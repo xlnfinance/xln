@@ -1,6 +1,136 @@
 /**
  * XLN Type Definitions
  * All interfaces and type definitions used across the XLN system
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * XLN MESSAGE FLOW: Runtime → Entity → Account (R→E→A)
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * 1. RuntimeInput (External trigger - 100ms tick or user action)
+ *    ├─ runtimeTxs: RuntimeTx[]        // System commands (importReplica, etc.)
+ *    └─ entityInputs: EntityInput[]    // Messages to specific entities
+ *
+ * 2. EntityInput (BFT consensus at entity level)
+ *    ├─ entityTxs: EntityTx[]          // State transitions (chat, payment, vote)
+ *    ├─ precommits: Map<signerId, sig> // BFT signatures from validators
+ *    └─ proposedFrame: ProposedEntityFrame // Consensus proposal with merkle root
+ *
+ * 3. EntityTx (Entity state machine transitions)
+ *    ├─ 'chat' | 'propose' | 'vote'    // Governance layer
+ *    ├─ 'j_event'                      // Blockchain events (reserves, settlements)
+ *    ├─ 'openAccount'                  // Create bilateral account
+ *    ├─ 'directPayment'                // Multi-hop payment through accounts
+ *    └─ 'accountInput'                 // Process bilateral consensus message
+ *
+ * 4. AccountInput (Bilateral consensus between two entities)
+ *    ├─ height: number                 // Which frame we're ACKing
+ *    ├─ prevSignatures: string[]       // ACK their previous frame
+ *    ├─ newAccountFrame: AccountFrame  // Our proposed frame
+ *    ├─ newSignatures: string[]        // Signatures on new frame
+ *    └─ counter: number                // Replay protection (CRITICAL)
+ *
+ * 5. AccountFrame (Agreed bilateral state - like a block)
+ *    ├─ height: number                 // Frame number in bilateral chain
+ *    ├─ accountTxs: AccountTx[]        // State transitions this frame
+ *    ├─ prevFrameHash: string          // Links to previous frame (blockchain)
+ *    ├─ stateHash: string              // Merkle root of current state
+ *    ├─ tokenIds: number[]             // Active tokens in this account
+ *    └─ deltas: bigint[]               // Per-token balances (signed integers)
+ *
+ * 6. AccountTx (Bilateral account state transitions)
+ *    ├─ 'direct_payment'               // Update offdelta (instant settlement)
+ *    ├─ 'add_delta'                    // Add new token to account
+ *    ├─ 'set_credit_limit'             // Set mutual credit limits
+ *    ├─ 'request_withdrawal'           // Phase 2: C→R (collateral to reserve)
+ *    ├─ 'approve_withdrawal'           // ACK/NACK withdrawal request
+ *    └─ 'reserve_to_collateral'        // Phase 1: R→C (from j_event)
+ *
+ * 7. Delta (Per-token bilateral state - the money)
+ *    ├─ collateral: bigint             // Escrowed on-chain funds
+ *    ├─ ondelta: bigint                // On-chain balance delta
+ *    ├─ offdelta: bigint               // Off-chain balance delta (instant)
+ *    ├─ leftCreditLimit: bigint        // Credit extended by left entity
+ *    ├─ rightCreditLimit: bigint       // Credit extended by right entity
+ *    ├─ leftAllowance: bigint          // Left entity's remaining credit
+ *    └─ rightAllowance: bigint         // Right entity's remaining credit
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * CONSENSUS GUARANTEES (Byzantine Fault Tolerance)
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * Entity Level (BFT):
+ *   - Proposer rotates deterministically
+ *   - Threshold signatures (t of n validators must sign)
+ *   - Precommit-lock prevents double-signing
+ *   - Safety: Never finalize conflicting states
+ *   - Liveness: Progress if >threshold validators honest
+ *
+ * Account Level (Bilateral):
+ *   - Both sides must sign every frame (2-of-2 consensus)
+ *   - Counter prevents replay attacks
+ *   - prevSignatures ACK prevents forks
+ *   - State hash ensures deterministic state computation
+ *   - Dispute resolution via on-chain proof submission
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * EXAMPLE FLOW: Alice pays Bob 100 USDC
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * Step 1: Alice's UI creates RuntimeInput
+ *   runtimeInput = {
+ *     runtimeTxs: [],
+ *     entityInputs: [{
+ *       entityId: "Alice",
+ *       entityTxs: [{
+ *         type: 'directPayment',
+ *         data: { targetEntityId: "Bob", tokenId: 1, amount: 100n }
+ *       }]
+ *     }]
+ *   }
+ *
+ * Step 2: Alice's entity processes payment (entity-consensus.ts)
+ *   - Validates Alice has account with Bob
+ *   - Creates AccountInput to send to Bob
+ *   - Updates Alice's AccountMachine.mempool
+ *
+ * Step 3: Bob receives AccountInput (account-consensus.ts)
+ *   - Validates counter, prevSignatures
+ *   - Applies payment tx: Bob.offdelta += 100n, Alice.offdelta -= 100n
+ *   - Creates AccountFrame with new state
+ *   - Signs frame, sends back to Alice
+ *
+ * Step 4: Alice receives Bob's signature
+ *   - Both sides now have 2-of-2 signed frame
+ *   - Payment is FINAL (instant finality)
+ *   - No on-chain tx needed (pure off-chain)
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * NAMING CONVENTIONS
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * Consistent terminology prevents confusion when reading/debugging code:
+ *
+ * **height** (NOT frameId):
+ *   - Used everywhere: EntityFrame.height, AccountFrame.height, ServerFrame.height
+ *   - Consistent with blockchain terminology (block height)
+ *   - Old code used "frameId" but we migrated to "height" for S/E/A consistency
+ *
+ * **tx** (NOT transition):
+ *   - EntityTx, AccountTx, RuntimeTx (transaction = state change request)
+ *   - Used for actual state modifications
+ *
+ * **transition** (NOT tx):
+ *   - ackedTransitions, sentTransitions (counter = message sequence number)
+ *   - Used for replay protection counters, NOT transaction counts
+ *   - Counts message exchanges, not individual transactions
+ *   - Example: One message can contain multiple AccountTxs, but only increments counter by 1
+ *
+ * **counter** (for replay protection):
+ *   - AccountInput.counter (sequential message counter, starts at 1)
+ *   - CRITICAL: Must be exactly ackedTransitions + 1 (no gaps allowed)
+ *   - Different from "transitions" which tracks confirmed message count
+ *
+ * ═══════════════════════════════════════════════════════════════════════
  */
 
 import type { Profile } from './gossip.js';
@@ -26,16 +156,27 @@ export interface RuntimeInput {
   entityInputs: EntityInput[];
 }
 
-export interface RuntimeTx {
-  type: 'importReplica';
-  entityId: string;
-  signerId: string;
-  data: {
-    config: ConsensusConfig;
-    isProposer: boolean;
-    position?: { x: number; y: number; z: number };
-  };
-}
+export type RuntimeTx =
+  | {
+      type: 'importReplica';
+      entityId: string;
+      signerId: string;
+      data: {
+        config: ConsensusConfig;
+        isProposer: boolean;
+        position?: { x: number; y: number; z: number };
+      };
+    }
+  | {
+      type: 'createXlnomy';
+      data: {
+        name: string;
+        evmType: 'browservm' | 'reth' | 'erigon' | 'monad';
+        rpcUrl?: string; // If evmType === RPC-based
+        blockTimeMs?: number; // Default: 1000ms
+        autoGrid?: boolean; // Auto-create 2x2x2 grid with $1M reserves
+      };
+    };
 
 export interface EntityInput {
   entityId: string;
@@ -438,7 +579,10 @@ export interface Env {
   runtimeInput: RuntimeInput; // Persistent storage for merged inputs
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: any; // Gossip layer for network profiles
-  // Future: add config, utilities, etc.
+
+  // Xlnomy system (multi-jurisdiction support)
+  xlnomies?: Map<string, Xlnomy>; // name → Xlnomy instance
+  activeXlnomy?: string; // Currently active Xlnomy name
 }
 
 export interface RuntimeSnapshot {
@@ -562,4 +706,106 @@ export interface NameSearchResult {
   name: string;
   avatar: string;
   relevance: number; // Search relevance score 0-1
+}
+
+// === XLNOMY (JURISDICTION) SYSTEM ===
+
+/**
+ * Xlnomy = J-Machine (court/jurisdiction) + Entities + Contracts
+ * Self-contained economy where J-Machine IS the jurisdiction
+ */
+export interface Xlnomy {
+  name: string; // e.g., "Simnet", "GameEconomy"
+  evmType: 'browservm' | 'reth' | 'erigon' | 'monad';
+  blockTimeMs: number; // Block time in milliseconds (1000ms default)
+
+  // J-Machine = Jurisdiction machine (court that entities anchor to)
+  jMachine: {
+    position: { x: number; y: number; z: number }; // Visual position (0, 100, 0)
+    capacity: number; // Broadcast threshold (default: 3)
+    jHeight: number; // Current block height in jurisdiction
+    mempool: any[]; // Pending transactions in J-Machine queue
+  };
+
+  // Deployed contracts
+  contracts: {
+    entityProviderAddress: string;
+    depositoryAddress: string;
+  };
+
+  // EVM instance (BrowserVM in-browser, or Reth/Erigon RPC)
+  evm: JurisdictionEVM;
+
+  // Entity registry
+  entities: string[]; // Entity IDs registered in this Xlnomy
+
+  // Metadata
+  created: number; // Timestamp
+  version: string; // e.g., "1.0.0"
+}
+
+/**
+ * Abstract jurisdiction EVM (BrowserVM or RPC to Reth/Erigon/Monad)
+ * Allows swapping execution layer without changing runtime code
+ */
+export interface JurisdictionEVM {
+  type: 'browservm' | 'reth' | 'erigon' | 'monad';
+
+  // Contract deployment
+  deployContract(bytecode: string, args?: any[]): Promise<string>;
+
+  // Contract calls
+  call(to: string, data: string, from?: string): Promise<string>;
+  send(to: string, data: string, value?: bigint): Promise<string>;
+
+  // State queries
+  getBlock(): Promise<number>;
+  getBalance(address: string): Promise<bigint>;
+
+  // Serialization for persistence
+  serialize(): Promise<XlnomySnapshot>;
+
+  // Address getters
+  getEntityProviderAddress(): string;
+  getDepositoryAddress(): string;
+}
+
+/**
+ * Persisted Xlnomy snapshot (stored in Level/IndexedDB)
+ * Can be exported as JSON and shared/imported
+ */
+export interface XlnomySnapshot {
+  name: string;
+  version: string;
+  created: number;
+  evmType: 'browservm' | 'reth' | 'erigon' | 'monad';
+  blockTimeMs: number;
+
+  // J-Machine config
+  jMachine: {
+    position: { x: number; y: number; z: number };
+    capacity: number;
+    jHeight: number;
+  };
+
+  // Deployed contracts
+  contracts: {
+    entityProviderAddress: string;
+    depositoryAddress: string;
+  };
+
+  // EVM-specific state
+  evmState: {
+    rpcUrl?: string; // If RPC EVM (Reth/Erigon/Monad)
+    vmState?: any; // If BrowserVM - serialized @ethereumjs/vm state
+  };
+
+  // Entity registry
+  entities: string[];
+
+  // Runtime state (replicas + history)
+  runtimeState?: {
+    replicas: any; // Serialized Map<string, EntityReplica>
+    history: EnvSnapshot[];
+  };
 }

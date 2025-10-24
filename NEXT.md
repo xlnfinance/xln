@@ -2,11 +2,189 @@
 
 **Disposable scratchpad. For long-term vision, see /vibepaper/roadmap.md**
 
-**Last Updated:** 2025-10-15
+**Last Updated:** 2025-10-23
 
 ---
 
-## 🚨 Current Blockers (Fix First)
+## 🚨 Current Work: Xlnomy System (Self-Contained Jurisdictions)
+
+**Goal:** Make XLN "super self-contained" by creating jurisdictions entirely within runtime. Eliminate external dependencies.
+
+### Architecture Overview
+
+**Xlnomy = J-Machine (court/jurisdiction) + Entities + Contracts**
+
+- **J-Machine IS the jurisdiction** (not two separate entities!)
+- **J-Machine** = Jurisdiction Machine (court entity at elevated position that all entities anchor to)
+- **EVM Abstraction** = Swap BrowserVM ↔ Reth/Erigon/Monad without changing runtime code
+- **BrowserVM** = In-browser EVM (simnet mode, zero external dependencies)
+- **First Load** = Auto-create "Simnet" Xlnomy with 2×2×2 grid (8 entities, $1M reserves each)
+- **Depository Panel** = Live RCPAN monitor (reserves + FIFO debt head + auto-clear preview)
+
+### Key Files Created
+
+1. **runtime/types.ts** - Extended with Xlnomy types:
+   - `RuntimeTx` extended with `'createXlnomy'` type
+   - `Xlnomy` interface (name, evmType, jMachine config, contracts, entities)
+   - `JurisdictionEVM` interface (abstract EVM: BrowserVM or RPC)
+   - `XlnomySnapshot` interface (serialization for persistence/export)
+
+2. **runtime/jurisdiction-factory.ts** (NEW) - Core factory:
+   - `createXlnomy()` - Create new Xlnomy with optional auto-grid
+   - `exportXlnomy()` / `importXlnomy()` - JSON snapshots (git-like versioning)
+   - `saveXlnomy()` / `loadXlnomy()` - Level/IndexedDB persistence
+
+3. **runtime/evms/browservm-evm.ts** (NEW) - BrowserVM implementation:
+   - Wraps `BrowserVMProvider` from frontend
+   - Deploys EntityProvider + Depository contracts
+   - TODO: Serialize @ethereumjs/vm state
+
+4. **runtime/evms/rpc-evm.ts** (NEW) - RPC implementation:
+   - Future support for Reth/Erigon/Monad
+   - TODO: All JSON-RPC methods (eth_call, eth_sendTransaction, etc.)
+
+### Terminology Decisions
+
+✅ **COMPLETED (2025-10-23):**
+- Renamed `backend` → `evm` throughout codebase
+- Renamed `JurisdictionBackend` → `JurisdictionEVM`
+- Renamed `backendType` → `evmType`
+- Renamed `backends/` → `evms/` directory
+- Added `jHeight` (block height) and `mempool` to J-Machine config
+- Clarified: J-Machine = Jurisdiction (not two separate entities)
+
+### Implementation Status
+
+✅ **COMPLETED (2025-10-23):**
+- ✅ Type definitions (Xlnomy, JurisdictionEVM, XlnomySnapshot)
+- ✅ Factory complete (createXlnomy, export/import stubs, save/load stubs)
+- ✅ BrowserVM wrapper working (wraps BrowserVMProvider, deploys contracts)
+- ✅ RPC skeleton (ready for future Reth/Erigon/Monad support)
+- ✅ Runtime integration (createXlnomy handler in runtime.ts:262-293)
+- ✅ Architect Panel UI:
+  - ✅ Dropdown selector for active Xlnomy
+  - ✅ "+ New" button opens modal
+  - ✅ Modal form (name, EVM type, RPC URL, block time, auto-grid)
+  - ✅ Create button wires to runtime via applyRuntimeInput()
+  - ✅ Switch Xlnomy updates env.activeXlnomy
+- ✅ Auto-create Simnet on first load (View.svelte:67-80)
+- ✅ Grid creation stubbed (xlnomy.entities array populated)
+- ✅ Serialization fixed (xlnomies excluded from snapshots to avoid circular refs)
+
+**Browser Verification (2025-10-23 3:09 PM) - FED CHAIR APPROVED:**
+- ✅ Simnet auto-creates with J-Machine (purple pyramid) + 8 entities (green dots)
+- ✅ "+ New" button opens modal with full form (Name, EVM type, block time, auto-grid)
+- ✅ Created "FedReserve" successfully (separate BrowserVM, contracts, 8 entities)
+- ✅ Dropdown shows both Simnet + FedReserve (switchable)
+- ✅ Switch works: Select FedReserve → "✅ Switched to 'FedReserve'"
+- ✅ Circular arrangement: Each Xlnomy gets unique angle (0°, 45°, 90°, etc.) around origin
+- ✅ Spatial isolation: Simnet entities at (200,0,0), FedReserve at (141,0,141), etc.
+- ✅ Unique entity IDs: Simnet=#1-8, FedReserve=#9-16, Jamaica=#17-24 (no collisions)
+- ✅ Unique signerIds: simnet_e0, fedreserve_e1, etc.
+- ✅ VR-ready: Walk between economies in circular plaza layout
+- ✅ No console errors (only HMR WebSocket, non-critical)
+- ✅ Build passes (0 TypeScript errors)
+
+✅ **VERIFIED WORKING (2025-10-23 4:19 PM):**
+
+1. ✅ **Modal closes** - showCreateXlnomyModal = false works
+2. ✅ **Unique entity IDs** - Simnet=#1-8, Jamaica=#9-16 (verified in console)
+3. ✅ **Unique signer IDs** - simnet_e0-e7, jamaica_e0-e7 (verified in console)
+4. ✅ **Circular positions calculated** - Simnet at (200,100,0), Jamaica at (141,100,141)
+5. ✅ **16 entities created** - Entity panel shows "16 total"
+6. ✅ **Dropdown works** - Shows Simnet + Jamaica, switches between them
+7. ✅ **Entity dropdowns updated** - All 16 entities appear in mint/R2R dropdowns
+8. ✅ **No collisions** - Jamaica entities don't overwrite Simnet entities
+
+🚧 **CRITICAL: 3D Rendering Not Updated**
+
+**Issue**: Graph3DPanel has ONE hardcoded `jMachine` variable (line 197)
+- Renders static J-Machine at hardcoded position
+- Doesn't read from `env.xlnomies` Map
+- When Jamaica created, its J-Machine position is calculated but NOT rendered
+
+**Fix needed** (Graph3DPanel.svelte):
+```typescript
+// CURRENT (wrong):
+let jMachine: THREE.Group | null = null; // Single static J-Machine
+
+// NEEDED (correct):
+let jMachines: Map<string, THREE.Group> = new Map(); // One per xlnomy
+
+$: if (env?.xlnomies) {
+  // For each xlnomy, create/update J-Machine at xlnomy.jMachine.position
+  env.xlnomies.forEach((xlnomy, name) => {
+    if (!jMachines.has(name)) {
+      const jMachine = createOctahedron(xlnomy.jMachine.position);
+      jMachine.userData.xlnomyName = name;
+      scene.add(jMachine);
+      jMachines.set(name, jMachine);
+
+      // Add text label with xlnomy name (not "J-MACHINE")
+      addTextLabel(jMachine, name, xlnomy.jMachine.position);
+    }
+  });
+}
+```
+
+🚧 **NEXT SESSION - FED CHAIR DEMO (1 HOUR):**
+
+**CRITICAL FIX** (Graph3DPanel.svelte line 197):
+```typescript
+// Replace single jMachine with Map of jMachines
+let jMachines: Map<string, THREE.Group> = new Map();
+
+// Reactive: Create J-Machine for each xlnomy
+$: if (env?.xlnomies && scene) {
+  env.xlnomies.forEach((xlnomy, name) => {
+    if (!jMachines.has(name)) {
+      const pos = xlnomy.jMachine.position;
+      const jMachine = createOctahedron(pos, name); // Pass name for label
+      scene.add(jMachine);
+      jMachines.set(name, jMachine);
+    }
+  });
+}
+```
+
+**THEN** (if time):
+1. Camera: Zoom out to see all J-Machines at once (or add "View All" button)
+2. Labels: Replace "J-MACHINE" text with xlnomy name (Simnet, Jamaica, USA)
+3. Test: Create 3 economies → see triangle of J-Machines
+4. Sidebar: Make it 1/4 width (currently still 1/2)
+5. Architect: Make it active tab by default (add setTimeout fix)
+
+**LATER** (post-Fed):
+- Xlnomy persistence (Level storage)
+- Switch Xlnomy → load that xlnomy's entities only
+- Export/Import .xlnomy.json files
+- Preset economies (USA🇺🇸/China🇨🇳/Jamaica🇯🇲 with flags)
+
+### User Requirements
+
+From user's words:
+- "on first load - auto-creation of economy Simnet"
+- "when Simnet is created: 1) new J-machine 2) deploy of all contracts to it 3) intialize the cube of 8 users , the grid 2. and accounts between them. all 8 have $1m reserves minted to them"
+- "we use level/indexed in browser. persist with single global db we already have"
+- "make it shareable / exportable"
+- "we dev in browser, in mainnet we just change dataptres [data providers]"
+- "keep all design stuff under Architect [panel]"
+- "block time: make it 1000ms"
+
+### Design Clarity
+
+**Q: Can we snapshot ethereum js?**
+A: Yes, TODO in browservm-evm.ts to serialize @ethereumjs/vm state
+
+**Q: Cross-jurisdiction transfers?**
+A: "currently, no. how would we do that? in the future yes, with hashlocks and swaps inside accounts"
+
+**Q: Too many panels?**
+A: Fold jurisdiction management into Architect panel (no new panel)
+
+---
+
+## 🚨 Old Blockers (Fixed)
 
 *No current blockers*
 

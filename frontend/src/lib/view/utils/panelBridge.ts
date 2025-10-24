@@ -12,6 +12,8 @@ type EventMap = {
   'layout:changed': { layout: any };
   'transfer:executed': { from: string; to: string; tokenId: number; amount: bigint };
   'vr:toggle': {};
+  'broadcast:toggle': { enabled: boolean };
+  'broadcast:style': { style: 'raycast' | 'wave' | 'particles' };
 };
 
 class PanelBridge {

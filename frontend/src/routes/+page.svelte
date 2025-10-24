@@ -34,7 +34,14 @@
   // Check if user has unlocked
   onMount(() => {
     if (browser) {
-      showLanding = localStorage.getItem('open') !== 'true';
+      // Check for #MML invite hash FIRST (takes precedence over localStorage)
+      if (window.location.hash === '#MML') {
+        localStorage.setItem('open', 'true');
+        window.location.hash = ''; // Remove hash after processing
+        showLanding = false;
+      } else {
+        showLanding = localStorage.getItem('open') !== 'true';
+      }
     }
   });
 

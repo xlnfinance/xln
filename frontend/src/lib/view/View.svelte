@@ -40,20 +40,19 @@
 
     // Initialize isolated XLN runtime (simnet - BrowserVM mode)
     try {
-      // Step 1: Initialize BrowserVM (deploy EntityProvider + Depository in-browser)
+      // Step 1: Initialize BrowserVM (deploy Depository in-browser)
       const { browserVMProvider } = await import('./utils/browserVMProvider');
       await browserVMProvider.init();
-      const entityProviderAddress = browserVMProvider.getEntityProviderAddress();
       const depositoryAddress = browserVMProvider.getDepositoryAddress();
 
-      console.log('[View] BrowserVM ready:', { entityProviderAddress, depositoryAddress });
+      console.log('[View] BrowserVM ready:', { depositoryAddress });
 
       // Step 2: Load XLN runtime
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // Step 3: Register BrowserVM jurisdiction (overrides DEFAULT_JURISDICTIONS)
-      XLN.setBrowserVMJurisdiction(entityProviderAddress, depositoryAddress, browserVMProvider);
+      XLN.setBrowserVMJurisdiction(depositoryAddress, browserVMProvider);
       console.log('[View] ✅ BrowserVM jurisdiction registered with browserVM instance');
 
       // CRITICAL: Initialize global xlnInstance for utility functions (deriveDelta, etc)
@@ -64,64 +63,39 @@
       // Step 4: Create empty environment (simnet mode)
       const env = XLN.createEmptyEnv();
 
+      // Step 5: Auto-create "Simnet" Xlnomy on first load
+      console.log('[View] 🌍 Auto-creating Simnet Xlnomy...');
+      await XLN.applyRuntimeInput(env, {
+        runtimeTxs: [{
+          type: 'createXlnomy',
+          data: {
+            name: 'Simnet',
+            evmType: 'browservm',
+            blockTimeMs: 1000,
+            autoGrid: true // Auto-create 2x2x2 grid with $1M reserves
+          }
+        }],
+        entityInputs: []
+      });
+
+      // Process the queued importReplica transactions to actually create entities
+      console.log('[View] Processing grid entities...');
+      const gridResult = await XLN.applyRuntimeInput(env, {
+        runtimeTxs: [], // Grid entities were queued in previous step
+        entityInputs: []
+      });
+      console.log('[View] ✅ Grid entities created');
+      console.log('[View] Replicas:', env.replicas.size);
+      console.log('[View] History frames:', env.history.length);
+
       // Set to isolated stores
       localEnvStore.set(env);
-      localHistoryStore.set([env]); // Initial snapshot
+      localHistoryStore.set(env.history || []);
+      localTimeIndex.set((env.history?.length || 1) - 1); // Set to latest frame
+      localIsLive.set(true);
 
-      console.log('[View] ✅ Isolated simnet environment ready');
-
-      // Auto-execute demo scenario after 2 seconds
-      setTimeout(async () => {
-        try {
-          console.log('[View] 🎬 Auto-executing demo scenario...');
-
-          const response = await fetch('/scenarios/auto-demo.scenario.txt');
-          if (!response.ok) {
-            console.warn('[View] Auto-demo scenario not found');
-            return;
-          }
-
-          let scenarioText = await response.text();
-
-          // Force numbered entities (on-chain registration)
-          scenarioText = scenarioText.replace(
-            /^(grid\s+\d+(?:\s+\d+)?(?:\s+\d+)?)(\s+.*)?$/gm,
-            (match, gridCmd, rest) => {
-              const cleanRest = rest ? rest.replace(/\s+type=\w+/, '') : '';
-              return `${gridCmd}${cleanRest} type=numbered`;
-            }
-          );
-
-          const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-          const XLN = await import(/* @vite-ignore */ runtimeUrl);
-
-          const parsed = XLN.parseScenario(scenarioText);
-
-          if (parsed.errors.length > 0) {
-            console.error('[View] Scenario parse errors:', parsed.errors);
-            return;
-          }
-
-          console.log('[View] Executing scenario with', parsed.scenario.events.length, 'events');
-
-          const result = await XLN.executeScenario(env, parsed.scenario);
-
-          if (result.success) {
-            console.log('[View] ✅ Auto-demo completed successfully');
-
-            // Update isolated stores with new state
-            localEnvStore.set(env);
-            const history = env.history || [];
-            localHistoryStore.set(history);
-            localTimeIndex.set(history.length - 1); // Jump to latest frame
-            localIsLive.set(true);
-          } else {
-            console.error('[View] Auto-demo failed:', result.error);
-          }
-        } catch (err) {
-          console.error('[View] ❌ Auto-demo execution failed:', err);
-        }
-      }, 2000);
+      console.log('[View] ✅ Simnet Xlnomy ready with', env.replicas.size, 'entities');
+      console.log('[View] 💡 Use Architect panel to run scenarios or create new Xlnomies');
 
     } catch (err) {
       console.error('[View] ❌ Failed to initialize XLN:', err);
@@ -196,7 +170,7 @@
       },
     });
 
-    // Default 4-panel layout
+    // Default layout: Graph3D (75%) + Right sidebar (25%)
     const graph3d = dockview.addPanel({
       id: 'graph3d',
       component: 'graph3d',
@@ -209,6 +183,15 @@
       title: '🏢 Entities',
       position: { direction: 'right', referencePanel: 'graph3d' },
     });
+
+    // Set initial sizes: Graph3D gets 75%, sidebar gets 25%
+    const graph3dApi = dockview.getPanel('graph3d');
+    const entitiesApi = dockview.getPanel('entities');
+    if (graph3dApi && entitiesApi) {
+      setTimeout(() => {
+        graph3dApi.api.setSize({ width: window.innerWidth * 0.75 });
+      }, 100);
+    }
 
     const depository = dockview.addPanel({
       id: 'depository',
@@ -223,6 +206,14 @@
       title: '🎬 Architect',
       position: { direction: 'within', referencePanel: 'depository' },
     });
+
+    // Make Architect active by default
+    setTimeout(() => {
+      const architectApi = dockview.getPanel('architect');
+      if (architectApi) {
+        architectApi.api.setActive();
+      }
+    }, 200);
 
     const consolePanel = dockview.addPanel({
       id: 'console',

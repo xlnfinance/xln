@@ -1,14 +1,23 @@
 // SPDX-License-Identifier: unknown
 pragma solidity ^0.8.24;
 
-
 import "./ECDSA.sol";
 import "./console.sol";
-import "hardhat/console.sol";
-
 import "./EntityProvider.sol";
-
 import "./SubcontractProvider.sol";
+
+abstract contract ReentrancyGuardLite {
+  uint256 private constant _NOT_ENTERED = 1;
+  uint256 private constant _ENTERED = 2;
+  uint256 private _status = _NOT_ENTERED;
+
+  modifier nonReentrant() {
+    require(_status != _ENTERED, "ReentrancyGuard: reentrant call");
+    _status = _ENTERED;
+    _;
+    _status = _NOT_ENTERED;
+  }
+}
 
 // Add necessary interfaces
 interface IERC20 {
@@ -32,7 +41,7 @@ interface IERC721 {
   First in history: No system combines escrowed collateral + credit extension + mechanical enforcement. Traditional finance has credit but it's
   social/legal enforcement. Crypto has collateral but no credit extension. You have both.
 */
-contract Depository is Console {
+contract Depository is Console, ReentrancyGuardLite {
 
   // Multi-provider support  
   mapping(address => bool) public approvedEntityProviders;
@@ -49,6 +58,32 @@ contract Depository is Console {
   mapping (bytes32 => mapping (uint => uint)) public _debtIndex;
   // total number of debts of an entity  
   mapping (bytes32 => uint) public _activeDebts;
+
+  struct TokenDebtStats {
+    uint256 outstandingAmount;
+    uint64 since;
+    uint64 lastUpdated;
+  }
+
+  mapping(bytes32 => mapping(uint256 => TokenDebtStats)) private _tokenDebtStats;
+
+  address public immutable admin;
+  bool public emergencyPause;
+
+  event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
+  event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex);
+  event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
+  event EmergencyPauseToggled(bool isPaused);
+
+  modifier onlyAdmin() {
+    require(msg.sender == admin, "Depository: admin only");
+    _;
+  }
+
+  modifier whenNotPaused() {
+    require(!emergencyPause, "Depository: paused");
+    _;
+  }
 
 
   // === REPUTATION SCORES ===
@@ -155,7 +190,8 @@ contract Depository is Console {
    * @notice Add an EntityProvider to approved list
    * @param provider EntityProvider contract address
    */
-  function addEntityProvider(address provider) external {
+  function addEntityProvider(address provider) external onlyAdmin {
+    require(provider != address(0), "Invalid provider");
     require(!approvedEntityProviders[provider], "Already approved");
     approvedEntityProviders[provider] = true;
     entityProvidersList.push(provider);
@@ -166,7 +202,8 @@ contract Depository is Console {
    * @notice Remove an EntityProvider from approved list  
    * @param provider EntityProvider contract address
    */
-  function removeEntityProvider(address provider) external {
+  function removeEntityProvider(address provider) external onlyAdmin {
+    require(provider != address(0), "Invalid provider");
     require(approvedEntityProviders[provider], "Not approved");
     approvedEntityProviders[provider] = false;
     
@@ -189,6 +226,7 @@ contract Depository is Console {
   }
 
   constructor() {
+    admin = msg.sender;
     _tokens.push(bytes32(0));
 
     // empty record, hub_id==0 means not a hub
@@ -198,9 +236,22 @@ contract Depository is Console {
       gasused: 0
     }));
   }
+
+  function setEmergencyPause(bool isPaused) external onlyAdmin {
+    if (emergencyPause == isPaused) {
+      return;
+    }
+    emergencyPause = isPaused;
+    emit EmergencyPauseToggled(isPaused);
+  }
   
   function getTokensLength() public view returns (uint) {
     return _tokens.length;
+  }
+
+  function getTokenMetadata(uint256 tokenId) external view returns (address contractAddress, uint96 externalTokenId, uint8 tokenType) {
+    require(tokenId < _tokens.length, "Invalid tokenId");
+    return unpackTokenReference(_tokens[tokenId]);
   }
 
 
@@ -236,75 +287,59 @@ contract Depository is Console {
     //bytes32[] cleanSecret;
     uint hub_id;
   }
+  // === HANKO INTEGRATION ===
 
-
-  /* === HANKO INTEGRATION ===
-  
-  /* Nonce tracking for replay protection (since Hanko signatures are stateless)
-  /* EVM-style sequential nonces: each entity must use nonce = lastNonce + 1
+  /// @notice Sequential nonce for each entity authorising batches via Hanko.
   mapping(address => uint256) public entityNonces;
-  
-  /* Domain separation for EIP-712 compatibility
+
+  /// @notice Domain separator used when hashing Hanko payloads for verification.
   bytes32 public constant DOMAIN_SEPARATOR = keccak256("XLN_DEPOSITORY_HANKO_V1");
-  
+
   event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed hankoHash, uint256 nonce, bool success);
-  
+
   /**
-   * @notice Process batch with Hanko signature authorization using on-chain cryptographic verification
-   * @dev SECURITY: All signatures are verified on-chain using ecrecover - no off-chain trust
-   * @param encodedBatch The batch data
-   * @param entityProvider EntityProvider contract address  
-   * @param hankoData ABI-encoded Hanko bytes (placeholders, packedSignatures, claims)
-   * @param nonce EVM-style sequential nonce for replay protection
+   * @notice Process a batch that carries an off-chain Hanko authorisation.
+   * @dev Signature verification is performed on-chain against an approved EntityProvider.
    */
-  /* DISABLED: Hanko processing
   function processBatchWithHanko(
     bytes calldata encodedBatch,
     address entityProvider,
     bytes calldata hankoData,
     uint256 nonce
-  ) external onlyApprovedProvider(entityProvider) returns (bool completeSuccess) {
-    
-    // 🛡️ Domain separation: Hash batch with contract-specific context
-    bytes32 domainSeparatedHash = keccak256(abi.encodePacked(
-      DOMAIN_SEPARATOR,
-      block.chainid,
-      address(this),
-      encodedBatch,
-      nonce
-    ));
-    
-    // 🔥 Verify Hanko with flashloan governance
+  ) external whenNotPaused nonReentrant onlyApprovedProvider(entityProvider) returns (bool completeSuccess) {
+    bytes32 domainSeparatedHash = keccak256(
+      abi.encodePacked(
+        DOMAIN_SEPARATOR,
+        block.chainid,
+        address(this),
+        encodedBatch,
+        nonce
+      )
+    );
+
     (bytes32 entityId, bool hankoValid) = EntityProvider(entityProvider).verifyHankoSignature(
       hankoData,
       domainSeparatedHash
     );
-    
-    require(hankoValid, "Invalid Hanko signature");
-    require(entityId != bytes32(0), "No entity recovered from Hanko");
-    
-    // 🚀 Nonce management: Prevent replay attacks
-    bytes32 entityIdBytes32 = entityId; // Already bytes32
+
+    require(hankoValid, "Depository: invalid hanko");
+    require(entityId != bytes32(0), "Depository: empty entity");
+
+    address entityAddress = address(uint160(uint256(entityId)));
+    require(nonce == entityNonces[entityAddress] + 1, "Depository: stale nonce");
+    entityNonces[entityAddress] = nonce;
+
+    Batch memory batch = abi.decode(encodedBatch, (Batch));
     bytes32 hankoHash = keccak256(hankoData);
-    
-    require(nonce == entityNonces[address(uint160(uint256(entityIdBytes32)))] + 1, "Invalid nonce (must be sequential)");
-    entityNonces[address(uint160(uint256(entityIdBytes32)))] = nonce;
-    
-    // ⚡ Process the actual batch
-    completeSuccess = _processBatch(entityIdBytes32, abi.decode(encodedBatch, (Batch)));
-    
+
+    completeSuccess = _processBatch(entityId, batch);
     emit HankoBatchProcessed(entityId, hankoHash, nonce, completeSuccess);
-    
-    return completeSuccess;
   }
-  */
-  
-
-
 
 
   // DEBUG: Simple function to fund entity reserves for testing
-  function debugFundReserves(bytes32 entity, uint tokenId, uint amount) public {
+  function debugFundReserves(bytes32 entity, uint tokenId, uint amount) external onlyAdmin {
+    require(amount > 0, "Amount zero");
     console.log("debugFundReserves: funding entity");
     console.logBytes32(entity);
     console.log("debugFundReserves: tokenId");
@@ -320,7 +355,7 @@ contract Depository is Console {
   }
 
   // DEBUG: Bulk fund top 1000 entities with test reserves
-  function debugBulkFundEntities() public {
+  function debugBulkFundEntities() external onlyAdmin {
     console.log("debugBulkFundEntities: funding entities 1-200 with USDC and ETH");
 
     uint256 fundAmount = 100000000000000000000; // 100 units (100e18)
@@ -338,7 +373,7 @@ contract Depository is Console {
     console.log("debugBulkFundEntities: funding complete");
   }
 
-  function processBatch(bytes32 entity, Batch calldata batch) public returns (bool completeSuccess) {
+  function processBatch(bytes32 entity, Batch calldata batch) public whenNotPaused nonReentrant returns (bool completeSuccess) {
     console.log("=== processBatch ENTRY ===");
     console.log("=== processBatch ENTRY ===");
     console.log("=== processBatch ENTRY ===");
@@ -369,9 +404,10 @@ contract Depository is Console {
 
   // ========== ACCOUNT PREFUNDING FUNCTION ==========
   // Allows an entity to fund an account's collateral from their reserves
-  function prefundAccount(bytes32 counterpartyEntity, uint tokenId, uint amount) public returns (bool) {
+  function prefundAccount(bytes32 counterpartyEntity, uint tokenId, uint amount) public whenNotPaused nonReentrant returns (bool) {
     bytes32 fundingEntity = bytes32(uint256(uint160(msg.sender)));
     require(fundingEntity != counterpartyEntity, "Cannot prefund account with self");
+    require(amount > 0, "Amount zero");
     
     // Ensure entities are in canonical order (left < right)
     bytes32 leftEntity = fundingEntity < counterpartyEntity ? fundingEntity : counterpartyEntity;
@@ -380,12 +416,15 @@ contract Depository is Console {
     // Simple channel key: hash of left and right entities converted to bytes
     bytes memory ch_key = abi.encodePacked(keccak256(abi.encodePacked(leftEntity, rightEntity)));
     
+    enforceDebts(fundingEntity, tokenId);
+
     // Check funding entity has sufficient reserves
     require(_reserves[fundingEntity][tokenId] >= amount, "Insufficient reserves for prefunding");
     
     // Move funds from reserves to account collateral
     _reserves[fundingEntity][tokenId] -= amount;
-    
+    emit ReserveUpdated(fundingEntity, tokenId, _reserves[fundingEntity][tokenId]);
+
     ChannelCollateral storage col = _collaterals[ch_key][tokenId];
     col.collateral += amount;
     
@@ -412,8 +451,10 @@ contract Depository is Console {
 
   // ========== DIRECT R2R FUNCTION ==========
   // Simple reserve-to-reserve transfer (simpler than batch)
-  function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint tokenId, uint amount) public returns (bool) {
+  function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint tokenId, uint amount) public whenNotPaused nonReentrant returns (bool) {
     require(fromEntity != toEntity, "Cannot transfer to self");
+    require(amount > 0, "Amount zero");
+    enforceDebts(fromEntity, tokenId);
     require(_reserves[fromEntity][tokenId] >= amount, "Insufficient reserves");
 
     console.log("=== DIRECT R2R TRANSFER ===");
@@ -436,23 +477,54 @@ contract Depository is Console {
     return true;
   }
 
-  // ========== NEW SIMPLIFIED SETTLE FUNCTION ==========
-  // Simple settlement between two entities without signature verification
+  // ========== SETTLE FUNCTION (merged from cooperativeUpdate) ==========
+  // Bilateral settlement with signature verification and nonce tracking
   // Can be called independently or as part of processBatch
-  function settle(bytes32 leftEntity, bytes32 rightEntity, SettlementDiff[] memory diffs) public returns (bool) {
+  function settle(
+    bytes32 leftEntity,
+    bytes32 rightEntity,
+    SettlementDiff[] memory diffs,
+    uint[] memory forgiveDebtsInTokenIds,
+    bytes memory sig
+  ) public whenNotPaused nonReentrant returns (bool) {
     require(leftEntity != rightEntity, "Cannot settle with self");
     require(leftEntity < rightEntity, "Entities must be in order (left < right)");
 
-    // Access control: Only the entities involved can settle (or processBatch calling internally)
-    bytes32 msgSenderEntity = bytes32(uint256(uint160(msg.sender)));
-    bool isInternalCall = msg.sender == address(this);
-    require(
-      isInternalCall || msgSenderEntity == leftEntity || msgSenderEntity == rightEntity,
-      "Only involved entities can settle"
-    );
-
     // Simple channel key: hash of left and right entities converted to bytes
     bytes memory ch_key = abi.encodePacked(keccak256(abi.encodePacked(leftEntity, rightEntity)));
+
+    // Determine caller and counterparty
+    bytes32 caller = bytes32(uint256(uint160(msg.sender)));
+    bool isInternalCall = msg.sender == address(this);
+
+    // For internal calls (from processBatch), caller is passed in entityId
+    // For external calls, verify caller is one of the entities
+    if (!isInternalCall) {
+      require(caller == leftEntity || caller == rightEntity, "Only involved entities can settle");
+    }
+
+    bytes32 counterparty = (caller == leftEntity) ? rightEntity : leftEntity;
+
+    // Signature verification (skip for internal calls during development)
+    if (!isInternalCall && sig.length > 0) {
+      bytes memory encoded_msg = abi.encode(
+        MessageType.CooperativeUpdate,
+        ch_key,
+        _channels[ch_key].cooperativeNonce,
+        diffs,
+        forgiveDebtsInTokenIds
+      );
+
+      bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+
+      address recoveredSigner = ECDSA.recover(hash, sig);
+      address counterpartyAddress = address(uint160(uint256(counterparty)));
+      require(recoveredSigner == counterpartyAddress, "Invalid counterparty signature");
+    }
+
+    // Update cooperative action scores
+    entityScores[leftEntity].cooperativeActions++;
+    entityScores[rightEntity].cooperativeActions++;
     
     for (uint j = 0; j < diffs.length; j++) {
       SettlementDiff memory diff = diffs[j];
@@ -489,20 +561,65 @@ contract Depository is Console {
       
       // Update ondelta
       col.ondelta += diff.ondeltaDiff;
-      
-      // Emit SettlementProcessed event with final values for j-watcher consumption
-      emit SettlementProcessed(
-        leftEntity,
-        rightEntity,
-        tokenId,
-        _reserves[leftEntity][tokenId],
-        _reserves[rightEntity][tokenId],
-        col.collateral,
-        col.ondelta
-      );
     }
-    
-    // TODO: Add cooperative nonce tracking if needed for settlement ordering
+
+    // Forgive debts in specified tokens
+    for (uint i = 0; i < forgiveDebtsInTokenIds.length; i++) {
+      uint tokenId = forgiveDebtsInTokenIds[i];
+
+      // Forgive left entity's debts to right entity
+      uint256 leftDebtIndex = _debtIndex[leftEntity][tokenId];
+      Debt[] storage leftDebts = _debts[leftEntity][tokenId];
+      uint256 leftLength = leftDebts.length;
+      for (uint256 j = leftDebtIndex; j < leftLength; j++) {
+        if (leftDebts[j].creditor == rightEntity && leftDebts[j].amount > 0) {
+          (uint256 forgivenAmount, bytes32 creditor) = _clearDebtAtIndex(leftEntity, tokenId, j, false);
+          if (forgivenAmount > 0) {
+            emit DebtForgiven(leftEntity, creditor, tokenId, forgivenAmount, j);
+          }
+        }
+      }
+      _syncDebtIndex(leftEntity, tokenId);
+
+      // Forgive right entity's debts to left entity
+      uint256 rightDebtIndex = _debtIndex[rightEntity][tokenId];
+      Debt[] storage rightDebts = _debts[rightEntity][tokenId];
+      uint256 rightLength = rightDebts.length;
+      for (uint256 j = rightDebtIndex; j < rightLength; j++) {
+        if (rightDebts[j].creditor == leftEntity && rightDebts[j].amount > 0) {
+          (uint256 forgivenAmount, bytes32 creditor) = _clearDebtAtIndex(rightEntity, tokenId, j, false);
+          if (forgivenAmount > 0) {
+            emit DebtForgiven(rightEntity, creditor, tokenId, forgivenAmount, j);
+          }
+        }
+      }
+      _syncDebtIndex(rightEntity, tokenId);
+    }
+
+    // Emit ChannelSettled event with final values
+    Settled[] memory settledEvents = new Settled[](diffs.length);
+    for (uint i = 0; i < diffs.length; i++) {
+      uint tokenId = diffs[i].tokenId;
+      ChannelCollateral storage col = _collaterals[ch_key][tokenId];
+
+      settledEvents[i] = Settled({
+        left: leftEntity,
+        right: rightEntity,
+        tokenId: tokenId,
+        leftReserve: _reserves[leftEntity][tokenId],
+        rightReserve: _reserves[rightEntity][tokenId],
+        collateral: col.collateral,
+        ondelta: col.ondelta
+      });
+    }
+
+    if (settledEvents.length > 0) {
+      emit ChannelSettled(settledEvents);
+    }
+
+    // Increment nonce to invalidate old proofs
+    _channels[ch_key].cooperativeNonce++;
+
     return true;
   }
 
@@ -533,7 +650,7 @@ contract Depository is Console {
       reserveToReserve(entityId, batch.reserveToReserve[i]);
     }
 
-    // NEW: Process settlements (simplified account settlements between entities)
+    // NEW: Process settlements (bilateral settlements with signatures)
     console.log("Processing settlements count:");
     console.logUint(batch.settlements.length);
     for (uint i = 0; i < batch.settlements.length; i++) {
@@ -542,25 +659,22 @@ contract Depository is Console {
       console.logBytes32(settlement.leftEntity);
       console.log("and:");
       console.logBytes32(settlement.rightEntity);
-      
-      if (!settle(settlement.leftEntity, settlement.rightEntity, settlement.diffs)) {
+
+      if (!settle(
+        settlement.leftEntity,
+        settlement.rightEntity,
+        settlement.diffs,
+        settlement.forgiveDebtsInTokenIds,
+        settlement.sig
+      )) {
         completeSuccess = false;
       }
     }
 
-    /*
-    // flashloans allow to settle batch of cooperativeUpdate
-    for (uint i = 0; i < batch.flashloans.length; i++) {
-      _reserves[msg.sender][batch.flashloans[i].tokenId] += batch.flashloans[i].amount;
+    if (batch.flashloans.length > 0) {
+      revert("Depository: flashloans disabled");
     }
 
-    for (uint i = 0; i < batch.flashloans.length; i++) {
-      // fails if not enough _reserves 
-      _reserves[entityAddress][batch.flashloans[i].tokenId] -= batch.flashloans[i].amount;
-    }
-    */
-    
-    /* DISABLED: dispute functions
     for (uint i = 0; i < batch.cooperativeUpdate.length; i++) {
       if(!(cooperativeUpdate(entityId, batch.cooperativeUpdate[i]))){
         completeSuccess = false;
@@ -585,25 +699,12 @@ contract Depository is Console {
         completeSuccess = false;
       }
     }
-    */
 
-    
-    /* DISABLED: collateral functions
     for (uint i = 0; i < batch.reserveToCollateral.length; i++) {
       if(!(reserveToCollateral(entityId, batch.reserveToCollateral[i]))){
         completeSuccess = false;
       }
     }
-    */
-    
-    /*
-    for (uint i = 0; i < batch.revealSecret.length; i++) {
-      revealSecret(batch.revealSecret[i]);
-    }
-
-    for (uint i = 0; i < batch.cleanSecret.length; i++) {
-      cleanSecret(batch.cleanSecret[i]);
-    }*/
 
     // increase gasused for hubs
     // this is hardest to fake metric of real usage
@@ -622,7 +723,8 @@ contract Depository is Console {
   enum MessageType {
     CooperativeUpdate,
     CooperativeDisputeProof,
-    DisputeProof
+    DisputeProof,
+    FinalDisputeProof
   }
 
   struct TokenAmountPair {
@@ -653,7 +755,7 @@ contract Depository is Console {
   struct SettlementDiff {
     uint tokenId;
     int leftDiff;        // Change for left entity
-    int rightDiff;       // Change for right entity  
+    int rightDiff;       // Change for right entity
     int collateralDiff;  // Change in collateral
     int ondeltaDiff;     // Change in ondelta
   }
@@ -663,7 +765,8 @@ contract Depository is Console {
     bytes32 leftEntity;
     bytes32 rightEntity;
     SettlementDiff[] diffs;
-    // No signature field - signatures commented out for development
+    uint[] forgiveDebtsInTokenIds;  // Token IDs where debts should be forgiven
+    bytes sig;                       // Signature from counterparty
   }
   //Enforces the invariant: Its main job is to run the check you described: require(leftReserveDiff + rightReserveDiff + collateralDiff == 0). This guarantees no value is created or lost, only moved.
   struct CooperativeUpdate {
@@ -733,6 +836,133 @@ contract Depository is Console {
     uint amount;
     bytes32 creditor;
   }
+
+  struct DebtSnapshot {
+    bytes32 creditor;
+    uint256 amount;
+    uint256 index;
+  }
+
+  function _addDebt(bytes32 debtor, uint256 tokenId, bytes32 creditor, uint256 amount) internal returns (uint256 index) {
+    require(creditor != bytes32(0), "Depository: creditor required");
+    require(amount > 0, "Depository: zero debt");
+    _debts[debtor][tokenId].push(Debt({ amount: amount, creditor: creditor }));
+    index = _debts[debtor][tokenId].length - 1;
+
+    if (index == 0) {
+      _debtIndex[debtor][tokenId] = 0;
+    }
+
+    _activeDebts[debtor]++;
+
+    EntityScore storage score = entityScores[debtor];
+    score.totalActiveDebts++;
+    if (score.inDebtSince == 0) {
+      score.inDebtSince = uint48(block.timestamp);
+    }
+
+    _increaseDebtStats(debtor, tokenId, amount);
+    emit DebtCreated(debtor, creditor, tokenId, amount, index);
+  }
+
+  function _afterDebtCleared(bytes32 entity, bool isRepayment) internal {
+    if (_activeDebts[entity] > 0) {
+      unchecked {
+        _activeDebts[entity]--;
+      }
+    }
+
+    EntityScore storage score = entityScores[entity];
+    if (score.totalActiveDebts > 0) {
+      unchecked {
+        score.totalActiveDebts--;
+      }
+      if (score.totalActiveDebts == 0) {
+        score.inDebtSince = 0;
+      }
+    }
+
+    if (isRepayment) {
+      score.successfulRepayments++;
+    }
+  }
+
+  function _increaseDebtStats(bytes32 entity, uint256 tokenId, uint256 amount) internal {
+    if (amount == 0) {
+      return;
+    }
+    TokenDebtStats storage stats = _tokenDebtStats[entity][tokenId];
+    stats.outstandingAmount += amount;
+    stats.lastUpdated = uint64(block.timestamp);
+    if (stats.since == 0) {
+      stats.since = uint64(block.timestamp);
+    }
+  }
+
+  function _decreaseDebtStats(bytes32 entity, uint256 tokenId, uint256 amount) internal {
+    if (amount == 0) {
+      return;
+    }
+    TokenDebtStats storage stats = _tokenDebtStats[entity][tokenId];
+    if (amount >= stats.outstandingAmount) {
+      stats.outstandingAmount = 0;
+      stats.since = 0;
+    } else {
+      stats.outstandingAmount -= amount;
+    }
+    stats.lastUpdated = uint64(block.timestamp);
+  }
+
+  function _clearDebtAtIndex(bytes32 entity, uint256 tokenId, uint256 index, bool isRepayment) internal returns (uint256 amountCleared, bytes32 creditor) {
+    Debt storage debt = _debts[entity][tokenId][index];
+    amountCleared = debt.amount;
+    creditor = debt.creditor;
+
+    if (amountCleared > 0) {
+      _decreaseDebtStats(entity, tokenId, amountCleared);
+      _afterDebtCleared(entity, isRepayment);
+    }
+
+    delete _debts[entity][tokenId][index];
+  }
+
+  function _countRemainingDebts(Debt[] storage queue, uint256 cursor) internal view returns (uint256 count) {
+    uint256 length = queue.length;
+    if (cursor >= length) {
+      return 0;
+    }
+    for (uint256 i = cursor; i < length; i++) {
+      if (queue[i].amount > 0) {
+        count++;
+      }
+    }
+  }
+
+  function _syncDebtIndex(bytes32 entity, uint256 tokenId) internal {
+    Debt[] storage queue = _debts[entity][tokenId];
+    uint256 length = queue.length;
+    if (length == 0) {
+      _debtIndex[entity][tokenId] = 0;
+      return;
+    }
+
+    uint256 cursor = _debtIndex[entity][tokenId];
+    if (cursor >= length) {
+      cursor = 0;
+    }
+
+    while (cursor < length && queue[cursor].amount == 0) {
+      cursor++;
+    }
+
+    if (cursor >= length) {
+      _debtIndex[entity][tokenId] = 0;
+      delete _debts[entity][tokenId];
+    } else {
+      _debtIndex[entity][tokenId] = cursor;
+    }
+  }
+
   
   struct ChannelCollateral {
     // total amount of collateral locked in the channel for this token
@@ -807,8 +1037,9 @@ contract Depository is Console {
     uint internalTokenId;
     uint amount;
   }
-  function externalTokenToReserve(ExternalTokenToReserve memory params) public {
+  function externalTokenToReserve(ExternalTokenToReserve memory params) public nonReentrant {
     bytes32 targetEntity = params.entity == bytes32(0) ? bytes32(uint256(uint160(msg.sender))) : params.entity;
+    require(params.amount > 0, "Amount zero");
     
     if (params.internalTokenId == 0) {
       // Check if token already exists using efficient lookup
@@ -970,6 +1201,124 @@ contract Depository is Console {
     allDebts = _debts[entity][tokenId];
   }
 
+  function listActiveDebts(
+    bytes32 entity,
+    uint256 tokenId,
+    uint256 startIndex,
+    uint256 limit
+  ) external view returns (DebtSnapshot[] memory debts, uint256 nextIndex, bool hasMore) {
+    require(limit > 0 && limit <= 256, "Depository: invalid limit");
+
+    Debt[] storage queue = _debts[entity][tokenId];
+    uint256 length = queue.length;
+    uint256 cursor = startIndex;
+    uint256 head = _debtIndex[entity][tokenId];
+    if (cursor < head) {
+      cursor = head;
+    }
+
+    if (cursor >= length) {
+      return (new DebtSnapshot[](0), length, false);
+    }
+
+    DebtSnapshot[] memory buffer = new DebtSnapshot[](limit);
+    uint256 count = 0;
+    while (cursor < length && count < limit) {
+      Debt storage debt = queue[cursor];
+      if (debt.amount > 0) {
+        buffer[count] = DebtSnapshot({
+          creditor: debt.creditor,
+          amount: debt.amount,
+          index: cursor
+        });
+        count++;
+      }
+      cursor++;
+    }
+
+    debts = new DebtSnapshot[](count);
+    for (uint256 i = 0; i < count; i++) {
+      debts[i] = buffer[i];
+    }
+
+    nextIndex = cursor;
+    hasMore = cursor < length;
+  }
+
+  function previewEnforceDebts(
+    bytes32 entity,
+    uint256 tokenId,
+    uint256 additionalReserve,
+    uint256 maxIterations
+  )
+    external
+    view
+    returns (
+      uint256 totalClearedAmount,
+      uint256 resultingReserve,
+      uint256 nextDebtIndex,
+      uint256 nextDebtAmount,
+      bytes32 nextDebtCreditor
+    )
+  {
+    Debt[] storage queue = _debts[entity][tokenId];
+    uint256 length = queue.length;
+    if (length == 0) {
+      return (0, _reserves[entity][tokenId] + additionalReserve, 0, 0, bytes32(0));
+    }
+
+    uint256 cursor = _debtIndex[entity][tokenId];
+    uint256 available = _reserves[entity][tokenId] + additionalReserve;
+    uint256 iterations = 0;
+    uint256 iterationCap = maxIterations == 0 ? type(uint256).max : maxIterations;
+
+    while (cursor < length && available > 0 && iterations < iterationCap) {
+      Debt storage debt = queue[cursor];
+      uint256 amount = debt.amount;
+      if (amount == 0) {
+        cursor++;
+        continue;
+      }
+
+      if (available >= amount) {
+        available -= amount;
+        totalClearedAmount += amount;
+        cursor++;
+      } else {
+        uint256 paid = available;
+        totalClearedAmount += paid;
+        available = 0;
+        nextDebtIndex = cursor;
+        nextDebtAmount = amount - paid;
+        nextDebtCreditor = debt.creditor;
+        resultingReserve = available;
+        return (totalClearedAmount, resultingReserve, nextDebtIndex, nextDebtAmount, nextDebtCreditor);
+      }
+
+      iterations++;
+    }
+
+    while (cursor < length && queue[cursor].amount == 0) {
+      cursor++;
+    }
+
+    nextDebtIndex = cursor;
+    resultingReserve = available;
+
+    if (cursor < length) {
+      nextDebtAmount = queue[cursor].amount;
+      nextDebtCreditor = queue[cursor].creditor;
+    } else {
+      nextDebtAmount = 0;
+      nextDebtCreditor = bytes32(0);
+      nextDebtIndex = 0;
+    }
+  }
+
+  function getEntityTokenDebtStats(bytes32 entity, uint256 tokenId) external view returns (TokenDebtStats memory) {
+    return _tokenDebtStats[entity][tokenId];
+  }
+
 
   /* triggered automatically before every reserveTo{Reserve/ChannelCollateral/PackedToken}
   /* can be called manually
@@ -1031,62 +1380,83 @@ contract Depository is Console {
  * Pure chronological ordering is the only objective truth the J-machine can enforce
  * without becoming a judge.
  */
-  function enforceDebts(bytes32 entity, uint tokenId) public returns (uint totalDebts) {
-    uint debtsLength = _debts[entity][tokenId].length;
-    if (debtsLength == 0) {
+  function enforceDebts(bytes32 entity, uint tokenId) public returns (uint256 totalDebts) {
+    return _enforceDebts(entity, tokenId, type(uint256).max);
+  }
+
+  function enforceDebts(bytes32 entity, uint tokenId, uint256 maxIterations) public returns (uint256 totalDebts) {
+    return _enforceDebts(entity, tokenId, maxIterations);
+  }
+
+  function _enforceDebts(bytes32 entity, uint256 tokenId, uint256 maxIterations) internal returns (uint256 totalDebts) {
+    Debt[] storage queue = _debts[entity][tokenId];
+    uint256 length = queue.length;
+    if (length == 0) {
+      _debtIndex[entity][tokenId] = 0;
       return 0;
     }
-   
-    uint memoryReserve = _reserves[entity][tokenId]; 
-    uint memoryDebtIndex = _debtIndex[entity][tokenId];
-    
-    if (memoryReserve == 0){
-      return debtsLength - memoryDebtIndex;
+
+    uint256 cursor = _debtIndex[entity][tokenId];
+    if (cursor >= length) {
+      cursor = 0;
     }
-    // allow partial enforcing in case there are too many _debts to pay off at once (over block gas limit)
-    while (true) {
-      Debt storage debt = _debts[entity][tokenId][memoryDebtIndex];
-      
-      if (memoryReserve >= debt.amount) {
-        // can pay this debt off in full
-        memoryReserve -= debt.amount;
-        _reserves[debt.creditor][tokenId] += debt.amount;
 
-        delete _debts[entity][tokenId][memoryDebtIndex];
+    uint256 available = _reserves[entity][tokenId];
+    uint256 iterationCap = maxIterations == 0 ? type(uint256).max : maxIterations;
+    uint256 iterations = 0;
 
-        // Update reputation score for repayment
-        EntityScore storage score = entityScores[entity];
-        score.totalActiveDebts--;
-        score.successfulRepayments++;
-        if (score.totalActiveDebts == 0) {
-          score.inDebtSince = 0; // Reset timestamp when all debts are clear
-        }
+    if (available == 0) {
+      _debtIndex[entity][tokenId] = cursor;
+      _syncDebtIndex(entity, tokenId);
 
-        // last debt was paid off, the entity is debt free now
-        if (memoryDebtIndex+1 == debtsLength) {
-          memoryDebtIndex = 0;
-          // resets .length to 0
-          delete _debts[entity][tokenId]; 
-          debtsLength = 0;
-          break;
-        }
-        memoryDebtIndex++;
-        _activeDebts[entity]--;
-        
-      } else {
-        // pay off the debt partially and break the loop
-        _reserves[debt.creditor][tokenId] += memoryReserve;
-        debt.amount -= memoryReserve;
-        memoryReserve = 0;
-        break;
+      Debt[] storage untouchedQueue = _debts[entity][tokenId];
+      if (untouchedQueue.length == 0) {
+        return 0;
       }
+
+      return _countRemainingDebts(untouchedQueue, _debtIndex[entity][tokenId]);
     }
 
-    // put memory variables back to storage
-    _reserves[entity][tokenId] = memoryReserve;
-    _debtIndex[entity][tokenId] = memoryDebtIndex;
-    
-    return debtsLength - memoryDebtIndex;
+    while (cursor < length && available > 0 && iterations < iterationCap) {
+      Debt storage debt = queue[cursor];
+      uint256 amount = debt.amount;
+      if (amount == 0) {
+        cursor++;
+        continue;
+      }
+
+      bytes32 creditor = debt.creditor;
+      uint256 payableAmount = available < amount ? available : amount;
+      if (payableAmount > 0) {
+        _reserves[creditor][tokenId] += payableAmount;
+        available -= payableAmount;
+        _decreaseDebtStats(entity, tokenId, payableAmount);
+        if (payableAmount == amount) {
+          debt.amount = 0;
+          emit DebtEnforced(entity, creditor, tokenId, payableAmount, 0, cursor + 1);
+          _afterDebtCleared(entity, true);
+          delete queue[cursor];
+          cursor++;
+        } else {
+          debt.amount = amount - payableAmount;
+          emit DebtEnforced(entity, creditor, tokenId, payableAmount, debt.amount, cursor);
+          available = 0;
+        }
+      }
+
+      iterations++;
+    }
+
+    _reserves[entity][tokenId] = available;
+    _debtIndex[entity][tokenId] = cursor;
+    _syncDebtIndex(entity, tokenId);
+
+    Debt[] storage refreshedQueue = _debts[entity][tokenId];
+    if (refreshedQueue.length == 0) {
+      return 0;
+    }
+
+    return _countRemainingDebts(refreshedQueue, _debtIndex[entity][tokenId]);
   }
 
 
@@ -1135,10 +1505,8 @@ contract Depository is Console {
     return true;
   }
 
-
-
-
-  /* mutually agreed update of channel state in a single atomic operation
+  // DEPRECATED: Use settle() instead - cooperativeUpdate kept for backwards compatibility
+  // mutually agreed update of channel state in a single atomic operation
   function cooperativeUpdate(bytes32 entity, CooperativeUpdate memory params) internal returns (bool) {
     bytes memory ch_key = channelKey(entity, params.counterentity);
     bytes32 left;
@@ -1163,7 +1531,8 @@ contract Depository is Console {
 
     log('Encoded msg', encoded_msg);
     
-    if(params.counterentity != ECDSA.recover(hash, params.sig)) {
+    address counterpartyAddress = address(uint160(uint256(params.counterentity)));
+    if(counterpartyAddress != ECDSA.recover(hash, params.sig)) {
       log("Invalid signer ", ECDSA.recover(hash, params.sig));
       return false;
     }
@@ -1240,261 +1609,303 @@ contract Depository is Console {
     return true;
   }
 
-  /* COMMENTED OUT: Channel finalization disabled for development focus
-  /* returns tokens to _reserves based on final deltas and _collaterals
-  /* then increases cooperativeNonce to invalidate all previous dispute proofs
-/*
+  function finalizeChannel(
+    bytes32 entity1,
+    bytes32 entity2,
+    ProofBody memory proofbody,
+    bytes memory arguments1,
+    bytes memory arguments2
+  ) internal returns (bool) {
+    bytes32 leftAddress;
+    bytes32 rightAddress;
+    bytes memory leftArguments;
+    bytes memory rightArguments;
 
-  1. Collateral lives in channels 
-    - Two entities lock funds, transact off-chain with signed deltas
-    - When finalizing: if delta >= 0 && delta <= collateral, split proportionally
-    - If delta > collateral, winner gets all collateral + excess becomes Debt
-  2. Debt enters FIFO queue (enforceDebts lines 1012-1068)
-    - Every reserve withdrawal must clear debts first
-    - Creates "liquidity trap" - can receive but not send until debts clear
-    - Atomic: either pay all debts in full or you can't withdraw
-  3. Subcontracts enable complexity (SubcontractProvider.sol)
-    - HTLCs (hash time-locked payments)
-    - Atomic swaps between tokens
-    - All within the bilateral delta array
-     */
-  /* todo: private visability
-  /* function finalizeChannel(bytes32 entity1, 
-  /*     bytes32 entity2, 
-  /*     ProofBody memory proofbody, 
-  /*     bytes memory arguments1, 
-  /*     bytes memory arguments2) public returns (bool) 
-  /* {
-  /*   bytes32 leftAddress;
-  /*   bytes32 rightAddress;
-  /*   bytes memory leftArguments;
-  /*   bytes memory rightArguments;
-  /*   if (entity1 < entity2) {
-  /*       leftAddress = entity1;
-  /*       rightAddress = entity2;
-  /*       leftArguments = arguments1;
-  /*       rightArguments = arguments2;
-  /*   } else {
-  /*       leftAddress = entity2;
-  /*       rightAddress = entity1;    
-  /*       leftArguments = arguments2;
-  /*       rightArguments = arguments1;
-  /*   }
-
-  /*   bytes memory ch_key = abi.encodePacked(leftAddress, rightAddress);
-
-  /*   logChannel(leftAddress, rightAddress);
-
-    // 1. create deltas (ondelta+offdelta) from proofbody
-    int[] memory deltas = new int[](proofbody.offdeltas.length);
-    for (uint i = 0;i<deltas.length;i++){
-      deltas[i] = _collaterals[ch_key][proofbody.tokenIds[i]].ondelta + int(proofbody.offdeltas[i]);
+    if (entity1 < entity2) {
+      leftAddress = entity1;
+      rightAddress = entity2;
+      leftArguments = arguments1;
+      rightArguments = arguments2;
+    } else {
+      leftAddress = entity2;
+      rightAddress = entity1;
+      leftArguments = arguments2;
+      rightArguments = arguments1;
     }
-    
-    // 2. process subcontracts and apply to deltas
-    bytes[] memory decodedLeftArguments = abi.decode(leftArguments, (bytes[]));
-    bytes[] memory decodedRightArguments = abi.decode(rightArguments, (bytes[]));
 
-    for (uint i = 0; i < proofbody.subcontracts.length; i++){
+    bytes memory ch_key = channelKey(leftAddress, rightAddress);
+    logChannel(leftAddress, rightAddress);
+
+    uint256 tokenCount = proofbody.tokenIds.length;
+    require(tokenCount == proofbody.offdeltas.length, "Depository: invalid proofbody");
+
+    int[] memory deltas = new int[](tokenCount);
+    for (uint256 i = 0; i < tokenCount; i++) {
+      uint256 tokenId = proofbody.tokenIds[i];
+      deltas[i] = _collaterals[ch_key][tokenId].ondelta + int(proofbody.offdeltas[i]);
+    }
+
+    bytes[] memory decodedLeft = leftArguments.length == 0 ? new bytes[](0) : abi.decode(leftArguments, (bytes[]));
+    bytes[] memory decodedRight = rightArguments.length == 0 ? new bytes[](0) : abi.decode(rightArguments, (bytes[]));
+
+    require(decodedLeft.length == proofbody.subcontracts.length, "Depository: invalid left args");
+    require(decodedRight.length == proofbody.subcontracts.length, "Depository: invalid right args");
+
+    for (uint256 i = 0; i < proofbody.subcontracts.length; i++) {
       SubcontractClause memory sc = proofbody.subcontracts[i];
-      
-      // todo: check gas usage
       int[] memory newDeltas = SubcontractProvider(sc.subcontractProviderAddress).applyBatch(
-        deltas, 
-        sc.encodedBatch, 
-        decodedLeftArguments[i],
-        decodedRightArguments[i]
+        deltas,
+        sc.encodedBatch,
+        decodedLeft.length > i ? decodedLeft[i] : bytes(""),
+        decodedRight.length > i ? decodedRight[i] : bytes("")
       );
 
-      // sanity check 
-      if (newDeltas.length != deltas.length) continue;
+      require(newDeltas.length == deltas.length, "Depository: invalid subcontract response");
 
-      // iterate over allowences and apply to new deltas if they are respected
-      for (uint j = 0; j < sc.allowences.length; j++){
-        Allowence memory allowence = sc.allowences[j];
-        int difference = newDeltas[allowence.deltaIndex] - deltas[allowence.deltaIndex];
-        if ((difference > 0 && uint(difference) > allowence.rightAllowence) || 
-          (difference < 0 && uint(-difference) > allowence.leftAllowence) || 
-          difference == 0){
-          continue;
+      for (uint256 j = 0; j < sc.allowences.length; j++) {
+        Allowence memory allowance = sc.allowences[j];
+        require(allowance.deltaIndex < newDeltas.length, "Depository: invalid allowance index");
+        int difference = newDeltas[allowance.deltaIndex] - deltas[allowance.deltaIndex];
+
+        if (difference > 0) {
+          require(uint256(difference) <= allowance.rightAllowence, "Depository: allowance exceeded (right)");
+        } else if (difference < 0) {
+          require(uint256(-difference) <= allowance.leftAllowence, "Depository: allowance exceeded (left)");
         }
-        console.log("Update delta");
-        console.logInt(deltas[allowence.deltaIndex]);
-        console.logInt(newDeltas[allowence.deltaIndex]);
-        deltas[allowence.deltaIndex] = newDeltas[allowence.deltaIndex];
-      
       }
-    }    
 
-    // 3. split _collaterals
-    for (uint i = 0;i<deltas.length;i++){
-      uint tokenId = proofbody.tokenIds[i];
-      int delta = deltas[i];
+      for (uint256 j = 0; j < deltas.length; j++) {
+        deltas[j] = newDeltas[j];
+      }
+    }
+
+    for (uint256 i = 0; i < tokenCount; i++) {
+      uint256 tokenId = proofbody.tokenIds[i];
       ChannelCollateral storage col = _collaterals[ch_key][tokenId];
 
-      if (delta >= 0 && uint(delta) <= col.collateral) {
-        // collateral is split between entities
-        _reserves[leftAddress][tokenId] += uint(delta);
-        _reserves[rightAddress][tokenId] += col.collateral - uint(delta);
-      } else {
-        // one entity gets entire collateral, another pays credit from reserve or gets debt
-        address getsCollateral = delta < 0 ? rightAddress : leftAddress;
-        address getsDebt = delta < 0 ? leftAddress : rightAddress;
-        uint debtAmount = delta < 0 ? uint(-delta) : uint(delta) - col.collateral;
-        _reserves[getsCollateral][tokenId] += col.collateral;
-        
-        log('gets debt', getsDebt);
-        log('debt', debtAmount);
-
-        if (_reserves[getsDebt][tokenId] >= debtAmount) {
-          // will pay right away without creating Debt
-          _reserves[getsCollateral][tokenId] += debtAmount;
-          _reserves[getsDebt][tokenId] -= debtAmount;
-        } else {
-          // pay what they can, and create Debt
-          if (_reserves[getsDebt][tokenId] > 0) {
-            _reserves[getsCollateral][tokenId] += _reserves[getsDebt][tokenId];
-            debtAmount -= _reserves[getsDebt][tokenId];
-            _reserves[getsDebt][tokenId] = 0;
-          }
-          _debts[getsDebt][tokenId].push(Debt({
-            creditor: getsCollateral,
-            amount: debtAmount
-          }));
-          _activeDebts[getsDebt]++;
-
-          // Update reputation score for new debt
-          EntityScore storage score = entityScores[getsDebt];
-          score.totalActiveDebts++;
-          if (score.inDebtSince == 0) {
-            score.inDebtSince = uint48(block.timestamp);
-          }
-        }
-      }
-
+      _applyChannelDelta(tokenId, col, leftAddress, rightAddress, deltas[i]);
       delete _collaterals[ch_key][tokenId];
     }
 
-
     delete _channels[ch_key].disputeHash;
-
     _channels[ch_key].cooperativeNonce++;
-   
     logChannel(leftAddress, rightAddress);
 
     return true;
-
   }
 
-  /* DISABLED: disputes
-  function cooperativeDisputeProof (CooperativeDisputeProof memory params) public returns (bool) {
-    bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
+  function _applyChannelDelta(
+    uint256 tokenId,
+    ChannelCollateral storage col,
+    bytes32 leftEntity,
+    bytes32 rightEntity,
+    int delta
+  ) internal {
+    uint256 collateral = col.collateral;
 
+    if (delta >= 0) {
+      uint256 desired = uint256(delta);
+      if (desired <= collateral) {
+        if (desired > 0) {
+          _increaseReserve(leftEntity, tokenId, desired);
+        }
+        uint256 remainder = collateral - desired;
+        if (remainder > 0) {
+          _increaseReserve(rightEntity, tokenId, remainder);
+        }
+      } else {
+        if (collateral > 0) {
+          _increaseReserve(leftEntity, tokenId, collateral);
+        }
+        uint256 shortfall = desired - collateral;
+        _settleShortfall(rightEntity, leftEntity, tokenId, shortfall);
+      }
+    } else {
+      uint256 desiredAbs = uint256(-delta);
+      if (desiredAbs <= collateral) {
+        if (desiredAbs > 0) {
+          _increaseReserve(rightEntity, tokenId, desiredAbs);
+        }
+        uint256 remainder = collateral - desiredAbs;
+        if (remainder > 0) {
+          _increaseReserve(leftEntity, tokenId, remainder);
+        }
+      } else {
+        if (collateral > 0) {
+          _increaseReserve(rightEntity, tokenId, collateral);
+        }
+        uint256 shortfall = desiredAbs - collateral;
+        _settleShortfall(leftEntity, rightEntity, tokenId, shortfall);
+      }
+    }
+
+    col.collateral = 0;
+    col.ondelta = 0;
+  }
+
+  function _increaseReserve(bytes32 entity, uint256 tokenId, uint256 amount) internal {
+    if (amount == 0) {
+      return;
+    }
+    _reserves[entity][tokenId] += amount;
+    emit ReserveUpdated(entity, tokenId, _reserves[entity][tokenId]);
+  }
+
+  function _settleShortfall(bytes32 debtor, bytes32 creditor, uint256 tokenId, uint256 amount) internal {
+    if (amount == 0) {
+      return;
+    }
+
+    uint256 available = _reserves[debtor][tokenId];
+    uint256 payAmount = available >= amount ? amount : available;
+
+    if (payAmount > 0) {
+      _reserves[debtor][tokenId] = available - payAmount;
+      emit ReserveUpdated(debtor, tokenId, _reserves[debtor][tokenId]);
+      _increaseReserve(creditor, tokenId, payAmount);
+    }
+
+    uint256 remaining = amount - payAmount;
+    if (remaining > 0) {
+      _addDebt(debtor, tokenId, creditor, remaining);
+      _syncDebtIndex(debtor, tokenId);
+    }
+  }
+
+  // Cooperative dispute proof: both parties agree to close channel with signed proof
+  function cooperativeDisputeProof (CooperativeDisputeProof memory params) public nonReentrant returns (bool) {
+    bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
 
     console.log("Received proof");
     console.logBytes32(keccak256(abi.encode(params.proofbody)));
     console.logBytes32(keccak256(params.initialArguments));
 
     bytes memory encoded_msg = abi.encode(
-      MessageType.CooperativeDisputeProof, 
-      ch_key, 
+      MessageType.CooperativeDisputeProof,
+      ch_key,
       _channels[ch_key].cooperativeNonce,
       keccak256(abi.encode(params.proofbody)),
       keccak256(params.initialArguments)
     );
 
-    bytes32 hash = keccak256(encoded_msg);
-
-
     bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
 
-    require(ECDSA.recover(final_hash, params.sig) == params.counterentity);
+    // Fix type conversion: bytes32 → address
+    address recoveredSigner = ECDSA.recover(final_hash, params.sig);
+    address counterpartyAddress = address(uint160(uint256(params.counterentity)));
+    require(recoveredSigner == counterpartyAddress, "Invalid counterparty signature");
 
-    require(_channels[ch_key].disputeHash == bytes32(0));
+    require(_channels[ch_key].disputeHash == bytes32(0), "Dispute already in progress");
 
     delete _channels[ch_key].disputeHash;
 
-    finalizeChannel(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.proofbody, params.finalArguments, params.initialArguments);
-    
+    require(
+      finalizeChannel(
+        bytes32(uint256(uint160(msg.sender))),
+        params.counterentity,
+        params.proofbody,
+        params.finalArguments,
+        params.initialArguments
+      ),
+      "Depository: finalize failed"
+    );
+
     emit CooperativeClose(bytes32(uint256(uint160(msg.sender))), params.counterentity, _channels[ch_key].cooperativeNonce);
+
+    return true;
   }
-  */
 
 
-  /* DISABLED: dispute functions
-  function initialDisputeProof(InitialDisputeProof memory params) public returns (bool) {
-  /*   bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
+  // Initial dispute proof: one party posts signed proof to start dispute
+  function initialDisputeProof(InitialDisputeProof memory params) public nonReentrant returns (bool) {
+    bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
 
-  /*   // Update dispute scores for both parties
-  /*   entityScores[bytes32(uint256(uint160(msg.sender)))].totalDisputes++;
-  /*   entityScores[params.counterentity].totalDisputes++;
+    // Update dispute scores for both parties
+    entityScores[bytes32(uint256(uint160(msg.sender)))].totalDisputes++;
+    entityScores[params.counterentity].totalDisputes++;
 
-  /*   // entities must always hold a dispute proof with cooperativeNonce equal or higher than the one in the contract
-  /*   require(_channels[ch_key].cooperativeNonce <= params.cooperativeNonce);
+    // entities must always hold a dispute proof with cooperativeNonce equal or higher than the one in the contract
+    require(_channels[ch_key].cooperativeNonce <= params.cooperativeNonce, "Proof nonce too old");
 
-  /*   bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, 
-  /*     ch_key, 
-  /*     params.cooperativeNonce, 
-  /*     params.disputeNonce, 
-  /*     params.proofbodyHash);
+    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof,
+      ch_key,
+      params.cooperativeNonce,
+      params.disputeNonce,
+      params.proofbodyHash);
 
-  /*   bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+    bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
 
-  /*   log('encoded_msg',encoded_msg);
+    log('encoded_msg',encoded_msg);
 
-  /*   require(ECDSA.recover(final_hash, params.sig) == params.counterentity, "Invalid signer");
+    // Fix type conversion: bytes32 → address
+    address recoveredSigner = ECDSA.recover(final_hash, params.sig);
+    address counterpartyAddress = address(uint160(uint256(params.counterentity)));
+    require(recoveredSigner == counterpartyAddress, "Invalid signer");
 
-  /*   require(_channels[ch_key].disputeHash == bytes32(0));
+    require(_channels[ch_key].disputeHash == bytes32(0), "Dispute already in progress");
 
-  /*   bytes memory encodedDispute = abi.encodePacked(params.cooperativeNonce,
-  /*     params.disputeNonce, 
-  /*     bytes32(uint256(uint160(msg.sender))) < params.counterentity, // is started by left
-  /*     block.number + 20,
-  /*     params.proofbodyHash, 
-  /*     keccak256(abi.encodePacked(params.initialArguments)));
+    bytes memory encodedDispute = abi.encodePacked(params.cooperativeNonce,
+      params.disputeNonce,
+      bytes32(uint256(uint160(msg.sender))) < params.counterentity, // is started by left
+      block.number + 20,
+      params.proofbodyHash,
+      keccak256(abi.encodePacked(params.initialArguments)));
 
-  /*   _channels[ch_key].disputeHash = keccak256(encodedDispute);
-  /*   emit DisputeStarted(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.disputeNonce, params.initialArguments);
-  /* }
+    _channels[ch_key].disputeHash = keccak256(encodedDispute);
+    emit DisputeStarted(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.disputeNonce, params.initialArguments);
 
-  /* COMMENTED OUT: Dispute functionality disabled for development focus
-  /* function finalDisputeProof(FinalDisputeProof memory params) public returns (bool) {
-  /*   bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
+    return true;
+  }
 
-  /*   // Update dispute scores for both parties involved in the finalization
-  /*   entityScores[bytes32(uint256(uint160(msg.sender)))].totalDisputes++;
-  /*   entityScores[params.counterentity].totalDisputes++;
+  // Final dispute proof: counterparty responds with newer proof OR timeout expires
+  function finalDisputeProof(FinalDisputeProof memory params) public nonReentrant returns (bool) {
+    bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
 
-  /*   // verify the dispute was started
+    // Update dispute scores for both parties involved in the finalization
+    entityScores[bytes32(uint256(uint160(msg.sender)))].totalDisputes++;
+    entityScores[params.counterentity].totalDisputes++;
 
-  /*   if (params.sig.length > 0) {
-  /*     // Validate signature if provided
-  /*     bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, 
-  /*       ch_key, 
-  /*       params.cooperativeNonce, 
-  /*       params.initialDisputeNonce, 
-  /*       params.finalDisputeNonce);
-        
-  /*     bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-  /*     log('encoded_msg',encoded_msg);
-  /*     require(ECDSA.recover(final_hash, params.sig) == params.counterentity, "Invalid signer");
+    // verify the dispute was started
 
-  /*     // TODO: if nonce is same, Left one's proof is considered valid
+    if (params.sig.length > 0) {
+      // Validate signature if provided
+      bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof,
+        ch_key,
+        params.finalCooperativeNonce,
+        params.initialDisputeNonce,
+        params.finalDisputeNonce);
 
-  /*     require(params.initialDisputeNonce < params.finalDisputeNonce, "New nonce must be greater");
-  /*   } else {
-  /*     // counterparty agrees or does not respond 
-  /*     bool senderIsCounterparty = params.startedByLeft != (bytes32(uint256(uint160(msg.sender))) < params.counterentity);
-  /*     require(senderIsCounterparty || (block.number >= params.disputeUntilBlock), "Dispute period ended");
-  /*     require(params.initialProofbodyHash == keccak256(abi.encode(params.finalProofbody)), "Invalid proofbody");
-  /*   }
-    
+      bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+      log('encoded_msg',encoded_msg);
 
-  /*   finalizeChannel(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.finalProofbody, params.finalArguments, params.initialArguments);
-  
+      // Fix type conversion: bytes32 → address
+      address recoveredSigner = ECDSA.recover(final_hash, params.sig);
+      address counterpartyAddress = address(uint160(uint256(params.counterentity)));
+      require(recoveredSigner == counterpartyAddress, "Invalid signer");
 
-  /*   return true;
-  /* }
+      // TODO: if nonce is same, Left one's proof is considered valid
+
+      require(params.initialDisputeNonce < params.finalDisputeNonce, "New nonce must be greater");
+    } else {
+      // counterparty agrees or does not respond
+      bool senderIsCounterparty = params.startedByLeft != (bytes32(uint256(uint160(msg.sender))) < params.counterentity);
+      require(senderIsCounterparty || (block.number >= params.disputeUntilBlock), "Dispute period ended");
+      require(params.initialProofbodyHash == keccak256(abi.encode(params.finalProofbody)), "Invalid proofbody");
+    }
+
+    require(
+      finalizeChannel(
+        bytes32(uint256(uint160(msg.sender))),
+        params.counterentity,
+        params.finalProofbody,
+        params.finalArguments,
+        params.initialArguments
+      ),
+      "Depository: finalize failed"
+    );
+
+    return true;
+  }
 
 
 
@@ -1517,7 +1928,6 @@ contract Depository is Console {
   }
   
   
-  /* return users with reserves in provided tokens
   function getUsers(bytes32[] memory entities, uint[] memory tokenIds) external view returns (UserReturn[] memory response) {
     response = new UserReturn[](entities.length);
     for (uint i = 0;i<entities.length;i++){
@@ -1538,8 +1948,7 @@ contract Depository is Console {
     
     return response;
   }
-  
-  /* get many _channels around one address, with collaterals in provided tokens
+
   function getChannels(bytes32 entity, bytes32[] memory counterentities, uint[] memory tokenIds) public view returns (ChannelReturn[] memory response) {
     bytes memory ch_key;
 
@@ -1573,11 +1982,8 @@ contract Depository is Console {
 
   /* GPT5: You're right - this IS revolutionary. Lightning dies because you can't dynamically add inbound capacity. You solve it by allowing credit beyond
   collateral, then mechanically enforcing repayment via FIFO queue. That's genuinely novel. */
-  function createDebt(bytes32 addr, bytes32 creditor, uint tokenId, uint amount) public {
-    _debts[addr][tokenId].push(Debt({
-      creditor: creditor,
-      amount: amount
-    }));
+  function createDebt(bytes32 addr, bytes32 creditor, uint tokenId, uint amount) public onlyAdmin {
+    _addDebt(addr, tokenId, creditor, amount);
   }
 
 

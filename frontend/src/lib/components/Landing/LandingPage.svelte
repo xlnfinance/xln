@@ -169,9 +169,10 @@
         console.error('Failed to load superprompt:', error);
       }
 
-      // Check for #MML hash
+      // Check for #MML hash (fallback if +page.svelte didn't catch it)
       if (window.location.hash === '#MML') {
         localStorage.setItem('open', 'true');
+        window.location.hash = ''; // Remove hash after processing
         onUnlock();
       }
     }
@@ -282,6 +283,57 @@
             <div class="formula-desc">Delta in closed interval</div>
           </div>
         </div>
+      </div>
+
+      <!-- Triple-S First Principles -->
+      <div class="section triple-s">
+        <h2>Triple-S First Principles</h2>
+        <div class="principles-grid">
+          <div class="principle-card">
+            <div class="principle-icon">⚡</div>
+            <h3>Scalable</h3>
+            <p><strong>Unicast (1-to-1)</strong> architecture enables unbounded horizontal scaling. No broadcast bottlenecks, no global consensus delays.</p>
+            <p class="principle-detail">O(1) per-hop updates vs O(n) broadcast overhead. Perfect for Coasian micro-economies where counterparties self-select optimal routing paths.</p>
+          </div>
+          <div class="principle-card">
+            <div class="principle-icon">🔒</div>
+            <h3>Secure</h3>
+            <p><strong>Every phone and laptop will be a full node by default.</strong> Non-negotiable.</p>
+            <p class="principle-detail">This implements the original vision of Satoshi and Vitalik: self-sovereign verification without trusted intermediaries. Your keys, your node, your rules.</p>
+          </div>
+          <div class="principle-card">
+            <div class="principle-icon">✨</div>
+            <h3>Simple</h3>
+            <p><strong>Banking 2.0</strong> with zero new terminology invented.</p>
+            <p class="principle-detail">Credit, collateral, reserves, transfers. Concepts you already know. No zkSNARKs to understand, no merkle trees to audit. Just finance, but programmable.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Newsletter Signup -->
+      <div class="newsletter-section">
+        <div class="newsletter-header">
+          <h3>Join the Unicast Revolution</h3>
+          <p>Get notified about mainnet launch, technical deep-dives, and protocol updates</p>
+        </div>
+        <form
+          action="https://buttondown.email/api/emails/embed-subscribe/xln"
+          method="post"
+          target="popupwindow"
+          class="newsletter-form"
+        >
+          <input
+            type="email"
+            name="email"
+            placeholder="your@email.com"
+            required
+            class="newsletter-input"
+          />
+          <button type="submit" class="newsletter-btn">
+            Subscribe
+          </button>
+        </form>
+        <p class="newsletter-note">No spam. Unsubscribe anytime. Privacy-first via Buttondown.</p>
       </div>
 
       <div class="section">
@@ -423,50 +475,23 @@
       </Collapsible>
     </div>
 
-    <!-- Newsletter Signup - DISABLED (re-enable when Buttondown account is verified) -->
-    <!--
-    <div class="newsletter-section">
-      <div class="newsletter-header">
-        <h3>Stay Updated</h3>
-        <p>Get notified about mainnet launch, technical deep-dives, and protocol updates</p>
-      </div>
-      <form
-        action="https://buttondown.email/api/emails/embed-subscribe/xln"
-        method="post"
-        target="popupwindow"
-        class="newsletter-form"
-      >
-        <input
-          type="email"
-          name="email"
-          placeholder="your@email.com"
-          required
-          class="newsletter-input"
-        />
-        <button type="submit" class="newsletter-btn">
-          Subscribe
-        </button>
-      </form>
-      <p class="newsletter-note">No spam. Unsubscribe anytime. Privacy-first via Buttondown.</p>
-    </div>
-    -->
-
     {#if showInvite}
       <div class="invite-form">
-        <div class="invite-label">Private Testnet Access</div>
+        <div class="invite-label">🔐 Early Access (Invite Only)</div>
         <input
           type="text"
           bind:value={inviteCode}
-          placeholder="Invite Code"
+          placeholder="Access Code"
           on:keydown={(e) => e.key === 'Enter' && handleSubmit()}
           class="invite-input"
         />
         <button on:click={handleSubmit} class="enter-btn">
-          Enter Testnet
+          Unlock
         </button>
         {#if error}
           <div class="error">{error}</div>
         {/if}
+        <p class="invite-note">DM @xlnfinance for access</p>
       </div>
     {/if}
 
@@ -676,6 +701,13 @@
     text-align: center;
   }
 
+  .invite-note {
+    margin-top: 0.75rem;
+    font-size: 0.85rem;
+    color: #888;
+    text-align: center;
+  }
+
   .problem-solution {
     width: 100%;
     max-width: 1200px;
@@ -809,6 +841,77 @@
     color: rgba(255, 255, 255, 0.5);
     margin: -1rem 0 1.5rem;
     font-style: italic;
+  }
+
+  /* Triple-S First Principles */
+  .triple-s {
+    background: linear-gradient(135deg, rgba(79, 209, 139, 0.05) 0%, rgba(0, 122, 204, 0.05) 100%);
+    border-radius: 12px;
+    padding: 2.5rem;
+  }
+
+  .triple-s h2 {
+    text-align: center;
+    margin-bottom: 2.5rem;
+    font-size: 2rem;
+    background: linear-gradient(135deg, #4fd18b 0%, #007acc 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .principles-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+    margin-top: 1.5rem;
+  }
+
+  .principle-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(79, 209, 139, 0.2);
+    border-radius: 8px;
+    padding: 2rem;
+    transition: all 0.3s ease;
+  }
+
+  .principle-card:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(79, 209, 139, 0.4);
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(79, 209, 139, 0.1);
+  }
+
+  .principle-icon {
+    font-size: 3rem;
+    text-align: center;
+    margin-bottom: 1rem;
+    filter: drop-shadow(0 0 8px rgba(79, 209, 139, 0.3));
+  }
+
+  .principle-card h3 {
+    color: #4fd18b;
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+    text-align: center;
+    font-weight: 600;
+  }
+
+  .principle-card p {
+    color: rgba(255, 255, 255, 0.85);
+    line-height: 1.7;
+    margin-bottom: 1rem;
+    font-size: 0.95rem;
+  }
+
+  .principle-card p:last-child {
+    margin-bottom: 0;
+  }
+
+  .principle-detail {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.9rem;
+    line-height: 1.6;
   }
 
   .properties-list {
@@ -1042,6 +1145,10 @@
 
     .visual-column {
       margin-top: 1rem;
+    }
+
+    .principles-grid {
+      grid-template-columns: repeat(2, 1fr);
     }
   }
 
@@ -1470,6 +1577,19 @@
   @media (max-width: 768px) {
     .logo {
       width: 300px;
+    }
+
+    .principles-grid {
+      grid-template-columns: 1fr;
+      gap: 1.5rem;
+    }
+
+    .triple-s {
+      padding: 1.5rem;
+    }
+
+    .principle-card {
+      padding: 1.5rem;
     }
 
     .prompt-grid {

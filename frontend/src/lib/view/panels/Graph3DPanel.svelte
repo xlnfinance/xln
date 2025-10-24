@@ -55,7 +55,7 @@
     error: (...args: unknown[]) => console.error('[Graph3D]', ...args)
   };
   const getThemeColors = (theme: string) => ({
-    background: 0x0a0a0a,
+    background: 0x222222, // Lighter gray for debugging
     entity: 0x007acc,
     connection: 0x444444,
     entityColor: '#007acc',
@@ -193,8 +193,12 @@ let vrHammer: VRHammer | null = null;
   let entityMeshMap = new Map<string, THREE.Object3D | undefined>();
   let lastJEventId: string | null = null;
 
-  // J-Machine octahedron (broadcast visualization)
-  let jMachine: THREE.Group | null = null;
+  // J-Machines (one per xlnomy) - broadcast visualization
+  let jMachines: Map<string, THREE.Group> = new Map(); // xlnomy name → J-Machine mesh
+
+  // Active J-Machine (for backward compatibility with broadcast functions)
+  $: jMachine = env?.activeXlnomy ? jMachines.get(env.activeXlnomy) || null : null;
+
   let jMachineTxBoxes: THREE.Mesh[] = []; // Yellow tx cubes inside octahedron
   let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) problem)
   let broadcastEnabled = true;
@@ -546,6 +550,18 @@ let vrHammer: VRHammer | null = null;
     handleJEventRipple(env.lastJEvent);
   }
 
+  // ===== CREATE J-MACHINES FOR EACH XLNOMY =====
+  $: if (env?.xlnomies && scene) {
+    env.xlnomies.forEach((xlnomy: any, name: string) => {
+      if (!jMachines.has(name)) {
+        console.log(`[Graph3D] Creating J-Machine for xlnomy: ${name} at position`, xlnomy.jMachine.position);
+        const jMachine = createJMachine(25, xlnomy.jMachine.position, name);
+        scene.add(jMachine);
+        jMachines.set(name, jMachine);
+      }
+    });
+  }
+
   // ===== PROCESS ACCOUNT ACTIVITY LIGHTNING (on new frame) =====
   $: if (activityVisualizer && env?.runtimeInput && entityMeshMap) {
     activityVisualizer.processFrame(env.runtimeInput, entityMeshMap);
@@ -743,7 +759,7 @@ let vrHammer: VRHammer | null = null;
       }
 
       await initThreeJS();
-      updateNetworkData();
+      // updateNetworkData() is called automatically by reactive statement: $: if ($isolatedEnv && scene)
       animate();
     };
 
@@ -782,17 +798,32 @@ let vrHammer: VRHammer | null = null;
     };
   });
 
-  // Reactive update when replicas change
-  $: if (replicas && scene) {
+  // Reactive update when isolated env changes
+  $: if ($isolatedEnv && scene) {
+    console.log('[Graph3D] Reactive statement triggered - calling updateNetworkData()');
     updateNetworkData();
   }
 
   onDestroy(() => {
     if (animationId) {
       cancelAnimationFrame(animationId);
+      animationId = null;
     }
     if (renderer) {
       renderer.dispose();
+      renderer = null;
+    }
+    if (scene) {
+      scene = null;
+    }
+    if (camera) {
+      camera = null;
+    }
+    if (controls) {
+      if (typeof controls.dispose === 'function') {
+        controls.dispose();
+      }
+      controls = null;
     }
 
     // Clean up visual effects
@@ -822,9 +853,13 @@ let vrHammer: VRHammer | null = null;
    * Create J-Machine octahedron at (0, 100, 0) - elevated above entity grid (L1 layer)
    * Visual: EVM/Ethereum-style diamond with purple/blue gradient, vertically stretched 1.6x
    */
-  function createJMachine(size: number = 25): THREE.Group {
+  function createJMachine(
+    size: number = 25,
+    position: { x: number; y: number; z: number } = { x: 0, y: 100, z: 0 },
+    name: string = 'J-MACHINE'
+  ): THREE.Group {
     const group = new THREE.Group();
-    group.position.set(0, 100, 0); // Elevated high above entity network (L1 vs L2)
+    group.position.set(position.x, position.y, position.z); // Position from xlnomy config
 
     // Octahedron geometry (8 faces) - Ethereum diamond shape
     const octahedronGeometry = new THREE.OctahedronGeometry(size, 0);
@@ -866,7 +901,7 @@ let vrHammer: VRHammer | null = null;
     innerGlow.scale.set(1, 1.6, 1); // Match outer octahedron stretch
     group.add(innerGlow);
 
-    // Add label: "J-MACHINE (L1)"
+    // Add label with xlnomy name
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
     if (context) {
@@ -875,7 +910,7 @@ let vrHammer: VRHammer | null = null;
       context.fillStyle = '#b8a4d9';
       context.font = 'bold 32px monospace';
       context.textAlign = 'center';
-      context.fillText('J-MACHINE', 128, 40);
+      context.fillText(name.toUpperCase(), 128, 40);
     }
 
     const texture = new THREE.CanvasTexture(canvas);
@@ -1170,6 +1205,17 @@ let vrHammer: VRHammer | null = null;
   }
 
   async function initThreeJS() {
+    // Guard against multiple initializations
+    if (renderer || scene) {
+      console.warn('[Graph3D] Already initialized, skipping');
+      return;
+    }
+
+    // Clear container to ensure clean slate
+    while (container.firstChild) {
+      container.removeChild(container.firstChild);
+    }
+
     // Load OrbitControls dynamically
     try {
       const { OrbitControls: OC } = await import('three/examples/jsm/controls/OrbitControls.js');
@@ -1195,21 +1241,40 @@ let vrHammer: VRHammer | null = null;
     gridHelper.position.y = -50; // Below entities
     scene.add(gridHelper);
 
-    // Camera setup
+    // Camera setup - use container dimensions
+    const containerWidth = container.clientWidth || window.innerWidth;
+    const containerHeight = container.clientHeight || window.innerHeight;
+
+    console.log('[Graph3D] Container dimensions:', {
+      clientWidth: container.clientWidth,
+      clientHeight: container.clientHeight,
+      offsetWidth: container.offsetWidth,
+      offsetHeight: container.offsetHeight,
+      finalWidth: containerWidth,
+      finalHeight: containerHeight
+    });
+
     camera = new THREE.PerspectiveCamera(
       75,
-      window.innerWidth / window.innerHeight,
+      containerWidth / containerHeight,
       0.1,
       1000
     );
-    camera.position.set(0, 0, 100); // Zoom out for better H visibility
+    camera.position.set(200, 0, 100); // Position camera to look at grid center (200, 0, 0)
 
     // Renderer setup with VR support
     renderer = await createRenderer(rendererMode, { antialias: true });
     renderer.xr.enabled = true;  // Enable XR separately
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setSize(containerWidth, containerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(renderer.domElement);
+
+    // Debug: Expose to window for inspection
+    if (typeof window !== 'undefined') {
+      window.__debugScene = scene;
+      window.__debugCamera = camera;
+      window.__debugRenderer = renderer;
+    }
 
     // OrbitControls setup
     if (OrbitControls) {
@@ -1220,6 +1285,9 @@ let vrHammer: VRHammer | null = null;
       controls.enableRotate = true;
       controls.enablePan = true;
 
+      // Set default target to grid center
+      controls.target.set(200, 0, 0);
+
       // Restore saved camera state if available
       if (savedSettings.camera) {
         const cam = savedSettings.camera;
@@ -1227,6 +1295,9 @@ let vrHammer: VRHammer | null = null;
         controls.target.set(cam.target.x, cam.target.y, cam.target.z);
         camera.zoom = cam.zoom;
         camera.updateProjectionMatrix();
+        controls.update();
+      } else {
+        // First time: update controls to apply default target
         controls.update();
       }
 
@@ -1248,12 +1319,10 @@ let vrHammer: VRHammer | null = null;
     scene.add(ambientLight);
 
     const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(10, 10, 5);
+    directionalLight.position.set(200, 50, 50); // Position light above grid center
     scene.add(directionalLight);
 
-    // Create J-Machine octahedron elevated at (0, 40, 0) - L1 layer
-    jMachine = createJMachine(); // Uses default size=25
-    scene.add(jMachine);
+    // J-Machines are now created reactively based on env.xlnomies (see reactive statement above)
 
     // Mouse events
     renderer.domElement.addEventListener('mousedown', onMouseDown);
@@ -1521,13 +1590,13 @@ let vrHammer: VRHammer | null = null;
 
     // Use time-aware data sources (isolated env if provided, otherwise global)
     let entityData: any[] = [];
-    let currentReplicas = $isolatedEnv?.replicas || replicas;
+    let currentReplicas = $isolatedEnv?.replicas || new Map();
 
     console.log('[Graph3D] Replicas check:', {
       hasIsolatedEnv: !!isolatedEnv,
       isolatedEnvValue: $isolatedEnv,
       replicasSize: currentReplicas?.size || 0,
-      source: currentReplicas === replicas ? 'global' : 'isolated'
+      source: 'isolated'
     });
 
     // Always use replicas (ground truth)
@@ -1561,6 +1630,8 @@ let vrHammer: VRHammer | null = null;
         metadata: { name: entityId.slice(0, 8) + '...' }
       }));
     }
+
+    console.log('[Graph3D] entityData created:', entityData.length, 'entities');
 
     // NO DEMO DATA - only show what actually exists
     if (entityData.length === 0) {
@@ -1638,8 +1709,10 @@ let vrHammer: VRHammer | null = null;
       : applyForceDirectedLayout(entityData, connectionMap, capacityMap);
 
     // Create entity nodes
+    console.log('[Graph3D] About to create', entityData.length, 'entity nodes');
     entityData.forEach((profile, index) => {
       const isHub = top3Hubs.has(profile.entityId);
+      console.log('[Graph3D] Creating entity node for', profile.entityId);
       createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub);
     });
 
@@ -1876,14 +1949,24 @@ let vrHammer: VRHammer | null = null;
     let x: number, y: number, z: number;
 
     // Priority 1: Check replica position (from importReplica serverTx)
-    const currentReplicas = replicas;
+    const currentReplicas = $isolatedEnv?.replicas || new Map();
     const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(profile.entityId + ':'));
     const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
+
+    // DEBUG: Log replica lookup details
+    console.log('[Graph3D] 🔍 Replica lookup for', profile.entityId.slice(0,10), ':', {
+      replicaKey,
+      hasReplica: !!replica,
+      hasPosition: !!replica?.position,
+      position: replica?.position,
+      allReplicaKeys: Array.from(currentReplicas.keys())
+    });
 
     if (replica?.position) {
       x = replica.position.x;
       y = replica.position.y;
       z = replica.position.z;
+      console.log('[Graph3D] ✅ Position extracted:', { entityId: profile.entityId.slice(0,10), x, y, z });
       // Only log ONCE on first draw
       if (!loggedGridPositions.has(profile.entityId)) {
         loggedGridPositions.add(profile.entityId);
@@ -2541,10 +2624,16 @@ let vrHammer: VRHammer | null = null;
     });
   }
 
+  let animateCallCount = 0;
   function animate() {
     // VR uses setAnimationLoop, don't double-call requestAnimationFrame
     if (!renderer?.xr?.isPresenting) {
       animationId = requestAnimationFrame(animate);
+    }
+
+    // Debug log every 60 frames
+    if (animateCallCount++ % 60 === 0) {
+      console.log('[Graph3D] animate() called, frame:', animateCallCount, 'renderer:', !!renderer, 'camera:', !!camera, 'scene children:', scene?.children?.length);
     }
 
     // ===== PROCESS VISUAL EFFECTS QUEUE =====
@@ -4490,11 +4579,14 @@ let vrHammer: VRHammer | null = null;
   }
 
   function onWindowResize() {
-    if (!camera || !renderer) return;
+    if (!camera || !renderer || !container) return;
 
-    camera.aspect = window.innerWidth / window.innerHeight;
+    const containerWidth = container.clientWidth || window.innerWidth;
+    const containerHeight = container.clientHeight || window.innerHeight;
+
+    camera.aspect = containerWidth / containerHeight;
     camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setSize(containerWidth, containerHeight);
   }
 
 </script>

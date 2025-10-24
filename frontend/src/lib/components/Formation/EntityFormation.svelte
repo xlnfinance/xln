@@ -134,7 +134,9 @@
           throw new Error(`⚠️ This validator configuration already exists! Entity #${$xlnFunctions!.getEntityShortId(entityId)} is already in use. Try different validators or weights to create a unique entity.`);
         }
         
-        config = xln.createLazyEntity(formData.entityName, validatorNames, threshold, formattedJurisdiction);
+        const { config: lazyConfig, executionTimeMs } = xln.createLazyEntity(formData.entityName, validatorNames, threshold, formattedJurisdiction);
+        config = lazyConfig;
+        console.log(`⚡ Lazy entity created in ${executionTimeMs.toFixed(3)}ms (pure in-memory)`);
         console.log('✅ Lazy entity config created:', config);
         console.log('✅ Entity ID: #', $xlnFunctions!.getEntityShortId(entityId));
       } else {

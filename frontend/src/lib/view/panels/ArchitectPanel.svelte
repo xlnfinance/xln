@@ -31,6 +31,18 @@
   // Entity registration mode
   let numberedEntities = false; // Default: lazy (in-memory only, no blockchain needed)
 
+  // Xlnomy state
+  let showCreateXlnomyModal = false;
+  let newXlnomyName = '';
+  let newXlnomyEvmType: 'browservm' | 'reth' | 'erigon' | 'monad' = 'browservm';
+  let newXlnomyRpcUrl = 'http://localhost:8545';
+  let newXlnomyBlockTime = '1000';
+  let newXlnomyAutoGrid = true;
+
+  // Get available Xlnomies from env
+  $: xlnomies = $isolatedEnv?.xlnomies ? Array.from($isolatedEnv.xlnomies.keys()) : [];
+  $: activeXlnomy = $isolatedEnv?.activeXlnomy || '';
+
   // Check if env is ready
   $: envReady = $isolatedEnv !== null && $isolatedEnv !== undefined;
   $: if (envReady) {
@@ -249,6 +261,85 @@
     }
   }
 
+  async function createNewXlnomy() {
+    if (!newXlnomyName.trim()) {
+      lastAction = '❌ Enter a name for the Xlnomy';
+      return;
+    }
+
+    loading = true;
+    lastAction = `Creating Xlnomy "${newXlnomyName}"...`;
+
+    try {
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      // Step 1: Create Xlnomy (queues grid entity RuntimeTxs)
+      await XLN.applyRuntimeInput($isolatedEnv, {
+        runtimeTxs: [{
+          type: 'createXlnomy',
+          data: {
+            name: newXlnomyName,
+            evmType: newXlnomyEvmType,
+            rpcUrl: newXlnomyEvmType !== 'browservm' ? newXlnomyRpcUrl : undefined,
+            blockTimeMs: parseInt(newXlnomyBlockTime),
+            autoGrid: newXlnomyAutoGrid
+          }
+        }],
+        entityInputs: []
+      });
+
+      // Step 2: Process the queued importReplica transactions
+      await XLN.applyRuntimeInput($isolatedEnv, {
+        runtimeTxs: [],
+        entityInputs: []
+      });
+
+      console.log('[Architect] Created Xlnomy with', $isolatedEnv.replicas.size, 'total entities');
+
+      // Success message BEFORE clearing name
+      lastAction = `✅ Xlnomy "${newXlnomyName}" created!`;
+
+      // Close modal and reset form
+      showCreateXlnomyModal = false;
+      newXlnomyName = '';
+
+      // Update stores to trigger reactivity
+      isolatedEnv.set($isolatedEnv);
+      isolatedHistory.set($isolatedEnv.history || []);
+      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+    } catch (err: any) {
+      lastAction = `❌ ${err.message}`;
+      console.error('[Architect] Xlnomy creation error:', err);
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function switchXlnomy(name: string) {
+    if (!$isolatedEnv || name === $isolatedEnv.activeXlnomy) return;
+
+    loading = true;
+    lastAction = `Switching to "${name}"...`;
+
+    try {
+      $isolatedEnv.activeXlnomy = name;
+      const xlnomy = $isolatedEnv.xlnomies?.get(name);
+
+      if (xlnomy) {
+        // TODO: Load xlnomy's replicas and history into env
+        // For now, just update the active name
+        lastAction = `✅ Switched to "${name}"`;
+      }
+
+      isolatedEnv.set($isolatedEnv);
+    } catch (err: any) {
+      lastAction = `❌ ${err.message}`;
+    } finally {
+      loading = false;
+    }
+  }
+
 </script>
 
 <div class="architect-panel">
@@ -298,6 +389,23 @@
           ⏳ Initializing XLN environment...
         </div>
       {:else}
+        <div class="action-section">
+          <h5>🌍 Xlnomy (Economy)</h5>
+          <div class="xlnomy-selector">
+            <select bind:value={activeXlnomy} on:change={(e) => switchXlnomy(e.currentTarget.value)} disabled={xlnomies.length === 0}>
+              {#if xlnomies.length === 0}
+                <option value="">No Xlnomies created</option>
+              {:else}
+                {#each xlnomies as name}
+                  <option value={name}>{name}</option>
+                {/each}
+              {/if}
+            </select>
+            <button class="action-btn secondary" on:click={() => showCreateXlnomyModal = true}>+ New</button>
+          </div>
+          <p class="help-text">Self-contained economies with isolated J-Machine + contracts</p>
+        </div>
+
         <div class="action-section">
           <h5>Entity Registration</h5>
           <label class="checkbox-label">
@@ -434,6 +542,63 @@
     {/if}
   </div>
 </div>
+
+{#if showCreateXlnomyModal}
+  <div class="modal-overlay" on:click={() => showCreateXlnomyModal = false}>
+    <div class="modal" on:click|stopPropagation>
+      <h3>Create New Xlnomy</h3>
+
+      <div class="form-group">
+        <label for="xlnomy-name">Name:</label>
+        <input id="xlnomy-name" type="text" bind:value={newXlnomyName} placeholder="My Economy" />
+      </div>
+
+      <div class="form-group">
+        <label>EVM Type:</label>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" bind:group={newXlnomyEvmType} value="browservm" />
+            <span>BrowserVM (Simnet)</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" bind:group={newXlnomyEvmType} value="reth" />
+            <span>Reth (RPC)</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" bind:group={newXlnomyEvmType} value="erigon" />
+            <span>Erigon (RPC)</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" bind:group={newXlnomyEvmType} value="monad" />
+            <span>Monad (RPC)</span>
+          </label>
+        </div>
+      </div>
+
+      {#if newXlnomyEvmType !== 'browservm'}
+        <div class="form-group">
+          <label for="xlnomy-rpc">RPC URL:</label>
+          <input id="xlnomy-rpc" type="text" bind:value={newXlnomyRpcUrl} placeholder="http://localhost:8545" />
+        </div>
+      {/if}
+
+      <div class="form-group">
+        <label for="xlnomy-blocktime">Block Time (ms):</label>
+        <input id="xlnomy-blocktime" type="text" bind:value={newXlnomyBlockTime} placeholder="1000" />
+      </div>
+
+      <label class="checkbox-label">
+        <input type="checkbox" bind:checked={newXlnomyAutoGrid} />
+        <span>Auto-create 2×2×2 grid with $1M reserves each</span>
+      </label>
+
+      <div class="modal-actions">
+        <button class="action-btn secondary" on:click={() => showCreateXlnomyModal = false}>Cancel</button>
+        <button class="action-btn" on:click={createNewXlnomy}>Create</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .architect-panel {
@@ -635,5 +800,65 @@
 
   .checkbox-label span {
     font-weight: 500;
+  }
+
+  .xlnomy-selector {
+    display: flex;
+    gap: 8px;
+  }
+
+  .xlnomy-selector select {
+    flex: 1;
+  }
+
+  .xlnomy-selector .action-btn {
+    flex: 0 0 auto;
+    width: auto;
+    padding: 8px 16px;
+    margin: 0;
+  }
+
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+  }
+
+  .modal {
+    background: #2d2d30;
+    border: 1px solid #007acc;
+    border-radius: 8px;
+    padding: 24px;
+    max-width: 500px;
+    width: 90%;
+  }
+
+  .modal h3 {
+    margin: 0 0 20px 0;
+    color: #fff;
+    font-size: 16px;
+  }
+
+  .radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 24px;
+  }
+
+  .modal-actions .action-btn {
+    flex: 1;
   }
 </style>

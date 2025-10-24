@@ -700,7 +700,7 @@ export const applyEntityFrame = async (
       if (accountMachine) {
         // Add to proposable if:
         // 1. Received a NEW frame that needs ACK (newAccountFrame)
-        // 2. Received an ACK (frameId with prevSignatures) AND we have mempool items
+        // 2. Received an ACK (height with prevSignatures) AND we have mempool items
         // 3. Received account transactions that need processing
         const isNewFrame = entityTx.data.newAccountFrame;
         const isAck = entityTx.data.height && entityTx.data.prevSignatures;
