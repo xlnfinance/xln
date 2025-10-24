@@ -232,8 +232,8 @@
 
     <!-- Founder Context -->
     <div class="founder-note founder-note-quote">
-      <p>
-        <span class="quote-mark">"</span>After 13 years auditing payment systems and blockchains, I built the protocol I kept wishing existed."
+      <p class="quote-text">
+        <span class="quote-mark">"</span>After 13 years auditing payment systems and blockchains, I built the protocol I kept wishing existed.<span class="quote-mark">"</span>
       </p>
       <p class="signature">
         — Egor Homakov (<a href="https://sakurity.com" target="_blank" rel="noopener" class="founder-link">Sakurity</a>)
@@ -281,6 +281,18 @@
                 description="−leftCredit ≤ Δ ≤ collateral + rightCredit"
                 pattern="[---.===---]"
               />
+            </div>
+          </div>
+          <div class="invariant-legend">
+            <div class="legend-item">
+              <span class="legend-label">Left entity</span>
+              <span class="legend-arrow">←</span>
+              <span class="legend-delta">Δ</span>
+              <span class="legend-arrow">→</span>
+              <span class="legend-label">Right entity</span>
+            </div>
+            <div class="legend-explanation">
+              Left can owe up to their credit limit (−) · Δ tracks the balance · Right can owe up to collateral + their credit limit
             </div>
           </div>
         </div>
@@ -710,14 +722,14 @@
   /* Founder Note */
   .founder-note {
     text-align: center;
-    margin: 0 0 2rem;
-    max-width: 600px;
+    margin: 3rem 0 3rem;
+    max-width: 700px;
   }
 
   .founder-note p {
-    font-size: 0.95rem;
-    line-height: 1.6;
-    color: rgba(255, 255, 255, 0.6);
+    font-size: 1rem;
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.85);
     margin: 0;
   }
 
@@ -739,24 +751,36 @@
 
   /* Large Opening Quote Style */
   .founder-note-quote {
-    text-align: left;
+    text-align: center;
     font-style: italic;
   }
 
+  .founder-note-quote .quote-text {
+    font-size: 1.05rem;
+    line-height: 1.7;
+  }
+
   .founder-note-quote .quote-mark {
-    font-size: 3rem;
+    font-size: 2.5rem;
     line-height: 0;
-    vertical-align: -0.4em;
-    color: rgba(79, 209, 139, 0.3);
+    vertical-align: -0.3em;
+    color: rgba(79, 209, 139, 0.5);
     font-family: Georgia, serif;
+  }
+
+  .founder-note-quote .quote-mark:first-child {
     margin-right: 0.1em;
+  }
+
+  .founder-note-quote .quote-mark:last-child {
+    margin-left: 0.1em;
   }
 
   .founder-note-quote .signature {
     font-style: italic;
     font-size: 0.9rem;
     opacity: 0.7;
-    margin-top: 0.5rem;
+    margin-top: 1rem;
   }
 
   :global(.light-mode) .founder-link {
@@ -1605,6 +1629,54 @@
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+  }
+
+  .invariant-legend {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(79, 209, 139, 0.15);
+    text-align: center;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+    font-size: 1rem;
+  }
+
+  .legend-label {
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 500;
+  }
+
+  .legend-arrow {
+    color: rgba(79, 209, 139, 0.6);
+    font-size: 1.2rem;
+  }
+
+  .legend-delta {
+    color: #00d1ff;
+    font-weight: 600;
+    font-size: 1.1rem;
+    padding: 0 0.5rem;
+  }
+
+  .legend-explanation {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.5);
+    font-style: italic;
+    line-height: 1.6;
+  }
+
+  :global(.light-mode) .legend-label {
+    color: rgba(0, 0, 0, 0.7);
+  }
+
+  :global(.light-mode) .legend-explanation {
+    color: rgba(0, 0, 0, 0.5);
   }
 
   .visual-column {
