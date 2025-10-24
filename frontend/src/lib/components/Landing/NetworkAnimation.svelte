@@ -181,10 +181,10 @@
     // Start animation loop
     animate();
 
-    // Spawn unicast paths very frequently (every 200-300ms) - emphasize scaling!
+    // Spawn unicast paths EXTREMELY frequently (every 20-30ms) - WOW factor!
     const unicastInterval = setInterval(() => {
       createUnicastPath();
-    }, 200 + Math.random() * 100);
+    }, 20 + Math.random() * 10);
 
     // Spawn broadcast ripples every 3-5 seconds
     const broadcastInterval = setInterval(() => {
