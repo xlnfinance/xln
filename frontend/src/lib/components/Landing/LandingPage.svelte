@@ -233,7 +233,7 @@
     <!-- Founder Context -->
     <div class="founder-note">
       <p>
-        By <a href="https://sakurity.com" target="_blank" rel="noopener" class="founder-link">Egor Homakov</a> (Sakurity).
+        By Egor Homakov (<a href="https://sakurity.com" target="_blank" rel="noopener" class="founder-link">Sakurity</a>).
         After 13 years auditing payment systems and blockchains, I built the protocol I kept wishing existed.
       </p>
     </div>
