@@ -224,6 +224,21 @@
   <div class="content">
     <img src="/img/logo.png" alt="xln" class="logo" />
 
+    <!-- Main Tagline -->
+    <div class="hero-tagline">
+      <h1>One protocol. Every jurisdiction. Every programmable ledger.</h1>
+      <p class="hero-subtitle">The universal CBDC substrate for planetary-scale settlement</p>
+    </div>
+
+    <!-- Sakurity Credibility -->
+    <div class="credibility-badge">
+      <img src="/img/sakurity-logo.png" alt="Sakurity" class="sakurity-logo" />
+      <div class="credibility-text">
+        <div class="credibility-main">Built by Egor Homakov (Sakurity)</div>
+        <div class="credibility-sub">Sakurity-grade security • Open source • MIT license</div>
+      </div>
+    </div>
+
     <div class="problem-solution">
       <div class="section">
         <h2>137 Countries Are Building Programmable Money</h2>
@@ -268,6 +283,7 @@
             </div>
             <div class="visual-column">
               <img src="/img/RCPAN.png" alt="RCPAN Visual Metaphor" class="rcpan-visual" />
+              <div class="visual-caption">Credit (left) + Reserves (center) + Credit (right) = Bounded risk at infinite scale</div>
             </div>
           </div>
         </div>
@@ -287,6 +303,18 @@
             <div class="formula-desc">Delta in closed interval</div>
           </div>
         </div>
+      </div>
+
+      <!-- Why Now? - Urgency Section -->
+      <div class="section urgency-section">
+        <h2 style="color: #00d1ff;">Why Now?</h2>
+        <ul class="properties-list">
+          <li><strong>2025:</strong> 72 CBDCs in pilot phase (Russia, China, EU actively testing)</li>
+          <li><strong>2026:</strong> Cross-border CBDC interop becomes political imperative</li>
+          <li><strong>Legacy rails incompatible:</strong> SWIFT and correspondent banking can't handle programmable money</li>
+          <li><strong>Window closing:</strong> Each CBDC building incompatible scaling solution creates permanent fragmentation</li>
+          <li><strong>Universal substrate needed NOW:</strong> Before standards ossify</li>
+        </ul>
       </div>
 
       <div class="section">
@@ -379,18 +407,9 @@
 
         <p class="vision-text">Most will be EVM-compatible or similar smart contract platforms. xln naturally attaches to <strong>any</strong> programmable ledger by simply deploying <code>Depository.sol</code>.</p>
 
-        <h3 style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.3rem; color: #00d1ff;">Why Now?</h3>
-        <ul class="properties-list" style="margin-bottom: 2rem;">
-          <li><strong>2025:</strong> 72 CBDCs in pilot phase (Russia, China, EU actively testing)</li>
-          <li><strong>2026:</strong> Cross-border CBDC interop becomes political imperative</li>
-          <li><strong>Legacy rails incompatible:</strong> SWIFT and correspondent banking can't handle programmable money</li>
-          <li><strong>Window closing:</strong> Each CBDC building incompatible scaling solution creates permanent fragmentation</li>
-          <li><strong>Universal substrate needed NOW:</strong> Before standards ossify</li>
-        </ul>
-
         <div class="endgame-box">
           <p class="endgame-text"><strong>The endgame:</strong> xln becomes the universal CBDC substrate — every digital asset (CBDCs, stablecoins, tokenized securities, RWAs) gets instant off-chain settlement with bounded risk and infinite scale.</p>
-          <p class="endgame-text">One protocol. Every jurisdiction. Every programmable ledger. Zero broadcast overhead.</p>
+          <p class="endgame-text">Zero broadcast overhead. Zero custody risk. Infinite horizontal scale.</p>
         </div>
       </div>
     </div>
@@ -570,6 +589,97 @@
 
   .landing.light-mode .logo {
     filter: invert(1) drop-shadow(0 0 20px rgba(0, 0, 0, 0.2));
+  }
+
+  /* Hero Tagline */
+  .hero-tagline {
+    text-align: center;
+    margin: 2rem 0 1.5rem;
+  }
+
+  .hero-tagline h1 {
+    font-size: 1.8rem;
+    font-weight: 600;
+    margin: 0 0 0.75rem;
+    line-height: 1.3;
+    background: linear-gradient(135deg, #4fd18b 0%, #00d1ff 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero-subtitle {
+    font-size: 1rem;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0;
+  }
+
+  .landing.light-mode .hero-subtitle {
+    color: rgba(0, 0, 0, 0.7);
+  }
+
+  /* Sakurity Credibility Badge */
+  .credibility-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 1rem 1.5rem;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    margin-bottom: 2rem;
+    max-width: 600px;
+  }
+
+  .sakurity-logo {
+    width: 48px;
+    height: 48px;
+    object-fit: contain;
+  }
+
+  .credibility-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .credibility-main {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .credibility-sub {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .landing.light-mode .credibility-badge {
+    background: rgba(0, 0, 0, 0.03);
+    border-color: rgba(0, 0, 0, 0.15);
+  }
+
+  .landing.light-mode .credibility-main {
+    color: rgba(0, 0, 0, 0.9);
+  }
+
+  .landing.light-mode .credibility-sub {
+    color: rgba(0, 0, 0, 0.6);
+  }
+
+  /* Urgency Section */
+  .urgency-section {
+    background: rgba(0, 209, 255, 0.05);
+    border: 1px solid rgba(0, 209, 255, 0.2);
+    border-radius: 8px;
+    padding: 2rem;
+    margin: 2rem 0;
+  }
+
+  .landing.light-mode .urgency-section {
+    background: rgba(0, 122, 204, 0.05);
+    border-color: rgba(0, 122, 204, 0.3);
   }
 
   .newsletter-section {
@@ -1095,9 +1205,11 @@
 
   .visual-column {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     min-width: 300px;
+    gap: 0.75rem;
   }
 
   .rcpan-visual {
@@ -1111,6 +1223,14 @@
 
   .rcpan-visual:hover {
     filter: drop-shadow(0 0 30px rgba(79, 209, 139, 0.5));
+  }
+
+  .visual-caption {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.6);
+    text-align: center;
+    font-style: italic;
+    max-width: 340px;
   }
 
   .visualization-link-section {
