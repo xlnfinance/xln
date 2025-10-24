@@ -83,16 +83,3 @@ db/
 package-lock.json
 pnpm-lock.yaml
 yarn.lock
-
-# ========================================
-# PRIVATE IMPLEMENTATION CODE
-# (Available in private repo: xlnfinance/_xln)
-# ========================================
-
-# Runtime implementation (TypeScript consensus code)
-runtime/
-
-# Smart contracts source code
-jurisdictions/contracts/*.sol
-jurisdictions/scripts/
-jurisdictions/test/
