@@ -87,7 +87,7 @@
 
   function formatPrompt(prompt: typeof PROMPTS[0]): string {
     const metricsFormatted = prompt.metrics.map(m => `${m} — ☐/1000`).join('\n');
-    return `Read xln.finance/c.txt fully, then:\n\nYou are ${prompt.persona}.\n${prompt.task}\n\nOutput TL;DR:\n${metricsFormatted}\n→ Final Verdict: (one-line insight)`;
+    return `Read xln.finance/llms.txt fully, then:\n\nYou are ${prompt.persona}.\n${prompt.task}\n\nOutput TL;DR:\n${metricsFormatted}\n→ Final Verdict: (one-line insight)`;
   }
 
   function handleSubmit() {
@@ -564,7 +564,7 @@
           <div class="prompt-header">
             <div class="prompt-label">
               <div class="label-subtitle">
-                Prompt template: Read <a href="/c.txt" target="_blank" class="context-inline">https://xln.finance/c.txt</a> (~120k tokens of xln architecture + contracts + runtime)
+                Prompt template: Read <a href="/llms.txt" target="_blank" class="context-inline">https://xln.finance/llms.txt</a> (~120k tokens of xln architecture + contracts + runtime)
                 <br/>Then evaluate as [persona] using the scoring rubric below.
               </div>
             </div>
@@ -617,10 +617,10 @@
 
     <div class="footer">
       <div class="context-highlight">
-        <a href="/c.txt" target="_blank" class="context-link">
+        <a href="/llms.txt" target="_blank" class="context-link">
           <div class="context-header">
             <span class="context-icon">📄</span>
-            <span class="context-title">xln.finance/c.txt</span>
+            <span class="context-title">xln.finance/llms.txt</span>
           </div>
           <div class="context-desc">Complete source: All Solidity contracts + TypeScript runtime + Architecture docs (~120k tokens) — Context for AI analysis</div>
         </a>
