@@ -226,26 +226,26 @@
 
     <div class="problem-solution">
       <div class="section">
-        <h2>The $100 Trillion Question</h2>
-        <p class="intro">How do we scale finance without custodians?</p>
+        <h2>137 Countries Are Building Programmable Money</h2>
+        <p class="intro">CBDCs, stablecoins, tokenized assets—98% of global GDP is going programmable. The $100 trillion question isn't <em>if</em> programmable ledgers win. It's <strong>how they scale without custodians</strong>.</p>
         <p class="vision-text">Every existing answer fails at planetary scale:</p>
         <ul>
           <li><strong>TradFi/CEX (traditional banks, Binance, Coinbase):</strong> $100T economy, $10T daily volume, but custodial — bank bailouts, FTX collapse, Mt. Gox</li>
           <li><strong>All big blockers (Solana, Tron, BSC):</strong> $80B+ market cap, but can't run full nodes — centralized by design</li>
-          <li><strong>All rollups (Arbitrum, Optimism, zkSync, StarkNet):</strong> $10B+ TVL, but data availability paradox — trust third-party committees, ephemeral calldata, or expensive blobspace</li>
-          <li><strong>Sharding chains (NEAR, TON, Zilliqa, MultiversX):</strong> Still broadcast O(n) within shards — doesn't solve the fundamental bottleneck</li>
+          <li><strong>All rollups (Arbitrum, Optimism, zkSync, StarkNet):</strong> $10B+ TVL, but data availability paradox — trust third-party committees, ephemeral calldata, or expensive blobspace. The DA/verifier dilemma is mathematically unsolvable: you cannot have cheap verification, permanent data, and no trust assumptions simultaneously. It's a catch-22, not a tradeoff.</li>
+          <li><strong>Sharding chains (NEAR, TON, Zilliqa, MultiversX):</strong> Still broadcast O(n) within shards — doesn't solve the fundamental bottleneck. Security dilution means one shard compromised, entire network at risk. Fishermen are security theater that breaks under economic pressure.</li>
         </ul>
 
         <div class="technical-context">
-          <p class="vision-text">For centuries, finance ran on <strong>FCUAN</strong> (Full-Credit Unprovable Account Networks): traditional banking, CEXs, brokers. Pure credit scales phenomenally but offers weak security—assets can be seized, hubs can default.</p>
+          <p class="vision-text">For centuries, finance ran on <strong>Full-Credit Unprovable Account Networks (FCUAN)</strong>: traditional banking, CEXs, brokers. Pure credit scales phenomenally but offers weak security—assets can be seized, hubs can default.</p>
 
-          <p class="vision-text">In 2015, Lightning introduced <strong>FRPAP</strong> (Full-Reserve Provable Account Primitives): payment channels with cryptographic proofs. Full security but hits the <em>inbound liquidity wall</em>—an architectural limit, not a bug. Lightning, Raiden, Connext, Celer — all payment channel projects are now dead or pivoted due to full-reserve constraints.</p>
+          <p class="vision-text">In 2015, Lightning introduced <strong>Full-Reserve Provable Account Primitives (FRPAP)</strong>: payment channels with cryptographic proofs. Full security but hits the <em>inbound liquidity wall</em>—an architectural limit, not a bug. Lightning, Raiden, Connext, Celer — all payment channel projects are now dead or pivoted due to full-reserve constraints.</p>
         </div>
       </div>
 
       <div class="section">
         <h2>The Solution</h2>
-        <p class="intro"><strong>xln</strong> is the first <strong>RCPAN</strong> (Reserve-Credit Provable Account Network): credit where it scales, collateral where it secures. A principled hybrid.</p>
+        <p class="intro"><strong>xln</strong> is the first <strong>Reserve-Credit Provable Account Network (RCPAN)</strong>: credit where it scales, collateral where it secures. A principled hybrid.</p>
 
         <div class="invariant-box">
           <div class="tickers-grid">
@@ -289,6 +289,17 @@
         </div>
       </div>
 
+      <div class="section">
+        <h2>Key Properties</h2>
+        <ul class="properties-list">
+          <li>Infinite scalability: O(1) per-hop updates vs O(n) broadcast</li>
+          <li>No inbound liquidity problem: credit + collateral hybrid</li>
+          <li>Bounded risk: counterparty loss capped at collateral + credit</li>
+          <li>Strong privacy: onion-routing (payment sender/receiver anonymous to routing hubs, like Tor for money)</li>
+          <li><strong>Local state: no sequencers, no data availability dependencies</strong></li>
+        </ul>
+      </div>
+
       <!-- Triple-S First Principles -->
       <div class="section triple-s">
         <h2>Triple-S First Principles</h2>
@@ -297,13 +308,14 @@
             <div class="principle-icon">⚡</div>
             <h3>Scalable</h3>
             <p><strong>Unicast (1-to-1)</strong> architecture enables unbounded horizontal scaling. No broadcast bottlenecks, no global consensus delays.</p>
-            <p class="principle-detail">O(1) per-hop updates vs O(n) broadcast overhead. Perfect for Coasian micro-economies where counterparties self-select optimal routing paths.</p>
+            <p class="principle-detail">O(1) per-hop updates vs O(n) broadcast overhead. Counterparties self-select optimal routing paths through Coasian negotiation — from CBDCs to coffee, village to globe.</p>
+            <p class="principle-detail">There is simply no other way to scale to the entire planet. The internet already proved unicast wins at global scale.</p>
           </div>
           <div class="principle-card">
             <div class="principle-icon">🔒</div>
             <h3>Secure</h3>
             <p><strong>Every phone and laptop will be a full node by default.</strong> Non-negotiable.</p>
-            <p class="principle-detail">L1 blockchains handle only final netting — not every coffee purchase. This ultra-low settlement load means even phones can verify the entire chain. No pruning, no light clients, no trust assumptions.</p>
+            <p class="principle-detail">L1 blockchains handle only final netting — not every coffee purchase. This ultra-low settlement load means even phones can verify the entire chain. State pruning keeps storage minimal: full verification, not full history. No light clients, no trust assumptions.</p>
             <p class="principle-detail">This implements the original vision of Satoshi and Vitalik: self-sovereign verification without trusted intermediaries. Your keys, your node, your rules.</p>
           </div>
           <div class="principle-card">
@@ -311,6 +323,7 @@
             <h3>Simple</h3>
             <p><strong>Banking 2.0</strong> with zero new terminology invented.</p>
             <p class="principle-detail">Credit, collateral, reserves, transfers. Concepts you already know. No zkSNARKs to understand, no merkle trees to audit. Just finance, but programmable.</p>
+            <p class="principle-detail">Complexity hidden in the protocol. Simplicity exposed to users. That's how the internet scaled — and that's how finance will scale.</p>
           </div>
         </div>
       </div>
@@ -341,21 +354,10 @@
         <p class="newsletter-note">No spam. Unsubscribe anytime. Privacy-first via Buttondown.</p>
       </div>
 
-      <div class="section">
-        <h2>Key Properties</h2>
-        <ul class="properties-list">
-          <li>Infinite scalability: O(1) per-hop updates vs O(n) broadcast</li>
-          <li>No inbound liquidity problem: credit + collateral hybrid</li>
-          <li>Bounded risk: counterparty loss capped at collateral + credit</li>
-          <li>Perfect privacy: onion-routing (payment sender/receiver anonymous to routing hubs, like Tor for money)</li>
-          <li><strong>Local state: no sequencers, no data availability dependencies</strong></li>
-        </ul>
-      </div>
-
       <!-- Plot Twist -->
       <div class="section plot-twist">
-        <h2>The Unicast Endgame</h2>
-        <p class="intro">xln isn't just "better payment channels" — it's the ultimate financial substrate.</p>
+        <h2>The Universal CBDC Substrate</h2>
+        <p class="intro">xln isn't just "better payment channels" — it's the settlement layer for programmable money at planetary scale.</p>
 
         <div class="cbdc-stat">
           <div class="stat-stack">
@@ -377,9 +379,18 @@
 
         <p class="vision-text">Most will be EVM-compatible or similar smart contract platforms. xln naturally attaches to <strong>any</strong> programmable ledger by simply deploying <code>Depository.sol</code>.</p>
 
+        <h3 style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.3rem; color: #00d1ff;">Why Now?</h3>
+        <ul class="properties-list" style="margin-bottom: 2rem;">
+          <li><strong>2025:</strong> 72 CBDCs in pilot phase (Russia, China, EU actively testing)</li>
+          <li><strong>2026:</strong> Cross-border CBDC interop becomes political imperative</li>
+          <li><strong>Legacy rails incompatible:</strong> SWIFT and correspondent banking can't handle programmable money</li>
+          <li><strong>Window closing:</strong> Each CBDC building incompatible scaling solution creates permanent fragmentation</li>
+          <li><strong>Universal substrate needed NOW:</strong> Before standards ossify</li>
+        </ul>
+
         <div class="endgame-box">
-          <p class="endgame-text"><strong>The endgame:</strong> Every digital asset — CBDCs, stablecoins, tokenized securities, RWAs — gets instant off-chain settlement with bounded risk and infinite scale.</p>
-          <p class="endgame-text">One protocol. Every jurisdiction. Zero broadcast overhead.</p>
+          <p class="endgame-text"><strong>The endgame:</strong> xln becomes the universal CBDC substrate — every digital asset (CBDCs, stablecoins, tokenized securities, RWAs) gets instant off-chain settlement with bounded risk and infinite scale.</p>
+          <p class="endgame-text">One protocol. Every jurisdiction. Every programmable ledger. Zero broadcast overhead.</p>
         </div>
       </div>
     </div>
@@ -563,9 +574,9 @@
 
   .newsletter-section {
     width: 100%;
-    max-width: 600px;
-    margin: 3rem 0;
-    padding: 2rem;
+    max-width: 800px;
+    margin: 3rem auto;
+    padding: 2.5rem;
     background: rgba(79, 209, 139, 0.05);
     border: 1px solid rgba(79, 209, 139, 0.2);
     border-radius: 8px;
@@ -592,19 +603,23 @@
 
   .newsletter-form {
     display: flex;
+    flex-direction: row;
     gap: 0.75rem;
     width: 100%;
+    align-items: stretch;
   }
 
   .newsletter-input {
-    flex: 1;
-    padding: 0.875rem 1rem;
+    flex: 1 1 auto;
+    height: 48px;
+    padding: 0 1.25rem;
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 4px;
     color: #fff;
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.9rem;
+    line-height: 48px;
   }
 
   .newsletter-input::placeholder {
@@ -618,7 +633,9 @@
   }
 
   .newsletter-btn {
-    padding: 0.875rem 2rem;
+    flex: 0 0 auto;
+    height: 48px;
+    padding: 0 2.5rem;
     background: #4fd18b;
     border: none;
     border-radius: 4px;
@@ -629,6 +646,9 @@
     cursor: pointer;
     transition: all 0.2s;
     white-space: nowrap;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
   .newsletter-btn:hover {
@@ -1927,6 +1947,18 @@
   @media (max-width: 768px) {
     .logo {
       width: 300px;
+    }
+
+    .newsletter-form {
+      flex-direction: column;
+    }
+
+    .newsletter-input {
+      width: 100%;
+    }
+
+    .newsletter-btn {
+      width: 100%;
     }
 
     .principles-grid {
