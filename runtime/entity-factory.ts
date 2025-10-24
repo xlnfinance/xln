@@ -164,7 +164,9 @@ export const createLazyEntity = (
   validators: string[],
   threshold: bigint,
   jurisdiction?: JurisdictionConfig,
-): ConsensusConfig => {
+): { config: ConsensusConfig; executionTimeMs: number } => {
+  const startTime = performance.now();
+
   const entityId = generateLazyEntityId(validators, threshold);
 
   if (DEBUG) console.log(`🔒 Creating lazy entity: ${name}`);
@@ -185,7 +187,11 @@ export const createLazyEntity = (
     shares,
     ...(jurisdiction && { jurisdiction }),
   };
-  return config;
+
+  const executionTimeMs = performance.now() - startTime;
+  console.log(`⚡ Lazy entity creation: ${executionTimeMs.toFixed(3)}ms (pure in-memory)`);
+
+  return { config, executionTimeMs };
 };
 
 // 2. NUMBERED ENTITIES (Small gas cost)

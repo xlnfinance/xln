@@ -1,3 +1,15 @@
+/**
+ * XLN Logging System
+ *
+ * Feature-flagged logging controlled by runtime/constants.ts PERFORMANCE flags.
+ * In production, set all DEBUG_* flags to false for 10x faster performance.
+ *
+ * @license AGPL-3.0
+ * Copyright (C) 2025 XLN Finance
+ */
+
+import { PERFORMANCE } from './constants';
+
 // Log filtering system for debugging
 export interface LogConfig {
   ENTITY_TX: boolean;
@@ -15,21 +27,22 @@ export interface LogConfig {
   ACCOUNT_STATE: boolean;
 }
 
-// Default log config - toggle these to debug specific flows
+// Default log config - derived from constants.ts PERFORMANCE flags
+// Individual categories can be toggled at runtime via window.logConfig.set()
 export const LOG_CONFIG: LogConfig = {
-  ENTITY_TX: true,
-  ACCOUNT_OPEN: true,
-  SIGNER_LOOKUP: true,
-  PROCESS_CASCADE: true,
-  FRAME_CONSENSUS: false,
-  ENTITY_OUTPUT: true,
-  ENTITY_INPUT: true,
-  SERVER_TICK: false,
-  J_WATCHER: false,
-  BLOCKCHAIN: false,
-  GOSSIP: false,
-  R2R_FLOW: true, // Enable to debug r2r receiver issues
-  ACCOUNT_STATE: true,
+  ENTITY_TX: PERFORMANCE.DEBUG_CONSENSUS,        // Entity-level consensus
+  ACCOUNT_OPEN: PERFORMANCE.DEBUG_ACCOUNTS,      // Account creation
+  SIGNER_LOOKUP: PERFORMANCE.DEBUG_CONSENSUS,    // Validator management
+  PROCESS_CASCADE: PERFORMANCE.DEBUG_LOGGING,    // General flow
+  FRAME_CONSENSUS: PERFORMANCE.DEBUG_CONSENSUS,  // BFT consensus
+  ENTITY_OUTPUT: PERFORMANCE.DEBUG_LOGGING,      // Entity outputs
+  ENTITY_INPUT: PERFORMANCE.DEBUG_LOGGING,       // Entity inputs
+  SERVER_TICK: PERFORMANCE.DEBUG_LOGGING,        // Runtime tick processing
+  J_WATCHER: PERFORMANCE.LOG_BLOCKCHAIN_ERRORS,  // Blockchain watcher
+  BLOCKCHAIN: PERFORMANCE.LOG_BLOCKCHAIN_ERRORS, // Blockchain interactions
+  GOSSIP: PERFORMANCE.DEBUG_LOGGING,             // Network gossip
+  R2R_FLOW: PERFORMANCE.DEBUG_ACCOUNTS,          // Reserve-to-reserve transfers
+  ACCOUNT_STATE: PERFORMANCE.DEBUG_ACCOUNTS,     // Account state changes
 };
 
 // Helper to check if logging is enabled for a category

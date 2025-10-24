@@ -1,4 +1,4 @@
-# XLN Context - Core System Files (~104k tokens)
+# XLN Context - Core System Files (~109k tokens)
 
 ## THE CORE INNOVATION: RCPAN Invariant
 
@@ -39,7 +39,7 @@ This single invariant:
 4. **Multi-hop payments that NET positions** - Ripple batches, Lightning routes, only XLN nets bilaterally
 5. **Entity-owned subcontracts (HTLCs, limit orders) without separate channels** - One bilateral account, many subcontracts
 
-## Token Budget Guide (~104k tokens total)
+## Token Budget Guide (~109k tokens total)
 
 **Critical path (read first, ~30min):**
 - ⚡ emc2.md (5min) - Why credit = stored energy
@@ -119,13 +119,13 @@ bun run src/server.ts  # Starts server
 
 xln/
   jurisdictions/contracts/
-    Depository.sol             1652 lines - enforceDebts() FIFO, collateral + credit (INVARIANT: L+R+C=0)
+    Depository.sol             1746 lines - enforceDebts() FIFO, collateral + credit (INVARIANT: L+R+C=0)
     EntityProvider.sol         1119 lines - Hanko sigs, Control/Dividend, governance
     SubcontractProvider.sol    155 lines - HTLCs, swaps, limit orders
 
   runtime/
-    types.ts                     566 lines - All TypeScript interfaces (START HERE)
-    runtime.ts                   1175 lines - Main coordinator, 100ms ticks, R->E->A routing
+    types.ts                     812 lines - All TypeScript interfaces (START HERE)
+    runtime.ts                   1208 lines - Main coordinator, 100ms ticks, R->E->A routing
     entity-consensus.ts          954 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
     account-consensus.ts         675 lines - Bilateral consensus, left/right perspective
 
@@ -147,7 +147,7 @@ xln/
 
     state-helpers.ts             314 lines - Pure state management
     snapshot-coder.ts            240 lines - Deterministic RLP serialization
-    evm.ts                       940 lines - Blockchain integration
+    evm.ts                       977 lines - Blockchain integration
 
   vibepaper/
     emc2.md                      33 lines - ⚡ Energy-Mass-Credit equivalence (CRITICAL PATH)
@@ -171,7 +171,7 @@ Reading Guide:
 Suggested LLM prompt: "Read the critical path docs (30min budget), then explain how RCPAN enables instant settlement with partial collateral. Compare to Lightning and rollups."
 
 
-//jurisdictions/contracts/Depository.sol (1652 lines)
+//jurisdictions/contracts/Depository.sol (1746 lines)
 // SPDX-License-Identifier: unknown
 pragma solidity ^0.8.24;
 
@@ -364,16 +364,13 @@ contract Depository is Console {
 
   constructor() {
     _tokens.push(bytes32(0));
-    
+
     // empty record, hub_id==0 means not a hub
     _hubs.push(Hub({
       entityId: bytes32(0),
       uri: '',
       gasused: 0
     }));
-    
-    // DEBUG: Prefund top 1000 entities for testing
-    debugBulkFundEntities();
   }
   
   function getTokensLength() public view returns (uint) {
@@ -613,18 +610,54 @@ contract Depository is Console {
     return true;
   }
 
-  // ========== NEW SIMPLIFIED SETTLE FUNCTION ==========
-  // Simple settlement between two entities without signature verification
+  // ========== SETTLE FUNCTION (merged from cooperativeUpdate) ==========
+  // Bilateral settlement with signature verification and nonce tracking
   // Can be called independently or as part of processBatch
-  function settle(bytes32 leftEntity, bytes32 rightEntity, SettlementDiff[] memory diffs) public returns (bool) {
+  function settle(
+    bytes32 leftEntity,
+    bytes32 rightEntity,
+    SettlementDiff[] memory diffs,
+    uint[] memory forgiveDebtsInTokenIds,
+    bytes memory sig
+  ) public returns (bool) {
     require(leftEntity != rightEntity, "Cannot settle with self");
     require(leftEntity < rightEntity, "Entities must be in order (left < right)");
-    
+
     // Simple channel key: hash of left and right entities converted to bytes
     bytes memory ch_key = abi.encodePacked(keccak256(abi.encodePacked(leftEntity, rightEntity)));
-    
-    // Comment out signature verification for development
-    // TODO: Re-enable signature verification in production
+
+    // Determine caller and counterparty
+    bytes32 caller = bytes32(uint256(uint160(msg.sender)));
+    bool isInternalCall = msg.sender == address(this);
+
+    // For internal calls (from processBatch), caller is passed in entityId
+    // For external calls, verify caller is one of the entities
+    if (!isInternalCall) {
+      require(caller == leftEntity || caller == rightEntity, "Only involved entities can settle");
+    }
+
+    bytes32 counterparty = (caller == leftEntity) ? rightEntity : leftEntity;
+
+    // Signature verification (skip for internal calls during development)
+    if (!isInternalCall && sig.length > 0) {
+      bytes memory encoded_msg = abi.encode(
+        MessageType.CooperativeUpdate,
+        ch_key,
+        _channels[ch_key].cooperativeNonce,
+        diffs,
+        forgiveDebtsInTokenIds
+      );
+
+      bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+
+      address recoveredSigner = ECDSA.recover(hash, sig);
+      address counterpartyAddress = address(uint160(uint256(counterparty)));
+      require(recoveredSigner == counterpartyAddress, "Invalid counterparty signature");
+    }
+
+    // Update cooperative action scores
+    entityScores[leftEntity].cooperativeActions++;
+    entityScores[rightEntity].cooperativeActions++;
     
     for (uint j = 0; j < diffs.length; j++) {
       SettlementDiff memory diff = diffs[j];
@@ -661,20 +694,55 @@ contract Depository is Console {
       
       // Update ondelta
       col.ondelta += diff.ondeltaDiff;
-      
-      // Emit SettlementProcessed event with final values for j-watcher consumption
-      emit SettlementProcessed(
-        leftEntity,
-        rightEntity,
-        tokenId,
-        _reserves[leftEntity][tokenId],
-        _reserves[rightEntity][tokenId],
-        col.collateral,
-        col.ondelta
-      );
     }
-    
-    // TODO: Add cooperative nonce tracking if needed for settlement ordering
+
+    // Forgive debts in specified tokens
+    for (uint i = 0; i < forgiveDebtsInTokenIds.length; i++) {
+      uint tokenId = forgiveDebtsInTokenIds[i];
+
+      // Forgive left entity's debts to right entity
+      uint leftDebtIndex = _debtIndex[leftEntity][tokenId];
+      for (uint j = leftDebtIndex; j < _debts[leftEntity][tokenId].length; j++) {
+        if (_debts[leftEntity][tokenId][j].creditor == rightEntity) {
+          delete _debts[leftEntity][tokenId][j];
+          _activeDebts[leftEntity]--;
+        }
+      }
+
+      // Forgive right entity's debts to left entity
+      uint rightDebtIndex = _debtIndex[rightEntity][tokenId];
+      for (uint j = rightDebtIndex; j < _debts[rightEntity][tokenId].length; j++) {
+        if (_debts[rightEntity][tokenId][j].creditor == leftEntity) {
+          delete _debts[rightEntity][tokenId][j];
+          _activeDebts[rightEntity]--;
+        }
+      }
+    }
+
+    // Emit ChannelSettled event with final values
+    Settled[] memory settledEvents = new Settled[](diffs.length);
+    for (uint i = 0; i < diffs.length; i++) {
+      uint tokenId = diffs[i].tokenId;
+      ChannelCollateral storage col = _collaterals[ch_key][tokenId];
+
+      settledEvents[i] = Settled({
+        left: leftEntity,
+        right: rightEntity,
+        tokenId: tokenId,
+        leftReserve: _reserves[leftEntity][tokenId],
+        rightReserve: _reserves[rightEntity][tokenId],
+        collateral: col.collateral,
+        ondelta: col.ondelta
+      });
+    }
+
+    if (settledEvents.length > 0) {
+      emit ChannelSettled(settledEvents);
+    }
+
+    // Increment nonce to invalidate old proofs
+    _channels[ch_key].cooperativeNonce++;
+
     return true;
   }
 
@@ -705,7 +773,7 @@ contract Depository is Console {
       reserveToReserve(entityId, batch.reserveToReserve[i]);
     }
 
-    // NEW: Process settlements (simplified account settlements between entities)
+    // NEW: Process settlements (bilateral settlements with signatures)
     console.log("Processing settlements count:");
     console.logUint(batch.settlements.length);
     for (uint i = 0; i < batch.settlements.length; i++) {
@@ -714,8 +782,14 @@ contract Depository is Console {
       console.logBytes32(settlement.leftEntity);
       console.log("and:");
       console.logBytes32(settlement.rightEntity);
-      
-      if (!settle(settlement.leftEntity, settlement.rightEntity, settlement.diffs)) {
+
+      if (!settle(
+        settlement.leftEntity,
+        settlement.rightEntity,
+        settlement.diffs,
+        settlement.forgiveDebtsInTokenIds,
+        settlement.sig
+      )) {
         completeSuccess = false;
       }
     }
@@ -794,7 +868,8 @@ contract Depository is Console {
   enum MessageType {
     CooperativeUpdate,
     CooperativeDisputeProof,
-    DisputeProof
+    DisputeProof,
+    FinalDisputeProof
   }
 
   struct TokenAmountPair {
@@ -825,7 +900,7 @@ contract Depository is Console {
   struct SettlementDiff {
     uint tokenId;
     int leftDiff;        // Change for left entity
-    int rightDiff;       // Change for right entity  
+    int rightDiff;       // Change for right entity
     int collateralDiff;  // Change in collateral
     int ondeltaDiff;     // Change in ondelta
   }
@@ -835,7 +910,8 @@ contract Depository is Console {
     bytes32 leftEntity;
     bytes32 rightEntity;
     SettlementDiff[] diffs;
-    // No signature field - signatures commented out for development
+    uint[] forgiveDebtsInTokenIds;  // Token IDs where debts should be forgiven
+    bytes sig;                       // Signature from counterparty
   }
   //Enforces the invariant: Its main job is to run the check you described: require(leftReserveDiff + rightReserveDiff + collateralDiff == 0). This guarantees no value is created or lost, only moved.
   struct CooperativeUpdate {
@@ -1026,7 +1102,7 @@ contract Depository is Console {
     uint amount;
   }
   function reserveToExternalToken(bytes32 entity, ReserveToExternalToken memory params) internal {
-    // enforceDebts(entity, params.tokenId); // DISABLED
+    enforceDebts(entity, params.tokenId);
 
     (address contractAddress, uint96 tokenId, uint8 tokenType) = unpackTokenReference(_tokens[params.tokenId]);
     //console.log('unpackedToken ', contractAddress,tokenId,  tokenType);
@@ -1062,8 +1138,8 @@ contract Depository is Console {
     console.logUint(params.amount);
     console.log("reserveToReserve: sender balance");
     console.logUint(_reserves[entity][params.tokenId]);
-    
-    // enforceDebts(entity, params.tokenId); // DISABLED
+
+    enforceDebts(entity, params.tokenId);
 
     console.log("=== BALANCE CHECK ===");
     if (_reserves[entity][params.tokenId] >= params.amount) {
@@ -1108,7 +1184,7 @@ contract Depository is Console {
     uint256 amount,
     string calldata /* purpose */
   ) internal {
-    // enforceDebts(entity, internalTokenId); // DISABLED
+    enforceDebts(entity, internalTokenId);
 
     require(_reserves[entity][internalTokenId] >= amount, "Insufficient control shares");
     require(to != bytes32(0), "Invalid recipient");
@@ -1159,7 +1235,7 @@ contract Depository is Console {
 /* enforceDebts(): The Immutable Law of Chronological Justice
  *
  * This function is 100% OPTIMAL - any deviation breaks fairness invariants.
- * 
+ *
  * WHY FIFO IS THE ONLY SOLUTION:
  * In traditional finance, bankruptcy courts enforce "absolute priority rule" -
  * first creditor gets paid first. This prevents late-coming creditors from
@@ -1169,29 +1245,39 @@ contract Depository is Console {
  * 1. SIMPLICITY: One queue, one order, no exceptions. O(n) complexity.
  * 2. UNGAMEABLE: Timestamp of debt creation is immutable history.
  * 3. DETERMINISTIC: No subjective judgments about "senior" vs "junior" debt.
- * 4. ATOMIC: Either you have reserves to pay next debt in full, or you don't.
- * 
+ * 4. VACUUM CLEANER: Pays ALL available reserves to debt[0] until cleared.
+ *
  * THE MECHANISM:
  * - Every reserve withdrawal must first satisfy debts in order
  * - Creates a "liquidity trap" - entity can receive but not send until debts clear
  * - Transforms social reputation ("this hub owes me") into mechanical enforcement
  *
- * WHY NOT PARTIAL PAYMENTS?
- * Partial payments enable gaming: pay 1 wei to each creditor, keep queue forever.
- * Full payment requirement forces entity to accumulate enough for meaningful settlement.
+ * WHY PARTIAL PAYMENTS ARE SAFE:
+ * Entity cannot CHOOSE to pay partially - enforceDebts() is a vacuum that sucks
+ * ALL available reserves into debt[0]. Partial payment only occurs when reserves
+ * run out mid-debt. This enables:
+ * 1. GAS EFFICIENCY: Large debts clear incrementally without hitting block gas limit
+ * 2. CAPITAL EFFICIENCY: Don't need to accumulate full debt amount before repayment starts
+ * 3. SAME FIFO SECURITY: Can't skip queue, can't game order, can't withdraw until debts clear
  *
- * WHY NOT NETTING/PRIORITIES/TRADING?
- * Any deviation from FIFO allows queue manipulation. Hub could create fake 
+ * Example: Entity owes Alice 1M, has 100k reserves, tries to withdraw 10k:
+ *   1. enforceDebts() runs automatically
+ *   2. Pays ALL 100k to Alice (debt reduced to 900k)
+ *   3. Reserve = 0, withdrawal fails
+ *   4. Entity receives another 50k → pays ALL 50k to Alice → still locked
+ *   Repeat until Alice's debt = 0, THEN move to debt[1]
+ *
+ * WHY NOT NETTING/PRIORITIES/MANUAL ALLOCATION?
+ * Any deviation from FIFO allows queue manipulation. Hub could create fake
  * senior debt to itself, or net out favorable cycles while starving others.
- *
- * This is not a bug - it's the feature. enforceDebts is like the Kalashnikov of financial protocols - utterly reliable because it has no moving parts to break. Any "improvement" would be like adding a laser sight to a hammer.
- Like TCP sequence numbers or Bitcoin's
- * UTXO model, the constraint IS the security. Pure chronological ordering is the
- * only objective truth the J-machine can enforce without becoming a judge.
  *
  * The elegance: by doing exactly ONE thing perfectly (FIFO enforcement), it enables
  * an entire credit economy to exist trustlessly. The threat of entering this
  * "debt purgatory" keeps hubs honest without ever needing to trigger it.
+ *
+ * Like TCP sequence numbers or Bitcoin's UTXO model, the constraint IS the security.
+ * Pure chronological ordering is the only objective truth the J-machine can enforce
+ * without becoming a judge.
  */
   function enforceDebts(bytes32 entity, uint tokenId) public returns (uint totalDebts) {
     uint debtsLength = _debts[entity][tokenId].length;
@@ -1300,6 +1386,7 @@ contract Depository is Console {
 
 
 
+  /* DEPRECATED: Use settle() instead - cooperativeUpdate kept for backwards compatibility
   /* mutually agreed update of channel state in a single atomic operation
   function cooperativeUpdate(bytes32 entity, CooperativeUpdate memory params) internal returns (bool) {
     bytes memory ch_key = channelKey(entity, params.counterentity);
@@ -1548,115 +1635,122 @@ contract Depository is Console {
 
   }
 
-  /* DISABLED: disputes
+  // Cooperative dispute proof: both parties agree to close channel with signed proof
   function cooperativeDisputeProof (CooperativeDisputeProof memory params) public returns (bool) {
     bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
-
 
     console.log("Received proof");
     console.logBytes32(keccak256(abi.encode(params.proofbody)));
     console.logBytes32(keccak256(params.initialArguments));
 
     bytes memory encoded_msg = abi.encode(
-      MessageType.CooperativeDisputeProof, 
-      ch_key, 
+      MessageType.CooperativeDisputeProof,
+      ch_key,
       _channels[ch_key].cooperativeNonce,
       keccak256(abi.encode(params.proofbody)),
       keccak256(params.initialArguments)
     );
 
-    bytes32 hash = keccak256(encoded_msg);
-
-
     bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
 
-    require(ECDSA.recover(final_hash, params.sig) == params.counterentity);
+    // Fix type conversion: bytes32 → address
+    address recoveredSigner = ECDSA.recover(final_hash, params.sig);
+    address counterpartyAddress = address(uint160(uint256(params.counterentity)));
+    require(recoveredSigner == counterpartyAddress, "Invalid counterparty signature");
 
-    require(_channels[ch_key].disputeHash == bytes32(0));
+    require(_channels[ch_key].disputeHash == bytes32(0), "Dispute already in progress");
 
     delete _channels[ch_key].disputeHash;
 
     finalizeChannel(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.proofbody, params.finalArguments, params.initialArguments);
-    
+
     emit CooperativeClose(bytes32(uint256(uint160(msg.sender))), params.counterentity, _channels[ch_key].cooperativeNonce);
+
+    return true;
   }
-  */
 
 
-  /* DISABLED: dispute functions
+  // Initial dispute proof: one party posts signed proof to start dispute
   function initialDisputeProof(InitialDisputeProof memory params) public returns (bool) {
-  /*   bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
+    bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
 
-  /*   // Update dispute scores for both parties
-  /*   entityScores[bytes32(uint256(uint160(msg.sender)))].totalDisputes++;
-  /*   entityScores[params.counterentity].totalDisputes++;
+    // Update dispute scores for both parties
+    entityScores[bytes32(uint256(uint160(msg.sender)))].totalDisputes++;
+    entityScores[params.counterentity].totalDisputes++;
 
-  /*   // entities must always hold a dispute proof with cooperativeNonce equal or higher than the one in the contract
-  /*   require(_channels[ch_key].cooperativeNonce <= params.cooperativeNonce);
+    // entities must always hold a dispute proof with cooperativeNonce equal or higher than the one in the contract
+    require(_channels[ch_key].cooperativeNonce <= params.cooperativeNonce, "Proof nonce too old");
 
-  /*   bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, 
-  /*     ch_key, 
-  /*     params.cooperativeNonce, 
-  /*     params.disputeNonce, 
-  /*     params.proofbodyHash);
+    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof,
+      ch_key,
+      params.cooperativeNonce,
+      params.disputeNonce,
+      params.proofbodyHash);
 
-  /*   bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+    bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
 
-  /*   log('encoded_msg',encoded_msg);
+    log('encoded_msg',encoded_msg);
 
-  /*   require(ECDSA.recover(final_hash, params.sig) == params.counterentity, "Invalid signer");
+    // Fix type conversion: bytes32 → address
+    address recoveredSigner = ECDSA.recover(final_hash, params.sig);
+    address counterpartyAddress = address(uint160(uint256(params.counterentity)));
+    require(recoveredSigner == counterpartyAddress, "Invalid signer");
 
-  /*   require(_channels[ch_key].disputeHash == bytes32(0));
+    require(_channels[ch_key].disputeHash == bytes32(0), "Dispute already in progress");
 
-  /*   bytes memory encodedDispute = abi.encodePacked(params.cooperativeNonce,
-  /*     params.disputeNonce, 
-  /*     bytes32(uint256(uint160(msg.sender))) < params.counterentity, // is started by left
-  /*     block.number + 20,
-  /*     params.proofbodyHash, 
-  /*     keccak256(abi.encodePacked(params.initialArguments)));
+    bytes memory encodedDispute = abi.encodePacked(params.cooperativeNonce,
+      params.disputeNonce,
+      bytes32(uint256(uint160(msg.sender))) < params.counterentity, // is started by left
+      block.number + 20,
+      params.proofbodyHash,
+      keccak256(abi.encodePacked(params.initialArguments)));
 
-  /*   _channels[ch_key].disputeHash = keccak256(encodedDispute);
-  /*   emit DisputeStarted(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.disputeNonce, params.initialArguments);
-  /* }
+    _channels[ch_key].disputeHash = keccak256(encodedDispute);
+    emit DisputeStarted(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.disputeNonce, params.initialArguments);
 
-  /* COMMENTED OUT: Dispute functionality disabled for development focus
-  /* function finalDisputeProof(FinalDisputeProof memory params) public returns (bool) {
-  /*   bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
+    return true;
+  }
 
-  /*   // Update dispute scores for both parties involved in the finalization
-  /*   entityScores[bytes32(uint256(uint160(msg.sender)))].totalDisputes++;
-  /*   entityScores[params.counterentity].totalDisputes++;
+  // Final dispute proof: counterparty responds with newer proof OR timeout expires
+  function finalDisputeProof(FinalDisputeProof memory params) public returns (bool) {
+    bytes memory ch_key = channelKey(bytes32(uint256(uint160(msg.sender))), params.counterentity);
 
-  /*   // verify the dispute was started
+    // Update dispute scores for both parties involved in the finalization
+    entityScores[bytes32(uint256(uint160(msg.sender)))].totalDisputes++;
+    entityScores[params.counterentity].totalDisputes++;
 
-  /*   if (params.sig.length > 0) {
-  /*     // Validate signature if provided
-  /*     bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, 
-  /*       ch_key, 
-  /*       params.cooperativeNonce, 
-  /*       params.initialDisputeNonce, 
-  /*       params.finalDisputeNonce);
-        
-  /*     bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-  /*     log('encoded_msg',encoded_msg);
-  /*     require(ECDSA.recover(final_hash, params.sig) == params.counterentity, "Invalid signer");
+    // verify the dispute was started
 
-  /*     // TODO: if nonce is same, Left one's proof is considered valid
+    if (params.sig.length > 0) {
+      // Validate signature if provided
+      bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof,
+        ch_key,
+        params.finalCooperativeNonce,
+        params.initialDisputeNonce,
+        params.finalDisputeNonce);
 
-  /*     require(params.initialDisputeNonce < params.finalDisputeNonce, "New nonce must be greater");
-  /*   } else {
-  /*     // counterparty agrees or does not respond 
-  /*     bool senderIsCounterparty = params.startedByLeft != (bytes32(uint256(uint160(msg.sender))) < params.counterentity);
-  /*     require(senderIsCounterparty || (block.number >= params.disputeUntilBlock), "Dispute period ended");
-  /*     require(params.initialProofbodyHash == keccak256(abi.encode(params.finalProofbody)), "Invalid proofbody");
-  /*   }
-    
+      bytes32 final_hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+      log('encoded_msg',encoded_msg);
 
-  /*   finalizeChannel(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.finalProofbody, params.finalArguments, params.initialArguments);
-  
+      // Fix type conversion: bytes32 → address
+      address recoveredSigner = ECDSA.recover(final_hash, params.sig);
+      address counterpartyAddress = address(uint160(uint256(params.counterentity)));
+      require(recoveredSigner == counterpartyAddress, "Invalid signer");
 
-  /*   return true;
-  /* }
+      // TODO: if nonce is same, Left one's proof is considered valid
+
+      require(params.initialDisputeNonce < params.finalDisputeNonce, "New nonce must be greater");
+    } else {
+      // counterparty agrees or does not respond
+      bool senderIsCounterparty = params.startedByLeft != (bytes32(uint256(uint160(msg.sender))) < params.counterentity);
+      require(senderIsCounterparty || (block.number >= params.disputeUntilBlock), "Dispute period ended");
+      require(params.initialProofbodyHash == keccak256(abi.encode(params.finalProofbody)), "Invalid proofbody");
+    }
+
+    finalizeChannel(bytes32(uint256(uint160(msg.sender))), params.counterentity, params.finalProofbody, params.finalArguments, params.initialArguments);
+
+    return true;
+  }
 
 
 
@@ -3103,10 +3197,140 @@ contract SubcontractProvider is Console {
 
 }
 
-//runtime/types.ts (566 lines)
+//runtime/types.ts (812 lines)
 /**
  * XLN Type Definitions
  * All interfaces and type definitions used across the XLN system
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * XLN MESSAGE FLOW: Runtime → Entity → Account (R→E→A)
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * 1. RuntimeInput (External trigger - 100ms tick or user action)
+ *    ├─ runtimeTxs: RuntimeTx[]        // System commands (importReplica, etc.)
+ *    └─ entityInputs: EntityInput[]    // Messages to specific entities
+ *
+ * 2. EntityInput (BFT consensus at entity level)
+ *    ├─ entityTxs: EntityTx[]          // State transitions (chat, payment, vote)
+ *    ├─ precommits: Map<signerId, sig> // BFT signatures from validators
+ *    └─ proposedFrame: ProposedEntityFrame // Consensus proposal with merkle root
+ *
+ * 3. EntityTx (Entity state machine transitions)
+ *    ├─ 'chat' | 'propose' | 'vote'    // Governance layer
+ *    ├─ 'j_event'                      // Blockchain events (reserves, settlements)
+ *    ├─ 'openAccount'                  // Create bilateral account
+ *    ├─ 'directPayment'                // Multi-hop payment through accounts
+ *    └─ 'accountInput'                 // Process bilateral consensus message
+ *
+ * 4. AccountInput (Bilateral consensus between two entities)
+ *    ├─ height: number                 // Which frame we're ACKing
+ *    ├─ prevSignatures: string[]       // ACK their previous frame
+ *    ├─ newAccountFrame: AccountFrame  // Our proposed frame
+ *    ├─ newSignatures: string[]        // Signatures on new frame
+ *    └─ counter: number                // Replay protection (CRITICAL)
+ *
+ * 5. AccountFrame (Agreed bilateral state - like a block)
+ *    ├─ height: number                 // Frame number in bilateral chain
+ *    ├─ accountTxs: AccountTx[]        // State transitions this frame
+ *    ├─ prevFrameHash: string          // Links to previous frame (blockchain)
+ *    ├─ stateHash: string              // Merkle root of current state
+ *    ├─ tokenIds: number[]             // Active tokens in this account
+ *    └─ deltas: bigint[]               // Per-token balances (signed integers)
+ *
+ * 6. AccountTx (Bilateral account state transitions)
+ *    ├─ 'direct_payment'               // Update offdelta (instant settlement)
+ *    ├─ 'add_delta'                    // Add new token to account
+ *    ├─ 'set_credit_limit'             // Set mutual credit limits
+ *    ├─ 'request_withdrawal'           // Phase 2: C→R (collateral to reserve)
+ *    ├─ 'approve_withdrawal'           // ACK/NACK withdrawal request
+ *    └─ 'reserve_to_collateral'        // Phase 1: R→C (from j_event)
+ *
+ * 7. Delta (Per-token bilateral state - the money)
+ *    ├─ collateral: bigint             // Escrowed on-chain funds
+ *    ├─ ondelta: bigint                // On-chain balance delta
+ *    ├─ offdelta: bigint               // Off-chain balance delta (instant)
+ *    ├─ leftCreditLimit: bigint        // Credit extended by left entity
+ *    ├─ rightCreditLimit: bigint       // Credit extended by right entity
+ *    ├─ leftAllowance: bigint          // Left entity's remaining credit
+ *    └─ rightAllowance: bigint         // Right entity's remaining credit
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * CONSENSUS GUARANTEES (Byzantine Fault Tolerance)
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * Entity Level (BFT):
+ *   - Proposer rotates deterministically
+ *   - Threshold signatures (t of n validators must sign)
+ *   - Precommit-lock prevents double-signing
+ *   - Safety: Never finalize conflicting states
+ *   - Liveness: Progress if >threshold validators honest
+ *
+ * Account Level (Bilateral):
+ *   - Both sides must sign every frame (2-of-2 consensus)
+ *   - Counter prevents replay attacks
+ *   - prevSignatures ACK prevents forks
+ *   - State hash ensures deterministic state computation
+ *   - Dispute resolution via on-chain proof submission
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * EXAMPLE FLOW: Alice pays Bob 100 USDC
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * Step 1: Alice's UI creates RuntimeInput
+ *   runtimeInput = {
+ *     runtimeTxs: [],
+ *     entityInputs: [{
+ *       entityId: "Alice",
+ *       entityTxs: [{
+ *         type: 'directPayment',
+ *         data: { targetEntityId: "Bob", tokenId: 1, amount: 100n }
+ *       }]
+ *     }]
+ *   }
+ *
+ * Step 2: Alice's entity processes payment (entity-consensus.ts)
+ *   - Validates Alice has account with Bob
+ *   - Creates AccountInput to send to Bob
+ *   - Updates Alice's AccountMachine.mempool
+ *
+ * Step 3: Bob receives AccountInput (account-consensus.ts)
+ *   - Validates counter, prevSignatures
+ *   - Applies payment tx: Bob.offdelta += 100n, Alice.offdelta -= 100n
+ *   - Creates AccountFrame with new state
+ *   - Signs frame, sends back to Alice
+ *
+ * Step 4: Alice receives Bob's signature
+ *   - Both sides now have 2-of-2 signed frame
+ *   - Payment is FINAL (instant finality)
+ *   - No on-chain tx needed (pure off-chain)
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * NAMING CONVENTIONS
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * Consistent terminology prevents confusion when reading/debugging code:
+ *
+ * **height** (NOT frameId):
+ *   - Used everywhere: EntityFrame.height, AccountFrame.height, ServerFrame.height
+ *   - Consistent with blockchain terminology (block height)
+ *   - Old code used "frameId" but we migrated to "height" for S/E/A consistency
+ *
+ * **tx** (NOT transition):
+ *   - EntityTx, AccountTx, RuntimeTx (transaction = state change request)
+ *   - Used for actual state modifications
+ *
+ * **transition** (NOT tx):
+ *   - ackedTransitions, sentTransitions (counter = message sequence number)
+ *   - Used for replay protection counters, NOT transaction counts
+ *   - Counts message exchanges, not individual transactions
+ *   - Example: One message can contain multiple AccountTxs, but only increments counter by 1
+ *
+ * **counter** (for replay protection):
+ *   - AccountInput.counter (sequential message counter, starts at 1)
+ *   - CRITICAL: Must be exactly ackedTransitions + 1 (no gaps allowed)
+ *   - Different from "transitions" which tracks confirmed message count
+ *
+ * ═══════════════════════════════════════════════════════════════════════
  */
 
 import type { Profile } from './gossip.js';
@@ -3132,16 +3356,27 @@ export interface RuntimeInput {
   entityInputs: EntityInput[];
 }
 
-export interface RuntimeTx {
-  type: 'importReplica';
-  entityId: string;
-  signerId: string;
-  data: {
-    config: ConsensusConfig;
-    isProposer: boolean;
-    position?: { x: number; y: number; z: number };
-  };
-}
+export type RuntimeTx =
+  | {
+      type: 'importReplica';
+      entityId: string;
+      signerId: string;
+      data: {
+        config: ConsensusConfig;
+        isProposer: boolean;
+        position?: { x: number; y: number; z: number };
+      };
+    }
+  | {
+      type: 'createXlnomy';
+      data: {
+        name: string;
+        evmType: 'browservm' | 'reth' | 'erigon' | 'monad';
+        rpcUrl?: string; // If evmType === RPC-based
+        blockTimeMs?: number; // Default: 1000ms
+        autoGrid?: boolean; // Auto-create 2x2x2 grid with $1M reserves
+      };
+    };
 
 export interface EntityInput {
   entityId: string;
@@ -3544,7 +3779,10 @@ export interface Env {
   runtimeInput: RuntimeInput; // Persistent storage for merged inputs
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: any; // Gossip layer for network profiles
-  // Future: add config, utilities, etc.
+
+  // Xlnomy system (multi-jurisdiction support)
+  xlnomies?: Map<string, Xlnomy>; // name → Xlnomy instance
+  activeXlnomy?: string; // Currently active Xlnomy name
 }
 
 export interface RuntimeSnapshot {
@@ -3670,8 +3908,110 @@ export interface NameSearchResult {
   relevance: number; // Search relevance score 0-1
 }
 
+// === XLNOMY (JURISDICTION) SYSTEM ===
 
-//runtime/runtime.ts (1175 lines)
+/**
+ * Xlnomy = J-Machine (court/jurisdiction) + Entities + Contracts
+ * Self-contained economy where J-Machine IS the jurisdiction
+ */
+export interface Xlnomy {
+  name: string; // e.g., "Simnet", "GameEconomy"
+  evmType: 'browservm' | 'reth' | 'erigon' | 'monad';
+  blockTimeMs: number; // Block time in milliseconds (1000ms default)
+
+  // J-Machine = Jurisdiction machine (court that entities anchor to)
+  jMachine: {
+    position: { x: number; y: number; z: number }; // Visual position (0, 100, 0)
+    capacity: number; // Broadcast threshold (default: 3)
+    jHeight: number; // Current block height in jurisdiction
+    mempool: any[]; // Pending transactions in J-Machine queue
+  };
+
+  // Deployed contracts
+  contracts: {
+    entityProviderAddress: string;
+    depositoryAddress: string;
+  };
+
+  // EVM instance (BrowserVM in-browser, or Reth/Erigon RPC)
+  evm: JurisdictionEVM;
+
+  // Entity registry
+  entities: string[]; // Entity IDs registered in this Xlnomy
+
+  // Metadata
+  created: number; // Timestamp
+  version: string; // e.g., "1.0.0"
+}
+
+/**
+ * Abstract jurisdiction EVM (BrowserVM or RPC to Reth/Erigon/Monad)
+ * Allows swapping execution layer without changing runtime code
+ */
+export interface JurisdictionEVM {
+  type: 'browservm' | 'reth' | 'erigon' | 'monad';
+
+  // Contract deployment
+  deployContract(bytecode: string, args?: any[]): Promise<string>;
+
+  // Contract calls
+  call(to: string, data: string, from?: string): Promise<string>;
+  send(to: string, data: string, value?: bigint): Promise<string>;
+
+  // State queries
+  getBlock(): Promise<number>;
+  getBalance(address: string): Promise<bigint>;
+
+  // Serialization for persistence
+  serialize(): Promise<XlnomySnapshot>;
+
+  // Address getters
+  getEntityProviderAddress(): string;
+  getDepositoryAddress(): string;
+}
+
+/**
+ * Persisted Xlnomy snapshot (stored in Level/IndexedDB)
+ * Can be exported as JSON and shared/imported
+ */
+export interface XlnomySnapshot {
+  name: string;
+  version: string;
+  created: number;
+  evmType: 'browservm' | 'reth' | 'erigon' | 'monad';
+  blockTimeMs: number;
+
+  // J-Machine config
+  jMachine: {
+    position: { x: number; y: number; z: number };
+    capacity: number;
+    jHeight: number;
+  };
+
+  // Deployed contracts
+  contracts: {
+    entityProviderAddress: string;
+    depositoryAddress: string;
+  };
+
+  // EVM-specific state
+  evmState: {
+    rpcUrl?: string; // If RPC EVM (Reth/Erigon/Monad)
+    vmState?: any; // If BrowserVM - serialized @ethereumjs/vm state
+  };
+
+  // Entity registry
+  entities: string[];
+
+  // Runtime state (replicas + history)
+  runtimeState?: {
+    replicas: any; // Serialized Map<string, EntityReplica>
+    history: EnvSnapshot[];
+  };
+}
+
+
+//runtime/runtime.ts (1208 lines)
 // for regular use > bun run runtime/runtime.ts
 // for debugging > bun repl
 // await import('./debug.js');
@@ -3705,6 +4045,7 @@ import {
   getJurisdictionByAddress,
   getNextEntityNumber,
   registerNumberedEntityOnChain,
+  setBrowserVMJurisdiction,
   submitProcessBatch,
   submitPrefundAccount,
   submitSettle,
@@ -3931,9 +4272,40 @@ const applyRuntimeInput = async (
 
     const entityOutbox: EntityInput[] = [];
 
-    // TICK and REPLICA-DEBUG logging removed - too verbose
-    env.runtimeInput.runtimeTxs.forEach(runtimeTx => {
-      if (runtimeTx.type === 'importReplica') {
+    // Process runtime transactions (handle async operations properly)
+    for (const runtimeTx of env.runtimeInput.runtimeTxs) {
+      if (runtimeTx.type === 'createXlnomy') {
+        console.log(`[Runtime] Creating Xlnomy "${runtimeTx.data.name}"...`);
+
+        try {
+          const { createXlnomy } = await import('./jurisdiction-factory.js');
+          const xlnomy = await createXlnomy({
+            name: runtimeTx.data.name,
+            evmType: runtimeTx.data.evmType,
+            rpcUrl: runtimeTx.data.rpcUrl,
+            blockTimeMs: runtimeTx.data.blockTimeMs,
+            autoGrid: runtimeTx.data.autoGrid,
+          });
+
+          // Initialize xlnomies Map if it doesn't exist
+          if (!env.xlnomies) {
+            env.xlnomies = new Map();
+          }
+
+          // Store the created Xlnomy
+          env.xlnomies.set(xlnomy.name, xlnomy);
+
+          // Set as active if it's the first one
+          if (!env.activeXlnomy) {
+            env.activeXlnomy = xlnomy.name;
+          }
+
+          console.log(`[Runtime] ✅ Xlnomy "${xlnomy.name}" created with ${xlnomy.entities.length} entities`);
+          console.log(`[Runtime] Active Xlnomy: ${env.activeXlnomy}`);
+        } catch (error) {
+          console.error(`[Runtime] ❌ Failed to create Xlnomy:`, error);
+        }
+      } else if (runtimeTx.type === 'importReplica') {
         if (DEBUG)
           console.log(
             `Importing replica Entity #${formatEntityDisplay(runtimeTx.entityId)}:${formatSignerDisplay(runtimeTx.signerId)} (proposer: ${runtimeTx.data.isProposer})`,
@@ -4007,7 +4379,7 @@ const applyRuntimeInput = async (
           }
         }
       }
-    });
+    }
     // REPLICA-DEBUG and SERVER-PROCESSING logs removed
     for (const entityInput of mergedInputs) {
       // Track j-events in this input - entityInput.entityTxs guaranteed by validateEntityInput above
@@ -4498,6 +4870,7 @@ export {
   runDemoWrapper,
   // Name resolution functions
   searchEntityNames,
+  setBrowserVMJurisdiction,
   submitProcessBatch,
   submitPrefundAccount,
   submitSettle,
@@ -5551,7 +5924,7 @@ export const applyEntityFrame = async (
       if (accountMachine) {
         // Add to proposable if:
         // 1. Received a NEW frame that needs ACK (newAccountFrame)
-        // 2. Received an ACK (frameId with prevSignatures) AND we have mempool items
+        // 2. Received an ACK (height with prevSignatures) AND we have mempool items
         // 3. Received account transactions that need processing
         const isNewFrame = entityTx.data.newAccountFrame;
         const isAck = entityTx.data.height && entityTx.data.prevSignatures;
@@ -6079,7 +6452,7 @@ export async function handleAccountInput(
   // CRITICAL: Counter validation (replay protection) - ALWAYS enforce, no frame 0 exemption
   if (input.counter !== undefined) {
     const counterValid = validateMessageCounter(accountMachine, input.counter);
-    console.log(`🔍 Counter validation: ${input.counter} vs acked=${accountMachine.ackedTransitions}, frameId=${accountMachine.currentHeight}, valid=${counterValid}`);
+    console.log(`🔍 Counter validation: ${input.counter} vs acked=${accountMachine.ackedTransitions}, height=${accountMachine.currentHeight}, valid=${counterValid}`);
 
     if (!counterValid) {
       return { success: false, error: `Replay attack detected: counter ${input.counter} invalid (expected ${accountMachine.ackedTransitions + 1})`, events };
@@ -6179,7 +6552,7 @@ export async function handleAccountInput(
     console.log(`✅ Frame chain verified: prevFrameHash matches frame ${accountMachine.currentHeight}`);
 
     // CHANNEL.TS REFERENCE: Lines 138-165 - Proper rollback logic for simultaneous proposals
-    // Handle simultaneous proposals when both sides send same frameId
+    // Handle simultaneous proposals when both sides send same height
     if (accountMachine.pendingFrame && receivedFrame.height === accountMachine.pendingFrame.height) {
       console.log(`🔄 SIMULTANEOUS-PROPOSALS: Both proposed frame ${receivedFrame.height}`);
 
@@ -8298,7 +8671,7 @@ export const decodeAsync = async (buffer: Buffer): Promise<any> => {
 export { USE_MSGPACK };
 
 
-//runtime/evm.ts (940 lines)
+//runtime/evm.ts (977 lines)
 /**
  * XLN EVM Integration
  * Handles blockchain interactions, jurisdictions, and smart contract operations
@@ -8313,6 +8686,7 @@ import { safeStringify } from './serialization-utils';
 import { ConsensusConfig, JurisdictionConfig } from './types';
 import { DEBUG, isBrowser } from './utils';
 import { logError } from './logger';
+import { BrowserVMEthersProvider } from './browservm-ethers-provider';
 
 // Global logger for UI-accessible error logging (set by frontend)
 declare global {
@@ -8418,8 +8792,22 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
       uiLog(`   Resolved RPC: ${resolvedRpcUrl}`);
     }
 
-    // Connect to specified RPC node
-    const provider = new ethers.JsonRpcProvider(resolvedRpcUrl);
+    // Connect to specified RPC node (or use BrowserVM provider)
+    let provider: ethers.Provider;
+    const isBrowserVM = resolvedRpcUrl.startsWith('browservm://');
+
+    if (isBrowserVM) {
+      // Use BrowserVM provider
+      if (!BROWSER_VM_INSTANCE) {
+        throw new Error('BrowserVM instance not set - call setBrowserVMJurisdiction with browserVM instance first');
+      }
+      uiLog(`🧪 Using BrowserVM ethers provider`);
+      provider = new BrowserVMEthersProvider(BROWSER_VM_INSTANCE);
+    } else {
+      // Use standard JSON-RPC provider
+      provider = new ethers.JsonRpcProvider(resolvedRpcUrl);
+    }
+
     uiLog(`✅ Provider created`);
 
     // Use Hardhat account #0 private key (browser-compatible, no getSigner)
@@ -8429,18 +8817,22 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
     const signerAddress = await signer.getAddress();
     uiLog(`✅ Signer created: ${signerAddress}`);
 
-    // Test connection
-    try {
-      const network = await provider.getNetwork();
-      uiLog(`✅ Network connected: chainId=${network.chainId}`);
-    } catch (netError) {
-      uiError(`❌ NETWORK-CONNECT-FAILED`, {
-        rpcUrl,
-        errorCode: (netError as any)?.code,
-        errorMessage: (netError as any)?.message,
-        errorStack: (netError as any)?.stack
-      });
-      throw netError;
+    // Test connection (skip for BrowserVM to avoid circular dependency issues)
+    if (!isBrowserVM) {
+      try {
+        const network = await provider.getNetwork();
+        uiLog(`✅ Network connected: chainId=${network.chainId}`);
+      } catch (netError) {
+        uiError(`❌ NETWORK-CONNECT-FAILED`, {
+          rpcUrl,
+          errorCode: (netError as any)?.code,
+          errorMessage: (netError as any)?.message,
+          errorStack: (netError as any)?.stack
+        });
+        throw netError;
+      }
+    } else {
+      uiLog(`✅ BrowserVM connection established (chainId=1337)`);
     }
 
     // Create contract instances
@@ -8818,8 +9210,6 @@ export const registerNumberedEntitiesBatchOnChain = async (
   jurisdiction: JurisdictionConfig,
 ): Promise<{ txHash: string; entityNumbers: number[] }> => {
   try {
-    const { entityProvider } = await connectToEthereum(jurisdiction);
-
     // Encode all board hashes
     const boardHashes = configs.map(config => {
       const encodedBoard = encodeBoard(config);
@@ -8827,6 +9217,17 @@ export const registerNumberedEntitiesBatchOnChain = async (
     });
 
     console.log(`🏛️ Batch registering ${configs.length} entities in ONE transaction...`);
+
+    // BrowserVM: Use direct call to avoid circular dependencies
+    if (jurisdiction.address.startsWith('browservm://')) {
+      if (!BROWSER_VM_INSTANCE) {
+        throw new Error('BrowserVM instance not set');
+      }
+      return await BROWSER_VM_INSTANCE.registerNumberedEntitiesBatch(boardHashes);
+    }
+
+    // Standard blockchain: Use ethers.js
+    const { entityProvider } = await connectToEthereum(jurisdiction);
 
     // Call batch registration function
     const tx = await entityProvider['registerNumberedEntitiesBatch']!(boardHashes);
@@ -9130,18 +9531,27 @@ export const getAvailableJurisdictions = async (): Promise<JurisdictionConfig[]>
   return Array.from(jurisdictions.values());
 };
 
+// Store BrowserVM instance globally for runtime access
+let BROWSER_VM_INSTANCE: any = null;
+
 /**
  * Set BrowserVM jurisdiction (for isolated /view environments)
  * This overrides DEFAULT_JURISDICTIONS with a single BrowserVM-backed jurisdiction
  */
-export const setBrowserVMJurisdiction = (entityProviderAddress: string, depositoryAddress: string) => {
-  console.log('[BrowserVM] Setting jurisdiction override:', { entityProviderAddress, depositoryAddress });
+export const setBrowserVMJurisdiction = (entityProviderAddress: string, depositoryAddress: string, browserVMInstance?: any) => {
+  console.log('[BrowserVM] Setting jurisdiction override:', { entityProviderAddress, depositoryAddress, hasBrowserVM: !!browserVMInstance });
+
+  // Store browserVM instance if provided
+  if (browserVMInstance) {
+    BROWSER_VM_INSTANCE = browserVMInstance;
+    console.log('[BrowserVM] Stored browserVM instance for runtime access');
+  }
 
   DEFAULT_JURISDICTIONS = new Map();
   DEFAULT_JURISDICTIONS.set('arrakis', {
     name: 'Arrakis',
     chainId: 1337,
-    rpc: 'http://localhost:8545', // Not used by BrowserVM but required for type
+    address: 'browservm://', // BrowserVM uses in-memory EVM, no real RPC
     entityProviderAddress,
     depositoryAddress,
   });

@@ -12,6 +12,7 @@ import { safeStringify } from './serialization-utils';
 import { ConsensusConfig, JurisdictionConfig } from './types';
 import { DEBUG, isBrowser } from './utils';
 import { logError } from './logger';
+import { BrowserVMEthersProvider } from './browservm-ethers-provider';
 
 // Global logger for UI-accessible error logging (set by frontend)
 declare global {
@@ -117,8 +118,22 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
       uiLog(`   Resolved RPC: ${resolvedRpcUrl}`);
     }
 
-    // Connect to specified RPC node
-    const provider = new ethers.JsonRpcProvider(resolvedRpcUrl);
+    // Connect to specified RPC node (or use BrowserVM provider)
+    let provider: ethers.Provider;
+    const isBrowserVM = resolvedRpcUrl.startsWith('browservm://');
+
+    if (isBrowserVM) {
+      // Use BrowserVM provider
+      if (!BROWSER_VM_INSTANCE) {
+        throw new Error('BrowserVM instance not set - call setBrowserVMJurisdiction with browserVM instance first');
+      }
+      uiLog(`🧪 Using BrowserVM ethers provider`);
+      provider = new BrowserVMEthersProvider(BROWSER_VM_INSTANCE);
+    } else {
+      // Use standard JSON-RPC provider
+      provider = new ethers.JsonRpcProvider(resolvedRpcUrl);
+    }
+
     uiLog(`✅ Provider created`);
 
     // Use Hardhat account #0 private key (browser-compatible, no getSigner)
@@ -128,18 +143,22 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
     const signerAddress = await signer.getAddress();
     uiLog(`✅ Signer created: ${signerAddress}`);
 
-    // Test connection
-    try {
-      const network = await provider.getNetwork();
-      uiLog(`✅ Network connected: chainId=${network.chainId}`);
-    } catch (netError) {
-      uiError(`❌ NETWORK-CONNECT-FAILED`, {
-        rpcUrl,
-        errorCode: (netError as any)?.code,
-        errorMessage: (netError as any)?.message,
-        errorStack: (netError as any)?.stack
-      });
-      throw netError;
+    // Test connection (skip for BrowserVM to avoid circular dependency issues)
+    if (!isBrowserVM) {
+      try {
+        const network = await provider.getNetwork();
+        uiLog(`✅ Network connected: chainId=${network.chainId}`);
+      } catch (netError) {
+        uiError(`❌ NETWORK-CONNECT-FAILED`, {
+          rpcUrl,
+          errorCode: (netError as any)?.code,
+          errorMessage: (netError as any)?.message,
+          errorStack: (netError as any)?.stack
+        });
+        throw netError;
+      }
+    } else {
+      uiLog(`✅ BrowserVM connection established (chainId=1337)`);
     }
 
     // Create contract instances
@@ -517,8 +536,6 @@ export const registerNumberedEntitiesBatchOnChain = async (
   jurisdiction: JurisdictionConfig,
 ): Promise<{ txHash: string; entityNumbers: number[] }> => {
   try {
-    const { entityProvider } = await connectToEthereum(jurisdiction);
-
     // Encode all board hashes
     const boardHashes = configs.map(config => {
       const encodedBoard = encodeBoard(config);
@@ -526,6 +543,17 @@ export const registerNumberedEntitiesBatchOnChain = async (
     });
 
     console.log(`🏛️ Batch registering ${configs.length} entities in ONE transaction...`);
+
+    // BrowserVM: Use direct call to avoid circular dependencies
+    if (jurisdiction.address.startsWith('browservm://')) {
+      if (!BROWSER_VM_INSTANCE) {
+        throw new Error('BrowserVM instance not set');
+      }
+      return await BROWSER_VM_INSTANCE.registerNumberedEntitiesBatch(boardHashes);
+    }
+
+    // Standard blockchain: Use ethers.js
+    const { entityProvider } = await connectToEthereum(jurisdiction);
 
     // Call batch registration function
     const tx = await entityProvider['registerNumberedEntitiesBatch']!(boardHashes);
@@ -829,19 +857,31 @@ export const getAvailableJurisdictions = async (): Promise<JurisdictionConfig[]>
   return Array.from(jurisdictions.values());
 };
 
+// Store BrowserVM instance globally for runtime access
+let BROWSER_VM_INSTANCE: any = null;
+
 /**
  * Set BrowserVM jurisdiction (for isolated /view environments)
  * This overrides DEFAULT_JURISDICTIONS with a single BrowserVM-backed jurisdiction
  */
-export const setBrowserVMJurisdiction = (entityProviderAddress: string, depositoryAddress: string) => {
-  console.log('[BrowserVM] Setting jurisdiction override:', { entityProviderAddress, depositoryAddress });
+export const setBrowserVMJurisdiction = (depositoryAddress: string, browserVMInstance?: any) => {
+  // EntityProvider removed from BrowserVM - use placeholder address
+  const entityProviderAddress = '0x0000000000000000000000000000000000000000';
+
+  console.log('[BrowserVM] Setting jurisdiction override:', { depositoryAddress, hasBrowserVM: !!browserVMInstance });
+
+  // Store browserVM instance if provided
+  if (browserVMInstance) {
+    BROWSER_VM_INSTANCE = browserVMInstance;
+    console.log('[BrowserVM] Stored browserVM instance for runtime access');
+  }
 
   DEFAULT_JURISDICTIONS = new Map();
   DEFAULT_JURISDICTIONS.set('arrakis', {
     name: 'Arrakis',
     chainId: 1337,
-    rpc: 'http://localhost:8545', // Not used by BrowserVM but required for type
-    entityProviderAddress,
+    address: 'browservm://', // BrowserVM uses in-memory EVM, no real RPC
+    entityProviderAddress, // Placeholder - EntityProvider removed from BrowserVM
     depositoryAddress,
   });
 

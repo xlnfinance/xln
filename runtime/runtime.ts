@@ -31,6 +31,7 @@ import {
   getJurisdictionByAddress,
   getNextEntityNumber,
   registerNumberedEntityOnChain,
+  setBrowserVMJurisdiction,
   submitProcessBatch,
   submitPrefundAccount,
   submitSettle,
@@ -257,9 +258,42 @@ const applyRuntimeInput = async (
 
     const entityOutbox: EntityInput[] = [];
 
-    // TICK and REPLICA-DEBUG logging removed - too verbose
-    env.runtimeInput.runtimeTxs.forEach(runtimeTx => {
-      if (runtimeTx.type === 'importReplica') {
+    // Process runtime transactions (handle async operations properly)
+    for (const runtimeTx of env.runtimeInput.runtimeTxs) {
+      if (runtimeTx.type === 'createXlnomy') {
+        console.log(`[Runtime] Creating Xlnomy "${runtimeTx.data.name}"...`);
+
+        try {
+          const { createXlnomy } = await import('./jurisdiction-factory.js');
+          const xlnomy = await createXlnomy({
+            name: runtimeTx.data.name,
+            evmType: runtimeTx.data.evmType,
+            rpcUrl: runtimeTx.data.rpcUrl,
+            blockTimeMs: runtimeTx.data.blockTimeMs,
+            autoGrid: runtimeTx.data.autoGrid,
+            env, // Pass env so grid entities get added to runtime
+          });
+
+          // Initialize xlnomies Map if it doesn't exist
+          if (!env.xlnomies) {
+            env.xlnomies = new Map();
+          }
+
+          // Store the created Xlnomy
+          env.xlnomies.set(xlnomy.name, xlnomy);
+
+          // Set as active if it's the first one
+          if (!env.activeXlnomy) {
+            env.activeXlnomy = xlnomy.name;
+          }
+
+          console.log(`[Runtime] ✅ Xlnomy "${xlnomy.name}" created`);
+          console.log(`[Runtime] Grid entities queued in runtimeInput: ${env.runtimeInput.runtimeTxs.length} txs`);
+          console.log(`[Runtime] Active Xlnomy: ${env.activeXlnomy}`);
+        } catch (error) {
+          console.error(`[Runtime] ❌ Failed to create Xlnomy:`, error);
+        }
+      } else if (runtimeTx.type === 'importReplica') {
         if (DEBUG)
           console.log(
             `Importing replica Entity #${formatEntityDisplay(runtimeTx.entityId)}:${formatSignerDisplay(runtimeTx.signerId)} (proposer: ${runtimeTx.data.isProposer})`,
@@ -333,7 +367,7 @@ const applyRuntimeInput = async (
           }
         }
       }
-    });
+    }
     // REPLICA-DEBUG and SERVER-PROCESSING logs removed
     for (const entityInput of mergedInputs) {
       // Track j-events in this input - entityInput.entityTxs guaranteed by validateEntityInput above
@@ -824,6 +858,7 @@ export {
   runDemoWrapper,
   // Name resolution functions
   searchEntityNames,
+  setBrowserVMJurisdiction,
   submitProcessBatch,
   submitPrefundAccount,
   submitSettle,
@@ -1092,12 +1127,15 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     // Save latest height pointer
     await db.put(Buffer.from('latest_height'), Buffer.from(String(env.height)));
 
-    // Save environment snapshot
-    const snapshot = JSON.stringify(env, (k, v) =>
-      typeof v === 'bigint' ? String(v) :
-      v instanceof Uint8Array ? Array.from(v) :
-      v instanceof Map ? Array.from(v.entries()) : v
-    );
+    // Save environment snapshot (exclude xlnomies - they have circular refs)
+    const snapshot = JSON.stringify(env, (k, v) => {
+      // Skip xlnomies Map entirely (contains EVM instances with circular refs)
+      if (k === 'xlnomies') return undefined;
+
+      return typeof v === 'bigint' ? String(v) :
+        v instanceof Uint8Array ? Array.from(v) :
+        v instanceof Map ? Array.from(v.entries()) : v;
+    });
     await db.put(Buffer.from(`snapshot:${env.height}`), Buffer.from(snapshot));
   } catch (err) {
     console.error('❌ Failed to save to LevelDB:', err);

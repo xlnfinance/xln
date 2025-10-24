@@ -68,10 +68,13 @@ export function getRuntimeFrames(history: Snapshot[], replica: EntityReplica | n
     });
 
     // Also check relevant runtimeTxs
-    const relevantRuntimeTxs = runtimeTxs.filter(
-      (tx: RuntimeTx) =>
-        tx.entityId === replica.entityId || tx.signerId === replica.signerId,
-    );
+    const relevantRuntimeTxs = runtimeTxs.filter((tx: RuntimeTx) => {
+      if (tx.type === 'importReplica') {
+        return tx.entityId === replica.entityId || tx.signerId === replica.signerId;
+      }
+      // For other types (createXlnomy), they're not specific to any replica
+      return false;
+    });
 
     const hasActivity = replicaInputs.length > 0 || replicaOutputs.length > 0 || replicaImports.length > 0;
 

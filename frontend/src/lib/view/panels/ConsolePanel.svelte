@@ -21,6 +21,8 @@
   let scrollContainer: HTMLDivElement;
   let mirrorToDevTools = true; // Toggle for sending to browser console
   let searchText = '';
+  let debouncedSearchText = ''; // Debounced version for filtering
+  let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Command REPL
   let commandInput = '';
@@ -138,9 +140,17 @@
     URL.revokeObjectURL(url);
   }
 
+  // Debounce search input (300ms delay)
+  $: {
+    if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+    searchDebounceTimer = setTimeout(() => {
+      debouncedSearchText = searchText;
+    }, 300);
+  }
+
   $: filteredLogs = logs
     .filter(log => filterLevel === 'all' || log.level === filterLevel)
-    .filter(log => !searchText || log.message.toLowerCase().includes(searchText.toLowerCase()));
+    .filter(log => !debouncedSearchText || log.message.toLowerCase().includes(debouncedSearchText.toLowerCase()));
 
   // Command executor
   const commands = {

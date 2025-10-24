@@ -3,3 +3,53 @@ SEED simnet-grid
 0: Create Grid
 Lazy 2x2x2 cube (no blockchain)
 grid 2 2 2 type=lazy
+
+100: First wave of transfers (show O(n) broadcast problem)
+Entity 0_0_0 pays 100k to Entity 0_0_1
+r2r 0_0_0 0_0_1 100000
+
+200: Entity 0_1_0 pays Entity 0_1_1
+r2r 0_1_0 0_1_1 50000
+
+300: Entity 1_0_0 pays Entity 1_0_1
+r2r 1_0_0 1_0_1 75000
+
+400: Cross-grid transfer
+Entity 0_0_1 pays Entity 1_1_0
+r2r 0_0_1 1_1_0 120000
+
+500: Multiple simultaneous transfers (broadcast storm)
+Entity 0_1_1 pays Entity 1_1_1
+r2r 0_1_1 1_1_1 80000
+
+520: Another transfer (more broadcasts)
+Entity 1_0_1 pays Entity 0_1_0
+r2r 1_0_1 0_1_0 60000
+
+540: Final transfer
+Entity 1_1_1 pays Entity 0_0_0
+r2r 1_1_1 0_0_0 90000
+
+560: More transfers (trigger another broadcast)
+Entity 0_0_0 pays Entity 0_1_1
+r2r 0_0_0 0_1_1 40000
+
+580: Continuous activity
+Entity 1_1_0 pays Entity 1_0_0
+r2r 1_1_0 1_0_0 55000
+
+600: More transfers
+Entity 0_1_0 pays Entity 1_0_1
+r2r 0_1_0 1_0_1 70000
+
+620: Keep going (show broadcast storm)
+Entity 1_0_0 pays Entity 0_0_1
+r2r 1_0_0 0_0_1 35000
+
+640: Another round
+Entity 1_0_1 pays Entity 1_1_1
+r2r 1_0_1 1_1_1 85000
+
+660: Final burst
+Entity 0_0_1 pays Entity 0_1_1
+r2r 0_0_1 0_1_1 95000

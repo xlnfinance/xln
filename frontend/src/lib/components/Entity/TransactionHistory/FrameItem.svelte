@@ -26,7 +26,13 @@
         {#each frame.imports as imp}
           <div class="simple-transaction">
             <span class="tx-type">Import</span>
-            <span class="tx-details">Entity {imp.entityId.slice(-4)}</span>
+            <span class="tx-details">
+              {#if imp.type === 'importReplica'}
+                Entity {imp.entityId.slice(-4)}
+              {:else}
+                {imp.type}
+              {/if}
+            </span>
           </div>
         {/each}
 

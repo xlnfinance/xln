@@ -8,6 +8,7 @@
 
   import type { Writable } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
+  import { shortAddress } from '$lib/utils/format';
 
   // Receive isolated env as prop (passed from View.svelte)
   export let isolatedEnv: Writable<any>;
@@ -42,10 +43,16 @@
     }
 
     if (replicas) {
-      return Array.from(replicas.entries() as any).map((entry: any) => ({
-        id: entry[0],
-        accounts: entry[1]?.state?.accounts
-      }));
+      // Extract entityId from replica key (format: "entityId:signerId")
+      return Array.from(replicas.entries() as any).map((entry: any) => {
+        const replicaKey = entry[0];
+        const entityId = replicaKey.split(':')[0] || replicaKey;
+        return {
+          id: entityId,
+          replicaKey: replicaKey,
+          accounts: entry[1]?.state?.accounts
+        };
+      });
     }
     return [];
   })();
@@ -64,7 +71,7 @@
         class:selected={entity.id === selectedEntityId}
         on:click={() => panelBridge.emit('entity:selected', { entityId: entity.id })}
       >
-        <h4>{entity.id.slice(0, 10)}...</h4>
+        <h4>{shortAddress(entity.id)}</h4>
         <p>Accounts: {entity.accounts?.size || 0}</p>
       </div>
     {/each}

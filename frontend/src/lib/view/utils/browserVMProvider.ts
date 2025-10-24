@@ -10,6 +10,7 @@ import { createVM, runTx } from '@ethereumjs/vm';
 import { createLegacyTx } from '@ethereumjs/tx';
 import { createAddressFromPrivateKey, hexToBytes, createAccount, bytesToHex } from '@ethereumjs/util';
 import type { Address } from '@ethereumjs/util';
+import { Common, Hardfork, Chain } from '@ethereumjs/common';
 
 export class BrowserVMProvider {
   private vm: any;
@@ -42,9 +43,14 @@ export class BrowserVMProvider {
     this.depositoryArtifact = await response.json();
     console.log('[BrowserVM] Initializing...');
 
-    // Create VM
-    this.vm = await createVM();
+    // Create VM with evmOpts to disable contract size limit
+    this.vm = await createVM({
+      evmOpts: {
+        allowUnlimitedContractSize: true, // Disable EIP-170 24KB limit for simnet
+      },
+    });
     this.common = this.vm.common;
+    console.log('[BrowserVM] Unlimited contract size enabled for simnet');
 
     // Fund deployer
     const deployerAccount = createAccount({
@@ -65,6 +71,7 @@ export class BrowserVMProvider {
   /** Deploy Depository contract */
   private async deployDepository(): Promise<void> {
     console.log('[BrowserVM] Deploying Depository...');
+    console.log('[BrowserVM] Bytecode length:', this.depositoryArtifact.bytecode?.length || 0);
 
     // Query nonce from VM state
     const currentNonce = await this.getCurrentNonce();
@@ -79,6 +86,12 @@ export class BrowserVMProvider {
     const result = await runTx(this.vm, { tx });
 
     if (result.execResult.exceptionError) {
+      console.error('[BrowserVM] Deployment exception:', result.execResult.exceptionError);
+      console.error('[BrowserVM] Result:', JSON.stringify({
+        gasUsed: result.totalGasSpent?.toString(),
+        returnValue: result.execResult.returnValue?.length,
+        logs: result.execResult.logs?.length
+      }));
       throw new Error(`Deployment failed: ${result.execResult.exceptionError}`);
     }
 

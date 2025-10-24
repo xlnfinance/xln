@@ -272,7 +272,7 @@ export async function handleAccountInput(
   // CRITICAL: Counter validation (replay protection) - ALWAYS enforce, no frame 0 exemption
   if (input.counter !== undefined) {
     const counterValid = validateMessageCounter(accountMachine, input.counter);
-    console.log(`🔍 Counter validation: ${input.counter} vs acked=${accountMachine.ackedTransitions}, frameId=${accountMachine.currentHeight}, valid=${counterValid}`);
+    console.log(`🔍 Counter validation: ${input.counter} vs acked=${accountMachine.ackedTransitions}, height=${accountMachine.currentHeight}, valid=${counterValid}`);
 
     if (!counterValid) {
       return { success: false, error: `Replay attack detected: counter ${input.counter} invalid (expected ${accountMachine.ackedTransitions + 1})`, events };
@@ -372,7 +372,7 @@ export async function handleAccountInput(
     console.log(`✅ Frame chain verified: prevFrameHash matches frame ${accountMachine.currentHeight}`);
 
     // CHANNEL.TS REFERENCE: Lines 138-165 - Proper rollback logic for simultaneous proposals
-    // Handle simultaneous proposals when both sides send same frameId
+    // Handle simultaneous proposals when both sides send same height
     if (accountMachine.pendingFrame && receivedFrame.height === accountMachine.pendingFrame.height) {
       console.log(`🔄 SIMULTANEOUS-PROPOSALS: Both proposed frame ${receivedFrame.height}`);
 

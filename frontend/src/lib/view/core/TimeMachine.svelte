@@ -382,9 +382,7 @@
     align-items: center;
     gap: 1rem;
     padding: 0.75rem 1.5rem;
-    background: rgba(10, 10, 10, 0.6);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    background: #252526; /* Solid background to cover 3D scene underneath */
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     border-bottom: 1px solid rgba(0, 0, 0, 0.5);
     box-shadow:
@@ -484,7 +482,8 @@
     height: 6px;
     -webkit-appearance: none;
     appearance: none;
-    background: transparent;
+    background: rgba(255, 255, 255, 0.1); /* Fallback background */
+    border-radius: 3px;
     cursor: pointer;
     outline: none;
   }
@@ -493,11 +492,19 @@
   .scrubber::-webkit-slider-track {
     width: 100%;
     height: 6px;
+    background: rgba(255, 255, 255, 0.1); /* Gray track as base */
+    border-radius: 3px;
+  }
+
+  /* Progress fill using ::before pseudo-element (CSS var not supported in gradients on all browsers) */
+  .scrubber::-webkit-slider-runnable-track {
+    width: 100%;
+    height: 6px;
     background: linear-gradient(
       to right,
       rgba(0, 122, 255, 0.8) 0%,
-      rgba(0, 122, 255, 0.8) var(--progress),
-      rgba(255, 255, 255, 0.1) var(--progress),
+      rgba(0, 122, 255, 0.8) var(--progress, 0%),
+      rgba(255, 255, 255, 0.1) var(--progress, 0%),
       rgba(255, 255, 255, 0.1) 100%
     );
     border-radius: 3px;
@@ -529,11 +536,17 @@
     background: linear-gradient(
       to right,
       rgba(0, 122, 255, 0.8) 0%,
-      rgba(0, 122, 255, 0.8) var(--progress),
-      rgba(255, 255, 255, 0.1) var(--progress),
+      rgba(0, 122, 255, 0.8) var(--progress, 0%),
+      rgba(255, 255, 255, 0.1) var(--progress, 0%),
       rgba(255, 255, 255, 0.1) 100%
     );
     border-radius: 3px;
+  }
+
+  .scrubber::-moz-range-progress {
+    height: 6px;
+    background: rgba(0, 122, 255, 0.8);
+    border-radius: 3px 0 0 3px;
   }
 
   .scrubber::-moz-range-thumb {
