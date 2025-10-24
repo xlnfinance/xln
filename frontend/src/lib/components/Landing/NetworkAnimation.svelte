@@ -49,11 +49,12 @@
   function createUnicastPath() {
     if (!animationEnabled) return;
 
-    const numHops = 3 + Math.floor(Math.random() * 3); // 3-5 hops
+    // 4-6 points = 3-5 hops (always alice-hub-bob minimum, never direct alice-bob)
+    const numPoints = 4 + Math.floor(Math.random() * 3);
     const hops: Point[] = [];
 
     // Generate path points across the screen
-    for (let i = 0; i < numHops; i++) {
+    for (let i = 0; i < numPoints; i++) {
       hops.push(randomPoint());
     }
 
