@@ -283,18 +283,6 @@
               />
             </div>
           </div>
-          <div class="invariant-legend">
-            <div class="legend-item">
-              <span class="legend-label">Left entity</span>
-              <span class="legend-arrow">←</span>
-              <span class="legend-delta">Δ</span>
-              <span class="legend-arrow">→</span>
-              <span class="legend-label">Right entity</span>
-            </div>
-            <div class="legend-explanation">
-              Left can owe up to their credit limit (−) · Δ tracks the balance · Right can owe up to collateral + their credit limit
-            </div>
-          </div>
         </div>
 
         <div class="formula-variants">
@@ -1629,54 +1617,6 @@
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
-  }
-
-  .invariant-legend {
-    margin-top: 1.5rem;
-    padding-top: 1.5rem;
-    border-top: 1px solid rgba(79, 209, 139, 0.15);
-    text-align: center;
-  }
-
-  .legend-item {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.75rem;
-    margin-bottom: 0.75rem;
-    font-size: 1rem;
-  }
-
-  .legend-label {
-    color: rgba(255, 255, 255, 0.7);
-    font-weight: 500;
-  }
-
-  .legend-arrow {
-    color: rgba(79, 209, 139, 0.6);
-    font-size: 1.2rem;
-  }
-
-  .legend-delta {
-    color: #00d1ff;
-    font-weight: 600;
-    font-size: 1.1rem;
-    padding: 0 0.5rem;
-  }
-
-  .legend-explanation {
-    font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.5);
-    font-style: italic;
-    line-height: 1.6;
-  }
-
-  :global(.light-mode) .legend-label {
-    color: rgba(0, 0, 0, 0.7);
-  }
-
-  :global(.light-mode) .legend-explanation {
-    color: rgba(0, 0, 0, 0.5);
   }
 
   .visual-column {
