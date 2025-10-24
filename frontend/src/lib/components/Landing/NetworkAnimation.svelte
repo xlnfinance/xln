@@ -116,25 +116,14 @@
     const currentX = from.x + (to.x - from.x) * progress;
     const currentY = from.y + (to.y - from.y) * progress;
 
-    const opacity = (blackAndWhiteMode ? 0.4 : 0.3) * fadeMultiplier;
+    const opacity = (blackAndWhiteMode ? 0.5 : 0.4) * fadeMultiplier;
 
-    // Create gradient from blue to cyan (or white in B&W mode)
-    const gradient = ctx.createLinearGradient(from.x, from.y, currentX, currentY);
-    if (blackAndWhiteMode) {
-      gradient.addColorStop(0, 'rgba(255, 255, 255, ' + opacity + ')');
-      gradient.addColorStop(1, 'rgba(255, 255, 255, ' + (opacity * 1.5) + ')');
-    } else {
-      gradient.addColorStop(0, 'rgba(0, 122, 204, ' + opacity + ')'); // Blue
-      gradient.addColorStop(1, 'rgba(0, 255, 255, ' + (opacity * 1.5) + ')'); // Cyan
-    }
+    // Simpler solid color - no gradient (performance)
+    const color = blackAndWhiteMode ? `rgba(255, 255, 255, ${opacity})` : `rgba(0, 200, 255, ${opacity})`;
 
-    // Glow effect
-    ctx.shadowBlur = 8;
-    ctx.shadowColor = blackAndWhiteMode ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 200, 255, 0.6)';
-
-    ctx.strokeStyle = gradient;
-    ctx.globalAlpha = 1; // Let gradient handle opacity
-    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 2;
     ctx.lineCap = 'round';
 
     ctx.beginPath();
@@ -142,32 +131,13 @@
     ctx.lineTo(currentX, currentY);
     ctx.stroke();
 
-    // Draw glowing dot at current position with particle trail
-    const dotColor = blackAndWhiteMode ? '#ffffff' : '#00ffff';
-    ctx.shadowBlur = 12;
-    ctx.shadowColor = dotColor;
+    // Simple bright dot at current position (no shadow blur)
+    const dotColor = blackAndWhiteMode ? `rgba(255, 255, 255, ${opacity * 1.8})` : `rgba(0, 255, 255, ${opacity * 1.8})`;
 
     ctx.fillStyle = dotColor;
-    ctx.globalAlpha = opacity * 1.8;
     ctx.beginPath();
-    ctx.arc(currentX, currentY, 3, 0, Math.PI * 2);
+    ctx.arc(currentX, currentY, 2.5, 0, Math.PI * 2);
     ctx.fill();
-
-    // Particle trail (3 small fading dots behind)
-    for (let i = 1; i <= 3; i++) {
-      const trailProgress = Math.max(0, progress - (i * 0.05));
-      const trailX = from.x + (to.x - from.x) * trailProgress;
-      const trailY = from.y + (to.y - from.y) * trailProgress;
-      const trailOpacity = opacity * (1 - i * 0.3);
-
-      ctx.globalAlpha = trailOpacity;
-      ctx.beginPath();
-      ctx.arc(trailX, trailY, 2 - i * 0.3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Reset shadow
-    ctx.shadowBlur = 0;
   }
 
   function drawRipple(ripple: BroadcastRipple) {
@@ -177,10 +147,6 @@
     const baseOpacity = blackAndWhiteMode ? 0.4 : 0.3;
     const opacity = baseOpacity * (1 - ripple.radius / ripple.maxRadius);
 
-    // Heavy glow to emphasize expense
-    ctx.shadowBlur = 15;
-    ctx.shadowColor = color;
-
     ctx.strokeStyle = color;
     ctx.globalAlpha = opacity;
     ctx.lineWidth = 4; // Thicker to emphasize heaviness
@@ -188,9 +154,6 @@
     ctx.beginPath();
     ctx.arc(ripple.x, ripple.y, ripple.radius, 0, Math.PI * 2);
     ctx.stroke();
-
-    // Reset shadow for other drawings
-    ctx.shadowBlur = 0;
   }
 
   function animate() {
@@ -248,10 +211,10 @@
     // Start animation loop
     animate();
 
-    // Spawn unicast paths EXTREMELY frequently (every 20-30ms) - WOW factor!
+    // Spawn unicast paths frequently but not crazy (every 150-250ms) - performance balanced!
     const unicastInterval = setInterval(() => {
       createUnicastPath();
-    }, 20 + Math.random() * 10);
+    }, 150 + Math.random() * 100);
 
     // Spawn broadcast ripples every 3-5 seconds
     const broadcastInterval = setInterval(() => {
