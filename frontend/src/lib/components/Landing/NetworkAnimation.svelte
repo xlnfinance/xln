@@ -2,13 +2,15 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
 
+  export let darkMode = true; // Prop from parent
+  export let onToggleDarkMode: () => void; // Callback to parent
+
   let canvas: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D | null;
   let animationFrame: number;
 
   // Controls
-  let animationEnabled = true;
-  let blackAndWhiteMode = false;
+  let animationEnabled = false; // OFF by default - less annoying
 
   interface Point {
     x: number;
@@ -116,10 +118,10 @@
     const currentX = from.x + (to.x - from.x) * progress;
     const currentY = from.y + (to.y - from.y) * progress;
 
-    const opacity = (blackAndWhiteMode ? 0.5 : 0.4) * fadeMultiplier;
+    const opacity = (darkMode ? 0.4 : 0.5) * fadeMultiplier;
 
     // Simpler solid color - no gradient (performance)
-    const color = blackAndWhiteMode ? `rgba(255, 255, 255, ${opacity})` : `rgba(0, 200, 255, ${opacity})`;
+    const color = darkMode ? `rgba(0, 200, 255, ${opacity})` : `rgba(0, 100, 200, ${opacity})`;
 
     ctx.strokeStyle = color;
     ctx.globalAlpha = 1;
@@ -132,7 +134,7 @@
     ctx.stroke();
 
     // Simple bright dot at current position (no shadow blur)
-    const dotColor = blackAndWhiteMode ? `rgba(255, 255, 255, ${opacity * 1.8})` : `rgba(0, 255, 255, ${opacity * 1.8})`;
+    const dotColor = darkMode ? `rgba(0, 255, 255, ${opacity * 1.8})` : `rgba(0, 100, 200, ${opacity * 1.8})`;
 
     ctx.fillStyle = dotColor;
     ctx.beginPath();
@@ -143,8 +145,8 @@
   function drawRipple(ripple: BroadcastRipple) {
     if (!ctx) return;
 
-    const color = blackAndWhiteMode ? '#ffffff' : '#ff8888';
-    const baseOpacity = blackAndWhiteMode ? 0.4 : 0.3;
+    const color = darkMode ? '#ff8888' : '#cc5555';
+    const baseOpacity = darkMode ? 0.3 : 0.4;
     const opacity = baseOpacity * (1 - ripple.radius / ripple.maxRadius);
 
     ctx.strokeStyle = color;
@@ -216,10 +218,10 @@
       createUnicastPath();
     }, 150 + Math.random() * 100);
 
-    // Spawn broadcast ripples every 3-5 seconds
+    // Spawn broadcast ripples rarely (every 9-15 seconds) - they're expensive!
     const broadcastInterval = setInterval(() => {
       createBroadcastRipple();
-    }, 3000 + Math.random() * 2000);
+    }, 9000 + Math.random() * 6000);
 
     return () => {
       if (animationFrame) cancelAnimationFrame(animationFrame);
@@ -234,10 +236,10 @@
 
 <div class="animation-controls">
   <button on:click={() => animationEnabled = !animationEnabled} class="control-btn">
-    {animationEnabled ? '⏸ Pause Unicast Dance' : '▶ Play Unicast Dance'}
+    {animationEnabled ? '⏸ Pause Animation' : '▶ Play Animation'}
   </button>
-  <button on:click={() => blackAndWhiteMode = !blackAndWhiteMode} class="control-btn">
-    {blackAndWhiteMode ? '🎨 Color' : '⚫ B&W'}
+  <button on:click={onToggleDarkMode} class="control-btn">
+    {darkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
   </button>
 </div>
 
@@ -275,6 +277,18 @@
 
   .control-btn:hover {
     background: rgba(0, 0, 0, 0.9);
+    border-color: #007acc;
+  }
+
+  /* Light mode button styling */
+  :global(.light-mode) .control-btn {
+    background: rgba(255, 255, 255, 0.9);
+    color: #000;
+    border-color: rgba(0, 0, 0, 0.2);
+  }
+
+  :global(.light-mode) .control-btn:hover {
+    background: rgba(255, 255, 255, 1);
     border-color: #007acc;
   }
 </style>
