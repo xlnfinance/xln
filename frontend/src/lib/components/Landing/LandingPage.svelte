@@ -470,8 +470,8 @@
         <p class="intro">xln isn't just "better payment channels" — it's the settlement layer for programmable money at planetary scale.</p>
 
         <div class="roadmap-box">
-          <p class="roadmap-text"><strong>Today:</strong> EVM substrate — instant settlement between Ethereum L1, rollups, and alt-L1s (Polygon, Arbitrum, Base, etc.)</p>
-          <p class="roadmap-text"><strong>Tomorrow:</strong> CBDC substrate — when central banks launch programmable money, xln becomes the universal interop layer</p>
+          <p class="roadmap-text"><strong>Today:</strong> Universal EVM substrate — works with any EVM chain (Ethereum L1, rollups, alt-L1s: Polygon, Arbitrum, Base, BSC, etc.)</p>
+          <p class="roadmap-text"><strong>Tomorrow:</strong> Same substrate serves CBDCs — when central banks launch EVM-compatible programmable money, xln becomes the universal interop layer</p>
         </div>
 
         <div class="cbdc-stat">
