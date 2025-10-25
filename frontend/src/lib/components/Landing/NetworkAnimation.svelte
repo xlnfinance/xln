@@ -170,17 +170,20 @@
 
       // Draw all completed hops
       for (let i = 0; i < path.currentHop; i++) {
-        drawLine(path.hops[i], path.hops[i + 1], 1, 0.3);
+        const from = path.hops[i];
+        const to = path.hops[i + 1];
+        if (from && to) {
+          drawLine(from, to, 1, 0.3);
+        }
       }
 
       // Draw current hop
       if (path.currentHop < path.hops.length - 1) {
-        drawLine(
-          path.hops[path.currentHop],
-          path.hops[path.currentHop + 1],
-          path.progress,
-          1
-        );
+        const from = path.hops[path.currentHop];
+        const to = path.hops[path.currentHop + 1];
+        if (from && to) {
+          drawLine(from, to, path.progress, 1);
+        }
 
         if (path.progress >= 1) {
           path.currentHop++;
