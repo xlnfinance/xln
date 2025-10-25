@@ -640,6 +640,27 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
+  /* Text Selection Colors */
+  ::selection {
+    background: rgba(79, 209, 139, 0.3);
+    color: #fff;
+  }
+
+  ::-moz-selection {
+    background: rgba(79, 209, 139, 0.3);
+    color: #fff;
+  }
+
+  :global(.light-mode) ::selection {
+    background: rgba(79, 209, 139, 0.25);
+    color: #000;
+  }
+
+  :global(.light-mode) ::-moz-selection {
+    background: rgba(79, 209, 139, 0.25);
+    color: #000;
+  }
+
   .landing {
     min-height: 100vh;
     background: #000;
