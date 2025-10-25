@@ -1,5 +1,5 @@
 // XLN Context Generator - Creates ultra-compact LLM-friendly context
-// Output: frontend/static/c.txt (accessible at xln.finance/c.txt)
+// Output: frontend/static/llms.txt (accessible at xln.finance/llms.txt)
 const fs = require('fs');
 const path = require('path');
 
@@ -337,7 +337,7 @@ function generateContext() {
 
 // Generate and write
 const { output: context, fileStats } = generateContext();
-const outputPath = path.join(__dirname, '../../frontend/static/c.txt');
+const outputPath = path.join(__dirname, '../../frontend/static/llms.txt');
 
 // Ensure directory exists
 const outputDir = path.dirname(outputPath);
@@ -353,9 +353,9 @@ const bytes = Buffer.byteLength(context, 'utf8');
 const kb = (bytes / 1024).toFixed(1);
 const tokensTotal = Math.round(bytes / 3.5);
 
-console.log('✅ c.txt generated');
+console.log('✅ llms.txt generated');
 console.log(`📊 ${lines.toLocaleString()} lines, ${kb} KB, ~${tokensTotal.toLocaleString()} tokens`);
-console.log(`🌐 xln.finance/c.txt`);
+console.log(`🌐 xln.finance/llms.txt`);
 console.log(`📁 Contracts: ${CORE_FILES.contracts.length} | Runtime: ${CORE_FILES.runtime.length} | Docs: ${CORE_FILES.docs.length} | Worlds: ${CORE_FILES.worlds.length}`);
 
 // Token breakdown by file (top 15)
