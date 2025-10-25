@@ -314,6 +314,39 @@
         </ul>
       </div>
 
+      <!-- Smart Contracts Section -->
+      <div class="section contracts-section">
+        <h2>Three Core Smart Contracts</h2>
+        <div class="contracts-grid">
+          <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/Depository.sol" target="_blank" rel="noopener" class="contract-card">
+            <div class="contract-header">
+              <span class="contract-icon">📜</span>
+              <span class="contract-name">Depository.sol</span>
+            </div>
+            <p class="contract-desc">Reserve management & FIFO debt enforcement</p>
+            <div class="contract-link-label">View on GitHub →</div>
+          </a>
+
+          <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/EntityProvider.sol" target="_blank" rel="noopener" class="contract-card">
+            <div class="contract-header">
+              <span class="contract-icon">🏛️</span>
+              <span class="contract-name">EntityProvider.sol</span>
+            </div>
+            <p class="contract-desc">Entity registration & BFT quorum verification</p>
+            <div class="contract-link-label">View on GitHub →</div>
+          </a>
+
+          <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/SubcontractProvider.sol" target="_blank" rel="noopener" class="contract-card">
+            <div class="contract-header">
+              <span class="contract-icon">⚡</span>
+              <span class="contract-name">SubcontractProvider.sol</span>
+            </div>
+            <p class="contract-desc">HTLCs, atomic swaps & limit orders</p>
+            <div class="contract-link-label">View on GitHub →</div>
+          </a>
+        </div>
+      </div>
+
       <div class="section">
         <h2>Key Properties</h2>
         <ul class="properties-list">
@@ -1486,6 +1519,86 @@
     left: 0;
     color: #4fd18b;
     font-weight: bold;
+  }
+
+  /* Smart Contracts Section */
+  .contracts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+  }
+
+  .contract-card {
+    display: flex;
+    flex-direction: column;
+    padding: 1.5rem;
+    background: rgba(79, 209, 139, 0.05);
+    border: 1px solid rgba(79, 209, 139, 0.2);
+    border-radius: 8px;
+    text-decoration: none;
+    transition: all 0.3s ease;
+  }
+
+  .contract-card:hover {
+    background: rgba(79, 209, 139, 0.08);
+    border-color: rgba(79, 209, 139, 0.4);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(79, 209, 139, 0.15);
+  }
+
+  .contract-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .contract-icon {
+    font-size: 1.5rem;
+  }
+
+  .contract-name {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .contract-desc {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0 0 1rem 0;
+    flex-grow: 1;
+  }
+
+  .contract-link-label {
+    font-size: 0.85rem;
+    color: #4fd18b;
+    font-weight: 500;
+  }
+
+  :global(.light-mode) .contract-card {
+    background: rgba(79, 209, 139, 0.08);
+    border-color: rgba(79, 209, 139, 0.25);
+  }
+
+  :global(.light-mode) .contract-card:hover {
+    background: rgba(79, 209, 139, 0.12);
+    border-color: rgba(79, 209, 139, 0.5);
+  }
+
+  :global(.light-mode) .contract-name {
+    color: rgba(0, 0, 0, 0.95);
+  }
+
+  :global(.light-mode) .contract-desc {
+    color: rgba(0, 0, 0, 0.7);
+  }
+
+  :global(.light-mode) .contract-link-label {
+    color: #2a8a5f;
   }
 
   .plot-twist {
