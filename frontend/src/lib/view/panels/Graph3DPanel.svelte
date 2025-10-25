@@ -231,7 +231,7 @@ let vrHammer: VRHammer | null = null;
   let connectionIndexMap: Map<string, number> = new Map();
 
   // Animation frame and hover state
-  let animationId: number;
+  let animationId: number | null;
   let clock = new THREE.Clock();
   let hoveredObject: any = null;
   let tooltip = { visible: false, x: 0, y: 0, content: '' };
@@ -807,17 +807,17 @@ let vrHammer: VRHammer | null = null;
   onDestroy(() => {
     if (animationId) {
       cancelAnimationFrame(animationId);
-      animationId = null;
+      animationId = null as any;
     }
     if (renderer) {
       renderer.dispose();
-      renderer = null;
+      renderer = null as any;
     }
     if (scene) {
-      scene = null;
+      scene = null as any;
     }
     if (camera) {
-      camera = null;
+      camera = null as any;
     }
     if (controls) {
       if (typeof controls.dispose === 'function') {
@@ -1271,9 +1271,9 @@ let vrHammer: VRHammer | null = null;
 
     // Debug: Expose to window for inspection
     if (typeof window !== 'undefined') {
-      window.__debugScene = scene;
-      window.__debugCamera = camera;
-      window.__debugRenderer = renderer;
+      (window as any).__debugScene = scene;
+      (window as any).__debugCamera = camera;
+      (window as any).__debugRenderer = renderer;
     }
 
     // OrbitControls setup
