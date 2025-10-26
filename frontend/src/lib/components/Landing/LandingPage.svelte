@@ -263,83 +263,58 @@
         <h2>The Solution</h2>
         <p class="intro"><strong>xln</strong> is the first <strong>Reserve-Credit Provable Account Network (RCPAN)</strong>: credit where it scales, collateral where it secures. A principled hybrid.</p>
 
-        <!-- History of Money: From Big Bang to xln -->
-        <div class="money-history">
-          <div class="history-title">The Evolution of Settlement</div>
+        <!-- Evolution Timeline - Simple Linear History -->
+        <div class="evolution-simple">
+          <h3 class="evo-title">The Evolution of Settlement</h3>
 
-          <!-- Single unified visualization -->
-          <div class="history-flow">
-            <!-- Stage 1: Big Bang → Banking -->
-            <div class="history-stage history-stage-banking">
-              <div class="stage-era">Big Bang → ~5000 BC</div>
-              <div class="stage-visual">
-                <div class="bang-marker">●</div>
-                <div class="flow-line flow-line-thick"></div>
-                <img src="/bikes/fcuan.svg" alt="FCUAN" class="stage-bike" />
-              </div>
-              <div class="stage-content">
-                <div class="stage-label">FCUAN</div>
-                <div class="stage-name">Full-Credit Unprovable Account Networks</div>
-                <div class="stage-ticker">
-                  <InvariantTicker
-                    label=""
-                    description="−leftCredit ≤ Δ ≤ rightCredit"
-                    pattern="[---.---]"
-                    speed={4}
-                  />
-                </div>
-                <div class="stage-desc">Traditional banking. Pure credit, dominant for 7000 years. Weak security (Mt. Gox, FTX).</div>
-              </div>
+          <div class="evo-track">
+            <!-- Origin -->
+            <div class="evo-item">
+              <div class="evo-dot">●</div>
+              <div class="evo-label-top">Big Bang</div>
             </div>
 
-            <!-- Stage 2: Lightning appears (thin branch) -->
-            <div class="history-stage history-stage-lightning">
-              <div class="stage-era">2015</div>
-              <div class="stage-visual">
-                <div class="flow-line flow-line-banking-continues"></div>
-                <div class="flow-branch flow-branch-thin"></div>
-                <img src="/bikes/frpap.svg" alt="FRPAP" class="stage-bike stage-bike-small" />
-              </div>
-              <div class="stage-content">
-                <div class="stage-label">FRPAP</div>
-                <div class="stage-name">Full-Reserve Provable Account Primitives</div>
-                <div class="stage-ticker">
-                  <InvariantTicker
-                    label=""
-                    description="0 ≤ Δ ≤ collateral"
-                    pattern="[.===]"
-                    speed={4}
-                  />
-                </div>
-                <div class="stage-desc">Lightning Network. Full collateral, cryptographic proofs. Failed (inbound liquidity wall). All projects dead.</div>
-              </div>
+            <!-- Banking Era (long thick line) -->
+            <div class="evo-line evo-line-thick"></div>
+
+            <div class="evo-item">
+              <div class="evo-label-top">~5000 BC</div>
+              <img src="/bikes/fcuan.svg" class="evo-bike" />
+              <div class="evo-name">FCUAN</div>
+              <div class="evo-fullname">Full-Credit Unprovable Account Networks</div>
+              <InvariantTicker label="" description="−leftCredit ≤ Δ ≤ rightCredit" pattern="[---.---]" speed={4} />
+              <div class="evo-desc">Banking. Pure credit, 7000 years dominant.</div>
             </div>
 
-            <!-- Stage 3: MERGE → xln (FINALE) -->
-            <div class="history-stage history-stage-finale">
-              <div class="stage-era">2026 → Future</div>
-              <div class="stage-visual">
-                <div class="merge-point">⊃ MERGE</div>
-                <div class="flow-line flow-line-finale"></div>
-                <img src="/bikes/rcpan.svg" alt="RCPAN" class="stage-bike stage-bike-finale" />
-              </div>
-              <div class="stage-content">
-                <div class="stage-label stage-label-finale">RCPAN</div>
-                <div class="stage-name">Reserve-Credit Provable Account Network</div>
-                <div class="stage-ticker">
-                  <InvariantTicker
-                    label=""
-                    description="−leftCredit ≤ Δ ≤ collateral + rightCredit"
-                    pattern="[---.===---]"
-                    speed={4}
-                  />
-                </div>
-                <div class="stage-desc stage-desc-finale">
-                  <strong>xln: The synthesis.</strong> Banking's credit + Lightning's proofs = RCPAN.
-                  The logical end of payment evolution. FCUAN + FRPAP = RCPAN.
-                </div>
-              </div>
+            <div class="evo-line evo-line-thick"></div>
+
+            <!-- Lightning branch (thin failed) -->
+            <div class="evo-item evo-item-branch">
+              <div class="evo-label-top">2015</div>
+              <div class="evo-branch-line"></div>
+              <img src="/bikes/frpap.svg" class="evo-bike evo-bike-small" />
+              <div class="evo-name">FRPAP</div>
+              <div class="evo-fullname">Full-Reserve Provable Account Primitives</div>
+              <InvariantTicker label="" description="0 ≤ Δ ≤ collateral" pattern="[.===]" speed={4} />
+              <div class="evo-desc">Lightning. Failed (liquidity wall).</div>
             </div>
+
+            <!-- MERGE -->
+            <div class="evo-merge">⊃ MERGE</div>
+
+            <!-- Future (THICK GREEN) -->
+            <div class="evo-line evo-line-finale"></div>
+
+            <div class="evo-item evo-item-finale">
+              <div class="evo-label-top">2026 →</div>
+              <img src="/bikes/rcpan.svg" class="evo-bike evo-bike-finale" />
+              <div class="evo-name evo-name-finale">RCPAN</div>
+              <div class="evo-fullname">Reserve-Credit Provable Account Network</div>
+              <InvariantTicker label="" description="−leftCredit ≤ Δ ≤ collateral + rightCredit" pattern="[---.===---]" speed={4} />
+              <div class="evo-desc evo-desc-finale"><strong>xln:</strong> Banking + Lightning = RCPAN. The logical end.</div>
+            </div>
+
+            <div class="evo-line evo-line-future"></div>
           </div>
         </div>
 
@@ -1806,16 +1781,15 @@
     gap: 1.5rem;
   }
 
-  /* Money History - Single Unified Story */
-  .money-history {
+  /* Simple Linear Evolution Timeline */
+  .evolution-simple {
     margin: 3rem 0;
     padding: 3rem 2rem;
-    background: linear-gradient(135deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.1) 100%);
+    background: linear-gradient(135deg, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.1));
     border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
   }
 
-  .history-title {
+  .evo-title {
     text-align: center;
     font-size: 1.8rem;
     font-weight: 700;
@@ -1823,222 +1797,183 @@
     margin-bottom: 3rem;
   }
 
-  .history-flow {
-    display: flex;
-    align-items: stretch;
-    gap: 0;
-    position: relative;
-  }
-
-  .history-stage {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    position: relative;
-  }
-
-  .history-stage-finale {
-    flex: 1.4;
-  }
-
-  .stage-era {
-    font-size: 1rem;
-    font-weight: 700;
-    color: rgba(255, 255, 255, 0.7);
-    margin-bottom: 2rem;
-    text-align: center;
-  }
-
-  .stage-visual {
+  .evo-track {
     display: flex;
     align-items: center;
     justify-content: center;
     position: relative;
-    height: 160px;
-    width: 100%;
+    min-height: 400px;
   }
 
-  .bang-marker {
-    position: absolute;
-    left: 20px;
-    font-size: 3rem;
-    color: #fff;
-    filter: drop-shadow(0 0 12px rgba(255,255,255,0.6));
-  }
-
-  .flow-line {
-    position: absolute;
-    height: 4px;
-    background: rgba(200, 200, 200, 0.4);
-    top: 50%;
-    transform: translateY(-50%);
-  }
-
-  .flow-line-thick {
-    left: 60px;
-    right: -10px;
-    height: 12px;
-    background: linear-gradient(to right, rgba(200,200,200,0.6), rgba(200,200,200,0.4));
-  }
-
-  .flow-line-banking-continues {
-    left: -10px;
-    right: -10px;
-    height: 10px;
-    background: rgba(200, 200, 200, 0.35);
-    top: 30%;
-  }
-
-  .flow-branch-thin {
-    position: absolute;
-    left: -10px;
-    right: -10px;
-    height: 3px;
-    background: rgba(79, 209, 139, 0.3);
-    top: 70%;
-    border-top: 2px dashed rgba(79, 209, 139, 0.4);
-  }
-
-  .flow-line-finale {
-    left: -20px;
-    right: 20px;
-    height: 24px;
-    background: linear-gradient(to right, rgba(79,209,139,0.6), rgba(79,209,139,0.9));
-    box-shadow: 0 0 24px rgba(79, 209, 139, 0.4);
-  }
-
-  .merge-point {
-    position: absolute;
-    left: -30px;
-    top: 50%;
-    transform: translateY(-50%);
-    font-size: 0.85rem;
-    font-weight: 700;
-    color: #4fd18b;
-    background: rgba(79, 209, 139, 0.15);
-    padding: 0.4rem 0.8rem;
-    border-radius: 12px;
-    border: 1px solid rgba(79, 209, 139, 0.4);
-    white-space: nowrap;
-  }
-
-  .stage-bike {
-    position: relative;
-    z-index: 2;
-    width: 140px;
-    height: auto;
-    filter: brightness(1.1) drop-shadow(0 4px 8px rgba(0,0,0,0.3));
-  }
-
-  .stage-bike-small {
-    width: 120px;
-    opacity: 0.7;
-  }
-
-  .stage-bike-finale {
-    width: 200px;
-    filter: brightness(1.2) drop-shadow(0 8px 16px rgba(79,209,139,0.3));
-  }
-
-  .stage-content {
+  .evo-item {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.75rem;
-    margin-top: 1.5rem;
+    gap: 0.5rem;
+    min-width: 240px;
+    position: relative;
+    z-index: 2;
   }
 
-  .stage-label {
-    font-size: 1.4rem;
+  .evo-item-finale {
+    min-width: 300px;
+  }
+
+  .evo-item-branch {
+    position: relative;
+  }
+
+  .evo-branch-line {
+    position: absolute;
+    top: -30px;
+    left: -80px;
+    width: 160px;
+    height: 3px;
+    background: linear-gradient(to right, rgba(200,200,200,0.3), rgba(79,209,139,0.4));
+    border-top: 2px dashed rgba(79,209,139,0.4);
+  }
+
+  .evo-dot {
+    font-size: 3rem;
+    color: #fff;
+    filter: drop-shadow(0 0 16px rgba(255,255,255,0.8));
+    line-height: 1;
+  }
+
+  .evo-line {
+    height: 8px;
+    background: rgba(200, 200, 200, 0.5);
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+  }
+
+  .evo-line-thick {
+    width: 120px;
+    height: 12px;
+    background: rgba(200, 200, 200, 0.6);
+  }
+
+  .evo-line-finale {
+    width: 80px;
+    height: 24px;
+    background: linear-gradient(to right, rgba(79,209,139,0.7), rgba(79,209,139,0.9));
+    box-shadow: 0 0 24px rgba(79,209,139,0.5);
+  }
+
+  .evo-line-future {
+    width: 60px;
+    height: 28px;
+    background: linear-gradient(to right, rgba(79,209,139,0.9), rgba(79,209,139,0.6));
+    box-shadow: 0 0 32px rgba(79,209,139,0.6);
+  }
+
+  .evo-merge {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #4fd18b;
+    background: rgba(79, 209, 139, 0.15);
+    padding: 0.5rem 1rem;
+    border-radius: 12px;
+    border: 2px solid rgba(79, 209, 139, 0.5);
+    white-space: nowrap;
+    z-index: 3;
+  }
+
+  .evo-label-top {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.75);
+    margin-bottom: 1rem;
+  }
+
+  .evo-bike {
+    width: 140px;
+    height: auto;
+    filter: brightness(1.1) drop-shadow(0 4px 8px rgba(0,0,0,0.3));
+    margin: 0.5rem 0;
+  }
+
+  .evo-bike-small {
+    width: 100px;
+    opacity: 0.6;
+  }
+
+  .evo-bike-finale {
+    width: 200px;
+    filter: brightness(1.2) drop-shadow(0 8px 20px rgba(79,209,139,0.4));
+  }
+
+  .evo-name {
+    font-size: 1.3rem;
     font-weight: 700;
     color: rgba(255, 255, 255, 0.95);
   }
 
-  .stage-label-finale {
+  .evo-name-finale {
     font-size: 1.8rem;
     color: #4fd18b;
-    text-shadow: 0 0 12px rgba(79, 209, 139, 0.5);
+    text-shadow: 0 0 16px rgba(79,209,139,0.6);
   }
 
-  .stage-name {
-    font-size: 0.8rem;
+  .evo-fullname {
+    font-size: 0.75rem;
     color: rgba(255, 255, 255, 0.6);
     font-style: italic;
     text-align: center;
     max-width: 200px;
-    line-height: 1.4;
+    line-height: 1.3;
+    margin-bottom: 0.5rem;
   }
 
-  .stage-ticker {
-    margin: 0.5rem 0;
-  }
-
-  .stage-desc {
-    font-size: 0.85rem;
-    line-height: 1.6;
+  .evo-desc {
+    font-size: 0.8rem;
+    line-height: 1.5;
     color: rgba(255, 255, 255, 0.7);
     text-align: center;
-    max-width: 220px;
+    max-width: 200px;
+    margin-top: 0.5rem;
   }
 
-  .stage-desc-finale {
-    max-width: 280px;
-    font-size: 0.9rem;
+  .evo-desc-finale {
+    max-width: 260px;
+    font-size: 0.85rem;
     color: rgba(255, 255, 255, 0.85);
     font-weight: 500;
   }
 
-  :global(.light-mode) .money-history {
-    background: linear-gradient(135deg, rgba(0, 0, 0, 0.02) 0%, rgba(0, 0, 0, 0.01) 100%);
-    border-color: rgba(0, 0, 0, 0.08);
+  :global(.light-mode) .evolution-simple {
+    background: linear-gradient(135deg, rgba(0, 0, 0, 0.02), rgba(0, 0, 0, 0.01));
   }
 
-  :global(.light-mode) .history-title {
+  :global(.light-mode) .evo-title {
     color: rgba(0, 0, 0, 0.9);
   }
 
-  :global(.light-mode) .stage-era {
-    color: rgba(0, 0, 0, 0.7);
-  }
-
-  :global(.light-mode) .stage-label {
+  :global(.light-mode) .evo-name {
     color: rgba(0, 0, 0, 0.95);
   }
 
-  :global(.light-mode) .stage-label-finale {
+  :global(.light-mode) .evo-name-finale {
     color: #2a8a5f;
-    text-shadow: 0 0 12px rgba(79, 209, 139, 0.3);
   }
 
-  :global(.light-mode) .stage-name {
+  :global(.light-mode) .evo-fullname {
     color: rgba(0, 0, 0, 0.6);
   }
 
-  :global(.light-mode) .stage-desc {
+  :global(.light-mode) .evo-desc {
     color: rgba(0, 0, 0, 0.7);
   }
 
-  :global(.light-mode) .stage-desc-finale {
+  :global(.light-mode) .evo-desc-finale {
     color: rgba(0, 0, 0, 0.85);
   }
 
-  :global(.light-mode) .merge-point {
+  :global(.light-mode) .evo-merge {
     background: rgba(79, 209, 139, 0.2);
-    border-color: rgba(79, 209, 139, 0.5);
+    border-color: rgba(79, 209, 139, 0.6);
     color: #2a8a5f;
-  }
-
-  :global(.light-mode) .bang-marker {
-    color: #000;
-  }
-
-  :global(.light-mode) .stage-bike {
-    filter: brightness(0.9) drop-shadow(0 4px 8px rgba(0,0,0,0.2));
-  }
-
-  :global(.light-mode) .stage-bike-finale {
-    filter: brightness(1) drop-shadow(0 8px 16px rgba(79,209,139,0.2));
   }
 
   .visual-column {
