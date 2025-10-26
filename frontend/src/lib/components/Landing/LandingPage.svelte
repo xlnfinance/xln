@@ -1592,7 +1592,14 @@
   }
 
   /* Smart Contracts Section */
-  /* Contract Architecture Layout */
+  /* Contract Architecture Layout - FULL WIDTH */
+  .contracts-section {
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    padding: 3rem 4rem;
+    background: linear-gradient(135deg, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.05));
+  }
+
   .contracts-architecture {
     position: relative;
     display: flex;
@@ -1601,6 +1608,9 @@
     gap: 2.5rem;
     margin-top: 2rem;
     min-height: 500px;
+    max-width: 1600px;
+    margin-left: auto;
+    margin-right: auto;
   }
 
   .contract-connections {
@@ -1939,12 +1949,12 @@
     gap: 1.5rem;
   }
 
-  /* Simple Linear Evolution Timeline */
+  /* Simple Linear Evolution Timeline - FULL WIDTH */
   .evolution-simple {
-    margin: 3rem 0;
-    padding: 3rem 0;
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    padding: 3rem 4rem;
     background: linear-gradient(135deg, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.1));
-    border-radius: 16px;
     overflow: hidden;
     position: relative;
   }
