@@ -364,37 +364,57 @@
         </ul>
       </div>
 
-      <!-- Smart Contracts Section -->
+      <!-- Smart Contracts Architecture -->
       <div class="section contracts-section">
-        <h2>Three Core Smart Contracts</h2>
-        <div class="contracts-grid">
-          <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/Depository.sol" target="_blank" rel="noopener" class="contract-card">
-            <div class="contract-header">
-              <span class="contract-icon">📜</span>
-              <span class="contract-name">Depository.sol</span>
+        <h2>Contract Architecture</h2>
+        <div class="contracts-architecture">
+          <!-- Core: Depository (HUGE) -->
+          <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/Depository.sol" target="_blank" rel="noopener" class="contract-core">
+            <div class="core-badge">CORE</div>
+            <div class="contract-icon-large">📜</div>
+            <div class="contract-name-large">Depository.sol</div>
+            <div class="contract-desc-large">Reserve Management & FIFO Debt Enforcement</div>
+            <div class="core-features">
+              <div class="feature">• Holds all collateral</div>
+              <div class="feature">• enforceDebts() FIFO queue</div>
+              <div class="feature">• Final settlement layer</div>
             </div>
-            <p class="contract-desc">Reserve management & FIFO debt enforcement</p>
-            <div class="contract-link-label">View on GitHub →</div>
+            <div class="contract-link-label">View Source →</div>
           </a>
 
-          <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/EntityProvider.sol" target="_blank" rel="noopener" class="contract-card">
-            <div class="contract-header">
-              <span class="contract-icon">🏛️</span>
-              <span class="contract-name">EntityProvider.sol</span>
-            </div>
-            <p class="contract-desc">Entity registration & BFT quorum verification</p>
-            <div class="contract-link-label">View on GitHub →</div>
-          </a>
+          <!-- Modules: EP + SP (smaller, pluggable) -->
+          <div class="contract-modules">
+            <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/EntityProvider.sol" target="_blank" rel="noopener" class="contract-module">
+              <div class="module-badge">MODULE</div>
+              <div class="contract-icon">🏛️</div>
+              <div class="contract-name">EntityProvider.sol</div>
+              <div class="contract-desc">Entity registration<br/>BFT quorum logic</div>
+              <div class="module-tag">Modular</div>
+              <div class="contract-link-label-small">GitHub →</div>
+            </a>
 
-          <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/SubcontractProvider.sol" target="_blank" rel="noopener" class="contract-card">
-            <div class="contract-header">
-              <span class="contract-icon">⚡</span>
-              <span class="contract-name">SubcontractProvider.sol</span>
-            </div>
-            <p class="contract-desc">HTLCs, atomic swaps & limit orders</p>
-            <div class="contract-link-label">View on GitHub →</div>
-          </a>
+            <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/SubcontractProvider.sol" target="_blank" rel="noopener" class="contract-module">
+              <div class="module-badge">MODULE</div>
+              <div class="contract-icon">⚡</div>
+              <div class="contract-name">SubcontractProvider.sol</div>
+              <div class="contract-desc">HTLCs, swaps<br/>Limit orders, DeFi</div>
+              <div class="module-tag">Extensible</div>
+              <div class="contract-link-label-small">GitHub →</div>
+            </a>
+          </div>
+
+          <!-- Connection arrows -->
+          <svg class="contract-connections" viewBox="0 0 400 200" preserveAspectRatio="none">
+            <defs>
+              <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                <polygon points="0 0, 10 3, 0 6" fill="rgba(79,209,139,0.5)" />
+              </marker>
+            </defs>
+            <path d="M 200 50 L 100 150" stroke="rgba(79,209,139,0.3)" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#arrowhead)" />
+            <path d="M 200 50 L 300 150" stroke="rgba(79,209,139,0.3)" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#arrowhead)" />
+          </svg>
         </div>
+        <div class="architecture-note">Depository = trust anchor. Modules = pluggable logic (add new ones anytime).</div>
       </div>
 
       <div class="section">
@@ -1572,83 +1592,204 @@
   }
 
   /* Smart Contracts Section */
-  .contracts-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1.5rem;
-    margin-top: 1.5rem;
-  }
-
-  .contract-card {
+  /* Contract Architecture Layout */
+  .contracts-architecture {
+    position: relative;
     display: flex;
     flex-direction: column;
-    padding: 1.5rem;
-    background: rgba(79, 209, 139, 0.05);
-    border: 1px solid rgba(79, 209, 139, 0.2);
-    border-radius: 8px;
+    align-items: center;
+    gap: 2.5rem;
+    margin-top: 2rem;
+    min-height: 500px;
+  }
+
+  .contract-connections {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* CORE: Depository (HUGE, central) */
+  .contract-core {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 3rem 2.5rem;
+    background: linear-gradient(135deg, rgba(79,209,139,0.1), rgba(79,209,139,0.05));
+    border: 3px solid rgba(79,209,139,0.4);
+    border-radius: 16px;
+    text-decoration: none;
+    box-shadow: 0 8px 32px rgba(79,209,139,0.2);
+    transition: all 0.3s ease;
+    max-width: 600px;
+  }
+
+  .contract-core:hover {
+    transform: translateY(-4px);
+    border-color: rgba(79,209,139,0.6);
+    box-shadow: 0 12px 48px rgba(79,209,139,0.35);
+  }
+
+  .core-badge {
+    background: rgba(79,209,139,0.2);
+    border: 1px solid rgba(79,209,139,0.5);
+    color: #4fd18b;
+    padding: 0.4rem 1rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    letter-spacing: 1px;
+  }
+
+  .contract-icon-large {
+    font-size: 3.5rem;
+    margin: 0.5rem 0;
+  }
+
+  .contract-name-large {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: rgba(255,255,255,0.95);
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 0.5rem;
+  }
+
+  .contract-desc-large {
+    font-size: 1.05rem;
+    color: rgba(255,255,255,0.75);
+    text-align: center;
+    margin-bottom: 1.5rem;
+  }
+
+  .core-features {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .feature {
+    font-size: 0.9rem;
+    color: rgba(255,255,255,0.7);
+    text-align: center;
+  }
+
+  /* MODULES: EP + SP (smaller, pluggable) */
+  .contract-modules {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    gap: 2rem;
+    justify-content: center;
+  }
+
+  .contract-module {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1.5rem 1.25rem;
+    background: rgba(255,255,255,0.03);
+    border: 1.5px solid rgba(255,255,255,0.15);
+    border-radius: 12px;
     text-decoration: none;
     transition: all 0.3s ease;
+    width: 200px;
   }
 
-  .contract-card:hover {
-    background: rgba(79, 209, 139, 0.08);
-    border-color: rgba(79, 209, 139, 0.4);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(79, 209, 139, 0.15);
+  .contract-module:hover {
+    transform: translateY(-3px);
+    border-color: rgba(79,209,139,0.4);
+    background: rgba(79,209,139,0.05);
+    box-shadow: 0 6px 20px rgba(79,209,139,0.15);
   }
 
-  .contract-header {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
+  .module-badge {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.6);
+    padding: 0.25rem 0.6rem;
+    border-radius: 8px;
+    font-size: 0.65rem;
+    font-weight: 600;
     margin-bottom: 0.75rem;
+    letter-spacing: 0.5px;
   }
 
   .contract-icon {
-    font-size: 1.5rem;
+    font-size: 2rem;
+    margin: 0.5rem 0;
   }
 
   .contract-name {
-    font-size: 1.1rem;
+    font-size: 0.95rem;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.95);
+    color: rgba(255,255,255,0.95);
     font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 0.5rem;
+    text-align: center;
   }
 
   .contract-desc {
-    font-size: 0.95rem;
-    line-height: 1.6;
-    color: rgba(255, 255, 255, 0.7);
-    margin: 0 0 1rem 0;
-    flex-grow: 1;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    color: rgba(255,255,255,0.65);
+    text-align: center;
+    margin-bottom: 0.75rem;
   }
 
-  .contract-link-label {
-    font-size: 0.85rem;
+  .module-tag {
+    font-size: 0.7rem;
+    color: rgba(79,209,139,0.7);
+    font-style: italic;
+    margin-bottom: 0.5rem;
+  }
+
+  .contract-link-label-small {
+    font-size: 0.75rem;
     color: #4fd18b;
     font-weight: 500;
   }
 
-  :global(.light-mode) .contract-card {
-    background: rgba(79, 209, 139, 0.08);
-    border-color: rgba(79, 209, 139, 0.25);
+  .contract-link-label {
+    font-size: 0.9rem;
+    color: #4fd18b;
+    font-weight: 600;
+    margin-top: 0.5rem;
   }
 
-  :global(.light-mode) .contract-card:hover {
-    background: rgba(79, 209, 139, 0.12);
-    border-color: rgba(79, 209, 139, 0.5);
+  .architecture-note {
+    text-align: center;
+    font-size: 0.9rem;
+    color: rgba(255,255,255,0.6);
+    font-style: italic;
+    margin-top: 2rem;
   }
 
+  :global(.light-mode) .contract-core {
+    background: linear-gradient(135deg, rgba(79,209,139,0.12), rgba(79,209,139,0.06));
+    border-color: rgba(79,209,139,0.5);
+  }
+
+  :global(.light-mode) .contract-module {
+    background: rgba(0,0,0,0.02);
+    border-color: rgba(0,0,0,0.15);
+  }
+
+  :global(.light-mode) .contract-name-large,
   :global(.light-mode) .contract-name {
-    color: rgba(0, 0, 0, 0.95);
+    color: rgba(0,0,0,0.95);
   }
 
+  :global(.light-mode) .contract-desc-large,
   :global(.light-mode) .contract-desc {
-    color: rgba(0, 0, 0, 0.7);
-  }
-
-  :global(.light-mode) .contract-link-label {
-    color: #2a8a5f;
+    color: rgba(0,0,0,0.7);
   }
 
   .plot-twist {
@@ -1801,9 +1942,11 @@
   /* Simple Linear Evolution Timeline */
   .evolution-simple {
     margin: 3rem 0;
-    padding: 3rem 2rem;
+    padding: 3rem 0;
     background: linear-gradient(135deg, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.1));
     border-radius: 16px;
+    overflow: hidden;
+    position: relative;
   }
 
   .evo-title {
@@ -1812,14 +1955,16 @@
     font-weight: 700;
     color: rgba(255, 255, 255, 0.9);
     margin-bottom: 3rem;
+    padding: 0 2rem;
   }
 
   .evo-track {
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     position: relative;
     min-height: 400px;
+    padding: 0 2rem 0 0;
   }
 
   .evo-item {
@@ -1830,6 +1975,12 @@
     min-width: 240px;
     position: relative;
     z-index: 2;
+  }
+
+  .evo-item:first-child {
+    position: absolute;
+    left: -60px;
+    min-width: auto;
   }
 
   .evo-item-finale {
@@ -1851,14 +2002,15 @@
   }
 
   .evo-dot {
-    width: 60px;
-    height: 60px;
+    width: 120px;
+    height: 120px;
     border-radius: 50%;
-    background: radial-gradient(circle, #fff 0%, #ffd700 40%, #ff6b6b 100%);
+    background: radial-gradient(circle, #fff 0%, #ffd700 35%, #ff8844 70%, #ff6b6b 100%);
     box-shadow:
-      0 0 30px rgba(255, 255, 255, 0.9),
-      0 0 60px rgba(255, 215, 0, 0.6),
-      0 0 90px rgba(255, 107, 107, 0.4);
+      0 0 40px rgba(255, 255, 255, 1),
+      0 0 80px rgba(255, 215, 0, 0.8),
+      0 0 120px rgba(255, 136, 68, 0.6),
+      0 0 160px rgba(255, 107, 107, 0.4);
     animation: bang-pulse 3s ease-in-out infinite;
   }
 
