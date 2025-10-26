@@ -263,56 +263,56 @@
         <h2>The Solution</h2>
         <p class="intro"><strong>xln</strong> is the first <strong>Reserve-Credit Provable Account Network (RCPAN)</strong>: credit where it scales, collateral where it secures. A principled hybrid.</p>
 
-        <div class="invariant-box">
-          <div class="tickers-bikes-grid">
-            <!-- Left: Animated ASCII Tickers -->
-            <div class="tickers-column">
-              <InvariantTicker
-                label="FCUAN"
-                description="−leftCredit ≤ Δ ≤ rightCredit"
-                pattern="[---.---]"
-              />
-              <div class="ticker-explanation">Full-Credit Unprovable Account Networks: Traditional banking, pure credit (no collateral)</div>
-
-              <InvariantTicker
-                label="FRPAP"
-                description="0 ≤ Δ ≤ collateral"
-                pattern="[.===]"
-              />
-              <div class="ticker-explanation">Full-Reserve Provable Account Primitives: Lightning, full collateral (no credit)</div>
-
-              <InvariantTicker
-                label="RCPAN"
-                description="−leftCredit ≤ Δ ≤ collateral + rightCredit"
-                pattern="[---.===---]"
-              />
-              <div class="ticker-explanation">Reserve-Credit Provable Account Network: xln's hybrid (credit + collateral)</div>
+        <div class="evolution-grid">
+          <!-- FCUAN Card -->
+          <div class="evolution-card">
+            <div class="timeline-badge">~5000 BC</div>
+            <img src="/bikes/fcuan.svg" alt="FCUAN" class="bike-svg" />
+            <div class="bike-title">FCUAN</div>
+            <div class="bike-fullname">Full-Credit Unprovable Account Networks</div>
+            <InvariantTicker
+              label="Pattern"
+              description="−leftCredit ≤ Δ ≤ rightCredit"
+              pattern="[---.---]"
+              speed={4}
+            />
+            <div class="bike-explanation">
+              <strong>Traditional banking.</strong> Pure credit, no collateral. Scales phenomenally but weak security—assets seized, hubs default (Mt. Gox, FTX).
             </div>
+          </div>
 
-            <!-- Right: Bike SVGs Comparison -->
-            <div class="bikes-visual">
-              <div class="bikes-comparison">
-                <div class="bikes-bad">
-                  <div class="bike-item">
-                    <img src="/bikes/fcuan.svg" alt="FCUAN" class="bike-svg" />
-                    <div class="bike-label-small">FCUAN</div>
-                  </div>
-                  <div class="bike-item">
-                    <img src="/bikes/frpap.svg" alt="FRPAP" class="bike-svg" />
-                    <div class="bike-label-small">FRPAP</div>
-                  </div>
-                </div>
-                <div class="bikes-divider">
-                  <div class="divider-label">vs</div>
-                </div>
-                <div class="bikes-better">
-                  <div class="bike-item bike-rcpan">
-                    <div class="better-badge">BETTER: Superset Hybrid</div>
-                    <img src="/bikes/rcpan.svg" alt="RCPAN" class="bike-svg bike-svg-large" />
-                    <div class="bike-label-large">RCPAN</div>
-                  </div>
-                </div>
-              </div>
+          <!-- FRPAP Card -->
+          <div class="evolution-card">
+            <div class="timeline-badge">2015</div>
+            <img src="/bikes/frpap.svg" alt="FRPAP" class="bike-svg" />
+            <div class="bike-title">FRPAP</div>
+            <div class="bike-fullname">Full-Reserve Provable Account Primitives</div>
+            <InvariantTicker
+              label="Pattern"
+              description="0 ≤ Δ ≤ collateral"
+              pattern="[.===]"
+              speed={4}
+            />
+            <div class="bike-explanation">
+              <strong>Lightning Network.</strong> Full collateral, no credit. Cryptographic proofs but hits inbound liquidity wall. All payment channel projects now dead.
+            </div>
+          </div>
+
+          <!-- RCPAN Card (Superset) -->
+          <div class="evolution-card evolution-card-superset">
+            <div class="timeline-badge timeline-badge-superset">2026</div>
+            <div class="superset-badge">⊃ Superset: Logical Evolution</div>
+            <img src="/bikes/rcpan.svg" alt="RCPAN" class="bike-svg bike-svg-superset" />
+            <div class="bike-title bike-title-superset">RCPAN</div>
+            <div class="bike-fullname">Reserve-Credit Provable Account Network</div>
+            <InvariantTicker
+              label="Pattern"
+              description="−leftCredit ≤ Δ ≤ collateral + rightCredit"
+              pattern="[---.===---]"
+              speed={4}
+            />
+            <div class="bike-explanation bike-explanation-superset">
+              <strong>xln (combines both).</strong> Credit where it scales, collateral where it secures. FCUAN + FRPAP = RCPAN. The principled hybrid.
             </div>
           </div>
         </div>
@@ -1780,131 +1780,163 @@
     gap: 1.5rem;
   }
 
-  /* Tickers + Bikes Grid */
-  .tickers-bikes-grid {
+  /* Evolution Grid - Timeline of payment systems */
+  .evolution-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 3rem;
-    align-items: center;
-  }
-
-  .ticker-explanation {
-    font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.6);
-    line-height: 1.5;
-    margin: -0.75rem 0 1.25rem 0;
-    font-style: italic;
-  }
-
-  /* Bikes Visual */
-  .bikes-visual {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-  }
-
-  .bikes-comparison {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     gap: 2rem;
-    flex-wrap: wrap;
+    margin: 2rem 0;
   }
 
-  .bikes-bad {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-    opacity: 0.5;
-  }
-
-  .bikes-better {
-    display: flex;
-    align-items: center;
-  }
-
-  .bike-item {
+  .evolution-card {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.5rem;
+    padding: 2rem 1.5rem;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    transition: all 0.3s ease;
+  }
+
+  .evolution-card-superset {
+    background: rgba(79, 209, 139, 0.05);
+    border: 2px solid rgba(79, 209, 139, 0.3);
+    transform: scale(1.05);
+  }
+
+  .evolution-card:hover {
+    transform: translateY(-4px);
+  }
+
+  .evolution-card-superset:hover {
+    transform: translateY(-4px) scale(1.05);
+    border-color: rgba(79, 209, 139, 0.5);
+  }
+
+  .timeline-badge {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.6);
+    padding: 0.3rem 0.8rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+  }
+
+  .timeline-badge-superset {
+    background: rgba(79, 209, 139, 0.12);
+    border-color: rgba(79, 209, 139, 0.4);
+    color: #4fd18b;
+  }
+
+  .superset-badge {
+    background: linear-gradient(135deg, rgba(79, 209, 139, 0.15) 0%, rgba(0, 209, 255, 0.15) 100%);
+    border: 1px solid rgba(79, 209, 139, 0.5);
+    color: #4fd18b;
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    text-align: center;
   }
 
   .bike-svg {
-    width: 120px;
+    width: 180px;
     height: auto;
+    margin: 1rem 0;
     filter: brightness(1.1);
   }
 
-  .bike-svg-large {
-    width: 280px;
+  .bike-svg-superset {
+    width: 240px;
   }
 
-  .bike-label-small {
-    font-weight: 500;
-    font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.5);
-  }
-
-  .bike-label-large {
+  .bike-title {
+    font-size: 1.3rem;
     font-weight: 700;
-    font-size: 1.1rem;
-    color: rgba(255, 255, 255, 0.9);
+    color: rgba(255, 255, 255, 0.95);
+    margin-bottom: 0.25rem;
   }
 
-  .bikes-divider {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .divider-label {
+  .bike-title-superset {
     font-size: 1.5rem;
-    font-weight: 700;
-    color: rgba(79, 209, 139, 0.5);
-    padding: 0 1rem;
-  }
-
-  .better-badge {
-    background: rgba(79, 209, 139, 0.15);
-    border: 1px solid rgba(79, 209, 139, 0.4);
     color: #4fd18b;
-    padding: 0.4rem 0.8rem;
-    border-radius: 20px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    margin-bottom: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
   }
 
-  :global(.light-mode) .ticker-explanation {
+  .bike-fullname {
+    font-size: 0.8rem;
+    color: rgba(255, 255, 255, 0.5);
+    text-align: center;
+    margin-bottom: 1.5rem;
+    font-style: italic;
+  }
+
+  .bike-explanation {
+    font-size: 0.9rem;
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.75);
+    text-align: center;
+    margin-top: 1rem;
+  }
+
+  .bike-explanation-superset {
+    color: rgba(255, 255, 255, 0.85);
+    font-weight: 500;
+  }
+
+  :global(.light-mode) .evolution-card {
+    background: rgba(0, 0, 0, 0.02);
+    border-color: rgba(0, 0, 0, 0.1);
+  }
+
+  :global(.light-mode) .evolution-card-superset {
+    background: rgba(79, 209, 139, 0.08);
+    border-color: rgba(79, 209, 139, 0.35);
+  }
+
+  :global(.light-mode) .timeline-badge {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.15);
     color: rgba(0, 0, 0, 0.6);
   }
 
-  :global(.light-mode) .bike-label-small {
-    color: rgba(0, 0, 0, 0.5);
-  }
-
-  :global(.light-mode) .bike-label-large {
-    color: rgba(0, 0, 0, 0.9);
-  }
-
-  :global(.light-mode) .bike-svg {
-    filter: brightness(0.9);
-  }
-
-  :global(.light-mode) .better-badge {
-    background: rgba(79, 209, 139, 0.2);
+  :global(.light-mode) .timeline-badge-superset {
+    background: rgba(79, 209, 139, 0.15);
     border-color: rgba(79, 209, 139, 0.5);
     color: #2a8a5f;
   }
 
-  @media (max-width: 1024px) {
-    .tickers-bikes-grid {
-      grid-template-columns: 1fr;
-      gap: 2rem;
-    }
+  :global(.light-mode) .superset-badge {
+    background: linear-gradient(135deg, rgba(79, 209, 139, 0.2) 0%, rgba(0, 209, 255, 0.2) 100%);
+    border-color: rgba(79, 209, 139, 0.6);
+    color: #2a8a5f;
+  }
+
+  :global(.light-mode) .bike-title {
+    color: rgba(0, 0, 0, 0.95);
+  }
+
+  :global(.light-mode) .bike-title-superset {
+    color: #2a8a5f;
+  }
+
+  :global(.light-mode) .bike-fullname {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  :global(.light-mode) .bike-explanation {
+    color: rgba(0, 0, 0, 0.75);
+  }
+
+  :global(.light-mode) .bike-explanation-superset {
+    color: rgba(0, 0, 0, 0.85);
+  }
+
+  :global(.light-mode) .bike-svg {
+    filter: brightness(0.9);
   }
 
   .visual-column {
