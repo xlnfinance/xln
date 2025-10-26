@@ -264,28 +264,54 @@
         <p class="intro"><strong>xln</strong> is the first <strong>Reserve-Credit Provable Account Network (RCPAN)</strong>: credit where it scales, collateral where it secures. A principled hybrid.</p>
 
         <div class="invariant-box">
-          <div class="bikes-comparison">
-            <div class="bikes-bad">
-              <div class="bike-item">
-                <img src="/bikes/fcuan.svg" alt="FCUAN - Full Credit" class="bike-svg" />
-                <div class="bike-label">FCUAN (Traditional Banking)</div>
-                <div class="bike-desc">Pure credit, no collateral</div>
-              </div>
-              <div class="bike-item">
-                <img src="/bikes/frpap.svg" alt="FRPAP - Full Reserve" class="bike-svg" />
-                <div class="bike-label">FRPAP (Lightning)</div>
-                <div class="bike-desc">Full collateral, no credit</div>
-              </div>
+          <div class="tickers-bikes-grid">
+            <!-- Left: Animated ASCII Tickers -->
+            <div class="tickers-column">
+              <InvariantTicker
+                label="FCUAN"
+                description="−leftCredit ≤ Δ ≤ rightCredit"
+                pattern="[---.---]"
+              />
+              <div class="ticker-explanation">Full-Credit Unprovable Account Networks: Traditional banking, pure credit (no collateral)</div>
+
+              <InvariantTicker
+                label="FRPAP"
+                description="0 ≤ Δ ≤ collateral"
+                pattern="[.===]"
+              />
+              <div class="ticker-explanation">Full-Reserve Provable Account Primitives: Lightning, full collateral (no credit)</div>
+
+              <InvariantTicker
+                label="RCPAN"
+                description="−leftCredit ≤ Δ ≤ collateral + rightCredit"
+                pattern="[---.===---]"
+              />
+              <div class="ticker-explanation">Reserve-Credit Provable Account Network: xln's hybrid (credit + collateral)</div>
             </div>
-            <div class="bikes-divider">
-              <div class="divider-label">vs</div>
-            </div>
-            <div class="bikes-better">
-              <div class="bike-item bike-rcpan">
-                <div class="better-badge">BETTER: Superset Hybrid</div>
-                <img src="/bikes/rcpan.svg" alt="RCPAN - Reserve + Credit" class="bike-svg bike-svg-large" />
-                <div class="bike-label">RCPAN (xln)</div>
-                <div class="bike-desc">Credit where it scales, collateral where it secures</div>
+
+            <!-- Right: Bike SVGs Comparison -->
+            <div class="bikes-visual">
+              <div class="bikes-comparison">
+                <div class="bikes-bad">
+                  <div class="bike-item">
+                    <img src="/bikes/fcuan.svg" alt="FCUAN" class="bike-svg" />
+                    <div class="bike-label-small">FCUAN</div>
+                  </div>
+                  <div class="bike-item">
+                    <img src="/bikes/frpap.svg" alt="FRPAP" class="bike-svg" />
+                    <div class="bike-label-small">FRPAP</div>
+                  </div>
+                </div>
+                <div class="bikes-divider">
+                  <div class="divider-label">vs</div>
+                </div>
+                <div class="bikes-better">
+                  <div class="bike-item bike-rcpan">
+                    <div class="better-badge">BETTER: Superset Hybrid</div>
+                    <img src="/bikes/rcpan.svg" alt="RCPAN" class="bike-svg bike-svg-large" />
+                    <div class="bike-label-large">RCPAN</div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1754,7 +1780,29 @@
     gap: 1.5rem;
   }
 
-  /* Bikes Comparison */
+  /* Tickers + Bikes Grid */
+  .tickers-bikes-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3rem;
+    align-items: center;
+  }
+
+  .ticker-explanation {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.6);
+    line-height: 1.5;
+    margin: -0.75rem 0 1.25rem 0;
+    font-style: italic;
+  }
+
+  /* Bikes Visual */
+  .bikes-visual {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
   .bikes-comparison {
     display: flex;
     align-items: center;
@@ -1767,7 +1815,7 @@
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
-    opacity: 0.6;
+    opacity: 0.5;
   }
 
   .bikes-better {
@@ -1783,31 +1831,25 @@
   }
 
   .bike-svg {
-    width: 200px;
+    width: 120px;
     height: auto;
     filter: brightness(1.1);
   }
 
   .bike-svg-large {
-    width: 400px;
+    width: 280px;
   }
 
-  .bike-label {
-    font-weight: 600;
-    font-size: 0.95rem;
-    color: rgba(255, 255, 255, 0.85);
+  .bike-label-small {
+    font-weight: 500;
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.5);
   }
 
-  .bike-desc {
-    font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.6);
-    font-style: italic;
-    text-align: center;
-    max-width: 200px;
-  }
-
-  .bike-rcpan .bike-desc {
-    max-width: 400px;
+  .bike-label-large {
+    font-weight: 700;
+    font-size: 1.1rem;
+    color: rgba(255, 255, 255, 0.9);
   }
 
   .bikes-divider {
@@ -1827,21 +1869,25 @@
     background: rgba(79, 209, 139, 0.15);
     border: 1px solid rgba(79, 209, 139, 0.4);
     color: #4fd18b;
-    padding: 0.5rem 1rem;
+    padding: 0.4rem 0.8rem;
     border-radius: 20px;
-    font-size: 0.85rem;
+    font-size: 0.75rem;
     font-weight: 600;
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
 
-  :global(.light-mode) .bike-label {
-    color: rgba(0, 0, 0, 0.85);
+  :global(.light-mode) .ticker-explanation {
+    color: rgba(0, 0, 0, 0.6);
   }
 
-  :global(.light-mode) .bike-desc {
-    color: rgba(0, 0, 0, 0.6);
+  :global(.light-mode) .bike-label-small {
+    color: rgba(0, 0, 0, 0.5);
+  }
+
+  :global(.light-mode) .bike-label-large {
+    color: rgba(0, 0, 0, 0.9);
   }
 
   :global(.light-mode) .bike-svg {
@@ -1852,6 +1898,13 @@
     background: rgba(79, 209, 139, 0.2);
     border-color: rgba(79, 209, 139, 0.5);
     color: #2a8a5f;
+  }
+
+  @media (max-width: 1024px) {
+    .tickers-bikes-grid {
+      grid-template-columns: 1fr;
+      gap: 2rem;
+    }
   }
 
   .visual-column {
