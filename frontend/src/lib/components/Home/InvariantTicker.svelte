@@ -130,11 +130,11 @@
   }
 
   .char.credit {
-    color: #ff6fa9;
+    color: #ff4d6a;
   }
 
   .char.used {
-    color: #ffd1f0;
+    color: #ff8fa9;
   }
 
   .char.collateral {
