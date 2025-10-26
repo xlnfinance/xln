@@ -316,6 +316,22 @@
 
             <div class="evo-line evo-line-future"></div>
           </div>
+
+          <!-- Color Legend -->
+          <div class="color-legend">
+            <div class="legend-item">
+              <span class="legend-box legend-credit">−</span>
+              <span class="legend-text">Credit (Red)</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-box legend-reserve">=</span>
+              <span class="legend-text">Reserve (Green)</span>
+            </div>
+            <div class="legend-item">
+              <span class="legend-box legend-both">−.=</span>
+              <span class="legend-text">RCPAN = Both United</span>
+            </div>
+          </div>
         </div>
 
         <div class="formula-variants">
@@ -1974,6 +1990,64 @@
     background: rgba(79, 209, 139, 0.2);
     border-color: rgba(79, 209, 139, 0.6);
     color: #2a8a5f;
+  }
+
+  /* Color Legend */
+  .color-legend {
+    display: flex;
+    justify-content: center;
+    gap: 3rem;
+    margin-top: 3rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+
+  .legend-box {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.2rem;
+    font-weight: 700;
+    padding: 0.5rem 0.8rem;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+  }
+
+  .legend-credit {
+    color: #ff4d6a;
+  }
+
+  .legend-reserve {
+    color: #4fd18b;
+  }
+
+  .legend-both {
+    background: linear-gradient(135deg, rgba(255,77,106,0.2) 0%, rgba(79,209,139,0.2) 100%);
+    border-color: rgba(79, 209, 139, 0.3);
+  }
+
+  .legend-text {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 500;
+  }
+
+  :global(.light-mode) .color-legend {
+    border-top-color: rgba(0, 0, 0, 0.1);
+  }
+
+  :global(.light-mode) .legend-box {
+    background: rgba(0, 0, 0, 0.05);
+    border-color: rgba(0, 0, 0, 0.15);
+  }
+
+  :global(.light-mode) .legend-text {
+    color: rgba(0, 0, 0, 0.7);
   }
 
   .visual-column {
