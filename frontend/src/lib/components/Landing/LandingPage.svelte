@@ -264,52 +264,54 @@
         <p class="intro"><strong>xln</strong> is the first <strong>Reserve-Credit Provable Account Network (RCPAN)</strong>: credit where it scales, collateral where it secures. A principled hybrid.</p>
 
         <div class="evolution-container">
-          <!-- Monumental Timeline SVG -->
-          <svg class="timeline-path" viewBox="0 0 1200 120" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="mergeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" style="stop-color:rgba(255,255,255,0.2);stop-opacity:1" />
-                <stop offset="70%" style="stop-color:rgba(255,255,255,0.2);stop-opacity:1" />
-                <stop offset="85%" style="stop-color:rgba(79,209,139,0.4);stop-opacity:1" />
-                <stop offset="100%" style="stop-color:rgba(79,209,139,0.8);stop-opacity:1" />
-              </linearGradient>
-            </defs>
-
-            <!-- Big Bang origin marker -->
-            <circle cx="50" cy="60" r="4" fill="rgba(255,255,255,0.3)" />
-
-            <!-- Banking line (thick) -->
-            <path d="M 50 60 L 400 40 L 800 35 L 1000 50"
-                  stroke="url(#mergeGradient)"
-                  stroke-width="6"
-                  fill="none"
-                  stroke-linecap="round"/>
-
-            <!-- Lightning line (thin, appears at 2015) -->
-            <path d="M 800 70 L 1000 65"
-                  stroke="rgba(79,209,139,0.3)"
-                  stroke-width="2"
-                  fill="none"
-                  stroke-linecap="round"
-                  stroke-dasharray="4 4"/>
-
-            <!-- Merged future line (THICK + BRIGHT) -->
-            <path d="M 1000 50 L 1150 50"
-                  stroke="#4fd18b"
-                  stroke-width="12"
-                  fill="none"
-                  stroke-linecap="round"
-                  filter="url(#glow)"/>
-
+          <!-- Monumental Timeline SVG - Clear River Merging -->
+          <svg class="timeline-path" viewBox="0 0 1200 200" preserveAspectRatio="xMidYMid meet">
             <defs>
               <filter id="glow">
-                <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                <feGaussianBlur stdDeviation="5" result="coloredBlur"/>
                 <feMerge>
                   <feMergeNode in="coloredBlur"/>
                   <feMergeNode in="SourceGraphic"/>
                 </feMerge>
               </filter>
             </defs>
+
+            <!-- Big Bang (huge bright circle) -->
+            <circle cx="80" cy="100" r="16" fill="#fff" opacity="0.6" filter="url(#glow)" />
+            <text x="80" y="170" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="18" font-weight="700">Big Bang</text>
+
+            <!-- BANKING LINE (THICK dominates history) -->
+            <path d="M 100 100 L 350 80 L 700 75 L 950 85"
+                  stroke="rgba(200,200,200,0.7)"
+                  stroke-width="20"
+                  fill="none"
+                  stroke-linecap="round"/>
+            <text x="350" y="50" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="16" font-weight="600">Banking (5000 BC → 2026)</text>
+            <text x="350" y="125" text-anchor="middle" fill="rgba(255,255,255,0.4)" font-size="13">(thick = dominant)</text>
+
+            <!-- LIGHTNING LINE (THIN niche project) -->
+            <path d="M 700 120 L 950 115"
+                  stroke="rgba(79,209,139,0.5)"
+                  stroke-width="6"
+                  fill="none"
+                  stroke-linecap="round"
+                  stroke-dasharray="8 8"/>
+            <text x="825" y="150" text-anchor="middle" fill="rgba(79,209,139,0.6)" font-size="14" font-weight="500">Lightning 2015</text>
+            <text x="825" y="168" text-anchor="middle" fill="rgba(79,209,139,0.4)" font-size="11">(thin = niche)</text>
+
+            <!-- MERGE POINT (glowing convergence) -->
+            <circle cx="950" cy="95" r="20" fill="rgba(79,209,139,0.3)" filter="url(#glow)" />
+            <text x="950" y="35" text-anchor="middle" fill="#4fd18b" font-size="14" font-weight="700">MERGE</text>
+
+            <!-- xln FUTURE (SUPER THICK + GLOWING) -->
+            <path d="M 970 95 L 1120 95"
+                  stroke="#4fd18b"
+                  stroke-width="40"
+                  fill="none"
+                  stroke-linecap="round"
+                  filter="url(#glow)"/>
+            <text x="1045" y="55" text-anchor="middle" fill="#4fd18b" font-size="20" font-weight="900">xln 2026 →</text>
+            <text x="1045" y="155" text-anchor="middle" fill="rgba(79,209,139,0.8)" font-size="14" font-weight="600">(THICK BRIGHT FUTURE)</text>
           </svg>
 
           <div class="evolution-grid">
@@ -1847,13 +1849,13 @@
 
   .timeline-path {
     position: absolute;
-    top: -40px;
+    top: -60px;
     left: 0;
     width: 100%;
-    height: 120px;
+    height: 200px;
     pointer-events: none;
     z-index: 0;
-    opacity: 0.8;
+    opacity: 1;
   }
 
   /* Evolution Grid - Timeline of payment systems */
