@@ -263,56 +263,115 @@
         <h2>The Solution</h2>
         <p class="intro"><strong>xln</strong> is the first <strong>Reserve-Credit Provable Account Network (RCPAN)</strong>: credit where it scales, collateral where it secures. A principled hybrid.</p>
 
-        <div class="evolution-grid">
-          <!-- FCUAN Card -->
-          <div class="evolution-card">
-            <div class="timeline-badge">~5000 BC</div>
-            <img src="/bikes/fcuan.svg" alt="FCUAN" class="bike-svg" />
-            <div class="bike-title">FCUAN</div>
-            <div class="bike-fullname">Full-Credit Unprovable Account Networks</div>
-            <InvariantTicker
-              label="Pattern"
-              description="−leftCredit ≤ Δ ≤ rightCredit"
-              pattern="[---.---]"
-              speed={4}
-            />
-            <div class="bike-explanation">
-              <strong>Traditional banking.</strong> Pure credit, no collateral. Scales phenomenally but weak security—assets seized, hubs default (Mt. Gox, FTX).
-            </div>
-          </div>
+        <div class="evolution-container">
+          <!-- Monumental Timeline SVG -->
+          <svg class="timeline-path" viewBox="0 0 1200 120" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="mergeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" style="stop-color:rgba(255,255,255,0.2);stop-opacity:1" />
+                <stop offset="70%" style="stop-color:rgba(255,255,255,0.2);stop-opacity:1" />
+                <stop offset="85%" style="stop-color:rgba(79,209,139,0.4);stop-opacity:1" />
+                <stop offset="100%" style="stop-color:rgba(79,209,139,0.8);stop-opacity:1" />
+              </linearGradient>
+            </defs>
 
-          <!-- FRPAP Card -->
-          <div class="evolution-card">
-            <div class="timeline-badge">2015</div>
-            <img src="/bikes/frpap.svg" alt="FRPAP" class="bike-svg" />
-            <div class="bike-title">FRPAP</div>
-            <div class="bike-fullname">Full-Reserve Provable Account Primitives</div>
-            <InvariantTicker
-              label="Pattern"
-              description="0 ≤ Δ ≤ collateral"
-              pattern="[.===]"
-              speed={4}
-            />
-            <div class="bike-explanation">
-              <strong>Lightning Network.</strong> Full collateral, no credit. Cryptographic proofs but hits inbound liquidity wall. All payment channel projects now dead.
-            </div>
-          </div>
+            <!-- Big Bang origin marker -->
+            <circle cx="50" cy="60" r="4" fill="rgba(255,255,255,0.3)" />
 
-          <!-- RCPAN Card (Superset) -->
-          <div class="evolution-card evolution-card-superset">
-            <div class="timeline-badge timeline-badge-superset">2026</div>
-            <div class="superset-badge">⊃ Superset: Logical Evolution</div>
-            <img src="/bikes/rcpan.svg" alt="RCPAN" class="bike-svg bike-svg-superset" />
-            <div class="bike-title bike-title-superset">RCPAN</div>
-            <div class="bike-fullname">Reserve-Credit Provable Account Network</div>
-            <InvariantTicker
-              label="Pattern"
-              description="−leftCredit ≤ Δ ≤ collateral + rightCredit"
-              pattern="[---.===---]"
-              speed={4}
-            />
-            <div class="bike-explanation bike-explanation-superset">
-              <strong>xln (combines both).</strong> Credit where it scales, collateral where it secures. FCUAN + FRPAP = RCPAN. The principled hybrid.
+            <!-- Banking line (thick) -->
+            <path d="M 50 60 L 400 40 L 800 35 L 1000 50"
+                  stroke="url(#mergeGradient)"
+                  stroke-width="6"
+                  fill="none"
+                  stroke-linecap="round"/>
+
+            <!-- Lightning line (thin, appears at 2015) -->
+            <path d="M 800 70 L 1000 65"
+                  stroke="rgba(79,209,139,0.3)"
+                  stroke-width="2"
+                  fill="none"
+                  stroke-linecap="round"
+                  stroke-dasharray="4 4"/>
+
+            <!-- Merged future line (THICK + BRIGHT) -->
+            <path d="M 1000 50 L 1150 50"
+                  stroke="#4fd18b"
+                  stroke-width="12"
+                  fill="none"
+                  stroke-linecap="round"
+                  filter="url(#glow)"/>
+
+            <defs>
+              <filter id="glow">
+                <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                <feMerge>
+                  <feMergeNode in="coloredBlur"/>
+                  <feMergeNode in="SourceGraphic"/>
+                </feMerge>
+              </filter>
+            </defs>
+          </svg>
+
+          <div class="evolution-grid">
+            <!-- FCUAN Card -->
+            <div class="evolution-card">
+              <div class="timeline-badge">~5000 BC</div>
+              <img src="/bikes/fcuan.svg" alt="FCUAN" class="bike-svg" />
+              <div class="bike-title">FCUAN</div>
+              <div class="bike-fullname">Full-Credit Unprovable Account Networks</div>
+              <div class="ticker-wrapper">
+                <div class="ticker-formula">−leftCredit ≤ Δ ≤ rightCredit</div>
+                <InvariantTicker
+                  label=""
+                  description=""
+                  pattern="[---.---]"
+                  speed={4}
+                />
+              </div>
+              <div class="bike-explanation">
+                <strong>Traditional banking.</strong> Pure credit, no collateral. Scales phenomenally but weak security—assets seized, hubs default (Mt. Gox, FTX).
+              </div>
+            </div>
+
+            <!-- FRPAP Card -->
+            <div class="evolution-card">
+              <div class="timeline-badge">2015</div>
+              <img src="/bikes/frpap.svg" alt="FRPAP" class="bike-svg" />
+              <div class="bike-title">FRPAP</div>
+              <div class="bike-fullname">Full-Reserve Provable Account Primitives</div>
+              <div class="ticker-wrapper">
+                <div class="ticker-formula">0 ≤ Δ ≤ collateral</div>
+                <InvariantTicker
+                  label=""
+                  description=""
+                  pattern="[.===]"
+                  speed={4}
+                />
+              </div>
+              <div class="bike-explanation">
+                <strong>Lightning Network.</strong> Full collateral, no credit. Cryptographic proofs but hits inbound liquidity wall. All payment channel projects now dead.
+              </div>
+            </div>
+
+            <!-- RCPAN Card (Superset) -->
+            <div class="evolution-card evolution-card-superset">
+              <div class="timeline-badge timeline-badge-superset">2026</div>
+              <div class="superset-badge">⊃ Superset: Logical Evolution</div>
+              <img src="/bikes/rcpan.svg" alt="RCPAN" class="bike-svg bike-svg-superset" />
+              <div class="bike-title bike-title-superset">RCPAN</div>
+              <div class="bike-fullname">Reserve-Credit Provable Account Network</div>
+              <div class="ticker-wrapper">
+                <div class="ticker-formula">−leftCredit ≤ Δ ≤ collateral + rightCredit</div>
+                <InvariantTicker
+                  label=""
+                  description=""
+                  pattern="[---.===---]"
+                  speed={4}
+                />
+              </div>
+              <div class="bike-explanation bike-explanation-superset">
+                <strong>xln (combines both).</strong> Credit where it scales, collateral where it secures. FCUAN + FRPAP = RCPAN. The principled hybrid.
+              </div>
             </div>
           </div>
         </div>
@@ -1780,12 +1839,31 @@
     gap: 1.5rem;
   }
 
+  /* Evolution Container with Monumental Timeline */
+  .evolution-container {
+    position: relative;
+    margin: 2rem 0;
+  }
+
+  .timeline-path {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    width: 100%;
+    height: 120px;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.8;
+  }
+
   /* Evolution Grid - Timeline of payment systems */
   .evolution-grid {
+    position: relative;
+    z-index: 1;
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
     gap: 2rem;
-    margin: 2rem 0;
+    padding-top: 3rem;
   }
 
   .evolution-card {
@@ -1802,7 +1880,8 @@
   .evolution-card-superset {
     background: rgba(79, 209, 139, 0.05);
     border: 2px solid rgba(79, 209, 139, 0.3);
-    transform: scale(1.05);
+    transform: scale(1.15);
+    box-shadow: 0 0 24px rgba(79, 209, 139, 0.15);
   }
 
   .evolution-card:hover {
@@ -1810,25 +1889,28 @@
   }
 
   .evolution-card-superset:hover {
-    transform: translateY(-4px) scale(1.05);
+    transform: translateY(-4px) scale(1.15);
     border-color: rgba(79, 209, 139, 0.5);
+    box-shadow: 0 0 32px rgba(79, 209, 139, 0.25);
   }
 
   .timeline-badge {
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    color: rgba(255, 255, 255, 0.6);
-    padding: 0.3rem 0.8rem;
-    border-radius: 12px;
-    font-size: 0.75rem;
-    font-weight: 600;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.8);
+    padding: 0.5rem 1.2rem;
+    border-radius: 16px;
+    font-size: 0.95rem;
+    font-weight: 700;
     margin-bottom: 1.5rem;
+    letter-spacing: 0.5px;
   }
 
   .timeline-badge-superset {
-    background: rgba(79, 209, 139, 0.12);
-    border-color: rgba(79, 209, 139, 0.4);
+    background: rgba(79, 209, 139, 0.15);
+    border-color: rgba(79, 209, 139, 0.5);
     color: #4fd18b;
+    font-size: 1.1rem;
   }
 
   .superset-badge {
@@ -1851,7 +1933,7 @@
   }
 
   .bike-svg-superset {
-    width: 240px;
+    width: 260px;
   }
 
   .bike-title {
@@ -1862,16 +1944,32 @@
   }
 
   .bike-title-superset {
-    font-size: 1.5rem;
+    font-size: 1.6rem;
     color: #4fd18b;
   }
 
   .bike-fullname {
-    font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.7);
     text-align: center;
     margin-bottom: 1.5rem;
     font-style: italic;
+  }
+
+  .ticker-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    margin: 1rem 0;
+  }
+
+  .ticker-formula {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.75);
+    font-family: 'JetBrains Mono', monospace;
+    text-align: center;
   }
 
   .bike-explanation {
@@ -1895,17 +1993,18 @@
   :global(.light-mode) .evolution-card-superset {
     background: rgba(79, 209, 139, 0.08);
     border-color: rgba(79, 209, 139, 0.35);
+    box-shadow: 0 0 24px rgba(79, 209, 139, 0.2);
   }
 
   :global(.light-mode) .timeline-badge {
-    background: rgba(0, 0, 0, 0.05);
-    border-color: rgba(0, 0, 0, 0.15);
-    color: rgba(0, 0, 0, 0.6);
+    background: rgba(0, 0, 0, 0.08);
+    border-color: rgba(0, 0, 0, 0.2);
+    color: rgba(0, 0, 0, 0.8);
   }
 
   :global(.light-mode) .timeline-badge-superset {
-    background: rgba(79, 209, 139, 0.15);
-    border-color: rgba(79, 209, 139, 0.5);
+    background: rgba(79, 209, 139, 0.2);
+    border-color: rgba(79, 209, 139, 0.6);
     color: #2a8a5f;
   }
 
@@ -1924,7 +2023,11 @@
   }
 
   :global(.light-mode) .bike-fullname {
-    color: rgba(0, 0, 0, 0.5);
+    color: rgba(0, 0, 0, 0.7);
+  }
+
+  :global(.light-mode) .ticker-formula {
+    color: rgba(0, 0, 0, 0.75);
   }
 
   :global(.light-mode) .bike-explanation {
