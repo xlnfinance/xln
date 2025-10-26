@@ -264,23 +264,29 @@
         <p class="intro"><strong>xln</strong> is the first <strong>Reserve-Credit Provable Account Network (RCPAN)</strong>: credit where it scales, collateral where it secures. A principled hybrid.</p>
 
         <div class="invariant-box">
-          <div class="tickers-grid">
-            <div class="tickers-column">
-              <InvariantTicker
-                label="FCUAN"
-                description="−leftCredit ≤ Δ ≤ rightCredit"
-                pattern="[---.---]"
-              />
-              <InvariantTicker
-                label="FRPAP"
-                description="0 ≤ Δ ≤ collateral"
-                pattern="[.===]"
-              />
-              <InvariantTicker
-                label="RCPAN"
-                description="−leftCredit ≤ Δ ≤ collateral + rightCredit"
-                pattern="[---.===---]"
-              />
+          <div class="bikes-comparison">
+            <div class="bikes-bad">
+              <div class="bike-item">
+                <img src="/bikes/fcuan.svg" alt="FCUAN - Full Credit" class="bike-svg" />
+                <div class="bike-label">FCUAN (Traditional Banking)</div>
+                <div class="bike-desc">Pure credit, no collateral</div>
+              </div>
+              <div class="bike-item">
+                <img src="/bikes/frpap.svg" alt="FRPAP - Full Reserve" class="bike-svg" />
+                <div class="bike-label">FRPAP (Lightning)</div>
+                <div class="bike-desc">Full collateral, no credit</div>
+              </div>
+            </div>
+            <div class="bikes-divider">
+              <div class="divider-label">vs</div>
+            </div>
+            <div class="bikes-better">
+              <div class="bike-item bike-rcpan">
+                <div class="better-badge">BETTER: Superset Hybrid</div>
+                <img src="/bikes/rcpan.svg" alt="RCPAN - Reserve + Credit" class="bike-svg bike-svg-large" />
+                <div class="bike-label">RCPAN (xln)</div>
+                <div class="bike-desc">Credit where it scales, collateral where it secures</div>
+              </div>
             </div>
           </div>
         </div>
@@ -1746,6 +1752,106 @@
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+  }
+
+  /* Bikes Comparison */
+  .bikes-comparison {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2rem;
+    flex-wrap: wrap;
+  }
+
+  .bikes-bad {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    opacity: 0.6;
+  }
+
+  .bikes-better {
+    display: flex;
+    align-items: center;
+  }
+
+  .bike-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .bike-svg {
+    width: 200px;
+    height: auto;
+    filter: brightness(1.1);
+  }
+
+  .bike-svg-large {
+    width: 400px;
+  }
+
+  .bike-label {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  .bike-desc {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.6);
+    font-style: italic;
+    text-align: center;
+    max-width: 200px;
+  }
+
+  .bike-rcpan .bike-desc {
+    max-width: 400px;
+  }
+
+  .bikes-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .divider-label {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: rgba(79, 209, 139, 0.5);
+    padding: 0 1rem;
+  }
+
+  .better-badge {
+    background: rgba(79, 209, 139, 0.15);
+    border: 1px solid rgba(79, 209, 139, 0.4);
+    color: #4fd18b;
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  :global(.light-mode) .bike-label {
+    color: rgba(0, 0, 0, 0.85);
+  }
+
+  :global(.light-mode) .bike-desc {
+    color: rgba(0, 0, 0, 0.6);
+  }
+
+  :global(.light-mode) .bike-svg {
+    filter: brightness(0.9);
+  }
+
+  :global(.light-mode) .better-badge {
+    background: rgba(79, 209, 139, 0.2);
+    border-color: rgba(79, 209, 139, 0.5);
+    color: #2a8a5f;
   }
 
   .visual-column {
