@@ -162,66 +162,151 @@
     stroke-width: 0.4;
   }
 
-  /* Server Detail - Geological Layers */
+  /* Server Detail - Premium Stripe-style Layers */
   .server-detail {
-    max-width: 900px;
+    max-width: 1100px;
     margin: 0 auto;
+    perspective: 1000px;
   }
 
   .server-detail h2 {
     text-align: center;
     color: #00d1ff;
-    margin-bottom: 2rem;
+    font-size: 2.5rem;
+    margin-bottom: 3rem;
+    font-weight: 700;
   }
 
   .layers-stack {
     display: flex;
     flex-direction: column;
     gap: 0;
+    position: relative;
   }
 
   .layer {
-    padding: 2rem;
-    border: 1px solid rgba(255,255,255,0.1);
+    padding: 3.5rem 4rem;
     position: relative;
+    transform-style: preserve-3d;
+    transition: transform 0.3s ease;
   }
 
+  .layer:hover {
+    transform: translateZ(20px);
+  }
+
+  /* Runtime - Dark Foundation */
   .layer-runtime {
-    background: linear-gradient(180deg, rgba(100,100,100,0.2), rgba(80,80,80,0.15));
-    border-radius: 12px 12px 0 0;
+    background:
+      linear-gradient(135deg, rgba(20,20,25,0.95) 0%, rgba(30,30,35,0.9) 100%),
+      radial-gradient(circle at top left, rgba(100,100,120,0.15), transparent 50%);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 20px 20px 0 0;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.05),
+      0 4px 20px rgba(0,0,0,0.3);
   }
 
+  /* J-Machine - Orange Broadcast Glow */
   .layer-j {
-    background: linear-gradient(180deg, rgba(255,165,0,0.15), rgba(255,140,0,0.1));
+    background:
+      linear-gradient(135deg, rgba(255,130,0,0.12) 0%, rgba(255,100,0,0.08) 100%),
+      radial-gradient(circle at center, rgba(255,165,0,0.15), transparent 70%);
+    border-left: 3px solid rgba(255,140,0,0.4);
+    border-right: 3px solid rgba(255,140,0,0.4);
+    box-shadow:
+      inset 0 2px 0 rgba(255,165,0,0.1),
+      0 8px 32px rgba(255,140,0,0.15),
+      0 -4px 20px rgba(0,0,0,0.2);
     position: relative;
     overflow: hidden;
+    transform: translateZ(10px);
   }
 
+  .layer-j::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(255,165,0,0.5), transparent);
+  }
+
+  /* E-Machine - Blue Consensus */
   .layer-e {
-    background: linear-gradient(180deg, rgba(0,100,200,0.15), rgba(0,80,160,0.1));
+    background:
+      linear-gradient(135deg, rgba(0,120,255,0.12) 0%, rgba(0,90,200,0.08) 100%),
+      radial-gradient(circle at center, rgba(0,150,255,0.15), transparent 70%);
+    border-left: 3px solid rgba(0,150,255,0.4);
+    border-right: 3px solid rgba(0,150,255,0.4);
+    box-shadow:
+      inset 0 2px 0 rgba(0,150,255,0.1),
+      0 12px 40px rgba(0,120,255,0.2),
+      0 -4px 20px rgba(0,0,0,0.25);
+    transform: translateZ(20px);
   }
 
+  /* A-Machines - Green Unicast (Top Layer) */
   .layer-a {
-    background: linear-gradient(180deg, rgba(79,209,139,0.15), rgba(79,209,139,0.08));
-    border-radius: 0 0 12px 12px;
+    background:
+      linear-gradient(135deg, rgba(79,209,139,0.18) 0%, rgba(79,209,139,0.12) 100%),
+      radial-gradient(circle at top center, rgba(79,255,180,0.2), transparent 60%);
+    border: 2px solid rgba(79,209,139,0.5);
+    border-radius: 0 0 20px 20px;
+    box-shadow:
+      inset 0 3px 0 rgba(79,209,139,0.15),
+      0 16px 48px rgba(79,209,139,0.3),
+      0 8px 24px rgba(0,0,0,0.3);
+    transform: translateZ(30px);
+  }
+
+  .layer-a::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, transparent, rgba(79,209,139,0.7), transparent);
+    filter: blur(2px);
   }
 
   .layer-label {
-    font-size: 1.3rem;
+    font-size: 1.8rem;
     font-weight: 700;
-    color: rgba(255,255,255,0.95);
-    margin-bottom: 0.5rem;
+    color: rgba(255,255,255,0.98);
+    margin-bottom: 1rem;
+    letter-spacing: -0.02em;
+  }
+
+  .layer-runtime .layer-label {
+    color: rgba(200,200,210,0.9);
+  }
+
+  .layer-j .layer-label {
+    color: rgba(255,180,80,0.95);
+  }
+
+  .layer-e .layer-label {
+    color: rgba(100,180,255,0.95);
+  }
+
+  .layer-a .layer-label {
+    color: rgba(79,255,180,0.98);
   }
 
   .layer-desc {
-    font-size: 0.9rem;
-    color: rgba(255,255,255,0.65);
-    line-height: 1.6;
+    font-size: 1.05rem;
+    color: rgba(255,255,255,0.75);
+    line-height: 1.8;
+    max-width: 600px;
   }
 
   .layer-icon {
-    font-size: 2rem;
-    margin-bottom: 0.5rem;
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    filter: drop-shadow(0 4px 12px rgba(255,165,0,0.4));
   }
 
   /* J-Machine Broadcast Visualization */
