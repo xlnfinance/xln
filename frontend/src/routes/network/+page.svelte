@@ -117,26 +117,35 @@
 <style>
   .network-page {
     min-height: 100vh;
-    background: #000;
+    background:
+      radial-gradient(circle at top left, rgba(139, 92, 246, 0.15), transparent 50%),
+      radial-gradient(circle at top right, rgba(79, 209, 139, 0.15), transparent 50%),
+      radial-gradient(circle at bottom, rgba(59, 130, 246, 0.15), transparent 50%),
+      linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 100%);
     color: #fff;
-    padding: 4rem 2rem;
+    padding: 6rem 2rem;
   }
 
   .header {
     text-align: center;
-    margin-bottom: 4rem;
+    margin-bottom: 5rem;
   }
 
   .header h1 {
-    font-size: 3rem;
-    font-weight: 700;
-    color: #4fd18b;
+    font-size: 4rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #4fd18b 0%, #00d1ff 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -0.03em;
+    margin-bottom: 1.5rem;
   }
 
   .subtitle {
-    font-size: 1.2rem;
+    font-size: 1.4rem;
     color: rgba(255,255,255,0.7);
-    margin-top: 1rem;
+    font-weight: 400;
   }
 
   .network-canvas {
@@ -195,32 +204,33 @@
     transform: translateZ(20px);
   }
 
-  /* Runtime - Dark Foundation */
+  /* Runtime - Dark Foundation (Stripe card style) */
   .layer-runtime {
-    background:
-      linear-gradient(135deg, rgba(20,20,25,0.95) 0%, rgba(30,30,35,0.9) 100%),
-      radial-gradient(circle at top left, rgba(100,100,120,0.15), transparent 50%);
-    border: 1px solid rgba(255,255,255,0.08);
-    border-radius: 20px 20px 0 0;
+    background: rgba(15,15,20,0.6);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 24px 24px 0 0;
     box-shadow:
-      inset 0 1px 0 rgba(255,255,255,0.05),
-      0 4px 20px rgba(0,0,0,0.3);
+      0 1px 3px rgba(0,0,0,0.12),
+      0 8px 24px rgba(0,0,0,0.25),
+      inset 0 1px 0 rgba(255,255,255,0.06);
   }
 
-  /* J-Machine - Orange Broadcast Glow */
+  /* J-Machine - Premium Orange Layer */
   .layer-j {
     background:
-      linear-gradient(135deg, rgba(255,130,0,0.12) 0%, rgba(255,100,0,0.08) 100%),
-      radial-gradient(circle at center, rgba(255,165,0,0.15), transparent 70%);
-    border-left: 3px solid rgba(255,140,0,0.4);
-    border-right: 3px solid rgba(255,140,0,0.4);
+      linear-gradient(135deg, rgba(255,140,60,0.08), rgba(255,120,40,0.05)),
+      rgba(20,15,10,0.5);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,140,0,0.2);
+    border-left: 4px solid rgba(255,140,0,0.5);
     box-shadow:
-      inset 0 2px 0 rgba(255,165,0,0.1),
-      0 8px 32px rgba(255,140,0,0.15),
-      0 -4px 20px rgba(0,0,0,0.2);
+      0 2px 8px rgba(0,0,0,0.15),
+      0 12px 40px rgba(255,140,0,0.12),
+      inset 0 1px 0 rgba(255,165,0,0.08);
     position: relative;
     overflow: hidden;
-    transform: translateZ(10px);
+    transform: translateZ(15px);
   }
 
   .layer-j::before {
@@ -229,47 +239,50 @@
     top: 0;
     left: 0;
     right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, rgba(255,165,0,0.5), transparent);
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255,165,0,0.6), transparent);
   }
 
-  /* E-Machine - Blue Consensus */
+  /* E-Machine - Premium Blue Layer */
   .layer-e {
     background:
-      linear-gradient(135deg, rgba(0,120,255,0.12) 0%, rgba(0,90,200,0.08) 100%),
-      radial-gradient(circle at center, rgba(0,150,255,0.15), transparent 70%);
-    border-left: 3px solid rgba(0,150,255,0.4);
-    border-right: 3px solid rgba(0,150,255,0.4);
+      linear-gradient(135deg, rgba(59,130,246,0.1), rgba(37,99,235,0.06)),
+      rgba(10,15,25,0.5);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(59,130,246,0.25);
+    border-left: 4px solid rgba(59,130,246,0.6);
     box-shadow:
-      inset 0 2px 0 rgba(0,150,255,0.1),
-      0 12px 40px rgba(0,120,255,0.2),
-      0 -4px 20px rgba(0,0,0,0.25);
-    transform: translateZ(20px);
+      0 4px 12px rgba(0,0,0,0.18),
+      0 16px 48px rgba(59,130,246,0.15),
+      inset 0 1px 0 rgba(59,130,246,0.1);
+    transform: translateZ(25px);
   }
 
-  /* A-Machines - Green Unicast (Top Layer) */
+  /* A-Machines - Premium Green Top Layer */
   .layer-a {
     background:
-      linear-gradient(135deg, rgba(79,209,139,0.18) 0%, rgba(79,209,139,0.12) 100%),
-      radial-gradient(circle at top center, rgba(79,255,180,0.2), transparent 60%);
-    border: 2px solid rgba(79,209,139,0.5);
-    border-radius: 0 0 20px 20px;
+      linear-gradient(135deg, rgba(79,209,139,0.15), rgba(34,197,94,0.1)),
+      rgba(10,20,15,0.5);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(79,209,139,0.35);
+    border-left: 4px solid rgba(79,209,139,0.7);
+    border-radius: 0 0 24px 24px;
     box-shadow:
-      inset 0 3px 0 rgba(79,209,139,0.15),
-      0 16px 48px rgba(79,209,139,0.3),
-      0 8px 24px rgba(0,0,0,0.3);
-    transform: translateZ(30px);
+      0 6px 16px rgba(0,0,0,0.2),
+      0 20px 60px rgba(79,209,139,0.25),
+      inset 0 2px 0 rgba(79,209,139,0.12);
+    transform: translateZ(35px);
   }
 
   .layer-a::before {
     content: '';
     position: absolute;
-    top: -2px;
+    top: -1px;
     left: 0;
     right: 0;
-    height: 4px;
-    background: linear-gradient(90deg, transparent, rgba(79,209,139,0.7), transparent);
-    filter: blur(2px);
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(79,209,139,0.8), transparent);
+    box-shadow: 0 0 8px rgba(79,209,139,0.6);
   }
 
   .layer-label {
