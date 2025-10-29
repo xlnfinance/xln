@@ -2,11 +2,74 @@
 
 **Disposable scratchpad. For long-term vision, see /vibepaper/roadmap.md**
 
-**Last Updated:** 2025-10-23
+**Last Updated:** 2025-10-24
 
 ---
 
-## 🚨 Current Work: Xlnomy System (Self-Contained Jurisdictions)
+## 🚨 Current Session: Landing Page + New Routes (2025-10-24)
+
+### ✅ Completed This Session
+
+**Landing Page Improvements:**
+- Light mode fixes (ComparativeChart, all components)
+- Typography refresh (Inter font, better contrast, larger sizes)
+- Roadmap section (Q1 2026 testnet)
+- Founder quote (Sakurity link, quote styling)
+- Layout widened for 15"+ displays (1200px)
+- llms.txt integration (self-contained 285 lines → 112k tokens from gpt.cjs)
+- Timeline evolution visualization (Big Bang → FCUAN → FRPAP → RCPAN)
+- Bike SVGs (fcuan/frpap/rcpan.svg) with metaphor
+- Color legend (Credit Red, Reserve Green)
+- Contract architecture (Depository HUGE core + EP/SP modules)
+- Full-width sections (timeline + contracts break 1200px constraint)
+- Text selection colors (green brand)
+
+**Repository Strategy:**
+- Created private repo `xlnfinance/_xln`
+- Configured dual remotes (origin = public, private = _xln)
+- Decided to keep code public (speed is moat, not secrecy)
+- Updated .gitignore, removed runtime.js from tracking
+
+**New Routes:**
+- `/reviews` - AI Magazine (5 prompts × 4 models, tweet-sized reviews)
+- `/network` - Topology view (X-shaped servers, geological R/J/E/A layers)
+- Stripe-premium styling (gradients, backdrop-blur, soft shadows)
+
+**Build:**
+- Fixed 9 TypeScript errors (Graph3DPanel, NetworkAnimation)
+- `bun run check` passes ✔
+
+### 🚧 TODO Next Session
+
+**1. Timeline Continuity (CRITICAL)**
+- Line still broken/disconnected
+- Fix: Make truly continuous flow from Big Bang (left edge) → future (right edge)
+- Add Bitcoin (2009), Big Blockers (2017), Rollups (2019) milestones
+- Show xln as synthesis of ALL attempts
+
+**2. /reviews Content**
+- Add real AI-generated reviews (run prompts through GPT-4, Claude, Gemini)
+- Currently placeholder text
+- Make reviews rotate/animate
+
+**3. /network Improvements**
+- Light mode support
+- Better server selection UX
+- Animate unicast lines vs broadcast rays
+- Add capacity labels on layers
+
+**4. Navigation**
+- Add header nav: Home | Reviews | Network | View
+- Footer links to new pages
+
+**5. Mobile Responsive**
+- Timeline wraps on <1024px
+- Contracts stack vertically
+- Big Bang stays visible
+
+---
+
+## 🎯 Old Work: Xlnomy System (Self-Contained Jurisdictions)
 
 **Goal:** Make XLN "super self-contained" by creating jurisdictions entirely within runtime. Eliminate external dependencies.
 
