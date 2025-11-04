@@ -472,12 +472,20 @@ let vrHammer: VRHammer | null = null;
   let rotationZ: number = savedSettings.rotationZ; // 0-10000 (0 = stopped, 10000 = fast)
   let availableTokens: number[] = []; // Will be populated from actual token data
   let showPanel: boolean = true; // Mobile-friendly panel toggle - start visible
-  let rendererMode: RendererMode = 'webgl'; // Renderer mode: 'webgl' | 'webgpu'
-  let labelScale: number = 2.0; // Entity label size multiplier (1.0 = 32px font, 2.0 = 64px font)
-  let lightningSpeed: number = 100; // Lightning animation speed in ms per hop (default 100ms)
-  let sidebarWidth: number = 400; // Sidebar width in pixels (250-600)
-  let isResizingSidebar: boolean = false;
-  let forceLayoutEnabled: boolean = true; // Toggle for force-directed layout rebalancing
+  // Settings (managed by SettingsPanel, updated via panelBridge)
+  // Settings (managed by SettingsPanel, updated via panelBridge)
+  let rendererMode: RendererMode = 'webgl';
+  let labelScale: number = 2.0;
+  let lightningSpeed: number = 100;
+  let forceLayoutEnabled: boolean = true;
+  let gridSize: number = 300;
+  let gridDivisions: number = 60;
+  let gridOpacity: number = 0.4;
+  let gridColor: string = '#00ff41';
+  let cameraDistance: number = 500;
+  let cameraTarget: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
+  let gridHelper: THREE.GridHelper | null = null;
+  let resizeDebounceTimer: number | null = null;
 
   // Helper to get token symbol using xlnFunctions
   function getTokenSymbol(tokenId: number): string {
@@ -551,13 +559,27 @@ let vrHammer: VRHammer | null = null;
   }
 
   // ===== CREATE J-MACHINES FOR EACH XLNOMY =====
-  $: if (env?.xlnomies && scene) {
-    env.xlnomies.forEach((xlnomy: any, name: string) => {
+  // CRITICAL: Always read from $isolatedEnv (live state), not time-travel env
+  // Xlnomies Map exists on live state only, not on individual historical frames
+  $: if ($isolatedEnv?.xlnomies && scene) {
+    // Remove J-Machines that no longer exist
+    const currentXlnomies = new Set($isolatedEnv.xlnomies.keys());
+    for (const [name, mesh] of jMachines.entries()) {
+      if (!currentXlnomies.has(name)) {
+        scene.remove(mesh);
+        jMachines.delete(name);
+        console.log(`[Graph3D] Removed J-Machine: ${name}`);
+      }
+    }
+
+    // Create new J-Machines
+    $isolatedEnv.xlnomies.forEach((xlnomy: any, name: string) => {
       if (!jMachines.has(name)) {
         console.log(`[Graph3D] Creating J-Machine for xlnomy: ${name} at position`, xlnomy.jMachine.position);
         const jMachine = createJMachine(25, xlnomy.jMachine.position, name);
         scene.add(jMachine);
         jMachines.set(name, jMachine);
+        console.log(`[Graph3D] ✅ J-Machine created, scene now has ${scene.children.length} objects`);
       }
     });
   }
@@ -789,12 +811,77 @@ let vrHammer: VRHammer | null = null;
     panelBridge.on('broadcast:toggle', handleBroadcastToggle);
     panelBridge.on('broadcast:style', handleBroadcastStyle);
 
+    // Settings updates from SettingsPanel
+    const handleSettingsUpdate = (event: any) => {
+      const { key, value } = event;
+      console.log(`[Graph3D] Settings update: ${key} =`, value);
+
+      if (key === 'gridSize') gridSize = value;
+      else if (key === 'gridDivisions') gridDivisions = value;
+      else if (key === 'gridOpacity') gridOpacity = value;
+      else if (key === 'gridColor') gridColor = value;
+      else if (key === 'cameraDistance') cameraDistance = value;
+      else if (key === 'cameraTarget') {
+        cameraTarget = value;
+        if (controls) {
+          controls.target.set(value.x, value.y, value.z);
+          controls.update();
+        }
+      }
+      else if (key === 'entityLabelScale') labelScale = value;
+      else if (key === 'lightningSpeed') lightningSpeed = value;
+      else if (key === 'rendererMode') rendererMode = value;
+      else if (key === 'forceLayoutEnabled') forceLayoutEnabled = value;
+
+      // Recreate scene for grid changes
+      if (['gridSize', 'gridDivisions', 'gridOpacity', 'gridColor'].includes(key)) {
+        recreateGrid();
+      }
+    };
+
+    const handleSettingsReset = () => {
+      console.log('[Graph3D] Resetting to default settings');
+      gridSize = 300;
+      gridDivisions = 60;
+      gridOpacity = 0.4;
+      gridColor = '#00ff41';
+      cameraDistance = 500;
+      cameraTarget = { x: 0, y: 0, z: 0 };
+      labelScale = 2.0;
+      lightningSpeed = 100;
+      rendererMode = 'webgl';
+      forceLayoutEnabled = true;
+
+      if (controls) {
+        controls.target.set(0, 0, 0);
+        controls.update();
+      }
+      recreateGrid();
+    };
+
+    const handleCameraFocus = (event: any) => {
+      const { target } = event;
+      if (controls) {
+        cameraTarget = target;
+        controls.target.set(target.x, target.y, target.z);
+        controls.update();
+        console.log('[Graph3D] Camera focused on:', target);
+      }
+    };
+
+    panelBridge.on('settings:update', handleSettingsUpdate);
+    panelBridge.on('settings:reset', handleSettingsReset);
+    panelBridge.on('camera:focus', handleCameraFocus);
+
     const unsubscribe1 = isolatedEnv.subscribe(updateNetworkData);
     return () => {
       unsubscribe1();
       panelBridge.off('vr:toggle', handleVRToggle);
       panelBridge.off('broadcast:toggle', handleBroadcastToggle);
       panelBridge.off('broadcast:style', handleBroadcastStyle);
+      panelBridge.off('settings:update', handleSettingsUpdate);
+      panelBridge.off('settings:reset', handleSettingsReset);
+      panelBridge.off('camera:focus', handleCameraFocus);
     };
   });
 
@@ -804,7 +891,15 @@ let vrHammer: VRHammer | null = null;
     updateNetworkData();
   }
 
+  let resizeObserver: ResizeObserver | null = null;
+
   onDestroy(() => {
+    // Cleanup resize observer
+    if (resizeObserver && container) {
+      resizeObserver.disconnect();
+      resizeObserver = null;
+    }
+
     if (animationId) {
       cancelAnimationFrame(animationId);
       animationId = null as any;
@@ -843,11 +938,46 @@ let vrHammer: VRHammer | null = null;
     if (activityVisualizer) {
       activityVisualizer.clearAll();
     }
-
-    // Remove sidebar resize listeners
-    window.removeEventListener('mousemove', handleResizeMove);
-    window.removeEventListener('mouseup', handleResizeEnd);
   });
+
+  /**
+   * Create grid floor centered at origin (large enough to never clip)
+   */
+  function createGrid() {
+    if (!scene) return;
+
+    // Fixed large grid (±1000px) to prevent clipping on zoom
+    const fixedSize = 2000; // Diameter = 2000, radius = 1000
+    const divisions = 200; // 10px per division
+
+    gridHelper = new THREE.GridHelper(fixedSize, divisions,
+      gridColor,  // Center line
+      gridColor   // Grid lines (same color, controlled by opacity)
+    );
+    gridHelper.material.opacity = gridOpacity;
+    gridHelper.material.transparent = true;
+    gridHelper.position.set(0, -50, 0); // Centered at origin, below entities
+    scene.add(gridHelper);
+
+    console.log(`[Graph3D] Grid created: ±1000px, ${divisions} divisions, opacity ${gridOpacity}`);
+  }
+
+  /**
+   * Recreate grid when settings change (RAF scheduled to prevent blinking)
+   */
+  function recreateGrid() {
+    requestAnimationFrame(() => {
+      if (!scene || !gridHelper) return;
+
+      // Remove old grid
+      scene.remove(gridHelper);
+      gridHelper.geometry.dispose();
+      (gridHelper.material as THREE.Material).dispose();
+
+      // Create new grid with updated settings
+      createGrid();
+    });
+  }
 
   /**
    * Create J-Machine octahedron at (0, 100, 0) - elevated above entity grid (L1 layer)
@@ -860,6 +990,13 @@ let vrHammer: VRHammer | null = null;
   ): THREE.Group {
     const group = new THREE.Group();
     group.position.set(position.x, position.y, position.z); // Position from xlnomy config
+
+    // Store xlnomy name for click handling
+    group.userData = {
+      type: 'jMachine',
+      xlnomyName: name,
+      position
+    };
 
     // Octahedron geometry (8 faces) - Ethereum diamond shape
     const octahedronGeometry = new THREE.OctahedronGeometry(size, 0);
@@ -910,7 +1047,7 @@ let vrHammer: VRHammer | null = null;
       context.fillStyle = '#b8a4d9';
       context.font = 'bold 32px monospace';
       context.textAlign = 'center';
-      context.fillText(name.toUpperCase(), 128, 40);
+      context.fillText(name.toLowerCase(), 128, 40); // Lowercase for consistency
     }
 
     const texture = new THREE.CanvasTexture(canvas);
@@ -1231,15 +1368,9 @@ let vrHammer: VRHammer | null = null;
     const themeColors = getThemeColors(settings.theme);
     scene.background = new THREE.Color(themeColors.background);
 
-    // Matrix-style 3D grid floor (always visible, subtle depth)
-    const gridHelper = new THREE.GridHelper(200, 40,
-      0x00ff88, // Center line (XLN green)
-      0x002222  // Grid lines (very dark for subtlety)
-    );
-    gridHelper.material.opacity = 0.2; // Subtle but visible
-    gridHelper.material.transparent = true;
-    gridHelper.position.y = -50; // Below entities
-    scene.add(gridHelper);
+    // Matrix-style 3D grid floor centered at origin (0,0,0)
+    // Grid creation moved to createGrid() function for settings updates
+    createGrid();
 
     // Camera setup - use container dimensions
     const containerWidth = container.clientWidth || window.innerWidth;
@@ -1258,7 +1389,7 @@ let vrHammer: VRHammer | null = null;
       75,
       containerWidth / containerHeight,
       0.1,
-      1000
+      20000 // Far plane: large enough to see full grid at any zoom
     );
     camera.position.set(200, 0, 100); // Position camera to look at grid center (200, 0, 0)
 
@@ -1285,8 +1416,8 @@ let vrHammer: VRHammer | null = null;
       controls.enableRotate = true;
       controls.enablePan = true;
 
-      // Set default target to grid center
-      controls.target.set(200, 0, 0);
+      // Set default target from settings (grid center)
+      controls.target.set(cameraTarget.x, cameraTarget.y, cameraTarget.z);
 
       // Restore saved camera state if available
       if (savedSettings.camera) {
@@ -1337,12 +1468,22 @@ let vrHammer: VRHammer | null = null;
     renderer.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
     renderer.domElement.addEventListener('touchend', onTouchEnd);
 
-    // Handle resize
+    // Handle window AND panel resize (Dockview)
     window.addEventListener('resize', onWindowResize);
 
-    // Sidebar resize handlers
-    window.addEventListener('mousemove', handleResizeMove);
-    window.addEventListener('mouseup', handleResizeEnd);
+    // Watch for Dockview panel resize (debounced to prevent blinking)
+    resizeObserver = new ResizeObserver(() => {
+      // Debounce: Only resize after 100ms of no changes
+      if (resizeDebounceTimer) {
+        clearTimeout(resizeDebounceTimer);
+      }
+      resizeDebounceTimer = window.setTimeout(() => {
+        requestAnimationFrame(() => {
+          onWindowResize();
+        });
+      }, 50); // 50ms debounce
+    });
+    resizeObserver.observe(container);
 
     // Setup VR controllers if VR supported
     if (isVRSupported && renderer) {
@@ -1953,6 +2094,9 @@ let vrHammer: VRHammer | null = null;
     const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(profile.entityId + ':'));
     const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
 
+    // Check if this is Federal Reserve
+    const isFed = replica?.signerId?.includes('_fed') || false;
+
     // DEBUG: Log replica lookup details
     console.log('[Graph3D] 🔍 Replica lookup for', profile.entityId.slice(0,10), ':', {
       replicaKey,
@@ -1997,28 +2141,58 @@ let vrHammer: VRHammer | null = null;
       z = 0;
     }
 
-    // Calculate entity size based on selected token reserves
-    const entitySize = getEntitySizeForToken(profile.entityId, selectedTokenId);
+    // Calculate entity size based on type
+    let entitySize = getEntitySizeForToken(profile.entityId, selectedTokenId);
 
-    // Create entity geometry - size based on token reserves
+    // Federal Reserve is 3x larger
+    if (isFed) {
+      entitySize = entitySize * 3;
+    }
+
+    // Create entity geometry
     const geometry = new THREE.SphereGeometry(entitySize, 32, 32);
 
-    // Get theme colors
-    const themeColors = getThemeColors(settings.theme);
-    const baseColor = parseInt(themeColors.entityColor.replace('#', '0x'));
-    const emissiveColor = parseInt(themeColors.entityEmissive.replace('#', '0x'));
-    const emissiveIntensity = isHub ? 1.5 : 0.1; // Much brighter for hubs
+    // Colors: Purple for Fed, green for banks
+    let baseColor: number, emissiveColor: number, emissiveIntensity: number;
+
+    if (isFed) {
+      baseColor = 0x8b7fb8;      // Ethereum purple (matches J-Machine)
+      emissiveColor = 0x9a8ac4;  // Bright purple glow
+      emissiveIntensity = 2.0;   // Very bright
+    } else {
+      const themeColors = getThemeColors(settings.theme);
+      baseColor = parseInt(themeColors.entityColor.replace('#', '0x'));
+      emissiveColor = parseInt(themeColors.entityEmissive.replace('#', '0x'));
+      emissiveIntensity = isHub ? 1.5 : 0.1;
+    }
 
     const material = new THREE.MeshLambertMaterial({
       color: baseColor,
       emissive: emissiveColor,
       emissiveIntensity: emissiveIntensity,
       transparent: true,
-      opacity: 0.9
+      opacity: isFed ? 1.0 : 0.9
     });
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, y, z);
+
+    // Add purple glow ring for Fed
+    if (isFed) {
+      const glowGeometry = new THREE.RingGeometry(entitySize * 1.2, entitySize * 1.5, 32);
+      const glowMaterial = new THREE.MeshBasicMaterial({
+        color: 0x8b7fb8,
+        transparent: true,
+        opacity: 0.3,
+        side: THREE.DoubleSide
+      });
+      const glowRing = new THREE.Mesh(glowGeometry, glowMaterial);
+      glowRing.rotation.x = Math.PI / 2; // Horizontal ring
+      mesh.add(glowRing);
+
+      // Store for animation
+      mesh.userData['glowRing'] = glowRing;
+    }
 
     // GRID-POS-E removed - already logged in GRID-POS-D above
 
@@ -2378,17 +2552,42 @@ let vrHammer: VRHammer | null = null;
       toEntity.position
     ]);
 
-    // Create dotted line material with theme color
-    const themeColors = getThemeColors(settings.theme);
-    const connectionColor = parseInt(themeColors.connectionColor.replace('#', '0x'));
+    // Check if either entity is Federal Reserve
+    const currentReplicas = $isolatedEnv?.replicas || new Map();
+    const fromReplicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(fromId + ':'));
+    const toReplicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(toId + ':'));
+    const fromReplicaData = fromReplicaKey ? currentReplicas.get(fromReplicaKey) : null;
+    const toReplicaData = toReplicaKey ? currentReplicas.get(toReplicaKey) : null;
+
+    const isFedConnection =
+      fromReplicaData?.signerId?.includes('_fed') ||
+      toReplicaData?.signerId?.includes('_fed');
+
+    // Gold thick lines for Fed connections (credit lines), normal for others
+    let connectionColor: number, opacity: number, linewidth: number, dashSize: number, gapSize: number;
+
+    if (isFedConnection) {
+      connectionColor = 0xffd700;  // Gold color for Fed credit lines
+      opacity = 0.8;
+      linewidth = 4;
+      dashSize = 1.0;  // Longer dashes
+      gapSize = 0.5;   // Smaller gaps (more continuous)
+    } else {
+      const themeColors = getThemeColors(settings.theme);
+      connectionColor = parseInt(themeColors.connectionColor.replace('#', '0x'));
+      opacity = 0.5;
+      linewidth = 2;
+      dashSize = 0.3;
+      gapSize = 0.3;
+    }
 
     const material = new THREE.LineDashedMaterial({
       color: connectionColor,
-      opacity: 0.5, // More visible (was 0.3)
+      opacity: opacity,
       transparent: true,
-      linewidth: 2, // Thicker lines
-      dashSize: 0.3, // Longer dashes (more visible)
-      gapSize: 0.3   // Smaller gaps (more continuous)
+      linewidth: linewidth,
+      dashSize: dashSize,
+      gapSize: gapSize
     });
 
     const line = new THREE.Line(geometry, material);
@@ -2670,9 +2869,17 @@ let vrHammer: VRHammer | null = null;
       vrHammer.update(connections);
     }
 
-    // Pulse animation for hubs (24/7 always-on effect)
+    // Pulse animation for hubs AND Fed entities (24/7 always-on effect)
     const time = Date.now() * 0.001; // Convert to seconds
     entities.forEach(entity => {
+      // Fed glow ring animation (rotating + pulsing)
+      if (entity.mesh.userData['glowRing']) {
+        const glowRing = entity.mesh.userData['glowRing'] as THREE.Mesh;
+        glowRing.rotation.z = time * 0.5; // Slow rotation
+        const pulseMaterial = glowRing.material as THREE.MeshBasicMaterial;
+        pulseMaterial.opacity = 0.2 + Math.sin(time * 2) * 0.15; // Pulse 0.05-0.35
+      }
+
       if (entity.isHub && entity.mesh.material && entity.pulsePhase !== undefined) {
         // Aurora borealis effect: multi-frequency pulsing with color shift
         const material = entity.mesh.material as THREE.MeshLambertMaterial;
@@ -3494,6 +3701,40 @@ let vrHammer: VRHammer | null = null;
     // Update raycaster
     raycaster.setFromCamera(mouse, camera);
 
+    // Check for J-Machine intersections FIRST (higher priority than entities)
+    const jMachineObjects: THREE.Object3D[] = [];
+    jMachines.forEach(group => {
+      group.children.forEach(child => jMachineObjects.push(child));
+    });
+    const jMachineIntersects = raycaster.intersectObjects(jMachineObjects);
+
+    if (jMachineIntersects.length > 0 && jMachineIntersects[0]) {
+      // Find which J-Machine was clicked
+      const clickedMesh = jMachineIntersects[0].object;
+      let clickedJMachine: THREE.Group | null = null;
+
+      jMachines.forEach((group) => {
+        if (group.children.includes(clickedMesh)) {
+          clickedJMachine = group;
+        }
+      });
+
+      if (clickedJMachine && (clickedJMachine as any).userData && (clickedJMachine as any).userData.type === 'jMachine') {
+        const pos = (clickedJMachine as any).userData.position as { x: number; y: number; z: number };
+        const name = (clickedJMachine as any).userData.xlnomyName as string;
+        console.log(`[Graph3D] J-Machine clicked: ${name} at`, pos);
+
+        // Focus camera on this J-Machine
+        if (controls && pos) {
+          cameraTarget = pos;
+          controls.target.set(pos.x, pos.y, pos.z);
+          controls.update();
+          console.log(`[Graph3D] ✅ Camera now rotates around ${name}`);
+        }
+        return; // Don't process entity clicks
+      }
+    }
+
     // Check for entity intersections
     const entityMeshes = entities.map(e => e.mesh);
     const intersects = raycaster.intersectObjects(entityMeshes);
@@ -3550,23 +3791,6 @@ let vrHammer: VRHammer | null = null;
 
       // TODO: Switch to panels view and focus specific entity
     }
-  }
-
-  // Sidebar resize handlers
-  function handleResizeStart(event: MouseEvent) {
-    event.preventDefault();
-    isResizingSidebar = true;
-  }
-
-  function handleResizeMove(event: MouseEvent) {
-    if (!isResizingSidebar) return;
-
-    const newWidth = window.innerWidth - event.clientX;
-    sidebarWidth = Math.max(50, newWidth); // Allow dragging anywhere, minimum 50px
-  }
-
-  function handleResizeEnd() {
-    isResizingSidebar = false;
   }
 
   // Touch event handlers for iPhone/mobile support

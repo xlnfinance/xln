@@ -68,7 +68,7 @@
       <div class="model-column">
         <div class="model-header">{model}</div>
         <div class="review-card">
-          <div class="review-text">{REVIEWS[model][selectedPrompt]}</div>
+          <div class="review-text">{REVIEWS[model as keyof typeof REVIEWS][selectedPrompt]}</div>
         </div>
       </div>
     {/each}

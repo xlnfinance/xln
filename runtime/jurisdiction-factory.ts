@@ -40,19 +40,38 @@ export async function createXlnomy(options: {
   // 2. Get deployed contracts (BrowserVM already deploys in init())
   const contracts = await deployContracts(evm);
 
-  // 3. Calculate J-Machine position (circular arrangement for VR)
+  // 3. Calculate J-Machine position (3×3 grid layout)
   const xlnomyCount = env?.xlnomies ? env.xlnomies.size : 0;
-  const maxSlots = 8; // Support up to 8 Xlnomies in a circle
-  const radius = 200; // Distance from origin
-  const angle = (xlnomyCount * 2 * Math.PI) / maxSlots; // Evenly spaced around circle
+
+  // 3×3 grid positions (9 slots total):
+  // [0,1,2]  top row
+  // [3,4,5]  middle row (4 = center)
+  // [6,7,8]  bottom row
+  const gridPositions = [
+    { x: -400, z: 400 },   // 0: top-left
+    { x: 0, z: 400 },      // 1: top-center
+    { x: 400, z: 400 },    // 2: top-right
+    { x: -400, z: 0 },     // 3: middle-left
+    { x: 0, z: 0 },        // 4: CENTER
+    { x: 400, z: 0 },      // 5: middle-right
+    { x: -400, z: -400 },  // 6: bottom-left
+    { x: 0, z: -400 },     // 7: bottom-center
+    { x: 400, z: -400 },   // 8: bottom-right
+  ];
+
+  // First xlnomy gets center (slot 4), others fill grid
+  const slotOrder = [4, 1, 3, 5, 7, 0, 2, 6, 8]; // Center first, then cross pattern
+  const slotIndex = Math.min(xlnomyCount, 8);
+  const gridSlot = slotOrder[slotIndex];
+  const pos = gridPositions[gridSlot] || { x: 0, z: 0 };
 
   const jMachinePosition = {
-    x: Math.round(radius * Math.cos(angle)),
-    y: 100, // Elevated above ground
-    z: Math.round(radius * Math.sin(angle)),
+    x: pos.x,
+    y: 300, // Supreme layer (3× higher than original)
+    z: pos.z,
   };
 
-  console.log(`[Xlnomy] "${name}" J-Machine position (slot ${xlnomyCount}/${maxSlots}):`, jMachinePosition);
+  console.log(`[Xlnomy] "${name}" J-Machine at 3×3 slot ${slotIndex} (grid position ${gridSlot}):`, jMachinePosition);
 
   // 3. Create J-Machine config
   const jMachine = {
@@ -126,42 +145,46 @@ async function deployContracts(evm: JurisdictionEVM): Promise<{
 }
 
 /**
- * Create 2x2x2 grid (8 entities) with $1M reserves each
- * Entities positioned around their Xlnomy's J-Machine
+ * Create 3×3×1 grid (9 entities) - Hub layer above J-Machine
+ * Forms pinnacle hub at supreme layer
  */
 async function createGridEntities(xlnomy: Xlnomy, env: any): Promise<void> {
-  console.log('[Xlnomy] Creating 2x2x2 grid with $1M reserves...');
+  console.log('[Xlnomy] Creating 3×3×1 hub grid (9 entities) with $1M reserves...');
 
   // Import necessary functions
   const { generateNumberedEntityId } = await import('./entity-factory.js');
 
-  // Get J-Machine center position to offset entities around it
+  // Get J-Machine center position
   const jCenter = xlnomy.jMachine.position;
 
-  // Generate 8 numbered entity IDs
+  // Generate 9 numbered entity IDs
   const gridEntities: string[] = [];
   const entityInputs: any[] = [];
 
-  // Base entity number for this Xlnomy (each Xlnomy gets 8 sequential IDs)
-  // xlnomies.size = count of EXISTING xlnomies (doesn't include current one being created)
+  // Base entity number for this Xlnomy (each Xlnomy gets 9 sequential IDs now)
   const xlnomyIndex = env?.xlnomies ? env.xlnomies.size : 0;
-  const baseEntityNum = xlnomyIndex * 8 + 1; // Index 0→1-8, Index 1→9-16, Index 2→17-24
+  const baseEntityNum = xlnomyIndex * 9 + 1; // Index 0→1-9, Index 1→10-18, Index 2→19-27
 
-  console.log(`[Xlnomy] "${xlnomy.name}" (index ${xlnomyIndex}) → Entity IDs ${baseEntityNum}-${baseEntityNum + 7}`);
+  console.log(`[Xlnomy] "${xlnomy.name}" hub (index ${xlnomyIndex}) → Entity IDs ${baseEntityNum}-${baseEntityNum + 8}`);
 
-  for (let i = 0; i < 8; i++) {
+  // 3×3 flat grid pattern (i=0-8)
+  // [0,1,2]  row 0 (top)
+  // [3,4,5]  row 1 (middle) - 4 is center
+  // [6,7,8]  row 2 (bottom)
+  for (let i = 0; i < 9; i++) {
     const entityNum = baseEntityNum + i;
     const entityId = generateNumberedEntityId(entityNum);
     gridEntities.push(entityId);
 
-    // Calculate grid position (2x2x2 cube, 50 units apart)
-    // Offset from J-Machine position
-    const localX = (i % 2) * 50 - 25; // -25 or 25
-    const localY = (Math.floor(i / 2) % 2) * 50 - 25;
-    const localZ = (Math.floor(i / 4)) * 50 - 25;
+    // Calculate 3×3 grid position (flat layer, 40px spacing)
+    const row = Math.floor(i / 3); // 0, 1, or 2
+    const col = i % 3; // 0, 1, or 2
+
+    const localX = (col - 1) * 40; // -40, 0, 40
+    const localZ = (row - 1) * 40; // -40, 0, 40
 
     const x = jCenter.x + localX;
-    const y = jCenter.y + localY - 100; // Below J-Machine (ground level)
+    const y = jCenter.y + 20; // 20px above J-Machine (y=300 + 20 = 320)
     const z = jCenter.z + localZ;
 
     // Create importReplica RuntimeTx for each entity

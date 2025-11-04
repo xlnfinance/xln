@@ -96,8 +96,8 @@ Where:
 - Lᵣ = credit you extend to me (your trust in me)
 
 This single invariant:
-- Eliminates the FCUAN problem (Fractional Collateral Under Arbitrary Netting)
-- Eliminates the FRPAP problem (Full Reserve Precludes Arbitrary Payments)
+- Eliminates the FCUAN problem (Full Credit Unprovable Account Networks)
+- Eliminates the FRPAP problem (Full Reserve Provable Account Primitives)
 - Enables instant bilateral netting with partial collateral
 - Makes credit programmable and composable
 

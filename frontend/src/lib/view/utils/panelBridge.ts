@@ -14,6 +14,9 @@ type EventMap = {
   'vr:toggle': {};
   'broadcast:toggle': { enabled: boolean };
   'broadcast:style': { style: 'raycast' | 'wave' | 'particles' };
+  'settings:update': { key: string; value: any };
+  'settings:reset': {};
+  'camera:focus': { target: { x: number; y: number; z: number } };
 };
 
 class PanelBridge {

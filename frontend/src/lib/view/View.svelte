@@ -16,6 +16,7 @@
   import ArchitectPanel from './panels/ArchitectPanel.svelte';
   import ConsolePanel from './panels/ConsolePanel.svelte';
   import RuntimeIOPanel from './panels/RuntimeIOPanel.svelte';
+  import SettingsPanel from './panels/SettingsPanel.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
   import 'dockview/dist/styles/dockview.css';
 
@@ -60,42 +61,59 @@
       const { xlnInstance } = await import('$lib/stores/xlnStore');
       xlnInstance.set(XLN);
 
-      // Step 4: Create empty environment (simnet mode)
-      const env = XLN.createEmptyEnv();
+      // Step 4: Check for URL hash import (shareable state)
+      const { parseURLHash } = await import('./utils/stateCodec');
+      const urlImport = parseURLHash();
 
-      // Step 5: Auto-create "Simnet" Xlnomy on first load
-      console.log('[View] 🌍 Auto-creating Simnet Xlnomy...');
-      await XLN.applyRuntimeInput(env, {
-        runtimeTxs: [{
-          type: 'createXlnomy',
-          data: {
-            name: 'Simnet',
-            evmType: 'browservm',
-            blockTimeMs: 1000,
-            autoGrid: true // Auto-create 2x2x2 grid with $1M reserves
-          }
-        }],
-        entityInputs: []
-      });
+      let env;
 
-      // Process the queued importReplica transactions to actually create entities
-      console.log('[View] Processing grid entities...');
-      const gridResult = await XLN.applyRuntimeInput(env, {
-        runtimeTxs: [], // Grid entities were queued in previous step
-        entityInputs: []
-      });
-      console.log('[View] ✅ Grid entities created');
-      console.log('[View] Replicas:', env.replicas.size);
-      console.log('[View] History frames:', env.history.length);
+      if (urlImport) {
+        console.log('[View] 🔗 Importing state from URL hash...');
+        env = XLN.createEmptyEnv();
+
+        // Restore xlnomies
+        env.xlnomies = urlImport.state.x;
+        env.activeXlnomy = urlImport.state.a;
+
+        // Restore entities (replicas)
+        env.replicas = urlImport.state.e;
+
+        // Restore UI settings if included
+        if (urlImport.includeUI && urlImport.state.ui) {
+          // Settings will be loaded by SettingsPanel from its own localStorage
+          // Just log that UI was included
+          console.log('[View] 📋 URL included UI settings');
+        }
+
+        console.log('[View] ✅ Imported:', {
+          xlnomies: env.xlnomies.size,
+          entities: env.replicas.size,
+          active: env.activeXlnomy
+        });
+      } else {
+        // No URL import: Create empty environment
+        env = XLN.createEmptyEnv();
+
+        // Initialize with empty frame 0
+        env.history = [{
+          height: 0,
+          timestamp: Date.now(),
+          replicas: new Map(),
+          runtimeInput: { runtimeTxs: [], entityInputs: [] },
+          runtimeOutputs: [],
+          description: 'Frame 0: Empty slate',
+          title: 'Initial State'
+        }];
+
+        console.log('[View] ✅ Empty environment ready (frame 0)');
+        console.log('[View] 💡 Use Architect panel to create Xlnomies + entities');
+      }
 
       // Set to isolated stores
       localEnvStore.set(env);
       localHistoryStore.set(env.history || []);
-      localTimeIndex.set((env.history?.length || 1) - 1); // Set to latest frame
+      localTimeIndex.set(urlImport?.state.ui?.ti || 0);
       localIsLive.set(true);
-
-      console.log('[View] ✅ Simnet Xlnomy ready with', env.replicas.size, 'entities');
-      console.log('[View] 💡 Use Architect panel to run scenarios or create new Xlnomies');
 
     } catch (err) {
       console.error('[View] ❌ Failed to initialize XLN:', err);
@@ -157,6 +175,15 @@
               isolatedTimeIndex: localTimeIndex
             }
           });
+        } else if (options.name === 'settings') {
+          component = mount(SettingsPanel, {
+            target: div,
+            props: {
+              isolatedEnv: localEnvStore,
+              isolatedHistory: localHistoryStore,
+              isolatedTimeIndex: localTimeIndex
+            }
+          });
         }
 
         // Return Dockview-compatible API
@@ -164,7 +191,9 @@
           element: div,
           init: () => {}, // Svelte components self-initialize
           dispose: () => {
-            if (component?.$destroy) component.$destroy();
+            // Svelte 5: unmount() happens automatically when DOM removed
+            // No need to call $destroy() - it doesn't exist in Svelte 5
+            // Component cleanup via onDestroy() hook handles everything
           }
         };
       },
@@ -228,6 +257,32 @@
       title: '🔄 Runtime I/O',
       position: { direction: 'within', referencePanel: 'depository' },
     });
+
+    const settingsPanel = dockview.addPanel({
+      id: 'settings',
+      component: 'settings',
+      title: '⚙️ Settings',
+      position: { direction: 'within', referencePanel: 'depository' },
+    });
+
+    // DISABLED: Dockview layout persistence (Svelte 5 incompatibility)
+    // Issue: fromJSON() tries to destroy existing panels using $destroy()
+    // which doesn't exist in Svelte 5. Need to implement custom serialization.
+    // For now: Use default layout on every reload.
+
+    // TODO: Custom layout serialization that doesn't use fromJSON/toJSON
+    // Save panel IDs, positions, sizes manually and recreate on mount
+
+    // Save layout on change (for future custom implementation)
+    dockview.onDidLayoutChange(() => {
+      try {
+        const layout = dockview.toJSON();
+        localStorage.setItem('xln-dockview-layout', JSON.stringify(layout));
+        console.log('[View] Layout saved (custom restore pending)');
+      } catch (err) {
+        console.warn('[View] Failed to save layout:', err);
+      }
+    });
   });
 </script>
 
@@ -241,6 +296,7 @@
       history={localHistoryStore}
       timeIndex={localTimeIndex}
       isLive={localIsLive}
+      env={localEnvStore}
     />
     <button class="collapse-btn" on:click={() => collapsed = !collapsed}>
       {collapsed ? '▲' : '▼'}
