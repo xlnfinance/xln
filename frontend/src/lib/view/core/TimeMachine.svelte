@@ -6,6 +6,7 @@
   export let history: Writable<any[]>;
   export let timeIndex: Writable<number>;
   export let isLive: Writable<boolean>;
+  export let env: Writable<any>; // For state export
 
   // Direct store usage - no fallback logic
   $: maxTimeIndex = Math.max(0, $history.length - 1);
@@ -190,6 +191,44 @@
     showExportMenu = false;
   }
 
+  async function shareURL() {
+    try {
+      const { generateShareURL } = await import('../utils/stateCodec');
+      const shareableURL = generateShareURL($env, false); // Data only, no UI
+
+      // Copy to clipboard
+      await navigator.clipboard.writeText(shareableURL);
+
+      console.log('[TimeMachine] ✅ Shareable URL copied to clipboard');
+      console.log('[TimeMachine] 🔗', shareableURL);
+
+      // Visual feedback (could add toast notification)
+      alert('Shareable URL copied to clipboard!\n\nPaste in new tab to restore xlnomies + entities.');
+
+      showExportMenu = false;
+    } catch (err) {
+      console.error('[TimeMachine] Failed to generate share URL:', err);
+      alert(`Failed to generate URL: ${err}`);
+    }
+  }
+
+  async function shareURLWithUI() {
+    try {
+      const { generateShareURL } = await import('../utils/stateCodec');
+      const shareableURL = generateShareURL($env, true); // Include UI settings
+
+      await navigator.clipboard.writeText(shareableURL);
+
+      console.log('[TimeMachine] ✅ Shareable URL (with UI) copied');
+      alert('Shareable URL (with UI settings) copied to clipboard!');
+
+      showExportMenu = false;
+    } catch (err) {
+      console.error('[TimeMachine] Failed to generate share URL:', err);
+      alert(`Failed: ${err}`);
+    }
+  }
+
   // Handle slider drag/input
   function handleSliderInput(event: Event) {
     const target = event.target as HTMLInputElement;
@@ -342,9 +381,9 @@
       </button>
       {#if showExportMenu}
         <div class="menu">
-          <button on:click={exportFrames}>Export Frames (JSON)</button>
-          <button on:click={() => {showExportMenu = false;}}>Share URL</button>
-          <button on:click={() => {showExportMenu = false;}}>Download GIF</button>
+          <button on:click={exportFrames}>📥 Export Frames (JSON)</button>
+          <button on:click={shareURL}>🔗 Share URL (Data Only)</button>
+          <button on:click={shareURLWithUI}>🎨 Share URL (+ UI)</button>
         </div>
       {/if}
     </div>

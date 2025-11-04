@@ -711,6 +711,51 @@ export interface NameSearchResult {
 // === XLNOMY (JURISDICTION) SYSTEM ===
 
 /**
+ * Economic Topology Types
+ * Defines how central bank, commercial banks, and customers interact
+ */
+export type TopologyType = 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid';
+
+export interface TopologyLayer {
+  name: string;              // "Federal Reserve", "Tier 1 Banks", "Customers"
+  yPosition: number;         // Vertical position in 3D space
+  entityCount: number;       // How many entities in this layer
+  xzSpacing: number;         // Horizontal spread between entities
+
+  // Visual properties
+  color: string;             // Hex color (#FFD700 for Fed)
+  size: number;              // Size multiplier (10.0 for Fed, 1.0 for banks, 0.5 for customers)
+  emissiveIntensity: number; // Glow intensity
+
+  // Economic properties
+  initialReserves: bigint;   // Starting balance
+  canMintMoney: boolean;     // Only central bank = true
+}
+
+export interface ConnectionRules {
+  // Who can create accounts with whom
+  allowedPairs: Array<{ from: string; to: string }>;
+
+  // Routing
+  allowDirectInterbank: boolean;  // Banks can trade P2P?
+  requireHubRouting: boolean;     // All payments through central hub?
+  maxHops: number;                // Max routing path length
+
+  // Credit limits (per layer pair)
+  defaultCreditLimits: Map<string, bigint>;
+}
+
+export interface XlnomyTopology {
+  type: TopologyType;
+  layers: TopologyLayer[];
+  rules: ConnectionRules;
+
+  // Crisis management (for HYBRID)
+  crisisThreshold: number;        // 0.20 = reserves < 20% deposits triggers crisis
+  crisisMode: 'star' | 'mesh';    // Morph to this during crisis
+}
+
+/**
  * Xlnomy = J-Machine (court/jurisdiction) + Entities + Contracts
  * Self-contained economy where J-Machine IS the jurisdiction
  */
@@ -718,6 +763,9 @@ export interface Xlnomy {
   name: string; // e.g., "Simnet", "GameEconomy"
   evmType: 'browservm' | 'reth' | 'erigon' | 'monad';
   blockTimeMs: number; // Block time in milliseconds (1000ms default)
+
+  // NEW: Economic topology configuration
+  topology?: XlnomyTopology;
 
   // J-Machine = Jurisdiction machine (court that entities anchor to)
   jMachine: {

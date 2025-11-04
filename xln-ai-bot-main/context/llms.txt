@@ -1,0 +1,201 @@
+# XLN Protocol - Organizational Layer for Digital Finance
+
+## Vision
+**"TradFi + DeFi = XLN"** — Replace SWIFT, achieve 51% of world's settlement volume through multi-jurisdictional consensus.
+
+## Core Concept
+XLN is a sovereign Layer2 for EVM that combines institutional governance with crypto-native innovation. It's not a smart contract platform, rollup, or channel network — it's a machine language for sovereign economic agents.
+
+## Architecture: JEA (Jurisdiction → Entity → Account)
+
+### J-machine (Jurisdiction)
+- Public truth, reserves, dispute resolution
+- Validates external claims and provides registry semantics
+- Tracks reserve deposits and collateral via Depository.sol
+- External observer for Entity state commitments
+
+### E-machine (Entity)
+- Programmable corporations, DAOs, banks, states
+- Governance via proposals and quorums (signature-based consensus)
+- Key-value RLP tree storage with Merkle integrity
+- Block-based execution: Propose → Sign → Execute → Finalize
+- Can host DeFi logic: AMMs, oracles, credit lines
+- Decouples ownership (tokens) from control (quorum)
+
+### A-machine (Account)
+- User-level channels and identities
+- Local logic execution with cryptographic proofs
+- Off-chain payment routing without touching jurisdiction
+- Subcontracts: HTLCs, swaps, derivatives
+
+## Key Primitives
+
+### Reserves & Channels
+- **Reserves**: Liquid balances in jurisdiction
+- **Collateral**: Locked tokens in bilateral channels
+- **ondelta**: Public shift (on-chain)
+- **offdelta**: Private shift (off-chain in AccountProof)
+- **Invariant**: Δ = ondelta + offdelta
+
+### Credit Model (RCPAN)
+XLN is the first Reserve-Credit Provable Account Network:
+```
+−leftCreditLimit ≤ Δ ≤ collateral + rightCreditLimit
+[---.===---]
+```
+
+Combines:
+- FCUAN (Full-Credit Unprovable: traditional banking)
+- FRPAN (Full-Reserve Provable: Lightning/state channels)
+
+## Payment Flow
+
+### Off-Chain Payment
+1. Alice creates AccountProof with `offdelta -= amount`
+2. Signs and sends to counterparty (Hub)
+3. Hub verifies and stores canonical proof
+4. No on-chain action needed
+5. Multi-hop routing possible
+
+### Cooperative Settle
+- Both parties jointly update on-chain state
+- Atomic updates to reserves, collateral, ondelta
+- Maintains invariant: `leftReserveDiff + rightReserveDiff + collateralDiff = 0`
+
+### Dispute Resolution
+1. Submit latest AccountProof to jurisdiction
+2. Calculate Δ = ondelta + offdelta
+3. Execute subcontracts on DeltaList
+4. Split collateral based on final Δ
+5. Enforce debt from reserves if needed
+
+## Technical Properties
+
+### Hanko Signature System
+- Hierarchical cryptographic signatures
+- Enables unlimited organizational complexity
+- Gas-efficient on-chain validation
+- Lazy entities: No registration required
+
+### Scalability
+- **Unicast O(1)**: Billions+ TPS (same as Internet)
+- **Zero DA risk**: No external data availability assumptions
+- **99.99% off-chain**: Only net settlements touch jurisdiction
+- **Sovereign exits**: Any party can exit with AccountProof
+
+### Security
+- Every action signed via Hanko
+- All blocks replayable and deterministic
+- State stored as RLP + Merkle trees
+- Signature threshold enforcement
+- Real-time Board validation via EntityProvider
+
+## Real-World Applications
+
+### Corporate Treasury
+- Cryptographic proof of every approval
+- Atomic multi-protocol operations
+- Tesla treasury rebalances $1B across 10 protocols in ONE signature
+
+### Investment Funds
+- Programmable GP/LP governance
+- Automated capital calls and distributions
+- Real-time NAV, cryptographic audit trail
+
+### Cross-Border Subsidiaries
+- Spawn subsidiaries in seconds, zero marginal cost
+- Parent controls all subsidiaries cryptographically
+- Instant fund transfers between entities
+
+## Roadmap
+
+### Phase 1: Simnet (Oct 2025 - Q1 2026)
+- Browser-only simulation with @ethereumjs/vm
+- 500 prefunded entities (USDC + ETH)
+- Zero infrastructure (no servers, no RPC)
+- Target: 1000 users, 10 community scenarios
+
+### Phase 2: Testnet (Q1-Q3 2026)
+- Arrakis (custom PoA chain, 5 validators)
+- Full contract suite deployment
+- Target: 100+ entities, $10M/month volume
+
+### Phase 3: Mainnet (Q4 2026 - 2027)
+- Multi-chain (Ethereum L1, Polygon, Arbitrum, Optimism)
+- Professional audits
+- Target: 1000 entities, $100M/month volume
+
+## Market Strategy
+
+### Year 1-2: Cross-border remittances
+- Philippines ↔ US ($700B/year market)
+- 0.1% fees vs 5-10% (Western Union/Wise)
+- Target: $7M/year (1% market share)
+
+### Year 3-5: Global remittances
+- 50+ corridors (Nigeria-UK, Mexico-US, India-UAE)
+- Target: $70M/year (10% global remittances)
+
+### Year 6-10: Interbank settlement
+- Replace SWIFT for bank-to-bank transfers
+- 100x faster, 50x cheaper
+- Target: $20B/year (5% interbank settlement)
+
+## Key Contracts
+
+### IDepository
+- Bilateral reserve management interface
+- ERC standard candidate (Q2-Q3 2026)
+- 6.6KB reference implementation
+
+### EntityProvider.sol
+- Quorum hash validation
+- Board Change Detection (BCD) governance
+- Jurisdiction interface
+
+## Philosophy
+
+**"Blockchains made consensus global. XLN makes consensus personal."**
+
+- Sovereignty is cryptographic, not geographic
+- The machine is the law
+- No intents, no MEV, just deterministic execution
+- Credit where it scales, collateral where it secures
+- Every Entity is a VM with quorum and block-based state
+
+## Success Criteria
+- Fortune 500 run operations through XLN
+- Governments issue digital corporate registrations
+- Every DeFi protocol integrates Hanko
+- "Opening a subsidiary" = "creating a folder"
+
+## Core Innovation: Unified Financial Theory (UFT)
+
+### Triple-S Manifesto
+- **Scalable**: 1B+ TPS unicast
+- **Secure**: Full-verifying nodes on every device
+- **Simple**: Just 3 invariants, elegant design
+
+### Solves Fundamental Problems
+- Data Availability Paradox (rollups/Plasma)
+- Inbound Capacity Wall (state channels)
+- Diamond-Dybvig hub run problem
+- Coasian zero-friction economy
+
+## Technical Stack
+- TypeScript/Bun runtime
+- Svelte frontend with Graph3D visualization
+- @ethereumjs/vm for browser simulation
+- LevelDB with Merkle integrity
+- Hardhat for contract deployment
+- Playwright for E2E testing
+
+## Community
+Website: https://xln.finance
+Email: h@xln.finance
+Creator: Egor Homakov
+
+---
+
+*XLN: Where organizational sovereignty meets computational truth.*
+
