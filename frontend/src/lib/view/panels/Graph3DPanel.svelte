@@ -2878,34 +2878,27 @@ let vrHammer: VRHammer | null = null;
       vrHammer.update(connections);
     }
 
-    // Pulse animation for hubs AND Fed entities (24/7 always-on effect)
-    const time = Date.now() * 0.001; // Convert to seconds
+    // PERF: Pulse animations disabled for 60 FPS target
+    // Fed glow ring and hub aurora effects consume ~5-10 FPS
+    // Uncomment below to re-enable visual effects
+    /*
+    const time = Date.now() * 0.001;
     entities.forEach(entity => {
-      // Fed glow ring animation (rotating + pulsing)
       if (entity.mesh.userData['glowRing']) {
         const glowRing = entity.mesh.userData['glowRing'] as THREE.Mesh;
-        glowRing.rotation.z = time * 0.5; // Slow rotation
+        glowRing.rotation.z = time * 0.5;
         const pulseMaterial = glowRing.material as THREE.MeshBasicMaterial;
-        pulseMaterial.opacity = 0.2 + Math.sin(time * 2) * 0.15; // Pulse 0.05-0.35
+        pulseMaterial.opacity = 0.2 + Math.sin(time * 2) * 0.15;
       }
 
       if (entity.isHub && entity.mesh.material && entity.pulsePhase !== undefined) {
-        // Aurora borealis effect: multi-frequency pulsing with color shift
         const material = entity.mesh.material as THREE.MeshLambertMaterial;
-
-        // Primary slow pulse (breathing)
         const slowPulse = Math.sin(time * 0.8 + entity.pulsePhase);
-        // Secondary fast shimmer
         const fastShimmer = Math.sin(time * 3.5 + entity.pulsePhase * 0.7);
-        // Tertiary ultra-slow wave
         const wave = Math.sin(time * 0.3 + entity.pulsePhase * 1.3);
-
-        // Combine frequencies for aurora-like complexity
         const pulseIntensity = 2.0 + 1.5 * slowPulse + 0.5 * fastShimmer + 0.3 * wave;
         material.emissiveIntensity = pulseIntensity;
-
-        // Color shift: cyan → green → cyan (polar lights)
-        const colorShift = (slowPulse + 1) * 0.5; // 0 to 1
+        const colorShift = (slowPulse + 1) * 0.5;
         const r = 0;
         const g = Math.floor(255 * (0.8 + 0.2 * colorShift));
         const b = Math.floor(255 * (0.5 + 0.5 * (1 - colorShift)));
@@ -2977,6 +2970,7 @@ let vrHammer: VRHammer | null = null;
         }
       }
     });
+    */ // End of disabled pulse animations
 
     // Auto-rotate (adjustable speed from slider 0-10000 per axis)
     if ((rotationX > 0 || rotationY > 0 || rotationZ > 0) && controls) {
