@@ -48,7 +48,7 @@
   const DEFAULT_SETTINGS: ViewSettings = {
     // Scene
     gridSize: 300,
-    gridDivisions: 60,
+    gridDivisions: 12, // PERF: Reduced from 60 (5x less visual noise)
     gridOpacity: 0.4,
     gridColor: '#00ff41',
 
