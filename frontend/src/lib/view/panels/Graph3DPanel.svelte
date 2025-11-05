@@ -69,8 +69,12 @@
     process: (...args: unknown[]) => {}
   };
   const createRenderer = async (mode: string, options: THREE.WebGLRendererParameters) => {
-    const renderer = new THREE.WebGLRenderer(options);
-    return renderer;
+    // WebGPU requires Three.js r163+ with WebGPURenderer
+    // For now, always use WebGL (WebGPU support needs package upgrade)
+    if (mode === 'webgpu' && typeof navigator !== 'undefined' && navigator.gpu) {
+      console.warn('[Graph3D] WebGPU requested but requires Three.js r163+. Using WebGL for now.');
+    }
+    return new THREE.WebGLRenderer(options);
   };
   type RendererMode = 'webgl' | 'webgpu';
 
