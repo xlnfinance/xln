@@ -2841,7 +2841,12 @@ let vrHammer: VRHammer | null = null;
   }
 
   let animateCallCount = 0;
+  let renderFps = 0;
+  let frameTime = 0;
   const perfMonitor = new PerformanceMonitor((metrics: PerfMetrics) => {
+    // Update local FPS display
+    renderFps = metrics.fps;
+    frameTime = metrics.frameTime;
     // Emit FPS to panelBridge for TimeMachine display
     panelBridge.emit('renderFps', metrics.fps);
   });
@@ -4832,7 +4837,18 @@ let vrHammer: VRHammer | null = null;
 </script>
 
 <!-- Graph3D Panel - Pure 3D rendering (no sidebar) -->
-<div bind:this={container} class="graph3d-panel"></div>
+<div bind:this={container} class="graph3d-panel">
+  <!-- FPS Overlay -->
+  <div class="fps-overlay">
+    <div class="fps-stat" class:fps-good={renderFps >= 55} class:fps-ok={renderFps >= 30 && renderFps < 55} class:fps-bad={renderFps < 30}>
+      <span class="fps-label">Render FPS</span>
+      <span class="fps-value">{renderFps.toFixed(1)}</span>
+    </div>
+    <div class="fps-stat-secondary">
+      <span>{frameTime.toFixed(2)}ms/frame</span>
+    </div>
+  </div>
+</div>
 
 <style>
   .graph3d-panel {
@@ -4847,5 +4863,56 @@ let vrHammer: VRHammer | null = null;
     display: block;
     width: 100%;
     height: 100%;
+  }
+
+  .fps-overlay {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(0, 255, 65, 0.3);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-family: 'Courier New', monospace;
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  .fps-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 4px;
+  }
+
+  .fps-label {
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+  }
+
+  .fps-value {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+
+  .fps-good .fps-value {
+    color: #00ff41;
+  }
+
+  .fps-ok .fps-value {
+    color: #ffaa00;
+  }
+
+  .fps-bad .fps-value {
+    color: #ff4646;
+  }
+
+  .fps-stat-secondary {
+    font-size: 10px;
+    color: #666;
+    text-align: right;
   }
 </style>
