@@ -3,6 +3,7 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 **🤖 AGENTIC MODE: Read [agentic.md](./agentic.md) FIRST for autonomous execution protocol (80% confidence threshold)**
+**🧠 RESPONSE FORMAT: Read [adhd.md](./adhd.md) for visual hierarchy, ASCII headers, scannable layout (zero-attention-span optimized)**
 
 # CRITICAL CLAUDE CODE OVERRIDES
 

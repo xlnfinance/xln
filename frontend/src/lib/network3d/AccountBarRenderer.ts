@@ -110,7 +110,7 @@ function renderSpreadMode(
 ): void {
   const barRadius = barHeight * 2.5;
   const safeGap = 0.2; // Small gap between entity surface and bar
-  const minGapSpread = 2; // Gap in middle
+  const minGapSpread = 0.5; // Gap in middle (reduced 4x for denser visualization)
 
   // Left-side bars extend from left entity rightward
   const leftStartPos = fromEntity.position.clone().add(

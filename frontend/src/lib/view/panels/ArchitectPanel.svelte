@@ -562,21 +562,23 @@
         crisisMode: 'star'
       };
     } else if (type === 'star') {
+      // MINIMAL STAR: 1 Fed + 2 Banks = 3 entities (matches topology-presets.ts)
       return {
         type: 'star',
         layers: [
           { name: 'Federal Reserve', yPosition: 200, entityCount: 1, xzSpacing: 0, color: '#FFD700', size: 10.0, emissiveIntensity: 2.0, initialReserves: 100_000_000n, canMintMoney: true },
-          { name: 'Commercial Banks', yPosition: 100, entityCount: 4, xzSpacing: 100, color: '#00ff41', size: 1.0, emissiveIntensity: 0.3, initialReserves: 1_000_000n, canMintMoney: false },
-          { name: 'Customers', yPosition: 0, entityCount: 12, xzSpacing: 25, color: '#0088FF', size: 0.5, emissiveIntensity: 0.1, initialReserves: 10_000n, canMintMoney: false }
+          { name: 'Commercial Banks', yPosition: 100, entityCount: 2, xzSpacing: 100, color: '#00ff41', size: 1.0, emissiveIntensity: 0.3, initialReserves: 1_000_000n, canMintMoney: false }
+          // MINIMAL: Removed customers layer (was 12 entities)
         ],
         rules: {
           allowedPairs: [
-            { from: 'Federal Reserve', to: 'Commercial Banks' }, { from: 'Commercial Banks', to: 'Federal Reserve' },
-            { from: 'Commercial Banks', to: 'Customers' }, { from: 'Customers', to: 'Commercial Banks' }
+            { from: 'Federal Reserve', to: 'Commercial Banks' },
+            { from: 'Commercial Banks', to: 'Federal Reserve' }
+            // MINIMAL: Removed customer connections
           ],
           allowDirectInterbank: false,
           requireHubRouting: true,
-          maxHops: 3,
+          maxHops: 2, // Reduced from 3
           defaultCreditLimits: new Map()
         },
         crisisThreshold: 0.20,

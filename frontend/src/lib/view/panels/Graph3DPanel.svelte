@@ -4837,8 +4837,9 @@ let vrHammer: VRHammer | null = null;
 </script>
 
 <!-- Graph3D Panel - Pure 3D rendering (no sidebar) -->
-<div bind:this={container} class="graph3d-panel">
-  <!-- FPS Overlay -->
+<div class="graph3d-wrapper">
+  <div bind:this={container} class="graph3d-panel"></div>
+  <!-- FPS Overlay (outside container so canvas doesn't cover it) -->
   <div class="fps-overlay">
     <div class="fps-stat" class:fps-good={renderFps >= 55} class:fps-ok={renderFps >= 30 && renderFps < 55} class:fps-bad={renderFps < 30}>
       <span class="fps-label">Render FPS</span>
@@ -4851,12 +4852,20 @@ let vrHammer: VRHammer | null = null;
 </div>
 
 <style>
-  .graph3d-panel {
+  .graph3d-wrapper {
     width: 100%;
     height: 100%;
     position: relative;
     overflow: hidden;
     background: #000;
+  }
+
+  .graph3d-panel {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
   }
 
   :global(.graph3d-panel canvas) {

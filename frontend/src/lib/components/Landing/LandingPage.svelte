@@ -366,55 +366,80 @@
 
       <!-- Smart Contracts Architecture -->
       <div class="section contracts-section">
-        <h2>Contract Architecture</h2>
-        <div class="contracts-architecture">
-          <!-- Core: Depository (HUGE) -->
-          <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/Depository.sol" target="_blank" rel="noopener" class="contract-core">
-            <div class="core-badge">CORE</div>
-            <div class="contract-icon-large">📜</div>
-            <div class="contract-name-large">Depository.sol</div>
-            <div class="contract-desc-large">Reserve Management & FIFO Debt Enforcement</div>
-            <div class="core-features">
-              <div class="feature">• Holds all collateral</div>
-              <div class="feature">• enforceDebts() FIFO queue</div>
-              <div class="feature">• Final settlement layer</div>
-            </div>
-            <div class="contract-link-label">View Source →</div>
+        <h2>Modular Contract System</h2>
+        <p class="architecture-subtitle">The entire financial system as pluggable Lego bricks. Deploy your own. Extend forever.</p>
+
+        <!-- SLOT MACHINE: 777 Style Modularity -->
+        <div class="contracts-slot-machine">
+          <!-- Left: Entity Provider -->
+          <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/EntityProvider.sol" target="_blank" rel="noopener" class="slot-reel slot-left">
+            <div class="slot-label">PLUGGABLE</div>
+            <div class="contract-icon-slot">🏛️</div>
+            <div class="interface-name-slot">IEntityProvider</div>
+            <div class="contract-name-slot">EntityProvider.sol</div>
+            <div class="slot-desc">Entity registration<br/>BFT quorum</div>
+            <div class="slot-tag">↔ SWAP</div>
           </a>
 
-          <!-- Modules: EP + SP (smaller, pluggable) -->
-          <div class="contract-modules">
-            <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/EntityProvider.sol" target="_blank" rel="noopener" class="contract-module">
-              <div class="module-badge">MODULE</div>
-              <div class="contract-icon">🏛️</div>
-              <div class="contract-name">EntityProvider.sol</div>
-              <div class="contract-desc">Entity registration<br/>BFT quorum logic</div>
-              <div class="module-tag">Modular</div>
-              <div class="contract-link-label-small">GitHub →</div>
-            </a>
+          <!-- Center: Depository (GOLDEN JACKPOT) -->
+          <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/Depository.sol" target="_blank" rel="noopener" class="slot-reel slot-center">
+            <div class="slot-label-gold">⭐ CORE ⭐</div>
+            <div class="contract-icon-slot-gold">📜</div>
+            <div class="interface-name-slot-gold">IDepository</div>
+            <div class="contract-name-slot-gold">Depository.sol</div>
+            <div class="slot-features-gold">
+              <div>• Collateral</div>
+              <div>• FIFO</div>
+              <div>• Settlement</div>
+            </div>
+            <div class="slot-tag-gold">ANCHOR</div>
+          </a>
 
-            <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/SubcontractProvider.sol" target="_blank" rel="noopener" class="contract-module">
-              <div class="module-badge">MODULE</div>
-              <div class="contract-icon">⚡</div>
-              <div class="contract-name">SubcontractProvider.sol</div>
-              <div class="contract-desc">HTLCs, swaps<br/>Limit orders, DeFi</div>
-              <div class="module-tag">Extensible</div>
-              <div class="contract-link-label-small">GitHub →</div>
-            </a>
-          </div>
+          <!-- Right: Delta Transformers -->
+          <a href="https://github.com/xlnfinance/xln/blob/main/jurisdictions/contracts/SubcontractProvider.sol" target="_blank" rel="noopener" class="slot-reel slot-right">
+            <div class="slot-label">PLUGGABLE</div>
+            <div class="contract-icon-slot">⚡</div>
+            <div class="interface-name-slot">IDeltaTransformers</div>
+            <div class="contract-name-slot">SubcontractProvider.sol</div>
+            <div class="slot-desc">HTLCs, swaps<br/>Limit orders</div>
+            <div class="slot-tag">EXTEND ↔</div>
+          </a>
 
-          <!-- Connection arrows -->
-          <svg class="contract-connections" viewBox="0 0 400 200" preserveAspectRatio="none">
+          <!-- Many-to-Many Connections -->
+          <svg class="slot-connections" viewBox="0 0 600 300">
             <defs>
-              <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
-                <polygon points="0 0, 10 3, 0 6" fill="rgba(79,209,139,0.5)" />
+              <marker id="slot-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                <polygon points="0 0, 7 3.5, 0 7" fill="rgba(79,209,139,0.2)" />
+              </marker>
+              <marker id="slot-arrow-gold" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                <polygon points="0 0, 8 4, 0 8" fill="rgba(255,215,0,0.3)" />
               </marker>
             </defs>
-            <path d="M 200 50 L 100 150" stroke="rgba(79,209,139,0.3)" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#arrowhead)" />
-            <path d="M 200 50 L 300 150" stroke="rgba(79,209,139,0.3)" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#arrowhead)" />
+            <!-- Left ↔ Center (GOLD) -->
+            <path d="M 180 110 L 280 110" stroke="rgba(255,215,0,0.18)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#slot-arrow-gold)">
+              <animate attributeName="stroke-dashoffset" from="0" to="8" dur="1.5s" repeatCount="indefinite" />
+            </path>
+            <path d="M 280 150 L 180 150" stroke="rgba(255,215,0,0.18)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#slot-arrow-gold)">
+              <animate attributeName="stroke-dashoffset" from="0" to="8" dur="1.5s" repeatCount="indefinite" />
+            </path>
+            <!-- Center ↔ Right (GOLD) -->
+            <path d="M 320 110 L 420 110" stroke="rgba(255,215,0,0.18)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#slot-arrow-gold)">
+              <animate attributeName="stroke-dashoffset" from="0" to="8" dur="1.5s" repeatCount="indefinite" />
+            </path>
+            <path d="M 420 150 L 320 150" stroke="rgba(255,215,0,0.18)" stroke-width="1.5" stroke-dasharray="4 4" marker-end="url(#slot-arrow-gold)">
+              <animate attributeName="stroke-dashoffset" from="0" to="8" dur="1.5s" repeatCount="indefinite" />
+            </path>
+            <!-- Left ↔ Right (indirect, subtle) -->
+            <path d="M 180 130 L 420 130" stroke="rgba(79,209,139,0.1)" stroke-width="1" stroke-dasharray="3 3" opacity="0.6">
+              <animate attributeName="opacity" values="0.3;0.6;0.3" dur="3s" repeatCount="indefinite" />
+            </path>
           </svg>
         </div>
-        <div class="architecture-note">Depository = trust anchor. Modules = pluggable logic (add new ones anytime).</div>
+        <div class="architecture-note">
+          <strong>Depository</strong> = immutable trust anchor.
+          <strong>Modules</strong> = hot-swappable implementations.
+          Deploy <code>YourCustomEntityProvider.sol</code> anytime.
+        </div>
       </div>
 
       <div class="section">
@@ -1596,24 +1621,36 @@
   .contracts-section {
     width: 100vw;
     margin-left: calc(50% - 50vw);
-    padding: 3rem 4rem;
-    background: linear-gradient(135deg, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.05));
+    padding: 5rem 4rem;
+    background: linear-gradient(135deg, rgba(0, 0, 0, 0.15), rgba(0, 0, 0, 0.03));
   }
 
-  .contracts-architecture {
+  .architecture-subtitle {
+    text-align: center;
+    font-size: 1.1rem;
+    color: rgba(79,209,139,0.9);
+    font-weight: 500;
+    margin-top: -0.5rem;
+    margin-bottom: 2.5rem;
+    font-style: italic;
+  }
+
+  /* SLOT MACHINE LAYOUT - 777 Style */
+  .contracts-slot-machine {
     position: relative;
     display: flex;
-    flex-direction: column;
     align-items: center;
-    gap: 2.5rem;
-    margin-top: 2rem;
-    min-height: 500px;
-    max-width: 1600px;
+    justify-content: center;
+    gap: 1.5rem;
+    margin-top: 3rem;
+    min-height: 450px;
+    max-width: 1200px;
     margin-left: auto;
     margin-right: auto;
+    padding: 2rem 1rem;
   }
 
-  .contract-connections {
+  .slot-connections {
     position: absolute;
     top: 0;
     left: 0;
@@ -1623,163 +1660,242 @@
     z-index: 0;
   }
 
-  /* CORE: Depository (HUGE, central) */
-  .contract-core {
+  /* SLOT REEL - Base */
+  .slot-reel {
     position: relative;
     z-index: 2;
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 3rem 2.5rem;
-    background: linear-gradient(135deg, rgba(79,209,139,0.1), rgba(79,209,139,0.05));
-    border: 3px solid rgba(79,209,139,0.4);
-    border-radius: 16px;
+    padding: 2.5rem 1.75rem;
+    background: rgba(255,255,255,0.015);
+    border: 1.5px solid rgba(255,255,255,0.1);
+    border-radius: 20px;
     text-decoration: none;
-    box-shadow: 0 8px 32px rgba(79,209,139,0.2);
-    transition: all 0.3s ease;
-    max-width: 600px;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    flex: 1;
+    max-width: 260px;
   }
 
-  .contract-core:hover {
-    transform: translateY(-4px);
-    border-color: rgba(79,209,139,0.6);
-    box-shadow: 0 12px 48px rgba(79,209,139,0.35);
+  .slot-reel:hover {
+    transform: translateY(-6px);
+    border-color: rgba(79,209,139,0.35);
+    background: rgba(79,209,139,0.04);
+    box-shadow: 0 12px 40px rgba(79,209,139,0.2);
   }
 
-  .core-badge {
-    background: rgba(79,209,139,0.2);
-    border: 1px solid rgba(79,209,139,0.5);
-    color: #4fd18b;
-    padding: 0.4rem 1rem;
-    border-radius: 12px;
-    font-size: 0.75rem;
+  /* CENTER SLOT - GOLDEN JACKPOT (DOMINANT) */
+  .slot-center {
+    flex: 2;
+    max-width: 420px;
+    padding: 3.5rem 3rem;
+    background: linear-gradient(135deg, rgba(255,215,0,0.12), rgba(255,215,0,0.05));
+    border: 4px solid rgba(255,215,0,0.5);
+    border-radius: 24px;
+    box-shadow:
+      0 20px 60px rgba(255,215,0,0.25),
+      0 0 120px rgba(255,215,0,0.2),
+      inset 0 0 80px rgba(255,215,0,0.03);
+    animation: slot-jackpot-glow 3s ease-in-out infinite;
+  }
+
+  .slot-center:hover {
+    transform: translateY(-10px) scale(1.03);
+    border-color: rgba(255,215,0,0.7);
+    box-shadow:
+      0 25px 80px rgba(255,215,0,0.35),
+      0 0 150px rgba(255,215,0,0.3),
+      inset 0 0 100px rgba(255,215,0,0.05);
+    animation: none;
+  }
+
+  /* LEFT/RIGHT SLOTS - Subtle drift animation */
+  .slot-left {
+    animation: slot-drift-left 8s ease-in-out infinite;
+  }
+
+  .slot-right {
+    animation: slot-drift-right 9s ease-in-out infinite;
+  }
+
+  @keyframes slot-jackpot-glow {
+    0%, 100% {
+      box-shadow:
+        0 20px 60px rgba(255,215,0,0.25),
+        0 0 120px rgba(255,215,0,0.2),
+        inset 0 0 80px rgba(255,215,0,0.03);
+    }
+    50% {
+      box-shadow:
+        0 20px 60px rgba(255,215,0,0.35),
+        0 0 140px rgba(255,215,0,0.3),
+        inset 0 0 100px rgba(255,215,0,0.05);
+    }
+  }
+
+  @keyframes slot-drift-left {
+    0%, 100% { transform: translateY(0); }
+    33% { transform: translateY(-8px); }
+    66% { transform: translateY(4px); }
+  }
+
+  @keyframes slot-drift-right {
+    0%, 100% { transform: translateY(0); }
+    33% { transform: translateY(6px); }
+    66% { transform: translateY(-4px); }
+  }
+
+  /* SLOT LABELS */
+  .slot-label {
+    font-size: 0.7rem;
+    color: rgba(79,209,139,0.7);
     font-weight: 700;
+    letter-spacing: 1.5px;
     margin-bottom: 1rem;
-    letter-spacing: 1px;
+    text-transform: uppercase;
   }
 
-  .contract-icon-large {
-    font-size: 3.5rem;
-    margin: 0.5rem 0;
+  .slot-label-gold {
+    font-size: 0.85rem;
+    color: rgba(255,215,0,1);
+    font-weight: 900;
+    letter-spacing: 2px;
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+    text-shadow: 0 0 20px rgba(255,215,0,0.5);
   }
 
-  .contract-name-large {
-    font-size: 1.8rem;
+  /* SLOT ICONS */
+  .contract-icon-slot {
+    font-size: 3rem;
+    margin: 1rem 0;
+    filter: drop-shadow(0 3px 6px rgba(79,209,139,0.15));
+    opacity: 0.9;
+  }
+
+  .contract-icon-slot-gold {
+    font-size: 6rem;
+    margin: 1.5rem 0;
+    filter: drop-shadow(0 8px 16px rgba(255,215,0,0.5));
+    animation: icon-glow 3s ease-in-out infinite;
+  }
+
+  @keyframes icon-glow {
+    0%, 100% {
+      filter: drop-shadow(0 8px 16px rgba(255,215,0,0.5));
+    }
+    50% {
+      filter: drop-shadow(0 8px 16px rgba(255,215,0,0.7)) drop-shadow(0 0 30px rgba(255,215,0,0.4));
+    }
+  }
+
+  /* INTERFACE NAMES */
+  .interface-name-slot {
+    font-size: 0.95rem;
     font-weight: 700;
-    color: rgba(255,255,255,0.95);
+    color: rgba(79,209,139,0.85);
     font-family: 'JetBrains Mono', monospace;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.4rem;
+    letter-spacing: 0.3px;
   }
 
-  .contract-desc-large {
+  .interface-name-slot-gold {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: rgba(255,215,0,1);
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 0.6rem;
+    letter-spacing: 0.8px;
+    text-shadow: 0 0 20px rgba(255,215,0,0.4);
+    animation: text-shimmer 4s ease-in-out infinite;
+  }
+
+  @keyframes text-shimmer {
+    0%, 100% { text-shadow: 0 0 20px rgba(255,215,0,0.4); }
+    50% { text-shadow: 0 0 30px rgba(255,215,0,0.6), 0 0 50px rgba(255,215,0,0.3); }
+  }
+
+  /* CONTRACT NAMES */
+  .contract-name-slot {
     font-size: 1.05rem;
-    color: rgba(255,255,255,0.75);
-    text-align: center;
-    margin-bottom: 1.5rem;
-  }
-
-  .core-features {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-bottom: 1.5rem;
-  }
-
-  .feature {
-    font-size: 0.9rem;
-    color: rgba(255,255,255,0.7);
-    text-align: center;
-  }
-
-  /* MODULES: EP + SP (smaller, pluggable) */
-  .contract-modules {
-    position: relative;
-    z-index: 2;
-    display: flex;
-    gap: 2rem;
-    justify-content: center;
-  }
-
-  .contract-module {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 1.5rem 1.25rem;
-    background: rgba(255,255,255,0.03);
-    border: 1.5px solid rgba(255,255,255,0.15);
-    border-radius: 12px;
-    text-decoration: none;
-    transition: all 0.3s ease;
-    width: 200px;
-  }
-
-  .contract-module:hover {
-    transform: translateY(-3px);
-    border-color: rgba(79,209,139,0.4);
-    background: rgba(79,209,139,0.05);
-    box-shadow: 0 6px 20px rgba(79,209,139,0.15);
-  }
-
-  .module-badge {
-    background: rgba(255,255,255,0.08);
-    border: 1px solid rgba(255,255,255,0.2);
-    color: rgba(255,255,255,0.6);
-    padding: 0.25rem 0.6rem;
-    border-radius: 8px;
-    font-size: 0.65rem;
     font-weight: 600;
-    margin-bottom: 0.75rem;
+    color: rgba(255,255,255,0.9);
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 1rem;
+    text-align: center;
+  }
+
+  .contract-name-slot-gold {
+    font-size: 1.7rem;
+    font-weight: 800;
+    color: rgba(255,255,255,1);
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 1.2rem;
+    text-align: center;
     letter-spacing: 0.5px;
   }
 
-  .contract-icon {
-    font-size: 2rem;
-    margin: 0.5rem 0;
-  }
-
-  .contract-name {
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: rgba(255,255,255,0.95);
-    font-family: 'JetBrains Mono', monospace;
-    margin-bottom: 0.5rem;
-    text-align: center;
-  }
-
-  .contract-desc {
-    font-size: 0.8rem;
+  /* SLOT DESCRIPTIONS */
+  .slot-desc {
+    font-size: 0.85rem;
     line-height: 1.5;
     color: rgba(255,255,255,0.65);
     text-align: center;
-    margin-bottom: 0.75rem;
+    margin-bottom: 1rem;
   }
 
-  .module-tag {
-    font-size: 0.7rem;
-    color: rgba(79,209,139,0.7);
-    font-style: italic;
-    margin-bottom: 0.5rem;
-  }
-
-  .contract-link-label-small {
-    font-size: 0.75rem;
-    color: #4fd18b;
-    font-weight: 500;
-  }
-
-  .contract-link-label {
+  .slot-features-gold {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
     font-size: 0.9rem;
-    color: #4fd18b;
-    font-weight: 600;
-    margin-top: 0.5rem;
+    color: rgba(255,255,255,0.8);
+    text-align: center;
   }
+
+  /* SLOT TAGS */
+  .slot-tag {
+    font-size: 0.75rem;
+    color: rgba(79,209,139,0.85);
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .slot-tag-gold {
+    font-size: 0.85rem;
+    color: rgba(255,215,0,1);
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    text-shadow: 0 0 10px rgba(255,215,0,0.4);
+  }
+
 
   .architecture-note {
     text-align: center;
+    font-size: 1rem;
+    color: rgba(255,255,255,0.7);
+    margin-top: 2.5rem;
+    line-height: 1.8;
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .architecture-note strong {
+    color: rgba(79,209,139,0.95);
+    font-weight: 700;
+  }
+
+  .architecture-note code {
+    background: rgba(79,209,139,0.1);
+    color: rgba(79,209,139,0.9);
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
     font-size: 0.9rem;
-    color: rgba(255,255,255,0.6);
-    font-style: italic;
-    margin-top: 2rem;
+    font-family: 'JetBrains Mono', monospace;
   }
 
   :global(.light-mode) .contract-core {
@@ -1953,19 +2069,20 @@
   .evolution-simple {
     width: 100vw;
     margin-left: calc(50% - 50vw);
-    padding: 3rem 4rem;
-    background: linear-gradient(135deg, rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.1));
+    padding: 5rem 4rem;
+    background: linear-gradient(135deg, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.05));
     overflow: hidden;
     position: relative;
   }
 
   .evo-title {
     text-align: center;
-    font-size: 1.8rem;
-    font-weight: 700;
-    color: rgba(255, 255, 255, 0.9);
-    margin-bottom: 3rem;
+    font-size: 2rem;
+    font-weight: 800;
+    color: rgba(255, 255, 255, 0.95);
+    margin-bottom: 3.5rem;
     padding: 0 2rem;
+    letter-spacing: -0.5px;
   }
 
   .evo-track {
@@ -1973,28 +2090,39 @@
     align-items: center;
     justify-content: flex-start;
     position: relative;
-    min-height: 400px;
-    padding: 0 2rem 0 0;
+    min-height: 480px;
+    padding: 0 4rem;
+    max-width: 1800px;
+    margin: 0 auto;
+    gap: 1rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  @media (min-width: 1200px) {
+    .evo-track {
+      justify-content: center;
+      overflow-x: visible;
+    }
   }
 
   .evo-item {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.5rem;
-    min-width: 240px;
+    gap: 0.7rem;
+    min-width: 260px;
     position: relative;
     z-index: 2;
   }
 
   .evo-item:first-child {
-    position: absolute;
-    left: -60px;
-    min-width: auto;
+    min-width: 180px;
+    margin-right: 0;
   }
 
   .evo-item-finale {
-    min-width: 300px;
+    min-width: 340px;
   }
 
   .evo-item-branch {
@@ -2012,15 +2140,14 @@
   }
 
   .evo-dot {
-    width: 120px;
-    height: 120px;
+    width: 100px;
+    height: 100px;
     border-radius: 50%;
     background: radial-gradient(circle, #fff 0%, #ffd700 35%, #ff8844 70%, #ff6b6b 100%);
     box-shadow:
-      0 0 40px rgba(255, 255, 255, 1),
-      0 0 80px rgba(255, 215, 0, 0.8),
-      0 0 120px rgba(255, 136, 68, 0.6),
-      0 0 160px rgba(255, 107, 107, 0.4);
+      0 0 30px rgba(255, 255, 255, 0.9),
+      0 0 60px rgba(255, 215, 0, 0.6),
+      0 0 100px rgba(255, 136, 68, 0.4);
     animation: bang-pulse 3s ease-in-out infinite;
   }
 
@@ -2048,15 +2175,15 @@
   }
 
   .evo-line-thick {
-    width: 150px;
-    height: 12px;
-    background: linear-gradient(to right, rgba(255,255,255,0.4), rgba(200,200,200,0.6));
+    width: 100px;
+    height: 3px;
+    background: linear-gradient(to right, rgba(255,255,255,0.2), rgba(200,200,200,0.3));
   }
 
   .evo-line-finale {
-    width: 100px;
-    height: 28px;
-    background: linear-gradient(to right, rgba(79,209,139,0.75), rgba(79,209,139,0.95));
+    width: 80px;
+    height: 4px;
+    background: linear-gradient(to right, rgba(79,209,139,0.4), rgba(79,209,139,0.6));
     box-shadow: 0 0 32px rgba(79,209,139,0.6);
     animation: pulse-glow 2s ease-in-out infinite;
   }
@@ -2093,19 +2220,19 @@
   }
 
   .evo-bike {
-    width: 140px;
+    width: 180px;
     height: auto;
-    filter: brightness(1.1) drop-shadow(0 4px 8px rgba(0,0,0,0.3));
+    filter: brightness(1.15) drop-shadow(0 6px 12px rgba(0,0,0,0.4));
     margin: 0.5rem 0;
   }
 
   .evo-bike-small {
-    width: 100px;
-    opacity: 0.6;
+    width: 140px;
+    opacity: 0.65;
   }
 
   .evo-bike-finale {
-    width: 240px;
+    width: 280px;
     filter: brightness(1.3) drop-shadow(0 12px 30px rgba(79,209,139,0.6));
     animation: float-bike 4s ease-in-out infinite;
   }
