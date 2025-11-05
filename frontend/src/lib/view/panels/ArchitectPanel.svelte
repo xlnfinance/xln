@@ -429,6 +429,104 @@
     }
   }
 
+  /** Quick Action: Send 20% of balance to random entity */
+  async function send20PercentTransfer() {
+    if (!$isolatedEnv || entityIds.length < 2) {
+      lastAction = '❌ Need at least 2 entities';
+      return;
+    }
+
+    loading = true;
+
+    try {
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      // Pick random sender with reserves > 0
+      const entitiesWithReserves = entityIds.filter(id => {
+        const key = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+        const replica = key ? $isolatedEnv.replicas.get(key) : null;
+        const reserves = replica?.state?.reserves?.get(0) || 0n;
+        return BigInt(reserves) > 0n;
+      });
+
+      if (entitiesWithReserves.length === 0) {
+        lastAction = '❌ No entities have reserves';
+        loading = false;
+        return;
+      }
+
+      const from = entitiesWithReserves[Math.floor(Math.random() * entitiesWithReserves.length)];
+      const fromReplicaKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
+      const fromReplica = fromReplicaKey ? $isolatedEnv.replicas.get(fromReplicaKey) : null;
+
+      if (!fromReplica) throw new Error('Sender replica not found');
+
+      const reserves = BigInt(fromReplica.state?.reserves?.get(0) || 0n);
+      const amount = (reserves * 20n) / 100n;
+
+      if (amount <= 0n) {
+        lastAction = '❌ Insufficient reserves for 20% transfer';
+        loading = false;
+        return;
+      }
+
+      // Pick random recipient (not self)
+      let to = entityIds[Math.floor(Math.random() * entityIds.length)];
+      let attempts = 0;
+      while (to === from && attempts < 10) {
+        to = entityIds[Math.floor(Math.random() * entityIds.length)];
+        attempts++;
+      }
+
+      if (to === from) {
+        lastAction = '❌ Could not find different entity';
+        loading = false;
+        return;
+      }
+
+      const hasAccount = fromReplica.state?.accounts?.has(to);
+      const txBatch = [];
+
+      if (!hasAccount) {
+        txBatch.push({
+          entityId: from,
+          signerId: fromReplica.signerId,
+          entityTxs: [{ type: 'openAccount', data: { targetEntityId: to } }]
+        });
+      }
+
+      txBatch.push({
+        entityId: from,
+        signerId: fromReplica.signerId,
+        entityTxs: [{
+          type: 'directPayment',
+          data: {
+            targetEntityId: to,
+            tokenId: 0,
+            amount,
+            route: [from, to],
+            description: '20% balance transfer'
+          }
+        }]
+      });
+
+      await XLN.process($isolatedEnv, txBatch);
+
+      lastAction = `✅ 20% Transfer: ${shortAddress(from!)} → ${shortAddress(to!)} ($${(Number(amount)/1000).toFixed(0)}K)`;
+
+      isolatedEnv.set($isolatedEnv);
+      isolatedHistory.set($isolatedEnv.history || []);
+      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+    } catch (err) {
+      const error = err as Error;
+      lastAction = `❌ ${error.message}`;
+      console.error('[Architect] 20% transfer error:', err);
+    } finally {
+      loading = false;
+    }
+  }
+
   /** BANKER DEMO STEP 4: Reset */
   async function resetDemo() {
     stopFedPaymentLoop(); // Stop any running payment loops
@@ -672,22 +770,53 @@
       console.log('[createEntities] ✅ Funded', fundingInputs.length, 'entities in 1 frame');
     }
 
-    // PERF FIX: Batch all account openings into ONE process() call
-    console.log('[createEntities] Batching account openings...');
+    // PERF + REALISM: Proximity-based account creation (not all-to-all)
+    console.log('[createEntities] Batching account openings (proximity-based)...');
     const accountInputs = [];
     const accountsOpened = new Set<string>(); // Track to avoid duplicates
+
+    // Helper: Calculate euclidean distance
+    const distance = (pos1: {x: number; y: number; z: number}, pos2: {x: number; y: number; z: number}): number => {
+      const dx = pos1.x - pos2.x;
+      const dy = pos1.y - pos2.y;
+      const dz = pos1.z - pos2.z;
+      return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    };
+
+    // Get entity position from created entities array
+    const entityPositions = new Map<string, {x: number; y: number; z: number}>();
+    entities.forEach((e: any) => {
+      if (e.data?.position) {
+        entityPositions.set(e.entityId, e.data.position);
+      }
+    });
 
     for (const rule of topology.rules.allowedPairs) {
       const fromLayerIds = layerEntityIds.get(rule.from) || [];
       const toLayerIds = layerEntityIds.get(rule.to) || [];
 
-      // Open accounts between all pairs
+      // Proximity-based connections (realistic banking)
       for (const fromId of fromLayerIds) {
-        for (const toId of toLayerIds) {
-          if (fromId === toId) continue; // Skip self
+        const fromPos = entityPositions.get(fromId);
+        if (!fromPos) continue;
 
-          // Check if we already opened this account (prevents add_delta duplicates)
-          const accountKey = fromId < toId ? `${fromId}:${toId}` : `${toId}:${fromId}`;
+        // Find nearest hubs in target layer
+        const hubsByDistance = toLayerIds
+          .map(toId => ({
+            id: toId,
+            distance: distance(fromPos, entityPositions.get(toId) || {x: 0, y: 0, z: 0})
+          }))
+          .filter(h => h.id !== fromId) // Skip self
+          .sort((a, b) => a.distance - b.distance);
+
+        // Realistic distribution: 70% connect to 1 hub, 25% to 2, 5% to 3-4
+        const rand = Math.random();
+        const connectionCount = rand < 0.70 ? 1 : rand < 0.95 ? 2 : rand < 0.98 ? 3 : 4;
+        const selectedHubs = hubsByDistance.slice(0, Math.min(connectionCount, hubsByDistance.length));
+
+        for (const hub of selectedHubs) {
+          // Check if already opened (canonical order)
+          const accountKey = fromId < hub.id ? `${fromId}:${hub.id}` : `${hub.id}:${fromId}`;
           if (accountsOpened.has(accountKey)) continue;
           accountsOpened.add(accountKey);
 
@@ -700,7 +829,7 @@
               signerId: fromReplica.signerId,
               entityTxs: [{
                 type: 'openAccount',
-                data: { targetEntityId: toId }
+                data: { targetEntityId: hub.id }
               }]
             });
           }
@@ -1864,6 +1993,11 @@
             🔄 Step 3: Random Payment
           </button>
           <p class="step-help">Send one R2R payment (click multiple times)</p>
+
+          <button class="demo-btn quick-action" on:click={send20PercentTransfer} disabled={loading || entityIds.length < 2}>
+            💸 Quick: 20% Transfer
+          </button>
+          <p class="step-help">Send 20% of balance from random entity</p>
 
           <button class="demo-btn step-4" on:click={resetDemo} disabled={loading}>
             🔄 Reset Demo
