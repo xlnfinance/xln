@@ -16,6 +16,7 @@
 
   // Panel communication
   import { panelBridge } from '../utils/panelBridge';
+  import { PerformanceMonitor, type PerfMetrics } from '../utils/perfMonitor';
 
   // Props - REQUIRED for /view isolation (dead props removed)
   export let isolatedEnv: Writable<any>;
@@ -890,13 +891,20 @@ let vrHammer: VRHammer | null = null;
   });
 
   // Reactive update when isolated env changes
-  // PERF FIX: Only update when replica count changes (not on every state mutation)
+  // PERF FIX: Only update when replica count changes + debounce to 60fps
   let lastReplicaCount = 0;
+  let updateDebounceTimer: number | null = null;
   $: if ($isolatedEnv && scene) {
     const currentCount = $isolatedEnv.replicas?.size || 0;
     if (currentCount !== lastReplicaCount) {
       lastReplicaCount = currentCount;
-      updateNetworkData();
+
+      // Debounce: Max 60 updates per second (16.67ms throttle)
+      if (updateDebounceTimer) clearTimeout(updateDebounceTimer);
+      updateDebounceTimer = window.setTimeout(() => {
+        updateNetworkData();
+        updateDebounceTimer = null;
+      }, 16);
     }
   }
 
@@ -2833,16 +2841,19 @@ let vrHammer: VRHammer | null = null;
   }
 
   let animateCallCount = 0;
+  const perfMonitor = new PerformanceMonitor((metrics: PerfMetrics) => {
+    // Emit FPS to panelBridge for TimeMachine display
+    panelBridge.emit('renderFps', metrics.fps);
+  });
   function animate() {
+    perfMonitor.begin(); // Start FPS measurement
+
     // VR uses setAnimationLoop, don't double-call requestAnimationFrame
     if (!renderer?.xr?.isPresenting) {
       animationId = requestAnimationFrame(animate);
     }
 
-    // Debug log every 60 frames
-    if (animateCallCount++ % 60 === 0) {
-      console.log('[Graph3D] animate() called, frame:', animateCallCount, 'renderer:', !!renderer, 'camera:', !!camera, 'scene children:', scene?.children?.length);
-    }
+    animateCallCount++;
 
     // ===== PROCESS VISUAL EFFECTS QUEUE =====
     if (scene && spatialHash && entityMeshMap) {
@@ -3056,6 +3067,8 @@ let vrHammer: VRHammer | null = null;
     if (renderer && camera) {
       const renderStartTime = performance.now();
       renderer.render(scene, camera);
+      perfMonitor.end(); // Complete FPS measurement
+
       const renderEndTime = performance.now();
 
       // Performance metrics update (every 500ms)
