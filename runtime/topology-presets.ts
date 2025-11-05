@@ -117,40 +117,29 @@ export function createStarTopology(): XlnomyTopology {
     {
       name: 'Commercial Banks',
       yPosition: 100,
-      entityCount: 4,
+      entityCount: 2, // MINIMAL: Reduced from 4 for performance testing
       xzSpacing: 100, // Distance from center
       color: '#00ff41', // Green
       size: 1.0,
       emissiveIntensity: 0.3,
       initialReserves: 1_000_000n, // $1M
       canMintMoney: false
-    },
-    {
-      name: 'Customers',
-      yPosition: 0,
-      entityCount: 12, // 3 per bank average
-      xzSpacing: 25, // Close to parent bank
-      color: '#0088FF', // Blue
-      size: 0.5,
-      emissiveIntensity: 0.1,
-      initialReserves: 10_000n, // $10K
-      canMintMoney: false
     }
+    // MINIMAL: Removed customers layer for performance testing (was 12 entities)
   ];
 
   const rules: ConnectionRules = {
     allowedPairs: [
       { from: 'Federal Reserve', to: 'Commercial Banks' },
-      { from: 'Commercial Banks', to: 'Federal Reserve' },
-      { from: 'Commercial Banks', to: 'Customers' },
-      { from: 'Customers', to: 'Commercial Banks' }
+      { from: 'Commercial Banks', to: 'Federal Reserve' }
+      // MINIMAL: Removed customer connections
     ],
     allowDirectInterbank: false, // Star topology: no bank-to-bank
     requireHubRouting: true, // All interbank through Fed
-    maxHops: 3,
+    maxHops: 2, // MINIMAL: Reduced from 3
     defaultCreditLimits: new Map([
-      ['Federal Reserve→Commercial Banks', 10_000_000n], // Fed can lend $10M
-      ['Commercial Banks→Customers', 100_000n] // Banks can lend $100K
+      ['Federal Reserve→Commercial Banks', 10_000_000n] // Fed can lend $10M
+      // MINIMAL: Removed bank→customer limits
     ])
   };
 
