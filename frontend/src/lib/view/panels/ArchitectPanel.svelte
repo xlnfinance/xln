@@ -215,7 +215,7 @@
   /** BANKER DEMO STEP 1: Create 3×3 Hub */
   async function createHub() {
     if (!$isolatedEnv?.activeXlnomy) {
-      lastAction = '❌ Create xlnomy first';
+      lastAction = '❌ Create jurisdiction first';
       return;
     }
 
@@ -495,7 +495,7 @@
     console.log('[Architect] createEconomyWithTopology called with type:', topologyType);
 
     if (!$isolatedEnv?.activeXlnomy) {
-      lastAction = '❌ Create xlnomy first';
+      lastAction = '❌ Create jurisdiction first';
       console.error('[Architect] No active xlnomy');
       return;
     }
@@ -701,7 +701,7 @@
   /** OLD: FED RESERVE DEMO (legacy - will be removed) */
   async function createFedReserveDemo() {
     if (!$isolatedEnv?.activeXlnomy) {
-      lastAction = '❌ Create xlnomy first';
+      lastAction = '❌ Create jurisdiction first';
       return;
     }
 
@@ -1684,11 +1684,11 @@
         </div>
       {:else}
         <div class="action-section">
-          <h5>🌍 Xlnomy (Economy)</h5>
+          <h5>🌍 Jurisdiction (EVM Instance)</h5>
 
           <!-- Prominent Create Button -->
           <button class="action-btn create-xlnomy-btn" on:click={() => showCreateXlnomyModal = true}>
-            ➕ Create Xlnomy Here
+            ➕ Create Jurisdiction Here
           </button>
 
           <!-- Dropdown for switching (only visible if xlnomies exist) -->
@@ -1703,7 +1703,7 @@
             </div>
           {/if}
 
-          <p class="help-text">Self-contained economies with isolated J-Machine + contracts</p>
+          <p class="help-text">Isolated EVM with J-Machine + Depository. Xlnomies (L2 economies) run inside.</p>
         </div>
 
         <div class="action-section">

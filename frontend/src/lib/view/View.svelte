@@ -229,39 +229,32 @@
       position: { direction: 'below', referencePanel: 'entities' },
     });
 
-    const architect = dockview.addPanel({
-      id: 'architect',
-      component: 'architect',
-      title: '🎬 Architect',
-      position: { direction: 'within', referencePanel: 'depository' },
-    });
-
-    // Make Architect active by default
-    setTimeout(() => {
-      const architectApi = dockview.getPanel('architect');
-      if (architectApi) {
-        architectApi.api.setActive();
-      }
-    }, 200);
-
-    const consolePanel = dockview.addPanel({
+    dockview.addPanel({
       id: 'console',
       component: 'console',
       title: '📋 Console',
       position: { direction: 'within', referencePanel: 'depository' },
     });
 
-    const runtimeIOPanel = dockview.addPanel({
+    dockview.addPanel({
       id: 'runtime-io',
       component: 'runtime-io',
       title: '🔄 Runtime I/O',
       position: { direction: 'within', referencePanel: 'depository' },
     });
 
-    const settingsPanel = dockview.addPanel({
+    dockview.addPanel({
       id: 'settings',
       component: 'settings',
       title: '⚙️ Settings',
+      position: { direction: 'within', referencePanel: 'depository' },
+    });
+
+    // Add Architect LAST so it becomes active by default (Dockview behavior)
+    dockview.addPanel({
+      id: 'architect',
+      component: 'architect',
+      title: '🎬 Architect',
       position: { direction: 'within', referencePanel: 'depository' },
     });
 
