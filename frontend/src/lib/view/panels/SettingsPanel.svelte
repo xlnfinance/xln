@@ -437,6 +437,29 @@
           <span>Anti-Aliasing (Restart Required)</span>
         </label>
       </div>
+
+      <div class="setting-group">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            bind:checked={settings.verboseLogging}
+            on:change={() => {
+              updateSetting('verboseLogging', settings.verboseLogging);
+              if (typeof window !== 'undefined' && window.frontendLogs) {
+                settings.verboseLogging ? window.frontendLogs.enableAll() : window.frontendLogs.disableAll();
+              }
+            }}
+          />
+          <span>Verbose Console Logging</span>
+        </label>
+        <p style="font-size: 11px; color: #888; margin: 4px 0 0 24px;">
+          {#if settings.verboseLogging}
+            ⚠️ Logs ON - may cause lag
+          {:else}
+            ✅ Logs OFF - errors only (recommended)
+          {/if}
+        </p>
+      </div>
     {/if}
   </div>
 </div>
