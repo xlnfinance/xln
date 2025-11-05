@@ -1,12 +1,101 @@
 /**
  * Topology Presets for Xlnomies
  * 5 economic models: STAR, MESH, TIERED, CORRESPONDENT, HYBRID
+ * + Top 9 country presets with flags
  *
  * @license AGPL-3.0
  * Copyright (C) 2025 XLN Finance
  */
 
 import type { XlnomyTopology, TopologyLayer, ConnectionRules } from './types';
+
+/**
+ * Country Economic Presets (Top 9 GDP)
+ * Each maps to a real-world financial system topology
+ */
+export interface CountryPreset {
+  name: string;
+  flag: string; // Emoji flag
+  topology: 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid';
+  centralBank: string;
+  currency: string;
+  color: string; // Primary color for visualization
+}
+
+export const COUNTRY_PRESETS: CountryPreset[] = [
+  {
+    name: 'United States',
+    flag: '🇺🇸',
+    topology: 'star',
+    centralBank: 'Federal Reserve',
+    currency: 'USD',
+    color: '#FFD700' // Gold
+  },
+  {
+    name: 'China',
+    flag: '🇨🇳',
+    topology: 'tiered',
+    centralBank: 'PBOC',
+    currency: 'CNY',
+    color: '#FF0000' // Red
+  },
+  {
+    name: 'Germany',
+    flag: '🇩🇪',
+    topology: 'mesh',
+    centralBank: 'Bundesbank',
+    currency: 'EUR',
+    color: '#000000' // Black
+  },
+  {
+    name: 'Japan',
+    flag: '🇯🇵',
+    topology: 'star',
+    centralBank: 'Bank of Japan',
+    currency: 'JPY',
+    color: '#BC002D' // Red circle
+  },
+  {
+    name: 'India',
+    flag: '🇮🇳',
+    topology: 'tiered',
+    centralBank: 'Reserve Bank of India',
+    currency: 'INR',
+    color: '#FF9933' // Saffron
+  },
+  {
+    name: 'United Kingdom',
+    flag: '🇬🇧',
+    topology: 'star',
+    centralBank: 'Bank of England',
+    currency: 'GBP',
+    color: '#C8102E' // UK Red
+  },
+  {
+    name: 'France',
+    flag: '🇫🇷',
+    topology: 'mesh',
+    centralBank: 'Banque de France',
+    currency: 'EUR',
+    color: '#0055A4' // French Blue
+  },
+  {
+    name: 'Italy',
+    flag: '🇮🇹',
+    topology: 'mesh',
+    centralBank: 'Banca d\'Italia',
+    currency: 'EUR',
+    color: '#009246' // Italian Green
+  },
+  {
+    name: 'Russia',
+    flag: '🇷🇺',
+    topology: 'star',
+    centralBank: 'Central Bank of Russia',
+    currency: 'RUB',
+    color: '#FFFFFF' // White
+  }
+];
 
 /**
  * STAR - USA/Canada Model
@@ -359,7 +448,7 @@ export function createHybridTopology(): XlnomyTopology {
     {
       name: 'Customers',
       yPosition: 0,
-      entityCount: 24,
+      entityCount: 8, // Reduced from 24 for performance
       xzSpacing: 25,
       color: '#0088FF',
       size: 0.5,
@@ -427,4 +516,31 @@ export function getTopologyPreset(type: 'star' | 'mesh' | 'tiered' | 'correspond
     default:
       return createHybridTopology(); // Default to HYBRID
   }
+}
+
+/**
+ * Get topology for a country preset with customizations
+ * @param country Country preset configuration
+ * @returns Customized topology with country-specific naming and colors
+ */
+export function getCountryTopology(country: CountryPreset): XlnomyTopology {
+  const baseTopology = getTopologyPreset(country.topology);
+
+  // Customize layer names and colors for this country
+  const customLayers = baseTopology.layers.map((layer, idx) => {
+    if (idx === 0) {
+      // First layer = Central Bank
+      return {
+        ...layer,
+        name: country.centralBank,
+        color: country.color
+      };
+    }
+    return layer;
+  });
+
+  return {
+    ...baseTopology,
+    layers: customLayers
+  };
 }

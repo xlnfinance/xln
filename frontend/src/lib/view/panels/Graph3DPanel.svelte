@@ -886,9 +886,14 @@ let vrHammer: VRHammer | null = null;
   });
 
   // Reactive update when isolated env changes
+  // PERF FIX: Only update when replica count changes (not on every state mutation)
+  let lastReplicaCount = 0;
   $: if ($isolatedEnv && scene) {
-    console.log('[Graph3D] Reactive statement triggered - calling updateNetworkData()');
-    updateNetworkData();
+    const currentCount = $isolatedEnv.replicas?.size || 0;
+    if (currentCount !== lastReplicaCount) {
+      lastReplicaCount = currentCount;
+      updateNetworkData();
+    }
   }
 
   let resizeObserver: ResizeObserver | null = null;
