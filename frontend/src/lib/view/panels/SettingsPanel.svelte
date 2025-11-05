@@ -42,6 +42,7 @@
     rendererMode: 'webgl' | 'webgpu';
     forceLayoutEnabled: boolean;
     antiAlias: boolean;
+    verboseLogging: boolean; // NEW: Master log toggle
   }
 
   const DEFAULT_SETTINGS: ViewSettings = {
@@ -69,7 +70,8 @@
     // Performance
     rendererMode: 'webgl',
     forceLayoutEnabled: true,
-    antiAlias: true
+    antiAlias: true,
+    verboseLogging: false // DEFAULT: Logs OFF for performance
   };
 
   let settings: ViewSettings = { ...DEFAULT_SETTINGS };
