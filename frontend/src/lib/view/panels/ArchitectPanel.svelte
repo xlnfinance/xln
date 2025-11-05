@@ -2676,6 +2676,19 @@
     background: rgba(0, 255, 65, 0.3);
   }
 
+  .demo-btn.quick-action {
+    background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+    border: none;
+    color: #000;
+    font-weight: 600;
+  }
+
+  .demo-btn.quick-action:hover:not(:disabled) {
+    background: linear-gradient(135deg, #FFED4E 0%, #FFB84D 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(255, 215, 0, 0.5);
+  }
+
   .live-indicator {
     color: #ff4646;
     font-weight: 700;
