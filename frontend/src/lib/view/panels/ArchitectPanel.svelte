@@ -627,18 +627,18 @@
     });
     console.log('[createEntities] Entities imported');
 
-    // Fund entities according to layer reserves
-    console.log('[createEntities] Funding entities...');
+    // PERF FIX: Batch all funding into ONE process() call instead of 1 per entity
+    console.log('[createEntities] Batching funding for all entities...');
+    const fundingInputs = [];
     for (const layer of topology.layers) {
       const ids = layerEntityIds.get(layer.name) || [];
-      console.log('[createEntities] Funding', ids.length, 'entities in layer:', layer.name);
 
       for (const entityId of ids) {
         const replicaKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(entityId + ':'));
         const replica = replicaKey ? $isolatedEnv.replicas.get(replicaKey) : null;
 
         if (replica) {
-          await XLN.process($isolatedEnv, [{
+          fundingInputs.push({
             entityId,
             signerId: replica.signerId,
             entityTxs: [{
@@ -661,41 +661,60 @@
                 transactionHash: '0x' + Array(64).fill('0').join('')
               }
             }]
-          }]);
+          });
         }
       }
     }
 
-    // Create credit lines based on topology rules
-    console.log('[createEntities] Creating credit lines for', topology.rules.allowedPairs.length, 'rules...');
+    // Single batch: all entities funded in ONE frame
+    if (fundingInputs.length > 0) {
+      await XLN.process($isolatedEnv, fundingInputs);
+      console.log('[createEntities] ✅ Funded', fundingInputs.length, 'entities in 1 frame');
+    }
+
+    // PERF FIX: Batch all account openings into ONE process() call
+    console.log('[createEntities] Batching account openings...');
+    const accountInputs = [];
+    const accountsOpened = new Set<string>(); // Track to avoid duplicates
+
     for (const rule of topology.rules.allowedPairs) {
       const fromLayerIds = layerEntityIds.get(rule.from) || [];
       const toLayerIds = layerEntityIds.get(rule.to) || [];
-      console.log('[createEntities] Rule:', rule.from, '→', rule.to, `(${fromLayerIds.length}×${toLayerIds.length} pairs)`);
 
       // Open accounts between all pairs
       for (const fromId of fromLayerIds) {
         for (const toId of toLayerIds) {
           if (fromId === toId) continue; // Skip self
 
+          // Check if we already opened this account (prevents add_delta duplicates)
+          const accountKey = fromId < toId ? `${fromId}:${toId}` : `${toId}:${fromId}`;
+          if (accountsOpened.has(accountKey)) continue;
+          accountsOpened.add(accountKey);
+
           const fromReplicaKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(fromId + ':'));
           const fromReplica = fromReplicaKey ? $isolatedEnv.replicas.get(fromReplicaKey) : null;
 
           if (fromReplica) {
-            await XLN.process($isolatedEnv, [{
+            accountInputs.push({
               entityId: fromId,
               signerId: fromReplica.signerId,
               entityTxs: [{
                 type: 'openAccount',
                 data: { targetEntityId: toId }
               }]
-            }]);
+            });
           }
         }
       }
     }
 
-    console.log('[createEntities] COMPLETE - Created economy with', entities.length, 'entities');
+    // Single batch: all accounts opened in ONE frame
+    if (accountInputs.length > 0) {
+      await XLN.process($isolatedEnv, accountInputs);
+      console.log('[createEntities] ✅ Opened', accountInputs.length, 'accounts in 1 frame');
+    }
+
+    console.log('[createEntities] ✅ COMPLETE - Created economy with', entities.length, 'entities in ~3 frames (was 466)');
   }
 
   /** OLD: FED RESERVE DEMO (legacy - will be removed) */
