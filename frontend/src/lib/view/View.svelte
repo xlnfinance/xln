@@ -10,6 +10,7 @@
   import { onMount, mount } from 'svelte';
   import { writable } from 'svelte/store';
   import { DockviewComponent } from 'dockview';
+  import './utils/frontendLogger'; // Initialize global log control
   import Graph3DPanel from './panels/Graph3DPanel.svelte';
   import EntitiesPanel from './panels/EntitiesPanel.svelte';
   import DepositoryPanel from './panels/DepositoryPanel.svelte';

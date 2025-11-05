@@ -47,13 +47,45 @@ declare global {
   }
 }
 
+// Global verbose logging toggle (controlled by Settings panel)
+let VERBOSE_ENABLED = false;
+
+// Monkey-patch console for performance-aware logging
+const originalLog = console.log;
+const originalInfo = console.info;
+const originalDebug = console.debug;
+
+console.log = (...args: unknown[]) => {
+  if (VERBOSE_ENABLED || args[0]?.toString().includes('ERROR') || args[0]?.toString().includes('❌')) {
+    originalLog(...args);
+  }
+};
+
+console.info = (...args: unknown[]) => {
+  if (VERBOSE_ENABLED) originalInfo(...args);
+};
+
+console.debug = (...args: unknown[]) => {
+  if (VERBOSE_ENABLED) originalDebug(...args);
+};
+
+// console.error and console.warn ALWAYS show (never silenced)
+
 if (typeof window !== 'undefined') {
   window.frontendLogs = {
-    enable: (cat) => { LOG_CONFIG[cat] = true; console.log(`✅ ${cat} enabled`); },
-    disable: (cat) => { LOG_CONFIG[cat] = false; console.log(`❌ ${cat} disabled`); },
-    enableAll: () => { Object.keys(LOG_CONFIG).forEach(k => LOG_CONFIG[k as keyof FrontendLogConfig] = true); console.log('✅ All frontend logs enabled'); },
-    disableAll: () => { Object.keys(LOG_CONFIG).forEach(k => LOG_CONFIG[k as keyof FrontendLogConfig] = false); console.log('❌ All frontend logs disabled'); },
-    show: () => { console.table(LOG_CONFIG); }
+    enable: (cat) => { LOG_CONFIG[cat] = true; originalLog(`✅ ${cat} enabled`); },
+    disable: (cat) => { LOG_CONFIG[cat] = false; originalLog(`❌ ${cat} disabled`); },
+    enableAll: () => {
+      VERBOSE_ENABLED = true;
+      Object.keys(LOG_CONFIG).forEach(k => LOG_CONFIG[k as keyof FrontendLogConfig] = true);
+      originalLog('✅ All frontend logs enabled');
+    },
+    disableAll: () => {
+      VERBOSE_ENABLED = false;
+      Object.keys(LOG_CONFIG).forEach(k => LOG_CONFIG[k as keyof FrontendLogConfig] = false);
+      originalLog('❌ All frontend logs disabled (errors still show)');
+    },
+    show: () => { originalLog('Verbose:', VERBOSE_ENABLED); console.table(LOG_CONFIG); }
   };
-  console.log('🔧 Frontend log control: window.frontendLogs.show()');
+  originalLog('🔧 Frontend log control: window.frontendLogs.show()');
 }
