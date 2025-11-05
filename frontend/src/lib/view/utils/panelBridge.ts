@@ -17,6 +17,7 @@ type EventMap = {
   'settings:update': { key: string; value: any };
   'settings:reset': {};
   'camera:focus': { target: { x: number; y: number; z: number } };
+  'renderFps': number; // Real-time rendering FPS from Graph3DPanel
 };
 
 class PanelBridge {
