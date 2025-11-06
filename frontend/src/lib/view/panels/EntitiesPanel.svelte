@@ -17,6 +17,54 @@
 
   let selectedEntityId: string | null = null;
 
+  // Bank names (same as Graph3DPanel)
+  const BANK_NAMES = [
+    'Chase', 'Bank of America', 'Wells Fargo', 'Citi', 'Goldman Sachs',
+    'Morgan Stanley', 'HSBC', 'Barclays', 'Deutsche Bank', 'UBS',
+    'Credit Suisse', 'BNP Paribas', 'Santander', 'ICBC', 'China Construction',
+    'Agricultural Bank', 'Mizuho', 'MUFG', 'RBC', 'TD Bank'
+  ];
+
+  const FED_NAMES = new Map([
+    ['federal_reserve', 'Federal Reserve'],
+    ['ecb', 'European Central Bank'],
+    ['boc', 'Bank of China'],
+    ['boj', 'Bank of Japan'],
+    ['boe', 'Bank of England'],
+    ['snb', 'Swiss National Bank'],
+    ['rbi', 'Reserve Bank of India'],
+    ['cbr', 'Central Bank of Russia'],
+    ['bundesbank', 'Bundesbank']
+  ]);
+
+  const FED_FLAGS = new Map([
+    ['federal_reserve', '🇺🇸'],
+    ['ecb', '🇪🇺'],
+    ['boc', '🇨🇳'],
+    ['boj', '🇯🇵'],
+    ['boe', '🇬🇧'],
+    ['snb', '🇨🇭'],
+    ['rbi', '🇮🇳'],
+    ['cbr', '🇷🇺'],
+    ['bundesbank', '🇩🇪']
+  ]);
+
+  function getEntityName(entityId: string, signerId: string | undefined): string {
+    if (!signerId) return shortAddress(entityId);
+
+    // Check if Fed
+    for (const [key, name] of FED_NAMES) {
+      if (signerId.toLowerCase().includes(key)) {
+        const flag = FED_FLAGS.get(key) || '';
+        return flag ? `${flag} ${name}` : name;
+      }
+    }
+
+    // Bank: hash-based consistent name
+    const hash = entityId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return BANK_NAMES[hash % BANK_NAMES.length] || shortAddress(entityId);
+  }
+
   // Listen for selections
   const unsubscribe = panelBridge.on('entity:selected', ({ entityId }) => {
     selectedEntityId = entityId;
@@ -47,10 +95,12 @@
       return Array.from(replicas.entries() as any).map((entry: any) => {
         const replicaKey = entry[0];
         const entityId = replicaKey.split(':')[0] || replicaKey;
+        const replica = entry[1];
         return {
           id: entityId,
           replicaKey: replicaKey,
-          accounts: entry[1]?.state?.accounts
+          signerId: replica?.signerId,
+          accounts: replica?.state?.accounts
         };
       });
     }
@@ -71,7 +121,7 @@
         class:selected={entity.id === selectedEntityId}
         on:click={() => panelBridge.emit('entity:selected', { entityId: entity.id })}
       >
-        <h4>{shortAddress(entity.id)}</h4>
+        <h4>{getEntityName(entity.id, entity.signerId)}</h4>
         <p>Accounts: {entity.accounts?.size || 0}</p>
       </div>
     {/each}
