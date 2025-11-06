@@ -5076,7 +5076,28 @@ let vrHammer: VRHammer | null = null;
   </div>
 
   <!-- VR Controls HUD (for first-time Vision Pro users) -->
-  <VRControlsHUD isVRActive={isVRActive} />
+  <VRControlsHUD
+    isVRActive={isVRActive}
+    entityCount={entities.length}
+    currentFPS={renderFps}
+    onPaymentClick={() => {
+      // Trigger random R2R payment
+      if (entities.length >= 2) {
+        const from = entities[Math.floor(Math.random() * entities.length)];
+        const to = entities[Math.floor(Math.random() * entities.length)];
+        if (from && to && from.id !== to.id) {
+          console.log('[VR] Payment gesture:', from.id.slice(-4), '→', to.id.slice(-4));
+          panelBridge.emit('vr:payment', { from: from.id, to: to.id });
+        }
+      }
+    }}
+    onAutoRotateClick={() => {
+      autoRotate = !autoRotate;
+      panelBridge.emit('settings:update', { key: 'autoRotate', value: autoRotate });
+      console.log('[VR] Auto-rotate:', autoRotate);
+    }}
+    onExitVR={exitVR}
+  />
 </div>
 
 <style>
