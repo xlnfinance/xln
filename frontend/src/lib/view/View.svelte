@@ -215,12 +215,12 @@
       position: { direction: 'right', referencePanel: 'graph3d' },
     });
 
-    // Set initial sizes: Graph3D gets 75%, sidebar gets 25%
+    // Set initial sizes: Graph3D gets 80%, sidebar gets 20% (more focus on 3D)
     const graph3dApi = dockview.getPanel('graph3d');
     const entitiesApi = dockview.getPanel('entities');
     if (graph3dApi && entitiesApi) {
       setTimeout(() => {
-        graph3dApi.api.setSize({ width: window.innerWidth * 0.75 });
+        graph3dApi.api.setSize({ width: window.innerWidth * 0.80 });
       }, 100);
     }
 
