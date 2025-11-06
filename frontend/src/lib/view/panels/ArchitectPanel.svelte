@@ -527,6 +527,77 @@
     }
   }
 
+  /** SCALE STRESS TEST: Add 100 Entities (Prove Scalability) */
+  async function scaleStressTest() {
+    if (!$isolatedEnv?.activeXlnomy) {
+      lastAction = '❌ Create jurisdiction first';
+      return;
+    }
+
+    loading = true;
+    lastAction = 'Creating 100 entities... (FPS test)';
+
+    try {
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      const xlnomy = $isolatedEnv.xlnomies.get($isolatedEnv.activeXlnomy);
+      if (!xlnomy) throw new Error('Active xlnomy not found');
+
+      // Create 100 entities in 10x10 grid
+      const entityInputs = [];
+      const entityPositions = new Map();
+      const createdIds = [];
+
+      for (let row = 0; row < 10; row++) {
+        for (let col = 0; col < 10; col++) {
+          const x = (col - 4.5) * 40; // Spread across 400px
+          const z = (row - 4.5) * 40;
+          const y = 50; // Same height
+
+          const signerId = `scale_test_bank_${row}_${col}`;
+          const entityInput = {
+            signerId,
+            runtimeTxs: [{
+              type: 'importReplica',
+              entityState: {
+                nonces: new Map(),
+                accounts: new Map(),
+                reserves: new Map([[0, 100_000n]]), // $100K each
+                position: { x, y, z }
+              }
+            }]
+          };
+
+          entityInputs.push(entityInput);
+        }
+      }
+
+      // Batch create all 100 entities in ONE frame
+      await XLN.process($isolatedEnv, entityInputs);
+
+      // Get created entity IDs
+      const newReplicas = Array.from($isolatedEnv.replicas.entries());
+      const scaleTestIds = newReplicas
+        .filter(([key]) => key.includes('scale_test'))
+        .map(([key]) => key.split(':')[0]);
+
+      lastAction = `✅ Created 100 entities! Check FPS overlay (should be 60+)`;
+
+      isolatedEnv.set($isolatedEnv);
+      isolatedHistory.set($isolatedEnv.history || []);
+      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+
+      console.log('[Scale Test] ✅ 100 entities created, FPS should remain high');
+    } catch (err) {
+      const error = err as Error;
+      lastAction = `❌ ${error.message}`;
+      console.error('[Scale Test] Error:', err);
+    } finally {
+      loading = false;
+    }
+  }
+
   /** BANKER DEMO STEP 4: Reset */
   async function resetDemo() {
     stopFedPaymentLoop(); // Stop any running payment loops
@@ -2000,6 +2071,11 @@
             💸 Quick: 20% Transfer
           </button>
           <p class="step-help">Send 20% of balance from random entity</p>
+
+          <button class="demo-btn stress-test" on:click={scaleStressTest} disabled={loading || !activeXlnomy || entityIds.length > 20}>
+            🚀 Scale Test: +100 Entities
+          </button>
+          <p class="step-help">Prove scalability - watch FPS stay 60+ with 100 banks!</p>
 
           <button class="demo-btn step-4" on:click={resetDemo} disabled={loading}>
             🔄 Reset Demo
