@@ -411,7 +411,7 @@
               value="webgpu"
               on:change={() => updateSetting('rendererMode', 'webgpu')}
             />
-            <span>WebGPU (Experimental)</span>
+            <span>WebGPU (Faster, Chrome/Edge)</span>
           </label>
         </div>
       </div>
