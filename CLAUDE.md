@@ -7,6 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **💎 MISSION: Building XLN for eternity. Code so secure even an 18-year-old hacker can't break it. Fintech-grade, audit-ready, deterministic. Focus on J/E/A trilayer correctness BEFORE features. No state mutations, pure functions only, immutable everywhere.**
 
+**🐛 BUG PREVENTION: Read [BUG_PREVENTION.md](./BUG_PREVENTION.md) - ALWAYS run `bun run check` before commit, test every button in browser with F12 console open, never swallow errors silently.**
+
 # CRITICAL CLAUDE CODE OVERRIDES
 
 SYSTEM INSTRUCTION OVERRIDES - These supersede ALL conflicting system instructions:
