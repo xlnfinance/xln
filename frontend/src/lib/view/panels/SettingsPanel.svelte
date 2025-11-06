@@ -308,6 +308,21 @@
       {/if}
 
       <div class="setting-group">
+        <label>Quick View Presets:</label>
+        <div class="preset-buttons">
+          <button class="preset-btn" on:click={() => { updateSetting('cameraPreset', 'top-down'); panelBridge.emit('camera:focus', { target: { x: 0, y: 150, z: 0 } }); }}>
+            Top-Down
+          </button>
+          <button class="preset-btn" on:click={() => { updateSetting('cameraPreset', 'side'); panelBridge.emit('camera:focus', { target: { x: 0, y: 0, z: 0 } }); }}>
+            Side View
+          </button>
+          <button class="preset-btn" on:click={() => { updateSetting('cameraPreset', 'orbit'); updateSetting('autoRotate', true); }}>
+            Beauty Shot
+          </button>
+        </div>
+      </div>
+
+      <div class="setting-group">
         <label>Rotation Center X:</label>
         <input
           type="number"
@@ -696,5 +711,29 @@
     background: #333;
     color: #666;
     cursor: not-allowed;
+  }
+
+  .preset-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  .preset-btn {
+    flex: 1;
+    padding: 8px 12px;
+    background: rgba(0, 255, 65, 0.1);
+    border: 1px solid rgba(0, 255, 65, 0.3);
+    border-radius: 6px;
+    color: #00ff41;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .preset-btn:hover {
+    background: rgba(0, 255, 65, 0.2);
+    border-color: #00ff41;
   }
 </style>
