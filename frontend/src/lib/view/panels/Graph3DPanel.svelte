@@ -1678,83 +1678,198 @@ let vrHammer: VRHammer | null = null;
         scene.position.set(0, -0.5, -1); // Position on table in front of user
       }
 
-      // Hand tracking: Create hand cursors (spheres at index fingertips)
-      const handCursors: any = {
-        left: null,
-        right: null
+      // Hand tracking: Create hand rays + cursors
+      const handVisuals: any = {
+        left: { cursor: null, ray: null },
+        right: { cursor: null, ray: null }
       };
 
-      // Create glowing spheres for hand tracking
-      const createHandCursor = () => {
-        const geometry = new THREE.SphereGeometry(0.02, 16, 16);
-        const material = new THREE.MeshBasicMaterial({
-          color: 0x00ffff,
+      // Create glowing hand ray (laser pointer style)
+      const createHandVisual = (handedness: string) => {
+        // Cursor sphere
+        const cursorGeometry = new THREE.SphereGeometry(0.015, 16, 16);
+        const cursorMaterial = new THREE.MeshBasicMaterial({
+          color: handedness === 'left' ? 0x00ffff : 0xff00ff, // Cyan left, Magenta right
           transparent: true,
-          opacity: 0.8
+          opacity: 0.9
         });
-        const cursor = new THREE.Mesh(geometry, material);
+        const cursor = new THREE.Mesh(cursorGeometry, cursorMaterial);
         cursor.visible = false;
+
+        // Ray line (from hand to cursor)
+        const rayGeometry = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(0, 0, 0),
+          new THREE.Vector3(0, 0, -1)
+        ]);
+        const rayMaterial = new THREE.LineBasicMaterial({
+          color: handedness === 'left' ? 0x00ffff : 0xff00ff,
+          transparent: true,
+          opacity: 0.6,
+          linewidth: 2
+        });
+        const ray = new THREE.Line(rayGeometry, rayMaterial);
+        ray.visible = false;
+
         scene.add(cursor);
-        return cursor;
+        scene.add(ray);
+        return { cursor, ray };
       };
 
-      handCursors.left = createHandCursor();
-      handCursors.right = createHandCursor();
+      handVisuals.left = createHandVisual('left');
+      handVisuals.right = createHandVisual('right');
 
-      // Hand tracking update loop
+      // Floating tutorial text
+      const createFloatingTutorial = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d')!;
+
+        // Background
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillRect(0, 0, 512, 256);
+
+        // Border
+        ctx.strokeStyle = '#00ffff';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(2, 2, 508, 252);
+
+        // Text
+        ctx.fillStyle = '#00ffff';
+        ctx.font = 'bold 32px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('👆 POINT AT BANKS', 256, 60);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '24px monospace';
+        ctx.fillText('Pinch thumb+index = select', 256, 110);
+        ctx.fillText('💰 Green numbers = reserves', 256, 150);
+        ctx.fillText('🔵 Blue lines = accounts', 256, 190);
+        ctx.fillText('🟡 Yellow = payments flowing', 256, 230);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        const material = new THREE.MeshBasicMaterial({
+          map: texture,
+          transparent: true,
+          opacity: 0.9,
+          side: THREE.DoubleSide
+        });
+        const geometry = new THREE.PlaneGeometry(0.8, 0.4);
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set(0, 0.3, -0.6); // Float in front of user
+        scene.add(mesh);
+        return mesh;
+      };
+
+      const tutorialPanel = createFloatingTutorial();
+
+      // Hand tracking + controller update loop
       const updateHandTracking = () => {
         if (!session || !renderer.xr.isPresenting) return;
 
-        // Get hand input sources
+        // Get hand input sources (Vision Pro hands or Quest controllers)
         for (const source of session.inputSources) {
+          const handedness = source.handedness as 'left' | 'right';
+          const visuals = handVisuals[handedness];
+          if (!visuals) continue;
+
+          // Try hand tracking first (Vision Pro / Quest 3)
           if (source.hand) {
             const hand = source.hand;
-            const handedness = source.handedness; // 'left' or 'right'
-
-            // Get index fingertip position (joint 9 = index tip)
             const indexTip = hand.get('index-finger-tip');
-            if (indexTip) {
-              const cursor = handCursors[handedness];
-              if (cursor) {
-                // Get joint pose in XR space
-                const frame = renderer.xr.getFrame();
-                const referenceSpace = renderer.xr.getReferenceSpace();
-                if (frame && referenceSpace && frame.getJointPose) {
-                  const jointPose = frame.getJointPose(indexTip, referenceSpace);
-                  if (jointPose) {
-                    cursor.position.set(
-                      jointPose.transform.position.x,
-                      jointPose.transform.position.y,
-                      jointPose.transform.position.z
-                    );
-                    cursor.visible = true;
+            const wrist = hand.get('wrist');
 
-                    // Detect pinch gesture (thumb + index close)
-                    const thumbTip = hand.get('thumb-tip');
-                    if (thumbTip && frame.getJointPose) {
-                      const thumbPose = frame.getJointPose(thumbTip, referenceSpace);
-                      if (thumbPose) {
-                        const distance = cursor.position.distanceTo(
-                          new THREE.Vector3(
-                            thumbPose.transform.position.x,
-                            thumbPose.transform.position.y,
-                            thumbPose.transform.position.z
-                          )
-                        );
+            if (indexTip && wrist) {
+              const frame = renderer.xr.getFrame();
+              const referenceSpace = renderer.xr.getReferenceSpace();
 
-                        // Pinch detected when thumb + index < 3cm apart
-                        if (distance < 0.03) {
-                          cursor.material.color.setHex(0xff00ff); // Pink = pinching
-                          cursor.scale.setScalar(1.5); // Bigger when pinching
+              if (frame && referenceSpace && frame.getJointPose) {
+                const tipPose = frame.getJointPose(indexTip, referenceSpace);
+                const wristPose = frame.getJointPose(wrist, referenceSpace);
 
-                          // TODO: Raycast from pinch point to select entities
-                        } else {
-                          cursor.material.color.setHex(0x00ffff); // Cyan = idle
-                          cursor.scale.setScalar(1.0);
-                        }
+                if (tipPose && wristPose) {
+                  // Position cursor at fingertip
+                  visuals.cursor.position.set(
+                    tipPose.transform.position.x,
+                    tipPose.transform.position.y,
+                    tipPose.transform.position.z
+                  );
+                  visuals.cursor.visible = true;
+
+                  // Draw ray from wrist to fingertip
+                  const wristPos = new THREE.Vector3(
+                    wristPose.transform.position.x,
+                    wristPose.transform.position.y,
+                    wristPose.transform.position.z
+                  );
+                  const tipPos = visuals.cursor.position.clone();
+                  const rayPoints = [wristPos, tipPos];
+                  visuals.ray.geometry.setFromPoints(rayPoints);
+                  visuals.ray.visible = true;
+
+                  // Detect pinch
+                  const thumbTip = hand.get('thumb-tip');
+                  if (thumbTip && frame.getJointPose) {
+                    const thumbPose = frame.getJointPose(thumbTip, referenceSpace);
+                    if (thumbPose) {
+                      const thumbPos = new THREE.Vector3(
+                        thumbPose.transform.position.x,
+                        thumbPose.transform.position.y,
+                        thumbPose.transform.position.z
+                      );
+                      const distance = tipPos.distanceTo(thumbPos);
+
+                      // Pinch = make cursor glow gold
+                      if (distance < 0.03) {
+                        visuals.cursor.material.color.setHex(0xffff00); // Gold
+                        visuals.cursor.scale.setScalar(2.0);
+                        visuals.ray.material.opacity = 1.0;
+                      } else {
+                        const baseColor = handedness === 'left' ? 0x00ffff : 0xff00ff;
+                        visuals.cursor.material.color.setHex(baseColor);
+                        visuals.cursor.scale.setScalar(1.0);
+                        visuals.ray.material.opacity = 0.6;
                       }
                     }
                   }
+                }
+              }
+            }
+          }
+          // Fallback: XR controller (Quest 1/2 or generic)
+          else if (source.gripSpace) {
+            const frame = renderer.xr.getFrame();
+            const referenceSpace = renderer.xr.getReferenceSpace();
+
+            if (frame && referenceSpace) {
+              const gripPose = frame.getPose(source.gripSpace, referenceSpace);
+              if (gripPose) {
+                // Controller pointer ray
+                const pos = gripPose.transform.position;
+                const orient = gripPose.transform.orientation;
+
+                visuals.cursor.position.set(pos.x, pos.y, pos.z);
+                visuals.cursor.visible = true;
+
+                // Ray shoots forward from controller
+                const forward = new THREE.Vector3(0, 0, -1);
+                const quat = new THREE.Quaternion(orient.x, orient.y, orient.z, orient.w);
+                forward.applyQuaternion(quat);
+
+                const rayStart = new THREE.Vector3(pos.x, pos.y, pos.z);
+                const rayEnd = rayStart.clone().add(forward.multiplyScalar(1.0));
+
+                visuals.ray.geometry.setFromPoints([rayStart, rayEnd]);
+                visuals.ray.visible = true;
+
+                // Controller trigger = select (show as pressed)
+                if (source.gamepad && source.gamepad.buttons[0]?.pressed) {
+                  visuals.cursor.material.color.setHex(0xffff00);
+                  visuals.cursor.scale.setScalar(2.0);
+                } else {
+                  const baseColor = handedness === 'left' ? 0x00ffff : 0xff00ff;
+                  visuals.cursor.material.color.setHex(baseColor);
+                  visuals.cursor.scale.setScalar(1.0);
                 }
               }
             }
@@ -1778,16 +1893,26 @@ let vrHammer: VRHammer | null = null;
       session.addEventListener('end', () => {
         isVRActive = false;
 
-        // Cleanup hand cursors
-        if (handCursors.left) {
-          scene.remove(handCursors.left);
-          handCursors.left.geometry.dispose();
-          handCursors.left.material.dispose();
-        }
-        if (handCursors.right) {
-          scene.remove(handCursors.right);
-          handCursors.right.geometry.dispose();
-          handCursors.right.material.dispose();
+        // Cleanup hand visuals
+        Object.values(handVisuals).forEach((visuals: any) => {
+          if (visuals.cursor) {
+            scene.remove(visuals.cursor);
+            visuals.cursor.geometry.dispose();
+            visuals.cursor.material.dispose();
+          }
+          if (visuals.ray) {
+            scene.remove(visuals.ray);
+            visuals.ray.geometry.dispose();
+            visuals.ray.material.dispose();
+          }
+        });
+
+        // Cleanup tutorial panel
+        if (tutorialPanel) {
+          scene.remove(tutorialPanel);
+          tutorialPanel.geometry.dispose();
+          tutorialPanel.material.map?.dispose();
+          tutorialPanel.material.dispose();
         }
 
         // Restore scene background
