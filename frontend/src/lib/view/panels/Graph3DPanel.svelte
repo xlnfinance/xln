@@ -2438,15 +2438,42 @@ let vrHammer: VRHammer | null = null;
       radius = Math.max(0.05, Math.min(radius, 0.8)); // Clamp 0.05-0.8
     }
 
+    // Color based on amount (Strange Attractors style spectrum)
+    let color = 0x00ccff; // Default cyan
+    let emissiveColor = 0x00ccff;
+    if (amountUSD > 0) {
+      if (amountUSD < 1000) {
+        // Tiny: Blue
+        color = 0x0088ff;
+        emissiveColor = 0x0088ff;
+      } else if (amountUSD < 100000) {
+        // Small: Cyan
+        color = 0x00ccff;
+        emissiveColor = 0x00ccff;
+      } else if (amountUSD < 1000000) {
+        // Medium: Green
+        color = 0x00ff88;
+        emissiveColor = 0x00ff88;
+      } else if (amountUSD < 10000000) {
+        // Large: Yellow
+        color = 0xffff00;
+        emissiveColor = 0xffff00;
+      } else {
+        // Huge: Red
+        color = 0xff4444;
+        emissiveColor = 0xff4444;
+      }
+    }
+
     // FAT CYLINDER BOLT (not sphere)
     const geometry = new THREE.CylinderGeometry(radius, radius, boltLength, 16);
 
-    // GRADIENT MATERIAL: bright cyan (source) → dim blue (dest)
+    // GRADIENT MATERIAL with amount-based color
     const material = new THREE.MeshLambertMaterial({
-      color: 0x00ccff, // Bright cyan
+      color,
       transparent: true,
       opacity: 0.95,
-      emissive: 0x00ccff,
+      emissive: emissiveColor,
       emissiveIntensity: 2.0 // Very bright for electric feel
     });
 
