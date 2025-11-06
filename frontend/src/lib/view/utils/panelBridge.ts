@@ -12,6 +12,7 @@ type EventMap = {
   'layout:changed': { layout: any };
   'transfer:executed': { from: string; to: string; tokenId: number; amount: bigint };
   'vr:toggle': {};
+  'vr:payment': { from: string; to: string }; // VR hand gesture payment
   'broadcast:toggle': { enabled: boolean };
   'broadcast:style': { style: 'raycast' | 'wave' | 'particles' };
   'settings:update': { key: string; value: any };

@@ -70,6 +70,15 @@
     ? Array.from($isolatedEnv.replicas.keys() as Iterable<string>).map((key: string) => key.split(':')[0] || key).filter((id: string, idx: number, arr: string[]) => arr.indexOf(id) === idx)
     : [];
 
+  // Listen for VR payment gestures
+  panelBridge.on('vr:payment', async ({ from, to }) => {
+    console.log('[Architect] VR payment triggered:', from.slice(-4), '→', to.slice(-4));
+    r2rFromEntity = from;
+    r2rToEntity = to;
+    r2rAmount = '500000'; // Default $500K
+    await sendR2RTransaction();
+  });
+
   /** Mint reserves to selected entity */
   async function mintReservesToEntity() {
     if (!selectedEntityForMint || !$isolatedEnv) {
