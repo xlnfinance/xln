@@ -1183,9 +1183,9 @@
       } catch (err: any) {
         console.error('[Smart Loop] Error:', err);
       }
-    }, 1000); // Every 1 second (not 3)
+    }, 5000); // Every 5 seconds (optimized for frame count)
 
-    console.log(`[Smart Loop] 🔄 Started (${topology.type} topology, 1s interval)`);
+    console.log(`[Smart Loop] 🔄 Started (${topology.type} topology, 5s interval)`);
   }
 
   /** Smart QE: Fed mints based on system liquidity */
@@ -1503,9 +1503,9 @@
       } catch (err: any) {
         console.error('[Fed Loop] Payment error:', err);
       }
-    }, 3000); // Every 3 seconds
+    }, 5000); // Every 5 seconds (reduced for performance)
 
-    console.log('[Fed Loop] 🔄 Started auto payment loop (3s interval)');
+    console.log('[Fed Loop] 🔄 Started auto payment loop (5s interval)');
   }
 
   function stopFedPaymentLoop() {
