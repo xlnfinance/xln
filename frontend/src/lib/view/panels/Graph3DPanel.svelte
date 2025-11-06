@@ -18,6 +18,7 @@
   import { panelBridge } from '../utils/panelBridge';
   import { PerformanceMonitor, type PerfMetrics } from '../utils/perfMonitor';
   import VRControlsHUD from '../components/VRControlsHUD.svelte';
+  import { HandGesturePaymentController } from '../utils/handGesturePayments';
 
   // Props - REQUIRED for /view isolation (dead props removed)
   export let isolatedEnv: Writable<any>;
