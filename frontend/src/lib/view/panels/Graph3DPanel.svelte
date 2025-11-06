@@ -4771,13 +4771,53 @@ let vrHammer: VRHammer | null = null;
     return `${isNegative ? '-' : ''}${wholePart.toLocaleString()}.${formatted}`;
   }
 
+  // Realistic bank names for demo (rotates through on creation)
+  const BANK_NAMES = [
+    'Chase', 'Bank of America', 'Wells Fargo', 'Citi', 'Goldman Sachs',
+    'Morgan Stanley', 'HSBC', 'Barclays', 'Deutsche Bank', 'UBS',
+    'Credit Suisse', 'BNP Paribas', 'Santander', 'ICBC', 'China Construction Bank',
+    'Agricultural Bank', 'Mizuho', 'MUFG', 'RBC', 'TD Bank'
+  ];
+
+  const FED_NAMES = new Map([
+    ['federal_reserve', 'Federal Reserve'],
+    ['ecb', 'European Central Bank'],
+    ['boc', 'Bank of China'],
+    ['boj', 'Bank of Japan'],
+    ['boe', 'Bank of England'],
+    ['snb', 'Swiss National Bank'],
+    ['rbi', 'Reserve Bank of India'],
+    ['cbr', 'Central Bank of Russia'],
+    ['bundesbank', 'Bundesbank']
+  ]);
+
   /**
-   * Get entity short name (just ID, clean - no prefix)
+   * Get entity display name (realistic names for demo)
    */
   function getEntityShortName(entityId: string): string {
+    // Check if it's a Fed entity (from replica signerId)
+    const currentReplicas = $isolatedEnv?.replicas || new Map();
+    const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(entityId + ':'));
+    const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
+
+    if (replica?.signerId) {
+      // Check if Fed
+      for (const [key, name] of FED_NAMES) {
+        if (replica.signerId.toLowerCase().includes(key)) {
+          return name;
+        }
+      }
+
+      // Bank: use hash-based index to get consistent name
+      const hash = entityId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+      const bankIndex = hash % BANK_NAMES.length;
+      return BANK_NAMES[bankIndex] || entityId.slice(-4);
+    }
+
+    // Fallback
     if (!XLN?.getEntityShortId) return entityId.slice(-4);
     try {
-      return XLN?.getEntityShortId(entityId); // Just ID, clean - no "#" or "Entity" prefix
+      return XLN?.getEntityShortId(entityId);
     } catch {
       return entityId.slice(-4);
     }
