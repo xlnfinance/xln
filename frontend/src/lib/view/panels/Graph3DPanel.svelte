@@ -1644,31 +1644,48 @@ let vrHammer: VRHammer | null = null;
 
     try {
       const sessionInit: any = {
-        optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+        optionalFeatures: [
+          'local-floor',
+          'bounded-floor',
+          'hand-tracking',
+          'layers', // Vision Pro AR passthrough
+          'dom-overlay', // Better UI integration
+          'anchors' // Physical world anchoring
+        ],
+        requiredFeatures: [] // Keep it compatible
       };
-
-      // Add passthrough if enabled
-      if (passthroughEnabled) {
-        sessionInit.optionalFeatures.push('layers');
-      }
 
       const session = await (navigator as any).xr.requestSession('immersive-vr', sessionInit);
 
       await renderer.xr.setSession(session);
       isVRActive = true;
 
+      // Vision Pro optimization: Position scene for table-top AR
+      if (scene) {
+        // Scale down for comfortable AR viewing (entities appear table-sized)
+        scene.scale.setScalar(0.01); // 1/100 scale = table-sized economy
+        scene.position.set(0, -0.5, -1); // Position on table in front of user
+      }
+
       // Switch to VR animation loop
       renderer.setAnimationLoop(animate);
 
-      console.log('🥽 Entered VR mode');
+      console.log('🥽 Entered VR mode (Vision Pro optimized)');
 
       // Listen for session end
       session.addEventListener('end', () => {
         isVRActive = false;
+
+        // Reset scene transform (restore normal desktop view)
+        if (scene) {
+          scene.scale.setScalar(1);
+          scene.position.set(0, 0, 0);
+        }
+
         // Return to regular animation loop
         renderer.setAnimationLoop(null);
         animate();
-        console.log('🥽 Exited VR mode');
+        console.log('🥽 Exited VR mode - scene restored');
       });
 
     } catch (error) {
