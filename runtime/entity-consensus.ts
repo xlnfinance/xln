@@ -8,7 +8,7 @@ import { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env
 import { DEBUG, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
-import { addMessages } from './state-helpers';
+import { addMessages, cloneEntityReplica } from './state-helpers';
 
 // === SECURITY VALIDATION ===
 
@@ -188,17 +188,21 @@ export const applyEntityInput = async (
   entityReplica: EntityReplica,
   entityInput: EntityInput,
 ): Promise<{ newState: EntityState, outputs: EntityInput[] }> => {
+  // IMMUTABILITY: Clone replica at function start (fintech-safe, hacker-proof)
+  // Prevents state mutations from escaping function scope
+  const workingReplica = cloneEntityReplica(entityReplica);
+
   // Debug: Log every input being processed with timestamp and unique identifier
   const entityDisplay = formatEntityDisplay(entityInput.entityId);
   const timestamp = Date.now();
-  const currentProposalHash = entityReplica.proposal?.hash?.slice(0, 10) || 'none';
+  const currentProposalHash = workingReplica.proposal?.hash?.slice(0, 10) || 'none';
   const frameHash = entityInput.proposedFrame?.hash?.slice(0, 10) || 'none';
 
   console.log(
     `🔍 INPUT-RECEIVED: [${timestamp}] Processing input for Entity #${entityDisplay}:${formatSignerDisplay(entityInput.signerId)}`,
   );
   console.log(
-    `🔍 INPUT-STATE: Current proposal: ${currentProposalHash}, Mempool: ${entityReplica.mempool.length}, isProposer: ${entityReplica.isProposer}`,
+    `🔍 INPUT-STATE: Current proposal: ${currentProposalHash}, Mempool: ${workingReplica.mempool.length}, isProposer: ${workingReplica.isProposer}`,
   );
   console.log(
     `🔍 INPUT-DETAILS: txs=${entityInput.entityTxs?.length || 0}, precommits=${entityInput.precommits?.size || 0}, frame=${frameHash}`,
@@ -215,11 +219,11 @@ export const applyEntityInput = async (
   // SECURITY: Validate all inputs
   if (!validateEntityInput(entityInput)) {
     log.error(`❌ Invalid input for ${entityInput.entityId}:${entityInput.signerId}`);
-    return { newState: entityReplica.state, outputs: [] };
+    return { newState: workingReplica.state, outputs: [] };
   }
-  if (!validateEntityReplica(entityReplica)) {
-    log.error(`❌ Invalid replica state for ${entityReplica.entityId}:${entityReplica.signerId}`);
-    return { newState: entityReplica.state, outputs: [] };
+  if (!validateEntityReplica(workingReplica)) {
+    log.error(`❌ Invalid replica state for ${workingReplica.entityId}:${workingReplica.signerId}`);
+    return { newState: workingReplica.state, outputs: [] };
   }
 
   const entityOutbox: EntityInput[] = [];
@@ -228,11 +232,11 @@ export const applyEntityInput = async (
   const { executeCrontab, initCrontab } = await import('./entity-crontab');
 
   // Initialize crontab on first use
-  if (!entityReplica.state.crontabState) {
-    entityReplica.state.crontabState = initCrontab();
+  if (!workingReplica.state.crontabState) {
+    workingReplica.state.crontabState = initCrontab();
   }
 
-  const crontabOutputs = await executeCrontab(entityReplica, entityReplica.state.crontabState);
+  const crontabOutputs = await executeCrontab(workingReplica, workingReplica.state.crontabState);
   if (crontabOutputs.length > 0) {
     console.log(`⏰ CRONTAB: Generated ${crontabOutputs.length} outputs from periodic tasks`);
     entityOutbox.push(...crontabOutputs);
@@ -243,30 +247,30 @@ export const applyEntityInput = async (
     // DEBUG: Track vote transactions specifically
     const voteTransactions = entityInput.entityTxs.filter(tx => tx.type === 'vote');
     if (voteTransactions.length > 0) {
-      console.log(`🗳️ VOTE-MEMPOOL: ${entityReplica.signerId} receiving ${voteTransactions.length} vote transactions`);
+      console.log(`🗳️ VOTE-MEMPOOL: ${workingReplica.signerId} receiving ${voteTransactions.length} vote transactions`);
       voteTransactions.forEach(tx => {
         console.log(`🗳️ VOTE-TX:`, tx);
       });
     }
 
-    if (entityReplica.signerId === 'alice') {
+    if (workingReplica.signerId === 'alice') {
       console.log(`🔥 ALICE-RECEIVES: Alice receiving ${entityInput.entityTxs.length} txs from input`);
       console.log(
         `🔥 ALICE-RECEIVES: Transaction types:`,
         entityInput.entityTxs.map(tx => tx.type),
       );
       console.log(
-        `🔥 ALICE-RECEIVES: Alice isProposer=${entityReplica.isProposer}, current mempool=${entityReplica.mempool.length}`,
+        `🔥 ALICE-RECEIVES: Alice isProposer=${workingReplica.isProposer}, current mempool=${workingReplica.mempool.length}`,
       );
     }
     // Log details of each EntityTx
     for (const tx of entityInput.entityTxs) {
       console.log(`🏛️ E-MACHINE: - EntityTx type="${tx.type}", data=`, safeStringify(tx.data, 2));
     }
-    entityReplica.mempool.push(...entityInput.entityTxs);
+    workingReplica.mempool.push(...entityInput.entityTxs);
     if (DEBUG)
       console.log(
-        `    → Added ${entityInput.entityTxs.length} txs to mempool (total: ${entityReplica.mempool.length})`,
+        `    → Added ${entityInput.entityTxs.length} txs to mempool (total: ${workingReplica.mempool.length})`,
       );
     if (DEBUG && entityInput.entityTxs.length > 3) {
       console.log(`    ⚠️  CORNER CASE: Large batch of ${entityInput.entityTxs.length} transactions`);
@@ -277,49 +281,49 @@ export const applyEntityInput = async (
 
   // CRITICAL: Forward transactions to proposer BEFORE processing commits
   // This prevents race condition where commits clear mempool before forwarding
-  if (!entityReplica.isProposer && entityReplica.mempool.length > 0) {
+  if (!workingReplica.isProposer && workingReplica.mempool.length > 0) {
     // Send mempool to proposer
-    const proposerId = entityReplica.state.config.validators[0];
+    const proposerId = workingReplica.state.config.validators[0];
     if (!proposerId) {
-      logError("FRAME_CONSENSUS", `❌ No proposer found in validators: ${entityReplica.state.config.validators}`);
-      return { newState: entityReplica.state, outputs: entityOutbox };
+      logError("FRAME_CONSENSUS", `❌ No proposer found in validators: ${workingReplica.state.config.validators}`);
+      return { newState: workingReplica.state, outputs: entityOutbox };
     }
 
-    const txCount = entityReplica.mempool.length;
+    const txCount = workingReplica.mempool.length;
     console.log(`🔥 BOB-TO-ALICE: Bob sending ${txCount} txs to proposer ${proposerId}`);
     console.log(
       `🔥 BOB-TO-ALICE: Transaction types:`,
-      entityReplica.mempool.map(tx => tx.type),
+      workingReplica.mempool.map(tx => tx.type),
     );
     entityOutbox.push({
       entityId: entityInput.entityId,
       signerId: proposerId,
-      entityTxs: [...entityReplica.mempool],
+      entityTxs: [...workingReplica.mempool],
     });
 
     // CHANNEL.TS PATTERN: Track sent txs, DON'T clear mempool yet
     // Only clear after receiving commit confirmation (like Channel.ts line 217)
-    entityReplica.sentTransitions = txCount;
+    workingReplica.sentTransitions = txCount;
     console.log(`📊 Tracked ${txCount} sent transitions (will clear on commit)`);
   }
 
   // Handle commit notifications AFTER forwarding (when receiving finalized frame from proposer)
-  if (entityInput.precommits?.size && entityInput.proposedFrame && !entityReplica.proposal) {
+  if (entityInput.precommits?.size && entityInput.proposedFrame && !workingReplica.proposal) {
     const signers = Array.from(entityInput.precommits.keys());
-    const totalPower = calculateQuorumPower(entityReplica.state.config, signers);
+    const totalPower = calculateQuorumPower(workingReplica.state.config, signers);
 
-    if (totalPower >= entityReplica.state.config.threshold) {
+    if (totalPower >= workingReplica.state.config.threshold) {
       // This is a commit notification from proposer, apply the frame
 
       // SECURITY: Validate commit matches our locked frame (if we have one)
-      if (entityReplica.lockedFrame) {
-        if (entityReplica.lockedFrame.hash !== entityInput.proposedFrame.hash) {
+      if (workingReplica.lockedFrame) {
+        if (workingReplica.lockedFrame.hash !== entityInput.proposedFrame.hash) {
           logError("FRAME_CONSENSUS", `❌ BYZANTINE: Commit frame doesn't match locked frame!`);
-          logError("FRAME_CONSENSUS", `   Locked: ${entityReplica.lockedFrame.hash}`);
+          logError("FRAME_CONSENSUS", `   Locked: ${workingReplica.lockedFrame.hash}`);
           logError("FRAME_CONSENSUS", `   Commit: ${entityInput.proposedFrame.hash}`);
-          return { newState: entityReplica.state, outputs: entityOutbox };
+          return { newState: workingReplica.state, outputs: entityOutbox };
         }
-        console.log(`✅ Commit validation: matches locked frame ${entityReplica.lockedFrame.hash.slice(0,10)}`);
+        console.log(`✅ Commit validation: matches locked frame ${workingReplica.lockedFrame.hash.slice(0,10)}`);
       }
 
       // SECURITY: Verify signatures are for the correct frame hash
@@ -329,62 +333,62 @@ export const applyEntityInput = async (
           logError("FRAME_CONSENSUS", `❌ BYZANTINE: Invalid signature format from ${signerId}`);
           logError("FRAME_CONSENSUS", `   Expected: ${expectedSig.slice(0,30)}...`);
           logError("FRAME_CONSENSUS", `   Received: ${signature.slice(0,30)}...`);
-          return { newState: entityReplica.state, outputs: entityOutbox };
+          return { newState: workingReplica.state, outputs: entityOutbox };
         }
       }
       console.log(`✅ All ${entityInput.precommits.size} signatures validated for frame ${entityInput.proposedFrame.hash.slice(0,10)}`);
 
       // Apply the committed frame with incremented height
-      entityReplica.state = {
+      workingReplica.state = {
         ...entityInput.proposedFrame.newState,
-        height: entityReplica.state.height + 1,
+        height: workingReplica.state.height + 1,
       };
 
       // CHANNEL.TS PATTERN: Only clear sent transactions that were committed
       // Like Channel.ts line 217: mempool.splice(0, this.data.sentTransitions)
-      if (entityReplica.sentTransitions && entityReplica.sentTransitions > 0) {
-        console.log(`📊 Clearing ${entityReplica.sentTransitions} committed txs from mempool (${entityReplica.mempool.length} total)`);
-        entityReplica.mempool.splice(0, entityReplica.sentTransitions);
-        entityReplica.sentTransitions = 0;
-        console.log(`📊 Mempool after commit: ${entityReplica.mempool.length} txs remaining`);
+      if (workingReplica.sentTransitions && workingReplica.sentTransitions > 0) {
+        console.log(`📊 Clearing ${workingReplica.sentTransitions} committed txs from mempool (${workingReplica.mempool.length} total)`);
+        workingReplica.mempool.splice(0, workingReplica.sentTransitions);
+        workingReplica.sentTransitions = 0;
+        console.log(`📊 Mempool after commit: ${workingReplica.mempool.length} txs remaining`);
       } else {
         // Fallback: clear entire mempool (old behavior)
-        entityReplica.mempool.length = 0;
+        workingReplica.mempool.length = 0;
       }
 
-      delete entityReplica.lockedFrame; // Release lock after commit
+      delete workingReplica.lockedFrame; // Release lock after commit
       if (DEBUG)
         console.log(
-          `    → Applied commit, new state: ${entityReplica.state.messages.length} messages, height: ${entityReplica.state.height}`,
+          `    → Applied commit, new state: ${workingReplica.state.messages.length} messages, height: ${workingReplica.state.height}`,
         );
 
       // Return early - commit notifications don't trigger further processing
-      return { newState: entityReplica.state, outputs: entityOutbox };
+      return { newState: workingReplica.state, outputs: entityOutbox };
     }
   }
 
   // Handle proposed frame (PROPOSE phase) - only if not a commit notification
   if (
     entityInput.proposedFrame &&
-    (!entityReplica.proposal || (entityReplica.state.config.mode === 'gossip-based' && entityReplica.isProposer))
+    (!workingReplica.proposal || (workingReplica.state.config.mode === 'gossip-based' && workingReplica.isProposer))
   ) {
-    const frameSignature = `sig_${entityReplica.signerId}_${entityInput.proposedFrame.hash}`;
-    const config = entityReplica.state.config;
+    const frameSignature = `sig_${workingReplica.signerId}_${entityInput.proposedFrame.hash}`;
+    const config = workingReplica.state.config;
 
     // Lock to this frame (CometBFT style)
-    entityReplica.lockedFrame = entityInput.proposedFrame;
+    workingReplica.lockedFrame = entityInput.proposedFrame;
     // DEBUG removed: → Validator locked to frame ${entityInput.proposedFrame.hash.slice(0, 10)}...`);
 
     if (config.mode === 'gossip-based') {
       // Send precommit to all validators
       config.validators.forEach(validatorId => {
         console.log(
-          `🔍 GOSSIP: [${timestamp}] ${entityReplica.signerId} sending precommit to ${validatorId} for entity ${entityInput.entityId.slice(0, 10)}, proposal ${frameHash}, sig: ${frameSignature.slice(0, 20)}...`,
+          `🔍 GOSSIP: [${timestamp}] ${workingReplica.signerId} sending precommit to ${validatorId} for entity ${entityInput.entityId.slice(0, 10)}, proposal ${frameHash}, sig: ${frameSignature.slice(0, 20)}...`,
         );
         entityOutbox.push({
           entityId: entityInput.entityId,
           signerId: validatorId,
-          precommits: new Map([[entityReplica.signerId, frameSignature]]),
+          precommits: new Map([[workingReplica.signerId, frameSignature]]),
         });
       });
       // DEBUG removed: → Signed proposal, gossiping precommit to ${config.validators.length} validators`);
@@ -393,90 +397,90 @@ export const applyEntityInput = async (
       const proposerId = config.validators[0];
       if (!proposerId) {
         logError("FRAME_CONSENSUS", `❌ No proposer found in validators: ${config.validators}`);
-        return { newState: entityReplica.state, outputs: entityOutbox };
+        return { newState: workingReplica.state, outputs: entityOutbox };
       }
       console.log(
-        `🔍 PROPOSER: [${timestamp}] ${entityReplica.signerId} sending precommit to ${proposerId} for entity ${entityInput.entityId.slice(0, 10)}, proposal ${frameHash}, sig: ${frameSignature.slice(0, 20)}...`,
+        `🔍 PROPOSER: [${timestamp}] ${workingReplica.signerId} sending precommit to ${proposerId} for entity ${entityInput.entityId.slice(0, 10)}, proposal ${frameHash}, sig: ${frameSignature.slice(0, 20)}...`,
       );
       console.log(
-        `🔍 PROPOSER-REASON: Signed new proposal, current state: proposal=${currentProposalHash}, locked=${entityReplica.lockedFrame?.hash?.slice(0, 10) || 'none'}`,
+        `🔍 PROPOSER-REASON: Signed new proposal, current state: proposal=${currentProposalHash}, locked=${workingReplica.lockedFrame?.hash?.slice(0, 10) || 'none'}`,
       );
       entityOutbox.push({
         entityId: entityInput.entityId,
         signerId: proposerId,
-        precommits: new Map([[entityReplica.signerId, frameSignature]]),
+        precommits: new Map([[workingReplica.signerId, frameSignature]]),
       });
       // DEBUG removed: → Signed proposal, sending precommit to ${proposerId}`);
     }
   }
 
   // Handle precommits (SIGN phase)
-  if (entityInput.precommits?.size && entityReplica.proposal) {
+  if (entityInput.precommits?.size && workingReplica.proposal) {
     // SECURITY: Check for Byzantine faults before collecting signatures
     for (const [signerId, signature] of entityInput.precommits) {
-      if (detectByzantineFault(entityReplica.proposal.signatures, signerId, signature)) {
+      if (detectByzantineFault(workingReplica.proposal.signatures, signerId, signature)) {
         log.error(`❌ Rejecting Byzantine input from ${signerId}`);
-        return { newState: entityReplica.state, outputs: entityOutbox }; // Return early, don't process malicious input
+        return { newState: workingReplica.state, outputs: entityOutbox }; // Return early, don't process malicious input
       }
-      entityReplica.proposal.signatures.set(signerId, signature);
+      workingReplica.proposal.signatures.set(signerId, signature);
     }
     if (DEBUG)
       console.log(
-        `    → Collected ${entityInput.precommits.size} signatures (total: ${entityReplica.proposal.signatures.size})`,
+        `    → Collected ${entityInput.precommits.size} signatures (total: ${workingReplica.proposal.signatures.size})`,
       );
 
     // Check threshold using shares
-    const signers = Array.from(entityReplica.proposal.signatures.keys());
-    const totalPower = calculateQuorumPower(entityReplica.state.config, signers);
+    const signers = Array.from(workingReplica.proposal.signatures.keys());
+    const totalPower = calculateQuorumPower(workingReplica.state.config, signers);
 
     // SECURITY: Validate voting power
     if (!validateVotingPower(totalPower)) {
       log.error(`❌ Invalid voting power calculation: ${totalPower}`);
-      return { newState: entityReplica.state, outputs: entityOutbox };
+      return { newState: workingReplica.state, outputs: entityOutbox };
     }
 
     if (DEBUG) {
-      const totalShares = Object.values(entityReplica.state.config.shares).reduce((sum, val) => sum + val, BigInt(0));
-      const percentage = ((Number(totalPower) / Number(entityReplica.state.config.threshold)) * 100).toFixed(1);
+      const totalShares = Object.values(workingReplica.state.config.shares).reduce((sum, val) => sum + val, BigInt(0));
+      const percentage = ((Number(totalPower) / Number(workingReplica.state.config.threshold)) * 100).toFixed(1);
       log.info(
-        `    🔍 Threshold check: ${totalPower} / ${totalShares} [${percentage}% threshold${Number(totalPower) >= Number(entityReplica.state.config.threshold) ? '+' : ''}]`,
+        `    🔍 Threshold check: ${totalPower} / ${totalShares} [${percentage}% threshold${Number(totalPower) >= Number(workingReplica.state.config.threshold) ? '+' : ''}]`,
       );
-      if (entityReplica.state.config.mode === 'gossip-based') {
+      if (workingReplica.state.config.mode === 'gossip-based') {
         console.log(`    ⚠️  CORNER CASE: Gossip mode - all validators receive precommits`);
       }
     }
 
-    if (totalPower >= entityReplica.state.config.threshold) {
+    if (totalPower >= workingReplica.state.config.threshold) {
       // Commit phase - use pre-computed state with incremented height
-      entityReplica.state = {
-        ...entityReplica.proposal.newState,
-        height: entityReplica.state.height + 1,
+      workingReplica.state = {
+        ...workingReplica.proposal.newState,
+        height: workingReplica.state.height + 1,
       };
-      // DEBUG removed: → Threshold reached! Committing frame, height: ${entityReplica.state.height}`);
+      // DEBUG removed: → Threshold reached! Committing frame, height: ${workingReplica.state.height}`);
 
       // Save proposal data before clearing
-      const sortedSignatures = sortSignatures(entityReplica.proposal.signatures, entityReplica.state.config);
-      const committedFrame = entityReplica.proposal;
+      const sortedSignatures = sortSignatures(workingReplica.proposal.signatures, workingReplica.state.config);
+      const committedFrame = workingReplica.proposal;
 
       // Clear state (mutable)
-      entityReplica.mempool.length = 0;
-      delete entityReplica.proposal;
-      delete entityReplica.lockedFrame; // Release lock after commit
+      workingReplica.mempool.length = 0;
+      delete workingReplica.proposal;
+      delete workingReplica.lockedFrame; // Release lock after commit
 
       // Only send commit notifications in proposer-based mode
       // In gossip mode, everyone already has all precommits via gossip
-      if (entityReplica.state.config.mode === 'proposer-based') {
+      if (workingReplica.state.config.mode === 'proposer-based') {
         const committedProposalHash = committedFrame.hash.slice(0, 10);
         console.log(
-          `🔍 COMMIT-START: [${timestamp}] ${entityReplica.signerId} reached threshold for proposal ${committedProposalHash}, sending commit notifications...`,
+          `🔍 COMMIT-START: [${timestamp}] ${workingReplica.signerId} reached threshold for proposal ${committedProposalHash}, sending commit notifications...`,
         );
 
         // Notify all validators (except self - proposer already has all precommits)
-        entityReplica.state.config.validators.forEach(validatorId => {
-          if (validatorId !== entityReplica.signerId) {
+        workingReplica.state.config.validators.forEach(validatorId => {
+          if (validatorId !== workingReplica.signerId) {
             const precommitSigners = Array.from(sortedSignatures.keys());
             console.log(
-              `🔍 COMMIT: [${timestamp}] ${entityReplica.signerId} sending commit notification to ${validatorId} for entity ${entityInput.entityId.slice(0, 10)}, proposal ${committedProposalHash} (${sortedSignatures.size} precommits from: ${precommitSigners.join(', ')})`,
+              `🔍 COMMIT: [${timestamp}] ${workingReplica.signerId} sending commit notification to ${validatorId} for entity ${entityInput.entityId.slice(0, 10)}, proposal ${committedProposalHash} (${sortedSignatures.size} precommits from: ${precommitSigners.join(', ')})`,
             );
             entityOutbox.push({
               entityId: entityInput.entityId,
@@ -486,11 +490,11 @@ export const applyEntityInput = async (
             });
           }
         });
-        // const notifiedCount = entityReplica.state.config.validators.length - 1; // excluding self
+        // const notifiedCount = workingReplica.state.config.validators.length - 1; // excluding self
         // DEBUG removed: → Sending commit notifications to ${notifiedCount} validators (excluding self)`);
       } else {
         console.log(
-          `🔍 GOSSIP-COMMIT: [${timestamp}] ${entityReplica.signerId} NOT sending commit notifications (gossip mode) for entity ${entityInput.entityId.slice(0, 10)}...`,
+          `🔍 GOSSIP-COMMIT: [${timestamp}] ${workingReplica.signerId} NOT sending commit notifications (gossip mode) for entity ${entityInput.entityId.slice(0, 10)}...`,
         );
         if (DEBUG)
           console.log(`    → Gossip mode: No commit notifications needed (everyone has precommits via gossip)`);
@@ -501,39 +505,39 @@ export const applyEntityInput = async (
   // Commit notifications are now handled at the top of the function
 
   // Debug consensus trigger conditions
-  console.log(`🎯 CONSENSUS-CHECK: Entity ${entityReplica.entityId}:${entityReplica.signerId}`);
-  console.log(`🎯   isProposer: ${entityReplica.isProposer}`);
-  console.log(`🎯   mempool.length: ${entityReplica.mempool.length}`);
-  console.log(`🎯   hasProposal: ${!!entityReplica.proposal}`);
-  if (entityReplica.mempool.length > 0) {
+  console.log(`🎯 CONSENSUS-CHECK: Entity ${workingReplica.entityId}:${workingReplica.signerId}`);
+  console.log(`🎯   isProposer: ${workingReplica.isProposer}`);
+  console.log(`🎯   mempool.length: ${workingReplica.mempool.length}`);
+  console.log(`🎯   hasProposal: ${!!workingReplica.proposal}`);
+  if (workingReplica.mempool.length > 0) {
     console.log(
       `🎯   mempoolTypes:`,
-      entityReplica.mempool.map(tx => tx.type),
+      workingReplica.mempool.map(tx => tx.type),
     );
   }
 
   // Auto-propose logic: ONLY proposer can propose (BFT requirement)
-  if (entityReplica.isProposer && entityReplica.mempool.length > 0 && !entityReplica.proposal) {
+  if (workingReplica.isProposer && workingReplica.mempool.length > 0 && !workingReplica.proposal) {
     console.log(`🔥 ALICE-PROPOSES: Alice auto-propose triggered!`);
     console.log(
-      `🔥 ALICE-PROPOSES: mempool=${entityReplica.mempool.length}, isProposer=${entityReplica.isProposer}, hasProposal=${!!entityReplica.proposal}`,
+      `🔥 ALICE-PROPOSES: mempool=${workingReplica.mempool.length}, isProposer=${workingReplica.isProposer}, hasProposal=${!!workingReplica.proposal}`,
     );
     console.log(
       `🔥 ALICE-PROPOSES: Mempool transaction types:`,
-      entityReplica.mempool.map(tx => tx.type),
+      workingReplica.mempool.map(tx => tx.type),
     );
 
     // Check if this is a single signer entity (threshold = 1, only 1 validator)
     const isSingleSigner =
-      entityReplica.state.config.validators.length === 1 && entityReplica.state.config.threshold === BigInt(1);
+      workingReplica.state.config.validators.length === 1 && workingReplica.state.config.threshold === BigInt(1);
 
     if (isSingleSigner) {
       console.log(`🚀 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
       // For single signer entities, directly apply transactions without consensus
-      const { newState: newEntityState, outputs: frameOutputs } = await applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
-      entityReplica.state = {
+      const { newState: newEntityState, outputs: frameOutputs } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool);
+      workingReplica.state = {
         ...newEntityState,
-        height: entityReplica.state.height + 1,
+        height: workingReplica.state.height + 1,
       };
 
       // Add any outputs generated by entity transactions to the outbox
@@ -541,22 +545,22 @@ export const applyEntityInput = async (
       // SINGLE-SIGNER-OUTPUTS removed - too noisy
 
       // Clear mempool after direct application
-      entityReplica.mempool.length = 0;
+      workingReplica.mempool.length = 0;
 
       if (DEBUG)
         console.log(
-          `    ⚡ Single signer entity: transactions applied directly, height: ${entityReplica.state.height}`,
+          `    ⚡ Single signer entity: transactions applied directly, height: ${workingReplica.state.height}`,
         );
       // SINGLE-SIGNER-RETURN removed - too noisy
-      return { newState: entityReplica.state, outputs: entityOutbox }; // Skip the full consensus process
+      return { newState: workingReplica.state, outputs: entityOutbox }; // Skip the full consensus process
     }
 
     if (DEBUG)
       console.log(
-        `    🚀 Auto-propose triggered: mempool=${entityReplica.mempool.length}, isProposer=${entityReplica.isProposer}, hasProposal=${!!entityReplica.proposal}`,
+        `    🚀 Auto-propose triggered: mempool=${workingReplica.mempool.length}, isProposer=${workingReplica.isProposer}, hasProposal=${!!workingReplica.proposal}`,
       );
     // Compute new state once during proposal
-    const { newState: newEntityState, outputs: proposalOutputs } = await applyEntityFrame(env, entityReplica.state, entityReplica.mempool);
+    const { newState: newEntityState, outputs: proposalOutputs } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool);
 
     // Add any outputs generated during proposal to the outbox
     entityOutbox.push(...proposalOutputs);
@@ -567,72 +571,72 @@ export const applyEntityInput = async (
     // SECURITY: Validate timestamp
     if (!validateTimestamp(newTimestamp, env.timestamp)) {
       log.error(`❌ Invalid proposal timestamp: ${newTimestamp}`);
-      return { newState: entityReplica.state, outputs: entityOutbox };
+      return { newState: workingReplica.state, outputs: entityOutbox };
     }
 
-    const frameHash = `frame_${entityReplica.state.height + 1}_${newTimestamp}`;
-    const selfSignature = `sig_${entityReplica.signerId}_${frameHash}`;
+    const frameHash = `frame_${workingReplica.state.height + 1}_${newTimestamp}`;
+    const selfSignature = `sig_${workingReplica.signerId}_${frameHash}`;
 
-    entityReplica.proposal = {
-      height: entityReplica.state.height + 1,
-      txs: [...entityReplica.mempool],
+    workingReplica.proposal = {
+      height: workingReplica.state.height + 1,
+      txs: [...workingReplica.mempool],
       hash: frameHash,
       newState: {
         ...newEntityState,
-        height: entityReplica.state.height + 1,
+        height: workingReplica.state.height + 1,
         timestamp: newTimestamp, // Set new deterministic timestamp in proposed state
       },
-      signatures: new Map<string, string>([[entityReplica.signerId, selfSignature]]), // Proposer signs immediately
+      signatures: new Map<string, string>([[workingReplica.signerId, selfSignature]]), // Proposer signs immediately
     };
 
     if (DEBUG)
       console.log(
-        `    → Auto-proposing frame ${entityReplica.proposal.hash} with ${entityReplica.proposal.txs.length} txs and self-signature.`,
+        `    → Auto-proposing frame ${workingReplica.proposal.hash} with ${workingReplica.proposal.txs.length} txs and self-signature.`,
       );
 
     // Send proposal to all validators (except self)
-    entityReplica.state.config.validators.forEach(validatorId => {
-      if (validatorId !== entityReplica.signerId) {
+    workingReplica.state.config.validators.forEach(validatorId => {
+      if (validatorId !== workingReplica.signerId) {
         entityOutbox.push({
           entityId: entityInput.entityId,
           signerId: validatorId,
-          proposedFrame: entityReplica.proposal!,
+          proposedFrame: workingReplica.proposal!,
           // Note: Don't send entityTxs separately - they're already in proposedFrame.txs
         });
       }
     });
-  } else if (entityReplica.isProposer && entityReplica.mempool.length === 0 && !entityReplica.proposal) {
+  } else if (workingReplica.isProposer && workingReplica.mempool.length === 0 && !workingReplica.proposal) {
     // DEBUG removed: ⚠️  CORNER CASE: Proposer with empty mempool - no auto-propose`);
-  } else if (!entityReplica.isProposer && entityReplica.mempool.length > 0) {
-    // DEBUG removed: → Non-proposer sending ${entityReplica.mempool.length} txs to proposer`);
+  } else if (!workingReplica.isProposer && workingReplica.mempool.length > 0) {
+    // DEBUG removed: → Non-proposer sending ${workingReplica.mempool.length} txs to proposer`);
     // Send mempool to proposer
-    const proposerId = entityReplica.state.config.validators[0];
+    const proposerId = workingReplica.state.config.validators[0];
     if (!proposerId) {
-      logError("FRAME_CONSENSUS", `❌ No proposer found in validators: ${entityReplica.state.config.validators}`);
-      return { newState: entityReplica.state, outputs: entityOutbox };
+      logError("FRAME_CONSENSUS", `❌ No proposer found in validators: ${workingReplica.state.config.validators}`);
+      return { newState: workingReplica.state, outputs: entityOutbox };
     }
-    console.log(`🔥 BOB-TO-ALICE: Bob sending ${entityReplica.mempool.length} txs to proposer ${proposerId}`);
+    console.log(`🔥 BOB-TO-ALICE: Bob sending ${workingReplica.mempool.length} txs to proposer ${proposerId}`);
     console.log(
       `🔥 BOB-TO-ALICE: Transaction types:`,
-      entityReplica.mempool.map(tx => tx.type),
+      workingReplica.mempool.map(tx => tx.type),
     );
     entityOutbox.push({
       entityId: entityInput.entityId,
       signerId: proposerId,
-      entityTxs: [...entityReplica.mempool],
+      entityTxs: [...workingReplica.mempool],
     });
     // Clear mempool after sending
-    entityReplica.mempool.length = 0;
-  } else if (entityReplica.isProposer && entityReplica.proposal) {
+    workingReplica.mempool.length = 0;
+  } else if (workingReplica.isProposer && workingReplica.proposal) {
     // DEBUG removed: ⚠️  CORNER CASE: Proposer already has pending proposal - no new auto-propose`);
   }
 
   // Debug: Log outputs being generated with detailed analysis
   console.log(
-    `🔍 OUTPUT-GENERATED: [${timestamp}] Entity #${entityDisplay}:${formatSignerDisplay(entityReplica.signerId)} generating ${entityOutbox.length} outputs`,
+    `🔍 OUTPUT-GENERATED: [${timestamp}] Entity #${entityDisplay}:${formatSignerDisplay(workingReplica.signerId)} generating ${entityOutbox.length} outputs`,
   );
   console.log(
-    `🔍 OUTPUT-FINAL-STATE: proposal=${entityReplica.proposal?.hash?.slice(0, 10) || 'none'}, mempool=${entityReplica.mempool.length}, locked=${entityReplica.lockedFrame?.hash?.slice(0, 10) || 'none'}`,
+    `🔍 OUTPUT-FINAL-STATE: proposal=${workingReplica.proposal?.hash?.slice(0, 10) || 'none'}, mempool=${workingReplica.mempool.length}, locked=${workingReplica.lockedFrame?.hash?.slice(0, 10) || 'none'}`,
   );
 
   entityOutbox.forEach((output, index) => {
@@ -668,7 +672,7 @@ export const applyEntityInput = async (
     }
   });
 
-  return { newState: entityReplica.state, outputs: entityOutbox };
+  return { newState: workingReplica.state, outputs: entityOutbox };
 };
 
 export const applyEntityFrame = async (

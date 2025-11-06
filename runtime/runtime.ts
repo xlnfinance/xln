@@ -418,8 +418,17 @@ const applyRuntimeInput = async (
         const { newState, outputs } = await applyEntityInput(env, entityReplica, entityInput);
         // APPLY-ENTITY-INPUT-RESULT removed - too noisy
 
-        // CRITICAL FIX: Update the replica in the environment with the new state
-        env.replicas.set(replicaKey, { ...entityReplica, state: newState });
+        // IMMUTABILITY: Create fresh replica (working memory cleared, state updated)
+        // applyEntityInput clones internally, so mempool/proposal mutations stay local
+        // Reset working memory to prevent stale data from previous frames
+        env.replicas.set(replicaKey, {
+          ...entityReplica,
+          state: newState,
+          mempool: [], // Fresh mempool (applyEntityInput already processed txs)
+          proposal: undefined, // Clear proposal after commit
+          lockedFrame: undefined, // Clear lock
+          sentTransitions: 0 // Reset counter
+        });
 
         // FINTECH-LEVEL TYPE SAFETY: Validate all entity outputs before routing
         outputs.forEach((output, index) => {
