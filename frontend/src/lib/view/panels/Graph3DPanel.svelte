@@ -1668,6 +1668,9 @@ let vrHammer: VRHammer | null = null;
       await renderer.xr.setSession(session);
       isVRActive = true;
 
+      // Vision Pro: Enable passthrough (transparent background = see real world)
+      scene.background = null; // Transparent = passthrough mode
+
       // Vision Pro optimization: Position scene for table-top AR
       if (scene) {
         // Scale down for comfortable AR viewing (entities appear table-sized)
@@ -1675,14 +1678,120 @@ let vrHammer: VRHammer | null = null;
         scene.position.set(0, -0.5, -1); // Position on table in front of user
       }
 
-      // Switch to VR animation loop
-      renderer.setAnimationLoop(animate);
+      // Hand tracking: Create hand cursors (spheres at index fingertips)
+      const handCursors: any = {
+        left: null,
+        right: null
+      };
+
+      // Create glowing spheres for hand tracking
+      const createHandCursor = () => {
+        const geometry = new THREE.SphereGeometry(0.02, 16, 16);
+        const material = new THREE.MeshBasicMaterial({
+          color: 0x00ffff,
+          transparent: true,
+          opacity: 0.8
+        });
+        const cursor = new THREE.Mesh(geometry, material);
+        cursor.visible = false;
+        scene.add(cursor);
+        return cursor;
+      };
+
+      handCursors.left = createHandCursor();
+      handCursors.right = createHandCursor();
+
+      // Hand tracking update loop
+      const updateHandTracking = () => {
+        if (!session || !renderer.xr.isPresenting) return;
+
+        // Get hand input sources
+        for (const source of session.inputSources) {
+          if (source.hand) {
+            const hand = source.hand;
+            const handedness = source.handedness; // 'left' or 'right'
+
+            // Get index fingertip position (joint 9 = index tip)
+            const indexTip = hand.get('index-finger-tip');
+            if (indexTip) {
+              const cursor = handCursors[handedness];
+              if (cursor) {
+                // Get joint pose in XR space
+                const frame = renderer.xr.getFrame();
+                const referenceSpace = renderer.xr.getReferenceSpace();
+                if (frame && referenceSpace && frame.getJointPose) {
+                  const jointPose = frame.getJointPose(indexTip, referenceSpace);
+                  if (jointPose) {
+                    cursor.position.set(
+                      jointPose.transform.position.x,
+                      jointPose.transform.position.y,
+                      jointPose.transform.position.z
+                    );
+                    cursor.visible = true;
+
+                    // Detect pinch gesture (thumb + index close)
+                    const thumbTip = hand.get('thumb-tip');
+                    if (thumbTip && frame.getJointPose) {
+                      const thumbPose = frame.getJointPose(thumbTip, referenceSpace);
+                      if (thumbPose) {
+                        const distance = cursor.position.distanceTo(
+                          new THREE.Vector3(
+                            thumbPose.transform.position.x,
+                            thumbPose.transform.position.y,
+                            thumbPose.transform.position.z
+                          )
+                        );
+
+                        // Pinch detected when thumb + index < 3cm apart
+                        if (distance < 0.03) {
+                          cursor.material.color.setHex(0xff00ff); // Pink = pinching
+                          cursor.scale.setScalar(1.5); // Bigger when pinching
+
+                          // TODO: Raycast from pinch point to select entities
+                        } else {
+                          cursor.material.color.setHex(0x00ffff); // Cyan = idle
+                          cursor.scale.setScalar(1.0);
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      };
+
+      // Add hand tracking to animation loop
+      const originalAnimate = animate;
+      const animateWithHands = () => {
+        updateHandTracking();
+        originalAnimate();
+      };
+
+      // Switch to VR animation loop with hand tracking
+      renderer.setAnimationLoop(animateWithHands);
 
       console.log('🥽 Entered VR mode (Vision Pro optimized)');
 
       // Listen for session end
       session.addEventListener('end', () => {
         isVRActive = false;
+
+        // Cleanup hand cursors
+        if (handCursors.left) {
+          scene.remove(handCursors.left);
+          handCursors.left.geometry.dispose();
+          handCursors.left.material.dispose();
+        }
+        if (handCursors.right) {
+          scene.remove(handCursors.right);
+          handCursors.right.geometry.dispose();
+          handCursors.right.material.dispose();
+        }
+
+        // Restore scene background
+        scene.background = new THREE.Color(0x0a0a0a);
 
         // Reset scene transform (restore normal desktop view)
         if (scene) {
