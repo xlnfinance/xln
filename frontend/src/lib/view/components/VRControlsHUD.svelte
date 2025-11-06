@@ -8,6 +8,11 @@
    */
 
   export let isVRActive = false;
+  export let onPaymentClick: (() => void) | null = null;
+  export let onAutoRotateClick: (() => void) | null = null;
+  export let onExitVR: (() => void) | null = null;
+  export let entityCount = 0;
+  export let currentFPS = 0;
 </script>
 
 {#if isVRActive}
@@ -31,13 +36,13 @@
 
     <!-- Quick Actions (Bottom) -->
     <div class="vr-panel actions">
-      <button class="vr-btn big-green">
-        🚀 Start Payments
+      <button class="vr-btn big-green" on:click={() => onPaymentClick?.()}>
+        💸 Send Payment
       </button>
-      <button class="vr-btn big-blue">
+      <button class="vr-btn big-blue" on:click={() => onAutoRotateClick?.()}>
         🌀 Auto-Rotate
       </button>
-      <button class="vr-btn big-red">
+      <button class="vr-btn big-red" on:click={() => onExitVR?.()}>
         ❌ Exit VR
       </button>
     </div>
@@ -46,11 +51,11 @@
     <div class="vr-panel stats">
       <div class="stat-item">
         <span class="stat-label">Entities</span>
-        <span class="stat-value">3</span>
+        <span class="stat-value">{entityCount}</span>
       </div>
       <div class="stat-item">
         <span class="stat-label">FPS</span>
-        <span class="stat-value">60</span>
+        <span class="stat-value">{Math.round(currentFPS)}</span>
       </div>
     </div>
   </div>
