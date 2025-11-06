@@ -2812,22 +2812,53 @@ let vrHammer: VRHammer | null = null;
     // Get short entity name (just number, no prefix)
     const entityName = getEntityShortName(entityId);
 
+    // Check if this is a Fed entity (for flag rendering)
+    const currentReplicas = $isolatedEnv?.replicas || new Map();
+    const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(entityId + ':'));
+    const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
+
+    let flag = '';
+    if (replica?.signerId) {
+      for (const [key, emoji] of FED_FLAGS) {
+        if (replica.signerId.toLowerCase().includes(key)) {
+          flag = emoji;
+          break;
+        }
+      }
+    }
+
     // NO background - transparent (user requirement: black background is ugly)
     context.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Text styling - bright green with dark outline for contrast
-    context.font = `bold ${32 * labelScale}px sans-serif`; // Dynamic: 32px * labelScale
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
+    // Draw flag above name if Fed
+    if (flag) {
+      context.font = `${48 * labelScale}px sans-serif`;
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+      context.fillText(flag, 64, 32); // Top half of canvas
 
-    // Draw dark outline for contrast (visible on any background)
-    context.strokeStyle = '#000000';
-    context.lineWidth = 4;
-    context.strokeText(entityName, 64, 64);
+      // Draw name below flag (smaller)
+      context.font = `bold ${20 * labelScale}px sans-serif`;
+      context.strokeStyle = '#000000';
+      context.lineWidth = 3;
+      context.strokeText(entityName, 64, 80);
+      context.fillStyle = '#FFD700'; // Gold for Fed
+      context.fillText(entityName, 64, 80);
+    } else {
+      // Regular entity: just name, centered
+      context.font = `bold ${32 * labelScale}px sans-serif`;
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
 
-    // Draw bright green text on top
-    context.fillStyle = '#00ff88';
-    context.fillText(entityName, 64, 64);
+      // Draw dark outline for contrast
+      context.strokeStyle = '#000000';
+      context.lineWidth = 4;
+      context.strokeText(entityName, 64, 64);
+
+      // Draw bright green text on top
+      context.fillStyle = '#00ff88';
+      context.fillText(entityName, 64, 64);
+    }
 
     // Create sprite with texture
     const texture = new THREE.CanvasTexture(canvas);
@@ -4789,6 +4820,18 @@ let vrHammer: VRHammer | null = null;
     ['rbi', 'Reserve Bank of India'],
     ['cbr', 'Central Bank of Russia'],
     ['bundesbank', 'Bundesbank']
+  ]);
+
+  const FED_FLAGS = new Map([
+    ['federal_reserve', '🇺🇸'],
+    ['ecb', '🇪🇺'],
+    ['boc', '🇨🇳'],
+    ['boj', '🇯🇵'],
+    ['boe', '🇬🇧'],
+    ['snb', '🇨🇭'],
+    ['rbi', '🇮🇳'],
+    ['cbr', '🇷🇺'],
+    ['bundesbank', '🇩🇪']
   ]);
 
   /**
