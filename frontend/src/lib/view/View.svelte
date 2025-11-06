@@ -19,6 +19,7 @@
   import RuntimeIOPanel from './panels/RuntimeIOPanel.svelte';
   import SettingsPanel from './panels/SettingsPanel.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
+  import Tutorial from './components/Tutorial.svelte';
   import 'dockview/dist/styles/dockview.css';
 
   export let layout: string = 'default';
@@ -296,6 +297,9 @@
       {collapsed ? '▲' : '▼'}
     </button>
   </div>
+
+  <!-- Interactive Tutorial (first-time users) -->
+  <Tutorial />
 </div>
 
 <style>
