@@ -78,12 +78,21 @@
   let activeCategory: 'scene' | 'camera' | 'entities' | 'effects' | 'performance' = 'scene';
 
   // Load settings from localStorage on mount
-  function loadSettings() {
+  async function loadSettings() {
     try {
       const stored = localStorage.getItem('xln-view-settings');
       if (stored) {
         settings = { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
         console.log('[Settings] Loaded from localStorage:', settings);
+      }
+
+      // Auto-detect WebGPU if not explicitly set by user
+      if (!stored || !JSON.parse(stored).rendererMode) {
+        if (typeof navigator !== 'undefined' && navigator.gpu) {
+          settings.rendererMode = 'webgpu';
+          saveSettings();
+          console.log('[Settings] ✅ WebGPU detected - enabled by default');
+        }
       }
     } catch (err) {
       console.error('[Settings] Failed to load:', err);
