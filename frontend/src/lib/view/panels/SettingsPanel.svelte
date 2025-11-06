@@ -48,6 +48,9 @@
     autoRotate: boolean;
     autoRotateSpeed: number; // RPM
     cameraPreset: 'free' | 'top-down' | 'side' | 'orbit';
+
+    // VR Settings
+    vrScaleMultiplier: number; // 0.1-10x for comfortable VR viewing
   }
 
   const DEFAULT_SETTINGS: ViewSettings = {
@@ -81,7 +84,10 @@
     // Camera Presets
     autoRotate: false,
     autoRotateSpeed: 0.5, // RPM (revolutions per minute)
-    cameraPreset: 'free'
+    cameraPreset: 'free',
+
+    // VR Settings
+    vrScaleMultiplier: 1.0 // Default 1:1 scale
   };
 
   let settings: ViewSettings = { ...DEFAULT_SETTINGS };
