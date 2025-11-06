@@ -4856,6 +4856,17 @@ let vrHammer: VRHammer | null = null;
     'Agricultural Bank', 'Mizuho', 'MUFG', 'RBC', 'TD Bank'
   ];
 
+  // S&P 500 tickers (matches ArchitectPanel)
+  const SP500_TICKERS = [
+    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA',
+    'BRK.B', 'JPM', 'V', 'MA', 'BAC', 'WFC', 'GS', 'MS',
+    'UNH', 'JNJ', 'LLY', 'PFE', 'ABBV', 'TMO', 'MRK',
+    'WMT', 'PG', 'KO', 'PEP', 'COST', 'HD', 'MCD', 'NKE',
+    'XOM', 'CVX', 'BA', 'CAT', 'GE', 'MMM',
+    'DIS', 'NFLX', 'CMCSA', 'T', 'VZ',
+    'INTC', 'CSCO', 'ORCL', 'CRM', 'AMD'
+  ];
+
   const FED_NAMES = new Map([
     ['federal_reserve', 'Federal Reserve'],
     ['ecb', 'European Central Bank'],
@@ -4890,6 +4901,13 @@ let vrHammer: VRHammer | null = null;
     const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
 
     if (replica?.signerId) {
+      // Check if S&P 500 ticker
+      for (const ticker of SP500_TICKERS) {
+        if (replica.signerId.includes(ticker)) {
+          return ticker; // Show raw ticker (AAPL, MSFT, etc)
+        }
+      }
+
       // Check if Fed
       for (const [key, name] of FED_NAMES) {
         if (replica.signerId.toLowerCase().includes(key)) {

@@ -794,8 +794,13 @@
           z = jPos.z + Math.sin(angle) * layer.xzSpacing;
         }
 
-        // Generate entity ID
-        const signerId = `${$isolatedEnv.activeXlnomy}_${layer.name.toLowerCase().replace(/\s/g, '_')}_${i}`;
+        // Generate entity ID (use real ticker for S&P 500 companies)
+        let signerId: string;
+        if (layer.name === 'S&P 500 Companies' && i < SP500_TICKERS.length) {
+          signerId = `${$isolatedEnv.activeXlnomy}_${SP500_TICKERS[i]}`;
+        } else {
+          signerId = `${$isolatedEnv.activeXlnomy}_${layer.name.toLowerCase().replace(/\s/g, '_')}_${i}`;
+        }
         const data = new TextEncoder().encode(`${$isolatedEnv.activeXlnomy}:${layer.name}:${i}:${Date.now()}`);
         const hashBuffer = await crypto.subtle.digest('SHA-256', data);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
@@ -2061,6 +2066,22 @@
                 <li>Chain routing</li>
                 <li>Gateway bank</li>
                 <li>FX fees</li>
+              </ul>
+            </button>
+
+            <button
+              class="topology-card sp500-card"
+              class:active={selectedTopology === 'sp500'}
+              on:click={() => selectedTopology = 'sp500'}
+              disabled={loading || !activeXlnomy || entityIds.length > 0}
+            >
+              <div class="topology-icon">📈</div>
+              <h6>S&P 500</h6>
+              <p class="topology-model">Corporate Settlement</p>
+              <ul class="topology-features">
+                <li>▸ 50 real companies</li>
+                <li>▸ AAPL MSFT GOOGL</li>
+                <li>▸ P2P corporate</li>
               </ul>
             </button>
           </div>
