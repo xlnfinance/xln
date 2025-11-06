@@ -2615,15 +2615,17 @@ let vrHammer: VRHammer | null = null;
             conn.line.computeLineDistances();
           }
 
-          // Update progress bars position/rotation
+          // Recreate progress bars (positions changed, need full rebuild)
           if (conn.progressBars) {
-            const midpoint = new THREE.Vector3(
-              (fromEntity.position.x + toEntity.position.x) / 2,
-              (fromEntity.position.y + toEntity.position.y) / 2,
-              (fromEntity.position.z + toEntity.position.z) / 2
-            );
-            conn.progressBars.position.copy(midpoint);
-            conn.progressBars.lookAt(toEntity.position);
+            scene.remove(conn.progressBars);
+            // Get fresh replica data
+            const currentReplicas = $isolatedEnv?.replicas || new Map();
+            const replicaKey = Array.from(currentReplicas.keys()).find(k => k.startsWith(conn.from + ':') || k.startsWith(conn.to + ':'));
+            const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
+
+            if (replica) {
+              conn.progressBars = createAccountBarsForConnection(fromEntity, toEntity, conn.from, conn.to, replica);
+            }
           }
         }
       }
