@@ -501,6 +501,7 @@ let vrHammer: VRHammer | null = null;
   let cameraTarget: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
   let gridHelper: THREE.GridHelper | null = null;
   let resizeDebounceTimer: number | null = null;
+  let gridPulseIntensity: number = 0; // 0-1, animates on J-Machine broadcasts
 
   // Helper to get token symbol using xlnFunctions
   function getTokenSymbol(tokenId: number): string {
@@ -2567,6 +2568,9 @@ let vrHammer: VRHammer | null = null;
 
     scene.add(ripple);
 
+    // Trigger grid pulse (visualize O(n) broadcast)
+    gridPulseIntensity = 1.0;
+
     // Add to particles array for animation (reuse particles system)
     particles.push({
       mesh: ripple,
@@ -3167,6 +3171,21 @@ let vrHammer: VRHammer | null = null;
 
     // Animate entity pulses
     animateEntityPulses();
+
+    // Animate grid pulse (on J-Machine broadcasts)
+    if (gridPulseIntensity > 0 && gridHelper) {
+      gridPulseIntensity *= 0.95; // Exponential decay
+      if (gridPulseIntensity < 0.01) gridPulseIntensity = 0;
+
+      // Pulse grid color toward bright green
+      const baseMaterial = gridHelper.material as THREE.LineBasicMaterial;
+      const pulseColor = new THREE.Color(gridColor).lerp(
+        new THREE.Color(0x00ff88), // Bright green
+        gridPulseIntensity
+      );
+      baseMaterial.color = pulseColor;
+      baseMaterial.opacity = gridOpacity + (gridPulseIntensity * 0.3); // Brighten on pulse
+    }
 
     // Update balance change ripples
     updateRipples();
