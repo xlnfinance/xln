@@ -5025,6 +5025,7 @@ let vrHammer: VRHammer | null = null;
 <div class="graph3d-wrapper">
   <div bind:this={container} class="graph3d-panel"></div>
   <!-- FPS Overlay (outside container so canvas doesn't cover it) -->
+  <!-- FPS + Network Stats Overlay -->
   <div class="fps-overlay">
     <div class="fps-stat" class:fps-good={renderFps >= 55} class:fps-ok={renderFps >= 30 && renderFps < 55} class:fps-bad={renderFps < 30}>
       <span class="fps-label">Render FPS</span>
@@ -5032,6 +5033,23 @@ let vrHammer: VRHammer | null = null;
     </div>
     <div class="fps-stat-secondary">
       <span>{frameTime.toFixed(2)}ms/frame</span>
+    </div>
+
+    <div class="stats-divider"></div>
+
+    <div class="network-stat">
+      <span class="stat-label">Entities</span>
+      <span class="stat-value">{entities.length}</span>
+    </div>
+
+    <div class="network-stat">
+      <span class="stat-label">Connections</span>
+      <span class="stat-value">{connections.length}</span>
+    </div>
+
+    <div class="network-stat">
+      <span class="stat-label">Particles</span>
+      <span class="stat-value">{particles.length}</span>
     </div>
   </div>
 </div>
@@ -5108,5 +5126,32 @@ let vrHammer: VRHammer | null = null;
     font-size: 10px;
     color: #666;
     text-align: right;
+  }
+
+  .stats-divider {
+    height: 1px;
+    background: rgba(0, 255, 65, 0.2);
+    margin: 8px 0;
+  }
+
+  .network-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+
+  .stat-label {
+    font-size: 10px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .stat-value {
+    font-size: 14px;
+    font-weight: 700;
+    color: #00ff88;
+    font-family: 'Courier New', monospace;
   }
 </style>
