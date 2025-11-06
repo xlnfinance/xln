@@ -2899,7 +2899,9 @@ let vrHammer: VRHammer | null = null;
     const sprite = new THREE.Sprite(spriteMaterial);
 
     // Sprite scale proportional to labelScale: 1.5 * labelScale
-    sprite.scale.set(1.5 * labelScale, 1.5 * labelScale, 1);
+    // In VR mode, scale up 3x for comfortable reading at table distance
+    const vrMultiplier = isVRActive ? 3.0 : 1.0;
+    sprite.scale.set(1.5 * labelScale * vrMultiplier, 1.5 * labelScale * vrMultiplier, 1);
 
     scene.add(sprite);
     return sprite; // Return sprite to store with entity
