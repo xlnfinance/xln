@@ -2832,11 +2832,11 @@ let vrHammer: VRHammer | null = null;
   // }
 
   function createEntityLabel(entityId: string): THREE.Sprite {
-    // Create canvas for entity name - wider for long bank names
+    // Create canvas for entity name - extra wide for emoji + bank names
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d')!;
-    // Use wide canvas for bank names (256x128 to prevent truncation)
-    canvas.width = 256;
+    // Extra wide for emoji + name (512x128 for VR visibility)
+    canvas.width = 512;
     canvas.height = 128;
 
     // Get short entity name (just number, no prefix)
@@ -2865,17 +2865,17 @@ let vrHammer: VRHammer | null = null;
       context.font = `${48 * labelScale}px sans-serif`;
       context.textAlign = 'center';
       context.textBaseline = 'middle';
-      context.fillText(flag, 128, 32); // Top half (centered at 256/2=128)
+      context.fillText(flag, 256, 32); // Top half (centered at 512/2=256)
 
       // Draw name below flag (smaller)
       context.font = `bold ${18 * labelScale}px sans-serif`;
       context.strokeStyle = '#000000';
       context.lineWidth = 3;
-      context.strokeText(entityName, 128, 90);
+      context.strokeText(entityName, 256, 90);
       context.fillStyle = '#FFD700'; // Gold for Fed
-      context.fillText(entityName, 128, 90);
+      context.fillText(entityName, 256, 90);
     } else {
-      // Regular entity: just name, centered
+      // Regular entity: emoji + name, centered
       context.font = `bold ${24 * labelScale}px sans-serif`;
       context.textAlign = 'center';
       context.textBaseline = 'middle';
@@ -2883,11 +2883,11 @@ let vrHammer: VRHammer | null = null;
       // Draw dark outline for contrast
       context.strokeStyle = '#000000';
       context.lineWidth = 3;
-      context.strokeText(entityName, 128, 64);
+      context.strokeText(entityName, 256, 64);
 
       // Draw bright green text on top
       context.fillStyle = '#00ff88';
-      context.fillText(entityName, 128, 64);
+      context.fillText(entityName, 256, 64);
     }
 
     // Create sprite with texture
@@ -2902,12 +2902,12 @@ let vrHammer: VRHammer | null = null;
     });
     const sprite = new THREE.Sprite(spriteMaterial);
 
-    // Sprite scale proportional to labelScale: wider aspect ratio for long names
-    // Canvas is 256x128 (2:1 ratio), so scale X twice as much as Y
+    // Sprite scale proportional to labelScale: extra wide for emoji + names
+    // Canvas is 512x128 (4:1 ratio), so scale X 4x wider than Y
     // In VR mode, scale up 3x for comfortable reading at table distance
     const vrMultiplier = isVRActive ? 3.0 : 1.0;
     const baseScale = 1.5 * labelScale * vrMultiplier;
-    sprite.scale.set(baseScale * 2, baseScale, 1); // 2:1 aspect ratio
+    sprite.scale.set(baseScale * 4, baseScale, 1); // 4:1 aspect ratio for emoji + text
 
     scene.add(sprite);
     return sprite; // Return sprite to store with entity
@@ -4851,12 +4851,12 @@ let vrHammer: VRHammer | null = null;
     return `${isNegative ? '-' : ''}${wholePart.toLocaleString()}.${formatted}`;
   }
 
-  // Realistic bank names for demo (rotates through on creation)
+  // Realistic bank names with emojis (instant recognition in VR)
   const BANK_NAMES = [
-    'Chase', 'Bank of America', 'Wells Fargo', 'Citi', 'Goldman Sachs',
-    'Morgan Stanley', 'HSBC', 'Barclays', 'Deutsche Bank', 'UBS',
-    'Credit Suisse', 'BNP Paribas', 'Santander', 'ICBC', 'China Construction Bank',
-    'Agricultural Bank', 'Mizuho', 'MUFG', 'RBC', 'TD Bank'
+    '💰 Chase', '🏦 Bank of America', '💳 Wells Fargo', '🏛️ Citi', '💎 Goldman Sachs',
+    '📊 Morgan Stanley', '🌍 HSBC', '🇬🇧 Barclays', '🇩🇪 Deutsche Bank', '🇨🇭 UBS',
+    '🇨🇭 Credit Suisse', '🇫🇷 BNP Paribas', '🇪🇸 Santander', '🇨🇳 ICBC', '🏗️ China Construction',
+    '🌾 Agricultural Bank', '🇯🇵 Mizuho', '🏯 MUFG', '🇨🇦 RBC', '🍁 TD Bank'
   ];
 
   // S&P 500 tickers (matches ArchitectPanel)
