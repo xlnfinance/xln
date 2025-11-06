@@ -1475,13 +1475,18 @@ let vrHammer: VRHammer | null = null;
     raycaster.params.Line = { threshold: 5 };
     mouse = new THREE.Vector2();
 
-    // Lights
-    const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+    // Lights (enhanced for AR passthrough visibility)
+    const ambientLight = new THREE.AmbientLight(0x606060, 1.2); // Brighter for AR
     scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
     directionalLight.position.set(200, 50, 50); // Position light above grid center
     scene.add(directionalLight);
+
+    // Rim light (makes entities pop against real-world background in AR)
+    const rimLight = new THREE.DirectionalLight(0x00ff88, 0.4);
+    rimLight.position.set(-200, 30, -50); // Opposite side
+    scene.add(rimLight);
 
     // J-Machines are now created reactively based on env.xlnomies (see reactive statement above)
 
