@@ -495,6 +495,8 @@ let vrHammer: VRHammer | null = null;
   let gridDivisions: number = 60;
   let gridOpacity: number = 0.4;
   let gridColor: string = '#00ff41';
+  let autoRotate: boolean = false;
+  let autoRotateSpeed: number = 0.5; // RPM
   let cameraDistance: number = 500;
   let cameraTarget: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
   let gridHelper: THREE.GridHelper | null = null;
@@ -845,6 +847,8 @@ let vrHammer: VRHammer | null = null;
       else if (key === 'lightningSpeed') lightningSpeed = value;
       else if (key === 'rendererMode') rendererMode = value;
       else if (key === 'forceLayoutEnabled') forceLayoutEnabled = value;
+      else if (key === 'autoRotate') autoRotate = value;
+      else if (key === 'autoRotateSpeed') autoRotateSpeed = value;
 
       // Recreate scene for grid changes
       if (['gridSize', 'gridDivisions', 'gridOpacity', 'gridColor'].includes(key)) {
@@ -3045,6 +3049,26 @@ let vrHammer: VRHammer | null = null;
       if (Math.random() < 0.01) { // ~1% chance per frame = every few seconds
         saveBirdViewSettings();
       }
+    }
+
+    // Auto-rotate camera (Strange Attractors style)
+    if (autoRotate && controls && camera) {
+      const radiansPerSecond = (autoRotateSpeed / 60) * (2 * Math.PI); // RPM to rad/s
+      const radiansPerFrame = radiansPerSecond / 60; // Assuming 60 FPS
+
+      const currentPos = camera.position.clone();
+      const target = controls.target.clone();
+      const offset = currentPos.sub(target);
+
+      // Rotate around Y axis (horizontal orbit)
+      const cos = Math.cos(radiansPerFrame);
+      const sin = Math.sin(radiansPerFrame);
+      const newX = offset.x * cos - offset.z * sin;
+      const newZ = offset.x * sin + offset.z * cos;
+
+      camera.position.x = target.x + newX;
+      camera.position.z = target.z + newZ;
+      camera.lookAt(target);
     }
 
     // Update controls

@@ -43,6 +43,11 @@
     forceLayoutEnabled: boolean;
     antiAlias: boolean;
     verboseLogging: boolean; // NEW: Master log toggle
+
+    // Camera Presets
+    autoRotate: boolean;
+    autoRotateSpeed: number; // RPM
+    cameraPreset: 'free' | 'top-down' | 'side' | 'orbit';
   }
 
   const DEFAULT_SETTINGS: ViewSettings = {
@@ -71,7 +76,12 @@
     rendererMode: 'webgl',
     forceLayoutEnabled: true,
     antiAlias: true,
-    verboseLogging: false // DEFAULT: Logs OFF for performance
+    verboseLogging: false, // DEFAULT: Logs OFF for performance
+
+    // Camera Presets
+    autoRotate: false,
+    autoRotateSpeed: 0.5, // RPM (revolutions per minute)
+    cameraPreset: 'free'
   };
 
   let settings: ViewSettings = { ...DEFAULT_SETTINGS };
@@ -263,6 +273,33 @@
           />
         </label>
       </div>
+
+      <div class="setting-group">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            bind:checked={settings.autoRotate}
+            on:change={() => updateSetting('autoRotate', settings.autoRotate)}
+          />
+          <span>Auto-Rotate Camera</span>
+        </label>
+      </div>
+
+      {#if settings.autoRotate}
+        <div class="setting-group">
+          <label>
+            Rotation Speed: {settings.autoRotateSpeed} RPM
+            <input
+              type="range"
+              min="0.1"
+              max="2"
+              step="0.1"
+              bind:value={settings.autoRotateSpeed}
+              on:input={() => updateSetting('autoRotateSpeed', settings.autoRotateSpeed)}
+            />
+          </label>
+        </div>
+      {/if}
 
       <div class="setting-group">
         <label>Rotation Center X:</label>
