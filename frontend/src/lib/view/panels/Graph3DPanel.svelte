@@ -1678,214 +1678,92 @@ let vrHammer: VRHammer | null = null;
         scene.position.set(0, -0.5, -1); // Position on table in front of user
       }
 
-      // Hand tracking: Create hand rays + cursors
-      const handVisuals: any = {
-        left: { cursor: null, ray: null },
-        right: { cursor: null, ray: null }
-      };
-
-      // Create glowing hand ray (laser pointer style)
-      const createHandVisual = (handedness: string) => {
-        // Cursor sphere
-        const cursorGeometry = new THREE.SphereGeometry(0.015, 16, 16);
-        const cursorMaterial = new THREE.MeshBasicMaterial({
-          color: handedness === 'left' ? 0x00ffff : 0xff00ff, // Cyan left, Magenta right
-          transparent: true,
-          opacity: 0.9
-        });
-        const cursor = new THREE.Mesh(cursorGeometry, cursorMaterial);
-        cursor.visible = false;
-
-        // Ray line (from hand to cursor)
-        const rayGeometry = new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(0, 0, 0),
-          new THREE.Vector3(0, 0, -1)
-        ]);
-        const rayMaterial = new THREE.LineBasicMaterial({
-          color: handedness === 'left' ? 0x00ffff : 0xff00ff,
-          transparent: true,
-          opacity: 0.6,
-          linewidth: 2
-        });
-        const ray = new THREE.Line(rayGeometry, rayMaterial);
-        ray.visible = false;
-
-        scene.add(cursor);
-        scene.add(ray);
-        return { cursor, ray };
-      };
-
-      handVisuals.left = createHandVisual('left');
-      handVisuals.right = createHandVisual('right');
-
-      // Floating tutorial text
-      const createFloatingTutorial = () => {
+      // Create floating welcome panel
+      const createWelcomePanel = () => {
         const canvas = document.createElement('canvas');
-        canvas.width = 512;
-        canvas.height = 256;
+        canvas.width = 1024;
+        canvas.height = 512;
         const ctx = canvas.getContext('2d')!;
 
-        // Background
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-        ctx.fillRect(0, 0, 512, 256);
+        // Gradient background
+        const gradient = ctx.createLinearGradient(0, 0, 0, 512);
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 0.95)');
+        gradient.addColorStop(1, 'rgba(10, 30, 50, 0.95)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 1024, 512);
 
-        // Border
+        // Glowing border
         ctx.strokeStyle = '#00ffff';
-        ctx.lineWidth = 4;
-        ctx.strokeRect(2, 2, 508, 252);
+        ctx.lineWidth = 6;
+        ctx.shadowColor = '#00ffff';
+        ctx.shadowBlur = 20;
+        ctx.strokeRect(3, 3, 1018, 506);
+        ctx.shadowBlur = 0;
 
-        // Text
+        // Title
         ctx.fillStyle = '#00ffff';
-        ctx.font = 'bold 32px monospace';
+        ctx.font = 'bold 56px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('👆 POINT AT BANKS', 256, 60);
+        ctx.fillText('🏦 XLN FINANCIAL NETWORK', 512, 80);
 
+        // Subtitle
         ctx.fillStyle = '#ffffff';
+        ctx.font = '28px monospace';
+        ctx.fillText('Cross-Jurisdictional Settlement System', 512, 130);
+
+        // Instructions
+        ctx.font = 'bold 32px monospace';
+        ctx.fillStyle = '#4fd18b';
+        ctx.fillText('💰 GREEN NUMBERS = Bank Reserves', 512, 200);
+
+        ctx.fillStyle = '#00ff41';
+        ctx.fillText('🔵 BLUE LINES = Open Accounts', 512, 250);
+
+        ctx.fillStyle = '#ffff00';
+        ctx.fillText('🟡 YELLOW DOTS = Payments Flowing', 512, 300);
+
+        // Bottom instruction
+        ctx.fillStyle = '#888888';
         ctx.font = '24px monospace';
-        ctx.fillText('Pinch thumb+index = select', 256, 110);
-        ctx.fillText('💰 Green numbers = reserves', 256, 150);
-        ctx.fillText('🔵 Blue lines = accounts', 256, 190);
-        ctx.fillText('🟡 Yellow = payments flowing', 256, 230);
+        ctx.fillText('Payments auto-starting in 3 seconds...', 512, 380);
+
+        ctx.fillStyle = '#aaaaaa';
+        ctx.font = 'italic 20px monospace';
+        ctx.fillText('(Tap outside panel or wait 10s to dismiss)', 512, 420);
 
         const texture = new THREE.CanvasTexture(canvas);
         const material = new THREE.MeshBasicMaterial({
           map: texture,
           transparent: true,
-          opacity: 0.9,
+          opacity: 1.0,
           side: THREE.DoubleSide
         });
-        const geometry = new THREE.PlaneGeometry(0.8, 0.4);
+        const geometry = new THREE.PlaneGeometry(1.2, 0.6);
         const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.set(0, 0.3, -0.6); // Float in front of user
+        mesh.position.set(0, 0.2, -0.8); // In front of user at eye level
         scene.add(mesh);
+
+        // Auto-dismiss after 10 seconds
+        setTimeout(() => {
+          scene.remove(mesh);
+          mesh.geometry.dispose();
+          mesh.material.map?.dispose();
+          mesh.material.dispose();
+        }, 10000);
+
         return mesh;
       };
 
-      const tutorialPanel = createFloatingTutorial();
+      const welcomePanel = createWelcomePanel();
 
-      // Hand tracking + controller update loop
-      const updateHandTracking = () => {
-        if (!session || !renderer.xr.isPresenting) return;
+      // Auto-start payment demo after 3 seconds in VR
+      setTimeout(() => {
+        console.log('🎬 Auto-starting VR demo...');
+        panelBridge.emit('auto-demo:start', {});
+      }, 3000);
 
-        // Get hand input sources (Vision Pro hands or Quest controllers)
-        for (const source of session.inputSources) {
-          const handedness = source.handedness as 'left' | 'right';
-          const visuals = handVisuals[handedness];
-          if (!visuals) continue;
-
-          // Try hand tracking first (Vision Pro / Quest 3)
-          if (source.hand) {
-            const hand = source.hand;
-            const indexTip = hand.get('index-finger-tip');
-            const wrist = hand.get('wrist');
-
-            if (indexTip && wrist) {
-              const frame = renderer.xr.getFrame();
-              const referenceSpace = renderer.xr.getReferenceSpace();
-
-              if (frame && referenceSpace && frame.getJointPose) {
-                const tipPose = frame.getJointPose(indexTip, referenceSpace);
-                const wristPose = frame.getJointPose(wrist, referenceSpace);
-
-                if (tipPose && wristPose) {
-                  // Position cursor at fingertip
-                  visuals.cursor.position.set(
-                    tipPose.transform.position.x,
-                    tipPose.transform.position.y,
-                    tipPose.transform.position.z
-                  );
-                  visuals.cursor.visible = true;
-
-                  // Draw ray from wrist to fingertip
-                  const wristPos = new THREE.Vector3(
-                    wristPose.transform.position.x,
-                    wristPose.transform.position.y,
-                    wristPose.transform.position.z
-                  );
-                  const tipPos = visuals.cursor.position.clone();
-                  const rayPoints = [wristPos, tipPos];
-                  visuals.ray.geometry.setFromPoints(rayPoints);
-                  visuals.ray.visible = true;
-
-                  // Detect pinch
-                  const thumbTip = hand.get('thumb-tip');
-                  if (thumbTip && frame.getJointPose) {
-                    const thumbPose = frame.getJointPose(thumbTip, referenceSpace);
-                    if (thumbPose) {
-                      const thumbPos = new THREE.Vector3(
-                        thumbPose.transform.position.x,
-                        thumbPose.transform.position.y,
-                        thumbPose.transform.position.z
-                      );
-                      const distance = tipPos.distanceTo(thumbPos);
-
-                      // Pinch = make cursor glow gold
-                      if (distance < 0.03) {
-                        visuals.cursor.material.color.setHex(0xffff00); // Gold
-                        visuals.cursor.scale.setScalar(2.0);
-                        visuals.ray.material.opacity = 1.0;
-                      } else {
-                        const baseColor = handedness === 'left' ? 0x00ffff : 0xff00ff;
-                        visuals.cursor.material.color.setHex(baseColor);
-                        visuals.cursor.scale.setScalar(1.0);
-                        visuals.ray.material.opacity = 0.6;
-                      }
-                    }
-                  }
-                }
-              }
-            }
-          }
-          // Fallback: XR controller (Quest 1/2 or generic)
-          else if (source.gripSpace) {
-            const frame = renderer.xr.getFrame();
-            const referenceSpace = renderer.xr.getReferenceSpace();
-
-            if (frame && referenceSpace) {
-              const gripPose = frame.getPose(source.gripSpace, referenceSpace);
-              if (gripPose) {
-                // Controller pointer ray
-                const pos = gripPose.transform.position;
-                const orient = gripPose.transform.orientation;
-
-                visuals.cursor.position.set(pos.x, pos.y, pos.z);
-                visuals.cursor.visible = true;
-
-                // Ray shoots forward from controller
-                const forward = new THREE.Vector3(0, 0, -1);
-                const quat = new THREE.Quaternion(orient.x, orient.y, orient.z, orient.w);
-                forward.applyQuaternion(quat);
-
-                const rayStart = new THREE.Vector3(pos.x, pos.y, pos.z);
-                const rayEnd = rayStart.clone().add(forward.multiplyScalar(1.0));
-
-                visuals.ray.geometry.setFromPoints([rayStart, rayEnd]);
-                visuals.ray.visible = true;
-
-                // Controller trigger = select (show as pressed)
-                if (source.gamepad && source.gamepad.buttons[0]?.pressed) {
-                  visuals.cursor.material.color.setHex(0xffff00);
-                  visuals.cursor.scale.setScalar(2.0);
-                } else {
-                  const baseColor = handedness === 'left' ? 0x00ffff : 0xff00ff;
-                  visuals.cursor.material.color.setHex(baseColor);
-                  visuals.cursor.scale.setScalar(1.0);
-                }
-              }
-            }
-          }
-        }
-      };
-
-      // Add hand tracking to animation loop
-      const originalAnimate = animate;
-      const animateWithHands = () => {
-        updateHandTracking();
-        originalAnimate();
-      };
-
-      // Switch to VR animation loop with hand tracking
-      renderer.setAnimationLoop(animateWithHands);
+      // Switch to VR animation loop
+      renderer.setAnimationLoop(animate);
 
       console.log('🥽 Entered VR mode (Vision Pro optimized)');
 
@@ -1893,26 +1771,12 @@ let vrHammer: VRHammer | null = null;
       session.addEventListener('end', () => {
         isVRActive = false;
 
-        // Cleanup hand visuals
-        Object.values(handVisuals).forEach((visuals: any) => {
-          if (visuals.cursor) {
-            scene.remove(visuals.cursor);
-            visuals.cursor.geometry.dispose();
-            visuals.cursor.material.dispose();
-          }
-          if (visuals.ray) {
-            scene.remove(visuals.ray);
-            visuals.ray.geometry.dispose();
-            visuals.ray.material.dispose();
-          }
-        });
-
-        // Cleanup tutorial panel
-        if (tutorialPanel) {
-          scene.remove(tutorialPanel);
-          tutorialPanel.geometry.dispose();
-          tutorialPanel.material.map?.dispose();
-          tutorialPanel.material.dispose();
+        // Cleanup welcome panel (if still exists)
+        if (welcomePanel && scene) {
+          scene.remove(welcomePanel);
+          welcomePanel.geometry.dispose();
+          welcomePanel.material.map?.dispose();
+          welcomePanel.material.dispose();
         }
 
         // Restore scene background
@@ -2500,11 +2364,15 @@ let vrHammer: VRHammer | null = null;
     // Add entity name label (returns sprite to store with entity)
     const labelSprite = createEntityLabel(profile.entityId);
 
+    // Add reserve amount label (GIANT green $ above entity - Bernanke wow factor)
+    const reserveSprite = createReserveLabel(profile.entityId, 0n);
+
     entities.push({
       id: profile.entityId,
       position: new THREE.Vector3(x, y, z),
       mesh,
-      label: labelSprite, // Store label with entity for dynamic positioning
+      label: labelSprite, // Entity name
+      reserveLabel: reserveSprite, // Reserve amount (dynamic)
       profile,
       isHub, // Store hub status for pulse animation
       pulsePhase: Math.random() * Math.PI * 2, // Random start phase for pulse
@@ -3147,34 +3015,145 @@ let vrHammer: VRHammer | null = null;
     return sprite; // Return sprite to store with entity
   }
 
+  /**
+   * Create reserve amount label (GIANT $ above entity for Bernanke wow)
+   */
+  function createReserveLabel(entityId: string, reserveAmount: bigint): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+
+    // Transparent background
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Format reserve as $ millions
+    const reserveMillions = Number(reserveAmount) / 1_000_000;
+    const reserveText = reserveMillions >= 1
+      ? `💰 $${reserveMillions.toFixed(1)}M`
+      : `💰 $${(Number(reserveAmount) / 1000).toFixed(0)}K`;
+
+    // GIANT green $ amount
+    ctx.font = 'bold 48px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Glow effect
+    ctx.shadowColor = '#4fd18b';
+    ctx.shadowBlur = 15;
+
+    // Dark outline for contrast
+    ctx.strokeStyle = '#000000';
+    ctx.lineWidth = 4;
+    ctx.strokeText(reserveText, 256, 64);
+
+    // Bright green fill
+    ctx.fillStyle = '#4fd18b';
+    ctx.fillText(reserveText, 256, 64);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+      sizeAttenuation: true
+    });
+    const sprite = new THREE.Sprite(material);
+
+    // Larger than name labels for emphasis
+    const vrMultiplier = isVRActive ? 3.0 : 1.0;
+    const baseScale = 2.0 * labelScale * vrMultiplier; // 2x bigger than name
+    sprite.scale.set(baseScale * 4, baseScale, 1);
+
+    scene.add(sprite);
+    return sprite;
+  }
+
   function updateEntityLabels() {
     // Update all entity labels to stay on top of spheres (neat, minimalist, always attached)
     // FIRST PRINCIPLE: Labels must never disconnect - every entity must have a visible label
     if (!camera) return;
 
+    const currentReplicas = $isolatedEnv?.replicas || new Map();
+
     entities.forEach(entity => {
+      // Update entity name label
       if (!entity.label) {
-        // Defensive: If label is missing, recreate it (should never happen but fail-safe)
         debug.warn(`⚠️ Entity ${entity.id.slice(-4)} missing label - recreating`);
         entity.label = createEntityLabel(entity.id);
       }
 
-      // PERF: Use .parent check instead of scene.children.includes() (O(1) vs O(400+))
       if (!entity.label.parent) {
         scene.add(entity.label);
       }
 
-      // Position label above the entity sphere (attached to entity position)
+      // Position name label above sphere
       const entitySize = getEntitySizeForToken(entity.id, selectedTokenId);
       entity.label.position.set(
         entity.position.x,
-        entity.position.y + entitySize + 0.8, // Slightly above sphere
+        entity.position.y + entitySize + 0.8,
         entity.position.z
       );
-
-      // CRITICAL: Sprites must always face camera for readable text
-      // Explicitly update rotation quaternion to face camera (billboard effect)
       entity.label.quaternion.copy(camera.quaternion);
+
+      // Update reserve amount label (CRITICAL FOR BERNANKE WOW)
+      if (!entity.reserveLabel) {
+        entity.reserveLabel = createReserveLabel(entity.id, 0n);
+      }
+
+      if (!entity.reserveLabel.parent) {
+        scene.add(entity.reserveLabel);
+      }
+
+      // Get current reserve from replica state
+      const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(
+        (k: any) => k.startsWith(entity.id + ':')
+      );
+      const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
+      const reserveAmount = replica?.state?.reserve || 0n;
+
+      // Recreate reserve label if amount changed significantly
+      const currentText = entity.reserveLabel.material.map;
+      if (currentText) {
+        // Update reserve label with latest amount
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 128;
+        const ctx = canvas.getContext('2d')!;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const reserveMillions = Number(reserveAmount) / 1_000_000;
+        const reserveText = reserveMillions >= 1
+          ? `💰 $${reserveMillions.toFixed(1)}M`
+          : reserveAmount > 0n
+          ? `💰 $${(Number(reserveAmount) / 1000).toFixed(0)}K`
+          : '💰 $0';
+
+        ctx.font = 'bold 48px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.shadowColor = '#4fd18b';
+        ctx.shadowBlur = 15;
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 4;
+        ctx.strokeText(reserveText, 256, 64);
+        ctx.fillStyle = '#4fd18b';
+        ctx.fillText(reserveText, 256, 64);
+
+        const newTexture = new THREE.CanvasTexture(canvas);
+        entity.reserveLabel.material.map?.dispose();
+        entity.reserveLabel.material.map = newTexture;
+        entity.reserveLabel.material.needsUpdate = true;
+      }
+
+      // Position reserve label ABOVE name label
+      entity.reserveLabel.position.set(
+        entity.position.x,
+        entity.position.y + entitySize + 3.0, // Higher than name
+        entity.position.z
+      );
+      entity.reserveLabel.quaternion.copy(camera.quaternion);
     });
   }
 

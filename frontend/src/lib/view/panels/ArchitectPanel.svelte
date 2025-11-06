@@ -79,6 +79,23 @@
     await sendR2RTransaction();
   });
 
+  // Auto-demo mode (triggered when entering VR for Bernanke wow)
+  panelBridge.on('auto-demo:start', async () => {
+    console.log('[Architect] 🎬 Starting auto-demo for VR...');
+
+    // Step 1: Fund all entities if not already funded
+    if (entityIds.length > 0) {
+      console.log('💰 Funding all entities...');
+      await fundAllEntities();
+
+      // Step 2: Start payment loop after 2 seconds
+      setTimeout(() => {
+        console.log('🔄 Starting payment loop...');
+        startPaymentLoop();
+      }, 2000);
+    }
+  });
+
   /** Mint reserves to selected entity */
   async function mintReservesToEntity() {
     if (!selectedEntityForMint || !$isolatedEnv) {
