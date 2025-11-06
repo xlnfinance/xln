@@ -17,6 +17,7 @@
   // Panel communication
   import { panelBridge } from '../utils/panelBridge';
   import { PerformanceMonitor, type PerfMetrics } from '../utils/perfMonitor';
+  import VRControlsHUD from '../components/VRControlsHUD.svelte';
 
   // Props - REQUIRED for /view isolation (dead props removed)
   export let isolatedEnv: Writable<any>;
@@ -2828,11 +2829,11 @@ let vrHammer: VRHammer | null = null;
   // }
 
   function createEntityLabel(entityId: string): THREE.Sprite {
-    // Create canvas for entity name - minimalist, no background, square aspect ratio to avoid skewing
+    // Create canvas for entity name - wider for long bank names
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d')!;
-    // Use square canvas to prevent skewing (128x128 for clean rendering)
-    canvas.width = 128;
+    // Use wide canvas for bank names (256x128 to prevent truncation)
+    canvas.width = 256;
     canvas.height = 128;
 
     // Get short entity name (just number, no prefix)
@@ -2861,29 +2862,29 @@ let vrHammer: VRHammer | null = null;
       context.font = `${48 * labelScale}px sans-serif`;
       context.textAlign = 'center';
       context.textBaseline = 'middle';
-      context.fillText(flag, 64, 32); // Top half of canvas
+      context.fillText(flag, 128, 32); // Top half (centered at 256/2=128)
 
       // Draw name below flag (smaller)
-      context.font = `bold ${20 * labelScale}px sans-serif`;
+      context.font = `bold ${18 * labelScale}px sans-serif`;
       context.strokeStyle = '#000000';
       context.lineWidth = 3;
-      context.strokeText(entityName, 64, 80);
+      context.strokeText(entityName, 128, 90);
       context.fillStyle = '#FFD700'; // Gold for Fed
-      context.fillText(entityName, 64, 80);
+      context.fillText(entityName, 128, 90);
     } else {
       // Regular entity: just name, centered
-      context.font = `bold ${32 * labelScale}px sans-serif`;
+      context.font = `bold ${24 * labelScale}px sans-serif`;
       context.textAlign = 'center';
       context.textBaseline = 'middle';
 
       // Draw dark outline for contrast
       context.strokeStyle = '#000000';
-      context.lineWidth = 4;
-      context.strokeText(entityName, 64, 64);
+      context.lineWidth = 3;
+      context.strokeText(entityName, 128, 64);
 
       // Draw bright green text on top
       context.fillStyle = '#00ff88';
-      context.fillText(entityName, 64, 64);
+      context.fillText(entityName, 128, 64);
     }
 
     // Create sprite with texture
@@ -2898,10 +2899,12 @@ let vrHammer: VRHammer | null = null;
     });
     const sprite = new THREE.Sprite(spriteMaterial);
 
-    // Sprite scale proportional to labelScale: 1.5 * labelScale
+    // Sprite scale proportional to labelScale: wider aspect ratio for long names
+    // Canvas is 256x128 (2:1 ratio), so scale X twice as much as Y
     // In VR mode, scale up 3x for comfortable reading at table distance
     const vrMultiplier = isVRActive ? 3.0 : 1.0;
-    sprite.scale.set(1.5 * labelScale * vrMultiplier, 1.5 * labelScale * vrMultiplier, 1);
+    const baseScale = 1.5 * labelScale * vrMultiplier;
+    sprite.scale.set(baseScale * 2, baseScale, 1); // 2:1 aspect ratio
 
     scene.add(sprite);
     return sprite; // Return sprite to store with entity
@@ -5052,6 +5055,9 @@ let vrHammer: VRHammer | null = null;
       <span class="stat-value">{particles.length}</span>
     </div>
   </div>
+
+  <!-- VR Controls HUD (for first-time Vision Pro users) -->
+  <VRControlsHUD isVRActive={isVRActive} />
 </div>
 
 <style>

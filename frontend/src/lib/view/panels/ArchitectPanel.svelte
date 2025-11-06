@@ -33,7 +33,18 @@
   let newEntityName = 'alice'; // For manual entity creation in Build mode
 
   // Topology selector
-  let selectedTopology: 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid' = 'hybrid';
+  let selectedTopology: 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid' | 'sp500' = 'hybrid';
+
+  // S&P 500 tickers (top 50)
+  const SP500_TICKERS = [
+    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA',
+    'BRK.B', 'JPM', 'V', 'MA', 'BAC', 'WFC', 'GS', 'MS',
+    'UNH', 'JNJ', 'LLY', 'PFE', 'ABBV', 'TMO', 'MRK',
+    'WMT', 'PG', 'KO', 'PEP', 'COST', 'HD', 'MCD', 'NKE',
+    'XOM', 'CVX', 'BA', 'CAT', 'GE', 'MMM',
+    'DIS', 'NFLX', 'CMCSA', 'T', 'VZ',
+    'INTC', 'CSCO', 'ORCL', 'CRM', 'AMD'
+  ];
 
   // Xlnomy state
   let showCreateXlnomyModal = false;
@@ -655,6 +666,31 @@
         crisisThreshold: 0.20,
         crisisMode: 'star'
       };
+    } else if (type === 'sp500') {
+      // S&P 500: Real corporate settlement network
+      return {
+        type: 'sp500',
+        layers: [
+          { name: 'Federal Reserve', yPosition: 300, entityCount: 1, xzSpacing: 0, color: '#FFD700', size: 12.0, emissiveIntensity: 2.5, initialReserves: 1_000_000_000n, canMintMoney: true },
+          { name: 'Clearing Banks', yPosition: 200, entityCount: 4, xzSpacing: 120, color: '#00ff88', size: 2.0, emissiveIntensity: 0.8, initialReserves: 100_000_000n, canMintMoney: false },
+          { name: 'S&P 500 Companies', yPosition: 100, entityCount: 47, xzSpacing: 60, color: '#0088ff', size: 0.8, emissiveIntensity: 0.3, initialReserves: 10_000_000n, canMintMoney: false }
+        ],
+        rules: {
+          allowedPairs: [
+            { from: 'Federal Reserve', to: 'Clearing Banks' },
+            { from: 'Clearing Banks', to: 'Federal Reserve' },
+            { from: 'Clearing Banks', to: 'S&P 500 Companies' },
+            { from: 'S&P 500 Companies', to: 'Clearing Banks' },
+            { from: 'S&P 500 Companies', to: 'S&P 500 Companies' } // P2P corporate settlement
+          ],
+          allowDirectInterbank: true, // S&P companies can trade directly
+          requireHubRouting: false,
+          maxHops: 3,
+          defaultCreditLimits: new Map()
+        },
+        crisisThreshold: 0.15,
+        crisisMode: 'star'
+      };
     } else {
       // Default to hybrid for other types (will implement mesh/tiered/correspondent later)
       return getTopologyPresetInline('hybrid');
@@ -662,7 +698,7 @@
   }
 
   /** CREATE ECONOMY WITH TOPOLOGY - Main entry point */
-  async function createEconomyWithTopology(topologyType: 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid') {
+  async function createEconomyWithTopology(topologyType: 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid' | 'sp500') {
     console.log('[Architect] createEconomyWithTopology called with type:', topologyType);
 
     if (!$isolatedEnv?.activeXlnomy) {
