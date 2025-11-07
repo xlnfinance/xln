@@ -13,6 +13,7 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "playwright test",
 		"test:landing": "playwright test tests/landing.spec.ts",
+		"test:fed": "playwright test tests/fed-chair-demo.spec.ts",
 		"test:ui": "playwright test --ui"
 	},
 	"devDependencies": {

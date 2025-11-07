@@ -13,8 +13,9 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: 'http://localhost:8080',
+    baseURL: 'https://localhost:8080',
     trace: 'on-first-retry',
+    ignoreHTTPSErrors: true,  // Dev server uses self-signed cert
   },
 
   projects: [
@@ -26,9 +27,9 @@ export default defineConfig({
 
   // Run dev server before tests
   webServer: {
-    command: 'bun run dev',
-    url: 'http://localhost:8080',
-    reuseExistingServer: !process.env.CI,
+    command: 'SKIP_TYPECHECK=1 bun run dev',
+    url: 'https://localhost:8080',
+    reuseExistingServer: true,  // Always reuse - dev server runs separately
     timeout: 120 * 1000,
   },
 });
