@@ -1399,6 +1399,7 @@
     font-weight: 600;
     margin-bottom: 1rem;
     color: rgba(255, 255, 255, 0.95);
+    text-align: center;
   }
 
   .section .intro {

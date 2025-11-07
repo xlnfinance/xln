@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
+  import { goto } from '$app/navigation';
   import LandingPage from '../lib/components/Landing/LandingPage.svelte';
   import AdminTopBar from '../lib/components/Layout/AdminTopBar.svelte';
   import TimeMachine from '../lib/components/Layout/TimeMachine.svelte';
@@ -47,6 +48,9 @@
 
   function handleUnlock() {
     showLanding = false;
+    if (browser) {
+      goto('/view');
+    }
   }
 
   // Keyboard shortcut for zen mode
