@@ -251,22 +251,45 @@
 
   /** BANKER DEMO STEP 1: Create 3×3 Hub */
   async function createHub() {
-    if (!$isolatedEnv?.activeXlnomy) {
-      lastAction = '❌ Create jurisdiction first';
-      return;
-    }
-
-    if (entityIds.length > 0) {
-      lastAction = '❌ Hub already exists';
-      return;
-    }
-
     loading = true;
-    lastAction = 'Creating 3×3 hub (9 entities)...';
 
     try {
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      // Auto-create default jurisdiction if none exists
+      if (!$isolatedEnv?.activeXlnomy) {
+        lastAction = 'Creating default jurisdiction for demo...';
+
+        await XLN.applyRuntimeInput($isolatedEnv, {
+          runtimeTxs: [{
+            type: 'createXlnomy',
+            data: {
+              name: 'demo',
+              evmType: 'browservm',
+              blockTimeMs: 100,
+              autoGrid: true
+            }
+          }],
+          entityInputs: []
+        });
+
+        // Process queued importReplica transactions
+        await XLN.applyRuntimeInput($isolatedEnv, {
+          runtimeTxs: [],
+          entityInputs: []
+        });
+
+        console.log('[Architect] Auto-created demo jurisdiction');
+      }
+
+      if (entityIds.length > 0) {
+        lastAction = '❌ Hub already exists';
+        loading = false;
+        return;
+      }
+
+      lastAction = 'Creating 3×3 hub (9 entities)...';
 
       const xlnomy = $isolatedEnv.xlnomies.get($isolatedEnv.activeXlnomy);
       if (!xlnomy) throw new Error('Active xlnomy not found');
@@ -2018,7 +2041,7 @@
               class="topology-card"
               class:active={selectedTopology === 'hybrid'}
               on:click={() => selectedTopology = 'hybrid'}
-              disabled={loading || !activeXlnomy || entityIds.length > 0}
+              disabled={loading || entityIds.length > 0}
             >
               <div class="badge-new">DEFAULT</div>
               <div class="topology-icon">🔮</div>
@@ -2035,7 +2058,7 @@
               class="topology-card"
               class:active={selectedTopology === 'star'}
               on:click={() => selectedTopology = 'star'}
-              disabled={loading || !activeXlnomy || entityIds.length > 0}
+              disabled={loading || entityIds.length > 0}
             >
               <div class="topology-icon">⭐</div>
               <h6>STAR</h6>
@@ -2051,7 +2074,7 @@
               class="topology-card"
               class:active={selectedTopology === 'mesh'}
               on:click={() => selectedTopology = 'mesh'}
-              disabled={loading || !activeXlnomy || entityIds.length > 0}
+              disabled={loading || entityIds.length > 0}
             >
               <div class="topology-icon">🕸️</div>
               <h6>MESH</h6>
@@ -2067,7 +2090,7 @@
               class="topology-card"
               class:active={selectedTopology === 'tiered'}
               on:click={() => selectedTopology = 'tiered'}
-              disabled={loading || !activeXlnomy || entityIds.length > 0}
+              disabled={loading || entityIds.length > 0}
             >
               <div class="topology-icon">🏛️</div>
               <h6>TIERED</h6>
@@ -2083,7 +2106,7 @@
               class="topology-card"
               class:active={selectedTopology === 'correspondent'}
               on:click={() => selectedTopology = 'correspondent'}
-              disabled={loading || !activeXlnomy || entityIds.length > 0}
+              disabled={loading || entityIds.length > 0}
             >
               <div class="topology-icon">🌍</div>
               <h6>CORRESPONDENT</h6>
@@ -2099,7 +2122,7 @@
               class="topology-card sp500-card"
               class:active={selectedTopology === 'sp500'}
               on:click={() => selectedTopology = 'sp500'}
-              disabled={loading || !activeXlnomy || entityIds.length > 0}
+              disabled={loading || entityIds.length > 0}
             >
               <div class="topology-icon">📈</div>
               <h6>S&P 500</h6>
@@ -2115,7 +2138,7 @@
           <button
             class="demo-btn create-economy-btn"
             on:click={() => createEconomyWithTopology(selectedTopology)}
-            disabled={loading || !activeXlnomy || entityIds.length > 0}
+            disabled={loading || entityIds.length > 0}
           >
             🚀 Create {selectedTopology.toUpperCase()} Economy
           </button>
@@ -2135,7 +2158,7 @@
         <div class="action-section banker-demo">
           <h5>🏦 Banker Demo (Step-by-Step)</h5>
 
-          <button class="demo-btn step-1" on:click={createHub} disabled={loading || !activeXlnomy || entityIds.length > 0}>
+          <button class="demo-btn step-1" on:click={createHub} disabled={loading || entityIds.length > 0}>
             🏗️ Step 1: Create 3×3 Hub
           </button>
           <p class="step-help">9 entities at y=320 (pinnacle hub)</p>
