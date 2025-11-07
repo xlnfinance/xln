@@ -83,3 +83,10 @@ db/
 package-lock.json
 pnpm-lock.yaml
 yarn.lock
+
+# Private internal files (reports, research, sensitive docs)
+# Convention: _prefix = internal only, never committed to public repo
+_reports/
+_scripts/
+_research/
+_*
