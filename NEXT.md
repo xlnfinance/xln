@@ -87,3 +87,61 @@ Space, arrows, Home/End, F
 ---
 
 **Start next session:** Batch optimization (#1)
+
+---
+
+## 🔵 LOW-HANGING (2-5 min each)
+
+### 11. Layout cache workaround
+**Issue:** Browser localStorage caches old 50/50 layout despite code being 75/25
+**Fix:** Add "Reset Layout" button in SettingsPanel → `localStorage.removeItem('xln-layout')`
+**Effort:** 5min
+
+### 12. Reports index
+**File:** `reports/README.md` (create index of all 14 reports)
+**Effort:** 5min
+
+### 13. Inline code TODOs
+**Found:** 7 TODOs in ArchitectPanel/Graph3DPanel
+**Notable:** Graph3DPanel:4156 "Switch to panels view" = entity click feature (#3)
+**Action:** Review and resolve or remove
+**Effort:** 15min
+
+### 14. Cleanup background processes
+**Issue:** Multiple `bun run dev`, deploy scripts still running
+**Command:** `pkill -f "bun run dev" && pkill -f "auto-deploy"`
+**Effort:** 1min
+
+---
+
+## 📌 MISSED IDEAS (From Session Discussion)
+
+**Recorded in reports but not in NEXT.md:**
+
+### Future (Low Priority)
+- FREQUENTLY_ASKED.md (reduce Claude re-explaining between sessions)
+- Multi-model orchestration (Gemini/Grok for parallel tasks)
+- Presentation-driven development (Figma → Code workflow)
+- Autonomous agent loop (works while you sleep)
+
+**See:** `reports/2025-11-07-session-summary.md` sections 2-4
+
+---
+
+## 🐛 INLINE CODE TODOS
+
+```
+ArchitectPanel.svelte:1567 - TODO: Trigger Fed emergency lending
+ArchitectPanel.svelte:1898 - TODO: Load xlnomy's replicas and history
+Graph3DPanel.svelte:4156   - TODO: Switch to panels view (= #3 entity click!)
+Graph3DPanel.svelte:1815   - TODO: Hub rebalance coordination
+Graph3DPanel:8-10          - TODO: Move imports to view/
+```
+
+**Action:** Review in next session, implement or delete
+
+---
+
+**Total actionable items:** 14 (3 critical, 3 high, 4 medium, 4 low)
+**Estimated total time:** ~3.5 hours for all
+
