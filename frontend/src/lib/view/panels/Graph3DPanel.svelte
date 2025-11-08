@@ -980,7 +980,7 @@ let vrHammer: VRHammer | null = null;
 
     // Fixed large grid (±1000px) to prevent clipping on zoom
     const fixedSize = 2000; // Diameter = 2000, radius = 1000
-    const divisions = 200; // 10px per division
+    const divisions = 20; // 100px per division (10x fewer lines for performance)
 
     gridHelper = new THREE.GridHelper(fixedSize, divisions,
       gridColor,  // Center line
@@ -1429,7 +1429,7 @@ let vrHammer: VRHammer | null = null;
     renderer = await createRenderer(rendererMode, { antialias: false }); // Disabled for performance
     renderer.xr.enabled = true;  // Enable XR separately
     renderer.setSize(containerWidth, containerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // Cap at 1.5 for performance
     container.appendChild(renderer.domElement);
 
     // Debug: Expose to window for inspection
