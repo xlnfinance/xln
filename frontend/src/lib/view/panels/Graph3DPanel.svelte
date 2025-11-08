@@ -594,7 +594,7 @@ let vrHammer: VRHammer | null = null;
     $isolatedEnv.xlnomies.forEach((xlnomy: any, name: string) => {
       if (!jMachines.has(name)) {
         console.log(`[Graph3D] Creating J-Machine for xlnomy: ${name} at position`, xlnomy.jMachine.position);
-        const jMachine = createJMachine(25, xlnomy.jMachine.position, name);
+        const jMachine = createJMachine(12, xlnomy.jMachine.position, name); // 2x smaller for Fed Chair UX
         scene.add(jMachine);
         jMachines.set(name, jMachine);
         console.log(`[Graph3D] ✅ J-Machine created, scene now has ${scene.children.length} objects`);
