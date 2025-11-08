@@ -665,8 +665,29 @@
   }
 
   /** Get topology preset (inline until we export from runtime.js) */
-  function getTopologyPresetInline(type: 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid') {
-    if (type === 'hybrid') {
+  function getTopologyPresetInline(type: 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid' | 'sp500' | 'ahb') {
+    if (type === 'ahb') {
+      // Alice-Hub-Bob: Simplest payment demo (3 entities)
+      return {
+        type: 'ahb',
+        layers: [
+          { name: 'Hub', yPosition: 100, entityCount: 1, xzSpacing: 0, color: '#FFD700', size: 2.0, emissiveIntensity: 1.0, initialReserves: 10_000_000n, canMintMoney: false },
+          { name: 'Users', yPosition: 50, entityCount: 2, xzSpacing: 80, color: '#0088FF', size: 1.0, emissiveIntensity: 0.5, initialReserves: 100_000n, canMintMoney: false }
+        ],
+        rules: {
+          allowedPairs: [
+            { from: 'Hub', to: 'Users' }, { from: 'Users', to: 'Hub' },
+            { from: 'Users', to: 'Users' } // Alice can pay Bob directly or via Hub
+          ],
+          allowDirectInterbank: true,
+          requireHubRouting: false,
+          maxHops: 2,
+          defaultCreditLimits: new Map()
+        },
+        crisisThreshold: 0,
+        crisisMode: null
+      };
+    } else if (type === 'hybrid') {
       return {
         type: 'hybrid',
         layers: [
@@ -747,22 +768,47 @@
   }
 
   /** CREATE ECONOMY WITH TOPOLOGY - Main entry point */
-  async function createEconomyWithTopology(topologyType: 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid' | 'sp500') {
+  async function createEconomyWithTopology(topologyType: 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid' | 'sp500' | 'ahb') {
     console.log('[Architect] createEconomyWithTopology called with type:', topologyType);
 
-    if (!$isolatedEnv?.activeXlnomy) {
-      lastAction = '❌ Create jurisdiction first';
-      console.error('[Architect] No active xlnomy');
-      return;
-    }
+    loading = true;
+
+    try {
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      // Auto-create default jurisdiction if none exists
+      if (!$isolatedEnv?.activeXlnomy) {
+        lastAction = 'Creating default jurisdiction for demo...';
+
+        await XLN.applyRuntimeInput($isolatedEnv, {
+          runtimeTxs: [{
+            type: 'createXlnomy',
+            data: {
+              name: 'demo',
+              evmType: 'browservm',
+              blockTimeMs: 100,
+              autoGrid: true
+            }
+          }],
+          entityInputs: []
+        });
+
+        await XLN.applyRuntimeInput($isolatedEnv, {
+          runtimeTxs: [],
+          entityInputs: []
+        });
+
+        console.log('[Architect] Auto-created demo jurisdiction for topology');
+      }
 
     if (entityIds.length > 0) {
       lastAction = '❌ Economy already exists (reload page to reset)';
       console.error('[Architect] Economy already exists, entityIds:', entityIds.length);
+      loading = false;
       return;
     }
 
-    loading = true;
     lastAction = `Creating ${topologyType.toUpperCase()} economy...`;
     console.log('[Architect] Starting topology creation, loading=true');
 
