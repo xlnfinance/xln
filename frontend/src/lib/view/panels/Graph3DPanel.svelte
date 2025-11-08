@@ -3161,8 +3161,8 @@ let vrHammer: VRHammer | null = null;
   let renderFps = 0;
   let frameTime = 0;
   const perfMonitor = new PerformanceMonitor((metrics: PerfMetrics) => {
-    // Update local FPS display
-    renderFps = metrics.fps;
+    // Update local FPS display (clamp to avoid "Infinity")
+    renderFps = Math.min(metrics.fps, 9999);
     frameTime = metrics.frameTime;
     // Emit FPS to panelBridge for TimeMachine display
     panelBridge.emit('renderFps', metrics.fps);
