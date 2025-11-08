@@ -145,3 +145,36 @@ Graph3DPanel:8-10          - TODO: Move imports to view/
 **Total actionable items:** 14 (3 critical, 3 high, 4 medium, 4 low)
 **Estimated total time:** ~3.5 hours for all
 
+
+---
+
+## 🏗️ ARCHITECTURE (Design Phase)
+
+### 15. Multi-Runtime Support
+**Vision:** Runtime switcher dropdown, local/remote runtimes, state persistence
+**Needs:** Design decisions from user (see below)
+**Effort:** ~8 hours total (phases 1-4)
+**See:** `reports/2025-11-07-multi-runtime-architecture.md`
+
+**Quick wins (25min):**
+- Center J-Machine on grid intersections (snap to 666px cells)
+- Save camera position to localStorage
+- Auto-restore UI state on reload
+
+**Full system (8hr):**
+- Runtime switcher dropdown
+- State persistence (env + history + camera)
+- Session locking (multi-tab warning)
+- Remote runtime (WebSocket to bun server)
+
+**Critical questions (need answers):**
+1. One runtime per tab OR dropdown switcher? (Recommend: dropdown)
+2. Local (BrowserVM) OR remote (WebSocket)? (Recommend: local default)
+3. Persist everything OR just env? (Recommend: everything)
+4. Multi-tab: Lock, Sync, or Warn? (Recommend: warn)
+5. Remote protocol: REST, WebSocket, or SSE? (Recommend: WebSocket)
+
+**Read full analysis:** `cat reports/2025-11-07-multi-runtime-architecture.md`
+
+---
+
