@@ -910,17 +910,8 @@ let vrHammer: VRHammer | null = null;
   let lastReplicaCount = 0;
   let updateDebounceTimer: number | null = null;
   $: if ($isolatedEnv && scene) {
-    const currentCount = $isolatedEnv.replicas?.size || 0;
-    if (currentCount !== lastReplicaCount) {
-      lastReplicaCount = currentCount;
-
-      // Debounce: Max 60 updates per second (16.67ms throttle)
-      if (updateDebounceTimer) clearTimeout(updateDebounceTimer);
-      updateDebounceTimer = window.setTimeout(() => {
-        updateNetworkData();
-        updateDebounceTimer = null;
-      }, 16);
-    }
+    // Always update (removed debounce check that caused cache issues)
+    updateNetworkData();
   }
 
   let resizeObserver: ResizeObserver | null = null;
