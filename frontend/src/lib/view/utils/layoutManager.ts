@@ -19,7 +19,7 @@ export interface LayoutConfig {
 
 export class LayoutManager {
   private readonly STORAGE_KEY = 'xln-layout';
-  private readonly STORAGE_VERSION = '4.0';
+  private readonly STORAGE_VERSION = '4.1';
 
   /** Save layout to localStorage */
   saveLayout(layout: LayoutConfig) {
