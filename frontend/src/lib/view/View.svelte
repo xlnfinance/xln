@@ -296,6 +296,13 @@
     <button class="collapse-btn" on:click={() => collapsed = !collapsed}>
       {collapsed ? '▲' : '▼'}
     </button>
+    <button
+      class="position-toggle-btn"
+      on:click={() => timeMachinePosition = timeMachinePosition === 'bottom' ? 'top' : 'bottom'}
+      title="Move to {timeMachinePosition === 'bottom' ? 'top' : 'bottom'}"
+    >
+      {timeMachinePosition === 'bottom' ? '⬆️' : '⬇️'}
+    </button>
   </div>
 
   <!-- Interactive Tutorial (first-time users) -->
