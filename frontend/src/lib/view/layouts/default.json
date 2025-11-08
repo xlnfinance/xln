@@ -1,7 +1,7 @@
 {
   "name": "default",
-  "version": "4.0",
-  "description": "Default 4-panel layout (Graph3D + Entities + Depository + Architect)",
+  "version": "4.1",
+  "description": "Default 4-panel layout (Graph3D 75% + Sidebar 25% for optimal visual focus)",
   "grid": {
     "root": {
       "type": "branch",
@@ -15,7 +15,7 @@
                 "views": ["graph3d"],
                 "activeView": "graph3d"
               },
-              "size": 60
+              "size": 75
             },
             {
               "type": "branch",
