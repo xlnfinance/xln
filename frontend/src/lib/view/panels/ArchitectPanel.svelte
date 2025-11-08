@@ -802,18 +802,17 @@
         console.log('[Architect] Auto-created demo jurisdiction for topology');
       }
 
-    if (entityIds.length > 0) {
-      lastAction = '❌ Economy already exists (reload page to reset)';
-      console.error('[Architect] Economy already exists, entityIds:', entityIds.length);
-      loading = false;
-      return;
-    }
+      if (entityIds.length > 0) {
+        lastAction = '❌ Economy already exists (reload page to reset)';
+        console.error('[Architect] Economy already exists, entityIds:', entityIds.length);
+        loading = false;
+        return;
+      }
 
-    lastAction = `Creating ${topologyType.toUpperCase()} economy...`;
-    console.log('[Architect] Starting topology creation, loading=true');
+      lastAction = `Creating ${topologyType.toUpperCase()} economy...`;
+      console.log('[Architect] Starting topology creation');
 
-    try {
-      // Get topology preset (inline for now)
+      // Get topology preset
       console.log('[Architect] Getting topology preset...');
       const topology = getTopologyPresetInline(topologyType);
       console.log('[Architect] Topology preset loaded:', topology.type, 'layers:', topology.layers.length);
