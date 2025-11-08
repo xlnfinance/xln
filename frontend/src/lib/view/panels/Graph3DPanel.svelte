@@ -5288,6 +5288,14 @@ let vrHammer: VRHammer | null = null;
       <span class="stat-label">Particles</span>
       <span class="stat-value">{particles.length}</span>
     </div>
+
+    <button
+      class="bars-mode-toggle"
+      on:click={() => { barsMode = barsMode === 'close' ? 'spread' : 'close'; saveSettings(); }}
+      title="Toggle bars positioning: {barsMode === 'close' ? 'Center (close)' : 'Sides (spread)'}"
+    >
+      Bars: {barsMode === 'close' ? '⬌ Center' : '↔ Sides'}
+    </button>
   </div>
 
   <!-- VR Controls HUD (for first-time Vision Pro users) -->
