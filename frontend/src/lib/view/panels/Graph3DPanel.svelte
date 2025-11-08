@@ -906,11 +906,8 @@ let vrHammer: VRHammer | null = null;
   });
 
   // Reactive update when isolated env changes
-  // PERF FIX: Only update when replica count changes + debounce to 60fps
-  let lastReplicaCount = 0;
-  let updateDebounceTimer: number | null = null;
+  // Always update (debounce removed to fix cache issues)
   $: if ($isolatedEnv && scene) {
-    // Always update (removed debounce check that caused cache issues)
     updateNetworkData();
   }
 
