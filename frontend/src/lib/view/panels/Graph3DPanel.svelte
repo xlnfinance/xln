@@ -1426,7 +1426,7 @@ let vrHammer: VRHammer | null = null;
     camera.position.set(200, 0, 100); // Position camera to look at grid center (200, 0, 0)
 
     // Renderer setup with VR support
-    renderer = await createRenderer(rendererMode, { antialias: true });
+    renderer = await createRenderer(rendererMode, { antialias: false }); // Disabled for performance
     renderer.xr.enabled = true;  // Enable XR separately
     renderer.setSize(containerWidth, containerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
