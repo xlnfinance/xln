@@ -691,10 +691,10 @@
       return {
         type: 'hybrid',
         layers: [
-          { name: 'Federal Reserve', yPosition: 300, entityCount: 1, xzSpacing: 0, color: '#FFD700', size: 5.0, emissiveIntensity: 2.0, initialReserves: 100_000_000n, canMintMoney: true },
-          { name: 'Big Four Banks', yPosition: 200, entityCount: 4, xzSpacing: 150, color: '#00ff41', size: 3.0, emissiveIntensity: 0.5, initialReserves: 1_000_000n, canMintMoney: false },
-          { name: 'Community Banks', yPosition: 100, entityCount: 4, xzSpacing: 200, color: '#FFFF00', size: 2.0, emissiveIntensity: 0.2, initialReserves: 100_000n, canMintMoney: false },
-          { name: 'Customers', yPosition: 0, entityCount: 12, xzSpacing: 60, color: '#0088FF', size: 1.5, emissiveIntensity: 0.1, initialReserves: 10_000n, canMintMoney: false }
+          { name: 'Federal Reserve', yPosition: 300, entityCount: 1, xzSpacing: 0, color: '#FFD700', size: 50.0, emissiveIntensity: 2.0, initialReserves: 100_000_000n, canMintMoney: true },
+          { name: 'Big Four Banks', yPosition: 200, entityCount: 4, xzSpacing: 150, color: '#00ff41', size: 30.0, emissiveIntensity: 0.5, initialReserves: 1_000_000n, canMintMoney: false },
+          { name: 'Community Banks', yPosition: 100, entityCount: 4, xzSpacing: 200, color: '#FFFF00', size: 20.0, emissiveIntensity: 0.2, initialReserves: 100_000n, canMintMoney: false },
+          { name: 'Customers', yPosition: 0, entityCount: 12, xzSpacing: 80, color: '#0088FF', size: 15.0, emissiveIntensity: 0.1, initialReserves: 10_000n, canMintMoney: false }
         ],
         rules: {
           allowedPairs: [

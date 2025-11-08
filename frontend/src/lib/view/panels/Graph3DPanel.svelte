@@ -978,9 +978,9 @@ let vrHammer: VRHammer | null = null;
   function createGrid() {
     if (!scene) return;
 
-    // Fixed large grid (±1000px) to prevent clipping on zoom
+    // Minimal grid: 4x4 divisions = 3x3 xlnomy areas
     const fixedSize = 2000; // Diameter = 2000, radius = 1000
-    const divisions = 20; // 100px per division (10x fewer lines for performance)
+    const divisions = 4; // 500px per division (ultra minimal, 3x3 grid for xlnomies)
 
     gridHelper = new THREE.GridHelper(fixedSize, divisions,
       gridColor,  // Center line
