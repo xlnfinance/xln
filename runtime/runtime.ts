@@ -1206,7 +1206,8 @@ export const clearDB = async (): Promise<void> => {
 
 // === PREPOPULATE FUNCTION ===
 import { prepopulate } from './prepopulate';
-export { prepopulate };
+import { prepopulateAHB } from './prepopulate-ahb';
+export { prepopulate, prepopulateAHB };
 
 // === SCENARIO SYSTEM ===
 export { parseScenario, mergeAndSortEvents } from './scenarios/parser.js';

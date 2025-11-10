@@ -249,11 +249,20 @@
     }
   }
 
+  // Preset selection for prepopulation
+  let selectedPreset: 'h-topology' | 'ahb' = 'ahb'; // Default to AHB demo
+
   async function handlePrepopulate() {
     try {
       const xln = await getXLN();
       const env = $xlnEnvironment || await xln.main();
-      await xln.prepopulate(env, xln.process);
+
+      // Choose prepopulate function based on selected preset
+      if (selectedPreset === 'ahb') {
+        await xln.prepopulateAHB(env, xln.process);
+      } else {
+        await xln.prepopulate(env, xln.process);
+      }
     } catch (error) {
       console.error('❌ Prepopulation failed:', error);
       alert(`Prepopulation failed: ${(error as Error)?.message || 'Unknown error'}`);
@@ -342,9 +351,15 @@
         <button class="action-btn" on:click={handleRunDemo}>
           <span>▶️</span> Run Demo
         </button>
-        <button class="action-btn" on:click={handlePrepopulate}>
-          <span>🌐</span> Prepopulate Network
-        </button>
+        <div class="preset-selector">
+          <select bind:value={selectedPreset} class="preset-dropdown">
+            <option value="ahb">🎬 Alice-Hub-Bob Demo</option>
+            <option value="h-topology">🌐 H-Topology Network</option>
+          </select>
+          <button class="action-btn" on:click={handlePrepopulate}>
+            <span>▶</span> Run
+          </button>
+        </div>
         <button class="action-btn" on:click={handleClearDatabase}>
           <span>🗑️</span> Clear Database
         </button>
@@ -713,6 +728,42 @@
   .action-btn:hover {
     background: rgba(0, 122, 204, 0.3);
     border-color: rgba(0, 122, 204, 0.5);
+  }
+
+  /* Preset Selector */
+  .preset-selector {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  .preset-dropdown {
+    flex: 1;
+    padding: 12px 16px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(0, 122, 204, 0.3);
+    border-radius: 6px;
+    color: #ffffff;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .preset-dropdown:hover {
+    background: rgba(0, 0, 0, 0.4);
+    border-color: rgba(0, 122, 204, 0.5);
+  }
+
+  .preset-dropdown:focus {
+    outline: none;
+    border-color: rgba(0, 217, 255, 0.6);
+    box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.1);
+  }
+
+  .preset-selector .action-btn {
+    flex-shrink: 0;
+    min-width: 80px;
+    justify-content: center;
   }
 
   /* Stats Grid */

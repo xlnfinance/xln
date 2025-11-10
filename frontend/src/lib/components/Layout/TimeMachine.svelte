@@ -14,6 +14,7 @@
     Scissors,
     ChevronDown
   } from 'lucide-svelte';
+  import FrameSubtitle from '../TimeMachine/FrameSubtitle.svelte';
 
   // Playback state
   let playing = false;
@@ -49,6 +50,9 @@
     frameTimestamps = frameTimestamps.filter(t => now - t < 60000); // Keep last minute
     fps = frameTimestamps.length / 60;
   }
+
+  // Get current frame subtitle (Fed Chair educational content)
+  $: currentSubtitle = $history[$currentTimeIndex]?.subtitle;
 
   // Format time from frame
   function formatTime(frameIndex: number): string {
@@ -338,6 +342,9 @@
     {$isLive ? 'LIVE' : 'HISTORY'}
   </div>
 </div>
+
+<!-- Fed Chair Subtitle Overlay -->
+<FrameSubtitle subtitle={currentSubtitle} visible={!$isLive && currentSubtitle !== undefined} />
 
 <style>
   .time-machine {
