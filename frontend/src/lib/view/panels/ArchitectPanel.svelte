@@ -249,6 +249,181 @@
     }
   }
 
+  // ============================================================================
+  // TUTORIAL SYSTEM - Autopilot Mode
+  // ============================================================================
+
+  let tutorialActive = false;
+  let tutorialPaused = false;
+  let currentTutorialFrame = 0;
+
+  /** Start AHB Tutorial with autopilot */
+  async function startAHBTutorial() {
+    loading = true;
+    tutorialActive = true;
+    try {
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      // Run prepopulateAHB
+      await XLN.prepopulateAHB($isolatedEnv, XLN.process);
+
+      // Update isolated stores
+      isolatedEnv.set($isolatedEnv);
+      isolatedHistory.set($isolatedEnv.history || []);
+      isolatedTimeIndex.set(0); // Start at frame 0
+
+      lastAction = '✅ AHB Tutorial loaded - 9 frames ready';
+
+      // Start autopilot playback
+      startAutopilot([3, 5, 5, 4, 4, 6, 6, 5, 10]); // Pause times per frame (seconds)
+    } catch (err: any) {
+      lastAction = `❌ ${err.message}`;
+      console.error('[Tutorial] AHB error:', err);
+      tutorialActive = false;
+    } finally {
+      loading = false;
+    }
+  }
+
+  /** Start H-Topology Tutorial */
+  async function startHTopologyTutorial() {
+    loading = true;
+    tutorialActive = true;
+    try {
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      // Run regular prepopulate (H-topology)
+      await XLN.prepopulate($isolatedEnv, XLN.process);
+
+      isolatedEnv.set($isolatedEnv);
+      isolatedHistory.set($isolatedEnv.history || []);
+      isolatedTimeIndex.set(0);
+
+      lastAction = '✅ H-Topology Tutorial loaded';
+
+      // Slower autopilot for more complex topology
+      startAutopilot([5, 6, 6, 7, 7, 8, 8, 10, 12]);
+    } catch (err: any) {
+      lastAction = `❌ ${err.message}`;
+      console.error('[Tutorial] H-Topology error:', err);
+      tutorialActive = false;
+    } finally {
+      loading = false;
+    }
+  }
+
+  /** Autopilot playback with smart pauses */
+  let autopilotInterval: number | null = null;
+
+  function startAutopilot(pauseTimes: number[]) {
+    if (autopilotInterval) clearInterval(autopilotInterval);
+
+    currentTutorialFrame = 0;
+    let frameStartTime = Date.now();
+
+    autopilotInterval = window.setInterval(() => {
+      if (tutorialPaused) return;
+
+      const elapsed = (Date.now() - frameStartTime) / 1000;
+      const currentPause = pauseTimes[currentTutorialFrame] || 5;
+
+      if (elapsed >= currentPause) {
+        currentTutorialFrame++;
+
+        if (currentTutorialFrame >= ($isolatedHistory?.length || 0)) {
+          // Tutorial complete
+          stopAutopilot();
+          lastAction = '✅ Tutorial complete! Use arrow keys to review frames.';
+        } else {
+          // Move to next frame
+          isolatedTimeIndex.set(currentTutorialFrame);
+          frameStartTime = Date.now();
+        }
+      }
+    }, 100); // Check every 100ms
+  }
+
+  function stopAutopilot() {
+    if (autopilotInterval) {
+      clearInterval(autopilotInterval);
+      autopilotInterval = null;
+    }
+    tutorialActive = false;
+    tutorialPaused = false;
+  }
+
+  /** Quick mechanic demos (30 sec micro-demos) */
+  async function runMechanicDemo(mechanic: string) {
+    loading = true;
+    try {
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      // Clear current state
+      $isolatedEnv.replicas.clear();
+      $isolatedEnv.history = [];
+
+      // Create micro-demo based on mechanic type
+      switch (mechanic) {
+        case 'r2r':
+          await demoR2R(XLN);
+          break;
+        case 'r2c':
+          await demoR2C(XLN);
+          break;
+        case 'c2r':
+          await demoC2R(XLN);
+          break;
+        case 'ondelta':
+          await demoOndelta(XLN);
+          break;
+        case 'credit':
+          await demoCreditExtension(XLN);
+          break;
+        // TODO: Add other mechanics
+        default:
+          lastAction = `⚠️ Demo for "${mechanic}" not implemented yet`;
+          return;
+      }
+
+      isolatedEnv.set($isolatedEnv);
+      isolatedHistory.set($isolatedEnv.history || []);
+      isolatedTimeIndex.set(0);
+
+      lastAction = `✅ ${mechanic.toUpperCase()} demo ready`;
+    } catch (err: any) {
+      lastAction = `❌ ${err.message}`;
+      console.error(`[Mechanic Demo] ${mechanic} error:`, err);
+    } finally {
+      loading = false;
+    }
+  }
+
+  // Micro-demo implementations (simplified versions)
+  async function demoR2R(XLN: any) {
+    // Create Alice + Bob, fund Alice, transfer to Bob
+    // (Placeholder - implement later)
+    lastAction = '⚠️ R2R micro-demo: Not implemented yet';
+  }
+
+  async function demoR2C(XLN: any) {
+    lastAction = '⚠️ R2C micro-demo: Not implemented yet';
+  }
+
+  async function demoC2R(XLN: any) {
+    lastAction = '⚠️ C2R micro-demo: Not implemented yet';
+  }
+
+  async function demoOndelta(XLN: any) {
+    lastAction = '⚠️ Ondelta micro-demo: Not implemented yet';
+  }
+
+  async function demoCreditExtension(XLN: any) {
+    lastAction = '⚠️ Credit Extension micro-demo: Not implemented yet';
+  }
+
   /** BANKER DEMO STEP 1: Create 3×3 Hub */
   async function createHub() {
     loading = true;
@@ -2039,6 +2214,197 @@
           ⏳ Initializing XLN environment...
         </div>
       {:else}
+        <!-- ============================================================ -->
+        <!-- J-MACHINE STATUS (Always visible at top) -->
+        <!-- ============================================================ -->
+        <div class="j-machine-status" class:active={activeXlnomy}>
+          <div class="status-indicator">
+            {#if activeXlnomy}
+              <span class="status-icon active">✅</span>
+              <div class="status-text">
+                <strong>J-Machine Active:</strong>
+                <span class="jurisdiction-name">{activeXlnomy}</span>
+              </div>
+            {:else}
+              <span class="status-icon inactive">⚠️</span>
+              <div class="status-text">
+                <strong>No J-Machine</strong>
+                <span class="jurisdiction-hint">Tutorials will create demo jurisdiction automatically</span>
+              </div>
+            {/if}
+          </div>
+          {#if xlnomies.length > 1}
+            <select class="quick-switch" bind:value={activeXlnomy} on:change={(e) => switchXlnomy(e.currentTarget.value)}>
+              {#each xlnomies as name}
+                <option value={name}>{name}</option>
+              {/each}
+            </select>
+          {/if}
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- INTERACTIVE TUTORIALS - Fed Chair Edition -->
+        <!-- ============================================================ -->
+        <div class="action-section tutorials-section">
+          <h5>📚 Interactive Tutorials (Learn by Watching)</h5>
+          <p class="help-text">Guided autopilot demos explaining core XLN mechanics step-by-step</p>
+
+          <div class="tutorial-grid">
+            <!-- AHB Tutorial Card -->
+            <button class="tutorial-card beginner" on:click={startAHBTutorial} disabled={loading}>
+              <div class="tutorial-header">
+                <span class="tutorial-icon">🎬</span>
+                <div class="tutorial-meta">
+                  <h6>Alice-Hub-Bob</h6>
+                  <span class="difficulty beginner">🟢 Beginner</span>
+                </div>
+              </div>
+              <div class="tutorial-body">
+                <p class="duration">⏱️ 3 minutes</p>
+                <ul class="topics">
+                  <li>R2R Transfers</li>
+                  <li>R2C Prefunding</li>
+                  <li>Off-Chain Ondelta</li>
+                  <li>Settlements</li>
+                </ul>
+                <div class="tutorial-cta">▶ Start Tutorial</div>
+              </div>
+            </button>
+
+            <!-- H-Topology Tutorial Card -->
+            <button class="tutorial-card intermediate" on:click={startHTopologyTutorial} disabled={loading}>
+              <div class="tutorial-header">
+                <span class="tutorial-icon">🌐</span>
+                <div class="tutorial-meta">
+                  <h6>H-Topology Network</h6>
+                  <span class="difficulty intermediate">🟡 Intermediate</span>
+                </div>
+              </div>
+              <div class="tutorial-body">
+                <p class="duration">⏱️ 5 minutes</p>
+                <ul class="topics">
+                  <li>Hub Routing</li>
+                  <li>Multi-Hop Payments</li>
+                  <li>Network Topology</li>
+                  <li>Capacity Management</li>
+                </ul>
+                <div class="tutorial-cta">▶ Start Tutorial</div>
+              </div>
+            </button>
+
+            <!-- Placeholder for S&P 500 -->
+            <button class="tutorial-card advanced" disabled>
+              <div class="tutorial-header">
+                <span class="tutorial-icon">📈</span>
+                <div class="tutorial-meta">
+                  <h6>S&P 500 Corporate</h6>
+                  <span class="difficulty advanced">🔴 Advanced</span>
+                </div>
+              </div>
+              <div class="tutorial-body">
+                <p class="duration">⏱️ 10 minutes</p>
+                <ul class="topics">
+                  <li>Corporate Settlement</li>
+                  <li>Governance Tokens</li>
+                  <li>Derivatives</li>
+                  <li>Voting Systems</li>
+                </ul>
+                <div class="tutorial-cta disabled">Coming Soon</div>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- TOP 10 CORE MECHANICS - Quick Demos -->
+        <!-- ============================================================ -->
+        <div class="action-section mechanics-section">
+          <h5>🧪 Core Mechanics (Quick Demos)</h5>
+          <p class="help-text">Click any mechanic to see a 30-second isolated demo</p>
+
+          <div class="mechanics-grid">
+            <button class="mechanic-card" on:click={() => runMechanicDemo('r2r')} disabled={loading}>
+              <span class="mechanic-icon">🔄</span>
+              <div class="mechanic-info">
+                <h6>Reserve to Reserve</h6>
+                <p>On-chain settlement (Fedwire)</p>
+              </div>
+            </button>
+
+            <button class="mechanic-card" on:click={() => runMechanicDemo('r2c')} disabled={loading}>
+              <span class="mechanic-icon">🔒</span>
+              <div class="mechanic-info">
+                <h6>Reserve to Collateral</h6>
+                <p>Lock funds (post margin)</p>
+              </div>
+            </button>
+
+            <button class="mechanic-card" on:click={() => runMechanicDemo('c2r')} disabled={loading}>
+              <span class="mechanic-icon">💸</span>
+              <div class="mechanic-info">
+                <h6>Collateral to Reserve</h6>
+                <p>Withdraw settlement</p>
+              </div>
+            </button>
+
+            <button class="mechanic-card" on:click={() => runMechanicDemo('ondelta')} disabled={loading}>
+              <span class="mechanic-icon">⚡</span>
+              <div class="mechanic-info">
+                <h6>Off-Chain Ondelta</h6>
+                <p>Zero-gas instant payment</p>
+              </div>
+            </button>
+
+            <button class="mechanic-card" on:click={() => runMechanicDemo('credit')} disabled={loading}>
+              <span class="mechanic-icon">📊</span>
+              <div class="mechanic-info">
+                <h6>Credit Extension</h6>
+                <p>Beyond collateral (unique!)</p>
+              </div>
+            </button>
+
+            <button class="mechanic-card" on:click={() => runMechanicDemo('settlement')} disabled={loading}>
+              <span class="mechanic-icon">⚖️</span>
+              <div class="mechanic-info">
+                <h6>Cooperative Settlement</h6>
+                <p>Signed bilateral close</p>
+              </div>
+            </button>
+
+            <button class="mechanic-card" on:click={() => runMechanicDemo('dispute')} disabled={loading}>
+              <span class="mechanic-icon">⚔️</span>
+              <div class="mechanic-info">
+                <h6>Dispute Resolution</h6>
+                <p>Challenge period + proofs</p>
+              </div>
+            </button>
+
+            <button class="mechanic-card" on:click={() => runMechanicDemo('fifo')} disabled={loading}>
+              <span class="mechanic-icon">🔁</span>
+              <div class="mechanic-info">
+                <h6>FIFO Debt Queue</h6>
+                <p>Chronological enforcement</p>
+              </div>
+            </button>
+
+            <button class="mechanic-card" on:click={() => runMechanicDemo('routing')} disabled={loading}>
+              <span class="mechanic-icon">🌉</span>
+              <div class="mechanic-info">
+                <h6>Multi-Hop Routing</h6>
+                <p>Onion routing (privacy)</p>
+              </div>
+            </button>
+
+            <button class="mechanic-card" on:click={() => runMechanicDemo('anchoring')} disabled={loading}>
+              <span class="mechanic-icon">🏛️</span>
+              <div class="mechanic-info">
+                <h6>On-Chain Anchoring</h6>
+                <p>Batch netting (100x savings)</p>
+              </div>
+            </button>
+          </div>
+        </div>
+
         <div class="action-section">
           <h5>🌍 Jurisdiction (EVM Instance)</h5>
 
@@ -2730,6 +3096,261 @@
     font-family: 'Courier New', monospace;
     font-size: 12px;
     color: #8be9fd;
+  }
+
+  /* ============================================ */
+  /* J-MACHINE STATUS BANNER */
+  /* ============================================ */
+  .j-machine-status {
+    background: rgba(255, 100, 0, 0.1);
+    border: 2px solid rgba(255, 100, 0, 0.4);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .j-machine-status.active {
+    background: rgba(0, 255, 100, 0.1);
+    border-color: rgba(0, 255, 100, 0.4);
+  }
+
+  .status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .status-icon {
+    font-size: 24px;
+  }
+
+  .status-text strong {
+    display: block;
+    font-size: 14px;
+    color: #ffffff;
+    margin-bottom: 2px;
+  }
+
+  .jurisdiction-name {
+    font-size: 13px;
+    color: #00ff66;
+    font-weight: 600;
+  }
+
+  .jurisdiction-hint {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .quick-switch {
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: #ffffff;
+    font-size: 13px;
+    cursor: pointer;
+  }
+
+  /* ============================================ */
+  /* TUTORIAL CARDS */
+  /* ============================================ */
+  .tutorials-section {
+    margin-bottom: 32px;
+    border-bottom: 2px solid rgba(0, 217, 255, 0.2);
+    padding-bottom: 24px;
+  }
+
+  .tutorial-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  .tutorial-card {
+    background: rgba(0, 20, 40, 0.6);
+    border: 2px solid rgba(0, 122, 204, 0.3);
+    border-radius: 12px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-align: left;
+  }
+
+  .tutorial-card:hover:not(:disabled) {
+    background: rgba(0, 40, 80, 0.8);
+    border-color: rgba(0, 217, 255, 0.6);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 217, 255, 0.2);
+  }
+
+  .tutorial-card:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .tutorial-card.beginner {
+    border-color: rgba(0, 255, 100, 0.3);
+  }
+
+  .tutorial-card.intermediate {
+    border-color: rgba(255, 200, 0, 0.3);
+  }
+
+  .tutorial-card.advanced {
+    border-color: rgba(255, 50, 50, 0.3);
+  }
+
+  .tutorial-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+
+  .tutorial-icon {
+    font-size: 32px;
+    flex-shrink: 0;
+  }
+
+  .tutorial-meta h6 {
+    margin: 0 0 4px 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: #00d9ff;
+  }
+
+  .difficulty {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+
+  .difficulty.beginner {
+    background: rgba(0, 255, 100, 0.15);
+    color: #00ff66;
+  }
+
+  .difficulty.intermediate {
+    background: rgba(255, 200, 0, 0.15);
+    color: #ffc800;
+  }
+
+  .difficulty.advanced {
+    background: rgba(255, 50, 50, 0.15);
+    color: #ff3232;
+  }
+
+  .tutorial-body {
+    margin-left: 44px;
+  }
+
+  .tutorial-body .duration {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.7);
+    margin: 0 0 8px 0;
+  }
+
+  .tutorial-body .topics {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 12px 0;
+  }
+
+  .tutorial-body .topics li {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.8);
+    padding: 4px 0;
+    padding-left: 16px;
+    position: relative;
+  }
+
+  .tutorial-body .topics li:before {
+    content: '▸';
+    position: absolute;
+    left: 0;
+    color: #00d9ff;
+  }
+
+  .tutorial-cta {
+    display: inline-block;
+    padding: 8px 16px;
+    background: rgba(0, 217, 255, 0.15);
+    border: 1px solid rgba(0, 217, 255, 0.4);
+    border-radius: 6px;
+    color: #00d9ff;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .tutorial-cta.disabled {
+    opacity: 0.4;
+    border-color: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  /* ============================================ */
+  /* MECHANICS GRID */
+  /* ============================================ */
+  .mechanics-section {
+    margin-bottom: 32px;
+    border-bottom: 2px solid rgba(0, 217, 255, 0.2);
+    padding-bottom: 24px;
+  }
+
+  .mechanics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  .mechanic-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: rgba(0, 10, 20, 0.5);
+    border: 1px solid rgba(0, 122, 204, 0.25);
+    border-radius: 8px;
+    padding: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: left;
+  }
+
+  .mechanic-card:hover:not(:disabled) {
+    background: rgba(0, 30, 60, 0.7);
+    border-color: rgba(0, 217, 255, 0.5);
+    transform: translateX(2px);
+  }
+
+  .mechanic-card:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .mechanic-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+  }
+
+  .mechanic-info h6 {
+    margin: 0 0 2px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #ffffff;
+  }
+
+  .mechanic-info p {
+    margin: 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
   }
 
   .topology-builder {

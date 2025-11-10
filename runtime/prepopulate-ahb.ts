@@ -226,10 +226,18 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
   console.log('=====================================\n');
 
   const jurisdictions = await getAvailableJurisdictions();
-  const arrakis = jurisdictions.find(j => j.name.toLowerCase() === 'arrakis');
+  let arrakis = jurisdictions.find(j => j.name.toLowerCase() === 'arrakis');
 
+  // FALLBACK: Create mock jurisdiction if none exist (for isolated /view mode)
   if (!arrakis) {
-    throw new Error('Arrakis jurisdiction not found');
+    console.log('⚠️ No jurisdiction found - creating mock jurisdiction for demo');
+    arrakis = {
+      name: 'Arrakis (Demo)',
+      chainId: 31337,
+      entityProviderAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
+      depositoryAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
+      rpc: 'http://localhost:8545'
+    };
   }
 
   console.log(`📋 Jurisdiction: ${arrakis.name}`);

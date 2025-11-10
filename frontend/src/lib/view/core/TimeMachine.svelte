@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { type Writable } from 'svelte/store';
+  import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
 
   // Props: REQUIRED isolated stores (no fallbacks)
   export let history: Writable<any[]>;
@@ -64,6 +65,9 @@
   let loopMode: 'off' | 'all' | 'slice' = 'off';
   let sliceStart: number | null = null;
   let sliceEnd: number | null = null;
+
+  // Get current frame subtitle (Fed Chair educational content)
+  $: currentSubtitle = $history[$timeIndex]?.subtitle;
 
   // FPS tracking
   let fps = 0;
@@ -414,6 +418,9 @@
     {$isLive ? 'LIVE' : 'HISTORY'}
   </div>
 </div>
+
+<!-- Fed Chair Subtitle Overlay (only in history mode) -->
+<FrameSubtitle subtitle={currentSubtitle} visible={!$isLive && currentSubtitle !== undefined} />
 
 <style>
   .time-machine {
