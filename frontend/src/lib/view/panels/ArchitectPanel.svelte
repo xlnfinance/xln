@@ -2243,140 +2243,129 @@
         </div>
       {:else}
         <!-- ============================================================ -->
-        <!-- J-MACHINE STATUS (Always visible at top) -->
+        <!-- J-MACHINE CREATION (MUST DO FIRST) -->
         <!-- ============================================================ -->
-        <div class="j-machine-status" class:active={activeXlnomy}>
-          <div class="status-indicator">
-            {#if activeXlnomy}
-              <span class="status-icon active">✅</span>
-              <div class="status-text">
-                <strong>J-Machine Active:</strong>
-                <span class="jurisdiction-name">{activeXlnomy}</span>
-              </div>
-            {:else}
-              <span class="status-icon inactive">⚠️</span>
-              <div class="status-text">
-                <strong>No J-Machine</strong>
-                <span class="jurisdiction-hint">Tutorials will create demo jurisdiction automatically</span>
-              </div>
+        {#if !activeXlnomy}
+          <div class="j-machine-required">
+            <div class="requirement-header">
+              <h5>STEP 1: Create J-Machine (Required)</h5>
+              <p>Jurisdiction = EVM instance with Depository.sol. Entities cannot exist without it.</p>
+            </div>
+            <button class="create-jmachine-btn" on:click={() => showCreateXlnomyModal = true}>
+              Create J-Machine Now
+            </button>
+          </div>
+        {:else}
+          <div class="j-machine-active">
+            <strong>J-Machine Active:</strong> {activeXlnomy}
+            {#if xlnomies.length > 1}
+              <select class="quick-switch" bind:value={activeXlnomy} on:change={(e) => switchXlnomy(e.currentTarget.value)}>
+                {#each xlnomies as name}
+                  <option value={name}>{name}</option>
+                {/each}
+              </select>
             {/if}
           </div>
-          {#if xlnomies.length > 1}
-            <select class="quick-switch" bind:value={activeXlnomy} on:change={(e) => switchXlnomy(e.currentTarget.value)}>
-              {#each xlnomies as name}
-                <option value={name}>{name}</option>
-              {/each}
-            </select>
-          {/if}
-        </div>
+        {/if}
 
         <!-- ============================================================ -->
-        <!-- INTERACTIVE TUTORIALS - Fed Chair Edition -->
+        <!-- INTERACTIVE TUTORIALS -->
         <!-- ============================================================ -->
         <div class="action-section tutorials-section">
-          <h5>📚 Interactive Tutorials (Learn by Watching)</h5>
-          <p class="help-text">Guided autopilot demos explaining core XLN mechanics step-by-step</p>
+          <h5>Tutorials (Autopilot Guided Demos)</h5>
+          <p class="help-text">Watch step-by-step demonstrations with Fed Chair subtitles</p>
 
           <div class="tutorial-grid">
             <!-- AHB Tutorial Card -->
             <button class="tutorial-card beginner" on:click={startAHBTutorial} disabled={loading}>
               <div class="tutorial-header">
-                <span class="tutorial-icon">🎬</span>
-                <div class="tutorial-meta">
-                  <h6>Alice-Hub-Bob</h6>
-                  <span class="difficulty beginner">🟢 Beginner</span>
-                </div>
+                <span class="tutorial-badge">BEGINNER</span>
+                <h6>Alice-Hub-Bob</h6>
               </div>
               <div class="tutorial-body">
-                <p class="duration">⏱️ 3 minutes</p>
+                <p class="duration">3 minutes | 9 frames</p>
                 <ul class="topics">
                   <li>R2R Transfers</li>
                   <li>R2C Prefunding</li>
                   <li>Off-Chain Ondelta</li>
                   <li>Settlements</li>
                 </ul>
-                <div class="tutorial-cta">▶ Start Tutorial</div>
+                <div class="tutorial-cta">START</div>
               </div>
             </button>
 
             <!-- H-Topology Tutorial Card -->
             <button class="tutorial-card intermediate" on:click={startHTopologyTutorial} disabled={loading}>
               <div class="tutorial-header">
-                <span class="tutorial-icon">🌐</span>
-                <div class="tutorial-meta">
-                  <h6>H-Topology Network</h6>
-                  <span class="difficulty intermediate">🟡 Intermediate</span>
-                </div>
+                <span class="tutorial-badge">INTERMEDIATE</span>
+                <h6>H-Topology Network</h6>
               </div>
               <div class="tutorial-body">
-                <p class="duration">⏱️ 5 minutes</p>
+                <p class="duration">5 minutes | 6 entities</p>
                 <ul class="topics">
                   <li>Hub Routing</li>
                   <li>Multi-Hop Payments</li>
                   <li>Network Topology</li>
                   <li>Capacity Management</li>
                 </ul>
-                <div class="tutorial-cta">▶ Start Tutorial</div>
+                <div class="tutorial-cta">START</div>
               </div>
             </button>
 
             <!-- Full Mechanics Tutorial -->
             <button class="tutorial-card advanced" on:click={startFullMechanicsTutorial} disabled={loading}>
               <div class="tutorial-header">
-                <span class="tutorial-icon">🎓</span>
-                <div class="tutorial-meta">
-                  <h6>All 10 Mechanics</h6>
-                  <span class="difficulty advanced">🔴 Advanced</span>
-                </div>
+                <span class="tutorial-badge">ADVANCED</span>
+                <h6>All 10 Mechanics</h6>
               </div>
               <div class="tutorial-body">
-                <p class="duration">⏱️ 8 minutes</p>
+                <p class="duration">8 minutes | 15 frames</p>
                 <ul class="topics">
                   <li>Complete XLN Tour</li>
-                  <li>R2R → Disputes → FIFO</li>
+                  <li>R2R to Disputes to FIFO</li>
                   <li>All Primitives</li>
                   <li>Fed Chair Edition</li>
                 </ul>
-                <div class="tutorial-cta">▶ Start Tutorial</div>
+                <div class="tutorial-cta">START</div>
               </div>
             </button>
           </div>
         </div>
 
         <!-- ============================================================ -->
-        <!-- TOP 10 CORE MECHANICS - Quick Demos -->
+        <!-- TOP 10 CORE MECHANICS -->
         <!-- ============================================================ -->
         <div class="action-section mechanics-section">
-          <h5>🧪 Core Mechanics (Quick Demos)</h5>
-          <p class="help-text">Click any mechanic to see a 30-second isolated demo</p>
+          <h5>Core Mechanics (Quick 30-sec Demos)</h5>
+          <p class="help-text">Click any mechanic for isolated demonstration</p>
 
           <div class="mechanics-grid">
             <button class="mechanic-card" on:click={() => runMechanicDemo('r2r')} disabled={loading}>
-              <span class="mechanic-icon">🔄</span>
+              <div class="mechanic-number">1</div>
               <div class="mechanic-info">
-                <h6>Reserve to Reserve</h6>
+                <h6>R2R: Reserve to Reserve</h6>
                 <p>On-chain settlement (Fedwire)</p>
               </div>
             </button>
 
             <button class="mechanic-card" on:click={() => runMechanicDemo('r2c')} disabled={loading}>
-              <span class="mechanic-icon">🔒</span>
+              <div class="mechanic-number">2</div>
               <div class="mechanic-info">
-                <h6>Reserve to Collateral</h6>
+                <h6>R2C: Reserve to Collateral</h6>
                 <p>Lock funds (post margin)</p>
               </div>
             </button>
 
             <button class="mechanic-card" on:click={() => runMechanicDemo('c2r')} disabled={loading}>
-              <span class="mechanic-icon">💸</span>
+              <div class="mechanic-number">3</div>
               <div class="mechanic-info">
-                <h6>Collateral to Reserve</h6>
+                <h6>C2R: Collateral to Reserve</h6>
                 <p>Withdraw settlement</p>
               </div>
             </button>
 
             <button class="mechanic-card" on:click={() => runMechanicDemo('ondelta')} disabled={loading}>
-              <span class="mechanic-icon">⚡</span>
+              <div class="mechanic-number">4</div>
               <div class="mechanic-info">
                 <h6>Off-Chain Ondelta</h6>
                 <p>Zero-gas instant payment</p>
@@ -2384,15 +2373,15 @@
             </button>
 
             <button class="mechanic-card" on:click={() => runMechanicDemo('credit')} disabled={loading}>
-              <span class="mechanic-icon">📊</span>
+              <div class="mechanic-number">5</div>
               <div class="mechanic-info">
                 <h6>Credit Extension</h6>
-                <p>Beyond collateral (unique!)</p>
+                <p>Beyond collateral (unique)</p>
               </div>
             </button>
 
             <button class="mechanic-card" on:click={() => runMechanicDemo('settlement')} disabled={loading}>
-              <span class="mechanic-icon">⚖️</span>
+              <div class="mechanic-number">6</div>
               <div class="mechanic-info">
                 <h6>Cooperative Settlement</h6>
                 <p>Signed bilateral close</p>
@@ -2400,7 +2389,7 @@
             </button>
 
             <button class="mechanic-card" on:click={() => runMechanicDemo('dispute')} disabled={loading}>
-              <span class="mechanic-icon">⚔️</span>
+              <div class="mechanic-number">7</div>
               <div class="mechanic-info">
                 <h6>Dispute Resolution</h6>
                 <p>Challenge period + proofs</p>
@@ -2408,7 +2397,7 @@
             </button>
 
             <button class="mechanic-card" on:click={() => runMechanicDemo('fifo')} disabled={loading}>
-              <span class="mechanic-icon">🔁</span>
+              <div class="mechanic-number">8</div>
               <div class="mechanic-info">
                 <h6>FIFO Debt Queue</h6>
                 <p>Chronological enforcement</p>
@@ -2416,7 +2405,7 @@
             </button>
 
             <button class="mechanic-card" on:click={() => runMechanicDemo('routing')} disabled={loading}>
-              <span class="mechanic-icon">🌉</span>
+              <div class="mechanic-number">9</div>
               <div class="mechanic-info">
                 <h6>Multi-Hop Routing</h6>
                 <p>Onion routing (privacy)</p>
@@ -2424,7 +2413,7 @@
             </button>
 
             <button class="mechanic-card" on:click={() => runMechanicDemo('anchoring')} disabled={loading}>
-              <span class="mechanic-icon">🏛️</span>
+              <div class="mechanic-number">10</div>
               <div class="mechanic-info">
                 <h6>On-Chain Anchoring</h6>
                 <p>Batch netting (100x savings)</p>
@@ -3184,6 +3173,66 @@
   }
 
   /* ============================================ */
+  /* J-MACHINE REQUIRED BANNER */
+  /* ============================================ */
+  .j-machine-required {
+    background: rgba(255, 100, 0, 0.15);
+    border: 3px solid rgba(255, 100, 0, 0.6);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 32px;
+    text-align: center;
+  }
+
+  .requirement-header h5 {
+    margin: 0 0 8px 0;
+    font-size: 18px;
+    color: #ffaa00;
+    font-weight: 700;
+  }
+
+  .requirement-header p {
+    margin: 0 0 16px 0;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .create-jmachine-btn {
+    padding: 16px 32px;
+    background: linear-gradient(135deg, #ff6b00 0%, #ff8800 100%);
+    border: none;
+    border-radius: 8px;
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 16px rgba(255, 100, 0, 0.3);
+  }
+
+  .create-jmachine-btn:hover {
+    background: linear-gradient(135deg, #ff8800 0%, #ffaa00 100%);
+    transform: scale(1.05);
+    box-shadow: 0 6px 24px rgba(255, 100, 0, 0.5);
+  }
+
+  .j-machine-active {
+    background: rgba(0, 255, 100, 0.1);
+    border: 2px solid rgba(0, 255, 100, 0.4);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .j-machine-active strong {
+    color: #00ff66;
+    font-size: 14px;
+  }
+
+  /* ============================================ */
   /* TUTORIAL CARDS */
   /* ============================================ */
   .tutorials-section {
@@ -3203,7 +3252,7 @@
     background: rgba(0, 20, 40, 0.6);
     border: 2px solid rgba(0, 122, 204, 0.3);
     border-radius: 12px;
-    padding: 16px;
+    padding: 20px;
     cursor: pointer;
     transition: all 0.3s ease;
     text-align: left;
@@ -3222,73 +3271,70 @@
   }
 
   .tutorial-card.beginner {
-    border-color: rgba(0, 255, 100, 0.3);
+    border-color: rgba(0, 255, 100, 0.4);
   }
 
   .tutorial-card.intermediate {
-    border-color: rgba(255, 200, 0, 0.3);
+    border-color: rgba(255, 200, 0, 0.4);
   }
 
   .tutorial-card.advanced {
-    border-color: rgba(255, 50, 50, 0.3);
+    border-color: rgba(255, 50, 50, 0.4);
   }
 
   .tutorial-header {
     display: flex;
-    align-items: flex-start;
-    gap: 12px;
-    margin-bottom: 12px;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
   }
 
-  .tutorial-icon {
-    font-size: 32px;
-    flex-shrink: 0;
+  .tutorial-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+    width: fit-content;
   }
 
-  .tutorial-meta h6 {
-    margin: 0 0 4px 0;
-    font-size: 16px;
+  .tutorial-card.beginner .tutorial-badge {
+    background: rgba(0, 255, 100, 0.2);
+    color: #00ff66;
+  }
+
+  .tutorial-card.intermediate .tutorial-badge {
+    background: rgba(255, 200, 0, 0.2);
+    color: #ffc800;
+  }
+
+  .tutorial-card.advanced .tutorial-badge {
+    background: rgba(255, 50, 50, 0.2);
+    color: #ff3232;
+  }
+
+  .tutorial-header h6 {
+    margin: 0;
+    font-size: 18px;
     font-weight: 700;
     color: #00d9ff;
   }
 
-  .difficulty {
-    display: inline-block;
-    font-size: 11px;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-weight: 600;
-  }
-
-  .difficulty.beginner {
-    background: rgba(0, 255, 100, 0.15);
-    color: #00ff66;
-  }
-
-  .difficulty.intermediate {
-    background: rgba(255, 200, 0, 0.15);
-    color: #ffc800;
-  }
-
-  .difficulty.advanced {
-    background: rgba(255, 50, 50, 0.15);
-    color: #ff3232;
-  }
-
   .tutorial-body {
-    margin-left: 44px;
+    margin: 0;
   }
 
   .tutorial-body .duration {
     font-size: 13px;
     color: rgba(255, 255, 255, 0.7);
-    margin: 0 0 8px 0;
+    margin: 0 0 12px 0;
   }
 
   .tutorial-body .topics {
     list-style: none;
     padding: 0;
-    margin: 0 0 12px 0;
+    margin: 0 0 16px 0;
   }
 
   .tutorial-body .topics li {
@@ -3300,7 +3346,7 @@
   }
 
   .tutorial-body .topics li:before {
-    content: '▸';
+    content: '>';
     position: absolute;
     left: 0;
     color: #00d9ff;
@@ -3308,13 +3354,13 @@
 
   .tutorial-cta {
     display: inline-block;
-    padding: 8px 16px;
-    background: rgba(0, 217, 255, 0.15);
-    border: 1px solid rgba(0, 217, 255, 0.4);
+    padding: 10px 20px;
+    background: rgba(0, 217, 255, 0.2);
+    border: 2px solid rgba(0, 217, 255, 0.5);
     border-radius: 6px;
     color: #00d9ff;
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 700;
   }
 
   .tutorial-cta.disabled {
@@ -3334,7 +3380,7 @@
 
   .mechanics-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
     gap: 12px;
     margin-top: 16px;
   }
@@ -3342,11 +3388,11 @@
   .mechanic-card {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 14px;
     background: rgba(0, 10, 20, 0.5);
-    border: 1px solid rgba(0, 122, 204, 0.25);
+    border: 2px solid rgba(0, 122, 204, 0.3);
     border-radius: 8px;
-    padding: 14px;
+    padding: 16px;
     cursor: pointer;
     transition: all 0.2s ease;
     text-align: left;
@@ -3354,8 +3400,8 @@
 
   .mechanic-card:hover:not(:disabled) {
     background: rgba(0, 30, 60, 0.7);
-    border-color: rgba(0, 217, 255, 0.5);
-    transform: translateX(2px);
+    border-color: rgba(0, 217, 255, 0.6);
+    transform: translateX(3px);
   }
 
   .mechanic-card:disabled {
@@ -3363,13 +3409,23 @@
     cursor: not-allowed;
   }
 
-  .mechanic-icon {
-    font-size: 24px;
+  .mechanic-number {
+    font-size: 20px;
+    font-weight: 700;
+    color: #00d9ff;
+    background: rgba(0, 217, 255, 0.1);
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     flex-shrink: 0;
+    border: 2px solid rgba(0, 217, 255, 0.3);
   }
 
   .mechanic-info h6 {
-    margin: 0 0 2px 0;
+    margin: 0 0 4px 0;
     font-size: 14px;
     font-weight: 600;
     color: #ffffff;
