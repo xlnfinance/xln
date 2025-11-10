@@ -50,7 +50,60 @@ interface FrameSubtitle {
   keyMetrics?: string[];
 }
 
+function cloneProfilesForSnapshot(env: Env): { profiles: Profile[] } | undefined {
+  if (!env.gossip || typeof env.gossip.getProfiles !== 'function') {
+    return undefined;
+  }
+
+  const profiles = env.gossip.getProfiles().map((profile: Profile): Profile => {
+    let clonedMetadata: Profile['metadata'] = undefined;
+    if (profile.metadata) {
+      clonedMetadata = { ...profile.metadata };
+      clonedMetadata.lastUpdated = clonedMetadata.lastUpdated ?? Date.now();
+      if (clonedMetadata.baseFee !== undefined) {
+        clonedMetadata.baseFee = BigInt(clonedMetadata.baseFee.toString());
+      }
+    }
+
+    const clonedAccounts = profile.accounts
+      ? profile.accounts.map((account) => {
+          const tokenCapacities = new Map<number, { inCapacity: bigint; outCapacity: bigint }>();
+          if (account.tokenCapacities) {
+            for (const [tokenId, capacities] of account.tokenCapacities.entries()) {
+              tokenCapacities.set(tokenId, {
+                inCapacity: capacities.inCapacity,
+                outCapacity: capacities.outCapacity,
+              });
+            }
+          }
+
+          return {
+            counterpartyId: account.counterpartyId,
+            tokenCapacities,
+          };
+        })
+      : [];
+
+    const profileClone: Profile = {
+      entityId: profile.entityId,
+      capabilities: [...profile.capabilities],
+      hubs: [...profile.hubs],
+      accounts: clonedAccounts,
+    };
+
+    if (clonedMetadata) {
+      profileClone.metadata = clonedMetadata;
+    }
+
+    return profileClone;
+  });
+
+  return { profiles };
+}
+
 function pushSnapshot(env: Env, description: string, subtitle: FrameSubtitle) {
+  const gossipSnapshot = cloneProfilesForSnapshot(env);
+
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: Date.now(),
@@ -61,11 +114,12 @@ function pushSnapshot(env: Env, description: string, subtitle: FrameSubtitle) {
     runtimeOutputs: [],
     description,
     subtitle,
+    ...(gossipSnapshot ? { gossip: gossipSnapshot } : {}),
   };
 
   if (!env.history) env.history = [];
   env.history.push(snapshot);
-  console.log(`📸 Frame ${env.history.length - 1}: ${description}`);
+  console.log(`Frame ${env.history.length - 1}: ${description}`);
 }
 
 function setReserve(replica: EntityReplica, amount: bigint) {
@@ -141,42 +195,29 @@ export async function prepopulateFullMechanics(env: Env, processUntilEmpty: (env
     const name = entityNames[i];
     const signer = `s${i + 1}`;
 
-    try {
-      const { config, entityNumber, entityId } = await createNumberedEntity(name, [signer], 1n, arrakis);
-      entities.push({ id: entityId, signer, name });
+    // SIMPLE FALLBACK (no blockchain)
+    const entityId = '0x' + (i + 1).toString(16).padStart(64, '0');
+    entities.push({ id: entityId, signer, name });
 
-      await applyRuntimeInput(env, {
-        runtimeTxs: [{
-          type: 'importReplica' as const,
-          entityId,
-          signerId: signer,
-          data: { isProposer: true, config }
-        }],
-        entityInputs: []
-      });
-    } catch {
-      const entityId = '0x' + (i + 1).toString(16).padStart(64, '0');
-      entities.push({ id: entityId, signer, name });
-
-      await applyRuntimeInput(env, {
-        runtimeTxs: [{
-          type: 'importReplica' as const,
-          entityId,
-          signerId: signer,
-          data: {
-            isProposer: true,
-            config: {
-              mode: 'proposer-based' as const,
-              threshold: 1n,
-              validators: [signer],
-              shares: { [signer]: 1n },
-              jurisdiction: arrakis
-            }
+    await applyRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica' as const,
+        entityId,
+        signerId: signer,
+        data: {
+          isProposer: true,
+          config: {
+            mode: 'proposer-based' as const,
+            threshold: 1n,
+            validators: [signer],
+            shares: { [signer]: 1n },
+            jurisdiction: arrakis
           }
-        }],
-        entityInputs: []
-      });
-    }
+        }
+      }],
+      entityInputs: []
+    });
+    console.log(`${name}: Entity #${i + 1}`);
   }
 
   const [alice, bob, hub, dave] = entities;

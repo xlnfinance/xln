@@ -255,49 +255,27 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     const name = entityNames[i];
     const signer = `s${i + 1}`;
 
-    try {
-      const { config, entityNumber, entityId } = await createNumberedEntity(
-        name,
-        [signer],
-        1n,
-        arrakis
-      );
+    // SIMPLE FALLBACK ONLY (no blockchain calls in demos)
+    const entityNumber = i + 1;
+    const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
+    entities.push({ id: entityId, signer, name });
 
-      entities.push({ id: entityId, signer, name });
-      console.log(`  ✓ ${name}: Entity #${entityNumber}`);
-
-      createEntityTxs.push({
-        type: 'importReplica' as const,
-        entityId,
-        signerId: signer,
-        data: {
-          isProposer: true,
-          config
+    createEntityTxs.push({
+      type: 'importReplica' as const,
+      entityId,
+      signerId: signer,
+      data: {
+        isProposer: true,
+        config: {
+          mode: 'proposer-based' as const,
+          threshold: 1n,
+          validators: [signer],
+          shares: { [signer]: 1n },
+          jurisdiction: arrakis
         }
-      });
-    } catch (error) {
-      console.error(`  ❌ Failed to create ${name}:`, error);
-      const entityNumber = i + 1;
-      const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
-      entities.push({ id: entityId, signer, name });
-
-      createEntityTxs.push({
-        type: 'importReplica' as const,
-        entityId,
-        signerId: signer,
-        data: {
-          isProposer: true,
-          config: {
-            mode: 'proposer-based' as const,
-            threshold: 1n,
-            validators: [signer],
-            shares: { [signer]: 1n },
-            jurisdiction: arrakis
-          }
-        }
-      });
-      console.log(`  ⚠️ Using fallback ID for ${name}`);
-    }
+      }
+    });
+    console.log(`${name}: Entity #${entityNumber} (${entityId.slice(0, 10)}...)`);
   }
 
   await applyRuntimeInput(env, {
