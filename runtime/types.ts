@@ -606,6 +606,14 @@ export interface EnvSnapshot {
   // Interactive storytelling narrative
   title?: string; // Short headline (e.g., "Bank Run Begins")
   narrative?: string; // Detailed explanation of what's happening in this frame
+  // Fed Chair educational subtitles (AHB demo)
+  subtitle?: {
+    title: string;           // Technical summary (e.g., "Reserve-to-Reserve Transfer")
+    what: string;            // What's happening
+    why: string;             // Why it matters
+    tradfiParallel: string;  // Traditional finance equivalent
+    keyMetrics?: string[];   // Bullet points of key numbers
+  };
   // Cinematic view state for scenario playback
   viewState?: {
     camera?: 'orbital' | 'overview' | 'follow' | 'free';
