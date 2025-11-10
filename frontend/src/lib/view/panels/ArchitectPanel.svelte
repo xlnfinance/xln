@@ -314,6 +314,34 @@
     }
   }
 
+  /** Start Full Mechanics Tutorial (All 10) */
+  async function startFullMechanicsTutorial() {
+    loading = true;
+    tutorialActive = true;
+    try {
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      // Run comprehensive mechanics demo
+      await XLN.prepopulateFullMechanics($isolatedEnv, XLN.process);
+
+      isolatedEnv.set($isolatedEnv);
+      isolatedHistory.set($isolatedEnv.history || []);
+      isolatedTimeIndex.set(0);
+
+      lastAction = '✅ Full Mechanics Tutorial loaded - 15 frames';
+
+      // Moderate autopilot (15 frames, ~8 min total)
+      startAutopilot([4, 5, 5, 6, 6, 5, 5, 6, 5, 6, 6, 7, 5, 6, 10]);
+    } catch (err: any) {
+      lastAction = `❌ ${err.message}`;
+      console.error('[Tutorial] Full Mechanics error:', err);
+      tutorialActive = false;
+    } finally {
+      loading = false;
+    }
+  }
+
   /** Autopilot playback with smart pauses */
   let autopilotInterval: number | null = null;
 
@@ -2292,24 +2320,24 @@
               </div>
             </button>
 
-            <!-- Placeholder for S&P 500 -->
-            <button class="tutorial-card advanced" disabled>
+            <!-- Full Mechanics Tutorial -->
+            <button class="tutorial-card advanced" on:click={startFullMechanicsTutorial} disabled={loading}>
               <div class="tutorial-header">
-                <span class="tutorial-icon">📈</span>
+                <span class="tutorial-icon">🎓</span>
                 <div class="tutorial-meta">
-                  <h6>S&P 500 Corporate</h6>
+                  <h6>All 10 Mechanics</h6>
                   <span class="difficulty advanced">🔴 Advanced</span>
                 </div>
               </div>
               <div class="tutorial-body">
-                <p class="duration">⏱️ 10 minutes</p>
+                <p class="duration">⏱️ 8 minutes</p>
                 <ul class="topics">
-                  <li>Corporate Settlement</li>
-                  <li>Governance Tokens</li>
-                  <li>Derivatives</li>
-                  <li>Voting Systems</li>
+                  <li>Complete XLN Tour</li>
+                  <li>R2R → Disputes → FIFO</li>
+                  <li>All Primitives</li>
+                  <li>Fed Chair Edition</li>
                 </ul>
-                <div class="tutorial-cta disabled">Coming Soon</div>
+                <div class="tutorial-cta">▶ Start Tutorial</div>
               </div>
             </button>
           </div>
