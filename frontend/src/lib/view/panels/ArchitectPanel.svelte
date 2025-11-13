@@ -257,6 +257,21 @@
   let tutorialPaused = false;
   let currentTutorialFrame = 0;
 
+  // Expandable category state
+  let expandedCategory: 'elementary' | 'intermediate' | 'advanced' | null = null;
+
+  /** Run preset by ID */
+  async function runPreset(presetId: string) {
+    if (presetId === 'empty') {
+      // Create empty J-Machine (just jurisdiction, no entities)
+      if (!activeXlnomy) {
+        showCreateXlnomyModal = true;
+      }
+      lastAction = '✅ Empty J-Machine ready - add entities manually';
+      return;
+    }
+  }
+
   /** Start AHB Tutorial with autopilot */
   async function startAHBTutorial() {
     loading = true;
@@ -2243,183 +2258,161 @@
         </div>
       {:else}
         <!-- ============================================================ -->
-        <!-- J-MACHINE CREATION (MUST DO FIRST) -->
+        <!-- 3-LEVEL PRESET SYSTEM (Game-Style) -->
         <!-- ============================================================ -->
-        {#if !activeXlnomy}
-          <div class="j-machine-required">
-            <div class="requirement-header">
-              <h5>STEP 1: Create J-Machine (Required)</h5>
-              <p>Jurisdiction = EVM instance with Depository.sol. Entities cannot exist without it.</p>
+        <div class="preset-system">
+          <h5>Select Difficulty</h5>
+
+          <!-- ELEMENTARY -->
+          <button
+            class="category-btn elementary"
+            class:expanded={expandedCategory === 'elementary'}
+            on:click={() => expandedCategory = expandedCategory === 'elementary' ? null : 'elementary'}
+            disabled={loading}
+          >
+            <div class="category-main">
+              <span class="level">LVL 1</span>
+              <div class="category-info">
+                <h6>ELEMENTARY</h6>
+                <p>Basics · First steps · Sandbox</p>
+              </div>
             </div>
-            <button class="create-jmachine-btn" on:click={() => showCreateXlnomyModal = true}>
-              Create J-Machine Now
-            </button>
-          </div>
-        {:else}
-          <div class="j-machine-active">
-            <strong>J-Machine Active:</strong> {activeXlnomy}
-            {#if xlnomies.length > 1}
-              <select class="quick-switch" bind:value={activeXlnomy} on:change={(e) => switchXlnomy(e.currentTarget.value)}>
-                {#each xlnomies as name}
-                  <option value={name}>{name}</option>
-                {/each}
-              </select>
-            {/if}
-          </div>
-        {/if}
+            <span class="arrow">{expandedCategory === 'elementary' ? '▼' : '▶'}</span>
+          </button>
 
-        <!-- ============================================================ -->
-        <!-- INTERACTIVE TUTORIALS -->
-        <!-- ============================================================ -->
-        <div class="action-section tutorials-section">
-          <h5>Tutorials (Autopilot Guided Demos)</h5>
-          <p class="help-text">Watch step-by-step demonstrations with Fed Chair subtitles</p>
+          {#if expandedCategory === 'elementary'}
+            <div class="preset-list">
+              <button class="preset-item" on:click={() => runPreset('empty')} disabled={loading}>
+                <span class="icon">□</span>
+                <div class="info">
+                  <strong>Empty J-Machine</strong>
+                  <p>Clean slate · Manual exploration</p>
+                </div>
+              </button>
 
-          <div class="tutorial-grid">
-            <!-- AHB Tutorial Card -->
-            <button class="tutorial-card beginner" on:click={startAHBTutorial} disabled={loading}>
-              <div class="tutorial-header">
-                <span class="tutorial-badge">BEGINNER</span>
-                <h6>Alice-Hub-Bob</h6>
-              </div>
-              <div class="tutorial-body">
-                <p class="duration">3 minutes | 9 frames</p>
-                <ul class="topics">
-                  <li>R2R Transfers</li>
-                  <li>R2C Prefunding</li>
-                  <li>Off-Chain Ondelta</li>
-                  <li>Settlements</li>
-                </ul>
-                <div class="tutorial-cta">START</div>
-              </div>
-            </button>
+              <button class="preset-item" on:click={startAHBTutorial} disabled={loading}>
+                <span class="icon">A-H-B</span>
+                <div class="info">
+                  <strong>Alice-Hub-Bob</strong>
+                  <p>3 min · 9 frames · Auto-play tutorial</p>
+                </div>
+              </button>
 
-            <!-- H-Topology Tutorial Card -->
-            <button class="tutorial-card intermediate" on:click={startHTopologyTutorial} disabled={loading}>
-              <div class="tutorial-header">
-                <span class="tutorial-badge">INTERMEDIATE</span>
-                <h6>H-Topology Network</h6>
-              </div>
-              <div class="tutorial-body">
-                <p class="duration">5 minutes | 6 entities</p>
-                <ul class="topics">
-                  <li>Hub Routing</li>
-                  <li>Multi-Hop Payments</li>
-                  <li>Network Topology</li>
-                  <li>Capacity Management</li>
-                </ul>
-                <div class="tutorial-cta">START</div>
-              </div>
-            </button>
+              <button class="preset-item" on:click={createHub} disabled={loading}>
+                <span class="icon">3×3</span>
+                <div class="info">
+                  <strong>Grid 3×3 Hub</strong>
+                  <p>9 entities · Pinnacle topology</p>
+                </div>
+              </button>
+            </div>
+          {/if}
 
-            <!-- Full Mechanics Tutorial -->
-            <button class="tutorial-card advanced" on:click={startFullMechanicsTutorial} disabled={loading}>
-              <div class="tutorial-header">
-                <span class="tutorial-badge">ADVANCED</span>
-                <h6>All 10 Mechanics</h6>
+          <!-- INTERMEDIATE (CEFI) -->
+          <button
+            class="category-btn intermediate"
+            class:expanded={expandedCategory === 'intermediate'}
+            on:click={() => expandedCategory = expandedCategory === 'intermediate' ? null : 'intermediate'}
+            disabled={loading}
+          >
+            <div class="category-main">
+              <span class="level">LVL 2</span>
+              <div class="category-info">
+                <h6>INTERMEDIATE</h6>
+                <p>Real banking models · Central banks</p>
               </div>
-              <div class="tutorial-body">
-                <p class="duration">8 minutes | 15 frames</p>
-                <ul class="topics">
-                  <li>Complete XLN Tour</li>
-                  <li>R2R to Disputes to FIFO</li>
-                  <li>All Primitives</li>
-                  <li>Fed Chair Edition</li>
-                </ul>
-                <div class="tutorial-cta">START</div>
-              </div>
-            </button>
-          </div>
-        </div>
+            </div>
+            <span class="arrow">{expandedCategory === 'intermediate' ? '▼' : '▶'}</span>
+          </button>
 
-        <!-- ============================================================ -->
-        <!-- TOP 10 CORE MECHANICS -->
-        <!-- ============================================================ -->
-        <div class="action-section mechanics-section">
-          <h5>Core Mechanics (Quick 30-sec Demos)</h5>
-          <p class="help-text">Click any mechanic for isolated demonstration</p>
+          {#if expandedCategory === 'intermediate'}
+            <div class="preset-list">
+              <button class="preset-item" on:click={startHTopologyTutorial} disabled={loading}>
+                <span class="icon">H</span>
+                <div class="info">
+                  <strong>H-Topology Network</strong>
+                  <p>6 entities · Hub routing · 5 min tutorial</p>
+                </div>
+              </button>
 
-          <div class="mechanics-grid">
-            <button class="mechanic-card" on:click={() => runMechanicDemo('r2r')} disabled={loading}>
-              <div class="mechanic-number">1</div>
-              <div class="mechanic-info">
-                <h6>R2R: Reserve to Reserve</h6>
-                <p>On-chain settlement (Fedwire)</p>
-              </div>
-            </button>
+              <button class="preset-item" on:click={() => createEconomyWithTopology('star')} disabled={loading}>
+                <span class="icon">★</span>
+                <div class="info">
+                  <strong>STAR (USA)</strong>
+                  <p>Fed-centric · No interbank · Max control</p>
+                </div>
+              </button>
 
-            <button class="mechanic-card" on:click={() => runMechanicDemo('r2c')} disabled={loading}>
-              <div class="mechanic-number">2</div>
-              <div class="mechanic-info">
-                <h6>R2C: Reserve to Collateral</h6>
-                <p>Lock funds (post margin)</p>
-              </div>
-            </button>
+              <button class="preset-item" on:click={() => createEconomyWithTopology('mesh')} disabled={loading}>
+                <span class="icon">⬢</span>
+                <div class="info">
+                  <strong>MESH (Eurozone)</strong>
+                  <p>P2P interbank · ECB emergency</p>
+                </div>
+              </button>
 
-            <button class="mechanic-card" on:click={() => runMechanicDemo('c2r')} disabled={loading}>
-              <div class="mechanic-number">3</div>
-              <div class="mechanic-info">
-                <h6>C2R: Collateral to Reserve</h6>
-                <p>Withdraw settlement</p>
-              </div>
-            </button>
+              <button class="preset-item" on:click={() => createEconomyWithTopology('tiered')} disabled={loading}>
+                <span class="icon">▲</span>
+                <div class="info">
+                  <strong>TIERED (China)</strong>
+                  <p>6 layers · No tier jumping</p>
+                </div>
+              </button>
 
-            <button class="mechanic-card" on:click={() => runMechanicDemo('ondelta')} disabled={loading}>
-              <div class="mechanic-number">4</div>
-              <div class="mechanic-info">
-                <h6>Off-Chain Ondelta</h6>
-                <p>Zero-gas instant payment</p>
-              </div>
-            </button>
+              <button class="preset-item" on:click={() => createEconomyWithTopology('correspondent')} disabled={loading}>
+                <span class="icon">◈</span>
+                <div class="info">
+                  <strong>CORRESPONDENT (IMF)</strong>
+                  <p>Gateway banks · FX routing</p>
+                </div>
+              </button>
+            </div>
+          {/if}
 
-            <button class="mechanic-card" on:click={() => runMechanicDemo('credit')} disabled={loading}>
-              <div class="mechanic-number">5</div>
-              <div class="mechanic-info">
-                <h6>Credit Extension</h6>
-                <p>Beyond collateral (unique)</p>
+          <!-- ADVANCED -->
+          <button
+            class="category-btn advanced"
+            class:expanded={expandedCategory === 'advanced'}
+            on:click={() => expandedCategory = expandedCategory === 'advanced' ? null : 'advanced'}
+            disabled={loading}
+          >
+            <div class="category-main">
+              <span class="level">LVL 3</span>
+              <div class="category-info">
+                <h6>ADVANCED</h6>
+                <p>Experimental · Complex · Research</p>
               </div>
-            </button>
+            </div>
+            <span class="arrow">{expandedCategory === 'advanced' ? '▼' : '▶'}</span>
+          </button>
 
-            <button class="mechanic-card" on:click={() => runMechanicDemo('settlement')} disabled={loading}>
-              <div class="mechanic-number">6</div>
-              <div class="mechanic-info">
-                <h6>Cooperative Settlement</h6>
-                <p>Signed bilateral close</p>
-              </div>
-            </button>
+          {#if expandedCategory === 'advanced'}
+            <div class="preset-list">
+              <button class="preset-item" on:click={startFullMechanicsTutorial} disabled={loading}>
+                <span class="icon">10</span>
+                <div class="info">
+                  <strong>All 10 Mechanics</strong>
+                  <p>15 frames · Complete tour · 8 min</p>
+                </div>
+              </button>
 
-            <button class="mechanic-card" on:click={() => runMechanicDemo('dispute')} disabled={loading}>
-              <div class="mechanic-number">7</div>
-              <div class="mechanic-info">
-                <h6>Dispute Resolution</h6>
-                <p>Challenge period + proofs</p>
-              </div>
-            </button>
+              <button class="preset-item" on:click={() => createEconomyWithTopology('hybrid')} disabled={loading}>
+                <span class="icon">◐</span>
+                <div class="info">
+                  <strong>HYBRID (Adaptive)</strong>
+                  <p>Crisis mode · Auto-switching · Optimal</p>
+                </div>
+              </button>
 
-            <button class="mechanic-card" on:click={() => runMechanicDemo('fifo')} disabled={loading}>
-              <div class="mechanic-number">8</div>
-              <div class="mechanic-info">
-                <h6>FIFO Debt Queue</h6>
-                <p>Chronological enforcement</p>
-              </div>
-            </button>
-
-            <button class="mechanic-card" on:click={() => runMechanicDemo('routing')} disabled={loading}>
-              <div class="mechanic-number">9</div>
-              <div class="mechanic-info">
-                <h6>Multi-Hop Routing</h6>
-                <p>Onion routing (privacy)</p>
-              </div>
-            </button>
-
-            <button class="mechanic-card" on:click={() => runMechanicDemo('anchoring')} disabled={loading}>
-              <div class="mechanic-number">10</div>
-              <div class="mechanic-info">
-                <h6>On-Chain Anchoring</h6>
-                <p>Batch netting (100x savings)</p>
-              </div>
-            </button>
-          </div>
+              <button class="preset-item" disabled>
+                <span class="icon">S&P</span>
+                <div class="info">
+                  <strong>S&P 500 Corporate</strong>
+                  <p>50 companies · Coming soon</p>
+                </div>
+              </button>
+            </div>
+          {/if}
         </div>
 
         <div class="action-section">
@@ -3173,250 +3166,156 @@
   }
 
   /* ============================================ */
-  /* J-MACHINE REQUIRED BANNER */
+  /* 3-LEVEL PRESET SYSTEM (Game UI) */
   /* ============================================ */
-  .j-machine-required {
-    background: rgba(255, 100, 0, 0.15);
-    border: 3px solid rgba(255, 100, 0, 0.6);
-    border-radius: 12px;
-    padding: 24px;
+  .preset-system {
     margin-bottom: 32px;
-    text-align: center;
   }
 
-  .requirement-header h5 {
-    margin: 0 0 8px 0;
-    font-size: 18px;
-    color: #ffaa00;
-    font-weight: 700;
-  }
-
-  .requirement-header p {
-    margin: 0 0 16px 0;
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.8);
-  }
-
-  .create-jmachine-btn {
-    padding: 16px 32px;
-    background: linear-gradient(135deg, #ff6b00 0%, #ff8800 100%);
-    border: none;
-    border-radius: 8px;
-    color: #ffffff;
+  .preset-system h5 {
     font-size: 16px;
+    color: #00d9ff;
+    margin-bottom: 20px;
     font-weight: 700;
+  }
+
+  .category-btn {
+    width: 100%;
+    background: linear-gradient(135deg, rgba(0, 20, 40, 0.8) 0%, rgba(0, 40, 80, 0.6) 100%);
+    border: 2px solid rgba(0, 122, 204, 0.4);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 12px;
     cursor: pointer;
     transition: all 0.3s ease;
-    box-shadow: 0 4px 16px rgba(255, 100, 0, 0.3);
-  }
-
-  .create-jmachine-btn:hover {
-    background: linear-gradient(135deg, #ff8800 0%, #ffaa00 100%);
-    transform: scale(1.05);
-    box-shadow: 0 6px 24px rgba(255, 100, 0, 0.5);
-  }
-
-  .j-machine-active {
-    background: rgba(0, 255, 100, 0.1);
-    border: 2px solid rgba(0, 255, 100, 0.4);
-    border-radius: 8px;
-    padding: 12px 16px;
-    margin-bottom: 24px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-  }
-
-  .j-machine-active strong {
-    color: #00ff66;
-    font-size: 14px;
-  }
-
-  /* ============================================ */
-  /* TUTORIAL CARDS */
-  /* ============================================ */
-  .tutorials-section {
-    margin-bottom: 32px;
-    border-bottom: 2px solid rgba(0, 217, 255, 0.2);
-    padding-bottom: 24px;
-  }
-
-  .tutorial-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 16px;
-    margin-top: 16px;
-  }
-
-  .tutorial-card {
-    background: rgba(0, 20, 40, 0.6);
-    border: 2px solid rgba(0, 122, 204, 0.3);
-    border-radius: 12px;
-    padding: 20px;
-    cursor: pointer;
-    transition: all 0.3s ease;
     text-align: left;
   }
 
-  .tutorial-card:hover:not(:disabled) {
-    background: rgba(0, 40, 80, 0.8);
-    border-color: rgba(0, 217, 255, 0.6);
-    transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0, 217, 255, 0.2);
+  .category-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(0, 40, 80, 0.9) 0%, rgba(0, 60, 120, 0.7) 100%);
+    border-color: rgba(0, 217, 255, 0.7);
+    transform: translateX(4px);
+    box-shadow: 0 4px 20px rgba(0, 217, 255, 0.3);
   }
 
-  .tutorial-card:disabled {
-    opacity: 0.5;
+  .category-btn.expanded {
+    border-color: rgba(0, 217, 255, 0.8);
+    background: linear-gradient(135deg, rgba(0, 60, 120, 0.9) 0%, rgba(0, 80, 160, 0.7) 100%);
+  }
+
+  .category-btn:disabled {
+    opacity: 0.4;
     cursor: not-allowed;
   }
 
-  .tutorial-card.beginner {
+  .category-btn.elementary {
     border-color: rgba(0, 255, 100, 0.4);
   }
 
-  .tutorial-card.intermediate {
+  .category-btn.intermediate {
     border-color: rgba(255, 200, 0, 0.4);
   }
 
-  .tutorial-card.advanced {
+  .category-btn.advanced {
     border-color: rgba(255, 50, 50, 0.4);
   }
 
-  .tutorial-header {
+  .category-main {
     display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-bottom: 16px;
+    align-items: center;
+    gap: 16px;
   }
 
-  .tutorial-badge {
-    display: inline-block;
-    font-size: 10px;
+  .level {
+    font-size: 11px;
     font-weight: 700;
-    padding: 4px 10px;
-    border-radius: 4px;
-    letter-spacing: 0.5px;
-    width: fit-content;
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: rgba(0, 217, 255, 0.15);
+    color: #00d9ff;
+    letter-spacing: 1px;
   }
 
-  .tutorial-card.beginner .tutorial-badge {
-    background: rgba(0, 255, 100, 0.2);
+  .category-btn.elementary .level {
+    background: rgba(0, 255, 100, 0.15);
     color: #00ff66;
   }
 
-  .tutorial-card.intermediate .tutorial-badge {
-    background: rgba(255, 200, 0, 0.2);
+  .category-btn.intermediate .level {
+    background: rgba(255, 200, 0, 0.15);
     color: #ffc800;
   }
 
-  .tutorial-card.advanced .tutorial-badge {
-    background: rgba(255, 50, 50, 0.2);
+  .category-btn.advanced .level {
+    background: rgba(255, 50, 50, 0.15);
     color: #ff3232;
   }
 
-  .tutorial-header h6 {
-    margin: 0;
+  .category-info h6 {
+    margin: 0 0 4px 0;
     font-size: 18px;
     font-weight: 700;
-    color: #00d9ff;
+    color: #ffffff;
   }
 
-  .tutorial-body {
+  .category-info p {
     margin: 0;
-  }
-
-  .tutorial-body .duration {
     font-size: 13px;
-    color: rgba(255, 255, 255, 0.7);
-    margin: 0 0 12px 0;
+    color: rgba(255, 255, 255, 0.6);
   }
 
-  .tutorial-body .topics {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 16px 0;
-  }
-
-  .tutorial-body .topics li {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.8);
-    padding: 4px 0;
-    padding-left: 16px;
-    position: relative;
-  }
-
-  .tutorial-body .topics li:before {
-    content: '>';
-    position: absolute;
-    left: 0;
-    color: #00d9ff;
-  }
-
-  .tutorial-cta {
-    display: inline-block;
-    padding: 10px 20px;
-    background: rgba(0, 217, 255, 0.2);
-    border: 2px solid rgba(0, 217, 255, 0.5);
-    border-radius: 6px;
-    color: #00d9ff;
-    font-size: 14px;
-    font-weight: 700;
-  }
-
-  .tutorial-cta.disabled {
-    opacity: 0.4;
-    border-color: rgba(255, 255, 255, 0.2);
+  .arrow {
+    font-size: 20px;
     color: rgba(255, 255, 255, 0.5);
+    transition: transform 0.3s ease;
   }
 
-  /* ============================================ */
-  /* MECHANICS GRID */
-  /* ============================================ */
-  .mechanics-section {
-    margin-bottom: 32px;
-    border-bottom: 2px solid rgba(0, 217, 255, 0.2);
-    padding-bottom: 24px;
+  .preset-list {
+    background: rgba(0, 0, 0, 0.3);
+    border-left: 3px solid rgba(0, 217, 255, 0.3);
+    border-radius: 8px;
+    padding: 12px;
+    margin: -8px 0 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 
-  .mechanics-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 12px;
-    margin-top: 16px;
-  }
-
-  .mechanic-card {
+  .preset-item {
+    background: rgba(0, 20, 40, 0.5);
+    border: 1px solid rgba(0, 122, 204, 0.25);
+    border-radius: 8px;
+    padding: 14px 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
     display: flex;
     align-items: center;
     gap: 14px;
-    background: rgba(0, 10, 20, 0.5);
-    border: 2px solid rgba(0, 122, 204, 0.3);
-    border-radius: 8px;
-    padding: 16px;
-    cursor: pointer;
-    transition: all 0.2s ease;
     text-align: left;
   }
 
-  .mechanic-card:hover:not(:disabled) {
-    background: rgba(0, 30, 60, 0.7);
-    border-color: rgba(0, 217, 255, 0.6);
-    transform: translateX(3px);
+  .preset-item:hover:not(:disabled) {
+    background: rgba(0, 40, 80, 0.7);
+    border-color: rgba(0, 217, 255, 0.5);
+    transform: translateX(4px);
   }
 
-  .mechanic-card:disabled {
+  .preset-item:disabled {
     opacity: 0.4;
     cursor: not-allowed;
   }
 
-  .mechanic-number {
+  .preset-item .icon {
     font-size: 20px;
     font-weight: 700;
     color: #00d9ff;
     background: rgba(0, 217, 255, 0.1);
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -3424,14 +3323,14 @@
     border: 2px solid rgba(0, 217, 255, 0.3);
   }
 
-  .mechanic-info h6 {
-    margin: 0 0 4px 0;
-    font-size: 14px;
-    font-weight: 600;
+  .preset-item .info strong {
+    display: block;
+    font-size: 15px;
     color: #ffffff;
+    margin-bottom: 2px;
   }
 
-  .mechanic-info p {
+  .preset-item .info p {
     margin: 0;
     font-size: 12px;
     color: rgba(255, 255, 255, 0.6);
