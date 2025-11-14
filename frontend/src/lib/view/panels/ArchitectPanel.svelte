@@ -287,8 +287,7 @@
       isolatedEnv.set($isolatedEnv);
       const frames = $isolatedEnv.history || [];
       isolatedHistory.set(frames);
-      isolatedTimeIndex.set(0);
-      isolatedIsLive.set(false); // CRITICAL: Enter HISTORY mode
+      isolatedTimeIndex.set(0); // TimeMachine will auto-enter HISTORY mode
 
       console.log('[AHB] Frames loaded:', frames.length);
       console.log('[AHB] Subtitle exists:', !!frames[0]?.subtitle);
@@ -321,7 +320,6 @@
       const frames = $isolatedEnv.history || [];
       isolatedHistory.set(frames);
       isolatedTimeIndex.set(0);
-      isolatedIsLive.set(false);
 
       console.log('[H-Topology] Frames loaded:', frames.length);
 
@@ -353,7 +351,6 @@
       const frames = $isolatedEnv.history || [];
       isolatedHistory.set(frames);
       isolatedTimeIndex.set(0);
-      isolatedIsLive.set(false);
 
       console.log('[Full Mechanics] Frames loaded:', frames.length);
 
