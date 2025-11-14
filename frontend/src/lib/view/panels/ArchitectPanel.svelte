@@ -81,16 +81,16 @@
 
   // Auto-demo mode (triggered when entering VR for Bernanke wow)
   panelBridge.on('auto-demo:start', async () => {
-    console.log('[Architect] 🎬 Starting auto-demo for VR...');
+    console.log('[Architect]  Starting auto-demo for VR...');
 
     // Step 1: Fund all entities if not already funded
     if (entityIds.length > 0) {
-      console.log('💰 Funding all entities...');
+      console.log(' Funding all entities...');
       await fundAllEntities();
 
       // Step 2: Start payment loop after 2 seconds
       setTimeout(() => {
-        console.log('🔄 Starting payment loop...');
+        console.log(' Starting payment loop...');
         startPaymentLoop();
       }, 2000);
     }
@@ -99,7 +99,7 @@
   /** Mint reserves to selected entity */
   async function mintReservesToEntity() {
     if (!selectedEntityForMint || !$isolatedEnv) {
-      lastAction = '❌ Select an entity first';
+      lastAction = ' Select an entity first';
       return;
     }
 
@@ -145,7 +145,7 @@
         }]
       }]);
 
-      lastAction = `✅ Minted ${mintAmount} to entity`;
+      lastAction = ` Minted ${mintAmount} to entity`;
 
       // Update stores to trigger reactivity
       isolatedEnv.set($isolatedEnv);
@@ -156,7 +156,7 @@
 
       console.log('[Architect] Mint complete, new frame created');
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
       console.error('[Architect] Mint error:', err);
     } finally {
       loading = false;
@@ -166,12 +166,12 @@
   /** Send R2R (Reserve-to-Reserve) transaction */
   async function sendR2RTransaction() {
     if (!r2rFromEntity || !r2rToEntity || r2rFromEntity === r2rToEntity) {
-      lastAction = '❌ Select different FROM and TO entities';
+      lastAction = ' Select different FROM and TO entities';
       return;
     }
 
     if (!$isolatedEnv) {
-      lastAction = '❌ Environment not ready';
+      lastAction = ' Environment not ready';
       return;
     }
 
@@ -231,7 +231,7 @@
         }]
       }]);
 
-      lastAction = `✅ R2R sent: ${r2rAmount} units`;
+      lastAction = ` R2R sent: ${r2rAmount} units`;
 
       // Update stores to trigger reactivity
       isolatedEnv.set($isolatedEnv);
@@ -242,7 +242,7 @@
 
       console.log('[Architect] R2R complete, new frame created');
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
       console.error('[Architect] R2R error:', err);
     } finally {
       loading = false;
@@ -267,7 +267,7 @@
       if (!activeXlnomy) {
         showCreateXlnomyModal = true;
       }
-      lastAction = '✅ Empty J-Machine ready - add entities manually';
+      lastAction = ' Empty J-Machine ready - add entities manually';
       return;
     }
   }
@@ -288,12 +288,12 @@
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedTimeIndex.set(0); // Start at frame 0
 
-      lastAction = '✅ AHB Tutorial loaded - 9 frames ready';
+      lastAction = ' AHB Tutorial loaded - 9 frames ready';
 
       // Start autopilot playback
       startAutopilot([3, 5, 5, 4, 4, 6, 6, 5, 10]); // Pause times per frame (seconds)
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
       console.error('[Tutorial] AHB error:', err);
       tutorialActive = false;
     } finally {
@@ -316,12 +316,12 @@
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedTimeIndex.set(0);
 
-      lastAction = '✅ H-Topology Tutorial loaded';
+      lastAction = ' H-Topology Tutorial loaded';
 
       // Slower autopilot for more complex topology
       startAutopilot([5, 6, 6, 7, 7, 8, 8, 10, 12]);
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
       console.error('[Tutorial] H-Topology error:', err);
       tutorialActive = false;
     } finally {
@@ -344,12 +344,12 @@
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedTimeIndex.set(0);
 
-      lastAction = '✅ Full Mechanics Tutorial loaded - 15 frames';
+      lastAction = ' Full Mechanics Tutorial loaded - 15 frames';
 
       // Moderate autopilot (15 frames, ~8 min total)
       startAutopilot([4, 5, 5, 6, 6, 5, 5, 6, 5, 6, 6, 7, 5, 6, 10]);
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
       console.error('[Tutorial] Full Mechanics error:', err);
       tutorialActive = false;
     } finally {
@@ -378,7 +378,7 @@
         if (currentTutorialFrame >= ($isolatedHistory?.length || 0)) {
           // Tutorial complete
           stopAutopilot();
-          lastAction = '✅ Tutorial complete! Use arrow keys to review frames.';
+          lastAction = ' Tutorial complete! Use arrow keys to review frames.';
         } else {
           // Move to next frame
           isolatedTimeIndex.set(currentTutorialFrame);
@@ -435,9 +435,9 @@
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedTimeIndex.set(0);
 
-      lastAction = `✅ ${mechanic.toUpperCase()} demo ready`;
+      lastAction = ` ${mechanic.toUpperCase()} demo ready`;
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
       console.error(`[Mechanic Demo] ${mechanic} error:`, err);
     } finally {
       loading = false;
@@ -502,7 +502,7 @@
       }
 
       if (entityIds.length > 0) {
-        lastAction = '❌ Hub already exists';
+        lastAction = ' Hub already exists';
         loading = false;
         return;
       }
@@ -555,7 +555,7 @@
         entityInputs: []
       });
 
-      lastAction = `✅ Created 3×3 hub (9 entities at y=320)`;
+      lastAction = ` Created 3×3 hub (9 entities at y=320)`;
 
       isolatedEnv.set($isolatedEnv);
       isolatedHistory.set($isolatedEnv.history || []);
@@ -563,7 +563,7 @@
 
       console.log('[Architect] Hub created');
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
       console.error('[Architect] Create hub error:', err);
     } finally {
       loading = false;
@@ -573,7 +573,7 @@
   /** BANKER DEMO STEP 2: Fund all entities */
   async function fundAllEntities() {
     if (entityIds.length === 0) {
-      lastAction = '❌ Create hub first';
+      lastAction = ' Create hub first';
       return;
     }
 
@@ -616,7 +616,7 @@
         }
       }
 
-      lastAction = `✅ Funded all ${entityIds.length} entities with $1M`;
+      lastAction = ` Funded all ${entityIds.length} entities with $1M`;
 
       isolatedEnv.set($isolatedEnv);
       isolatedHistory.set($isolatedEnv.history || []);
@@ -624,7 +624,7 @@
 
       console.log('[Architect] All entities funded');
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
       console.error('[Architect] Fund all error:', err);
     } finally {
       loading = false;
@@ -634,7 +634,7 @@
   /** BANKER DEMO STEP 3: Send one random payment */
   async function sendRandomPayment() {
     if (entityIds.length < 2) {
-      lastAction = '❌ Need at least 2 entities';
+      lastAction = ' Need at least 2 entities';
       return;
     }
 
@@ -692,7 +692,7 @@
         }]
       }]);
 
-      lastAction = `✅ Payment: ${shortAddress(from)} → ${shortAddress(to)} ($${(amount/1000).toFixed(0)}K)`;
+      lastAction = ` Payment: ${shortAddress(from)} → ${shortAddress(to)} ($${(amount/1000).toFixed(0)}K)`;
 
       isolatedEnv.set($isolatedEnv);
       isolatedHistory.set($isolatedEnv.history || []);
@@ -700,7 +700,7 @@
 
       console.log('[Architect] Random payment sent');
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
       console.error('[Architect] Random payment error:', err);
     } finally {
       loading = false;
@@ -710,7 +710,7 @@
   /** Quick Action: Send 20% of balance to random entity */
   async function send20PercentTransfer() {
     if (!$isolatedEnv || entityIds.length < 2) {
-      lastAction = '❌ Need at least 2 entities';
+      lastAction = ' Need at least 2 entities';
       return;
     }
 
@@ -729,7 +729,7 @@
       });
 
       if (entitiesWithReserves.length === 0) {
-        lastAction = '❌ No entities have reserves';
+        lastAction = ' No entities have reserves';
         loading = false;
         return;
       }
@@ -744,7 +744,7 @@
       const amount = (reserves * 20n) / 100n;
 
       if (amount <= 0n) {
-        lastAction = '❌ Insufficient reserves for 20% transfer';
+        lastAction = ' Insufficient reserves for 20% transfer';
         loading = false;
         return;
       }
@@ -758,7 +758,7 @@
       }
 
       if (to === from) {
-        lastAction = '❌ Could not find different entity';
+        lastAction = ' Could not find different entity';
         loading = false;
         return;
       }
@@ -791,14 +791,14 @@
 
       await XLN.process($isolatedEnv, txBatch);
 
-      lastAction = `✅ 20% Transfer: ${shortAddress(from!)} → ${shortAddress(to!)} ($${(Number(amount)/1000).toFixed(0)}K)`;
+      lastAction = ` 20% Transfer: ${shortAddress(from!)} → ${shortAddress(to!)} ($${(Number(amount)/1000).toFixed(0)}K)`;
 
       isolatedEnv.set($isolatedEnv);
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
     } catch (err) {
       const error = err as Error;
-      lastAction = `❌ ${error.message}`;
+      lastAction = ` ${error.message}`;
       console.error('[Architect] 20% transfer error:', err);
     } finally {
       loading = false;
@@ -808,7 +808,7 @@
   /** SCALE STRESS TEST: Add 100 Entities (Prove Scalability) */
   async function scaleStressTest() {
     if (!$isolatedEnv?.activeXlnomy) {
-      lastAction = '❌ Create jurisdiction first';
+      lastAction = ' Create jurisdiction first';
       return;
     }
 
@@ -860,16 +860,16 @@
         .filter(([key]) => key.includes('scale_test'))
         .map(([key]) => key.split(':')[0]);
 
-      lastAction = `✅ Created 100 entities! Check FPS overlay (should be 60+)`;
+      lastAction = ` Created 100 entities! Check FPS overlay (should be 60+)`;
 
       isolatedEnv.set($isolatedEnv);
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
 
-      console.log('[Scale Test] ✅ 100 entities created, FPS should remain high');
+      console.log('[Scale Test]  100 entities created, FPS should remain high');
     } catch (err) {
       const error = err as Error;
-      lastAction = `❌ ${error.message}`;
+      lastAction = ` ${error.message}`;
       console.error('[Scale Test] Error:', err);
     } finally {
       loading = false;
@@ -1021,7 +1021,7 @@
       }
 
       if (entityIds.length > 0) {
-        lastAction = '❌ Economy already exists (reload page to reset)';
+        lastAction = ' Economy already exists (reload page to reset)';
         console.error('[Architect] Economy already exists, entityIds:', entityIds.length);
         loading = false;
         return;
@@ -1045,7 +1045,7 @@
       setTimeout(() => startSmartPaymentLoop(topology), 2000);
 
       const totalEntities = topology.layers.reduce((sum: number, layer: any) => sum + layer.entityCount, 0);
-      lastAction = `✅ Created ${topologyType.toUpperCase()} economy: ${totalEntities} entities across ${topology.layers.length} layers`;
+      lastAction = ` Created ${topologyType.toUpperCase()} economy: ${totalEntities} entities across ${topology.layers.length} layers`;
 
       isolatedEnv.set($isolatedEnv);
       isolatedHistory.set($isolatedEnv.history || []);
@@ -1053,7 +1053,7 @@
 
       console.log(`[Architect] ${topologyType.toUpperCase()} economy created successfully`);
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
       console.error('[Architect] Topology creation error:', err);
       console.error('[Architect] Full error stack:', err.stack);
     } finally {
@@ -1193,7 +1193,7 @@
     // Single batch: all entities funded in ONE frame
     if (fundingInputs.length > 0) {
       await XLN.process($isolatedEnv, fundingInputs);
-      console.log('[createEntities] ✅ Funded', fundingInputs.length, 'entities in 1 frame');
+      console.log('[createEntities]  Funded', fundingInputs.length, 'entities in 1 frame');
     }
 
     // PERF + REALISM: Proximity-based account creation (not all-to-all)
@@ -1266,21 +1266,21 @@
     // Single batch: all accounts opened in ONE frame
     if (accountInputs.length > 0) {
       await XLN.process($isolatedEnv, accountInputs);
-      console.log('[createEntities] ✅ Opened', accountInputs.length, 'accounts in 1 frame');
+      console.log('[createEntities]  Opened', accountInputs.length, 'accounts in 1 frame');
     }
 
-    console.log('[createEntities] ✅ COMPLETE - Created economy with', entities.length, 'entities in ~3 frames (was 466)');
+    console.log('[createEntities]  COMPLETE - Created economy with', entities.length, 'entities in ~3 frames (was 466)');
   }
 
   /** OLD: FED RESERVE DEMO (legacy - will be removed) */
   async function createFedReserveDemo() {
     if (!$isolatedEnv?.activeXlnomy) {
-      lastAction = '❌ Create jurisdiction first';
+      lastAction = ' Create jurisdiction first';
       return;
     }
 
     if (entityIds.length > 0) {
-      lastAction = '❌ Economy already exists (use Reset first)';
+      lastAction = ' Economy already exists (use Reset first)';
       return;
     }
 
@@ -1561,7 +1561,7 @@
       // Start automatic payment flow
       setTimeout(() => startFedPaymentLoop(), 2000);
 
-      lastAction = `✅ Created ${totalEntities} entities: Fed ($100M, y=200) + 4 Banks ($1M, y=100) + ${totalCustomers} Customers ($10K, y=0)`;
+      lastAction = ` Created ${totalEntities} entities: Fed ($100M, y=200) + 4 Banks ($1M, y=100) + ${totalCustomers} Customers ($10K, y=0)`;
 
       isolatedEnv.set($isolatedEnv);
       isolatedHistory.set($isolatedEnv.history || []);
@@ -1569,7 +1569,7 @@
 
       console.log('[Architect] Fed Reserve demo created - payment loop starting');
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
       console.error('[Architect] Fed Reserve demo error:', err);
     } finally {
       loading = false;
@@ -1609,7 +1609,7 @@
       }
     }, 5000); // Every 5 seconds (optimized for frame count)
 
-    console.log(`[Smart Loop] 🔄 Started (${topology.type} topology, 5s interval)`);
+    console.log(`[Smart Loop]  Started (${topology.type} topology, 5s interval)`);
   }
 
   /** Smart QE: Fed mints based on system liquidity */
@@ -1843,7 +1843,7 @@
               }]
             }]);
 
-            console.log(`[Fed Loop] 🏛️ → 🏦 Fed lent $${(amount/1000).toFixed(0)}K to bank`);
+            console.log(`[Fed Loop] 🏛️ →  Fed lent $${(amount/1000).toFixed(0)}K to bank`);
           }
         } else if (action === 1) {
           // Random bank borrows from Fed (reverse direction)
@@ -1869,7 +1869,7 @@
               }]
             }]);
 
-            console.log(`[Fed Loop] 🏦 → 🏛️ Bank repaid $${(amount/1000).toFixed(0)}K to Fed`);
+            console.log(`[Fed Loop]  → 🏛️ Bank repaid $${(amount/1000).toFixed(0)}K to Fed`);
           }
         } else {
           // Interbank payment (Bank → Bank)
@@ -1916,7 +1916,7 @@
               }]
             }]);
 
-            console.log(`[Fed Loop] 🏦 → 🏦 Interbank payment $${(amount/1000).toFixed(0)}K`);
+            console.log(`[Fed Loop]  →  Interbank payment $${(amount/1000).toFixed(0)}K`);
           }
         }
 
@@ -1929,7 +1929,7 @@
       }
     }, 5000); // Every 5 seconds (reduced for performance)
 
-    console.log('[Fed Loop] 🔄 Started auto payment loop (5s interval)');
+    console.log('[Fed Loop]  Started auto payment loop (5s interval)');
   }
 
   function stopFedPaymentLoop() {
@@ -2004,7 +2004,7 @@
       const result = await XLN.executeScenario(currentEnv, parsed.scenario);
 
       if (result.success) {
-        lastAction = `✅ Success! ${result.framesGenerated} frames generated.`;
+        lastAction = ` Success! ${result.framesGenerated} frames generated.`;
         console.log(`[Architect] ${filename}: ${result.framesGenerated} frames`);
 
         // Prepend frame 0 (clean slate) to show progression from empty
@@ -2025,7 +2025,7 @@
         throw new Error(`Execution failed: ${result.errors?.join(', ')}`);
       }
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
       console.error('[Architect] Error:', err);
     } finally {
       loading = false;
@@ -2034,13 +2034,13 @@
 
   async function createNewXlnomy() {
     if (!newXlnomyName.trim()) {
-      lastAction = '❌ Enter a name for the xlnomy';
+      lastAction = ' Enter a name for the xlnomy';
       return;
     }
 
     // Limit to 9 xlnomies (3×3 grid)
     if ($isolatedEnv?.xlnomies && $isolatedEnv.xlnomies.size >= 9) {
-      lastAction = '❌ Maximum 9 xlnomies (3×3 grid full)';
+      lastAction = ' Maximum 9 xlnomies (3×3 grid full)';
       return;
     }
 
@@ -2076,7 +2076,7 @@
 
       // Success message
       const createdName = newXlnomyName.toLowerCase();
-      lastAction = `✅ xlnomy "${createdName}" created!`;
+      lastAction = ` xlnomy "${createdName}" created!`;
 
       // Close modal and advance to next number
       showCreateXlnomyModal = false;
@@ -2095,7 +2095,7 @@
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
       console.error('[Architect] Xlnomy creation error:', err);
     } finally {
       loading = false;
@@ -2115,12 +2115,12 @@
       if (xlnomy) {
         // TODO: Load xlnomy's replicas and history into env
         // For now, just update the active name
-        lastAction = `✅ Switched to "${name}"`;
+        lastAction = ` Switched to "${name}"`;
       }
 
       isolatedEnv.set($isolatedEnv);
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
     } finally {
       loading = false;
     }
@@ -2129,12 +2129,12 @@
   /** Create new entity with custom name */
   async function createEntity() {
     if (!newEntityName.trim()) {
-      lastAction = '❌ Enter entity name';
+      lastAction = ' Enter entity name';
       return;
     }
 
     if (!$isolatedEnv?.activeXlnomy) {
-      lastAction = '❌ Create Xlnomy first';
+      lastAction = ' Create Xlnomy first';
       return;
     }
 
@@ -2184,7 +2184,7 @@
         entityInputs: []
       });
 
-      lastAction = `✅ Created "${newEntityName}"`;
+      lastAction = ` Created "${newEntityName}"`;
 
       // Auto-advance to next common name for fast creation
       const names = ['alice', 'bob', 'charlie', 'dave', 'eve', 'frank', 'grace', 'heidi'];
@@ -2201,7 +2201,7 @@
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
       panelBridge.emit('entity:created', { entityId, type: 'manual' });
     } catch (err: any) {
-      lastAction = `❌ ${err.message}`;
+      lastAction = ` ${err.message}`;
       console.error('[Architect] Create entity error:', err);
     } finally {
       loading = false;
@@ -2212,7 +2212,7 @@
 
 <div class="architect-panel">
   <div class="header">
-    <h3>🎬 Architect</h3>
+    <h3> Architect</h3>
   </div>
 
   <div class="mode-selector">
@@ -2220,31 +2220,31 @@
       class:active={currentMode === 'explore'}
       on:click={() => currentMode = 'explore'}
     >
-      🔍 Explore
+       Explore
     </button>
     <button
       class:active={currentMode === 'build'}
       on:click={() => currentMode = 'build'}
     >
-      🏗️ Build
+       Build
     </button>
     <button
       class:active={currentMode === 'economy'}
       on:click={() => currentMode = 'economy'}
     >
-      💰 Economy
+       Economy
     </button>
     <button
       class:active={currentMode === 'governance'}
       on:click={() => currentMode = 'governance'}
     >
-      ⚖️ Governance
+       Governance
     </button>
     <button
       class:active={currentMode === 'resolve'}
       on:click={() => currentMode = 'resolve'}
     >
-      ⚔️ Resolve
+       Resolve
     </button>
   </div>
 
@@ -2416,11 +2416,11 @@
         </div>
 
         <div class="action-section">
-          <h5>🌍 Jurisdiction (EVM Instance)</h5>
+          <h5>Jurisdiction (EVM Instance)</h5>
 
           <!-- Prominent Create Button -->
           <button class="action-btn create-xlnomy-btn" on:click={() => showCreateXlnomyModal = true}>
-            ➕ Create Jurisdiction Here
+            + Create Jurisdiction Here
           </button>
 
           <!-- Dropdown for switching (only visible if xlnomies exist) -->
@@ -2446,7 +2446,7 @@
           </label>
           <p class="help-text">
             {#if numberedEntities}
-              ⚙️ Numbered: Entities registered on blockchain (slower, sequential numbers)
+               Numbered: Entities registered on blockchain (slower, sequential numbers)
             {:else}
               ⚡ Lazy: In-browser only entities (faster, hash-based IDs, no gas)
             {/if}
@@ -2454,7 +2454,7 @@
         </div>
 
         <div class="action-section topology-builder">
-          <h5>🌐 Economic Topology Builder</h5>
+          <h5> Economic Topology Builder</h5>
           <p class="topology-intro">XLN = SUPERSET of all financial systems. Choose your model:</p>
 
           <div class="topology-grid">
@@ -2529,7 +2529,7 @@
               on:click={() => selectedTopology = 'correspondent'}
               disabled={loading || entityIds.length > 0}
             >
-              <div class="topology-icon">🌍</div>
+              <div class="topology-icon"></div>
               <h6>CORRESPONDENT</h6>
               <p class="topology-model">IMF/DevCo</p>
               <ul class="topology-features">
@@ -2561,7 +2561,7 @@
             on:click={() => createEconomyWithTopology(selectedTopology)}
             disabled={loading || entityIds.length > 0}
           >
-            🚀 Create {selectedTopology.toUpperCase()} Economy
+             Create {selectedTopology.toUpperCase()} Economy
           </button>
 
           {#if fedPaymentInterval}
@@ -2577,41 +2577,41 @@
         </div>
 
         <div class="action-section banker-demo">
-          <h5>🏦 Banker Demo (Step-by-Step)</h5>
+          <h5> Banker Demo (Step-by-Step)</h5>
 
           <button class="demo-btn step-1" on:click={createHub} disabled={loading || entityIds.length > 0}>
-            🏗️ Step 1: Create 3×3 Hub
+             Step 1: Create 3×3 Hub
           </button>
           <p class="step-help">9 entities at y=320 (pinnacle hub)</p>
 
           <button class="demo-btn step-2" on:click={fundAllEntities} disabled={loading || entityIds.length === 0}>
-            💰 Step 2: Fund All ($1M each)
+             Step 2: Fund All ($1M each)
           </button>
           <p class="step-help">Mint reserves to all 9 entities</p>
 
           <button class="demo-btn step-3" on:click={sendRandomPayment} disabled={loading || entityIds.length < 2}>
-            🔄 Step 3: Random Payment
+             Step 3: Random Payment
           </button>
           <p class="step-help">Send one R2R payment (click multiple times)</p>
 
           <button class="demo-btn quick-action" on:click={send20PercentTransfer} disabled={loading || entityIds.length < 2}>
-            💸 Quick: 20% Transfer
+             Quick: 20% Transfer
           </button>
           <p class="step-help">Send 20% of balance from random entity</p>
 
           <button class="demo-btn stress-test" on:click={scaleStressTest} disabled={loading || !activeXlnomy || entityIds.length > 20}>
-            🚀 Scale Test: +100 Entities
+             Scale Test: +100 Entities
           </button>
           <p class="step-help">Prove scalability - watch FPS stay 60+ with 100 banks!</p>
 
           <button class="demo-btn step-4" on:click={resetDemo} disabled={loading}>
-            🔄 Reset Demo
+             Reset Demo
           </button>
           <p class="step-help">Clear xlnomy and start over</p>
         </div>
 
         <div class="action-section">
-          <h5>💸 Mint Reserves</h5>
+          <h5> Mint Reserves</h5>
           <div class="form-group">
             <label for="mint-entity">Entity:</label>
             <select id="mint-entity" bind:value={selectedEntityForMint} disabled={entityIds.length === 0}>
@@ -2626,13 +2626,13 @@
             <input id="mint-amount" type="text" bind:value={mintAmount} placeholder="1000000" />
           </div>
           <button class="action-btn" on:click={mintReservesToEntity} disabled={loading || !selectedEntityForMint}>
-            💸 Mint to Reserve
+             Mint to Reserve
           </button>
           <p class="help-text">Deposit tokens to entity reserve (triggers J-Machine)</p>
         </div>
 
         <div class="action-section">
-          <h5>🔄 Reserve-to-Reserve (R2R)</h5>
+          <h5> Reserve-to-Reserve (R2R)</h5>
           <div class="form-group">
             <label for="r2r-from">From Entity:</label>
             <select id="r2r-from" bind:value={r2rFromEntity} disabled={entityIds.length === 0}>
@@ -2656,7 +2656,7 @@
             <input id="r2r-amount" type="text" bind:value={r2rAmount} placeholder="500000" />
           </div>
           <button class="action-btn" on:click={sendR2RTransaction} disabled={loading || !r2rFromEntity || !r2rToEntity}>
-            🔄 Send R2R Transaction
+             Send R2R Transaction
           </button>
           <p class="help-text">Send reserve-to-reserve payment (shows broadcast ripple)</p>
         </div>
@@ -2664,7 +2664,7 @@
         <div class="action-section">
           <h5>VR Mode</h5>
           <button class="action-btn" on:click={() => panelBridge.emit('vr:toggle', {})}>
-            🥽 Enter VR
+             Enter VR
           </button>
           <p class="help-text">Quest 3 / WebXR headsets</p>
         </div>
@@ -2724,7 +2724,7 @@
             />
           </div>
           <button class="action-btn" on:click={createEntity} disabled={loading || !newEntityName.trim()}>
-            ➕ Create Entity
+             Create Entity
           </button>
           <p class="help-text">Entities appear as dots in 3D space</p>
         </div>
