@@ -1843,7 +1843,7 @@
               }]
             }]);
 
-            console.log(`[Fed Loop]  →  Fed lent $${(amount/1000).toFixed(0)}K to bank`);
+            console.log(`[Fed Loop] 🏛️ →  Fed lent $${(amount/1000).toFixed(0)}K to bank`);
           }
         } else if (action === 1) {
           // Random bank borrows from Fed (reverse direction)
@@ -1869,7 +1869,7 @@
               }]
             }]);
 
-            console.log(`[Fed Loop]  →  Bank repaid $${(amount/1000).toFixed(0)}K to Fed`);
+            console.log(`[Fed Loop]  → 🏛️ Bank repaid $${(amount/1000).toFixed(0)}K to Fed`);
           }
         } else {
           // Interbank payment (Bank → Bank)
@@ -2465,7 +2465,7 @@
               disabled={loading || entityIds.length > 0}
             >
               <div class="badge-new">DEFAULT</div>
-              <div class="topology-icon"></div>
+              <div class="topology-icon">🔮</div>
               <h6>HYBRID</h6>
               <p class="topology-model">XLN Native</p>
               <ul class="topology-features">
@@ -2481,7 +2481,7 @@
               on:click={() => selectedTopology = 'star'}
               disabled={loading || entityIds.length > 0}
             >
-              <div class="topology-icon"></div>
+              <div class="topology-icon">⭐</div>
               <h6>STAR</h6>
               <p class="topology-model">USA/Canada</p>
               <ul class="topology-features">
@@ -2497,7 +2497,7 @@
               on:click={() => selectedTopology = 'mesh'}
               disabled={loading || entityIds.length > 0}
             >
-              <div class="topology-icon"></div>
+              <div class="topology-icon">🕸️</div>
               <h6>MESH</h6>
               <p class="topology-model">Eurozone</p>
               <ul class="topology-features">
@@ -2513,7 +2513,7 @@
               on:click={() => selectedTopology = 'tiered'}
               disabled={loading || entityIds.length > 0}
             >
-              <div class="topology-icon"></div>
+              <div class="topology-icon">🏛️</div>
               <h6>TIERED</h6>
               <p class="topology-model">China/Japan</p>
               <ul class="topology-features">
@@ -2545,7 +2545,7 @@
               on:click={() => selectedTopology = 'sp500'}
               disabled={loading || entityIds.length > 0}
             >
-              <div class="topology-icon"></div>
+              <div class="topology-icon">📈</div>
               <h6>S&P 500</h6>
               <p class="topology-model">Corporate Settlement</p>
               <ul class="topology-features">
@@ -2571,7 +2571,7 @@
             <p class="step-help live-indicator">🔴 LIVE: {selectedTopology.toUpperCase()} topology running...</p>
           {:else if entityIds.length > 0}
             <button class="demo-btn play-btn" on:click={startFedPaymentLoop}>
-               Restart Payment Loop
+              ▶️ Restart Payment Loop
             </button>
           {/if}
         </div>
