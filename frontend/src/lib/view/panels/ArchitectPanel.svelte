@@ -285,10 +285,15 @@
 
       // Update isolated stores
       isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
-      isolatedTimeIndex.set(0); // Start at frame 0
+      const frames = $isolatedEnv.history || [];
+      isolatedHistory.set(frames);
+      isolatedTimeIndex.set(0);
+      isolatedIsLive.set(false); // CRITICAL: Enter HISTORY mode
 
-      lastAction = ' AHB Tutorial loaded - 9 frames ready';
+      console.log('[AHB] Frames loaded:', frames.length);
+      console.log('[AHB] Subtitle exists:', !!frames[0]?.subtitle);
+
+      lastAction = `AHB Tutorial: ${frames.length} frames loaded`;
 
       // Start autopilot playback
       startAutopilot([3, 5, 5, 4, 4, 6, 6, 5, 10]); // Pause times per frame (seconds)
@@ -313,10 +318,14 @@
       await XLN.prepopulate($isolatedEnv, XLN.process);
 
       isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
+      const frames = $isolatedEnv.history || [];
+      isolatedHistory.set(frames);
       isolatedTimeIndex.set(0);
+      isolatedIsLive.set(false);
 
-      lastAction = ' H-Topology Tutorial loaded';
+      console.log('[H-Topology] Frames loaded:', frames.length);
+
+      lastAction = `H-Topology: ${frames.length} frames loaded`;
 
       // Slower autopilot for more complex topology
       startAutopilot([5, 6, 6, 7, 7, 8, 8, 10, 12]);
@@ -341,10 +350,14 @@
       await XLN.prepopulateFullMechanics($isolatedEnv, XLN.process);
 
       isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
+      const frames = $isolatedEnv.history || [];
+      isolatedHistory.set(frames);
       isolatedTimeIndex.set(0);
+      isolatedIsLive.set(false);
 
-      lastAction = ' Full Mechanics Tutorial loaded - 15 frames';
+      console.log('[Full Mechanics] Frames loaded:', frames.length);
+
+      lastAction = `Full Mechanics: ${frames.length} frames loaded`;
 
       // Moderate autopilot (15 frames, ~8 min total)
       startAutopilot([4, 5, 5, 6, 6, 5, 5, 6, 5, 6, 6, 7, 5, 6, 10]);
