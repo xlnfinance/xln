@@ -280,6 +280,11 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
+      // CRITICAL: Clear old state BEFORE running demo
+      $isolatedEnv.replicas.clear();
+      $isolatedEnv.history = [];
+      console.log('[AHB] Cleared old state');
+
       // Run prepopulateAHB
       await XLN.prepopulateAHB($isolatedEnv, XLN.process);
 
@@ -313,6 +318,11 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
+      // CRITICAL: Clear old state BEFORE running demo
+      $isolatedEnv.replicas.clear();
+      $isolatedEnv.history = [];
+      console.log('[H-Topology] Cleared old state');
+
       // Run regular prepopulate (H-topology)
       await XLN.prepopulate($isolatedEnv, XLN.process);
 
@@ -343,6 +353,11 @@
     try {
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      // CRITICAL: Clear old state BEFORE running demo
+      $isolatedEnv.replicas.clear();
+      $isolatedEnv.history = [];
+      console.log('[Full Mechanics] Cleared old state');
 
       // Run comprehensive mechanics demo
       await XLN.prepopulateFullMechanics($isolatedEnv, XLN.process);
