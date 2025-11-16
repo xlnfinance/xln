@@ -5052,13 +5052,8 @@ let vrHammer: VRHammer | null = null;
     return `${isNegative ? '-' : ''}${wholePart.toLocaleString()}.${formatted}`;
   }
 
-  // Realistic bank names with emojis (instant recognition in VR)
-  const BANK_NAMES = [
-    '💰 Chase', '🏦 Bank of America', '💳 Wells Fargo', '🏛️ Citi', '💎 Goldman Sachs',
-    '📊 Morgan Stanley', '🌍 HSBC', '🇬🇧 Barclays', '🇩🇪 Deutsche Bank', '🇨🇭 UBS',
-    '🇨🇭 Credit Suisse', '🇫🇷 BNP Paribas', '🇪🇸 Santander', '🇨🇳 ICBC', '🏗️ China Construction',
-    '🌾 Agricultural Bank', '🇯🇵 Mizuho', '🏯 MUFG', '🇨🇦 RBC', '🍁 TD Bank'
-  ];
+  // REMOVED hardcoded bank names - override prepopulate names!
+  const BANK_NAMES: string[] = [];
 
   // S&P 500 tickers (matches ArchitectPanel)
   const SP500_TICKERS = [
