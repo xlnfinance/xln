@@ -17,13 +17,9 @@
 
   let selectedEntityId: string | null = null;
 
-  // Bank names (same as Graph3DPanel)
-  const BANK_NAMES = [
-    'Chase', 'Bank of America', 'Wells Fargo', 'Citi', 'Goldman Sachs',
-    'Morgan Stanley', 'HSBC', 'Barclays', 'Deutsche Bank', 'UBS',
-    'Credit Suisse', 'BNP Paribas', 'Santander', 'ICBC', 'China Construction',
-    'Agricultural Bank', 'Mizuho', 'MUFG', 'RBC', 'TD Bank'
-  ];
+  // REMOVED HARDCODED BANK NAMES - they override prepopulate entity names!
+  // Entity names now come ONLY from gossip profiles
+  const BANK_NAMES: string[] = [];
 
   const FED_NAMES = new Map([
     ['federal_reserve', 'Federal Reserve'],
