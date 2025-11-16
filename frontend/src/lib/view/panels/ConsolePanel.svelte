@@ -327,7 +327,7 @@
 
 <div class="console-panel">
   <div class="console-header">
-    <h3>📋 Console</h3>
+    <h3> Console</h3>
     <div class="console-controls">
       <input
         type="text"

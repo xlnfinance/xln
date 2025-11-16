@@ -152,7 +152,7 @@
 
 <div class="settings-panel">
   <div class="header">
-    <h3>⚙️ Settings</h3>
+    <h3> Settings</h3>
     <button class="reset-btn" on:click={resetToDefaults}>Reset All</button>
   </div>
 
@@ -162,7 +162,7 @@
       class:active={activeCategory === 'scene'}
       on:click={() => activeCategory = 'scene'}
     >
-      🌍 Scene
+       Scene
     </button>
     <button
       class:active={activeCategory === 'camera'}
@@ -186,7 +186,7 @@
       class:active={activeCategory === 'performance'}
       on:click={() => activeCategory = 'performance'}
     >
-      ⚡ Performance
+       Performance
     </button>
   </div>
 

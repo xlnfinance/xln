@@ -71,14 +71,14 @@
 
 <div class="runtime-io-panel">
   <div class="header">
-    <h3>🔄 Runtime I/O</h3>
+    <h3> Runtime I/O</h3>
     <div class="controls">
       <button
         class="view-toggle"
         class:active={viewMode === 'structured'}
         on:click={() => viewMode = 'structured'}
       >
-        📊 Structured
+         Structured
       </button>
       <button
         class="view-toggle"

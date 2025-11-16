@@ -96,14 +96,14 @@
 
 <div class="depository-panel">
   <div class="header">
-    <h3>💰 Depository (J-State)</h3>
+    <h3> Depository (J-State)</h3>
     <div class="meta">
       <span>Contract: {browserVMProvider.getDepositoryAddress().slice(0, 10)}...</span>
       <span>|</span>
       <span>Mode: Simnet</span>
     </div>
     <button on:click={refreshReserves} disabled={loading} class="refresh-btn">
-      {loading ? '⏳' : '🔄'} Refresh
+      {loading ? '⏳' : ''} Refresh
     </button>
   </div>
 

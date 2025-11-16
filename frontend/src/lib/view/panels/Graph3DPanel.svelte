@@ -774,7 +774,7 @@ let vrHammer: VRHammer | null = null;
           // Oculus Quest browsers support 'immersive-vr'
           const vrSupported = await (navigator as any).xr.isSessionSupported('immersive-vr');
           isVRSupported = vrSupported === true;
-          console.log('🥽 WebXR Detection:', {
+          console.log(' WebXR Detection:', {
             hasNavigatorXR: true,
             isSessionSupported: isVRSupported,
             isSecureContext: window.isSecureContext,
@@ -786,11 +786,11 @@ let vrHammer: VRHammer | null = null;
             console.warn('⚠️ WebXR requires HTTPS in production. Use self-signed cert or ngrok for testing.');
           }
         } catch (err) {
-          console.log('🥽 VR Support check failed:', err);
+          console.log(' VR Support check failed:', err);
           isVRSupported = false;
         }
       } else {
-        console.log('🥽 WebXR not available:', {
+        console.log(' WebXR not available:', {
           hasNavigatorXR: 'xr' in navigator,
           navigatorXRValue: (navigator as any).xr,
           isSecureContext: window.isSecureContext
@@ -1588,7 +1588,7 @@ let vrHammer: VRHammer | null = null;
     controller1.add(ray1);
     controller2.add(ray2);
 
-    console.log('🥽 VR Controllers initialized');
+    console.log(' VR Controllers initialized');
   }
 
   let vrGrabbedEntity: any = null;
@@ -1616,14 +1616,14 @@ let vrHammer: VRHammer | null = null;
         vrGrabbedEntity = entity;
         vrGrabController = controller;
         entity.isPinned = true; // Pin while dragging
-        console.log('🥽 Grabbed entity:', entity.id);
+        console.log(' Grabbed entity:', entity.id);
       }
     }
   }
 
   function onVRSelectEnd() {
     if (vrGrabbedEntity) {
-      console.log('🥽 Released entity:', vrGrabbedEntity.id);
+      console.log(' Released entity:', vrGrabbedEntity.id);
       vrGrabbedEntity = null;
       vrGrabController = null;
     }
@@ -1702,7 +1702,7 @@ let vrHammer: VRHammer | null = null;
         // Instructions
         ctx.font = 'bold 32px monospace';
         ctx.fillStyle = '#4fd18b';
-        ctx.fillText('💰 GREEN NUMBERS = Bank Reserves', 512, 200);
+        ctx.fillText(' GREEN NUMBERS = Bank Reserves', 512, 200);
 
         ctx.fillStyle = '#00ff41';
         ctx.fillText('🔵 BLUE LINES = Open Accounts', 512, 250);
@@ -1746,14 +1746,14 @@ let vrHammer: VRHammer | null = null;
 
       // Auto-start payment demo after 3 seconds in VR
       setTimeout(() => {
-        console.log('🎬 Auto-starting VR demo...');
+        console.log(' Auto-starting VR demo...');
         panelBridge.emit('auto-demo:start', {});
       }, 3000);
 
       // Switch to VR animation loop
       renderer.setAnimationLoop(animate);
 
-      console.log('🥽 Entered VR mode (Vision Pro optimized)');
+      console.log(' Entered VR mode (Vision Pro optimized)');
 
       // Listen for session end
       session.addEventListener('end', () => {
@@ -1779,7 +1779,7 @@ let vrHammer: VRHammer | null = null;
         // Return to regular animation loop
         renderer.setAnimationLoop(null);
         animate();
-        console.log('🥽 Exited VR mode - scene restored');
+        console.log(' Exited VR mode - scene restored');
       });
 
     } catch (error) {
@@ -1807,7 +1807,7 @@ let vrHammer: VRHammer | null = null;
    */
   async function handleRebalanceGesture(entityId: string) {
     try {
-      console.log(`🔄 Initiating automatic rebalance for entity: ${entityId}`);
+      console.log(` Initiating automatic rebalance for entity: ${entityId}`);
 
       // TODO: Implement hub rebalance coordination (Phase 3 of docs/next.md)
       console.log('⚠️ Rebalance coordination not yet implemented');
@@ -3018,8 +3018,8 @@ let vrHammer: VRHammer | null = null;
     // Format reserve as $ millions
     const reserveMillions = Number(reserveAmount) / 1_000_000;
     const reserveText = reserveMillions >= 1
-      ? `💰 $${reserveMillions.toFixed(1)}M`
-      : `💰 $${(Number(reserveAmount) / 1000).toFixed(0)}K`;
+      ? ` $${reserveMillions.toFixed(1)}M`
+      : ` $${(Number(reserveAmount) / 1000).toFixed(0)}K`;
 
     // GIANT green $ amount
     ctx.font = 'bold 48px monospace';
@@ -3113,10 +3113,10 @@ let vrHammer: VRHammer | null = null;
 
         const reserveMillions = Number(reserveAmount) / 1_000_000;
         const reserveText = reserveMillions >= 1
-          ? `💰 $${reserveMillions.toFixed(1)}M`
+          ? ` $${reserveMillions.toFixed(1)}M`
           : reserveAmount > 0n
-          ? `💰 $${(Number(reserveAmount) / 1000).toFixed(0)}K`
-          : '💰 $0';
+          ? ` $${(Number(reserveAmount) / 1000).toFixed(0)}K`
+          : ' $0';
 
         ctx.font = 'bold 48px monospace';
         ctx.textAlign = 'center';
@@ -4799,7 +4799,7 @@ let vrHammer: VRHammer | null = null;
         isolatedTimeIndex.set(-1)  // Go to live;
       }
 
-      console.log(`🎬 Executing live command: ${commandText}`);
+      console.log(` Executing live command: ${commandText}`);
 
       // Clear logged positions if this is a grid command (for fresh logs)
       if (commandText.trim().startsWith('grid')) {
@@ -4876,7 +4876,7 @@ let vrHammer: VRHammer | null = null;
     const baseUrl = window.location.origin;
     exportUrl = `${baseUrl}/?s=${base64Scenario}&loop=${start}:${end}`;
 
-    console.log(`📋 Generated slice URL: frames ${start}-${end}, scenario ${scenarioText.length} chars`);
+    console.log(` Generated slice URL: frames ${start}-${end}, scenario ${scenarioText.length} chars`);
   }
 
   function generateASCIIScenario() {
@@ -5079,15 +5079,15 @@ let vrHammer: VRHammer | null = null;
   ]);
 
   const FED_FLAGS = new Map([
-    ['federal_reserve', '🇺🇸'],
-    ['ecb', '🇪🇺'],
-    ['boc', '🇨🇳'],
-    ['boj', '🇯🇵'],
-    ['boe', '🇬🇧'],
-    ['snb', '🇨🇭'],
-    ['rbi', '🇮🇳'],
-    ['cbr', '🇷🇺'],
-    ['bundesbank', '🇩🇪']
+    ['federal_reserve', ''],
+    ['ecb', ''],
+    ['boc', ''],
+    ['boj', ''],
+    ['boe', ''],
+    ['snb', ''],
+    ['rbi', ''],
+    ['cbr', ''],
+    ['bundesbank', '']
   ]);
 
   /**

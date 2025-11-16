@@ -2473,7 +2473,7 @@
             {#if numberedEntities}
                Numbered: Entities registered on blockchain (slower, sequential numbers)
             {:else}
-              ⚡ Lazy: In-browser only entities (faster, hash-based IDs, no gas)
+               Lazy: In-browser only entities (faster, hash-based IDs, no gas)
             {/if}
           </p>
         </div>

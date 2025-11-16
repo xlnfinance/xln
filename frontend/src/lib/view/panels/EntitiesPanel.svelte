@@ -34,15 +34,15 @@
   ]);
 
   const FED_FLAGS = new Map([
-    ['federal_reserve', '🇺🇸'],
-    ['ecb', '🇪🇺'],
-    ['boc', '🇨🇳'],
-    ['boj', '🇯🇵'],
-    ['boe', '🇬🇧'],
-    ['snb', '🇨🇭'],
-    ['rbi', '🇮🇳'],
-    ['cbr', '🇷🇺'],
-    ['bundesbank', '🇩🇪']
+    ['federal_reserve', ''],
+    ['ecb', ''],
+    ['boc', ''],
+    ['boj', ''],
+    ['boe', ''],
+    ['snb', ''],
+    ['rbi', ''],
+    ['cbr', ''],
+    ['bundesbank', '']
   ]);
 
   function getEntityName(entityId: string, signerId: string | undefined): string {
@@ -106,7 +106,7 @@
 
 <div class="entities-panel">
   <div class="header">
-    <h3>🏢 Entities</h3>
+    <h3> Entities</h3>
     <span>{entities.length} total</span>
   </div>
 
