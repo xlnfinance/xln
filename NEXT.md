@@ -178,3 +178,62 @@ Graph3DPanel:8-10          - TODO: Move imports to view/
 
 ---
 
+
+## 2025-11-10 Session: AHB Demo + 3-Level UI
+
+### COMPLETED (18 commits):
+- ✅ AHB Demo (prepopulate-ahb.ts, 9 frames, Fed Chair subtitles)
+- ✅ Full Mechanics Demo (prepopulate-full-mechanics.ts, 15 frames)
+- ✅ 3-Level Preset System (LVL 1/2/3 game UI)
+- ✅ EntityObject.ts (proper entity hierarchy, 176 lines)
+- ✅ No-blockchain mode (works without EVM)
+- ✅ BANK_NAMES removed (hardcoded names bug)
+- ✅ env.clear() added (state cleanup)
+- ✅ E2E smoke test (tests/ahb-smoke.spec.ts)
+
+### INCOMPLETE (Next Session):
+
+**1. EntityObject Integration (2-3h)**
+- Import EntityObject into Graph3DPanel ✅ (started)
+- Replace old entity creation with new class
+- Test labels stick to entities
+- File: frontend/src/lib/view/3d/README.md (full plan)
+
+**2. /view Isolated Mode Debug (2h)**
+- Issue: Entities show but wrong names/frame count
+- Root cause: TBD (needs browser DevTools debugging)
+- Workaround: Main UI (Settings → AHB) WORKS!
+
+**3. Subtitle Rendering (1h)**
+- FrameSubtitle component exists
+- Subtitle data exists in frames
+- But doesn't render in /view
+- Likely: isolatedHistory store wiring issue
+
+### FILES CREATED:
+```
+runtime/
+├─ prepopulate-ahb.ts
+├─ prepopulate-full-mechanics.ts
+
+frontend/src/lib/
+├─ components/TimeMachine/FrameSubtitle.svelte
+├─ view/3d/EntityObject.ts
+├─ view/3d/README.md
+
+e2e/ahb-smoke.spec.ts
+TESTING-AHB.md
+vibepaper/architecture/jurisdiction-requirement.md
+```
+
+### KNOWN ISSUES:
+- /view mode: entities persist between demos
+- Labels float (EntityObject not integrated)
+- Subtitle doesn't show in /view
+- Main UI works perfectly ✅
+
+### MEMORY:
+- /view = main product (isolated, embeddable)
+- No global window.XLN in /view mode
+- EntityObject = correct architecture
+- Need focused debugging session for /view
