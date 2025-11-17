@@ -72,7 +72,7 @@
   // Time-travel aware: read from history[timeIndex] or live state
   $: entities = (() => {
     let replicas;
-    let gossipProfiles;
+    let gossipProfiles: any[] | undefined;
 
     // Time travel mode: show historical frame
     if (isolatedTimeIndex && isolatedHistory) {
