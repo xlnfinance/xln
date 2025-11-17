@@ -45,7 +45,10 @@
     ['bundesbank', '']
   ]);
 
-  function getEntityName(entityId: string, signerId: string | undefined): string {
+  function getEntityName(entityId: string, signerId: string | undefined, gossipName?: string): string {
+    // First priority: gossip profile name (from prepopulate demos)
+    if (gossipName) return gossipName;
+
     if (!signerId) return shortAddress(entityId);
 
     // Check if Fed
@@ -69,6 +72,7 @@
   // Time-travel aware: read from history[timeIndex] or live state
   $: entities = (() => {
     let replicas;
+    let gossipProfiles;
 
     // Time travel mode: show historical frame
     if (isolatedTimeIndex && isolatedHistory) {
@@ -78,12 +82,14 @@
         const idx = Math.min(timeIdx, hist.length - 1);
         const frame = hist[idx];
         replicas = frame?.replicas;
+        gossipProfiles = frame?.gossip?.profiles;
       }
     }
 
     if (!replicas) {
       // Live mode: read from current env
       replicas = $isolatedEnv?.replicas;
+      gossipProfiles = $isolatedEnv?.gossip?.getProfiles?.();
     }
 
     if (replicas) {
@@ -92,11 +98,16 @@
         const replicaKey = entry[0];
         const entityId = replicaKey.split(':')[0] || replicaKey;
         const replica = entry[1];
+
+        // Find gossip profile for this entity
+        const profile = gossipProfiles?.find((p: any) => p.entityId === entityId);
+
         return {
           id: entityId,
           replicaKey: replicaKey,
           signerId: replica?.signerId,
-          accounts: replica?.state?.accounts
+          accounts: replica?.state?.accounts,
+          name: profile?.metadata?.name, // Add name from gossip
         };
       });
     }
@@ -117,7 +128,7 @@
         class:selected={entity.id === selectedEntityId}
         on:click={() => panelBridge.emit('entity:selected', { entityId: entity.id })}
       >
-        <h4>{getEntityName(entity.id, entity.signerId)}</h4>
+        <h4>{getEntityName(entity.id, entity.signerId, entity.name)}</h4>
         <p>Accounts: {entity.accounts?.size || 0}</p>
       </div>
     {/each}

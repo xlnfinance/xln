@@ -160,6 +160,7 @@ function setReservesAndAccounts(
     collateral: bigint;
     delta: bigint;
   }>,
+  entityName?: string,
 ) {
   const [, replica] = findReplica(env, entityId);
   ensureReserves(replica, reserves);
@@ -176,7 +177,7 @@ function setReservesAndAccounts(
   }
 
   if (env.gossip) {
-    env.gossip.announce(buildEntityProfile(replica.state));
+    env.gossip.announce(buildEntityProfile(replica.state, entityName));
   }
 }
 
@@ -188,7 +189,11 @@ interface FrameSubtitle {
   keyMetrics?: string[];   // Optional: bullet points of key numbers
 }
 
+let pushSnapshotCount = 0;
+
 function pushSnapshot(env: Env, description: string, subtitle: FrameSubtitle) {
+  pushSnapshotCount++;
+  console.log(`[pushSnapshot #${pushSnapshotCount}] Called for: "${description}"`);
   const gossipSnapshot = cloneProfilesForSnapshot(env);
 
   const snapshot: EnvSnapshot = {
@@ -208,17 +213,24 @@ function pushSnapshot(env: Env, description: string, subtitle: FrameSubtitle) {
   };
 
   if (!env.history) {
+    console.log(`[pushSnapshot] Creating new history array`);
     env.history = [];
   }
 
+  const beforeLength = env.history.length;
   env.history.push(snapshot);
-  console.log(`📸 Snapshot: ${description}`);
+  const afterLength = env.history.length;
+  console.log(`📸 Snapshot: ${description} (history: ${beforeLength} → ${afterLength})`);
 }
 
 export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inputs?: EntityInput[]) => Promise<any>): Promise<void> {
+  pushSnapshotCount = 0; // RESET: Track if demo runs multiple times
+  env.disableAutoSnapshots = true; // DISABLE automatic tick snapshots - we use manual pushSnapshot instead
+
   console.log('[AHB] ========================================');
-  console.log('[AHB] Starting Alice-Hub-Bob Demo');
+  console.log('[AHB] Starting Alice-Hub-Bob Demo (Auto-snapshots DISABLED)');
   console.log('[AHB] BEFORE: replicas =', env.replicas.size, 'history =', env.history?.length || 0);
+  console.log('[AHB] Stack trace:', new Error().stack?.split('\n').slice(1, 5).join('\n'));
   console.log('[AHB] ========================================');
 
   const jurisdictions = await getAvailableJurisdictions();
@@ -291,9 +303,9 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
   // ============================================================================
   console.log('\n💰 FRAME 1: Initial State - Hub Reserve Funding');
 
-  setReservesAndAccounts(env, hub.id, usd(100), []);
-  setReservesAndAccounts(env, alice.id, usd(0), []);
-  setReservesAndAccounts(env, bob.id, usd(0), []);
+  setReservesAndAccounts(env, hub.id, usd(100), [], hub.name);
+  setReservesAndAccounts(env, alice.id, usd(0), [], alice.name);
+  setReservesAndAccounts(env, bob.id, usd(0), [], bob.name);
 
   pushSnapshot(env, 'Initial State: Hub Funded', {
     title: 'Initial Liquidity Provision',
@@ -325,10 +337,10 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
   // Setup state: Hub transferred 30 to Alice
   setReservesAndAccounts(env, hub.id, usd(70), [
     { counterpartyId: alice.id, ownCredit: 0n, peerCredit: 0n, collateral: 0n, delta: 0n }
-  ]);
+  ], hub.name);
   setReservesAndAccounts(env, alice.id, usd(30), [
     { counterpartyId: hub.id, ownCredit: 0n, peerCredit: 0n, collateral: 0n, delta: 0n }
-  ]);
+  ], alice.name);
 
   pushSnapshot(env, 'Hub → Alice: 30 USDC Reserve Transfer', {
     title: 'Reserve-to-Reserve Transfer (R2R)',
@@ -359,10 +371,10 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
   setReservesAndAccounts(env, hub.id, usd(50), [
     { counterpartyId: alice.id, ownCredit: 0n, peerCredit: 0n, collateral: 0n, delta: 0n },
     { counterpartyId: bob.id, ownCredit: 0n, peerCredit: 0n, collateral: 0n, delta: 0n }
-  ]);
+  ], hub.name);
   setReservesAndAccounts(env, bob.id, usd(20), [
     { counterpartyId: hub.id, ownCredit: 0n, peerCredit: 0n, collateral: 0n, delta: 0n }
-  ]);
+  ], bob.name);
 
   pushSnapshot(env, 'Hub → Bob: 20 USDC Reserve Transfer', {
     title: 'Second R2R Transfer',
@@ -383,11 +395,11 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
 
   setReservesAndAccounts(env, alice.id, usd(20), [
     { counterpartyId: hub.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(10), delta: usd(10) }
-  ]);
+  ], alice.name);
   setReservesAndAccounts(env, hub.id, usd(50), [
     { counterpartyId: alice.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(10), delta: -usd(10) },
     { counterpartyId: bob.id, ownCredit: 0n, peerCredit: 0n, collateral: 0n, delta: 0n }
-  ]);
+  ], hub.name);
 
   pushSnapshot(env, 'Alice → Hub: 10 USDC Reserve to Collateral', {
     title: 'Reserve-to-Collateral Prefunding (R2C)',
@@ -409,11 +421,11 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
 
   setReservesAndAccounts(env, bob.id, usd(5), [
     { counterpartyId: hub.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(15), delta: -usd(15) }
-  ]);
+  ], bob.name);
   setReservesAndAccounts(env, hub.id, usd(50), [
     { counterpartyId: alice.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(10), delta: -usd(10) },
     { counterpartyId: bob.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(15), delta: usd(15) }
-  ]);
+  ], hub.name);
 
   pushSnapshot(env, 'Bob → Hub: 15 USDC Reserve to Collateral', {
     title: 'Second R2C Prefunding',
@@ -435,11 +447,11 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
 
   setReservesAndAccounts(env, alice.id, usd(20), [
     { counterpartyId: hub.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(10), delta: usd(5) }
-  ]);
+  ], alice.name);
   setReservesAndAccounts(env, hub.id, usd(50), [
     { counterpartyId: alice.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(10), delta: -usd(5) },
     { counterpartyId: bob.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(15), delta: usd(15) }
-  ]);
+  ], hub.name);
 
   pushSnapshot(env, 'Alice → Hub: 5 USDC Off-Chain (Ondelta)', {
     title: 'Off-Chain Bilateral Netting',
@@ -461,11 +473,11 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
 
   setReservesAndAccounts(env, bob.id, usd(5), [
     { counterpartyId: hub.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(15), delta: -usd(23) }
-  ]);
+  ], bob.name);
   setReservesAndAccounts(env, hub.id, usd(50), [
     { counterpartyId: alice.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(10), delta: -usd(5) },
     { counterpartyId: bob.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(15), delta: usd(23) }
-  ]);
+  ], hub.name);
 
   pushSnapshot(env, 'Hub → Bob: 8 USDC Off-Chain (Ondelta)', {
     title: 'Credit Extension Beyond Collateral',
@@ -487,11 +499,11 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
 
   setReservesAndAccounts(env, alice.id, usd(25), [
     { counterpartyId: hub.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(0), delta: usd(0) }
-  ]);
+  ], alice.name);
   setReservesAndAccounts(env, hub.id, usd(45), [
     { counterpartyId: alice.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(0), delta: usd(0) },
     { counterpartyId: bob.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(15), delta: usd(23) }
-  ]);
+  ], hub.name);
 
   pushSnapshot(env, 'Alice Closes Account: Collateral → Reserve Settlement', {
     title: 'Cooperative Settlement (Collateral-to-Reserve)',
@@ -526,9 +538,13 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     ]
   });
 
+  env.disableAutoSnapshots = false; // RE-ENABLE auto-snapshots for normal operation
+
   console.log('\n=====================================');
   console.log('✅ AHB Demo Complete!');
   console.log('9 frames captured for time machine playback');
   console.log('Use arrow keys to step through the demo');
   console.log('=====================================\n');
+  console.log(`[AHB] FINAL: Total snapshots pushed: ${pushSnapshotCount}`);
+  console.log(`[AHB] FINAL: env.history.length: ${env.history?.length}`);
 }
