@@ -204,9 +204,10 @@ function pushFinalSnapshot(env: Env, description: string) {
 
 export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs?: EntityInput[]) => Promise<any>): Promise<void> {
   env.disableAutoSnapshots = true; // Disable automatic tick snapshots
-  console.log('🌐 Starting XLN Prepopulation');
-  console.log('================================');
-  console.log('Creating H-shaped network topology:');
+  try {
+    console.log('🌐 Starting XLN Prepopulation');
+    console.log('================================');
+    console.log('Creating H-shaped network topology:');
   console.log('  • 2 Hubs (E1, E2) - connected crossbar');
   console.log('  • 4 Users (E3-E6) - split between hubs');
   console.log('    - E3, E4 → Hub E1');
@@ -436,10 +437,11 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
   console.log('  • Topology: Clean 6-entity visualization (perfect number)');
   console.log('\nYou can now:');
   console.log('  1. View clean H-shaped topology in bird view');
-  console.log('  2. Send payments between any entities');
-  console.log('  3. Payments will route through hubs automatically');
-  console.log('================================\n');
-
-  env.disableAutoSnapshots = false; // Re-enable auto-snapshots
+    console.log('  2. Send payments between any entities');
+    console.log('  3. Payments will route through hubs automatically');
+    console.log('================================\n');
+  } finally {
+    env.disableAutoSnapshots = false; // ALWAYS re-enable, even on error
+  }
 }
 

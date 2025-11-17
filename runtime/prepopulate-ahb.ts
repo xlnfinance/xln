@@ -227,13 +227,14 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
   pushSnapshotCount = 0; // RESET: Track if demo runs multiple times
   env.disableAutoSnapshots = true; // DISABLE automatic tick snapshots - we use manual pushSnapshot instead
 
-  console.log('[AHB] ========================================');
-  console.log('[AHB] Starting Alice-Hub-Bob Demo (Auto-snapshots DISABLED)');
-  console.log('[AHB] BEFORE: replicas =', env.replicas.size, 'history =', env.history?.length || 0);
-  console.log('[AHB] Stack trace:', new Error().stack?.split('\n').slice(1, 5).join('\n'));
-  console.log('[AHB] ========================================');
+  try {
+    console.log('[AHB] ========================================');
+    console.log('[AHB] Starting Alice-Hub-Bob Demo (Auto-snapshots DISABLED)');
+    console.log('[AHB] BEFORE: replicas =', env.replicas.size, 'history =', env.history?.length || 0);
+    console.log('[AHB] Stack trace:', new Error().stack?.split('\n').slice(1, 5).join('\n'));
+    console.log('[AHB] ========================================');
 
-  const jurisdictions = await getAvailableJurisdictions();
+    const jurisdictions = await getAvailableJurisdictions();
   let arrakis = jurisdictions.find(j => j.name.toLowerCase() === 'arrakis');
 
   // FALLBACK: Create mock jurisdiction if none exist (for isolated /view mode)
@@ -538,13 +539,14 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     ]
   });
 
-  env.disableAutoSnapshots = false; // RE-ENABLE auto-snapshots for normal operation
-
-  console.log('\n=====================================');
-  console.log('✅ AHB Demo Complete!');
-  console.log('9 frames captured for time machine playback');
-  console.log('Use arrow keys to step through the demo');
-  console.log('=====================================\n');
-  console.log(`[AHB] FINAL: Total snapshots pushed: ${pushSnapshotCount}`);
-  console.log(`[AHB] FINAL: env.history.length: ${env.history?.length}`);
+    console.log('\n=====================================');
+    console.log('✅ AHB Demo Complete!');
+    console.log('9 frames captured for time machine playback');
+    console.log('Use arrow keys to step through the demo');
+    console.log('=====================================\n');
+    console.log(`[AHB] FINAL: Total snapshots pushed: ${pushSnapshotCount}`);
+    console.log(`[AHB] FINAL: env.history.length: ${env.history?.length}`);
+  } finally {
+    env.disableAutoSnapshots = false; // ALWAYS re-enable, even on error
+  }
 }

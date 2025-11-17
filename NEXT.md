@@ -38,40 +38,7 @@
 
 ## 🎯 NEXT SESSION PRIORITIES:
 
-### 1. FIX /view Entity Names (CRITICAL - 1h)
-**Problem:** Entities show 0x000...001 instead of Alice/Hub/Bob
-
-**Solution:**
-- Check gossip profile creation in prepopulateAHB
-- Verify buildEntityProfile() called with name
-- Debug name resolution in EntitiesPanel
-- Test that Alice/Hub/Bob appear
-
-**Files:**
-- runtime/prepopulate-ahb.ts (check gossip.announce)
-- frontend/src/lib/view/panels/EntitiesPanel.svelte (name display)
-
-### 2. Fix Frame Count (HIGH - 1h)
-**Problem:** 18 frames instead of 9
-
-**Solution:**
-- Count pushSnapshot calls in prepopulate-ahb.ts (verify = 9)
-- Check if old frames persist after .clear()
-- Add env.history = [] BEFORE prepopulate
-- Test frame count correct
-
-### 3. Integrate EntityObject (HIGH - 2h)
-**Problem:** Labels float separately
-
-**Solution:**
-- Import EntityObject into Graph3DPanel ✅ (done)
-- Find entity creation (~line 1040-1100)
-- Replace with: new EntityObject(data)
-- Test labels stick to entities
-
-**File:** frontend/src/lib/view/panels/Graph3DPanel.svelte
-
-### 4. Subtitle Rendering (MEDIUM - 30min)
+### 1. Subtitle Rendering in /view (MEDIUM - 30min)
 **Problem:** FrameSubtitle doesn't show in /view
 
 **Solution:**
