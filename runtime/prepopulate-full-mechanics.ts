@@ -170,6 +170,7 @@ function createAccount(replica: EntityReplica, counterpartyId: string, collatera
 }
 
 export async function prepopulateFullMechanics(env: Env, processUntilEmpty: (env: Env, inputs?: EntityInput[]) => Promise<any>): Promise<void> {
+  env.disableAutoSnapshots = true; // Disable automatic tick snapshots
   console.log('🎓 COMPREHENSIVE DEMO: All 10 Core Mechanics');
   console.log('═══════════════════════════════════════════════\n');
 
@@ -492,4 +493,6 @@ export async function prepopulateFullMechanics(env: Env, processUntilEmpty: (env
   console.log('✅ All 10 Mechanics Demo Complete!');
   console.log(`Total frames: ${env.history?.length || 0}`);
   console.log('═══════════════════════════════════════════════\n');
+
+  env.disableAutoSnapshots = false; // Re-enable auto-snapshots
 }

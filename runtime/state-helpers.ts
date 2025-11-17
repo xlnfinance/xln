@@ -149,6 +149,11 @@ export const captureSnapshot = (
   runtimeOutputs: EntityInput[],
   description: string,
 ): void => {
+  // Skip automatic snapshots if disabled (for prepopulate demos)
+  if (env.disableAutoSnapshots) {
+    return;
+  }
+
   const gossipProfiles = env.gossip?.getProfiles
     ? env.gossip.getProfiles().map((profile: Profile) => {
         try {

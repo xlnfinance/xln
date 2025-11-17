@@ -1,26 +1,38 @@
 # NEXT.md - Priority Tasks
 
-## 🔥 CURRENT SESSION (2025-11-17): AHB Demo
+## 🔥 CURRENT SESSION (2025-11-17 PM): Critical Fixes COMPLETE
 
-### STATUS: Partially Complete (20 commits, ~7 hours)
+### STATUS: 2 MAJOR BUGS FIXED (autonomous session)
 
-**WORKING:**
+**FIXED THIS SESSION:**
+- ✅ Entity names: Alice/Hub/Bob display correctly (was showing 0x000...001)
+- ✅ Frame count: 9 frames exactly (was 18 - auto-snapshots now disabled in demos)
+- ✅ All 3 prepopulate functions patched (AHB, H-Topology, Full Mechanics)
+
+**STILL TODO:**
+- ⏳ Subtitle doesn't render in /view (works in main UI)
+- ⏳ EntityObject integration in Graph3D (labels float)
+- ⏳ TypeScript errors (51 errors - pre-existing)
+
+**PREVIOUS SESSION (2025-11-17 AM):**
 - ✅ prepopulate-ahb.ts (Alice-Hub-Bob demo code)
 - ✅ prepopulate-full-mechanics.ts (10 primitives)
 - ✅ 3-level UI (ELEMENTARY/INTERMEDIATE/ADVANCED)
 - ✅ EntityObject.ts architecture (176 lines)
 - ✅ Main UI path works (localhost:8080 → Settings → AHB)
 
-**BROKEN:**
-- ❌ /view mode: entities show as IDs (0x000...001) not names (Alice/Hub/Bob)
-- ❌ Frame count wrong (18 instead of 9)
-- ❌ Subtitle doesn't render in /view
-- ❌ Labels float (EntityObject not integrated)
+**ROOT CAUSES IDENTIFIED & FIXED:**
 
-**ROOT CAUSES:**
-1. Entity names from gossip profiles not resolved
-2. Old frames persist (env.clear() not fully working?)
-3. Runtime.js browser cache issues
+**Bug 1: Entity Names (0x000...001 instead of Alice)**
+- **Cause:** buildEntityProfile() didn't include name in metadata
+- **Fix:** Added name param + updated all setReservesAndAccounts calls
+- **Files:** runtime/gossip-helper.ts, runtime/prepopulate-ahb.ts, frontend/EntitiesPanel.svelte
+
+**Bug 2: 18 Frames Instead of 9**
+- **Cause:** captureSnapshot() auto-created "Tick X" frames on EVERY XLN.process() call
+- **Root:** state-helpers.ts:192 pushed to envHistory unconditionally
+- **Fix:** Added env.disableAutoSnapshots flag, disabled during all prepopulate demos
+- **Files:** runtime/types.ts (Env interface), runtime/state-helpers.ts, all 3 prepopulate files
 
 ---
 

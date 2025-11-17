@@ -583,6 +583,9 @@ export interface Env {
   // Xlnomy system (multi-jurisdiction support)
   xlnomies?: Map<string, Xlnomy>; // name → Xlnomy instance
   activeXlnomy?: string; // Currently active Xlnomy name
+
+  // Snapshot control (for prepopulate demos)
+  disableAutoSnapshots?: boolean; // When true, captureSnapshot skips automatic tick frames
 }
 
 export interface RuntimeSnapshot {

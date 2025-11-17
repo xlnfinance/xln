@@ -203,6 +203,7 @@ function pushFinalSnapshot(env: Env, description: string) {
 }
 
 export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs?: EntityInput[]) => Promise<any>): Promise<void> {
+  env.disableAutoSnapshots = true; // Disable automatic tick snapshots
   console.log('🌐 Starting XLN Prepopulation');
   console.log('================================');
   console.log('Creating H-shaped network topology:');
@@ -438,5 +439,7 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
   console.log('  2. Send payments between any entities');
   console.log('  3. Payments will route through hubs automatically');
   console.log('================================\n');
+
+  env.disableAutoSnapshots = false; // Re-enable auto-snapshots
 }
 

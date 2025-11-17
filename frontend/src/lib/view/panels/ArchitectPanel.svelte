@@ -273,7 +273,13 @@
   }
 
   /** Start AHB Tutorial with autopilot */
+  let ahbRunning = false; // Guard against double execution
   async function startAHBTutorial() {
+    if (ahbRunning) {
+      console.log('[Architect] AHB already running, skipping duplicate call');
+      return;
+    }
+    ahbRunning = true;
     loading = true;
     tutorialActive = true;
     try {
@@ -295,6 +301,8 @@
       // Update isolated stores
       isolatedEnv.set($isolatedEnv);
       const frames = $isolatedEnv.history || [];
+      console.log('[Architect] Setting isolatedHistory with frames:', frames.length);
+      console.log('[Architect] Frame descriptions:', frames.map(f => f.description));
       isolatedHistory.set(frames);
       isolatedTimeIndex.set(0);
 
@@ -314,6 +322,7 @@
       tutorialActive = false;
     } finally {
       loading = false;
+      ahbRunning = false; // Reset guard
     }
   }
 

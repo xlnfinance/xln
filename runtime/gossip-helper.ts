@@ -11,7 +11,7 @@ import { deriveDelta, isLeft } from './account-utils';
  * Build gossip profile from entity state
  * Includes all account capacities for routing
  */
-export function buildEntityProfile(entityState: EntityState): Profile {
+export function buildEntityProfile(entityState: EntityState, name?: string): Profile {
   const accounts: Profile['accounts'] = [];
 
   // Build account capacities from all accounts
@@ -47,6 +47,7 @@ export function buildEntityProfile(entityState: EntityState): Profile {
       isHub: false, // Future: Determine from entity capabilities or manual config
       routingFeePPM: 100, // Default 100 PPM (0.01%)
       baseFee: 0n,
+      ...(name ? { name } : {}), // Include name if provided
     },
     accounts,
   };
