@@ -281,21 +281,28 @@
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // CRITICAL: Clear old state BEFORE running demo
+      console.log('[Architect] BEFORE clear: replicas =', $isolatedEnv.replicas.size);
       $isolatedEnv.replicas.clear();
       $isolatedEnv.history = [];
-      console.log('[AHB] Cleared old state');
+      console.log('[Architect] AFTER clear: replicas =', $isolatedEnv.replicas.size);
 
       // Run prepopulateAHB
+      console.log('[Architect] Calling prepopulateAHB...');
       await XLN.prepopulateAHB($isolatedEnv, XLN.process);
+      console.log('[Architect] prepopulateAHB returned');
+      console.log('[Architect] AFTER prepopulate: replicas =', $isolatedEnv.replicas.size, 'history =', $isolatedEnv.history?.length);
 
       // Update isolated stores
       isolatedEnv.set($isolatedEnv);
       const frames = $isolatedEnv.history || [];
       isolatedHistory.set(frames);
-      isolatedTimeIndex.set(0); // TimeMachine will auto-enter HISTORY mode
+      isolatedTimeIndex.set(0);
 
-      console.log('[AHB] Frames loaded:', frames.length);
-      console.log('[AHB] Subtitle exists:', !!frames[0]?.subtitle);
+      console.log('[Architect] Frames in localHistory store:', frames.length);
+      console.log('[Architect] First frame subtitle:', !!frames[0]?.subtitle);
+      if (frames.length > 0) {
+        console.log('[Architect] Frame 0 description:', frames[0].description);
+      }
 
       lastAction = `AHB Tutorial: ${frames.length} frames loaded`;
 
