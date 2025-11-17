@@ -216,14 +216,10 @@ function pushSnapshot(env: Env, description: string, subtitle: FrameSubtitle) {
 }
 
 export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inputs?: EntityInput[]) => Promise<any>): Promise<void> {
-  console.log('🎬 Starting Alice-Hub-Bob (AHB) Demo');
-  console.log('=====================================');
-  console.log('Educational flow demonstrating:');
-  console.log('  • Reserve-to-Reserve (R2R) transfers');
-  console.log('  • Reserve-to-Collateral (R2C) prefunding');
-  console.log('  • Off-chain ondelta changes (bilateral netting)');
-  console.log('  • Collateral-to-Reserve (C2R) withdrawals');
-  console.log('=====================================\n');
+  console.log('[AHB] ========================================');
+  console.log('[AHB] Starting Alice-Hub-Bob Demo');
+  console.log('[AHB] BEFORE: replicas =', env.replicas.size, 'history =', env.history?.length || 0);
+  console.log('[AHB] ========================================');
 
   const jurisdictions = await getAvailableJurisdictions();
   let arrakis = jurisdictions.find(j => j.name.toLowerCase() === 'arrakis');
