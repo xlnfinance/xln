@@ -1,239 +1,178 @@
-# next.md - clean roadmap
+# NEXT.md - Priority Tasks
 
-**Last Updated:** 2025-11-07 23:00
-**Session:** Fed Chair demo + Performance + UX polish (15 commits)
+## 🔥 CURRENT SESSION (2025-11-17): AHB Demo
 
----
+### STATUS: Partially Complete (20 commits, ~7 hours)
 
-## 🔴 CRITICAL NEXT SESSION
+**WORKING:**
+- ✅ prepopulate-ahb.ts (Alice-Hub-Bob demo code)
+- ✅ prepopulate-full-mechanics.ts (10 primitives)
+- ✅ 3-level UI (ELEMENTARY/INTERMEDIATE/ADVANCED)
+- ✅ EntityObject.ts architecture (176 lines)
+- ✅ Main UI path works (localhost:8080 → Settings → AHB)
 
-### 1. Speed up HYBRID creation (15s → <1s)
-**File:** `frontend/src/lib/view/panels/ArchitectPanel.svelte` ~line 850
-**Current:** Sequential `await XLN.applyRuntimeInput()` for each entity (21 calls)
-**Fix:** Batch all entities: `await XLN.applyRuntimeInput({runtimeTxs: all21Entities})`
-**Effort:** 15min
+**BROKEN:**
+- ❌ /view mode: entities show as IDs (0x000...001) not names (Alice/Hub/Bob)
+- ❌ Frame count wrong (18 instead of 9)
+- ❌ Subtitle doesn't render in /view
+- ❌ Labels float (EntityObject not integrated)
 
-### 2. Safari macOS broken
-**Need:** Console errors from user (Cmd+Option+I)
-**See:** `reports/2025-11-07-safari-bug.md`
-
-### 3. Entity click → panel
-**File:** `Graph3DPanel.svelte:4063` (onMouseClick)
-**Add:** `panelBridge.emit('entity:selected', {entityId})`
-**Effort:** 10min
-
----
-
-## 🟡 HIGH (Code Quality)
-
-### 4. Remove 15x 'as any'
-**File:** Graph3DPanel.svelte (lines 772, 775, 795, 928, 932, 935, 938, 1428-1430, 1657, 3239, 4086-4088)
-**Fix:** WebXR type definitions, JMachineUserData interface
-**Effort:** 30min
-
-### 5. DRY: updateIsolatedStores()
-**File:** ArchitectPanel.svelte (5 locations)
-**Effort:** 15min
-
-### 6. Remove unused vars
-**File:** Graph3DPanel.svelte:910-911 (`lastReplicaCount`, `updateDebounceTimer`)
-**Effort:** 2min
+**ROOT CAUSES:**
+1. Entity names from gossip profiles not resolved
+2. Old frames persist (env.clear() not fully working?)
+3. Runtime.js browser cache issues
 
 ---
 
-## 🟢 MEDIUM (UX)
+## 🎯 NEXT SESSION PRIORITIES:
 
-### 7. Keyboard shortcuts
-Space, arrows, Home/End, F
-**Effort:** 15min
+### 1. FIX /view Entity Names (CRITICAL - 1h)
+**Problem:** Entities show 0x000...001 instead of Alice/Hub/Bob
 
-### 8. Time machine mini mode
-**Effort:** 10min
+**Solution:**
+- Check gossip profile creation in prepopulateAHB
+- Verify buildEntityProfile() called with name
+- Debug name resolution in EntitiesPanel
+- Test that Alice/Hub/Bob appear
 
-### 9. Compact entity list
-**Effort:** 20min
+**Files:**
+- runtime/prepopulate-ahb.ts (check gossip.announce)
+- frontend/src/lib/view/panels/EntitiesPanel.svelte (name display)
 
-### 10. Alice-Hub-Bob button
-**Effort:** 5min
+### 2. Fix Frame Count (HIGH - 1h)
+**Problem:** 18 frames instead of 9
 
----
+**Solution:**
+- Count pushSnapshot calls in prepopulate-ahb.ts (verify = 9)
+- Check if old frames persist after .clear()
+- Add env.history = [] BEFORE prepopulate
+- Test frame count correct
 
-## 📊 TODAY'S WORK (2025-11-07)
+### 3. Integrate EntityObject (HIGH - 2h)
+**Problem:** Labels float separately
 
-**Commits:** 15
-**Reports:** 14 (private, in `reports/`)
-
-**Completed:**
-- ✅ Fed Chair one-click demo
-- ✅ HYBRID economy (works, 15s creation)
-- ✅ Performance 5x faster (3x3 grid, 10x entity sizes, no antialiasing)
-- ✅ Layout 75/25 (code correct, browser cache issue)
-- ✅ Time machine/bars toggles
-- ✅ 6 bugs fixed
-
-**Read:** `cat reports/2025-11-07-COMPLETE-SESSION-SUMMARY.md`
-
----
-
-## 🚀 PRODUCTION
-
-**https://xln.finance/view:**
-- ✅ Working (HYBRID: 313 FPS, 30 entities)
-- ⚠️ Slow (15s creation)
-- ⚠️ Safari broken
-
-**Latest:** 316f991
-
----
-
-**Start next session:** Batch optimization (#1)
-
----
-
-## 🔵 LOW-HANGING (2-5 min each)
-
-### 11. Layout cache workaround
-**Issue:** Browser localStorage caches old 50/50 layout despite code being 75/25
-**Fix:** Add "Reset Layout" button in SettingsPanel → `localStorage.removeItem('xln-layout')`
-**Effort:** 5min
-
-### 12. Reports index
-**File:** `reports/README.md` (create index of all 14 reports)
-**Effort:** 5min
-
-### 13. Inline code TODOs
-**Found:** 7 TODOs in ArchitectPanel/Graph3DPanel
-**Notable:** Graph3DPanel:4156 "Switch to panels view" = entity click feature (#3)
-**Action:** Review and resolve or remove
-**Effort:** 15min
-
-### 14. Cleanup background processes
-**Issue:** Multiple `bun run dev`, deploy scripts still running
-**Command:** `pkill -f "bun run dev" && pkill -f "auto-deploy"`
-**Effort:** 1min
-
----
-
-## 📌 MISSED IDEAS (From Session Discussion)
-
-**Recorded in reports but not in NEXT.md:**
-
-### Future (Low Priority)
-- FREQUENTLY_ASKED.md (reduce Claude re-explaining between sessions)
-- Multi-model orchestration (Gemini/Grok for parallel tasks)
-- Presentation-driven development (Figma → Code workflow)
-- Autonomous agent loop (works while you sleep)
-
-**See:** `reports/2025-11-07-session-summary.md` sections 2-4
-
----
-
-## 🐛 INLINE CODE TODOS
-
-```
-ArchitectPanel.svelte:1567 - TODO: Trigger Fed emergency lending
-ArchitectPanel.svelte:1898 - TODO: Load xlnomy's replicas and history
-Graph3DPanel.svelte:4156   - TODO: Switch to panels view (= #3 entity click!)
-Graph3DPanel.svelte:1815   - TODO: Hub rebalance coordination
-Graph3DPanel:8-10          - TODO: Move imports to view/
-```
-
-**Action:** Review in next session, implement or delete
-
----
-
-**Total actionable items:** 14 (3 critical, 3 high, 4 medium, 4 low)
-**Estimated total time:** ~3.5 hours for all
-
-
----
-
-## 🏗️ ARCHITECTURE (Design Phase)
-
-### 15. Multi-Runtime Support
-**Vision:** Runtime switcher dropdown, local/remote runtimes, state persistence
-**Needs:** Design decisions from user (see below)
-**Effort:** ~8 hours total (phases 1-4)
-**See:** `reports/2025-11-07-multi-runtime-architecture.md`
-
-**Quick wins (25min):**
-- Center J-Machine on grid intersections (snap to 666px cells)
-- Save camera position to localStorage
-- Auto-restore UI state on reload
-
-**Full system (8hr):**
-- Runtime switcher dropdown
-- State persistence (env + history + camera)
-- Session locking (multi-tab warning)
-- Remote runtime (WebSocket to bun server)
-
-**Critical questions (need answers):**
-1. One runtime per tab OR dropdown switcher? (Recommend: dropdown)
-2. Local (BrowserVM) OR remote (WebSocket)? (Recommend: local default)
-3. Persist everything OR just env? (Recommend: everything)
-4. Multi-tab: Lock, Sync, or Warn? (Recommend: warn)
-5. Remote protocol: REST, WebSocket, or SSE? (Recommend: WebSocket)
-
-**Read full analysis:** `cat reports/2025-11-07-multi-runtime-architecture.md`
-
----
-
-
-## 2025-11-10 Session: AHB Demo + 3-Level UI
-
-### COMPLETED (18 commits):
-- ✅ AHB Demo (prepopulate-ahb.ts, 9 frames, Fed Chair subtitles)
-- ✅ Full Mechanics Demo (prepopulate-full-mechanics.ts, 15 frames)
-- ✅ 3-Level Preset System (LVL 1/2/3 game UI)
-- ✅ EntityObject.ts (proper entity hierarchy, 176 lines)
-- ✅ No-blockchain mode (works without EVM)
-- ✅ BANK_NAMES removed (hardcoded names bug)
-- ✅ env.clear() added (state cleanup)
-- ✅ E2E smoke test (tests/ahb-smoke.spec.ts)
-
-### INCOMPLETE (Next Session):
-
-**1. EntityObject Integration (2-3h)**
-- Import EntityObject into Graph3DPanel ✅ (started)
-- Replace old entity creation with new class
+**Solution:**
+- Import EntityObject into Graph3DPanel ✅ (done)
+- Find entity creation (~line 1040-1100)
+- Replace with: new EntityObject(data)
 - Test labels stick to entities
-- File: frontend/src/lib/view/3d/README.md (full plan)
 
-**2. /view Isolated Mode Debug (2h)**
-- Issue: Entities show but wrong names/frame count
-- Root cause: TBD (needs browser DevTools debugging)
-- Workaround: Main UI (Settings → AHB) WORKS!
+**File:** frontend/src/lib/view/panels/Graph3DPanel.svelte
 
-**3. Subtitle Rendering (1h)**
-- FrameSubtitle component exists
-- Subtitle data exists in frames
-- But doesn't render in /view
-- Likely: isolatedHistory store wiring issue
+### 4. Subtitle Rendering (MEDIUM - 30min)
+**Problem:** FrameSubtitle doesn't show in /view
 
-### FILES CREATED:
+**Solution:**
+- Check /view/core/TimeMachine.svelte wiring
+- Verify currentSubtitle reactive var
+- Test subtitle appears at bottom
+
+---
+
+## 📁 FILES CREATED THIS SESSION:
+
 ```
 runtime/
-├─ prepopulate-ahb.ts
-├─ prepopulate-full-mechanics.ts
+├─ prepopulate-ahb.ts (AHB demo, 9 frames)
+├─ prepopulate-full-mechanics.ts (15 frames, 10 mechanics)
 
 frontend/src/lib/
-├─ components/TimeMachine/FrameSubtitle.svelte
-├─ view/3d/EntityObject.ts
-├─ view/3d/README.md
+├─ components/TimeMachine/FrameSubtitle.svelte (Fed Chair subtitles)
+├─ view/3d/EntityObject.ts (proper entity hierarchy)
+├─ view/3d/README.md (refactor plan)
 
-e2e/ahb-smoke.spec.ts
-TESTING-AHB.md
+e2e/ahb-smoke.spec.ts (smoke test)
+tests/ahb-demo.spec.ts (E2E test)
+TESTING-AHB.md (instructions)
 vibepaper/architecture/jurisdiction-requirement.md
 ```
 
-### KNOWN ISSUES:
-- /view mode: entities persist between demos
-- Labels float (EntityObject not integrated)
-- Subtitle doesn't show in /view
-- Main UI works perfectly ✅
+---
 
-### MEMORY:
-- /view = main product (isolated, embeddable)
-- No global window.XLN in /view mode
-- EntityObject = correct architecture
-- Need focused debugging session for /view
+## 🧪 TESTING:
+
+**Working Path (NOW):**
+```
+https://localhost:8080 (main UI)
+→ Settings gear
+→ Dropdown: "Alice-Hub-Bob Demo"
+→ Click "Run"
+→ Wait 3 sec
+→ Navigate with arrow keys
+→ Subtitles show! ✅
+```
+
+**Broken Path:**
+```
+https://localhost:8080/view
+→ Architect → Economy → LVL 1 → Alice-Hub-Bob
+→ Entities show but wrong names ❌
+→ 18 frames (not 9) ❌
+```
+
+---
+
+## 💾 COMMITS TODAY: 20
+
+```
+d13f0f8 debug: extensive logging in prepopulateAHB
+059900e debug: extensive logging in ArchitectPanel
+3aa7a59 fix: smoke test checks UI
+16c0824 cleanup: remove ALL emojis from panels
+3276257 fix: remove BANK_NAMES from Graph3D
+42946d4 fix: remove hardcoded bank names (ROOT CAUSE)
+1b663c9 fix: clear isolated env before tutorials
+420868a arch: EntityObject encapsulation
+... +12 more
+```
+
+---
+
+## 🔧 ARCHITECTURAL NOTES:
+
+**View Isolation (MUST REMEMBER):**
+- /view uses localEnvStore (isolated, no window.XLN)
+- Embeddable design
+- No global state
+- All stores passed as props
+
+**Entity Hierarchy:**
+```
+EntityObject extends THREE.Group
+├─ mesh (octahedron)
+├─ label (sprite - CHILD, moves with entity)
+├─ reserveBar (CHILD)
+└─ edges[] (managed)
+```
+
+**Prepopulate Flow:**
+```
+1. .clear() replicas + history
+2. createNumberedEntity() → importReplica
+3. openAccount between entities
+4. setReservesAndAccounts()
+5. pushSnapshot() for each frame
+```
+
+---
+
+## 🎯 QUICK WINS FOR NEXT SESSION:
+
+1. **Hard refresh browser** (Ctrl+Shift+R)
+2. **Check console for [AHB] logs**
+3. **Verify gossip profiles have names**
+4. **Fix name resolution** (EntitiesPanel)
+5. **Test Alice/Hub/Bob appear**
+
+**Estimated:** 2-3 hours focused work
+
+---
+
+## 📝 REMEMBER:
+
+- prepopulateAHB code = CORRECT ✅
+- Architecture = SOUND ✅
+- Integration = INCOMPLETE ⏳
+- Main UI = WORKS ✅
+
+Next session = debugging + integration, NOT new features!
