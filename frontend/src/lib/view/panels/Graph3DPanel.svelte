@@ -137,6 +137,7 @@
     position: THREE.Vector3;
     mesh: THREE.Mesh;
     label?: THREE.Sprite; // Label sprite that follows entity
+    reserveLabel?: THREE.Sprite;
     profile?: any;
     isHub?: boolean; // Hub entity (gets pulsing glow animation)
     pulsePhase?: number;
@@ -2056,26 +2057,16 @@ let vrHammer: VRHammer | null = null;
 
       const geometryHeapBefore = topologyProfiler.getCurrentHeapUsage();
       topologyProfiler.timeSection('network:geometry', () => {
-        // Clear and rebuild - simple and reliable
-        clearNetwork();
-
-        // Create entity nodes
-        console.log('[Graph3D] About to create', entityData.length, 'entity nodes');
-        entityData.forEach((profile, index) => {
-          const isHub = top3Hubs.has(profile.entityId);
-          console.log('[Graph3D] Creating entity node for', profile.entityId);
-          createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub);
-        });
+        reconcileEntities(entityData, forceLayoutPositions, top3Hubs);
 
         // Save positions after creating entities (for persistence)
         if (!allEntitiesHaveSavedPositions) {
           saveEntityPositions();
         }
 
-        // Create connections between entities that have accounts
+        // Reconcile connections/particles on top of diffed entities
         createConnections();
-
-        // Create transaction flow particles (also tracks activity)
+        clearParticles();
         createTransactionParticles();
       });
       topologyProfiler.recordHeapDelta('network:geometry', geometryHeapBefore, topologyProfiler.getCurrentHeapUsage());
@@ -2090,30 +2081,137 @@ let vrHammer: VRHammer | null = null;
   }
 
   function clearNetwork() {
-    // Remove entity meshes AND labels
-    entities.forEach(entity => {
-      scene.remove(entity.mesh);
-      // CRITICAL: Remove labels to prevent orphaned sprites accumulating
-      if (entity.label) {
-        scene.remove(entity.label);
-      }
-    });
-    entities = [];
+    [...entities].forEach(entity => removeEntityById(entity.id));
+    clearConnectionsAndParticles();
+    entityMeshMap.clear();
+  }
 
-    // Remove connection lines and progress bars
-    connections.forEach(connection => {
-      scene.remove(connection.line);
-      if (connection.progressBars) {
-        scene.remove(connection.progressBars);
-      }
-    });
+  function disposeObject(obj: THREE.Object3D | null | undefined) {
+    if (!obj) return;
+    if ('geometry' in obj && (obj as any).geometry?.dispose) {
+      (obj as any).geometry.dispose();
+    }
+    const material = (obj as any).material;
+    if (Array.isArray(material)) {
+      material.forEach(m => m?.dispose?.());
+    } else if (material && typeof material.dispose === 'function') {
+      material.dispose();
+    }
+  }
+
+  function disposeConnection(connection: ConnectionData) {
+    scene.remove(connection.line);
+    disposeObject(connection.line);
+
+    if (connection.progressBars) {
+      connection.progressBars.traverse(child => {
+        disposeObject(child as THREE.Object3D);
+      });
+      scene.remove(connection.progressBars);
+    }
+  }
+
+  function clearConnectionsAndParticles() {
+    connections.forEach(disposeConnection);
     connections = [];
+    connectionIndexMap.clear();
 
-    // Remove particles
+    clearParticles();
+
+    topologyProfiler.setGauge('objects:connections', 0);
+  }
+
+  function clearParticles() {
     particles.forEach(particle => {
       scene.remove(particle.mesh);
+      disposeObject(particle.mesh);
     });
     particles = [];
+    topologyProfiler.setGauge('objects:particles', 0);
+  }
+
+  function removeEntityById(entityId: string) {
+    const index = entities.findIndex(e => e.id === entityId);
+    if (index === -1) return;
+
+    const entity = entities[index];
+    scene.remove(entity.mesh);
+    disposeObject(entity.mesh);
+
+    if (entity.label) {
+      scene.remove(entity.label);
+      disposeObject(entity.label);
+    }
+    if (entity.reserveLabel) {
+      scene.remove(entity.reserveLabel);
+      disposeObject(entity.reserveLabel);
+    }
+    if (entity.activityRing) {
+      scene.remove(entity.activityRing);
+      disposeObject(entity.activityRing);
+    }
+
+    entityMeshMap.delete(entityId);
+    entities.splice(index, 1);
+  }
+
+  function reconcileEntities(
+    entityData: any[],
+    forceLayoutPositions: Map<string, THREE.Vector3>,
+    top3Hubs: Set<string>
+  ) {
+    const nextIds = new Set(entityData.map(profile => profile.entityId));
+
+    // Remove stale entities
+    const stale = entities.filter(e => !nextIds.has(e.id));
+    stale.forEach(entity => removeEntityById(entity.id));
+
+    const nextEntities: EntityData[] = [];
+
+    entityData.forEach((profile, index) => {
+      const existing = entities.find(e => e.id === profile.entityId);
+      const targetPos =
+        forceLayoutPositions.get(profile.entityId) ||
+        existing?.position ||
+        new THREE.Vector3(0, 0, 0);
+
+      if (existing) {
+        existing.profile = profile;
+        existing.isHub = top3Hubs.has(profile.entityId);
+        existing.mesh.userData['isHub'] = existing.isHub;
+        if (existing.isHub && !existing.hubConnectedIds) {
+          existing.hubConnectedIds = new Set();
+        } else if (!existing.isHub) {
+          existing.hubConnectedIds = undefined;
+        }
+        existing.position.copy(targetPos);
+        existing.mesh.position.copy(targetPos);
+
+        if (existing.label) {
+          existing.label.position.copy(targetPos);
+          existing.label.position.y += 3;
+        }
+
+        if (existing.reserveLabel) {
+          existing.reserveLabel.position.copy(targetPos);
+          existing.reserveLabel.position.y += getEntitySizeForToken(profile.entityId, selectedTokenId) + 3.0;
+        }
+
+        entityMeshMap.set(existing.id, existing.mesh);
+        nextEntities.push(existing);
+      } else {
+        const isHub = top3Hubs.has(profile.entityId);
+        createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub);
+        const newEntity = entities[entities.length - 1];
+        if (newEntity) {
+          entityMeshMap.set(newEntity.id, newEntity.mesh);
+          nextEntities.push(newEntity);
+        }
+      }
+    });
+
+    entities = nextEntities;
+    topologyProfiler.setGauge('objects:entities', entities.length);
   }
 
   function recordSceneObjectStats() {
@@ -2477,7 +2575,14 @@ let vrHammer: VRHammer | null = null;
   function createConnections() {
     const processedConnections = new Set<string>();
     const currentReplicas = replicas;
+    const existingByKey = new Map<string, ConnectionData>();
 
+    const makeKey = (a: string, b: string) => [a, b].sort().join('<->');
+    connections.forEach(conn => {
+      existingByKey.set(makeKey(conn.from, conn.to), conn);
+    });
+
+    const nextConnections: ConnectionData[] = [];
 
     // Method 1: Real connections from time-aware replicas
     if (currentReplicas.size > 0) {
@@ -2485,34 +2590,41 @@ let vrHammer: VRHammer | null = null;
         const [entityId] = replicaKey.split(':');
         const entityAccounts = replica.state?.accounts;
 
-
         if (!entityAccounts || !entityId) continue;
 
         for (const accountKey of entityAccounts.keys()) {
-          // Account key is just the counterparty ID (not counterpartyId:tokenId)
           const counterpartyId = String(accountKey);
-
           if (!counterpartyId) continue;
 
-          // Create connection key (sorted to avoid duplicates)
-          const connectionKey = [entityId, counterpartyId].sort().join('<->');
+          const connectionKey = makeKey(entityId, counterpartyId);
           if (processedConnections.has(connectionKey)) continue;
           processedConnections.add(connectionKey);
 
-          // Find entity positions
           const fromEntity = entities.find(e => e.id === entityId);
           const toEntity = entities.find(e => e.id === counterpartyId);
 
-          if (fromEntity && toEntity) {
-            createConnectionLine(fromEntity, toEntity, entityId, counterpartyId, replica);
-          } else {
+          if (!fromEntity || !toEntity) {
             debug.warn(`🔗 Missing entity for connection: ${entityId} ↔ ${counterpartyId}`);
+            continue;
+          }
+
+          const existing = existingByKey.get(connectionKey);
+          if (existing) {
+            updateConnectionGeometry(existing, fromEntity, toEntity, entityId, counterpartyId, replica);
+            existingByKey.delete(connectionKey);
+            nextConnections.push(existing);
+          } else {
+            const newConnection = createConnectionLine(fromEntity, toEntity, entityId, counterpartyId, replica);
+            nextConnections.push(newConnection);
           }
         }
       }
     }
 
-    // NO DEMO CONNECTIONS - only show real bilateral accounts
+    // Dispose stale connections that no longer exist
+    existingByKey.forEach(disposeConnection);
+
+    connections = nextConnections;
 
     // Build connection index map for O(1) lookups
     buildConnectionIndexMap();
@@ -2527,6 +2639,8 @@ let vrHammer: VRHammer | null = null;
         );
       }
     });
+
+    topologyProfiler.setGauge('objects:connections', connections.length);
   }
 
   function buildConnectionIndexMap() {
@@ -2540,6 +2654,8 @@ let vrHammer: VRHammer | null = null;
   }
 
   function createTransactionParticles() {
+    clearParticles();
+
     // Reset activity tracking
     currentFrameActivity = {
       activeEntities: new Set(),
@@ -2879,12 +2995,33 @@ let vrHammer: VRHammer | null = null;
     // Create account capacity bars
     const accountBars = createAccountBarsForConnection(fromEntity, toEntity, fromId, toId, replica);
 
-    connections.push({
+    return {
       from: fromId,
       to: toId,
       line,
       progressBars: accountBars
-    });
+    };
+  }
+
+  function updateConnectionGeometry(
+    connection: ConnectionData,
+    fromEntity: EntityData,
+    toEntity: EntityData,
+    fromId: string,
+    toId: string,
+    replica: any
+  ) {
+    const positions = connection.line.geometry.getAttribute('position') as THREE.BufferAttribute;
+    positions.setXYZ(0, fromEntity.position.x, fromEntity.position.y, fromEntity.position.z);
+    positions.setXYZ(1, toEntity.position.x, toEntity.position.y, toEntity.position.z);
+    positions.needsUpdate = true;
+    connection.line.computeLineDistances();
+
+    if (connection.progressBars) {
+      connection.progressBars.traverse(child => disposeObject(child as THREE.Object3D));
+      scene.remove(connection.progressBars);
+    }
+    connection.progressBars = createAccountBarsForConnection(fromEntity, toEntity, fromId, toId, replica);
   }
 
   function createAccountBarsForConnection(fromEntity: any, toEntity: any, fromId: string, toId: string, _replica: any) {
@@ -3651,13 +3788,7 @@ let vrHammer: VRHammer | null = null;
 
     const now = Date.now();
     if (needsConnectionRebuild && (now - lastConnectionRebuild > 100)) { // Max 10 fps for rebuilds
-      connections.forEach(connection => {
-        scene.remove(connection.line);
-        if (connection.progressBars) {
-          scene.remove(connection.progressBars);
-        }
-      });
-      connections = [];
+      clearParticles(); // particle indices become invalid after connection reindex
       createConnections();
       needsConnectionRebuild = false;
       lastConnectionRebuild = now;
