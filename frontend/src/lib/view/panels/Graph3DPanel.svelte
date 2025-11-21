@@ -19,6 +19,12 @@
   import { PerformanceMonitor, type PerfMetrics } from '../utils/perfMonitor';
   import VRControlsHUD from '../components/VRControlsHUD.svelte';
   import { HandGesturePaymentController } from '../utils/handGesturePayments';
+  import ProfilerHUD from '../components/ProfilerHUD.svelte';
+  import {
+    topologyProfiler,
+    topologyProfilerStore,
+    type ProfilerSnapshot
+  } from '../utils/topologyProfiler';
 
   // Props - REQUIRED for /view isolation (dead props removed)
   export let isolatedEnv: Writable<any>;
@@ -261,6 +267,11 @@ let vrHammer: VRHammer | null = null;
     leftEntity: '',
     rightEntity: ''
   };
+
+  let profilerSnapshot: ProfilerSnapshot | null = null;
+  const unsubscribeProfiler = topologyProfilerStore.subscribe(snapshot => {
+    profilerSnapshot = snapshot;
+  });
 
   // Drag state
   let draggedEntity: EntityData | null = null;
@@ -958,6 +969,8 @@ let vrHammer: VRHammer | null = null;
     if (activityVisualizer) {
       activityVisualizer.clearAll();
     }
+
+    unsubscribeProfiler();
   });
 
   /**
@@ -1864,152 +1877,166 @@ let vrHammer: VRHammer | null = null;
   function updateNetworkData() {
     if (!scene) return;
 
-    const timeIndex = $isolatedTimeIndex;
+    const stopSection = topologyProfiler.startSection('network:update');
 
-    // Update available tokens
-    updateAvailableTokens();
+    try {
+      const timeIndex = $isolatedTimeIndex;
 
-    // Use time-aware data sources (isolated env if provided, otherwise global)
-    let entityData: any[] = [];
-    let currentReplicas = $isolatedEnv?.replicas || new Map();
+      // Update available tokens
+      updateAvailableTokens();
 
-    console.log('[Graph3D] Replicas check:', {
-      hasIsolatedEnv: !!isolatedEnv,
-      isolatedEnvValue: $isolatedEnv,
-      replicasSize: currentReplicas?.size || 0,
-      source: 'isolated'
-    });
+      // Use time-aware data sources (isolated env if provided, otherwise global)
+      let entityData: any[] = [];
+      let currentReplicas = $isolatedEnv?.replicas || new Map();
 
-    // Always use replicas (ground truth)
-    if (currentReplicas && currentReplicas.size > 0) {
-      const replicaEntries = Array.from(currentReplicas.entries());
+      console.log('[Graph3D] Replicas check:', {
+        hasIsolatedEnv: !!isolatedEnv,
+        isolatedEnvValue: $isolatedEnv,
+        replicasSize: currentReplicas?.size || 0,
+        source: 'isolated'
+      });
 
-      // Extract unique entity IDs from replica keys with fail-fast validation
-      const uniqueEntityIds = new Set<string>();
-      for (let i = 0; i < replicaEntries.length; i++) {
-        const entry = replicaEntries[i];
-        if (!entry || !Array.isArray(entry) || entry.length < 2) {
-          throw new Error('FINTECH-SAFETY: Invalid replica entry structure');
-        }
+      // Always use replicas (ground truth)
+      if (currentReplicas && currentReplicas.size > 0) {
+        const replicaEntries = Array.from(currentReplicas.entries());
 
-        const key = entry[0];
-        if (typeof key !== 'string') {
-          throw new Error('FINTECH-SAFETY: Replica key must be string');
-        }
-
-        const parts = key.split(':');
-        const entityId = parts[0];
-        if (!entityId) {
-          throw new Error('FINTECH-SAFETY: Invalid replica key format - missing entity ID');
-        }
-        uniqueEntityIds.add(entityId);
-      }
-
-      entityData = Array.from(uniqueEntityIds).map(entityId => ({
-        entityId,
-        capabilities: ['consensus'],
-        metadata: { name: entityId.slice(0, 8) + '...' }
-      }));
-    }
-
-    console.log('[Graph3D] entityData created:', entityData.length, 'entities');
-
-    // NO DEMO DATA - only show what actually exists
-    if (entityData.length === 0) {
-      debug.warn(`⚠️ No entity data found at frame ${timeIndex} - nothing to display`);
-      clearNetwork(); // Clear stale geometry before returning
-      return; // Don't create fake entities
-    }
-
-
-    // Build connection and capacity maps for force-directed layout (always active)
-    const connectionMap = new Map<string, Set<string>>();
-    const capacityMap = new Map<string, number>();
-
-    // Build connection map from replicas
-    if (currentReplicas.size > 0) {
-      for (const [replicaKey, replica] of currentReplicas.entries()) {
-        const [entityId] = replicaKey.split(':');
-        const entityAccounts = replica.state?.accounts;
-
-        if (entityAccounts && entityAccounts.size > 0) {
-          if (!connectionMap.has(entityId)) {
-            connectionMap.set(entityId, new Set());
+        // Extract unique entity IDs from replica keys with fail-fast validation
+        const uniqueEntityIds = new Set<string>();
+        for (let i = 0; i < replicaEntries.length; i++) {
+          const entry = replicaEntries[i];
+          if (!entry || !Array.isArray(entry) || entry.length < 2) {
+            throw new Error('FINTECH-SAFETY: Invalid replica entry structure');
           }
 
-          for (const [counterpartyId, accountData] of entityAccounts.entries()) {
-            connectionMap.get(entityId)?.add(counterpartyId);
+          const key = entry[0];
+          if (typeof key !== 'string') {
+            throw new Error('FINTECH-SAFETY: Replica key must be string');
+          }
 
-            // Calculate total capacity for this connection
-            const accountTokenDelta = getAccountTokenDelta(accountData, selectedTokenId);
-            if (accountTokenDelta) {
-              const derived = XLN?.deriveDelta(accountTokenDelta, entityId < counterpartyId);
-              if (!derived) continue;
-              const capacityKey = [entityId, counterpartyId].sort().join('-');
-              capacityMap.set(capacityKey, Number(derived.totalCapacity));
+          const parts = key.split(':');
+          const entityId = parts[0];
+          if (!entityId) {
+            throw new Error('FINTECH-SAFETY: Invalid replica key format - missing entity ID');
+          }
+          uniqueEntityIds.add(entityId);
+        }
+
+        entityData = Array.from(uniqueEntityIds).map(entityId => ({
+          entityId,
+          capabilities: ['consensus'],
+          metadata: { name: entityId.slice(0, 8) + '...' }
+        }));
+      }
+
+      console.log('[Graph3D] entityData created:', entityData.length, 'entities');
+
+      // NO DEMO DATA - only show what actually exists
+      if (entityData.length === 0) {
+        debug.warn(`⚠️ No entity data found at frame ${timeIndex} - nothing to display`);
+        clearNetwork(); // Clear stale geometry before returning
+        return; // Don't create fake entities
+      }
+
+      // Build connection and capacity maps for force-directed layout (always active)
+      const connectionMap = new Map<string, Set<string>>();
+      const capacityMap = new Map<string, number>();
+
+      // Build connection map from replicas
+      if (currentReplicas.size > 0) {
+        for (const [replicaKey, replica] of currentReplicas.entries()) {
+          const [entityId] = replicaKey.split(':');
+          const entityAccounts = replica.state?.accounts;
+
+          if (entityAccounts && entityAccounts.size > 0) {
+            if (!connectionMap.has(entityId)) {
+              connectionMap.set(entityId, new Set());
+            }
+
+            for (const [counterpartyId, accountData] of entityAccounts.entries()) {
+              connectionMap.get(entityId)?.add(counterpartyId);
+
+              // Calculate total capacity for this connection
+              const accountTokenDelta = getAccountTokenDelta(accountData, selectedTokenId);
+              if (accountTokenDelta) {
+                const derived = XLN?.deriveDelta(accountTokenDelta, entityId < counterpartyId);
+                if (!derived) continue;
+                const capacityKey = [entityId, counterpartyId].sort().join('-');
+                capacityMap.set(capacityKey, Number(derived.totalCapacity));
+              }
             }
           }
         }
       }
-    }
 
-    // Calculate connection degrees and find top-3 hubs
-    const connectionDegrees = new Map<string, number>();
-    entityData.forEach(profile => {
-      const degree = connectionMap.get(profile.entityId)?.size || 0;
-      connectionDegrees.set(profile.entityId, degree);
-    });
+      // Calculate connection degrees and find top-3 hubs
+      const connectionDegrees = new Map<string, number>();
+      entityData.forEach(profile => {
+        const degree = connectionMap.get(profile.entityId)?.size || 0;
+        connectionDegrees.set(profile.entityId, degree);
+      });
 
-    // Find top-3 hubs (most connected entities)
-    const sortedByDegree = [...connectionDegrees.entries()].sort((a, b) => b[1] - a[1]);
-    const top3Hubs = new Set(sortedByDegree.slice(0, 3).map(([id]) => id));
+      // Find top-3 hubs (most connected entities)
+      const sortedByDegree = [...connectionDegrees.entries()].sort((a, b) => b[1] - a[1]);
+      const top3Hubs = new Set(sortedByDegree.slice(0, 3).map(([id]) => id));
 
-
-    // Clear and rebuild - simple and reliable
-    clearNetwork();
-
-    // Try to load saved positions first
-    let savedPositions: Map<string, THREE.Vector3> | null = null;
-    try {
-      const saved = localStorage.getItem('xln-entity-positions');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        savedPositions = new Map();
-        Object.entries(parsed).forEach(([id, pos]: [string, any]) => {
-          savedPositions!.set(id, new THREE.Vector3(pos.x, pos.y, pos.z));
-        });
+      // Try to load saved positions first
+      let savedPositions: Map<string, THREE.Vector3> | null = null;
+      try {
+        const saved = localStorage.getItem('xln-entity-positions');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          savedPositions = new Map();
+          Object.entries(parsed).forEach(([id, pos]: [string, any]) => {
+            savedPositions!.set(id, new THREE.Vector3(pos.x, pos.y, pos.z));
+          });
+        }
+      } catch (err) {
+        debug.warn('Failed to load saved positions:', err);
       }
-    } catch (err) {
-      debug.warn('Failed to load saved positions:', err);
+
+      const allEntitiesHaveSavedPositions = Boolean(
+        savedPositions && entityData.every(p => savedPositions!.has(p.entityId))
+      );
+
+      let forceLayoutPositions: Map<string, THREE.Vector3>;
+      if (allEntitiesHaveSavedPositions && savedPositions) {
+        forceLayoutPositions = savedPositions;
+      } else {
+        forceLayoutPositions = topologyProfiler.timeSection('network:layout', () =>
+          applyForceDirectedLayout(entityData, connectionMap, capacityMap)
+        );
+      }
+
+      topologyProfiler.timeSection('network:geometry', () => {
+        // Clear and rebuild - simple and reliable
+        clearNetwork();
+
+        // Create entity nodes
+        console.log('[Graph3D] About to create', entityData.length, 'entity nodes');
+        entityData.forEach((profile, index) => {
+          const isHub = top3Hubs.has(profile.entityId);
+          console.log('[Graph3D] Creating entity node for', profile.entityId);
+          createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub);
+        });
+
+        // Save positions after creating entities (for persistence)
+        if (!allEntitiesHaveSavedPositions) {
+          saveEntityPositions();
+        }
+
+        // Create connections between entities that have accounts
+        createConnections();
+
+        // Create transaction flow particles (also tracks activity)
+        createTransactionParticles();
+      });
+
+      // Don't enforce spacing constraints - they break the H-shape
+      // enforceSpacingConstraints();
+    } finally {
+      updateProfilerObjectGauges();
+      stopSection();
     }
-
-    // Use saved positions if all entities have saved positions, otherwise use H-layout
-    const allEntitiesHaveSavedPositions = savedPositions && entityData.every(p => savedPositions!.has(p.entityId));
-    const forceLayoutPositions = allEntitiesHaveSavedPositions && savedPositions
-      ? savedPositions
-      : applyForceDirectedLayout(entityData, connectionMap, capacityMap);
-
-    // Create entity nodes
-    console.log('[Graph3D] About to create', entityData.length, 'entity nodes');
-    entityData.forEach((profile, index) => {
-      const isHub = top3Hubs.has(profile.entityId);
-      console.log('[Graph3D] Creating entity node for', profile.entityId);
-      createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub);
-    });
-
-    // Save positions after creating entities (for persistence)
-    if (!allEntitiesHaveSavedPositions) {
-      saveEntityPositions();
-    }
-
-    // Create connections between entities that have accounts
-    createConnections();
-
-    // Create transaction flow particles (also tracks activity)
-    createTransactionParticles();
-
-    // Don't enforce spacing constraints - they break the H-shape
-    // enforceSpacingConstraints();
   }
 
   function clearNetwork() {
@@ -2037,6 +2064,12 @@ let vrHammer: VRHammer | null = null;
       scene.remove(particle.mesh);
     });
     particles = [];
+  }
+
+  function updateProfilerObjectGauges() {
+    topologyProfiler.setGauge('objects:entities', entities.length);
+    topologyProfiler.setGauge('objects:connections', connections.length);
+    topologyProfiler.setGauge('objects:particles', particles.length);
   }
 
   /**
@@ -3157,281 +3190,317 @@ let vrHammer: VRHammer | null = null;
   });
   function animate() {
     perfMonitor.begin(); // Start FPS measurement
+    const stopFrameSection = topologyProfiler.startSection('animate:frame');
 
-    // VR uses setAnimationLoop, don't double-call requestAnimationFrame
-    if (!renderer?.xr?.isPresenting) {
-      animationId = requestAnimationFrame(animate);
-    }
-
-    animateCallCount++;
-
-    // ===== PROCESS VISUAL EFFECTS QUEUE =====
-    if (scene && spatialHash && entityMeshMap) {
-      const deltaTime = clock.getDelta() * 1000; // to milliseconds
-      effectOperations.process(scene, entityMeshMap, deltaTime, 10);
-
-      // ===== UPDATE ACCOUNT ACTIVITY LIGHTNING =====
-      activityVisualizer?.update(deltaTime);
-    }
-
-    // Update VR grabbed entity position
-    if (vrGrabbedEntity && vrGrabController) {
-      const controllerPos = new THREE.Vector3();
-      controllerPos.setFromMatrixPosition(vrGrabController.matrixWorld);
-
-      vrGrabbedEntity.mesh.position.copy(controllerPos);
-      vrGrabbedEntity.position.copy(controllerPos);
-
-      // ===== UPDATE GESTURE DETECTOR =====
-      if (gestureManager) {
-        gestureManager.updateEntity(vrGrabbedEntity.id, vrGrabbedEntity.position, Date.now());
+    try {
+      // VR uses setAnimationLoop, don't double-call requestAnimationFrame
+      if (!renderer?.xr?.isPresenting) {
+        animationId = requestAnimationFrame(animate);
       }
 
-      // Update label position
-      if (vrGrabbedEntity.label) {
-        vrGrabbedEntity.label.position.copy(controllerPos);
-        vrGrabbedEntity.label.position.y += 3;
-      }
-    }
+      animateCallCount++;
 
-    // ===== UPDATE VR HAMMER (hit detection) =====
-    if (isVRActive && vrHammer) {
-      vrHammer.update(connections);
-    }
-
-    // PERF: Pulse animations disabled for 60 FPS target
-    // Fed glow ring and hub aurora effects consume ~5-10 FPS
-    // Uncomment below to re-enable visual effects
-    /*
-    const time = Date.now() * 0.001;
-    entities.forEach(entity => {
-      if (entity.mesh.userData['glowRing']) {
-        const glowRing = entity.mesh.userData['glowRing'] as THREE.Mesh;
-        glowRing.rotation.z = time * 0.5;
-        const pulseMaterial = glowRing.material as THREE.MeshBasicMaterial;
-        pulseMaterial.opacity = 0.2 + Math.sin(time * 2) * 0.15;
+      // ===== PROCESS VISUAL EFFECTS QUEUE =====
+      if (scene && spatialHash && entityMeshMap) {
+        const deltaTime = clock.getDelta() * 1000; // to milliseconds
+        topologyProfiler.timeSection('animate:effects', () => {
+          effectOperations.process(scene, entityMeshMap, deltaTime, 10);
+          // ===== UPDATE ACCOUNT ACTIVITY LIGHTNING =====
+          activityVisualizer?.update(deltaTime);
+        });
       }
 
-      if (entity.isHub && entity.mesh.material && entity.pulsePhase !== undefined) {
-        const material = entity.mesh.material as THREE.MeshLambertMaterial;
-        const slowPulse = Math.sin(time * 0.8 + entity.pulsePhase);
-        const fastShimmer = Math.sin(time * 3.5 + entity.pulsePhase * 0.7);
-        const wave = Math.sin(time * 0.3 + entity.pulsePhase * 1.3);
-        const pulseIntensity = 2.0 + 1.5 * slowPulse + 0.5 * fastShimmer + 0.3 * wave;
-        material.emissiveIntensity = pulseIntensity;
-        const colorShift = (slowPulse + 1) * 0.5;
-        const r = 0;
-        const g = Math.floor(255 * (0.8 + 0.2 * colorShift));
-        const b = Math.floor(255 * (0.5 + 0.5 * (1 - colorShift)));
-        material.emissive.setRGB(r / 255, g / 255, b / 255);
+      topologyProfiler.timeSection('animate:vr', () => {
+        // Update VR grabbed entity position
+        if (vrGrabbedEntity && vrGrabController) {
+          const controllerPos = new THREE.Vector3();
+          controllerPos.setFromMatrixPosition(vrGrabController.matrixWorld);
 
-        // Lightning bolts from hub to connected entities
-        const lightningGroup = entity.mesh.userData['lightningGroup'];
-        if (lightningEnabled && lightningGroup) {
-          // Clear old lightning every 150ms (faster refresh for more chaos)
-          if (Math.floor(time * 6.67) !== Math.floor((time - 0.016) * 6.67)) {
-            while (lightningGroup.children.length > 0) {
-              const child = lightningGroup.children[0];
-              if (child.geometry) child.geometry.dispose();
-              if (child.material) (child.material as any).dispose();
-              lightningGroup.remove(child);
-            }
+          vrGrabbedEntity.mesh.position.copy(controllerPos);
+          vrGrabbedEntity.position.copy(controllerPos);
 
-            // PERF: Use cached hub connections instead of nested filter+some
-            const connectedEntities = entity.hubConnectedIds
-              ? entities.filter(e => entity.hubConnectedIds!.has(e.id))
-              : [];
+          // ===== UPDATE GESTURE DETECTOR =====
+          if (gestureManager) {
+            gestureManager.updateEntity(vrGrabbedEntity.id, vrGrabbedEntity.position, Date.now());
+          }
 
-            // Fire lightning to 1-3 random connected entities
-            const targetCount = Math.min(3, connectedEntities.length);
-            const shuffled = [...connectedEntities].sort(() => Math.random() - 0.5);
-            const targets = shuffled.slice(0, targetCount);
-
-            targets.forEach(target => {
-              // Calculate relative position
-              const hubPos = entity.mesh.position;
-              const targetPos = target.mesh.position;
-
-              const relX = targetPos.x - hubPos.x;
-              const relY = targetPos.y - hubPos.y;
-              const relZ = targetPos.z - hubPos.z;
-
-              // Create jagged lightning path
-              const points: THREE.Vector3[] = [];
-              points.push(new THREE.Vector3(0, 0, 0));
-
-              const segments = 8; // More segments = more jagged
-              for (let s = 1; s < segments; s++) {
-                const t = s / segments;
-                const jitterScale = 1.5; // Higher = more chaos
-                const jitterX = (Math.random() - 0.5) * jitterScale;
-                const jitterY = (Math.random() - 0.5) * jitterScale;
-                const jitterZ = (Math.random() - 0.5) * jitterScale;
-
-                points.push(new THREE.Vector3(
-                  relX * t + jitterX,
-                  relY * t + jitterY,
-                  relZ * t + jitterZ
-                ));
-              }
-              points.push(new THREE.Vector3(relX, relY, relZ));
-
-              const geometry = new THREE.BufferGeometry().setFromPoints(points);
-              const material = new THREE.LineBasicMaterial({
-                color: 0x00ffff,
-                opacity: 0.7 + Math.random() * 0.3,
-                transparent: true,
-                linewidth: 3
-              });
-
-              const lightning = new THREE.Line(geometry, material);
-              lightningGroup.add(lightning);
-            });
+          // Update label position
+          if (vrGrabbedEntity.label) {
+            vrGrabbedEntity.label.position.copy(controllerPos);
+            vrGrabbedEntity.label.position.y += 3;
           }
         }
+
+        // ===== UPDATE VR HAMMER (hit detection) =====
+        if (isVRActive && vrHammer) {
+          vrHammer.update(connections);
+        }
+      });
+
+      // PERF: Pulse animations disabled for 60 FPS target
+      // Fed glow ring and hub aurora effects consume ~5-10 FPS
+      // Uncomment below to re-enable visual effects
+      /*
+      const time = Date.now() * 0.001;
+      entities.forEach(entity => {
+        if (entity.mesh.userData['glowRing']) {
+          const glowRing = entity.mesh.userData['glowRing'] as THREE.Mesh;
+          glowRing.rotation.z = time * 0.5;
+          const pulseMaterial = glowRing.material as THREE.MeshBasicMaterial;
+          pulseMaterial.opacity = 0.2 + Math.sin(time * 2) * 0.15;
+        }
+
+        if (entity.isHub && entity.mesh.material && entity.pulsePhase !== undefined) {
+          const material = entity.mesh.material as THREE.MeshLambertMaterial;
+          const slowPulse = Math.sin(time * 0.8 + entity.pulsePhase);
+          const fastShimmer = Math.sin(time * 3.5 + entity.pulsePhase * 0.7);
+          const wave = Math.sin(time * 0.3 + entity.pulsePhase * 1.3);
+          const pulseIntensity = 2.0 + 1.5 * slowPulse + 0.5 * fastShimmer + 0.3 * wave;
+          material.emissiveIntensity = pulseIntensity;
+          const colorShift = (slowPulse + 1) * 0.5;
+          const r = 0;
+          const g = Math.floor(255 * (0.8 + 0.2 * colorShift));
+          const b = Math.floor(255 * (0.5 + 0.5 * (1 - colorShift)));
+          material.emissive.setRGB(r / 255, g / 255, b / 255);
+
+          // Lightning bolts from hub to connected entities
+          const lightningGroup = entity.mesh.userData['lightningGroup'];
+          if (lightningEnabled && lightningGroup) {
+            // Clear old lightning every 150ms (faster refresh for more chaos)
+            if (Math.floor(time * 6.67) !== Math.floor((time - 0.016) * 6.67)) {
+              while (lightningGroup.children.length > 0) {
+                const child = lightningGroup.children[0];
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) (child.material as any).dispose();
+                lightningGroup.remove(child);
+              }
+
+              // PERF: Use cached hub connections instead of nested filter+some
+              const connectedEntities = entity.hubConnectedIds
+                ? entities.filter(e => entity.hubConnectedIds!.has(e.id))
+                : [];
+
+              // Fire lightning to 1-3 random connected entities
+              const targetCount = Math.min(3, connectedEntities.length);
+              const shuffled = [...connectedEntities].sort(() => Math.random() - 0.5);
+              const targets = shuffled.slice(0, targetCount);
+
+              targets.forEach(target => {
+                // Calculate relative position
+                const hubPos = entity.mesh.position;
+                const targetPos = target.mesh.position;
+
+                const relX = targetPos.x - hubPos.x;
+                const relY = targetPos.y - hubPos.y;
+                const relZ = targetPos.z - hubPos.z;
+
+                // Create jagged lightning path
+                const points: THREE.Vector3[] = [];
+                points.push(new THREE.Vector3(0, 0, 0));
+
+                const segments = 8; // More segments = more jagged
+                for (let s = 1; s < segments; s++) {
+                  const t = s / segments;
+                  const jitterScale = 1.5; // Higher = more chaos
+                  const jitterX = (Math.random() - 0.5) * jitterScale;
+                  const jitterY = (Math.random() - 0.5) * jitterScale;
+                  const jitterZ = (Math.random() - 0.5) * jitterScale;
+
+                  points.push(new THREE.Vector3(
+                    relX * t + jitterX,
+                    relY * t + jitterY,
+                    relZ * t + jitterZ
+                  ));
+                }
+                points.push(new THREE.Vector3(relX, relY, relZ));
+
+                const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                const material = new THREE.LineBasicMaterial({
+                  color: 0x00ffff,
+                  opacity: 0.7 + Math.random() * 0.3,
+                  transparent: true,
+                  linewidth: 3
+                });
+
+                const lightning = new THREE.Line(geometry, material);
+                lightningGroup.add(lightning);
+              });
+            }
+          }
+        }
+      });
+      */ // End of disabled pulse animations
+
+      // Auto-rotate (adjustable speed from slider 0-10000 per axis)
+      if ((rotationX > 0 || rotationY > 0 || rotationZ > 0) && controls) {
+        // Map slider value (0-10000) to rotation angle
+        // 1000 = Earth-like slow rotation (~0.001 rad/frame = 1 rotation per ~100 seconds)
+        // 10000 = Fast rotation (~0.01 rad/frame = 1 rotation per ~10 seconds)
+        const maxRotationSpeed = 0.01; // Maximum rotation speed at slider = 10000
+
+        const currentPosition = camera.position.clone();
+        const target = controls.target.clone();
+        const offset = currentPosition.sub(target);
+
+        let newOffset = offset.clone();
+
+        // Apply X-axis rotation (pitch - rotating around horizontal axis)
+        if (rotationX > 0) {
+          const angleX = (rotationX / 10000) * maxRotationSpeed;
+          const newY = newOffset.y * Math.cos(angleX) - newOffset.z * Math.sin(angleX);
+          const newZ = newOffset.y * Math.sin(angleX) + newOffset.z * Math.cos(angleX);
+          newOffset.y = newY;
+          newOffset.z = newZ;
+        }
+
+        // Apply Y-axis rotation (yaw - rotating around vertical axis)
+        if (rotationY > 0) {
+          const angleY = (rotationY / 10000) * maxRotationSpeed;
+          const newX = newOffset.x * Math.cos(angleY) - newOffset.z * Math.sin(angleY);
+          const newZ = newOffset.x * Math.sin(angleY) + newOffset.z * Math.cos(angleY);
+          newOffset.x = newX;
+          newOffset.z = newZ;
+        }
+
+        // Apply Z-axis rotation (roll - rotating around depth axis)
+        if (rotationZ > 0) {
+          const angleZ = (rotationZ / 10000) * maxRotationSpeed;
+          const newX = newOffset.x * Math.cos(angleZ) - newOffset.y * Math.sin(angleZ);
+          const newY = newOffset.x * Math.sin(angleZ) + newOffset.y * Math.cos(angleZ);
+          newOffset.x = newX;
+          newOffset.y = newY;
+        }
+
+        camera.position.x = target.x + newOffset.x;
+        camera.position.y = target.y + newOffset.y;
+        camera.position.z = target.z + newOffset.z;
+        camera.lookAt(target);
+
+        // Save camera state periodically during auto-rotation (not every frame)
+        if (Math.random() < 0.01) { // ~1% chance per frame = every few seconds
+          saveBirdViewSettings();
+        }
       }
-    });
-    */ // End of disabled pulse animations
 
-    // Auto-rotate (adjustable speed from slider 0-10000 per axis)
-    if ((rotationX > 0 || rotationY > 0 || rotationZ > 0) && controls) {
-      // Map slider value (0-10000) to rotation angle
-      // 1000 = Earth-like slow rotation (~0.001 rad/frame = 1 rotation per ~100 seconds)
-      // 10000 = Fast rotation (~0.01 rad/frame = 1 rotation per ~10 seconds)
-      const maxRotationSpeed = 0.01; // Maximum rotation speed at slider = 10000
+      // Auto-rotate camera (Strange Attractors style)
+      if (autoRotate && controls && camera) {
+        const radiansPerSecond = (autoRotateSpeed / 60) * (2 * Math.PI); // RPM to rad/s
+        const radiansPerFrame = radiansPerSecond / 60; // Assuming 60 FPS
 
-      const currentPosition = camera.position.clone();
-      const target = controls.target.clone();
-      const offset = currentPosition.sub(target);
+        const currentPos = camera.position.clone();
+        const target = controls.target.clone();
+        const offset = currentPos.sub(target);
 
-      let newOffset = offset.clone();
+        // Rotate around Y axis (horizontal orbit)
+        const cos = Math.cos(radiansPerFrame);
+        const sin = Math.sin(radiansPerFrame);
+        const newX = offset.x * cos - offset.z * sin;
+        const newZ = offset.x * sin + offset.z * cos;
 
-      // Apply X-axis rotation (pitch - rotating around horizontal axis)
-      if (rotationX > 0) {
-        const angleX = (rotationX / 10000) * maxRotationSpeed;
-        const newY = newOffset.y * Math.cos(angleX) - newOffset.z * Math.sin(angleX);
-        const newZ = newOffset.y * Math.sin(angleX) + newOffset.z * Math.cos(angleX);
-        newOffset.y = newY;
-        newOffset.z = newZ;
+        camera.position.x = target.x + newX;
+        camera.position.z = target.z + newZ;
+        camera.lookAt(target);
       }
 
-      // Apply Y-axis rotation (yaw - rotating around vertical axis)
-      if (rotationY > 0) {
-        const angleY = (rotationY / 10000) * maxRotationSpeed;
-        const newX = newOffset.x * Math.cos(angleY) - newOffset.z * Math.sin(angleY);
-        const newZ = newOffset.x * Math.sin(angleY) + newOffset.z * Math.cos(angleY);
-        newOffset.x = newX;
-        newOffset.z = newZ;
+      // Update controls
+      if (controls) {
+        controls.update();
+      } else {
+        // Fallback rotation if no controls
+        if (scene) {
+          scene.rotation.y += 0.002;
+        }
       }
 
-      // Apply Z-axis rotation (roll - rotating around depth axis)
-      if (rotationZ > 0) {
-        const angleZ = (rotationZ / 10000) * maxRotationSpeed;
-        const newX = newOffset.x * Math.cos(angleZ) - newOffset.y * Math.sin(angleZ);
-        const newY = newOffset.x * Math.sin(angleZ) + newOffset.y * Math.cos(angleZ);
-        newOffset.x = newX;
-        newOffset.y = newY;
+      // Continuous auto-repulsion when entities intersect in space
+      topologyProfiler.timeSection('animate:physics', () => {
+        applyCollisionRepulsion();
+      });
+
+      // Update entity label positions (always on top of sphere)
+      topologyProfiler.timeSection('animate:labels', () => {
+        updateEntityLabels();
+      });
+
+      // Animate transaction particles
+      topologyProfiler.timeSection('animate:particles', () => {
+        animateParticles();
+      });
+      topologyProfiler.setGauge('objects:particles', particles.length);
+
+      // Animate entity pulses
+      topologyProfiler.timeSection('animate:pulses', () => {
+        animateEntityPulses();
+      });
+
+      // Animate grid pulse (on J-Machine broadcasts)
+      if (gridPulseIntensity > 0 && gridHelper) {
+        topologyProfiler.timeSection('animate:grid', () => {
+          gridPulseIntensity *= 0.95; // Exponential decay
+          if (gridPulseIntensity < 0.01) gridPulseIntensity = 0;
+
+          // Pulse grid color toward bright green
+          const baseMaterial = gridHelper.material as THREE.LineBasicMaterial;
+          const pulseColor = new THREE.Color(gridColor).lerp(
+            new THREE.Color(0x00ff88), // Bright green
+            gridPulseIntensity
+          );
+          baseMaterial.color = pulseColor;
+          baseMaterial.opacity = gridOpacity + (gridPulseIntensity * 0.3); // Brighten on pulse
+        });
       }
 
-      camera.position.x = target.x + newOffset.x;
-      camera.position.y = target.y + newOffset.y;
-      camera.position.z = target.z + newOffset.z;
-      camera.lookAt(target);
+      // Update balance change ripples & jurisdiction checks
+      topologyProfiler.timeSection('animate:effects', () => {
+        updateRipples();
+        if (Math.random() < 0.05) { // Check ~5% of frames = 3 times per second at 60fps
+          detectJurisdictionalEvents();
+        }
+      });
 
-      // Save camera state periodically during auto-rotation (not every frame)
-      if (Math.random() < 0.01) { // ~1% chance per frame = every few seconds
-        saveBirdViewSettings();
+      if (renderer && camera) {
+        const renderStartTime = performance.now();
+        topologyProfiler.timeSection('animate:render', () => {
+          renderer.render(scene, camera);
+        });
+        perfMonitor.end(); // Complete FPS measurement
+
+        const renderEndTime = performance.now();
+
+        if (renderer.info) {
+          const { render, memory } = renderer.info;
+          topologyProfiler.recordRendererStats({
+            drawCalls: render.calls,
+            triangles: render.triangles,
+            lines: render.lines,
+            points: render.points,
+            geometries: memory.geometries,
+            textures: memory.textures
+          });
+        }
+
+        // Performance metrics update (every 500ms)
+        const frameTime = renderEndTime - renderStartTime;
+        frameTimeSamples.push(frameTime);
+        if (frameTimeSamples.length > 60) frameTimeSamples.shift();
+
+        if (renderEndTime - lastPerfUpdate > 500) {
+          perfMetrics = {
+            fps: Math.round(1000 / (frameTimeSamples.reduce((a, b) => a + b, 0) / frameTimeSamples.length)),
+            renderTime: Math.round(frameTime * 100) / 100,
+            entityCount: entities.length,
+            connectionCount: connections.length,
+            lastFrameTime: Math.round(frameTime * 100) / 100,
+            avgFrameTime: Math.round((frameTimeSamples.reduce((a, b) => a + b, 0) / frameTimeSamples.length) * 100) / 100,
+          };
+          lastPerfUpdate = renderEndTime;
+        }
       }
-    }
-
-    // Auto-rotate camera (Strange Attractors style)
-    if (autoRotate && controls && camera) {
-      const radiansPerSecond = (autoRotateSpeed / 60) * (2 * Math.PI); // RPM to rad/s
-      const radiansPerFrame = radiansPerSecond / 60; // Assuming 60 FPS
-
-      const currentPos = camera.position.clone();
-      const target = controls.target.clone();
-      const offset = currentPos.sub(target);
-
-      // Rotate around Y axis (horizontal orbit)
-      const cos = Math.cos(radiansPerFrame);
-      const sin = Math.sin(radiansPerFrame);
-      const newX = offset.x * cos - offset.z * sin;
-      const newZ = offset.x * sin + offset.z * cos;
-
-      camera.position.x = target.x + newX;
-      camera.position.z = target.z + newZ;
-      camera.lookAt(target);
-    }
-
-    // Update controls
-    if (controls) {
-      controls.update();
-    } else {
-      // Fallback rotation if no controls
-      if (scene) {
-        scene.rotation.y += 0.002;
+    } finally {
+      if (animateCallCount % 60 === 0) {
+        topologyProfiler.trackHeapSample();
       }
-    }
-
-    // Continuous auto-repulsion when entities intersect in space
-    applyCollisionRepulsion();
-
-    // Update entity label positions (always on top of sphere)
-    updateEntityLabels();
-
-    // Animate transaction particles
-    animateParticles();
-
-    // Animate entity pulses
-    animateEntityPulses();
-
-    // Animate grid pulse (on J-Machine broadcasts)
-    if (gridPulseIntensity > 0 && gridHelper) {
-      gridPulseIntensity *= 0.95; // Exponential decay
-      if (gridPulseIntensity < 0.01) gridPulseIntensity = 0;
-
-      // Pulse grid color toward bright green
-      const baseMaterial = gridHelper.material as THREE.LineBasicMaterial;
-      const pulseColor = new THREE.Color(gridColor).lerp(
-        new THREE.Color(0x00ff88), // Bright green
-        gridPulseIntensity
-      );
-      baseMaterial.color = pulseColor;
-      baseMaterial.opacity = gridOpacity + (gridPulseIntensity * 0.3); // Brighten on pulse
-    }
-
-    // Update balance change ripples
-    updateRipples();
-
-    // Detect jurisdictional events (j-events) and create ripples (throttled)
-    if (Math.random() < 0.05) { // Check ~5% of frames = 3 times per second at 60fps
-      detectJurisdictionalEvents();
-    }
-
-    if (renderer && camera) {
-      const renderStartTime = performance.now();
-      renderer.render(scene, camera);
-      perfMonitor.end(); // Complete FPS measurement
-
-      const renderEndTime = performance.now();
-
-      // Performance metrics update (every 500ms)
-      const frameTime = renderEndTime - renderStartTime;
-      frameTimeSamples.push(frameTime);
-      if (frameTimeSamples.length > 60) frameTimeSamples.shift();
-
-      if (renderEndTime - lastPerfUpdate > 500) {
-        perfMetrics = {
-          fps: Math.round(1000 / (frameTimeSamples.reduce((a, b) => a + b, 0) / frameTimeSamples.length)),
-          renderTime: Math.round(frameTime * 100) / 100,
-          entityCount: entities.length,
-          connectionCount: connections.length,
-          lastFrameTime: Math.round(frameTime * 100) / 100,
-          avgFrameTime: Math.round((frameTimeSamples.reduce((a, b) => a + b, 0) / frameTimeSamples.length) * 100) / 100,
-        };
-        lastPerfUpdate = renderEndTime;
-      }
+      stopFrameSection();
     }
   }
 
@@ -5304,6 +5373,7 @@ let vrHammer: VRHammer | null = null;
     }}
     onExitVR={exitVR}
   />
+  <ProfilerHUD metrics={profilerSnapshot} />
 </div>
 
 <style>
