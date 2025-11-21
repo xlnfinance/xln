@@ -1,0 +1,13 @@
+# E2E Test Artifacts
+screenshots/*.png
+screenshots/*.jpg
+!screenshots/.gitkeep
+
+# Test reports
+reports/
+coverage/
+
+# Playwright artifacts
+.playwright/
+test-results/
+playwright-report/

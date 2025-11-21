@@ -47,7 +47,7 @@ test-results/
 .playwright-mcp/
 
 # Archive (old implementations)
-.archive/
+# .archive/ - NOW PUBLIC (was private, going open source)
 
 # Simnet state
 simnet/state/

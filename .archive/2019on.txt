@@ -1,0 +1,1343 @@
+//chain.js
+module.exports = async (args) => {
+  return q('onchain', async () => {
+    const started = K.total_blocks
+    //l(`Sync since ${started} ${args.length}`)
+
+    for (const block of args) {
+      if (!(await me.processBlock(block[0], block[1], block[2]))) {
+        l('Bad chain?')
+        break
+      }
+    }
+
+    if (K.total_blocks - started <= 0) {
+      return
+    }
+
+    // dirty hack to not backup k.json until all blocks are synced
+    if (args.length >= K.sync_limit) {
+      l('So many blocks. Syncing one more time')
+      sync()
+      return
+    }
+
+    //
+    update_cache()
+    react({}, false)
+
+    // Ensure our last broadcasted batch was added
+    if (PK.pending_batch) {
+      const raw = fromHex(PK.pending_batch)
+      l('Rebroadcasting pending tx ', raw.length)
+      me.send(me.next_validator(true), 'tx', r([raw]))
+    } else {
+      // time to broadcast our next batch then. (Delay to ensure validator processed the block)
+      setTimeout(() => {
+        me.broadcast()
+      }, 2000)
+    }
+  })
+}
+//consensus.js
+/*
+Consensus Reactor fires up every second and based on Unix ts() triggers an action
+This is a state machine where each transition is triggered by going to next step (time-based).
+Inspired by: https://tendermint.readthedocs.io/en/master/getting-started.html
+
+Unlike tendermint we have no interest in fast 3s blocks and aim for "fat" blocks and low validator sig overhead with blocktime 1-10min. Also "await" step was added when validators are idle.
+
+See external_rpc for other part of consensus.
+
+|====propose====|====prevote====|====precommit====|================await==================|
+
+propose > prevote on proposal or nil > precommit if 2/3+ prevotes or nil > commit if 2/3+ precommits and await.
+
+Long term TODO: redundancy reduced gossip. For now with validators <= 100, everyone sends to everyone.
+
+Byzantine (CHEAT_) scenarios for validator to attack network.
+
+Expected security properties:
+1/3- cannot make forks or deadlock consensus
+2/3- cannot make forks w/o powerful network partition
+1/3+ can attempt fork with partion. can deadlock by going offline
+2/3+ can do anything
+
+for all scenarios we use 4 nodes: A B C D each with 25% stake. We must tolerate 1 compromised node (A).
+
+1. A gives all three different blocks.
+= no block gains 2/3+ prevotes, next node is honest.
+
+2. A proposes block1 to B C and block2 to D.
+= block1 gains 3 prevotes, B and C precommit to block 1. A cheats on them and never gossips its own precommit. This round is failed. Next round B is still locked on block1 and proposes block1 again. B C and D all prevote and precommit on it = block1 is committed.
+
+*/
+const await_propose = async () => {
+    me.status = 'propose'
+  
+    //l('Next round', me.next_validator().id)
+    if (me.my_validator != me.next_validator()) {
+      return
+    }
+  
+    //l(`it's our turn to propose, gossip new block`)
+    if (K.ts < ts() - K.blocktime) {
+      l('Danger: No previous block exists')
+    }
+  
+    let header = false
+    let ordered_tx_body
+  
+    if (me.proposed_block.locked) {
+      l(`We precommited to previous block, keep proposing it`)
+      ;({header, ordered_tx_body} = me.proposed_block)
+    } else {
+      // otherwise build new block from your mempool
+      let total_size = 0
+      const ordered_tx = []
+      const meta = {dry_run: true}
+      for (const candidate of me.mempool) {
+        if (total_size + candidate.length >= K.blocksize) {
+          l(`The block is out of space, stop adding tx`)
+          break
+        }
+  
+        const result = await me.processBatch(candidate, meta)
+        if (result.success) {
+          ordered_tx.push(candidate)
+          total_size += candidate.length
+        } else {
+          l(`Bad tx in mempool`, result)
+          // punish submitter ip
+        }
+      }
+      // sort by fee (optimize for profits)
+  
+      // flush it or pass leftovers to next validator
+      me.mempool = []
+  
+      // Propose no blocks if mempool is empty
+      if (ordered_tx.length > 0 || K.ts < ts() - K.skip_empty_blocks) {
+        ordered_tx_body = r(ordered_tx)
+        header = r([
+          methodMap('propose'),
+          me.record.id,
+          K.total_blocks,
+          Buffer.from(K.prev_hash, 'hex'),
+          ts(),
+          sha3(ordered_tx_body),
+          current_db_hash()
+        ])
+      }
+    }
+  
+    if (!header) {
+      return
+    }
+  
+    var propose = r([
+      bin(me.block_keypair.publicKey),
+      bin(ec(header, me.block_keypair.secretKey)),
+      header,
+      ordered_tx_body
+    ])
+  
+    if (me.CHEAT_dontpropose) {
+      l('CHEAT_dontpropose')
+      return
+    }
+    //l('Broadcast header ', toHex(header))
+  
+    setTimeout(() => {
+      me.gossip('propose', propose)
+    }, K.gossip_delay)
+  }
+  
+  const propose_prevote = () => {
+    me.status = 'prevote'
+  
+    // gossip your prevotes for block or nil
+    const prevotable = me.proposed_block ? me.proposed_block.header : 0
+  
+    setTimeout(() => {
+      me.gossip('prevote', me.block_envelope(methodMap('prevote'), prevotable))
+    }, K.gossip_delay)
+  }
+  
+  const prevote_precommit = () => {
+    me.status = 'precommit'
+  
+    // gossip your precommits if have 2/3+ prevotes or nil
+  
+    // do we have enough prevotes?
+    let shares = 0
+    Validators.map((c, index) => {
+      if (c.prevote) {
+        shares += c.shares
+      }
+    })
+  
+    let precommitable = 0
+    if (shares >= K.majority) {
+      precommitable = me.proposed_block.header
+  
+      // lock on this block. Unlock only if another block gets 2/3+
+      me.proposed_block.locked = true
+    }
+  
+    if (me.CHEAT_dontprecommit) {
+      //l('We are in CHEAT and dont precommit ever')
+      return
+    }
+  
+    setTimeout(() => {
+      me.gossip(
+        'precommit',
+        me.block_envelope(methodMap('precommit'), precommitable)
+      )
+    }, K.gossip_delay)
+  }
+  
+  const precommit_await = () => {
+    me.status = 'await'
+  
+    // if have 2/3+ precommits, commit the block and share
+    let shares = 0
+    const precommits = []
+    Validators.map((c, index) => {
+      if (c.precommit) {
+        shares += c.shares
+        precommits[index] = c.precommit
+      } else {
+        precommits[index] = 0
+      }
+  
+      // flush sigs for next round
+      c.prevote = null
+      c.precommit = null
+    })
+  
+    if (shares < K.majority) {
+      if (!me.proposed_block.locked) me.proposed_block = {}
+  
+      l(`Failed to commit, only ${shares} precommits / ${K.majority}. Lets sync`)
+      sync()
+    } else if (me.proposed_block.header) {
+      // adding to our external queue to avoid race conditions
+      // we don't call processBlock directly to avoid races
+      require('./chain')([
+        [precommits, me.proposed_block.header, me.proposed_block.ordered_tx_body]
+      ])
+      me.proposed_block = {}
+    }
+  }
+  
+  const compute_phase = () => {
+    const second = ts() % K.blocktime
+    if (second < K.step_latency) {
+      return 'propose'
+    } else if (second < K.step_latency * 2) {
+      return 'prevote'
+    } else if (second < K.step_latency * 3) {
+      return 'precommit'
+    } else {
+      return 'await'
+    }
+  }
+  
+  module.exports = async () => {
+    const phase = compute_phase()
+  
+    if (me.status == 'await' && phase == 'propose') {
+      await await_propose()
+    } else if (me.status == 'propose' && phase == 'prevote') {
+      propose_prevote()
+    } else if (me.status == 'prevote' && phase == 'precommit') {
+      prevote_precommit()
+    } else if (me.status == 'precommit' && phase == 'await') {
+      precommit_await()
+    }
+  
+    // watch for new events
+    setTimeout(() => {
+      q('onchain', me.consensus)
+    }, 500)
+  
+    return true
+  }
+  //process_batch.js
+  / Verify and apply transactions to current state.
+// Since we aim to be a settlement layer executed on *all* machines, transactions are sent in big signed batches to optimize load - only 1 batch per user per block is allowed
+
+// Blockchain consists of blocks, blocks consist of batches sent by users, batches consist of transactions
+
+const setAsset = async (global_state, tr) => {
+  // all subsequent transactions are now implied to use this asset
+  // ensure this asset exists
+  const assetRecord = await Asset.findById(readInt(tr[1][0]))
+  if (assetRecord) {
+    const asset = assetRecord.id
+    global_state.asset = asset
+    global_state.events.push(['setAsset', asset])
+  }
+}
+
+const withdrawFrom = async (global_state, tr, signer, meta) => {
+  // withdraw money from a channel by providing a sig of your partner
+  // you can only withdraw from insured balance
+  for (const input of tr[1]) {
+    let amount = readInt(input[0])
+
+    const partner = await User.idOrKey(input[1])
+    if (!partner || !partner.id) {
+      l('Cant withdraw from nonexistent partner')
+      return
+    }
+
+    const compared = Buffer.compare(signer.pubkey, partner.pubkey)
+    if (compared == 0) return
+
+    const ins = await Insurance.btw(signer, partner, global_state.asset)
+
+    if (!ins || !ins.id || amount > ins.insurance) {
+      l(`Invalid amount ${ins.insurance} vs ${amount}`)
+      return
+    }
+
+    const body = r([
+      methodMap('withdrawFrom'),
+      ins.leftId,
+      ins.rightId,
+      ins.nonce,
+      amount,
+      ins.asset
+    ])
+
+    if (!ec.verify(body, input[2], partner.pubkey)) {
+      l('Invalid withdrawal sig by partner ', ins.nonce, input)
+      return
+    }
+
+    // for blockchain explorer
+    global_state.events.push(['withdrawFrom', amount, partner.id])
+    meta.inputs_volume += amount // todo: asset-specific
+
+    ins.insurance -= amount
+    // if signer is left and reduces insurance, move ondelta to the left too
+    // .====| reduce insurance .==--| reduce ondelta .==|
+    if (signer.id == ins.leftId) ins.ondelta -= amount
+
+    signer.asset(global_state.asset, amount)
+
+    ins.nonce++
+
+    await saveId(ins)
+
+    // was this input related to us?
+    if (me.record && [partner.id, signer.id].includes(me.record.id)) {
+      const ch = await me.getChannel(
+        me.record.id == partner.id ? signer.pubkey : partner.pubkey,
+        global_state.asset
+      )
+      // they planned to withdraw and they did. Nullify hold amount
+      ch.d.they_input_amount = 0
+      ch.d.input_amount = 0
+      ch.d.input_sig = null
+
+      ch.ins = ins
+
+      //if (argv.syncdb) ch.d.save()
+    }
+  }
+}
+
+const revealSecrets = async (global_state, tr) => {
+  // someone tries to cheat in an atomic payment? Reveal the secrets onchain and dispute!
+  // can be used not just for channels but any atomic actions. Stored according to Sprites approach
+  for (const secret of tr[1]) {
+    const hash = sha3(secret)
+    const hl = await Hashlock.findOne({
+      where: {
+        hash: hash
+      }
+    })
+
+    if (hl) {
+      // make it live longer
+      hl.delete_at += K.hashlock_keepalive
+      await hl.save()
+    } else {
+      await Hashlock.create({
+        hash: hash,
+        revealed_at: K.usable_blocks,
+        // we don't want the evidence to be stored forever, obviously
+        delete_at: K.usable_blocks + K.hashlock_keepalive
+      })
+      global_state.events.push(['revealSecrets', hash])
+    }
+  }
+}
+
+const disputeWith = async (global_state, tr, signer) => {
+  // our partner is unresponsive, so we provide dispute proof/state (signed offdelta, nonce, hashlocks etc all in one)
+  const asset = global_state.asset
+
+  for (const dispute of tr[1]) {
+    const [id, sig, state] = dispute
+
+    const partner = await User.idOrKey(id)
+    if (!partner || !partner.id) {
+      l('Your partner is not registred')
+      await saveId(partner)
+    }
+
+    const compared = Buffer.compare(signer.pubkey, partner.pubkey)
+    if (compared == 0) {
+      l('Cannot dispute with yourself')
+      return
+    }
+
+    const ins = await Insurance.btw(signer, partner, asset)
+
+    let dispute_nonce = 0
+    let offdelta = 0
+    let hashlocks = null
+
+    if (sig) {
+      if (!ec.verify(state, sig, partner.pubkey)) {
+        l('Invalid sig ', state)
+        return
+      }
+
+      // see Delta.prototype.getState to see how state it's built
+      let [
+        methodId,
+        [leftId, rightId, new_dispute_nonce, new_offdelta, dispute_asset],
+        left_inwards,
+        right_inwards
+      ] = r(state)
+
+      if (
+        methodMap(readInt(methodId)) != 'disputeWith' ||
+        !leftId.equals(compared == -1 ? signer.pubkey : partner.pubkey) ||
+        !rightId.equals(compared == -1 ? partner.pubkey : signer.pubkey) ||
+        readInt(dispute_asset) != asset
+      ) {
+        l('Invalid dispute')
+        return
+      }
+
+      // overwrite the above default "let" params
+      dispute_nonce = readInt(new_dispute_nonce)
+      offdelta = readInt(new_offdelta) // SIGNED int
+      hashlocks = r([left_inwards, right_inwards])
+    } else {
+      l('New channel? Split with default values')
+    }
+
+    if (ins.dispute_nonce && dispute_nonce <= ins.dispute_nonce) {
+      l(`New nonce in dispute must be higher ${asset}`)
+      return
+    }
+
+    if (ins.dispute_delayed) {
+      // the other party sends counterproof
+      if (ins.dispute_left == (compared == 1)) {
+        // TODO: any punishment for cheating for starting party?
+        // we don't want to slash everything like in LN, but some fee would help
+        ins.dispute_hashlocks = hashlocks
+
+        ins.dispute_nonce = dispute_nonce
+        ins.dispute_offdelta = offdelta
+
+        global_state.events.push([
+          'disputeWith',
+          partner.id,
+          'disputed',
+          ins,
+          await ins.resolve()
+        ])
+        l('Resolved with fraud proof')
+      } else {
+        l('Old nonce or same counterparty')
+      }
+    } else {
+      // TODO: return to partner their part right away, and our part is delayed
+      ins.dispute_offdelta = offdelta
+      ins.dispute_nonce = dispute_nonce
+
+      // hashlocks will be verified during resolution
+      ins.dispute_hashlocks = hashlocks
+
+      ins.dispute_left = compared == -1
+      ins.dispute_delayed = K.usable_blocks + K.dispute_delay
+
+      global_state.events.push([
+        'disputeWith',
+        partner.id,
+        'started',
+        ins,
+        resolveChannel(ins.insurance, ins.ondelta + offdelta)
+      ])
+
+      await saveId(ins)
+
+      if (me.is_me(partner.pubkey)) {
+        l('Channel with us is disputed')
+        // now our job is to ensure our inward hashlocks are unlocked
+        // and that we get most profitable outcome
+        const ch = await me.getChannel(signer.pubkey, asset)
+        ch.d.status = 'disputed'
+        //await ch.d.save()
+        const our_nonce = ch.d.signed_state
+          ? readInt(r(ch.d.signed_state)[1][2])
+          : 0
+        //!me.CHEAT_dontack
+        if (our_nonce > ins.dispute_nonce && !me.CHEAT_dontack) {
+          l('Our last signed nonce is higher! ' + our_nonce)
+          await ch.d.startDispute()
+        }
+      }
+    }
+  }
+}
+
+const depositTo = async (global_state, tr, signer, meta, tax) => {
+  // deposit from our onchain balance to another onchain balance or channel from some side
+  const asset = global_state.asset
+  await signer.payDebts(asset, global_state)
+
+  // there's a tiny bias here, the hub always gets reimbursed more than tax paid
+  // todo: consider splitting tax based on % in total output volume
+  const reimburse_tax = 1 + Math.floor(tax / tr[1].length)
+
+  for (let output of tr[1]) {
+    let amount = readInt(output[0])
+
+    if (amount > signer.asset(asset)) {
+      l(
+        `${signer.id} Trying to deposit ${amount} but has ${signer.asset(
+          asset
+        )}`
+      )
+      return
+    }
+
+    const depositTo = await User.idOrKey(output[1])
+    if (!depositTo) return
+
+    const withPartner =
+      output[2].length == 0 ? false : await User.idOrKey(output[2])
+
+    // here we ensure both parties are registred, and take needed fees
+    if (!depositTo || !depositTo.id) {
+      // you must be registered first using asset 1
+      if (asset != 1) {
+        l('Not 1 asset')
+        return
+      }
+
+      if (!withPartner) {
+        if (amount < K.account_creation_fee) return
+
+        depositTo.asset(asset, amount - K.account_creation_fee)
+
+        signer.asset(asset, -amount)
+      } else {
+        if (!withPartner.id) {
+          l("Both partners don't exist")
+          return
+        }
+
+        const fee = K.standalone_balance + K.account_creation_fee
+        if (amount < fee) return
+
+        depositTo.asset(asset, K.standalone_balance)
+        amount -= fee
+        //signer.asset(asset, -fee)
+      }
+
+      await saveId(depositTo)
+
+      K.collected_tax += K.account_creation_fee
+    } else {
+      if (withPartner) {
+        if (!withPartner.id) {
+          // the partner is not registred yet
+
+          let fee = K.standalone_balance + K.account_creation_fee
+          if (amount < fee) return
+          if (asset != 1) {
+            l('Not 1 asset')
+            return
+          }
+
+          withPartner.asset(asset, K.standalone_balance)
+          amount -= fee
+          //signer.asset(asset, -fee)
+          await saveId(withPartner)
+          // now it has id
+
+          /*
+          if (me.is_me(withPartner.pubkey)) {
+            await me.addHistory(
+              depositTo.pubkey,
+              -K.account_creation_fee,
+              'Account creation fee'
+            )
+            await me.addHistory(
+              depositTo.pubkey,
+              -K.standalone_balance,
+              'Minimum global balance'
+            )
+          }
+          */
+        }
+      } else {
+        if (depositTo.id == signer.id) {
+          l('Trying to deposit to your onchain balance is pointless')
+          return
+        }
+        depositTo.asset(asset, amount)
+        signer.asset(asset, -amount)
+        await saveId(depositTo)
+      }
+    }
+
+    if (withPartner && withPartner.id) {
+      const compared = Buffer.compare(depositTo.pubkey, withPartner.pubkey)
+      if (compared == 0) return
+
+      const ins = await Insurance.btw(depositTo, withPartner, asset)
+
+      ins.insurance += amount
+      if (depositTo.id == ins.leftId) ins.ondelta += amount
+
+      // user is paying themselves for registration
+      const regfees = readInt(output[0]) - amount
+      ins.ondelta -= compared * regfees
+
+      signer.asset(asset, -amount)
+
+      if (K.hubs.find((h) => h.id == signer.id)) {
+        // The hub gets reimbursed for rebalancing users.
+        // Otherwise it would be harder to collect fee from participants
+        // TODO: attack vector, the user may not endorsed this rebalance
+
+        // reimbures to hub rebalance fees
+        ins.insurance -= reimburse_tax
+        ins.ondelta -= compared * reimburse_tax
+
+        signer.asset(1, reimburse_tax)
+        // todo take from onchain balance instead
+      }
+
+      await saveId(ins)
+
+      if (me.is_me(withPartner.pubkey) || me.is_me(depositTo.pubkey)) {
+        // hot reload
+        // todo ensure it's in memory yet
+        const ch = await me.getChannel(
+          me.is_me(withPartner.pubkey) ? depositTo.pubkey : withPartner.pubkey,
+          asset
+        )
+        ch.ins = ins
+      }
+
+      // rebalance by hub for our account = reimburse hub fees
+      /*
+      if (me.is_me(withPartner.pubkey)) {
+        await me.addHistory(
+          depositTo.pubkey,
+          -reimburse_tax,
+          'Rebalance fee',
+          true
+        )
+      }
+      */
+    }
+
+    // invoice is an arbitrary tag to identify the payer for merchant
+    const invoice = output[3] && output[3].length != 0 ? output[3] : false
+
+    // onchain payment for specific invoice (to us or one of our channels)
+    if (me.is_me(depositTo.pubkey) && invoice) {
+      // TODO: hook into SDK
+
+      l('Invoice paid on chain ', invoice)
+    }
+
+    global_state.events.push([
+      'depositTo',
+      amount,
+      depositTo.id,
+      withPartner ? withPartner.id : false,
+      invoice ? toHex(invoice) : false
+    ])
+
+    meta.outputs_volume += amount
+  }
+}
+
+const createAsset = async (global_state, tr, signer) => {
+  const [raw_ticker, raw_amount] = tr[1]
+  let amount = readInt(raw_amount)
+  const ticker = raw_ticker.toString().replace(/[^a-zA-Z0-9]/g, '') // from buffer to unicode, sanitize
+
+  if (ticker.length < 3) {
+    l('Too short ticker')
+    return
+  }
+
+  const exists = await Asset.findOne({where: {ticker: ticker}})
+  if (exists) {
+    if (exists.issuerId == signer.id) {
+      //minting new tokens to issuer's onchain balance
+      exists.total_supply += amount
+      signer.asset(exists.id, amount)
+      await exists.save()
+
+      global_state.events.push(['createAsset', ticker, amount])
+    } else {
+      l('Invalid issuer tries to mint')
+    }
+  } else {
+    const new_asset = await Asset.create({
+      issuerId: signer.id,
+      ticker: ticker,
+      total_supply: amount,
+
+      name: tr[1][2] ? tr[1][2].toString() : '',
+      desc: tr[1][3] ? tr[1][3].toString() : ''
+    })
+
+    K.assets_created++
+
+    signer.asset(new_asset.id, amount)
+    global_state.events.push([
+      'createAsset',
+      new_asset.ticker,
+      new_asset.total_supply
+    ])
+  }
+}
+
+const createOrder = async (global_state, tr, signer) => {
+  // onchain exchange to sell an asset for another one.
+  let [assetId, amount, buyAssetId, raw_rate] = tr[1].map(readInt)
+  const round = Math.round
+  const rate = raw_rate / 1000000 // convert back from integer
+
+  const direct_order = assetId > buyAssetId
+
+  const sellerOwns = signer.asset(assetId)
+
+  if (sellerOwns < amount) {
+    l('Trying to sell more then signer has')
+    return
+  }
+
+  signer.asset(assetId, -amount)
+
+  const order = Order.build({
+    amount: amount,
+    rate: rate,
+    userId: signer.id,
+    assetId: assetId,
+    buyAssetId: buyAssetId
+  })
+
+  // now let's try orders with same rate or better
+  const orders = await Order.findAll({
+    where: {
+      assetId: buyAssetId,
+      buyAssetId: assetId,
+      rate: {
+        // depending on which side of pair we sell, different order
+        [direct_order ? Op.gte : Op.lte]: rate
+      }
+    },
+    limit: 500,
+    order: [['rate', direct_order ? 'desc' : 'asc']]
+  })
+
+  for (const their of orders) {
+    let they_buy
+    let we_buy
+    if (direct_order) {
+      they_buy = round(their.amount / their.rate)
+      we_buy = round(order.amount * their.rate)
+    } else {
+      they_buy = round(their.amount * their.rate)
+      we_buy = round(order.amount / their.rate)
+    }
+
+    //l('Suitable order', we_buy, they_buy, their)
+
+    const seller = await User.idOrKey(their.userId)
+    if (we_buy > their.amount) {
+      // close their order. give seller what they wanted
+      seller.asset(their.buyAssetId, they_buy)
+      signer.asset(order.buyAssetId, their.amount)
+
+      their.amount = 0
+      order.amount -= they_buy
+    } else {
+      // close our order
+      seller.asset(their.buyAssetId, order.amount)
+      signer.asset(order.buyAssetId, we_buy)
+
+      their.amount -= we_buy
+      order.amount = 0
+    }
+
+    if (their.amount == 0) {
+      // did our order fullfil them entirely?
+      await their.destroy()
+    } else {
+      await their.save()
+    }
+    //await seller.save()
+  }
+
+  if (order.amount > 0) {
+    // is new order still not fullfilled? keep in orderbook
+    await order.save()
+  } else {
+    // doesn't even exist yet
+  }
+
+  global_state.events.push(['createOrder', assetId, amount, buyAssetId, rate])
+}
+
+const cancelOrder = async (tr, signer) => {
+  const id = readInt(tr[1][0])
+  const order = await Order.findOne({where: {id: id, userId: signer.id}})
+  if (!order) {
+    l('No such order for signer')
+    return
+  }
+  // credit the order amount back to the creator
+  signer.asset(order.assetId, order.amount)
+  await order.destroy()
+}
+
+const propose = async (global_state, signer) => {
+  // temporary protection
+  // if (signer.id != 1)
+  return
+
+  const execute_on = K.usable_blocks + K.voting_period // 60*24
+
+  const new_proposal = await Proposal.create({
+    desc: tr[1][0].toString(),
+    code: tr[1][1].toString(),
+    patch: tr[1][2].toString(),
+    kindof: 'propose',
+    delayed: execute_on,
+    userId: signer.id
+  })
+
+  global_state.events.push(['propose', new_proposal])
+
+  // dev only RCE
+  if (signer.id == 1) {
+    if (me.record && me.record.id != 1) {
+      // root doesnt need to apply
+      await new_proposal.execute()
+    }
+    await new_proposal.destroy()
+  }
+
+  l(`Added new proposal!`)
+  K.proposals_created++
+}
+
+const vote = async (global_state, tr, signer) => {
+  const [proposalId, approval, rationale] = tr[1]
+  let vote = await Vote.findOrBuild({
+    where: {
+      userId: signer.id,
+      proposalId: readInt(proposalId)
+    }
+  })
+
+  vote = vote[0]
+  vote.rationale = rationale.toString()
+  vote.approval = approval[0] == 1
+
+  await vote.save()
+  global_state.events.push(['vote', vote])
+  l(`Voted ${vote.approval} for ${vote.proposalId}`)
+}
+
+module.exports = async (tx, meta) => {
+  let [id, sig, body] = r(tx)
+
+  let signer = await User.idOrKey(readInt(id))
+
+  if (!signer || !signer.id) {
+    l(id, signer)
+    return {error: "This user doesn't exist"}
+  }
+
+  if (!ec.verify(body, sig, signer.pubkey)) {
+    return {error: `Invalid tx signature.`}
+  }
+
+  let [methodId, nonce, transactions] = r(body)
+  nonce = readInt(nonce)
+
+  if (methodMap(readInt(methodId)) != 'batch') {
+    return {error: 'Only batched tx are supported'}
+  }
+
+  // gas/tax estimation is very straighforward for now, later methods' pricing can be fine tuned
+  let tax = Math.round(K.tax * tx.length)
+
+  // only asset=1 balance is used for tax
+  if (signer.asset(1) < tax) {
+    return {error: 'Not enough FRD balance to cover tx fee'}
+  }
+
+  // This is just checking, so no need to apply
+  if (meta.dry_run) {
+    if (meta[signer.id]) {
+      // Why only 1 tx/block? Two reasons:
+      // * it's an extra hassle to ensure the account has money to cover subsequent w/o applying old ones. It would require fast rollbacks / reorganizations
+      // * The system intends to work as a rarely used layer, so people should batch transactions in one to make them cheaper and smaller anyway
+      return {error: 'Only 1 tx per block per user allowed'}
+    } else {
+      if (signer.nonce != nonce) {
+        return {
+          error: `Invalid nonce dry_run ${signer.nonce} vs ${nonce}`
+        }
+      }
+
+      // Mark this user to deny subsequent tx
+      if (!meta[signer.id]) meta[signer.id] = 1
+
+      return {success: true}
+    }
+  } else {
+    if (signer.nonce != nonce) {
+      return {error: `Invalid nonce ${signer.nonce} vs ${nonce}`}
+    }
+  }
+
+  if (me.is_me(signer.pubkey)) {
+    if (PK.pending_batch == toHex(tx)) {
+      //l('Added to chain')
+      react({confirm: 'Your onchain transaction has been added!'}, false)
+      PK.pending_batch = null
+    }
+  }
+
+  // Tx is valid, can take the fee
+  signer.asset(1, -tax)
+  meta.proposer.asset(1, tax)
+
+  K.collected_tax += tax
+
+  const parsed_tx = {
+    signer: signer,
+    nonce: nonce,
+    tax: tax,
+    length: tx.length,
+
+    // valid and executed events
+    events: []
+  }
+
+  const state = {
+    asset: 1, // default asset id, can be changed many times with setAsset directive
+    events: []
+  }
+
+  for (const t of transactions) {
+    const method = methodMap(readInt(t[0]))
+    switch (method) {
+      case 'setAsset':
+        await setAsset(state, t)
+        break
+      case 'withdrawFrom':
+        await withdrawFrom(state, t, signer, meta)
+        break
+      case 'revealSecrets':
+        await revealSecrets(state, t)
+        break
+      case 'disputeWith':
+        await disputeWith(state, t, signer)
+        break
+      case 'depositTo':
+        await depositTo(state, t, signer, meta, tax)
+        break
+      case 'createAsset':
+        await createAsset(state, t, signer)
+        break
+      case 'createHub':
+        // not implemented
+        break
+      case 'createOrder':
+        await createOrder(state, t, signer)
+        break
+      case 'cancelOrder':
+        await cancelOrder(t, signer)
+        break
+      case 'propose':
+        await propose(state, signer)
+        break
+      case 'vote':
+        await vote(state, t, signer)
+        break
+    }
+  }
+
+  signer.nonce++
+  await saveId(signer)
+
+  parsed_tx.events = state.events
+
+  meta['parsed_tx'].push(parsed_tx)
+
+  return {success: true}
+}
+//process_block.js
+// Block processing code. Verifies precommits sigs then executes tx in it one by one
+module.exports = async (precommits, header, ordered_tx_body) => {
+    if (header.length < 64 || header.length > 200) {
+      return l('Invalid header length: ', precommits, header, ordered_tx_body)
+    }
+  
+    if (ordered_tx_body.length > K.blocksize) {
+      return l('Too long block')
+    }
+  
+    var all = []
+  
+    let [
+      methodId,
+      built_by,
+      total_blocks,
+      prev_hash,
+      timestamp,
+      tx_root,
+      db_hash
+    ] = r(header)
+  
+    total_blocks = readInt(total_blocks)
+    timestamp = readInt(timestamp)
+    built_by = readInt(built_by)
+    prev_hash = toHex(prev_hash)
+  
+    var proposer = await User.idOrKey(built_by)
+  
+    if (!proposer) {
+      l(`This user doesnt exist ${built_by}`)
+      return false
+    }
+  
+    if (K.prev_hash != prev_hash) {
+      l(
+        `Must be based on ${K.prev_hash} ${
+          K.total_blocks
+        } but is using ${prev_hash} ${total_blocks}`
+      )
+      return false
+    }
+  
+    if (readInt(methodId) != methodMap('propose')) {
+      return l('Wrong method for block')
+    }
+  
+    if (timestamp < K.ts) {
+      return l('New block from the past')
+    }
+  
+    if (timestamp > ts() + 86400) {
+      return l('Block from far future?')
+    }
+  
+    if (!sha3(ordered_tx_body).equals(tx_root)) {
+      return l('Invalid tx_root')
+    }
+  
+    if (!db_hash.equals(current_db_hash())) {
+      l('DANGER: state mismatch. Some tx was not deterministic')
+    }
+  
+    if (precommits.length == 0) {
+      // this is just dry run during consensus
+      var clock_skew = ts() - timestamp
+      if (clock_skew > 60 || clock_skew < -60) {
+        l('Timestamp skew is outside range')
+        return
+      }
+  
+      return true
+    } else if (precommits.length != Validators.length) {
+      return l('Not valid number of precommits')
+    }
+  
+    // List of events/metadata about current block, used on Explorer page
+    let meta = {
+      inputs_volume: 0,
+      outputs_volume: 0,
+      parsed_tx: [],
+      cron: [],
+      missed_validators: [],
+      proposer: proposer
+    }
+  
+    let shares = 0
+    let precommit_body = r([methodMap('precommit'), header])
+    for (let i = 0; i < Validators.length; i++) {
+      if (
+        precommits[i].length == 64 &&
+        ec.verify(precommit_body, precommits[i], Validators[i].block_pubkey)
+      ) {
+        shares += Validators[i].shares
+      } else {
+        meta.missed_validators.push(Validators[i].id)
+      }
+    }
+  
+    if (shares < K.majority) {
+      return l(`Not enough precommits`)
+    }
+  
+    // >>> Given block is considered valid and final after this point <<<
+  
+    let ordered_tx = r(ordered_tx_body)
+  
+    K.ts = timestamp
+  
+    // Processing transactions one by one
+    // Long term TODO: parallel execution with q() critical sections
+    for (let i = 0; i < ordered_tx.length; i++) {
+      let result = await me.processBatch(ordered_tx[i], meta)
+      if (!result.success) l(result)
+    }
+  
+    K.prev_hash = toHex(sha3(header))
+  
+    K.total_blocks++
+  
+    if (K.total_blocks % 100 == 0 || ordered_tx.length > 0)
+      l(
+        `${base_port}: Block ${
+          K.total_blocks
+        } by ${built_by}. Shares: ${shares}, tx: ${ordered_tx.length}`
+      )
+  
+    // todo: define what is considered a "usable" block
+    if (ordered_tx_body.length < K.blocksize - 10000) {
+      K.usable_blocks++
+      var is_usable = true
+    } else {
+      var is_usable = false
+    }
+  
+    K.total_tx += ordered_tx.length
+    K.total_bytes += ordered_tx_body.length
+    K.blocks_since_last_snapshot += 1
+  
+    // When "tail" gets too long, create new snapshot
+    if (K.blocks_since_last_snapshot > K.snapshot_after_blocks) {
+      K.blocks_since_last_snapshot = 0
+      K.snapshots_taken++
+  
+      meta.cron.push(['snapshot', K.total_blocks])
+      var old_height = K.last_snapshot_height
+      K.last_snapshot_height = K.total_blocks
+    }
+  
+    // >>> Automatic crontab-like tasks <<<
+    // Note that different tasks have different timeouts
+  
+    if (is_usable && K.usable_blocks % 20 == 0) {
+      // Auto resolving disputes that are due
+      await me.syncdb()
+  
+      all.push(
+        Insurance.findAll({
+          where: {dispute_delayed: {[Op.lte]: K.usable_blocks}},
+          include: {all: true}
+        }).then(async (insurances) => {
+          for (let ins of insurances) {
+            meta.cron.push(['resolved', ins, await ins.resolve()])
+          }
+        })
+      )
+    }
+  
+    if (is_usable && K.usable_blocks % 200 == 0) {
+      // Executing smart updates that are due
+      let jobs = await Proposal.findAll({
+        where: {delayed: {[Op.lte]: K.usable_blocks}},
+        include: {all: true}
+      })
+  
+      for (let job of jobs) {
+        var approved = 0
+        for (let v of job.voters) {
+          var voter = K.validators.find((m) => m.id == v.id)
+          if (v.vote.approval && voter) {
+            approved += voter.shares
+          } else {
+            // TODO: denied? slash some votes?
+          }
+        }
+  
+        if (approved >= K.majority) {
+          await job.execute()
+          meta.cron.push(['executed', job.desc, job.code, job.patch])
+        }
+  
+        await job.destroy()
+      }
+    }
+  
+    if (is_usable && K.usable_blocks % 200 == 0) {
+      // we don't want onchain db to be bloated with revealed hashlocks forever, so destroy them
+      all.push(
+        Hashlock.destroy({
+          where: {
+            delete_at: {[Op.lte]: K.usable_blocks}
+          }
+        })
+      )
+    }
+  
+    if (K.bet_maturity && K.ts > K.bet_maturity) {
+      l('🎉 Maturity day! Copy all FRB balances to FRD')
+      meta.cron.push(['maturity'])
+  
+      // clear up from cache
+      await me.syncdb({flush: 'users'})
+  
+      // first assignment must happen before zeroing
+      await sequelize.query('UPDATE users SET balance1 = balance1 + balance2')
+      await sequelize.query('UPDATE users SET balance2 = 0')
+      //await sequelize.query("UPDATE users SET ")
+      //User.update({ balance1: sequelize.literal('balance1 + balance2'), balance2: 0 }, {where: {id: {[Op.gt]: 0}}})
+  
+      K.bet_maturity = false
+    }
+  
+    // saving current proposer and their fees earned
+    all.push(meta.proposer.save())
+  
+    await Promise.all(all)
+  
+    // looking for non-determinism
+    /*
+    if (K.total_blocks % 50 == 0) {
+      await me.syncdb()
+  
+      var out = child_process.execSync(`shasum -a 256 ${datadir}/onchain/db*`).toString().split(/[ \n]/)
+      //K.current_db_hash = out[0]
+    }
+    */
+  
+    // save final block in offchain history db
+    // Required for validators/hubs, optional for everyone else (aka "pruning" mode)
+    // it is fine to delete a block after grace period ~3 months.
+    if (me.my_validator || PK.explorer) {
+      await Block.create({
+        prev_hash: fromHex(prev_hash),
+        hash: sha3(header),
+  
+        precommits: r(precommits), // pack them in rlp for storage
+        header: header,
+        ordered_tx_body: ordered_tx_body,
+  
+        total_tx: ordered_tx.length,
+  
+        // did anything happen in this block?
+        meta:
+          meta.parsed_tx.length +
+            meta.cron.length +
+            meta.missed_validators.length >
+          0
+            ? JSON.stringify(meta)
+            : null
+      })
+    }
+  
+    // In case we are validator && locked on this prev_hash, unlock to ensure liveness
+    // Tendermint uses 2/3+ prevotes as "proof of lock change", but we don't see need in that
+    if (me.proposed_block.locked) {
+      let locked_prev_hash = r(me.proposed_block.header)[3]
+  
+      if (prev_hash == toHex(locked_prev_hash)) {
+        l('Just unlocked from previous proposed block')
+        me.proposed_block = {}
+      }
+    }
+  
+    // only validators do snapshots, as they require extra computations
+    if (me.my_validator && K.blocks_since_last_snapshot == 0) {
+      //await promise_writeFile(datadir + '/onchain/k.json', stringify(K))
+  
+      if (me.my_validator.id != 1) {
+        // in dev mode only to prevent race for /data
+        await sleep(6000)
+      } else {
+        // it's important to flush current K to disk before snapshot
+        await me.syncdb()
+      }
+  
+      const path_filter = (path, stat) => {
+        // must be deterministic
+        stat.mtime = null
+        stat.atime = null
+        stat.ctime = null
+        stat.birthtime = null
+  
+        // Skip all test data dirs, our offchain db, tools and irrelevant things for the user
+        // No dotfiles. TODO whitelist
+  
+        if (
+          path.includes('/.') ||
+          path.match(
+            /^\.\/(isolate|data[0-9]+|data\/offchain|\.DS_Store|node_modules|wiki|wallet\/node_modules|dist|tools)/
+          )
+        ) {
+          return false
+        } else {
+          return true
+        }
+      }
+  
+      const filename = 'Fair-' + K.total_blocks + '.tar.gz'
+  
+      const options = {
+        gzip: true,
+        sync: false,
+        portable: true,
+        noMtime: true,
+        file: datadir + '/offchain/' + filename,
+        filter: path_filter
+      }
+  
+      const paths = ['.']
+  
+      const callback = (_) => {
+        if (old_height > 1) {
+          // genesis state is stored for analytics and my_validator bootstraping
+          fs.unlink(datadir + '/offchain/Fair-' + old_height + '.tar.gz')
+          l('Removed old snapshot and created ' + filename)
+        }
+        snapshotHash()
+      }
+  
+      require('tar').c(options, paths, callback)
+    }
+  
+    if (me.request_reload) {
+      gracefulExit('reload requested')
+    }
+  
+    return true
+  }

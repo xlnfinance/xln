@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XLN - Universal Money Relationships</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, system-ui, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 420px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.98);
+            border-radius: 24px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .header {
+            background: white;
+            padding: 20px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .balance-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 24px;
+            margin: 20px;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+        .balance-title { 
+            font-size: 14px; 
+            opacity: 0.9; 
+            margin-bottom: 8px;
+        }
+        .balance-amount { 
+            font-size: 36px; 
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+        .balance-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .balance-item {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 12px;
+            border-radius: 8px;
+        }
+        .balance-item-label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+        .balance-item-value {
+            font-size: 20px;
+            font-weight: 600;
+            margin-top: 4px;
+        }
+        .quick-actions {
+            display: flex;
+            justify-content: space-around;
+            padding: 20px;
+            background: #f9fafb;
+        }
+        .quick-action {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .quick-action:hover { transform: scale(1.05); }
+        .quick-action-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            background: white;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .quick-action-label {
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .relationships {
+            padding: 20px;
+        }
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #1f2937;
+        }
+        .see-all {
+            font-size: 14px;
+            color: #667eea;
+            cursor: pointer;
+        }
+        .relationship-card {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+        .relationship-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .relationship-avatar {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }
+        .relationship-info { flex: 1; }
+        .relationship-name {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .relationship-status {
+            font-size: 12px;
+            color: #6b7280;
+            display: flex;
+            gap: 12px;
+        }
+        .relationship-metrics {
+            text-align: right;
+        }
+        .capacity {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .capacity.in { color: #10b981; }
+        .capacity.out { color: #6b7280; }
+        .trust-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+        .trust-high { background: #dcfce7; color: #14532d; }
+        .trust-medium { background: #fef3c7; color: #78350f; }
+        .trust-low { background: #f3f4f6; color: #6b7280; }
+        .bottom-nav {
+            display: flex;
+            justify-content: space-around;
+            padding: 16px;
+            border-top: 1px solid #e5e7eb;
+            background: white;
+        }
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            color: #9ca3af;
+            cursor: pointer;
+        }
+        .nav-item.active { color: #667eea; }
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        .modal.active { display: flex; }
+        .modal-content {
+            background: white;
+            border-radius: 20px;
+            padding: 24px;
+            max-width: 380px;
+            width: 100%;
+        }
+        .slider {
+            width: 100%;
+            margin: 16px 0;
+        }
+        .slider-labels {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .btn {
+            width: 100%;
+            padding: 16px;
+            border-radius: 12px;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 16px;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <h1 style="font-size: 24px; font-weight: 700;">XLN</h1>
+                <div style="display: flex; gap: 8px;">
+                    <span style="padding: 4px 12px; background: #dcfce7; color: #14532d; border-radius: 20px; font-size: 12px; font-weight: 600;">
+                        Score: 98
+                    </span>
+                    <span style="font-size: 24px;">🔔</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Total Balance Card -->
+        <div class="balance-card">
+            <div class="balance-title">Total Available</div>
+            <div class="balance-amount">$12,450</div>
+            <div class="balance-grid">
+                <div class="balance-item">
+                    <div class="balance-item-label">Credit Available</div>
+                    <div class="balance-item-value">$8,200</div>
+                </div>
+                <div class="balance-item">
+                    <div class="balance-item-label">Collateral Locked</div>
+                    <div class="balance-item-value">$4,250</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="quick-actions">
+            <div class="quick-action" onclick="showModal('send')">
+                <div class="quick-action-icon">↗️</div>
+                <div class="quick-action-label">Send</div>
+            </div>
+            <div class="quick-action" onclick="showModal('request')">
+                <div class="quick-action-icon">↙️</div>
+                <div class="quick-action-label">Request</div>
+            </div>
+            <div class="quick-action" onclick="showModal('swap')">
+                <div class="quick-action-icon">🔄</div>
+                <div class="quick-action-label">Swap</div>
+            </div>
+            <div class="quick-action" onclick="showModal('new')">
+                <div class="quick-action-icon">➕</div>
+                <div class="quick-action-label">New Channel</div>
+            </div>
+        </div>
+
+        <!-- Relationships -->
+        <div class="relationships">
+            <div class="section-header">
+                <div class="section-title">Your Relationships</div>
+                <div class="see-all">See all →</div>
+            </div>
+
+            <!-- High Trust Relationship -->
+            <div class="relationship-card" onclick="showModal('manage')">
+                <div class="relationship-avatar" style="background: #dcfce7; color: #14532d;">JD</div>
+                <div class="relationship-info">
+                    <div class="relationship-name">
+                        John's Coffee
+                        <span class="trust-badge trust-high">High Trust</span>
+                    </div>
+                    <div class="relationship-status">
+                        <span>Credit: $500</span>
+                        <span>No collateral</span>
+                    </div>
+                </div>
+                <div class="relationship-metrics">
+                    <div class="capacity in">↓ $500</div>
+                    <div class="capacity out">↑ $500</div>
+                </div>
+            </div>
+
+            <!-- Medium Trust Relationship -->
+            <div class="relationship-card" onclick="showModal('manage')">
+                <div class="relationship-avatar" style="background: #e0e7ff; color: #3730a3;">NY</div>
+                <div class="relationship-info">
+                    <div class="relationship-name">
+                        Hub New York
+                        <span class="trust-badge trust-medium">Building Trust</span>
+                    </div>
+                    <div class="relationship-status">
+                        <span>Credit: $1,000</span>
+                        <span>Collateral: $2,000</span>
+                    </div>
+                </div>
+                <div class="relationship-metrics">
+                    <div class="capacity in">↓ $2,800</div>
+                    <div class="capacity out">↑ $1,200</div>
+                </div>
+            </div>
+
+            <!-- Low Trust Relationship -->
+            <div class="relationship-card" onclick="showModal('manage')">
+                <div class="relationship-avatar" style="background: #fef3c7; color: #78350f;">DX</div>
+                <div class="relationship-info">
+                    <div class="relationship-name">
+                        DEX Router
+                        <span class="trust-badge trust-low">Trustless</span>
+                    </div>
+                    <div class="relationship-status">
+                        <span>No credit</span>
+                        <span>Collateral: $5,000</span>
+                    </div>
+                </div>
+                <div class="relationship-metrics">
+                    <div class="capacity in">↓ $4,950</div>
+                    <div class="capacity out">↑ $5,000</div>
+                </div>
+            </div>
+
+            <!-- Mutual Trust Relationship -->
+            <div class="relationship-card" onclick="showModal('manage')">
+                <div class="relationship-avatar" style="background: #fce7f3; color: #831843;">AL</div>
+                <div class="relationship-info">
+                    <div class="relationship-name">
+                        Alice
+                        <span class="trust-badge trust-high">Mutual</span>
+                    </div>
+                    <div class="relationship-status">
+                        <span>Credit: $1k/$1k</span>
+                        <span>328 payments</span>
+                    </div>
+                </div>
+                <div class="relationship-metrics">
+                    <div class="capacity in">↓ $950</div>
+                    <div class="capacity out">↑ $1,050</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bottom Navigation -->
+        <div class="bottom-nav">
+            <div class="nav-item active">
+                <span>🏠</span>
+                <span style="font-size: 12px;">Home</span>
+            </div>
+            <div class="nav-item">
+                <span>📊</span>
+                <span style="font-size: 12px;">Activity</span>
+            </div>
+            <div class="nav-item">
+                <span>🔍</span>
+                <span style="font-size: 12px;">Discover</span>
+            </div>
+            <div class="nav-item">
+                <span>⚙️</span>
+                <span style="font-size: 12px;">Settings</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Manage Relationship Modal -->
+    <div class="modal" id="manage-modal">
+        <div class="modal-content">
+            <h2 style="margin-bottom: 20px;">Manage Relationship</h2>
+            <div style="background: #f9fafb; padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                    <span style="color: #6b7280;">Trust Score</span>
+                    <span style="font-weight: 600;">92/100</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 12px;">
+                    <span style="color: #6b7280;">Total Volume</span>
+                    <span style="font-weight: 600;">$45,320</span>
+                </div>
+                <div style="display: flex; justify-content: space-between;">
+                    <span style="color: #6b7280;">Relationship Since</span>
+                    <span style="font-weight: 600;">6 months ago</span>
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <label style="font-weight: 600; display: block; margin-bottom: 8px;">
+                    Your Credit Line to Them
+                </label>
+                <input type="range" class="slider" min="0" max="5000" value="1000" 
+                       oninput="document.getElementById('credit-value').textContent = '$' + this.value">
+                <div class="slider-labels">
+                    <span>$0</span>
+                    <span id="credit-value">$1000</span>
+                    <span>$5000</span>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <label style="font-weight: 600; display: block; margin-bottom: 8px;">
+                    Collateral Ratio
+                </label>
+                <input type="range" class="slider" min="0" max="200" value="50"
+                       oninput="document.getElementById('collateral-value').textContent = this.value + '%'">
+                <div class="slider-labels">
+                    <span>0%</span>
+                    <span id="collateral-value">50%</span>
+                    <span>200%</span>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 12px;">
+                <button class="btn btn-primary">Save Changes</button>
+            </div>
+            <button class="btn" style="background: #f3f4f6; margin-top: 8px;" onclick="closeModal()">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        function showModal(type) {
+            if (type === 'manage') {
+                document.getElementById('manage-modal').classList.add('active');
+            }
+            // Add other modal types here
+        }
+
+        function closeModal() {
+            document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
+        }
+
+        // Close modal on outside click
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) closeModal();
+            });
+        });
+    </script>
+</body>
+</html>
