@@ -241,6 +241,8 @@ let vrHammer: VRHammer | null = null;
     direction?: 'incoming' | 'outgoing';
   }> = [];
 
+  let lastObjectSampleTime = 0;
+
   // Frame activity tracking
   let currentFrameActivity: FrameActivity = {
     activeEntities: new Set(),
@@ -1878,55 +1880,79 @@ let vrHammer: VRHammer | null = null;
     if (!scene) return;
 
     const stopSection = topologyProfiler.startSection('network:update');
+    const heapBeforeUpdate = topologyProfiler.getCurrentHeapUsage();
 
     try {
       const timeIndex = $isolatedTimeIndex;
+      const historyFrames = $isolatedHistory || [];
+
+      // Record diff delivery latency using history timestamps (if present)
+      if (Array.isArray(historyFrames) && historyFrames.length > 0) {
+        const targetIndex = timeIndex >= 0
+          ? Math.min(timeIndex, historyFrames.length - 1)
+          : historyFrames.length - 1;
+        const frame = historyFrames[targetIndex];
+        if (frame?.timestamp) {
+          const nowTs = Date.now();
+          const latencyMs = nowTs - frame.timestamp;
+          topologyProfiler.recordDeliveryStats({
+            diffTimestamp: frame.timestamp,
+            deliveredAt: nowTs,
+            latencyMs,
+            totalMs: latencyMs,
+            source: 'history'
+          });
+        }
+      }
 
       // Update available tokens
       updateAvailableTokens();
 
       // Use time-aware data sources (isolated env if provided, otherwise global)
       let entityData: any[] = [];
-      let currentReplicas = $isolatedEnv?.replicas || new Map();
+      const currentReplicas = $isolatedEnv?.replicas || new Map();
+      topologyProfiler.setGauge('network:replicas', currentReplicas?.size || 0);
 
-      console.log('[Graph3D] Replicas check:', {
-        hasIsolatedEnv: !!isolatedEnv,
-        isolatedEnvValue: $isolatedEnv,
-        replicasSize: currentReplicas?.size || 0,
-        source: 'isolated'
-      });
+      topologyProfiler.timeSection('network:parse', () => {
+        console.log('[Graph3D] Replicas check:', {
+          hasIsolatedEnv: !!isolatedEnv,
+          isolatedEnvValue: $isolatedEnv,
+          replicasSize: currentReplicas?.size || 0,
+          source: 'isolated'
+        });
 
-      // Always use replicas (ground truth)
-      if (currentReplicas && currentReplicas.size > 0) {
-        const replicaEntries = Array.from(currentReplicas.entries());
+        // Always use replicas (ground truth)
+        if (currentReplicas && currentReplicas.size > 0) {
+          const replicaEntries = Array.from(currentReplicas.entries());
 
-        // Extract unique entity IDs from replica keys with fail-fast validation
-        const uniqueEntityIds = new Set<string>();
-        for (let i = 0; i < replicaEntries.length; i++) {
-          const entry = replicaEntries[i];
-          if (!entry || !Array.isArray(entry) || entry.length < 2) {
-            throw new Error('FINTECH-SAFETY: Invalid replica entry structure');
+          // Extract unique entity IDs from replica keys with fail-fast validation
+          const uniqueEntityIds = new Set<string>();
+          for (let i = 0; i < replicaEntries.length; i++) {
+            const entry = replicaEntries[i];
+            if (!entry || !Array.isArray(entry) || entry.length < 2) {
+              throw new Error('FINTECH-SAFETY: Invalid replica entry structure');
+            }
+
+            const key = entry[0];
+            if (typeof key !== 'string') {
+              throw new Error('FINTECH-SAFETY: Replica key must be string');
+            }
+
+            const parts = key.split(':');
+            const entityId = parts[0];
+            if (!entityId) {
+              throw new Error('FINTECH-SAFETY: Invalid replica key format - missing entity ID');
+            }
+            uniqueEntityIds.add(entityId);
           }
 
-          const key = entry[0];
-          if (typeof key !== 'string') {
-            throw new Error('FINTECH-SAFETY: Replica key must be string');
-          }
-
-          const parts = key.split(':');
-          const entityId = parts[0];
-          if (!entityId) {
-            throw new Error('FINTECH-SAFETY: Invalid replica key format - missing entity ID');
-          }
-          uniqueEntityIds.add(entityId);
+          entityData = Array.from(uniqueEntityIds).map(entityId => ({
+            entityId,
+            capabilities: ['consensus'],
+            metadata: { name: entityId.slice(0, 8) + '...' }
+          }));
         }
-
-        entityData = Array.from(uniqueEntityIds).map(entityId => ({
-          entityId,
-          capabilities: ['consensus'],
-          metadata: { name: entityId.slice(0, 8) + '...' }
-        }));
-      }
+      });
 
       console.log('[Graph3D] entityData created:', entityData.length, 'entities');
 
@@ -1937,36 +1963,57 @@ let vrHammer: VRHammer | null = null;
         return; // Don't create fake entities
       }
 
+      // Pre-compute diff to prepare for incremental updates
+      topologyProfiler.timeSection('network:diff', () => {
+        const previousIds = new Set(entities.map(e => e.id));
+        const nextIds = new Set(entityData.map(e => e.entityId));
+
+        let added = 0;
+        let removed = 0;
+
+        nextIds.forEach(id => {
+          if (!previousIds.has(id)) added++;
+        });
+        previousIds.forEach(id => {
+          if (!nextIds.has(id)) removed++;
+        });
+
+        topologyProfiler.setGauge('diff:entities:add', added);
+        topologyProfiler.setGauge('diff:entities:remove', removed);
+      });
+
       // Build connection and capacity maps for force-directed layout (always active)
       const connectionMap = new Map<string, Set<string>>();
       const capacityMap = new Map<string, number>();
 
-      // Build connection map from replicas
-      if (currentReplicas.size > 0) {
-        for (const [replicaKey, replica] of currentReplicas.entries()) {
-          const [entityId] = replicaKey.split(':');
-          const entityAccounts = replica.state?.accounts;
+      topologyProfiler.timeSection('network:connections', () => {
+        // Build connection map from replicas
+        if (currentReplicas.size > 0) {
+          for (const [replicaKey, replica] of currentReplicas.entries()) {
+            const [entityId] = replicaKey.split(':');
+            const entityAccounts = replica.state?.accounts;
 
-          if (entityAccounts && entityAccounts.size > 0) {
-            if (!connectionMap.has(entityId)) {
-              connectionMap.set(entityId, new Set());
-            }
+            if (entityAccounts && entityAccounts.size > 0) {
+              if (!connectionMap.has(entityId)) {
+                connectionMap.set(entityId, new Set());
+              }
 
-            for (const [counterpartyId, accountData] of entityAccounts.entries()) {
-              connectionMap.get(entityId)?.add(counterpartyId);
+              for (const [counterpartyId, accountData] of entityAccounts.entries()) {
+                connectionMap.get(entityId)?.add(counterpartyId);
 
-              // Calculate total capacity for this connection
-              const accountTokenDelta = getAccountTokenDelta(accountData, selectedTokenId);
-              if (accountTokenDelta) {
-                const derived = XLN?.deriveDelta(accountTokenDelta, entityId < counterpartyId);
-                if (!derived) continue;
-                const capacityKey = [entityId, counterpartyId].sort().join('-');
-                capacityMap.set(capacityKey, Number(derived.totalCapacity));
+                // Calculate total capacity for this connection
+                const accountTokenDelta = getAccountTokenDelta(accountData, selectedTokenId);
+                if (accountTokenDelta) {
+                  const derived = XLN?.deriveDelta(accountTokenDelta, entityId < counterpartyId);
+                  if (!derived) continue;
+                  const capacityKey = [entityId, counterpartyId].sort().join('-');
+                  capacityMap.set(capacityKey, Number(derived.totalCapacity));
+                }
               }
             }
           }
         }
-      }
+      });
 
       // Calculate connection degrees and find top-3 hubs
       const connectionDegrees = new Map<string, number>();
@@ -2007,6 +2054,7 @@ let vrHammer: VRHammer | null = null;
         );
       }
 
+      const geometryHeapBefore = topologyProfiler.getCurrentHeapUsage();
       topologyProfiler.timeSection('network:geometry', () => {
         // Clear and rebuild - simple and reliable
         clearNetwork();
@@ -2030,10 +2078,12 @@ let vrHammer: VRHammer | null = null;
         // Create transaction flow particles (also tracks activity)
         createTransactionParticles();
       });
+      topologyProfiler.recordHeapDelta('network:geometry', geometryHeapBefore, topologyProfiler.getCurrentHeapUsage());
 
       // Don't enforce spacing constraints - they break the H-shape
       // enforceSpacingConstraints();
     } finally {
+      topologyProfiler.recordHeapDelta('network:update', heapBeforeUpdate, topologyProfiler.getCurrentHeapUsage());
       updateProfilerObjectGauges();
       stopSection();
     }
@@ -2066,10 +2116,33 @@ let vrHammer: VRHammer | null = null;
     particles = [];
   }
 
+  function recordSceneObjectStats() {
+    if (!scene) return;
+
+    const stats = {
+      meshes: 0,
+      lines: 0,
+      lineSegments: 0,
+      sprites: 0,
+      groups: 0
+    };
+
+    scene.traverse(obj => {
+      if (obj instanceof THREE.Mesh) stats.meshes += 1;
+      else if (obj instanceof THREE.LineSegments) stats.lineSegments += 1;
+      else if (obj instanceof THREE.Line) stats.lines += 1;
+      else if (obj instanceof THREE.Sprite) stats.sprites += 1;
+      else if (obj instanceof THREE.Group) stats.groups += 1;
+    });
+
+    topologyProfiler.recordObjectStats(stats);
+  }
+
   function updateProfilerObjectGauges() {
     topologyProfiler.setGauge('objects:entities', entities.length);
     topologyProfiler.setGauge('objects:connections', connections.length);
     topologyProfiler.setGauge('objects:particles', particles.length);
+    recordSceneObjectStats();
   }
 
   /**
@@ -3451,12 +3524,18 @@ let vrHammer: VRHammer | null = null;
       }
 
       // Update balance change ripples & jurisdiction checks
-      topologyProfiler.timeSection('animate:effects', () => {
+      topologyProfiler.timeSection('animate:events', () => {
         updateRipples();
         if (Math.random() < 0.05) { // Check ~5% of frames = 3 times per second at 60fps
           detectJurisdictionalEvents();
         }
       });
+
+      // Periodically sample scene object mix (meshes/lines/sprites)
+      if (performance.now() - lastObjectSampleTime > 1000) {
+        recordSceneObjectStats();
+        lastObjectSampleTime = performance.now();
+      }
 
       if (renderer && camera) {
         const renderStartTime = performance.now();
