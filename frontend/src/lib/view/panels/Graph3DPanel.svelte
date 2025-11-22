@@ -25,6 +25,8 @@
     topologyProfilerStore,
     type ProfilerSnapshot
   } from '../utils/topologyProfiler';
+  import { defaultRenderBudget, evaluateRenderBudget, type BudgetState } from '../utils/renderBudget';
+  import { LayoutWorkerClient } from '../utils/layoutWorkerClient';
 
   // Props - REQUIRED for /view isolation (dead props removed)
   export let isolatedEnv: Writable<any>;
@@ -518,6 +520,16 @@ let vrHammer: VRHammer | null = null;
   let gridHelper: THREE.GridHelper | null = null;
   let resizeDebounceTimer: number | null = null;
   let gridPulseIntensity: number = 0; // 0-1, animates on J-Machine broadcasts
+  const renderBudget = defaultRenderBudget;
+  let budgetState: BudgetState = evaluateRenderBudget({ entities: 0, connections: 0, particles: 0 }, renderBudget);
+  let labelsEnabled = true;
+  let barsEnabled = true;
+  let effectsEnabled = true;
+  let particleCap = Infinity;
+  let batchedEdgesEnabled = false; // off by default to avoid artifacts
+  let batchedEdges: THREE.LineSegments | null = null;
+  const layoutWorkerClient = new LayoutWorkerClient();
+  let useLayoutWorker = false; // feature flag, stays false until worker is wired
 
   // Helper to get token symbol using xlnFunctions
   function getTokenSymbol(tokenId: number): string {
@@ -2016,6 +2028,17 @@ let vrHammer: VRHammer | null = null;
         }
       });
 
+      budgetState = evaluateRenderBudget({
+        entities: entityData.length,
+        connections: connectionMap.size,
+        particles: particles.length
+      }, renderBudget);
+      labelsEnabled = !budgetState.degradeLabels;
+      barsEnabled = !budgetState.disableBars;
+      effectsEnabled = !budgetState.disableEffects;
+      particleCap = budgetState.particleCap;
+      updateBudgetGauges(budgetState);
+
       // Calculate connection degrees and find top-3 hubs
       const connectionDegrees = new Map<string, number>();
       entityData.forEach(profile => {
@@ -2050,9 +2073,19 @@ let vrHammer: VRHammer | null = null;
       if (allEntitiesHaveSavedPositions && savedPositions) {
         forceLayoutPositions = savedPositions;
       } else {
-        forceLayoutPositions = topologyProfiler.timeSection('network:layout', () =>
-          applyForceDirectedLayout(entityData, connectionMap, capacityMap)
-        );
+        if (useLayoutWorker) {
+          const { result, latency } = layoutWorkerClient.computeLayout(() =>
+            topologyProfiler.timeSection('network:layout', () =>
+              applyForceDirectedLayout(entityData, connectionMap, capacityMap)
+            )
+          );
+          topologyProfiler.recordWorkerLatency(latency, 0);
+          forceLayoutPositions = result;
+        } else {
+          forceLayoutPositions = topologyProfiler.timeSection('network:layout', () =>
+            applyForceDirectedLayout(entityData, connectionMap, capacityMap)
+          );
+        }
       }
 
       const geometryHeapBefore = topologyProfiler.getCurrentHeapUsage();
@@ -2119,6 +2152,12 @@ let vrHammer: VRHammer | null = null;
     clearParticles();
 
     topologyProfiler.setGauge('objects:connections', 0);
+
+    if (batchedEdges) {
+      scene.remove(batchedEdges);
+      disposeObject(batchedEdges);
+      batchedEdges = null;
+    }
   }
 
   function clearParticles() {
@@ -2187,14 +2226,22 @@ let vrHammer: VRHammer | null = null;
         existing.position.copy(targetPos);
         existing.mesh.position.copy(targetPos);
 
-        if (existing.label) {
+        if (labelsEnabled && existing.label) {
           existing.label.position.copy(targetPos);
           existing.label.position.y += 3;
+        } else if (!labelsEnabled && existing.label) {
+          scene.remove(existing.label);
+          disposeObject(existing.label);
+          existing.label = undefined;
         }
 
-        if (existing.reserveLabel) {
+        if (labelsEnabled && existing.reserveLabel) {
           existing.reserveLabel.position.copy(targetPos);
           existing.reserveLabel.position.y += getEntitySizeForToken(profile.entityId, selectedTokenId) + 3.0;
+        } else if (!labelsEnabled && existing.reserveLabel) {
+          scene.remove(existing.reserveLabel);
+          disposeObject(existing.reserveLabel);
+          existing.reserveLabel = undefined;
         }
 
         entityMeshMap.set(existing.id, existing.mesh);
@@ -2241,6 +2288,14 @@ let vrHammer: VRHammer | null = null;
     topologyProfiler.setGauge('objects:connections', connections.length);
     topologyProfiler.setGauge('objects:particles', particles.length);
     recordSceneObjectStats();
+  }
+
+  function updateBudgetGauges(state: BudgetState) {
+    topologyProfiler.setGauge('limits:mode', state.mode === 'critical' ? 2 : state.mode === 'degraded' ? 1 : 0);
+    topologyProfiler.setGauge('limits:particleCap', state.particleCap);
+    topologyProfiler.setGauge('limits:labels', state.degradeLabels ? 0 : 1);
+    topologyProfiler.setGauge('limits:bars', state.disableBars ? 0 : 1);
+    topologyProfiler.setGauge('limits:effects', state.disableEffects ? 0 : 1);
   }
 
   /**
@@ -2554,10 +2609,10 @@ let vrHammer: VRHammer | null = null;
     scene.add(mesh);
 
     // Add entity name label (returns sprite to store with entity)
-    const labelSprite = createEntityLabel(profile.entityId);
+    const labelSprite = labelsEnabled ? createEntityLabel(profile.entityId) : undefined;
 
     // Add reserve amount label (GIANT green $ above entity - Bernanke wow factor)
-    const reserveSprite = createReserveLabel(profile.entityId, 0n);
+    const reserveSprite = labelsEnabled ? createReserveLabel(profile.entityId, 0n) : undefined;
 
     entities.push({
       id: profile.entityId,
@@ -2641,6 +2696,44 @@ let vrHammer: VRHammer | null = null;
     });
 
     topologyProfiler.setGauge('objects:connections', connections.length);
+
+    rebuildBatchedEdges();
+  }
+
+  function rebuildBatchedEdges() {
+    if (!batchedEdgesEnabled || !scene) return;
+
+    if (batchedEdges) {
+      scene.remove(batchedEdges);
+      disposeObject(batchedEdges);
+      batchedEdges = null;
+    }
+
+    if (connections.length === 0) return;
+
+    const positions: number[] = [];
+    connections.forEach(conn => {
+      positions.push(
+        conn.line.geometry.getAttribute('position').getX(0),
+        conn.line.geometry.getAttribute('position').getY(0),
+        conn.line.geometry.getAttribute('position').getZ(0),
+        conn.line.geometry.getAttribute('position').getX(1),
+        conn.line.geometry.getAttribute('position').getY(1),
+        conn.line.geometry.getAttribute('position').getZ(1)
+      );
+    });
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+
+    const material = new THREE.LineBasicMaterial({
+      color: 0x4aa3ff,
+      transparent: true,
+      opacity: 0.4
+    });
+
+    batchedEdges = new THREE.LineSegments(geometry, material);
+    scene.add(batchedEdges);
   }
 
   function buildConnectionIndexMap() {
@@ -2655,6 +2748,10 @@ let vrHammer: VRHammer | null = null;
 
   function createTransactionParticles() {
     clearParticles();
+
+    if (effectsEnabled && particleCap <= 0) {
+      return;
+    }
 
     // Reset activity tracking
     currentFrameActivity = {
@@ -2685,7 +2782,9 @@ let vrHammer: VRHammer | null = null;
                   currentFrameActivity.outgoingFlows.set(fromEntityId, []);
                 }
                 currentFrameActivity.outgoingFlows.get(fromEntityId)!.push(toEntityId);
-                createDirectionalLightning(fromEntityId, toEntityId, 'outgoing', tx.data.accountTx);
+                if (effectsEnabled && particles.length < particleCap) {
+                  createDirectionalLightning(fromEntityId, toEntityId, 'outgoing', tx.data.accountTx);
+                }
 
                 // Incoming: from receiver's perspective (same particle, different tracking)
                 if (!currentFrameActivity.incomingFlows.has(toEntityId)) {
@@ -2693,10 +2792,14 @@ let vrHammer: VRHammer | null = null;
                 }
                 currentFrameActivity.incomingFlows.get(toEntityId)!.push(fromEntityId);
 
-                triggerEntityActivity(fromEntityId);
-                triggerEntityActivity(toEntityId);
+                if (effectsEnabled) {
+                  triggerEntityActivity(fromEntityId);
+                  triggerEntityActivity(toEntityId);
+                }
               } else if (['deposit_collateral', 'reserve_to_collateral', 'deposit_reserve', 'withdraw_reserve'].includes(tx.type)) {
-                createBroadcastRipple(processingEntityId, tx.type);
+                if (effectsEnabled) {
+                  createBroadcastRipple(processingEntityId, tx.type);
+                }
               }
             });
           }
@@ -2720,7 +2823,9 @@ let vrHammer: VRHammer | null = null;
                 currentFrameActivity.outgoingFlows.set(fromEntityId, []);
               }
               currentFrameActivity.outgoingFlows.get(fromEntityId)!.push(toEntityId);
-              createDirectionalLightning(fromEntityId, toEntityId, 'outgoing', tx.data.accountTx);
+              if (effectsEnabled && particles.length < particleCap) {
+                createDirectionalLightning(fromEntityId, toEntityId, 'outgoing', tx.data.accountTx);
+              }
 
               // Incoming: from receiver's perspective (same particle, different tracking)
               if (!currentFrameActivity.incomingFlows.has(toEntityId)) {
@@ -2728,10 +2833,14 @@ let vrHammer: VRHammer | null = null;
               }
               currentFrameActivity.incomingFlows.get(toEntityId)!.push(fromEntityId);
 
-              triggerEntityActivity(fromEntityId);
-              triggerEntityActivity(toEntityId);
+              if (effectsEnabled) {
+                triggerEntityActivity(fromEntityId);
+                triggerEntityActivity(toEntityId);
+              }
             } else if (['deposit_collateral', 'reserve_to_collateral', 'deposit_reserve', 'withdraw_reserve'].includes(tx.type)) {
-              createBroadcastRipple(processingEntityId, tx.type);
+              if (effectsEnabled) {
+                createBroadcastRipple(processingEntityId, tx.type);
+              }
             }
           });
         }
@@ -2745,6 +2854,8 @@ let vrHammer: VRHammer | null = null;
     direction: 'incoming' | 'outgoing',
     accountTx: any
   ) {
+    if (!effectsEnabled || particles.length >= particleCap) return;
+
     // O(1) connection lookup
     const key = `${fromEntityId}->${toEntityId}`;
     const connectionIndex = connectionIndexMap.get(key) ??
@@ -2838,6 +2949,10 @@ let vrHammer: VRHammer | null = null;
   }
 
   function createBroadcastRipple(entityId: string, txType: string) {
+    if (!effectsEnabled || particles.length >= particleCap) {
+      return;
+    }
+
     // Find entity by ID
     const entity = entities.find(e => e.id === entityId);
     if (!entity) {
@@ -2993,7 +3108,7 @@ let vrHammer: VRHammer | null = null;
     scene.add(line);
 
     // Create account capacity bars
-    const accountBars = createAccountBarsForConnection(fromEntity, toEntity, fromId, toId, replica);
+    const accountBars = barsEnabled ? createAccountBarsForConnection(fromEntity, toEntity, fromId, toId, replica) : undefined;
 
     return {
       from: fromId,
@@ -3017,11 +3132,16 @@ let vrHammer: VRHammer | null = null;
     positions.needsUpdate = true;
     connection.line.computeLineDistances();
 
-    if (connection.progressBars) {
-      connection.progressBars.traverse(child => disposeObject(child as THREE.Object3D));
+    if (barsEnabled) {
+      if (connection.progressBars) {
+        connection.progressBars.traverse(child => disposeObject(child as THREE.Object3D));
+        scene.remove(connection.progressBars);
+      }
+      connection.progressBars = createAccountBarsForConnection(fromEntity, toEntity, fromId, toId, replica);
+    } else if (connection.progressBars) {
       scene.remove(connection.progressBars);
+      connection.progressBars = undefined;
     }
-    connection.progressBars = createAccountBarsForConnection(fromEntity, toEntity, fromId, toId, replica);
   }
 
   function createAccountBarsForConnection(fromEntity: any, toEntity: any, fromId: string, toId: string, _replica: any) {
@@ -3303,6 +3423,7 @@ let vrHammer: VRHammer | null = null;
   function updateEntityLabels() {
     // Update all entity labels to stay on top of spheres (neat, minimalist, always attached)
     // FIRST PRINCIPLE: Labels must never disconnect - every entity must have a visible label
+    if (!labelsEnabled) return;
     if (!camera) return;
 
     const currentReplicas = $isolatedEnv?.replicas || new Map();
@@ -3411,7 +3532,7 @@ let vrHammer: VRHammer | null = null;
       animateCallCount++;
 
       // ===== PROCESS VISUAL EFFECTS QUEUE =====
-      if (scene && spatialHash && entityMeshMap) {
+      if (scene && spatialHash && entityMeshMap && effectsEnabled) {
         const deltaTime = clock.getDelta() * 1000; // to milliseconds
         topologyProfiler.timeSection('animate:effects', () => {
           effectOperations.process(scene, entityMeshMap, deltaTime, 10);
@@ -3661,12 +3782,14 @@ let vrHammer: VRHammer | null = null;
       }
 
       // Update balance change ripples & jurisdiction checks
-      topologyProfiler.timeSection('animate:events', () => {
-        updateRipples();
-        if (Math.random() < 0.05) { // Check ~5% of frames = 3 times per second at 60fps
-          detectJurisdictionalEvents();
-        }
-      });
+      if (effectsEnabled) {
+        topologyProfiler.timeSection('animate:events', () => {
+          updateRipples();
+          if (Math.random() < 0.05) { // Check ~5% of frames = 3 times per second at 60fps
+            detectJurisdictionalEvents();
+          }
+        });
+      }
 
       // Periodically sample scene object mix (meshes/lines/sprites)
       if (performance.now() - lastObjectSampleTime > 1000) {
