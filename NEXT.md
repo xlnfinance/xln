@@ -1,18 +1,22 @@
 # NEXT.md - Priority Tasks
 
-## 🔥 CURRENT SESSION (2025-11-17 PM): Critical Fixes COMPLETE
+## 🔥 COMPLETED (2025-11-17 PM): Critical Bugs + Going Public
 
-### STATUS: 2 MAJOR BUGS FIXED (autonomous session)
+### STATUS: All critical /view bugs FIXED ✅
 
 **FIXED THIS SESSION:**
-- ✅ Entity names: Alice/Hub/Bob display correctly (was showing 0x000...001)
-- ✅ Frame count: 9 frames exactly (was 18 - auto-snapshots now disabled in demos)
-- ✅ All 3 prepopulate functions patched (AHB, H-Topology, Full Mechanics)
+- ✅ Entity names: Alice/Hub/Bob display correctly (was 0x000...001)
+- ✅ Frame count: 9 frames exactly (was 18 - auto-snapshots disabled)
+- ✅ Error handling: try/finally blocks prevent stuck flags
+- ✅ Archive public: Removed .archive/ from gitignore (74 files now public)
+- ✅ root.svelte error: Confirmed browser cache issue (clean in incognito)
 
-**STILL TODO:**
-- ⏳ Subtitle doesn't render in /view (works in main UI)
-- ⏳ EntityObject integration in Graph3D (labels float)
-- ⏳ TypeScript errors (51 errors - pre-existing)
+**COMMITS:** 2e8b3fd (archive public) + previous fixes
+
+**REMAINING POLISH:**
+- ⏳ Subtitle rendering in /view (30min)
+- ⏳ EntityObject integration in Graph3D (90min)
+- ⏳ TypeScript errors (51 errors - pre-existing, non-blocking)
 
 **PREVIOUS SESSION (2025-11-17 AM):**
 - ✅ prepopulate-ahb.ts (Alice-Hub-Bob demo code)
