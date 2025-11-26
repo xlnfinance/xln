@@ -1,4 +1,32 @@
 {
+  "app": {
+    "name": "xln",
+    "tagline": "L'endgame mathématique en évolutivité, sécurité et simplicité",
+    "description": "Paiements off-chain instantanés avec garanties de sécurité on-chain"
+  },
+  "landing": {
+    "hero": {
+      "title": "L'Avenir des Paiements",
+      "subtitle": "Évolutivité infinie. Frais zéro. Règlement instantané.",
+      "cta": "Entrer dans le Réseau"
+    },
+    "features": {
+      "speed": "Instantané",
+      "speedDesc": "Transactions en millisecondes",
+      "scale": "Infini",
+      "scaleDesc": "Aucune limite de débit",
+      "cost": "Frais Zéro",
+      "costDesc": "Pas de gas, pas de frais de minage",
+      "security": "Sécurisé",
+      "securityDesc": "Garanties de règlement on-chain"
+    },
+    "invite": {
+      "title": "Entrez le Code d'Invitation",
+      "placeholder": "Votre code d'invitation",
+      "submit": "Déverrouiller",
+      "invalid": "Code invalide"
+    }
+  },
   "vault": {
     "title": "coffre",
     "tagline": "Dérivation de clé à mémoire intensive. Votre cerveau est la sauvegarde.",
@@ -24,14 +52,78 @@
     },
     "derive": "Dériver le Portefeuille",
     "deriving": "Dérivation...",
-    "warning": "Cela utilise des ressources de calcul importantes. Facteur plus élevé = plus de sécurité mais temps de dérivation plus long.",
+    "warning": "C'est permanent. Nom + mot de passe + niveau de sécurité = votre portefeuille pour toujours.",
     "result": {
-      "title": "Portefeuille Dérivé",
+      "title": "Portefeuille Généré",
       "address": "Adresse",
+      "mnemonic": "Mnémonique",
       "privateKey": "Clé Privée",
       "copy": "Copier",
       "copied": "Copié!"
+    },
+    "passwordManager": {
+      "title": "Gestionnaire de Mots de Passe",
+      "hint": "Générez des mots de passe uniques pour chaque site",
+      "generate": "Générer"
     }
+  },
+  "network": {
+    "title": "Réseau",
+    "entities": "Entités",
+    "accounts": "Comptes",
+    "transactions": "Transactions",
+    "reserves": "Réserves",
+    "balance": "Solde",
+    "status": {
+      "online": "En ligne",
+      "offline": "Hors ligne",
+      "syncing": "Synchronisation"
+    },
+    "actions": {
+      "deposit": "Déposer",
+      "withdraw": "Retirer",
+      "transfer": "Transférer",
+      "createEntity": "Créer une Entité"
+    },
+    "empty": "Pas encore d'entités. Créez-en une pour commencer."
+  },
+  "view": {
+    "title": "Vue 3D",
+    "controls": {
+      "zoom": "Zoom",
+      "rotate": "Rotation",
+      "pan": "Déplacer",
+      "reset": "Réinitialiser la Vue"
+    },
+    "vr": {
+      "enter": "Entrer en VR",
+      "exit": "Quitter la VR",
+      "notSupported": "VR non supporté sur cet appareil"
+    },
+    "labels": {
+      "entity": "Entité",
+      "account": "Compte",
+      "connection": "Connexion"
+    }
+  },
+  "time": {
+    "now": "Maintenant",
+    "live": "En Direct",
+    "historical": "Historique",
+    "frame": "Frame",
+    "block": "Bloc"
+  },
+  "settings": {
+    "title": "Paramètres",
+    "language": "Langue",
+    "theme": "Thème",
+    "themes": {
+      "dark": "Sombre",
+      "light": "Clair",
+      "system": "Système"
+    },
+    "advanced": "Avancé",
+    "reset": "Réinitialiser"
   },
   "common": {
     "loading": "Chargement...",
@@ -40,12 +132,35 @@
     "cancel": "Annuler",
     "confirm": "Confirmer",
     "save": "Enregistrer",
-    "close": "Fermer"
+    "close": "Fermer",
+    "back": "Retour",
+    "next": "Suivant",
+    "done": "Terminé",
+    "search": "Rechercher",
+    "filter": "Filtrer",
+    "refresh": "Actualiser",
+    "copy": "Copier",
+    "copied": "Copié!",
+    "show": "Afficher",
+    "hide": "Masquer",
+    "more": "Plus",
+    "less": "Moins"
   },
   "nav": {
     "home": "Accueil",
     "vault": "Coffre",
     "network": "Réseau",
-    "settings": "Paramètres"
+    "view": "Vue",
+    "settings": "Paramètres",
+    "docs": "Documentation",
+    "terminal": "Terminal",
+    "panels": "Panneaux"
+  },
+  "errors": {
+    "connection": "Échec de connexion",
+    "timeout": "Délai d'attente dépassé",
+    "unknown": "Erreur inconnue",
+    "notFound": "Non trouvé",
+    "unauthorized": "Non autorisé"
   }
 }

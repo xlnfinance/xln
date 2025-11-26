@@ -5,6 +5,7 @@
   import InvariantTicker from '../Home/InvariantTicker.svelte';
   import Collapsible from './Collapsible.svelte';
   import NetworkAnimation from './NetworkAnimation.svelte';
+  import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
 
   export let onUnlock: () => void;
 
@@ -222,6 +223,10 @@
 <NetworkAnimation {darkMode} onToggleDarkMode={() => darkMode = !darkMode} />
 
 <div class="landing" class:light-mode={!darkMode}>
+  <!-- Global language switcher for landing page -->
+  <div class="landing-lang-switcher">
+    <LanguageSwitcher />
+  </div>
   <div class="content">
     <img src="/img/logo.png" alt="xln" class="logo" />
 
@@ -801,6 +806,14 @@
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
     font-size: 16px;
     line-height: 1.6;
+    position: relative;
+  }
+
+  .landing-lang-switcher {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 1000;
   }
 
   .content {

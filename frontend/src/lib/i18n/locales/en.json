@@ -1,4 +1,32 @@
 {
+  "app": {
+    "name": "xln",
+    "tagline": "The mathematical endgame in scalability, security, and simplicity",
+    "description": "Instant off-chain payments with on-chain security guarantees"
+  },
+  "landing": {
+    "hero": {
+      "title": "The Future of Payments",
+      "subtitle": "Infinite scalability. Zero fees. Instant settlement.",
+      "cta": "Enter Network"
+    },
+    "features": {
+      "speed": "Instant",
+      "speedDesc": "Transactions settle in milliseconds",
+      "scale": "Infinite",
+      "scaleDesc": "No throughput limits",
+      "cost": "Zero Fees",
+      "costDesc": "No gas, no mining fees",
+      "security": "Secure",
+      "securityDesc": "On-chain settlement guarantees"
+    },
+    "invite": {
+      "title": "Enter Invite Code",
+      "placeholder": "Your invite code",
+      "submit": "Unlock",
+      "invalid": "Invalid code"
+    }
+  },
   "vault": {
     "title": "vault",
     "tagline": "Memory-hard key derivation. Your brain is the backup.",
@@ -24,14 +52,78 @@
     },
     "derive": "Derive Wallet",
     "deriving": "Deriving...",
-    "warning": "This uses significant computational resources. Higher factors = more security but longer derivation time.",
+    "warning": "This is permanent. Name + passphrase + security level = your wallet forever.",
     "result": {
-      "title": "Derived Wallet",
+      "title": "Wallet Generated",
       "address": "Address",
+      "mnemonic": "Mnemonic",
       "privateKey": "Private Key",
       "copy": "Copy",
       "copied": "Copied!"
+    },
+    "passwordManager": {
+      "title": "Password Manager",
+      "hint": "Derive unique passwords for any site",
+      "generate": "Generate"
     }
+  },
+  "network": {
+    "title": "Network",
+    "entities": "Entities",
+    "accounts": "Accounts",
+    "transactions": "Transactions",
+    "reserves": "Reserves",
+    "balance": "Balance",
+    "status": {
+      "online": "Online",
+      "offline": "Offline",
+      "syncing": "Syncing"
+    },
+    "actions": {
+      "deposit": "Deposit",
+      "withdraw": "Withdraw",
+      "transfer": "Transfer",
+      "createEntity": "Create Entity"
+    },
+    "empty": "No entities yet. Create one to get started."
+  },
+  "view": {
+    "title": "3D View",
+    "controls": {
+      "zoom": "Zoom",
+      "rotate": "Rotate",
+      "pan": "Pan",
+      "reset": "Reset View"
+    },
+    "vr": {
+      "enter": "Enter VR",
+      "exit": "Exit VR",
+      "notSupported": "VR not supported on this device"
+    },
+    "labels": {
+      "entity": "Entity",
+      "account": "Account",
+      "connection": "Connection"
+    }
+  },
+  "time": {
+    "now": "Now",
+    "live": "Live",
+    "historical": "Historical",
+    "frame": "Frame",
+    "block": "Block"
+  },
+  "settings": {
+    "title": "Settings",
+    "language": "Language",
+    "theme": "Theme",
+    "themes": {
+      "dark": "Dark",
+      "light": "Light",
+      "system": "System"
+    },
+    "advanced": "Advanced",
+    "reset": "Reset to Defaults"
   },
   "common": {
     "loading": "Loading...",
@@ -40,12 +132,35 @@
     "cancel": "Cancel",
     "confirm": "Confirm",
     "save": "Save",
-    "close": "Close"
+    "close": "Close",
+    "back": "Back",
+    "next": "Next",
+    "done": "Done",
+    "search": "Search",
+    "filter": "Filter",
+    "refresh": "Refresh",
+    "copy": "Copy",
+    "copied": "Copied!",
+    "show": "Show",
+    "hide": "Hide",
+    "more": "More",
+    "less": "Less"
   },
   "nav": {
     "home": "Home",
     "vault": "Vault",
     "network": "Network",
-    "settings": "Settings"
+    "view": "View",
+    "settings": "Settings",
+    "docs": "Docs",
+    "terminal": "Terminal",
+    "panels": "Panels"
+  },
+  "errors": {
+    "connection": "Connection failed",
+    "timeout": "Request timed out",
+    "unknown": "An unknown error occurred",
+    "notFound": "Not found",
+    "unauthorized": "Unauthorized"
   }
 }

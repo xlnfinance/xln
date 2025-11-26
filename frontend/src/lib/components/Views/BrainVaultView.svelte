@@ -848,45 +848,36 @@
 
     <!-- DERIVING PHASE -->
     {:else if phase === 'deriving'}
-      <div class="glass-card deriving">
-        <h2>{t('vault.deriving')}</h2>
-
-        <!-- Progress Info -->
-        <div class="progress-info">
-          <div class="progress-stats">
-            <span>{shardsCompleted} / {shardCount} shards</span>
-            <span>{workerCount} workers</span>
+      <div class="vault-door-container">
+        <!-- Vault Door Animation -->
+        <div class="vault-door">
+          <div class="vault-ring outer" style="--rotation: {progress * 3.6}deg"></div>
+          <div class="vault-ring middle" style="--rotation: {-progress * 2.4}deg"></div>
+          <div class="vault-ring inner" style="--rotation: {progress * 1.8}deg"></div>
+          <div class="vault-center">
+            <div class="vault-logo">◈</div>
           </div>
-          <div class="progress-bar-container">
-            <div class="progress-bar" style="width: {progress}%"></div>
-          </div>
-          <div class="time-info">
-            <span>Elapsed: {formatDuration(elapsedMs)}</span>
-            <span>Remaining: ~{formatDuration(remainingMs)}</span>
+          <!-- Progress indicator dots around the ring -->
+          <div class="vault-progress-ring">
+            {#each Array(36) as _, i}
+              <div
+                class="vault-tick"
+                class:active={i < Math.floor(progress / 2.78)}
+                style="--angle: {i * 10}deg"
+              ></div>
+            {/each}
           </div>
         </div>
 
-        <!-- Shard Grid Visualization -->
-        <div class="shard-grid" style="--cols: {gridCols}">
-          {#each shardStatus as status, i}
-            <div
-              class="shard-cube"
-              class:pending={status === 'pending'}
-              class:computing={status === 'computing'}
-              class:complete={status === 'complete'}
-              title="Shard {i}: {status}"
-            ></div>
-          {/each}
+        <!-- Minimal text info -->
+        <div class="vault-info">
+          <div class="vault-progress-text">{Math.floor(progress)}%</div>
+          <div class="vault-time">{formatDuration(remainingMs)}</div>
         </div>
 
-        <!-- Resume Token -->
-        <div class="resume-token-section">
-          <p class="resume-hint">If you need to stop, your progress is saved automatically.</p>
-        </div>
-
-        <!-- Cancel Button -->
-        <button class="cancel-btn" on:click={reset}>
-          Cancel
+        <!-- Cancel - subtle -->
+        <button class="vault-cancel" on:click={reset}>
+          esc
         </button>
       </div>
 
@@ -1375,94 +1366,140 @@
     margin-top: 8px;
   }
 
-  /* Shard Grid */
-  .shard-grid {
-    display: grid;
-    grid-template-columns: repeat(var(--cols), 1fr);
-    gap: 2px;
-    padding: 16px;
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 12px;
-    margin-bottom: 24px;
-    max-height: 200px;
-    overflow-y: auto;
+  /* ═══════════════════════════════════════════════════════════════════════════
+     VAULT DOOR - Bank vault opening animation (black & white, minimal)
+     ═══════════════════════════════════════════════════════════════════════════ */
 
-    /* Custom scrollbar - thin, translucent, matches theme */
-    scrollbar-width: thin;
-    scrollbar-color: rgba(139, 92, 246, 0.5) transparent;
+  .vault-door-container {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
   }
 
-  .shard-grid::-webkit-scrollbar {
-    width: 6px;
+  .vault-door {
+    position: relative;
+    width: 280px;
+    height: 280px;
   }
 
-  .shard-grid::-webkit-scrollbar-track {
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 3px;
+  .vault-ring {
+    position: absolute;
+    inset: 0;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 50%;
+    transition: transform 0.5s ease-out;
   }
 
-  .shard-grid::-webkit-scrollbar-thumb {
-    background: linear-gradient(180deg, rgba(139, 92, 246, 0.6) 0%, rgba(236, 72, 153, 0.6) 100%);
-    border-radius: 3px;
+  .vault-ring.outer {
+    inset: 0;
+    transform: rotate(var(--rotation, 0deg));
+    border-width: 2px;
+    border-color: rgba(255, 255, 255, 0.3);
   }
 
-  .shard-grid::-webkit-scrollbar-thumb:hover {
-    background: linear-gradient(180deg, rgba(139, 92, 246, 0.8) 0%, rgba(236, 72, 153, 0.8) 100%);
+  .vault-ring.middle {
+    inset: 30px;
+    transform: rotate(var(--rotation, 0deg));
+    border-style: dashed;
+    border-color: rgba(255, 255, 255, 0.2);
   }
 
-  .shard-cube {
-    aspect-ratio: 1;
-    min-width: 3px;
-    min-height: 3px;
-    border-radius: 1px;
-    transition: all 0.3s;
+  .vault-ring.inner {
+    inset: 60px;
+    transform: rotate(var(--rotation, 0deg));
+    border-color: rgba(255, 255, 255, 0.1);
   }
 
-  .shard-cube.pending {
+  .vault-center {
+    position: absolute;
+    inset: 90px;
+    background: #000;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .vault-logo {
+    font-size: 32px;
+    color: #fff;
+    opacity: 0.8;
+    animation: vault-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes vault-pulse {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.05); }
+  }
+
+  .vault-progress-ring {
+    position: absolute;
+    inset: -10px;
+  }
+
+  .vault-tick {
+    position: absolute;
+    width: 2px;
+    height: 8px;
     background: rgba(255, 255, 255, 0.1);
+    left: 50%;
+    top: 0;
+    transform-origin: 50% 150px;
+    transform: translateX(-50%) rotate(var(--angle, 0deg));
+    transition: background 0.3s, box-shadow 0.3s;
   }
 
-  .shard-cube.computing {
-    background: #eab308;
-    box-shadow: 0 0 4px #eab308;
-    animation: pulse 1s infinite;
+  .vault-tick.active {
+    background: #fff;
+    box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
   }
 
-  .shard-cube.complete {
-    background: #22c55e;
-    box-shadow: 0 0 2px rgba(34, 197, 94, 0.5);
-  }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
-
-  .resume-token-section {
+  .vault-info {
+    margin-top: 48px;
     text-align: center;
-    margin-bottom: 24px;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
   }
 
-  .resume-hint {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.5);
+  .vault-progress-text {
+    font-size: 48px;
+    font-weight: 200;
+    color: #fff;
+    letter-spacing: 4px;
   }
 
-  .cancel-btn {
-    width: 100%;
-    padding: 14px;
-    background: rgba(239, 68, 68, 0.2);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: 12px;
-    color: #f87171;
-    font-size: 16px;
-    font-weight: 500;
+  .vault-time {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.4);
+    margin-top: 8px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .vault-cancel {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    padding: 8px 24px;
+    color: rgba(255, 255, 255, 0.4);
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 12px;
+    letter-spacing: 2px;
     cursor: pointer;
     transition: all 0.2s;
   }
 
-  .cancel-btn:hover {
-    background: rgba(239, 68, 68, 0.3);
+  .vault-cancel:hover {
+    border-color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.7);
   }
 
   /* Complete Phase */

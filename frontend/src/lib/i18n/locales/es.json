@@ -1,4 +1,32 @@
 {
+  "app": {
+    "name": "xln",
+    "tagline": "El endgame matemático en escalabilidad, seguridad y simplicidad",
+    "description": "Pagos off-chain instantáneos con garantías de seguridad on-chain"
+  },
+  "landing": {
+    "hero": {
+      "title": "El Futuro de los Pagos",
+      "subtitle": "Escalabilidad infinita. Sin comisiones. Liquidación instantánea.",
+      "cta": "Entrar a la Red"
+    },
+    "features": {
+      "speed": "Instantáneo",
+      "speedDesc": "Transacciones en milisegundos",
+      "scale": "Infinito",
+      "scaleDesc": "Sin límites de rendimiento",
+      "cost": "Sin Comisiones",
+      "costDesc": "Sin gas, sin fees de minería",
+      "security": "Seguro",
+      "securityDesc": "Garantías de liquidación on-chain"
+    },
+    "invite": {
+      "title": "Ingresa tu Código de Invitación",
+      "placeholder": "Tu código de invitación",
+      "submit": "Desbloquear",
+      "invalid": "Código inválido"
+    }
+  },
   "vault": {
     "title": "bóveda",
     "tagline": "Derivación de claves con memoria intensiva. Tu cerebro es el respaldo.",
@@ -24,14 +52,78 @@
     },
     "derive": "Derivar Billetera",
     "deriving": "Derivando...",
-    "warning": "Esto usa recursos computacionales significativos. Mayor factor = más seguridad pero mayor tiempo de derivación.",
+    "warning": "Esto es permanente. Nombre + contraseña + nivel de seguridad = tu billetera para siempre.",
     "result": {
-      "title": "Billetera Derivada",
+      "title": "Billetera Generada",
       "address": "Dirección",
+      "mnemonic": "Mnemónico",
       "privateKey": "Clave Privada",
       "copy": "Copiar",
       "copied": "¡Copiado!"
+    },
+    "passwordManager": {
+      "title": "Gestor de Contraseñas",
+      "hint": "Genera contraseñas únicas para cualquier sitio",
+      "generate": "Generar"
     }
+  },
+  "network": {
+    "title": "Red",
+    "entities": "Entidades",
+    "accounts": "Cuentas",
+    "transactions": "Transacciones",
+    "reserves": "Reservas",
+    "balance": "Balance",
+    "status": {
+      "online": "En línea",
+      "offline": "Desconectado",
+      "syncing": "Sincronizando"
+    },
+    "actions": {
+      "deposit": "Depositar",
+      "withdraw": "Retirar",
+      "transfer": "Transferir",
+      "createEntity": "Crear Entidad"
+    },
+    "empty": "Sin entidades aún. Crea una para comenzar."
+  },
+  "view": {
+    "title": "Vista 3D",
+    "controls": {
+      "zoom": "Zoom",
+      "rotate": "Rotar",
+      "pan": "Mover",
+      "reset": "Resetear Vista"
+    },
+    "vr": {
+      "enter": "Entrar a VR",
+      "exit": "Salir de VR",
+      "notSupported": "VR no soportado en este dispositivo"
+    },
+    "labels": {
+      "entity": "Entidad",
+      "account": "Cuenta",
+      "connection": "Conexión"
+    }
+  },
+  "time": {
+    "now": "Ahora",
+    "live": "En Vivo",
+    "historical": "Histórico",
+    "frame": "Frame",
+    "block": "Bloque"
+  },
+  "settings": {
+    "title": "Configuración",
+    "language": "Idioma",
+    "theme": "Tema",
+    "themes": {
+      "dark": "Oscuro",
+      "light": "Claro",
+      "system": "Sistema"
+    },
+    "advanced": "Avanzado",
+    "reset": "Restablecer"
   },
   "common": {
     "loading": "Cargando...",
@@ -40,12 +132,35 @@
     "cancel": "Cancelar",
     "confirm": "Confirmar",
     "save": "Guardar",
-    "close": "Cerrar"
+    "close": "Cerrar",
+    "back": "Atrás",
+    "next": "Siguiente",
+    "done": "Listo",
+    "search": "Buscar",
+    "filter": "Filtrar",
+    "refresh": "Actualizar",
+    "copy": "Copiar",
+    "copied": "¡Copiado!",
+    "show": "Mostrar",
+    "hide": "Ocultar",
+    "more": "Más",
+    "less": "Menos"
   },
   "nav": {
     "home": "Inicio",
     "vault": "Bóveda",
     "network": "Red",
-    "settings": "Ajustes"
+    "view": "Vista",
+    "settings": "Configuración",
+    "docs": "Docs",
+    "terminal": "Terminal",
+    "panels": "Paneles"
+  },
+  "errors": {
+    "connection": "Conexión fallida",
+    "timeout": "Tiempo de espera agotado",
+    "unknown": "Error desconocido",
+    "notFound": "No encontrado",
+    "unauthorized": "No autorizado"
   }
 }

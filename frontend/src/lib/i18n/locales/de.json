@@ -1,4 +1,32 @@
 {
+  "app": {
+    "name": "xln",
+    "tagline": "Das mathematische Endspiel in Skalierbarkeit, Sicherheit und Einfachheit",
+    "description": "Sofortige Off-Chain-Zahlungen mit On-Chain-Sicherheitsgarantien"
+  },
+  "landing": {
+    "hero": {
+      "title": "Die Zukunft der Zahlungen",
+      "subtitle": "Unbegrenzte Skalierbarkeit. Null Gebühren. Sofortige Abwicklung.",
+      "cta": "Netzwerk Betreten"
+    },
+    "features": {
+      "speed": "Sofort",
+      "speedDesc": "Transaktionen in Millisekunden",
+      "scale": "Unbegrenzt",
+      "scaleDesc": "Keine Durchsatzbegrenzungen",
+      "cost": "Null Gebühren",
+      "costDesc": "Kein Gas, keine Mining-Gebühren",
+      "security": "Sicher",
+      "securityDesc": "On-Chain-Abwicklungsgarantien"
+    },
+    "invite": {
+      "title": "Einladungscode Eingeben",
+      "placeholder": "Dein Einladungscode",
+      "submit": "Entsperren",
+      "invalid": "Ungültiger Code"
+    }
+  },
   "vault": {
     "title": "tresor",
     "tagline": "Speicherintensive Schlüsselableitung. Dein Gehirn ist das Backup.",
@@ -24,14 +52,78 @@
     },
     "derive": "Wallet Ableiten",
     "deriving": "Ableitung...",
-    "warning": "Dies verwendet erhebliche Rechenressourcen. Höherer Faktor = mehr Sicherheit aber längere Ableitungszeit.",
+    "warning": "Das ist permanent. Name + Passwort + Sicherheitsstufe = dein Wallet für immer.",
     "result": {
-      "title": "Abgeleitetes Wallet",
+      "title": "Wallet Generiert",
       "address": "Adresse",
+      "mnemonic": "Mnemonik",
       "privateKey": "Privater Schlüssel",
       "copy": "Kopieren",
       "copied": "Kopiert!"
+    },
+    "passwordManager": {
+      "title": "Passwort-Manager",
+      "hint": "Generiere einzigartige Passwörter für jede Seite",
+      "generate": "Generieren"
     }
+  },
+  "network": {
+    "title": "Netzwerk",
+    "entities": "Entitäten",
+    "accounts": "Konten",
+    "transactions": "Transaktionen",
+    "reserves": "Reserven",
+    "balance": "Guthaben",
+    "status": {
+      "online": "Online",
+      "offline": "Offline",
+      "syncing": "Synchronisierung"
+    },
+    "actions": {
+      "deposit": "Einzahlen",
+      "withdraw": "Abheben",
+      "transfer": "Überweisen",
+      "createEntity": "Entität Erstellen"
+    },
+    "empty": "Noch keine Entitäten. Erstelle eine um zu beginnen."
+  },
+  "view": {
+    "title": "3D-Ansicht",
+    "controls": {
+      "zoom": "Zoom",
+      "rotate": "Drehen",
+      "pan": "Verschieben",
+      "reset": "Ansicht Zurücksetzen"
+    },
+    "vr": {
+      "enter": "VR Betreten",
+      "exit": "VR Verlassen",
+      "notSupported": "VR wird auf diesem Gerät nicht unterstützt"
+    },
+    "labels": {
+      "entity": "Entität",
+      "account": "Konto",
+      "connection": "Verbindung"
+    }
+  },
+  "time": {
+    "now": "Jetzt",
+    "live": "Live",
+    "historical": "Verlauf",
+    "frame": "Frame",
+    "block": "Block"
+  },
+  "settings": {
+    "title": "Einstellungen",
+    "language": "Sprache",
+    "theme": "Design",
+    "themes": {
+      "dark": "Dunkel",
+      "light": "Hell",
+      "system": "System"
+    },
+    "advanced": "Erweitert",
+    "reset": "Auf Standard Zurücksetzen"
   },
   "common": {
     "loading": "Laden...",
@@ -40,12 +132,35 @@
     "cancel": "Abbrechen",
     "confirm": "Bestätigen",
     "save": "Speichern",
-    "close": "Schließen"
+    "close": "Schließen",
+    "back": "Zurück",
+    "next": "Weiter",
+    "done": "Fertig",
+    "search": "Suchen",
+    "filter": "Filtern",
+    "refresh": "Aktualisieren",
+    "copy": "Kopieren",
+    "copied": "Kopiert!",
+    "show": "Anzeigen",
+    "hide": "Ausblenden",
+    "more": "Mehr",
+    "less": "Weniger"
   },
   "nav": {
     "home": "Startseite",
     "vault": "Tresor",
     "network": "Netzwerk",
-    "settings": "Einstellungen"
+    "view": "Ansicht",
+    "settings": "Einstellungen",
+    "docs": "Dokumentation",
+    "terminal": "Terminal",
+    "panels": "Panels"
+  },
+  "errors": {
+    "connection": "Verbindung fehlgeschlagen",
+    "timeout": "Zeitüberschreitung",
+    "unknown": "Unbekannter Fehler",
+    "notFound": "Nicht gefunden",
+    "unauthorized": "Nicht autorisiert"
   }
 }
