@@ -51,7 +51,7 @@
   .global-lang-switcher {
     position: fixed;
     bottom: 20px;
-    left: 20px;
+    right: 20px;
     z-index: 9999;
   }
 
@@ -101,7 +101,7 @@
   .dropdown {
     position: absolute;
     bottom: calc(100% + 8px);
-    left: 0;
+    right: 0;
     min-width: 180px;
     background: rgba(20, 20, 30, 0.98);
     border: 1px solid rgba(255, 255, 255, 0.12);

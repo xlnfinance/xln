@@ -25,12 +25,16 @@
   import { settingsOperations } from '../lib/stores/settingsStore';
   import { timeOperations, currentTimeIndex } from '../lib/stores/timeStore';
   import { viewMode } from '../lib/stores/viewModeStore';
+  import { showingLandingPage } from '../lib/stores/uiStore';
   import { get } from 'svelte/store';
 
   let activeTab = 'formation';
   let zenMode = false; // Zen mode: hide UI chrome
   let hideButton = false; // Full zen: also hide the toggle button
   let showLanding = true;
+
+  // Sync showLanding with store
+  $: showingLandingPage.set(showLanding);
 
   // Check if user has unlocked
   onMount(() => {

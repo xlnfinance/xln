@@ -5,8 +5,7 @@
   import InvariantTicker from '../Home/InvariantTicker.svelte';
   import Collapsible from './Collapsible.svelte';
   import NetworkAnimation from './NetworkAnimation.svelte';
-  import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
-
+  
   export let onUnlock: () => void;
 
   let inviteCode = '';
@@ -223,10 +222,6 @@
 <NetworkAnimation {darkMode} onToggleDarkMode={() => darkMode = !darkMode} />
 
 <div class="landing" class:light-mode={!darkMode}>
-  <!-- Global language switcher for landing page -->
-  <div class="landing-lang-switcher">
-    <LanguageSwitcher />
-  </div>
   <div class="content">
     <img src="/img/logo.png" alt="xln" class="logo" />
 
