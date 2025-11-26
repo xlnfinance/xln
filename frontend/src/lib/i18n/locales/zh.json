@@ -1,4 +1,32 @@
 {
+  "app": {
+    "name": "xln",
+    "tagline": "可扩展性、安全性和简洁性的数学终局",
+    "description": "链下即时支付，链上安全保障"
+  },
+  "landing": {
+    "hero": {
+      "title": "支付的未来",
+      "subtitle": "无限可扩展。零费用。即时结算。",
+      "cta": "进入网络"
+    },
+    "features": {
+      "speed": "即时",
+      "speedDesc": "交易毫秒级结算",
+      "scale": "无限",
+      "scaleDesc": "无吞吐量限制",
+      "cost": "零费用",
+      "costDesc": "无Gas费，无矿工费",
+      "security": "安全",
+      "securityDesc": "链上结算保障"
+    },
+    "invite": {
+      "title": "输入邀请码",
+      "placeholder": "您的邀请码",
+      "submit": "解锁",
+      "invalid": "无效代码"
+    }
+  },
   "vault": {
     "title": "保险库",
     "tagline": "内存硬密钥派生。您的大脑就是备份。",
@@ -24,14 +52,78 @@
     },
     "derive": "派生钱包",
     "deriving": "派生中...",
-    "warning": "这将使用大量计算资源。系数越高 = 安全性越高，但派生时间越长。",
+    "warning": "这是永久性的。名称 + 密码 + 安全级别 = 您的永久钱包。",
     "result": {
-      "title": "派生钱包",
+      "title": "钱包已生成",
       "address": "地址",
+      "mnemonic": "助记词",
       "privateKey": "私钥",
       "copy": "复制",
       "copied": "已复制！"
+    },
+    "passwordManager": {
+      "title": "密码管理器",
+      "hint": "为任何网站生成唯一密码",
+      "generate": "生成"
     }
+  },
+  "network": {
+    "title": "网络",
+    "entities": "实体",
+    "accounts": "账户",
+    "transactions": "交易",
+    "reserves": "储备",
+    "balance": "余额",
+    "status": {
+      "online": "在线",
+      "offline": "离线",
+      "syncing": "同步中"
+    },
+    "actions": {
+      "deposit": "存款",
+      "withdraw": "取款",
+      "transfer": "转账",
+      "createEntity": "创建实体"
+    },
+    "empty": "暂无实体。创建一个开始吧。"
+  },
+  "view": {
+    "title": "3D视图",
+    "controls": {
+      "zoom": "缩放",
+      "rotate": "旋转",
+      "pan": "平移",
+      "reset": "重置视图"
+    },
+    "vr": {
+      "enter": "进入VR",
+      "exit": "退出VR",
+      "notSupported": "此设备不支持VR"
+    },
+    "labels": {
+      "entity": "实体",
+      "account": "账户",
+      "connection": "连接"
+    }
+  },
+  "time": {
+    "now": "现在",
+    "live": "实时",
+    "historical": "历史",
+    "frame": "帧",
+    "block": "区块"
+  },
+  "settings": {
+    "title": "设置",
+    "language": "语言",
+    "theme": "主题",
+    "themes": {
+      "dark": "深色",
+      "light": "浅色",
+      "system": "跟随系统"
+    },
+    "advanced": "高级",
+    "reset": "恢复默认"
   },
   "common": {
     "loading": "加载中...",
@@ -40,12 +132,35 @@
     "cancel": "取消",
     "confirm": "确认",
     "save": "保存",
-    "close": "关闭"
+    "close": "关闭",
+    "back": "返回",
+    "next": "下一步",
+    "done": "完成",
+    "search": "搜索",
+    "filter": "筛选",
+    "refresh": "刷新",
+    "copy": "复制",
+    "copied": "已复制！",
+    "show": "显示",
+    "hide": "隐藏",
+    "more": "更多",
+    "less": "收起"
   },
   "nav": {
     "home": "首页",
     "vault": "保险库",
     "network": "网络",
-    "settings": "设置"
+    "view": "视图",
+    "settings": "设置",
+    "docs": "文档",
+    "terminal": "终端",
+    "panels": "面板"
+  },
+  "errors": {
+    "connection": "连接失败",
+    "timeout": "请求超时",
+    "unknown": "发生未知错误",
+    "notFound": "未找到",
+    "unauthorized": "未授权"
   }
 }

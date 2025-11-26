@@ -33,8 +33,9 @@ export const LOCALES = {
 
 export type Locale = keyof typeof LOCALES;
 
-// Translation dictionary type
-type TranslationDict = Record<string, string | Record<string, string>>;
+// Translation dictionary type - supports nested objects up to 3 levels
+type TranslationValue = string | Record<string, string | Record<string, string>>;
+type TranslationDict = Record<string, TranslationValue>;
 
 // Translations storage - pre-loaded
 const translations: Record<Locale, TranslationDict> = {

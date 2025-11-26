@@ -1,4 +1,32 @@
 {
+  "app": {
+    "name": "xln",
+    "tagline": "Ölçeklenebilirlik, güvenlik ve sadelikte matematiksel son nokta",
+    "description": "Zincir üstü güvenlik garantileri ile anında zincir dışı ödemeler"
+  },
+  "landing": {
+    "hero": {
+      "title": "Ödemelerin Geleceği",
+      "subtitle": "Sınırsız ölçeklenebilirlik. Sıfır ücret. Anında uzlaşma.",
+      "cta": "Ağa Gir"
+    },
+    "features": {
+      "speed": "Anında",
+      "speedDesc": "Milisaniyede işlem tamamlama",
+      "scale": "Sınırsız",
+      "scaleDesc": "İşlem hacmi sınırı yok",
+      "cost": "Sıfır Ücret",
+      "costDesc": "Gas yok, madencilik ücreti yok",
+      "security": "Güvenli",
+      "securityDesc": "Zincir üstü uzlaşma garantileri"
+    },
+    "invite": {
+      "title": "Davet Kodunu Girin",
+      "placeholder": "Davet kodunuz",
+      "submit": "Kilidini Aç",
+      "invalid": "Geçersiz kod"
+    }
+  },
   "vault": {
     "title": "kasa",
     "tagline": "Bellek yoğun anahtar türetme. Beynin yedek.",
@@ -24,14 +52,78 @@
     },
     "derive": "Cüzdan Türet",
     "deriving": "Türetiliyor...",
-    "warning": "Bu önemli hesaplama kaynakları kullanır. Yüksek faktör = daha fazla güvenlik ama daha uzun türetme süresi.",
+    "warning": "Bu kalıcıdır. İsim + şifre + güvenlik seviyesi = sonsuza kadar cüzdanın.",
     "result": {
-      "title": "Türetilmiş Cüzdan",
+      "title": "Cüzdan Oluşturuldu",
       "address": "Adres",
+      "mnemonic": "Mnemonik",
       "privateKey": "Özel Anahtar",
       "copy": "Kopyala",
       "copied": "Kopyalandı!"
+    },
+    "passwordManager": {
+      "title": "Şifre Yöneticisi",
+      "hint": "Herhangi bir site için benzersiz şifre oluştur",
+      "generate": "Oluştur"
     }
+  },
+  "network": {
+    "title": "Ağ",
+    "entities": "Varlıklar",
+    "accounts": "Hesaplar",
+    "transactions": "İşlemler",
+    "reserves": "Rezervler",
+    "balance": "Bakiye",
+    "status": {
+      "online": "Çevrimiçi",
+      "offline": "Çevrimdışı",
+      "syncing": "Eşitleniyor"
+    },
+    "actions": {
+      "deposit": "Yatır",
+      "withdraw": "Çek",
+      "transfer": "Transfer",
+      "createEntity": "Varlık Oluştur"
+    },
+    "empty": "Henüz varlık yok. Başlamak için bir tane oluşturun."
+  },
+  "view": {
+    "title": "3D Görünüm",
+    "controls": {
+      "zoom": "Yakınlaştır",
+      "rotate": "Döndür",
+      "pan": "Kaydır",
+      "reset": "Görünümü Sıfırla"
+    },
+    "vr": {
+      "enter": "VR'a Gir",
+      "exit": "VR'dan Çık",
+      "notSupported": "Bu cihazda VR desteklenmiyor"
+    },
+    "labels": {
+      "entity": "Varlık",
+      "account": "Hesap",
+      "connection": "Bağlantı"
+    }
+  },
+  "time": {
+    "now": "Şimdi",
+    "live": "Canlı",
+    "historical": "Geçmiş",
+    "frame": "Frame",
+    "block": "Blok"
+  },
+  "settings": {
+    "title": "Ayarlar",
+    "language": "Dil",
+    "theme": "Tema",
+    "themes": {
+      "dark": "Koyu",
+      "light": "Açık",
+      "system": "Sistem"
+    },
+    "advanced": "Gelişmiş",
+    "reset": "Varsayılanlara Sıfırla"
   },
   "common": {
     "loading": "Yükleniyor...",
@@ -40,12 +132,35 @@
     "cancel": "İptal",
     "confirm": "Onayla",
     "save": "Kaydet",
-    "close": "Kapat"
+    "close": "Kapat",
+    "back": "Geri",
+    "next": "İleri",
+    "done": "Tamam",
+    "search": "Ara",
+    "filter": "Filtrele",
+    "refresh": "Yenile",
+    "copy": "Kopyala",
+    "copied": "Kopyalandı!",
+    "show": "Göster",
+    "hide": "Gizle",
+    "more": "Daha Fazla",
+    "less": "Daha Az"
   },
   "nav": {
     "home": "Ana Sayfa",
     "vault": "Kasa",
     "network": "Ağ",
-    "settings": "Ayarlar"
+    "view": "Görünüm",
+    "settings": "Ayarlar",
+    "docs": "Belgeler",
+    "terminal": "Terminal",
+    "panels": "Paneller"
+  },
+  "errors": {
+    "connection": "Bağlantı başarısız",
+    "timeout": "İstek zaman aşımına uğradı",
+    "unknown": "Bilinmeyen bir hata oluştu",
+    "notFound": "Bulunamadı",
+    "unauthorized": "Yetkisiz"
   }
 }

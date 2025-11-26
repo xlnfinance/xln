@@ -1,4 +1,32 @@
 {
+  "app": {
+    "name": "xln",
+    "tagline": "スケーラビリティ、セキュリティ、シンプルさの数学的終着点",
+    "description": "オンチェーンセキュリティ保証付きのオフチェーン即時決済"
+  },
+  "landing": {
+    "hero": {
+      "title": "決済の未来",
+      "subtitle": "無限のスケーラビリティ。手数料ゼロ。即時決済。",
+      "cta": "ネットワークに入る"
+    },
+    "features": {
+      "speed": "即時",
+      "speedDesc": "ミリ秒で取引完了",
+      "scale": "無限",
+      "scaleDesc": "スループット制限なし",
+      "cost": "手数料ゼロ",
+      "costDesc": "ガス代・マイニング手数料なし",
+      "security": "安全",
+      "securityDesc": "オンチェーン決済保証"
+    },
+    "invite": {
+      "title": "招待コードを入力",
+      "placeholder": "招待コード",
+      "submit": "ロック解除",
+      "invalid": "無効なコード"
+    }
+  },
   "vault": {
     "title": "ボールト",
     "tagline": "メモリハード鍵導出。あなたの脳がバックアップ。",
@@ -24,14 +52,78 @@
     },
     "derive": "ウォレットを導出",
     "deriving": "導出中...",
-    "warning": "これは大量の計算リソースを使用します。係数が高い = より安全ですが導出時間が長くなります。",
+    "warning": "これは永久的です。名前 + パスワード + セキュリティレベル = 永遠のウォレット。",
     "result": {
-      "title": "導出ウォレット",
+      "title": "ウォレット生成完了",
       "address": "アドレス",
+      "mnemonic": "ニーモニック",
       "privateKey": "秘密鍵",
       "copy": "コピー",
       "copied": "コピーしました！"
+    },
+    "passwordManager": {
+      "title": "パスワードマネージャー",
+      "hint": "任意のサイト用にユニークなパスワードを生成",
+      "generate": "生成"
     }
+  },
+  "network": {
+    "title": "ネットワーク",
+    "entities": "エンティティ",
+    "accounts": "アカウント",
+    "transactions": "トランザクション",
+    "reserves": "リザーブ",
+    "balance": "残高",
+    "status": {
+      "online": "オンライン",
+      "offline": "オフライン",
+      "syncing": "同期中"
+    },
+    "actions": {
+      "deposit": "入金",
+      "withdraw": "出金",
+      "transfer": "送金",
+      "createEntity": "エンティティ作成"
+    },
+    "empty": "エンティティがありません。最初の一つを作成しましょう。"
+  },
+  "view": {
+    "title": "3Dビュー",
+    "controls": {
+      "zoom": "ズーム",
+      "rotate": "回転",
+      "pan": "パン",
+      "reset": "ビューをリセット"
+    },
+    "vr": {
+      "enter": "VRに入る",
+      "exit": "VRを終了",
+      "notSupported": "このデバイスはVR非対応"
+    },
+    "labels": {
+      "entity": "エンティティ",
+      "account": "アカウント",
+      "connection": "接続"
+    }
+  },
+  "time": {
+    "now": "現在",
+    "live": "ライブ",
+    "historical": "履歴",
+    "frame": "フレーム",
+    "block": "ブロック"
+  },
+  "settings": {
+    "title": "設定",
+    "language": "言語",
+    "theme": "テーマ",
+    "themes": {
+      "dark": "ダーク",
+      "light": "ライト",
+      "system": "システム"
+    },
+    "advanced": "詳細設定",
+    "reset": "デフォルトに戻す"
   },
   "common": {
     "loading": "読み込み中...",
@@ -40,12 +132,35 @@
     "cancel": "キャンセル",
     "confirm": "確認",
     "save": "保存",
-    "close": "閉じる"
+    "close": "閉じる",
+    "back": "戻る",
+    "next": "次へ",
+    "done": "完了",
+    "search": "検索",
+    "filter": "フィルター",
+    "refresh": "更新",
+    "copy": "コピー",
+    "copied": "コピーしました！",
+    "show": "表示",
+    "hide": "非表示",
+    "more": "もっと見る",
+    "less": "閉じる"
   },
   "nav": {
     "home": "ホーム",
     "vault": "ボールト",
     "network": "ネットワーク",
-    "settings": "設定"
+    "view": "ビュー",
+    "settings": "設定",
+    "docs": "ドキュメント",
+    "terminal": "ターミナル",
+    "panels": "パネル"
+  },
+  "errors": {
+    "connection": "接続に失敗しました",
+    "timeout": "リクエストがタイムアウトしました",
+    "unknown": "不明なエラーが発生しました",
+    "notFound": "見つかりません",
+    "unauthorized": "認証されていません"
   }
 }

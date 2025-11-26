@@ -1,4 +1,32 @@
 {
+  "app": {
+    "name": "xln",
+    "tagline": "확장성, 보안, 단순성의 수학적 종착점",
+    "description": "온체인 보안 보장이 있는 오프체인 즉시 결제"
+  },
+  "landing": {
+    "hero": {
+      "title": "결제의 미래",
+      "subtitle": "무한한 확장성. 수수료 제로. 즉시 정산.",
+      "cta": "네트워크 입장"
+    },
+    "features": {
+      "speed": "즉시",
+      "speedDesc": "밀리초 단위 거래 완료",
+      "scale": "무한",
+      "scaleDesc": "처리량 제한 없음",
+      "cost": "수수료 제로",
+      "costDesc": "가스비, 채굴 수수료 없음",
+      "security": "안전",
+      "securityDesc": "온체인 정산 보장"
+    },
+    "invite": {
+      "title": "초대 코드 입력",
+      "placeholder": "초대 코드",
+      "submit": "잠금 해제",
+      "invalid": "잘못된 코드"
+    }
+  },
   "vault": {
     "title": "금고",
     "tagline": "메모리 집약적 키 파생. 당신의 뇌가 백업입니다.",
@@ -24,14 +52,78 @@
     },
     "derive": "지갑 파생",
     "deriving": "파생 중...",
-    "warning": "상당한 계산 리소스를 사용합니다. 높은 계수 = 더 많은 보안이지만 파생 시간이 길어집니다.",
+    "warning": "이것은 영구적입니다. 이름 + 비밀번호 + 보안 레벨 = 영원한 지갑.",
     "result": {
-      "title": "파생된 지갑",
+      "title": "지갑 생성 완료",
       "address": "주소",
+      "mnemonic": "니모닉",
       "privateKey": "개인 키",
       "copy": "복사",
       "copied": "복사됨!"
+    },
+    "passwordManager": {
+      "title": "비밀번호 관리자",
+      "hint": "모든 사이트용 고유 비밀번호 생성",
+      "generate": "생성"
     }
+  },
+  "network": {
+    "title": "네트워크",
+    "entities": "엔티티",
+    "accounts": "계정",
+    "transactions": "거래",
+    "reserves": "준비금",
+    "balance": "잔액",
+    "status": {
+      "online": "온라인",
+      "offline": "오프라인",
+      "syncing": "동기화 중"
+    },
+    "actions": {
+      "deposit": "입금",
+      "withdraw": "출금",
+      "transfer": "송금",
+      "createEntity": "엔티티 생성"
+    },
+    "empty": "아직 엔티티가 없습니다. 하나를 만들어 시작하세요."
+  },
+  "view": {
+    "title": "3D 뷰",
+    "controls": {
+      "zoom": "줌",
+      "rotate": "회전",
+      "pan": "이동",
+      "reset": "뷰 초기화"
+    },
+    "vr": {
+      "enter": "VR 입장",
+      "exit": "VR 종료",
+      "notSupported": "이 기기는 VR을 지원하지 않습니다"
+    },
+    "labels": {
+      "entity": "엔티티",
+      "account": "계정",
+      "connection": "연결"
+    }
+  },
+  "time": {
+    "now": "현재",
+    "live": "라이브",
+    "historical": "히스토리",
+    "frame": "프레임",
+    "block": "블록"
+  },
+  "settings": {
+    "title": "설정",
+    "language": "언어",
+    "theme": "테마",
+    "themes": {
+      "dark": "다크",
+      "light": "라이트",
+      "system": "시스템"
+    },
+    "advanced": "고급 설정",
+    "reset": "기본값으로 재설정"
   },
   "common": {
     "loading": "로딩 중...",
@@ -40,12 +132,35 @@
     "cancel": "취소",
     "confirm": "확인",
     "save": "저장",
-    "close": "닫기"
+    "close": "닫기",
+    "back": "뒤로",
+    "next": "다음",
+    "done": "완료",
+    "search": "검색",
+    "filter": "필터",
+    "refresh": "새로고침",
+    "copy": "복사",
+    "copied": "복사됨!",
+    "show": "보기",
+    "hide": "숨기기",
+    "more": "더보기",
+    "less": "접기"
   },
   "nav": {
     "home": "홈",
     "vault": "금고",
     "network": "네트워크",
-    "settings": "설정"
+    "view": "뷰",
+    "settings": "설정",
+    "docs": "문서",
+    "terminal": "터미널",
+    "panels": "패널"
+  },
+  "errors": {
+    "connection": "연결 실패",
+    "timeout": "요청 시간 초과",
+    "unknown": "알 수 없는 오류 발생",
+    "notFound": "찾을 수 없음",
+    "unauthorized": "인증되지 않음"
   }
 }

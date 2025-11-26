@@ -1,4 +1,32 @@
 {
+  "app": {
+    "name": "xln",
+    "tagline": "O endgame matemático em escalabilidade, segurança e simplicidade",
+    "description": "Pagamentos off-chain instantâneos com garantias de segurança on-chain"
+  },
+  "landing": {
+    "hero": {
+      "title": "O Futuro dos Pagamentos",
+      "subtitle": "Escalabilidade infinita. Taxa zero. Liquidação instantânea.",
+      "cta": "Entrar na Rede"
+    },
+    "features": {
+      "speed": "Instantâneo",
+      "speedDesc": "Transações em milissegundos",
+      "scale": "Infinito",
+      "scaleDesc": "Sem limites de throughput",
+      "cost": "Taxa Zero",
+      "costDesc": "Sem gas, sem taxas de mineração",
+      "security": "Seguro",
+      "securityDesc": "Garantias de liquidação on-chain"
+    },
+    "invite": {
+      "title": "Digite o Código de Convite",
+      "placeholder": "Seu código de convite",
+      "submit": "Desbloquear",
+      "invalid": "Código inválido"
+    }
+  },
   "vault": {
     "title": "cofre",
     "tagline": "Derivação de chave com uso intensivo de memória. Seu cérebro é o backup.",
@@ -24,14 +52,78 @@
     },
     "derive": "Derivar Carteira",
     "deriving": "Derivando...",
-    "warning": "Isso usa recursos computacionais significativos. Fator maior = mais segurança mas tempo de derivação maior.",
+    "warning": "Isso é permanente. Nome + senha + nível de segurança = sua carteira para sempre.",
     "result": {
-      "title": "Carteira Derivada",
+      "title": "Carteira Gerada",
       "address": "Endereço",
+      "mnemonic": "Mnemônico",
       "privateKey": "Chave Privada",
       "copy": "Copiar",
       "copied": "Copiado!"
+    },
+    "passwordManager": {
+      "title": "Gerenciador de Senhas",
+      "hint": "Gere senhas únicas para qualquer site",
+      "generate": "Gerar"
     }
+  },
+  "network": {
+    "title": "Rede",
+    "entities": "Entidades",
+    "accounts": "Contas",
+    "transactions": "Transações",
+    "reserves": "Reservas",
+    "balance": "Saldo",
+    "status": {
+      "online": "Online",
+      "offline": "Offline",
+      "syncing": "Sincronizando"
+    },
+    "actions": {
+      "deposit": "Depositar",
+      "withdraw": "Sacar",
+      "transfer": "Transferir",
+      "createEntity": "Criar Entidade"
+    },
+    "empty": "Sem entidades ainda. Crie uma para começar."
+  },
+  "view": {
+    "title": "Visualização 3D",
+    "controls": {
+      "zoom": "Zoom",
+      "rotate": "Rotacionar",
+      "pan": "Mover",
+      "reset": "Resetar Vista"
+    },
+    "vr": {
+      "enter": "Entrar em VR",
+      "exit": "Sair do VR",
+      "notSupported": "VR não suportado neste dispositivo"
+    },
+    "labels": {
+      "entity": "Entidade",
+      "account": "Conta",
+      "connection": "Conexão"
+    }
+  },
+  "time": {
+    "now": "Agora",
+    "live": "Ao Vivo",
+    "historical": "Histórico",
+    "frame": "Frame",
+    "block": "Bloco"
+  },
+  "settings": {
+    "title": "Configurações",
+    "language": "Idioma",
+    "theme": "Tema",
+    "themes": {
+      "dark": "Escuro",
+      "light": "Claro",
+      "system": "Sistema"
+    },
+    "advanced": "Avançado",
+    "reset": "Restaurar Padrões"
   },
   "common": {
     "loading": "Carregando...",
@@ -40,12 +132,35 @@
     "cancel": "Cancelar",
     "confirm": "Confirmar",
     "save": "Salvar",
-    "close": "Fechar"
+    "close": "Fechar",
+    "back": "Voltar",
+    "next": "Próximo",
+    "done": "Concluído",
+    "search": "Buscar",
+    "filter": "Filtrar",
+    "refresh": "Atualizar",
+    "copy": "Copiar",
+    "copied": "Copiado!",
+    "show": "Mostrar",
+    "hide": "Ocultar",
+    "more": "Mais",
+    "less": "Menos"
   },
   "nav": {
     "home": "Início",
     "vault": "Cofre",
     "network": "Rede",
-    "settings": "Configurações"
+    "view": "Visualização",
+    "settings": "Configurações",
+    "docs": "Docs",
+    "terminal": "Terminal",
+    "panels": "Painéis"
+  },
+  "errors": {
+    "connection": "Falha na conexão",
+    "timeout": "Tempo esgotado",
+    "unknown": "Erro desconhecido",
+    "notFound": "Não encontrado",
+    "unauthorized": "Não autorizado"
   }
 }

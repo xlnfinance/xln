@@ -1,14 +1,19 @@
 <script lang="ts">
   import { viewMode, viewModeOperations, type ViewMode } from '../../stores/viewModeStore';
+  import { translations$ } from '$lib/i18n';
+  import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
 
-  const viewTabs: Array<{ mode: ViewMode; icon: string; label: string; title: string }> = [
-    { mode: 'home', icon: '🏠', label: 'Home', title: 'XLN Overview' },
-    { mode: 'settings', icon: '⚙️', label: 'Settings', title: 'Settings & Configuration' },
-    { mode: 'docs', icon: '📚', label: 'Docs', title: 'Documentation' },
-    { mode: 'brainvault', icon: '🧠', label: 'Wallet', title: 'BrainVault Wallet Generator' },
-    { mode: 'graph3d', icon: '🗺️', label: 'Graph 3D', title: '3D Network Topology' },
-    { mode: 'panels', icon: '📊', label: 'Panels', title: 'Entity Panels' },
-    { mode: 'terminal', icon: '💻', label: 'Terminal', title: 'Console View' }
+  $: t = $translations$;
+
+  // Dynamic tabs with i18n - keys map to nav.* translations
+  const viewTabsConfig: Array<{ mode: ViewMode; icon: string; labelKey: string; titleKey: string }> = [
+    { mode: 'home', icon: '🏠', labelKey: 'nav.home', titleKey: 'nav.home' },
+    { mode: 'settings', icon: '⚙️', labelKey: 'nav.settings', titleKey: 'nav.settings' },
+    { mode: 'docs', icon: '📚', labelKey: 'nav.docs', titleKey: 'nav.docs' },
+    { mode: 'brainvault', icon: '🧠', labelKey: 'nav.vault', titleKey: 'nav.vault' },
+    { mode: 'graph3d', icon: '🗺️', labelKey: 'view.title', titleKey: 'view.title' },
+    { mode: 'panels', icon: '📊', labelKey: 'nav.panels', titleKey: 'nav.panels' },
+    { mode: 'terminal', icon: '💻', labelKey: 'nav.terminal', titleKey: 'nav.terminal' }
   ];
 
   $: activeView = $viewMode;
@@ -24,18 +29,21 @@
   <div class="admin-logo">
     <span class="logo-text">xln</span>
     <div class="view-switcher">
-      {#each viewTabs as tab}
+      {#each viewTabsConfig as tab}
         <button
           class="view-switch-btn"
           class:active={activeView === tab.mode}
           on:click={() => handleChangeView(tab.mode)}
-          title={tab.title}
+          title={t(tab.titleKey)}
         >
           <span class="view-icon">{tab.icon}</span>
-          <span class="view-label">{tab.label}</span>
+          <span class="view-label">{t(tab.labelKey)}</span>
         </button>
       {/each}
     </div>
+  </div>
+  <div class="topbar-actions">
+    <LanguageSwitcher />
   </div>
 </div>
 
@@ -142,5 +150,12 @@
     font-size: 12px;
     font-weight: 600;
     letter-spacing: 0.3px;
+  }
+
+  .topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-left: auto;
   }
 </style>
