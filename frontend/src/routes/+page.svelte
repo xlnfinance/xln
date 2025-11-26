@@ -33,22 +33,33 @@
   let hideButton = false; // Full zen: also hide the toggle button
   let showLanding = true;
 
-  // Sync showLanding with store
-  $: showingLandingPage.set(showLanding);
-
-  // Check if user has unlocked
-  onMount(() => {
+  // Sync showLanding with store and toggle app-mode class
+  $: {
+    showingLandingPage.set(showLanding);
     if (browser) {
-      // Check for #MML invite hash FIRST (takes precedence over localStorage)
-      if (window.location.hash === '#MML') {
-        localStorage.setItem('open', 'true');
-        window.location.hash = ''; // Remove hash after processing
-        showLanding = false;
+      if (showLanding) {
+        document.documentElement.classList.remove('app-mode');
+        document.body.classList.remove('app-mode');
       } else {
-        showLanding = localStorage.getItem('open') !== 'true';
+        document.documentElement.classList.add('app-mode');
+        document.body.classList.add('app-mode');
       }
     }
-  });
+  }
+
+  // Check if user has unlocked - sync BEFORE mount for SSR hydration
+  if (browser) {
+    // Check for #MML invite hash FIRST (takes precedence over localStorage)
+    if (window.location.hash === '#MML') {
+      localStorage.setItem('open', 'true');
+      window.location.hash = ''; // Remove hash after processing
+      showLanding = false;
+      showingLandingPage.set(false);
+    } else {
+      showLanding = localStorage.getItem('open') !== 'true';
+      showingLandingPage.set(showLanding);
+    }
+  }
 
   function handleUnlock() {
     showLanding = false;
@@ -419,6 +430,16 @@
 
   :global(html) {
     overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  :global(html.app-mode) {
+    overflow: hidden;
+  }
+
+  :global(body.app-mode) {
+    overflow: hidden;
+    height: 100vh;
   }
 
   .app {
