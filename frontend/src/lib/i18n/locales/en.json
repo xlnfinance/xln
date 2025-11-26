@@ -1,0 +1,51 @@
+{
+  "vault": {
+    "title": "vault",
+    "tagline": "Memory-hard key derivation. Your brain is the backup.",
+    "name": {
+      "label": "Name",
+      "hint": "Public identifier (email, username, etc.)",
+      "placeholder": "satoshi@bitcoin.org"
+    },
+    "password": {
+      "label": "Password",
+      "hint": "Make it memorable, make it strong",
+      "placeholder": "your secret phrase"
+    },
+    "factor": {
+      "label": "Security Factor",
+      "memory": "Memory",
+      "time": "Time",
+      "threads": "Threads"
+    },
+    "shards": {
+      "title": "Derivation Shards",
+      "empty": "Enter credentials to begin derivation"
+    },
+    "derive": "Derive Wallet",
+    "deriving": "Deriving...",
+    "warning": "This uses significant computational resources. Higher factors = more security but longer derivation time.",
+    "result": {
+      "title": "Derived Wallet",
+      "address": "Address",
+      "privateKey": "Private Key",
+      "copy": "Copy",
+      "copied": "Copied!"
+    }
+  },
+  "common": {
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "close": "Close"
+  },
+  "nav": {
+    "home": "Home",
+    "vault": "Vault",
+    "network": "Network",
+    "settings": "Settings"
+  }
+}

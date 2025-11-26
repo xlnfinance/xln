@@ -1,0 +1,51 @@
+{
+  "vault": {
+    "title": "coffre",
+    "tagline": "Dérivation de clé à mémoire intensive. Votre cerveau est la sauvegarde.",
+    "name": {
+      "label": "Nom",
+      "hint": "Identifiant public (email, nom d'utilisateur, etc.)",
+      "placeholder": "satoshi@bitcoin.org"
+    },
+    "password": {
+      "label": "Mot de passe",
+      "hint": "Rendez-le mémorable, rendez-le fort",
+      "placeholder": "votre phrase secrète"
+    },
+    "factor": {
+      "label": "Facteur de Sécurité",
+      "memory": "Mémoire",
+      "time": "Temps",
+      "threads": "Threads"
+    },
+    "shards": {
+      "title": "Fragments de Dérivation",
+      "empty": "Entrez les identifiants pour commencer la dérivation"
+    },
+    "derive": "Dériver le Portefeuille",
+    "deriving": "Dérivation...",
+    "warning": "Cela utilise des ressources de calcul importantes. Facteur plus élevé = plus de sécurité mais temps de dérivation plus long.",
+    "result": {
+      "title": "Portefeuille Dérivé",
+      "address": "Adresse",
+      "privateKey": "Clé Privée",
+      "copy": "Copier",
+      "copied": "Copié!"
+    }
+  },
+  "common": {
+    "loading": "Chargement...",
+    "error": "Erreur",
+    "success": "Succès",
+    "cancel": "Annuler",
+    "confirm": "Confirmer",
+    "save": "Enregistrer",
+    "close": "Fermer"
+  },
+  "nav": {
+    "home": "Accueil",
+    "vault": "Coffre",
+    "network": "Réseau",
+    "settings": "Paramètres"
+  }
+}

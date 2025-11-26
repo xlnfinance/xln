@@ -1,0 +1,51 @@
+{
+  "vault": {
+    "title": "cofre",
+    "tagline": "Derivação de chave com uso intensivo de memória. Seu cérebro é o backup.",
+    "name": {
+      "label": "Nome",
+      "hint": "Identificador público (email, usuário, etc.)",
+      "placeholder": "satoshi@bitcoin.org"
+    },
+    "password": {
+      "label": "Senha",
+      "hint": "Torne-a memorável, torne-a forte",
+      "placeholder": "sua frase secreta"
+    },
+    "factor": {
+      "label": "Fator de Segurança",
+      "memory": "Memória",
+      "time": "Tempo",
+      "threads": "Threads"
+    },
+    "shards": {
+      "title": "Fragmentos de Derivação",
+      "empty": "Digite credenciais para iniciar derivação"
+    },
+    "derive": "Derivar Carteira",
+    "deriving": "Derivando...",
+    "warning": "Isso usa recursos computacionais significativos. Fator maior = mais segurança mas tempo de derivação maior.",
+    "result": {
+      "title": "Carteira Derivada",
+      "address": "Endereço",
+      "privateKey": "Chave Privada",
+      "copy": "Copiar",
+      "copied": "Copiado!"
+    }
+  },
+  "common": {
+    "loading": "Carregando...",
+    "error": "Erro",
+    "success": "Sucesso",
+    "cancel": "Cancelar",
+    "confirm": "Confirmar",
+    "save": "Salvar",
+    "close": "Fechar"
+  },
+  "nav": {
+    "home": "Início",
+    "vault": "Cofre",
+    "network": "Rede",
+    "settings": "Configurações"
+  }
+}

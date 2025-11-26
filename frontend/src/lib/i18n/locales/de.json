@@ -1,0 +1,51 @@
+{
+  "vault": {
+    "title": "tresor",
+    "tagline": "Speicherintensive Schlüsselableitung. Dein Gehirn ist das Backup.",
+    "name": {
+      "label": "Name",
+      "hint": "Öffentlicher Bezeichner (E-Mail, Benutzername, etc.)",
+      "placeholder": "satoshi@bitcoin.org"
+    },
+    "password": {
+      "label": "Passwort",
+      "hint": "Mach es einprägsam, mach es stark",
+      "placeholder": "deine geheime Phrase"
+    },
+    "factor": {
+      "label": "Sicherheitsfaktor",
+      "memory": "Speicher",
+      "time": "Zeit",
+      "threads": "Threads"
+    },
+    "shards": {
+      "title": "Ableitungs-Shards",
+      "empty": "Anmeldedaten eingeben um Ableitung zu starten"
+    },
+    "derive": "Wallet Ableiten",
+    "deriving": "Ableitung...",
+    "warning": "Dies verwendet erhebliche Rechenressourcen. Höherer Faktor = mehr Sicherheit aber längere Ableitungszeit.",
+    "result": {
+      "title": "Abgeleitetes Wallet",
+      "address": "Adresse",
+      "privateKey": "Privater Schlüssel",
+      "copy": "Kopieren",
+      "copied": "Kopiert!"
+    }
+  },
+  "common": {
+    "loading": "Laden...",
+    "error": "Fehler",
+    "success": "Erfolg",
+    "cancel": "Abbrechen",
+    "confirm": "Bestätigen",
+    "save": "Speichern",
+    "close": "Schließen"
+  },
+  "nav": {
+    "home": "Startseite",
+    "vault": "Tresor",
+    "network": "Netzwerk",
+    "settings": "Einstellungen"
+  }
+}

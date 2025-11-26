@@ -1,0 +1,51 @@
+{
+  "vault": {
+    "title": "ボールト",
+    "tagline": "メモリハード鍵導出。あなたの脳がバックアップ。",
+    "name": {
+      "label": "名前",
+      "hint": "公開識別子（メール、ユーザー名など）",
+      "placeholder": "satoshi@bitcoin.org"
+    },
+    "password": {
+      "label": "パスワード",
+      "hint": "覚えやすく、強力に",
+      "placeholder": "あなたの秘密のフレーズ"
+    },
+    "factor": {
+      "label": "セキュリティ係数",
+      "memory": "メモリ",
+      "time": "時間",
+      "threads": "スレッド"
+    },
+    "shards": {
+      "title": "導出シャード",
+      "empty": "導出を開始するには認証情報を入力"
+    },
+    "derive": "ウォレットを導出",
+    "deriving": "導出中...",
+    "warning": "これは大量の計算リソースを使用します。係数が高い = より安全ですが導出時間が長くなります。",
+    "result": {
+      "title": "導出ウォレット",
+      "address": "アドレス",
+      "privateKey": "秘密鍵",
+      "copy": "コピー",
+      "copied": "コピーしました！"
+    }
+  },
+  "common": {
+    "loading": "読み込み中...",
+    "error": "エラー",
+    "success": "成功",
+    "cancel": "キャンセル",
+    "confirm": "確認",
+    "save": "保存",
+    "close": "閉じる"
+  },
+  "nav": {
+    "home": "ホーム",
+    "vault": "ボールト",
+    "network": "ネットワーク",
+    "settings": "設定"
+  }
+}

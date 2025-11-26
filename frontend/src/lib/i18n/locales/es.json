@@ -1,0 +1,51 @@
+{
+  "vault": {
+    "title": "bóveda",
+    "tagline": "Derivación de claves con memoria intensiva. Tu cerebro es el respaldo.",
+    "name": {
+      "label": "Nombre",
+      "hint": "Identificador público (email, usuario, etc.)",
+      "placeholder": "satoshi@bitcoin.org"
+    },
+    "password": {
+      "label": "Contraseña",
+      "hint": "Hazla memorable, hazla fuerte",
+      "placeholder": "tu frase secreta"
+    },
+    "factor": {
+      "label": "Factor de Seguridad",
+      "memory": "Memoria",
+      "time": "Tiempo",
+      "threads": "Hilos"
+    },
+    "shards": {
+      "title": "Fragmentos de Derivación",
+      "empty": "Ingresa credenciales para iniciar derivación"
+    },
+    "derive": "Derivar Billetera",
+    "deriving": "Derivando...",
+    "warning": "Esto usa recursos computacionales significativos. Mayor factor = más seguridad pero mayor tiempo de derivación.",
+    "result": {
+      "title": "Billetera Derivada",
+      "address": "Dirección",
+      "privateKey": "Clave Privada",
+      "copy": "Copiar",
+      "copied": "¡Copiado!"
+    }
+  },
+  "common": {
+    "loading": "Cargando...",
+    "error": "Error",
+    "success": "Éxito",
+    "cancel": "Cancelar",
+    "confirm": "Confirmar",
+    "save": "Guardar",
+    "close": "Cerrar"
+  },
+  "nav": {
+    "home": "Inicio",
+    "vault": "Bóveda",
+    "network": "Red",
+    "settings": "Ajustes"
+  }
+}
