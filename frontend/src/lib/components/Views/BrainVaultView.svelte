@@ -1005,9 +1005,23 @@
     {:else if phase === 'complete'}
       <div class="glass-card complete">
         <div class="success-header">
-          <span class="success-icon">✅</span>
-          <h2>Wallet Generated!</h2>
-          <p>Derived in {formatDuration(elapsedMs)} using {shardCount} shards</p>
+          <!-- Liquid glass checkmark icon -->
+          <div class="success-icon-container">
+            <div class="success-glow"></div>
+            <div class="success-ring">
+              <svg viewBox="0 0 24 24" fill="none" class="success-check">
+                <path d="M5 13l4 4L19 7" stroke="url(#checkGradient)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                <defs>
+                  <linearGradient id="checkGradient" x1="5" y1="7" x2="19" y2="17">
+                    <stop offset="0%" stop-color="#a855f7"/>
+                    <stop offset="100%" stop-color="#06b6d4"/>
+                  </linearGradient>
+                </defs>
+              </svg>
+            </div>
+          </div>
+          <h2>Wallet Generated</h2>
+          <p class="success-stats">{formatDuration(elapsedMs)} <span class="stat-divider">·</span> {shardCount} shards</p>
         </div>
 
         <!-- Address -->
@@ -1721,28 +1735,91 @@
     letter-spacing: 1px;
   }
 
-  /* Complete Phase */
+  /* Complete Phase - Liquid Glass Apple Style */
   .success-header {
     text-align: center;
-    margin-bottom: 32px;
+    margin-bottom: 36px;
   }
 
-  .success-icon {
-    font-size: 48px;
-    display: block;
-    margin-bottom: 12px;
+  .success-icon-container {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 20px;
+  }
+
+  .success-glow {
+    position: absolute;
+    inset: -20px;
+    background: radial-gradient(circle, rgba(139, 92, 246, 0.4) 0%, rgba(6, 182, 212, 0.2) 50%, transparent 70%);
+    filter: blur(20px);
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.1); }
+  }
+
+  .success-ring {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: linear-gradient(135deg,
+      rgba(255, 255, 255, 0.15) 0%,
+      rgba(255, 255, 255, 0.05) 50%,
+      rgba(255, 255, 255, 0.1) 100%);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow:
+      0 8px 32px rgba(139, 92, 246, 0.3),
+      inset 0 1px 1px rgba(255, 255, 255, 0.3),
+      inset 0 -1px 1px rgba(0, 0, 0, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .success-check {
+    width: 40px;
+    height: 40px;
+    animation: draw-check 0.6s ease-out forwards;
+  }
+
+  .success-check path {
+    stroke-dasharray: 30;
+    stroke-dashoffset: 30;
+    animation: draw-check-path 0.6s ease-out 0.2s forwards;
+  }
+
+  @keyframes draw-check-path {
+    to { stroke-dashoffset: 0; }
   }
 
   .success-header h2 {
-    color: #4ade80;
+    background: linear-gradient(135deg, #e0e7ff 0%, #a5b4fc 50%, #818cf8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
     margin: 0 0 8px 0;
-    font-size: 28px;
+    font-size: 26px;
+    font-weight: 600;
+    letter-spacing: -0.02em;
   }
 
-  .success-header p {
-    color: rgba(255, 255, 255, 0.6);
+  .success-stats {
+    color: rgba(255, 255, 255, 0.5);
     margin: 0;
-    font-size: 14px;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+
+  .stat-divider {
+    opacity: 0.4;
+    margin: 0 4px;
   }
 
   /* Result Sections */
