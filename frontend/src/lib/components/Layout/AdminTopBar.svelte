@@ -1,8 +1,7 @@
 <script lang="ts">
   import { viewMode, viewModeOperations, type ViewMode } from '../../stores/viewModeStore';
   import { translations$ } from '$lib/i18n';
-  import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
-
+  
   $: t = $translations$;
 
   // Dynamic tabs with i18n - keys map to nav.* translations
@@ -43,7 +42,7 @@
     </div>
   </div>
   <div class="topbar-actions">
-    <LanguageSwitcher />
+    <!-- LanguageSwitcher moved to bottom corner (GlobalLanguageSwitcher.svelte) -->
   </div>
 </div>
 
