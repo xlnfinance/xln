@@ -588,7 +588,10 @@
       name, // Needed for UI
     };
     localStorage.setItem('brainvault_resume', JSON.stringify(token));
-    resumeToken = btoa(JSON.stringify(token));
+    // Use TextEncoder for Unicode-safe base64
+    const jsonStr = JSON.stringify(token);
+    const bytes = new TextEncoder().encode(jsonStr);
+    resumeToken = btoa(String.fromCharCode(...bytes));
   }
 
   async function loadResumeToken() {
