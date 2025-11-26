@@ -1,0 +1,51 @@
+{
+  "vault": {
+    "title": "금고",
+    "tagline": "메모리 집약적 키 파생. 당신의 뇌가 백업입니다.",
+    "name": {
+      "label": "이름",
+      "hint": "공개 식별자 (이메일, 사용자명 등)",
+      "placeholder": "satoshi@bitcoin.org"
+    },
+    "password": {
+      "label": "비밀번호",
+      "hint": "기억하기 쉽고 강력하게",
+      "placeholder": "비밀 문구"
+    },
+    "factor": {
+      "label": "보안 계수",
+      "memory": "메모리",
+      "time": "시간",
+      "threads": "스레드"
+    },
+    "shards": {
+      "title": "파생 샤드",
+      "empty": "파생을 시작하려면 자격 증명 입력"
+    },
+    "derive": "지갑 파생",
+    "deriving": "파생 중...",
+    "warning": "상당한 계산 리소스를 사용합니다. 높은 계수 = 더 많은 보안이지만 파생 시간이 길어집니다.",
+    "result": {
+      "title": "파생된 지갑",
+      "address": "주소",
+      "privateKey": "개인 키",
+      "copy": "복사",
+      "copied": "복사됨!"
+    }
+  },
+  "common": {
+    "loading": "로딩 중...",
+    "error": "오류",
+    "success": "성공",
+    "cancel": "취소",
+    "confirm": "확인",
+    "save": "저장",
+    "close": "닫기"
+  },
+  "nav": {
+    "home": "홈",
+    "vault": "금고",
+    "network": "네트워크",
+    "settings": "설정"
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "vault": {
+    "title": "保险库",
+    "tagline": "内存硬密钥派生。您的大脑就是备份。",
+    "name": {
+      "label": "名称",
+      "hint": "公开标识符（邮箱、用户名等）",
+      "placeholder": "satoshi@bitcoin.org"
+    },
+    "password": {
+      "label": "密码",
+      "hint": "使其难忘，使其强大",
+      "placeholder": "您的秘密短语"
+    },
+    "factor": {
+      "label": "安全系数",
+      "memory": "内存",
+      "time": "时间",
+      "threads": "线程"
+    },
+    "shards": {
+      "title": "派生分片",
+      "empty": "输入凭据开始派生"
+    },
+    "derive": "派生钱包",
+    "deriving": "派生中...",
+    "warning": "这将使用大量计算资源。系数越高 = 安全性越高，但派生时间越长。",
+    "result": {
+      "title": "派生钱包",
+      "address": "地址",
+      "privateKey": "私钥",
+      "copy": "复制",
+      "copied": "已复制！"
+    }
+  },
+  "common": {
+    "loading": "加载中...",
+    "error": "错误",
+    "success": "成功",
+    "cancel": "取消",
+    "confirm": "确认",
+    "save": "保存",
+    "close": "关闭"
+  },
+  "nav": {
+    "home": "首页",
+    "vault": "保险库",
+    "network": "网络",
+    "settings": "设置"
+  }
+}

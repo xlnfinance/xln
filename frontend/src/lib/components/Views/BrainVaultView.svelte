@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { HDNodeWallet } from 'ethers';
+  import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
+  import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
+
+  // Initialize i18n
+  let i18nReady = false;
+  $: t = $translations$;
 
   // ============================================================================
   // CRYPTO WORKER HELPER
@@ -682,8 +688,17 @@
     }
   });
 
-  // Check for saved resume on mount
-  onMount(() => {
+  // Check for saved resume on mount + init i18n
+  onMount(async () => {
+    // Init i18n
+    await initI18n();
+    i18nReady = true;
+
+    // Watch for locale changes
+    const unsubscribe = locale.subscribe(async (loc) => {
+      await loadTranslations(loc);
+    });
+
     const saved = localStorage.getItem('brainvault_resume');
     if (saved) {
       try {
@@ -695,6 +710,8 @@
         }
       } catch {}
     }
+
+    return () => unsubscribe();
   });
 
   // BIP39 wordlist
@@ -706,12 +723,14 @@
 <div class="brainvault-container">
   <!-- Header -->
   <div class="header">
-    <div class="logo">
-      <span class="logo-icon">🧠</span>
-      <h1>BrainVault</h1>
-      <span class="version">v2.0</span>
+    <div class="header-top">
+      <div class="spacer"></div>
+      <h1 class="wordmark">{t('vault.title')}</h1>
+      <div class="lang-switcher-wrapper">
+        <LanguageSwitcher />
+      </div>
     </div>
-    <p class="tagline">Your brain is the backup. Memory-hard sharded key derivation.</p>
+    <p class="tagline">{t('vault.tagline')}</p>
   </div>
 
   <!-- Main Content -->
@@ -732,44 +751,48 @@
 
         <!-- Name Input -->
         <div class="input-group">
-          <label for="name">
-            <span class="label-text">Name</span>
-            <span class="label-hint">(public identifier - email or username)</span>
-          </label>
-          <input
-            type="text"
-            id="name"
-            bind:value={name}
-            placeholder="satoshi@bitcoin.org"
-            autocomplete="off"
-            class:valid={name.length >= BRAINVAULT_V2.MIN_NAME_LENGTH}
-          />
-          {#if name && name.length < BRAINVAULT_V2.MIN_NAME_LENGTH}
-            <span class="validation-hint">At least {BRAINVAULT_V2.MIN_NAME_LENGTH} characters required</span>
-          {/if}
+          <label for="name">{t('vault.name.label')}</label>
+          <span class="input-hint">{t('vault.name.hint')}</span>
+          <div class="input-wrapper">
+            <input
+              type="text"
+              id="name"
+              bind:value={name}
+              placeholder={t('vault.name.placeholder')}
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
         </div>
 
         <!-- Passphrase Input -->
         <div class="input-group">
-          <label for="passphrase">
-            <span class="label-text">Passphrase</span>
-            <span class="label-hint">(secret - never share this)</span>
-          </label>
-          <div class="password-input-wrapper">
+          <label for="passphrase">{t('vault.password.label')}</label>
+          <span class="input-hint">{t('vault.password.hint')}</span>
+          <div class="input-wrapper">
             <input
               type={showPassphrase ? 'text' : 'password'}
               id="passphrase"
               bind:value={passphrase}
-              placeholder="Enter a strong passphrase..."
+              placeholder={t('vault.password.placeholder')}
               autocomplete="off"
-              class:valid={passphrase.length >= BRAINVAULT_V2.MIN_PASSPHRASE_LENGTH}
+              spellcheck="false"
             />
             <button
               class="toggle-visibility"
               on:click={() => showPassphrase = !showPassphrase}
               type="button"
+              aria-label="Toggle passphrase visibility"
             >
-              {showPassphrase ? '👁️' : '👁️‍🗨️'}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                {#if showPassphrase}
+                  <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                {:else}
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                {/if}
+              </svg>
             </button>
           </div>
           {#if passphrase}
@@ -787,10 +810,8 @@
 
         <!-- Factor Slider -->
         <div class="input-group">
-          <label for="factor">
-            <span class="label-text">Security Factor</span>
-            <span class="label-hint">(1-9, higher = more secure but slower)</span>
-          </label>
+          <label for="factor">{t('vault.factor.label')}</label>
+          <span class="input-hint">{t('vault.factor.memory')} · {t('vault.factor.time')} · {t('vault.factor.threads')}</span>
           <div class="factor-slider-wrapper">
             <input
               type="range"
@@ -801,27 +822,18 @@
             />
             <div class="factor-labels">
               <span>1</span>
-              <span>5</span>
               <span>9</span>
             </div>
           </div>
           <div class="factor-info">
-            <div class="factor-badge" class:demo={factor === 1} class:balanced={factor === 5} class:paranoid={factor >= 8}>
-              Factor {factor}: {factorInfo.description}
-            </div>
-            <div class="factor-stats">
-              <span><strong>{factorInfo.shards}</strong> shards</span>
-              <span><strong>{factorInfo.memory}</strong> memory equiv.</span>
-              <span><strong>{factorInfo.time}</strong> est. time</span>
-            </div>
+            <span class="factor-level">{factorInfo.description}</span>
+            <span class="factor-stats">{factorInfo.shards} shards · {factorInfo.memory} · ~{factorInfo.time}</span>
           </div>
         </div>
 
         <!-- Warning -->
         <div class="warning-box">
-          <span class="warning-icon">⚠️</span>
-          <p><strong>name + passphrase + factor = your wallet forever</strong><br/>
-          If you forget any of these, your funds are permanently lost. There is no recovery.</p>
+          <p><strong>This is permanent.</strong> Name + passphrase + security level = your wallet forever. No recovery possible.</p>
         </div>
 
         <!-- Derive Button -->
@@ -830,15 +842,14 @@
           disabled={!canDerive}
           on:click={startDerivation}
         >
-          <span class="btn-icon">🔐</span>
-          Derive Wallet
+          {t('vault.derive')}
         </button>
       </div>
 
     <!-- DERIVING PHASE -->
     {:else if phase === 'deriving'}
       <div class="glass-card deriving">
-        <h2>Deriving Wallet...</h2>
+        <h2>{t('vault.deriving')}</h2>
 
         <!-- Progress Info -->
         <div class="progress-info">
@@ -1033,41 +1044,36 @@
     margin-bottom: 40px;
   }
 
-  .logo {
+  .header-top {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 12px;
-    margin-bottom: 8px;
+    gap: 20px;
   }
 
-  .logo-icon {
-    font-size: 48px;
-    filter: drop-shadow(0 0 20px rgba(147, 51, 234, 0.5));
+  .spacer, .lang-switcher-wrapper {
+    flex: 0 0 100px;
   }
 
-  .logo h1 {
-    font-size: 42px;
-    font-weight: 700;
-    background: linear-gradient(135deg, #a855f7 0%, #06b6d4 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin: 0;
+  .lang-switcher-wrapper {
+    display: flex;
+    justify-content: flex-end;
   }
 
-  .version {
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.4);
-    background: rgba(255, 255, 255, 0.1);
-    padding: 2px 8px;
-    border-radius: 12px;
+  .wordmark {
+    font-size: 56px;
+    font-weight: 200;
+    letter-spacing: -0.02em;
+    color: rgba(255, 255, 255, 0.95);
+    margin: 0 0 8px 0;
   }
 
   .tagline {
-    color: rgba(255, 255, 255, 0.6);
-    font-size: 16px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 17px;
+    font-weight: 400;
     margin: 0;
+    letter-spacing: -0.01em;
   }
 
   .main-content {
@@ -1136,84 +1142,74 @@
 
   /* Input Groups */
   .input-group {
-    margin-bottom: 24px;
+    margin-bottom: 28px;
   }
 
   .input-group label {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-
-  .label-text {
-    font-size: 15px;
-    font-weight: 600;
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
     color: rgba(255, 255, 255, 0.9);
+    margin-bottom: 4px;
+    letter-spacing: 0.01em;
   }
 
-  .label-hint {
+  .input-hint {
+    display: block;
     font-size: 13px;
     color: rgba(255, 255, 255, 0.4);
+    margin-bottom: 10px;
   }
 
-  .input-group input[type="text"],
-  .input-group input[type="password"] {
+  .input-wrapper {
+    position: relative;
+  }
+
+  .input-wrapper input {
     width: 100%;
     padding: 14px 16px;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 12px;
     font-size: 16px;
     color: white;
     transition: all 0.2s;
+    box-sizing: border-box;
   }
 
-  .input-group input:focus {
+  .input-wrapper input:focus {
     outline: none;
-    border-color: rgba(147, 51, 234, 0.5);
-    box-shadow: 0 0 0 3px rgba(147, 51, 234, 0.2);
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(0, 0, 0, 0.5);
   }
 
-  .input-group input.valid {
-    border-color: rgba(34, 197, 94, 0.5);
+  .input-wrapper input::placeholder {
+    color: rgba(255, 255, 255, 0.25);
   }
 
-  .input-group input::placeholder {
-    color: rgba(255, 255, 255, 0.3);
-  }
-
-  .validation-hint {
-    font-size: 12px;
-    color: #ef4444;
-    margin-top: 4px;
-  }
-
-  /* Password Input */
-  .password-input-wrapper {
-    position: relative;
-    display: flex;
-  }
-
-  .password-input-wrapper input {
-    padding-right: 48px;
-  }
-
-  .toggle-visibility {
+  /* Password toggle */
+  .input-wrapper .toggle-visibility {
     position: absolute;
-    right: 12px;
+    right: 14px;
     top: 50%;
     transform: translateY(-50%);
     background: none;
     border: none;
-    font-size: 18px;
+    padding: 4px;
     cursor: pointer;
-    opacity: 0.6;
-    transition: opacity 0.2s;
+    color: rgba(255, 255, 255, 0.4);
+    transition: color 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
 
-  .toggle-visibility:hover {
-    opacity: 1;
+  .input-wrapper .toggle-visibility:hover {
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .input-wrapper:has(.toggle-visibility) input {
+    padding-right: 48px;
   }
 
   /* Strength Meter */
@@ -1270,110 +1266,73 @@
   }
 
   .factor-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-top: 12px;
   }
 
-  .factor-badge {
-    display: inline-block;
-    padding: 6px 12px;
-    border-radius: 20px;
+  .factor-level {
     font-size: 14px;
-    font-weight: 600;
-    background: rgba(255, 255, 255, 0.1);
+    font-weight: 500;
     color: rgba(255, 255, 255, 0.9);
-    margin-bottom: 8px;
-  }
-
-  .factor-badge.demo {
-    background: rgba(239, 68, 68, 0.2);
-    color: #f87171;
-  }
-
-  .factor-badge.balanced {
-    background: rgba(34, 197, 94, 0.2);
-    color: #4ade80;
-  }
-
-  .factor-badge.paranoid {
-    background: rgba(147, 51, 234, 0.2);
-    color: #a78bfa;
   }
 
   .factor-stats {
-    display: flex;
-    gap: 16px;
     font-size: 13px;
-    color: rgba(255, 255, 255, 0.6);
-  }
-
-  .factor-stats strong {
-    color: rgba(255, 255, 255, 0.9);
+    color: rgba(255, 255, 255, 0.5);
   }
 
   /* Warning Box */
   .warning-box {
-    display: flex;
-    gap: 12px;
-    background: rgba(234, 179, 8, 0.1);
-    border: 1px solid rgba(234, 179, 8, 0.3);
+    background: rgba(255, 255, 255, 0.03);
     border-radius: 12px;
     padding: 16px;
-    margin-bottom: 24px;
-  }
-
-  .warning-icon {
-    font-size: 24px;
-    flex-shrink: 0;
+    margin-bottom: 28px;
   }
 
   .warning-box p {
     margin: 0;
     font-size: 14px;
-    color: rgba(255, 255, 255, 0.8);
+    color: rgba(255, 255, 255, 0.6);
     line-height: 1.5;
+  }
+
+  .warning-box strong {
+    color: rgba(255, 255, 255, 0.9);
   }
 
   /* Derive Button */
   .derive-btn {
     width: 100%;
     padding: 16px;
-    background: linear-gradient(135deg, #7c3aed 0%, #06b6d4 100%);
+    background: rgba(255, 255, 255, 0.9);
     border: none;
-    border-radius: 16px;
-    font-size: 18px;
-    font-weight: 600;
-    color: white;
+    border-radius: 12px;
+    font-size: 17px;
+    font-weight: 500;
+    color: #000;
     cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    transition: all 0.3s;
-    box-shadow: 0 4px 20px rgba(124, 58, 237, 0.3);
+    transition: all 0.2s;
   }
 
   .derive-btn:hover:not(:disabled) {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 30px rgba(124, 58, 237, 0.4);
+    background: rgba(255, 255, 255, 1);
   }
 
   .derive-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.3;
     cursor: not-allowed;
   }
 
   .derive-btn.secondary {
     background: rgba(255, 255, 255, 0.1);
-    box-shadow: none;
+    color: rgba(255, 255, 255, 0.9);
     margin-top: 24px;
   }
 
-  .derive-btn.secondary:hover {
+  .derive-btn.secondary:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.15);
-  }
-
-  .btn-icon {
-    font-size: 22px;
   }
 
   /* Deriving Phase */
@@ -1427,6 +1386,28 @@
     margin-bottom: 24px;
     max-height: 200px;
     overflow-y: auto;
+
+    /* Custom scrollbar - thin, translucent, matches theme */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(139, 92, 246, 0.5) transparent;
+  }
+
+  .shard-grid::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .shard-grid::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+  }
+
+  .shard-grid::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(139, 92, 246, 0.6) 0%, rgba(236, 72, 153, 0.6) 100%);
+    border-radius: 3px;
+  }
+
+  .shard-grid::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, rgba(139, 92, 246, 0.8) 0%, rgba(236, 72, 153, 0.8) 100%);
   }
 
   .shard-cube {

@@ -1,0 +1,51 @@
+{
+  "vault": {
+    "title": "kasa",
+    "tagline": "Bellek yoğun anahtar türetme. Beynin yedek.",
+    "name": {
+      "label": "İsim",
+      "hint": "Genel tanımlayıcı (e-posta, kullanıcı adı, vb.)",
+      "placeholder": "satoshi@bitcoin.org"
+    },
+    "password": {
+      "label": "Şifre",
+      "hint": "Akılda kalıcı yap, güçlü yap",
+      "placeholder": "gizli ifaden"
+    },
+    "factor": {
+      "label": "Güvenlik Faktörü",
+      "memory": "Bellek",
+      "time": "Süre",
+      "threads": "İş Parçacığı"
+    },
+    "shards": {
+      "title": "Türetme Parçaları",
+      "empty": "Türetmeyi başlatmak için kimlik bilgilerini girin"
+    },
+    "derive": "Cüzdan Türet",
+    "deriving": "Türetiliyor...",
+    "warning": "Bu önemli hesaplama kaynakları kullanır. Yüksek faktör = daha fazla güvenlik ama daha uzun türetme süresi.",
+    "result": {
+      "title": "Türetilmiş Cüzdan",
+      "address": "Adres",
+      "privateKey": "Özel Anahtar",
+      "copy": "Kopyala",
+      "copied": "Kopyalandı!"
+    }
+  },
+  "common": {
+    "loading": "Yükleniyor...",
+    "error": "Hata",
+    "success": "Başarılı",
+    "cancel": "İptal",
+    "confirm": "Onayla",
+    "save": "Kaydet",
+    "close": "Kapat"
+  },
+  "nav": {
+    "home": "Ana Sayfa",
+    "vault": "Kasa",
+    "network": "Ağ",
+    "settings": "Ayarlar"
+  }
+}
