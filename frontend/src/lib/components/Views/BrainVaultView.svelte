@@ -1,590 +1,1765 @@
 <script lang="ts">
-  const wordList = ["abandon", "ability", "able", "about", "above", "absent", "absorb", "abstract", "absurd", "abuse", "access", "accident", "account", "accuse", "achieve", "acid", "acoustic", "acquire", "across", "act", "action", "actor", "actress", "actual", "adapt", "add", "addict", "address", "adjust", "admit", "adult", "advance", "advice", "aerobic", "affair", "afford", "afraid", "again", "age", "agent", "agree", "ahead", "aim", "air", "airport", "aisle", "alarm", "album", "alcohol", "alert", "alien", "all", "alley", "allow", "almost", "alone", "alpha", "already", "also", "alter", "always", "amateur", "amazing", "among", "amount", "amused", "analyst", "anchor", "ancient", "anger", "angle", "angry", "animal", "ankle", "announce", "annual", "another", "answer", "antenna", "antique", "anxiety", "any", "apart", "apology", "appear", "apple", "approve", "april", "arch", "arctic"];
+  import { onMount, onDestroy } from 'svelte';
+  import { HDNodeWallet } from 'ethers';
 
-  const tips = [
-    "Channels allow for instant, fee-less transactions off-chain.",
-    "Brainwallets use your username as a public salt, enhancing security.",
-    "Higher derivation complexity protects against brute-force attacks.",
-    "State channels can handle complex logic beyond simple transfers.",
-    "Your username in a brainwallet is public, but your password should remain secret.",
-    "Channels can be closed cooperatively or through on-chain dispute resolution.",
-    "Brainwallets eliminate the need to store a recovery phrase.",
-    "State channels can interact with smart contracts off-chain.",
-    "The derivation process in brainwallets can be adjusted for better security.",
-    "Channels can be used for microtransactions without incurring blockchain fees.",
-    "Brainwallets combine something you know (password) with something public (username).",
-    "State channels can be used for non-financial applications like gaming.",
-    "The security of a brainwallet depends on the strength of your password and derivation complexity.",
-    "Channels can be part of a network, enabling multi-hop payments.",
-    "Brainwallets can be accessed from any device without needing to sync blockchain data.",
-    "State channels can significantly increase blockchain scalability.",
-    "The username in a brainwallet helps prevent rainbow table attacks.",
-    "Channels can have multiple participants, not just two.",
-    "Brainwallets can be a good option for cold storage when used with high security settings.",
-    "State channels can reduce congestion on the main blockchain."
+  // ============================================================================
+  // CRYPTO WORKER HELPER
+  // We use a dedicated worker for all BLAKE3 operations since hash-wasm
+  // doesn't work well in the main thread (Buffer polyfill issues)
+  // ============================================================================
+
+  let cryptoWorker: Worker | null = null;
+  let cryptoWorkerId = 0;
+  const cryptoCallbacks = new Map<number, { resolve: (data: any) => void; reject: (err: Error) => void }>();
+
+  async function initCryptoWorker(): Promise<void> {
+    if (cryptoWorker) return;
+
+    cryptoWorker = new Worker('/brainvault-worker.js', { type: 'module' });
+
+    cryptoWorker.onmessage = (e) => {
+      const { type, id, data } = e.data;
+      const callback = cryptoCallbacks.get(id);
+      if (!callback) return;
+
+      if (type === 'error') {
+        callback.reject(new Error(data.message));
+      } else {
+        callback.resolve(data);
+      }
+      cryptoCallbacks.delete(id);
+    };
+
+    // Wait for worker to be ready
+    return new Promise((resolve, reject) => {
+      const id = ++cryptoWorkerId;
+      const timeout = setTimeout(() => reject(new Error('Crypto worker init timeout')), 10000);
+      cryptoCallbacks.set(id, {
+        resolve: () => { clearTimeout(timeout); resolve(); },
+        reject: (err) => { clearTimeout(timeout); reject(err); }
+      });
+      cryptoWorker!.postMessage({ type: 'init', id });
+    });
+  }
+
+  async function workerBlake3(inputHex: string): Promise<string> {
+    await initCryptoWorker();
+    return new Promise((resolve, reject) => {
+      const id = ++cryptoWorkerId;
+      cryptoCallbacks.set(id, { resolve: (d) => resolve(d.resultHex), reject });
+      cryptoWorker!.postMessage({ type: 'blake3', id, data: { inputHex } });
+    });
+  }
+
+  async function workerHashName(name: string): Promise<string> {
+    await initCryptoWorker();
+    return new Promise((resolve, reject) => {
+      const id = ++cryptoWorkerId;
+      cryptoCallbacks.set(id, { resolve: (d) => resolve(d.nameHashHex), reject });
+      cryptoWorker!.postMessage({ type: 'hash_name', id, data: { name } });
+    });
+  }
+
+  // ============================================================================
+  // CONSTANTS
+  // ============================================================================
+
+  const BRAINVAULT_V2 = {
+    ALG_ID: 'brainvault/argon2id-sharded/v2.0',
+    SHARD_MEMORY_KB: 256 * 1024,
+    MIN_NAME_LENGTH: 4,
+    MIN_PASSPHRASE_LENGTH: 6,
+    MIN_FACTOR: 1,
+    MAX_FACTOR: 9,
+  };
+
+  const FACTOR_INFO = [
+    { factor: 1, shards: 1, memory: '256MB', time: '~3s', description: 'Demo only' },
+    { factor: 2, shards: 4, memory: '1GB', time: '~12s', description: 'Quick test' },
+    { factor: 3, shards: 16, memory: '4GB', time: '~50s', description: 'Light use' },
+    { factor: 4, shards: 64, memory: '16GB', time: '~3min', description: 'Daily wallet' },
+    { factor: 5, shards: 256, memory: '64GB', time: '~13min', description: 'Balanced' },
+    { factor: 6, shards: 1024, memory: '256GB', time: '~50min', description: 'Secure' },
+    { factor: 7, shards: 4096, memory: '1TB', time: '~3.5hr', description: 'Very secure' },
+    { factor: 8, shards: 16384, memory: '4TB', time: '~14hr', description: 'Paranoid' },
+    { factor: 9, shards: 65536, memory: '16TB', time: '~55hr', description: 'Ultra paranoid' },
   ];
 
-  const times = ['5 seconds', '10 seconds', '30 seconds', '1 minute', '2 minutes', '5 minutes', '10 minutes', '20 minutes', '40 minutes', '1 hour'];
-  const colors = ['#ff0000', '#ff5e00', '#ff9a00', '#ffd000', '#dbff00', '#84ff00', '#30ff00', '#00ff33', '#00ff84', '#00ffd5'];
+  const FAQ_ITEMS = [
+    {
+      q: 'What is BrainVault?',
+      a: 'BrainVault generates a cryptocurrency wallet from something you can remember: a name (public) and passphrase (secret). No need to write down 24 random words - your brain IS the backup.'
+    },
+    {
+      q: 'How is this different from old "brainwallets"?',
+      a: 'Old brainwallets used fast hashing (MD5/SHA256) and were cracked instantly. BrainVault uses Argon2id - a memory-hard algorithm that requires gigabytes of RAM per attempt, making brute-force attacks impractical.'
+    },
+    {
+      q: 'What does "sharded" mean?',
+      a: 'Instead of one giant computation, we split it into many 256MB shards. Your phone computes them sequentially; a powerful computer computes them in parallel. Same wallet, different speeds.'
+    },
+    {
+      q: 'What is the "factor"?',
+      a: 'Factor determines security level. Each factor quadruples the work needed. Factor 5 (~64GB equivalent) is good for most users. Factor 9 (~16TB equivalent) would take attackers millions of years.'
+    },
+    {
+      q: 'Can I recover my wallet anywhere?',
+      a: 'Yes! Same name + passphrase + factor = same wallet on any device, anywhere, forever. No seed phrase backup needed. But remember: if you forget your inputs, your funds are GONE.'
+    },
+    {
+      q: 'What about the 24-word mnemonic?',
+      a: 'BrainVault generates a standard BIP39 mnemonic for compatibility. You can import it into MetaMask, Ledger, or any wallet. The mnemonic IS your wallet - treat it as sensitive as a password.'
+    },
+    {
+      q: 'What is the device passphrase?',
+      a: 'An additional layer for hardware wallets. On Ledger/Trezor, set it as a "hidden wallet" passphrase. The mnemonic alone opens a decoy wallet; add the passphrase for your real wallet.'
+    },
+    {
+      q: 'How strong should my passphrase be?',
+      a: 'At least 6 characters minimum, but longer is better. A memorable sentence works great: "My cat Felix was born in 2019!" is far stronger than "P@ssw0rd123".'
+    },
+    {
+      q: 'What if I forget my name/passphrase/factor?',
+      a: 'Your funds are permanently lost. There is no recovery. This is the tradeoff for not needing a backup. Consider storing a hint somewhere safe, but NEVER the actual passphrase.'
+    },
+    {
+      q: 'Can I use this as a password manager?',
+      a: 'Yes! Once derived, enter any domain to generate a unique strong password for that site. The passwords are deterministically derived from your master key.'
+    },
+  ];
 
-  let activeTab: 'brainwallet' | 'mnemonic' = 'brainwallet';
-  let username = '';
-  let password = '';
-  let mnemonicInput = '';
-  let complexity = 5;
-  let generating = false;
-  let progressFill = 0;
-  let matrixText = '';
-  let tipText = '';
-  let wallets: Array<{ address: string; type: string }> = [];
+  // ============================================================================
+  // STATE
+  // ============================================================================
 
-  $: complexityValue = complexity;
-  $: timeEstimate = times[complexity - 1];
-  $: sliderGradient = `linear-gradient(to right, ${colors[0]} 0%, ${colors[complexity - 1]} 100%)`;
+  type Phase = 'input' | 'deriving' | 'complete';
 
-  function switchTab(tab: 'brainwallet' | 'mnemonic') {
-    activeTab = tab;
+  let phase: Phase = 'input';
+
+  // Input state
+  let name = '';
+  let passphrase = '';
+  let showPassphrase = false;
+  let factor = 5;
+
+  // Derivation state
+  let workers: Worker[] = [];
+  let workerCount = 1;
+  let shardCount = 0;
+  let shardsCompleted = 0;
+  let shardResults: Map<number, string> = new Map();
+  let shardStatus: ('pending' | 'computing' | 'complete')[] = [];
+  let estimatedShardTimeMs = 3000;
+  let startTime = 0;
+  let elapsedMs = 0;
+  let elapsedInterval: ReturnType<typeof setInterval> | null = null;
+
+  // Resume state
+  let resumeToken = '';
+  let showResumeInput = false;
+
+  // Result state
+  let mnemonic24 = '';
+  let mnemonic12 = '';
+  let devicePassphrase = '';
+  let ethereumAddress = '';
+  let masterKeyHex = '';
+  let showMnemonic = false;
+  let showDevicePassphrase = false;
+  let copiedField: string | null = null;
+
+  // Password manager state
+  let siteDomain = '';
+  let sitePassword = '';
+  let showSitePassword = false;
+
+  // FAQ state
+  let expandedFaq: number | null = null;
+
+  // ============================================================================
+  // COMPUTED
+  // ============================================================================
+
+  $: passwordStrength = estimatePasswordStrength(passphrase);
+  $: factorInfo = FACTOR_INFO[factor - 1]!;
+  $: canDerive = name.length >= BRAINVAULT_V2.MIN_NAME_LENGTH &&
+                 passphrase.length >= BRAINVAULT_V2.MIN_PASSPHRASE_LENGTH;
+  $: progress = shardCount > 0 ? (shardsCompleted / shardCount) * 100 : 0;
+  $: remainingMs = shardCount > 0
+    ? Math.max(0, ((shardCount - shardsCompleted) / Math.max(workerCount, 1)) * estimatedShardTimeMs)
+    : 0;
+
+  // Shard grid dimensions (for visualization)
+  $: gridCols = Math.ceil(Math.sqrt(shardCount));
+  $: gridRows = Math.ceil(shardCount / gridCols);
+
+  // ============================================================================
+  // UTILITY FUNCTIONS
+  // ============================================================================
+
+  // Native SHA256 using Web Crypto API (browser built-in)
+  async function sha256(data: Uint8Array): Promise<string> {
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = new Uint8Array(hashBuffer);
+    return bytesToHex(hashArray);
   }
 
-  function generateMnemonic() {
-    const mnemonic = Array(16).fill(0).map(() => wordList[Math.floor(Math.random() * wordList.length)]).join(' ');
-    mnemonicInput = mnemonic;
+  function hexToBytes(hex: string): Uint8Array {
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    }
+    return bytes;
   }
 
-  function generateMatrixAnimation(): string {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%^&*()_+-=[]{}|;:,.<>?';
-    const width = 60;
-    const height = 5;
-    return Array(height).fill(0).map(() =>
-      Array(width).fill(0).map(() => Math.random() > 0.7 ? chars[Math.floor(Math.random() * chars.length)] : ' ').join('')
-    ).join('\n');
+  function bytesToHex(bytes: Uint8Array): string {
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
-  async function generateWallet() {
-    if (activeTab === 'mnemonic') {
-      if (!mnemonicInput.trim()) {
-        alert('Please enter a mnemonic');
+  function estimatePasswordStrength(pw: string): { bits: number; rating: string; color: string } {
+    if (!pw) return { bits: 0, rating: 'none', color: '#666' };
+
+    const charsets = {
+      lowercase: /[a-z]/.test(pw) ? 26 : 0,
+      uppercase: /[A-Z]/.test(pw) ? 26 : 0,
+      digits: /\d/.test(pw) ? 10 : 0,
+      special: /[^a-zA-Z0-9]/.test(pw) ? 33 : 0,
+    };
+
+    const poolSize = Object.values(charsets).reduce((a, b) => a + b, 0);
+    const bits = poolSize > 0 ? Math.log2(poolSize) * pw.length : 0;
+
+    if (bits < 40) return { bits: Math.round(bits), rating: 'weak', color: '#ef4444' };
+    if (bits < 60) return { bits: Math.round(bits), rating: 'fair', color: '#f59e0b' };
+    if (bits < 80) return { bits: Math.round(bits), rating: 'good', color: '#84cc16' };
+    if (bits < 100) return { bits: Math.round(bits), rating: 'strong', color: '#22c55e' };
+    return { bits: Math.round(bits), rating: 'excellent', color: '#06b6d4' };
+  }
+
+  function formatDuration(ms: number): string {
+    if (ms < 1000) return `${Math.round(ms)}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    if (ms < 3600000) {
+      const mins = Math.floor(ms / 60000);
+      const secs = Math.round((ms % 60000) / 1000);
+      return `${mins}m ${secs}s`;
+    }
+    const hours = Math.floor(ms / 3600000);
+    const mins = Math.round((ms % 3600000) / 60000);
+    return `${hours}h ${mins}m`;
+  }
+
+  function getShardCount(f: number): number {
+    return Math.pow(4, f - 1);
+  }
+
+  async function copyToClipboard(text: string, field: string) {
+    await navigator.clipboard.writeText(text);
+    copiedField = field;
+    setTimeout(() => copiedField = null, 2000);
+  }
+
+  // ============================================================================
+  // DERIVATION LOGIC
+  // ============================================================================
+
+  async function startDerivation() {
+    phase = 'deriving';
+    shardCount = getShardCount(factor);
+    shardsCompleted = 0;
+    shardResults = new Map();
+    shardStatus = Array(shardCount).fill('pending');
+    startTime = Date.now();
+    elapsedMs = 0;
+
+    // Start elapsed timer
+    elapsedInterval = setInterval(() => {
+      elapsedMs = Date.now() - startTime;
+    }, 100);
+
+    // Create workers
+    workerCount = Math.min(
+      navigator.hardwareConcurrency || 4,
+      shardCount,
+      8 // Cap at 8 workers to avoid memory issues
+    );
+
+    // Hash the name first using the worker
+    const nameHashHex = await workerHashName(name);
+
+    // Create workers
+    workers = [];
+    const workerPromises: Promise<void>[] = [];
+
+    for (let i = 0; i < workerCount; i++) {
+      const worker = new Worker('/brainvault-worker.js', { type: 'module' });
+      workers.push(worker);
+
+      const initPromise = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Worker init timeout')), 30000);
+
+        worker.onmessage = (e) => {
+          const { type, data } = e.data;
+
+          if (type === 'ready') {
+            clearTimeout(timeout);
+            resolve();
+          } else if (type === 'probe_result') {
+            estimatedShardTimeMs = data.estimatedShardTimeMs;
+          } else if (type === 'shard_complete') {
+            handleShardComplete(data.shardIndex, data.resultHex, data.elapsedMs);
+          } else if (type === 'error') {
+            console.error('Worker error:', data.message);
+          }
+        };
+
+        worker.onerror = (e) => {
+          clearTimeout(timeout);
+          reject(e);
+        };
+      });
+
+      worker.postMessage({ type: 'init', id: i });
+      workerPromises.push(initPromise);
+    }
+
+    try {
+      await Promise.all(workerPromises);
+
+      // Probe first worker for time estimate
+      workers[0]?.postMessage({ type: 'probe', id: 0 });
+
+      // Wait a bit for probe result
+      await new Promise(r => setTimeout(r, 500));
+
+      // Dispatch initial shards
+      dispatchShards(nameHashHex);
+    } catch (err) {
+      console.error('Failed to initialize workers:', err);
+      terminateWorkers();
+      phase = 'input';
+    }
+  }
+
+  let nameHashHexGlobal = '';
+  let nextShardToDispatch = 0;
+
+  function dispatchShards(nameHashHex: string) {
+    nameHashHexGlobal = nameHashHex;
+    nextShardToDispatch = 0;
+
+    // Dispatch one shard to each worker
+    for (let i = 0; i < workers.length && nextShardToDispatch < shardCount; i++) {
+      dispatchNextShard(workers[i]!);
+    }
+  }
+
+  function dispatchNextShard(worker: Worker) {
+    if (nextShardToDispatch >= shardCount) return;
+
+    const shardIndex = nextShardToDispatch++;
+    shardStatus[shardIndex] = 'computing';
+    shardStatus = shardStatus; // Trigger reactivity
+
+    worker.postMessage({
+      type: 'derive_shard',
+      id: shardIndex,
+      data: {
+        nameHashHex: nameHashHexGlobal,
+        passphrase,
+        shardIndex,
+      }
+    });
+  }
+
+  async function handleShardComplete(shardIndex: number, resultHex: string, elapsedMs: number) {
+    shardResults.set(shardIndex, resultHex);
+    shardStatus[shardIndex] = 'complete';
+    shardStatus = shardStatus;
+    shardsCompleted++;
+
+    // Update time estimate (exponential moving average)
+    estimatedShardTimeMs = estimatedShardTimeMs * 0.7 + elapsedMs * 0.3;
+
+    // Save resume token to localStorage
+    saveResumeToken();
+
+    // Find the worker that completed this shard and give it more work
+    const workerIndex = workers.findIndex(w => w !== null);
+    if (workerIndex >= 0 && nextShardToDispatch < shardCount) {
+      dispatchNextShard(workers[workerIndex]!);
+    }
+
+    // Check if all done
+    if (shardsCompleted >= shardCount) {
+      await finalizeDeriv();
+    }
+  }
+
+  async function finalizeDeriv() {
+    if (elapsedInterval) {
+      clearInterval(elapsedInterval);
+      elapsedInterval = null;
+    }
+    elapsedMs = Date.now() - startTime;
+
+    terminateWorkers();
+
+    // Collect results in order
+    const orderedResults: Uint8Array[] = [];
+    for (let i = 0; i < shardCount; i++) {
+      const hex = shardResults.get(i);
+      if (!hex) throw new Error(`Missing shard ${i}`);
+      orderedResults.push(hexToBytes(hex));
+    }
+
+    // Combine with BLAKE3
+    const totalLength = orderedResults.reduce((sum, s) => sum + s.length, 0);
+    const combined = new Uint8Array(totalLength + 1);
+    let offset = 0;
+    for (const shard of orderedResults) {
+      combined.set(shard, offset);
+      offset += shard.length;
+    }
+    combined[totalLength] = factor; // Add factor to prevent collisions
+
+    masterKeyHex = await workerBlake3(bytesToHex(combined));
+
+    // Derive BIP39 entropy
+    const masterKey = hexToBytes(masterKeyHex);
+    const entropyInput = new Uint8Array(masterKey.length + 20);
+    entropyInput.set(masterKey, 0);
+    entropyInput.set(new TextEncoder().encode('bip39/entropy/v2.0'), masterKey.length);
+    const entropyHex = await workerBlake3(bytesToHex(entropyInput));
+    const entropy = hexToBytes(entropyHex);
+
+    // Generate mnemonic
+    mnemonic24 = await entropyToMnemonic(entropy);
+    mnemonic12 = mnemonic24.split(' ').slice(0, 12).join(' ');
+
+    // Derive device passphrase
+    const passInput = new Uint8Array(masterKey.length + 24);
+    passInput.set(masterKey, 0);
+    passInput.set(new TextEncoder().encode('bip39/passphrase/v2.0'), masterKey.length);
+    devicePassphrase = await workerBlake3(bytesToHex(passInput));
+
+    // Derive Ethereum address using ethers directly
+    // We use the mnemonic without device passphrase for MetaMask compatibility
+    // The device passphrase is only for hardware wallet hidden wallets
+    // HDNodeWallet.fromPhrase creates a wallet at the Ethereum default path m/44'/60'/0'/0/0
+    const wallet = HDNodeWallet.fromPhrase(mnemonic24);
+    ethereumAddress = wallet.address;
+
+    // Clear localStorage resume token
+    localStorage.removeItem('brainvault_resume');
+
+    phase = 'complete';
+  }
+
+  function terminateWorkers() {
+    for (const worker of workers) {
+      worker?.terminate();
+    }
+    workers = [];
+  }
+
+  function saveResumeToken() {
+    const token = {
+      version: 'bv2',
+      nameHash: nameHashHexGlobal,
+      factor,
+      completedShards: Array.from(shardResults.keys()).sort((a, b) => a - b),
+      shardResults: Object.fromEntries(
+        Array.from(shardResults.entries()).map(([k, v]) => [k.toString(), v])
+      ),
+      name, // Needed for UI
+    };
+    localStorage.setItem('brainvault_resume', JSON.stringify(token));
+    resumeToken = btoa(JSON.stringify(token));
+  }
+
+  async function loadResumeToken() {
+    const saved = localStorage.getItem('brainvault_resume');
+    if (!saved) {
+      alert('No resume token found');
+      return;
+    }
+
+    try {
+      const token = JSON.parse(saved);
+      if (token.version !== 'bv2') {
+        alert('Invalid resume token version');
         return;
       }
 
-      const address = '0x' + Array(40).fill(0).map(() => Math.floor(Math.random() * 16).toString(16)).join('');
-      wallets = [...wallets, { address, type: 'mnemonic' }];
-      mnemonicInput = '';
-    } else {
-      if (!username.trim() || !password.trim()) {
-        alert('Please enter username and password');
+      // Restore state
+      name = token.name || '';
+      factor = token.factor;
+      shardCount = getShardCount(factor);
+      shardResults = new Map(Object.entries(token.shardResults).map(([k, v]) => [parseInt(k), v as string]));
+      shardsCompleted = shardResults.size;
+      shardStatus = Array(shardCount).fill('pending');
+      for (const idx of shardResults.keys()) {
+        shardStatus[idx] = 'complete';
+      }
+      nameHashHexGlobal = token.nameHash;
+
+      showResumeInput = false;
+
+      // Need passphrase to continue
+      if (!passphrase) {
+        alert('Enter your passphrase to continue');
         return;
       }
 
-      const totalSteps = complexity * 20;
-      let currentStep = 0;
+      // Continue derivation
+      phase = 'deriving';
+      startTime = Date.now();
+      elapsedMs = 0;
 
-      generating = true;
-      progressFill = 0;
+      elapsedInterval = setInterval(() => {
+        elapsedMs = Date.now() - startTime;
+      }, 100);
 
-      // Start tip rotation
-      tipText = tips[Math.floor(Math.random() * tips.length)] || '';
-      const tipInterval = setInterval(() => {
-        tipText = tips[Math.floor(Math.random() * tips.length)] || '';
-      }, 3000);
+      // Create workers
+      workerCount = Math.min(
+        navigator.hardwareConcurrency || 4,
+        shardCount - shardsCompleted,
+        8
+      );
 
-      // Start matrix animation
-      const matrixInterval = setInterval(() => {
-        matrixText = generateMatrixAnimation();
-      }, 200);
+      workers = [];
+      const workerPromises: Promise<void>[] = [];
 
-      const generationInterval = setInterval(() => {
-        currentStep++;
-        progressFill = (currentStep / totalSteps) * 100;
+      for (let i = 0; i < workerCount; i++) {
+        const worker = new Worker('/brainvault-worker.js', { type: 'module' });
+        workers.push(worker);
 
-        if (currentStep >= totalSteps) {
-          clearInterval(generationInterval);
-          clearInterval(tipInterval);
-          clearInterval(matrixInterval);
+        const initPromise = new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new Error('Worker init timeout')), 30000);
 
-          const address = '0x' + Array(40).fill(0).map(() => Math.floor(Math.random() * 16).toString(16)).join('');
-          wallets = [...wallets, { address, type: 'brainwallet' }];
+          worker.onmessage = (e) => {
+            const { type, data } = e.data;
 
-          username = '';
-          password = '';
+            if (type === 'ready') {
+              clearTimeout(timeout);
+              resolve();
+            } else if (type === 'shard_complete') {
+              handleShardComplete(data.shardIndex, data.resultHex, data.elapsedMs);
+            } else if (type === 'error') {
+              console.error('Worker error:', data.message);
+            }
+          };
 
-          setTimeout(() => {
-            generating = false;
-          }, 500);
+          worker.onerror = (e) => {
+            clearTimeout(timeout);
+            reject(e);
+          };
+        });
+
+        worker.postMessage({ type: 'init', id: i });
+        workerPromises.push(initPromise);
+      }
+
+      await Promise.all(workerPromises);
+
+      // Find next shard to dispatch
+      nextShardToDispatch = 0;
+      while (nextShardToDispatch < shardCount && shardResults.has(nextShardToDispatch)) {
+        nextShardToDispatch++;
+      }
+
+      // Dispatch remaining shards
+      for (let i = 0; i < workers.length && nextShardToDispatch < shardCount; i++) {
+        // Find next incomplete shard
+        while (nextShardToDispatch < shardCount && shardResults.has(nextShardToDispatch)) {
+          nextShardToDispatch++;
         }
-      }, complexity === 1 ? 50 : 250);
+        if (nextShardToDispatch < shardCount) {
+          dispatchNextShard(workers[i]!);
+        }
+      }
+
+    } catch (err) {
+      console.error('Failed to load resume token:', err);
+      alert('Failed to load resume token');
     }
   }
 
-  function loginWallet(index: number) {
-    const wallet = wallets[index];
-    if (wallet) {
-      alert('Login functionality for wallet: ' + wallet.address);
+  async function entropyToMnemonic(entropy: Uint8Array): Promise<string> {
+    const wordlist = getBIP39Wordlist();
+
+    // Checksum
+    const checksumHash = await sha256(entropy);
+    const checksumBits = hexToBits(checksumHash).slice(0, entropy.length * 8 / 32);
+
+    const entropyBits = bytesToBits(entropy);
+    const allBits = entropyBits + checksumBits;
+
+    const words: string[] = [];
+    for (let i = 0; i < allBits.length; i += 11) {
+      const chunk = allBits.slice(i, i + 11);
+      const index = parseInt(chunk, 2);
+      words.push(wordlist[index]!);
     }
+
+    return words.join(' ');
+  }
+
+  function bytesToBits(bytes: Uint8Array): string {
+    return Array.from(bytes).map(b => b.toString(2).padStart(8, '0')).join('');
+  }
+
+  function hexToBits(hex: string): string {
+    return hex.split('').map(c => parseInt(c, 16).toString(2).padStart(4, '0')).join('');
+  }
+
+  // Password manager
+  async function deriveSitePassword() {
+    if (!siteDomain.trim() || !masterKeyHex) return;
+
+    const domain = siteDomain.trim().toLowerCase();
+    const masterKey = hexToBytes(masterKeyHex);
+    const input = new Uint8Array(masterKey.length + domain.length + 14);
+    input.set(masterKey, 0);
+    input.set(new TextEncoder().encode('site-password:'), masterKey.length);
+    input.set(new TextEncoder().encode(domain), masterKey.length + 14);
+
+    const rawHex = await workerBlake3(bytesToHex(input));
+    const raw = hexToBytes(rawHex);
+
+    const lowers = 'abcdefghijklmnopqrstuvwxyz';
+    const uppers = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const digits = '0123456789';
+    const specials = '!@#$%^&*()-_=+[]{}:,./?';
+    const all = lowers + uppers + digits + specials;
+
+    const passwordChars: string[] = [
+      lowers[raw[0]! % lowers.length]!,
+      uppers[raw[1]! % uppers.length]!,
+      digits[raw[2]! % digits.length]!,
+      specials[raw[3]! % specials.length]!,
+    ];
+
+    const length = 20;
+    for (let i = 4; i < length; i++) {
+      passwordChars.push(all[raw[i]! % all.length]!);
+    }
+
+    // Shuffle
+    for (let i = passwordChars.length - 1; i > 0; i--) {
+      const j = raw[length + i]! % (i + 1);
+      [passwordChars[i], passwordChars[j]] = [passwordChars[j]!, passwordChars[i]!];
+    }
+
+    sitePassword = passwordChars.join('');
+  }
+
+  function reset() {
+    phase = 'input';
+    terminateWorkers();
+    if (elapsedInterval) {
+      clearInterval(elapsedInterval);
+      elapsedInterval = null;
+    }
+    // Keep name and passphrase for convenience
+    mnemonic24 = '';
+    mnemonic12 = '';
+    devicePassphrase = '';
+    ethereumAddress = '';
+    masterKeyHex = '';
+    siteDomain = '';
+    sitePassword = '';
+    shardsCompleted = 0;
+    shardResults = new Map();
+    shardStatus = [];
+  }
+
+  onDestroy(() => {
+    terminateWorkers();
+    if (elapsedInterval) {
+      clearInterval(elapsedInterval);
+    }
+  });
+
+  // Check for saved resume on mount
+  onMount(() => {
+    const saved = localStorage.getItem('brainvault_resume');
+    if (saved) {
+      try {
+        const token = JSON.parse(saved);
+        if (token.completedShards?.length > 0) {
+          showResumeInput = true;
+          name = token.name || '';
+          factor = token.factor;
+        }
+      } catch {}
+    }
+  });
+
+  // BIP39 wordlist
+  function getBIP39Wordlist(): string[] {
+    return ["abandon","ability","able","about","above","absent","absorb","abstract","absurd","abuse","access","accident","account","accuse","achieve","acid","acoustic","acquire","across","act","action","actor","actress","actual","adapt","add","addict","address","adjust","admit","adult","advance","advice","aerobic","affair","afford","afraid","again","age","agent","agree","ahead","aim","air","airport","aisle","alarm","album","alcohol","alert","alien","all","alley","allow","almost","alone","alpha","already","also","alter","always","amateur","amazing","among","amount","amused","analyst","anchor","ancient","anger","angle","angry","animal","ankle","announce","annual","another","answer","antenna","antique","anxiety","any","apart","apology","appear","apple","approve","april","arch","arctic","area","arena","argue","arm","armed","armor","army","around","arrange","arrest","arrive","arrow","art","artefact","artist","artwork","ask","aspect","assault","asset","assist","assume","asthma","athlete","atom","attack","attend","attitude","attract","auction","audit","august","aunt","author","auto","autumn","average","avocado","avoid","awake","aware","away","awesome","awful","awkward","axis","baby","bachelor","bacon","badge","bag","balance","balcony","ball","bamboo","banana","banner","bar","barely","bargain","barrel","base","basic","basket","battle","beach","bean","beauty","because","become","beef","before","begin","behave","behind","believe","below","belt","bench","benefit","best","betray","better","between","beyond","bicycle","bid","bike","bind","biology","bird","birth","bitter","black","blade","blame","blanket","blast","bleak","bless","blind","blood","blossom","blouse","blue","blur","blush","board","boat","body","boil","bomb","bone","bonus","book","boost","border","boring","borrow","boss","bottom","bounce","box","boy","bracket","brain","brand","brass","brave","bread","breeze","brick","bridge","brief","bright","bring","brisk","broccoli","broken","bronze","broom","brother","brown","brush","bubble","buddy","budget","buffalo","build","bulb","bulk","bullet","bundle","bunker","burden","burger","burst","bus","business","busy","butter","buyer","buzz","cabbage","cabin","cable","cactus","cage","cake","call","calm","camera","camp","can","canal","cancel","candy","cannon","canoe","canvas","canyon","capable","capital","captain","car","carbon","card","cargo","carpet","carry","cart","case","cash","casino","castle","casual","cat","catalog","catch","category","cattle","caught","cause","caution","cave","ceiling","celery","cement","census","century","cereal","certain","chair","chalk","champion","change","chaos","chapter","charge","chase","chat","cheap","check","cheese","chef","cherry","chest","chicken","chief","child","chimney","choice","choose","chronic","chuckle","chunk","churn","cigar","cinnamon","circle","citizen","city","civil","claim","clap","clarify","claw","clay","clean","clerk","clever","click","client","cliff","climb","clinic","clip","clock","clog","close","cloth","cloud","clown","club","clump","cluster","clutch","coach","coast","coconut","code","coffee","coil","coin","collect","color","column","combine","come","comfort","comic","common","company","concert","conduct","confirm","congress","connect","consider","control","convince","cook","cool","copper","copy","coral","core","corn","correct","cost","cotton","couch","country","couple","course","cousin","cover","coyote","crack","cradle","craft","cram","crane","crash","crater","crawl","crazy","cream","credit","creek","crew","cricket","crime","crisp","critic","crop","cross","crouch","crowd","crucial","cruel","cruise","crumble","crunch","crush","cry","crystal","cube","culture","cup","cupboard","curious","current","curtain","curve","cushion","custom","cute","cycle","dad","damage","damp","dance","danger","daring","dash","daughter","dawn","day","deal","debate","debris","decade","december","decide","decline","decorate","decrease","deer","defense","define","defy","degree","delay","deliver","demand","demise","denial","dentist","deny","depart","depend","deposit","depth","deputy","derive","describe","desert","design","desk","despair","destroy","detail","detect","develop","device","devote","diagram","dial","diamond","diary","dice","diesel","diet","differ","digital","dignity","dilemma","dinner","dinosaur","direct","dirt","disagree","discover","disease","dish","dismiss","disorder","display","distance","divert","divide","divorce","dizzy","doctor","document","dog","doll","dolphin","domain","donate","donkey","donor","door","dose","double","dove","draft","dragon","drama","drastic","draw","dream","dress","drift","drill","drink","drip","drive","drop","drum","dry","duck","dumb","dune","during","dust","dutch","duty","dwarf","dynamic","eager","eagle","early","earn","earth","easily","east","easy","echo","ecology","economy","edge","edit","educate","effort","egg","eight","either","elbow","elder","electric","elegant","element","elephant","elevator","elite","else","embark","embody","embrace","emerge","emotion","employ","empower","empty","enable","enact","end","endless","endorse","enemy","energy","enforce","engage","engine","enhance","enjoy","enlist","enough","enrich","enroll","ensure","enter","entire","entry","envelope","episode","equal","equip","era","erase","erode","erosion","error","erupt","escape","essay","essence","estate","eternal","ethics","evidence","evil","evoke","evolve","exact","example","excess","exchange","excite","exclude","excuse","execute","exercise","exhaust","exhibit","exile","exist","exit","exotic","expand","expect","expire","explain","expose","express","extend","extra","eye","eyebrow","fabric","face","faculty","fade","faint","faith","fall","false","fame","family","famous","fan","fancy","fantasy","farm","fashion","fat","fatal","father","fatigue","fault","favorite","feature","february","federal","fee","feed","feel","female","fence","festival","fetch","fever","few","fiber","fiction","field","figure","file","film","filter","final","find","fine","finger","finish","fire","firm","first","fiscal","fish","fit","fitness","fix","flag","flame","flash","flat","flavor","flee","flight","flip","float","flock","floor","flower","fluid","flush","fly","foam","focus","fog","foil","fold","follow","food","foot","force","forest","forget","fork","fortune","forum","forward","fossil","foster","found","fox","fragile","frame","frequent","fresh","friend","fringe","frog","front","frost","frown","frozen","fruit","fuel","fun","funny","furnace","fury","future","gadget","gain","galaxy","gallery","game","gap","garage","garbage","garden","garlic","garment","gas","gasp","gate","gather","gauge","gaze","general","genius","genre","gentle","genuine","gesture","ghost","giant","gift","giggle","ginger","giraffe","girl","give","glad","glance","glare","glass","glide","glimpse","globe","gloom","glory","glove","glow","glue","goat","goddess","gold","good","goose","gorilla","gospel","gossip","govern","gown","grab","grace","grain","grant","grape","grass","gravity","great","green","grid","grief","grit","grocery","group","grow","grunt","guard","guess","guide","guilt","guitar","gun","gym","habit","hair","half","hammer","hamster","hand","happy","harbor","hard","harsh","harvest","hat","have","hawk","hazard","head","health","heart","heavy","hedgehog","height","hello","helmet","help","hen","hero","hidden","high","hill","hint","hip","hire","history","hobby","hockey","hold","hole","holiday","hollow","home","honey","hood","hope","horn","horror","horse","hospital","host","hotel","hour","hover","hub","huge","human","humble","humor","hundred","hungry","hunt","hurdle","hurry","hurt","husband","hybrid","ice","icon","idea","identify","idle","ignore","ill","illegal","illness","image","imitate","immense","immune","impact","impose","improve","impulse","inch","include","income","increase","index","indicate","indoor","industry","infant","inflict","inform","inhale","inherit","initial","inject","injury","inmate","inner","innocent","input","inquiry","insane","insect","inside","inspire","install","intact","interest","into","invest","invite","involve","iron","island","isolate","issue","item","ivory","jacket","jaguar","jar","jazz","jealous","jeans","jelly","jewel","job","join","joke","journey","joy","judge","juice","jump","jungle","junior","junk","just","kangaroo","keen","keep","ketchup","key","kick","kid","kidney","kind","kingdom","kiss","kit","kitchen","kite","kitten","kiwi","knee","knife","knock","know","lab","label","labor","ladder","lady","lake","lamp","language","laptop","large","later","latin","laugh","laundry","lava","law","lawn","lawsuit","layer","lazy","leader","leaf","learn","leave","lecture","left","leg","legal","legend","leisure","lemon","lend","length","lens","leopard","lesson","letter","level","liar","liberty","library","license","life","lift","light","like","limb","limit","link","lion","liquid","list","little","live","lizard","load","loan","lobster","local","lock","logic","lonely","long","loop","lottery","loud","lounge","love","loyal","lucky","luggage","lumber","lunar","lunch","luxury","lyrics","machine","mad","magic","magnet","maid","mail","main","major","make","mammal","man","manage","mandate","mango","mansion","manual","maple","marble","march","margin","marine","market","marriage","mask","mass","master","match","material","math","matrix","matter","maximum","maze","meadow","mean","measure","meat","mechanic","medal","media","melody","melt","member","memory","mention","menu","mercy","merge","merit","merry","mesh","message","metal","method","middle","midnight","milk","million","mimic","mind","minimum","minor","minute","miracle","mirror","misery","miss","mistake","mix","mixed","mixture","mobile","model","modify","mom","moment","monitor","monkey","monster","month","moon","moral","more","morning","mosquito","mother","motion","motor","mountain","mouse","move","movie","much","muffin","mule","multiply","muscle","museum","mushroom","music","must","mutual","myself","mystery","myth","naive","name","napkin","narrow","nasty","nation","nature","near","neck","need","negative","neglect","neither","nephew","nerve","nest","net","network","neutral","never","news","next","nice","night","noble","noise","nominee","noodle","normal","north","nose","notable","note","nothing","notice","novel","now","nuclear","number","nurse","nut","oak","obey","object","oblige","obscure","observe","obtain","obvious","occur","ocean","october","odor","off","offer","office","often","oil","okay","old","olive","olympic","omit","once","one","onion","online","only","open","opera","opinion","oppose","option","orange","orbit","orchard","order","ordinary","organ","orient","original","orphan","ostrich","other","outdoor","outer","output","outside","oval","oven","over","own","owner","oxygen","oyster","ozone","pact","paddle","page","pair","palace","palm","panda","panel","panic","panther","paper","parade","parent","park","parrot","party","pass","patch","path","patient","patrol","pattern","pause","pave","payment","peace","peanut","pear","peasant","pelican","pen","penalty","pencil","people","pepper","perfect","permit","person","pet","phone","photo","phrase","physical","piano","picnic","picture","piece","pig","pigeon","pill","pilot","pink","pioneer","pipe","pistol","pitch","pizza","place","planet","plastic","plate","play","please","pledge","pluck","plug","plunge","poem","poet","point","polar","pole","police","pond","pony","pool","popular","portion","position","possible","post","potato","pottery","poverty","powder","power","practice","praise","predict","prefer","prepare","present","pretty","prevent","price","pride","primary","print","priority","prison","private","prize","problem","process","produce","profit","program","project","promote","proof","property","prosper","protect","proud","provide","public","pudding","pull","pulp","pulse","pumpkin","punch","pupil","puppy","purchase","purity","purpose","purse","push","put","puzzle","pyramid","quality","quantum","quarter","question","quick","quit","quiz","quote","rabbit","raccoon","race","rack","radar","radio","rail","rain","raise","rally","ramp","ranch","random","range","rapid","rare","rate","rather","raven","raw","razor","ready","real","reason","rebel","rebuild","recall","receive","recipe","record","recycle","reduce","reflect","reform","refuse","region","regret","regular","reject","relax","release","relief","rely","remain","remember","remind","remove","render","renew","rent","reopen","repair","repeat","replace","report","require","rescue","resemble","resist","resource","response","result","retire","retreat","return","reunion","reveal","review","reward","rhythm","rib","ribbon","rice","rich","ride","ridge","rifle","right","rigid","ring","riot","ripple","risk","ritual","rival","river","road","roast","robot","robust","rocket","romance","roof","rookie","room","rose","rotate","rough","round","route","royal","rubber","rude","rug","rule","run","runway","rural","sad","saddle","sadness","safe","sail","salad","salmon","salon","salt","salute","same","sample","sand","satisfy","satoshi","sauce","sausage","save","say","scale","scan","scare","scatter","scene","scheme","school","science","scissors","scorpion","scout","scrap","screen","script","scrub","sea","search","season","seat","second","secret","section","security","seed","seek","segment","select","sell","seminar","senior","sense","sentence","series","service","session","settle","setup","seven","shadow","shaft","shallow","share","shed","shell","sheriff","shield","shift","shine","ship","shiver","shock","shoe","shoot","shop","short","shoulder","shove","shrimp","shrug","shuffle","shy","sibling","sick","side","siege","sight","sign","silent","silk","silly","silver","similar","simple","since","sing","siren","sister","situate","six","size","skate","sketch","ski","skill","skin","skirt","skull","slab","slam","sleep","slender","slice","slide","slight","slim","slogan","slot","slow","slush","small","smart","smile","smoke","smooth","snack","snake","snap","sniff","snow","soap","soccer","social","sock","soda","soft","solar","soldier","solid","solution","solve","someone","song","soon","sorry","sort","soul","sound","soup","source","south","space","spare","spatial","spawn","speak","special","speed","spell","spend","sphere","spice","spider","spike","spin","spirit","split","spoil","sponsor","spoon","sport","spot","spray","spread","spring","spy","square","squeeze","squirrel","stable","stadium","staff","stage","stairs","stamp","stand","start","state","stay","steak","steel","stem","step","stereo","stick","still","sting","stock","stomach","stone","stool","story","stove","strategy","street","strike","strong","struggle","student","stuff","stumble","style","subject","submit","subway","success","such","sudden","suffer","sugar","suggest","suit","summer","sun","sunny","sunset","super","supply","supreme","sure","surface","surge","surprise","surround","survey","suspect","sustain","swallow","swamp","swap","swarm","swear","sweet","swift","swim","swing","switch","sword","symbol","symptom","syrup","system","table","tackle","tag","tail","talent","talk","tank","tape","target","task","taste","tattoo","taxi","teach","team","tell","ten","tenant","tennis","tent","term","test","text","thank","that","theme","then","theory","there","they","thing","this","thought","three","thrive","throw","thumb","thunder","ticket","tide","tiger","tilt","timber","time","tiny","tip","tired","tissue","title","toast","tobacco","today","toddler","toe","together","toilet","token","tomato","tomorrow","tone","tongue","tonight","tool","tooth","top","topic","topple","torch","tornado","tortoise","toss","total","tourist","toward","tower","town","toy","track","trade","traffic","tragic","train","transfer","trap","trash","travel","tray","treat","tree","trend","trial","tribe","trick","trigger","trim","trip","trophy","trouble","truck","true","truly","trumpet","trust","truth","try","tube","tuition","tumble","tuna","tunnel","turkey","turn","turtle","twelve","twenty","twice","twin","twist","two","type","typical","ugly","umbrella","unable","unaware","uncle","uncover","under","undo","unfair","unfold","unhappy","uniform","unique","unit","universe","unknown","unlock","until","unusual","unveil","update","upgrade","uphold","upon","upper","upset","urban","urge","usage","use","used","useful","useless","usual","utility","vacant","vacuum","vague","valid","valley","valve","van","vanish","vapor","various","vast","vault","vehicle","velvet","vendor","venture","venue","verb","verify","version","very","vessel","veteran","viable","vibrant","vicious","victory","video","view","village","vintage","violin","virtual","virus","visa","visit","visual","vital","vivid","vocal","voice","void","volcano","volume","vote","voyage","wage","wagon","wait","walk","wall","walnut","want","warfare","warm","warrior","wash","wasp","waste","water","wave","way","wealth","weapon","wear","weasel","weather","web","wedding","weekend","weird","welcome","west","wet","whale","what","wheat","wheel","when","where","whip","whisper","wide","width","wife","wild","will","win","window","wine","wing","wink","winner","winter","wire","wisdom","wise","wish","witness","wolf","woman","wonder","wood","wool","word","work","world","worry","worth","wrap","wreck","wrestle","wrist","write","wrong","yard","year","yellow","you","young","youth","zebra","zero","zone","zoo"];
   }
 </script>
 
 <div class="brainvault-container">
-  <div class="container">
-    <h1>XLN Wallet</h1>
-
-    <div class="tabs">
-      <button
-        class="tab"
-        class:active={activeTab === 'brainwallet'}
-        on:click={() => switchTab('brainwallet')}
-      >
-        <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
-        </svg>
-        Brainwallet
-      </button>
-      <button
-        class="tab"
-        class:active={activeTab === 'mnemonic'}
-        on:click={() => switchTab('mnemonic')}
-      >
-        <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-        </svg>
-        Mnemonic
-      </button>
+  <!-- Header -->
+  <div class="header">
+    <div class="logo">
+      <span class="logo-icon">🧠</span>
+      <h1>BrainVault</h1>
+      <span class="version">v2.0</span>
     </div>
+    <p class="tagline">Your brain is the backup. Memory-hard sharded key derivation.</p>
+  </div>
 
-    {#if activeTab === 'brainwallet'}
-      <div class="tab-content active">
-        <div class="form-group">
-          <label for="username">Username</label>
-          <input type="text" id="username" placeholder="Enter username" bind:value={username}>
-        </div>
+  <!-- Main Content -->
+  <div class="main-content">
 
-        <div class="form-group">
-          <label for="password">Password</label>
-          <input type="password" id="password" placeholder="Enter password" bind:value={password}>
-        </div>
-
-        <div class="form-group">
-          <label for="complexity-slider">Derivation Complexity: <span>{complexityValue}</span></label>
-          <div class="slider-group">
-            <input
-              id="complexity-slider"
-              type="range"
-              min="1"
-              max="10"
-              bind:value={complexity}
-              style="background: {sliderGradient}"
-            >
-            <div class="slider-labels">
-              <span>Quick (Demo)</span>
-              <span>Balanced</span>
-              <span>Secure</span>
-            </div>
-            <div class="time-estimate">
-              <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-              </svg>
-              Estimated time: <span>{timeEstimate}</span>
-            </div>
+    <!-- INPUT PHASE -->
+    {#if phase === 'input'}
+      <div class="glass-card">
+        <!-- Resume Banner -->
+        {#if showResumeInput}
+          <div class="resume-banner">
+            <span class="resume-icon">⏸️</span>
+            <span>Incomplete derivation found ({shardsCompleted}/{getShardCount(factor)} shards)</span>
+            <button class="resume-btn" on:click={loadResumeToken}>Resume</button>
+            <button class="dismiss-btn" on:click={() => { showResumeInput = false; localStorage.removeItem('brainvault_resume'); }}>Dismiss</button>
           </div>
+        {/if}
+
+        <!-- Name Input -->
+        <div class="input-group">
+          <label for="name">
+            <span class="label-text">Name</span>
+            <span class="label-hint">(public identifier - email or username)</span>
+          </label>
+          <input
+            type="text"
+            id="name"
+            bind:value={name}
+            placeholder="satoshi@bitcoin.org"
+            autocomplete="off"
+            class:valid={name.length >= BRAINVAULT_V2.MIN_NAME_LENGTH}
+          />
+          {#if name && name.length < BRAINVAULT_V2.MIN_NAME_LENGTH}
+            <span class="validation-hint">At least {BRAINVAULT_V2.MIN_NAME_LENGTH} characters required</span>
+          {/if}
         </div>
-      </div>
-    {:else}
-      <div class="tab-content active">
-        <div class="form-group">
-          <label for="mnemonic-input">Mnemonic (16 words)</label>
-          <div class="mnemonic-group">
-            <textarea id="mnemonic-input" rows="4" placeholder="Enter 16-word mnemonic" bind:value={mnemonicInput}></textarea>
-            <button class="icon-btn" on:click={generateMnemonic} aria-label="Generate new mnemonic">
-              <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-              </svg>
+
+        <!-- Passphrase Input -->
+        <div class="input-group">
+          <label for="passphrase">
+            <span class="label-text">Passphrase</span>
+            <span class="label-hint">(secret - never share this)</span>
+          </label>
+          <div class="password-input-wrapper">
+            <input
+              type={showPassphrase ? 'text' : 'password'}
+              id="passphrase"
+              bind:value={passphrase}
+              placeholder="Enter a strong passphrase..."
+              autocomplete="off"
+              class:valid={passphrase.length >= BRAINVAULT_V2.MIN_PASSPHRASE_LENGTH}
+            />
+            <button
+              class="toggle-visibility"
+              on:click={() => showPassphrase = !showPassphrase}
+              type="button"
+            >
+              {showPassphrase ? '👁️' : '👁️‍🗨️'}
             </button>
           </div>
-          <p class="info-text">
-            <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="vertical-align: middle;">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
-            </svg>
-            Store your mnemonic securely. It's the only way to recover your wallet.
-          </p>
-        </div>
-      </div>
-    {/if}
-
-    <button class="generate-btn" on:click={generateWallet} disabled={generating}>
-      <svg class="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
-      </svg>
-      Generate Wallet
-    </button>
-
-    {#if generating}
-      <div class="progress-container">
-        <div class="progress-bar">
-          <div class="progress-fill" style="width: {progressFill}%"></div>
-        </div>
-        <div class="matrix-box">{matrixText}</div>
-        <p class="tip-text">{tipText}</p>
-      </div>
-    {/if}
-
-    {#if wallets.length > 0}
-      <div class="wallets-section">
-        <h2>Generated Wallets</h2>
-        <div class="wallets-list">
-          {#each wallets as wallet, index}
-            <div class="wallet-item">
-              <span class="wallet-address">{wallet.address} ({wallet.type})</span>
-              <button class="login-btn" on:click={() => loginWallet(index)}>Login</button>
+          {#if passphrase}
+            <div class="strength-meter">
+              <div
+                class="strength-bar"
+                style="width: {Math.min(100, passwordStrength.bits)}%; background: {passwordStrength.color}"
+              ></div>
             </div>
+            <span class="strength-text" style="color: {passwordStrength.color}">
+              {passwordStrength.bits} bits - {passwordStrength.rating}
+            </span>
+          {/if}
+        </div>
+
+        <!-- Factor Slider -->
+        <div class="input-group">
+          <label for="factor">
+            <span class="label-text">Security Factor</span>
+            <span class="label-hint">(1-9, higher = more secure but slower)</span>
+          </label>
+          <div class="factor-slider-wrapper">
+            <input
+              type="range"
+              id="factor"
+              min="1"
+              max="9"
+              bind:value={factor}
+            />
+            <div class="factor-labels">
+              <span>1</span>
+              <span>5</span>
+              <span>9</span>
+            </div>
+          </div>
+          <div class="factor-info">
+            <div class="factor-badge" class:demo={factor === 1} class:balanced={factor === 5} class:paranoid={factor >= 8}>
+              Factor {factor}: {factorInfo.description}
+            </div>
+            <div class="factor-stats">
+              <span><strong>{factorInfo.shards}</strong> shards</span>
+              <span><strong>{factorInfo.memory}</strong> memory equiv.</span>
+              <span><strong>{factorInfo.time}</strong> est. time</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Warning -->
+        <div class="warning-box">
+          <span class="warning-icon">⚠️</span>
+          <p><strong>name + passphrase + factor = your wallet forever</strong><br/>
+          If you forget any of these, your funds are permanently lost. There is no recovery.</p>
+        </div>
+
+        <!-- Derive Button -->
+        <button
+          class="derive-btn"
+          disabled={!canDerive}
+          on:click={startDerivation}
+        >
+          <span class="btn-icon">🔐</span>
+          Derive Wallet
+        </button>
+      </div>
+
+    <!-- DERIVING PHASE -->
+    {:else if phase === 'deriving'}
+      <div class="glass-card deriving">
+        <h2>Deriving Wallet...</h2>
+
+        <!-- Progress Info -->
+        <div class="progress-info">
+          <div class="progress-stats">
+            <span>{shardsCompleted} / {shardCount} shards</span>
+            <span>{workerCount} workers</span>
+          </div>
+          <div class="progress-bar-container">
+            <div class="progress-bar" style="width: {progress}%"></div>
+          </div>
+          <div class="time-info">
+            <span>Elapsed: {formatDuration(elapsedMs)}</span>
+            <span>Remaining: ~{formatDuration(remainingMs)}</span>
+          </div>
+        </div>
+
+        <!-- Shard Grid Visualization -->
+        <div class="shard-grid" style="--cols: {gridCols}">
+          {#each shardStatus as status, i}
+            <div
+              class="shard-cube"
+              class:pending={status === 'pending'}
+              class:computing={status === 'computing'}
+              class:complete={status === 'complete'}
+              title="Shard {i}: {status}"
+            ></div>
           {/each}
         </div>
+
+        <!-- Resume Token -->
+        <div class="resume-token-section">
+          <p class="resume-hint">If you need to stop, your progress is saved automatically.</p>
+        </div>
+
+        <!-- Cancel Button -->
+        <button class="cancel-btn" on:click={reset}>
+          Cancel
+        </button>
+      </div>
+
+    <!-- COMPLETE PHASE -->
+    {:else if phase === 'complete'}
+      <div class="glass-card complete">
+        <div class="success-header">
+          <span class="success-icon">✅</span>
+          <h2>Wallet Generated!</h2>
+          <p>Derived in {formatDuration(elapsedMs)} using {shardCount} shards</p>
+        </div>
+
+        <!-- Address -->
+        <div class="result-section">
+          <label>Ethereum Address</label>
+          <div class="result-box address">
+            <code>{ethereumAddress}</code>
+            <button class="copy-btn" on:click={() => copyToClipboard(ethereumAddress, 'address')}>
+              {copiedField === 'address' ? '✓' : '📋'}
+            </button>
+          </div>
+        </div>
+
+        <!-- 24-word Mnemonic -->
+        <div class="result-section">
+          <label>
+            24-Word Mnemonic
+            <span class="label-hint">(for MetaMask, Ledger, Trezor)</span>
+          </label>
+          <div class="result-box mnemonic">
+            <div class="mnemonic-toggle">
+              <button on:click={() => showMnemonic = !showMnemonic}>
+                {showMnemonic ? 'Hide' : 'Show'} Mnemonic
+              </button>
+            </div>
+            {#if showMnemonic}
+              <div class="mnemonic-words">
+                {#each mnemonic24.split(' ') as word, i}
+                  <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
+                {/each}
+              </div>
+              <button class="copy-btn full" on:click={() => copyToClipboard(mnemonic24, 'mnemonic24')}>
+                {copiedField === 'mnemonic24' ? '✓ Copied!' : '📋 Copy all 24 words'}
+              </button>
+            {/if}
+          </div>
+        </div>
+
+        <!-- 12-word Mnemonic -->
+        <div class="result-section">
+          <label>
+            12-Word Mnemonic
+            <span class="label-hint">(for wallets that only support 12 words)</span>
+          </label>
+          <div class="result-box mnemonic compact">
+            <code class:blurred={!showMnemonic}>{showMnemonic ? mnemonic12 : '••• ••• ••• ••• ••• ••• ••• ••• ••• ••• ••• •••'}</code>
+            {#if showMnemonic}
+              <button class="copy-btn" on:click={() => copyToClipboard(mnemonic12, 'mnemonic12')}>
+                {copiedField === 'mnemonic12' ? '✓' : '📋'}
+              </button>
+            {/if}
+          </div>
+        </div>
+
+        <!-- Device Passphrase -->
+        <div class="result-section">
+          <label>
+            Device Passphrase
+            <span class="label-hint">(for Ledger/Trezor hidden wallet)</span>
+          </label>
+          <div class="result-box passphrase">
+            <code class:blurred={!showDevicePassphrase}>
+              {showDevicePassphrase ? devicePassphrase : '••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••'}
+            </code>
+            <button class="toggle-btn" on:click={() => showDevicePassphrase = !showDevicePassphrase}>
+              {showDevicePassphrase ? '🙈' : '👁️'}
+            </button>
+            {#if showDevicePassphrase}
+              <button class="copy-btn" on:click={() => copyToClipboard(devicePassphrase, 'devicePass')}>
+                {copiedField === 'devicePass' ? '✓' : '📋'}
+              </button>
+            {/if}
+          </div>
+        </div>
+
+        <!-- Password Manager -->
+        <div class="result-section password-manager">
+          <label>
+            <span class="pm-icon">🔑</span> Password Manager
+            <span class="label-hint">(derive unique passwords for any site)</span>
+          </label>
+          <div class="pm-input-row">
+            <input
+              type="text"
+              placeholder="example.com"
+              bind:value={siteDomain}
+              on:keydown={(e) => e.key === 'Enter' && deriveSitePassword()}
+            />
+            <button on:click={deriveSitePassword}>Generate</button>
+          </div>
+          {#if sitePassword}
+            <div class="result-box site-password">
+              <code class:blurred={!showSitePassword}>
+                {showSitePassword ? sitePassword : '••••••••••••••••••••'}
+              </code>
+              <button class="toggle-btn" on:click={() => showSitePassword = !showSitePassword}>
+                {showSitePassword ? '🙈' : '👁️'}
+              </button>
+              <button class="copy-btn" on:click={() => copyToClipboard(sitePassword, 'sitePass')}>
+                {copiedField === 'sitePass' ? '✓' : '📋'}
+              </button>
+            </div>
+          {/if}
+        </div>
+
+        <!-- New Wallet Button -->
+        <button class="derive-btn secondary" on:click={reset}>
+          <span class="btn-icon">🔄</span>
+          Derive Another Wallet
+        </button>
       </div>
     {/if}
+
+    <!-- FAQ Section -->
+    <div class="faq-section">
+      <h3>Frequently Asked Questions</h3>
+      {#each FAQ_ITEMS as item, i}
+        <div class="faq-item" class:expanded={expandedFaq === i}>
+          <button class="faq-question" on:click={() => expandedFaq = expandedFaq === i ? null : i}>
+            <span>{item.q}</span>
+            <span class="faq-toggle">{expandedFaq === i ? '−' : '+'}</span>
+          </button>
+          {#if expandedFaq === i}
+            <div class="faq-answer">
+              <p>{item.a}</p>
+            </div>
+          {/if}
+        </div>
+      {/each}
+    </div>
+
   </div>
 </div>
 
 <style>
   .brainvault-container {
     width: 100%;
-    min-height: calc(100vh - 60px);
+    min-height: 100vh;
+    padding: 40px 20px;
+    background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3a 50%, #0a0a1a 100%);
+  }
+
+  .header {
+    text-align: center;
+    margin-bottom: 40px;
+  }
+
+  .logo {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 40px 20px;
+    gap: 12px;
+    margin-bottom: 8px;
   }
 
-  .container {
-    background: rgba(30, 30, 30, 0.8);
+  .logo-icon {
+    font-size: 48px;
+    filter: drop-shadow(0 0 20px rgba(147, 51, 234, 0.5));
+  }
+
+  .logo h1 {
+    font-size: 42px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #a855f7 0%, #06b6d4 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin: 0;
+  }
+
+  .version {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.1);
+    padding: 2px 8px;
+    border-radius: 12px;
+  }
+
+  .tagline {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 16px;
+    margin: 0;
+  }
+
+  .main-content {
+    max-width: 600px;
+    margin: 0 auto;
+  }
+
+  /* Glass Card */
+  .glass-card {
+    background: rgba(255, 255, 255, 0.05);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border-radius: 12px;
     border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    padding: 40px;
-    max-width: 520px;
-    width: 100%;
+    border-radius: 24px;
+    padding: 32px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   }
 
-  h1 {
-    text-align: center;
-    margin-bottom: 32px;
-    color: #00d9ff;
-    font-size: 32px;
-    font-weight: 700;
-    text-shadow: 0 0 20px rgba(0, 217, 255, 0.3);
-  }
-
-  .tabs {
-    display: flex;
-    gap: 6px;
-    margin-bottom: 28px;
-    background: rgba(255, 255, 255, 0.03);
-    backdrop-filter: blur(20px);
-    border-radius: 10px;
-    padding: 5px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .tab {
-    flex: 1;
-    padding: 12px;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    border-radius: 7px;
-    font-size: 14px;
-    font-weight: 500;
+  /* Resume Banner */
+  .resume-banner {
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 6px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    color: rgba(255, 255, 255, 0.5);
-  }
-
-  .tab:hover {
-    background: rgba(0, 122, 204, 0.15);
-    color: rgba(255, 255, 255, 0.8);
-  }
-
-  .tab.active {
-    background: linear-gradient(135deg, rgba(0, 122, 204, 0.2) 0%, rgba(0, 180, 255, 0.15) 100%);
-    color: #00ccff;
-    box-shadow: 0 2px 12px rgba(0, 122, 204, 0.3);
-  }
-
-  .tab-content {
-    display: block;
-  }
-
-  .form-group {
-    margin-bottom: 20px;
-  }
-
-  label {
-    display: block;
-    margin-bottom: 8px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.7);
+    gap: 12px;
+    background: rgba(147, 51, 234, 0.2);
+    border: 1px solid rgba(147, 51, 234, 0.3);
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 24px;
     font-size: 14px;
-  }
-
-  input[type="text"],
-  input[type="password"],
-  textarea {
-    width: 100%;
-    padding: 12px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 6px;
-    font-size: 14px;
-    transition: all 0.2s;
     color: rgba(255, 255, 255, 0.9);
   }
 
-  input:focus,
-  textarea:focus {
-    outline: none;
-    border-color: rgba(0, 122, 204, 0.5);
-    background: rgba(0, 0, 0, 0.4);
-    box-shadow: 0 0 0 3px rgba(0, 122, 204, 0.1);
+  .resume-icon {
+    font-size: 20px;
   }
 
-  input::placeholder,
-  textarea::placeholder {
-    color: rgba(255, 255, 255, 0.3);
-  }
-
-  textarea {
-    resize: vertical;
-    font-family: 'Courier New', monospace;
-  }
-
-  .mnemonic-group {
-    display: flex;
-    gap: 8px;
-  }
-
-  .mnemonic-group textarea {
-    flex: 1;
-  }
-
-  .icon-btn {
-    padding: 12px;
-    background: rgba(0, 122, 204, 0.3);
-    color: #00ccff;
-    border: 1px solid rgba(0, 122, 204, 0.5);
-    border-radius: 6px;
+  .resume-btn, .dismiss-btn {
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;
   }
 
-  .icon-btn:hover {
-    background: rgba(0, 122, 204, 0.5);
-    border-color: rgba(0, 180, 255, 0.7);
+  .resume-btn {
+    background: rgba(147, 51, 234, 0.4);
+    border: 1px solid rgba(147, 51, 234, 0.5);
+    color: white;
+    margin-left: auto;
   }
 
-  .slider-group {
-    margin-top: 8px;
+  .resume-btn:hover {
+    background: rgba(147, 51, 234, 0.6);
   }
 
-  input[type="range"] {
+  .dismiss-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .dismiss-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  /* Input Groups */
+  .input-group {
+    margin-bottom: 24px;
+  }
+
+  .input-group label {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .label-text {
+    font-size: 15px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .label-hint {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .input-group input[type="text"],
+  .input-group input[type="password"] {
     width: 100%;
-    height: 6px;
-    border-radius: 3px;
+    padding: 14px 16px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    font-size: 16px;
+    color: white;
+    transition: all 0.2s;
+  }
+
+  .input-group input:focus {
     outline: none;
-    -webkit-appearance: none;
+    border-color: rgba(147, 51, 234, 0.5);
+    box-shadow: 0 0 0 3px rgba(147, 51, 234, 0.2);
   }
 
-  input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: #00ccff;
-    cursor: pointer;
-    box-shadow: 0 0 8px rgba(0, 204, 255, 0.5);
+  .input-group input.valid {
+    border-color: rgba(34, 197, 94, 0.5);
   }
 
-  input[type="range"]::-moz-range-thumb {
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: #00ccff;
-    cursor: pointer;
+  .input-group input::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+  }
+
+  .validation-hint {
+    font-size: 12px;
+    color: #ef4444;
+    margin-top: 4px;
+  }
+
+  /* Password Input */
+  .password-input-wrapper {
+    position: relative;
+    display: flex;
+  }
+
+  .password-input-wrapper input {
+    padding-right: 48px;
+  }
+
+  .toggle-visibility {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
     border: none;
-    box-shadow: 0 0 8px rgba(0, 204, 255, 0.5);
+    font-size: 18px;
+    cursor: pointer;
+    opacity: 0.6;
+    transition: opacity 0.2s;
   }
 
-  .slider-labels {
+  .toggle-visibility:hover {
+    opacity: 1;
+  }
+
+  /* Strength Meter */
+  .strength-meter {
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    margin-top: 8px;
+    overflow: hidden;
+  }
+
+  .strength-bar {
+    height: 100%;
+    transition: all 0.3s;
+    border-radius: 2px;
+  }
+
+  .strength-text {
+    font-size: 12px;
+    margin-top: 4px;
+    display: block;
+  }
+
+  /* Factor Slider */
+  .factor-slider-wrapper {
+    padding: 8px 0;
+  }
+
+  .factor-slider-wrapper input[type="range"] {
+    width: 100%;
+    height: 8px;
+    background: linear-gradient(90deg, #22c55e 0%, #eab308 50%, #ef4444 100%);
+    border-radius: 4px;
+    -webkit-appearance: none;
+    cursor: pointer;
+  }
+
+  .factor-slider-wrapper input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 24px;
+    height: 24px;
+    background: white;
+    border-radius: 50%;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    cursor: pointer;
+  }
+
+  .factor-labels {
     display: flex;
     justify-content: space-between;
-    margin-top: 8px;
+    margin-top: 4px;
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(255, 255, 255, 0.4);
   }
 
-  .slider-labels span:first-child {
-    color: #ef4444;
+  .factor-info {
+    margin-top: 12px;
   }
 
-  .slider-labels span:last-child {
-    color: #10b981;
-  }
-
-  .time-estimate {
-    margin-top: 8px;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.6);
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .info-text {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.6);
-    line-height: 1.5;
-    margin-top: 8px;
-    padding: 12px;
-    background: rgba(0, 122, 204, 0.1);
-    border-left: 3px solid rgba(0, 122, 204, 0.5);
-    border-radius: 4px;
-  }
-
-  .generate-btn {
-    width: 100%;
-    padding: 14px;
-    background: linear-gradient(135deg, rgba(0, 122, 204, 0.3) 0%, rgba(0, 180, 255, 0.2) 100%);
-    border: 1px solid rgba(0, 122, 204, 0.5);
-    color: #00ccff;
-    border-radius: 8px;
-    font-size: 16px;
+  .factor-badge {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 14px;
     font-weight: 600;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+    margin-bottom: 8px;
+  }
+
+  .factor-badge.demo {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+  }
+
+  .factor-badge.balanced {
+    background: rgba(34, 197, 94, 0.2);
+    color: #4ade80;
+  }
+
+  .factor-badge.paranoid {
+    background: rgba(147, 51, 234, 0.2);
+    color: #a78bfa;
+  }
+
+  .factor-stats {
+    display: flex;
+    gap: 16px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .factor-stats strong {
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  /* Warning Box */
+  .warning-box {
+    display: flex;
+    gap: 12px;
+    background: rgba(234, 179, 8, 0.1);
+    border: 1px solid rgba(234, 179, 8, 0.3);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 24px;
+  }
+
+  .warning-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+  }
+
+  .warning-box p {
+    margin: 0;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.8);
+    line-height: 1.5;
+  }
+
+  /* Derive Button */
+  .derive-btn {
+    width: 100%;
+    padding: 16px;
+    background: linear-gradient(135deg, #7c3aed 0%, #06b6d4 100%);
+    border: none;
+    border-radius: 16px;
+    font-size: 18px;
+    font-weight: 600;
+    color: white;
     cursor: pointer;
-    margin-top: 24px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
-    box-shadow: 0 4px 16px rgba(0, 122, 204, 0.2);
+    gap: 10px;
+    transition: all 0.3s;
+    box-shadow: 0 4px 20px rgba(124, 58, 237, 0.3);
   }
 
-  .generate-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, rgba(0, 122, 204, 0.4) 0%, rgba(0, 180, 255, 0.3) 100%);
-    border-color: rgba(0, 180, 255, 0.7);
-    box-shadow: 0 6px 24px rgba(0, 122, 204, 0.4);
+  .derive-btn:hover:not(:disabled) {
     transform: translateY(-2px);
+    box-shadow: 0 6px 30px rgba(124, 58, 237, 0.4);
   }
 
-  .generate-btn:disabled {
+  .derive-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
 
-  .progress-container {
-    margin-top: 20px;
+  .derive-btn.secondary {
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+    margin-top: 24px;
+  }
+
+  .derive-btn.secondary:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  .btn-icon {
+    font-size: 22px;
+  }
+
+  /* Deriving Phase */
+  .glass-card.deriving h2 {
+    text-align: center;
+    color: rgba(255, 255, 255, 0.9);
+    margin-bottom: 24px;
+  }
+
+  .progress-info {
+    margin-bottom: 24px;
+  }
+
+  .progress-stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.7);
+    margin-bottom: 8px;
+  }
+
+  .progress-bar-container {
+    height: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    overflow: hidden;
   }
 
   .progress-bar {
-    width: 100%;
-    height: 8px;
-    background: rgba(0, 0, 0, 0.4);
-    border-radius: 4px;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.05);
-  }
-
-  .progress-fill {
     height: 100%;
-    background: linear-gradient(90deg, #00ccff, #00ff88);
+    background: linear-gradient(90deg, #7c3aed, #06b6d4);
     transition: width 0.3s;
-    box-shadow: 0 0 10px rgba(0, 204, 255, 0.5);
   }
 
-  .matrix-box {
-    margin-top: 12px;
-    background: rgba(0, 0, 0, 0.6);
-    color: #00ff88;
-    padding: 12px;
-    border-radius: 6px;
-    border: 1px solid rgba(0, 255, 136, 0.2);
-    font-family: 'Courier New', monospace;
-    font-size: 10px;
-    line-height: 1.4;
-    overflow: hidden;
-    white-space: pre;
-  }
-
-  .tip-text {
-    margin-top: 12px;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.6);
-    line-height: 1.5;
-    padding: 10px;
-    background: rgba(0, 122, 204, 0.08);
-    border-radius: 4px;
-  }
-
-  .wallets-section {
-    margin-top: 32px;
-    padding-top: 24px;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-  }
-
-  .wallets-section h2 {
-    font-size: 20px;
-    margin-bottom: 16px;
-    color: #00d9ff;
-    font-weight: 600;
-  }
-
-  .wallet-item {
+  .time-info {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    padding: 14px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-top: 8px;
+  }
+
+  /* Shard Grid */
+  .shard-grid {
+    display: grid;
+    grid-template-columns: repeat(var(--cols), 1fr);
+    gap: 2px;
+    padding: 16px;
     background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    margin-bottom: 10px;
-    transition: all 0.2s ease;
+    border-radius: 12px;
+    margin-bottom: 24px;
+    max-height: 200px;
+    overflow-y: auto;
   }
 
-  .wallet-item:hover {
-    background: rgba(0, 0, 0, 0.4);
-    border-color: rgba(0, 122, 204, 0.4);
+  .shard-cube {
+    aspect-ratio: 1;
+    min-width: 3px;
+    min-height: 3px;
+    border-radius: 1px;
+    transition: all 0.3s;
   }
 
-  .wallet-address {
+  .shard-cube.pending {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .shard-cube.computing {
+    background: #eab308;
+    box-shadow: 0 0 4px #eab308;
+    animation: pulse 1s infinite;
+  }
+
+  .shard-cube.complete {
+    background: #22c55e;
+    box-shadow: 0 0 2px rgba(34, 197, 94, 0.5);
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .resume-token-section {
+    text-align: center;
+    margin-bottom: 24px;
+  }
+
+  .resume-hint {
     font-size: 13px;
-    color: rgba(255, 255, 255, 0.7);
-    word-break: break-all;
-    font-family: 'Courier New', monospace;
+    color: rgba(255, 255, 255, 0.5);
   }
 
-  .login-btn {
-    padding: 8px 16px;
-    background: rgba(16, 185, 129, 0.3);
-    border: 1px solid rgba(16, 185, 129, 0.5);
-    color: #00ff88;
-    border-radius: 6px;
-    font-size: 13px;
+  .cancel-btn {
+    width: 100%;
+    padding: 14px;
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 12px;
+    color: #f87171;
+    font-size: 16px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;
   }
 
-  .login-btn:hover {
-    background: rgba(16, 185, 129, 0.5);
-    border-color: rgba(16, 185, 129, 0.7);
-    box-shadow: 0 0 12px rgba(16, 185, 129, 0.3);
+  .cancel-btn:hover {
+    background: rgba(239, 68, 68, 0.3);
   }
 
-  .icon {
-    width: 16px;
-    height: 16px;
-    display: inline-block;
+  /* Complete Phase */
+  .success-header {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+
+  .success-icon {
+    font-size: 48px;
+    display: block;
+    margin-bottom: 12px;
+  }
+
+  .success-header h2 {
+    color: #4ade80;
+    margin: 0 0 8px 0;
+    font-size: 28px;
+  }
+
+  .success-header p {
+    color: rgba(255, 255, 255, 0.6);
+    margin: 0;
+    font-size: 14px;
+  }
+
+  /* Result Sections */
+  .result-section {
+    margin-bottom: 24px;
+  }
+
+  .result-section > label {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .result-box {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .result-box code {
+    flex: 1;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.9);
+    word-break: break-all;
+  }
+
+  .result-box code.blurred {
+    filter: blur(4px);
+    user-select: none;
+  }
+
+  .result-box.address code {
+    color: #06b6d4;
+  }
+
+  .copy-btn, .toggle-btn {
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+
+  .copy-btn:hover, .toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .copy-btn.full {
+    width: 100%;
+    margin-top: 12px;
+    padding: 12px;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  /* Mnemonic Display */
+  .result-box.mnemonic {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .mnemonic-toggle button {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(135deg, rgba(147, 51, 234, 0.3), rgba(6, 182, 212, 0.3));
+    border: 1px solid rgba(147, 51, 234, 0.3);
+    border-radius: 8px;
+    color: white;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .mnemonic-toggle button:hover {
+    background: linear-gradient(135deg, rgba(147, 51, 234, 0.4), rgba(6, 182, 212, 0.4));
+  }
+
+  .mnemonic-words {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .word {
+    background: rgba(255, 255, 255, 0.05);
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.9);
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+
+  .word-num {
+    color: rgba(255, 255, 255, 0.4);
+    margin-right: 4px;
+    font-size: 11px;
+  }
+
+  .result-box.compact {
+    flex-direction: row;
+  }
+
+  .result-box.compact code {
+    font-size: 12px;
+  }
+
+  /* Password Manager */
+  .password-manager {
+    background: rgba(147, 51, 234, 0.1);
+    border-radius: 16px;
+    padding: 20px;
+    margin-top: 32px;
+  }
+
+  .password-manager label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .pm-icon {
+    font-size: 20px;
+  }
+
+  .pm-input-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .pm-input-row input {
+    flex: 1;
+    padding: 12px 14px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    font-size: 14px;
+    color: white;
+  }
+
+  .pm-input-row input:focus {
+    outline: none;
+    border-color: rgba(147, 51, 234, 0.5);
+  }
+
+  .pm-input-row button {
+    padding: 12px 20px;
+    background: rgba(147, 51, 234, 0.4);
+    border: 1px solid rgba(147, 51, 234, 0.5);
+    border-radius: 10px;
+    color: white;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .pm-input-row button:hover {
+    background: rgba(147, 51, 234, 0.6);
+  }
+
+  .result-box.site-password {
+    margin-top: 12px;
+  }
+
+  /* FAQ Section */
+  .faq-section {
+    margin-top: 48px;
+  }
+
+  .faq-section h3 {
+    font-size: 20px;
+    color: rgba(255, 255, 255, 0.9);
+    margin-bottom: 20px;
+  }
+
+  .faq-item {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    margin-bottom: 8px;
+    overflow: hidden;
+    transition: all 0.2s;
+  }
+
+  .faq-item.expanded {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(147, 51, 234, 0.3);
+  }
+
+  .faq-question {
+    width: 100%;
+    padding: 16px 20px;
+    background: none;
+    border: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 15px;
+    font-weight: 500;
+    text-align: left;
+  }
+
+  .faq-toggle {
+    font-size: 20px;
+    color: rgba(255, 255, 255, 0.5);
+    width: 24px;
+    text-align: center;
+  }
+
+  .faq-answer {
+    padding: 0 20px 16px;
+  }
+
+  .faq-answer p {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.6;
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  /* Responsive */
+  @media (max-width: 600px) {
+    .glass-card {
+      padding: 20px;
+    }
+
+    .mnemonic-words {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .factor-stats {
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .logo h1 {
+      font-size: 32px;
+    }
   }
 </style>
