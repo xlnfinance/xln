@@ -2,7 +2,6 @@
   import { onMount, onDestroy } from 'svelte';
   import { HDNodeWallet } from 'ethers';
   import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
-  import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
 
   // Initialize i18n
   let i18nReady = false;
@@ -181,6 +180,110 @@
 
   // FAQ state
   let expandedFaq: number | null = null;
+
+  // ============================================================================
+  // AUDIO & HAPTICS - Mechanical vault clicks and mobile feedback
+  // ============================================================================
+
+  let audioCtx: AudioContext | null = null;
+  let lastActiveTick = 0;
+
+  function initAudio(): AudioContext {
+    if (!audioCtx) {
+      audioCtx = new AudioContext();
+    }
+    return audioCtx;
+  }
+
+  function playVaultClick(intensity: number = 1) {
+    try {
+      const ctx = initAudio();
+      if (ctx.state === 'suspended') ctx.resume();
+
+      // Create mechanical click sound
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+
+      // Metallic click parameters
+      oscillator.type = 'square';
+      oscillator.frequency.setValueAtTime(800 + Math.random() * 200, ctx.currentTime);
+      oscillator.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.05);
+
+      // Low-pass filter for mechanical sound
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(2000, ctx.currentTime);
+      filter.frequency.exponentialRampToValueAtTime(400, ctx.currentTime + 0.03);
+      filter.Q.value = 2;
+
+      // Quick decay envelope
+      gainNode.gain.setValueAtTime(0.15 * intensity, ctx.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
+
+      oscillator.connect(filter);
+      filter.connect(gainNode);
+      gainNode.connect(ctx.destination);
+
+      oscillator.start(ctx.currentTime);
+      oscillator.stop(ctx.currentTime + 0.08);
+    } catch (e) {
+      // Audio not available, ignore
+    }
+  }
+
+  function playVaultOpen() {
+    try {
+      const ctx = initAudio();
+      if (ctx.state === 'suspended') ctx.resume();
+
+      // Heavy mechanical vault opening sound
+      for (let i = 0; i < 5; i++) {
+        setTimeout(() => {
+          const oscillator = ctx.createOscillator();
+          const gainNode = ctx.createGain();
+
+          oscillator.type = 'triangle';
+          oscillator.frequency.setValueAtTime(100 + i * 30, ctx.currentTime);
+          oscillator.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + 0.2);
+
+          gainNode.gain.setValueAtTime(0.2, ctx.currentTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+
+          oscillator.connect(gainNode);
+          gainNode.connect(ctx.destination);
+
+          oscillator.start(ctx.currentTime);
+          oscillator.stop(ctx.currentTime + 0.3);
+        }, i * 80);
+      }
+    } catch (e) {
+      // Audio not available, ignore
+    }
+  }
+
+  function hapticFeedback(pattern: 'tick' | 'complete') {
+    if ('vibrate' in navigator) {
+      if (pattern === 'tick') {
+        navigator.vibrate(5);
+      } else if (pattern === 'complete') {
+        // Success pattern: short-pause-long
+        navigator.vibrate([50, 100, 150]);
+      }
+    }
+  }
+
+  // Track tick activation for sound
+  $: if (phase === 'deriving') {
+    const currentActiveTick = Math.floor(progress / 2.78);
+    if (currentActiveTick > lastActiveTick && currentActiveTick > 0) {
+      // Play click for each new tick that activates
+      playVaultClick(0.8 + Math.random() * 0.4);
+      hapticFeedback('tick');
+      lastActiveTick = currentActiveTick;
+    }
+  } else {
+    lastActiveTick = 0;
+  }
 
   // ============================================================================
   // COMPUTED
@@ -459,6 +562,10 @@
     // Clear localStorage resume token
     localStorage.removeItem('brainvault_resume');
 
+    // Play vault open sound and haptic
+    playVaultOpen();
+    hapticFeedback('complete');
+
     phase = 'complete';
   }
 
@@ -723,13 +830,7 @@
 <div class="brainvault-container">
   <!-- Header -->
   <div class="header">
-    <div class="header-top">
-      <div class="spacer"></div>
-      <h1 class="wordmark">{t('vault.title')}</h1>
-      <div class="lang-switcher-wrapper">
-        <LanguageSwitcher />
-      </div>
-    </div>
+    <h1 class="wordmark">{t('vault.title')}</h1>
     <p class="tagline">{t('vault.tagline')}</p>
   </div>
 
@@ -1033,22 +1134,6 @@
   .header {
     text-align: center;
     margin-bottom: 40px;
-  }
-
-  .header-top {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 20px;
-  }
-
-  .spacer, .lang-switcher-wrapper {
-    flex: 0 0 100px;
-  }
-
-  .lang-switcher-wrapper {
-    display: flex;
-    justify-content: flex-end;
   }
 
   .wordmark {
