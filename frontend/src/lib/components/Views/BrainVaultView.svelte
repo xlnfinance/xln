@@ -947,12 +947,32 @@
 
     <!-- DERIVING PHASE -->
     {:else if phase === 'deriving'}
-      <div class="vault-door-container">
+      <div class="vault-door-container" class:opening={progress >= 100}>
+        <!-- Split door panels -->
+        <div class="vault-split-left"></div>
+        <div class="vault-split-right"></div>
+
         <!-- Vault Door Animation -->
         <div class="vault-door">
           <div class="vault-ring outer" style="--rotation: {progress * 3.6}deg"></div>
           <div class="vault-ring middle" style="--rotation: {-progress * 2.4}deg"></div>
           <div class="vault-ring inner" style="--rotation: {progress * 1.8}deg"></div>
+
+          <!-- Shard segments - 8 pieces around the door -->
+          <div class="shard-segments">
+            {#each Array(shardCount) as _, i}
+              <div
+                class="shard-segment"
+                class:pending={shardStatus[i] === 'pending'}
+                class:computing={shardStatus[i] === 'computing'}
+                class:complete={shardStatus[i] === 'complete'}
+                style="--shard-angle: {i * (360 / shardCount)}deg; --shard-index: {i}"
+              >
+                <div class="shard-inner"></div>
+              </div>
+            {/each}
+          </div>
+
           <div class="vault-center">
             <div class="vault-logo">◈</div>
           </div>
@@ -972,6 +992,7 @@
         <div class="vault-info">
           <div class="vault-progress-text">{Math.floor(progress)}%</div>
           <div class="vault-time">{formatDuration(remainingMs)}</div>
+          <div class="vault-shards">{shardsCompleted}/{shardCount} shards</div>
         </div>
 
         <!-- Cancel - subtle -->
@@ -1583,6 +1604,121 @@
   .vault-cancel:hover {
     border-color: rgba(255, 255, 255, 0.5);
     color: rgba(255, 255, 255, 0.7);
+  }
+
+  /* Split door panels for dramatic opening */
+  .vault-split-left,
+  .vault-split-right {
+    position: absolute;
+    top: 0;
+    width: 50%;
+    height: 100%;
+    background: #000;
+    z-index: -1;
+    opacity: 0;
+    transition: transform 0.8s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.1s;
+  }
+
+  .vault-split-left {
+    left: 0;
+    border-right: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  .vault-split-right {
+    right: 0;
+    border-left: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  .vault-door-container.opening .vault-split-left,
+  .vault-door-container.opening .vault-split-right {
+    z-index: 10;
+    opacity: 1;
+  }
+
+  .vault-door-container.opening .vault-split-left {
+    transform: translateX(-100%);
+  }
+
+  .vault-door-container.opening .vault-split-right {
+    transform: translateX(100%);
+  }
+
+  .vault-door-container.opening .vault-door,
+  .vault-door-container.opening .vault-info,
+  .vault-door-container.opening .vault-cancel {
+    opacity: 0;
+    transition: opacity 0.3s;
+  }
+
+  /* Shard segments visualization */
+  .shard-segments {
+    position: absolute;
+    inset: 20px;
+    pointer-events: none;
+  }
+
+  .shard-segment {
+    position: absolute;
+    width: 50%;
+    height: 50%;
+    left: 50%;
+    top: 50%;
+    transform-origin: 0 0;
+    transform: rotate(var(--shard-angle, 0deg));
+    opacity: 0.3;
+    transition: opacity 0.5s, filter 0.5s;
+  }
+
+  .shard-inner {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      rgba(255, 255, 255, 0.03) 10deg,
+      rgba(255, 255, 255, 0.08) 20deg,
+      rgba(255, 255, 255, 0.03) 35deg,
+      transparent 45deg
+    );
+    clip-path: polygon(0 0, 100% 0, 0 100%);
+  }
+
+  .shard-segment.pending {
+    opacity: 0.1;
+  }
+
+  .shard-segment.computing {
+    opacity: 0.6;
+    animation: shard-compute 0.5s ease-in-out infinite alternate;
+  }
+
+  .shard-segment.complete {
+    opacity: 1;
+  }
+
+  .shard-segment.complete .shard-inner {
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      rgba(255, 255, 255, 0.1) 10deg,
+      rgba(255, 255, 255, 0.25) 20deg,
+      rgba(255, 255, 255, 0.1) 35deg,
+      transparent 45deg
+    );
+    filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.3));
+  }
+
+  @keyframes shard-compute {
+    0% { opacity: 0.4; }
+    100% { opacity: 0.8; }
+  }
+
+  .vault-shards {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.3);
+    margin-top: 4px;
+    letter-spacing: 1px;
   }
 
   /* Complete Phase */
