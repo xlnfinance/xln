@@ -4,6 +4,9 @@
   import * as THREE from 'three';
   import type { OrbitControls as OrbitControlsType } from 'three/examples/jsm/controls/OrbitControls.js';
 
+  // VR Hand tracking
+  import { VRHandTrackingController, type GrabbableEntity } from '../utils/vrHandTracking';
+
   // Visual effects system
   // import VisualDemoPanel from '../Views/VisualDemoPanel.svelte'; // TODO: Move to view/
   // import AdminPanel from '../Admin/AdminPanel.svelte'; // TODO: Move to view/
@@ -722,6 +725,9 @@ let vrHammer: VRHammer | null = null;
   let isVRSupported: boolean = false;
   let isVRActive: boolean = false;
   let passthroughEnabled: boolean = false;
+
+  // Hand tracking controller (Vision Pro + Quest)
+  let handTrackingController: VRHandTrackingController | null = null;
 
   // Visual effects toggles
   let lightningEnabled: boolean = false; // Disabled by default (performance)
@@ -1591,6 +1597,78 @@ let vrHammer: VRHammer | null = null;
     console.log(' VR Controllers initialized');
   }
 
+  /**
+   * Initialize VR hand tracking controller
+   */
+  function initHandTracking(): void {
+    if (!renderer || !scene) return;
+
+    // Track grabbed entities for visual feedback
+    const grabbedEntities = new Map<string, { originalScale: THREE.Vector3; originalEmissive: number }>();
+
+    handTrackingController = new VRHandTrackingController(
+      renderer as THREE.WebGLRenderer,
+      scene,
+      {
+        onGrab: (entityId, handedness) => {
+          const entity = entities.find(e => e.id === entityId);
+          if (!entity) return;
+
+          entity.isPinned = true;
+
+          // Store original values for reset
+          grabbedEntities.set(entityId, {
+            originalScale: entity.mesh.scale.clone(),
+            originalEmissive: (entity.mesh.material as THREE.MeshLambertMaterial)?.emissiveIntensity || 0
+          });
+
+          // Visual feedback: scale up and glow
+          entity.mesh.scale.multiplyScalar(1.3);
+          if (entity.mesh.material) {
+            const mat = entity.mesh.material as THREE.MeshLambertMaterial;
+            mat.emissiveIntensity = (mat.emissiveIntensity || 0) + 0.5;
+          }
+
+          console.log(`🖐️ Grab (${handedness}): ${entityId.slice(-8)}`);
+        },
+
+        onRelease: (entityId, targetEntityId, handedness) => {
+          const entity = entities.find(e => e.id === entityId);
+          if (!entity) return;
+
+          // Restore visual state
+          const original = grabbedEntities.get(entityId);
+          if (original) {
+            entity.mesh.scale.copy(original.originalScale);
+            if (entity.mesh.material) {
+              const mat = entity.mesh.material as THREE.MeshLambertMaterial;
+              mat.emissiveIntensity = original.originalEmissive;
+            }
+            grabbedEntities.delete(entityId);
+          }
+
+          // Trigger payment if released on another entity
+          if (targetEntityId) {
+            console.log(`💸 Hand payment: ${entityId.slice(-8)} → ${targetEntityId.slice(-8)}`);
+            panelBridge.emit('vr:hand-payment', {
+              from: entityId,
+              to: targetEntityId
+            });
+          }
+
+          console.log(`🖐️ Release (${handedness}): ${entityId.slice(-8)}`);
+        },
+
+        onHover: (entityId, handedness) => {
+          // Optional: Add hover highlight effect
+          // Could emit event or directly modify entity appearance
+        }
+      }
+    );
+
+    handTrackingController.init();
+  }
+
   let vrGrabbedEntity: any = null;
   let vrGrabController: any = null;
 
@@ -1655,6 +1733,9 @@ let vrHammer: VRHammer | null = null;
 
       await renderer.xr.setSession(session);
       isVRActive = true;
+
+      // Setup hand tracking (Vision Pro passthrough vs Quest mesh)
+      initHandTracking();
 
       // Vision Pro: Enable passthrough (transparent background = see real world)
       scene.background = null; // Transparent = passthrough mode
@@ -3197,6 +3278,19 @@ let vrHammer: VRHammer | null = null;
     // ===== UPDATE VR HAMMER (hit detection) =====
     if (isVRActive && vrHammer) {
       vrHammer.update(connections);
+    }
+
+    // ===== UPDATE HAND TRACKING (Vision Pro + Quest) =====
+    if (isVRActive && handTrackingController) {
+      // Convert entities to GrabbableEntity format
+      const grabbableEntities: GrabbableEntity[] = entities.map(e => ({
+        id: e.id,
+        mesh: e.mesh,
+        position: e.position,
+        isPinned: e.isPinned,
+        label: e.label
+      }));
+      handTrackingController.update(grabbableEntities);
     }
 
     // PERF: Pulse animations disabled for 60 FPS target
