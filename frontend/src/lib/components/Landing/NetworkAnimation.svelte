@@ -2,7 +2,16 @@
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
 
+  import { locale, LOCALES, type Locale } from '$lib/i18n';
+
   export let darkMode = true; // Prop from parent
+
+  let langDropdownOpen = false;
+
+  function selectLocale(loc: Locale) {
+    locale.set(loc);
+    langDropdownOpen = false;
+  }
   export let onToggleDarkMode: () => void; // Callback to parent
 
   let canvas: HTMLCanvasElement;
@@ -238,6 +247,30 @@
 <canvas bind:this={canvas} class="network-canvas"></canvas>
 
 <div class="animation-controls">
+  <!-- Language Switcher -->
+  <div class="lang-dropdown-container">
+    <button on:click={() => langDropdownOpen = !langDropdownOpen} class="control-btn lang-btn">
+      <span class="lang-flag">{LOCALES[$locale].flag}</span>
+      <span class="lang-code">{$locale.toUpperCase()}</span>
+      <svg class="lang-chevron" class:open={langDropdownOpen} viewBox="0 0 24 24" fill="none" stroke="currentColor" width="12" height="12">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" />
+      </svg>
+    </button>
+    {#if langDropdownOpen}
+      <div class="lang-dropdown">
+        {#each Object.entries(LOCALES) as [code, info]}
+          <button
+            class="lang-option"
+            class:active={code === $locale}
+            on:click={() => selectLocale(code as Locale)}
+          >
+            <span class="lang-flag">{info.flag}</span>
+            <span class="lang-name">{info.name}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </div>
   <button on:click={() => animationEnabled = !animationEnabled} class="control-btn">
     {animationEnabled ? '⏸ Pause Animation' : '▶ Play Animation'}
   </button>
@@ -245,6 +278,11 @@
     {darkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
   </button>
 </div>
+
+<!-- Click outside to close lang dropdown -->
+{#if langDropdownOpen}
+  <div class="lang-backdrop" on:click={() => langDropdownOpen = false} on:keydown={() => {}} role="presentation"></div>
+{/if}
 
 <style>
   .network-canvas {
@@ -293,5 +331,103 @@
   :global(.light-mode) .control-btn:hover {
     background: rgba(255, 255, 255, 1);
     border-color: #007acc;
+  }
+
+  /* Language Dropdown */
+  .lang-dropdown-container {
+    position: relative;
+  }
+
+  .lang-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .lang-flag {
+    font-size: 16px;
+  }
+
+  .lang-code {
+    font-weight: 600;
+    font-size: 11px;
+  }
+
+  .lang-chevron {
+    transition: transform 0.2s;
+    opacity: 0.6;
+  }
+
+  .lang-chevron.open {
+    transform: rotate(180deg);
+  }
+
+  .lang-dropdown {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 0;
+    min-width: 160px;
+    background: rgba(20, 20, 30, 0.98);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    padding: 4px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  .lang-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+  }
+
+  .lang-option:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+  }
+
+  .lang-option.active {
+    background: rgba(0, 122, 204, 0.3);
+    color: white;
+  }
+
+  .lang-name {
+    flex: 1;
+  }
+
+  .lang-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+  }
+
+  :global(.light-mode) .lang-dropdown {
+    background: rgba(255, 255, 255, 0.98);
+    border-color: rgba(0, 0, 0, 0.1);
+  }
+
+  :global(.light-mode) .lang-option {
+    color: rgba(0, 0, 0, 0.8);
+  }
+
+  :global(.light-mode) .lang-option:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: black;
+  }
+
+  :global(.light-mode) .lang-option.active {
+    background: rgba(0, 122, 204, 0.2);
+    color: black;
   }
 </style>
