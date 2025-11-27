@@ -1,5 +1,12 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import BrainVaultView from '$lib/components/Views/BrainVaultView.svelte';
+  import { showingLandingPage } from '$lib/stores/uiStore';
+
+  // Signal that we're not on landing page so GlobalLanguageSwitcher shows
+  onMount(() => {
+    showingLandingPage.set(false);
+  });
 </script>
 
 <svelte:head>
