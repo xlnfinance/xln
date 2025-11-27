@@ -133,6 +133,31 @@
     },
   ];
 
+  // Short memorable words for passphrase suggestion (3-5 letters each)
+  const WORDS = [
+    'sun', 'moon', 'star', 'fire', 'wind', 'rain', 'snow', 'leaf', 'tree', 'bird',
+    'wolf', 'bear', 'fish', 'frog', 'lion', 'hawk', 'deer', 'swan', 'crow', 'owl',
+    'blue', 'red', 'gold', 'jade', 'ruby', 'onyx', 'iron', 'silk', 'oak', 'ash',
+    'dawn', 'dusk', 'noon', 'tide', 'wave', 'rock', 'sand', 'peak', 'cave', 'lake',
+    'rose', 'lily', 'fern', 'vine', 'seed', 'root', 'bark', 'twig', 'moss', 'herb',
+    'king', 'sage', 'bard', 'monk', 'lord', 'duke', 'earl', 'chef', 'smith', 'mage',
+  ];
+
+  function suggestPassphrase(): void {
+    // Pick 3 random words = ~17.8 bits each × 3 = ~53 bits
+    // Combined with factor 5+ this is very strong
+    const words: string[] = [];
+    const used = new Set<number>();
+    while (words.length < 3) {
+      const idx = Math.floor(Math.random() * WORDS.length);
+      if (!used.has(idx)) {
+        used.add(idx);
+        words.push(WORDS[idx]!);
+      }
+    }
+    passphrase = words.join('-');
+  }
+
   // ============================================================================
   // STATE
   // ============================================================================
@@ -1040,6 +1065,17 @@
                 {/if}
               </svg>
             </button>
+            <button
+              class="suggest-btn"
+              on:click={suggestPassphrase}
+              type="button"
+              title="Suggest random passphrase"
+              aria-label="Suggest random passphrase"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M20 7h-9m9 10h-9M4 7h.01M4 17h.01M7 4l-3 3 3 3M7 17l-3 3 3 3"/>
+              </svg>
+            </button>
           </div>
           {#if passphrase}
             <div class="strength-meter">
@@ -1500,8 +1536,28 @@
     color: rgba(255, 255, 255, 0.7);
   }
 
+  .input-wrapper .suggest-btn {
+    position: absolute;
+    right: 48px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.4);
+    transition: color 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .input-wrapper .suggest-btn:hover {
+    color: rgba(139, 92, 246, 0.9);
+  }
+
   .input-wrapper:has(.toggle-visibility) input {
-    padding-right: 48px;
+    padding-right: 80px;
   }
 
   /* Strength Meter */
