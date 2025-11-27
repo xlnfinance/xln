@@ -146,6 +146,36 @@
   let passphrase = '';
   let showPassphrase = false;
   let factor = 5;
+  let animationStyle: 'vault' | 'shards' = 'shards'; // Toggle between vault door and shard grid
+  let soundTheme: 'off' | 'vault' | 'digital' | 'nature' | 'minimal' | 'retro' = 'off';
+  $: soundEnabled = soundTheme !== 'off';
+
+  // XLN tips shown during derivation
+  const XLN_TIPS = [
+    'xln enables instant off-chain payments between any two entities',
+    'Every transaction is cryptographically signed and verifiable on-chain',
+    'BrainVault uses Argon2id — the same algorithm trusted by password managers',
+    'Your wallet exists in your memory. No seed phrase backup needed.',
+    'xln supports multi-jurisdictional settlements across different blockchains',
+    'Higher security factors = more shards = exponentially harder to brute-force',
+    'The same name + passphrase + factor will always produce the same wallet',
+    'xln entities can exchange value without trusting a central authority',
+    'Device passphrase adds an extra layer — use it for hardware wallet hidden wallets',
+    'Each shard requires 256MB of memory, making GPU attacks impractical',
+    'xln uses bilateral consensus for instant finality between parties',
+    'Your password manager passwords are derived from your master key — no storage needed',
+    'Factor 5 requires ~64GB equivalent work — good balance of security and speed',
+    'xln separates jurisdiction (law), entity (identity), and account (balance) layers',
+    'The 24-word mnemonic is BIP39 standard — works with MetaMask, Ledger, Trezor',
+    'xln enables programmable money with smart contract integration',
+    'Memory-hard functions prevent specialized ASIC attacks on your passphrase',
+    'xln achieves finality in milliseconds vs hours for on-chain transactions',
+    'Your wallet address is derived from Ethereum\'s standard HD path m/44\'/60\'/0\'/0/0',
+    'xln is open source — audit the code yourself at github.com/xlnfinance/xln',
+  ];
+
+  let currentTipIndex = 0;
+  let tipInterval: ReturnType<typeof setInterval> | null = null;
 
   // Derivation state
   let workers: Worker[] = [];
@@ -195,42 +225,131 @@
   }
 
   function playVaultClick(intensity: number = 1) {
+    if (!soundEnabled) return;
     try {
       const ctx = initAudio();
       if (ctx.state === 'suspended') ctx.resume();
 
-      // Create mechanical click sound
-      const oscillator = ctx.createOscillator();
-      const gainNode = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-
-      // Metallic click parameters
-      oscillator.type = 'square';
-      oscillator.frequency.setValueAtTime(800 + Math.random() * 200, ctx.currentTime);
-      oscillator.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.05);
-
-      // Low-pass filter for mechanical sound
-      filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(2000, ctx.currentTime);
-      filter.frequency.exponentialRampToValueAtTime(400, ctx.currentTime + 0.03);
-      filter.Q.value = 2;
-
-      // Quick decay envelope
-      gainNode.gain.setValueAtTime(0.15 * intensity, ctx.currentTime);
-      gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
-
-      oscillator.connect(filter);
-      filter.connect(gainNode);
-      gainNode.connect(ctx.destination);
-
-      oscillator.start(ctx.currentTime);
-      oscillator.stop(ctx.currentTime + 0.08);
+      switch (soundTheme) {
+        case 'vault': // Heavy mechanical vault tumbler
+          playVaultTumbler(ctx, intensity);
+          break;
+        case 'digital': // Sci-fi digital blip
+          playDigitalBlip(ctx, intensity);
+          break;
+        case 'nature': // Soft water drop
+          playWaterDrop(ctx, intensity);
+          break;
+        case 'minimal': // Subtle tick
+          playMinimalTick(ctx, intensity);
+          break;
+        case 'retro': // 8-bit coin sound
+          playRetroCoin(ctx, intensity);
+          break;
+      }
     } catch (e) {
       // Audio not available, ignore
     }
   }
 
+  function playVaultTumbler(ctx: AudioContext, intensity: number) {
+    // Heavy mechanical vault tumbler click
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(150 + Math.random() * 50, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.1);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(800, ctx.currentTime);
+    filter.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.08);
+    filter.Q.value = 5;
+
+    gain.gain.setValueAtTime(0.2 * intensity, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.12);
+  }
+
+  function playDigitalBlip(ctx: AudioContext, intensity: number) {
+    // Sci-fi digital blip
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(1200, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.05);
+
+    gain.gain.setValueAtTime(0.12 * intensity, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.06);
+  }
+
+  function playWaterDrop(ctx: AudioContext, intensity: number) {
+    // Soft water drop
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(600 + Math.random() * 200, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.15);
+
+    gain.gain.setValueAtTime(0.08 * intensity, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.2);
+  }
+
+  function playMinimalTick(ctx: AudioContext, intensity: number) {
+    // Subtle minimal tick
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(2000, ctx.currentTime);
+
+    gain.gain.setValueAtTime(0.06 * intensity, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.02);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.02);
+  }
+
+  function playRetroCoin(ctx: AudioContext, intensity: number) {
+    // 8-bit coin collect sound
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(987, ctx.currentTime);
+    osc.frequency.setValueAtTime(1319, ctx.currentTime + 0.05);
+
+    gain.gain.setValueAtTime(0.1 * intensity, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.1);
+  }
+
   function playVaultOpen() {
+    if (!soundEnabled) return;
     try {
       const ctx = initAudio();
       if (ctx.state === 'suspended') ctx.resume();
@@ -261,6 +380,7 @@
   }
 
   function hapticFeedback(pattern: 'tick' | 'complete') {
+    if (!soundEnabled) return;
     if ('vibrate' in navigator) {
       if (pattern === 'tick') {
         navigator.vibrate(5);
@@ -385,6 +505,12 @@
       elapsedMs = Date.now() - startTime;
     }, 100);
 
+    // Start tip rotation (change every 7 seconds)
+    currentTipIndex = Math.floor(Math.random() * XLN_TIPS.length);
+    tipInterval = setInterval(() => {
+      currentTipIndex = (currentTipIndex + 1) % XLN_TIPS.length;
+    }, 7000);
+
     // Create workers
     workerCount = Math.min(
       navigator.hardwareConcurrency || 4,
@@ -508,6 +634,10 @@
     if (elapsedInterval) {
       clearInterval(elapsedInterval);
       elapsedInterval = null;
+    }
+    if (tipInterval) {
+      clearInterval(tipInterval);
+      tipInterval = null;
     }
     elapsedMs = Date.now() - startTime;
 
@@ -725,9 +855,20 @@
     return hex.split('').map(c => parseInt(c, 16).toString(2).padStart(4, '0')).join('');
   }
 
-  // Password manager
+  // Password manager - auto-derive on domain change
+  $: if (siteDomain.trim() && masterKeyHex && phase === 'complete') {
+    deriveSitePasswordReactive();
+  }
+
+  async function deriveSitePasswordReactive() {
+    await deriveSitePassword();
+  }
+
   async function deriveSitePassword() {
-    if (!siteDomain.trim() || !masterKeyHex) return;
+    if (!siteDomain.trim() || !masterKeyHex) {
+      sitePassword = '';
+      return;
+    }
 
     const domain = siteDomain.trim().toLowerCase();
     const masterKey = hexToBytes(masterKeyHex);
@@ -773,6 +914,10 @@
       clearInterval(elapsedInterval);
       elapsedInterval = null;
     }
+    if (tipInterval) {
+      clearInterval(tipInterval);
+      tipInterval = null;
+    }
     // Keep name and passphrase for convenience
     mnemonic24 = '';
     mnemonic12 = '';
@@ -790,6 +935,9 @@
     terminateWorkers();
     if (elapsedInterval) {
       clearInterval(elapsedInterval);
+    }
+    if (tipInterval) {
+      clearInterval(tipInterval);
     }
   });
 
@@ -930,6 +1078,21 @@
           </div>
         </div>
 
+        <!-- Sound Setting -->
+        <div class="input-group settings-row">
+          <div class="setting sound-setting">
+            <label>Sound</label>
+            <select class="sound-select" bind:value={soundTheme}>
+              <option value="off">Off</option>
+              <option value="vault">Vault</option>
+              <option value="digital">Digital</option>
+              <option value="nature">Water</option>
+              <option value="minimal">Minimal</option>
+              <option value="retro">Retro</option>
+            </select>
+          </div>
+        </div>
+
         <!-- Warning -->
         <div class="warning-box">
           <p><strong>This is permanent.</strong> Name + passphrase + security level = your wallet forever. No recovery possible.</p>
@@ -947,59 +1110,86 @@
 
     <!-- DERIVING PHASE -->
     {:else if phase === 'deriving'}
-      <div class="vault-door-container" class:opening={progress >= 100}>
-        <!-- Split door panels -->
-        <div class="vault-split-left"></div>
-        <div class="vault-split-right"></div>
-
+      {#if animationStyle === 'vault'}
         <!-- Vault Door Animation -->
-        <div class="vault-door">
-          <div class="vault-ring outer" style="--rotation: {progress * 3.6}deg"></div>
-          <div class="vault-ring middle" style="--rotation: {-progress * 2.4}deg"></div>
-          <div class="vault-ring inner" style="--rotation: {progress * 1.8}deg"></div>
+        <div class="vault-door-container" class:opening={progress >= 100}>
+          <div class="vault-split-left"></div>
+          <div class="vault-split-right"></div>
 
-          <!-- Shard segments - 8 pieces around the door -->
-          <div class="shard-segments">
-            {#each Array(shardCount) as _, i}
-              <div
-                class="shard-segment"
-                class:pending={shardStatus[i] === 'pending'}
-                class:computing={shardStatus[i] === 'computing'}
-                class:complete={shardStatus[i] === 'complete'}
-                style="--shard-angle: {i * (360 / shardCount)}deg; --shard-index: {i}"
-              >
-                <div class="shard-inner"></div>
-              </div>
-            {/each}
+          <div class="vault-door">
+            <div class="vault-ring outer" style="--rotation: {progress * 3.6}deg"></div>
+            <div class="vault-ring middle" style="--rotation: {-progress * 2.4}deg"></div>
+            <div class="vault-ring inner" style="--rotation: {progress * 1.8}deg"></div>
+
+            <div class="vault-center">
+              <div class="vault-logo">◈</div>
+            </div>
+            <div class="vault-progress-ring">
+              {#each Array(36) as _, i}
+                <div
+                  class="vault-tick"
+                  class:active={i < Math.floor(progress / 2.78)}
+                  style="--angle: {i * 10}deg"
+                ></div>
+              {/each}
+            </div>
           </div>
 
-          <div class="vault-center">
-            <div class="vault-logo">◈</div>
+          <div class="vault-info">
+            <div class="vault-progress-text">{Math.floor(progress)}%</div>
+            <div class="vault-time">{formatDuration(remainingMs)}</div>
+            <div class="vault-shards">{shardsCompleted}/{shardCount} shards</div>
+            <div class="vault-tip">{XLN_TIPS[currentTipIndex]}</div>
           </div>
-          <!-- Progress indicator dots around the ring -->
-          <div class="vault-progress-ring">
-            {#each Array(36) as _, i}
+
+          <!-- Controls bar -->
+          <div class="anim-controls">
+            <button class="control-btn" on:click={() => animationStyle = 'shards'} title="Switch to shards view">
+              ▦
+            </button>
+            <button class="control-btn" on:click={() => soundEnabled = !soundEnabled} title="Toggle sound">
+              {soundEnabled ? '🔊' : '🔇'}
+            </button>
+            <button class="control-btn cancel" on:click={reset}>esc</button>
+          </div>
+        </div>
+      {:else}
+        <!-- Shards Grid Animation -->
+        <div class="shards-container">
+          <div class="shards-header">
+            <div class="shards-progress-text">{Math.floor(progress)}%</div>
+            <div class="shards-time">{formatDuration(remainingMs)}</div>
+          </div>
+
+          <div class="shard-grid" style="--cols: {gridCols}">
+            {#each shardStatus as status, i}
               <div
-                class="vault-tick"
-                class:active={i < Math.floor(progress / 2.78)}
-                style="--angle: {i * 10}deg"
+                class="shard"
+                class:pending={status === 'pending'}
+                class:computing={status === 'computing'}
+                class:complete={status === 'complete'}
               ></div>
             {/each}
           </div>
-        </div>
 
-        <!-- Minimal text info -->
-        <div class="vault-info">
-          <div class="vault-progress-text">{Math.floor(progress)}%</div>
-          <div class="vault-time">{formatDuration(remainingMs)}</div>
-          <div class="vault-shards">{shardsCompleted}/{shardCount} shards</div>
-        </div>
+          <div class="shards-footer">
+            {shardsCompleted}/{shardCount} shards
+          </div>
 
-        <!-- Cancel - subtle -->
-        <button class="vault-cancel" on:click={reset}>
-          esc
-        </button>
-      </div>
+          <div class="shards-tip">{XLN_TIPS[currentTipIndex]}</div>
+
+          <!-- Controls bar -->
+          <div class="anim-controls">
+            <button class="control-btn" on:click={() => animationStyle = 'vault'} title="Switch to vault view">
+              ◎
+            </button>
+            <button class="control-btn" on:click={() => soundEnabled = !soundEnabled} title="Toggle sound">
+              {soundEnabled ? '🔊' : '🔇'}
+            </button>
+            <button class="control-btn cancel" on:click={reset}>esc</button>
+          </div>
+        </div>
+      {/if}
 
     <!-- COMPLETE PHASE -->
     {:else if phase === 'complete'}
@@ -1097,21 +1287,15 @@
           </div>
         </div>
 
-        <!-- Password Manager -->
+        <!-- Password Manager - simplified -->
         <div class="result-section password-manager">
-          <label>
-            <span class="pm-icon">🔑</span> Password Manager
-            <span class="label-hint">(derive unique passwords for any site)</span>
-          </label>
-          <div class="pm-input-row">
-            <input
-              type="text"
-              placeholder="example.com"
-              bind:value={siteDomain}
-              on:keydown={(e) => e.key === 'Enter' && deriveSitePassword()}
-            />
-            <button on:click={deriveSitePassword}>Generate</button>
-          </div>
+          <label>Password Manager</label>
+          <input
+            type="text"
+            class="pm-domain-input"
+            placeholder="domain.com"
+            bind:value={siteDomain}
+          />
           {#if sitePassword}
             <div class="result-box site-password">
               <code class:blurred={!showSitePassword}>
@@ -1392,6 +1576,79 @@
     color: rgba(255, 255, 255, 0.5);
   }
 
+  /* Settings Row (Animation + Sound) */
+  .settings-row {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  .setting {
+    flex: 1;
+  }
+
+  .setting > label {
+    display: block;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-bottom: 6px;
+  }
+
+  .toggle-buttons {
+    display: flex;
+    gap: 6px;
+  }
+
+  .toggle-option {
+    flex: 1;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .toggle-option:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .toggle-option.active {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: white;
+  }
+
+  /* Sound select dropdown */
+  .sound-select {
+    width: 100%;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: white;
+    font-size: 13px;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.5)' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 30px;
+  }
+
+  .sound-select:focus {
+    outline: none;
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  .sound-select option {
+    background: #1a1a2e;
+    color: white;
+  }
+
   /* Warning Box */
   .warning-box {
     background: rgba(255, 255, 255, 0.03);
@@ -1620,6 +1877,39 @@
     color: rgba(255, 255, 255, 0.7);
   }
 
+  /* Controls bar - shared between both animation styles */
+  .anim-controls {
+    position: absolute;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .control-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 8px 16px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-radius: 6px;
+  }
+
+  .control-btn:hover {
+    border-color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .control-btn.cancel {
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 12px;
+    letter-spacing: 1px;
+  }
+
   /* Split door panels for dramatic opening */
   .vault-split-left,
   .vault-split-right {
@@ -1663,75 +1953,110 @@
     opacity: 0;
     transition: opacity 0.3s;
   }
-
-  /* Shard segments visualization */
-  .shard-segments {
-    position: absolute;
-    inset: 20px;
-    pointer-events: none;
-  }
-
-  .shard-segment {
-    position: absolute;
-    width: 50%;
-    height: 50%;
-    left: 50%;
-    top: 50%;
-    transform-origin: 0 0;
-    transform: rotate(var(--shard-angle, 0deg));
-    opacity: 0.3;
-    transition: opacity 0.5s, filter 0.5s;
-  }
-
-  .shard-inner {
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    background: conic-gradient(
-      from 0deg,
-      transparent 0deg,
-      rgba(255, 255, 255, 0.03) 10deg,
-      rgba(255, 255, 255, 0.08) 20deg,
-      rgba(255, 255, 255, 0.03) 35deg,
-      transparent 45deg
-    );
-    clip-path: polygon(0 0, 100% 0, 0 100%);
-  }
-
-  .shard-segment.pending {
-    opacity: 0.1;
-  }
-
-  .shard-segment.computing {
-    opacity: 0.6;
-    animation: shard-compute 0.5s ease-in-out infinite alternate;
-  }
-
-  .shard-segment.complete {
-    opacity: 1;
-  }
-
-  .shard-segment.complete .shard-inner {
-    background: conic-gradient(
-      from 0deg,
-      transparent 0deg,
-      rgba(255, 255, 255, 0.1) 10deg,
-      rgba(255, 255, 255, 0.25) 20deg,
-      rgba(255, 255, 255, 0.1) 35deg,
-      transparent 45deg
-    );
-    filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.3));
-  }
-
-  @keyframes shard-compute {
-    0% { opacity: 0.4; }
-    100% { opacity: 0.8; }
-  }
-
   .vault-shards {
     font-size: 11px;
     color: rgba(255, 255, 255, 0.3);
     margin-top: 4px;
+    letter-spacing: 1px;
+  }
+
+  /* Tips display */
+  .vault-tip,
+  .shards-tip {
+    max-width: 400px;
+    margin-top: 24px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+    text-align: center;
+    line-height: 1.5;
+    padding: 0 20px;
+    animation: tip-fade 7s ease-in-out infinite;
+  }
+
+  @keyframes tip-fade {
+    0%, 100% { opacity: 0.4; }
+    10%, 90% { opacity: 1; }
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+     SHARDS GRID - Alternative shard visualization
+     ═══════════════════════════════════════════════════════════════════════════ */
+
+  .shards-container {
+    position: fixed;
+    inset: 0;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+    z-index: 1000;
+  }
+
+  .shards-header {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+
+  .shards-progress-text {
+    font-size: 56px;
+    font-weight: 200;
+    color: #fff;
+    letter-spacing: 4px;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  }
+
+  .shards-time {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.4);
+    margin-top: 8px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+
+  .shard-grid {
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 8), 1fr);
+    gap: 3px;
+    max-width: 400px;
+    max-height: 400px;
+    width: 100%;
+    aspect-ratio: 1;
+  }
+
+  .shard {
+    aspect-ratio: 1;
+    border-radius: 2px;
+    transition: all 0.3s ease;
+  }
+
+  .shard.pending {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .shard.computing {
+    background: rgba(147, 51, 234, 0.4);
+    border: 1px solid rgba(147, 51, 234, 0.6);
+    animation: shard-pulse 1s ease-in-out infinite;
+  }
+
+  .shard.complete {
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(255, 255, 255, 1);
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+  }
+
+  @keyframes shard-pulse {
+    0%, 100% { opacity: 0.6; }
+    50% { opacity: 1; }
+  }
+
+  .shards-footer {
+    margin-top: 32px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.4);
     letter-spacing: 1px;
   }
 
@@ -1940,63 +2265,42 @@
     font-size: 12px;
   }
 
-  /* Password Manager */
+  /* Password Manager - simplified */
   .password-manager {
-    background: rgba(147, 51, 234, 0.1);
-    border-radius: 16px;
-    padding: 20px;
     margin-top: 32px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 24px;
   }
 
-  .password-manager label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  .password-manager > label {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-bottom: 8px;
+    display: block;
   }
 
-  .pm-icon {
-    font-size: 20px;
-  }
-
-  .pm-input-row {
-    display: flex;
-    gap: 8px;
-    margin-top: 12px;
-  }
-
-  .pm-input-row input {
-    flex: 1;
+  .pm-domain-input {
+    width: 100%;
     padding: 12px 14px;
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 10px;
     font-size: 14px;
     color: white;
+    box-sizing: border-box;
   }
 
-  .pm-input-row input:focus {
+  .pm-domain-input:focus {
     outline: none;
-    border-color: rgba(147, 51, 234, 0.5);
+    border-color: rgba(255, 255, 255, 0.25);
   }
 
-  .pm-input-row button {
-    padding: 12px 20px;
-    background: rgba(147, 51, 234, 0.4);
-    border: 1px solid rgba(147, 51, 234, 0.5);
-    border-radius: 10px;
-    color: white;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .pm-input-row button:hover {
-    background: rgba(147, 51, 234, 0.6);
+  .pm-domain-input::placeholder {
+    color: rgba(255, 255, 255, 0.3);
   }
 
   .result-box.site-password {
-    margin-top: 12px;
+    margin-top: 10px;
   }
 
   /* FAQ Section */
