@@ -300,8 +300,13 @@
     return audioCtx;
   }
 
-  function playVaultClick(_intensity: number = 1) {
-    // Sound disabled by default - no-op
+  function playVaultClick(intensity: number = 1) {
+    try {
+      const ctx = initAudio();
+      playVaultTumbler(ctx, intensity);
+    } catch {
+      // Audio not available
+    }
   }
 
   function playVaultTumbler(ctx: AudioContext, intensity: number) {
@@ -401,11 +406,25 @@
   }
 
   function playVaultOpen() {
-    // Sound disabled by default - no-op
+    try {
+      const ctx = initAudio();
+      // Heavy vault door opening sequence
+      for (let i = 0; i < 3; i++) {
+        setTimeout(() => playVaultTumbler(ctx, 1.2 - i * 0.2), i * 100);
+      }
+    } catch {
+      // Audio not available
+    }
   }
 
-  function hapticFeedback(_pattern: 'tick' | 'complete') {
-    // Sound disabled by default - no-op
+  function hapticFeedback(pattern: 'tick' | 'complete') {
+    if ('vibrate' in navigator) {
+      if (pattern === 'tick') {
+        navigator.vibrate(10);
+      } else if (pattern === 'complete') {
+        navigator.vibrate([100, 50, 100]);
+      }
+    }
   }
 
   // Track tick activation for sound - play every ~16 chunks (not every tick)
