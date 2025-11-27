@@ -1110,6 +1110,28 @@
             font-style: italic;
         }
 
+        .summary-content a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .summary-content a:hover {
+            text-decoration: underline;
+        }
+
+        /* digest-specific styles */
+        .digest-content blockquote {
+            background: var(--bg-hover);
+            padding: 12px 16px;
+            border-radius: 8px;
+            margin: 16px 0;
+            font-style: normal;
+        }
+
+        .digest-content blockquote strong {
+            color: var(--accent);
+        }
+
         .summary-loading {
             text-align: center;
             padding: 40px;
@@ -1498,6 +1520,7 @@
                 <button class="modal-tab active" data-mode="short">short</button>
                 <button class="modal-tab" data-mode="medium">medium</button>
                 <button class="modal-tab" data-mode="long">long</button>
+                <button class="modal-tab" data-mode="digest">💬 digest</button>
             </div>
             <div class="modal-body">
                 <div class="summary-content" id="summaryContent">
@@ -1547,9 +1570,11 @@
 
         // summary config
         const NEWS_API_BASE = 'https://xln.finance/api/news'; // adjust to your api url
+        const STATIC_DATA_BASE = '/news/data'; // static json from cron
         const MIN_POINTS_FOR_SUMMARY = 200;
         let currentSummaryStory = null;
         let summaryCache = {}; // local cache { hn_id: { short, medium, long } }
+        let cronFeed = null; // cached cron feed
 
         // reading history
         let readStories = JSON.parse(localStorage.getItem('xln-read') || '[]');
@@ -1905,12 +1930,40 @@
             return (story.score || 0) >= MIN_POINTS_FOR_SUMMARY;
         }
 
+        // try to load cron-generated feed
+        async function loadCronFeed() {
+            if (cronFeed) return cronFeed;
+            try {
+                const res = await fetch(`${STATIC_DATA_BASE}/feed.json`);
+                if (res.ok) {
+                    cronFeed = await res.json();
+                    console.log('📦 loaded cron feed:', cronFeed.stories?.length || 0, 'stories');
+                }
+            } catch (e) {
+                console.log('📦 no cron feed available');
+            }
+            return cronFeed;
+        }
+
         async function fetchSummary(hn_id, mode = 'medium') {
             // check local cache first
             if (summaryCache[hn_id]?.[mode]) {
                 return { summary: summaryCache[hn_id][mode], cached: true };
             }
 
+            // try static cron feed
+            const feed = await loadCronFeed();
+            if (feed?.stories) {
+                const story = feed.stories.find(s => s.hn_id === hn_id);
+                if (story?.summaries?.[mode]) {
+                    // cache locally
+                    if (!summaryCache[hn_id]) summaryCache[hn_id] = {};
+                    summaryCache[hn_id][mode] = story.summaries[mode];
+                    return { summary: story.summaries[mode], cached: true, source: 'cron' };
+                }
+            }
+
+            // fallback to api
             const res = await fetch(`${NEWS_API_BASE}/summarize`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1929,6 +1982,17 @@
             summaryCache[hn_id][mode] = data.summary;
 
             return data;
+        }
+
+        // fetch comment digest from cron
+        async function fetchDigest(hn_id) {
+            try {
+                const res = await fetch(`${STATIC_DATA_BASE}/digest-${hn_id}.md`);
+                if (res.ok) {
+                    return await res.text();
+                }
+            } catch (e) {}
+            return null;
         }
 
         function openSummaryModal(story) {
@@ -1956,37 +2020,52 @@
             content.innerHTML = `
                 <div class="summary-loading">
                     <div class="spinner"></div>
-                    generating ${mode} summary...
+                    ${mode === 'digest' ? 'loading comment digest...' : `generating ${mode} summary...`}
                 </div>
             `;
 
             try {
-                const data = await fetchSummary(currentSummaryStory.id, mode);
-                content.innerHTML = `<div class="summary-content">${markdownToHtml(data.summary)}</div>`;
-                if (data.cached) {
-                    showToast('📝', 'cached', 'loaded from cache');
+                if (mode === 'digest') {
+                    // load comment digest
+                    const digest = await fetchDigest(currentSummaryStory.id);
+                    if (digest) {
+                        content.innerHTML = `<div class="summary-content digest-content">${markdownToHtml(digest)}</div>`;
+                        showToast('💬', 'digest loaded', 'rich comment stream');
+                    } else {
+                        content.innerHTML = `<div class="summary-error">💬 no digest available yet. digests are generated every 6 hours for popular stories.</div>`;
+                    }
+                } else {
+                    const data = await fetchSummary(currentSummaryStory.id, mode);
+                    content.innerHTML = `<div class="summary-content">${markdownToHtml(data.summary)}</div>`;
+                    if (data.cached) {
+                        showToast('📝', data.source === 'cron' ? 'pre-cached' : 'cached', 'loaded from cache');
+                    }
                 }
             } catch (err) {
                 content.innerHTML = `<div class="summary-error">❌ ${err.message}</div>`;
             }
         }
 
-        // simple markdown to html
+        // markdown to html with link support
         function markdownToHtml(md) {
             return md
+                // links first
+                .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+                // headers
                 .replace(/^### (.+)$/gm, '<h3>$1</h3>')
                 .replace(/^## (.+)$/gm, '<h2>$1</h2>')
                 .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+                // emphasis
                 .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
                 .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                // lists
                 .replace(/^- (.+)$/gm, '<li>$1</li>')
                 .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
+                // blockquotes (multiline support)
                 .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
-                .replace(/\n\n/g, '</p><p>')
-                .replace(/^(.+)$/gm, (match) => {
-                    if (match.startsWith('<')) return match;
-                    return match;
-                });
+                .replace(/<\/blockquote>\n<blockquote>/g, '<br>')
+                // paragraphs
+                .replace(/\n\n/g, '</p><p>');
         }
 
         // setup modal tabs

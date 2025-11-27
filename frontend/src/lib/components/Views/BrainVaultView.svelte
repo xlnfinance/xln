@@ -92,6 +92,62 @@
     { factor: 9, shards: 65536, memory: '16TB', time: '55hr', description: 'Nation-state', attackCost: '$800M', attackTime: '16 years' },
   ];
 
+  // ============================================================================
+  // IDENTICON GENERATOR (Ethereum Blockies-style)
+  // ============================================================================
+
+  function generateIdenticon(address: string, size = 8): string {
+    // Simple hash function for seed
+    const seed = address.toLowerCase().replace('0x', '');
+    let seedInt = 0;
+    for (let i = 0; i < seed.length; i++) {
+      seedInt = ((seedInt << 5) - seedInt + seed.charCodeAt(i)) | 0;
+    }
+
+    // PRNG based on seed
+    const rand = () => {
+      const x = Math.sin(seedInt++) * 10000;
+      return x - Math.floor(x);
+    };
+
+    // Generate colors from seed
+    const hue = Math.floor(rand() * 360);
+    const sat = 50 + Math.floor(rand() * 30);
+    const colors = [
+      `hsl(${hue}, ${sat}%, 65%)`,
+      `hsl(${(hue + 120) % 360}, ${sat}%, 35%)`,
+      `hsl(${(hue + 240) % 360}, ${sat}%, 50%)`
+    ];
+
+    // Generate pattern (symmetric)
+    const pattern: number[][] = [];
+    for (let y = 0; y < size; y++) {
+      pattern[y] = [];
+      for (let x = 0; x < Math.ceil(size / 2); x++) {
+        const v = Math.floor(rand() * 3);
+        pattern[y][x] = v;
+        pattern[y][size - 1 - x] = v; // Mirror
+      }
+    }
+
+    // Render to SVG
+    const cellSize = 10;
+    let svg = `<svg width="${size * cellSize}" height="${size * cellSize}" viewBox="0 0 ${size * cellSize} ${size * cellSize}" xmlns="http://www.w3.org/2000/svg">`;
+    svg += `<rect width="100%" height="100%" fill="${colors[0]}"/>`;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        if (pattern[y][x] > 0) {
+          svg += `<rect x="${x * cellSize}" y="${y * cellSize}" width="${cellSize}" height="${cellSize}" fill="${colors[pattern[y][x]]}"/>`;
+        }
+      }
+    }
+    svg += '</svg>';
+    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+  }
+
+  // Reactive identicon
+  $: identiconSrc = ethereumAddress ? generateIdenticon(ethereumAddress) : '';
+
   const FAQ_ITEMS = [
     {
       q: 'What is BrainVault?',
@@ -1439,10 +1495,11 @@
           <p class="success-stats">{formatDuration(elapsedMs)} <span class="stat-divider">·</span> {shardCount} shards</p>
         </div>
 
-        <!-- Address -->
+        <!-- Address with Identicon -->
         <div class="result-section">
           <label>Ethereum Address</label>
-          <div class="result-box address">
+          <div class="result-box address with-identicon">
+            <img src={identiconSrc} alt="Address identicon" class="identicon" />
             <code>{ethereumAddress}</code>
             <button class="copy-btn" on:click={() => copyToClipboard(ethereumAddress, 'address')}>
               {copiedField === 'address' ? '✓' : '📋'}
@@ -3662,6 +3719,21 @@
     font-size: 13px;
   }
 
+  .result-box.address.with-identicon {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .identicon {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    flex-shrink: 0;
+    border: 2px solid rgba(180, 140, 80, 0.3);
+    box-shadow: 0 0 12px rgba(180, 140, 80, 0.2);
+  }
+
   .copy-btn, .toggle-btn {
     background: rgba(180, 140, 80, 0.15);
     border: 1px solid rgba(180, 140, 80, 0.2);
@@ -3725,8 +3797,10 @@
   }
 
   .word {
+    display: flex;
+    align-items: baseline;
     background: rgba(180, 140, 80, 0.08);
-    padding: 10px 12px;
+    padding: 12px 14px;
     border-radius: 6px;
     font-size: 15px;
     color: #fbbf24;
@@ -3735,13 +3809,17 @@
     letter-spacing: 0.02em;
     border: 1px solid rgba(180, 140, 80, 0.15);
     text-shadow: 0 0 8px rgba(251, 191, 36, 0.2);
+    min-height: 44px;
+    box-sizing: border-box;
   }
 
   .word-num {
     color: rgba(180, 140, 80, 0.5);
-    margin-right: 6px;
+    margin-right: 8px;
     font-size: 12px;
     font-weight: 400;
+    min-width: 24px;
+    flex-shrink: 0;
   }
 
   .result-box.compact {
