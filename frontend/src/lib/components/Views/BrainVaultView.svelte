@@ -214,8 +214,8 @@
   let deviceMemoryGB = typeof navigator !== 'undefined' ? ((navigator as any).deviceMemory || 8) : 8;
   let deviceMemoryMB = deviceMemoryGB * 1024;
 
-  // Reactive memory calculations
-  $: allocatedMemoryMB = workerCount * 256;
+  // Reactive memory calculations - show TARGET for immediate feedback, not actual workerCount
+  $: allocatedMemoryMB = targetWorkerCount * 256;
   $: memoryPercent = Math.min(100, (allocatedMemoryMB / deviceMemoryMB) * 100);
   let shardCount = 0;
   let shardsCompleted = 0;
@@ -428,11 +428,12 @@
     }
   }
 
-  // Track tick activation for sound
+  // Track tick activation for sound - play every ~16 chunks (not every tick)
+  // 100% / ~6 sounds = ~16.67% intervals
   $: if (phase === 'deriving') {
-    const currentActiveTick = Math.floor(progress / 2.78);
+    const currentActiveTick = Math.floor(progress / 16.67);
     if (currentActiveTick > lastActiveTick && currentActiveTick > 0) {
-      // Play click for each new tick that activates
+      // Play click for approximately every 16 chunks of progress
       playVaultClick(0.8 + Math.random() * 0.4);
       hapticFeedback('tick');
       lastActiveTick = currentActiveTick;
@@ -1080,11 +1081,14 @@
     <div class="logo-monument" class:deriving={phase === 'deriving'}>
       <div class="logo-glow" class:active={phase === 'deriving'}></div>
       <img src="/img/l.png" alt="xln" class="triangle-logo" class:deriving={phase === 'deriving'} />
-      {#if phase === 'deriving'}
-        <div class="pyramid-crack left"></div>
-        <div class="pyramid-crack right"></div>
-      {/if}
     </div>
+    <!-- Trust Badges -->
+    {#if phase === 'input'}
+      <div class="trust-badges">
+        <span class="badge offline">100% OFFLINE</span>
+        <span class="badge client">CLIENT-SIDE ONLY</span>
+      </div>
+    {/if}
   </div>
 
   <!-- Main Content -->
@@ -1098,8 +1102,10 @@
           <div class="resume-banner">
             <span class="resume-icon">⏸️</span>
             <span>Incomplete derivation found ({shardsCompleted}/{getShardCount(factor)} shards)</span>
-            <button class="resume-btn" on:click={loadResumeToken}>Resume</button>
-            <button class="dismiss-btn" on:click={() => { showResumeInput = false; localStorage.removeItem('brainvault_resume'); }}>Dismiss</button>
+            <div class="resume-actions">
+              <button class="resume-btn" on:click={loadResumeToken}>Resume</button>
+              <button class="dismiss-btn" on:click={() => { showResumeInput = false; localStorage.removeItem('brainvault_resume'); }}>Dismiss</button>
+            </div>
           </div>
         {/if}
 
@@ -1276,7 +1282,7 @@
                   min="1"
                   max={maxWorkers}
                   bind:value={targetWorkerCount}
-                  on:change={adjustWorkers}
+                  on:input={adjustWorkers}
                   class="memory-slider"
                 />
                 <span class="memory-value">{allocatedMemoryMB}MB / {deviceMemoryMB}MB</span>
@@ -1388,7 +1394,7 @@
                 min="1"
                 max={maxWorkers}
                 bind:value={targetWorkerCount}
-                on:change={adjustWorkers}
+                on:input={adjustWorkers}
                 class="parallelism-slider"
                 title="Adjust CPU usage: {targetWorkerCount}/{maxWorkers} threads"
               />
@@ -1422,8 +1428,8 @@
                 <path d="M5 13l4 4L19 7" stroke="url(#checkGradient)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
                 <defs>
                   <linearGradient id="checkGradient" x1="5" y1="7" x2="19" y2="17">
-                    <stop offset="0%" stop-color="#a855f7"/>
-                    <stop offset="100%" stop-color="#06b6d4"/>
+                    <stop offset="0%" stop-color="#fbbf24"/>
+                    <stop offset="100%" stop-color="#d97706"/>
                   </linearGradient>
                 </defs>
               </svg>
@@ -1750,6 +1756,47 @@
     margin-bottom: 12px;
   }
 
+  /* Trust Badges - HN crowd loves these */
+  .trust-badges {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .badge.offline {
+    background: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+  }
+
+  .badge.offline::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    background: #22c55e;
+    border-radius: 50%;
+    box-shadow: 0 0 8px #22c55e;
+  }
+
+  .badge.client {
+    background: rgba(180, 140, 80, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(180, 140, 80, 0.3);
+  }
+
   .logo-monument {
     position: relative;
     margin-bottom: 0;
@@ -1795,38 +1842,6 @@
   @keyframes glow-pulse-intense {
     0%, 100% { opacity: 0.8; transform: translate(-50%, -50%) scale(1); }
     50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
-  }
-
-  /* Pyramid cracks - light escaping from within */
-  .pyramid-crack {
-    position: absolute;
-    top: 50%;
-    width: 3px;
-    height: 60px;
-    background: linear-gradient(180deg,
-      transparent 0%,
-      rgba(255, 220, 120, 0.8) 20%,
-      rgba(255, 200, 100, 1) 50%,
-      rgba(255, 220, 120, 0.8) 80%,
-      transparent 100%);
-    transform: translateY(-50%);
-    animation: crack-glow 2s ease-in-out infinite;
-    box-shadow: 0 0 20px rgba(255, 200, 100, 0.8), 0 0 40px rgba(255, 180, 80, 0.4);
-  }
-
-  .pyramid-crack.left {
-    left: -8px;
-    transform: translateY(-50%) rotate(-15deg);
-  }
-
-  .pyramid-crack.right {
-    right: -8px;
-    transform: translateY(-50%) rotate(15deg);
-  }
-
-  @keyframes crack-glow {
-    0%, 100% { opacity: 0.6; height: 60px; }
-    50% { opacity: 1; height: 70px; }
   }
 
   .triangle-logo {
@@ -1977,52 +1992,98 @@
     background: linear-gradient(90deg, transparent, rgba(180, 140, 80, 0.4), transparent);
   }
 
-  /* Resume Banner */
+  /* Complete phase - no visible box, seamless with vault background */
+  .glass-card.complete {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    padding: 0;
+  }
+
+  .glass-card.complete::before {
+    display: none;
+  }
+
+  /* Resume Banner - Pharaoh Gold Monumental Style */
   .resume-banner {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 12px;
-    background: rgba(147, 51, 234, 0.2);
-    border: 1px solid rgba(147, 51, 234, 0.3);
-    border-radius: 12px;
-    padding: 12px 16px;
-    margin-bottom: 24px;
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.9);
+    gap: 16px;
+    background:
+      linear-gradient(135deg, rgba(180, 140, 80, 0.15) 0%, rgba(120, 90, 50, 0.1) 100%),
+      radial-gradient(ellipse at 50% 0%, rgba(255, 200, 100, 0.1) 0%, transparent 60%);
+    border: 1px solid rgba(180, 140, 80, 0.3);
+    border-radius: 16px;
+    padding: 24px 32px;
+    margin-bottom: 32px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .resume-banner::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255, 200, 100, 0.05) 0%, transparent 100%);
+    pointer-events: none;
   }
 
   .resume-icon {
-    font-size: 20px;
+    font-size: 40px;
+    filter: drop-shadow(0 0 20px rgba(255, 200, 100, 0.4));
+  }
+
+  .resume-banner > span:nth-child(2) {
+    font-size: 18px;
+    font-weight: 600;
+    color: #fbbf24;
+    text-shadow: 0 0 10px rgba(251, 191, 36, 0.3);
+    letter-spacing: 0.02em;
+    text-align: center;
+  }
+
+  .resume-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
   }
 
   .resume-btn, .dismiss-btn {
-    padding: 6px 12px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 500;
+    padding: 12px 24px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.2s ease-out;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
 
   .resume-btn {
-    background: rgba(147, 51, 234, 0.4);
-    border: 1px solid rgba(147, 51, 234, 0.5);
-    color: white;
-    margin-left: auto;
+    background: linear-gradient(135deg, rgba(255, 200, 100, 0.3) 0%, rgba(180, 140, 80, 0.2) 100%);
+    border: 1px solid rgba(255, 200, 100, 0.4);
+    color: #fbbf24;
+    box-shadow: 0 4px 20px rgba(255, 200, 100, 0.2);
   }
 
   .resume-btn:hover {
-    background: rgba(147, 51, 234, 0.6);
+    background: linear-gradient(135deg, rgba(255, 200, 100, 0.5) 0%, rgba(180, 140, 80, 0.4) 100%);
+    box-shadow: 0 6px 30px rgba(255, 200, 100, 0.3);
+    transform: translateY(-2px);
   }
 
   .dismiss-btn {
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: rgba(255, 255, 255, 0.5);
   }
 
   .dismiss-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.25);
   }
 
   /* Input Groups - Sacred inscriptions */
@@ -3468,7 +3529,7 @@
     letter-spacing: 0.5px;
   }
 
-  /* Complete Phase - Liquid Glass Apple Style */
+  /* Complete Phase - Pharaoh Gold Theme */
   .success-header {
     text-align: center;
     margin-bottom: 36px;
@@ -3484,7 +3545,7 @@
   .success-glow {
     position: absolute;
     inset: -20px;
-    background: radial-gradient(circle, rgba(139, 92, 246, 0.4) 0%, rgba(6, 182, 212, 0.2) 50%, transparent 70%);
+    background: radial-gradient(circle, rgba(251, 191, 36, 0.4) 0%, rgba(180, 140, 80, 0.2) 50%, transparent 70%);
     filter: blur(20px);
     animation: pulse-glow 2s ease-in-out infinite;
   }
@@ -3500,15 +3561,15 @@
     height: 100%;
     border-radius: 50%;
     background: linear-gradient(135deg,
-      rgba(255, 255, 255, 0.15) 0%,
-      rgba(255, 255, 255, 0.05) 50%,
-      rgba(255, 255, 255, 0.1) 100%);
+      rgba(180, 140, 80, 0.2) 0%,
+      rgba(120, 90, 50, 0.1) 50%,
+      rgba(180, 140, 80, 0.15) 100%);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(180, 140, 80, 0.3);
     box-shadow:
-      0 8px 32px rgba(139, 92, 246, 0.3),
-      inset 0 1px 1px rgba(255, 255, 255, 0.3),
+      0 8px 32px rgba(180, 140, 80, 0.3),
+      inset 0 1px 1px rgba(255, 200, 100, 0.3),
       inset 0 -1px 1px rgba(0, 0, 0, 0.1);
     display: flex;
     align-items: center;
@@ -3532,20 +3593,21 @@
   }
 
   .success-header h2 {
-    background: linear-gradient(135deg, #e0e7ff 0%, #a5b4fc 50%, #818cf8 100%);
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 50%, #d97706 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
     margin: 0 0 8px 0;
-    font-size: 26px;
-    font-weight: 600;
+    font-size: 28px;
+    font-weight: 700;
     letter-spacing: -0.02em;
+    text-shadow: 0 0 40px rgba(251, 191, 36, 0.3);
   }
 
   .success-stats {
-    color: rgba(255, 255, 255, 0.5);
+    color: rgba(180, 140, 80, 0.7);
     margin: 0;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 500;
     letter-spacing: 0.02em;
   }
@@ -3557,24 +3619,26 @@
 
   /* Result Sections */
   .result-section {
-    margin-bottom: 24px;
+    margin-bottom: 28px;
   }
 
   .result-section > label {
     display: flex;
     align-items: baseline;
     gap: 8px;
-    margin-bottom: 8px;
-    font-size: 14px;
+    margin-bottom: 10px;
+    font-size: 13px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.9);
+    color: rgba(180, 140, 80, 0.8);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
 
   .result-box {
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    padding: 14px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(180, 140, 80, 0.2);
+    border-radius: 10px;
+    padding: 16px;
     display: flex;
     align-items: center;
     gap: 12px;
@@ -3582,7 +3646,7 @@
 
   .result-box code {
     flex: 1;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
     font-size: 14px;
     color: rgba(255, 255, 255, 0.9);
     word-break: break-all;
@@ -3594,22 +3658,25 @@
   }
 
   .result-box.address code {
-    color: #06b6d4;
+    color: #fbbf24;
+    font-size: 13px;
   }
 
   .copy-btn, .toggle-btn {
-    background: rgba(255, 255, 255, 0.1);
-    border: none;
+    background: rgba(180, 140, 80, 0.15);
+    border: 1px solid rgba(180, 140, 80, 0.2);
     border-radius: 8px;
     padding: 8px 12px;
     cursor: pointer;
     font-size: 16px;
     transition: all 0.2s;
     flex-shrink: 0;
+    color: rgba(180, 140, 80, 0.8);
   }
 
   .copy-btn:hover, .toggle-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: rgba(180, 140, 80, 0.25);
+    border-color: rgba(180, 140, 80, 0.4);
   }
 
   .copy-btn.full {
@@ -3628,41 +3695,53 @@
 
   .mnemonic-toggle button {
     width: 100%;
-    padding: 12px;
-    background: linear-gradient(135deg, rgba(147, 51, 234, 0.3), rgba(6, 182, 212, 0.3));
-    border: 1px solid rgba(147, 51, 234, 0.3);
+    padding: 14px;
+    background: linear-gradient(135deg, rgba(180, 140, 80, 0.2), rgba(120, 90, 50, 0.15));
+    border: 1px solid rgba(180, 140, 80, 0.3);
     border-radius: 8px;
-    color: white;
+    color: #fbbf24;
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
   }
 
   .mnemonic-toggle button:hover {
-    background: linear-gradient(135deg, rgba(147, 51, 234, 0.4), rgba(6, 182, 212, 0.4));
+    background: linear-gradient(135deg, rgba(180, 140, 80, 0.3), rgba(120, 90, 50, 0.25));
+    border-color: rgba(180, 140, 80, 0.5);
   }
 
   .mnemonic-words {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
-    margin-top: 16px;
+    gap: 10px;
+    margin-top: 20px;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 12px;
+    border: 1px solid rgba(180, 140, 80, 0.2);
   }
 
   .word {
-    background: rgba(255, 255, 255, 0.05);
-    padding: 8px 10px;
-    border-radius: 8px;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.9);
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    background: rgba(180, 140, 80, 0.08);
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 15px;
+    color: #fbbf24;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    border: 1px solid rgba(180, 140, 80, 0.15);
+    text-shadow: 0 0 8px rgba(251, 191, 36, 0.2);
   }
 
   .word-num {
-    color: rgba(255, 255, 255, 0.4);
-    margin-right: 4px;
-    font-size: 11px;
+    color: rgba(180, 140, 80, 0.5);
+    margin-right: 6px;
+    font-size: 12px;
+    font-weight: 400;
   }
 
   .result-box.compact {
