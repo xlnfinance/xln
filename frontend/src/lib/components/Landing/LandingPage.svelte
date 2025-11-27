@@ -5,8 +5,13 @@
   import InvariantTicker from '../Home/InvariantTicker.svelte';
   import Collapsible from './Collapsible.svelte';
   import NetworkAnimation from './NetworkAnimation.svelte';
-  
+  import { content, type Content, type ContentLang } from './content';
+  import { locale } from '$lib/i18n';
+
   export let onUnlock: () => void;
+
+  // Reactive content based on locale (en/ru only for now)
+  $: c = content[$locale === 'ru' ? 'ru' : 'en'] as Content;
 
   let inviteCode = '';
   let error = '';
@@ -227,46 +232,46 @@
 
     <!-- Main Tagline -->
     <div class="hero-tagline">
-      <h1>One protocol. Every jurisdiction. Every programmable ledger.</h1>
-      <p class="hero-subtitle">The universal CBDC substrate for planetary-scale settlement</p>
+      <h1>{c.hero.title}</h1>
+      <p class="hero-subtitle">{c.hero.subtitle}</p>
     </div>
 
     <!-- Founder Context -->
     <div class="founder-note founder-note-quote">
       <p class="quote-text">
-        <span class="quote-mark">"</span>After 13 years auditing payment systems and blockchains, I built the protocol I kept wishing existed.<span class="quote-mark">"</span>
+        <span class="quote-mark">"</span>{c.founder.quote}<span class="quote-mark">"</span>
       </p>
       <p class="signature">
-        — Egor Homakov (<a href="https://sakurity.com" target="_blank" rel="noopener" class="founder-link">Sakurity</a>)
+        — {c.founder.signature} (<a href="https://sakurity.com" target="_blank" rel="noopener" class="founder-link">Sakurity</a>)
       </p>
     </div>
 
     <div class="problem-solution">
       <div class="section">
-        <h2>137 Countries Are Building Programmable Money</h2>
-        <p class="intro">CBDCs, stablecoins, tokenized assets—98% of global GDP is going programmable. The $100 trillion question isn't <em>if</em> programmable ledgers win. It's <strong>how they scale without custodians</strong>.</p>
-        <p class="vision-text">Every existing answer fails at planetary scale:</p>
+        <h2>{c.problem.title}</h2>
+        <p class="intro">{@html c.problem.intro}</p>
+        <p class="vision-text">{c.problem.vision}</p>
         <ul>
-          <li><strong>TradFi/CEX (traditional banks, Binance, Coinbase):</strong> $100T economy, $10T daily volume, but custodial — bank bailouts, FTX collapse, Mt. Gox</li>
-          <li><strong>All big blockers (Solana, Tron, BSC):</strong> $80B+ market cap, but can't run full nodes — centralized by design</li>
-          <li><strong>All rollups (Arbitrum, Optimism, zkSync, StarkNet):</strong> $10B+ TVL, but data availability paradox — trust third-party committees, ephemeral calldata, or expensive blobspace. The DA/verifier dilemma is mathematically unsolvable: you cannot have cheap verification, permanent data, and no trust assumptions simultaneously. It's a catch-22, not a tradeoff.</li>
-          <li><strong>Sharding chains (NEAR, TON, Zilliqa, MultiversX):</strong> Still broadcast O(n) within shards — doesn't solve the fundamental bottleneck. Security dilution means one shard compromised, entire network at risk. Fishermen are security theater that breaks under economic pressure.</li>
+          <li>{@html c.problem.tradfi}</li>
+          <li>{@html c.problem.bigBlocks}</li>
+          <li>{@html c.problem.rollups}</li>
+          <li>{@html c.problem.sharding}</li>
         </ul>
 
         <div class="technical-context">
-          <p class="vision-text">For centuries, finance ran on <strong>Full-Credit Unprovable Account Networks (FCUAN)</strong>: traditional banking, CEXs, brokers. Pure credit scales phenomenally but offers weak security—assets can be seized, hubs can default.</p>
+          <p class="vision-text">{@html c.problem.fcuan}</p>
 
-          <p class="vision-text">In 2015, Lightning introduced <strong>Full-Reserve Provable Account Primitives (FRPAP)</strong>: payment channels with cryptographic proofs. Full security but hits the <em>inbound liquidity wall</em>—an architectural limit, not a bug. Lightning, Raiden, Connext, Celer — all payment channel projects are now dead or pivoted due to full-reserve constraints.</p>
+          <p class="vision-text">{@html c.problem.frpap}</p>
         </div>
       </div>
 
       <div class="section">
-        <h2>The Solution</h2>
-        <p class="intro"><strong>xln</strong> is the first <strong>Reserve-Credit Provable Account Network (RCPAN)</strong>: credit where it scales, collateral where it secures. A principled hybrid.</p>
+        <h2>{c.solution.title}</h2>
+        <p class="intro">{@html c.solution.intro}</p>
 
         <!-- Evolution Timeline - Simple Linear History -->
         <div class="evolution-simple">
-          <h3 class="evo-title">The Evolution of Settlement</h3>
+          <h3 class="evo-title">{c.solution.evolution}</h3>
 
           <div class="evo-track">
             <!-- Origin -->
@@ -284,7 +289,7 @@
               <div class="evo-name">FCUAN</div>
               <div class="evo-fullname">Full-Credit Unprovable Account Networks</div>
               <InvariantTicker label="" description="−leftCredit ≤ Δ ≤ rightCredit" pattern="[---.---]" speed={4} />
-              <div class="evo-desc">Banking. Pure credit, 7000 years dominant.</div>
+              <div class="evo-desc">{c.solution.fcuanDesc}</div>
             </div>
 
             <div class="evo-line evo-line-thick"></div>
@@ -297,7 +302,7 @@
               <div class="evo-name">FRPAP</div>
               <div class="evo-fullname">Full-Reserve Provable Account Primitives</div>
               <InvariantTicker label="" description="0 ≤ Δ ≤ collateral" pattern="[.===]" speed={4} />
-              <div class="evo-desc">Lightning. Failed (liquidity wall).</div>
+              <div class="evo-desc">{c.solution.frpapDesc}</div>
             </div>
 
             <!-- MERGE -->
@@ -312,7 +317,7 @@
               <div class="evo-name evo-name-finale">RCPAN</div>
               <div class="evo-fullname">Reserve-Credit Provable Account Network</div>
               <InvariantTicker label="" description="−leftCredit ≤ Δ ≤ collateral + rightCredit" pattern="[---.===---]" speed={4} />
-              <div class="evo-desc evo-desc-finale"><strong>xln:</strong> Banking + Lightning = RCPAN. The logical end.</div>
+              <div class="evo-desc evo-desc-finale">{@html c.solution.rcpanDesc}</div>
             </div>
 
             <div class="evo-line evo-line-future"></div>
@@ -354,20 +359,18 @@
 
       <!-- Why Now? - Urgency Section -->
       <div class="section urgency-section">
-        <h2 style="color: #00d1ff;">Why Now?</h2>
+        <h2 style="color: #00d1ff;">{c.whyNow.title}</h2>
         <ul class="properties-list">
-          <li><strong>2025:</strong> 72 CBDCs in pilot phase</li>
-          <li><strong>2026:</strong> Cross-border CBDC interop becomes political imperative</li>
-          <li><strong>Legacy rails incompatible:</strong> SWIFT and correspondent banking can't handle programmable money</li>
-          <li><strong>Window closing:</strong> Each CBDC building incompatible scaling solution creates permanent fragmentation</li>
-          <li><strong>Universal substrate needed NOW:</strong> Before standards ossify</li>
+          {#each c.whyNow.items as item}
+            <li>{@html item}</li>
+          {/each}
         </ul>
       </div>
 
       <!-- Smart Contracts Architecture -->
       <div class="section contracts-section">
-        <h2>Modular Contract System</h2>
-        <p class="architecture-subtitle">The entire financial system as pluggable Lego bricks. Deploy your own. Extend forever.</p>
+        <h2>{c.contracts.title}</h2>
+        <p class="architecture-subtitle">{c.contracts.subtitle}</p>
 
         <!-- SLOT MACHINE: 777 Style Modularity -->
         <div class="contracts-slot-machine">
@@ -443,58 +446,56 @@
       </div>
 
       <div class="section">
-        <h2>Key Properties</h2>
+        <h2>{c.properties.title}</h2>
         <ul class="properties-list">
-          <li>Infinite scalability: O(1) per-hop updates vs O(n) broadcast</li>
-          <li>No inbound liquidity problem: credit + collateral hybrid</li>
-          <li>Bounded risk: counterparty loss capped at collateral + credit</li>
-          <li>Strong privacy: onion-routing (payment sender/receiver anonymous to routing hubs, like Tor for money)</li>
-          <li><strong>Local state: no sequencers, no data availability dependencies</strong></li>
+          {#each c.properties.items as item}
+            <li>{@html item}</li>
+          {/each}
         </ul>
       </div>
 
       <!-- Triple-S First Principles -->
       <div class="section triple-s">
-        <h2>Triple-S First Principles</h2>
+        <h2>{c.tripleS.title}</h2>
         <div class="principles-grid">
           <div class="principle-card">
             <div class="principle-icon">⚡</div>
-            <h3>Scalable</h3>
-            <p><strong>Unicast (1-to-1)</strong> architecture enables unbounded horizontal scaling. No broadcast bottlenecks, no global consensus delays.</p>
-            <p class="principle-detail">O(1) per-hop updates vs O(n) broadcast overhead. Counterparties self-select optimal routing paths through Coasian negotiation — from CBDCs to coffee, village to globe.</p>
-            <p class="principle-detail">There is simply no other way to scale to the entire planet. The internet already proved unicast wins at global scale.</p>
+            <h3>{c.tripleS.scalable.title}</h3>
+            <p>{@html c.tripleS.scalable.desc}</p>
+            <p class="principle-detail">{c.tripleS.scalable.detail1}</p>
+            <p class="principle-detail">{c.tripleS.scalable.detail2}</p>
           </div>
           <div class="principle-card">
             <div class="principle-icon">🔒</div>
-            <h3>Secure</h3>
-            <p><strong>Every phone and laptop will be a full node by default.</strong> Non-negotiable.</p>
-            <p class="principle-detail">L1 blockchains handle only final netting — not every coffee purchase. This ultra-low settlement load means even phones can verify the entire chain. State pruning keeps storage minimal: full verification, not full history. No light clients, no trust assumptions.</p>
-            <p class="principle-detail">This implements the original vision of Satoshi and Vitalik: self-sovereign verification without trusted intermediaries. Your keys, your node, your rules.</p>
+            <h3>{c.tripleS.secure.title}</h3>
+            <p>{@html c.tripleS.secure.desc}</p>
+            <p class="principle-detail">{c.tripleS.secure.detail1}</p>
+            <p class="principle-detail">{c.tripleS.secure.detail2}</p>
           </div>
           <div class="principle-card">
             <div class="principle-icon">✨</div>
-            <h3>Simple</h3>
-            <p><strong>Banking 2.0</strong> with zero new terminology invented.</p>
-            <p class="principle-detail">Credit, collateral, reserves, transfers. Concepts you already know. No zkSNARKs to understand, no merkle trees to audit. Just finance, but programmable.</p>
-            <p class="principle-detail">Complexity hidden in the protocol. Simplicity exposed to users. That's how the internet scaled — and that's how finance will scale.</p>
+            <h3>{c.tripleS.simple.title}</h3>
+            <p>{@html c.tripleS.simple.desc}</p>
+            <p class="principle-detail">{c.tripleS.simple.detail1}</p>
+            <p class="principle-detail">{c.tripleS.simple.detail2}</p>
           </div>
         </div>
       </div>
 
       <!-- Roadmap -->
       <div class="section roadmap-section">
-        <h2 style="color: #00d1ff;">Roadmap</h2>
+        <h2 style="color: #00d1ff;">{c.roadmap.title}</h2>
 
         <div class="roadmap-timeline">
           <div class="roadmap-item completed">
             <div class="roadmap-marker">✓</div>
             <div class="roadmap-content">
-              <div class="roadmap-quarter">Q4 2025</div>
-              <div class="roadmap-title">Protocol Design Complete</div>
+              <div class="roadmap-quarter">{c.roadmap.q4_2025.quarter}</div>
+              <div class="roadmap-title">{c.roadmap.q4_2025.title}</div>
               <div class="roadmap-details">
-                <span class="detail-item">Runtime architecture finalized</span>
-                <span class="detail-item">Bilateral consensus spec</span>
-                <span class="detail-item">Smart contract design</span>
+                {#each c.roadmap.q4_2025.items as item}
+                  <span class="detail-item">{item}</span>
+                {/each}
               </div>
             </div>
           </div>
@@ -502,12 +503,12 @@
           <div class="roadmap-item active">
             <div class="roadmap-marker">⟳</div>
             <div class="roadmap-content">
-              <div class="roadmap-quarter">Q1 2026</div>
-              <div class="roadmap-title">Testnet Launch</div>
+              <div class="roadmap-quarter">{c.roadmap.q1_2026.quarter}</div>
+              <div class="roadmap-title">{c.roadmap.q1_2026.title}</div>
               <div class="roadmap-details">
-                <span class="detail-item">Deploy on Ethereum Sepolia</span>
-                <span class="detail-item">Developer sandbox with demo entities</span>
-                <span class="detail-item">Public API documentation</span>
+                {#each c.roadmap.q1_2026.items as item}
+                  <span class="detail-item">{item}</span>
+                {/each}
               </div>
             </div>
           </div>
@@ -515,12 +516,12 @@
           <div class="roadmap-item">
             <div class="roadmap-marker">○</div>
             <div class="roadmap-content">
-              <div class="roadmap-quarter">Q2 2026</div>
-              <div class="roadmap-title">Multi-Chain Expansion</div>
+              <div class="roadmap-quarter">{c.roadmap.q2_2026.quarter}</div>
+              <div class="roadmap-title">{c.roadmap.q2_2026.title}</div>
               <div class="roadmap-details">
-                <span class="detail-item">Arbitrum, Optimism, Base support</span>
-                <span class="detail-item">Cross-chain settlement demos</span>
-                <span class="detail-item">Performance benchmarks published</span>
+                {#each c.roadmap.q2_2026.items as item}
+                  <span class="detail-item">{item}</span>
+                {/each}
               </div>
             </div>
           </div>
@@ -528,12 +529,12 @@
           <div class="roadmap-item">
             <div class="roadmap-marker">○</div>
             <div class="roadmap-content">
-              <div class="roadmap-quarter">Q3 2026</div>
-              <div class="roadmap-title">Security Audits & Mainnet Beta</div>
+              <div class="roadmap-quarter">{c.roadmap.q3_2026.quarter}</div>
+              <div class="roadmap-title">{c.roadmap.q3_2026.title}</div>
               <div class="roadmap-details">
-                <span class="detail-item">Third-party security audits</span>
-                <span class="detail-item">Bug bounty program launch</span>
-                <span class="detail-item">Mainnet beta with whitelisted entities</span>
+                {#each c.roadmap.q3_2026.items as item}
+                  <span class="detail-item">{item}</span>
+                {/each}
               </div>
             </div>
           </div>
@@ -541,12 +542,12 @@
           <div class="roadmap-item">
             <div class="roadmap-marker">○</div>
             <div class="roadmap-content">
-              <div class="roadmap-quarter">Q4 2026</div>
-              <div class="roadmap-title">Public Mainnet</div>
+              <div class="roadmap-quarter">{c.roadmap.q4_2026.quarter}</div>
+              <div class="roadmap-title">{c.roadmap.q4_2026.title}</div>
               <div class="roadmap-details">
-                <span class="detail-item">Open entity registration</span>
-                <span class="detail-item">Production-grade SDKs (TypeScript, Python)</span>
-                <span class="detail-item">Governance framework activation</span>
+                {#each c.roadmap.q4_2026.items as item}
+                  <span class="detail-item">{item}</span>
+                {/each}
               </div>
             </div>
           </div>
@@ -554,12 +555,12 @@
           <div class="roadmap-item">
             <div class="roadmap-marker">◇</div>
             <div class="roadmap-content">
-              <div class="roadmap-quarter">2027+</div>
-              <div class="roadmap-title">CBDC Integration Layer</div>
+              <div class="roadmap-quarter">{c.roadmap.future.quarter}</div>
+              <div class="roadmap-title">{c.roadmap.future.title}</div>
               <div class="roadmap-details">
-                <span class="detail-item">Partnerships with central banks</span>
-                <span class="detail-item">Programmable CBDC substrate</span>
-                <span class="detail-item">Universal interop protocol</span>
+                {#each c.roadmap.future.items as item}
+                  <span class="detail-item">{item}</span>
+                {/each}
               </div>
             </div>
           </div>
@@ -569,8 +570,8 @@
       <!-- Newsletter Signup -->
       <div class="newsletter-section">
         <div class="newsletter-header">
-          <h3>Join the Unicast Revolution</h3>
-          <p>Get notified about mainnet launch, technical deep-dives, and protocol updates</p>
+          <h3>{c.newsletter.title}</h3>
+          <p>{c.newsletter.subtitle}</p>
         </div>
         <form
           action="https://buttondown.email/api/emails/embed-subscribe/xln"
@@ -581,46 +582,46 @@
           <input
             type="email"
             name="email"
-            placeholder="your@email.com"
+            placeholder={c.newsletter.placeholder}
             required
             class="newsletter-input"
           />
           <button type="submit" class="newsletter-btn">
-            Subscribe
+            {c.newsletter.button}
           </button>
         </form>
-        <p class="newsletter-note">No spam. Unsubscribe anytime.</p>
+        <p class="newsletter-note">{c.newsletter.note}</p>
       </div>
 
       <!-- Plot Twist -->
       <div class="section plot-twist">
-        <h2>The Universal CBDC Substrate</h2>
-        <p class="intro">xln isn't just "better payment channels" — it's the settlement layer for programmable money at planetary scale.</p>
+        <h2>{c.cbdc.title}</h2>
+        <p class="intro">{c.cbdc.intro}</p>
 
         <div class="roadmap-box">
-          <p class="roadmap-text"><strong>Today:</strong> Universal EVM substrate — works with any EVM chain (Ethereum L1, rollups, alt-L1s: Polygon, Arbitrum, Base, BSC, etc.)</p>
-          <p class="roadmap-text"><strong>Tomorrow:</strong> Same substrate serves CBDCs — when central banks launch EVM-compatible programmable money, xln becomes the universal interop layer</p>
+          <p class="roadmap-text">{@html c.cbdc.today}</p>
+          <p class="roadmap-text">{@html c.cbdc.tomorrow}</p>
         </div>
 
         <div class="cbdc-stat">
           <div class="stat-stack">
             <div class="stat-number-large">137</div>
-            <div class="stat-sublabel">countries</div>
+            <div class="stat-sublabel">{c.cbdc.countries}</div>
           </div>
           <div class="stat-stack">
             <div class="stat-number-medium">72</div>
-            <div class="stat-sublabel">in pilot phase</div>
+            <div class="stat-sublabel">{c.cbdc.pilot}</div>
           </div>
           <div class="stat-stack">
             <div class="stat-number-large">98%</div>
-            <div class="stat-sublabel">of global GDP</div>
+            <div class="stat-sublabel">{c.cbdc.gdp}</div>
           </div>
           <div class="stat-description">
-            building programmable ledgers (<a href="https://www.atlanticcouncil.org/cbdctracker/" target="_blank" rel="noopener noreferrer" class="stat-link">CBDCs</a>)
+            {c.cbdc.building} (<a href="https://www.atlanticcouncil.org/cbdctracker/" target="_blank" rel="noopener noreferrer" class="stat-link">CBDCs</a>)
           </div>
         </div>
 
-        <p class="vision-text">Most will be EVM-compatible. xln attaches to <strong>any</strong> programmable ledger by deploying <code>Depository.sol</code>.</p>
+        <p class="vision-text">{@html c.cbdc.vision}</p>
       </div>
     </div>
 
@@ -726,15 +727,15 @@
         <input
           type="text"
           bind:value={inviteCode}
-          placeholder="Access Code"
+          placeholder={c.invite.placeholder}
           on:keydown={(e) => e.key === 'Enter' && handleSubmit()}
           class="invite-input"
         />
         <button on:click={handleSubmit} class="enter-btn">
-          Unlock
+          {c.invite.button}
         </button>
         {#if error}
-          <div class="error">{error}</div>
+          <div class="error">{c.invite.invalid}</div>
         {/if}
         <p class="invite-note">DM @xlnfinance for access</p>
       </div>

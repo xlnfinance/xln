@@ -14,18 +14,10 @@
   <meta name="description" content="Generate a cryptocurrency wallet from your memory. Sharded argon2id key derivation - secure, deterministic, no seed phrase backup needed." />
 </svelte:head>
 
-<main class="vault-page">
-  <BrainVaultView />
-</main>
+<!-- BrainVaultView handles its own full-page layout -->
+<BrainVaultView />
 
 <style>
-  .vault-page {
-    min-height: 100vh;
-    background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #0f0f1a 100%);
-    padding: 0;
-    margin: 0;
-  }
-
   :global(html),
   :global(body) {
     margin: 0;
