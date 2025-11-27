@@ -1,0 +1,1611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>xln news - lightning-fast fintech & crypto news</title>
+    <meta name="description" content="curated fintech, crypto, and lightning network news from hacker news. stay ahead with xln news.">
+    <meta name="keywords" content="bitcoin, lightning network, crypto, fintech, hacker news, layer 2, payments, defi">
+    <link rel="canonical" href="https://news.xln.finance">
+
+    <!-- open graph -->
+    <meta property="og:title" content="xln news">
+    <meta property="og:description" content="lightning-fast fintech & crypto news, curated from hacker news">
+    <meta property="og:url" content="https://news.xln.finance">
+    <meta property="og:type" content="website">
+
+    <!-- twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="xln news">
+    <meta name="twitter:description" content="lightning-fast fintech & crypto news, curated from hacker news">
+
+    <!-- favicon -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+    <style>
+        :root {
+            --bg-primary: #fafafa;
+            --bg-secondary: #ffffff;
+            --bg-hover: #f0f0f0;
+            --bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --text-primary: #1a1a1a;
+            --text-secondary: #666666;
+            --text-muted: #999999;
+            --accent: #ff6600;
+            --accent-hover: #ff8533;
+            --border: #e5e5e5;
+            --shadow: rgba(0, 0, 0, 0.08);
+            --relevance-high: #10b981;
+            --relevance-medium: #f59e0b;
+            --relevance-low: #6b7280;
+            --glow: rgba(102, 126, 234, 0.4);
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-hover: #21262d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681;
+            --accent: #ff6600;
+            --accent-hover: #ff8533;
+            --border: #30363d;
+            --shadow: rgba(0, 0, 0, 0.3);
+            --glow: rgba(102, 126, 234, 0.6);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            transition: background 0.3s, color 0.3s;
+            overflow-x: hidden;
+        }
+
+        /* Animated background particles */
+        .particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: 0;
+        }
+
+        .particle {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: var(--accent);
+            border-radius: 50%;
+            opacity: 0.3;
+            animation: float 15s infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(100vh) rotate(0deg); opacity: 0; }
+            10% { opacity: 0.3; }
+            90% { opacity: 0.3; }
+            100% { transform: translateY(-100vh) rotate(720deg); opacity: 0; }
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 0 20px;
+            position: relative;
+            z-index: 1;
+        }
+
+        header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 20px var(--shadow);
+        }
+
+        .header-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 0;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            text-decoration: none;
+            color: var(--text-primary);
+        }
+
+        .logo-icon {
+            width: 42px;
+            height: 42px;
+            background: var(--bg-gradient);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 18px;
+            box-shadow: 0 4px 15px var(--glow);
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 4px 15px var(--glow); }
+            50% { box-shadow: 0 4px 25px var(--glow), 0 0 40px var(--glow); }
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .logo-subtitle {
+            font-size: 11px;
+            color: var(--text-muted);
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        nav {
+            display: flex;
+            gap: 4px;
+        }
+
+        nav button {
+            background: none;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+
+        nav button:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+            transform: translateY(-1px);
+        }
+
+        nav button.active {
+            background: var(--bg-gradient);
+            color: white;
+            box-shadow: 0 2px 10px var(--glow);
+        }
+
+        .theme-toggle {
+            background: var(--bg-hover);
+            border: none;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: all 0.3s;
+        }
+
+        .theme-toggle:hover {
+            transform: scale(1.1) rotate(20deg);
+        }
+
+        /* Stats bar */
+        .stats-bar {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 0;
+        }
+
+        .stats-content {
+            display: flex;
+            gap: 24px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .stat {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .stat-icon {
+            font-size: 16px;
+        }
+
+        .stat-value {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        /* Filter bar */
+        .filter-bar {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 0;
+        }
+
+        .filter-content {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .filter-label {
+            font-size: 13px;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .filter-chips {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .filter-chip {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: var(--bg-primary);
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+
+        .filter-chip:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .filter-chip.active {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .filter-chip.xln {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-color: transparent;
+            color: white;
+        }
+
+        main {
+            padding: 24px 0;
+            min-height: calc(100vh - 80px);
+        }
+
+        .stories-list {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .story-card {
+            background: var(--bg-secondary);
+            border-radius: 16px;
+            padding: 20px;
+            border: 1px solid var(--border);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .story-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--bg-gradient);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .story-card:hover {
+            box-shadow: 0 8px 30px var(--shadow);
+            transform: translateY(-4px);
+            border-color: transparent;
+        }
+
+        .story-card:hover::before {
+            opacity: 1;
+        }
+
+        .story-card.high-relevance {
+            border-left: 4px solid var(--relevance-high);
+        }
+
+        .story-card.medium-relevance {
+            border-left: 4px solid var(--relevance-medium);
+        }
+
+        .story-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 16px;
+        }
+
+        .story-rank {
+            min-width: 32px;
+            height: 32px;
+            background: var(--bg-hover);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-muted);
+        }
+
+        .story-content {
+            flex: 1;
+        }
+
+        .story-title {
+            font-size: 17px;
+            font-weight: 600;
+            color: var(--text-primary);
+            text-decoration: none;
+            display: block;
+            margin-bottom: 6px;
+            line-height: 1.4;
+            transition: color 0.2s;
+        }
+
+        .story-title:hover {
+            color: #667eea;
+        }
+
+        .story-domain {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 500;
+            padding: 2px 8px;
+            background: var(--bg-hover);
+            border-radius: 4px;
+        }
+
+        .story-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-top: 12px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .story-meta span {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .story-meta a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .story-meta a:hover {
+            color: #667eea;
+        }
+
+        .points {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-weight: 600;
+        }
+
+        .points-icon {
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .points-icon:hover {
+            transform: scale(1.3);
+        }
+
+        .points-icon.voted {
+            animation: vote-pop 0.4s ease;
+        }
+
+        @keyframes vote-pop {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.5); }
+            100% { transform: scale(1); }
+        }
+
+        /* Relevance badge */
+        .relevance-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .relevance-badge.high {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--relevance-high);
+        }
+
+        .relevance-badge.medium {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--relevance-medium);
+        }
+
+        .relevance-badge.low {
+            background: rgba(107, 114, 128, 0.1);
+            color: var(--relevance-low);
+        }
+
+        .relevance-score {
+            font-weight: 700;
+        }
+
+        /* Tags */
+        .story-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 10px;
+        }
+
+        .tag {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            background: var(--bg-hover);
+            color: var(--text-secondary);
+        }
+
+        .tag.xln {
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
+            color: #667eea;
+        }
+
+        /* Thumbnail */
+        .story-thumbnail {
+            width: 80px;
+            height: 80px;
+            border-radius: 12px;
+            background: var(--bg-hover);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .story-thumbnail img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px;
+            color: var(--text-secondary);
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid var(--border);
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .load-more {
+            display: block;
+            width: 100%;
+            padding: 18px;
+            margin-top: 24px;
+            background: var(--bg-gradient);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px var(--glow);
+        }
+
+        .load-more:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 25px var(--glow);
+        }
+
+        .load-more:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Sparkles */
+        .sparkle {
+            position: fixed;
+            pointer-events: none;
+            z-index: 1000;
+            animation: sparkle-fade 0.6s ease forwards;
+        }
+
+        @keyframes sparkle-fade {
+            0% { transform: scale(0) rotate(0deg); opacity: 1; }
+            50% { transform: scale(1) rotate(180deg); opacity: 1; }
+            100% { transform: scale(0) rotate(360deg); opacity: 0; }
+        }
+
+        /* Toast notifications */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 20px;
+            box-shadow: 0 8px 30px var(--shadow);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            animation: toast-in 0.3s ease;
+        }
+
+        @keyframes toast-in {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .toast-icon {
+            font-size: 24px;
+        }
+
+        .toast-content {
+            font-size: 14px;
+        }
+
+        .toast-title {
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+
+        .toast-message {
+            color: var(--text-secondary);
+        }
+
+        /* Comments styles */
+        .item-view {
+            display: none;
+        }
+
+        .item-view.active {
+            display: block;
+        }
+
+        .stories-view.hidden {
+            display: none;
+        }
+
+        .back-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            font-size: 14px;
+            cursor: pointer;
+            padding: 10px 16px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .back-button:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .item-header {
+            background: var(--bg-secondary);
+            border-radius: 16px;
+            padding: 28px;
+            border: 1px solid var(--border);
+            margin-bottom: 24px;
+        }
+
+        .item-title {
+            font-size: 26px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            line-height: 1.3;
+        }
+
+        .item-title a {
+            color: var(--text-primary);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .item-title a:hover {
+            color: #667eea;
+        }
+
+        .item-text {
+            color: var(--text-secondary);
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            line-height: 1.8;
+            font-size: 15px;
+        }
+
+        .item-text a {
+            color: #667eea;
+        }
+
+        .comments-section h2 {
+            font-size: 18px;
+            margin-bottom: 20px;
+            color: var(--text-primary);
+        }
+
+        .comment {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 16px 20px;
+            border: 1px solid var(--border);
+            margin-bottom: 12px;
+            transition: border-color 0.2s;
+        }
+
+        .comment:hover {
+            border-color: #667eea;
+        }
+
+        .comment-meta {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .comment-meta a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .comment-meta a:hover {
+            color: #667eea;
+        }
+
+        .comment-text {
+            color: var(--text-primary);
+            line-height: 1.7;
+            font-size: 14px;
+        }
+
+        .comment-text a {
+            color: #667eea;
+        }
+
+        .comment-text pre {
+            background: var(--bg-hover);
+            padding: 14px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 14px 0;
+        }
+
+        .comment-text code {
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .comment-text p {
+            margin-bottom: 12px;
+        }
+
+        .comment-text p:last-child {
+            margin-bottom: 0;
+        }
+
+        .comment-replies {
+            margin-left: 20px;
+            margin-top: 12px;
+            padding-left: 20px;
+            border-left: 2px solid var(--border);
+        }
+
+        .collapse-btn {
+            background: var(--bg-hover);
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .collapse-btn:hover {
+            background: var(--border);
+            color: var(--text-secondary);
+        }
+
+        .comment.collapsed .comment-text,
+        .comment.collapsed .comment-replies {
+            display: none;
+        }
+
+        .no-comments {
+            text-align: center;
+            padding: 60px;
+            color: var(--text-muted);
+        }
+
+        /* Footer */
+        footer {
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+            padding: 24px 0;
+            margin-top: 48px;
+            text-align: center;
+        }
+
+        .footer-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .footer-brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .footer-brand a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .footer-brand a:hover {
+            text-decoration: underline;
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 20px;
+            font-size: 13px;
+        }
+
+        .footer-links a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+        .footer-links a:hover {
+            color: #667eea;
+        }
+
+        .footer-credit {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .footer-credit a {
+            color: var(--text-muted);
+            text-decoration: none;
+        }
+
+        .footer-credit a:hover {
+            color: var(--accent);
+        }
+
+        /* Fun counter animation */
+        .animated-number {
+            display: inline-block;
+            transition: transform 0.2s;
+        }
+
+        .animated-number.bump {
+            animation: number-bump 0.3s ease;
+        }
+
+        @keyframes number-bump {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.3); color: #667eea; }
+            100% { transform: scale(1); }
+        }
+
+        @media (max-width: 600px) {
+            .header-content {
+                flex-direction: column;
+                gap: 16px;
+            }
+
+            nav {
+                width: 100%;
+                overflow-x: auto;
+                padding-bottom: 4px;
+            }
+
+            nav button {
+                flex-shrink: 0;
+            }
+
+            .story-card {
+                padding: 16px;
+            }
+
+            .story-header {
+                flex-direction: column;
+            }
+
+            .story-thumbnail {
+                width: 100%;
+                height: 120px;
+                order: -1;
+            }
+
+            .story-title {
+                font-size: 15px;
+            }
+
+            .story-meta {
+                gap: 10px;
+                font-size: 12px;
+            }
+
+            .stats-content {
+                overflow-x: auto;
+                padding-bottom: 4px;
+            }
+
+            .filter-content {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Animated particles background -->
+    <div class="particles" id="particles"></div>
+
+    <header>
+        <div class="container header-content">
+            <a href="#" class="logo" onclick="goHome()">
+                <div class="logo-icon">⚡</div>
+                <div>
+                    <span class="logo-text">xln news</span>
+                    <div class="logo-subtitle">lightning-fast fintech news</div>
+                </div>
+            </a>
+            <div class="header-actions">
+                <nav>
+                    <button class="active" data-type="top">🔥 Top</button>
+                    <button data-type="new">✨ New</button>
+                    <button data-type="best">🏆 Best</button>
+                    <button data-type="ask">❓ Ask</button>
+                    <button data-type="show">🚀 Show</button>
+                    <button data-type="job">💼 Jobs</button>
+                </nav>
+                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                    🌙
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <div class="stats-bar">
+        <div class="container stats-content">
+            <div class="stat">
+                <span class="stat-icon">📊</span>
+                <span>Stories loaded: <span class="stat-value" id="storiesCount">0</span></span>
+            </div>
+            <div class="stat">
+                <span class="stat-icon">🎯</span>
+                <span>Relevant: <span class="stat-value" id="relevantCount">0</span></span>
+            </div>
+            <div class="stat">
+                <span class="stat-icon">⚡</span>
+                <span>Total points: <span class="stat-value" id="totalPoints">0</span></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="filter-bar">
+        <div class="container filter-content">
+            <span class="filter-label">🔍 Filter:</span>
+            <div class="filter-chips">
+                <span class="filter-chip active" data-filter="all">All Stories</span>
+                <span class="filter-chip xln" data-filter="xln">⚡ For You</span>
+                <span class="filter-chip" data-filter="crypto">₿ Crypto</span>
+                <span class="filter-chip" data-filter="tech">💻 Tech</span>
+                <span class="filter-chip" data-filter="startup">🦄 Startups</span>
+            </div>
+        </div>
+    </div>
+
+    <main class="container">
+        <div class="stories-view">
+            <div class="stories-list" id="stories"></div>
+            <button class="load-more" id="loadMore" onclick="loadMore()">⚡ Load More Stories</button>
+        </div>
+
+        <div class="item-view" id="itemView">
+            <button class="back-button" onclick="goHome()">
+                ← Back to stories
+            </button>
+            <div class="item-header" id="itemHeader"></div>
+            <div class="comments-section">
+                <h2 id="commentsTitle">💬 Comments</h2>
+                <div id="comments"></div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container footer-content">
+            <div class="footer-brand">
+                ⚡ <a href="https://xln.finance" target="_blank">xln news</a> — lightning-fast fintech intelligence
+            </div>
+            <div class="footer-links">
+                <a href="https://xln.finance" target="_blank">xln.finance</a>
+                <a href="https://github.com" target="_blank">github</a>
+                <a href="https://twitter.com" target="_blank">twitter</a>
+            </div>
+            <div class="footer-credit">
+                data powered by <a href="https://news.ycombinator.com" target="_blank">hacker news api</a> •
+                not affiliated with y combinator
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        const API_BASE = 'https://hacker-news.firebaseio.com/v0';
+        let currentType = 'top';
+        let currentFilter = 'all';
+        let storyIds = [];
+        let loadedStories = [];
+        let loadedCount = 0;
+        const STORIES_PER_PAGE = 20;
+        let itemCache = new Map();
+        let totalPointsCount = 0;
+        let relevantStoriesCount = 0;
+
+        // XLN relevance keywords with weights
+        const XLN_KEYWORDS = {
+            // Core topics (high weight)
+            'lightning network': 10,
+            'lightning': 7,
+            'bitcoin': 6,
+            'btc': 5,
+            'layer 2': 8,
+            'layer2': 8,
+            'l2': 5,
+            'off-chain': 9,
+            'offchain': 9,
+            'payment channel': 9,
+            'state channel': 8,
+            'settlement': 7,
+            'scalability': 6,
+            'micropayment': 8,
+            'instant payment': 7,
+
+            // Crypto/blockchain (medium weight)
+            'blockchain': 4,
+            'crypto': 3,
+            'cryptocurrency': 3,
+            'defi': 5,
+            'web3': 3,
+            'ethereum': 3,
+            'smart contract': 4,
+            'decentralized': 3,
+            'protocol': 2,
+
+            // Fintech (medium weight)
+            'fintech': 4,
+            'payments': 4,
+            'financial': 3,
+            'banking': 3,
+            'transaction': 3,
+            'remittance': 5,
+            'cross-border': 4,
+
+            // Technical (lower weight)
+            'rust': 2,
+            'cryptography': 3,
+            'distributed': 2,
+            'consensus': 4,
+            'node': 2,
+            'network': 1,
+            'p2p': 3,
+            'peer-to-peer': 3,
+
+            // Companies/Projects
+            'strike': 4,
+            'cash app': 3,
+            'square': 3,
+            'coinbase': 3,
+            'nostr': 4,
+            'lnurl': 7,
+            'bolt': 5
+        };
+
+        // Category keywords
+        const CATEGORY_KEYWORDS = {
+            crypto: ['bitcoin', 'btc', 'crypto', 'blockchain', 'ethereum', 'defi', 'web3', 'token', 'nft', 'wallet'],
+            tech: ['programming', 'software', 'code', 'developer', 'api', 'database', 'cloud', 'ai', 'ml', 'open source'],
+            startup: ['startup', 'founder', 'yc', 'funding', 'series', 'venture', 'launch', 'pivot', 'growth', 'saas']
+        };
+
+        // Calculate relevance score
+        function calculateRelevance(story) {
+            const text = `${story.title} ${story.text || ''}`.toLowerCase();
+            let score = 0;
+            let matchedKeywords = [];
+
+            for (const [keyword, weight] of Object.entries(XLN_KEYWORDS)) {
+                if (text.includes(keyword.toLowerCase())) {
+                    score += weight;
+                    matchedKeywords.push(keyword);
+                }
+            }
+
+            return { score, matchedKeywords };
+        }
+
+        // Get relevance level
+        function getRelevanceLevel(score) {
+            if (score >= 8) return 'high';
+            if (score >= 3) return 'medium';
+            return 'low';
+        }
+
+        // Detect category
+        function detectCategory(story) {
+            const text = `${story.title} ${story.text || ''}`.toLowerCase();
+            const categories = [];
+
+            for (const [category, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+                if (keywords.some(kw => text.includes(kw))) {
+                    categories.push(category);
+                }
+            }
+
+            return categories;
+        }
+
+        // Get emoji for story type
+        function getStoryEmoji(story) {
+            const title = story.title.toLowerCase();
+            if (title.includes('show hn')) return '🚀';
+            if (title.includes('ask hn')) return '❓';
+            if (title.includes('tell hn')) return '📢';
+            if (title.includes('launch')) return '🎉';
+            if (title.includes('hiring') || title.includes('job')) return '💼';
+            if (title.includes('open source')) return '💝';
+            if (title.includes('ai') || title.includes('gpt') || title.includes('llm')) return '🤖';
+            if (title.includes('rust')) return '🦀';
+            if (title.includes('bitcoin') || title.includes('crypto')) return '₿';
+            if (title.includes('security') || title.includes('hack')) return '🔐';
+            return '📰';
+        }
+
+        // Create particles
+        function createParticles() {
+            const container = document.getElementById('particles');
+            for (let i = 0; i < 20; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'particle';
+                particle.style.left = `${Math.random() * 100}%`;
+                particle.style.animationDelay = `${Math.random() * 15}s`;
+                particle.style.animationDuration = `${15 + Math.random() * 10}s`;
+                container.appendChild(particle);
+            }
+        }
+
+        // Theme handling
+        function initTheme() {
+            const saved = localStorage.getItem('hn-theme');
+            if (saved) {
+                document.documentElement.setAttribute('data-theme', saved);
+                updateThemeIcon(saved);
+            } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                updateThemeIcon('dark');
+            }
+        }
+
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme');
+            const next = current === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('hn-theme', next);
+            updateThemeIcon(next);
+            createSparkles(event.clientX, event.clientY);
+        }
+
+        function updateThemeIcon(theme) {
+            document.querySelector('.theme-toggle').textContent = theme === 'dark' ? '☀️' : '🌙';
+        }
+
+        // Sparkle effect
+        function createSparkles(x, y) {
+            const colors = ['#667eea', '#764ba2', '#ff6600', '#f59e0b', '#10b981'];
+            for (let i = 0; i < 8; i++) {
+                const sparkle = document.createElement('div');
+                sparkle.className = 'sparkle';
+                sparkle.style.left = `${x}px`;
+                sparkle.style.top = `${y}px`;
+                sparkle.style.fontSize = `${12 + Math.random() * 12}px`;
+                sparkle.textContent = ['✨', '⭐', '💫', '🌟'][Math.floor(Math.random() * 4)];
+                sparkle.style.transform = `translate(${(Math.random() - 0.5) * 100}px, ${(Math.random() - 0.5) * 100}px)`;
+                document.body.appendChild(sparkle);
+                setTimeout(() => sparkle.remove(), 600);
+            }
+        }
+
+        // Show toast notification
+        function showToast(icon, title, message) {
+            const existing = document.querySelector('.toast');
+            if (existing) existing.remove();
+
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.innerHTML = `
+                <span class="toast-icon">${icon}</span>
+                <div class="toast-content">
+                    <div class="toast-title">${title}</div>
+                    <div class="toast-message">${message}</div>
+                </div>
+            `;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // Navigation
+        document.querySelectorAll('nav button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentType = btn.dataset.type;
+                loadStories();
+            });
+        });
+
+        // Filter chips
+        document.querySelectorAll('.filter-chip').forEach(chip => {
+            chip.addEventListener('click', () => {
+                document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+                chip.classList.add('active');
+                currentFilter = chip.dataset.filter;
+                renderFilteredStories();
+            });
+        });
+
+        // Fetch helpers
+        async function fetchItem(id) {
+            if (itemCache.has(id)) {
+                return itemCache.get(id);
+            }
+            const res = await fetch(`${API_BASE}/item/${id}.json`);
+            const item = await res.json();
+            itemCache.set(id, item);
+            return item;
+        }
+
+        async function fetchStoryIds(type) {
+            const endpoints = {
+                top: 'topstories',
+                new: 'newstories',
+                best: 'beststories',
+                ask: 'askstories',
+                show: 'showstories',
+                job: 'jobstories'
+            };
+            const res = await fetch(`${API_BASE}/${endpoints[type]}.json`);
+            return res.json();
+        }
+
+        // Time formatting
+        function timeAgo(timestamp) {
+            const seconds = Math.floor(Date.now() / 1000 - timestamp);
+            const intervals = [
+                { label: 'y', seconds: 31536000 },
+                { label: 'mo', seconds: 2592000 },
+                { label: 'd', seconds: 86400 },
+                { label: 'h', seconds: 3600 },
+                { label: 'm', seconds: 60 }
+            ];
+
+            for (const interval of intervals) {
+                const count = Math.floor(seconds / interval.seconds);
+                if (count >= 1) {
+                    return `${count}${interval.label}`;
+                }
+            }
+            return 'now';
+        }
+
+        // Extract domain from URL
+        function getDomain(url) {
+            if (!url) return null;
+            try {
+                const domain = new URL(url).hostname.replace('www.', '');
+                return domain;
+            } catch {
+                return null;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Render story card
+        function renderStory(story, rank) {
+            const domain = getDomain(story.url);
+            const { score: relevanceScore, matchedKeywords } = calculateRelevance(story);
+            const relevanceLevel = getRelevanceLevel(relevanceScore);
+            const categories = detectCategory(story);
+            const emoji = getStoryEmoji(story);
+
+            const card = document.createElement('article');
+            card.className = `story-card ${relevanceScore >= 3 ? relevanceLevel + '-relevance' : ''}`;
+            card.dataset.relevance = relevanceScore;
+            card.dataset.categories = categories.join(',');
+
+            const tagsHtml = matchedKeywords.slice(0, 3).map(kw =>
+                `<span class="tag xln">${kw}</span>`
+            ).join('');
+
+            const categoryTagsHtml = categories.map(cat =>
+                `<span class="tag">${cat}</span>`
+            ).join('');
+
+            card.innerHTML = `
+                <div class="story-header">
+                    <div class="story-rank">${rank}</div>
+                    <div class="story-content">
+                        <a href="${story.url || '#'}" class="story-title" target="_blank" rel="noopener" onclick="event.stopPropagation()">
+                            ${emoji} ${escapeHtml(story.title)}
+                        </a>
+                        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                            ${domain ? `<span class="story-domain">🔗 ${domain}</span>` : ''}
+                            ${relevanceScore >= 3 ? `
+                                <span class="relevance-badge ${relevanceLevel}">
+                                    ⚡ XLN <span class="relevance-score">${relevanceScore}</span>
+                                </span>
+                            ` : ''}
+                        </div>
+                        <div class="story-meta">
+                            <span class="points">
+                                <span class="points-icon" onclick="event.stopPropagation(); vote(this)">▲</span>
+                                <span class="animated-number">${story.score || 0}</span> pts
+                            </span>
+                            <span>by <a href="https://news.ycombinator.com/user?id=${story.by}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${story.by}</a></span>
+                            <span>🕐 ${timeAgo(story.time)}</span>
+                            <span>
+                                <a href="#" onclick="event.preventDefault(); event.stopPropagation(); viewItem(${story.id})">
+                                    💬 ${story.descendants || 0}
+                                </a>
+                            </span>
+                        </div>
+                        ${(tagsHtml || categoryTagsHtml) ? `
+                            <div class="story-tags">
+                                ${tagsHtml}
+                                ${categoryTagsHtml}
+                            </div>
+                        ` : ''}
+                    </div>
+                    <div class="story-thumbnail">${emoji}</div>
+                </div>
+            `;
+
+            card.addEventListener('click', () => viewItem(story.id));
+            return card;
+        }
+
+        // Fake vote animation
+        function vote(element) {
+            element.classList.add('voted');
+            const numEl = element.nextElementSibling;
+            const currentVal = parseInt(numEl.textContent);
+            numEl.textContent = currentVal + 1;
+            numEl.classList.add('bump');
+            createSparkles(event.clientX, event.clientY);
+            showToast('⚡', 'upvoted', 'your vote has been recorded');
+            setTimeout(() => {
+                element.classList.remove('voted');
+                numEl.classList.remove('bump');
+            }, 400);
+        }
+
+        // Update stats
+        function updateStats() {
+            document.getElementById('storiesCount').textContent = loadedStories.length;
+            document.getElementById('relevantCount').textContent = relevantStoriesCount;
+            document.getElementById('totalPoints').textContent = totalPointsCount.toLocaleString();
+        }
+
+        // Render filtered stories
+        function renderFilteredStories() {
+            const container = document.getElementById('stories');
+            container.innerHTML = '';
+
+            let rank = 1;
+            loadedStories.forEach(story => {
+                const { score: relevanceScore } = calculateRelevance(story);
+                const categories = detectCategory(story);
+
+                let show = false;
+                if (currentFilter === 'all') show = true;
+                else if (currentFilter === 'xln' && relevanceScore >= 3) show = true;
+                else if (categories.includes(currentFilter)) show = true;
+
+                if (show) {
+                    container.appendChild(renderStory(story, rank++));
+                }
+            });
+
+            if (rank === 1) {
+                container.innerHTML = `
+                    <div class="loading">
+                        <div style="font-size: 48px; margin-bottom: 16px;">🔍</div>
+                        No stories match this filter
+                    </div>
+                `;
+            }
+        }
+
+        // Load stories
+        async function loadStories() {
+            const container = document.getElementById('stories');
+            container.innerHTML = '<div class="loading"><div class="spinner"></div>Loading stories...</div>';
+            document.getElementById('loadMore').style.display = 'none';
+
+            document.querySelector('.stories-view').classList.remove('hidden');
+            document.getElementById('itemView').classList.remove('active');
+
+            try {
+                storyIds = await fetchStoryIds(currentType);
+                loadedCount = 0;
+                loadedStories = [];
+                totalPointsCount = 0;
+                relevantStoriesCount = 0;
+                container.innerHTML = '';
+                await loadMore();
+            } catch (error) {
+                container.innerHTML = '<div class="error">Failed to load stories. Please try again.</div>';
+                console.error(error);
+            }
+        }
+
+        async function loadMore() {
+            const loadMoreBtn = document.getElementById('loadMore');
+            loadMoreBtn.disabled = true;
+            loadMoreBtn.textContent = '⏳ Loading...';
+
+            const nextIds = storyIds.slice(loadedCount, loadedCount + STORIES_PER_PAGE);
+
+            try {
+                const stories = await Promise.all(nextIds.map(id => fetchItem(id)));
+
+                stories.forEach(story => {
+                    if (story) {
+                        loadedStories.push(story);
+                        totalPointsCount += story.score || 0;
+                        const { score } = calculateRelevance(story);
+                        if (score >= 3) relevantStoriesCount++;
+                    }
+                });
+
+                loadedCount += STORIES_PER_PAGE;
+                updateStats();
+                renderFilteredStories();
+
+                if (loadedCount < storyIds.length) {
+                    loadMoreBtn.style.display = 'block';
+                    loadMoreBtn.disabled = false;
+                    loadMoreBtn.textContent = `⚡ Load More (${storyIds.length - loadedCount} remaining)`;
+                } else {
+                    loadMoreBtn.style.display = 'none';
+                }
+
+                if (relevantStoriesCount > 0 && loadedCount === STORIES_PER_PAGE) {
+                    showToast('🎯', 'stories for you', `${relevantStoriesCount} relevant stories found`);
+                }
+            } catch (error) {
+                loadMoreBtn.disabled = false;
+                loadMoreBtn.textContent = '🔄 Try Again';
+                console.error(error);
+            }
+        }
+
+        // Item/Comments view
+        async function viewItem(id) {
+            document.querySelector('.stories-view').classList.add('hidden');
+            const itemView = document.getElementById('itemView');
+            itemView.classList.add('active');
+
+            const headerEl = document.getElementById('itemHeader');
+            const commentsEl = document.getElementById('comments');
+
+            headerEl.innerHTML = '<div class="loading"><div class="spinner"></div>Loading...</div>';
+            commentsEl.innerHTML = '';
+
+            try {
+                const item = await fetchItem(id);
+                const domain = getDomain(item.url);
+                const { score: relevanceScore, matchedKeywords } = calculateRelevance(item);
+                const relevanceLevel = getRelevanceLevel(relevanceScore);
+                const emoji = getStoryEmoji(item);
+
+                const tagsHtml = matchedKeywords.map(kw =>
+                    `<span class="tag xln">${kw}</span>`
+                ).join('');
+
+                headerEl.innerHTML = `
+                    <h1 class="item-title">
+                        ${emoji} ${item.url
+                            ? `<a href="${item.url}" target="_blank" rel="noopener">${escapeHtml(item.title)}</a>`
+                            : escapeHtml(item.title)}
+                    </h1>
+                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px;">
+                        ${domain ? `<span class="story-domain">🔗 ${domain}</span>` : ''}
+                        ${relevanceScore >= 3 ? `
+                            <span class="relevance-badge ${relevanceLevel}">
+                                ⚡ XLN Relevance: <span class="relevance-score">${relevanceScore}</span>
+                            </span>
+                        ` : ''}
+                    </div>
+                    <div class="story-meta">
+                        <span class="points">▲ ${item.score || 0} points</span>
+                        <span>by <a href="https://news.ycombinator.com/user?id=${item.by}" target="_blank" rel="noopener">${item.by}</a></span>
+                        <span>🕐 ${timeAgo(item.time)}</span>
+                    </div>
+                    ${tagsHtml ? `<div class="story-tags" style="margin-top: 12px;">${tagsHtml}</div>` : ''}
+                    ${item.text ? `<div class="item-text">${item.text}</div>` : ''}
+                `;
+
+                document.getElementById('commentsTitle').textContent = `💬 ${item.descendants || 0} Comments`;
+
+                if (item.kids && item.kids.length > 0) {
+                    commentsEl.innerHTML = '<div class="loading"><div class="spinner"></div>Loading comments...</div>';
+                    const commentsHtml = await renderComments(item.kids);
+                    commentsEl.innerHTML = commentsHtml;
+                } else {
+                    commentsEl.innerHTML = '<div class="no-comments">No comments yet 🦗</div>';
+                }
+            } catch (error) {
+                headerEl.innerHTML = '<div class="error">Failed to load item</div>';
+                console.error(error);
+            }
+        }
+
+        async function renderComments(ids, depth = 0) {
+            if (!ids || ids.length === 0 || depth > 5) return '';
+
+            const comments = await Promise.all(ids.slice(0, 50).map(id => fetchItem(id)));
+            let html = '';
+
+            for (const comment of comments) {
+                if (!comment || comment.deleted || comment.dead) continue;
+
+                const repliesHtml = comment.kids ? await renderComments(comment.kids, depth + 1) : '';
+
+                html += `
+                    <div class="comment" id="comment-${comment.id}">
+                        <div class="comment-meta">
+                            <a href="https://news.ycombinator.com/user?id=${comment.by}" target="_blank" rel="noopener">${comment.by}</a>
+                            <span>•</span>
+                            <span>${timeAgo(comment.time)}</span>
+                            <button class="collapse-btn" onclick="toggleComment(${comment.id})">−</button>
+                        </div>
+                        <div class="comment-text">${comment.text || ''}</div>
+                        ${repliesHtml ? `<div class="comment-replies">${repliesHtml}</div>` : ''}
+                    </div>
+                `;
+            }
+
+            return html;
+        }
+
+        function toggleComment(id) {
+            const comment = document.getElementById(`comment-${id}`);
+            comment.classList.toggle('collapsed');
+            const btn = comment.querySelector('.collapse-btn');
+            btn.textContent = comment.classList.contains('collapsed') ? '+' : '−';
+        }
+
+        function goHome() {
+            document.querySelector('.stories-view').classList.remove('hidden');
+            document.getElementById('itemView').classList.remove('active');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // Initialize
+        createParticles();
+        initTheme();
+        loadStories();
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                goHome();
+            }
+        });
+
+        // Add some fun console message
+        console.log('%c⚡ xln news', 'font-size: 24px; font-weight: bold; color: #667eea;');
+        console.log('%clightning-fast fintech & crypto news', 'font-size: 14px; color: #764ba2;');
+        console.log('%cpowered by hacker news api • xln.finance', 'font-size: 12px; color: #888;');
+    </script>
+</body>
+</html>
