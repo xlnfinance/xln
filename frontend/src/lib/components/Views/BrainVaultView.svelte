@@ -450,8 +450,13 @@
   $: canDerive = name.length >= BRAINVAULT_V2.MIN_NAME_LENGTH &&
                  passphrase.length >= BRAINVAULT_V2.MIN_PASSPHRASE_LENGTH;
   $: progress = shardCount > 0 ? (shardsCompleted / shardCount) * 100 : 0;
+  // Remaining time based on ACTUAL worker count (for live display during derivation)
   $: remainingMs = shardCount > 0
     ? Math.max(0, ((shardCount - shardsCompleted) / Math.max(workerCount, 1)) * estimatedShardTimeMs)
+    : 0;
+  // Projected ETA based on TARGET worker count (for slider preview)
+  $: projectedRemainingMs = shardCount > 0
+    ? Math.max(0, ((shardCount - shardsCompleted) / Math.max(targetWorkerCount, 1)) * estimatedShardTimeMs)
     : 0;
 
   // Shard grid dimensions (for visualization)
@@ -1263,19 +1268,27 @@
               <div class="pyramid-progress-fill" style="width: {progress}%"></div>
             </div>
 
-            <!-- Memory allocation slider - Argon2id is MEMORY-HARD -->
-            <div class="memory-control">
-              <span class="memory-label">MEMORY</span>
-              <div class="memory-slider-wrapper">
+            <!-- Speed control slider - more threads = faster but more RAM -->
+            <div class="speed-control">
+              <div class="speed-header">
+                <span class="speed-label">SPEED</span>
+                <span class="speed-eta">ETA: {formatDuration(projectedRemainingMs)}</span>
+              </div>
+              <div class="speed-slider-wrapper">
+                <span class="speed-min">🐢</span>
                 <input
                   type="range"
                   min="1"
                   max={maxWorkers}
                   bind:value={targetWorkerCount}
                   on:input={adjustWorkers}
-                  class="memory-slider"
+                  class="speed-slider"
                 />
-                <span class="memory-value">{allocatedMemoryMB}MB / {deviceMemoryMB}MB</span>
+                <span class="speed-max">🚀</span>
+              </div>
+              <div class="speed-details">
+                <span class="speed-threads">{targetWorkerCount} threads</span>
+                <span class="speed-memory">{allocatedMemoryMB}MB RAM</span>
               </div>
             </div>
 
@@ -2828,7 +2841,94 @@
     box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
   }
 
-  .memory-control, .sound-control {
+  .speed-control {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    padding: 12px 16px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 10px;
+    border: 1px solid rgba(255, 200, 100, 0.15);
+  }
+
+  .speed-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .speed-label {
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: rgba(255, 200, 100, 0.7);
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+
+  .speed-eta {
+    font-size: 14px;
+    color: #f5d78e;
+    font-weight: 600;
+    text-shadow: 0 0 10px rgba(245, 215, 142, 0.3);
+  }
+
+  .speed-slider-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .speed-min, .speed-max {
+    font-size: 16px;
+    opacity: 0.8;
+  }
+
+  .speed-slider {
+    flex: 1;
+    height: 28px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: linear-gradient(90deg, rgba(100, 150, 255, 0.2), rgba(255, 200, 100, 0.3));
+    border-radius: 6px;
+    cursor: pointer;
+  }
+
+  .speed-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px;
+    height: 28px;
+    background: linear-gradient(180deg, #f5d78e 0%, #c9a346 100%);
+    border-radius: 5px;
+    cursor: pointer;
+    box-shadow: 0 0 12px rgba(255, 200, 100, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  .speed-slider::-moz-range-thumb {
+    width: 20px;
+    height: 28px;
+    background: linear-gradient(180deg, #f5d78e 0%, #c9a346 100%);
+    border-radius: 5px;
+    cursor: pointer;
+    box-shadow: 0 0 12px rgba(255, 200, 100, 0.6);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+  }
+
+  .speed-details {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: rgba(255, 200, 100, 0.5);
+    letter-spacing: 0.5px;
+  }
+
+  .speed-threads, .speed-memory {
+    opacity: 0.8;
+  }
+
+  .sound-control {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -2836,56 +2936,13 @@
     font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
   }
 
-  .memory-label, .sound-label {
+  .sound-label {
     font-size: 10px;
     letter-spacing: 2px;
     color: rgba(255, 200, 100, 0.6);
     text-transform: uppercase;
     width: 70px;
     flex-shrink: 0;
-  }
-
-  .memory-slider-wrapper {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .memory-slider {
-    width: 100%;
-    height: 24px;
-    -webkit-appearance: none;
-    appearance: none;
-    background: rgba(255, 200, 100, 0.15);
-    border-radius: 4px;
-    cursor: pointer;
-  }
-
-  .memory-slider::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 16px;
-    height: 24px;
-    background: rgb(255, 200, 100);
-    border-radius: 3px;
-    cursor: pointer;
-    box-shadow: 0 0 10px rgba(255, 200, 100, 0.5);
-  }
-
-  .memory-slider::-moz-range-thumb {
-    width: 16px;
-    height: 24px;
-    background: rgb(255, 200, 100);
-    border-radius: 3px;
-    cursor: pointer;
-    box-shadow: 0 0 10px rgba(255, 200, 100, 0.5);
-    border: none;
-  }
-
-  .memory-value {
-    font-size: 11px;
-    color: rgba(255, 200, 100, 0.8);
-    text-align: right;
   }
 
   /* Mini shard grid under pyramid */
@@ -3632,38 +3689,47 @@
   .mnemonic-words {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
-    margin-top: 20px;
-    padding: 16px;
-    background: rgba(0, 0, 0, 0.4);
-    border-radius: 12px;
-    border: 1px solid rgba(180, 140, 80, 0.2);
+    gap: 12px;
+    margin-top: 24px;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 16px;
+    border: 1px solid rgba(180, 140, 80, 0.15);
   }
 
   .word {
     display: flex;
-    align-items: baseline;
-    background: rgba(180, 140, 80, 0.08);
-    padding: 12px 14px;
-    border-radius: 6px;
-    font-size: 15px;
-    color: #fbbf24;
+    align-items: center;
+    justify-content: flex-start;
+    background: linear-gradient(135deg, rgba(180, 140, 80, 0.12) 0%, rgba(180, 140, 80, 0.06) 100%);
+    padding: 14px 16px;
+    border-radius: 10px;
+    font-size: 16px;
+    color: #f5d78e;
     font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    border: 1px solid rgba(180, 140, 80, 0.15);
-    text-shadow: 0 0 8px rgba(251, 191, 36, 0.2);
-    min-height: 44px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    border: 1px solid rgba(180, 140, 80, 0.2);
+    text-shadow: 0 0 12px rgba(251, 191, 36, 0.25);
+    min-height: 52px;
     box-sizing: border-box;
+    transition: all 0.15s ease;
+  }
+
+  .word:hover {
+    background: linear-gradient(135deg, rgba(180, 140, 80, 0.18) 0%, rgba(180, 140, 80, 0.1) 100%);
+    border-color: rgba(180, 140, 80, 0.35);
+    transform: translateY(-1px);
   }
 
   .word-num {
-    color: rgba(180, 140, 80, 0.5);
-    margin-right: 8px;
-    font-size: 12px;
-    font-weight: 400;
-    min-width: 24px;
+    color: rgba(180, 140, 80, 0.4);
+    margin-right: 12px;
+    font-size: 11px;
+    font-weight: 500;
+    min-width: 22px;
     flex-shrink: 0;
+    opacity: 0.7;
   }
 
   .result-box.compact {
