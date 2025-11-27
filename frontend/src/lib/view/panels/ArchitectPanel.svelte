@@ -91,7 +91,7 @@
       // Step 2: Start payment loop after 2 seconds
       setTimeout(() => {
         console.log(' Starting payment loop...');
-        startPaymentLoop();
+        startFedPaymentLoop();
       }, 2000);
     }
   });
@@ -302,7 +302,7 @@
       isolatedEnv.set($isolatedEnv);
       const frames = $isolatedEnv.history || [];
       console.log('[Architect] Setting isolatedHistory with frames:', frames.length);
-      console.log('[Architect] Frame descriptions:', frames.map(f => f.description));
+      console.log('[Architect] Frame descriptions:', frames.map((f: any) => f.description));
       isolatedHistory.set(frames);
       isolatedTimeIndex.set(0);
 
@@ -896,10 +896,10 @@
       await XLN.process($isolatedEnv, entityInputs);
 
       // Get created entity IDs
-      const newReplicas = Array.from($isolatedEnv.replicas.entries());
+      const newReplicas = Array.from($isolatedEnv.replicas.entries()) as [string, any][];
       const scaleTestIds = newReplicas
-        .filter(([key]) => key.includes('scale_test'))
-        .map(([key]) => key.split(':')[0]);
+        .filter(([key]: [string, any]) => key.includes('scale_test'))
+        .map(([key]: [string, any]) => key.split(':')[0]);
 
       lastAction = ` Created 100 entities! Check FPS overlay (should be 60+)`;
 

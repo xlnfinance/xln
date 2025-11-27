@@ -191,6 +191,7 @@
 
   function nextStep() {
     const scenario = SCENARIOS[currentScenario];
+    if (!scenario) return;
     if (currentStep < scenario.steps.length - 1) {
       currentStep++;
     } else if (currentScenario < SCENARIOS.length - 1) {
@@ -203,10 +204,12 @@
 
     // Emit event for 3D panel to execute visual actions
     const step = scenario.steps[currentStep];
-    panelBridge.emit('tutorial:action', {
-      action: step.action,
-      scenarioId: scenario.id
-    });
+    if (step) {
+      panelBridge.emit('tutorial:action', {
+        action: step.action,
+        data: { scenarioId: scenario.id }
+      });
+    }
   }
 
   function prevStep() {
@@ -214,26 +217,31 @@
       currentStep--;
     } else if (currentScenario > 0) {
       currentScenario--;
-      currentStep = SCENARIOS[currentScenario].steps.length - 1;
+      const prevScenario = SCENARIOS[currentScenario];
+      currentStep = prevScenario ? prevScenario.steps.length - 1 : 0;
     }
 
     const scenario = SCENARIOS[currentScenario];
+    if (!scenario) return;
     const step = scenario.steps[currentStep];
-    panelBridge.emit('tutorial:action', {
-      action: step.action,
-      scenarioId: scenario.id
-    });
+    if (step) {
+      panelBridge.emit('tutorial:action', {
+        action: step.action,
+        data: { scenarioId: scenario.id }
+      });
+    }
   }
 
   function skip() {
     dispatch('skip');
   }
 
-  $: currentScenarioData = SCENARIOS[currentScenario];
-  $: currentStepData = currentScenarioData.steps[currentStep];
+  $: currentScenarioData = SCENARIOS[currentScenario] ?? SCENARIOS[0];
+  $: currentStepData = currentScenarioData?.steps[currentStep] ?? currentScenarioData?.steps[0];
   $: progress = ((currentScenario * 10 + currentStep) / (SCENARIOS.length * 10)) * 100;
 </script>
 
+{#if currentScenarioData && currentStepData}
 <div class="tutorial-overlay" class:vr-mode={isVRMode}>
   <div class="tutorial-panel" style="border-color: {currentScenarioData.color}">
     <!-- Progress bar -->
@@ -282,6 +290,7 @@
     </div>
   </div>
 </div>
+{/if}
 
 <style>
   .tutorial-overlay {

@@ -1,5 +1,25 @@
 # Next Session Tasks
 
+## Completed (2025-11-28)
+
+### TypeScript Refactoring - 42 errors → 0 errors
+- Fixed undefined array access in `handGesturePayments.ts` (raycast intersects)
+- Fixed Map.keys() type cast in `Graph3DPanel.svelte`
+- Fixed GrabbableEntity type assertions in `Graph3DPanel.svelte`
+- Fixed Uint8Array to ArrayBuffer conversion in `BrainVaultView.svelte`
+- Fixed async onMount pattern in `BrainVaultView.svelte` (wrap in IIFE, return sync cleanup)
+- Fixed null coalescing in `Tutorial.svelte` and `XLNTutorial.svelte`
+- Fixed function name `startPaymentLoop` → `startFedPaymentLoop` in `ArchitectPanel.svelte`
+- Fixed type-only import for Page in `fed-chair-demo.spec.ts`
+- Added Window.XLN declaration for Playwright tests
+
+### /vault Layout Fix
+- Removed padding from vault page container
+- Fixed BrainVaultView scroll: `overflow: hidden` → `overflow-y: auto`
+- Changed `height: 100vh` → `min-height: 100vh`
+
+---
+
 ## Split-Screen Broadcast vs Unicast Visualization
 
 ### Goal

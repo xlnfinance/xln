@@ -18,6 +18,7 @@ export interface EntityData {
   isDragging: boolean | undefined;
   activityRing: THREE.Mesh | null | undefined;
   hubConnectedIds: Set<string> | undefined;
+  reserveLabel: THREE.Sprite | undefined;
 }
 
 export interface AccountConnectionData {

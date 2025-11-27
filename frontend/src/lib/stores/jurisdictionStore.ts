@@ -106,3 +106,9 @@ export function clearJurisdictionsCache(): void {
   jurisdictionsLoaded.set(false);
   console.log('🔄 Frontend jurisdictions cache cleared');
 }
+
+// Get available jurisdictions as an array (for components that need list format)
+export async function getAvailableJurisdictions(): Promise<JurisdictionConfig[]> {
+  const data = await loadJurisdictions();
+  return Object.values(data.jurisdictions);
+}

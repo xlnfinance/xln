@@ -144,6 +144,7 @@
     activityRing?: THREE.Mesh | null; // Activity indicator ring
     hubConnectedIds?: Set<string>; // PERF: Cache of connected entity IDs for hubs
     baseScale?: number; // Base scale from reserves (before pulse animation)
+    reserveLabel?: THREE.Sprite; // Reserve amount label under entity
   }
 
   interface FrameActivity {
@@ -195,7 +196,7 @@
   let container: HTMLDivElement;
   let scene: THREE.Scene;
   let camera: THREE.PerspectiveCamera;
-  let renderer: THREE.WebGLRenderer;
+  let renderer: THREE.WebGLRenderer | any; // WebGPURenderer fallback
   let controls: any;
   let raycaster: THREE.Raycaster;
   let mouse: THREE.Vector2;
@@ -2791,7 +2792,7 @@ let vrHammer: VRHammer | null = null;
             scene.remove(conn.progressBars);
             // Get fresh replica data
             const currentReplicas = $isolatedEnv?.replicas || new Map();
-            const replicaKey = Array.from(currentReplicas.keys()).find(k => k.startsWith(conn.from + ':') || k.startsWith(conn.to + ':'));
+            const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(k => k.startsWith(conn.from + ':') || k.startsWith(conn.to + ':'));
             const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
 
             if (replica) {
@@ -3283,13 +3284,13 @@ let vrHammer: VRHammer | null = null;
     // ===== UPDATE HAND TRACKING (Vision Pro + Quest) =====
     if (isVRActive && handTrackingController) {
       // Convert entities to GrabbableEntity format
-      const grabbableEntities: GrabbableEntity[] = entities.map(e => ({
+      const grabbableEntities = entities.map(e => ({
         id: e.id,
-        mesh: e.mesh,
+        mesh: e.mesh as THREE.Mesh,
         position: e.position,
         isPinned: e.isPinned,
-        label: e.label
-      }));
+        label: e.label as THREE.Object3D | undefined
+      })) as GrabbableEntity[];
       handTrackingController.update(grabbableEntities);
     }
 
@@ -5368,7 +5369,7 @@ let vrHammer: VRHammer | null = null;
 
     <button
       class="bars-mode-toggle"
-      on:click={() => { barsMode = barsMode === 'close' ? 'spread' : 'close'; saveSettings(); }}
+      on:click={() => { barsMode = barsMode === 'close' ? 'spread' : 'close'; saveBirdViewSettings(); }}
       title="Toggle bars positioning: {barsMode === 'close' ? 'Center (close)' : 'Sides (spread)'}"
     >
       Bars: {barsMode === 'close' ? '⬌ Center' : '↔ Sides'}

@@ -11,15 +11,93 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const DATA_DIR = join(import.meta.dir, "../data/news-cache");
 const OUTPUT_DIR = join(import.meta.dir, "../frontend/static/news/data");
+const BUDGET_FILE = join(import.meta.dir, "../data/news-budget.json");
 const MIN_POINTS = 200;
 const MAX_STORIES_PER_RUN = 10;
+const DAILY_BUDGET_USD = 20;
+
+// pricing per 1M tokens (sonnet 4)
+const PRICE_INPUT_PER_M = 3;
+const PRICE_OUTPUT_PER_M = 15;
+
+interface BudgetData {
+  date: string;
+  spent_usd: number;
+  requests: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
+function getTodayBudget(): BudgetData {
+  const today = new Date().toISOString().split("T")[0];
+  if (existsSync(BUDGET_FILE)) {
+    try {
+      const data = JSON.parse(readFileSync(BUDGET_FILE, "utf-8"));
+      if (data.date === today) return data;
+    } catch {}
+  }
+  return { date: today, spent_usd: 0, requests: 0, tokens_in: 0, tokens_out: 0 };
+}
+
+function saveBudget(budget: BudgetData) {
+  writeFileSync(BUDGET_FILE, JSON.stringify(budget, null, 2));
+}
+
+function trackUsage(inputTokens: number, outputTokens: number): BudgetData {
+  const budget = getTodayBudget();
+  const cost = (inputTokens / 1_000_000) * PRICE_INPUT_PER_M +
+               (outputTokens / 1_000_000) * PRICE_OUTPUT_PER_M;
+  budget.spent_usd += cost;
+  budget.requests++;
+  budget.tokens_in += inputTokens;
+  budget.tokens_out += outputTokens;
+  saveBudget(budget);
+  return budget;
+}
+
+function checkBudget(): boolean {
+  return getTodayBudget().spent_usd < DAILY_BUDGET_USD;
+}
 
 // ensure dirs exist
 [DATA_DIR, OUTPUT_DIR].forEach(dir => {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 });
 
-const anthropic = new Anthropic();
+// load .env.news if exists
+function loadEnvFile() {
+  const envPath = join(import.meta.dir, "../.env.news");
+  if (existsSync(envPath)) {
+    const content = readFileSync(envPath, "utf-8");
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith("#")) {
+        const [key, ...valueParts] = trimmed.split("=");
+        const value = valueParts.join("=").trim();
+        if (key && value) {
+          process.env[key.trim()] = value;
+        }
+      }
+    }
+  }
+}
+
+loadEnvFile();
+
+// try to get auth token
+function getAuthToken(): string | undefined {
+  return process.env.ANTHROPIC_API_KEY;
+}
+
+const authToken = getAuthToken();
+if (!authToken) {
+  console.error("❌ no auth token found. set ANTHROPIC_API_KEY or login with claude");
+  process.exit(1);
+}
+
+const anthropic = new Anthropic({
+  apiKey: authToken,
+});
 
 interface HNItem {
   id: number;
@@ -277,6 +355,9 @@ be thorough but scannable. use emojis as section markers. bold important terms. 
     messages: [{ role: "user", content: prompts[mode] }],
   });
 
+  // track usage
+  trackUsage(response.usage.input_tokens, response.usage.output_tokens);
+
   return (response.content[0] as any).text;
 }
 
@@ -325,6 +406,9 @@ make it scannable and engaging. no preamble.`;
     max_tokens: 2500,
     messages: [{ role: "user", content: prompt }],
   });
+
+  // track usage
+  trackUsage(response.usage.input_tokens, response.usage.output_tokens);
 
   let digest = (response.content[0] as any).text;
 
@@ -376,6 +460,16 @@ function outputFeed(stories: CachedStory[]) {
 async function runCron(mode: "hourly" | "6hourly") {
   console.log(`\n⚡ xln news cron: ${mode} run at ${new Date().toISOString()}`);
 
+  // check budget first
+  const budgetOk = checkBudget();
+  const budget = getTodayBudget();
+  console.log(`💰 budget: $${budget.spent_usd.toFixed(2)} / $${DAILY_BUDGET_USD} (${budget.requests} requests)`);
+
+  if (!budgetOk) {
+    console.log("❌ daily budget exhausted, skipping...");
+    return;
+  }
+
   const topIds = await fetchTopStories();
   console.log(`📰 fetched ${topIds.length} top story ids`);
 
@@ -384,6 +478,12 @@ async function runCron(mode: "hourly" | "6hourly") {
 
   for (const id of topIds) {
     if (processed >= MAX_STORIES_PER_RUN) break;
+
+    // re-check budget during processing
+    if (!checkBudget()) {
+      console.log("⚠️ budget limit reached during run, stopping...");
+      break;
+    }
 
     const item = await fetchHNItem(id);
     if (!item || item.score < MIN_POINTS) continue;

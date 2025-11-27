@@ -22,12 +22,15 @@
   .vault-page {
     min-height: 100vh;
     background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #0f0f1a 100%);
-    padding: 20px;
+    padding: 0;
+    margin: 0;
   }
 
+  :global(html),
   :global(body) {
     margin: 0;
     padding: 0;
     background: #0a0a0f;
+    overflow-x: hidden;
   }
 </style>

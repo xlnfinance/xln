@@ -76,10 +76,10 @@
     localStorage.setItem('xln-tutorial-seen', 'true');
   }
 
-  $: step = TUTORIAL_STEPS[currentStep];
+  $: step = TUTORIAL_STEPS[currentStep] ?? TUTORIAL_STEPS[0];
 </script>
 
-{#if showTutorial}
+{#if showTutorial && step}
   <div class="tutorial-overlay">
     <div class="tutorial-backdrop" on:click={skipTutorial}></div>
 

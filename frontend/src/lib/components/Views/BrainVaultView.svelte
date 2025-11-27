@@ -2,6 +2,9 @@
   import { onMount, onDestroy } from 'svelte';
   import { HDNodeWallet } from 'ethers';
   import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
+  import ERC20Send from '$lib/components/Wallet/ERC20Send.svelte';
+  import DepositToEntity from '$lib/components/Wallet/DepositToEntity.svelte';
+  import { keccak256, zeroPadValue } from 'ethers';
 
   // Initialize i18n
   let i18nReady = false;
@@ -122,11 +125,12 @@
     // Generate pattern (symmetric)
     const pattern: number[][] = [];
     for (let y = 0; y < size; y++) {
-      pattern[y] = [];
+      const row: number[] = [];
+      pattern[y] = row;
       for (let x = 0; x < Math.ceil(size / 2); x++) {
         const v = Math.floor(rand() * 3);
-        pattern[y][x] = v;
-        pattern[y][size - 1 - x] = v; // Mirror
+        row[x] = v;
+        row[size - 1 - x] = v; // Mirror
       }
     }
 
@@ -135,9 +139,12 @@
     let svg = `<svg width="${size * cellSize}" height="${size * cellSize}" viewBox="0 0 ${size * cellSize} ${size * cellSize}" xmlns="http://www.w3.org/2000/svg">`;
     svg += `<rect width="100%" height="100%" fill="${colors[0]}"/>`;
     for (let y = 0; y < size; y++) {
+      const row = pattern[y];
+      if (!row) continue;
       for (let x = 0; x < size; x++) {
-        if (pattern[y][x] > 0) {
-          svg += `<rect x="${x * cellSize}" y="${y * cellSize}" width="${cellSize}" height="${cellSize}" fill="${colors[pattern[y][x]]}"/>`;
+        const val = row[x] ?? 0;
+        if (val > 0) {
+          svg += `<rect x="${x * cellSize}" y="${y * cellSize}" width="${cellSize}" height="${cellSize}" fill="${colors[val]}"/>`;
         }
       }
     }
@@ -295,6 +302,7 @@
   let devicePassphrase = '';
   let ethereumAddress = '';
   let masterKeyHex = '';
+  let entityId = ''; // bytes32 entity ID derived from address
   let showMnemonic = false;
   let showDevicePassphrase = false;
   let copiedField: string | null = null;
@@ -530,7 +538,7 @@
 
   // Native SHA256 using Web Crypto API (browser built-in)
   async function sha256(data: Uint8Array): Promise<string> {
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data.buffer as ArrayBuffer);
     const hashArray = new Uint8Array(hashBuffer);
     return bytesToHex(hashArray);
   }
@@ -792,6 +800,8 @@
     // HDNodeWallet.fromPhrase creates a wallet at the Ethereum default path m/44'/60'/0'/0/0
     const wallet = HDNodeWallet.fromPhrase(mnemonic24);
     ethereumAddress = wallet.address;
+    // Entity ID is keccak256(address) - deterministic bytes32 derived from address
+    entityId = keccak256(wallet.address);
 
     // Clear localStorage resume token
     localStorage.removeItem('brainvault_resume');
@@ -1093,29 +1103,36 @@
   });
 
   // Check for saved resume on mount + init i18n
-  onMount(async () => {
-    // Init i18n
-    await initI18n();
-    i18nReady = true;
+  onMount(() => {
+    let unsubscribe: (() => void) | undefined;
 
-    // Watch for locale changes
-    const unsubscribe = locale.subscribe(async (loc) => {
-      await loadTranslations(loc);
-    });
+    // Run async init
+    (async () => {
+      // Init i18n
+      await initI18n();
+      i18nReady = true;
 
-    const saved = localStorage.getItem('brainvault_resume');
-    if (saved) {
-      try {
-        const token = JSON.parse(saved);
-        if (token.completedShards?.length > 0) {
-          showResumeInput = true;
-          name = token.name || '';
-          factor = token.factor;
-        }
-      } catch {}
-    }
+      // Watch for locale changes
+      unsubscribe = locale.subscribe(async (loc) => {
+        await loadTranslations(loc);
+      });
 
-    return () => unsubscribe();
+      const saved = localStorage.getItem('brainvault_resume');
+      if (saved) {
+        try {
+          const token = JSON.parse(saved);
+          if (token.completedShards?.length > 0) {
+            showResumeInput = true;
+            name = token.name || '';
+            factor = token.factor;
+          }
+        } catch {}
+      }
+    })();
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   });
 
   // BIP39 wordlist
@@ -1607,6 +1624,12 @@
           {/if}
         </div>
 
+        <!-- ERC20 Send Section -->
+        <ERC20Send privateKey={masterKeyHex} walletAddress={ethereumAddress} />
+
+        <!-- Deposit to XLN Entity Section -->
+        <DepositToEntity privateKey={masterKeyHex} walletAddress={ethereumAddress} {entityId} />
+
         <!-- Network Actions -->
         <div class="network-actions">
           <div class="network-cta">
@@ -1654,15 +1677,16 @@
 <style>
   .brainvault-container {
     width: 100%;
-    height: 100vh;
-    padding: 40px 20px 20px;
+    min-height: 100vh;
+    padding: 20px;
     background: #000;
     background-image:
       radial-gradient(ellipse at 50% 0%, rgba(180, 140, 80, 0.08) 0%, transparent 50%),
       radial-gradient(ellipse at 50% 20%, rgba(120, 90, 50, 0.05) 0%, transparent 40%),
       linear-gradient(180deg, #0a0806 0%, #000 100%);
     position: relative;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
     display: flex;
     flex-direction: column;
     box-sizing: border-box;

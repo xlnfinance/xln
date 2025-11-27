@@ -10,7 +10,14 @@
  * This is the showcase feature - it MUST work flawlessly.
  */
 
-import { test, expect, Page } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+
+// Extend Window interface for XLN
+declare global {
+  interface Window {
+    XLN?: unknown;
+  }
+}
 
 // Helper: Navigate to /view and wait for runtime to initialize
 async function navigateToView(page: Page) {
@@ -161,7 +168,9 @@ test.describe('Fed Chair Demo - Step-by-Step', () => {
 
     // Should have at least 100 entities
     expect(entitiesText).toMatch(/\d+\stotal/);
-    const entityCount = parseInt(entitiesText!.match(/(\d+)\stotal/)![1]);
+    const entityMatch = entitiesText?.match(/(\d+)\stotal/);
+    expect(entityMatch).toBeTruthy();
+    const entityCount = parseInt(entityMatch![1] ?? '0');
     expect(entityCount).toBeGreaterThanOrEqual(100);
 
     // Check FPS counter - should show reasonable performance
@@ -169,10 +178,10 @@ test.describe('Fed Chair Demo - Step-by-Step', () => {
     const statsText = await graph3DStats.textContent();
 
     // Extract FPS value
-    const fpsMatch = statsText!.match(/Render FPS\s*([\d.]+)/);
+    const fpsMatch = statsText?.match(/Render FPS\s*([\d.]+)/);
     expect(fpsMatch).toBeTruthy();
 
-    const fps = parseFloat(fpsMatch![1]);
+    const fps = parseFloat(fpsMatch![1] ?? '0');
 
     // FPS should be at least 30 (60 is ideal, but 30 is acceptable for scale test)
     expect(fps).toBeGreaterThan(30);
