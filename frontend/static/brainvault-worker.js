@@ -9,13 +9,11 @@
 let argon2id = null;
 let blake3 = null;
 
-// IMPORTANT: These parameters are FIXED for deterministic derivation
-// Changing them would produce different wallet addresses!
 const BRAINVAULT_V2 = {
   ALG_ID: 'brainvault/argon2id-sharded/v2.0',
-  SHARD_MEMORY_KB: 256 * 1024,    // 256MB per shard (FIXED - do not change!)
-  ARGON_TIME_COST: 1,              // (FIXED - do not change!)
-  ARGON_PARALLELISM: 1,            // (FIXED - do not change!)
+  SHARD_MEMORY_KB: 256 * 1024,    // 256MB per shard
+  ARGON_TIME_COST: 1,
+  ARGON_PARALLELISM: 1,
   SHARD_OUTPUT_BYTES: 32,
 };
 
