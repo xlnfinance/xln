@@ -72,7 +72,7 @@
   const BRAINVAULT_V2 = {
     ALG_ID: 'brainvault/argon2id-sharded/v2.0',
     SHARD_MEMORY_KB: 256 * 1024,
-    MIN_NAME_LENGTH: 4,
+    MIN_NAME_LENGTH: 1,
     MIN_PASSPHRASE_LENGTH: 6,
     MIN_FACTOR: 1,
     MAX_FACTOR: 9,
@@ -188,6 +188,10 @@
     {
       q: 'Can I use this as a password manager?',
       a: 'Yes! Once derived, enter any domain to generate a unique strong password for that site. The passwords are deterministically derived from your master key.'
+    },
+    {
+      q: 'How can I verify this code is safe?',
+      a: 'This is 100% open source. View source: github.com/xlnfinance/xln. Run locally: git clone, cd frontend, bun install, bun run dev. Check Network tab - zero external requests. You can even disconnect from internet and it still works.'
     },
   ];
 
