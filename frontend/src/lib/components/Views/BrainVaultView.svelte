@@ -511,12 +511,11 @@
       currentTipIndex = (currentTipIndex + 1) % XLN_TIPS.length;
     }, 7000);
 
-    // Create workers
-    workerCount = Math.min(
-      navigator.hardwareConcurrency || 4,
-      shardCount,
-      8 // Cap at 8 workers to avoid memory issues
-    );
+    // Create workers - USE ALL AVAILABLE CORES
+    // No artificial cap - let the browser/OS handle scheduling
+    const cpuCores = navigator.hardwareConcurrency || 4;
+    workerCount = Math.min(cpuCores, shardCount);
+    console.log(`[BrainVault] Using ${workerCount} workers (${cpuCores} CPU cores detected)`);
 
     // Hash the name first using the worker
     const nameHashHex = await workerHashName(name);
