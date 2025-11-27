@@ -10,14 +10,85 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const PORT = 3002;
 const CACHE_DIR = join(import.meta.dir, "data/news-cache");
+const BUDGET_FILE = join(import.meta.dir, "data/news-budget.json");
 const MIN_POINTS_FOR_SUMMARY = 200; // admin configurable
+const DAILY_BUDGET_USD = 20; // $20/day limit
+
+// pricing per 1M tokens (sonnet 4)
+const PRICE_INPUT_PER_M = 3;   // $3 per 1M input
+const PRICE_OUTPUT_PER_M = 15; // $15 per 1M output
+
+interface BudgetData {
+  date: string;
+  spent_usd: number;
+  requests: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
+function getTodayBudget(): BudgetData {
+  const today = new Date().toISOString().split("T")[0];
+  if (existsSync(BUDGET_FILE)) {
+    try {
+      const data = JSON.parse(readFileSync(BUDGET_FILE, "utf-8"));
+      if (data.date === today) return data;
+    } catch {}
+  }
+  return { date: today, spent_usd: 0, requests: 0, tokens_in: 0, tokens_out: 0 };
+}
+
+function saveBudget(budget: BudgetData) {
+  writeFileSync(BUDGET_FILE, JSON.stringify(budget, null, 2));
+}
+
+function trackUsage(inputTokens: number, outputTokens: number) {
+  const budget = getTodayBudget();
+  const cost = (inputTokens / 1_000_000) * PRICE_INPUT_PER_M +
+               (outputTokens / 1_000_000) * PRICE_OUTPUT_PER_M;
+  budget.spent_usd += cost;
+  budget.requests++;
+  budget.tokens_in += inputTokens;
+  budget.tokens_out += outputTokens;
+  saveBudget(budget);
+  return budget;
+}
+
+function checkBudget(): { ok: boolean; remaining: number; spent: number } {
+  const budget = getTodayBudget();
+  return {
+    ok: budget.spent_usd < DAILY_BUDGET_USD,
+    remaining: Math.max(0, DAILY_BUDGET_USD - budget.spent_usd),
+    spent: budget.spent_usd
+  };
+}
+
+// load .env.news if exists
+function loadEnvFile() {
+  const envPath = join(import.meta.dir, ".env.news");
+  if (existsSync(envPath)) {
+    const content = readFileSync(envPath, "utf-8");
+    for (const line of content.split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed && !trimmed.startsWith("#")) {
+        const [key, ...valueParts] = trimmed.split("=");
+        const value = valueParts.join("=").trim();
+        if (key && value) {
+          process.env[key.trim()] = value;
+        }
+      }
+    }
+  }
+}
+loadEnvFile();
 
 // ensure cache dir exists
 if (!existsSync(CACHE_DIR)) {
   mkdirSync(CACHE_DIR, { recursive: true });
 }
 
-const anthropic = new Anthropic();
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
 
 interface HNItem {
   id: number;
@@ -208,6 +279,9 @@ be thorough but organized. use quotes where relevant. no preamble.`
     messages: [{ role: "user", content: prompts[mode] }],
   });
 
+  // track token usage for budget
+  trackUsage(response.usage.input_tokens, response.usage.output_tokens);
+
   return (response.content[0] as any).text;
 }
 
@@ -227,9 +301,33 @@ serve({
       return new Response(null, { headers });
     }
 
+    // GET /api/news/budget - check today's budget
+    if (url.pathname === "/api/news/budget" && req.method === "GET") {
+      const budget = checkBudget();
+      const data = getTodayBudget();
+      return new Response(JSON.stringify({
+        ...budget,
+        daily_limit: DAILY_BUDGET_USD,
+        requests_today: data.requests,
+        tokens_in: data.tokens_in,
+        tokens_out: data.tokens_out,
+      }), { headers });
+    }
+
     // POST /api/news/summarize
     if (url.pathname === "/api/news/summarize" && req.method === "POST") {
       try {
+        // check budget first
+        const budget = checkBudget();
+        if (!budget.ok) {
+          return new Response(JSON.stringify({
+            error: "daily budget exhausted",
+            spent: budget.spent.toFixed(2),
+            limit: DAILY_BUDGET_USD,
+            retry_after: "tomorrow"
+          }), { status: 429, headers });
+        }
+
         const body = await req.json();
         const { hn_id, mode = "medium" } = body;
 

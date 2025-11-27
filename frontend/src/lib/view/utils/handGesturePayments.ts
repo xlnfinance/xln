@@ -88,8 +88,9 @@ export class HandGesturePaymentController {
         false
       );
 
-      if (intersects.length > 0) {
-        const entity = this.entities.find(e => e.mesh === intersects[0].object);
+      const firstIntersect = intersects[0];
+      if (firstIntersect) {
+        const entity = this.entities.find(e => e.mesh === firstIntersect.object);
         if (entity) {
           handState.isGrabbing = true;
           handState.grabbedEntity = entity.id;
@@ -116,8 +117,9 @@ export class HandGesturePaymentController {
         false
       );
 
-      if (intersects.length > 0) {
-        const targetEntity = this.entities.find(e => e.mesh === intersects[0].object);
+      const targetIntersect = intersects[0];
+      if (targetIntersect) {
+        const targetEntity = this.entities.find(e => e.mesh === targetIntersect.object);
 
         if (targetEntity && grabbedEntityId && targetEntity.id !== grabbedEntityId) {
           // Trigger payment!

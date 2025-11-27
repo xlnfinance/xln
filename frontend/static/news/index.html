@@ -299,6 +299,93 @@
             color: white;
         }
 
+        .filter-chip.digest {
+            background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
+            border-color: transparent;
+            color: white;
+        }
+
+        /* Daily digest view */
+        .digest-view {
+            display: none;
+        }
+
+        .digest-view.active {
+            display: block;
+        }
+
+        .digest-card {
+            background: var(--bg-secondary);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            border: 1px solid var(--border);
+        }
+
+        .digest-card h2 {
+            font-size: 18px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .digest-card h2 a {
+            color: var(--text-primary);
+            text-decoration: none;
+        }
+
+        .digest-card h2 a:hover {
+            color: var(--accent);
+        }
+
+        .digest-card-meta {
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+        }
+
+        .digest-card-summary {
+            font-size: 14px;
+            line-height: 1.7;
+            color: var(--text-secondary);
+        }
+
+        .digest-card-summary strong {
+            color: var(--text-primary);
+        }
+
+        .digest-card-summary h2, .digest-card-summary h3 {
+            color: var(--text-primary);
+            margin: 16px 0 8px 0;
+            font-size: 15px;
+        }
+
+        .digest-card-summary ul {
+            margin: 8px 0;
+            padding-left: 20px;
+        }
+
+        .digest-card-summary li {
+            margin: 4px 0;
+        }
+
+        .digest-header {
+            text-align: center;
+            padding: 24px 0;
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .digest-header h1 {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .digest-header p {
+            color: var(--text-muted);
+        }
+
         main {
             padding: 24px 0;
             min-height: calc(100vh - 80px);
@@ -504,6 +591,35 @@
         .tag.xln {
             background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
             color: #667eea;
+        }
+
+        /* Inline TL;DR preview */
+        .story-tldr {
+            margin-top: 10px;
+            padding: 10px 12px;
+            background: var(--bg-hover);
+            border-radius: 8px;
+            font-size: 13px;
+            line-height: 1.5;
+            color: var(--text-secondary);
+            border-left: 3px solid #667eea;
+        }
+
+        .story-tldr strong {
+            color: var(--text-primary);
+        }
+
+        .story-tldr-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #667eea;
+            margin-bottom: 4px;
+            display: block;
+        }
+
+        .stories-list.compact .story-tldr {
+            display: none;
         }
 
         /* Thumbnail */
@@ -1267,6 +1383,38 @@
             gap: 2px;
         }
 
+        /* Controversial indicator */
+        .controversial {
+            color: #f59e0b;
+            font-size: 11px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+        }
+
+        /* Reading time */
+        .reading-time {
+            font-size: 11px;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        /* Discussion heat */
+        .heat {
+            margin-left: 2px;
+            font-size: 11px;
+        }
+
+        .heat-blazing {
+            animation: pulse 0.5s ease-in-out infinite alternate;
+        }
+
+        @keyframes pulse {
+            from { opacity: 1; }
+            to { opacity: 0.6; }
+        }
+
         /* Summarize button */
         .summarize-btn {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -1463,6 +1611,7 @@
                 <span class="filter-chip" data-filter="tech">💻 Tech</span>
                 <span class="filter-chip" data-filter="startup">🦄 Startups</span>
                 <span class="filter-chip" data-filter="saved">🔖 Saved</span>
+                <span class="filter-chip digest" data-filter="digest">📰 Daily Digest</span>
             </div>
             <div class="sort-wrapper">
                 <select id="sortSelect">
@@ -1486,6 +1635,14 @@
             <button class="load-more" id="loadMore" onclick="loadMore()">⚡ Load More Stories</button>
         </div>
 
+        <div class="digest-view" id="digestView">
+            <div class="digest-header">
+                <h1>📰 daily digest</h1>
+                <p>ai-summarized top stories, updated hourly</p>
+            </div>
+            <div id="digestContent"></div>
+        </div>
+
         <div class="item-view" id="itemView">
             <button class="back-button" onclick="goHome()">
                 ← Back to stories
@@ -1503,6 +1660,7 @@
         <span><kbd>o</kbd> open</span>
         <span><kbd>b</kbd> bookmark</span>
         <span><kbd>s</kbd> summarize</span>
+        <span><kbd>d</kbd> digest</span>
         <span><kbd>/</kbd> search</span>
     </div>
 
@@ -2158,6 +2316,38 @@
             return hoursOld < 12 && pointsPerHour > 20;
         }
 
+        // Check if story is controversial (lots of comments relative to points)
+        function isControversial(story) {
+            const comments = story.descendants || 0;
+            const points = story.score || 1;
+            // controversial = more comments than points, or ratio > 0.7
+            return comments > 30 && (comments / points) > 0.7;
+        }
+
+        // Estimate reading time (article + top comments)
+        function getReadingTime(story) {
+            // rough estimate: title words + assume 800 words for article + 50 words per comment
+            const titleWords = story.title.split(' ').length;
+            const estimatedArticleWords = story.url ? 800 : (story.text?.split(' ').length || 100);
+            const commentWords = (story.descendants || 0) * 30; // avg 30 words per comment visible
+            const totalWords = titleWords + estimatedArticleWords + Math.min(commentWords, 1500);
+            const minutes = Math.ceil(totalWords / 200); // 200 wpm reading speed
+            return minutes;
+        }
+
+        // Get discussion activity level
+        function getDiscussionHeat(story) {
+            const comments = story.descendants || 0;
+            const hoursOld = (Date.now() / 1000 - story.time) / 3600;
+            const commentsPerHour = comments / Math.max(hoursOld, 1);
+
+            if (commentsPerHour > 20) return { level: 'blazing', emoji: '🔥🔥', label: 'blazing' };
+            if (commentsPerHour > 10) return { level: 'hot', emoji: '🔥', label: 'hot' };
+            if (commentsPerHour > 3) return { level: 'active', emoji: '💬', label: 'active' };
+            if (comments > 50) return { level: 'steady', emoji: '📝', label: 'discussed' };
+            return null;
+        }
+
         // Render story card
         function renderStory(story, rank) {
             const domain = getDomain(story.url);
@@ -2168,6 +2358,12 @@
             const bookmarked = isBookmarked(story.id);
             const read = isRead(story.id);
             const trending = isTrending(story);
+            const controversial = isControversial(story);
+            const readingTime = getReadingTime(story);
+            const discussionHeat = getDiscussionHeat(story);
+
+            // check if we have cached TL;DR
+            const cachedTldr = summaryCache[story.id]?.short || null;
 
             const card = document.createElement('article');
             card.className = `story-card ${relevanceScore >= 3 ? relevanceLevel + '-relevance' : ''} ${read ? 'read' : ''}`;
@@ -2203,12 +2399,15 @@
                                 <span class="points-icon" onclick="event.stopPropagation(); vote(this)">▲</span>
                                 <span class="animated-number">${story.score || 0}</span> pts
                                 ${trending ? '<span class="trending">🔥 trending</span>' : ''}
+                                ${controversial ? '<span class="controversial">⚡ controversial</span>' : ''}
                             </span>
+                            <span class="reading-time">📖 ${readingTime} min</span>
                             <span>by <a href="https://news.ycombinator.com/user?id=${story.by}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${story.by}</a></span>
                             <span>🕐 ${timeAgo(story.time)}</span>
-                            <span>
+                            <span class="comments-link">
                                 <a href="#" onclick="event.preventDefault(); event.stopPropagation(); viewItem(${story.id})">
                                     💬 ${story.descendants || 0}
+                                    ${discussionHeat ? `<span class="heat heat-${discussionHeat.level}">${discussionHeat.emoji}</span>` : ''}
                                 </a>
                             </span>
                             <button class="bookmark-btn ${bookmarked ? 'saved' : ''}" onclick="event.stopPropagation();" data-story-id="${story.id}">
@@ -2227,6 +2426,12 @@
                             <div class="story-tags">
                                 ${tagsHtml}
                                 ${categoryTagsHtml}
+                            </div>
+                        ` : ''}
+                        ${cachedTldr ? `
+                            <div class="story-tldr">
+                                <span class="story-tldr-label">⚡ tl;dr</span>
+                                ${cachedTldr.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')}
                             </div>
                         ` : ''}
                     </div>
@@ -2300,8 +2505,70 @@
             document.getElementById('totalPoints').textContent = totalPointsCount.toLocaleString();
         }
 
+        // Render daily digest view
+        function renderDigestView() {
+            const digestView = document.getElementById('digestView');
+            const digestContent = document.getElementById('digestContent');
+            const storiesView = document.querySelector('.stories-view');
+
+            storiesView.classList.add('hidden');
+            digestView.classList.add('active');
+
+            if (!cronFeed?.stories || cronFeed.stories.length === 0) {
+                digestContent.innerHTML = `
+                    <div class="loading">
+                        <div style="font-size: 48px; margin-bottom: 16px;">📭</div>
+                        no summaries yet. check back in an hour!
+                    </div>
+                `;
+                return;
+            }
+
+            // render stories with summaries
+            let html = '';
+            cronFeed.stories.forEach((story, i) => {
+                const summary = story.summaries?.medium || story.summaries?.short || '';
+                if (!summary) return;
+
+                html += `
+                    <div class="digest-card">
+                        <h2>
+                            <span>${i + 1}.</span>
+                            <a href="https://news.ycombinator.com/item?id=${story.hn_id}" target="_blank" rel="noopener">
+                                ${story.title}
+                            </a>
+                        </h2>
+                        <div class="digest-card-meta">
+                            ${story.score} pts • ${story.comments_count} comments
+                            ${story.url ? ` • <a href="${story.url}" target="_blank">${getDomain(story.url)}</a>` : ''}
+                        </div>
+                        <div class="digest-card-summary">
+                            ${markdownToHtml(summary)}
+                        </div>
+                    </div>
+                `;
+            });
+
+            digestContent.innerHTML = html || '<div class="loading">no summaries available</div>';
+        }
+
+        // Hide digest view
+        function hideDigestView() {
+            document.getElementById('digestView').classList.remove('active');
+            document.querySelector('.stories-view').classList.remove('hidden');
+        }
+
         // Render filtered stories
         function renderFilteredStories() {
+            // handle digest mode separately
+            if (currentFilter === 'digest') {
+                renderDigestView();
+                return;
+            }
+
+            // hide digest view if showing
+            hideDigestView();
+
             const container = document.getElementById('stories');
             container.innerHTML = '';
             selectedIndex = -1;
@@ -2533,7 +2800,20 @@
         setupModalTabs();
         updateSavedCount();
         setupInfiniteScroll();
-        loadStories();
+
+        // load cron feed first to populate summary cache for TL;DR previews
+        loadCronFeed().then(() => {
+            // populate summaryCache from feed
+            if (cronFeed?.stories) {
+                cronFeed.stories.forEach(s => {
+                    if (s.summaries) {
+                        summaryCache[s.hn_id] = s.summaries;
+                    }
+                });
+                console.log('📦 pre-loaded', Object.keys(summaryCache).length, 'summaries');
+            }
+            loadStories();
+        });
 
         // Keyboard navigation
         function getVisibleCards() {
@@ -2648,6 +2928,11 @@
                 case 'r': // refresh
                     e.preventDefault();
                     loadStories();
+                    break;
+                case 'd': // digest mode
+                    e.preventDefault();
+                    document.querySelector('.filter-chip[data-filter="digest"]').click();
+                    showToast('📰', 'digest mode', 'all ai summaries');
                     break;
                 case '?': // toggle help
                     e.preventDefault();

@@ -417,10 +417,9 @@
   <div class="mode-badge" class:live={$isLive}>
     {$isLive ? 'LIVE' : 'HISTORY'}
   </div>
+  <!-- Fed Chair Subtitle (inline, above controls) -->
+  <FrameSubtitle subtitle={currentSubtitle} visible={!$isLive && currentSubtitle !== undefined} />
 </div>
-
-<!-- Fed Chair Subtitle Overlay (only in history mode) -->
-<FrameSubtitle subtitle={currentSubtitle} visible={!$isLive && currentSubtitle !== undefined} />
 
 <style>
   .time-machine {

@@ -64,7 +64,8 @@ export class EntityManager {
       isHovered: false,
       isDragging: false,
       activityRing: null,
-      hubConnectedIds: isHub ? new Set() : undefined
+      hubConnectedIds: isHub ? new Set() : undefined,
+      reserveLabel: undefined
     };
 
     this.entities.set(entityId, entity);
