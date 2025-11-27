@@ -79,15 +79,15 @@
   };
 
   const FACTOR_INFO = [
-    { factor: 1, shards: 1, memory: '256MB', time: '~3s', description: 'Demo only' },
-    { factor: 2, shards: 4, memory: '1GB', time: '~12s', description: 'Quick test' },
-    { factor: 3, shards: 16, memory: '4GB', time: '~50s', description: 'Light use' },
-    { factor: 4, shards: 64, memory: '16GB', time: '~3min', description: 'Daily wallet' },
-    { factor: 5, shards: 256, memory: '64GB', time: '~13min', description: 'Balanced' },
-    { factor: 6, shards: 1024, memory: '256GB', time: '~50min', description: 'Secure' },
-    { factor: 7, shards: 4096, memory: '1TB', time: '~3.5hr', description: 'Very secure' },
-    { factor: 8, shards: 16384, memory: '4TB', time: '~14hr', description: 'Paranoid' },
-    { factor: 9, shards: 65536, memory: '16TB', time: '~55hr', description: 'Ultra paranoid' },
+    { factor: 1, shards: 1, memory: '256MB', time: '3s', description: 'Demo only' },
+    { factor: 2, shards: 4, memory: '1GB', time: '12s', description: 'Quick test' },
+    { factor: 3, shards: 16, memory: '4GB', time: '50s', description: 'Light use' },
+    { factor: 4, shards: 64, memory: '16GB', time: '3min', description: 'Daily vault' },
+    { factor: 5, shards: 256, memory: '64GB', time: '13min', description: 'Balanced' },
+    { factor: 6, shards: 1024, memory: '256GB', time: '50min', description: 'Secure' },
+    { factor: 7, shards: 4096, memory: '1TB', time: '3.5hr', description: 'Very secure' },
+    { factor: 8, shards: 16384, memory: '4TB', time: '14hr', description: 'Paranoid' },
+    { factor: 9, shards: 65536, memory: '16TB', time: '55hr', description: 'Ultra paranoid' },
   ];
 
   const FAQ_ITEMS = [
@@ -171,7 +171,7 @@
   let passphrase = '';
   let showPassphrase = false;
   let factor = 5;
-  let animationStyle: 'vault' | 'shards' = 'shards'; // Toggle between vault door and shard grid
+  let animationStyle: 'vault' | 'shards' = 'vault'; // Toggle between vault door and shard grid
   let soundTheme: 'off' | 'vault' | 'digital' | 'nature' | 'minimal' | 'retro' = 'off';
   $: soundEnabled = soundTheme !== 'off';
 
@@ -1107,30 +1107,27 @@
               <span>9</span>
             </div>
           </div>
-          <div class="factor-info">
-            <span class="factor-level">{factorInfo.description}</span>
-            <span class="factor-stats">{factorInfo.shards} shards · {factorInfo.memory} · ~{factorInfo.time}</span>
-          </div>
-        </div>
-
-        <!-- Sound Setting -->
-        <div class="input-group settings-row">
-          <div class="setting sound-setting">
-            <label>Sound</label>
-            <select class="sound-select" bind:value={soundTheme}>
-              <option value="off">Off</option>
-              <option value="vault">Vault</option>
-              <option value="digital">Digital</option>
-              <option value="nature">Water</option>
-              <option value="minimal">Minimal</option>
-              <option value="retro">Retro</option>
-            </select>
+          <div class="factor-info-row">
+            <div class="factor-info">
+              <span class="factor-level">{factorInfo.description}</span>
+              <span class="factor-stats">{factorInfo.shards} shards · {factorInfo.memory} · {factorInfo.time}</span>
+            </div>
+            <div class="sound-setting">
+              <select class="sound-select" bind:value={soundTheme} title="Sound theme">
+                <option value="off">Sound: Off</option>
+                <option value="vault">Sound: Vault</option>
+                <option value="digital">Sound: Digital</option>
+                <option value="nature">Sound: Water</option>
+                <option value="minimal">Sound: Minimal</option>
+                <option value="retro">Sound: Retro</option>
+              </select>
+            </div>
           </div>
         </div>
 
         <!-- Warning -->
         <div class="warning-box">
-          <p><strong>This is permanent.</strong> Name + passphrase + security level = your wallet forever. No recovery possible.</p>
+          <p><strong>This is permanent.</strong> Name + passphrase + factor = your vault forever. No recovery possible.</p>
         </div>
 
         <!-- Derive Button -->
@@ -1208,7 +1205,10 @@
           </div>
 
           <div class="shards-footer">
-            {shardsCompleted}/{shardCount} shards
+            <span class="shards-count">{shardsCompleted}/{shardCount} shards</span>
+            <span class="shards-stats">
+              {workerCount} workers · {workerCount * 256}MB allocated · {(shardsCompleted / (elapsedMs / 1000) || 0).toFixed(2)} sh/s
+            </span>
           </div>
 
           <div class="shards-tip">{XLN_TIPS[currentTipIndex]}</div>
@@ -1245,7 +1245,7 @@
               </svg>
             </div>
           </div>
-          <h2>Wallet Generated</h2>
+          <h2>Vault Opened</h2>
           <p class="success-stats">{formatDuration(elapsedMs)} <span class="stat-divider">·</span> {shardCount} shards</p>
         </div>
 
@@ -1613,40 +1613,52 @@
     color: rgba(255, 255, 255, 0.4);
   }
 
-  .factor-info {
+  .factor-info-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-top: 12px;
+    gap: 16px;
+  }
+
+  .factor-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
   }
 
   .factor-level {
     font-size: 14px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.9);
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    letter-spacing: 0.02em;
   }
 
   .factor-stats {
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.5);
-  }
-
-  /* Settings Row (Animation + Sound) */
-  .settings-row {
-    display: flex;
-    gap: 16px;
-    margin-bottom: 20px;
-  }
-
-  .setting {
-    flex: 1;
-  }
-
-  .setting > label {
-    display: block;
     font-size: 12px;
     color: rgba(255, 255, 255, 0.5);
-    margin-bottom: 6px;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+    letter-spacing: 0.01em;
+  }
+
+  .sound-setting {
+    flex-shrink: 0;
+  }
+
+  .sound-setting .sound-select {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .sound-setting .sound-select:hover {
+    border-color: rgba(139, 92, 246, 0.4);
+    color: rgba(255, 255, 255, 0.8);
   }
 
   .toggle-buttons {
@@ -2110,9 +2122,23 @@
 
   .shards-footer {
     margin-top: 32px;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.4);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .shards-count {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.6);
     letter-spacing: 1px;
+  }
+
+  .shards-stats {
+    font-size: 11px;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+    color: rgba(139, 92, 246, 0.6);
+    letter-spacing: 0.5px;
   }
 
   /* Complete Phase - Liquid Glass Apple Style */
