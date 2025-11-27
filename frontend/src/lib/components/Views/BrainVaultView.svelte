@@ -240,36 +240,7 @@
   let passphrase = '';
   let showPassphrase = false;
   let factor = 5;
-  let animationStyle: 'vault' | 'shards' = 'vault'; // Toggle between vault door and shard grid
-  let soundTheme: 'off' | 'vault' | 'digital' | 'nature' | 'minimal' | 'retro' = 'off';
-  $: soundEnabled = soundTheme !== 'off';
 
-  // XLN tips shown during derivation
-  const XLN_TIPS = [
-    'xln enables instant off-chain payments between any two entities',
-    'Every transaction is cryptographically signed and verifiable on-chain',
-    'BrainVault uses Argon2id — the same algorithm trusted by password managers',
-    'Your wallet exists in your memory. No seed phrase backup needed.',
-    'xln supports multi-jurisdictional settlements across different blockchains',
-    'Higher security factors = more shards = exponentially harder to brute-force',
-    'The same name + passphrase + factor will always produce the same wallet',
-    'xln entities can exchange value without trusting a central authority',
-    'Device passphrase adds an extra layer — use it for hardware wallet hidden wallets',
-    'Each shard requires 256MB of memory, making GPU attacks impractical',
-    'xln uses bilateral consensus for instant finality between parties',
-    'Your password manager passwords are derived from your master key — no storage needed',
-    'Factor 5 requires ~64GB equivalent work — good balance of security and speed',
-    'xln separates jurisdiction (law), entity (identity), and account (balance) layers',
-    'The 24-word mnemonic is BIP39 standard — works with MetaMask, Ledger, Trezor',
-    'xln enables programmable money with smart contract integration',
-    'Memory-hard functions prevent specialized ASIC attacks on your passphrase',
-    'xln achieves finality in milliseconds vs hours for on-chain transactions',
-    'Your wallet address is derived from Ethereum\'s standard HD path m/44\'/60\'/0\'/0/0',
-    'xln is open source — audit the code yourself at github.com/xlnfinance/xln',
-  ];
-
-  let currentTipIndex = 0;
-  let tipInterval: ReturnType<typeof setInterval> | null = null;
 
   // Derivation state
   let workers: Worker[] = [];
@@ -329,32 +300,8 @@
     return audioCtx;
   }
 
-  function playVaultClick(intensity: number = 1) {
-    if (!soundEnabled) return;
-    try {
-      const ctx = initAudio();
-      if (ctx.state === 'suspended') ctx.resume();
-
-      switch (soundTheme) {
-        case 'vault': // Heavy mechanical vault tumbler
-          playVaultTumbler(ctx, intensity);
-          break;
-        case 'digital': // Sci-fi digital blip
-          playDigitalBlip(ctx, intensity);
-          break;
-        case 'nature': // Soft water drop
-          playWaterDrop(ctx, intensity);
-          break;
-        case 'minimal': // Subtle tick
-          playMinimalTick(ctx, intensity);
-          break;
-        case 'retro': // 8-bit coin sound
-          playRetroCoin(ctx, intensity);
-          break;
-      }
-    } catch (e) {
-      // Audio not available, ignore
-    }
+  function playVaultClick(_intensity: number = 1) {
+    // Sound disabled by default - no-op
   }
 
   function playVaultTumbler(ctx: AudioContext, intensity: number) {
@@ -454,46 +401,11 @@
   }
 
   function playVaultOpen() {
-    if (!soundEnabled) return;
-    try {
-      const ctx = initAudio();
-      if (ctx.state === 'suspended') ctx.resume();
-
-      // Heavy mechanical vault opening sound
-      for (let i = 0; i < 5; i++) {
-        setTimeout(() => {
-          const oscillator = ctx.createOscillator();
-          const gainNode = ctx.createGain();
-
-          oscillator.type = 'triangle';
-          oscillator.frequency.setValueAtTime(100 + i * 30, ctx.currentTime);
-          oscillator.frequency.exponentialRampToValueAtTime(50, ctx.currentTime + 0.2);
-
-          gainNode.gain.setValueAtTime(0.2, ctx.currentTime);
-          gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-
-          oscillator.connect(gainNode);
-          gainNode.connect(ctx.destination);
-
-          oscillator.start(ctx.currentTime);
-          oscillator.stop(ctx.currentTime + 0.3);
-        }, i * 80);
-      }
-    } catch (e) {
-      // Audio not available, ignore
-    }
+    // Sound disabled by default - no-op
   }
 
-  function hapticFeedback(pattern: 'tick' | 'complete') {
-    if (!soundEnabled) return;
-    if ('vibrate' in navigator) {
-      if (pattern === 'tick') {
-        navigator.vibrate(5);
-      } else if (pattern === 'complete') {
-        // Success pattern: short-pause-long
-        navigator.vibrate([50, 100, 150]);
-      }
-    }
+  function hapticFeedback(_pattern: 'tick' | 'complete') {
+    // Sound disabled by default - no-op
   }
 
   // Track tick activation for sound - play every ~16 chunks (not every tick)
@@ -615,12 +527,6 @@
     elapsedInterval = setInterval(() => {
       elapsedMs = Date.now() - startTime;
     }, 100);
-
-    // Start tip rotation (change every 7 seconds)
-    currentTipIndex = Math.floor(Math.random() * XLN_TIPS.length);
-    tipInterval = setInterval(() => {
-      currentTipIndex = (currentTipIndex + 1) % XLN_TIPS.length;
-    }, 7000);
 
     // Create workers - start at targetWorkerCount (50% of maxWorkers by default)
     const cpuCores = navigator.hardwareConcurrency || 4;
@@ -747,10 +653,6 @@
     if (elapsedInterval) {
       clearInterval(elapsedInterval);
       elapsedInterval = null;
-    }
-    if (tipInterval) {
-      clearInterval(tipInterval);
-      tipInterval = null;
     }
     elapsedMs = Date.now() - startTime;
 
@@ -1075,10 +977,6 @@
       clearInterval(elapsedInterval);
       elapsedInterval = null;
     }
-    if (tipInterval) {
-      clearInterval(tipInterval);
-      tipInterval = null;
-    }
     // Keep name and passphrase for convenience
     mnemonic24 = '';
     mnemonic12 = '';
@@ -1096,9 +994,6 @@
     terminateWorkers();
     if (elapsedInterval) {
       clearInterval(elapsedInterval);
-    }
-    if (tipInterval) {
-      clearInterval(tipInterval);
     }
   });
 
@@ -1306,7 +1201,6 @@
 
     <!-- DERIVING PHASE -->
     {:else if phase === 'deriving'}
-      {#if animationStyle === 'vault'}
         <!-- Vault Door Animation - PHARAOH GOLD SHOW -->
         <div class="vault-door-container" class:opening={progress >= 100} style="--progress: {progress}">
           <!-- Golden dust particles floating -->
@@ -1366,18 +1260,6 @@
               </div>
             </div>
 
-            <!-- Sound selector -->
-            <div class="sound-control">
-              <span class="sound-label">SOUND</span>
-              <select class="sound-select" bind:value={soundTheme}>
-                <option value="off">Off</option>
-                <option value="vault">Vault</option>
-                <option value="digital">Digital</option>
-                <option value="nature">Water</option>
-                <option value="minimal">Minimal</option>
-                <option value="retro">Retro</option>
-              </select>
-            </div>
           </div>
 
           <!-- Shard grid under pyramid -->
@@ -1400,98 +1282,13 @@
 
           <div class="vault-info">
             <div class="vault-time">{formatDuration(remainingMs)} remaining</div>
-            <div class="vault-tip">{XLN_TIPS[currentTipIndex]}</div>
           </div>
 
           <!-- Controls bar -->
           <div class="anim-controls">
-            <button class="control-btn" on:click={() => animationStyle = 'shards'} title="Switch to shards view">
-              ▦
-            </button>
-
-            <!-- Sound dropdown -->
-            <select class="sound-select-mini" bind:value={soundTheme} title="Sound theme">
-              <option value="off">Off</option>
-              <option value="vault">Vault</option>
-              <option value="digital">Digital</option>
-              <option value="nature">Water</option>
-              <option value="minimal">Minimal</option>
-              <option value="retro">Retro</option>
-            </select>
-
             <button class="control-btn cancel" on:click={reset}>esc</button>
           </div>
         </div>
-      {:else}
-        <!-- Shards Grid Animation -->
-        <div class="shards-container">
-          <div class="shards-header">
-            <div class="shards-progress-text">{Math.floor(progress)}%</div>
-            <div class="shards-time">{formatDuration(remainingMs)}</div>
-          </div>
-
-          <div class="shard-grid" style="--cols: {gridCols}">
-            {#each Array(visualShardCount) as _, cellIdx}
-              {@const startShard = cellIdx * shardsPerCell}
-              {@const endShard = Math.min(startShard + shardsPerCell, shardCount)}
-              {@const cellShards = shardStatus.slice(startShard, endShard)}
-              {@const completedInCell = cellShards.filter(s => s === 'complete').length}
-              {@const computingInCell = cellShards.filter(s => s === 'computing').length}
-              {@const cellProgress = completedInCell / cellShards.length}
-              <div
-                class="shard"
-                class:pending={cellProgress === 0 && computingInCell === 0}
-                class:computing={computingInCell > 0}
-                class:complete={cellProgress === 1}
-                class:partial={cellProgress > 0 && cellProgress < 1}
-                style={cellProgress > 0 && cellProgress < 1 ? `--progress: ${cellProgress}` : ''}
-              ></div>
-            {/each}
-          </div>
-
-          <div class="shards-footer">
-            <span class="shards-count">{shardsCompleted}/{shardCount} shards</span>
-            <span class="shards-stats">
-              {workerCount} workers · {workerCount * 256}MB allocated · {(shardsCompleted / (elapsedMs / 1000) || 0).toFixed(2)} sh/s
-            </span>
-          </div>
-
-          <div class="shards-tip">{XLN_TIPS[currentTipIndex]}</div>
-
-          <!-- Controls bar -->
-          <div class="anim-controls">
-            <button class="control-btn" on:click={() => animationStyle = 'vault'} title="Switch to vault view">
-              ◎
-            </button>
-
-            <!-- Parallelism slider -->
-            <div class="parallelism-control">
-              <input
-                type="range"
-                min="1"
-                max={maxWorkers}
-                bind:value={targetWorkerCount}
-                on:input={adjustWorkers}
-                class="parallelism-slider"
-                title="Adjust CPU usage: {targetWorkerCount}/{maxWorkers} threads"
-              />
-              <span class="parallelism-label">{targetWorkerCount}</span>
-            </div>
-
-            <!-- Sound dropdown -->
-            <select class="sound-select-mini" bind:value={soundTheme} title="Sound theme">
-              <option value="off">Off</option>
-              <option value="vault">Vault</option>
-              <option value="digital">Digital</option>
-              <option value="nature">Water</option>
-              <option value="minimal">Minimal</option>
-              <option value="retro">Retro</option>
-            </select>
-
-            <button class="control-btn cancel" on:click={reset}>esc</button>
-          </div>
-        </div>
-      {/if}
 
     <!-- COMPLETE PHASE -->
     {:else if phase === 'complete'}
