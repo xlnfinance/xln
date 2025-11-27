@@ -1417,6 +1417,9 @@
     min-height: 100vh;
     padding: 40px 20px;
     background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3a 50%, #0a0a1a 100%);
+    overflow-x: hidden;
+    max-width: 100vw;
+    box-sizing: border-box;
   }
 
   .header {
@@ -1488,7 +1491,10 @@
 
   .main-content {
     max-width: 600px;
+    width: 100%;
     margin: 0 auto;
+    box-sizing: border-box;
+    padding: 0 20px;
   }
 
   /* Glass Card */
@@ -1500,6 +1506,7 @@
     border-radius: 24px;
     padding: 32px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
   }
 
   /* Resume Banner */
@@ -1990,6 +1997,10 @@
     align-items: center;
     justify-content: center;
     z-index: 1000;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+    max-width: 100vw;
   }
 
   .vault-door {
@@ -2200,13 +2211,14 @@
   .vault-tip,
   .shards-tip {
     max-width: 400px;
-    margin-top: 24px;
+    margin: 24px auto 0;
     font-size: 13px;
     color: rgba(255, 255, 255, 0.5);
     text-align: center;
     line-height: 1.5;
     padding: 0 20px;
     animation: tip-fade 7s ease-in-out infinite;
+    word-wrap: break-word;
   }
 
   @keyframes tip-fade {
@@ -2228,6 +2240,11 @@
     justify-content: center;
     padding: 40px;
     z-index: 1000;
+    overflow: hidden;
+    width: 100vw;
+    height: 100vh;
+    max-width: 100vw;
+    box-sizing: border-box;
   }
 
   .shards-header {
@@ -2667,6 +2684,20 @@
 
     .logo h1 {
       font-size: 32px;
+    }
+
+    .wordmark {
+      font-size: 40px;
+    }
+
+    .vault-door {
+      width: 240px;
+      height: 240px;
+    }
+
+    .shard-grid {
+      max-width: 280px;
+      max-height: 280px;
     }
   }
 </style>
