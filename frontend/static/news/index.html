@@ -1124,6 +1124,127 @@
             border-radius: 8px;
         }
 
+        /* Share buttons */
+        .share-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            padding: 4px 8px;
+            opacity: 0.6;
+            transition: all 0.2s;
+            border-radius: 4px;
+        }
+
+        .share-btn:hover {
+            opacity: 1;
+            background: var(--bg-hover);
+        }
+
+        .share-menu {
+            position: absolute;
+            right: 0;
+            top: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 0;
+            min-width: 150px;
+            box-shadow: 0 8px 24px var(--shadow);
+            z-index: 50;
+            display: none;
+        }
+
+        .share-menu.active {
+            display: block;
+        }
+
+        .share-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .share-menu-item:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        /* Read stories (history) */
+        .story-card.read {
+            opacity: 0.6;
+        }
+
+        .story-card.read .story-title {
+            color: var(--text-muted);
+        }
+
+        /* Compact view */
+        .stories-list.compact .story-card {
+            padding: 12px 16px;
+        }
+
+        .stories-list.compact .story-thumbnail {
+            display: none;
+        }
+
+        .stories-list.compact .story-title {
+            font-size: 15px;
+        }
+
+        .stories-list.compact .story-tags {
+            display: none;
+        }
+
+        .stories-list.compact .story-meta {
+            margin-top: 6px;
+            gap: 12px;
+        }
+
+        /* View toggle */
+        .view-toggle {
+            display: flex;
+            gap: 4px;
+            margin-left: 12px;
+        }
+
+        .view-toggle button {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            padding: 6px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--text-muted);
+            transition: all 0.2s;
+        }
+
+        .view-toggle button:hover {
+            border-color: #667eea;
+            color: var(--text-primary);
+        }
+
+        .view-toggle button.active {
+            background: var(--bg-hover);
+            border-color: #667eea;
+            color: #667eea;
+        }
+
+        /* Trending indicator */
+        .trending {
+            color: #10b981;
+            font-size: 11px;
+            font-weight: 600;
+            display: inline-flex;
+            align-items: center;
+            gap: 2px;
+        }
+
         /* Summarize button */
         .summarize-btn {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -1330,6 +1451,10 @@
                     <option value="comments">sort: comments</option>
                 </select>
             </div>
+            <div class="view-toggle">
+                <button class="active" data-view="cards" title="card view">▦</button>
+                <button data-view="compact" title="compact view">≡</button>
+            </div>
         </div>
     </div>
 
@@ -1425,6 +1550,12 @@
         const MIN_POINTS_FOR_SUMMARY = 200;
         let currentSummaryStory = null;
         let summaryCache = {}; // local cache { hn_id: { short, medium, long } }
+
+        // reading history
+        let readStories = JSON.parse(localStorage.getItem('xln-read') || '[]');
+
+        // view mode
+        let viewMode = localStorage.getItem('xln-view') || 'cards';
 
         // XLN relevance keywords with weights
         const XLN_KEYWORDS = {
@@ -1876,6 +2007,78 @@
             });
         }
 
+        // Reading history
+        function isRead(id) {
+            return readStories.includes(id);
+        }
+
+        function markAsRead(id) {
+            if (!readStories.includes(id)) {
+                readStories.unshift(id);
+                // keep last 500
+                if (readStories.length > 500) readStories = readStories.slice(0, 500);
+                localStorage.setItem('xln-read', JSON.stringify(readStories));
+            }
+        }
+
+        // View toggle
+        function setupViewToggle() {
+            document.querySelectorAll('.view-toggle button').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.view-toggle button').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    viewMode = btn.dataset.view;
+                    localStorage.setItem('xln-view', viewMode);
+                    applyViewMode();
+                });
+            });
+            // apply saved view
+            applyViewMode();
+            document.querySelector(`.view-toggle button[data-view="${viewMode}"]`)?.classList.add('active');
+        }
+
+        function applyViewMode() {
+            const list = document.getElementById('stories');
+            if (viewMode === 'compact') {
+                list.classList.add('compact');
+            } else {
+                list.classList.remove('compact');
+            }
+        }
+
+        // Share functions
+        function shareTwitter(story) {
+            const text = `${story.title}`;
+            const url = story.url || `https://news.ycombinator.com/item?id=${story.id}`;
+            window.open(`https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`, '_blank');
+        }
+
+        function shareNostr(story) {
+            const text = `${story.title}\n\n${story.url || `https://news.ycombinator.com/item?id=${story.id}`}`;
+            // copy to clipboard with nostr note format
+            navigator.clipboard.writeText(text);
+            showToast('📋', 'copied for nostr', 'paste in your nostr client');
+        }
+
+        function copyLink(story) {
+            const url = story.url || `https://news.ycombinator.com/item?id=${story.id}`;
+            navigator.clipboard.writeText(url);
+            showToast('🔗', 'copied', 'link copied to clipboard');
+            createSparkles(event?.clientX || 200, event?.clientY || 200);
+        }
+
+        function copyHNLink(story) {
+            navigator.clipboard.writeText(`https://news.ycombinator.com/item?id=${story.id}`);
+            showToast('🔗', 'copied', 'hn discussion link copied');
+        }
+
+        // Check if story is trending (posted recently with high score)
+        function isTrending(story) {
+            const hoursOld = (Date.now() / 1000 - story.time) / 3600;
+            const pointsPerHour = (story.score || 0) / Math.max(hoursOld, 1);
+            return hoursOld < 12 && pointsPerHour > 20;
+        }
+
         // Render story card
         function renderStory(story, rank) {
             const domain = getDomain(story.url);
@@ -1884,9 +2087,11 @@
             const categories = detectCategory(story);
             const emoji = getStoryEmoji(story);
             const bookmarked = isBookmarked(story.id);
+            const read = isRead(story.id);
+            const trending = isTrending(story);
 
             const card = document.createElement('article');
-            card.className = `story-card ${relevanceScore >= 3 ? relevanceLevel + '-relevance' : ''}`;
+            card.className = `story-card ${relevanceScore >= 3 ? relevanceLevel + '-relevance' : ''} ${read ? 'read' : ''}`;
             card.dataset.relevance = relevanceScore;
             card.dataset.categories = categories.join(',');
             card.dataset.storyId = story.id;
@@ -1918,6 +2123,7 @@
                             <span class="points">
                                 <span class="points-icon" onclick="event.stopPropagation(); vote(this)">▲</span>
                                 <span class="animated-number">${story.score || 0}</span> pts
+                                ${trending ? '<span class="trending">🔥 trending</span>' : ''}
                             </span>
                             <span>by <a href="https://news.ycombinator.com/user?id=${story.by}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${story.by}</a></span>
                             <span>🕐 ${timeAgo(story.time)}</span>
@@ -1934,6 +2140,9 @@
                                     📝 memo
                                 </button>
                             ` : ''}
+                            <button class="share-btn" onclick="event.stopPropagation();" data-story-id="${story.id}" title="share">
+                                ↗
+                            </button>
                         </div>
                         ${(tagsHtml || categoryTagsHtml) ? `
                             <div class="story-tags">
@@ -1959,7 +2168,34 @@
                 });
             }
 
-            card.addEventListener('click', () => viewItem(story.id));
+            // Add share click handler
+            const shareBtn = card.querySelector('.share-btn');
+            shareBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // simple share menu via prompt-like behavior
+                const actions = [
+                    { label: '🔗 copy link', fn: () => copyLink(story) },
+                    { label: '💬 copy hn link', fn: () => copyHNLink(story) },
+                    { label: '🐦 twitter', fn: () => shareTwitter(story) },
+                    { label: '🟣 nostr', fn: () => shareNostr(story) },
+                ];
+                // for now just copy link, can expand to menu later
+                copyLink(story);
+            });
+
+            // Mark as read when clicking title or card
+            card.addEventListener('click', () => {
+                markAsRead(story.id);
+                card.classList.add('read');
+                viewItem(story.id);
+            });
+
+            const titleLink = card.querySelector('.story-title');
+            titleLink.addEventListener('click', (e) => {
+                markAsRead(story.id);
+                card.classList.add('read');
+            });
+
             return card;
         }
 
@@ -2214,6 +2450,7 @@
         initTheme();
         setupSearch();
         setupSort();
+        setupViewToggle();
         setupModalTabs();
         updateSavedCount();
         setupInfiniteScroll();
