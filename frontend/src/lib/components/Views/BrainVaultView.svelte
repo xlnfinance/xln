@@ -207,6 +207,16 @@
   // Derivation state
   let workers: Worker[] = [];
   let workerCount = 1;
+  let maxWorkers = typeof navigator !== 'undefined' ? Math.min(navigator.hardwareConcurrency || 4, 8) : 4;
+  let targetWorkerCount = Math.ceil(maxWorkers / 2); // Start gentle at 50% CPU
+
+  // Device memory detection (navigator.deviceMemory gives GB, default 8GB if unavailable)
+  let deviceMemoryGB = typeof navigator !== 'undefined' ? ((navigator as any).deviceMemory || 8) : 8;
+  let deviceMemoryMB = deviceMemoryGB * 1024;
+
+  // Reactive memory calculations
+  $: allocatedMemoryMB = workerCount * 256;
+  $: memoryPercent = Math.min(100, (allocatedMemoryMB / deviceMemoryMB) * 100);
   let shardCount = 0;
   let shardsCompleted = 0;
   let shardResults: Map<number, string> = new Map();
@@ -445,8 +455,13 @@
     : 0;
 
   // Shard grid dimensions (for visualization)
-  $: gridCols = Math.ceil(Math.sqrt(shardCount));
-  $: gridRows = Math.ceil(shardCount / gridCols);
+  // For very large shard counts, cap visual grid at 64x64 (4096 visible cells)
+  // Each visual cell represents a chunk of shards
+  $: maxVisualCols = 64;
+  $: visualShardCount = Math.min(shardCount, maxVisualCols * maxVisualCols);
+  $: gridCols = Math.min(Math.ceil(Math.sqrt(shardCount)), maxVisualCols);
+  $: gridRows = Math.ceil(visualShardCount / gridCols);
+  $: shardsPerCell = Math.ceil(shardCount / visualShardCount);
 
   // ============================================================================
   // UTILITY FUNCTIONS
@@ -538,11 +553,10 @@
       currentTipIndex = (currentTipIndex + 1) % XLN_TIPS.length;
     }, 7000);
 
-    // Create workers - USE ALL AVAILABLE CORES
-    // No artificial cap - let the browser/OS handle scheduling
+    // Create workers - start at targetWorkerCount (50% of maxWorkers by default)
     const cpuCores = navigator.hardwareConcurrency || 4;
-    workerCount = Math.min(cpuCores, shardCount);
-    console.log(`[BrainVault] Using ${workerCount} workers (${cpuCores} CPU cores detected)`);
+    workerCount = Math.min(targetWorkerCount, shardCount);
+    console.log(`[BrainVault] Using ${workerCount} workers (${cpuCores} cores, max ${maxWorkers}, starting at ${targetWorkerCount})`);
 
     // Hash the name first using the worker
     const nameHashHex = await workerHashName(name);
@@ -638,6 +652,10 @@
     shardStatus = shardStatus;
     shardsCompleted++;
 
+    // Play sound for completed shard
+    const intensity = 0.5 + (shardsCompleted / shardCount) * 0.5; // Gets louder as we progress
+    playVaultClick(intensity);
+
     // Update time estimate (exponential moving average)
     estimatedShardTimeMs = estimatedShardTimeMs * 0.7 + elapsedMs * 0.3;
 
@@ -731,6 +749,53 @@
     workers = [];
   }
 
+  // Dynamic worker scaling based on user slider
+  async function adjustWorkers() {
+    if (phase !== 'deriving') return;
+
+    const currentCount = workers.length;
+    const target = targetWorkerCount;
+
+    if (target < currentCount) {
+      // Scale down: terminate excess workers (they'll finish current shard first)
+      const excessWorkers = workers.splice(target);
+      for (const w of excessWorkers) {
+        w?.terminate();
+      }
+      workerCount = workers.length;
+    } else if (target > currentCount && nextShardToDispatch < shardCount) {
+      // Scale up: add more workers
+      const workersToAdd = target - currentCount;
+
+      for (let i = 0; i < workersToAdd && nextShardToDispatch < shardCount; i++) {
+        const worker = new Worker('/brainvault-worker.js', { type: 'module' });
+        workers.push(worker);
+
+        // Set up message handler
+        worker.onmessage = (e) => {
+          const { type, data } = e.data;
+          if (type === 'ready') {
+            // Dispatch work immediately
+            if (nextShardToDispatch < shardCount) {
+              dispatchNextShard(worker);
+            }
+          } else if (type === 'shard_complete') {
+            handleShardComplete(data.shardIndex, data.resultHex, data.elapsedMs);
+          } else if (type === 'error') {
+            console.error('Worker error:', data.message);
+          }
+        };
+
+        worker.onerror = (e) => {
+          console.error('Worker error:', e);
+        };
+
+        worker.postMessage({ type: 'init', id: currentCount + i });
+      }
+      workerCount = workers.length;
+    }
+  }
+
   function saveResumeToken() {
     const token = {
       version: 'bv2',
@@ -788,11 +853,10 @@
         elapsedMs = Date.now() - startTime;
       }, 100);
 
-      // Create workers
+      // Create workers - use targetWorkerCount (user-adjustable)
       workerCount = Math.min(
-        navigator.hardwareConcurrency || 4,
-        shardCount - shardsCompleted,
-        8
+        targetWorkerCount,
+        shardCount - shardsCompleted
       );
 
       workers = [];
@@ -999,14 +1063,27 @@
   }
 </script>
 
-<div class="brainvault-container">
-  <!-- Header -->
-  <div class="header">
-    <h1 class="wordmark">{t('vault.title')}</h1>
-    <p class="tagline">{t('vault.tagline')}</p>
-    <div class="badges">
-      <span class="badge offline-badge" title="All computation happens in your browser. No servers, no network calls.">100% offline</span>
-      <span class="badge client-badge" title="Your passphrase never leaves this device.">client-side only</span>
+<div class="brainvault-container" class:deriving={phase === 'deriving'} class:complete={phase === 'complete'}>
+  <!-- Ambient particles - intensify during derivation -->
+  <div class="dust-particles" class:active={phase === 'deriving'}></div>
+
+  <!-- Light rays from logo - EXPLODE during derivation -->
+  <div class="light-rays" class:active={phase === 'deriving'}></div>
+
+  <!-- Golden light flood during derivation -->
+  {#if phase === 'deriving'}
+    <div class="light-flood" style="--progress: {progress}"></div>
+  {/if}
+
+  <!-- Header with Monumental Triangle -->
+  <div class="header" class:deriving={phase === 'deriving'}>
+    <div class="logo-monument" class:deriving={phase === 'deriving'}>
+      <div class="logo-glow" class:active={phase === 'deriving'}></div>
+      <img src="/img/l.png" alt="xln" class="triangle-logo" class:deriving={phase === 'deriving'} />
+      {#if phase === 'deriving'}
+        <div class="pyramid-crack left"></div>
+        <div class="pyramid-crack right"></div>
+      {/if}
     </div>
   </div>
 
@@ -1107,26 +1184,19 @@
               min="1"
               max="9"
               bind:value={factor}
+              aria-label="Security Factor"
             />
             <div class="factor-labels">
-              <span>1</span>
-              <span>9</span>
+              <span class="factor-label-min">1</span>
+              <span class="factor-label-max">9</span>
             </div>
+            <!-- Current factor value prominently displayed -->
+            <div class="factor-current-value">{factor}</div>
           </div>
           <div class="factor-info-row">
             <div class="factor-info">
               <span class="factor-level">{factorInfo.description}</span>
               <span class="factor-stats">{factorInfo.shards} shards · {factorInfo.memory} · {factorInfo.time}</span>
-            </div>
-            <div class="sound-setting">
-              <select class="sound-select" bind:value={soundTheme} title="Sound theme">
-                <option value="off">Sound: Off</option>
-                <option value="vault">Sound: Vault</option>
-                <option value="digital">Sound: Digital</option>
-                <option value="nature">Sound: Water</option>
-                <option value="minimal">Sound: Minimal</option>
-                <option value="retro">Sound: Retro</option>
-              </select>
             </div>
           </div>
           <div class="attack-cost">
@@ -1154,34 +1224,99 @@
     <!-- DERIVING PHASE -->
     {:else if phase === 'deriving'}
       {#if animationStyle === 'vault'}
-        <!-- Vault Door Animation -->
-        <div class="vault-door-container" class:opening={progress >= 100}>
+        <!-- Vault Door Animation - PHARAOH GOLD SHOW -->
+        <div class="vault-door-container" class:opening={progress >= 100} style="--progress: {progress}">
+          <!-- Golden dust particles floating -->
+          <div class="pharaoh-dust"></div>
+          <!-- Golden light rays emanating from pyramid -->
+          <div class="pharaoh-rays"></div>
+          <!-- Golden light flood that intensifies with progress -->
+          <div class="pharaoh-flood"></div>
+
           <div class="vault-split-left"></div>
           <div class="vault-split-right"></div>
 
-          <div class="vault-door">
-            <div class="vault-ring outer" style="--rotation: {progress * 3.6}deg"></div>
-            <div class="vault-ring middle" style="--rotation: {-progress * 2.4}deg"></div>
-            <div class="vault-ring inner" style="--rotation: {progress * 1.8}deg"></div>
-
-            <div class="vault-center">
-              <div class="vault-logo">◈</div>
+          <!-- Monumental Pyramid Visualization -->
+          <div class="pyramid-visualization">
+            <div class="pyramid-logo" style="--progress: {progress}%">
+              <img src="/img/l.png" alt="xln" class="pyramid-triangle pharaoh-blazing" />
+              <div class="pyramid-glow pharaoh-glow"></div>
+              <!-- Light escaping from pyramid cracks -->
+              <div class="pharaoh-crack left"></div>
+              <div class="pharaoh-crack right"></div>
             </div>
-            <div class="vault-progress-ring">
-              {#each Array(36) as _, i}
-                <div
-                  class="vault-tick"
-                  class:active={i < Math.floor(progress / 2.78)}
-                  style="--angle: {i * 10}deg"
-                ></div>
-              {/each}
+            <div class="pyramid-progress-text">{Math.floor(progress)}%</div>
+
+            <div class="pyramid-stats">
+              <div class="stat-row">
+                <span class="stat-label">SHARDS</span>
+                <span class="stat-value">{shardsCompleted}/{shardCount}</span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">THREADS</span>
+                <span class="stat-value">{workerCount}/{maxWorkers}</span>
+              </div>
+              <div class="stat-row">
+                <span class="stat-label">MEMORY</span>
+                <span class="stat-value">{allocatedMemoryMB}MB</span>
+              </div>
+            </div>
+
+            <!-- Progress bar -->
+            <div class="pyramid-progress-bar">
+              <div class="pyramid-progress-fill" style="width: {progress}%"></div>
+            </div>
+
+            <!-- Memory allocation slider - Argon2id is MEMORY-HARD -->
+            <div class="memory-control">
+              <span class="memory-label">MEMORY</span>
+              <div class="memory-slider-wrapper">
+                <input
+                  type="range"
+                  min="1"
+                  max={maxWorkers}
+                  bind:value={targetWorkerCount}
+                  on:change={adjustWorkers}
+                  class="memory-slider"
+                />
+                <span class="memory-value">{allocatedMemoryMB}MB / {deviceMemoryMB}MB</span>
+              </div>
+            </div>
+
+            <!-- Sound selector -->
+            <div class="sound-control">
+              <span class="sound-label">SOUND</span>
+              <select class="sound-select" bind:value={soundTheme}>
+                <option value="off">Off</option>
+                <option value="vault">Vault</option>
+                <option value="digital">Digital</option>
+                <option value="nature">Water</option>
+                <option value="minimal">Minimal</option>
+                <option value="retro">Retro</option>
+              </select>
             </div>
           </div>
 
+          <!-- Shard grid under pyramid -->
+          <div class="mini-shard-grid" style="--cols: {Math.ceil(Math.sqrt(visualShardCount))}">
+            {#each Array(visualShardCount) as _, cellIdx}
+              {@const startShard = cellIdx * shardsPerCell}
+              {@const endShard = Math.min(startShard + shardsPerCell, shardCount)}
+              {@const cellShards = shardStatus.slice(startShard, endShard)}
+              {@const completedInCell = cellShards.filter(s => s === 'complete').length}
+              {@const computingInCell = cellShards.filter(s => s === 'computing').length}
+              {@const cellProgress = completedInCell / cellShards.length}
+              <div
+                class="mini-shard"
+                class:pending={cellProgress === 0 && computingInCell === 0}
+                class:computing={computingInCell > 0}
+                class:complete={cellProgress === 1}
+              ></div>
+            {/each}
+          </div>
+
           <div class="vault-info">
-            <div class="vault-progress-text">{Math.floor(progress)}%</div>
-            <div class="vault-time">{formatDuration(remainingMs)}</div>
-            <div class="vault-shards">{shardsCompleted}/{shardCount} shards</div>
+            <div class="vault-time">{formatDuration(remainingMs)} remaining</div>
             <div class="vault-tip">{XLN_TIPS[currentTipIndex]}</div>
           </div>
 
@@ -1190,9 +1325,17 @@
             <button class="control-btn" on:click={() => animationStyle = 'shards'} title="Switch to shards view">
               ▦
             </button>
-            <button class="control-btn" on:click={() => soundEnabled = !soundEnabled} title="Toggle sound">
-              {soundEnabled ? '🔊' : '🔇'}
-            </button>
+
+            <!-- Sound dropdown -->
+            <select class="sound-select-mini" bind:value={soundTheme} title="Sound theme">
+              <option value="off">Off</option>
+              <option value="vault">Vault</option>
+              <option value="digital">Digital</option>
+              <option value="nature">Water</option>
+              <option value="minimal">Minimal</option>
+              <option value="retro">Retro</option>
+            </select>
+
             <button class="control-btn cancel" on:click={reset}>esc</button>
           </div>
         </div>
@@ -1205,12 +1348,20 @@
           </div>
 
           <div class="shard-grid" style="--cols: {gridCols}">
-            {#each shardStatus as status, i}
+            {#each Array(visualShardCount) as _, cellIdx}
+              {@const startShard = cellIdx * shardsPerCell}
+              {@const endShard = Math.min(startShard + shardsPerCell, shardCount)}
+              {@const cellShards = shardStatus.slice(startShard, endShard)}
+              {@const completedInCell = cellShards.filter(s => s === 'complete').length}
+              {@const computingInCell = cellShards.filter(s => s === 'computing').length}
+              {@const cellProgress = completedInCell / cellShards.length}
               <div
                 class="shard"
-                class:pending={status === 'pending'}
-                class:computing={status === 'computing'}
-                class:complete={status === 'complete'}
+                class:pending={cellProgress === 0 && computingInCell === 0}
+                class:computing={computingInCell > 0}
+                class:complete={cellProgress === 1}
+                class:partial={cellProgress > 0 && cellProgress < 1}
+                style={cellProgress > 0 && cellProgress < 1 ? `--progress: ${cellProgress}` : ''}
               ></div>
             {/each}
           </div>
@@ -1229,9 +1380,31 @@
             <button class="control-btn" on:click={() => animationStyle = 'vault'} title="Switch to vault view">
               ◎
             </button>
-            <button class="control-btn" on:click={() => soundEnabled = !soundEnabled} title="Toggle sound">
-              {soundEnabled ? '🔊' : '🔇'}
-            </button>
+
+            <!-- Parallelism slider -->
+            <div class="parallelism-control">
+              <input
+                type="range"
+                min="1"
+                max={maxWorkers}
+                bind:value={targetWorkerCount}
+                on:change={adjustWorkers}
+                class="parallelism-slider"
+                title="Adjust CPU usage: {targetWorkerCount}/{maxWorkers} threads"
+              />
+              <span class="parallelism-label">{targetWorkerCount}</span>
+            </div>
+
+            <!-- Sound dropdown -->
+            <select class="sound-select-mini" bind:value={soundTheme} title="Sound theme">
+              <option value="off">Off</option>
+              <option value="vault">Vault</option>
+              <option value="digital">Digital</option>
+              <option value="nature">Water</option>
+              <option value="minimal">Minimal</option>
+              <option value="retro">Retro</option>
+            </select>
+
             <button class="control-btn cancel" on:click={reset}>esc</button>
           </div>
         </div>
@@ -1414,92 +1587,394 @@
 <style>
   .brainvault-container {
     width: 100%;
-    min-height: 100vh;
-    padding: 40px 20px;
-    background: linear-gradient(135deg, #0a0a1a 0%, #1a1a3a 50%, #0a0a1a 100%);
+    height: 100vh;
+    padding: 40px 20px 20px;
+    background: #000;
+    background-image:
+      radial-gradient(ellipse at 50% 0%, rgba(180, 140, 80, 0.08) 0%, transparent 50%),
+      radial-gradient(ellipse at 50% 20%, rgba(120, 90, 50, 0.05) 0%, transparent 40%),
+      linear-gradient(180deg, #0a0806 0%, #000 100%);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+  }
+
+  /* Dune-style dust particles */
+  .dust-particles {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    background-image:
+      radial-gradient(1px 1px at 10% 20%, rgba(180, 140, 80, 0.3) 0%, transparent 100%),
+      radial-gradient(1px 1px at 30% 40%, rgba(180, 140, 80, 0.2) 0%, transparent 100%),
+      radial-gradient(1px 1px at 50% 10%, rgba(180, 140, 80, 0.25) 0%, transparent 100%),
+      radial-gradient(1px 1px at 70% 30%, rgba(180, 140, 80, 0.2) 0%, transparent 100%),
+      radial-gradient(1px 1px at 90% 50%, rgba(180, 140, 80, 0.3) 0%, transparent 100%),
+      radial-gradient(1px 1px at 20% 60%, rgba(180, 140, 80, 0.2) 0%, transparent 100%),
+      radial-gradient(1px 1px at 40% 80%, rgba(180, 140, 80, 0.25) 0%, transparent 100%),
+      radial-gradient(1px 1px at 60% 70%, rgba(180, 140, 80, 0.2) 0%, transparent 100%),
+      radial-gradient(1px 1px at 80% 90%, rgba(180, 140, 80, 0.3) 0%, transparent 100%);
+    animation: dust-drift 20s linear infinite;
+    opacity: 0.6;
+  }
+
+  @keyframes dust-drift {
+    0% { transform: translateY(0) translateX(0); }
+    50% { transform: translateY(-20px) translateX(10px); }
+    100% { transform: translateY(0) translateX(0); }
+  }
+
+  /* PHARAOH GOLD SHOW - Particles intensify during derivation */
+  .dust-particles.active {
+    opacity: 1;
+    animation: dust-drift 8s linear infinite, dust-glow 2s ease-in-out infinite;
+    background-image:
+      radial-gradient(2px 2px at 10% 20%, rgba(255, 200, 100, 0.6) 0%, transparent 100%),
+      radial-gradient(2px 2px at 30% 40%, rgba(255, 180, 80, 0.5) 0%, transparent 100%),
+      radial-gradient(2px 2px at 50% 10%, rgba(255, 220, 120, 0.55) 0%, transparent 100%),
+      radial-gradient(2px 2px at 70% 30%, rgba(255, 180, 80, 0.5) 0%, transparent 100%),
+      radial-gradient(2px 2px at 90% 50%, rgba(255, 200, 100, 0.6) 0%, transparent 100%),
+      radial-gradient(2px 2px at 20% 60%, rgba(255, 180, 80, 0.5) 0%, transparent 100%),
+      radial-gradient(2px 2px at 40% 80%, rgba(255, 220, 120, 0.55) 0%, transparent 100%),
+      radial-gradient(2px 2px at 60% 70%, rgba(255, 180, 80, 0.5) 0%, transparent 100%),
+      radial-gradient(2px 2px at 80% 90%, rgba(255, 200, 100, 0.6) 0%, transparent 100%),
+      radial-gradient(3px 3px at 15% 45%, rgba(255, 200, 100, 0.4) 0%, transparent 100%),
+      radial-gradient(3px 3px at 85% 35%, rgba(255, 200, 100, 0.4) 0%, transparent 100%);
+  }
+
+  @keyframes dust-glow {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.5); }
+  }
+
+  /* Golden light flood during derivation */
+  .light-flood {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at 50% 0%,
+      rgba(255, 200, 100, calc(0.1 * var(--progress) / 100)) 0%,
+      rgba(255, 180, 80, calc(0.05 * var(--progress) / 100)) 30%,
+      transparent 70%);
+    z-index: 0;
+    animation: flood-pulse 3s ease-in-out infinite;
+  }
+
+  @keyframes flood-pulse {
+    0%, 100% { opacity: 0.8; }
+    50% { opacity: 1; }
+  }
+
+  /* Light rays emanating from logo */
+  .light-rays {
+    position: fixed;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 100%;
+    height: 60vh;
+    background:
+      conic-gradient(from 250deg at 50% 0%,
+        transparent 0deg,
+        rgba(180, 140, 80, 0.03) 10deg,
+        transparent 20deg,
+        rgba(180, 140, 80, 0.02) 30deg,
+        transparent 40deg,
+        rgba(180, 140, 80, 0.04) 50deg,
+        transparent 60deg,
+        rgba(180, 140, 80, 0.02) 70deg,
+        transparent 80deg,
+        rgba(180, 140, 80, 0.03) 90deg,
+        transparent 100deg,
+        transparent 260deg,
+        rgba(180, 140, 80, 0.03) 270deg,
+        transparent 280deg,
+        rgba(180, 140, 80, 0.02) 290deg,
+        transparent 300deg
+      );
+    pointer-events: none;
+    opacity: 0.8;
+    transition: all 0.8s ease;
+  }
+
+  /* LIGHT RAYS EXPLODE during derivation */
+  .light-rays.active {
+    opacity: 1;
+    height: 100vh;
+    background:
+      conic-gradient(from 250deg at 50% 0%,
+        transparent 0deg,
+        rgba(255, 200, 100, 0.15) 10deg,
+        transparent 20deg,
+        rgba(255, 180, 80, 0.12) 30deg,
+        transparent 40deg,
+        rgba(255, 220, 120, 0.18) 50deg,
+        transparent 60deg,
+        rgba(255, 180, 80, 0.12) 70deg,
+        transparent 80deg,
+        rgba(255, 200, 100, 0.15) 90deg,
+        transparent 100deg,
+        transparent 260deg,
+        rgba(255, 200, 100, 0.15) 270deg,
+        transparent 280deg,
+        rgba(255, 180, 80, 0.12) 290deg,
+        transparent 300deg
+      );
+    animation: rays-rotate 30s linear infinite;
+  }
+
+  @keyframes rays-rotate {
+    0% { transform: translateX(-50%) rotate(0deg); }
+    100% { transform: translateX(-50%) rotate(360deg); }
   }
 
   .header {
     text-align: center;
-    margin-bottom: 40px;
+    margin-bottom: 24px;
+    position: relative;
+    z-index: 1;
+    flex-shrink: 0;
+    transition: all 0.8s ease;
+  }
+
+  /* Header shrinks during derivation to give space to the show */
+  .header.deriving {
+    margin-bottom: 12px;
+  }
+
+  .logo-monument {
+    position: relative;
+    margin-bottom: 0;
+    display: inline-block;
+    transition: all 0.8s ease;
+  }
+
+  /* Logo monument GROWS and GLOWS during derivation */
+  .logo-monument.deriving {
+    transform: scale(1.3);
+  }
+
+  .logo-glow {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 200px;
+    height: 200px;
+    background: radial-gradient(ellipse at center, rgba(180, 140, 80, 0.15) 0%, transparent 70%);
+    pointer-events: none;
+    animation: glow-pulse 4s ease-in-out infinite;
+    transition: all 0.8s ease;
+  }
+
+  /* LOGO GLOW EXPLODES during derivation */
+  .logo-glow.active {
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(ellipse at center,
+      rgba(255, 200, 100, 0.5) 0%,
+      rgba(255, 180, 80, 0.3) 30%,
+      rgba(255, 150, 50, 0.1) 60%,
+      transparent 80%);
+    animation: glow-pulse-intense 1.5s ease-in-out infinite;
+  }
+
+  @keyframes glow-pulse {
+    0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
+    50% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
+  }
+
+  @keyframes glow-pulse-intense {
+    0%, 100% { opacity: 0.8; transform: translate(-50%, -50%) scale(1); }
+    50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+  }
+
+  /* Pyramid cracks - light escaping from within */
+  .pyramid-crack {
+    position: absolute;
+    top: 50%;
+    width: 3px;
+    height: 60px;
+    background: linear-gradient(180deg,
+      transparent 0%,
+      rgba(255, 220, 120, 0.8) 20%,
+      rgba(255, 200, 100, 1) 50%,
+      rgba(255, 220, 120, 0.8) 80%,
+      transparent 100%);
+    transform: translateY(-50%);
+    animation: crack-glow 2s ease-in-out infinite;
+    box-shadow: 0 0 20px rgba(255, 200, 100, 0.8), 0 0 40px rgba(255, 180, 80, 0.4);
+  }
+
+  .pyramid-crack.left {
+    left: -8px;
+    transform: translateY(-50%) rotate(-15deg);
+  }
+
+  .pyramid-crack.right {
+    right: -8px;
+    transform: translateY(-50%) rotate(15deg);
+  }
+
+  @keyframes crack-glow {
+    0%, 100% { opacity: 0.6; height: 60px; }
+    50% { opacity: 1; height: 70px; }
+  }
+
+  .triangle-logo {
+    width: 100px;
+    height: auto;
+    opacity: 0.95;
+    filter:
+      drop-shadow(0 0 40px rgba(180, 140, 80, 0.3))
+      drop-shadow(0 0 80px rgba(180, 140, 80, 0.15));
+    transition: all 0.8s ease;
+    position: relative;
+    z-index: 1;
+    animation: logo-breathe 6s ease-in-out infinite;
+  }
+
+  /* Triangle logo BLAZES during derivation */
+  .triangle-logo.deriving {
+    filter:
+      drop-shadow(0 0 60px rgba(255, 200, 100, 0.7))
+      drop-shadow(0 0 120px rgba(255, 180, 80, 0.5))
+      drop-shadow(0 0 200px rgba(255, 150, 50, 0.3));
+    animation: logo-blaze 1.5s ease-in-out infinite;
+  }
+
+  @keyframes logo-breathe {
+    0%, 100% { transform: scale(1); filter: drop-shadow(0 0 60px rgba(180, 140, 80, 0.3)) drop-shadow(0 0 120px rgba(180, 140, 80, 0.15)); }
+    50% { transform: scale(1.02); filter: drop-shadow(0 0 80px rgba(180, 140, 80, 0.4)) drop-shadow(0 0 150px rgba(180, 140, 80, 0.2)); }
+  }
+
+  @keyframes logo-blaze {
+    0%, 100% {
+      transform: scale(1);
+      filter: drop-shadow(0 0 60px rgba(255, 200, 100, 0.7)) drop-shadow(0 0 120px rgba(255, 180, 80, 0.5)) drop-shadow(0 0 200px rgba(255, 150, 50, 0.3));
+    }
+    50% {
+      transform: scale(1.05);
+      filter: drop-shadow(0 0 80px rgba(255, 220, 120, 0.9)) drop-shadow(0 0 150px rgba(255, 200, 100, 0.7)) drop-shadow(0 0 250px rgba(255, 180, 80, 0.5));
+    }
+  }
+
+  .triangle-logo:hover {
+    opacity: 1;
+    filter:
+      drop-shadow(0 0 80px rgba(180, 140, 80, 0.5))
+      drop-shadow(0 0 150px rgba(180, 140, 80, 0.25));
+    transform: scale(1.05);
   }
 
   .wordmark {
-    font-size: 56px;
-    font-weight: 200;
-    letter-spacing: -0.02em;
-    color: rgba(255, 255, 255, 0.95);
-    margin: 0 0 8px 0;
+    font-size: 72px;
+    font-weight: 100;
+    letter-spacing: 0.3em;
+    text-transform: lowercase;
+    color: rgba(255, 255, 255, 0.9);
+    margin: 0 0 12px 0;
+    text-shadow: 0 0 60px rgba(180, 140, 80, 0.3);
   }
 
   .tagline {
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 17px;
-    font-weight: 400;
+    color: rgba(180, 140, 80, 0.6);
+    font-size: 14px;
+    font-weight: 300;
     margin: 0;
-    letter-spacing: -0.01em;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
   }
 
   .badges {
     display: flex;
     justify-content: center;
-    gap: 10px;
-    margin-top: 16px;
+    gap: 12px;
+    margin-top: 24px;
   }
 
   .badge {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 5px 12px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 500;
-    letter-spacing: 0.03em;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 2px;
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
     cursor: help;
-    transition: all 0.2s ease;
+    transition: all 0.3s ease;
   }
 
   .offline-badge {
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(22, 163, 74, 0.1) 100%);
-    border: 1px solid rgba(34, 197, 94, 0.3);
-    color: rgba(34, 197, 94, 0.9);
+    background: transparent;
+    border: 1px solid rgba(180, 140, 80, 0.3);
+    color: rgba(180, 140, 80, 0.8);
   }
 
   .offline-badge::before {
     content: '';
-    width: 6px;
-    height: 6px;
+    width: 5px;
+    height: 5px;
     border-radius: 50%;
-    background: rgba(34, 197, 94, 0.9);
-    box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+    background: rgba(180, 140, 80, 0.9);
+    box-shadow: 0 0 8px rgba(180, 140, 80, 0.6);
   }
 
   .client-badge {
-    background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(37, 99, 235, 0.1) 100%);
-    border: 1px solid rgba(59, 130, 246, 0.3);
-    color: rgba(59, 130, 246, 0.9);
+    background: transparent;
+    border: 1px solid rgba(180, 140, 80, 0.2);
+    color: rgba(180, 140, 80, 0.6);
   }
 
   .badge:hover {
-    transform: translateY(-1px);
+    border-color: rgba(180, 140, 80, 0.5);
+    color: rgba(180, 140, 80, 1);
   }
 
   .main-content {
-    max-width: 600px;
+    max-width: 520px;
     margin: 0 auto;
+    position: relative;
+    z-index: 1;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
 
-  /* Glass Card */
+  /* Glass Card - Sacred Chamber */
   .glass-card {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(10, 8, 6, 0.9);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 24px;
-    padding: 32px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(180, 140, 80, 0.15);
+    border-radius: 2px;
+    padding: 24px;
+    box-shadow:
+      0 0 80px rgba(180, 140, 80, 0.05),
+      inset 0 1px 0 rgba(180, 140, 80, 0.1);
+    position: relative;
+  }
+
+  .glass-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(180, 140, 80, 0.4), transparent);
   }
 
   /* Resume Banner */
@@ -1550,25 +2025,27 @@
     background: rgba(255, 255, 255, 0.1);
   }
 
-  /* Input Groups */
+  /* Input Groups - Sacred inscriptions */
   .input-group {
-    margin-bottom: 28px;
+    margin-bottom: 16px;
   }
 
   .input-group label {
     display: block;
-    font-size: 13px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.9);
-    margin-bottom: 4px;
-    letter-spacing: 0.01em;
+    font-size: 11px;
+    font-weight: 400;
+    color: rgba(180, 140, 80, 0.8);
+    margin-bottom: 6px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
   }
 
   .input-hint {
     display: block;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.4);
-    margin-bottom: 10px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.35);
+    margin-bottom: 12px;
+    font-style: italic;
   }
 
   .input-wrapper {
@@ -1577,24 +2054,27 @@
 
   .input-wrapper input {
     width: 100%;
-    padding: 14px 16px;
-    background: rgba(0, 0, 0, 0.4);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
+    padding: 16px 18px;
+    background: rgba(0, 0, 0, 0.6);
+    border: 1px solid rgba(180, 140, 80, 0.2);
+    border-radius: 2px;
     font-size: 16px;
-    color: white;
-    transition: all 0.2s;
+    color: rgba(255, 255, 255, 0.9);
+    transition: all 0.3s;
     box-sizing: border-box;
+    letter-spacing: 0.02em;
   }
 
   .input-wrapper input:focus {
     outline: none;
-    border-color: rgba(255, 255, 255, 0.2);
-    background: rgba(0, 0, 0, 0.5);
+    border-color: rgba(180, 140, 80, 0.5);
+    background: rgba(0, 0, 0, 0.7);
+    box-shadow: 0 0 30px rgba(180, 140, 80, 0.1);
   }
 
   .input-wrapper input::placeholder {
-    color: rgba(255, 255, 255, 0.25);
+    color: rgba(255, 255, 255, 0.2);
+    font-style: italic;
   }
 
   /* Password toggle */
@@ -1607,15 +2087,15 @@
     border: none;
     padding: 4px;
     cursor: pointer;
-    color: rgba(255, 255, 255, 0.4);
-    transition: color 0.2s;
+    color: rgba(180, 140, 80, 0.4);
+    transition: color 0.3s;
     display: flex;
     align-items: center;
     justify-content: center;
   }
 
   .input-wrapper .toggle-visibility:hover {
-    color: rgba(255, 255, 255, 0.7);
+    color: rgba(180, 140, 80, 0.9);
   }
 
   .input-wrapper .suggest-btn {
@@ -1627,15 +2107,15 @@
     border: none;
     padding: 4px;
     cursor: pointer;
-    color: rgba(255, 255, 255, 0.4);
-    transition: color 0.2s;
+    color: rgba(180, 140, 80, 0.4);
+    transition: color 0.3s;
     display: flex;
     align-items: center;
     justify-content: center;
   }
 
   .input-wrapper .suggest-btn:hover {
-    color: rgba(139, 92, 246, 0.9);
+    color: rgba(180, 140, 80, 0.9);
   }
 
   .input-wrapper:has(.toggle-visibility) input {
@@ -1644,28 +2124,31 @@
 
   /* Strength Meter */
   .strength-meter {
-    height: 4px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 2px;
-    margin-top: 8px;
+    height: 2px;
+    background: rgba(180, 140, 80, 0.1);
+    border-radius: 0;
+    margin-top: 10px;
     overflow: hidden;
   }
 
   .strength-bar {
     height: 100%;
     transition: all 0.3s;
-    border-radius: 2px;
+    border-radius: 0;
   }
 
   .strength-text {
-    font-size: 12px;
-    margin-top: 4px;
+    font-size: 11px;
+    margin-top: 6px;
     display: block;
+    letter-spacing: 0.05em;
   }
 
   /* Factor Slider */
   .factor-slider-wrapper {
+    position: relative;
     padding: 8px 0;
+    padding-top: 56px; /* Make room for the big factor number */
   }
 
   .factor-slider-wrapper input[type="range"] {
@@ -1695,6 +2178,21 @@
     color: rgba(255, 255, 255, 0.4);
   }
 
+  .factor-current-value {
+    position: absolute;
+    top: -48px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 48px;
+    font-weight: 700;
+    color: #fbbf24;
+    text-shadow: 0 0 20px rgba(251, 191, 36, 0.5), 0 0 40px rgba(251, 191, 36, 0.3);
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+    letter-spacing: -0.02em;
+    pointer-events: none;
+    transition: all 0.15s ease-out;
+  }
+
   .factor-info-row {
     display: flex;
     justify-content: space-between;
@@ -1721,26 +2219,6 @@
     color: rgba(255, 255, 255, 0.5);
     font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
     letter-spacing: 0.01em;
-  }
-
-  .sound-setting {
-    flex-shrink: 0;
-  }
-
-  .sound-setting .sound-select {
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
-    padding: 6px 10px;
-    color: rgba(255, 255, 255, 0.6);
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .sound-setting .sound-select:hover {
-    border-color: rgba(139, 92, 246, 0.4);
-    color: rgba(255, 255, 255, 0.8);
   }
 
   .toggle-buttons {
@@ -1848,51 +2326,76 @@
     color: rgba(255, 255, 255, 0.9);
   }
 
-  /* Derive Button */
+  /* Derive Button - Sacred Gate */
   .derive-btn {
     width: 100%;
-    padding: 16px;
-    background: rgba(255, 255, 255, 0.9);
-    border: none;
-    border-radius: 12px;
-    font-size: 17px;
-    font-weight: 500;
-    color: #000;
+    padding: 18px;
+    background: transparent;
+    border: 1px solid rgba(180, 140, 80, 0.4);
+    border-radius: 2px;
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: rgba(180, 140, 80, 0.9);
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.4s ease;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .derive-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(180, 140, 80, 0.1), transparent);
+    transition: left 0.5s ease;
+  }
+
+  .derive-btn:hover:not(:disabled)::before {
+    left: 100%;
   }
 
   .derive-btn:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 1);
+    background: rgba(180, 140, 80, 0.1);
+    border-color: rgba(180, 140, 80, 0.6);
+    box-shadow: 0 0 40px rgba(180, 140, 80, 0.15);
+    color: rgba(180, 140, 80, 1);
   }
 
   .derive-btn:disabled {
-    opacity: 0.3;
+    opacity: 0.25;
     cursor: not-allowed;
   }
 
   .derive-btn.secondary {
-    background: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.9);
+    background: transparent;
+    border: 1px solid rgba(180, 140, 80, 0.2);
+    color: rgba(180, 140, 80, 0.6);
     margin-top: 24px;
   }
 
   .derive-btn.secondary:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.15);
+    background: rgba(180, 140, 80, 0.05);
+    border-color: rgba(180, 140, 80, 0.4);
+    color: rgba(180, 140, 80, 0.9);
   }
 
-  /* Network CTA Section */
+  /* Network CTA Section - Join the Spice Guild */
   .network-actions {
-    margin-top: 32px;
-    padding-top: 32px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    margin-top: 40px;
+    padding-top: 40px;
+    border-top: 1px solid rgba(180, 140, 80, 0.1);
   }
 
   .network-cta {
-    background: linear-gradient(135deg, rgba(147, 51, 234, 0.1) 0%, rgba(79, 70, 229, 0.08) 100%);
-    border: 1px solid rgba(147, 51, 234, 0.25);
-    border-radius: 16px;
-    padding: 24px;
+    background: rgba(180, 140, 80, 0.03);
+    border: 1px solid rgba(180, 140, 80, 0.15);
+    border-radius: 2px;
+    padding: 28px;
     text-align: center;
   }
 
@@ -1900,41 +2403,44 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    margin-bottom: 12px;
+    gap: 12px;
+    margin-bottom: 14px;
   }
 
   .network-icon {
-    font-size: 24px;
-    color: rgba(147, 51, 234, 0.9);
-    text-shadow: 0 0 20px rgba(147, 51, 234, 0.5);
+    font-size: 20px;
+    color: rgba(180, 140, 80, 0.8);
   }
 
   .network-title {
-    font-size: 18px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.95);
-    letter-spacing: -0.01em;
+    font-size: 14px;
+    font-weight: 400;
+    color: rgba(180, 140, 80, 0.9);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
   }
 
   .network-desc {
     font-size: 13px;
-    color: rgba(255, 255, 255, 0.5);
-    line-height: 1.5;
-    margin: 0 0 20px 0;
+    color: rgba(255, 255, 255, 0.4);
+    line-height: 1.6;
+    margin: 0 0 24px 0;
+    font-style: italic;
   }
 
   .derive-btn.network-btn {
     display: inline-flex;
-    background: linear-gradient(135deg, rgba(147, 51, 234, 0.9) 0%, rgba(79, 70, 229, 0.9) 100%);
-    box-shadow: 0 4px 20px rgba(147, 51, 234, 0.3);
+    background: rgba(180, 140, 80, 0.15);
+    border-color: rgba(180, 140, 80, 0.5);
+    box-shadow: 0 0 30px rgba(180, 140, 80, 0.1);
     text-decoration: none;
   }
 
   .derive-btn.network-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, rgba(147, 51, 234, 1) 0%, rgba(79, 70, 229, 1) 100%);
-    box-shadow: 0 6px 30px rgba(147, 51, 234, 0.4);
-    transform: translateY(-2px);
+    background: rgba(180, 140, 80, 0.25);
+    border-color: rgba(180, 140, 80, 0.7);
+    box-shadow: 0 0 50px rgba(180, 140, 80, 0.2);
+    transform: translateY(-1px);
   }
 
   /* Deriving Phase */
@@ -1985,11 +2491,201 @@
     position: fixed;
     inset: 0;
     background: #000;
+    background-image:
+      radial-gradient(ellipse at 50% 30%, rgba(180, 140, 80, 0.15) 0%, transparent 50%),
+      radial-gradient(ellipse at 50% 50%, rgba(120, 90, 50, 0.08) 0%, transparent 40%);
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     z-index: 1000;
+    overflow: hidden;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+     PHARAOH GOLD SHOW - You just found pharaoh gold!
+     ═══════════════════════════════════════════════════════════════════════════ */
+
+  /* Golden dust particles floating in the air */
+  .pharaoh-dust {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.8;
+    background-image:
+      radial-gradient(2px 2px at 10% 20%, rgba(255, 200, 100, 0.7) 0%, transparent 100%),
+      radial-gradient(2px 2px at 20% 50%, rgba(255, 180, 80, 0.6) 0%, transparent 100%),
+      radial-gradient(1px 1px at 30% 10%, rgba(255, 220, 120, 0.5) 0%, transparent 100%),
+      radial-gradient(2px 2px at 40% 70%, rgba(255, 200, 100, 0.7) 0%, transparent 100%),
+      radial-gradient(1px 1px at 50% 30%, rgba(255, 180, 80, 0.5) 0%, transparent 100%),
+      radial-gradient(2px 2px at 60% 60%, rgba(255, 220, 120, 0.6) 0%, transparent 100%),
+      radial-gradient(1px 1px at 70% 15%, rgba(255, 200, 100, 0.5) 0%, transparent 100%),
+      radial-gradient(2px 2px at 80% 45%, rgba(255, 180, 80, 0.7) 0%, transparent 100%),
+      radial-gradient(1px 1px at 90% 80%, rgba(255, 220, 120, 0.6) 0%, transparent 100%),
+      radial-gradient(2px 2px at 15% 85%, rgba(255, 200, 100, 0.7) 0%, transparent 100%),
+      radial-gradient(1px 1px at 25% 35%, rgba(255, 180, 80, 0.5) 0%, transparent 100%),
+      radial-gradient(2px 2px at 35% 95%, rgba(255, 220, 120, 0.6) 0%, transparent 100%),
+      radial-gradient(1px 1px at 45% 5%, rgba(255, 200, 100, 0.5) 0%, transparent 100%),
+      radial-gradient(2px 2px at 55% 75%, rgba(255, 180, 80, 0.7) 0%, transparent 100%),
+      radial-gradient(1px 1px at 65% 25%, rgba(255, 220, 120, 0.5) 0%, transparent 100%),
+      radial-gradient(2px 2px at 75% 55%, rgba(255, 200, 100, 0.6) 0%, transparent 100%),
+      radial-gradient(1px 1px at 85% 15%, rgba(255, 180, 80, 0.5) 0%, transparent 100%),
+      radial-gradient(2px 2px at 95% 65%, rgba(255, 220, 120, 0.7) 0%, transparent 100%);
+    background-size: 100% 100%;
+    animation: pharaoh-dust-drift 15s linear infinite;
+  }
+
+  @keyframes pharaoh-dust-drift {
+    0% { transform: translateY(0) translateX(0); }
+    25% { transform: translateY(-15px) translateX(10px); }
+    50% { transform: translateY(0) translateX(-5px); }
+    75% { transform: translateY(15px) translateX(5px); }
+    100% { transform: translateY(0) translateX(0); }
+  }
+
+  /* Golden light rays emanating from the pyramid */
+  .pharaoh-rays {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: calc(0.3 + var(--progress, 0) * 0.007);
+    background: conic-gradient(
+      from 250deg at 50% 35%,
+      transparent 0deg,
+      rgba(255, 200, 100, 0.2) 10deg,
+      transparent 20deg,
+      rgba(255, 180, 80, 0.15) 40deg,
+      transparent 50deg,
+      rgba(255, 220, 120, 0.18) 70deg,
+      transparent 80deg,
+      rgba(255, 200, 100, 0.2) 100deg,
+      transparent 110deg,
+      rgba(255, 180, 80, 0.15) 130deg,
+      transparent 140deg,
+      rgba(255, 220, 120, 0.18) 160deg,
+      transparent 170deg,
+      rgba(255, 200, 100, 0.2) 190deg,
+      transparent 200deg,
+      rgba(255, 180, 80, 0.15) 220deg,
+      transparent 230deg,
+      rgba(255, 220, 120, 0.18) 250deg,
+      transparent 260deg,
+      rgba(255, 200, 100, 0.2) 280deg,
+      transparent 290deg,
+      rgba(255, 180, 80, 0.15) 310deg,
+      transparent 320deg,
+      rgba(255, 220, 120, 0.18) 340deg,
+      transparent 360deg
+    );
+    animation: pharaoh-rays-rotate 60s linear infinite;
+  }
+
+  @keyframes pharaoh-rays-rotate {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  /* Golden light flood that intensifies with progress */
+  .pharaoh-flood {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(
+      ellipse at 50% 35%,
+      rgba(255, 200, 100, calc(0.05 + var(--progress, 0) * 0.003)) 0%,
+      rgba(255, 180, 80, calc(0.03 + var(--progress, 0) * 0.002)) 30%,
+      transparent 70%
+    );
+    animation: pharaoh-flood-pulse 3s ease-in-out infinite;
+  }
+
+  @keyframes pharaoh-flood-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  /* Pyramid blazing with golden light */
+  .pharaoh-blazing {
+    filter:
+      drop-shadow(0 0 30px rgba(255, 200, 100, 0.6))
+      drop-shadow(0 0 60px rgba(255, 180, 80, 0.4))
+      drop-shadow(0 0 100px rgba(255, 160, 60, 0.3));
+    animation: pharaoh-blaze 2s ease-in-out infinite;
+  }
+
+  @keyframes pharaoh-blaze {
+    0%, 100% {
+      filter:
+        drop-shadow(0 0 30px rgba(255, 200, 100, 0.6))
+        drop-shadow(0 0 60px rgba(255, 180, 80, 0.4))
+        drop-shadow(0 0 100px rgba(255, 160, 60, 0.3));
+    }
+    50% {
+      filter:
+        drop-shadow(0 0 40px rgba(255, 200, 100, 0.8))
+        drop-shadow(0 0 80px rgba(255, 180, 80, 0.5))
+        drop-shadow(0 0 120px rgba(255, 160, 60, 0.4));
+    }
+  }
+
+  /* Pharaoh glow - massive golden aura */
+  .pharaoh-glow {
+    position: absolute;
+    inset: -100px;
+    background: radial-gradient(
+      ellipse at center,
+      rgba(255, 200, 100, 0.5) 0%,
+      rgba(255, 180, 80, 0.3) 30%,
+      rgba(255, 160, 60, 0.15) 50%,
+      transparent 80%
+    );
+    opacity: calc(0.5 + var(--progress, 0%) * 0.005);
+    animation: pharaoh-glow-pulse 2s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  @keyframes pharaoh-glow-pulse {
+    0%, 100% { transform: scale(1); opacity: calc(0.5 + var(--progress, 0%) * 0.005); }
+    50% { transform: scale(1.1); opacity: calc(0.7 + var(--progress, 0%) * 0.003); }
+  }
+
+  /* Light escaping from pyramid cracks */
+  .pharaoh-crack {
+    position: absolute;
+    width: 3px;
+    height: 50px;
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(255, 200, 100, 0.9) 30%,
+      rgba(255, 220, 120, 1) 50%,
+      rgba(255, 200, 100, 0.9) 70%,
+      transparent 100%
+    );
+    box-shadow:
+      0 0 15px rgba(255, 200, 100, 0.8),
+      0 0 30px rgba(255, 180, 80, 0.5),
+      0 0 50px rgba(255, 160, 60, 0.3);
+    animation: pharaoh-crack-flicker 1.5s ease-in-out infinite;
+  }
+
+  .pharaoh-crack.left {
+    top: 60%;
+    left: 25%;
+    transform: rotate(-25deg);
+  }
+
+  .pharaoh-crack.right {
+    top: 60%;
+    right: 25%;
+    transform: rotate(25deg);
+  }
+
+  @keyframes pharaoh-crack-flicker {
+    0%, 100% { opacity: 0.8; height: 50px; }
+    25% { opacity: 1; height: 55px; }
+    50% { opacity: 0.6; height: 48px; }
+    75% { opacity: 1; height: 52px; }
   }
 
   .vault-door {
@@ -2071,6 +2767,353 @@
     box-shadow: 0 0 6px rgba(255, 255, 255, 0.8);
   }
 
+  /* Pyramid Visualization - Monumental */
+  .pyramid-visualization {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    padding: 40px;
+    width: 100%;
+    max-width: 400px;
+  }
+
+  .pyramid-logo {
+    position: relative;
+    width: 120px;
+    height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .pyramid-triangle {
+    width: 100%;
+    height: auto;
+    opacity: calc(0.4 + var(--progress, 0%) * 0.006);
+    filter: drop-shadow(0 0 40px rgba(255, 255, 255, calc(0.1 + var(--progress, 0%) * 0.004)));
+    animation: pyramid-breathe 3s ease-in-out infinite;
+    transition: opacity 0.3s, filter 0.3s;
+  }
+
+  .pyramid-glow {
+    position: absolute;
+    inset: -20px;
+    background: radial-gradient(circle at center, rgba(255, 255, 255, 0.1) 0%, transparent 70%);
+    opacity: calc(var(--progress, 0%) * 0.01);
+    animation: pyramid-glow-pulse 2s ease-in-out infinite;
+    pointer-events: none;
+  }
+
+  @keyframes pyramid-breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.02); }
+  }
+
+  @keyframes pyramid-glow-pulse {
+    0%, 100% { opacity: calc(var(--progress, 0%) * 0.008); }
+    50% { opacity: calc(var(--progress, 0%) * 0.012); }
+  }
+
+  .pyramid-progress-text {
+    font-size: 64px;
+    font-weight: 200;
+    color: rgb(255, 220, 140);
+    letter-spacing: 4px;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    text-shadow:
+      0 0 20px rgba(255, 200, 100, 0.6),
+      0 0 40px rgba(255, 180, 80, 0.4);
+  }
+
+  .pyramid-stats {
+    display: flex;
+    gap: 32px;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  }
+
+  .stat-row {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .stat-label {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: rgba(255, 255, 255, 0.4);
+    text-transform: uppercase;
+  }
+
+  .stat-value {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .pyramid-progress-bar {
+    width: 100%;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .pyramid-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.5) 0%, #fff 100%);
+    transition: width 0.2s ease-out;
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+  }
+
+  .memory-control, .sound-control {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  }
+
+  .memory-label, .sound-label {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: rgba(255, 200, 100, 0.6);
+    text-transform: uppercase;
+    width: 70px;
+    flex-shrink: 0;
+  }
+
+  .memory-slider-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .memory-slider {
+    width: 100%;
+    height: 24px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255, 200, 100, 0.15);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .memory-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 24px;
+    background: rgb(255, 200, 100);
+    border-radius: 3px;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(255, 200, 100, 0.5);
+  }
+
+  .memory-slider::-moz-range-thumb {
+    width: 16px;
+    height: 24px;
+    background: rgb(255, 200, 100);
+    border-radius: 3px;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(255, 200, 100, 0.5);
+    border: none;
+  }
+
+  .memory-value {
+    font-size: 11px;
+    color: rgba(255, 200, 100, 0.8);
+    text-align: right;
+  }
+
+  /* Mini shard grid under pyramid */
+  .mini-shard-grid {
+    display: grid;
+    grid-template-columns: repeat(var(--cols, 16), 1fr);
+    gap: 2px;
+    width: 100%;
+    max-width: 320px;
+    margin: 16px auto 0;
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+  }
+
+  .mini-shard {
+    aspect-ratio: 1;
+    border-radius: 2px;
+    transition: all 0.2s ease-out;
+  }
+
+  .mini-shard.pending {
+    background: rgba(80, 60, 30, 0.4);
+    border: 1px solid rgba(180, 140, 80, 0.1);
+  }
+
+  .mini-shard.computing {
+    background: radial-gradient(circle at center,
+      rgba(255, 200, 100, 0.9) 0%,
+      rgba(255, 180, 80, 0.7) 50%,
+      rgba(180, 140, 80, 0.4) 100%);
+    box-shadow: 0 0 8px rgba(255, 200, 100, 0.6);
+    animation: mini-shard-pulse 0.6s ease-in-out infinite;
+  }
+
+  .mini-shard.complete {
+    background: linear-gradient(135deg, rgba(255, 220, 120, 0.9) 0%, rgba(230, 180, 80, 0.8) 100%);
+    border: 1px solid rgba(255, 220, 120, 0.8);
+    box-shadow: 0 0 4px rgba(255, 200, 100, 0.3);
+  }
+
+  @keyframes mini-shard-pulse {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.1); opacity: 0.8; }
+  }
+
+  .thread-control {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  }
+
+  .thread-label {
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: rgba(255, 255, 255, 0.4);
+    text-transform: uppercase;
+    width: 70px;
+    flex-shrink: 0;
+  }
+
+  .thread-slider {
+    flex: 1;
+    height: 24px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .thread-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 24px;
+    background: #fff;
+    border-radius: 3px;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+  }
+
+  .thread-slider::-moz-range-thumb {
+    width: 16px;
+    height: 24px;
+    background: #fff;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+  }
+
+  .sound-select {
+    flex: 1;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 12px;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    cursor: pointer;
+  }
+
+  .sound-select:focus {
+    outline: none;
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+
+  .sound-select option {
+    background: #0a0a0a;
+    color: #fff;
+  }
+
+  .derivation-progress {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 16px;
+  }
+
+  .progress-bar-track {
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #fff 0%, rgba(255,255,255,0.8) 100%);
+    transition: width 0.2s ease-out;
+  }
+
+  .progress-label {
+    text-align: center;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  }
+
+  .sound-selector {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 20px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+  }
+
+  .sound-label {
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: rgba(255, 255, 255, 0.5);
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  }
+
+  .sound-select {
+    flex: 1;
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 13px;
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .sound-select:hover {
+    border-color: rgba(255, 255, 255, 0.4);
+    background: rgba(0, 0, 0, 0.4);
+  }
+
+  .sound-select:focus {
+    outline: none;
+    border-color: rgba(100, 200, 255, 0.6);
+    box-shadow: 0 0 0 2px rgba(100, 200, 255, 0.2);
+  }
+
+  .sound-select option {
+    background: #1a1a1a;
+    color: #fff;
+  }
+
   .vault-info {
     margin-top: 48px;
     text-align: center;
@@ -2144,6 +3187,77 @@
     font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
     font-size: 12px;
     letter-spacing: 1px;
+  }
+
+  /* Parallelism control */
+  .parallelism-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    padding: 4px 12px;
+  }
+
+  .parallelism-slider {
+    width: 60px;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+    cursor: pointer;
+  }
+
+  .parallelism-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px;
+    height: 14px;
+    background: linear-gradient(135deg, #a855f7, #06b6d4);
+    border-radius: 50%;
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(168, 85, 247, 0.5);
+  }
+
+  .parallelism-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: linear-gradient(135deg, #a855f7, #06b6d4);
+    border-radius: 50%;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 0 8px rgba(168, 85, 247, 0.5);
+  }
+
+  .parallelism-label {
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+    min-width: 12px;
+    text-align: center;
+  }
+
+  /* Mini sound dropdown for controls bar */
+  .sound-select-mini {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .sound-select-mini:hover {
+    border-color: rgba(255, 255, 255, 0.35);
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .sound-select-mini option {
+    background: #1a1a2e;
+    color: #fff;
   }
 
   /* Split door panels for dramatic opening */
@@ -2222,6 +3336,9 @@
     position: fixed;
     inset: 0;
     background: #000;
+    background-image:
+      radial-gradient(ellipse at 50% 30%, rgba(180, 140, 80, 0.08) 0%, transparent 60%),
+      radial-gradient(ellipse at 50% 50%, rgba(120, 90, 50, 0.05) 0%, transparent 50%);
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -2261,32 +3378,73 @@
     aspect-ratio: 1;
   }
 
+  /* ANCIENT SEAL - Each shard is a golden seal being unlocked */
   .shard {
     aspect-ratio: 1;
-    border-radius: 2px;
+    border-radius: 1px;
     transition: all 0.3s ease;
+    position: relative;
   }
 
+  /* Pending - dark dormant seal */
   .shard.pending {
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(30, 25, 15, 0.8);
+    border: 1px solid rgba(180, 140, 80, 0.15);
+    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.5);
   }
 
+  /* Computing - seal being UNLOCKED, golden fire */
   .shard.computing {
-    background: rgba(147, 51, 234, 0.4);
-    border: 1px solid rgba(147, 51, 234, 0.6);
-    animation: shard-pulse 1s ease-in-out infinite;
+    background: radial-gradient(circle at center,
+      rgba(255, 200, 100, 0.8) 0%,
+      rgba(255, 180, 80, 0.6) 40%,
+      rgba(200, 150, 50, 0.4) 70%,
+      rgba(180, 140, 80, 0.3) 100%);
+    border: 1px solid rgba(255, 200, 100, 0.8);
+    animation: seal-unlock 0.8s ease-in-out infinite;
+    box-shadow:
+      0 0 15px rgba(255, 200, 100, 0.6),
+      0 0 30px rgba(255, 180, 80, 0.3),
+      inset 0 0 10px rgba(255, 220, 120, 0.4);
   }
 
+  /* Complete - GOLDEN seal, fully lit */
   .shard.complete {
-    background: rgba(255, 255, 255, 0.9);
-    border: 1px solid rgba(255, 255, 255, 1);
-    box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+    background: linear-gradient(135deg,
+      rgba(255, 220, 120, 0.95) 0%,
+      rgba(255, 200, 100, 0.9) 50%,
+      rgba(230, 180, 80, 0.85) 100%);
+    border: 1px solid rgba(255, 220, 120, 1);
+    box-shadow:
+      0 0 8px rgba(255, 200, 100, 0.5),
+      0 0 20px rgba(255, 180, 80, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.3);
   }
 
-  @keyframes shard-pulse {
-    0%, 100% { opacity: 0.6; }
-    50% { opacity: 1; }
+  /* Partial completion for chunked cells (shows gradient progress) */
+  .shard.partial {
+    background: linear-gradient(
+      to top,
+      rgba(255, 200, 100, 0.9) 0%,
+      rgba(255, 200, 100, 0.9) calc(var(--progress, 0) * 100%),
+      rgba(180, 140, 80, 0.3) calc(var(--progress, 0) * 100%),
+      rgba(180, 140, 80, 0.3) 100%
+    );
+    border: 1px solid rgba(255, 200, 100, 0.6);
+    box-shadow: 0 0 10px rgba(255, 200, 100, 0.3);
+  }
+
+  @keyframes seal-unlock {
+    0%, 100% {
+      opacity: 0.7;
+      transform: scale(1);
+      box-shadow: 0 0 15px rgba(255, 200, 100, 0.6), 0 0 30px rgba(255, 180, 80, 0.3);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.05);
+      box-shadow: 0 0 25px rgba(255, 200, 100, 0.9), 0 0 50px rgba(255, 180, 80, 0.5);
+    }
   }
 
   .shards-footer {
@@ -2594,27 +3752,30 @@
 
   /* FAQ Section */
   .faq-section {
-    margin-top: 48px;
+    margin-top: 60px;
   }
 
   .faq-section h3 {
-    font-size: 20px;
-    color: rgba(255, 255, 255, 0.9);
-    margin-bottom: 20px;
+    font-size: 12px;
+    color: rgba(180, 140, 80, 0.7);
+    margin-bottom: 24px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    font-weight: 400;
   }
 
   .faq-item {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    margin-bottom: 8px;
+    background: transparent;
+    border: 1px solid rgba(180, 140, 80, 0.1);
+    border-radius: 0;
+    margin-bottom: 4px;
     overflow: hidden;
-    transition: all 0.2s;
+    transition: all 0.3s;
   }
 
   .faq-item.expanded {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(147, 51, 234, 0.3);
+    background: rgba(180, 140, 80, 0.03);
+    border-color: rgba(180, 140, 80, 0.25);
   }
 
   .faq-question {
@@ -2626,28 +3787,39 @@
     justify-content: space-between;
     align-items: center;
     cursor: pointer;
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 15px;
-    font-weight: 500;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 14px;
+    font-weight: 400;
     text-align: left;
+    transition: color 0.3s;
+  }
+
+  .faq-question:hover {
+    color: rgba(180, 140, 80, 0.9);
   }
 
   .faq-toggle {
-    font-size: 20px;
-    color: rgba(255, 255, 255, 0.5);
+    font-size: 16px;
+    color: rgba(180, 140, 80, 0.4);
     width: 24px;
     text-align: center;
+    transition: color 0.3s;
+  }
+
+  .faq-item.expanded .faq-toggle {
+    color: rgba(180, 140, 80, 0.8);
   }
 
   .faq-answer {
-    padding: 0 20px 16px;
+    padding: 0 20px 18px;
   }
 
   .faq-answer p {
     margin: 0;
-    font-size: 14px;
-    line-height: 1.6;
-    color: rgba(255, 255, 255, 0.7);
+    font-size: 13px;
+    line-height: 1.7;
+    color: rgba(255, 255, 255, 0.5);
+    font-style: italic;
   }
 
   /* Responsive */
