@@ -78,16 +78,18 @@
     MAX_FACTOR: 9,
   };
 
+  // Attack cost assumes: $0.05/GB-hour on AWS, 1M password guesses
+  // Time to crack = shards × 256MB × $0.05/GB-hr × 1M guesses
   const FACTOR_INFO = [
-    { factor: 1, shards: 1, memory: '256MB', time: '3s', description: 'Demo only' },
-    { factor: 2, shards: 4, memory: '1GB', time: '12s', description: 'Quick test' },
-    { factor: 3, shards: 16, memory: '4GB', time: '50s', description: 'Light use' },
-    { factor: 4, shards: 64, memory: '16GB', time: '3min', description: 'Daily vault' },
-    { factor: 5, shards: 256, memory: '64GB', time: '13min', description: 'Balanced' },
-    { factor: 6, shards: 1024, memory: '256GB', time: '50min', description: 'Secure' },
-    { factor: 7, shards: 4096, memory: '1TB', time: '3.5hr', description: 'Very secure' },
-    { factor: 8, shards: 16384, memory: '4TB', time: '14hr', description: 'Paranoid' },
-    { factor: 9, shards: 65536, memory: '16TB', time: '55hr', description: 'Ultra paranoid' },
+    { factor: 1, shards: 1, memory: '256MB', time: '3s', description: 'Demo only', attackCost: '$13K', attackTime: '1 hour' },
+    { factor: 2, shards: 4, memory: '1GB', time: '12s', description: 'Testing', attackCost: '$50K', attackTime: '4 hours' },
+    { factor: 3, shards: 16, memory: '4GB', time: '50s', description: 'Coffee money', attackCost: '$200K', attackTime: '1 day' },
+    { factor: 4, shards: 64, memory: '16GB', time: '3min', description: 'Pocket change', attackCost: '$800K', attackTime: '5 days' },
+    { factor: 5, shards: 256, memory: '64GB', time: '13min', description: 'Savings', attackCost: '$3.2M', attackTime: '3 weeks' },
+    { factor: 6, shards: 1024, memory: '256GB', time: '50min', description: 'Serious money', attackCost: '$13M', attackTime: '3 months' },
+    { factor: 7, shards: 4096, memory: '1TB', time: '3.5hr', description: 'Life savings', attackCost: '$51M', attackTime: '1 year' },
+    { factor: 8, shards: 16384, memory: '4TB', time: '14hr', description: 'Generational', attackCost: '$200M', attackTime: '4 years' },
+    { factor: 9, shards: 65536, memory: '16TB', time: '55hr', description: 'Nation-state', attackCost: '$800M', attackTime: '16 years' },
   ];
 
   const FAQ_ITEMS = [
@@ -1002,6 +1004,10 @@
   <div class="header">
     <h1 class="wordmark">{t('vault.title')}</h1>
     <p class="tagline">{t('vault.tagline')}</p>
+    <div class="badges">
+      <span class="badge offline-badge" title="All computation happens in your browser. No servers, no network calls.">100% offline</span>
+      <span class="badge client-badge" title="Your passphrase never leaves this device.">client-side only</span>
+    </div>
   </div>
 
   <!-- Main Content -->
@@ -1122,6 +1128,11 @@
                 <option value="retro">Sound: Retro</option>
               </select>
             </div>
+          </div>
+          <div class="attack-cost">
+            <span class="attack-label">Attacker cost (1M guesses):</span>
+            <span class="attack-value">{factorInfo.attackCost}</span>
+            <span class="attack-time">· {factorInfo.attackTime}</span>
           </div>
         </div>
 
@@ -1324,13 +1335,18 @@
 
         <!-- Password Manager - simplified -->
         <div class="result-section password-manager">
-          <label>Password Manager</label>
-          <input
-            type="text"
-            class="pm-domain-input"
-            placeholder="domain.com"
-            bind:value={siteDomain}
-          />
+          <div class="pm-header">
+            <label>Password Manager</label>
+            <span class="pm-hint">Derive unique passwords for any site</span>
+          </div>
+          <div class="pm-input-row">
+            <input
+              type="text"
+              class="pm-domain-input"
+              placeholder="github.com, twitter.com..."
+              bind:value={siteDomain}
+            />
+          </div>
           {#if sitePassword}
             <div class="result-box site-password">
               <code class:blurred={!showSitePassword}>
@@ -1343,13 +1359,33 @@
                 {copiedField === 'sitePass' ? '✓' : '📋'}
               </button>
             </div>
+          {:else if !siteDomain}
+            <div class="pm-empty-state">
+              <span class="pm-empty-icon">🔐</span>
+              <span class="pm-empty-text">Enter a domain to generate a unique password</span>
+            </div>
           {/if}
         </div>
 
-        <!-- New Wallet Button -->
+        <!-- Network Actions -->
+        <div class="network-actions">
+          <div class="network-cta">
+            <div class="network-cta-header">
+              <span class="network-icon">◈</span>
+              <span class="network-title">Join xln Network</span>
+            </div>
+            <p class="network-desc">Use this vault as your identity on the xln network. Create an entity, open accounts, send instant payments.</p>
+            <a href="/" class="derive-btn network-btn">
+              <span class="btn-icon">⚡</span>
+              Enter Network
+            </a>
+          </div>
+        </div>
+
+        <!-- New Vault Button -->
         <button class="derive-btn secondary" on:click={reset}>
           <span class="btn-icon">🔄</span>
-          Derive Another Wallet
+          Derive Another Vault
         </button>
       </div>
     {/if}
@@ -1402,6 +1438,52 @@
     font-weight: 400;
     margin: 0;
     letter-spacing: -0.01em;
+  }
+
+  .badges {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 16px;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    cursor: help;
+    transition: all 0.2s ease;
+  }
+
+  .offline-badge {
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.15) 0%, rgba(22, 163, 74, 0.1) 100%);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    color: rgba(34, 197, 94, 0.9);
+  }
+
+  .offline-badge::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(34, 197, 94, 0.9);
+    box-shadow: 0 0 6px rgba(34, 197, 94, 0.6);
+  }
+
+  .client-badge {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.15) 0%, rgba(37, 99, 235, 0.1) 100%);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: rgba(59, 130, 246, 0.9);
+  }
+
+  .badge:hover {
+    transform: translateY(-1px);
   }
 
   .main-content {
@@ -1716,6 +1798,37 @@
     color: white;
   }
 
+  /* Attack Cost Display */
+  .attack-cost {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    margin-top: 12px;
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(220, 38, 38, 0.04) 100%);
+    border: 1px solid rgba(239, 68, 68, 0.15);
+    border-radius: 8px;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+  }
+
+  .attack-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    letter-spacing: 0.02em;
+  }
+
+  .attack-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(239, 68, 68, 0.9);
+    letter-spacing: 0.03em;
+  }
+
+  .attack-time {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+  }
+
   /* Warning Box */
   .warning-box {
     background: rgba(255, 255, 255, 0.03);
@@ -1766,6 +1879,62 @@
 
   .derive-btn.secondary:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.15);
+  }
+
+  /* Network CTA Section */
+  .network-actions {
+    margin-top: 32px;
+    padding-top: 32px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .network-cta {
+    background: linear-gradient(135deg, rgba(147, 51, 234, 0.1) 0%, rgba(79, 70, 229, 0.08) 100%);
+    border: 1px solid rgba(147, 51, 234, 0.25);
+    border-radius: 16px;
+    padding: 24px;
+    text-align: center;
+  }
+
+  .network-cta-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .network-icon {
+    font-size: 24px;
+    color: rgba(147, 51, 234, 0.9);
+    text-shadow: 0 0 20px rgba(147, 51, 234, 0.5);
+  }
+
+  .network-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+    letter-spacing: -0.01em;
+  }
+
+  .network-desc {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+    line-height: 1.5;
+    margin: 0 0 20px 0;
+  }
+
+  .derive-btn.network-btn {
+    display: inline-flex;
+    background: linear-gradient(135deg, rgba(147, 51, 234, 0.9) 0%, rgba(79, 70, 229, 0.9) 100%);
+    box-shadow: 0 4px 20px rgba(147, 51, 234, 0.3);
+    text-decoration: none;
+  }
+
+  .derive-btn.network-btn:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(147, 51, 234, 1) 0%, rgba(79, 70, 229, 1) 100%);
+    box-shadow: 0 6px 30px rgba(147, 51, 234, 0.4);
+    transform: translateY(-2px);
   }
 
   /* Deriving Phase */
@@ -2382,6 +2551,45 @@
 
   .result-box.site-password {
     margin-top: 10px;
+  }
+
+  .pm-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 10px;
+  }
+
+  .pm-hint {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.35);
+  }
+
+  .pm-input-row {
+    margin-bottom: 10px;
+  }
+
+  .pm-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 24px 16px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    margin-top: 10px;
+  }
+
+  .pm-empty-icon {
+    font-size: 24px;
+    opacity: 0.5;
+  }
+
+  .pm-empty-text {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.35);
+    text-align: center;
   }
 
   /* FAQ Section */
