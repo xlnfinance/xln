@@ -863,6 +863,326 @@
             color: var(--accent);
         }
 
+        /* Search bar */
+        .search-bar {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 12px 0;
+        }
+
+        .search-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 14px;
+            font-size: 14px;
+            pointer-events: none;
+        }
+
+        #searchInput {
+            width: 100%;
+            padding: 12px 50px 12px 42px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-size: 14px;
+            outline: none;
+            transition: all 0.2s;
+        }
+
+        #searchInput:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        #searchInput::placeholder {
+            color: var(--text-muted);
+        }
+
+        .search-shortcut {
+            position: absolute;
+            right: 14px;
+            padding: 4px 8px;
+            background: var(--bg-hover);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 11px;
+            color: var(--text-muted);
+            font-family: monospace;
+        }
+
+        /* Sort dropdown */
+        .sort-wrapper {
+            margin-left: auto;
+        }
+
+        #sortSelect {
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-primary);
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            outline: none;
+        }
+
+        #sortSelect:hover {
+            border-color: #667eea;
+        }
+
+        /* Bookmark button */
+        .bookmark-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 4px;
+            opacity: 0.5;
+            transition: all 0.2s;
+        }
+
+        .bookmark-btn:hover {
+            opacity: 1;
+            transform: scale(1.2);
+        }
+
+        .bookmark-btn.saved {
+            opacity: 1;
+        }
+
+        /* Story card selected state */
+        .story-card.selected {
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.3);
+        }
+
+        /* Summary modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            z-index: 200;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border-radius: 16px;
+            max-width: 700px;
+            width: 100%;
+            max-height: 80vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            transform: translateY(20px);
+            transition: transform 0.3s;
+        }
+
+        .modal-overlay.active .modal {
+            transform: translateY(0);
+        }
+
+        .modal-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .modal-title {
+            font-size: 18px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--text-muted);
+            padding: 4px;
+        }
+
+        .modal-close:hover {
+            color: var(--text-primary);
+        }
+
+        .modal-tabs {
+            display: flex;
+            padding: 0 24px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .modal-tab {
+            padding: 12px 20px;
+            border: none;
+            background: none;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+            transition: all 0.2s;
+        }
+
+        .modal-tab:hover {
+            color: var(--text-primary);
+        }
+
+        .modal-tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .modal-body {
+            padding: 24px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .summary-content {
+            font-size: 15px;
+            line-height: 1.8;
+            color: var(--text-primary);
+        }
+
+        .summary-content h2 {
+            font-size: 18px;
+            margin: 24px 0 12px 0;
+            color: var(--text-primary);
+        }
+
+        .summary-content h2:first-child {
+            margin-top: 0;
+        }
+
+        .summary-content h3 {
+            font-size: 15px;
+            margin: 16px 0 8px 0;
+            color: var(--text-secondary);
+        }
+
+        .summary-content p {
+            margin: 12px 0;
+        }
+
+        .summary-content ul, .summary-content ol {
+            margin: 12px 0;
+            padding-left: 24px;
+        }
+
+        .summary-content li {
+            margin: 8px 0;
+        }
+
+        .summary-content blockquote {
+            border-left: 3px solid #667eea;
+            padding-left: 16px;
+            margin: 16px 0;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        .summary-loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-muted);
+        }
+
+        .summary-error {
+            text-align: center;
+            padding: 24px;
+            color: #e74c3c;
+            background: rgba(231, 76, 60, 0.1);
+            border-radius: 8px;
+        }
+
+        /* Summarize button */
+        .summarize-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.2s;
+        }
+
+        .summarize-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px var(--glow);
+        }
+
+        .summarize-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Keyboard hints */
+        .keyboard-hints {
+            position: fixed;
+            bottom: 24px;
+            left: 24px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-size: 12px;
+            color: var(--text-muted);
+            display: flex;
+            gap: 16px;
+            box-shadow: 0 4px 20px var(--shadow);
+            z-index: 100;
+        }
+
+        .keyboard-hints kbd {
+            padding: 2px 6px;
+            background: var(--bg-hover);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-family: monospace;
+            margin-right: 4px;
+        }
+
+        @media (max-width: 600px) {
+            .keyboard-hints {
+                display: none;
+            }
+        }
+
         /* Fun counter animation */
         .animated-number {
             display: inline-block;
@@ -973,6 +1293,20 @@
                 <span class="stat-icon">⚡</span>
                 <span>Total points: <span class="stat-value" id="totalPoints">0</span></span>
             </div>
+            <div class="stat">
+                <span class="stat-icon">🔖</span>
+                <span>Saved: <span class="stat-value" id="savedCount">0</span></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="search-bar">
+        <div class="container">
+            <div class="search-wrapper">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="searchInput" placeholder="search stories..." autocomplete="off">
+                <kbd class="search-shortcut">/</kbd>
+            </div>
         </div>
     </div>
 
@@ -985,6 +1319,16 @@
                 <span class="filter-chip" data-filter="crypto">₿ Crypto</span>
                 <span class="filter-chip" data-filter="tech">💻 Tech</span>
                 <span class="filter-chip" data-filter="startup">🦄 Startups</span>
+                <span class="filter-chip" data-filter="saved">🔖 Saved</span>
+            </div>
+            <div class="sort-wrapper">
+                <select id="sortSelect">
+                    <option value="default">sort: default</option>
+                    <option value="relevance">sort: relevance</option>
+                    <option value="points">sort: points</option>
+                    <option value="time">sort: newest</option>
+                    <option value="comments">sort: comments</option>
+                </select>
             </div>
         </div>
     </div>
@@ -1007,6 +1351,40 @@
         </div>
     </main>
 
+    <div class="keyboard-hints" id="keyboardHints">
+        <span><kbd>j</kbd><kbd>k</kbd> navigate</span>
+        <span><kbd>o</kbd> open</span>
+        <span><kbd>b</kbd> bookmark</span>
+        <span><kbd>s</kbd> summarize</span>
+        <span><kbd>/</kbd> search</span>
+    </div>
+
+    <!-- Summary Modal -->
+    <div class="modal-overlay" id="summaryModal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <span>📝</span>
+                    <span id="modalTitle">summary</span>
+                </div>
+                <button class="modal-close" onclick="closeSummaryModal()">×</button>
+            </div>
+            <div class="modal-tabs">
+                <button class="modal-tab active" data-mode="short">short</button>
+                <button class="modal-tab" data-mode="medium">medium</button>
+                <button class="modal-tab" data-mode="long">long</button>
+            </div>
+            <div class="modal-body">
+                <div class="summary-content" id="summaryContent">
+                    <div class="summary-loading">
+                        <div class="spinner"></div>
+                        generating summary...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <footer>
         <div class="container footer-content">
             <div class="footer-brand">
@@ -1028,6 +1406,8 @@
         const API_BASE = 'https://hacker-news.firebaseio.com/v0';
         let currentType = 'top';
         let currentFilter = 'all';
+        let currentSort = 'default';
+        let searchQuery = '';
         let storyIds = [];
         let loadedStories = [];
         let loadedCount = 0;
@@ -1035,6 +1415,16 @@
         let itemCache = new Map();
         let totalPointsCount = 0;
         let relevantStoriesCount = 0;
+        let selectedIndex = -1;
+
+        // bookmarks from localStorage
+        let savedStories = JSON.parse(localStorage.getItem('xln-saved') || '[]');
+
+        // summary config
+        const NEWS_API_BASE = 'https://xln.finance/api/news'; // adjust to your api url
+        const MIN_POINTS_FOR_SUMMARY = 200;
+        let currentSummaryStory = null;
+        let summaryCache = {}; // local cache { hn_id: { short, medium, long } }
 
         // XLN relevance keywords with weights
         const XLN_KEYWORDS = {
@@ -1308,6 +1698,184 @@
             return div.innerHTML;
         }
 
+        // Bookmark functions
+        function isBookmarked(id) {
+            return savedStories.some(s => s.id === id);
+        }
+
+        function toggleBookmark(story, event) {
+            if (event) event.stopPropagation();
+            const idx = savedStories.findIndex(s => s.id === story.id);
+            if (idx >= 0) {
+                savedStories.splice(idx, 1);
+                showToast('🔖', 'removed', 'story removed from saved');
+            } else {
+                savedStories.unshift({
+                    id: story.id,
+                    title: story.title,
+                    url: story.url,
+                    by: story.by,
+                    score: story.score,
+                    time: story.time,
+                    descendants: story.descendants,
+                    savedAt: Date.now()
+                });
+                showToast('🔖', 'saved', 'story saved for later');
+                createSparkles(event?.clientX || 200, event?.clientY || 200);
+            }
+            localStorage.setItem('xln-saved', JSON.stringify(savedStories));
+            updateSavedCount();
+            renderFilteredStories();
+        }
+
+        function updateSavedCount() {
+            document.getElementById('savedCount').textContent = savedStories.length;
+        }
+
+        // Search functionality
+        function setupSearch() {
+            const input = document.getElementById('searchInput');
+            let debounceTimer;
+            input.addEventListener('input', (e) => {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => {
+                    searchQuery = e.target.value.toLowerCase();
+                    renderFilteredStories();
+                }, 200);
+            });
+        }
+
+        // Sort functionality
+        function setupSort() {
+            document.getElementById('sortSelect').addEventListener('change', (e) => {
+                currentSort = e.target.value;
+                renderFilteredStories();
+            });
+        }
+
+        function sortStories(stories) {
+            const sorted = [...stories];
+            switch (currentSort) {
+                case 'relevance':
+                    return sorted.sort((a, b) => calculateRelevance(b).score - calculateRelevance(a).score);
+                case 'points':
+                    return sorted.sort((a, b) => (b.score || 0) - (a.score || 0));
+                case 'time':
+                    return sorted.sort((a, b) => b.time - a.time);
+                case 'comments':
+                    return sorted.sort((a, b) => (b.descendants || 0) - (a.descendants || 0));
+                default:
+                    return sorted;
+            }
+        }
+
+        // Summary functions
+        function canSummarize(story) {
+            return (story.score || 0) >= MIN_POINTS_FOR_SUMMARY;
+        }
+
+        async function fetchSummary(hn_id, mode = 'medium') {
+            // check local cache first
+            if (summaryCache[hn_id]?.[mode]) {
+                return { summary: summaryCache[hn_id][mode], cached: true };
+            }
+
+            const res = await fetch(`${NEWS_API_BASE}/summarize`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ hn_id, mode })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.error || 'failed to generate summary');
+            }
+
+            const data = await res.json();
+
+            // cache locally
+            if (!summaryCache[hn_id]) summaryCache[hn_id] = {};
+            summaryCache[hn_id][mode] = data.summary;
+
+            return data;
+        }
+
+        function openSummaryModal(story) {
+            currentSummaryStory = story;
+            document.getElementById('modalTitle').textContent = story.title.slice(0, 50) + (story.title.length > 50 ? '...' : '');
+            document.getElementById('summaryModal').classList.add('active');
+            document.body.style.overflow = 'hidden';
+
+            // reset tabs
+            document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+            document.querySelector('.modal-tab[data-mode="medium"]').classList.add('active');
+
+            // load medium summary by default
+            loadSummary('medium');
+        }
+
+        function closeSummaryModal() {
+            document.getElementById('summaryModal').classList.remove('active');
+            document.body.style.overflow = '';
+            currentSummaryStory = null;
+        }
+
+        async function loadSummary(mode) {
+            const content = document.getElementById('summaryContent');
+            content.innerHTML = `
+                <div class="summary-loading">
+                    <div class="spinner"></div>
+                    generating ${mode} summary...
+                </div>
+            `;
+
+            try {
+                const data = await fetchSummary(currentSummaryStory.id, mode);
+                content.innerHTML = `<div class="summary-content">${markdownToHtml(data.summary)}</div>`;
+                if (data.cached) {
+                    showToast('📝', 'cached', 'loaded from cache');
+                }
+            } catch (err) {
+                content.innerHTML = `<div class="summary-error">❌ ${err.message}</div>`;
+            }
+        }
+
+        // simple markdown to html
+        function markdownToHtml(md) {
+            return md
+                .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+                .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+                .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                .replace(/^- (.+)$/gm, '<li>$1</li>')
+                .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
+                .replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>')
+                .replace(/\n\n/g, '</p><p>')
+                .replace(/^(.+)$/gm, (match) => {
+                    if (match.startsWith('<')) return match;
+                    return match;
+                });
+        }
+
+        // setup modal tabs
+        function setupModalTabs() {
+            document.querySelectorAll('.modal-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+                    loadSummary(tab.dataset.mode);
+                });
+            });
+
+            // close modal on overlay click
+            document.getElementById('summaryModal').addEventListener('click', (e) => {
+                if (e.target.classList.contains('modal-overlay')) {
+                    closeSummaryModal();
+                }
+            });
+        }
+
         // Render story card
         function renderStory(story, rank) {
             const domain = getDomain(story.url);
@@ -1315,11 +1883,13 @@
             const relevanceLevel = getRelevanceLevel(relevanceScore);
             const categories = detectCategory(story);
             const emoji = getStoryEmoji(story);
+            const bookmarked = isBookmarked(story.id);
 
             const card = document.createElement('article');
             card.className = `story-card ${relevanceScore >= 3 ? relevanceLevel + '-relevance' : ''}`;
             card.dataset.relevance = relevanceScore;
             card.dataset.categories = categories.join(',');
+            card.dataset.storyId = story.id;
 
             const tagsHtml = matchedKeywords.slice(0, 3).map(kw =>
                 `<span class="tag xln">${kw}</span>`
@@ -1356,6 +1926,14 @@
                                     💬 ${story.descendants || 0}
                                 </a>
                             </span>
+                            <button class="bookmark-btn ${bookmarked ? 'saved' : ''}" onclick="event.stopPropagation();" data-story-id="${story.id}">
+                                ${bookmarked ? '🔖' : '📑'}
+                            </button>
+                            ${canSummarize(story) ? `
+                                <button class="summarize-btn" onclick="event.stopPropagation();" data-story-id="${story.id}">
+                                    📝 memo
+                                </button>
+                            ` : ''}
                         </div>
                         ${(tagsHtml || categoryTagsHtml) ? `
                             <div class="story-tags">
@@ -1367,6 +1945,19 @@
                     <div class="story-thumbnail">${emoji}</div>
                 </div>
             `;
+
+            // Add bookmark click handler
+            const bookmarkBtn = card.querySelector('.bookmark-btn');
+            bookmarkBtn.addEventListener('click', (e) => toggleBookmark(story, e));
+
+            // Add summarize click handler
+            const summarizeBtn = card.querySelector('.summarize-btn');
+            if (summarizeBtn) {
+                summarizeBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    openSummaryModal(story);
+                });
+            }
 
             card.addEventListener('click', () => viewItem(story.id));
             return card;
@@ -1398,27 +1989,43 @@
         function renderFilteredStories() {
             const container = document.getElementById('stories');
             container.innerHTML = '';
+            selectedIndex = -1;
 
-            let rank = 1;
-            loadedStories.forEach(story => {
+            // get stories based on filter
+            let storiesToShow = currentFilter === 'saved' ? savedStories : loadedStories;
+
+            // filter by category/relevance
+            storiesToShow = storiesToShow.filter(story => {
                 const { score: relevanceScore } = calculateRelevance(story);
                 const categories = detectCategory(story);
 
-                let show = false;
-                if (currentFilter === 'all') show = true;
-                else if (currentFilter === 'xln' && relevanceScore >= 3) show = true;
-                else if (categories.includes(currentFilter)) show = true;
+                if (currentFilter === 'all' || currentFilter === 'saved') return true;
+                if (currentFilter === 'xln' && relevanceScore >= 3) return true;
+                if (categories.includes(currentFilter)) return true;
+                return false;
+            });
 
-                if (show) {
-                    container.appendChild(renderStory(story, rank++));
-                }
+            // filter by search query
+            if (searchQuery) {
+                storiesToShow = storiesToShow.filter(story => {
+                    const text = `${story.title} ${story.by || ''}`.toLowerCase();
+                    return text.includes(searchQuery);
+                });
+            }
+
+            // sort stories
+            storiesToShow = sortStories(storiesToShow);
+
+            let rank = 1;
+            storiesToShow.forEach(story => {
+                container.appendChild(renderStory(story, rank++));
             });
 
             if (rank === 1) {
                 container.innerHTML = `
                     <div class="loading">
-                        <div style="font-size: 48px; margin-bottom: 16px;">🔍</div>
-                        No stories match this filter
+                        <div style="font-size: 48px; margin-bottom: 16px;">${currentFilter === 'saved' ? '🔖' : '🔍'}</div>
+                        ${currentFilter === 'saved' ? 'no saved stories yet. press <kbd>b</kbd> to bookmark!' : 'no stories match this filter'}
                     </div>
                 `;
             }
@@ -1590,15 +2197,147 @@
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
+        // Infinite scroll
+        function setupInfiniteScroll() {
+            const observer = new IntersectionObserver((entries) => {
+                if (entries[0].isIntersecting && loadedCount < storyIds.length) {
+                    loadMore();
+                }
+            }, { threshold: 0.1 });
+
+            const loadMoreBtn = document.getElementById('loadMore');
+            observer.observe(loadMoreBtn);
+        }
+
         // Initialize
         createParticles();
         initTheme();
+        setupSearch();
+        setupSort();
+        setupModalTabs();
+        updateSavedCount();
+        setupInfiniteScroll();
         loadStories();
+
+        // Keyboard navigation
+        function getVisibleCards() {
+            return Array.from(document.querySelectorAll('.story-card'));
+        }
+
+        function selectCard(index) {
+            const cards = getVisibleCards();
+            if (cards.length === 0) return;
+
+            // remove previous selection
+            cards.forEach(c => c.classList.remove('selected'));
+
+            // clamp index
+            selectedIndex = Math.max(0, Math.min(index, cards.length - 1));
+
+            // select new card
+            const card = cards[selectedIndex];
+            if (card) {
+                card.classList.add('selected');
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+
+        function getSelectedStory() {
+            const cards = getVisibleCards();
+            if (selectedIndex >= 0 && selectedIndex < cards.length) {
+                const storyId = parseInt(cards[selectedIndex].dataset.storyId);
+                return loadedStories.find(s => s.id === storyId) || savedStories.find(s => s.id === storyId);
+            }
+            return null;
+        }
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
+            const searchInput = document.getElementById('searchInput');
+            const isTyping = document.activeElement === searchInput;
+
+            // "/" focuses search
+            if (e.key === '/' && !isTyping) {
+                e.preventDefault();
+                searchInput.focus();
+                return;
+            }
+
+            // escape clears search or goes home
             if (e.key === 'Escape') {
-                goHome();
+                if (isTyping) {
+                    searchInput.blur();
+                    searchInput.value = '';
+                    searchQuery = '';
+                    renderFilteredStories();
+                } else {
+                    goHome();
+                }
+                return;
+            }
+
+            // don't process shortcuts while typing
+            if (isTyping) return;
+
+            const cards = getVisibleCards();
+
+            switch (e.key) {
+                case 'j': // next
+                    e.preventDefault();
+                    selectCard(selectedIndex + 1);
+                    break;
+                case 'k': // previous
+                    e.preventDefault();
+                    selectCard(selectedIndex - 1);
+                    break;
+                case 'o': // open in new tab
+                case 'Enter':
+                    e.preventDefault();
+                    const story = getSelectedStory();
+                    if (story && story.url) {
+                        window.open(story.url, '_blank');
+                    }
+                    break;
+                case 'c': // open comments
+                    e.preventDefault();
+                    const storyForComments = getSelectedStory();
+                    if (storyForComments) {
+                        viewItem(storyForComments.id);
+                    }
+                    break;
+                case 'b': // bookmark
+                    e.preventDefault();
+                    const storyToBookmark = getSelectedStory();
+                    if (storyToBookmark) {
+                        toggleBookmark(storyToBookmark);
+                    }
+                    break;
+                case 's': // summarize
+                    e.preventDefault();
+                    const storyToSummarize = getSelectedStory();
+                    if (storyToSummarize && canSummarize(storyToSummarize)) {
+                        openSummaryModal(storyToSummarize);
+                    } else if (storyToSummarize) {
+                        showToast('📝', 'not available', `needs ${MIN_POINTS_FOR_SUMMARY}+ points`);
+                    }
+                    break;
+                case 'g': // go to top
+                    e.preventDefault();
+                    selectCard(0);
+                    break;
+                case 'G': // go to bottom
+                    e.preventDefault();
+                    selectCard(cards.length - 1);
+                    break;
+                case 'r': // refresh
+                    e.preventDefault();
+                    loadStories();
+                    break;
+                case '?': // toggle help
+                    e.preventDefault();
+                    const hints = document.getElementById('keyboardHints');
+                    hints.style.display = hints.style.display === 'none' ? 'flex' : 'none';
+                    break;
             }
         });
 
