@@ -27,7 +27,7 @@
 
   {#if isOpen}
     <div class="dropdown">
-      {#each Object.entries(LOCALES) as [code, info]}
+      {#each Object.entries(LOCALES).filter(([code]) => ['en', 'ru'].includes(code)) as [code, info]}
         <button
           class="option"
           class:active={code === $locale}
