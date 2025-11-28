@@ -3,6 +3,7 @@
   import { replicas, xlnFunctions } from '../../stores/xlnStore';
   import { visibleReplicas } from '../../stores/timeStore';
   import { settings } from '../../stores/settingsStore';
+  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import type { Tab } from '$lib/types/ui';
 
   export let tab: Tab;
@@ -12,13 +13,24 @@
   let isOpen = false;
   let dropdownContent: HTMLDivElement;
 
+  // Get environment from context (for /view route) or use global stores (for / route)
+  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
+
+  // Extract the stores from entityEnv (or use global stores as fallback)
+  const contextReplicas = entityEnv?.replicas;
+  const contextXlnFunctions = entityEnv?.xlnFunctions;
+
+  // Use context stores if available, otherwise fall back to global
+  $: activeReplicas = contextReplicas ? $contextReplicas : ($visibleReplicas || $replicas);
+  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
+
   // Get dropdown display text
   $: dropdownText = getDropdownText(tab);
 
   function getDropdownText(tab: Tab): string {
     // SIMPLE: Just show the selected entity (like I fixed in CombinedNavigationDropdown)
-    if (tab.entityId) {
-      const entityNum = $xlnFunctions.getEntityShortId(tab.entityId);
+    if (tab.entityId && activeXlnFunctions) {
+      const entityNum = activeXlnFunctions.getEntityShortId(tab.entityId);
       return `Entity #${entityNum}`;
     }
     return 'Select Entity';
@@ -62,15 +74,15 @@
 
   function updateDropdownResults(resultsContainer: HTMLDivElement, _searchTerm: string) {
     if (!resultsContainer) return;
-    if (!$xlnFunctions) {
+    if (!activeXlnFunctions) {
       resultsContainer.innerHTML = '<div class="dropdown-item">Loading XLN functions...</div>';
       return;
     }
 
     resultsContainer.innerHTML = '';
 
-    console.log(`🔍 EntityDropdown: Total replicas available: ${$replicas.size}`);
-    console.log(`🔍 EntityDropdown: Replica keys:`, Array.from($replicas.keys()));
+    console.log(`🔍 EntityDropdown: Total replicas available: ${activeReplicas?.size || 0}`);
+    console.log(`🔍 EntityDropdown: Replica keys:`, Array.from(activeReplicas?.keys() || []));
 
     // For now, show all entities regardless of jurisdiction
     // TODO: Later we can filter by jurisdiction ID when we have multiple networks
@@ -90,7 +102,7 @@
   function renderSignerFirstDropdown(jurisdictions: any[], resultsContainer: HTMLDivElement, _searchTerm: string) {
     jurisdictions.forEach((jurisdiction) => {
       // Get all replicas (no jurisdiction filtering for now)
-      const replicasArray = Array.from($replicas.values());
+      const replicasArray = Array.from(activeReplicas?.values() || []);
 
       if (replicasArray.length === 0) return;
 
@@ -126,8 +138,8 @@
         // Add entities for this signer
         signerEntities?.forEach((replica, eIndex) => {
           const isLastEntity = eIndex === (signerEntities?.length || 0) - 1;
-          if (!$xlnFunctions) return; // Safety guard
-          const entityNum = $xlnFunctions.getEntityShortId(replica.entityId);
+          if (!activeXlnFunctions) return; // Safety guard
+          const entityNum = activeXlnFunctions.getEntityShortId(replica.entityId);
           const entityDisplay = `Entity #${entityNum}`;
 
           const entityItem = createDropdownTreeItem(
@@ -149,13 +161,12 @@
   function renderEntityFirstDropdown(jurisdictions: any[], resultsContainer: HTMLDivElement, _searchTerm: string) {
     jurisdictions.forEach((jurisdiction) => {
       // Get all replicas (use time-aware replicas, no jurisdiction filtering)
-      const currentReplicas = $visibleReplicas || $replicas;
-      const replicasArray = Array.from(currentReplicas.values());
+      const replicasArray = Array.from(activeReplicas?.values() || []);
 
       console.log(`🔍 EntityDropdown: ${jurisdiction.name} has ${replicasArray.length} replicas`);
       replicasArray.forEach((replica: any) => {
-        if (!$xlnFunctions) return; // Safety guard
-        console.log(`  📋 Entity: #${$xlnFunctions.getEntityShortId(replica.entityId)} (${replica.signerId})`);
+        if (!activeXlnFunctions) return; // Safety guard
+        console.log(`  📋 Entity: #${activeXlnFunctions.getEntityShortId(replica.entityId)} (${replica.signerId})`);
       });
 
       if (replicasArray.length === 0) return;
@@ -177,8 +188,8 @@
       entityKeys.forEach((entityId, eIndex) => {
         const entitySigners = entityGroups[entityId];
         const isLastEntity = eIndex === entityKeys.length - 1;
-        if (!$xlnFunctions) return; // Safety guard
-        const entityNum = $xlnFunctions.getEntityShortId(entityId);
+        if (!activeXlnFunctions) return; // Safety guard
+        const entityNum = activeXlnFunctions.getEntityShortId(entityId);
         const entityDisplay = `Entity #${entityNum}`;
 
         // Add entity

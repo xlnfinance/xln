@@ -1,9 +1,22 @@
 <script lang="ts">
+  import type { Writable } from 'svelte/store';
   import { getXLN, xlnEnvironment, replicas, xlnFunctions, processWithDelay } from '../../stores/xlnStore';
   import { routePreview } from '../../stores/routePreviewStore';
-  // Functions now accessed through $xlnEnvironment.xln from runtime.ts
+  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
 
   export let entityId: string;
+
+  // Optional isolated mode props (legacy - for backward compatibility)
+  export let isolatedEnv: Writable<any> | undefined = undefined;
+  export let isolatedReplicas: Writable<Map<string, any>> | undefined = undefined;
+
+  // Get environment from context (for /view route) or use global stores (for / route)
+  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
+
+  // Extract the stores from entityEnv (or use props/global stores as fallback)
+  const contextReplicas = entityEnv?.replicas;
+  const contextXlnFunctions = entityEnv?.xlnFunctions;
+  const contextEnv = entityEnv?.env;
 
   // Payment form state
   let targetEntityId = '';
@@ -15,9 +28,14 @@
   let routes: any[] = [];
   let selectedRouteIndex = -1;
 
+  // Reactive: Use context stores first, then props, then global stores
+  $: currentReplicas = contextReplicas ? $contextReplicas : (isolatedReplicas ? $isolatedReplicas : $replicas);
+  $: currentEnv = contextEnv ? $contextEnv : (isolatedEnv ? $isolatedEnv : $xlnEnvironment);
+  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
+
   // Auto-select first available token from entity's reserves
   $: {
-    const replica = $replicas?.get(`${entityId}:s1`) || $replicas?.get(`${entityId}:s2`);
+    const replica = currentReplicas?.get(`${entityId}:s1`) || currentReplicas?.get(`${entityId}:s2`);
     if (replica?.state?.reserves) {
       const availableTokens = Array.from(replica.state.reserves.keys());
       if (availableTokens.length > 0 && !availableTokens.includes(tokenId)) {
@@ -42,7 +60,7 @@
   }
 
   // Get all entities for dropdown - guaranteed non-null entity IDs
-  $: allEntities = $replicas ? Array.from($replicas.keys() as IterableIterator<string>)
+  $: allEntities = currentReplicas ? Array.from(currentReplicas.keys() as IterableIterator<string>)
     .map((key: string) => {
       const entityId = key.split(':')[0];
       if (!entityId) throw new Error(`Invalid replica key format: ${key}`);
@@ -126,7 +144,7 @@
 
     try {
       await getXLN();
-      const env = $xlnEnvironment;
+      const env = currentEnv;
       if (!env) throw new Error('Environment not ready');
 
       // Convert decimal amount to smallest unit (wei/cents)
@@ -140,7 +158,8 @@
       const amountInSmallestUnit = wholePart * BigInt(10 ** decimals) + BigInt(paddedDecimal || 0);
 
       // Use account-based pathfinding (replaces gossip)
-      const foundPaths = findPathsThroughAccounts(env.replicas, entityId, targetEntityId);
+      // Use time-aware replicas from context/props (currentReplicas already handles priority)
+      const foundPaths = findPathsThroughAccounts(currentReplicas, entityId, targetEntityId);
 
       if (foundPaths.length === 0) {
         throw new Error(`No route found from ${entityId.slice(0, 10)}... to ${targetEntityId.slice(0, 10)}...`);
@@ -197,14 +216,15 @@
     sendingPayment = true;
     try {
       await getXLN(); // Ensure initialized
-      const env = $xlnEnvironment;
+      const env = currentEnv;
       if (!env) throw new Error('Environment not ready');
 
       const route = routes[selectedRouteIndex];
 
       // Find the correct signer ID for this entity
+      // Use time-aware replicas from context/props (currentReplicas already handles priority)
       let signerId = 's1'; // default
-      for (const key of env.replicas.keys()) {
+      for (const key of currentReplicas.keys()) {
         if (key.startsWith(entityId + ':')) {
           signerId = key.split(':')[1];
           break;
@@ -245,7 +265,7 @@
   }
 
   function formatRoute(route: any): string {
-    return route.path.map((id: string) => `E${$xlnFunctions!.getEntityShortId(id)}`).join(' → ');
+    return route.path.map((id: string) => `E${activeXlnFunctions!.getEntityShortId(id)}`).join(' → ');
   }
 
   function formatFee(feePPM: number): string {
@@ -266,15 +286,15 @@
       >
         <option value="">Select entity...</option>
         {#each allEntities as id}
-          <option value={id}>Entity {$xlnFunctions!.formatEntityId(id)}</option>
+          <option value={id}>Entity {activeXlnFunctions?.formatEntityId(id)}</option>
         {/each}
       </select>
       <button
         class="btn-reverse"
         on:click={() => {
           // Show target entity info (for reverse payment, user clicks target entity in graph)
-          if (targetEntityId && $xlnFunctions) {
-            const targetDisplay = $xlnFunctions.formatEntityId(targetEntityId);
+          if (targetEntityId && activeXlnFunctions) {
+            const targetDisplay = activeXlnFunctions.formatEntityId(targetEntityId);
             alert(`To send reverse payment: Click Entity ${targetDisplay} in the graph`);
           }
         }}

@@ -2,9 +2,19 @@
   import type { AccountMachine } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
   import { getXLN, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
+  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import BigIntInput from '../Common/BigIntInput.svelte';
 
-  // All utility functions now come from runtime.js via xlnFunctions
+  // Get environment from context (for /view route) or use global stores (for / route)
+  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
+
+  // Extract the stores from entityEnv (or use global stores as fallback)
+  const contextXlnFunctions = entityEnv?.xlnFunctions;
+  const contextEnv = entityEnv?.env;
+
+  // Use context stores if available, otherwise fall back to global
+  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
+  $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
 
   // FINTECH-SAFE: Never return "N/A" - fail fast if data is corrupted
   // Handles BigInt by converting to Number first
@@ -81,7 +91,7 @@
   // XLN functions accessed through $xlnEnvironment.xln (attached in xlnStore)
 
   $: tokenDetails = Array.from(account.deltas?.entries() || []).map(([tokenId, delta]) => {
-    if (!$xlnFunctions?.deriveDelta) {
+    if (!activeXlnFunctions?.deriveDelta) {
       return {
         tokenId,
         delta,
@@ -104,8 +114,8 @@
       };
     }
 
-    const derived = $xlnFunctions.deriveDelta(delta, isLeftEntity);
-    const tokenInfo = $xlnFunctions?.getTokenInfo?.(tokenId) || {
+    const derived = activeXlnFunctions.deriveDelta(delta, isLeftEntity);
+    const tokenInfo = activeXlnFunctions?.getTokenInfo?.(tokenId) || {
       symbol: `TKN${tokenId}`,
       color: '#999',
       name: `Token ${tokenId}`,
@@ -171,7 +181,7 @@
   async function sendPayment() {
     try {
       const xln = await getXLN();
-      const env = $xlnEnvironment;
+      const env = activeEnv;
       if (!env) throw new Error('XLN environment not ready');
 
       // Create direct payment EntityTx
@@ -190,7 +200,7 @@
       };
 
       await xln.process(env, [paymentInput]);
-      console.log(`✅ Payment sent: ${$xlnFunctions.formatTokenAmount(selectedTokenId, paymentAmountBigInt)}`);
+      console.log(`✅ Payment sent: ${activeXlnFunctions?.formatTokenAmount(selectedTokenId, paymentAmountBigInt)}`);
 
       // Reset form
       paymentAmountBigInt = 0n;
@@ -205,7 +215,7 @@
   async function adjustCredit() {
     try {
       const xln = await getXLN();
-      const env = $xlnEnvironment;
+      const env = activeEnv;
       if (!env) throw new Error('XLN environment not ready');
 
       // Create credit adjustment EntityTx
@@ -289,7 +299,7 @@
     </button>
     <div class="account-title">
       <span class="entity-pair">
-        Entity #{$xlnFunctions!.getEntityShortId(entityId)} ⟷ Entity #{$xlnFunctions!.getEntityShortId(counterpartyId)}
+        Entity #{activeXlnFunctions!.getEntityShortId(entityId)} ⟷ Entity #{activeXlnFunctions!.getEntityShortId(counterpartyId)}
       </span>
       <div class="consensus-status">
         <span class="frame-badge">Frame #{account.currentFrame.height}</span>
@@ -329,23 +339,23 @@
             <div class="canonical-values">
               <div class="canonical-item">
                 <span class="canonical-key">collateral:</span>
-                <span class="canonical-value">{$xlnFunctions?.formatTokenAmount(td.tokenId, td.delta.collateral)}</span>
+                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.collateral)}</span>
               </div>
               <div class="canonical-item">
                 <span class="canonical-key">ondelta:</span>
-                <span class="canonical-value">{$xlnFunctions?.formatTokenAmount(td.tokenId, td.delta.ondelta)}</span>
+                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.ondelta)}</span>
               </div>
               <div class="canonical-item">
                 <span class="canonical-key">offdelta:</span>
-                <span class="canonical-value">{$xlnFunctions?.formatTokenAmount(td.tokenId, td.delta.offdelta)}</span>
+                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.offdelta)}</span>
               </div>
               <div class="canonical-item">
                 <span class="canonical-key">leftCreditLimit:</span>
-                <span class="canonical-value">{$xlnFunctions?.formatTokenAmount(td.tokenId, td.delta.leftCreditLimit)} (Entity #{$xlnFunctions!.getEntityShortId(isLeftEntity ? entityId : counterpartyId)})</span>
+                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.leftCreditLimit)} (Entity #{activeXlnFunctions!.getEntityShortId(isLeftEntity ? entityId : counterpartyId)})</span>
               </div>
               <div class="canonical-item">
                 <span class="canonical-key">rightCreditLimit:</span>
-                <span class="canonical-value">{$xlnFunctions?.formatTokenAmount(td.tokenId, td.delta.rightCreditLimit)} (Entity #{$xlnFunctions!.getEntityShortId(isLeftEntity ? counterpartyId : entityId)})</span>
+                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.rightCreditLimit)} (Entity #{activeXlnFunctions!.getEntityShortId(isLeftEntity ? counterpartyId : entityId)})</span>
               </div>
             </div>
             <!-- ASCII Visualization -->
@@ -365,7 +375,7 @@
 
     <!-- Personal View (Perspective-based) -->
     <div class="section">
-      <h3>👤 My View (Entity #{$xlnFunctions!.getEntityShortId(entityId)} perspective)</h3>
+      <h3>👤 My View (Entity #{activeXlnFunctions!.getEntityShortId(entityId)} perspective)</h3>
       {#each tokenDetails as td (td.tokenId)}
         <div class="token-detail-card">
           <div class="token-header">
@@ -373,7 +383,7 @@
               {td.tokenInfo.symbol} (Token #{td.tokenId})
             </span>
             <span class="net-position" class:positive={td.derived.delta > 0n} class:negative={td.derived.delta < 0n}>
-              Net: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.derived.delta)}
+              Net: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.delta)}
             </span>
           </div>
 
@@ -426,15 +436,15 @@
           <div class="capacity-summary">
             <div class="capacity-item">
               <span class="capacity-label">Available to Send:</span>
-              <span class="capacity-value outbound">{$xlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity)}</span>
+              <span class="capacity-value outbound">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCapacity)}</span>
             </div>
             <div class="capacity-item">
               <span class="capacity-label">Available to Receive:</span>
-              <span class="capacity-value inbound">{$xlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity)}</span>
+              <span class="capacity-value inbound">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCapacity)}</span>
             </div>
             <div class="capacity-item">
               <span class="capacity-label">Total Capacity:</span>
-              <span class="capacity-value">{$xlnFunctions?.formatTokenAmount(td.tokenId, td.derived.totalCapacity)}</span>
+              <span class="capacity-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.totalCapacity)}</span>
             </div>
           </div>
 
@@ -630,7 +640,7 @@
                     <span class="tx-index">{i+1}.</span>
                     <span class="tx-type">{tx.type}</span>
                     {#if tx.type === 'direct_payment'}
-                      <span class="tx-amount">{$xlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
+                      <span class="tx-amount">{activeXlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
                       <span class="tx-desc">{tx.data.description || ''}</span>
                     {/if}
                   </div>
@@ -654,14 +664,14 @@
                     <span class="tx-index">{i+1}.</span>
                     <span class="tx-type">{tx.type}</span>
                     {#if tx.type === 'direct_payment'}
-                      <span class="tx-amount">{$xlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
+                      <span class="tx-amount">{activeXlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
                       <span class="tx-desc">"{tx.data.description || 'no description'}"</span>
                       <span class="tx-token">Token #{tx.data.tokenId}</span>
                     {:else if tx.type === 'set_credit_limit'}
-                      <span class="tx-amount">{$xlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
+                      <span class="tx-amount">{activeXlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
                       <span class="tx-desc">{tx.data.side === 'left' ? 'Left limit' : 'Right limit'}</span>
                     {:else}
-                      <span class="tx-desc">{$xlnFunctions?.safeStringify(tx.data)}</span>
+                      <span class="tx-desc">{activeXlnFunctions?.safeStringify(tx.data)}</span>
                     {/if}
                   </div>
                 {/each}

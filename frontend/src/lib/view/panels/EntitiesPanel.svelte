@@ -7,6 +7,7 @@
    */
 
   import type { Writable } from 'svelte/store';
+  import { onDestroy } from 'svelte';
   import { panelBridge } from '../utils/panelBridge';
   import { shortAddress } from '$lib/utils/format';
 
@@ -67,6 +68,11 @@
   // Listen for selections
   const unsubscribe = panelBridge.on('entity:selected', ({ entityId }) => {
     selectedEntityId = entityId;
+  });
+
+  // Clean up subscription on component destroy
+  onDestroy(() => {
+    unsubscribe();
   });
 
   // Time-travel aware: read from history[timeIndex] or live state
