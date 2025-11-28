@@ -1,22 +1,17 @@
 # NEXT.md - Priority Tasks
 
-## 🔥 COMPLETED (2025-11-17 PM): Critical Bugs + Going Public
+## 🔥 COMPLETED (2025-11-29): Time Machine + Tests + Cleanup
 
-### STATUS: All critical /view bugs FIXED ✅
+### STATUS: /view fully functional ✅
 
 **FIXED THIS SESSION:**
-- ✅ Entity names: Alice/Hub/Bob display correctly (was 0x000...001)
-- ✅ Frame count: 9 frames exactly (was 18 - auto-snapshots disabled)
-- ✅ Error handling: try/finally blocks prevent stuck flags
-- ✅ Archive public: Removed .archive/ from gitignore (74 files now public)
-- ✅ root.svelte error: Confirmed browser cache issue (clean in incognito)
+- ✅ Subtitle rendering: Added `isolatedIsLive` prop to ArchitectPanel
+- ✅ Time Machine isolation: Fixed 7 places reading live state instead of history[timeIndex]
+- ✅ EntityObject pattern: Labels now children of mesh (auto-sync positions)
+- ✅ E2E tests: `e2e/time-machine-isolation.spec.ts` (4 tests passing)
+- ✅ Cleanup: Removed 23 .bak files, frontend/build/, 13 dead npm scripts
 
-**COMMITS:** 2e8b3fd (archive public) + previous fixes
-
-**REMAINING POLISH:**
-- ⏳ Subtitle rendering in /view (30min)
-- ⏳ EntityObject integration in Graph3D (90min)
-- ⏳ TypeScript errors (51 errors - pre-existing, non-blocking)
+**BUILD STATUS:** 0 errors, 208 warnings (non-blocking)
 
 **PREVIOUS SESSION (2025-11-17 AM):**
 - ✅ prepopulate-ahb.ts (Alice-Hub-Bob demo code)

@@ -10,15 +10,22 @@
   export let visible: boolean = true;
 
   let expanded = false;
+  let hidden = false; // Fully hidden by user
+
+  // Reset hidden state when subtitle changes
+  $: if (subtitle) hidden = false;
 </script>
 
-{#if visible && subtitle}
+{#if visible && subtitle && !hidden}
   <div class="subtitle-overlay" class:expanded>
     <!-- Compact pill (always visible) -->
-    <button class="subtitle-pill" on:click={() => expanded = !expanded}>
-      <span class="pill-title">{subtitle.title}</span>
-      <span class="pill-toggle">{expanded ? '−' : '+'}</span>
-    </button>
+    <div class="pill-row">
+      <button class="subtitle-pill" on:click={() => expanded = !expanded}>
+        <span class="pill-title">{subtitle.title}</span>
+        <span class="pill-toggle">{expanded ? '−' : '+'}</span>
+      </button>
+      <button class="close-btn" on:click={() => hidden = true} title="Hide subtitle">×</button>
+    </div>
 
     <!-- Expanded card -->
     {#if expanded}
@@ -67,6 +74,35 @@
     gap: 8px;
     z-index: 101; /* Above time machine (z-index: 100) */
     pointer-events: none;
+  }
+
+  .pill-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    pointer-events: auto;
+  }
+
+  .close-btn {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+  }
+
+  .close-btn:hover {
+    background: rgba(255, 80, 80, 0.2);
+    border-color: rgba(255, 80, 80, 0.4);
+    color: rgba(255, 100, 100, 0.9);
   }
 
   /* Compact pill - liquid glass style */

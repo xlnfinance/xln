@@ -15,6 +15,7 @@
   export let isolatedEnv: Writable<any>;
   export let isolatedHistory: Writable<any[]>;
   export let isolatedTimeIndex: Writable<number>;
+  export let isolatedIsLive: Writable<boolean>;
 
   type Mode = 'explore' | 'build' | 'economy' | 'governance' | 'resolve';
   let currentMode: Mode = 'economy';
@@ -312,6 +313,9 @@
         console.log('[Architect] Frame 0 description:', frames[0].description);
       }
 
+      // Exit live mode so subtitles show
+      isolatedIsLive.set(false);
+
       lastAction = `AHB Tutorial: ${frames.length} frames loaded`;
 
       // Start autopilot playback
@@ -346,6 +350,7 @@
       const frames = $isolatedEnv.history || [];
       isolatedHistory.set(frames);
       isolatedTimeIndex.set(0);
+      isolatedIsLive.set(false);
 
       console.log('[H-Topology] Frames loaded:', frames.length);
 
@@ -382,6 +387,7 @@
       const frames = $isolatedEnv.history || [];
       isolatedHistory.set(frames);
       isolatedTimeIndex.set(0);
+      isolatedIsLive.set(false);
 
       console.log('[Full Mechanics] Frames loaded:', frames.length);
 
@@ -475,6 +481,7 @@
       isolatedEnv.set($isolatedEnv);
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedTimeIndex.set(0);
+      isolatedIsLive.set(false);
 
       lastAction = ` ${mechanic.toUpperCase()} demo ready`;
     } catch (err: any) {
@@ -2059,6 +2066,7 @@
 
         // Start at frame 0 to show clean slate
         isolatedTimeIndex.set(0);
+        isolatedIsLive.set(false);
 
         // Notify panels
         panelBridge.emit('entity:created', { entityId: 'scenario', type: 'grid' });
