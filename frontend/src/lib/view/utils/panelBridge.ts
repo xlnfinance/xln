@@ -22,7 +22,7 @@ type EventMap = {
   'renderFps': number; // Real-time rendering FPS from Graph3DPanel
   'auto-demo:start': {}; // Auto-start demo in VR mode
   'tutorial:action': { action: string; data?: any }; // Tutorial actions
-  'openEntityOperations': { entityId: string; entityName: string }; // Open entity operations panel
+  'openEntityOperations': { entityId: string; entityName: string; signerId?: string }; // Open entity panel
 };
 
 class PanelBridge {

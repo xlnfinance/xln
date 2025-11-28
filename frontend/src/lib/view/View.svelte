@@ -7,7 +7,7 @@
    * Copyright (C) 2025 XLN Finance
    */
 
-  import { onMount, mount } from 'svelte';
+  import { onMount, onDestroy, mount } from 'svelte';
   import { writable } from 'svelte/store';
   import { DockviewComponent } from 'dockview';
   import './utils/frontendLogger'; // Initialize global log control
@@ -18,7 +18,7 @@
   import ConsolePanel from './panels/ConsolePanel.svelte';
   import RuntimeIOPanel from './panels/RuntimeIOPanel.svelte';
   import SettingsPanel from './panels/SettingsPanel.svelte';
-  import EntityOperationsPanel from './components/EntityOperationsPanel.svelte';
+  import EntityPanelWrapper from './panels/wrappers/EntityPanelWrapper.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
   import Tutorial from './components/Tutorial.svelte';
   import { panelBridge } from './utils/panelBridge';
@@ -29,6 +29,7 @@
 
   let container: HTMLDivElement;
   let dockview: DockviewComponent;
+  let unsubOpenEntity: (() => void) | null = null;
 
   // TimeMachine draggable state
   let timeMachinePosition: 'bottom' | 'top' | 'left' | 'right' = 'bottom';
@@ -189,17 +190,21 @@
               isolatedTimeIndex: localTimeIndex
             }
           });
-        } else if (options.name === 'entity-operations') {
+        } else if (options.name === 'entity-panel') {
           // Dynamic panel for entity operations (opened via panelBridge)
+          // Uses EntityPanelWrapper - thin Dockview adapter for legacy EntityPanel
           // @ts-ignore - Dockview params passed via addPanel
           const params = (options as any).params || {};
-          component = mount(EntityOperationsPanel, {
+          component = mount(EntityPanelWrapper, {
             target: div,
             props: {
               entityId: params.entityId || '',
               entityName: params.entityName || '',
+              signerId: params.signerId || '',
               isolatedEnv: localEnvStore,
-              isolatedHistory: localHistoryStore
+              isolatedHistory: localHistoryStore,
+              isolatedTimeIndex: localTimeIndex,
+              isolatedIsLive: localIsLive
             }
           });
         }
@@ -295,10 +300,10 @@
       }
     });
 
-    // Listen for entity operations panel requests from Graph3D
-    panelBridge.on('openEntityOperations', ({ entityId, entityName }) => {
+    // Listen for entity panel requests from Graph3D (click on entity node)
+    unsubOpenEntity = panelBridge.on('openEntityOperations', ({ entityId, entityName, signerId }) => {
       // Check if panel already exists for this entity
-      const panelId = `entity-ops-${entityId.slice(0, 8)}`;
+      const panelId = `entity-${entityId.slice(0, 8)}`;
       const existingPanel = dockview.getPanel(panelId);
 
       if (existingPanel) {
@@ -307,17 +312,27 @@
         return;
       }
 
-      // Create new panel for this entity
+      // Create new panel using EntityPanelWrapper (reuses full EntityPanel)
       dockview.addPanel({
         id: panelId,
-        component: 'entity-operations',
-        title: `🔧 ${entityName || entityId.slice(0, 10) + '...'}`,
+        component: 'entity-panel',
+        title: `🏢 ${entityName || entityId.slice(0, 10) + '...'}`,
         position: { direction: 'within', referencePanel: 'architect' },
-        params: { entityId, entityName }
+        params: { entityId, entityName, signerId }
       });
 
-      console.log('[View] Opened entity operations panel:', entityId.slice(0, 10));
+      console.log('[View] Opened entity panel:', entityId.slice(0, 10));
     });
+  });
+
+  // Cleanup on component destroy
+  onDestroy(() => {
+    if (unsubOpenEntity) {
+      unsubOpenEntity();
+    }
+    if (dockview) {
+      dockview.dispose();
+    }
   });
 </script>
 

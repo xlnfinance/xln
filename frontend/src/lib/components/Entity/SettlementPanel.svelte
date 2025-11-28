@@ -1,7 +1,21 @@
 <script lang="ts">
   import { getXLN, xlnEnvironment, replicas, processWithDelay, xlnFunctions } from '../../stores/xlnStore';
+  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
 
   export let entityId: string;
+
+  // Get environment from context (for /view route) or use global stores (for / route)
+  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
+
+  // Extract the stores from entityEnv (or use global stores as fallback)
+  const contextReplicas = entityEnv?.replicas;
+  const contextXlnFunctions = entityEnv?.xlnFunctions;
+  const contextEnv = entityEnv?.env;
+
+  // Use context stores if available, otherwise fall back to global
+  $: activeReplicas = contextReplicas ? $contextReplicas : $replicas;
+  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
+  $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
 
   // Form state
   let counterpartyEntityId = '';
@@ -30,18 +44,18 @@
   $: ourSide = isLeft ? 'LEFT' : 'RIGHT';
 
   // Get all entities for dropdown
-  $: allEntities = $replicas ? Array.from($replicas.keys() as IterableIterator<string>)
+  $: allEntities = activeReplicas ? Array.from(activeReplicas.keys() as IterableIterator<string>)
     .map(key => key.split(':')[0]!)
     .filter((id, index, self) => self.indexOf(id) === index && id !== entityId)
     .sort() : [];
 
   // Get jBatch state for this entity
   $: jBatchState = (() => {
-    if (!$replicas || !entityId) return null;
-    const keys = Array.from($replicas.keys()) as string[];
+    if (!activeReplicas || !entityId) return null;
+    const keys = Array.from(activeReplicas.keys()) as string[];
     const replicaKey = keys.find((k) => k.startsWith(entityId + ':'));
     if (!replicaKey) return null;
-    const replica = $replicas.get(replicaKey);
+    const replica = activeReplicas.get(replicaKey);
     return (replica?.state as any)?.jBatchState || null;
   })();
 
@@ -104,7 +118,7 @@
     sending = true;
     try {
       await getXLN(); // Ensure initialized
-      const env = $xlnEnvironment;
+      const env = activeEnv;
       if (!env) throw new Error('Environment not ready');
 
       // Find signer ID
@@ -253,7 +267,7 @@
     <select id="settlement-counterparty" bind:value={counterpartyEntityId} disabled={sending}>
       <option value="">Select entity...</option>
       {#each allEntities as id}
-        <option value={id}>Entity #{$xlnFunctions!.getEntityShortId(id)}</option>
+        <option value={id}>Entity #{activeXlnFunctions?.getEntityShortId(id)}</option>
       {/each}
     </select>
   </div>

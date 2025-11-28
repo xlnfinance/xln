@@ -8,6 +8,7 @@
    */
 
   import type { Writable } from 'svelte/store';
+  import { onDestroy } from 'svelte';
   import { panelBridge } from '../utils/panelBridge';
   import { shortAddress } from '$lib/utils/format';
 
@@ -72,16 +73,17 @@
     : [];
 
   // Listen for VR payment gestures
-  panelBridge.on('vr:payment', async ({ from, to }) => {
+  const handleVRPayment = async ({ from, to }: { from: string; to: string }) => {
     console.log('[Architect] VR payment triggered:', from.slice(-4), '→', to.slice(-4));
     r2rFromEntity = from;
     r2rToEntity = to;
     r2rAmount = '500000'; // Default $500K
     await sendR2RTransaction();
-  });
+  };
+  const unsubVRPayment = panelBridge.on('vr:payment', handleVRPayment);
 
   // Auto-demo mode (triggered when entering VR for Bernanke wow)
-  panelBridge.on('auto-demo:start', async () => {
+  const handleAutoDemo = async () => {
     console.log('[Architect]  Starting auto-demo for VR...');
 
     // Step 1: Fund all entities if not already funded
@@ -95,6 +97,13 @@
         startFedPaymentLoop();
       }, 2000);
     }
+  };
+  const unsubAutoDemo = panelBridge.on('auto-demo:start', handleAutoDemo);
+
+  // Clean up subscriptions on component destroy
+  onDestroy(() => {
+    unsubVRPayment();
+    unsubAutoDemo();
   });
 
   /** Mint reserves to selected entity */

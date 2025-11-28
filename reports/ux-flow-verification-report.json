@@ -1,0 +1,68 @@
+{
+  "timestamp": "2025-11-28T22:58:19.336Z",
+  "summary": {
+    "totalPassed": 1,
+    "totalFailed": 5,
+    "consoleErrors": 0,
+    "consoleWarnings": 1
+  },
+  "results": {
+    "tutorialSkip": {
+      "status": "PASS",
+      "errors": [],
+      "screenshots": [
+        "tutorialSkip-after-load-1764370571359.png"
+      ]
+    },
+    "panelTabNavigation": {
+      "status": "FAIL",
+      "errors": [
+        "6 tabs failed"
+      ],
+      "screenshots": [
+        "panelTabNavigation-depository-1764370586123.png"
+      ],
+      "tabs": {
+        "Graph3D": "FAIL - Not Found",
+        "Entities": "FAIL - Not Found",
+        "Depository": "PASS",
+        "Console": "FAIL - Not Found",
+        "Runtime I/O": "FAIL - Not Found",
+        "Settings": "FAIL - Not Found",
+        "Architect": "FAIL - Not Found"
+      }
+    },
+    "entityCreation": {
+      "status": "FAIL",
+      "errors": [
+        "locator.click: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('Architect', { exact: true }).first()\u001b[22m\n"
+      ],
+      "screenshots": []
+    },
+    "entityList": {
+      "status": "FAIL",
+      "errors": [
+        "locator.click: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('Entities', { exact: true }).first()\u001b[22m\n"
+      ],
+      "screenshots": []
+    },
+    "miniPanelFlow": {
+      "status": "FAIL",
+      "errors": [
+        "locator.click: Timeout 5000ms exceeded.\nCall log:\n\u001b[2m  - waiting for getByText('Graph3D', { exact: true }).first()\u001b[22m\n"
+      ],
+      "screenshots": []
+    },
+    "expandToFullPanel": {
+      "status": "FAIL",
+      "errors": [
+        "Expand button not found"
+      ],
+      "screenshots": [
+        "expandToFullPanel-final-state-1764370696755.png"
+      ]
+    }
+  },
+  "consoleErrors": [],
+  "screenshotDir": "/Users/zigota/xln/reports/ux-flow-screenshots"
+}

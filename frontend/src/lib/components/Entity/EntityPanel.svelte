@@ -5,6 +5,7 @@
   import { visibleReplicas, currentTimeIndex } from '../../stores/timeStore';
   import { tabOperations } from '../../stores/tabStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
+  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
 
   import EntityDropdown from './EntityDropdown.svelte';
   import AccountPanel from './AccountPanel.svelte';
@@ -29,13 +30,30 @@
   let showCloseButton = true;
   let selectedAccountId: string | null = null;
 
+  // Get environment from context (for /view route) or fall back to global stores (for / route)
+  // This allows EntityPanel to work in both isolated and global contexts
+  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
+
+  // Extract the stores from entityEnv (or use global stores as fallback)
+  // entityEnv.replicas, entityEnv.xlnFunctions, entityEnv.history, entityEnv.timeIndex are Readable stores
+  const contextReplicas = entityEnv?.replicas;
+  const contextXlnFunctions = entityEnv?.xlnFunctions;
+  const contextHistory = entityEnv?.history;
+  const contextTimeIndex = entityEnv?.timeIndex;
+
+  // Use context stores if available, otherwise fall back to global stores
+  $: activeReplicas = contextReplicas ? $contextReplicas : $visibleReplicas;
+  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
+  $: activeHistory = contextHistory ? $contextHistory : $history;
+  $: activeTimeIndex = contextTimeIndex !== undefined ? $contextTimeIndex : $currentTimeIndex;
+
   // Reactive statement to get replica data
   $: {
     if (tab.entityId && tab.signerId) {
       // Prefer time-aware replicas if available
       const replicaKey = `${tab.entityId}:${tab.signerId}`;
-      const candidate = $visibleReplicas?.get?.(replicaKey);
-      replica = candidate; // TODO: Fix getReplica call
+      const candidate = activeReplicas?.get?.(replicaKey);
+      replica = candidate ?? null;
     } else {
       replica = null;
     }
@@ -60,7 +78,8 @@
   // 💰 Financial calculation functions
 
   function formatAssetDisplay(tokenId: string, amount: bigint): string {
-    const tokenInfo = $xlnFunctions.getTokenInfo(Number(tokenId));
+    if (!activeXlnFunctions) return `${amount} (token ${tokenId})`;
+    const tokenInfo = activeXlnFunctions.getTokenInfo(Number(tokenId));
     const divisor = BigInt(10) ** BigInt(tokenInfo.decimals);
 
     const wholePart = amount / divisor;
@@ -75,7 +94,8 @@
   }
 
   function getAssetValue(tokenId: string, amount: bigint): number {
-    const tokenInfo = $xlnFunctions.getTokenInfo(Number(tokenId));
+    if (!activeXlnFunctions) return 0;
+    const tokenInfo = activeXlnFunctions.getTokenInfo(Number(tokenId));
     const divisor = BigInt(10) ** BigInt(tokenInfo.decimals);
 
     const numericAmount = Number(amount) / Number(divisor);
@@ -197,9 +217,9 @@
     <!-- Focused Account View -->
     <div class="focused-account-view">
       <div class="account-breadcrumb">
-        <button class="breadcrumb-back" on:click={handleBackToEntity}>← Entity #{$xlnFunctions!.getEntityShortId(tab.entityId)}</button>
+        <button class="breadcrumb-back" on:click={handleBackToEntity}>← Entity #{activeXlnFunctions!.getEntityShortId(tab.entityId)}</button>
         <span class="breadcrumb-separator">→</span>
-        <span class="breadcrumb-current">Account with Entity #{$xlnFunctions!.getEntityShortId(selectedAccountId!)}</span>
+        <span class="breadcrumb-current">Account with Entity #{activeXlnFunctions!.getEntityShortId(selectedAccountId!)}</span>
       </div>
       <AccountPanel
         account={selectedAccount}
@@ -247,7 +267,7 @@
           </div>
           <div class="reserves-grid">
             {#each Array.from(replica.state.reserves.entries()) as [tokenId, amount]}
-              {@const tokenInfo = $xlnFunctions.getTokenInfo(Number(tokenId))}
+              {@const tokenInfo = activeXlnFunctions?.getTokenInfo(Number(tokenId)) ?? { symbol: 'UNK', decimals: 18 }}
               {@const assetValue = getAssetValue(tokenId, amount)}
               {@const totalNetworth = calculateTotalNetworth(replica.state.reserves)}
               {@const globalPercentage = $settings.portfolioScale > 0 ? Math.min((assetValue / $settings.portfolioScale) * 100, 100) : 0}
@@ -361,7 +381,7 @@
       class:collapsed={!chatExpanded}
       style="max-height: 25vh;"
     >
-      <ChatMessages {replica} {tab} currentTimeIndex={$currentTimeIndex} />
+      <ChatMessages {replica} {tab} currentTimeIndex={activeTimeIndex ?? -1} />
     </div>
   </div>
 
@@ -411,7 +431,7 @@
       class:collapsed={!historyExpanded}
       style="max-height: 50vh;"
     >
-      <TransactionHistory {replica} {tab} runtimeHistory={$history} currentTimeIndex={$currentTimeIndex} />
+      <TransactionHistory {replica} {tab} runtimeHistory={activeHistory ?? []} currentTimeIndex={activeTimeIndex ?? -1} />
     </div>
   </div>
 

@@ -1,156 +1,104 @@
 # NEXT.md - Priority Tasks
 
-## 🔥 COMPLETED (2025-11-29): Time Machine + Tests + Cleanup
+## 🔥 COMPLETED (2025-11-29): EntityEnvContext Integration Fix
 
-### STATUS: /view fully functional ✅
+### STATUS: /view EntityPanel context fully integrated ✅
 
 **FIXED THIS SESSION:**
-- ✅ Subtitle rendering: Added `isolatedIsLive` prop to ArchitectPanel
-- ✅ Time Machine isolation: Fixed 7 places reading live state instead of history[timeIndex]
-- ✅ EntityObject pattern: Labels now children of mesh (auto-sync positions)
-- ✅ E2E tests: `e2e/time-machine-isolation.spec.ts` (4 tests passing)
-- ✅ Cleanup: Removed 23 .bak files, frontend/build/, 13 dead npm scripts
 
-**BUILD STATUS:** 0 errors, 208 warnings (non-blocking)
+### EntityEnvContext Integration (Junior Review Fixes)
+- ✅ **EntityPanel.svelte** - Now consumes context for replicas, xlnFunctions, history, timeIndex
+- ✅ **EntityDropdown.svelte** - Uses getEntityEnv() with global fallback
+- ✅ **AccountPanel.svelte** - Uses context for xlnFunctions and xlnEnvironment
+- ✅ **PaymentPanel.svelte** - Fixed context replicas priority over props over global
+- ✅ **SettlementPanel.svelte** - Uses context for replicas, xlnFunctions, xlnEnvironment
+- ✅ **TransactionHistory** - Now receives time-aware history/timeIndex from context
+- ✅ **ChatMessages** - Now receives time-aware currentTimeIndex from context
 
-**PREVIOUS SESSION (2025-11-17 AM):**
-- ✅ prepopulate-ahb.ts (Alice-Hub-Bob demo code)
-- ✅ prepopulate-full-mechanics.ts (10 primitives)
-- ✅ 3-level UI (ELEMENTARY/INTERMEDIATE/ADVANCED)
-- ✅ EntityObject.ts architecture (176 lines)
-- ✅ Main UI path works (localhost:8080 → Settings → AHB)
+### Subscription Leak Fixes (panelBridge cleanup)
+- ✅ **EntitiesPanel.svelte** - Added onDestroy with unsubscribe()
+- ✅ **ArchitectPanel.svelte** - Added onDestroy with unsubscribe() for vr:payment, auto-demo:start
+- ✅ **View.svelte** - Added onDestroy with unsubscribe() for openEntityOperations
 
-**ROOT CAUSES IDENTIFIED & FIXED:**
+### Build Status
+- **0 TypeScript errors**
+- **208 warnings** (unchanged, non-blocking)
 
-**Bug 1: Entity Names (0x000...001 instead of Alice)**
-- **Cause:** buildEntityProfile() didn't include name in metadata
-- **Fix:** Added name param + updated all setReservesAndAccounts calls
-- **Files:** runtime/gossip-helper.ts, runtime/prepopulate-ahb.ts, frontend/EntitiesPanel.svelte
+---
 
-**Bug 2: 18 Frames Instead of 9**
-- **Cause:** captureSnapshot() auto-created "Tick X" frames on EVERY XLN.process() call
-- **Root:** state-helpers.ts:192 pushed to envHistory unconditionally
-- **Fix:** Added env.disableAutoSnapshots flag, disabled during all prepopulate demos
-- **Files:** runtime/types.ts (Env interface), runtime/state-helpers.ts, all 3 prepopulate files
+## 📁 FILES MODIFIED THIS SESSION:
+
+```
+frontend/src/lib/components/Entity/
+├─ EntityPanel.svelte (context consumption + history/timeIndex)
+├─ EntityDropdown.svelte (context consumption)
+├─ AccountPanel.svelte (context consumption)
+├─ PaymentPanel.svelte (context priority fix)
+├─ SettlementPanel.svelte (context consumption)
+
+frontend/src/lib/view/panels/
+├─ EntitiesPanel.svelte (subscription leak fix)
+├─ ArchitectPanel.svelte (subscription leak fix)
+
+frontend/src/lib/view/
+├─ View.svelte (subscription leak fix + onDestroy)
+```
+
+---
+
+## 🔧 PATTERN USED (EntityEnvContext):
+
+```typescript
+// In component script:
+import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
+
+// Get context if available (for /view route)
+const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
+
+// Extract stores
+const contextReplicas = entityEnv?.replicas;
+const contextXlnFunctions = entityEnv?.xlnFunctions;
+const contextHistory = entityEnv?.history;
+const contextTimeIndex = entityEnv?.timeIndex;
+
+// Reactive: prioritize context over global stores
+$: activeReplicas = contextReplicas ? $contextReplicas : $visibleReplicas;
+$: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
+$: activeHistory = contextHistory ? $contextHistory : $history;
+$: activeTimeIndex = contextTimeIndex !== undefined ? $contextTimeIndex : $currentTimeIndex;
+```
 
 ---
 
 ## 🎯 NEXT SESSION PRIORITIES:
 
-### 1. Subtitle Rendering in /view (MEDIUM - 30min)
-**Problem:** FrameSubtitle doesn't show in /view
+### 1. Time Machine Testing in /view (HIGH)
+- Verify time travel works with entity panel open
+- Test historical frame displays correct data
+- Check TransactionHistory shows correct history
 
-**Solution:**
-- Check /view/core/TimeMachine.svelte wiring
-- Verify currentSubtitle reactive var
-- Test subtitle appears at bottom
-
----
-
-## 📁 FILES CREATED THIS SESSION:
-
-```
-runtime/
-├─ prepopulate-ahb.ts (AHB demo, 9 frames)
-├─ prepopulate-full-mechanics.ts (15 frames, 10 mechanics)
-
-frontend/src/lib/
-├─ components/TimeMachine/FrameSubtitle.svelte (Fed Chair subtitles)
-├─ view/3d/EntityObject.ts (proper entity hierarchy)
-├─ view/3d/README.md (refactor plan)
-
-e2e/ahb-smoke.spec.ts (smoke test)
-tests/ahb-demo.spec.ts (E2E test)
-TESTING-AHB.md (instructions)
-vibepaper/architecture/jurisdiction-requirement.md
-```
+### 2. Click-to-Expand Entity Flow (MEDIUM)
+- Fix entity sphere click detection positions
+- Verify mini-panel → expand → entity panel flow
+- Test entity dropdown shows selected entity
 
 ---
 
-## 🧪 TESTING:
+## 📝 ARCHITECTURE NOTES:
 
-**Working Path (NOW):**
+**EntityEnvContext Purpose:**
+- Pierces store boundary once at wrapper level
+- Child components consume via getEntityEnv()
+- Falls back to global stores for backward compatibility
+- Enables time travel in /view workspace
+
+**panelBridge Cleanup Pattern:**
+```typescript
+import { onDestroy } from 'svelte';
+
+const unsub = panelBridge.on('event', handler);
+
+onDestroy(() => {
+  unsub();
+});
 ```
-https://localhost:8080 (main UI)
-→ Settings gear
-→ Dropdown: "Alice-Hub-Bob Demo"
-→ Click "Run"
-→ Wait 3 sec
-→ Navigate with arrow keys
-→ Subtitles show! ✅
-```
-
-**Broken Path:**
-```
-https://localhost:8080/view
-→ Architect → Economy → LVL 1 → Alice-Hub-Bob
-→ Entities show but wrong names ❌
-→ 18 frames (not 9) ❌
-```
-
----
-
-## 💾 COMMITS TODAY: 20
-
-```
-d13f0f8 debug: extensive logging in prepopulateAHB
-059900e debug: extensive logging in ArchitectPanel
-3aa7a59 fix: smoke test checks UI
-16c0824 cleanup: remove ALL emojis from panels
-3276257 fix: remove BANK_NAMES from Graph3D
-42946d4 fix: remove hardcoded bank names (ROOT CAUSE)
-1b663c9 fix: clear isolated env before tutorials
-420868a arch: EntityObject encapsulation
-... +12 more
-```
-
----
-
-## 🔧 ARCHITECTURAL NOTES:
-
-**View Isolation (MUST REMEMBER):**
-- /view uses localEnvStore (isolated, no window.XLN)
-- Embeddable design
-- No global state
-- All stores passed as props
-
-**Entity Hierarchy:**
-```
-EntityObject extends THREE.Group
-├─ mesh (octahedron)
-├─ label (sprite - CHILD, moves with entity)
-├─ reserveBar (CHILD)
-└─ edges[] (managed)
-```
-
-**Prepopulate Flow:**
-```
-1. .clear() replicas + history
-2. createNumberedEntity() → importReplica
-3. openAccount between entities
-4. setReservesAndAccounts()
-5. pushSnapshot() for each frame
-```
-
----
-
-## 🎯 QUICK WINS FOR NEXT SESSION:
-
-1. **Hard refresh browser** (Ctrl+Shift+R)
-2. **Check console for [AHB] logs**
-3. **Verify gossip profiles have names**
-4. **Fix name resolution** (EntitiesPanel)
-5. **Test Alice/Hub/Bob appear**
-
-**Estimated:** 2-3 hours focused work
-
----
-
-## 📝 REMEMBER:
-
-- prepopulateAHB code = CORRECT ✅
-- Architecture = SOUND ✅
-- Integration = INCOMPLETE ⏳
-- Main UI = WORKS ✅
-
-Next session = debugging + integration, NOT new features!

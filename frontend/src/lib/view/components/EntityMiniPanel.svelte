@@ -6,6 +6,7 @@
    */
   import { createEventDispatcher } from 'svelte';
   import type { Writable } from 'svelte/store';
+  import { formatTokenAmount } from './entity/shared/formatters';
 
   export let entityId: string;
   export let entityName: string = '';
@@ -29,9 +30,9 @@
     return sum + (delta?.collateral || 0n);
   }, 0n);
 
+  // Use shared formatter with token ID 1 (USDC default)
   function formatAmount(amount: bigint): string {
-    const num = Number(amount) / 1e18;
-    return num.toFixed(2);
+    return formatTokenAmount(1, amount);
   }
 
   function openFullPanel() {
