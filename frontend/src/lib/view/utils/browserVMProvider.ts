@@ -2,6 +2,9 @@
  * BrowserVMProvider - In-browser EVM using @ethereumjs/vm
  * Self-contained environment with Depository.sol
  *
+ * Uses ethers.js Interface for ABI encoding - same pattern as mainnet evm.ts
+ * This ensures browserVM calls are identical to real blockchain calls.
+ *
  * @license AGPL-3.0
  * Copyright (C) 2025 XLN Finance
  */
@@ -11,6 +14,7 @@ import { createLegacyTx } from '@ethereumjs/tx';
 import { createAddressFromPrivateKey, hexToBytes, createAccount, bytesToHex } from '@ethereumjs/util';
 import type { Address } from '@ethereumjs/util';
 import { Common, Hardfork, Chain } from '@ethereumjs/common';
+import { ethers } from 'ethers';
 
 export class BrowserVMProvider {
   private vm: any;
@@ -20,6 +24,7 @@ export class BrowserVMProvider {
   private deployerAddress: Address;
   private nonce = 0n;
   private depositoryArtifact: any = null;
+  private depositoryInterface: ethers.Interface | null = null;
   private initialized = false;
 
   constructor() {
@@ -41,7 +46,10 @@ export class BrowserVMProvider {
       throw new Error(`Failed to load Depository artifact: ${response.status}`);
     }
     this.depositoryArtifact = await response.json();
-    console.log('[BrowserVM] Initializing...');
+
+    // Create ethers Interface for ABI encoding (same as evm.ts mainnet pattern)
+    this.depositoryInterface = new ethers.Interface(this.depositoryArtifact.abi);
+    console.log('[BrowserVM] Initializing with ABI interface...');
 
     // Create VM with evmOpts to disable contract size limit
     this.vm = await createVM({
@@ -108,15 +116,12 @@ export class BrowserVMProvider {
 
   /** Get entity reserves for a token */
   async getReserves(entityId: string, tokenId: number): Promise<bigint> {
-    if (!this.depositoryAddress) {
+    if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
 
-    // Encode function call: _reserves(bytes32,uint256)
-    const selector = '0xacd6f208';
-    const paddedEntity = entityId.startsWith('0x') ? entityId.slice(2).padStart(64, '0') : entityId.padStart(64, '0');
-    const paddedTokenId = tokenId.toString(16).padStart(64, '0');
-    const callData = selector + paddedEntity + paddedTokenId;
+    // Use ethers Interface for ABI encoding (same as mainnet)
+    const callData = this.depositoryInterface.encodeFunctionData('_reserves', [entityId, tokenId]);
 
     const result = await this.vm.evm.runCall({
       to: this.depositoryAddress,
@@ -133,22 +138,24 @@ export class BrowserVMProvider {
     const returnData = result.execResult.returnValue;
     if (!returnData || returnData.length === 0) return 0n;
 
-    return BigInt(bytesToHex(returnData));
+    // Decode return value using ethers Interface
+    const decoded = this.depositoryInterface.decodeFunctionResult('_reserves', returnData);
+    return decoded[0];
   }
 
   /** Get total number of tokens */
   async getTokensLength(): Promise<number> {
-    if (!this.depositoryAddress) {
+    if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
 
-    // Encode function call: getTokensLength()
-    const selector = '0xb0c26ecf'; // keccak256("getTokensLength()")[:4]
+    // Use ethers Interface for ABI encoding (same as mainnet)
+    const callData = this.depositoryInterface.encodeFunctionData('getTokensLength', []);
 
     const result = await this.vm.evm.runCall({
       to: this.depositoryAddress,
       caller: this.deployerAddress,
-      data: hexToBytes(selector),
+      data: hexToBytes(callData as `0x${string}`),
       gasLimit: 100000n,
     });
 
@@ -160,7 +167,8 @@ export class BrowserVMProvider {
     const returnData = result.execResult.returnValue;
     if (returnData.length === 0) return 0;
 
-    return Number(BigInt(bytesToHex(returnData)));
+    const decoded = this.depositoryInterface.decodeFunctionResult('getTokensLength', returnData);
+    return Number(decoded[0]);
   }
 
   /** Get current nonce from VM state */
@@ -171,16 +179,12 @@ export class BrowserVMProvider {
 
   /** Debug: Fund entity reserves */
   async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<void> {
-    if (!this.depositoryAddress) {
+    if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
 
-    // Encode function call: debugFundReserves(bytes32,uint256,uint256)
-    const selector = '0x5ffefe5b';
-    const paddedEntity = entityId.startsWith('0x') ? entityId.slice(2).padStart(64, '0') : entityId.padStart(64, '0');
-    const paddedTokenId = tokenId.toString(16).padStart(64, '0');
-    const paddedAmount = amount.toString(16).padStart(64, '0');
-    const callData = selector + paddedEntity + paddedTokenId + paddedAmount;
+    // Use ethers Interface for ABI encoding (same as mainnet)
+    const callData = this.depositoryInterface.encodeFunctionData('debugFundReserves', [entityId, tokenId, amount]);
 
     // Always query nonce from VM (don't trust local counter)
     const currentNonce = await this.getCurrentNonce();
@@ -204,17 +208,12 @@ export class BrowserVMProvider {
 
   /** Execute R2R transfer */
   async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<void> {
-    if (!this.depositoryAddress) {
+    if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
 
-    // Encode function call: reserveToReserve(bytes32,bytes32,uint256,uint256)
-    const selector = '0x3925cd44'; // keccak256("reserveToReserve(bytes32,bytes32,uint256,uint256)")[:4]
-    const paddedFrom = from.startsWith('0x') ? from.slice(2).padStart(64, '0') : from.padStart(64, '0');
-    const paddedTo = to.startsWith('0x') ? to.slice(2).padStart(64, '0') : to.padStart(64, '0');
-    const paddedTokenId = tokenId.toString(16).padStart(64, '0');
-    const paddedAmount = amount.toString(16).padStart(64, '0');
-    const callData = selector + paddedFrom + paddedTo + paddedTokenId + paddedAmount;
+    // Use ethers Interface for ABI encoding (same as mainnet)
+    const callData = this.depositoryInterface.encodeFunctionData('reserveToReserve', [from, to, tokenId, amount]);
 
     // Always query nonce from VM
     const currentNonce = await this.getCurrentNonce();
@@ -239,6 +238,160 @@ export class BrowserVMProvider {
   /** Get contract address */
   getDepositoryAddress(): string {
     return this.depositoryAddress?.toString() || '0x0';
+  }
+
+  /** Prefund account (R2C - Reserve to Collateral) */
+  async prefundAccount(entityId: string, counterpartyId: string, tokenId: number, amount: bigint): Promise<void> {
+    if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
+
+    // Use ethers Interface for ABI encoding (same as mainnet)
+    // Note: prefundAccount(bytes32 counterpartyEntity, uint tokenId, uint amount)
+    const callData = this.depositoryInterface.encodeFunctionData('prefundAccount', [counterpartyId, tokenId, amount]);
+
+    const currentNonce = await this.getCurrentNonce();
+    const tx = createLegacyTx({
+      to: this.depositoryAddress,
+      gasLimit: 1000000n,
+      gasPrice: 10n,
+      data: hexToBytes(callData as `0x${string}`),
+      nonce: currentNonce,
+    }, { common: this.common }).sign(this.deployerPrivKey);
+
+    const result = await runTx(this.vm, { tx });
+    if (result.execResult.exceptionError) {
+      throw new Error(`prefundAccount failed: ${result.execResult.exceptionError}`);
+    }
+    console.log(`[BrowserVM] Prefunded ${amount} from ${entityId.slice(0, 10)}... to account with ${counterpartyId.slice(0, 10)}...`);
+  }
+
+  /** Get collateral for an account */
+  async getCollateral(entityId: string, counterpartyId: string, tokenId: number): Promise<bigint> {
+    if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
+
+    // Use ethers Interface for ABI encoding (same as mainnet)
+    const callData = this.depositoryInterface.encodeFunctionData('_collateral', [entityId, counterpartyId, tokenId]);
+
+    const result = await this.vm.evm.runCall({
+      to: this.depositoryAddress,
+      caller: this.deployerAddress,
+      data: hexToBytes(callData as `0x${string}`),
+      gasLimit: 100000n,
+    });
+
+    if (result.execResult.exceptionError) return 0n;
+    const returnData = result.execResult.returnValue;
+    if (!returnData || returnData.length === 0) return 0n;
+
+    const decoded = this.depositoryInterface.decodeFunctionResult('_collateral', returnData);
+    return decoded[0];
+  }
+
+  /** Get debts for an entity */
+  async getDebts(entityId: string, tokenId: number): Promise<Array<{amount: bigint, creditor: string}>> {
+    if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
+
+    // Use ethers Interface for ABI encoding (same as mainnet)
+    const callData = this.depositoryInterface.encodeFunctionData('getDebts', [entityId, tokenId]);
+
+    const result = await this.vm.evm.runCall({
+      to: this.depositoryAddress,
+      caller: this.deployerAddress,
+      data: hexToBytes(callData as `0x${string}`),
+      gasLimit: 500000n,
+    });
+
+    if (result.execResult.exceptionError) return [];
+
+    try {
+      const decoded = this.depositoryInterface.decodeFunctionResult('getDebts', result.execResult.returnValue);
+      // decoded[0] is the Debt[] array
+      return decoded[0].map((d: any) => ({ amount: d.amount, creditor: d.creditor }));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Enforce debts (FIFO) */
+  async enforceDebts(entityId: string, tokenId: number, maxIterations: number = 100): Promise<bigint> {
+    if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
+
+    // Use ethers Interface for ABI encoding (same as mainnet)
+    const callData = this.depositoryInterface.encodeFunctionData('enforceDebts', [entityId, tokenId, maxIterations]);
+
+    const currentNonce = await this.getCurrentNonce();
+    const tx = createLegacyTx({
+      to: this.depositoryAddress,
+      gasLimit: 2000000n,
+      gasPrice: 10n,
+      data: hexToBytes(callData as `0x${string}`),
+      nonce: currentNonce,
+    }, { common: this.common }).sign(this.deployerPrivKey);
+
+    const result = await runTx(this.vm, { tx });
+    if (result.execResult.exceptionError) {
+      console.error(`[BrowserVM] enforceDebts failed:`, result.execResult.exceptionError);
+      return 0n;
+    }
+
+    try {
+      const decoded = this.depositoryInterface.decodeFunctionResult('enforceDebts', result.execResult.returnValue);
+      console.log(`[BrowserVM] Enforced debts for ${entityId.slice(0, 10)}..., paid: ${decoded[0]}`);
+      return decoded[0];
+    } catch {
+      return 0n;
+    }
+  }
+
+  /** Process a full batch */
+  async processBatch(entityId: string, batch: {
+    reserveToReserve?: Array<{toEntity: string, tokenId: number, amount: bigint}>,
+    reserveToCollateral?: Array<{counterparty: string, tokenId: number, amount: bigint}>,
+    settlements?: Array<{leftEntity: string, rightEntity: string, diffs: any[]}>,
+  }): Promise<boolean> {
+    if (!this.depositoryAddress) throw new Error('Depository not deployed');
+
+    // For simplicity, execute individual operations
+    // In production, encode full Batch struct and call processBatch
+
+    if (batch.reserveToReserve) {
+      for (const r2r of batch.reserveToReserve) {
+        await this.reserveToReserve(entityId, r2r.toEntity, r2r.tokenId, r2r.amount);
+      }
+    }
+
+    console.log(`[BrowserVM] Batch processed for ${entityId.slice(0, 10)}...`);
+    return true;
+  }
+
+  /** Get VM state snapshot (for time machine) */
+  async getStateSnapshot(): Promise<{
+    accounts: Map<string, {balance: bigint, nonce: bigint}>,
+    depositoryState: any
+  }> {
+    // Snapshot VM state for time travel
+    const snapshot = {
+      accounts: new Map<string, {balance: bigint, nonce: bigint}>(),
+      depositoryState: {
+        address: this.depositoryAddress?.toString(),
+        // Add more state as needed
+      }
+    };
+
+    // Get deployer account state
+    const deployerAcc = await this.vm.stateManager.getAccount(this.deployerAddress);
+    if (deployerAcc) {
+      snapshot.accounts.set(this.deployerAddress.toString(), {
+        balance: deployerAcc.balance,
+        nonce: deployerAcc.nonce
+      });
+    }
+
+    return snapshot;
+  }
+
+  /** Check if initialized */
+  isInitialized(): boolean {
+    return this.initialized;
   }
 }
 

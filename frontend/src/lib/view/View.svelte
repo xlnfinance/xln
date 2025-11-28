@@ -18,8 +18,10 @@
   import ConsolePanel from './panels/ConsolePanel.svelte';
   import RuntimeIOPanel from './panels/RuntimeIOPanel.svelte';
   import SettingsPanel from './panels/SettingsPanel.svelte';
+  import EntityOperationsPanel from './components/EntityOperationsPanel.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
   import Tutorial from './components/Tutorial.svelte';
+  import { panelBridge } from './utils/panelBridge';
   import 'dockview/dist/styles/dockview.css';
 
   export let layout: string = 'default';
@@ -158,7 +160,8 @@
             props: {
               isolatedEnv: localEnvStore,
               isolatedHistory: localHistoryStore,
-              isolatedTimeIndex: localTimeIndex
+              isolatedTimeIndex: localTimeIndex,
+              isolatedIsLive: localIsLive
             }
           });
         } else if (options.name === 'console') {
@@ -184,6 +187,19 @@
               isolatedEnv: localEnvStore,
               isolatedHistory: localHistoryStore,
               isolatedTimeIndex: localTimeIndex
+            }
+          });
+        } else if (options.name === 'entity-operations') {
+          // Dynamic panel for entity operations (opened via panelBridge)
+          // @ts-ignore - Dockview params passed via addPanel
+          const params = (options as any).params || {};
+          component = mount(EntityOperationsPanel, {
+            target: div,
+            props: {
+              entityId: params.entityId || '',
+              entityName: params.entityName || '',
+              isolatedEnv: localEnvStore,
+              isolatedHistory: localHistoryStore
             }
           });
         }
@@ -277,6 +293,30 @@
       } catch (err) {
         console.warn('[View] Failed to save layout:', err);
       }
+    });
+
+    // Listen for entity operations panel requests from Graph3D
+    panelBridge.on('openEntityOperations', ({ entityId, entityName }) => {
+      // Check if panel already exists for this entity
+      const panelId = `entity-ops-${entityId.slice(0, 8)}`;
+      const existingPanel = dockview.getPanel(panelId);
+
+      if (existingPanel) {
+        // Focus existing panel
+        existingPanel.api.setActive();
+        return;
+      }
+
+      // Create new panel for this entity
+      dockview.addPanel({
+        id: panelId,
+        component: 'entity-operations',
+        title: `🔧 ${entityName || entityId.slice(0, 10) + '...'}`,
+        position: { direction: 'within', referencePanel: 'architect' },
+        params: { entityId, entityName }
+      });
+
+      console.log('[View] Opened entity operations panel:', entityId.slice(0, 10));
     });
   });
 </script>

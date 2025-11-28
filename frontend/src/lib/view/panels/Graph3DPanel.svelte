@@ -22,6 +22,13 @@
   import { PerformanceMonitor, type PerfMetrics } from '../utils/perfMonitor';
   import VRControlsHUD from '../components/VRControlsHUD.svelte';
   import { HandGesturePaymentController } from '../utils/handGesturePayments';
+  import EntityMiniPanel from '../components/EntityMiniPanel.svelte';
+
+  // Mini panel state for entity click
+  let showMiniPanel = false;
+  let miniPanelEntityId = '';
+  let miniPanelEntityName = '';
+  let miniPanelPosition = { x: 0, y: 0 };
 
   // Props - REQUIRED for /view isolation (dead props removed)
   export let isolatedEnv: Writable<any>;
@@ -271,6 +278,7 @@ let vrHammer: VRHammer | null = null;
   let dragPlane: THREE.Plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0); // Plane for 3D dragging
   let dragOffset: THREE.Vector3 = new THREE.Vector3();
   let isDragging: boolean = false;
+  let hasMoved: boolean = false; // Track if actual movement occurred during drag
   let justDragged: boolean = false; // Flag to prevent click after drag
 
   /**
@@ -1951,15 +1959,15 @@ let vrHammer: VRHammer | null = null;
     // Update available tokens
     updateAvailableTokens();
 
-    // Use time-aware data sources (isolated env if provided, otherwise global)
+    // Use time-aware data sources (replicas from env which respects timeIndex)
     let entityData: any[] = [];
-    let currentReplicas = $isolatedEnv?.replicas || new Map();
+    // CRITICAL: Use 'replicas' (time-aware) not '$isolatedEnv?.replicas' (always live)
+    let currentReplicas = replicas;
 
     console.log('[Graph3D] Replicas check:', {
-      hasIsolatedEnv: !!isolatedEnv,
-      isolatedEnvValue: $isolatedEnv,
+      timeIndex: $isolatedTimeIndex,
       replicasSize: currentReplicas?.size || 0,
-      source: 'isolated'
+      source: 'time-aware (env.replicas)'
     });
 
     // Always use replicas (ground truth)
@@ -2312,7 +2320,8 @@ let vrHammer: VRHammer | null = null;
     let x: number, y: number, z: number;
 
     // Priority 1: Check replica position (from importReplica serverTx)
-    const currentReplicas = $isolatedEnv?.replicas || new Map();
+    // Use time-aware replicas (not $isolatedEnv which is always live)
+    const currentReplicas = replicas;
     const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(profile.entityId + ':'));
     const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
 
@@ -2431,8 +2440,10 @@ let vrHammer: VRHammer | null = null;
 
     scene.add(mesh);
 
-    // Add entity name label (returns sprite to store with entity)
+    // Add entity name label AS CHILD of mesh (auto-moves with entity!)
     const labelSprite = createEntityLabel(profile.entityId);
+    labelSprite.position.set(0, entitySize + 0.8, 0); // Local position above mesh
+    mesh.add(labelSprite); // Child of mesh = auto-sync position
 
     // Add reserve amount label (GIANT green $ above entity - Bernanke wow factor)
     const reserveSprite = createReserveLabel(profile.entityId, 0n);
@@ -2790,8 +2801,8 @@ let vrHammer: VRHammer | null = null;
           // Recreate progress bars (positions changed, need full rebuild)
           if (conn.progressBars) {
             scene.remove(conn.progressBars);
-            // Get fresh replica data
-            const currentReplicas = $isolatedEnv?.replicas || new Map();
+            // Get time-aware replica data
+            const currentReplicas = replicas;
             const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(k => k.startsWith(conn.from + ':') || k.startsWith(conn.to + ':'));
             const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
 
@@ -2810,8 +2821,8 @@ let vrHammer: VRHammer | null = null;
       toEntity.position
     ]);
 
-    // Check if either entity is Federal Reserve
-    const currentReplicas = $isolatedEnv?.replicas || new Map();
+    // Check if either entity is Federal Reserve (use time-aware replicas)
+    const currentReplicas = replicas;
     const fromReplicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(fromId + ':'));
     const toReplicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(toId + ':'));
     const fromReplicaData = fromReplicaKey ? currentReplicas.get(fromReplicaKey) : null;
@@ -3015,7 +3026,8 @@ let vrHammer: VRHammer | null = null;
     const entityName = getEntityShortName(entityId);
 
     // Check if this is a Fed entity (for flag rendering)
-    const currentReplicas = $isolatedEnv?.replicas || new Map();
+    // Use time-aware replicas
+    const currentReplicas = replicas;
     const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(entityId + ':'));
     const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
 
@@ -3081,8 +3093,8 @@ let vrHammer: VRHammer | null = null;
     const baseScale = 1.5 * labelScale * vrMultiplier;
     sprite.scale.set(baseScale * 4, baseScale, 1); // 4:1 aspect ratio for emoji + text
 
-    scene.add(sprite);
-    return sprite; // Return sprite to store with entity
+    // Don't add to scene here - will be added as child of mesh in createEntityNode
+    return sprite;
   }
 
   /**
@@ -3140,31 +3152,32 @@ let vrHammer: VRHammer | null = null;
   }
 
   function updateEntityLabels() {
-    // Update all entity labels to stay on top of spheres (neat, minimalist, always attached)
-    // FIRST PRINCIPLE: Labels must never disconnect - every entity must have a visible label
+    // Update entity labels - name labels are now CHILDREN of mesh (auto-positioned!)
+    // Only need to handle: missing labels, reserve labels, billboarding
     if (!camera) return;
 
-    const currentReplicas = $isolatedEnv?.replicas || new Map();
+    // Use time-aware replicas
+    const currentReplicas = replicas;
 
     entities.forEach(entity => {
-      // Update entity name label
+      // Recreate name label if missing (shouldn't happen now that it's a child)
       if (!entity.label) {
         debug.warn(`⚠️ Entity ${entity.id.slice(-4)} missing label - recreating`);
         entity.label = createEntityLabel(entity.id);
+        const entitySize = getEntitySizeForToken(entity.id, selectedTokenId);
+        entity.label.position.set(0, entitySize + 0.8, 0);
+        entity.mesh.add(entity.label);
       }
 
-      if (!entity.label.parent) {
-        scene.add(entity.label);
+      // Ensure label is child of mesh (migration from old scene-parented labels)
+      if (entity.label.parent !== entity.mesh) {
+        scene.remove(entity.label);
+        const entitySize = getEntitySizeForToken(entity.id, selectedTokenId);
+        entity.label.position.set(0, entitySize + 0.8, 0);
+        entity.mesh.add(entity.label);
       }
 
-      // Position name label above sphere
-      const entitySize = getEntitySizeForToken(entity.id, selectedTokenId);
-      entity.label.position.set(
-        entity.position.x,
-        entity.position.y + entitySize + 0.8,
-        entity.position.z
-      );
-      entity.label.quaternion.copy(camera.quaternion);
+      // Name label position is automatic (child of mesh) - no manual sync needed!
 
       // Update reserve amount label (CRITICAL FOR BERNANKE WOW)
       if (!entity.reserveLabel) {
@@ -3218,9 +3231,10 @@ let vrHammer: VRHammer | null = null;
       }
 
       // Position reserve label ABOVE name label
+      const reserveEntitySize = getEntitySizeForToken(entity.id, selectedTokenId);
       entity.reserveLabel.position.set(
         entity.position.x,
-        entity.position.y + entitySize + 3.0, // Higher than name
+        entity.position.y + reserveEntitySize + 3.0, // Higher than name
         entity.position.z
       );
       entity.reserveLabel.quaternion.copy(camera.quaternion);
@@ -3951,6 +3965,7 @@ let vrHammer: VRHammer | null = null;
 
       // Start dragging
       isDragging = true;
+      hasMoved = false; // Reset movement flag for this drag
       draggedEntity = entity;
       entity.isDragging = true;
 
@@ -3974,8 +3989,10 @@ let vrHammer: VRHammer | null = null;
 
   function onMouseUp(_event: MouseEvent) {
     if (draggedEntity && isDragging) {
-      // Mark entity as pinned (user has manually positioned it)
-      draggedEntity.isPinned = true;
+      // Mark entity as pinned only if actual movement occurred
+      if (hasMoved) {
+        draggedEntity.isPinned = true;
+      }
       draggedEntity.isDragging = false;
 
       // Reset visual feedback
@@ -3983,20 +4000,23 @@ let vrHammer: VRHammer | null = null;
         draggedEntity.mesh.material.emissive.setHex(0x002200);
       }
 
-      // Check if entity violates spacing constraints after drag
-      enforceSpacingConstraints();
+      // Only process drag-related logic if actual movement occurred
+      if (hasMoved) {
+        // Check if entity violates spacing constraints after drag
+        enforceSpacingConstraints();
 
-      // Save positions after drag (persistence)
-      saveEntityPositions();
+        // Save positions after drag (persistence)
+        saveEntityPositions();
+
+        // Set flag to prevent click event from triggering camera refocus
+        justDragged = true;
+        setTimeout(() => {
+          justDragged = false;
+        }, 100); // Clear flag after 100ms
+      }
 
       draggedEntity = null;
       isDragging = false;
-
-      // Set flag to prevent click event from triggering camera refocus
-      justDragged = true;
-      setTimeout(() => {
-        justDragged = false;
-      }, 100); // Clear flag after 100ms
     }
 
     // Re-enable orbit controls WITHOUT refocusing
@@ -4017,6 +4037,7 @@ let vrHammer: VRHammer | null = null;
 
     // Handle dragging
     if (isDragging && draggedEntity) {
+      hasMoved = true; // Actual movement occurred
       const intersection = new THREE.Vector3();
       raycaster.ray.intersectPlane(dragPlane, intersection);
 
@@ -4144,8 +4165,11 @@ let vrHammer: VRHammer | null = null;
   }
 
   function onMouseClick(event: MouseEvent) {
+    console.log(`[Graph3D] Click detected, entities count: ${entities.length}, justDragged: ${justDragged}`);
+
     // Don't trigger click actions if user just finished dragging
     if (justDragged) {
+      console.log(`[Graph3D] Ignoring click - just dragged`);
       return;
     }
 
@@ -4193,7 +4217,9 @@ let vrHammer: VRHammer | null = null;
 
     // Check for entity intersections
     const entityMeshes = entities.map(e => e.mesh);
+    console.log(`[Graph3D] Raycasting against ${entityMeshes.length} entity meshes`);
     const intersects = raycaster.intersectObjects(entityMeshes);
+    console.log(`[Graph3D] Intersections found: ${intersects.length}`);
 
     if (intersects.length > 0) {
       const intersectedObject = intersects[0]?.object;
@@ -4201,19 +4227,60 @@ let vrHammer: VRHammer | null = null;
         throw new Error('FINTECH-SAFETY: No intersected object in click');
       }
       const entity = entities.find(e => e.mesh === intersectedObject);
+      console.log(`[Graph3D] Entity found for mesh:`, entity?.id);
 
       if (!entity) {
         // Clicked on lightning or other non-entity - ignore
+        console.log(`[Graph3D] No entity found for clicked mesh - might be child mesh`);
         return;
       }
 
       // Trigger activity animation
       triggerEntityActivity(entity.id);
 
-      // DISABLED: Center camera on entity (user doesn't want ANY refocusing)
-      // centerCameraOnEntity(entity);
+      // Show mini panel at click position
+      const entityName = getEntityName(entity.id);
+      console.log(`[Graph3D] Entity clicked: ${entity.id}, name: ${entityName}`);
+      miniPanelEntityId = entity.id;
+      miniPanelEntityName = entityName;
+      miniPanelPosition = { x: event.clientX + 10, y: event.clientY + 10 };
+      showMiniPanel = true;
+      console.log(`[Graph3D] showMiniPanel set to: ${showMiniPanel}, position:`, miniPanelPosition);
 
+    } else {
+      // Clicked on empty space - close mini panel
+      showMiniPanel = false;
     }
+  }
+
+  // Get entity name from gossip/profile
+  function getEntityName(entityId: string): string {
+    if (!env?.gossip) return '';
+    const profiles = typeof env.gossip.getProfiles === 'function' ? env.gossip.getProfiles() : (env.gossip.profiles || []);
+    const profile = profiles.find((p: any) => p.entityId === entityId);
+    return profile?.metadata?.name || '';
+  }
+
+  // Handle mini panel close
+  function closeMiniPanel() {
+    showMiniPanel = false;
+  }
+
+  // Handle mini panel actions
+  function handleMiniPanelAction(event: CustomEvent) {
+    const { type, entityId } = event.detail;
+    console.log(`[Graph3D] Mini panel action: ${type} for ${entityId}`);
+    // TODO: Open full operations panel or execute quick action
+  }
+
+  // Handle open full panel
+  function handleOpenFullPanel(event: CustomEvent) {
+    const { entityId, entityName } = event.detail;
+    console.log(`[Graph3D] Open full panel for: ${entityName || entityId}`);
+    // Emit event to parent to open EntityOperationsPanel in Dockview
+    // @ts-ignore - emit exists on panelBridge
+    panelBridge.emit('openEntityOperations', { entityId, entityName });
+    showMiniPanel = false;
   }
 
   function onMouseDoubleClick(event: MouseEvent) {
@@ -4276,6 +4343,7 @@ let vrHammer: VRHammer | null = null;
         }
 
         isDragging = true;
+        hasMoved = false; // Reset movement flag for this drag
         draggedEntity = entity;
         entity.isDragging = true;
 
@@ -4307,6 +4375,7 @@ let vrHammer: VRHammer | null = null;
       raycaster.setFromCamera(mouse, camera);
 
       if (isDragging && draggedEntity) {
+        hasMoved = true; // Actual movement occurred
         const intersection = new THREE.Vector3();
         raycaster.ray.intersectPlane(dragPlane, intersection);
         draggedEntity.position.copy(intersection.add(dragOffset));
@@ -4319,23 +4388,29 @@ let vrHammer: VRHammer | null = null;
     event.preventDefault();
 
     if (draggedEntity && isDragging) {
-      draggedEntity.isPinned = true;
+      // Mark entity as pinned only if actual movement occurred
+      if (hasMoved) {
+        draggedEntity.isPinned = true;
+      }
       draggedEntity.isDragging = false;
 
       if (draggedEntity.mesh.material instanceof THREE.MeshLambertMaterial) {
         draggedEntity.mesh.material.emissive.setHex(0x002200);
       }
 
-      enforceSpacingConstraints();
-      saveEntityPositions();
+      // Only process drag-related logic if actual movement occurred
+      if (hasMoved) {
+        enforceSpacingConstraints();
+        saveEntityPositions();
+
+        justDragged = true;
+        setTimeout(() => {
+          justDragged = false;
+        }, 100);
+      }
 
       draggedEntity = null;
       isDragging = false;
-
-      justDragged = true;
-      setTimeout(() => {
-        justDragged = false;
-      }, 100);
     }
 
     if (controls) {
@@ -5189,8 +5264,8 @@ let vrHammer: VRHammer | null = null;
    * Get entity display name (realistic names for demo)
    */
   function getEntityShortName(entityId: string): string {
-    // Check if it's a Fed entity (from replica signerId)
-    const currentReplicas = $isolatedEnv?.replicas || new Map();
+    // Check if it's a Fed entity (from replica signerId) - use time-aware replicas
+    const currentReplicas = replicas;
     const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(entityId + ':'));
     const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
 
@@ -5339,6 +5414,19 @@ let vrHammer: VRHammer | null = null;
 <!-- Graph3D Panel - Pure 3D rendering (no sidebar) -->
 <div class="graph3d-wrapper">
   <div bind:this={container} class="graph3d-panel"></div>
+
+  <!-- Entity Mini Panel (on click) -->
+  {#if showMiniPanel}
+    <EntityMiniPanel
+      entityId={miniPanelEntityId}
+      entityName={miniPanelEntityName}
+      position={miniPanelPosition}
+      {isolatedEnv}
+      on:close={closeMiniPanel}
+      on:action={handleMiniPanelAction}
+      on:openFull={handleOpenFullPanel}
+    />
+  {/if}
   <!-- FPS Overlay (outside container so canvas doesn't cover it) -->
   <!-- FPS + Network Stats Overlay -->
   <div class="fps-overlay">
