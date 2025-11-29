@@ -769,6 +769,16 @@
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
+  /* Body background for canvas visibility */
+  :global(body) {
+    background: #000 !important;
+  }
+
+  :global(.light-mode body),
+  :global(body.light-mode) {
+    background: #f5f5f5 !important;
+  }
+
   /* Text Selection Colors */
   ::selection {
     background: rgba(79, 209, 139, 0.3);
@@ -792,7 +802,7 @@
 
   .landing {
     min-height: 100vh;
-    background: #000;
+    background: transparent; /* Let canvas show through */
     color: #fff;
     display: flex;
     flex-direction: column;
@@ -803,6 +813,7 @@
     font-size: 16px;
     line-height: 1.6;
     position: relative;
+    z-index: 1; /* Above canvas */
   }
 
   .landing-lang-switcher {
