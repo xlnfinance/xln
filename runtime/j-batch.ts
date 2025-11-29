@@ -59,6 +59,15 @@ export interface JBatch {
       collateralDiff: bigint;
       ondeltaDiff: bigint;
     }>;
+    forgiveDebtsInTokenIds: number[];
+    insuranceRegs: Array<{
+      insured: string;      // Entity being covered
+      insurer: string;      // Entity providing coverage
+      tokenId: number;
+      limit: bigint;        // Max coverage amount
+      expiresAt: bigint;    // Block timestamp expiration
+    }>;
+    sig: string;            // Counterparty signature (empty for unsigned)
   }>;
 
   // Dispute/Cooperative proofs (DEPRECATED in current Depository.sol - empty arrays for now)
@@ -175,6 +184,17 @@ export function batchAddReserveToCollateral(
 }
 
 /**
+ * Insurance registration for settlement
+ */
+export interface InsuranceReg {
+  insured: string;
+  insurer: string;
+  tokenId: number;
+  limit: bigint;
+  expiresAt: bigint;
+}
+
+/**
  * Add settlement operation to batch
  */
 export function batchAddSettlement(
@@ -187,7 +207,10 @@ export function batchAddSettlement(
     rightDiff: bigint;
     collateralDiff: bigint;
     ondeltaDiff: bigint;
-  }>
+  }>,
+  forgiveDebtsInTokenIds: number[] = [],
+  insuranceRegs: InsuranceReg[] = [],
+  sig: string = '0x'
 ): void {
   // Validate entities are in canonical order
   if (leftEntity >= rightEntity) {
@@ -212,15 +235,61 @@ export function batchAddSettlement(
         existing.diffs.push(newDiff);
       }
     }
+    // Append new insurance registrations
+    existing.insuranceRegs.push(...insuranceRegs);
+    // Append debt forgiveness (dedup)
+    for (const tokenId of forgiveDebtsInTokenIds) {
+      if (!existing.forgiveDebtsInTokenIds.includes(tokenId)) {
+        existing.forgiveDebtsInTokenIds.push(tokenId);
+      }
+    }
   } else {
     jBatchState.batch.settlements.push({
       leftEntity,
       rightEntity,
       diffs,
+      forgiveDebtsInTokenIds,
+      insuranceRegs,
+      sig,
     });
   }
 
-  console.log(`📦 jBatch: Added settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)}, ${diffs.length} tokens`);
+  const insuranceMsg = insuranceRegs.length > 0 ? `, ${insuranceRegs.length} insurance regs` : '';
+  console.log(`📦 jBatch: Added settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)}, ${diffs.length} tokens${insuranceMsg}`);
+}
+
+/**
+ * Add insurance registration to existing settlement (or create new settlement)
+ */
+export function batchAddInsurance(
+  jBatchState: JBatchState,
+  leftEntity: string,
+  rightEntity: string,
+  insuranceReg: InsuranceReg
+): void {
+  // Validate entities are in canonical order
+  const [left, right] = leftEntity < rightEntity ? [leftEntity, rightEntity] : [rightEntity, leftEntity];
+
+  // Find or create settlement
+  let existing = jBatchState.batch.settlements.find(
+    s => s.leftEntity === left && s.rightEntity === right
+  );
+
+  if (!existing) {
+    // Create empty settlement just for insurance
+    existing = {
+      leftEntity: left,
+      rightEntity: right,
+      diffs: [],
+      forgiveDebtsInTokenIds: [],
+      insuranceRegs: [],
+      sig: '0x',
+    };
+    jBatchState.batch.settlements.push(existing);
+  }
+
+  existing.insuranceRegs.push(insuranceReg);
+  console.log(`📦 jBatch: Added insurance ${insuranceReg.insurer.slice(-4)}→${insuranceReg.insured.slice(-4)}, ${insuranceReg.limit} limit`);
 }
 
 /**
