@@ -4,7 +4,7 @@
 
   import { locale, LOCALES, type Locale } from '$lib/i18n';
 
-  export let darkMode = true; // Prop from parent
+  export let darkMode = true;
 
   let langDropdownOpen = false;
 
@@ -12,204 +12,307 @@
     locale.set(loc);
     langDropdownOpen = false;
   }
-  export let onToggleDarkMode: () => void; // Callback to parent
+  export let onToggleDarkMode: () => void;
 
   let canvas: HTMLCanvasElement;
   let ctx: CanvasRenderingContext2D | null;
   let animationFrame: number;
 
-  // Controls
-  let animationEnabled = false; // OFF by default - less annoying
+  // Animation mode: 'off' | 'constellation' | 'grid' | 'noise'
+  let animationMode: 'off' | 'constellation' | 'grid' | 'noise' = 'constellation';
 
-  interface Point {
-    x: number;
-    y: number;
+  const MODES = ['off', 'constellation', 'grid', 'noise'] as const;
+  const MODE_LABELS = {
+    off: '⏹ Off',
+    constellation: '✦ Constellation',
+    grid: '▦ Grid Flow',
+    noise: '◐ Noise Field'
+  };
+
+  function cycleMode() {
+    const idx = MODES.indexOf(animationMode);
+    animationMode = MODES[(idx + 1) % MODES.length] as typeof animationMode;
   }
 
-  interface UnicastPath {
-    hops: Point[];
-    currentHop: number;
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CONSTELLATION - Static nodes with subtle pulse connections
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  interface Star {
+    x: number;
+    y: number;
+    size: number;
+    brightness: number;
+    phase: number;
+  }
+
+  interface Pulse {
+    fromIdx: number;
+    toIdx: number;
     progress: number;
     speed: number;
   }
 
-  interface BroadcastRipple {
-    x: number;
-    y: number;
-    radius: number;
-    maxRadius: number;
-    speed: number;
+  let stars: Star[] = [];
+  let pulses: Pulse[] = [];
+
+  function initConstellation() {
+    stars = [];
+    const count = Math.floor((canvas.width * canvas.height) / 25000); // ~50-80 stars
+    for (let i = 0; i < count; i++) {
+      stars.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        size: 1 + Math.random() * 2,
+        brightness: 0.3 + Math.random() * 0.7,
+        phase: Math.random() * Math.PI * 2
+      });
+    }
   }
 
-  let unicastPaths: UnicastPath[] = [];
-  let broadcastRipples: BroadcastRipple[] = [];
+  function drawConstellation(time: number) {
+    if (!ctx) return;
+
+    // Draw stars with subtle twinkle
+    stars.forEach((star, i) => {
+      const twinkle = 0.5 + 0.5 * Math.sin(time * 0.001 + star.phase);
+      const alpha = star.brightness * twinkle * 0.6;
+      const color = darkMode
+        ? `rgba(120, 180, 255, ${alpha})`
+        : `rgba(60, 100, 180, ${alpha * 0.7})`;
+
+      ctx!.fillStyle = color;
+      ctx!.beginPath();
+      ctx!.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+      ctx!.fill();
+    });
+
+    // Occasionally spawn a pulse between nearby stars
+    if (Math.random() < 0.005 && pulses.length < 3) {
+      const fromIdx = Math.floor(Math.random() * stars.length);
+      const from = stars[fromIdx];
+
+      // Find a nearby star
+      let bestIdx = -1;
+      let bestDist = Infinity;
+      stars.forEach((s, i) => {
+        if (i === fromIdx || !from) return;
+        const dist = Math.hypot(s.x - from.x, s.y - from.y);
+        if (dist < 200 && dist < bestDist) {
+          bestDist = dist;
+          bestIdx = i;
+        }
+      });
+
+      if (bestIdx >= 0) {
+        pulses.push({
+          fromIdx,
+          toIdx: bestIdx,
+          progress: 0,
+          speed: 0.008 + Math.random() * 0.012
+        });
+      }
+    }
+
+    // Draw and update pulses
+    pulses = pulses.filter(pulse => {
+      const from = stars[pulse.fromIdx];
+      const to = stars[pulse.toIdx];
+      if (!from || !to) return false;
+
+      pulse.progress += pulse.speed;
+
+      const alpha = Math.sin(pulse.progress * Math.PI) * 0.4;
+      const color = darkMode
+        ? `rgba(0, 200, 255, ${alpha})`
+        : `rgba(0, 120, 200, ${alpha})`;
+
+      // Draw line
+      ctx!.strokeStyle = color;
+      ctx!.lineWidth = 1;
+      ctx!.beginPath();
+      ctx!.moveTo(from.x, from.y);
+      ctx!.lineTo(to.x, to.y);
+      ctx!.stroke();
+
+      // Draw traveling dot
+      const dotX = from.x + (to.x - from.x) * pulse.progress;
+      const dotY = from.y + (to.y - from.y) * pulse.progress;
+      ctx!.fillStyle = darkMode
+        ? `rgba(0, 255, 255, ${alpha * 2})`
+        : `rgba(0, 150, 255, ${alpha * 2})`;
+      ctx!.beginPath();
+      ctx!.arc(dotX, dotY, 2, 0, Math.PI * 2);
+      ctx!.fill();
+
+      return pulse.progress < 1;
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GRID FLOW - Minimal grid with directional flow
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  let gridOffset = 0;
+
+  function drawGrid(time: number) {
+    if (!ctx) return;
+
+    const spacing = 60;
+    const flowSpeed = 0.3;
+    gridOffset = (gridOffset + flowSpeed) % spacing;
+
+    const baseAlpha = darkMode ? 0.08 : 0.06;
+    const accentAlpha = darkMode ? 0.15 : 0.12;
+
+    // Vertical lines with flow
+    for (let x = -spacing + gridOffset; x < canvas.width + spacing; x += spacing) {
+      const wave = Math.sin(x * 0.01 + time * 0.0005) * 0.5 + 0.5;
+      const alpha = baseAlpha + wave * 0.03;
+
+      ctx.strokeStyle = darkMode
+        ? `rgba(100, 150, 255, ${alpha})`
+        : `rgba(50, 100, 200, ${alpha})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, canvas.height);
+      ctx.stroke();
+    }
+
+    // Horizontal lines (static)
+    for (let y = 0; y < canvas.height; y += spacing) {
+      const wave = Math.sin(y * 0.02 + time * 0.0003) * 0.5 + 0.5;
+      const alpha = baseAlpha * 0.7 + wave * 0.02;
+
+      ctx.strokeStyle = darkMode
+        ? `rgba(100, 150, 255, ${alpha})`
+        : `rgba(50, 100, 200, ${alpha})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(canvas.width, y);
+      ctx.stroke();
+    }
+
+    // Accent dots at intersections with subtle pulse
+    for (let x = gridOffset; x < canvas.width; x += spacing) {
+      for (let y = 0; y < canvas.height; y += spacing) {
+        const pulse = Math.sin(time * 0.002 + x * 0.01 + y * 0.01) * 0.5 + 0.5;
+        const alpha = accentAlpha * pulse;
+
+        if (alpha > 0.05) {
+          ctx.fillStyle = darkMode
+            ? `rgba(0, 200, 255, ${alpha})`
+            : `rgba(0, 120, 200, ${alpha})`;
+          ctx.beginPath();
+          ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // NOISE FIELD - Perlin-like gradient shifts (aurora effect)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Simple noise implementation
+  function noise2D(x: number, y: number, seed: number = 0): number {
+    const n = Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453;
+    return n - Math.floor(n);
+  }
+
+  function smoothNoise(x: number, y: number, scale: number, time: number): number {
+    const sx = x / scale;
+    const sy = y / scale;
+    const t = time * 0.0001;
+
+    // Multi-octave noise
+    let value = 0;
+    value += noise2D(sx + t, sy + t * 0.7, 1) * 0.5;
+    value += noise2D(sx * 2 + t * 1.3, sy * 2 + t, 2) * 0.25;
+    value += noise2D(sx * 4 + t * 0.8, sy * 4 + t * 1.2, 3) * 0.125;
+
+    return value;
+  }
+
+  function drawNoise(time: number) {
+    if (!ctx) return;
+
+    const imageData = ctx.createImageData(canvas.width, canvas.height);
+    const data = imageData.data;
+    const scale = 200;
+
+    for (let y = 0; y < canvas.height; y += 4) {
+      for (let x = 0; x < canvas.width; x += 4) {
+        const n = smoothNoise(x, y, scale, time);
+
+        // Color gradient based on noise
+        let r, g, b, a;
+        if (darkMode) {
+          // Dark mode: deep blue to cyan gradient
+          r = Math.floor(n * 30);
+          g = Math.floor(50 + n * 80);
+          b = Math.floor(100 + n * 100);
+          a = Math.floor(n * 40);
+        } else {
+          // Light mode: subtle blue tints
+          r = Math.floor(n * 20);
+          g = Math.floor(40 + n * 60);
+          b = Math.floor(80 + n * 80);
+          a = Math.floor(n * 25);
+        }
+
+        // Fill 4x4 block for performance
+        for (let dy = 0; dy < 4 && y + dy < canvas.height; dy++) {
+          for (let dx = 0; dx < 4 && x + dx < canvas.width; dx++) {
+            const idx = ((y + dy) * canvas.width + (x + dx)) * 4;
+            data[idx] = r;
+            data[idx + 1] = g;
+            data[idx + 2] = b;
+            data[idx + 3] = a;
+          }
+        }
+      }
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MAIN ANIMATION LOOP
+  // ═══════════════════════════════════════════════════════════════════════════
 
   function resizeCanvas() {
     if (!canvas || !browser) return;
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
-  }
-
-  function randomPoint(): Point {
-    return {
-      x: Math.random() * (canvas?.width || window.innerWidth),
-      y: Math.random() * (canvas?.height || window.innerHeight)
-    };
-  }
-
-  function createUnicastPath() {
-    if (!animationEnabled) return;
-
-    // 2-10 zig-zags = 3-11 total points
-    const numPoints = 3 + Math.floor(Math.random() * 9);
-    const hops: Point[] = [];
-
-    // Start and end points
-    const start = randomPoint();
-    const end = randomPoint();
-
-    hops.push(start);
-
-    // Generate zig-zag waypoints between start and end
-    for (let i = 1; i < numPoints - 1; i++) {
-      const t = i / (numPoints - 1); // Progress from 0 to 1
-
-      // Interpolate between start and end
-      const baseX = start.x + (end.x - start.x) * t;
-      const baseY = start.y + (end.y - start.y) * t;
-
-      // Add random offset for zig-zag (perpendicular to main direction)
-      const maxOffset = Math.min(
-        canvas?.width || window.innerWidth,
-        canvas?.height || window.innerHeight
-      ) * 0.2; // 20% of screen size
-
-      const offsetX = (Math.random() - 0.5) * maxOffset;
-      const offsetY = (Math.random() - 0.5) * maxOffset;
-
-      hops.push({
-        x: Math.max(0, Math.min((canvas?.width || window.innerWidth), baseX + offsetX)),
-        y: Math.max(0, Math.min((canvas?.height || window.innerHeight), baseY + offsetY))
-      });
+    if (animationMode === 'constellation') {
+      initConstellation();
     }
-
-    hops.push(end);
-
-
-    unicastPaths.push({
-      hops,
-      currentHop: 0,
-      progress: 0,
-      speed: 0.01 + Math.random() * 0.06 // More dramatic speed variation (slow to fast)
-    });
   }
 
-  function createBroadcastRipple() {
-    if (!animationEnabled) return;
-
-    const center = randomPoint();
-    const screenDiagonal = Math.sqrt(
-      Math.pow(canvas?.width || window.innerWidth, 2) +
-      Math.pow(canvas?.height || window.innerHeight, 2)
-    );
-    broadcastRipples.push({
-      x: center.x,
-      y: center.y,
-      radius: 0,
-      maxRadius: screenDiagonal * 0.8, // Cover 80% of screen diagonal
-      speed: 2 // Slower to emphasize heaviness
-    });
-  }
-
-  function drawLine(from: Point, to: Point, progress: number, fadeMultiplier: number = 1) {
-    if (!ctx) return;
-
-    const currentX = from.x + (to.x - from.x) * progress;
-    const currentY = from.y + (to.y - from.y) * progress;
-
-    const opacity = (darkMode ? 0.4 : 0.5) * fadeMultiplier;
-
-    // Simpler solid color - no gradient (performance)
-    const color = darkMode ? `rgba(0, 200, 255, ${opacity})` : `rgba(0, 100, 200, ${opacity})`;
-
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = 1;
-    ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
-
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(currentX, currentY);
-    ctx.stroke();
-
-    // Simple bright dot at current position (no shadow blur)
-    const dotColor = darkMode ? `rgba(0, 255, 255, ${opacity * 1.8})` : `rgba(0, 100, 200, ${opacity * 1.8})`;
-
-    ctx.fillStyle = dotColor;
-    ctx.beginPath();
-    ctx.arc(currentX, currentY, 2.5, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  function drawRipple(ripple: BroadcastRipple) {
-    if (!ctx) return;
-
-    const color = darkMode ? '#ff8888' : '#cc5555';
-    const baseOpacity = darkMode ? 0.3 : 0.4;
-    const opacity = baseOpacity * (1 - ripple.radius / ripple.maxRadius);
-
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = opacity;
-    ctx.lineWidth = 4; // Thicker to emphasize heaviness
-
-    ctx.beginPath();
-    ctx.arc(ripple.x, ripple.y, ripple.radius, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-
-  function animate() {
+  function animate(time: number) {
     if (!ctx || !canvas) return;
 
-    // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Update and draw unicast paths
-    unicastPaths = unicastPaths.filter(path => {
-      path.progress += path.speed;
-
-      // Draw all completed hops
-      for (let i = 0; i < path.currentHop; i++) {
-        const from = path.hops[i];
-        const to = path.hops[i + 1];
-        if (from && to) {
-          drawLine(from, to, 1, 0.3);
-        }
-      }
-
-      // Draw current hop
-      if (path.currentHop < path.hops.length - 1) {
-        const from = path.hops[path.currentHop];
-        const to = path.hops[path.currentHop + 1];
-        if (from && to) {
-          drawLine(from, to, path.progress, 1);
-        }
-
-        if (path.progress >= 1) {
-          path.currentHop++;
-          path.progress = 0;
-        }
-      }
-
-      // Keep path alive until all hops complete
-      return path.currentHop < path.hops.length - 1 || path.progress < 1;
-    });
-
-    // Update and draw broadcast ripples
-    broadcastRipples = broadcastRipples.filter(ripple => {
-      ripple.radius += ripple.speed;
-      drawRipple(ripple);
-      return ripple.radius < ripple.maxRadius;
-    });
+    switch (animationMode) {
+      case 'constellation':
+        drawConstellation(time);
+        break;
+      case 'grid':
+        drawGrid(time);
+        break;
+      case 'noise':
+        drawNoise(time);
+        break;
+      case 'off':
+      default:
+        // Nothing
+        break;
+    }
 
     animationFrame = requestAnimationFrame(animate);
   }
@@ -222,23 +325,10 @@
 
     window.addEventListener('resize', resizeCanvas);
 
-    // Start animation loop
-    animate();
-
-    // Spawn unicast paths frequently but not crazy (every 150-250ms) - performance balanced!
-    const unicastInterval = setInterval(() => {
-      createUnicastPath();
-    }, 150 + Math.random() * 100);
-
-    // Spawn broadcast ripples rarely (every 9-15 seconds) - they're expensive!
-    const broadcastInterval = setInterval(() => {
-      createBroadcastRipple();
-    }, 9000 + Math.random() * 6000);
+    animationFrame = requestAnimationFrame(animate);
 
     return () => {
       if (animationFrame) cancelAnimationFrame(animationFrame);
-      clearInterval(unicastInterval);
-      clearInterval(broadcastInterval);
       window.removeEventListener('resize', resizeCanvas);
     };
   });
@@ -271,8 +361,8 @@
       </div>
     {/if}
   </div>
-  <button on:click={() => animationEnabled = !animationEnabled} class="control-btn">
-    {animationEnabled ? '⏸ Pause Animation' : '▶ Play Animation'}
+  <button on:click={cycleMode} class="control-btn">
+    {MODE_LABELS[animationMode]}
   </button>
   <button on:click={onToggleDarkMode} class="control-btn">
     {darkMode ? '☀️ Light Mode' : '🌙 Dark Mode'}
