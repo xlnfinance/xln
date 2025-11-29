@@ -31,7 +31,14 @@
 
   function cycleMode() {
     const idx = MODES.indexOf(animationMode);
-    animationMode = MODES[(idx + 1) % MODES.length] as typeof animationMode;
+    const newMode = MODES[(idx + 1) % MODES.length] as typeof animationMode;
+    console.log('[Animation] Cycling mode:', animationMode, '->', newMode);
+    animationMode = newMode;
+
+    // Re-init constellation if switching to it
+    if (animationMode === 'constellation' && canvas) {
+      initConstellation();
+    }
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -320,12 +327,19 @@
   onMount(() => {
     if (!browser) return;
 
+    console.log('[Animation] onMount - initializing canvas');
     ctx = canvas.getContext('2d');
     resizeCanvas();
+
+    // Init constellation on mount (default mode)
+    if (animationMode === 'constellation') {
+      initConstellation();
+    }
 
     window.addEventListener('resize', resizeCanvas);
 
     animationFrame = requestAnimationFrame(animate);
+    console.log('[Animation] Animation started, mode:', animationMode);
 
     return () => {
       if (animationFrame) cancelAnimationFrame(animationFrame);
