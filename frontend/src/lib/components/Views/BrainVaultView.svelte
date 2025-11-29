@@ -3688,7 +3688,7 @@
 
   .mnemonic-words {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 12px;
     margin-top: 24px;
     padding: 24px;
@@ -3702,7 +3702,7 @@
     align-items: center;
     justify-content: flex-start;
     background: linear-gradient(135deg, rgba(180, 140, 80, 0.12) 0%, rgba(180, 140, 80, 0.06) 100%);
-    padding: 14px 16px;
+    padding: 8px;
     border-radius: 10px;
     font-size: 16px;
     color: #f5d78e;
@@ -3711,7 +3711,7 @@
     letter-spacing: 0.04em;
     border: 1px solid rgba(180, 140, 80, 0.2);
     text-shadow: 0 0 12px rgba(251, 191, 36, 0.25);
-    min-height: 52px;
+    /* min-height: 52px; */
     box-sizing: border-box;
     transition: all 0.15s ease;
   }
