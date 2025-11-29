@@ -70,6 +70,12 @@ contract Depository is Console, ReentrancyGuardLite {
   address public immutable admin;
   bool public emergencyPause;
 
+  // Insurance gas threshold - stop iterating if gasleft() drops below this
+  uint256 public minGasForInsurance = 50000;
+
+  // Insurance cursor - tracks iteration position per insured entity
+  mapping(bytes32 => uint256) public insuranceCursor;
+
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
@@ -244,7 +250,11 @@ contract Depository is Console, ReentrancyGuardLite {
     emergencyPause = isPaused;
     emit EmergencyPauseToggled(isPaused);
   }
-  
+
+  function setMinGasForInsurance(uint256 _minGas) external onlyAdmin {
+    minGasForInsurance = _minGas;
+  }
+
   function getTokensLength() public view returns (uint) {
     return _tokens.length;
   }
@@ -485,6 +495,7 @@ contract Depository is Console, ReentrancyGuardLite {
     bytes32 rightEntity,
     SettlementDiff[] memory diffs,
     uint[] memory forgiveDebtsInTokenIds,
+    InsuranceRegistration[] memory insuranceRegs,
     bytes memory sig
   ) public whenNotPaused nonReentrant returns (bool) {
     require(leftEntity != rightEntity, "Cannot settle with self");
@@ -512,7 +523,8 @@ contract Depository is Console, ReentrancyGuardLite {
         ch_key,
         _channels[ch_key].cooperativeNonce,
         diffs,
-        forgiveDebtsInTokenIds
+        forgiveDebtsInTokenIds,
+        insuranceRegs
       );
 
       bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
@@ -596,6 +608,32 @@ contract Depository is Console, ReentrancyGuardLite {
       _syncDebtIndex(rightEntity, tokenId);
     }
 
+    // Process insurance registrations (mutual agreement via settle signature)
+    for (uint i = 0; i < insuranceRegs.length; i++) {
+      InsuranceRegistration memory reg = insuranceRegs[i];
+
+      // Insurer must be one of the settling parties
+      require(reg.insurer == leftEntity || reg.insurer == rightEntity, "Insurer must be settling party");
+      // Insured must be one of the settling parties
+      require(reg.insured == leftEntity || reg.insured == rightEntity, "Insured must be settling party");
+      // Can't insure yourself
+      require(reg.insurer != reg.insured, "Cannot self-insure");
+      // Must have future expiry
+      require(reg.expiresAt > block.timestamp, "Insurance already expired");
+      // Must have limit
+      require(reg.limit > 0, "Insurance limit must be positive");
+
+      // Add to insured's FIFO queue
+      insuranceLines[reg.insured].push(InsuranceLine({
+        insurer: reg.insurer,
+        tokenId: reg.tokenId,
+        remaining: reg.limit,
+        expiresAt: reg.expiresAt
+      }));
+
+      emit InsuranceRegistered(reg.insured, reg.insurer, reg.tokenId, reg.limit, reg.expiresAt);
+    }
+
     // Emit ChannelSettled event with final values
     Settled[] memory settledEvents = new Settled[](diffs.length);
     for (uint i = 0; i < diffs.length; i++) {
@@ -665,6 +703,7 @@ contract Depository is Console, ReentrancyGuardLite {
         settlement.rightEntity,
         settlement.diffs,
         settlement.forgiveDebtsInTokenIds,
+        settlement.insuranceRegs,
         settlement.sig
       )) {
         completeSuccess = false;
@@ -766,6 +805,7 @@ contract Depository is Console, ReentrancyGuardLite {
     bytes32 rightEntity;
     SettlementDiff[] diffs;
     uint[] forgiveDebtsInTokenIds;  // Token IDs where debts should be forgiven
+    InsuranceRegistration[] insuranceRegs;  // Insurance lines to register
     bytes sig;                       // Signature from counterparty
   }
   //Enforces the invariant: Its main job is to run the check you described: require(leftReserveDiff + rightReserveDiff + collateralDiff == 0). This guarantees no value is created or lost, only moved.
@@ -835,6 +875,33 @@ contract Depository is Console, ReentrancyGuardLite {
   struct Debt {
     uint amount;
     bytes32 creditor;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //                              INSURANCE
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  struct InsuranceLine {
+    bytes32 insurer;      // Entity providing coverage
+    uint256 tokenId;      // Token covered
+    uint256 remaining;    // Coverage left (decreases on claim)
+    uint64 expiresAt;     // Block timestamp expiration
+  }
+
+  // insured entity => insurance lines (FIFO queue)
+  mapping(bytes32 => InsuranceLine[]) public insuranceLines;
+
+  event InsuranceRegistered(bytes32 indexed insured, bytes32 indexed insurer, uint256 indexed tokenId, uint256 limit, uint64 expiresAt);
+  event InsuranceClaimed(bytes32 indexed insured, bytes32 indexed insurer, bytes32 indexed creditor, uint256 tokenId, uint256 amount);
+  event InsuranceExpired(bytes32 indexed insured, bytes32 indexed insurer, uint256 indexed tokenId, uint256 index);
+
+  // Registration struct for bilateral insurance agreement during settle()
+  struct InsuranceRegistration {
+    bytes32 insured;      // Entity being covered
+    bytes32 insurer;      // Entity providing coverage (must be one of the settling parties)
+    uint256 tokenId;      // Token covered
+    uint256 limit;        // Max coverage amount
+    uint64 expiresAt;     // Block timestamp expiration
   }
 
   struct DebtSnapshot {
@@ -1427,21 +1494,36 @@ contract Depository is Console, ReentrancyGuardLite {
 
       bytes32 creditor = debt.creditor;
       uint256 payableAmount = available < amount ? available : amount;
+
+      // Pay from reserves first
       if (payableAmount > 0) {
         _reserves[creditor][tokenId] += payableAmount;
         available -= payableAmount;
         _decreaseDebtStats(entity, tokenId, payableAmount);
-        if (payableAmount == amount) {
-          debt.amount = 0;
-          emit DebtEnforced(entity, creditor, tokenId, payableAmount, 0, cursor + 1);
-          _afterDebtCleared(entity, true);
-          delete queue[cursor];
-          cursor++;
-        } else {
-          debt.amount = amount - payableAmount;
-          emit DebtEnforced(entity, creditor, tokenId, payableAmount, debt.amount, cursor);
-          available = 0;
+        amount -= payableAmount;
+      }
+
+      // If reserves exhausted but debt remains, try insurance
+      if (amount > 0 && available == 0) {
+        uint256 insuranceRemaining = _claimFromInsurance(entity, creditor, tokenId, amount);
+        uint256 insurancePaid = amount - insuranceRemaining;
+        if (insurancePaid > 0) {
+          _decreaseDebtStats(entity, tokenId, insurancePaid);
+          amount = insuranceRemaining;
         }
+      }
+
+      // Update debt state
+      uint256 totalPaid = debt.amount - amount;
+      if (amount == 0) {
+        debt.amount = 0;
+        emit DebtEnforced(entity, creditor, tokenId, totalPaid, 0, cursor + 1);
+        _afterDebtCleared(entity, true);
+        delete queue[cursor];
+        cursor++;
+      } else {
+        debt.amount = amount;
+        emit DebtEnforced(entity, creditor, tokenId, totalPaid, debt.amount, cursor);
       }
 
       iterations++;
@@ -1756,6 +1838,7 @@ contract Depository is Console, ReentrancyGuardLite {
       return;
     }
 
+    // 1. First, use debtor's reserves
     uint256 available = _reserves[debtor][tokenId];
     uint256 payAmount = available >= amount ? amount : available;
 
@@ -1766,10 +1849,93 @@ contract Depository is Console, ReentrancyGuardLite {
     }
 
     uint256 remaining = amount - payAmount;
+    if (remaining == 0) {
+      return;
+    }
+
+    // 2. Claim from insurance FIFO queue
+    remaining = _claimFromInsurance(debtor, creditor, tokenId, remaining);
+
+    // 3. Create debt for any remaining shortfall
     if (remaining > 0) {
       _addDebt(debtor, tokenId, creditor, remaining);
       _syncDebtIndex(debtor, tokenId);
     }
+  }
+
+  /**
+   * @notice Claims from debtor's insurance lines (FIFO order with gas cap)
+   * @dev Iterates from cursor position, skips expired/exhausted, stops if gas low
+   * @param debtor Entity that owes (the insured party)
+   * @param creditor Entity that is owed (receives insurance payout)
+   * @param tokenId Token being claimed
+   * @param shortfall Amount to cover
+   * @return remaining Amount still uncovered after insurance claims
+   */
+  function _claimFromInsurance(
+    bytes32 debtor,
+    bytes32 creditor,
+    uint256 tokenId,
+    uint256 shortfall
+  ) internal returns (uint256 remaining) {
+    remaining = shortfall;
+    InsuranceLine[] storage lines = insuranceLines[debtor];
+    uint256 length = lines.length;
+    if (length == 0) return remaining;
+
+    uint256 cursor = insuranceCursor[debtor];
+    if (cursor >= length) cursor = 0;
+
+    uint256 startCursor = cursor;
+    uint256 minGas = minGasForInsurance;
+
+    // Iterate from cursor, wrap around once if needed
+    for (uint256 checked = 0; checked < length && remaining > 0; checked++) {
+      // Gas cap - stop if running low
+      if (gasleft() < minGas) break;
+
+      uint256 i = (startCursor + checked) % length;
+      InsuranceLine storage line = lines[i];
+
+      // Skip if wrong token
+      if (line.tokenId != tokenId) continue;
+
+      // Skip expired lines (lazy cleanup - just skip)
+      if (block.timestamp > line.expiresAt) {
+        emit InsuranceExpired(debtor, line.insurer, tokenId, i);
+        continue;
+      }
+
+      // Skip exhausted lines
+      if (line.remaining == 0) continue;
+
+      // Check insurer has reserves to pay
+      uint256 insurerReserves = _reserves[line.insurer][tokenId];
+      uint256 canPay = line.remaining < insurerReserves ? line.remaining : insurerReserves;
+      uint256 claimAmount = canPay < remaining ? canPay : remaining;
+
+      if (claimAmount == 0) continue;
+
+      // Transfer from insurer to creditor
+      _reserves[line.insurer][tokenId] -= claimAmount;
+      emit ReserveUpdated(line.insurer, tokenId, _reserves[line.insurer][tokenId]);
+      _increaseReserve(creditor, tokenId, claimAmount);
+
+      // Decrease remaining coverage
+      line.remaining -= claimAmount;
+      remaining -= claimAmount;
+
+      // LOAN MODEL: debtor now owes insurer (insurer can recover later)
+      _addDebt(debtor, tokenId, line.insurer, claimAmount);
+
+      emit InsuranceClaimed(debtor, line.insurer, creditor, tokenId, claimAmount);
+
+      // Advance cursor past this line for next call
+      cursor = (i + 1) % length;
+    }
+
+    // Save cursor position
+    insuranceCursor[debtor] = cursor;
   }
 
   // Cooperative dispute proof: both parties agree to close channel with signed proof
@@ -2055,15 +2221,47 @@ contract Depository is Console, ReentrancyGuardLite {
   }
 
   /* =================================================================================================
-  /* === SHORTCUT FUNCTIONS ==========================================================================
-  /* =================================================================================================
+  /* === INSURANCE VIEW FUNCTIONS ====================================================================
+  /* =================================================================================================*/
 
   /**
-   * @notice Unilateral action to move funds from reserve to a channel's collateral.
-   * @dev This does not require a counterparty signature as it only adds funds to the channel.
-   * @param peer The counterparty in the channel.
-   * @param tokenId The internal ID of the token being moved.
-   * @param amount The amount to move.
+   * @notice Get all insurance lines for an insured entity
+   * @param insured The entity that has insurance coverage
+   * @return lines Array of insurance lines (FIFO order)
    */
+  function getInsuranceLines(bytes32 insured) external view returns (InsuranceLine[] memory lines) {
+    return insuranceLines[insured];
+  }
+
+  /**
+   * @notice Get count of insurance lines for an entity
+   * @param insured The entity to check
+   * @return count Number of insurance lines
+   */
+  function getInsuranceLinesCount(bytes32 insured) external view returns (uint256 count) {
+    return insuranceLines[insured].length;
+  }
+
+  /**
+   * @notice Get available insurance coverage for a specific token
+   * @param insured The insured entity
+   * @param tokenId The token to check coverage for
+   * @return totalAvailable Sum of remaining coverage for non-expired lines matching tokenId
+   */
+  function getAvailableInsurance(bytes32 insured, uint256 tokenId) external view returns (uint256 totalAvailable) {
+    InsuranceLine[] storage lines = insuranceLines[insured];
+    uint256 length = lines.length;
+
+    for (uint256 i = 0; i < length; i++) {
+      InsuranceLine storage line = lines[i];
+      if (line.tokenId != tokenId) continue;
+      if (block.timestamp > line.expiresAt) continue;
+      if (line.remaining == 0) continue;
+
+      // Cap by insurer's actual reserves
+      uint256 insurerReserves = _reserves[line.insurer][tokenId];
+      totalAvailable += line.remaining < insurerReserves ? line.remaining : insurerReserves;
+    }
+  }
 
 }
