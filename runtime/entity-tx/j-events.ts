@@ -209,6 +209,121 @@ export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntit
     newEntityState.accountInputQueue.push(accountInput as any);
 
     if (DEBUG) console.log(`✅ TransferReserveToCollateral: Created accountInput for token ${tokenId} with counterparty ${counterpartyEntityId.slice(0,10)}...`);
+  } else if (event.type === 'InsuranceRegistered') {
+    const { insured, insurer, tokenId, limit, expiresAt } = event.data;
+    const tokenSymbol = getTokenSymbol(tokenId as number);
+    const decimals = getTokenDecimals(tokenId as number);
+    const limitDisplay = (Number(limit) / (10 ** decimals)).toFixed(2);
+
+    // Initialize insurance lines if not present
+    if (!newEntityState.insuranceLines) {
+      newEntityState.insuranceLines = [];
+    }
+
+    // Add insurance line (only if we are the insured)
+    if (insured === entityState.entityId) {
+      newEntityState.insuranceLines.push({
+        insurer: insurer as string,
+        tokenId: tokenId as number,
+        remaining: BigInt(limit as string | number | bigint),
+        expiresAt: BigInt(expiresAt as string | number | bigint),
+      });
+    }
+
+    elaborateMessage = `🛡️ ${from} observed INSURANCE REGISTERED:
+📍 Block: ${blockNumber} | ⏰ ${timestamp} | 🔗 Tx: ${txHashShort}
+🏦 Insurer: ${(insurer as string).slice(-8)} covers ${(insured as string).slice(-8)}
+💰 Limit: ${limitDisplay} ${tokenSymbol} | ⏳ Expires: ${new Date(Number(expiresAt) * 1000).toLocaleDateString()}`;
+
+    addMessage(newEntityState, elaborateMessage);
+
+  } else if (event.type === 'InsuranceClaimed') {
+    const { insured, insurer, creditor, tokenId, amount } = event.data;
+    const tokenSymbol = getTokenSymbol(tokenId as number);
+    const decimals = getTokenDecimals(tokenId as number);
+    const amountDisplay = (Number(amount) / (10 ** decimals)).toFixed(4);
+
+    // Update insurance line remaining if we are the insured
+    if (insured === entityState.entityId && newEntityState.insuranceLines) {
+      const line = newEntityState.insuranceLines.find(
+        l => l.insurer === insurer && l.tokenId === tokenId
+      );
+      if (line) {
+        line.remaining -= BigInt(amount as string | number | bigint);
+      }
+    }
+
+    elaborateMessage = `💸 ${from} observed INSURANCE CLAIMED:
+📍 Block: ${blockNumber} | ⏰ ${timestamp} | 🔗 Tx: ${txHashShort}
+🏦 Insurer: ${(insurer as string).slice(-8)} paid ${amountDisplay} ${tokenSymbol}
+👤 For: ${(insured as string).slice(-8)} → Creditor: ${(creditor as string).slice(-8)}`;
+
+    addMessage(newEntityState, elaborateMessage);
+
+  } else if (event.type === 'InsuranceExpired') {
+    const { insured, insurer, tokenId, index } = event.data;
+    const tokenSymbol = getTokenSymbol(tokenId as number);
+
+    elaborateMessage = `⏰ ${from} observed INSURANCE EXPIRED:
+📍 Block: ${blockNumber} | ⏰ ${timestamp} | 🔗 Tx: ${txHashShort}
+🏦 Insurer: ${(insurer as string).slice(-8)} policy for ${(insured as string).slice(-8)}
+📊 Token: ${tokenSymbol} | Index: ${index}`;
+
+    addMessage(newEntityState, elaborateMessage);
+
+  } else if (event.type === 'DebtCreated') {
+    const { debtor, creditor, tokenId, amount, debtIndex } = event.data;
+    const tokenSymbol = getTokenSymbol(tokenId as number);
+    const decimals = getTokenDecimals(tokenId as number);
+    const amountDisplay = (Number(amount) / (10 ** decimals)).toFixed(4);
+
+    // Initialize debts if not present
+    if (!newEntityState.debts) {
+      newEntityState.debts = [];
+    }
+
+    // Track debt if we are the debtor
+    if (debtor === entityState.entityId) {
+      newEntityState.debts.push({
+        creditor: creditor as string,
+        tokenId: tokenId as number,
+        amount: BigInt(amount as string | number | bigint),
+        index: debtIndex as number,
+      });
+    }
+
+    elaborateMessage = `🔴 ${from} observed DEBT CREATED:
+📍 Block: ${blockNumber} | ⏰ ${timestamp} | 🔗 Tx: ${txHashShort}
+💳 Debtor: ${(debtor as string).slice(-8)} owes ${amountDisplay} ${tokenSymbol}
+👤 Creditor: ${(creditor as string).slice(-8)} | Index: ${debtIndex}`;
+
+    addMessage(newEntityState, elaborateMessage);
+
+  } else if (event.type === 'DebtEnforced') {
+    const { debtor, creditor, tokenId, amountPaid, remainingAmount, newDebtIndex } = event.data;
+    const tokenSymbol = getTokenSymbol(tokenId as number);
+    const decimals = getTokenDecimals(tokenId as number);
+    const paidDisplay = (Number(amountPaid) / (10 ** decimals)).toFixed(4);
+    const remainingDisplay = (Number(remainingAmount) / (10 ** decimals)).toFixed(4);
+
+    // Update debt if we are the debtor
+    if (debtor === entityState.entityId && newEntityState.debts) {
+      const debt = newEntityState.debts.find(
+        d => d.creditor === creditor && d.tokenId === tokenId
+      );
+      if (debt) {
+        debt.amount = BigInt(remainingAmount as string | number | bigint);
+        debt.index = newDebtIndex as number;
+      }
+    }
+
+    elaborateMessage = `✅ ${from} observed DEBT ENFORCED:
+📍 Block: ${blockNumber} | ⏰ ${timestamp} | 🔗 Tx: ${txHashShort}
+💳 Debtor: ${(debtor as string).slice(-8)} paid ${paidDisplay} ${tokenSymbol}
+👤 Creditor: ${(creditor as string).slice(-8)} | Remaining: ${remainingDisplay}`;
+
+    addMessage(newEntityState, elaborateMessage);
+
   } else {
     addMessage(newEntityState, `⚠️ Unhandled j-event type: ${event.type}`);
   }
