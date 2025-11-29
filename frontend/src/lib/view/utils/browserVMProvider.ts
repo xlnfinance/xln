@@ -393,6 +393,160 @@ export class BrowserVMProvider {
   isInitialized(): boolean {
     return this.initialized;
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //                              INSURANCE
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** Get all insurance lines for an entity */
+  async getInsuranceLines(entityId: string): Promise<Array<{
+    insurer: string;
+    tokenId: number;
+    remaining: bigint;
+    expiresAt: bigint;
+  }>> {
+    if (!this.depositoryAddress || !this.depositoryInterface) {
+      throw new Error('Depository not deployed');
+    }
+
+    const callData = this.depositoryInterface.encodeFunctionData('getInsuranceLines', [entityId]);
+
+    const result = await this.vm.evm.runCall({
+      to: this.depositoryAddress,
+      caller: this.deployerAddress,
+      data: hexToBytes(callData as `0x${string}`),
+      gasLimit: 500000n,
+    });
+
+    if (result.execResult.exceptionError) {
+      console.error('[BrowserVM] getInsuranceLines failed:', result.execResult.exceptionError);
+      return [];
+    }
+
+    try {
+      const decoded = this.depositoryInterface.decodeFunctionResult('getInsuranceLines', result.execResult.returnValue);
+      return decoded[0].map((line: any) => ({
+        insurer: line.insurer,
+        tokenId: Number(line.tokenId),
+        remaining: line.remaining,
+        expiresAt: line.expiresAt,
+      }));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Get available insurance coverage for entity+token */
+  async getAvailableInsurance(entityId: string, tokenId: number): Promise<bigint> {
+    if (!this.depositoryAddress || !this.depositoryInterface) {
+      throw new Error('Depository not deployed');
+    }
+
+    const callData = this.depositoryInterface.encodeFunctionData('getAvailableInsurance', [entityId, tokenId]);
+
+    const result = await this.vm.evm.runCall({
+      to: this.depositoryAddress,
+      caller: this.deployerAddress,
+      data: hexToBytes(callData as `0x${string}`),
+      gasLimit: 100000n,
+    });
+
+    if (result.execResult.exceptionError) {
+      console.error('[BrowserVM] getAvailableInsurance failed:', result.execResult.exceptionError);
+      return 0n;
+    }
+
+    try {
+      const decoded = this.depositoryInterface.decodeFunctionResult('getAvailableInsurance', result.execResult.returnValue);
+      return decoded[0];
+    } catch {
+      return 0n;
+    }
+  }
+
+  /** Execute settle with insurance registration */
+  async settleWithInsurance(
+    leftEntity: string,
+    rightEntity: string,
+    diffs: Array<{
+      tokenId: number;
+      leftDiff: bigint;
+      rightDiff: bigint;
+      collateralDiff: bigint;
+      ondeltaDiff: bigint;
+    }>,
+    forgiveDebtsInTokenIds: number[] = [],
+    insuranceRegs: Array<{
+      insured: string;
+      insurer: string;
+      tokenId: number;
+      limit: bigint;
+      expiresAt: bigint;
+    }> = [],
+    sig: string = '0x'
+  ): Promise<{ success: boolean; logs: any[] }> {
+    if (!this.depositoryAddress || !this.depositoryInterface) {
+      throw new Error('Depository not deployed');
+    }
+
+    const callData = this.depositoryInterface.encodeFunctionData('settle', [
+      leftEntity,
+      rightEntity,
+      diffs,
+      forgiveDebtsInTokenIds,
+      insuranceRegs,
+      sig,
+    ]);
+
+    const currentNonce = await this.getCurrentNonce();
+    const tx = createLegacyTx({
+      to: this.depositoryAddress,
+      gasLimit: 2000000n,
+      gasPrice: 10n,
+      data: hexToBytes(callData as `0x${string}`),
+      nonce: currentNonce,
+    }, { common: this.common }).sign(this.deployerPrivKey);
+
+    const result = await runTx(this.vm, { tx });
+
+    if (result.execResult.exceptionError) {
+      console.error('[BrowserVM] settle failed:', result.execResult.exceptionError);
+      return { success: false, logs: [] };
+    }
+
+    // Parse logs
+    const logs = this.parseLogs(result.execResult.logs || []);
+
+    const insuranceCount = insuranceRegs.length;
+    console.log(`[BrowserVM] Settle completed: ${diffs.length} diffs, ${insuranceCount} insurance regs`);
+
+    return { success: true, logs };
+  }
+
+  /** Parse EVM logs into decoded events */
+  private parseLogs(logs: any[]): any[] {
+    if (!this.depositoryInterface) return [];
+
+    const decoded: any[] = [];
+    for (const log of logs) {
+      try {
+        const topics = log[1].map((t: Uint8Array) => bytesToHex(t));
+        const data = bytesToHex(log[2]);
+        const parsed = this.depositoryInterface.parseLog({ topics, data });
+        if (parsed) {
+          decoded.push({
+            name: parsed.name,
+            args: Object.fromEntries(
+              parsed.fragment.inputs.map((input, i) => [input.name, parsed.args[i]])
+            ),
+          });
+        }
+      } catch {
+        // Skip unparseable logs
+      }
+    }
+    return decoded;
+  }
 }
 
 // Singleton instance

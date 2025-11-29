@@ -550,6 +550,22 @@ export interface EntityState {
 
   // 📦 J-Batch system - accumulates operations for on-chain submission (typed in j-batch.ts)
   jBatchState?: any; // JBatchState - avoid circular import
+
+  // 🛡️ Insurance - coverage lines from insurers
+  insuranceLines?: Array<{
+    insurer: string;
+    tokenId: number;
+    remaining: bigint;
+    expiresAt: bigint;
+  }>;
+
+  // 💳 Debts - amounts owed to creditors (from FIFO queue)
+  debts?: Array<{
+    creditor: string;
+    tokenId: number;
+    amount: bigint;
+    index: number;
+  }>;
 }
 
 export interface ProposedEntityFrame {
