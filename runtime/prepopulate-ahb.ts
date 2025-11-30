@@ -196,6 +196,16 @@ function pushSnapshot(env: Env, description: string, subtitle: FrameSubtitle) {
   console.log(`[pushSnapshot #${pushSnapshotCount}] Called for: "${description}"`);
   const gossipSnapshot = cloneProfilesForSnapshot(env);
 
+  // Clone xlnomies for this frame (J-Machine state)
+  const xlnomiesSnapshot = env.xlnomies ? Array.from(env.xlnomies.values()).map(x => ({
+    name: x.name,
+    jMachine: {
+      position: { ...x.jMachine.position },
+      capacity: x.jMachine.capacity,
+      jHeight: x.jMachine.jHeight,
+    }
+  })) : undefined;
+
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: Date.now(),
@@ -208,7 +218,8 @@ function pushSnapshot(env: Env, description: string, subtitle: FrameSubtitle) {
     },
     runtimeOutputs: [],
     description,
-    subtitle, // NEW: Fed Chair educational content
+    subtitle, // Fed Chair educational content
+    xlnomies: xlnomiesSnapshot, // J-Machine state for this frame
     ...(gossipSnapshot ? { gossip: gossipSnapshot } : {}),
   };
 
@@ -252,17 +263,74 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
   console.log(`📋 Jurisdiction: ${arrakis.name}`);
 
   // ============================================================================
-  // STEP 0: Create entities
+  // STEP 0a: Create Xlnomy (J-Machine) for visualization
+  // ============================================================================
+  console.log('\n🏛️ Creating AHB Xlnomy (J-Machine at center)...');
+
+  // Create minimal xlnomy directly (bypass full createXlnomy which needs BrowserVM)
+  if (!env.xlnomies) {
+    env.xlnomies = new Map();
+  }
+
+  const ahbXlnomy = {
+    name: 'AHB Demo',
+    evmType: 'browservm' as const,
+    blockTimeMs: 100,
+    jMachine: {
+      position: { x: 0, y: 300, z: 0 }, // Center, Supreme layer
+      capacity: 3,
+      jHeight: 0,
+      mempool: [],
+    },
+    contracts: {
+      depository: arrakis.depositoryAddress,
+      entityProvider: arrakis.entityProviderAddress,
+    },
+    evm: null, // No actual EVM in demo mode
+    entities: [],
+    created: Date.now(),
+    version: '1.0.0',
+  };
+
+  env.xlnomies.set('AHB Demo', ahbXlnomy);
+  env.activeXlnomy = 'AHB Demo';
+  console.log('✅ AHB Xlnomy created (J-Machine visible in 3D)');
+
+  // Push Frame 0: Clean slate with J-Machine only (no entities yet)
+  pushSnapshot(env, 'Frame 0: Clean Slate - J-Machine Ready', {
+    title: 'Jurisdiction Machine Deployed',
+    what: 'The J-Machine (Jurisdiction Machine) is deployed on-chain. It represents the EVM smart contracts (Depository.sol, EntityProvider.sol) that will process settlements.',
+    why: 'Before any entities exist, the jurisdiction infrastructure must be in place. Think of this as deploying the central bank\'s core settlement system.',
+    tradfiParallel: 'Like the Federal Reserve deploying its Fedwire Funds Service before any banks can participate.',
+    keyMetrics: [
+      'J-Machine: Deployed at origin',
+      'Entities: 0 (none created yet)',
+      'Reserves: Empty',
+    ]
+  });
+
+  // ============================================================================
+  // STEP 0b: Create entities
   // ============================================================================
   console.log('\n📦 Creating entities: Alice, Hub, Bob...');
 
-  const entityNames = ['Alice', 'Hub', 'Bob'];
+  // AHB Triangle Layout (J-Machine at y=300):
+  // - Hub: 50px below J-Machine (y=250), center
+  // - Alice/Bob: 200px below Hub (y=50), spread horizontally
+  const AHB_POSITIONS = {
+    Alice: { x: -30, y: 50, z: 0 },   // Bottom-left
+    Hub:   { x: 0, y: 250, z: 0 },    // 50px below J-Machine
+    Bob:   { x: 30, y: 50, z: 0 },    // Bottom-right
+  };
+
+  const entityNames = ['Alice', 'Hub', 'Bob'] as const;
   const entities: Array<{id: string, signer: string, name: string}> = [];
   const createEntityTxs = [];
 
   for (let i = 0; i < 3; i++) {
     const name = entityNames[i];
     const signer = `s${i + 1}`;
+    const position = AHB_POSITIONS[name];
 
     // SIMPLE FALLBACK ONLY (no blockchain calls in demos)
     const entityNumber = i + 1;
@@ -275,6 +343,7 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
       signerId: signer,
       data: {
         isProposer: true,
+        position, // Explicit position for proper AHB triangle layout
         config: {
           mode: 'proposer-based' as const,
           threshold: 1n,
@@ -284,7 +353,7 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
         }
       }
     });
-    console.log(`${name}: Entity #${entityNumber} (${entityId.slice(0, 10)}...)`);
+    console.log(`${name}: Entity #${entityNumber} @ (${position.x}, ${position.y}, ${position.z})`);
   }
 
   await applyRuntimeInput(env, {
