@@ -151,7 +151,7 @@
     activityRing?: THREE.Mesh | null; // Activity indicator ring
     hubConnectedIds?: Set<string>; // PERF: Cache of connected entity IDs for hubs
     baseScale?: number; // Base scale from reserves (before pulse animation)
-    reserveLabel?: THREE.Sprite; // Reserve amount label under entity
+    // NOTE: reserveLabel removed - too noisy
   }
 
   interface FrameActivity {
@@ -260,6 +260,7 @@ let vrHammer: VRHammer | null = null;
   let animationId: number | null;
   let clock = new THREE.Clock();
   let hoveredObject: any = null;
+  // NOTE: hoveredEntity removed - reserve labels were removed
   let tooltip = { visible: false, x: 0, y: 0, content: '' };
 
   // Dual tooltip for connections (showing both perspectives)
@@ -589,13 +590,29 @@ let vrHammer: VRHammer | null = null;
   }
 
   // ===== CREATE J-MACHINES FOR EACH XLNOMY =====
-  // CRITICAL: Always read from $isolatedEnv (live state), not time-travel env
-  // Xlnomies Map exists on live state only, not on individual historical frames
-  $: if ($isolatedEnv?.xlnomies && scene) {
+  // Time-aware: Read from env (historical frame or live state)
+  // Historical frames have xlnomies as array, live state has xlnomies as Map
+  $: if (scene) {
+    // Get xlnomies from time-aware env (array from history) or live state (Map)
+    let xlnomiesArray: Array<{ name: string; jMachine: { position: { x: number; y: number; z: number }; capacity: number; jHeight: number } }> = [];
+
+    if (env?.xlnomies) {
+      // Historical frame: xlnomies is an array
+      if (Array.isArray(env.xlnomies)) {
+        xlnomiesArray = env.xlnomies;
+      } else if (env.xlnomies instanceof Map) {
+        // Live state: xlnomies is a Map
+        xlnomiesArray = Array.from(env.xlnomies.values()).map((x: any) => ({
+          name: x.name,
+          jMachine: x.jMachine
+        }));
+      }
+    }
+
     // Remove J-Machines that no longer exist
-    const currentXlnomies = new Set($isolatedEnv.xlnomies.keys());
+    const currentXlnomyNames = new Set(xlnomiesArray.map(x => x.name));
     for (const [name, mesh] of jMachines.entries()) {
-      if (!currentXlnomies.has(name)) {
+      if (!currentXlnomyNames.has(name)) {
         scene.remove(mesh);
         jMachines.delete(name);
         console.log(`[Graph3D] Removed J-Machine: ${name}`);
@@ -603,12 +620,12 @@ let vrHammer: VRHammer | null = null;
     }
 
     // Create new J-Machines
-    $isolatedEnv.xlnomies.forEach((xlnomy: any, name: string) => {
-      if (!jMachines.has(name)) {
-        console.log(`[Graph3D] Creating J-Machine for xlnomy: ${name} at position`, xlnomy.jMachine.position);
-        const jMachine = createJMachine(12, xlnomy.jMachine.position, name); // 2x smaller for Fed Chair UX
+    xlnomiesArray.forEach((xlnomy) => {
+      if (!jMachines.has(xlnomy.name)) {
+        console.log(`[Graph3D] Creating J-Machine for xlnomy: ${xlnomy.name} at position`, xlnomy.jMachine.position);
+        const jMachine = createJMachine(12, xlnomy.jMachine.position, xlnomy.name); // 2x smaller for Fed Chair UX
         scene.add(jMachine);
-        jMachines.set(name, jMachine);
+        jMachines.set(xlnomy.name, jMachine);
         console.log(`[Graph3D] ✅ J-Machine created, scene now has ${scene.children.length} objects`);
       }
     });
@@ -909,8 +926,17 @@ let vrHammer: VRHammer | null = null;
     panelBridge.on('camera:focus', handleCameraFocus);
 
     const unsubscribe1 = isolatedEnv.subscribe(updateNetworkData);
+    // CRITICAL: Also subscribe to timeIndex changes for time-travel
+    const unsubscribe2 = isolatedTimeIndex.subscribe(() => {
+      if (scene) updateNetworkData();
+    });
+    const unsubscribe3 = isolatedHistory.subscribe(() => {
+      if (scene) updateNetworkData();
+    });
     return () => {
       unsubscribe1();
+      unsubscribe2();
+      unsubscribe3();
       panelBridge.off('vr:toggle', handleVRToggle);
       panelBridge.off('broadcast:toggle', handleBroadcastToggle);
       panelBridge.off('broadcast:style', handleBroadcastStyle);
@@ -920,9 +946,11 @@ let vrHammer: VRHammer | null = null;
     };
   });
 
-  // Reactive update when isolated env changes
-  // Always update (debounce removed to fix cache issues)
-  $: if ($isolatedEnv && scene) {
+  // Reactive update when isolated env OR timeIndex changes
+  // CRITICAL: Must react to $isolatedTimeIndex for time-travel to work visually
+  $: if (scene && ($isolatedEnv || $isolatedTimeIndex >= -1)) {
+    // Re-read replicas from time-aware env before updating
+    const _ = replicas; // Force dependency on replicas (derived from env)
     updateNetworkData();
   }
 
@@ -1451,6 +1479,25 @@ let vrHammer: VRHammer | null = null;
       controls.enableRotate = true;
       controls.enablePan = true;
 
+      // CRITICAL: screenSpacePanning = true for intuitive right-click pan
+      // Default is false which makes panning move along camera's local axes
+      controls.screenSpacePanning = true;
+
+      // Allow zooming close to entities without clipping
+      controls.minDistance = 5; // Don't allow getting too close
+      controls.maxDistance = 5000; // Allow zooming out far
+
+      // Debug: Log OrbitControls events
+      controls.addEventListener('change', () => {
+        // Camera moved - OrbitControls is working
+      });
+      controls.addEventListener('start', () => {
+        console.log('[Graph3D] OrbitControls: User started interacting');
+      });
+      controls.addEventListener('end', () => {
+        console.log('[Graph3D] OrbitControls: User stopped interacting');
+      });
+
       // Set default target from settings (grid center)
       controls.target.set(cameraTarget.x, cameraTarget.y, cameraTarget.z);
 
@@ -1959,15 +2006,27 @@ let vrHammer: VRHammer | null = null;
     // Update available tokens
     updateAvailableTokens();
 
-    // Use time-aware data sources (replicas from env which respects timeIndex)
+    // CRITICAL: Compute time-aware env directly here (subscriptions fire before reactive statements)
+    // This ensures we always read the correct historical frame
+    const computedEnv = (() => {
+      const hist = get(isolatedHistory);
+      if (timeIndex >= 0 && hist && hist.length > 0) {
+        const idx = Math.min(timeIndex, hist.length - 1);
+        return hist[idx];  // Historical frame
+      }
+      return get(isolatedEnv);  // Live state
+    })();
+
+    // Use time-aware data sources
     let entityData: any[] = [];
-    // CRITICAL: Use 'replicas' (time-aware) not '$isolatedEnv?.replicas' (always live)
-    let currentReplicas = replicas;
+    // Read replicas from computed env, not reactive variable
+    let currentReplicas = computedEnv?.replicas || new Map();
 
     console.log('[Graph3D] Replicas check:', {
-      timeIndex: $isolatedTimeIndex,
+      timeIndex,
       replicasSize: currentReplicas?.size || 0,
-      source: 'time-aware (env.replicas)'
+      historyLength: get(isolatedHistory)?.length || 0,
+      source: timeIndex >= 0 ? 'history[' + timeIndex + ']' : 'live'
     });
 
     // Always use replicas (ground truth)
@@ -1995,11 +2054,28 @@ let vrHammer: VRHammer | null = null;
         uniqueEntityIds.add(entityId);
       }
 
-      entityData = Array.from(uniqueEntityIds).map(entityId => ({
-        entityId,
-        capabilities: ['consensus'],
-        metadata: { name: entityId.slice(0, 8) + '...' }
-      }));
+      // Helper to get entity name from gossip profiles (time-aware)
+      const getNameFromEnv = (entityId: string): string => {
+        if (!computedEnv?.gossip) return '';
+        const profiles = typeof computedEnv.gossip.getProfiles === 'function'
+          ? computedEnv.gossip.getProfiles()
+          : (computedEnv.gossip.profiles || []);
+        const profile = profiles.find((p: any) => p.entityId === entityId);
+        return profile?.metadata?.name || '';
+      };
+
+      entityData = Array.from(uniqueEntityIds).map(entityId => {
+        // Prefer gossip name, fallback to entity number (like #1, #2), last resort hex slice
+        const gossipName = getNameFromEnv(entityId);
+        const shortId = XLN?.getEntityShortId?.(entityId) || entityId.slice(0, 8);
+        const displayName = gossipName || (shortId.match(/^\d+$/) ? `Entity #${shortId}` : shortId + '...');
+
+        return {
+          entityId,
+          capabilities: ['consensus'],
+          metadata: { name: displayName }
+        };
+      });
     }
 
     console.log('[Graph3D] entityData created:', entityData.length, 'entities');
@@ -2429,6 +2505,7 @@ let vrHammer: VRHammer | null = null;
 
     // Store material for animation (hubs will pulse)
     mesh.userData['isHub'] = isHub;
+    mesh.userData['isFed'] = isFed; // Used to skip color updates for Fed (always purple)
     mesh.userData['baseMaterial'] = material;
 
     if (isHub) {
@@ -2445,15 +2522,13 @@ let vrHammer: VRHammer | null = null;
     labelSprite.position.set(0, entitySize + 0.8, 0); // Local position above mesh
     mesh.add(labelSprite); // Child of mesh = auto-sync position
 
-    // Add reserve amount label (GIANT green $ above entity - Bernanke wow factor)
-    const reserveSprite = createReserveLabel(profile.entityId, 0n);
+    // NOTE: Reserve labels removed - too noisy, clutter the view
 
     entities.push({
       id: profile.entityId,
       position: new THREE.Vector3(x, y, z),
       mesh,
       label: labelSprite, // Entity name
-      reserveLabel: reserveSprite, // Reserve amount (dynamic)
       profile,
       isHub, // Store hub status for pulse animation
       pulsePhase: Math.random() * Math.PI * 2, // Random start phase for pulse
@@ -3097,63 +3172,10 @@ let vrHammer: VRHammer | null = null;
     return sprite;
   }
 
-  /**
-   * Create reserve amount label (GIANT $ above entity for Bernanke wow)
-   */
-  function createReserveLabel(entityId: string, reserveAmount: bigint): THREE.Sprite {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 128;
-    const ctx = canvas.getContext('2d')!;
-
-    // Transparent background
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    // Format reserve as $ millions
-    const reserveMillions = Number(reserveAmount) / 1_000_000;
-    const reserveText = reserveMillions >= 1
-      ? ` $${reserveMillions.toFixed(1)}M`
-      : ` $${(Number(reserveAmount) / 1000).toFixed(0)}K`;
-
-    // GIANT green $ amount
-    ctx.font = 'bold 48px monospace';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    // Glow effect
-    ctx.shadowColor = '#4fd18b';
-    ctx.shadowBlur = 15;
-
-    // Dark outline for contrast
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 4;
-    ctx.strokeText(reserveText, 256, 64);
-
-    // Bright green fill
-    ctx.fillStyle = '#4fd18b';
-    ctx.fillText(reserveText, 256, 64);
-
-    const texture = new THREE.CanvasTexture(canvas);
-    const material = new THREE.SpriteMaterial({
-      map: texture,
-      transparent: true,
-      depthTest: false,
-      sizeAttenuation: true
-    });
-    const sprite = new THREE.Sprite(material);
-
-    // Larger than name labels for emphasis
-    const vrMultiplier = isVRActive ? 3.0 : 1.0;
-    const baseScale = 2.0 * labelScale * vrMultiplier; // 2x bigger than name
-    sprite.scale.set(baseScale * 4, baseScale, 1);
-
-    scene.add(sprite);
-    return sprite;
-  }
+  // NOTE: createReserveLabel removed - reserve labels were too noisy
 
   function updateEntityLabels() {
     // Update entity labels - name labels are now CHILDREN of mesh (auto-positioned!)
-    // Only need to handle: missing labels, reserve labels, billboarding
     if (!camera) return;
 
     // Use time-aware replicas
@@ -3162,7 +3184,7 @@ let vrHammer: VRHammer | null = null;
     entities.forEach(entity => {
       // Recreate name label if missing (shouldn't happen now that it's a child)
       if (!entity.label) {
-        debug.warn(`⚠️ Entity ${entity.id.slice(-4)} missing label - recreating`);
+        debug.warn(`Entity ${entity.id.slice(-4)} missing label - recreating`);
         entity.label = createEntityLabel(entity.id);
         const entitySize = getEntitySizeForToken(entity.id, selectedTokenId);
         entity.label.position.set(0, entitySize + 0.8, 0);
@@ -3177,67 +3199,33 @@ let vrHammer: VRHammer | null = null;
         entity.mesh.add(entity.label);
       }
 
-      // Name label position is automatic (child of mesh) - no manual sync needed!
-
-      // Update reserve amount label (CRITICAL FOR BERNANKE WOW)
-      if (!entity.reserveLabel) {
-        entity.reserveLabel = createReserveLabel(entity.id, 0n);
-      }
-
-      if (!entity.reserveLabel.parent) {
-        scene.add(entity.reserveLabel);
-      }
-
-      // Get current reserve from replica state
+      // Get current reserve from replica state for SELECTED token
       const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(
         (k: any) => k.startsWith(entity.id + ':')
       );
       const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
-      const reserveAmount = replica?.state?.reserve || 0n;
 
-      // Recreate reserve label if amount changed significantly
-      const currentText = entity.reserveLabel.material.map;
-      if (currentText) {
-        // Update reserve label with latest amount
-        const canvas = document.createElement('canvas');
-        canvas.width = 512;
-        canvas.height = 128;
-        const ctx = canvas.getContext('2d')!;
+      // Get reserves for the SELECTED token (not total reserves!)
+      const reservesMap = replica?.state?.reserves;
+      const reserveForSelectedToken = reservesMap?.get(selectedTokenId) || reservesMap?.get(String(selectedTokenId)) || 0n;
+      const reserveAmount = BigInt(reserveForSelectedToken);
 
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        const reserveMillions = Number(reserveAmount) / 1_000_000;
-        const reserveText = reserveMillions >= 1
-          ? ` $${reserveMillions.toFixed(1)}M`
-          : reserveAmount > 0n
-          ? ` $${(Number(reserveAmount) / 1000).toFixed(0)}K`
-          : ' $0';
-
-        ctx.font = 'bold 48px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.shadowColor = '#4fd18b';
-        ctx.shadowBlur = 15;
-        ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 4;
-        ctx.strokeText(reserveText, 256, 64);
-        ctx.fillStyle = '#4fd18b';
-        ctx.fillText(reserveText, 256, 64);
-
-        const newTexture = new THREE.CanvasTexture(canvas);
-        entity.reserveLabel.material.map?.dispose();
-        entity.reserveLabel.material.map = newTexture;
-        entity.reserveLabel.material.needsUpdate = true;
+      // UPDATE ENTITY COLOR: Grey if 0 reserves in selected token, green otherwise
+      const material = entity.mesh.material as THREE.MeshLambertMaterial;
+      if (material && !entity.mesh.userData['isFed']) { // Don't change Fed color
+        if (reserveAmount <= 0n) {
+          // Grey for zero reserves
+          material.color.setHex(0x666666);
+          material.emissive.setHex(0x333333);
+          material.emissiveIntensity = 0.1;
+        } else {
+          // Green for entities with reserves (original color)
+          const themeColors = getThemeColors(settings.theme);
+          material.color.setHex(parseInt(themeColors.entityColor.replace('#', ''), 16));
+          material.emissive.setHex(parseInt(themeColors.entityEmissive.replace('#', ''), 16));
+          material.emissiveIntensity = entity.isHub ? 1.5 : 0.1;
+        }
       }
-
-      // Position reserve label ABOVE name label
-      const reserveEntitySize = getEntitySizeForToken(entity.id, selectedTokenId);
-      entity.reserveLabel.position.set(
-        entity.position.x,
-        entity.position.y + reserveEntitySize + 3.0, // Higher than name
-        entity.position.z
-      );
-      entity.reserveLabel.quaternion.copy(camera.quaternion);
     });
   }
 
@@ -3936,8 +3924,9 @@ let vrHammer: VRHammer | null = null;
   }
 
   function onMouseDown(event: MouseEvent) {
-    // Prevent default to avoid text selection
-    event.preventDefault();
+    // Only handle left-click for entity dragging (button 0)
+    // Let OrbitControls handle right-click (pan) and middle-click (zoom)
+    if (event.button !== 0) return;
 
     // Calculate mouse position
     const rect = renderer.domElement.getBoundingClientRect();
@@ -3957,6 +3946,9 @@ let vrHammer: VRHammer | null = null;
 
       const entity = entities.find(e => e.mesh === intersectedObject);
       if (!entity) return;
+
+      // Only preventDefault when we're actually handling entity drag
+      event.preventDefault();
 
       // Disable orbit controls during drag
       if (controls) {
@@ -4549,18 +4541,30 @@ let vrHammer: VRHammer | null = null;
     }
 
     if (!replica?.state?.reserves) {
-      const defaultSize = 0.5;
+      const defaultSize = 0.6; // Base size for entities with no reserves
       entitySizeCache.set(cacheKey, defaultSize);
       return defaultSize;
     }
 
-    const reserves = replica.state.reserves;
-    const tokenAmount = reserves.get(String(tokenId)) || 0n;
+    // --- NEW LOGIC ---
+    // Calculate total reserves across all tokens to represent overall financial size
+    let totalReserves = 0n;
+    for (const amount of replica.state.reserves.values()) {
+        totalReserves += amount;
+    }
 
-    // VC-MODE: Dramatic scaling - reserve changes must be visually obvious
-    // 1M reserves → size 3.0, 500k → 1.75, 0 → 0.5 (58% size change for 50% reserve change)
-    const scaleFactor = Number(tokenAmount) / 1_000_000; // 1.0 for 1M, 0.5 for 500k
-    const size = Math.max(0.5, Math.min(4.0, 0.5 + scaleFactor * 2.5));
+    // Convert from wei (1e18) to a numerical value for calculation
+    const reserveValue = Number(totalReserves) / 1e18;
+
+    // Use a logarithmic scale for better visualization of wide-ranging values.
+    // This formula ensures entities with 0 reserves have a base size, and large reserves don't become infinitely large.
+    const newScale = 0.8 + Math.log1p(reserveValue / 1000) * 0.3; // log1p(x) is log(1+x)
+    
+    // Clamp the scale to a reasonable min/max to keep the scene tidy
+    const size = Math.max(0.6, Math.min(newScale, 8.0));
+
+    // VERIFICATION: Log the calculated size to the console for verification.
+    console.log(`[Verification] Entity: ${entityId.slice(0, 10)}... | Total Reserves: ${reserveValue.toFixed(2)} | Calculated Scale: ${size.toFixed(2)}`);
 
     // Cache the result
     entitySizeCache.set(cacheKey, size);
