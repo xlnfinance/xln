@@ -2330,7 +2330,7 @@ let vrHammer: VRHammer | null = null;
       ? savedPositions
       : applyForceDirectedLayout(entityData, connectionMap, capacityMap);
 
-    // Update existing entities in-place (profile, isHub status)
+    // Update existing entities in-place (profile, isHub status, scale)
     const entityMap = new Map(entities.map(e => [e.id, e]));
     entityData.forEach(profile => {
       const existing = entityMap.get(profile.entityId);
@@ -2339,6 +2339,15 @@ let vrHammer: VRHammer | null = null;
         existing.profile = profile;
         existing.isHub = top3Hubs.has(profile.entityId);
         existing.mesh.userData['isHub'] = existing.isHub;
+
+        // Update scale based on current reserves
+        const newSize = getEntitySizeForToken(profile.entityId, selectedTokenId);
+        const currentSize = existing.baseScale || 1.8;
+        if (Math.abs(newSize - currentSize) > 0.1) {
+          const scaleFactor = newSize / currentSize;
+          existing.mesh.scale.multiplyScalar(scaleFactor);
+          existing.baseScale = newSize;
+        }
 
         // Update hub cache
         if (existing.isHub && !existing.hubConnectedIds) {
@@ -4787,7 +4796,7 @@ let vrHammer: VRHammer | null = null;
   function recalculateAllEntitySizes(): void {
     entitySizesAtFrame.clear();
     const dollarsPerPx = settings.dollarsPerPx || 30000;
-    const EMPTY_SIZE = 1.8; // Fixed size for $0 entities
+    const EMPTY_SIZE = 0.3; // Tiny size for $0 entities (10x smaller than before)
 
     const currentReplicas = replicas;
     const seenEntities = new Set<string>();
@@ -4819,7 +4828,8 @@ let vrHammer: VRHammer | null = null;
       // Volume = money / dollarsPerPx, then sphere radius from volume
       const volumePx = reserveValueUSD / dollarsPerPx;
       const radius = Math.cbrt(volumePx * 0.75 / Math.PI);
-      const size = Math.max(EMPTY_SIZE, Math.min(radius, 50.0));
+      // Min 0.5 (small but visible), max 50
+      const size = Math.max(0.5, Math.min(radius, 50.0));
       entitySizesAtFrame.set(entityId, size);
     }
   }
@@ -4832,7 +4842,7 @@ let vrHammer: VRHammer | null = null;
       recalculateAllEntitySizes();
     }
 
-    return entitySizesAtFrame.get(entityId) ?? 1.8;
+    return entitySizesAtFrame.get(entityId) ?? 0.3;
   }
 
   /** Check if entity has any reserves (for color determination) */
