@@ -47,6 +47,7 @@ const MODELS: Record<string, ModelInfo> = {
   "huihui_ai/qwen3-abliterated:235b": { name: "Qwen3 Abliterated 235B", params: "235B", backend: "ollama", vision: false },
   "qwen3-coder:latest": { name: "Qwen3 Coder 32B", params: "32B", backend: "ollama", vision: false },
   // MLX models (native Apple Silicon) - actual models on disk
+  "gemma3-27b-mlx": { name: "Gemma3 27B MLX", params: "27B", backend: "mlx", vision: false, path: "~/.lmstudio/models/McG-221/gemma3-27b-abliterated-dpo-mlx-8Bit" },
   "qwen3-235b-mlx": { name: "Qwen3 235B MLX", params: "235B", backend: "mlx", vision: false, path: "~/models/Qwen3-235B-MLX-4bit" },
   "gpt-oss-120b-mlx": { name: "GPT-OSS 120B MLX", params: "120B", backend: "mlx", vision: false, path: "~/models/gpt-oss-120b-heretic-mlx" },
   "deepseek-v3-mlx": { name: "DeepSeek-V3 MLX", params: "671B", backend: "mlx", vision: false, path: "~/models/DeepSeek-V3-MLX-4bit" },
