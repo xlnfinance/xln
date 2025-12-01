@@ -100,7 +100,25 @@ export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntit
 
   addMessage(newEntityState, elaborateMessage);
 
-  if (event.type === 'ReserveUpdated') {
+  if (event.type === 'ReserveMinted') {
+    const { entity, tokenId, amount, newBalance } = event.data;
+    const tokenSymbol = getTokenSymbol(tokenId as number);
+    const decimals = getTokenDecimals(tokenId as number);
+    const amountDisplay = (Number(amount) / (10 ** decimals)).toFixed(4);
+    const balanceDisplay = (Number(newBalance) / (10 ** decimals)).toFixed(4);
+
+    if (entity === entityState.entityId) {
+      newEntityState.reserves.set(String(tokenId), BigInt(newBalance as string | number | bigint));
+
+      elaborateMessage = `🏦 ${from} observed RESERVE MINTED: +${amountDisplay} ${tokenSymbol}
+📍 Block: ${blockNumber} | ⏰ ${timestamp} | 🔗 Tx: ${txHashShort}
+🎯 Event: ReserveMinted | 🔢 TokenID: ${tokenId}
+💰 Amount: ${amountDisplay} | 📊 New Balance: ${balanceDisplay}`;
+
+      addMessage(newEntityState, elaborateMessage);
+      if (DEBUG) console.log(`✅ Reserve minted for ${(entity as string).slice(0,10)}...: Token ${tokenId}, minted ${amount}, new balance ${newBalance}`);
+    }
+  } else if (event.type === 'ReserveUpdated') {
     const { entity, tokenId, newBalance } = event.data;
 
     if (entity === entityState.entityId) {

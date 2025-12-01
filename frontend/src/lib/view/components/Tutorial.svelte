@@ -7,7 +7,8 @@
    * Copyright (C) 2025 XLN Finance
    */
 
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import { panelBridge } from '../utils/panelBridge';
 
   let currentStep = 0;
   let showTutorial = false;
@@ -45,11 +46,22 @@
     }
   ];
 
-  onMount(() => {
-    const hasSeenTutorial = localStorage.getItem('xln-tutorial-seen');
-    if (!hasSeenTutorial) {
+  // Listen for tutorial start events from Architect panel
+  const unsubTutorial = panelBridge.on('tutorial:action', ({ action }) => {
+    if (action === 'start') {
       showTutorial = true;
+      currentStep = 0;
     }
+  });
+
+  onMount(() => {
+    // Tutorial is now hidden by default
+    // Users can trigger it manually via "Start Tutorial" button in Architect panel
+    showTutorial = false;
+  });
+
+  onDestroy(() => {
+    unsubTutorial();
   });
 
   function nextStep() {

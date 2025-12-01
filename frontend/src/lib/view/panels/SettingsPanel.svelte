@@ -172,7 +172,7 @@
     </button>
     <button
       class:active={activeCategory === 'entities'}
-      on:click={() => activeCategory === 'entities'}
+      on:click={() => activeCategory = 'entities'}
     >
       🔮 Entities
     </button>

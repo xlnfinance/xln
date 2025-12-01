@@ -1,104 +1,107 @@
 # NEXT.md - Priority Tasks
 
-## 🔥 COMPLETED (2025-11-29): EntityEnvContext Integration Fix
+## 🔥 COMPLETED (2025-11-30): Codex/Gemini Review Fixes + Multi-Agent Protocol
 
-### STATUS: /view EntityPanel context fully integrated ✅
+### Codex Blockers Fixed ✅
+- ✅ **timeIndex default to -1** - View.svelte:129 now uses `?? -1` (LIVE mode default)
+- ✅ **InsurancePanel time-travel aware** - Shows warning in history mode
+- ✅ **Architect mutations blocked in history** - `requireLiveMode()` guard on all 10 mutation functions
 
-**FIXED THIS SESSION:**
+### Gemini Security Fixes ✅
+- ✅ **Mempool DoS protection** - entity-consensus.ts:111 checks `LIMITS.MEMPOOL_SIZE` (1000)
+- ✅ **JurisdictionEvent typing** - types.ts has discriminated union (5 event types)
+- ✅ **Rollback logic** - Confirmed correct (ackedTransitions=incoming, sentTransitions=outgoing)
 
-### EntityEnvContext Integration (Junior Review Fixes)
-- ✅ **EntityPanel.svelte** - Now consumes context for replicas, xlnFunctions, history, timeIndex
-- ✅ **EntityDropdown.svelte** - Uses getEntityEnv() with global fallback
-- ✅ **AccountPanel.svelte** - Uses context for xlnFunctions and xlnEnvironment
-- ✅ **PaymentPanel.svelte** - Fixed context replicas priority over props over global
-- ✅ **SettlementPanel.svelte** - Uses context for replicas, xlnFunctions, xlnEnvironment
-- ✅ **TransactionHistory** - Now receives time-aware history/timeIndex from context
-- ✅ **ChatMessages** - Now receives time-aware currentTimeIndex from context
+### Sphere Rendering Fixes ✅
+- ✅ **Sphere sizing** - Graph3DPanel.svelte:4596-4605 uses `dollarsPerPx = 1000`
+- ✅ **Grey sphere bug** - Color now queries actual reserves via `checkEntityHasReserves()`
 
-### Subscription Leak Fixes (panelBridge cleanup)
-- ✅ **EntitiesPanel.svelte** - Added onDestroy with unsubscribe()
-- ✅ **ArchitectPanel.svelte** - Added onDestroy with unsubscribe() for vr:payment, auto-demo:start
-- ✅ **View.svelte** - Added onDestroy with unsubscribe() for openEntityOperations
-
-### Build Status
-- **0 TypeScript errors**
-- **208 warnings** (unchanged, non-blocking)
+### Multi-Agent Protocol ✅
+- ✅ **Created .agents/** - Full coordination protocol with economy system
+- ✅ **Onboarding flow** - Agents read multiagent.md, create profile, write ready.md
+- ✅ **Token budgets** - claude=500k/day, others=200k/day, subagent spawning
+- ✅ **Papertrail** - All interactions logged to papertrail/{date}/
 
 ---
 
 ## 📁 FILES MODIFIED THIS SESSION:
 
 ```
-frontend/src/lib/components/Entity/
-├─ EntityPanel.svelte (context consumption + history/timeIndex)
-├─ EntityDropdown.svelte (context consumption)
-├─ AccountPanel.svelte (context consumption)
-├─ PaymentPanel.svelte (context priority fix)
-├─ SettlementPanel.svelte (context consumption)
-
-frontend/src/lib/view/panels/
-├─ EntitiesPanel.svelte (subscription leak fix)
-├─ ArchitectPanel.svelte (subscription leak fix)
+runtime/
+├─ entity-consensus.ts (mempool limit check)
+├─ types.ts (JurisdictionEvent discriminated union)
 
 frontend/src/lib/view/
-├─ View.svelte (subscription leak fix + onDestroy)
-```
+├─ View.svelte (timeIndex default -1)
+├─ panels/ArchitectPanel.svelte (requireLiveMode guards)
+├─ panels/InsurancePanel.svelte (isHistoryMode + warning)
+├─ panels/Graph3DPanel.svelte (dollarsPerPx, checkEntityHasReserves)
 
----
-
-## 🔧 PATTERN USED (EntityEnvContext):
-
-```typescript
-// In component script:
-import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
-
-// Get context if available (for /view route)
-const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-
-// Extract stores
-const contextReplicas = entityEnv?.replicas;
-const contextXlnFunctions = entityEnv?.xlnFunctions;
-const contextHistory = entityEnv?.history;
-const contextTimeIndex = entityEnv?.timeIndex;
-
-// Reactive: prioritize context over global stores
-$: activeReplicas = contextReplicas ? $contextReplicas : $visibleReplicas;
-$: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
-$: activeHistory = contextHistory ? $contextHistory : $history;
-$: activeTimeIndex = contextTimeIndex !== undefined ? $contextTimeIndex : $currentTimeIndex;
+.agents/
+├─ multiagent.md (full protocol v2)
+├─ manifest.json
+├─ economy/ledger.json
+├─ profiles/claude-architect.md
+├─ inbox/{claude,codex,gemini,glm}/
+├─ outbox/{claude,codex,gemini,glm}/
+├─ papertrail/2025-11-30/
+├─ queue/, consensus/, subagents/, completed/
 ```
 
 ---
 
 ## 🎯 NEXT SESSION PRIORITIES:
 
-### 1. Time Machine Testing in /view (HIGH)
-- Verify time travel works with entity panel open
-- Test historical frame displays correct data
-- Check TransactionHistory shows correct history
+### 1. Visual E2E Testing (HIGH)
+- Run AHB demo end-to-end
+- Verify sphere sizes look correct with new formula
+- Confirm grey/green coloring matches reserves
 
-### 2. Click-to-Expand Entity Flow (MEDIUM)
-- Fix entity sphere click detection positions
-- Verify mini-panel → expand → entity panel flow
-- Test entity dropdown shows selected entity
+### 2. Multi-Agent Onboarding (HIGH)
+- Invite codex-reviewer, gemini-tester to .agents/
+- Create first task in queue/
+- Test consensus flow
+
+### 3. SettingsPanel Slider (MEDIUM)
+- Add `dollarsPerPx` slider to SettingsPanel
+- Auto-adjust to prevent sphere overlap
+
+### 4. File Splitting (LOW)
+- ArchitectPanel.svelte is huge (~2300 lines)
+- Consider splitting into sub-components
 
 ---
 
-## 📝 ARCHITECTURE NOTES:
+## 📋 LOW HANGS (can do quickly):
 
-**EntityEnvContext Purpose:**
-- Pierces store boundary once at wrapper level
-- Child components consume via getEntityEnv()
-- Falls back to global stores for backward compatibility
-- Enables time travel in /view workspace
+1. **Settings slider for dollarsPerPx** - ~20 lines in SettingsPanel.svelte
+2. **Kill stale background shells** - Many zombie processes running
+3. **Add .agents/ to .gitignore** - Prevent papertrail from bloating repo
 
-**panelBridge Cleanup Pattern:**
-```typescript
-import { onDestroy } from 'svelte';
+---
 
-const unsub = panelBridge.on('event', handler);
+## 🤖 MULTI-AGENT ONBOARDING PROMPT:
 
-onDestroy(() => {
-  unsub();
-});
 ```
+You are joining the XLN multi-agent development team.
+READ THIS FIRST: /Users/zigota/xln/.agents/multiagent.md
+
+After reading:
+1. Create your profile in .agents/profiles/{your-codename}.md
+2. Write "ready" to .agents/inbox/{your-codename}/ready.md
+3. Check .agents/queue/ for unclaimed tasks
+4. Follow papertrail protocol for ALL interactions
+
+Your codename: codex-reviewer | gemini-tester | glm-auditor
+```
+
+---
+
+## 📝 HUMAN COMMANDS (1 letter):
+
+- `y` = approve & continue
+- `n` = reject (explain why)
+- `?` = show status
+- `!` = emergency stop
+- `1-9` = pick option
+- ` ` = skip/next

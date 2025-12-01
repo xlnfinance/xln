@@ -137,6 +137,16 @@ contract Depository is Console, ReentrancyGuardLite {
   event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint indexed tokenId, uint amount);
 
   /**
+   * @notice Emitted when reserves are minted (created from thin air) to an entity.
+   * @dev This is distinct from ReserveTransferred (which moves existing reserves).
+   * @param entity The entity receiving the minted reserves.
+   * @param tokenId The internal ID of the token.
+   * @param amount The amount minted.
+   * @param newBalance The absolute new balance after minting.
+   */
+  event ReserveMinted(bytes32 indexed entity, uint indexed tokenId, uint amount, uint newBalance);
+
+  /**
    * @notice Emitted whenever an entity's reserve balance for a specific token changes.
    * @dev This is the primary event for j-watchers to sync entity state.
    * @param entity The entity whose reserve was updated.
@@ -347,21 +357,40 @@ contract Depository is Console, ReentrancyGuardLite {
   }
 
 
-  // DEBUG: Simple function to fund entity reserves for testing
+  /**
+   * @notice Mint new reserves to an entity (admin only).
+   * @dev In production, minting would be gated by governance. For testnet/demo, admin can mint freely.
+   *      Emits both ReserveMinted (for j-watchers tracking mint events) and ReserveUpdated (for balance sync).
+   * @param entity The entity receiving the minted reserves.
+   * @param tokenId The internal token ID.
+   * @param amount The amount to mint.
+   */
+  function mintToReserve(bytes32 entity, uint tokenId, uint amount) external onlyAdmin {
+    require(amount > 0, "Amount zero");
+    console.log("mintToReserve: minting to entity");
+    console.logBytes32(entity);
+    console.log("mintToReserve: tokenId");
+    console.logUint(tokenId);
+    console.log("mintToReserve: amount");
+    console.logUint(amount);
+
+    _reserves[entity][tokenId] += amount;
+    uint newBalance = _reserves[entity][tokenId];
+
+    emit ReserveMinted(entity, tokenId, amount, newBalance);
+    emit ReserveUpdated(entity, tokenId, newBalance);
+
+    console.log("mintToReserve: new balance");
+    console.logUint(newBalance);
+  }
+
+  // @deprecated Use mintToReserve instead. Kept for backwards compatibility.
   function debugFundReserves(bytes32 entity, uint tokenId, uint amount) external onlyAdmin {
     require(amount > 0, "Amount zero");
-    console.log("debugFundReserves: funding entity");
-    console.logBytes32(entity);
-    console.log("debugFundReserves: tokenId");
-    console.logUint(tokenId);
-    console.log("debugFundReserves: amount");
-    console.logUint(amount);
-    
     _reserves[entity][tokenId] += amount;
-    emit ReserveUpdated(entity, tokenId, _reserves[entity][tokenId]);
-    
-    console.log("debugFundReserves: new balance");
-    console.logUint(_reserves[entity][tokenId]);
+    uint newBalance = _reserves[entity][tokenId];
+    emit ReserveMinted(entity, tokenId, amount, newBalance);
+    emit ReserveUpdated(entity, tokenId, newBalance);
   }
 
   // DEBUG: Bulk fund top 1000 entities with test reserves

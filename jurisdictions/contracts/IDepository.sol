@@ -29,6 +29,15 @@ interface IDepository {
   event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint indexed tokenId, uint amount);
 
   /**
+   * @notice Emitted when reserves are minted to an entity
+   * @param entity Entity receiving minted reserves
+   * @param tokenId Token identifier
+   * @param amount Amount minted
+   * @param newBalance New total balance after minting
+   */
+  event ReserveMinted(bytes32 indexed entity, uint indexed tokenId, uint amount, uint newBalance);
+
+  /**
    * @notice Emitted on bilateral settlement
    * @param leftEntity First entity (lexicographically lower)
    * @param rightEntity Second entity (lexicographically higher)
@@ -63,6 +72,14 @@ interface IDepository {
    * @return Token count
    */
   function getTokensLength() external view returns (uint);
+
+  /**
+   * @notice Mint new reserves to an entity (admin only)
+   * @param entity Entity to receive minted reserves
+   * @param tokenId Token identifier
+   * @param amount Amount to mint
+   */
+  function mintToReserve(bytes32 entity, uint tokenId, uint amount) external;
 
   /**
    * @notice Transfer reserves between entities (unilateral)

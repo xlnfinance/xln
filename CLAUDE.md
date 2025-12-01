@@ -581,7 +581,7 @@ Bilateral relationships use canonical ordering:
 ## Memories
 
 - remember this
-- we use bun not pnpm (except frontend which might use pnpm)
+- **we use bun EVERYWHERE** - never npm/pnpm/node, always `bun run dev`, `bun run check`, `bun test`
 - Codestyle guidelines added to highlight mission, influences, and detailed TypeScript practices
 - we agreed that tx for transactions are ok shortcut accepted in crypto community
 - Always use safeStringify() to prevent BigInt serialization crashes

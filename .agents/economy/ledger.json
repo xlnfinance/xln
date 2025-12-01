@@ -1,0 +1,48 @@
+{
+  "version": "1.0.0",
+  "created_at": "2025-11-30T00:00:00Z",
+  "reset_daily": true,
+  "transactions": [],
+  "balances": {
+    "claude-architect": {
+      "input_tokens": 500000,
+      "output_tokens": 100000,
+      "usd_budget": 5.00,
+      "usd_spent": 0.00,
+      "tasks_completed": 0,
+      "subagents_spawned": 0
+    },
+    "codex-reviewer": {
+      "input_tokens": 200000,
+      "output_tokens": 50000,
+      "usd_budget": 2.00,
+      "usd_spent": 0.00,
+      "tasks_completed": 0,
+      "subagents_spawned": 0
+    },
+    "gemini-tester": {
+      "input_tokens": 200000,
+      "output_tokens": 50000,
+      "usd_budget": 1.50,
+      "usd_spent": 0.00,
+      "tasks_completed": 0,
+      "subagents_spawned": 0
+    },
+    "glm-auditor": {
+      "input_tokens": 200000,
+      "output_tokens": 50000,
+      "usd_budget": 0.50,
+      "usd_spent": 0.00,
+      "tasks_completed": 0,
+      "subagents_spawned": 0
+    }
+  },
+  "pricing": {
+    "claude-opus": { "input_per_1k": 0.015, "output_per_1k": 0.075 },
+    "claude-sonnet": { "input_per_1k": 0.003, "output_per_1k": 0.015 },
+    "claude-haiku": { "input_per_1k": 0.00025, "output_per_1k": 0.00125 },
+    "gpt-4": { "input_per_1k": 0.03, "output_per_1k": 0.06 },
+    "gemini-pro": { "input_per_1k": 0.00125, "output_per_1k": 0.00375 },
+    "glm-4": { "input_per_1k": 0.001, "output_per_1k": 0.002 }
+  }
+}
