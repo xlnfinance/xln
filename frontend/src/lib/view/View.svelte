@@ -19,6 +19,7 @@
   import RuntimeIOPanel from './panels/RuntimeIOPanel.svelte';
   import SettingsPanel from './panels/SettingsPanel.svelte';
   import InsurancePanel from './panels/InsurancePanel.svelte';
+  import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
   import EntityPanelWrapper from './panels/wrappers/EntityPanelWrapper.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
   import Tutorial from './components/Tutorial.svelte';
@@ -210,6 +211,8 @@
               isolatedTimeIndex: localTimeIndex
             }
           });
+        } else if (options.name === 'jurisdiction') {
+          component = mount(JurisdictionPanel, { target: div });
         } else if (options.name === 'entity-panel') {
           // Dynamic panel for entity operations (opened via panelBridge)
           // Uses EntityPanelWrapper - thin Dockview adapter for legacy EntityPanel
@@ -263,11 +266,13 @@
     });
 
     // Add remaining panels in order (they append to the tab group)
+    // ALL panels after Architect get inactive:true to prevent stealing focus
     dockview.addPanel({
       id: 'entities',
       component: 'entities',
       title: '🏢 Entities',
       position: { direction: 'within', referencePanel: 'architect' },
+      inactive: true,
     });
 
     dockview.addPanel({
@@ -275,6 +280,7 @@
       component: 'console',
       title: '📋 Console',
       position: { direction: 'within', referencePanel: 'architect' },
+      inactive: true,
     });
 
     dockview.addPanel({
@@ -282,6 +288,15 @@
       component: 'depository',
       title: '💰 Depository',
       position: { direction: 'within', referencePanel: 'architect' },
+      inactive: true,
+    });
+
+    dockview.addPanel({
+      id: 'jurisdiction',
+      component: 'jurisdiction',
+      title: '🏛️ Jurisdiction',
+      position: { direction: 'within', referencePanel: 'architect' },
+      inactive: true,
     });
 
     dockview.addPanel({
@@ -289,6 +304,7 @@
       component: 'runtime-io',
       title: '🔄 Runtime I/O',
       position: { direction: 'within', referencePanel: 'architect' },
+      inactive: true,
     });
 
     dockview.addPanel({
@@ -296,6 +312,7 @@
       component: 'settings',
       title: '⚙️ Settings',
       position: { direction: 'within', referencePanel: 'architect' },
+      inactive: true,
     });
 
     dockview.addPanel({
@@ -303,24 +320,27 @@
       component: 'insurance',
       title: '🛡️ Insurance',
       position: { direction: 'within', referencePanel: 'architect' },
+      inactive: true,
     });
+
+    // Architect should already be active (it was created first in the group)
+    // But ensure it with a setTimeout as final guarantee
+    setTimeout(() => {
+      const architectPanel = dockview.getPanel('architect');
+      if (architectPanel) {
+        architectPanel.api.setActive();
+        console.log('[View] ✅ Architect panel set as active tab');
+      }
+    }, 0);
 
     // Set initial sizes: Graph3D gets 2/3, sidebar gets 1/3
     const graph3dApi = dockview.getPanel('graph3d');
     if (graph3dApi) {
+      // Delay size adjustment for AVP compatibility
       setTimeout(() => {
         graph3dApi.api.setSize({ width: window.innerWidth * 0.67 }); // 2/3 split
+        console.log('[View] ✅ Graph3D resized to 67%');
       }, 100);
-    }
-
-    // Make Architect active (first tab, selected by default)
-    // IMMEDIATELY after adding all panels - no timeout race conditions
-    const architectPanel = dockview.getPanel('architect');
-    if (architectPanel) {
-      architectPanel.api.setActive();
-      console.log('[View] ✅ Architect panel set as active tab');
-    } else {
-      console.warn('[View] ⚠️ Architect panel not found when trying to activate');
     }
 
     // DISABLED: Dockview layout persistence (Svelte 5 incompatibility)
