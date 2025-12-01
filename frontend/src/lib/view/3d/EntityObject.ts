@@ -40,33 +40,27 @@ export class EntityObject extends THREE.Group {
     this.entityId = data.entityId;
     this.entityName = data.name || `Entity ${data.entityId.slice(2, 8)}`;
     this._position = data.position || new THREE.Vector3();
-    this._reserves = data.reserves || new Map();
-
+    
     // Create octahedron (main body)
     const geometry = new THREE.OctahedronGeometry(size);
     const material = new THREE.MeshStandardMaterial({
-      color: 0x00aaff,
-      emissive: 0x002244,
+      color: 0x00dd88, // Changed to a more vibrant green
+      emissive: 0x004422,
       metalness: 0.3,
       roughness: 0.7
     });
     this.octahedron = new THREE.Mesh(geometry, material);
     this.octahedron.castShadow = true;
     this.octahedron.receiveShadow = true;
-    this.octahedron.scale.set(1, 1.6, 1); // Vertically stretched
     this.add(this.octahedron);
 
     // Create label (sprite ATTACHED to entity)
     this.label = this.createLabel(this.entityName, size);
     this.add(this.label); // ← KEY: label is CHILD of entity group
 
-    // Set initial position
+    // Set initial position and reserves
     this.position.copy(this._position);
-
-    // Create reserve bar if reserves exist
-    if (this._reserves.size > 0) {
-      this.updateReserveBar();
-    }
+    this.setReserves(data.reserves || new Map());
   }
 
   private createLabel(text: string, entitySize: number): THREE.Sprite {
@@ -75,11 +69,8 @@ export class EntityObject extends THREE.Group {
     canvas.width = 512;
     canvas.height = 128;
 
-    context.fillStyle = '#000000';
-    context.fillRect(0, 0, canvas.width, canvas.height);
-
     context.font = 'bold 48px monospace';
-    context.fillStyle = '#00ffff';
+    context.fillStyle = '#ffffff'; // Brighter label
     context.textAlign = 'center';
     context.textBaseline = 'middle';
     context.fillText(text, 256, 64);
@@ -87,12 +78,12 @@ export class EntityObject extends THREE.Group {
     const texture = new THREE.CanvasTexture(canvas);
     texture.needsUpdate = true;
 
-    const material = new THREE.SpriteMaterial({ map: texture });
+    const material = new THREE.SpriteMaterial({ map: texture, sizeAttenuation: false });
     const sprite = new THREE.Sprite(material);
-    sprite.scale.set(25, 6, 1);
+    sprite.scale.set(0.1, 0.025, 1); // Scale for world units if sizeAttenuation is false
 
     // Position RELATIVE to entity center (local coordinates)
-    sprite.position.set(0, entitySize * 1.6 + 15, 0); // Above octahedron
+    sprite.position.set(0, entitySize * 1.8 + 0.1, 0); // Position above scaled octahedron
 
     return sprite;
   }
@@ -103,65 +94,56 @@ export class EntityObject extends THREE.Group {
   setPosition(x: number, y: number, z: number) {
     this._position.set(x, y, z);
     this.position.copy(this._position);
-    // Label automatically moves because it's a child!
   }
 
   /**
-   * Update reserves and re-render bar
+   * Update reserves and trigger visual updates.
    */
   setReserves(reserves: Map<string, bigint>) {
     this._reserves = reserves;
-    this.updateReserveBar();
-  }
-
-  private updateReserveBar() {
-    // Remove old bar
-    if (this.reserveBar) {
-      this.remove(this.reserveBar);
-      this.reserveBar.geometry.dispose();
-      (this.reserveBar.material as THREE.Material).dispose();
-    }
-
-    // Calculate total reserves (simplified - just token 1 for now)
-    const reserveAmount = Number(this._reserves.get('1') || 0n) / 1e18;
-
-    if (reserveAmount > 0) {
-      const height = Math.min(reserveAmount / 5000, 100); // Scale: $5k = 1 unit
-      const geometry = new THREE.CylinderGeometry(2, 2, height, 16);
-      const material = new THREE.MeshStandardMaterial({
-        color: 0x00ff44,
-        emissive: 0x004400,
-        transparent: true,
-        opacity: 0.8
-      });
-      this.reserveBar = new THREE.Mesh(geometry, material);
-
-      // Position RELATIVE to entity (above octahedron)
-      this.reserveBar.position.set(0, 8 * 1.6 + height / 2 + 20, 0);
-      this.add(this.reserveBar); // ← Child of entity group
-    }
+    this.updateEntityScale();
+    // The reserve bar has been removed in favor of scaling the main entity
+    // this.updateReserveBar(); 
   }
 
   /**
-   * Update label text (e.g., name change)
+   * NEW: Scales the entire entity based on its total reserves.
    */
+  private updateEntityScale() {
+    let totalReserves = 0n;
+    // Sum up reserves across all token types
+    for (const amount of this._reserves.values()) {
+        totalReserves += amount;
+    }
+
+    // Convert from wei (1e18) to a numerical value for calculation
+    const reserveValue = Number(totalReserves) / 1e18;
+
+    // Use a logarithmic scale for better visualization across a wide range of values.
+    // This formula ensures entities with 0 reserves have a base size, and large reserves don't become infinitely large.
+    // The constants (e.g., 0.8, 0.3) can be tweaked for best visual effect.
+    const newScale = 0.8 + Math.log1p(reserveValue / 1000) * 0.3; // log1p(x) is log(1+x)
+    
+    // Clamp the scale to a reasonable min/max to keep the scene tidy
+    const clampedScale = Math.max(0.6, Math.min(newScale, 8.0));
+
+    // Apply the scale to the main octahedron mesh
+    this.octahedron.scale.set(clampedScale, clampedScale, clampedScale);
+
+    // Adjust label position based on new scale
+    this.label.position.set(0, 8 * clampedScale + 0.15, 0);
+  }
+
   updateLabel(newText: string) {
     this.entityName = newText;
-    // Remove old label
     this.remove(this.label);
     this.label.material.map?.dispose();
     this.label.material.dispose();
-
-    // Create new label
     this.label = this.createLabel(newText, 8);
     this.add(this.label);
   }
 
-  /**
-   * Cleanup on removal
-   */
   dispose() {
-    // Dispose geometries and materials
     this.octahedron.geometry.dispose();
     (this.octahedron.material as THREE.Material).dispose();
 

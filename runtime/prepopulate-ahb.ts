@@ -1,6 +1,9 @@
 /**
  * Alice-Hub-Bob (AHB) Demo: Step-by-step collateral & settlement flows
  *
+ * USING REAL BrowserVM transactions - no state hacks!
+ * All R2R transfers go through Depository.sol via BrowserVM.
+ *
  * Educational demo showing:
  * - Reserve-to-Reserve transfers (R2R)
  * - Reserve-to-Collateral prefunding (R2C)
@@ -11,11 +14,9 @@
  * Each frame includes Fed-style subtitles explaining what/why/tradfi-parallel
  */
 
-import type { Env, EntityInput, AccountMachine, EnvSnapshot, EntityReplica } from './types';
+import type { Env, EntityInput, EnvSnapshot, EntityReplica } from './types';
 import { applyRuntimeInput } from './runtime';
-import { createNumberedEntity } from './entity-factory';
-import { getAvailableJurisdictions } from './evm';
-import { createDemoDelta } from './account-utils';
+import { getAvailableJurisdictions, getBrowserVMInstance } from './evm';
 import { buildEntityProfile } from './gossip-helper';
 import { cloneEntityReplica } from './state-helpers';
 import type { Profile } from './gossip';
@@ -87,98 +88,33 @@ function cloneProfilesForSnapshot(env: Env): { profiles: Profile[] } | undefined
   return { profiles };
 }
 
-function upsertAccount(
-  replica: EntityReplica,
-  counterpartyId: string,
-  ownCreditLimit: bigint,
-  peerCreditLimit: bigint,
-  collateral: bigint,
-  deltaValue: bigint,
-) {
-  const accountMachine: AccountMachine = {
-    counterpartyEntityId: counterpartyId,
-    mempool: [],
-    currentFrame: {
-      height: 0,
-      timestamp: 0,
-      accountTxs: [],
-      prevFrameHash: '',
-      tokenIds: [USDC_TOKEN_ID],
-      deltas: [deltaValue],
-      stateHash: ''
-    },
-    sentTransitions: 0,
-    ackedTransitions: 0,
-    deltas: new Map([[USDC_TOKEN_ID, (() => {
-      const delta = createDemoDelta(USDC_TOKEN_ID, collateral, deltaValue);
-      delta.leftCreditLimit = ownCreditLimit;
-      delta.rightCreditLimit = peerCreditLimit;
-      return delta;
-    })()]]),
-    globalCreditLimits: {
-      ownLimit: ownCreditLimit,
-      peerLimit: peerCreditLimit,
-    },
-    currentHeight: 0,
-    pendingSignatures: [],
-    rollbackCount: 0,
-    sendCounter: 0,
-    receiveCounter: 0,
-    proofHeader: {
-      fromEntity: replica.state.entityId,
-      toEntity: counterpartyId,
-      cooperativeNonce: 0,
-      disputeNonce: 0,
-    },
-    proofBody: {
-      tokenIds: [USDC_TOKEN_ID],
-      deltas: [deltaValue],
-    },
-    frameHistory: [],
-    pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-  };
+/**
+ * Sync reserves from BrowserVM to replica state
+ * This ensures UI reflects actual on-chain state
+ */
+async function syncReservesFromBrowserVM(
+  env: Env,
+  entityId: string,
+  browserVM: any,
+  entityName?: string
+): Promise<void> {
+  const [, replica] = findReplica(env, entityId);
 
-  replica.state.accounts.set(counterpartyId, accountMachine);
-}
+  // Get actual reserves from BrowserVM
+  const reserves = await browserVM.getReserves(entityId, USDC_TOKEN_ID);
 
-function ensureReserves(replica: EntityReplica, reserveAmount: bigint) {
+  // Update replica state
   if (!replica.state.reserves) {
     replica.state.reserves = new Map();
   }
-  replica.state.reserves.set(String(USDC_TOKEN_ID), reserveAmount);
-}
+  replica.state.reserves.set(String(USDC_TOKEN_ID), reserves);
 
-function setReservesAndAccounts(
-  env: Env,
-  entityId: string,
-  reserves: bigint,
-  accounts: Array<{
-    counterpartyId: string;
-    ownCredit: bigint;
-    peerCredit: bigint;
-    collateral: bigint;
-    delta: bigint;
-  }>,
-  entityName?: string,
-) {
-  const [, replica] = findReplica(env, entityId);
-  ensureReserves(replica, reserves);
-
-  for (const acc of accounts) {
-    upsertAccount(
-      replica,
-      acc.counterpartyId,
-      acc.ownCredit,
-      acc.peerCredit,
-      acc.collateral,
-      acc.delta,
-    );
-  }
-
+  // Update gossip profile
   if (env.gossip) {
     env.gossip.announce(buildEntityProfile(replica.state, entityName));
   }
+
+  console.log(`[AHB] Synced reserves for ${entityName || entityId.slice(0, 10)}: ${Number(reserves) / 1e18} USDC`);
 }
 
 interface FrameSubtitle {
@@ -191,7 +127,12 @@ interface FrameSubtitle {
 
 let pushSnapshotCount = 0;
 
-function pushSnapshot(env: Env, description: string, subtitle: FrameSubtitle) {
+function pushSnapshot(
+  env: Env,
+  description: string,
+  subtitle: FrameSubtitle,
+  entityInputs?: EntityInput[]
+) {
   pushSnapshotCount++;
   console.log(`[pushSnapshot #${pushSnapshotCount}] Called for: "${description}"`);
   const gossipSnapshot = cloneProfilesForSnapshot(env);
@@ -214,7 +155,7 @@ function pushSnapshot(env: Env, description: string, subtitle: FrameSubtitle) {
     ),
     runtimeInput: {
       runtimeTxs: [],
-      entityInputs: [],
+      entityInputs: entityInputs || [], // Include entity inputs for J-Machine visualization!
     },
     runtimeOutputs: [],
     description,
@@ -240,377 +181,339 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
 
   try {
     console.log('[AHB] ========================================');
-    console.log('[AHB] Starting Alice-Hub-Bob Demo (Auto-snapshots DISABLED)');
+    console.log('[AHB] Starting Alice-Hub-Bob Demo (REAL BrowserVM transactions)');
     console.log('[AHB] BEFORE: replicas =', env.replicas.size, 'history =', env.history?.length || 0);
-    console.log('[AHB] Stack trace:', new Error().stack?.split('\n').slice(1, 5).join('\n'));
     console.log('[AHB] ========================================');
 
+    // Get BrowserVM instance for real transactions
+    const browserVM = getBrowserVMInstance();
+    if (!browserVM) {
+      throw new Error('[AHB] BrowserVM not available - call setBrowserVMJurisdiction first');
+    }
+    console.log('[AHB] ✅ BrowserVM instance available');
+
     const jurisdictions = await getAvailableJurisdictions();
-  let arrakis = jurisdictions.find(j => j.name.toLowerCase() === 'arrakis');
+    let arrakis = jurisdictions.find(j => j.name.toLowerCase() === 'arrakis');
 
-  // FALLBACK: Create mock jurisdiction if none exist (for isolated /view mode)
-  if (!arrakis) {
-    console.log('⚠️ No jurisdiction found - creating mock jurisdiction for demo');
-    arrakis = {
-      name: 'Arrakis (Demo)',
-      chainId: 31337,
-      entityProviderAddress: '0x5FbDB2315678afecb367f032d93F642f64180aa3',
-      depositoryAddress: '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512',
-      rpc: 'http://localhost:8545'
+    // FALLBACK: Create mock jurisdiction if none exist (for isolated /view mode)
+    if (!arrakis) {
+      console.log('[AHB] No jurisdiction found - using BrowserVM jurisdiction');
+      arrakis = {
+        name: 'Arrakis (BrowserVM)',
+        chainId: 31337,
+        entityProviderAddress: '0x0000000000000000000000000000000000000000',
+        depositoryAddress: browserVM.getDepositoryAddress(),
+        rpc: 'browservm://'
+      };
+    }
+
+    console.log(`📋 Jurisdiction: ${arrakis.name}`);
+
+    // ============================================================================
+    // STEP 0a: Create Xlnomy (J-Machine) for visualization
+    // ============================================================================
+    console.log('\n🏛️ Creating AHB Xlnomy (J-Machine at center)...');
+
+    if (!env.xlnomies) {
+      env.xlnomies = new Map();
+    }
+
+    const ahbXlnomy = {
+      name: 'AHB Demo',
+      evmType: 'browservm' as const,
+      blockTimeMs: 100,
+      jMachine: {
+        position: { x: 0, y: 300, z: 0 }, // Center, Supreme layer
+        capacity: 3,
+        jHeight: 0,
+        mempool: [],
+      },
+      contracts: {
+        depository: arrakis.depositoryAddress,
+        entityProvider: arrakis.entityProviderAddress,
+      },
+      evm: null,
+      entities: [],
+      created: Date.now(),
+      version: '1.0.0',
     };
-  }
 
-  console.log(`📋 Jurisdiction: ${arrakis.name}`);
+    env.xlnomies.set('AHB Demo', ahbXlnomy);
+    env.activeXlnomy = 'AHB Demo';
+    console.log('✅ AHB Xlnomy created (J-Machine visible in 3D)');
 
-  // ============================================================================
-  // STEP 0a: Create Xlnomy (J-Machine) for visualization
-  // ============================================================================
-  console.log('\n🏛️ Creating AHB Xlnomy (J-Machine at center)...');
-
-  // Create minimal xlnomy directly (bypass full createXlnomy which needs BrowserVM)
-  if (!env.xlnomies) {
-    env.xlnomies = new Map();
-  }
-
-  const ahbXlnomy = {
-    name: 'AHB Demo',
-    evmType: 'browservm' as const,
-    blockTimeMs: 100,
-    jMachine: {
-      position: { x: 0, y: 300, z: 0 }, // Center, Supreme layer
-      capacity: 3,
-      jHeight: 0,
-      mempool: [],
-    },
-    contracts: {
-      depository: arrakis.depositoryAddress,
-      entityProvider: arrakis.entityProviderAddress,
-    },
-    evm: null, // No actual EVM in demo mode
-    entities: [],
-    created: Date.now(),
-    version: '1.0.0',
-  };
-
-  env.xlnomies.set('AHB Demo', ahbXlnomy);
-  env.activeXlnomy = 'AHB Demo';
-  console.log('✅ AHB Xlnomy created (J-Machine visible in 3D)');
-
-  // Push Frame 0: Clean slate with J-Machine only (no entities yet)
-  pushSnapshot(env, 'Frame 0: Clean Slate - J-Machine Ready', {
-    title: 'Jurisdiction Machine Deployed',
-    what: 'The J-Machine (Jurisdiction Machine) is deployed on-chain. It represents the EVM smart contracts (Depository.sol, EntityProvider.sol) that will process settlements.',
-    why: 'Before any entities exist, the jurisdiction infrastructure must be in place. Think of this as deploying the central bank\'s core settlement system.',
-    tradfiParallel: 'Like the Federal Reserve deploying its Fedwire Funds Service before any banks can participate.',
-    keyMetrics: [
-      'J-Machine: Deployed at origin',
-      'Entities: 0 (none created yet)',
-      'Reserves: Empty',
-    ]
-  });
-
-  // ============================================================================
-  // STEP 0b: Create entities
-  // ============================================================================
-  console.log('\n📦 Creating entities: Alice, Hub, Bob...');
-
-  // AHB Triangle Layout (J-Machine at y=300):
-  // - Hub: 50px below J-Machine (y=250), center
-  // - Alice/Bob: 200px below Hub (y=50), spread horizontally
-  const AHB_POSITIONS = {
-    Alice: { x: -30, y: 50, z: 0 },   // Bottom-left
-    Hub:   { x: 0, y: 250, z: 0 },    // 50px below J-Machine
-    Bob:   { x: 30, y: 50, z: 0 },    // Bottom-right
-  };
-
-  const entityNames = ['Alice', 'Hub', 'Bob'] as const;
-  const entities: Array<{id: string, signer: string, name: string}> = [];
-  const createEntityTxs = [];
-
-  for (let i = 0; i < 3; i++) {
-    const name = entityNames[i];
-    const signer = `s${i + 1}`;
-    const position = AHB_POSITIONS[name];
-
-    // SIMPLE FALLBACK ONLY (no blockchain calls in demos)
-    const entityNumber = i + 1;
-    const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
-    entities.push({ id: entityId, signer, name });
-
-    createEntityTxs.push({
-      type: 'importReplica' as const,
-      entityId,
-      signerId: signer,
-      data: {
-        isProposer: true,
-        position, // Explicit position for proper AHB triangle layout
-        config: {
-          mode: 'proposer-based' as const,
-          threshold: 1n,
-          validators: [signer],
-          shares: { [signer]: 1n },
-          jurisdiction: arrakis
-        }
-      }
+    // Push Frame 0: Clean slate with J-Machine only (no entities yet)
+    pushSnapshot(env, 'Frame 0: Clean Slate - J-Machine Ready', {
+      title: 'Jurisdiction Machine Deployed',
+      what: 'The J-Machine (Jurisdiction Machine) is deployed on-chain. It represents the EVM smart contracts (Depository.sol, EntityProvider.sol) that will process settlements.',
+      why: 'Before any entities exist, the jurisdiction infrastructure must be in place. Think of this as deploying the central bank\'s core settlement system.',
+      tradfiParallel: 'Like the Federal Reserve deploying its Fedwire Funds Service before any banks can participate.',
+      keyMetrics: [
+        'J-Machine: Deployed at origin',
+        'Entities: 0 (none created yet)',
+        'Reserves: Empty',
+      ]
     });
-    console.log(`${name}: Entity #${entityNumber} @ (${position.x}, ${position.y}, ${position.z})`);
-  }
 
-  await applyRuntimeInput(env, {
-    runtimeTxs: createEntityTxs,
-    entityInputs: []
-  });
+    // ============================================================================
+    // STEP 0b: Create entities
+    // ============================================================================
+    console.log('\n📦 Creating entities: Alice, Hub, Bob...');
 
-  const [alice, hub, bob] = entities;
-  if (!alice || !hub || !bob) {
-    throw new Error('Failed to create all entities');
-  }
+    // AHB Triangle Layout (J-Machine at y=300):
+    // - Hub: 50px below J-Machine (y=250), center
+    // - Alice/Bob: 50px below Hub (y=200), spread horizontally
+    const AHB_POSITIONS = {
+      Alice: { x: -30, y: 200, z: 0 },  // Bottom-left (moved 4x higher)
+      Hub:   { x: 0, y: 250, z: 0 },    // 50px below J-Machine
+      Bob:   { x: 30, y: 200, z: 0 },   // Bottom-right (moved 4x higher)
+    };
 
-  console.log(`\n  ✅ Created: ${alice.name}, ${hub.name}, ${bob.name}`);
+    const entityNames = ['Alice', 'Hub', 'Bob'] as const;
+    const entities: Array<{id: string, signer: string, name: string}> = [];
+    const createEntityTxs = [];
 
-  // ============================================================================
-  // STEP 1: Initial State - Hub funded with 100 USDC
-  // ============================================================================
-  console.log('\n💰 FRAME 1: Initial State - Hub Reserve Funding');
+    for (let i = 0; i < 3; i++) {
+      const name = entityNames[i];
+      const signer = `s${i + 1}`;
+      const position = AHB_POSITIONS[name];
 
-  setReservesAndAccounts(env, hub.id, usd(100), [], hub.name);
-  setReservesAndAccounts(env, alice.id, usd(0), [], alice.name);
-  setReservesAndAccounts(env, bob.id, usd(0), [], bob.name);
+      // SIMPLE FALLBACK ONLY (no blockchain calls in demos)
+      const entityNumber = i + 1;
+      const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
+      entities.push({ id: entityId, signer, name });
 
-  pushSnapshot(env, 'Initial State: Hub Funded', {
-    title: 'Initial Liquidity Provision',
-    what: 'Hub entity receives 100 USDC reserve balance on Depository.sol (on-chain)',
-    why: 'Reserve balances are the source of liquidity for off-chain bilateral accounts. Think of this as the hub depositing cash into its custody account.',
-    tradfiParallel: 'Like a correspondent bank depositing USD reserves at the Federal Reserve to enable wire transfers',
-    keyMetrics: [
-      'Hub Reserve: 100 USDC',
-      'Alice Reserve: 0 USDC',
-      'Bob Reserve: 0 USDC',
-    ]
-  });
+      createEntityTxs.push({
+        type: 'importReplica' as const,
+        entityId,
+        signerId: signer,
+        data: {
+          isProposer: true,
+          position, // Explicit position for proper AHB triangle layout
+          config: {
+            mode: 'proposer-based' as const,
+            threshold: 1n,
+            validators: [signer],
+            shares: { [signer]: 1n },
+            jurisdiction: arrakis
+          }
+        }
+      });
+      console.log(`${name}: Entity #${entityNumber} @ (${position.x}, ${position.y}, ${position.z})`);
+    }
 
-  // ============================================================================
-  // STEP 2: Hub R2R → Alice (30 USDC)
-  // ============================================================================
-  console.log('\n🔄 FRAME 2: Hub → Alice Reserve Transfer (30 USDC)');
+    await applyRuntimeInput(env, {
+      runtimeTxs: createEntityTxs,
+      entityInputs: []
+    });
 
-  // Open accounts first
-  await processUntilEmpty(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{
-      type: 'openAccount',
-      data: { targetEntityId: alice.id }
-    }]
-  }]);
+    const [alice, hub, bob] = entities;
+    if (!alice || !hub || !bob) {
+      throw new Error('Failed to create all entities');
+    }
 
-  // Setup state: Hub transferred 30 to Alice
-  setReservesAndAccounts(env, hub.id, usd(70), [
-    { counterpartyId: alice.id, ownCredit: 0n, peerCredit: 0n, collateral: 0n, delta: 0n }
-  ], hub.name);
-  setReservesAndAccounts(env, alice.id, usd(30), [
-    { counterpartyId: hub.id, ownCredit: 0n, peerCredit: 0n, collateral: 0n, delta: 0n }
-  ], alice.name);
+    console.log(`\n  ✅ Created: ${alice.name}, ${hub.name}, ${bob.name}`);
 
-  pushSnapshot(env, 'Hub → Alice: 30 USDC Reserve Transfer', {
-    title: 'Reserve-to-Reserve Transfer (R2R)',
-    what: 'Hub calls Depository.reserveToReserve(Alice, 30 USDC). On-chain balance update: Hub -= 30, Alice += 30',
-    why: 'R2R transfers are the simplest form of value movement - pure on-chain settlement with no bilateral account involved yet.',
-    tradfiParallel: 'Like a Fedwire transfer: instant, final, on-chain settlement between reserve accounts',
-    keyMetrics: [
-      'Hub Reserve: 70 USDC (-30)',
-      'Alice Reserve: 30 USDC (+30)',
-      'Gas cost: ~50k (single EVM call)',
-    ]
-  });
+    // Push Frame 0.5: Entities created but not yet funded
+    pushSnapshot(env, 'Entities Created: Alice, Hub, Bob', {
+      title: 'Three Entities Deployed',
+      what: 'Alice, Hub, and Bob entities are now registered in the J-Machine. They appear in the 3D visualization but have no reserves yet (grey spheres).',
+      why: 'Before entities can transact, they must be registered in the jurisdiction. This establishes their identity and governance structure.',
+      tradfiParallel: 'Like banks registering with the Federal Reserve before opening for business.',
+      keyMetrics: [
+        'Entities: 3 (Alice, Hub, Bob)',
+        'Reserves: All $0 (grey - unfunded)',
+        'Accounts: None opened yet',
+      ]
+    });
 
-  // ============================================================================
-  // STEP 3: Hub R2R → Bob (20 USDC)
-  // ============================================================================
-  console.log('\n🔄 FRAME 3: Hub → Bob Reserve Transfer (20 USDC)');
+    // ============================================================================
+    // STEP 1: Initial State - Hub funded with $10M USDC via REAL BrowserVM tx
+    // ============================================================================
+    console.log('\n💰 FRAME 1: Initial State - Hub Reserve Funding (REAL BrowserVM TX)');
 
-  await processUntilEmpty(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{
-      type: 'openAccount',
-      data: { targetEntityId: bob.id }
-    }]
-  }]);
+    // REAL BrowserVM transaction: debugFundReserves
+    await browserVM.debugFundReserves(hub.id, USDC_TOKEN_ID, usd(10_000_000));
 
-  setReservesAndAccounts(env, hub.id, usd(50), [
-    { counterpartyId: alice.id, ownCredit: 0n, peerCredit: 0n, collateral: 0n, delta: 0n },
-    { counterpartyId: bob.id, ownCredit: 0n, peerCredit: 0n, collateral: 0n, delta: 0n }
-  ], hub.name);
-  setReservesAndAccounts(env, bob.id, usd(20), [
-    { counterpartyId: hub.id, ownCredit: 0n, peerCredit: 0n, collateral: 0n, delta: 0n }
-  ], bob.name);
+    // Sync all entity reserves from BrowserVM to replica state
+    await syncReservesFromBrowserVM(env, hub.id, browserVM, hub.name);
+    await syncReservesFromBrowserVM(env, alice.id, browserVM, alice.name);
+    await syncReservesFromBrowserVM(env, bob.id, browserVM, bob.name);
 
-  pushSnapshot(env, 'Hub → Bob: 20 USDC Reserve Transfer', {
-    title: 'Second R2R Transfer',
-    what: 'Hub calls Depository.reserveToReserve(Bob, 20 USDC). Same mechanism as previous transfer.',
-    why: 'Now Hub has distributed 50 USDC total (30 to Alice, 20 to Bob) while retaining 50 USDC for further operations.',
-    tradfiParallel: 'Hub acts like a treasury distributing funds to subsidiaries via wire transfers',
-    keyMetrics: [
-      'Hub Reserve: 50 USDC (-20)',
-      'Bob Reserve: 20 USDC (+20)',
-      'Total distributed: 50 USDC',
-    ]
-  });
+    pushSnapshot(env, 'Initial State: Hub Funded', {
+      title: 'Initial Liquidity Provision',
+      what: 'Hub entity receives $10M USDC reserve balance on Depository.sol (on-chain via BrowserVM)',
+      why: 'Reserve balances are the source of liquidity for off-chain bilateral accounts. Think of this as the hub depositing cash into its custody account.',
+      tradfiParallel: 'Like a correspondent bank depositing USD reserves at the Federal Reserve to enable wire transfers',
+      keyMetrics: [
+        'Hub Reserve: $10M USDC',
+        'Alice Reserve: $0 (grey - no funds)',
+        'Bob Reserve: $0 (grey - no funds)',
+      ]
+    });
 
-  // ============================================================================
-  // STEP 4: Alice prefunds account (10 reserve → collateral)
-  // ============================================================================
-  console.log('\n🔒 FRAME 4: Alice Prefunds Account with Hub (10 USDC)');
+    // ============================================================================
+    // STEP 2: Hub R2R → Alice ($3M USDC) - REAL TX goes to J-Machine mempool
+    // ============================================================================
+    console.log('\n🔄 FRAME 2: Hub → Alice Reserve Transfer ($3M) - REAL BrowserVM TX');
 
-  setReservesAndAccounts(env, alice.id, usd(20), [
-    { counterpartyId: hub.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(10), delta: usd(10) }
-  ], alice.name);
-  setReservesAndAccounts(env, hub.id, usd(50), [
-    { counterpartyId: alice.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(10), delta: -usd(10) },
-    { counterpartyId: bob.id, ownCredit: 0n, peerCredit: 0n, collateral: 0n, delta: 0n }
-  ], hub.name);
+    // Open accounts first
+    await processUntilEmpty(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'openAccount',
+        data: { targetEntityId: alice.id }
+      }]
+    }]);
 
-  pushSnapshot(env, 'Alice → Hub: 10 USDC Reserve to Collateral', {
-    title: 'Reserve-to-Collateral Prefunding (R2C)',
-    what: 'Alice calls Depository.prefundAccount(Hub, 10 USDC). Moves funds from Alice reserve into bilateral account collateral. Ondelta = +10 (Alice is "left" entity)',
-    why: 'Collateral enables off-chain bilateral settlement. Like Lightning channels, but WITH credit extension beyond collateral (unique to XLN).',
-    tradfiParallel: 'Like posting margin at a clearinghouse before trading derivatives. Collateral backs off-chain netting, reducing settlement frequency.',
-    keyMetrics: [
-      'Alice Reserve: 20 USDC (-10)',
-      'Alice↔Hub Collateral: 10 USDC',
-      'Ondelta: +10 (Alice funded)',
-      'Credit limits: 50 USDC each',
-    ]
-  });
+    // REAL BrowserVM R2R transaction
+    await browserVM.reserveToReserve(hub.id, alice.id, USDC_TOKEN_ID, usd(3_000_000));
 
-  // ============================================================================
-  // STEP 5: Bob prefunds account (15 reserve → collateral)
-  // ============================================================================
-  console.log('\n🔒 FRAME 5: Bob Prefunds Account with Hub (15 USDC)');
+    // Sync reserves from BrowserVM
+    await syncReservesFromBrowserVM(env, hub.id, browserVM, hub.name);
+    await syncReservesFromBrowserVM(env, alice.id, browserVM, alice.name);
 
-  setReservesAndAccounts(env, bob.id, usd(5), [
-    { counterpartyId: hub.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(15), delta: -usd(15) }
-  ], bob.name);
-  setReservesAndAccounts(env, hub.id, usd(50), [
-    { counterpartyId: alice.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(10), delta: -usd(10) },
-    { counterpartyId: bob.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(15), delta: usd(15) }
-  ], hub.name);
+    // Create entityInput with R2R tx for J-Machine visualization
+    const r2rTx1: EntityInput = {
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'payFromReserve' as any,
+        kind: 'payFromReserve',
+        targetEntityId: alice.id,
+        tokenId: USDC_TOKEN_ID,
+        amount: usd(3_000_000),
+      }]
+    };
 
-  pushSnapshot(env, 'Bob → Hub: 15 USDC Reserve to Collateral', {
-    title: 'Second R2C Prefunding',
-    what: 'Bob calls Depository.prefundAccount(Hub, 15 USDC). Bob is "right" entity (entityId > Hub), so ondelta = +15 from Hub perspective.',
-    why: 'Both Alice and Bob now have bilateral accounts with Hub, each backed by collateral. This enables off-chain payment routing.',
-    tradfiParallel: 'Both parties posted margin. Now they can net trades off-chain, settling only final positions periodically (like CME FX netting).',
-    keyMetrics: [
-      'Bob Reserve: 5 USDC (-15)',
-      'Hub↔Bob Collateral: 15 USDC',
-      'Ondelta: +15 (Hub perspective)',
-      'Total locked collateral: 25 USDC',
-    ]
-  });
+    pushSnapshot(env, 'Hub → Alice: $3M R2R Transfer', {
+      title: 'Reserve-to-Reserve Transfer #1 (R2R)',
+      what: 'Hub calls Depository.reserveToReserve(Alice, $3M). TX enters J-Machine mempool. On finalization: Hub -= $3M, Alice += $3M',
+      why: 'R2R transfers are pure on-chain settlement. Watch Alice\'s sphere grow as she receives funds!',
+      tradfiParallel: 'Like a Fedwire transfer: instant, final, on-chain settlement between reserve accounts',
+      keyMetrics: [
+        'Hub Reserve: $7M (-$3M)',
+        'Alice Reserve: $3M (+$3M) - now green!',
+        'J-Machine: 1 tx in mempool',
+      ]
+    }, [r2rTx1]);
 
-  // ============================================================================
-  // STEP 6: Alice ↔ Hub off-chain payment (ondelta change -5)
-  // ============================================================================
-  console.log('\n⚡ FRAME 6: Alice → Hub Off-Chain Payment (5 USDC)');
+    // ============================================================================
+    // STEP 3: Hub R2R → Bob ($2M USDC) - Second TX to mempool
+    // ============================================================================
+    console.log('\n🔄 FRAME 3: Hub → Bob Reserve Transfer ($2M) - REAL BrowserVM TX');
 
-  setReservesAndAccounts(env, alice.id, usd(20), [
-    { counterpartyId: hub.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(10), delta: usd(5) }
-  ], alice.name);
-  setReservesAndAccounts(env, hub.id, usd(50), [
-    { counterpartyId: alice.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(10), delta: -usd(5) },
-    { counterpartyId: bob.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(15), delta: usd(15) }
-  ], hub.name);
+    await processUntilEmpty(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'openAccount',
+        data: { targetEntityId: bob.id }
+      }]
+    }]);
 
-  pushSnapshot(env, 'Alice → Hub: 5 USDC Off-Chain (Ondelta)', {
-    title: 'Off-Chain Bilateral Netting',
-    what: 'Alice sends 5 USDC to Hub off-chain. NO on-chain transaction! Ondelta changes from +10 to +5. Both parties sign new AccountFrame.',
-    why: 'This is the magic: instant, zero-gas payments via bilateral state updates. Ondelta tracks net position. Can go negative (credit extension!).',
-    tradfiParallel: 'Like continuous net settlement (CNS) in securities clearing: trade all day, settle net position once. Or SWIFT gpi bilateral netting.',
-    keyMetrics: [
-      'Ondelta: +10 → +5 (-5 change)',
-      'Gas cost: 0 (off-chain)',
-      'Latency: <100ms (bilateral agreement)',
-      'Collateral unchanged: 10 USDC',
-    ]
-  });
+    // REAL BrowserVM R2R transaction
+    await browserVM.reserveToReserve(hub.id, bob.id, USDC_TOKEN_ID, usd(2_000_000));
 
-  // ============================================================================
-  // STEP 7: Bob ↔ Hub off-chain payment (ondelta change +8)
-  // ============================================================================
-  console.log('\n⚡ FRAME 7: Hub → Bob Off-Chain Payment (8 USDC)');
+    // Sync reserves from BrowserVM
+    await syncReservesFromBrowserVM(env, hub.id, browserVM, hub.name);
+    await syncReservesFromBrowserVM(env, bob.id, browserVM, bob.name);
 
-  setReservesAndAccounts(env, bob.id, usd(5), [
-    { counterpartyId: hub.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(15), delta: -usd(23) }
-  ], bob.name);
-  setReservesAndAccounts(env, hub.id, usd(50), [
-    { counterpartyId: alice.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(10), delta: -usd(5) },
-    { counterpartyId: bob.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(15), delta: usd(23) }
-  ], hub.name);
+    const r2rTx2: EntityInput = {
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'payFromReserve' as any,
+        kind: 'payFromReserve',
+        targetEntityId: bob.id,
+        tokenId: USDC_TOKEN_ID,
+        amount: usd(2_000_000),
+      }]
+    };
 
-  pushSnapshot(env, 'Hub → Bob: 8 USDC Off-Chain (Ondelta)', {
-    title: 'Credit Extension Beyond Collateral',
-    what: 'Hub sends 8 USDC to Bob. Ondelta: +15 → +23. CRITICAL: Ondelta (+23) exceeds collateral (15)! This is credit extension.',
-    why: 'XLN\'s killer feature: collateral bounds MAX exposure, but credit can extend beyond. If Hub defaults, Bob loses max 15 USDC (collateral), not 23.',
-    tradfiParallel: 'Like a credit line secured by partial collateral. Federal Reserve Daylight Overdrafts work similarly: banks can overdraw (credit) with collateral caps.',
-    keyMetrics: [
-      'Ondelta: +15 → +23 (+8 change)',
-      'Collateral: 15 USDC (unchanged)',
-      'Credit exposure: 23 USDC (8 beyond collateral)',
-      'Hub\'s risk: Limited to 15 USDC',
-    ]
-  });
+    pushSnapshot(env, 'Hub → Bob: $2M R2R Transfer', {
+      title: 'Reserve-to-Reserve Transfer #2',
+      what: 'Hub calls Depository.reserveToReserve(Bob, $2M). Second TX enters mempool.',
+      why: 'Now Hub has distributed $5M total ($3M to Alice, $2M to Bob). Both entities now have visible reserves.',
+      tradfiParallel: 'Hub acts like a treasury distributing funds to subsidiaries via wire transfers',
+      keyMetrics: [
+        'Hub Reserve: $5M (-$2M)',
+        'Bob Reserve: $2M (+$2M) - now green!',
+        'J-Machine: 2 txs in mempool',
+      ]
+    }, [r2rTx2]);
 
-  // ============================================================================
-  // STEP 8: Alice withdraws collateral (settlement)
-  // ============================================================================
-  console.log('\n💸 FRAME 8: Alice Closes Account (Collateral → Reserve)');
+    // ============================================================================
+    // STEP 4: Alice R2R → Bob ($500K) - Third TX triggers broadcast!
+    // ============================================================================
+    console.log('\n🔄 FRAME 4: Alice → Bob Reserve Transfer ($500K) - REAL BrowserVM TX');
 
-  setReservesAndAccounts(env, alice.id, usd(25), [
-    { counterpartyId: hub.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(0), delta: usd(0) }
-  ], alice.name);
-  setReservesAndAccounts(env, hub.id, usd(45), [
-    { counterpartyId: alice.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(0), delta: usd(0) },
-    { counterpartyId: bob.id, ownCredit: usd(50), peerCredit: usd(50), collateral: usd(15), delta: usd(23) }
-  ], hub.name);
+    // REAL BrowserVM R2R transaction
+    await browserVM.reserveToReserve(alice.id, bob.id, USDC_TOKEN_ID, usd(500_000));
 
-  pushSnapshot(env, 'Alice Closes Account: Collateral → Reserve Settlement', {
-    title: 'Cooperative Settlement (Collateral-to-Reserve)',
-    what: 'Alice & Hub call Depository.settle() with signed SettlementDiff. Ondelta (+5) determines distribution: Alice gets 5, Hub gets 5 back to reserves. Collateral released.',
-    why: 'Settlements are how bilateral accounts close. Ondelta determines final payout. This is the "cash out" moment - converting off-chain positions to on-chain reserves.',
-    tradfiParallel: 'Like closing a margin account at a brokerage: net position (ondelta) determines who gets what from the posted collateral.',
-    keyMetrics: [
-      'Alice Reserve: 20 → 25 (+5 from ondelta)',
-      'Hub Reserve: 50 → 45 (-5 settled)',
-      'Collateral released: 10 USDC',
-      'Account closed (ondelta = 0)',
-    ]
-  });
+    // Sync reserves from BrowserVM
+    await syncReservesFromBrowserVM(env, alice.id, browserVM, alice.name);
+    await syncReservesFromBrowserVM(env, bob.id, browserVM, bob.name);
 
-  // ============================================================================
-  // STEP 9: Final state summary
-  // ============================================================================
-  console.log('\n📊 FRAME 9: Final State Summary');
+    const r2rTx3: EntityInput = {
+      entityId: alice.id,
+      signerId: alice.signer,
+      entityTxs: [{
+        type: 'payFromReserve' as any,
+        kind: 'payFromReserve',
+        targetEntityId: bob.id,
+        tokenId: USDC_TOKEN_ID,
+        amount: usd(500_000),
+      }]
+    };
 
-  pushSnapshot(env, 'Final State: AHB Demo Complete', {
-    title: 'End State: Mixed Reserve & Collateral Positions',
-    what: 'Alice: 25 USDC reserve (closed account). Hub: 45 USDC reserve + 15 collateral with Bob (ondelta +23). Bob: 5 USDC reserve + account with Hub.',
-    why: 'This demonstrates the full cycle: R2R funding → R2C collateral → off-chain netting → C2R settlement. Hub still has active credit exposure to Bob.',
-    tradfiParallel: 'Alice "withdrew" like closing a brokerage account. Hub-Bob relationship remains active, like an open credit line with outstanding balance.',
-    keyMetrics: [
-      'Alice: 25 USDC reserve (no accounts)',
-      'Hub: 45 USDC reserve + 1 active account',
-      'Bob: 5 USDC reserve + 1 active account',
-      'Outstanding credit: 8 USDC (Hub → Bob)',
-      'Total system reserves: 75 USDC',
-      'Total locked collateral: 15 USDC',
-    ]
-  });
+    pushSnapshot(env, 'Alice → Bob: $500K R2R Transfer', {
+      title: 'Reserve-to-Reserve Transfer #3 → J-Block Finalized!',
+      what: 'Alice sends $500K to Bob. Third TX fills mempool capacity → J-Machine broadcasts rays to ALL entities!',
+      why: 'J-Machine batches transactions for efficiency. When capacity reached, it finalizes J-Block and broadcasts state updates.',
+      tradfiParallel: 'Like batch settlement at end-of-day: accumulate transactions, then settle all at once',
+      keyMetrics: [
+        'Alice Reserve: $2.5M (-$500K)',
+        'Bob Reserve: $2.5M (+$500K)',
+        'J-Machine: BROADCAST! 🔥',
+        'J-Block finalized with 3 txs',
+      ]
+    }, [r2rTx3]);
+
+    // ============================================================================
+    // STEP 5: Final State - All reserves settled (verify from BrowserVM)
+    // ============================================================================
+    console.log('\n📊 FRAME 5: Final State Summary');
+
+    // Verify final reserves from BrowserVM
+    const finalHubReserves = await browserVM.getReserves(hub.id, USDC_TOKEN_ID);
+    const finalAliceReserves = await browserVM.getReserves(alice.id, USDC_TOKEN_ID);
+    const finalBobReserves = await browserVM.getReserves(bob.id, USDC_TOKEN_ID);
+
+    console.log(`[AHB] Final BrowserVM reserves:`);
+    console.log(`  Hub: ${Number(finalHubReserves) / 1e18} USDC`);
+    console.log(`  Alice: ${Number(finalAliceReserves) / 1e18} USDC`);
+    console.log(`  Bob: ${Number(finalBobReserves) / 1e18} USDC`);
+    console.log(`  Total: ${Number(finalHubReserves + finalAliceReserves + finalBobReserves) / 1e18} USDC`);
+
+    pushSnapshot(env, 'Final State: R2R Demo Complete', {
+      title: 'End State: Reserve Distribution Complete',
+      what: 'Hub: $5M, Alice: $2.5M, Bob: $2.5M. Total: $10M preserved. All entities now have visible reserves.',
+      why: 'This demonstrates pure on-chain R2R settlement with J-Machine batching and broadcast visualization.',
+      tradfiParallel: 'Like Fedwire settlement: instant, final, auditable transfers between reserve accounts',
+      keyMetrics: [
+        'Hub: $5M reserve (green)',
+        'Alice: $2.5M reserve (green)',
+        'Bob: $2.5M reserve (green)',
+        'Total system reserves: $10M (conserved)',
+        'J-Blocks finalized: 1',
+      ]
+    });
 
     console.log('\n=====================================');
-    console.log('✅ AHB Demo Complete!');
-    console.log('9 frames captured for time machine playback');
+    console.log('✅ AHB Demo Complete (REAL BrowserVM transactions)!');
+    console.log('6 frames captured for time machine playback');
     console.log('Use arrow keys to step through the demo');
     console.log('=====================================\n');
     console.log(`[AHB] FINAL: Total snapshots pushed: ${pushSnapshotCount}`);

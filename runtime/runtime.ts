@@ -32,6 +32,7 @@ import {
   getNextEntityNumber,
   registerNumberedEntityOnChain,
   setBrowserVMJurisdiction,
+  getBrowserVMInstance,
   submitProcessBatch,
   submitPrefundAccount,
   submitSettle,
@@ -868,6 +869,7 @@ export {
   // Name resolution functions
   searchEntityNames,
   setBrowserVMJurisdiction,
+  getBrowserVMInstance,
   submitProcessBatch,
   submitPrefundAccount,
   submitSettle,

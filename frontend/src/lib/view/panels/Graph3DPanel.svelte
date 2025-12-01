@@ -75,7 +75,7 @@
     entityEmissive: '#003366',
     connectionColor: '#444444'
   });
-  const settings = { theme: 'dark', portfolioScale: 5000 };
+  const settings = { theme: 'dark', portfolioScale: 5000, dollarsPerPx: 30000 };
   const effectOperations = {
     clear: () => {},
     enqueue: (...args: unknown[]) => {},
@@ -151,6 +151,7 @@
     activityRing?: THREE.Mesh | null; // Activity indicator ring
     hubConnectedIds?: Set<string>; // PERF: Cache of connected entity IDs for hubs
     baseScale?: number; // Base scale from reserves (before pulse animation)
+    currentScale?: number; // Current interpolated scale (for smooth transitions)
     // NOTE: reserveLabel removed - too noisy
   }
 
@@ -230,6 +231,13 @@ let vrHammer: VRHammer | null = null;
   let broadcastEnabled = true;
   let broadcastStyle: 'raycast' | 'wave' | 'particles' = 'raycast';
   let broadcastAnimations: THREE.Object3D[] = []; // Active broadcast visuals
+
+  // J-Machine Auto-Proposer: Single-signer consensus simulation
+  // J acts as super-entity that auto-proposes every N seconds
+  let jAutoProposerInterval: ReturnType<typeof setInterval> | null = null;
+  let jProposalIntervalMs = 1000; // 1 second default - configurable
+  let jLastProposalTime = 0; // Track last proposal timestamp
+  let jAutoProposerEnabled = true; // Enable/disable auto-proposer
 
   // Network data with proper typing (legacy - will migrate to managers)
   let entities: EntityData[] = [];
@@ -594,7 +602,7 @@ let vrHammer: VRHammer | null = null;
   // Historical frames have xlnomies as array, live state has xlnomies as Map
   $: if (scene) {
     // Get xlnomies from time-aware env (array from history) or live state (Map)
-    let xlnomiesArray: Array<{ name: string; jMachine: { position: { x: number; y: number; z: number }; capacity: number; jHeight: number } }> = [];
+    let xlnomiesArray: Array<{ name: string; jMachine: { position: { x: number; y: number; z: number }; capacity: number; jHeight: number; mempool?: any[] } }> = [];
 
     if (env?.xlnomies) {
       // Historical frame: xlnomies is an array
@@ -623,28 +631,88 @@ let vrHammer: VRHammer | null = null;
     xlnomiesArray.forEach((xlnomy) => {
       if (!jMachines.has(xlnomy.name)) {
         console.log(`[Graph3D] Creating J-Machine for xlnomy: ${xlnomy.name} at position`, xlnomy.jMachine.position);
-        const jMachine = createJMachine(12, xlnomy.jMachine.position, xlnomy.name); // 2x smaller for Fed Chair UX
-        scene.add(jMachine);
-        jMachines.set(xlnomy.name, jMachine);
+        const jMachineGroup = createJMachine(12, xlnomy.jMachine.position, xlnomy.name); // 2x smaller for Fed Chair UX
+        scene.add(jMachineGroup);
+        jMachines.set(xlnomy.name, jMachineGroup);
         console.log(`[Graph3D] ✅ J-Machine created, scene now has ${scene.children.length} objects`);
       }
     });
+
+    // Sync J mempool visual: show tx cubes based on actual mempool contents
+    const activeXlnomy = xlnomiesArray.find(x => x.name === env?.activeXlnomy);
+    if (activeXlnomy && jMachine) {
+      const mempoolSize = activeXlnomy.jMachine.mempool?.length || 0;
+      const currentVisualCount = jMachineTxBoxes.length;
+
+      // Add cubes if mempool grew
+      while (jMachineTxBoxes.length < mempoolSize) {
+        const txIndex = jMachineTxBoxes.length;
+        const txCube = createMempoolTxCube(txIndex);
+        jMachine.add(txCube);
+        jMachineTxBoxes.push(txCube);
+      }
+
+      // Remove cubes if mempool shrunk (broadcast happened)
+      while (jMachineTxBoxes.length > mempoolSize) {
+        const txCube = jMachineTxBoxes.pop();
+        if (txCube && jMachine) {
+          jMachine.remove(txCube);
+          (txCube.geometry as THREE.BufferGeometry).dispose();
+          ((txCube as THREE.Mesh).material as THREE.Material).dispose();
+        }
+      }
+
+      if (currentVisualCount !== mempoolSize && mempoolSize > 0) {
+        console.log(`[Graph3D] 📦 J-Mempool synced: ${mempoolSize} pending txs`);
+      }
+    }
+  }
+
+  // Create a tx cube for mempool visualization
+  function createMempoolTxCube(index: number): THREE.Mesh {
+    const cubeSize = 1.5;
+    const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
+    const material = new THREE.MeshLambertMaterial({
+      color: 0xffaa00, // Orange-yellow for pending tx
+      transparent: true,
+      opacity: 0.8,
+      emissive: 0xffaa00,
+      emissiveIntensity: 0.3
+    });
+    const cube = new THREE.Mesh(geometry, material);
+
+    // Position cubes in a spiral inside the octahedron
+    const angle = (index * Math.PI * 2) / 5; // 5 per ring
+    const radius = 3 + Math.floor(index / 5) * 2;
+    const height = (index % 3) * 2 - 2;
+    cube.position.set(
+      Math.cos(angle) * radius,
+      height,
+      Math.sin(angle) * radius
+    );
+
+    return cube;
   }
 
   // ===== PROCESS ACCOUNT ACTIVITY LIGHTNING (on new frame) =====
-  $: if (activityVisualizer && env?.runtimeInput && entityMeshMap) {
+  // Only animate in LIVE mode ($isolatedTimeIndex === -1), not historical playback
+  $: if (activityVisualizer && env?.runtimeInput && entityMeshMap && $isolatedTimeIndex === -1) {
     activityVisualizer.processFrame(env.runtimeInput, entityMeshMap);
   }
 
   // ===== ADD TXS TO J-MACHINE (broadcast simulation) + R2R ANIMATION =====
-  $: if (jMachine && env?.runtimeInput?.entityInputs) {
+  // CRITICAL: Only animate in LIVE mode - historical playback should show static state
+  $: if (jMachine && env?.runtimeInput?.entityInputs && $isolatedTimeIndex === -1) {
     // For each entity input, check for reserve-to-reserve transactions
     env.runtimeInput.entityInputs.forEach((entityInput: any) => {
-      const txs = entityInput?.input?.txs || [];
+      // Support both old format (input.txs) and new format (entityTxs)
+      const txs = entityInput?.entityTxs || entityInput?.input?.txs || [];
       txs.forEach((tx: any) => {
         // Check if it's a reserve-related transaction (R2R)
-        if (tx.kind === 'payFromReserve' || tx.kind === 'payToReserve' || tx.kind === 'settleToReserve') {
-          console.log(`[J-Machine] Adding tx ${tx.kind} from ${entityInput.entityId?.slice(0, 8)}...`);
+        // Check both tx.kind and tx.type for compatibility
+        const txKind = tx.kind || tx.type;
+        if (txKind === 'payFromReserve' || txKind === 'payToReserve' || txKind === 'settleToReserve') {
+          console.log(`[J-Machine] Adding tx ${txKind} from ${entityInput.entityId?.slice(0, 8)}...`);
 
           // Shoot ray from entity → J-Machine (incoming tx)
           shootRayToJMachine(entityInput.entityId);
@@ -652,7 +720,7 @@ let vrHammer: VRHammer | null = null;
           addTxToJMachine(entityInput.entityId);
 
           // R2R animation: particle flies from source to target
-          if (tx.kind === 'payFromReserve' && tx.targetEntityId) {
+          if (txKind === 'payFromReserve' && tx.targetEntityId) {
             animateR2RTransfer(entityInput.entityId, tx.targetEntityId, tx.amount);
           }
         }
@@ -734,8 +802,7 @@ let vrHammer: VRHammer | null = null;
   // Track logged entities to only log ONCE on first draw
   let loggedGridPositions = new Set<string>();
 
-  // PERF: Cache entity sizes to avoid O(n²) reactive store lookups
-  let entitySizeCache = new Map<string, number>();
+  // entitySizeCache removed - now using frame-locked entitySizesAtFrame
 
   // Slice & export state
   let sliceStart: number = 0;
@@ -833,6 +900,9 @@ let vrHammer: VRHammer | null = null;
       await initThreeJS();
       // updateNetworkData() is called automatically by reactive statement: $: if ($isolatedEnv && scene)
       animate();
+
+      // Start J auto-proposer (1-second instant consensus simulation)
+      startJAutoProposer();
     };
 
     initAndSetup().catch(error => {
@@ -957,6 +1027,12 @@ let vrHammer: VRHammer | null = null;
   let resizeObserver: ResizeObserver | null = null;
 
   onDestroy(() => {
+    // Cleanup J auto-proposer timer
+    if (jAutoProposerInterval) {
+      clearInterval(jAutoProposerInterval);
+      jAutoProposerInterval = null;
+    }
+
     // Cleanup resize observer
     if (resizeObserver && container) {
       resizeObserver.disconnect();
@@ -1402,6 +1478,57 @@ let vrHammer: VRHammer | null = null;
       }
     };
     animateParticle();
+  }
+
+  /**
+   * J-Machine Auto-Proposer: Single-signer consensus simulation
+   *
+   * J acts as a "super entity" that auto-proposes on a timer.
+   * When mempool has txs and timer fires:
+   * 1. Trigger broadcast rays to all entities
+   * 2. Clear visual mempool cubes
+   * 3. Clear runtime mempool (via XLN.clearJMempool if available)
+   *
+   * This simulates instant J consensus without batching delays.
+   */
+  function startJAutoProposer() {
+    if (jAutoProposerInterval) {
+      clearInterval(jAutoProposerInterval);
+    }
+
+    console.log(`[J-AutoProposer] Started with ${jProposalIntervalMs}ms interval`);
+    jLastProposalTime = Date.now();
+
+    jAutoProposerInterval = setInterval(() => {
+      if (!jAutoProposerEnabled || !jMachine || !scene) return;
+
+      // Check if there are txs in visual mempool
+      if (jMachineTxBoxes.length === 0) return;
+
+      const now = Date.now();
+      console.log(`[J-AutoProposer] 🎯 Proposing ${jMachineTxBoxes.length} txs (elapsed: ${now - jLastProposalTime}ms)`);
+      jLastProposalTime = now;
+
+      // Trigger broadcast animation with rays
+      triggerBroadcast();
+
+      // Try to clear runtime mempool if XLN exposes it
+      // @ts-ignore - XLN may have clearJMempool method
+      if (typeof window !== 'undefined' && (window as any).XLN?.clearJMempool) {
+        (window as any).XLN.clearJMempool();
+      }
+
+      // Grid pulse effect on broadcast
+      gridPulseIntensity = 1.0;
+    }, jProposalIntervalMs);
+  }
+
+  function stopJAutoProposer() {
+    if (jAutoProposerInterval) {
+      clearInterval(jAutoProposerInterval);
+      jAutoProposerInterval = null;
+      console.log('[J-AutoProposer] Stopped');
+    }
   }
 
   async function initThreeJS() {
@@ -2131,8 +2258,56 @@ let vrHammer: VRHammer | null = null;
     const top3Hubs = new Set(sortedByDegree.slice(0, 3).map(([id]) => id));
 
 
-    // Clear and rebuild - simple and reliable
-    clearNetwork();
+    // Reconciliation pattern: diff entities instead of clear/rebuild
+    // This prevents GPU memory churn and preserves user-dragged positions
+    const currentEntityIds = new Set(entities.map(e => e.id));
+    const newEntityIds = new Set(entityData.map(e => e.entityId));
+
+    // Find entities to remove (exist now, not in new data)
+    const toRemove = entities.filter(e => !newEntityIds.has(e.id));
+
+    // Find entities to add (in new data, don't exist now)
+    const toAdd = entityData.filter(e => !currentEntityIds.has(e.entityId));
+
+    // Remove stale entities with proper disposal
+    toRemove.forEach(entity => {
+      scene.remove(entity.mesh);
+      if (entity.mesh.geometry) entity.mesh.geometry.dispose();
+      if (entity.mesh.material) {
+        const mat = entity.mesh.material;
+        if (Array.isArray(mat)) {
+          mat.forEach(m => m.dispose());
+        } else {
+          mat.dispose();
+        }
+      }
+      if (entity.label) {
+        scene.remove(entity.label);
+        if (entity.label.geometry) entity.label.geometry.dispose();
+        if (entity.label.material) entity.label.material.dispose();
+      }
+    });
+    entities = entities.filter(e => newEntityIds.has(e.id));
+
+    // Also reconcile connections - remove those involving removed entities
+    const removedIds = new Set(toRemove.map(e => e.id));
+    if (removedIds.size > 0) {
+      const staleConnections = connections.filter(c => removedIds.has(c.from) || removedIds.has(c.to));
+      staleConnections.forEach(connection => {
+        scene.remove(connection.line);
+        if (connection.line.geometry) connection.line.geometry.dispose();
+        if (connection.line.material) {
+          const mat = connection.line.material;
+          if (Array.isArray(mat)) {
+            mat.forEach(m => m.dispose());
+          } else {
+            mat.dispose();
+          }
+        }
+        if (connection.progressBars) scene.remove(connection.progressBars);
+      });
+      connections = connections.filter(c => !removedIds.has(c.from) && !removedIds.has(c.to));
+    }
 
     // Try to load saved positions first
     let savedPositions: Map<string, THREE.Vector3> | null = null;
@@ -2155,11 +2330,29 @@ let vrHammer: VRHammer | null = null;
       ? savedPositions
       : applyForceDirectedLayout(entityData, connectionMap, capacityMap);
 
-    // Create entity nodes
-    console.log('[Graph3D] About to create', entityData.length, 'entity nodes');
-    entityData.forEach((profile, index) => {
+    // Update existing entities in-place (profile, isHub status)
+    const entityMap = new Map(entities.map(e => [e.id, e]));
+    entityData.forEach(profile => {
+      const existing = entityMap.get(profile.entityId);
+      if (existing) {
+        // Update profile data
+        existing.profile = profile;
+        existing.isHub = top3Hubs.has(profile.entityId);
+        existing.mesh.userData['isHub'] = existing.isHub;
+
+        // Update hub cache
+        if (existing.isHub && !existing.hubConnectedIds) {
+          existing.hubConnectedIds = new Set();
+        } else if (!existing.isHub && existing.hubConnectedIds) {
+          delete existing.hubConnectedIds;
+        }
+      }
+    });
+
+    // Create ONLY NEW entity nodes (reconciliation - skip existing)
+    console.log('[Graph3D] Reconciliation: adding', toAdd.length, 'new entities, keeping', entities.length, 'existing');
+    toAdd.forEach((profile, index) => {
       const isHub = top3Hubs.has(profile.entityId);
-      console.log('[Graph3D] Creating entity node for', profile.entityId);
       createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub);
     });
 
@@ -2179,28 +2372,57 @@ let vrHammer: VRHammer | null = null;
   }
 
   function clearNetwork() {
-    // Remove entity meshes AND labels
+    // Remove entity meshes AND labels - PROPERLY DISPOSE to prevent memory leaks
     entities.forEach(entity => {
       scene.remove(entity.mesh);
+      // Dispose geometry and material to free GPU memory
+      if (entity.mesh.geometry) entity.mesh.geometry.dispose();
+      if (entity.mesh.material) {
+        if (Array.isArray(entity.mesh.material)) {
+          entity.mesh.material.forEach(m => m.dispose());
+        } else {
+          entity.mesh.material.dispose();
+        }
+      }
       // CRITICAL: Remove labels to prevent orphaned sprites accumulating
       if (entity.label) {
         scene.remove(entity.label);
+        if (entity.label.geometry) entity.label.geometry.dispose();
+        if (entity.label.material) entity.label.material.dispose();
       }
     });
     entities = [];
 
-    // Remove connection lines and progress bars
+    // Remove connection lines and progress bars - dispose materials
     connections.forEach(connection => {
       scene.remove(connection.line);
+      if (connection.line.geometry) connection.line.geometry.dispose();
+      if (connection.line.material) {
+        const mat = connection.line.material;
+        if (Array.isArray(mat)) {
+          mat.forEach(m => m.dispose());
+        } else {
+          mat.dispose();
+        }
+      }
       if (connection.progressBars) {
         scene.remove(connection.progressBars);
       }
     });
     connections = [];
 
-    // Remove particles
+    // Remove particles - dispose materials
     particles.forEach(particle => {
       scene.remove(particle.mesh);
+      if (particle.mesh.geometry) particle.mesh.geometry.dispose();
+      if (particle.mesh.material) {
+        const mat = particle.mesh.material;
+        if (Array.isArray(mat)) {
+          mat.forEach(m => m.dispose());
+        } else {
+          mat.dispose();
+        }
+      }
     });
     particles = [];
   }
@@ -3116,6 +3338,29 @@ let vrHammer: VRHammer | null = null;
       }
     }
 
+    // Get reserve balance for display (merged into name label)
+    let balanceStr = '';
+    if (replica?.state?.reserves) {
+      let totalReserves = 0n;
+      for (const amount of replica.state.reserves.values()) {
+        totalReserves += amount;
+      }
+      const reserveValue = Number(totalReserves) / 1e18;
+      // Format: $1.2M, $500K, $0
+      if (reserveValue >= 1000000) {
+        balanceStr = ` $${(reserveValue / 1000000).toFixed(1)}M`;
+      } else if (reserveValue >= 1000) {
+        balanceStr = ` $${(reserveValue / 1000).toFixed(0)}K`;
+      } else if (reserveValue > 0) {
+        balanceStr = ` $${reserveValue.toFixed(0)}`;
+      } else {
+        balanceStr = ' $0';
+      }
+    }
+
+    // Combined label: "alice $0" or "Hub $1.2M"
+    const labelText = entityName + balanceStr;
+
     // NO background - transparent (user requirement: black background is ugly)
     context.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -3126,15 +3371,15 @@ let vrHammer: VRHammer | null = null;
       context.textBaseline = 'middle';
       context.fillText(flag, 256, 32); // Top half (centered at 512/2=256)
 
-      // Draw name below flag (smaller)
+      // Draw name + balance below flag (smaller)
       context.font = `bold ${18 * labelScale}px sans-serif`;
       context.strokeStyle = '#000000';
       context.lineWidth = 3;
-      context.strokeText(entityName, 256, 90);
+      context.strokeText(labelText, 256, 90);
       context.fillStyle = '#FFD700'; // Gold for Fed
-      context.fillText(entityName, 256, 90);
+      context.fillText(labelText, 256, 90);
     } else {
-      // Regular entity: emoji + name, centered
+      // Regular entity: name + balance, centered
       context.font = `bold ${24 * labelScale}px sans-serif`;
       context.textAlign = 'center';
       context.textBaseline = 'middle';
@@ -3142,11 +3387,11 @@ let vrHammer: VRHammer | null = null;
       // Draw dark outline for contrast
       context.strokeStyle = '#000000';
       context.lineWidth = 3;
-      context.strokeText(entityName, 256, 64);
+      context.strokeText(labelText, 256, 64);
 
       // Draw bright green text on top
       context.fillStyle = '#00ff88';
-      context.fillText(entityName, 256, 64);
+      context.fillText(labelText, 256, 64);
     }
 
     // Create sprite with texture
@@ -3715,6 +3960,7 @@ let vrHammer: VRHammer | null = null;
       }
 
       // Calculate base size from reserves (planet size = reserve balance)
+      // Size is STATIC within a frame - only changes on J-events (frame change)
       const baseSize = getEntitySizeForToken(entityId, selectedTokenId);
       entity.baseScale = baseSize; // Store for reference
 
@@ -3790,7 +4036,17 @@ let vrHammer: VRHammer | null = null;
       } else {
         // Inactive: use base size from reserves (no pulse)
         entity.mesh.scale.setScalar(baseSize);
-        material.emissive.setRGB(0, 0.1, 0);
+
+        // Color based on reserves: WHITE/LIGHT if $0, GREEN if has funds
+        // Query actual reserves instead of relying on size threshold
+        const hasReserves = checkEntityHasReserves(entityId);
+        if (hasReserves) {
+          material.color.setHex(0x00ff88); // Bright green - has funds
+          material.emissive.setRGB(0, 0.15, 0.05);
+        } else {
+          material.color.setHex(0xcccccc); // Light white/grey - empty (visible)
+          material.emissive.setRGB(0.1, 0.1, 0.1);
+        }
 
         // Remove activity ring (use property deletion for optional type)
         if (entity.activityRing) {
@@ -4522,58 +4778,78 @@ let vrHammer: VRHammer | null = null;
     }
   }
 
-  function getEntitySizeForToken(entityId: string, tokenId: number): number {
-    // PERF: Check cache first (eliminates O(n²) reactive store lookups)
-    const cacheKey = `${entityId}:${tokenId}`;
-    if (entitySizeCache.has(cacheKey)) {
-      return entitySizeCache.get(cacheKey)!;
-    }
+  // ENTITY SIZING: Frame-locked, only recalculates on timeIndex change (J-events)
+  // Size is determined by: 1) Scenario config (dollarsPerPx) 2) Reserve balance at current frame
+  // NEVER changes mid-frame during render loops
+  let lastSizeCalcTimeIndex = -999;
+  const entitySizesAtFrame = new Map<string, number>(); // entityId -> size
+
+  function recalculateAllEntitySizes(): void {
+    entitySizesAtFrame.clear();
+    const dollarsPerPx = settings.dollarsPerPx || 30000;
+    const EMPTY_SIZE = 1.8; // Fixed size for $0 entities
 
     const currentReplicas = replicas;
-    let replica: any = null;
+    const seenEntities = new Set<string>();
 
-    // PERF: Direct iteration instead of Array.from + find
-    for (const [key, value] of currentReplicas) {
-      if (key.startsWith(entityId + ':')) {
-        replica = value;
-        break;
+    // Calculate size for each entity based on reserves
+    for (const [key, replica] of currentReplicas) {
+      const entityId = key.split(':')[0];
+      if (seenEntities.has(entityId)) continue;
+      seenEntities.add(entityId);
+
+      if (!replica?.state?.reserves) {
+        entitySizesAtFrame.set(entityId, EMPTY_SIZE);
+        continue;
       }
-    }
 
-    if (!replica?.state?.reserves) {
-      const defaultSize = 0.6; // Base size for entities with no reserves
-      entitySizeCache.set(cacheKey, defaultSize);
-      return defaultSize;
-    }
-
-    // --- NEW LOGIC ---
-    // Calculate total reserves across all tokens to represent overall financial size
-    let totalReserves = 0n;
-    for (const amount of replica.state.reserves.values()) {
+      // Sum all reserves
+      let totalReserves = 0n;
+      for (const amount of replica.state.reserves.values()) {
         totalReserves += amount;
+      }
+
+      const reserveValueUSD = Number(totalReserves) / 1e18;
+
+      if (reserveValueUSD <= 0) {
+        entitySizesAtFrame.set(entityId, EMPTY_SIZE);
+        continue;
+      }
+
+      // Volume = money / dollarsPerPx, then sphere radius from volume
+      const volumePx = reserveValueUSD / dollarsPerPx;
+      const radius = Math.cbrt(volumePx * 0.75 / Math.PI);
+      const size = Math.max(EMPTY_SIZE, Math.min(radius, 50.0));
+      entitySizesAtFrame.set(entityId, size);
     }
-
-    // Convert from wei (1e18) to a numerical value for calculation
-    const reserveValue = Number(totalReserves) / 1e18;
-
-    // Use a logarithmic scale for better visualization of wide-ranging values.
-    // This formula ensures entities with 0 reserves have a base size, and large reserves don't become infinitely large.
-    const newScale = 0.8 + Math.log1p(reserveValue / 1000) * 0.3; // log1p(x) is log(1+x)
-    
-    // Clamp the scale to a reasonable min/max to keep the scene tidy
-    const size = Math.max(0.6, Math.min(newScale, 8.0));
-
-    // VERIFICATION: Log the calculated size to the console for verification.
-    console.log(`[Verification] Entity: ${entityId.slice(0, 10)}... | Total Reserves: ${reserveValue.toFixed(2)} | Calculated Scale: ${size.toFixed(2)}`);
-
-    // Cache the result
-    entitySizeCache.set(cacheKey, size);
-    return size;
   }
 
-  // PERF: Clear cache when replicas change
-  $: if (replicas) {
-    entitySizeCache.clear();
+  function getEntitySizeForToken(entityId: string, _tokenId: number): number {
+    // Check if we need to recalculate (only on frame change)
+    const currentTimeIndex = get(isolatedTimeIndex);
+    if (currentTimeIndex !== lastSizeCalcTimeIndex) {
+      lastSizeCalcTimeIndex = currentTimeIndex;
+      recalculateAllEntitySizes();
+    }
+
+    return entitySizesAtFrame.get(entityId) ?? 1.8;
+  }
+
+  /** Check if entity has any reserves (for color determination) */
+  function checkEntityHasReserves(entityId: string): boolean {
+    const currentReplicas = replicas;
+    for (const [key, value] of currentReplicas) {
+      if (key.startsWith(entityId + ':')) {
+        const replica = value as any;
+        if (replica?.state?.reserves) {
+          for (const amount of replica.state.reserves.values()) {
+            if (amount > 0n) return true;
+          }
+        }
+        return false;
+      }
+    }
+    return false;
   }
 
   function calculateAvailableRoutes(from: string, to: string) {

@@ -16,9 +16,16 @@ import fs from 'fs';
  */
 
 // Check if HTTPS certs exist (try multiple locations)
-let certPath = './localhost+2.pem';
-let keyPath = './localhost+2-key.pem';
+let certPath = './localhost+3.pem';
+let keyPath = './localhost+3-key.pem';
 let hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
+
+// Fallback to localhost+2 certs
+if (!hasCerts) {
+	certPath = './localhost+2.pem';
+	keyPath = './localhost+2-key.pem';
+	hasCerts = fs.existsSync(certPath) && fs.existsSync(keyPath);
+}
 
 // Fallback to LAN IP certs if localhost certs don't exist
 if (!hasCerts) {
@@ -86,6 +93,9 @@ export default defineConfig({
 	define: {
 		// Define globals for browser compatibility
 		global: 'globalThis',
+		// Build hash for stale version detection (changes on every build)
+		__BUILD_HASH__: JSON.stringify(Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)),
+		__BUILD_TIME__: JSON.stringify(new Date().toISOString()),
 	},
 	resolve: {
 		alias: {

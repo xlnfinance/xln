@@ -1872,6 +1872,7 @@
 
   .main-content {
     max-width: 520px;
+    width: 100%;
     margin: 0 auto;
     position: relative;
     z-index: 1;
@@ -1879,6 +1880,8 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+    box-sizing: border-box;
+    overflow: hidden;
   }
 
   /* Glass Card - Sacred Chamber */
@@ -3333,13 +3336,14 @@
   .vault-tip,
   .shards-tip {
     max-width: 400px;
-    margin-top: 24px;
+    margin: 24px auto 0;
     font-size: 13px;
     color: rgba(255, 255, 255, 0.5);
     text-align: center;
     line-height: 1.5;
     padding: 0 20px;
     animation: tip-fade 7s ease-in-out infinite;
+    word-wrap: break-word;
   }
 
   @keyframes tip-fade {

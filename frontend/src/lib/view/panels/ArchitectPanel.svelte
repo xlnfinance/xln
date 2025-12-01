@@ -66,6 +66,19 @@
     console.log('[ArchitectPanel] Env ready with', $isolatedEnv.entities?.length || 0, 'entities');
   }
 
+  // CRITICAL: Check if viewing history (timeIndex >= 0 means historical frame, -1 means LIVE)
+  $: isHistoryMode = $isolatedTimeIndex >= 0;
+
+  /** Guard function - blocks mutations when viewing history */
+  function requireLiveMode(action: string): boolean {
+    if (isHistoryMode) {
+      lastAction = `⚠️ Cannot ${action} while viewing history. Jump to LIVE first.`;
+      console.warn('[Architect] Blocked mutation in history mode:', action);
+      return false;
+    }
+    return true;
+  }
+
   // Get entity IDs for dropdowns (extract entityId from replica keys)
   let entityIds: string[] = [];
   $: entityIds = $isolatedEnv?.replicas
@@ -108,6 +121,7 @@
 
   /** Mint reserves to selected entity */
   async function mintReservesToEntity() {
+    if (!requireLiveMode('mint reserves')) return;
     if (!selectedEntityForMint || !$isolatedEnv) {
       lastAction = ' Select an entity first';
       return;
@@ -175,6 +189,7 @@
 
   /** Send R2R (Reserve-to-Reserve) transaction */
   async function sendR2RTransaction() {
+    if (!requireLiveMode('send R2R transaction')) return;
     if (!r2rFromEntity || !r2rToEntity || r2rFromEntity === r2rToEntity) {
       lastAction = ' Select different FROM and TO entities';
       return;
@@ -268,7 +283,7 @@
   let currentTutorialFrame = 0;
 
   // Expandable category state
-  let expandedCategory: 'elementary' | 'intermediate' | 'advanced' | null = null;
+  let expandedCategory: 'elementary' | 'intermediate' | 'advanced' | null = 'elementary'; // Pre-expand Elementary on load
 
   /** Run preset by ID */
   async function runPreset(presetId: string) {
@@ -280,6 +295,11 @@
       lastAction = ' Empty J-Machine ready - add entities manually';
       return;
     }
+  }
+
+  /** Start UI Tutorial (overlay walkthrough) */
+  function startUITutorial() {
+    panelBridge.emit('tutorial:action', { action: 'start' });
   }
 
   /** Start AHB Tutorial with autopilot */
@@ -314,21 +334,19 @@
       console.log('[Architect] Setting isolatedHistory with frames:', frames.length);
       console.log('[Architect] Frame descriptions:', frames.map((f: any) => f.description));
       isolatedHistory.set(frames);
-      isolatedTimeIndex.set(0);
+      // Set to LAST frame - show final state after scenario completes
+      isolatedTimeIndex.set(Math.max(0, frames.length - 1));
 
       console.log('[Architect] Frames in localHistory store:', frames.length);
-      console.log('[Architect] First frame subtitle:', !!frames[0]?.subtitle);
-      if (frames.length > 0) {
-        console.log('[Architect] Frame 0 description:', frames[0].description);
-      }
 
       // Exit live mode so subtitles show
       isolatedIsLive.set(false);
 
-      lastAction = `AHB Tutorial: ${frames.length} frames loaded`;
+      lastAction = `AHB: ${frames.length} frames loaded. Use TimeMachine to navigate.`;
 
-      // Start autopilot playback
-      startAutopilot([3, 5, 5, 4, 4, 6, 6, 5, 10]); // Pause times per frame (seconds)
+      // NO autopilot - user controls playback via TimeMachine
+      // Start at LAST frame to show final state (user can rewind with TimeMachine)
+      tutorialActive = false; // Don't show tutorial UI - just use TimeMachine
     } catch (err: any) {
       lastAction = ` ${err.message}`;
       console.error('[Tutorial] AHB error:', err);
@@ -526,6 +544,7 @@
 
   /** BANKER DEMO STEP 1: Create 3×3 Hub */
   async function createHub() {
+    if (!requireLiveMode('create hub')) return;
     loading = true;
 
     try {
@@ -690,6 +709,7 @@
 
   /** BANKER DEMO STEP 3: Send one random payment */
   async function sendRandomPayment() {
+    if (!requireLiveMode('send payment')) return;
     if (entityIds.length < 2) {
       lastAction = ' Need at least 2 entities';
       return;
@@ -766,6 +786,7 @@
 
   /** Quick Action: Send 20% of balance to random entity */
   async function send20PercentTransfer() {
+    if (!requireLiveMode('send transfer')) return;
     if (!$isolatedEnv || entityIds.length < 2) {
       lastAction = ' Need at least 2 entities';
       return;
@@ -1044,6 +1065,7 @@
 
   /** CREATE ECONOMY WITH TOPOLOGY - Main entry point */
   async function createEconomyWithTopology(topologyType: 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid' | 'sp500' | 'ahb') {
+    if (!requireLiveMode('create economy')) return;
     console.log('[Architect] createEconomyWithTopology called with type:', topologyType);
 
     loading = true;
@@ -1121,6 +1143,7 @@
 
   /** Create entities based on topology configuration */
   async function createEntitiesFromTopology(topology: any) {
+    if (!requireLiveMode('create entities')) return;
     console.log('[createEntities] START');
 
     const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
@@ -1331,6 +1354,7 @@
 
   /** OLD: FED RESERVE DEMO (legacy - will be removed) */
   async function createFedReserveDemo() {
+    if (!requireLiveMode('create demo')) return;
     if (!$isolatedEnv?.activeXlnomy) {
       lastAction = ' Create jurisdiction first';
       return;
@@ -2091,6 +2115,7 @@
   }
 
   async function createNewXlnomy() {
+    if (!requireLiveMode('create xlnomy')) return;
     if (!newXlnomyName.trim()) {
       lastAction = ' Enter a name for the xlnomy';
       return;
@@ -2186,6 +2211,7 @@
 
   /** Create new entity with custom name */
   async function createEntity() {
+    if (!requireLiveMode('create entity')) return;
     if (!newEntityName.trim()) {
       lastAction = ' Enter entity name';
       return;
@@ -2271,6 +2297,9 @@
 <div class="architect-panel">
   <div class="header">
     <h3> Architect</h3>
+    <button class="tutorial-btn" on:click={startUITutorial} title="Start interactive tutorial">
+       Start Tutorial
+    </button>
   </div>
 
   <div class="mode-selector">
@@ -2340,19 +2369,20 @@
 
           {#if expandedCategory === 'elementary'}
             <div class="preset-list">
+              <!-- AHB FIRST with glow - recommended starting point -->
+              <button class="preset-item recommended" on:click={startAHBTutorial} disabled={loading}>
+                <span class="icon">ahb</span>
+                <div class="info">
+                  <strong>Alice-Hub-Bob</strong>
+                  <p>3 min · 9 frames · Auto-play tutorial</p>
+                </div>
+              </button>
+
               <button class="preset-item" on:click={() => runPreset('empty')} disabled={loading}>
                 <span class="icon">□</span>
                 <div class="info">
                   <strong>Empty J-Machine</strong>
                   <p>Clean slate · Manual exploration</p>
-                </div>
-              </button>
-
-              <button class="preset-item" on:click={startAHBTutorial} disabled={loading}>
-                <span class="icon">A-H-B</span>
-                <div class="info">
-                  <strong>Alice-Hub-Bob</strong>
-                  <p>3 min · 9 frames · Auto-play tutorial</p>
                 </div>
               </button>
 
@@ -2879,11 +2909,33 @@
     padding: 12px;
     background: #2d2d30;
     border-bottom: 2px solid #007acc;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   }
 
   .header h3 {
     margin: 0;
     font-size: 14px;
+  }
+
+  .tutorial-btn {
+    padding: 6px 12px;
+    background: linear-gradient(135deg, #00ff41, #00cc33);
+    border: none;
+    border-radius: 4px;
+    color: #000;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 0 10px rgba(0, 255, 65, 0.3);
+  }
+
+  .tutorial-btn:hover {
+    background: linear-gradient(135deg, #00dd38, #00aa2a);
+    box-shadow: 0 0 20px rgba(0, 255, 65, 0.5);
+    transform: translateY(-1px);
   }
 
   .mode-selector {
@@ -3392,6 +3444,18 @@
     margin: 0;
     font-size: 12px;
     color: rgba(255, 255, 255, 0.6);
+  }
+
+  /* Recommended scenario - AHB glow effect */
+  .preset-item.recommended {
+    border: 2px solid #00ff88;
+    box-shadow: 0 0 15px rgba(0, 255, 136, 0.4), inset 0 0 10px rgba(0, 255, 136, 0.1);
+    animation: recommendedPulse 2s ease-in-out infinite;
+  }
+
+  @keyframes recommendedPulse {
+    0%, 100% { box-shadow: 0 0 15px rgba(0, 255, 136, 0.4), inset 0 0 10px rgba(0, 255, 136, 0.1); }
+    50% { box-shadow: 0 0 25px rgba(0, 255, 136, 0.6), inset 0 0 15px rgba(0, 255, 136, 0.2); }
   }
 
   .topology-builder {

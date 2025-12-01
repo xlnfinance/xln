@@ -111,54 +111,67 @@
     return `${minutes}:${seconds.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
   }
 
-  // Playback
+  // Playback - simplified with guard against multiple intervals
   function togglePlay() {
+    playing = !playing;
+
     if (playing) {
-      stopPlayback();
-    } else {
-      startPlayback();
-    }
-  }
+      // Start: clear any existing interval first, then create new
+      if (playbackInterval) clearInterval(playbackInterval);
 
-  function startPlayback() {
-    if ($history.length === 0) return;
-
-    if ($isLive || $timeIndex >= maxTimeIndex) {
-      localTimeOperations.goToHistoryStart();
-    }
-
-    playing = true;
-    const frameDelay = 1000 / speed;
-
-    playbackInterval = window.setInterval(() => {
-      const end = sliceEnd ?? maxTimeIndex;
-
-      if ($timeIndex >= end) {
-        if (loopMode === 'all' || loopMode === 'slice') {
-          localTimeOperations.goToTimeIndex(sliceStart ?? 0);
-        } else {
-          stopPlayback();
-        }
-      } else {
-        localTimeOperations.stepForward();
+      if ($history.length === 0) {
+        playing = false;
+        return;
       }
-    }, frameDelay);
-  }
 
-  function stopPlayback() {
-    playing = false;
-    if (playbackInterval) {
-      clearInterval(playbackInterval);
-      playbackInterval = null;
+      // Reset to start if at end or in live mode
+      if ($isLive || $timeIndex >= maxTimeIndex) {
+        localTimeOperations.goToHistoryStart();
+      }
+
+      playbackInterval = window.setInterval(() => {
+        const end = sliceEnd ?? maxTimeIndex;
+        if ($timeIndex >= end) {
+          if (loopMode === 'all' || loopMode === 'slice') {
+            localTimeOperations.goToTimeIndex(sliceStart ?? 0);
+          } else {
+            playing = false;
+            if (playbackInterval) clearInterval(playbackInterval);
+            playbackInterval = null;
+          }
+        } else {
+          localTimeOperations.stepForward();
+        }
+      }, 1000 / speed);
+    } else {
+      // Stop: clear interval
+      if (playbackInterval) {
+        clearInterval(playbackInterval);
+        playbackInterval = null;
+      }
     }
   }
 
   function setSpeed(newSpeed: number) {
     speed = newSpeed;
     showSpeedMenu = false;
-    if (playing) {
-      stopPlayback();
-      startPlayback(); // Restart with new speed
+    // Restart interval with new speed if playing
+    if (playing && playbackInterval) {
+      clearInterval(playbackInterval);
+      playbackInterval = window.setInterval(() => {
+        const end = sliceEnd ?? maxTimeIndex;
+        if ($timeIndex >= end) {
+          if (loopMode === 'all' || loopMode === 'slice') {
+            localTimeOperations.goToTimeIndex(sliceStart ?? 0);
+          } else {
+            playing = false;
+            if (playbackInterval) clearInterval(playbackInterval);
+            playbackInterval = null;
+          }
+        } else {
+          localTimeOperations.stepForward();
+        }
+      }, 1000 / speed);
     }
   }
 
@@ -272,7 +285,12 @@
   });
 
   onDestroy(() => {
-    stopPlayback();
+    // Cleanup: stop playback
+    playing = false;
+    if (playbackInterval) {
+      clearInterval(playbackInterval);
+      playbackInterval = null;
+    }
     window.removeEventListener('keydown', handleKeyboard);
   });
 

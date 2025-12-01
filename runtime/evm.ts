@@ -60,6 +60,7 @@ export const ENTITY_PROVIDER_ABI = [
 ];
 
 export const DEPOSITORY_ABI = [
+  'function mintToReserve(bytes32 entity, uint256 tokenId, uint256 amount) external',
   'function debugFundReserves(bytes32 entity, uint256 tokenId, uint256 amount) external',
   'function debugBulkFundEntities() external',
   'function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint256 tokenId, uint256 amount) external returns (bool)',
@@ -72,6 +73,7 @@ export const DEPOSITORY_ABI = [
   'function getInsuranceLinesCount(bytes32 insured) external view returns (uint256)',
   'function getAvailableInsurance(bytes32 insured, uint256 tokenId) external view returns (uint256)',
   // Events
+  'event ReserveMinted(bytes32 indexed entity, uint256 indexed tokenId, uint256 amount, uint256 newBalance)',
   'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
   'event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint256 indexed tokenId, uint256 amount)',
   'event SettlementProcessed(bytes32 indexed leftEntity, bytes32 indexed rightEntity, uint256 indexed tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)',
@@ -903,6 +905,11 @@ export const setBrowserVMJurisdiction = (depositoryAddress: string, browserVMIns
 export const getJurisdictionByAddress = async (address: string): Promise<JurisdictionConfig | undefined> => {
   const jurisdictions = await getJurisdictions();
   return jurisdictions.get(address);
+};
+
+/** Get BrowserVM instance (for demos that need direct BrowserVM access) */
+export const getBrowserVMInstance = (): any => {
+  return BROWSER_VM_INSTANCE;
 };
 
 // Settlement diff structure matching contract

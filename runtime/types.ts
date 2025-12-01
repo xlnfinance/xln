@@ -212,15 +212,70 @@ export interface VoteData {
 }
 
 /**
+ * Jurisdiction event types - discriminated union for type safety
+ * Each on-chain event has its own typed data structure
+ */
+export type JurisdictionEvent =
+  | {
+      type: 'ReserveUpdated';
+      data: {
+        entity: string;
+        tokenId: number;
+        newBalance: string;
+        symbol: string;
+        decimals: number;
+      };
+    }
+  | {
+      type: 'SettlementProcessed';
+      data: {
+        leftEntity: string;
+        rightEntity: string;
+        counterpartyEntityId: string;
+        tokenId: number;
+        ownReserve: string;
+        counterpartyReserve: string;
+        collateral: string;
+        ondelta: string;
+        side: 'left' | 'right';
+      };
+    }
+  | {
+      type: 'TransferReserveToCollateral';
+      data: {
+        receivingEntity: string;
+        counterentity: string;
+        collateral: string;
+        ondelta: string;
+        tokenId: number;
+        side: 'receiving' | 'counterparty';
+      };
+    }
+  | {
+      type: 'InsuranceClaimed';
+      data: {
+        entityId: string;
+        counterpartyId: string;
+        tokenId: number;
+        amount: string;
+        claimReason: string;
+      };
+    }
+  | {
+      type: 'GovernanceEnabled';
+      data: {
+        entityId: string;
+        proposalThreshold: number;
+      };
+    };
+
+/**
  * Jurisdiction event data for j_event transactions
- * Flattened structure (no nested event object)
+ * Now with typed event discriminated union
  */
 export interface JurisdictionEventData {
   from: string;
-  event: {
-    type: string; // e.g. "reserveToReserve", "GovernanceEnabled"
-    data: any;
-  };
+  event: JurisdictionEvent;
   observedAt: number;
   blockNumber: number;
   transactionHash: string;
@@ -622,6 +677,15 @@ export interface EnvSnapshot {
   gossip?: {
     profiles: Profile[];
   };
+  // Jurisdiction state (J-Machine) - required for merkle tree
+  xlnomies?: Array<{
+    name: string;
+    jMachine: {
+      position: { x: number; y: number; z: number };
+      capacity: number;
+      jHeight: number;
+    };
+  }>;
   // Interactive storytelling narrative
   title?: string; // Short headline (e.g., "Bank Run Begins")
   narrative?: string; // Detailed explanation of what's happening in this frame

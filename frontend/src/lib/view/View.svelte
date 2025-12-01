@@ -18,6 +18,7 @@
   import ConsolePanel from './panels/ConsolePanel.svelte';
   import RuntimeIOPanel from './panels/RuntimeIOPanel.svelte';
   import SettingsPanel from './panels/SettingsPanel.svelte';
+  import InsurancePanel from './panels/InsurancePanel.svelte';
   import EntityPanelWrapper from './panels/wrappers/EntityPanelWrapper.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
   import Tutorial from './components/Tutorial.svelte';
@@ -41,7 +42,15 @@
   const localTimeIndex = writable<number>(-1);  // -1 = live mode
   const localIsLive = writable<boolean>(true);
 
+  // Build version tracking (injected by vite.config.ts)
+  // @ts-ignore - __BUILD_HASH__ and __BUILD_TIME__ are injected by vite define
+  const BUILD_HASH: string = typeof globalThis.__BUILD_HASH__ !== 'undefined' ? globalThis.__BUILD_HASH__ : (typeof __BUILD_HASH__ !== 'undefined' ? __BUILD_HASH__ : 'dev');
+  // @ts-ignore
+  const BUILD_TIME: string = typeof globalThis.__BUILD_TIME__ !== 'undefined' ? globalThis.__BUILD_TIME__ : (typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : 'unknown');
+
   onMount(async () => {
+    // Version check - ALWAYS log build hash for stale detection
+    console.log(`%c[XLN View] Build: ${BUILD_HASH} @ ${BUILD_TIME}`, 'color: #00ff88; font-weight: bold; font-size: 14px;');
     console.log('[View] onMount started - initializing isolated XLN');
 
     // Initialize isolated XLN runtime (simnet - BrowserVM mode)
@@ -117,7 +126,9 @@
       // Set to isolated stores
       localEnvStore.set(env);
       localHistoryStore.set(env.history || []);
-      localTimeIndex.set(urlImport?.state.ui?.ti || 0);
+      // CRITICAL: Default to -1 (LIVE mode), not 0 (historical frame 0)
+      // Only use saved timeIndex when explicitly importing from URL
+      localTimeIndex.set(urlImport?.state.ui?.ti ?? -1);
       localIsLive.set(true);
 
     } catch (err) {
@@ -190,6 +201,15 @@
               isolatedTimeIndex: localTimeIndex
             }
           });
+        } else if (options.name === 'insurance') {
+          component = mount(InsurancePanel, {
+            target: div,
+            props: {
+              isolatedEnv: localEnvStore,
+              isolatedHistory: localHistoryStore,
+              isolatedTimeIndex: localTimeIndex
+            }
+          });
         } else if (options.name === 'entity-panel') {
           // Dynamic panel for entity operations (opened via panelBridge)
           // Uses EntityPanelWrapper - thin Dockview adapter for legacy EntityPanel
@@ -222,64 +242,86 @@
       },
     });
 
-    // Default layout: Graph3D (75%) + Right sidebar (25%)
+    // Clear any saved layout to ensure fresh default layout
+    localStorage.removeItem('xln-dockview-layout');
+
+    // Default layout: Graph3D (2/3) + Right sidebar (1/3) with ALL panels stacked
+    // Dockview: 'within' adds tabs to the END of the group - so add in desired order
+    // Final desired tab order: Architect | Entities | Console | Depository | Runtime I/O | Settings | Insurance
     const graph3d = dockview.addPanel({
       id: 'graph3d',
       component: 'graph3d',
       title: '🌐 Graph3D',
     });
 
-    const entities = dockview.addPanel({
-      id: 'entities',
-      component: 'entities',
-      title: '🏢 Entities',
+    // Architect FIRST (leftmost tab) - create the right panel group
+    const architect = dockview.addPanel({
+      id: 'architect',
+      component: 'architect',
+      title: '🎬 Architect',
       position: { direction: 'right', referencePanel: 'graph3d' },
     });
 
-    // Set initial sizes: Graph3D gets 2/3, sidebar gets 1/3 (balanced layout)
-    const graph3dApi = dockview.getPanel('graph3d');
-    const entitiesApi = dockview.getPanel('entities');
-    if (graph3dApi && entitiesApi) {
-      setTimeout(() => {
-        graph3dApi.api.setSize({ width: window.innerWidth * 0.667 }); // 2/3 split
-      }, 100);
-    }
-
-    const depository = dockview.addPanel({
-      id: 'depository',
-      component: 'depository',
-      title: '💰 Depository',
-      position: { direction: 'below', referencePanel: 'entities' },
+    // Add remaining panels in order (they append to the tab group)
+    dockview.addPanel({
+      id: 'entities',
+      component: 'entities',
+      title: '🏢 Entities',
+      position: { direction: 'within', referencePanel: 'architect' },
     });
 
     dockview.addPanel({
       id: 'console',
       component: 'console',
       title: '📋 Console',
-      position: { direction: 'within', referencePanel: 'depository' },
+      position: { direction: 'within', referencePanel: 'architect' },
+    });
+
+    dockview.addPanel({
+      id: 'depository',
+      component: 'depository',
+      title: '💰 Depository',
+      position: { direction: 'within', referencePanel: 'architect' },
     });
 
     dockview.addPanel({
       id: 'runtime-io',
       component: 'runtime-io',
       title: '🔄 Runtime I/O',
-      position: { direction: 'within', referencePanel: 'depository' },
+      position: { direction: 'within', referencePanel: 'architect' },
     });
 
     dockview.addPanel({
       id: 'settings',
       component: 'settings',
       title: '⚙️ Settings',
-      position: { direction: 'within', referencePanel: 'depository' },
+      position: { direction: 'within', referencePanel: 'architect' },
     });
 
-    // Add Architect LAST so it becomes active by default (Dockview behavior)
     dockview.addPanel({
-      id: 'architect',
-      component: 'architect',
-      title: '🎬 Architect',
-      position: { direction: 'within', referencePanel: 'depository' },
+      id: 'insurance',
+      component: 'insurance',
+      title: '🛡️ Insurance',
+      position: { direction: 'within', referencePanel: 'architect' },
     });
+
+    // Set initial sizes: Graph3D gets 2/3, sidebar gets 1/3
+    const graph3dApi = dockview.getPanel('graph3d');
+    if (graph3dApi) {
+      setTimeout(() => {
+        graph3dApi.api.setSize({ width: window.innerWidth * 0.67 }); // 2/3 split
+      }, 100);
+    }
+
+    // Make Architect active (first tab, selected by default)
+    // IMMEDIATELY after adding all panels - no timeout race conditions
+    const architectPanel = dockview.getPanel('architect');
+    if (architectPanel) {
+      architectPanel.api.setActive();
+      console.log('[View] ✅ Architect panel set as active tab');
+    } else {
+      console.warn('[View] ⚠️ Architect panel not found when trying to activate');
+    }
 
     // DISABLED: Dockview layout persistence (Svelte 5 incompatibility)
     // Issue: fromJSON() tries to destroy existing panels using $destroy()

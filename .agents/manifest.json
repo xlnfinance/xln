@@ -1,0 +1,47 @@
+{
+  "version": "1.0.0",
+  "project": "xln",
+  "agents": {
+    "claude-architect": {
+      "votes": 2,
+      "role": "lead",
+      "can_spawn": true,
+      "description": "Lead developer, architecture decisions, can spawn subagents"
+    },
+    "codex-reviewer": {
+      "votes": 1,
+      "role": "reviewer",
+      "can_spawn": false,
+      "description": "Code review, security audit, bug finding"
+    },
+    "gemini-tester": {
+      "votes": 1,
+      "role": "tester",
+      "can_spawn": false,
+      "description": "Testing, edge cases, verification"
+    },
+    "glm-auditor": {
+      "votes": 1,
+      "role": "auditor",
+      "can_spawn": false,
+      "description": "Compliance, style, documentation"
+    }
+  },
+  "consensus": {
+    "threshold": 3,
+    "human_veto": true,
+    "timeout_minutes": 30
+  },
+  "polling": {
+    "interval_seconds": 60,
+    "max_retries": 3
+  },
+  "human_commands": {
+    "y": "approve & continue",
+    "n": "reject (explain why)",
+    "?": "show status",
+    "!": "emergency stop",
+    "1-9": "pick option",
+    " ": "skip/next"
+  }
+}

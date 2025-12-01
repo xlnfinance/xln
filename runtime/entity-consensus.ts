@@ -9,6 +9,7 @@ import { DEBUG, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
 import { addMessages, cloneEntityReplica } from './state-helpers';
+import { LIMITS } from './constants';
 
 // === SECURITY VALIDATION ===
 
@@ -107,8 +108,8 @@ const validateEntityReplica = (replica: EntityReplica): boolean => {
       log.error(`❌ Invalid state height: ${replica.state.height}`);
       return false;
     }
-    if (replica.mempool.length > 10000) {
-      log.error(`❌ Mempool overflow: ${replica.mempool.length} > 10000`);
+    if (replica.mempool.length > LIMITS.MEMPOOL_SIZE) {
+      log.error(`❌ Mempool overflow: ${replica.mempool.length} > ${LIMITS.MEMPOOL_SIZE}`);
       return false;
     }
     return true;
