@@ -153,6 +153,7 @@
     baseScale?: number; // Base scale from reserves (before pulse animation)
     currentScale?: number; // Current interpolated scale (for smooth transitions)
     // NOTE: reserveLabel removed - too noisy
+    mempoolIndicator?: THREE.Sprite; // Mempool count indicator
   }
 
   interface FrameActivity {
@@ -641,7 +642,34 @@ let vrHammer: VRHammer | null = null;
     // Sync J mempool visual: show tx cubes based on actual mempool contents
     const activeXlnomy = xlnomiesArray.find(x => x.name === env?.activeXlnomy);
     if (activeXlnomy && jMachine) {
-      const mempoolSize = activeXlnomy.jMachine.mempool?.length || 0;
+      let mempoolSize = activeXlnomy.jMachine.mempool?.length || 0;
+
+      // For time-machine playback: derive mempool from cumulative R2R txs
+      // Count R2R txs up to current frame (capacity=3, resets after broadcast)
+      if ($isolatedTimeIndex !== -1 && $isolatedEnv?.history) {
+        let r2rCount = 0;
+        for (let i = 0; i <= $isolatedTimeIndex; i++) {
+          const frame = $isolatedEnv.history[i];
+          const frameInputs = frame?.runtimeInput?.entityInputs || frame?.serverInput?.entityInputs || [];
+          for (const entityInput of frameInputs) {
+            for (const tx of (entityInput.entityTxs || [])) {
+              if (tx.type === 'payFromReserve' || tx.kind === 'payFromReserve') {
+                r2rCount++;
+              }
+            }
+          }
+        }
+        // Mempool resets after broadcast (capacity=3)
+        const jCapacity = activeXlnomy.jMachine.capacity || 3;
+        mempoolSize = r2rCount % jCapacity;
+        // If we just hit capacity, show 0 (broadcast cleared it)
+        if (r2rCount > 0 && r2rCount % jCapacity === 0 && $isolatedTimeIndex < ($isolatedEnv.history.length - 1)) {
+          // Check if this is the broadcast frame (frame 5 in AHB = index 4)
+          // Actually keep showing cubes until next frame
+          mempoolSize = jCapacity; // Show full before clearing
+        }
+      }
+
       const currentVisualCount = jMachineTxBoxes.length;
 
       // Add cubes if mempool grew
@@ -662,8 +690,8 @@ let vrHammer: VRHammer | null = null;
         }
       }
 
-      if (currentVisualCount !== mempoolSize && mempoolSize > 0) {
-        console.log(`[Graph3D] 📦 J-Mempool synced: ${mempoolSize} pending txs`);
+      if (currentVisualCount !== mempoolSize) {
+        console.log(`[Graph3D] 📦 J-Mempool synced: ${mempoolSize} pending txs (frame ${$isolatedTimeIndex})`);
       }
     }
   }
@@ -1119,12 +1147,12 @@ let vrHammer: VRHammer | null = null;
   }
 
   /**
-   * Create J-Machine octahedron at (0, 100, 0) - elevated above entity grid (L1 layer)
+   * Create J-Machine octahedron at (0, 200, 0) - settlement layer high above entity grid
    * Visual: EVM/Ethereum-style diamond with purple/blue gradient, vertically stretched 1.6x
    */
   function createJMachine(
     size: number = 25,
-    position: { x: number; y: number; z: number } = { x: 0, y: 100, z: 0 },
+    position: { x: number; y: number; z: number } = { x: 0, y: 200, z: 0 },
     name: string = 'J-MACHINE'
   ): THREE.Group {
     const group = new THREE.Group();
@@ -1238,44 +1266,85 @@ let vrHammer: VRHammer | null = null;
   }
 
   /**
-   * Shoot green ray from entity → J-Machine (incoming transaction)
-   * Fast, bright green beam showing value flowing into L1
+   * Shoot green ray + flying orb from entity → J-Machine (incoming transaction)
+   * Shows TX visually traveling up to the J-Machine mempool
    */
   function shootRayToJMachine(entityId: string) {
-    if (!jMachine || !scene) return;
+    if (!jMachine || !scene) {
+      console.log(`[shootRayToJMachine] ❌ No jMachine or scene`);
+      return;
+    }
 
     // Find entity position
     const entity = entities.find(e => e.id === entityId);
-    if (!entity) return;
+    if (!entity) {
+      console.log(`[shootRayToJMachine] ❌ Entity ${entityId.slice(0,8)} not found in ${entities.length} entities`);
+      return;
+    }
+    console.log(`[shootRayToJMachine] ✅ Shooting from ${entityId.slice(0,8)} to J-Machine`);
 
-    // Create green ray from entity → J-Machine
-    const points = [
-      entity.position.clone(),
-      new THREE.Vector3(0, 100, 0) // J-Machine center (elevated L1 layer)
-    ];
-    const geometry = new THREE.BufferGeometry().setFromPoints(points);
-    const material = new THREE.LineBasicMaterial({
-      color: 0x00ff88, // Bright green (incoming money)
-      linewidth: 3,
+    // Get J-Machine position from active xlnomy or use jMachine.position
+    const jPos = jMachine.position.clone();
+
+    // Create flying orb (TX traveling to J-Machine)
+    const orbGeometry = new THREE.SphereGeometry(1.5, 16, 16);
+    const orbMaterial = new THREE.MeshBasicMaterial({
+      color: 0x00ff88, // Bright green
       transparent: true,
-      opacity: 1.0
+      opacity: 0.9
     });
-    const ray = new THREE.Line(geometry, material);
-    scene.add(ray);
+    const orb = new THREE.Mesh(orbGeometry, orbMaterial);
+    orb.position.copy(entity.position);
+    scene.add(orb);
 
-    // Quick fade out (300ms - fast transaction submission)
-    const fadeStart = Date.now();
-    const fadeInterval = setInterval(() => {
-      const elapsed = Date.now() - fadeStart;
-      const progress = elapsed / 300;
+    // Create trail effect (fading line)
+    const trailMaterial = new THREE.LineBasicMaterial({
+      color: 0x00ff88,
+      transparent: true,
+      opacity: 0.6
+    });
 
-      if (progress >= 1) {
-        scene.remove(ray);
-        clearInterval(fadeInterval);
+    // Animate orb flying to J-Machine with arc
+    const startPos = entity.position.clone();
+    const endPos = jPos.clone();
+    const midPoint = new THREE.Vector3(
+      (startPos.x + endPos.x) / 2,
+      Math.max(startPos.y, endPos.y) + 30, // Arc above midpoint
+      (startPos.z + endPos.z) / 2
+    );
+
+    const startTime = Date.now();
+    const duration = 600; // 600ms flight time
+
+    const animateOrb = () => {
+      const elapsed = Date.now() - startTime;
+      const t = Math.min(elapsed / duration, 1);
+
+      // Quadratic Bezier curve: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
+      const oneMinusT = 1 - t;
+      orb.position.set(
+        oneMinusT * oneMinusT * startPos.x + 2 * oneMinusT * t * midPoint.x + t * t * endPos.x,
+        oneMinusT * oneMinusT * startPos.y + 2 * oneMinusT * t * midPoint.y + t * t * endPos.y,
+        oneMinusT * oneMinusT * startPos.z + 2 * oneMinusT * t * midPoint.z + t * t * endPos.z
+      );
+
+      // Pulsing glow
+      const pulse = 1 + 0.3 * Math.sin(t * Math.PI * 6);
+      orb.scale.setScalar(pulse);
+
+      // Fade out near end
+      orbMaterial.opacity = 0.9 * (1 - t * 0.5);
+
+      if (t < 1) {
+        requestAnimationFrame(animateOrb);
       } else {
-        material.opacity = 1.0 - progress;
+        // Reached J-Machine - remove orb with flash
+        scene.remove(orb);
+        orbGeometry.dispose();
+        orbMaterial.dispose();
       }
-    }, 16); // 60fps
+    };
+    animateOrb();
   }
 
   /**
@@ -1304,46 +1373,11 @@ let vrHammer: VRHammer | null = null;
   }
 
   /**
-   * Ray-cast broadcast: Thick bright rays shoot from J-Machine to all entities (O(n) distribution)
-   * VC-MODE: Dramatic visualization showing J-Machine broadcasting to entire network
+   * Ray-cast broadcast: Redirects to wave (J-Machine pulsation)
+   * Blockchain is self-contained core - no rays shooting to entities
    */
   function broadcastRaycast() {
-    if (!jMachine || !scene) return;
-
-    console.log(`[Broadcast] Shooting rays to ${entities.length} entities (O(n) broadcast)...`);
-
-    entities.forEach((entity, i) => {
-      // Create thick bright ray from J-Machine → entity
-      const points = [
-        new THREE.Vector3(0, 100, 0), // J-Machine center (elevated L1 layer)
-        entity.position.clone()
-      ];
-      const geometry = new THREE.BufferGeometry().setFromPoints(points);
-      const material = new THREE.LineBasicMaterial({
-        color: 0xff00ff, // Bright magenta (broadcast = expensive O(n))
-        linewidth: 5, // Thicker for VC visibility
-        transparent: true,
-        opacity: 1.0
-      });
-      const line = new THREE.Line(geometry, material);
-      scene.add(line);
-      broadcastAnimations.push(line);
-
-      // Slow fade out (1500ms) to emphasize O(n) cost
-      const fadeStart = Date.now();
-      const fadeInterval = setInterval(() => {
-        const elapsed = Date.now() - fadeStart;
-        const progress = elapsed / 1500;
-
-        if (progress >= 1) {
-          scene.remove(line);
-          broadcastAnimations = broadcastAnimations.filter(a => a !== line);
-          clearInterval(fadeInterval);
-        } else {
-          material.opacity = 1.0 - progress;
-        }
-      }, 16); // 60fps
-    });
+    broadcastWave();
   }
 
   /**
@@ -1360,7 +1394,7 @@ let vrHammer: VRHammer | null = null;
       wireframe: true
     });
     const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-    sphere.position.set(0, 100, 0); // Elevated J-Machine L1 layer position
+    sphere.position.set(0, 200, 0); // Settlement layer high above entity grid
     scene.add(sphere);
     broadcastAnimations.push(sphere);
 
@@ -1385,99 +1419,20 @@ let vrHammer: VRHammer | null = null;
   }
 
   /**
-   * Particle broadcast: Particles fly from J-Machine to each entity
+   * Particle broadcast: Redirects to wave (J-Machine pulsation)
+   * Blockchain doesn't "send" to entities - entities observe state
    */
   function broadcastParticles() {
-    if (!jMachine || !scene) return;
-
-    entities.forEach((entity) => {
-      // Create particle (small sphere)
-      const particleGeometry = new THREE.SphereGeometry(0.5, 8, 8);
-      const particleMaterial = new THREE.MeshBasicMaterial({
-        color: 0xb8a4d9, // Purple to match EVM theme
-        transparent: true,
-        opacity: 0.8
-      });
-      const particle = new THREE.Mesh(particleGeometry, particleMaterial);
-      particle.position.set(0, 100, 0); // Start at elevated J-Machine L1 layer
-      scene.add(particle);
-      broadcastAnimations.push(particle);
-
-      // Animate flight to entity
-      const startTime = Date.now();
-      const duration = 1500;
-      const jMachinePos = new THREE.Vector3(0, 100, 0);
-      const animateParticle = () => {
-        const elapsed = Date.now() - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-
-        // Lerp from (0, 100, 0) to entity position
-        particle.position.lerpVectors(jMachinePos, entity.position, progress);
-
-        if (progress < 1) {
-          requestAnimationFrame(animateParticle);
-        } else {
-          scene.remove(particle);
-          broadcastAnimations = broadcastAnimations.filter(a => a !== particle);
-        }
-      };
-      animateParticle();
-    });
+    broadcastWave();
   }
 
   /**
-   * Animate R2R transfer: particle flies from source to target entity
+   * Animate R2R transfer: No-op - J-Machine is the core
+   * R2R transfers are J-layer operations, visualized by J-Machine mempool filling
    */
-  function animateR2RTransfer(fromEntityId: string, toEntityId: string, amount: bigint) {
-    if (!scene) return;
-
-    // Find source and target entities
-    const fromEntity = entities.find(e => e.id === fromEntityId);
-    const toEntity = entities.find(e => e.id === toEntityId);
-
-    if (!fromEntity || !toEntity) {
-      console.warn(`[R2R Animation] Entities not found: ${fromEntityId.slice(0,8)} → ${toEntityId.slice(0,8)}`);
-      return;
-    }
-
-    // Create gold particle (represents reserves moving)
-    const particleGeometry = new THREE.SphereGeometry(0.3, 16, 16);
-    const particleMaterial = new THREE.MeshBasicMaterial({
-      color: 0xffd700, // Gold
-      transparent: true,
-      opacity: 0.9
-    });
-    const particle = new THREE.Mesh(particleGeometry, particleMaterial);
-    particle.position.copy(fromEntity.position);
-    scene.add(particle);
-
-    console.log(`[R2R Animation] ${fromEntityId.slice(0,8)} → ${toEntityId.slice(0,8)}: ${amount} tokens`);
-
-    // Animate particle movement
-    const startTime = Date.now();
-    const duration = 1000; // 1 second flight time
-
-    const animateParticle = () => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-
-      // Lerp from source to target
-      particle.position.lerpVectors(fromEntity.position, toEntity.position, progress);
-
-      // Pulsing effect
-      const pulse = 1 + 0.3 * Math.sin(progress * Math.PI * 4);
-      particle.scale.setScalar(pulse);
-
-      if (progress < 1) {
-        requestAnimationFrame(animateParticle);
-      } else {
-        // Reached target - remove particle
-        scene.remove(particle);
-        particleGeometry.dispose();
-        particleMaterial.dispose();
-      }
-    };
-    animateParticle();
+  function animateR2RTransfer(_fromEntityId: string, _toEntityId: string, _amount: bigint) {
+    // No animation - J-Machine (blockchain) is the core
+    // R2R transfers go through J, not directly between entities
   }
 
   /**
@@ -1613,6 +1568,10 @@ let vrHammer: VRHammer | null = null;
       // Allow zooming close to entities without clipping
       controls.minDistance = 5; // Don't allow getting too close
       controls.maxDistance = 5000; // Allow zooming out far
+
+      // CRITICAL: Disable keyboard events so arrow keys work for TimeMachine
+      // OrbitControls uses arrow keys for panning by default
+      controls.keys = { LEFT: '', UP: '', RIGHT: '', BOTTOM: '' };
 
       // Debug: Log OrbitControls events
       controls.addEventListener('change', () => {
@@ -2845,8 +2804,11 @@ let vrHammer: VRHammer | null = null;
     if (!($isolatedTimeIndex === -1) && $isolatedEnv?.history && timeIndex >= 0) {
       const currentFrame = $isolatedEnv.history[timeIndex];
 
-      if (currentFrame?.serverInput?.entityInputs) {
-        currentFrame.serverInput.entityInputs.forEach((entityInput: any) => {
+      // Support both serverInput (older format) and runtimeInput (AHB demo format)
+      const entityInputs = currentFrame?.serverInput?.entityInputs || currentFrame?.runtimeInput?.entityInputs || [];
+
+      if (entityInputs.length > 0) {
+        entityInputs.forEach((entityInput: any) => {
           const processingEntityId = entityInput.entityId;
           currentFrameActivity.activeEntities.add(processingEntityId);
 
@@ -2874,6 +2836,23 @@ let vrHammer: VRHammer | null = null;
                 triggerEntityActivity(toEntityId);
               } else if (['deposit_collateral', 'reserve_to_collateral', 'deposit_reserve', 'withdraw_reserve'].includes(tx.type)) {
                 createBroadcastRipple(processingEntityId, tx.type);
+              } else if (tx.type === 'payFromReserve' || tx.kind === 'payFromReserve') {
+                // R2R (Reserve-to-Reserve) transaction visualization during time-machine playback
+                const fromEntityId = processingEntityId;
+                const toEntityId = tx.targetEntityId;
+                console.log(`[Time-Machine] 🔍 R2R tx detected: from=${fromEntityId?.slice(0,8)}, to=${toEntityId?.slice(0,8)}, type=${tx.type}, kind=${tx.kind}`);
+                if (toEntityId) {
+                  console.log(`[Time-Machine] 💸 R2R animation: ${fromEntityId.slice(0,8)} → ${toEntityId.slice(0,8)}`);
+                  // Shoot ray from entity → J-Machine
+                  shootRayToJMachine(fromEntityId);
+                  // Add tx cube to J-Machine mempool
+                  addTxToJMachine(fromEntityId);
+                  // Animate R2R particle between entities
+                  animateR2RTransfer(fromEntityId, toEntityId, tx.amount || 0n);
+                  // Trigger activity visuals
+                  triggerEntityActivity(fromEntityId);
+                  triggerEntityActivity(toEntityId);
+                }
               }
             });
           }
@@ -2909,6 +2888,22 @@ let vrHammer: VRHammer | null = null;
               triggerEntityActivity(toEntityId);
             } else if (['deposit_collateral', 'reserve_to_collateral', 'deposit_reserve', 'withdraw_reserve'].includes(tx.type)) {
               createBroadcastRipple(processingEntityId, tx.type);
+            } else if (tx.type === 'payFromReserve' || tx.kind === 'payFromReserve') {
+              // R2R (Reserve-to-Reserve) transaction visualization in live mode
+              const fromEntityId = processingEntityId;
+              const toEntityId = tx.targetEntityId;
+              if (toEntityId) {
+                console.log(`[Live] 💸 R2R: ${fromEntityId.slice(0,8)} → ${toEntityId.slice(0,8)}`);
+                // Shoot ray from entity → J-Machine
+                shootRayToJMachine(fromEntityId);
+                // Add tx cube to J-Machine mempool
+                addTxToJMachine(fromEntityId);
+                // Animate R2R particle between entities
+                animateR2RTransfer(fromEntityId, toEntityId, tx.amount || 0n);
+                // Trigger activity visuals
+                triggerEntityActivity(fromEntityId);
+                triggerEntityActivity(toEntityId);
+              }
             }
           });
         }
@@ -3355,9 +3350,11 @@ let vrHammer: VRHammer | null = null;
         totalReserves += amount;
       }
       const reserveValue = Number(totalReserves) / 1e18;
-      // Format: $1.2M, $500K, $0
+      // Format: $5M (round millions), $1.2M, $500K, $0
       if (reserveValue >= 1000000) {
-        balanceStr = ` $${(reserveValue / 1000000).toFixed(1)}M`;
+        const millions = reserveValue / 1000000;
+        // Show clean "$5M" for round millions, "$1.2M" for fractional
+        balanceStr = ` $${millions % 1 === 0 ? millions.toFixed(0) : millions.toFixed(1)}M`;
       } else if (reserveValue >= 1000) {
         balanceStr = ` $${(reserveValue / 1000).toFixed(0)}K`;
       } else if (reserveValue > 0) {
@@ -3427,6 +3424,121 @@ let vrHammer: VRHammer | null = null;
   }
 
   // NOTE: createReserveLabel removed - reserve labels were too noisy
+
+  // Create mempool indicator sprite (shows inbox/outbox tx counts)
+  function createMempoolIndicator(entityId: string): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d')!;
+    canvas.width = 128;
+    canvas.height = 64;
+
+    // Initial empty state - will be updated in updateMempoolIndicators
+    context.clearRect(0, 0, canvas.width, canvas.height);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false,
+      sizeAttenuation: true
+    });
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.scale.set(1.0, 0.5, 1);
+    sprite.userData['entityId'] = entityId;
+    sprite.userData['canvas'] = canvas;
+    sprite.userData['context'] = context;
+
+    return sprite;
+  }
+
+  // Update mempool indicators for all entities
+  function updateMempoolIndicators() {
+    const currentReplicas = replicas;
+
+    entities.forEach(entity => {
+      // Get replica for this entity
+      const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(
+        k => k.startsWith(entity.id + ':')
+      );
+      const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
+
+      // Count entity mempool (outgoing txs waiting to be proposed)
+      const entityMempoolCount = replica?.mempool?.length || 0;
+
+      // Count account mempool (pending bilateral txs)
+      let accountMempoolOut = 0;
+      let accountMempoolIn = 0;
+      if (replica?.state?.accounts) {
+        for (const [counterpartyId, accountMachine] of replica.state.accounts) {
+          const pending = accountMachine?.mempool?.length || 0;
+          // This entity's pending outgoing txs
+          accountMempoolOut += pending;
+        }
+      }
+
+      // Check if other entities have txs targeting this entity (incoming)
+      for (const [otherKey, otherReplica] of currentReplicas.entries()) {
+        const [otherEntityId] = otherKey.split(':');
+        if (otherEntityId === entity.id) continue;
+
+        if (otherReplica?.state?.accounts) {
+          const accountToUs = otherReplica.state.accounts.get(entity.id);
+          if (accountToUs?.mempool?.length > 0) {
+            accountMempoolIn += accountToUs.mempool.length;
+          }
+        }
+      }
+
+      const totalOut = entityMempoolCount + accountMempoolOut;
+      const totalIn = accountMempoolIn;
+
+      // Only show indicator if there's something in mempool
+      if (totalOut === 0 && totalIn === 0) {
+        if (entity.mempoolIndicator) {
+          entity.mempoolIndicator.visible = false;
+        }
+        return;
+      }
+
+      // Create indicator if missing
+      if (!entity.mempoolIndicator) {
+        entity.mempoolIndicator = createMempoolIndicator(entity.id);
+        const entitySize = getEntitySizeForToken(entity.id, selectedTokenId);
+        entity.mempoolIndicator.position.set(entitySize + 0.5, 0, 0); // Right side of entity
+        entity.mesh.add(entity.mempoolIndicator);
+      }
+
+      entity.mempoolIndicator.visible = true;
+
+      // Update the canvas with new counts
+      const canvas = entity.mempoolIndicator.userData['canvas'] as HTMLCanvasElement;
+      const context = entity.mempoolIndicator.userData['context'] as CanvasRenderingContext2D;
+
+      context.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw outbox (orange arrow up + count)
+      if (totalOut > 0) {
+        context.font = 'bold 24px sans-serif';
+        context.textAlign = 'center';
+        context.fillStyle = '#ff8800'; // Orange for outgoing
+        context.fillText(`↑${totalOut}`, 32, 36);
+      }
+
+      // Draw inbox (cyan arrow down + count)
+      if (totalIn > 0) {
+        context.font = 'bold 24px sans-serif';
+        context.textAlign = 'center';
+        context.fillStyle = '#00ccff'; // Cyan for incoming
+        context.fillText(`↓${totalIn}`, 96, 36);
+      }
+
+      // Update texture
+      const texture = entity.mempoolIndicator.material.map as THREE.CanvasTexture;
+      texture.needsUpdate = true;
+    });
+  }
 
   function updateEntityLabels() {
     // Update entity labels - name labels are now CHILDREN of mesh (auto-positioned!)
@@ -3730,6 +3842,9 @@ let vrHammer: VRHammer | null = null;
 
     // Update entity label positions (always on top of sphere)
     updateEntityLabels();
+
+    // Update mempool indicators (show pending tx counts)
+    updateMempoolIndicators();
 
     // Animate transaction particles
     animateParticles();
@@ -4795,8 +4910,11 @@ let vrHammer: VRHammer | null = null;
 
   function recalculateAllEntitySizes(): void {
     entitySizesAtFrame.clear();
-    const dollarsPerPx = settings.dollarsPerPx || 30000;
-    const EMPTY_SIZE = 0.3; // Tiny size for $0 entities (10x smaller than before)
+    // dollarsPerPx controls scaling: lower = more dramatic size differences
+    const dollarsPerPx = settings.dollarsPerPx || 50000; // Was 100K - halved for more visual diff
+    const EMPTY_SIZE = 1.5; // Visible size for $0 entities
+    const MIN_SIZE = 1.5;   // Minimum funded entity size
+    const MAX_SIZE = 6.0;   // Max size to prevent domination
 
     const currentReplicas = replicas;
     const seenEntities = new Set<string>();
@@ -4828,8 +4946,8 @@ let vrHammer: VRHammer | null = null;
       // Volume = money / dollarsPerPx, then sphere radius from volume
       const volumePx = reserveValueUSD / dollarsPerPx;
       const radius = Math.cbrt(volumePx * 0.75 / Math.PI);
-      // Min 0.5 (small but visible), max 50
-      const size = Math.max(0.5, Math.min(radius, 50.0));
+      // Clamp between MIN and MAX
+      const size = Math.max(MIN_SIZE, Math.min(radius + MIN_SIZE, MAX_SIZE));
       entitySizesAtFrame.set(entityId, size);
     }
   }
@@ -5550,10 +5668,23 @@ let vrHammer: VRHammer | null = null;
     ['bundesbank', '']
   ]);
 
+  // AHB Demo entity names (entity IDs 1, 2, 3)
+  const AHB_NAMES: Map<string, string> = new Map([
+    ['1', 'Alice'],
+    ['2', 'Hub'],
+    ['3', 'Bob'],
+  ]);
+
   /**
    * Get entity display name (realistic names for demo)
    */
   function getEntityShortName(entityId: string): string {
+    // First check for AHB Demo names (entity IDs 1, 2, 3)
+    const shortId = XLN?.getEntityShortId?.(entityId);
+    if (shortId && AHB_NAMES.has(shortId)) {
+      return AHB_NAMES.get(shortId)!;
+    }
+
     // Check if it's a Fed entity (from replica signerId) - use time-aware replicas
     const currentReplicas = replicas;
     const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(entityId + ':'));
@@ -5580,13 +5711,8 @@ let vrHammer: VRHammer | null = null;
       return BANK_NAMES[bankIndex] || entityId.slice(-4);
     }
 
-    // Fallback
-    if (!XLN?.getEntityShortId) return entityId.slice(-4);
-    try {
-      return XLN?.getEntityShortId(entityId);
-    } catch {
-      return entityId.slice(-4);
-    }
+    // Fallback to short ID
+    return shortId || entityId.slice(-4);
   }
 
   /**
