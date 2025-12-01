@@ -10,8 +10,8 @@
 
   export let onUnlock: () => void;
 
-  // Reactive content based on locale (en/ru only for now)
-  $: c = content[$locale === 'ru' ? 'ru' : 'en'] as Content;
+  // Reactive content based on locale (all 10 languages)
+  $: c = content[$locale in content ? $locale as ContentLang : 'en'] as Content;
 
   let inviteCode = '';
   let error = '';
