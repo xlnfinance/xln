@@ -12,14 +12,185 @@
 
 import { serve } from "bun";
 import { spawn } from "child_process";
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from "fs";
 import { join } from "path";
 
 const PORT = 3031;
 const OLLAMA_URL = "http://localhost:11434";
-const MLX_GEMMA_URL = "http://localhost:8082";   // Gemma3 27B MLX
-const MLX_DEEPSEEK_URL = "http://localhost:8081"; // DeepSeek-V3 MLX (when ready)
-const MLX_URL = MLX_GEMMA_URL; // Default MLX endpoint
+const MLX_PORT = 8081; // Single MLX server port (dynamic loading)
+const MLX_URL = `http://localhost:${MLX_PORT}`;
+const XLN_FRONTEND_URL = "https://localhost:8080"; // xln frontend for state queries
+
+// ============================================================================
+// DYNAMIC MLX MODEL LOADER STATE
+// ============================================================================
+
+interface MLXServerState {
+  activeModel: string | null;
+  process: ReturnType<typeof spawn> | null;
+  loading: boolean;
+  loadProgress: string;
+  lastError: string | null;
+}
+
+const mlxState: MLXServerState = {
+  activeModel: null,
+  process: null,
+  loading: false,
+  loadProgress: "",
+  lastError: null,
+};
+
+/**
+ * Kill any existing MLX server process
+ */
+function killMLXServer(): Promise<void> {
+  return new Promise((resolve) => {
+    if (mlxState.process) {
+      console.log(`[MLX] Killing existing MLX server (model: ${mlxState.activeModel})`);
+      mlxState.process.kill("SIGTERM");
+      mlxState.process = null;
+    }
+    // Also kill any orphaned processes
+    const killer = spawn("pkill", ["-f", `mlx_lm.server.*${MLX_PORT}`]);
+    killer.on("close", () => {
+      setTimeout(resolve, 500); // Give time for port to be released
+    });
+  });
+}
+
+/**
+ * Wait for MLX server to be ready
+ */
+async function waitForMLXReady(timeoutMs = 120000): Promise<boolean> {
+  const startTime = Date.now();
+  const checkInterval = 1000;
+
+  while (Date.now() - startTime < timeoutMs) {
+    try {
+      const res = await fetch(`${MLX_URL}/v1/models`, {
+        signal: AbortSignal.timeout(2000)
+      });
+      if (res.ok) {
+        console.log("[MLX] Server is ready!");
+        return true;
+      }
+    } catch {
+      // Not ready yet
+    }
+    mlxState.loadProgress = `Loading... ${Math.round((Date.now() - startTime) / 1000)}s`;
+    await new Promise(r => setTimeout(r, checkInterval));
+  }
+  return false;
+}
+
+/**
+ * Ensure the specified MLX model is loaded
+ * If a different model is loaded, kill and restart with new model
+ */
+async function ensureMLXModel(modelId: string): Promise<{ success: boolean; error?: string }> {
+  const modelInfo = MODELS[modelId];
+  if (!modelInfo || (modelInfo.backend !== "mlx" && modelInfo.backend !== "mlx_vision")) {
+    return { success: false, error: `Model ${modelId} is not an MLX model` };
+  }
+
+  const modelPath = modelInfo.path?.replace("~", "/Users/zigota");
+  if (!modelPath) {
+    return { success: false, error: `Model ${modelId} has no path configured` };
+  }
+
+  // Check if model files exist
+  if (!existsSync(modelPath)) {
+    return { success: false, error: `Model path ${modelPath} does not exist` };
+  }
+
+  // Already loaded?
+  if (mlxState.activeModel === modelId && !mlxState.loading) {
+    // Verify server is still running
+    try {
+      const res = await fetch(`${MLX_URL}/v1/models`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) {
+        console.log(`[MLX] Model ${modelId} already loaded and running`);
+        return { success: true };
+      }
+    } catch {
+      console.log(`[MLX] Server not responding, will restart`);
+    }
+  }
+
+  // Already loading?
+  if (mlxState.loading) {
+    return { success: false, error: "Another model is currently loading" };
+  }
+
+  // Start loading
+  mlxState.loading = true;
+  mlxState.loadProgress = "Stopping previous model...";
+  mlxState.lastError = null;
+
+  try {
+    // Kill existing server
+    await killMLXServer();
+
+    // Start new server
+    mlxState.loadProgress = `Starting ${modelInfo.name}...`;
+    console.log(`[MLX] Starting server for ${modelId} at ${modelPath}`);
+
+    const proc = spawn("mlx_lm.server", [
+      "--model", modelPath,
+      "--port", String(MLX_PORT),
+      "--host", "0.0.0.0"
+    ], {
+      env: { ...process.env, PATH: `/Users/zigota/Library/Python/3.9/bin:${process.env.PATH}` },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    mlxState.process = proc;
+
+    // Log output for debugging
+    proc.stdout?.on("data", (data) => {
+      const line = data.toString().trim();
+      if (line) console.log(`[MLX stdout] ${line}`);
+    });
+    proc.stderr?.on("data", (data) => {
+      const line = data.toString().trim();
+      if (line) console.log(`[MLX stderr] ${line}`);
+    });
+
+    proc.on("error", (err) => {
+      console.error(`[MLX] Process error:`, err);
+      mlxState.lastError = err.message;
+      mlxState.loading = false;
+    });
+
+    proc.on("exit", (code) => {
+      console.log(`[MLX] Process exited with code ${code}`);
+      if (mlxState.activeModel === modelId) {
+        mlxState.activeModel = null;
+      }
+    });
+
+    // Wait for server to be ready
+    const ready = await waitForMLXReady();
+
+    if (ready) {
+      mlxState.activeModel = modelId;
+      mlxState.loading = false;
+      mlxState.loadProgress = "";
+      return { success: true };
+    } else {
+      mlxState.loading = false;
+      mlxState.lastError = "Timeout waiting for server to start";
+      return { success: false, error: "Timeout waiting for MLX server" };
+    }
+
+  } catch (error) {
+    mlxState.loading = false;
+    mlxState.lastError = String(error);
+    return { success: false, error: String(error) };
+  }
+}
+
 const CHATS_DIR = "/Users/zigota/ai/chats";
 const AGENTS_DIR = "/Users/zigota/xln/.agents";
 
@@ -49,7 +220,7 @@ const MODELS: Record<string, ModelInfo> = {
   // MLX models (native Apple Silicon) - actual models on disk
   "gemma3-27b-mlx": { name: "Gemma3 27B MLX", params: "27B", backend: "mlx", vision: false, path: "~/.lmstudio/models/McG-221/gemma3-27b-abliterated-dpo-mlx-8Bit" },
   "qwen3-235b-mlx": { name: "Qwen3 235B MLX", params: "235B", backend: "mlx", vision: false, path: "~/models/Qwen3-235B-MLX-4bit" },
-  "gpt-oss-120b-mlx": { name: "GPT-OSS 120B MLX", params: "120B", backend: "mlx", vision: false, path: "~/models/gpt-oss-120b-heretic-mlx" },
+  "gpt-oss-heretic-mlx": { name: "GPT-OSS 120B Heretic MLX", params: "120B", backend: "mlx", vision: false, path: "~/models/gpt-oss-120b-heretic-mlx" },
   "deepseek-v3-mlx": { name: "DeepSeek-V3 MLX", params: "671B", backend: "mlx", vision: false, path: "~/models/DeepSeek-V3-MLX-4bit" },
   "deepseek-v3.1-mlx": { name: "DeepSeek-V3.1 MLX", params: "671B", backend: "mlx", vision: false, path: "~/models/DeepSeek-V3.1-4bit-mlx" },
   "glm-4.5-mlx": { name: "GLM-4.5 Air MLX", params: "9B", backend: "mlx", vision: false, path: "~/models/GLM-4.5-Air-mlx" },
@@ -96,12 +267,20 @@ interface ChatSession {
 // OLLAMA API
 // ============================================================================
 
+interface OllamaResponse {
+  content: string;
+  tool_calls?: Array<{
+    id: string;
+    function: { name: string; arguments: any };
+  }>;
+}
+
 async function queryOllama(
   model: string,
   messages: Message[],
-  options: { stream?: boolean; images?: string[] } = {}
-): Promise<Response | string> {
-  const { stream = false, images } = options;
+  options: { stream?: boolean; images?: string[]; tools?: any[] } = {}
+): Promise<Response | string | OllamaResponse> {
+  const { stream = false, images, tools } = options;
 
   // Add images to last user message if provided
   const processedMessages = messages.map((m, i) => {
@@ -111,7 +290,10 @@ async function queryOllama(
     return { role: m.role, content: m.content };
   });
 
-  const body = { model, messages: processedMessages, stream };
+  const body: any = { model, messages: processedMessages, stream };
+  if (tools?.length) {
+    body.tools = tools;
+  }
 
   const response = await fetch(`${OLLAMA_URL}/api/chat`, {
     method: "POST",
@@ -122,6 +304,21 @@ async function queryOllama(
   if (stream) return response;
 
   const data = await response.json();
+
+  // Check for tool calls in Ollama format
+  if (data.message?.tool_calls?.length) {
+    return {
+      content: data.message.content || "",
+      tool_calls: data.message.tool_calls.map((tc: any) => ({
+        id: tc.id || `call_${Math.random().toString(36).slice(2, 10)}`,
+        function: {
+          name: tc.function.name,
+          arguments: tc.function.arguments
+        }
+      }))
+    };
+  }
+
   return data.message?.content || "";
 }
 
@@ -135,17 +332,18 @@ async function queryMLX(
 ): Promise<Response | string> {
   const { stream = false, model = "gemma3-27b-mlx" } = options;
 
-  // Select endpoint based on model
-  const endpoint = model.includes("deepseek") ? MLX_DEEPSEEK_URL : MLX_GEMMA_URL;
+  // Get the actual model path from registry for MLX
+  const modelInfo = MODELS[model];
+  const modelPath = modelInfo?.path?.replace("~", "/Users/zigota") || model;
 
   const body = {
-    model: "default",
+    model: modelPath,
     messages: messages.map(m => ({ role: m.role, content: m.content })),
     stream,
     max_tokens: 2048,
   };
 
-  const response = await fetch(`${endpoint}/v1/chat/completions`, {
+  const response = await fetch(`${MLX_URL}/v1/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -465,6 +663,13 @@ function loadChat(id: string): ChatSession | null {
   };
 }
 
+function deleteChat(id: string): boolean {
+  const filepath = join(CHATS_DIR, `${id}.md`);
+  if (!existsSync(filepath)) return false;
+  unlinkSync(filepath);
+  return true;
+}
+
 function listChats(): { id: string; title: string; updated: string }[] {
   if (!existsSync(CHATS_DIR)) return [];
 
@@ -490,23 +695,23 @@ function listChats(): { id: string; title: string; updated: string }[] {
 // SERVICE HEALTH
 // ============================================================================
 
-async function checkServices(): Promise<Record<string, boolean>> {
-  const services: Record<string, boolean> = {};
+async function checkServices(): Promise<Record<string, boolean | string | null>> {
+  const services: Record<string, boolean | string | null> = {};
 
   try {
     const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(2000) });
     services.ollama = res.ok;
   } catch { services.ollama = false; }
 
+  // MLX dynamic server status
   try {
-    const res = await fetch(`${MLX_GEMMA_URL}/v1/models`, { signal: AbortSignal.timeout(2000) });
-    services.mlx_gemma = res.ok;
-  } catch { services.mlx_gemma = false; }
+    const res = await fetch(`${MLX_URL}/v1/models`, { signal: AbortSignal.timeout(2000) });
+    services.mlx = res.ok;
+  } catch { services.mlx = false; }
 
-  try {
-    const res = await fetch(`${MLX_DEEPSEEK_URL}/v1/models`, { signal: AbortSignal.timeout(2000) });
-    services.mlx_deepseek = res.ok;
-  } catch { services.mlx_deepseek = false; }
+  // Add MLX-specific state
+  services.mlx_active_model = mlxState.activeModel;
+  services.mlx_loading = mlxState.loading;
 
   return services;
 }
@@ -517,6 +722,185 @@ async function getOllamaModels(): Promise<string[]> {
     const data = await res.json();
     return data.models?.map((m: { name: string }) => m.name) || [];
   } catch { return []; }
+}
+
+// ============================================================================
+// XLN STATE QUERY TOOLS (Phase 2: Read-only agent mode)
+// ============================================================================
+
+// Tool definitions for function calling (OpenAI format)
+const XLN_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "getEntityState",
+      description: "Get the current state of an xln entity including reserves, accounts, and metadata",
+      parameters: {
+        type: "object",
+        properties: {
+          entityId: {
+            type: "string",
+            description: "The entity ID (hex string)"
+          }
+        },
+        required: ["entityId"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "getAccountState",
+      description: "Get the state of a bilateral account between two entities",
+      parameters: {
+        type: "object",
+        properties: {
+          entityId: {
+            type: "string",
+            description: "The entity ID (hex string)"
+          },
+          counterpartyId: {
+            type: "string",
+            description: "The counterparty entity ID (hex string)"
+          }
+        },
+        required: ["entityId", "counterpartyId"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "listEntities",
+      description: "List all entities currently visible in the xln network",
+      parameters: {
+        type: "object",
+        properties: {}
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "getNetworkTopology",
+      description: "Get the network topology showing all entities and their connections",
+      parameters: {
+        type: "object",
+        properties: {}
+      }
+    }
+  }
+];
+
+// In-memory cache for xln state (updated by frontend via POST /api/xln/state)
+let xlnStateCache: {
+  entities: Record<string, any>;
+  accounts: Record<string, any>;
+  topology: { nodes: any[]; edges: any[] };
+  lastUpdate: number;
+} = {
+  entities: {},
+  accounts: {},
+  topology: { nodes: [], edges: [] },
+  lastUpdate: 0
+};
+
+// Execute a tool call against cached xln state
+function executeXlnTool(name: string, args: Record<string, any>): { result: any; error?: string } {
+  const staleThreshold = 30000; // 30 seconds
+  const isStale = Date.now() - xlnStateCache.lastUpdate > staleThreshold;
+
+  switch (name) {
+    case "getEntityState": {
+      const { entityId } = args;
+      const entity = xlnStateCache.entities[entityId];
+      if (!entity) {
+        return { result: null, error: `Entity ${entityId} not found in cache` };
+      }
+      return {
+        result: {
+          ...entity,
+          _cacheAge: Date.now() - xlnStateCache.lastUpdate,
+          _stale: isStale
+        }
+      };
+    }
+
+    case "getAccountState": {
+      const { entityId, counterpartyId } = args;
+      // Canonical key: sorted entity IDs
+      const key = [entityId, counterpartyId].sort().join(':');
+      const account = xlnStateCache.accounts[key];
+      if (!account) {
+        return { result: null, error: `Account ${entityId}↔${counterpartyId} not found in cache` };
+      }
+      return {
+        result: {
+          ...account,
+          _cacheAge: Date.now() - xlnStateCache.lastUpdate,
+          _stale: isStale
+        }
+      };
+    }
+
+    case "listEntities": {
+      const entities = Object.entries(xlnStateCache.entities).map(([id, data]) => ({
+        id,
+        jurisdiction: (data as any).jurisdiction,
+        accountCount: (data as any).accountCount || 0,
+        reserves: (data as any).reserves || {}
+      }));
+      return {
+        result: {
+          entities,
+          count: entities.length,
+          _cacheAge: Date.now() - xlnStateCache.lastUpdate,
+          _stale: isStale
+        }
+      };
+    }
+
+    case "getNetworkTopology": {
+      return {
+        result: {
+          ...xlnStateCache.topology,
+          _cacheAge: Date.now() - xlnStateCache.lastUpdate,
+          _stale: isStale
+        }
+      };
+    }
+
+    default:
+      return { result: null, error: `Unknown tool: ${name}` };
+  }
+}
+
+// Process tool calls from model response
+async function processToolCalls(
+  toolCalls: Array<{ id: string; function: { name: string; arguments: string } }>
+): Promise<Array<{ tool_call_id: string; role: "tool"; content: string }>> {
+  const results: Array<{ tool_call_id: string; role: "tool"; content: string }> = [];
+
+  for (const call of toolCalls) {
+    try {
+      const args = JSON.parse(call.function.arguments);
+      const { result, error } = executeXlnTool(call.function.name, args);
+
+      results.push({
+        tool_call_id: call.id,
+        role: "tool",
+        content: error ? JSON.stringify({ error }) : JSON.stringify(result)
+      });
+    } catch (e) {
+      results.push({
+        tool_call_id: call.id,
+        role: "tool",
+        content: JSON.stringify({ error: `Failed to execute ${call.function.name}: ${e}` })
+      });
+    }
+  }
+
+  return results;
 }
 
 // ============================================================================
@@ -564,7 +948,8 @@ serve({
             name: info.name,
             backend: info.backend,
             params: info.params,
-            available: services.mlx_gemma || services.mlx_deepseek, // simplified check
+            available: existsSync(info.path?.replace("~", "/Users/zigota") || ""),
+            loaded: mlxState.activeModel === id,
             vision: info.vision,
             path: info.path,
           })),
@@ -575,8 +960,73 @@ serve({
         default_model: DEFAULT_MODEL,
         council_models: COUNCIL_MODELS,
         chairman_model: CHAIRMAN_MODEL,
+        mlx_state: {
+          activeModel: mlxState.activeModel,
+          loading: mlxState.loading,
+          loadProgress: mlxState.loadProgress,
+          lastError: mlxState.lastError,
+        },
         models: allModels,
       }), { headers });
+    }
+
+    // ========================================================================
+    // POST /api/models/load - Load a specific MLX model
+    // ========================================================================
+    if (url.pathname === "/api/models/load" && req.method === "POST") {
+      try {
+        const body = await req.json();
+        const { model } = body;
+
+        if (!model) {
+          return new Response(JSON.stringify({ error: "No model specified" }), { status: 400, headers });
+        }
+
+        const modelInfo = MODELS[model];
+        if (!modelInfo || (modelInfo.backend !== "mlx" && modelInfo.backend !== "mlx_vision")) {
+          return new Response(JSON.stringify({ error: `Model ${model} is not an MLX model` }), { status: 400, headers });
+        }
+
+        console.log(`[API] Loading MLX model: ${model}`);
+        const result = await ensureMLXModel(model);
+
+        if (result.success) {
+          return new Response(JSON.stringify({
+            success: true,
+            model,
+            message: `Model ${modelInfo.name} loaded successfully`
+          }), { headers });
+        } else {
+          return new Response(JSON.stringify({
+            success: false,
+            error: result.error
+          }), { status: 500, headers });
+        }
+      } catch (error) {
+        return new Response(JSON.stringify({ error: String(error) }), { status: 500, headers });
+      }
+    }
+
+    // ========================================================================
+    // GET /api/mlx/status - Get MLX server status
+    // ========================================================================
+    if (url.pathname === "/api/mlx/status" && req.method === "GET") {
+      return new Response(JSON.stringify({
+        activeModel: mlxState.activeModel,
+        loading: mlxState.loading,
+        loadProgress: mlxState.loadProgress,
+        lastError: mlxState.lastError,
+        serverUrl: MLX_URL,
+      }), { headers });
+    }
+
+    // ========================================================================
+    // POST /api/mlx/unload - Unload the current MLX model
+    // ========================================================================
+    if (url.pathname === "/api/mlx/unload" && req.method === "POST") {
+      await killMLXServer();
+      mlxState.activeModel = null;
+      return new Response(JSON.stringify({ success: true, message: "MLX server stopped" }), { headers });
     }
 
     // ========================================================================
@@ -585,12 +1035,26 @@ serve({
     if (url.pathname === "/api/chat" && req.method === "POST") {
       try {
         const body = await req.json();
-        const { model = DEFAULT_MODEL, messages, stream = false, images } = body;
+        const { model = DEFAULT_MODEL, messages, stream = false, images, tools } = body;
 
-        // Route to MLX if model is MLX-based
-        const isMLX = model.includes("-mlx") || model.includes("gemma3-27b") || model.includes("deepseek-v3");
+        // Check if this is an MLX model from registry
+        const modelInfo = MODELS[model];
+        const isMLX = modelInfo?.backend === "mlx" || modelInfo?.backend === "mlx_vision";
 
         if (isMLX) {
+          // Dynamic model loading - ensure model is loaded before querying
+          const loadResult = await ensureMLXModel(model);
+          if (!loadResult.success) {
+            return new Response(JSON.stringify({
+              error: `Failed to load model: ${loadResult.error}`,
+              mlx_state: {
+                activeModel: mlxState.activeModel,
+                loading: mlxState.loading,
+                loadProgress: mlxState.loadProgress,
+              }
+            }), { status: 503, headers });
+          }
+
           // MLX models - OpenAI compatible API
           const response = await queryMLX(messages, { stream, model }) as Response | string;
 
@@ -655,8 +1119,18 @@ serve({
           });
         }
 
-        const response = await queryOllama(model, messages, { images }) as string;
-        return new Response(JSON.stringify({ content: response, model }), { headers });
+        const response = await queryOllama(model, messages, { images, tools });
+
+        // Check if response has tool_calls (OllamaResponse)
+        if (typeof response === "object" && "tool_calls" in response) {
+          return new Response(JSON.stringify({
+            content: response.content,
+            tool_calls: response.tool_calls,
+            model
+          }), { headers });
+        }
+
+        return new Response(JSON.stringify({ content: response as string, model }), { headers });
 
       } catch (error) {
         return new Response(JSON.stringify({ error: String(error) }), { status: 500, headers });
@@ -787,6 +1261,192 @@ serve({
         session.updated_at = new Date().toISOString();
         saveChatToMarkdown(session);
         return new Response(JSON.stringify({ success: true, id: session.id }), { headers });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: String(error) }), { status: 500, headers });
+      }
+    }
+
+    // ========================================================================
+    // DELETE /api/chats/:id - Delete chat
+    // ========================================================================
+    if (url.pathname.startsWith("/api/chats/") && req.method === "DELETE") {
+      const id = url.pathname.split("/").pop();
+      if (!id) {
+        return new Response(JSON.stringify({ error: "No ID" }), { status: 400, headers });
+      }
+
+      const deleted = deleteChat(id);
+      if (!deleted) {
+        return new Response(JSON.stringify({ error: "Not found" }), { status: 404, headers });
+      }
+
+      return new Response(JSON.stringify({ success: true }), { headers });
+    }
+
+    // ========================================================================
+    // POST /api/xln/state - Update xln state cache (called by frontend)
+    // ========================================================================
+    if (url.pathname === "/api/xln/state" && req.method === "POST") {
+      try {
+        const body = await req.json();
+        const { entities, accounts, topology } = body;
+
+        if (entities) xlnStateCache.entities = entities;
+        if (accounts) xlnStateCache.accounts = accounts;
+        if (topology) xlnStateCache.topology = topology;
+        xlnStateCache.lastUpdate = Date.now();
+
+        console.log(`[XLN] State cache updated: ${Object.keys(xlnStateCache.entities).length} entities, ${Object.keys(xlnStateCache.accounts).length} accounts`);
+
+        return new Response(JSON.stringify({
+          success: true,
+          cached: {
+            entities: Object.keys(xlnStateCache.entities).length,
+            accounts: Object.keys(xlnStateCache.accounts).length,
+            nodes: xlnStateCache.topology.nodes.length,
+            edges: xlnStateCache.topology.edges.length,
+          }
+        }), { headers });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: String(error) }), { status: 500, headers });
+      }
+    }
+
+    // ========================================================================
+    // GET /api/xln/state - Get cached xln state
+    // ========================================================================
+    if (url.pathname === "/api/xln/state" && req.method === "GET") {
+      return new Response(JSON.stringify({
+        ...xlnStateCache,
+        _age: Date.now() - xlnStateCache.lastUpdate,
+        _stale: Date.now() - xlnStateCache.lastUpdate > 30000
+      }), { headers });
+    }
+
+    // ========================================================================
+    // GET /api/xln/tools - Get available xln tools for function calling
+    // ========================================================================
+    if (url.pathname === "/api/xln/tools" && req.method === "GET") {
+      return new Response(JSON.stringify({ tools: XLN_TOOLS }), { headers });
+    }
+
+    // ========================================================================
+    // POST /api/xln/execute - Execute a tool call directly
+    // ========================================================================
+    if (url.pathname === "/api/xln/execute" && req.method === "POST") {
+      try {
+        const body = await req.json();
+        const { tool, args } = body;
+
+        if (!tool) {
+          return new Response(JSON.stringify({ error: "No tool specified" }), { status: 400, headers });
+        }
+
+        const { result, error } = executeXlnTool(tool, args || {});
+
+        if (error) {
+          return new Response(JSON.stringify({ error }), { status: 400, headers });
+        }
+
+        return new Response(JSON.stringify({ result }), { headers });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: String(error) }), { status: 500, headers });
+      }
+    }
+
+    // ========================================================================
+    // GET /api/system/stats - System memory, GPU, and CPU stats
+    // ========================================================================
+    if (url.pathname === "/api/system/stats" && req.method === "GET") {
+      try {
+        // Get memory info using vm_stat on macOS
+        const vmStatProc = Bun.spawn(["vm_stat"], { stdout: "pipe" });
+        const vmStatOutput = await new Response(vmStatProc.stdout).text();
+
+        // Get total memory using sysctl
+        const sysctlProc = Bun.spawn(["sysctl", "-n", "hw.memsize"], { stdout: "pipe" });
+        const totalMemBytes = parseInt((await new Response(sysctlProc.stdout).text()).trim());
+
+        // Get GPU stats using ioreg
+        const gpuProc = Bun.spawn(["ioreg", "-r", "-d", "1", "-c", "IOAccelerator"], { stdout: "pipe" });
+        const gpuOutput = await new Response(gpuProc.stdout).text();
+
+        // Parse GPU info
+        const gpuModelMatch = gpuOutput.match(/"model"\s*=\s*"([^"]+)"/);
+        const gpuCoresMatch = gpuOutput.match(/"gpu-core-count"\s*=\s*(\d+)/);
+        const deviceUtilMatch = gpuOutput.match(/"Device Utilization %"\s*=\s*(\d+)/);
+        const rendererUtilMatch = gpuOutput.match(/"Renderer Utilization %"\s*=\s*(\d+)/);
+        const tilerUtilMatch = gpuOutput.match(/"Tiler Utilization %"\s*=\s*(\d+)/);
+        const gpuMemAllocMatch = gpuOutput.match(/"Alloc system memory"\s*=\s*(\d+)/);
+        const gpuMemInUseMatch = gpuOutput.match(/"In use system memory"\s*=\s*(\d+)/);
+
+        const gpuModel = gpuModelMatch?.[1] || "Unknown GPU";
+        const gpuCores = parseInt(gpuCoresMatch?.[1] || "0");
+        const deviceUtil = parseInt(deviceUtilMatch?.[1] || "0");
+        const rendererUtil = parseInt(rendererUtilMatch?.[1] || "0");
+        const tilerUtil = parseInt(tilerUtilMatch?.[1] || "0");
+        const gpuMemAlloc = parseInt(gpuMemAllocMatch?.[1] || "0");
+        const gpuMemInUse = parseInt(gpuMemInUseMatch?.[1] || "0");
+
+        // Parse vm_stat output
+        const pageSize = 16384; // Apple Silicon page size
+        const freeMatch = vmStatOutput.match(/Pages free:\s+(\d+)/);
+        const activeMatch = vmStatOutput.match(/Pages active:\s+(\d+)/);
+        const inactiveMatch = vmStatOutput.match(/Pages inactive:\s+(\d+)/);
+        const wiredMatch = vmStatOutput.match(/Pages wired down:\s+(\d+)/);
+        const compressedMatch = vmStatOutput.match(/Pages occupied by compressor:\s+(\d+)/);
+
+        const freePages = parseInt(freeMatch?.[1] || "0");
+        const activePages = parseInt(activeMatch?.[1] || "0");
+        const inactivePages = parseInt(inactiveMatch?.[1] || "0");
+        const wiredPages = parseInt(wiredMatch?.[1] || "0");
+        const compressedPages = parseInt(compressedMatch?.[1] || "0");
+
+        const usedBytes = (activePages + wiredPages + compressedPages) * pageSize;
+        const freeBytes = freePages * pageSize;
+        const cachedBytes = inactivePages * pageSize;
+
+        // Format helper
+        const formatGB = (bytes: number) => (bytes / 1024 / 1024 / 1024).toFixed(1);
+
+        // Get active MLX model info
+        const activeModel = mlxState.activeModel;
+        const modelInfo = activeModel ? MODELS[activeModel] : null;
+
+        return new Response(JSON.stringify({
+          memory: {
+            total: totalMemBytes,
+            used: usedBytes,
+            free: freeBytes,
+            cached: cachedBytes,
+            totalGB: formatGB(totalMemBytes),
+            usedGB: formatGB(usedBytes),
+            freeGB: formatGB(freeBytes),
+            cachedGB: formatGB(cachedBytes),
+            usedPercent: Math.round((usedBytes / totalMemBytes) * 100),
+          },
+          gpu: {
+            model: gpuModel,
+            cores: gpuCores,
+            utilization: deviceUtil,
+            rendererUtil: rendererUtil,
+            tilerUtil: tilerUtil,
+            memoryAllocatedGB: formatGB(gpuMemAlloc),
+            memoryInUseGB: formatGB(gpuMemInUse),
+            active: deviceUtil > 0 || rendererUtil > 0,
+          },
+          mlx: {
+            activeModel: mlxState.activeModel,
+            activeModelName: modelInfo?.name || null,
+            activeModelParams: modelInfo?.params || null,
+            loading: mlxState.loading,
+            loadProgress: mlxState.loadProgress,
+            lastError: mlxState.lastError,
+          },
+          platform: "darwin",
+          arch: "arm64",
+          timestamp: Date.now(),
+        }), { headers });
       } catch (error) {
         return new Response(JSON.stringify({ error: String(error) }), { status: 500, headers });
       }

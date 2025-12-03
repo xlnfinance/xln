@@ -640,7 +640,14 @@ export interface EntityReplica {
   lockedFrame?: ProposedEntityFrame; // Frame this validator is locked/precommitted to
   isProposer: boolean;
   sentTransitions?: number; // Number of txs sent to proposer but not yet committed (Channel.ts pattern)
-  position?: { x: number; y: number; z: number }; // 3D visualization position (for grid scenarios)
+  // Position is RELATIVE to j-machine (xlnomy)
+  // Frontend calculates: worldPos = jMachine.position + relativePosition
+  position?: {
+    x: number;      // Relative X offset from j-machine center
+    y: number;      // Relative Y offset from j-machine center
+    z: number;      // Relative Z offset from j-machine center
+    xlnomy?: string; // Which j-machine this entity belongs to (defaults to activeXlnomy)
+  };
 }
 
 export interface Env {
@@ -709,8 +716,8 @@ export interface EnvSnapshot {
   };
 }
 
-// Entity types
-export type EntityType = 'lazy' | 'numbered' | 'named';
+// Entity types - canonical definition in ids.ts
+export { type EntityType } from './ids';
 
 // Constants
 export const ENC = 'hex' as const;

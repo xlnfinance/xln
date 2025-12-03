@@ -49,7 +49,7 @@
     const maxJBlock = Math.max(0, ...Array.from($xlnEnvironment.replicas?.values() || []).map((r: any) => r.state?.jBlock || 0));
     return {
       block: maxJBlock,
-      events: $xlnEnvironment.serverInput?.entityInputs?.length || 0,
+      events: $xlnEnvironment?.runtimeInput?.entityInputs?.length || 0,
       height: $xlnEnvironment.height || 0
     };
   })();
@@ -58,7 +58,7 @@
   $: jWatcherStatus = (() => {
     if (!$xlnEnvironment) return null;
     try {
-      const proposers = Array.from($xlnEnvironment.replicas?.entries() as [string, any][] || [])
+      const proposers = [...($xlnEnvironment.replicas?.entries() || [])]
         .filter(([, replica]) => replica.isProposer)
         .map(([key, replica]) => {
           const [entityId, signerId] = key.split(':');
@@ -259,9 +259,9 @@
 
       // Choose prepopulate function based on selected preset
       if (selectedPreset === 'ahb') {
-        await xln.prepopulateAHB(env, xln.process);
+        await xln.prepopulateAHB(env);
       } else {
-        await xln.prepopulate(env, xln.process);
+        await xln.prepopulate(env);
       }
     } catch (error) {
       console.error('❌ Prepopulation failed:', error);

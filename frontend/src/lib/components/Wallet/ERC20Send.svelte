@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { JsonRpcProvider, Wallet, Contract, parseUnits, formatUnits, isAddress, type InterfaceAbi } from 'ethers';
+  import { onMount, onDestroy } from 'svelte';
+  import { JsonRpcProvider, Wallet, Contract, parseUnits, formatUnits, isAddress, parseEther, formatEther, type InterfaceAbi } from 'ethers';
   import { EVM_NETWORKS, ERC20_ABI, type EVMNetwork, type TokenInfo } from '$lib/config/evmNetworks';
 
   // Cast ABI to proper type for ethers
@@ -9,9 +10,17 @@
   export let privateKey: string;
   export let walletAddress: string;
 
+  // Balance state
+  let nativeBalance = '0';
+  let selectedTokenBalance = '0';
+  let loadingBalance = false;
+  let syncInterval = 30; // seconds
+  let syncTimer: ReturnType<typeof setInterval> | null = null;
+
   // State - EVM_NETWORKS always has Ethereum as first element
   let selectedNetwork: EVMNetwork = EVM_NETWORKS[0]!;
   let selectedToken: TokenInfo | null = null;
+  let sendNative = false; // Toggle between native token and ERC20
   let customTokenAddress = '';
   let recipientAddress = '';
   let amount = '';
@@ -43,9 +52,9 @@
     gasEstimate = '';
   }
 
-  // Validate inputs
+  // Validate inputs - allow native or token
   $: canEstimate = selectedNetwork &&
-    (selectedToken || (isCustomToken && customTokenInfo)) &&
+    (sendNative || selectedToken || (isCustomToken && customTokenInfo)) &&
     recipientAddress &&
     isAddress(recipientAddress) &&
     amount &&
@@ -108,29 +117,39 @@
     gasEstimate = '';
 
     try {
-      const token = isCustomToken ? customTokenInfo : selectedToken;
-      if (!token) throw new Error('No token selected');
-
       const provider = getProvider();
-      const contract = new Contract(token.address, ERC20_INTERFACE, provider);
-      const amountWei = parseUnits(amount, token.decimals);
-
-      // Estimate gas using getFunction
-      const transferFn = contract.getFunction('transfer');
-      const gasLimit = await transferFn.estimateGas(recipientAddress, amountWei, {
-        from: walletAddress
-      });
-
-      // Get gas price
       const feeData = await provider.getFeeData();
       const gasPrice = feeData.gasPrice || 0n;
-      const totalGas = gasLimit * gasPrice;
 
+      let gasLimit: bigint;
+
+      if (sendNative) {
+        // Native ETH transfer - estimate simple transfer
+        const amountWei = parseEther(amount);
+        gasLimit = await provider.estimateGas({
+          from: walletAddress,
+          to: recipientAddress,
+          value: amountWei
+        });
+      } else {
+        // ERC20 token transfer
+        const token = isCustomToken ? customTokenInfo : selectedToken;
+        if (!token) throw new Error('No token selected');
+
+        const contract = new Contract(token.address, ERC20_INTERFACE, provider);
+        const amountWei = parseUnits(amount, token.decimals);
+
+        const transferFn = contract.getFunction('transfer');
+        gasLimit = await transferFn.estimateGas(recipientAddress, amountWei, {
+          from: walletAddress
+        });
+      }
+
+      const totalGas = gasLimit * gasPrice;
       gasEstimate = `~${formatUnits(totalGas, 18)} ${selectedNetwork.symbol}`;
       status = 'idle';
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Gas estimation failed';
-      // Common errors translation
       if (msg.includes('insufficient funds')) {
         errorMessage = 'Insufficient balance for gas fees';
       } else if (msg.includes('execution reverted')) {
@@ -151,20 +170,33 @@
     txHash = '';
 
     try {
-      const token = isCustomToken ? customTokenInfo : selectedToken;
-      if (!token) throw new Error('No token selected');
-
       const wallet = getWallet();
-      const contract = new Contract(token.address, ERC20_INTERFACE, wallet);
-      const amountWei = parseUnits(amount, token.decimals);
+      let tx: { hash: string; wait: () => Promise<unknown> };
 
-      const transferFn = contract.getFunction('transfer');
-      const tx = await transferFn(recipientAddress, amountWei);
+      if (sendNative) {
+        // Native ETH transfer
+        const amountWei = parseEther(amount);
+        tx = await wallet.sendTransaction({
+          to: recipientAddress,
+          value: amountWei
+        });
+      } else {
+        // ERC20 token transfer
+        const token = isCustomToken ? customTokenInfo : selectedToken;
+        if (!token) throw new Error('No token selected');
+
+        const contract = new Contract(token.address, ERC20_INTERFACE, wallet);
+        const amountWei = parseUnits(amount, token.decimals);
+
+        const transferFn = contract.getFunction('transfer');
+        tx = await transferFn(recipientAddress, amountWei);
+      }
+
       txHash = tx.hash;
-
-      // Wait for confirmation
       await tx.wait();
       status = 'success';
+      // Refresh balances after successful send
+      fetchBalances();
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Transaction failed';
       if (msg.includes('insufficient funds')) {
@@ -211,12 +243,118 @@
     errorMessage = '';
     txHash = '';
   }
+
+  // Fetch balances
+  async function fetchBalances() {
+    if (!walletAddress || !selectedNetwork) return;
+
+    loadingBalance = true;
+    try {
+      const provider = getProvider();
+
+      // Fetch native balance
+      const rawNativeBalance = await provider.getBalance(walletAddress);
+      nativeBalance = formatEther(rawNativeBalance);
+
+      // Fetch selected token balance if applicable
+      const token = isCustomToken ? customTokenInfo : selectedToken;
+      if (token && !sendNative) {
+        const contract = new Contract(token.address, ERC20_INTERFACE, provider);
+        const rawTokenBalance = await contract.getFunction('balanceOf')(walletAddress);
+        selectedTokenBalance = formatUnits(rawTokenBalance, token.decimals);
+      }
+    } catch (e) {
+      console.error('Failed to fetch balances:', e);
+    } finally {
+      loadingBalance = false;
+    }
+  }
+
+  // Start sync timer
+  function startSyncTimer() {
+    stopSyncTimer();
+    fetchBalances();
+    syncTimer = setInterval(fetchBalances, syncInterval * 1000);
+  }
+
+  // Stop sync timer
+  function stopSyncTimer() {
+    if (syncTimer) {
+      clearInterval(syncTimer);
+      syncTimer = null;
+    }
+  }
+
+  // Update timer when interval changes
+  function updateSyncInterval(newInterval: number) {
+    syncInterval = newInterval;
+    if (syncTimer) {
+      startSyncTimer();
+    }
+  }
+
+  // Lifecycle
+  onMount(() => {
+    startSyncTimer();
+  });
+
+  onDestroy(() => {
+    stopSyncTimer();
+  });
+
+  // Refetch when network or token changes
+  $: if (selectedNetwork) {
+    fetchBalances();
+  }
+  $: if (selectedToken || customTokenInfo || sendNative) {
+    fetchBalances();
+  }
 </script>
 
 <div class="erc20-send">
   <div class="send-header">
     <span class="send-icon">&#x21E8;</span>
-    <span class="send-title">Send Token</span>
+    <span class="send-title">Send {sendNative ? selectedNetwork.symbol : 'Token'}</span>
+  </div>
+
+  <!-- Balance Display -->
+  <div class="balance-display">
+    <div class="balance-row">
+      <span class="balance-label">{selectedNetwork.symbol} Balance:</span>
+      <span class="balance-value" class:loading={loadingBalance}>
+        {loadingBalance ? '...' : parseFloat(nativeBalance).toFixed(6)} {selectedNetwork.symbol}
+      </span>
+    </div>
+    {#if !sendNative && (selectedToken || customTokenInfo)}
+      {@const token = isCustomToken ? customTokenInfo : selectedToken}
+      <div class="balance-row">
+        <span class="balance-label">{token?.symbol} Balance:</span>
+        <span class="balance-value" class:loading={loadingBalance}>
+          {loadingBalance ? '...' : parseFloat(selectedTokenBalance).toFixed(6)} {token?.symbol}
+        </span>
+      </div>
+    {/if}
+  </div>
+
+  <!-- Native/Token Toggle -->
+  <div class="field-group">
+    <label>Send Type</label>
+    <div class="toggle-buttons">
+      <button
+        class="toggle-btn"
+        class:active={sendNative}
+        on:click={() => { sendNative = true; gasEstimate = ''; }}
+      >
+        {selectedNetwork.symbol}
+      </button>
+      <button
+        class="toggle-btn"
+        class:active={!sendNative}
+        on:click={() => { sendNative = false; gasEstimate = ''; }}
+      >
+        ERC20 Token
+      </button>
+    </div>
   </div>
 
   <!-- Network Selector -->
@@ -259,67 +397,69 @@
     </div>
   </div>
 
-  <!-- Token Selector -->
-  <div class="field-group">
-    <label>Token</label>
-    <div class="dropdown" class:open={tokenDropdownOpen}>
-      <button class="dropdown-trigger" on:click={() => tokenDropdownOpen = !tokenDropdownOpen}>
-        {#if selectedToken}
-          <span class="token-symbol">{selectedToken.symbol}</span>
-          <span class="token-name">{selectedToken.name}</span>
-        {:else if isCustomToken && customTokenInfo}
-          <span class="token-symbol">{customTokenInfo.symbol}</span>
-          <span class="token-name">{customTokenInfo.name}</span>
-        {:else if isCustomToken}
-          <span class="token-placeholder">Enter custom address...</span>
-        {:else}
-          <span class="token-placeholder">Select token...</span>
-        {/if}
-        <span class="dropdown-arrow">{tokenDropdownOpen ? '^' : 'v'}</span>
-      </button>
-      {#if tokenDropdownOpen}
-        <div class="dropdown-menu">
-          {#if availableTokens.length > 0}
-            {#each availableTokens as token}
-              <button
-                class="dropdown-item"
-                class:selected={selectedToken?.address === token.address}
-                on:click={() => selectToken(token)}
-              >
-                <span class="token-symbol">{token.symbol}</span>
-                <span class="token-name">{token.name}</span>
-              </button>
-            {/each}
-            <div class="dropdown-divider"></div>
+  <!-- Token Selector (only for ERC20) -->
+  {#if !sendNative}
+    <div class="field-group">
+      <label>Token</label>
+      <div class="dropdown" class:open={tokenDropdownOpen}>
+        <button class="dropdown-trigger" on:click={() => tokenDropdownOpen = !tokenDropdownOpen}>
+          {#if selectedToken}
+            <span class="token-symbol">{selectedToken.symbol}</span>
+            <span class="token-name">{selectedToken.name}</span>
+          {:else if isCustomToken && customTokenInfo}
+            <span class="token-symbol">{customTokenInfo.symbol}</span>
+            <span class="token-name">{customTokenInfo.name}</span>
+          {:else if isCustomToken}
+            <span class="token-placeholder">Enter custom address...</span>
+          {:else}
+            <span class="token-placeholder">Select token...</span>
           {/if}
-          <button
-            class="dropdown-item custom-token-btn"
-            class:selected={isCustomToken}
-            on:click={enableCustomToken}
-          >
-            <span class="custom-icon">+</span>
-            <span>Custom Token Address</span>
-          </button>
+          <span class="dropdown-arrow">{tokenDropdownOpen ? '^' : 'v'}</span>
+        </button>
+        {#if tokenDropdownOpen}
+          <div class="dropdown-menu">
+            {#if availableTokens.length > 0}
+              {#each availableTokens as token}
+                <button
+                  class="dropdown-item"
+                  class:selected={selectedToken?.address === token.address}
+                  on:click={() => selectToken(token)}
+                >
+                  <span class="token-symbol">{token.symbol}</span>
+                  <span class="token-name">{token.name}</span>
+                </button>
+              {/each}
+              <div class="dropdown-divider"></div>
+            {/if}
+            <button
+              class="dropdown-item custom-token-btn"
+              class:selected={isCustomToken}
+              on:click={enableCustomToken}
+            >
+              <span class="custom-icon">+</span>
+              <span>Custom Token Address</span>
+            </button>
+          </div>
+        {/if}
+      </div>
+
+      {#if isCustomToken}
+        <div class="custom-token-input">
+          <input
+            type="text"
+            placeholder="0x... (ERC20 contract address)"
+            bind:value={customTokenAddress}
+            on:blur={loadCustomToken}
+          />
+          {#if loadingCustomToken}
+            <span class="loading-indicator">...</span>
+          {:else if customTokenInfo}
+            <span class="token-found">{customTokenInfo.symbol}</span>
+          {/if}
         </div>
       {/if}
     </div>
-
-    {#if isCustomToken}
-      <div class="custom-token-input">
-        <input
-          type="text"
-          placeholder="0x... (ERC20 contract address)"
-          bind:value={customTokenAddress}
-          on:blur={loadCustomToken}
-        />
-        {#if loadingCustomToken}
-          <span class="loading-indicator">...</span>
-        {:else if customTokenInfo}
-          <span class="token-found">{customTokenInfo.symbol}</span>
-        {/if}
-      </div>
-    {/if}
-  </div>
+  {/if}
 
   <!-- Recipient Address -->
   <div class="field-group">
@@ -347,7 +487,7 @@
         bind:value={amount}
       />
       <span class="amount-symbol">
-        {selectedToken?.symbol || customTokenInfo?.symbol || 'TOKEN'}
+        {sendNative ? selectedNetwork.symbol : (selectedToken?.symbol || customTokenInfo?.symbol || 'TOKEN')}
       </span>
     </div>
   </div>
@@ -399,6 +539,27 @@
         {status === 'sending' ? 'Sending...' : 'Send'}
       </button>
     {/if}
+  </div>
+
+  <!-- Sync Interval Slider -->
+  <div class="sync-settings">
+    <div class="sync-header">
+      <span class="sync-label">Balance Sync</span>
+      <span class="sync-value">{syncInterval}s</span>
+    </div>
+    <input
+      type="range"
+      class="sync-slider"
+      min="5"
+      max="120"
+      step="5"
+      bind:value={syncInterval}
+      on:change={() => updateSyncInterval(syncInterval)}
+    />
+    <div class="sync-range-labels">
+      <span>5s</span>
+      <span>120s</span>
+    </div>
   </div>
 
   <!-- Explorer Link -->
@@ -795,6 +956,151 @@
 
   .no-explorer {
     font-size: 11px;
+    color: rgba(255, 255, 255, 0.3);
+  }
+
+  /* Balance Display */
+  .balance-display {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 14px;
+  }
+
+  .balance-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+
+  .balance-row:last-child {
+    margin-bottom: 0;
+  }
+
+  .balance-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .balance-value {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    font-family: monospace;
+  }
+
+  .balance-value.loading {
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  /* Toggle Buttons */
+  .toggle-buttons {
+    display: flex;
+    gap: 0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .toggle-btn {
+    flex: 1;
+    padding: 10px 16px;
+    background: rgba(255, 255, 255, 0.02);
+    border: none;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .toggle-btn:first-child {
+    border-right: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .toggle-btn:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .toggle-btn.active {
+    background: rgba(251, 191, 36, 0.15);
+    color: rgba(251, 191, 36, 1);
+  }
+
+  /* Sync Settings */
+  .sync-settings {
+    margin-top: 16px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+  }
+
+  .sync-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .sync-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .sync-value {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(251, 191, 36, 0.9);
+    font-family: monospace;
+  }
+
+  .sync-slider {
+    width: 100%;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  .sync-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    background: rgba(251, 191, 36, 0.9);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.15s ease;
+  }
+
+  .sync-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+  }
+
+  .sync-slider::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: rgba(251, 191, 36, 0.9);
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+  }
+
+  .sync-range-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 4px;
+    font-size: 10px;
     color: rgba(255, 255, 255, 0.3);
   }
 </style>

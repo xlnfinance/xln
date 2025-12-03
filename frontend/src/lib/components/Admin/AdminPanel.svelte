@@ -59,13 +59,13 @@
       // Scan all accounts
       for (const [_counterpartyId, accountMachine] of replica.state.accounts.entries()) {
         for (const [tokenId, delta] of accountMachine.deltas.entries()) {
-          // Net spender: has negative delta (owes money, has excess collateral)
-          if (delta.delta < 0n) {
+          // Net spender: has negative offdelta (owes money, has excess collateral)
+          if (delta.offdelta < 0n) {
             if (!tokenMatches.has(tokenId)) {
               tokenMatches.set(tokenId, { totalDebt: 0n, totalRequested: 0n, rebalanceAmount: 0n });
             }
             const match = tokenMatches.get(tokenId)!;
-            const debtAmount = BigInt(delta.delta.toString()) * -1n; // Make positive
+            const debtAmount = BigInt(delta.offdelta.toString()) * -1n; // Make positive
             match.totalDebt += debtAmount;
           }
 

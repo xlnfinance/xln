@@ -26,10 +26,10 @@
     const replicaKey = `${currentEntityId}:${currentSignerId}`;
     const replica = $xlnEnvironment.replicas?.get(replicaKey);
     
-    if (!replica?.state?.channels) return false;
-    
-    // Check if there's a channel with this hub
-    return replica.state.channels.has(profile.entityId);
+    if (!replica?.state?.accounts) return false;
+
+    // Check if there's an account with this hub
+    return replica.state.accounts.has(profile.entityId);
   })();
 
   async function joinHub(targetEntityId: string = profile.entityId) {

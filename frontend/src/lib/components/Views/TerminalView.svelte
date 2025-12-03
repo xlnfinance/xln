@@ -168,7 +168,7 @@ SYSTEM:
 
     // Render each entity and its accounts using invariant ASCII style
     for (const entityId of Array.from(entityIds)) {
-      const replicaEntry = Array.from(env.replicas.entries() as [string, any][]).find(([k]) => k.startsWith(entityId + ':'));
+      const replicaEntry = Array.from(env.replicas.entries()).find(([k]) => k.startsWith(entityId + ':'));
       const replica = replicaEntry?.[1];
       if (!replica) continue;
 

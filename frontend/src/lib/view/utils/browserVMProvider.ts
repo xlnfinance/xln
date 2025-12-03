@@ -16,6 +16,14 @@ import type { Address } from '@ethereumjs/util';
 import { Common, Hardfork, Chain } from '@ethereumjs/common';
 import { ethers } from 'ethers';
 
+/** EVM event emitted from the BrowserVM */
+export interface EVMEvent {
+  name: string;
+  args: Record<string, unknown>;
+  blockNumber?: number;
+  timestamp?: number;
+}
+
 export class BrowserVMProvider {
   private vm: any;
   private common: any;
@@ -546,6 +554,35 @@ export class BrowserVMProvider {
       }
     }
     return decoded;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //  ENTITY PROVIDER STUBS - Used by JurisdictionPanel
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** Subscribe to all EVM events */
+  onAny(callback: (event: EVMEvent) => void): () => void {
+    // TODO: Implement event subscription when needed
+    console.log('[BrowserVM] onAny stub - event subscription not yet implemented');
+    return () => {}; // Return empty unsubscribe function
+  }
+
+  /** Get next available entity number */
+  async getNextEntityNumber(): Promise<number> {
+    // TODO: Read from EntityProvider contract when implemented
+    return 1;
+  }
+
+  /** Get entity info by ID */
+  async getEntityInfo(entityId: string): Promise<{ exists: boolean; name?: string; quorum?: string[]; threshold?: number }> {
+    // TODO: Read from EntityProvider contract when implemented
+    return { exists: false };
+  }
+
+  /** Get EntityProvider contract address */
+  getEntityProviderAddress(): string {
+    // TODO: Return actual EntityProvider address when deployed
+    return '0x0000000000000000000000000000000000000000';
   }
 }
 

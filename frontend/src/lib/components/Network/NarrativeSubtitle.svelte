@@ -56,9 +56,10 @@
             titleComplete = true;
             // Start narrative after title completes
             if (currentFrame.narrative && currentFrame.narrative.length > 0) {
+              const narrative = currentFrame.narrative; // Capture for closure
               setTimeout(() => {
                 typewriterEffect(
-                  currentFrame.narrative,
+                  narrative,
                   (val) => displayedNarrative = val,
                   () => narrativeComplete = true
                 );

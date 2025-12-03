@@ -1,16 +1,17 @@
 import { writable, derived, get } from 'svelte/store';
 import { errorLog } from './errorLogStore';
 import { settings } from './settingsStore';
+import type { XLNModule, Env, EnvSnapshot, EntityId, ReplicaKey } from '@xln/runtime/xln-api';
 
 // Direct import of XLN runtime module (no wrapper boilerplate needed)
-let XLN: any = null;
+let XLN: XLNModule | null = null;
 
-async function getXLN() {
+async function getXLN(): Promise<XLNModule> {
   if (XLN) return XLN;
 
   // Add timestamp to bust cache
   const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
-  XLN = await import(/* @vite-ignore */ runtimeUrl);
+  XLN = await import(/* @vite-ignore */ runtimeUrl) as XLNModule;
 
   // Expose globally for console debugging
   exposeGlobalDebugObjects();
@@ -44,12 +45,12 @@ function exposeGlobalDebugObjects() {
 }
 
 // Simple reactive store for XLN environment - just like legacy index.html
-export const xlnEnvironment = writable<any>(null);
+export const xlnEnvironment = writable<Env | null>(null);
 export const isLoading = writable<boolean>(true);
 export const error = writable<string | null>(null);
 
 // Store XLN instance separately for function access
-export const xlnInstance = writable<any>(null);
+export const xlnInstance = writable<XLNModule | null>(null);
 
 // xlnFunctions is now defined at the end of the file
 
@@ -60,14 +61,25 @@ export const replicas = derived(
 );
 
 // Direct stores for immediate updates (no derived timing races)
-export const history = writable<any[]>([]);
+export const history = writable<EnvSnapshot[]>([]);
 export const currentHeight = writable<number>(0);
+
+// Entity positions store - persists across time-travel (positions are static per entity)
+// Stores RELATIVE positions + xlnomy reference for proper multi-jurisdiction support
+// Frontend computes: worldPos = jMachine.position + relativePosition
+export interface RelativeEntityPosition {
+  x: number;        // Relative X offset from j-machine center
+  y: number;        // Relative Y offset from j-machine center
+  z: number;        // Relative Z offset from j-machine center
+  xlnomy: string;   // Which j-machine this entity belongs to
+}
+export const entityPositions = writable<Map<string, RelativeEntityPosition>>(new Map());
 
 // Track if XLN is already initialized to prevent data loss
 let isInitialized = false;
 
 // Helper functions for common patterns (not wrappers)
-export async function initializeXLN() {
+export async function initializeXLN(): Promise<Env> {
   // CRITICAL: Don't re-initialize if we already have data
   if (isInitialized) {
     const currentEnv = get(xlnEnvironment);
@@ -94,10 +106,30 @@ export async function initializeXLN() {
     xlnInstance.set(xln);
 
     // Register callback for automatic reactivity (fires on every process())
-    xln.registerEnvChangeCallback?.((env: any) => {
+    xln.registerEnvChangeCallback?.((env: Env) => {
       xlnEnvironment.set(env);
       history.set(env?.history || []);
       currentHeight.set(env?.height || 0);
+
+      // Extract and persist entity positions from replicas (positions are immutable)
+      // Positions are RELATIVE to j-machine - store xlnomy reference for world position calculation
+      if (env?.replicas) {
+        entityPositions.update(currentPositions => {
+          let hasChanges = false;
+          for (const [replicaKey, replica] of env.replicas.entries()) {
+            const entityId = xln.extractEntityId(replicaKey); // Uses ids.ts - no split
+            if (entityId && (replica as any).position && !currentPositions.has(entityId)) {
+              const pos = (replica as any).position;
+              // Store relative position + xlnomy reference (defaults to activeXlnomy)
+              const xlnomy = pos.xlnomy || env.activeXlnomy || 'default';
+              currentPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, xlnomy });
+              hasChanges = true;
+              console.log(`[xlnStore] 📍 Captured relative position for ${entityId.slice(0,10)}: (${pos.x}, ${pos.y}, ${pos.z}) in xlnomy=${xlnomy}`);
+            }
+          }
+          return hasChanges ? new Map(currentPositions) : currentPositions;
+        });
+      }
 
       // Update window for e2e testing
       if (typeof window !== 'undefined') {
@@ -112,6 +144,26 @@ export async function initializeXLN() {
     xlnEnvironment.set(env);
     history.set(env?.history || []);
     currentHeight.set(env?.height || 0);
+
+    // Extract positions from initial load as well
+    // Positions are RELATIVE to j-machine - store xlnomy reference for world position calculation
+    if (env?.replicas) {
+      const initialPositions = new Map<string, RelativeEntityPosition>();
+      for (const [replicaKey, replica] of env.replicas.entries()) {
+        const entityId = xln.extractEntityId(replicaKey); // Uses ids.ts - no split
+        if (entityId && (replica as any).position) {
+          const pos = (replica as any).position;
+          // Store relative position + xlnomy reference (defaults to activeXlnomy)
+          const xlnomy = pos.xlnomy || env.activeXlnomy || 'default';
+          initialPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, xlnomy });
+          console.log(`[xlnStore] 📍 Initial relative position for ${entityId.slice(0,10)}: (${pos.x}, ${pos.y}, ${pos.z}) in xlnomy=${xlnomy}`);
+        }
+      }
+      if (initialPositions.size > 0) {
+        entityPositions.set(initialPositions);
+      }
+    }
+
     isLoading.set(false);
 
     // Expose to window for e2e testing
@@ -144,12 +196,12 @@ export async function initializeXLN() {
 export { getXLN };
 
 // Helper to get current environment
-export function getEnv() {
+export function getEnv(): Env | null {
   return get(xlnEnvironment);
 }
 
 // Wrapper for process() that auto-injects runtimeDelay from settings
-export async function processWithDelay(env: any, inputs?: any[]) {
+export async function processWithDelay(env: Env, inputs?: unknown[]): Promise<Env> {
   const xln = await getXLN();
   const delay = get(settings).runtimeDelay;
   return await xln.process(env, inputs, delay);
@@ -195,6 +247,13 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
       generateEntityAvatar: notReady as any,
       generateSignerAvatar: notReady as any,
       getEntityDisplayInfo: notReady as any,
+
+      // Identity system (from ids.ts)
+      extractEntityId: notReady as any,
+      extractSignerId: notReady as any,
+      parseReplicaKey: notReady as any,
+      formatReplicaKey: notReady as any,
+      createReplicaKey: notReady as any,
 
       isReady: false
     };
@@ -300,6 +359,13 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
         return { name: signerId, address: signerId, avatar: '' };
       }
     },
+
+    // Identity system (from ids.ts) - replaces split(':') patterns
+    extractEntityId: $xlnInstance.extractEntityId,
+    extractSignerId: $xlnInstance.extractSignerId,
+    parseReplicaKey: $xlnInstance.parseReplicaKey,
+    formatReplicaKey: $xlnInstance.formatReplicaKey,
+    createReplicaKey: $xlnInstance.createReplicaKey,
 
     // State management - indicates functions are fully loaded
     isReady: true

@@ -40,6 +40,59 @@ import {
   transferNameBetweenEntities,
 } from './evm';
 import { createGossipLayer } from './gossip';
+import {
+  parseReplicaKey,
+  extractEntityId,
+  extractSignerId,
+  formatReplicaKey,
+  createReplicaKey,
+  formatEntityDisplay as formatEntityDisplayIds,
+  formatSignerDisplay as formatSignerDisplayIds,
+  formatReplicaDisplay,
+  // Types for re-export
+  type EntityId,
+  type SignerId,
+  type JId,
+  type EntityProviderAddress,
+  type ReplicaKey,
+  type FullReplicaAddress,
+  type ReplicaUri,
+  // Constants
+  XLN_URI_SCHEME,
+  DEFAULT_RUNTIME_HOST,
+  XLN_COORDINATOR,
+  CHAIN_IDS,
+  MAX_NUMBERED_ENTITY,
+  // Type guards
+  isValidEntityId,
+  isValidSignerId,
+  isValidJId,
+  isValidEpAddress,
+  // Constructors
+  toEntityId,
+  toSignerId,
+  toJId,
+  toEpAddress,
+  // Entity type detection (re-export from ids.ts)
+  detectEntityType as detectEntityTypeIds,
+  isNumberedEntity,
+  isLazyEntity,
+  getEntityDisplayNumber,
+  // URI operations
+  formatReplicaUri,
+  parseReplicaUri,
+  createLocalUri,
+  // Type-safe collections
+  ReplicaMap,
+  EntityMap,
+  // Jurisdiction helpers
+  type JurisdictionInfo,
+  jIdFromChainId,
+  createLazyJId,
+  // Migration helpers
+  safeParseReplicaKey,
+  safeExtractEntityId,
+} from './ids';
 import { type Profile } from './gossip.js';
 import { loadPersistedProfiles } from './gossip-loader';
 import { setupJEventWatcher, JEventWatcher } from './j-event-watcher';
@@ -739,10 +792,8 @@ const main = async (): Promise<Env> => {
     console.log(`🔍   Environment height: ${env.height}`);
     console.log(`🔍   Total replicas: ${env.replicas.size}`);
     for (const [replicaKey, replica] of env.replicas.entries()) {
-      const [entityId, signerId] = replicaKey.split(':');
-      if (entityId && signerId) {
-        console.log(`🔍   Entity ${entityId.slice(0,10)}... (${signerId}): jBlock=${replica.state.jBlock}, isProposer=${replica.isProposer}`);
-      }
+      const { entityId, signerId } = parseReplicaKey(replicaKey);
+      console.log(`🔍   Entity ${entityId.slice(0,10)}... (${signerId}): jBlock=${replica.state.jBlock}, isProposer=${replica.isProposer}`);
     }
   }
 
@@ -809,10 +860,7 @@ export const getJWatcherStatus = () => {
     proposers: Array.from(env.replicas.entries())
       .filter(([, replica]) => replica.isProposer)
       .map(([key, replica]) => {
-        const [entityId, signerId] = key.split(':');
-        if (!entityId || !signerId) {
-          throw new Error(`Invalid replica key format: ${key}`);
-        }
+        const { entityId, signerId } = parseReplicaKey(key);
         return {
           entityId: entityId.slice(0,10) + '...',
           signerId,
@@ -909,9 +957,62 @@ export {
   encode,
   decode,
 
+  // Identity system (from ids.ts) - replaces split(':') patterns
+  parseReplicaKey,
+  extractEntityId,
+  extractSignerId,
+  formatReplicaKey,
+  createReplicaKey,
+  formatReplicaDisplay,
+  // Type guards
+  isValidEntityId,
+  isValidSignerId,
+  isValidJId,
+  isValidEpAddress,
+  // Constructors
+  toEntityId,
+  toSignerId,
+  toJId,
+  toEpAddress,
+  // Entity type detection
+  isNumberedEntity,
+  isLazyEntity,
+  getEntityDisplayNumber,
+  // URI operations (for future networking)
+  formatReplicaUri,
+  parseReplicaUri,
+  createLocalUri,
+  // Type-safe collections
+  ReplicaMap,
+  EntityMap,
+  // Jurisdiction helpers
+  jIdFromChainId,
+  createLazyJId,
+  // Migration helpers
+  safeParseReplicaKey,
+  safeExtractEntityId,
+  // Constants
+  XLN_URI_SCHEME,
+  DEFAULT_RUNTIME_HOST,
+  XLN_COORDINATOR,
+  CHAIN_IDS,
+  MAX_NUMBERED_ENTITY,
+
   // Account messaging: Using bilateral frame-based consensus instead of direct messaging
   // (Old direct messaging functions removed - replaced with AccountInput flow)
 };
+
+// Re-export types from ids.ts for frontend use
+export type {
+  EntityId,
+  SignerId,
+  JId,
+  EntityProviderAddress,
+  ReplicaKey,
+  FullReplicaAddress,
+  ReplicaUri,
+  JurisdictionInfo,
+} from './ids';
 
 // The browser-specific auto-execution logic has been removed.
 // The consuming application (e.g., index.html) is now responsible for calling main().

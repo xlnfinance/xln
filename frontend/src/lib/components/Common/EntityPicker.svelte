@@ -7,7 +7,7 @@
   export let label: string = 'Entity:';
 
   // Get all available entities
-  $: availableEntities = $replicas ? Array.from($replicas.entries() as [string, any][])
+  $: availableEntities = $replicas ? [...$replicas.entries()]
     .map(([replicaKey, replica]) => {
       const [entityId, signerId] = replicaKey.split(':');
       return { entityId: entityId || '', signerId: signerId || '', replica };
