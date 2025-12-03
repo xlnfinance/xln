@@ -2,8 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { HDNodeWallet } from 'ethers';
   import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
-  import ERC20Send from '$lib/components/Wallet/ERC20Send.svelte';
-  import DepositToEntity from '$lib/components/Wallet/DepositToEntity.svelte';
+  import WalletView from '$lib/components/Wallet/WalletView.svelte';
   import { keccak256, zeroPadValue } from 'ethers';
 
   // Initialize i18n
@@ -234,6 +233,15 @@
   type Phase = 'input' | 'deriving' | 'complete';
 
   let phase: Phase = 'input';
+  let showSuccessHeader = true;
+  let successHeaderTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  // Auto-hide success header after 2.5 seconds
+  $: if (phase === 'complete' && showSuccessHeader) {
+    successHeaderTimeout = setTimeout(() => {
+      showSuccessHeader = false;
+    }, 2500);
+  }
 
   // Input state
   let name = '';
@@ -1001,6 +1009,11 @@
       clearInterval(elapsedInterval);
       elapsedInterval = null;
     }
+    if (successHeaderTimeout) {
+      clearTimeout(successHeaderTimeout);
+      successHeaderTimeout = null;
+    }
+    showSuccessHeader = true; // Reset for next open
     // Keep name and passphrase for convenience
     mnemonic24 = '';
     mnemonic12 = '';
@@ -1018,6 +1031,9 @@
     terminateWorkers();
     if (elapsedInterval) {
       clearInterval(elapsedInterval);
+    }
+    if (successHeaderTimeout) {
+      clearTimeout(successHeaderTimeout);
     }
   });
 
@@ -1325,25 +1341,27 @@
     <!-- COMPLETE PHASE -->
     {:else if phase === 'complete'}
       <div class="glass-card complete">
-        <div class="success-header">
-          <!-- Liquid glass checkmark icon -->
-          <div class="success-icon-container">
-            <div class="success-glow"></div>
-            <div class="success-ring">
-              <svg viewBox="0 0 24 24" fill="none" class="success-check">
-                <path d="M5 13l4 4L19 7" stroke="url(#checkGradient)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                <defs>
-                  <linearGradient id="checkGradient" x1="5" y1="7" x2="19" y2="17">
-                    <stop offset="0%" stop-color="#fbbf24"/>
-                    <stop offset="100%" stop-color="#d97706"/>
-                  </linearGradient>
-                </defs>
-              </svg>
+        {#if showSuccessHeader}
+          <div class="success-header" style="animation: fadeOut 0.5s ease-out 2s forwards;">
+            <!-- Liquid glass checkmark icon -->
+            <div class="success-icon-container">
+              <div class="success-glow"></div>
+              <div class="success-ring">
+                <svg viewBox="0 0 24 24" fill="none" class="success-check">
+                  <path d="M5 13l4 4L19 7" stroke="url(#checkGradient)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <defs>
+                    <linearGradient id="checkGradient" x1="5" y1="7" x2="19" y2="17">
+                      <stop offset="0%" stop-color="#fbbf24"/>
+                      <stop offset="100%" stop-color="#d97706"/>
+                    </linearGradient>
+                  </defs>
+                </svg>
+              </div>
             </div>
+            <h2>Vault Opened</h2>
+            <p class="success-stats">{formatDuration(elapsedMs)} <span class="stat-divider">·</span> {shardCount} shards</p>
           </div>
-          <h2>Vault Opened</h2>
-          <p class="success-stats">{formatDuration(elapsedMs)} <span class="stat-divider">·</span> {shardCount} shards</p>
-        </div>
+        {/if}
 
         <!-- Address with Identicon -->
         <div class="result-section">
@@ -1453,11 +1471,15 @@
           {/if}
         </div>
 
-        <!-- ERC20 Send Section -->
-        <ERC20Send privateKey={masterKeyHex} walletAddress={ethereumAddress} />
-
-        <!-- Deposit to XLN Entity Section -->
-        <DepositToEntity privateKey={masterKeyHex} walletAddress={ethereumAddress} {entityId} />
+        <!-- Wallet View - MetaMask-style interface -->
+        <div class="wallet-section">
+          <WalletView
+            privateKey={masterKeyHex}
+            walletAddress={ethereumAddress}
+            {entityId}
+            {identiconSrc}
+          />
+        </div>
 
         <!-- Network Actions -->
         <div class="network-actions">
@@ -3515,6 +3537,11 @@
   @keyframes pulse-glow {
     0%, 100% { opacity: 0.6; transform: scale(1); }
     50% { opacity: 1; transform: scale(1.1); }
+  }
+
+  @keyframes fadeOut {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-20px); }
   }
 
   .success-ring {
