@@ -26,7 +26,8 @@ const config = {
 			base: ''
 		},
 		alias: {
-			$types: '../runtime/types.ts'
+			$types: '../runtime/types.ts',
+			'@xln/runtime': '../runtime'
 		}
 	}
 };

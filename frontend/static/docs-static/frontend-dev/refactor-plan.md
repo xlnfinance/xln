@@ -88,15 +88,20 @@
 
 ```
 /frontend/src/lib/network3d/
-├── EntityManager.ts         (Entity creation, labels, sizing)
-├── ConnectionManager.ts     (Lines, bars, channel rendering)
-├── LayoutEngine.ts          (Force-directed, radial, collision)
-├── AnimationController.ts   (Main loop, particles, pulses)
-├── VRControllers.ts         (XR session, grab/release)
-├── InputHandler.ts          (Mouse, touch, drag handlers)
-├── RouteCalculator.ts       (Pathfinding, highlighting)
-├── SettingsPersistence.ts   (localStorage, camera state)
-└── types.ts                 (EntityData, ConnectionData, etc.)
+├── EntityManager.ts              ✅ DONE (368 lines) - Entity creation, labels, sizing
+├── LayoutEngine.ts               ✅ DONE (382 lines) - Force-directed, radial layouts
+├── AccountBarRenderer.ts         ✅ DONE (282 lines) - 7-region channel bars
+├── AccountActivityVisualizer.ts  ✅ DONE (289 lines) - Activity animations
+├── RoutePreviewVisualizer.ts     ✅ DONE (179 lines) - Route highlighting
+├── ProvidencePyramid.ts          ✅ DONE (136 lines) - Central pyramid effect
+├── SettingsPersistence.ts        ✅ DONE (175 lines) - localStorage, camera state
+├── types.ts                      ✅ DONE (53 lines) - Shared interfaces
+├── ConnectionManager.ts          ⏳ TODO - Lines, connection management (tightly coupled)
+├── AnimationController.ts        ⏳ TODO - Main loop, particles, pulses (tightly coupled)
+├── VRControllers.ts              ⏳ TODO - XR session, grab/release (tightly coupled)
+└── InputHandler.ts               ⏳ TODO - Mouse, touch, drag handlers (tightly coupled)
+
+TOTAL EXTRACTED: 1864 lines (8 modules)
 ```
 
 **Benefits:**

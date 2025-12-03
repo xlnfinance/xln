@@ -1,5 +1,51 @@
 # NEXT.md - Priority Tasks
 
+## 🔥 COMPLETED (2025-12-04): BrainVault Entity Auto-Creation
+
+### Fixes ✅
+- ✅ **Auto-save vault with input name** - No manual save modal, vault auto-saved on derivation complete
+- ✅ **Invalid mnemonic checksum error** - Fixed Argon2id → BIP39 derivation flow
+- ✅ **Auto-create entity for first signer** - `generateLazyEntityId()` creates proper lazy entity ID matching runtime algorithm, persisted via `vaultOperations.setSignerEntity(0, entityId)`
+
+### Files Modified ✅
+- `frontend/src/lib/components/Views/BrainVaultView.svelte`
+  - Added `generateLazyEntityId()` helper (lines 617-634)
+  - Entity ID uses canonical JSON + keccak256 (matches runtime)
+  - Vault auto-saves with entity assignment on derivation complete
+
+### Verified ✅
+- `bun run check` passes (0 errors)
+- Removed duplicate function definition from previous session
+
+---
+
+## 🔥 COMPLETED (2025-12-03): Identity System Refactor (Phase 1)
+
+### New Files ✅
+- ✅ **runtime/ids.ts** - Core identity system (~520 lines)
+  - Branded types: `EntityId`, `SignerId`, `JId`, `EntityProviderAddress`
+  - Structured `ReplicaKey` interface (no more string splitting)
+  - URI format for future networking: `xln://{host}/{jId}/{epAddress}/{entityId}/{signerId}`
+  - Type-safe collections: `ReplicaMap<T>`, `EntityMap<T>`
+- ✅ **runtime/ids.test.ts** - 36 unit tests (all passing)
+  - Type constructors, validators, ReplicaKey ops, display formatting
+  - Entity type detection, URI operations, edge cases
+  - Run: `bun test runtime/ids.test.ts`
+
+### Updated Files ✅
+- ✅ **runtime/runtime.ts** - Imports/exports all ids.ts functions
+- ✅ **xlnStore.ts** - Migrated 2 split patterns, exposed via xlnFunctions:
+  - `extractEntityId()`, `extractSignerId()`, `parseReplicaKey()`
+
+### Verified ✅
+- E2E test: 4/4 browser tests pass (Playwright)
+- Unit tests: 36/36 pass
+
+### Pending (Phase 2)
+- ~26 split(':') patterns in frontend components (gradual migration as files touched)
+
+---
+
 ## 🔥 COMPLETED (2025-11-30): Codex/Gemini Review Fixes + Multi-Agent Protocol
 
 ### Codex Blockers Fixed ✅
@@ -47,6 +93,48 @@ frontend/src/lib/view/
 ├─ papertrail/2025-11-30/
 ├─ queue/, consensus/, subagents/, completed/
 ```
+
+---
+
+## 🚨 ARCHITECTURE DEBT (ASAP - 2025-12-03)
+
+### A1. Entity positions must be RELATIVE to j-machine (CRITICAL)
+**Problem:** Positions are stored as absolute x,y,z. Breaks when loading multiple jurisdictions.
+**Solution:** Store `{jurisdictionId, relativeX, relativeY, relativeZ}` instead.
+**Files:** xlnStore.ts, Graph3DPanel.svelte, runtime/types.ts
+
+### A2. Replica key parsing is error-prone
+**Problem:** `replicaKey.split(':')[0]` vs `[1]` causes bugs (just fixed one).
+**Solution:** Add `parseReplicaKey(key): {entityId, signerId}` helper in runtime.
+**Files:** runtime/utils.ts (new), xlnStore.ts, Graph3DPanel.svelte
+
+### A3. xlnomies inconsistent type (Map vs Array)
+**Problem:** `env.xlnomies` is Map in live mode, Array in history. Code has dual handling.
+**Solution:** Always use Map. Serialize properly in history snapshots.
+**Files:** runtime/types.ts, state-helpers.ts, Graph3DPanel.svelte:611-614
+
+### A4. Time-travel is bolted on, not designed in
+**Problem:** `history[]` stores full snapshots (memory hog). Panels mix live/historical reads.
+**Solution:** Design proper time-travel-aware state access pattern.
+**Files:** xlnStore.ts, all panels that read replicas
+
+### A5. Graph3DPanel is 6000+ lines
+**Problem:** Unmaintainable god-component.
+**Solution:** Split: EntityRenderer, ConnectionRenderer, JMachineRenderer, CameraController
+**Files:** Graph3DPanel.svelte → multiple files
+
+### A6. Profiles vs Replicas vs Entities confusion
+**Problem:** Three overlapping concepts. Which is source of truth?
+- `gossipProfiles` - from gossip layer
+- `replicas` - from consensus
+- Entities in EntitiesPanel
+**Solution:** Define clear ownership: Entity is canonical, replica is state, profile is metadata.
+**Files:** Needs design doc first
+
+### A7. Frontend reimplements runtime types
+**Problem:** `xlnFunctions` wraps XLN instance methods with different error handling.
+**Solution:** Single source of truth in runtime, frontend just consumes.
+**Files:** xlnStore.ts:198-344
 
 ---
 

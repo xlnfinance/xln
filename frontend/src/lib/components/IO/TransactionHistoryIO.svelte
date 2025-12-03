@@ -10,8 +10,8 @@
 
   // Reactive data for server I/O
   $: currentSnapshot = $timeState.isLive ? null : $xlnEnvironment?.history?.[$timeState.currentTimeIndex];
-  $: serverInput = currentSnapshot?.serverInput || { serverTxs: [], entityInputs: [] };
-  $: serverOutputs = currentSnapshot?.serverOutputs || [];
+  $: serverInput = currentSnapshot?.runtimeInput || { runtimeTxs: [], entityInputs: [] };
+  $: serverOutputs = currentSnapshot?.runtimeOutputs || [];
 
   // Use central safeStringify from xlnFunctions
   function elaborateStringify(obj: any): string {
@@ -56,12 +56,17 @@
               </button>
             </div>
             <div class="server-txs-list">
-              {#if serverInput.serverTxs.length > 0}
-                {#each serverInput.serverTxs as tx, index}
+              {#if serverInput.runtimeTxs?.length > 0}
+                {#each serverInput.runtimeTxs as tx, index}
                   <div class="input-item">
                     <div class="summary-line">
-                      <strong>🖥️ {tx.type}</strong>: {tx.entityId}:{tx.signerId}
-                      {tx.data.isProposer ? ' (👑 Proposer)' : ' (✅ Validator)'}
+                      <strong>🖥️ {tx.type}</strong>
+                      {#if tx.type === 'importReplica'}
+                        : {tx.entityId}:{tx.signerId}
+                        {tx.data.isProposer ? ' (👑 Proposer)' : ' (✅ Validator)'}
+                      {:else if tx.type === 'createXlnomy'}
+                        : "{tx.data.name}" ({tx.data.evmType})
+                      {/if}
                     </div>
                     {#if showJsonDetails.serverTxs}
                       <div class="json-details">
@@ -141,7 +146,7 @@
                           <br>  {i+1}. {tx.type === 'chat' ? `💬 Chat: "${tx.data.message}"` :
                                        tx.type === 'propose' ? `📝 Propose: "${tx.data.action.data.message}"` :
                                        tx.type === 'vote' ? `🗳️ Vote: ${tx.data.choice}` :
-                                       tx.type === 'accountInput' ? `💳 AccountInput: ${tx.data.accountTx?.type || 'unknown'}` :
+                                       tx.type === 'accountInput' ? `💳 AccountInput: ${tx.data.fromEntityId?.slice(-8) || '?'} → ${tx.data.toEntityId?.slice(-8) || '?'}` :
                                        `⚙️ ${tx.type}`}
                         {/each}
                       {/if}

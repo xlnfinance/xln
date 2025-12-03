@@ -159,6 +159,29 @@
     tabOperations.addTab();
   }
 
+  // Handle Ask AI - navigate to /ai with entity context
+  function handleAskAI() {
+    if (!replica) return;
+
+    // Build entity context for AI
+    const entityContext = {
+      entityId: tab.entityId,
+      signerId: tab.signerId,
+      jurisdiction: tab.jurisdiction,
+      reserves: replica.state?.reserves ? Object.fromEntries(
+        Array.from(replica.state.reserves.entries()).map(([k, v]) => [k, v.toString()])
+      ) : {},
+      accountCount: replica.state?.accounts?.size ?? 0,
+      timestamp: Date.now()
+    };
+
+    // Store in localStorage for /ai page to read
+    localStorage.setItem('xln-entity-context', JSON.stringify(entityContext));
+
+    // Navigate to /ai with context flag
+    window.location.href = '/ai?context=entity';
+  }
+
   onMount(() => {
     // Check if we should show close button
     tabOperations.getActiveTab();
@@ -200,6 +223,11 @@
       </div>
     </div>
     <div class="panel-header-controls">
+      {#if replica}
+        <button class="panel-ai-btn" on:click={handleAskAI} title="Ask AI about this entity">
+          🤖
+        </button>
+      {/if}
       {#if isLast}
         <button class="panel-add-btn" on:click={handleAddTab} title="Add Entity Panel">
           ➕
@@ -431,7 +459,7 @@
       class:collapsed={!historyExpanded}
       style="max-height: 50vh;"
     >
-      <TransactionHistory {replica} {tab} runtimeHistory={activeHistory ?? []} currentTimeIndex={activeTimeIndex ?? -1} />
+      <TransactionHistory {replica} {tab} runtimeHistory={(activeHistory ?? []) as any[]} currentTimeIndex={activeTimeIndex ?? -1} />
     </div>
   </div>
 
@@ -686,5 +714,42 @@
   .breadcrumb-current {
     color: #d4d4d4;
     font-weight: 500;
+  }
+
+  .panel-header-controls {
+    display: flex;
+    gap: 6px;
+  }
+
+  .panel-ai-btn,
+  .panel-add-btn,
+  .panel-close-btn {
+    width: 28px;
+    height: 28px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #333;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    transition: all 0.15s ease;
+  }
+
+  .panel-ai-btn:hover {
+    background: #007acc;
+    border-color: #007acc;
+  }
+
+  .panel-add-btn:hover {
+    background: #28a745;
+    border-color: #28a745;
+  }
+
+  .panel-close-btn:hover {
+    background: #dc3545;
+    border-color: #dc3545;
+    color: white;
   }
 </style>

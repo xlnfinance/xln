@@ -23,7 +23,7 @@
 
   // Helper to get vote display and calculate voting power
   function getVoteInfo(proposal: any, config: any) {
-    const votes = proposal.votes ? Array.from(proposal.votes.entries() as [any, any][]) : [];
+    const votes = proposal.votes ? [...proposal.votes.entries()] : [];
     const yesVotes = votes.filter(([_, vote]) => getVoteChoice(vote) === 'yes');
     const noVotes = votes.filter(([_, vote]) => getVoteChoice(vote) === 'no');
     const abstainVotes = votes.filter(([_, vote]) => getVoteChoice(vote) === 'abstain');

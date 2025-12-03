@@ -119,7 +119,7 @@
     try {
       await getXLN(); // Ensure initialized
       const env = activeEnv;
-      if (!env) throw new Error('Environment not ready');
+      if (!env || !('history' in env)) throw new Error('Environment not ready or in historical mode');
 
       // Find signer ID
       let signerId = 's1';

@@ -110,10 +110,10 @@
         if (info.exists) {
           entities.push({
             entityId,
-            entityNumber: info.entityNumber,
-            name: info.name,
-            quorum: info.quorum,
-            threshold: info.threshold,
+            entityNumber: 0, // TODO: fetch from contract when available
+            name: info.name || '',
+            quorum: info.quorum || [],
+            threshold: info.threshold || 0,
           });
         }
       }

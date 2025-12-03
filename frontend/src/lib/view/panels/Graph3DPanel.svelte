@@ -20,6 +20,7 @@
   // Panel communication
   import { panelBridge } from '../utils/panelBridge';
   import { PerformanceMonitor, type PerfMetrics } from '../utils/perfMonitor';
+  import { entityPositions, type RelativeEntityPosition } from '$lib/stores/xlnStore';
   import VRControlsHUD from '../components/VRControlsHUD.svelte';
   import { HandGesturePaymentController } from '../utils/handGesturePayments';
   import EntityMiniPanel from '../components/EntityMiniPanel.svelte';
@@ -2594,24 +2595,90 @@ let vrHammer: VRHammer | null = null;
     // Check if this is Federal Reserve
     const isFed = replica?.signerId?.includes('_fed') || false;
 
+    // Priority 0: Check entityPositions store (persists across time-travel)
+    // Positions are RELATIVE to j-machine - compute world position by adding j-machine position
+    const persistedPosition = $entityPositions.get(profile.entityId);
+
+    // Helper: Get j-machine position for an xlnomy name
+    const getJMachinePosition = (xlnomyName: string): { x: number; y: number; z: number } | null => {
+      // First check env.xlnomies (works for both Map and Array)
+      if (env?.xlnomies) {
+        if (Array.isArray(env.xlnomies)) {
+          const xlnomy = env.xlnomies.find((x: any) => x.name === xlnomyName);
+          if (xlnomy?.jMachine?.position) return xlnomy.jMachine.position;
+        } else if (env.xlnomies instanceof Map) {
+          const xlnomy = env.xlnomies.get(xlnomyName);
+          if (xlnomy?.jMachine?.position) return xlnomy.jMachine.position;
+        }
+      }
+      // Fallback: Check jMachines mesh positions (already created in scene)
+      const jMesh = jMachines.get(xlnomyName);
+      if (jMesh) return { x: jMesh.position.x, y: jMesh.position.y, z: jMesh.position.z };
+      return null;
+    };
+
     // DEBUG: Log replica lookup details
-    console.log('[Graph3D] 🔍 Replica lookup for', profile.entityId.slice(0,10), ':', {
+    console.log('[Graph3D] 🔍 Position lookup for', profile.entityId.slice(0,10), ':', {
+      persistedPosition,
       replicaKey,
       hasReplica: !!replica,
-      hasPosition: !!replica?.position,
-      position: replica?.position,
-      allReplicaKeys: Array.from(currentReplicas.keys())
+      hasReplicaPosition: !!replica?.position,
+      replicaPosition: replica?.position,
     });
 
-    if (replica?.position) {
-      x = replica.position.x;
-      y = replica.position.y;
-      z = replica.position.z;
-      console.log('[Graph3D] ✅ Position extracted:', { entityId: profile.entityId.slice(0,10), x, y, z });
+    if (persistedPosition) {
+      // PRIORITY 0: Use persisted position from entityPositions store (survives time-travel)
+      // Position is RELATIVE to j-machine - compute world position
+      const jMachinePos = getJMachinePosition(persistedPosition.xlnomy);
+      if (jMachinePos) {
+        // World position = j-machine position + relative offset
+        x = jMachinePos.x + persistedPosition.x;
+        y = jMachinePos.y + persistedPosition.y;
+        z = jMachinePos.z + persistedPosition.z;
+        console.log('[Graph3D] ✅ World position from relative:', {
+          entityId: profile.entityId.slice(0,10),
+          xlnomy: persistedPosition.xlnomy,
+          jMachinePos,
+          relative: { x: persistedPosition.x, y: persistedPosition.y, z: persistedPosition.z },
+          world: { x, y, z }
+        });
+      } else {
+        // Fallback: use relative position as absolute (j-machine not found)
+        x = persistedPosition.x;
+        y = persistedPosition.y;
+        z = persistedPosition.z;
+        console.warn('[Graph3D] ⚠️ J-machine not found for xlnomy:', persistedPosition.xlnomy, '- using relative as absolute');
+      }
+      if (!loggedGridPositions.has(profile.entityId)) {
+        loggedGridPositions.add(profile.entityId);
+        logActivity(`📍 ${profile.entityId.slice(0,10)} @ (${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)}) [relative to ${persistedPosition.xlnomy}]`);
+      }
+    } else if (replica?.position) {
+      // Replica position is also RELATIVE to j-machine - compute world position
+      const replicaXlnomy = replica.position.xlnomy || env?.activeXlnomy || 'default';
+      const jMachinePos = getJMachinePosition(replicaXlnomy);
+      if (jMachinePos) {
+        x = jMachinePos.x + replica.position.x;
+        y = jMachinePos.y + replica.position.y;
+        z = jMachinePos.z + replica.position.z;
+        console.log('[Graph3D] ✅ World position from replica:', {
+          entityId: profile.entityId.slice(0,10),
+          xlnomy: replicaXlnomy,
+          jMachinePos,
+          relative: { x: replica.position.x, y: replica.position.y, z: replica.position.z },
+          world: { x, y, z }
+        });
+      } else {
+        // Fallback: use as absolute
+        x = replica.position.x;
+        y = replica.position.y;
+        z = replica.position.z;
+        console.log('[Graph3D] ✅ Position from replica (absolute fallback):', { entityId: profile.entityId.slice(0,10), x, y, z });
+      }
       // Only log ONCE on first draw
       if (!loggedGridPositions.has(profile.entityId)) {
         loggedGridPositions.add(profile.entityId);
-        logActivity(`📍 ${profile.entityId.slice(0,10)} @ (${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)})`);
+        logActivity(`📍 ${profile.entityId.slice(0,10)} @ (${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)}) [relative to ${replicaXlnomy}]`);
       }
     } else if (profile.metadata?.position) {
       // Priority 2: Check gossip profile position
@@ -2858,9 +2925,9 @@ let vrHammer: VRHammer | null = null;
           }
         });
       }
-    } else if (($isolatedTimeIndex === -1) && $isolatedEnv?.serverInput?.entityInputs) {
+    } else if (($isolatedTimeIndex === -1) && $isolatedEnv?.runtimeInput?.entityInputs) {
       // Live mode - same logic
-      $isolatedEnv.serverInput.entityInputs.forEach((entityInput: any) => {
+      $isolatedEnv.runtimeInput.entityInputs.forEach((entityInput: any) => {
         const processingEntityId = entityInput.entityId;
         currentFrameActivity.activeEntities.add(processingEntityId);
 
@@ -3183,7 +3250,7 @@ let vrHammer: VRHammer | null = null;
     let accountData: any = null;
 
     // Read accounts THE SAME WAY as EntityPanel - key is just counterpartyId!
-    const fromReplica = Array.from(currentReplicas.entries() as [string, any][])
+    const fromReplica = [...currentReplicas.entries()]
       .find(([key]) => key.startsWith(fromId + ':'));
 
     if (fromReplica?.[1]?.state?.accounts) {
@@ -3194,7 +3261,7 @@ let vrHammer: VRHammer | null = null;
 
     // Try reverse direction if not found
     if (!accountData) {
-      const toReplica = Array.from(currentReplicas.entries() as [string, any][])
+      const toReplica = [...currentReplicas.entries()]
         .find(([key]) => key.startsWith(toId + ':'));
 
       if (toReplica?.[1]?.state?.accounts) {
@@ -4224,7 +4291,7 @@ let vrHammer: VRHammer | null = null;
         const currentReplicas = replicas;
         let totalBarsLength = 0;
 
-        const fromReplica = Array.from(currentReplicas.entries() as [string, any][])
+        const fromReplica = [...currentReplicas.entries()]
           .find(([key]) => key.startsWith(entityA.id + ':'));
 
         if (fromReplica?.[1]?.state?.accounts) {
@@ -4989,7 +5056,7 @@ let vrHammer: VRHammer | null = null;
     const routes: typeof availableRoutes = [];
 
     // Check for direct account
-    const fromReplicaEntry = Array.from(env.replicas.entries() as [string, any][]).find(([k]) => k.startsWith(from + ':'));
+    const fromReplicaEntry = [...env.replicas.entries()].find(([k]) => k.startsWith(from + ':'));
     const fromReplica = fromReplicaEntry?.[1];
     if (fromReplica?.state?.accounts?.has(to)) {
       routes.push({
@@ -5015,7 +5082,7 @@ let vrHammer: VRHammer | null = null;
       const {current, path} = item;
       if (path.length > maxHops) continue;
 
-      const currentReplicaEntry = Array.from(env.replicas.entries() as [string, any][]).find(([k]) => k.startsWith(current + ':'));
+      const currentReplicaEntry = [...env.replicas.entries()].find(([k]) => k.startsWith(current + ':'));
       const currentReplica = currentReplicaEntry?.[1];
       if (!currentReplica?.state?.accounts) continue;
 
@@ -5578,7 +5645,7 @@ let vrHammer: VRHammer | null = null;
 
   function getEntityBalanceInfo(entityId: string): string {
     const currentReplicas = replicas;
-    const replica = Array.from(currentReplicas.entries() as [string, any][])
+    const replica = [...currentReplicas.entries()]
       .find(([key]) => key.startsWith(entityId + ':'));
 
     if (!replica?.[1]?.state?.reserves) {
@@ -5731,7 +5798,7 @@ let vrHammer: VRHammer | null = null;
     let accountData: any = null;
 
     // Try left entity's replica first
-    const leftReplica = Array.from(currentReplicas.entries() as [string, any][])
+    const leftReplica = [...currentReplicas.entries()]
       .find(([key]) => key.startsWith(leftId + ':'));
 
     if (leftReplica?.[1]?.state?.accounts) {
@@ -5741,7 +5808,7 @@ let vrHammer: VRHammer | null = null;
 
     // Try right entity's replica if not found
     if (!accountData) {
-      const rightReplica = Array.from(currentReplicas.entries() as [string, any][])
+      const rightReplica = [...currentReplicas.entries()]
         .find(([key]) => key.startsWith(rightId + ':'));
 
       if (rightReplica?.[1]?.state?.accounts) {

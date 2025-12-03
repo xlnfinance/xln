@@ -182,7 +182,7 @@
     try {
       const xln = await getXLN();
       const env = activeEnv;
-      if (!env) throw new Error('XLN environment not ready');
+      if (!env || !('history' in env)) throw new Error('XLN environment not ready or in historical mode');
 
       // Create direct payment EntityTx
       const paymentInput = {
@@ -216,7 +216,7 @@
     try {
       const xln = await getXLN();
       const env = activeEnv;
-      if (!env) throw new Error('XLN environment not ready');
+      if (!env || !('history' in env)) throw new Error('XLN environment not ready or in historical mode');
 
       // Create credit adjustment EntityTx
       const adjustmentInput = {

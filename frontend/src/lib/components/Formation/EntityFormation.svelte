@@ -161,8 +161,8 @@
       console.log(`🔍 Generated ${serverTxs.length} serverTxs:`, serverTxs);
       
       // Apply to server and process until empty
-      const result = await xln.applyServerInput(env, {
-        serverTxs,
+      const result = await xln.applyRuntimeInput(env, {
+        runtimeTxs: serverTxs,
         entityInputs: []
       });
       

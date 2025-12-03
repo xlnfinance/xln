@@ -159,6 +159,7 @@
 
       // Use account-based pathfinding (replaces gossip)
       // Use time-aware replicas from context/props (currentReplicas already handles priority)
+      if (!currentReplicas) throw new Error('Replicas not available');
       const foundPaths = findPathsThroughAccounts(currentReplicas, entityId, targetEntityId);
 
       if (foundPaths.length === 0) {
@@ -224,6 +225,7 @@
       // Find the correct signer ID for this entity
       // Use time-aware replicas from context/props (currentReplicas already handles priority)
       let signerId = 's1'; // default
+      if (!currentReplicas) throw new Error('Replicas not available');
       for (const key of currentReplicas.keys()) {
         if (key.startsWith(entityId + ':')) {
           signerId = key.split(':')[1];

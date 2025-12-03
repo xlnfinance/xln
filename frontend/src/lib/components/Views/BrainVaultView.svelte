@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { HDNodeWallet } from 'ethers';
+  import { HDNodeWallet, Mnemonic } from 'ethers';
   import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
   import WalletView from '$lib/components/Wallet/WalletView.svelte';
-  import { keccak256, zeroPadValue } from 'ethers';
+  import { keccak256, zeroPadValue, toUtf8Bytes } from 'ethers';
+  import { vaultState, vaultOperations, activeVault, activeSigner, allVaults, type Vault, type Signer } from '$lib/stores/vaultStore';
 
   // Initialize i18n
   let i18nReady = false;
@@ -294,6 +295,72 @@
   // FAQ state
   let expandedFaq: number | null = null;
 
+  // Complete phase tabs
+  type CompleteTab = 'wallet' | 'xln' | 'settings';
+  let completeTab: CompleteTab = 'wallet';
+
+  // Vault management state
+  let vaultDropdownOpen = false;
+  let signerDropdownOpen = false;
+  let showSaveVaultModal = false;
+  let vaultNameInput = '';
+
+  // Reactive: Get current vault/signer for display
+  $: currentVault = $activeVault;
+  $: currentSigner = $activeSigner;
+  $: savedVaults = $allVaults;
+
+  // Current signer's private key (derived from active vault)
+  $: currentSignerPrivateKey = currentVault && currentSigner
+    ? vaultOperations.getSignerPrivateKey(currentSigner.index)
+    : masterKeyHex;
+
+  // Current signer's address
+  $: currentSignerAddress = currentSigner?.address || ethereumAddress;
+
+  // Identicon for current signer
+  $: currentSignerIdenticon = currentSignerAddress ? generateIdenticon(currentSignerAddress) : identiconSrc;
+
+  // Helper to add a new signer
+  function handleAddSigner() {
+    const newSigner = vaultOperations.addSigner();
+    if (newSigner) {
+      vaultOperations.selectSigner(newSigner.index);
+    }
+  }
+
+  // Helper to save current derivation as vault (uses mnemonic24 for valid BIP39)
+  function saveCurrentAsVault() {
+    if (!vaultNameInput.trim() || !mnemonic24) return;
+
+    // Check if vault exists
+    if (vaultOperations.vaultExists(vaultNameInput.trim())) {
+      alert('A vault with this name already exists');
+      return;
+    }
+
+    vaultOperations.createVault(vaultNameInput.trim(), mnemonic24);
+    showSaveVaultModal = false;
+    vaultNameInput = '';
+  }
+
+  // Switch to a saved vault
+  function switchToVault(vaultId: string) {
+    vaultOperations.selectVault(vaultId);
+    vaultDropdownOpen = false;
+  }
+
+  // Switch signer
+  function switchSigner(index: number) {
+    vaultOperations.selectSigner(index);
+    signerDropdownOpen = false;
+  }
+
+  // Initialize vault store from localStorage
+  onMount(() => {
+    vaultOperations.initialize();
+  });
+
   // ============================================================================
   // AUDIO & HAPTICS - Mechanical vault clicks and mobile feedback
   // ============================================================================
@@ -542,6 +609,30 @@
     setTimeout(() => copiedField = null, 2000);
   }
 
+  /**
+   * Generate a lazy entity ID using the same algorithm as the runtime.
+   * For a single-signer entity: validators=[{name: address, weight: 1}], threshold=1
+   * Algorithm: sort validators by name, JSON stringify, keccak256 hash
+   */
+  function generateLazyEntityId(signerAddress: string): string {
+    // For single-signer entity: validators=[{name, weight}], threshold=1
+    const validatorData = [{ name: signerAddress, weight: 1 }];
+
+    // Sort by name for canonical ordering (already sorted for single validator)
+    const sortedValidators = validatorData.slice().sort((a, b) => a.name.localeCompare(b.name));
+
+    const quorumData = {
+      validators: sortedValidators,
+      threshold: '1', // threshold.toString() for single signer
+    };
+
+    // Canonical JSON serialization (matches runtime's algorithm)
+    const serialized = JSON.stringify(quorumData);
+
+    // Hash with keccak256 to generate entity ID
+    return keccak256(toUtf8Bytes(serialized));
+  }
+
   // ============================================================================
   // DERIVATION LOGIC
   // ============================================================================
@@ -734,8 +825,8 @@
     // HDNodeWallet.fromPhrase creates a wallet at the Ethereum default path m/44'/60'/0'/0/0
     const wallet = HDNodeWallet.fromPhrase(mnemonic24);
     ethereumAddress = wallet.address;
-    // Entity ID is keccak256(address) - deterministic bytes32 derived from address
-    entityId = keccak256(wallet.address);
+    // Entity ID is a lazy entity ID for a single-signer quorum (matches runtime algorithm)
+    entityId = generateLazyEntityId(wallet.address);
 
     // Clear localStorage resume token
     localStorage.removeItem('brainvault_resume');
@@ -745,6 +836,20 @@
     hapticFeedback('complete');
 
     phase = 'complete';
+
+    // Auto-save vault using the input name (not a manual modal)
+    if (name.trim() && mnemonic24) {
+      if (!vaultOperations.vaultExists(name.trim())) {
+        vaultOperations.createVault(name.trim(), mnemonic24);
+        // Auto-create entity for first signer
+        vaultOperations.setSignerEntity(0, entityId);
+        console.log('🔐 Vault auto-saved with entity:', name.trim(), entityId.slice(0, 10) + '...');
+      } else {
+        // Vault exists, just select it
+        vaultOperations.selectVault(name.trim());
+        console.log('🔐 Existing vault selected:', name.trim());
+      }
+    }
   }
 
   function terminateWorkers() {
@@ -1081,26 +1186,19 @@
   <div class="dust-particles" class:active={phase === 'deriving'}></div>
 
   <!-- Light rays from logo - EXPLODE during derivation -->
-  <div class="light-rays" class:active={phase === 'deriving'}></div>
+  <!-- Light rays disabled - too distracting during derivation -->
 
   <!-- Golden light flood during derivation -->
   {#if phase === 'deriving'}
     <div class="light-flood" style="--progress: {progress}"></div>
   {/if}
 
-  <!-- Header with Monumental Triangle -->
+  <!-- Header with Monumental Triangle - 2x larger -->
   <div class="header" class:deriving={phase === 'deriving'}>
-    <div class="logo-monument" class:deriving={phase === 'deriving'}>
+    <div class="logo-monument monument-xl" class:deriving={phase === 'deriving'}>
       <div class="logo-glow" class:active={phase === 'deriving'}></div>
       <img src="/img/l.png" alt="xln" class="triangle-logo" class:deriving={phase === 'deriving'} />
     </div>
-    <!-- Trust Badges -->
-    {#if phase === 'input'}
-      <div class="trust-badges">
-        <span class="badge offline">100% OFFLINE</span>
-        <span class="badge client">CLIENT-SIDE ONLY</span>
-      </div>
-    {/if}
   </div>
 
   <!-- Main Content -->
@@ -1340,10 +1438,9 @@
 
     <!-- COMPLETE PHASE -->
     {:else if phase === 'complete'}
-      <div class="glass-card complete">
+      <div class="glass-card complete tabbed">
         {#if showSuccessHeader}
           <div class="success-header" style="animation: fadeOut 0.5s ease-out 2s forwards;">
-            <!-- Liquid glass checkmark icon -->
             <div class="success-icon-container">
               <div class="success-glow"></div>
               <div class="success-ring">
@@ -1363,165 +1460,285 @@
           </div>
         {/if}
 
-        <!-- Address with Identicon -->
-        <div class="result-section">
-          <label>Ethereum Address</label>
-          <div class="result-box address with-identicon">
-            <img src={identiconSrc} alt="Address identicon" class="identicon" />
-            <code>{ethereumAddress}</code>
-            <button class="copy-btn" on:click={() => copyToClipboard(ethereumAddress, 'address')}>
-              {copiedField === 'address' ? '✓' : '📋'}
-            </button>
-          </div>
+        <!-- Main Tab Navigation -->
+        <div class="complete-tabs">
+          <button
+            class="complete-tab"
+            class:active={completeTab === 'wallet'}
+            on:click={() => completeTab = 'wallet'}
+          >
+            Wallet
+          </button>
+          <button
+            class="complete-tab"
+            class:active={completeTab === 'xln'}
+            on:click={() => completeTab = 'xln'}
+          >
+            xln
+          </button>
+          <button
+            class="complete-tab"
+            class:active={completeTab === 'settings'}
+            on:click={() => completeTab = 'settings'}
+          >
+            Settings
+          </button>
         </div>
 
-        <!-- 24-word Mnemonic -->
-        <div class="result-section">
-          <label>
-            24-Word Mnemonic
-            <span class="label-hint">(for MetaMask, Ledger, Trezor)</span>
-          </label>
-          <div class="result-box mnemonic">
-            <div class="mnemonic-toggle">
-              <button on:click={() => showMnemonic = !showMnemonic}>
-                {showMnemonic ? 'Hide' : 'Show'} Mnemonic
-              </button>
+        <!-- Tab Content -->
+        <div class="complete-tab-content">
+          {#if completeTab === 'wallet'}
+            <!-- WALLET TAB: Vault/Signer selectors + wallet interface -->
+            <div class="wallet-section">
+              <!-- Vault & Signer Selectors -->
+              <div class="vault-signer-bar">
+                <!-- Vault Dropdown -->
+                <div class="vault-dropdown" class:open={vaultDropdownOpen}>
+                  <button
+                    class="vault-trigger"
+                    on:click|stopPropagation={() => vaultDropdownOpen = !vaultDropdownOpen}
+                  >
+                    <span class="vault-icon">🔐</span>
+                    <span class="vault-name">{currentVault?.id || 'Unsaved Vault'}</span>
+                    <span class="dropdown-arrow">{vaultDropdownOpen ? '▲' : '▼'}</span>
+                  </button>
+                  {#if vaultDropdownOpen}
+                    <div class="vault-menu">
+                      {#if savedVaults.length > 0}
+                        <div class="menu-section-label">Saved Vaults</div>
+                        {#each savedVaults as vault}
+                          <button
+                            class="vault-item"
+                            class:active={vault.id === currentVault?.id}
+                            on:click={() => switchToVault(vault.id)}
+                          >
+                            <span class="vault-item-icon">🔐</span>
+                            <span>{vault.id}</span>
+                            <span class="signer-count">{vault.signers.length} signer{vault.signers.length !== 1 ? 's' : ''}</span>
+                          </button>
+                        {/each}
+                        <div class="menu-divider"></div>
+                      {/if}
+                      {#if !currentVault}
+                        <button class="vault-item save-vault" on:click={() => { showSaveVaultModal = true; vaultDropdownOpen = false; }}>
+                          <span class="vault-item-icon">💾</span>
+                          <span>Save Current Vault</span>
+                        </button>
+                      {/if}
+                    </div>
+                  {/if}
+                </div>
+
+                <!-- Signer Dropdown (only if vault is active) -->
+                {#if currentVault}
+                  <div class="signer-dropdown" class:open={signerDropdownOpen}>
+                    <button
+                      class="signer-trigger"
+                      on:click|stopPropagation={() => signerDropdownOpen = !signerDropdownOpen}
+                    >
+                      <img src={currentSignerIdenticon} alt="" class="signer-icon" />
+                      <span class="signer-name">{currentSigner?.name || 'Signer 1'}</span>
+                      <span class="dropdown-arrow">{signerDropdownOpen ? '▲' : '▼'}</span>
+                    </button>
+                    {#if signerDropdownOpen}
+                      <div class="signer-menu">
+                        {#each currentVault.signers as signer}
+                          <button
+                            class="signer-item"
+                            class:active={signer.index === currentSigner?.index}
+                            on:click={() => switchSigner(signer.index)}
+                          >
+                            <img src={generateIdenticon(signer.address)} alt="" class="signer-item-icon" />
+                            <div class="signer-item-info">
+                              <span class="signer-item-name">{signer.name}</span>
+                              <code class="signer-item-addr">{signer.address.slice(0, 6)}...{signer.address.slice(-4)}</code>
+                            </div>
+                          </button>
+                        {/each}
+                        <div class="menu-divider"></div>
+                        <button class="signer-item add-signer" on:click={handleAddSigner}>
+                          <span class="add-icon">+</span>
+                          <span>Add Signer</span>
+                        </button>
+                      </div>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+
+              <!-- WalletView with current signer's credentials -->
+              <WalletView
+                privateKey={currentSignerPrivateKey || masterKeyHex}
+                walletAddress={currentSignerAddress}
+                {entityId}
+                identiconSrc={currentSignerIdenticon}
+              />
             </div>
-            {#if showMnemonic}
-              <div class="mnemonic-words">
-                {#each mnemonic24.split(' ') as word, i}
-                  <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
+
+            <!-- Save Vault Modal -->
+            {#if showSaveVaultModal}
+              <div class="modal-overlay" on:click={() => showSaveVaultModal = false}>
+                <div class="modal-content" on:click|stopPropagation>
+                  <h3>Save Vault</h3>
+                  <p class="modal-desc">Give this vault a name to save it for quick access later.</p>
+                  <input
+                    type="text"
+                    class="vault-name-input"
+                    placeholder="Enter vault name..."
+                    bind:value={vaultNameInput}
+                    on:keydown={(e) => e.key === 'Enter' && saveCurrentAsVault()}
+                  />
+                  <div class="modal-actions">
+                    <button class="modal-btn cancel" on:click={() => showSaveVaultModal = false}>Cancel</button>
+                    <button class="modal-btn save" on:click={saveCurrentAsVault} disabled={!vaultNameInput.trim()}>Save Vault</button>
+                  </div>
+                </div>
+              </div>
+            {/if}
+
+          {:else if completeTab === 'xln'}
+            <!-- XLN TAB: Network entry -->
+            <div class="xln-tab-content">
+              <div class="network-cta">
+                <div class="network-cta-header">
+                  <span class="network-icon">◈</span>
+                  <span class="network-title">Join xln Network</span>
+                </div>
+                <p class="network-desc">Use this vault as your identity on the xln network. Create an entity, open accounts, send instant payments.</p>
+                <a href="/" class="derive-btn network-btn">
+                  <span class="btn-icon">⚡</span>
+                  Enter Network
+                </a>
+              </div>
+            </div>
+
+          {:else if completeTab === 'settings'}
+            <!-- SETTINGS TAB: Backup info, password manager, FAQ -->
+            <div class="settings-tab-content">
+              <!-- Address with Identicon -->
+              <div class="result-section">
+                <label>Ethereum Address</label>
+                <div class="result-box address with-identicon">
+                  <img src={identiconSrc} alt="Address identicon" class="identicon" />
+                  <code>{ethereumAddress}</code>
+                  <button class="copy-btn" on:click={() => copyToClipboard(ethereumAddress, 'address')}>
+                    {copiedField === 'address' ? '✓' : '📋'}
+                  </button>
+                </div>
+              </div>
+
+              <!-- 12-word Mnemonic (Standard BIP39) -->
+              <div class="result-section">
+                <label>
+                  Recovery Phrase
+                  <span class="label-hint">(12 words - standard for MetaMask, Ledger, Trezor)</span>
+                </label>
+                <div class="result-box mnemonic">
+                  {#if !showMnemonic}
+                    <!-- Blurred preview state -->
+                    <div class="mnemonic-blurred-preview">
+                      <div class="blur-overlay">
+                        <span class="blur-icon">🔒</span>
+                        <span class="blur-text">Sensitive - Click to Reveal</span>
+                      </div>
+                      <div class="mnemonic-words blurred" aria-hidden="true">
+                        {#each Array(12) as _, i}
+                          <span class="word"><span class="word-num">{i + 1}.</span> ••••••</span>
+                        {/each}
+                      </div>
+                    </div>
+                    <button class="mnemonic-reveal-btn" on:click={() => showMnemonic = true}>
+                      <span class="reveal-icon">👁️</span>
+                      Reveal Recovery Phrase
+                    </button>
+                  {:else}
+                    <div class="mnemonic-words">
+                      {#each mnemonic12.split(' ') as word, i}
+                        <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
+                      {/each}
+                    </div>
+                    <div class="mnemonic-actions">
+                      <button class="copy-btn full" on:click={() => copyToClipboard(mnemonic12, 'mnemonic12')}>
+                        {copiedField === 'mnemonic12' ? '✓ Copied!' : '📋 Copy all 12 words'}
+                      </button>
+                      <button class="hide-btn" on:click={() => showMnemonic = false}>
+                        🔒 Hide
+                      </button>
+                    </div>
+                  {/if}
+                </div>
+              </div>
+
+              <!-- Device Passphrase -->
+              <div class="result-section">
+                <label>
+                  Device Passphrase
+                  <span class="label-hint">(for Ledger/Trezor hidden wallet)</span>
+                </label>
+                <div class="result-box passphrase">
+                  <code class:blurred={!showDevicePassphrase}>
+                    {showDevicePassphrase ? devicePassphrase : '••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••'}
+                  </code>
+                  <button class="toggle-btn" on:click={() => showDevicePassphrase = !showDevicePassphrase}>
+                    {showDevicePassphrase ? '🙈' : '👁️'}
+                  </button>
+                  {#if showDevicePassphrase}
+                    <button class="copy-btn" on:click={() => copyToClipboard(devicePassphrase, 'devicePass')}>
+                      {copiedField === 'devicePass' ? '✓' : '📋'}
+                    </button>
+                  {/if}
+                </div>
+              </div>
+
+              <!-- Password Manager - Minimalist single line -->
+              <div class="result-section password-manager-inline">
+                <label>Password Generator</label>
+                <div class="pm-row">
+                  <input
+                    type="text"
+                    class="pm-domain-input"
+                    placeholder="domain.com"
+                    bind:value={siteDomain}
+                  />
+                  <code class="pm-password" class:empty={!sitePassword}>
+                    {sitePassword || 'enter domain'}
+                  </code>
+                  {#if sitePassword}
+                    <button class="copy-btn" on:click={() => copyToClipboard(sitePassword, 'sitePass')}>
+                      {copiedField === 'sitePass' ? '✓' : '📋'}
+                    </button>
+                  {/if}
+                </div>
+              </div>
+
+              <!-- FAQ Section -->
+              <div class="faq-section embedded">
+                <h3>Frequently Asked Questions</h3>
+                {#each FAQ_ITEMS as item, i}
+                  <div class="faq-item" class:expanded={expandedFaq === i}>
+                    <button class="faq-question" on:click={() => expandedFaq = expandedFaq === i ? null : i}>
+                      <span>{item.q}</span>
+                      <span class="faq-toggle">{expandedFaq === i ? '−' : '+'}</span>
+                    </button>
+                    {#if expandedFaq === i}
+                      <div class="faq-answer">
+                        <p>{item.a}</p>
+                      </div>
+                    {/if}
+                  </div>
                 {/each}
               </div>
-              <button class="copy-btn full" on:click={() => copyToClipboard(mnemonic24, 'mnemonic24')}>
-                {copiedField === 'mnemonic24' ? '✓ Copied!' : '📋 Copy all 24 words'}
-              </button>
-            {/if}
-          </div>
-        </div>
 
-        <!-- 12-word Mnemonic -->
-        <div class="result-section">
-          <label>
-            12-Word Mnemonic
-            <span class="label-hint">(for wallets that only support 12 words)</span>
-          </label>
-          <div class="result-box mnemonic compact">
-            <code class:blurred={!showMnemonic}>{showMnemonic ? mnemonic12 : '••• ••• ••• ••• ••• ••• ••• ••• ••• ••• ••• •••'}</code>
-            {#if showMnemonic}
-              <button class="copy-btn" on:click={() => copyToClipboard(mnemonic12, 'mnemonic12')}>
-                {copiedField === 'mnemonic12' ? '✓' : '📋'}
+              <!-- New Vault Button -->
+              <button class="derive-btn secondary" on:click={reset}>
+                <span class="btn-icon">🔄</span>
+                Derive Another Vault
               </button>
-            {/if}
-          </div>
-        </div>
-
-        <!-- Device Passphrase -->
-        <div class="result-section">
-          <label>
-            Device Passphrase
-            <span class="label-hint">(for Ledger/Trezor hidden wallet)</span>
-          </label>
-          <div class="result-box passphrase">
-            <code class:blurred={!showDevicePassphrase}>
-              {showDevicePassphrase ? devicePassphrase : '••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••'}
-            </code>
-            <button class="toggle-btn" on:click={() => showDevicePassphrase = !showDevicePassphrase}>
-              {showDevicePassphrase ? '🙈' : '👁️'}
-            </button>
-            {#if showDevicePassphrase}
-              <button class="copy-btn" on:click={() => copyToClipboard(devicePassphrase, 'devicePass')}>
-                {copiedField === 'devicePass' ? '✓' : '📋'}
-              </button>
-            {/if}
-          </div>
-        </div>
-
-        <!-- Password Manager - simplified -->
-        <div class="result-section password-manager">
-          <div class="pm-header">
-            <label>Password Manager</label>
-            <span class="pm-hint">Derive unique passwords for any site</span>
-          </div>
-          <div class="pm-input-row">
-            <input
-              type="text"
-              class="pm-domain-input"
-              placeholder="github.com, twitter.com..."
-              bind:value={siteDomain}
-            />
-          </div>
-          {#if sitePassword}
-            <div class="result-box site-password">
-              <code class:blurred={!showSitePassword}>
-                {showSitePassword ? sitePassword : '••••••••••••••••••••'}
-              </code>
-              <button class="toggle-btn" on:click={() => showSitePassword = !showSitePassword}>
-                {showSitePassword ? '🙈' : '👁️'}
-              </button>
-              <button class="copy-btn" on:click={() => copyToClipboard(sitePassword, 'sitePass')}>
-                {copiedField === 'sitePass' ? '✓' : '📋'}
-              </button>
-            </div>
-          {:else if !siteDomain}
-            <div class="pm-empty-state">
-              <span class="pm-empty-icon">🔐</span>
-              <span class="pm-empty-text">Enter a domain to generate a unique password</span>
             </div>
           {/if}
         </div>
-
-        <!-- Wallet View - MetaMask-style interface -->
-        <div class="wallet-section">
-          <WalletView
-            privateKey={masterKeyHex}
-            walletAddress={ethereumAddress}
-            {entityId}
-            {identiconSrc}
-          />
-        </div>
-
-        <!-- Network Actions -->
-        <div class="network-actions">
-          <div class="network-cta">
-            <div class="network-cta-header">
-              <span class="network-icon">◈</span>
-              <span class="network-title">Join xln Network</span>
-            </div>
-            <p class="network-desc">Use this vault as your identity on the xln network. Create an entity, open accounts, send instant payments.</p>
-            <a href="/" class="derive-btn network-btn">
-              <span class="btn-icon">⚡</span>
-              Enter Network
-            </a>
-          </div>
-        </div>
-
-        <!-- New Vault Button -->
-        <button class="derive-btn secondary" on:click={reset}>
-          <span class="btn-icon">🔄</span>
-          Derive Another Vault
-        </button>
       </div>
     {/if}
-
-    <!-- FAQ Section -->
-    <div class="faq-section">
-      <h3>Frequently Asked Questions</h3>
-      {#each FAQ_ITEMS as item, i}
-        <div class="faq-item" class:expanded={expandedFaq === i}>
-          <button class="faq-question" on:click={() => expandedFaq = expandedFaq === i ? null : i}>
-            <span>{item.q}</span>
-            <span class="faq-toggle">{expandedFaq === i ? '−' : '+'}</span>
-          </button>
-          {#if expandedFaq === i}
-            <div class="faq-answer">
-              <p>{item.a}</p>
-            </div>
-          {/if}
-        </div>
-      {/each}
-    </div>
-
   </div>
 </div>
 
@@ -1738,6 +1955,16 @@
     margin-bottom: 0;
     display: inline-block;
     transition: all 0.8s ease;
+  }
+
+  /* Monument XL - 2x larger logo for monumental impact */
+  .logo-monument.monument-xl .triangle-logo {
+    width: 200px;
+  }
+
+  .logo-monument.monument-xl .logo-glow {
+    width: 400px;
+    height: 400px;
   }
 
   /* Logo monument GROWS and GLOWS during derivation */
@@ -2271,6 +2498,61 @@
     border-color: rgba(255, 255, 255, 0.2);
   }
 
+  /* Password Manager Inline - Minimalist single line */
+  .password-manager-inline {
+    margin-top: 16px;
+  }
+
+  .password-manager-inline label {
+    display: block;
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.7);
+    margin-bottom: 8px;
+  }
+
+  .pm-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 4px 8px;
+  }
+
+  .pm-row .pm-domain-input {
+    flex: 0 0 120px;
+    background: transparent;
+    border: none;
+    color: white;
+    font-size: 13px;
+    padding: 8px 0;
+    outline: none;
+  }
+
+  .pm-row .pm-domain-input::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+  }
+
+  .pm-row .pm-password {
+    flex: 1;
+    font-family: 'SF Mono', 'Monaco', monospace;
+    font-size: 12px;
+    color: rgba(255, 200, 100, 0.9);
+    padding: 8px;
+    background: rgba(255, 200, 100, 0.05);
+    border-radius: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pm-row .pm-password.empty {
+    color: rgba(255, 255, 255, 0.3);
+    font-style: italic;
+  }
+
   .sound-select option {
     background: #1a1a2e;
     color: white;
@@ -2384,6 +2666,86 @@
     color: rgba(180, 140, 80, 0.9);
   }
 
+  /* Complete Phase Tabs */
+  .glass-card.complete.tabbed {
+    padding: 0;
+  }
+
+  .glass-card.complete.tabbed .success-header {
+    padding: 24px 32px 16px;
+  }
+
+  .complete-tabs {
+    display: flex;
+    border-bottom: 1px solid rgba(180, 140, 80, 0.15);
+    padding: 0 16px;
+    background: rgba(0, 0, 0, 0.1);
+  }
+
+  .complete-tab {
+    flex: 1;
+    padding: 16px 24px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .complete-tab:hover {
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .complete-tab.active {
+    color: rgba(180, 140, 80, 0.9);
+    border-bottom-color: rgba(180, 140, 80, 0.8);
+  }
+
+  .complete-tab-content {
+    padding: 24px 32px;
+    min-height: 400px;
+  }
+
+  .xln-tab-content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 350px;
+  }
+
+  .xln-tab-content .network-cta {
+    max-width: 400px;
+    margin: 0 auto;
+  }
+
+  .settings-tab-content {
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+
+  .settings-tab-content .result-section {
+    margin-bottom: 20px;
+  }
+
+  .faq-section.embedded {
+    margin-top: 32px;
+    padding-top: 24px;
+    border-top: 1px solid rgba(180, 140, 80, 0.1);
+  }
+
+  .faq-section.embedded h3 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: rgba(180, 140, 80, 0.6);
+    margin-bottom: 16px;
+  }
+
   /* Network CTA Section - Join the Spice Guild */
   .network-actions {
     margin-top: 40px;
@@ -2428,19 +2790,35 @@
     font-style: italic;
   }
 
+  /* Primary CTA - Bold gold filled style */
   .derive-btn.network-btn {
     display: inline-flex;
-    background: rgba(180, 140, 80, 0.15);
-    border-color: rgba(180, 140, 80, 0.5);
-    box-shadow: 0 0 30px rgba(180, 140, 80, 0.1);
+    background: linear-gradient(135deg, rgba(220, 180, 100, 0.95), rgba(180, 140, 80, 0.9));
+    border: 2px solid rgba(255, 220, 120, 0.6);
+    box-shadow: 0 4px 24px rgba(180, 140, 80, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15);
     text-decoration: none;
+    color: #000;
+    font-weight: 700;
+    text-shadow: none;
+    padding: 20px 32px;
+    font-size: 16px;
+  }
+
+  .derive-btn.network-btn .btn-icon {
+    color: #000;
   }
 
   .derive-btn.network-btn:hover:not(:disabled) {
-    background: rgba(180, 140, 80, 0.25);
-    border-color: rgba(180, 140, 80, 0.7);
-    box-shadow: 0 0 50px rgba(180, 140, 80, 0.2);
-    transform: translateY(-1px);
+    background: linear-gradient(135deg, rgba(255, 220, 120, 1), rgba(220, 180, 100, 0.95));
+    border-color: rgba(255, 240, 160, 0.8);
+    box-shadow: 0 6px 32px rgba(180, 140, 80, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+    color: #000;
+  }
+
+  .derive-btn.network-btn:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: 0 2px 12px rgba(180, 140, 80, 0.3);
   }
 
   /* Deriving Phase */
@@ -3618,7 +3996,7 @@
     margin-bottom: 10px;
     font-size: 13px;
     font-weight: 600;
-    color: rgba(180, 140, 80, 0.8);
+    color: rgba(220, 180, 100, 1);
     text-transform: uppercase;
     letter-spacing: 0.08em;
   }
@@ -3673,14 +4051,22 @@
     padding: 8px 12px;
     cursor: pointer;
     font-size: 16px;
-    transition: all 0.2s;
+    transition: all 0.2s ease;
     flex-shrink: 0;
     color: rgba(180, 140, 80, 0.8);
   }
 
   .copy-btn:hover, .toggle-btn:hover {
-    background: rgba(180, 140, 80, 0.25);
-    border-color: rgba(180, 140, 80, 0.4);
+    background: rgba(180, 140, 80, 0.3);
+    border-color: rgba(220, 180, 100, 0.5);
+    color: rgba(255, 220, 120, 1);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(180, 140, 80, 0.2);
+  }
+
+  .copy-btn:active, .toggle-btn:active {
+    transform: translateY(0);
+    box-shadow: none;
   }
 
   .copy-btn.full {
@@ -3691,10 +4077,23 @@
     color: rgba(255, 255, 255, 0.9);
   }
 
-  /* Mnemonic Display */
+  /* Mnemonic Display - Sensitive field styling */
   .result-box.mnemonic {
     flex-direction: column;
     align-items: stretch;
+    border-left: 3px solid rgba(220, 100, 60, 0.6);
+    background: rgba(220, 100, 60, 0.03);
+  }
+
+  .result-box.passphrase {
+    border-left: 3px solid rgba(220, 100, 60, 0.6);
+    background: rgba(220, 100, 60, 0.03);
+  }
+
+  /* Password Manager - Derived password styling (blue accent) */
+  .result-box.site-password {
+    border-left: 3px solid rgba(100, 160, 220, 0.6);
+    background: rgba(100, 160, 220, 0.03);
   }
 
   .mnemonic-toggle button {
@@ -3715,6 +4114,107 @@
   .mnemonic-toggle button:hover {
     background: linear-gradient(135deg, rgba(180, 140, 80, 0.3), rgba(120, 90, 50, 0.25));
     border-color: rgba(180, 140, 80, 0.5);
+  }
+
+  /* Blur-until-reveal for mnemonics */
+  .mnemonic-blurred-preview {
+    position: relative;
+    overflow: hidden;
+    border-radius: 12px;
+  }
+
+  .blur-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    z-index: 10;
+    backdrop-filter: blur(2px);
+  }
+
+  .blur-icon {
+    font-size: 32px;
+    opacity: 0.8;
+  }
+
+  .blur-text {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(220, 100, 60, 0.9);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  .mnemonic-words.blurred {
+    filter: blur(8px);
+    opacity: 0.4;
+    user-select: none;
+    pointer-events: none;
+    margin-top: 0;
+  }
+
+  .mnemonic-reveal-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    padding: 16px;
+    margin-top: 16px;
+    background: transparent;
+    border: 1px dashed rgba(220, 100, 60, 0.4);
+    border-radius: 10px;
+    color: rgba(220, 100, 60, 0.9);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .mnemonic-reveal-btn:hover {
+    background: rgba(220, 100, 60, 0.1);
+    border-color: rgba(220, 100, 60, 0.6);
+    color: rgba(255, 140, 80, 1);
+  }
+
+  .reveal-icon {
+    font-size: 18px;
+  }
+
+  .mnemonic-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 16px;
+  }
+
+  .mnemonic-actions .copy-btn.full {
+    flex: 1;
+    margin-top: 0;
+  }
+
+  .hide-btn {
+    padding: 12px 20px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+  }
+
+  .hide-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.25);
+    color: rgba(255, 255, 255, 0.9);
   }
 
   .mnemonic-words {
@@ -3854,70 +4354,446 @@
   }
 
   .faq-section h3 {
-    font-size: 12px;
-    color: rgba(180, 140, 80, 0.7);
-    margin-bottom: 24px;
-    letter-spacing: 0.15em;
+    font-size: 13px;
+    color: rgba(220, 180, 100, 0.9);
+    margin-bottom: 20px;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    font-weight: 400;
+    font-weight: 500;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(180, 140, 80, 0.15);
   }
 
   .faq-item {
     background: transparent;
-    border: 1px solid rgba(180, 140, 80, 0.1);
-    border-radius: 0;
-    margin-bottom: 4px;
+    border: 1px solid rgba(180, 140, 80, 0.12);
+    border-radius: 8px;
+    margin-bottom: 8px;
     overflow: hidden;
-    transition: all 0.3s;
+    transition: all 0.2s ease;
   }
 
   .faq-item.expanded {
-    background: rgba(180, 140, 80, 0.03);
-    border-color: rgba(180, 140, 80, 0.25);
+    background: rgba(180, 140, 80, 0.05);
+    border-color: rgba(180, 140, 80, 0.3);
   }
 
   .faq-question {
     width: 100%;
-    padding: 16px 20px;
+    padding: 18px 20px;
     background: none;
     border: none;
     display: flex;
     justify-content: space-between;
     align-items: center;
     cursor: pointer;
-    color: rgba(255, 255, 255, 0.8);
+    color: rgba(255, 255, 255, 0.85);
     font-size: 14px;
     font-weight: 400;
     text-align: left;
-    transition: color 0.3s;
+    transition: all 0.2s ease;
   }
 
   .faq-question:hover {
-    color: rgba(180, 140, 80, 0.9);
+    color: rgba(255, 220, 120, 1);
+    background: rgba(180, 140, 80, 0.05);
   }
 
   .faq-toggle {
-    font-size: 16px;
-    color: rgba(180, 140, 80, 0.4);
-    width: 24px;
-    text-align: center;
-    transition: color 0.3s;
+    font-size: 18px;
+    color: rgba(180, 140, 80, 0.5);
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(180, 140, 80, 0.1);
+    transition: all 0.2s ease;
+    flex-shrink: 0;
   }
 
   .faq-item.expanded .faq-toggle {
-    color: rgba(180, 140, 80, 0.8);
+    color: rgba(255, 220, 120, 1);
+    background: rgba(180, 140, 80, 0.2);
+    transform: rotate(45deg);
   }
 
   .faq-answer {
-    padding: 0 20px 18px;
+    padding: 0 20px 20px;
   }
 
   .faq-answer p {
     margin: 0;
     font-size: 13px;
-    line-height: 1.7;
+    line-height: 1.8;
+    color: rgba(255, 255, 255, 0.6);
+    font-style: normal;
+  }
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+     VAULT & SIGNER SELECTOR - MetaMask-style account management
+     ═══════════════════════════════════════════════════════════════════════════ */
+
+  .vault-signer-bar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid rgba(180, 140, 80, 0.1);
+    margin: -24px -32px 24px;
+  }
+
+  /* Vault Dropdown */
+  .vault-dropdown {
+    position: relative;
+    flex: 1;
+  }
+
+  .vault-trigger {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 14px;
+    background: rgba(180, 140, 80, 0.08);
+    border: 1px solid rgba(180, 140, 80, 0.2);
+    border-radius: 10px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .vault-trigger:hover {
+    background: rgba(180, 140, 80, 0.12);
+    border-color: rgba(180, 140, 80, 0.3);
+  }
+
+  .vault-trigger .vault-icon {
+    font-size: 16px;
+  }
+
+  .vault-trigger .vault-name {
+    flex: 1;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .vault-trigger .chevron {
+    color: rgba(180, 140, 80, 0.6);
+    font-size: 10px;
+    transition: transform 0.2s ease;
+  }
+
+  .vault-dropdown.open .vault-trigger {
+    border-color: rgba(180, 140, 80, 0.5);
+    background: rgba(180, 140, 80, 0.15);
+  }
+
+  .vault-dropdown.open .vault-trigger .chevron {
+    transform: rotate(180deg);
+  }
+
+  .vault-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    background: rgba(15, 12, 10, 0.98);
+    border: 1px solid rgba(180, 140, 80, 0.25);
+    border-radius: 12px;
+    padding: 8px;
+    z-index: 100;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    max-height: 280px;
+    overflow-y: auto;
+  }
+
+  .vault-menu-header {
+    padding: 8px 10px 12px;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(180, 140, 80, 0.6);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    border-bottom: 1px solid rgba(180, 140, 80, 0.1);
+    margin-bottom: 8px;
+  }
+
+  .vault-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: left;
+  }
+
+  .vault-item:hover {
+    background: rgba(180, 140, 80, 0.1);
+    color: rgba(255, 255, 255, 1);
+  }
+
+  .vault-item.active {
+    background: rgba(180, 140, 80, 0.15);
+    color: rgba(255, 200, 100, 1);
+  }
+
+  .vault-item.save-new {
+    border-top: 1px solid rgba(180, 140, 80, 0.1);
+    margin-top: 8px;
+    padding-top: 12px;
+    color: rgba(180, 140, 80, 0.8);
+  }
+
+  .vault-item.save-new:hover {
+    color: rgba(255, 200, 100, 1);
+  }
+
+  .vault-item-icon {
+    font-size: 14px;
+  }
+
+  /* Signer Dropdown */
+  .signer-dropdown {
+    position: relative;
+  }
+
+  .signer-trigger {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .signer-trigger:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+
+  .signer-trigger .signer-identicon {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    border: 1px solid rgba(180, 140, 80, 0.3);
+  }
+
+  .signer-trigger .signer-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .signer-trigger .signer-name {
+    font-weight: 500;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .signer-trigger .signer-address {
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 10px;
+    color: rgba(180, 140, 80, 0.7);
+  }
+
+  .signer-dropdown.open .signer-trigger {
+    border-color: rgba(180, 140, 80, 0.4);
+    background: rgba(180, 140, 80, 0.1);
+  }
+
+  .signer-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 220px;
+    background: rgba(15, 12, 10, 0.98);
+    border: 1px solid rgba(180, 140, 80, 0.25);
+    border-radius: 12px;
+    padding: 8px;
+    z-index: 100;
+    backdrop-filter: blur(20px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .signer-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: left;
+  }
+
+  .signer-item:hover {
+    background: rgba(180, 140, 80, 0.1);
+  }
+
+  .signer-item.active {
+    background: rgba(180, 140, 80, 0.15);
+    color: rgba(255, 200, 100, 1);
+  }
+
+  .signer-item .signer-identicon {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid rgba(180, 140, 80, 0.2);
+  }
+
+  .signer-item .signer-details {
+    flex: 1;
+  }
+
+  .signer-item .signer-name {
+    font-weight: 500;
+    color: inherit;
+  }
+
+  .signer-item .signer-address {
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 10px;
+    color: rgba(180, 140, 80, 0.6);
+    margin-top: 2px;
+  }
+
+  .signer-item.add-new {
+    border-top: 1px solid rgba(180, 140, 80, 0.1);
+    margin-top: 8px;
+    padding-top: 12px;
+    color: rgba(180, 140, 80, 0.8);
+    justify-content: center;
+  }
+
+  .signer-item.add-new:hover {
+    color: rgba(255, 200, 100, 1);
+  }
+
+  /* Save Vault Modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    backdrop-filter: blur(4px);
+  }
+
+  .modal-content {
+    background: rgba(20, 16, 12, 0.98);
+    border: 1px solid rgba(180, 140, 80, 0.3);
+    border-radius: 16px;
+    padding: 28px;
+    width: 90%;
+    max-width: 400px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  }
+
+  .modal-content h3 {
+    margin: 0 0 8px 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.95);
+  }
+
+  .modal-content p {
+    margin: 0 0 20px 0;
+    font-size: 13px;
     color: rgba(255, 255, 255, 0.5);
-    font-style: italic;
+  }
+
+  .vault-name-input {
+    width: 100%;
+    padding: 14px 16px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(180, 140, 80, 0.3);
+    border-radius: 10px;
+    font-size: 14px;
+    color: #fff;
+    outline: none;
+    transition: all 0.2s ease;
+    box-sizing: border-box;
+  }
+
+  .vault-name-input:focus {
+    border-color: rgba(180, 140, 80, 0.6);
+    background: rgba(0, 0, 0, 0.5);
+  }
+
+  .vault-name-input::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+  }
+
+  .modal-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+  }
+
+  .modal-btn {
+    flex: 1;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: none;
+  }
+
+  .modal-btn.cancel {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .modal-btn.cancel:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .modal-btn.save {
+    background: linear-gradient(135deg, rgba(180, 140, 80, 0.9), rgba(140, 100, 50, 0.9));
+    color: #fff;
+  }
+
+  .modal-btn.save:hover:not(:disabled) {
+    background: linear-gradient(135deg, rgba(200, 160, 100, 0.95), rgba(160, 120, 60, 0.95));
+    box-shadow: 0 4px 20px rgba(180, 140, 80, 0.3);
+  }
+
+  .modal-btn.save:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 
   /* Responsive */
@@ -3937,6 +4813,21 @@
 
     .logo h1 {
       font-size: 32px;
+    }
+
+    .vault-signer-bar {
+      flex-direction: column;
+      gap: 8px;
+      margin: -20px -20px 20px;
+    }
+
+    .vault-dropdown {
+      width: 100%;
+    }
+
+    .signer-menu {
+      left: 0;
+      right: 0;
     }
   }
 </style>

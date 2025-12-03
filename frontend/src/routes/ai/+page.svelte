@@ -32,6 +32,40 @@
     name: string;
     vision: boolean;
     available: boolean;
+    backend?: string;
+    loaded?: boolean;
+  }
+
+  interface SystemStats {
+    memory: {
+      total: number;
+      used: number;
+      free: number;
+      cached: number;
+      totalGB: string;
+      usedGB: string;
+      freeGB: string;
+      cachedGB: string;
+      usedPercent: number;
+    };
+    gpu: {
+      model: string;
+      cores: number;
+      utilization: number;
+      rendererUtil: number;
+      tilerUtil: number;
+      memoryAllocatedGB: string;
+      memoryInUseGB: string;
+      active: boolean;
+    };
+    mlx: {
+      activeModel: string | null;
+      activeModelName: string | null;
+      activeModelParams: string | null;
+      loading: boolean;
+      loadProgress: string;
+      lastError: string | null;
+    };
   }
 
   let messages: Message[] = [];
@@ -63,7 +97,29 @@
   // Chat persistence
   let chatId = `chat-${Date.now()}`;
   let chatTitle = 'New Chat';
-  let savedChats: { id: string; title: string; updated: string }[] = [];
+  let savedChats: { id: string; title: string; updated: string; pinned?: boolean }[] = [];
+
+  // Entity context from xln frontend
+  interface EntityContext {
+    entityId: string;
+    signerId: string;
+    jurisdiction: string;
+    reserves: Record<string, string>;
+    accountCount: number;
+    timestamp: number;
+  }
+  let entityContext: EntityContext | null = null;
+
+  // Tool call state for agent mode
+  interface ToolCall {
+    id: string;
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }
+  let availableTools: any[] = [];
+  let agentModeEnabled = false;
 
   // TTS/STT model selection
   let selectedSTT = 'whisper-large-v3';
@@ -89,6 +145,13 @@
   let visualizerFrame: number | null = null;
   let isSpeaking = false; // TTS is playing
 
+  // System stats / MLX state
+  let systemStats: SystemStats | null = null;
+  let mlxLoading = false;
+  let mlxLoadProgress = '';
+  let mlxActiveModel: string | null = null;
+  let statsInterval: ReturnType<typeof setInterval> | null = null;
+
   // ============================================================================
   // LIFECYCLE
   // ============================================================================
@@ -96,12 +159,94 @@
   onMount(async () => {
     await loadModels();
     await loadSavedChats();
+    await fetchSystemStats();
+    await loadXlnTools();
     startContinuousListening();
+    // Poll system stats every 2 seconds
+    statsInterval = setInterval(fetchSystemStats, 2000);
+
+    // Check for entity context from xln frontend
+    checkEntityContext();
   });
+
+  async function loadXlnTools() {
+    try {
+      const res = await fetch(`${API_URL}/api/xln/tools`);
+      const data = await res.json();
+      availableTools = data.tools || [];
+      console.log(`Loaded ${availableTools.length} xln tools for agent mode`);
+    } catch (e) {
+      console.warn('Failed to load xln tools:', e);
+    }
+  }
+
+  async function executeToolCall(toolCall: ToolCall): Promise<string> {
+    try {
+      const args = JSON.parse(toolCall.function.arguments);
+      const res = await fetch(`${API_URL}/api/xln/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: toolCall.function.name, args }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        return JSON.stringify({ error: data.error });
+      }
+      return JSON.stringify(data.result);
+    } catch (e) {
+      return JSON.stringify({ error: `Tool execution failed: ${e}` });
+    }
+  }
+
+  function checkEntityContext() {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('context') === 'entity') {
+      const stored = localStorage.getItem('xln-entity-context');
+      if (stored) {
+        try {
+          entityContext = JSON.parse(stored);
+          // Create a new chat with entity context
+          chatId = `entity-${entityContext!.entityId}-${Date.now()}`;
+          chatTitle = `Entity ${entityContext!.entityId.slice(0, 8)}...`;
+
+          // Build context message for AI
+          const reservesList = Object.entries(entityContext!.reserves)
+            .map(([tokenId, amount]) => `  Token ${tokenId}: ${amount}`)
+            .join('\n');
+
+          const systemMessage = `You are assisting with xln Entity ${entityContext!.entityId}.
+
+Entity Context:
+- Entity ID: ${entityContext!.entityId}
+- Signer ID: ${entityContext!.signerId}
+- Jurisdiction: ${entityContext!.jurisdiction}
+- Number of accounts: ${entityContext!.accountCount}
+- Reserves:
+${reservesList || '  (none)'}
+
+Help the user understand this entity's state, suggest actions, or answer questions about xln operations.`;
+
+          // Add system message to start the chat
+          messages = [{
+            role: 'system',
+            content: systemMessage,
+            timestamp: new Date().toISOString()
+          }];
+
+          // Clear the URL param and localStorage
+          window.history.replaceState({}, '', '/ai');
+          localStorage.removeItem('xln-entity-context');
+        } catch (e) {
+          console.error('Failed to parse entity context:', e);
+        }
+      }
+    }
+  }
 
   onDestroy(() => {
     stopListening();
     stopCamera();
+    if (statsInterval) clearInterval(statsInterval);
   });
 
   // ============================================================================
@@ -115,8 +260,62 @@
       models = data.models || [];
       councilModels = data.council_models || [];
       if (data.default_model) selectedModel = data.default_model;
+      // Update MLX state from models response
+      if (data.mlx_state) {
+        mlxLoading = data.mlx_state.loading;
+        mlxLoadProgress = data.mlx_state.loadProgress || '';
+        mlxActiveModel = data.mlx_state.activeModel;
+      }
     } catch (e) {
       console.error('Failed to load models:', e);
+    }
+  }
+
+  async function fetchSystemStats() {
+    try {
+      const res = await fetch(`${API_URL}/api/system/stats`);
+      const data = await res.json();
+      systemStats = data;
+      mlxLoading = data.mlx?.loading || false;
+      mlxLoadProgress = data.mlx?.loadProgress || '';
+      mlxActiveModel = data.mlx?.activeModel || null;
+    } catch (e) {
+      // Silently fail - stats are optional
+    }
+  }
+
+  async function ejectMLXModel() {
+    try {
+      const res = await fetch(`${API_URL}/api/mlx/unload`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        mlxActiveModel = null;
+        await fetchSystemStats();
+        await loadModels();
+      }
+    } catch (e) {
+      console.error('Failed to eject model:', e);
+    }
+  }
+
+  async function loadMLXModel(modelId: string) {
+    try {
+      mlxLoading = true;
+      const res = await fetch(`${API_URL}/api/models/load`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelId }),
+      });
+      const data = await res.json();
+      mlxLoading = false;
+      if (data.success) {
+        mlxActiveModel = modelId;
+        await fetchSystemStats();
+        await loadModels();
+      }
+    } catch (e) {
+      mlxLoading = false;
+      console.error('Failed to load model:', e);
     }
   }
 
@@ -125,15 +324,33 @@
       const res = await fetch(`${API_URL}/api/chats`);
       const data = await res.json();
       savedChats = data.chats || [];
+      // Restore pinned state from localStorage
+      const pins = JSON.parse(localStorage.getItem('pinnedChats') || '[]');
+      savedChats = savedChats.map(c => ({ ...c, pinned: pins.includes(c.id) }));
     } catch (e) {
       console.error('Failed to load chats:', e);
     }
   }
 
+  function generateChatTitle(msgs: Message[]): string {
+    const firstUserMsg = msgs.find(m => m.role === 'user');
+    if (!firstUserMsg) return 'New Chat';
+    // Take first 30 chars, trim at word boundary if possible
+    let title = firstUserMsg.content.slice(0, 35);
+    const lastSpace = title.lastIndexOf(' ');
+    if (lastSpace > 20) title = title.slice(0, lastSpace);
+    return title.trim() || 'New Chat';
+  }
+
   async function saveChat() {
+    // Auto-generate title from first message if still "New Chat"
+    if (chatTitle === 'New Chat' && messages.length > 0) {
+      chatTitle = generateChatTitle(messages);
+    }
+
     const session = {
       id: chatId,
-      title: chatTitle || messages[0]?.content.slice(0, 50) || 'Untitled',
+      title: chatTitle,
       messages,
       council_mode: councilMode,
       created_at: new Date().toISOString(),
@@ -149,6 +366,28 @@
       await loadSavedChats();
     } catch (e) {
       console.error('Failed to save chat:', e);
+    }
+  }
+
+  async function deleteChat(id: string) {
+    if (!confirm('Delete this chat?')) return;
+    try {
+      await fetch(`${API_URL}/api/chats/${id}`, { method: 'DELETE' });
+      savedChats = savedChats.filter(c => c.id !== id);
+      if (chatId === id) newChat();
+    } catch (e) {
+      console.error('Failed to delete chat:', e);
+    }
+  }
+
+  function togglePinChat(id: string) {
+    const idx = savedChats.findIndex(c => c.id === id);
+    if (idx >= 0 && savedChats[idx]) {
+      savedChats[idx]!.pinned = !savedChats[idx]!.pinned;
+      savedChats = [...savedChats]; // trigger reactivity
+      // Save pin state to localStorage
+      const pins = savedChats.filter(c => c.pinned).map(c => c.id);
+      localStorage.setItem('pinnedChats', JSON.stringify(pins));
     }
   }
 
@@ -193,58 +432,114 @@
 
         messages = [...messages, assistantMessage];
       } else {
-        // Single model streaming
+        // Single model chat (with optional agent mode)
         const allMessages = messages.map(m => ({
           role: m.role,
           content: m.content,
         }));
 
+        const requestBody: Record<string, any> = {
+          model: selectedModel,
+          messages: allMessages,
+          stream: !agentModeEnabled, // Disable streaming for agent mode (tool calls need full response)
+          images: userMessage.images,
+        };
+
+        // Add tools if agent mode is enabled
+        if (agentModeEnabled && availableTools.length > 0) {
+          requestBody['tools'] = availableTools;
+          requestBody['tool_choice'] = 'auto';
+        }
+
         const res = await fetch(`${API_URL}/api/chat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: selectedModel,
-            messages: allMessages,
-            stream: true,
-            images: userMessage.images,
-          }),
+          body: JSON.stringify(requestBody),
         });
 
-        if (!res.body) throw new Error('No response body');
+        if (agentModeEnabled) {
+          // Agent mode: non-streaming response, may contain tool calls
+          const data = await res.json();
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        streamingContent = '';
+          // Check if response contains tool calls
+          if (data.tool_calls && data.tool_calls.length > 0) {
+            // Show tool calling status
+            messages = [...messages, {
+              role: 'system',
+              content: `[Agent] Calling ${data.tool_calls.length} tool(s): ${data.tool_calls.map((tc: ToolCall) => tc.function.name).join(', ')}`,
+              timestamp: new Date().toISOString(),
+            }];
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+            // Execute tool calls
+            for (const toolCall of data.tool_calls) {
+              const result = await executeToolCall(toolCall);
 
-          const chunk = decoder.decode(value);
-          const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
+              // Add tool result to messages
+              messages = [...messages, {
+                role: 'system',
+                content: `[Tool: ${toolCall.function.name}] ${result}`,
+                timestamp: new Date().toISOString(),
+              }];
+            }
 
-          for (const line of lines) {
-            const data = line.slice(6);
-            if (data === '[DONE]') continue;
-
-            try {
-              const parsed = JSON.parse(data);
-              if (parsed.content) {
-                streamingContent += parsed.content;
-              }
-            } catch {}
+            // Get final response with tool results - this would need another API call
+            // For now, show the partial content if available
+            if (data.content) {
+              messages = [...messages, {
+                role: 'assistant',
+                content: data.content,
+                model: selectedModel,
+                timestamp: new Date().toISOString(),
+              }];
+            }
+          } else {
+            // Normal response without tool calls
+            const assistantMessage: Message = {
+              role: 'assistant',
+              content: data.content || '',
+              model: selectedModel,
+              timestamp: new Date().toISOString(),
+            };
+            messages = [...messages, assistantMessage];
           }
+        } else {
+          // Streaming mode
+          if (!res.body) throw new Error('No response body');
+
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          streamingContent = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value);
+            const lines = chunk.split('\n').filter(l => l.startsWith('data: '));
+
+            for (const line of lines) {
+              const data = line.slice(6);
+              if (data === '[DONE]') continue;
+
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed.content) {
+                  streamingContent += parsed.content;
+                }
+              } catch {}
+            }
+          }
+
+          const assistantMessage: Message = {
+            role: 'assistant',
+            content: streamingContent,
+            model: selectedModel,
+            timestamp: new Date().toISOString(),
+          };
+
+          messages = [...messages, assistantMessage];
+          streamingContent = '';
         }
-
-        const assistantMessage: Message = {
-          role: 'assistant',
-          content: streamingContent,
-          model: selectedModel,
-          timestamp: new Date().toISOString(),
-        };
-
-        messages = [...messages, assistantMessage];
-        streamingContent = '';
       }
 
       // Auto-save after each exchange
@@ -644,14 +939,37 @@
     <button class="new-chat-btn" on:click={newChat}>+ New Chat</button>
 
     <div class="chat-list">
-      {#each savedChats as chat}
-        <button
+      {#each [...savedChats].sort((a, b) => {
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+        return b.updated.localeCompare(a.updated);
+      }) as chat}
+        <div
           class="chat-item"
           class:active={chat.id === chatId}
-          on:click={() => loadChatById(chat.id)}
+          class:pinned={chat.pinned}
         >
-          {chat.title.slice(0, 30)}{chat.title.length > 30 ? '...' : ''}
-        </button>
+          <button class="chat-title" on:click={() => loadChatById(chat.id)}>
+            {#if chat.pinned}<span class="pin-icon">*</span>{/if}
+            {chat.title.slice(0, 25)}{chat.title.length > 25 ? '...' : ''}
+          </button>
+          <div class="chat-actions">
+            <button
+              class="chat-action-btn"
+              title={chat.pinned ? 'Unpin' : 'Pin'}
+              on:click|stopPropagation={() => togglePinChat(chat.id)}
+            >
+              {chat.pinned ? '-' : '+'}
+            </button>
+            <button
+              class="chat-action-btn delete"
+              title="Delete"
+              on:click|stopPropagation={() => deleteChat(chat.id)}
+            >
+              x
+            </button>
+          </div>
+        </div>
       {/each}
     </div>
 
@@ -683,19 +1001,108 @@
 
   <!-- Main chat area -->
   <main class="chat-main">
+    <!-- System Health Bar -->
+    {#if systemStats}
+      <div class="system-health-bar">
+        <div class="health-item ram">
+          <span class="health-label">RAM</span>
+          <div class="health-bar-container">
+            <div
+              class="health-bar-fill"
+              class:warning={systemStats.memory.usedPercent > 70}
+              class:danger={systemStats.memory.usedPercent > 85}
+              style="width: {systemStats.memory.usedPercent}%"
+            ></div>
+          </div>
+          <span class="health-value">{systemStats.memory.usedGB}/{systemStats.memory.totalGB}GB</span>
+        </div>
+
+        <!-- GPU Utilization -->
+        {#if systemStats.gpu}
+          <div class="health-item gpu" class:gpu-active={systemStats.gpu.active}>
+            <span class="health-label">GPU</span>
+            <div class="health-bar-container">
+              <div
+                class="health-bar-fill gpu-fill"
+                class:inferencing={systemStats.gpu.active}
+                style="width: {systemStats.gpu.utilization}%"
+              ></div>
+            </div>
+            <span class="health-value">{systemStats.gpu.utilization}%</span>
+            {#if systemStats.gpu.active}
+              <span class="inference-indicator" title="Model is actively inferencing">
+                <span class="pulse-dot"></span>
+              </span>
+            {/if}
+          </div>
+        {/if}
+
+        {#if mlxActiveModel}
+          <div class="health-item mlx-active">
+            <span class="mlx-badge loaded">MLX</span>
+            <span class="mlx-model-name">{systemStats.mlx?.activeModelName || mlxActiveModel}</span>
+            {#if systemStats.mlx?.activeModelParams}
+              <span class="mlx-params">{systemStats.mlx.activeModelParams}</span>
+            {/if}
+            <button class="eject-btn" on:click={ejectMLXModel} title="Eject model from memory">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 9L15 15M15 9L9 15M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </button>
+          </div>
+        {:else}
+          <div class="health-item mlx-inactive">
+            <span class="mlx-badge idle">MLX</span>
+            <span class="mlx-status">No model loaded</span>
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    <!-- MLX Loading Toast (unobtrusive) -->
+    {#if mlxLoading}
+      <div class="mlx-loading-toast">
+        <div class="toast-spinner"></div>
+        <div class="toast-content">
+          <span class="toast-text">Loading model...</span>
+          {#if mlxLoadProgress}
+            <span class="toast-progress">{mlxLoadProgress}</span>
+          {/if}
+        </div>
+      </div>
+    {/if}
+
     <!-- Header -->
     <header class="chat-header">
       <div class="model-selector">
-        <select bind:value={selectedModel} disabled={councilMode}>
+        <select bind:value={selectedModel} disabled={councilMode || mlxLoading}>
           {#each models as model}
-            <option value={model.id}>{model.name || model.id}</option>
+            <option value={model.id}>
+              {#if model.backend?.includes('mlx')}
+                {model.id === mlxActiveModel ? '[*] ' : '[ ] '}
+              {/if}
+              {model.name || model.id}
+            </option>
           {/each}
         </select>
+        {#if selectedModel && models.find(m => m.id === selectedModel)?.backend?.includes('mlx') && selectedModel !== mlxActiveModel}
+          <button class="load-model-btn" on:click={() => loadMLXModel(selectedModel)} disabled={mlxLoading}>
+            Load
+          </button>
+        {/if}
       </div>
 
       <label class="council-toggle">
         <input type="checkbox" bind:checked={councilMode} />
         Council Mode
+      </label>
+
+      <label class="agent-toggle" class:active={agentModeEnabled}>
+        <input type="checkbox" bind:checked={agentModeEnabled} disabled={availableTools.length === 0} />
+        Agent Mode
+        {#if availableTools.length > 0}
+          <span class="tool-count">({availableTools.length} tools)</span>
+        {/if}
       </label>
 
       <div class="header-actions">
@@ -975,6 +1382,32 @@
 
   .council-toggle input:checked + * {
     color: #00ff88;
+  }
+
+  .agent-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #888;
+    font-size: 13px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.2s;
+  }
+
+  .agent-toggle.active {
+    background: rgba(0, 136, 255, 0.1);
+    border: 1px solid rgba(0, 136, 255, 0.3);
+  }
+
+  .agent-toggle input:checked + * {
+    color: #0088ff;
+  }
+
+  .tool-count {
+    font-size: 11px;
+    color: #666;
   }
 
   .header-actions {
@@ -1271,5 +1704,400 @@
     font-size: 24px;
     color: #00ff88;
     pointer-events: none;
+  }
+
+  /* System Health Bar */
+  .system-health-bar {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 8px 16px;
+    background: linear-gradient(180deg, #0d0d0d 0%, #111 100%);
+    border-bottom: 1px solid #222;
+    font-size: 12px;
+  }
+
+  .health-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .health-label {
+    color: #666;
+    font-weight: 500;
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+  }
+
+  .health-bar-container {
+    width: 80px;
+    height: 6px;
+    background: #222;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .health-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #00ff88 0%, #00cc6a 100%);
+    border-radius: 3px;
+    transition: width 0.3s ease, background 0.3s ease;
+  }
+
+  .health-bar-fill.warning {
+    background: linear-gradient(90deg, #ffaa00 0%, #ff8800 100%);
+  }
+
+  .health-bar-fill.danger {
+    background: linear-gradient(90deg, #ff4444 0%, #cc0000 100%);
+  }
+
+  /* GPU specific styles */
+  .health-item.gpu {
+    position: relative;
+  }
+
+  .health-item.gpu-active .health-label {
+    color: #00ccff;
+  }
+
+  .health-bar-fill.gpu-fill {
+    background: linear-gradient(90deg, #0088ff 0%, #00ccff 100%);
+  }
+
+  .health-bar-fill.gpu-fill.inferencing {
+    background: linear-gradient(90deg, #00ff88 0%, #00ffcc 100%);
+    animation: gpu-pulse 1s ease-in-out infinite;
+  }
+
+  @keyframes gpu-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+
+  .inference-indicator {
+    display: flex;
+    align-items: center;
+    margin-left: 4px;
+  }
+
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    background: #00ff88;
+    border-radius: 50%;
+    animation: pulse-glow 1s ease-in-out infinite;
+    box-shadow: 0 0 8px #00ff88;
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% {
+      transform: scale(1);
+      box-shadow: 0 0 8px #00ff88;
+    }
+    50% {
+      transform: scale(1.2);
+      box-shadow: 0 0 16px #00ff88, 0 0 24px #00ff88;
+    }
+  }
+
+  .health-value {
+    color: #888;
+    font-family: monospace;
+    font-size: 11px;
+  }
+
+  .mlx-badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  .mlx-badge.loaded {
+    background: rgba(0, 255, 136, 0.2);
+    color: #00ff88;
+    border: 1px solid rgba(0, 255, 136, 0.3);
+  }
+
+  .mlx-badge.idle {
+    background: rgba(102, 102, 102, 0.2);
+    color: #666;
+    border: 1px solid rgba(102, 102, 102, 0.3);
+  }
+
+  .mlx-model-name {
+    color: #00ff88;
+    font-weight: 500;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mlx-params {
+    color: #666;
+    font-size: 10px;
+  }
+
+  .mlx-status {
+    color: #555;
+    font-style: italic;
+  }
+
+  .eject-btn {
+    background: rgba(255, 68, 68, 0.1);
+    border: 1px solid rgba(255, 68, 68, 0.3);
+    border-radius: 4px;
+    padding: 4px 6px;
+    cursor: pointer;
+    color: #ff4444;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+  }
+
+  .eject-btn:hover {
+    background: rgba(255, 68, 68, 0.2);
+    border-color: #ff4444;
+  }
+
+  .load-model-btn {
+    padding: 6px 12px;
+    background: rgba(0, 255, 136, 0.1);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+    border-radius: 6px;
+    color: #00ff88;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .load-model-btn:hover:not(:disabled) {
+    background: rgba(0, 255, 136, 0.2);
+    border-color: #00ff88;
+  }
+
+  .load-model-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Loading Overlay */
+  .loading-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(10, 10, 10, 0.95);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    backdrop-filter: blur(8px);
+  }
+
+  .loading-content {
+    text-align: center;
+    padding: 40px;
+  }
+
+  .loading-spinner {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 24px;
+  }
+
+  .spinner-ring {
+    position: absolute;
+    inset: 0;
+    border: 3px solid transparent;
+    border-radius: 50%;
+    animation: spin 1.5s linear infinite;
+  }
+
+  .spinner-ring:nth-child(1) {
+    border-top-color: #00ff88;
+    animation-delay: 0s;
+  }
+
+  .spinner-ring:nth-child(2) {
+    inset: 8px;
+    border-right-color: #00aaff;
+    animation-delay: -0.3s;
+    animation-direction: reverse;
+  }
+
+  .spinner-ring:nth-child(3) {
+    inset: 16px;
+    border-bottom-color: #ff8800;
+    animation-delay: -0.6s;
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .loading-text {
+    font-size: 18px;
+    font-weight: 500;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .loading-progress {
+    font-size: 14px;
+    color: #00ff88;
+    font-family: monospace;
+    margin-bottom: 16px;
+  }
+
+  .loading-hint {
+    font-size: 12px;
+    color: #666;
+  }
+
+  /* MLX Loading Toast - unobtrusive notification */
+  .mlx-loading-toast {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    background: rgba(0, 0, 0, 0.9);
+    border: 1px solid #333;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    z-index: 1000;
+    animation: slideIn 0.3s ease;
+  }
+
+  @keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  .toast-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #333;
+    border-top-color: #00ff88;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .toast-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .toast-text {
+    font-size: 13px;
+    color: #fff;
+  }
+
+  .toast-progress {
+    font-size: 11px;
+    color: #00ff88;
+    font-family: monospace;
+  }
+
+  /* Chat item with actions */
+  .chat-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    padding: 8px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #aaa;
+    cursor: pointer;
+    margin-bottom: 2px;
+    font-size: 13px;
+    transition: background 0.15s;
+  }
+
+  .chat-item:hover, .chat-item.active {
+    background: #1a1a1a;
+    color: #fff;
+  }
+
+  .chat-item.pinned {
+    border-left: 2px solid #00ff88;
+    background: rgba(0, 255, 136, 0.05);
+  }
+
+  .chat-title {
+    flex: 1;
+    background: none;
+    border: none;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    padding: 0;
+    font-size: inherit;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .pin-icon {
+    color: #00ff88;
+    margin-right: 4px;
+    font-size: 11px;
+  }
+
+  .chat-actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+
+  .chat-item:hover .chat-actions {
+    opacity: 1;
+  }
+
+  .chat-action-btn {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: #222;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #888;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+
+  .chat-action-btn:hover {
+    background: #333;
+    color: #fff;
+  }
+
+  .chat-action-btn.delete:hover {
+    background: #ff4444;
+    border-color: #ff4444;
+    color: #fff;
   }
 </style>
