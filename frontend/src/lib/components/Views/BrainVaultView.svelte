@@ -5,6 +5,8 @@
   import WalletView from '$lib/components/Wallet/WalletView.svelte';
   import { keccak256, zeroPadValue, toUtf8Bytes } from 'ethers';
   import { vaultState, vaultOperations, activeVault, activeSigner, allVaults, type Vault, type Signer } from '$lib/stores/vaultStore';
+  import { EVM_NETWORKS, type EVMNetwork } from '$lib/config/evmNetworks';
+  import { Copy, Check } from 'lucide-svelte';
 
   // Initialize i18n
   let i18nReady = false;
@@ -295,6 +297,35 @@
   // FAQ state
   let expandedFaq: number | null = null;
 
+  // ============================================================================
+  // LIFECYCLE - Load vault on mount
+  // ============================================================================
+
+  onMount(() => {
+    // Initialize vault store from localStorage
+    vaultOperations.initialize();
+
+    // Check if there's an active vault
+    const vault = $activeVault;
+    if (vault) {
+      // Restore state from saved vault
+      name = vault.id;
+      mnemonic12 = vault.seed;
+
+      // Get active signer's address
+      const signer = $activeSigner;
+      if (signer) {
+        ethereumAddress = signer.address;
+        entityId = signer.entityId || '';
+      }
+
+      // Skip to complete phase
+      phase = 'complete';
+      showSuccessHeader = false; // Don't show success animation on reload
+      console.log('🔐 Vault restored from storage:', vault.id);
+    }
+  });
+
   // Complete phase tabs
   type CompleteTab = 'wallet' | 'xln' | 'settings';
   let completeTab: CompleteTab = 'wallet';
@@ -302,8 +333,73 @@
   // Vault management state
   let vaultDropdownOpen = false;
   let signerDropdownOpen = false;
+  let networkDropdownOpen = false;
   let showSaveVaultModal = false;
   let vaultNameInput = '';
+  let addressCopied = false;
+
+  // Network state
+  let selectedNetwork: EVMNetwork = EVM_NETWORKS[0]!;
+
+  function selectNetwork(network: EVMNetwork) {
+    selectedNetwork = network;
+    networkDropdownOpen = false;
+  }
+
+  function copyAddress() {
+    navigator.clipboard.writeText(currentSignerAddress);
+    addressCopied = true;
+    setTimeout(() => addressCopied = false, 2000);
+  }
+
+  function deriveNewVault() {
+    vaultDropdownOpen = false;
+    reset(); // Go back to input phase
+  }
+
+  // Click-outside handler to close dropdowns
+  function handleClickOutside(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (!target.closest('.context-dropdown')) {
+      vaultDropdownOpen = false;
+      signerDropdownOpen = false;
+      networkDropdownOpen = false;
+    }
+  }
+
+  // Network connection status
+  type NetworkStatus = 'connected' | 'connecting' | 'error';
+  let networkStatus: NetworkStatus = 'connecting';
+
+  async function checkNetworkConnection() {
+    try {
+      networkStatus = 'connecting';
+      const { JsonRpcProvider } = await import('ethers');
+      const provider = new JsonRpcProvider(selectedNetwork.rpcUrl);
+      await provider.getBlockNumber();
+      networkStatus = 'connected';
+    } catch {
+      networkStatus = 'error';
+    }
+  }
+
+  // Portfolio total from WalletView
+  let portfolioTotal = 0;
+  function handlePortfolioUpdate(e: CustomEvent<{ total: number }>) {
+    portfolioTotal = e.detail.total;
+  }
+
+  function formatUSD(value: number): string {
+    if (value === 0) return '$0';
+    if (value < 0.01) return '<$0.01';
+    if (value >= 1000) return '$' + (value / 1000).toFixed(1) + 'k';
+    return '$' + value.toFixed(2);
+  }
+
+  // Check network on mount and when network changes
+  $: if (selectedNetwork && phase === 'complete') {
+    checkNetworkConnection();
+  }
 
   // Reactive: Get current vault/signer for display
   $: currentVault = $activeVault;
@@ -1181,6 +1277,8 @@
   }
 </script>
 
+<svelte:window on:click={handleClickOutside} />
+
 <div class="brainvault-container" class:deriving={phase === 'deriving'} class:complete={phase === 'complete'}>
   <!-- Ambient particles - intensify during derivation -->
   <div class="dust-particles" class:active={phase === 'deriving'}></div>
@@ -1197,7 +1295,7 @@
   <div class="header" class:deriving={phase === 'deriving'}>
     <div class="logo-monument monument-xl" class:deriving={phase === 'deriving'}>
       <div class="logo-glow" class:active={phase === 'deriving'}></div>
-      <img src="/img/l.png" alt="xln" class="triangle-logo" class:deriving={phase === 'deriving'} />
+      <img src="/img/l.png" alt="xln" class="triangle-logo" class:deriving={phase === 'deriving'} class:complete={phase === 'complete'} />
     </div>
   </div>
 
@@ -1488,82 +1586,139 @@
         <!-- Tab Content -->
         <div class="complete-tab-content">
           {#if completeTab === 'wallet'}
-            <!-- WALLET TAB: Vault/Signer selectors + wallet interface -->
+            <!-- WALLET TAB: Unified context bar + wallet interface -->
             <div class="wallet-section">
-              <!-- Vault & Signer Selectors -->
-              <div class="vault-signer-bar">
+              <!-- Unified Context Bar: Vault | Signer | Network -->
+              <div class="context-bar">
                 <!-- Vault Dropdown -->
-                <div class="vault-dropdown" class:open={vaultDropdownOpen}>
+                <div class="context-dropdown" class:open={vaultDropdownOpen}>
                   <button
-                    class="vault-trigger"
-                    on:click|stopPropagation={() => vaultDropdownOpen = !vaultDropdownOpen}
+                    class="context-trigger"
+                    on:click|stopPropagation={() => { vaultDropdownOpen = !vaultDropdownOpen; signerDropdownOpen = false; networkDropdownOpen = false; }}
                   >
-                    <span class="vault-icon">🔐</span>
-                    <span class="vault-name">{currentVault?.id || 'Unsaved Vault'}</span>
-                    <span class="dropdown-arrow">{vaultDropdownOpen ? '▲' : '▼'}</span>
+                    <span class="context-icon">🔐</span>
+                    <span class="context-label">{currentVault?.id || 'Vault'}</span>
+                    <span class="dropdown-arrow">▼</span>
                   </button>
                   {#if vaultDropdownOpen}
-                    <div class="vault-menu">
+                    <div class="context-menu">
                       {#if savedVaults.length > 0}
                         <div class="menu-section-label">Saved Vaults</div>
                         {#each savedVaults as vault}
                           <button
-                            class="vault-item"
+                            class="menu-item"
                             class:active={vault.id === currentVault?.id}
                             on:click={() => switchToVault(vault.id)}
                           >
-                            <span class="vault-item-icon">🔐</span>
-                            <span>{vault.id}</span>
-                            <span class="signer-count">{vault.signers.length} signer{vault.signers.length !== 1 ? 's' : ''}</span>
+                            <span class="menu-item-icon">🔐</span>
+                            <span class="menu-item-label">{vault.id}</span>
+                            <span class="menu-item-meta">{vault.signers.length}</span>
                           </button>
                         {/each}
                         <div class="menu-divider"></div>
                       {/if}
                       {#if !currentVault}
-                        <button class="vault-item save-vault" on:click={() => { showSaveVaultModal = true; vaultDropdownOpen = false; }}>
-                          <span class="vault-item-icon">💾</span>
-                          <span>Save Current Vault</span>
+                        <button class="menu-item" on:click={() => { showSaveVaultModal = true; vaultDropdownOpen = false; }}>
+                          <span class="menu-item-icon">💾</span>
+                          <span class="menu-item-label">Save Current Vault</span>
                         </button>
                       {/if}
+                      <button class="menu-item derive-new" on:click={deriveNewVault}>
+                        <span class="menu-item-icon">➕</span>
+                        <span class="menu-item-label">Derive New Vault</span>
+                      </button>
                     </div>
                   {/if}
                 </div>
 
-                <!-- Signer Dropdown (only if vault is active) -->
-                {#if currentVault}
-                  <div class="signer-dropdown" class:open={signerDropdownOpen}>
-                    <button
-                      class="signer-trigger"
-                      on:click|stopPropagation={() => signerDropdownOpen = !signerDropdownOpen}
-                    >
-                      <img src={currentSignerIdenticon} alt="" class="signer-icon" />
-                      <span class="signer-name">{currentSigner?.name || 'Signer 1'}</span>
-                      <span class="dropdown-arrow">{signerDropdownOpen ? '▲' : '▼'}</span>
-                    </button>
-                    {#if signerDropdownOpen}
-                      <div class="signer-menu">
+                <!-- Signer Dropdown -->
+                <div class="context-dropdown" class:open={signerDropdownOpen}>
+                  <button
+                    class="context-trigger"
+                    on:click|stopPropagation={() => { signerDropdownOpen = !signerDropdownOpen; vaultDropdownOpen = false; networkDropdownOpen = false; }}
+                  >
+                    <img src={currentSignerIdenticon} alt="" class="context-identicon" />
+                    <span class="context-label">{currentSigner?.name || 'Signer 1'}</span>
+                    <span class="context-networth">{formatUSD(portfolioTotal)}</span>
+                    <span class="dropdown-arrow">▼</span>
+                  </button>
+                  {#if signerDropdownOpen}
+                    <div class="context-menu">
+                      {#if currentVault}
                         {#each currentVault.signers as signer}
                           <button
-                            class="signer-item"
+                            class="menu-item"
                             class:active={signer.index === currentSigner?.index}
                             on:click={() => switchSigner(signer.index)}
                           >
-                            <img src={generateIdenticon(signer.address)} alt="" class="signer-item-icon" />
-                            <div class="signer-item-info">
-                              <span class="signer-item-name">{signer.name}</span>
-                              <code class="signer-item-addr">{signer.address.slice(0, 6)}...{signer.address.slice(-4)}</code>
+                            <img src={generateIdenticon(signer.address)} alt="" class="menu-item-identicon" />
+                            <div class="menu-item-info">
+                              <span class="menu-item-label">{signer.name}</span>
+                              <code class="menu-item-addr">{signer.address.slice(0, 6)}...{signer.address.slice(-4)}</code>
                             </div>
                           </button>
                         {/each}
                         <div class="menu-divider"></div>
-                        <button class="signer-item add-signer" on:click={handleAddSigner}>
-                          <span class="add-icon">+</span>
-                          <span>Add Signer</span>
+                      {/if}
+                      <button class="menu-item add-action" on:click={handleAddSigner}>
+                        <span class="menu-item-icon">➕</span>
+                        <span class="menu-item-label">Add Signer</span>
+                      </button>
+                    </div>
+                  {/if}
+                </div>
+
+                <!-- Network Dropdown -->
+                <div class="context-dropdown" class:open={networkDropdownOpen}>
+                  <button
+                    class="context-trigger"
+                    on:click|stopPropagation={() => { networkDropdownOpen = !networkDropdownOpen; vaultDropdownOpen = false; signerDropdownOpen = false; }}
+                  >
+                    <span class="network-dot" style="background: {networkStatus === 'connected' ? '#00ff88' : networkStatus === 'connecting' ? '#ffcc00' : '#ff4466'}"></span>
+                    <span class="context-label">{selectedNetwork.name}</span>
+                    <span class="dropdown-arrow">▼</span>
+                  </button>
+                  {#if networkDropdownOpen}
+                    <div class="context-menu">
+                      <div class="menu-section-label">Mainnets</div>
+                      {#each EVM_NETWORKS.filter(n => !n.isTestnet) as network}
+                        <button
+                          class="menu-item"
+                          class:active={network.chainId === selectedNetwork.chainId}
+                          on:click={() => selectNetwork(network)}
+                        >
+                          <span class="network-dot" style="background: #00ff88"></span>
+                          <span class="menu-item-label">{network.name}</span>
                         </button>
-                      </div>
-                    {/if}
-                  </div>
-                {/if}
+                      {/each}
+                      <div class="menu-divider"></div>
+                      <div class="menu-section-label">Testnets</div>
+                      {#each EVM_NETWORKS.filter(n => n.isTestnet) as network}
+                        <button
+                          class="menu-item"
+                          class:active={network.chainId === selectedNetwork.chainId}
+                          on:click={() => selectNetwork(network)}
+                        >
+                          <span class="network-dot" style="background: #ff9944"></span>
+                          <span class="menu-item-label">{network.name}</span>
+                        </button>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              </div>
+
+              <!-- Address Display Row -->
+              <div class="address-row">
+                <img src={currentSignerIdenticon} alt="" class="address-identicon" />
+                <button class="address-copy" on:click={copyAddress} title={currentSignerAddress}>
+                  <code class="address-text">{currentSignerAddress.slice(0, 6)}...{currentSignerAddress.slice(-4)}</code>
+                  {#if addressCopied}
+                    <Check size={14} class="copy-icon copied" />
+                  {:else}
+                    <Copy size={14} class="copy-icon" />
+                  {/if}
+                </button>
               </div>
 
               <!-- WalletView with current signer's credentials -->
@@ -1572,6 +1727,7 @@
                 walletAddress={currentSignerAddress}
                 {entityId}
                 identiconSrc={currentSignerIdenticon}
+                on:portfolioUpdate={handlePortfolioUpdate}
               />
             </div>
 
@@ -1701,7 +1857,7 @@
                     bind:value={siteDomain}
                   />
                   <code class="pm-password" class:empty={!sitePassword}>
-                    {sitePassword || 'enter domain'}
+                    {sitePassword || 'BLAKE3(masterKey, domain)'}
                   </code>
                   {#if sitePassword}
                     <button class="copy-btn" on:click={() => copyToClipboard(sitePassword, 'sitePass')}>
@@ -2051,6 +2207,20 @@
       drop-shadow(0 0 80px rgba(180, 140, 80, 0.5))
       drop-shadow(0 0 150px rgba(180, 140, 80, 0.25));
     transform: scale(1.05);
+  }
+
+  /* Logo shrinks after derivation complete */
+  .triangle-logo.complete {
+    width: 50px;
+    opacity: 0.7;
+    filter: drop-shadow(0 0 20px rgba(180, 140, 80, 0.2));
+    animation: none;
+    transition: all 0.5s ease;
+  }
+
+  .triangle-logo.complete:hover {
+    opacity: 0.9;
+    transform: scale(1.1);
   }
 
   .wordmark {
@@ -2716,6 +2886,241 @@
     align-items: center;
     justify-content: center;
     min-height: 350px;
+  }
+
+  /* Unified Context Bar - 3 column dropdowns */
+  .wallet-section {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .context-bar {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(180, 140, 80, 0.15);
+    border-radius: 12px;
+  }
+
+  .context-dropdown {
+    position: relative;
+  }
+
+  .context-trigger {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: white;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .context-trigger:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(180, 140, 80, 0.3);
+  }
+
+  .context-dropdown.open .context-trigger {
+    background: rgba(180, 140, 80, 0.1);
+    border-color: rgba(180, 140, 80, 0.4);
+  }
+
+  .context-icon {
+    font-size: 14px;
+  }
+
+  .context-identicon {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+  }
+
+  .context-label {
+    flex: 1;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dropdown-arrow {
+    font-size: 8px;
+    opacity: 0.5;
+    transition: transform 0.2s ease;
+  }
+
+  .context-dropdown.open .dropdown-arrow {
+    transform: rotate(180deg);
+  }
+
+  .network-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .context-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 4px;
+    background: rgba(20, 20, 30, 0.98);
+    border: 1px solid rgba(180, 140, 80, 0.2);
+    border-radius: 8px;
+    padding: 4px;
+    z-index: 100;
+    max-height: 280px;
+    overflow-y: auto;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  }
+
+  .menu-section-label {
+    padding: 8px 12px 4px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .menu-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+    margin: 4px 8px;
+  }
+
+  .menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-align: left;
+  }
+
+  .menu-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
+  .menu-item.active {
+    background: rgba(180, 140, 80, 0.15);
+    color: rgba(180, 140, 80, 0.95);
+  }
+
+  .menu-item.add-action,
+  .menu-item.derive-new {
+    color: rgba(180, 140, 80, 0.8);
+  }
+
+  .menu-item.add-action:hover,
+  .menu-item.derive-new:hover {
+    background: rgba(180, 140, 80, 0.1);
+  }
+
+  .menu-item-icon {
+    font-size: 14px;
+    width: 20px;
+    text-align: center;
+  }
+
+  .menu-item-identicon {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+  }
+
+  .menu-item-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .menu-item-label {
+    font-size: 13px;
+    color: inherit;
+  }
+
+  .menu-item-addr {
+    font-family: 'SF Mono', 'Monaco', monospace;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.4);
+  }
+
+  .menu-item-meta {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.4);
+    padding: 2px 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+  }
+
+  /* Address Display Row */
+  .address-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: rgba(0, 0, 0, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 10px;
+  }
+
+  .address-identicon {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 1px solid rgba(180, 140, 80, 0.2);
+  }
+
+  .address-copy {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .address-text {
+    font-family: 'SF Mono', 'Monaco', monospace;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.7);
+    letter-spacing: 0.02em;
+  }
+
+  .address-copy :global(.copy-icon) {
+    color: rgba(255, 255, 255, 0.4);
+    transition: color 0.2s ease;
+  }
+
+  .address-copy:hover :global(.copy-icon) {
+    color: rgba(180, 140, 80, 0.8);
+  }
+
+  .address-copy :global(.copy-icon.copied) {
+    color: #22c55e;
   }
 
   .xln-tab-content .network-cta {
@@ -4219,8 +4624,8 @@
 
   .mnemonic-words {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
     margin-top: 24px;
     padding: 24px;
     background: rgba(0, 0, 0, 0.5);
@@ -4697,6 +5102,16 @@
     color: rgba(255, 200, 100, 1);
   }
 
+  /* Context bar networth display */
+  .context-networth {
+    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(100, 200, 100, 0.9);
+    margin-left: auto;
+    padding-left: 8px;
+  }
+
   /* Save Vault Modal */
   .modal-overlay {
     position: fixed;
@@ -4794,6 +5209,41 @@
   .modal-btn.save:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+  }
+
+  /* Desktop - wider layout */
+  @media (min-width: 900px) {
+    .glass-card {
+      padding: 48px 64px;
+      max-width: 900px;
+    }
+
+    .mnemonic-words {
+      grid-template-columns: repeat(6, 1fr);
+      gap: 14px;
+    }
+
+    .factor-stats {
+      gap: 32px;
+    }
+
+    .seed-input-wrapper {
+      gap: 16px;
+    }
+
+    .seed-input {
+      font-size: 20px;
+      padding: 20px 28px;
+    }
+
+    .vault-signer-bar {
+      padding: 16px 24px;
+    }
+
+    .derive-btn {
+      font-size: 18px;
+      padding: 20px 48px;
+    }
   }
 
   /* Responsive */
