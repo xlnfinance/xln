@@ -4972,13 +4972,22 @@ let vrHammer: VRHammer | null = null;
   // ENTITY SIZING: Frame-locked, only recalculates on timeIndex change (J-events)
   // Size is determined by: 1) Scenario config (dollarsPerPx) 2) Reserve balance at current frame
   // NEVER changes mid-frame during render loops
+  //
+  // VISUAL BENCHMARK (at dollarsPerPx = 30000):
+  //   radius = cbrt(USD / dollarsPerPx * 0.75 / π)
+  //   ├─ 1.0 radius ≈ $125K   (small startup)
+  //   ├─ 2.0 radius ≈ $1M     (seed round)
+  //   ├─ 3.0 radius ≈ $3.4M   (series A)
+  //   ├─ 4.0 radius ≈ $8M     (series B)
+  //   └─ 5.0 radius ≈ $16M    (MAX_SIZE default)
+  //
   let lastSizeCalcTimeIndex = -999;
   const entitySizesAtFrame = new Map<string, number>(); // entityId -> size
 
   function recalculateAllEntitySizes(): void {
     entitySizesAtFrame.clear();
-    // dollarsPerPx controls scaling: lower = more dramatic size differences
-    const dollarsPerPx = settings.dollarsPerPx || 50000; // Was 100K - halved for more visual diff
+    // dollarsPerPx controls scaling: lower = bigger spheres
+    const dollarsPerPx = settings.dollarsPerPx || 30000;
     const EMPTY_SIZE = 1.5; // Visible size for $0 entities
     const MIN_SIZE = 1.5;   // Minimum funded entity size
     const MAX_SIZE = 6.0;   // Max size to prevent domination
