@@ -15,12 +15,9 @@
   export let isolatedHistory: Writable<any[]> | null = null;
   export let isolatedTimeIndex: Writable<number> | null = null;
 
-  type ViewMode = 'json' | 'structured' | 'full';
-  let viewMode: ViewMode = 'structured';
-
   // Expandable sections for full data view
   let expandedReplicas: Set<string> = new Set();
-  let expandedAccounts: Set<string> = new Set();
+  let expandedXlnomies: Set<string> = new Set();
 
   // Get current frame data based on time machine index
   $: currentFrame = (() => {
@@ -103,81 +100,63 @@
 
   // Get replicas as array
   $: replicasArray = currentFrame?.replicas ? mapToArray(currentFrame.replicas) : [];
+
+  // Get xlnomies (J-Machine state) as array
+  $: xlnomiesArray = currentFrame?.xlnomies || [];
+
+  // Toggle xlnomy expansion
+  function toggleXlnomy(name: string) {
+    if (expandedXlnomies.has(name)) {
+      expandedXlnomies.delete(name);
+    } else {
+      expandedXlnomies.add(name);
+    }
+    expandedXlnomies = expandedXlnomies;
+  }
 </script>
 
 <div class="runtime-io-panel">
   <div class="header">
-    <h3> Runtime I/O</h3>
-    <div class="controls">
-      <button
-        class="view-toggle"
-        class:active={viewMode === 'structured'}
-        on:click={() => viewMode = 'structured'}
-      >
-         Structured
-      </button>
-      <button
-        class="view-toggle"
-        class:active={viewMode === 'json'}
-        on:click={() => viewMode = 'json'}
-      >
-        📝 JSON
-      </button>
-      <button
-        class="view-toggle"
-        class:active={viewMode === 'full'}
-        on:click={() => viewMode = 'full'}
-      >
-        🔬 Full
-      </button>
-    </div>
+    <h3>Runtime State</h3>
+    <span class="subtitle">Frame {currentFrame?.height || 0} | {replicaCount} E-replicas | {xlnomiesArray.length} J-machines</span>
   </div>
 
   <div class="content">
     {#if !currentFrame}
       <div class="empty-state">
-        <p>⏳ No frame data available</p>
-        <p class="hint">Run a scenario or create entities to see frame I/O</p>
+        <p>⏳ No frame data</p>
       </div>
     {:else}
-      <div class="frame-info">
-        <span class="badge">Frame {currentFrame.height || 0}</span>
-        <span class="timestamp">{new Date(currentFrame.timestamp).toLocaleTimeString()}</span>
-        {#if currentFrame.title}
-          <span class="title">{currentFrame.title}</span>
-        {/if}
-      </div>
-
-      {#if viewMode === 'json'}
-        <!-- JSON View -->
-        <div class="json-view">
-          <div class="section">
-            <h4>📥 Runtime Input</h4>
-            <pre class="json-block">{safeStringify(currentFrame.runtimeInput)}</pre>
-          </div>
-
-          <div class="section">
-            <h4>📤 Runtime Outputs</h4>
-            <pre class="json-block">{safeStringify(currentFrame.runtimeOutputs)}</pre>
-          </div>
+      <div class="full-view">
+        <!-- J-Machines (Jurisdiction State) -->
+        <div class="section">
+          <h4>⚖️ J-Machines ({xlnomiesArray.length})</h4>
+          {#if xlnomiesArray.length > 0}
+            {#each xlnomiesArray as xlnomy}
+              <div class="replica-card">
+                <button class="replica-header" on:click={() => toggleXlnomy(xlnomy.name)}>
+                  <span class="expand-icon">{expandedXlnomies.has(xlnomy.name) ? '▼' : '▶'}</span>
+                  <span class="entity-id">{xlnomy.name}</span>
+                  <span class="replica-summary">
+                    block:{xlnomy.jMachine?.blockNumber || 0} |
+                    entities:{xlnomy.jMachine?.entities?.length || 0}
+                  </span>
+                </button>
+                {#if expandedXlnomies.has(xlnomy.name)}
+                  <div class="replica-body">
+                    <pre class="json-block-small">{safeStringify(xlnomy.jMachine)}</pre>
+                  </div>
+                {/if}
+              </div>
+            {/each}
+          {:else}
+            <div class="empty-data">No J-machines</div>
+          {/if}
         </div>
-      {:else if viewMode === 'full'}
-        <!-- FULL DATA DUMP View -->
-        <div class="full-view">
-          <!-- Frame Metadata -->
-          <div class="section">
-            <h4>📋 Frame Metadata</h4>
-            <div class="metadata-grid">
-              <div class="meta-item"><span class="label">Height:</span> {currentFrame.height}</div>
-              <div class="meta-item"><span class="label">Timestamp:</span> {currentFrame.timestamp}</div>
-              <div class="meta-item"><span class="label">Description:</span> {currentFrame.description || 'N/A'}</div>
-              <div class="meta-item"><span class="label">Replicas:</span> {replicaCount}</div>
-            </div>
-          </div>
 
-          <!-- Replicas (Entity States) -->
-          <div class="section">
-            <h4>🏛️ Entity Replicas ({replicaCount})</h4>
+        <!-- E-Replicas (Entity State) -->
+        <div class="section">
+          <h4>🏛️ E-Replicas ({replicaCount})</h4>
             {#if replicasArray.length > 0}
               {#each replicasArray as [entityId, replica]}
                 <div class="replica-card">
@@ -294,123 +273,10 @@
 
           <!-- Full Frame Dump -->
           <div class="section">
-            <h4>🔬 Complete Frame Dump</h4>
+            <h4>🔬 Full Frame JSON</h4>
             <pre class="json-block">{safeStringify(currentFrame)}</pre>
           </div>
         </div>
-      {:else}
-        <!-- Structured View -->
-        <div class="structured-view">
-          <!-- INPUTS -->
-          <div class="section">
-            <h4>📥 Runtime Input</h4>
-
-            {#if currentFrame.runtimeInput?.runtimeTxs?.length > 0}
-              <div class="subsection">
-                <h5>System Commands ({currentFrame.runtimeInput.runtimeTxs.length})</h5>
-                {#each currentFrame.runtimeInput.runtimeTxs as rtx, i}
-                  <div class="tx-card runtime-tx">
-                    <div class="tx-header">
-                      <span class="tx-index">#{i}</span>
-                      <span class="tx-type">{rtx.type}</span>
-                    </div>
-                    <div class="tx-body">
-                      <div class="tx-field">
-                        <span class="label">Entity:</span>
-                        <span class="value mono">{shortAddress(rtx.entityId)}</span>
-                      </div>
-                      <div class="tx-field">
-                        <span class="label">Signer:</span>
-                        <span class="value mono">{shortAddress(rtx.signerId)}</span>
-                      </div>
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-
-            {#if currentFrame.runtimeInput?.entityInputs?.length > 0}
-              <div class="subsection">
-                <h5>Entity Inputs ({currentFrame.runtimeInput.entityInputs.length})</h5>
-                {#each currentFrame.runtimeInput.entityInputs as entityInput, i}
-                  <div class="tx-card entity-input">
-                    <div class="tx-header">
-                      <span class="tx-index">#{i}</span>
-                      <span class="entity-id mono">{shortAddress(entityInput.entityId)}</span>
-                    </div>
-                    <div class="tx-body">
-                      <div class="tx-field">
-                        <span class="label">Signer:</span>
-                        <span class="value mono">{shortAddress(entityInput.signerId)}</span>
-                      </div>
-
-                      {#if entityInput.entityTxs && entityInput.entityTxs.length > 0}
-                        <div class="tx-field">
-                          <span class="label">Transactions:</span>
-                          <span class="value">{entityInput.entityTxs.length} txs</span>
-                        </div>
-                        <div class="entity-txs">
-                          {#each entityInput.entityTxs as etx, j}
-                            <div class="entity-tx">
-                              <span class="tx-type-small">{getTxTypeName(etx)}</span>
-                              <span class="tx-summary">{getTxSummary(etx)}</span>
-                            </div>
-                          {/each}
-                        </div>
-                      {/if}
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-
-            {#if (!currentFrame.runtimeInput?.runtimeTxs?.length && !currentFrame.runtimeInput?.entityInputs?.length)}
-              <div class="empty-subsection">No inputs in this frame</div>
-            {/if}
-          </div>
-
-          <!-- OUTPUTS -->
-          <div class="section">
-            <h4>📤 Runtime Outputs</h4>
-
-            {#if currentFrame.runtimeOutputs?.length > 0}
-              {#each currentFrame.runtimeOutputs as output, i}
-                <div class="tx-card entity-output">
-                  <div class="tx-header">
-                    <span class="tx-index">#{i}</span>
-                    <span class="entity-id mono">{shortAddress(output.entityId)}</span>
-                    <span class="arrow">→</span>
-                    <span class="output-label">Output</span>
-                  </div>
-                  <div class="tx-body">
-                    <div class="tx-field">
-                      <span class="label">Signer:</span>
-                      <span class="value mono">{shortAddress(output.signerId)}</span>
-                    </div>
-
-                    {#if output.entityTxs && output.entityTxs.length > 0}
-                      <div class="tx-field">
-                        <span class="label">Transactions:</span>
-                        <span class="value">{output.entityTxs.length} txs</span>
-                      </div>
-                      <div class="entity-txs">
-                        {#each output.entityTxs as etx, j}
-                          <div class="entity-tx">
-                            <span class="tx-type-small">{getTxTypeName(etx)}</span>
-                            <span class="tx-summary">{getTxSummary(etx)}</span>
-                          </div>
-                        {/each}
-                      </div>
-                    {/if}
-                  </div>
-                </div>
-              {/each}
-            {:else}
-              <div class="empty-subsection">No outputs in this frame</div>
-            {/if}
-          </div>
-        </div>
-      {/if}
     {/if}
   </div>
 </div>
