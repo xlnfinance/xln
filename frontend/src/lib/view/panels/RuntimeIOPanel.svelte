@@ -15,9 +15,12 @@
   export let isolatedHistory: Writable<any[]> | null = null;
   export let isolatedTimeIndex: Writable<number> | null = null;
 
-  // Expandable sections for full data view
+  // Expandable sections
   let expandedReplicas: Set<string> = new Set();
   let expandedXlnomies: Set<string> = new Set();
+  let showFullJson = false;
+  let showInputJson = false;
+  let showOutputJson = false;
 
   // Get current frame data based on time machine index
   $: currentFrame = (() => {
@@ -36,11 +39,13 @@
     return null;
   })();
 
-  // Safe JSON stringify for BigInt values
+  // Safe JSON stringify that handles BigInt and Map
   function safeStringify(obj: any, indent = 2): string {
-    return JSON.stringify(obj, (key, value) =>
-      typeof value === 'bigint' ? value.toString() + 'n' : value,
-    indent);
+    return JSON.stringify(obj, (key, value) => {
+      if (typeof value === 'bigint') return value.toString() + 'n';
+      if (value instanceof Map) return Object.fromEntries(value);
+      return value;
+    }, indent);
   }
 
   // Extract entity transaction type display name
@@ -260,21 +265,37 @@
             </div>
           {/if}
 
-          <!-- Runtime I/O (collapsed) -->
+          <!-- Runtime Input (collapsible) -->
           <div class="section">
-            <h4>📥 Runtime Input</h4>
-            <pre class="json-block">{safeStringify(currentFrame.runtimeInput)}</pre>
+            <button class="section-header" on:click={() => showInputJson = !showInputJson}>
+              <span class="expand-icon">{showInputJson ? '▼' : '▶'}</span>
+              <h4>📥 Runtime Input</h4>
+            </button>
+            {#if showInputJson}
+              <pre class="json-block">{safeStringify(currentFrame.runtimeInput)}</pre>
+            {/if}
           </div>
 
+          <!-- Runtime Output (collapsible) -->
           <div class="section">
-            <h4>📤 Runtime Outputs</h4>
-            <pre class="json-block">{safeStringify(currentFrame.runtimeOutputs)}</pre>
+            <button class="section-header" on:click={() => showOutputJson = !showOutputJson}>
+              <span class="expand-icon">{showOutputJson ? '▼' : '▶'}</span>
+              <h4>📤 Runtime Outputs</h4>
+            </button>
+            {#if showOutputJson}
+              <pre class="json-block">{safeStringify(currentFrame.runtimeOutputs)}</pre>
+            {/if}
           </div>
 
-          <!-- Full Frame Dump -->
+          <!-- Full Frame JSON (collapsible) -->
           <div class="section">
-            <h4>🔬 Full Frame JSON</h4>
-            <pre class="json-block">{safeStringify(currentFrame)}</pre>
+            <button class="section-header" on:click={() => showFullJson = !showFullJson}>
+              <span class="expand-icon">{showFullJson ? '▼' : '▶'}</span>
+              <h4>🔬 Full Frame JSON</h4>
+            </button>
+            {#if showFullJson}
+              <pre class="json-block">{safeStringify(currentFrame)}</pre>
+            {/if}
           </div>
         </div>
     {/if}
@@ -425,12 +446,31 @@
 
   .section h4 {
     margin: 0;
-    padding: 12px;
-    background: #2d2d30;
     font-size: 13px;
     font-weight: 600;
     color: #fff;
+  }
+
+  .section-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+    background: #2d2d30;
+    border: none;
     border-bottom: 1px solid #3e3e3e;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .section-header:hover {
+    background: #37373d;
+  }
+
+  .section-header .expand-icon {
+    color: #8b949e;
+    font-size: 10px;
   }
 
   .subsection {
