@@ -1,6 +1,7 @@
 <script lang="ts">
   /**
    * Runtime I/O Panel - Shows frame-by-frame input/output data
+   * + FULL DATA DUMP for time machine debugging
    *
    * @license AGPL-3.0
    * Copyright (C) 2025 XLN Finance
@@ -14,8 +15,12 @@
   export let isolatedHistory: Writable<any[]> | null = null;
   export let isolatedTimeIndex: Writable<number> | null = null;
 
-  type ViewMode = 'json' | 'structured';
+  type ViewMode = 'json' | 'structured' | 'full';
   let viewMode: ViewMode = 'structured';
+
+  // Expandable sections for full data view
+  let expandedReplicas: Set<string> = new Set();
+  let expandedAccounts: Set<string> = new Set();
 
   // Get current frame data based on time machine index
   $: currentFrame = (() => {
@@ -67,6 +72,37 @@
         return JSON.stringify(tx.data).slice(0, 60) + '...';
     }
   }
+
+  // Toggle replica expansion
+  function toggleReplica(entityId: string) {
+    if (expandedReplicas.has(entityId)) {
+      expandedReplicas.delete(entityId);
+    } else {
+      expandedReplicas.add(entityId);
+    }
+    expandedReplicas = expandedReplicas; // trigger reactivity
+  }
+
+  // Convert Map to array for display
+  function mapToArray(map: Map<any, any> | undefined): Array<[string, any]> {
+    if (!map) return [];
+    if (map instanceof Map) return Array.from(map.entries());
+    if (typeof map === 'object') return Object.entries(map);
+    return [];
+  }
+
+  // Format bigint for display
+  function formatBigInt(val: any): string {
+    if (typeof val === 'bigint') return val.toString() + 'n';
+    if (typeof val === 'number') return val.toString();
+    return String(val);
+  }
+
+  // Get replica count
+  $: replicaCount = currentFrame?.replicas?.size || 0;
+
+  // Get replicas as array
+  $: replicasArray = currentFrame?.replicas ? mapToArray(currentFrame.replicas) : [];
 </script>
 
 <div class="runtime-io-panel">
@@ -86,6 +122,13 @@
         on:click={() => viewMode = 'json'}
       >
         📝 JSON
+      </button>
+      <button
+        class="view-toggle"
+        class:active={viewMode === 'full'}
+        on:click={() => viewMode = 'full'}
+      >
+        🔬 Full
       </button>
     </div>
   </div>
@@ -116,6 +159,143 @@
           <div class="section">
             <h4>📤 Runtime Outputs</h4>
             <pre class="json-block">{safeStringify(currentFrame.runtimeOutputs)}</pre>
+          </div>
+        </div>
+      {:else if viewMode === 'full'}
+        <!-- FULL DATA DUMP View -->
+        <div class="full-view">
+          <!-- Frame Metadata -->
+          <div class="section">
+            <h4>📋 Frame Metadata</h4>
+            <div class="metadata-grid">
+              <div class="meta-item"><span class="label">Height:</span> {currentFrame.height}</div>
+              <div class="meta-item"><span class="label">Timestamp:</span> {currentFrame.timestamp}</div>
+              <div class="meta-item"><span class="label">Description:</span> {currentFrame.description || 'N/A'}</div>
+              <div class="meta-item"><span class="label">Replicas:</span> {replicaCount}</div>
+            </div>
+          </div>
+
+          <!-- Replicas (Entity States) -->
+          <div class="section">
+            <h4>🏛️ Entity Replicas ({replicaCount})</h4>
+            {#if replicasArray.length > 0}
+              {#each replicasArray as [entityId, replica]}
+                <div class="replica-card">
+                  <button class="replica-header" on:click={() => toggleReplica(entityId)}>
+                    <span class="expand-icon">{expandedReplicas.has(entityId) ? '▼' : '▶'}</span>
+                    <span class="entity-id mono">{shortAddress(entityId)}</span>
+                    <span class="replica-summary">
+                      h:{replica.state?.height || 0} |
+                      reserves:{mapToArray(replica.state?.reserves).length} |
+                      accounts:{mapToArray(replica.state?.accounts).length}
+                    </span>
+                  </button>
+
+                  {#if expandedReplicas.has(entityId)}
+                    <div class="replica-body">
+                      <!-- Basic Info -->
+                      <div class="replica-section">
+                        <h5>📌 Basic</h5>
+                        <div class="data-row"><span>Entity ID:</span> <code>{entityId}</code></div>
+                        <div class="data-row"><span>Signer:</span> <code>{replica.signerId}</code></div>
+                        <div class="data-row"><span>Is Proposer:</span> {replica.isProposer}</div>
+                        <div class="data-row"><span>State Height:</span> {replica.state?.height}</div>
+                        <div class="data-row"><span>J-Block:</span> {replica.state?.jBlock || 0}</div>
+                      </div>
+
+                      <!-- Reserves -->
+                      <div class="replica-section">
+                        <h5>💰 Reserves</h5>
+                        {#if mapToArray(replica.state?.reserves).length > 0}
+                          <div class="data-table">
+                            {#each mapToArray(replica.state?.reserves) as [tokenId, amount]}
+                              <div class="data-row">
+                                <span>Token {tokenId}:</span>
+                                <code>{formatBigInt(amount)}</code>
+                              </div>
+                            {/each}
+                          </div>
+                        {:else}
+                          <div class="empty-data">No reserves</div>
+                        {/if}
+                      </div>
+
+                      <!-- Accounts (Bilateral) -->
+                      <div class="replica-section">
+                        <h5>🤝 Accounts (Bilateral)</h5>
+                        {#if mapToArray(replica.state?.accounts).length > 0}
+                          {#each mapToArray(replica.state?.accounts) as [counterparty, account]}
+                            <div class="account-card">
+                              <div class="account-header">↔ {shortAddress(counterparty)}</div>
+                              <pre class="json-mini">{safeStringify(account)}</pre>
+                            </div>
+                          {/each}
+                        {:else}
+                          <div class="empty-data">No bilateral accounts</div>
+                        {/if}
+                      </div>
+
+                      <!-- Insurance Lines -->
+                      {#if replica.state?.insuranceLines?.length > 0}
+                        <div class="replica-section">
+                          <h5>🛡️ Insurance Lines</h5>
+                          <pre class="json-mini">{safeStringify(replica.state.insuranceLines)}</pre>
+                        </div>
+                      {/if}
+
+                      <!-- Debts -->
+                      {#if replica.state?.debts?.length > 0}
+                        <div class="replica-section">
+                          <h5>💳 Debts</h5>
+                          <pre class="json-mini">{safeStringify(replica.state.debts)}</pre>
+                        </div>
+                      {/if}
+
+                      <!-- Mempool -->
+                      {#if replica.mempool?.length > 0}
+                        <div class="replica-section">
+                          <h5>📦 Mempool ({replica.mempool.length} txs)</h5>
+                          <pre class="json-mini">{safeStringify(replica.mempool)}</pre>
+                        </div>
+                      {/if}
+
+                      <!-- Full State JSON -->
+                      <div class="replica-section">
+                        <h5>📝 Full State JSON</h5>
+                        <pre class="json-block-small">{safeStringify(replica.state)}</pre>
+                      </div>
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            {:else}
+              <div class="empty-data">No replicas in this frame</div>
+            {/if}
+          </div>
+
+          <!-- Gossip Profiles -->
+          {#if currentFrame.gossip?.profiles?.length > 0}
+            <div class="section">
+              <h4>📡 Gossip Profiles ({currentFrame.gossip.profiles.length})</h4>
+              <pre class="json-block">{safeStringify(currentFrame.gossip.profiles)}</pre>
+            </div>
+          {/if}
+
+          <!-- Runtime I/O (collapsed) -->
+          <div class="section">
+            <h4>📥 Runtime Input</h4>
+            <pre class="json-block">{safeStringify(currentFrame.runtimeInput)}</pre>
+          </div>
+
+          <div class="section">
+            <h4>📤 Runtime Outputs</h4>
+            <pre class="json-block">{safeStringify(currentFrame.runtimeOutputs)}</pre>
+          </div>
+
+          <!-- Full Frame Dump -->
+          <div class="section">
+            <h4>🔬 Complete Frame Dump</h4>
+            <pre class="json-block">{safeStringify(currentFrame)}</pre>
           </div>
         </div>
       {:else}
@@ -550,5 +730,160 @@
 
   .content::-webkit-scrollbar-thumb:hover {
     background: #4e4e4e;
+  }
+
+  /* Full Data View Styles */
+  .full-view {
+    padding: 12px;
+  }
+
+  .metadata-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    background: #252526;
+    padding: 12px;
+    border-radius: 4px;
+  }
+
+  .meta-item {
+    font-size: 12px;
+  }
+
+  .meta-item .label {
+    color: #8b949e;
+    margin-right: 8px;
+  }
+
+  .replica-card {
+    background: #252526;
+    border: 1px solid #3e3e3e;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+
+  .replica-header {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: #2d2d30;
+    border: none;
+    color: #ccc;
+    cursor: pointer;
+    text-align: left;
+    font-size: 12px;
+  }
+
+  .replica-header:hover {
+    background: #3e3e3e;
+  }
+
+  .expand-icon {
+    color: #007acc;
+    font-size: 10px;
+  }
+
+  .replica-summary {
+    color: #6e7681;
+    font-size: 11px;
+    margin-left: auto;
+  }
+
+  .replica-body {
+    padding: 12px;
+    border-top: 1px solid #3e3e3e;
+  }
+
+  .replica-section {
+    margin-bottom: 16px;
+  }
+
+  .replica-section:last-child {
+    margin-bottom: 0;
+  }
+
+  .replica-section h5 {
+    margin: 0 0 8px 0;
+    font-size: 11px;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .data-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+    font-size: 12px;
+    border-bottom: 1px solid #3e3e3e;
+  }
+
+  .data-row:last-child {
+    border-bottom: none;
+  }
+
+  .data-row span {
+    color: #8b949e;
+  }
+
+  .data-row code {
+    color: #79c0ff;
+    font-family: 'Consolas', monospace;
+  }
+
+  .account-card {
+    background: #1e1e1e;
+    border: 1px solid #3e3e3e;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+
+  .account-header {
+    padding: 6px 10px;
+    background: #2d2d30;
+    font-size: 11px;
+    color: #d4d4d4;
+    font-family: 'Consolas', monospace;
+  }
+
+  .json-mini {
+    margin: 0;
+    padding: 8px;
+    font-size: 10px;
+    color: #9cdcfe;
+    background: #1e1e1e;
+    overflow-x: auto;
+    max-height: 150px;
+    overflow-y: auto;
+  }
+
+  .json-block-small {
+    margin: 0;
+    padding: 8px;
+    font-size: 10px;
+    color: #9cdcfe;
+    background: #1e1e1e;
+    border-radius: 4px;
+    overflow-x: auto;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .empty-data {
+    padding: 12px;
+    text-align: center;
+    color: #6e7681;
+    font-size: 11px;
+    font-style: italic;
+  }
+
+  .data-table {
+    background: #1e1e1e;
+    border-radius: 4px;
+    padding: 8px;
   }
 </style>

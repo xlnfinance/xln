@@ -27,12 +27,17 @@ export interface EVMEvent {
 export class BrowserVMProvider {
   private vm: any;
   private common: any;
+  private accountAddress: Address | null = null;
   private depositoryAddress: Address | null = null;
+  private entityProviderAddress: Address | null = null;
   private deployerPrivKey: Uint8Array;
   private deployerAddress: Address;
   private nonce = 0n;
+  private accountArtifact: any = null;
   private depositoryArtifact: any = null;
+  private entityProviderArtifact: any = null;
   private depositoryInterface: ethers.Interface | null = null;
+  private entityProviderInterface: ethers.Interface | null = null;
   private initialized = false;
 
   constructor() {
@@ -48,16 +53,25 @@ export class BrowserVMProvider {
       return;
     }
 
-    // Load artifact from static/ (can't import JSON from /public in vite)
-    const response = await fetch('/contracts/Depository.json');
-    if (!response.ok) {
-      throw new Error(`Failed to load Depository artifact: ${response.status}`);
-    }
-    this.depositoryArtifact = await response.json();
+    // Load all artifacts from static/
+    const [accountResp, depositoryResp, entityProviderResp] = await Promise.all([
+      fetch('/contracts/Account.json'),
+      fetch('/contracts/Depository.json'),
+      fetch('/contracts/EntityProvider.json'),
+    ]);
 
-    // Create ethers Interface for ABI encoding (same as evm.ts mainnet pattern)
+    if (!accountResp.ok) throw new Error(`Failed to load Account artifact: ${accountResp.status}`);
+    if (!depositoryResp.ok) throw new Error(`Failed to load Depository artifact: ${depositoryResp.status}`);
+    if (!entityProviderResp.ok) throw new Error(`Failed to load EntityProvider artifact: ${entityProviderResp.status}`);
+
+    this.accountArtifact = await accountResp.json();
+    this.depositoryArtifact = await depositoryResp.json();
+    this.entityProviderArtifact = await entityProviderResp.json();
+
+    // Create ethers Interfaces for ABI encoding
     this.depositoryInterface = new ethers.Interface(this.depositoryArtifact.abi);
-    console.log('[BrowserVM] Initializing with ABI interface...');
+    this.entityProviderInterface = new ethers.Interface(this.entityProviderArtifact.abi);
+    console.log('[BrowserVM] Loaded all contract artifacts');
 
     // Create VM with evmOpts to disable contract size limit
     this.vm = await createVM({
@@ -74,52 +88,112 @@ export class BrowserVMProvider {
       balance: 10000000000000000000000n, // 10000 ETH
     });
     await this.vm.stateManager.putAccount(this.deployerAddress, deployerAccount);
-
     console.log(`[BrowserVM] Deployer funded: ${this.deployerAddress.toString()}`);
 
-    // Deploy Depository
+    // Deploy contracts in order: Account (library) → Depository (with linking) → EntityProvider
+    await this.deployAccount();
     await this.deployDepository();
+    await this.deployEntityProvider();
 
     this.initialized = true;
-    console.log('[BrowserVM] Initialization complete');
+    console.log('[BrowserVM] All contracts deployed successfully');
   }
 
-  /** Deploy Depository contract */
-  private async deployDepository(): Promise<void> {
-    console.log('[BrowserVM] Deploying Depository...');
-    console.log('[BrowserVM] Bytecode length:', this.depositoryArtifact.bytecode?.length || 0);
-
-    // Query nonce from VM state
+  /** Deploy Account library */
+  private async deployAccount(): Promise<void> {
+    console.log('[BrowserVM] Deploying Account library...');
     const currentNonce = await this.getCurrentNonce();
 
     const tx = createLegacyTx({
       gasLimit: 100000000n,
       gasPrice: 10n,
-      data: this.depositoryArtifact.bytecode,
+      data: this.accountArtifact.bytecode,
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
     const result = await runTx(this.vm, { tx });
 
     if (result.execResult.exceptionError) {
-      console.error('[BrowserVM] Deployment exception:', result.execResult.exceptionError);
-      console.error('[BrowserVM] Result:', JSON.stringify({
-        gasUsed: result.totalGasSpent?.toString(),
-        returnValue: result.execResult.returnValue?.length,
-        logs: result.execResult.logs?.length
-      }));
-      throw new Error(`Deployment failed: ${result.execResult.exceptionError}`);
+      console.error('[BrowserVM] Account deployment failed:', result.execResult.exceptionError);
+      throw new Error(`Account deployment failed: ${result.execResult.exceptionError}`);
+    }
+
+    this.accountAddress = result.createdAddress!;
+    console.log(`[BrowserVM] Account library deployed at: ${this.accountAddress.toString()}`);
+  }
+
+  /** Deploy Depository contract with Account library linking */
+  private async deployDepository(): Promise<void> {
+    console.log('[BrowserVM] Deploying Depository with Account library linking...');
+
+    if (!this.accountAddress) {
+      throw new Error('Account library must be deployed first');
+    }
+
+    // Link Account library address into Depository bytecode
+    // Replace placeholder __$...$__ with actual library address
+    let linkedBytecode = this.depositoryArtifact.bytecode;
+    const accountAddrHex = this.accountAddress.toString().slice(2).toLowerCase(); // Remove 0x prefix
+
+    // Find and replace library placeholder (format: __$<hash>$__)
+    const placeholderRegex = /__\$[a-f0-9]{34}\$__/g;
+    const placeholders = linkedBytecode.match(placeholderRegex);
+
+    if (placeholders && placeholders.length > 0) {
+      console.log(`[BrowserVM] Found ${placeholders.length} library placeholders, linking Account at ${accountAddrHex}`);
+      linkedBytecode = linkedBytecode.replace(placeholderRegex, accountAddrHex);
+    } else {
+      console.warn('[BrowserVM] No library placeholders found in Depository bytecode');
+    }
+
+    const currentNonce = await this.getCurrentNonce();
+
+    const tx = createLegacyTx({
+      gasLimit: 100000000n,
+      gasPrice: 10n,
+      data: linkedBytecode,
+      nonce: currentNonce,
+    }, { common: this.common }).sign(this.deployerPrivKey);
+
+    const result = await runTx(this.vm, { tx });
+
+    if (result.execResult.exceptionError) {
+      console.error('[BrowserVM] Depository deployment failed:', result.execResult.exceptionError);
+      throw new Error(`Depository deployment failed: ${result.execResult.exceptionError}`);
     }
 
     this.depositoryAddress = result.createdAddress!;
-    console.log(`[BrowserVM] Deployed at: ${this.depositoryAddress.toString()}`);
+    console.log(`[BrowserVM] Depository deployed at: ${this.depositoryAddress.toString()}`);
     console.log(`[BrowserVM] Gas used: ${result.totalGasSpent}`);
 
     // Verify code exists
     const code = await this.vm.stateManager.getCode(this.depositoryAddress);
     if (code.length === 0) {
-      throw new Error('Contract deployment failed - no code at address');
+      throw new Error('Depository deployment failed - no code at address');
     }
+  }
+
+  /** Deploy EntityProvider contract */
+  private async deployEntityProvider(): Promise<void> {
+    console.log('[BrowserVM] Deploying EntityProvider...');
+    const currentNonce = await this.getCurrentNonce();
+
+    const tx = createLegacyTx({
+      gasLimit: 100000000n,
+      gasPrice: 10n,
+      data: this.entityProviderArtifact.bytecode,
+      nonce: currentNonce,
+    }, { common: this.common }).sign(this.deployerPrivKey);
+
+    const result = await runTx(this.vm, { tx });
+
+    if (result.execResult.exceptionError) {
+      console.error('[BrowserVM] EntityProvider deployment failed:', result.execResult.exceptionError);
+      throw new Error(`EntityProvider deployment failed: ${result.execResult.exceptionError}`);
+    }
+
+    this.entityProviderAddress = result.createdAddress!;
+    console.log(`[BrowserVM] EntityProvider deployed at: ${this.entityProviderAddress.toString()}`);
   }
 
   /** Get entity reserves for a token */
@@ -185,14 +259,15 @@ export class BrowserVMProvider {
     return account?.nonce || 0n;
   }
 
-  /** Debug: Fund entity reserves */
+  /** Debug: Fund entity reserves (uses mintToReserve in testMode) */
   async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<void> {
     if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
 
     // Use ethers Interface for ABI encoding (same as mainnet)
-    const callData = this.depositoryInterface.encodeFunctionData('debugFundReserves', [entityId, tokenId, amount]);
+    // mintToReserve is the onlyAdmin function in Depository.sol
+    const callData = this.depositoryInterface.encodeFunctionData('mintToReserve', [entityId, tokenId, amount]);
 
     // Always query nonce from VM (don't trust local counter)
     const currentNonce = await this.getCurrentNonce();
@@ -208,7 +283,7 @@ export class BrowserVMProvider {
     const result = await runTx(this.vm, { tx });
 
     if (result.execResult.exceptionError) {
-      throw new Error(`debugFundReserves failed: ${result.execResult.exceptionError}`);
+      throw new Error(`mintToReserve failed: ${result.execResult.exceptionError}`);
     }
 
     console.log(`[BrowserVM] Funded ${entityId.slice(0, 10)}... with ${amount} of token ${tokenId}`);
@@ -244,8 +319,25 @@ export class BrowserVMProvider {
   }
 
   /** Get contract address */
+  getAccountAddress(): string {
+    return this.accountAddress?.toString() || '0x0';
+  }
+
   getDepositoryAddress(): string {
     return this.depositoryAddress?.toString() || '0x0';
+  }
+
+  getEntityProviderAddress(): string {
+    return this.entityProviderAddress?.toString() || '0x0';
+  }
+
+  /** Get all deployed contract addresses */
+  getDeployedContracts(): { account: string; depository: string; entityProvider: string } {
+    return {
+      account: this.getAccountAddress(),
+      depository: this.getDepositoryAddress(),
+      entityProvider: this.getEntityProviderAddress(),
+    };
   }
 
   /** Prefund account (R2C - Reserve to Collateral) */
@@ -277,7 +369,19 @@ export class BrowserVMProvider {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
     // Use ethers Interface for ABI encoding (same as mainnet)
-    const callData = this.depositoryInterface.encodeFunctionData('_collateral', [entityId, counterpartyId, tokenId]);
+    // Solidity mapping: _collaterals(bytes channelKey, uint tokenId) -> ChannelCollateral
+    // Need to compute channelKey first, then call the mapping getter
+    const channelKeyData = this.depositoryInterface.encodeFunctionData('channelKey', [entityId, counterpartyId]);
+    const channelKeyResult = await this.vm.evm.runCall({
+      to: this.depositoryAddress,
+      caller: this.deployerAddress,
+      data: hexToBytes(channelKeyData as `0x${string}`),
+      gasLimit: 100000n,
+    });
+    if (channelKeyResult.execResult.exceptionError) return 0n;
+    const channelKey = channelKeyResult.execResult.returnValue;
+
+    const callData = this.depositoryInterface.encodeFunctionData('_collaterals', [channelKey, tokenId]);
 
     const result = await this.vm.evm.runCall({
       to: this.depositoryAddress,
@@ -290,8 +394,9 @@ export class BrowserVMProvider {
     const returnData = result.execResult.returnValue;
     if (!returnData || returnData.length === 0) return 0n;
 
-    const decoded = this.depositoryInterface.decodeFunctionResult('_collateral', returnData);
-    return decoded[0];
+    // _collaterals returns ChannelCollateral struct: { collateral: uint256, ondelta: int256 }
+    const decoded = this.depositoryInterface.decodeFunctionResult('_collaterals', returnData);
+    return decoded[0]; // collateral field
   }
 
   /** Get debts for an entity */
@@ -577,12 +682,6 @@ export class BrowserVMProvider {
   async getEntityInfo(entityId: string): Promise<{ exists: boolean; name?: string; quorum?: string[]; threshold?: number }> {
     // TODO: Read from EntityProvider contract when implemented
     return { exists: false };
-  }
-
-  /** Get EntityProvider contract address */
-  getEntityProviderAddress(): string {
-    // TODO: Return actual EntityProvider address when deployed
-    return '0x0000000000000000000000000000000000000000';
   }
 }
 

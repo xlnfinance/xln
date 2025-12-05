@@ -1,5 +1,35 @@
 # NEXT.md - Priority Tasks
 
+## 🔥 COMPLETED (2025-12-06): BrowserVM Multi-Contract Deployment + Runtime I/O Full Dump
+
+### BrowserVM Contract Deployment ✅
+- ✅ **Account.sol library** - Deploys first, address stored for linking
+- ✅ **Depository.sol with linking** - Replaces `__$<hash>$__` placeholders with Account address
+- ✅ **EntityProvider.sol** - Deploys for entity registration
+- ✅ **Contract getters** - `getAccountAddress()`, `getDepositoryAddress()`, `getEntityProviderAddress()`, `getDeployedContracts()`
+
+### JurisdictionPanel Updates ✅
+- ✅ **Shows all 3 contracts** - ACC, DEP, EP badges with tooltips in header
+- ✅ **Contract artifacts copied** - Account.json, Depository.json, EntityProvider.json in frontend/static/contracts/
+
+### Runtime I/O Panel - Full Data Dump ✅
+- ✅ **New "🔬 Full" view mode** - Complete frame data for time machine debugging
+- ✅ **Expandable replica cards** - Entity state, reserves, accounts, debts, insurance
+- ✅ **BigInt-safe formatting** - Proper handling of all numeric values
+
+### Files Modified ✅
+- `frontend/src/lib/view/utils/browserVMProvider.ts` - Multi-contract deployment with library linking
+- `frontend/src/lib/view/panels/JurisdictionPanel.svelte` - All 3 contract addresses in header
+- `frontend/src/lib/view/panels/RuntimeIOPanel.svelte` - Full dump view mode
+- `frontend/static/contracts/` - Updated artifacts (Account.json, Depository.json, EntityProvider.json)
+
+### Security Fixes (Depository.sol) ✅
+- ✅ **Cooperative finalize zero-state** - Added `cooperativeNonce == 0` check (line 1027)
+- ✅ **Nested nonReentrant fix** - Split `externalTokenToReserve` → `_externalTokenToReserve` internal
+- ✅ **Contract size** - 23,247 bytes (1,329 bytes headroom under 24KB limit)
+
+---
+
 ## 🔥 COMPLETED (2025-12-04): BrainVault Entity Auto-Creation
 
 ### Fixes ✅

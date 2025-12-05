@@ -16,7 +16,17 @@ function entityToAddress(entity: string): string {
 async function deployDepositoryFixture() {
   const [admin, user1, user2] = await ethers.getSigners();
 
-  const Depository = await ethers.getContractFactory("Depository");
+  // Deploy Account library first
+  const AccountFactory = await ethers.getContractFactory("Account");
+  const account = await AccountFactory.deploy();
+  await account.waitForDeployment();
+
+  // Deploy Depository with Account library linked
+  const Depository = await ethers.getContractFactory("Depository", {
+    libraries: {
+      Account: await account.getAddress()
+    }
+  });
   const depository = await Depository.deploy();
   await depository.waitForDeployment();
 

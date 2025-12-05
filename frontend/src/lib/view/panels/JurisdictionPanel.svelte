@@ -133,40 +133,69 @@
       collateral.clear();
       insuranceLines.clear();
 
+      // Build all fetch tasks in parallel
+      const reserveTasks: Promise<{entityId: string, tokenId: number, balance: bigint}>[] = [];
+      const collateralTasks: Promise<{entityId: string, counterpartyId: string, tokenId: number, amount: bigint}>[] = [];
+      const insuranceTasks: Promise<{entityId: string, lines: any[]}>[] = [];
+
       for (const entityId of KNOWN_ENTITIES) {
-        // Get reserves
-        const entityReserves = new Map<number, bigint>();
+        // Reserve tasks
         for (let tokenId = 1; tokenId <= maxTokenId; tokenId++) {
-          const balance = await browserVMProvider.getReserves(entityId, tokenId);
-          if (balance > 0n) {
-            entityReserves.set(tokenId, balance);
-          }
-        }
-        if (entityReserves.size > 0) {
-          reserves.set(entityId, entityReserves);
+          reserveTasks.push(
+            browserVMProvider.getReserves(entityId, tokenId)
+              .then(balance => ({ entityId, tokenId, balance }))
+              .catch(() => ({ entityId, tokenId, balance: 0n }))
+          );
         }
 
-        // Get collateral with other entities
-        const entityCollateral = new Map<string, Map<number, bigint>>();
+        // Collateral tasks
         for (const counterpartyId of KNOWN_ENTITIES) {
           if (counterpartyId === entityId) continue;
-          const counterpartyCollateral = new Map<number, bigint>();
           for (let tokenId = 1; tokenId <= maxTokenId; tokenId++) {
-            const amount = await browserVMProvider.getCollateral(entityId, counterpartyId, tokenId);
-            if (amount > 0n) {
-              counterpartyCollateral.set(tokenId, amount);
-            }
+            collateralTasks.push(
+              browserVMProvider.getCollateral(entityId, counterpartyId, tokenId)
+                .then(amount => ({ entityId, counterpartyId, tokenId, amount }))
+                .catch(() => ({ entityId, counterpartyId, tokenId, amount: 0n }))
+            );
           }
-          if (counterpartyCollateral.size > 0) {
-            entityCollateral.set(counterpartyId, counterpartyCollateral);
-          }
-        }
-        if (entityCollateral.size > 0) {
-          collateral.set(entityId, entityCollateral);
         }
 
-        // Get insurance lines
-        const lines = await browserVMProvider.getInsuranceLines(entityId);
+        // Insurance tasks
+        insuranceTasks.push(
+          browserVMProvider.getInsuranceLines(entityId)
+            .then(lines => ({ entityId, lines }))
+            .catch(() => ({ entityId, lines: [] }))
+        );
+      }
+
+      // Execute all in parallel
+      const [reserveResults, collateralResults, insuranceResults] = await Promise.all([
+        Promise.all(reserveTasks),
+        Promise.all(collateralTasks),
+        Promise.all(insuranceTasks)
+      ]);
+
+      // Process reserves
+      for (const { entityId, tokenId, balance } of reserveResults) {
+        if (balance > 0n) {
+          if (!reserves.has(entityId)) reserves.set(entityId, new Map());
+          reserves.get(entityId)!.set(tokenId, balance);
+        }
+      }
+
+      // Process collateral
+      for (const { entityId, counterpartyId, tokenId, amount } of collateralResults) {
+        if (amount > 0n) {
+          if (!collateral.has(entityId)) collateral.set(entityId, new Map());
+          if (!collateral.get(entityId)!.has(counterpartyId)) {
+            collateral.get(entityId)!.set(counterpartyId, new Map());
+          }
+          collateral.get(entityId)!.get(counterpartyId)!.set(tokenId, amount);
+        }
+      }
+
+      // Process insurance
+      for (const { entityId, lines } of insuranceResults) {
         if (lines.length > 0) {
           insuranceLines.set(entityId, lines);
         }
@@ -225,11 +254,14 @@
   <div class="header">
     <h3>Jurisdiction</h3>
     <div class="meta">
-      <span class="contract-badge">
-        EP: {browserVMProvider.getEntityProviderAddress().slice(0, 8)}...
+      <span class="contract-badge" title="Account Library">
+        ACC: {browserVMProvider.getAccountAddress().slice(0, 8)}...
       </span>
-      <span class="contract-badge">
+      <span class="contract-badge" title="Depository Contract">
         DEP: {browserVMProvider.getDepositoryAddress().slice(0, 8)}...
+      </span>
+      <span class="contract-badge" title="EntityProvider Contract">
+        EP: {browserVMProvider.getEntityProviderAddress().slice(0, 8)}...
       </span>
     </div>
     <button on:click={refreshAll} disabled={loading} class="refresh-btn">

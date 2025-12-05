@@ -64,8 +64,17 @@ describe("Depository", function () {
 
     await erc1155.mint(user0.address, 0, 100, "0x");
 
+    // Deploy Account library first
+    const AccountFactory = await hre.ethers.getContractFactory("Account");
+    const account = await AccountFactory.deploy();
+    await account.waitForDeployment();
 
-    const Depository = await hre.ethers.getContractFactory("Depository");
+    // Deploy Depository with Account library linked
+    const Depository = await hre.ethers.getContractFactory("Depository", {
+      libraries: {
+        Account: await account.getAddress()
+      }
+    });
     depository = await Depository.deploy();
     await depository.waitForDeployment();
 
