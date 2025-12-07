@@ -5101,17 +5101,19 @@ let vrHammer: VRHammer | null = null;
         continue;
       }
 
-      // DETERMINISTIC SIZE FORMULA (multiplicative - preserves proportionality):
-      // Volume scales linearly with reserves, radius = cbrt(volume)
-      // $5M should look 2x VOLUME as $2.5M → radius ratio = cbrt(2) ≈ 1.26
-      const BASE_RESERVE = 1_000_000; // $1M = base size (MIN_SIZE)
-      const ratio = reserveValueUSD / BASE_RESERVE;
-      const size = Math.max(MIN_SIZE, Math.min(MIN_SIZE * Math.cbrt(ratio), MAX_SIZE));
+      // DETERMINISTIC SIZE FORMULA - 2D VISUAL SCALING for obvious differences:
+      // Use power 0.6 (between sqrt=0.5 and cbrt=0.33) for more dramatic visual impact
+      // $5M vs $2.5M → pow(2, 0.6) ≈ 1.52x radius difference (very visible)
+      // $10M vs $2M → pow(5, 0.6) ≈ 2.63x radius difference (dramatic)
+      const BASE_RESERVE = 500_000; // $500K = base size (MIN_SIZE) - lower base = bigger entities
+      const ratio = Math.max(1, reserveValueUSD / BASE_RESERVE);
+      const VISUAL_POWER = 0.6; // 0.33=cbrt(subtle), 0.5=sqrt(moderate), 0.6-0.7=dramatic
+      const size = Math.max(MIN_SIZE, Math.min(MIN_SIZE * Math.pow(ratio, VISUAL_POWER), MAX_SIZE));
       entitySizesAtFrame.set(entityId, size);
 
       // Debug: log size calculation for verification
       if (reserveValueUSD > 0) {
-        console.debug(`[Size] ${entityId.slice(0, 8)}: $${(reserveValueUSD/1e6).toFixed(2)}M → size ${size.toFixed(2)} (ratio ${ratio.toFixed(1)})`);
+        console.debug(`[Size] ${entityId.slice(0, 8)}: $${(reserveValueUSD/1e6).toFixed(2)}M → size ${size.toFixed(2)} (pow ${ratio.toFixed(1)}^${VISUAL_POWER})`);
       }
     }
   }
