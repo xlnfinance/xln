@@ -29,6 +29,8 @@
   // Props for future layout/mode switching (passed from parent, reserved for future use)
   export let layout: string = 'default'; void layout;
   export let networkMode: 'simnet' | 'testnet' | 'mainnet' = 'simnet'; void networkMode;
+  export let embedMode: boolean = false; // When true: hide panels, show only 3D + minimal controls
+  export let scenarioId: string = ''; // Auto-run scenario on load (e.g. 'ahb', 'fed-chair')
 
   let container: HTMLDivElement;
   let dockview: DockviewComponent;
@@ -37,6 +39,9 @@
   // TimeMachine draggable state
   let timeMachinePosition: 'bottom' | 'top' | 'left' | 'right' = 'bottom';
   let collapsed = false;
+
+  // Embed mode: hide sidebar by default, show on toggle
+  let showSidebarInEmbed = false;
 
   // Isolated XLN environment for this View instance (passed to ALL panels + TimeMachine)
   const localEnvStore = writable<any>(null);
@@ -334,13 +339,16 @@
       }
     }, 0);
 
-    // Set initial sizes: Graph3D gets 2/3, sidebar gets 1/3
+    // Set initial sizes based on mode
     const graph3dApi = dockview.getPanel('graph3d');
     if (graph3dApi) {
       // Delay size adjustment for AVP compatibility
       setTimeout(() => {
-        graph3dApi.api.setSize({ width: window.innerWidth * 0.67 }); // 2/3 split
-        console.log('[View] ✅ Graph3D resized to 67%');
+        // In embed mode: start fullscreen (100%), user can toggle sidebar
+        // In normal mode: 70:30 split
+        const widthPercent = embedMode ? 1.0 : 0.70;
+        graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
+        console.log(`[View] ✅ Graph3D resized to ${widthPercent * 100}%${embedMode ? ' (embed mode)' : ''}`);
       }, 100);
     }
 
@@ -389,6 +397,17 @@
   });
 
   // Cleanup on component destroy
+  // Toggle sidebar visibility in embed mode
+  function toggleEmbedSidebar() {
+    showSidebarInEmbed = !showSidebarInEmbed;
+    const graph3dApi = dockview?.getPanel('graph3d');
+    if (graph3dApi) {
+      const widthPercent = showSidebarInEmbed ? 0.70 : 1.0;
+      graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
+      console.log(`[View] Embed sidebar ${showSidebarInEmbed ? 'shown' : 'hidden'}`);
+    }
+  }
+
   onDestroy(() => {
     if (unsubOpenEntity) {
       unsubOpenEntity();
@@ -399,32 +418,50 @@
   });
 </script>
 
-<div class="view-wrapper">
+<div class="view-wrapper" class:embed-mode={embedMode}>
   <div class="view-container" class:with-timemachine={!collapsed} bind:this={container}></div>
 
-  <!-- TimeMachine - Fixed bottom bar, draggable -->
-  <div class="time-machine-bar" class:collapsed data-position={timeMachinePosition}>
-    <div class="drag-handle" title="Drag to reposition">⋮⋮</div>
+  <!-- TimeMachine - Always visible (like YouTube progress bar) -->
+  <div class="time-machine-bar" class:collapsed class:embed={embedMode} data-position={timeMachinePosition}>
+    {#if !embedMode}
+      <div class="drag-handle" title="Drag to reposition">⋮⋮</div>
+    {/if}
     <TimeMachine
       history={localHistoryStore}
       timeIndex={localTimeIndex}
       isLive={localIsLive}
       env={localEnvStore}
     />
-    <button class="collapse-btn" on:click={() => collapsed = !collapsed}>
-      {collapsed ? '▲' : '▼'}
-    </button>
-    <button
-      class="position-toggle-btn"
-      on:click={() => timeMachinePosition = timeMachinePosition === 'bottom' ? 'top' : 'bottom'}
-      title="Move to {timeMachinePosition === 'bottom' ? 'top' : 'bottom'}"
-    >
-      {timeMachinePosition === 'bottom' ? '⬆️' : '⬇️'}
-    </button>
+    {#if !embedMode}
+      <button class="collapse-btn" on:click={() => collapsed = !collapsed}>
+        {collapsed ? '▲' : '▼'}
+      </button>
+      <button
+        class="position-toggle-btn"
+        on:click={() => timeMachinePosition = timeMachinePosition === 'bottom' ? 'top' : 'bottom'}
+        title="Move to {timeMachinePosition === 'bottom' ? 'top' : 'bottom'}"
+      >
+        {timeMachinePosition === 'bottom' ? '⬆️' : '⬇️'}
+      </button>
+    {/if}
   </div>
 
-  <!-- Interactive Tutorial (first-time users) -->
-  <Tutorial />
+  {#if !embedMode}
+    <!-- Interactive Tutorial (first-time users) -->
+    <Tutorial />
+  {/if}
+
+  {#if embedMode}
+    <!-- Embed mode: Toggle button for sidebar -->
+    <button
+      class="embed-sidebar-toggle"
+      class:sidebar-visible={showSidebarInEmbed}
+      on:click={toggleEmbedSidebar}
+      title={showSidebarInEmbed ? 'Hide panels' : 'Show panels'}
+    >
+      {showSidebarInEmbed ? '»' : '«'}
+    </button>
+  {/if}
 </div>
 
 <style>
@@ -443,7 +480,21 @@
   }
 
   .view-container.with-timemachine {
-    height: calc(100vh - 80px); /* Leave room for TimeMachine */
+    height: calc(100vh - 48px); /* Leave room for compact TimeMachine */
+  }
+
+  /* Embed mode - full screen with TimeMachine, hide dockview tabs */
+  .view-wrapper.embed-mode .view-container {
+    height: calc(100vh - 48px);
+  }
+
+  .view-wrapper.embed-mode :global(.dockview-tabs-container),
+  .view-wrapper.embed-mode :global(.dockview-groupcontrol) {
+    display: none !important;
+  }
+
+  .time-machine-bar.embed {
+    height: 48px;
   }
 
   :global(.dockview-theme-dark .dockview-tab) {
@@ -460,61 +511,59 @@
     background: #007acc;
   }
 
-  /* TimeMachine Bar */
+  /* TimeMachine Bar - minimal wrapper */
   .time-machine-bar {
     position: relative;
-    height: 80px;
-    background: #252526;
-    border-top: 2px solid #007acc;
-    display: flex;
-    align-items: center;
-    padding: 0 16px;
-    transition: height 0.2s ease;
+    height: 48px;
     z-index: 1000;
   }
 
   .time-machine-bar.collapsed {
-    height: 32px;
+    height: 24px;
   }
 
   .time-machine-bar[data-position="top"] {
     order: -1;
-    border-top: none;
-    border-bottom: 2px solid #007acc;
   }
 
   .drag-handle {
-    position: absolute;
-    left: 8px;
+    display: none; /* Hidden in compact mode */
+  }
+
+  .collapse-btn,
+  .position-toggle-btn {
+    display: none; /* Hidden in compact mode */
+  }
+
+  /* Embed mode sidebar toggle button */
+  .embed-sidebar-toggle {
+    position: fixed;
     top: 50%;
-    transform: translateY(-50%);
-    cursor: move;
-    color: #6e7681;
-    font-size: 18px;
-    user-select: none;
-    padding: 4px 8px;
-  }
-
-  .drag-handle:hover {
-    color: #007acc;
-  }
-
-  .collapse-btn {
-    position: absolute;
     right: 8px;
-    top: 50%;
     transform: translateY(-50%);
-    background: #2d2d30;
-    border: 1px solid #3e3e3e;
-    color: #ccc;
-    padding: 4px 12px;
-    cursor: pointer;
+    z-index: 200;
+    width: 28px;
+    height: 48px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 4px;
-    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(8px);
   }
 
-  .collapse-btn:hover {
-    background: #37373d;
-    border-color: #007acc;
+  .embed-sidebar-toggle:hover {
+    background: rgba(0, 122, 255, 0.3);
+    border-color: rgba(0, 122, 255, 0.5);
+    color: white;
+  }
+
+  .embed-sidebar-toggle.sidebar-visible {
+    right: calc(30% + 8px);
   }
 </style>

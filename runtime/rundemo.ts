@@ -89,8 +89,8 @@ const runDemo = async (env: Env): Promise<Env> => {
   await process(env, []);
   
   // Clear any leftover transactions in mempool
-  const e1_replica = env.replicas.get(`${e1_id}:${s1}`);
-  const e2_replica = env.replicas.get(`${e2_id}:${s2}`);
+  const e1_replica = env.eReplicas.get(`${e1_id}:${s1}`);
+  const e2_replica = env.eReplicas.get(`${e2_id}:${s2}`);
   if (e1_replica) {
     console.log(`🧹 Cleared ${e1_replica.mempool.length} leftover transactions from e1 mempool`);
     e1_replica.mempool.length = 0;
@@ -112,7 +112,7 @@ const runDemo = async (env: Env): Promise<Env> => {
   await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: depositInputs });
   await process(env, []);
   
-  const e1_replica_after_funding = env.replicas.get(`${e1_id}:${s1}`);
+  const e1_replica_after_funding = env.eReplicas.get(`${e1_id}:${s1}`);
   
   // Debug: Check what's actually in reserves
   if (DEBUG) {
@@ -150,8 +150,8 @@ const runDemo = async (env: Env): Promise<Env> => {
   const transferTokenId = 1;
   
   // Get current balances to calculate new balances after transfer
-  const e1_replica_before_transfer = env.replicas.get(`${e1_id}:${s1}`);
-  const e2_replica_before_transfer = env.replicas.get(`${e2_id}:${s2}`);
+  const e1_replica_before_transfer = env.eReplicas.get(`${e1_id}:${s1}`);
+  const e2_replica_before_transfer = env.eReplicas.get(`${e2_id}:${s2}`);
   
   if (!e1_replica_before_transfer) {
     throw new Error('❌ Entity 1 replica not found before transfer');
@@ -193,8 +193,8 @@ const runDemo = async (env: Env): Promise<Env> => {
 
   console.log('✅ Transfer transaction submitted.');
   
-  const e1_replica_after_transfer = env.replicas.get(`${e1_id}:${s1}`);
-  const e2_replica_after_transfer = env.replicas.get(`${e2_id}:${s2}`);
+  const e1_replica_after_transfer = env.eReplicas.get(`${e1_id}:${s1}`);
+  const e2_replica_after_transfer = env.eReplicas.get(`${e2_id}:${s2}`);
   
   // Debug: Check final reserves for both entities
   if (DEBUG) {
@@ -278,8 +278,8 @@ const runDemo = async (env: Env): Promise<Env> => {
   console.log(`✅ Direct payment sent: $500 USD from ${formatEntityDisplay(e1_id)} to ${formatEntityDisplay(e2_id)}`);
 
   // STEP 2.5: Verify bilateral balance conservation
-  const e1_final_replica = env.replicas.get(`${e1_id}:${s1}`);
-  const e2_final_replica = env.replicas.get(`${e2_id}:${s2}`);
+  const e1_final_replica = env.eReplicas.get(`${e1_id}:${s1}`);
+  const e2_final_replica = env.eReplicas.get(`${e2_id}:${s2}`);
 
   console.log(`\n🔍 BILATERAL BALANCE VERIFICATION:`);
 
@@ -319,8 +319,8 @@ const runDemo = async (env: Env): Promise<Env> => {
   }
 
   // STEP 3: Verify account states
-  const e1_replica_final = env.replicas.get(`${e1_id}:${s1}`);
-  const e2_replica_final = env.replicas.get(`${e2_id}:${s2}`);
+  const e1_replica_final = env.eReplicas.get(`${e1_id}:${s1}`);
+  const e2_replica_final = env.eReplicas.get(`${e2_id}:${s2}`);
 
   if (e1_replica_final?.state.accounts.has(e2_id)) {
     const e1_account = e1_replica_final.state.accounts.get(e2_id)!;

@@ -6,7 +6,7 @@
   import { keccak256, zeroPadValue, toUtf8Bytes } from 'ethers';
   import { vaultState, vaultOperations, activeVault, activeSigner, allVaults, type Vault, type Signer } from '$lib/stores/vaultStore';
   import { EVM_NETWORKS, type EVMNetwork } from '$lib/config/evmNetworks';
-  import { Copy, Check } from 'lucide-svelte';
+  import { Copy, Check, Settings } from 'lucide-svelte';
 
   // Initialize i18n
   let i18nReady = false;
@@ -252,6 +252,23 @@
   let showPassphrase = false;
   let factor = 5;
 
+  // Dynamic color for factor number: red(1) → yellow(5) → green(9)
+  $: factorColor = (() => {
+    const t = (factor - 1) / 8; // 0 to 1
+    if (t < 0.5) {
+      // red to yellow
+      const r = 239;
+      const g = Math.round(68 + (179 - 68) * (t * 2));
+      const b = 68;
+      return `rgb(${r}, ${g}, ${b})`;
+    } else {
+      // yellow to green
+      const r = Math.round(234 - (234 - 34) * ((t - 0.5) * 2));
+      const g = Math.round(179 + (197 - 179) * ((t - 0.5) * 2));
+      const b = Math.round(8 + (94 - 8) * ((t - 0.5) * 2));
+      return `rgb(${r}, ${g}, ${b})`;
+    }
+  })();
 
   // Derivation state
   let workers: Worker[] = [];
@@ -1405,7 +1422,7 @@
               <span class="factor-label-max">9</span>
             </div>
             <!-- Current factor value prominently displayed -->
-            <div class="factor-current-value">{factor}</div>
+            <div class="factor-current-value" style="color: {factorColor}; text-shadow: 0 0 20px {factorColor}40, 0 0 40px {factorColor}20">{factor}</div>
           </div>
           <div class="factor-info-row">
             <div class="factor-info">
@@ -1558,65 +1575,71 @@
           </div>
         {/if}
 
-        <!-- Main Tab Navigation -->
-        <div class="complete-tabs">
-          <button
-            class="complete-tab"
-            class:active={completeTab === 'wallet'}
-            on:click={() => completeTab = 'wallet'}
-          >
-            Wallet
-          </button>
-          <button
-            class="complete-tab"
-            class:active={completeTab === 'xln'}
-            on:click={() => completeTab = 'xln'}
-          >
-            xln
-          </button>
-          <button
-            class="complete-tab"
-            class:active={completeTab === 'settings'}
-            on:click={() => completeTab = 'settings'}
-          >
-            Settings
-          </button>
-        </div>
 
         <!-- Tab Content -->
         <div class="complete-tab-content">
-          {#if completeTab === 'wallet'}
-            <!-- WALLET TAB: Unified context bar + wallet interface -->
-            <div class="wallet-section">
-              <!-- Unified Context Bar: Vault | Signer | Network -->
-              <div class="context-bar">
-                <!-- Vault Dropdown -->
-                <div class="context-dropdown" class:open={vaultDropdownOpen}>
+          <!-- Unified Context Bar: Vault+Signer | Network (always visible) -->
+          <div class="context-bar">
+                <!-- Combined Vault + Signer Dropdown -->
+                <div class="context-dropdown vault-signer-combo" class:open={vaultDropdownOpen}>
                   <button
-                    class="context-trigger"
-                    on:click|stopPropagation={() => { vaultDropdownOpen = !vaultDropdownOpen; signerDropdownOpen = false; networkDropdownOpen = false; }}
+                    class="context-trigger pill"
+                    on:click|stopPropagation={() => { vaultDropdownOpen = !vaultDropdownOpen; networkDropdownOpen = false; }}
                   >
-                    <span class="context-icon">🔐</span>
-                    <span class="context-label">{currentVault?.id || 'Vault'}</span>
+                    <img src={currentSignerIdenticon} alt="" class="context-identicon" />
+                    <div class="context-info">
+                      <span class="context-vault-name">{currentVault?.id || 'Vault'}</span>
+                      <span class="context-signer-name">{currentSigner?.name || 'Signer 1'}</span>
+                    </div>
+                    <span class="context-networth">{formatUSD(portfolioTotal)}</span>
                     <span class="dropdown-arrow">▼</span>
                   </button>
                   {#if vaultDropdownOpen}
-                    <div class="context-menu">
+                    <div class="context-menu cascading">
+                      <!-- Current Vault Section -->
+                      {#if currentVault}
+                        <div class="menu-section-label">
+                          <span class="section-icon">🔐</span>
+                          {currentVault.id}
+                        </div>
+                        <div class="signers-list">
+                          {#each currentVault.signers as signer}
+                            <button
+                              class="menu-item signer-item"
+                              class:active={signer.index === currentSigner?.index}
+                              on:click={() => switchSigner(signer.index)}
+                            >
+                              <img src={generateIdenticon(signer.address)} alt="" class="menu-item-identicon" />
+                              <div class="menu-item-info">
+                                <span class="menu-item-label">{signer.name}</span>
+                                <code class="menu-item-addr">{signer.address.slice(0, 6)}...{signer.address.slice(-4)}</code>
+                              </div>
+                            </button>
+                          {/each}
+                          <button class="menu-item add-action indent" on:click={handleAddSigner}>
+                            <span class="menu-item-icon">➕</span>
+                            <span class="menu-item-label">Add Signer</span>
+                          </button>
+                        </div>
+                      {/if}
+
+                      <!-- Other Vaults -->
                       {#if savedVaults.length > 0}
-                        <div class="menu-section-label">Saved Vaults</div>
-                        {#each savedVaults as vault}
+                        <div class="menu-divider"></div>
+                        <div class="menu-section-label">Other Vaults</div>
+                        {#each savedVaults.filter(v => v.id !== currentVault?.id) as vault}
                           <button
-                            class="menu-item"
-                            class:active={vault.id === currentVault?.id}
+                            class="menu-item vault-item"
                             on:click={() => switchToVault(vault.id)}
                           >
                             <span class="menu-item-icon">🔐</span>
                             <span class="menu-item-label">{vault.id}</span>
-                            <span class="menu-item-meta">{vault.signers.length}</span>
+                            <span class="menu-item-meta">{vault.signers.length} signers</span>
                           </button>
                         {/each}
-                        <div class="menu-divider"></div>
                       {/if}
+
+                      <div class="menu-divider"></div>
                       {#if !currentVault}
                         <button class="menu-item" on:click={() => { showSaveVaultModal = true; vaultDropdownOpen = false; }}>
                           <span class="menu-item-icon">💾</span>
@@ -1631,48 +1654,11 @@
                   {/if}
                 </div>
 
-                <!-- Signer Dropdown -->
-                <div class="context-dropdown" class:open={signerDropdownOpen}>
-                  <button
-                    class="context-trigger"
-                    on:click|stopPropagation={() => { signerDropdownOpen = !signerDropdownOpen; vaultDropdownOpen = false; networkDropdownOpen = false; }}
-                  >
-                    <img src={currentSignerIdenticon} alt="" class="context-identicon" />
-                    <span class="context-label">{currentSigner?.name || 'Signer 1'}</span>
-                    <span class="context-networth">{formatUSD(portfolioTotal)}</span>
-                    <span class="dropdown-arrow">▼</span>
-                  </button>
-                  {#if signerDropdownOpen}
-                    <div class="context-menu">
-                      {#if currentVault}
-                        {#each currentVault.signers as signer}
-                          <button
-                            class="menu-item"
-                            class:active={signer.index === currentSigner?.index}
-                            on:click={() => switchSigner(signer.index)}
-                          >
-                            <img src={generateIdenticon(signer.address)} alt="" class="menu-item-identicon" />
-                            <div class="menu-item-info">
-                              <span class="menu-item-label">{signer.name}</span>
-                              <code class="menu-item-addr">{signer.address.slice(0, 6)}...{signer.address.slice(-4)}</code>
-                            </div>
-                          </button>
-                        {/each}
-                        <div class="menu-divider"></div>
-                      {/if}
-                      <button class="menu-item add-action" on:click={handleAddSigner}>
-                        <span class="menu-item-icon">➕</span>
-                        <span class="menu-item-label">Add Signer</span>
-                      </button>
-                    </div>
-                  {/if}
-                </div>
-
                 <!-- Network Dropdown -->
                 <div class="context-dropdown" class:open={networkDropdownOpen}>
                   <button
-                    class="context-trigger"
-                    on:click|stopPropagation={() => { networkDropdownOpen = !networkDropdownOpen; vaultDropdownOpen = false; signerDropdownOpen = false; }}
+                    class="context-trigger pill"
+                    on:click|stopPropagation={() => { networkDropdownOpen = !networkDropdownOpen; vaultDropdownOpen = false; }}
                   >
                     <span class="network-dot" style="background: {networkStatus === 'connected' ? '#00ff88' : networkStatus === 'connecting' ? '#ffcc00' : '#ff4466'}"></span>
                     <span class="context-label">{selectedNetwork.name}</span>
@@ -1708,28 +1694,29 @@
                 </div>
               </div>
 
-              <!-- Address Display Row -->
-              <div class="address-row">
-                <img src={currentSignerIdenticon} alt="" class="address-identicon" />
-                <button class="address-copy" on:click={copyAddress} title={currentSignerAddress}>
-                  <code class="address-text">{currentSignerAddress.slice(0, 6)}...{currentSignerAddress.slice(-4)}</code>
-                  {#if addressCopied}
-                    <Check size={14} class="copy-icon copied" />
-                  {:else}
-                    <Copy size={14} class="copy-icon" />
-                  {/if}
-                </button>
-              </div>
+          <!-- Wallet Tabs: Tokens | xln | Settings -->
+          <div class="wallet-tabs">
+            <button class="wallet-tab" class:active={completeTab === 'wallet'} on:click={() => completeTab = 'wallet'}>
+              Tokens
+            </button>
+            <button class="wallet-tab" class:active={completeTab === 'xln'} on:click={() => completeTab = 'xln'}>
+              xln
+            </button>
+            <button class="wallet-tab" class:active={completeTab === 'settings'} on:click={() => completeTab = 'settings'}>
+              Settings
+            </button>
+          </div>
 
-              <!-- WalletView with current signer's credentials -->
-              <WalletView
-                privateKey={currentSignerPrivateKey || masterKeyHex}
-                walletAddress={currentSignerAddress}
-                {entityId}
-                identiconSrc={currentSignerIdenticon}
-                on:portfolioUpdate={handlePortfolioUpdate}
-              />
-            </div>
+          <!-- Tab Content -->
+          {#if completeTab === 'wallet'}
+            <!-- WalletView with current signer's credentials -->
+            <WalletView
+              privateKey={currentSignerPrivateKey || masterKeyHex}
+              walletAddress={currentSignerAddress}
+              {entityId}
+              identiconSrc={currentSignerIdenticon}
+              on:portfolioUpdate={handlePortfolioUpdate}
+            />
 
             <!-- Save Vault Modal -->
             {#if showSaveVaultModal}
@@ -2551,7 +2538,7 @@
   .factor-slider-wrapper input[type="range"] {
     width: 100%;
     height: 8px;
-    background: linear-gradient(90deg, #22c55e 0%, #eab308 50%, #ef4444 100%);
+    background: linear-gradient(90deg, #ef4444 0%, #eab308 50%, #22c55e 100%);
     border-radius: 4px;
     -webkit-appearance: none;
     cursor: pointer;
@@ -2582,8 +2569,6 @@
     transform: translateX(-50%);
     font-size: 48px;
     font-weight: 700;
-    color: #fbbf24;
-    text-shadow: 0 0 20px rgba(251, 191, 36, 0.5), 0 0 40px rgba(251, 191, 36, 0.3);
     font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
     letter-spacing: -0.02em;
     pointer-events: none;
@@ -2896,25 +2881,29 @@
   }
 
   .context-bar {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    display: flex;
     gap: 8px;
     padding: 12px;
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid rgba(180, 140, 80, 0.15);
-    border-radius: 12px;
+    border-radius: 16px;
+    align-items: center;
   }
 
   .context-dropdown {
     position: relative;
   }
 
+  .context-dropdown.vault-signer-combo {
+    flex: 1;
+  }
+
   .context-trigger {
     width: 100%;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
+    gap: 10px;
+    padding: 10px 16px;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
@@ -2922,6 +2911,10 @@
     font-size: 13px;
     cursor: pointer;
     transition: all 0.2s ease;
+  }
+
+  .context-trigger.pill {
+    border-radius: 24px;
   }
 
   .context-trigger:hover {
@@ -2934,14 +2927,45 @@
     border-color: rgba(180, 140, 80, 0.4);
   }
 
-  .context-icon {
-    font-size: 14px;
+  .context-identicon {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid rgba(180, 140, 80, 0.3);
   }
 
-  .context-identicon {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
+  .context-info {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    flex: 1;
+    text-align: left;
+    min-width: 0;
+  }
+
+  .context-vault-name {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(180, 140, 80, 0.7);
+  }
+
+  .context-signer-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: white;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .context-networth {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(180, 140, 80, 0.9);
+    padding: 4px 10px;
+    background: rgba(180, 140, 80, 0.1);
+    border-radius: 12px;
   }
 
   .context-label {
@@ -2977,27 +3001,44 @@
     margin-top: 4px;
     background: rgba(20, 20, 30, 0.98);
     border: 1px solid rgba(180, 140, 80, 0.2);
-    border-radius: 8px;
-    padding: 4px;
+    border-radius: 16px;
+    padding: 6px;
     z-index: 100;
-    max-height: 280px;
+    max-height: 340px;
     overflow-y: auto;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   }
 
+  .context-menu.cascading {
+    min-width: 260px;
+  }
+
   .menu-section-label {
-    padding: 8px 12px 4px;
-    font-size: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 12px 6px;
+    font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: rgba(255, 255, 255, 0.4);
+    color: rgba(180, 140, 80, 0.8);
+  }
+
+  .section-icon {
+    font-size: 12px;
+  }
+
+  .signers-list {
+    padding-left: 8px;
+    border-left: 2px solid rgba(180, 140, 80, 0.2);
+    margin-left: 12px;
   }
 
   .menu-divider {
     height: 1px;
     background: rgba(255, 255, 255, 0.08);
-    margin: 4px 8px;
+    margin: 6px 8px;
   }
 
   .menu-item {
@@ -3008,12 +3049,16 @@
     padding: 10px 12px;
     background: transparent;
     border: none;
-    border-radius: 6px;
+    border-radius: 10px;
     color: rgba(255, 255, 255, 0.8);
     font-size: 13px;
     cursor: pointer;
     transition: all 0.15s ease;
     text-align: left;
+  }
+
+  .menu-item.indent {
+    margin-left: 4px;
   }
 
   .menu-item:hover {
@@ -3023,6 +3068,10 @@
   .menu-item.active {
     background: rgba(180, 140, 80, 0.15);
     color: rgba(180, 140, 80, 0.95);
+  }
+
+  .menu-item.signer-item {
+    padding: 8px 10px;
   }
 
   .menu-item.add-action,
@@ -3069,9 +3118,39 @@
   .menu-item-meta {
     font-size: 11px;
     color: rgba(255, 255, 255, 0.4);
-    padding: 2px 6px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 4px;
+  }
+
+  /* Wallet Tabs */
+  .wallet-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 4px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    margin-bottom: 12px;
+  }
+
+  .wallet-tab {
+    flex: 1;
+    padding: 10px 16px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .wallet-tab:hover {
+    color: rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .wallet-tab.active {
+    background: rgba(180, 140, 80, 0.15);
+    color: rgba(180, 140, 80, 0.95);
   }
 
   /* Address Display Row */
@@ -3756,10 +3835,9 @@
   /* Mini shard grid under pyramid */
   .mini-shard-grid {
     display: grid;
-    grid-template-columns: repeat(var(--cols, 16), 1fr);
+    grid-template-columns: repeat(var(--cols, 16), 10px);
     gap: 2px;
-    width: 100%;
-    max-width: 320px;
+    width: fit-content;
     margin: 16px auto 0;
     padding: 8px;
     background: rgba(0, 0, 0, 0.3);
@@ -3767,7 +3845,8 @@
   }
 
   .mini-shard {
-    aspect-ratio: 1;
+    width: 10px;
+    height: 10px;
     border-radius: 2px;
     transition: all 0.2s ease-out;
   }

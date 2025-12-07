@@ -14,7 +14,7 @@
   import { EVM_NETWORKS, ERC20_ABI, type EVMNetwork, type TokenInfo } from '$lib/config/evmNetworks';
   import { RefreshCw, TrendingUp, TrendingDown } from 'lucide-svelte';
 
-  export let privateKey: string;
+  export let privateKey: string; void privateKey; // Reserved for signing
   export let walletAddress: string;
 
   const dispatch = createEventDispatcher();

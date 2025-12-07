@@ -1,7 +1,7 @@
 {
   "name": "default",
   "version": "4.1",
-  "description": "Default 4-panel layout (Graph3D 75% + Sidebar 25% for optimal visual focus)",
+  "description": "Default 4-panel layout (Graph3D 70% + Sidebar 30% for optimal visual focus)",
   "grid": {
     "root": {
       "type": "branch",
@@ -15,7 +15,7 @@
                 "views": ["graph3d"],
                 "activeView": "graph3d"
               },
-              "size": 75
+              "size": 70
             },
             {
               "type": "branch",

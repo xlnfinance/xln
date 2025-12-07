@@ -101,10 +101,10 @@
   }
 
   // Get replica count
-  $: replicaCount = currentFrame?.replicas?.size || 0;
+  $: replicaCount = currentFrame?.eReplicas?.size || 0;
 
   // Get replicas as array
-  $: replicasArray = currentFrame?.replicas ? mapToArray(currentFrame.replicas) : [];
+  $: replicasArray = currentFrame?.eReplicas ? mapToArray(currentFrame.eReplicas) : [];
 
   // Get xlnomies (J-Machine state) as array
   $: xlnomiesArray = currentFrame?.xlnomies || [];

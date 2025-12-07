@@ -50,6 +50,13 @@
   // Extract replicas from env (replaces $replicas)
   $: replicas = env?.eReplicas || new Map();
 
+  // Derive activeJurisdiction: from env.activeJurisdiction OR first jReplica name (for time-travel)
+  // EnvSnapshot stores jReplicas[] but not activeJurisdiction - we derive it
+  $: activeJurisdictionName = env?.activeJurisdiction
+    || (env?.jReplicas?.length > 0 ? env.jReplicas[0].name : null)
+    || (Array.isArray(env?.jReplicas) && env.jReplicas[0]?.name)
+    || null;
+
   /**
    * Get time-aware replicas - computes directly from stores to avoid stale reactive variable
    * Use this in functions called during store subscription callbacks where reactive vars may be stale
@@ -98,6 +105,26 @@
       total += amount;
     }
     return total;
+  }
+
+  /**
+   * Get single reserve value by key (handles both Map and serialized Object)
+   */
+  function getReserveValue(reserves: Map<string, bigint> | Record<string, unknown> | undefined, key: string): bigint {
+    if (!reserves) return 0n;
+    if (reserves instanceof Map) {
+      // Try both string and number keys (Map may have number keys in some cases)
+      return reserves.get(key) || (reserves as Map<any, bigint>).get(Number(key)) || 0n;
+    }
+    if (typeof reserves === 'object') {
+      const v = (reserves as Record<string, unknown>)[key];
+      if (v === undefined || v === null) return 0n;
+      if (typeof v === 'string') {
+        return BigInt(v.replace(/n$/, ''));
+      }
+      return BigInt(v as bigint);
+    }
+    return 0n;
   }
 
   // XLN runtime interface
@@ -201,8 +228,7 @@
     isDragging?: boolean; // Currently being dragged
     activityRing?: THREE.Mesh | null; // Activity indicator ring
     hubConnectedIds?: Set<string>; // PERF: Cache of connected entity IDs for hubs
-    baseScale?: number; // Base scale from reserves (before pulse animation)
-    currentScale?: number; // Current interpolated scale (for smooth transitions)
+    // NOTE: Entity sizes stored globally in lockedEntitySizes Map, not per-entity
     // NOTE: reserveLabel removed - too noisy
     mempoolIndicator?: THREE.Sprite; // Mempool count indicator
   }
@@ -275,8 +301,8 @@ let vrHammer: VRHammer | null = null;
   // J-Machines (one per jurisdiction) - broadcast visualization
   let jMachines: Map<string, THREE.Group> = new Map(); // jurisdiction name → J-Machine mesh
 
-  // Active J-Machine (for backward compatibility with broadcast functions)
-  $: jMachine = env?.activeJurisdiction ? jMachines.get(env.activeJurisdiction) || null : null;
+  // Active J-Machine - derived from activeJurisdictionName (handles time-travel)
+  $: jMachine = activeJurisdictionName ? jMachines.get(activeJurisdictionName) || null : null;
 
   let jMachineTxBoxes: THREE.Mesh[] = []; // Yellow tx cubes inside octahedron
   let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) problem)
@@ -290,6 +316,7 @@ let vrHammer: VRHammer | null = null;
   let jProposalIntervalMs = 1000; // 1 second default - configurable
   let jLastProposalTime = 0; // Track last proposal timestamp
   let jAutoProposerEnabled = true; // Enable/disable auto-proposer
+  let lastAnimatedFrameIndex = -1; // Track which frame we last animated (to avoid re-animating)
 
   // Network data with proper typing (legacy - will migrate to managers)
   let entities: EntityData[] = [];
@@ -572,6 +599,7 @@ let vrHammer: VRHammer | null = null;
   let gridColor: string = '#ffffff'; // White for better contrast with 3x3 grid
   let autoRotate: boolean = false;
   let autoRotateSpeed: number = 0.5; // RPM
+  let showFpsOverlay: boolean = false; // Controlled by settings
   let cameraDistance: number = 500;
   let cameraTarget: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
   let gridHelper: THREE.GridHelper | null = null;
@@ -656,29 +684,26 @@ let vrHammer: VRHammer | null = null;
     let jurisdictionsArray: Array<{ name: string; jMachine: { position: { x: number; y: number; z: number }; capacity: number; jHeight: number; mempool?: any[] } }> = [];
 
     if (env?.jReplicas) {
-      // jReplicas is a Map<string, JReplica>
+      // jReplicas is a Map<string, JReplica> live, but may be serialized as object/array
+      let jReplicaValues: any[] = [];
       if (env.jReplicas instanceof Map) {
-        jurisdictionsArray = Array.from(env.jReplicas.values()).map((jr: any) => ({
-          name: jr.name,
-          jMachine: {
-            position: jr.position || { x: 0, y: 300, z: 0 },
-            capacity: 3,
-            jHeight: Number(jr.blockNumber || 0n),
-            mempool: jr.mempool || []
-          }
-        }));
+        jReplicaValues = Array.from(env.jReplicas.values());
       } else if (Array.isArray(env.jReplicas)) {
-        // Historical frame: jReplicas might be serialized as array
-        jurisdictionsArray = env.jReplicas.map((jr: any) => ({
-          name: jr.name,
-          jMachine: {
-            position: jr.position || { x: 0, y: 300, z: 0 },
-            capacity: 3,
-            jHeight: Number(jr.blockNumber || 0n),
-            mempool: jr.mempool || []
-          }
-        }));
+        // Historical frame: jReplicas serialized as array
+        jReplicaValues = env.jReplicas;
+      } else if (typeof env.jReplicas === 'object') {
+        // Historical frame: jReplicas serialized as plain object { 'simnet': {...} }
+        jReplicaValues = Object.values(env.jReplicas);
       }
+      jurisdictionsArray = jReplicaValues.map((jr: any) => ({
+        name: jr.name,
+        jMachine: {
+          position: jr.position || { x: 0, y: 600, z: 0 },
+          capacity: 3,
+          jHeight: Number(jr.blockNumber || 0n),
+          mempool: jr.mempool || []
+        }
+      }));
     }
 
     // Remove J-Machines that no longer exist
@@ -703,7 +728,7 @@ let vrHammer: VRHammer | null = null;
     });
 
     // Sync J mempool visual: show tx cubes based on actual mempool contents
-    const activeJurisdiction = jurisdictionsArray.find(x => x.name === env?.activeJurisdiction);
+    const activeJurisdiction = jurisdictionsArray.find(x => x.name === activeJurisdictionName);
     if (activeJurisdiction && jMachine) {
       let mempoolSize = activeJurisdiction.jMachine.mempool?.length || 0;
 
@@ -760,9 +785,9 @@ let vrHammer: VRHammer | null = null;
   }
 
   // Create a tx cube for mempool visualization
-  // SMALLER cubes that fit INSIDE the J-machine octahedron (transparent)
+  // Cubes STACK INSIDE the J-machine cube container (like Tetris)
   function createMempoolTxCube(index: number): THREE.Mesh {
-    const cubeSize = 0.8; // 2x smaller than before
+    const cubeSize = 4; // Larger tx cubes - visible inside container
     const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
     const material = new THREE.MeshLambertMaterial({
       color: 0xffaa00, // Orange-yellow for pending tx
@@ -773,15 +798,20 @@ let vrHammer: VRHammer | null = null;
     });
     const cube = new THREE.Mesh(geometry, material);
 
-    // Position cubes in a tight cluster INSIDE the octahedron center
-    // J-machine inner glow is size*0.7 = ~8.4, so stay well within
-    const angle = (index * Math.PI * 2) / 3; // 3 per ring (tighter)
-    const radius = 1.5 + Math.floor(index / 3) * 1.2; // Much smaller radius
-    const height = (index % 3 - 1) * 1.5; // -1.5, 0, 1.5
+    // Position cubes in a grid INSIDE the J-machine cube (size=25, so fit within ~20)
+    // Grid: 3x3 base, stacking up
+    const gridSize = 3;
+    const spacing = 5; // Space between cubes
+    const xIndex = index % gridSize;
+    const zIndex = Math.floor(index / gridSize) % gridSize;
+    const yIndex = Math.floor(index / (gridSize * gridSize));
+
+    // Center the grid inside the container
+    const offset = -(gridSize - 1) * spacing / 2;
     cube.position.set(
-      Math.cos(angle) * radius,
-      height,
-      Math.sin(angle) * radius
+      offset + xIndex * spacing,
+      -8 + yIndex * spacing, // Start from bottom
+      offset + zIndex * spacing
     );
 
     return cube;
@@ -794,31 +824,44 @@ let vrHammer: VRHammer | null = null;
   }
 
   // ===== ADD TXS TO J-MACHINE (broadcast simulation) + R2R ANIMATION =====
-  // CRITICAL: Only animate in LIVE mode - historical playback should show static state
-  $: if (jMachine && env?.runtimeInput?.entityInputs && $isolatedTimeIndex === -1) {
-    // For each entity input, check for reserve-to-reserve transactions
-    env.runtimeInput.entityInputs.forEach((entityInput: any) => {
-      // Support both old format (input.txs) and new format (entityTxs)
-      const txs = entityInput?.entityTxs || entityInput?.input?.txs || [];
-      txs.forEach((tx: any) => {
-        // Check if it's a reserve-related transaction (R2R)
-        // Check both tx.kind and tx.type for compatibility
-        const txKind = tx.kind || tx.type;
-        if (txKind === 'payFromReserve' || txKind === 'payToReserve' || txKind === 'settleToReserve') {
-          console.log(`[J-Machine] Adding tx ${txKind} from ${entityInput.entityId?.slice(0, 8)}...`);
+  // CRITICAL: Watch HISTORY frames, not env.runtimeInput (which is cleared after processing)
+  // Only animate in LIVE mode - historical playback should show static state
+  $: if (jMachine && $isolatedTimeIndex === -1) {
+    const hist = $isolatedHistory;
+    const currentLen = hist?.length || 0;
 
-          // Shoot ray from entity → J-Machine (incoming tx)
-          shootRayToJMachine(entityInput.entityId);
+    // Animate any NEW frames we haven't processed yet
+    if (currentLen > lastAnimatedFrameIndex + 1) {
+      for (let i = lastAnimatedFrameIndex + 1; i < currentLen; i++) {
+        const frame = hist[i];
+        const entityInputs = frame?.runtimeInput?.entityInputs || [];
 
-          addTxToJMachine(entityInput.entityId);
+        entityInputs.forEach((entityInput: any) => {
+          // Support both old format (input.txs) and new format (entityTxs)
+          const txs = entityInput?.entityTxs || entityInput?.input?.txs || [];
+          txs.forEach((tx: any) => {
+            // Check if it's a reserve-related transaction (R2R)
+            const txKind = tx.kind || tx.type;
+            if (txKind === 'payFromReserve' || txKind === 'payToReserve' || txKind === 'settleToReserve') {
+              console.log(`[J-Machine] 🚀 TX ${txKind} from ${entityInput.entityId?.slice(0, 8)} → J-Machine (frame ${i})`);
 
-          // R2R animation: particle flies from source to target
-          if (txKind === 'payFromReserve' && tx.targetEntityId) {
-            animateR2RTransfer(entityInput.entityId, tx.targetEntityId, tx.amount);
-          }
-        }
-      });
-    });
+              // Shoot ray from entity → J-Machine (incoming tx)
+              shootRayToJMachine(entityInput.entityId);
+
+              addTxToJMachine(entityInput.entityId);
+
+              // R2R animation: particle flies from source to target
+              const targetId = tx.targetEntityId || tx.data?.targetEntityId;
+              const amount = tx.amount || tx.data?.amount;
+              if (txKind === 'payFromReserve' && targetId) {
+                animateR2RTransfer(entityInput.entityId, targetId, amount);
+              }
+            }
+          });
+        });
+      }
+      lastAnimatedFrameIndex = currentLen - 1;
+    }
   }
 
   // ===== UPDATE SPATIAL HASH (when entities move) =====
@@ -1047,6 +1090,7 @@ let vrHammer: VRHammer | null = null;
       else if (key === 'forceLayoutEnabled') forceLayoutEnabled = value;
       else if (key === 'autoRotate') autoRotate = value;
       else if (key === 'autoRotateSpeed') autoRotateSpeed = value;
+      else if (key === 'showFpsOverlay') showFpsOverlay = value;
 
       // Recreate scene for grid changes
       if (['gridSize', 'gridDivisions', 'gridOpacity', 'gridColor'].includes(key)) {
@@ -1212,8 +1256,8 @@ let vrHammer: VRHammer | null = null;
   }
 
   /**
-   * Create J-Machine octahedron at (0, 200, 0) - settlement layer high above entity grid
-   * Visual: EVM/Ethereum-style diamond with purple/blue gradient, vertically stretched 1.6x
+   * Create J-Machine as TRANSLUCENT CUBE - mempool container for batching txs
+   * Visual: Glass-like cube where you can see tx cubes stacking inside
    */
   function createJMachine(
     size: number = 25,
@@ -1230,63 +1274,51 @@ let vrHammer: VRHammer | null = null;
       position
     };
 
-    // Octahedron geometry (8 faces) - Ethereum diamond shape
-    const octahedronGeometry = new THREE.OctahedronGeometry(size, 0);
+    // CUBE geometry - clear mempool container
+    const cubeGeometry = new THREE.BoxGeometry(size, size, size);
 
-    // EVM-style purple/blue gradient material
-    const octahedronMaterial = new THREE.MeshPhongMaterial({
-      color: 0x8b7fb8, // Ethereum purple
-      emissive: 0x6a5a8b, // Brighter purple glow
+    // Translucent glass material - see txs inside
+    const cubeMaterial = new THREE.MeshPhongMaterial({
+      color: 0x4488aa, // Teal-blue (distinct from entity blue)
+      emissive: 0x224455,
       transparent: true,
-      opacity: 0.8, // More visible (was 0.4)
-      wireframe: false,
+      opacity: 0.15, // Very translucent - see inside
       side: THREE.DoubleSide,
-      shininess: 100
+      shininess: 100,
+      depthWrite: false // Prevent z-fighting with inner objects
     });
 
-    const octahedron = new THREE.Mesh(octahedronGeometry, octahedronMaterial);
-    // Vertically stretch to match Ethereum logo proportions (diamond is taller than wide)
-    octahedron.scale.set(1, 1.6, 1);
-    group.add(octahedron);
+    const cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
+    group.add(cube);
 
-    // Wireframe edges for Ethereum diamond aesthetic
-    const edgesGeometry = new THREE.EdgesGeometry(octahedronGeometry);
+    // Wireframe edges for cube visibility
+    const edgesGeometry = new THREE.EdgesGeometry(cubeGeometry);
     const edgesMaterial = new THREE.LineBasicMaterial({
-      color: 0xb8a4d9, // Lighter purple for edges
-      linewidth: 3
+      color: 0x66ccff, // Bright cyan edges
+      linewidth: 2
     });
     const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
     group.add(edges);
 
-    // Inner glow effect (smaller octahedron)
-    const innerGeometry = new THREE.OctahedronGeometry(size * 0.7, 0);
-    const innerMaterial = new THREE.MeshBasicMaterial({
-      color: 0x9a8ac4, // Brighter purple
-      transparent: true,
-      opacity: 0.5, // More visible (was 0.2)
-      wireframe: true
-    });
-    const innerGlow = new THREE.Mesh(innerGeometry, innerMaterial);
-    innerGlow.scale.set(1, 1.6, 1); // Match outer octahedron stretch
-    group.add(innerGlow);
+    // Pure cube - no corner spheres
 
-    // Add label with jurisdiction name
+    // Add label with J-machine number
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
     if (context) {
       canvas.width = 256;
       canvas.height = 64;
-      context.fillStyle = '#b8a4d9';
-      context.font = 'bold 32px monospace';
+      context.fillStyle = '#66ccff';
+      context.font = 'bold 28px monospace';
       context.textAlign = 'center';
-      context.fillText(name.toLowerCase(), 128, 40); // Lowercase for consistency
+      context.fillText(`J-machine #1`, 128, 40);
     }
 
     const texture = new THREE.CanvasTexture(canvas);
     const labelMaterial = new THREE.SpriteMaterial({ map: texture });
     const label = new THREE.Sprite(labelMaterial);
     label.scale.set(25, 6, 1);
-    label.position.set(0, size * 1.6 + 15, 0); // Above vertically-stretched octahedron (accounting for 1.6x stretch)
+    label.position.set(0, size / 2 + 10, 0); // Above cube
     group.add(label);
 
     return group;
@@ -2364,14 +2396,9 @@ let vrHammer: VRHammer | null = null;
         existing.isHub = top3Hubs.has(profile.entityId);
         existing.mesh.userData['isHub'] = existing.isHub;
 
-        // Update scale based on current reserves
-        const newSize = getEntitySizeForToken(profile.entityId, selectedTokenId);
-        const currentSize = existing.baseScale || 1.8;
-        if (Math.abs(newSize - currentSize) > 0.1) {
-          const scaleFactor = newSize / currentSize;
-          existing.mesh.scale.multiplyScalar(scaleFactor);
-          existing.baseScale = newSize;
-        }
+        // SIZE IS FIXED AT CREATION - never recalculate!
+        // Size was set when entity was first created, don't touch it
+        // This prevents size jumps when reserves change during R2R transfers
 
         // Update hub cache
         if (existing.isHub && !existing.hubConnectedIds) {
@@ -2776,18 +2803,11 @@ let vrHammer: VRHammer | null = null;
       z = 0;
     }
 
-    // Calculate entity size based on type
-    let entitySize = getEntitySizeForToken(profile.entityId, selectedTokenId);
+    // UNIT SPHERE: Geometry is always radius=1.0
+    // Scale alone controls visual size (set in applyPulseAnimation from current frame reserves)
+    const geometry = new THREE.SphereGeometry(1.0, 32, 32);
 
-    // Federal Reserve is 3x larger
-    if (isFed) {
-      entitySize = entitySize * 3;
-    }
-
-    // Create entity geometry
-    const geometry = new THREE.SphereGeometry(entitySize, 32, 32);
-
-    // Colors: Purple for Fed, green for banks
+    // Colors: Purple for Fed, BLUE for entities (distinct from green J-Machine)
     let baseColor: number, emissiveColor: number, emissiveIntensity: number;
 
     if (isFed) {
@@ -2795,10 +2815,10 @@ let vrHammer: VRHammer | null = null;
       emissiveColor = 0x9a8ac4;  // Bright purple glow
       emissiveIntensity = 2.0;   // Very bright
     } else {
-      const themeColors = getThemeColors(settings.theme);
-      baseColor = parseInt(themeColors.entityColor.replace('#', '0x'));
-      emissiveColor = parseInt(themeColors.entityEmissive.replace('#', '0x'));
-      emissiveIntensity = isHub ? 1.5 : 0.1;
+      // Blue entities - distinct from green J-Machine
+      baseColor = 0x0077cc;       // Blue
+      emissiveColor = 0x003366;   // Dark blue glow
+      emissiveIntensity = isHub ? 1.5 : 0.3;
     }
 
     const material = new THREE.MeshLambertMaterial({
@@ -2812,9 +2832,9 @@ let vrHammer: VRHammer | null = null;
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(x, y, z);
 
-    // Add purple glow ring for Fed
+    // Add purple glow ring for Fed (unit geometry - scales with mesh)
     if (isFed) {
-      const glowGeometry = new THREE.RingGeometry(entitySize * 1.2, entitySize * 1.5, 32);
+      const glowGeometry = new THREE.RingGeometry(1.2, 1.5, 32);
       const glowMaterial = new THREE.MeshBasicMaterial({
         color: 0x8b7fb8,
         transparent: true,
@@ -2847,7 +2867,7 @@ let vrHammer: VRHammer | null = null;
 
     // Add entity name label AS CHILD of mesh (auto-moves with entity!)
     const labelSprite = createEntityLabel(profile.entityId);
-    labelSprite.position.set(0, entitySize + 0.8, 0); // Local position above mesh
+    labelSprite.position.set(0, 1.8, 0); // Local position above unit sphere (scales with mesh)
     mesh.add(labelSprite); // Child of mesh = auto-sync position
 
     // NOTE: Reserve labels removed - too noisy, clutter the view
@@ -2861,6 +2881,7 @@ let vrHammer: VRHammer | null = null;
       isHub, // Store hub status for pulse animation
       pulsePhase: Math.random() * Math.PI * 2, // Random start phase for pulse
       lastActivity: 0
+      // Size is calculated from reserves in applyPulseAnimation (pure function)
     });
   }
 
@@ -2977,8 +2998,10 @@ let vrHammer: VRHammer | null = null;
               } else if (tx.type === 'payFromReserve' || tx.kind === 'payFromReserve') {
                 // R2R (Reserve-to-Reserve) transaction visualization during time-machine playback
                 const fromEntityId = processingEntityId;
-                const toEntityId = tx.targetEntityId;
-                console.log(`[Time-Machine] 🔍 R2R tx detected: from=${fromEntityId?.slice(0,8)}, to=${toEntityId?.slice(0,8)}, type=${tx.type}, kind=${tx.kind}`);
+                // Support both tx.targetEntityId (old) and tx.data.targetEntityId (new format)
+                const toEntityId = tx.targetEntityId || tx.data?.targetEntityId;
+                const amount = tx.amount || tx.data?.amount || 0n;
+                console.log(`[Time-Machine] 🔍 R2R tx detected: from=${fromEntityId?.slice(0,8)}, to=${toEntityId?.slice(0,8)}, type=${tx.type}`);
                 if (toEntityId) {
                   console.log(`[Time-Machine] 💸 R2R animation: ${fromEntityId.slice(0,8)} → ${toEntityId.slice(0,8)}`);
                   // Shoot ray from entity → J-Machine
@@ -2986,7 +3009,7 @@ let vrHammer: VRHammer | null = null;
                   // Add tx cube to J-Machine mempool
                   addTxToJMachine(fromEntityId);
                   // Animate R2R particle between entities
-                  animateR2RTransfer(fromEntityId, toEntityId, tx.amount || 0n);
+                  animateR2RTransfer(fromEntityId, toEntityId, amount);
                   // Trigger activity visuals
                   triggerEntityActivity(fromEntityId);
                   triggerEntityActivity(toEntityId);
@@ -3710,23 +3733,22 @@ let vrHammer: VRHammer | null = null;
       // Ensure label is child of mesh (migration from old scene-parented labels)
       if (entity.label.parent !== entity.mesh) {
         scene.remove(entity.label);
-        const entitySize = getEntitySizeForToken(entity.id, selectedTokenId);
-        entity.label.position.set(0, entitySize + 0.8, 0);
+        const labelEntitySize = getEntitySizeForToken(entity.id, selectedTokenId);
+        entity.label.position.set(0, labelEntitySize + 0.8, 0);
         entity.mesh.add(entity.label);
       }
 
       // Get current reserve from replica state for SELECTED token
+      // Use getReserveValue() helper to handle both Map and serialized Object formats
       const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(
         (k: any) => k.startsWith(entity.id + ':')
       );
       const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
 
-      // Get reserves for the SELECTED token (not total reserves!)
-      const reservesMap = replica?.state?.reserves;
-      const reserveForSelectedToken = reservesMap?.get(selectedTokenId) || reservesMap?.get(String(selectedTokenId)) || 0n;
-      const reserveAmount = BigInt(reserveForSelectedToken);
+      // Get reserves using helper that handles Map/Object serialization
+      const reserveAmount = getReserveValue(replica?.state?.reserves, String(selectedTokenId));
 
-      // UPDATE ENTITY COLOR: Grey if 0 reserves in selected token, green otherwise
+      // UPDATE ENTITY COLOR: Grey if 0 reserves, BLUE otherwise (not green - easier to distinguish)
       const material = entity.mesh.material as THREE.MeshLambertMaterial;
       if (material && !entity.mesh.userData['isFed']) { // Don't change Fed color
         if (reserveAmount <= 0n) {
@@ -3735,11 +3757,10 @@ let vrHammer: VRHammer | null = null;
           material.emissive.setHex(0x333333);
           material.emissiveIntensity = 0.1;
         } else {
-          // Green for entities with reserves (original color)
-          const themeColors = getThemeColors(settings.theme);
-          material.color.setHex(parseInt(themeColors.entityColor.replace('#', ''), 16));
-          material.emissive.setHex(parseInt(themeColors.entityEmissive.replace('#', ''), 16));
-          material.emissiveIntensity = entity.isHub ? 1.5 : 0.1;
+          // Blue for entities with reserves (distinct from green J-Machine)
+          material.color.setHex(0x0077cc);  // Blue
+          material.emissive.setHex(0x003366);  // Dark blue glow
+          material.emissiveIntensity = entity.isHub ? 1.5 : 0.3;
         }
       }
     });
@@ -4070,7 +4091,7 @@ let vrHammer: VRHammer | null = null;
         const entityB = entities[j];
         if (!entityA || !entityB) continue;
 
-        // Calculate entity radii (approximate as sphere radius)
+        // Calculate entity radii from locked global sizes
         const radiusA = getEntitySizeForToken(entityA.id, selectedTokenId);
         const radiusB = getEntitySizeForToken(entityB.id, selectedTokenId);
 
@@ -4233,10 +4254,13 @@ let vrHammer: VRHammer | null = null;
         throw new Error('FINTECH-SAFETY: Entity material missing emissive property');
       }
 
-      // Calculate base size from reserves (planet size = reserve balance)
-      // Size is STATIC within a frame - only changes on J-events (frame change)
-      const baseSize = getEntitySizeForToken(entityId, selectedTokenId);
-      entity.baseScale = baseSize; // Store for reference
+      // DUMB PIPE: Calculate size directly from current reserves at render time
+      let baseSize = getEntitySizeForToken(entityId, selectedTokenId);
+
+      // Federal Reserve is 3x larger
+      if (entity.mesh.userData['isFed']) {
+        baseSize = baseSize * 3;
+      }
 
       if (isActive) {
         // Check activity direction
@@ -4365,7 +4389,7 @@ let vrHammer: VRHammer | null = null;
 
         if (!connection) continue;
 
-        // Calculate required spacing based on bars
+        // Calculate required spacing based on locked global sizes
         const entityASizeData = getEntitySizeForToken(entityA.id, selectedTokenId);
         const entityBSizeData = getEntitySizeForToken(entityB.id, selectedTokenId);
 
@@ -5051,82 +5075,45 @@ let vrHammer: VRHammer | null = null;
     }
   }
 
-  // ENTITY SIZING: Frame-locked, only recalculates on timeIndex change (J-events)
-  // Size is determined by: 1) Scenario config (dollarsPerPx) 2) Reserve balance at current frame
-  // NEVER changes mid-frame during render loops
+  // ENTITY SIZING: PURE FUNCTION - NO STORAGE!
+  // size = f(reserves, DOLLARS_PER_PX) - calculated at RENDER TIME from current frame's reserves
   //
-  // VISUAL BENCHMARK (at dollarsPerPx = 30000):
-  //   radius = cbrt(USD / dollarsPerPx * 0.75 / π)
-  //   ├─ 1.0 radius ≈ $125K   (small startup)
-  //   ├─ 2.0 radius ≈ $1M     (seed round)
-  //   ├─ 3.0 radius ≈ $3.4M   (series A)
-  //   ├─ 4.0 radius ≈ $8M     (series B)
-  //   └─ 5.0 radius ≈ $16M    (MAX_SIZE default)
-  //
-  let lastSizeCalcTimeIndex = -999;
+  // VISUAL RATIO: How many USD = 1 visual unit of radius
+  const DOLLARS_PER_PX = 500_000; // $500K = 1.0 radius
+  const EMPTY_SIZE = 0.4;         // $0 entities - still visible
+  const MIN_SIZE = 0.5;           // Minimum for funded entities
+  const MAX_SIZE = 2.7;           // Cap for whales
+  const VISUAL_POWER = 0.6;       // Scaling curve (0.5=sqrt, 0.33=cbrt)
+
   let lastLabelUpdateTimeIndex = -999; // Track for label updates on frame change
-  const entitySizesAtFrame = new Map<string, number>(); // entityId -> size
 
-  function recalculateAllEntitySizes(): void {
-    entitySizesAtFrame.clear();
+  function getEntitySizeForToken(entityId: string, _tokenId: number): number {
+    // PURE FUNCTION: Always calculate from current time-aware reserves
+    // No caching, no storage - just math
+    const currentReplicas = getTimeAwareReplicas();
 
-    // HARDCODED RATIO: $100K per unit of visual volume
-    // This ensures sphere sizes NEVER jump mid-scenario
-    // Same reserves = same size, always deterministic
-    const DOLLARS_PER_UNIT = 100_000; // $100K = 1 unit of visual volume
-    const EMPTY_SIZE = 1.2;           // Visible size for $0 entities
-    const MIN_SIZE = 1.5;             // Minimum funded entity size
-    const MAX_SIZE = 8.0;             // Max size (for large reserves)
-
-    const currentReplicas = getTimeAwareReplicas();  // Time-aware, not stale reactive
-    const seenEntities = new Set<string>();
-
-    // Calculate size for each entity based on reserves
+    // Find replica for this entity
     for (const [key, replica] of currentReplicas) {
-      const entityId = key.split(':')[0] || key;  // key format: entityId:signerId
-      if (seenEntities.has(entityId)) continue;
-      seenEntities.add(entityId);
+      const replicaEntityId = key.split(':')[0] || key;
+      if (replicaEntityId !== entityId) continue;
 
       if (!replica?.state?.reserves) {
-        entitySizesAtFrame.set(entityId, EMPTY_SIZE);
-        continue;
+        return EMPTY_SIZE;
       }
 
-      // Sum all reserves (handles both Map and Object formats)
       const totalReserves = getTotalReserves(replica);
       const reserveValueUSD = Number(totalReserves) / 1e18;
 
       if (reserveValueUSD <= 0) {
-        entitySizesAtFrame.set(entityId, EMPTY_SIZE);
-        continue;
+        return EMPTY_SIZE;
       }
 
-      // DETERMINISTIC SIZE FORMULA - 2D VISUAL SCALING for obvious differences:
-      // Use power 0.6 (between sqrt=0.5 and cbrt=0.33) for more dramatic visual impact
-      // $5M vs $2.5M → pow(2, 0.6) ≈ 1.52x radius difference (very visible)
-      // $10M vs $2M → pow(5, 0.6) ≈ 2.63x radius difference (dramatic)
-      const BASE_RESERVE = 500_000; // $500K = base size (MIN_SIZE) - lower base = bigger entities
-      const ratio = Math.max(1, reserveValueUSD / BASE_RESERVE);
-      const VISUAL_POWER = 0.6; // 0.33=cbrt(subtle), 0.5=sqrt(moderate), 0.6-0.7=dramatic
-      const size = Math.max(MIN_SIZE, Math.min(MIN_SIZE * Math.pow(ratio, VISUAL_POWER), MAX_SIZE));
-      entitySizesAtFrame.set(entityId, size);
-
-      // Debug: log size calculation for verification
-      if (reserveValueUSD > 0) {
-        console.debug(`[Size] ${entityId.slice(0, 8)}: $${(reserveValueUSD/1e6).toFixed(2)}M → size ${size.toFixed(2)} (pow ${ratio.toFixed(1)}^${VISUAL_POWER})`);
-      }
-    }
-  }
-
-  function getEntitySizeForToken(entityId: string, _tokenId: number): number {
-    // Check if we need to recalculate (only on frame change)
-    const currentTimeIndex = get(isolatedTimeIndex);
-    if (currentTimeIndex !== lastSizeCalcTimeIndex) {
-      lastSizeCalcTimeIndex = currentTimeIndex;
-      recalculateAllEntitySizes();
+      // DETERMINISTIC: size = MIN_SIZE * (USD / DOLLARS_PER_PX) ^ VISUAL_POWER
+      const ratio = Math.max(1, reserveValueUSD / DOLLARS_PER_PX);
+      return Math.max(MIN_SIZE, Math.min(MIN_SIZE * Math.pow(ratio, VISUAL_POWER), MAX_SIZE));
     }
 
-    return entitySizesAtFrame.get(entityId) ?? 0.3;
+    return EMPTY_SIZE; // Entity not found in replicas
   }
 
   /** Check if entity has any reserves (for color determination) */
@@ -5996,20 +5983,23 @@ let vrHammer: VRHammer | null = null;
 <div class="graph3d-wrapper">
   <div bind:this={container} class="graph3d-panel"></div>
 
-  <!-- Entity Mini Panel (on click) -->
+  <!-- Entity Mini Panel (on click) - TIME-TRAVEL AWARE -->
   {#if showMiniPanel}
     <EntityMiniPanel
       entityId={miniPanelEntityId}
       entityName={miniPanelEntityName}
       position={miniPanelPosition}
       {isolatedEnv}
+      {isolatedHistory}
+      {isolatedTimeIndex}
       on:close={closeMiniPanel}
       on:action={handleMiniPanelAction}
       on:openFull={handleOpenFullPanel}
     />
   {/if}
   <!-- FPS Overlay (outside container so canvas doesn't cover it) -->
-  <!-- FPS + Network Stats Overlay -->
+  <!-- FPS + Network Stats Overlay - controlled by settings -->
+  {#if showFpsOverlay}
   <div class="fps-overlay">
     <div class="fps-stat" class:fps-good={renderFps >= 55} class:fps-ok={renderFps >= 30 && renderFps < 55} class:fps-bad={renderFps < 30}>
       <span class="fps-label">Render FPS</span>
@@ -6044,6 +6034,7 @@ let vrHammer: VRHammer | null = null;
       Bars: {barsMode === 'close' ? '⬌ Center' : '↔ Sides'}
     </button>
   </div>
+  {/if}
 
   <!-- VR Controls HUD (for first-time Vision Pro users) -->
   <VRControlsHUD

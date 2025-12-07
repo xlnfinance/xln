@@ -87,14 +87,14 @@
       if (timeIdx != null && timeIdx >= 0 && hist && hist.length > 0) {
         const idx = Math.min(timeIdx, hist.length - 1);
         const frame = hist[idx];
-        replicas = frame?.replicas;
+        replicas = frame?.eReplicas;
         gossipProfiles = frame?.gossip?.profiles;
       }
     }
 
     if (!replicas) {
       // Live mode: read from current env
-      replicas = $isolatedEnv?.replicas;
+      replicas = $isolatedEnv?.eReplicas;
       gossipProfiles = $isolatedEnv?.gossip?.getProfiles?.();
     }
 

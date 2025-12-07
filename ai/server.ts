@@ -17,78 +17,119 @@ import { join } from "path";
 
 const PORT = 3031;
 const OLLAMA_URL = "http://localhost:11434";
-const MLX_PORT = 8081; // Single MLX server port (dynamic loading)
-const MLX_URL = `http://localhost:${MLX_PORT}`;
+const MLX_BASE_PORT = 8081; // Starting port for MLX servers (parallel loading)
 const XLN_FRONTEND_URL = "https://localhost:8080"; // xln frontend for state queries
 
 // ============================================================================
-// DYNAMIC MLX MODEL LOADER STATE
+// PARALLEL MLX MODEL LOADER STATE (512GB RAM = unlimited parallel models)
 // ============================================================================
 
-interface MLXServerState {
-  activeModel: string | null;
+interface MLXModelInstance {
+  modelId: string;
+  port: number;
   process: ReturnType<typeof spawn> | null;
   loading: boolean;
   loadProgress: string;
   lastError: string | null;
+  loadedAt: Date | null;
 }
 
-const mlxState: MLXServerState = {
-  activeModel: null,
-  process: null,
-  loading: false,
-  loadProgress: "",
-  lastError: null,
+// Map of modelId -> instance (supports unlimited parallel models)
+const loadedMLXModels = new Map<string, MLXModelInstance>();
+let nextMLXPort = MLX_BASE_PORT;
+
+// Helper to get URL for a specific model
+function getMLXUrl(modelId: string): string | null {
+  const instance = loadedMLXModels.get(modelId);
+  return instance?.port ? `http://localhost:${instance.port}` : null;
+}
+
+// Legacy compatibility shim - points to most recently loaded model
+const mlxState = {
+  get activeModel(): string | null {
+    const loaded = Array.from(loadedMLXModels.values()).filter(m => !m.loading && m.process);
+    return loaded.length > 0 ? loaded[loaded.length - 1]!.modelId : null;
+  },
+  set activeModel(_: string | null) { /* no-op for compatibility */ },
+  get loading(): boolean { return Array.from(loadedMLXModels.values()).some(m => m.loading); },
+  get loadProgress(): string {
+    const loading = Array.from(loadedMLXModels.values()).find(m => m.loading);
+    return loading?.loadProgress || "";
+  },
+  get lastError(): string | null {
+    const errors = Array.from(loadedMLXModels.values()).filter(m => m.lastError);
+    return errors[0]?.lastError || null;
+  },
+  get process(): ReturnType<typeof spawn> | null {
+    const loaded = Array.from(loadedMLXModels.values()).filter(m => m.process);
+    return loaded.length > 0 ? loaded[loaded.length - 1]!.process : null;
+  },
 };
 
 /**
- * Kill any existing MLX server process
+ * Kill a specific MLX model instance by ID
+ */
+function killMLXModel(modelId: string): Promise<void> {
+  return new Promise((resolve) => {
+    const instance = loadedMLXModels.get(modelId);
+    if (instance?.process) {
+      console.log(`[MLX] Killing MLX server for ${modelId} on port ${instance.port}`);
+      instance.process.kill("SIGTERM");
+      instance.process = null;
+    }
+    loadedMLXModels.delete(modelId);
+    setTimeout(resolve, 500); // Give time for port to be released
+  });
+}
+
+/**
+ * Kill ALL MLX server processes (legacy compatibility)
  */
 function killMLXServer(): Promise<void> {
-  return new Promise((resolve) => {
-    if (mlxState.process) {
-      console.log(`[MLX] Killing existing MLX server (model: ${mlxState.activeModel})`);
-      mlxState.process.kill("SIGTERM");
-      mlxState.process = null;
+  return new Promise(async (resolve) => {
+    const modelIds = Array.from(loadedMLXModels.keys());
+    for (const modelId of modelIds) {
+      await killMLXModel(modelId);
     }
     // Also kill any orphaned processes
-    const killer = spawn("pkill", ["-f", `mlx_lm.server.*${MLX_PORT}`]);
+    const killer = spawn("pkill", ["-f", `mlx_lm.server`]);
     killer.on("close", () => {
-      setTimeout(resolve, 500); // Give time for port to be released
+      setTimeout(resolve, 500);
     });
   });
 }
 
 /**
- * Wait for MLX server to be ready
+ * Wait for MLX server to be ready on a specific port
  */
-async function waitForMLXReady(timeoutMs = 120000): Promise<boolean> {
+async function waitForMLXReady(port: number, instance: MLXModelInstance, timeoutMs = 600000): Promise<boolean> {
   const startTime = Date.now();
   const checkInterval = 1000;
+  const url = `http://localhost:${port}`;
 
   while (Date.now() - startTime < timeoutMs) {
     try {
-      const res = await fetch(`${MLX_URL}/v1/models`, {
+      const res = await fetch(`${url}/v1/models`, {
         signal: AbortSignal.timeout(2000)
       });
       if (res.ok) {
-        console.log("[MLX] Server is ready!");
+        console.log(`[MLX] Server for ${instance.modelId} is ready on port ${port}!`);
         return true;
       }
     } catch {
       // Not ready yet
     }
-    mlxState.loadProgress = `Loading... ${Math.round((Date.now() - startTime) / 1000)}s`;
+    instance.loadProgress = `Loading... ${Math.round((Date.now() - startTime) / 1000)}s`;
     await new Promise(r => setTimeout(r, checkInterval));
   }
   return false;
 }
 
 /**
- * Ensure the specified MLX model is loaded
- * If a different model is loaded, kill and restart with new model
+ * Ensure the specified MLX model is loaded (PARALLEL - no killing other models)
+ * Each model gets its own port and process
  */
-async function ensureMLXModel(modelId: string): Promise<{ success: boolean; error?: string }> {
+async function ensureMLXModel(modelId: string): Promise<{ success: boolean; error?: string; port?: number }> {
   const modelInfo = MODELS[modelId];
   if (!modelInfo || (modelInfo.backend !== "mlx" && modelInfo.backend !== "mlx_vision")) {
     return { success: false, error: `Model ${modelId} is not an MLX model` };
@@ -104,89 +145,96 @@ async function ensureMLXModel(modelId: string): Promise<{ success: boolean; erro
     return { success: false, error: `Model path ${modelPath} does not exist` };
   }
 
-  // Already loaded?
-  if (mlxState.activeModel === modelId && !mlxState.loading) {
+  // Already loaded? Check existing instance
+  const existing = loadedMLXModels.get(modelId);
+  if (existing && !existing.loading && existing.process) {
     // Verify server is still running
     try {
-      const res = await fetch(`${MLX_URL}/v1/models`, { signal: AbortSignal.timeout(2000) });
+      const res = await fetch(`http://localhost:${existing.port}/v1/models`, { signal: AbortSignal.timeout(2000) });
       if (res.ok) {
-        console.log(`[MLX] Model ${modelId} already loaded and running`);
-        return { success: true };
+        console.log(`[MLX] Model ${modelId} already loaded on port ${existing.port}`);
+        return { success: true, port: existing.port };
       }
     } catch {
-      console.log(`[MLX] Server not responding, will restart`);
+      console.log(`[MLX] Server for ${modelId} not responding, will restart`);
+      await killMLXModel(modelId);
     }
   }
 
-  // Already loading?
-  if (mlxState.loading) {
-    return { success: false, error: "Another model is currently loading" };
+  // Already loading this specific model?
+  if (existing?.loading) {
+    return { success: false, error: `Model ${modelId} is currently loading` };
   }
 
-  // Start loading
-  mlxState.loading = true;
-  mlxState.loadProgress = "Stopping previous model...";
-  mlxState.lastError = null;
+  // Assign new port for this model
+  const port = nextMLXPort++;
+
+  // Create instance record
+  const instance: MLXModelInstance = {
+    modelId,
+    port,
+    process: null,
+    loading: true,
+    loadProgress: `Starting ${modelInfo.name}...`,
+    lastError: null,
+    loadedAt: null,
+  };
+  loadedMLXModels.set(modelId, instance);
 
   try {
-    // Kill existing server
-    await killMLXServer();
-
-    // Start new server
-    mlxState.loadProgress = `Starting ${modelInfo.name}...`;
-    console.log(`[MLX] Starting server for ${modelId} at ${modelPath}`);
+    console.log(`[MLX] Starting server for ${modelId} at ${modelPath} on port ${port}`);
 
     const proc = spawn("mlx_lm.server", [
       "--model", modelPath,
-      "--port", String(MLX_PORT),
+      "--port", String(port),
       "--host", "0.0.0.0"
     ], {
       env: { ...process.env, PATH: `/Users/zigota/Library/Python/3.9/bin:${process.env.PATH}` },
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    mlxState.process = proc;
+    instance.process = proc;
 
     // Log output for debugging
     proc.stdout?.on("data", (data) => {
       const line = data.toString().trim();
-      if (line) console.log(`[MLX stdout] ${line}`);
+      if (line) console.log(`[MLX:${modelId}] ${line}`);
     });
     proc.stderr?.on("data", (data) => {
       const line = data.toString().trim();
-      if (line) console.log(`[MLX stderr] ${line}`);
+      if (line) console.log(`[MLX:${modelId}] ${line}`);
     });
 
     proc.on("error", (err) => {
-      console.error(`[MLX] Process error:`, err);
-      mlxState.lastError = err.message;
-      mlxState.loading = false;
+      console.error(`[MLX:${modelId}] Process error:`, err);
+      instance.lastError = err.message;
+      instance.loading = false;
     });
 
     proc.on("exit", (code) => {
-      console.log(`[MLX] Process exited with code ${code}`);
-      if (mlxState.activeModel === modelId) {
-        mlxState.activeModel = null;
-      }
+      console.log(`[MLX:${modelId}] Process exited with code ${code}`);
+      loadedMLXModels.delete(modelId);
     });
 
     // Wait for server to be ready
-    const ready = await waitForMLXReady();
+    const ready = await waitForMLXReady(port, instance);
 
     if (ready) {
-      mlxState.activeModel = modelId;
-      mlxState.loading = false;
-      mlxState.loadProgress = "";
-      return { success: true };
+      instance.loading = false;
+      instance.loadProgress = "";
+      instance.loadedAt = new Date();
+      return { success: true, port };
     } else {
-      mlxState.loading = false;
-      mlxState.lastError = "Timeout waiting for server to start";
+      instance.loading = false;
+      instance.lastError = "Timeout waiting for server to start";
+      loadedMLXModels.delete(modelId);
       return { success: false, error: "Timeout waiting for MLX server" };
     }
 
   } catch (error) {
-    mlxState.loading = false;
-    mlxState.lastError = String(error);
+    instance.loading = false;
+    instance.lastError = String(error);
+    loadedMLXModels.delete(modelId);
     return { success: false, error: String(error) };
   }
 }
@@ -222,7 +270,8 @@ const MODELS: Record<string, ModelInfo> = {
   "qwen3-235b-mlx": { name: "Qwen3 235B MLX", params: "235B", backend: "mlx", vision: false, path: "~/models/Qwen3-235B-MLX-4bit" },
   "gpt-oss-heretic-mlx": { name: "GPT-OSS 120B Heretic MLX", params: "120B", backend: "mlx", vision: false, path: "~/models/gpt-oss-120b-heretic-mlx" },
   "deepseek-v3-mlx": { name: "DeepSeek-V3 MLX", params: "671B", backend: "mlx", vision: false, path: "~/models/DeepSeek-V3-MLX-4bit" },
-  "deepseek-v3.1-mlx": { name: "DeepSeek-V3.1 MLX", params: "671B", backend: "mlx", vision: false, path: "~/models/DeepSeek-V3.1-4bit-mlx" },
+  "deepseek-v3.1-mlx": { name: "DeepSeek-V3.1 MLX", params: "671B", backend: "mlx", vision: false, path: "~/.lmstudio/models/mlx-community/DeepSeek-V3.1-4bit" },
+  "deepseek-v3.2-speciale-mlx": { name: "DeepSeek-V3.2 Speciale MLX", params: "671B", backend: "mlx", vision: false, path: "~/.lmstudio/models/mlx-community/DeepSeek-V3.2-Speciale-4bit" },
   "glm-4.5-mlx": { name: "GLM-4.5 Air MLX", params: "9B", backend: "mlx", vision: false, path: "~/models/GLM-4.5-Air-mlx" },
   "minimax-m2-mlx": { name: "MiniMax M2 MLX", params: "8B", backend: "mlx", vision: false, path: "~/models/MiniMax-M2-8bit-mlx" },
   "kimi-vl-mlx": { name: "Kimi-VL A3B MLX", params: "3B", backend: "mlx_vision", vision: true, path: "~/models/Kimi-VL-A3B-Thinking-8bit-mlx" },
@@ -332,9 +381,15 @@ async function queryMLX(
 ): Promise<Response | string> {
   const { stream = false, model = "gemma3-27b-mlx" } = options;
 
-  // Get the actual model path from registry for MLX
+  // Get the actual model path and URL from registry for MLX
   const modelInfo = MODELS[model];
   const modelPath = modelInfo?.path?.replace("~", "/Users/zigota") || model;
+
+  // Get model-specific URL from loaded models
+  const mlxUrl = getMLXUrl(model);
+  if (!mlxUrl) {
+    throw new Error(`Model ${model} is not loaded. Call ensureMLXModel first.`);
+  }
 
   const body = {
     model: modelPath,
@@ -343,7 +398,7 @@ async function queryMLX(
     max_tokens: 2048,
   };
 
-  const response = await fetch(`${MLX_URL}/v1/chat/completions`, {
+  const response = await fetch(`${mlxUrl}/v1/chat/completions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -703,15 +758,13 @@ async function checkServices(): Promise<Record<string, boolean | string | null>>
     services.ollama = res.ok;
   } catch { services.ollama = false; }
 
-  // MLX dynamic server status
-  try {
-    const res = await fetch(`${MLX_URL}/v1/models`, { signal: AbortSignal.timeout(2000) });
-    services.mlx = res.ok;
-  } catch { services.mlx = false; }
+  // MLX dynamic server status - check if ANY model is loaded
+  services.mlx = loadedMLXModels.size > 0 && Array.from(loadedMLXModels.values()).some(m => !m.loading);
 
   // Add MLX-specific state
   services.mlx_active_model = mlxState.activeModel;
   services.mlx_loading = mlxState.loading;
+  services.mlx_loaded_count = Array.from(loadedMLXModels.values()).filter(m => !m.loading).length;
 
   return services;
 }
@@ -914,8 +967,8 @@ serve({
 
     const headers = {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Methods": "*",
+      "Access-Control-Allow-Headers": "*",
       "Content-Type": "application/json",
     };
 
@@ -1008,25 +1061,58 @@ serve({
     }
 
     // ========================================================================
-    // GET /api/mlx/status - Get MLX server status
+    // GET /api/mlx/status - Get MLX server status (ALL loaded models)
     // ========================================================================
     if (url.pathname === "/api/mlx/status" && req.method === "GET") {
+      // Return info about ALL loaded models
+      const loadedModels = Array.from(loadedMLXModels.entries()).map(([id, instance]) => ({
+        modelId: id,
+        port: instance.port,
+        serverUrl: `http://localhost:${instance.port}`,
+        loading: instance.loading,
+        loadProgress: instance.loadProgress,
+        lastError: instance.lastError,
+        loadedAt: instance.loadedAt?.toISOString() || null,
+        modelName: MODELS[id]?.name || id,
+        modelParams: MODELS[id]?.params || null,
+        modelPath: MODELS[id]?.path || null,
+      }));
+
       return new Response(JSON.stringify({
+        // Legacy compatibility
         activeModel: mlxState.activeModel,
         loading: mlxState.loading,
         loadProgress: mlxState.loadProgress,
         lastError: mlxState.lastError,
-        serverUrl: MLX_URL,
+        // New: all loaded models
+        loadedModels,
+        totalLoaded: loadedModels.filter(m => !m.loading).length,
       }), { headers });
     }
 
     // ========================================================================
-    // POST /api/mlx/unload - Unload the current MLX model
+    // POST /api/mlx/unload - Unload a specific MLX model (or all if no modelId)
     // ========================================================================
     if (url.pathname === "/api/mlx/unload" && req.method === "POST") {
-      await killMLXServer();
-      mlxState.activeModel = null;
-      return new Response(JSON.stringify({ success: true, message: "MLX server stopped" }), { headers });
+      try {
+        const body = await req.json().catch(() => ({}));
+        const { modelId } = body as { modelId?: string };
+
+        if (modelId) {
+          // Unload specific model
+          if (!loadedMLXModels.has(modelId)) {
+            return new Response(JSON.stringify({ success: false, error: `Model ${modelId} is not loaded` }), { status: 400, headers });
+          }
+          await killMLXModel(modelId);
+          return new Response(JSON.stringify({ success: true, message: `Model ${modelId} unloaded` }), { headers });
+        } else {
+          // Unload all models (legacy behavior)
+          await killMLXServer();
+          return new Response(JSON.stringify({ success: true, message: "All MLX servers stopped" }), { headers });
+        }
+      } catch (error) {
+        return new Response(JSON.stringify({ error: String(error) }), { status: 500, headers });
+      }
     }
 
     // ========================================================================

@@ -476,30 +476,24 @@ export class BrowserVMProvider {
     return true;
   }
 
-  /** Get VM state snapshot (for time machine) */
-  async getStateSnapshot(): Promise<{
-    accounts: Map<string, {balance: bigint, nonce: bigint}>,
-    depositoryState: any
-  }> {
-    // Snapshot VM state for time travel
-    const snapshot = {
-      accounts: new Map<string, {balance: bigint, nonce: bigint}>(),
-      depositoryState: {
-        address: this.depositoryAddress?.toString(),
-        // Add more state as needed
-      }
-    };
+  // ═══════════════════════════════════════════════════════════════════════════
+  //                              TIME TRAVEL (J-MACHINE STATE)
+  // ═══════════════════════════════════════════════════════════════════════════
 
-    // Get deployer account state
-    const deployerAcc = await this.vm.stateManager.getAccount(this.deployerAddress);
-    if (deployerAcc) {
-      snapshot.accounts.set(this.deployerAddress.toString(), {
-        balance: deployerAcc.balance,
-        nonce: deployerAcc.nonce
-      });
-    }
+  /** Capture current EVM state root (32 bytes) - for JReplica */
+  async captureStateRoot(): Promise<Uint8Array> {
+    return await this.vm.stateManager.getStateRoot();
+  }
 
-    return snapshot;
+  /** Time travel to historical state root */
+  async timeTravel(stateRoot: Uint8Array): Promise<void> {
+    await this.vm.stateManager.setStateRoot(stateRoot);
+    console.log(`[BrowserVM] Time traveled to state root: ${Buffer.from(stateRoot).toString('hex').slice(0, 16)}...`);
+  }
+
+  /** Get current block number */
+  getBlockNumber(): bigint {
+    return this.vm.blockchain?.currentBlock?.header?.number || 0n;
   }
 
   /** Check if initialized */

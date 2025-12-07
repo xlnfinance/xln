@@ -147,9 +147,9 @@ export class JEventWatcher {
       const currentBlock = await this.provider.getBlockNumber();
 
       if (DEBUG) {
-        console.log(`🔭🔍 SYNC-START: Current blockchain block=${currentBlock}, total replicas=${env.replicas.size}`);
+        console.log(`🔭🔍 SYNC-START: Current blockchain block=${currentBlock}, total eReplicas=${env.eReplicas.size}`);
         console.log(`🔭🔍 SYNC-ENV-TIMESTAMP: env.timestamp=${env.timestamp}`);
-        for (const [replicaKey, replica] of env.replicas.entries()) {
+        for (const [replicaKey, replica] of env.eReplicas.entries()) {
           console.log(`🔭🔍 REPLICA-STATE: ${replicaKey} → jBlock=${replica.state.jBlock}, height=${replica.state.height}, isProposer=${replica.isProposer}`);
         }
       }
@@ -157,7 +157,7 @@ export class JEventWatcher {
       // 1. Find all proposer replicas that need syncing
       const proposerReplicas: Array<{entityId: string, signerId: string, lastJBlock: number}> = [];
 
-      for (const [replicaKey, replica] of env.replicas.entries()) {
+      for (const [replicaKey, replica] of env.eReplicas.entries()) {
         if (replica.isProposer) {
           const [entityId, signerId] = replicaKey.split(':');
           if (!entityId || !signerId) continue;

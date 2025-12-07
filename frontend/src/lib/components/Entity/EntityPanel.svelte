@@ -35,8 +35,8 @@
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
 
   // Extract the stores from entityEnv (or use global stores as fallback)
-  // entityEnv.replicas, entityEnv.xlnFunctions, entityEnv.history, entityEnv.timeIndex are Readable stores
-  const contextReplicas = entityEnv?.replicas;
+  // entityEnv.eReplicas, entityEnv.xlnFunctions, entityEnv.history, entityEnv.timeIndex are Readable stores
+  const contextReplicas = entityEnv?.eReplicas;
   const contextXlnFunctions = entityEnv?.xlnFunctions;
   const contextHistory = entityEnv?.history;
   const contextTimeIndex = entityEnv?.timeIndex;

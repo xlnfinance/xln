@@ -126,9 +126,9 @@ SYSTEM:
     }
 
     if (subcommand === 'stats') {
-      const replicaKeys = Array.from(env.replicas.keys()) as string[];
+      const replicaKeys = Array.from(env.eReplicas.keys()) as string[];
       const entityCount = new Set(replicaKeys.map(k => k.split(':')[0])).size;
-      const totalAccounts = Array.from(env.replicas.values()).reduce((sum, r: any) => sum + (r.state?.accounts?.size || 0), 0);
+      const totalAccounts = Array.from(env.eReplicas.values()).reduce((sum, r: any) => sum + (r.state?.accounts?.size || 0), 0);
 
       addOutput('╔═══════════════════════════════════════╗', 'info');
       addOutput('║    XLN Network Statistics             ║', 'info');
@@ -152,7 +152,7 @@ SYSTEM:
     }
 
     // Extract entities and accounts
-    const replicaKeys = Array.from(env.replicas.keys()) as string[];
+    const replicaKeys = Array.from(env.eReplicas.keys()) as string[];
     const entityIds = new Set(replicaKeys.map(k => k.split(':')[0]).filter((id): id is string => !!id));
 
     if (entityIds.size === 0) {
@@ -168,7 +168,7 @@ SYSTEM:
 
     // Render each entity and its accounts using invariant ASCII style
     for (const entityId of Array.from(entityIds)) {
-      const replicaEntry = Array.from(env.replicas.entries()).find(([k]) => k.startsWith(entityId + ':'));
+      const replicaEntry = Array.from(env.eReplicas.entries()).find(([k]) => k.startsWith(entityId + ':'));
       const replica = replicaEntry?.[1];
       if (!replica) continue;
 
@@ -250,7 +250,7 @@ SYSTEM:
       return;
     }
 
-    const replicaKeys = Array.from(env.replicas.keys()) as string[];
+    const replicaKeys = Array.from(env.eReplicas.keys()) as string[];
     const entityIds = new Set(replicaKeys.map(k => k.split(':')[0]).filter((id): id is string => !!id));
 
     if (!subcommand || subcommand === 'list') {

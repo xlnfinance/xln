@@ -24,7 +24,7 @@
     
     // Find current entity's replica
     const replicaKey = `${currentEntityId}:${currentSignerId}`;
-    const replica = $xlnEnvironment.replicas?.get(replicaKey);
+    const replica = $xlnEnvironment.eReplicas?.get(replicaKey);
     
     if (!replica?.state?.accounts) return false;
 

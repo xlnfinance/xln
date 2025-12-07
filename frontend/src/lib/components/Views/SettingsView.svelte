@@ -46,7 +46,7 @@
   // J-machine status (derived from environment)
   $: jMachineStatus = (() => {
     if (!$xlnEnvironment) return { block: 0, events: 0, height: 0 };
-    const maxJBlock = Math.max(0, ...Array.from($xlnEnvironment.replicas?.values() || []).map((r: any) => r.state?.jBlock || 0));
+    const maxJBlock = Math.max(0, ...Array.from($xlnEnvironment.eReplicas?.values() || []).map((r: any) => r.state?.jBlock || 0));
     return {
       block: maxJBlock,
       events: $xlnEnvironment?.runtimeInput?.entityInputs?.length || 0,
@@ -58,7 +58,7 @@
   $: jWatcherStatus = (() => {
     if (!$xlnEnvironment) return null;
     try {
-      const proposers = [...($xlnEnvironment.replicas?.entries() || [])]
+      const proposers = [...($xlnEnvironment.eReplicas?.entries() || [])]
         .filter(([, replica]) => replica.isProposer)
         .map(([key, replica]) => {
           const [entityId, signerId] = key.split(':');
@@ -339,7 +339,7 @@
     </div>
   {:else if $xlnEnvironment}
     <div class="init-status success">
-      ✅ XLN Environment active (Height: {$xlnEnvironment.height}, Replicas: {$xlnEnvironment.replicas?.size || 0})
+      ✅ XLN Environment active (Height: {$xlnEnvironment.height}, Replicas: {$xlnEnvironment.eReplicas?.size || 0})
     </div>
   {/if}
 

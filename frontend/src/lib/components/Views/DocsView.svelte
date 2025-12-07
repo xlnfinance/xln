@@ -153,7 +153,7 @@
     {#if currentDoc === 'README'}
       <div class="intro-scenario">
         <h1>🧠 XLN Architecture</h1>
-        <p style="font-size: 1.125rem; margin-bottom: 2rem; color: var(--text-secondary);">
+        <p style="font-size: 1.125rem; margin-bottom: 2rem; color: rgba(255, 255, 255, 0.6);">
           Experience the first xlnomy — a 2×2×2 grid cube where value flows through 3D space.
         </p>
         <IsolatedScenarioPlayer
@@ -176,24 +176,24 @@
   .docs-view {
     display: grid;
     grid-template-columns: 280px 1fr;
-    height: 100vh;
+    height: calc(100vh - 56px);
     overflow: hidden;
-    background: var(--bg);
-    color: var(--text);
+    background: #0a0a0a;
+    color: #e0e0e0;
   }
 
   /* Sidebar */
   .docs-sidebar {
-    border-right: 1px solid var(--border);
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
     overflow-y: auto;
     padding: 1.5rem 1rem;
-    background: var(--bg-secondary);
+    background: #111;
   }
 
   .sidebar-header h2 {
     font-size: 1.25rem;
     margin: 0 0 1.5rem 0;
-    color: var(--accent);
+    color: #4fd18b;
     font-weight: 600;
   }
 
@@ -204,20 +204,20 @@
   .search-box input {
     width: 100%;
     padding: 0.5rem 0.75rem;
-    background: var(--bg);
-    border: 1px solid var(--border);
+    background: #0a0a0a;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 6px;
-    color: var(--text);
+    color: #e0e0e0;
     font-size: 0.875rem;
   }
 
   .search-box input:focus {
     outline: none;
-    border-color: var(--accent);
+    border-color: #4fd18b;
   }
 
   .search-box input::placeholder {
-    color: var(--text-secondary);
+    color: rgba(255, 255, 255, 0.4);
   }
 
   .sidebar-nav {
@@ -230,7 +230,7 @@
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: var(--text-secondary);
+    color: rgba(255, 255, 255, 0.4);
     margin: 0 0 0.5rem 0;
     padding: 0 0.75rem;
     font-weight: 600;
@@ -243,7 +243,7 @@
     padding: 0.5rem 0.75rem;
     background: none;
     border: none;
-    color: var(--text);
+    color: #e0e0e0;
     cursor: pointer;
     border-radius: 6px;
     transition: all 0.2s;
@@ -251,12 +251,12 @@
   }
 
   .nav-item:hover {
-    background: var(--bg);
-    color: var(--accent);
+    background: #0a0a0a;
+    color: #4fd18b;
   }
 
   .nav-item.active {
-    background: var(--accent);
+    background: #4fd18b;
     color: white;
     font-weight: 500;
   }
@@ -265,7 +265,7 @@
   .docs-content {
     overflow-y: auto;
     padding: 3rem;
-    background: var(--bg);
+    background: #0a0a0a;
   }
 
   .intro-scenario {
@@ -275,7 +275,7 @@
   .intro-scenario h1 {
     font-size: 2.5rem;
     margin-bottom: 1rem;
-    color: var(--text);
+    color: #e0e0e0;
   }
 
   .intro-scenario p {
@@ -292,7 +292,7 @@
     font-size: 2.5rem;
     font-weight: 700;
     margin: 0 0 1.5rem 0;
-    color: var(--text);
+    color: #e0e0e0;
     line-height: 1.2;
   }
 
@@ -301,32 +301,32 @@
     font-weight: 600;
     margin: 3rem 0 1rem 0;
     padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--border);
-    color: var(--text);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    color: #e0e0e0;
   }
 
   .markdown-body :global(h3) {
     font-size: 1.5rem;
     font-weight: 600;
     margin: 2rem 0 0.75rem 0;
-    color: var(--text);
+    color: #e0e0e0;
   }
 
   .markdown-body :global(h4) {
     font-size: 1.25rem;
     font-weight: 600;
     margin: 1.5rem 0 0.75rem 0;
-    color: var(--text);
+    color: #e0e0e0;
   }
 
   .markdown-body :global(p) {
     line-height: 1.7;
     margin-bottom: 1rem;
-    color: var(--text);
+    color: #e0e0e0;
   }
 
   .markdown-body :global(a) {
-    color: var(--accent);
+    color: #4fd18b;
     text-decoration: none;
   }
 
@@ -344,21 +344,21 @@
   .markdown-body :global(li) {
     line-height: 1.7;
     margin-bottom: 0.5rem;
-    color: var(--text);
+    color: #e0e0e0;
   }
 
   .markdown-body :global(code) {
-    background: var(--bg-secondary);
+    background: #111;
     padding: 0.2em 0.4em;
     border-radius: 3px;
     font-family: 'Courier New', Courier, monospace;
     font-size: 0.9em;
-    color: var(--accent);
+    color: #4fd18b;
   }
 
   .markdown-body :global(pre) {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
+    background: #111;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     padding: 1rem;
     border-radius: 8px;
     overflow-x: auto;
@@ -368,15 +368,15 @@
   .markdown-body :global(pre code) {
     background: none;
     padding: 0;
-    color: var(--text);
+    color: #e0e0e0;
     font-size: 0.875rem;
   }
 
   .markdown-body :global(blockquote) {
-    border-left: 4px solid var(--accent);
+    border-left: 4px solid #4fd18b;
     padding-left: 1rem;
     margin: 1.5rem 0;
-    color: var(--text-secondary);
+    color: rgba(255, 255, 255, 0.6);
     font-style: italic;
   }
 
@@ -389,23 +389,23 @@
 
   .markdown-body :global(th),
   .markdown-body :global(td) {
-    border: 1px solid var(--border);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     padding: 0.75rem;
     text-align: left;
   }
 
   .markdown-body :global(th) {
-    background: var(--bg-secondary);
+    background: #111;
     font-weight: 600;
-    color: var(--text);
+    color: #e0e0e0;
   }
 
   .markdown-body :global(td) {
-    color: var(--text);
+    color: #e0e0e0;
   }
 
   .markdown-body :global(tr:hover) {
-    background: var(--bg-secondary);
+    background: #111;
   }
 
   .markdown-body :global(img) {
@@ -417,13 +417,13 @@
 
   .markdown-body :global(hr) {
     border: none;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
     margin: 2rem 0;
   }
 
   .markdown-body :global(strong) {
     font-weight: 600;
-    color: var(--text);
+    color: #e0e0e0;
   }
 
   .markdown-body :global(em) {

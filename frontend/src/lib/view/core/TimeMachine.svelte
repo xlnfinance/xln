@@ -300,141 +300,103 @@
 </script>
 
 <div class="time-machine">
-  <!-- Navigation -->
-  <div class="nav-cluster">
+  <!-- Play/Pause (prominent, left) -->
+  <button on:click={togglePlay} class="play-btn" title="Play/Pause (Space)">
+    {#if playing}
+      <Pause size={16} />
+    {:else}
+      <Play size={16} />
+    {/if}
+  </button>
+
+  <!-- Progress Scrubber with frame info -->
+  <div class="scrubber-container">
+    <div class="frame-info">
+      <span class="frame-badge" class:live={$isLive}>
+        {$isLive ? 'LIVE' : `${$timeIndex + 1}/${$history.length}`}
+      </span>
+      <span class="time-label">{currentTime}</span>
+    </div>
+    <input
+      type="range"
+      class="scrubber"
+      min="0"
+      max={maxTimeIndex}
+      value={$timeIndex >= 0 ? $timeIndex : maxTimeIndex}
+      on:input={handleSliderInput}
+      disabled={maxTimeIndex === 0}
+      style="--progress: {progressPercent}%"
+    />
+    <span class="time-label end">{totalTime}</span>
+  </div>
+
+  <!-- Frame Navigation (separated from play) -->
+  <div class="frame-nav">
     <button on:click={localTimeOperations.goToHistoryStart} title="Go to start (Home)">
-      <SkipBack size={16} />
+      <SkipBack size={12} />
     </button>
     <button on:click={localTimeOperations.stepBackward} title="Step back (←)">
-      <ChevronLeft size={16} />
-    </button>
-    <button on:click={togglePlay} class="play-btn" title="Play/Pause (Space)">
-      {#if playing}
-        <Pause size={18} />
-      {:else}
-        <Play size={18} />
-      {/if}
+      <ChevronLeft size={12} />
     </button>
     <button on:click={localTimeOperations.stepForward} title="Step forward (→)">
-      <ChevronRight size={16} />
+      <ChevronRight size={12} />
     </button>
     <button on:click={localTimeOperations.goToLive} title="Go to live (End)">
-      <SkipForward size={16} />
+      <SkipForward size={12} />
     </button>
   </div>
 
-  <!-- Status Display -->
-  <div class="status-display">
-    <div class="timestamp">
-      <span class="label">Time</span>
-      <span class="value">{currentTime} / {totalTime}</span>
-    </div>
-    <div class="frames">
-      <span class="label">Runtime</span>
-      <span class="value">{$timeIndex >= 0 ? $timeIndex + 1 : $history.length} / {$history.length}</span>
-    </div>
-    <div class="fps">
-      <span class="label">FPS</span>
-      <span class="value">{fps.toFixed(1)}</span>
-    </div>
-  </div>
-
-  <!-- Progress Scrubber (Native HTML Range) -->
-  <input
-    type="range"
-    class="scrubber"
-    min="0"
-    max={maxTimeIndex}
-    value={$timeIndex >= 0 ? $timeIndex : maxTimeIndex}
-    on:input={handleSliderInput}
-    disabled={maxTimeIndex === 0}
-    style="--progress: {progressPercent}%"
-  />
-
-  <!-- Tools -->
-  <div class="tools-cluster">
-    <!-- Loop -->
-    <div class="dropdown">
-      <button
-        class="tool-btn"
-        class:active={loopMode !== 'off'}
-        on:click={() => (showLoopMenu = !showLoopMenu)}
-        title="Loop mode ([)"
-      >
-        <Repeat size={16} />
-        {#if loopMode === 'slice' && sliceStart !== null && sliceEnd !== null}
-          <span class="badge">{sliceStart}-{sliceEnd}</span>
-        {:else if loopMode === 'all'}
-          <span class="badge">All</span>
-        {/if}
-        <ChevronDown size={12} />
-      </button>
-      {#if showLoopMenu}
-        <div class="menu">
-          <button on:click={() => setLoopMode('off')}>Off</button>
-          <button on:click={() => setLoopMode('all')}>Loop All</button>
-          <button on:click={() => setLoopMode('slice')} disabled={sliceStart === null || sliceEnd === null}>
-            Loop Slice
-          </button>
-        </div>
-      {/if}
-    </div>
-
-    <!-- Slice Marker -->
-    <button
-      class="tool-btn"
-      class:active={sliceStart !== null}
-      on:click={markSlicePoint}
-      title="Mark slice ([)"
-    >
-      <Scissors size={16} />
-      {#if sliceStart !== null && sliceEnd === null}
-        <span class="badge">A</span>
-      {:else if sliceStart !== null && sliceEnd !== null}
-        <span class="badge">A-B</span>
-      {/if}
-    </button>
-
-    <!-- Export -->
-    <div class="dropdown">
-      <button class="tool-btn" on:click={() => (showExportMenu = !showExportMenu)} title="Export">
-        <Download size={16} />
-        <ChevronDown size={12} />
-      </button>
-      {#if showExportMenu}
-        <div class="menu">
-          <button on:click={exportFrames}>📥 Export Frames (JSON)</button>
-          <button on:click={shareURL}>🔗 Share URL (Data Only)</button>
-          <button on:click={shareURLWithUI}>🎨 Share URL (+ UI)</button>
-        </div>
-      {/if}
-    </div>
-  </div>
-
-  <!-- Speed -->
-  <div class="speed-cluster dropdown">
-    <button class="speed-btn" on:click={() => (showSpeedMenu = !showSpeedMenu)}>
+  <!-- Mega Dropdown (Settings: speed + loop + export) -->
+  <div class="dropdown">
+    <button class="settings-btn" on:click={() => { showSpeedMenu = !showSpeedMenu; showLoopMenu = false; showExportMenu = false; }} title="Settings">
       <span class="speed-value">{speed}x</span>
-      <ChevronDown size={12} />
+      {#if loopMode !== 'off'}
+        <Repeat size={10} />
+      {/if}
+      <ChevronDown size={10} />
     </button>
     {#if showSpeedMenu}
-      <div class="menu">
-        {#each speedOptions as option}
-          <button
-            on:click={() => setSpeed(option.value)}
-            class:selected={speed === option.value}
-          >
-            {option.label}
-          </button>
-        {/each}
+      <div class="menu mega">
+        <div class="menu-section">Speed</div>
+        <div class="speed-grid">
+          {#each speedOptions as option}
+            <button
+              on:click={() => setSpeed(option.value)}
+              class:selected={speed === option.value}
+            >
+              {option.label}
+            </button>
+          {/each}
+        </div>
+        <div class="menu-divider"></div>
+        <div class="menu-section">Loop</div>
+        <button on:click={() => setLoopMode('off')} class:selected={loopMode === 'off'}>Off</button>
+        <button on:click={() => setLoopMode('all')} class:selected={loopMode === 'all'}>Loop All</button>
+        <button on:click={() => setLoopMode('slice')} class:selected={loopMode === 'slice'} disabled={sliceStart === null || sliceEnd === null}>
+          Loop Slice {sliceStart !== null && sliceEnd !== null ? `(${sliceStart}-${sliceEnd})` : ''}
+        </button>
+        <button on:click={markSlicePoint}>
+          <Scissors size={12} />
+          {#if sliceStart === null}
+            Mark Start
+          {:else if sliceEnd === null}
+            Mark End (A: {sliceStart})
+          {:else}
+            Clear Slice
+          {/if}
+        </button>
+        <div class="menu-divider"></div>
+        <div class="menu-section">Export</div>
+        <button on:click={exportFrames}>
+          <Download size={12} />
+          Export JSON
+        </button>
+        <button on:click={shareURL}>Share URL</button>
+        <button on:click={shareURLWithUI}>Share URL + UI</button>
       </div>
     {/if}
   </div>
 
-  <!-- Mode Badge -->
-  <div class="mode-badge" class:live={$isLive}>
-    {$isLive ? 'LIVE' : 'HISTORY'}
-  </div>
   <!-- Fed Chair Subtitle (inline, above controls) -->
   <FrameSubtitle subtitle={currentSubtitle} visible={!$isLive && currentSubtitle !== undefined} />
 </div>
@@ -443,15 +405,11 @@
   .time-machine {
     display: flex;
     align-items: center;
-    gap: 1rem;
-    padding: 0.75rem 1.5rem;
-    background: #252526; /* Solid background to cover 3D scene underneath */
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.5);
-    box-shadow:
-      0 -1px 0 0 rgba(255, 255, 255, 0.05),
-      0 8px 32px 0 rgba(0, 0, 0, 0.3);
-    height: 60px;
+    gap: 0.75rem;
+    padding: 0.5rem 1rem;
+    background: #1a1a1a;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    height: 48px;
     position: fixed;
     bottom: 0;
     left: 0;
@@ -459,94 +417,108 @@
     z-index: 100;
   }
 
-  /* Navigation Cluster */
-  .nav-cluster {
-    display: flex;
-    gap: 4px;
-    padding: 4px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 8px;
-  }
-
-  .nav-cluster button,
-  .tool-btn,
-  .speed-btn {
+  /* Play Button (prominent) */
+  .play-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.9);
-    width: 32px;
-    height: 32px;
-    border-radius: 6px;
+    background: rgba(0, 122, 255, 0.15);
+    border: none;
+    color: rgba(0, 122, 255, 1);
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .nav-cluster button:hover,
-  .tool-btn:hover,
-  .speed-btn:hover {
-    background: rgba(255, 255, 255, 0.15);
-    border-color: rgba(0, 122, 255, 0.5);
-    transform: translateY(-1px);
-  }
-
-  .play-btn {
-    background: rgba(0, 122, 255, 0.2) !important;
-    border-color: rgba(0, 122, 255, 0.4) !important;
-    width: 36px !important;
-    height: 36px !important;
+    transition: all 0.15s;
+    flex-shrink: 0;
   }
 
   .play-btn:hover {
-    background: rgba(0, 122, 255, 0.3) !important;
-    box-shadow: 0 0 12px rgba(0, 122, 255, 0.4);
+    background: rgba(0, 122, 255, 0.25);
   }
 
-  .tool-btn.active {
-    background: rgba(0, 255, 136, 0.2);
-    border-color: rgba(0, 255, 136, 0.4);
-  }
-
-  /* Status Display */
-  .status-display {
+  /* Scrubber Container */
+  .scrubber-container {
+    flex: 1;
     display: flex;
-    gap: 1.5rem;
-    font-family: 'SF Mono', 'Monaco', monospace;
-    font-size: 0.8125rem;
+    align-items: center;
+    gap: 8px;
+    min-width: 200px;
   }
 
-  .status-display > div {
+  .frame-info {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
   }
 
-  .label {
-    font-size: 0.6875rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: rgba(255, 255, 255, 0.4);
-    font-weight: 500;
-  }
-
-  .value {
-    color: rgba(255, 255, 255, 0.95);
+  .frame-badge {
+    font-family: 'SF Mono', monospace;
+    font-size: 0.625rem;
     font-weight: 600;
-    font-variant-numeric: tabular-nums;
+    padding: 3px 6px;
+    background: rgba(0, 122, 255, 0.1);
+    border-radius: 3px;
+    color: rgba(0, 122, 255, 0.9);
+    white-space: nowrap;
   }
 
-  /* Progress Scrubber (Native Range Input) */
+  .frame-badge.live {
+    background: rgba(0, 255, 136, 0.1);
+    color: rgba(0, 255, 136, 0.9);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  .time-label {
+    font-family: 'SF Mono', monospace;
+    font-size: 0.625rem;
+    color: rgba(255, 255, 255, 0.5);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .time-label.end {
+    flex-shrink: 0;
+  }
+
+  /* Frame Navigation */
+  .frame-nav {
+    display: flex;
+    gap: 1px;
+    padding: 2px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+  .frame-nav button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    width: 24px;
+    height: 24px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .frame-nav button:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
+  }
+
+  /* Progress Scrubber */
   .scrubber {
     flex: 1;
-    min-width: 200px;
-    height: 6px;
+    height: 4px;
     -webkit-appearance: none;
     appearance: none;
-    background: rgba(255, 255, 255, 0.1); /* Fallback background */
-    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
     cursor: pointer;
     outline: none;
   }
@@ -554,15 +526,14 @@
   /* WebKit (Chrome/Safari) */
   .scrubber::-webkit-slider-track {
     width: 100%;
-    height: 6px;
-    background: rgba(255, 255, 255, 0.1); /* Gray track as base */
-    border-radius: 3px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
   }
 
-  /* Progress fill using ::before pseudo-element (CSS var not supported in gradients on all browsers) */
   .scrubber::-webkit-slider-runnable-track {
     width: 100%;
-    height: 6px;
+    height: 4px;
     background: linear-gradient(
       to right,
       rgba(0, 122, 255, 0.8) 0%,
@@ -570,32 +541,32 @@
       rgba(255, 255, 255, 0.1) var(--progress, 0%),
       rgba(255, 255, 255, 0.1) 100%
     );
-    border-radius: 3px;
+    border-radius: 2px;
   }
 
   .scrubber::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: 14px;
-    height: 14px;
-    margin-top: -4px;  /* Center on track */
+    width: 12px;
+    height: 12px;
+    margin-top: -4px;
     border-radius: 50%;
     background: white;
     border: 2px solid rgba(0, 122, 255, 1);
     cursor: grab;
-    box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.2), 0 2px 8px rgba(0, 0, 0, 0.4);
-    transition: transform 0.2s;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+    transition: transform 0.15s;
   }
 
   .scrubber:active::-webkit-slider-thumb {
     cursor: grabbing;
-    transform: scale(1.2);
+    transform: scale(1.15);
   }
 
   /* Firefox */
   .scrubber::-moz-range-track {
     width: 100%;
-    height: 6px;
+    height: 4px;
     background: linear-gradient(
       to right,
       rgba(0, 122, 255, 0.8) 0%,
@@ -603,18 +574,18 @@
       rgba(255, 255, 255, 0.1) var(--progress, 0%),
       rgba(255, 255, 255, 0.1) 100%
     );
-    border-radius: 3px;
+    border-radius: 2px;
   }
 
   .scrubber::-moz-range-progress {
-    height: 6px;
+    height: 4px;
     background: rgba(0, 122, 255, 0.8);
-    border-radius: 3px 0 0 3px;
+    border-radius: 2px 0 0 2px;
   }
 
   .scrubber::-moz-range-thumb {
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
     border: 2px solid rgba(0, 122, 255, 1);
     border-radius: 50%;
     background: white;
@@ -630,20 +601,6 @@
     cursor: not-allowed;
   }
 
-  /* Tools Cluster */
-  .tools-cluster {
-    display: flex;
-    gap: 4px;
-  }
-
-  .badge {
-    font-size: 0.625rem;
-    font-weight: 600;
-    background: rgba(0, 255, 136, 0.3);
-    padding: 1px 4px;
-    border-radius: 3px;
-  }
-
   /* Dropdown */
   .dropdown {
     position: relative;
@@ -652,37 +609,60 @@
   .menu {
     position: absolute;
     bottom: 100%;
-    left: 0;
-    margin-bottom: 8px;
-    background: rgba(20, 20, 20, 0.95);
-    backdrop-filter: blur(20px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-bottom: 6px;
+    background: rgba(20, 20, 20, 0.98);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
     padding: 4px;
-    min-width: 120px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    min-width: 100px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
     z-index: 1000;
+  }
+
+  .menu.wide {
+    min-width: 160px;
+  }
+
+  .menu-section {
+    padding: 4px 8px 2px;
+    font-size: 0.625rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: rgba(255, 255, 255, 0.4);
+    font-weight: 600;
+  }
+
+  .menu-divider {
+    height: 1px;
+    background: rgba(255, 255, 255, 0.1);
+    margin: 4px 0;
   }
 
   .menu button {
     width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     text-align: left;
-    padding: 8px 12px;
+    padding: 6px 8px;
     background: transparent;
     border: none;
-    color: rgba(255, 255, 255, 0.9);
-    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.8);
+    border-radius: 4px;
     cursor: pointer;
-    font-size: 0.875rem;
-    transition: all 0.15s;
+    font-size: 0.75rem;
+    transition: all 0.1s;
   }
 
   .menu button:hover:not(:disabled) {
-    background: rgba(0, 122, 255, 0.2);
+    background: rgba(255, 255, 255, 0.1);
   }
 
   .menu button.selected {
-    background: rgba(0, 122, 255, 0.3);
+    background: rgba(0, 122, 255, 0.2);
     color: white;
   }
 
@@ -691,85 +671,76 @@
     cursor: not-allowed;
   }
 
-  /* Speed */
-  .speed-cluster {
+  /* Settings Button */
+  .settings-btn {
     display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    border: none;
+    color: rgba(255, 255, 255, 0.7);
+    padding: 0 10px;
+    height: 28px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
   }
 
-  .speed-btn {
-    width: auto !important;
-    padding: 0 12px !important;
-    gap: 6px;
+  .settings-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: white;
   }
 
   .speed-value {
     font-family: 'SF Mono', monospace;
-    font-weight: 600;
-    font-size: 0.875rem;
-    min-width: 40px;
-    text-align: right;
+    font-size: 0.6875rem;
+    font-weight: 500;
   }
 
-  /* Mode Badge */
-  .mode-badge {
-    display: flex;
-    align-items: center;
+  /* Mega Menu */
+  .menu.mega {
+    min-width: 180px;
+    right: 0;
+    left: auto;
+    transform: none;
+  }
+
+  .speed-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 2px;
+    padding: 2px;
+  }
+
+  .speed-grid button {
+    width: auto;
+    padding: 4px 6px;
+    font-size: 0.6875rem;
     justify-content: center;
-    padding: 0 12px;
-    height: 32px;
-    background: rgba(0, 122, 255, 0.15);
-    border: 1px solid rgba(0, 122, 255, 0.3);
-    border-radius: 6px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    color: rgba(0, 122, 255, 1);
-    text-shadow: 0 0 8px rgba(0, 122, 255, 0.5);
-  }
-
-  .mode-badge.live {
-    background: rgba(0, 255, 136, 0.15);
-    border-color: rgba(0, 255, 136, 0.3);
-    color: rgba(0, 255, 136, 1);
-    text-shadow: 0 0 8px rgba(0, 255, 136, 0.5);
-    animation: pulse 2s ease-in-out infinite;
   }
 
   @keyframes pulse {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.7;
-    }
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
   }
 
   /* Responsive */
-  @media (max-width: 1024px) {
-    .status-display {
-      gap: 1rem;
-    }
-
-    .fps {
-      display: none;
-    }
-  }
-
   @media (max-width: 768px) {
     .time-machine {
       flex-wrap: wrap;
       height: auto;
-      padding: 0.5rem 1rem;
+      gap: 0.5rem;
+      padding: 0.5rem;
     }
 
-    .scrubber {
+    .scrubber-container {
       order: -1;
       width: 100%;
-      margin-bottom: 0.5rem;
     }
 
-    .status-display .timestamp {
+    .time-label {
       display: none;
     }
   }

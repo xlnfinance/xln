@@ -41,7 +41,7 @@ export async function createXlnomy(options: {
   const contracts = await deployContracts(evm);
 
   // 3. Calculate J-Machine position (3×3 grid layout)
-  const xlnomyCount = env?.xlnomies ? env.xlnomies.size : 0;
+  const xlnomyCount = env?.jReplicas ? env.jReplicas.size : 0;
 
   // 3×3 grid positions (9 slots total):
   // [0,1,2]  top row
@@ -112,8 +112,8 @@ async function createEVM(
   rpcUrl?: string
 ): Promise<JurisdictionEVM> {
   if (type === 'browservm') {
-    const { BrowserVMEVM } = await import('./evms/browservm-evm.js');
-    const evm = new BrowserVMEVM();
+    const { BrowserEVM } = await import('./evms/browser-evm.js');
+    const evm = new BrowserEVM();
     await evm.init();
     return evm;
   } else {
@@ -162,7 +162,7 @@ async function createGridEntities(xlnomy: Xlnomy, env: any): Promise<void> {
   const entityInputs: any[] = [];
 
   // Base entity number for this Xlnomy (each Xlnomy gets 9 sequential IDs now)
-  const xlnomyIndex = env?.xlnomies ? env.xlnomies.size : 0;
+  const xlnomyIndex = env?.jReplicas ? env.jReplicas.size : 0;
   const baseEntityNum = xlnomyIndex * 9 + 1; // Index 0→1-9, Index 1→10-18, Index 2→19-27
 
   console.log(`[Xlnomy] "${xlnomy.name}" hub (index ${xlnomyIndex}) → Entity IDs ${baseEntityNum}-${baseEntityNum + 8}`);

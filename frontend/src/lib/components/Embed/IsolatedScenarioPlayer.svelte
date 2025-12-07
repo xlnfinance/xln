@@ -148,8 +148,8 @@
     entities.clear();
 
     // Render entities from frame state
-    if (frameState.replicas) {
-      frameState.replicas.forEach((replica: any, key: string) => {
+    if (frameState.eReplicas) {
+      frameState.eReplicas.forEach((replica: any, key: string) => {
         const [entityId] = key.split(':');
 
         // CRITICAL: Get position from gossip layer (where grid command stores positions)
@@ -174,7 +174,7 @@
           mesh.position.set(position.x, position.y, position.z);
         } else {
           // Fallback: radial layout
-          const replicaKeys = Array.from(frameState.replicas.keys());
+          const replicaKeys = Array.from(frameState.eReplicas.keys());
           const index = replicaKeys.indexOf(key);
           const angle = (index / replicaKeys.length) * Math.PI * 2;
           const radius = 30;
@@ -187,8 +187,8 @@
     }
 
     // Render account connections (lines between entities with accounts)
-    if (frameState.replicas) {
-      frameState.replicas.forEach((replica: any, key: string) => {
+    if (frameState.eReplicas) {
+      frameState.eReplicas.forEach((replica: any, key: string) => {
         const entityMesh = entities.get(key);
         if (!entityMesh) return;
 
@@ -198,7 +198,7 @@
 
         accounts.forEach((_account: any, counterpartyId: string) => {
           // Find counterparty mesh
-          const counterpartyKey = (Array.from(frameState.replicas.keys()) as string[]).find(k => k.startsWith(counterpartyId));
+          const counterpartyKey = (Array.from(frameState.eReplicas.keys()) as string[]).find(k => k.startsWith(counterpartyId));
           const counterpartyMesh = counterpartyKey ? entities.get(counterpartyKey) : null;
 
           if (counterpartyMesh && entityMesh) {

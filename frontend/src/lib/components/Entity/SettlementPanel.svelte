@@ -8,7 +8,7 @@
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
 
   // Extract the stores from entityEnv (or use global stores as fallback)
-  const contextReplicas = entityEnv?.replicas;
+  const contextReplicas = entityEnv?.eReplicas;
   const contextXlnFunctions = entityEnv?.xlnFunctions;
   const contextEnv = entityEnv?.env;
 
@@ -123,7 +123,7 @@
 
       // Find signer ID
       let signerId = 's1';
-      for (const key of env.replicas.keys()) {
+      for (const key of env.eReplicas.keys()) {
         if (key.startsWith(entityId + ':')) {
           signerId = key.split(':')[1]!;
           break;

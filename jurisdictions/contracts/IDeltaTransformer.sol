@@ -2,12 +2,12 @@
 pragma solidity ^0.8.24;
 
 /**
- * ISubcontractProvider - Standard interface for bilateral logic execution
+ * IDeltaTransformer - Standard interface for bilateral delta transformations
  *
  * Candidate for ERC standardization (EIP proposal)
  * Defines primitives for programmable delta transformers (HTLCs, swaps, limit orders)
  */
-interface ISubcontractProvider {
+interface IDeltaTransformer {
 
   // ========== STRUCTS ==========
 

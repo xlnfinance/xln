@@ -17,7 +17,7 @@
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
 
   // Extract the stores from entityEnv (or use global stores as fallback)
-  const contextReplicas = entityEnv?.replicas;
+  const contextReplicas = entityEnv?.eReplicas;
   const contextXlnFunctions = entityEnv?.xlnFunctions;
 
   // Use context stores if available, otherwise fall back to global

@@ -7,9 +7,9 @@
   let resultType: 'success' | 'error' | '' = '';
 
   // Get list of all entity IDs from environment
-  $: entityIds = $xlnEnvironment?.replicas
+  $: entityIds = $xlnEnvironment?.eReplicas
     ? Array.from(new Set(
-        Array.from($xlnEnvironment.replicas.keys())
+        Array.from($xlnEnvironment.eReplicas.keys())
           .map(key => (key as string).split(':')[0])
       )).sort()
     : [];
@@ -37,7 +37,7 @@
 
       // Find signer ID for the selected entity
       let signerId = 's1';
-      for (const key of env.replicas.keys()) {
+      for (const key of env.eReplicas.keys()) {
         if (key.startsWith(selectedEntityId + ':')) {
           signerId = key.split(':')[1]!;
           break;
@@ -47,7 +47,7 @@
       console.log(`🔄 Manual rebalance trigger for entity ${selectedEntityId} (signer: ${signerId})`);
 
       // Get entity state
-      const replica = env.replicas.get(`${selectedEntityId}:${signerId}`);
+      const replica = env.eReplicas.get(`${selectedEntityId}:${signerId}`);
       if (!replica) {
         throw new Error(`No replica found for ${selectedEntityId}:${signerId}`);
       }

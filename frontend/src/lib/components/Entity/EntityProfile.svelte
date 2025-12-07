@@ -3,7 +3,7 @@
   import { xlnFunctions } from '../../stores/xlnStore';
 
   export let replica: EntityReplica | null;
-  export let tab: Tab;
+  export let tab: Tab; void tab; // Reserved for tab-aware profile features
 
   // Safety guard for XLN functions
 </script>

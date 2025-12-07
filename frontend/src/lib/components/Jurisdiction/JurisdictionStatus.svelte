@@ -2,6 +2,30 @@
   import { onMount } from 'svelte';
   import { loadJurisdictions } from '../../stores/jurisdictionStore';
   import Button from '../Common/Button.svelte';
+  import StorageInspector from './StorageInspector.svelte';
+
+  interface ContractInfo {
+    name: string;
+    address: string;
+    bytecodeSize: number;
+    deployable: boolean;
+  }
+
+  interface ReserveEntry {
+    entity: string;
+    tokenId: number;
+    amount: bigint;
+    debtCount: number;
+    insuranceCount: number;
+  }
+
+  interface CollateralEntry {
+    leftEntity: string;
+    rightEntity: string;
+    tokenId: number;
+    collateral: bigint;
+    ondelta: bigint;
+  }
 
   interface JurisdictionInfo {
     rpcUrl: string; // Full RPC URL (not just port)
@@ -14,6 +38,16 @@
     status: 'connected' | 'disconnected' | 'checking';
     lastUpdate: string;
     entities: Array<{ id: string; name: string; type: string }>;
+
+    // New: Contract introspection
+    contracts: ContractInfo[];
+    reserves: ReserveEntry[];
+    collaterals: CollateralEntry[];
+
+    // UI state
+    showStorage: boolean;
+    sortColumn: string;
+    sortDirection: 'asc' | 'desc';
   }
 
   let jurisdictions: JurisdictionInfo[] = [];
@@ -41,7 +75,13 @@
           nextEntityNumber: 1,
           status: 'checking' as const,
           lastUpdate: '',
-          entities: []
+          entities: [],
+          contracts: [],
+          reserves: [],
+          collaterals: [],
+          showStorage: false,
+          sortColumn: 'entity',
+          sortDirection: 'asc' as const
         };
       });
 
@@ -184,10 +224,20 @@
             {/if}
           </div>
         </div>
-        
+
+        <!-- Storage Introspection -->
+        {#if jurisdiction.status === 'connected'}
+          <StorageInspector
+            jurisdictionName={jurisdiction.name}
+            rpcUrl={jurisdiction.rpcUrl}
+            depositoryAddress={jurisdiction.contractAddress}
+            entityProviderAddress={jurisdiction.contractAddress}
+          />
+        {/if}
+
         <div class="jurisdiction-actions">
-          <Button 
-            variant="secondary" 
+          <Button
+            variant="secondary"
             size="small"
             disabled={jurisdiction.status === 'checking'}
             on:click={() => refreshJurisdiction(jurisdiction)}

@@ -3,6 +3,8 @@
   /**
    * EntityMiniPanel - Compact popup when clicking entity in Graph3D
    * Shows quick info + actions, can expand to full panel
+   *
+   * TIME-TRAVEL AWARE: Reads from isolatedHistory[timeIndex] when scrubbing
    */
   import { createEventDispatcher } from 'svelte';
   import type { Writable } from 'svelte/store';
@@ -12,22 +14,80 @@
   export let entityName: string = '';
   export let position: { x: number; y: number } = { x: 0, y: 0 };
   export let isolatedEnv: Writable<any>;
+  export let isolatedHistory: Writable<any[]>;
+  export let isolatedTimeIndex: Writable<number>;
 
   const dispatch = createEventDispatcher();
 
-  let env: any;
-  $: env = $isolatedEnv;
+  // TIME-TRAVEL AWARE: Read from history[timeIndex] when scrubbing, else live state
+  $: env = (() => {
+    const timeIdx = $isolatedTimeIndex;
+    const hist = $isolatedHistory;
+    if (timeIdx >= 0 && hist && hist.length > 0) {
+      const idx = Math.min(timeIdx, hist.length - 1);
+      return hist[idx];  // Historical frame
+    }
+    return $isolatedEnv;  // Live state
+  })();
+
+  /**
+   * Get reserve values from reserves object (handles both Map and plain Object formats)
+   * Maps serialize to plain objects when passed through postMessage/JSON
+   */
+  function getReserveValue(reserves: Map<string, bigint> | Record<string, unknown> | undefined, key: string): bigint {
+    if (!reserves) return 0n;
+    // If it's a Map, use .get()
+    if (reserves instanceof Map) {
+      return reserves.get(key) || 0n;
+    }
+    // If it's a plain object (serialized Map), use property access
+    if (typeof reserves === 'object') {
+      const v = (reserves as Record<string, unknown>)[key];
+      if (v === undefined || v === null) return 0n;
+      if (typeof v === 'string') {
+        const numStr = v.replace(/n$/, '');
+        return BigInt(numStr);
+      }
+      return BigInt(v as bigint);
+    }
+    return 0n;
+  }
 
   // Find replica for this entity
-  $: replica = env?.replicas ?
-    Array.from(env.replicas.entries()).find(([key]: [string, any]) => key.startsWith(entityId + ':'))?.[1]
-    : null;
+  $: replica = (() => {
+    if (!env?.eReplicas) return null;
+    // Handle both Map and plain Object (serialized)
+    if (env.eReplicas instanceof Map) {
+      return Array.from(env.eReplicas.entries()).find(([key]: [string, any]) => key.startsWith(entityId + ':'))?.[1];
+    }
+    // Plain object case
+    const entries = Object.entries(env.eReplicas);
+    return entries.find(([key]) => key.startsWith(entityId + ':'))?.[1];
+  })();
 
-  $: reserves = replica?.state?.reserves?.get('1') || 0n;
-  $: accounts = replica?.state?.accounts ? Array.from(replica.state.accounts.entries()) : [];
+  $: reserves = getReserveValue(replica?.state?.reserves, '1');
+
+  // Handle both Map and plain Object (serialized) for accounts
+  $: accounts = (() => {
+    if (!replica?.state?.accounts) return [];
+    if (replica.state.accounts instanceof Map) {
+      return Array.from(replica.state.accounts.entries());
+    }
+    return Object.entries(replica.state.accounts);
+  })();
+
+  // Get delta from account (handles both Map and Object)
+  function getDelta(acc: any, tokenId: number): any {
+    if (!acc?.deltas) return null;
+    if (acc.deltas instanceof Map) {
+      return acc.deltas.get(tokenId);
+    }
+    return acc.deltas[tokenId];
+  }
+
   $: totalCollateral = accounts.reduce((sum: bigint, [_, acc]: [string, any]) => {
-    const delta = acc.deltas?.get(1);
-    return sum + (delta?.collateral || 0n);
+    const delta = getDelta(acc, 1);
+    return sum + BigInt(delta?.collateral || 0);
   }, 0n);
 
   // Use shared formatter with token ID 1 (USDC default)
@@ -93,11 +153,12 @@
     <div class="accounts-preview">
       <div class="section-title">Accounts</div>
       {#each accounts.slice(0, 3) as [counterpartyId, acc]}
-        {@const delta = acc.deltas?.get(1)}
+        {@const delta = getDelta(acc, 1)}
+        {@const ondelta = BigInt(delta?.ondelta || 0)}
         <div class="account-row">
           <span class="peer">{counterpartyId.slice(0, 8)}...</span>
-          <span class="ondelta" class:positive={delta?.ondelta > 0n} class:negative={delta?.ondelta < 0n}>
-            {delta?.ondelta > 0n ? '+' : ''}{formatAmount(delta?.ondelta || 0n)}
+          <span class="ondelta" class:positive={ondelta > 0n} class:negative={ondelta < 0n}>
+            {ondelta > 0n ? '+' : ''}{formatAmount(ondelta)}
           </span>
         </div>
       {/each}

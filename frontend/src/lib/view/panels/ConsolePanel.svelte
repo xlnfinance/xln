@@ -166,7 +166,7 @@
     state: () => {
       const env = $isolatedEnv;
       return {
-        entities: Object.keys(env.replicas || {}).length,
+        entities: Object.keys(env.eReplicas || {}).length,
         height: env.height,
         timestamp: env.timestamp
       };
@@ -174,12 +174,12 @@
 
     entities: () => {
       const env = $isolatedEnv;
-      return Object.keys(env.replicas || {});
+      return Object.keys(env.eReplicas || {});
     },
 
     inspect: (entityId: string) => {
       const env = $isolatedEnv;
-      const replica = env.replicas?.[entityId];
+      const replica = env.eReplicas?.[entityId];
       if (!replica) return `Entity ${entityId} not found`;
       return replica;
     },

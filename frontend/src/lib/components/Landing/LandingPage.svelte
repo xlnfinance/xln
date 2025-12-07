@@ -228,8 +228,6 @@
 
 <div class="landing" class:light-mode={!darkMode}>
   <div class="content">
-    <img src="/img/logo.png" alt="xln" class="logo" />
-
     <!-- Main Tagline -->
     <div class="hero-tagline">
       <h1>{c.hero.title}</h1>
@@ -274,18 +272,27 @@
           <h3 class="evo-title">{c.solution.evolution}</h3>
 
           <div class="evo-track">
-            <!-- Origin -->
-            <div class="evo-item">
-              <div class="evo-dot">●</div>
-              <div class="evo-label-top">Big Bang</div>
+            <!-- Origin (small, just a joke) -->
+            <div class="evo-item evo-item-small">
+              <div class="evo-dot evo-dot-small">●</div>
+              <div class="evo-label-top evo-label-small">Big Bang</div>
             </div>
 
             <!-- Banking Era (long thick line) -->
             <div class="evo-line evo-line-thick"></div>
 
-            <div class="evo-item">
+            <div class="evo-item evo-item-fcuan" title="Full-Credit Unprovable Account Networks: Banking since ancient times">
               <div class="evo-label-top">~5000 BC</div>
-              <img src="/bikes/fcuan.svg" class="evo-bike" />
+              <div class="bike-container bike-container-shake">
+                <img src="/bikes/fcuan.svg" class="evo-bike evo-bike-wobble" />
+                <span class="crisis-badge">CRISIS</span>
+                <!-- Dust particles on crash -->
+                <span class="dust-particle dust-1"></span>
+                <span class="dust-particle dust-2"></span>
+                <span class="dust-particle dust-3"></span>
+                <span class="dust-particle dust-4"></span>
+                <span class="dust-particle dust-5"></span>
+              </div>
               <div class="evo-name">FCUAN</div>
               <div class="evo-fullname">Full-Credit Unprovable Account Networks</div>
               <InvariantTicker label="" description="−leftCredit ≤ Δ ≤ rightCredit" pattern="[---.---]" speed={4} />
@@ -295,25 +302,45 @@
             <div class="evo-line evo-line-thick"></div>
 
             <!-- Lightning branch (thin failed) -->
-            <div class="evo-item evo-item-branch">
-              <div class="evo-label-top">2015</div>
+            <div class="evo-item evo-item-branch" title="Fully-Reserved Provable Account Protocols: Lightning/PCNs - technically sound but lacks credit">
+              <div class="evo-label-top">2015-2025</div>
               <div class="evo-branch-line"></div>
-              <img src="/bikes/frpap.svg" class="evo-bike evo-bike-small" />
+              <div class="bike-container">
+                <img src="/bikes/frpap.svg" class="evo-bike evo-bike-small evo-bike-locked" />
+                <div class="wall-stack">
+                  <div class="wall-brick">Inbound</div>
+                  <div class="wall-brick">Liquidity</div>
+                  <div class="wall-brick">Wall</div>
+                </div>
+              </div>
               <div class="evo-name">FRPAP</div>
               <div class="evo-fullname">Full-Reserve Provable Account Primitives</div>
               <InvariantTicker label="" description="0 ≤ Δ ≤ collateral" pattern="[.===]" speed={4} />
               <div class="evo-desc">{c.solution.frpapDesc}</div>
             </div>
 
-            <!-- MERGE -->
-            <div class="evo-merge">⊃ MERGE</div>
+            <!-- MERGE - Animated arrow flow instead of button -->
+            <div class="evo-merge-flow">
+              <span class="merge-arrow">→</span>
+              <span class="merge-arrow">→</span>
+              <span class="merge-arrow">→</span>
+            </div>
 
             <!-- Future (THICK GREEN) -->
             <div class="evo-line evo-line-finale"></div>
 
-            <div class="evo-item evo-item-finale">
+            <div class="evo-item evo-item-finale" title="Reserve-Credit Provable Account Network: The best of both worlds - provable AND credit-enabled">
               <div class="evo-label-top">2026 →</div>
-              <img src="/bikes/rcpan.svg" class="evo-bike evo-bike-finale" />
+              <div class="rcpan-container">
+                <img src="/bikes/rcpan.svg" class="evo-bike evo-bike-finale evo-bike-flying" />
+                <!-- Particle trail -->
+                <span class="trail-particle trail-1"></span>
+                <span class="trail-particle trail-2"></span>
+                <span class="trail-particle trail-3"></span>
+                <span class="trail-particle trail-4"></span>
+                <span class="trail-particle trail-5"></span>
+                <span class="trail-particle trail-6"></span>
+              </div>
               <div class="evo-name evo-name-finale">RCPAN</div>
               <div class="evo-fullname">Reserve-Credit Provable Account Network</div>
               <InvariantTicker label="" description="−leftCredit ≤ Δ ≤ collateral + rightCredit" pattern="[---.===---]" speed={4} />
@@ -830,18 +857,7 @@
     flex-direction: column;
     align-items: center;
     gap: 3rem;
-  }
-
-  .logo {
-    width: 500px;
-    max-width: 80%;
-    height: auto;
-    filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.3));
-    transition: filter 0.3s ease;
-  }
-
-  .landing.light-mode .logo {
-    filter: invert(1) drop-shadow(0 0 20px rgba(0, 0, 0, 0.2));
+    padding-top: 0; /* Topbar handled by layout */
   }
 
   /* Hero Tagline */
@@ -874,7 +890,7 @@
   /* Founder Note */
   .founder-note {
     text-align: center;
-    margin: 3rem 0 3rem;
+    margin: 1rem 0 1.5rem;
     max-width: 700px;
   }
 
@@ -2151,13 +2167,8 @@
   }
 
   .evo-branch-line {
-    position: absolute;
-    top: -30px;
-    left: -80px;
-    width: 160px;
-    height: 3px;
-    background: linear-gradient(to right, rgba(200,200,200,0.3), rgba(79,209,139,0.4));
-    border-top: 2px dashed rgba(79,209,139,0.4);
+    /* HIDDEN - was causing green artifact above timeline */
+    display: none;
   }
 
   .evo-dot {
@@ -2215,22 +2226,48 @@
   }
 
   .evo-line-future {
-    width: 80px;
-    height: 32px;
-    background: linear-gradient(to right, rgba(79,209,139,0.95), rgba(0,209,255,0.7));
-    box-shadow: 0 0 40px rgba(79,209,139,0.7), 0 0 60px rgba(0,209,255,0.4);
+    display: none; /* Removed - no line after RCPAN */
   }
 
   .evo-merge {
-    font-size: 0.9rem;
+    /* OLD BUTTON STYLE - replaced by evo-merge-flow */
+    display: none;
+  }
+
+  .evo-merge-flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    z-index: 3;
+    margin: 0 0.5rem;
+  }
+
+  .merge-arrow {
+    font-size: 1.5rem;
     font-weight: 700;
     color: #4fd18b;
-    background: rgba(79, 209, 139, 0.15);
-    padding: 0.5rem 1rem;
-    border-radius: 12px;
-    border: 2px solid rgba(79, 209, 139, 0.5);
-    white-space: nowrap;
-    z-index: 3;
+    opacity: 0;
+    animation: arrow-flow 1.5s ease-in-out infinite;
+    text-shadow: 0 0 10px rgba(79, 209, 139, 0.8);
+  }
+
+  .merge-arrow:nth-child(1) { animation-delay: 0s; }
+  .merge-arrow:nth-child(2) { animation-delay: 0.3s; }
+  .merge-arrow:nth-child(3) { animation-delay: 0.6s; }
+
+  @keyframes arrow-flow {
+    0% {
+      opacity: 0;
+      transform: translateX(-10px);
+    }
+    50% {
+      opacity: 1;
+      transform: translateX(0);
+    }
+    100% {
+      opacity: 0;
+      transform: translateX(10px);
+    }
   }
 
   .evo-label-top {
@@ -2250,6 +2287,237 @@
   .evo-bike-small {
     width: 140px;
     opacity: 0.65;
+  }
+
+  /* Big Bang small (just a joke) */
+  .evo-item-small {
+    transform: scale(0.5);
+    margin: 0 -20px;
+  }
+
+  .evo-dot-small {
+    font-size: 2rem !important;
+    opacity: 0.7;
+  }
+
+  .evo-label-small {
+    font-size: 0.7rem !important;
+    opacity: 0.6;
+  }
+
+  /* Bike container for positioning badges/walls */
+  .bike-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* FCUAN: Riding with bounce, then HARD crash every 4 seconds */
+  .evo-bike-wobble {
+    animation: bike-crash 6s ease-in-out infinite;
+    transform-origin: bottom center;
+  }
+
+  @keyframes bike-crash {
+    /* Riding unstable - wobbling like a house of cards (0-83%) */
+    0% { transform: rotate(1deg) translateY(0); }
+    5% { transform: rotate(-1.5deg) translateY(-1px); }
+    10% { transform: rotate(2deg) translateY(0); }
+    15% { transform: rotate(-1deg) translateY(-1px); }
+    20% { transform: rotate(1.5deg) translateY(0); }
+    25% { transform: rotate(-2deg) translateY(-1px); }
+    30% { transform: rotate(1deg) translateY(0); }
+    35% { transform: rotate(-1.5deg) translateY(-1px); }
+    40% { transform: rotate(2deg) translateY(0); }
+    45% { transform: rotate(-1deg) translateY(-1px); }
+    50% { transform: rotate(1.5deg) translateY(0); }
+    55% { transform: rotate(-2deg) translateY(-1px); }
+    60% { transform: rotate(1deg) translateY(0); }
+    65% { transform: rotate(-1.5deg) translateY(-1px); }
+    70% { transform: rotate(2deg) translateY(0); }
+    75% { transform: rotate(-1deg) translateY(-1px); }
+    80% { transform: rotate(1.5deg) translateY(0); }
+    /* CRASH - 1 second (83-100%) */
+    83% { transform: rotate(-3deg); }
+    86% { transform: rotate(20deg); }
+    89% { transform: rotate(40deg); }
+    91%, 94% { transform: rotate(45deg); }
+    97% { transform: rotate(20deg); }
+    100% { transform: rotate(1deg); }
+  }
+
+  .crisis-badge {
+    position: absolute;
+    bottom: 5%;
+    right: 0%;
+    background: rgba(220, 30, 30, 0.95);
+    color: white;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: 3px;
+    opacity: 0;
+    animation: crisis-appear 6s ease-in-out infinite;
+    pointer-events: none;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    box-shadow: 0 2px 12px rgba(255,0,0,0.6);
+  }
+
+  @keyframes crisis-appear {
+    /* Hidden while riding (0-83%) */
+    0%, 85% { opacity: 0; transform: scale(0.5); }
+    /* Appear when crashed */
+    89%, 95% { opacity: 1; transform: scale(1.1); }
+    /* Fade out */
+    100% { opacity: 0; transform: scale(0.5); }
+  }
+
+  /* Screen shake on crash */
+  .bike-container-shake {
+    animation: container-shake 6s ease-in-out infinite;
+  }
+
+  @keyframes container-shake {
+    0%, 85% { transform: translate(0, 0); }
+    86% { transform: translate(-2px, 0); }
+    87% { transform: translate(3px, -1px); }
+    88% { transform: translate(-2px, 1px); }
+    89% { transform: translate(2px, 0); }
+    90% { transform: translate(-1px, -1px); }
+    91%, 100% { transform: translate(0, 0); }
+  }
+
+  /* Dust particles on FCUAN crash */
+  .dust-particle {
+    position: absolute;
+    width: 4px;
+    height: 4px;
+    background: #a08060;
+    border-radius: 50%;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .dust-1 { bottom: 10%; right: 20%; animation: dust-fly-1 6s ease-out infinite; }
+  .dust-2 { bottom: 15%; right: 15%; animation: dust-fly-2 6s ease-out infinite; }
+  .dust-3 { bottom: 8%; right: 25%; animation: dust-fly-3 6s ease-out infinite; }
+  .dust-4 { bottom: 12%; right: 10%; animation: dust-fly-4 6s ease-out infinite; }
+  .dust-5 { bottom: 5%; right: 18%; animation: dust-fly-5 6s ease-out infinite; }
+
+  @keyframes dust-fly-1 {
+    0%, 88% { opacity: 0; transform: translate(0, 0) scale(0); }
+    89% { opacity: 1; transform: translate(0, 0) scale(1); }
+    95% { opacity: 0.8; transform: translate(-15px, -20px) scale(0.8); }
+    100% { opacity: 0; transform: translate(-20px, -30px) scale(0); }
+  }
+  @keyframes dust-fly-2 {
+    0%, 88% { opacity: 0; transform: translate(0, 0) scale(0); }
+    89% { opacity: 1; transform: translate(0, 0) scale(1.2); }
+    95% { opacity: 0.7; transform: translate(10px, -25px) scale(0.6); }
+    100% { opacity: 0; transform: translate(15px, -35px) scale(0); }
+  }
+  @keyframes dust-fly-3 {
+    0%, 89% { opacity: 0; transform: translate(0, 0) scale(0); }
+    90% { opacity: 1; transform: translate(0, 0) scale(0.9); }
+    96% { opacity: 0.6; transform: translate(-8px, -18px) scale(0.5); }
+    100% { opacity: 0; transform: translate(-12px, -25px) scale(0); }
+  }
+  @keyframes dust-fly-4 {
+    0%, 88% { opacity: 0; transform: translate(0, 0) scale(0); }
+    89% { opacity: 0.9; transform: translate(0, 0) scale(1.1); }
+    94% { opacity: 0.5; transform: translate(20px, -15px) scale(0.7); }
+    100% { opacity: 0; transform: translate(25px, -20px) scale(0); }
+  }
+  @keyframes dust-fly-5 {
+    0%, 89% { opacity: 0; transform: translate(0, 0) scale(0); }
+    90% { opacity: 1; transform: translate(0, 0) scale(0.8); }
+    95% { opacity: 0.4; transform: translate(-5px, -22px) scale(0.4); }
+    100% { opacity: 0; transform: translate(-8px, -28px) scale(0); }
+  }
+
+  /* RCPAN flying animation */
+  .rcpan-container {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .evo-bike-flying {
+    animation: bike-flying 4s ease-in-out infinite;
+  }
+
+  @keyframes bike-flying {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    25% { transform: translateY(-8px) rotate(-2deg); }
+    50% { transform: translateY(-3px) rotate(0deg); }
+    75% { transform: translateY(-10px) rotate(2deg); }
+  }
+
+  /* RCPAN particle trail */
+  .trail-particle {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    background: radial-gradient(circle, #4fd18b 0%, transparent 70%);
+    border-radius: 50%;
+    left: 10%;
+    top: 50%;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .trail-1 { animation: trail-emit 4s ease-out infinite 0s; }
+  .trail-2 { animation: trail-emit 4s ease-out infinite 0.2s; }
+  .trail-3 { animation: trail-emit 4s ease-out infinite 0.4s; }
+  .trail-4 { animation: trail-emit 4s ease-out infinite 0.6s; }
+  .trail-5 { animation: trail-emit 4s ease-out infinite 0.8s; }
+  .trail-6 { animation: trail-emit 4s ease-out infinite 1s; }
+
+  @keyframes trail-emit {
+    0% { opacity: 0; transform: translate(0, 0) scale(1); }
+    10% { opacity: 0.8; transform: translate(-10px, 2px) scale(0.9); }
+    30% { opacity: 0.5; transform: translate(-25px, 5px) scale(0.6); }
+    50% { opacity: 0.2; transform: translate(-40px, 3px) scale(0.3); }
+    70%, 100% { opacity: 0; transform: translate(-55px, 0) scale(0); }
+  }
+
+  /* FRPAP: Stacked brick wall on RIGHT side */
+  .wall-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin-left: 8px;
+  }
+
+  .wall-brick {
+    background: linear-gradient(180deg, #a85532 0%, #8b4513 50%, #6b3510 100%);
+    color: #ffddcc;
+    font-size: 0.4rem;
+    font-weight: 700;
+    padding: 6px 10px;
+    border-radius: 1px;
+    text-align: center;
+    box-shadow: 2px 2px 6px rgba(0,0,0,0.5);
+    border: 1px solid #4a2508;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    min-width: 55px;
+  }
+
+  /* FRPAP: Locked up / frozen - slight grayscale + shake attempt */
+  .evo-bike-locked {
+    filter: brightness(0.8) saturate(0.5) drop-shadow(0 6px 12px rgba(0,0,0,0.4));
+    animation: bike-locked 2s ease-in-out infinite;
+  }
+
+  @keyframes bike-locked {
+    0%, 100% { transform: translateX(0); }
+    10% { transform: translateX(-1px); }
+    20% { transform: translateX(1px); }
+    30% { transform: translateX(0); }
+    /* Mostly static - locked */
   }
 
   .evo-bike-finale {
@@ -3255,10 +3523,6 @@
   }
 
   @media (max-width: 768px) {
-    .logo {
-      width: 300px;
-    }
-
     .newsletter-form {
       flex-direction: column;
     }

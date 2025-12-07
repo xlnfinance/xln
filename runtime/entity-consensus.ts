@@ -786,9 +786,9 @@ export const applyEntityFrame = async (
         if (proposal.success && proposal.accountInput) {
           // Get the proposer of the target entity from env
           let targetProposerId = 'alice'; // Default fallback
-          const targetReplicaKeys = Array.from(env.replicas.keys()).filter(key => key.startsWith(proposal.accountInput!.toEntityId + ':'));
+          const targetReplicaKeys = Array.from(env.eReplicas.keys()).filter(key => key.startsWith(proposal.accountInput!.toEntityId + ':'));
           if (targetReplicaKeys.length > 0) {
-            const firstTargetReplica = env.replicas.get(targetReplicaKeys[0]!);
+            const firstTargetReplica = env.eReplicas.get(targetReplicaKeys[0]!);
             const firstValidator = firstTargetReplica?.state.config.validators[0];
             if (firstValidator) {
               targetProposerId = firstValidator;
