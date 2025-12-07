@@ -11,9 +11,9 @@ export interface XLNPersistedState {
   t: number; // Timestamp
 
   // Core data (always included)
-  x: any[]; // Xlnomies (serialized)
-  e: any[]; // Entities (serialized replicas)
-  a: string; // Active xlnomy name
+  x: any[]; // jReplicas (serialized)
+  e: any[]; // eReplicas (serialized)
+  a: string; // Active jurisdiction name
 
   // UI preferences (optional)
   ui?: {
@@ -57,9 +57,9 @@ export function exportState(
       t: Date.now(),
 
       // Core data
-      x: env.xlnomies ? serializeMap(env.xlnomies) : [],
-      e: env.replicas ? serializeMap(env.replicas) : [],
-      a: env.activeXlnomy || '',
+      x: env.jReplicas ? serializeMap(env.jReplicas) : [],
+      e: env.eReplicas ? serializeMap(env.eReplicas) : [],
+      a: env.activeJurisdiction || '',
 
       // Optional UI
       ui: options?.includeUI ? {
@@ -116,8 +116,8 @@ export function importState(encoded: string): XLNPersistedState {
     console.log('[StateCodec] Imported state:', {
       version: state.v,
       timestamp: new Date(state.t).toISOString(),
-      xlnomies: state.x.size,
-      entities: state.e.size,
+      jReplicas: state.x.size,
+      eReplicas: state.e.size,
       hasUI: !!state.ui
     });
 

@@ -2,7 +2,7 @@
   import type { EntityReplica, Tab } from '$lib/types/ui';
 
   export let replica: EntityReplica | null;
-  export let tab: Tab;
+  export let tab: Tab; void tab; // Reserved for tab-aware features
 
   // Helper to convert BigInt to number safely
   function toNumber(value: any): number {

@@ -54,8 +54,17 @@ describe("Entity Control-Shares System", function () {
     const EntityProviderFactory = await ethers.getContractFactory("EntityProvider");
     entityProvider = await EntityProviderFactory.deploy();
 
-    // Deploy Depository
-    const DepositoryFactory = await ethers.getContractFactory("Depository");
+    // Deploy Account library first
+    const AccountFactory = await ethers.getContractFactory("Account");
+    const account = await AccountFactory.deploy();
+    await account.waitForDeployment();
+
+    // Deploy Depository with Account library linked
+    const DepositoryFactory = await ethers.getContractFactory("Depository", {
+      libraries: {
+        Account: await account.getAddress()
+      }
+    });
     depository = await DepositoryFactory.deploy();
 
     // Add EntityProvider to Depository's approved list

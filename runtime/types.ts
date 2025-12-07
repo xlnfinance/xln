@@ -375,6 +375,22 @@ export type EntityTx =
         tokenId: number;
         amount: bigint;
       };
+    }
+  | {
+      // Reserve-to-reserve: Entity moves reserves to another entity (accumulates in jBatch)
+      type: 'reserve_to_reserve';
+      data: {
+        toEntityId: string; // Recipient entity
+        tokenId: number;
+        amount: bigint;
+      };
+    }
+  | {
+      // J-Broadcast: Entity broadcasts accumulated jBatch to J-machine
+      type: 'j_broadcast';
+      data: {
+        hankoSignature?: string; // Optional hanko seal for the batch
+      };
     };
 
 export interface AssetBalance {
@@ -640,30 +656,60 @@ export interface EntityReplica {
   lockedFrame?: ProposedEntityFrame; // Frame this validator is locked/precommitted to
   isProposer: boolean;
   sentTransitions?: number; // Number of txs sent to proposer but not yet committed (Channel.ts pattern)
-  // Position is RELATIVE to j-machine (xlnomy)
+  // Position is RELATIVE to j-machine (jurisdiction)
   // Frontend calculates: worldPos = jMachine.position + relativePosition
   position?: {
     x: number;      // Relative X offset from j-machine center
     y: number;      // Relative Y offset from j-machine center
     z: number;      // Relative Z offset from j-machine center
-    xlnomy?: string; // Which j-machine this entity belongs to (defaults to activeXlnomy)
+    jurisdiction?: string; // Which j-machine this entity belongs to (defaults to activeJurisdiction)
+    xlnomy?: string; // DEPRECATED: Use jurisdiction instead
   };
 }
 
 export interface Env {
-  replicas: Map<string, EntityReplica>;
+  eReplicas: Map<string, EntityReplica>;  // Entity replicas (E-layer state machines)
+  jReplicas: Map<string, JReplica>;       // Jurisdiction replicas (J-layer EVM state)
   height: number;
   timestamp: number;
   runtimeInput: RuntimeInput; // Persistent storage for merged inputs
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: any; // Gossip layer for network profiles
 
-  // Xlnomy system (multi-jurisdiction support)
-  xlnomies?: Map<string, Xlnomy>; // name → Xlnomy instance
-  activeXlnomy?: string; // Currently active Xlnomy name
+  // Active jurisdiction
+  activeJurisdiction?: string; // Currently active J-replica name
 
   // Snapshot control (for prepopulate demos)
   disableAutoSnapshots?: boolean; // When true, captureSnapshot skips automatic tick frames
+}
+
+/**
+ * JReplica = Jurisdiction replica (J-Machine EVM state)
+ * Contains stateRoot for time travel + decoded contracts for UI
+ */
+export interface JReplica {
+  name: string;                           // "ethereum", "base", "simnet"
+  blockNumber: bigint;                    // Current J-block height
+  stateRoot: Uint8Array;                  // 32 bytes - for time travel via setStateRoot()
+  mempool: JTx[];                         // Pending settlement txs
+
+  // Visual position (for 3D rendering)
+  position: { x: number; y: number; z: number };
+
+  // Decoded contract addresses for UI
+  contracts?: {
+    depository?: string;
+    entityProvider?: string;
+    account?: string;
+  };
+}
+
+/** J-Machine transaction (settlement layer) */
+export interface JTx {
+  type: 'settle' | 'dispute' | 'register' | 'deposit' | 'withdraw';
+  entityId: string;
+  data: any;
+  timestamp: number;
 }
 
 export interface RuntimeSnapshot {
@@ -677,22 +723,14 @@ export interface RuntimeSnapshot {
 export interface EnvSnapshot {
   height: number;
   timestamp: number;
-  replicas: Map<string, EntityReplica>;
+  eReplicas: Map<string, EntityReplica>;  // E-layer state
+  jReplicas: JReplica[];                   // J-layer state (with stateRoot for time travel)
   runtimeInput: RuntimeInput;
   runtimeOutputs: EntityInput[];
   description: string;
   gossip?: {
     profiles: Profile[];
   };
-  // Jurisdiction state (J-Machine) - required for merkle tree
-  xlnomies?: Array<{
-    name: string;
-    jMachine: {
-      position: { x: number; y: number; z: number };
-      capacity: number;
-      jHeight: number;
-    };
-  }>;
   // Interactive storytelling narrative
   title?: string; // Short headline (e.g., "Bank Run Begins")
   narrative?: string; // Detailed explanation of what's happening in this frame
@@ -914,6 +952,11 @@ export interface JurisdictionEVM {
   // Address getters
   getEntityProviderAddress(): string;
   getDepositoryAddress(): string;
+
+  // Time travel (optional - only BrowserVM supports this)
+  captureStateRoot?(): Promise<Uint8Array>;
+  timeTravel?(stateRoot: Uint8Array): Promise<void>;
+  getBlockNumber?(): bigint;
 }
 
 /**

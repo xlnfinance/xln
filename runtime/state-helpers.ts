@@ -4,7 +4,7 @@
  */
 
 import { encode } from './snapshot-coder';
-import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, RuntimeInput, AccountMachine } from './types';
+import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, RuntimeInput, AccountMachine, JReplica } from './types';
 import type { Profile } from './gossip';
 import { DEBUG } from './utils';
 import { validateEntityState } from './validation-utils';
@@ -169,10 +169,23 @@ export const captureSnapshot = (
       })
     : [];
 
+  // Clone jReplicas (J-layer state)
+  const jReplicas: JReplica[] = env.jReplicas
+    ? Array.from(env.jReplicas.values()).map(jr => ({
+        name: jr.name,
+        blockNumber: jr.blockNumber,
+        stateRoot: new Uint8Array(jr.stateRoot), // Copy stateRoot
+        mempool: [...jr.mempool],
+        position: { ...jr.position },
+        contracts: jr.contracts ? { ...jr.contracts } : undefined,
+      }))
+    : [];
+
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: env.timestamp,
-    replicas: new Map(Array.from(env.replicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica)])),
+    eReplicas: new Map(Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica)])),
+    jReplicas,
     runtimeInput: {
       runtimeTxs: [...runtimeInput.runtimeTxs],
       entityInputs: runtimeInput.entityInputs.map(input => ({
@@ -204,10 +217,10 @@ export const captureSnapshot = (
   // Alert if snapshot exceeds 1MB threshold
   if (snapshotSize > 1_000_000) {
     console.warn(`📦 LARGE SNAPSHOT: ${sizeMB}MB at height ${snapshot.height}`);
-    console.warn(`   Replicas: ${snapshot.replicas.size}`);
+    console.warn(`   E-Replicas: ${snapshot.eReplicas.size}, J-Replicas: ${snapshot.jReplicas.length}`);
 
     // Log per-entity diagnostics
-    for (const [key, replica] of snapshot.replicas) {
+    for (const [key, replica] of snapshot.eReplicas) {
       const msgCount = replica.state.messages?.length || 0;
       const accountCount = replica.state.accounts?.size || 0;
       if (msgCount > 20 || accountCount > 10) {

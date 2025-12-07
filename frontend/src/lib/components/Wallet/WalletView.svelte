@@ -11,7 +11,6 @@
    */
 
   import { createEventDispatcher } from 'svelte';
-  import WalletHeader from './WalletHeader.svelte';
   import TokenList from './TokenList.svelte';
   import ERC20Send from './ERC20Send.svelte';
   import DepositToEntity from './DepositToEntity.svelte';
@@ -63,13 +62,6 @@
 </script>
 
 <div class="wallet-view">
-  <!-- Header with address and network -->
-  <WalletHeader
-    {walletAddress}
-    {identiconSrc}
-    on:copy={copyAddress}
-  />
-
   <!-- Portfolio Value -->
   <div class="portfolio-section">
     <div class="portfolio-value">
@@ -200,7 +192,7 @@
 <style>
   .wallet-view {
     width: 100%;
-    max-width: 420px;
+    max-width: 630px;
     margin: 0 auto;
     background: linear-gradient(180deg, rgba(20, 18, 15, 0.95) 0%, rgba(10, 8, 5, 0.98) 100%);
     border: 1px solid rgba(255, 255, 255, 0.06);

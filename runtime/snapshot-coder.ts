@@ -116,9 +116,10 @@ type SnapshotTuple = [
  */
 export const encode = (data: any): Buffer => {
   // ENCODE validation removed - too verbose
-  // Auto-fix jBlock corruption if needed
-  if (data && data.replicas) {
-    for (const [replicaKey, replica] of data.replicas.entries()) {
+  // Auto-fix jBlock corruption if needed (supports both old and new naming)
+  const replicasMap = data?.eReplicas || data?.replicas;
+  if (replicasMap) {
+    for (const [replicaKey, replica] of replicasMap.entries()) {
       if (replica && replica.state && typeof replica.state.jBlock !== 'number') {
         console.error(`💥 CRITICAL: Invalid jBlock for ${replicaKey.slice(0,20)}... - auto-fixing to 0`);
         replica.state.jBlock = 0;
@@ -149,8 +150,10 @@ export const decode = (buffer: Buffer): any => {
     const decoded = JSON.parse(buffer.toString(), jsonReviver);
 
     // CRITICAL: Validate financial state integrity after deserialization
-    if (decoded && decoded.replicas) {
-      for (const [replicaKey, replica] of decoded.replicas.entries()) {
+    // Supports both old naming (replicas) and new naming (eReplicas)
+    const decodedReplicas = decoded?.eReplicas || decoded?.replicas;
+    if (decodedReplicas) {
+      for (const [replicaKey, replica] of decodedReplicas.entries()) {
         if (replica && replica.state) {
           const jBlock = replica.state.jBlock;
           if (typeof jBlock !== 'number') {
@@ -176,7 +179,7 @@ export const encodeAsync = async (data: any): Promise<Buffer> => {
     const packrInstance = await initMsgpack();
 
     // Msgpack encoding with integrity hashing
-    const sortedReplicas = deterministicDeepSort(data.replicas || new Map());
+    const sortedReplicas = deterministicDeepSort(data.eReplicas || data.replicas || new Map());
     const serializedReplicas = packrInstance.pack(sortedReplicas);
     const hashOfReplicas = sha256(serializedReplicas);
 

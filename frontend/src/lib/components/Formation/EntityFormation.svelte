@@ -127,7 +127,7 @@
         entityId = xln.generateLazyEntityId(validatorNames, threshold);
         
         // Check if this board hash is already used
-        const existingReplicas = Array.from(env.replicas.keys()) as string[];
+        const existingReplicas = Array.from(env.eReplicas.keys()) as string[];
         const isDuplicate = existingReplicas.some((key: string) => key.startsWith(entityId + ':'));
         
         if (isDuplicate) {

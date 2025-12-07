@@ -167,6 +167,14 @@
 
     // Check for entity context from xln frontend
     checkEntityContext();
+
+    // Check for chat ID in URL path (e.g., /ai/chat-123456)
+    const pathMatch = window.location.pathname.match(/^\/ai\/(.+)$/);
+    if (pathMatch && pathMatch[1]) {
+      const urlChatId = pathMatch[1];
+      // Try to load this chat
+      await loadChatById(urlChatId, false);
+    }
   });
 
   async function loadXlnTools() {
@@ -370,7 +378,6 @@ Help the user understand this entity's state, suggest actions, or answer questio
   }
 
   async function deleteChat(id: string) {
-    if (!confirm('Delete this chat?')) return;
     try {
       await fetch(`${API_URL}/api/chats/${id}`, { method: 'DELETE' });
       savedChats = savedChats.filter(c => c.id !== id);
@@ -902,9 +909,11 @@ Help the user understand this entity's state, suggest actions, or answer questio
     chatId = `chat-${Date.now()}`;
     chatTitle = 'New Chat';
     messages = [];
+    // Update URL without reload
+    window.history.replaceState({}, '', `/ai`);
   }
 
-  async function loadChatById(id: string) {
+  async function loadChatById(id: string, updateUrl = true) {
     try {
       const res = await fetch(`${API_URL}/api/chats/${id}`);
       const data = await res.json();
@@ -912,6 +921,10 @@ Help the user understand this entity's state, suggest actions, or answer questio
       chatTitle = data.title;
       messages = data.messages;
       councilMode = data.council_mode;
+      // Update URL to reflect current chat
+      if (updateUrl) {
+        window.history.replaceState({}, '', `/ai/${id}`);
+      }
     } catch (e) {
       console.error('Failed to load chat:', e);
     }
@@ -939,38 +952,35 @@ Help the user understand this entity's state, suggest actions, or answer questio
     <button class="new-chat-btn" on:click={newChat}>+ New Chat</button>
 
     <div class="chat-list">
-      {#each [...savedChats].sort((a, b) => {
-        if (a.pinned && !b.pinned) return -1;
-        if (!a.pinned && b.pinned) return 1;
-        return b.updated.localeCompare(a.updated);
-      }) as chat}
-        <div
-          class="chat-item"
-          class:active={chat.id === chatId}
-          class:pinned={chat.pinned}
-        >
-          <button class="chat-title" on:click={() => loadChatById(chat.id)}>
-            {#if chat.pinned}<span class="pin-icon">*</span>{/if}
-            {chat.title.slice(0, 25)}{chat.title.length > 25 ? '...' : ''}
-          </button>
-          <div class="chat-actions">
-            <button
-              class="chat-action-btn"
-              title={chat.pinned ? 'Unpin' : 'Pin'}
-              on:click|stopPropagation={() => togglePinChat(chat.id)}
-            >
-              {chat.pinned ? '-' : '+'}
+      {#if savedChats.some(c => c.pinned)}
+        <div class="section-header">Pinned</div>
+        {#each savedChats.filter(c => c.pinned).sort((a, b) => b.updated.localeCompare(a.updated)) as chat}
+          <div class="chat-item" class:active={chat.id === chatId} class:pinned={true}>
+            <button class="chat-title" on:click={() => loadChatById(chat.id)}>
+              {chat.title.slice(0, 25)}{chat.title.length > 25 ? '...' : ''}
             </button>
-            <button
-              class="chat-action-btn delete"
-              title="Delete"
-              on:click|stopPropagation={() => deleteChat(chat.id)}
-            >
-              x
-            </button>
+            <div class="chat-actions">
+              <button class="chat-action-btn" title="Unpin" on:click|stopPropagation={() => togglePinChat(chat.id)}>-</button>
+              <button class="chat-action-btn delete" title="Delete" on:click|stopPropagation={() => deleteChat(chat.id)}>x</button>
+            </div>
           </div>
-        </div>
-      {/each}
+        {/each}
+      {/if}
+
+      {#if savedChats.some(c => !c.pinned)}
+        <div class="section-header">Recent</div>
+        {#each savedChats.filter(c => !c.pinned).sort((a, b) => b.updated.localeCompare(a.updated)) as chat}
+          <div class="chat-item" class:active={chat.id === chatId}>
+            <button class="chat-title" on:click={() => loadChatById(chat.id)}>
+              {chat.title.slice(0, 25)}{chat.title.length > 25 ? '...' : ''}
+            </button>
+            <div class="chat-actions">
+              <button class="chat-action-btn" title="Pin" on:click|stopPropagation={() => togglePinChat(chat.id)}>+</button>
+              <button class="chat-action-btn delete" title="Delete" on:click|stopPropagation={() => deleteChat(chat.id)}>x</button>
+            </div>
+          </div>
+        {/each}
+      {/if}
     </div>
 
     <div class="sidebar-footer">
@@ -2041,6 +2051,19 @@ Help the user understand this entity's state, suggest actions, or answer questio
   .chat-item.pinned {
     border-left: 2px solid #00ff88;
     background: rgba(0, 255, 136, 0.05);
+  }
+
+  .section-header {
+    font-size: 11px;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 12px 4px;
+    margin-top: 8px;
+  }
+
+  .section-header:first-child {
+    margin-top: 0;
   }
 
   .chat-title {

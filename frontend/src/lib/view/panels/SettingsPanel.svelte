@@ -10,10 +10,10 @@
   import type { Writable } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
 
-  // Props (isolated stores - not used here but could be)
-  export let isolatedEnv: Writable<any>;
-  export let isolatedHistory: Writable<any[]>;
-  export let isolatedTimeIndex: Writable<number>;
+  // Props (isolated stores - reserved for future time-travel settings UI)
+  export let isolatedEnv: Writable<any>; void isolatedEnv;
+  export let isolatedHistory: Writable<any[]>; void isolatedHistory;
+  export let isolatedTimeIndex: Writable<number>; void isolatedTimeIndex;
 
   // Settings state (loaded from localStorage on mount)
   interface ViewSettings {
@@ -42,7 +42,8 @@
     rendererMode: 'webgl' | 'webgpu';
     forceLayoutEnabled: boolean;
     antiAlias: boolean;
-    verboseLogging: boolean; // NEW: Master log toggle
+    verboseLogging: boolean; // Master log toggle
+    showFpsOverlay: boolean; // Show FPS + network stats overlay
 
     // Camera Presets
     autoRotate: boolean;
@@ -79,7 +80,8 @@
     rendererMode: 'webgl',
     forceLayoutEnabled: true,
     antiAlias: true,
-    verboseLogging: false, // DEFAULT: Logs OFF for performance
+    verboseLogging: false, // Logs OFF by default
+    showFpsOverlay: false, // FPS overlay hidden by default
 
     // Camera Presets
     autoRotate: false,
@@ -526,6 +528,17 @@
             ✅ Logs OFF - errors only (recommended)
           {/if}
         </p>
+      </div>
+
+      <div class="setting-group">
+        <label class="checkbox-label">
+          <input
+            type="checkbox"
+            bind:checked={settings.showFpsOverlay}
+            on:change={() => updateSetting('showFpsOverlay', settings.showFpsOverlay)}
+          />
+          <span>Show FPS & Stats Overlay</span>
+        </label>
       </div>
     {/if}
   </div>

@@ -6,7 +6,7 @@ module.exports = {
     settings: {
       optimizer: {
         enabled: true,
-        runs: 1000,
+        runs: 1, // Optimize for bytecode size (deploying to mainnet)
       },
       viaIR: true, // Enable via-IR compilation for stack too deep issues
     },

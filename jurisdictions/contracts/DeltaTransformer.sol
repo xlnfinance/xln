@@ -23,7 +23,7 @@ Subcontracts - Programmable Delta Transformers
 
   This is DeFi within bilateral channels. Genuinely new.
   */
-contract SubcontractProvider is Console {
+contract DeltaTransformer is Console {
   mapping(bytes32 => uint) public hashToBlock;
   uint MAXUINT32 = type(uint32).max;
 

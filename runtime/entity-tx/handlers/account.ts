@@ -160,12 +160,12 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
         // Get target proposer
         let targetProposerId = 'alice';
-        const targetReplicaKeys = Array.from(env.replicas.keys()).filter(key =>
+        const targetReplicaKeys = Array.from(env.eReplicas.keys()).filter(key =>
           key.startsWith(result.response!.toEntityId + ':')
         );
 
         if (targetReplicaKeys.length > 0) {
-          const firstTargetReplica = env.replicas.get(targetReplicaKeys[0]!);
+          const firstTargetReplica = env.eReplicas.get(targetReplicaKeys[0]!);
           if (firstTargetReplica?.state.config.validators[0]) {
             targetProposerId = firstTargetReplica.state.config.validators[0];
           }

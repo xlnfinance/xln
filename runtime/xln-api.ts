@@ -207,6 +207,9 @@ export interface XLNModule {
   runDemo: (env: Env) => Promise<Env>;
   runDemoWrapper: () => Promise<void>;
 
+  // Environment creation
+  createEmptyEnv: () => Env;
+
   // Prepopulation
   prepopulate: (env: Env) => Promise<Env>;
   prepopulateAHB: (env: Env) => Promise<Env>;

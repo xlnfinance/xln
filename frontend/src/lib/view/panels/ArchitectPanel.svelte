@@ -11,6 +11,7 @@
   import { onDestroy } from 'svelte';
   import { panelBridge } from '../utils/panelBridge';
   import { shortAddress } from '$lib/utils/format';
+  import { getXLN } from '$lib/stores/xlnStore';
 
   // Receive isolated env as props (passed from View.svelte) - REQUIRED
   export let isolatedEnv: Writable<any>;
@@ -57,8 +58,8 @@
   let newXlnomyAutoGrid = false; // Removed from UI, always manual now
 
   // Get available Xlnomies from env
-  $: xlnomies = $isolatedEnv?.xlnomies ? Array.from($isolatedEnv.xlnomies.keys()) : [];
-  $: activeXlnomy = $isolatedEnv?.activeXlnomy || '';
+  $: jurisdictions = $isolatedEnv?.jReplicas ? Array.from($isolatedEnv.jReplicas.keys()) : [];
+  $: activeJurisdiction = $isolatedEnv?.activeJurisdiction || '';
 
   // Check if env is ready
   $: envReady = $isolatedEnv !== null && $isolatedEnv !== undefined;
@@ -81,8 +82,8 @@
 
   // Get entity IDs for dropdowns (extract entityId from replica keys)
   let entityIds: string[] = [];
-  $: entityIds = $isolatedEnv?.replicas
-    ? Array.from($isolatedEnv.replicas.keys() as Iterable<string>).map((key: string) => key.split(':')[0] || key).filter((id: string, idx: number, arr: string[]) => arr.indexOf(id) === idx)
+  $: entityIds = $isolatedEnv?.eReplicas
+    ? Array.from($isolatedEnv.eReplicas.keys() as Iterable<string>).map((key: string) => key.split(':')[0] || key).filter((id: string, idx: number, arr: string[]) => arr.indexOf(id) === idx)
     : [];
 
   // Listen for VR payment gestures
@@ -135,9 +136,9 @@
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // Get the replica to find the signerId
-      const replicaKeys = Array.from($isolatedEnv.replicas.keys()) as string[];
+      const replicaKeys = Array.from($isolatedEnv.eReplicas.keys()) as string[];
       const replicaKey = replicaKeys.find(k => k.startsWith(selectedEntityForMint + ':'));
-      const replica = replicaKey ? $isolatedEnv.replicas.get(replicaKey) : null;
+      const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
 
       if (!replica) {
         throw new Error(`No replica found for entity ${shortAddress(selectedEntityForMint)}`);
@@ -171,12 +172,10 @@
 
       lastAction = ` Minted ${mintAmount} to entity`;
 
-      // Update stores to trigger reactivity
-      isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
-
-      // Advance to latest frame
+      // Update stores to trigger reactivity (set timeIndex FIRST to avoid race condition)
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+      isolatedHistory.set($isolatedEnv.history || []);
+      isolatedEnv.set($isolatedEnv);
 
       console.log('[Architect] Mint complete, new frame created');
     } catch (err: any) {
@@ -208,9 +207,9 @@
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // Get the replica to find the signerId
-      const replicaKeys = Array.from($isolatedEnv.replicas.keys()) as string[];
+      const replicaKeys = Array.from($isolatedEnv.eReplicas.keys()) as string[];
       const replicaKey = replicaKeys.find(k => k.startsWith(r2rFromEntity + ':'));
-      const replica = replicaKey ? $isolatedEnv.replicas.get(replicaKey) : null;
+      const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
 
       if (!replica) {
         throw new Error(`No replica found for entity ${shortAddress(r2rFromEntity)}`);
@@ -258,12 +257,10 @@
 
       lastAction = ` R2R sent: ${r2rAmount} units`;
 
-      // Update stores to trigger reactivity
-      isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
-
-      // Advance to latest frame
+      // Update stores to trigger reactivity (set timeIndex FIRST to avoid race condition)
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+      isolatedHistory.set($isolatedEnv.history || []);
+      isolatedEnv.set($isolatedEnv);
 
       console.log('[Architect] R2R complete, new frame created');
     } catch (err: any) {
@@ -289,7 +286,7 @@
   async function runPreset(presetId: string) {
     if (presetId === 'empty') {
       // Create empty J-Machine (just jurisdiction, no entities)
-      if (!activeXlnomy) {
+      if (!activeJurisdiction) {
         showCreateXlnomyModal = true;
       }
       lastAction = ' Empty J-Machine ready - add entities manually';
@@ -305,42 +302,57 @@
   /** Start AHB Tutorial with autopilot */
   let ahbRunning = false; // Guard against double execution
   async function startAHBTutorial() {
+    console.log('[AHB] ========== STARTING AHB ==========');
     if (ahbRunning) {
-      console.log('[Architect] AHB already running, skipping duplicate call');
+      console.log('[AHB] Already running, skip');
       return;
     }
     ahbRunning = true;
     loading = true;
     tutorialActive = true;
     try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+      console.log('[AHB] Loading runtime via getXLN()...');
+      const XLN = await getXLN();
+      console.log('[AHB] Runtime loaded, keys:', Object.keys(XLN).slice(0, 10));
+
+      // Ensure env exists with eReplicas
+      if (!$isolatedEnv) {
+        $isolatedEnv = XLN.createEmptyEnv();
+        isolatedEnv.set($isolatedEnv);
+      }
+      if (!$isolatedEnv.eReplicas) {
+        $isolatedEnv.eReplicas = new Map();
+      }
 
       // CRITICAL: Clear old state BEFORE running demo
-      console.log('[Architect] BEFORE clear: replicas =', $isolatedEnv.replicas.size);
-      $isolatedEnv.replicas.clear();
+      // Note: prepopulateAHB will auto-create BrowserVM if needed
+      console.log('[Architect] BEFORE clear: eReplicas =', $isolatedEnv.eReplicas.size);
+      $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
-      console.log('[Architect] AFTER clear: replicas =', $isolatedEnv.replicas.size);
+      console.log('[Architect] AFTER clear: eReplicas =', $isolatedEnv.eReplicas.size);
 
-      // Run prepopulateAHB
+      // Run prepopulateAHB (runtime.ts wraps with process internally)
       console.log('[Architect] Calling prepopulateAHB...');
-      await XLN.prepopulateAHB($isolatedEnv, XLN.process);
+      await XLN.prepopulateAHB($isolatedEnv);
       console.log('[Architect] prepopulateAHB returned');
-      console.log('[Architect] AFTER prepopulate: replicas =', $isolatedEnv.replicas.size, 'history =', $isolatedEnv.history?.length);
+      console.log('[Architect] AFTER prepopulate: eReplicas =', $isolatedEnv.eReplicas.size, 'history =', $isolatedEnv.history?.length);
 
       // Update isolated stores
-      isolatedEnv.set($isolatedEnv);
+      // CRITICAL: Set timeIndex BEFORE history to avoid race condition
+      // When history triggers updateNetworkData, timeIndex must already be correct
       const frames = $isolatedEnv.history || [];
       console.log('[Architect] Setting isolatedHistory with frames:', frames.length);
       console.log('[Architect] Frame descriptions:', frames.map((f: any) => f.description));
-      isolatedHistory.set(frames);
-      // Set to LAST frame - show final state after scenario completes
+
+      // Exit live mode and set timeIndex FIRST
+      isolatedIsLive.set(false);
       isolatedTimeIndex.set(Math.max(0, frames.length - 1));
 
-      console.log('[Architect] Frames in localHistory store:', frames.length);
+      // THEN set history and env (which trigger Graph3DPanel updates)
+      isolatedHistory.set(frames);
+      isolatedEnv.set($isolatedEnv);
 
-      // Exit live mode so subtitles show
-      isolatedIsLive.set(false);
+      console.log('[Architect] Frames in localHistory store:', frames.length);
 
       lastAction = `AHB: ${frames.length} frames loaded. Use TimeMachine to navigate.`;
 
@@ -366,18 +378,19 @@
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // CRITICAL: Clear old state BEFORE running demo
-      $isolatedEnv.replicas.clear();
+      $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
       console.log('[H-Topology] Cleared old state');
 
       // Run regular prepopulate (H-topology)
       await XLN.prepopulate($isolatedEnv, XLN.process);
 
-      isolatedEnv.set($isolatedEnv);
+      // CRITICAL: Set timeIndex BEFORE history to avoid race condition
       const frames = $isolatedEnv.history || [];
-      isolatedHistory.set(frames);
-      isolatedTimeIndex.set(0);
       isolatedIsLive.set(false);
+      isolatedTimeIndex.set(0);
+      isolatedHistory.set(frames);
+      isolatedEnv.set($isolatedEnv);
 
       console.log('[H-Topology] Frames loaded:', frames.length);
 
@@ -403,18 +416,19 @@
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // CRITICAL: Clear old state BEFORE running demo
-      $isolatedEnv.replicas.clear();
+      $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
       console.log('[Full Mechanics] Cleared old state');
 
       // Run comprehensive mechanics demo
       await XLN.prepopulateFullMechanics($isolatedEnv, XLN.process);
 
-      isolatedEnv.set($isolatedEnv);
+      // CRITICAL: Set timeIndex BEFORE history to avoid race condition
       const frames = $isolatedEnv.history || [];
-      isolatedHistory.set(frames);
-      isolatedTimeIndex.set(0);
       isolatedIsLive.set(false);
+      isolatedTimeIndex.set(0);
+      isolatedHistory.set(frames);
+      isolatedEnv.set($isolatedEnv);
 
       console.log('[Full Mechanics] Frames loaded:', frames.length);
 
@@ -479,7 +493,7 @@
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // Clear current state
-      $isolatedEnv.replicas.clear();
+      $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
 
       // Create micro-demo based on mechanic type
@@ -505,10 +519,11 @@
           return;
       }
 
-      isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
-      isolatedTimeIndex.set(0);
+      // CRITICAL: Set timeIndex BEFORE history to avoid race condition
       isolatedIsLive.set(false);
+      isolatedTimeIndex.set(0);
+      isolatedHistory.set($isolatedEnv.history || []);
+      isolatedEnv.set($isolatedEnv);
 
       lastAction = ` ${mechanic.toUpperCase()} demo ready`;
     } catch (err: any) {
@@ -552,7 +567,7 @@
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // Auto-create default jurisdiction if none exists
-      if (!$isolatedEnv?.activeXlnomy) {
+      if (!$isolatedEnv?.activeJurisdiction) {
         lastAction = 'Creating default jurisdiction for demo...';
 
         await XLN.applyRuntimeInput($isolatedEnv, {
@@ -585,7 +600,7 @@
 
       lastAction = 'Creating 3×3 hub (9 entities)...';
 
-      const xlnomy = $isolatedEnv.xlnomies.get($isolatedEnv.activeXlnomy);
+      const xlnomy = $isolatedEnv.jReplicas.get($isolatedEnv.activeJurisdiction);
       if (!xlnomy) throw new Error('Active xlnomy not found');
 
       const jPos = xlnomy.jMachine.position;
@@ -599,9 +614,9 @@
         const z = jPos.z + (row - 1) * 40;
         const y = jPos.y + 20; // y=320
 
-        const signerId = `${$isolatedEnv.activeXlnomy}_e${i}`;
+        const signerId = `${$isolatedEnv.activeJurisdiction}_e${i}`;
         const encoder = new TextEncoder();
-        const data = encoder.encode(`${$isolatedEnv.activeXlnomy}:e${i}:${Date.now()}`);
+        const data = encoder.encode(`${$isolatedEnv.activeJurisdiction}:e${i}:${Date.now()}`);
         const hashBuffer = await crypto.subtle.digest('SHA-256', data);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -617,7 +632,7 @@
               threshold: 1n,
               validators: [signerId],
               shares: { [signerId]: 1n },
-              jurisdiction: $isolatedEnv.activeXlnomy
+              jurisdiction: $isolatedEnv.activeJurisdiction
             },
             isProposer: true,
             position: { x, y, z }
@@ -633,9 +648,10 @@
 
       lastAction = ` Created 3×3 hub (9 entities at y=320)`;
 
-      isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
+      // CRITICAL: Set timeIndex BEFORE history to avoid race condition
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
+      isolatedHistory.set($isolatedEnv.history || []);
+      isolatedEnv.set($isolatedEnv);
 
       console.log('[Architect] Hub created');
     } catch (err: any) {
@@ -661,8 +677,8 @@
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       for (const entityId of entityIds) {
-        const replicaKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(entityId + ':'));
-        const replica = replicaKey ? $isolatedEnv.replicas.get(replicaKey) : null;
+        const replicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(entityId + ':'));
+        const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
 
         if (replica) {
           await XLN.process($isolatedEnv, [{
@@ -728,8 +744,8 @@
         to = entityIds[Math.floor(Math.random() * entityIds.length)];
       }
 
-      const fromReplicaKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
-      const fromReplica = fromReplicaKey ? $isolatedEnv.replicas.get(fromReplicaKey) : null;
+      const fromReplicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
+      const fromReplica = fromReplicaKey ? $isolatedEnv.eReplicas.get(fromReplicaKey) : null;
 
       if (!fromReplica || !from || !to) {
         throw new Error('Entity not found');
@@ -800,8 +816,8 @@
 
       // Pick random sender with reserves > 0
       const entitiesWithReserves = entityIds.filter(id => {
-        const key = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-        const replica = key ? $isolatedEnv.replicas.get(key) : null;
+        const key = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+        const replica = key ? $isolatedEnv.eReplicas.get(key) : null;
         const reserves = replica?.state?.reserves?.get(0) || 0n;
         return BigInt(reserves) > 0n;
       });
@@ -813,8 +829,8 @@
       }
 
       const from = entitiesWithReserves[Math.floor(Math.random() * entitiesWithReserves.length)];
-      const fromReplicaKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
-      const fromReplica = fromReplicaKey ? $isolatedEnv.replicas.get(fromReplicaKey) : null;
+      const fromReplicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
+      const fromReplica = fromReplicaKey ? $isolatedEnv.eReplicas.get(fromReplicaKey) : null;
 
       if (!fromReplica) throw new Error('Sender replica not found');
 
@@ -885,7 +901,7 @@
 
   /** SCALE STRESS TEST: Add 100 Entities (Prove Scalability) */
   async function scaleStressTest() {
-    if (!$isolatedEnv?.activeXlnomy) {
+    if (!$isolatedEnv?.activeJurisdiction) {
       lastAction = ' Create jurisdiction first';
       return;
     }
@@ -897,7 +913,7 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-      const xlnomy = $isolatedEnv.xlnomies.get($isolatedEnv.activeXlnomy);
+      const xlnomy = $isolatedEnv.jReplicas.get($isolatedEnv.activeJurisdiction);
       if (!xlnomy) throw new Error('Active xlnomy not found');
 
       // Create 100 entities in 10x10 grid
@@ -933,7 +949,7 @@
       await XLN.process($isolatedEnv, entityInputs);
 
       // Get created entity IDs
-      const newReplicas = Array.from($isolatedEnv.replicas.entries()) as [string, any][];
+      const newReplicas = Array.from($isolatedEnv.eReplicas.entries()) as [string, any][];
       const scaleTestIds = newReplicas
         .filter(([key]: [string, any]) => key.includes('scale_test'))
         .map(([key]: [string, any]) => key.split(':')[0]);
@@ -1075,7 +1091,7 @@
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // Auto-create default jurisdiction if none exists
-      if (!$isolatedEnv?.activeXlnomy) {
+      if (!$isolatedEnv?.activeJurisdiction) {
         lastAction = 'Creating default jurisdiction for demo...';
 
         await XLN.applyRuntimeInput($isolatedEnv, {
@@ -1151,9 +1167,9 @@
     const XLN = await import(/* @vite-ignore */ runtimeUrl);
     console.log('[createEntities] XLN loaded');
 
-    const xlnomy = $isolatedEnv.xlnomies.get($isolatedEnv.activeXlnomy);
+    const xlnomy = $isolatedEnv.jReplicas.get($isolatedEnv.activeJurisdiction);
     if (!xlnomy) {
-      console.error('[createEntities] Active xlnomy not found:', $isolatedEnv.activeXlnomy);
+      console.error('[createEntities] Active xlnomy not found:', $isolatedEnv.activeJurisdiction);
       throw new Error('Active xlnomy not found');
     }
     console.log('[createEntities] Xlnomy found:', xlnomy.name);
@@ -1189,11 +1205,11 @@
         // Generate entity ID (use real ticker for S&P 500 companies)
         let signerId: string;
         if (layer.name === 'S&P 500 Companies' && i < SP500_TICKERS.length) {
-          signerId = `${$isolatedEnv.activeXlnomy}_${SP500_TICKERS[i]}`;
+          signerId = `${$isolatedEnv.activeJurisdiction}_${SP500_TICKERS[i]}`;
         } else {
-          signerId = `${$isolatedEnv.activeXlnomy}_${layer.name.toLowerCase().replace(/\s/g, '_')}_${i}`;
+          signerId = `${$isolatedEnv.activeJurisdiction}_${layer.name.toLowerCase().replace(/\s/g, '_')}_${i}`;
         }
-        const data = new TextEncoder().encode(`${$isolatedEnv.activeXlnomy}:${layer.name}:${i}:${Date.now()}`);
+        const data = new TextEncoder().encode(`${$isolatedEnv.activeJurisdiction}:${layer.name}:${i}:${Date.now()}`);
         const hashBuffer = await crypto.subtle.digest('SHA-256', data);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -1209,7 +1225,7 @@
               threshold: 1n,
               validators: [signerId],
               shares: { [signerId]: 1n },
-              jurisdiction: $isolatedEnv.activeXlnomy
+              jurisdiction: $isolatedEnv.activeJurisdiction
             },
             isProposer: true,
             position: { x, y, z }
@@ -1238,8 +1254,8 @@
       const ids = layerEntityIds.get(layer.name) || [];
 
       for (const entityId of ids) {
-        const replicaKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(entityId + ':'));
-        const replica = replicaKey ? $isolatedEnv.replicas.get(replicaKey) : null;
+        const replicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(entityId + ':'));
+        const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
 
         if (replica) {
           fundingInputs.push({
@@ -1326,8 +1342,8 @@
           if (accountsOpened.has(accountKey)) continue;
           accountsOpened.add(accountKey);
 
-          const fromReplicaKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(fromId + ':'));
-          const fromReplica = fromReplicaKey ? $isolatedEnv.replicas.get(fromReplicaKey) : null;
+          const fromReplicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(fromId + ':'));
+          const fromReplica = fromReplicaKey ? $isolatedEnv.eReplicas.get(fromReplicaKey) : null;
 
           if (fromReplica) {
             accountInputs.push({
@@ -1355,7 +1371,7 @@
   /** OLD: FED RESERVE DEMO (legacy - will be removed) */
   async function createFedReserveDemo() {
     if (!requireLiveMode('create demo')) return;
-    if (!$isolatedEnv?.activeXlnomy) {
+    if (!$isolatedEnv?.activeJurisdiction) {
       lastAction = ' Create jurisdiction first';
       return;
     }
@@ -1372,7 +1388,7 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-      const xlnomy = $isolatedEnv.xlnomies.get($isolatedEnv.activeXlnomy);
+      const xlnomy = $isolatedEnv.jReplicas.get($isolatedEnv.activeJurisdiction);
       if (!xlnomy) throw new Error('Active xlnomy not found');
 
       const jPos = xlnomy.jMachine.position;
@@ -1393,8 +1409,8 @@
       const entities = [];
 
       // LAYER 2: Federal Reserve (center, y=200)
-      const fedSignerId = `${$isolatedEnv.activeXlnomy}_fed`;
-      const fedData = new TextEncoder().encode(`${$isolatedEnv.activeXlnomy}:fed:${Date.now()}`);
+      const fedSignerId = `${$isolatedEnv.activeJurisdiction}_fed`;
+      const fedData = new TextEncoder().encode(`${$isolatedEnv.activeJurisdiction}:fed:${Date.now()}`);
       const fedHashBuffer = await crypto.subtle.digest('SHA-256', fedData);
       const fedHashArray = Array.from(new Uint8Array(fedHashBuffer));
       const fedHashHex = fedHashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -1410,7 +1426,7 @@
             threshold: 1n,
             validators: [fedSignerId],
             shares: { [fedSignerId]: 1n },
-            jurisdiction: $isolatedEnv.activeXlnomy
+            jurisdiction: $isolatedEnv.activeJurisdiction
           },
           isProposer: true,
           position: { x: jPos.x, y: 200, z: jPos.z }
@@ -1421,8 +1437,8 @@
       const bankEntityIds = [];
       for (let i = 0; i < banks.length; i++) {
         const bank = banks[i]!;
-        const signerId = `${$isolatedEnv.activeXlnomy}_${bank.name.toLowerCase().replace(/\s/g, '_')}`;
-        const data = new TextEncoder().encode(`${$isolatedEnv.activeXlnomy}:${bank.name}:${Date.now() + i}`);
+        const signerId = `${$isolatedEnv.activeJurisdiction}_${bank.name.toLowerCase().replace(/\s/g, '_')}`;
+        const data = new TextEncoder().encode(`${$isolatedEnv.activeJurisdiction}:${bank.name}:${Date.now() + i}`);
         const hashBuffer = await crypto.subtle.digest('SHA-256', data);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
         const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -1438,7 +1454,7 @@
               threshold: 1n,
               validators: [signerId],
               shares: { [signerId]: 1n },
-              jurisdiction: $isolatedEnv.activeXlnomy
+              jurisdiction: $isolatedEnv.activeJurisdiction
             },
             isProposer: true,
             position: { x: jPos.x + bank.x, y: 100, z: jPos.z + bank.z }
@@ -1461,8 +1477,8 @@
           const custX = bankPos.x + Math.cos(angle) * radius;
           const custZ = bankPos.z + Math.sin(angle) * radius;
 
-          const custSignerId = `${$isolatedEnv.activeXlnomy}_${banks[i]!.name.toLowerCase()}_c${c}`;
-          const custData = new TextEncoder().encode(`${$isolatedEnv.activeXlnomy}:customer:${banks[i]!.name}:${c}:${Date.now()}`);
+          const custSignerId = `${$isolatedEnv.activeJurisdiction}_${banks[i]!.name.toLowerCase()}_c${c}`;
+          const custData = new TextEncoder().encode(`${$isolatedEnv.activeJurisdiction}:customer:${banks[i]!.name}:${c}:${Date.now()}`);
           const custHashBuffer = await crypto.subtle.digest('SHA-256', custData);
           const custHashArray = Array.from(new Uint8Array(custHashBuffer));
           const custHashHex = custHashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -1478,7 +1494,7 @@
                 threshold: 1n,
                 validators: [custSignerId],
                 shares: { [custSignerId]: 1n },
-                jurisdiction: $isolatedEnv.activeXlnomy
+                jurisdiction: $isolatedEnv.activeJurisdiction
               },
               isProposer: true,
               position: { x: custX, y: 0, z: custZ }
@@ -1494,8 +1510,8 @@
       });
 
       // FUNDING TIER 1: Fed Reserve with $100M (base money)
-      const fedReplicaKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(fedEntityId + ':'));
-      const fedReplica = fedReplicaKey ? $isolatedEnv.replicas.get(fedReplicaKey) : null;
+      const fedReplicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(fedEntityId + ':'));
+      const fedReplica = fedReplicaKey ? $isolatedEnv.eReplicas.get(fedReplicaKey) : null;
 
       if (fedReplica) {
         await XLN.process($isolatedEnv, [{
@@ -1526,8 +1542,8 @@
 
       // FUNDING TIER 2: Banks with $1M each
       for (const bankData of bankEntityIds) {
-        const replicaKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(bankData.entityId + ':'));
-        const replica = replicaKey ? $isolatedEnv.replicas.get(replicaKey) : null;
+        const replicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(bankData.entityId + ':'));
+        const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
 
         if (replica) {
           await XLN.process($isolatedEnv, [{
@@ -1561,8 +1577,8 @@
       const customerStartIndex = 1 + bankEntityIds.length; // Skip Fed + Banks
       for (let i = customerStartIndex; i < entities.length; i++) {
         const entity = entities[i]!;
-        const replicaKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(entity.entityId + ':'));
-        const replica = replicaKey ? $isolatedEnv.replicas.get(replicaKey) : null;
+        const replicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(entity.entityId + ':'));
+        const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
 
         if (replica) {
           await XLN.process($isolatedEnv, [{
@@ -1594,8 +1610,8 @@
 
       // CREDIT LINES TIER 1: Fed → Banks ($10M limit each)
       for (const bankData of bankEntityIds) {
-        const replicaKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(bankData.entityId + ':'));
-        const replica = replicaKey ? $isolatedEnv.replicas.get(replicaKey) : null;
+        const replicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(bankData.entityId + ':'));
+        const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
 
         if (replica) {
           await XLN.process($isolatedEnv, [{
@@ -1619,8 +1635,8 @@
         const parentBank = bankEntityIds.find(b => bankName && b.signerId.includes(bankName));
 
         if (parentBank) {
-          const custReplicaKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(custEntity.entityId + ':'));
-          const custReplica = custReplicaKey ? $isolatedEnv.replicas.get(custReplicaKey) : null;
+          const custReplicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(custEntity.entityId + ':'));
+          const custReplica = custReplicaKey ? $isolatedEnv.eReplicas.get(custReplicaKey) : null;
 
           if (custReplica) {
             await XLN.process($isolatedEnv, [{
@@ -1700,8 +1716,8 @@
     if (!centralBankLayer) return;
 
     const fedId = entityIds.find(id => {
-      const key = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-      const replica = key ? $isolatedEnv.replicas.get(key) : null;
+      const key = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+      const replica = key ? $isolatedEnv.eReplicas.get(key) : null;
       return replica?.signerId?.includes(centralBankLayer.name.toLowerCase().replace(/\s/g, '_'));
     });
 
@@ -1712,8 +1728,8 @@
     let totalEntities = 0;
 
     for (const id of entityIds) {
-      const key = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-      const replica = key ? $isolatedEnv.replicas.get(key) : null;
+      const key = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+      const replica = key ? $isolatedEnv.eReplicas.get(key) : null;
       if (replica?.state?.reserves) {
         const tokenReserves = replica.state.reserves.get(0) || 0n;
         totalReserves += BigInt(tokenReserves);
@@ -1729,8 +1745,8 @@
       const deficit = (targetAverage - averageReserves) * BigInt(totalEntities);
       const mintAmount = deficit > 1_000_000n ? 1_000_000n : deficit; // Max $1M per tick
 
-      const fedKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(fedId + ':'));
-      const fedReplica = fedKey ? $isolatedEnv.replicas.get(fedKey) : null;
+      const fedKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(fedId + ':'));
+      const fedReplica = fedKey ? $isolatedEnv.eReplicas.get(fedKey) : null;
 
       if (fedReplica) {
         const currentReserves = fedReplica.state?.reserves?.get(0) || 0n;
@@ -1770,16 +1786,16 @@
   async function run20PercentPayments(XLN: any) {
     // Get all entities with reserves > 0
     const activeEntities = entityIds.filter(id => {
-      const key = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-      const replica = key ? $isolatedEnv.replicas.get(key) : null;
+      const key = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+      const replica = key ? $isolatedEnv.eReplicas.get(key) : null;
       const reserves = replica?.state?.reserves?.get(0) || 0n;
       return BigInt(reserves) > 0n;
     });
 
     // Each entity sends 20% to random peer
     for (const fromId of activeEntities) {
-      const fromKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(fromId + ':'));
-      const fromReplica = fromKey ? $isolatedEnv.replicas.get(fromKey) : null;
+      const fromKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(fromId + ':'));
+      const fromReplica = fromKey ? $isolatedEnv.eReplicas.get(fromKey) : null;
       if (!fromReplica) continue;
 
       const reserves = BigInt(fromReplica.state?.reserves?.get(0) || 0n);
@@ -1835,8 +1851,8 @@
   async function detectAndHandleCrisis(XLN: any, topology: any) {
     // Check each entity's reserve ratio
     for (const id of entityIds) {
-      const key = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-      const replica = key ? $isolatedEnv.replicas.get(key) : null;
+      const key = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+      const replica = key ? $isolatedEnv.eReplicas.get(key) : null;
       if (!replica) continue;
 
       const reserves = BigInt(replica.state?.reserves?.get(0) || 0n);
@@ -1874,14 +1890,14 @@
     if (fedPaymentInterval) clearInterval(fedPaymentInterval);
 
     const bankEntityIds = entityIds.filter(id => {
-      const key = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-      const replica = key ? $isolatedEnv.replicas.get(key) : null;
+      const key = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+      const replica = key ? $isolatedEnv.eReplicas.get(key) : null;
       return replica?.signerId && !replica.signerId.includes('_fed');
     });
 
     const fedId = entityIds.find(id => {
-      const key = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
-      const replica = key ? $isolatedEnv.replicas.get(key) : null;
+      const key = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(id + ':'));
+      const replica = key ? $isolatedEnv.eReplicas.get(key) : null;
       return replica?.signerId?.includes('_fed');
     });
 
@@ -1905,8 +1921,8 @@
           const bank = bankEntityIds[Math.floor(Math.random() * bankEntityIds.length)]!;
           const amount = Math.floor(Math.random() * 500000) + 100000; // $100K-$600K
 
-          const fedKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(fedId + ':'));
-          const fedReplica = fedKey ? $isolatedEnv.replicas.get(fedKey) : null;
+          const fedKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(fedId + ':'));
+          const fedReplica = fedKey ? $isolatedEnv.eReplicas.get(fedKey) : null;
 
           if (fedReplica) {
             await XLN.process($isolatedEnv, [{
@@ -1931,8 +1947,8 @@
           const bank = bankEntityIds[Math.floor(Math.random() * bankEntityIds.length)]!;
           const amount = Math.floor(Math.random() * 300000) + 50000; // $50K-$350K
 
-          const bankKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(bank + ':'));
-          const bankReplica = bankKey ? $isolatedEnv.replicas.get(bankKey) : null;
+          const bankKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(bank + ':'));
+          const bankReplica = bankKey ? $isolatedEnv.eReplicas.get(bankKey) : null;
 
           if (bankReplica) {
             await XLN.process($isolatedEnv, [{
@@ -1962,8 +1978,8 @@
 
           const amount = Math.floor(Math.random() * 200000) + 25000; // $25K-$225K
 
-          const fromKey = (Array.from($isolatedEnv.replicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
-          const fromReplica = fromKey ? $isolatedEnv.replicas.get(fromKey) : null;
+          const fromKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(from + ':'));
+          const fromReplica = fromKey ? $isolatedEnv.eReplicas.get(fromKey) : null;
 
           if (fromReplica) {
             // Check if account exists
@@ -2121,14 +2137,14 @@
       return;
     }
 
-    // Limit to 9 xlnomies (3×3 grid)
-    if ($isolatedEnv?.xlnomies && $isolatedEnv.xlnomies.size >= 9) {
-      lastAction = ' Maximum 9 xlnomies (3×3 grid full)';
+    // Limit to 9 jurisdictions (3×3 grid)
+    if ($isolatedEnv?.jReplicas && $isolatedEnv.jReplicas.size >= 9) {
+      lastAction = ' Maximum 9 jurisdictions (3×3 grid full)';
       return;
     }
 
     loading = true;
-    lastAction = `Creating xlnomy "${newXlnomyName.toLowerCase()}"...`;
+    lastAction = `Creating jurisdiction "${newXlnomyName.toLowerCase()}"...`;
 
     try {
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
@@ -2155,7 +2171,7 @@
         entityInputs: []
       });
 
-      console.log('[Architect] Created Xlnomy with', $isolatedEnv.replicas.size, 'total entities');
+      console.log('[Architect] Created Xlnomy with', $isolatedEnv.eReplicas.size, 'total entities');
 
       // Success message
       const createdName = newXlnomyName.toLowerCase();
@@ -2186,14 +2202,14 @@
   }
 
   async function switchXlnomy(name: string) {
-    if (!$isolatedEnv || name === $isolatedEnv.activeXlnomy) return;
+    if (!$isolatedEnv || name === $isolatedEnv.activeJurisdiction) return;
 
     loading = true;
     lastAction = `Switching to "${name}"...`;
 
     try {
-      $isolatedEnv.activeXlnomy = name;
-      const xlnomy = $isolatedEnv.xlnomies?.get(name);
+      $isolatedEnv.activeJurisdiction = name;
+      const xlnomy = $isolatedEnv.jReplicas?.get(name);
 
       if (xlnomy) {
         // TODO: Load xlnomy's replicas and history into env
@@ -2217,7 +2233,7 @@
       return;
     }
 
-    if (!$isolatedEnv?.activeXlnomy) {
+    if (!$isolatedEnv?.activeJurisdiction) {
       lastAction = ' Create Xlnomy first';
       return;
     }
@@ -2230,11 +2246,11 @@
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // Generate signerId from xlnomy name + entity name
-      const signerId = `${$isolatedEnv.activeXlnomy.toLowerCase()}_${newEntityName.toLowerCase()}`;
+      const signerId = `${$isolatedEnv.activeJurisdiction.toLowerCase()}_${newEntityName.toLowerCase()}`;
 
       // Generate entityId (hash-based for lazy entities)
       const encoder = new TextEncoder();
-      const data = encoder.encode(`${$isolatedEnv.activeXlnomy}:${newEntityName}:${Date.now()}`);
+      const data = encoder.encode(`${$isolatedEnv.activeJurisdiction}:${newEntityName}:${Date.now()}`);
       const hashBuffer = await crypto.subtle.digest('SHA-256', data);
       const hashArray = Array.from(new Uint8Array(hashBuffer));
       const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
@@ -2259,7 +2275,7 @@
               threshold: 1n,
               validators: [signerId],
               shares: { [signerId]: 1n },
-              jurisdiction: $isolatedEnv.activeXlnomy
+              jurisdiction: $isolatedEnv.activeJurisdiction
             },
             isProposer: true,
             position
@@ -2303,36 +2319,13 @@
   </div>
 
   <div class="mode-selector">
-    <button
-      class:active={currentMode === 'explore'}
-      on:click={() => currentMode = 'explore'}
-    >
-       Explore
-    </button>
-    <button
-      class:active={currentMode === 'build'}
-      on:click={() => currentMode = 'build'}
-    >
-       Build
-    </button>
-    <button
-      class:active={currentMode === 'economy'}
-      on:click={() => currentMode = 'economy'}
-    >
-       Economy
-    </button>
-    <button
-      class:active={currentMode === 'governance'}
-      on:click={() => currentMode = 'governance'}
-    >
-       Governance
-    </button>
-    <button
-      class:active={currentMode === 'resolve'}
-      on:click={() => currentMode = 'resolve'}
-    >
-       Resolve
-    </button>
+    <select bind:value={currentMode} class="mode-dropdown">
+      <option value="explore">Explore</option>
+      <option value="build">Build</option>
+      <option value="economy">Economy</option>
+      <option value="governance">Governance</option>
+      <option value="resolve">Resolve</option>
+    </select>
   </div>
 
   <div class="mode-content">
@@ -2511,19 +2504,19 @@
             + Create Jurisdiction Here
           </button>
 
-          <!-- Dropdown for switching (only visible if xlnomies exist) -->
-          {#if xlnomies.length > 0}
+          <!-- Dropdown for switching (only visible if jurisdictions exist) -->
+          {#if jurisdictions.length > 0}
             <div class="xlnomy-selector">
               <label for="xlnomy-switch">Switch to:</label>
-              <select id="xlnomy-switch" bind:value={activeXlnomy} on:change={(e) => switchXlnomy(e.currentTarget.value)}>
-                {#each xlnomies as name}
+              <select id="xlnomy-switch" bind:value={activeJurisdiction} on:change={(e) => switchXlnomy(e.currentTarget.value)}>
+                {#each jurisdictions as name}
                   <option value={name}>{name}</option>
                 {/each}
               </select>
             </div>
           {/if}
 
-          <p class="help-text">Isolated EVM with J-Machine + Depository. Xlnomies (L2 economies) run inside.</p>
+          <p class="help-text">Isolated EVM with J-Machine + Depository. Jurisdictions run inside.</p>
         </div>
 
         <div class="action-section">
@@ -2687,7 +2680,7 @@
           </button>
           <p class="step-help">Send 20% of balance from random entity</p>
 
-          <button class="demo-btn stress-test" on:click={scaleStressTest} disabled={loading || !activeXlnomy || entityIds.length > 20}>
+          <button class="demo-btn stress-test" on:click={scaleStressTest} disabled={loading || !activeJurisdiction || entityIds.length > 20}>
              Scale Test: +100 Entities
           </button>
           <p class="step-help">Prove scalability - watch FPS stay 60+ with 100 banks!</p>
@@ -2794,7 +2787,7 @@
         <div class="status loading">
           ⏳ Initializing XLN environment...
         </div>
-      {:else if !$isolatedEnv?.activeXlnomy}
+      {:else if !$isolatedEnv?.activeJurisdiction}
         <div class="status">
           ⚠️ Create an Xlnomy first (Economy mode)
         </div>
@@ -2818,7 +2811,7 @@
         </div>
 
         <div class="action-section">
-          <h5>Entities in {$isolatedEnv.activeXlnomy}</h5>
+          <h5>Entities in {$isolatedEnv.activeJurisdiction}</h5>
           {#if entityIds.length === 0}
             <p class="help-text">No entities yet. Create alice and bob to start!</p>
           {:else}
@@ -2939,35 +2932,42 @@
   }
 
   .mode-selector {
-    display: flex;
-    gap: 4px;
     padding: 8px;
     background: #252526;
     border-bottom: 1px solid #3e3e3e;
-    flex-wrap: wrap;
   }
 
-  .mode-selector button {
-    flex: 1;
-    min-width: 80px;
+  .mode-dropdown {
+    width: 100%;
     padding: 8px 12px;
     background: #2d2d30;
     border: 1px solid #3e3e3e;
-    color: #ccc;
+    color: #fff;
     border-radius: 4px;
     cursor: pointer;
     font-size: 12px;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23ccc' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 28px;
   }
 
-  .mode-selector button:hover {
-    background: #37373d;
+  .mode-dropdown:hover {
+    background-color: #37373d;
     border-color: #007acc;
   }
 
-  .mode-selector button.active {
-    background: #0e639c;
-    color: white;
-    border-color: #1177bb;
+  .mode-dropdown:focus {
+    outline: none;
+    border-color: #0e639c;
+    box-shadow: 0 0 0 1px #0e639c;
+  }
+
+  .mode-dropdown option {
+    background: #2d2d30;
+    color: #fff;
+    padding: 8px;
   }
 
   .mode-content {

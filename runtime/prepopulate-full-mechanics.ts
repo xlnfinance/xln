@@ -35,7 +35,7 @@ const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 type ReplicaEntry = [string, EntityReplica];
 
 function findReplica(env: Env, entityId: string): ReplicaEntry {
-  const entry = Array.from(env.replicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
+  const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
   if (!entry) {
     throw new Error(`Replica for entity ${entityId} not found`);
   }
@@ -107,9 +107,10 @@ function pushSnapshot(env: Env, description: string, subtitle: FrameSubtitle) {
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: Date.now(),
-    replicas: new Map(
-      Array.from(env.replicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica)]),
+    eReplicas: new Map(
+      Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica)]),
     ),
+    jReplicas: [],
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     runtimeOutputs: [],
     description,

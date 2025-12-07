@@ -118,7 +118,7 @@ import { captureSnapshot, cloneEntityReplica } from './state-helpers';
 import { getEntityShortId, getEntityNumber, formatEntityId } from './entity-helpers';
 import { safeStringify } from './serialization-utils';
 import { validateDelta, validateAccountDeltas, createDefaultDelta, isDelta, validateEntityInput, validateEntityOutput } from './validation-utils';
-import { EntityInput, EntityReplica, Env, RuntimeInput } from './types';
+import { EntityInput, EntityReplica, Env, RuntimeInput, JReplica } from './types';
 import {
   clearDatabase,
   DEBUG,
@@ -290,25 +290,30 @@ const applyRuntimeInput = async (
       return { entityOutbox: [], mergedInputs: [] };
     }
 
-    // Merge new runtimeInput into env.runtimeInput
-    env.runtimeInput.runtimeTxs.push(...runtimeInput.runtimeTxs);
-    env.runtimeInput.entityInputs.push(...runtimeInput.entityInputs);
-
-    // Merge all entityInputs in env.runtimeInput
-    const mergedInputs = mergeEntityInputs(env.runtimeInput.entityInputs);
-
-    // FINTECH-LEVEL TYPE SAFETY: Validate all merged inputs at entry point
-    mergedInputs.forEach((input, i) => {
+    // FINTECH-LEVEL TYPE SAFETY: Validate all inputs BEFORE mutating env
+    // Clone inputs to avoid mutating caller's data
+    const validatedRuntimeTxs = [...runtimeInput.runtimeTxs];
+    const validatedEntityInputs = [...runtimeInput.entityInputs];
+    
+    // Validate entity inputs before merging
+    validatedEntityInputs.forEach((input, i) => {
       try {
         validateEntityInput(input);
       } catch (error) {
-        logError("RUNTIME_TICK", `🚨 CRITICAL FINANCIAL ERROR: Invalid merged EntityInput[${i}]!`, {
+        logError("RUNTIME_TICK", `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityInput[${i}] before merge!`, {
           error: (error as Error).message,
           input
         });
         throw error; // Fail fast
       }
     });
+
+    // NOW safe to merge into env.runtimeInput (after validation)
+    env.runtimeInput.runtimeTxs.push(...validatedRuntimeTxs);
+    env.runtimeInput.entityInputs.push(...validatedEntityInputs);
+
+    // Merge all entityInputs in env.runtimeInput (already validated above)
+    const mergedInputs = mergeEntityInputs(env.runtimeInput.entityInputs);
 
     const entityOutbox: EntityInput[] = [];
 
@@ -328,22 +333,44 @@ const applyRuntimeInput = async (
             env, // Pass env so grid entities get added to runtime
           });
 
-          // Initialize xlnomies Map if it doesn't exist
-          if (!env.xlnomies) {
-            env.xlnomies = new Map();
+          // Initialize jReplicas Map if it doesn't exist
+          if (!env.jReplicas) {
+            env.jReplicas = new Map();
           }
 
-          // Store the created Xlnomy
-          env.xlnomies.set(xlnomy.name, xlnomy);
+          // Capture initial stateRoot from EVM (for time travel)
+          let stateRoot = new Uint8Array(32);
+          if (xlnomy.evm?.captureStateRoot) {
+            try {
+              stateRoot = await xlnomy.evm.captureStateRoot();
+              console.log(`[Runtime] Captured initial stateRoot: ${Buffer.from(stateRoot).toString('hex').slice(0, 16)}...`);
+            } catch (e) {
+              console.warn(`[Runtime] Could not capture stateRoot: ${e}`);
+            }
+          }
+
+          // Create JReplica from Xlnomy
+          const jReplica: JReplica = {
+            name: xlnomy.name,
+            blockNumber: BigInt(xlnomy.jMachine.jHeight),
+            stateRoot,
+            mempool: xlnomy.jMachine.mempool || [],
+            position: xlnomy.jMachine.position,
+            contracts: xlnomy.contracts ? {
+              depository: xlnomy.contracts.depository,
+              entityProvider: xlnomy.contracts.entityProvider,
+            } : undefined,
+          };
+          env.jReplicas.set(xlnomy.name, jReplica);
 
           // Set as active if it's the first one
-          if (!env.activeXlnomy) {
-            env.activeXlnomy = xlnomy.name;
+          if (!env.activeJurisdiction) {
+            env.activeJurisdiction = xlnomy.name;
           }
 
-          console.log(`[Runtime] ✅ Xlnomy "${xlnomy.name}" created`);
+          console.log(`[Runtime] ✅ JReplica "${xlnomy.name}" created`);
           console.log(`[Runtime] Grid entities queued in runtimeInput: ${env.runtimeInput.runtimeTxs.length} txs`);
-          console.log(`[Runtime] Active Xlnomy: ${env.activeXlnomy}`);
+          console.log(`[Runtime] Active Jurisdiction: ${env.activeJurisdiction}`);
         } catch (error) {
           console.error(`[Runtime] ❌ Failed to create Xlnomy:`, error);
         }
@@ -384,13 +411,15 @@ const applyRuntimeInput = async (
 
         // Only add position if it exists (exactOptionalPropertyTypes compliance)
         if (runtimeTx.data.position) {
-          replica.position = runtimeTx.data.position;
-          // GRID-POS-C removed - frontend has GRID-POS-D/E
+          replica.position = {
+            ...runtimeTx.data.position,
+            jurisdiction: runtimeTx.data.position.jurisdiction || runtimeTx.data.position.xlnomy || env.activeJurisdiction || 'default',
+          };
         }
 
-        env.replicas.set(replicaKey, replica);
+        env.eReplicas.set(replicaKey, replica);
         // Validate jBlock immediately after creation
-        const createdReplica = env.replicas.get(replicaKey);
+        const createdReplica = env.eReplicas.get(replicaKey);
         const actualJBlock = createdReplica?.state.jBlock;
         // REPLICA-DEBUG removed
 
@@ -434,14 +463,14 @@ const applyRuntimeInput = async (
         const hasAccountInput = entityInput.entityTxs!.some(tx => tx.type === 'accountInput');
         if (hasAccountInput) {
           // Find the proposer for this entity
-          const entityReplicaKeys = Array.from(env.replicas.keys()).filter(key => key.startsWith(entityInput.entityId + ':'));
+          const entityReplicaKeys = Array.from(env.eReplicas.keys()).filter(key => key.startsWith(entityInput.entityId + ':'));
           if (entityReplicaKeys.length > 0) {
             const firstReplicaKey = entityReplicaKeys[0];
             if (!firstReplicaKey) {
               logError("RUNTIME_TICK", `❌ Invalid replica key for entity ${entityInput.entityId}`);
               continue;
             }
-            const firstReplica = env.replicas.get(firstReplicaKey);
+            const firstReplica = env.eReplicas.get(firstReplicaKey);
             if (firstReplica?.state.config.validators[0]) {
               actualSignerId = firstReplica.state.config.validators[0];
               // AUTO-ROUTE log removed
@@ -457,7 +486,7 @@ const applyRuntimeInput = async (
       }
 
       const replicaKey = `${entityInput.entityId}:${actualSignerId}`;
-      const entityReplica = env.replicas.get(replicaKey);
+      const entityReplica = env.eReplicas.get(replicaKey);
 
       // REPLICA-LOOKUP logs removed - not consensus-critical
 
@@ -475,7 +504,7 @@ const applyRuntimeInput = async (
         // IMMUTABILITY: Create fresh replica (working memory cleared, state updated)
         // applyEntityInput clones internally, so mempool/proposal mutations stay local
         // Reset working memory to prevent stale data from previous frames
-        env.replicas.set(replicaKey, {
+        env.eReplicas.set(replicaKey, {
           ...entityReplica,
           state: newState,
           mempool: [], // Fresh mempool (applyEntityInput already processed txs)
@@ -540,12 +569,12 @@ const applyRuntimeInput = async (
     }
 
     // Compare old vs new entities
-    const oldEntityKeys = Array.from(env.replicas.keys()).filter(
+    const oldEntityKeys = Array.from(env.eReplicas.keys()).filter(
       key =>
         key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000001:') ||
         key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000002:'),
     );
-    const newEntityKeys = Array.from(env.replicas.keys()).filter(
+    const newEntityKeys = Array.from(env.eReplicas.keys()).filter(
       key =>
         !key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000001:') &&
         !key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000002:') &&
@@ -630,7 +659,8 @@ const main = async (): Promise<Env> => {
 
   // First, create default environment with gossip layer
   env = {
-    replicas: new Map(),
+    eReplicas: new Map(),
+    jReplicas: new Map(),
     height: 0,
     timestamp: Date.now(),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
@@ -681,9 +711,9 @@ const main = async (): Promise<Env> => {
     if (snapshots.length > 0) {
       const latestSnapshot = snapshots[snapshots.length - 1];
 
-      // CRITICAL: Validate snapshot has proper replicas data
-      if (!latestSnapshot.replicas) {
-        console.warn('⚠️ Latest snapshot missing replicas data, using fresh environment');
+      // CRITICAL: Validate snapshot has proper eReplicas data
+      if (!latestSnapshot.eReplicas) {
+        console.warn('⚠️ Latest snapshot missing eReplicas data, using fresh environment');
         throw new Error('LEVEL_NOT_FOUND');
       }
 
@@ -696,29 +726,41 @@ const main = async (): Promise<Env> => {
         console.log(`📡 Restored gossip profiles: ${Object.keys(latestSnapshot.gossip.profiles).length} entries`);
       }
 
-      // CRITICAL: Convert replicas to proper Map if needed (handle deserialization from DB)
-      let replicasMap: Map<string, EntityReplica>;
+      // CRITICAL: Convert eReplicas to proper Map if needed (handle deserialization from DB)
+      let eReplicasMap: Map<string, EntityReplica>;
       try {
-        if (latestSnapshot.replicas instanceof Map) {
-          replicasMap = latestSnapshot.replicas;
-        } else if (latestSnapshot.replicas && typeof latestSnapshot.replicas === 'object') {
+        if (latestSnapshot.eReplicas instanceof Map) {
+          eReplicasMap = latestSnapshot.eReplicas;
+        } else if (latestSnapshot.eReplicas && typeof latestSnapshot.eReplicas === 'object') {
           // Deserialized from DB - convert object to Map
-          replicasMap = new Map(Object.entries(latestSnapshot.replicas));
+          eReplicasMap = new Map(Object.entries(latestSnapshot.eReplicas));
         } else {
-          console.warn('⚠️ Invalid replicas format in snapshot, using fresh environment');
+          console.warn('⚠️ Invalid eReplicas format in snapshot, using fresh environment');
           throw new Error('LEVEL_NOT_FOUND');
         }
       } catch (conversionError) {
-        logError("RUNTIME_TICK", '❌ Failed to convert replicas to Map:', conversionError);
+        logError("RUNTIME_TICK", '❌ Failed to convert eReplicas to Map:', conversionError);
         console.warn('⚠️ Falling back to fresh environment');
         throw new Error('LEVEL_NOT_FOUND');
       }
 
+      // Convert jReplicas array to Map
+      const jReplicasMap = new Map<string, JReplica>();
+      if (latestSnapshot.jReplicas) {
+        for (const jr of latestSnapshot.jReplicas) {
+          jReplicasMap.set(jr.name, {
+            ...jr,
+            stateRoot: new Uint8Array(jr.stateRoot), // Ensure proper Uint8Array
+          });
+        }
+      }
+
       env = {
-        // CRITICAL: Clone the replicas Map to avoid mutating snapshot data!
-        replicas: new Map(Array.from(replicasMap).map(([key, replica]): [string, EntityReplica] => {
+        // CRITICAL: Clone the eReplicas Map to avoid mutating snapshot data!
+        eReplicas: new Map(Array.from(eReplicasMap).map(([key, replica]): [string, EntityReplica] => {
           return [key, cloneEntityReplica(replica)];
         })),
+        jReplicas: jReplicasMap,
         height: latestSnapshot.height,
         timestamp: latestSnapshot.timestamp,
         // CRITICAL: runtimeInput must start EMPTY on restore!
@@ -733,7 +775,7 @@ const main = async (): Promise<Env> => {
       console.log(`✅ History restored. Runtime is at height ${env.height} with ${env.history.length} snapshots.`);
       console.log(`📈 Snapshot details:`, {
         height: env.height,
-        replicaCount: env.replicas.size,
+        replicaCount: env.eReplicas.size,
         timestamp: new Date(env.timestamp).toISOString(),
         runtimeInputs: env.runtimeInput.entityInputs.length,
       });
@@ -784,14 +826,14 @@ const main = async (): Promise<Env> => {
     console.log('🌐 Browser environment: Demos available via UI buttons, not auto-running');
   }
 
-  log.info(`🎯 Runtime startup complete. Height: ${env.height}, Entities: ${env.replicas.size}`);
+  log.info(`🎯 Runtime startup complete. Height: ${env.height}, Entities: ${env.eReplicas.size}`);
 
   // Debug final state before starting j-watcher
   if (isBrowser) {
     console.log(`🔍 BROWSER-DEBUG: Final state before j-watcher start:`);
     console.log(`🔍   Environment height: ${env.height}`);
-    console.log(`🔍   Total replicas: ${env.replicas.size}`);
-    for (const [replicaKey, replica] of env.replicas.entries()) {
+    console.log(`🔍   Total replicas: ${env.eReplicas.size}`);
+    for (const [replicaKey, replica] of env.eReplicas.entries()) {
       const { entityId, signerId } = parseReplicaKey(replicaKey);
       console.log(`🔍   Entity ${entityId.slice(0,10)}... (${signerId}): jBlock=${replica.state.jBlock}, isProposer=${replica.isProposer}`);
     }
@@ -841,7 +883,8 @@ const clearDatabaseAndHistory = async () => {
 
   // Reset the runtime environment to initial state (including history)
   env = {
-    replicas: new Map(),
+    eReplicas: new Map(),
+    jReplicas: new Map(),
     height: 0,
     timestamp: Date.now(),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
@@ -857,7 +900,7 @@ export const getJWatcherStatus = () => {
   if (!jWatcher || !env) return null;
   return {
     isWatching: jWatcher.getStatus().isWatching,
-    proposers: Array.from(env.replicas.entries())
+    proposers: Array.from(env.eReplicas.entries())
       .filter(([, replica]) => replica.isProposer)
       .map(([key, replica]) => {
         const { entityId, signerId } = parseReplicaKey(key);
@@ -1145,7 +1188,8 @@ const runDemoWrapper = async (env: Env): Promise<Env> => {
 // === ENVIRONMENT UTILITIES ===
 export const createEmptyEnv = (): Env => {
   return {
-    replicas: new Map(),
+    eReplicas: new Map(),
+    jReplicas: new Map(),
     height: 0,
     timestamp: Date.now(),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
@@ -1239,11 +1283,8 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     // Save latest height pointer
     await db.put(Buffer.from('latest_height'), Buffer.from(String(env.height)));
 
-    // Save environment snapshot (exclude xlnomies - they have circular refs)
+    // Save environment snapshot (jReplicas with stateRoot are serializable)
     const snapshot = JSON.stringify(env, (k, v) => {
-      // Skip xlnomies Map entirely (contains EVM instances with circular refs)
-      if (k === 'xlnomies') return undefined;
-
       return typeof v === 'bigint' ? String(v) :
         v instanceof Uint8Array ? Array.from(v) :
         v instanceof Map ? Array.from(v.entries()) : v;
@@ -1274,7 +1315,12 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
       const env = createEmptyEnv();
       env.height = BigInt(data.height || 0);
       env.timestamp = BigInt(data.timestamp || 0);
-      env.replicas = new Map(data.replicas || []);
+      // Support both old (replicas) and new (eReplicas) format
+      env.eReplicas = new Map(data.eReplicas || data.replicas || []);
+      // Load jReplicas if present
+      if (data.jReplicas) {
+        env.jReplicas = new Map(data.jReplicas.map((jr: JReplica) => [jr.name, jr]));
+      }
       if (data.gossip?.profiles) {
         env.gossip.profiles = new Map(data.gossip.profiles);
       }
@@ -1308,10 +1354,25 @@ export const clearDB = async (): Promise<void> => {
 };
 
 // === PREPOPULATE FUNCTION ===
-import { prepopulate } from './prepopulate';
-import { prepopulateAHB } from './prepopulate-ahb';
-import { prepopulateFullMechanics } from './prepopulate-full-mechanics';
-export { prepopulate, prepopulateAHB, prepopulateFullMechanics };
+import { prepopulate as prepopulateImpl } from './prepopulate';
+import { prepopulateAHB as prepopulateAHBImpl } from './prepopulate-ahb';
+import { prepopulateFullMechanics as prepopulateFullMechanicsImpl } from './prepopulate-full-mechanics';
+
+// Wrap prepopulate functions to match API signature (bind process as second parameter)
+export const prepopulate = async (env: Env): Promise<Env> => {
+  await prepopulateImpl(env, process);
+  return env;
+};
+
+export const prepopulateAHB = async (env: Env): Promise<Env> => {
+  await prepopulateAHBImpl(env, process);
+  return env;
+};
+
+export const prepopulateFullMechanics = async (env: Env): Promise<Env> => {
+  await prepopulateFullMechanicsImpl(env, process);
+  return env;
+};
 
 // === SCENARIO SYSTEM ===
 export { parseScenario, mergeAndSortEvents } from './scenarios/parser.js';

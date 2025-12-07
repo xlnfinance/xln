@@ -37,9 +37,9 @@
     : [];
 
   // Get all other entities for account opening
-  $: otherEntities = $xlnEnvironment?.replicas
+  $: otherEntities = $xlnEnvironment?.eReplicas
     ? Array.from(new Set(
-        Array.from($xlnEnvironment.replicas.keys() as IterableIterator<string>)
+        Array.from($xlnEnvironment.eReplicas.keys() as IterableIterator<string>)
           .map(key => key.split(':')[0]!)
           .filter((entityId): entityId is string => !!entityId && entityId !== tab.entityId)
       ))

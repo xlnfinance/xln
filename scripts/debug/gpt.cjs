@@ -4,20 +4,26 @@ const fs = require('fs');
 const path = require('path');
 
 // ⭐ CORE FILES ONLY - Everything an LLM needs to understand XLN
+// 🔴 READ ORDER: Solidity contracts FIRST (source of truth), then TypeScript runtime
 const CORE_FILES = {
   contracts: [
-    'Depository.sol',      // Reserve/collateral management, enforceDebts FIFO
+    // ⚡ READ THESE FIRST - On-chain source of truth for all invariants
+    'Types.sol',           // Shared types: Diff, BatchArgs, InsuranceReg
+    'Depository.sol',      // Reserve/collateral management, enforceDebts FIFO, RCPAN invariant
     'EntityProvider.sol',  // Hanko verification, governance, C/D shares
-    'SubcontractProvider.sol', // HTLCs, swaps, limit orders
+    'Account.sol',         // A-machine on-chain: bilateral account state, settlements
+    'DeltaTransformer.sol', // Delta transformations: HTLCs, swaps, limit orders
   ],
   runtime: [
     // Core data structures and implementation
     'types.ts',              // All TypeScript interfaces
+    'ids.ts',                // Identity system: EntityId, SignerId, JId, ReplicaKey
 
     // Main coordinators (how the system works)
     'runtime.ts',            // Main coordinator, 100ms ticks, R→E→A routing
     'entity-consensus.ts',   // BFT consensus (ADD_TX → PROPOSE → SIGN → COMMIT)
     'account-consensus.ts',  // Bilateral account consensus between entities
+    'j-batch.ts',            // J-batch system: E-machine accumulates → jBroadcast → J-machine
 
     // Transaction processing (how txs are applied)
     'entity-tx/index.ts',    // Entity transaction types
@@ -43,9 +49,9 @@ const CORE_FILES = {
     // Ordered by dependency - read in this order
     'emc2.md',               // ⚡ Core philosophy: E=mc² → Energy-Mass-Credit (5min)
     'docs/12_invariant.md',  // ⚡ RCPAN vs FCUAN vs FRPAP (THE core innovation) (10min)
-    'docs/jea.md',           // ⚡ Jurisdiction-Entity-Account 3-layer model (8min)
+    'docs/JEA.md',           // ⚡ Jurisdiction-Entity-Account 3-layer model (8min)
     'docs/11_Jurisdiction_Machine.md', // Architecture deep-dive
-    'priorart.md',           // Why Lightning/rollups don't work
+    'PriorArt.md',           // Why Lightning/rollups don't work
   ],
   worlds: [
     'architecture.md'        // Scenario architecture, EntityInput primitives
@@ -199,17 +205,23 @@ bun run src/server.ts  # Starts server
 
 ## Cross-Local Network: Off-chain settlement with on-chain anchoring
 
+🔴 **READ SOLIDITY FIRST** - Contracts are the source of truth for all invariants
+
 xln/
   jurisdictions/contracts/
+    Types.sol                  ${fileSizes['contracts/Types.sol'] || '?'} lines - Shared types: Diff, BatchArgs, InsuranceReg
     Depository.sol             ${fileSizes['contracts/Depository.sol'] || '?'} lines - enforceDebts() FIFO, collateral + credit (INVARIANT: L+R+C=0)
     EntityProvider.sol         ${fileSizes['contracts/EntityProvider.sol'] || '?'} lines - Hanko sigs, Control/Dividend, governance
-    SubcontractProvider.sol    ${fileSizes['contracts/SubcontractProvider.sol'] || '?'} lines - HTLCs, swaps, limit orders
+    Account.sol                ${fileSizes['contracts/Account.sol'] || '?'} lines - A-machine on-chain: bilateral accounts, settlements
+    DeltaTransformer.sol       ${fileSizes['contracts/DeltaTransformer.sol'] || '?'} lines - Delta transformations: HTLCs, swaps, limit orders
 
   runtime/
     types.ts                     ${fileSizes['runtime/types.ts'] || '?'} lines - All TypeScript interfaces (START HERE)
+    ids.ts                       ${fileSizes['runtime/ids.ts'] || '?'} lines - Identity system: EntityId, SignerId, JId, ReplicaKey
     runtime.ts                   ${fileSizes['runtime/runtime.ts'] || '?'} lines - Main coordinator, 100ms ticks, R->E->A routing
     entity-consensus.ts          ${fileSizes['runtime/entity-consensus.ts'] || '?'} lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
     account-consensus.ts         ${fileSizes['runtime/account-consensus.ts'] || '?'} lines - Bilateral consensus, left/right perspective
+    j-batch.ts                   ${fileSizes['runtime/j-batch.ts'] || '?'} lines - J-batch: E-machine accumulates → jBroadcast → J-machine
 
     entity-tx/
       index.ts                   ${fileSizes['runtime/entity-tx/index.ts'] || '?'} lines - Entity transaction types
@@ -234,9 +246,9 @@ xln/
   vibepaper/
     emc2.md                      ${fileSizes['vibepaper/emc2.md'] || '?'} lines - ⚡ Energy-Mass-Credit equivalence (CRITICAL PATH)
     docs/12_invariant.md         ${fileSizes['vibepaper/docs/12_invariant.md'] || '?'} lines - ⚡ RCPAN innovation (CRITICAL PATH)
-    docs/jea.md                  ${fileSizes['vibepaper/docs/jea.md'] || '?'} lines - ⚡ Jurisdiction-Entity-Account model (CRITICAL PATH)
+    docs/JEA.md                  ${fileSizes['vibepaper/docs/JEA.md'] || '?'} lines - ⚡ Jurisdiction-Entity-Account model (CRITICAL PATH)
     docs/11_Jurisdiction_Machine.md  ${fileSizes['vibepaper/docs/11_Jurisdiction_Machine.md'] || '?'} lines - Architecture deep-dive
-    priorart.md                  ${fileSizes['vibepaper/priorart.md'] || '?'} lines - Why Lightning/rollups don't work
+    PriorArt.md                  ${fileSizes['vibepaper/PriorArt.md'] || '?'} lines - Why Lightning/rollups don't work
 
   worlds/
     architecture.md              ${fileSizes['worlds/architecture.md'] || '?'} lines - Scenario architecture, EntityInput primitives

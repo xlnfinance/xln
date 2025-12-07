@@ -405,6 +405,16 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       return await handleDepositCollateral(entityState, entityTx);
     }
 
+    if (entityTx.type === 'reserve_to_reserve') {
+      const { handleReserveToReserve } = await import('./handlers/reserve-to-reserve');
+      return await handleReserveToReserve(entityState, entityTx);
+    }
+
+    if (entityTx.type === 'j_broadcast') {
+      const { handleJBroadcast } = await import('./handlers/j-broadcast');
+      return await handleJBroadcast(entityState, entityTx);
+    }
+
     if (entityTx.type === 'requestWithdrawal') {
       const { handleRequestWithdrawal } = await import('./handlers/request-withdrawal');
       return { newState: handleRequestWithdrawal(entityState, entityTx), outputs: [] };
