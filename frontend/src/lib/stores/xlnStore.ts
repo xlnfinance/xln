@@ -57,7 +57,7 @@ export const xlnInstance = writable<XLNModule | null>(null);
 // Derived stores for convenience
 export const replicas = derived(
   xlnEnvironment,
-  ($env) => $env?.replicas || new Map()
+  ($env) => $env?.eReplicas || new Map()
 );
 
 // Direct stores for immediate updates (no derived timing races)
@@ -65,13 +65,13 @@ export const history = writable<EnvSnapshot[]>([]);
 export const currentHeight = writable<number>(0);
 
 // Entity positions store - persists across time-travel (positions are static per entity)
-// Stores RELATIVE positions + xlnomy reference for proper multi-jurisdiction support
+// Stores RELATIVE positions + jurisdiction reference for proper multi-jurisdiction support
 // Frontend computes: worldPos = jMachine.position + relativePosition
 export interface RelativeEntityPosition {
   x: number;        // Relative X offset from j-machine center
   y: number;        // Relative Y offset from j-machine center
   z: number;        // Relative Z offset from j-machine center
-  xlnomy: string;   // Which j-machine this entity belongs to
+  jurisdiction: string;   // Which j-machine this entity belongs to
 }
 export const entityPositions = writable<Map<string, RelativeEntityPosition>>(new Map());
 
@@ -83,7 +83,7 @@ export async function initializeXLN(): Promise<Env> {
   // CRITICAL: Don't re-initialize if we already have data
   if (isInitialized) {
     const currentEnv = get(xlnEnvironment);
-    if (currentEnv && currentEnv.replicas?.size > 0) {
+    if (currentEnv && currentEnv.eReplicas?.size > 0) {
       console.log('🛑 PREVENTED RE-INITIALIZATION: XLN already has data, keeping existing state');
       return currentEnv;
     }
@@ -111,20 +111,20 @@ export async function initializeXLN(): Promise<Env> {
       history.set(env?.history || []);
       currentHeight.set(env?.height || 0);
 
-      // Extract and persist entity positions from replicas (positions are immutable)
-      // Positions are RELATIVE to j-machine - store xlnomy reference for world position calculation
-      if (env?.replicas) {
+      // Extract and persist entity positions from eReplicas (positions are immutable)
+      // Positions are RELATIVE to j-machine - store jReplica reference for world position calculation
+      if (env?.eReplicas) {
         entityPositions.update(currentPositions => {
           let hasChanges = false;
-          for (const [replicaKey, replica] of env.replicas.entries()) {
+          for (const [replicaKey, replica] of env.eReplicas.entries()) {
             const entityId = xln.extractEntityId(replicaKey); // Uses ids.ts - no split
             if (entityId && (replica as any).position && !currentPositions.has(entityId)) {
               const pos = (replica as any).position;
-              // Store relative position + xlnomy reference (defaults to activeXlnomy)
-              const xlnomy = pos.xlnomy || env.activeXlnomy || 'default';
-              currentPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, xlnomy });
+              // Store relative position + jReplica reference (defaults to activeJurisdiction)
+              const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
+              currentPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
               hasChanges = true;
-              console.log(`[xlnStore] 📍 Captured relative position for ${entityId.slice(0,10)}: (${pos.x}, ${pos.y}, ${pos.z}) in xlnomy=${xlnomy}`);
+              console.log(`[xlnStore] 📍 Captured relative position for ${entityId.slice(0,10)}: (${pos.x}, ${pos.y}, ${pos.z}) in jurisdiction=${jurisdiction}`);
             }
           }
           return hasChanges ? new Map(currentPositions) : currentPositions;
@@ -146,17 +146,17 @@ export async function initializeXLN(): Promise<Env> {
     currentHeight.set(env?.height || 0);
 
     // Extract positions from initial load as well
-    // Positions are RELATIVE to j-machine - store xlnomy reference for world position calculation
-    if (env?.replicas) {
+    // Positions are RELATIVE to j-machine - store jReplica reference for world position calculation
+    if (env?.eReplicas) {
       const initialPositions = new Map<string, RelativeEntityPosition>();
-      for (const [replicaKey, replica] of env.replicas.entries()) {
+      for (const [replicaKey, replica] of env.eReplicas.entries()) {
         const entityId = xln.extractEntityId(replicaKey); // Uses ids.ts - no split
         if (entityId && (replica as any).position) {
           const pos = (replica as any).position;
-          // Store relative position + xlnomy reference (defaults to activeXlnomy)
-          const xlnomy = pos.xlnomy || env.activeXlnomy || 'default';
-          initialPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, xlnomy });
-          console.log(`[xlnStore] 📍 Initial relative position for ${entityId.slice(0,10)}: (${pos.x}, ${pos.y}, ${pos.z}) in xlnomy=${xlnomy}`);
+          // Store relative position + jReplica reference (defaults to activeJurisdiction)
+          const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
+          initialPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
+          console.log(`[xlnStore] 📍 Initial relative position for ${entityId.slice(0,10)}: (${pos.x}, ${pos.y}, ${pos.z}) in jurisdiction=${jurisdiction}`);
         }
       }
       if (initialPositions.size > 0) {
