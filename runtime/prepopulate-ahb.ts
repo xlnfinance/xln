@@ -16,10 +16,11 @@
 
 import type { Env, EntityInput, EnvSnapshot, EntityReplica } from './types';
 import { applyRuntimeInput } from './runtime';
-import { getAvailableJurisdictions, getBrowserVMInstance } from './evm';
+import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from './evm';
 import { buildEntityProfile } from './gossip-helper';
 import { cloneEntityReplica } from './state-helpers';
 import type { Profile } from './gossip';
+import { BrowserEVM } from './evms/browser-evm';
 
 const USDC_TOKEN_ID = 1;
 const DECIMALS = 18n;
@@ -30,7 +31,7 @@ const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 type ReplicaEntry = [string, EntityReplica];
 
 function findReplica(env: Env, entityId: string): ReplicaEntry {
-  const entry = Array.from(env.replicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
+  const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
   if (!entry) {
     throw new Error(`AHB: Replica for entity ${entityId} not found`);
   }
@@ -137,22 +138,23 @@ function pushSnapshot(
   console.log(`[pushSnapshot #${pushSnapshotCount}] Called for: "${description}"`);
   const gossipSnapshot = cloneProfilesForSnapshot(env);
 
-  // Clone xlnomies for this frame (J-Machine state)
-  const xlnomiesSnapshot = env.xlnomies ? Array.from(env.xlnomies.values()).map(x => ({
-    name: x.name,
-    jMachine: {
-      position: { ...x.jMachine.position },
-      capacity: x.jMachine.capacity,
-      jHeight: x.jMachine.jHeight,
-    }
-  })) : undefined;
+  // Clone jReplicas for this frame (J-Machine state)
+  const jReplicasSnapshot = env.jReplicas ? Array.from(env.jReplicas.values()).map(jr => ({
+    name: jr.name,
+    blockNumber: jr.blockNumber,
+    stateRoot: new Uint8Array(jr.stateRoot),
+    mempool: [...jr.mempool],
+    position: { ...jr.position },
+    contracts: jr.contracts ? { ...jr.contracts } : undefined,
+  })) : [];
 
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: Date.now(),
-    replicas: new Map(
-      Array.from(env.replicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica)]),
+    eReplicas: new Map(
+      Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica)]),
     ),
+    jReplicas: jReplicasSnapshot,
     runtimeInput: {
       runtimeTxs: [],
       entityInputs: entityInputs || [], // Include entity inputs for J-Machine visualization!
@@ -160,7 +162,6 @@ function pushSnapshot(
     runtimeOutputs: [],
     description,
     subtitle, // Fed Chair educational content
-    xlnomies: xlnomiesSnapshot, // J-Machine state for this frame
     ...(gossipSnapshot ? { gossip: gossipSnapshot } : {}),
   };
 
@@ -182,15 +183,23 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
   try {
     console.log('[AHB] ========================================');
     console.log('[AHB] Starting Alice-Hub-Bob Demo (REAL BrowserVM transactions)');
-    console.log('[AHB] BEFORE: replicas =', env.replicas.size, 'history =', env.history?.length || 0);
+    console.log('[AHB] BEFORE: eReplicas =', env.eReplicas.size, 'history =', env.history?.length || 0);
     console.log('[AHB] ========================================');
 
-    // Get BrowserVM instance for real transactions
-    const browserVM = getBrowserVMInstance();
+    // Get or create BrowserVM instance for real transactions
+    let browserVM = getBrowserVMInstance();
     if (!browserVM) {
-      throw new Error('[AHB] BrowserVM not available - call setBrowserVMJurisdiction first');
+      console.log('[AHB] No BrowserVM found - creating one...');
+      const evm = new BrowserEVM();
+      await evm.init();
+      const depositoryAddress = evm.getDepositoryAddress();
+      // Register with runtime so other code can access it
+      setBrowserVMJurisdiction(depositoryAddress, evm);
+      browserVM = evm;
+      console.log('[AHB] ✅ BrowserVM created, depository:', depositoryAddress);
+    } else {
+      console.log('[AHB] ✅ BrowserVM instance available');
     }
-    console.log('[AHB] ✅ BrowserVM instance available');
 
     const jurisdictions = await getAvailableJurisdictions();
     let arrakis = jurisdictions.find(j => j.name.toLowerCase() === 'arrakis');
@@ -214,32 +223,24 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     // ============================================================================
     console.log('\n🏛️ Creating AHB Xlnomy (J-Machine at center)...');
 
-    if (!env.xlnomies) {
-      env.xlnomies = new Map();
+    if (!env.jReplicas) {
+      env.jReplicas = new Map();
     }
 
-    const ahbXlnomy = {
+    const ahbJReplica = {
       name: 'AHB Demo',
-      evmType: 'browservm' as const,
-      blockTimeMs: 100,
-      jMachine: {
-        position: { x: 0, y: 300, z: 0 }, // Center, Supreme layer
-        capacity: 3,
-        jHeight: 0,
-        mempool: [],
-      },
+      blockNumber: 0n,
+      stateRoot: new Uint8Array(32), // Will be captured from BrowserVM
+      mempool: [] as any[],
+      position: { x: 0, y: 600, z: 0 }, // Match EVM jMachine.position for consistent entity placement
       contracts: {
         depository: arrakis.depositoryAddress,
         entityProvider: arrakis.entityProviderAddress,
       },
-      evm: null,
-      entities: [],
-      created: Date.now(),
-      version: '1.0.0',
     };
 
-    env.xlnomies.set('AHB Demo', ahbXlnomy);
-    env.activeXlnomy = 'AHB Demo';
+    env.jReplicas.set('AHB Demo', ahbJReplica);
+    env.activeJurisdiction = 'AHB Demo';
     console.log('✅ AHB Xlnomy created (J-Machine visible in 3D)');
 
     // Push Frame 0: Clean slate with J-Machine only (no entities yet)
@@ -260,13 +261,12 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     // ============================================================================
     console.log('\n📦 Creating entities: Alice, Hub, Bob...');
 
-    // AHB Triangle Layout (J-Machine at y=300):
-    // - Hub: 50px below J-Machine (y=250), center
-    // - Alice/Bob: 50px below Hub (y=200), spread horizontally
+    // AHB Triangle Layout - entities positioned relative to J-Machine
+    // Layout: J-machine at y=0, entities in triangle below
     const AHB_POSITIONS = {
-      Alice: { x: -30, y: 200, z: 0 },  // Bottom-left (moved 4x higher)
-      Hub:   { x: 0, y: 250, z: 0 },    // 50px below J-Machine
-      Bob:   { x: 30, y: 200, z: 0 },   // Bottom-right (moved 4x higher)
+      Alice: { x: -50, y: -100, z: 0 },  // Bottom-left
+      Hub:   { x: 0, y: -50, z: 0 },     // Middle layer
+      Bob:   { x: 50, y: -100, z: 0 },   // Bottom-right
     };
 
     const entityNames = ['Alice', 'Hub', 'Bob'] as const;

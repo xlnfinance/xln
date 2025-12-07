@@ -64,6 +64,42 @@
     return get(isolatedEnv)?.eReplicas || new Map();
   }
 
+  /**
+   * Get reserve values from reserves object (handles both Map and plain Object formats)
+   * Maps serialize to plain objects when passed through postMessage/JSON
+   */
+  function getReserveValues(reserves: Map<string, bigint> | Record<string, unknown> | undefined): bigint[] {
+    if (!reserves) return [];
+    // If it's a Map, use .values()
+    if (reserves instanceof Map) {
+      return Array.from(reserves.values());
+    }
+    // If it's a plain object (serialized Map), use Object.values()
+    if (typeof reserves === 'object') {
+      return Object.values(reserves).map((v: unknown) => {
+        // Handle string representations of BigInt (e.g., "5000000000000000000000000n")
+        if (typeof v === 'string') {
+          const numStr = v.replace(/n$/, '');
+          return BigInt(numStr);
+        }
+        return BigInt(v as bigint);
+      });
+    }
+    return [];
+  }
+
+  /**
+   * Get total reserves from replica state (handles both Map and Object formats)
+   */
+  function getTotalReserves(replica: any): bigint {
+    const values = getReserveValues(replica?.state?.reserves);
+    let total = 0n;
+    for (const amount of values) {
+      total += amount;
+    }
+    return total;
+  }
+
   // XLN runtime interface
   interface XLNRuntime {
     deriveDelta: (delta: { [tokenId: number]: bigint }, isLeft: boolean) => DerivedAccountData;
@@ -3447,10 +3483,7 @@ let vrHammer: VRHammer | null = null;
     // Get reserve balance for display (merged into name label)
     let balanceStr = '';
     if (replica?.state?.reserves) {
-      let totalReserves = 0n;
-      for (const amount of replica.state.reserves.values()) {
-        totalReserves += amount;
-      }
+      const totalReserves = getTotalReserves(replica);
       const reserveValue = Number(totalReserves) / 1e18;
       // Format: $5M (round millions), $1.2M, $500K, $0
       if (reserveValue >= 1000000) {
@@ -3649,10 +3682,25 @@ let vrHammer: VRHammer | null = null;
     // Use time-aware replicas
     const currentReplicas = getTimeAwareReplicas();
 
+    // Check if time index changed - force label recreation to update reserve display
+    const currentTimeIndex = get(isolatedTimeIndex);
+    const forceRecreateLabels = currentTimeIndex !== lastLabelUpdateTimeIndex;
+    if (forceRecreateLabels) {
+      lastLabelUpdateTimeIndex = currentTimeIndex;
+    }
+
     entities.forEach(entity => {
-      // Recreate name label if missing (shouldn't happen now that it's a child)
-      if (!entity.label) {
-        debug.warn(`Entity ${entity.id.slice(-4)} missing label - recreating`);
+      // Recreate label if missing OR if time changed (reserve amounts may have changed)
+      if (!entity.label || forceRecreateLabels) {
+        // Dispose old label if exists
+        if (entity.label) {
+          entity.mesh.remove(entity.label);
+          if (entity.label.material?.map) {
+            entity.label.material.map.dispose();
+          }
+          entity.label.material?.dispose();
+        }
+        // Create new label with updated reserve amount
         entity.label = createEntityLabel(entity.id);
         const entitySize = getEntitySizeForToken(entity.id, selectedTokenId);
         entity.label.position.set(0, entitySize + 0.8, 0);
@@ -5016,6 +5064,7 @@ let vrHammer: VRHammer | null = null;
   //   └─ 5.0 radius ≈ $16M    (MAX_SIZE default)
   //
   let lastSizeCalcTimeIndex = -999;
+  let lastLabelUpdateTimeIndex = -999; // Track for label updates on frame change
   const entitySizesAtFrame = new Map<string, number>(); // entityId -> size
 
   function recalculateAllEntitySizes(): void {
@@ -5043,12 +5092,8 @@ let vrHammer: VRHammer | null = null;
         continue;
       }
 
-      // Sum all reserves
-      let totalReserves = 0n;
-      for (const amount of replica.state.reserves.values()) {
-        totalReserves += amount;
-      }
-
+      // Sum all reserves (handles both Map and Object formats)
+      const totalReserves = getTotalReserves(replica);
       const reserveValueUSD = Number(totalReserves) / 1e18;
 
       if (reserveValueUSD <= 0) {
@@ -5088,10 +5133,9 @@ let vrHammer: VRHammer | null = null;
     for (const [key, value] of currentReplicas) {
       if (key.startsWith(entityId + ':')) {
         const replica = value as any;
-        if (replica?.state?.reserves) {
-          for (const amount of replica.state.reserves.values()) {
-            if (amount > 0n) return true;
-          }
+        const reserveValues = getReserveValues(replica?.state?.reserves);
+        for (const amount of reserveValues) {
+          if (amount > 0n) return true;
         }
         return false;
       }

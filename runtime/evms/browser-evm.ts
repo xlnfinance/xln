@@ -41,7 +41,7 @@ export class BrowserEVM implements JurisdictionEVM {
       created: Date.now(),
       evmType: 'browservm',
       blockTimeMs: 1000,
-      jMachine: { position: { x: 0, y: 400, z: 0 }, capacity: 3, jHeight: 0 },
+      jMachine: { position: { x: 0, y: 600, z: 0 }, capacity: 3, jHeight: 0 },
       contracts: {
         entityProviderAddress: '0x0000000000000000000000000000000000000000',
         depositoryAddress: this.provider.getDepositoryAddress(),

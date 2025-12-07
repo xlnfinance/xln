@@ -49,7 +49,7 @@ export class RPCEVM implements JurisdictionEVM {
       created: Date.now(),
       evmType: 'reth', // TODO: Support erigon/monad too
       blockTimeMs: 1000,
-      jMachine: { position: { x: 0, y: 400, z: 0 }, capacity: 3, jHeight: 0 },
+      jMachine: { position: { x: 0, y: 600, z: 0 }, capacity: 3, jHeight: 0 },
       contracts: {
         entityProviderAddress: '0x0',
         depositoryAddress: '0x0',
