@@ -48,7 +48,21 @@
   })();
 
   // Extract replicas from env (replaces $replicas)
-  $: replicas = env?.replicas || new Map();
+  $: replicas = env?.eReplicas || new Map();
+
+  /**
+   * Get time-aware replicas - computes directly from stores to avoid stale reactive variable
+   * Use this in functions called during store subscription callbacks where reactive vars may be stale
+   */
+  function getTimeAwareReplicas(): Map<string, any> {
+    const timeIndex = get(isolatedTimeIndex);
+    const hist = get(isolatedHistory);
+    if (timeIndex >= 0 && hist && hist.length > 0) {
+      const idx = Math.min(timeIndex, hist.length - 1);
+      return hist[idx]?.eReplicas || new Map();
+    }
+    return get(isolatedEnv)?.eReplicas || new Map();
+  }
 
   // XLN runtime interface
   interface XLNRuntime {
@@ -222,11 +236,11 @@ let vrHammer: VRHammer | null = null;
   let entityMeshMap = new Map<string, THREE.Object3D | undefined>();
   let lastJEventId: string | null = null;
 
-  // J-Machines (one per xlnomy) - broadcast visualization
-  let jMachines: Map<string, THREE.Group> = new Map(); // xlnomy name → J-Machine mesh
+  // J-Machines (one per jurisdiction) - broadcast visualization
+  let jMachines: Map<string, THREE.Group> = new Map(); // jurisdiction name → J-Machine mesh
 
   // Active J-Machine (for backward compatibility with broadcast functions)
-  $: jMachine = env?.activeXlnomy ? jMachines.get(env.activeXlnomy) || null : null;
+  $: jMachine = env?.activeJurisdiction ? jMachines.get(env.activeJurisdiction) || null : null;
 
   let jMachineTxBoxes: THREE.Mesh[] = []; // Yellow tx cubes inside octahedron
   let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) problem)
@@ -599,30 +613,42 @@ let vrHammer: VRHammer | null = null;
     handleJEventRipple(env.lastJEvent);
   }
 
-  // ===== CREATE J-MACHINES FOR EACH XLNOMY =====
-  // Time-aware: Read from env (historical frame or live state)
-  // Historical frames have xlnomies as array, live state has xlnomies as Map
+  // ===== CREATE J-MACHINES FOR EACH JURISDICTION =====
+  // Time-aware: Read from env.jReplicas (historical frame or live state)
   $: if (scene) {
-    // Get xlnomies from time-aware env (array from history) or live state (Map)
-    let xlnomiesArray: Array<{ name: string; jMachine: { position: { x: number; y: number; z: number }; capacity: number; jHeight: number; mempool?: any[] } }> = [];
+    // Get jurisdictions from time-aware env - jReplicas is always a Map
+    let jurisdictionsArray: Array<{ name: string; jMachine: { position: { x: number; y: number; z: number }; capacity: number; jHeight: number; mempool?: any[] } }> = [];
 
-    if (env?.xlnomies) {
-      // Historical frame: xlnomies is an array
-      if (Array.isArray(env.xlnomies)) {
-        xlnomiesArray = env.xlnomies;
-      } else if (env.xlnomies instanceof Map) {
-        // Live state: xlnomies is a Map
-        xlnomiesArray = Array.from(env.xlnomies.values()).map((x: any) => ({
-          name: x.name,
-          jMachine: x.jMachine
+    if (env?.jReplicas) {
+      // jReplicas is a Map<string, JReplica>
+      if (env.jReplicas instanceof Map) {
+        jurisdictionsArray = Array.from(env.jReplicas.values()).map((jr: any) => ({
+          name: jr.name,
+          jMachine: {
+            position: jr.position || { x: 0, y: 300, z: 0 },
+            capacity: 3,
+            jHeight: Number(jr.blockNumber || 0n),
+            mempool: jr.mempool || []
+          }
+        }));
+      } else if (Array.isArray(env.jReplicas)) {
+        // Historical frame: jReplicas might be serialized as array
+        jurisdictionsArray = env.jReplicas.map((jr: any) => ({
+          name: jr.name,
+          jMachine: {
+            position: jr.position || { x: 0, y: 300, z: 0 },
+            capacity: 3,
+            jHeight: Number(jr.blockNumber || 0n),
+            mempool: jr.mempool || []
+          }
         }));
       }
     }
 
     // Remove J-Machines that no longer exist
-    const currentXlnomyNames = new Set(xlnomiesArray.map(x => x.name));
+    const currentJurisdictionNames = new Set(jurisdictionsArray.map(x => x.name));
     for (const [name, mesh] of jMachines.entries()) {
-      if (!currentXlnomyNames.has(name)) {
+      if (!currentJurisdictionNames.has(name)) {
         scene.remove(mesh);
         jMachines.delete(name);
         console.log(`[Graph3D] Removed J-Machine: ${name}`);
@@ -630,27 +656,27 @@ let vrHammer: VRHammer | null = null;
     }
 
     // Create new J-Machines
-    xlnomiesArray.forEach((xlnomy) => {
-      if (!jMachines.has(xlnomy.name)) {
-        console.log(`[Graph3D] Creating J-Machine for xlnomy: ${xlnomy.name} at position`, xlnomy.jMachine.position);
-        const jMachineGroup = createJMachine(12, xlnomy.jMachine.position, xlnomy.name); // 2x smaller for Fed Chair UX
+    jurisdictionsArray.forEach((jurisdiction) => {
+      if (!jMachines.has(jurisdiction.name)) {
+        console.log(`[Graph3D] Creating J-Machine for jurisdiction: ${jurisdiction.name} at position`, jurisdiction.jMachine.position);
+        const jMachineGroup = createJMachine(12, jurisdiction.jMachine.position, jurisdiction.name); // 2x smaller for Fed Chair UX
         scene.add(jMachineGroup);
-        jMachines.set(xlnomy.name, jMachineGroup);
+        jMachines.set(jurisdiction.name, jMachineGroup);
         console.log(`[Graph3D] ✅ J-Machine created, scene now has ${scene.children.length} objects`);
       }
     });
 
     // Sync J mempool visual: show tx cubes based on actual mempool contents
-    const activeXlnomy = xlnomiesArray.find(x => x.name === env?.activeXlnomy);
-    if (activeXlnomy && jMachine) {
-      let mempoolSize = activeXlnomy.jMachine.mempool?.length || 0;
+    const activeJurisdiction = jurisdictionsArray.find(x => x.name === env?.activeJurisdiction);
+    if (activeJurisdiction && jMachine) {
+      let mempoolSize = activeJurisdiction.jMachine.mempool?.length || 0;
 
       // For time-machine playback: derive mempool from cumulative R2R txs
       // Count R2R txs up to current frame (capacity=3, resets after broadcast)
-      if ($isolatedTimeIndex !== -1 && $isolatedEnv?.history) {
+      if ($isolatedTimeIndex !== -1 && $isolatedHistory) {
         let r2rCount = 0;
         for (let i = 0; i <= $isolatedTimeIndex; i++) {
-          const frame = $isolatedEnv.history[i];
+          const frame = $isolatedHistory[i];
           const frameInputs = frame?.runtimeInput?.entityInputs || frame?.serverInput?.entityInputs || [];
           for (const entityInput of frameInputs) {
             for (const tx of (entityInput.entityTxs || [])) {
@@ -661,10 +687,10 @@ let vrHammer: VRHammer | null = null;
           }
         }
         // Mempool resets after broadcast (capacity=3)
-        const jCapacity = activeXlnomy.jMachine.capacity || 3;
+        const jCapacity = activeJurisdiction.jMachine.capacity || 3;
         mempoolSize = r2rCount % jCapacity;
         // If we just hit capacity, show 0 (broadcast cleared it)
-        if (r2rCount > 0 && r2rCount % jCapacity === 0 && $isolatedTimeIndex < ($isolatedEnv.history.length - 1)) {
+        if (r2rCount > 0 && r2rCount % jCapacity === 0 && $isolatedTimeIndex < ($isolatedHistory.length - 1)) {
           // Check if this is the broadcast frame (frame 5 in AHB = index 4)
           // Actually keep showing cubes until next frame
           mempoolSize = jCapacity; // Show full before clearing
@@ -698,22 +724,24 @@ let vrHammer: VRHammer | null = null;
   }
 
   // Create a tx cube for mempool visualization
+  // SMALLER cubes that fit INSIDE the J-machine octahedron (transparent)
   function createMempoolTxCube(index: number): THREE.Mesh {
-    const cubeSize = 1.5;
+    const cubeSize = 0.8; // 2x smaller than before
     const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
     const material = new THREE.MeshLambertMaterial({
       color: 0xffaa00, // Orange-yellow for pending tx
       transparent: true,
-      opacity: 0.8,
+      opacity: 0.9,
       emissive: 0xffaa00,
-      emissiveIntensity: 0.3
+      emissiveIntensity: 0.5
     });
     const cube = new THREE.Mesh(geometry, material);
 
-    // Position cubes in a spiral inside the octahedron
-    const angle = (index * Math.PI * 2) / 5; // 5 per ring
-    const radius = 3 + Math.floor(index / 5) * 2;
-    const height = (index % 3) * 2 - 2;
+    // Position cubes in a tight cluster INSIDE the octahedron center
+    // J-machine inner glow is size*0.7 = ~8.4, so stay well within
+    const angle = (index * Math.PI * 2) / 3; // 3 per ring (tighter)
+    const radius = 1.5 + Math.floor(index / 3) * 1.2; // Much smaller radius
+    const height = (index % 3 - 1) * 1.5; // -1.5, 0, 1.5
     cube.position.set(
       Math.cos(angle) * radius,
       height,
@@ -1114,9 +1142,9 @@ let vrHammer: VRHammer | null = null;
   function createGrid() {
     if (!scene) return;
 
-    // Minimal grid: 3x3 divisions for xlnomy grid
+    // Minimal grid: 3x3 divisions for jurisdiction grid
     const fixedSize = 2000; // Diameter = 2000, radius = 1000
-    const divisions = 3; // 666px per division (3x3 perfect grid for xlnomies)
+    const divisions = 3; // 666px per division (3x3 perfect grid for jurisdictions)
 
     gridHelper = new THREE.GridHelper(fixedSize, divisions,
       gridColor,  // Center line
@@ -1157,12 +1185,12 @@ let vrHammer: VRHammer | null = null;
     name: string = 'J-MACHINE'
   ): THREE.Group {
     const group = new THREE.Group();
-    group.position.set(position.x, position.y, position.z); // Position from xlnomy config
+    group.position.set(position.x, position.y, position.z); // Position from jurisdiction config
 
-    // Store xlnomy name for click handling
+    // Store jurisdiction name for click handling
     group.userData = {
       type: 'jMachine',
-      xlnomyName: name,
+      jurisdictionName: name,
       position
     };
 
@@ -1206,7 +1234,7 @@ let vrHammer: VRHammer | null = null;
     innerGlow.scale.set(1, 1.6, 1); // Match outer octahedron stretch
     group.add(innerGlow);
 
-    // Add label with xlnomy name
+    // Add label with jurisdiction name
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
     if (context) {
@@ -1272,19 +1300,19 @@ let vrHammer: VRHammer | null = null;
    */
   function shootRayToJMachine(entityId: string) {
     if (!jMachine || !scene) {
-      console.log(`[shootRayToJMachine] ❌ No jMachine or scene`);
+      // Silently skip - scene not ready yet (normal during initialization)
       return;
     }
 
     // Find entity position
     const entity = entities.find(e => e.id === entityId);
     if (!entity) {
-      console.log(`[shootRayToJMachine] ❌ Entity ${entityId.slice(0,8)} not found in ${entities.length} entities`);
+      // Entity not yet created - silently skip
       return;
     }
-    console.log(`[shootRayToJMachine] ✅ Shooting from ${entityId.slice(0,8)} to J-Machine`);
+    console.debug(`[shootRayToJMachine] ✅ Shooting from ${entityId.slice(0,8)} to J-Machine`);
 
-    // Get J-Machine position from active xlnomy or use jMachine.position
+    // Get J-Machine position from active jurisdiction or use jMachine.position
     const jPos = jMachine.position.clone();
 
     // Create flying orb (TX traveling to J-Machine)
@@ -1627,7 +1655,7 @@ let vrHammer: VRHammer | null = null;
     rimLight.position.set(-200, 30, -50); // Opposite side
     scene.add(rimLight);
 
-    // J-Machines are now created reactively based on env.xlnomies (see reactive statement above)
+    // J-Machines are now created reactively based on env.jReplicas (see reactive statement above)
 
     // Mouse events
     renderer.domElement.addEventListener('mousedown', onMouseDown);
@@ -2107,7 +2135,7 @@ let vrHammer: VRHammer | null = null;
     // Use time-aware data sources
     let entityData: any[] = [];
     // Read replicas from computed env, not reactive variable
-    let currentReplicas = computedEnv?.replicas || new Map();
+    let currentReplicas = computedEnv?.eReplicas || new Map();
 
     console.log('[Graph3D] Replicas check:', {
       timeIndex,
@@ -2169,9 +2197,9 @@ let vrHammer: VRHammer | null = null;
 
     // NO DEMO DATA - only show what actually exists
     if (entityData.length === 0) {
-      debug.warn(`⚠️ No entity data found at frame ${timeIndex} - nothing to display`);
-      clearNetwork(); // Clear stale geometry before returning
-      return; // Don't create fake entities
+      debug.warn(`⚠️ No entity data found at frame ${timeIndex} - clearing network`);
+      clearNetwork(); // Proper clear - entities will be recreated on next frame with data
+      return;
     }
 
 
@@ -2322,7 +2350,8 @@ let vrHammer: VRHammer | null = null;
     console.log('[Graph3D] Reconciliation: adding', toAdd.length, 'new entities, keeping', entities.length, 'existing');
     toAdd.forEach((profile, index) => {
       const isHub = top3Hubs.has(profile.entityId);
-      createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub);
+      // Pass currentReplicas to avoid stale reactive variable during time-travel
+      createEntityNode(profile, index, entityData.length, forceLayoutPositions, isHub, currentReplicas);
     });
 
     // Save positions after creating entities (for persistence)
@@ -2582,13 +2611,19 @@ let vrHammer: VRHammer | null = null;
     return positions;
   }
 
-  function createEntityNode(profile: any, index: number, total: number, forceLayoutPositions: Map<string, THREE.Vector3>, isHub: boolean) {
+  function createEntityNode(
+    profile: any,
+    index: number,
+    total: number,
+    forceLayoutPositions: Map<string, THREE.Vector3>,
+    isHub: boolean,
+    passedReplicas?: Map<string, any>  // Time-aware replicas passed from updateNetworkData
+  ) {
     // Position entities: replica position > gossip position > force layout > radial fallback
     let x: number, y: number, z: number;
 
-    // Priority 1: Check replica position (from importReplica serverTx)
-    // Use time-aware replicas (not $isolatedEnv which is always live)
-    const currentReplicas = replicas;
+    // Use passed replicas (time-aware) or compute fresh from stores
+    const currentReplicas = passedReplicas || getTimeAwareReplicas();
     const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(profile.entityId + ':'));
     const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
 
@@ -2599,20 +2634,20 @@ let vrHammer: VRHammer | null = null;
     // Positions are RELATIVE to j-machine - compute world position by adding j-machine position
     const persistedPosition = $entityPositions.get(profile.entityId);
 
-    // Helper: Get j-machine position for an xlnomy name
-    const getJMachinePosition = (xlnomyName: string): { x: number; y: number; z: number } | null => {
-      // First check env.xlnomies (works for both Map and Array)
-      if (env?.xlnomies) {
-        if (Array.isArray(env.xlnomies)) {
-          const xlnomy = env.xlnomies.find((x: any) => x.name === xlnomyName);
-          if (xlnomy?.jMachine?.position) return xlnomy.jMachine.position;
-        } else if (env.xlnomies instanceof Map) {
-          const xlnomy = env.xlnomies.get(xlnomyName);
-          if (xlnomy?.jMachine?.position) return xlnomy.jMachine.position;
+    // Helper: Get j-machine position for a jurisdiction name
+    const getJMachinePosition = (jurisdictionName: string): { x: number; y: number; z: number } | null => {
+      // First check env.jReplicas (works for both Map and Array)
+      if (env?.jReplicas) {
+        if (env.jReplicas instanceof Map) {
+          const jr = env.jReplicas.get(jurisdictionName);
+          if (jr?.position) return jr.position;
+        } else if (Array.isArray(env.jReplicas)) {
+          const jr = env.jReplicas.find((x: any) => x.name === jurisdictionName);
+          if (jr?.position) return jr.position;
         }
       }
       // Fallback: Check jMachines mesh positions (already created in scene)
-      const jMesh = jMachines.get(xlnomyName);
+      const jMesh = jMachines.get(jurisdictionName);
       if (jMesh) return { x: jMesh.position.x, y: jMesh.position.y, z: jMesh.position.z };
       return null;
     };
@@ -2629,7 +2664,7 @@ let vrHammer: VRHammer | null = null;
     if (persistedPosition) {
       // PRIORITY 0: Use persisted position from entityPositions store (survives time-travel)
       // Position is RELATIVE to j-machine - compute world position
-      const jMachinePos = getJMachinePosition(persistedPosition.xlnomy);
+      const jMachinePos = getJMachinePosition(persistedPosition.jurisdiction);
       if (jMachinePos) {
         // World position = j-machine position + relative offset
         x = jMachinePos.x + persistedPosition.x;
@@ -2637,7 +2672,7 @@ let vrHammer: VRHammer | null = null;
         z = jMachinePos.z + persistedPosition.z;
         console.log('[Graph3D] ✅ World position from relative:', {
           entityId: profile.entityId.slice(0,10),
-          xlnomy: persistedPosition.xlnomy,
+          jurisdiction: persistedPosition.jurisdiction,
           jMachinePos,
           relative: { x: persistedPosition.x, y: persistedPosition.y, z: persistedPosition.z },
           world: { x, y, z }
@@ -2647,23 +2682,23 @@ let vrHammer: VRHammer | null = null;
         x = persistedPosition.x;
         y = persistedPosition.y;
         z = persistedPosition.z;
-        console.warn('[Graph3D] ⚠️ J-machine not found for xlnomy:', persistedPosition.xlnomy, '- using relative as absolute');
+        console.warn('[Graph3D] ⚠️ J-machine not found for jurisdiction:', persistedPosition.jurisdiction, '- using relative as absolute');
       }
       if (!loggedGridPositions.has(profile.entityId)) {
         loggedGridPositions.add(profile.entityId);
-        logActivity(`📍 ${profile.entityId.slice(0,10)} @ (${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)}) [relative to ${persistedPosition.xlnomy}]`);
+        logActivity(`📍 ${profile.entityId.slice(0,10)} @ (${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)}) [relative to ${persistedPosition.jurisdiction}]`);
       }
     } else if (replica?.position) {
       // Replica position is also RELATIVE to j-machine - compute world position
-      const replicaXlnomy = replica.position.xlnomy || env?.activeXlnomy || 'default';
-      const jMachinePos = getJMachinePosition(replicaXlnomy);
+      const replicaJurisdiction = replica.position.jurisdiction || replica.position.xlnomy || env?.activeJurisdiction || 'default';
+      const jMachinePos = getJMachinePosition(replicaJurisdiction);
       if (jMachinePos) {
         x = jMachinePos.x + replica.position.x;
         y = jMachinePos.y + replica.position.y;
         z = jMachinePos.z + replica.position.z;
         console.log('[Graph3D] ✅ World position from replica:', {
           entityId: profile.entityId.slice(0,10),
-          xlnomy: replicaXlnomy,
+          jurisdiction: replicaJurisdiction,
           jMachinePos,
           relative: { x: replica.position.x, y: replica.position.y, z: replica.position.z },
           world: { x, y, z }
@@ -2678,7 +2713,7 @@ let vrHammer: VRHammer | null = null;
       // Only log ONCE on first draw
       if (!loggedGridPositions.has(profile.entityId)) {
         loggedGridPositions.add(profile.entityId);
-        logActivity(`📍 ${profile.entityId.slice(0,10)} @ (${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)}) [relative to ${replicaXlnomy}]`);
+        logActivity(`📍 ${profile.entityId.slice(0,10)} @ (${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)}) [relative to ${replicaJurisdiction}]`);
       }
     } else if (profile.metadata?.position) {
       // Priority 2: Check gossip profile position
@@ -2795,7 +2830,7 @@ let vrHammer: VRHammer | null = null;
 
   function createConnections() {
     const processedConnections = new Set<string>();
-    const currentReplicas = replicas;
+    const currentReplicas = getTimeAwareReplicas();
 
 
     // Method 1: Real connections from time-aware replicas
@@ -2868,8 +2903,8 @@ let vrHammer: VRHammer | null = null;
 
     const timeIndex = $isolatedTimeIndex;
 
-    if (!($isolatedTimeIndex === -1) && $isolatedEnv?.history && timeIndex >= 0) {
-      const currentFrame = $isolatedEnv.history[timeIndex];
+    if (!($isolatedTimeIndex === -1) && $isolatedHistory && timeIndex >= 0) {
+      const currentFrame = $isolatedHistory[timeIndex];
 
       // Support both serverInput (older format) and runtimeInput (AHB demo format)
       const entityInputs = currentFrame?.serverInput?.entityInputs || currentFrame?.runtimeInput?.entityInputs || [];
@@ -3170,7 +3205,7 @@ let vrHammer: VRHammer | null = null;
           if (conn.progressBars) {
             scene.remove(conn.progressBars);
             // Get time-aware replica data
-            const currentReplicas = replicas;
+            const currentReplicas = getTimeAwareReplicas();
             const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(k => k.startsWith(conn.from + ':') || k.startsWith(conn.to + ':'));
             const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
 
@@ -3190,7 +3225,7 @@ let vrHammer: VRHammer | null = null;
     ]);
 
     // Check if either entity is Federal Reserve (use time-aware replicas)
-    const currentReplicas = replicas;
+    const currentReplicas = getTimeAwareReplicas();
     const fromReplicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(fromId + ':'));
     const toReplicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(toId + ':'));
     const fromReplicaData = fromReplicaKey ? currentReplicas.get(fromReplicaKey) : null;
@@ -3244,7 +3279,7 @@ let vrHammer: VRHammer | null = null;
 
   function createAccountBarsForConnection(fromEntity: any, toEntity: any, fromId: string, toId: string, _replica: any) {
     // Get current replicas to find the account
-    const currentReplicas = replicas;
+    const currentReplicas = getTimeAwareReplicas();
 
     // Find the replica that actually contains this account
     let accountData: any = null;
@@ -3395,7 +3430,7 @@ let vrHammer: VRHammer | null = null;
 
     // Check if this is a Fed entity (for flag rendering)
     // Use time-aware replicas
-    const currentReplicas = replicas;
+    const currentReplicas = getTimeAwareReplicas();
     const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(entityId + ':'));
     const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
 
@@ -3522,7 +3557,7 @@ let vrHammer: VRHammer | null = null;
 
   // Update mempool indicators for all entities
   function updateMempoolIndicators() {
-    const currentReplicas = replicas;
+    const currentReplicas = getTimeAwareReplicas();
 
     entities.forEach(entity => {
       // Get replica for this entity
@@ -3612,7 +3647,7 @@ let vrHammer: VRHammer | null = null;
     if (!camera) return;
 
     // Use time-aware replicas
-    const currentReplicas = replicas;
+    const currentReplicas = getTimeAwareReplicas();
 
     entities.forEach(entity => {
       // Recreate name label if missing (shouldn't happen now that it's a child)
@@ -4160,11 +4195,10 @@ let vrHammer: VRHammer | null = null;
         const hasIncoming = currentFrameActivity.incomingFlows.has(entityId);
         const hasOutgoing = currentFrameActivity.outgoingFlows.has(entityId);
 
-        entity.pulsePhase = (entity.pulsePhase || 0) + 0.12;
+        // NO BOUNCING - just use base size from reserves (stable, deterministic)
+        // Gentle glow indicates activity, not size oscillation
         const pulseIntensity = Math.max(0, 1 - timeSinceActivity / 2000);
-        const pulseFactor = 1 + pulseIntensity * 0.5 * Math.sin(entity.pulsePhase);
-        // Apply pulse on top of base size from reserves
-        entity.mesh.scale.setScalar(baseSize * pulseFactor);
+        entity.mesh.scale.setScalar(baseSize);
 
         // Color-coded glow based on direction
         let glowR = 0, glowG = 0, glowB = 0;
@@ -4221,8 +4255,8 @@ let vrHammer: VRHammer | null = null;
           ringMaterial.emissive.setHex(0xff8800);
         }
 
-        const ringPulse = 1 + 0.3 * Math.sin(entity.pulsePhase * 1.5);
-        entity.activityRing.scale.setScalar(ringPulse);
+        // NO BOUNCING - ring stays static, opacity fades with activity
+        entity.activityRing.scale.setScalar(1);
         ringMaterial.opacity = 0.6 * pulseIntensity;
       } else {
         // Inactive: use base size from reserves (no pulse)
@@ -4288,7 +4322,7 @@ let vrHammer: VRHammer | null = null;
         const entityBSizeData = getEntitySizeForToken(entityB.id, selectedTokenId);
 
         // Get account data to calculate bar length
-        const currentReplicas = replicas;
+        const currentReplicas = getTimeAwareReplicas();
         let totalBarsLength = 0;
 
         const fromReplica = [...currentReplicas.entries()]
@@ -4640,7 +4674,7 @@ let vrHammer: VRHammer | null = null;
 
       if (clickedJMachine && (clickedJMachine as any).userData && (clickedJMachine as any).userData.type === 'jMachine') {
         const pos = (clickedJMachine as any).userData.position as { x: number; y: number; z: number };
-        const name = (clickedJMachine as any).userData.xlnomyName as string;
+        const name = (clickedJMachine as any).userData.jurisdictionName as string;
         console.log(`[Graph3D] J-Machine clicked: ${name} at`, pos);
 
         // Focus camera on this J-Machine
@@ -4933,7 +4967,7 @@ let vrHammer: VRHammer | null = null;
   }
 
   function updateAvailableTokens() {
-    const currentReplicas = replicas;
+    const currentReplicas = getTimeAwareReplicas();
     const tokenSet = new Set<number>();
 
     // Collect all available token IDs from reserves
@@ -4986,18 +5020,21 @@ let vrHammer: VRHammer | null = null;
 
   function recalculateAllEntitySizes(): void {
     entitySizesAtFrame.clear();
-    // dollarsPerPx controls scaling: lower = bigger spheres
-    const dollarsPerPx = settings.dollarsPerPx || 30000;
-    const EMPTY_SIZE = 1.5; // Visible size for $0 entities
-    const MIN_SIZE = 1.5;   // Minimum funded entity size
-    const MAX_SIZE = 6.0;   // Max size to prevent domination
 
-    const currentReplicas = replicas;
+    // HARDCODED RATIO: $100K per unit of visual volume
+    // This ensures sphere sizes NEVER jump mid-scenario
+    // Same reserves = same size, always deterministic
+    const DOLLARS_PER_UNIT = 100_000; // $100K = 1 unit of visual volume
+    const EMPTY_SIZE = 1.2;           // Visible size for $0 entities
+    const MIN_SIZE = 1.5;             // Minimum funded entity size
+    const MAX_SIZE = 8.0;             // Max size (for large reserves)
+
+    const currentReplicas = getTimeAwareReplicas();  // Time-aware, not stale reactive
     const seenEntities = new Set<string>();
 
     // Calculate size for each entity based on reserves
     for (const [key, replica] of currentReplicas) {
-      const entityId = key.split(':')[0];
+      const entityId = key.split(':')[0] || key;  // key format: entityId:signerId
       if (seenEntities.has(entityId)) continue;
       seenEntities.add(entityId);
 
@@ -5019,12 +5056,18 @@ let vrHammer: VRHammer | null = null;
         continue;
       }
 
-      // Volume = money / dollarsPerPx, then sphere radius from volume
-      const volumePx = reserveValueUSD / dollarsPerPx;
-      const radius = Math.cbrt(volumePx * 0.75 / Math.PI);
-      // Clamp between MIN and MAX
-      const size = Math.max(MIN_SIZE, Math.min(radius + MIN_SIZE, MAX_SIZE));
+      // DETERMINISTIC SIZE FORMULA (multiplicative - preserves proportionality):
+      // Volume scales linearly with reserves, radius = cbrt(volume)
+      // $5M should look 2x VOLUME as $2.5M → radius ratio = cbrt(2) ≈ 1.26
+      const BASE_RESERVE = 1_000_000; // $1M = base size (MIN_SIZE)
+      const ratio = reserveValueUSD / BASE_RESERVE;
+      const size = Math.max(MIN_SIZE, Math.min(MIN_SIZE * Math.cbrt(ratio), MAX_SIZE));
       entitySizesAtFrame.set(entityId, size);
+
+      // Debug: log size calculation for verification
+      if (reserveValueUSD > 0) {
+        console.debug(`[Size] ${entityId.slice(0, 8)}: $${(reserveValueUSD/1e6).toFixed(2)}M → size ${size.toFixed(2)} (ratio ${ratio.toFixed(1)})`);
+      }
     }
   }
 
@@ -5041,7 +5084,7 @@ let vrHammer: VRHammer | null = null;
 
   /** Check if entity has any reserves (for color determination) */
   function checkEntityHasReserves(entityId: string): boolean {
-    const currentReplicas = replicas;
+    const currentReplicas = getTimeAwareReplicas();  // Time-aware, not stale reactive
     for (const [key, value] of currentReplicas) {
       if (key.startsWith(entityId + ':')) {
         const replica = value as any;
@@ -5065,7 +5108,7 @@ let vrHammer: VRHammer | null = null;
     const routes: typeof availableRoutes = [];
 
     // Check for direct account
-    const fromReplicaEntry = [...env.replicas.entries()].find(([k]) => k.startsWith(from + ':'));
+    const fromReplicaEntry = [...env.eReplicas.entries()].find(([k]) => k.startsWith(from + ':'));
     const fromReplica = fromReplicaEntry?.[1];
     if (fromReplica?.state?.accounts?.has(to)) {
       routes.push({
@@ -5091,7 +5134,7 @@ let vrHammer: VRHammer | null = null;
       const {current, path} = item;
       if (path.length > maxHops) continue;
 
-      const currentReplicaEntry = [...env.replicas.entries()].find(([k]) => k.startsWith(current + ':'));
+      const currentReplicaEntry = [...env.eReplicas.entries()].find(([k]) => k.startsWith(current + ':'));
       const currentReplica = currentReplicaEntry?.[1];
       if (!currentReplica?.state?.accounts) continue;
 
@@ -5200,9 +5243,9 @@ let vrHammer: VRHammer | null = null;
       // Step 1: Find routes (copy from PaymentPanel findRoutes logic)
       // Find our replica to check for direct account
       let ourReplica: any = null;
-      for (const key of env.replicas.keys()) {
+      for (const key of env.eReplicas.keys()) {
         if (key.startsWith(job.from + ':')) {
-          ourReplica = env.replicas.get(key);
+          ourReplica = env.eReplicas.get(key);
           break;
         }
       }
@@ -5245,7 +5288,7 @@ let vrHammer: VRHammer | null = null;
 
       // Step 2: Find signerId (copy from PaymentPanel)
       let signerId = 's1'; // default
-      for (const key of env.replicas.keys()) {
+      for (const key of env.eReplicas.keys()) {
         if (key.startsWith(job.from + ':')) {
           signerId = key.split(':')[1] || 's1';
           break;
@@ -5653,7 +5696,7 @@ let vrHammer: VRHammer | null = null;
   }
 
   function getEntityBalanceInfo(entityId: string): string {
-    const currentReplicas = replicas;
+    const currentReplicas = getTimeAwareReplicas();
     const replica = [...currentReplicas.entries()]
       .find(([key]) => key.startsWith(entityId + ':'));
 
@@ -5762,7 +5805,7 @@ let vrHammer: VRHammer | null = null;
     }
 
     // Check if it's a Fed entity (from replica signerId) - use time-aware replicas
-    const currentReplicas = replicas;
+    const currentReplicas = getTimeAwareReplicas();
     const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(key => key.startsWith(entityId + ':'));
     const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
 
@@ -5796,7 +5839,7 @@ let vrHammer: VRHammer | null = null;
    * Shows both left and right entity's view of the same account
    */
   function getDualConnectionAccountInfo(entityA: string, entityB: string): { left: string, right: string, leftEntity: string, rightEntity: string } {
-    const currentReplicas = replicas;
+    const currentReplicas = getTimeAwareReplicas();
 
     // Determine canonical ordering (left is always smaller ID)
     const isALeft = entityA < entityB;

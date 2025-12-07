@@ -44,11 +44,11 @@ export const visibleReplicas = derived(
   [timeState, history, xlnEnvironment],
   ([$timeState, $history, $env]) => {
     if ($timeState.isLive) {
-      return $env?.replicas || new Map();
+      return $env?.eReplicas || new Map();
     }
     const idx = $timeState.currentTimeIndex;
     if (idx >= 0 && idx < $history.length) {
-      return $history[idx]?.replicas || new Map();
+      return $history[idx]?.eReplicas || new Map();
     }
     return new Map();
   }

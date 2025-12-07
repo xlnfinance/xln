@@ -26,8 +26,9 @@
   import { panelBridge } from './utils/panelBridge';
   import 'dockview/dist/styles/dockview.css';
 
-  export let layout: string = 'default';
-  export let networkMode: 'simnet' | 'testnet' | 'mainnet' = 'simnet';
+  // Props for future layout/mode switching (passed from parent, reserved for future use)
+  export let layout: string = 'default'; void layout;
+  export let networkMode: 'simnet' | 'testnet' | 'mainnet' = 'simnet'; void networkMode;
 
   let container: HTMLDivElement;
   let dockview: DockviewComponent;
@@ -86,12 +87,12 @@
         console.log('[View] 🔗 Importing state from URL hash...');
         env = XLN.createEmptyEnv();
 
-        // Restore xlnomies
-        env.xlnomies = urlImport.state.x;
-        env.activeXlnomy = urlImport.state.a;
+        // Restore jurisdictions
+        env.jReplicas = urlImport.state.x;
+        env.activeJurisdiction = urlImport.state.a;
 
         // Restore entities (replicas)
-        env.replicas = urlImport.state.e;
+        env.eReplicas = urlImport.state.e;
 
         // Restore UI settings if included
         if (urlImport.includeUI && urlImport.state.ui) {
@@ -101,9 +102,9 @@
         }
 
         console.log('[View] ✅ Imported:', {
-          xlnomies: env.xlnomies.size,
-          entities: env.replicas.size,
-          active: env.activeXlnomy
+          jReplicas: env.jReplicas.size,
+          entities: env.eReplicas.size,
+          active: env.activeJurisdiction
         });
       } else {
         // No URL import: Create empty environment
@@ -113,7 +114,7 @@
         env.history = [{
           height: 0,
           timestamp: Date.now(),
-          replicas: new Map(),
+          eReplicas: new Map(),
           runtimeInput: { runtimeTxs: [], entityInputs: [] },
           runtimeOutputs: [],
           description: 'Frame 0: Empty slate',
@@ -121,7 +122,7 @@
         }];
 
         console.log('[View] ✅ Empty environment ready (frame 0)');
-        console.log('[View] 💡 Use Architect panel to create Xlnomies + entities');
+        console.log('[View] 💡 Use Architect panel to create jurisdictions + entities');
       }
 
       // Set to isolated stores

@@ -82,7 +82,8 @@ export interface TokenInfo {
 export interface HistoryFrame {
   height: number;
   timestamp: number;
-  replicas: Map<string, EntityReplica>;
+  eReplicas: Map<string, EntityReplica>;
+  jReplicas?: unknown[];
   runtimeInput?: unknown;
   runtimeOutputs?: unknown[];
   description?: string;
@@ -99,8 +100,8 @@ export interface HistoryFrame {
 export interface EntityEnvState {
   /** Current environment (time-aware - historical frame or live) */
   env: Readable<HistoryFrame | null>;
-  /** Current replicas map */
-  replicas: Readable<Map<string, EntityReplica>>;
+  /** Current entity replicas map */
+  eReplicas: Readable<Map<string, EntityReplica>>;
   /** Current time index (-1 = live mode) */
   timeIndex: Readable<number>;
   /** Whether in live mode vs historical playback */
@@ -170,7 +171,7 @@ export function setEntityEnvContext(options: EntityEnvContextOptions = {}): void
 
   // Replicas - derived from env
   const replicas: Readable<Map<string, EntityReplica>> = useIsolated
-    ? derived(env, ($e) => $e?.replicas ?? new Map())
+    ? derived(env, ($e) => $e?.eReplicas ?? new Map())
     : visibleReplicas as Readable<Map<string, EntityReplica>>;
 
   // XLN functions (always from global - loaded once)
@@ -178,7 +179,7 @@ export function setEntityEnvContext(options: EntityEnvContextOptions = {}): void
 
   const state: EntityEnvState = {
     env,
-    replicas,
+    eReplicas: replicas,
     timeIndex,
     isLive,
     history,
@@ -234,7 +235,7 @@ function createGlobalFallback(): EntityEnvState {
 
   return {
     env,
-    replicas: visibleReplicas as Readable<Map<string, EntityReplica>>,
+    eReplicas: visibleReplicas as Readable<Map<string, EntityReplica>>,
     timeIndex,
     isLive,
     history,
