@@ -2464,7 +2464,8 @@
   .crisis-badge {
     position: absolute;
     bottom: 5%;
-    right: 0;
+    left: 50%;
+    transform: translateX(-50%);
     background: rgba(220, 30, 30, 0.95);
     color: white;
     font-size: 0.7rem;
@@ -2480,11 +2481,11 @@
 
   @keyframes crisis-appear {
     /* Hidden while riding (0-83%) */
-    0%, 85% { opacity: 0; transform: scale(0.5); }
+    0%, 85% { opacity: 0; transform: translateX(-50%) scale(0.5); }
     /* Appear when crashed */
-    89%, 95% { opacity: 1; transform: scale(1.1); }
+    89%, 95% { opacity: 1; transform: translateX(-50%) scale(1.1); }
     /* Fade out */
-    100% { opacity: 0; transform: scale(0.5); }
+    100% { opacity: 0; transform: translateX(-50%) scale(0.5); }
   }
 
   /* Screen shake on crash */
