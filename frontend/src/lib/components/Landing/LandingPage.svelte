@@ -2427,10 +2427,10 @@
     justify-content: center;
   }
 
-  /* FCUAN: Riding with bounce, then HARD crash every 4 seconds */
+  /* FCUAN: Riding with bounce, then HARD crash - rear wheel stays on ground */
   .evo-bike-wobble {
     animation: bike-crash 6s ease-in-out infinite;
-    transform-origin: bottom center;
+    transform-origin: bottom left; /* Rear wheel = pivot point */
   }
 
   @keyframes bike-crash {
@@ -2463,9 +2463,8 @@
 
   .crisis-badge {
     position: absolute;
-    bottom: 5%;
-    left: 50%;
-    transform: translateX(-50%);
+    bottom: 0;
+    right: 10%;
     background: rgba(220, 30, 30, 0.95);
     color: white;
     font-size: 0.7rem;
@@ -2481,11 +2480,11 @@
 
   @keyframes crisis-appear {
     /* Hidden while riding (0-83%) */
-    0%, 85% { opacity: 0; transform: translateX(-50%) scale(0.5); }
-    /* Appear when crashed */
-    89%, 95% { opacity: 1; transform: translateX(-50%) scale(1.1); }
+    0%, 85% { opacity: 0; transform: scale(0.5); }
+    /* Appear when crashed - impact at front wheel */
+    89%, 95% { opacity: 1; transform: scale(1.1); }
     /* Fade out */
-    100% { opacity: 0; transform: translateX(-50%) scale(0.5); }
+    100% { opacity: 0; transform: scale(0.5); }
   }
 
   /* Screen shake on crash */
