@@ -312,35 +312,28 @@
 
             <!-- Middle: Convergence lines + arrows -->
             <div class="evo-merge-zone">
-              <svg class="convergence-lines" viewBox="0 0 220 420" preserveAspectRatio="xMidYMid meet">
+              <svg class="convergence-lines" viewBox="0 0 140 380" preserveAspectRatio="xMidYMid meet">
                 <!-- Top curve from FCUAN (gold/yellow) -->
                 <path
-                  d="M 0 105 C 80 105, 150 170, 190 210"
+                  d="M 0 95 C 50 95, 100 150, 130 190"
                   stroke="rgba(255,200,100,0.6)"
-                  stroke-width="2"
+                  stroke-width="2.5"
                   fill="none"
                 />
                 <!-- Bottom curve from FRPAP (blue/cyan) -->
                 <path
-                  d="M 0 315 C 80 315, 150 250, 190 210"
+                  d="M 0 285 C 50 285, 100 230, 130 190"
                   stroke="rgba(100,180,255,0.6)"
-                  stroke-width="2"
+                  stroke-width="2.5"
                   fill="none"
                 />
-                <!-- Merge point glow -->
-                <circle cx="190" cy="210" r="5" fill="#4fd18b" opacity="0.9">
-                  <animate attributeName="r" values="4;7;4" dur="1.5s" repeatCount="indefinite"/>
-                  <animate attributeName="opacity" values="0.8;1;0.8" dur="1.5s" repeatCount="indefinite"/>
-                </circle>
-                <!-- Outer glow ring -->
-                <circle cx="190" cy="210" r="10" fill="none" stroke="#4fd18b" stroke-width="1" opacity="0.4">
-                  <animate attributeName="r" values="8;14;8" dur="1.5s" repeatCount="indefinite"/>
-                  <animate attributeName="opacity" values="0.5;0.15;0.5" dur="1.5s" repeatCount="indefinite"/>
+                <!-- Merge point -->
+                <circle cx="130" cy="190" r="5" fill="#4fd18b" opacity="0.95">
+                  <animate attributeName="r" values="4;6;4" dur="1.2s" repeatCount="indefinite"/>
                 </circle>
               </svg>
-              <!-- Animated arrows after merge point -->
+              <!-- Animated arrows: merge point → RCPAN -->
               <div class="evo-merge-flow">
-                <span class="merge-arrow">→</span>
                 <span class="merge-arrow">→</span>
                 <span class="merge-arrow">→</span>
               </div>
@@ -2142,53 +2135,54 @@
   /* V-Convergence Layout: FCUAN + FRPAP → RCPAN */
   .evo-convergence {
     display: grid;
-    grid-template-columns: 300px 220px 1fr;
+    grid-template-columns: 280px 180px 320px;
     align-items: center;
+    justify-content: center;
     gap: 0;
-    max-width: 1150px;
+    max-width: 900px;
     margin: 0 auto;
-    padding: 1rem 2rem;
-    min-height: 500px;
+    padding: 0;
+    min-height: 420px;
   }
 
   .evo-sources {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0;
     align-items: flex-end;
     justify-content: center;
   }
 
   .evo-sources .evo-item {
-    transform: scale(0.72);
+    transform: scale(0.68);
     transform-origin: right center;
   }
 
   .evo-merge-zone {
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     position: relative;
-    width: 220px;
-    height: 420px;
+    width: 180px;
+    height: 380px;
   }
 
   .convergence-lines {
     position: absolute;
-    width: 100%;
+    width: 140px;
     height: 100%;
     left: 0;
     top: 0;
   }
 
   .convergence-lines path {
-    stroke-dasharray: 8 4;
+    stroke-dasharray: 6 3;
     stroke-linecap: round;
   }
 
   .evo-merge-flow {
     position: absolute;
-    right: 0;
+    left: 140px;
     display: flex;
     align-items: center;
     gap: 0;
@@ -2199,12 +2193,12 @@
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    padding-left: 0.5rem;
+    padding-left: 0;
   }
 
   .evo-result .evo-item {
-    transform: scale(0.85);
-    transform-origin: center;
+    transform: scale(0.8);
+    transform-origin: left center;
   }
 
   @media (max-width: 1000px) {
