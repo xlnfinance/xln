@@ -77,6 +77,9 @@
       XLN.setBrowserVMJurisdiction(depositoryAddress, browserVMProvider);
       console.log('[View] ✅ BrowserVM jurisdiction registered with browserVM instance');
 
+      // Expose browserVM on window for JurisdictionPanel to access
+      (window as any).__xlnBrowserVM = browserVMProvider;
+
       // CRITICAL: Initialize global xlnInstance for utility functions (deriveDelta, etc)
       // Graph3DPanel needs xlnFunctions even when using isolated stores
       const { xlnInstance } = await import('$lib/stores/xlnStore');
@@ -218,7 +221,14 @@
             }
           });
         } else if (options.name === 'jurisdiction') {
-          component = mount(JurisdictionPanel, { target: div });
+          component = mount(JurisdictionPanel, {
+            target: div,
+            props: {
+              isolatedEnv: localEnvStore,
+              isolatedHistory: localHistoryStore,
+              isolatedTimeIndex: localTimeIndex
+            }
+          });
         } else if (options.name === 'entity-panel') {
           // Dynamic panel for entity operations (opened via panelBridge)
           // Uses EntityPanelWrapper - thin Dockview adapter for legacy EntityPanel
@@ -393,6 +403,15 @@
       });
 
       console.log('[View] Opened entity panel:', entityId.slice(0, 10));
+    });
+
+    // Listen for J-Machine click to open Jurisdiction panel
+    panelBridge.on('openJurisdiction', ({ jurisdictionName }) => {
+      const jurisdictionPanel = dockview.getPanel('jurisdiction');
+      if (jurisdictionPanel) {
+        jurisdictionPanel.api.setActive();
+        console.log('[View] Focused Jurisdiction panel for:', jurisdictionName);
+      }
     });
   });
 

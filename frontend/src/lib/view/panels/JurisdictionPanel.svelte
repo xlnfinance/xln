@@ -1,272 +1,237 @@
 <script lang="ts">
   /**
-   * Jurisdiction Panel - Smart Contract Introspection
-   * Shows EntityProvider.sol and Depository.sol state in real-time
-   *
-   * @license AGPL-3.0
-   * Copyright (C) 2025 XLN Finance
+   * Jurisdiction Panel - READS DIRECTLY FROM BROWSERVM EVM STATE TRIE
+   * NO caching, NO syncing - calls browserVMProvider.getReserves() directly
+   * Uses actual Depository.sol storage via EVM call
    */
 
-  import { onMount, onDestroy } from 'svelte';
+  import type { Writable } from 'svelte/store';
+  import type { BrowserVMProvider } from '../utils/browserVMProvider';
+  import { untrack } from 'svelte';
+  import { ethers } from 'ethers';
   import { panelBridge } from '../utils/panelBridge';
-  import { browserVMProvider } from '../utils/browserVMProvider';
-  import type { EVMEvent } from '../utils/browserVMProvider';
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //                              STATE
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  let loading = true;
-  let error: string | null = null;
-  let activeTab: 'entityProvider' | 'depository' | 'events' = 'entityProvider';
-
-  // EntityProvider state
-  let nextEntityNumber = 0;
-  let registeredEntities: Array<{
-    entityId: string;
-    entityNumber: number;
-    name: string;
-    quorum: string[];
-    threshold: number;
-  }> = [];
-
-  // Depository state
-  let reserves: Map<string, Map<number, bigint>> = new Map();
-  let collateral: Map<string, Map<string, Map<number, bigint>>> = new Map();
-  let insuranceLines: Map<string, Array<{
-    insurer: string;
-    tokenId: number;
-    remaining: bigint;
-    expiresAt: bigint;
-  }>> = new Map();
-
-  // Events
-  let events: EVMEvent[] = [];
-  let eventUnsubscribe: (() => void) | null = null;
-
-  // Known entity IDs (from scenarios)
-  const KNOWN_ENTITIES = [
-    '0x0000000000000000000000000000000000000000000000000000000000000001',
-    '0x0000000000000000000000000000000000000000000000000000000000000002',
-    '0x0000000000000000000000000000000000000000000000000000000000000003',
-    '0x0000000000000000000000000000000000000000000000000000000000000004',
-    '0x0000000000000000000000000000000000000000000000000000000000000005',
-  ];
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  //                              LIFECYCLE
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  onMount(async () => {
-    try {
-      await browserVMProvider.init();
-
-      // Subscribe to all events
-      eventUnsubscribe = browserVMProvider.onAny((event) => {
-        events = [event, ...events].slice(0, 100); // Keep last 100 events
-      });
-
-      // Load initial state
-      await refreshAll();
-      loading = false;
-    } catch (err: any) {
-      error = err.message;
-      loading = false;
-    }
-  });
-
-  onDestroy(() => {
-    eventUnsubscribe?.();
-  });
-
-  // Listen for updates from other panels
-  const unsubscribeReserves = panelBridge.on('reserves:updated', () => {
-    refreshDepository();
-  });
-
-  onDestroy(() => {
-    unsubscribeReserves();
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  //                              DATA LOADING
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  async function refreshAll() {
-    await Promise.all([
-      refreshEntityProvider(),
-      refreshDepository(),
-    ]);
+  // Props
+  interface Props {
+    isolatedEnv: Writable<any>;
+    isolatedHistory?: Writable<any[]>;
+    isolatedTimeIndex?: Writable<number>;
   }
 
-  async function refreshEntityProvider() {
-    try {
-      nextEntityNumber = await browserVMProvider.getNextEntityNumber();
+  let { isolatedEnv, isolatedHistory, isolatedTimeIndex }: Props = $props();
 
-      // Query known entities
-      const entities: typeof registeredEntities = [];
-      for (const entityId of KNOWN_ENTITIES) {
-        const info = await browserVMProvider.getEntityInfo(entityId);
-        if (info.exists) {
-          entities.push({
-            entityId,
-            entityNumber: 0, // TODO: fetch from contract when available
-            name: info.name || '',
-            quorum: info.quorum || [],
-            threshold: info.threshold || 0,
-          });
-        }
-      }
-      registeredEntities = entities;
-    } catch (err: any) {
-      console.error('[JurisdictionPanel] EntityProvider refresh failed:', err);
+  // Tab state
+  let activeTab = $state<'entityProvider' | 'depository'>('depository');
+
+  // Reactive state for EVM reads
+  let reserves = $state<Array<{ entityId: string; name: string; tokenId: number; amount: bigint }>>([]);
+  let entities = $state<Array<{ entityId: string; name: string; quorum: string[]; threshold: number }>>([]);
+  let loading = $state(false);
+
+  // BrowserVM instance management
+  let browserVM = $state<BrowserVMProvider | null>(null);
+
+  // Try to get BrowserVM instance
+  function getBrowserVM(): BrowserVMProvider | null {
+    if (typeof window !== 'undefined') {
+      const w = window as { __xlnBrowserVM?: BrowserVMProvider };
+      return w.__xlnBrowserVM ?? null;
     }
+    return null;
   }
 
-  async function refreshDepository() {
-    try {
-      const tokensLength = await browserVMProvider.getTokensLength();
-      const maxTokenId = Math.max(tokensLength, 2);
+  // Initialize BrowserVM reference
+  $effect(() => {
+    const vm = getBrowserVM();
+    if (vm) {
+      browserVM = vm;
+      return; // Consistent return type (undefined)
+    }
 
-      // Clear old data
-      reserves.clear();
-      collateral.clear();
-      insuranceLines.clear();
-
-      // Build all fetch tasks in parallel
-      const reserveTasks: Promise<{entityId: string, tokenId: number, balance: bigint}>[] = [];
-      const collateralTasks: Promise<{entityId: string, counterpartyId: string, tokenId: number, amount: bigint}>[] = [];
-      const insuranceTasks: Promise<{entityId: string, lines: any[]}>[] = [];
-
-      for (const entityId of KNOWN_ENTITIES) {
-        // Reserve tasks
-        for (let tokenId = 1; tokenId <= maxTokenId; tokenId++) {
-          reserveTasks.push(
-            browserVMProvider.getReserves(entityId, tokenId)
-              .then(balance => ({ entityId, tokenId, balance }))
-              .catch(() => ({ entityId, tokenId, balance: 0n }))
-          );
-        }
-
-        // Collateral tasks
-        for (const counterpartyId of KNOWN_ENTITIES) {
-          if (counterpartyId === entityId) continue;
-          for (let tokenId = 1; tokenId <= maxTokenId; tokenId++) {
-            collateralTasks.push(
-              browserVMProvider.getCollateral(entityId, counterpartyId, tokenId)
-                .then(amount => ({ entityId, counterpartyId, tokenId, amount }))
-                .catch(() => ({ entityId, counterpartyId, tokenId, amount: 0n }))
-            );
-          }
-        }
-
-        // Insurance tasks
-        insuranceTasks.push(
-          browserVMProvider.getInsuranceLines(entityId)
-            .then(lines => ({ entityId, lines }))
-            .catch(() => ({ entityId, lines: [] }))
-        );
+    // Poll briefly for initialization (e.g. if loaded before runtime)
+    const timer = setInterval(() => {
+      const vm = getBrowserVM();
+      if (vm) {
+        browserVM = vm;
+        clearInterval(timer);
       }
+    }, 500);
+    
+    // Cleanup function
+    return () => clearInterval(timer);
+  });
 
-      // Execute all in parallel
-      const [reserveResults, collateralResults, insuranceResults] = await Promise.all([
-        Promise.all(reserveTasks),
-        Promise.all(collateralTasks),
-        Promise.all(insuranceTasks)
-      ]);
+  // ═══════════════════════════════════════════════════════════════════════════
+  //          DIRECT EVM STORAGE READS (via browserVMProvider)
+  // ═══════════════════════════════════════════════════════════════════════════
 
-      // Process reserves
-      for (const { entityId, tokenId, balance } of reserveResults) {
-        if (balance > 0n) {
-          if (!reserves.has(entityId)) reserves.set(entityId, new Map());
-          reserves.get(entityId)!.set(tokenId, balance);
-        }
+  const USDC_TOKEN_ID = 1;
+
+  // Get entity IDs from env (just to know which entities exist)
+  function getEntityIds(env: any): Array<{ entityId: string; name: string }> {
+    if (!env?.eReplicas) return [];
+    const result: Array<{ entityId: string; name: string }> = [];
+    const seen = new Set<string>();
+
+    const entries = env.eReplicas instanceof Map
+      ? Array.from(env.eReplicas.entries())
+      : Object.entries(env.eReplicas);
+
+    for (const entry of entries) {
+      const [key, replica] = entry as [string, any];
+      const entityId = key.split(':')[0] ?? '';
+      if (entityId && !seen.has(entityId)) {
+        seen.add(entityId);
+        result.push({
+          entityId,
+          name: replica?.name || `E${entityId.slice(-4)}`,
+        });
       }
+    }
+    return result;
+  }
 
-      // Process collateral
-      for (const { entityId, counterpartyId, tokenId, amount } of collateralResults) {
+  // Ensure entity ID is in valid bytes32 format for EVM
+  function ensureHexId(id: string): string {
+    // If it's a valid hex string of correct length (0x + 64 chars = 66), use it
+    if (ethers.isHexString(id) && id.length === 66) { 
+        return id;
+    }
+    
+    // If it's a hex string but short (e.g. 0x1), pad it
+    if (ethers.isHexString(id)) {
+        return ethers.zeroPadValue(id, 32);
+    }
+
+    // If it's not hex, hash it (assuming it's a name or other ID format)
+    // Using keccak256 of utf8 bytes matches standard Solidity hashing for strings
+    return ethers.keccak256(ethers.toUtf8Bytes(id));
+  }
+
+  // Read reserves DIRECTLY from BrowserVM EVM storage
+  async function readReservesFromEVM(
+    entityIds: Array<{ entityId: string; name: string }>,
+    vm: BrowserVMProvider
+  ) {
+    const results: Array<{ entityId: string; name: string; tokenId: number; amount: bigint }> = [];
+
+    for (const { entityId, name } of entityIds) {
+      try {
+        const hexId = ensureHexId(entityId);
+        // DIRECT EVM CALL - reads Depository.sol _reserves mapping
+        const amount = await vm.getReserves(hexId, USDC_TOKEN_ID);
         if (amount > 0n) {
-          if (!collateral.has(entityId)) collateral.set(entityId, new Map());
-          if (!collateral.get(entityId)!.has(counterpartyId)) {
-            collateral.get(entityId)!.set(counterpartyId, new Map());
-          }
-          collateral.get(entityId)!.get(counterpartyId)!.set(tokenId, amount);
+          results.push({ entityId, name, tokenId: USDC_TOKEN_ID, amount });
         }
+      } catch (err) {
+        console.error(`[J-Panel] Failed to read reserves for ${entityId}:`, err);
       }
-
-      // Process insurance
-      for (const { entityId, lines } of insuranceResults) {
-        if (lines.length > 0) {
-          insuranceLines.set(entityId, lines);
-        }
-      }
-
-      // Trigger reactivity
-      reserves = reserves;
-      collateral = collateral;
-      insuranceLines = insuranceLines;
-    } catch (err: any) {
-      console.error('[JurisdictionPanel] Depository refresh failed:', err);
     }
+
+    return results;
   }
+
+  // React to env/timeIndex changes - re-read from EVM
+  $effect(() => {
+    const env = $isolatedEnv;
+    // We don't strictly depend on timeIndex for validity, but we reload when it changes
+    // to reflect potential EVM state changes (if runtime syncs EVM state).
+    const timeIndex = isolatedTimeIndex ? ($isolatedTimeIndex ?? -1) : -1;
+    const vm = browserVM;
+
+    // Local active flag for cleanup
+    let active = true;
+
+    // Update entities list first (synchronous)
+    const entityIds = getEntityIds(env);
+    entities = entityIds.map(e => ({
+        entityId: e.entityId,
+        name: e.name,
+        quorum: [],
+        threshold: 1,
+    }));
+
+    if (!vm || entityIds.length === 0) {
+        reserves = [];
+        return;
+    }
+
+    // Debounce/Delay slightly to batch rapid updates and avoid race conditions
+    const timer = setTimeout(() => {
+        if (!active) return;
+        loading = true;
+        readReservesFromEVM(entityIds, vm).then(r => {
+            if (active) {
+                reserves = r;
+                loading = false;
+            }
+        }).catch(err => {
+            if (active) {
+                console.error('[J-Panel] EVM read failed:', err);
+                loading = false;
+            }
+        });
+    }, 50); // 50ms debounce
+
+    return () => {
+        active = false;
+        clearTimeout(timer);
+    };
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   //                              HELPERS
   // ═══════════════════════════════════════════════════════════════════════════
 
   function formatEntityId(entityId: string): string {
-    return entityId.slice(0, 10) + '...' + entityId.slice(-4);
+    if (!entityId) return 'N/A';
+    // Try to detect if it's a long hex string
+    if (entityId.startsWith('0x') && entityId.length > 10) {
+        // Check if it looks like an auto-generated number
+        try {
+             // Take last 8 chars
+             const suffix = entityId.slice(-8);
+             const num = parseInt(suffix, 16);
+             // If number is small and ID is mostly zeros?
+             // Just show abbreviated hex
+             return entityId.slice(0, 6) + '...' + entityId.slice(-4);
+        } catch {
+             return entityId.slice(0, 6) + '...' + entityId.slice(-4);
+        }
+    }
+    return entityId;
   }
 
   function formatBalance(balance: bigint): string {
-    // Format with commas
-    return balance.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    // Convert from 18 decimals to human-readable
+    const num = Number(balance) / 1e18;
+    if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(1)}M`;
+    if (num >= 1_000) return `$${(num / 1_000).toFixed(0)}K`;
+    return `$${num.toFixed(0)}`;
   }
 
-  function formatBalanceShort(balance: bigint): string {
-    const num = Number(balance);
-    if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M`;
-    if (num >= 1_000) return `${(num / 1_000).toFixed(1)}K`;
-    return num.toString();
+  function handleEntityClick(entityId: string) {
+    panelBridge.emit('entity:selected', { entityId });
   }
 
-  function getTokenName(tokenId: number): string {
-    return tokenId === 1 ? 'USDC' : tokenId === 2 ? 'ETH' : `Token ${tokenId}`;
+  function handleEntityExpand(entityId: string, name: string) {
+    panelBridge.emit('openEntityOperations', { entityId, entityName: name || formatEntityId(entityId) });
   }
 
-  function getEntityName(entityId: string): string {
-    const entity = registeredEntities.find(e => e.entityId === entityId);
-    if (entity?.name) return entity.name;
-    const num = registeredEntities.find(e => e.entityId === entityId)?.entityNumber;
-    if (num) return `#${num}`;
-    return formatEntityId(entityId);
-  }
-
-  function formatTimestamp(ts: bigint): string {
-    if (ts === 0n) return 'Never';
-    const date = new Date(Number(ts) * 1000);
-    return date.toLocaleString();
-  }
+  // Get depository address from browserVM
+  let depAddress = $derived(browserVM?.getDepositoryAddress?.() || '');
 </script>
 
 <div class="jurisdiction-panel">
   <!-- Header -->
   <div class="header">
-    <h3>Jurisdiction</h3>
+    <h3>J-Machine EVM</h3>
     <div class="meta">
-      <span class="contract-badge" title="Account Library">
-        ACC: {browserVMProvider.getAccountAddress().slice(0, 8)}...
-      </span>
-      <span class="contract-badge" title="Depository Contract">
-        DEP: {browserVMProvider.getDepositoryAddress().slice(0, 8)}...
-      </span>
-      <span class="contract-badge" title="EntityProvider Contract">
-        EP: {browserVMProvider.getEntityProviderAddress().slice(0, 8)}...
-      </span>
+      <span class="contract-badge" title="Depository">DEP: {depAddress ? depAddress.slice(0,10) + '...' : 'N/A'}</span>
+      {#if loading}
+        <span class="loading-badge">reading EVM...</span>
+      {/if}
     </div>
-    <button on:click={refreshAll} disabled={loading} class="refresh-btn">
-      {loading ? '...' : 'Refresh'}
-    </button>
   </div>
 
   <!-- Tabs -->
@@ -274,223 +239,94 @@
     <button
       class="tab"
       class:active={activeTab === 'entityProvider'}
-      on:click={() => activeTab = 'entityProvider'}
+      onclick={() => activeTab = 'entityProvider'}
     >
-      EntityProvider
+      EntityProvider.sol
     </button>
     <button
       class="tab"
       class:active={activeTab === 'depository'}
-      on:click={() => activeTab = 'depository'}
+      onclick={() => activeTab = 'depository'}
     >
-      Depository
-    </button>
-    <button
-      class="tab"
-      class:active={activeTab === 'events'}
-      on:click={() => activeTab = 'events'}
-    >
-      Events ({events.length})
+      Depository.sol
     </button>
   </div>
 
   <!-- Content -->
   <div class="content">
-    {#if loading}
-      <div class="loading">
-        <div class="spinner"></div>
-        <p>Initializing BrowserVM...</p>
-      </div>
-    {:else if error}
-      <div class="error">
-        <p>{error}</p>
-        <button on:click={refreshAll}>Retry</button>
-      </div>
-    {:else if activeTab === 'entityProvider'}
-      <!-- EntityProvider Tab -->
+    {#if activeTab === 'entityProvider'}
+      <!-- EntityProvider.sol storage -->
       <div class="section">
         <div class="section-header">
-          <span class="section-title">Contract State</span>
+          <span class="section-title">mapping(bytes32 =&gt; Entity) entities</span>
+          <span class="count">{entities.length}</span>
         </div>
-        <div class="stat-row">
-          <span class="stat-label">Next Entity #</span>
-          <span class="stat-value">{nextEntityNumber}</span>
-        </div>
-        <div class="stat-row">
-          <span class="stat-label">Registered</span>
-          <span class="stat-value">{registeredEntities.length}</span>
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="section-header">
-          <span class="section-title">Registered Entities</span>
-        </div>
-        {#if registeredEntities.length === 0}
+        {#if entities.length === 0}
           <div class="empty">No entities registered</div>
         {:else}
-          {#each registeredEntities as entity}
-            <div class="entity-card">
-              <div class="entity-header">
-                <span class="entity-number">#{entity.entityNumber}</span>
-                <span class="entity-name">{entity.name || 'Unnamed'}</span>
-              </div>
-              <div class="entity-details">
-                <div class="detail-row">
-                  <span class="detail-label">ID</span>
-                  <span class="detail-value mono">{formatEntityId(entity.entityId)}</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">Threshold</span>
-                  <span class="detail-value">{entity.threshold}/{entity.quorum.length}</span>
-                </div>
-                {#if entity.quorum.length > 0}
-                  <div class="detail-row">
-                    <span class="detail-label">Quorum</span>
-                    <div class="quorum-list">
-                      {#each entity.quorum as addr}
-                        <span class="quorum-addr">{addr.slice(0, 8)}...</span>
-                      {/each}
-                    </div>
-                  </div>
-                {/if}
-              </div>
+          {#each entities as entity}
+            <div
+              class="entity-row clickable"
+              onclick={() => handleEntityClick(entity.entityId)}
+              ondblclick={() => handleEntityExpand(entity.entityId, entity.name)}
+              role="button"
+              tabindex="0"
+            >
+              <span class="entity-id">{formatEntityId(entity.entityId)}</span>
+              <span class="entity-name">{entity.name || '—'}</span>
+              <span class="entity-threshold">{entity.threshold}/{entity.quorum.length || 1}</span>
+              <button
+                class="expand-btn"
+                onclick={(e) => { e.stopPropagation(); handleEntityExpand(entity.entityId, entity.name); }}
+                title="Open Entity Panel"
+              >↗</button>
             </div>
           {/each}
         {/if}
       </div>
 
     {:else if activeTab === 'depository'}
-      <!-- Depository Tab -->
+      <!-- Depository.sol storage - DIRECT FROM EVM -->
       <div class="section">
         <div class="section-header">
-          <span class="section-title">Reserves</span>
+          <span class="section-title">mapping(bytes32 =&gt; mapping(uint =&gt; uint)) _reserves</span>
+          <span class="count">{reserves.length}</span>
         </div>
-        {#if reserves.size === 0}
-          <div class="empty">No reserves</div>
+        {#if reserves.length === 0}
+          <div class="empty">{loading ? 'Reading from EVM...' : 'No reserves'}</div>
         {:else}
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Entity</th>
-                <th>Token</th>
-                <th>Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each [...reserves.entries()] as [entityId, entityReserves]}
-                {#each [...entityReserves.entries()] as [tokenId, balance]}
-                  <tr>
-                    <td>{getEntityName(entityId)}</td>
-                    <td>{getTokenName(tokenId)}</td>
-                    <td class="mono">{formatBalanceShort(balance)}</td>
-                  </tr>
-                {/each}
-              {/each}
-            </tbody>
-          </table>
-        {/if}
-      </div>
-
-      <div class="section">
-        <div class="section-header">
-          <span class="section-title">Collateral</span>
-        </div>
-        {#if collateral.size === 0}
-          <div class="empty">No collateral posted</div>
-        {:else}
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>From</th>
-                <th>To</th>
-                <th>Token</th>
-                <th>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each [...collateral.entries()] as [entityId, counterparties]}
-                {#each [...counterparties.entries()] as [counterpartyId, tokens]}
-                  {#each [...tokens.entries()] as [tokenId, amount]}
-                    <tr>
-                      <td>{getEntityName(entityId)}</td>
-                      <td>{getEntityName(counterpartyId)}</td>
-                      <td>{getTokenName(tokenId)}</td>
-                      <td class="mono">{formatBalanceShort(amount)}</td>
-                    </tr>
-                  {/each}
-                {/each}
-              {/each}
-            </tbody>
-          </table>
-        {/if}
-      </div>
-
-      <div class="section">
-        <div class="section-header">
-          <span class="section-title">Insurance Lines</span>
-        </div>
-        {#if insuranceLines.size === 0}
-          <div class="empty">No insurance lines</div>
-        {:else}
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Insured</th>
-                <th>Insurer</th>
-                <th>Token</th>
-                <th>Remaining</th>
-                <th>Expires</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each [...insuranceLines.entries()] as [entityId, lines]}
-                {#each lines as line}
-                  <tr>
-                    <td>{getEntityName(entityId)}</td>
-                    <td>{formatEntityId(line.insurer)}</td>
-                    <td>{getTokenName(line.tokenId)}</td>
-                    <td class="mono">{formatBalanceShort(line.remaining)}</td>
-                    <td>{formatTimestamp(line.expiresAt)}</td>
-                  </tr>
-                {/each}
-              {/each}
-            </tbody>
-          </table>
-        {/if}
-      </div>
-
-    {:else if activeTab === 'events'}
-      <!-- Events Tab -->
-      <div class="section">
-        <div class="section-header">
-          <span class="section-title">Contract Events</span>
-          <span class="event-count">{events.length} events</span>
-        </div>
-        {#if events.length === 0}
-          <div class="empty">No events yet</div>
-        {:else}
-          <div class="events-list">
-            {#each events as event}
-              <div class="event-item">
-                <div class="event-header">
-                  <span class="event-name">{event.name}</span>
-                  <span class="event-block">Block {event.blockNumber}</span>
-                </div>
-                <div class="event-args">
-                  {#each Object.entries(event.args) as [key, value]}
-                    <div class="event-arg">
-                      <span class="arg-key">{key}:</span>
-                      <span class="arg-value">
-                        {typeof value === 'bigint' ? formatBalance(value) : String(value).slice(0, 20)}
-                      </span>
-                    </div>
-                  {/each}
-                </div>
+          <div class="storage-table">
+            {#each reserves as r}
+              <div
+                class="storage-row clickable"
+                onclick={() => handleEntityClick(r.entityId)}
+                ondblclick={() => handleEntityExpand(r.entityId, r.name)}
+                role="button"
+                tabindex="0"
+              >
+                <span class="entity-label">{r.name}</span>
+                <span class="key">[{formatEntityId(r.entityId)}][{r.tokenId}]</span>
+                <span class="value">{formatBalance(r.amount)}</span>
               </div>
             {/each}
           </div>
         {/if}
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">mapping(bytes =&gt; mapping(uint =&gt; AccountCollateral)) _collaterals</span>
+          <span class="count">0</span>
+        </div>
+        <div class="empty">No collateral</div>
+      </div>
+
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">mapping(bytes32 =&gt; InsuranceLine[]) insuranceLines</span>
+          <span class="count">0</span>
+        </div>
+        <div class="empty">No insurance</div>
       </div>
     {/if}
   </div>
@@ -505,58 +341,46 @@
     background: #0d1117;
     color: #c9d1d9;
     overflow: hidden;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: 'Monaco', 'Menlo', monospace;
+    font-size: 11px;
   }
 
   .header {
-    padding: 12px 16px;
+    padding: 8px 12px;
     border-bottom: 1px solid #21262d;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
     background: #161b22;
   }
 
   .header h3 {
     margin: 0;
-    font-size: 14px;
+    font-size: 12px;
     font-weight: 600;
-    color: #f0f6fc;
+    color: #7ee787;
   }
 
   .meta {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     flex: 1;
   }
 
   .contract-badge {
-    font-size: 10px;
-    padding: 2px 6px;
+    font-size: 9px;
+    padding: 2px 5px;
     background: #21262d;
-    border-radius: 4px;
-    font-family: monospace;
-    color: #7ee787;
+    border-radius: 3px;
+    color: #8b949e;
   }
 
-  .refresh-btn {
-    padding: 4px 10px;
-    background: #238636;
-    border: none;
-    color: white;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 11px;
-    font-weight: 500;
-  }
-
-  .refresh-btn:hover:not(:disabled) {
-    background: #2ea043;
-  }
-
-  .refresh-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .loading-badge {
+    font-size: 9px;
+    padding: 2px 5px;
+    background: #3d3000;
+    border-radius: 3px;
+    color: #d29922;
   }
 
   .tabs {
@@ -567,15 +391,13 @@
 
   .tab {
     flex: 1;
-    padding: 10px;
+    padding: 6px 8px;
     background: transparent;
     border: none;
     color: #8b949e;
     cursor: pointer;
-    font-size: 12px;
-    font-weight: 500;
+    font-size: 10px;
     border-bottom: 2px solid transparent;
-    transition: all 0.2s;
   }
 
   .tab:hover {
@@ -590,229 +412,131 @@
   .content {
     flex: 1;
     overflow-y: auto;
-    padding: 12px;
-  }
-
-  .loading, .error {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 40px;
-    gap: 12px;
-  }
-
-  .spinner {
-    width: 32px;
-    height: 32px;
-    border: 3px solid #21262d;
-    border-top-color: #58a6ff;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  .error {
-    color: #f85149;
-  }
-
-  .error button {
-    padding: 6px 12px;
-    background: #21262d;
-    border: 1px solid #30363d;
-    color: #c9d1d9;
-    border-radius: 4px;
-    cursor: pointer;
+    padding: 8px;
   }
 
   .section {
-    margin-bottom: 16px;
+    margin-bottom: 12px;
+    background: #161b22;
+    border: 1px solid #21262d;
+    border-radius: 4px;
+    overflow: hidden;
   }
 
   .section-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 0;
+    padding: 6px 8px;
+    background: #0d1117;
     border-bottom: 1px solid #21262d;
-    margin-bottom: 8px;
   }
 
   .section-title {
-    font-size: 12px;
-    font-weight: 600;
+    font-size: 9px;
+    color: #d29922;
+  }
+
+  .count {
+    font-size: 9px;
     color: #8b949e;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .stat-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 6px 0;
-    font-size: 12px;
-  }
-
-  .stat-label {
-    color: #8b949e;
-  }
-
-  .stat-value {
-    color: #f0f6fc;
-    font-weight: 500;
-  }
-
-  .empty {
-    padding: 20px;
-    text-align: center;
-    color: #484f58;
-    font-size: 12px;
-    font-style: italic;
-  }
-
-  .entity-card {
-    background: #161b22;
-    border: 1px solid #21262d;
-    border-radius: 6px;
-    padding: 10px;
-    margin-bottom: 8px;
-  }
-
-  .entity-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-
-  .entity-number {
-    font-size: 14px;
-    font-weight: 600;
-    color: #58a6ff;
-  }
-
-  .entity-name {
-    font-size: 13px;
-    color: #f0f6fc;
-  }
-
-  .entity-details {
-    font-size: 11px;
-  }
-
-  .detail-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 3px 0;
-  }
-
-  .detail-label {
-    color: #8b949e;
-  }
-
-  .detail-value {
-    color: #c9d1d9;
-  }
-
-  .mono {
-    font-family: 'Monaco', 'Menlo', monospace;
-    font-size: 11px;
-  }
-
-  .quorum-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-
-  .quorum-addr {
-    font-size: 10px;
     padding: 1px 4px;
     background: #21262d;
     border-radius: 3px;
-    font-family: monospace;
   }
 
-  .data-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 11px;
+  .empty {
+    padding: 12px;
+    text-align: center;
+    color: #484f58;
+    font-size: 10px;
+    font-style: italic;
   }
 
-  .data-table th,
-  .data-table td {
+  .entity-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     padding: 6px 8px;
-    text-align: left;
     border-bottom: 1px solid #21262d;
   }
 
-  .data-table th {
-    background: #161b22;
-    color: #8b949e;
+  .entity-row:last-child {
+    border-bottom: none;
+  }
+
+  .clickable {
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .clickable:hover {
+    background: #1c2128;
+  }
+
+  .entity-id {
+    color: #58a6ff;
     font-weight: 500;
+    min-width: 40px;
+  }
+
+  .entity-name {
+    flex: 1;
+    color: #c9d1d9;
+  }
+
+  .entity-threshold {
+    color: #8b949e;
     font-size: 10px;
-    text-transform: uppercase;
   }
 
-  .data-table tbody tr:hover {
-    background: #161b22;
+  .expand-btn {
+    padding: 2px 6px;
+    background: transparent;
+    border: 1px solid #30363d;
+    color: #8b949e;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 10px;
   }
 
-  .events-list {
-    max-height: 400px;
-    overflow-y: auto;
+  .expand-btn:hover {
+    background: #21262d;
+    color: #58a6ff;
   }
 
-  .event-item {
-    background: #161b22;
-    border: 1px solid #21262d;
-    border-radius: 4px;
-    padding: 8px;
-    margin-bottom: 6px;
+  .storage-table {
+    padding: 4px 0;
   }
 
-  .event-header {
+  .storage-row {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 6px;
+    align-items: center;
+    padding: 4px 8px;
+    border-bottom: 1px solid #21262d;
+    gap: 8px;
   }
 
-  .event-name {
-    font-weight: 600;
+  .storage-row:last-child {
+    border-bottom: none;
+  }
+
+  .entity-label {
+    color: #58a6ff;
+    font-weight: 500;
+    min-width: 50px;
+  }
+
+  .key {
+    color: #8b949e;
+    flex: 1;
+    font-size: 9px;
+  }
+
+  .value {
     color: #7ee787;
+    font-weight: 600;
     font-size: 12px;
-  }
-
-  .event-block {
-    font-size: 10px;
-    color: #8b949e;
-  }
-
-  .event-count {
-    font-size: 10px;
-    color: #8b949e;
-  }
-
-  .event-args {
-    font-size: 10px;
-  }
-
-  .event-arg {
-    display: flex;
-    gap: 4px;
-    padding: 2px 0;
-  }
-
-  .arg-key {
-    color: #8b949e;
-  }
-
-  .arg-value {
-    color: #c9d1d9;
-    font-family: monospace;
-    word-break: break-all;
   }
 </style>

@@ -24,6 +24,10 @@
   let debouncedSearchText = ''; // Debounced version for filtering
   let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // RAF-batched logging to break Svelte reactivity loops
+  let pendingLogs: ConsoleEntry[] = [];
+  let rafScheduled = false;
+
   // Command REPL
   let commandInput = '';
   let commandHistory: string[] = [];
@@ -51,7 +55,19 @@
     });
   }
 
+  function flushPendingLogs() {
+    if (pendingLogs.length === 0) return;
+    logs = [...logs, ...pendingLogs].slice(-maxLogs);
+    pendingLogs = [];
+    rafScheduled = false;
+
+    if (autoScroll && scrollContainer) {
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+    }
+  }
+
   function addLog(level: ConsoleEntry['level'], args: any[]) {
+    // Format message synchronously (no Svelte reactivity)
     const message = args.map(arg => {
       if (typeof arg === 'object') {
         try {
@@ -65,26 +81,24 @@
       return String(arg);
     }).join(' ');
 
-    const entry: ConsoleEntry = {
+    // Push to pending queue (non-reactive)
+    pendingLogs.push({
       id: logId++,
       timestamp: formatTimestamp(),
       level,
       message,
       stack: args.find(arg => arg instanceof Error)?.stack
-    };
+    });
 
-    logs = [...logs, entry].slice(-maxLogs);
-
-    // Auto-scroll to bottom if enabled
-    if (autoScroll && scrollContainer) {
-      setTimeout(() => {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
-      }, 10);
+    // Schedule ONE RAF update to flush all pending logs
+    if (!rafScheduled) {
+      rafScheduled = true;
+      requestAnimationFrame(flushPendingLogs);
     }
   }
 
   onMount(() => {
-    // Intercept console methods
+    // Intercept console methods - RAF batching breaks Svelte reactivity loops
     console.debug = (...args) => {
       if (mirrorToDevTools) originalConsole.debug(...args);
       addLog('debug', args);

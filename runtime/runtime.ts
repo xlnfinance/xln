@@ -552,6 +552,20 @@ const applyRuntimeInput = async (
       env.runtimeInput.runtimeTxs.length = 0;
       env.runtimeInput.entityInputs.length = 0;
 
+      // CRITICAL: Update JReplica stateRoots from BrowserVM BEFORE snapshot
+      // Without this, time-travel shows stale EVM state from xlnomy creation
+      const browserVM = getBrowserVMInstance();
+      if (browserVM?.captureStateRoot && env.jReplicas) {
+        try {
+          const freshStateRoot = await browserVM.captureStateRoot();
+          for (const [name, jReplica] of env.jReplicas.entries()) {
+            jReplica.stateRoot = freshStateRoot;
+          }
+        } catch (e) {
+          // Silent fail - stateRoot capture is optional for time-travel
+        }
+      }
+
       // Capture snapshot with the actual processed input and outputs
       await captureSnapshot(env, env.history, db, processedInput, entityOutbox, inputDescription);
     } else {
@@ -666,6 +680,7 @@ const main = async (): Promise<Env> => {
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
     gossip: gossipLayer,
+    frameLogs: [],
   };
 
   // Try to load saved state from database
@@ -771,6 +786,7 @@ const main = async (): Promise<Env> => {
         },
         history: snapshots, // Include the loaded history
         gossip: gossipLayer, // Use restored gossip layer
+        frameLogs: [],
       };
       console.log(`✅ History restored. Runtime is at height ${env.height} with ${env.history.length} snapshots.`);
       console.log(`📈 Snapshot details:`, {
@@ -890,6 +906,7 @@ const clearDatabaseAndHistory = async () => {
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
     gossip: createGossipLayer(),
+    frameLogs: [],
   };
 
   console.log('✅ Database and runtime history cleared');
@@ -1195,6 +1212,7 @@ export const createEmptyEnv = (): Env => {
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
     gossip: createGossipLayer(),
+    frameLogs: [],
   };
 };
 

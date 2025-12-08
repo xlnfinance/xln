@@ -1132,15 +1132,21 @@ let vrHammer: VRHammer | null = null;
     panelBridge.on('settings:reset', handleSettingsReset);
     panelBridge.on('camera:focus', handleCameraFocus);
 
-    const unsubscribe1 = isolatedEnv.subscribe(updateNetworkData);
-    // CRITICAL: Also subscribe to timeIndex changes for time-travel
-    const unsubscribe2 = isolatedTimeIndex.subscribe(() => {
-      if (scene) updateNetworkData();
-    });
-    const unsubscribe3 = isolatedHistory.subscribe(() => {
-      if (scene) updateNetworkData();
-    });
+    // FIXED: Single debounced update function to prevent multiple simultaneous calls
+    let updateTimeout: ReturnType<typeof setTimeout> | null = null;
+    const debouncedUpdate = () => {
+      if (updateTimeout) clearTimeout(updateTimeout);
+      updateTimeout = setTimeout(() => {
+        if (scene) updateNetworkData();
+        updateTimeout = null;
+      }, 16); // ~60fps max update rate
+    };
+
+    const unsubscribe1 = isolatedEnv.subscribe(debouncedUpdate);
+    const unsubscribe2 = isolatedTimeIndex.subscribe(debouncedUpdate);
+    const unsubscribe3 = isolatedHistory.subscribe(debouncedUpdate);
     return () => {
+      if (updateTimeout) clearTimeout(updateTimeout);
       unsubscribe1();
       unsubscribe2();
       unsubscribe3();
@@ -1153,13 +1159,9 @@ let vrHammer: VRHammer | null = null;
     };
   });
 
-  // Reactive update when isolated env OR timeIndex changes
-  // CRITICAL: Must react to $isolatedTimeIndex for time-travel to work visually
-  $: if (scene && ($isolatedEnv || $isolatedTimeIndex >= -1)) {
-    // Re-read replicas from time-aware env before updating
-    const _ = replicas; // Force dependency on replicas (derived from env)
-    updateNetworkData();
-  }
+  // FIXED: Removed redundant reactive block - subscriptions handle updates
+  // This was causing double/triple updates on every change
+  // Subscriptions in onMount already handle all store changes
 
   let resizeObserver: ResizeObserver | null = null;
 
@@ -2205,12 +2207,14 @@ let vrHammer: VRHammer | null = null;
     // Read replicas from computed env, not reactive variable
     let currentReplicas = computedEnv?.eReplicas || new Map();
 
-    console.log('[Graph3D] Replicas check:', {
-      timeIndex,
-      replicasSize: currentReplicas?.size || 0,
-      historyLength: get(isolatedHistory)?.length || 0,
-      source: timeIndex >= 0 ? 'history[' + timeIndex + ']' : 'live'
-    });
+    // FIXED: Removed excessive console.log - only log on significant changes
+    // Uncomment for debugging:
+    // console.log('[Graph3D] Replicas check:', {
+    //   timeIndex,
+    //   replicasSize: currentReplicas?.size || 0,
+    //   historyLength: get(isolatedHistory)?.length || 0,
+    //   source: timeIndex >= 0 ? 'history[' + timeIndex + ']' : 'live'
+    // });
 
     // Always use replicas (ground truth)
     if (currentReplicas && currentReplicas.size > 0) {
@@ -2261,7 +2265,7 @@ let vrHammer: VRHammer | null = null;
       });
     }
 
-    console.log('[Graph3D] entityData created:', entityData.length, 'entities');
+    // FIXED: Removed excessive console.log
 
     // NO DEMO DATA - only show what actually exists
     if (entityData.length === 0) {
@@ -4756,6 +4760,10 @@ let vrHammer: VRHammer | null = null;
           controls.update();
           console.log(`[Graph3D] ✅ Camera now rotates around ${name}`);
         }
+
+        // Open Jurisdiction panel
+        panelBridge.emit('openJurisdiction', { jurisdictionName: name });
+
         return; // Don't process entity clicks
       }
     }
@@ -4783,14 +4791,15 @@ let vrHammer: VRHammer | null = null;
       // Trigger activity animation
       triggerEntityActivity(entity.id);
 
-      // Show mini panel at click position
+      // Get entity name and directly open full panel (simplified UX)
       const entityName = getEntityName(entity.id);
       console.log(`[Graph3D] Entity clicked: ${entity.id}, name: ${entityName}`);
-      miniPanelEntityId = entity.id;
-      miniPanelEntityName = entityName;
-      miniPanelPosition = { x: event.clientX + 10, y: event.clientY + 10 };
-      showMiniPanel = true;
-      console.log(`[Graph3D] showMiniPanel set to: ${showMiniPanel}, position:`, miniPanelPosition);
+
+      // Emit selection for other panels to react
+      panelBridge.emit('entity:selected', { entityId: entity.id });
+
+      // Directly open full entity panel (skip mini panel for faster UX)
+      panelBridge.emit('openEntityOperations', { entityId: entity.id, entityName });
 
     } else {
       // Clicked on empty space - close mini panel

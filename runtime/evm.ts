@@ -745,14 +745,29 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
       console.log('🔍 JURISDICTION DEBUG: Loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
       console.log('✅ Loaded jurisdictions from centralized loader (cached)');
     } else {
-      // Browser environment - fetch from runtime (use relative path for GitHub Pages compatibility)
-      const response = await fetch('./jurisdictions.json');
-      if (!response.ok) {
-        throw new Error(`Failed to fetch jurisdictions.json: ${response.status} ${response.statusText}`);
+      // Browser environment - fetch from runtime with timeout (prevents indefinite hang in BrowserVM mode)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+
+      try {
+        const response = await fetch('./jurisdictions.json', { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch jurisdictions.json: ${response.status} ${response.statusText}`);
+        }
+        config = await response.json();
+        console.log('🔍 JURISDICTION DEBUG: Browser loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
+        console.log('✅ Loaded jurisdictions from runtime');
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === 'AbortError') {
+          console.log('⏱️ jurisdictions.json fetch timed out - using BrowserVM mode (no external blockchain)');
+        } else {
+          console.log('⚠️ jurisdictions.json not found - using BrowserVM mode (no external blockchain)');
+        }
+        // Return empty map for BrowserVM mode - prepopulate-ahb.ts has its own fallback
+        return jurisdictions;
       }
-      config = await response.json();
-      console.log('🔍 JURISDICTION DEBUG: Browser loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
-      console.log('✅ Loaded jurisdictions from runtime');
     }
 
     const jurisdictionData = config.jurisdictions;

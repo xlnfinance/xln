@@ -87,6 +87,7 @@ export function getRuntimeFrames(history: Snapshot[], replica: EntityReplica | n
       runtimeTxs: relevantRuntimeTxs,
       timestamp: snapshot.timestamp || Date.now() - (history.length - frameIndex) * 1000,
       hasActivity,
+      logs: snapshot.logs || [], // Frame-specific structured logs
     };
   });
 }

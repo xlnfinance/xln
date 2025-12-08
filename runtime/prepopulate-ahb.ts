@@ -128,7 +128,7 @@ interface FrameSubtitle {
 
 let pushSnapshotCount = 0;
 
-function pushSnapshot(
+async function pushSnapshot(
   env: Env,
   description: string,
   subtitle: FrameSubtitle,
@@ -138,15 +138,67 @@ function pushSnapshot(
   console.log(`[pushSnapshot #${pushSnapshotCount}] Called for: "${description}"`);
   const gossipSnapshot = cloneProfilesForSnapshot(env);
 
-  // Clone jReplicas for this frame (J-Machine state)
-  const jReplicasSnapshot = env.jReplicas ? Array.from(env.jReplicas.values()).map(jr => ({
-    name: jr.name,
-    blockNumber: jr.blockNumber,
-    stateRoot: new Uint8Array(jr.stateRoot),
-    mempool: [...jr.mempool],
-    position: { ...jr.position },
-    contracts: jr.contracts ? { ...jr.contracts } : undefined,
-  })) : [];
+  // CRITICAL: Capture fresh stateRoot from BrowserVM for time-travel
+  const browserVM = getBrowserVMInstance();
+  let freshStateRoot: Uint8Array | null = null;
+  if (browserVM?.captureStateRoot && env.jReplicas) {
+    try {
+      freshStateRoot = await browserVM.captureStateRoot();
+      // Also update live jReplicas so next snapshot has correct base
+      for (const [name, jReplica] of env.jReplicas.entries()) {
+        jReplica.stateRoot = freshStateRoot;
+      }
+    } catch (e) {
+      // Silent fail - stateRoot capture is optional
+    }
+  }
+
+  // Clone jReplicas for this frame (J-Machine state) + SYNC reserves from eReplicas
+  const jReplicasSnapshot = env.jReplicas ? Array.from(env.jReplicas.values()).map(jr => {
+    // Sync reserves from eReplicas into JReplica
+    const reserves = new Map<string, Map<number, bigint>>();
+    const registeredEntities = new Map<string, { name: string; quorum: string[]; threshold: number }>();
+
+    // Aggregate reserves from all entity replicas
+    for (const [key, replica] of env.eReplicas.entries()) {
+      const entityId = key.split(':')[0];
+      if (replica.state?.reserves) {
+        const tokenMap = new Map<number, bigint>();
+        // Handle both Map and plain object
+        if (replica.state.reserves instanceof Map) {
+          replica.state.reserves.forEach((amount: bigint, tokenId: string) => {
+            tokenMap.set(Number(tokenId), amount);
+          });
+        } else {
+          for (const [tokenId, amount] of Object.entries(replica.state.reserves as Record<string, bigint>)) {
+            tokenMap.set(Number(tokenId), BigInt(amount));
+          }
+        }
+        if (tokenMap.size > 0) {
+          reserves.set(entityId, tokenMap);
+        }
+      }
+      // Add entity to registeredEntities
+      if (!registeredEntities.has(entityId)) {
+        registeredEntities.set(entityId, {
+          name: replica.name || `E${entityId.slice(-4)}`,
+          quorum: replica.quorum || [],
+          threshold: replica.threshold || 1,
+        });
+      }
+    }
+
+    return {
+      name: jr.name,
+      blockNumber: jr.blockNumber,
+      stateRoot: new Uint8Array(jr.stateRoot),
+      mempool: [...jr.mempool],
+      position: { ...jr.position },
+      contracts: jr.contracts ? { ...jr.contracts } : undefined,
+      reserves,
+      registeredEntities,
+    };
+  }) : [];
 
   const snapshot: EnvSnapshot = {
     height: env.height,
@@ -244,7 +296,7 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     console.log('✅ AHB Xlnomy created (J-Machine visible in 3D)');
 
     // Push Frame 0: Clean slate with J-Machine only (no entities yet)
-    pushSnapshot(env, 'Frame 0: Clean Slate - J-Machine Ready', {
+    await pushSnapshot(env, 'Frame 0: Clean Slate - J-Machine Ready', {
       title: 'Jurisdiction Machine Deployed',
       what: 'The J-Machine (Jurisdiction Machine) is deployed on-chain. It represents the EVM smart contracts (Depository.sol, EntityProvider.sol) that will process settlements.',
       why: 'Before any entities exist, the jurisdiction infrastructure must be in place. Think of this as deploying the central bank\'s core settlement system.',
@@ -315,7 +367,7 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     console.log(`\n  ✅ Created: ${alice.name}, ${hub.name}, ${bob.name}`);
 
     // Push Frame 0.5: Entities created but not yet funded
-    pushSnapshot(env, 'Entities Created: Alice, Hub, Bob', {
+    await pushSnapshot(env, 'Entities Created: Alice, Hub, Bob', {
       title: 'Three Entities Deployed',
       what: 'Alice, Hub, and Bob entities are now registered in the J-Machine. They appear in the 3D visualization but have no reserves yet (grey spheres).',
       why: 'Before entities can transact, they must be registered in the jurisdiction. This establishes their identity and governance structure.',
@@ -340,7 +392,7 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     await syncReservesFromBrowserVM(env, alice.id, browserVM, alice.name);
     await syncReservesFromBrowserVM(env, bob.id, browserVM, bob.name);
 
-    pushSnapshot(env, 'Initial State: Hub Funded', {
+    await pushSnapshot(env, 'Initial State: Hub Funded', {
       title: 'Initial Liquidity Provision',
       what: 'Hub entity receives $10M USDC reserve balance on Depository.sol (on-chain via BrowserVM)',
       why: 'Reserve balances are the source of liquidity for off-chain bilateral accounts. Think of this as the hub depositing cash into its custody account.',
@@ -387,7 +439,7 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
       }]
     };
 
-    pushSnapshot(env, 'Hub → Alice: $3M R2R Transfer', {
+    await pushSnapshot(env, 'Hub → Alice: $3M R2R Transfer', {
       title: 'Reserve-to-Reserve Transfer #1 (R2R)',
       what: 'Hub calls Depository.reserveToReserve(Alice, $3M). TX enters J-Machine mempool. On finalization: Hub -= $3M, Alice += $3M',
       why: 'R2R transfers are pure on-chain settlement. Watch Alice\'s sphere grow as she receives funds!',
@@ -432,7 +484,7 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
       }]
     };
 
-    pushSnapshot(env, 'Hub → Bob: $2M R2R Transfer', {
+    await pushSnapshot(env, 'Hub → Bob: $2M R2R Transfer', {
       title: 'Reserve-to-Reserve Transfer #2',
       what: 'Hub calls Depository.reserveToReserve(Bob, $2M). Second TX enters mempool.',
       why: 'Now Hub has distributed $5M total ($3M to Alice, $2M to Bob). Both entities now have visible reserves.',
@@ -468,7 +520,7 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
       }]
     };
 
-    pushSnapshot(env, 'Alice → Bob: $500K R2R Transfer', {
+    await pushSnapshot(env, 'Alice → Bob: $500K R2R Transfer', {
       title: 'Reserve-to-Reserve Transfer #3 → J-Block Finalized!',
       what: 'Alice sends $500K to Bob. Third TX fills mempool capacity → J-Machine broadcasts rays to ALL entities!',
       why: 'J-Machine batches transactions for efficiency. When capacity reached, it finalizes J-Block and broadcasts state updates.',
@@ -497,7 +549,7 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     console.log(`  Bob: ${Number(finalBobReserves) / 1e18} USDC`);
     console.log(`  Total: ${Number(finalHubReserves + finalAliceReserves + finalBobReserves) / 1e18} USDC`);
 
-    pushSnapshot(env, 'Final State: R2R Demo Complete', {
+    await pushSnapshot(env, 'Final State: R2R Demo Complete', {
       title: 'End State: Reserve Distribution Complete',
       what: 'Hub: $5M, Alice: $2.5M, Bob: $2.5M. Total: $10M preserved. All entities now have visible reserves.',
       why: 'This demonstrates pure on-chain R2R settlement with J-Machine batching and broadcast visualization.',

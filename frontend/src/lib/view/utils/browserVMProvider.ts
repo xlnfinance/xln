@@ -677,6 +677,118 @@ export class BrowserVMProvider {
     // TODO: Read from EntityProvider contract when implemented
     return { exists: false };
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  //                              STATE PERSISTENCE
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** Serialize full EVM state (all trie nodes) for persistence */
+  async serializeState(): Promise<{ stateRoot: string; trieData: Array<[string, string]>; nonce: string; addresses: { depository: string; entityProvider: string } }> {
+    if (!this.initialized) throw new Error('BrowserVM not initialized');
+
+    const stateRoot = await this.vm.stateManager.getStateRoot();
+
+    // Access internal trie database
+    const trie = (this.vm.stateManager as any)._trie;
+    const db = trie.database().db;
+
+    // Serialize all key-value pairs from the trie database
+    const trieData: Array<[string, string]> = [];
+    if (db instanceof Map) {
+      for (const [key, value] of db.entries()) {
+        trieData.push([
+          Buffer.from(key).toString('hex'),
+          Buffer.from(value).toString('hex'),
+        ]);
+      }
+    }
+
+    console.log(`[BrowserVM] Serialized state: ${trieData.length} trie nodes`);
+
+    return {
+      stateRoot: Buffer.from(stateRoot).toString('hex'),
+      trieData,
+      nonce: this.nonce.toString(),
+      addresses: {
+        depository: this.depositoryAddress?.toString() || '',
+        entityProvider: this.entityProviderAddress?.toString() || '',
+      },
+    };
+  }
+
+  /** Restore EVM state from serialized data (for page reload) */
+  async restoreState(data: { stateRoot: string; trieData: Array<[string, string]>; nonce: string; addresses: { depository: string; entityProvider: string } }): Promise<void> {
+    if (!this.initialized) {
+      // Need to init first to get contracts deployed structure
+      await this.init();
+    }
+
+    // Restore trie database entries
+    const trie = (this.vm.stateManager as any)._trie;
+    const db = trie.database().db;
+
+    if (db instanceof Map) {
+      db.clear();
+      for (const [keyHex, valueHex] of data.trieData) {
+        db.set(
+          hexToBytes(`0x${keyHex}`),
+          hexToBytes(`0x${valueHex}`),
+        );
+      }
+    }
+
+    // Restore state root
+    const stateRoot = hexToBytes(`0x${data.stateRoot}`);
+    await this.vm.stateManager.setStateRoot(stateRoot);
+
+    // Restore nonce
+    this.nonce = BigInt(data.nonce);
+
+    console.log(`[BrowserVM] Restored state: ${data.trieData.length} trie nodes, root ${data.stateRoot.slice(0, 16)}...`);
+  }
+
+  /** Save full EVM state to localStorage */
+  async saveToLocalStorage(key: string = 'xln-evm-state'): Promise<void> {
+    try {
+      const state = await this.serializeState();
+      const json = JSON.stringify(state);
+      localStorage.setItem(key, json);
+      console.log(`[BrowserVM] Saved state to localStorage: ${key} (${(json.length / 1024).toFixed(1)}KB)`);
+    } catch (err) {
+      console.error('[BrowserVM] Failed to save state:', err);
+      throw err;
+    }
+  }
+
+  /** Load full EVM state from localStorage */
+  async loadFromLocalStorage(key: string = 'xln-evm-state'): Promise<boolean> {
+    try {
+      const json = localStorage.getItem(key);
+      if (!json) {
+        console.log('[BrowserVM] No saved state found');
+        return false;
+      }
+
+      const data = JSON.parse(json);
+      await this.restoreState(data);
+      console.log(`[BrowserVM] Loaded state from localStorage: ${key}`);
+      return true;
+    } catch (err) {
+      console.error('[BrowserVM] Failed to load state:', err);
+      return false;
+    }
+  }
+
+  /** Clear saved state from localStorage */
+  clearLocalStorage(key: string = 'xln-evm-state'): void {
+    localStorage.removeItem(key);
+    console.log(`[BrowserVM] Cleared saved state: ${key}`);
+  }
+
+  /** Check if saved state exists */
+  hasSavedState(key: string = 'xln-evm-state'): boolean {
+    return localStorage.getItem(key) !== null;
+  }
 }
 
 // Singleton instance
