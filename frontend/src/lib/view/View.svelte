@@ -31,6 +31,7 @@
   export let networkMode: 'simnet' | 'testnet' | 'mainnet' = 'simnet'; void networkMode;
   export let embedMode: boolean = false; // When true: hide panels, show only 3D + minimal controls
   export let scenarioId: string = ''; // Auto-run scenario on load (e.g. 'ahb', 'fed-chair')
+  export let autoplay: boolean = false; // When true: auto-run scenario immediately on load
 
   let container: HTMLDivElement;
   let dockview: DockviewComponent;
@@ -140,6 +141,41 @@
       // Only use saved timeIndex when explicitly importing from URL
       localTimeIndex.set(urlImport?.state.ui?.ti ?? -1);
       localIsLive.set(true);
+
+      // AUTOPLAY: Auto-run scenario if requested
+      if (autoplay && scenarioId) {
+        console.log(`[View] 🎬 Autoplay: Running scenario "${scenarioId}"...`);
+
+        // Supported scenarios (others show error)
+        const supportedScenarios = ['ahb'];
+
+        if (!supportedScenarios.includes(scenarioId)) {
+          console.error(`[View] ❌ SCENARIO NOT IMPLEMENTED: "${scenarioId}"`);
+          console.error(`[View] 📋 Available scenarios: ${supportedScenarios.join(', ')}`);
+          console.error(`[View] 💡 To add "${scenarioId}", implement it in View.svelte autoplay section`);
+        } else if (scenarioId === 'ahb') {
+          try {
+            console.log(`[View] 📦 Calling XLN.prepopulateAHB...`);
+            await XLN.prepopulateAHB(env);
+            console.log(`[View] 📦 prepopulateAHB completed, history: ${env.history?.length || 0} frames`);
+
+            // Update stores after prepopulate
+            localEnvStore.set(env);
+            localHistoryStore.set(env.history || []);
+
+            // Start at frame 0 for playback (not live mode)
+            localTimeIndex.set(0);
+            localIsLive.set(false);
+
+            console.log(`[View] ✅ AHB scenario loaded successfully!`);
+            console.log(`[View]    Frames: ${env.history?.length || 0}`);
+            console.log(`[View]    Entities: ${env.eReplicas?.size || 0}`);
+          } catch (autoplayErr) {
+            console.error('[View] ❌ Autoplay FAILED:', autoplayErr);
+            console.error('[View] Stack:', (autoplayErr as Error).stack);
+          }
+        }
+      }
 
     } catch (err) {
       console.error('[View] ❌ Failed to initialize XLN:', err);

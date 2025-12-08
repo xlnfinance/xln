@@ -391,6 +391,15 @@ export type EntityTx =
       data: {
         hankoSignature?: string; // Optional hanko seal for the batch
       };
+    }
+  | {
+      // Extend credit to a counterparty in bilateral account
+      type: 'extendCredit';
+      data: {
+        counterpartyEntityId: string;
+        tokenId: number;
+        amount: bigint;
+      };
     };
 
 export interface AssetBalance {

@@ -2426,7 +2426,40 @@ let vrHammer: VRHammer | null = null;
       saveEntityPositions();
     }
 
-    // Create connections between entities that have accounts
+    // CRITICAL: Clear ALL connections and rebuild from current frame's accounts
+    // This ensures time-travel shows correct account bars for each frame
+    // (Connections don't need position preservation like entities do)
+    if (connections.length > 0) {
+      connections.forEach(connection => {
+        scene.remove(connection.line);
+        if (connection.line.geometry) connection.line.geometry.dispose();
+        if (connection.line.material) {
+          const mat = connection.line.material;
+          if (Array.isArray(mat)) {
+            mat.forEach(m => m.dispose());
+          } else {
+            mat.dispose();
+          }
+        }
+        if (connection.progressBars) {
+          scene.remove(connection.progressBars);
+          // Dispose progress bar group children
+          connection.progressBars.traverse((child: any) => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+              if (Array.isArray(child.material)) {
+                child.material.forEach((m: any) => m.dispose());
+              } else {
+                child.material.dispose();
+              }
+            }
+          });
+        }
+      });
+      connections = [];
+    }
+
+    // Create connections between entities that have accounts (from current frame)
     createConnections();
 
     // Create transaction flow particles (also tracks activity)
@@ -2962,6 +2995,21 @@ let vrHammer: VRHammer | null = null;
       outgoingFlows: new Map()
     };
 
+    // CRITICAL: Clear existing particles to prevent stale visuals during time-travel
+    particles.forEach(particle => {
+      scene.remove(particle.mesh);
+      if (particle.mesh.geometry) particle.mesh.geometry.dispose();
+      if (particle.mesh.material) {
+        const mat = particle.mesh.material;
+        if (Array.isArray(mat)) {
+          mat.forEach(m => m.dispose());
+        } else {
+          mat.dispose();
+        }
+      }
+    });
+    particles = [];
+
     const timeIndex = $isolatedTimeIndex;
 
     if (!($isolatedTimeIndex === -1) && $isolatedHistory && timeIndex >= 0) {
@@ -3344,27 +3392,28 @@ let vrHammer: VRHammer | null = null;
     // Get current replicas to find the account
     const currentReplicas = getTimeAwareReplicas();
 
-    // Find the replica that actually contains this account
+    // CANONICAL: Always use LEFT entity's account (smaller entityId)
+    // This ensures deterministic rendering regardless of traversal order
+    const leftId = fromId < toId ? fromId : toId;
+    const rightId = fromId < toId ? toId : fromId;
+
     let accountData: any = null;
 
-    // Read accounts THE SAME WAY as EntityPanel - key is just counterpartyId!
-    const fromReplica = [...currentReplicas.entries()]
-      .find(([key]) => key.startsWith(fromId + ':'));
+    // Try LEFT entity's replica first (canonical source)
+    const leftReplica = [...currentReplicas.entries()]
+      .find(([key]) => key.startsWith(leftId + ':'));
 
-    if (fromReplica?.[1]?.state?.accounts) {
-      // Account key is just the counterparty ID, not counterpartyId:tokenId
-      const accountKey = toId;
-      accountData = fromReplica[1].state.accounts.get(accountKey);
+    if (leftReplica?.[1]?.state?.accounts) {
+      accountData = leftReplica[1].state.accounts.get(rightId);
     }
 
-    // Try reverse direction if not found
+    // Fallback to RIGHT entity's replica only if LEFT doesn't have account
     if (!accountData) {
-      const toReplica = [...currentReplicas.entries()]
-        .find(([key]) => key.startsWith(toId + ':'));
+      const rightReplica = [...currentReplicas.entries()]
+        .find(([key]) => key.startsWith(rightId + ':'));
 
-      if (toReplica?.[1]?.state?.accounts) {
-        const reverseAccountKey = fromId;
-        accountData = toReplica[1].state.accounts.get(reverseAccountKey);
+      if (rightReplica?.[1]?.state?.accounts) {
+        accountData = rightReplica[1].state.accounts.get(leftId);
       }
     }
 
@@ -3406,7 +3455,8 @@ let vrHammer: VRHammer | null = null;
     }
 
     // Derive account data using REAL token delta
-    const derived = deriveEntry(tokenDelta, fromId < toId); // left entity is lexicographically smaller
+    // CANONICAL: Since we always read from LEFT entity, deriveDelta needs isLeft=true
+    const derived = deriveEntry(tokenDelta, true); // Always from left entity's perspective
 
     // Delegate rendering to AccountBarRenderer
     return createAccountBars(

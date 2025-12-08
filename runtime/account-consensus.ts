@@ -187,6 +187,12 @@ export async function proposeAccountFrame(
   console.log(`📊 Frame state after processing: ${finalTokenIds.length} tokens`);
   console.log(`📊 TokenIds: [${finalTokenIds.join(', ')}]`);
   console.log(`📊 Deltas: [${finalDeltas.map(d => d.toString()).join(', ')}]`);
+  console.log(`📊 FullDeltaStates:`, fullDeltaStates.map(d => ({
+    tokenId: d.tokenId,
+    collateral: d.collateral?.toString(),
+    leftCreditLimit: d.leftCreditLimit?.toString(),
+    rightCreditLimit: d.rightCreditLimit?.toString(),
+  })));
 
   // Create account frame matching the real AccountFrame interface
   const frameData = {
@@ -304,6 +310,16 @@ export async function handleAccountInput(
       // Commit using cloned state
       if (accountMachine.clonedForValidation) {
         accountMachine.deltas = accountMachine.clonedForValidation.deltas;
+
+        // Log committed deltas for debugging credit limits (PROPOSER side)
+        console.log(`💳 PROPOSER-COMMIT: Deltas after commit for ${accountMachine.counterpartyEntityId.slice(-4)}:`,
+          Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
+            tokenId,
+            collateral: delta.collateral?.toString(),
+            leftCreditLimit: delta.leftCreditLimit?.toString(),
+            rightCreditLimit: delta.rightCreditLimit?.toString(),
+          })));
+
         accountMachine.currentFrame = {
           height: accountMachine.pendingFrame.height,
           timestamp: accountMachine.pendingFrame.timestamp,
@@ -498,6 +514,17 @@ export async function handleAccountInput(
 
     // Commit frame
     accountMachine.deltas = clonedMachine.deltas;
+
+    // Log committed deltas for debugging credit limits
+    console.log(`💳 COMMIT: Deltas after commit for ${accountMachine.counterpartyEntityId.slice(-4)}:`,
+      Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
+        tokenId,
+        collateral: delta.collateral?.toString(),
+        leftCreditLimit: delta.leftCreditLimit?.toString(),
+        rightCreditLimit: delta.rightCreditLimit?.toString(),
+        ondelta: delta.ondelta?.toString(),
+        offdelta: delta.offdelta?.toString(),
+      })));
 
     // CRITICAL: Copy pendingForward for multi-hop routing
     if (clonedMachine.pendingForward) {

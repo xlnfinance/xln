@@ -317,18 +317,18 @@
                   <path id="credit-path" d="M 0 95 C 50 95, 100 150, 130 190" />
                   <path id="reserve-path" d="M 0 285 C 50 285, 100 230, 130 190" />
                 </defs>
-                <!-- Top curve from FCUAN (gold) - CREDIT -->
-                <use href="#credit-path" stroke="rgba(255,200,100,0.5)" stroke-width="2.5" fill="none" class="flow-line" />
+                <!-- Top curve from FCUAN (red) - CREDIT = risk -->
+                <use href="#credit-path" stroke="rgba(220,80,80,0.6)" stroke-width="2.5" fill="none" class="flow-line" />
                 <text class="curve-label curve-label-credit">
                   <textPath href="#credit-path" startOffset="15%">Credit</textPath>
                 </text>
-                <!-- Bottom curve from FRPAP (blue) - RESERVE -->
-                <use href="#reserve-path" stroke="rgba(100,180,255,0.5)" stroke-width="2.5" fill="none" class="flow-line" />
+                <!-- Bottom curve from FRPAP (green) - RESERVE = safety -->
+                <use href="#reserve-path" stroke="rgba(80,200,100,0.6)" stroke-width="2.5" fill="none" class="flow-line" />
                 <text class="curve-label curve-label-reserve">
                   <textPath href="#reserve-path" startOffset="15%">Reserve</textPath>
                 </text>
                 <!-- Merge point -->
-                <circle cx="130" cy="190" r="5" fill="#4fd18b" opacity="0.95">
+                <circle cx="130" cy="190" r="5" fill="#6b9fff" opacity="0.95">
                   <animate attributeName="r" values="4;6;4" dur="1.2s" repeatCount="indefinite"/>
                 </circle>
               </svg>
@@ -2197,11 +2197,11 @@
   }
 
   .curve-label-credit {
-    fill: rgba(255, 200, 100, 0.8);
+    fill: rgba(220, 80, 80, 0.9);
   }
 
   .curve-label-reserve {
-    fill: rgba(100, 180, 255, 0.8);
+    fill: rgba(80, 200, 100, 0.9);
   }
 
   .evo-merge-flow {
@@ -2216,7 +2216,7 @@
   .merge-equals {
     font-size: 1.4rem;
     font-weight: 300;
-    color: #4fd18b;
+    color: #6b9fff;
     margin-right: 4px;
   }
 
@@ -2375,10 +2375,10 @@
   .merge-arrow {
     font-size: 1.5rem;
     font-weight: 700;
-    color: #4fd18b;
+    color: #6b9fff;
     opacity: 0;
     animation: arrow-flow 1.5s ease-in-out infinite;
-    text-shadow: 0 0 10px rgba(79, 209, 139, 0.8);
+    text-shadow: 0 0 10px rgba(107, 159, 255, 0.8);
   }
 
   .merge-arrow:nth-child(1) { animation-delay: 0s; }
@@ -2427,10 +2427,10 @@
     justify-content: center;
   }
 
-  /* FCUAN: Riding wobbly, then crashes FORWARD (front wheel hits wall) */
+  /* FCUAN: Riding wobbly, then crashes FORWARD (back wheel stays on ground) */
   .evo-bike-wobble {
     animation: bike-crash 6s ease-in-out infinite;
-    transform-origin: bottom right; /* Front wheel = pivot (hits wall) */
+    transform-origin: bottom left; /* Back wheel = pivot (stays grounded) */
   }
 
   @keyframes bike-crash {
@@ -2444,19 +2444,19 @@
     60% { transform: rotate(1deg); }
     70% { transform: rotate(-1.5deg); }
     80% { transform: rotate(1deg); }
-    /* CRASH FORWARD - tips over handlebars (83-100%) */
+    /* CRASH FORWARD - tips clockwise (front wheel pivot) */
     83% { transform: rotate(3deg); }
-    86% { transform: rotate(-15deg); }
-    89% { transform: rotate(-35deg); }
-    91%, 94% { transform: rotate(-40deg); }
-    97% { transform: rotate(-15deg); }
+    86% { transform: rotate(10deg); }
+    89% { transform: rotate(16deg); }
+    91%, 94% { transform: rotate(20deg); } /* Max tip forward */
+    97% { transform: rotate(8deg); }
     100% { transform: rotate(1deg); }
   }
 
   .crisis-badge {
     position: absolute;
     bottom: 0;
-    right: 10%;
+    right: 2%;
     background: rgba(220, 30, 30, 0.95);
     color: white;
     font-size: 0.7rem;

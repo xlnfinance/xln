@@ -13,15 +13,22 @@ export function handleSetCreditLimit(
   const { tokenId, amount, side } = accountTx.data;
   const events: string[] = [];
 
-  // Get delta - must exist before setting credit limit
-  const delta = accountMachine.deltas.get(tokenId);
+  // Get or create delta - credit extension can happen before collateral deposit
+  let delta = accountMachine.deltas.get(tokenId);
   if (!delta) {
-    console.error(`❌ Delta for token ${tokenId} not found - cannot set credit limit`);
-    return {
-      success: false,
-      error: `Delta for token ${tokenId} not found. Use add_delta first.`,
-      events,
+    console.log(`💳 Creating delta for token ${tokenId} (credit extension without collateral)`);
+    delta = {
+      tokenId,
+      collateral: 0n,
+      ondelta: 0n,
+      offdelta: 0n,
+      leftCreditLimit: 0n,
+      rightCreditLimit: 0n,
+      leftAllowance: 0n,
+      rightAllowance: 0n,
     };
+    accountMachine.deltas.set(tokenId, delta);
+    events.push(`📊 Created delta for token ${tokenId}`);
   }
 
   // DETERMINISTIC: side is canonical ('left' or 'right'), not perspective-dependent

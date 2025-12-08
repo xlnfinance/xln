@@ -118,6 +118,59 @@ async function syncReservesFromBrowserVM(
   console.log(`[AHB] Synced reserves for ${entityName || entityId.slice(0, 10)}: ${Number(reserves) / 1e18} USDC`);
 }
 
+/**
+ * Execute R2C (Reserve-to-Collateral) - Full flow for simnet:
+ * 1. Call BrowserVM.prefundAccount (on-chain transfer)
+ * 2. Sync reserves from BrowserVM
+ * 3. Update account machine's delta.collateral
+ */
+async function executeR2C(
+  env: Env,
+  entityId: string,
+  counterpartyId: string,
+  tokenId: number,
+  amount: bigint,
+  browserVM: any,
+  entityName?: string
+): Promise<void> {
+  console.log(`[AHB] Executing R2C: ${entityName || entityId.slice(0, 10)} → ${counterpartyId.slice(0, 10)}, amount=${Number(amount) / 1e18}`);
+
+  // Step 1: On-chain transfer (reserve → collateral)
+  await browserVM.prefundAccount(entityId, counterpartyId, tokenId, amount);
+  console.log(`[AHB] ✅ BrowserVM.prefundAccount completed`);
+
+  // Step 2: Sync reserves
+  await syncReservesFromBrowserVM(env, entityId, browserVM, entityName);
+
+  // Step 3: Update account machine's delta.collateral
+  const [, replica] = findReplica(env, entityId);
+  const accountMachine = replica.state.accounts?.get(counterpartyId);
+
+  if (accountMachine) {
+    const delta = accountMachine.deltas?.get(tokenId);
+    if (delta) {
+      delta.collateral = (delta.collateral || 0n) + amount;
+      console.log(`[AHB] ✅ Updated account delta.collateral: ${Number(delta.collateral) / 1e18}`);
+    } else {
+      console.warn(`[AHB] ⚠️ No delta for token ${tokenId} in account`);
+    }
+  } else {
+    console.warn(`[AHB] ⚠️ No account machine for ${counterpartyId.slice(0, 10)}`);
+  }
+
+  // Also update counterparty's view of the account (bilateral)
+  const [, counterpartyReplica] = findReplica(env, counterpartyId);
+  const counterpartyAccountMachine = counterpartyReplica.state.accounts?.get(entityId);
+
+  if (counterpartyAccountMachine) {
+    const counterpartyDelta = counterpartyAccountMachine.deltas?.get(tokenId);
+    if (counterpartyDelta) {
+      counterpartyDelta.collateral = (counterpartyDelta.collateral || 0n) + amount;
+      console.log(`[AHB] ✅ Updated counterparty account delta.collateral: ${Number(counterpartyDelta.collateral) / 1e18}`);
+    }
+  }
+}
+
 interface FrameSubtitle {
   title: string;           // Short header (e.g., "Reserve-to-Reserve Transfer")
   what: string;            // What's happening technically
@@ -128,14 +181,52 @@ interface FrameSubtitle {
 
 let pushSnapshotCount = 0;
 
+// System solvency check - inline for self-contained testing
+function checkSolvency(env: Env, expected: bigint, label: string): void {
+  let reserves = 0n;
+  let collateral = 0n;
+
+  for (const [_, replica] of env.eReplicas) {
+    for (const [_, amount] of replica.state.reserves) {
+      reserves += amount;
+    }
+    for (const [counterpartyId, account] of replica.state.accounts) {
+      if (replica.state.entityId < counterpartyId) {
+        for (const [_, delta] of account.deltas) {
+          collateral += delta.collateral;
+        }
+      }
+    }
+  }
+
+  const total = reserves + collateral;
+  if (total !== expected) {
+    console.error(`❌ [${label}] SOLVENCY FAIL: ${total} !== ${expected}`);
+    console.error(`   Reserves: ${reserves}, Collateral: ${collateral}`);
+    throw new Error(`SOLVENCY VIOLATION at "${label}": got ${total}, expected ${expected}`);
+  }
+  console.log(`✅ [${label}] Solvency OK: ${total} (R:${reserves} + C:${collateral})`);
+}
+
+interface SnapshotOptions {
+  expectedSolvency?: bigint;      // Self-test: throws if solvency doesn't match
+  entityInputs?: EntityInput[];   // Entity inputs for J-Machine visualization
+}
+
 async function pushSnapshot(
   env: Env,
   description: string,
   subtitle: FrameSubtitle,
-  entityInputs?: EntityInput[]
+  options: SnapshotOptions = {}
 ) {
   pushSnapshotCount++;
   console.log(`[pushSnapshot #${pushSnapshotCount}] Called for: "${description}"`);
+
+  // SELF-TEST: Verify solvency at every frame
+  if (options.expectedSolvency !== undefined) {
+    checkSolvency(env, options.expectedSolvency, `Frame ${pushSnapshotCount}`);
+  }
+
   const gossipSnapshot = cloneProfilesForSnapshot(env);
 
   // CRITICAL: Capture fresh stateRoot from BrowserVM for time-travel
@@ -209,7 +300,7 @@ async function pushSnapshot(
     jReplicas: jReplicasSnapshot,
     runtimeInput: {
       runtimeTxs: [],
-      entityInputs: entityInputs || [], // Include entity inputs for J-Machine visualization!
+      entityInputs: options.entityInputs || [],
     },
     runtimeOutputs: [],
     description,
@@ -296,6 +387,9 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     console.log('✅ AHB Xlnomy created (J-Machine visible in 3D)');
 
     // Push Frame 0: Clean slate with J-Machine only (no entities yet)
+    // Define total system solvency - $10M minted to Hub
+    const TOTAL_SOLVENCY = usd(10_000_000);
+
     await pushSnapshot(env, 'Frame 0: Clean Slate - J-Machine Ready', {
       title: 'Jurisdiction Machine Deployed',
       what: 'The J-Machine (Jurisdiction Machine) is deployed on-chain. It represents the EVM smart contracts (Depository.sol, EntityProvider.sol) that will process settlements.',
@@ -306,7 +400,7 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
         'Entities: 0 (none created yet)',
         'Reserves: Empty',
       ]
-    });
+    }, { expectedSolvency: 0n }); // Frame 0: No tokens yet
 
     // ============================================================================
     // STEP 0b: Create entities
@@ -314,11 +408,11 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     console.log('\n📦 Creating entities: Alice, Hub, Bob...');
 
     // AHB Triangle Layout - entities positioned relative to J-Machine
-    // Layout: J-machine at y=0, entities in triangle below
+    // Layout: J-machine at y=0, entities in compact triangle below
     const AHB_POSITIONS = {
-      Alice: { x: -50, y: -100, z: 0 },  // Bottom-left
-      Hub:   { x: 0, y: -50, z: 0 },     // Middle layer
-      Bob:   { x: 50, y: -100, z: 0 },   // Bottom-right
+      Alice: { x: -20, y: -40, z: 0 },  // Bottom-left (closer to hub)
+      Hub:   { x: 0, y: -20, z: 0 },     // Middle layer
+      Bob:   { x: 20, y: -40, z: 0 },   // Bottom-right (closer to hub)
     };
 
     const entityNames = ['Alice', 'Hub', 'Bob'] as const;
@@ -377,7 +471,7 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
         'Reserves: All $0 (grey - unfunded)',
         'Accounts: None opened yet',
       ]
-    });
+    }, { expectedSolvency: 0n }); // No tokens minted yet
 
     // ============================================================================
     // STEP 1: Initial State - Hub funded with $10M USDC via REAL BrowserVM tx
@@ -402,23 +496,14 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
         'Alice Reserve: $0 (grey - no funds)',
         'Bob Reserve: $0 (grey - no funds)',
       ]
-    });
+    }, { expectedSolvency: TOTAL_SOLVENCY }); // $10M minted to Hub
 
     // ============================================================================
     // STEP 2: Hub R2R → Alice ($3M USDC) - REAL TX goes to J-Machine mempool
     // ============================================================================
     console.log('\n🔄 FRAME 2: Hub → Alice Reserve Transfer ($3M) - REAL BrowserVM TX');
 
-    // Open accounts first
-    await processUntilEmpty(env, [{
-      entityId: hub.id,
-      signerId: hub.signer,
-      entityTxs: [{
-        type: 'openAccount',
-        data: { targetEntityId: alice.id }
-      }]
-    }]);
-
+    // NOTE: R2R doesn't require bilateral account - pure reserve transfer
     // REAL BrowserVM R2R transaction
     await browserVM.reserveToReserve(hub.id, alice.id, USDC_TOKEN_ID, usd(3_000_000));
 
@@ -449,22 +534,14 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
         'Alice Reserve: $3M (+$3M) - now green!',
         'J-Machine: 1 tx in mempool',
       ]
-    }, [r2rTx1]);
+    }, { entityInputs: [r2rTx1], expectedSolvency: TOTAL_SOLVENCY });
 
     // ============================================================================
     // STEP 3: Hub R2R → Bob ($2M USDC) - Second TX to mempool
     // ============================================================================
     console.log('\n🔄 FRAME 3: Hub → Bob Reserve Transfer ($2M) - REAL BrowserVM TX');
 
-    await processUntilEmpty(env, [{
-      entityId: hub.id,
-      signerId: hub.signer,
-      entityTxs: [{
-        type: 'openAccount',
-        data: { targetEntityId: bob.id }
-      }]
-    }]);
-
+    // NOTE: R2R doesn't require bilateral account - pure reserve transfer
     // REAL BrowserVM R2R transaction
     await browserVM.reserveToReserve(hub.id, bob.id, USDC_TOKEN_ID, usd(2_000_000));
 
@@ -494,7 +571,7 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
         'Bob Reserve: $2M (+$2M) - now green!',
         'J-Machine: 2 txs in mempool',
       ]
-    }, [r2rTx2]);
+    }, { entityInputs: [r2rTx2], expectedSolvency: TOTAL_SOLVENCY });
 
     // ============================================================================
     // STEP 4: Alice R2R → Bob ($500K) - Third TX triggers broadcast!
@@ -531,7 +608,7 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
         'J-Machine: BROADCAST! 🔥',
         'J-Block finalized with 3 txs',
       ]
-    }, [r2rTx3]);
+    }, { entityInputs: [r2rTx3], expectedSolvency: TOTAL_SOLVENCY });
 
     // ============================================================================
     // STEP 5: Final State - All reserves settled (verify from BrowserVM)
@@ -549,23 +626,182 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     console.log(`  Bob: ${Number(finalBobReserves) / 1e18} USDC`);
     console.log(`  Total: ${Number(finalHubReserves + finalAliceReserves + finalBobReserves) / 1e18} USDC`);
 
-    await pushSnapshot(env, 'Final State: R2R Demo Complete', {
-      title: 'End State: Reserve Distribution Complete',
+    await pushSnapshot(env, 'R2R Complete: All reserves distributed', {
+      title: 'Phase 1 Complete: Reserve Distribution',
       what: 'Hub: $5M, Alice: $2.5M, Bob: $2.5M. Total: $10M preserved. All entities now have visible reserves.',
-      why: 'This demonstrates pure on-chain R2R settlement with J-Machine batching and broadcast visualization.',
+      why: 'R2R transfers are pure on-chain settlement. Now we move to Phase 2: Bilateral Accounts.',
       tradfiParallel: 'Like Fedwire settlement: instant, final, auditable transfers between reserve accounts',
       keyMetrics: [
-        'Hub: $5M reserve (green)',
-        'Alice: $2.5M reserve (green)',
-        'Bob: $2.5M reserve (green)',
-        'Total system reserves: $10M (conserved)',
-        'J-Blocks finalized: 1',
+        'Hub: $5M reserve',
+        'Alice: $2.5M reserve',
+        'Bob: $2.5M reserve',
+        'Next: Open bilateral accounts',
       ]
-    });
+    }, { expectedSolvency: TOTAL_SOLVENCY });
+
+    // ============================================================================
+    // PHASE 2: BILATERAL ACCOUNTS
+    // ============================================================================
+
+    // ============================================================================
+    // STEP 6: Open Alice-Hub Bilateral Account
+    // ============================================================================
+    console.log('\n🔗 FRAME 6: Open Alice ↔ Hub Bilateral Account');
+
+    await processUntilEmpty(env, [{
+      entityId: alice.id,
+      signerId: alice.signer,
+      entityTxs: [{
+        type: 'openAccount',
+        data: { targetEntityId: hub.id }
+      }]
+    }]);
+
+    await pushSnapshot(env, 'Alice ↔ Hub: Account Created', {
+      title: 'Bilateral Account: Alice ↔ Hub (A-H)',
+      what: 'Alice opens bilateral account with Hub. Creates off-chain channel for instant payments.',
+      why: 'Bilateral accounts enable unlimited off-chain transactions with final on-chain settlement.',
+      tradfiParallel: 'Like opening a margin account: enables trading before settlement.',
+      keyMetrics: [
+        'Account A-H: CREATED',
+        'Collateral: $0 (empty)',
+        'Credit limits: Default',
+        'Ready for R2C prefunding',
+      ]
+    }, { expectedSolvency: TOTAL_SOLVENCY });
+
+    // ============================================================================
+    // STEP 7: Open Bob-Hub Bilateral Account
+    // ============================================================================
+    console.log('\n🔗 FRAME 7: Open Bob ↔ Hub Bilateral Account');
+
+    await processUntilEmpty(env, [{
+      entityId: bob.id,
+      signerId: bob.signer,
+      entityTxs: [{
+        type: 'openAccount',
+        data: { targetEntityId: hub.id }
+      }]
+    }]);
+
+    await pushSnapshot(env, 'Bob ↔ Hub: Account Created', {
+      title: 'Bilateral Account: Bob ↔ Hub (B-H)',
+      what: 'Bob opens bilateral account with Hub. Now both spoke entities connected to hub.',
+      why: 'Star topology: Alice and Bob both connect to Hub. Hub routes payments between them.',
+      tradfiParallel: 'Like correspondent banking: small banks connect to large banks for interbank settlement.',
+      keyMetrics: [
+        'Account B-H: CREATED',
+        'Topology: Alice ↔ Hub ↔ Bob',
+        'Ready for credit extension',
+      ]
+    }, { expectedSolvency: TOTAL_SOLVENCY });
+
+    // ============================================================================
+    // STEP 8: Alice R2C - Reserve to Collateral (full flow)
+    // ============================================================================
+    console.log('\n💰 FRAME 8: Alice R2C - Reserve → Collateral ($500K)');
+
+    // 20% of Alice's $2.5M reserve = $500K
+    const aliceCollateralAmount = usd(500_000);
+
+    // Execute full R2C flow:
+    // 1. On-chain transfer via BrowserVM.prefundAccount
+    // 2. Sync reserves
+    // 3. Update account machine delta.collateral in BOTH entities
+    await executeR2C(env, alice.id, hub.id, USDC_TOKEN_ID, aliceCollateralAmount, browserVM, alice.name);
+
+    await pushSnapshot(env, 'Alice R2C: $500K Reserve → Collateral', {
+      title: 'Reserve-to-Collateral (R2C): Alice → A-H Account',
+      what: 'Alice moves $500K from reserve to A-H account collateral. Settlement sent to J-Machine.',
+      why: 'Collateral enables off-chain payments. Alice can now send up to $500K to Hub instantly.',
+      tradfiParallel: 'Like posting margin: Alice locks funds in the bilateral account as security.',
+      keyMetrics: [
+        'Alice Reserve: $2.5M → $2M (-$500K)',
+        'A-H Collateral: $0 → $500K',
+        'Alice outCapacity: $500K',
+        'Settlement broadcast to J-Machine',
+      ]
+    }, { expectedSolvency: TOTAL_SOLVENCY }); // R2C moves funds, doesn't create/destroy
+
+    // ============================================================================
+    // STEP 9: Bob Credit Extension - set_credit_limit
+    // ============================================================================
+    console.log('\n💳 FRAME 9: Bob Credit Extension ($500K)');
+
+    // Bob extends $500K credit to Hub in B-H account
+    // This is purely off-chain - no collateral from Bob
+    const bobCreditAmount = usd(500_000);
+
+    await processUntilEmpty(env, [{
+      entityId: bob.id,
+      signerId: bob.signer,
+      entityTxs: [{
+        type: 'extendCredit',
+        data: {
+          counterpartyEntityId: hub.id,
+          tokenId: USDC_TOKEN_ID,
+          amount: bobCreditAmount,
+        }
+      }]
+    }]);
+
+    await pushSnapshot(env, 'Bob Credit Extension: $500K', {
+      title: 'Credit Extension: Bob → Hub',
+      what: 'Bob extends $500K credit limit to Hub in B-H account. Purely off-chain, no collateral.',
+      why: 'Credit extension allows Hub to owe Bob. Bob trusts Hub up to $500K.',
+      tradfiParallel: 'Like a credit line: Bob says "Hub can owe me up to $500K".',
+      keyMetrics: [
+        'B-H Credit Limit: $500K',
+        'Bob collateral: $0 (receiver)',
+        'Hub can owe Bob: $500K max',
+        'Ready for routed payment!',
+      ]
+    }, { expectedSolvency: TOTAL_SOLVENCY }); // Credit extension is off-chain, no on-chain impact
+
+    // ============================================================================
+    // STEP 10: Off-Chain Payment Alice → Hub → Bob
+    // ============================================================================
+    console.log('\n⚡ FRAME 10: Off-Chain Payment A → H → B ($100K)');
+
+    // 20% of $500K capacity = $100K
+    const paymentAmount = usd(100_000);
+
+    // Direct payment from Alice through Hub to Bob
+    await processUntilEmpty(env, [{
+      entityId: alice.id,
+      signerId: alice.signer,
+      entityTxs: [{
+        type: 'directPayment',
+        data: {
+          targetEntityId: bob.id,
+          tokenId: USDC_TOKEN_ID,
+          amount: paymentAmount,
+          route: [alice.id, hub.id, bob.id], // Route: Alice → Hub → Bob
+          description: 'First off-chain payment!'
+        }
+      }]
+    }]);
+
+    await pushSnapshot(env, 'Off-Chain Payment: Alice → Hub → Bob $100K', {
+      title: '⚡ First Off-Chain Payment: A → H → B',
+      what: 'Alice sends $100K to Bob via Hub. Payment propagates: A-H offdelta ↓, H-B offdelta ↑.',
+      why: 'This is the magic: instant, zero-gas payment. Only final state settles on-chain.',
+      tradfiParallel: 'Like internal book transfers: instant between accounts at same bank.',
+      keyMetrics: [
+        'Payment: $100K',
+        'A-H: Alice owes Hub more',
+        'H-B: Hub owes Bob more',
+        'On-chain cost: $0',
+        'Latency: ~300ms (3 frames)',
+      ]
+    }, { expectedSolvency: TOTAL_SOLVENCY }); // Off-chain payment: pure netting, no solvency change
 
     console.log('\n=====================================');
-    console.log('✅ AHB Demo Complete (REAL BrowserVM transactions)!');
-    console.log('6 frames captured for time machine playback');
+    console.log('✅ AHB Demo Complete (Full Flow)!');
+    console.log('11 frames captured for time machine playback');
+    console.log('Phase 1: R2R reserve distribution');
+    console.log('Phase 2: Bilateral accounts + R2C + credit');
+    console.log('Phase 3: First off-chain routed payment');
     console.log('Use arrow keys to step through the demo');
     console.log('=====================================\n');
     console.log(`[AHB] FINAL: Total snapshots pushed: ${pushSnapshotCount}`);
