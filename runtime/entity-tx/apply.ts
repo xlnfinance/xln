@@ -6,7 +6,6 @@ import { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput } f
 import { DEBUG, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { buildEntityProfile } from '../gossip-helper';
-import { getDefaultCreditLimit } from '../account-utils';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import { handleAccountInput } from './handlers/account';
 import { handleJEvent } from './j-events';
@@ -216,8 +215,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           ackedTransitions: 0,
           deltas: initialDeltas,
           globalCreditLimits: {
-            ownLimit: getDefaultCreditLimit(1), // We extend 1M USDC credit to counterparty (token 1 = USDC)
-            peerLimit: getDefaultCreditLimit(1), // Counterparty extends same USDC credit to us
+            ownLimit: 0n, // Credit starts at 0 - must be explicitly extended via set_credit_limit
+            peerLimit: 0n, // Credit starts at 0 - must be explicitly extended via set_credit_limit
           },
           // Frame-based consensus fields
           currentHeight: 0,
@@ -252,26 +251,16 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Token 1 = USDC
       const usdcTokenId = 1;
-      const defaultCreditLimit = getDefaultCreditLimit(1); // 1M USDC (token 1)
-
-      // Determine canonical side (left/right) - DETERMINISTIC
-      const isLeftEntity = entityState.entityId < entityTx.data.targetEntityId;
-      const ourSide: 'left' | 'right' = isLeftEntity ? 'left' : 'right';
-
       // Add transactions to mempool - will be batched into frame #1 on next tick
+      // NOTE: Only add_delta is queued. Credit limits are 0 by default - must be explicitly set
       localAccount.mempool.push({
         type: 'add_delta',
         data: { tokenId: usdcTokenId }
       });
 
-      localAccount.mempool.push({
-        type: 'set_credit_limit',
-        data: { tokenId: usdcTokenId, amount: defaultCreditLimit, side: ourSide }
-      });
-
-      console.log(`📝 Queued 2 transactions to mempool (total: ${localAccount.mempool.length})`);
+      console.log(`📝 Queued add_delta to mempool (total: ${localAccount.mempool.length})`);
       console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms) via AUTO-PROPOSE`);
-      console.log(`   Transactions: [add_delta, set_credit_limit(side=${ourSide}, amount=1M)]`);
+      console.log(`   Transactions: [add_delta] - credit limits start at 0, must be explicitly set`);
 
       // Add success message to chat
       addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(entityTx.data.targetEntityId)}`);
@@ -413,6 +402,54 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     if (entityTx.type === 'j_broadcast') {
       const { handleJBroadcast } = await import('./handlers/j-broadcast');
       return await handleJBroadcast(entityState, entityTx);
+    }
+
+    if (entityTx.type === 'extendCredit') {
+      console.log(`💳 EXTEND-CREDIT: ${entityState.entityId.slice(-4)} extending credit to ${entityTx.data.counterpartyEntityId.slice(-4)}`);
+
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const { counterpartyEntityId, tokenId, amount } = entityTx.data;
+
+      // Get account machine
+      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      if (!accountMachine) {
+        console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for credit extension`);
+        return { newState: entityState, outputs: [] };
+      }
+
+      // Determine canonical side (left/right)
+      const isLeftEntity = entityState.entityId < counterpartyEntityId;
+      const side = isLeftEntity ? 'left' : 'right';
+
+      // Create set_credit_limit account transaction
+      const accountTx: AccountTx = {
+        type: 'set_credit_limit',
+        data: {
+          tokenId,
+          amount,
+          side: side as 'left' | 'right',
+        },
+      };
+
+      // Add to account mempool
+      accountMachine.mempool.push(accountTx);
+      console.log(`💳 Added set_credit_limit to mempool for account with ${counterpartyEntityId.slice(-4)}`);
+      console.log(`💳 We are ${side} entity, extending credit of ${amount} for token ${tokenId}`);
+
+      addMessage(newState, `💳 Extended credit of ${amount} to ${counterpartyEntityId.slice(-4)}`);
+
+      // Trigger processing (same pattern as directPayment)
+      const firstValidator = entityState.config.validators[0];
+      if (firstValidator) {
+        outputs.push({
+          entityId: entityState.entityId,
+          signerId: firstValidator,
+          entityTxs: [] // Empty - triggers processing
+        });
+      }
+
+      return { newState, outputs };
     }
 
     if (entityTx.type === 'requestWithdrawal') {

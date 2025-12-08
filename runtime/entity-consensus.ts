@@ -43,13 +43,11 @@ const validateEntityInput = (input: EntityInput): boolean => {
           log.error(`❌ Invalid transaction: ${safeStringify(tx)}`);
           return false;
         }
-        if (
-          typeof tx.type !== 'string' ||
-          !['chat', 'propose', 'vote', 'profile-update', 'j_event', 'accountInput', 'openAccount', 'directPayment'].includes(tx.type)
-        ) {
-          log.error(`❌ Invalid transaction type: ${tx.type}`);
+        if (typeof tx.type !== 'string') {
+          log.error(`❌ Transaction type must be string: ${typeof tx.type}`);
           return false;
         }
+        // No whitelist - trust the type system
       }
     }
 
@@ -697,6 +695,20 @@ export const applyEntityFrame = async (
     currentEntityState = newState;
     allOutputs.push(...outputs);
 
+    // Debug: Log all account mempools after each tx
+    if (entityTx.type === 'extendCredit') {
+      console.log(`💳 POST-EXTEND-CREDIT: Checking all account mempools:`);
+      for (const [cpId, acctMachine] of currentEntityState.accounts) {
+        console.log(`💳   Account with ${cpId.slice(0,10)}: mempool=${acctMachine.mempool.length}, pendingFrame=${acctMachine.pendingFrame ? `height=${acctMachine.pendingFrame.height}` : 'none'}, currentHeight=${acctMachine.currentHeight}`);
+        if (acctMachine.mempool.length > 0) {
+          console.log(`💳   Mempool txs:`, acctMachine.mempool.map(tx => tx.type));
+        }
+        if (acctMachine.pendingFrame) {
+          console.log(`💳   ⚠️ BLOCKING: pendingFrame exists - no new proposals until ACKed!`);
+        }
+      }
+    }
+
     // Track which accounts need proposals based on transaction type
     if (entityTx.type === 'accountInput' && entityTx.data) {
       const fromEntity = entityTx.data.fromEntityId;
@@ -752,6 +764,16 @@ export const applyEntityFrame = async (
           proposableAccounts.add(targetEntity);
           console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (new account opened)`);
         }
+      }
+    } else if (entityTx.type === 'extendCredit' && entityTx.data) {
+      // Credit extension - mark account for proposal
+      const counterpartyId = entityTx.data.counterpartyEntityId;
+      const accountMachine = currentEntityState.accounts.get(counterpartyId);
+      console.log(`💳 EXTEND-CREDIT: Checking account ${counterpartyId.slice(0,10)} for proposal`);
+      console.log(`💳 EXTEND-CREDIT: accountMachine exists: ${!!accountMachine}, mempool: ${accountMachine?.mempool?.length || 0}`);
+      if (accountMachine && accountMachine.mempool.length > 0) {
+        proposableAccounts.add(counterpartyId);
+        console.log(`💳 ✅ Added ${counterpartyId.slice(0,10)} to proposableAccounts (credit extension)`);
       }
     }
   }

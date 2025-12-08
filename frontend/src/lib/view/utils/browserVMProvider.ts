@@ -345,8 +345,8 @@ export class BrowserVMProvider {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
     // Use ethers Interface for ABI encoding (same as mainnet)
-    // Note: prefundAccount(bytes32 counterpartyEntity, uint tokenId, uint amount)
-    const callData = this.depositoryInterface.encodeFunctionData('prefundAccount', [counterpartyId, tokenId, amount]);
+    // Note: prefundAccount(bytes32 fundingEntity, bytes32 counterpartyEntity, uint tokenId, uint amount)
+    const callData = this.depositoryInterface.encodeFunctionData('prefundAccount', [entityId, counterpartyId, tokenId, amount]);
 
     const currentNonce = await this.getCurrentNonce();
     const tx = createLegacyTx({

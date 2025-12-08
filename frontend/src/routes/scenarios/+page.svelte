@@ -133,7 +133,7 @@
         <div class="iframe-container">
           <iframe
             bind:this={iframeRefs[scenario.id]}
-            src="/view?embed=1&scenario={scenario.id}"
+            src="/view?embed=1&scenario={scenario.id}&autoplay=1"
             title={scenario.title}
             on:load={() => handleIframeLoad(scenario, iframeRefs[scenario.id])}
             allow="accelerometer; autoplay; encrypted-media; gyroscope"

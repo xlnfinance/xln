@@ -1,7 +1,6 @@
 import { AccountInput, AccountTx, EntityState, Env, EntityInput } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages } from '../../state-helpers';
-import { getDefaultCreditLimit } from '../../account-utils';
 
 export async function handleAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
   console.log(`🚀 APPLY accountInput: ${input.fromEntityId.slice(-4)} → ${input.toEntityId.slice(-4)}`);
@@ -37,8 +36,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       ackedTransitions: 0,
       deltas: initialDeltas,
       globalCreditLimits: {
-        ownLimit: getDefaultCreditLimit(1), // Token 1 = USDC (was incorrectly token 2)
-        peerLimit: getDefaultCreditLimit(1),
+        ownLimit: 0n, // Credit starts at 0 - must be explicitly extended
+        peerLimit: 0n, // Credit starts at 0 - must be explicitly extended
       },
       currentHeight: 0,
       pendingSignatures: [],
@@ -68,31 +67,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     throw new Error(`CRITICAL: AccountMachine creation failed for ${input.fromEntityId}`);
   }
 
-  // Auto-queue our credit limit when we receive opening frame from new account
-  // Frame #1 from opener contains: [add_delta, set_credit_limit(their_side)]
-  // We respond with frame #2: [set_credit_limit(our_side)] batched with ACK
-  if (isNewAccount && input.newAccountFrame) {
-    const hasAddDelta = input.newAccountFrame.accountTxs.some(tx => tx.type === 'add_delta');
-
-    if (hasAddDelta) {
-      const usdcTokenId = 1;
-      const defaultCreditLimit = getDefaultCreditLimit(1); // 1M USDC (token 1)
-
-      console.log(`💳 NEW-ACCOUNT: Received opening frame, queueing our credit limit`);
-
-      // Determine canonical side - DETERMINISTIC
-      const isLeftEntity = state.entityId < input.fromEntityId;
-      const ourSide: 'left' | 'right' = isLeftEntity ? 'left' : 'right';
-
-      // Queue our credit limit - will be sent with ACK (Channel.ts pattern)
-      accountMachine.mempool.push({
-        type: 'set_credit_limit',
-        data: { tokenId: usdcTokenId, amount: defaultCreditLimit, side: ourSide }
-      });
-
-      console.log(`📝 Queued set_credit_limit(side=${ourSide}, 1M) - will batch with ACK`);
-    }
-  }
+  // NOTE: Credit limits start at 0 - no auto-credit on account opening
+  // Credit must be explicitly extended via set_credit_limit transaction
 
   // CHANNEL.TS PATTERN: Process frame-level consensus ONLY
   if (input.height || input.newAccountFrame) {

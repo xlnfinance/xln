@@ -16,7 +16,8 @@ export function isLeft(myEntityId: string, counterpartyEntityId: string): boolea
   return myEntityId < counterpartyEntityId;
 }
 
-const BASE_CREDIT_LIMIT = 1_000_000n;
+// CRITICAL: Default credit is 0 - credit must be explicitly extended via set_credit_limit
+const BASE_CREDIT_LIMIT = 0n;
 
 /**
  * Derive account balance information for a specific token

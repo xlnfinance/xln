@@ -890,6 +890,63 @@ const getSnapshot = (index: number) => {
 };
 const getCurrentHistoryIndex = () => (env.history || []).length - 1;
 
+// === SYSTEM SOLVENCY CHECK ===
+// Total tokens in system: reserves + collateral must equal minted supply
+interface Solvency {
+  reserves: bigint;
+  collateral: bigint;
+  total: bigint;
+  byToken: Map<number, { reserves: bigint; collateral: bigint; total: bigint }>;
+}
+
+const calculateSolvency = (snapshot?: Env): Solvency => {
+  const targetEnv = snapshot || env;
+  const byToken = new Map<number, { reserves: bigint; collateral: bigint; total: bigint }>();
+
+  let reserves = 0n;
+  let collateral = 0n;
+
+  for (const [_replicaKey, replica] of targetEnv.eReplicas) {
+    // Sum reserves
+    for (const [tokenId, amount] of replica.state.reserves) {
+      reserves += amount;
+      const existing = byToken.get(tokenId) || { reserves: 0n, collateral: 0n, total: 0n };
+      existing.reserves += amount;
+      existing.total = existing.reserves + existing.collateral;
+      byToken.set(tokenId, existing);
+    }
+
+    // Sum collateral (left entity only to avoid double-counting)
+    for (const [counterpartyId, account] of replica.state.accounts) {
+      if (replica.state.entityId < counterpartyId) {
+        for (const [tokenId, delta] of account.deltas) {
+          collateral += delta.collateral;
+          const existing = byToken.get(tokenId) || { reserves: 0n, collateral: 0n, total: 0n };
+          existing.collateral += delta.collateral;
+          existing.total = existing.reserves + existing.collateral;
+          byToken.set(tokenId, existing);
+        }
+      }
+    }
+  }
+
+  return { reserves, collateral, total: reserves + collateral, byToken };
+};
+
+const verifySolvency = (expected?: bigint, label?: string): boolean => {
+  const s = calculateSolvency();
+  const prefix = label ? `[${label}] ` : '';
+
+  if (expected !== undefined && s.total !== expected) {
+    console.error(`❌ ${prefix}SOLVENCY VIOLATION: Expected ${expected}, got ${s.total}`);
+    console.error(`   Reserves: ${s.reserves}, Collateral: ${s.collateral}`);
+    throw new Error(`Solvency check failed: ${s.total} !== ${expected}`);
+  }
+
+  console.log(`✅ ${prefix}Solvency: ${s.total} (R:${s.reserves} + C:${s.collateral})`);
+  return true;
+};
+
 // Server-specific clearDatabase that also resets history
 const clearDatabaseAndHistory = async () => {
   console.log('🗑️ Clearing database and resetting runtime history...');
@@ -1016,6 +1073,10 @@ export {
   // Snapshot utilities
   encode,
   decode,
+
+  // System solvency (conservation of tokens)
+  calculateSolvency,
+  verifySolvency,
 
   // Identity system (from ids.ts) - replaces split(':') patterns
   parseReplicaKey,
