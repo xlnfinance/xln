@@ -328,37 +328,7 @@
 </script>
 
 <div class="time-machine">
-  <!-- Play/Pause (prominent, left) -->
-  <button on:click={togglePlay} class="play-btn" title="Play/Pause (Space)">
-    {#if playing}
-      <Pause size={16} />
-    {:else}
-      <Play size={16} />
-    {/if}
-  </button>
-
-  <!-- Progress Scrubber with frame info -->
-  <div class="scrubber-container">
-    <div class="frame-info">
-      <span class="frame-badge" class:live={$isLive}>
-        {$isLive ? 'LIVE' : `${$timeIndex + 1}/${$history.length}`}
-      </span>
-      <span class="time-label">{currentTime}</span>
-    </div>
-    <input
-      type="range"
-      class="scrubber"
-      min="0"
-      max={maxTimeIndex}
-      value={$timeIndex >= 0 ? $timeIndex : maxTimeIndex}
-      on:input={handleSliderInput}
-      disabled={maxTimeIndex === 0}
-      style="--progress: {progressPercent}%"
-    />
-    <span class="time-label end">{totalTime}</span>
-  </div>
-
-  <!-- Frame Navigation (separated from play) -->
+  <!-- Frame Navigation (LEFT - most used) -->
   <div class="frame-nav">
     <button on:click={localTimeOperations.goToHistoryStart} title="Go to start (Home)">
       <SkipBack size={12} />
@@ -373,6 +343,15 @@
       <SkipForward size={12} />
     </button>
   </div>
+
+  <!-- Play/Pause -->
+  <button on:click={togglePlay} class="play-btn" title="Play/Pause (Space)">
+    {#if playing}
+      <Pause size={16} />
+    {:else}
+      <Play size={16} />
+    {/if}
+  </button>
 
   <!-- Mega Dropdown (Settings: speed + loop + export) -->
   <div class="dropdown">

@@ -208,6 +208,65 @@ function checkSolvency(env: Env, expected: bigint, label: string): void {
   console.log(`✅ [${label}] Solvency OK: ${total} (R:${reserves} + C:${collateral})`);
 }
 
+// Get offdelta for a bilateral account (uses LEFT entity's view - canonical)
+function getOffdelta(env: Env, entityA: string, entityB: string, tokenId: number): bigint {
+  // Always use LEFT entity (smaller ID) as canonical source
+  const leftId = entityA < entityB ? entityA : entityB;
+  const rightId = entityA < entityB ? entityB : entityA;
+
+  const [, leftReplica] = findReplica(env, leftId);
+  const account = leftReplica?.state?.accounts?.get(rightId);
+  const delta = account?.deltas?.get(tokenId);
+
+  return delta?.offdelta ?? 0n;
+}
+
+// Verify payment moved through accounts - throws on failure
+function verifyPayment(
+  env: Env,
+  sender: string,
+  hub: string,
+  receiver: string,
+  tokenId: number,
+  amount: bigint,
+  label: string
+): void {
+  // Get offdeltas for both legs
+  const senderHubDelta = getOffdelta(env, sender, hub, tokenId);
+  const hubReceiverDelta = getOffdelta(env, hub, receiver, tokenId);
+
+  // Canonical delta direction: positive means RIGHT owes LEFT
+  // Alice < Hub (alphabetically by ID): Alice is LEFT
+  // Hub < Bob (alphabetically): Hub is LEFT
+  //
+  // When Alice sends to Bob via Hub:
+  // - Alice-Hub: Alice (LEFT) sends → delta DECREASES (Hub now owes Alice less / Alice owes Hub more)
+  // - Hub-Bob: Hub (LEFT) sends → delta DECREASES (Bob now owes Hub less / Hub owes Bob more)
+
+  console.log(`[PAYMENT-VERIFY] ${label}`);
+  console.log(`  Sender-Hub offdelta: ${senderHubDelta}`);
+  console.log(`  Hub-Receiver offdelta: ${hubReceiverDelta}`);
+
+  // After payment: sender-hub delta should be negative (sender sent)
+  // After payment: hub-receiver delta should be negative (hub forwarded)
+  if (senderHubDelta >= 0n) {
+    throw new Error(`PAYMENT FAILED at "${label}": Sender-Hub offdelta should be negative after payment (got ${senderHubDelta})`);
+  }
+  if (hubReceiverDelta >= 0n) {
+    throw new Error(`PAYMENT FAILED at "${label}": Hub-Receiver offdelta should be negative after payment (got ${hubReceiverDelta})`);
+  }
+
+  // Verify amounts match
+  if (-senderHubDelta !== amount) {
+    throw new Error(`PAYMENT MISMATCH at "${label}": Sender-Hub offdelta is ${-senderHubDelta}, expected ${amount}`);
+  }
+  if (-hubReceiverDelta !== amount) {
+    throw new Error(`PAYMENT MISMATCH at "${label}": Hub-Receiver offdelta is ${-hubReceiverDelta}, expected ${amount}`);
+  }
+
+  console.log(`✅ [${label}] Payment verified: ${Number(amount) / 1e18} moved through hub`);
+}
+
 interface SnapshotOptions {
   expectedSolvency?: bigint;      // Self-test: throws if solvency doesn't match
   entityInputs?: EntityInput[];   // Entity inputs for J-Machine visualization
@@ -761,10 +820,16 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     // ============================================================================
     // STEP 10: Off-Chain Payment Alice → Hub → Bob
     // ============================================================================
-    console.log('\n⚡ FRAME 10: Off-Chain Payment A → H → B ($100K)');
+    console.log('\n⚡ FRAME 10: Off-Chain Payment A → H → B ($125K)');
 
-    // 20% of $500K capacity = $100K
-    const paymentAmount = usd(100_000);
+    // 25% of $500K capacity = $125K
+    const paymentAmount = usd(125_000);
+
+    // SELF-TEST: Verify delta is zero before payment
+    const deltaBeforeAH = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
+    const deltaBeforeHB = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
+    console.log(`[PRE-PAYMENT] Alice-Hub offdelta: ${deltaBeforeAH}`);
+    console.log(`[PRE-PAYMENT] Hub-Bob offdelta: ${deltaBeforeHB}`);
 
     // Direct payment from Alice through Hub to Bob
     await processUntilEmpty(env, [{
@@ -782,15 +847,18 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
       }]
     }]);
 
-    await pushSnapshot(env, 'Off-Chain Payment: Alice → Hub → Bob $100K', {
+    // SELF-TEST: Verify payment actually moved value through hub
+    verifyPayment(env, alice.id, hub.id, bob.id, USDC_TOKEN_ID, paymentAmount, 'Frame 10 - A→H→B Payment');
+
+    await pushSnapshot(env, 'Off-Chain Payment: Alice → Hub → Bob $125K', {
       title: '⚡ First Off-Chain Payment: A → H → B',
-      what: 'Alice sends $100K to Bob via Hub. Payment propagates: A-H offdelta ↓, H-B offdelta ↑.',
+      what: 'Alice sends $125K to Bob via Hub. Payment propagates: A-H offdelta ↓, H-B offdelta ↓.',
       why: 'This is the magic: instant, zero-gas payment. Only final state settles on-chain.',
       tradfiParallel: 'Like internal book transfers: instant between accounts at same bank.',
       keyMetrics: [
-        'Payment: $100K',
-        'A-H: Alice owes Hub more',
-        'H-B: Hub owes Bob more',
+        'Payment: $125K (25% of capacity)',
+        'A-H: offdelta = -$125K (Alice sent)',
+        'H-B: offdelta = -$125K (Hub forwarded)',
         'On-chain cost: $0',
         'Latency: ~300ms (3 frames)',
       ]
