@@ -55,8 +55,10 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
 
   const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
 
-  let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowence);
-  let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowence);
+  // FIXED: outCapacity = collateral I CAN SEND (inCollateral) + credit peer extended to me
+  // inCapacity = collateral THEY can send (outCollateral) + credit I extended to them
+  let inCapacity = nonNegative(outCollateral + inOwnCredit + outPeerCredit - inAllowence);
+  let outCapacity = nonNegative(inCollateral + outOwnCredit + inPeerCredit - outAllowence);
 
   if (!isLeft) {
     // flip the view
