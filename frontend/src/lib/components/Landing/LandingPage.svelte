@@ -2427,37 +2427,29 @@
     justify-content: center;
   }
 
-  /* FCUAN: Riding with bounce, then HARD crash - rear wheel stays on ground */
+  /* FCUAN: Riding wobbly, then crashes FORWARD (front wheel hits wall) */
   .evo-bike-wobble {
     animation: bike-crash 6s ease-in-out infinite;
-    transform-origin: bottom left; /* Rear wheel = pivot point */
+    transform-origin: bottom right; /* Front wheel = pivot (hits wall) */
   }
 
   @keyframes bike-crash {
-    /* Riding unstable - wobbling like a house of cards (0-83%) */
-    0% { transform: rotate(1deg) translateY(0); }
-    5% { transform: rotate(-1.5deg) translateY(-1px); }
-    10% { transform: rotate(2deg) translateY(0); }
-    15% { transform: rotate(-1deg) translateY(-1px); }
-    20% { transform: rotate(1.5deg) translateY(0); }
-    25% { transform: rotate(-2deg) translateY(-1px); }
-    30% { transform: rotate(1deg) translateY(0); }
-    35% { transform: rotate(-1.5deg) translateY(-1px); }
-    40% { transform: rotate(2deg) translateY(0); }
-    45% { transform: rotate(-1deg) translateY(-1px); }
-    50% { transform: rotate(1.5deg) translateY(0); }
-    55% { transform: rotate(-2deg) translateY(-1px); }
-    60% { transform: rotate(1deg) translateY(0); }
-    65% { transform: rotate(-1.5deg) translateY(-1px); }
-    70% { transform: rotate(2deg) translateY(0); }
-    75% { transform: rotate(-1deg) translateY(-1px); }
-    80% { transform: rotate(1.5deg) translateY(0); }
-    /* CRASH - 1 second (83-100%) */
-    83% { transform: rotate(-3deg); }
-    86% { transform: rotate(20deg); }
-    89% { transform: rotate(40deg); }
-    91%, 94% { transform: rotate(45deg); }
-    97% { transform: rotate(20deg); }
+    /* Riding unstable - wobbling (0-80%) */
+    0% { transform: rotate(1deg); }
+    10% { transform: rotate(-1.5deg); }
+    20% { transform: rotate(2deg); }
+    30% { transform: rotate(-1deg); }
+    40% { transform: rotate(1.5deg); }
+    50% { transform: rotate(-2deg); }
+    60% { transform: rotate(1deg); }
+    70% { transform: rotate(-1.5deg); }
+    80% { transform: rotate(1deg); }
+    /* CRASH FORWARD - tips over handlebars (83-100%) */
+    83% { transform: rotate(3deg); }
+    86% { transform: rotate(-15deg); }
+    89% { transform: rotate(-35deg); }
+    91%, 94% { transform: rotate(-40deg); }
+    97% { transform: rotate(-15deg); }
     100% { transform: rotate(1deg); }
   }
 
