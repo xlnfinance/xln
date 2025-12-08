@@ -2,6 +2,8 @@
   import { onDestroy, onMount } from 'svelte';
   import { type Writable } from 'svelte/store';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
+  import { browserVMProvider } from '../utils/browserVMProvider';
+  import { panelBridge } from '../utils/panelBridge';
 
   // Props: REQUIRED isolated stores (no fallbacks)
   export let history: Writable<any[]>;
@@ -11,6 +13,29 @@
 
   // Direct store usage - no fallback logic
   $: maxTimeIndex = Math.max(0, $history.length - 1);
+
+  // BrowserVM time-travel: restore EVM state when timeIndex changes
+  let lastTimeTravelIndex = -1;
+  $: if ($timeIndex !== lastTimeTravelIndex && $history.length > 0) {
+    const targetIndex = $timeIndex === -1 ? $history.length - 1 : $timeIndex;
+    const frame = $history[targetIndex];
+    if (frame?.jReplicas) {
+      // Get stateRoot from jReplicas (array or map)
+      const jReplicas = Array.isArray(frame.jReplicas)
+        ? frame.jReplicas
+        : Object.values(frame.jReplicas);
+      const stateRoot = jReplicas[0]?.stateRoot;
+      if (stateRoot && stateRoot.length === 32) {
+        browserVMProvider.timeTravel(new Uint8Array(stateRoot))
+          .then(() => {
+            console.log(`[TimeMachine] EVM restored to frame ${targetIndex}`);
+            panelBridge.emit('time:changed', { frame: targetIndex, block: Number(jReplicas[0]?.blockNumber || 0) });
+          })
+          .catch(e => console.warn('[TimeMachine] timeTravel failed:', e));
+      }
+    }
+    lastTimeTravelIndex = $timeIndex;
+  }
 
   // Time operations that work with isolated stores
   let localTimeOperations: any;
@@ -89,11 +114,14 @@
   ];
 
   // Calculate FPS from history updates
-  $: if ($history.length > 0) {
+  // FIXED: Only update when history length actually changes, not on every reactive cycle
+  let lastHistoryLength = 0;
+  $: if ($history.length > 0 && $history.length !== lastHistoryLength) {
     const now = Date.now();
     frameTimestamps.push(now);
     frameTimestamps = frameTimestamps.filter(t => now - t < 60000); // Keep last minute
     fps = frameTimestamps.length / 60;
+    lastHistoryLength = $history.length;
   }
 
   // Format time from frame

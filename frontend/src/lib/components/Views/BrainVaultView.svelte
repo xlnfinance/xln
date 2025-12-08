@@ -343,9 +343,8 @@
     }
   });
 
-  // Complete phase tabs
-  type CompleteTab = 'wallet' | 'xln' | 'settings';
-  let completeTab: CompleteTab = 'wallet';
+  // Settings modal state (no more tabs)
+  let showSettingsModal = false;
 
   // Vault management state
   let vaultDropdownOpen = false;
@@ -1604,17 +1603,27 @@
                         </div>
                         <div class="signers-list">
                           {#each currentVault.signers as signer}
-                            <button
-                              class="menu-item signer-item"
-                              class:active={signer.index === currentSigner?.index}
-                              on:click={() => switchSigner(signer.index)}
-                            >
-                              <img src={generateIdenticon(signer.address)} alt="" class="menu-item-identicon" />
-                              <div class="menu-item-info">
-                                <span class="menu-item-label">{signer.name}</span>
-                                <code class="menu-item-addr">{signer.address.slice(0, 6)}...{signer.address.slice(-4)}</code>
-                              </div>
-                            </button>
+                            <div class="signer-row">
+                              <button
+                                class="menu-item signer-item"
+                                class:active={signer.index === currentSigner?.index}
+                                on:click={() => switchSigner(signer.index)}
+                              >
+                                <img src={generateIdenticon(signer.address)} alt="" class="menu-item-identicon" />
+                                <div class="menu-item-info">
+                                  <span class="menu-item-label">{signer.name}</span>
+                                  <code class="menu-item-addr">{signer.address.slice(0, 6)}...{signer.address.slice(-4)}</code>
+                                </div>
+                              </button>
+                              <a
+                                href="{selectedNetwork.explorerUrl}/address/{signer.address}"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="explorer-link"
+                                title="View on {selectedNetwork.explorerName}"
+                                on:click|stopPropagation
+                              >↗</a>
+                            </div>
                           {/each}
                           <button class="menu-item add-action indent" on:click={handleAddSigner}>
                             <span class="menu-item-icon">➕</span>
@@ -1692,25 +1701,19 @@
                     </div>
                   {/if}
                 </div>
+
+                <!-- Settings Gear Icon -->
+                <button
+                  class="settings-gear"
+                  on:click={() => showSettingsModal = true}
+                  title="Settings"
+                >
+                  ⚙️
+                </button>
               </div>
 
-          <!-- Wallet Tabs: Tokens | xln | Settings -->
-          <div class="wallet-tabs">
-            <button class="wallet-tab" class:active={completeTab === 'wallet'} on:click={() => completeTab = 'wallet'}>
-              Tokens
-            </button>
-            <button class="wallet-tab" class:active={completeTab === 'xln'} on:click={() => completeTab = 'xln'}>
-              xln
-            </button>
-            <button class="wallet-tab" class:active={completeTab === 'settings'} on:click={() => completeTab = 'settings'}>
-              Settings
-            </button>
-          </div>
-
-          <!-- Tab Content -->
-          {#if completeTab === 'wallet'}
-            <!-- WalletView with current signer's credentials -->
-            <WalletView
+          <!-- Unified Wallet View (no tabs) -->
+          <WalletView
               privateKey={currentSignerPrivateKey || masterKeyHex}
               walletAddress={currentSignerAddress}
               {entityId}
@@ -1739,146 +1742,118 @@
               </div>
             {/if}
 
-          {:else if completeTab === 'xln'}
-            <!-- XLN TAB: Network entry -->
-            <div class="xln-tab-content">
-              <div class="network-cta">
-                <div class="network-cta-header">
-                  <span class="network-icon">◈</span>
-                  <span class="network-title">Join xln Network</span>
-                </div>
-                <p class="network-desc">Use this vault as your identity on the xln network. Create an entity, open accounts, send instant payments.</p>
-                <a href="/" class="derive-btn network-btn">
-                  <span class="btn-icon">⚡</span>
-                  Enter Network
-                </a>
-              </div>
-            </div>
-
-          {:else if completeTab === 'settings'}
-            <!-- SETTINGS TAB: Backup info, password manager, FAQ -->
-            <div class="settings-tab-content">
-              <!-- Address with Identicon -->
-              <div class="result-section">
-                <label>Ethereum Address</label>
-                <div class="result-box address with-identicon">
-                  <img src={identiconSrc} alt="Address identicon" class="identicon" />
-                  <code>{ethereumAddress}</code>
-                  <button class="copy-btn" on:click={() => copyToClipboard(ethereumAddress, 'address')}>
-                    {copiedField === 'address' ? '✓' : '📋'}
-                  </button>
-                </div>
-              </div>
-
-              <!-- 12-word Mnemonic (Standard BIP39) -->
-              <div class="result-section">
-                <label>
-                  Recovery Phrase
-                  <span class="label-hint">(12 words - standard for MetaMask, Ledger, Trezor)</span>
-                </label>
-                <div class="result-box mnemonic">
-                  {#if !showMnemonic}
-                    <!-- Blurred preview state -->
-                    <div class="mnemonic-blurred-preview">
-                      <div class="blur-overlay">
-                        <span class="blur-icon">🔒</span>
-                        <span class="blur-text">Sensitive - Click to Reveal</span>
-                      </div>
-                      <div class="mnemonic-words blurred" aria-hidden="true">
-                        {#each Array(12) as _, i}
-                          <span class="word"><span class="word-num">{i + 1}.</span> ••••••</span>
-                        {/each}
-                      </div>
-                    </div>
-                    <button class="mnemonic-reveal-btn" on:click={() => showMnemonic = true}>
-                      <span class="reveal-icon">👁️</span>
-                      Reveal Recovery Phrase
-                    </button>
-                  {:else}
-                    <div class="mnemonic-words">
-                      {#each mnemonic12.split(' ') as word, i}
-                        <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
-                      {/each}
-                    </div>
-                    <div class="mnemonic-actions">
-                      <button class="copy-btn full" on:click={() => copyToClipboard(mnemonic12, 'mnemonic12')}>
-                        {copiedField === 'mnemonic12' ? '✓ Copied!' : '📋 Copy all 12 words'}
-                      </button>
-                      <button class="hide-btn" on:click={() => showMnemonic = false}>
-                        🔒 Hide
-                      </button>
-                    </div>
-                  {/if}
-                </div>
-              </div>
-
-              <!-- Device Passphrase -->
-              <div class="result-section">
-                <label>
-                  Device Passphrase
-                  <span class="label-hint">(for Ledger/Trezor hidden wallet)</span>
-                </label>
-                <div class="result-box passphrase">
-                  <code class:blurred={!showDevicePassphrase}>
-                    {showDevicePassphrase ? devicePassphrase : '••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••••'}
-                  </code>
-                  <button class="toggle-btn" on:click={() => showDevicePassphrase = !showDevicePassphrase}>
-                    {showDevicePassphrase ? '🙈' : '👁️'}
-                  </button>
-                  {#if showDevicePassphrase}
-                    <button class="copy-btn" on:click={() => copyToClipboard(devicePassphrase, 'devicePass')}>
-                      {copiedField === 'devicePass' ? '✓' : '📋'}
-                    </button>
-                  {/if}
-                </div>
-              </div>
-
-              <!-- Password Manager - Minimalist single line -->
-              <div class="result-section password-manager-inline">
-                <label>Password Generator</label>
-                <div class="pm-row">
-                  <input
-                    type="text"
-                    class="pm-domain-input"
-                    placeholder="domain.com"
-                    bind:value={siteDomain}
-                  />
-                  <code class="pm-password" class:empty={!sitePassword}>
-                    {sitePassword || 'BLAKE3(masterKey, domain)'}
-                  </code>
-                  {#if sitePassword}
-                    <button class="copy-btn" on:click={() => copyToClipboard(sitePassword, 'sitePass')}>
-                      {copiedField === 'sitePass' ? '✓' : '📋'}
-                    </button>
-                  {/if}
-                </div>
-              </div>
-
-              <!-- FAQ Section -->
-              <div class="faq-section embedded">
-                <h3>Frequently Asked Questions</h3>
-                {#each FAQ_ITEMS as item, i}
-                  <div class="faq-item" class:expanded={expandedFaq === i}>
-                    <button class="faq-question" on:click={() => expandedFaq = expandedFaq === i ? null : i}>
-                      <span>{item.q}</span>
-                      <span class="faq-toggle">{expandedFaq === i ? '−' : '+'}</span>
-                    </button>
-                    {#if expandedFaq === i}
-                      <div class="faq-answer">
-                        <p>{item.a}</p>
-                      </div>
-                    {/if}
+            <!-- Settings Modal -->
+            {#if showSettingsModal}
+              <div class="modal-overlay" on:click={() => showSettingsModal = false}>
+                <div class="modal-content settings-modal" on:click|stopPropagation>
+                  <div class="modal-header">
+                    <h3>Settings</h3>
+                    <button class="close-btn" on:click={() => showSettingsModal = false}>✕</button>
                   </div>
-                {/each}
-              </div>
 
-              <!-- New Vault Button -->
-              <button class="derive-btn secondary" on:click={reset}>
-                <span class="btn-icon">🔄</span>
-                Derive Another Vault
-              </button>
-            </div>
-          {/if}
+                  <!-- Address with Identicon -->
+                  <div class="result-section">
+                    <label>Ethereum Address</label>
+                    <div class="result-box address with-identicon">
+                      <img src={identiconSrc} alt="Address identicon" class="identicon" />
+                      <code>{ethereumAddress}</code>
+                      <button class="copy-btn" on:click={() => copyToClipboard(ethereumAddress, 'address')}>
+                        {copiedField === 'address' ? '✓' : '📋'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- 12-word Mnemonic (Standard BIP39) -->
+                  <div class="result-section">
+                    <label>
+                      Recovery Phrase
+                      <span class="label-hint">(12 words)</span>
+                    </label>
+                    <div class="result-box mnemonic">
+                      {#if !showMnemonic}
+                        <div class="mnemonic-blurred-preview">
+                          <div class="blur-overlay">
+                            <span class="blur-icon">🔒</span>
+                            <span class="blur-text">Click to Reveal</span>
+                          </div>
+                          <div class="mnemonic-words blurred" aria-hidden="true">
+                            {#each Array(12) as _, i}
+                              <span class="word"><span class="word-num">{i + 1}.</span> ••••••</span>
+                            {/each}
+                          </div>
+                        </div>
+                        <button class="mnemonic-reveal-btn" on:click={() => showMnemonic = true}>
+                          <span class="reveal-icon">👁️</span>
+                          Reveal Recovery Phrase
+                        </button>
+                      {:else}
+                        <div class="mnemonic-words">
+                          {#each mnemonic12.split(' ') as word, i}
+                            <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
+                          {/each}
+                        </div>
+                        <div class="mnemonic-actions">
+                          <button class="copy-btn full" on:click={() => copyToClipboard(mnemonic12, 'mnemonic12')}>
+                            {copiedField === 'mnemonic12' ? '✓ Copied!' : '📋 Copy all 12 words'}
+                          </button>
+                          <button class="hide-btn" on:click={() => showMnemonic = false}>
+                            🔒 Hide
+                          </button>
+                        </div>
+                      {/if}
+                    </div>
+                  </div>
+
+                  <!-- Device Passphrase -->
+                  <div class="result-section">
+                    <label>
+                      Device Passphrase
+                      <span class="label-hint">(Ledger/Trezor)</span>
+                    </label>
+                    <div class="result-box passphrase">
+                      <code class:blurred={!showDevicePassphrase}>
+                        {showDevicePassphrase ? devicePassphrase : '••••••••••••••••••••••••••••••••'}
+                      </code>
+                      <button class="toggle-btn" on:click={() => showDevicePassphrase = !showDevicePassphrase}>
+                        {showDevicePassphrase ? '🙈' : '👁️'}
+                      </button>
+                      {#if showDevicePassphrase}
+                        <button class="copy-btn" on:click={() => copyToClipboard(devicePassphrase, 'devicePass')}>
+                          {copiedField === 'devicePass' ? '✓' : '📋'}
+                        </button>
+                      {/if}
+                    </div>
+                  </div>
+
+                  <!-- Password Generator -->
+                  <div class="result-section password-manager-inline">
+                    <label>Password Generator</label>
+                    <div class="pm-row">
+                      <input
+                        type="text"
+                        class="pm-domain-input"
+                        placeholder="domain.com"
+                        bind:value={siteDomain}
+                      />
+                      <code class="pm-password" class:empty={!sitePassword}>
+                        {sitePassword || 'BLAKE3(key, domain)'}
+                      </code>
+                      {#if sitePassword}
+                        <button class="copy-btn" on:click={() => copyToClipboard(sitePassword, 'sitePass')}>
+                          {copiedField === 'sitePass' ? '✓' : '📋'}
+                        </button>
+                      {/if}
+                    </div>
+                  </div>
+
+                  <!-- New Vault Button -->
+                  <button class="derive-btn secondary" on:click={() => { showSettingsModal = false; reset(); }}>
+                    <span class="btn-icon">🔄</span>
+                    Derive Another Vault
+                  </button>
+                </div>
+              </div>
+            {/if}
         </div>
       </div>
     {/if}
@@ -2890,6 +2865,61 @@
     align-items: center;
   }
 
+  .settings-gear {
+    padding: 8px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+  }
+
+  .settings-gear:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(180, 140, 80, 0.3);
+    color: rgba(255, 200, 100, 0.9);
+  }
+
+  /* Settings Modal Styles */
+  .settings-modal {
+    max-width: 480px;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+
+  .modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .modal-header h3 {
+    margin: 0;
+    font-size: 18px;
+    color: rgba(255, 200, 100, 0.95);
+  }
+
+  .close-btn {
+    padding: 4px 10px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .close-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: white;
+  }
+
   .context-dropdown {
     position: relative;
   }
@@ -3072,6 +3102,31 @@
 
   .menu-item.signer-item {
     padding: 8px 10px;
+    flex: 1;
+  }
+
+  .signer-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .explorer-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    color: rgba(180, 140, 80, 0.5);
+    font-size: 12px;
+    text-decoration: none;
+    transition: all 0.15s ease;
+  }
+
+  .explorer-link:hover {
+    background: rgba(180, 140, 80, 0.15);
+    color: rgba(255, 200, 100, 1);
   }
 
   .menu-item.add-action,

@@ -15,12 +15,71 @@
   export let isolatedHistory: Writable<any[]> | null = null;
   export let isolatedTimeIndex: Writable<number> | null = null;
 
+  import type { LogLevel, LogCategory, FrameLogEntry } from '$lib/types/ui';
+
   // Expandable sections
   let expandedReplicas: Set<string> = new Set();
   let expandedXlnomies: Set<string> = new Set();
   let showFullJson = false;
   let showInputJson = false;
   let showOutputJson = false;
+  let showLogs = true;
+
+  // Log filtering
+  const ALL_LEVELS: LogLevel[] = ['trace', 'debug', 'info', 'warn', 'error'];
+  const ALL_CATEGORIES: LogCategory[] = ['consensus', 'account', 'jurisdiction', 'evm', 'network', 'ui', 'system'];
+  let activeLevels: Set<LogLevel> = new Set(['info', 'warn', 'error']);
+  let activeCategories: Set<LogCategory> = new Set(ALL_CATEGORIES);
+  let logSearchText = '';
+
+  // Toggle log level filter
+  function toggleLevel(level: LogLevel) {
+    if (activeLevels.has(level)) {
+      activeLevels.delete(level);
+    } else {
+      activeLevels.add(level);
+    }
+    activeLevels = activeLevels;
+  }
+
+  // Toggle category filter
+  function toggleCategory(cat: LogCategory) {
+    if (activeCategories.has(cat)) {
+      activeCategories.delete(cat);
+    } else {
+      activeCategories.add(cat);
+    }
+    activeCategories = activeCategories;
+  }
+
+  // Get filtered logs
+  $: frameLogs = (currentFrame?.logs || []) as FrameLogEntry[];
+  $: filteredLogs = frameLogs.filter(log => {
+    if (!activeLevels.has(log.level)) return false;
+    if (!activeCategories.has(log.category)) return false;
+    if (logSearchText && !log.message.toLowerCase().includes(logSearchText.toLowerCase())) return false;
+    return true;
+  });
+
+  // Log level colors
+  const levelColors: Record<LogLevel, string> = {
+    trace: '#6e7681',
+    debug: '#8b949e',
+    info: '#58a6ff',
+    warn: '#d29922',
+    error: '#f85149'
+  };
+
+  // Category icons
+  const categoryIcons: Record<LogCategory, string> = {
+    consensus: '🔗',
+    account: '🤝',
+    jurisdiction: '⚖️',
+    evm: '⛓️',
+    network: '📡',
+    ui: '🖥️',
+    system: '⚙️'
+  };
 
   // Get current frame data based on time machine index
   $: currentFrame = (() => {
@@ -156,6 +215,83 @@
             {/each}
           {:else}
             <div class="empty-data">No J-machines</div>
+          {/if}
+        </div>
+
+        <!-- Frame Logs (Structured Logging) -->
+        <div class="section">
+          <button class="section-header" on:click={() => showLogs = !showLogs}>
+            <span class="expand-icon">{showLogs ? '▼' : '▶'}</span>
+            <h4>📋 Frame Logs ({frameLogs.length})</h4>
+            {#if filteredLogs.length !== frameLogs.length}
+              <span class="filter-badge">{filteredLogs.length} shown</span>
+            {/if}
+          </button>
+          {#if showLogs}
+            <div class="logs-section">
+              <!-- Filter controls -->
+              <div class="log-filters">
+                <div class="filter-group">
+                  <span class="filter-label">Level:</span>
+                  {#each ALL_LEVELS as level}
+                    <button
+                      class="filter-chip"
+                      class:active={activeLevels.has(level)}
+                      style="--level-color: {levelColors[level]}"
+                      on:click={() => toggleLevel(level)}
+                    >
+                      {level}
+                    </button>
+                  {/each}
+                </div>
+                <div class="filter-group">
+                  <span class="filter-label">Category:</span>
+                  {#each ALL_CATEGORIES as cat}
+                    <button
+                      class="filter-chip category"
+                      class:active={activeCategories.has(cat)}
+                      on:click={() => toggleCategory(cat)}
+                    >
+                      {categoryIcons[cat]} {cat}
+                    </button>
+                  {/each}
+                </div>
+                <div class="filter-group search">
+                  <input
+                    type="text"
+                    placeholder="Search logs..."
+                    bind:value={logSearchText}
+                    class="log-search"
+                  />
+                </div>
+              </div>
+
+              <!-- Log entries -->
+              <div class="log-list">
+                {#if filteredLogs.length > 0}
+                  {#each filteredLogs as log}
+                    <div class="log-entry" style="--level-color: {levelColors[log.level]}">
+                      <span class="log-level" style="color: {levelColors[log.level]}">{log.level.toUpperCase()}</span>
+                      <span class="log-category">{categoryIcons[log.category]} {log.category}</span>
+                      <span class="log-message">{log.message}</span>
+                      {#if log.entityId}
+                        <span class="log-entity">{shortAddress(log.entityId)}</span>
+                      {/if}
+                      {#if log.data}
+                        <details class="log-data">
+                          <summary>data</summary>
+                          <pre>{safeStringify(log.data)}</pre>
+                        </details>
+                      {/if}
+                    </div>
+                  {/each}
+                {:else if frameLogs.length > 0}
+                  <div class="empty-data">No logs match filters</div>
+                {:else}
+                  <div class="empty-data">No logs in this frame</div>
+                {/if}
+              </div>
+            </div>
           {/if}
         </div>
 
@@ -791,5 +927,162 @@
     background: #1e1e1e;
     border-radius: 4px;
     padding: 8px;
+  }
+
+  /* Log Viewer Styles */
+  .logs-section {
+    padding: 12px;
+  }
+
+  .log-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 8px;
+    background: #1e1e1e;
+    border-radius: 4px;
+  }
+
+  .filter-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .filter-group.search {
+    margin-top: 4px;
+  }
+
+  .filter-label {
+    font-size: 10px;
+    color: #6e7681;
+    text-transform: uppercase;
+    margin-right: 4px;
+    min-width: 60px;
+  }
+
+  .filter-chip {
+    padding: 2px 8px;
+    font-size: 10px;
+    background: #252526;
+    border: 1px solid #3e3e3e;
+    border-radius: 3px;
+    color: #8b949e;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .filter-chip:hover {
+    background: #37373d;
+    border-color: #4e4e4e;
+  }
+
+  .filter-chip.active {
+    background: var(--level-color, #0e639c);
+    border-color: var(--level-color, #1177bb);
+    color: #fff;
+  }
+
+  .filter-chip.category.active {
+    background: #0e639c;
+    border-color: #1177bb;
+  }
+
+  .log-search {
+    flex: 1;
+    min-width: 150px;
+    padding: 4px 8px;
+    font-size: 11px;
+    background: #252526;
+    border: 1px solid #3e3e3e;
+    border-radius: 3px;
+    color: #ccc;
+  }
+
+  .log-search:focus {
+    outline: none;
+    border-color: #007acc;
+  }
+
+  .filter-badge {
+    margin-left: auto;
+    padding: 2px 6px;
+    font-size: 10px;
+    background: #3e3e3e;
+    color: #8b949e;
+    border-radius: 3px;
+  }
+
+  .log-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .log-entry {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    background: #1e1e1e;
+    border-left: 2px solid var(--level-color, #3e3e3e);
+    border-radius: 2px;
+    font-size: 11px;
+  }
+
+  .log-level {
+    font-size: 9px;
+    font-weight: 600;
+    min-width: 40px;
+    text-transform: uppercase;
+  }
+
+  .log-category {
+    font-size: 10px;
+    color: #8b949e;
+    padding: 1px 4px;
+    background: #252526;
+    border-radius: 2px;
+  }
+
+  .log-message {
+    flex: 1;
+    color: #d4d4d4;
+    word-break: break-word;
+  }
+
+  .log-entity {
+    font-size: 10px;
+    color: #79c0ff;
+    font-family: 'Consolas', monospace;
+    padding: 1px 4px;
+    background: #252526;
+    border-radius: 2px;
+  }
+
+  .log-data {
+    width: 100%;
+    margin-top: 4px;
+  }
+
+  .log-data summary {
+    font-size: 10px;
+    color: #6e7681;
+    cursor: pointer;
+  }
+
+  .log-data pre {
+    margin: 4px 0 0 0;
+    padding: 6px;
+    font-size: 10px;
+    background: #252526;
+    border-radius: 3px;
+    color: #9cdcfe;
+    overflow-x: auto;
   }
 </style>

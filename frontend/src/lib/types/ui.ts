@@ -5,7 +5,7 @@
  * For shared types (EntityState, AccountMachine, etc.), import from $types
  */
 
-import type { EnvSnapshot, EntityInput, RuntimeTx } from '$types';
+import type { EnvSnapshot, EntityInput, RuntimeTx, LogLevel, LogCategory, FrameLogEntry } from '$types';
 
 // Re-export commonly used backend types for convenience
 export type {
@@ -21,6 +21,10 @@ export type {
   AccountFrame,
   AccountTx,
   EnvSnapshot as Snapshot, // Frontend historically called this Snapshot
+  // Structured logging types (canonical definitions from backend)
+  LogLevel,
+  LogCategory,
+  FrameLogEntry,
 } from '$types';
 
 // Tab management for multi-entity UI
@@ -109,6 +113,19 @@ export interface EntityInfo {
   boardHash: string;
 }
 
+// =============================================================================
+// STRUCTURED LOGGING SYSTEM
+// =============================================================================
+// Core log types (LogLevel, LogCategory, FrameLogEntry) are imported from $types
+
+/** Log filter configuration (frontend-only) */
+export interface LogFilter {
+  levels: Set<LogLevel>;
+  categories: Set<LogCategory>;
+  entityId?: string;        // Filter to specific entity
+  searchText?: string;      // Free-text search
+}
+
 // Server frame wrapper for transaction history UI
 export interface RuntimeFrame {
   frameIndex: number;
@@ -119,6 +136,7 @@ export interface RuntimeFrame {
   runtimeTxs: RuntimeTx[];
   timestamp: number;
   hasActivity: boolean;
+  logs: FrameLogEntry[];   // Frame-specific structured logs
 }
 
 // Banking transaction display

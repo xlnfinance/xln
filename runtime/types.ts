@@ -667,6 +667,34 @@ export interface EntityReplica {
   };
 }
 
+// =============================================================================
+// STRUCTURED LOGGING SYSTEM
+// =============================================================================
+
+/** Log severity levels - ordered by priority */
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
+
+/** Log categories for filtering */
+export type LogCategory =
+  | 'consensus'     // BFT entity consensus
+  | 'account'       // Bilateral account consensus
+  | 'jurisdiction'  // J-machine events
+  | 'evm'           // Blockchain interactions
+  | 'network'       // Routing/messaging
+  | 'ui'            // UI events
+  | 'system';       // System-level
+
+/** Single log entry attached to a frame */
+export interface FrameLogEntry {
+  id: number;
+  timestamp: number;
+  level: LogLevel;
+  category: LogCategory;
+  message: string;
+  entityId?: string;              // Associated entity (if applicable)
+  data?: Record<string, unknown>; // Structured data
+}
+
 export interface Env {
   eReplicas: Map<string, EntityReplica>;  // Entity replicas (E-layer state machines)
   jReplicas: Map<string, JReplica>;       // Jurisdiction replicas (J-layer EVM state)
@@ -681,6 +709,9 @@ export interface Env {
 
   // Snapshot control (for prepopulate demos)
   disableAutoSnapshots?: boolean; // When true, captureSnapshot skips automatic tick frames
+
+  // Frame-scoped structured logs (captured into snapshot, then reset)
+  frameLogs: FrameLogEntry[];
 }
 
 /**
@@ -702,6 +733,20 @@ export interface JReplica {
     entityProvider?: string;
     account?: string;
   };
+
+  // === SYNCED FROM DEPOSITORY.SOL ===
+  // mapping(bytes32 => mapping(uint => uint)) _reserves
+  reserves?: Map<string, Map<number, bigint>>;  // entityId -> tokenId -> amount
+
+  // mapping(bytes => mapping(uint => AccountCollateral)) _collaterals
+  collaterals?: Map<string, Map<number, bigint>>; // accountKey -> tokenId -> amount
+
+  // mapping(bytes32 => InsuranceLine[]) insuranceLines
+  insuranceLines?: Map<string, Array<{ insurer: string; tokenId: number; remaining: bigint; expiresAt: bigint }>>;
+
+  // === SYNCED FROM ENTITYPROVIDER.SOL ===
+  // mapping(bytes32 => Entity) entities
+  registeredEntities?: Map<string, { name: string; quorum: string[]; threshold: number }>;
 }
 
 /** J-Machine transaction (settlement layer) */
@@ -752,6 +797,8 @@ export interface EnvSnapshot {
     position?: { x: number; y: number; z: number }; // Camera position
     rotation?: { x: number; y: number; z: number }; // Camera rotation
   };
+  // Frame-specific structured logs
+  logs?: FrameLogEntry[];
 }
 
 // Entity types - canonical definition in ids.ts

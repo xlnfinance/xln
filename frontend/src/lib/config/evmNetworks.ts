@@ -21,7 +21,20 @@ export interface TokenInfo {
 }
 
 export const EVM_NETWORKS: EVMNetwork[] = [
-  // Mainnets
+  // Mainnets - Base is default
+  {
+    chainId: 8453,
+    name: 'Base',
+    symbol: 'ETH',
+    rpcUrl: 'https://base.llamarpc.com',
+    explorerUrl: 'https://basescan.org',
+    explorerName: 'Basescan',
+    isTestnet: false,
+    tokens: [
+      { symbol: 'USDC', name: 'USD Coin', address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: 6 },
+      { symbol: 'DAI', name: 'Dai Stablecoin', address: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', decimals: 18 },
+    ]
+  },
   {
     chainId: 1,
     name: 'Ethereum',
@@ -81,19 +94,6 @@ export const EVM_NETWORKS: EVMNetwork[] = [
       { symbol: 'USDT', name: 'Tether USD', address: '0x94b008aA00579c1307B0EF2c499aD98a8ce58e58', decimals: 6 },
       { symbol: 'DAI', name: 'Dai Stablecoin', address: '0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1', decimals: 18 },
       { symbol: 'OP', name: 'Optimism', address: '0x4200000000000000000000000000000000000042', decimals: 18 },
-    ]
-  },
-  {
-    chainId: 8453,
-    name: 'Base',
-    symbol: 'ETH',
-    rpcUrl: 'https://base.llamarpc.com',
-    explorerUrl: 'https://basescan.org',
-    explorerName: 'Basescan',
-    isTestnet: false,
-    tokens: [
-      { symbol: 'USDC', name: 'USD Coin', address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', decimals: 6 },
-      { symbol: 'DAI', name: 'Dai Stablecoin', address: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', decimals: 18 },
     ]
   },
   {
@@ -179,7 +179,7 @@ export function getTestnetNetworks(): EVMNetwork[] {
   return EVM_NETWORKS.filter(n => n.isTestnet);
 }
 
-// Default network (Ethereum mainnet)
+// Default network (Base)
 export const DEFAULT_NETWORK = EVM_NETWORKS[0];
 
 // ERC20 ABI for transfer function (minimal)

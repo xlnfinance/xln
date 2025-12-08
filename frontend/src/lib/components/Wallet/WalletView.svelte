@@ -103,57 +103,9 @@
     </button>
   </div>
 
-  <!-- Tab Navigation -->
-  <div class="tab-nav">
-    <button
-      class="tab-btn"
-      class:active={activeTab === 'tokens'}
-      on:click={() => activeTab = 'tokens'}
-    >
-      Tokens
-    </button>
-    <button
-      class="tab-btn"
-      class:active={activeTab === 'activity'}
-      on:click={() => activeTab = 'activity'}
-    >
-      Activity
-    </button>
-  </div>
-
-  <!-- Tab Content -->
+  <!-- Main Content (no tabs - unified view) -->
   <div class="tab-content">
-    {#if activeTab === 'tokens'}
-      <TokenList
-        {privateKey}
-        {walletAddress}
-        on:portfolioUpdate={handlePortfolioUpdate}
-      />
-    {:else if activeTab === 'activity'}
-      <div class="activity-tab">
-        <div class="activity-placeholder">
-          <div class="placeholder-icon">
-            <ExternalLink size={32} />
-          </div>
-          <p class="placeholder-text">View transaction history on Etherscan</p>
-          <a
-            href={getEtherscanLink()}
-            target="_blank"
-            rel="noopener noreferrer"
-            class="etherscan-link"
-          >
-            <span>Open Etherscan</span>
-            <ExternalLink size={14} />
-          </a>
-          <p class="placeholder-hint">
-            <!-- Tooltip: Future feature - in-app activity feed -->
-            <span class="hint-tooltip" title="Coming soon: In-app transaction history with xln payment tracking">
-              In-app activity coming soon
-            </span>
-          </p>
-        </div>
-      </div>
-    {:else if activeTab === 'send'}
+    {#if activeTab === 'send'}
       <div class="send-tab">
         <ERC20Send {privateKey} {walletAddress} />
       </div>
@@ -184,6 +136,31 @@
     {:else if activeTab === 'bridge'}
       <div class="bridge-tab">
         <DepositToEntity {privateKey} {walletAddress} {entityId} />
+      </div>
+    {:else}
+      <!-- Default: Tokens + Activity inline -->
+      <TokenList
+        {privateKey}
+        {walletAddress}
+        on:portfolioUpdate={handlePortfolioUpdate}
+      />
+
+      <!-- Activity Section (inline) -->
+      <div class="activity-section">
+        <div class="activity-header">
+          <span class="activity-title">Recent</span>
+          <a
+            href={getEtherscanLink()}
+            target="_blank"
+            rel="noopener noreferrer"
+            class="view-all-link"
+          >
+            View All <ExternalLink size={12} />
+          </a>
+        </div>
+        <div class="activity-empty">
+          <span>No recent activity</span>
+        </div>
       </div>
     {/if}
   </div>
@@ -473,5 +450,48 @@
     border: none;
     background: transparent;
     padding: 0;
+  }
+
+  /* Activity Section (inline below tokens) */
+  .activity-section {
+    margin-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 12px 16px;
+  }
+
+  .activity-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+
+  .activity-title {
+    font-size: 13px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  .view-all-link {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: rgba(255, 200, 100, 0.7);
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+
+  .view-all-link:hover {
+    color: rgba(255, 200, 100, 1);
+  }
+
+  .activity-empty {
+    padding: 16px;
+    text-align: center;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.3);
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 8px;
   }
 </style>

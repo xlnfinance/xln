@@ -169,17 +169,60 @@ export const captureSnapshot = (
       })
     : [];
 
-  // Clone jReplicas (J-layer state)
+  // Clone jReplicas (J-layer state) + SYNC reserves from eReplicas for time travel
   const jReplicas: JReplica[] = env.jReplicas
-    ? Array.from(env.jReplicas.values()).map(jr => ({
-        name: jr.name,
-        blockNumber: jr.blockNumber,
-        stateRoot: new Uint8Array(jr.stateRoot), // Copy stateRoot
-        mempool: [...jr.mempool],
-        position: { ...jr.position },
-        contracts: jr.contracts ? { ...jr.contracts } : undefined,
-      }))
+    ? Array.from(env.jReplicas.values()).map(jr => {
+        // Sync reserves from eReplicas into JReplica snapshot
+        const reserves = new Map<string, Map<number, bigint>>();
+        const registeredEntities = new Map<string, { name: string; quorum: string[]; threshold: number }>();
+
+        // Aggregate reserves from all entity replicas
+        for (const [key, replica] of env.eReplicas.entries()) {
+          const entityId = key.split(':')[0];
+          if (replica.state?.reserves) {
+            const tokenMap = new Map<number, bigint>();
+            // Handle both Map and plain object
+            if (replica.state.reserves instanceof Map) {
+              replica.state.reserves.forEach((amount: bigint, tokenId: string) => {
+                tokenMap.set(Number(tokenId), amount);
+              });
+            } else {
+              for (const [tokenId, amount] of Object.entries(replica.state.reserves as Record<string, bigint>)) {
+                tokenMap.set(Number(tokenId), BigInt(amount));
+              }
+            }
+            if (tokenMap.size > 0) {
+              reserves.set(entityId, tokenMap);
+            }
+          }
+          // Add entity to registeredEntities
+          if (!registeredEntities.has(entityId)) {
+            registeredEntities.set(entityId, {
+              name: replica.name || `E${entityId.slice(-4)}`,
+              quorum: replica.quorum || [],
+              threshold: replica.threshold || 1,
+            });
+          }
+        }
+
+        return {
+          name: jr.name,
+          blockNumber: jr.blockNumber,
+          stateRoot: new Uint8Array(jr.stateRoot),
+          mempool: [...jr.mempool],
+          position: { ...jr.position },
+          contracts: jr.contracts ? { ...jr.contracts } : undefined,
+          reserves,
+          registeredEntities,
+        };
+      })
     : [];
+
+  // Capture and reset frame logs
+  const frameLogs = env.frameLogs ? [...env.frameLogs] : [];
+  if (env.frameLogs) {
+    env.frameLogs = [];
+  }
 
   const snapshot: EnvSnapshot = {
     height: env.height,
@@ -205,6 +248,7 @@ export const captureSnapshot = (
     })),
     description,
     gossip: { profiles: gossipProfiles },
+    logs: frameLogs,
   };
 
   envHistory.push(snapshot);

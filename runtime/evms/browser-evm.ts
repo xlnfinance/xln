@@ -6,13 +6,28 @@
 import type { JurisdictionEVM, XlnomySnapshot } from '../types.js';
 import { BrowserVMProvider } from '../../frontend/src/lib/view/utils/browserVMProvider.js';
 
+// Singleton across bundles via window global
+declare global {
+  interface Window {
+    __xlnBrowserVM?: BrowserVMProvider;
+  }
+}
+
+function getOrCreateBrowserVM(): BrowserVMProvider {
+  if (typeof window !== 'undefined') {
+    if (!window.__xlnBrowserVM) {
+      window.__xlnBrowserVM = new BrowserVMProvider();
+    }
+    return window.__xlnBrowserVM;
+  }
+  // Fallback for non-browser (shouldn't happen)
+  return new BrowserVMProvider();
+}
+
 export class BrowserEVM implements JurisdictionEVM {
   type: 'browservm' = 'browservm';
-  private provider: BrowserVMProvider;
-
-  constructor() {
-    this.provider = new BrowserVMProvider();
-  }
+  // Use window global singleton - works across bundles
+  private provider = getOrCreateBrowserVM();
 
   // Proxy all provider methods
   async init() { return this.provider.init(); }
