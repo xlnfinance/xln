@@ -312,22 +312,37 @@
 
             <!-- Middle: Convergence lines + arrows -->
             <div class="evo-merge-zone">
-              <svg class="convergence-lines" viewBox="0 0 120 200" preserveAspectRatio="none">
-                <!-- Top line from FCUAN -->
-                <path d="M 0 50 Q 60 50, 100 100" stroke="rgba(255,200,100,0.4)" stroke-width="2" fill="none">
-                  <animate attributeName="stroke-dashoffset" from="100" to="0" dur="2s" repeatCount="indefinite"/>
+              <svg class="convergence-lines" viewBox="0 0 180 500" preserveAspectRatio="xMidYMid meet">
+                <!-- Top curve from FCUAN (gold/yellow) -->
+                <path
+                  d="M 0 120 C 60 120, 120 200, 150 250"
+                  stroke="rgba(255,200,100,0.5)"
+                  stroke-width="2.5"
+                  fill="none"
+                >
+                  <animate attributeName="stroke-dashoffset" from="200" to="0" dur="2.5s" repeatCount="indefinite"/>
                 </path>
-                <!-- Bottom line from FRPAP -->
-                <path d="M 0 150 Q 60 150, 100 100" stroke="rgba(100,200,255,0.4)" stroke-width="2" fill="none">
-                  <animate attributeName="stroke-dashoffset" from="100" to="0" dur="2s" repeatCount="indefinite"/>
+                <!-- Bottom curve from FRPAP (blue/cyan) -->
+                <path
+                  d="M 0 380 C 60 380, 120 300, 150 250"
+                  stroke="rgba(100,180,255,0.5)"
+                  stroke-width="2.5"
+                  fill="none"
+                >
+                  <animate attributeName="stroke-dashoffset" from="200" to="0" dur="2.5s" repeatCount="indefinite"/>
                 </path>
                 <!-- Merge point glow -->
-                <circle cx="100" cy="100" r="4" fill="#4fd18b" opacity="0.8">
-                  <animate attributeName="r" values="3;6;3" dur="1.5s" repeatCount="indefinite"/>
-                  <animate attributeName="opacity" values="0.6;1;0.6" dur="1.5s" repeatCount="indefinite"/>
+                <circle cx="150" cy="250" r="6" fill="#4fd18b" opacity="0.9">
+                  <animate attributeName="r" values="4;8;4" dur="1.5s" repeatCount="indefinite"/>
+                  <animate attributeName="opacity" values="0.7;1;0.7" dur="1.5s" repeatCount="indefinite"/>
+                </circle>
+                <!-- Outer glow ring -->
+                <circle cx="150" cy="250" r="12" fill="none" stroke="#4fd18b" stroke-width="1" opacity="0.3">
+                  <animate attributeName="r" values="10;18;10" dur="1.5s" repeatCount="indefinite"/>
+                  <animate attributeName="opacity" values="0.4;0.1;0.4" dur="1.5s" repeatCount="indefinite"/>
                 </circle>
               </svg>
-              <!-- Animated arrows -->
+              <!-- Animated arrows after merge point -->
               <div class="evo-merge-flow">
                 <span class="merge-arrow">→</span>
                 <span class="merge-arrow">→</span>
@@ -2131,20 +2146,26 @@
   /* V-Convergence Layout: FCUAN + FRPAP → RCPAN */
   .evo-convergence {
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    grid-template-columns: minmax(280px, 1fr) 180px minmax(320px, 1fr);
     align-items: center;
-    gap: 1rem;
-    max-width: 1600px;
+    gap: 0;
+    max-width: 1400px;
     margin: 0 auto;
-    padding: 2rem;
-    min-height: 520px;
+    padding: 2rem 1rem;
+    min-height: 600px;
   }
 
   .evo-sources {
     display: flex;
     flex-direction: column;
-    gap: 2rem;
-    align-items: flex-end;
+    gap: 3.5rem;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .evo-sources .evo-item {
+    transform: scale(0.85);
+    transform-origin: center;
   }
 
   .evo-merge-zone {
@@ -2152,8 +2173,8 @@
     align-items: center;
     justify-content: center;
     position: relative;
-    width: 140px;
-    height: 400px;
+    width: 180px;
+    height: 500px;
   }
 
   .convergence-lines {
@@ -2165,21 +2186,28 @@
   }
 
   .convergence-lines path {
-    stroke-dasharray: 8 4;
+    stroke-dasharray: 12 6;
+    stroke-linecap: round;
   }
 
   .evo-merge-flow {
     position: absolute;
-    right: -20px;
+    right: 10px;
     display: flex;
     align-items: center;
+    gap: 2px;
     z-index: 3;
   }
 
   .evo-result {
     display: flex;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: center;
+  }
+
+  .evo-result .evo-item {
+    transform: scale(0.95);
+    transform-origin: center;
   }
 
   @media (max-width: 1000px) {
