@@ -272,15 +272,6 @@
           <h3 class="evo-title">{c.solution.evolution}</h3>
 
           <div class="evo-track">
-            <!-- Origin (small, just a joke) -->
-            <div class="evo-item evo-item-small">
-              <div class="evo-dot evo-dot-small">●</div>
-              <div class="evo-label-top evo-label-small">Big Bang</div>
-            </div>
-
-            <!-- Banking Era (long thick line) -->
-            <div class="evo-line evo-line-thick"></div>
-
             <div class="evo-item evo-item-fcuan" title="Full-Credit Unprovable Account Networks: Banking since ancient times">
               <div class="evo-label-top">~5000 BC</div>
               <div class="bike-container bike-container-shake">
@@ -299,7 +290,8 @@
               <div class="evo-desc">{c.solution.fcuanDesc}</div>
             </div>
 
-            <div class="evo-line evo-line-thick"></div>
+            <!-- Plus sign between eras -->
+            <div class="evo-plus">+</div>
 
             <!-- Lightning branch (thin failed) -->
             <div class="evo-item evo-item-branch" title="Fully-Reserved Provable Account Protocols: Lightning/PCNs - technically sound but lacks credit">
@@ -319,15 +311,12 @@
               <div class="evo-desc">{c.solution.frpapDesc}</div>
             </div>
 
-            <!-- MERGE - Animated arrow flow instead of button -->
+            <!-- MERGE - Animated arrow flow -->
             <div class="evo-merge-flow">
               <span class="merge-arrow">→</span>
               <span class="merge-arrow">→</span>
               <span class="merge-arrow">→</span>
             </div>
-
-            <!-- Future (THICK GREEN) -->
-            <div class="evo-line evo-line-finale"></div>
 
             <div class="evo-item evo-item-finale" title="Reserve-Credit Provable Account Network: The best of both worlds - provable AND credit-enabled">
               <div class="evo-label-top">2026 →</div>
@@ -890,7 +879,7 @@
   /* Founder Note */
   .founder-note {
     text-align: center;
-    margin: 1rem 0 1.5rem;
+    margin: 0.5rem 0 1rem;
     max-width: 700px;
   }
 
@@ -2212,6 +2201,21 @@
     background: linear-gradient(to right, rgba(255,255,255,0.2), rgba(200,200,200,0.3));
   }
 
+  .evo-plus {
+    font-size: 3rem;
+    font-weight: 200;
+    color: rgba(255, 255, 255, 0.5);
+    margin: 0 1.5rem;
+    align-self: center;
+    text-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+    animation: plus-pulse 3s ease-in-out infinite;
+  }
+
+  @keyframes plus-pulse {
+    0%, 100% { opacity: 0.5; transform: scale(1); }
+    50% { opacity: 0.8; transform: scale(1.1); }
+  }
+
   .evo-line-finale {
     width: 80px;
     height: 4px;
@@ -2289,22 +2293,6 @@
     opacity: 0.65;
   }
 
-  /* Big Bang small (just a joke) */
-  .evo-item-small {
-    transform: scale(0.5);
-    margin: 0 -20px;
-  }
-
-  .evo-dot-small {
-    font-size: 2rem !important;
-    opacity: 0.7;
-  }
-
-  .evo-label-small {
-    font-size: 0.7rem !important;
-    opacity: 0.6;
-  }
-
   /* Bike container for positioning badges/walls */
   .bike-container {
     position: relative;
@@ -2350,7 +2338,7 @@
   .crisis-badge {
     position: absolute;
     bottom: 5%;
-    right: 0%;
+    right: 0;
     background: rgba(220, 30, 30, 0.95);
     color: white;
     font-size: 0.7rem;
