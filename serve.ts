@@ -40,6 +40,12 @@ const handler = async (request: Request): Promise<Response> => {
 
   console.log(`➡️  ${request.method} ${path}`);
 
+  // Strip trailing slash (redirect to canonical URL)
+  if (path.length > 1 && path.endsWith('/')) {
+    const canonical = path.slice(0, -1);
+    return Response.redirect(new URL(canonical, url.origin).href, 301);
+  }
+
   // Health check
   if (path === '/healthz') return new Response('ok');
 
