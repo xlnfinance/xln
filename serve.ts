@@ -54,6 +54,12 @@ const handler = async (request: Request): Promise<Response> => {
   const staticFile = await serveFile(`./frontend/build${path}`);
   if (staticFile) return staticFile;
 
+  // Try with .html extension (SvelteKit creates /scenarios.html not /scenarios/index.html)
+  if (!path.includes('.')) {
+    const htmlFile = await serveFile(`./frontend/build${path}.html`);
+    if (htmlFile) return htmlFile;
+  }
+
   // SPA fallback - serve index.html for any unknown route
   const fallback = await serveFile('./frontend/build/index.html');
   if (fallback) return fallback;
