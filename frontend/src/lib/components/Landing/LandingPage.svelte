@@ -313,27 +313,28 @@
             <!-- Middle: Convergence lines + arrows -->
             <div class="evo-merge-zone">
               <svg class="convergence-lines" viewBox="0 0 140 380" preserveAspectRatio="xMidYMid meet">
-                <!-- Top curve from FCUAN (gold/yellow) -->
-                <path
-                  d="M 0 95 C 50 95, 100 150, 130 190"
-                  stroke="rgba(255,200,100,0.6)"
-                  stroke-width="2.5"
-                  fill="none"
-                />
-                <!-- Bottom curve from FRPAP (blue/cyan) -->
-                <path
-                  d="M 0 285 C 50 285, 100 230, 130 190"
-                  stroke="rgba(100,180,255,0.6)"
-                  stroke-width="2.5"
-                  fill="none"
-                />
+                <defs>
+                  <path id="credit-path" d="M 0 95 C 50 95, 100 150, 130 190" />
+                  <path id="reserve-path" d="M 0 285 C 50 285, 100 230, 130 190" />
+                </defs>
+                <!-- Top curve from FCUAN (gold) - CREDIT -->
+                <use href="#credit-path" stroke="rgba(255,200,100,0.5)" stroke-width="2.5" fill="none" class="flow-line" />
+                <text class="curve-label curve-label-credit">
+                  <textPath href="#credit-path" startOffset="15%">Credit</textPath>
+                </text>
+                <!-- Bottom curve from FRPAP (blue) - RESERVE -->
+                <use href="#reserve-path" stroke="rgba(100,180,255,0.5)" stroke-width="2.5" fill="none" class="flow-line" />
+                <text class="curve-label curve-label-reserve">
+                  <textPath href="#reserve-path" startOffset="15%">Reserve</textPath>
+                </text>
                 <!-- Merge point -->
                 <circle cx="130" cy="190" r="5" fill="#4fd18b" opacity="0.95">
                   <animate attributeName="r" values="4;6;4" dur="1.2s" repeatCount="indefinite"/>
                 </circle>
               </svg>
-              <!-- Animated arrows: merge point → RCPAN -->
+              <!-- = sign + Animated arrows → RCPAN -->
               <div class="evo-merge-flow">
+                <span class="merge-equals">=</span>
                 <span class="merge-arrow">→</span>
                 <span class="merge-arrow">→</span>
               </div>
@@ -2175,18 +2176,48 @@
     top: 0;
   }
 
-  .convergence-lines path {
+  .convergence-lines path,
+  .convergence-lines use {
     stroke-dasharray: 6 3;
     stroke-linecap: round;
   }
 
+  .flow-line {
+    animation: dash-flow 2s linear infinite;
+  }
+
+  @keyframes dash-flow {
+    to { stroke-dashoffset: -18; }
+  }
+
+  .curve-label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+  }
+
+  .curve-label-credit {
+    fill: rgba(255, 200, 100, 0.8);
+  }
+
+  .curve-label-reserve {
+    fill: rgba(100, 180, 255, 0.8);
+  }
+
   .evo-merge-flow {
     position: absolute;
-    left: 140px;
+    left: 130px;
     display: flex;
     align-items: center;
-    gap: 0;
+    gap: 2px;
     z-index: 3;
+  }
+
+  .merge-equals {
+    font-size: 1.4rem;
+    font-weight: 300;
+    color: #4fd18b;
+    margin-right: 4px;
   }
 
   .evo-result {
@@ -2201,24 +2232,44 @@
     transform-origin: left center;
   }
 
-  @media (max-width: 1000px) {
+  /* Mobile: vertical stack */
+  @media (max-width: 900px) {
     .evo-convergence {
       grid-template-columns: 1fr;
       grid-template-rows: auto auto auto;
-      gap: 2rem;
+      gap: 1rem;
+      padding: 1rem;
+      max-width: 400px;
     }
     .evo-sources {
       flex-direction: row;
+      flex-wrap: wrap;
       justify-content: center;
       align-items: flex-start;
+      gap: 1rem;
+    }
+    .evo-sources .evo-item {
+      transform: scale(0.6);
+      transform-origin: center;
     }
     .evo-merge-zone {
       width: 100%;
-      height: 80px;
-      transform: rotate(90deg);
+      height: 100px;
+      justify-content: center;
+    }
+    .convergence-lines {
+      display: none;
+    }
+    .evo-merge-flow {
+      position: static;
+      justify-content: center;
     }
     .evo-result {
       justify-content: center;
+    }
+    .evo-result .evo-item {
+      transform: scale(0.7);
+      transform-origin: center;
     }
   }
 
