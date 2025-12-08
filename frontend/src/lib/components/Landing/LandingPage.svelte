@@ -271,72 +271,89 @@
         <div class="evolution-simple">
           <h3 class="evo-title">{c.solution.evolution}</h3>
 
-          <div class="evo-track">
-            <div class="evo-item evo-item-fcuan" title="Full-Credit Unprovable Account Networks: Banking since ancient times">
-              <div class="evo-label-top">~5000 BC</div>
-              <div class="bike-container bike-container-shake">
-                <img src="/bikes/fcuan.svg" class="evo-bike evo-bike-wobble" />
-                <span class="crisis-badge">CRISIS</span>
-                <!-- Dust particles on crash -->
-                <span class="dust-particle dust-1"></span>
-                <span class="dust-particle dust-2"></span>
-                <span class="dust-particle dust-3"></span>
-                <span class="dust-particle dust-4"></span>
-                <span class="dust-particle dust-5"></span>
-              </div>
-              <div class="evo-name">FCUAN</div>
-              <div class="evo-fullname">Full-Credit Unprovable Account Networks</div>
-              <InvariantTicker label="" description="−leftCredit ≤ Δ ≤ rightCredit" pattern="[---.---]" speed={4} />
-              <div class="evo-desc">{c.solution.fcuanDesc}</div>
-            </div>
-
-            <!-- Plus sign between eras -->
-            <div class="evo-plus">+</div>
-
-            <!-- Lightning branch (thin failed) -->
-            <div class="evo-item evo-item-branch" title="Fully-Reserved Provable Account Protocols: Lightning/PCNs - technically sound but lacks credit">
-              <div class="evo-label-top">2015-2025</div>
-              <div class="evo-branch-line"></div>
-              <div class="bike-container">
-                <img src="/bikes/frpap.svg" class="evo-bike evo-bike-small evo-bike-locked" />
-                <div class="wall-stack">
-                  <div class="wall-brick">Inbound</div>
-                  <div class="wall-brick">Liquidity</div>
-                  <div class="wall-brick">Wall</div>
+          <div class="evo-convergence">
+            <!-- Left: Two source systems stacked -->
+            <div class="evo-sources">
+              <!-- Banking (FCUAN) -->
+              <div class="evo-item evo-item-fcuan" title="Full-Credit Unprovable Account Networks: Banking since ancient times">
+                <div class="evo-label-top">~5000 BC</div>
+                <div class="bike-container bike-container-shake">
+                  <img src="/bikes/fcuan.svg" class="evo-bike evo-bike-wobble" />
+                  <span class="crisis-badge">CRISIS</span>
+                  <span class="dust-particle dust-1"></span>
+                  <span class="dust-particle dust-2"></span>
+                  <span class="dust-particle dust-3"></span>
+                  <span class="dust-particle dust-4"></span>
+                  <span class="dust-particle dust-5"></span>
                 </div>
+                <div class="evo-name">FCUAN</div>
+                <div class="evo-fullname">Full-Credit Unprovable Account Networks</div>
+                <InvariantTicker label="" description="−leftCredit ≤ Δ ≤ rightCredit" pattern="[---.---]" speed={4} />
+                <div class="evo-desc">{c.solution.fcuanDesc}</div>
               </div>
-              <div class="evo-name">FRPAP</div>
-              <div class="evo-fullname">Full-Reserve Provable Account Primitives</div>
-              <InvariantTicker label="" description="0 ≤ Δ ≤ collateral" pattern="[.===]" speed={4} />
-              <div class="evo-desc">{c.solution.frpapDesc}</div>
-            </div>
 
-            <!-- MERGE - Animated arrow flow -->
-            <div class="evo-merge-flow">
-              <span class="merge-arrow">→</span>
-              <span class="merge-arrow">→</span>
-              <span class="merge-arrow">→</span>
-            </div>
-
-            <div class="evo-item evo-item-finale" title="Reserve-Credit Provable Account Network: The best of both worlds - provable AND credit-enabled">
-              <div class="evo-label-top">2026 →</div>
-              <div class="rcpan-container">
-                <img src="/bikes/rcpan.svg" class="evo-bike evo-bike-finale evo-bike-flying" />
-                <!-- Particle trail -->
-                <span class="trail-particle trail-1"></span>
-                <span class="trail-particle trail-2"></span>
-                <span class="trail-particle trail-3"></span>
-                <span class="trail-particle trail-4"></span>
-                <span class="trail-particle trail-5"></span>
-                <span class="trail-particle trail-6"></span>
+              <!-- Lightning (FRPAP) -->
+              <div class="evo-item evo-item-branch" title="Fully-Reserved Provable Account Protocols: Lightning/PCNs - technically sound but lacks credit">
+                <div class="evo-label-top">2015-2025</div>
+                <div class="bike-container">
+                  <img src="/bikes/frpap.svg" class="evo-bike evo-bike-small evo-bike-locked" />
+                  <div class="wall-stack">
+                    <div class="wall-brick">Inbound</div>
+                    <div class="wall-brick">Liquidity</div>
+                    <div class="wall-brick">Wall</div>
+                  </div>
+                </div>
+                <div class="evo-name">FRPAP</div>
+                <div class="evo-fullname">Full-Reserve Provable Account Primitives</div>
+                <InvariantTicker label="" description="0 ≤ Δ ≤ collateral" pattern="[.===]" speed={4} />
+                <div class="evo-desc">{c.solution.frpapDesc}</div>
               </div>
-              <div class="evo-name evo-name-finale">RCPAN</div>
-              <div class="evo-fullname">Reserve-Credit Provable Account Network</div>
-              <InvariantTicker label="" description="−leftCredit ≤ Δ ≤ collateral + rightCredit" pattern="[---.===---]" speed={4} />
-              <div class="evo-desc evo-desc-finale">{@html c.solution.rcpanDesc}</div>
             </div>
 
-            <div class="evo-line evo-line-future"></div>
+            <!-- Middle: Convergence lines + arrows -->
+            <div class="evo-merge-zone">
+              <svg class="convergence-lines" viewBox="0 0 120 200" preserveAspectRatio="none">
+                <!-- Top line from FCUAN -->
+                <path d="M 0 50 Q 60 50, 100 100" stroke="rgba(255,200,100,0.4)" stroke-width="2" fill="none">
+                  <animate attributeName="stroke-dashoffset" from="100" to="0" dur="2s" repeatCount="indefinite"/>
+                </path>
+                <!-- Bottom line from FRPAP -->
+                <path d="M 0 150 Q 60 150, 100 100" stroke="rgba(100,200,255,0.4)" stroke-width="2" fill="none">
+                  <animate attributeName="stroke-dashoffset" from="100" to="0" dur="2s" repeatCount="indefinite"/>
+                </path>
+                <!-- Merge point glow -->
+                <circle cx="100" cy="100" r="4" fill="#4fd18b" opacity="0.8">
+                  <animate attributeName="r" values="3;6;3" dur="1.5s" repeatCount="indefinite"/>
+                  <animate attributeName="opacity" values="0.6;1;0.6" dur="1.5s" repeatCount="indefinite"/>
+                </circle>
+              </svg>
+              <!-- Animated arrows -->
+              <div class="evo-merge-flow">
+                <span class="merge-arrow">→</span>
+                <span class="merge-arrow">→</span>
+                <span class="merge-arrow">→</span>
+              </div>
+            </div>
+
+            <!-- Right: Result (RCPAN) -->
+            <div class="evo-result">
+              <div class="evo-item evo-item-finale" title="Reserve-Credit Provable Account Network: The best of both worlds - provable AND credit-enabled">
+                <div class="evo-label-top">2026 →</div>
+                <div class="rcpan-container">
+                  <img src="/bikes/rcpan.svg" class="evo-bike evo-bike-finale evo-bike-flying" />
+                  <span class="trail-particle trail-1"></span>
+                  <span class="trail-particle trail-2"></span>
+                  <span class="trail-particle trail-3"></span>
+                  <span class="trail-particle trail-4"></span>
+                  <span class="trail-particle trail-5"></span>
+                  <span class="trail-particle trail-6"></span>
+                </div>
+                <div class="evo-name evo-name-finale">RCPAN</div>
+                <div class="evo-fullname">Reserve-Credit Provable Account Network</div>
+                <InvariantTicker label="" description="−leftCredit ≤ Δ ≤ collateral + rightCredit" pattern="[---.===---]" speed={4} />
+                <div class="evo-desc evo-desc-finale">{@html c.solution.rcpanDesc}</div>
+              </div>
+            </div>
           </div>
 
           <!-- Color Legend -->
@@ -2111,24 +2128,78 @@
     letter-spacing: -0.5px;
   }
 
-  .evo-track {
+  /* V-Convergence Layout: FCUAN + FRPAP → RCPAN */
+  .evo-convergence {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 1rem;
+    max-width: 1600px;
+    margin: 0 auto;
+    padding: 2rem;
+    min-height: 520px;
+  }
+
+  .evo-sources {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    align-items: flex-end;
+  }
+
+  .evo-merge-zone {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    width: 140px;
+    height: 400px;
+  }
+
+  .convergence-lines {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    left: 0;
+    top: 0;
+  }
+
+  .convergence-lines path {
+    stroke-dasharray: 8 4;
+  }
+
+  .evo-merge-flow {
+    position: absolute;
+    right: -20px;
+    display: flex;
+    align-items: center;
+    z-index: 3;
+  }
+
+  .evo-result {
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    position: relative;
-    min-height: 480px;
-    padding: 0 4rem;
-    max-width: 1800px;
-    margin: 0 auto;
-    gap: 1rem;
-    overflow-x: auto;
-    overflow-y: hidden;
   }
 
-  @media (min-width: 1200px) {
-    .evo-track {
+  @media (max-width: 1000px) {
+    .evo-convergence {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto auto;
+      gap: 2rem;
+    }
+    .evo-sources {
+      flex-direction: row;
       justify-content: center;
-      overflow-x: visible;
+      align-items: flex-start;
+    }
+    .evo-merge-zone {
+      width: 100%;
+      height: 80px;
+      transform: rotate(90deg);
+    }
+    .evo-result {
+      justify-content: center;
     }
   }
 
@@ -2199,21 +2270,6 @@
     width: 100px;
     height: 3px;
     background: linear-gradient(to right, rgba(255,255,255,0.2), rgba(200,200,200,0.3));
-  }
-
-  .evo-plus {
-    font-size: 3rem;
-    font-weight: 200;
-    color: rgba(255, 255, 255, 0.5);
-    margin: 0 1.5rem;
-    align-self: center;
-    text-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
-    animation: plus-pulse 3s ease-in-out infinite;
-  }
-
-  @keyframes plus-pulse {
-    0%, 100% { opacity: 0.5; transform: scale(1); }
-    50% { opacity: 0.8; transform: scale(1.1); }
   }
 
   .evo-line-finale {
