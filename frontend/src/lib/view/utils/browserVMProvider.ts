@@ -53,20 +53,33 @@ export class BrowserVMProvider {
       return;
     }
 
-    // Load all artifacts from static/
-    const [accountResp, depositoryResp, entityProviderResp] = await Promise.all([
-      fetch('/contracts/Account.json'),
-      fetch('/contracts/Depository.json'),
-      fetch('/contracts/EntityProvider.json'),
-    ]);
+    // Load artifacts - browser uses fetch, CLI uses file read
+    if (typeof window !== 'undefined') {
+      // Browser: fetch from static/
+      const [accountResp, depositoryResp, entityProviderResp] = await Promise.all([
+        fetch('/contracts/Account.json'),
+        fetch('/contracts/Depository.json'),
+        fetch('/contracts/EntityProvider.json'),
+      ]);
 
-    if (!accountResp.ok) throw new Error(`Failed to load Account artifact: ${accountResp.status}`);
-    if (!depositoryResp.ok) throw new Error(`Failed to load Depository artifact: ${depositoryResp.status}`);
-    if (!entityProviderResp.ok) throw new Error(`Failed to load EntityProvider artifact: ${entityProviderResp.status}`);
+      if (!accountResp.ok) throw new Error(`Failed to load Account artifact: ${accountResp.status}`);
+      if (!depositoryResp.ok) throw new Error(`Failed to load Depository artifact: ${depositoryResp.status}`);
+      if (!entityProviderResp.ok) throw new Error(`Failed to load EntityProvider artifact: ${entityProviderResp.status}`);
 
-    this.accountArtifact = await accountResp.json();
-    this.depositoryArtifact = await depositoryResp.json();
-    this.entityProviderArtifact = await entityProviderResp.json();
+      this.accountArtifact = await accountResp.json();
+      this.depositoryArtifact = await depositoryResp.json();
+      this.entityProviderArtifact = await entityProviderResp.json();
+    } else {
+      // CLI: read from jurisdictions/artifacts/
+      const fs = await import('fs');
+      const path = await import('path');
+      const basePath = path.join(process.cwd(), 'jurisdictions/artifacts/contracts');
+
+      this.accountArtifact = JSON.parse(fs.readFileSync(path.join(basePath, 'Account.sol/Account.json'), 'utf-8'));
+      this.depositoryArtifact = JSON.parse(fs.readFileSync(path.join(basePath, 'Depository.sol/Depository.json'), 'utf-8'));
+      this.entityProviderArtifact = JSON.parse(fs.readFileSync(path.join(basePath, 'EntityProvider.sol/EntityProvider.json'), 'utf-8'));
+      console.log('[BrowserVM] Loaded artifacts from filesystem (CLI mode)');
+    }
 
     // Create ethers Interfaces for ABI encoding
     this.depositoryInterface = new ethers.Interface(this.depositoryArtifact.abi);

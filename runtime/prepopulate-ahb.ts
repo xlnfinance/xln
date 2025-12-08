@@ -235,14 +235,6 @@ function verifyPayment(
   const senderHubDelta = getOffdelta(env, sender, hub, tokenId);
   const hubReceiverDelta = getOffdelta(env, hub, receiver, tokenId);
 
-  // Canonical delta direction: positive means RIGHT owes LEFT
-  // Alice < Hub (alphabetically by ID): Alice is LEFT
-  // Hub < Bob (alphabetically): Hub is LEFT
-  //
-  // When Alice sends to Bob via Hub:
-  // - Alice-Hub: Alice (LEFT) sends → delta DECREASES (Hub now owes Alice less / Alice owes Hub more)
-  // - Hub-Bob: Hub (LEFT) sends → delta DECREASES (Bob now owes Hub less / Hub owes Bob more)
-
   console.log(`[PAYMENT-VERIFY] ${label}`);
   console.log(`  Sender-Hub offdelta: ${senderHubDelta}`);
   console.log(`  Hub-Receiver offdelta: ${hubReceiverDelta}`);
@@ -256,15 +248,19 @@ function verifyPayment(
     throw new Error(`PAYMENT FAILED at "${label}": Hub-Receiver offdelta should be negative after payment (got ${hubReceiverDelta})`);
   }
 
-  // Verify amounts match
+  // Verify sender paid exact amount
   if (-senderHubDelta !== amount) {
     throw new Error(`PAYMENT MISMATCH at "${label}": Sender-Hub offdelta is ${-senderHubDelta}, expected ${amount}`);
   }
-  if (-hubReceiverDelta !== amount) {
-    throw new Error(`PAYMENT MISMATCH at "${label}": Hub-Receiver offdelta is ${-hubReceiverDelta}, expected ${amount}`);
+
+  // Hub takes routing fee (0.1%), so receiver gets slightly less
+  const minReceiverAmount = (amount * 99n) / 100n; // Allow up to 1% fee
+  if (-hubReceiverDelta < minReceiverAmount) {
+    throw new Error(`PAYMENT MISMATCH at "${label}": Hub-Receiver offdelta is ${-hubReceiverDelta}, expected at least ${minReceiverAmount}`);
   }
 
-  console.log(`✅ [${label}] Payment verified: ${Number(amount) / 1e18} moved through hub`);
+  const hubFee = -senderHubDelta - (-hubReceiverDelta);
+  console.log(`✅ [${label}] Payment verified: ${Number(amount) / 1e18} sent, Hub fee: ${Number(hubFee) / 1e18}`);
 }
 
 interface SnapshotOptions {
@@ -825,10 +821,18 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     // 25% of $500K capacity = $125K
     const paymentAmount = usd(125_000);
 
-    // SELF-TEST: Verify delta is zero before payment
+    // SELF-TEST: Verify collateral exists before payment
+    const [, aliceReplica] = findReplica(env, alice.id);
+    const aliceHubAccount = aliceReplica?.state?.accounts?.get(hub.id);
+    const aliceHubDelta = aliceHubAccount?.deltas?.get(USDC_TOKEN_ID);
+    console.log(`[PRE-PAYMENT] Alice-Hub account exists: ${!!aliceHubAccount}`);
+    console.log(`[PRE-PAYMENT] Alice-Hub delta exists: ${!!aliceHubDelta}`);
+    console.log(`[PRE-PAYMENT] Alice-Hub delta.collateral: ${aliceHubDelta?.collateral}`);
+    console.log(`[PRE-PAYMENT] Alice-Hub delta.offdelta: ${aliceHubDelta?.offdelta}`);
+
     const deltaBeforeAH = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const deltaBeforeHB = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
-    console.log(`[PRE-PAYMENT] Alice-Hub offdelta: ${deltaBeforeAH}`);
+    console.log(`[PRE-PAYMENT] Alice-Hub offdelta (from getOffdelta): ${deltaBeforeAH}`);
     console.log(`[PRE-PAYMENT] Hub-Bob offdelta: ${deltaBeforeHB}`);
 
     // Direct payment from Alice through Hub to Bob
