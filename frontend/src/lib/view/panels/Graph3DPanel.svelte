@@ -1678,10 +1678,10 @@ let vrHammer: VRHammer | null = null;
         // Camera moved - OrbitControls is working
       });
       controls.addEventListener('start', () => {
-        console.log('[Graph3D] OrbitControls: User started interacting');
+        //console.log('[Graph3D] OrbitControls: User started interacting');
       });
       controls.addEventListener('end', () => {
-        console.log('[Graph3D] OrbitControls: User stopped interacting');
+        //console.log('[Graph3D] OrbitControls: User stopped interacting');
       });
 
       // Set default target from settings (grid center)
