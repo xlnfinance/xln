@@ -55,17 +55,22 @@ export function handleDirectPayment(
     };
   }
 
+  // CRITICAL: ALWAYS check capacity from SENDER's perspective FIRST
+  // Determine if sender is left entity
+  const senderIsLeft = paymentFromEntity === leftEntity;
+
+  // Derive capacity from sender's perspective
+  const senderDerived = deriveDelta(delta, senderIsLeft);
+
+  // Check if sender has collateral (PUSH model) or uses peer's credit (PULL model)
+  const senderHasCollateral = senderDerived.collateral > 0n;
+
   // Canonical delta: always relative to left entity
-  // CRITICAL: "Payment" = pulling value, increases receiver's allocation (they lend to you)
-  // When A pays B: B's red area (lending to A) increases
+  // delta > 0 = RIGHT owes LEFT (RIGHT holds LEFT's collateral OR borrowed LEFT's credit)
+  // delta < 0 = LEFT owes RIGHT (LEFT holds RIGHT's collateral OR borrowed RIGHT's credit)
   let canonicalDelta: bigint;
-  if (paymentFromEntity === leftEntity && paymentToEntity === rightEntity) {
-    // Left requests value from right - right lends to left - delta DECREASES
-    canonicalDelta = -amount;
-  } else if (paymentFromEntity === rightEntity && paymentToEntity === leftEntity) {
-    // Right requests value from left - left lends to right - delta INCREASES
-    canonicalDelta = amount;
-  } else {
+
+  if (paymentFromEntity !== leftEntity && paymentFromEntity !== rightEntity) {
     console.error(`❌ CONSENSUS-FAILURE: Payment entities don't match account`);
     console.error(`  Account: ${leftEntity.slice(-4)} ↔ ${rightEntity.slice(-4)}`);
     console.error(`  Payment: ${paymentFromEntity.slice(-4)} → ${paymentToEntity.slice(-4)}`);
@@ -76,12 +81,27 @@ export function handleDirectPayment(
     };
   }
 
-  // CRITICAL: ALWAYS check capacity from SENDER's perspective (both on creation and verification)
-  // Determine if sender is left entity
-  const senderIsLeft = paymentFromEntity === leftEntity;
-
-  // Derive capacity from sender's perspective
-  const senderDerived = deriveDelta(delta, senderIsLeft);
+  if (senderHasCollateral) {
+    // PUSH model: Sender has collateral, value moves TO receiver
+    // Receiver now holds sender's collateral = receiver OWES sender
+    if (senderIsLeft) {
+      // LEFT sends → RIGHT holds LEFT's collateral → delta INCREASES (RIGHT owes LEFT)
+      canonicalDelta = amount;
+    } else {
+      // RIGHT sends → LEFT holds RIGHT's collateral → delta DECREASES (LEFT owes RIGHT)
+      canonicalDelta = -amount;
+    }
+  } else {
+    // PULL model: Sender uses receiver's credit (borrows)
+    // Sender now owes receiver
+    if (senderIsLeft) {
+      // LEFT borrows from RIGHT's credit → delta DECREASES (LEFT owes RIGHT)
+      canonicalDelta = -amount;
+    } else {
+      // RIGHT borrows from LEFT's credit → delta INCREASES (RIGHT owes LEFT)
+      canonicalDelta = amount;
+    }
+  }
 
   if (amount > senderDerived.outCapacity) {
     return {
@@ -91,14 +111,52 @@ export function handleDirectPayment(
     };
   }
 
-  // CRITICAL: ALWAYS check global credit limits (not just for our frames)
+  // CRITICAL: Check collateral limits for PUSH model, credit limits for PULL model
   const newDelta = delta.ondelta + delta.offdelta + canonicalDelta;
-  if (tokenId === 1 && newDelta > accountMachine.globalCreditLimits.peerLimit) {
-    return {
-      success: false,
-      error: `Exceeds global credit limit: ${newDelta.toString()} > ${accountMachine.globalCreditLimits.peerLimit.toString()}`,
-      events,
-    };
+
+  if (senderHasCollateral) {
+    // PUSH model: Sender uses their own collateral
+    // Delta direction: positive if sender is LEFT, negative if sender is RIGHT
+    // Check that we don't exceed sender's collateral
+    // (already checked via outCapacity above, but double-check total delta vs collateral)
+    const maxCollateralDelta = senderIsLeft ? senderDerived.collateral : -senderDerived.collateral;
+    const absNewDelta = newDelta < 0n ? -newDelta : newDelta;
+    const absMaxDelta = maxCollateralDelta < 0n ? -maxCollateralDelta : maxCollateralDelta;
+    if (absNewDelta > absMaxDelta) {
+      return {
+        success: false,
+        error: `Exceeds collateral: ${absNewDelta.toString()} > ${absMaxDelta.toString()}`,
+        events,
+      };
+    }
+  } else {
+    // PULL model: Sender borrows from peer's credit
+    // Use delta-level credit limits (set via set_credit_limit from extendCredit)
+    // leftCreditLimit = credit LEFT extends to RIGHT (how much RIGHT can owe LEFT)
+    // rightCreditLimit = credit RIGHT extends to LEFT (how much LEFT can owe RIGHT)
+    if (senderIsLeft) {
+      // LEFT borrows → delta goes negative → LEFT owes RIGHT
+      // Check against rightCreditLimit (RIGHT's credit extension to LEFT)
+      const peerCreditLimit = delta.rightCreditLimit;
+      if (-newDelta > peerCreditLimit) {
+        return {
+          success: false,
+          error: `Exceeds credit limit from peer: ${(-newDelta).toString()} > ${peerCreditLimit.toString()}`,
+          events,
+        };
+      }
+    } else {
+      // RIGHT borrows → delta goes positive → RIGHT owes LEFT
+      // Check against leftCreditLimit (LEFT's credit extension to RIGHT)
+      const peerCreditLimit = delta.leftCreditLimit;
+      if (newDelta > peerCreditLimit) {
+        return {
+          success: false,
+          error: `Exceeds credit limit to peer: ${newDelta.toString()} > ${peerCreditLimit.toString()}`,
+          events,
+        };
+      }
+    }
   }
 
   // Apply canonical delta (identical on both sides)

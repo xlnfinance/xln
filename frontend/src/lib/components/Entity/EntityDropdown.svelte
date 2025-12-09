@@ -24,13 +24,35 @@
   $: activeReplicas = contextReplicas ? $contextReplicas : ($visibleReplicas || $replicas);
   $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
 
+  // Helper: Get entity name from gossip/profile
+  function getEntityName(replica: any): string {
+    // Try gossip profiles first
+    const envData = entityEnv?.env ? (entityEnv.env as any) : null;
+    if (envData?.gossip) {
+      const profiles = typeof envData.gossip.getProfiles === 'function' ? envData.gossip.getProfiles() : (envData.gossip.profiles || []);
+      const profile = profiles.find((p: any) => p.entityId === replica.entityId);
+      if (profile?.metadata?.name) {
+        return profile.metadata.name;
+      }
+    }
+    // Fallback to replica state
+    return replica.state?.name || '';
+  }
+
   // Get dropdown display text
   $: dropdownText = getDropdownText(tab);
 
   function getDropdownText(tab: Tab): string {
-    // SIMPLE: Just show the selected entity (like I fixed in CombinedNavigationDropdown)
-    if (tab.entityId && activeXlnFunctions) {
+    if (tab.entityId && activeXlnFunctions && activeReplicas) {
+      // Find replica to get name
+      const replicaKey = `${tab.entityId}:${tab.signerId}`;
+      const replica = activeReplicas.get(replicaKey);
       const entityNum = activeXlnFunctions.getEntityShortId(tab.entityId);
+
+      if (replica) {
+        const name = getEntityName(replica);
+        return name ? `${name} (#${entityNum})` : `Entity #${entityNum}`;
+      }
       return `Entity #${entityNum}`;
     }
     return 'Select Entity';
@@ -140,7 +162,8 @@
           const isLastEntity = eIndex === (signerEntities?.length || 0) - 1;
           if (!activeXlnFunctions) return; // Safety guard
           const entityNum = activeXlnFunctions.getEntityShortId(replica.entityId);
-          const entityDisplay = `Entity #${entityNum}`;
+          const name = getEntityName(replica);
+          const entityDisplay = name ? `${name} (#${entityNum})` : `Entity #${entityNum}`;
 
           const entityItem = createDropdownTreeItem(
             `🏢 ${entityDisplay}`,
@@ -190,7 +213,11 @@
         const isLastEntity = eIndex === entityKeys.length - 1;
         if (!activeXlnFunctions) return; // Safety guard
         const entityNum = activeXlnFunctions.getEntityShortId(entityId);
-        const entityDisplay = `Entity #${entityNum}`;
+
+        // Get name from first replica of this entity
+        const firstReplica = entitySigners?.[0];
+        const name = firstReplica ? getEntityName(firstReplica) : '';
+        const entityDisplay = name ? `${name} (#${entityNum})` : `Entity #${entityNum}`;
 
         // Add entity
         const entityItem = createDropdownTreeItem(
@@ -258,12 +285,16 @@
 
 
   function selectEntity(jurisdiction: string, signerId: string, entityId: string) {
+    console.log('🎯 EntityDropdown.selectEntity called:', { jurisdiction, signerId, entityId: entityId.slice(0, 10) });
+    console.log('🎯 Current tab before dispatch:', { tabEntityId: tab.entityId?.slice(0, 10), tabSignerId: tab.signerId });
+
     dispatch('entitySelect', {
       jurisdiction,
       signerId: signerId,
       entityId
     });
 
+    console.log('🎯 Event dispatched, closing dropdown');
     isOpen = false;
   }
 

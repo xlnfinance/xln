@@ -49,12 +49,18 @@
 
   // Reactive statement to get replica data
   $: {
+    console.log('🔄 EntityPanel reactive: tab =', { entityId: tab.entityId?.slice(0, 10), signerId: tab.signerId, isActive: tab.isActive });
+    console.log('🔄 EntityPanel reactive: activeReplicas size =', activeReplicas?.size);
+
     if (tab.entityId && tab.signerId) {
       // Prefer time-aware replicas if available
       const replicaKey = `${tab.entityId}:${tab.signerId}`;
+      console.log('🔄 Looking for replica:', replicaKey);
       const candidate = activeReplicas?.get?.(replicaKey);
       replica = candidate ?? null;
+      console.log('🔄 Replica found?', !!replica);
     } else {
+      console.log('🔄 No entityId/signerId in tab - replica = null');
       replica = null;
     }
   }
@@ -116,14 +122,22 @@
   function handleEntitySelect(event: CustomEvent) {
     const { jurisdiction, signerId, entityId } = event.detail;
 
+    console.log('🎯 EntityPanel.handleEntitySelect received:', { jurisdiction, signerId, entityId: entityId?.slice(0, 10) });
+    console.log('🎯 Current tab:', { id: tab.id, entityId: tab.entityId?.slice(0, 10), signerId: tab.signerId });
+    console.log('🎯 Current activeReplicas size:', activeReplicas?.size);
+
     // Clear selected account when changing entities
     selectedAccountId = null;
 
-    tabOperations.updateTab(tab.id, {
+    // Update tab (this will trigger reactive statement to load new replica)
+    tab = {
+      ...tab,
       jurisdiction,
       signerId,
       entityId,
-    });
+    };
+
+    console.log('🎯 Tab updated to:', { entityId: tab.entityId?.slice(0, 10), signerId: tab.signerId });
   }
 
   // Handle account selection from dropdown OR account preview click

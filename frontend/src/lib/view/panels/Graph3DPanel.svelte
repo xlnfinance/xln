@@ -132,6 +132,7 @@
     deriveDelta: (delta: { [tokenId: number]: bigint }, isLeft: boolean) => DerivedAccountData;
     getTokenInfo: (tokenId: number) => { symbol: string; decimals: number } | undefined;
     getEntityShortId: (entityId: string) => string;
+    isLeft: (myEntityId: string, counterpartyEntityId: string) => boolean;
     executeScenario: (env: unknown, scenario: unknown) => Promise<{ success: boolean; framesGenerated: number; errors?: string[] }>;
     process: (env: unknown, inputs: unknown[]) => Promise<void>;
     parseScenario: (text: string) => { errors: unknown[]; scenario: unknown };
@@ -3394,8 +3395,10 @@ let vrHammer: VRHammer | null = null;
 
     // CANONICAL: Always use LEFT entity's account (smaller entityId)
     // This ensures deterministic rendering regardless of traversal order
-    const leftId = fromId < toId ? fromId : toId;
-    const rightId = fromId < toId ? toId : fromId;
+    // Use runtime's isLeft for single source of truth
+    const fromIsLeftEntity = XLN?.isLeft?.(fromId, toId) ?? (fromId < toId);
+    const leftId = fromIsLeftEntity ? fromId : toId;
+    const rightId = fromIsLeftEntity ? toId : fromId;
 
     let accountData: any = null;
 
@@ -3455,9 +3458,9 @@ let vrHammer: VRHammer | null = null;
     }
 
     // Derive from BOTH perspectives - each entity sees their own values on their side
-    const fromIsLeft = fromId < toId;
-    const fromDerived = deriveEntry(tokenDelta, fromIsLeft);
-    const toDerived = deriveEntry(tokenDelta, !fromIsLeft);
+    // Use fromIsLeftEntity computed above for single source of truth
+    const fromDerived = deriveEntry(tokenDelta, fromIsLeftEntity);
+    const toDerived = deriveEntry(tokenDelta, !fromIsLeftEntity);
 
     // Delegate rendering to AccountBarRenderer
     return createAccountBars(
@@ -3466,7 +3469,7 @@ let vrHammer: VRHammer | null = null;
       toEntity,
       fromDerived,
       toDerived,
-      fromIsLeft,
+      fromIsLeftEntity,
       {
         barsMode,
         portfolioScale: settings.portfolioScale || 5000,

@@ -61,30 +61,38 @@ export function createAccountBars(
   const tokensToVisualUnits = 0.00001; // 1M tokens → 10 visual units
   const barScale = (tokensToVisualUnits / Math.pow(10, decimals)) * (settings.portfolioScale / 5000);
 
-  // Compute debt not captured by inOwnCredit
-  // Delta sign relative to LEFT: delta < 0 = LEFT owes, delta > 0 = RIGHT owes
-  // isLeft tells us which side this entity is on
-  const computeDebtSegment = (derived: DerivedAccountData, isLeft: boolean): number => {
+  // Compute CREDIT DEBT segment (how much I borrowed from peer's CREDIT line)
+  // RED = using peer's credit (actual debt, risky)
+  // GREEN = backed by collateral (safe, secured)
+  const computeCreditDebtSegment = (derived: DerivedAccountData, isLeft: boolean): number => {
     const delta = derived.delta;
-    const entityOwes = isLeft ? (delta < 0) : (delta > 0);
+    const iOwe = isLeft ? (delta < 0) : (delta > 0);
 
-    if (entityOwes) {
-      const debtAmount = Math.abs(delta);
-      // If inOwnCredit doesn't show the debt, it's backed by collateral
-      if (derived.inOwnCredit === 0 && derived.inCollateral > 0) {
-        return Math.min(debtAmount, derived.inCollateral);
-      }
-      // Or debt is backed by peer's credit toward us (not shown in our inOwnCredit)
-      if (derived.inOwnCredit === 0 && derived.inCollateral === 0) {
-        // Debt exists but not backed by our collateral or credit - show it
-        return debtAmount;
-      }
+    if (!iOwe) return 0; // I don't owe peer
+
+    const debtAmount = Math.abs(delta);
+
+    // SIMPLE RULE: Check if ACCOUNT has collateral
+    // If collateral exists and covers the flow → GREEN (collateral-backed, no debt segment)
+    // If collateral = 0 or insufficient → RED (credit-backed, show debt)
+    if (derived.collateral > 0 && debtAmount <= derived.collateral) {
+      // Flow is fully backed by collateral in account → GREEN (no debt segment)
+      return 0;
     }
+
+    // Flow uses credit (either no collateral or beyond collateral)
+    const creditDebt = Math.max(0, debtAmount - derived.collateral);
+
+    // Only show if peer actually extended credit
+    if (creditDebt > 0 && derived.peerCreditLimit > 0) {
+      return Math.min(creditDebt, derived.peerCreditLimit);
+    }
+
     return 0;
   };
 
-  const fromDebtSegment = computeDebtSegment(fromDerived, fromIsLeft) * barScale;
-  const toDebtSegment = computeDebtSegment(toDerived, !fromIsLeft) * barScale;
+  const fromDebtSegment = computeCreditDebtSegment(fromDerived, fromIsLeft) * barScale;
+  const toDebtSegment = computeCreditDebtSegment(toDerived, !fromIsLeft) * barScale;
 
   // When peer uses our credit, reduce our outOwnCredit (unused credit) accordingly
   // Delta > 0 for LEFT means RIGHT owes → LEFT's credit is being used by RIGHT
@@ -104,22 +112,22 @@ export function createAccountBars(
   const toCreditUsed = computeCreditUsedByPeer(toDerived, !fromIsLeft) * barScale;
 
   // Each entity's bars use their own perspective
-  // Adjust inCollateral when debt is shown separately
+  // inOwnCredit shows debt (what I OWE peer) - red on MY side
   // Adjust outOwnCredit when peer is using our credit
   const fromSegments: AccountSegments = {
     outOwnCredit: (fromDerived.outOwnCredit * barScale) - fromCreditUsed,
-    inCollateral: (fromDerived.inCollateral * barScale) - fromDebtSegment,
+    inCollateral: fromDerived.inCollateral * barScale,  // Don't reduce by debt - collateral is separate
     outPeerCredit: fromDerived.outPeerCredit * barScale,
-    inOwnCredit: fromDebtSegment > 0 ? fromDebtSegment : (fromDerived.inOwnCredit * barScale),
+    inOwnCredit: fromDebtSegment,  // Only show credit-backed debt (0 for collateral-backed)
     outCollateral: fromDerived.outCollateral * barScale,
     inPeerCredit: fromDerived.inPeerCredit * barScale
   };
 
   const toSegments: AccountSegments = {
     outOwnCredit: (toDerived.outOwnCredit * barScale) - toCreditUsed,
-    inCollateral: (toDerived.inCollateral * barScale) - toDebtSegment,
+    inCollateral: toDerived.inCollateral * barScale,  // Don't reduce by debt - collateral is separate
     outPeerCredit: toDerived.outPeerCredit * barScale,
-    inOwnCredit: toDebtSegment > 0 ? toDebtSegment : (toDerived.inOwnCredit * barScale),
+    inOwnCredit: toDebtSegment,  // Only show credit-backed debt (0 for collateral-backed)
     outCollateral: toDerived.outCollateral * barScale,
     inPeerCredit: toDerived.inPeerCredit * barScale
   };
@@ -181,11 +189,11 @@ function renderSpreadMode(
   );
 
   let fromOffset = 0;
-  // Show what fromEntity has and owes
+  // CAPACITY MODEL: Show what fromEntity CAN USE
   const fromBars: Array<{key: keyof AccountSegments, colorType: keyof typeof BAR_COLORS}> = [
-    { key: 'outOwnCredit', colorType: 'availableCredit' },  // their unused credit (pink)
-    { key: 'inCollateral', colorType: 'secured' },          // their collateral (green)
-    { key: 'inOwnCredit', colorType: 'unsecured' }          // their credit being used / debt (red)
+    { key: 'inPeerCredit', colorType: 'availableCredit' },  // peer's credit TO us (we can use)
+    { key: 'inCollateral', colorType: 'secured' },          // our collateral (green)
+    { key: 'inOwnCredit', colorType: 'unsecured' }          // debt we owe (red)
   ];
 
   fromBars.forEach((barSpec) => {
@@ -210,11 +218,11 @@ function renderSpreadMode(
   );
 
   let toOffset = 0;
-  // Show what toEntity has and owes
+  // CAPACITY MODEL: Show what toEntity CAN USE
   const toBars: Array<{key: keyof AccountSegments, colorType: keyof typeof BAR_COLORS}> = [
-    { key: 'outOwnCredit', colorType: 'availableCredit' },  // their unused credit (pink)
+    { key: 'inPeerCredit', colorType: 'availableCredit' },  // peer's credit TO them (they can use)
     { key: 'inCollateral', colorType: 'secured' },          // their collateral (green)
-    { key: 'inOwnCredit', colorType: 'unsecured' }          // their credit being used / debt (red)
+    { key: 'inOwnCredit', colorType: 'unsecured' }          // debt they owe (red)
   ];
 
   toBars.forEach((barSpec) => {

@@ -112,6 +112,20 @@ export class BrowserVMProvider {
     console.log('[BrowserVM] All contracts deployed successfully');
   }
 
+  /** Reset VM to fresh state - recreates VM and redeploys contracts */
+  async reset(): Promise<void> {
+    console.log('[BrowserVM] Resetting to fresh state...');
+    this.initialized = false;
+    this.vm = null;
+    this.common = null;
+    this.accountAddress = null;
+    this.depositoryAddress = null;
+    this.entityProviderAddress = null;
+    this.nonce = 0n;
+    await this.init();
+    console.log('[BrowserVM] Reset complete - fresh contracts deployed');
+  }
+
   /** Deploy Account library */
   private async deployAccount(): Promise<void> {
     console.log('[BrowserVM] Deploying Account library...');

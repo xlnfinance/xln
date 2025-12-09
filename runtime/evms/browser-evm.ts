@@ -31,6 +31,7 @@ export class BrowserEVM implements JurisdictionEVM {
 
   // Proxy all provider methods
   async init() { return this.provider.init(); }
+  async reset() { return this.provider.reset(); }
   getDepositoryAddress() { return this.provider.getDepositoryAddress(); }
   getBlockNumber() { return this.provider.getBlockNumber(); }
   async captureStateRoot() { return this.provider.captureStateRoot(); }
