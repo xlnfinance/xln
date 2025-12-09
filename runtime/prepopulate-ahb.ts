@@ -139,12 +139,30 @@ async function executeR2C(
 ): Promise<void> {
   console.log(`[AHB] Executing R2C: ${entityName || entityId.slice(0, 10)} → ${counterpartyId.slice(0, 10)}, amount=${Number(amount) / 1e18}`);
 
+  // SOLVENCY DEBUG: Check reserves BEFORE
+  const [, replica] = findReplica(env, entityId);
+  const reservesBefore = replica.state.reserves?.get(String(tokenId)) ?? 0n;
+  console.log(`🔍 SOLVENCY: ${entityName} reserves BEFORE R2C: ${Number(reservesBefore) / 1e18}`);
+
   // Step 1: On-chain transfer (reserve → collateral)
   await browserVM.prefundAccount(entityId, counterpartyId, tokenId, amount);
   console.log(`[AHB] ✅ BrowserVM.prefundAccount completed`);
 
+  // SOLVENCY DEBUG: Query EVM directly AFTER transaction
+  const evmReservesAfter = await browserVM.getReserves(entityId, tokenId);
+  console.log(`🔍 SOLVENCY: EVM _reserves[${entityName}] AFTER tx: ${Number(evmReservesAfter) / 1e18}`);
+
   // Step 2: Sync reserves
   await syncReservesFromBrowserVM(env, entityId, browserVM, entityName);
+
+  // SOLVENCY DEBUG: Check what sync wrote
+  const reservesAfterSync = replica.state.reserves?.get(String(tokenId)) ?? 0n;
+  console.log(`🔍 SOLVENCY: ${entityName} reserves AFTER sync: ${Number(reservesAfterSync) / 1e18}`);
+  console.log(`🔍 SOLVENCY: Delta = ${Number(reservesBefore - reservesAfterSync) / 1e18} (expected ${Number(amount) / 1e18})`);
+
+  if (reservesBefore - reservesAfterSync !== amount) {
+    console.error(`❌ SOLVENCY VIOLATION: Reserve deduction doesn't match R2C amount!`);
+  }
 
   // Step 3: Update account machine's delta.collateral
   const [, replica] = findReplica(env, entityId);

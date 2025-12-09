@@ -3402,23 +3402,48 @@ let vrHammer: VRHammer | null = null;
 
     let accountData: any = null;
 
-    // Try LEFT entity's replica first (canonical source)
+    // CANONICAL ACCOUNT SELECTION: Use most recent finalized state (highest currentFrame.height)
+    // This ensures visual solvency during bilateral consensus desync
     const leftReplica = [...currentReplicas.entries()]
       .find(([key]) => key.startsWith(leftId + ':'));
+    const rightReplica = [...currentReplicas.entries()]
+      .find(([key]) => key.startsWith(rightId + ':'));
 
-    if (leftReplica?.[1]?.state?.accounts) {
-      accountData = leftReplica[1].state.accounts.get(rightId);
-    }
+    const leftAccount = leftReplica?.[1]?.state?.accounts?.get(rightId);
+    const rightAccount = rightReplica?.[1]?.state?.accounts?.get(leftId);
 
-    // Fallback to RIGHT entity's replica only if LEFT doesn't have account
-    if (!accountData) {
-      const rightReplica = [...currentReplicas.entries()]
-        .find(([key]) => key.startsWith(rightId + ':'));
+    // Compare finalized heights - use HIGHER (most recent consensus state)
+    // Store both for potential dual rendering (confirmed + pending)
+    let confirmedAccount = null;
+    let pendingAccount = null;
 
-      if (rightReplica?.[1]?.state?.accounts) {
-        accountData = rightReplica[1].state.accounts.get(leftId);
+    if (leftAccount && rightAccount) {
+      const leftHeight = leftAccount.currentFrame?.height ?? 0;
+      const rightHeight = rightAccount.currentFrame?.height ?? 0;
+
+      if (leftHeight > rightHeight) {
+        accountData = leftAccount; // Primary render (highest)
+        confirmedAccount = rightAccount; // Lower height (confirmed)
+        pendingAccount = leftAccount; // Higher height (pending signature)
+      } else if (rightHeight > leftHeight) {
+        accountData = rightAccount;
+        confirmedAccount = leftAccount;
+        pendingAccount = rightAccount;
+      } else {
+        // Same height - synced, use LEFT (canonical tiebreaker)
+        accountData = leftAccount;
+        confirmedAccount = leftAccount; // Both synced
+        pendingAccount = null; // No pending state
       }
+    } else {
+      // Fallback if only one side has account
+      accountData = leftAccount || rightAccount;
+      confirmedAccount = accountData;
+      pendingAccount = null;
     }
+
+    // TODO: Future enhancement - render both confirmed (solid) and pending (translucent) bars
+    // when pendingAccount !== null for visual desync indication
 
     // NO BARS if no real account data
     if (!accountData) {
@@ -4899,11 +4924,11 @@ let vrHammer: VRHammer | null = null;
 
   // Handle open full panel
   function handleOpenFullPanel(event: CustomEvent) {
-    const { entityId, entityName } = event.detail;
+    const { entityId, entityName, signerId } = event.detail;
     console.log(`[Graph3D] Open full panel for: ${entityName || entityId}`);
     // Emit event to parent to open EntityOperationsPanel in Dockview
     // @ts-ignore - emit exists on panelBridge
-    panelBridge.emit('openEntityOperations', { entityId, entityName });
+    panelBridge.emit('openEntityOperations', { entityId, entityName, signerId: signerId || entityId });
     showMiniPanel = false;
   }
 

@@ -353,6 +353,11 @@
     {/if}
   </button>
 
+  <!-- Settings button -->
+  <button on:click={() => panelBridge.emit('focusPanel', { panelId: 'settings' })} class="settings-btn" title="Open Settings">
+    ⚙️
+  </button>
+
   <!-- Progress Scrubber with frame info -->
   <div class="scrubber-container">
     <div class="frame-info">
@@ -437,7 +442,7 @@
     padding: 0.5rem 1rem;
     background: #1a1a1a;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
-    height: 48px;
+    height: 34px;
     position: fixed;
     bottom: 0;
     left: 0;
@@ -463,6 +468,26 @@
 
   .play-btn:hover {
     background: rgba(0, 122, 255, 0.25);
+  }
+
+  .settings-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(128, 128, 128, 0.15);
+    border: none;
+    color: rgba(200, 200, 200, 1);
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+    font-size: 14px;
+  }
+
+  .settings-btn:hover {
+    background: rgba(128, 128, 128, 0.25);
   }
 
   /* Scrubber Container */

@@ -748,7 +748,7 @@ export interface JReplica {
   reserves?: Map<string, Map<number, bigint>>;  // entityId -> tokenId -> amount
 
   // mapping(bytes => mapping(uint => AccountCollateral)) _collaterals
-  collaterals?: Map<string, Map<number, bigint>>; // accountKey -> tokenId -> amount
+  collaterals?: Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>; // accountKey -> tokenId -> {collateral, ondelta}
 
   // mapping(bytes32 => InsuranceLine[]) insuranceLines
   insuranceLines?: Map<string, Array<{ insurer: string; tokenId: number; remaining: bigint; expiresAt: bigint }>>;

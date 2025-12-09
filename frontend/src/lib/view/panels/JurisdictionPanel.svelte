@@ -262,13 +262,13 @@
           {#if selectedJurisdiction.contracts?.depository}
             <div class="info-row">
               <span class="info-label">Depository</span>
-              <span class="info-value mono">{formatEntityId(selectedJurisdiction.contracts.depository)}</span>
+              <span class="info-value mono">{selectedJurisdiction.contracts.depository}</span>
             </div>
           {/if}
           {#if selectedJurisdiction.contracts?.entityProvider}
             <div class="info-row">
               <span class="info-label">EntityProvider</span>
-              <span class="info-value mono">{formatEntityId(selectedJurisdiction.contracts.entityProvider)}</span>
+              <span class="info-value mono">{selectedJurisdiction.contracts.entityProvider}</span>
             </div>
           {/if}
           <div class="info-row">
