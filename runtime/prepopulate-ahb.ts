@@ -104,6 +104,10 @@ async function syncReservesFromBrowserVM(
   // Get actual reserves from BrowserVM
   const reserves = await browserVM.getReserves(entityId, USDC_TOKEN_ID);
 
+  // DEBUG: Log what BrowserVM returned
+  const oldReserves = replica.state.reserves?.get(String(USDC_TOKEN_ID)) ?? 0n;
+  console.log(`[AHB-DEBUG] ${entityName}: BrowserVM returned ${reserves}, old replica value was ${oldReserves}`);
+
   // Update replica state
   if (!replica.state.reserves) {
     replica.state.reserves = new Map();
@@ -115,7 +119,7 @@ async function syncReservesFromBrowserVM(
     env.gossip.announce(buildEntityProfile(replica.state, entityName));
   }
 
-  console.log(`[AHB] Synced reserves for ${entityName || entityId.slice(0, 10)}: ${Number(reserves) / 1e18} USDC`);
+  console.log(`[AHB] Synced reserves for ${entityName || entityId.slice(0, 10)}: ${reserves / 10n**18n}M USDC`);
 }
 
 /**
@@ -171,6 +175,96 @@ async function executeR2C(
   }
 }
 
+/**
+ * COMPREHENSIVE STATE DUMP - Full JSON dump of system state
+ * Enable/disable via AHB_DEBUG=1 environment variable or pass enabled=true
+ */
+function dumpSystemState(env: Env, label: string, enabled: boolean = true): void {
+  if (!enabled && !process.env.AHB_DEBUG) return;
+
+  // Named entities for easier reading
+  const ENTITY_NAMES: Record<string, string> = {
+    '0x0000000000000000000000000000000000000000000000000000000000000001': 'Alice',
+    '0x0000000000000000000000000000000000000000000000000000000000000002': 'Hub',
+    '0x0000000000000000000000000000000000000000000000000000000000000003': 'Bob',
+  };
+
+  const getName = (id: string): string => ENTITY_NAMES[id] || id.slice(-4);
+
+  // Build JSON-serializable state object
+  const state: Record<string, any> = {
+    label,
+    timestamp: Date.now(),
+    height: env.height,
+    entities: {} as Record<string, any>,
+  };
+
+  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    const entityId = replicaKey.split(':')[0];
+    const entityName = getName(entityId);
+
+    const entityState: Record<string, any> = {
+      name: entityName,
+      entityId: entityId.slice(-8),
+      reserves: {} as Record<string, string>,
+      accounts: {} as Record<string, any>,
+    };
+
+    // Reserves (convert BigInt to string for JSON)
+    if (replica.state.reserves) {
+      for (const [tokenId, amount] of replica.state.reserves.entries()) {
+        const usd = Number(amount) / 1e18;
+        entityState.reserves[tokenId] = { raw: amount.toString(), usd: `$${usd.toLocaleString()}` };
+      }
+    }
+
+    // Accounts
+    if (replica.state.accounts) {
+      for (const [counterpartyId, account] of replica.state.accounts.entries()) {
+        const counterpartyName = getName(counterpartyId);
+        const isLeft = entityId < counterpartyId;
+
+        const accountState: Record<string, any> = {
+          counterparty: counterpartyName,
+          counterpartyId: counterpartyId.slice(-8),
+          perspective: isLeft ? 'LEFT' : 'RIGHT',
+          globalCreditLimits: {
+            ownLimit: account.globalCreditLimits.ownLimit.toString(),
+            peerLimit: account.globalCreditLimits.peerLimit.toString(),
+          },
+          deltas: {} as Record<number, any>,
+        };
+
+        for (const [tokenId, delta] of account.deltas.entries()) {
+          const totalDelta = delta.ondelta + delta.offdelta;
+          accountState.deltas[tokenId] = {
+            collateral: { raw: delta.collateral.toString(), usd: `$${(Number(delta.collateral) / 1e18).toLocaleString()}` },
+            ondelta: { raw: delta.ondelta.toString(), usd: `$${(Number(delta.ondelta) / 1e18).toLocaleString()}` },
+            offdelta: { raw: delta.offdelta.toString(), usd: `$${(Number(delta.offdelta) / 1e18).toLocaleString()}` },
+            totalDelta: {
+              raw: totalDelta.toString(),
+              usd: `$${(Number(totalDelta) / 1e18).toLocaleString()}`,
+              meaning: totalDelta > 0n ? 'RIGHT owes LEFT' : totalDelta < 0n ? 'LEFT owes RIGHT' : 'balanced',
+            },
+            leftCreditLimit: { raw: delta.leftCreditLimit.toString(), usd: `$${(Number(delta.leftCreditLimit) / 1e18).toLocaleString()}`, meaning: 'LEFT extends to RIGHT' },
+            rightCreditLimit: { raw: delta.rightCreditLimit.toString(), usd: `$${(Number(delta.rightCreditLimit) / 1e18).toLocaleString()}`, meaning: 'RIGHT extends to LEFT' },
+          };
+        }
+
+        entityState.accounts[counterpartyName] = accountState;
+      }
+    }
+
+    state.entities[entityName] = entityState;
+  }
+
+  console.log('\n' + '='.repeat(80));
+  console.log(`📊 SYSTEM STATE DUMP: ${label}`);
+  console.log('='.repeat(80));
+  console.log(JSON.stringify(state, null, 2));
+  console.log('='.repeat(80) + '\n');
+}
+
 interface FrameSubtitle {
   title: string;           // Short header (e.g., "Reserve-to-Reserve Transfer")
   what: string;            // What's happening technically
@@ -186,13 +280,19 @@ function checkSolvency(env: Env, expected: bigint, label: string): void {
   let reserves = 0n;
   let collateral = 0n;
 
-  for (const [_, replica] of env.eReplicas) {
-    for (const [_, amount] of replica.state.reserves) {
+  console.log(`[SOLVENCY ${label}] Checking ${env.eReplicas.size} replicas...`);
+
+  for (const [replicaKey, replica] of env.eReplicas) {
+    let replicaReserves = 0n;
+    for (const [tokenKey, amount] of replica.state.reserves) {
+      replicaReserves += amount;
       reserves += amount;
     }
+    console.log(`  [${replicaKey.slice(0,20)}] reserves=${replicaReserves / 10n**18n}M`);
+
     for (const [counterpartyId, account] of replica.state.accounts) {
       if (replica.state.entityId < counterpartyId) {
-        for (const [_, delta] of account.deltas) {
+        for (const [, delta] of account.deltas) {
           collateral += delta.collateral;
         }
       }
@@ -200,12 +300,13 @@ function checkSolvency(env: Env, expected: bigint, label: string): void {
   }
 
   const total = reserves + collateral;
+  console.log(`[SOLVENCY ${label}] Total: reserves=${reserves / 10n**18n}M, collateral=${collateral / 10n**18n}M, sum=${total / 10n**18n}M`);
+
   if (total !== expected) {
     console.error(`❌ [${label}] SOLVENCY FAIL: ${total} !== ${expected}`);
-    console.error(`   Reserves: ${reserves}, Collateral: ${collateral}`);
     throw new Error(`SOLVENCY VIOLATION at "${label}": got ${total}, expected ${expected}`);
   }
-  console.log(`✅ [${label}] Solvency OK: ${total} (R:${reserves} + C:${collateral})`);
+  console.log(`✅ [${label}] Solvency OK`);
 }
 
 // Get offdelta for a bilateral account (uses LEFT entity's view - canonical)
@@ -239,30 +340,32 @@ function verifyPayment(
   console.log(`  Sender-Hub offdelta: ${senderHubDelta}`);
   console.log(`  Hub-Receiver offdelta: ${hubReceiverDelta}`);
 
-  // Sender-Hub: sender (Alice) is LEFT, hub is RIGHT
-  // Alice owes Hub → LEFT owes RIGHT → totalDelta < 0 from LEFT view
-  if (senderHubDelta >= 0n) {
-    throw new Error(`PAYMENT FAILED at "${label}": Sender-Hub offdelta should be negative after payment (got ${senderHubDelta})`);
+  // DELTA SEMANTICS (corrected):
+  // - Sender-Hub: Alice (LEFT) has collateral, sends → delta POSITIVE (Hub holds Alice's value)
+  // - Hub-Receiver: Hub (LEFT) uses Bob's credit → delta NEGATIVE (Hub owes Bob)
+
+  // Sender-Hub: Alice (LEFT) paid Hub (RIGHT) from collateral → offdelta POSITIVE
+  if (senderHubDelta <= 0n) {
+    throw new Error(`PAYMENT FAILED at "${label}": Sender-Hub offdelta should be positive after payment (got ${senderHubDelta})`);
   }
 
-  // Hub-Receiver: receiver (Bob) is LEFT, hub is RIGHT
-  // Hub owes Bob → RIGHT owes LEFT → totalDelta > 0 from LEFT view
-  if (hubReceiverDelta <= 0n) {
-    throw new Error(`PAYMENT FAILED at "${label}": Hub-Receiver offdelta should be positive after payment (got ${hubReceiverDelta})`);
+  // Hub-Receiver: Hub (LEFT) used Bob's credit → offdelta NEGATIVE (Hub owes Bob)
+  if (hubReceiverDelta >= 0n) {
+    throw new Error(`PAYMENT FAILED at "${label}": Hub-Receiver offdelta should be negative after payment (got ${hubReceiverDelta})`);
   }
 
   // Verify sender paid exact amount
-  if (-senderHubDelta !== amount) {
-    throw new Error(`PAYMENT MISMATCH at "${label}": Sender-Hub offdelta is ${-senderHubDelta}, expected ${amount}`);
+  if (senderHubDelta !== amount) {
+    throw new Error(`PAYMENT MISMATCH at "${label}": Sender-Hub offdelta is ${senderHubDelta}, expected ${amount}`);
   }
 
   // Hub takes routing fee (0.1%), so receiver gets slightly less
   const minReceiverAmount = (amount * 99n) / 100n; // Allow up to 1% fee
-  if (hubReceiverDelta < minReceiverAmount) {
-    throw new Error(`PAYMENT MISMATCH at "${label}": Hub-Receiver offdelta is ${hubReceiverDelta}, expected at least ${minReceiverAmount}`);
+  if (-hubReceiverDelta < minReceiverAmount) {
+    throw new Error(`PAYMENT MISMATCH at "${label}": Hub-Receiver offdelta is ${-hubReceiverDelta}, expected at least ${minReceiverAmount}`);
   }
 
-  const hubFee = -senderHubDelta - hubReceiverDelta;
+  const hubFee = senderHubDelta - (-hubReceiverDelta);
   console.log(`✅ [${label}] Payment verified: ${Number(amount) / 1e18} sent, Hub fee: ${Number(hubFee) / 1e18}`);
 }
 
@@ -402,6 +505,21 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
       console.log('[AHB] ✅ BrowserVM instance available');
     }
 
+    // CRITICAL: Reset BrowserVM to fresh state EVERY time AHB runs
+    // This prevents reserve accumulation on re-runs (button clicks, HMR, etc.)
+    if (browserVM.reset) {
+      console.log('[AHB] Calling browserVM.reset()...');
+      await browserVM.reset();
+      // Verify reset worked by checking Hub's reserves (should be 0)
+      // Hub entityId = 0x0002 (entity #2)
+      const HUB_ENTITY_ID = '0x' + '2'.padStart(64, '0');
+      const hubReservesAfterReset = await browserVM.getReserves(HUB_ENTITY_ID, USDC_TOKEN_ID);
+      console.log(`[AHB] ✅ BrowserVM reset complete. Hub reserves after reset: ${hubReservesAfterReset}`);
+      if (hubReservesAfterReset !== 0n) {
+        throw new Error(`BrowserVM reset FAILED: Hub still has ${hubReservesAfterReset} reserves`);
+      }
+    }
+
     const jurisdictions = await getAvailableJurisdictions();
     let arrakis = jurisdictions.find(j => j.name.toLowerCase() === 'arrakis');
 
@@ -535,6 +653,9 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     // STEP 1: Initial State - Hub funded with $10M USDC via REAL BrowserVM tx
     // ============================================================================
     console.log('\n💰 FRAME 1: Initial State - Hub Reserve Funding (REAL BrowserVM TX)');
+
+    // NOTE: BrowserVM is reset in View.svelte at runtime creation time
+    // This ensures fresh state on every page load/HMR
 
     // REAL BrowserVM transaction: debugFundReserves
     await browserVM.debugFundReserves(hub.id, USDC_TOKEN_ID, usd(10_000_000));
@@ -856,6 +977,9 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
 
     // SELF-TEST: Verify payment actually moved value through hub
     verifyPayment(env, alice.id, hub.id, bob.id, USDC_TOKEN_ID, paymentAmount, 'Frame 10 - A→H→B Payment');
+
+    // COMPREHENSIVE DEBUG: Dump all state after payment
+    dumpSystemState(env, 'AFTER PAYMENT (Frame 10)');
 
     await pushSnapshot(env, 'Off-Chain Payment: Alice → Hub → Bob $125K', {
       title: '⚡ First Off-Chain Payment: A → H → B',

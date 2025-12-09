@@ -41,14 +41,24 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   let inCollateral = totalDelta > 0n ? nonNegative(collateral - totalDelta) : collateral;
   let outCollateral = totalDelta > 0n ? (totalDelta > collateral ? collateral : totalDelta) : 0n;
 
+  // When delta > 0: peer owes us (peer is using OUR credit or we hold their collateral)
+  // When delta < 0: we owe peer (we're using PEER's credit or they hold our collateral)
+
+  // inOwnCredit = how much we owe using OUR OWN credit (when delta < 0 beyond collateral)
   let inOwnCredit = nonNegative(-totalDelta);
   if (inOwnCredit > ownCreditLimit) inOwnCredit = ownCreditLimit;
 
+  // outPeerCredit = how much peer owes using OUR credit (when delta > 0 beyond collateral)
   let outPeerCredit = nonNegative(totalDelta - collateral);
   if (outPeerCredit > peerCreditLimit) outPeerCredit = peerCreditLimit;
 
+  // outOwnCredit = remaining OWN credit we can extend
   let outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
-  let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
+
+  // CRITICAL FIX: inPeerCredit = remaining PEER credit we can use
+  // When delta < 0, we're already using peer's credit = max(0, -delta - collateral)
+  const peerCreditUsed = totalDelta < 0n ? nonNegative(-totalDelta - collateral) : 0n;
+  let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit - peerCreditUsed);
 
   let inAllowence = delta.rightAllowance;
   let outAllowence = delta.leftAllowance;

@@ -31,7 +31,6 @@
   export let networkMode: 'simnet' | 'testnet' | 'mainnet' = 'simnet'; void networkMode;
   export let embedMode: boolean = false; // When true: hide panels, show only 3D + minimal controls
   export let scenarioId: string = ''; // Auto-run scenario on load (e.g. 'ahb', 'fed-chair')
-  export let autoplay: boolean = false; // When true: auto-run scenario immediately on load
 
   let container: HTMLDivElement;
   let dockview: DockviewComponent;
@@ -65,7 +64,12 @@
     try {
       // Step 1: Initialize BrowserVM (deploy Depository in-browser)
       const { browserVMProvider } = await import('./utils/browserVMProvider');
-      await browserVMProvider.init();
+
+      // Reset BrowserVM to ensure fresh state (prevents stale reserves from previous runs)
+      // This is critical for scenario re-runs and HMR during development
+      await browserVMProvider.reset();
+      console.log('[View] BrowserVM reset to fresh state');
+
       const depositoryAddress = browserVMProvider.getDepositoryAddress();
 
       console.log('[View] BrowserVM ready:', { depositoryAddress });
@@ -142,8 +146,8 @@
       localTimeIndex.set(urlImport?.state.ui?.ti ?? -1);
       localIsLive.set(true);
 
-      // AUTOPLAY: Auto-run scenario if requested
-      if (autoplay && scenarioId) {
+      // Auto-run scenario if scenarioId is provided
+      if (scenarioId) {
         console.log(`[View] 🎬 Autoplay: Running scenario "${scenarioId}"...`);
 
         // Supported scenarios (others show error)
@@ -419,18 +423,23 @@
 
     // Listen for entity panel requests from Graph3D (click on entity node)
     unsubOpenEntity = panelBridge.on('openEntityOperations', ({ entityId, entityName, signerId }) => {
-      // Check if panel already exists for this entity
-      const panelId = `entity-${entityId.slice(0, 8)}`;
-      const existingPanel = dockview.getPanel(panelId);
+      // Use full entityId to avoid collisions
+      const panelId = `entity-${entityId}`;
+
+      // Check ALL panels to find existing one
+      const allPanels = dockview.panels;
+      const existingPanel = allPanels.find(p => p.id === panelId);
 
       if (existingPanel) {
-        // Focus existing panel
+        console.log('[View] Focusing existing entity panel:', entityId.slice(0, 10));
         existingPanel.api.setActive();
         return;
       }
 
       // Create new panel using EntityPanelWrapper (reuses full EntityPanel)
       try {
+        console.log('[View] 📋 Creating entity panel:', { id: panelId, entityId: entityId.slice(0, 10), entityName, signerId });
+
         dockview.addPanel({
           id: panelId,
           component: 'entity-panel',
@@ -438,13 +447,16 @@
           position: { direction: 'within', referencePanel: 'architect' },
           params: { entityId, entityName, signerId }
         });
-        console.log('[View] Opened entity panel:', entityId.slice(0, 10));
+        console.log('[View] ✅ Entity panel created:', entityId.slice(0, 10));
       } catch (err) {
-        // Panel might already exist from race condition - try to focus it
-        console.warn('[View] Panel creation failed, trying to focus:', err);
-        const retryPanel = dockview.getPanel(panelId);
+        // Panel might already exist from race condition - force focus
+        console.error('[View] ❌ Panel creation failed:', err);
+        const retryPanel = dockview.panels.find(p => p.id === panelId);
         if (retryPanel) {
+          console.log('[View] Retry: focusing existing panel');
           retryPanel.api.setActive();
+        } else {
+          console.error('[View] Panel not found even after error - this should not happen');
         }
       }
     });

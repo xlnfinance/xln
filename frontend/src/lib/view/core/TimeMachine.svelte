@@ -357,7 +357,7 @@
   <div class="scrubber-container">
     <div class="frame-info">
       <span class="frame-badge" class:live={$isLive}>
-        {$isLive ? 'LIVE' : `${$timeIndex + 1}/${$history.length}`}
+        {$isLive ? `LIVE/${$history.length}` : `${$timeIndex + 1}/${$history.length}`}
       </span>
       <span class="time-label">{currentTime}</span>
     </div>

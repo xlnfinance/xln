@@ -1,9 +1,8 @@
 <script lang="ts">
   import type { AccountMachine, Delta } from '$lib/types/ui';
-  // Functions now accessed through $xlnEnvironment.xln from runtime.ts
-  // Entity functions now accessed through xlnFunctions from runtime.js
   import { createEventDispatcher } from 'svelte';
   import { xlnFunctions } from '../../stores/xlnStore';
+  import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
 
   export let account: AccountMachine;
   export let counterpartyId: string;
@@ -11,6 +10,22 @@
   export let isSelected: boolean = false;
 
   const dispatch = createEventDispatcher();
+
+  // Get entity names from gossip
+  const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
+
+  function getEntityName(id: string): string {
+    const envData = entityEnv?.env ? (entityEnv.env as any) : null;
+    if (envData?.gossip) {
+      const profiles = typeof envData.gossip.getProfiles === 'function' ? envData.gossip.getProfiles() : (envData.gossip.profiles || []);
+      const profile = profiles.find((p: any) => p.entityId === id);
+      if (profile?.metadata?.name) return profile.metadata.name;
+    }
+    return '';
+  }
+
+  $: ourName = getEntityName(entityId);
+  $: counterpartyName = getEntityName(counterpartyId);
 
   // Validate xlnFunctions availability - fail fast if not ready
 
@@ -96,7 +111,9 @@
 >
   <div class="account-header">
     <div class="entity-info">
-      <span class="entity-name">Entity #{$xlnFunctions!.getEntityShortId(counterpartyId)}</span>
+      <span class="our-entity">{ourName || `#${$xlnFunctions!.getEntityShortId(entityId)}`}</span>
+      <span class="separator">←→</span>
+      <span class="counterparty-name">{counterpartyName || `#${$xlnFunctions!.getEntityShortId(counterpartyId)}`}</span>
     </div>
     <div class="account-status">
       {#if account.mempool.length > 0 || (account as any).pendingFrame || (account as any).sentTransitions > 0}
@@ -129,41 +146,15 @@
           {td.tokenInfo.symbol}
         </span>
         <div class="delta-bar">
-          <!-- Left side: Outbound capacity (what we can send) -->
+          <!-- OWNERSHIP MODEL: LEFT = Our assets, RIGHT = Their assets -->
+
+          <!-- Left side: Our side (what WE own/extended) -->
           <div class="bar-section left-side">
             {#if td.ourUnusedCredit > 0n}
               <div
                 class="bar-segment unused-credit"
                 style="width: {Number((td.ourUnusedCredit * 100n) / td.totalCapacity)}%"
-                title="Our unused credit: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourUnusedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
-              ></div>
-            {/if}
-            {#if td.theirCollateralLocked > 0n}
-              <div
-                class="bar-segment collateral"
-                style="width: {Number((td.theirCollateralLocked * 100n) / td.totalCapacity)}%"
-                title="Their collateral: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirCollateralLocked) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
-              ></div>
-            {/if}
-            {#if td.ourUsedCredit > 0n}
-              <div
-                class="bar-segment used-credit"
-                style="width: {Number((td.ourUsedCredit * 100n) / td.totalCapacity)}%"
-                title="Credit they're using: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourUsedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
-              ></div>
-            {/if}
-          </div>
-
-          <!-- Visual separator -->
-          <div class="bar-separator">|</div>
-
-          <!-- Right side: Inbound capacity (what we can receive) -->
-          <div class="bar-section right-side">
-            {#if td.theirUnusedCredit > 0n}
-              <div
-                class="bar-segment unused-credit"
-                style="width: {Number((td.theirUnusedCredit * 100n) / td.totalCapacity)}%"
-                title="Their unused credit: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirUnusedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
+                title="Our credit extended to peer: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourUnusedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
               ></div>
             {/if}
             {#if td.ourCollateralLocked > 0n}
@@ -173,11 +164,39 @@
                 title="Our collateral: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourCollateralLocked) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
               ></div>
             {/if}
+            {#if td.ourUsedCredit > 0n}
+              <div
+                class="bar-segment used-credit"
+                style="width: {Number((td.ourUsedCredit * 100n) / td.totalCapacity)}%"
+                title="Credit peer is using from us: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourUsedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
+              ></div>
+            {/if}
+          </div>
+
+          <!-- Visual separator -->
+          <div class="bar-separator">|</div>
+
+          <!-- Right side: Their side (what THEY own/extended) -->
+          <div class="bar-section right-side">
+            {#if td.theirUnusedCredit > 0n}
+              <div
+                class="bar-segment unused-credit"
+                style="width: {Number((td.theirUnusedCredit * 100n) / td.totalCapacity)}%"
+                title="Peer credit extended to us: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirUnusedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
+              ></div>
+            {/if}
+            {#if td.theirCollateralLocked > 0n}
+              <div
+                class="bar-segment collateral"
+                style="width: {Number((td.theirCollateralLocked * 100n) / td.totalCapacity)}%"
+                title="Peer collateral: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirCollateralLocked) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
+              ></div>
+            {/if}
             {#if td.theirUsedCredit > 0n}
               <div
                 class="bar-segment used-credit"
                 style="width: {Number((td.theirUsedCredit * 100n) / td.totalCapacity)}%"
-                title="Credit we're using: {$xlnFunctions!.formatTokenAmount(td.tokenId, td.theirUsedCredit)}"
+                title="Credit we're using from peer: {$xlnFunctions!.formatTokenAmount(td.tokenId, td.theirUsedCredit)}"
               ></div>
             {/if}
           </div>
@@ -233,11 +252,46 @@
     gap: 6px;
   }
 
-  .entity-name {
-    font-weight: 500;
-    color: #e1e1e1;
+  .our-entity {
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 400;
+    font-size: 0.9em;
+  }
+
+  .separator {
+    color: rgba(255, 255, 255, 0.3);
+    font-weight: 300;
+    font-size: 0.85em;
+  }
+
+  .counterparty-name {
+    font-weight: 600;
+    color: #4fd18b;
     font-size: 0.95em;
-    letter-spacing: 0.02em;
+    text-decoration: underline;
+    text-decoration-color: rgba(79, 209, 139, 0.3);
+    text-underline-offset: 3px;
+  }
+
+  .our-entity {
+    color: rgba(255, 255, 255, 0.5);
+    font-weight: 400;
+    font-size: 0.9em;
+  }
+
+  .separator {
+    color: rgba(255, 255, 255, 0.3);
+    font-weight: 300;
+    font-size: 0.85em;
+  }
+
+  .counterparty-name {
+    font-weight: 600;
+    color: #4fd18b;
+    font-size: 0.95em;
+    text-decoration: underline;
+    text-decoration-color: rgba(79, 209, 139, 0.3);
+    text-underline-offset: 3px;
   }
 
   .account-status {
@@ -355,19 +409,20 @@
     transition: width 0.3s ease;
   }
 
-  /* Unused credit - Blue */
+  /* Unused credit - Red (credit = potential liability) */
   .bar-segment.unused-credit {
-    background: #3b82f6;
+    background: #ef4444;
+    opacity: 0.7;
   }
 
-  /* Collateral - Green */
+  /* Collateral - Green (safe, backed) */
   .bar-segment.collateral {
     background: #10b981;
   }
 
-  /* Used credit - Orange */
+  /* Used credit - Dark Red (actual debt) */
   .bar-segment.used-credit {
-    background: #f59e0b;
+    background: #dc2626;
   }
 
   .bar-segment:hover {
