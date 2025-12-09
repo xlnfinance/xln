@@ -99,16 +99,20 @@
       ? ownCreditLimit - derived.outOwnCredit
       : 0n;
 
-    // Left side: What WE can use + what THEY owe us
+    // HYBRID MODEL assignments:
+    // Unused credit shows on BORROWER's side (who can use it)
+    // Used credit shows on LENDER's side (who extended it)
+
+    // Left side (OUT): What WE can send
     const theirUnusedCredit = derived.inPeerCredit; // Their credit we CAN use (available)
     const ourCollateralLocked = derived.inCollateral; // Our collateral
-    const theirUsedCredit = derived.inOwnCredit; // Debt we owe (using their credit)
+    const theirUsedCredit = peerCreditUsedByUs; // Credit we USED from peer (shows as USED label)
 
-    // Right side: What THEY can use + what WE are owed
+    // Right side (IN): What THEY can send
     const ourUnusedCredit = derived.outOwnCredit; // Our credit they CAN use (available)
     const theirCollateralLocked = derived.outCollateral; // Their collateral
-    const ourUsedCredit = derived.outPeerCredit; // Debt they owe (using our credit)
-    const peerDebtToUs = peerCreditUsedByUs; // What peer owes us (THEIR used credit shows on THEIR side)
+    const ourUsedCredit = ownCreditUsedByPeer; // Credit they USED from us (shows as OWED label)
+    const peerDebtToUs = peerCreditUsedByUs; // Legacy field for compatibility
 
     const totalCapacity = derived.totalCapacity;
 
