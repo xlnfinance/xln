@@ -430,15 +430,23 @@
       }
 
       // Create new panel using EntityPanelWrapper (reuses full EntityPanel)
-      dockview.addPanel({
-        id: panelId,
-        component: 'entity-panel',
-        title: `🏢 ${entityName || entityId.slice(0, 10) + '...'}`,
-        position: { direction: 'within', referencePanel: 'architect' },
-        params: { entityId, entityName, signerId }
-      });
-
-      console.log('[View] Opened entity panel:', entityId.slice(0, 10));
+      try {
+        dockview.addPanel({
+          id: panelId,
+          component: 'entity-panel',
+          title: `🏢 ${entityName || entityId.slice(0, 10) + '...'}`,
+          position: { direction: 'within', referencePanel: 'architect' },
+          params: { entityId, entityName, signerId }
+        });
+        console.log('[View] Opened entity panel:', entityId.slice(0, 10));
+      } catch (err) {
+        // Panel might already exist from race condition - try to focus it
+        console.warn('[View] Panel creation failed, trying to focus:', err);
+        const retryPanel = dockview.getPanel(panelId);
+        if (retryPanel) {
+          retryPanel.api.setActive();
+        }
+      }
     });
 
     // Listen for J-Machine click to open Jurisdiction panel
