@@ -566,6 +566,37 @@ const applyRuntimeInput = async (
         }
       }
 
+      // CRITICAL: Sync collaterals and blockNumber from BrowserVM BEFORE snapshot
+      if (browserVM?.syncAllCollaterals && env.jReplicas && env.eReplicas) {
+        try {
+          // Collect all account pairs from all entities
+          const accountPairs: Array<{ entityId: string; counterpartyId: string }> = [];
+          for (const [replicaKey, replica] of env.eReplicas.entries()) {
+            if (replica.state.accounts) {
+              for (const [counterpartyId, _account] of replica.state.accounts) {
+                const entityId = replicaKey.split(':')[0];
+                accountPairs.push({ entityId, counterpartyId });
+              }
+            }
+          }
+
+          // Sync all collaterals from BrowserVM (for now, just tokenId 1 = USDC)
+          const collaterals = await browserVM.syncAllCollaterals(accountPairs, 1);
+
+          // Get current block height from BrowserVM
+          const blockHeight = browserVM.getBlockHeight ? browserVM.getBlockHeight() : 0;
+
+          // Update JReplica with synced data
+          for (const [name, jReplica] of env.jReplicas.entries()) {
+            jReplica.collaterals = collaterals;
+            jReplica.blockNumber = BigInt(blockHeight);
+          }
+        } catch (e) {
+          // Silent fail - collaterals sync is optional for debugging
+          console.warn('[Runtime] Failed to sync BrowserVM state:', e);
+        }
+      }
+
       // Capture snapshot with the actual processed input and outputs
       await captureSnapshot(env, env.history, db, processedInput, entityOutbox, inputDescription);
     } else {

@@ -81,6 +81,7 @@
     "level": "^8.0.1",
     "merkletreejs": "^0.4.0",
     "msgpackr": "^1.11.5",
+    "node-global-key-listener": "^0.3.0",
     "tevm": "^1.0.0-next.149",
     "ws": "^8.17.0"
   },

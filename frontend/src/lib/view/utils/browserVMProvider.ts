@@ -39,6 +39,7 @@ export class BrowserVMProvider {
   private depositoryInterface: ethers.Interface | null = null;
   private entityProviderInterface: ethers.Interface | null = null;
   private initialized = false;
+  private blockHeight = 0; // Track J-Machine block height
 
   constructor() {
     // Hardhat default account #0
@@ -139,6 +140,7 @@ export class BrowserVMProvider {
     }, { common: this.common }).sign(this.deployerPrivKey);
 
     const result = await runTx(this.vm, { tx });
+    this.incrementBlock(); // Transaction mined successfully
 
     if (result.execResult.exceptionError) {
       console.error('[BrowserVM] Account deployment failed:', result.execResult.exceptionError);
@@ -183,6 +185,7 @@ export class BrowserVMProvider {
     }, { common: this.common }).sign(this.deployerPrivKey);
 
     const result = await runTx(this.vm, { tx });
+    this.incrementBlock(); // Transaction mined successfully
 
     if (result.execResult.exceptionError) {
       console.error('[BrowserVM] Depository deployment failed:', result.execResult.exceptionError);
@@ -213,6 +216,7 @@ export class BrowserVMProvider {
     }, { common: this.common }).sign(this.deployerPrivKey);
 
     const result = await runTx(this.vm, { tx });
+    this.incrementBlock(); // Transaction mined successfully
 
     if (result.execResult.exceptionError) {
       console.error('[BrowserVM] EntityProvider deployment failed:', result.execResult.exceptionError);
@@ -308,6 +312,7 @@ export class BrowserVMProvider {
     }, { common: this.common }).sign(this.deployerPrivKey);
 
     const result = await runTx(this.vm, { tx });
+    this.incrementBlock(); // Transaction mined successfully
 
     if (result.execResult.exceptionError) {
       throw new Error(`mintToReserve failed: ${result.execResult.exceptionError}`);
@@ -337,6 +342,7 @@ export class BrowserVMProvider {
     }, { common: this.common }).sign(this.deployerPrivKey);
 
     const result = await runTx(this.vm, { tx });
+    this.incrementBlock(); // Transaction mined successfully
 
     if (result.execResult.exceptionError) {
       throw new Error(`reserveToReserve failed: ${result.execResult.exceptionError}`);
@@ -388,15 +394,16 @@ export class BrowserVMProvider {
     if (result.execResult.exceptionError) {
       throw new Error(`prefundAccount failed: ${result.execResult.exceptionError}`);
     }
+    this.incrementBlock(); // Transaction mined successfully
     console.log(`[BrowserVM] Prefunded ${amount} from ${entityId.slice(0, 10)}... to account with ${counterpartyId.slice(0, 10)}...`);
   }
 
   /** Get collateral for an account */
-  async getCollateral(entityId: string, counterpartyId: string, tokenId: number): Promise<bigint> {
+  async getCollateral(entityId: string, counterpartyId: string, tokenId: number): Promise<{ collateral: bigint; ondelta: bigint }> {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
     // Use ethers Interface for ABI encoding (same as mainnet)
-    // Solidity mapping: _collaterals(bytes channelKey, uint tokenId) -> ChannelCollateral
+    // Solidity mapping: _collaterals(bytes channelKey, uint tokenId) -> AccountCollateral
     // Need to compute channelKey first, then call the mapping getter
     const channelKeyData = this.depositoryInterface.encodeFunctionData('channelKey', [entityId, counterpartyId]);
     const channelKeyResult = await this.vm.evm.runCall({
@@ -405,7 +412,7 @@ export class BrowserVMProvider {
       data: hexToBytes(channelKeyData as `0x${string}`),
       gasLimit: 100000n,
     });
-    if (channelKeyResult.execResult.exceptionError) return 0n;
+    if (channelKeyResult.execResult.exceptionError) return { collateral: 0n, ondelta: 0n };
     const channelKey = channelKeyResult.execResult.returnValue;
 
     const callData = this.depositoryInterface.encodeFunctionData('_collaterals', [channelKey, tokenId]);
@@ -417,13 +424,13 @@ export class BrowserVMProvider {
       gasLimit: 100000n,
     });
 
-    if (result.execResult.exceptionError) return 0n;
+    if (result.execResult.exceptionError) return { collateral: 0n, ondelta: 0n };
     const returnData = result.execResult.returnValue;
-    if (!returnData || returnData.length === 0) return 0n;
+    if (!returnData || returnData.length === 0) return { collateral: 0n, ondelta: 0n };
 
-    // _collaterals returns ChannelCollateral struct: { collateral: uint256, ondelta: int256 }
+    // _collaterals returns AccountCollateral struct: { collateral: uint256, ondelta: int256 }
     const decoded = this.depositoryInterface.decodeFunctionResult('_collaterals', returnData);
-    return decoded[0]; // collateral field
+    return { collateral: BigInt(decoded[0]), ondelta: BigInt(decoded[1]) };
   }
 
   /** Get debts for an entity */
@@ -468,10 +475,12 @@ export class BrowserVMProvider {
     }, { common: this.common }).sign(this.deployerPrivKey);
 
     const result = await runTx(this.vm, { tx });
+    this.incrementBlock(); // Transaction mined successfully
     if (result.execResult.exceptionError) {
       console.error(`[BrowserVM] enforceDebts failed:`, result.execResult.exceptionError);
       return 0n;
     }
+    this.incrementBlock();
 
     try {
       const decoded = this.depositoryInterface.decodeFunctionResult('enforceDebts', result.execResult.returnValue);
@@ -556,6 +565,7 @@ export class BrowserVMProvider {
       console.error('[BrowserVM] getInsuranceLines failed:', result.execResult.exceptionError);
       return [];
     }
+    this.incrementBlock();
 
     try {
       const decoded = this.depositoryInterface.decodeFunctionResult('getInsuranceLines', result.execResult.returnValue);
@@ -589,6 +599,7 @@ export class BrowserVMProvider {
       console.error('[BrowserVM] getAvailableInsurance failed:', result.execResult.exceptionError);
       return 0n;
     }
+    this.incrementBlock();
 
     try {
       const decoded = this.depositoryInterface.decodeFunctionResult('getAvailableInsurance', result.execResult.returnValue);
@@ -642,6 +653,7 @@ export class BrowserVMProvider {
     }, { common: this.common }).sign(this.deployerPrivKey);
 
     const result = await runTx(this.vm, { tx });
+    this.incrementBlock(); // Transaction mined successfully
 
     if (result.execResult.exceptionError) {
       console.error('[BrowserVM] settle failed:', result.execResult.exceptionError);
@@ -810,6 +822,39 @@ export class BrowserVMProvider {
   clearLocalStorage(key: string = 'xln-evm-state'): void {
     localStorage.removeItem(key);
     console.log(`[BrowserVM] Cleared saved state: ${key}`);
+  }
+
+  /** Sync all collaterals from BrowserVM for given account pairs */
+  async syncAllCollaterals(
+    accountPairs: Array<{ entityId: string; counterpartyId: string }>,
+    tokenId: number
+  ): Promise<Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>> {
+    const collaterals = new Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>();
+
+    for (const { entityId, counterpartyId } of accountPairs) {
+      const accountKey = `${entityId}:${counterpartyId}`;
+      const data = await this.getCollateral(entityId, counterpartyId, tokenId);
+
+      if (data.collateral > 0n || data.ondelta !== 0n) {
+        if (!collaterals.has(accountKey)) {
+          collaterals.set(accountKey, new Map());
+        }
+        collaterals.get(accountKey)!.set(tokenId, data);
+      }
+    }
+
+    console.log(`[BrowserVM] Synced collaterals for ${accountPairs.length} accounts`);
+    return collaterals;
+  }
+
+  /** Get current block height (incremented with each successful transaction) */
+  getBlockHeight(): number {
+    return this.blockHeight;
+  }
+
+  /** Increment block height (called after successful transaction) */
+  private incrementBlock(): void {
+    this.blockHeight++;
   }
 
   /** Check if saved state exists */

@@ -59,6 +59,7 @@
     // Version check - ALWAYS log build hash for stale detection
     console.log(`%c[XLN View] Build: ${BUILD_HASH} @ ${BUILD_TIME}`, 'color: #00ff88; font-weight: bold; font-size: 14px;');
     console.log('[View] onMount started - initializing isolated XLN');
+    console.log('[View] 🎬 scenarioId prop:', scenarioId || '(empty)');
 
     // Initialize isolated XLN runtime (simnet - BrowserVM mode)
     try {
@@ -146,18 +147,19 @@
       localTimeIndex.set(urlImport?.state.ui?.ti ?? -1);
       localIsLive.set(true);
 
-      // Auto-run scenario if scenarioId is provided
-      if (scenarioId) {
-        console.log(`[View] 🎬 Autoplay: Running scenario "${scenarioId}"...`);
+      // Auto-run scenario if scenarioId is provided (or default to AHB for testing)
+      const effectiveScenarioId = scenarioId || 'ahb'; // Default to AHB for /view route
+      if (effectiveScenarioId) {
+        console.log(`[View] 🎬 Autoplay: Running scenario "${effectiveScenarioId}"${scenarioId ? '' : ' (default)'}...`);
 
         // Supported scenarios (others show error)
         const supportedScenarios = ['ahb'];
 
-        if (!supportedScenarios.includes(scenarioId)) {
-          console.error(`[View] ❌ SCENARIO NOT IMPLEMENTED: "${scenarioId}"`);
+        if (!supportedScenarios.includes(effectiveScenarioId)) {
+          console.error(`[View] ❌ SCENARIO NOT IMPLEMENTED: "${effectiveScenarioId}"`);
           console.error(`[View] 📋 Available scenarios: ${supportedScenarios.join(', ')}`);
-          console.error(`[View] 💡 To add "${scenarioId}", implement it in View.svelte autoplay section`);
-        } else if (scenarioId === 'ahb') {
+          console.error(`[View] 💡 To add "${effectiveScenarioId}", implement it in View.svelte autoplay section`);
+        } else if (effectiveScenarioId === 'ahb') {
           try {
             console.log(`[View] 📦 Calling XLN.prepopulateAHB...`);
             await XLN.prepopulateAHB(env);
@@ -467,6 +469,15 @@
       if (jurisdictionPanel) {
         jurisdictionPanel.api.setActive();
         console.log('[View] Focused Jurisdiction panel for:', jurisdictionName);
+      }
+    });
+
+    // Listen for focus panel requests (from TimeMachine settings button)
+    panelBridge.on('focusPanel', ({ panelId }) => {
+      const panel = dockview.getPanel(panelId);
+      if (panel) {
+        panel.api.setActive();
+        console.log('[View] Focused panel:', panelId);
       }
     });
   });

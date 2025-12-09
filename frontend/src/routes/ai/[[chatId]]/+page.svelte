@@ -135,6 +135,19 @@
     { id: 'browser', name: 'Browser TTS' },
   ];
 
+  // Voice-paste config
+  interface VoiceConfig {
+    hotkey: string;
+    model: string;
+    pasteDelay: number;
+  }
+  let voiceConfig: VoiceConfig = {
+    hotkey: 'LEFT CTRL',
+    model: 'large-v3',
+    pasteDelay: 100,
+  };
+  let voicePasteRunning = false;
+
   // Drag-drop state
   let isDragging = false;
   let pendingImages: string[] = [];
@@ -161,6 +174,8 @@
     await loadSavedChats();
     await fetchSystemStats();
     await loadXlnTools();
+    await loadVoiceConfig();
+    await checkVoicePasteStatus();
     startContinuousListening();
     // Poll system stats every 2 seconds
     statsInterval = setInterval(fetchSystemStats, 2000);
@@ -203,6 +218,47 @@
       return JSON.stringify(data.result);
     } catch (e) {
       return JSON.stringify({ error: `Tool execution failed: ${e}` });
+    }
+  }
+
+  // ============================================================================
+  // VOICE-PASTE CONFIG
+  // ============================================================================
+
+  async function loadVoiceConfig() {
+    try {
+      const res = await fetch(`${API_URL}/api/voice/config`);
+      const data = await res.json();
+      voiceConfig = data;
+    } catch (e) {
+      console.warn('Failed to load voice config:', e);
+    }
+  }
+
+  async function saveVoiceConfig() {
+    try {
+      const res = await fetch(`${API_URL}/api/voice/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(voiceConfig),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('Voice config saved! Restart voice-paste if running.');
+      }
+    } catch (e) {
+      console.error('Failed to save voice config:', e);
+      alert('Failed to save config');
+    }
+  }
+
+  async function checkVoicePasteStatus() {
+    try {
+      const res = await fetch(`${API_URL}/api/voice/status`);
+      const data = await res.json();
+      voicePasteRunning = data.running;
+    } catch (e) {
+      console.warn('Failed to check voice-paste status:', e);
     }
   }
 
@@ -1000,6 +1056,48 @@ Help the user understand this entity's state, suggest actions, or answer questio
           {/each}
         </select>
       </div>
+
+      <!-- Voice-Paste Config -->
+      <div class="voice-paste-section">
+        <div class="voice-paste-header">
+          <label>Voice-Paste (Global)</label>
+          <div class="status-indicator" class:active={voicePasteRunning}>
+            {voicePasteRunning ? '🎤 Running' : '⭕ Stopped'}
+          </div>
+        </div>
+
+        <div class="voice-config-row">
+          <label for="hotkey-select">Hotkey:</label>
+          <select id="hotkey-select" bind:value={voiceConfig.hotkey}>
+            <option value="LEFT CTRL">Left Ctrl</option>
+            <option value="RIGHT CTRL">Right Ctrl</option>
+            <option value="LEFT ALT">Left Alt</option>
+            <option value="RIGHT ALT">Right Alt</option>
+            <option value="LEFT SHIFT">Left Shift</option>
+            <option value="RIGHT SHIFT">Right Shift</option>
+          </select>
+        </div>
+
+        <div class="voice-config-row">
+          <label for="model-select">Model:</label>
+          <select id="model-select" bind:value={voiceConfig.model}>
+            <option value="large-v3">Large v3</option>
+            <option value="medium">Medium</option>
+            <option value="small">Small</option>
+            <option value="base">Base</option>
+          </select>
+        </div>
+
+        <button class="save-config-btn" on:click={saveVoiceConfig}>
+          Save Config
+        </button>
+
+        <div class="voice-paste-instructions">
+          <p>Start: <code>bun run ai/voice-paste.ts</code></p>
+          <p>Recordings: <code>~/records/</code></p>
+        </div>
+      </div>
+
       <div class="status-indicator" class:active={isListening}>
         {isListening ? 'Listening...' : 'Voice off'}
       </div>
@@ -1353,6 +1451,84 @@ Help the user understand this entity's state, suggest actions, or answer questio
 
   .status-indicator.active {
     color: #00ff88;
+  }
+
+  /* Voice-Paste Section */
+  .voice-paste-section {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #222;
+  }
+
+  .voice-paste-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .voice-paste-header label {
+    font-size: 11px;
+    color: #888;
+    font-weight: 600;
+  }
+
+  .voice-config-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+
+  .voice-config-row label {
+    font-size: 10px;
+    color: #666;
+  }
+
+  .voice-config-row select {
+    width: 60%;
+    padding: 3px 5px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #ccc;
+    font-size: 10px;
+  }
+
+  .save-config-btn {
+    width: 100%;
+    padding: 6px;
+    margin-top: 8px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #00ff88;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .save-config-btn:hover {
+    background: #222;
+    border-color: #00ff88;
+  }
+
+  .voice-paste-instructions {
+    margin-top: 8px;
+    font-size: 9px;
+    color: #555;
+  }
+
+  .voice-paste-instructions p {
+    margin: 2px 0;
+  }
+
+  .voice-paste-instructions code {
+    background: #1a1a1a;
+    padding: 1px 4px;
+    border-radius: 2px;
+    color: #888;
+    font-family: monospace;
   }
 
   /* Main area */

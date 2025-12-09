@@ -1,4 +1,4 @@
-import { AccountInput, AccountTx, EntityState, Env, EntityInput } from '../../types';
+import { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages } from '../../state-helpers';
 
@@ -102,24 +102,27 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           // Check if we have account with next hop
           const nextHopAccount = newState.accounts.get(nextHop);
           if (nextHopAccount) {
-            // Create forwarding payment transaction
-            const forwardingTx: AccountTx = {
-              type: 'direct_payment',
+            // CORRECT: Create EntityTx and send through runtime outbox (not direct mempool mutation)
+            const forwardingEntityTx: EntityTx = {
+              type: 'directPayment',
               data: {
+                toEntityId: nextHop,
                 tokenId: forward.tokenId,
                 amount: forwardAmount,
-                route: forward.route, // Already sliced in direct-payment.ts - don't slice again
+                route: forward.route,
                 ...(forward.description ? { description: forward.description } : {}),
-                fromEntityId: state.entityId,
-                toEntityId: nextHop,
               }
             };
 
-            // Add to next hop's account mempool
-            nextHopAccount.mempool.push(forwardingTx);
-            console.log(`✅ Forwarded payment added to account ${nextHop.slice(-4)} mempool`);
+            // Add to outputs so runtime routes it to next hop's entity in NEXT frame
+            outputs.push({
+              entityId: nextHop,
+              signerId: nextHop, // Assume signerId = entityId for now (TODO: proper signer lookup)
+              entityTxs: [forwardingEntityTx]
+            });
+            console.log(`✅ Forwarding EntityInput queued for next hop ${nextHop.slice(-4)} (will process in NEXT frame)`);
 
-            addMessage(newState, `⚡ Relayed payment to Entity ${nextHop.slice(-4)}`);
+            addMessage(newState, `⚡ Queued payment relay to Entity ${nextHop.slice(-4)}`);
           } else {
             console.error(`❌ No account with next hop ${nextHop.slice(-4)} for forwarding`);
             addMessage(newState, `❌ Payment routing failed: no account with next hop`);

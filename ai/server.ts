@@ -1539,6 +1539,71 @@ serve({
     }
 
     // ========================================================================
+    // GET /api/voice/config - Get voice-paste configuration
+    // ========================================================================
+    if (url.pathname === "/api/voice/config" && req.method === "GET") {
+      try {
+        const configPath = join(process.env.HOME || "~", ".xln-voice-config.json");
+        const defaults = {
+          hotkey: "LEFT CTRL",
+          model: "large-v3",
+          pasteDelay: 100,
+        };
+
+        if (existsSync(configPath)) {
+          const config = JSON.parse(readFileSync(configPath, "utf-8"));
+          return new Response(JSON.stringify({ ...defaults, ...config }), { headers });
+        }
+
+        return new Response(JSON.stringify(defaults), { headers });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: String(error) }), { status: 500, headers });
+      }
+    }
+
+    // ========================================================================
+    // POST /api/voice/config - Update voice-paste configuration
+    // ========================================================================
+    if (url.pathname === "/api/voice/config" && req.method === "POST") {
+      try {
+        const configPath = join(process.env.HOME || "~", ".xln-voice-config.json");
+        const body = await req.json();
+
+        writeFileSync(configPath, JSON.stringify(body, null, 2));
+
+        return new Response(JSON.stringify({ success: true, config: body }), { headers });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: String(error) }), { status: 500, headers });
+      }
+    }
+
+    // ========================================================================
+    // GET /api/voice/status - Check if voice-paste is running
+    // ========================================================================
+    if (url.pathname === "/api/voice/status" && req.method === "GET") {
+      try {
+        // Check if voice-paste process is running
+        const proc = spawn("pgrep", ["-f", "voice-paste.ts"]);
+
+        let output = "";
+        proc.stdout.on("data", (d) => { output += d.toString(); });
+
+        await new Promise((resolve) => {
+          proc.on("close", resolve);
+        });
+
+        const isRunning = output.trim().length > 0;
+
+        return new Response(JSON.stringify({
+          running: isRunning,
+          recordsDir: join(process.env.HOME || "~", "records"),
+        }), { headers });
+      } catch (error) {
+        return new Response(JSON.stringify({ error: String(error) }), { status: 500, headers });
+      }
+    }
+
+    // ========================================================================
     // GET /api/health
     // ========================================================================
     if (url.pathname === "/api/health") {

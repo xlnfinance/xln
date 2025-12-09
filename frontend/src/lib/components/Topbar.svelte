@@ -109,15 +109,11 @@
 
 <style>
   .topbar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 100;
+    height: 34px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.75rem 2rem;
+    padding: 0 16px;
     background: #000;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   }
@@ -138,7 +134,7 @@
   }
 
   .topbar-logo img {
-    height: 36px;
+    height: 20px;
     width: auto;
   }
 

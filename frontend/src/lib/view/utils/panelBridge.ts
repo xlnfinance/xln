@@ -24,6 +24,7 @@ type EventMap = {
   'tutorial:action': { action: string; data?: any }; // Tutorial actions
   'openEntityOperations': { entityId: string; entityName: string; signerId?: string }; // Open entity panel
   'openJurisdiction': { jurisdictionName: string }; // Open jurisdiction panel (J-Machine click)
+  'focusPanel': { panelId: string }; // Focus any panel by ID
 };
 
 class PanelBridge {
