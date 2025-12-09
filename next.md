@@ -1,23 +1,49 @@
 # NEXT.md - Priority Tasks
 
-## 🚧 TODO (2025-12-09): Post-Payment Visualization Session
+## 🚧 TODO (2025-12-10): Post-Bilateral Consensus Session
 
-### Entity Panel UX
+### Visual Solvency
+- [ ] **Dual-render for desync** - Show confirmed (solid) + pending (translucent) bars when heights differ
+- [ ] **Solvency panel** - Dedicated monitor showing conservation law: Σ(reserves) = Σ(collateral)
+- [ ] **Reserve sync verification** - Test frames 8-10 with new debug logs, confirm no desync
+
+### Entity Panel
+- [ ] **Click-to-open bug** - Entity panel opens empty, requires manual dropdown selection (debug with browser console)
 - [ ] **Mini-panel restoration** - Find where entity mini-panel went, decide keep or remove
-- [ ] **Auto-select entity** - Preselect correct entity in dropdown when opening panel from Graph3D click
 
-### Jurisdiction Panel
-- [ ] **JReplica.collaterals sync** - Populate from BrowserVM Depository.sol._collaterals
-- [ ] **JReplica.blockNumber** - Increment on J-Machine transactions (currently always 0)
-- [ ] **Contract addresses** - Show full addresses in overview, not shortened
+### Consensus Visualization
+- [ ] **Timeline view** - Horizontal ADD_TX→PROPOSE→SIGN→COMMIT flow (replace/augment current time machine)
+- [ ] **Bilateral diff panel** - Show both replicas when heights diverge with structural diff
 
-### TimeMachine + Topbar
-- [ ] **Size reduction** - Make both 30% smaller (same height for consistency)
-- [ ] **Settings dropdown** - Move next to Play button in TimeMachine bar
-- [ ] **Bars-sides toggle** - Verify account bar mode switching works
+### Cleanup
+- [ ] **Remove excess incrementBlock()** - Clean up read-only methods (added by sed, needs manual review)
 
-### Graph3D Settings
-- [ ] **Render controls popup** - Move completely inside Settings/Scene panel
+---
+
+## 🔥 COMPLETED (2025-12-10): Bilateral Consensus + Visual Solvency
+
+### Core Consensus Fixes ✅
+- ✅ **Multi-hop routing** - Through runtime outbox (not direct mempool), proper R-E-A waterfall
+- ✅ **Canonical account selection** - Use highest currentFrame.height for visual consistency
+- ✅ **Infrastructure for dual-render** - confirmedAccount/pendingAccount tracked for future visualization
+
+### JReplica Sync ✅
+- ✅ **collaterals sync** - Fixed AccountCollateral type {collateral, ondelta}, syncAllCollaterals() every frame
+- ✅ **blockNumber tracking** - BrowserVMProvider.blockHeight increments after successful transactions
+- ✅ **Full contract addresses** - JurisdictionPanel shows complete addresses
+
+### UI/UX Improvements ✅
+- ✅ **Topbar redesign** - 34px height, static positioning (no always-on-top)
+- ✅ **TimeMachine** - 34px height + settings button ⚙️ (opens Settings panel)
+- ✅ **AHB auto-start** - Default scenario for /view route (no URL param needed)
+
+### Debug Infrastructure ✅
+- ✅ **Solvency logging** - executeR2C tracks BEFORE/AFTER/DELTA, detects violations
+- ✅ **Entity panel debug** - Comprehensive logging for troubleshooting click-to-open
+- ✅ **EventMap extension** - focusPanel event for panel navigation
+
+### Commits
+- **ec6e2d9** - Bilateral consensus fixes + canonical account selection (24 files, +909/-65)
 
 ---
 
