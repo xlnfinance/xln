@@ -216,10 +216,20 @@
           </div>
         </div>
         <div class="capacity-labels">
-          <span class="capacity-out" title="Can send">
+          <span class="capacity-out" title="Available to send">
             OUT {$xlnFunctions!.formatTokenAmount(td.tokenId, td.derived.outCapacity)}
           </span>
-          <span class="capacity-in" title="Can receive">
+          {#if td.theirUsedCredit > 0n}
+            <span class="capacity-used" title="Credit we're using from peer">
+              USED {$xlnFunctions!.formatTokenAmount(td.tokenId, td.theirUsedCredit)}
+            </span>
+          {/if}
+          {#if td.ourUsedCredit > 0n}
+            <span class="capacity-owed" title="Credit peer is using from us">
+              OWED {$xlnFunctions!.formatTokenAmount(td.tokenId, td.ourUsedCredit)}
+            </span>
+          {/if}
+          <span class="capacity-in" title="Available to receive">
             IN {$xlnFunctions!.formatTokenAmount(td.tokenId, td.derived.inCapacity)}
           </span>
         </div>
@@ -457,6 +467,16 @@
 
   .capacity-out {
     color: #3b82f6;
+  }
+
+  .capacity-used {
+    color: #ef4444;
+    font-weight: 600;
+  }
+
+  .capacity-owed {
+    color: #f59e0b;
+    font-weight: 600;
   }
 
   .capacity-in {
