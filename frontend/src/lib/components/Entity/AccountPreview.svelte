@@ -61,7 +61,20 @@
 
   // Get all token deltas for rendering
   $: tokenDeltas = Array.from(account.deltas?.entries() || [] as [number, Delta][]).map(([tokenId, delta]: [number, Delta]) => {
-    if (!$xlnFunctions) return { tokenId, delta, derived: null, tokenInfo: null };
+    if (!$xlnFunctions) return {
+      tokenId,
+      delta,
+      derived: null,
+      tokenInfo: null,
+      theirUnusedCredit: 0n,
+      ourCollateralLocked: 0n,
+      theirUsedCredit: 0n,
+      ourUnusedCredit: 0n,
+      theirCollateralLocked: 0n,
+      ourUsedCredit: 0n,
+      peerDebtToUs: 0n,
+      totalCapacity: 0n
+    };
 
     const isLeftEntity = entityId < counterpartyId;
     const derived = $xlnFunctions.deriveDelta(delta, isLeftEntity);
