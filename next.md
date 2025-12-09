@@ -1,5 +1,65 @@
 # NEXT.md - Priority Tasks
 
+## 🚧 TODO (2025-12-09): Post-Payment Visualization Session
+
+### Entity Panel UX
+- [ ] **Mini-panel restoration** - Find where entity mini-panel went, decide keep or remove
+- [ ] **Auto-select entity** - Preselect correct entity in dropdown when opening panel from Graph3D click
+
+### Jurisdiction Panel
+- [ ] **JReplica.collaterals sync** - Populate from BrowserVM Depository.sol._collaterals
+- [ ] **JReplica.blockNumber** - Increment on J-Machine transactions (currently always 0)
+- [ ] **Contract addresses** - Show full addresses in overview, not shortened
+
+### TimeMachine + Topbar
+- [ ] **Size reduction** - Make both 30% smaller (same height for consistency)
+- [ ] **Settings dropdown** - Move next to Play button in TimeMachine bar
+- [ ] **Bars-sides toggle** - Verify account bar mode switching works
+
+### Graph3D Settings
+- [ ] **Render controls popup** - Move completely inside Settings/Scene panel
+
+---
+
+## 🔥 COMPLETED (2025-12-09): Payment Validation + Hybrid Visualization Model
+
+### Critical Consensus Bugs ✅
+- ✅ **direct-payment.ts** - Read credit limits from `delta.leftCreditLimit`/`rightCreditLimit` (not `globalCreditLimits`)
+- ✅ **account-utils.ts** - `deriveDelta` now tracks peer credit usage: `inPeerCredit = peerCreditLimit - outPeerCredit - peerCreditUsed`
+- ✅ **Hub-Bob capacity** - Correctly shows $375K (was $500K, now accounts for $125K spent)
+- ✅ **AHB self-test** - All 12 frames pass, solvency checks validated
+
+### Hybrid Visualization Model ✅
+- ✅ **3D bars (AccountBarRenderer)** - Unused credit on borrower, used credit on lender
+- ✅ **2D bars (AccountPreview)** - Matches 3D semantics exactly
+- ✅ **deriveDelta outputs** - Added `peerCreditUsed` and `ownCreditUsed` fields
+- ✅ **Visual bar sums** - OUT/IN labels show sum of bars on each side (not capacity semantics)
+- ✅ **Color scheme** - Red for credit (unused light, used dark), green for collateral
+
+### Entity Panel Improvements ✅
+- ✅ **EntityPanelWrapper** - Converted to Svelte 5 runes, removed time machine from individual panels
+- ✅ **Entity dropdown** - Working selection, shows gossip names "Alice (#1)", "Hub (#2)", "Bob (#3)"
+- ✅ **Account names** - Format: `Hub ←→ Alice` with counterparty underlined green
+- ✅ **Entity panel switching** - Full entityId for panel IDs (no collisions)
+
+### Debugging Tools ✅
+- ✅ **prepopulate-ahb.ts** - `dumpSystemState()` outputs full JSON state
+- ✅ **Comprehensive logging** - 🎯, 🔄, 📋 prefixes throughout
+- ✅ **Test harness** - `/tmp/debug-bars.ts` validates derived values
+
+### Documentation ✅
+- ✅ **vibepaper/flow.md** - Complete R→E→A waterfall with function calls, types, semantics
+
+### Commits Pushed
+1. **5285e09** - Critical payment validation + AHB fixes
+2. **9acdbb3** - Hybrid model 3D bars
+3. **4e55292** - USED/OWED labels (later simplified)
+4. **d8a03c8** - Fix USED variable assignment
+5. **4c7448d** - deriveDelta hybrid fields
+6. **d62a418** - Visual bar sums final
+
+---
+
 ## 🔥 COMPLETED (2025-12-06): BrowserVM Multi-Contract Deployment + Runtime I/O Full Dump
 
 ### BrowserVM Contract Deployment ✅
