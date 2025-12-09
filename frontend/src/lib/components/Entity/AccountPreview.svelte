@@ -72,17 +72,31 @@
     // outPeerCredit = credit they're using from us (moves from our credit to them)
     // inCollateral/outCollateral = collateral split based on delta position
 
-    // Left side bars (incoming capacity):
-    const theirUnusedCredit = derived.inPeerCredit; // Pink - their credit we haven't used
-    const ourCollateralLocked = derived.inCollateral; // Green - our collateral on this side
-    const theirUsedCredit = derived.inOwnCredit; // Orange - their credit we are using
+    // HYBRID MODEL: Unused on borrower side, Used on lender side
 
-    // Right side bars (outgoing capacity):
-    const ourUnusedCredit = derived.outOwnCredit; // Pink - our credit they haven't used
-    const theirCollateralLocked = derived.outCollateral; // Green - their collateral usage
-    const ourUsedCredit = derived.outPeerCredit; // Orange - our credit they are using
+    // Calculate USED credit (what we borrowed from peer)
+    const peerCreditLimit = isLeftEntity ? delta.rightCreditLimit : delta.leftCreditLimit;
+    const peerCreditUsedByUs = peerCreditLimit > derived.inPeerCredit
+      ? peerCreditLimit - derived.inPeerCredit
+      : 0n;
 
-    // Total for percentage calculations
+    // Calculate USED credit (what peer borrowed from us)
+    const ownCreditLimit = isLeftEntity ? delta.leftCreditLimit : delta.rightCreditLimit;
+    const ownCreditUsedByPeer = ownCreditLimit > derived.outOwnCredit
+      ? ownCreditLimit - derived.outOwnCredit
+      : 0n;
+
+    // Left side: What WE can use + what THEY owe us
+    const theirUnusedCredit = derived.inPeerCredit; // Their credit we CAN use (available)
+    const ourCollateralLocked = derived.inCollateral; // Our collateral
+    const theirUsedCredit = derived.inOwnCredit; // Debt we owe (using their credit)
+
+    // Right side: What THEY can use + what WE are owed
+    const ourUnusedCredit = derived.outOwnCredit; // Our credit they CAN use (available)
+    const theirCollateralLocked = derived.outCollateral; // Their collateral
+    const ourUsedCredit = derived.outPeerCredit; // Debt they owe (using our credit)
+    const peerDebtToUs = peerCreditUsedByUs; // What peer owes us (THEIR used credit shows on THEIR side)
+
     const totalCapacity = derived.totalCapacity;
 
     return {
@@ -94,6 +108,7 @@
       ourUnusedCredit,
       theirCollateralLocked,
       ourUsedCredit,
+      peerDebtToUs,  // HYBRID: peer's used credit shows on their side
       totalCapacity,
       derived
     };
@@ -192,11 +207,11 @@
                 title="Peer collateral: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirCollateralLocked) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
               ></div>
             {/if}
-            {#if td.theirUsedCredit > 0n}
+            {#if td.peerDebtToUs > 0n}
               <div
                 class="bar-segment used-credit"
-                style="width: {Number((td.theirUsedCredit * 100n) / td.totalCapacity)}%"
-                title="Credit we're using from peer: {$xlnFunctions!.formatTokenAmount(td.tokenId, td.theirUsedCredit)}"
+                style="width: {Number((td.peerDebtToUs * 100n) / td.totalCapacity)}%"
+                title="USED credit (peer owes us): {$xlnFunctions!.formatTokenAmount(td.tokenId, td.peerDebtToUs)}"
               ></div>
             {/if}
           </div>
