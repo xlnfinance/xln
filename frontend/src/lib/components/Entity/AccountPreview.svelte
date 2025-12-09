@@ -85,34 +85,18 @@
     // outPeerCredit = credit they're using from us (moves from our credit to them)
     // inCollateral/outCollateral = collateral split based on delta position
 
-    // HYBRID MODEL: Unused on borrower side, Used on lender side
-
-    // Calculate USED credit (what we borrowed from peer)
-    const peerCreditLimit = isLeftEntity ? delta.rightCreditLimit : delta.leftCreditLimit;
-    const peerCreditUsedByUs = peerCreditLimit > derived.inPeerCredit
-      ? peerCreditLimit - derived.inPeerCredit
-      : 0n;
-
-    // Calculate USED credit (what peer borrowed from us)
-    const ownCreditLimit = isLeftEntity ? delta.leftCreditLimit : delta.rightCreditLimit;
-    const ownCreditUsedByPeer = ownCreditLimit > derived.outOwnCredit
-      ? ownCreditLimit - derived.outOwnCredit
-      : 0n;
-
-    // HYBRID MODEL assignments:
-    // Unused credit shows on BORROWER's side (who can use it)
-    // Used credit shows on LENDER's side (who extended it)
+    // HYBRID MODEL: Use deriveDelta outputs directly (no manual calculations)
 
     // Left side (OUT): What WE can send
     const theirUnusedCredit = derived.inPeerCredit; // Their credit we CAN use (available)
     const ourCollateralLocked = derived.inCollateral; // Our collateral
-    const theirUsedCredit = peerCreditUsedByUs; // Credit we USED from peer (shows as USED label)
+    const theirUsedCredit = derived.peerCreditUsed; // Credit we USED from peer
 
     // Right side (IN): What THEY can send
-    const ourUnusedCredit = derived.outOwnCredit; // Our credit they CAN use (available)
+    const ourUnusedCredit = derived.outOwnCredit; // Our credit they CAN use
     const theirCollateralLocked = derived.outCollateral; // Their collateral
-    const ourUsedCredit = ownCreditUsedByPeer; // Credit they USED from us (shows as OWED label)
-    const peerDebtToUs = peerCreditUsedByUs; // Legacy field for compatibility
+    const ourUsedCredit = derived.ownCreditUsed; // Credit they USED from us
+    const peerDebtToUs = derived.peerCreditUsed; // What we owe peer
 
     const totalCapacity = derived.totalCapacity;
 

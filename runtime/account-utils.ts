@@ -55,10 +55,13 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   // outOwnCredit = remaining OWN credit we can extend
   let outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
 
-  // CRITICAL FIX: inPeerCredit = remaining PEER credit we can use
-  // When delta < 0, we're already using peer's credit = max(0, -delta - collateral)
+  // HYBRID MODEL: Track used credit for both directions
+  // peerCreditUsed = credit peer lent that WE'RE using (when delta < 0)
   const peerCreditUsed = totalDelta < 0n ? nonNegative(-totalDelta - collateral) : 0n;
   let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit - peerCreditUsed);
+
+  // ownCreditUsed = credit WE lent that PEER is using (when delta > 0)
+  const ownCreditUsed = totalDelta > 0n ? nonNegative(totalDelta - collateral) : 0n;
 
   let inAllowence = delta.rightAllowance;
   let outAllowence = delta.leftAllowance;
@@ -122,6 +125,8 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
     outCapacity,
     outOwnCredit,
     inPeerCredit,
+    peerCreditUsed,  // HYBRID: credit peer lent that we're using
+    ownCreditUsed,   // HYBRID: credit we lent that peer is using
     ascii,
   };
 }
