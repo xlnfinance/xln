@@ -100,6 +100,10 @@
 
     const totalCapacity = derived.totalCapacity;
 
+    // Visual bar sums (what's actually shown on each side)
+    const leftVisualSum = theirUnusedCredit + ourCollateralLocked;  // Unused credit + our collateral
+    const rightVisualSum = theirCollateralLocked + peerDebtToUs;    // Their collateral + used credit
+
     return {
       tokenId,
       tokenInfo,
@@ -109,8 +113,10 @@
       ourUnusedCredit,
       theirCollateralLocked,
       ourUsedCredit,
-      peerDebtToUs,  // HYBRID: peer's used credit shows on their side
+      peerDebtToUs,
       totalCapacity,
+      leftVisualSum,   // OUT label = sum of LEFT bars
+      rightVisualSum,  // IN label = sum of RIGHT bars
       derived
     };
   });
@@ -204,21 +210,11 @@
           </div>
         </div>
         <div class="capacity-labels">
-          <span class="capacity-out" title="Available to send">
-            OUT {$xlnFunctions!.formatTokenAmount(td.tokenId, td.derived.outCapacity)}
+          <span class="capacity-out" title="Sum of left side bars">
+            OUT {$xlnFunctions!.formatTokenAmount(td.tokenId, td.leftVisualSum)}
           </span>
-          {#if td.theirUsedCredit > 0n}
-            <span class="capacity-used" title="Credit we're using from peer">
-              USED {$xlnFunctions!.formatTokenAmount(td.tokenId, td.theirUsedCredit)}
-            </span>
-          {/if}
-          {#if td.ourUsedCredit > 0n}
-            <span class="capacity-owed" title="Credit peer is using from us">
-              OWED {$xlnFunctions!.formatTokenAmount(td.tokenId, td.ourUsedCredit)}
-            </span>
-          {/if}
-          <span class="capacity-in" title="Available to receive">
-            IN {$xlnFunctions!.formatTokenAmount(td.tokenId, td.derived.inCapacity)}
+          <span class="capacity-in" title="Sum of right side bars">
+            IN {$xlnFunctions!.formatTokenAmount(td.tokenId, td.rightVisualSum)}
           </span>
         </div>
       </div>
