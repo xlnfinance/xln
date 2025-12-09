@@ -35,12 +35,17 @@ const BAR_COLORS = {
 
 /**
  * Create account capacity bars for a bilateral account
+ * @param fromDerived - deriveDelta result from fromEntity's perspective
+ * @param toDerived - deriveDelta result from toEntity's perspective
+ * @param fromIsLeft - whether fromEntity is the LEFT entity (smaller entityId)
  */
 export function createAccountBars(
   scene: THREE.Scene,
   fromEntity: EntityData,
   toEntity: EntityData,
-  derived: DerivedAccountData,
+  fromDerived: DerivedAccountData,
+  toDerived: DerivedAccountData,
+  fromIsLeft: boolean,
   settings: AccountBarSettings,
   getEntitySize: (entityId: string, tokenId: number) => number
 ): THREE.Group {
@@ -56,13 +61,67 @@ export function createAccountBars(
   const tokensToVisualUnits = 0.00001; // 1M tokens → 10 visual units
   const barScale = (tokensToVisualUnits / Math.pow(10, decimals)) * (settings.portfolioScale / 5000);
 
-  const segments: AccountSegments = {
-    outOwnCredit: derived.outOwnCredit * barScale,
-    inCollateral: derived.inCollateral * barScale,
-    outPeerCredit: derived.outPeerCredit * barScale,
-    inOwnCredit: derived.inOwnCredit * barScale,
-    outCollateral: derived.outCollateral * barScale,
-    inPeerCredit: derived.inPeerCredit * barScale
+  // Compute debt not captured by inOwnCredit
+  // Delta sign relative to LEFT: delta < 0 = LEFT owes, delta > 0 = RIGHT owes
+  // isLeft tells us which side this entity is on
+  const computeDebtSegment = (derived: DerivedAccountData, isLeft: boolean): number => {
+    const delta = derived.delta;
+    const entityOwes = isLeft ? (delta < 0) : (delta > 0);
+
+    if (entityOwes) {
+      const debtAmount = Math.abs(delta);
+      // If inOwnCredit doesn't show the debt, it's backed by collateral
+      if (derived.inOwnCredit === 0 && derived.inCollateral > 0) {
+        return Math.min(debtAmount, derived.inCollateral);
+      }
+      // Or debt is backed by peer's credit toward us (not shown in our inOwnCredit)
+      if (derived.inOwnCredit === 0 && derived.inCollateral === 0) {
+        // Debt exists but not backed by our collateral or credit - show it
+        return debtAmount;
+      }
+    }
+    return 0;
+  };
+
+  const fromDebtSegment = computeDebtSegment(fromDerived, fromIsLeft) * barScale;
+  const toDebtSegment = computeDebtSegment(toDerived, !fromIsLeft) * barScale;
+
+  // When peer uses our credit, reduce our outOwnCredit (unused credit) accordingly
+  // Delta > 0 for LEFT means RIGHT owes → LEFT's credit is being used by RIGHT
+  // Delta < 0 for LEFT means LEFT owes → RIGHT's credit is being used by LEFT
+  const computeCreditUsedByPeer = (derived: DerivedAccountData, isLeft: boolean): number => {
+    const delta = derived.delta;
+    const peerOwes = isLeft ? (delta > 0) : (delta < 0);
+    if (peerOwes && derived.ownCreditLimit > 0) {
+      // Peer is using our credit. Amount = delta beyond collateral, capped by our credit limit
+      const amountBeyondCollateral = Math.max(0, Math.abs(delta) - derived.outCollateral);
+      return Math.min(amountBeyondCollateral, derived.ownCreditLimit);
+    }
+    return 0;
+  };
+
+  const fromCreditUsed = computeCreditUsedByPeer(fromDerived, fromIsLeft) * barScale;
+  const toCreditUsed = computeCreditUsedByPeer(toDerived, !fromIsLeft) * barScale;
+
+  // Each entity's bars use their own perspective
+  // Adjust inCollateral when debt is shown separately
+  // Adjust outOwnCredit when peer is using our credit
+  const fromSegments: AccountSegments = {
+    outOwnCredit: (fromDerived.outOwnCredit * barScale) - fromCreditUsed,
+    inCollateral: (fromDerived.inCollateral * barScale) - fromDebtSegment,
+    outPeerCredit: fromDerived.outPeerCredit * barScale,
+    inOwnCredit: fromDebtSegment > 0 ? fromDebtSegment : (fromDerived.inOwnCredit * barScale),
+    outCollateral: fromDerived.outCollateral * barScale,
+    inPeerCredit: fromDerived.inPeerCredit * barScale
+  };
+
+  const toSegments: AccountSegments = {
+    outOwnCredit: (toDerived.outOwnCredit * barScale) - toCreditUsed,
+    inCollateral: (toDerived.inCollateral * barScale) - toDebtSegment,
+    outPeerCredit: toDerived.outPeerCredit * barScale,
+    inOwnCredit: toDebtSegment > 0 ? toDebtSegment : (toDerived.inOwnCredit * barScale),
+    outCollateral: toDerived.outCollateral * barScale,
+    inPeerCredit: toDerived.inPeerCredit * barScale
   };
 
   // Get entity sizes to avoid collision
@@ -75,7 +134,8 @@ export function createAccountBars(
       fromEntity,
       toEntity,
       normalizedDirection,
-      segments,
+      fromSegments,
+      toSegments,
       barHeight,
       fromEntitySize,
       toEntitySize
@@ -86,7 +146,8 @@ export function createAccountBars(
       fromEntity,
       toEntity,
       normalizedDirection,
-      segments,
+      fromSegments,
+      toSegments,
       barHeight
     );
   }
@@ -96,135 +157,153 @@ export function createAccountBars(
 }
 
 /**
- * Spread mode: bars extend FROM each entity toward middle with gap
+ * Spread mode: each entity's bars extend FROM that entity toward the middle
+ * Each entity shows their OWN perspective values on their side
  */
 function renderSpreadMode(
   group: THREE.Group,
   fromEntity: EntityData,
-  _toEntity: EntityData,
+  toEntity: EntityData,
   direction: THREE.Vector3,
-  segments: AccountSegments,
+  fromSegments: AccountSegments,
+  toSegments: AccountSegments,
   barHeight: number,
   fromEntitySize: number,
-  _toEntitySize: number
+  toEntitySize: number
 ): void {
   const barRadius = barHeight * 2.5;
-  const safeGap = 0.2; // Small gap between entity surface and bar
-  const minGapSpread = 0.5; // Gap in middle (reduced 4x for denser visualization)
+  const safeGap = 0.2;
 
-  // Left-side bars extend from left entity rightward
-  const leftStartPos = fromEntity.position.clone().add(
+  // FROM entity bars - extend from fromEntity toward toEntity
+  // Show FROM's perspective: their collateral, their credit usage
+  const fromStartPos = fromEntity.position.clone().add(
     direction.clone().normalize().multiplyScalar(fromEntitySize + barRadius + safeGap)
   );
 
-  let leftOffset = 0;
-  const leftBars: Array<{key: keyof AccountSegments, colorType: keyof typeof BAR_COLORS}> = [
-    { key: 'outOwnCredit', colorType: 'availableCredit' },  // Our unused (pink) - closest to entity
-    { key: 'inCollateral', colorType: 'secured' },          // Our collateral (green) - middle
-    { key: 'outPeerCredit', colorType: 'unsecured' }        // Their used (red) - closest to gap
+  let fromOffset = 0;
+  // Show what fromEntity has and owes
+  const fromBars: Array<{key: keyof AccountSegments, colorType: keyof typeof BAR_COLORS}> = [
+    { key: 'outOwnCredit', colorType: 'availableCredit' },  // their unused credit (pink)
+    { key: 'inCollateral', colorType: 'secured' },          // their collateral (green)
+    { key: 'inOwnCredit', colorType: 'unsecured' }          // their credit being used / debt (red)
   ];
 
-  leftBars.forEach((barSpec) => {
-    const length = segments[barSpec.key];
+  fromBars.forEach((barSpec) => {
+    const length = fromSegments[barSpec.key];
     if (length > 0.01) {
       const bar = createBarCylinder(barRadius, length, BAR_COLORS[barSpec.colorType], barSpec.colorType);
-      const barCenter = leftStartPos.clone().add(direction.clone().normalize().multiplyScalar(leftOffset + length/2));
+      const barCenter = fromStartPos.clone().add(direction.clone().normalize().multiplyScalar(fromOffset + length/2));
       bar.position.copy(barCenter);
 
-      // Rotate cylinder to align with connection direction
       const axis = new THREE.Vector3(0, 1, 0);
       bar.quaternion.setFromUnitVectors(axis, direction.clone().normalize());
 
       group.add(bar);
     }
-    leftOffset += length;
+    fromOffset += length;
   });
 
-  // Right-side bars extend from right entity LEFTWARD toward gap
-  const rightStartPos = _toEntity.position.clone().sub(
-    direction.clone().normalize().multiplyScalar(_toEntitySize + barRadius + safeGap)
+  // TO entity bars - extend from toEntity toward fromEntity
+  // Show TO's perspective: their collateral, their credit usage
+  const toStartPos = toEntity.position.clone().sub(
+    direction.clone().normalize().multiplyScalar(toEntitySize + barRadius + safeGap)
   );
 
-  let rightOffset = 0;
-  const rightBars: Array<{key: keyof AccountSegments, colorType: keyof typeof BAR_COLORS}> = [
-    { key: 'inPeerCredit', colorType: 'availableCredit' },  // Their unused (pink) - closest to entity
-    { key: 'outCollateral', colorType: 'secured' },         // Their collateral (green) - middle
-    { key: 'inOwnCredit', colorType: 'unsecured' }          // Our used (red) - closest to gap
+  let toOffset = 0;
+  // Show what toEntity has and owes
+  const toBars: Array<{key: keyof AccountSegments, colorType: keyof typeof BAR_COLORS}> = [
+    { key: 'outOwnCredit', colorType: 'availableCredit' },  // their unused credit (pink)
+    { key: 'inCollateral', colorType: 'secured' },          // their collateral (green)
+    { key: 'inOwnCredit', colorType: 'unsecured' }          // their credit being used / debt (red)
   ];
 
-  rightBars.forEach((barSpec) => {
-    const length = segments[barSpec.key];
+  toBars.forEach((barSpec) => {
+    const length = toSegments[barSpec.key];
     if (length > 0.01) {
       const bar = createBarCylinder(barRadius, length, BAR_COLORS[barSpec.colorType], barSpec.colorType);
-      // Position bars going LEFTWARD from right entity toward gap
-      const barCenter = rightStartPos.clone().sub(direction.clone().normalize().multiplyScalar(rightOffset + length/2));
+      // Position bars going toward fromEntity (subtract)
+      const barCenter = toStartPos.clone().sub(direction.clone().normalize().multiplyScalar(toOffset + length/2));
       bar.position.copy(barCenter);
 
-      // Rotate cylinder to align with connection direction
       const axis = new THREE.Vector3(0, 1, 0);
       bar.quaternion.setFromUnitVectors(axis, direction.clone().normalize());
 
       group.add(bar);
     }
-    rightOffset += length;
+    toOffset += length;
   });
 }
 
 /**
- * Close mode: 7-region stack at centerline with yellow delta separator
+ * Close mode: stacked bars at centerline
+ * FROM entity bars | DELTA SEPARATOR | TO entity bars
  */
 function renderCloseMode(
   group: THREE.Group,
   fromEntity: EntityData,
   toEntity: EntityData,
   direction: THREE.Vector3,
-  segments: AccountSegments,
+  fromSegments: AccountSegments,
+  toSegments: AccountSegments,
   barHeight: number
 ): void {
   const barRadius = barHeight * 2.5;
-  const totalBarsLength =
-    segments.outOwnCredit + segments.inCollateral + segments.outPeerCredit +
-    segments.inOwnCredit + segments.outCollateral + segments.inPeerCredit;
 
-  const centerPoint = fromEntity.position.clone().lerp(toEntity.position, 0.5);
-  const halfBarsLength = totalBarsLength / 2;
-  const startPos = centerPoint.clone().sub(direction.clone().normalize().multiplyScalar(halfBarsLength));
-
-  let currentOffset = 0;
-  const barOrder: Array<{key: keyof AccountSegments, colorType: keyof typeof BAR_COLORS}> = [
-    { key: 'outOwnCredit', colorType: 'availableCredit' },  // our unused credit - light red
-    { key: 'inCollateral', colorType: 'secured' },          // our collateral - green
-    { key: 'outPeerCredit', colorType: 'unsecured' },       // their used credit - red
-    // DELTA SEPARATOR HERE (index 2)
-    { key: 'inOwnCredit', colorType: 'unsecured' },         // our used credit - red
-    { key: 'outCollateral', colorType: 'secured' },         // their collateral - green
-    { key: 'inPeerCredit', colorType: 'availableCredit' }   // their unused credit - light red
+  // Same bar pattern for each entity
+  const barPattern: Array<{key: keyof AccountSegments, colorType: keyof typeof BAR_COLORS}> = [
+    { key: 'outOwnCredit', colorType: 'availableCredit' },  // unused credit (pink)
+    { key: 'inCollateral', colorType: 'secured' },          // collateral (green)
+    { key: 'inOwnCredit', colorType: 'unsecured' }          // credit being used / debt (red)
   ];
 
-  barOrder.forEach((barSpec, index) => {
-    const length = segments[barSpec.key];
+  // Calculate total length
+  let fromLength = 0;
+  let toLength = 0;
+  barPattern.forEach(spec => {
+    fromLength += fromSegments[spec.key];
+    toLength += toSegments[spec.key];
+  });
 
+  const totalLength = fromLength + toLength;
+  const centerPoint = fromEntity.position.clone().lerp(toEntity.position, 0.5);
+  const startPos = centerPoint.clone().sub(direction.clone().normalize().multiplyScalar(totalLength / 2));
+
+  let currentOffset = 0;
+
+  // FROM entity bars (first half)
+  barPattern.forEach((barSpec) => {
+    const length = fromSegments[barSpec.key];
     if (length > 0.01) {
       const bar = createBarCylinder(barRadius, length, BAR_COLORS[barSpec.colorType], barSpec.colorType);
       const barCenter = startPos.clone().add(direction.clone().multiplyScalar(currentOffset + length/2));
       bar.position.copy(barCenter);
 
-      // Rotate cylinder to align with connection direction
       const axis = new THREE.Vector3(0, 1, 0);
       bar.quaternion.setFromUnitVectors(axis, direction.clone().normalize());
-
       group.add(bar);
     }
-
     currentOffset += length;
+  });
 
-    // Add delta separator after outPeerCredit (index 2)
-    if (index === 2) {
-      const separatorPos = startPos.clone().add(direction.clone().multiplyScalar(currentOffset));
-      const separator = createDeltaSeparator(barHeight, direction);
-      separator.position.copy(separatorPos);
-      group.add(separator);
+  // Delta separator at center
+  const separatorPos = startPos.clone().add(direction.clone().multiplyScalar(currentOffset));
+  const separator = createDeltaSeparator(barHeight, direction);
+  separator.position.copy(separatorPos);
+  group.add(separator);
+
+  // TO entity bars (second half)
+  barPattern.forEach((barSpec) => {
+    const length = toSegments[barSpec.key];
+    if (length > 0.01) {
+      const bar = createBarCylinder(barRadius, length, BAR_COLORS[barSpec.colorType], barSpec.colorType);
+      const barCenter = startPos.clone().add(direction.clone().multiplyScalar(currentOffset + length/2));
+      bar.position.copy(barCenter);
+
+      const axis = new THREE.Vector3(0, 1, 0);
+      bar.quaternion.setFromUnitVectors(axis, direction.clone().normalize());
+      group.add(bar);
     }
+    currentOffset += length;
   });
 }
 

@@ -239,13 +239,16 @@ function verifyPayment(
   console.log(`  Sender-Hub offdelta: ${senderHubDelta}`);
   console.log(`  Hub-Receiver offdelta: ${hubReceiverDelta}`);
 
-  // After payment: sender-hub delta should be negative (sender sent)
-  // After payment: hub-receiver delta should be negative (hub forwarded)
+  // Sender-Hub: sender (Alice) is LEFT, hub is RIGHT
+  // Alice owes Hub → LEFT owes RIGHT → totalDelta < 0 from LEFT view
   if (senderHubDelta >= 0n) {
     throw new Error(`PAYMENT FAILED at "${label}": Sender-Hub offdelta should be negative after payment (got ${senderHubDelta})`);
   }
-  if (hubReceiverDelta >= 0n) {
-    throw new Error(`PAYMENT FAILED at "${label}": Hub-Receiver offdelta should be negative after payment (got ${hubReceiverDelta})`);
+
+  // Hub-Receiver: receiver (Bob) is LEFT, hub is RIGHT
+  // Hub owes Bob → RIGHT owes LEFT → totalDelta > 0 from LEFT view
+  if (hubReceiverDelta <= 0n) {
+    throw new Error(`PAYMENT FAILED at "${label}": Hub-Receiver offdelta should be positive after payment (got ${hubReceiverDelta})`);
   }
 
   // Verify sender paid exact amount
@@ -255,11 +258,11 @@ function verifyPayment(
 
   // Hub takes routing fee (0.1%), so receiver gets slightly less
   const minReceiverAmount = (amount * 99n) / 100n; // Allow up to 1% fee
-  if (-hubReceiverDelta < minReceiverAmount) {
-    throw new Error(`PAYMENT MISMATCH at "${label}": Hub-Receiver offdelta is ${-hubReceiverDelta}, expected at least ${minReceiverAmount}`);
+  if (hubReceiverDelta < minReceiverAmount) {
+    throw new Error(`PAYMENT MISMATCH at "${label}": Hub-Receiver offdelta is ${hubReceiverDelta}, expected at least ${minReceiverAmount}`);
   }
 
-  const hubFee = -senderHubDelta - (-hubReceiverDelta);
+  const hubFee = -senderHubDelta - hubReceiverDelta;
   console.log(`✅ [${label}] Payment verified: ${Number(amount) / 1e18} sent, Hub fee: ${Number(hubFee) / 1e18}`);
 }
 

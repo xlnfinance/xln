@@ -3454,16 +3454,19 @@ let vrHammer: VRHammer | null = null;
       throw new Error(`FINTECH-SAFETY: Token ${displayTokenId} not found despite being in availableTokens: ${availableTokens}`);
     }
 
-    // Derive account data using REAL token delta
-    // CANONICAL: Since we always read from LEFT entity, deriveDelta needs isLeft=true
-    const derived = deriveEntry(tokenDelta, true); // Always from left entity's perspective
+    // Derive from BOTH perspectives - each entity sees their own values on their side
+    const fromIsLeft = fromId < toId;
+    const fromDerived = deriveEntry(tokenDelta, fromIsLeft);
+    const toDerived = deriveEntry(tokenDelta, !fromIsLeft);
 
     // Delegate rendering to AccountBarRenderer
     return createAccountBars(
       scene,
       fromEntity,
       toEntity,
-      derived,
+      fromDerived,
+      toDerived,
+      fromIsLeft,
       {
         barsMode,
         portfolioScale: settings.portfolioScale || 5000,
@@ -4841,15 +4844,16 @@ let vrHammer: VRHammer | null = null;
       // Trigger activity animation
       triggerEntityActivity(entity.id);
 
-      // Get entity name and directly open full panel (simplified UX)
+      // Get entity name and signerId for the clicked entity
       const entityName = getEntityName(entity.id);
-      console.log(`[Graph3D] Entity clicked: ${entity.id}, name: ${entityName}`);
+      const signerId = getSignerIdForEntity(entity.id);
+      console.log(`[Graph3D] Entity clicked: ${entity.id}, name: ${entityName}, signerId: ${signerId}`);
 
       // Emit selection for other panels to react
       panelBridge.emit('entity:selected', { entityId: entity.id });
 
       // Directly open full entity panel (skip mini panel for faster UX)
-      panelBridge.emit('openEntityOperations', { entityId: entity.id, entityName });
+      panelBridge.emit('openEntityOperations', { entityId: entity.id, entityName, signerId });
 
     } else {
       // Clicked on empty space - close mini panel
@@ -4863,6 +4867,19 @@ let vrHammer: VRHammer | null = null;
     const profiles = typeof env.gossip.getProfiles === 'function' ? env.gossip.getProfiles() : (env.gossip.profiles || []);
     const profile = profiles.find((p: any) => p.entityId === entityId);
     return profile?.metadata?.name || '';
+  }
+
+  // Get signerId for an entity by looking up replica key in eReplicas
+  function getSignerIdForEntity(entityId: string): string {
+    const currentReplicas = getTimeAwareReplicas();
+    // Find replica key that starts with this entityId
+    for (const key of currentReplicas.keys() as IterableIterator<string>) {
+      if (key.startsWith(entityId + ':')) {
+        const signerId = key.slice(entityId.length + 1);
+        return signerId;
+      }
+    }
+    return entityId; // Fallback to entityId if no replica found
   }
 
   // Handle mini panel close

@@ -353,6 +353,27 @@
     {/if}
   </button>
 
+  <!-- Progress Scrubber with frame info -->
+  <div class="scrubber-container">
+    <div class="frame-info">
+      <span class="frame-badge" class:live={$isLive}>
+        {$isLive ? 'LIVE' : `${$timeIndex + 1}/${$history.length}`}
+      </span>
+      <span class="time-label">{currentTime}</span>
+    </div>
+    <input
+      type="range"
+      class="scrubber"
+      min="0"
+      max={maxTimeIndex}
+      value={$timeIndex}
+      on:input={handleSliderInput}
+      style="--progress: {progressPercent}%"
+      disabled={$history.length === 0}
+    />
+    <span class="time-label end">{totalTime}</span>
+  </div>
+
   <!-- Mega Dropdown (Settings: speed + loop + export) -->
   <div class="dropdown">
     <button class="settings-btn" on:click={() => { showSpeedMenu = !showSpeedMenu; showLoopMenu = false; showExportMenu = false; }} title="Settings">
