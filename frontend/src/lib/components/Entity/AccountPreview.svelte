@@ -161,15 +161,15 @@
           {td.tokenInfo.symbol}
         </span>
         <div class="delta-bar">
-          <!-- OWNERSHIP MODEL: LEFT = Our assets, RIGHT = Their assets -->
+          <!-- HYBRID MODEL: Unused on borrower, Used on lender -->
 
-          <!-- Left side: Our side (what WE own/extended) -->
+          <!-- Left side: OUR PERSPECTIVE (what we can use) -->
           <div class="bar-section left-side">
-            {#if td.ourUnusedCredit > 0n}
+            {#if td.theirUnusedCredit > 0n}
               <div
                 class="bar-segment unused-credit"
-                style="width: {Number((td.ourUnusedCredit * 100n) / td.totalCapacity)}%"
-                title="Our credit extended to peer: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourUnusedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
+                style="width: {Number((td.theirUnusedCredit * 100n) / td.totalCapacity)}%"
+                title="Credit FROM peer we CAN use: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirUnusedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
               ></div>
             {/if}
             {#if td.ourCollateralLocked > 0n}
@@ -179,27 +179,13 @@
                 title="Our collateral: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourCollateralLocked) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
               ></div>
             {/if}
-            {#if td.ourUsedCredit > 0n}
-              <div
-                class="bar-segment used-credit"
-                style="width: {Number((td.ourUsedCredit * 100n) / td.totalCapacity)}%"
-                title="Credit peer is using from us: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourUsedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
-              ></div>
-            {/if}
           </div>
 
           <!-- Visual separator -->
           <div class="bar-separator">|</div>
 
-          <!-- Right side: Their side (what THEY own/extended) -->
+          <!-- Right side: THEIR PERSPECTIVE (what they deployed/we owe) -->
           <div class="bar-section right-side">
-            {#if td.theirUnusedCredit > 0n}
-              <div
-                class="bar-segment unused-credit"
-                style="width: {Number((td.theirUnusedCredit * 100n) / td.totalCapacity)}%"
-                title="Peer credit extended to us: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirUnusedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
-              ></div>
-            {/if}
             {#if td.theirCollateralLocked > 0n}
               <div
                 class="bar-segment collateral"
@@ -211,7 +197,7 @@
               <div
                 class="bar-segment used-credit"
                 style="width: {Number((td.peerDebtToUs * 100n) / td.totalCapacity)}%"
-                title="USED credit (peer owes us): {$xlnFunctions!.formatTokenAmount(td.tokenId, td.peerDebtToUs)}"
+                title="USED credit (we owe peer): {$xlnFunctions!.formatTokenAmount(td.tokenId, td.peerDebtToUs)}"
               ></div>
             {/if}
           </div>
