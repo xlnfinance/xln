@@ -12,8 +12,8 @@
 - [ ] **TR metric in Solvency Panel** - Show Total Risk = Σ(credit-backed positions)
 
 ### Visual Solvency
-- [ ] **Dual-render for desync** - Show confirmed (solid) + pending (translucent) bars when heights differ
-- [ ] **Solvency panel** - Dedicated monitor showing conservation law: Σ(reserves) = Σ(collateral)
+- [x] ~~**Dual-render for desync**~~ ✅ DONE - Striped bars when heights differ (commit ccbb022)
+- [x] ~~**Solvency panel**~~ ✅ DONE - Basel M1/M2/M3 panel created (commit 128db3d)
 - [ ] **Reserve sync verification** - Test frames 8-10 with new debug logs, confirm no desync
 
 ### Entity Panel
