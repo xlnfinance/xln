@@ -50,6 +50,9 @@
   const localTimeIndex = writable<number>(-1);  // -1 = live mode
   const localIsLive = writable<boolean>(true);
 
+  // Pending entity panel data - bypasses Dockview params timing race
+  const pendingEntityData = new Map<string, {entityId: string, entityName: string, signerId: string}>();
+
   // Build version tracking (injected by vite.config.ts)
   // @ts-ignore - __BUILD_HASH__ and __BUILD_TIME__ are injected by vite define
   const BUILD_HASH: string = typeof globalThis.__BUILD_HASH__ !== 'undefined' ? globalThis.__BUILD_HASH__ : (typeof __BUILD_HASH__ !== 'undefined' ? __BUILD_HASH__ : 'dev');
@@ -305,17 +308,26 @@
         return {
           element: div,
           init: (parameters: any) => {
-            // ENTITY PANEL: Get params from Dockview API (not from options!)
+            // ENTITY PANEL: Read from pendingEntityData Map (bypasses Dockview params)
             if (options.name === 'entity-panel') {
-              const params = parameters.api.getParameters();
-              console.log('[View] 🔍 Init called with params:', params);
+              const panelId = parameters.api.id;
+              const pending = pendingEntityData.get(panelId);
+
+              if (!pending) {
+                console.error('[View] ❌ No pending data for panel:', panelId);
+                return;
+              }
+
+              // Consume data (delete after reading)
+              pendingEntityData.delete(panelId);
+              console.log('[View] ✅ Consumed pending data:', pending);
 
               component = mount(EntityPanelWrapper, {
                 target: div,
                 props: {
-                  entityId: String(params.entityId || ''),
-                  entityName: String(params.entityName || ''),
-                  signerId: String(params.signerId || params.entityId || ''),
+                  entityId: pending.entityId,
+                  entityName: pending.entityName,
+                  signerId: pending.signerId,
                   isolatedEnv: localEnvStore,
                   isolatedHistory: localHistoryStore,
                   isolatedTimeIndex: localTimeIndex,
@@ -469,16 +481,21 @@
         return;
       }
 
-      // Create new panel using EntityPanelWrapper (reuses full EntityPanel)
-      try {
-        console.log('[View] 📋 Creating entity panel:', { id: panelId, entityId: entityId.slice(0, 10), entityName, signerId });
+      // STORE DATA FIRST - before Dockview (bypasses params timing race)
+      pendingEntityData.set(panelId, {
+        entityId,
+        entityName: entityName || entityId.slice(0, 10),
+        signerId: signerId || entityId
+      });
+      console.log('[View] 📋 Stored pending entity data for:', panelId);
 
+      // Create new panel - it will find its data in pendingEntityData Map
+      try {
         dockview.addPanel({
           id: panelId,
           component: 'entity-panel',
           title: `🏢 ${entityName || entityId.slice(0, 10) + '...'}`,
-          position: { direction: 'within', referencePanel: 'architect' },
-          params: { entityId, entityName, signerId }
+          position: { direction: 'within', referencePanel: 'architect' }
         });
         console.log('[View] ✅ Entity panel created:', entityId.slice(0, 10));
       } catch (err) {
