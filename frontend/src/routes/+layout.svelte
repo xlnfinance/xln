@@ -31,6 +31,6 @@
 	}
 
 	main.with-topbar {
-		padding-top: 56px; /* Height of topbar */
+		/* No padding - topbar is sticky (stays in flow) */
 	}
 </style>
