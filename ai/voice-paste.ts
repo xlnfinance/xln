@@ -5,7 +5,7 @@
  * Default: Hold Left Ctrl to record, release to transcribe & paste
  */
 
-import { GlobalKeyboardListener } from "node-global-key-listener";
+import ioHook from "iohook";
 import { spawn, ChildProcess } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from "fs";
 import { join } from "path";
@@ -295,8 +295,24 @@ function fallbackToClipboard(text: string): void {
 // HOTKEY LISTENER
 // ============================================================================
 
+// iohook keycodes mapping
+const KEYCODE_MAP: Record<string, number> = {
+  "LEFT CTRL": 29,
+  "RIGHT CTRL": 3677,
+  "LEFT ALT": 56,
+  "RIGHT ALT": 3640,
+  "LEFT SHIFT": 42,
+  "RIGHT SHIFT": 54,
+};
+
 function startListener(): void {
-  const listener = new GlobalKeyboardListener();
+  const targetKeycode = KEYCODE_MAP[config.hotkey.toUpperCase()];
+
+  if (!targetKeycode) {
+    console.error(`❌ Unknown hotkey: ${config.hotkey}`);
+    console.error(`   Available: ${Object.keys(KEYCODE_MAP).join(", ")}`);
+    process.exit(1);
+  }
 
   console.log(`
 ╔══════════════════════════════════════════════════════════════════╗
@@ -314,24 +330,28 @@ function startListener(): void {
 ╚══════════════════════════════════════════════════════════════════╝
 `);
 
-  listener.addListener((e, down) => {
-    // Normalize key name
-    const keyName = e.name.toUpperCase();
-    const targetKey = config.hotkey.toUpperCase();
-
-    if (keyName === targetKey) {
-      if (down[keyName]) {
-        startRecording();
-      } else {
-        stopRecording();
-      }
+  // Register keydown event
+  ioHook.on("keydown", (event: any) => {
+    if (event.keycode === targetKeycode && !recording) {
+      startRecording();
     }
   });
+
+  // Register keyup event
+  ioHook.on("keyup", (event: any) => {
+    if (event.keycode === targetKeycode && recording) {
+      stopRecording();
+    }
+  });
+
+  // Start iohook
+  ioHook.start();
 
   // Handle Ctrl+C gracefully
   process.on("SIGINT", () => {
     console.log("\n\n👋 Shutting down...");
     cleanup();
+    ioHook.stop();
     process.exit(0);
   });
 }

@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
 	import Topbar from '$lib/components/Topbar.svelte';
+	import '$lib/styles/apple-glass.css';
 	let { children } = $props();
 
 	// Check for embed mode from URL
@@ -30,6 +31,6 @@
 	}
 
 	main.with-topbar {
-		padding-top: 48px; /* Height of topbar */
+		padding-top: 56px; /* Height of topbar */
 	}
 </style>

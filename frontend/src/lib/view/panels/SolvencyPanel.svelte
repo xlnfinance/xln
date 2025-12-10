@@ -86,75 +86,172 @@
   }
 </script>
 
-<div class="solvency-panel">
-  <div class="header">
-    <h3>Capital Adequacy</h3>
-    <div class="status" class:valid={solvencyData?.isValid} class:invalid={!solvencyData?.isValid}>
-      {solvencyData?.isValid ? '✅ ADEQUATE' : '❌ VIOLATION'}
+<div class="solvency-panel glass-panel">
+  <!-- Hero status -->
+  <div class="hero-status" class:valid={solvencyData?.isValid}>
+    <div class="status-icon">
+      {solvencyData?.isValid ? '✓' : '⚠'}
+    </div>
+    <div class="status-text text-tiny">
+      {solvencyData?.isValid ? 'SYSTEM SOLVENT' : 'IMBALANCE DETECTED'}
     </div>
   </div>
 
   {#if solvencyData}
-    <!-- Basel-style metrics -->
-    <div class="metrics">
-      <div class="metric-row m1">
-        <span class="label">M1 (Reserves)</span>
-        <span class="value">{formatAmount(solvencyData.m1)}</span>
+    <!-- Big beautiful reserves -->
+    <div class="hero-metric animate-fade-in">
+      <div class="metric-label">TOTAL RESERVES</div>
+      <div class="metric-value accent animate-glow">
+        {formatAmount(solvencyData.m1)}
       </div>
+      <div class="metric-sublabel text-small">
+        M1 • On-chain liquidity
+      </div>
+    </div>
 
-      <div class="metric-row m2">
-        <span class="label">M2 (Confirmed)</span>
-        <span class="value">{formatAmount(solvencyData.m2)}</span>
+    <!-- Collateral breakdown -->
+    <div class="collateral-grid">
+      <div class="glass-card metric-card">
+        <div class="metric-label">CONFIRMED</div>
+        <div class="metric-value">
+          {formatAmount(solvencyData.m2)}
+        </div>
+        <div class="text-tiny" style="color: var(--text-tertiary);">M2 • Finalized</div>
       </div>
 
       {#if solvencyData.m3 > 0n}
-        <div class="metric-row m3">
-          <span class="label">M3 (Pending)</span>
-          <span class="value pending">{formatAmount(solvencyData.m3)}</span>
-        </div>
-      {/if}
-
-      <div class="separator"></div>
-
-      <div class="metric-row total">
-        <span class="label">Total Collateral</span>
-        <span class="value">{formatAmount(solvencyData.total)}</span>
-      </div>
-
-      {#if solvencyData.delta !== 0n}
-        <div class="metric-row delta" class:positive={solvencyData.delta > 0n} class:negative={solvencyData.delta < 0n}>
-          <span class="label">Delta</span>
-          <span class="value">{solvencyData.delta > 0n ? '+' : ''}{formatAmount(solvencyData.delta)}</span>
+        <div class="glass-card metric-card">
+          <div class="metric-label">PENDING</div>
+          <div class="metric-value" style="color: var(--accent-orange);">
+            {formatAmount(solvencyData.m3)}
+          </div>
+          <div class="text-tiny" style="color: var(--text-tertiary);">M3 • In consensus</div>
         </div>
       {/if}
     </div>
 
     <!-- Conservation law -->
-    <div class="formula">
-      <div class="equation">
-        M1 = M2 + M3
+    <div class="conservation-law glass-card">
+      <div class="equation text-heading">
+        M1 = M2 {#if solvencyData.m3 > 0n}+ M3{/if}
       </div>
-      <div class="description">
-        Total reserves must equal sum of all bilateral collateral positions
+      <div class="law-description text-small">
+        Conservation law • Reserves equal total collateral
       </div>
+
+      {#if solvencyData.delta !== 0n}
+        <div class="delta-warning">
+          <span class="metric-change" class:up={solvencyData.delta > 0n} class:down={solvencyData.delta < 0n}>
+            {solvencyData.delta > 0n ? '+' : ''}{formatAmount(solvencyData.delta)} imbalance
+          </span>
+        </div>
+      {/if}
     </div>
+
   {:else}
-    <div class="empty">
-      No data available
+    <div class="empty-state text-small">
+      <div style="opacity: 0.4; font-size: 2rem;">∅</div>
+      <div>No solvency data</div>
     </div>
   {/if}
 </div>
 
 <style>
   .solvency-panel {
-    padding: 16px;
-    background: #0d0d0d;
-    color: #e0e0e0;
-    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+    padding: var(--space-4);
     height: 100%;
     overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
   }
 
+  /* Hero status indicator */
+  .hero-status {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--glass-highlight);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--glass-border);
+  }
+
+  .hero-status.valid {
+    border-color: rgba(48, 209, 88, 0.3);
+  }
+
+  .status-icon {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: var(--font-size-xl);
+    color: var(--accent-green);
+  }
+
+  .status-text {
+    color: var(--text-secondary);
+  }
+
+  /* Hero metric */
+  .hero-metric {
+    text-align: center;
+    padding: var(--space-5) var(--space-4);
+  }
+
+  .metric-sublabel {
+    color: var(--text-tertiary);
+    margin-top: var(--space-1);
+  }
+
+  /* Collateral grid */
+  .collateral-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--space-3);
+  }
+
+  .metric-card {
+    padding: var(--space-3);
+    text-align: center;
+  }
+
+  /* Conservation law */
+  .conservation-law {
+    padding: var(--space-4);
+    text-align: center;
+  }
+
+  .equation {
+    font-size: var(--font-size-2xl);
+    font-weight: 700;
+    color: var(--accent-gold);
+    margin-bottom: var(--space-2);
+    font-family: 'Times New Roman', serif;
+    font-style: italic;
+  }
+
+  .law-description {
+    color: var(--text-tertiary);
+    margin-bottom: var(--space-3);
+  }
+
+  .delta-warning {
+    margin-top: var(--space-3);
+    display: flex;
+    justify-content: center;
+  }
+
+  /* Empty state */
+  .empty-state {
+    padding: var(--space-8) var(--space-4);
+    text-align: center;
+    color: var(--text-tertiary);
+  }
+
+  /* OLD STYLES BELOW - TODO: Remove when ready */
   .header {
     display: flex;
     justify-content: space-between;
