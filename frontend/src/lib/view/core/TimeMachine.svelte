@@ -438,16 +438,19 @@
   .time-machine {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    padding: 0.5rem 1rem;
-    background: #1a1a1a;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    height: 34px;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--blur-md));
+    -webkit-backdrop-filter: blur(var(--blur-md));
+    border-top: 1px solid var(--glass-border);
+    height: 56px;
     position: fixed;
     bottom: 0;
     left: 0;
     right: 0;
     z-index: 100;
+    box-shadow: 0 -1px 16px rgba(0, 0, 0, 0.2);
   }
 
   /* Play Button (prominent) */
