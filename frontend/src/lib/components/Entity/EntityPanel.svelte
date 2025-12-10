@@ -9,7 +9,6 @@
 
   import EntityDropdown from './EntityDropdown.svelte';
   import AccountPanel from './AccountPanel.svelte';
-  import EntityProfile from './EntityProfile.svelte';
   import ConsensusState from './ConsensusState.svelte';
   import ChatMessages from './ChatMessages.svelte';
   import ProposalsList from './ProposalsList.svelte';
@@ -295,8 +294,7 @@
       />
     {:else}
       <!-- Normal entity view -->
-      <!-- Entity Profile Section -->
-      <EntityProfile {replica} {tab} />
+      <!-- Entity info now only in dropdown, not separate card -->
 
       <!-- Reserves - Always Visible -->
       {#if replica?.state?.reserves && replica.state.reserves instanceof Map && replica.state.reserves.size > 0}
@@ -337,7 +335,17 @@
         </div>
       {/if}
 
-      <!-- Crontab Timers -->
+      <!-- Accounts - Always Visible -->
+      <div class="entity-accounts-section">
+        <div class="accounts-header">
+          <h3>Accounts</h3>
+        </div>
+        <div class="accounts-content">
+          <AccountList replica={replica} on:select={handleAccountPreviewSelect} />
+        </div>
+      </div>
+
+      <!-- Periodic Tasks (moved from above Accounts) -->
       {#if replica && (replica.state as any)?.crontabState}
         {@const now = Date.now()}
         {@const crontabState = (replica.state as any).crontabState}
@@ -364,16 +372,6 @@
           </div>
         {/if}
       {/if}
-
-      <!-- Accounts - Always Visible -->
-      <div class="entity-accounts-section">
-        <div class="accounts-header">
-          <h3>Accounts</h3>
-        </div>
-        <div class="accounts-content">
-          <AccountList replica={replica} on:select={handleAccountPreviewSelect} />
-        </div>
-      </div>
 
       <!-- Consensus State Component -->
       <div class="panel-component" id="consensus-{tab.id}">
