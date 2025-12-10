@@ -39,15 +39,15 @@
     return replica.state?.name || '';
   }
 
-  // Get dropdown display text
-  $: dropdownText = getDropdownText(tab);
+  // Get dropdown display text - explicitly track ALL dependencies
+  $: dropdownText = getDropdownText(tab, activeReplicas, activeXlnFunctions);
 
-  function getDropdownText(tab: Tab): string {
-    if (tab.entityId && activeXlnFunctions && activeReplicas) {
+  function getDropdownText(tab: Tab, replicas: any, xlnFuncs: any): string {
+    if (tab.entityId && xlnFuncs && replicas) {
       // Find replica to get name
       const replicaKey = `${tab.entityId}:${tab.signerId}`;
-      const replica = activeReplicas.get(replicaKey);
-      const entityNum = activeXlnFunctions.getEntityShortId(tab.entityId);
+      const replica = replicas.get(replicaKey);
+      const entityNum = xlnFuncs.getEntityShortId(tab.entityId);
 
       if (replica) {
         const name = getEntityName(replica);
