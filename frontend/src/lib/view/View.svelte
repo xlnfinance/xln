@@ -299,32 +299,32 @@
               isolatedTimeIndex: localTimeIndex
             }
           });
-        } else if (options.name === 'entity-panel') {
-          // Dynamic panel for entity operations (opened via panelBridge)
-          // Uses EntityPanelWrapper - thin Dockview adapter for legacy EntityPanel
-          // @ts-ignore - Dockview params passed via addPanel
-          console.log('[View] 🔍 FULL options object:', JSON.stringify(options, null, 2));
-          const params = (options as any).params || {};
-          console.log('[View] 🔍 Extracted params:', params);
-          console.log('[View] 🔍 entityId:', params.entityId, 'signerId:', params.signerId);
-          component = mount(EntityPanelWrapper, {
-            target: div,
-            props: {
-              entityId: String(params.entityId || ''),
-              entityName: String(params.entityName || ''),
-              signerId: String(params.signerId || params.entityId || ''),
-              isolatedEnv: localEnvStore,
-              isolatedHistory: localHistoryStore,
-              isolatedTimeIndex: localTimeIndex,
-              isolatedIsLive: localIsLive
-            }
-          });
         }
 
         // Return Dockview-compatible API
         return {
           element: div,
-          init: () => {}, // Svelte components self-initialize
+          init: (parameters: any) => {
+            // ENTITY PANEL: Get params from Dockview API (not from options!)
+            if (options.name === 'entity-panel') {
+              const params = parameters.api.getParameters();
+              console.log('[View] 🔍 Init called with params:', params);
+
+              component = mount(EntityPanelWrapper, {
+                target: div,
+                props: {
+                  entityId: String(params.entityId || ''),
+                  entityName: String(params.entityName || ''),
+                  signerId: String(params.signerId || params.entityId || ''),
+                  isolatedEnv: localEnvStore,
+                  isolatedHistory: localHistoryStore,
+                  isolatedTimeIndex: localTimeIndex,
+                  isolatedIsLive: localIsLive
+                }
+              });
+            }
+            // Other panels already mounted above
+          },
           dispose: () => {
             // Svelte 5: unmount() happens automatically when DOM removed
             // No need to call $destroy() - it doesn't exist in Svelte 5

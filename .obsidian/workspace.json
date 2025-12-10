@@ -185,17 +185,18 @@
   },
   "active": "69e3b875bcd19714",
   "lastOpenFiles": [
-    "frontend/build/_app/immutable/nodes/5.BGX7bega.js",
-    "frontend/build/_app/immutable/nodes/2.BxUG-ZsZ.js",
-    "frontend/build/_app/immutable/nodes/12.BRKmExLi.js",
-    "frontend/build/_app/immutable/nodes/1.Bwv5colt.js",
-    "frontend/build/_app/immutable/nodes/0.DIFej09s.js",
-    "frontend/build/_app/immutable/entry/start.DpssERRB.js",
-    "frontend/build/_app/immutable/entry/app.BcuP2By8.js",
-    "frontend/build/_app/immutable/chunks/CofXdJi1.js",
-    "frontend/build/_app/immutable/chunks/BXxyM0mI.js",
-    "frontend/build/_app/immutable/nodes/5.DHUZYDfv.js",
-    "frontend/build/_app/immutable/nodes/2.3TDqqt8G.js",
+    "frontend/build/_app/immutable/nodes/5.BGOZy-sH.js",
+    "frontend/build/_app/immutable/nodes/2.Dka6Pr9z.js",
+    "frontend/build/_app/immutable/nodes/12.C8kJZliZ.js",
+    "frontend/build/_app/immutable/nodes/1.C8VEgNhX.js",
+    "frontend/build/_app/immutable/nodes/0.Bg7XOO6Q.js",
+    "frontend/build/_app/immutable/entry/start.BSqOndGF.js",
+    "frontend/build/_app/immutable/entry/app.D-hTDYqZ.js",
+    "frontend/build/_app/immutable/chunks/BuxEQ715.js",
+    "frontend/build/_app/immutable/chunks/BWpBdAqt.js",
+    "frontend/build/_app/immutable/assets/_page.B3VZnfHv.css",
+    "frontend/build/_app/immutable/assets/12.OdNtv15b.css",
+    "test-results/playwright-view-smoke.png",
     "node_modules/then-request/node_modules/qs/README.md",
     "node_modules/then-request/node_modules/qs/CHANGELOG.md",
     "node_modules/then-request/node_modules/qs/LICENSE.md",
@@ -229,7 +230,6 @@
     "frontend/build/img/primitives/datacenter.svg",
     "frontend/build/img/preview.png",
     "frontend/build/img/og-image.png",
-    "frontend/build/img/logo.png",
-    "frontend/build/img/l.png"
+    "frontend/build/img/logo.png"
   ]
 }
