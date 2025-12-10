@@ -4866,11 +4866,14 @@ let vrHammer: VRHammer | null = null;
         throw new Error('FINTECH-SAFETY: No intersected object in click');
       }
       const entity = entities.find(e => e.mesh === intersectedObject);
-      console.log(`[Graph3D] Entity found for mesh:`, entity?.id);
+      console.log(`[Graph3D] Entity found for mesh:`, entity);
+      console.log(`[Graph3D] Entity.id:`, entity?.id, 'type:', typeof entity?.id);
 
-      if (!entity) {
+      if (!entity || !entity.id) {
         // Clicked on lightning or other non-entity - ignore
-        console.log(`[Graph3D] No entity found for clicked mesh - might be child mesh`);
+        console.log(`[Graph3D] No entity found for clicked mesh (or entity has no id)`);
+        console.log(`[Graph3D] Entities array length:`, entities.length);
+        console.log(`[Graph3D] First entity sample:`, entities[0]);
         return;
       }
 
