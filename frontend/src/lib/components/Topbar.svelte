@@ -109,18 +109,25 @@
 
 <style>
   .topbar {
-    height: 48px;
+    height: 56px;
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0 16px;
-    background: #000;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 0 var(--space-3);
+    background: var(--glass-bg);
+    backdrop-filter: blur(var(--blur-md));
+    -webkit-backdrop-filter: blur(var(--blur-md));
+    border-bottom: 1px solid var(--glass-border);
+    box-shadow: 0 1px 16px rgba(0, 0, 0, 0.2);
+    position: sticky;
+    top: 0;
+    z-index: 1000;
   }
 
   .topbar.transparent {
-    background: rgba(0, 0, 0, 0.8);
-    backdrop-filter: blur(10px);
+    background: rgba(17, 25, 40, 0.65);
+    backdrop-filter: blur(var(--blur-lg));
+    -webkit-backdrop-filter: blur(var(--blur-lg));
   }
 
   .topbar-left {
