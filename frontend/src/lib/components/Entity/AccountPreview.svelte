@@ -154,13 +154,6 @@
     </div>
   </div>
 
-  <div class="utilization-indicator">
-    <div class="utilization-bar">
-      <div class="utilization-fill" style="width: {utilization}%"></div>
-    </div>
-    <span class="utilization-text">{utilization}% utilized</span>
-  </div>
-
   <div class="delta-bars">
     {#each tokenDeltas as td (td.tokenId)}
       <div class="token-row">

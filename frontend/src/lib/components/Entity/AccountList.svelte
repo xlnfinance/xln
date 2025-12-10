@@ -19,6 +19,12 @@
       }))
     : [];
 
+  // DEBUG: Log accounts for entity
+  $: if (replica && accounts.length > 0) {
+    console.log(`[AccountList] Entity ${replica.entityId.slice(0,6)} has ${accounts.length} accounts:`,
+      accounts.map(a => a.counterpartyId.slice(0,6)));
+  }
+
 
   // Safety guard for XLN functions
 
