@@ -1,5 +1,50 @@
 # NEXT.md - Priority Tasks
 
+## 🔥 COMPLETED (2025-12-11): Entity Panel Click FIXED + UI Cleanup
+
+### Entity Panel Click - PERMANENT FIX ✅
+- ✅ **Map solution** - pendingEntityData Map bypasses Dockview params timing race
+- ✅ **$effect infinite loop removed** - was causing browser freeze
+- ✅ **Root cause found** - took 3 sessions! Dockview `options.params` doesn't exist in componentFactory
+- ✅ **Fix:** Store data in Map before addPanel(), read in init() callback
+- ✅ **Commits:** 90c17b4, 5c6b925
+
+### UI Improvements ✅
+- ✅ **BrainVault mnemonic** - 2 columns instead of 6 (vertical scan easier)
+- ✅ **JurisdictionPanel** - Address ellipsis + tooltips (no overflow)
+- ✅ **EntityPanel layout** - Removed EntityProfile card, reordered: Reserves → Accounts → Periodic Tasks
+- ✅ **Periodic Tasks styling** - SF Pro font, clean spacing, progress bars
+- ✅ **Topbar height** - 56px with proper logo sizing, no black bar
+- ✅ **AccountPreview** - Removed confusing "100% utilized" bar
+
+### Infrastructure ✅
+- ✅ **Playwright tests** - Created auto-test workflow for autonomous verification
+- ✅ **Baby steps workflow** - Small changes, verify before deploy
+- ✅ **BrowserVM fix** - channelKey → accountKey
+- ✅ **AHB autoload** - 500ms delay for Graph3D mount (was 100ms)
+- ✅ **No alerts/loops** - All removed, console-only logging
+- ✅ **Deploy pipeline** - Fixed auto-deploy.sh (runtime.js rebuild + bun PATH)
+
+### Commits Pushed ✅
+- 21 commits (9eb068a → ecd8f41)
+- All deployed to production
+
+---
+
+## 🚧 TODO (2025-12-11): Account Bilateral Sync + UI Polish
+
+### CRITICAL: Account Bilateral Desync (HIGH PRIORITY)
+- [ ] **Account #3←→#2 empty but #2←→#3 has credit** - bilateral consensus bug
+  - Entity #2 view shows credit opened with #3
+  - Entity #3 view shows account with #2 is EMPTY (0.0 USDC both sides)
+  - Should be mirrored - same account from both perspectives
+  - Debug logs added to AccountList.svelte (shows which accounts exist)
+  - May be issue in prepopulate-ahb.ts account creation or bilateral sync logic
+
+### UI Polish
+- [ ] **Identicons в dropdown** - Replace 🏢 emoji with generated identicons for entity/signer
+- [ ] **Apple design continuation** - 10 remaining panels need glassmorphism treatment
+
 ## 🚧 TODO (2025-12-10): Post-Bilateral Consensus Session
 
 ### Rebalancing Feature (HIGH PRIORITY)
@@ -17,7 +62,7 @@
 - [ ] **Reserve sync verification** - Test frames 8-10 with new debug logs, confirm no desync
 
 ### Entity Panel
-- [ ] **Click-to-open bug** - Entity panel opens empty, requires manual dropdown selection (debug with browser console)
+- [x] ~~**Click-to-open bug**~~ ✅ FIXED (2025-12-11) - Map solution + $effect loop removed (commits 90c17b4, 5c6b925)
 - [ ] **Mini-panel restoration** - Find where entity mini-panel went, decide keep or remove
 
 ### Consensus Visualization
