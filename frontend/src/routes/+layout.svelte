@@ -30,6 +30,6 @@
 	}
 
 	main.with-topbar {
-		padding-top: 56px; /* Height of topbar */
+		padding-top: 34px; /* Height of topbar */
 	}
 </style>

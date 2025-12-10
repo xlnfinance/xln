@@ -159,26 +159,43 @@
           console.error(`[View] ❌ SCENARIO NOT IMPLEMENTED: "${effectiveScenarioId}"`);
           console.error(`[View] 📋 Available scenarios: ${supportedScenarios.join(', ')}`);
           console.error(`[View] 💡 To add "${effectiveScenarioId}", implement it in View.svelte autoplay section`);
-        } else if (effectiveScenarioId === 'ahb') {
+        }
+
+        if (effectiveScenarioId === 'ahb') {
           try {
+            // CRITICAL: Clear old state BEFORE running (Architect panel pattern)
+            console.log('[View] BEFORE clear: eReplicas =', env.eReplicas?.size || 0);
+            if (env.eReplicas) env.eReplicas.clear();
+            env.history = [];
+            console.log('[View] AFTER clear: eReplicas =', env.eReplicas?.size || 0);
+
             console.log(`[View] 📦 Calling XLN.prepopulateAHB...`);
             await XLN.prepopulateAHB(env);
             console.log(`[View] 📦 prepopulateAHB completed, history: ${env.history?.length || 0} frames`);
 
-            // Update stores after prepopulate
-            localEnvStore.set(env);
-            localHistoryStore.set(env.history || []);
+            // Update stores AFTER prepopulate completes (EXACT Architect panel pattern)
+            const frames = env.history || [];
+            console.log('[View] Setting stores with frames:', frames.length);
 
-            // Start at frame 0 for playback (not live mode)
-            localTimeIndex.set(0);
+            // CRITICAL: Set in EXACT order from ArchitectPanel lines 348-353
+            // 1. Exit live mode FIRST
             localIsLive.set(false);
+            // 2. Set timeIndex to LAST frame
+            localTimeIndex.set(Math.max(0, frames.length - 1));
+            // 3. Set history (triggers Graph3D subscription)
+            localHistoryStore.set(frames);
+            // 4. Set env (triggers final update)
+            localEnvStore.set(env);
+
+            console.log('[View] ✅ Stores updated, Graph3D should re-render');
 
             console.log(`[View] ✅ AHB scenario loaded successfully!`);
-            console.log(`[View]    Frames: ${env.history?.length || 0}`);
+            console.log(`[View]    Frames: ${frames.length}`);
             console.log(`[View]    Entities: ${env.eReplicas?.size || 0}`);
           } catch (autoplayErr) {
             console.error('[View] ❌ Autoplay FAILED:', autoplayErr);
             console.error('[View] Stack:', (autoplayErr as Error).stack);
+            alert(`AHB autoplay failed: ${autoplayErr}`);
           }
         }
       }
