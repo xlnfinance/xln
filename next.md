@@ -2,6 +2,15 @@
 
 ## 🚧 TODO (2025-12-10): Post-Bilateral Consensus Session
 
+### Rebalancing Feature (HIGH PRIORITY)
+- [ ] **Hub rebalancing demo** - Add frames 11-15 to AHB showing risk management
+  - Hub analyzes TR (Total Risk) = $125K uninsured with Bob
+  - Creates 2 settlements: withdraw from Alice, deposit to Bob
+  - Broadcasts J-batch with both (atomic on-chain)
+  - Reference: .archive/2019_docs/03_rebalance.md
+  - Uses `settleDiffs` EntityTx → bilateral consensus → J-batch
+- [ ] **TR metric in Solvency Panel** - Show Total Risk = Σ(credit-backed positions)
+
 ### Visual Solvency
 - [ ] **Dual-render for desync** - Show confirmed (solid) + pending (translucent) bars when heights differ
 - [ ] **Solvency panel** - Dedicated monitor showing conservation law: Σ(reserves) = Σ(collateral)
