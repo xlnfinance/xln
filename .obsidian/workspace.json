@@ -185,6 +185,8 @@
   },
   "active": "69e3b875bcd19714",
   "lastOpenFiles": [
+    "vibepaper/issues/entityprovider-on-lookup.md",
+    "vibepaper/issues",
     "frontend/build/_app/immutable/nodes/5.CUD4qNVc.js",
     "frontend/build/_app/immutable/nodes/2.LPi9ZoXg.js",
     "frontend/build/_app/immutable/nodes/12.DF0nkBgB.js",
@@ -194,8 +196,6 @@
     "frontend/build/_app/immutable/entry/app.B1BPfHXk.js",
     "frontend/build/_app/immutable/chunks/Ef_0nBNd.js",
     "frontend/build/_app/immutable/chunks/6CEgUuZc.js",
-    "frontend/build/_app/immutable/nodes/5.DtYTXQ-c.js",
-    "frontend/build/_app/immutable/nodes/2.BuYTzGlr.js",
     "node_modules/sudo-prompt/README.md",
     "node_modules/sudo-prompt/CHANGELOG.md",
     "node_modules/node-global-key-listener/README.md",
