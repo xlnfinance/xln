@@ -304,12 +304,14 @@
           // Uses EntityPanelWrapper - thin Dockview adapter for legacy EntityPanel
           // @ts-ignore - Dockview params passed via addPanel
           const params = (options as any).params || {};
+          console.log('[View] EntityPanelWrapper params:', params);
+          console.log('[View] entityId:', params.entityId, 'signerId:', params.signerId);
           component = mount(EntityPanelWrapper, {
             target: div,
             props: {
-              entityId: params.entityId || '',
-              entityName: params.entityName || '',
-              signerId: params.signerId || '',
+              entityId: String(params.entityId || ''),
+              entityName: String(params.entityName || ''),
+              signerId: String(params.signerId || params.entityId || ''),
               isolatedEnv: localEnvStore,
               isolatedHistory: localHistoryStore,
               isolatedTimeIndex: localTimeIndex,
