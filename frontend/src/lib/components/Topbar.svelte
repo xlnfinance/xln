@@ -109,7 +109,7 @@
 
 <style>
   .topbar {
-    height: 34px;
+    height: 48px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -134,7 +134,7 @@
   }
 
   .topbar-logo img {
-    height: 20px;
+    height: 32px;
     width: auto;
   }
 

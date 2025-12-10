@@ -165,7 +165,7 @@ async function executeR2C(
   }
 
   // Step 3: Update account machine's delta.collateral
-  const [, replica] = findReplica(env, entityId);
+  // (reuse replica from line 143)
   const accountMachine = replica.state.accounts?.get(counterpartyId);
 
   if (accountMachine) {
