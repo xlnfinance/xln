@@ -3488,6 +3488,10 @@ let vrHammer: VRHammer | null = null;
     const toDerived = deriveEntry(tokenDelta, !fromIsLeftEntity);
 
     // Delegate rendering to AccountBarRenderer
+    // Pass desync info for bilateral diff visualization
+    const heightDiff = confirmedAccount && pendingAccount ?
+      Math.abs((confirmedAccount.currentFrame?.height ?? 0) - (pendingAccount.currentFrame?.height ?? 0)) : 0;
+
     return createAccountBars(
       scene,
       fromEntity,
@@ -3498,7 +3502,8 @@ let vrHammer: VRHammer | null = null;
       {
         barsMode,
         portfolioScale: settings.portfolioScale || 5000,
-        selectedTokenId: displayTokenId
+        selectedTokenId: displayTokenId,
+        desyncDetected: heightDiff > 0 // Visual indicator for consensus in progress
       },
       getEntitySizeForToken
     );

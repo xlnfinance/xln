@@ -16,6 +16,7 @@ export interface AccountBarSettings {
   barsMode: 'close' | 'spread';
   portfolioScale: number;
   selectedTokenId: number;
+  desyncDetected?: boolean; // Bilateral consensus in progress
 }
 
 export interface AccountSegments {
@@ -167,7 +168,8 @@ export function createAccountBars(
       fromEntitySize,
       toEntitySize,
       fromCreditUsed,
-      toCreditUsed
+      toCreditUsed,
+      settings
     );
   } else {
     renderCloseMode(
@@ -179,7 +181,8 @@ export function createAccountBars(
       toSegments,
       barHeight,
       fromCreditUsed,
-      toCreditUsed
+      toCreditUsed,
+      settings
     );
   }
 
@@ -202,7 +205,8 @@ function renderSpreadMode(
   fromEntitySize: number,
   toEntitySize: number,
   fromCreditUsed: number,
-  toCreditUsed: number
+  toCreditUsed: number,
+  settings: AccountBarSettings
 ): void {
   const barRadius = barHeight * 2.5;
   const safeGap = 0.2;
@@ -224,7 +228,7 @@ function renderSpreadMode(
 
   fromBarSegments.forEach((segment) => {
     if (segment.length > 0.01) {
-      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType);
+      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType, settings.desyncDetected || false);
       const barCenter = fromStartPos.clone().add(direction.clone().normalize().multiplyScalar(fromOffset + segment.length/2));
       bar.position.copy(barCenter);
 
@@ -253,7 +257,7 @@ function renderSpreadMode(
 
   toBarSegments.forEach((segment) => {
     if (segment.length > 0.01) {
-      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType);
+      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType, settings.desyncDetected || false);
       // Position bars going toward fromEntity (subtract)
       const barCenter = toStartPos.clone().sub(direction.clone().normalize().multiplyScalar(toOffset + segment.length/2));
       bar.position.copy(barCenter);
@@ -280,7 +284,8 @@ function renderCloseMode(
   toSegments: AccountSegments,
   barHeight: number,
   fromCreditUsed: number,
-  toCreditUsed: number
+  toCreditUsed: number,
+  settings: AccountBarSettings
 ): void {
   const barRadius = barHeight * 2.5;
 
@@ -312,7 +317,7 @@ function renderCloseMode(
   // FROM entity bars (first half)
   fromBarSegments.forEach((segment) => {
     if (segment.length > 0.01) {
-      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType);
+      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType, settings.desyncDetected || false);
       const barCenter = startPos.clone().add(direction.clone().multiplyScalar(currentOffset + segment.length/2));
       bar.position.copy(barCenter);
 
@@ -332,7 +337,7 @@ function renderCloseMode(
   // TO entity bars (second half)
   toBarSegments.forEach((segment) => {
     if (segment.length > 0.01) {
-      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType);
+      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType, settings.desyncDetected || false);
       const barCenter = startPos.clone().add(direction.clone().multiplyScalar(currentOffset + segment.length/2));
       bar.position.copy(barCenter);
 
@@ -351,7 +356,8 @@ function createBarCylinder(
   radius: number,
   length: number,
   color: number,
-  colorType: keyof typeof BAR_COLORS
+  colorType: keyof typeof BAR_COLORS,
+  desyncDetected: boolean = false
 ): THREE.Mesh {
   const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
 
@@ -359,13 +365,14 @@ function createBarCylinder(
   // Used credit (red) & Collateral (green): BRIGHT and SOLID (actual value at stake)
   const isUnusedCredit = colorType === 'availableCredit';
 
+  // DESYNC VISUAL: Bilateral consensus in progress
   const material = new THREE.MeshLambertMaterial({
     color,
     transparent: true,
-    opacity: isUnusedCredit ? 0.2 : 1.0, // Unused: 20% transparent, Used/Collateral: 100% solid
+    opacity: desyncDetected ? 0.5 : (isUnusedCredit ? 0.2 : 1.0), // Desync: striped/faded
     emissive: new THREE.Color(color).multiplyScalar(isUnusedCredit ? 0.03 : 0.15),
-    wireframe: isUnusedCredit, // Only unused credit is wireframe
-    emissiveIntensity: isUnusedCredit ? 0.3 : 1.0
+    wireframe: desyncDetected || isUnusedCredit, // Desync OR unused = wireframe
+    emissiveIntensity: desyncDetected ? 0.5 : (isUnusedCredit ? 0.3 : 1.0)
   });
 
   return new THREE.Mesh(geometry, material);
