@@ -97,38 +97,15 @@
     }
   }
 
-  onMount(() => {
-    // Intercept console methods - RAF batching breaks Svelte reactivity loops
-    console.debug = (...args) => {
-      if (mirrorToDevTools) originalConsole.debug(...args);
-      addLog('debug', args);
-    };
-    console.log = (...args) => {
-      if (mirrorToDevTools) originalConsole.log(...args);
-      addLog('log', args);
-    };
-    console.info = (...args) => {
-      if (mirrorToDevTools) originalConsole.info(...args);
-      addLog('info', args);
-    };
-    console.warn = (...args) => {
-      if (mirrorToDevTools) originalConsole.warn(...args);
-      addLog('warn', args);
-    };
-    console.error = (...args) => {
-      if (mirrorToDevTools) originalConsole.error(...args);
-      addLog('error', args);
-    };
-
-    // Restore original console on cleanup
-    return () => {
-      console.debug = originalConsole.debug;
-      console.log = originalConsole.log;
-      console.info = originalConsole.info;
-      console.warn = originalConsole.warn;
-      console.error = originalConsole.error;
-    };
-  });
+  // DISABLED - Console intercept causes infinite loops with EntityPanelWrapper
+  // TODO: Fix reactivity loop before re-enabling
+  // onMount(() => {
+  //   console.debug = (...args) => {
+  //     if (mirrorToDevTools) originalConsole.debug(...args);
+  //     addLog('debug', args);
+  //   };
+  //   // ... etc
+  // });
 
   function clearLogs() {
     logs = [];
