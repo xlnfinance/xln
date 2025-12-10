@@ -183,8 +183,8 @@
 
             // CRITICAL: Wait for Graph3DPanel to mount before updating stores
             // Fix race condition: on first load, Graph3D subscriptions not yet set up
-            await new Promise(resolve => setTimeout(resolve, 100)); // Give panels time to mount
-            console.log('[View] Graph3D mount delay complete');
+            await new Promise(resolve => setTimeout(resolve, 500)); // Give panels time to mount (increased from 100ms)
+            console.log('[View] Graph3D mount delay complete (500ms)');
 
             // CRITICAL: Set in EXACT order from ArchitectPanel lines 348-353
             // 1. Exit live mode FIRST
