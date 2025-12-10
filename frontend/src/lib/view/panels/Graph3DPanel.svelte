@@ -4873,15 +4873,27 @@ let vrHammer: VRHammer | null = null;
       triggerEntityActivity(entity.id);
 
       // Get entity name and signerId for the clicked entity
+      console.log(`[Graph3D] Entity clicked - entity object:`, entity);
+      console.log(`[Graph3D] entity.id:`, entity.id, 'type:', typeof entity.id);
+
+      if (!entity.id) {
+        console.error('[Graph3D] ❌ Entity has no ID!', entity);
+        return;
+      }
+
       const entityName = getEntityName(entity.id);
       const signerId = getSignerIdForEntity(entity.id);
-      console.log(`[Graph3D] Entity clicked: ${entity.id}, name: ${entityName}, signerId: ${signerId}`);
+      console.log(`[Graph3D] Entity clicked: ${entity.id.slice(0, 10)}, name: ${entityName}, signerId: ${signerId?.slice(0, 10)}`);
 
       // Emit selection for other panels to react
       panelBridge.emit('entity:selected', { entityId: entity.id });
 
       // Directly open full entity panel (skip mini panel for faster UX)
-      panelBridge.emit('openEntityOperations', { entityId: entity.id, entityName, signerId });
+      panelBridge.emit('openEntityOperations', {
+        entityId: entity.id,
+        entityName: entityName || entity.id.slice(0, 10),
+        signerId: signerId || entity.id
+      });
 
     } else {
       // Clicked on empty space - close mini panel
