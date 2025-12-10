@@ -23,6 +23,18 @@
 ### Consensus Visualization
 - [ ] **Timeline view** - Horizontal ADD_TX→PROPOSE→SIGN→COMMIT flow (replace/augment current time machine)
 - [ ] **Bilateral diff panel** - Show both replicas when heights diverge with structural diff
+- [ ] **Event Tree (R-E-A waterfall)** - Hierarchical log showing execution flow:
+  ```
+  Frame 10:
+    R: applyRuntimeInput
+      ├─ E[Alice]: direct_payment → pendingForward
+      ├─ E[Hub]: A[Alice] finalize + A[Bob] propose
+      └─ E[Bob]: A[Hub] apply + sign
+  ```
+  - Store as tree structure in runtime frame
+  - RuntimeIOPanel shows expandable tree
+  - Step-by-step debugging inside single frame
+  - Trace multi-hop payment through all layers
 
 ### Cleanup
 - [ ] **Remove excess incrementBlock()** - Clean up read-only methods (added by sed, needs manual review)
