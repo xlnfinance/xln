@@ -8,6 +8,9 @@ ssh -i ~/.ssh/xln_deploy root@xln.finance << 'ENDSSH'
 cd /root/xln
 git pull origin main
 
+# Add bun to PATH
+export PATH="$HOME/.bun/bin:$PATH"
+
 # CRITICAL: Build runtime.js FIRST (for browser)
 echo "🔧 Building runtime.js..."
 bun build runtime/runtime.ts --target=browser --outfile=frontend/static/runtime.js --minify \
