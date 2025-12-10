@@ -404,8 +404,8 @@ export class BrowserVMProvider {
 
     // Use ethers Interface for ABI encoding (same as mainnet)
     // Solidity mapping: _collaterals(bytes channelKey, uint tokenId) -> AccountCollateral
-    // Need to compute channelKey first, then call the mapping getter
-    const channelKeyData = this.depositoryInterface.encodeFunctionData('channelKey', [entityId, counterpartyId]);
+    // Need to compute channelKey first via accountKey(e1, e2), then call the mapping getter
+    const channelKeyData = this.depositoryInterface.encodeFunctionData('accountKey', [entityId, counterpartyId]);
     const channelKeyResult = await this.vm.evm.runCall({
       to: this.depositoryAddress,
       caller: this.deployerAddress,

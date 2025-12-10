@@ -199,9 +199,9 @@
             console.log(`[View]    Frames: ${frames.length}`);
             console.log(`[View]    Entities: ${env.eReplicas?.size || 0}`);
           } catch (autoplayErr) {
-            console.error('[View] ❌ Autoplay FAILED:', autoplayErr);
+            console.error('[View] ❌ AHB AUTOPLAY FAILED:', autoplayErr);
             console.error('[View] Stack:', (autoplayErr as Error).stack);
-            alert(`AHB autoplay failed: ${autoplayErr}`);
+            // Error logged to console F12
           }
         }
       }
@@ -303,9 +303,10 @@
           // Dynamic panel for entity operations (opened via panelBridge)
           // Uses EntityPanelWrapper - thin Dockview adapter for legacy EntityPanel
           // @ts-ignore - Dockview params passed via addPanel
+          console.log('[View] 🔍 FULL options object:', JSON.stringify(options, null, 2));
           const params = (options as any).params || {};
-          console.log('[View] EntityPanelWrapper params:', params);
-          console.log('[View] entityId:', params.entityId, 'signerId:', params.signerId);
+          console.log('[View] 🔍 Extracted params:', params);
+          console.log('[View] 🔍 entityId:', params.entityId, 'signerId:', params.signerId);
           component = mount(EntityPanelWrapper, {
             target: div,
             props: {
