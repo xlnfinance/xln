@@ -20,6 +20,7 @@
   import SettingsPanel from './panels/SettingsPanel.svelte';
   import InsurancePanel from './panels/InsurancePanel.svelte';
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
+  import SolvencyPanel from './panels/SolvencyPanel.svelte';
   import EntityPanelWrapper from './panels/wrappers/EntityPanelWrapper.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
   import Tutorial from './components/Tutorial.svelte';
@@ -283,6 +284,11 @@
               isolatedHistory: localHistoryStore,
               isolatedTimeIndex: localTimeIndex
             }
+          });
+        } else if (options.name === 'solvency') {
+          component = mount(SolvencyPanel, {
+            target: div,
+            props: {}
           });
         } else if (options.name === 'jurisdiction') {
           component = mount(JurisdictionPanel, {
