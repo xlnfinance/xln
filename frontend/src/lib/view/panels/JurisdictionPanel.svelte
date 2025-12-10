@@ -262,13 +262,13 @@
           {#if selectedJurisdiction.contracts?.depository}
             <div class="info-row">
               <span class="info-label">Depository</span>
-              <span class="info-value mono" title={selectedJurisdiction.contracts.depository}>{selectedJurisdiction.contracts.depository}</span>
+              <span class="info-value mono">{selectedJurisdiction.contracts.depository}</span>
             </div>
           {/if}
           {#if selectedJurisdiction.contracts?.entityProvider}
             <div class="info-row">
               <span class="info-label">EntityProvider</span>
-              <span class="info-value mono" title={selectedJurisdiction.contracts.entityProvider}>{selectedJurisdiction.contracts.entityProvider}</span>
+              <span class="info-value mono">{selectedJurisdiction.contracts.entityProvider}</span>
             </div>
           {/if}
           <div class="info-row">
@@ -505,10 +505,6 @@
   .info-value.mono {
     font-family: 'Monaco', 'Menlo', monospace;
     color: #58a6ff;
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .storage-table {
