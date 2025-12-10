@@ -161,18 +161,33 @@ function transcribeCLI(audioPath: string): Promise<void> {
 }
 
 function copyToClipboard(text: string): void {
-  const proc = spawn("pbcopy");
-  proc.stdin.write(text);
-  proc.stdin.end();
+  console.log(`✅ Transcribed: "${text}"`);
+  console.log("📋 Pasting...\n");
+
+  // Escape for AppleScript
+  const escaped = text
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, "\\n");
+
+  // Paste directly using AppleScript
+  const script = `tell application "System Events" to keystroke "${escaped}"`;
+  const proc = spawn("osascript", ["-e", script]);
 
   proc.on("close", (code) => {
     if (code === 0) {
-      console.log(`✅ Transcribed: "${text}"`);
-      console.log("📋 Copied to clipboard - paste with Cmd+V\n");
+      console.log("✅ Pasted!\n");
       process.exit(0);
     } else {
-      console.error("❌ Clipboard failed");
-      process.exit(1);
+      console.log("⚠️  Paste failed, copying to clipboard...");
+      // Fallback to clipboard
+      const clipProc = spawn("pbcopy");
+      clipProc.stdin.write(text);
+      clipProc.stdin.end();
+      clipProc.on("close", () => {
+        console.log("📋 In clipboard - paste with Cmd+V\n");
+        process.exit(0);
+      });
     }
   });
 }

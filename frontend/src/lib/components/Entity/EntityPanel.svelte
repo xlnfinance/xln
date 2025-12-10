@@ -764,4 +764,66 @@
     border-color: #dc3545;
     color: white;
   }
+
+  /* Periodic Tasks styling */
+  .crontab-section {
+    margin: 16px 0;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+  }
+
+  .crontab-section h3 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #e0e0e0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+
+  .crontab-timers {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .crontab-task {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .task-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .task-name {
+    font-size: 13px;
+    color: #c9d1d9;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-weight: 400;
+  }
+
+  .task-timer {
+    font-size: 12px;
+    color: #8b949e;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    font-weight: 500;
+  }
+
+  .task-progress {
+    height: 3px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .task-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #30d158, #32d366);
+    transition: width 0.3s ease;
+  }
 </style>
