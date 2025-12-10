@@ -50,7 +50,7 @@
   const localTimeIndex = writable<number>(-1);  // -1 = live mode
   const localIsLive = writable<boolean>(true);
 
-  // Pending entity panel data - bypasses Dockview params timing race
+  // Pending entity data - bypasses Dockview params timing
   const pendingEntityData = new Map<string, {entityId: string, entityName: string, signerId: string}>();
 
   // Build version tracking (injected by vite.config.ts)
@@ -302,32 +302,34 @@
               isolatedTimeIndex: localTimeIndex
             }
           });
+        } else if (options.name === 'entity-panel') {
+          // ENTITY PANEL: Don't mount here - wait for init() to get panel ID
+          // Component will be mounted in init() callback with data from Map
         }
 
         // Return Dockview-compatible API
         return {
           element: div,
           init: (parameters: any) => {
-            // ENTITY PANEL: Read from pendingEntityData Map (bypasses Dockview params)
+            // ENTITY PANEL: Mount in init() with data from Map
             if (options.name === 'entity-panel') {
               const panelId = parameters.api.id;
-              const pending = pendingEntityData.get(panelId);
+              const data = pendingEntityData.get(panelId);
 
-              if (!pending) {
-                console.error('[View] ❌ No pending data for panel:', panelId);
+              if (!data) {
+                console.error('[View] ❌ No pending data for:', panelId);
                 return;
               }
 
-              // Consume data (delete after reading)
               pendingEntityData.delete(panelId);
-              console.log('[View] ✅ Consumed pending data:', pending);
+              console.log('[View] ✅ Mounting with data:', data);
 
               component = mount(EntityPanelWrapper, {
                 target: div,
                 props: {
-                  entityId: pending.entityId,
-                  entityName: pending.entityName,
-                  signerId: pending.signerId,
+                  entityId: data.entityId,
+                  entityName: data.entityName,
+                  signerId: data.signerId,
                   isolatedEnv: localEnvStore,
                   isolatedHistory: localHistoryStore,
                   isolatedTimeIndex: localTimeIndex,
@@ -335,7 +337,6 @@
                 }
               });
             }
-            // Other panels already mounted above
           },
           dispose: () => {
             // Svelte 5: unmount() happens automatically when DOM removed
@@ -481,16 +482,17 @@
         return;
       }
 
-      // STORE DATA FIRST - before Dockview (bypasses params timing race)
+      // STORE entity data BEFORE creating panel (bypasses Dockview params race)
       pendingEntityData.set(panelId, {
         entityId,
         entityName: entityName || entityId.slice(0, 10),
         signerId: signerId || entityId
       });
-      console.log('[View] 📋 Stored pending entity data for:', panelId);
 
-      // Create new panel - it will find its data in pendingEntityData Map
+      // Create new panel using EntityPanelWrapper (reuses full EntityPanel)
       try {
+        console.log('[View] 📋 Stored entity data + creating panel:', panelId.slice(0, 20));
+
         dockview.addPanel({
           id: panelId,
           component: 'entity-panel',

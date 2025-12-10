@@ -58,23 +58,8 @@
     isActive: true,
   });
 
-  // Update tab when props change from parent
-  $effect(() => {
-    console.log('[EntityPanelWrapper] $effect triggered:', { entityId: entityId?.slice(0, 10), signerId: signerId?.slice(0, 10) });
-    if (entityId && signerId) {
-      localTab = {
-        id: tabId,
-        title: entityName || entityId.slice(0, 12) + '...',
-        entityId,
-        signerId: signerId || entityId,
-        jurisdiction: 'browservm',
-        isActive: true,
-      };
-      console.log('[EntityPanelWrapper] localTab updated:', { id: localTab.id, entityId: localTab.entityId.slice(0, 10), signerId: localTab.signerId.slice(0, 10) });
-    } else {
-      console.warn('[EntityPanelWrapper] Missing entityId or signerId:', { entityId, signerId });
-    }
-  });
+  // DISABLED $effect - was causing infinite loops
+  // localTab is already initialized above with correct values from props
 </script>
 
 <div class="entity-panel-wrapper">
