@@ -5353,7 +5353,7 @@
     }
 
     .mnemonic-words {
-      grid-template-columns: repeat(6, 1fr);
+      grid-template-columns: repeat(2, 1fr);
       gap: 14px;
     }
 
