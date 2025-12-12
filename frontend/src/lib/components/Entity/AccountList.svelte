@@ -10,19 +10,16 @@
   const dispatch = createEventDispatcher();
   let selectedNewEntityId = '';
 
-  // Get accounts from entity state
-  // Safari requires explicit Map check before calling .entries()
+  // Get accounts from entity state - DIRECT references (no shallow copy!)
+  // CRITICAL: Don't spread account object - it creates stale snapshot
   $: accounts = (replica?.state?.accounts && replica.state.accounts instanceof Map)
-    ? Array.from(replica.state.accounts.entries()).map(([counterpartyId, account]) => ({
-        counterpartyId,
-        ...account,
-      }))
+    ? Array.from(replica.state.accounts.entries())
     : [];
 
   // DEBUG: Log accounts for entity
   $: if (replica && accounts.length > 0) {
     console.log(`[AccountList] Entity ${replica.entityId.slice(0,6)} has ${accounts.length} accounts:`,
-      accounts.map(a => a.counterpartyId.slice(0,6)));
+      accounts.map(([id]) => id.slice(0,6)));
   }
 
 
@@ -122,10 +119,10 @@
         </div>
       {:else}
         <div class="scrollable-component accounts-list">
-          {#each accounts as account (account.counterpartyId)}
+          {#each accounts as [counterpartyId, account] (counterpartyId)}
             <AccountPreview
-              account={account}
-              counterpartyId={account.counterpartyId}
+              {account}
+              {counterpartyId}
               entityId={replica?.entityId || ''}
               isSelected={false}
               on:select={selectAccount}
