@@ -89,16 +89,7 @@ function manualCloneEntityState(entityState: EntityState): EntityState {
     accounts: new Map(
       Array.from(entityState.accounts.entries()).map(([id, account]) => [
         id,
-        {
-          ...account,
-          mempool: cloneArray(account.mempool),
-          deltas: cloneMap(account.deltas),
-          proofHeader: { ...account.proofHeader },
-          proofBody: {
-            tokenIds: [...account.proofBody.tokenIds],
-            deltas: [...account.proofBody.deltas],
-          },
-        },
+        cloneAccountMachine(account), // CRITICAL FIX: Deep clone including pendingFrame and clonedForValidation
       ]),
     ),
     accountInputQueue: cloneArray(entityState.accountInputQueue || []),

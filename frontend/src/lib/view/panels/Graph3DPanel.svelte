@@ -1636,7 +1636,7 @@ let vrHammer: VRHammer | null = null;
       0.1,
       20000 // Far plane: large enough to see full grid at any zoom
     );
-    camera.position.set(200, 0, 100); // Position camera to look at grid center (200, 0, 0)
+    camera.position.set(1, 585, 58); // Default view showing AHB entities (from user settings)
 
     // Renderer setup with VR support
     renderer = await createRenderer(rendererMode, { antialias: false }); // Disabled for performance
@@ -1673,9 +1673,17 @@ let vrHammer: VRHammer | null = null;
       // OrbitControls uses arrow keys for panning by default
       controls.keys = { LEFT: '', UP: '', RIGHT: '', BOTTOM: '' };
 
-      // Debug: Log OrbitControls events
+      // Set default target (lookAt point) for AHB view
+      controls.target.set(-37, 511, -243);
+      controls.update();
+
+      // Emit camera updates for Settings panel live display
       controls.addEventListener('change', () => {
-        // Camera moved - OrbitControls is working
+        panelBridge.emit('camera:update', {
+          position: { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+          target: { x: controls.target.x, y: controls.target.y, z: controls.target.z },
+          distance: camera.position.distanceTo(controls.target),
+        });
       });
       controls.addEventListener('start', () => {
         //console.log('[Graph3D] OrbitControls: User started interacting');

@@ -14,7 +14,7 @@
  * Each frame includes Fed-style subtitles explaining what/why/tradfi-parallel
  */
 
-import type { Env, EntityInput, EnvSnapshot, EntityReplica } from './types';
+import type { Env, EntityInput, EnvSnapshot, EntityReplica, Delta } from './types';
 import { applyRuntimeInput } from './runtime';
 import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from './evm';
 import { buildEntityProfile } from './gossip-helper';
@@ -338,6 +338,77 @@ function getOffdelta(env: Env, entityA: string, entityB: string, tokenId: number
   const delta = account?.deltas?.get(tokenId);
 
   return delta?.offdelta ?? 0n;
+}
+
+// Verify bilateral account sync - CRITICAL for consensus correctness
+function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId: number, label: string): void {
+  const [, replicaA] = findReplica(env, entityA);
+  const [, replicaB] = findReplica(env, entityB);
+
+  const accountAB = replicaA?.state?.accounts?.get(entityB);
+  const accountBA = replicaB?.state?.accounts?.get(entityA);
+
+  console.log(`\n[BILATERAL-SYNC ${label}] Checking ${entityA.slice(-4)}←→${entityB.slice(-4)} for token ${tokenId}...`);
+
+  // Both sides must have the account
+  if (!accountAB) {
+    console.error(`❌ Entity ${entityA.slice(-4)} has NO account with ${entityB.slice(-4)}`);
+    throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityA.slice(-4)} missing account with ${entityB.slice(-4)}`);
+  }
+  if (!accountBA) {
+    console.error(`❌ Entity ${entityB.slice(-4)} has NO account with ${entityA.slice(-4)}`);
+    throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityB.slice(-4)} missing account with ${entityA.slice(-4)}`);
+  }
+
+  const deltaAB = accountAB.deltas?.get(tokenId);
+  const deltaBA = accountBA.deltas?.get(tokenId);
+
+  // Both sides must have the delta for this token
+  if (!deltaAB) {
+    console.error(`❌ Entity ${entityA.slice(-4)} account has NO delta for token ${tokenId}`);
+    throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityA.slice(-4)} missing delta for token ${tokenId}`);
+  }
+  if (!deltaBA) {
+    console.error(`❌ Entity ${entityB.slice(-4)} account has NO delta for token ${tokenId}`);
+    throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityB.slice(-4)} missing delta for token ${tokenId}`);
+  }
+
+  // CRITICAL: Both sides MUST have IDENTICAL delta objects (canonical storage)
+  const fieldsToCheck: Array<keyof Delta> = [
+    'collateral',
+    'ondelta',
+    'offdelta',
+    'leftCreditLimit',
+    'rightCreditLimit',
+    'leftAllowance',
+    'rightAllowance',
+  ];
+
+  const errors: string[] = [];
+  for (const field of fieldsToCheck) {
+    const valueAB = deltaAB[field];
+    const valueBA = deltaBA[field];
+
+    if (valueAB !== valueBA) {
+      const msg = `  ${field}: ${entityA.slice(-4)} has ${valueAB}, ${entityB.slice(-4)} has ${valueBA}`;
+      console.error(`❌ ${msg}`);
+      errors.push(msg);
+    }
+  }
+
+  if (errors.length > 0) {
+    console.error(`\n❌ BILATERAL-SYNC FAILED at "${label}":`);
+    console.error(`   Account: ${entityA.slice(-4)}←→${entityB.slice(-4)}, token ${tokenId}`);
+    console.error(`   Mismatched fields:\n${errors.join('\n')}`);
+
+    // Dump full state for debugging
+    console.error(`\n   Full deltaAB (${entityA.slice(-4)} view):`, deltaAB);
+    console.error(`   Full deltaBA (${entityB.slice(-4)} view):`, deltaBA);
+
+    throw new Error(`BILATERAL-SYNC VIOLATION: ${errors.length} field(s) differ between ${entityA.slice(-4)} and ${entityB.slice(-4)}`);
+  }
+
+  console.log(`✅ [${label}] Bilateral sync OK: ${entityA.slice(-4)}←→${entityB.slice(-4)} token ${tokenId} - all ${fieldsToCheck.length} fields match`);
 }
 
 // Verify payment moved through accounts - throws on failure
@@ -864,6 +935,10 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     // 3. Update account machine delta.collateral in BOTH entities
     await executeR2C(env, alice.id, hub.id, USDC_TOKEN_ID, aliceCollateralAmount, browserVM, alice.name);
 
+    // CRITICAL: Verify bilateral sync after R2C collateral deposit
+    console.log('\n🔍 FRAME 8 VERIFICATION: Alice-Hub bilateral sync check...');
+    assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'Frame 8 - Alice R2C Collateral');
+
     await pushSnapshot(env, 'Alice R2C: $500K Reserve → Collateral', {
       title: 'Reserve-to-Collateral (R2C): Alice → A-H Account',
       what: 'Alice moves $500K from reserve to A-H account collateral. Settlement sent to J-Machine.',
@@ -898,6 +973,11 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
         }
       }]
     }]);
+
+    // CRITICAL: Verify bilateral sync after credit extension
+    console.log('\n🔍 FRAME 9 VERIFICATION: Bob-Hub bilateral sync check...');
+    dumpSystemState(env, 'AFTER BOB CREDIT EXTENSION (Frame 9)', true);
+    assertBilateralSync(env, bob.id, hub.id, USDC_TOKEN_ID, 'Frame 9 - Bob Credit Extension');
 
     await pushSnapshot(env, 'Bob Credit Extension: $500K', {
       title: 'Credit Extension: Bob → Hub',
@@ -950,15 +1030,19 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
       }]
     }]);
 
-    // SELF-TEST: Log actual values (verification disabled temporarily)
-    const ahDelta = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
-    const hbDelta = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
-    console.log(`[PAYMENT-DEBUG] Alice-Hub offdelta: ${ahDelta} (expected positive?)`);
-    console.log(`[PAYMENT-DEBUG] Hub-Bob offdelta: ${hbDelta} (expected negative?)`);
-    // verifyPayment(env, alice.id, hub.id, bob.id, USDC_TOKEN_ID, paymentAmount, 'Frame 10 - A→H→B Payment');
+    // CRITICAL: Verify bilateral sync after payment
+    console.log('\n🔍 FRAME 10 VERIFICATION: Bilateral sync checks after payment...');
+    assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'Frame 10 - After Payment (Alice-Hub)');
+    assertBilateralSync(env, hub.id, bob.id, USDC_TOKEN_ID, 'Frame 10 - After Payment (Hub-Bob)');
 
     // COMPREHENSIVE DEBUG: Dump all state after payment
     dumpSystemState(env, 'AFTER PAYMENT (Frame 10)');
+
+    // SELF-TEST: Log actual values
+    const ahDelta = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
+    const hbDelta = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
+    console.log(`[PAYMENT-DEBUG] Alice-Hub offdelta: ${ahDelta}`);
+    console.log(`[PAYMENT-DEBUG] Hub-Bob offdelta: ${hbDelta}`);
 
     await pushSnapshot(env, 'Off-Chain Payment: Alice → Hub → Bob $125K', {
       title: '⚡ First Off-Chain Payment: A → H → B',
@@ -973,6 +1057,12 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
         'Latency: ~300ms (3 frames)',
       ]
     }, { expectedSolvency: TOTAL_SOLVENCY }); // Off-chain payment: pure netting, no solvency change
+
+    // FINAL BILATERAL SYNC CHECK - All accounts must be synced
+    console.log('\n🔍 FINAL VERIFICATION: All bilateral accounts...');
+    assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'FINAL - Alice-Hub');
+    assertBilateralSync(env, hub.id, bob.id, USDC_TOKEN_ID, 'FINAL - Hub-Bob');
+    dumpSystemState(env, 'FINAL STATE (End of AHB)', true);
 
     console.log('\n=====================================');
     console.log('✅ AHB Demo Complete (Full Flow)!');

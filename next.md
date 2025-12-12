@@ -31,15 +31,16 @@
 
 ---
 
-## 🚧 TODO (2025-12-11): Account Bilateral Sync + UI Polish
+## 🔥 COMPLETED (2025-12-12): Account Bilateral Sync FIXED
 
-### CRITICAL: Account Bilateral Desync (HIGH PRIORITY)
-- [ ] **Account #3←→#2 empty but #2←→#3 has credit** - bilateral consensus bug
-  - Entity #2 view shows credit opened with #3
-  - Entity #3 view shows account with #2 is EMPTY (0.0 USDC both sides)
-  - Should be mirrored - same account from both perspectives
-  - Debug logs added to AccountList.svelte (shows which accounts exist)
-  - May be issue in prepopulate-ahb.ts account creation or bilateral sync logic
+### CRITICAL BUG FIXED: Shallow Copy in manualCloneEntityState
+- ✅ **ROOT CAUSE**: `manualCloneEntityState` used shallow copy `{...account}` for AccountMachines
+- ✅ **IMPACT**: `pendingFrame` and `clonedForValidation` were shared by reference between entities
+- ✅ **FIX**: Changed to `cloneAccountMachine(account)` for deep clone (state-helpers.ts:92)
+- ✅ **VERIFIED**: Unit test confirms deep clone independence
+- ✅ **RESULT**: Bob now sees $500K credit limit in Bob-Hub account (red line visible)
+
+## 🚧 TODO (2025-12-11): UI Polish
 
 ### UI Polish
 - [ ] **Identicons в dropdown** - Replace 🏢 emoji with generated identicons for entity/signer
