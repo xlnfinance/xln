@@ -353,11 +353,6 @@
     {/if}
   </button>
 
-  <!-- Settings button -->
-  <button on:click={() => panelBridge.emit('focusPanel', { panelId: 'settings' })} class="settings-btn" title="Open Settings">
-    ⚙️
-  </button>
-
   <!-- Progress Scrubber with frame info -->
   <div class="scrubber-container">
     <div class="frame-info">
