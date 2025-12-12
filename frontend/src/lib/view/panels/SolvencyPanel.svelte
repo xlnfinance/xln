@@ -10,10 +10,14 @@
    */
 
   import { getEntityEnv, hasEntityEnvContext } from '../components/entity/shared/EntityEnvContext';
+  import type { Writable } from 'svelte/store';
 
-  // Get environment from context (isolated stores for /view)
+  // Optional props for when used outside EntityEnvContext (e.g., in Architect)
+  export let isolatedEnv: Writable<any> | null = null;
+
+  // Get environment from context (isolated stores for /view) or props
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-  const envStore = entityEnv?.env;
+  const envStore = isolatedEnv || entityEnv?.env;
 
   // Real-time solvency calculation
   let solvencyData = $derived.by(() => {
