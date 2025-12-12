@@ -1146,6 +1146,13 @@ let vrHammer: VRHammer | null = null;
     const unsubscribe1 = isolatedEnv.subscribe(debouncedUpdate);
     const unsubscribe2 = isolatedTimeIndex.subscribe(debouncedUpdate);
     const unsubscribe3 = isolatedHistory.subscribe(debouncedUpdate);
+
+    // CRITICAL: Initial render after scene ready (subscriptions fire but scene may not exist yet)
+    if (scene) {
+      console.log('[Graph3D] Triggering initial updateNetworkData after mount');
+      updateNetworkData();
+    }
+
     return () => {
       if (updateTimeout) clearTimeout(updateTimeout);
       unsubscribe1();

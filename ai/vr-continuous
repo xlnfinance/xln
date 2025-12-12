@@ -75,3 +75,4 @@ fi
 
 echo "SUCCESS: ${MS}ms" >> "$LOG"
 echo "$MS"
+echo "TEXT:$TEXT"
