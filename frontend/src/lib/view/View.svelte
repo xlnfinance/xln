@@ -204,6 +204,10 @@
 
             console.log('[View] ✅ Stores updated, Graph3D should re-render');
 
+            // CRITICAL: Manually trigger Graph3D render after scenario loads
+            // Store subscriptions may not fire if Graph3D already mounted
+            panelBridge.emit('scenario:loaded', { frames: frames.length });
+
             console.log(`[View] ✅ AHB scenario loaded successfully!`);
             console.log(`[View]    Frames: ${frames.length}`);
             console.log(`[View]    Entities: ${env.eReplicas?.size || 0}`);

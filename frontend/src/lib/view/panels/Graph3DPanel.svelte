@@ -1147,6 +1147,13 @@ let vrHammer: VRHammer | null = null;
     const unsubscribe2 = isolatedTimeIndex.subscribe(debouncedUpdate);
     const unsubscribe3 = isolatedHistory.subscribe(debouncedUpdate);
 
+    // CRITICAL: Listen for scenario loaded event (from View.svelte after prepopulate)
+    const handleScenarioLoaded = () => {
+      console.log('[Graph3D] Scenario loaded - triggering updateNetworkData');
+      if (scene) updateNetworkData();
+    };
+    panelBridge.on('scenario:loaded', handleScenarioLoaded);
+
     // CRITICAL: Initial render after scene ready (subscriptions fire but scene may not exist yet)
     if (scene) {
       console.log('[Graph3D] Triggering initial updateNetworkData after mount');
@@ -1158,6 +1165,7 @@ let vrHammer: VRHammer | null = null;
       unsubscribe1();
       unsubscribe2();
       unsubscribe3();
+      panelBridge.off('scenario:loaded', handleScenarioLoaded);
       panelBridge.off('vr:toggle', handleVRToggle);
       panelBridge.off('broadcast:toggle', handleBroadcastToggle);
       panelBridge.off('broadcast:style', handleBroadcastStyle);
