@@ -176,7 +176,6 @@
              class:glow-left={bilateralState?.glowSide === 'left'}
              class:glow-right={bilateralState?.glowSide === 'right'}
              class:glow-both={bilateralState?.glowSide === 'both'}
-             class:dashed={bilateralState?.isDashed}
              style="--glow-intensity: {bilateralState?.glowIntensity ?? 0}">
           <!-- HYBRID MODEL: Unused on borrower, Used on lender -->
 
@@ -393,6 +392,34 @@
     border-radius: 2px;
     overflow: hidden;
     border: 1px solid #1a1a1a;
+    position: relative;
+  }
+
+  /* Bilateral consensus state glows - subtle from entity side */
+  .delta-bar.glow-left.glow-yellow::before,
+  .delta-bar.glow-right.glow-yellow::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 30%;
+    pointer-events: none;
+    background: linear-gradient(to right, rgba(255, 255, 0, calc(var(--glow-intensity, 0.3) * 0.4)), transparent);
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  .delta-bar.glow-right.glow-yellow::after {
+    right: 0;
+    background: linear-gradient(to left, rgba(255, 255, 0, calc(var(--glow-intensity, 0.3) * 0.4)), transparent);
+  }
+
+  .delta-bar.glow-left.glow-yellow::before {
+    left: 0;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
   }
 
   .bar-section {

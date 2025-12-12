@@ -60,9 +60,9 @@ await process(env, [{
 
 console.log('✅ Setup complete\n');
 
-// FRAME 12: Alice → Hub (skip forwarding)
+// FRAME 12: Alice → Hub (set flag to skip pendingForward processing)
 console.log('═══ FRAME 12: Alice → Hub ═══');
-env.skipPendingForward = true;
+env.skipPendingForward = true; // Skip forwarding this tick
 
 await process(env, [{
   entityId: alice, signerId: 's1',
@@ -72,13 +72,19 @@ await process(env, [{
   }]
 }]);
 
-const ahDelta12 = hubRep.state.accounts.get(alice)?.deltas.get(USDC)?.offdelta ?? 0n;
-const hbDelta12 = hubRep.state.accounts.get(bob)?.deltas.get(USDC)?.offdelta ?? 0n;
-const pendingForward = hubRep.state.accounts.get(alice)?.pendingForward;
+// Re-fetch replica after processing (state updated)
+const hubRepFresh = Array.from(env.eReplicas.values()).find(r => r.entityId === hub)!;
+
+const ahDelta12 = hubRepFresh.state.accounts.get(alice)?.deltas.get(USDC)?.offdelta ?? 0n;
+const hbDelta12 = hubRepFresh.state.accounts.get(bob)?.deltas.get(USDC)?.offdelta ?? 0n;
+const hubAliceAcc = hubRepFresh.state.accounts.get(alice);
+const pendingForward = hubAliceAcc?.pendingForward;
 
 console.log(`Alice-Hub: ${ahDelta12}`);
 console.log(`Hub-Bob: ${hbDelta12}`);
-console.log(`pendingForward: ${pendingForward ? 'SET' : 'NONE'}`);
+console.log(`Hub has ${hubRepFresh.state.accounts.size} accounts`);
+console.log(`Hub-Alice account exists: ${!!hubAliceAcc}`);
+console.log(`pendingForward: ${pendingForward ? `SET (route=[${pendingForward.route.map((r:string) => r.slice(-4)).join(',')}])` : 'NONE'}`);
 
 if (!pendingForward) {
   console.error('❌ pendingForward not set in Frame 12!');
@@ -92,11 +98,18 @@ if (hbDelta12 !== 0n) {
 console.log('✅ Frame 12: Alice-Hub committed, Hub-Bob unchanged\n');
 
 // Between frames: Process pendingForward
+// CRITICAL: Mutate replica IN env.eReplicas, not stale hubRep variable
 console.log('⏭️ Processing pendingForward between frames...');
 const nextHop = pendingForward.route[1];
-const hubBobAcc = hubRep.state.accounts.get(nextHop!);
 
-hubBobAcc!.mempool.push({
+const hubReplicaKey = Array.from(env.eReplicas.keys()).find(k => k.startsWith(hub + ':'))!;
+const hubReplicaLive = env.eReplicas.get(hubReplicaKey)!;
+const hubBobAccLive = hubReplicaLive.state.accounts.get(nextHop!);
+const hubAliceAccLive = hubReplicaLive.state.accounts.get(alice);
+
+if (!hubBobAccLive) throw new Error('Hub-Bob account not found');
+
+hubBobAccLive.mempool.push({
   type: 'direct_payment',
   data: {
     tokenId: pendingForward.tokenId,
@@ -108,13 +121,24 @@ hubBobAcc!.mempool.push({
   }
 });
 
-delete hubRep.state.accounts.get(alice)!.pendingForward;
+delete hubAliceAccLive!.pendingForward;
+
+console.log(`Hub-Bob mempool after manual add: ${hubBobAccLive.mempool.length}`);
 
 // FRAME 13: Hub → Bob
-console.log('\n═══ FRAME 13: Hub → Bob ═══');
+// Send dummy input to Hub to trigger AUTO-PROPOSE
+console.log('\n═══ FRAME 13: Hub → Bob ===');
 env.skipPendingForward = false;
 
-await process(env, []);
+// Re-fetch after manual mutation
+const hubRepFresh2 = Array.from(env.eReplicas.values()).find(r => r.entityId === hub)!;
+console.log(`Hub-Bob mempool before process: ${hubRepFresh2.state.accounts.get(bob)!.mempool.length}`);
+
+await process(env, [{
+  entityId: hub,
+  signerId: 's2',
+  entityTxs: [] // Empty tx list triggers AUTO-PROPOSE
+}]);
 
 const hbDelta13 = hubRep.state.accounts.get(bob)?.deltas.get(USDC)?.offdelta ?? 0n;
 console.log(`Hub-Bob: ${hbDelta13}`);

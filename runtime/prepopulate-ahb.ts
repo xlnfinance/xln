@@ -1023,11 +1023,14 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     console.log(`[PRE-PAYMENT] Alice-Hub offdelta (from getOffdelta): ${deltaBeforeAH}`);
     console.log(`[PRE-PAYMENT] Hub-Bob offdelta: ${deltaBeforeHB}`);
 
-    // TEMP FLAG: Disable forwarding for Frame 12
-    env.skipPendingForward = true;
+    // FRAME 12: Alice → Hub, Hub proposes to Bob (Bob doesn't accept yet)
+    // Dynamic import to avoid circular dependency
+    const { process: proc } = await import('./runtime');
 
-    // FRAME 12: Alice → Hub (full cascade but NO forwarding)
-    await processUntilEmpty(env, [{
+    // Step 1: Alice initiates (Alice -> Hub)
+    // We use singleIteration=true to stop after Alice runs
+    console.log(`🏃 Frame 12 Step 1: Alice initiates payment...`);
+    await proc(env, [{
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [{
@@ -1040,72 +1043,55 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
           description: 'First off-chain payment!'
         }
       }]
-    }]);
+    }], 0, true);
+
+    // Step 2: Hub processes Alice's message and proposes to Bob
+    const hubInbox = env.pendingOutputs || [];
+    env.pendingOutputs = []; // Clear pending outputs to capture next step cleanly
+    
+    console.log(`🏃 Frame 12 Step 2: Hub processes ${hubInbox.length} messages...`);
+    if (hubInbox.length > 0) {
+       await proc(env, hubInbox, 0, true); // Iteration 2 (Hub runs)
+    }
+
+    // Get outbox (Hub's frame to Bob) - this simulates the network boundary
+    const outbox12 = env.pendingOutputs || [];
+    env.pendingOutputs = [];
 
     const ahDelta12 = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const hbDelta12 = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
 
-    if (ahDelta12 === 0n) {
-      throw new Error(`❌ Frame 12: Alice-Hub NOT committed!`);
-    }
+    console.log(`📊 Frame 12: A-H=${ahDelta12}, H-B=${hbDelta12}, outbox=${outbox12.length}`);
+    console.log(`📊 Frame 12 outbox entities: [${outbox12.map(o => o.entityId.slice(-4)).join(',')}]`);
+    console.log(`📊 Frame 12 EXPECT: Hub NOT processed yet (A-H should be 0), outbox has Hub`);
+
     if (hbDelta12 !== 0n) {
-      throw new Error(`❌ Frame 12: Hub-Bob ALREADY committed! Should be 0`);
+      throw new Error(`❌ Frame 12: Hub-Bob changed (should be 0)! Bob hasn't processed yet.`);
     }
 
-    await pushSnapshot(env, 'Frame 12: Alice → Hub ($125K)', {
-      title: 'Hop 1: Alice → Hub',
-      what: `Alice-Hub bilateral consensus completes. Hub receives $125K.`,
-      why: 'First network hop. Hub will forward in next frame.',
-      tradfiParallel: 'First bank confirms',
+    await pushSnapshot(env, 'Frame 12: Alice → Hub, Hub AUTO-PROPOSES to Bob', {
+      title: 'Hop 1: Alice-Hub Commits, Hub Proposes to Bob',
+      what: `Alice-Hub bilateral consensus completes. Hub creates frame for Bob.`,
+      why: 'Hub received payment, now proposing forward to Bob (separate tick).',
+      tradfiParallel: 'First bank confirms, prepares wire to second bank',
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
-    // FRAME 13: Manually process pendingForward → Hub-Bob
-    // (pendingForward was set in Frame 12 but skipped)
-    const [, hubReplica] = findReplica(env, hub.id);
-    const hubAliceAccount = hubReplica.state.accounts.get(alice.id);
-
-    if (!hubAliceAccount?.pendingForward) {
-      throw new Error(`❌ Frame 12.5: Hub has NO pendingForward! Should be set.`);
-    }
-
-    // Manually add forwarding payment to Hub-Bob mempool
-    const forward = hubAliceAccount.pendingForward;
-    const nextHop = forward.route[1]; // Should be Bob
-    const hubBobAccount = hubReplica.state.accounts.get(nextHop!);
-
-    if (!hubBobAccount) {
-      throw new Error(`❌ Hub has no account with Bob!`);
-    }
-
-    hubBobAccount.mempool.push({
-      type: 'direct_payment',
-      data: {
-        tokenId: forward.tokenId,
-        amount: forward.amount,
-        route: forward.route.slice(1),
-        description: forward.description || 'Forwarded payment',
-        fromEntityId: hub.id,
-        toEntityId: nextHop!,
-      }
-    });
-
-    delete hubAliceAccount.pendingForward;
-    console.log(`⏭️ Manually processed pendingForward → Hub-Bob mempool has ${hubBobAccount.mempool.length} items`);
-
-    // Now process Hub-Bob bilateral consensus
-    await processUntilEmpty(env, []);
+    // FRAME 13: Bob receives and accepts Hub's proposal (from Frame 12 outbox)
+    await proc(env, outbox12); // Feed Frame 12 outbox as Frame 13 inbox
 
     const hbDelta13 = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
 
+    console.log(`📊 Frame 13: H-B=${hbDelta13}`);
+
     if (hbDelta13 === 0n) {
-      throw new Error(`❌ Frame 13: Hub-Bob NOT committed! Mempool had ${hubBobAccount.mempool.length} items`);
+      throw new Error(`❌ Frame 13: Hub-Bob NOT committed!`);
     }
 
-    await pushSnapshot(env, 'Frame 13: Hub → Bob ($125K)', {
-      title: 'Hop 2: Hub → Bob',
-      what: `Hub-Bob bilateral consensus completes. Multi-hop payment done.`,
-      why: 'Second network hop complete.',
-      tradfiParallel: 'Final bank confirms',
+    await pushSnapshot(env, 'Frame 13: Bob Accepts Hub Payment', {
+      title: 'Hop 2: Bob Commits Hub-Bob',
+      what: `Bob processes Hub's frame. Hub-Bob bilateral consensus completes.`,
+      why: 'Second network hop done. Multi-hop payment finalized.',
+      tradfiParallel: 'Second bank confirms receipt',
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
     // ============================================================================

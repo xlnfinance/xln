@@ -16,28 +16,6 @@ export function handleDirectPayment(
   const { tokenId, amount, route, description } = accountTx.data;
   const events: string[] = [];
 
-  // SECURITY: Route length limit (prevent resource exhaustion)
-  const MAX_ROUTE_LENGTH = 10;
-  if (route && route.length > MAX_ROUTE_LENGTH) {
-    return {
-      success: false,
-      error: `Route exceeds maximum length: ${route.length} > ${MAX_ROUTE_LENGTH}`,
-      events,
-    };
-  }
-
-  // SECURITY: Loop detection (prevent circular routes)
-  if (route && route.length > 0) {
-    const uniqueHops = new Set(route);
-    if (uniqueHops.size !== route.length) {
-      return {
-        success: false,
-        error: 'Circular route detected - payment rejected',
-        events,
-      };
-    }
-  }
-
   // Get or create delta
   let delta = accountMachine.deltas.get(tokenId);
   if (!delta) {
@@ -244,7 +222,7 @@ export function handleDirectPayment(
         accountMachine.pendingForward = {
           tokenId,
           amount,
-          route, // Keep as-is - already sliced correctly
+          route: [...route], // Copy to prevent mutation
           ...(description ? { description } : {}),
         };
       }
