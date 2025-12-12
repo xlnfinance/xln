@@ -12,6 +12,7 @@
   import { panelBridge } from '../utils/panelBridge';
   import { shortAddress } from '$lib/utils/format';
   import { getXLN } from '$lib/stores/xlnStore';
+  import SolvencyPanel from './SolvencyPanel.svelte';
 
   // Receive isolated env as props (passed from View.svelte) - REQUIRED
   export let isolatedEnv: Writable<any>;
@@ -2323,6 +2324,7 @@
       <option value="explore">Explore</option>
       <option value="build">Build</option>
       <option value="economy">Economy</option>
+      <option value="solvency">Solvency</option>
       <option value="governance">Governance</option>
       <option value="resolve">Resolve</option>
     </select>
@@ -2779,6 +2781,12 @@
           </div>
         {/if}
       {/if}
+
+    {:else if currentMode === 'solvency'}
+      <h4>Solvency Monitor</h4>
+      <div class="solvency-embed">
+        <SolvencyPanel />
+      </div>
 
     {:else if currentMode === 'build'}
       <h4>Build Mode</h4>
