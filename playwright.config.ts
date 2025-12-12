@@ -9,13 +9,14 @@ export default defineConfig({
     ['json'], // optional, for parsing
   ],
   testDir: './e2e',
-  timeout: 20000,
+  timeout: 60000, // 60s for AHB prepopulate
   workers: 1,
   // retries: 1,
   outputDir: './e2e/test-results',
   use: {
     baseURL: 'http://localhost:8080',
     headless: process.env['HEADED'] !== 'true', // Headless by default, use HEADED=true for visual
+    ignoreHTTPSErrors: true, // Ignore self-signed cert errors
     trace: 'on-first-retry',
     screenshot: 'on',
     viewport: { width: 1920, height: 1080 },

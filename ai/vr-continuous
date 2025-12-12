@@ -1,0 +1,77 @@
+#!/bin/bash
+export PATH="/opt/homebrew/bin:/Users/zigota/Library/Python/3.9/bin:/usr/bin:$PATH"
+export LANG=en_US.UTF-8
+
+LOG="/tmp/vr-debug.log"
+echo "=== $(date '+%H:%M:%S') START ===" >> "$LOG"
+
+LANG_ARG="${1:-auto}"
+AUDIO=~/records/$(date +%Y-%m-%d)/$(date +%H-%M-%S).wav
+mkdir -p $(dirname "$AUDIO")
+echo "File: $AUDIO" >> "$LOG"
+
+# Trap SIGTERM BEFORE starting rec (prevents race condition)
+trap 'echo "Got TERM, sending INT to background jobs" >> "$LOG"; kill -INT $(jobs -p) 2>/dev/null' TERM
+
+# Record in background (no subshell!)
+rec "$AUDIO" rate 16k channels 1 2>/dev/null &
+REC_PID=$!
+echo "Recording PID: $REC_PID" >> "$LOG"
+
+# Wait for rec
+wait $REC_PID 2>/dev/null
+REC_EXIT=$?
+echo "rec exit code: $REC_EXIT" >> "$LOG"
+
+# Give rec time to flush file
+sleep 0.3
+
+# Check audio exists
+if [ ! -s "$AUDIO" ]; then
+    echo "ERROR: No audio file" >> "$LOG"
+    exit 2
+fi
+
+SIZE=$(stat -f%z "$AUDIO" 2>/dev/null || echo 0)
+echo "Audio size: $SIZE bytes" >> "$LOG"
+
+# Transcribe (HTTP → CLI fallback)
+START=$(python3 -c "import time; print(int(time.time()*1000))")
+TEXT=""
+
+echo "Trying HTTP transcribe..." >> "$LOG"
+if RES=$(curl -sf http://localhost:5001/transcribe -F "file=@$AUDIO" -F "task=$([ "$LANG_ARG" = "translate-en" ] && echo translate || echo transcribe)" 2>&1); then
+    TEXT=$(echo "$RES" | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null)
+    echo "HTTP result: $TEXT" >> "$LOG"
+else
+    echo "ERROR: HTTP server failed (curl exit $?)" >> "$LOG"
+    exit 4
+fi
+
+# No CLI fallback - HTTP only for speed!
+
+MS=$(( $(python3 -c "import time; print(int(time.time()*1000))") - START ))
+echo "Transcribe time: ${MS}ms" >> "$LOG"
+
+# Paste
+if [ -z "$TEXT" ]; then
+    echo "ERROR: Empty text" >> "$LOG"
+    exit 3
+fi
+
+echo "Pasting: $TEXT" >> "$LOG"
+
+# Atomic paste via AppleScript (no race conditions, no verification loops)
+osascript 2>/dev/null << APPLESCRIPT
+set the clipboard to "$TEXT"
+delay 0.05
+tell application "System Events" to keystroke "v" using command down
+APPLESCRIPT
+
+if [ $? -ne 0 ]; then
+    echo "ERROR: Paste failed" >> "$LOG"
+    exit 9
+fi
+
+echo "SUCCESS: ${MS}ms" >> "$LOG"
+echo "$MS"

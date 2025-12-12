@@ -89,55 +89,18 @@
     const derived = activeXlnFunctions.deriveDelta(delta, isLeftEntity);
     const tokenInfo = activeXlnFunctions.getTokenInfo(tokenId);
 
-    // Debug: Log when deriveDelta runs successfully
-    if (delta.rightCreditLimit > 0n || delta.leftCreditLimit > 0n) {
-      console.log(`✅ [AccountPreview] ${entityId.slice(-4)}↔${counterpartyId.slice(-4)} derived:`, {
-        leftCredit: delta.leftCreditLimit.toString(),
-        rightCredit: delta.rightCreditLimit.toString(),
-        inPeerCredit: derived.inPeerCredit.toString(),
-        outCapacity: derived.outCapacity.toString(),
-        inCapacity: derived.inCapacity.toString(),
-      });
-    }
-
-    // Based on deriveDelta logic:
-    // inOwnCredit = credit we're using from them (moves from their credit to us)
-    // outPeerCredit = credit they're using from us (moves from our credit to them)
-    // inCollateral/outCollateral = collateral split based on delta position
-
-    // HYBRID MODEL: Use deriveDelta outputs directly (no manual calculations)
-
-    // Left side (OUT): What WE can send
-    const theirUnusedCredit = derived.inPeerCredit; // Their credit we CAN use (available)
-    const ourCollateralLocked = derived.inCollateral; // Our collateral
-    const theirUsedCredit = derived.peerCreditUsed; // Credit we USED from peer
-
-    // Right side (IN): What THEY can send
-    const ourUnusedCredit = derived.outOwnCredit; // Our credit they CAN use
-    const theirCollateralLocked = derived.outCollateral; // Their collateral
-    const ourUsedCredit = derived.ownCreditUsed; // Credit they USED from us
-    const peerDebtToUs = derived.peerCreditUsed; // What we owe peer
-
-    const totalCapacity = derived.totalCapacity;
-
-    // Visual bar sums (what's actually shown on each side)
-    const leftVisualSum = theirUnusedCredit + ourCollateralLocked;  // Unused credit + our collateral
-    const rightVisualSum = theirCollateralLocked + peerDebtToUs;    // Their collateral + used credit
-
+    // ALL DATA FROM deriveDelta - no redundant calculations!
+    // Use derived.* directly for bar rendering
     return {
       tokenId,
       tokenInfo,
-      theirUnusedCredit,
-      ourCollateralLocked,
-      theirUsedCredit,
-      ourUnusedCredit,
-      theirCollateralLocked,
-      ourUsedCredit,
-      peerDebtToUs,
-      totalCapacity,
-      leftVisualSum,   // OUT label = sum of LEFT bars
-      rightVisualSum,  // IN label = sum of RIGHT bars
-      derived
+      delta,
+      derived,
+      // Backward compat aliases for template (map to derived values)
+      theirUnusedCredit: derived.inPeerCredit,
+      ourCollateralLocked: derived.inCollateral,
+      theirCollateralLocked: derived.outCollateral,
+      totalCapacity: derived.totalCapacity,
     };
   });
 </script>
