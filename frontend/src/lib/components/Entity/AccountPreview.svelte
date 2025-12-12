@@ -89,6 +89,18 @@
     const derived = activeXlnFunctions.deriveDelta(delta, isLeftEntity);
     const tokenInfo = activeXlnFunctions.getTokenInfo(tokenId);
 
+    // DEBUG REGRESSION: Log Bob-Hub account
+    if ((entityId.endsWith('0003') && counterpartyId.endsWith('0002')) ||
+        (entityId.endsWith('0002') && counterpartyId.endsWith('0003'))) {
+      console.error(`🔍 REGRESSION DEBUG ${entityId.slice(-4)}↔${counterpartyId.slice(-4)}:`, {
+        rightCreditLimit: delta.rightCreditLimit?.toString(),
+        leftCreditLimit: delta.leftCreditLimit?.toString(),
+        'derived.inCapacity': derived.inCapacity?.toString(),
+        'derived.outCapacity': derived.outCapacity?.toString(),
+        isLeftEntity,
+      });
+    }
+
     // deriveDelta is single source of truth - use derived.* directly everywhere
     return { tokenId, tokenInfo, delta, derived };
   });
