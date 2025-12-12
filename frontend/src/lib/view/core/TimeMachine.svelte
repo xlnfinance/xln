@@ -283,7 +283,11 @@
 
   // Keyboard shortcuts
   function handleKeyboard(event: KeyboardEvent) {
-    if (event.target !== document.body) return;
+    // Allow shortcuts unless typing in input/textarea
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+      return;
+    }
 
     switch (event.key) {
       case ' ':

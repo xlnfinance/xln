@@ -81,58 +81,33 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       addMessages(newState, result.events);
 
       // CRITICAL: Process multi-hop forwarding (consume pendingForward)
-      console.log(`🔍 PENDING-FORWARD-CHECK: Has pendingForward=${!!accountMachine.pendingForward}`);
-      if (accountMachine.pendingForward) {
-        console.log(`🔍 PENDING-FORWARD: route=[${accountMachine.pendingForward.route.map(r => r.slice(-4)).join(',')}], amount=${accountMachine.pendingForward.amount}`);
-      }
-
-      if (accountMachine.pendingForward) {
+      // Skip if env.skipPendingForward is set (for discrete frame separation in demos)
+      if (accountMachine.pendingForward && !env.skipPendingForward) {
         const forward = accountMachine.pendingForward;
-        const finalTarget = forward.route[forward.route.length - 1];
-        console.log(`🔀 MULTI-HOP: Payment needs forwarding to ${finalTarget?.slice(-4)}`);
-
-        // CRITICAL FIX: route[0] is current entity (us), route[1] is next hop
-        // Skip ourselves and get actual next hop
         const nextHop = forward.route.length > 1 ? forward.route[1] : null;
+
         if (nextHop) {
-          // Calculate forwarding fee (0.1% minimum 1 token)
-          const feeRate = 1000n; // 0.1% = 1/1000
-          const fee = forward.amount / feeRate > 1n ? forward.amount / feeRate : 1n;
-          const forwardAmount = forward.amount - fee;
-
-          console.log(`💰 Forwarding fee: ${fee}, forward amount: ${forwardAmount}`);
-
-          // Check if we have account with next hop
           const nextHopAccount = newState.accounts.get(nextHop);
           if (nextHopAccount) {
-            // CORRECT: Create EntityTx and send through runtime outbox (not direct mempool mutation)
-            const forwardingEntityTx: EntityTx = {
-              type: 'directPayment',
+            // Forward full amount (no fees for simplicity)
+            const forwardAmount = forward.amount;
+
+            nextHopAccount.mempool.push({
+              type: 'direct_payment',
               data: {
-                toEntityId: nextHop,
                 tokenId: forward.tokenId,
                 amount: forwardAmount,
-                route: forward.route.slice(1), // Remove current entity from route
-                ...(forward.description ? { description: forward.description } : {}),
+                route: forward.route.slice(1),
+                description: forward.description || 'Forwarded payment',
+                fromEntityId: state.entityId,
+                toEntityId: nextHop,
               }
-            };
-
-            // Add to outputs so runtime routes it to next hop's entity in NEXT frame
-            outputs.push({
-              entityId: nextHop,
-              signerId: nextHop, // Assume signerId = entityId for now (TODO: proper signer lookup)
-              entityTxs: [forwardingEntityTx]
             });
-            console.log(`✅ Forwarding EntityInput queued for next hop ${nextHop.slice(-4)} (will process in NEXT frame)`);
 
-            addMessage(newState, `⚡ Queued payment relay to Entity ${nextHop.slice(-4)}`);
-          } else {
-            console.error(`❌ No account with next hop ${nextHop.slice(-4)} for forwarding`);
-            addMessage(newState, `❌ Payment routing failed: no account with next hop`);
+            console.log(`⚡ Multi-hop: Forwarding ${forwardAmount} to ${nextHop.slice(-4)} (no fee)`);
           }
         }
 
-        // Clear pendingForward
         delete accountMachine.pendingForward;
       }
 

@@ -719,6 +719,10 @@ export interface Env {
   // Snapshot control (for prepopulate demos)
   disableAutoSnapshots?: boolean; // When true, captureSnapshot skips automatic tick frames
 
+  // Distributed simulation (for multi-server network delay)
+  pendingOutputs?: EntityInput[]; // Outputs from single-iteration mode (processed next tick)
+  skipPendingForward?: boolean;   // Temp flag to defer forwarding to next frame
+
   // Frame-scoped structured logs (captured into snapshot, then reset)
   frameLogs: FrameLogEntry[];
 }

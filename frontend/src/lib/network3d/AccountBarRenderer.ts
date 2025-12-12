@@ -12,11 +12,20 @@
 import * as THREE from 'three';
 import type { EntityData, DerivedAccountData } from './types';
 
+export interface AccountBarVisual {
+  glowColor: 'yellow' | 'blue' | 'red' | null;
+  glowSide: 'left' | 'right' | 'both' | null;
+  glowIntensity: number;
+  isDashed: boolean;
+  pulseSpeed: number;
+}
+
 export interface AccountBarSettings {
   barsMode: 'close' | 'spread';
   portfolioScale: number;
   selectedTokenId: number;
   desyncDetected?: boolean; // Bilateral consensus in progress
+  bilateralState?: AccountBarVisual | null; // Visual state from consensus
 }
 
 export interface AccountSegments {
@@ -228,7 +237,7 @@ function renderSpreadMode(
 
   fromBarSegments.forEach((segment) => {
     if (segment.length > 0.01) {
-      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType, settings.desyncDetected || false);
+      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType, 'left', settings.bilateralState);
       const barCenter = fromStartPos.clone().add(direction.clone().normalize().multiplyScalar(fromOffset + segment.length/2));
       bar.position.copy(barCenter);
 
@@ -257,7 +266,7 @@ function renderSpreadMode(
 
   toBarSegments.forEach((segment) => {
     if (segment.length > 0.01) {
-      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType, settings.desyncDetected || false);
+      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType, 'right', settings.bilateralState);
       // Position bars going toward fromEntity (subtract)
       const barCenter = toStartPos.clone().sub(direction.clone().normalize().multiplyScalar(toOffset + segment.length/2));
       bar.position.copy(barCenter);
@@ -317,7 +326,7 @@ function renderCloseMode(
   // FROM entity bars (first half)
   fromBarSegments.forEach((segment) => {
     if (segment.length > 0.01) {
-      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType, settings.desyncDetected || false);
+      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType, 'left', settings.bilateralState);
       const barCenter = startPos.clone().add(direction.clone().multiplyScalar(currentOffset + segment.length/2));
       bar.position.copy(barCenter);
 
@@ -337,7 +346,7 @@ function renderCloseMode(
   // TO entity bars (second half)
   toBarSegments.forEach((segment) => {
     if (segment.length > 0.01) {
-      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType, settings.desyncDetected || false);
+      const bar = createBarCylinder(barRadius, segment.length, BAR_COLORS[segment.colorType], segment.colorType, 'right', settings.bilateralState);
       const barCenter = startPos.clone().add(direction.clone().multiplyScalar(currentOffset + segment.length/2));
       bar.position.copy(barCenter);
 
@@ -350,32 +359,54 @@ function renderCloseMode(
 }
 
 /**
- * Create a bar cylinder with proper material based on type
+ * Create a bar cylinder with proper material based on consensus state
  */
 function createBarCylinder(
   radius: number,
   length: number,
   color: number,
   colorType: keyof typeof BAR_COLORS,
-  desyncDetected: boolean = false
+  barSide: 'left' | 'right',
+  bilateralState: AccountBarVisual | null | undefined
 ): THREE.Mesh {
   const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
-
-  // Unused credit: transparent wireframe (unloaded trust - mental clarity)
-  // Used credit (red) & Collateral (green): BRIGHT and SOLID (actual value at stake)
   const isUnusedCredit = colorType === 'availableCredit';
 
-  // DESYNC VISUAL: Bilateral consensus in progress
+  // Determine if THIS bar should glow based on bilateral state
+  const shouldGlow = bilateralState?.glowColor &&
+    (bilateralState.glowSide === barSide || bilateralState.glowSide === 'both');
+
+  const glowColorMap = {
+    yellow: 0xffff00,
+    blue: 0x00aaff,
+    red: 0xff0000
+  };
+
+  const glowColor = shouldGlow && bilateralState?.glowColor
+    ? glowColorMap[bilateralState.glowColor]
+    : color;
+
   const material = new THREE.MeshLambertMaterial({
     color,
     transparent: true,
-    opacity: desyncDetected ? 0.5 : (isUnusedCredit ? 0.2 : 1.0), // Desync: striped/faded
-    emissive: new THREE.Color(color).multiplyScalar(isUnusedCredit ? 0.03 : 0.15),
-    wireframe: desyncDetected || isUnusedCredit, // Desync OR unused = wireframe
-    emissiveIntensity: desyncDetected ? 0.5 : (isUnusedCredit ? 0.3 : 1.0)
+    opacity: isUnusedCredit ? 0.2 : (bilateralState?.isDashed ? 0.7 : 1.0),
+    emissive: shouldGlow ? glowColor : new THREE.Color(color).multiplyScalar(0.15),
+    emissiveIntensity: shouldGlow ? (bilateralState?.glowIntensity ?? 0.6) : (isUnusedCredit ? 0.3 : 0.15),
+    wireframe: isUnusedCredit || bilateralState?.isDashed
   });
 
-  return new THREE.Mesh(geometry, material);
+  const mesh = new THREE.Mesh(geometry, material);
+
+  // Add pulsing animation if needed
+  if (shouldGlow && bilateralState && bilateralState.pulseSpeed > 0) {
+    mesh.userData.pulse = {
+      speed: bilateralState.pulseSpeed,
+      baseIntensity: bilateralState.glowIntensity,
+      startTime: Date.now()
+    };
+  }
+
+  return mesh;
 }
 
 /**

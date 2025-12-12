@@ -63,6 +63,31 @@
     dispatch('select', { accountId: counterpartyId });
   }
 
+  // Bilateral consensus state (for visual effects)
+  $: bilateralState = (() => {
+    if (!activeXlnFunctions?.classifyBilateralState || !activeXlnFunctions?.getAccountBarVisual) {
+      return null;
+    }
+
+    const isLeftEntity = entityId < counterpartyId;
+
+    // Get peer account to check their height
+    const envData = entityEnv?.env ? (entityEnv.env as any) : null;
+    const peerReplica = envData?.eReplicas
+      ? Array.from(envData.eReplicas.values()).find((r: any) => r.entityId === counterpartyId)
+      : null;
+    const peerAccount = peerReplica?.state?.accounts?.get(entityId);
+    const peerHeight = peerAccount?.currentFrame?.height ?? 0;
+
+    const myState = activeXlnFunctions.classifyBilateralState(account, peerHeight, isLeftEntity);
+    const peerState = activeXlnFunctions.classifyBilateralState(peerAccount, account.currentFrame?.height ?? 0, !isLeftEntity);
+
+    return activeXlnFunctions.getAccountBarVisual(
+      isLeftEntity ? myState : peerState,
+      isLeftEntity ? peerState : myState
+    );
+  })();
+
   // Get all token deltas for rendering
   $: tokenDeltas = Array.from(account.deltas?.entries() || [] as [number, Delta][]).map(([tokenId, delta]: [number, Delta]) => {
     if (!activeXlnFunctions) {
@@ -144,7 +169,15 @@
         <span class="token-label" style="color: {td.tokenInfo.color}">
           {td.tokenInfo.symbol}
         </span>
-        <div class="delta-bar">
+        <div class="delta-bar"
+             class:glow-yellow={bilateralState?.glowColor === 'yellow'}
+             class:glow-blue={bilateralState?.glowColor === 'blue'}
+             class:glow-red={bilateralState?.glowColor === 'red'}
+             class:glow-left={bilateralState?.glowSide === 'left'}
+             class:glow-right={bilateralState?.glowSide === 'right'}
+             class:glow-both={bilateralState?.glowSide === 'both'}
+             class:dashed={bilateralState?.isDashed}
+             style="--glow-intensity: {bilateralState?.glowIntensity ?? 0}">
           <!-- HYBRID MODEL: Unused on borrower, Used on lender -->
 
           <!-- Left side: OUR PERSPECTIVE (what we can use) -->

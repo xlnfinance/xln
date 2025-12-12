@@ -21,9 +21,6 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     return { newState: entityState, outputs: [] };
   }
 
-  //console.log(`🚨🚨 APPLY-ENTITY-TX: type="${entityTx?.type}" (typeof: ${typeof entityTx?.type})`);
-  //console.log(`🚨🚨 APPLY-ENTITY-TX: data=`, safeStringify(entityTx?.data, 2));
-  //console.log(`🚨🚨 APPLY-ENTITY-TX: Available types: profile-update, j_event, accountInput, openAccount, directPayment`);
   try {
     if (entityTx.type === 'chat') {
       const { from, message } = entityTx.data;
@@ -276,7 +273,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     }
 
     if (entityTx.type === 'directPayment') {
-      console.log(`💸 DIRECT-PAYMENT: Initiating payment to ${entityTx.data.targetEntityId}`);
+      console.log(`💸 Direct payment: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}, ${entityTx.data.amount} via ${entityTx.data.route?.length || 0} hops`);
 
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
@@ -317,16 +314,28 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       // Validate route starts with current entity
-      if (route.length < 2 || route[0] !== entityState.entityId) {
+      if (route.length < 1 || route[0] !== entityState.entityId) {
+        console.error(`❌ ROUTE VALIDATION FAILED: route.length=${route.length}, route[0]=${route[0]?.slice(-4)}, entityId=${entityState.entityId.slice(-4)}`);
         logError("ENTITY_TX", `❌ Invalid route: doesn't start with current entity`);
         return { newState: entityState, outputs: [] };
       }
 
-      // Determine next hop
+      // Check if we're the final destination (route.length === 1)
+      if (route.length === 1 && route[0] === targetEntityId) {
+        console.error(`✅ FINAL DESTINATION: Entity ${entityState.entityId.slice(-4)} is the final recipient`);
+        // This is a payment TO us (final hop) - handle as received payment
+        // The payment was already applied in the bilateral consensus
+        // Just add a message and return
+        addMessage(newState, `💰 Received payment of ${amount} (token ${tokenId})`);
+        return { newState, outputs: [] };
+      }
+
+      // Determine next hop (for intermediate forwarding)
       const nextHop = route[1];
       if (!nextHop) {
+        console.error(`❌ ROUTE ERROR: No next hop in route=[${route.map(r => r.slice(-4)).join(',')}]`);
         logError("ENTITY_TX", `❌ Invalid route: no next hop specified in route`);
-        return { newState: entityState, outputs: [] };
+        return { newState, outputs: [] };
       }
 
       // Check if we have an account with next hop
@@ -521,6 +530,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       return { newState, outputs: [] };
     }
 
+    console.warn(`⚠️ Unhandled EntityTx type: ${entityTx.type}`);
     return { newState: entityState, outputs: [] };
   } catch (error) {
     log.error(`❌ Transaction execution error: ${error}`);
