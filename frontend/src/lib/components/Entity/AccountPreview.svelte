@@ -16,7 +16,7 @@
 
   // CRITICAL FIX: Use xlnFunctions from context (like AccountPanel.svelte:12-16)
   const contextXlnFunctions = entityEnv?.xlnFunctions;
-  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : activeXlnFunctions;
+  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
 
   function getEntityName(id: string): string {
     const envData = entityEnv?.env ? (entityEnv.env as any) : null;
@@ -223,11 +223,11 @@
           </div>
         </div>
         <div class="capacity-labels">
-          <span class="capacity-out" title="Sum of left side bars">
-            OUT {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.leftVisualSum)}
+          <span class="capacity-out" title="Available to send (outCapacity)">
+            OUT {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived?.outCapacity || 0n)}
           </span>
-          <span class="capacity-in" title="Sum of right side bars">
-            IN {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.rightVisualSum)}
+          <span class="capacity-in" title="Available to receive (inCapacity)">
+            IN {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived?.inCapacity || 0n)}
           </span>
         </div>
       </div>
