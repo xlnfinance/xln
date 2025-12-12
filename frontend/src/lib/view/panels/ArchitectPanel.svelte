@@ -20,7 +20,7 @@
   export let isolatedTimeIndex: Writable<number>;
   export let isolatedIsLive: Writable<boolean>;
 
-  type Mode = 'explore' | 'build' | 'economy' | 'governance' | 'resolve';
+  type Mode = 'explore' | 'build' | 'economy' | 'solvency' | 'governance' | 'resolve';
   let currentMode: Mode = 'economy';
   let loading = false;
   let lastAction = '';
