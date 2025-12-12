@@ -512,6 +512,7 @@ async function pushSnapshot(
     runtimeOutputs: [],
     description,
     subtitle, // Fed Chair educational content
+    frameLogs: [...env.frameLogs], // Copy logs accumulated during this frame
     ...(gossipSnapshot ? { gossip: gossipSnapshot } : {}),
   };
 
@@ -523,7 +524,10 @@ async function pushSnapshot(
   const beforeLength = env.history.length;
   env.history.push(snapshot);
   const afterLength = env.history.length;
-  console.log(`📸 Snapshot: ${description} (history: ${beforeLength} → ${afterLength})`);
+  console.log(`📸 Snapshot: ${description} (history: ${beforeLength} → ${afterLength}, logs: ${env.frameLogs.length})`);
+
+  // Clear frame logs for next frame
+  env.frameLogs = [];
 }
 
 export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inputs?: EntityInput[]) => Promise<any>): Promise<void> {
