@@ -81,7 +81,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       addMessages(newState, result.events);
 
       // CRITICAL: Process multi-hop forwarding (consume pendingForward)
-      // Skip if env.skipPendingForward is set (for discrete frame separation in demos)
+      // Skip if env.skipPendingForward (for AHB demo frame separation)
+      // AUTO-PROPOSE deferred to Frame 13 when flag cleared
       if (accountMachine.pendingForward && !env.skipPendingForward) {
         const forward = accountMachine.pendingForward;
         const nextHop = forward.route.length > 1 ? forward.route[1] : null;

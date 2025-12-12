@@ -389,10 +389,10 @@ function createBarCylinder(
   const material = new THREE.MeshLambertMaterial({
     color,
     transparent: true,
-    opacity: isUnusedCredit ? 0.2 : (bilateralState?.isDashed ? 0.7 : 1.0),
+    opacity: isUnusedCredit ? 0.2 : 1.0, // Solid for committed state
     emissive: shouldGlow ? glowColor : new THREE.Color(color).multiplyScalar(0.15),
     emissiveIntensity: shouldGlow ? (bilateralState?.glowIntensity ?? 0.6) : (isUnusedCredit ? 0.3 : 0.15),
-    wireframe: isUnusedCredit || bilateralState?.isDashed
+    wireframe: isUnusedCredit // Only wireframe for unused credit, NOT for glow
   });
 
   const mesh = new THREE.Mesh(geometry, material);
