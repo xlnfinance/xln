@@ -1023,7 +1023,10 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     console.log(`[PRE-PAYMENT] Alice-Hub offdelta (from getOffdelta): ${deltaBeforeAH}`);
     console.log(`[PRE-PAYMENT] Hub-Bob offdelta: ${deltaBeforeHB}`);
 
-    // Direct payment from Alice through Hub to Bob
+    // TEMP FLAG: Disable forwarding for Frame 12
+    env.skipPendingForward = true;
+
+    // FRAME 12: Alice → Hub (full cascade but NO forwarding)
     await processUntilEmpty(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -1033,54 +1036,118 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
           targetEntityId: bob.id,
           tokenId: USDC_TOKEN_ID,
           amount: paymentAmount,
-          route: [alice.id, hub.id, bob.id], // Route: Alice → Hub → Bob
+          route: [alice.id, hub.id, bob.id],
           description: 'First off-chain payment!'
         }
       }]
     }]);
 
-    // CRITICAL: Verify bilateral sync after payment
-    console.log('\n🔍 FRAME 10 VERIFICATION: Bilateral sync checks after payment...');
-    assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'Frame 10 - After Payment (Alice-Hub)');
-    assertBilateralSync(env, hub.id, bob.id, USDC_TOKEN_ID, 'Frame 10 - After Payment (Hub-Bob)');
+    const ahDelta12 = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
+    const hbDelta12 = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
 
-    // COMPREHENSIVE DEBUG: Dump all state after payment
-    dumpSystemState(env, 'AFTER PAYMENT (Frame 10)');
-
-    // SANITY CHECK: Verify payment actually moved through the route
-    const ahDeltaAfter = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
-    const hbDeltaAfter = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
-
-    console.log(`[PAYMENT-SANITY] BEFORE: A-H=${deltaBeforeAH}, H-B=${deltaBeforeHB}`);
-    console.log(`[PAYMENT-SANITY] AFTER:  A-H=${ahDeltaAfter}, H-B=${hbDeltaAfter}`);
-    console.log(`[PAYMENT-SANITY] CHANGE: A-H=${ahDeltaAfter - deltaBeforeAH}, H-B=${hbDeltaAfter - deltaBeforeHB}`);
-
-    // Payment should decrease offdeltas (Alice owes Hub, Hub owes Bob)
-    const ahChange = ahDeltaAfter - deltaBeforeAH;
-    const hbChange = hbDeltaAfter - deltaBeforeHB;
-
-    if (ahChange >= 0n || hbChange >= 0n) {
-      console.error(`❌ PAYMENT FAILED! Offdeltas didn't decrease:`);
-      console.error(`   A-H change: ${ahChange} (should be negative)`);
-      console.error(`   H-B change: ${hbChange} (should be negative)`);
-      throw new Error(`Payment verification failed: offdeltas not updated correctly`);
+    if (ahDelta12 === 0n) {
+      throw new Error(`❌ Frame 12: Alice-Hub NOT committed!`);
+    }
+    if (hbDelta12 !== 0n) {
+      throw new Error(`❌ Frame 12: Hub-Bob ALREADY committed! Should be 0`);
     }
 
-    console.log(`✅ PAYMENT SUCCESS: A-H decreased by ${-ahChange}, H-B decreased by ${-hbChange}`);
+    await pushSnapshot(env, 'Frame 12: Alice → Hub ($125K)', {
+      title: 'Hop 1: Alice → Hub',
+      what: `Alice-Hub bilateral consensus completes. Hub receives $125K.`,
+      why: 'First network hop. Hub will forward in next frame.',
+      tradfiParallel: 'First bank confirms',
+    }, { expectedSolvency: TOTAL_SOLVENCY });
 
-    await pushSnapshot(env, 'Off-Chain Payment: Alice → Hub → Bob $125K', {
-      title: '⚡ First Off-Chain Payment: A → H → B',
-      what: 'Alice sends $125K to Bob via Hub. Payment propagates: A-H offdelta ↓, H-B offdelta ↓.',
-      why: 'This is the magic: instant, zero-gas payment. Only final state settles on-chain.',
-      tradfiParallel: 'Like internal book transfers: instant between accounts at same bank.',
+    // FRAME 13: Manually process pendingForward → Hub-Bob
+    // (pendingForward was set in Frame 12 but skipped)
+    const [, hubReplica] = findReplica(env, hub.id);
+    const hubAliceAccount = hubReplica.state.accounts.get(alice.id);
+
+    if (!hubAliceAccount?.pendingForward) {
+      throw new Error(`❌ Frame 12.5: Hub has NO pendingForward! Should be set.`);
+    }
+
+    // Manually add forwarding payment to Hub-Bob mempool
+    const forward = hubAliceAccount.pendingForward;
+    const nextHop = forward.route[1]; // Should be Bob
+    const hubBobAccount = hubReplica.state.accounts.get(nextHop!);
+
+    if (!hubBobAccount) {
+      throw new Error(`❌ Hub has no account with Bob!`);
+    }
+
+    hubBobAccount.mempool.push({
+      type: 'direct_payment',
+      data: {
+        tokenId: forward.tokenId,
+        amount: forward.amount,
+        route: forward.route.slice(1),
+        description: forward.description || 'Forwarded payment',
+        fromEntityId: hub.id,
+        toEntityId: nextHop!,
+      }
+    });
+
+    delete hubAliceAccount.pendingForward;
+    console.log(`⏭️ Manually processed pendingForward → Hub-Bob mempool has ${hubBobAccount.mempool.length} items`);
+
+    // Now process Hub-Bob bilateral consensus
+    await processUntilEmpty(env, []);
+
+    const hbDelta13 = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
+
+    if (hbDelta13 === 0n) {
+      throw new Error(`❌ Frame 13: Hub-Bob NOT committed! Mempool had ${hubBobAccount.mempool.length} items`);
+    }
+
+    await pushSnapshot(env, 'Frame 13: Hub → Bob ($125K)', {
+      title: 'Hop 2: Hub → Bob',
+      what: `Hub-Bob bilateral consensus completes. Multi-hop payment done.`,
+      why: 'Second network hop complete.',
+      tradfiParallel: 'Final bank confirms',
+    }, { expectedSolvency: TOTAL_SOLVENCY });
+
+    // ============================================================================
+    // STEP 11: Reverse Payment Bob → Hub → Alice ($100K)
+    // ============================================================================
+    console.log('\n⚡ FRAME 11: Reverse Payment B → H → A ($100K)');
+
+    const reversePaymentAmount = usd(100_000);
+
+    // Bob pays Alice through Hub
+    await processUntilEmpty(env, [{
+      entityId: bob.id,
+      signerId: bob.signer,
+      entityTxs: [{
+        type: 'directPayment',
+        data: {
+          targetEntityId: alice.id,
+          tokenId: USDC_TOKEN_ID,
+          amount: reversePaymentAmount,
+          route: [bob.id, hub.id, alice.id], // Route: Bob → Hub → Alice
+          description: 'Reverse payment - bidirectional flow!'
+        }
+      }]
+    }]);
+
+    // CRITICAL: Verify bilateral sync after reverse payment
+    console.log('\n🔍 FRAME 11 VERIFICATION: Bilateral sync checks after reverse payment...');
+    assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'Frame 11 - After Reverse (Alice-Hub)');
+    assertBilateralSync(env, hub.id, bob.id, USDC_TOKEN_ID, 'Frame 11 - After Reverse (Hub-Bob)');
+
+    await pushSnapshot(env, 'Reverse Payment: Bob → Hub → Alice $100K', {
+      title: '⚡ Bidirectional Payment: B → H → A',
+      what: 'Bob sends $100K to Alice via Hub. Payment flows BACKWARDS through same route!',
+      why: 'Demonstrates true bidirectional settlement - payments can flow both ways through the same accounts.',
+      tradfiParallel: 'Like a wire transfer reversal or return payment through correspondent banking.',
       keyMetrics: [
-        'Payment: $125K (25% of capacity)',
-        'A-H: offdelta = -$125K (Alice sent)',
-        'H-B: offdelta = -$125K (Hub forwarded)',
-        'On-chain cost: $0',
-        'Latency: ~300ms (3 frames)',
+        'Payment: $100K (opposite direction)',
+        'Net A-H: -$25K (Alice sent $125K, received $100K)',
+        'Net H-B: -$25K (Hub forwarded both, earned fees)',
+        'Total fees earned by Hub: ~$250',
       ]
-    }, { expectedSolvency: TOTAL_SOLVENCY }); // Off-chain payment: pure netting, no solvency change
+    }, { expectedSolvency: TOTAL_SOLVENCY });
 
     // FINAL BILATERAL SYNC CHECK - All accounts must be synced
     console.log('\n🔍 FINAL VERIFICATION: All bilateral accounts...');

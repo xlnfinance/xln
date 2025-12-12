@@ -3510,10 +3510,21 @@ let vrHammer: VRHammer | null = null;
     const fromDerived = deriveEntry(tokenDelta, fromIsLeftEntity);
     const toDerived = deriveEntry(tokenDelta, !fromIsLeftEntity);
 
-    // Delegate rendering to AccountBarRenderer
-    // Pass desync info for bilateral diff visualization
-    const heightDiff = confirmedAccount && pendingAccount ?
-      Math.abs((confirmedAccount.currentFrame?.height ?? 0) - (pendingAccount.currentFrame?.height ?? 0)) : 0;
+    // Bilateral consensus state classification
+    const leftEntityAccount = fromIsLeftEntity ? confirmedAccount : pendingAccount;
+    const rightEntityAccount = fromIsLeftEntity ? pendingAccount : confirmedAccount;
+    const leftEntityHeight = leftEntityAccount?.currentFrame?.height ?? 0;
+    const rightEntityHeight = rightEntityAccount?.currentFrame?.height ?? 0;
+
+    if (!XLN?.classifyBilateralState) {
+      console.warn('⚠️ XLN.classifyBilateralState not available - using fallback');
+    }
+
+    const leftConsensusState = XLN?.classifyBilateralState?.(leftEntityAccount, rightEntityHeight, true);
+    const rightConsensusState = XLN?.classifyBilateralState?.(rightEntityAccount, leftEntityHeight, false);
+    const barVisual = leftConsensusState && rightConsensusState
+      ? XLN?.getAccountBarVisual?.(leftConsensusState, rightConsensusState)
+      : null;
 
     return createAccountBars(
       scene,
@@ -3526,7 +3537,8 @@ let vrHammer: VRHammer | null = null;
         barsMode,
         portfolioScale: settings.portfolioScale || 5000,
         selectedTokenId: displayTokenId,
-        desyncDetected: heightDiff > 0 // Visual indicator for consensus in progress
+        desyncDetected: (leftConsensusState?.state !== 'committed' || rightConsensusState?.state !== 'committed'),
+        bilateralState: barVisual // NEW: Pass consensus state for visual effects
       },
       getEntitySizeForToken
     );

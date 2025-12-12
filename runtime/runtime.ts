@@ -105,6 +105,7 @@ import {
 import { runDemo } from './rundemo';
 import { decode, encode } from './snapshot-coder'; // encode used in exports
 import { deriveDelta, isLeft, getTokenInfo, formatTokenAmount, createDemoDelta, getDefaultCreditLimit } from './account-utils';
+import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import {
   formatTokenAmount as formatTokenAmountEthers,
   parseTokenAmount,
@@ -1023,6 +1024,8 @@ export {
   applyRuntimeInput,
   assignNameOnChain,
   clearDatabase,
+  classifyBilateralState,
+  getAccountBarVisual,
   clearDatabaseAndHistory,
   connectToEthereum,
   // Entity creation functions
@@ -1401,7 +1404,12 @@ function detectLogCategory(msg: string): 'consensus' | 'account' | 'jurisdiction
 // Global cascade lock to prevent tick interleaving
 let cascading = false;
 
-export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0) => {
+export const process = async (
+  env: Env,
+  inputs?: EntityInput[],
+  runtimeDelay = 0,
+  singleIteration = false  // NEW: Stop after one iteration (simulate network delay)
+) => {
   // Cascade lock: prevent interleaving when delay > tick interval
   if (cascading) {
     console.warn('⏸️ SKIP-CASCADE: Previous cascade still running');
@@ -1411,7 +1419,7 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
   cascading = true;
   let outputs = inputs || [];
   let iterationCount = 0;
-  const maxIterations = 10; // Safety limit
+  const maxIterations = singleIteration ? 1 : 10; // Single iteration for distributed simulation
 
   // Helper to sleep (browser-compatible)
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -1444,11 +1452,15 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
     while (outputs.length > 0 && iterationCount < maxIterations) {
       iterationCount++;
 
+      console.error(`🔥🔥🔥 PROCESS-CASCADE iteration ${iterationCount}: Processing ${outputs.length} outputs for entities: [${outputs.map(o => o.entityId.slice(-4)).join(',')}]`);
+
       const result = await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: outputs });
       outputs = result.entityOutbox;
 
       if (outputs.length > 0) {
-        console.log(`🔥 PROCESS-CASCADE: Iteration ${iterationCount}, ${outputs.length} outputs`);
+        console.error(`🔥 PROCESS-CASCADE: Iteration ${iterationCount} complete, ${outputs.length} new outputs`);
+      } else {
+        console.error(`🔥 PROCESS-CASCADE: Iteration ${iterationCount} complete, NO new outputs - cascade done`);
       }
 
       // Visual delay between cascade iterations (AFTER processing, before next iteration)
@@ -1458,13 +1470,17 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       }
     }
 
-    if (iterationCount >= maxIterations) {
-      console.warn('⚠️ process() reached maximum iterations');
+    if (iterationCount >= maxIterations && !singleIteration) {
+      console.warn('⚠️ process() reached maximum iterations (unexpected)');
+    } else if (singleIteration && outputs.length > 0) {
+      console.log(`⏭️ Single iteration mode: ${outputs.length} outputs remain for next tick`);
     }
 
     // Auto-persist to LevelDB after processing
     await saveEnvToDB(env);
 
+    // Return env + remaining outputs for distributed simulation
+    env.pendingOutputs = singleIteration ? outputs : [];
     return env;
   } finally {
     cascading = false;
@@ -1564,7 +1580,7 @@ export const prepopulate = async (env: Env): Promise<Env> => {
 };
 
 export const prepopulateAHB = async (env: Env): Promise<Env> => {
-  await prepopulateAHBImpl(env, process);
+  await prepopulateAHBImpl(env, process); // Use regular process (cascades fully)
   return env;
 };
 

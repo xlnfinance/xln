@@ -16,6 +16,28 @@ export function handleDirectPayment(
   const { tokenId, amount, route, description } = accountTx.data;
   const events: string[] = [];
 
+  // SECURITY: Route length limit (prevent resource exhaustion)
+  const MAX_ROUTE_LENGTH = 10;
+  if (route && route.length > MAX_ROUTE_LENGTH) {
+    return {
+      success: false,
+      error: `Route exceeds maximum length: ${route.length} > ${MAX_ROUTE_LENGTH}`,
+      events,
+    };
+  }
+
+  // SECURITY: Loop detection (prevent circular routes)
+  if (route && route.length > 0) {
+    const uniqueHops = new Set(route);
+    if (uniqueHops.size !== route.length) {
+      return {
+        success: false,
+        error: 'Circular route detected - payment rejected',
+        events,
+      };
+    }
+  }
+
   // Get or create delta
   let delta = accountMachine.deltas.get(tokenId);
   if (!delta) {
@@ -217,10 +239,12 @@ export function handleDirectPayment(
         );
 
         // Store forwarding info for entity-consensus to create next hop transaction
+        // NOTE: Route already sliced by entity-tx/apply (sender removed)
+        // So route[0] = current entity, route[1] = next hop
         accountMachine.pendingForward = {
           tokenId,
           amount,
-          route: route.slice(1), // Remove current entity, keep rest of route
+          route, // Keep as-is - already sliced correctly
           ...(description ? { description } : {}),
         };
       }
