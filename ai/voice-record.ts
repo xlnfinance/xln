@@ -114,12 +114,20 @@ async function transcribeAndCopy(audioPath: string): Promise<void> {
 
 function transcribeCLI(audioPath: string): Promise<void> {
   return new Promise((resolve, reject) => {
+    const outputDir = join(process.env.HOME || "~", "xln", "ai");
+
+    // Note: Language auto-detection works well for Russian/English
+    // Can specify --language Russian or --language English if needed
     const proc = spawn("mlx_whisper", [
       audioPath,
-      "--model", "large-v3",
-      "--output-format", "txt"
+      "--model", "mlx-community/whisper-large-v3-mlx",
+      "--output-format", "txt",
+      "--output-dir", outputDir,
+      "--verbose", "False",
+      // Auto-detects Russian/English/etc. Remove this line to force a specific language
     ], {
       env: { ...process.env, PATH: `/Users/zigota/Library/Python/3.9/bin:${process.env.PATH}` },
+      cwd: outputDir,
     });
 
     let output = "";
@@ -137,13 +145,21 @@ function transcribeCLI(audioPath: string): Promise<void> {
 
     proc.on("close", (code) => {
       if (code === 0) {
-        const txtPath = audioPath.replace(/\.[^.]+$/, ".txt");
-        let text = "";
+        // Check for txt file in output dir
+        const audioFilename = audioPath.split("/").pop()!.replace(/\.[^.]+$/, "");
+        const txtPath = join(outputDir, `${audioFilename}.txt`);
 
+        let text = "";
         if (existsSync(txtPath)) {
           text = readFileSync(txtPath, "utf-8").trim();
         } else {
-          text = output.trim();
+          // Fallback: parse stdout
+          text = output
+            .split("\n")
+            .map(line => line.replace(/^\[[\d:.]+\s*-->\s*[\d:.]+\]\s*/, "").trim())
+            .filter(line => line && !line.startsWith("Args:") && !line.startsWith("Detecting") && !line.startsWith("Detected"))
+            .join(" ")
+            .trim();
         }
 
         if (text) {
@@ -162,34 +178,39 @@ function transcribeCLI(audioPath: string): Promise<void> {
 
 function copyToClipboard(text: string): void {
   console.log(`✅ Transcribed: "${text}"`);
-  console.log("📋 Pasting...\n");
+  console.log("📋 Переключись на нужное окно... (2 сек)\n");
 
-  // Escape for AppleScript
-  const escaped = text
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n");
+  // Wait 2 seconds for user to switch to target app
+  setTimeout(() => {
+    console.log("Pasting...");
 
-  // Paste directly using AppleScript
-  const script = `tell application "System Events" to keystroke "${escaped}"`;
-  const proc = spawn("osascript", ["-e", script]);
+    // Escape for AppleScript
+    const escaped = text
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, "\\n");
 
-  proc.on("close", (code) => {
-    if (code === 0) {
-      console.log("✅ Pasted!\n");
-      process.exit(0);
-    } else {
-      console.log("⚠️  Paste failed, copying to clipboard...");
-      // Fallback to clipboard
-      const clipProc = spawn("pbcopy");
-      clipProc.stdin.write(text);
-      clipProc.stdin.end();
-      clipProc.on("close", () => {
-        console.log("📋 In clipboard - paste with Cmd+V\n");
+    // Paste directly using AppleScript
+    const script = `tell application "System Events" to keystroke "${escaped}"`;
+    const proc = spawn("osascript", ["-e", script]);
+
+    proc.on("close", (code) => {
+      if (code === 0) {
+        console.log("✅ Pasted!\n");
         process.exit(0);
-      });
-    }
-  });
+      } else {
+        console.log("⚠️  Paste failed, copying to clipboard...");
+        // Fallback to clipboard
+        const clipProc = spawn("pbcopy");
+        clipProc.stdin.write(text);
+        clipProc.stdin.end();
+        clipProc.on("close", () => {
+          console.log("📋 In clipboard - paste with Cmd+V\n");
+          process.exit(0);
+        });
+      }
+    });
+  }, 2000); // 2 second delay
 }
 
 // ============================================================================
