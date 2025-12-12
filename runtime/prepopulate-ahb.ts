@@ -1047,11 +1047,26 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     // COMPREHENSIVE DEBUG: Dump all state after payment
     dumpSystemState(env, 'AFTER PAYMENT (Frame 10)');
 
-    // SELF-TEST: Log actual values
-    const ahDelta = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
-    const hbDelta = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
-    console.log(`[PAYMENT-DEBUG] Alice-Hub offdelta: ${ahDelta}`);
-    console.log(`[PAYMENT-DEBUG] Hub-Bob offdelta: ${hbDelta}`);
+    // SANITY CHECK: Verify payment actually moved through the route
+    const ahDeltaAfter = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
+    const hbDeltaAfter = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
+
+    console.log(`[PAYMENT-SANITY] BEFORE: A-H=${deltaBeforeAH}, H-B=${deltaBeforeHB}`);
+    console.log(`[PAYMENT-SANITY] AFTER:  A-H=${ahDeltaAfter}, H-B=${hbDeltaAfter}`);
+    console.log(`[PAYMENT-SANITY] CHANGE: A-H=${ahDeltaAfter - deltaBeforeAH}, H-B=${hbDeltaAfter - deltaBeforeHB}`);
+
+    // Payment should decrease offdeltas (Alice owes Hub, Hub owes Bob)
+    const ahChange = ahDeltaAfter - deltaBeforeAH;
+    const hbChange = hbDeltaAfter - deltaBeforeHB;
+
+    if (ahChange >= 0n || hbChange >= 0n) {
+      console.error(`❌ PAYMENT FAILED! Offdeltas didn't decrease:`);
+      console.error(`   A-H change: ${ahChange} (should be negative)`);
+      console.error(`   H-B change: ${hbChange} (should be negative)`);
+      throw new Error(`Payment verification failed: offdeltas not updated correctly`);
+    }
+
+    console.log(`✅ PAYMENT SUCCESS: A-H decreased by ${-ahChange}, H-B decreased by ${-hbChange}`);
 
     await pushSnapshot(env, 'Off-Chain Payment: Alice → Hub → Bob $125K', {
       title: '⚡ First Off-Chain Payment: A → H → B',
