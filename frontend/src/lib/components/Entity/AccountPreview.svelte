@@ -89,19 +89,8 @@
     const derived = activeXlnFunctions.deriveDelta(delta, isLeftEntity);
     const tokenInfo = activeXlnFunctions.getTokenInfo(tokenId);
 
-    // ALL DATA FROM deriveDelta - no redundant calculations!
-    // Use derived.* directly for bar rendering
-    return {
-      tokenId,
-      tokenInfo,
-      delta,
-      derived,
-      // Backward compat aliases for template (map to derived values)
-      theirUnusedCredit: derived.inPeerCredit,
-      ourCollateralLocked: derived.inCollateral,
-      theirCollateralLocked: derived.outCollateral,
-      totalCapacity: derived.totalCapacity,
-    };
+    // deriveDelta is single source of truth - use derived.* directly everywhere
+    return { tokenId, tokenInfo, delta, derived };
   });
 </script>
 
@@ -148,18 +137,18 @@
 
           <!-- Left side: OUR PERSPECTIVE (what we can use) -->
           <div class="bar-section left-side">
-            {#if td.theirUnusedCredit > 0n}
+            {#if td.derived.inPeerCredit > 0n}
               <div
                 class="bar-segment unused-credit"
-                style="width: {Number((td.theirUnusedCredit * 100n) / td.totalCapacity)}%"
-                title="Credit FROM peer we CAN use: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.theirUnusedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
+                style="width: {Number((td.derived.inPeerCredit * 100n) / td.derived.totalCapacity)}%"
+                title="Credit FROM peer: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inPeerCredit)}"
               ></div>
             {/if}
-            {#if td.ourCollateralLocked > 0n}
+            {#if td.derived.inCollateral > 0n}
               <div
                 class="bar-segment collateral"
-                style="width: {Number((td.ourCollateralLocked * 100n) / td.totalCapacity)}%"
-                title="Our collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.ourCollateralLocked) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
+                style="width: {Number((td.derived.inCollateral * 100n) / td.derived.totalCapacity)}%"
+                title="Our collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCollateral)}"
               ></div>
             {/if}
           </div>
@@ -167,20 +156,20 @@
           <!-- Visual separator -->
           <div class="bar-separator">|</div>
 
-          <!-- Right side: THEIR PERSPECTIVE (what they deployed/we owe) -->
+          <!-- Right side: THEIR PERSPECTIVE -->
           <div class="bar-section right-side">
-            {#if td.theirCollateralLocked > 0n}
+            {#if td.derived.outCollateral > 0n}
               <div
                 class="bar-segment collateral"
-                style="width: {Number((td.theirCollateralLocked * 100n) / td.totalCapacity)}%"
-                title="Peer collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.theirCollateralLocked) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
+                style="width: {Number((td.derived.outCollateral * 100n) / td.derived.totalCapacity)}%"
+                title="Peer collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCollateral)}"
               ></div>
             {/if}
-            {#if td.peerDebtToUs > 0n}
+            {#if td.derived.outOwnCredit > 0n}
               <div
-                class="bar-segment used-credit"
-                style="width: {Number((td.peerDebtToUs * 100n) / td.totalCapacity)}%"
-                title="USED credit (we owe peer): {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.peerDebtToUs)}"
+                class="bar-segment unused-credit"
+                style="width: {Number((td.derived.outOwnCredit * 100n) / td.derived.totalCapacity)}%"
+                title="Our credit they CAN use: {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived.outOwnCredit)}"
               ></div>
             {/if}
           </div>
