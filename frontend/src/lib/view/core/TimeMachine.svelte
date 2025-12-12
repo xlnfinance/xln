@@ -356,34 +356,17 @@
   <!-- Progress Scrubber with frame info -->
   <div class="scrubber-container">
     <div class="frame-info">
-      <span class="frame-badge" class:live={$isLive}>
-        {$isLive ? `LIVE/${$history.length}` : `${$timeIndex + 1}/${$history.length}`}
-      </span>
-      <span class="time-label">{currentTime}</span>
-    </div>
-    <input
-      type="range"
-      class="scrubber"
-      min="0"
-      max={maxTimeIndex}
-      value={$timeIndex}
-      on:input={handleSliderInput}
-      style="--progress: {progressPercent}%"
-      disabled={$history.length === 0}
-    />
-    <span class="time-label end">{totalTime}</span>
-  </div>
-
-  <!-- Mega Dropdown (Settings: speed + loop + export) -->
-  <div class="dropdown">
-    <button class="settings-btn" on:click={() => { showSpeedMenu = !showSpeedMenu; showLoopMenu = false; showExportMenu = false; }} title="Settings">
-      <span class="speed-value">{speed}x</span>
-      {#if loopMode !== 'off'}
-        <Repeat size={10} />
-      {/if}
-      <ChevronDown size={10} />
-    </button>
-    {#if showSpeedMenu}
+      <div class="dropdown-trigger">
+        <button
+          class="frame-badge"
+          class:live={$isLive}
+          on:click={() => { showSpeedMenu = !showSpeedMenu; showLoopMenu = false; showExportMenu = false; }}
+          title="Click for playback settings"
+        >
+          {$isLive ? `LIVE/${$history.length}` : `${$timeIndex + 1}/${$history.length}`}
+        </button>
+        <!-- Dropdown menu -->
+        {#if showSpeedMenu}
       <div class="menu mega">
         <div class="menu-section">Speed</div>
         <div class="speed-grid">
@@ -422,7 +405,21 @@
         <button on:click={shareURL}>Share URL</button>
         <button on:click={shareURLWithUI}>Share URL + UI</button>
       </div>
-    {/if}
+        {/if}
+      </div>
+      <span class="time-label">{currentTime}</span>
+    </div>
+    <input
+      type="range"
+      class="scrubber"
+      min="0"
+      max={maxTimeIndex}
+      value={$timeIndex}
+      on:input={handleSliderInput}
+      style="--progress: {progressPercent}%"
+      disabled={$history.length === 0}
+    />
+    <span class="time-label end">{totalTime}</span>
   </div>
 
   <!-- Fed Chair Subtitle (inline, above controls) -->
@@ -501,15 +498,27 @@
     flex-shrink: 0;
   }
 
+  .dropdown-trigger {
+    position: relative; /* For dropdown positioning */
+  }
+
   .frame-badge {
     font-family: 'SF Mono', monospace;
     font-size: 0.625rem;
     font-weight: 600;
     padding: 3px 6px;
     background: rgba(0, 122, 255, 0.1);
+    border: 1px solid transparent;
     border-radius: 3px;
     color: rgba(0, 122, 255, 0.9);
     white-space: nowrap;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .frame-badge:hover {
+    background: rgba(0, 122, 255, 0.2);
+    border-color: rgba(0, 122, 255, 0.3);
   }
 
   .frame-badge.live {
