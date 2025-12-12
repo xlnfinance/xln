@@ -1295,8 +1295,11 @@ const runDemoWrapper = async (env: Env): Promise<Env> => {
 };
 
 // === ENVIRONMENT UTILITIES ===
+// Global reference to current env for log capturing
+let currentEnvForLogs: Env | null = null;
+
 export const createEmptyEnv = (): Env => {
-  return {
+  const env: Env = {
     eReplicas: new Map(),
     jReplicas: new Map(),
     height: 0,
@@ -1306,7 +1309,68 @@ export const createEmptyEnv = (): Env => {
     gossip: createGossipLayer(),
     frameLogs: [],
   };
+
+  // Set as current env for log capturing
+  currentEnvForLogs = env;
+
+  return env;
 };
+
+// Intercept console for frame log capturing (browser only)
+if (isBrowser) {
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+
+  console.log = function(...args: any[]) {
+    originalLog.apply(console, args);
+    if (currentEnvForLogs) {
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      currentEnvForLogs.frameLogs.push({
+        level: 'info',
+        category: detectLogCategory(msg),
+        message: msg,
+        timestamp: Date.now(),
+      });
+    }
+  };
+
+  console.warn = function(...args: any[]) {
+    originalWarn.apply(console, args);
+    if (currentEnvForLogs) {
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      currentEnvForLogs.frameLogs.push({
+        level: 'warn',
+        category: detectLogCategory(msg),
+        message: msg,
+        timestamp: Date.now(),
+      });
+    }
+  };
+
+  console.error = function(...args: any[]) {
+    originalError.apply(console, args);
+    if (currentEnvForLogs) {
+      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+      currentEnvForLogs.frameLogs.push({
+        level: 'error',
+        category: detectLogCategory(msg),
+        message: msg,
+        timestamp: Date.now(),
+      });
+    }
+  };
+}
+
+function detectLogCategory(msg: string): 'consensus' | 'account' | 'jurisdiction' | 'evm' | 'network' | 'ui' | 'system' {
+  if (msg.includes('CONSENSUS') || msg.includes('E-MACHINE') || msg.includes('PROPOSE')) return 'consensus';
+  if (msg.includes('ACCOUNT') || msg.includes('A-MACHINE') || msg.includes('BILATERAL')) return 'account';
+  if (msg.includes('J-MACHINE') || msg.includes('JURISDICTION')) return 'jurisdiction';
+  if (msg.includes('EVM') || msg.includes('BrowserVM')) return 'evm';
+  if (msg.includes('GOSSIP') || msg.includes('NETWORK')) return 'network';
+  if (msg.includes('[View]') || msg.includes('[Graph3D]')) return 'ui';
+  return 'system';
+}
 
 // === CONSENSUS PROCESSING UTILITIES ===
 // Global cascade lock to prevent tick interleaving

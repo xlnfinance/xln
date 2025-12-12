@@ -1,4 +1,4 @@
-# XLN Context - Core System Files (~121k tokens)
+# XLN Context - Core System Files (~126k tokens)
 
 ## THE CORE INNOVATION: RCPAN Invariant
 
@@ -39,7 +39,7 @@ This single invariant:
 4. **Multi-hop payments that NET positions** - Ripple batches, Lightning routes, only XLN nets bilaterally
 5. **Entity-owned subcontracts (HTLCs, limit orders) without separate channels** - One bilateral account, many subcontracts
 
-## Token Budget Guide (~121k tokens total)
+## Token Budget Guide (~126k tokens total)
 
 **Critical path (read first, ~30min):**
 - ⚡ emc2.md (5min) - Why credit = stored energy
@@ -128,16 +128,16 @@ xln/
     DeltaTransformer.sol       155 lines - Delta transformations: HTLCs, swaps, limit orders
 
   runtime/
-    types.ts                     1001 lines - All TypeScript interfaces (START HERE)
+    types.ts                     1057 lines - All TypeScript interfaces (START HERE)
     ids.ts                       519 lines - Identity system: EntityId, SignerId, JId, ReplicaKey
-    runtime.ts                   1388 lines - Main coordinator, 100ms ticks, R->E->A routing
-    entity-consensus.ts          959 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
-    account-consensus.ts         675 lines - Bilateral consensus, left/right perspective
+    runtime.ts                   1498 lines - Main coordinator, 100ms ticks, R->E->A routing
+    entity-consensus.ts          981 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
+    account-consensus.ts         729 lines - Bilateral consensus, left/right perspective
     j-batch.ts                   425 lines - J-batch: E-machine accumulates → jBroadcast → J-machine
 
     entity-tx/
       index.ts                   7 lines - Entity transaction types
-      apply.ts                   493 lines - Entity tx dispatcher
+      apply.ts                   530 lines - Entity tx dispatcher
       validation.ts              37 lines - Transaction validation
       financial.ts               33 lines - Financial accounting
       proposals.ts               35 lines - Proposal logic
@@ -151,9 +151,9 @@ xln/
       graph.ts                   117 lines - Network graph
       pathfinding.ts             227 lines - Dijkstra routing
 
-    state-helpers.ts             332 lines - Pure state management
+    state-helpers.ts             367 lines - Pure state management
     snapshot-coder.ts            243 lines - Deterministic RLP serialization
-    evm.ts                       999 lines - Blockchain integration
+    evm.ts                       1014 lines - Blockchain integration
 
   vibepaper/
     emc2.md                      33 lines - ⚡ Energy-Mass-Credit equivalence (CRITICAL PATH)
@@ -3077,7 +3077,7 @@ contract DeltaTransformer is Console {
 
 }
 
-//runtime/types.ts (1001 lines)
+//runtime/types.ts (1057 lines)
 /**
  * XLN Type Definitions
  * All interfaces and type definitions used across the XLN system
@@ -3471,6 +3471,15 @@ export type EntityTx =
       data: {
         hankoSignature?: string; // Optional hanko seal for the batch
       };
+    }
+  | {
+      // Extend credit to a counterparty in bilateral account
+      type: 'extendCredit';
+      data: {
+        counterpartyEntityId: string;
+        tokenId: number;
+        amount: bigint;
+      };
     };
 
 export interface AssetBalance {
@@ -3747,6 +3756,34 @@ export interface EntityReplica {
   };
 }
 
+// =============================================================================
+// STRUCTURED LOGGING SYSTEM
+// =============================================================================
+
+/** Log severity levels - ordered by priority */
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
+
+/** Log categories for filtering */
+export type LogCategory =
+  | 'consensus'     // BFT entity consensus
+  | 'account'       // Bilateral account consensus
+  | 'jurisdiction'  // J-machine events
+  | 'evm'           // Blockchain interactions
+  | 'network'       // Routing/messaging
+  | 'ui'            // UI events
+  | 'system';       // System-level
+
+/** Single log entry attached to a frame */
+export interface FrameLogEntry {
+  id: number;
+  timestamp: number;
+  level: LogLevel;
+  category: LogCategory;
+  message: string;
+  entityId?: string;              // Associated entity (if applicable)
+  data?: Record<string, unknown>; // Structured data
+}
+
 export interface Env {
   eReplicas: Map<string, EntityReplica>;  // Entity replicas (E-layer state machines)
   jReplicas: Map<string, JReplica>;       // Jurisdiction replicas (J-layer EVM state)
@@ -3761,6 +3798,9 @@ export interface Env {
 
   // Snapshot control (for prepopulate demos)
   disableAutoSnapshots?: boolean; // When true, captureSnapshot skips automatic tick frames
+
+  // Frame-scoped structured logs (captured into snapshot, then reset)
+  frameLogs: FrameLogEntry[];
 }
 
 /**
@@ -3782,6 +3822,20 @@ export interface JReplica {
     entityProvider?: string;
     account?: string;
   };
+
+  // === SYNCED FROM DEPOSITORY.SOL ===
+  // mapping(bytes32 => mapping(uint => uint)) _reserves
+  reserves?: Map<string, Map<number, bigint>>;  // entityId -> tokenId -> amount
+
+  // mapping(bytes => mapping(uint => AccountCollateral)) _collaterals
+  collaterals?: Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>; // accountKey -> tokenId -> {collateral, ondelta}
+
+  // mapping(bytes32 => InsuranceLine[]) insuranceLines
+  insuranceLines?: Map<string, Array<{ insurer: string; tokenId: number; remaining: bigint; expiresAt: bigint }>>;
+
+  // === SYNCED FROM ENTITYPROVIDER.SOL ===
+  // mapping(bytes32 => Entity) entities
+  registeredEntities?: Map<string, { name: string; quorum: string[]; threshold: number }>;
 }
 
 /** J-Machine transaction (settlement layer) */
@@ -3832,6 +3886,8 @@ export interface EnvSnapshot {
     position?: { x: number; y: number; z: number }; // Camera position
     rotation?: { x: number; y: number; z: number }; // Camera rotation
   };
+  // Frame-specific structured logs
+  logs?: FrameLogEntry[];
 }
 
 // Entity types - canonical definition in ids.ts
@@ -4601,7 +4657,7 @@ export const safeExtractEntityId = (keyString: string): EntityId | null => {
 };
 
 
-//runtime/runtime.ts (1388 lines)
+//runtime/runtime.ts (1498 lines)
 // for regular use > bun run runtime/runtime.ts
 // for debugging > bun repl
 // await import('./debug.js');
@@ -5156,6 +5212,51 @@ const applyRuntimeInput = async (
       env.runtimeInput.runtimeTxs.length = 0;
       env.runtimeInput.entityInputs.length = 0;
 
+      // CRITICAL: Update JReplica stateRoots from BrowserVM BEFORE snapshot
+      // Without this, time-travel shows stale EVM state from xlnomy creation
+      const browserVM = getBrowserVMInstance();
+      if (browserVM?.captureStateRoot && env.jReplicas) {
+        try {
+          const freshStateRoot = await browserVM.captureStateRoot();
+          for (const [name, jReplica] of env.jReplicas.entries()) {
+            jReplica.stateRoot = freshStateRoot;
+          }
+        } catch (e) {
+          // Silent fail - stateRoot capture is optional for time-travel
+        }
+      }
+
+      // CRITICAL: Sync collaterals and blockNumber from BrowserVM BEFORE snapshot
+      if (browserVM?.syncAllCollaterals && env.jReplicas && env.eReplicas) {
+        try {
+          // Collect all account pairs from all entities
+          const accountPairs: Array<{ entityId: string; counterpartyId: string }> = [];
+          for (const [replicaKey, replica] of env.eReplicas.entries()) {
+            if (replica.state.accounts) {
+              for (const [counterpartyId, _account] of replica.state.accounts) {
+                const entityId = replicaKey.split(':')[0];
+                accountPairs.push({ entityId, counterpartyId });
+              }
+            }
+          }
+
+          // Sync all collaterals from BrowserVM (for now, just tokenId 1 = USDC)
+          const collaterals = await browserVM.syncAllCollaterals(accountPairs, 1);
+
+          // Get current block height from BrowserVM
+          const blockHeight = browserVM.getBlockHeight ? browserVM.getBlockHeight() : 0;
+
+          // Update JReplica with synced data
+          for (const [name, jReplica] of env.jReplicas.entries()) {
+            jReplica.collaterals = collaterals;
+            jReplica.blockNumber = BigInt(blockHeight);
+          }
+        } catch (e) {
+          // Silent fail - collaterals sync is optional for debugging
+          console.warn('[Runtime] Failed to sync BrowserVM state:', e);
+        }
+      }
+
       // Capture snapshot with the actual processed input and outputs
       await captureSnapshot(env, env.history, db, processedInput, entityOutbox, inputDescription);
     } else {
@@ -5270,6 +5371,7 @@ const main = async (): Promise<Env> => {
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
     gossip: gossipLayer,
+    frameLogs: [],
   };
 
   // Try to load saved state from database
@@ -5375,6 +5477,7 @@ const main = async (): Promise<Env> => {
         },
         history: snapshots, // Include the loaded history
         gossip: gossipLayer, // Use restored gossip layer
+        frameLogs: [],
       };
       console.log(`✅ History restored. Runtime is at height ${env.height} with ${env.history.length} snapshots.`);
       console.log(`📈 Snapshot details:`, {
@@ -5478,6 +5581,63 @@ const getSnapshot = (index: number) => {
 };
 const getCurrentHistoryIndex = () => (env.history || []).length - 1;
 
+// === SYSTEM SOLVENCY CHECK ===
+// Total tokens in system: reserves + collateral must equal minted supply
+interface Solvency {
+  reserves: bigint;
+  collateral: bigint;
+  total: bigint;
+  byToken: Map<number, { reserves: bigint; collateral: bigint; total: bigint }>;
+}
+
+const calculateSolvency = (snapshot?: Env): Solvency => {
+  const targetEnv = snapshot || env;
+  const byToken = new Map<number, { reserves: bigint; collateral: bigint; total: bigint }>();
+
+  let reserves = 0n;
+  let collateral = 0n;
+
+  for (const [_replicaKey, replica] of targetEnv.eReplicas) {
+    // Sum reserves
+    for (const [tokenId, amount] of replica.state.reserves) {
+      reserves += amount;
+      const existing = byToken.get(tokenId) || { reserves: 0n, collateral: 0n, total: 0n };
+      existing.reserves += amount;
+      existing.total = existing.reserves + existing.collateral;
+      byToken.set(tokenId, existing);
+    }
+
+    // Sum collateral (left entity only to avoid double-counting)
+    for (const [counterpartyId, account] of replica.state.accounts) {
+      if (replica.state.entityId < counterpartyId) {
+        for (const [tokenId, delta] of account.deltas) {
+          collateral += delta.collateral;
+          const existing = byToken.get(tokenId) || { reserves: 0n, collateral: 0n, total: 0n };
+          existing.collateral += delta.collateral;
+          existing.total = existing.reserves + existing.collateral;
+          byToken.set(tokenId, existing);
+        }
+      }
+    }
+  }
+
+  return { reserves, collateral, total: reserves + collateral, byToken };
+};
+
+const verifySolvency = (expected?: bigint, label?: string): boolean => {
+  const s = calculateSolvency();
+  const prefix = label ? `[${label}] ` : '';
+
+  if (expected !== undefined && s.total !== expected) {
+    console.error(`❌ ${prefix}SOLVENCY VIOLATION: Expected ${expected}, got ${s.total}`);
+    console.error(`   Reserves: ${s.reserves}, Collateral: ${s.collateral}`);
+    throw new Error(`Solvency check failed: ${s.total} !== ${expected}`);
+  }
+
+  console.log(`✅ ${prefix}Solvency: ${s.total} (R:${s.reserves} + C:${s.collateral})`);
+  return true;
+};
+
 // Server-specific clearDatabase that also resets history
 const clearDatabaseAndHistory = async () => {
   console.log('🗑️ Clearing database and resetting runtime history...');
@@ -5494,6 +5654,7 @@ const clearDatabaseAndHistory = async () => {
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
     gossip: createGossipLayer(),
+    frameLogs: [],
   };
 
   console.log('✅ Database and runtime history cleared');
@@ -5603,6 +5764,10 @@ export {
   // Snapshot utilities
   encode,
   decode,
+
+  // System solvency (conservation of tokens)
+  calculateSolvency,
+  verifySolvency,
 
   // Identity system (from ids.ts) - replaces split(':') patterns
   parseReplicaKey,
@@ -5799,6 +5964,7 @@ export const createEmptyEnv = (): Env => {
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
     gossip: createGossipLayer(),
+    frameLogs: [],
   };
 };
 
@@ -5991,7 +6157,7 @@ const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayIn
 // Avatar functions are already imported and exported above
 
 
-//runtime/entity-consensus.ts (959 lines)
+//runtime/entity-consensus.ts (981 lines)
 /**
  * XLN Entity Consensus and State Management
  * Core entity processing logic, consensus, proposals, and state transitions
@@ -6037,13 +6203,11 @@ const validateEntityInput = (input: EntityInput): boolean => {
           log.error(`❌ Invalid transaction: ${safeStringify(tx)}`);
           return false;
         }
-        if (
-          typeof tx.type !== 'string' ||
-          !['chat', 'propose', 'vote', 'profile-update', 'j_event', 'accountInput', 'openAccount', 'directPayment'].includes(tx.type)
-        ) {
-          log.error(`❌ Invalid transaction type: ${tx.type}`);
+        if (typeof tx.type !== 'string') {
+          log.error(`❌ Transaction type must be string: ${typeof tx.type}`);
           return false;
         }
+        // No whitelist - trust the type system
       }
     }
 
@@ -6691,6 +6855,20 @@ export const applyEntityFrame = async (
     currentEntityState = newState;
     allOutputs.push(...outputs);
 
+    // Debug: Log all account mempools after each tx
+    if (entityTx.type === 'extendCredit') {
+      console.log(`💳 POST-EXTEND-CREDIT: Checking all account mempools:`);
+      for (const [cpId, acctMachine] of currentEntityState.accounts) {
+        console.log(`💳   Account with ${cpId.slice(0,10)}: mempool=${acctMachine.mempool.length}, pendingFrame=${acctMachine.pendingFrame ? `height=${acctMachine.pendingFrame.height}` : 'none'}, currentHeight=${acctMachine.currentHeight}`);
+        if (acctMachine.mempool.length > 0) {
+          console.log(`💳   Mempool txs:`, acctMachine.mempool.map(tx => tx.type));
+        }
+        if (acctMachine.pendingFrame) {
+          console.log(`💳   ⚠️ BLOCKING: pendingFrame exists - no new proposals until ACKed!`);
+        }
+      }
+    }
+
     // Track which accounts need proposals based on transaction type
     if (entityTx.type === 'accountInput' && entityTx.data) {
       const fromEntity = entityTx.data.fromEntityId;
@@ -6746,6 +6924,16 @@ export const applyEntityFrame = async (
           proposableAccounts.add(targetEntity);
           console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (new account opened)`);
         }
+      }
+    } else if (entityTx.type === 'extendCredit' && entityTx.data) {
+      // Credit extension - mark account for proposal
+      const counterpartyId = entityTx.data.counterpartyEntityId;
+      const accountMachine = currentEntityState.accounts.get(counterpartyId);
+      console.log(`💳 EXTEND-CREDIT: Checking account ${counterpartyId.slice(0,10)} for proposal`);
+      console.log(`💳 EXTEND-CREDIT: accountMachine exists: ${!!accountMachine}, mempool: ${accountMachine?.mempool?.length || 0}`);
+      if (accountMachine && accountMachine.mempool.length > 0) {
+        proposableAccounts.add(counterpartyId);
+        console.log(`💳 ✅ Added ${counterpartyId.slice(0,10)} to proposableAccounts (credit extension)`);
       }
     }
   }
@@ -6952,7 +7140,7 @@ export const handleEmptyMempoolProposer = (): void => {
 };
 
 
-//runtime/account-consensus.ts (675 lines)
+//runtime/account-consensus.ts (729 lines)
 /**
  * XLN Account Consensus System
  *
@@ -7142,6 +7330,12 @@ export async function proposeAccountFrame(
   console.log(`📊 Frame state after processing: ${finalTokenIds.length} tokens`);
   console.log(`📊 TokenIds: [${finalTokenIds.join(', ')}]`);
   console.log(`📊 Deltas: [${finalDeltas.map(d => d.toString()).join(', ')}]`);
+  console.log(`📊 FullDeltaStates:`, fullDeltaStates.map(d => ({
+    tokenId: d.tokenId,
+    collateral: d.collateral?.toString(),
+    leftCreditLimit: d.leftCreditLimit?.toString(),
+    rightCreditLimit: d.rightCreditLimit?.toString(),
+  })));
 
   // Create account frame matching the real AccountFrame interface
   const frameData = {
@@ -7243,6 +7437,7 @@ export async function handleAccountInput(
   // Handle pending frame confirmation
   if (accountMachine.pendingFrame && input.height === accountMachine.pendingFrame.height && input.prevSignatures) {
     console.log(`✅ Received confirmation for pending frame ${input.height}`);
+    console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}, counter=${input.counter}`);
 
     const frameHash = accountMachine.pendingFrame.stateHash;
     const expectedSigner = accountMachine.proofHeader.toEntity;
@@ -7252,13 +7447,47 @@ export async function handleAccountInput(
       // CRITICAL DEBUG: Log what we're committing
       console.log(`🔒 COMMIT: Frame ${accountMachine.pendingFrame.height}`);
       console.log(`  Transactions: ${accountMachine.pendingFrame.accountTxs.length}`);
+      console.log(`  Transactions detail:`, accountMachine.pendingFrame.accountTxs);
       console.log(`  TokenIds: ${accountMachine.pendingFrame.tokenIds.join(',')}`);
       console.log(`  Deltas: ${accountMachine.pendingFrame.deltas.map(d => `${d}`).join(',')}`);
       console.log(`  StateHash: ${frameHash.slice(0,16)}...`);
 
       // Commit using cloned state
       if (accountMachine.clonedForValidation) {
-        accountMachine.deltas = accountMachine.clonedForValidation.deltas;
+        console.log(`🔓🔓🔓 PROPOSER-COMMIT STARTING FOR ENTITY ${accountMachine.proofHeader.fromEntity.slice(-4)} with counterparty ${accountMachine.counterpartyEntityId.slice(-4)}`);
+        console.log(`🔓 clonedForValidation exists: ${!!accountMachine.clonedForValidation}`);
+        console.log(`🔓 clonedForValidation.deltas.size: ${accountMachine.clonedForValidation.deltas.size}`);
+
+        // BEFORE commit
+        console.log(`📊 BEFORE COMMIT - accountMachine.deltas:`, Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
+          tokenId,
+          leftCreditLimit: delta.leftCreditLimit?.toString(),
+          rightCreditLimit: delta.rightCreditLimit?.toString(),
+        })));
+
+        // BEFORE commit - clonedForValidation
+        console.log(`📊 BEFORE COMMIT - clonedForValidation.deltas:`, Array.from(accountMachine.clonedForValidation.deltas.entries()).map(([tokenId, delta]) => ({
+          tokenId,
+          leftCreditLimit: delta.leftCreditLimit?.toString(),
+          rightCreditLimit: delta.rightCreditLimit?.toString(),
+        })));
+
+        // CRITICAL FIX: Copy each delta individually to ensure proper mutation propagation
+        // Direct Map assignment can fail with deep clones - explicit copy is safer
+        accountMachine.deltas.clear();
+        for (const [tokenId, delta] of accountMachine.clonedForValidation.deltas.entries()) {
+          accountMachine.deltas.set(tokenId, { ...delta }); // Shallow copy of delta object
+        }
+
+        // AFTER commit
+        console.log(`💳💳💳 PROPOSER-COMMIT COMPLETE: Deltas after commit for ${accountMachine.counterpartyEntityId.slice(-4)}:`,
+          Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
+            tokenId,
+            collateral: delta.collateral?.toString(),
+            leftCreditLimit: delta.leftCreditLimit?.toString(),
+            rightCreditLimit: delta.rightCreditLimit?.toString(),
+          })));
+
         accountMachine.currentFrame = {
           height: accountMachine.pendingFrame.height,
           timestamp: accountMachine.pendingFrame.timestamp,
@@ -7454,6 +7683,17 @@ export async function handleAccountInput(
     // Commit frame
     accountMachine.deltas = clonedMachine.deltas;
 
+    // Log committed deltas for debugging credit limits
+    console.log(`💳 COMMIT: Deltas after commit for ${accountMachine.counterpartyEntityId.slice(-4)}:`,
+      Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
+        tokenId,
+        collateral: delta.collateral?.toString(),
+        leftCreditLimit: delta.leftCreditLimit?.toString(),
+        rightCreditLimit: delta.rightCreditLimit?.toString(),
+        ondelta: delta.ondelta?.toString(),
+        offdelta: delta.offdelta?.toString(),
+      })));
+
     // CRITICAL: Copy pendingForward for multi-hop routing
     if (clonedMachine.pendingForward) {
       accountMachine.pendingForward = clonedMachine.pendingForward;
@@ -7484,6 +7724,8 @@ export async function handleAccountInput(
 
     // Send confirmation (ACK)
     const confirmationSig = signAccountFrame(accountMachine.proofHeader.fromEntity, receivedFrame.stateHash);
+
+    console.log(`📤 ACK-SEND: Preparing ACK for frame ${receivedFrame.height} from ${accountMachine.proofHeader.fromEntity.slice(-4)} to ${input.fromEntityId.slice(-4)}`);
 
     // CHANNEL.TS PATTERN (Lines 576-612): Batch ACK + new frame in same message!
     // Check if we should batch BEFORE incrementing counter
@@ -8065,7 +8307,7 @@ export * from './proposals';
 export * from './validation';
 
 
-//runtime/entity-tx/apply.ts (493 lines)
+//runtime/entity-tx/apply.ts (530 lines)
 import { calculateQuorumPower } from '../entity-consensus';
 import { formatEntityId } from '../entity-helpers';
 import { processProfileUpdate } from '../name-resolution';
@@ -8074,7 +8316,6 @@ import { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput } f
 import { DEBUG, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { buildEntityProfile } from '../gossip-helper';
-import { getDefaultCreditLimit } from '../account-utils';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import { handleAccountInput } from './handlers/account';
 import { handleJEvent } from './j-events';
@@ -8284,8 +8525,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           ackedTransitions: 0,
           deltas: initialDeltas,
           globalCreditLimits: {
-            ownLimit: getDefaultCreditLimit(1), // We extend 1M USDC credit to counterparty (token 1 = USDC)
-            peerLimit: getDefaultCreditLimit(1), // Counterparty extends same USDC credit to us
+            ownLimit: 0n, // Credit starts at 0 - must be explicitly extended via set_credit_limit
+            peerLimit: 0n, // Credit starts at 0 - must be explicitly extended via set_credit_limit
           },
           // Frame-based consensus fields
           currentHeight: 0,
@@ -8320,26 +8561,16 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Token 1 = USDC
       const usdcTokenId = 1;
-      const defaultCreditLimit = getDefaultCreditLimit(1); // 1M USDC (token 1)
-
-      // Determine canonical side (left/right) - DETERMINISTIC
-      const isLeftEntity = entityState.entityId < entityTx.data.targetEntityId;
-      const ourSide: 'left' | 'right' = isLeftEntity ? 'left' : 'right';
-
       // Add transactions to mempool - will be batched into frame #1 on next tick
+      // NOTE: Only add_delta is queued. Credit limits are 0 by default - must be explicitly set
       localAccount.mempool.push({
         type: 'add_delta',
         data: { tokenId: usdcTokenId }
       });
 
-      localAccount.mempool.push({
-        type: 'set_credit_limit',
-        data: { tokenId: usdcTokenId, amount: defaultCreditLimit, side: ourSide }
-      });
-
-      console.log(`📝 Queued 2 transactions to mempool (total: ${localAccount.mempool.length})`);
+      console.log(`📝 Queued add_delta to mempool (total: ${localAccount.mempool.length})`);
       console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms) via AUTO-PROPOSE`);
-      console.log(`   Transactions: [add_delta, set_credit_limit(side=${ourSide}, amount=1M)]`);
+      console.log(`   Transactions: [add_delta] - credit limits start at 0, must be explicitly set`);
 
       // Add success message to chat
       addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(entityTx.data.targetEntityId)}`);
@@ -8481,6 +8712,54 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     if (entityTx.type === 'j_broadcast') {
       const { handleJBroadcast } = await import('./handlers/j-broadcast');
       return await handleJBroadcast(entityState, entityTx);
+    }
+
+    if (entityTx.type === 'extendCredit') {
+      console.log(`💳 EXTEND-CREDIT: ${entityState.entityId.slice(-4)} extending credit to ${entityTx.data.counterpartyEntityId.slice(-4)}`);
+
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const { counterpartyEntityId, tokenId, amount } = entityTx.data;
+
+      // Get account machine
+      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      if (!accountMachine) {
+        console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for credit extension`);
+        return { newState: entityState, outputs: [] };
+      }
+
+      // Determine canonical side (left/right)
+      const isLeftEntity = entityState.entityId < counterpartyEntityId;
+      const side = isLeftEntity ? 'left' : 'right';
+
+      // Create set_credit_limit account transaction
+      const accountTx: AccountTx = {
+        type: 'set_credit_limit',
+        data: {
+          tokenId,
+          amount,
+          side: side as 'left' | 'right',
+        },
+      };
+
+      // Add to account mempool
+      accountMachine.mempool.push(accountTx);
+      console.log(`💳 Added set_credit_limit to mempool for account with ${counterpartyEntityId.slice(-4)}`);
+      console.log(`💳 We are ${side} entity, extending credit of ${amount} for token ${tokenId}`);
+
+      addMessage(newState, `💳 Extended credit of ${amount} to ${counterpartyEntityId.slice(-4)}`);
+
+      // Trigger processing (same pattern as directPayment)
+      const firstValidator = entityState.config.validators[0];
+      if (firstValidator) {
+        outputs.push({
+          entityId: entityState.entityId,
+          signerId: firstValidator,
+          entityTxs: [] // Empty - triggers processing
+        });
+      }
+
+      return { newState, outputs };
     }
 
     if (entityTx.type === 'requestWithdrawal') {
@@ -9458,7 +9737,7 @@ export class PathFinder {
   }
 }
 
-//runtime/state-helpers.ts (332 lines)
+//runtime/state-helpers.ts (367 lines)
 /**
  * XLN State Management Helpers
  * Utilities for entity replica cloning, snapshots, and state persistence
@@ -9550,16 +9829,7 @@ function manualCloneEntityState(entityState: EntityState): EntityState {
     accounts: new Map(
       Array.from(entityState.accounts.entries()).map(([id, account]) => [
         id,
-        {
-          ...account,
-          mempool: cloneArray(account.mempool),
-          deltas: cloneMap(account.deltas),
-          proofHeader: { ...account.proofHeader },
-          proofBody: {
-            tokenIds: [...account.proofBody.tokenIds],
-            deltas: [...account.proofBody.deltas],
-          },
-        },
+        cloneAccountMachine(account), // CRITICAL FIX: Deep clone including pendingFrame and clonedForValidation
       ]),
     ),
     accountInputQueue: cloneArray(entityState.accountInputQueue || []),
@@ -9630,17 +9900,60 @@ export const captureSnapshot = (
       })
     : [];
 
-  // Clone jReplicas (J-layer state)
+  // Clone jReplicas (J-layer state) + SYNC reserves from eReplicas for time travel
   const jReplicas: JReplica[] = env.jReplicas
-    ? Array.from(env.jReplicas.values()).map(jr => ({
-        name: jr.name,
-        blockNumber: jr.blockNumber,
-        stateRoot: new Uint8Array(jr.stateRoot), // Copy stateRoot
-        mempool: [...jr.mempool],
-        position: { ...jr.position },
-        contracts: jr.contracts ? { ...jr.contracts } : undefined,
-      }))
+    ? Array.from(env.jReplicas.values()).map(jr => {
+        // Sync reserves from eReplicas into JReplica snapshot
+        const reserves = new Map<string, Map<number, bigint>>();
+        const registeredEntities = new Map<string, { name: string; quorum: string[]; threshold: number }>();
+
+        // Aggregate reserves from all entity replicas
+        for (const [key, replica] of env.eReplicas.entries()) {
+          const entityId = key.split(':')[0];
+          if (replica.state?.reserves) {
+            const tokenMap = new Map<number, bigint>();
+            // Handle both Map and plain object
+            if (replica.state.reserves instanceof Map) {
+              replica.state.reserves.forEach((amount: bigint, tokenId: string) => {
+                tokenMap.set(Number(tokenId), amount);
+              });
+            } else {
+              for (const [tokenId, amount] of Object.entries(replica.state.reserves as Record<string, bigint>)) {
+                tokenMap.set(Number(tokenId), BigInt(amount));
+              }
+            }
+            if (tokenMap.size > 0) {
+              reserves.set(entityId, tokenMap);
+            }
+          }
+          // Add entity to registeredEntities
+          if (!registeredEntities.has(entityId)) {
+            registeredEntities.set(entityId, {
+              name: replica.name || `E${entityId.slice(-4)}`,
+              quorum: replica.quorum || [],
+              threshold: replica.threshold || 1,
+            });
+          }
+        }
+
+        return {
+          name: jr.name,
+          blockNumber: jr.blockNumber,
+          stateRoot: new Uint8Array(jr.stateRoot),
+          mempool: [...jr.mempool],
+          position: { ...jr.position },
+          contracts: jr.contracts ? { ...jr.contracts } : undefined,
+          reserves,
+          registeredEntities,
+        };
+      })
     : [];
+
+  // Capture and reset frame logs
+  const frameLogs = env.frameLogs ? [...env.frameLogs] : [];
+  if (env.frameLogs) {
+    env.frameLogs = [];
+  }
 
   const snapshot: EnvSnapshot = {
     height: env.height,
@@ -9666,6 +9979,7 @@ export const captureSnapshot = (
     })),
     description,
     gossip: { profiles: gossipProfiles },
+    logs: frameLogs,
   };
 
   envHistory.push(snapshot);
@@ -10037,7 +10351,7 @@ export const decodeAsync = async (buffer: Buffer): Promise<any> => {
 export { USE_MSGPACK };
 
 
-//runtime/evm.ts (999 lines)
+//runtime/evm.ts (1014 lines)
 /**
  * XLN EVM Integration
  * Handles blockchain interactions, jurisdictions, and smart contract operations
@@ -10105,7 +10419,7 @@ export const DEPOSITORY_ABI = [
   'function debugBulkFundEntities() external',
   'function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint256 tokenId, uint256 amount) external returns (bool)',
   'function processBatch(bytes32 entity, tuple(tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(bytes32 entity, bytes32 packedToken, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig)[] settlements, tuple(bytes32 counterentity, tuple(uint256 tokenId, int256 peerReserveDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig)[] cooperativeUpdate, tuple(bytes32 counterentity, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) proofbody, bytes initialArguments, bytes finalArguments, bytes sig)[] cooperativeDisputeProof, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] initialDisputeProof, tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 initialDisputeNonce, uint256 disputeUntilBlock, bytes32 initialProofbodyHash, bytes initialArguments, bool startedByLeft, uint256 finalCooperativeNonce, uint256 finalDisputeNonce, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowence, uint256 leftAllowence)[] allowences)[] subcontracts) finalProofbody, bytes finalArguments, bytes sig)[] finalDisputeProof, tuple(uint256 tokenId, uint256 amount)[] flashloans, uint256 hub_id) batch) external returns (bool)',
-  'function prefundAccount(bytes32 counterpartyEntity, uint256 tokenId, uint256 amount) external returns (bool)',
+  'function prefundAccount(bytes32 fundingEntity, bytes32 counterpartyEntity, uint256 tokenId, uint256 amount) external returns (bool)',
   'function settle(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig) external returns (bool)',
   'function _reserves(bytes32 entity, uint256 tokenId) external view returns (uint256)',
   // Insurance view functions
@@ -10785,14 +11099,29 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
       console.log('🔍 JURISDICTION DEBUG: Loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
       console.log('✅ Loaded jurisdictions from centralized loader (cached)');
     } else {
-      // Browser environment - fetch from runtime (use relative path for GitHub Pages compatibility)
-      const response = await fetch('./jurisdictions.json');
-      if (!response.ok) {
-        throw new Error(`Failed to fetch jurisdictions.json: ${response.status} ${response.statusText}`);
+      // Browser environment - fetch from runtime with timeout (prevents indefinite hang in BrowserVM mode)
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+
+      try {
+        const response = await fetch('./jurisdictions.json', { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch jurisdictions.json: ${response.status} ${response.statusText}`);
+        }
+        config = await response.json();
+        console.log('🔍 JURISDICTION DEBUG: Browser loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
+        console.log('✅ Loaded jurisdictions from runtime');
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === 'AbortError') {
+          console.log('⏱️ jurisdictions.json fetch timed out - using BrowserVM mode (no external blockchain)');
+        } else {
+          console.log('⚠️ jurisdictions.json not found - using BrowserVM mode (no external blockchain)');
+        }
+        // Return empty map for BrowserVM mode - prepopulate-ahb.ts has its own fallback
+        return jurisdictions;
       }
-      config = await response.json();
-      console.log('🔍 JURISDICTION DEBUG: Browser loaded config with contracts:', config.jurisdictions?.ethereum?.contracts);
-      console.log('✅ Loaded jurisdictions from runtime');
     }
 
     const jurisdictionData = config.jurisdictions;
@@ -11047,17 +11376,17 @@ xln.finance
 Reserve-Credit Programmable Enforceable 
 Layer2 Netting-Account Network  
 ───────────────────────
-FCUU Full-Credit Unprogrammable Unenforceable
+FCUAN Full-Credit Unprovable Account Network
 100% of modern finance: Banking, SWIFT, Visa, any CEX etc (−5000 BCE)
 no collateral, no proof = trust-based, censorable, Diamond-Dybvig runs
 [−−−.**Δ−]  C = 0, Δ ∈ [−Lₗ, +Lᵣ]
 ───────────────────────
-FRPE Full-Reserve Programmable Enforceable
+FRPAP Full-Reserve Provable Account Primitives
 Layer2 channels: BTC Lightning (2015), ETH Raiden (2017), ADA Hydra (2020) etc
 no credit = unusable inbound capacity wall, capital inefficiency
 [.==Δ=]  Lₗ=Lᵣ=0, Δ ∈ [0, +C]
 ───────────────────────
-xln (RCPE) ⊃ { FCUU, FRPE }
+xln (RCPAN) ⊃ { FCUAN, FRPAP }
 Δ ∈ [−Lₗ, C + Lᵣ]
 Scalable Secure Simple
 
