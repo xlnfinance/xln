@@ -4,6 +4,7 @@
   import { getXLN, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import BigIntInput from '../Common/BigIntInput.svelte';
+  import AccountPreview from './AccountPreview.svelte';
 
   // Get environment from context (for /view route) or use global stores (for / route)
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
@@ -387,50 +388,14 @@
             </span>
           </div>
 
-          <!-- Unified stacked bar (like 3D spread bars) -->
-          <div class="unified-capacity-bar">
-            <div class="bar-segments">
-              <!-- CORRECT ORDER (matching 2019vue.txt): our unused → our secured → our unsecured → gap → their unsecured → their secured → their unused -->
-              {#if td.ourUnusedCredit > 0}
-                <div class="bar-segment our-unused" style="flex: {td.ourUnusedCredit}" title="Our available credit: {safeFixed(td.ourUnusedCredit)}">
-                  {#if td.ourUnusedCredit > 50000}{safeFixed(td.ourUnusedCredit, 0)}{/if}
-                </div>
-              {/if}
-              {#if td.ourCollateral > 0}
-                <div class="bar-segment collateral" style="flex: {td.ourCollateral}" title="Our secured balance: {safeFixed(td.ourCollateral)}">
-                  {#if td.ourCollateral > 50000}{safeFixed(td.ourCollateral, 0)}{/if}
-                </div>
-              {/if}
-              {#if td.ourUsedCredit > 0}
-                <div class="bar-segment our-used" style="flex: {td.ourUsedCredit}" title="Our unsecured balance: {safeFixed(td.ourUsedCredit)}">
-                  {#if td.ourUsedCredit > 50000}{safeFixed(td.ourUsedCredit, 0)}{/if}
-                </div>
-              {/if}
-              <!-- GAP: Visual separator between our side and their side -->
-              {#if td.theirUsedCredit > 0}
-                <div class="bar-segment their-used" style="flex: {td.theirUsedCredit}" title="Their unsecured balance: {safeFixed(td.theirUsedCredit)}">
-                  {#if td.theirUsedCredit > 50000}{safeFixed(td.theirUsedCredit, 0)}{/if}
-                </div>
-              {/if}
-              {#if td.theirCollateral > 0}
-                <div class="bar-segment their-collateral" style="flex: {td.theirCollateral}" title="Their secured balance: {safeFixed(td.theirCollateral)}">
-                  {#if td.theirCollateral > 50000}{safeFixed(td.theirCollateral, 0)}{/if}
-                </div>
-              {/if}
-              {#if td.theirUnusedCredit > 0}
-                <div class="bar-segment their-unused" style="flex: {td.theirUnusedCredit}" title="Their available credit: {safeFixed(td.theirUnusedCredit)}">
-                  {#if td.theirUnusedCredit > 50000}{safeFixed(td.theirUnusedCredit, 0)}{/if}
-                </div>
-              {/if}
-            </div>
-            <div class="bar-legend">
-              <span class="legend-item"><span class="legend-color our-unused-bg"></span> Our Available Credit</span>
-              <span class="legend-item"><span class="legend-color collateral-bg"></span> Our Secured</span>
-              <span class="legend-item"><span class="legend-color our-used-bg"></span> Our Unsecured</span>
-              <span class="legend-item"><span class="legend-color their-used-bg"></span> Their Unsecured</span>
-              <span class="legend-item"><span class="legend-color their-collateral-bg"></span> Their Secured</span>
-              <span class="legend-item"><span class="legend-color their-unused-bg"></span> Their Available Credit</span>
-            </div>
+          <!-- Reuse AccountPreview for bar visualization (DRY) -->
+          <div style="margin: 12px 0;">
+            <AccountPreview
+              {account}
+              {counterpartyId}
+              {entityId}
+              isSelected={false}
+            />
           </div>
 
           <div class="capacity-summary">
