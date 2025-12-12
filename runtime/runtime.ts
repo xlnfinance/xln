@@ -1317,7 +1317,8 @@ export const createEmptyEnv = (): Env => {
 };
 
 // Intercept console for frame log capturing (browser only)
-if (isBrowser) {
+// TEMPORARILY DISABLED - debugging solvency regression
+if (false && isBrowser) {
   const originalLog = console.log;
   const originalWarn = console.warn;
   const originalError = console.error;
@@ -1325,39 +1326,63 @@ if (isBrowser) {
   console.log = function(...args: any[]) {
     originalLog.apply(console, args);
     if (currentEnvForLogs) {
-      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-      currentEnvForLogs.frameLogs.push({
-        level: 'info',
-        category: detectLogCategory(msg),
-        message: msg,
-        timestamp: Date.now(),
-      });
+      try {
+        const msg = args.map(a => {
+          if (typeof a === 'string') return a;
+          if (typeof a === 'bigint') return a.toString() + 'n';
+          try { return JSON.stringify(a); } catch { return String(a); }
+        }).join(' ');
+        currentEnvForLogs.frameLogs.push({
+          level: 'info',
+          category: detectLogCategory(msg),
+          message: msg,
+          timestamp: Date.now(),
+        });
+      } catch (e) {
+        // Silently fail log capture - don't break runtime
+      }
     }
   };
 
   console.warn = function(...args: any[]) {
     originalWarn.apply(console, args);
     if (currentEnvForLogs) {
-      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-      currentEnvForLogs.frameLogs.push({
-        level: 'warn',
-        category: detectLogCategory(msg),
-        message: msg,
-        timestamp: Date.now(),
-      });
+      try {
+        const msg = args.map(a => {
+          if (typeof a === 'string') return a;
+          if (typeof a === 'bigint') return a.toString() + 'n';
+          try { return JSON.stringify(a); } catch { return String(a); }
+        }).join(' ');
+        currentEnvForLogs.frameLogs.push({
+          level: 'warn',
+          category: detectLogCategory(msg),
+          message: msg,
+          timestamp: Date.now(),
+        });
+      } catch (e) {
+        // Silently fail
+      }
     }
   };
 
   console.error = function(...args: any[]) {
     originalError.apply(console, args);
     if (currentEnvForLogs) {
-      const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-      currentEnvForLogs.frameLogs.push({
-        level: 'error',
-        category: detectLogCategory(msg),
-        message: msg,
-        timestamp: Date.now(),
-      });
+      try {
+        const msg = args.map(a => {
+          if (typeof a === 'string') return a;
+          if (typeof a === 'bigint') return a.toString() + 'n';
+          try { return JSON.stringify(a); } catch { return String(a); }
+        }).join(' ');
+        currentEnvForLogs.frameLogs.push({
+          level: 'error',
+          category: detectLogCategory(msg),
+          message: msg,
+          timestamp: Date.now(),
+        });
+      } catch (e) {
+        // Silently fail
+      }
     }
   };
 }
