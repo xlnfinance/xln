@@ -36,6 +36,8 @@ export interface XLNFunctions {
   getEntityShortId: (entityId: string) => string;
   formatEntityId: (entityId: string) => string;
   safeStringify: (obj: unknown) => string;
+  generateEntityAvatar: (entityId: string) => string;
+  generateSignerAvatar: (signerId: string) => string;
 }
 
 /**

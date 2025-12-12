@@ -17,7 +17,7 @@
       id: counterpartyId,
       account,
       entityShortId: $xlnFunctions?.getEntityShortId?.(counterpartyId) || counterpartyId.slice(-4),
-      avatarUrl: ($xlnFunctions as any)?.generateEntityAvatar?.(counterpartyId) || '',
+      avatarUrl: $xlnFunctions?.generateEntityAvatar?.(counterpartyId) || '',
       status: account.mempool?.length > 0 ? 'pending' : 'synced'
     }));
 
