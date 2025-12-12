@@ -2785,7 +2785,7 @@
     {:else if currentMode === 'solvency'}
       <h4>Solvency Monitor</h4>
       <div class="solvency-embed">
-        <SolvencyPanel />
+        <SolvencyPanel {isolatedEnv} />
       </div>
 
     {:else if currentMode === 'build'}

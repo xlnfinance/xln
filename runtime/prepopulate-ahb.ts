@@ -294,7 +294,7 @@ interface FrameSubtitle {
 let pushSnapshotCount = 0;
 
 // System solvency check - inline for self-contained testing
-function checkSolvency(env: Env, expected: bigint, label: string): void {
+function checkSolvency(env: Env, expected: bigint, label: string, optional: boolean = false): void {
   let reserves = 0n;
   let collateral = 0n;
 
@@ -322,9 +322,14 @@ function checkSolvency(env: Env, expected: bigint, label: string): void {
 
   if (total !== expected) {
     console.error(`❌ [${label}] SOLVENCY FAIL: ${total} !== ${expected}`);
-    throw new Error(`SOLVENCY VIOLATION at "${label}": got ${total}, expected ${expected}`);
+    if (!optional) {
+      throw new Error(`SOLVENCY VIOLATION at "${label}": got ${total}, expected ${expected}`);
+    } else {
+      console.warn(`⚠️  [${label}] Solvency check failed but continuing (optional mode)`);
+    }
+  } else {
+    console.log(`✅ [${label}] Solvency OK`);
   }
-  console.log(`✅ [${label}] Solvency OK`);
 }
 
 // Get offdelta for a bilateral account (uses LEFT entity's view - canonical)
