@@ -461,23 +461,37 @@ contract Depository is ReentrancyGuardLite {
   }
 
   function _processBatch(bytes32 entityId, Batch memory batch) private returns (bool completeSuccess) {
-    // Track starting reserves for flashloan validation
-    uint256[] memory flashloanStartingReserves = new uint256[](batch.flashloans.length);
+    // SECURITY FIX: Aggregate flashloans by tokenId (prevent duplicate tokenId exploit)
+    uint256[] memory flashloanTokenIds = new uint256[](batch.flashloans.length);
+    uint256[] memory flashloanStarting = new uint256[](batch.flashloans.length);
+    uint256[] memory flashloanTotals = new uint256[](batch.flashloans.length);
+    uint uniqueCount = 0;
+
+    // Aggregate flashloans per tokenId
     for (uint i = 0; i < batch.flashloans.length; i++) {
-      uint tokenId = batch.flashloans[i].tokenId;
-      flashloanStartingReserves[i] = _reserves[entityId][tokenId];
+      uint tid = batch.flashloans[i].tokenId;
+      uint amt = batch.flashloans[i].amount;
+
+      // Find if this tokenId already seen
+      uint j = 0;
+      for (; j < uniqueCount; j++) {
+        if (flashloanTokenIds[j] == tid) break;
+      }
+
+      // New tokenId - record starting reserve
+      if (j == uniqueCount) {
+        flashloanTokenIds[uniqueCount] = tid;
+        flashloanStarting[uniqueCount] = _reserves[entityId][tid];
+        uniqueCount++;
+      }
+
+      // Accumulate total for this tokenId
+      flashloanTotals[j] += amt;
     }
 
-    // Grant flashloans (increase reserves temporarily)
-    for (uint i = 0; i < batch.flashloans.length; i++) {
-      uint tokenId = batch.flashloans[i].tokenId;
-      uint amount = batch.flashloans[i].amount;
-
-      _reserves[entityId][tokenId] += amount;
-      
-      
-      
-      
+    // Grant aggregated flashloans (flash-mint)
+    for (uint j = 0; j < uniqueCount; j++) {
+      _reserves[entityId][flashloanTokenIds[j]] += flashloanTotals[j];
     }
 
     // the order is important: first go methods that increase entity's balance
@@ -552,19 +566,19 @@ contract Depository is ReentrancyGuardLite {
       reserveToExternalToken(entityId, batch.reserveToExternalToken[i]);
     }
 
-    for (uint i = 0; i < batch.flashloans.length; i++) {
-      uint tokenId = batch.flashloans[i].tokenId;
-      uint amount = batch.flashloans[i].amount;
-      if (_reserves[entityId][tokenId] < flashloanStartingReserves[i] + amount) revert E3();
+    // SECURITY FIX: Check aggregated flashloan return + burn
+    for (uint j = 0; j < uniqueCount; j++) {
+      uint tid = flashloanTokenIds[j];
+      uint expectedFinal = flashloanStarting[j] + flashloanTotals[j];
 
-      
-      
-      
-      
-      
-      
-      
-      
+      // Check entity returned borrowed amount
+      if (_reserves[entityId][tid] < expectedFinal) revert E3(); // Flashloan not returned
+
+      // Burn flashloan (remove temporary mint)
+      _reserves[entityId][tid] -= flashloanTotals[j];
+
+      // Final check: reserves back to original or higher
+      if (_reserves[entityId][tid] < flashloanStarting[j]) revert E3(); // Reserve decreased
     }
 
     return completeSuccess;
@@ -1158,12 +1172,14 @@ contract Depository is ReentrancyGuardLite {
   // createDebt removed for size reduction
 
   function onERC1155Received(address, address from, uint256 id, uint256 value, bytes calldata) external returns (bytes4) {
+    // SECURITY FIX: Don't credit here - _externalTokenToReserve:713 already credits
+    // This prevents double-crediting when ERC1155.safeTransferFrom triggers this callback
+    // If tokens sent directly (not via externalTokenToReserve), they will be stuck but not inflate reserves
     bytes32 packedToken = packTokenReference(TypeERC1155, msg.sender, uint96(id));
     uint256 tid = tokenToId[packedToken];
     if (tid == 0) { _tokens.push(packedToken); tid = _tokens.length - 1; tokenToId[packedToken] = tid; }
-    bytes32 entity = bytes32(uint256(uint160(from)));
-    _reserves[entity][tid] += value;
-    emit ReserveUpdated(entity, tid, _reserves[entity][tid]);
+    // DO NOT credit reserves here to avoid double-crediting
+    // _reserves[entity][tid] += value; // REMOVED
     return this.onERC1155Received.selector;
   }
   function onERC1155BatchReceived(address,address,uint256[] calldata,uint256[] calldata,bytes calldata) external pure returns (bytes4) { revert("!batch"); }
