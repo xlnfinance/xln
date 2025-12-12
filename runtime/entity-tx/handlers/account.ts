@@ -88,10 +88,12 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
       if (accountMachine.pendingForward) {
         const forward = accountMachine.pendingForward;
-        console.log(`🔀 MULTI-HOP: Payment needs forwarding to ${forward.route[forward.route.length - 1]?.slice(-4)}`);
+        const finalTarget = forward.route[forward.route.length - 1];
+        console.log(`🔀 MULTI-HOP: Payment needs forwarding to ${finalTarget?.slice(-4)}`);
 
-        // Next hop is first entity in remaining route
-        const nextHop = forward.route[0];
+        // CRITICAL FIX: route[0] is current entity (us), route[1] is next hop
+        // Skip ourselves and get actual next hop
+        const nextHop = forward.route.length > 1 ? forward.route[1] : null;
         if (nextHop) {
           // Calculate forwarding fee (0.1% minimum 1 token)
           const feeRate = 1000n; // 0.1% = 1/1000
@@ -110,7 +112,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 toEntityId: nextHop,
                 tokenId: forward.tokenId,
                 amount: forwardAmount,
-                route: forward.route,
+                route: forward.route.slice(1), // Remove current entity from route
                 ...(forward.description ? { description: forward.description } : {}),
               }
             };
