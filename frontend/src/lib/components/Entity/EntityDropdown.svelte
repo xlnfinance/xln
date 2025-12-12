@@ -166,13 +166,23 @@
           const entityDisplay = name ? `${name} (#${entityNum})` : `Entity #${entityNum}`;
 
           const entityItem = createDropdownTreeItem(
-            `🏢 ${entityDisplay}`,
+            entityDisplay,
             `${jurisdiction.name}:${signerId}:${replica.entityId}`,
             2,
             true,
             isLastEntity && isLastSigner,
             _searchTerm
           );
+
+          // Add identicon before text
+          if (activeXlnFunctions?.generateEntityAvatar) {
+            const avatarUrl = activeXlnFunctions.generateEntityAvatar(replica.entityId);
+            const img = document.createElement('img');
+            img.src = avatarUrl;
+            img.className = 'entity-avatar';
+            img.style.cssText = 'width: 20px; height: 20px; border-radius: 4px; margin-right: 8px; vertical-align: middle;';
+            entityItem.querySelector('.item-label')?.prepend(img);
+          }
 
           entityItem.addEventListener('click', () => selectEntity(jurisdiction.name, signerId, replica.entityId));
           resultsContainer.appendChild(entityItem);
@@ -219,15 +229,26 @@
         const name = firstReplica ? getEntityName(firstReplica) : '';
         const entityDisplay = name ? `${name} (#${entityNum})` : `Entity #${entityNum}`;
 
-        // Add entity
+        // Add entity with identicon
         const entityItem = createDropdownTreeItem(
-          `🏢 ${entityDisplay}`,
+          entityDisplay,
           '',
           1,
           false,
           isLastEntity,
           _searchTerm
         );
+
+        // Add identicon
+        if (activeXlnFunctions?.generateEntityAvatar) {
+          const avatarUrl = activeXlnFunctions.generateEntityAvatar(entityId);
+          const img = document.createElement('img');
+          img.src = avatarUrl;
+          img.className = 'entity-avatar';
+          img.style.cssText = 'width: 20px; height: 20px; border-radius: 4px; margin-right: 8px; vertical-align: middle;';
+          entityItem.querySelector('.item-label')?.prepend(img);
+        }
+
         resultsContainer.appendChild(entityItem);
 
         // Add signers for this entity
@@ -235,13 +256,23 @@
           const isLastSigner = sIndex === (entitySigners?.length || 0) - 1;
 
           const signerItem = createDropdownTreeItem(
-            `👤 ${replica.signerId}`,
+            replica.signerId,
             `${jurisdiction.name}:${replica.signerId}:${replica.entityId}`,
             2,
             true,
             isLastSigner && isLastEntity,
             _searchTerm
           );
+
+          // Add signer identicon
+          if (activeXlnFunctions?.generateSignerAvatar) {
+            const avatarUrl = activeXlnFunctions.generateSignerAvatar(replica.signerId);
+            const img = document.createElement('img');
+            img.src = avatarUrl;
+            img.className = 'signer-avatar';
+            img.style.cssText = 'width: 16px; height: 16px; border-radius: 3px; margin-right: 6px; vertical-align: middle;';
+            signerItem.querySelector('.item-label')?.prepend(img);
+          }
 
           signerItem.addEventListener('click', () => selectEntity(jurisdiction.name, replica.signerId, replica.entityId));
           resultsContainer.appendChild(signerItem);
