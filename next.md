@@ -31,14 +31,30 @@
 
 ---
 
-## 🔥 COMPLETED (2025-12-12): Account Bilateral Sync FIXED
+## 🔥 COMPLETED (2025-12-12): Bilateral Consensus + UI Reactivity FIXED
 
-### CRITICAL BUG FIXED: Shallow Copy in manualCloneEntityState
-- ✅ **ROOT CAUSE**: `manualCloneEntityState` used shallow copy `{...account}` for AccountMachines
-- ✅ **IMPACT**: `pendingFrame` and `clonedForValidation` were shared by reference between entities
-- ✅ **FIX**: Changed to `cloneAccountMachine(account)` for deep clone (state-helpers.ts:92)
-- ✅ **VERIFIED**: Unit test confirms deep clone independence
-- ✅ **RESULT**: Bob now sees $500K credit limit in Bob-Hub account (red line visible)
+### CRITICAL: Shallow Copy Bugs (3 locations!)
+- ✅ **manualCloneEntityState** - `{...account}` shared pendingFrame → deep clone via cloneAccountMachine()
+- ✅ **AccountList** - `...account` spread created stale snapshots → removed spread, pass Map entries directly
+- ✅ **Map mutation** - Direct assignment didn't trigger reactivity → explicit .clear() + .set() loop
+
+### UI Reactivity Fixes
+- ✅ **AccountPreview** - Now uses context xlnFunctions (was global only)
+- ✅ **AccountPreview** - Shows derived.outCapacity/inCapacity (was visualSum = 0)
+- ✅ **AccountPreview** - Uses td.derived.* directly (removed 15+ intermediate vars)
+- ✅ **AccountPanel** - Reuses AccountPreview component (DRY, -50 lines)
+- ✅ **timeStore** - Returns new Map() for Svelte reactivity
+- ✅ **Graph3D** - Initial updateNetworkData() call after mount (entities render on load)
+
+### UX Improvements
+- ✅ **Time Machine** - position:fixed bottom:0 (was off-screen)
+- ✅ **Camera** - Default (1,585,58) → (-37,511,-243) shows AHB entities
+- ✅ **Settings** - Live camera position display with camera:update events
+
+### Result
+- ✅ Bob sees $500K credit in preview AND detail
+- ✅ Red line visible in account list
+- ✅ Entities render immediately on page load
 
 ## 🚧 TODO (2025-12-11): UI Polish
 
