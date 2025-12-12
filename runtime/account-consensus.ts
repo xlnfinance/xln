@@ -294,6 +294,7 @@ export async function handleAccountInput(
   // Handle pending frame confirmation
   if (accountMachine.pendingFrame && input.height === accountMachine.pendingFrame.height && input.prevSignatures) {
     console.log(`✅ Received confirmation for pending frame ${input.height}`);
+    console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}, counter=${input.counter}`);
 
     const frameHash = accountMachine.pendingFrame.stateHash;
     const expectedSigner = accountMachine.proofHeader.toEntity;
@@ -303,16 +304,40 @@ export async function handleAccountInput(
       // CRITICAL DEBUG: Log what we're committing
       console.log(`🔒 COMMIT: Frame ${accountMachine.pendingFrame.height}`);
       console.log(`  Transactions: ${accountMachine.pendingFrame.accountTxs.length}`);
+      console.log(`  Transactions detail:`, accountMachine.pendingFrame.accountTxs);
       console.log(`  TokenIds: ${accountMachine.pendingFrame.tokenIds.join(',')}`);
       console.log(`  Deltas: ${accountMachine.pendingFrame.deltas.map(d => `${d}`).join(',')}`);
       console.log(`  StateHash: ${frameHash.slice(0,16)}...`);
 
       // Commit using cloned state
       if (accountMachine.clonedForValidation) {
-        accountMachine.deltas = accountMachine.clonedForValidation.deltas;
+        console.log(`🔓🔓🔓 PROPOSER-COMMIT STARTING FOR ENTITY ${accountMachine.proofHeader.fromEntity.slice(-4)} with counterparty ${accountMachine.counterpartyEntityId.slice(-4)}`);
+        console.log(`🔓 clonedForValidation exists: ${!!accountMachine.clonedForValidation}`);
+        console.log(`🔓 clonedForValidation.deltas.size: ${accountMachine.clonedForValidation.deltas.size}`);
 
-        // Log committed deltas for debugging credit limits (PROPOSER side)
-        console.log(`💳 PROPOSER-COMMIT: Deltas after commit for ${accountMachine.counterpartyEntityId.slice(-4)}:`,
+        // BEFORE commit
+        console.log(`📊 BEFORE COMMIT - accountMachine.deltas:`, Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
+          tokenId,
+          leftCreditLimit: delta.leftCreditLimit?.toString(),
+          rightCreditLimit: delta.rightCreditLimit?.toString(),
+        })));
+
+        // BEFORE commit - clonedForValidation
+        console.log(`📊 BEFORE COMMIT - clonedForValidation.deltas:`, Array.from(accountMachine.clonedForValidation.deltas.entries()).map(([tokenId, delta]) => ({
+          tokenId,
+          leftCreditLimit: delta.leftCreditLimit?.toString(),
+          rightCreditLimit: delta.rightCreditLimit?.toString(),
+        })));
+
+        // CRITICAL FIX: Copy each delta individually to ensure proper mutation propagation
+        // Direct Map assignment can fail with deep clones - explicit copy is safer
+        accountMachine.deltas.clear();
+        for (const [tokenId, delta] of accountMachine.clonedForValidation.deltas.entries()) {
+          accountMachine.deltas.set(tokenId, { ...delta }); // Shallow copy of delta object
+        }
+
+        // AFTER commit
+        console.log(`💳💳💳 PROPOSER-COMMIT COMPLETE: Deltas after commit for ${accountMachine.counterpartyEntityId.slice(-4)}:`,
           Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
             tokenId,
             collateral: delta.collateral?.toString(),
@@ -556,6 +581,8 @@ export async function handleAccountInput(
 
     // Send confirmation (ACK)
     const confirmationSig = signAccountFrame(accountMachine.proofHeader.fromEntity, receivedFrame.stateHash);
+
+    console.log(`📤 ACK-SEND: Preparing ACK for frame ${receivedFrame.height} from ${accountMachine.proofHeader.fromEntity.slice(-4)} to ${input.fromEntityId.slice(-4)}`);
 
     // CHANNEL.TS PATTERN (Lines 576-612): Batch ACK + new frame in same message!
     // Check if we should batch BEFORE incrementing counter

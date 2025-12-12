@@ -44,7 +44,10 @@ export const visibleReplicas = derived(
   [timeState, history, xlnEnvironment],
   ([$timeState, $history, $env]) => {
     if ($timeState.isLive) {
-      return $env?.eReplicas || new Map();
+      // CRITICAL FIX: Return NEW Map reference to trigger Svelte reactivity
+      // Derived stores only notify subscribers when return value identity changes
+      // Mutating eReplicas.set() doesn't change Map reference, so we clone it
+      return $env?.eReplicas ? new Map($env.eReplicas) : new Map();
     }
     const idx = $timeState.currentTimeIndex;
     if (idx >= 0 && idx < $history.length) {

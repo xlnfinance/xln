@@ -59,7 +59,13 @@
   // @ts-ignore
   const BUILD_TIME: string = typeof globalThis.__BUILD_TIME__ !== 'undefined' ? globalThis.__BUILD_TIME__ : (typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : 'unknown');
 
+  console.log('[View.svelte] 🎬 MODULE LOADED - scenarioId prop:', scenarioId);
+
   onMount(async () => {
+    console.log('[View] ============ onMount ENTRY ============');
+    console.log('[View] scenarioId:', scenarioId);
+    console.log('[View] embedMode:', embedMode);
+
     // Version check - ALWAYS log build hash for stale detection
     console.log(`%c[XLN View] Build: ${BUILD_HASH} @ ${BUILD_TIME}`, 'color: #00ff88; font-weight: bold; font-size: 14px;');
     console.log('[View] onMount started - initializing isolated XLN');
@@ -647,11 +653,15 @@
     background: #007acc;
   }
 
-  /* TimeMachine Bar - minimal wrapper */
+  /* TimeMachine Bar - always visible at bottom like YouTube progress bar */
   .time-machine-bar {
-    position: relative;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
     height: 48px;
     z-index: 1000;
+    background: rgba(30, 30, 30, 0.95);
   }
 
   .time-machine-bar.collapsed {

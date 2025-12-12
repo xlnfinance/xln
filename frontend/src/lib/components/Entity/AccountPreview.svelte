@@ -14,6 +14,10 @@
   // Get entity names from gossip
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
 
+  // CRITICAL FIX: Use xlnFunctions from context (like AccountPanel.svelte:12-16)
+  const contextXlnFunctions = entityEnv?.xlnFunctions;
+  $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : activeXlnFunctions;
+
   function getEntityName(id: string): string {
     const envData = entityEnv?.env ? (entityEnv.env as any) : null;
     if (envData?.gossip) {
@@ -43,7 +47,7 @@
     const isLeftEntity = entityId < counterpartyId;
 
     for (const [, delta] of account.deltas.entries()) {
-      const derived = $xlnFunctions!.deriveDelta(delta, isLeftEntity);
+      const derived = activeXlnFunctions!.deriveDelta(delta, isLeftEntity);
       totalCapacity += derived.outCapacity + derived.inCapacity;
 
       // Used = credit they spent + our collateral locked
@@ -61,24 +65,40 @@
 
   // Get all token deltas for rendering
   $: tokenDeltas = Array.from(account.deltas?.entries() || [] as [number, Delta][]).map(([tokenId, delta]: [number, Delta]) => {
-    if (!$xlnFunctions) return {
-      tokenId,
-      delta,
-      derived: null,
-      tokenInfo: null,
-      theirUnusedCredit: 0n,
-      ourCollateralLocked: 0n,
-      theirUsedCredit: 0n,
-      ourUnusedCredit: 0n,
-      theirCollateralLocked: 0n,
-      ourUsedCredit: 0n,
-      peerDebtToUs: 0n,
-      totalCapacity: 0n
-    };
+    if (!activeXlnFunctions) {
+      console.error(`❌ [AccountPreview] activeXlnFunctions NULL for account ${entityId.slice(-4)}↔${counterpartyId.slice(-4)} - SHOWING ZEROS!`);
+      console.error(`   contextXlnFunctions:`, contextXlnFunctions ? 'exists' : 'NULL');
+      console.error(`   $xlnFunctions:`, $xlnFunctions ? 'exists' : 'NULL');
+      return {
+        tokenId,
+        delta,
+        derived: null,
+        tokenInfo: null,
+        theirUnusedCredit: 0n,
+        ourCollateralLocked: 0n,
+        theirUsedCredit: 0n,
+        ourUnusedCredit: 0n,
+        theirCollateralLocked: 0n,
+        ourUsedCredit: 0n,
+        peerDebtToUs: 0n,
+        totalCapacity: 0n
+      };
+    }
 
     const isLeftEntity = entityId < counterpartyId;
-    const derived = $xlnFunctions.deriveDelta(delta, isLeftEntity);
-    const tokenInfo = $xlnFunctions.getTokenInfo(tokenId);
+    const derived = activeXlnFunctions.deriveDelta(delta, isLeftEntity);
+    const tokenInfo = activeXlnFunctions.getTokenInfo(tokenId);
+
+    // Debug: Log when deriveDelta runs successfully
+    if (delta.rightCreditLimit > 0n || delta.leftCreditLimit > 0n) {
+      console.log(`✅ [AccountPreview] ${entityId.slice(-4)}↔${counterpartyId.slice(-4)} derived:`, {
+        leftCredit: delta.leftCreditLimit.toString(),
+        rightCredit: delta.rightCreditLimit.toString(),
+        inPeerCredit: derived.inPeerCredit.toString(),
+        outCapacity: derived.outCapacity.toString(),
+        inCapacity: derived.inCapacity.toString(),
+      });
+    }
 
     // Based on deriveDelta logic:
     // inOwnCredit = credit we're using from them (moves from their credit to us)
@@ -133,9 +153,9 @@
 >
   <div class="account-header">
     <div class="entity-info">
-      <span class="our-entity">{ourName || `#${$xlnFunctions!.getEntityShortId(entityId)}`}</span>
+      <span class="our-entity">{ourName || `#${activeXlnFunctions!.getEntityShortId(entityId)}`}</span>
       <span class="separator">←→</span>
-      <span class="counterparty-name">{counterpartyName || `#${$xlnFunctions!.getEntityShortId(counterpartyId)}`}</span>
+      <span class="counterparty-name">{counterpartyName || `#${activeXlnFunctions!.getEntityShortId(counterpartyId)}`}</span>
     </div>
     <div class="account-status">
       {#if account.mempool.length > 0 || (account as any).pendingFrame || (account as any).sentTransitions > 0}
@@ -169,14 +189,14 @@
               <div
                 class="bar-segment unused-credit"
                 style="width: {Number((td.theirUnusedCredit * 100n) / td.totalCapacity)}%"
-                title="Credit FROM peer we CAN use: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirUnusedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
+                title="Credit FROM peer we CAN use: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.theirUnusedCredit) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
               ></div>
             {/if}
             {#if td.ourCollateralLocked > 0n}
               <div
                 class="bar-segment collateral"
                 style="width: {Number((td.ourCollateralLocked * 100n) / td.totalCapacity)}%"
-                title="Our collateral: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.ourCollateralLocked) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
+                title="Our collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.ourCollateralLocked) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
               ></div>
             {/if}
           </div>
@@ -190,24 +210,24 @@
               <div
                 class="bar-segment collateral"
                 style="width: {Number((td.theirCollateralLocked * 100n) / td.totalCapacity)}%"
-                title="Peer collateral: {$xlnFunctions?.formatTokenAmount(td.tokenId, td.theirCollateralLocked) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
+                title="Peer collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.theirCollateralLocked) || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })()}"
               ></div>
             {/if}
             {#if td.peerDebtToUs > 0n}
               <div
                 class="bar-segment used-credit"
                 style="width: {Number((td.peerDebtToUs * 100n) / td.totalCapacity)}%"
-                title="USED credit (we owe peer): {$xlnFunctions!.formatTokenAmount(td.tokenId, td.peerDebtToUs)}"
+                title="USED credit (we owe peer): {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.peerDebtToUs)}"
               ></div>
             {/if}
           </div>
         </div>
         <div class="capacity-labels">
           <span class="capacity-out" title="Sum of left side bars">
-            OUT {$xlnFunctions!.formatTokenAmount(td.tokenId, td.leftVisualSum)}
+            OUT {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.leftVisualSum)}
           </span>
           <span class="capacity-in" title="Sum of right side bars">
-            IN {$xlnFunctions!.formatTokenAmount(td.tokenId, td.rightVisualSum)}
+            IN {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.rightVisualSum)}
           </span>
         </div>
       </div>

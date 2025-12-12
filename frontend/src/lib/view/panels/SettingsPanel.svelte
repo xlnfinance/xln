@@ -7,6 +7,7 @@
    * Copyright (C) 2025 XLN Finance
    */
 
+  import { onMount, onDestroy } from 'svelte';
   import type { Writable } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
 
@@ -14,6 +15,13 @@
   export let isolatedEnv: Writable<any>; void isolatedEnv;
   export let isolatedHistory: Writable<any[]>; void isolatedHistory;
   export let isolatedTimeIndex: Writable<number>; void isolatedTimeIndex;
+
+  // Live camera state from Graph3D
+  let liveCameraState = {
+    position: { x: 0, y: 0, z: 0 },
+    target: { x: 0, y: 0, z: 0 },
+    distance: 0,
+  };
 
   // Settings state (loaded from localStorage on mount)
   interface ViewSettings {
@@ -116,6 +124,23 @@
       console.error('[Settings] Failed to load:', err);
     }
   }
+
+  // Listen for live camera updates from Graph3D
+  onMount(() => {
+    const unsubscribe = panelBridge.on('camera:update', (data: any) => {
+      liveCameraState = {
+        position: data.position || liveCameraState.position,
+        target: data.target || liveCameraState.target,
+        distance: data.distance || liveCameraState.distance,
+      };
+    });
+
+    loadSettings();
+
+    return () => {
+      unsubscribe?.();
+    };
+  });
 
   // Save settings to localStorage
   function saveSettings() {
@@ -308,6 +333,28 @@
           </label>
         </div>
       {/if}
+
+      <div class="setting-group">
+        <label>
+          <strong>Live Camera Position (updates as you move):</strong>
+          <textarea
+            readonly
+            rows="8"
+            style="width: 100%; font-family: monospace; font-size: 11px; background: #2a2a2a; color: #aaa; padding: 8px; border: 1px solid #444; margin-top: 8px;"
+            value={JSON.stringify({
+              position: liveCameraState.position,
+              target: liveCameraState.target,
+              distance: liveCameraState.distance,
+              note: 'Copy this and paste to Claude to set default camera position',
+              file: 'Graph3DPanel.svelte line ~1639: camera.position.set(x, y, z)'
+            }, null, 2)}
+            on:click={(e) => e.currentTarget.select()}
+          ></textarea>
+          <small style="color: #888; display: block; margin-top: 4px;">
+            ⚡ Updates live as you drag/zoom camera. Click to select all → Copy → Give to Claude.
+          </small>
+        </label>
+      </div>
 
       <div class="setting-group">
         <label>Quick View Presets:</label>
