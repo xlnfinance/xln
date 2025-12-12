@@ -175,8 +175,8 @@
           );
 
           // Add identicon before text
-          if (activeXlnFunctions?.generateEntityAvatar) {
-            const avatarUrl = activeXlnFunctions.generateEntityAvatar(replica.entityId);
+          if ((activeXlnFunctions as any)?.generateEntityAvatar) {
+            const avatarUrl = (activeXlnFunctions as any).generateEntityAvatar(replica.entityId);
             const img = document.createElement('img');
             img.src = avatarUrl;
             img.className = 'entity-avatar';
@@ -240,7 +240,7 @@
         );
 
         // Add identicon
-        if (activeXlnFunctions?.generateEntityAvatar) {
+        if ((activeXlnFunctions as any)?.generateEntityAvatar) {
           const avatarUrl = activeXlnFunctions.generateEntityAvatar(entityId);
           const img = document.createElement('img');
           img.src = avatarUrl;
@@ -265,7 +265,7 @@
           );
 
           // Add signer identicon
-          if (activeXlnFunctions?.generateSignerAvatar) {
+          if ((activeXlnFunctions as any)?.generateSignerAvatar) {
             const avatarUrl = activeXlnFunctions.generateSignerAvatar(replica.signerId);
             const img = document.createElement('img');
             img.src = avatarUrl;
