@@ -12,8 +12,8 @@
   import { getEntityEnv, hasEntityEnvContext } from '../components/entity/shared/EntityEnvContext';
   import type { Writable } from 'svelte/store';
 
-  // Optional props for when used outside EntityEnvContext (e.g., in Architect)
-  export let isolatedEnv: Writable<any> | null = null;
+  // Props (Svelte 5 runes mode)
+  let { isolatedEnv = null }: { isolatedEnv?: Writable<any> | null } = $props();
 
   // Get environment from context (isolated stores for /view) or props
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
