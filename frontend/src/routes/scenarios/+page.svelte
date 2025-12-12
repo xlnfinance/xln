@@ -12,61 +12,13 @@
     {
       id: 'ahb',
       title: 'Alice → Hub → Bob',
-      description: 'Basic 3-party payment flow. Watch funds route through the hub in real-time.',
-      autoScript: `
-        setTimeout(async () => {
-          if (window.XLN?.r2r) {
-            // Continuous loop
-            const loop = async () => {
-              await window.XLN.r2r('0', '1', 100);
-              await new Promise(r => setTimeout(r, 2000));
-              await window.XLN.r2r('1', '2', 50);
-              await new Promise(r => setTimeout(r, 3000));
-              loop();
-            };
-            loop();
-          }
-        }, 3000);
-      `
-    },
-    {
-      id: 'fed-chair',
-      title: 'Fed Chair Demo',
-      description: '3×3 hub grid with $1M per entity. Broadcast payments across the network.',
-      autoScript: `
-        setTimeout(async () => {
-          if (window.XLN?.fundAll) {
-            await window.XLN.fundAll(1000000);
-            await new Promise(r => setTimeout(r, 2000));
-            // Start continuous payments
-            const loop = async () => {
-              if (window.XLN?.r2r) {
-                const from = Math.floor(Math.random() * 9).toString();
-                const to = Math.floor(Math.random() * 9).toString();
-                if (from !== to) {
-                  await window.XLN.r2r(from, to, Math.floor(Math.random() * 10000));
-                }
-              }
-              setTimeout(loop, 1500);
-            };
-            loop();
-          }
-        }, 4000);
-      `
-    },
-    {
-      id: 'scale-test',
-      title: 'Scale Test: 100 Entities',
-      description: 'Stress test with 100 entities. FPS should stay at 60+.',
-      autoScript: `
-        setTimeout(async () => {
-          if (window.XLN?.createEntities) {
-            await window.XLN.createEntities(100);
-          }
-        }, 3000);
-      `
+      description: 'Educational demo: 3 entities, reserve distribution, bilateral accounts, off-chain payment routing. Step through 12 frames to understand XLN mechanics.',
     }
   ];
+
+  // ARCHIVED SCENARIOS (moved to /docs/scenarios.md for reference):
+  // - fed-chair: 3×3 hub grid with $1M per entity
+  // - scale-test: 100 entities stress test
 
   let fullscreenId: string | null = null;
   let iframeRefs: Record<string, HTMLIFrameElement> = {};
