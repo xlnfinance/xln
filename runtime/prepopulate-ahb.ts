@@ -1004,6 +1004,7 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     // ============================================================================
     // STEP 10: Off-Chain Payment Alice → Hub → Bob
     // ============================================================================
+    console.error('\n\n🚨🚨🚨 PAYMENT SECTION START 🚨🚨🚨\n');
     console.log('\n⚡ FRAME 10: Off-Chain Payment A → H → B ($125K)');
 
     // 25% of $500K capacity = $125K
@@ -1028,8 +1029,10 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
     const { process: proc } = await import('./runtime');
 
     // Step 1: Alice initiates (Alice -> Hub)
-    // We use singleIteration=true to stop after Alice runs
-    console.log(`🏃 Frame 12 Step 1: Alice initiates payment...`);
+    console.error('🏃 STEP 1: Alice initiates payment...');
+    console.error(`   Alice: ${alice.id.slice(-4)}, Hub: ${hub.id.slice(-4)}, Bob: ${bob.id.slice(-4)}`);
+    console.error(`   Amount: ${paymentAmount}, Route: [${alice.id.slice(-4)},${hub.id.slice(-4)},${bob.id.slice(-4)}]`);
+
     await proc(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -1045,17 +1048,31 @@ export async function prepopulateAHB(env: Env, processUntilEmpty: (env: Env, inp
       }]
     }], 0, true);
 
-    // Step 2: Hub processes Alice's message and proposes to Bob
+    console.error(`✅ STEP 1 complete, checking pendingOutputs...`);
     const hubInbox = env.pendingOutputs || [];
-    env.pendingOutputs = []; // Clear pending outputs to capture next step cleanly
-    
-    console.log(`🏃 Frame 12 Step 2: Hub processes ${hubInbox.length} messages...`);
+    console.error(`   pendingOutputs.length: ${hubInbox.length}`);
     if (hubInbox.length > 0) {
-       await proc(env, hubInbox, 0, true); // Iteration 2 (Hub runs)
+      console.error(`   Output entities: [${hubInbox.map(o => o.entityId.slice(-4)).join(',')}]`);
+    } else {
+      console.error(`   ❌ NO OUTPUTS from Step 1! Alice didn't produce output for Hub`);
+    }
+    env.pendingOutputs = [];
+
+    console.error(`\n🏃 STEP 2: Hub processes ${hubInbox.length} messages...`);
+    if (hubInbox.length > 0) {
+       await proc(env, hubInbox, 0, true);
+       console.error(`✅ STEP 2 complete, checking pendingOutputs...`);
+    } else {
+       console.error(`⏭️ STEP 2 skipped (no hubInbox)`);
     }
 
-    // Get outbox (Hub's frame to Bob) - this simulates the network boundary
     const outbox12 = env.pendingOutputs || [];
+    console.error(`   Step 2 pendingOutputs.length: ${outbox12.length}`);
+    if (outbox12.length > 0) {
+      console.error(`   Output entities: [${outbox12.map(o => o.entityId.slice(-4)).join(',')}]`);
+    } else {
+      console.error(`   ❌ NO OUTPUTS from Step 2! Hub didn't produce output for Bob`);
+    }
     env.pendingOutputs = [];
 
     const ahDelta12 = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);

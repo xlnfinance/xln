@@ -273,10 +273,12 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     }
 
     if (entityTx.type === 'directPayment') {
-      console.log(`💸 Direct payment: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}, ${entityTx.data.amount} via ${entityTx.data.route?.length || 0} hops`);
+      console.error(`💸💸💸 DIRECT-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`);
+      console.error(`   Amount: ${entityTx.data.amount}, Route: ${entityTx.data.route?.map(r => r.slice(-4)).join('→') || 'none'}`);
 
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
+      console.error(`   Outputs array initialized, length: ${outputs.length}`);
 
       // Extract payment details
       let { targetEntityId, tokenId, amount, route, description } = entityTx.data;
@@ -456,6 +458,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           signerId: firstValidator,
           entityTxs: [] // Empty - triggers processing
         });
+      }
+
+      console.error(`💸 DIRECT-PAYMENT RETURN: outputs.length=${outputs.length}`);
+      if (outputs.length > 0) {
+        console.error(`   Output entities: [${outputs.map(o => o.entityId.slice(-4)).join(',')}]`);
       }
 
       return { newState, outputs };

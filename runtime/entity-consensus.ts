@@ -779,33 +779,37 @@ export const applyEntityFrame = async (
   }
 
   // AUTO-PROPOSE: Process all proposable accounts plus any with pending transactions
-  console.log(`🚀 AUTO-PROPOSE: Starting bilateral consensus check`);
-  console.log(`🚀 Proposable accounts so far: ${Array.from(proposableAccounts).join(', ') || 'none'}`);
+  console.error(`\n🚀🚀🚀 AUTO-PROPOSE START 🚀🚀🚀`);
+  console.error(`   Entity: ${currentEntityState.entityId.slice(-4)}`);
+  console.error(`   Proposable accounts collected: ${Array.from(proposableAccounts).map(id => id.slice(-4)).join(', ') || 'none'}`);
 
   const { getAccountsToProposeFrames, proposeAccountFrame } = await import('./account-consensus');
 
   // Add accounts with mempool items that weren't already added
+  console.error(`   Calling getAccountsToProposeFrames...`);
   const additionalAccounts = getAccountsToProposeFrames(currentEntityState);
-  console.log(`🚀 Additional accounts from getAccountsToProposeFrames: ${additionalAccounts.join(', ') || 'none'}`);
+  console.error(`   Additional accounts: ${additionalAccounts.map(id => id.slice(-4)).join(', ') || 'none'}`);
   additionalAccounts.forEach(accountId => proposableAccounts.add(accountId));
 
-  // CRITICAL: Deterministic ordering - sort by counterpartyEntityId (lexicographic)
+  // CRITICAL: Deterministic ordering
   const accountsToProposeFrames = Array.from(proposableAccounts).sort();
+  console.error(`   TOTAL accounts to propose: ${accountsToProposeFrames.length}`);
 
   if (accountsToProposeFrames.length > 0) {
-    console.log(`🔄 AUTO-PROPOSE: ${accountsToProposeFrames.length} accounts need frame proposals`);
-    console.log(`🔄 AUTO-PROPOSE: Accounts to propose: ${accountsToProposeFrames.map(id => id.slice(0,10)).join(', ')}`);
+    console.error(`   Proposing frames for: [${accountsToProposeFrames.map(id => id.slice(-4)).join(',')}]`);
 
     for (const counterpartyEntityId of accountsToProposeFrames) {
-      console.log(`🔄 AUTO-PROPOSE: Processing account ${counterpartyEntityId.slice(0,10)}...`);
+      console.error(`\n   📝 Proposing for account ${counterpartyEntityId.slice(-4)}...`);
 
       const accountMachine = currentEntityState.accounts.get(counterpartyEntityId);
       if (accountMachine) {
-        console.log(`🔄 AUTO-PROPOSE: Account details - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}`);
+        console.error(`      Mempool: ${accountMachine.mempool.length}, Pending: ${!!accountMachine.pendingFrame}`);
         const proposal = await proposeAccountFrame(env, accountMachine);
-        console.log(`🔄 AUTO-PROPOSE: Proposal result - success=${proposal.success}, hasInput=${!!proposal.accountInput}, error=${proposal.error || 'none'}`);
+        console.error(`      Proposal: success=${proposal.success}, hasInput=${!!proposal.accountInput}, error=${proposal.error || 'none'}`);
 
         if (proposal.success && proposal.accountInput) {
+          console.error(`      ✅ SUCCESS! Creating output for ${proposal.accountInput.toEntityId.slice(-4)}`);
+
           // Get the proposer of the target entity from env
           let targetProposerId = 'alice'; // Default fallback
           const targetReplicaKeys = Array.from(env.eReplicas.keys()).filter(key => key.startsWith(proposal.accountInput!.toEntityId + ':'));
@@ -827,6 +831,7 @@ export const applyEntityFrame = async (
             }]
           };
           allOutputs.push(outputEntityInput);
+          console.error(`   ✅ AUTO-PROPOSE added output for ${proposal.accountInput.toEntityId.slice(-4)}, allOutputs.length=${allOutputs.length}`);
 
           // Add events to entity messages with size limiting
           addMessages(currentEntityState, proposal.events);
