@@ -651,8 +651,9 @@ export function shouldProposeFrame(accountMachine: AccountMachine): boolean {
   // Should propose if:
   // 1. Has transactions in mempool
   // 2. No pending frame waiting for confirmation
-  // Note: BOTH sides can propose in bilateral consensus (not just the proposer)
-  return accountMachine.mempool.length > 0 && !accountMachine.pendingFrame;
+  const should = accountMachine.mempool.length > 0 && !accountMachine.pendingFrame;
+  console.error(`   shouldProposeFrame: mempool=${accountMachine.mempool.length}, pending=${!!accountMachine.pendingFrame}, result=${should}`);
+  return should;
 }
 
 /**

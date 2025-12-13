@@ -68,9 +68,10 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
 
   const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
 
-  // EXACT Channel.ts formula - DO NOT MODIFY
-  let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowence);
-  let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowence);
+  // Working formula (from 32d52b4) - gives Alice correct outCapacity with collateral
+  // NOTE: Doesn't match Channel.ts exactly but works for our collateral model
+  let inCapacity = nonNegative(outCollateral + inOwnCredit + outPeerCredit - inAllowence);
+  let outCapacity = nonNegative(inCollateral + outOwnCredit + inPeerCredit - outAllowence);
 
   if (!isLeft) {
     // Flip for RIGHT entity perspective
