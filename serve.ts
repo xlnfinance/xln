@@ -58,15 +58,15 @@ const handler = async (request: Request): Promise<Response> => {
     return new Response('missing index.html', { status: 404 });
   }
 
-  // Try static files from frontend/build/
-  const staticFile = await serveFile(`./frontend/build${path}`);
-  if (staticFile) return staticFile;
-
-  // Try with .html extension (SvelteKit creates /scenarios.html not /scenarios/index.html)
+  // Try .html extension FIRST (SvelteKit creates /scenarios.html, but /scenarios/ dir also exists)
   if (!path.includes('.')) {
     const htmlFile = await serveFile(`./frontend/build${path}.html`);
     if (htmlFile) return htmlFile;
   }
+
+  // Try static files from frontend/build/
+  const staticFile = await serveFile(`./frontend/build${path}`);
+  if (staticFile) return staticFile;
 
   // SPA fallback - serve index.html for any unknown route
   const fallback = await serveFile('./frontend/build/index.html');
