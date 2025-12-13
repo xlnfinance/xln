@@ -1078,9 +1078,14 @@ contract Depository is ReentrancyGuardLite {
     bytes memory rightArgs = entity1 < entity2 ? arguments2 : arguments1;
     bytes memory ch_key = accountKey(leftAddr, rightAddr);
 
-    int[] memory deltas = new int[](proofbody.offdeltas.length);
-    for (uint256 i = 0; i < proofbody.offdeltas.length; i++) {
-      deltas[i] = proofbody.offdeltas[i];
+    // NOTE: On-chain settlement must apply TOTAL delta (ondelta + offdelta).
+    // - `col.ondelta` tracks the on-chain component (e.g., collateral funding events).
+    // - `proofbody.offdeltas` is the off-chain component agreed/derived by parties.
+    uint256 tokenCount = proofbody.tokenIds.length;
+    int[] memory deltas = new int[](tokenCount);
+    for (uint256 i = 0; i < tokenCount; i++) {
+      uint256 tokenId = proofbody.tokenIds[i];
+      deltas[i] = _collaterals[ch_key][tokenId].ondelta + proofbody.offdeltas[i];
     }
 
     bytes[] memory decodedLeft = leftArgs.length > 0 ? abi.decode(leftArgs, (bytes[])) : new bytes[](0);
@@ -1118,23 +1123,26 @@ contract Depository is ReentrancyGuardLite {
     AccountCollateral storage col = _collaterals[ch_key][tokenId];
     uint256 collateral = col.collateral;
 
-    if (delta >= 0) {
-      uint256 desired = uint256(delta);
-      if (desired <= collateral) {
-        if (desired > 0) _increaseReserve(leftEntity, tokenId, desired);
-        if (collateral > desired) _increaseReserve(rightEntity, tokenId, collateral - desired);
-      } else {
-        if (collateral > 0) _increaseReserve(leftEntity, tokenId, collateral);
-        _settleShortfall(rightEntity, leftEntity, tokenId, desired - collateral);
-      }
+    // Δ is LEFT's allocation (ondelta + offdelta), bounded by RCPAN:
+    //   −leftCreditLimit ≤ Δ ≤ collateral + rightCreditLimit
+    //
+    // Collateral only exists on the right side of 0. Therefore:
+    // - If Δ ≤ 0: LEFT gets 0, RIGHT gets all collateral, and LEFT owes −Δ (credit/debt).
+    // - If 0 < Δ < collateral: split collateral (LEFT = Δ, RIGHT = collateral − Δ).
+    // - If Δ ≥ collateral: LEFT gets all collateral and RIGHT owes Δ − collateral (credit/debt).
+    if (delta <= 0) {
+      if (collateral > 0) _increaseReserve(rightEntity, tokenId, collateral);
+      uint256 shortfall = uint256(-delta);
+      if (shortfall > 0) _settleShortfall(leftEntity, rightEntity, tokenId, shortfall);
     } else {
-      uint256 desiredAbs = uint256(-delta);
-      if (desiredAbs <= collateral) {
-        if (desiredAbs > 0) _increaseReserve(rightEntity, tokenId, desiredAbs);
-        if (collateral > desiredAbs) _increaseReserve(leftEntity, tokenId, collateral - desiredAbs);
+      uint256 desired = uint256(delta);
+      if (desired >= collateral) {
+        if (collateral > 0) _increaseReserve(leftEntity, tokenId, collateral);
+        uint256 shortfall = desired - collateral;
+        if (shortfall > 0) _settleShortfall(rightEntity, leftEntity, tokenId, shortfall);
       } else {
-        if (collateral > 0) _increaseReserve(rightEntity, tokenId, collateral);
-        _settleShortfall(leftEntity, rightEntity, tokenId, desiredAbs - collateral);
+        _increaseReserve(leftEntity, tokenId, desired);
+        _increaseReserve(rightEntity, tokenId, collateral - desired);
       }
     }
     col.collateral = 0;

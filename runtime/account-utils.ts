@@ -68,20 +68,18 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
 
   const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
 
-  // FIXED: outCapacity = collateral I CAN SEND (inCollateral) + credit peer extended to me
-  // inCapacity = collateral THEY can send (outCollateral) + credit I extended to them
-  let inCapacity = nonNegative(outCollateral + inOwnCredit + outPeerCredit - inAllowence);
-  let outCapacity = nonNegative(inCollateral + outOwnCredit + inPeerCredit - outAllowence);
+  // EXACT Channel.ts formula - DO NOT MODIFY
+  let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowence);
+  let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowence);
 
   if (!isLeft) {
-    // flip the view
+    // Flip for RIGHT entity perspective
     [inCollateral, inAllowence, inCapacity,
      outCollateral, outAllowence, outCapacity] =
     [outCollateral, outAllowence, outCapacity,
      inCollateral, inAllowence, inCapacity];
 
     [ownCreditLimit, peerCreditLimit] = [peerCreditLimit, ownCreditLimit];
-    // swap in<->out own<->peer credit
     [outOwnCredit, inOwnCredit, outPeerCredit, inPeerCredit] =
     [inPeerCredit, outPeerCredit, inOwnCredit, outOwnCredit];
   }
@@ -108,6 +106,8 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
     '|' +
     fullBar.substring(clampedPosition) +
     ']';
+
+  console.log(`✅ deriveDelta RETURN: isLeft=${isLeft}, inCap=${inCapacity}, outCap=${outCapacity}, SUM=${inCapacity + outCapacity}`);
 
   return {
     delta: totalDelta,
