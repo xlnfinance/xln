@@ -211,6 +211,12 @@
             console.log(`[View] ✅ AHB scenario loaded successfully!`);
             console.log(`[View]    Frames: ${frames.length}`);
             console.log(`[View]    Entities: ${env.eReplicas?.size || 0}`);
+
+            // Autoplay: Wait 200ms then press Play with loop
+            setTimeout(() => {
+              console.log('[View] 🎬 Starting autoplay...');
+              panelBridge.emit('timeMachine:play', { loop: true });
+            }, 200);
           } catch (autoplayErr) {
             console.error('[View] ❌ AHB AUTOPLAY FAILED:', autoplayErr);
             console.error('[View] Stack:', (autoplayErr as Error).stack);
