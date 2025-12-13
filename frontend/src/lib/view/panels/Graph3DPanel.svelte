@@ -1651,7 +1651,8 @@ let vrHammer: VRHammer | null = null;
       0.1,
       20000 // Far plane: large enough to see full grid at any zoom
     );
-    camera.position.set(1, 585, 58); // Default view showing AHB entities (from user settings)
+    camera.position.set(0.41, 572.94, 38.32); // AHB top-down view
+    controls.target.set(0.24, 568.33, -1.37); // Look at AHB center
 
     // Renderer setup with VR support
     renderer = await createRenderer(rendererMode, { antialias: false }); // Disabled for performance
