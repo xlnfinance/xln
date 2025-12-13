@@ -85,7 +85,7 @@
         <div class="iframe-container">
           <iframe
             bind:this={iframeRefs[scenario.id]}
-            src="/view?embed=1&scenario={scenario.id}&autoplay=1"
+            src="/view?embed=1&scenario={scenario.id}&autoplay=1&autoload=true&loop=true"
             title={scenario.title}
             on:load={() => handleIframeLoad(scenario, iframeRefs[scenario.id])}
             allow="accelerometer; autoplay; encrypted-media; gyroscope"
@@ -131,18 +131,12 @@
   }
 
   .scenarios-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    display: flex;
+    flex-direction: column;
     gap: 2rem;
-    max-width: 1800px;
+    max-width: 2400px; /* 1.5x wider (was 1800px) */
     margin: 0 auto;
     padding: 0 2rem;
-  }
-
-  @media (max-width: 1200px) {
-    .scenarios-grid {
-      grid-template-columns: 1fr;
-    }
   }
 
   .scenario-card {
