@@ -90,3 +90,8 @@ yarn.lock
 reports/        # SEO audits, test results, architecture analysis
 private/        # Deployment automation, monitoring, CI/CD
 research/       # Experimental features not ready for public
+
+# Voice paste transcriptions
+ai/*.txt
+*.wav
+*.m4a
