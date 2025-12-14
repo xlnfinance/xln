@@ -55,12 +55,11 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   // outOwnCredit = remaining OWN credit we can extend
   let outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
 
-  // HYBRID MODEL: Track used credit for both directions
-  // peerCreditUsed = credit peer lent that WE'RE using (when delta < 0)
-  const peerCreditUsed = totalDelta < 0n ? nonNegative(-totalDelta - collateral) : 0n;
-  let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit - peerCreditUsed);
+  // inPeerCredit = remaining credit peer extended to us (simple formula from original)
+  let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
 
-  // ownCreditUsed = credit WE lent that PEER is using (when delta > 0)
+  // Track used credit for reporting (not used in capacity calculation)
+  const peerCreditUsed = totalDelta < 0n ? nonNegative(-totalDelta - collateral) : 0n;
   const ownCreditUsed = totalDelta > 0n ? nonNegative(totalDelta - collateral) : 0n;
 
   let inAllowence = delta.rightAllowance;
@@ -68,10 +67,9 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
 
   const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
 
-  // Working formula (from 32d52b4) - gives Alice correct outCapacity with collateral
-  // NOTE: Doesn't match Channel.ts exactly but works for our collateral model
-  let inCapacity = nonNegative(outCollateral + inOwnCredit + outPeerCredit - inAllowence);
-  let outCapacity = nonNegative(inCollateral + outOwnCredit + inPeerCredit - outAllowence);
+  // Original formula: in* components for inCapacity, out* components for outCapacity
+  let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowence);
+  let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowence);
 
   if (!isLeft) {
     // Flip for RIGHT entity perspective
