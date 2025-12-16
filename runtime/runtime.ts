@@ -1562,6 +1562,26 @@ export const process = async (
       }
     }
 
+    // === J-MACHINE BLOCK PROPOSAL CHECK ===
+    // Check if any J-Machine should propose a block based on blockDelayMs
+    if (env.jReplicas) {
+      for (const jReplica of env.jReplicas.values()) {
+        const mempool = jReplica.mempool || [];
+        const blockDelayMs = jReplica.blockDelayMs || 300;
+        const lastBlockTs = jReplica.lastBlockTimestamp || 0;
+        const elapsed = env.timestamp - lastBlockTs;
+
+        // If mempool has items AND block delay has passed
+        if (mempool.length > 0 && elapsed >= blockDelayMs) {
+          console.log(`⏰ [J-Machine ${jReplica.name}] Block ready! ${mempool.length} txs pending, ${elapsed}ms since last block`);
+          // Mark jReplica as ready for block (UI can read this)
+          jReplica.blockReady = true;
+        } else {
+          jReplica.blockReady = false;
+        }
+      }
+    }
+
     // Auto-persist
     await saveEnvToDB(env);
     return env;

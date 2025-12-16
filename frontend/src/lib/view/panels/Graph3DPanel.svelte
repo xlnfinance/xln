@@ -57,6 +57,30 @@
     || (Array.isArray(env?.jReplicas) && env.jReplicas[0]?.name)
     || null;
 
+  // Derive jurisdictions data for 3D rendering (properly tracks env changes)
+  $: jurisdictionsData = (() => {
+    if (!env?.jReplicas) return [];
+
+    let jReplicaValues: any[] = [];
+    if (env.jReplicas instanceof Map) {
+      jReplicaValues = Array.from(env.jReplicas.values());
+    } else if (Array.isArray(env.jReplicas)) {
+      jReplicaValues = env.jReplicas;
+    } else if (typeof env.jReplicas === 'object') {
+      jReplicaValues = Object.values(env.jReplicas);
+    }
+
+    return jReplicaValues.map((jr: any) => ({
+      name: jr.name,
+      jMachine: {
+        position: jr.position || { x: 0, y: 600, z: 0 },
+        capacity: 3,
+        jHeight: Number(jr.blockNumber || 0n),
+        mempool: jr.mempool || []
+      }
+    }));
+  })();
+
   /**
    * Get time-aware replicas - computes directly from stores to avoid stale reactive variable
    * Use this in functions called during store subscription callbacks where reactive vars may be stale
@@ -307,7 +331,7 @@ let vrHammer: VRHammer | null = null;
   // Active J-Machine - derived from activeJurisdictionName (handles time-travel)
   $: jMachine = activeJurisdictionName ? jMachines.get(activeJurisdictionName) || null : null;
 
-  let jMachineTxBoxes: THREE.Mesh[] = []; // Yellow tx cubes inside octahedron
+  let jMachineTxBoxes: (THREE.Group | THREE.Mesh)[] = []; // Yellow tx cubes inside J-Machine
   let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) problem)
   let broadcastEnabled = true;
   let broadcastStyle: 'raycast' | 'wave' | 'particles' = 'raycast';
@@ -681,33 +705,10 @@ let vrHammer: VRHammer | null = null;
   }
 
   // ===== CREATE J-MACHINES FOR EACH JURISDICTION =====
-  // Time-aware: Read from env.jReplicas (historical frame or live state)
-  $: if (scene) {
-    // Get jurisdictions from time-aware env - jReplicas is always a Map
-    let jurisdictionsArray: Array<{ name: string; jMachine: { position: { x: number; y: number; z: number }; capacity: number; jHeight: number; mempool?: any[] } }> = [];
-
-    if (env?.jReplicas) {
-      // jReplicas is a Map<string, JReplica> live, but may be serialized as object/array
-      let jReplicaValues: any[] = [];
-      if (env.jReplicas instanceof Map) {
-        jReplicaValues = Array.from(env.jReplicas.values());
-      } else if (Array.isArray(env.jReplicas)) {
-        // Historical frame: jReplicas serialized as array
-        jReplicaValues = env.jReplicas;
-      } else if (typeof env.jReplicas === 'object') {
-        // Historical frame: jReplicas serialized as plain object { 'simnet': {...} }
-        jReplicaValues = Object.values(env.jReplicas);
-      }
-      jurisdictionsArray = jReplicaValues.map((jr: any) => ({
-        name: jr.name,
-        jMachine: {
-          position: jr.position || { x: 0, y: 600, z: 0 },
-          capacity: 3,
-          jHeight: Number(jr.blockNumber || 0n),
-          mempool: jr.mempool || []
-        }
-      }));
-    }
+  // Time-aware: Uses jurisdictionsData which properly tracks env/history changes
+  $: if (scene && jurisdictionsData) {
+    // Use pre-computed jurisdictionsData (tracks env reactively)
+    const jurisdictionsArray = jurisdictionsData;
 
     // Remove J-Machines that no longer exist
     const currentJurisdictionNames = new Set(jurisdictionsArray.map(x => x.name));
@@ -732,30 +733,72 @@ let vrHammer: VRHammer | null = null;
 
     // Sync J mempool visual: show tx cubes based on actual mempool contents from snapshot
     const activeJurisdiction = jurisdictionsArray.find(x => x.name === activeJurisdictionName);
-    console.log(`[J-Mempool] activeJurisdiction=${activeJurisdiction?.name}, jMachine=${!!jMachine}, jurisdictionsArray.length=${jurisdictionsArray.length}`);
-    if (activeJurisdiction && jMachine) {
+    const activeJMachine = activeJurisdiction ? jMachines.get(activeJurisdiction.name) : undefined;
+    console.log(`[J-Mempool] activeJurisdiction=${activeJurisdiction?.name}, jMachine=${!!activeJMachine}, jurisdictionsArray.length=${jurisdictionsArray.length}`);
+    if (activeJurisdiction && activeJMachine) {
       // Read mempool size directly from jReplica snapshot (canonical source of truth)
       const mempoolSize = activeJurisdiction.jMachine.mempool?.length || 0;
-      console.log(`[J-Mempool] mempool.length=${mempoolSize}, current cubes=${jMachineTxBoxes.length}`);
+
+      // Get PREVIOUS frame's mempool size for broadcast detection
+      const timeIdx = $isolatedTimeIndex;
+      const hist = $isolatedHistory;
+      let prevMempoolSize = 0;
+      if (hist && hist.length > 0) {
+        const prevFrameIdx = timeIdx === -1 ? hist.length - 2 : timeIdx - 1;
+        if (prevFrameIdx >= 0 && prevFrameIdx < hist.length) {
+          const prevFrame = hist[prevFrameIdx];
+          const prevJReplicas = prevFrame?.jReplicas;
+          if (prevJReplicas) {
+            const prevJReplicaArr = Array.isArray(prevJReplicas) ? prevJReplicas : Array.from(prevJReplicas.values());
+            const prevJR = prevJReplicaArr.find((jr: any) => jr.name === activeJurisdiction.name);
+            prevMempoolSize = prevJR?.mempool?.length || 0;
+          }
+        }
+      }
+
+      console.log(`[J-Mempool] mempool.length=${mempoolSize}, prev=${prevMempoolSize}, cubes=${jMachineTxBoxes.length}`);
 
       const currentVisualCount = jMachineTxBoxes.length;
 
       // Add cubes if mempool grew
+      const mempool = activeJurisdiction.jMachine.mempool || [];
+      const nextBlockHeight = (activeJurisdiction.jMachine.jHeight || 0) + 1; // Pending txs go in NEXT block
       while (jMachineTxBoxes.length < mempoolSize) {
         const txIndex = jMachineTxBoxes.length;
-        const txCube = createMempoolTxCube(txIndex);
-        jMachine.add(txCube);
+        const tx = mempool[txIndex];
+        const txCube = createMempoolTxCube(txIndex, tx, nextBlockHeight);
+        activeJMachine.add(txCube);
         jMachineTxBoxes.push(txCube);
       }
 
       // Remove cubes if mempool shrunk (broadcast happened)
+      const broadcastCount = jMachineTxBoxes.length - mempoolSize;
       while (jMachineTxBoxes.length > mempoolSize) {
-        const txCube = jMachineTxBoxes.pop();
-        if (txCube && jMachine) {
-          jMachine.remove(txCube);
-          (txCube.geometry as THREE.BufferGeometry).dispose();
-          ((txCube as THREE.Mesh).material as THREE.Material).dispose();
+        const txGroup = jMachineTxBoxes.pop();
+        if (txGroup && activeJMachine) {
+          activeJMachine.remove(txGroup);
+          // Dispose all children (cube mesh and label sprite)
+          txGroup.traverse((child) => {
+            if ((child as THREE.Mesh).geometry) {
+              (child as THREE.Mesh).geometry.dispose();
+            }
+            if ((child as THREE.Mesh).material) {
+              const mat = (child as THREE.Mesh).material;
+              if (Array.isArray(mat)) {
+                mat.forEach(m => m.dispose());
+              } else {
+                (mat as THREE.Material).dispose();
+              }
+            }
+          });
         }
+      }
+
+      // Broadcast ripple effect when mempool cleared (prev > 0 AND current === 0)
+      // Works in ANY frame (live or time-travel) - shows J-Block finalization
+      if (prevMempoolSize > 0 && mempoolSize === 0) {
+        createJBlockBroadcastRipple(activeJMachine.position);
+        console.log(`[Graph3D] 📡 J-Block broadcast: ${prevMempoolSize} txs finalized (frame ${$isolatedTimeIndex})`);
       }
 
       if (currentVisualCount !== mempoolSize) {
@@ -764,37 +807,129 @@ let vrHammer: VRHammer | null = null;
     }
   }
 
-  // Create a tx cube for mempool visualization
+  // Create a tx cube for mempool visualization with label
   // Cubes STACK INSIDE the J-machine cube container (like Tetris)
-  function createMempoolTxCube(index: number): THREE.Mesh {
-    const cubeSize = 4; // Larger tx cubes - visible inside container
+  // J-Machine size is 12x12x12, so cubes must be small enough to fit
+  function createMempoolTxCube(index: number, tx?: any, blockHeight?: number): THREE.Group {
+    const group = new THREE.Group();
+
+    const cubeSize = 1.5; // Small tx cubes - fit 3x3 grid inside J-Machine (size=12)
     const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
     const material = new THREE.MeshLambertMaterial({
-      color: 0xffaa00, // Orange-yellow for pending tx
+      color: 0xffcc00, // Bright yellow for pending tx
       transparent: true,
-      opacity: 0.9,
+      opacity: 0.95,
       emissive: 0xffaa00,
-      emissiveIntensity: 0.5
+      emissiveIntensity: 0.8
     });
     const cube = new THREE.Mesh(geometry, material);
+    group.add(cube);
 
-    // Position cubes in a grid INSIDE the J-machine cube (size=25, so fit within ~20)
+    // Position cubes in a 3x3 grid INSIDE the J-machine cube (size=12, half=6)
     // Grid: 3x3 base, stacking up
     const gridSize = 3;
-    const spacing = 5; // Space between cubes
+    const spacing = 2.5; // Space between cubes (fits 3 cubes in ~7.5 width)
     const xIndex = index % gridSize;
     const zIndex = Math.floor(index / gridSize) % gridSize;
     const yIndex = Math.floor(index / (gridSize * gridSize));
 
-    // Center the grid inside the container
-    const offset = -(gridSize - 1) * spacing / 2;
-    cube.position.set(
-      offset + xIndex * spacing,
-      -8 + yIndex * spacing, // Start from bottom
-      offset + zIndex * spacing
+    // Center the grid inside the cube (offset from center)
+    const halfGrid = (gridSize - 1) * spacing / 2;
+    group.position.set(
+      -halfGrid + xIndex * spacing,
+      -4 + yIndex * spacing, // Start near bottom of cube (-6 + 2 buffer)
+      -halfGrid + zIndex * spacing
     );
 
-    return cube;
+    // Add text label below cube (if tx data available)
+    if (tx) {
+      const label = formatMempoolTxLabel(tx, blockHeight);
+      const labelSprite = createTxLabelSprite(label);
+      labelSprite.position.set(0, -(cubeSize + 0.3), 0); // Below the cube
+      group.add(labelSprite);
+    }
+
+    return group;
+  }
+
+  // Format mempool tx into short label: "#2 R2R: 1→2 $3M"
+  function formatMempoolTxLabel(tx: any, blockHeight?: number): string {
+    const blockPrefix = blockHeight !== undefined ? `#${blockHeight} ` : '';
+    const type = (tx.type || 'tx').toUpperCase();
+    const from = tx.from?.slice(-1) || '?'; // Last digit of address
+    const to = tx.to?.slice(-1) || '?';
+    const amount = tx.amount ? `$${Number(tx.amount / (10n ** 18n) / 1_000_000n)}M` : '';
+    return `${blockPrefix}${type}: ${from}→${to} ${amount}`.trim();
+  }
+
+  // Create text sprite for tx label
+  function createTxLabelSprite(text: string): THREE.Sprite {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d')!;
+    canvas.width = 128;
+    canvas.height = 32;
+
+    // Draw text
+    ctx.fillStyle = '#ffcc00';
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 64, 16);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: false
+    });
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.scale.set(3, 0.75, 1); // Wide and short
+    return sprite;
+  }
+
+  // Animation speed multiplier (1.0 = normal, higher = faster)
+  // Connected to TimeMachine speed via panelBridge
+  let animationSpeed = 1.0;
+
+  // Create J-block broadcast effect when mempool clears
+  // Expanding wireframe sphere from J-Machine - radio wave to entire universe
+  function createJBlockBroadcastRipple(jMachinePos: THREE.Vector3) {
+    if (!scene) return;
+
+    const sphereGeometry = new THREE.SphereGeometry(1, 16, 16);
+    const sphereMaterial = new THREE.MeshBasicMaterial({
+      color: 0x44ffaa, // Cyan-green (J-Machine theme)
+      transparent: true,
+      opacity: 0.4,
+      wireframe: true
+    });
+    const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+    sphere.position.copy(jMachinePos);
+    scene.add(sphere);
+
+    // Speed-aware duration
+    const duration = 1500 / animationSpeed;
+    const startTime = performance.now();
+
+    function animateWave() {
+      const elapsed = performance.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+
+      // Expand sphere to cover universe
+      const scale = 1 + progress * 150;
+      sphere.scale.set(scale, scale, scale);
+      sphereMaterial.opacity = 0.4 * (1 - progress);
+
+      if (progress < 1) {
+        requestAnimationFrame(animateWave);
+      } else {
+        scene.remove(sphere);
+        sphereGeometry.dispose();
+        sphereMaterial.dispose();
+      }
+    }
+
+    animateWave();
   }
 
   // ===== PROCESS ACCOUNT ACTIVITY LIGHTNING (on new frame) =====
@@ -1108,9 +1243,13 @@ let vrHammer: VRHammer | null = null;
       }
     };
 
+    const handlePlaybackSpeed = (newSpeed: number) => {
+      animationSpeed = newSpeed;
+    };
     panelBridge.on('settings:update', handleSettingsUpdate);
     panelBridge.on('settings:reset', handleSettingsReset);
     panelBridge.on('camera:focus', handleCameraFocus);
+    panelBridge.on('playback:speed', handlePlaybackSpeed);
 
     // FIXED: Single debounced update function to prevent multiple simultaneous calls
     let updateTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -1151,6 +1290,7 @@ let vrHammer: VRHammer | null = null;
       panelBridge.off('settings:update', handleSettingsUpdate);
       panelBridge.off('settings:reset', handleSettingsReset);
       panelBridge.off('camera:focus', handleCameraFocus);
+      panelBridge.off('playback:speed', handlePlaybackSpeed);
     };
   });
 

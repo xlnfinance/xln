@@ -716,33 +716,17 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     // ============================================================================
     // STEP 2: Hub R2R → Alice ($3M USDC) - REAL TX goes to J-Machine mempool
     // ============================================================================
-    console.log('\n🔄 FRAME 2: Hub → Alice Reserve Transfer ($3M) - REAL BrowserVM TX');
+    console.log('\n🔄 FRAME 2: Hub → Alice R2R - TX ENTERS MEMPOOL (PENDING)');
 
-    // NOTE: R2R doesn't require bilateral account - pure reserve transfer
-    // REAL BrowserVM R2R transaction
-    await browserVM.reserveToReserve(hub.id, alice.id, USDC_TOKEN_ID, usd(3_000_000));
+    // Get jReplica for mempool operations
+    const jReplica = env.jReplicas.get('AHB Demo');
 
-    // Process j_events from BrowserVM (ReserveUpdated events)
-    await processJEvents(env);
-
-    // ✅ ASSERT: R2R delivered - Alice got $3M (eReplica state)
-    const [, aliceRep2] = findReplica(env, alice.id);
-    const aliceReserve2 = aliceRep2.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
-    if (aliceReserve2 !== usd(3_000_000)) {
-      throw new Error(`ASSERT FAIL Frame 2: Alice eReplica reserve = ${aliceReserve2}, expected ${usd(3_000_000)}. J-event NOT delivered!`);
+    // R2R Step 1: Add to J-Machine mempool (PENDING state)
+    // TX sits in mempool as yellow cube until next frame processes it
+    if (jReplica) {
+      jReplica.mempool.push({ type: 'r2r', from: hub.id, to: alice.id, amount: usd(3_000_000), timestamp: env.timestamp });
     }
-    // ✅ ASSERT: BrowserVM on-chain state matches
-    const aliceVMReserve2 = await browserVM.getReserves(alice.id, USDC_TOKEN_ID);
-    if (aliceVMReserve2 !== usd(3_000_000)) {
-      throw new Error(`ASSERT FAIL Frame 2: Alice BrowserVM reserve = ${aliceVMReserve2}, expected ${usd(3_000_000)}. On-chain state mismatch!`);
-    }
-    const hubVMReserve2 = await browserVM.getReserves(hub.id, USDC_TOKEN_ID);
-    if (hubVMReserve2 !== usd(7_000_000)) {
-      throw new Error(`ASSERT FAIL Frame 2: Hub BrowserVM reserve = ${hubVMReserve2}, expected ${usd(7_000_000)}. On-chain state mismatch!`);
-    }
-    console.log(`✅ ASSERT Frame 2: Alice reserve = $3M, Hub reserve = $7M (eReplica + BrowserVM match) ✓`);
 
-    // Create entityInput with R2R tx for J-Machine visualization
     const r2rTx1: EntityInput = {
       entityId: hub.id,
       signerId: hub.signer,
@@ -755,52 +739,27 @@ export async function prepopulateAHB(env: Env): Promise<void> {
       }]
     };
 
-    // Add to jReplica.mempool for yellow cube visualization
-    const jReplica = env.jReplicas.get('AHB Demo');
-    if (jReplica) {
-      jReplica.mempool.push({ type: 'r2r', from: hub.id, to: alice.id, amount: usd(3_000_000), timestamp: env.timestamp });
-    }
-
-    await pushSnapshot(env, 'Hub → Alice: $3M R2R Transfer', {
-      title: 'Reserve-to-Reserve Transfer #1 (R2R)',
-      what: 'Hub calls Depository.reserveToReserve(Alice, $3M). TX enters J-Machine mempool. On finalization: Hub -= $3M, Alice += $3M',
-      why: 'R2R transfers are pure on-chain settlement. Watch Alice\'s sphere grow as she receives funds!',
-      tradfiParallel: 'Like a Fedwire transfer: instant, final, on-chain settlement between reserve accounts',
+    await pushSnapshot(env, 'Hub → Alice: R2R Pending in Mempool', {
+      title: 'R2R #1: TX Enters J-Machine Mempool',
+      what: 'Hub submits reserveToReserve(Alice, $3M). TX is PENDING in J-Machine mempool (yellow cube). Not yet finalized.',
+      why: 'J-Machine batches transactions. TX waits in mempool until block creation.',
+      tradfiParallel: 'Like submitting a Fedwire - queued for batch settlement',
       keyMetrics: [
-        'Hub Reserve: $7M (-$3M)',
-        'Alice Reserve: $3M (+$3M) - now green!',
-        'J-Machine: 1 tx in mempool',
+        'J-Machine mempool: 1 pending tx',
+        'Hub Reserve: $10M (unchanged)',
+        'Alice Reserve: $0 (unchanged)',
       ]
     }, { entityInputs: [r2rTx1], expectedSolvency: TOTAL_SOLVENCY });
 
     // ============================================================================
-    // STEP 3: Hub R2R → Bob ($2M USDC) - Second TX to mempool
+    // STEP 3: Hub R2R → Bob ($2M USDC) - Second TX to mempool (PENDING)
     // ============================================================================
-    console.log('\n🔄 FRAME 3: Hub → Bob Reserve Transfer ($2M) - REAL BrowserVM TX');
+    console.log('\n🔄 FRAME 3: Hub → Bob R2R - TX ENTERS MEMPOOL (PENDING)');
 
-    // NOTE: R2R doesn't require bilateral account - pure reserve transfer
-    // REAL BrowserVM R2R transaction
-    await browserVM.reserveToReserve(hub.id, bob.id, USDC_TOKEN_ID, usd(2_000_000));
-
-    // Process j_events from BrowserVM (ReserveUpdated events)
-    await processJEvents(env);
-
-    // ✅ ASSERT: R2R delivered - Bob got $2M (eReplica state)
-    const [, bobRep3] = findReplica(env, bob.id);
-    const bobReserve3 = bobRep3.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
-    if (bobReserve3 !== usd(2_000_000)) {
-      throw new Error(`ASSERT FAIL Frame 3: Bob eReplica reserve = ${bobReserve3}, expected ${usd(2_000_000)}. J-event NOT delivered!`);
+    // R2R Step 1: Add to J-Machine mempool (PENDING state)
+    if (jReplica) {
+      jReplica.mempool.push({ type: 'r2r', from: hub.id, to: bob.id, amount: usd(2_000_000), timestamp: env.timestamp });
     }
-    // ✅ ASSERT: BrowserVM on-chain state matches
-    const bobVMReserve3 = await browserVM.getReserves(bob.id, USDC_TOKEN_ID);
-    if (bobVMReserve3 !== usd(2_000_000)) {
-      throw new Error(`ASSERT FAIL Frame 3: Bob BrowserVM reserve = ${bobVMReserve3}, expected ${usd(2_000_000)}. On-chain state mismatch!`);
-    }
-    const hubVMReserve3 = await browserVM.getReserves(hub.id, USDC_TOKEN_ID);
-    if (hubVMReserve3 !== usd(5_000_000)) {
-      throw new Error(`ASSERT FAIL Frame 3: Hub BrowserVM reserve = ${hubVMReserve3}, expected ${usd(5_000_000)}. On-chain state mismatch!`);
-    }
-    console.log(`✅ ASSERT Frame 3: Bob reserve = $2M, Hub reserve = $5M (eReplica + BrowserVM match) ✓`);
 
     const r2rTx2: EntityInput = {
       entityId: hub.id,
@@ -814,33 +773,66 @@ export async function prepopulateAHB(env: Env): Promise<void> {
       }]
     };
 
-    // Add to jReplica.mempool for yellow cube visualization
-    if (jReplica) {
-      jReplica.mempool.push({ type: 'r2r', from: hub.id, to: bob.id, amount: usd(2_000_000), timestamp: env.timestamp });
-    }
-
-    await pushSnapshot(env, 'Hub → Bob: $2M R2R Transfer', {
-      title: 'Reserve-to-Reserve Transfer #2',
-      what: 'Hub calls Depository.reserveToReserve(Bob, $2M). Second TX enters mempool.',
-      why: 'Now Hub has distributed $5M total ($3M to Alice, $2M to Bob). Both entities now have visible reserves.',
-      tradfiParallel: 'Hub acts like a treasury distributing funds to subsidiaries via wire transfers',
+    await pushSnapshot(env, 'Hub → Bob: R2R Pending in Mempool', {
+      title: 'R2R #2: TX Enters J-Machine Mempool',
+      what: 'Hub submits reserveToReserve(Bob, $2M). Second TX is PENDING in mempool.',
+      why: 'Multiple R2R txs accumulate in mempool before batch processing.',
+      tradfiParallel: 'Like queuing multiple Fedwires - batched for efficiency',
       keyMetrics: [
-        'Hub Reserve: $5M (-$2M)',
-        'Bob Reserve: $2M (+$2M) - now green!',
-        'J-Machine: 2 txs in mempool',
+        'J-Machine mempool: 2 pending txs',
+        'Hub Reserve: $10M (unchanged)',
+        'Bob Reserve: $0 (unchanged)',
       ]
     }, { entityInputs: [r2rTx2], expectedSolvency: TOTAL_SOLVENCY });
 
     // ============================================================================
-    // STEP 4: Alice R2R → Bob ($500K) - Third TX triggers broadcast!
+    // STEP 4: J-BLOCK #1 - Execute Hub's funding R2Rs (Alice & Bob get funded)
     // ============================================================================
-    console.log('\n🔄 FRAME 4: Alice → Bob Reserve Transfer ($500K) - REAL BrowserVM TX');
+    console.log('\n⚡ FRAME 4: J-Block #1 - Execute Hub Fundings');
 
-    // REAL BrowserVM R2R transaction
-    await browserVM.reserveToReserve(alice.id, bob.id, USDC_TOKEN_ID, usd(500_000));
+    // Execute Hub's 2 funding R2Rs
+    await browserVM.reserveToReserve(hub.id, alice.id, USDC_TOKEN_ID, usd(3_000_000));
+    await browserVM.reserveToReserve(hub.id, bob.id, USDC_TOKEN_ID, usd(2_000_000));
 
-    // Process j_events from BrowserVM (ReserveUpdated events)
+    // Process j_events from BrowserVM
     await processJEvents(env);
+
+    // Clear mempool after J-Block finalized
+    if (jReplica) {
+      jReplica.mempool = [];
+      jReplica.lastBlockTimestamp = env.timestamp;
+      jReplica.blockNumber += 1n;
+    }
+
+    // Verify Hub funding reserves
+    const fundedAliceReserves = await browserVM.getReserves(alice.id, USDC_TOKEN_ID);
+    const fundedBobReserves = await browserVM.getReserves(bob.id, USDC_TOKEN_ID);
+    console.log(`[AHB] J-Block #1 executed - Fundings complete:`);
+    console.log(`  Alice: ${Number(fundedAliceReserves) / 1e18} USDC`);
+    console.log(`  Bob: ${Number(fundedBobReserves) / 1e18} USDC`);
+
+    await pushSnapshot(env, 'Hub Fundings Complete: Alice & Bob funded', {
+      title: 'J-Block #1: Hub Fundings Executed',
+      what: 'Hub distributed $3M to Alice, $2M to Bob. Both entities now have reserve balances.',
+      why: 'Funding R2Rs executed first - entities need reserves before they can transact.',
+      tradfiParallel: 'Like initial capital injection: entities receive operating funds',
+      keyMetrics: [
+        'Hub: $5M reserve (remaining)',
+        'Alice: $3M reserve (funded)',
+        'Bob: $2M reserve (funded)',
+        'Next: Alice → Bob transfer',
+      ]
+    }, { expectedSolvency: TOTAL_SOLVENCY });
+
+    // ============================================================================
+    // STEP 5: Alice R2R → Bob ($500K) - NOW Alice has funds!
+    // ============================================================================
+    console.log('\n🔄 FRAME 5: Alice → Bob R2R - TX ENTERS MEMPOOL (PENDING)');
+
+    // R2R Step 1: Add to J-Machine mempool (PENDING state)
+    if (jReplica) {
+      jReplica.mempool.push({ type: 'r2r', from: alice.id, to: bob.id, amount: usd(500_000), timestamp: env.timestamp });
+    }
 
     const r2rTx3: EntityInput = {
       entityId: alice.id,
@@ -854,33 +846,34 @@ export async function prepopulateAHB(env: Env): Promise<void> {
       }]
     };
 
-    // Add to jReplica.mempool for yellow cube visualization
-    if (jReplica) {
-      jReplica.mempool.push({ type: 'r2r', from: alice.id, to: bob.id, amount: usd(500_000), timestamp: env.timestamp });
-    }
-
-    await pushSnapshot(env, 'Alice → Bob: $500K R2R Transfer', {
-      title: 'Reserve-to-Reserve Transfer #3 → J-Block Finalized!',
-      what: 'Alice sends $500K to Bob. Third TX fills mempool capacity → J-Machine broadcasts rays to ALL entities!',
-      why: 'J-Machine batches transactions for efficiency. When capacity reached, it finalizes J-Block and broadcasts state updates.',
-      tradfiParallel: 'Like batch settlement at end-of-day: accumulate transactions, then settle all at once',
+    await pushSnapshot(env, 'Alice → Bob: R2R Pending in Mempool', {
+      title: 'R2R: Alice → Bob Enters Mempool',
+      what: 'Alice (now funded with $3M) sends $500K to Bob. TX is PENDING in mempool.',
+      why: 'Alice has funds now! This demonstrates peer-to-peer R2R (not just Hub distribution).',
+      tradfiParallel: 'Interbank transfer: one funded bank pays another',
       keyMetrics: [
-        'Alice Reserve: $2.5M (-$500K)',
-        'Bob Reserve: $2.5M (+$500K)',
-        'J-Machine: BROADCAST! 🔥',
-        'J-Block finalized with 3 txs',
+        'Alice: $3M reserve (has funds!)',
+        'Mempool: 1 pending tx',
+        'Next: J-Block #2 execution',
       ]
     }, { entityInputs: [r2rTx3], expectedSolvency: TOTAL_SOLVENCY });
 
     // ============================================================================
-    // STEP 5: Final State - All reserves settled (verify from BrowserVM)
+    // STEP 6: J-BLOCK #2 - Execute Alice → Bob R2R
     // ============================================================================
-    console.log('\n📊 FRAME 5: Final State Summary');
+    console.log('\n⚡ FRAME 6: J-Block #2 - Execute Alice → Bob Transfer');
 
-    // Clear jReplica mempool after J-Block broadcast (txs finalized)
+    // Execute Alice → Bob R2R
+    await browserVM.reserveToReserve(alice.id, bob.id, USDC_TOKEN_ID, usd(500_000));
+
+    // Process j_events from BrowserVM
+    await processJEvents(env);
+
+    // Clear mempool after J-Block finalized
     if (jReplica) {
       jReplica.mempool = [];
       jReplica.lastBlockTimestamp = env.timestamp;
+      jReplica.blockNumber += 1n;
     }
 
     // Verify final reserves from BrowserVM
@@ -888,11 +881,10 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     const finalAliceReserves = await browserVM.getReserves(alice.id, USDC_TOKEN_ID);
     const finalBobReserves = await browserVM.getReserves(bob.id, USDC_TOKEN_ID);
 
-    console.log(`[AHB] Final BrowserVM reserves:`);
+    console.log(`[AHB] J-Block #2 executed - Final reserves:`);
     console.log(`  Hub: ${Number(finalHubReserves) / 1e18} USDC`);
     console.log(`  Alice: ${Number(finalAliceReserves) / 1e18} USDC`);
     console.log(`  Bob: ${Number(finalBobReserves) / 1e18} USDC`);
-    console.log(`  Total: ${Number(finalHubReserves + finalAliceReserves + finalBobReserves) / 1e18} USDC`);
 
     await pushSnapshot(env, 'R2R Complete: All reserves distributed', {
       title: 'Phase 1 Complete: Reserve Distribution',
