@@ -1013,7 +1013,7 @@ export async function prepopulateAHB(env: Env): Promise<void> {
 
     // Step 2: Copy jBatch to jReplica.mempool for visualization (yellow cubes!)
     const [, aliceReplicaForBatch] = findReplica(env, alice.id);
-    const jReplica = env.jReplicas.values().next().value;
+    // jReplica already declared above for R2R mempool pushes
     if (aliceReplicaForBatch.state.jBatchState && jReplica) {
       // Add batch to jReplica mempool so it shows as pending (yellow cube)
       jReplica.mempool.push({
