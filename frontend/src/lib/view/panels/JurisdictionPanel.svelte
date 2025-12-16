@@ -22,7 +22,7 @@
   let selectedJurisdictionName = $state<string | null>(null);
 
   // Tab state
-  let activeTab = $state<'overview' | 'reserves' | 'collaterals' | 'mempool'>('overview');
+  let activeTab = $state<'overview' | 'balances' | 'mempool'>('overview');
 
   // ═══════════════════════════════════════════════════════════════════════════
   //          TIME-TRAVEL AWARE DATA DERIVATION
@@ -185,6 +185,12 @@
     return entityId;
   }
 
+  function formatStateRoot(stateRoot: Uint8Array | undefined): string {
+    if (!stateRoot || stateRoot.length === 0) return '0x0';
+    const hex = Array.from(stateRoot).map(b => b.toString(16).padStart(2, '0')).join('');
+    return '0x' + hex;
+  }
+
   function formatBalance(balance: bigint): string {
     const num = Number(balance) / 1e18;
     if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(1)}M`;
@@ -238,11 +244,8 @@
     <button class="tab" class:active={activeTab === 'overview'} onclick={() => activeTab = 'overview'}>
       Overview
     </button>
-    <button class="tab" class:active={activeTab === 'reserves'} onclick={() => activeTab = 'reserves'}>
-      Reserves ({reserves.length})
-    </button>
-    <button class="tab" class:active={activeTab === 'collaterals'} onclick={() => activeTab = 'collaterals'}>
-      Collaterals ({collaterals.length})
+    <button class="tab" class:active={activeTab === 'balances'} onclick={() => activeTab = 'balances'}>
+      Balances ({reserves.length + collaterals.length})
     </button>
     <button class="tab" class:active={activeTab === 'mempool'} onclick={() => activeTab = 'mempool'}>
       Mempool ({mempool.length})
@@ -268,6 +271,16 @@
             <span class="info-label">Block</span>
             <span class="info-value">#{selectedJurisdiction.blockNumber?.toString() || '0'}</span>
           </div>
+          <div class="info-row">
+            <span class="info-label">State Root</span>
+            <span class="info-value mono state-root" title={formatStateRoot(selectedJurisdiction.stateRoot)}>
+              {formatStateRoot(selectedJurisdiction.stateRoot)}
+            </span>
+          </div>
+          <div class="info-row">
+            <span class="info-label">Block Delay</span>
+            <span class="info-value">{selectedJurisdiction.blockDelayMs || 300}ms</span>
+          </div>
           {#if selectedJurisdiction.contracts?.depository}
             <div class="info-row">
               <span class="info-label">Depository</span>
@@ -280,9 +293,30 @@
               <span class="info-value mono">{selectedJurisdiction.contracts.entityProvider}</span>
             </div>
           {/if}
-          <div class="info-row">
-            <span class="info-label">Mempool</span>
-            <span class="info-value">{selectedJurisdiction.mempool?.length || 0} pending txs</span>
+          <div class="info-row mempool-section">
+            <span class="info-label">Mempool ({mempool.length})</span>
+            {#if mempool.length === 0}
+              <span class="info-value empty-val">empty</span>
+            {:else}
+              <div class="mempool-inline">
+                {#each mempool as tx, i}
+                  <div class="mempool-tx-row">
+                    <span class="tx-idx">#{i + 1}</span>
+                    <span class="tx-type">{tx.type || tx.kind || 'tx'}</span>
+                    {#if tx.from || tx.entityId}
+                      <span class="tx-entity">{formatEntityId(tx.from || tx.entityId)}</span>
+                    {/if}
+                    {#if tx.to || tx.targetEntityId}
+                      <span class="tx-arrow">→</span>
+                      <span class="tx-entity">{formatEntityId(tx.to || tx.targetEntityId)}</span>
+                    {/if}
+                    {#if tx.amount}
+                      <span class="tx-amt">{formatBalance(BigInt(tx.amount))}</span>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+            {/if}
           </div>
           <div class="info-row">
             <span class="info-label">Position</span>
@@ -293,15 +327,17 @@
         </div>
       </div>
 
-    {:else if activeTab === 'reserves'}
-      <!-- Reserves tab -->
+    {:else if activeTab === 'balances'}
+      <!-- Balances tab - Reserves + Collaterals + Disputes -->
+
+      <!-- Reserves Section (R2C: Reserve-to-Collateral) -->
       <div class="section">
         <div class="section-header">
-          <span class="section-title">_reserves mapping</span>
+          <span class="section-title">Reserves (R2C source)</span>
           <span class="count">{reserves.length}</span>
         </div>
         {#if reserves.length === 0}
-          <div class="empty">No reserves in this frame</div>
+          <div class="empty">No reserves</div>
         {:else}
           <div class="storage-table">
             {#each reserves as r}
@@ -321,15 +357,14 @@
         {/if}
       </div>
 
-    {:else if activeTab === 'collaterals'}
-      <!-- Collaterals tab -->
+      <!-- Collaterals Section (C2R: Collateral-to-Reserve) -->
       <div class="section">
         <div class="section-header">
-          <span class="section-title">Bilateral Accounts</span>
+          <span class="section-title">Collaterals (C2R source)</span>
           <span class="count">{collaterals.length}</span>
         </div>
         {#if collaterals.length === 0}
-          <div class="empty">No accounts in this frame</div>
+          <div class="empty">No collaterals</div>
         {:else}
           <table class="accounts-table">
             <thead>
@@ -365,6 +400,15 @@
             </tbody>
           </table>
         {/if}
+      </div>
+
+      <!-- Disputes Section -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Active Disputes</span>
+          <span class="count">0</span>
+        </div>
+        <div class="empty">No active disputes</div>
       </div>
 
     {:else if activeTab === 'mempool'}
@@ -566,6 +610,62 @@
   .info-value.mono {
     font-family: 'Monaco', 'Menlo', monospace;
     color: #58a6ff;
+  }
+
+  .info-value.state-root {
+    word-break: break-all;
+    font-size: 9px;
+    line-height: 1.3;
+    max-width: 200px;
+  }
+
+  .mempool-section {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
+  .mempool-inline {
+    width: 100%;
+    padding-left: 4px;
+  }
+
+  .mempool-tx-row {
+    display: flex;
+    gap: 6px;
+    font-size: 9px;
+    padding: 2px 0;
+    color: #8b949e;
+  }
+
+  .mempool-tx-row .tx-idx {
+    color: #6e7681;
+    min-width: 20px;
+  }
+
+  .mempool-tx-row .tx-type {
+    color: #d29922;
+    text-transform: uppercase;
+    font-weight: 500;
+    min-width: 32px;
+  }
+
+  .mempool-tx-row .tx-entity {
+    color: #58a6ff;
+  }
+
+  .mempool-tx-row .tx-arrow {
+    color: #6e7681;
+  }
+
+  .mempool-tx-row .tx-amt {
+    color: #7ee787;
+    font-weight: 500;
+  }
+
+  .empty-val {
+    color: #6e7681;
+    font-style: italic;
   }
 
   .storage-table {

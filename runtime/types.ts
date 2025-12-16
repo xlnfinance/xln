@@ -750,6 +750,7 @@ export interface JReplica {
   // Creates visual delay where batches sit in mempool as yellow cubes
   blockDelayMs: number;                   // Delay in ms before processing mempool (default: 300)
   lastBlockTimestamp: number;             // Timestamp (ms) of last block creation
+  blockReady?: boolean;                   // True when mempool has items and blockDelayMs elapsed
 
   // Visual position (for 3D rendering)
   position: { x: number; y: number; z: number };

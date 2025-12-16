@@ -51,11 +51,11 @@ test.describe('AHB Demo - Critical Path', () => {
     console.log('⏳ Waiting for prepopulate...');
 
     // Wait for status message showing frames loaded (AHB uses isolatedEnv, not window.xlnEnv)
-    // The DOM status message shows "AHB: 27 frames loaded" when complete (2 mempool delay frames)
+    // The DOM status message shows "AHB: 28 frames loaded" when complete (split J-Block + 2 mempool delay frames)
     await page.waitForSelector('text=/\\d+ frames loaded/', { timeout: 30000 });
 
-    // Also wait for time machine button to show frame count (27 frames now with 2 mempool delay frames)
-    await page.waitForSelector('button:has-text("/27")');
+    // Also wait for time machine button to show frame count (28 frames now with split J-Block + 2 mempool delay frames)
+    await page.waitForSelector('button:has-text("/28")');
 
     console.log('✅ AHB loaded - DOM shows frames loaded');
 
