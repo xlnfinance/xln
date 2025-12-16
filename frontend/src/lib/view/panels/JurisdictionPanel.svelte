@@ -325,51 +325,45 @@
       <!-- Collaterals tab -->
       <div class="section">
         <div class="section-header">
-          <span class="section-title">_collaterals mapping</span>
+          <span class="section-title">Bilateral Accounts</span>
           <span class="count">{collaterals.length}</span>
         </div>
         {#if collaterals.length === 0}
-          <div class="empty">No collaterals in this frame</div>
+          <div class="empty">No accounts in this frame</div>
         {:else}
-          <div class="collateral-list">
-            {#each collaterals as c}
-              {@const parts = c.channelKey.split('-')}
-              {@const leftId = parts[0] || '????'}
-              {@const rightId = parts[1] || '????'}
-              {@const leftKey = Array.from(entityNames.keys()).find(k => k.endsWith(leftId))}
-              {@const rightKey = Array.from(entityNames.keys()).find(k => k.endsWith(rightId))}
-              {@const leftName = (leftKey ? entityNames.get(leftKey) : null) || leftId}
-              {@const rightName = (rightKey ? entityNames.get(rightKey) : null) || rightId}
-              <div class="collateral-card" role="row">
-                <div class="channel-header">
-                  <span class="entity-left">{leftName}</span>
-                  <span class="channel-arrow">↔</span>
-                  <span class="entity-right">{rightName}</span>
-                  <span class="token-badge">USDC</span>
-                </div>
-                <div class="collateral-details">
-                  <div class="detail-row">
-                    <span class="detail-label">Collateral</span>
-                    <span class="detail-value collateral">{formatBalance(c.collateral)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">Ondelta</span>
-                    <span class="detail-value ondelta" class:positive={c.ondelta > 0n} class:negative={c.ondelta < 0n}>
-                      {c.ondelta >= 0n ? '+' : ''}{formatBalance(c.ondelta)}
-                    </span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">{leftName} capacity</span>
-                    <span class="detail-value">{formatBalance(c.collateral > 0n ? (c.ondelta >= 0n ? c.collateral - c.ondelta : c.collateral + BigInt(Math.abs(Number(c.ondelta)))) : 0n)}</span>
-                  </div>
-                  <div class="detail-row">
-                    <span class="detail-label">{rightName} capacity</span>
-                    <span class="detail-value">{formatBalance(c.collateral > 0n ? (c.ondelta >= 0n ? c.ondelta : 0n) : 0n)}</span>
-                  </div>
-                </div>
-              </div>
-            {/each}
-          </div>
+          <table class="accounts-table">
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th>Token</th>
+                <th class="right">Collateral</th>
+                <th class="right">Ondelta</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each collaterals as c}
+                {@const parts = c.channelKey.split('-')}
+                {@const leftId = parts[0] || '??'}
+                {@const rightId = parts[1] || '??'}
+                {@const leftKey = Array.from(entityNames.keys()).find(k => k.endsWith(leftId))}
+                {@const rightKey = Array.from(entityNames.keys()).find(k => k.endsWith(rightId))}
+                {@const leftName = (leftKey ? entityNames.get(leftKey) : null) || leftId}
+                {@const rightName = (rightKey ? entityNames.get(rightKey) : null) || rightId}
+                <tr>
+                  <td class="account-cell">
+                    <span class="entity-left">{leftName}</span>
+                    <span class="sep">↔</span>
+                    <span class="entity-right">{rightName}</span>
+                  </td>
+                  <td class="token-cell">USDC</td>
+                  <td class="value-cell right">{formatBalance(c.collateral)}</td>
+                  <td class="value-cell right" class:positive={c.ondelta > 0n} class:negative={c.ondelta < 0n}>
+                    {c.ondelta >= 0n ? '+' : ''}{formatBalance(c.ondelta)}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
         {/if}
       </div>
 
@@ -651,89 +645,75 @@
     color: #f85149;
   }
 
-  /* Collateral card styles */
-  .collateral-list {
-    padding: 4px;
-  }
-
-  .collateral-card {
-    background: #0d1117;
-    border: 1px solid #30363d;
-    border-radius: 6px;
-    margin-bottom: 8px;
-    overflow: hidden;
-  }
-
-  .channel-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    background: #161b22;
-    border-bottom: 1px solid #21262d;
-  }
-
-  .entity-left {
-    color: #58a6ff;
-    font-weight: 600;
-    font-size: 11px;
-  }
-
-  .channel-arrow {
-    color: #484f58;
-    font-size: 12px;
-  }
-
-  .entity-right {
-    color: #f0883e;
-    font-weight: 600;
-    font-size: 11px;
-  }
-
-  .token-badge {
-    margin-left: auto;
-    font-size: 9px;
-    padding: 2px 6px;
-    background: #238636;
-    color: #fff;
-    border-radius: 3px;
-  }
-
-  .collateral-details {
-    padding: 8px 10px;
-  }
-
-  .detail-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 3px 0;
+  /* Accounts table styles */
+  .accounts-table {
+    width: 100%;
+    border-collapse: collapse;
     font-size: 10px;
   }
 
-  .detail-label {
+  .accounts-table th {
+    text-align: left;
     color: #8b949e;
-  }
-
-  .detail-value {
-    color: #c9d1d9;
     font-weight: 500;
+    padding: 6px 8px;
+    border-bottom: 1px solid #21262d;
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
   }
 
-  .detail-value.collateral {
-    color: #7ee787;
-    font-weight: 700;
-    font-size: 12px;
+  .accounts-table th.right {
+    text-align: right;
   }
 
-  .detail-value.ondelta {
+  .accounts-table td {
+    padding: 6px 8px;
+    border-bottom: 1px solid #21262d;
+  }
+
+  .accounts-table tr:hover {
+    background: #161b22;
+  }
+
+  .account-cell {
+    white-space: nowrap;
+  }
+
+  .account-cell .entity-left {
+    color: #58a6ff;
     font-weight: 600;
   }
 
-  .detail-value.ondelta.positive {
+  .account-cell .sep {
+    color: #484f58;
+    margin: 0 4px;
+  }
+
+  .account-cell .entity-right {
+    color: #f0883e;
+    font-weight: 600;
+  }
+
+  .token-cell {
+    color: #7ee787;
+    font-size: 9px;
+  }
+
+  .value-cell {
+    font-family: 'SF Mono', monospace;
+    color: #c9d1d9;
+  }
+
+  .value-cell.right {
+    text-align: right;
+  }
+
+  .value-cell.positive {
     color: #7ee787;
   }
 
-  .detail-value.ondelta.negative {
+  .value-cell.negative {
     color: #f85149;
   }
 
