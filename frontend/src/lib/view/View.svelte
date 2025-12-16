@@ -206,7 +206,7 @@
 
             // CRITICAL: Manually trigger Graph3D render after scenario loads
             // Store subscriptions may not fire if Graph3D already mounted
-            panelBridge.emit('scenario:loaded', { frames: frames.length });
+            panelBridge.emit('scenario:loaded', { name: 'ahb', frames: frames.length });
 
             console.log(`[View] ✅ AHB scenario loaded successfully!`);
             console.log(`[View]    Frames: ${frames.length}`);
@@ -220,7 +220,15 @@
           } catch (autoplayErr) {
             console.error('[View] ❌ AHB AUTOPLAY FAILED:', autoplayErr);
             console.error('[View] Stack:', (autoplayErr as Error).stack);
-            // Error logged to console F12
+            // CRITICAL: Still show frames created before error
+            const frames = env.history || [];
+            if (frames.length > 0) {
+              console.log('[View] Error but have', frames.length, 'frames - showing them');
+              localIsLive.set(false);
+              localTimeIndex.set(Math.max(0, frames.length - 1));
+              localHistoryStore.set(frames);
+              localEnvStore.set(env);
+            }
           }
         }
       }
@@ -274,7 +282,9 @@
           component = mount(ConsolePanel, {
             target: div,
             props: {
-              isolatedEnv: localEnvStore
+              isolatedEnv: localEnvStore,
+              isolatedHistory: localHistoryStore,
+              isolatedTimeIndex: localTimeIndex
             }
           });
         } else if (options.name === 'runtime-io') {
@@ -619,7 +629,7 @@
 <style>
   .view-wrapper {
     width: 100%;
-    height: 100vh;
+    height: calc(100vh - 56px); /* Account for topbar (56px) */
     background: #1e1e1e;
     display: flex;
     flex-direction: column;
@@ -632,10 +642,14 @@
   }
 
   .view-container.with-timemachine {
-    height: calc(100vh - 48px); /* Leave room for compact TimeMachine */
+    height: calc(100vh - 56px - 48px); /* Topbar (56px) + TimeMachine (48px) */
   }
 
-  /* Embed mode - full screen with TimeMachine, hide dockview tabs */
+  /* Embed mode - no topbar, just TimeMachine */
+  .view-wrapper.embed-mode {
+    height: 100vh;
+  }
+
   .view-wrapper.embed-mode .view-container {
     height: calc(100vh - 48px);
   }

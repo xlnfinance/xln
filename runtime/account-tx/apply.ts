@@ -11,6 +11,7 @@ import { handleReserveToCollateral } from './handlers/reserve-to-collateral';
 import { handleRequestWithdrawal } from './handlers/request-withdrawal';
 import { handleApproveWithdrawal } from './handlers/approve-withdrawal';
 import { handleRequestRebalance } from './handlers/request-rebalance';
+import { handleJSync } from './handlers/j-sync';
 
 /**
  * Process single AccountTx through bilateral consensus
@@ -58,6 +59,9 @@ export function processAccountTx(
 
     case 'request_rebalance':
       return handleRequestRebalance(accountMachine, accountTx as Extract<AccountTx, { type: 'request_rebalance' }>);
+
+    case 'j_sync':
+      return handleJSync(accountMachine, accountTx as Extract<AccountTx, { type: 'j_sync' }>, isOurFrame);
 
     case 'account_frame':
       // This should never be called - frames are handled by frame-level consensus

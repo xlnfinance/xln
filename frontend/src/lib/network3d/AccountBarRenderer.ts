@@ -13,8 +13,8 @@ import * as THREE from 'three';
 import type { EntityData, DerivedAccountData } from './types';
 
 export interface AccountBarVisual {
-  glowColor: 'yellow' | 'blue' | 'red' | null;
-  glowSide: 'left' | 'right' | 'both' | null;
+  glowColor: string | null;
+  glowSide: string | null;
   glowIntensity: number;
   isDashed: boolean;
   pulseSpeed: number;
@@ -24,8 +24,8 @@ export interface AccountBarSettings {
   barsMode: 'close' | 'spread';
   portfolioScale: number;
   selectedTokenId: number;
-  desyncDetected?: boolean; // Bilateral consensus in progress
-  bilateralState?: AccountBarVisual | null; // Visual state from consensus
+  desyncDetected?: boolean | undefined; // Bilateral consensus in progress
+  bilateralState?: AccountBarVisual | null | undefined; // Visual state from consensus
 }
 
 export interface AccountSegments {
@@ -227,12 +227,14 @@ function renderSpreadMode(
   );
 
   let fromOffset = 0;
-  // HYBRID MODEL: Unused on borrower side (FROM), Used credit on lender side (FROM lent to TO)
-  // fromCreditUsed = how much TO borrowed from FROM → shows on FROM's bars (lender's side)
+  // FROM's side of account: outOwnCredit → outCollateral → outPeerCredit
+  // 1. outOwnCredit = credit FROM can use (extended by peer) - light red
+  // 2. outCollateral = FROM's deposited collateral - green
+  // 3. outPeerCredit = peer's debt using FROM's credit line - dark red (used credit)
   const fromBarSegments = [
-    { length: fromSegments.inPeerCredit, colorType: 'availableCredit' as const, label: 'unused credit from peer' },
-    { length: fromSegments.inCollateral, colorType: 'secured' as const, label: 'FROM collateral' },
-    { length: fromCreditUsed, colorType: 'unsecured' as const, label: 'credit FROM extended (used by TO)' }
+    { length: fromSegments.outOwnCredit, colorType: 'availableCredit' as const, label: 'credit FROM can use' },
+    { length: fromSegments.outCollateral, colorType: 'secured' as const, label: 'FROM deposited collateral' },
+    { length: fromSegments.outPeerCredit, colorType: 'unsecured' as const, label: 'peer debt (using FROM credit)' }
   ];
 
   fromBarSegments.forEach((segment) => {
@@ -256,12 +258,14 @@ function renderSpreadMode(
   );
 
   let toOffset = 0;
-  // HYBRID MODEL: Unused on borrower side (TO), Used credit on lender side (TO lent to FROM)
-  // toCreditUsed = how much FROM borrowed from TO → shows on TO's bars (lender's side)
+  // TO's side of account: outOwnCredit → outCollateral → outPeerCredit
+  // 1. outOwnCredit = credit TO can use (extended by peer) - light red
+  // 2. outCollateral = TO's deposited collateral - green
+  // 3. outPeerCredit = peer's debt using TO's credit line - dark red (used credit)
   const toBarSegments = [
-    { length: toSegments.inPeerCredit, colorType: 'availableCredit' as const, label: 'unused credit from peer' },
-    { length: toSegments.inCollateral, colorType: 'secured' as const, label: 'TO collateral' },
-    { length: toCreditUsed, colorType: 'unsecured' as const, label: 'credit TO extended (used by FROM)' }
+    { length: toSegments.outOwnCredit, colorType: 'availableCredit' as const, label: 'credit TO can use' },
+    { length: toSegments.outCollateral, colorType: 'secured' as const, label: 'TO deposited collateral' },
+    { length: toSegments.outPeerCredit, colorType: 'unsecured' as const, label: 'peer debt (using TO credit)' }
   ];
 
   toBarSegments.forEach((segment) => {
@@ -298,17 +302,17 @@ function renderCloseMode(
 ): void {
   const barRadius = barHeight * 2.5;
 
-  // HYBRID MODEL: Same pattern as spread mode
+  // Same pattern as spread mode: outOwnCredit → outCollateral → outPeerCredit
   const fromBarSegments = [
-    { length: fromSegments.inPeerCredit, colorType: 'availableCredit' as const },
-    { length: fromSegments.inCollateral, colorType: 'secured' as const },
-    { length: fromCreditUsed, colorType: 'unsecured' as const }
+    { length: fromSegments.outOwnCredit, colorType: 'availableCredit' as const },
+    { length: fromSegments.outCollateral, colorType: 'secured' as const },
+    { length: fromSegments.outPeerCredit, colorType: 'unsecured' as const }
   ];
 
   const toBarSegments = [
-    { length: toSegments.inPeerCredit, colorType: 'availableCredit' as const },
-    { length: toSegments.inCollateral, colorType: 'secured' as const },
-    { length: toCreditUsed, colorType: 'unsecured' as const }
+    { length: toSegments.outOwnCredit, colorType: 'availableCredit' as const },
+    { length: toSegments.outCollateral, colorType: 'secured' as const },
+    { length: toSegments.outPeerCredit, colorType: 'unsecured' as const }
   ];
 
   // Calculate total length
@@ -376,14 +380,14 @@ function createBarCylinder(
   const shouldGlow = bilateralState?.glowColor &&
     (bilateralState.glowSide === barSide || bilateralState.glowSide === 'both');
 
-  const glowColorMap = {
+  const glowColorMap: Record<string, number> = {
     yellow: 0xffff00,
     blue: 0x00aaff,
     red: 0xff0000
   };
 
   const glowColor = shouldGlow && bilateralState?.glowColor
-    ? glowColorMap[bilateralState.glowColor]
+    ? (glowColorMap[bilateralState.glowColor] ?? color)
     : color;
 
   const material = new THREE.MeshLambertMaterial({
@@ -399,7 +403,7 @@ function createBarCylinder(
 
   // Add pulsing animation if needed
   if (shouldGlow && bilateralState && bilateralState.pulseSpeed > 0) {
-    mesh.userData.pulse = {
+    mesh.userData['pulse'] = {
       speed: bilateralState.pulseSpeed,
       baseIntensity: bilateralState.glowIntensity,
       startTime: Date.now()

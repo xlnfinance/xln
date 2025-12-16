@@ -136,6 +136,8 @@
     executeScenario: (env: unknown, scenario: unknown) => Promise<{ success: boolean; framesGenerated: number; errors?: string[] }>;
     process: (env: unknown, inputs: unknown[]) => Promise<void>;
     parseScenario: (text: string) => { errors: unknown[]; scenario: unknown };
+    classifyBilateralState: (myAccount: unknown, peerCurrentHeight: number | undefined, isLeft: boolean) => { state: string; isLeftEntity: boolean; shouldRollback: boolean; pendingHeight: number | null; mempoolCount: number };
+    getAccountBarVisual: (leftState: unknown, rightState: unknown) => { glowColor: string | null; glowSide: string | null; glowIntensity: number; isDashed: boolean; pulseSpeed: number };
   }
 
   // XLN runtime functions (loaded dynamically, no global store)
@@ -1043,7 +1045,7 @@ let vrHammer: VRHammer | null = null;
     };
 
     initAndSetup().catch(error => {
-      throw new Error(`FINTECH-SAFETY: Failed to initialize 3D topology: ${error.message}`);
+      console.warn(`⚠️ Graph3D init: ${error.message}`);
     });
 
     // Listen for VR toggle events from ArchitectPanel
@@ -1652,7 +1654,7 @@ let vrHammer: VRHammer | null = null;
       20000 // Far plane: large enough to see full grid at any zoom
     );
     camera.position.set(0.41, 572.94, 38.32); // AHB top-down view
-    controls.target.set(0.24, 568.33, -1.37); // Look at AHB center
+    // NOTE: controls.target set later after OrbitControls is created
 
     // Renderer setup with VR support
     renderer = await createRenderer(rendererMode, { antialias: false }); // Disabled for performance

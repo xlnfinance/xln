@@ -254,6 +254,8 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
       parseReplicaKey: notReady as any,
       formatReplicaKey: notReady as any,
       createReplicaKey: notReady as any,
+      classifyBilateralState: notReady as any,
+      getAccountBarVisual: notReady as any,
 
       isReady: false
     };
@@ -366,6 +368,8 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
     parseReplicaKey: $xlnInstance.parseReplicaKey,
     formatReplicaKey: $xlnInstance.formatReplicaKey,
     createReplicaKey: $xlnInstance.createReplicaKey,
+    classifyBilateralState: $xlnInstance.classifyBilateralState,
+    getAccountBarVisual: $xlnInstance.getAccountBarVisual,
 
     // State management - indicates functions are fully loaded
     isReady: true

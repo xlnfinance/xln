@@ -203,7 +203,6 @@ export interface XLNModule {
 
   // Runtime operations
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>;
-  applyServerInput: (env: Env, input: unknown) => Env;
   runDemo: (env: Env) => Promise<Env>;
   runDemoWrapper: () => Promise<void>;
 
@@ -259,6 +258,10 @@ export interface XLNModule {
   // Entity display helpers
   getEntityDisplayInfoFromProfile: (profile: EntityProfile) => EntityDisplayInfo;
   formatShortEntityId: (entityId: string) => string;
+
+  // Bilateral consensus state
+  classifyBilateralState: (myAccount: unknown, peerCurrentHeight: number | undefined, isLeft: boolean) => { state: string; isLeftEntity: boolean; shouldRollback: boolean; pendingHeight: number | null; mempoolCount: number };
+  getAccountBarVisual: (leftState: unknown, rightState: unknown) => { glowColor: string | null; glowSide: string | null; glowIntensity: number; isDashed: boolean; pulseSpeed: number };
 }
 
 /**

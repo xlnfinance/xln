@@ -17,11 +17,28 @@ const HEAVY_LOGS = false;
 
 // Event types we care about from the jurisdiction
 
+/**
+ * BrowserVM event interface (matches browserVMProvider.ts EVMEvent)
+ */
+export interface BrowserVMEvent {
+  name: string;
+  args: Record<string, any>;
+}
+
+/**
+ * BrowserVM interface for event subscription
+ */
+export interface BrowserVMEventSource {
+  onAny(callback: (event: BrowserVMEvent) => void): () => void;
+  getBlockNumber(): bigint;
+}
+
 interface WatcherConfig {
   rpcUrl: string;
   entityProviderAddress: string;
   depositoryAddress: string;
   startBlock?: number;
+  browserVM?: BrowserVMEventSource; // Optional BrowserVM for simnet mode
 }
 
 interface SignerConfig {
@@ -31,11 +48,16 @@ interface SignerConfig {
 }
 
 export class JEventWatcher {
-  private provider: ethers.JsonRpcProvider;
-  private entityProviderContract: ethers.Contract;
-  private depositoryContract: ethers.Contract;
+  private provider: ethers.JsonRpcProvider | null = null;
+  private entityProviderContract: ethers.Contract | null = null;
+  private depositoryContract: ethers.Contract | null = null;
   private signers: Map<string, SignerConfig> = new Map();
   private isWatching: boolean = false;
+
+  // BrowserVM mode (simnet)
+  private browserVM: BrowserVMEventSource | null = null;
+  private browserVMUnsubscribe: (() => void) | null = null;
+  private env: Env | null = null; // Store env reference for BrowserVM event handling
 
   // Minimal ABIs for events we need
   private entityProviderABI = [
@@ -53,6 +75,14 @@ export class JEventWatcher {
   ];
 
   constructor(config: WatcherConfig) {
+    // BrowserVM mode - subscribe to events directly, no RPC needed
+    if (config.browserVM) {
+      this.browserVM = config.browserVM;
+      console.log(`🔭 J-WATCHER: Initialized in BrowserVM mode (simnet)`);
+      return;
+    }
+
+    // Ethers RPC mode
     // Resolve relative URLs to full URLs for ethers.js (browser compat)
     let resolvedRpcUrl = config.rpcUrl;
     if (typeof window !== 'undefined' && config.rpcUrl.startsWith('/')) {
@@ -102,11 +132,24 @@ export class JEventWatcher {
     }
 
     this.isWatching = true;
+    this.env = env; // Store for BrowserVM event handler
+
+    // BrowserVM mode - subscribe to events directly
+    if (this.browserVM) {
+      console.log('🔭 J-WATCHER: Starting BrowserVM subscription mode...');
+      this.browserVMUnsubscribe = this.browserVM.onAny((event) => {
+        this.handleBrowserVMEvent(event);
+      });
+      console.log('🔭 J-WATCHER: Started with BrowserVM event subscription');
+      return;
+    }
+
+    // Ethers RPC mode
     console.log('🔭 J-WATCHER: Starting simple first-principles watcher...');
 
     try {
       // Test blockchain connection
-      const currentBlock = await this.provider.getBlockNumber();
+      const currentBlock = await this.provider!.getBlockNumber();
       console.log(`🔭 J-WATCHER: Connected to blockchain at block ${currentBlock}`);
     } catch (error) {
       console.log(`🔭⚠️  J-WATCHER: Blockchain not ready, will retry: ${error instanceof Error ? error.message : String(error)}`);
@@ -129,12 +172,174 @@ export class JEventWatcher {
   }
 
   /**
+   * Handle BrowserVM event - convert to EntityInput and queue
+   */
+  private handleBrowserVMEvent(event: BrowserVMEvent): void {
+    console.log(`🔭 handleBrowserVMEvent CALLED: ${event.name}`);
+
+    if (!this.env) {
+      console.error('🔭❌ J-WATCHER: No env reference for BrowserVM event');
+      return;
+    }
+
+    const blockNumber = this.browserVM ? Number(this.browserVM.getBlockNumber()) : 0;
+
+    // 1) J-EVENT THROUGH: Event received from BrowserVM/blockchain
+    console.log(`📡 [1/3] J-EVENT-IN: ${event.name} | eReplicas=${this.env.eReplicas.size}`);
+
+    // Find all proposer replicas that should receive this event
+    let foundAny = false;
+    for (const [replicaKey, replica] of this.env.eReplicas.entries()) {
+      console.log(`   checking replica: ${replicaKey.slice(-12)} isProposer=${replica.isProposer}`);
+      if (!replica.isProposer) continue;
+
+      const [entityId, signerId] = replicaKey.split(':');
+      if (!entityId || !signerId) continue;
+
+      // Check if this event is relevant to this entity
+      const isRelevant = this.isEventRelevantToEntity(event, entityId);
+      console.log(`   relevant to ${entityId.slice(-4)}? ${isRelevant}`);
+      if (!isRelevant) continue;
+
+      // Convert BrowserVM event to EntityTx (pass entityId for left/right determination)
+      const entityTx = this.browserVMEventToEntityTx(event, signerId, blockNumber, entityId);
+      if (!entityTx) { console.log(`   ❌ entityTx conversion failed`); continue; }
+
+      foundAny = true;
+      // Queue the event for processing
+      console.log(`   📮 QUEUE → ${entityId.slice(-4)} (pending will be ${this.env.runtimeInput.entityInputs.length + 1})`);
+      this.env.runtimeInput.entityInputs.push({
+        entityId,
+        signerId,
+        entityTxs: [entityTx],
+      });
+    }
+    if (!foundAny) {
+      console.log(`   ⚠️ No replicas matched event ${event.name}`);
+    }
+  }
+
+  /**
+   * Check if a BrowserVM event is relevant to an entity
+   */
+  private isEventRelevantToEntity(event: BrowserVMEvent, entityId: string): boolean {
+    switch (event.name) {
+      case 'ReserveUpdated':
+        return event.args.entity === entityId;
+      case 'SettlementProcessed':
+        return event.args.leftEntity === entityId || event.args.rightEntity === entityId;
+      case 'TransferReserveToCollateral':
+        return event.args.receivingEntity === entityId || event.args.counterentity === entityId;
+      default:
+        return false;
+    }
+  }
+
+  /**
+   * Convert BrowserVM event to EntityTx format
+   * @param entityId - The entity this event is being created for (for left/right determination)
+   */
+  private browserVMEventToEntityTx(event: BrowserVMEvent, signerId: string, blockNumber: number, entityId: string): any {
+    const baseData = {
+      from: signerId,
+      observedAt: Date.now(),
+      blockNumber,
+      transactionHash: `browservm-${Date.now()}`, // Synthetic tx hash for BrowserVM
+    };
+
+    switch (event.name) {
+      case 'ReserveUpdated':
+        return {
+          type: 'j_event' as const,
+          data: {
+            ...baseData,
+            event: {
+              type: 'ReserveUpdated',
+              data: {
+                entity: event.args.entity,
+                tokenId: Number(event.args.tokenId),
+                newBalance: event.args.newBalance?.toString() || '0',
+                symbol: `TKN${event.args.tokenId}`,
+                decimals: 18,
+              },
+            },
+          },
+        };
+
+      case 'SettlementProcessed': {
+        // Determine if this entity is left or right in the bilateral relationship
+        const isLeft = entityId === event.args.leftEntity;
+        return {
+          type: 'j_event' as const,
+          data: {
+            ...baseData,
+            event: {
+              type: 'SettlementProcessed',
+              data: {
+                leftEntity: event.args.leftEntity,
+                rightEntity: event.args.rightEntity,
+                counterpartyEntityId: isLeft ? event.args.rightEntity : event.args.leftEntity,
+                tokenId: Number(event.args.tokenId),
+                ownReserve: (isLeft ? event.args.leftReserve : event.args.rightReserve)?.toString() || '0',
+                counterpartyReserve: (isLeft ? event.args.rightReserve : event.args.leftReserve)?.toString() || '0',
+                collateral: event.args.collateral?.toString() || '0',
+                ondelta: event.args.ondelta?.toString() || '0',
+                side: isLeft ? 'left' : 'right',
+              },
+            },
+          },
+        };
+      }
+
+      case 'TransferReserveToCollateral': {
+        // Determine if this entity is receiving or counterparty
+        const isReceiving = entityId === event.args.receivingEntity;
+        return {
+          type: 'j_event' as const,
+          data: {
+            ...baseData,
+            event: {
+              type: 'TransferReserveToCollateral',
+              data: {
+                receivingEntity: event.args.receivingEntity,
+                counterentity: event.args.counterentity,
+                collateral: event.args.collateral?.toString() || '0',
+                ondelta: event.args.ondelta?.toString() || '0',
+                tokenId: Number(event.args.tokenId),
+                side: isReceiving ? 'receiving' : 'counterparty',
+              },
+            },
+          },
+        };
+      }
+
+      default:
+        console.log(`🔭⚠️ [BrowserVM] Unknown event type: ${event.name}`);
+        return null;
+    }
+  }
+
+  /**
    * Stop watching
    */
   stopWatching(): void {
     this.isWatching = false;
-    this.entityProviderContract.removeAllListeners();
-    this.depositoryContract.removeAllListeners();
+
+    // BrowserVM mode cleanup
+    if (this.browserVMUnsubscribe) {
+      this.browserVMUnsubscribe();
+      this.browserVMUnsubscribe = null;
+      console.log('🔭 J-WATCHER: Stopped BrowserVM subscription');
+      return;
+    }
+
+    // Ethers mode cleanup
+    if (this.entityProviderContract) {
+      this.entityProviderContract.removeAllListeners();
+    }
+    if (this.depositoryContract) {
+      this.depositoryContract.removeAllListeners();
+    }
     console.log('🔭 J-WATCHER: Stopped watching');
   }
 
@@ -494,6 +699,27 @@ export async function setupJEventWatcher(
   if (DEBUG) {
     console.log('🔭✅ J-WATCHER: Setup complete with first-principles design');
   }
+
+  return watcher;
+}
+
+/**
+ * Helper function to set up watcher with BrowserVM (simnet mode)
+ */
+export async function setupBrowserVMWatcher(
+  env: Env,
+  browserVM: BrowserVMEventSource,
+): Promise<JEventWatcher> {
+  const watcher = createJEventWatcher({
+    rpcUrl: '', // Not used in BrowserVM mode
+    entityProviderAddress: '',
+    depositoryAddress: '',
+    browserVM,
+  });
+
+  await watcher.startWatching(env);
+
+  console.log('🔭✅ J-WATCHER: Setup complete with BrowserVM mode');
 
   return watcher;
 }

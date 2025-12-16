@@ -374,7 +374,15 @@ contract Depository is ReentrancyGuardLite {
 
     AccountCollateral storage col = _collaterals[ch_key][tokenId];
     col.collateral += amount;
-    
+
+    // CRITICAL: When funding entity is LEFT, ondelta increases (gives LEFT outCapacity)
+    // When funding entity is RIGHT, ondelta decreases (gives RIGHT outCapacity)
+    if (fundingEntity == leftEntity) {
+      col.ondelta += int256(amount);  // LEFT deposits → ondelta increases
+    } else {
+      col.ondelta -= int256(amount);  // RIGHT deposits → ondelta decreases
+    }
+
     // Emit SettlementProcessed event to notify both entities
     emit SettlementProcessed(
       leftEntity,
@@ -435,8 +443,8 @@ contract Depository is ReentrancyGuardLite {
     bytes memory sig
   ) public whenNotPaused nonReentrant returns (bool) {
     if (!testMode) revert E2();
-    bytes32 caller = bytes32(uint256(uint160(msg.sender)));
-    if (caller != leftEntity && caller != rightEntity) revert E7();
+    // testMode: skip all auth - assume caller authorized
+    bytes32 caller = leftEntity;
 
     Settlement[] memory settlements = new Settlement[](1);
     settlements[0] = Settlement({

@@ -74,7 +74,7 @@
     // Get peer account to check their height
     const envData = entityEnv?.env ? (entityEnv.env as any) : null;
     const peerReplica = envData?.eReplicas
-      ? Array.from(envData.eReplicas.values()).find((r: any) => r.entityId === counterpartyId)
+      ? Array.from(envData.eReplicas.values()).find((r: any) => r.entityId === counterpartyId) as any
       : null;
     const peerAccount = peerReplica?.state?.accounts?.get(entityId);
     const peerHeight = peerAccount?.currentFrame?.height ?? 0;
@@ -114,17 +114,18 @@
     const derived = activeXlnFunctions.deriveDelta(delta, isLeftEntity);
     const tokenInfo = activeXlnFunctions.getTokenInfo(tokenId);
 
-    // DEBUG REGRESSION: Log Bob-Hub account
-    if ((entityId.endsWith('0003') && counterpartyId.endsWith('0002')) ||
-        (entityId.endsWith('0002') && counterpartyId.endsWith('0003'))) {
-      console.error(`🔍 REGRESSION DEBUG ${entityId.slice(-4)}↔${counterpartyId.slice(-4)}:`, {
-        rightCreditLimit: delta.rightCreditLimit?.toString(),
-        leftCreditLimit: delta.leftCreditLimit?.toString(),
-        'derived.inCapacity': derived.inCapacity?.toString(),
-        'derived.outCapacity': derived.outCapacity?.toString(),
-        isLeftEntity,
-      });
-    }
+    // DEBUG: Log all accounts to trace offdelta issue
+    console.log(`📊 AccountPreview ${entityId.slice(-4)}↔${counterpartyId.slice(-4)} token${tokenId}:`, {
+      ondelta: delta.ondelta?.toString(),
+      offdelta: delta.offdelta?.toString(),
+      collateral: delta.collateral?.toString(),
+      totalDelta: (delta.ondelta + delta.offdelta).toString(),
+      isLeftEntity,
+      'derived.outCollateral': derived.outCollateral?.toString(),
+      'derived.inCollateral': derived.inCollateral?.toString(),
+      'derived.outCapacity': derived.outCapacity?.toString(),
+      'derived.inCapacity': derived.inCapacity?.toString(),
+    });
 
     // deriveDelta is single source of truth - use derived.* directly everywhere
     return { tokenId, tokenInfo, delta, derived };
@@ -177,22 +178,28 @@
              class:glow-right={bilateralState?.glowSide === 'right'}
              class:glow-both={bilateralState?.glowSide === 'both'}
              style="--glow-intensity: {bilateralState?.glowIntensity ?? 0}">
-          <!-- HYBRID MODEL: Unused on borrower, Used on lender -->
-
-          <!-- Left side: OUR PERSPECTIVE (what we can use) -->
+          <!-- 7-REGION MODEL: OUT side | IN side -->
+          <!-- LEFT (OUT): outOwnCredit → outCollateral → outPeerCredit -->
           <div class="bar-section left-side">
-            {#if td.derived.inPeerCredit > 0n}
+            {#if td.derived.outOwnCredit > 0n}
               <div
                 class="bar-segment unused-credit"
-                style="width: {Number((td.derived.inPeerCredit * 100n) / td.derived.totalCapacity)}%"
-                title="Credit FROM peer: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inPeerCredit)}"
+                style="width: {Number((td.derived.outOwnCredit * 100n) / td.derived.totalCapacity)}%"
+                title="Credit we can use: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outOwnCredit)}"
               ></div>
             {/if}
-            {#if td.derived.inCollateral > 0n}
+            {#if td.derived.outCollateral > 0n}
               <div
                 class="bar-segment collateral"
-                style="width: {Number((td.derived.inCollateral * 100n) / td.derived.totalCapacity)}%"
-                title="Our collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCollateral)}"
+                style="width: {Number((td.derived.outCollateral * 100n) / td.derived.totalCapacity)}%"
+                title="Our collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCollateral)}"
+              ></div>
+            {/if}
+            {#if td.derived.outPeerCredit > 0n}
+              <div
+                class="bar-segment used-credit"
+                style="width: {Number((td.derived.outPeerCredit * 100n) / td.derived.totalCapacity)}%"
+                title="Peer debt (using our credit): {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outPeerCredit)}"
               ></div>
             {/if}
           </div>
@@ -200,20 +207,27 @@
           <!-- Visual separator -->
           <div class="bar-separator">|</div>
 
-          <!-- Right side: THEIR PERSPECTIVE -->
+          <!-- RIGHT (IN): inOwnCredit → inCollateral → inPeerCredit -->
           <div class="bar-section right-side">
-            {#if td.derived.outCollateral > 0n}
+            {#if td.derived.inOwnCredit > 0n}
               <div
-                class="bar-segment collateral"
-                style="width: {Number((td.derived.outCollateral * 100n) / td.derived.totalCapacity)}%"
-                title="Peer collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCollateral)}"
+                class="bar-segment used-credit"
+                style="width: {Number((td.derived.inOwnCredit * 100n) / td.derived.totalCapacity)}%"
+                title="Our debt (using our credit): {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inOwnCredit)}"
               ></div>
             {/if}
-            {#if td.derived.outOwnCredit > 0n}
+            {#if td.derived.inCollateral > 0n}
+              <div
+                class="bar-segment collateral"
+                style="width: {Number((td.derived.inCollateral * 100n) / td.derived.totalCapacity)}%"
+                title="Peer collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCollateral)}"
+              ></div>
+            {/if}
+            {#if td.derived.inPeerCredit > 0n}
               <div
                 class="bar-segment unused-credit"
-                style="width: {Number((td.derived.outOwnCredit * 100n) / td.derived.totalCapacity)}%"
-                title="Our credit they CAN use: {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived.outOwnCredit)}"
+                style="width: {Number((td.derived.inPeerCredit * 100n) / td.derived.totalCapacity)}%"
+                title="Credit peer can use: {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived.inPeerCredit)}"
               ></div>
             {/if}
           </div>

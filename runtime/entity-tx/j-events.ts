@@ -1,7 +1,7 @@
-import { EntityState } from '../types';
+import { EntityState, Delta } from '../types';
 import { DEBUG } from '../utils';
 import { cloneEntityState, addMessage } from '../state-helpers';
-import { getTokenInfo } from '../account-utils';
+import { getTokenInfo, getDefaultCreditLimit } from '../account-utils';
 import { safeStringify } from '../serialization-utils';
 
 /**
@@ -28,6 +28,37 @@ const getTokenDecimals = (tokenId: number): number => {
 };
 
 /**
+ * Get or create delta for a token in an account
+ * CRITICAL: J-events update account state directly (authoritative from blockchain)
+ */
+const getOrCreateDelta = (entityState: EntityState, counterpartyId: string, tokenId: number): Delta | null => {
+  const account = entityState.accounts.get(counterpartyId);
+  if (!account) {
+    console.warn(`⚠️ J-EVENT: No account found for counterparty ${counterpartyId.slice(0, 10)}...`);
+    return null;
+  }
+
+  let delta = account.deltas.get(tokenId);
+  if (!delta) {
+    console.log(`💰 J-EVENT: Creating new delta for token ${tokenId}`);
+    const defaultCreditLimit = getDefaultCreditLimit(tokenId);
+    delta = {
+      tokenId,
+      collateral: 0n,
+      ondelta: 0n,
+      offdelta: 0n,
+      leftCreditLimit: defaultCreditLimit,
+      rightCreditLimit: defaultCreditLimit,
+      leftAllowance: 0n,
+      rightAllowance: 0n,
+    };
+    account.deltas.set(tokenId, delta);
+  }
+
+  return delta;
+};
+
+/**
  * Handle jurisdiction (blockchain) events
  * @param entityState - Current entity state
  * @param entityTxData - Validated J-event transaction data
@@ -35,14 +66,20 @@ const getTokenDecimals = (tokenId: number): number => {
 export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntityTxData): EntityState => {
   const { from, event, observedAt, blockNumber, transactionHash } = entityTxData;
 
-  // Reject events from blocks we've already processed - handle undefined jBlock
-  const currentJBlock = entityState.jBlock || 0;
-  console.log(`🔍 J-EVENT-CHECK: ${event.type} block=${blockNumber} vs entity.jBlock=${currentJBlock} (raw=${entityState.jBlock}), from=${from}`);
-  if (blockNumber <= currentJBlock) {
-    console.log(`🔄 IGNORING OLD J-EVENT: ${event.type} from block ${blockNumber} (entity already at j-block ${entityState.jBlock})`);
+  // Reject events from blocks we've already processed
+  // CRITICAL: Use < not <= because multiple events can come from the same block
+  // (e.g., ReserveUpdated + SettlementProcessed from same transaction)
+  const currentJBlock = entityState.jBlock;
+
+  const entityShort = entityState.entityId.slice(-4);
+  // 2) E-MACHINE GETS IT: Entity receives j-event for processing
+  console.log(`🏛️ [2/3] E-MACHINE: ${entityShort} ← ${event.type}`);
+
+  if (currentJBlock !== undefined && currentJBlock !== null && blockNumber < currentJBlock) {
+    console.log(`   ⏭️ SKIP: old block`);
     return entityState;
   }
-  console.log(`✅ J-EVENT-ACCEPTED: ${event.type} block=${blockNumber} > entity.jBlock=${entityState.jBlock}, will process`);
+  console.log(`   ✓ ACCEPT`);
 
   const newEntityState = cloneEntityState(entityState);
   // Update jBlock to current event block
@@ -154,79 +191,73 @@ export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntit
     
     if (DEBUG) console.log(`✅ Reserve transfer processed: ${direction} ${amount} token ${tokenId}`);
   } else if (event.type === 'SettlementProcessed') {
-    const { counterpartyEntityId, tokenId, ownReserve, counterpartyReserve, collateral, ondelta, side } = event.data;
+    const { counterpartyEntityId, tokenId, ownReserve, collateral, ondelta } = event.data;
+    const tokenIdNum = Number(tokenId);
+    const cpShort = (counterpartyEntityId as string).slice(-4);
 
-    // Update own reserves based on the settlement
+    // Update own reserves based on the settlement (entity-level)
     newEntityState.reserves.set(String(tokenId), BigInt(ownReserve as string | number | bigint));
 
-    // Create accountInput to feed into a-machine for bilateral consensus
-    // This enables the settlement event to be processed by the account machine
-    const accountInput = {
-      fromEntityId: entityState.entityId,
-      toEntityId: counterpartyEntityId as string,
-      accountTx: {
-        type: 'account_settle' as const,
-        data: {
-          tokenId: Number(tokenId),
-          ownReserve: ownReserve as unknown,
-          counterpartyReserve: counterpartyReserve as unknown,
-          collateral: collateral as unknown,
-          ondelta: ondelta as unknown,
-          side: side as unknown,
-          blockNumber: blockNumber,
-          transactionHash: transactionHash
-        }
-      },
-      metadata: {
-        purpose: 'settlement_consensus',
-        description: `Settlement event from j-machine for token ${tokenId}`
+    // DIRECT UPDATE - J-machine is authoritative, same pattern as ReserveUpdated
+    const account = newEntityState.accounts.get(counterpartyEntityId as string);
+    if (account) {
+      let delta = account.deltas.get(tokenIdNum);
+      if (!delta) {
+        const defaultCreditLimit = getDefaultCreditLimit(tokenIdNum);
+        delta = {
+          tokenId: tokenIdNum,
+          collateral: 0n,
+          ondelta: 0n,
+          offdelta: 0n,
+          leftCreditLimit: defaultCreditLimit,
+          rightCreditLimit: defaultCreditLimit,
+          leftAllowance: 0n,
+          rightAllowance: 0n,
+        };
+        account.deltas.set(tokenIdNum, delta);
       }
-    };
-
-    // Add to entity's account inputs queue for processing
-    // This will be processed by the account handler to update bilateral account state
-    if (!newEntityState.accountInputQueue) {
-      newEntityState.accountInputQueue = [];
+      const oldColl = delta.collateral;
+      const oldOndelta = delta.ondelta;
+      delta.collateral = BigInt(collateral as string | number | bigint);
+      delta.ondelta = BigInt(ondelta as string | number | bigint);
+      console.log(`   💰 [2/3] Settlement: ${entityShort}↔${cpShort} | coll ${oldColl}→${delta.collateral} | ondelta ${oldOndelta}→${delta.ondelta}`);
+    } else {
+      console.warn(`   ⚠️ Settlement: No account for ${cpShort}`);
     }
-    newEntityState.accountInputQueue.push(accountInput as any);
-
-    if (DEBUG) console.log(`✅ SettlementProcessed: Created accountInput for token ${tokenId} with counterparty ${(counterpartyEntityId as string).slice(0,10)}...`);
   } else if (event.type === 'TransferReserveToCollateral') {
     const { receivingEntity, counterentity, collateral, ondelta, tokenId, side } = event.data;
+    const tokenIdNum = Number(tokenId);
 
     // Determine counterparty from our perspective
     const counterpartyEntityId = (side === 'receiving' ? counterentity : receivingEntity) as string;
+    const cpShort2 = counterpartyEntityId.slice(-4);
 
-    // Note: Reserve updates happen via separate ReserveUpdated event, so we don't update reserves here
-
-    // Create accountInput to update bilateral account state
-    const accountInput = {
-      fromEntityId: entityState.entityId,
-      toEntityId: counterpartyEntityId,
-      accountTx: {
-        type: 'reserve_to_collateral' as const,
-        data: {
-          tokenId: Number(tokenId),
-          collateral: collateral as unknown, // Absolute collateral value from contract
-          ondelta: ondelta as unknown,       // Absolute ondelta value from contract
-          side: side as unknown,             // 'receiving' or 'counterparty'
-          blockNumber: blockNumber,
-          transactionHash: transactionHash
-        }
-      },
-      metadata: {
-        purpose: 'r2c_consensus',
-        description: `R→C event from j-machine for token ${tokenId}`
+    // DIRECT UPDATE - J-machine is authoritative, same pattern as ReserveUpdated
+    const account = newEntityState.accounts.get(counterpartyEntityId);
+    if (account) {
+      let delta = account.deltas.get(tokenIdNum);
+      if (!delta) {
+        const defaultCreditLimit = getDefaultCreditLimit(tokenIdNum);
+        delta = {
+          tokenId: tokenIdNum,
+          collateral: 0n,
+          ondelta: 0n,
+          offdelta: 0n,
+          leftCreditLimit: defaultCreditLimit,
+          rightCreditLimit: defaultCreditLimit,
+          leftAllowance: 0n,
+          rightAllowance: 0n,
+        };
+        account.deltas.set(tokenIdNum, delta);
       }
-    };
-
-    // Add to entity's account inputs queue
-    if (!newEntityState.accountInputQueue) {
-      newEntityState.accountInputQueue = [];
+      const oldColl = delta.collateral;
+      const oldOndelta = delta.ondelta;
+      delta.collateral = BigInt(collateral as string | number | bigint);
+      delta.ondelta = BigInt(ondelta as string | number | bigint);
+      console.log(`   💰 [2/3] R→C: ${entityShort}↔${cpShort2} | coll ${oldColl}→${delta.collateral} | ondelta ${oldOndelta}→${delta.ondelta}`);
+    } else {
+      console.warn(`   ⚠️ R→C: No account for ${cpShort2}`);
     }
-    newEntityState.accountInputQueue.push(accountInput as any);
-
-    if (DEBUG) console.log(`✅ TransferReserveToCollateral: Created accountInput for token ${tokenId} with counterparty ${counterpartyEntityId.slice(0,10)}...`);
   } else if (event.type === 'InsuranceRegistered') {
     const { insured, insurer, tokenId, limit, expiresAt } = event.data;
     const tokenSymbol = getTokenSymbol(tokenId as number);

@@ -13,6 +13,16 @@ import { buildEntityProfile } from './gossip-helper';
 import { cloneEntityReplica } from './state-helpers';
 import type { Profile } from './gossip';
 
+// Lazy-loaded process to avoid circular dependency
+let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
+const getProcess = async () => {
+  if (!_process) {
+    const runtime = await import('./runtime');
+    _process = runtime.process;
+  }
+  return _process;
+};
+
 const USDC_TOKEN_ID = 1; // Token 1 = USDC (fixed from incorrect token 2)
 const DECIMALS = 18n;
 const ONE_TOKEN = 10n ** DECIMALS;
@@ -203,7 +213,8 @@ function pushFinalSnapshot(env: Env, description: string) {
   env.history.push(snapshot);
 }
 
-export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs?: EntityInput[]) => Promise<any>): Promise<void> {
+export async function prepopulate(env: Env): Promise<void> {
+  const process = await getProcess();
   env.disableAutoSnapshots = true; // Disable automatic tick snapshots
   try {
     console.log('🌐 Starting XLN Prepopulation');
@@ -311,7 +322,7 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
   }
 
   // Hub1 opens account with Hub2
-  await processUntilEmpty(env, [{
+  await process(env, [{
     entityId: hub1.id,
     signerId: hub1.signer,
     entityTxs: [{
@@ -349,7 +360,7 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
     const hub = (i % 2 === 0) ? hub1 : hub2; // Even index → hub1, odd → hub2
 
     // User opens account with hub
-    await processUntilEmpty(env, [{
+    await process(env, [{
       entityId: user.id,
       signerId: user.signer,
       entityTxs: [{
@@ -370,7 +381,7 @@ export async function prepopulate(env: Env, processUntilEmpty: (env: Env, inputs
     const hubNum = parseInt(hub.id.slice(2), 16);
 
     // Send profile update to set hub capabilities and lower fees
-    await processUntilEmpty(env, [{
+    await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,
       entityTxs: [{

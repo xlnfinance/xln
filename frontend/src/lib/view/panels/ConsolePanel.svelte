@@ -2,8 +2,10 @@
   import { onMount } from 'svelte';
   import type { Writable } from 'svelte/store';
 
-  // Props for isolated mode
+  // Props for isolated mode (passed from View.svelte)
   export let isolatedEnv: Writable<any>;
+  export let isolatedHistory: Writable<any[]> | undefined = undefined;
+  export let isolatedTimeIndex: Writable<number> | undefined = undefined;
 
   interface ConsoleEntry {
     id: number;
@@ -23,6 +25,46 @@
   let searchText = '';
   let debouncedSearchText = ''; // Debounced version for filtering
   let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Load frame logs from history when timeIndex changes
+  function loadFrameLogs() {
+    if (!isolatedHistory || !isolatedTimeIndex) return;
+    const history = $isolatedHistory;
+    const idx = $isolatedTimeIndex;
+    if (!history || history.length === 0 || idx === undefined) return;
+
+    // Get all frame logs up to current index
+    const allLogs: ConsoleEntry[] = [];
+    const endIdx: number = idx >= 0 ? idx : history.length - 1;
+
+    for (let i = 0; i <= endIdx && i < history.length; i++) {
+      const frame = history[i];
+      const frameLogs = frame?.logs || frame?.frameLogs || [];
+      for (const flog of frameLogs) {
+        allLogs.push({
+          id: logId++,
+          timestamp: new Date(flog.timestamp).toLocaleTimeString('en-US', {
+            hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit'
+          }),
+          level: flog.level === 'debug' ? 'debug' : flog.level === 'warn' ? 'warn' : flog.level === 'error' ? 'error' : 'log',
+          message: `[F${i}] ${flog.message}`,
+          stack: undefined
+        });
+      }
+    }
+    logs = allLogs.slice(-maxLogs);
+
+    if (autoScroll && scrollContainer) {
+      setTimeout(() => {
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      }, 50);
+    }
+  }
+
+  // React to history changes
+  $: if (isolatedHistory && isolatedTimeIndex && ($isolatedHistory || $isolatedTimeIndex !== undefined)) {
+    loadFrameLogs();
+  }
 
   // RAF-batched logging to break Svelte reactivity loops
   let pendingLogs: ConsoleEntry[] = [];
