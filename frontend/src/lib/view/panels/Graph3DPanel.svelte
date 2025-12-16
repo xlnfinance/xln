@@ -732,9 +732,11 @@ let vrHammer: VRHammer | null = null;
 
     // Sync J mempool visual: show tx cubes based on actual mempool contents from snapshot
     const activeJurisdiction = jurisdictionsArray.find(x => x.name === activeJurisdictionName);
+    console.log(`[J-Mempool] activeJurisdiction=${activeJurisdiction?.name}, jMachine=${!!jMachine}, jurisdictionsArray.length=${jurisdictionsArray.length}`);
     if (activeJurisdiction && jMachine) {
       // Read mempool size directly from jReplica snapshot (canonical source of truth)
       const mempoolSize = activeJurisdiction.jMachine.mempool?.length || 0;
+      console.log(`[J-Mempool] mempool.length=${mempoolSize}, current cubes=${jMachineTxBoxes.length}`);
 
       const currentVisualCount = jMachineTxBoxes.length;
 
