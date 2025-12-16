@@ -730,36 +730,11 @@ let vrHammer: VRHammer | null = null;
       }
     });
 
-    // Sync J mempool visual: show tx cubes based on actual mempool contents
+    // Sync J mempool visual: show tx cubes based on actual mempool contents from snapshot
     const activeJurisdiction = jurisdictionsArray.find(x => x.name === activeJurisdictionName);
     if (activeJurisdiction && jMachine) {
-      let mempoolSize = activeJurisdiction.jMachine.mempool?.length || 0;
-
-      // For time-machine playback: derive mempool from cumulative R2R txs
-      // Count R2R txs up to current frame (capacity=3, resets after broadcast)
-      if ($isolatedTimeIndex !== -1 && $isolatedHistory) {
-        let r2rCount = 0;
-        for (let i = 0; i <= $isolatedTimeIndex; i++) {
-          const frame = $isolatedHistory[i];
-          const frameInputs = frame?.runtimeInput?.entityInputs || frame?.serverInput?.entityInputs || [];
-          for (const entityInput of frameInputs) {
-            for (const tx of (entityInput.entityTxs || [])) {
-              if (tx.type === 'payFromReserve' || tx.kind === 'payFromReserve') {
-                r2rCount++;
-              }
-            }
-          }
-        }
-        // Mempool resets after broadcast (capacity=3)
-        const jCapacity = activeJurisdiction.jMachine.capacity || 3;
-        mempoolSize = r2rCount % jCapacity;
-        // If we just hit capacity, show 0 (broadcast cleared it)
-        if (r2rCount > 0 && r2rCount % jCapacity === 0 && $isolatedTimeIndex < ($isolatedHistory.length - 1)) {
-          // Check if this is the broadcast frame (frame 5 in AHB = index 4)
-          // Actually keep showing cubes until next frame
-          mempoolSize = jCapacity; // Show full before clearing
-        }
-      }
+      // Read mempool size directly from jReplica snapshot (canonical source of truth)
+      const mempoolSize = activeJurisdiction.jMachine.mempool?.length || 0;
 
       const currentVisualCount = jMachineTxBoxes.length;
 
@@ -1547,9 +1522,59 @@ let vrHammer: VRHammer | null = null;
    * Animate R2R transfer: No-op - J-Machine is the core
    * R2R transfers are J-layer operations, visualized by J-Machine mempool filling
    */
-  function animateR2RTransfer(_fromEntityId: string, _toEntityId: string, _amount: bigint) {
-    // No animation - J-Machine (blockchain) is the core
-    // R2R transfers go through J, not directly between entities
+  function animateR2RTransfer(fromEntityId: string, _toEntityId: string, _amount: bigint) {
+    // Animate yellow cube flying from sender entity to J-Machine
+    if (!scene || !jMachine) return;
+
+    // Get sender entity position
+    const fromEntity = entities.find(e => e.id === fromEntityId);
+    if (!fromEntity) return;
+
+    // Create flying cube
+    const cubeSize = 4;
+    const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
+    const material = new THREE.MeshLambertMaterial({
+      color: 0xffaa00,
+      transparent: true,
+      opacity: 0.9,
+      emissive: 0xffaa00,
+      emissiveIntensity: 0.8
+    });
+    const flyingCube = new THREE.Mesh(geometry, material);
+
+    // Start at entity position
+    flyingCube.position.copy(fromEntity.position);
+    scene.add(flyingCube);
+
+    // Animate to J-Machine center over 100ms
+    const jPos = jMachine.position.clone();
+    const startPos = fromEntity.position.clone();
+    const startTime = performance.now();
+    const duration = 100; // 100ms flight
+
+    function animateFlight() {
+      const elapsed = performance.now() - startTime;
+      const t = Math.min(elapsed / duration, 1);
+
+      // Ease-out cubic
+      const eased = 1 - Math.pow(1 - t, 3);
+
+      flyingCube.position.lerpVectors(startPos, jPos, eased);
+
+      // Scale down as it approaches (entering the cube)
+      flyingCube.scale.setScalar(1 - eased * 0.5);
+
+      if (t < 1) {
+        requestAnimationFrame(animateFlight);
+      } else {
+        // Remove flying cube (the mempool cube inside J will show it)
+        scene.remove(flyingCube);
+        geometry.dispose();
+        material.dispose();
+      }
+    }
+
+    animateFlight();
   }
 
   /**

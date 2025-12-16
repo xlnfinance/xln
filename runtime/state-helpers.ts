@@ -201,6 +201,8 @@ export const captureSnapshot = (
           blockNumber: jr.blockNumber,
           stateRoot: new Uint8Array(jr.stateRoot),
           mempool: [...jr.mempool],
+          blockDelayMs: jr.blockDelayMs || 300,
+          lastBlockTimestamp: jr.lastBlockTimestamp || 0,
           position: { ...jr.position },
           contracts: jr.contracts ? { ...jr.contracts } : undefined,
           reserves,

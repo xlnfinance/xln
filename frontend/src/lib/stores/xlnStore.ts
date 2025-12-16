@@ -44,6 +44,11 @@ function exposeGlobalDebugObjects() {
   }
 }
 
+// Eager load XLN for console debugging (non-blocking)
+if (typeof window !== 'undefined') {
+  getXLN().catch(e => console.warn('XLN eager load failed:', e));
+}
+
 // Simple reactive store for XLN environment - just like legacy index.html
 export const xlnEnvironment = writable<Env | null>(null);
 export const isLoading = writable<boolean>(true);

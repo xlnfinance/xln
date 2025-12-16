@@ -230,6 +230,16 @@ export class JEventWatcher {
         return event.args.leftEntity === entityId || event.args.rightEntity === entityId;
       case 'TransferReserveToCollateral':
         return event.args.receivingEntity === entityId || event.args.counterentity === entityId;
+      case 'AccountSettled': {
+        // AccountSettled has array of Settled structs - check if entity is left or right in any
+        const settledArray = event.args[''] || event.args[0] || [];
+        for (const settled of settledArray) {
+          const left = settled[0] || settled.left;
+          const right = settled[1] || settled.right;
+          if (left === entityId || right === entityId) return true;
+        }
+        return false;
+      }
       default:
         return false;
     }
@@ -311,6 +321,46 @@ export class JEventWatcher {
             },
           },
         };
+      }
+
+      case 'AccountSettled': {
+        // AccountSettled has array of Settled structs
+        // Find the settlement relevant to this entity
+        const settledArray = event.args[''] || event.args[0] || [];
+        for (const settled of settledArray) {
+          const left = settled[0] || settled.left;
+          const right = settled[1] || settled.right;
+          if (left === entityId || right === entityId) {
+            const tokenId = Number(settled[2] ?? settled.tokenId ?? 0);
+            const leftReserve = (settled[3] ?? settled.leftReserve ?? 0n).toString();
+            const rightReserve = (settled[4] ?? settled.rightReserve ?? 0n).toString();
+            const collateral = (settled[5] ?? settled.collateral ?? 0n).toString();
+            const ondelta = (settled[6] ?? settled.ondelta ?? 0n).toString();
+            const isLeft = entityId === left;
+
+            return {
+              type: 'j_event' as const,
+              data: {
+                ...baseData,
+                event: {
+                  type: 'AccountSettled',
+                  data: {
+                    leftEntity: left,
+                    rightEntity: right,
+                    counterpartyEntityId: isLeft ? right : left,
+                    tokenId,
+                    ownReserve: isLeft ? leftReserve : rightReserve,
+                    counterpartyReserve: isLeft ? rightReserve : leftReserve,
+                    collateral,
+                    ondelta,
+                    side: isLeft ? 'left' : 'right',
+                  },
+                },
+              },
+            };
+          }
+        }
+        return null;
       }
 
       default:
