@@ -728,8 +728,8 @@ export interface Env {
   // Snapshot control (for prepopulate demos)
   disableAutoSnapshots?: boolean; // When true, captureSnapshot skips automatic tick frames
 
-  // Distributed simulation (for multi-server network delay)
-  pendingOutputs?: EntityInput[]; // Outputs from single-iteration mode (processed next tick)
+  // E→E message queue (always spans ticks - no same-tick cascade)
+  pendingOutputs?: EntityInput[]; // Outputs queued for next tick
   skipPendingForward?: boolean;   // Temp flag to defer forwarding to next frame
 
   // Frame-scoped structured logs (captured into snapshot, then reset)
@@ -745,6 +745,11 @@ export interface JReplica {
   blockNumber: bigint;                    // Current J-block height
   stateRoot: Uint8Array;                  // 32 bytes - for time travel via setStateRoot()
   mempool: JTx[];                         // Pending settlement txs
+
+  // Block creation delay (ms-based for universal timing)
+  // Creates visual delay where batches sit in mempool as yellow cubes
+  blockDelayMs: number;                   // Delay in ms before processing mempool (default: 300)
+  lastBlockTimestamp: number;             // Timestamp (ms) of last block creation
 
   // Visual position (for 3D rendering)
   position: { x: number; y: number; z: number };

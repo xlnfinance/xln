@@ -22,7 +22,7 @@
   let selectedJurisdictionName = $state<string | null>(null);
 
   // Tab state
-  let activeTab = $state<'overview' | 'reserves' | 'collaterals'>('overview');
+  let activeTab = $state<'overview' | 'reserves' | 'collaterals' | 'mempool'>('overview');
 
   // ═══════════════════════════════════════════════════════════════════════════
   //          TIME-TRAVEL AWARE DATA DERIVATION
@@ -167,6 +167,12 @@
     return result;
   });
 
+  // Get mempool from selected jurisdiction
+  let mempool = $derived.by(() => {
+    if (!selectedJurisdiction?.mempool) return [];
+    return selectedJurisdiction.mempool;
+  });
+
   // ═══════════════════════════════════════════════════════════════════════════
   //                              HELPERS
   // ═══════════════════════════════════════════════════════════════════════════
@@ -237,6 +243,9 @@
     </button>
     <button class="tab" class:active={activeTab === 'collaterals'} onclick={() => activeTab = 'collaterals'}>
       Collaterals ({collaterals.length})
+    </button>
+    <button class="tab" class:active={activeTab === 'mempool'} onclick={() => activeTab = 'mempool'}>
+      Mempool ({mempool.length})
     </button>
   </div>
 
@@ -322,15 +331,73 @@
         {#if collaterals.length === 0}
           <div class="empty">No collaterals in this frame</div>
         {:else}
-          <div class="storage-table">
+          <div class="collateral-list">
             {#each collaterals as c}
-              <div class="storage-row" role="row">
-                <span class="channel-key">{formatChannelKey(c.channelKey)}</span>
-                <span class="token-id">[{c.tokenId}]</span>
-                <span class="collateral-value">{formatBalance(c.collateral)}</span>
-                <span class="ondelta-value" class:positive={c.ondelta > 0n} class:negative={c.ondelta < 0n}>
-                  {c.ondelta >= 0n ? '+' : ''}{formatBalance(c.ondelta)}
-                </span>
+              {@const parts = c.channelKey.split('-')}
+              {@const leftId = parts[0] || '????'}
+              {@const rightId = parts[1] || '????'}
+              {@const leftKey = Array.from(entityNames.keys()).find(k => k.endsWith(leftId))}
+              {@const rightKey = Array.from(entityNames.keys()).find(k => k.endsWith(rightId))}
+              {@const leftName = (leftKey ? entityNames.get(leftKey) : null) || leftId}
+              {@const rightName = (rightKey ? entityNames.get(rightKey) : null) || rightId}
+              <div class="collateral-card" role="row">
+                <div class="channel-header">
+                  <span class="entity-left">{leftName}</span>
+                  <span class="channel-arrow">↔</span>
+                  <span class="entity-right">{rightName}</span>
+                  <span class="token-badge">USDC</span>
+                </div>
+                <div class="collateral-details">
+                  <div class="detail-row">
+                    <span class="detail-label">Collateral</span>
+                    <span class="detail-value collateral">{formatBalance(c.collateral)}</span>
+                  </div>
+                  <div class="detail-row">
+                    <span class="detail-label">Ondelta</span>
+                    <span class="detail-value ondelta" class:positive={c.ondelta > 0n} class:negative={c.ondelta < 0n}>
+                      {c.ondelta >= 0n ? '+' : ''}{formatBalance(c.ondelta)}
+                    </span>
+                  </div>
+                  <div class="detail-row">
+                    <span class="detail-label">{leftName} capacity</span>
+                    <span class="detail-value">{formatBalance(c.collateral > 0n ? (c.ondelta >= 0n ? c.collateral - c.ondelta : c.collateral + BigInt(Math.abs(Number(c.ondelta)))) : 0n)}</span>
+                  </div>
+                  <div class="detail-row">
+                    <span class="detail-label">{rightName} capacity</span>
+                    <span class="detail-value">{formatBalance(c.collateral > 0n ? (c.ondelta >= 0n ? c.ondelta : 0n) : 0n)}</span>
+                  </div>
+                </div>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
+    {:else if activeTab === 'mempool'}
+      <!-- Mempool tab -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">Pending Transactions</span>
+          <span class="count">{mempool.length}</span>
+        </div>
+        {#if mempool.length === 0}
+          <div class="empty">Mempool empty - no pending txs</div>
+        {:else}
+          <div class="storage-table">
+            {#each mempool as tx, i}
+              <div class="storage-row mempool-tx" role="row">
+                <span class="tx-index">#{i + 1}</span>
+                <span class="tx-type">{tx.type || tx.kind || 'unknown'}</span>
+                {#if tx.from || tx.entityId}
+                  <span class="tx-from">{formatEntityId(tx.from || tx.entityId)}</span>
+                {/if}
+                {#if tx.to || tx.targetEntityId}
+                  <span class="tx-arrow">→</span>
+                  <span class="tx-to">{formatEntityId(tx.to || tx.targetEntityId)}</span>
+                {/if}
+                {#if tx.amount}
+                  <span class="tx-amount">{formatBalance(BigInt(tx.amount))}</span>
+                {/if}
               </div>
             {/each}
           </div>
@@ -582,5 +649,126 @@
 
   .ondelta-value.negative {
     color: #f85149;
+  }
+
+  /* Collateral card styles */
+  .collateral-list {
+    padding: 4px;
+  }
+
+  .collateral-card {
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+
+  .channel-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: #161b22;
+    border-bottom: 1px solid #21262d;
+  }
+
+  .entity-left {
+    color: #58a6ff;
+    font-weight: 600;
+    font-size: 11px;
+  }
+
+  .channel-arrow {
+    color: #484f58;
+    font-size: 12px;
+  }
+
+  .entity-right {
+    color: #f0883e;
+    font-weight: 600;
+    font-size: 11px;
+  }
+
+  .token-badge {
+    margin-left: auto;
+    font-size: 9px;
+    padding: 2px 6px;
+    background: #238636;
+    color: #fff;
+    border-radius: 3px;
+  }
+
+  .collateral-details {
+    padding: 8px 10px;
+  }
+
+  .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+    font-size: 10px;
+  }
+
+  .detail-label {
+    color: #8b949e;
+  }
+
+  .detail-value {
+    color: #c9d1d9;
+    font-weight: 500;
+  }
+
+  .detail-value.collateral {
+    color: #7ee787;
+    font-weight: 700;
+    font-size: 12px;
+  }
+
+  .detail-value.ondelta {
+    font-weight: 600;
+  }
+
+  .detail-value.ondelta.positive {
+    color: #7ee787;
+  }
+
+  .detail-value.ondelta.negative {
+    color: #f85149;
+  }
+
+  /* Mempool styles */
+  .mempool-tx {
+    gap: 6px;
+    align-items: center;
+  }
+
+  .tx-index {
+    color: #484f58;
+    font-size: 9px;
+    min-width: 20px;
+  }
+
+  .tx-type {
+    color: #d29922;
+    font-size: 10px;
+    font-weight: 500;
+    min-width: 70px;
+  }
+
+  .tx-from, .tx-to {
+    color: #58a6ff;
+    font-size: 9px;
+  }
+
+  .tx-arrow {
+    color: #8b949e;
+    font-size: 10px;
+  }
+
+  .tx-amount {
+    color: #7ee787;
+    font-weight: 600;
+    margin-left: auto;
   }
 </style>

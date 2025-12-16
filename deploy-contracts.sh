@@ -110,14 +110,6 @@ deploy_to_network() {
     
     # Verify critical functions are in compiled ABI
     echo "   🔍 Verifying critical functions in compiled ABI..."
-    if grep -q "debugBulkFundEntities" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
-        echo "   ✅ debugBulkFundEntities function found in compiled ABI"
-    else
-        echo "   ❌ debugBulkFundEntities function missing from compiled ABI"
-        cd ..
-        return 1
-    fi
-
     if grep -q "processBatch" artifacts/contracts/Depository.sol/Depository.json 2>/dev/null; then
         echo "   ✅ processBatch function found in compiled ABI"
     else

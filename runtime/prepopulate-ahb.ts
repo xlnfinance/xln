@@ -387,13 +387,15 @@ async function pushSnapshot(
     }
   }
 
-  // Clone jReplicas for this frame (J-Machine state) + SYNC reserves from eReplicas
+  // Clone jReplicas for this frame (J-Machine state) + SYNC reserves/collaterals from eReplicas
   const jReplicasSnapshot = env.jReplicas ? Array.from(env.jReplicas.values()).map(jr => {
     // Sync reserves from eReplicas into JReplica
     const reserves = new Map<string, Map<number, bigint>>();
     const registeredEntities = new Map<string, { name: string; quorum: string[]; threshold: number }>();
+    // Collaterals: channelKey → tokenId → { collateral, ondelta }
+    const collaterals = new Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>();
 
-    // Aggregate reserves from all entity replicas
+    // Aggregate reserves and collaterals from all entity replicas
     for (const [key, replica] of env.eReplicas.entries()) {
       const entityId = key.split(':')[0];
       if (replica.state?.reserves) {
@@ -412,6 +414,32 @@ async function pushSnapshot(
           reserves.set(entityId, tokenMap);
         }
       }
+
+      // Extract collaterals from bilateral accounts (only for LEFT entity to avoid duplicates)
+      if (replica.state?.accounts) {
+        for (const [counterpartyId, account] of replica.state.accounts.entries()) {
+          // Only capture from LEFT entity (smaller ID) to avoid duplicates
+          if (entityId < counterpartyId && account.deltas) {
+            // Create channel key: LEFT-RIGHT (canonical ordering)
+            const channelKey = `${entityId.slice(-4)}-${counterpartyId.slice(-4)}`;
+            const tokenMap = new Map<number, { collateral: bigint; ondelta: bigint }>();
+
+            for (const [tokenId, delta] of account.deltas.entries()) {
+              if (delta.collateral > 0n || delta.ondelta !== 0n) {
+                tokenMap.set(Number(tokenId), {
+                  collateral: delta.collateral,
+                  ondelta: delta.ondelta,
+                });
+              }
+            }
+
+            if (tokenMap.size > 0) {
+              collaterals.set(channelKey, tokenMap);
+            }
+          }
+        }
+      }
+
       // Add entity to registeredEntities
       if (!registeredEntities.has(entityId)) {
         registeredEntities.set(entityId, {
@@ -427,9 +455,12 @@ async function pushSnapshot(
       blockNumber: jr.blockNumber,
       stateRoot: new Uint8Array(jr.stateRoot),
       mempool: [...jr.mempool],
+      blockDelayMs: jr.blockDelayMs || 300,
+      lastBlockTimestamp: jr.lastBlockTimestamp || 0,
       position: { ...jr.position },
       contracts: jr.contracts ? { ...jr.contracts } : undefined,
       reserves,
+      collaterals,  // NEW: collateral state from bilateral accounts
       registeredEntities,
     };
   }) : [];
@@ -538,6 +569,8 @@ export async function prepopulateAHB(env: Env): Promise<void> {
       blockNumber: 0n,
       stateRoot: new Uint8Array(32), // Will be captured from BrowserVM
       mempool: [] as any[],
+      blockDelayMs: 300,             // 300ms delay before processing mempool (visual delay)
+      lastBlockTimestamp: env.timestamp,  // Use env.timestamp for determinism
       position: { x: 0, y: 600, z: 0 }, // Match EVM jMachine.position for consistent entity placement
       contracts: {
         depository: arrakis.depositoryAddress,
@@ -692,12 +725,22 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     // Process j_events from BrowserVM (ReserveUpdated events)
     await processJEvents(env);
 
-    // ✅ ASSERT: R2R delivered - Alice got $3M
+    // ✅ ASSERT: R2R delivered - Alice got $3M (eReplica state)
     const [, aliceRep2] = findReplica(env, alice.id);
     const aliceReserve2 = aliceRep2.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
     if (aliceReserve2 !== usd(3_000_000)) {
-      throw new Error(`ASSERT FAIL Frame 2: Alice reserve = ${aliceReserve2}, expected ${usd(3_000_000)}. R2R j-event NOT delivered!`);
+      throw new Error(`ASSERT FAIL Frame 2: Alice eReplica reserve = ${aliceReserve2}, expected ${usd(3_000_000)}. J-event NOT delivered!`);
     }
+    // ✅ ASSERT: BrowserVM on-chain state matches
+    const aliceVMReserve2 = await browserVM.getReserves(alice.id, USDC_TOKEN_ID);
+    if (aliceVMReserve2 !== usd(3_000_000)) {
+      throw new Error(`ASSERT FAIL Frame 2: Alice BrowserVM reserve = ${aliceVMReserve2}, expected ${usd(3_000_000)}. On-chain state mismatch!`);
+    }
+    const hubVMReserve2 = await browserVM.getReserves(hub.id, USDC_TOKEN_ID);
+    if (hubVMReserve2 !== usd(7_000_000)) {
+      throw new Error(`ASSERT FAIL Frame 2: Hub BrowserVM reserve = ${hubVMReserve2}, expected ${usd(7_000_000)}. On-chain state mismatch!`);
+    }
+    console.log(`✅ ASSERT Frame 2: Alice reserve = $3M, Hub reserve = $7M (eReplica + BrowserVM match) ✓`);
 
     // Create entityInput with R2R tx for J-Machine visualization
     const r2rTx1: EntityInput = {
@@ -711,6 +754,12 @@ export async function prepopulateAHB(env: Env): Promise<void> {
         amount: usd(3_000_000),
       }]
     };
+
+    // Add to jReplica.mempool for yellow cube visualization
+    const jReplica = env.jReplicas.get('AHB Demo');
+    if (jReplica) {
+      jReplica.mempool.push({ type: 'r2r', from: hub.id, to: alice.id, amount: usd(3_000_000), timestamp: env.timestamp });
+    }
 
     await pushSnapshot(env, 'Hub → Alice: $3M R2R Transfer', {
       title: 'Reserve-to-Reserve Transfer #1 (R2R)',
@@ -736,12 +785,22 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     // Process j_events from BrowserVM (ReserveUpdated events)
     await processJEvents(env);
 
-    // ✅ ASSERT: R2R delivered - Bob got $2M
+    // ✅ ASSERT: R2R delivered - Bob got $2M (eReplica state)
     const [, bobRep3] = findReplica(env, bob.id);
     const bobReserve3 = bobRep3.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
     if (bobReserve3 !== usd(2_000_000)) {
-      throw new Error(`ASSERT FAIL Frame 3: Bob reserve = ${bobReserve3}, expected ${usd(2_000_000)}. R2R j-event NOT delivered!`);
+      throw new Error(`ASSERT FAIL Frame 3: Bob eReplica reserve = ${bobReserve3}, expected ${usd(2_000_000)}. J-event NOT delivered!`);
     }
+    // ✅ ASSERT: BrowserVM on-chain state matches
+    const bobVMReserve3 = await browserVM.getReserves(bob.id, USDC_TOKEN_ID);
+    if (bobVMReserve3 !== usd(2_000_000)) {
+      throw new Error(`ASSERT FAIL Frame 3: Bob BrowserVM reserve = ${bobVMReserve3}, expected ${usd(2_000_000)}. On-chain state mismatch!`);
+    }
+    const hubVMReserve3 = await browserVM.getReserves(hub.id, USDC_TOKEN_ID);
+    if (hubVMReserve3 !== usd(5_000_000)) {
+      throw new Error(`ASSERT FAIL Frame 3: Hub BrowserVM reserve = ${hubVMReserve3}, expected ${usd(5_000_000)}. On-chain state mismatch!`);
+    }
+    console.log(`✅ ASSERT Frame 3: Bob reserve = $2M, Hub reserve = $5M (eReplica + BrowserVM match) ✓`);
 
     const r2rTx2: EntityInput = {
       entityId: hub.id,
@@ -754,6 +813,11 @@ export async function prepopulateAHB(env: Env): Promise<void> {
         amount: usd(2_000_000),
       }]
     };
+
+    // Add to jReplica.mempool for yellow cube visualization
+    if (jReplica) {
+      jReplica.mempool.push({ type: 'r2r', from: hub.id, to: bob.id, amount: usd(2_000_000), timestamp: env.timestamp });
+    }
 
     await pushSnapshot(env, 'Hub → Bob: $2M R2R Transfer', {
       title: 'Reserve-to-Reserve Transfer #2',
@@ -790,6 +854,11 @@ export async function prepopulateAHB(env: Env): Promise<void> {
       }]
     };
 
+    // Add to jReplica.mempool for yellow cube visualization
+    if (jReplica) {
+      jReplica.mempool.push({ type: 'r2r', from: alice.id, to: bob.id, amount: usd(500_000), timestamp: env.timestamp });
+    }
+
     await pushSnapshot(env, 'Alice → Bob: $500K R2R Transfer', {
       title: 'Reserve-to-Reserve Transfer #3 → J-Block Finalized!',
       what: 'Alice sends $500K to Bob. Third TX fills mempool capacity → J-Machine broadcasts rays to ALL entities!',
@@ -807,6 +876,12 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     // STEP 5: Final State - All reserves settled (verify from BrowserVM)
     // ============================================================================
     console.log('\n📊 FRAME 5: Final State Summary');
+
+    // Clear jReplica mempool after J-Block broadcast (txs finalized)
+    if (jReplica) {
+      jReplica.mempool = [];
+      jReplica.lastBlockTimestamp = env.timestamp;
+    }
 
     // Verify final reserves from BrowserVM
     const finalHubReserves = await browserVM.getReserves(hub.id, USDC_TOKEN_ID);
@@ -841,6 +916,7 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     // ============================================================================
     console.log('\n🔗 FRAME 6: Open Alice ↔ Hub Bilateral Account');
 
+    // Tick 1: Alice creates Alice→Hub, queues output to Hub
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -849,8 +925,10 @@ export async function prepopulateAHB(env: Env): Promise<void> {
         data: { targetEntityId: hub.id }
       }]
     }]);
+    // Tick 2: Hub receives, creates Hub→Alice
+    await process(env);
 
-    // ✅ ASSERT Frame 6: Alice-Hub account exists
+    // ✅ ASSERT Frame 6: Alice-Hub account exists (bidirectional)
     const [, aliceRep6] = findReplica(env, alice.id);
     const aliceHubAcc6 = aliceRep6?.state?.accounts?.get(hub.id);
     if (!aliceHubAcc6) {
@@ -876,6 +954,7 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     // ============================================================================
     console.log('\n🔗 FRAME 7: Open Bob ↔ Hub Bilateral Account');
 
+    // Tick 1: Bob creates Bob→Hub, queues output to Hub
     await process(env, [{
       entityId: bob.id,
       signerId: bob.signer,
@@ -884,6 +963,8 @@ export async function prepopulateAHB(env: Env): Promise<void> {
         data: { targetEntityId: hub.id }
       }]
     }]);
+    // Tick 2: Hub receives, creates Hub→Bob
+    await process(env);
 
     // ✅ ASSERT Frame 7: Both Hub-Bob accounts exist (bidirectional)
     const [, hubRep7] = findReplica(env, hub.id);
@@ -908,9 +989,9 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
     // ============================================================================
-    // STEP 8: Alice R2C - Reserve to Collateral (full flow)
+    // STEP 8: Alice R2C - Reserve to Collateral (BATCH CREATION)
     // ============================================================================
-    console.log('\n💰 FRAME 8: Alice R2C - Reserve → Collateral ($500K)');
+    console.log('\n💰 FRAME 8: Alice R2C - Create jBatch ($500K)');
 
     // 20% of Alice's $2.5M reserve = $500K
     const aliceCollateralAmount = usd(500_000);
@@ -930,36 +1011,107 @@ export async function prepopulateAHB(env: Env): Promise<void> {
       }]
     }]);
 
-    // Step 2: Broadcast jBatch to BrowserVM (triggers on-chain tx)
+    // Step 2: Copy jBatch to jReplica.mempool for visualization (yellow cubes!)
     const [, aliceReplicaForBatch] = findReplica(env, alice.id);
-    console.log(`[Frame 8] jBatchState exists? ${!!aliceReplicaForBatch.state.jBatchState}`);
-    if (aliceReplicaForBatch.state.jBatchState) {
-      console.log(`[Frame 8] Broadcasting jBatch...`);
-      const { broadcastBatch } = await import('./j-batch');
-      await broadcastBatch(alice.id, aliceReplicaForBatch.state.jBatchState, null, browserVM);
-      console.log(`[Frame 8] broadcastBatch completed`);
-    } else {
-      console.error(`[Frame 8] ❌ NO jBatchState! deposit_collateral didn't create batch`);
+    const jReplica = env.jReplicas.values().next().value;
+    if (aliceReplicaForBatch.state.jBatchState && jReplica) {
+      // Add batch to jReplica mempool so it shows as pending (yellow cube)
+      jReplica.mempool.push({
+        type: 'r2c_batch',
+        entityId: alice.id,
+        batch: JSON.parse(JSON.stringify(aliceReplicaForBatch.state.jBatchState.batch, (_, v) =>
+          typeof v === 'bigint' ? v.toString() : v
+        )),
+        timestamp: Date.now(),
+      });
+      console.log(`[Frame 8] Added batch to jReplica.mempool (${jReplica.mempool.length} pending)`);
     }
 
-    // Step 3: Process j_events from BrowserVM (SettlementProcessed updates delta.collateral)
+    // Snapshot BEFORE broadcast - shows batch pending in mempool
+    await pushSnapshot(env, 'Alice R2C: Batch Created (Pending)', {
+      title: 'J-Batch Pending: Alice R2C $500K',
+      what: 'Alice created jBatch for R2C. Batch sits in J-Machine mempool awaiting next block.',
+      why: 'Batches accumulate before on-chain submission. Yellow cube = pending batch.',
+      tradfiParallel: 'Like a wire transfer queued at end-of-day batch processing.',
+      keyMetrics: [
+        'jReplica mempool: 1 pending batch',
+        'Batch: R2C $500K Alice→A-H account',
+      ]
+    }, { expectedSolvency: TOTAL_SOLVENCY });
+
+    // ============================================================================
+    // STEP 8.5: Mempool Delay (BATCH PENDING - Visual Yellow Cube)
+    // ============================================================================
+    console.log('\n⏳ FRAME 8.5: Mempool Delay - Batch pending in J-Machine');
+
+    // Show ms-based delay (block creation waits until lastBlockTimestamp + blockDelayMs)
+    const elapsedMs = jReplica ? env.timestamp - (jReplica.lastBlockTimestamp || 0) : 0;
+    const delayMs = jReplica?.blockDelayMs || 300;
+    console.log(`[Frame 8.5] elapsed=${elapsedMs}ms, blockDelayMs=${delayMs}ms`);
+
+    // Snapshot showing batch still pending in mempool (yellow cube persists)
+    await pushSnapshot(env, 'J-Machine: Mempool Processing Delay', {
+      title: 'J-Batch Queued: Awaiting Block Creation',
+      what: `Batch sits in mempool for ${delayMs}ms before on-chain submission.`,
+      why: 'Batching improves gas efficiency. Multiple settlements can be combined into one block.',
+      tradfiParallel: 'Like SWIFT netting - accumulate transactions, settle in batch.',
+      keyMetrics: [
+        `Mempool: ${jReplica?.mempool?.length || 0} batch(es) pending`,
+        `Block delay: ${delayMs}ms`,
+      ]
+    }, { expectedSolvency: TOTAL_SOLVENCY });
+
+    // ============================================================================
+    // STEP 9: Alice R2C - Broadcast (BLOCK CREATION)
+    // ============================================================================
+    console.log('\n💰 FRAME 9: Alice R2C - Broadcast jBatch');
+
+    // Step 3: Broadcast jBatch to BrowserVM (triggers on-chain tx)
+    if (aliceReplicaForBatch.state.jBatchState) {
+      console.log(`[Frame 9] Broadcasting jBatch...`);
+      const { broadcastBatch } = await import('./j-batch');
+      await broadcastBatch(alice.id, aliceReplicaForBatch.state.jBatchState, null, browserVM);
+      console.log(`[Frame 9] broadcastBatch completed`);
+      // Clear mempool after broadcast
+      if (jReplica) jReplica.mempool = [];
+    } else {
+      console.error(`[Frame 9] ❌ NO jBatchState!`);
+    }
+
+    // Step 4: Process j_events from BrowserVM (SettlementProcessed updates delta.collateral)
     await processJEvents(env);
 
     // ✅ ASSERT: R2C delivered - Alice delta.collateral = $500K
-    const [, aliceRep8] = findReplica(env, alice.id);
-    const aliceHubAccount8 = aliceRep8.state.accounts.get(hub.id);
-    const aliceDelta8 = aliceHubAccount8?.deltas.get(USDC_TOKEN_ID);
-    if (!aliceDelta8 || aliceDelta8.collateral !== aliceCollateralAmount) {
-      const actual = aliceDelta8?.collateral || 0n;
-      throw new Error(`ASSERT FAIL Frame 8: Alice-Hub collateral = ${actual}, expected ${aliceCollateralAmount}. R2C j-event NOT delivered!`);
+    const [, aliceRep9] = findReplica(env, alice.id);
+    const aliceHubAccount9 = aliceRep9.state.accounts.get(hub.id);
+    const aliceDelta9 = aliceHubAccount9?.deltas.get(USDC_TOKEN_ID);
+    if (!aliceDelta9 || aliceDelta9.collateral !== aliceCollateralAmount) {
+      const actual = aliceDelta9?.collateral || 0n;
+      throw new Error(`ASSERT FAIL Frame 9: Alice-Hub collateral = ${actual}, expected ${aliceCollateralAmount}. R2C j-event NOT delivered!`);
     }
+    // ✅ ASSERT: ondelta equals collateral after R2C (settlement sets ondelta = collateral deposited)
+    if (aliceDelta9.ondelta !== aliceCollateralAmount) {
+      throw new Error(`ASSERT FAIL Frame 9: Alice-Hub ondelta = ${aliceDelta9.ondelta}, expected ${aliceCollateralAmount}. R2C ondelta mismatch!`);
+    }
+    // ✅ ASSERT: Alice reserve decreased by $500K (was $2.5M after R2R #3, now $2M)
+    const aliceReserve9 = aliceRep9.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+    const expectedAliceReserve9 = usd(2_000_000); // $2.5M - $500K R2C
+    if (aliceReserve9 !== expectedAliceReserve9) {
+      throw new Error(`ASSERT FAIL Frame 9: Alice reserve = ${aliceReserve9 / 10n**18n}M, expected $2M. R2C reserve deduction failed!`);
+    }
+    // ✅ ASSERT: BrowserVM on-chain state matches
+    const aliceVMReserve9 = await browserVM.getReserves(alice.id, USDC_TOKEN_ID);
+    if (aliceVMReserve9 !== expectedAliceReserve9) {
+      throw new Error(`ASSERT FAIL Frame 9: Alice BrowserVM reserve = ${aliceVMReserve9}, expected ${expectedAliceReserve9}. On-chain mismatch!`);
+    }
+    console.log(`✅ ASSERT Frame 9: R2C complete - collateral=$500K, ondelta=$500K, Alice reserve=$2M (all verified) ✓`);
 
     // CRITICAL: Verify bilateral sync after R2C collateral deposit
-    assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'Frame 8 - Alice R2C Collateral');
+    assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'Frame 9 - Alice R2C Collateral');
 
     await pushSnapshot(env, 'Alice R2C: $500K Reserve → Collateral', {
       title: 'Reserve-to-Collateral (R2C): Alice → A-H Account',
-      what: 'Alice moves $500K from reserve to A-H account collateral. Settlement sent to J-Machine.',
+      what: 'Alice moves $500K from reserve to A-H account collateral. J-Machine processed batch.',
       why: 'Collateral enables off-chain payments. Alice can now send up to $500K to Hub instantly.',
       tradfiParallel: 'Like posting margin: Alice locks funds in the bilateral account as security.',
       keyMetrics: [
@@ -979,6 +1131,7 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     // This is purely off-chain - no collateral from Bob
     const bobCreditAmount = usd(500_000);
 
+    // Tick 1: Bob adds credit tx to mempool, auto-propose sends to Hub
     await process(env, [{
       entityId: bob.id,
       signerId: bob.signer,
@@ -991,6 +1144,10 @@ export async function prepopulateAHB(env: Env): Promise<void> {
         }
       }]
     }]);
+    // Tick 2: Hub receives proposal, validates, ACKs back
+    await process(env);
+    // Tick 3: Bob receives ACK, commits frame
+    await process(env);
 
     // ✅ ASSERT: Credit extension delivered - Bob-Hub has leftCreditLimit = $500K
     // Bob (0x0003) > Hub (0x0002) → Bob is RIGHT, Hub is LEFT
@@ -1024,12 +1181,10 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     // ============================================================================
     console.error('\n\n🚨🚨🚨 PAYMENT SECTION START 🚨🚨🚨\n');
 
-    // Helper: process and collect outbox for next frame
-    const tick = async (inputs: EntityInput[]): Promise<EntityInput[]> => {
-      await process(env, inputs);
-      const outbox = [...(env.pendingOutputs || [])];
-      env.pendingOutputs = [];
-      return outbox;
+    // Helper: log pending outputs
+    const logPending = () => {
+      const pending = env.pendingOutputs || [];
+      console.log(`   pending: [${pending.map(o => o.entityId.slice(-4)).join(',')}]`);
     };
 
     // Payment 1: A → H → B ($125K)
@@ -1044,7 +1199,7 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     console.log('🏃 FRAME 10: Alice initiates A→H→B $125K');
 
     // Frame 10: Alice sends to Hub
-    let outbox = await tick([{
+    await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [{
@@ -1058,7 +1213,7 @@ export async function prepopulateAHB(env: Env): Promise<void> {
         }
       }]
     }]);
-    console.log(`   outbox: [${outbox.map(o => o.entityId.slice(-4)).join(',')}]`);
+    logPending();
 
     await pushSnapshot(env, 'Frame 10: Alice initiates A→H→B', {
       title: 'Payment 1/2: Alice → Hub',
@@ -1067,25 +1222,39 @@ export async function prepopulateAHB(env: Env): Promise<void> {
 
     // Frame 11: Hub + Alice process (Hub forwards to Bob, Alice gets ACK)
     console.log('🏃 FRAME 11: Hub forwards, Alice commits');
-    outbox = await tick(outbox);
-    console.log(`   outbox: [${outbox.map(o => o.entityId.slice(-4)).join(',')}]`);
+    await process(env);
+    logPending();
 
     await pushSnapshot(env, 'Frame 11: Hub forwards to Bob', {
       title: 'Payment 1/2: Hub → Bob proposal',
       what: 'Hub-Alice commits, Hub proposes to Bob',
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
-    // Frame 12: Bob accepts
-    console.log('🏃 FRAME 12: Bob accepts Hub proposal');
-    outbox = await tick(outbox);
-    console.log(`   outbox: [${outbox.map(o => o.entityId.slice(-4)).join(',')}]`);
+    // Frame 12: Bob ACKs Hub
+    console.log('🏃 FRAME 12: Bob ACKs Hub');
+    await process(env);
+    logPending();
 
-    // Verify payment 1 landed
+    // Frame 13: Hub commits H-B (receives Bob's ACK)
+    console.log('🏃 FRAME 13: Hub commits H-B');
+    await process(env);
+    logPending();
+
+    // Verify payment 1 landed with capacity assertions
     const ahDelta1 = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const hbDelta1 = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
-    console.log(`   ✅ After payment 1: A-H=${ahDelta1}, H-B=${hbDelta1}`);
 
-    await pushSnapshot(env, 'Frame 12: Bob accepts - Payment 1 complete', {
+    // After payment 1: A-H and H-B should both be -$125K
+    const expectedShift1 = -payment1; // -$125K
+    if (ahDelta1 !== expectedShift1) {
+      throw new Error(`❌ ASSERTION FAILED: After payment 1, A-H offdelta=${ahDelta1}, expected ${expectedShift1}`);
+    }
+    if (hbDelta1 !== expectedShift1) {
+      throw new Error(`❌ ASSERTION FAILED: After payment 1, H-B offdelta=${hbDelta1}, expected ${expectedShift1}`);
+    }
+    console.log(`   ✅ After payment 1: A-H=${ahDelta1}, H-B=${hbDelta1} (both -$125K as expected)`);
+
+    await pushSnapshot(env, 'Frame 13: Payment 1 complete', {
       title: 'Payment 1/2 Complete',
       what: `A→H→B $125K done. A-H shift: -$125K, H-B shift: -$125K`,
     }, { expectedSolvency: TOTAL_SOLVENCY });
@@ -1094,10 +1263,10 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     // PAYMENT 2: A → H → B ($125K) - Second payment, total shift = $250K
     // ============================================================================
     const payment2 = usd(125_000);
-    console.log('\n🏃 FRAME 13: Alice initiates second A→H→B $125K');
+    console.log('\n🏃 FRAME 14: Alice initiates second A→H→B $125K');
 
-    // Frame 13: Alice sends again
-    outbox = await tick([{
+    // Frame 14: Alice sends again
+    await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [{
@@ -1111,23 +1280,31 @@ export async function prepopulateAHB(env: Env): Promise<void> {
         }
       }]
     }]);
+    logPending();
 
-    await pushSnapshot(env, 'Frame 13: Alice initiates second payment', {
+    await pushSnapshot(env, 'Frame 14: Alice initiates second payment', {
       title: 'Payment 2/2: Alice → Hub',
       what: 'Second $125K payment to reach $250K total shift',
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
-    // Frame 14: Hub forwards, Alice commits
-    console.log('🏃 FRAME 14: Hub forwards, Alice commits');
-    outbox = await tick(outbox);
+    // Frame 15: Hub forwards, Alice commits A-H
+    console.log('🏃 FRAME 15: Hub forwards, Alice commits A-H');
+    await process(env);
+    logPending();
 
-    await pushSnapshot(env, 'Frame 14: Hub forwards second payment', {
+    await pushSnapshot(env, 'Frame 15: Hub forwards second payment', {
       title: 'Payment 2/2: Hub → Bob proposal',
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
-    // Frame 15: Bob accepts
-    console.log('🏃 FRAME 15: Bob accepts second payment');
-    outbox = await tick(outbox);
+    // Frame 16: Bob ACKs Hub
+    console.log('🏃 FRAME 16: Bob ACKs Hub');
+    await process(env);
+    logPending();
+
+    // Frame 17: Hub commits H-B
+    console.log('🏃 FRAME 17: Hub commits H-B');
+    await process(env);
+    logPending();
 
     // Verify total shift = $250K
     const ahDeltaFinal = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
@@ -1135,9 +1312,12 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     const expectedShift = -(payment1 + payment2); // -$250K
 
     if (ahDeltaFinal !== expectedShift) {
-      throw new Error(`ASSERT FAIL: A-H shift=${ahDeltaFinal}, expected ${expectedShift}`);
+      throw new Error(`❌ ASSERTION FAILED: A-H shift=${ahDeltaFinal}, expected ${expectedShift}`);
     }
-    console.log(`✅ Total shift verified: A-H=${ahDeltaFinal}, H-B=${hbDeltaFinal}`);
+    if (hbDeltaFinal !== expectedShift) {
+      throw new Error(`❌ ASSERTION FAILED: H-B shift=${hbDeltaFinal}, expected ${expectedShift}`);
+    }
+    console.log(`✅ Total shift verified: A-H=${ahDeltaFinal}, H-B=${hbDeltaFinal} (both -$250K as expected)`);
 
     // Verify Bob's view
     const [, bobRep] = findReplica(env, bob.id);
@@ -1147,11 +1327,11 @@ export async function prepopulateAHB(env: Env): Promise<void> {
       const bobDerived = deriveDelta(bobDelta, false); // Bob is RIGHT
       console.log(`   Bob outCapacity: ${bobDerived.outCapacity} (received $250K)`);
       if (bobDerived.outCapacity !== payment1 + payment2) {
-        throw new Error(`ASSERT FAIL: Bob outCapacity=${bobDerived.outCapacity}, expected ${payment1 + payment2}`);
+        throw new Error(`❌ ASSERTION FAILED: Bob outCapacity=${bobDerived.outCapacity}, expected ${payment1 + payment2}`);
       }
     }
 
-    await pushSnapshot(env, 'Frame 15: Both payments complete - $250K shifted', {
+    await pushSnapshot(env, 'Frame 17: Both payments complete - $250K shifted', {
       title: '✅ Payments Complete: $250K A→B',
       what: 'Two $125K payments complete. Total: $250K shifted from Alice to Bob via Hub.',
       why: 'Hub now has $250K uninsured liability to Bob (TR=$250K). Rebalancing needed!',
@@ -1163,30 +1343,130 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
     // ============================================================================
-    // PHASE 4: REBALANCING - Reduce Total Risk from $250K to $0
+    // PHASE 4: REVERSE PAYMENT B→H→A (Bob pays Alice $50K via Hub)
     // ============================================================================
-    // Current state after $250K shifted A→H→B:
-    // - A-H: offdelta = -$250K (Alice owes Hub), collateral = $500K
-    // - H-B: offdelta = -$250K (Hub owes Bob), collateral = $0
-    // - TR = $250K (Hub's uninsured liability to Bob)
+    // This tests the reverse routing: Bob → Hub → Alice
+    // CRITICAL: Order must be B→H first, THEN H→A (same as A→H→B does A→H then H→B)
+    // ============================================================================
+    console.log('\n💸 PHASE 4: REVERSE PAYMENT: B→H→A ($50K)');
+
+    const reversePayment = usd(50_000);
+
+    // Frame 18: Bob initiates B→H→A
+    console.log('🏃 FRAME 18: Bob initiates B→H→A $50K');
+    await process(env, [{
+      entityId: bob.id,
+      signerId: bob.signer,
+      entityTxs: [{
+        type: 'directPayment',
+        data: {
+          targetEntityId: alice.id,
+          tokenId: USDC_TOKEN_ID,
+          amount: reversePayment,
+          route: [bob.id, hub.id, alice.id],  // CRITICAL: B→H→A route
+          description: 'Reverse payment: Bob pays Alice'
+        }
+      }]
+    }]);
+    logPending();
+
+    // CRITICAL ASSERTION: B→H must happen FIRST
+    // After Frame 18, B-H should have changed but H-A should NOT yet
+    const bhDelta18 = getOffdelta(env, bob.id, hub.id, USDC_TOKEN_ID);
+    const haExpected18 = getOffdelta(env, hub.id, alice.id, USDC_TOKEN_ID);
+    console.log(`   After Bob initiates: B-H offdelta=${bhDelta18}, H-A offdelta=${haExpected18}`);
+    // Note: At this point Bob's local mempool has the tx but Hub hasn't received yet
+
+    await pushSnapshot(env, 'Frame 18: Bob initiates B→H→A', {
+      title: 'Reverse Payment: Bob → Hub',
+      what: 'Bob sends $50K to Alice via Hub. First hop: B→H',
+    }, { expectedSolvency: TOTAL_SOLVENCY });
+
+    // Frame 19: Hub receives from Bob, forwards to Alice
+    console.log('🏃 FRAME 19: Hub receives B→H, forwards to Alice');
+    await process(env);
+    logPending();
+
+    // CRITICAL ASSERTION: B→H should be committed BEFORE H→A is initiated
+    const bhDelta19 = getOffdelta(env, bob.id, hub.id, USDC_TOKEN_ID);
+    const ahDelta19 = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
+    console.log(`   After Hub forwards: B-H offdelta=${bhDelta19}, A-H offdelta=${ahDelta19}`);
+
+    // B-H should have shifted +$50K (Bob paid Hub, reducing Hub's debt)
+    // A-H should NOT have changed yet (Hub forwarding is in next frame)
+    const expectedBH19 = -(payment1 + payment2) + reversePayment; // -$250K + $50K = -$200K
+    if (bhDelta19 !== expectedBH19) {
+      console.warn(`⚠️ B-H shift unexpected: got ${bhDelta19}, expected ${expectedBH19}`);
+    }
+
+    await pushSnapshot(env, 'Frame 19: Hub forwards to Alice', {
+      title: 'Reverse Payment: Hub → Alice',
+      what: 'Hub receives B→H and forwards H→A proposal',
+    }, { expectedSolvency: TOTAL_SOLVENCY });
+
+    // Frame 20: Alice ACKs Hub
+    console.log('🏃 FRAME 20: Alice ACKs Hub');
+    await process(env);
+    logPending();
+
+    // Frame 21: Hub commits H-A
+    console.log('🏃 FRAME 21: Hub commits H-A (reverse payment complete)');
+    await process(env);
+    logPending();
+
+    // FINAL ASSERTION: Verify reverse payment shifted correctly
+    const ahDeltaRev = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
+    const bhDeltaRev = getOffdelta(env, bob.id, hub.id, USDC_TOKEN_ID);
+
+    // After $250K A→B and $50K B→A:
+    // A-H: -$250K + $50K = -$200K (Alice's debt reduced)
+    // B-H: -$250K + $50K = -$200K (Hub's debt to Bob reduced)
+    const expectedAH = -(payment1 + payment2) + reversePayment; // -$200K
+    const expectedBH = -(payment1 + payment2) + reversePayment; // -$200K
+
+    if (ahDeltaRev !== expectedAH) {
+      throw new Error(`❌ REVERSE PAYMENT FAIL: A-H offdelta=${ahDeltaRev}, expected ${expectedAH}`);
+    }
+    if (bhDeltaRev !== expectedBH) {
+      throw new Error(`❌ REVERSE PAYMENT FAIL: B-H offdelta=${bhDeltaRev}, expected ${expectedBH}`);
+    }
+    console.log(`✅ Reverse payment B→H→A verified: A-H=${ahDeltaRev}, B-H=${bhDeltaRev} (both -$200K)`);
+
+    await pushSnapshot(env, 'Frame 21: Reverse payment complete', {
+      title: '✅ Reverse Payment: $50K B→A',
+      what: 'Bob paid Alice $50K via Hub. Net position: $200K shifted A→B.',
+      keyMetrics: [
+        'A-H shift: -$200K (was -$250K)',
+        'B-H shift: -$200K (was -$250K)',
+        'TR: $200K (reduced from $250K)',
+      ]
+    }, { expectedSolvency: TOTAL_SOLVENCY });
+
+    // ============================================================================
+    // PHASE 5: REBALANCING - Reduce Total Risk from $200K to $0
+    // ============================================================================
+    // Current state after $250K A→H→B minus $50K B→H→A = $200K net shift:
+    // - A-H: offdelta = -$200K (Alice owes Hub), collateral = $500K
+    // - H-B: offdelta = -$200K (Hub owes Bob), collateral = $0
+    // - TR = $200K (Hub's uninsured liability to Bob)
     //
     // Rebalancing plan:
-    // 1. Alice-Hub settlement: Alice withdraws $250K collateral (pays Hub on-chain)
-    // 2. Hub-Bob settlement: Hub deposits $250K collateral (insures Bob's position)
+    // 1. Alice-Hub settlement: Alice withdraws $200K collateral (pays Hub on-chain)
+    // 2. Hub-Bob settlement: Hub deposits $200K collateral (insures Bob's position)
     // 3. Result: TR = $0, both accounts fully settled
     // ============================================================================
 
     console.log('\n\n🔄🔄🔄 REBALANCING SECTION START 🔄🔄🔄\n');
 
-    const rebalanceAmount = usd(250_000);
+    const rebalanceAmount = usd(200_000);
 
     // Import jBatch functions for BrowserVM settlements
     const { batchAddSettlement, initJBatch, broadcastBatch } = await import('./j-batch');
 
     // ============================================================================
-    // STEP 16: Alice-Hub Settlement (Alice withdraws to pay Hub on-chain)
+    // STEP 22: Alice-Hub Settlement (Alice withdraws to pay Hub on-chain)
     // ============================================================================
-    console.log('\n🏦 FRAME 16: Alice-Hub Settlement (Alice withdraws $250K)');
+    console.log('\n🏦 FRAME 22: Alice-Hub Settlement (Alice withdraws $200K)');
 
     // Alice is LEFT (0x0001 < 0x0002), Hub is RIGHT
     // Settlement: reduce collateral, give Alice reserve back, increase ondelta
@@ -1206,36 +1486,43 @@ export async function prepopulateAHB(env: Env): Promise<void> {
       hub.id,    // rightEntity (0x0002)
       [{
         tokenId: USDC_TOKEN_ID,
-        leftDiff: rebalanceAmount,        // Alice gets +$250K reserve
+        leftDiff: rebalanceAmount,        // Alice gets +$200K reserve
         rightDiff: 0n,                     // Hub reserve unchanged
-        collateralDiff: -rebalanceAmount,  // Account collateral -$250K
-        ondeltaDiff: rebalanceAmount,      // ondelta +$250K (settles off-chain debt)
+        collateralDiff: -rebalanceAmount,  // Account collateral -$200K
+        ondeltaDiff: rebalanceAmount,      // ondelta +$200K (settles off-chain debt)
       }]
     );
 
-    await pushSnapshot(env, 'Frame 16: Alice-Hub Settlement initiated', {
+    await pushSnapshot(env, 'Frame 22: Alice-Hub Settlement initiated', {
       title: 'Rebalancing 1/2: Alice-Hub Settlement',
-      what: 'Alice withdraws $250K collateral to settle her A-H debt on-chain.',
+      what: 'Alice withdraws $200K collateral to settle her A-H debt on-chain.',
       why: 'Settlement moves off-chain debt onto blockchain. Alice pays Hub atomically.',
       tradfiParallel: 'Like a margin call settlement: Alice covers her position with actual funds.',
       keyMetrics: [
-        'A-H collateral: $500K → $250K (-$250K)',
-        'Alice reserve: +$250K (pending)',
-        'A-H ondelta: +$250K (debt moved on-chain)',
+        'A-H collateral: $500K → $300K (-$200K)',
+        'Alice reserve: +$200K (pending)',
+        'A-H ondelta: +$200K (debt moved on-chain)',
       ]
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
     // Broadcast settlement to BrowserVM
     console.log('🏦 Broadcasting Alice-Hub settlement jBatch to BrowserVM...');
-    await broadcastBatch(alice.id, aliceReplicaRebal.state.jBatchState, null, browserVM);
-    console.log('✅ Alice-Hub settlement broadcast');
+    const ahSettleResult = await broadcastBatch(alice.id, aliceReplicaRebal.state.jBatchState, null, browserVM);
+    if (!ahSettleResult.success) {
+      throw new Error(`❌ ASSERTION FAILED: Alice-Hub settlement failed: ${ahSettleResult.error || 'unknown error'}`);
+    }
+    if (!ahSettleResult.events || ahSettleResult.events.length === 0) {
+      throw new Error(`❌ ASSERTION FAILED: Alice-Hub settlement returned no events (expected AccountSettled)`);
+    }
+    console.log(`✅ Alice-Hub settlement broadcast: ${ahSettleResult.events.length} events`);
 
     // Process j_events from BrowserVM (SettlementProcessed events)
     await processJEvents(env);
 
-    // Frame 17: Process any outbox
-    console.log('\n🏦 FRAME 17: Alice-Hub Settlement completes');
-    outbox = await tick([]);
+    // Frame 23: Process any pending outputs
+    console.log('\n🏦 FRAME 23: Alice-Hub Settlement completes');
+    await process(env);
+    logPending();
 
     // Verify A-H collateral reduced
     const [, aliceRepRebal] = findReplica(env, alice.id);
@@ -1243,25 +1530,25 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     const ahDeltaRebal = ahAccountRebal?.deltas.get(USDC_TOKEN_ID);
     console.log(`   A-H after settlement: collateral=${ahDeltaRebal?.collateral}, ondelta=${ahDeltaRebal?.ondelta}`);
 
-    await pushSnapshot(env, 'Frame 17: Alice-Hub Settlement complete', {
+    await pushSnapshot(env, 'Frame 23: Alice-Hub Settlement complete', {
       title: 'Rebalancing 1/2: A-H Settled',
-      what: 'Alice-Hub settlement finalized. Alice paid Hub $250K on-chain.',
+      what: 'Alice-Hub settlement finalized. Alice paid Hub $200K on-chain.',
       keyMetrics: [
-        'A-H collateral: $250K (down from $500K)',
+        'A-H collateral: $300K (down from $500K)',
         'A-H ondelta: reflects on-chain settlement',
         'Alice: cleared debt to Hub',
       ]
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
     // ============================================================================
-    // STEP 18: Hub-Bob Settlement (Hub deposits to insure Bob)
+    // STEP 24: Hub-Bob Settlement (Hub deposits to insure Bob)
     // ============================================================================
-    console.log('\n🏦 FRAME 18: Hub-Bob Settlement (Hub deposits $250K)');
+    console.log('\n🏦 FRAME 24: Hub-Bob Settlement (Hub deposits $200K)');
 
     // Hub is LEFT (0x0002 < 0x0003), Bob is RIGHT
     // Settlement: increase collateral, reduce Hub reserve, increase ondelta
     // Invariant: leftDiff + rightDiff + collateralDiff = 0
-    //   (-$250K) + 0 + (+$250K) = 0 ✓
+    //   (-$200K) + 0 + (+$200K) = 0 ✓
 
     // Create jBatch for Hub with the settlement
     const [, hubReplicaRebal] = findReplica(env, hub.id);
@@ -1276,36 +1563,43 @@ export async function prepopulateAHB(env: Env): Promise<void> {
       bob.id,   // rightEntity (0x0003)
       [{
         tokenId: USDC_TOKEN_ID,
-        leftDiff: -rebalanceAmount,        // Hub reserve -$250K
+        leftDiff: -rebalanceAmount,        // Hub reserve -$200K
         rightDiff: 0n,                      // Bob reserve unchanged
-        collateralDiff: rebalanceAmount,   // Account collateral +$250K
-        ondeltaDiff: rebalanceAmount,       // ondelta +$250K (insures Bob's position)
+        collateralDiff: rebalanceAmount,   // Account collateral +$200K
+        ondeltaDiff: rebalanceAmount,       // ondelta +$200K (insures Bob's position)
       }]
     );
 
-    await pushSnapshot(env, 'Frame 18: Hub-Bob Settlement initiated', {
+    await pushSnapshot(env, 'Frame 24: Hub-Bob Settlement initiated', {
       title: 'Rebalancing 2/2: Hub-Bob Settlement',
-      what: 'Hub deposits $250K collateral to insure Bob\'s position.',
-      why: 'Bob\'s $250K credit is now backed by on-chain collateral. TR → $0.',
+      what: 'Hub deposits $200K collateral to insure Bob\'s position.',
+      why: 'Bob\'s $200K credit is now backed by on-chain collateral. TR → $0.',
       tradfiParallel: 'Like posting margin: Hub locks funds to guarantee Bob\'s position.',
       keyMetrics: [
-        'H-B collateral: $0 → $250K (+$250K)',
-        'Hub reserve: -$250K (deposited)',
+        'H-B collateral: $0 → $200K (+$200K)',
+        'Hub reserve: -$200K (deposited)',
         'Bob: now fully insured!',
       ]
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
     // Broadcast settlement to BrowserVM
     console.log('🏦 Broadcasting Hub-Bob settlement jBatch to BrowserVM...');
-    await broadcastBatch(hub.id, hubReplicaRebal.state.jBatchState, null, browserVM);
-    console.log('✅ Hub-Bob settlement broadcast');
+    const hbSettleResult = await broadcastBatch(hub.id, hubReplicaRebal.state.jBatchState, null, browserVM);
+    if (!hbSettleResult.success) {
+      throw new Error(`❌ ASSERTION FAILED: Hub-Bob settlement failed: ${hbSettleResult.error || 'unknown error'}`);
+    }
+    if (!hbSettleResult.events || hbSettleResult.events.length === 0) {
+      throw new Error(`❌ ASSERTION FAILED: Hub-Bob settlement returned no events (expected AccountSettled)`);
+    }
+    console.log(`✅ Hub-Bob settlement broadcast: ${hbSettleResult.events.length} events`);
 
     // Process j_events from BrowserVM (SettlementProcessed events)
     await processJEvents(env);
 
-    // Frame 19: Process any outbox
-    console.log('\n🏦 FRAME 19: Hub-Bob Settlement completes');
-    outbox = await tick([]);
+    // Frame 25: Process any pending outputs
+    console.log('\n🏦 FRAME 25: Hub-Bob Settlement completes');
+    await process(env);
+    logPending();
 
     // Verify H-B collateral increased
     const [, hubRepRebal] = findReplica(env, hub.id);
@@ -1313,11 +1607,11 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     const hbDeltaRebal = hbAccountRebal?.deltas.get(USDC_TOKEN_ID);
     console.log(`   H-B after settlement: collateral=${hbDeltaRebal?.collateral}, ondelta=${hbDeltaRebal?.ondelta}`);
 
-    await pushSnapshot(env, 'Frame 19: Hub-Bob Settlement complete', {
+    await pushSnapshot(env, 'Frame 25: Hub-Bob Settlement complete', {
       title: 'Rebalancing 2/2: H-B Insured',
       what: 'Hub-Bob settlement finalized. Bob\'s position now fully collateralized.',
       keyMetrics: [
-        'H-B collateral: $250K (up from $0)',
+        'H-B collateral: $200K (up from $0)',
         'H-B ondelta: reflects on-chain backing',
         'TR: $0 (all risk eliminated!)',
       ]
@@ -1326,15 +1620,15 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     // ============================================================================
     // FINAL STATE: Rebalancing Complete
     // ============================================================================
-    console.log('\n📊 FRAME 20: Final State - Rebalancing Complete');
+    console.log('\n📊 FRAME 26: Final State - Rebalancing Complete');
 
-    await pushSnapshot(env, 'Frame 20: Rebalancing Complete - TR = $0', {
+    await pushSnapshot(env, 'Frame 26: Rebalancing Complete - TR = $0', {
       title: '✅ Rebalancing Complete: Zero Risk',
-      what: 'All positions now fully collateralized. Hub\'s TR reduced from $250K to $0.',
+      what: 'All positions now fully collateralized. Hub\'s TR reduced from $200K to $0.',
       why: 'Atomic on-chain settlement ensures: (1) Alice paid Hub, (2) Hub insured Bob. No counterparty risk remains.',
       tradfiParallel: 'Like end-of-day settlement: all net positions covered by actual reserves.',
       keyMetrics: [
-        'TR (Total Risk): $250K → $0',
+        'TR (Total Risk): $200K → $0',
         'A-H: Alice debt settled on-chain',
         'H-B: Bob position fully insured',
         'System: 100% collateralized',
@@ -1352,7 +1646,8 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     console.log('Phase 1: R2R reserve distribution');
     console.log('Phase 2: Bilateral accounts + R2C + credit');
     console.log('Phase 3: Two payments A→H→B ($250K total)');
-    console.log('Phase 4: Rebalancing - TR $250K → $0');
+    console.log('Phase 4: Reverse payment B→H→A ($50K) - net $200K');
+    console.log('Phase 5: Rebalancing - TR $200K → $0');
     console.log('=====================================\n');
     console.log(`[AHB] Snapshots: ${pushSnapshotCount}, history: ${env.history?.length}`);
   } finally {

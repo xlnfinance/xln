@@ -14,7 +14,7 @@ export default defineConfig({
   // retries: 1,
   outputDir: './e2e/test-results',
   use: {
-    baseURL: 'http://localhost:8080',
+    baseURL: 'https://localhost:8080',
     headless: process.env['HEADED'] !== 'true', // Headless by default, use HEADED=true for visual
     ignoreHTTPSErrors: true, // Ignore self-signed cert errors
     trace: 'on-first-retry',
@@ -31,4 +31,13 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
+
+  // Run dev server before tests
+  webServer: {
+    command: 'cd frontend && SKIP_TYPECHECK=1 bun run dev',
+    url: 'https://localhost:8080',
+    ignoreHTTPSErrors: true,  // Self-signed cert
+    reuseExistingServer: true,  // Reuse if already running (from dev-full.sh)
+    timeout: 120 * 1000,
+  },
 });

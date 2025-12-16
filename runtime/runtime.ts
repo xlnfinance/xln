@@ -183,12 +183,18 @@ export const getCleanLogs = (): string => cleanLogs.join('\n');
 /** Clear clean logs buffer */
 export const clearCleanLogs = (): void => { cleanLogs.length = 0; };
 
-/** Copy clean logs to clipboard and return count */
-export const copyCleanLogs = async (): Promise<number> => {
+/** Copy clean logs to clipboard (returns text if clipboard fails) */
+export const copyCleanLogs = async (): Promise<string> => {
+  const text = getCleanLogs();
   if (isBrowser && navigator.clipboard) {
-    await navigator.clipboard.writeText(getCleanLogs());
+    try {
+      await navigator.clipboard.writeText(text);
+      console.log(`✅ Copied ${cleanLogs.length} log entries to clipboard`);
+    } catch {
+      // Clipboard fails when devtools focused - just return text
+    }
   }
-  return cleanLogs.length;
+  return text;
 };
 
 // --- Database Setup ---
@@ -459,6 +465,8 @@ const applyRuntimeInput = async (
             blockNumber: BigInt(xlnomy.jMachine.jHeight),
             stateRoot,
             mempool: xlnomy.jMachine.mempool || [],
+            blockDelayMs: 300,             // 300ms delay before processing mempool
+            lastBlockTimestamp: env.timestamp,  // Use env.timestamp for determinism
             position: xlnomy.jMachine.position,
             contracts: xlnomy.contracts ? {
               depository: xlnomy.contracts.depository,
@@ -1505,90 +1513,60 @@ function detectLogCategory(msg: string): 'consensus' | 'account' | 'jurisdiction
   return 'system';
 }
 
-// === CONSENSUS PROCESSING UTILITIES ===
-// Global cascade lock to prevent tick interleaving
-let cascading = false;
+// === CONSENSUS PROCESSING ===
+// ONE TICK = ONE ITERATION. No cascade. E→E communication always requires new tick.
+let processing = false;
 
 export const process = async (
   env: Env,
   inputs?: EntityInput[],
-  runtimeDelay = 0,
-  singleIteration = false  // NEW: Stop after one iteration (simulate network delay)
+  runtimeDelay = 0
 ) => {
-  // Cascade lock: prevent interleaving when delay > tick interval
-  if (cascading) {
-    console.warn('⏸️ SKIP-CASCADE: Previous cascade still running');
+  // Lock: prevent interleaving
+  if (processing) {
+    console.warn('⏸️ SKIP: Previous tick still processing');
     return env;
   }
 
-  cascading = true;
-  let outputs = inputs || [];
-  let iterationCount = 0;
-  const maxIterations = singleIteration ? 1 : 10; // Single iteration for distributed simulation
+  processing = true;
 
-  // Helper to sleep (browser-compatible)
-  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  // Merge pending outputs from previous tick with new inputs
+  const allInputs = [...(env.pendingOutputs || []), ...(inputs || [])];
+  env.pendingOutputs = [];
 
-  // Validate all outputs before processing
-  outputs.forEach(o => {
+  // Validate inputs
+  allInputs.forEach(o => {
     try {
       validateEntityInput(o);
     } catch (error) {
-      logError("RUNTIME_TICK", `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityInput detected!`, {
+      logError("RUNTIME_TICK", `🚨 CRITICAL: Invalid EntityInput!`, {
         error: (error as Error).message,
-        entityId: o.entityId.slice(0,10),
+        entityId: o.entityId.slice(0, 10),
         signerId: o.signerId,
       });
       throw error;
     }
   });
 
-  // DEBUG: Log transaction details for vote transactions
-  outputs.forEach((output, i) => {
-    if (output.entityTxs?.some(tx => tx.type === 'vote')) {
-      console.log(
-        `🗳️ VOTE-DEBUG: Input ${i + 1} contains vote transactions:`,
-        output.entityTxs.filter(tx => tx.type === 'vote'),
-      );
-    }
-  });
-
   try {
-    while (outputs.length > 0 && iterationCount < maxIterations) {
-      iterationCount++;
+    if (allInputs.length > 0) {
+      console.log(`📥 TICK: Processing ${allInputs.length} inputs for [${allInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
 
-      console.error(`🔥🔥🔥 PROCESS-CASCADE iteration ${iterationCount}: Processing ${outputs.length} outputs for entities: [${outputs.map(o => o.entityId.slice(-4)).join(',')}]`);
+      const result = await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: allInputs });
 
-      const result = await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: outputs });
-      outputs = result.entityOutbox;
+      // Store outputs for NEXT tick (never process in same tick)
+      env.pendingOutputs = result.entityOutbox;
 
-      if (outputs.length > 0) {
-        console.error(`🔥 PROCESS-CASCADE: Iteration ${iterationCount} complete, ${outputs.length} new outputs`);
-      } else {
-        console.error(`🔥 PROCESS-CASCADE: Iteration ${iterationCount} complete, NO new outputs - cascade done`);
-      }
-
-      // Visual delay between cascade iterations (AFTER processing, before next iteration)
-      if (outputs.length > 0 && runtimeDelay > 0) {
-        console.log(`⏱️ CASCADE-DELAY: Waiting ${runtimeDelay}ms before next iteration...`);
-        await sleep(runtimeDelay);
+      if (result.entityOutbox.length > 0) {
+        console.log(`📤 TICK: ${result.entityOutbox.length} outputs queued for next tick → [${result.entityOutbox.map(o => o.entityId.slice(-4)).join(',')}]`);
       }
     }
 
-    if (iterationCount >= maxIterations && !singleIteration) {
-      console.warn('⚠️ process() reached maximum iterations (unexpected)');
-    } else if (singleIteration && outputs.length > 0) {
-      console.log(`⏭️ Single iteration mode: ${outputs.length} outputs remain for next tick`);
-    }
-
-    // Auto-persist to LevelDB after processing
+    // Auto-persist
     await saveEnvToDB(env);
-
-    // Return env + remaining outputs for distributed simulation
-    env.pendingOutputs = singleIteration ? outputs : [];
     return env;
   } finally {
-    cascading = false;
+    processing = false;
   }
 };
 

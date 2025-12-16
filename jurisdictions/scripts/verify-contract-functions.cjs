@@ -4,33 +4,39 @@ const fs = require('fs');
 async function main() {
     console.log("🔍 Verifying deployed contract functions...");
 
+    // Read deployment file
+    const deploymentFile = "ignition/deployments/chain-1337/deployed_addresses.json";
+    if (!fs.existsSync(deploymentFile)) {
+        console.log("❌ Deployment file not found:", deploymentFile);
+        process.exit(1);
+    }
+    const deploymentData = JSON.parse(fs.readFileSync(deploymentFile, 'utf8'));
+
     // Use address from environment variable if provided (fresh from deployment)
-    let depositoryAddress = process.env.DEPOSITORY_ADDRESS;
+    let depositoryAddress = process.env.DEPOSITORY_ADDRESS || deploymentData['DepositoryModule#Depository'];
 
     if (!depositoryAddress) {
-        console.log("🔍 No address from environment, reading from deployment file...");
-        // Fallback to deployment file
-        const deploymentFile = "ignition/deployments/chain-1337/deployed_addresses.json";
-        if (!fs.existsSync(deploymentFile)) {
-            console.log("❌ Deployment file not found:", deploymentFile);
-            process.exit(1);
-        }
-
-        const deploymentData = JSON.parse(fs.readFileSync(deploymentFile, 'utf8'));
-        depositoryAddress = deploymentData['DepositoryModule#Depository'];
-
-        if (!depositoryAddress) {
-            console.log("❌ Depository address not found in deployment file");
-            process.exit(1);
-        }
-    } else {
-        console.log("🔍 Using fresh address from deployment script:", depositoryAddress);
+        console.log("❌ Depository address not found in deployment file");
+        process.exit(1);
     }
 
     console.log("📍 Verifying Depository at:", depositoryAddress);
 
-    // Connect to contract
-    const Depository = await ethers.getContractFactory("Depository");
+    // Get Account library address for linking
+    const accountLibraryAddress = deploymentData['DepositoryModule#Account'];
+
+    if (!accountLibraryAddress) {
+        console.log("❌ Account library address not found - needed for Depository linking");
+        process.exit(1);
+    }
+    console.log("📍 Account library at:", accountLibraryAddress);
+
+    // Connect to contract with linked library
+    const Depository = await ethers.getContractFactory("Depository", {
+        libraries: {
+            Account: accountLibraryAddress
+        }
+    });
     const depository = Depository.attach(depositoryAddress);
 
     // Check bytecode
@@ -40,7 +46,11 @@ async function main() {
 
     // Get actual function selectors from contract interface
     console.log("🔍 Getting contract factory...");
-    const DepositoryFactory = await ethers.getContractFactory("Depository");
+    const DepositoryFactory = await ethers.getContractFactory("Depository", {
+        libraries: {
+            Account: accountLibraryAddress
+        }
+    });
     console.log("🔍 Contract factory:", DepositoryFactory ? "✅ LOADED" : "❌ NULL");
 
     if (!DepositoryFactory) {

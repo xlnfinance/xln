@@ -459,7 +459,7 @@ contract Depository is ReentrancyGuardLite {
       nonce: 0
     });
 
-    // Process diffs via Account library
+    // Process diffs via Account library (signature validation skipped if no sig provided)
     if (!Account.processSettlements(_reserves, _accounts, _collaterals, caller, settlements)) {
       return false;
     }

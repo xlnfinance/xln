@@ -38,6 +38,7 @@ export class BrowserEVM implements JurisdictionEVM {
   async timeTravel(stateRoot: Uint8Array) { return this.provider.timeTravel(stateRoot); }
   async debugFundReserves(entityId: string, tokenId: number, amount: bigint) { return this.provider.debugFundReserves(entityId, tokenId, amount); }
   async getReserves(entityId: string, tokenId: number) { return this.provider.getReserves(entityId, tokenId); }
+  async getCollateral(entity1: string, entity2: string, tokenId: number) { return this.provider.getCollateral(entity1, entity2, tokenId); }
   async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint) { return this.provider.reserveToReserve(from, to, tokenId, amount); }
   async prefundAccount(entityId: string, counterpartyId: string, tokenId: number, amount: bigint) { return this.provider.prefundAccount(entityId, counterpartyId, tokenId, amount); }
   async executeTx(tx: { to: string; data: string; gasLimit?: bigint }) { return this.provider.executeTx(tx); }

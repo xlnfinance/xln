@@ -50,6 +50,13 @@
   const localTimeIndex = writable<number>(-1);  // -1 = live mode
   const localIsLive = writable<boolean>(true);
 
+  // Expose env to window for E2E testing (Playwright tests need access to history)
+  localEnvStore.subscribe((env) => {
+    if (typeof window !== 'undefined' && env) {
+      (window as any).isolatedEnv = env;
+    }
+  });
+
   // Pending entity data - bypasses Dockview params timing
   const pendingEntityData = new Map<string, {entityId: string, entityName: string, signerId: string}>();
 
