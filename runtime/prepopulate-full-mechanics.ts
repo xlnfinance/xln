@@ -26,6 +26,16 @@ import { buildEntityProfile } from './gossip-helper';
 import { cloneEntityReplica } from './state-helpers';
 import type { Profile } from './gossip';
 
+// Lazy-loaded process to avoid circular dependency
+let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
+const getProcess = async () => {
+  if (!_process) {
+    const runtime = await import('./runtime');
+    _process = runtime.process;
+  }
+  return _process;
+};
+
 const USDC_TOKEN_ID = 1;
 const DECIMALS = 18n;
 const ONE_TOKEN = 10n ** DECIMALS;
@@ -170,7 +180,8 @@ function createAccount(replica: EntityReplica, counterpartyId: string, collatera
   replica.state.accounts.set(counterpartyId, accountMachine);
 }
 
-export async function prepopulateFullMechanics(env: Env, processUntilEmpty: (env: Env, inputs?: EntityInput[]) => Promise<any>): Promise<void> {
+export async function prepopulateFullMechanics(env: Env): Promise<void> {
+  const process = await getProcess();
   env.disableAutoSnapshots = true; // Disable automatic tick snapshots
   try {
     console.log('🎓 COMPREHENSIVE DEMO: All 10 Core Mechanics');
@@ -229,7 +240,7 @@ export async function prepopulateFullMechanics(env: Env, processUntilEmpty: (env
   for (const from of entities) {
     for (const to of entities) {
       if (from.id !== to.id) {
-        await processUntilEmpty(env, [{
+        await process(env, [{
           entityId: from.id,
           signerId: from.signer,
           entityTxs: [{ type: 'openAccount', data: { targetEntityId: to.id } }]

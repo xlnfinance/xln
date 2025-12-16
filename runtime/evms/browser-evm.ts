@@ -42,6 +42,10 @@ export class BrowserEVM implements JurisdictionEVM {
   async prefundAccount(entityId: string, counterpartyId: string, tokenId: number, amount: bigint) { return this.provider.prefundAccount(entityId, counterpartyId, tokenId, amount); }
   async executeTx(tx: { to: string; data: string; gasLimit?: bigint }) { return this.provider.executeTx(tx); }
   async executeBatch(entityId: string, batch: any) { return this.provider.executeBatch(entityId, batch); }
+  async processBatch(entityId: string, batch: any) { return this.provider.processBatch(entityId, batch); }
+
+  // Event subscription for j-watcher (proxied from BrowserVMProvider)
+  onAny(callback: (event: any) => void): () => void { return this.provider.onAny(callback); }
 
   // JurisdictionEVM interface
   async deployContract(bytecode: string, args?: any[]): Promise<string> { throw new Error('Not implemented'); }

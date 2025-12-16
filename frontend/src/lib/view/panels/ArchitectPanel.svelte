@@ -8,8 +8,10 @@
    */
 
   import type { Writable } from 'svelte/store';
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { panelBridge } from '../utils/panelBridge';
+  // @ts-ignore - Vite raw import
+  import prepopulateAHBCode from '../../../../../runtime/prepopulate-ahb.ts?raw';
   import { shortAddress } from '$lib/utils/format';
   import { getXLN } from '$lib/stores/xlnStore';
   import SolvencyPanel from './SolvencyPanel.svelte';
@@ -280,6 +282,31 @@
   let tutorialPaused = false;
   let currentTutorialFrame = 0;
 
+  // Scenario Code - shows actual prepopulate-ahb.ts from /runtime (via Vite raw import)
+  let scenarioCodeTextarea: HTMLTextAreaElement;
+  const scenarioCode = prepopulateAHBCode;
+
+  // Find line number for current frame in prepopulate-ahb.ts
+  function getFrameLineNumber(frameIndex: number): number {
+    const lines = scenarioCode.split('\n');
+    // Match patterns like "FRAME 12:", "Frame 12:", "FRAME 12 ", etc.
+    const framePattern = new RegExp(`FRAME\\s+${frameIndex}[:\\s]`, 'i');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (line && framePattern.test(line)) {
+        return i;
+      }
+    }
+    return 0;
+  }
+
+  // Scroll textarea to current frame when timeIndex changes
+  $: if (scenarioCodeTextarea && $isolatedTimeIndex >= 0) {
+    const lineNumber = getFrameLineNumber($isolatedTimeIndex);
+    const lineHeight = 18; // Approximate line height in pixels
+    scenarioCodeTextarea.scrollTop = lineNumber * lineHeight - 50;
+  }
+
   // Expandable category state
   let expandedCategory: 'elementary' | 'intermediate' | 'advanced' | null = 'elementary'; // Pre-expand Elementary on load
 
@@ -361,7 +388,18 @@
       // Start at LAST frame to show final state (user can rewind with TimeMachine)
       tutorialActive = false; // Don't show tutorial UI - just use TimeMachine
     } catch (err: any) {
-      lastAction = ` ${err.message}`;
+      // CRITICAL: Still update history with frames created before error
+      const frames = $isolatedEnv?.history || [];
+      if (frames.length > 0) {
+        console.log('[Architect] Error occurred but have', frames.length, 'frames - showing them');
+        isolatedIsLive.set(false);
+        isolatedTimeIndex.set(Math.max(0, frames.length - 1));
+        isolatedHistory.set(frames);
+        isolatedEnv.set($isolatedEnv);
+        lastAction = `AHB: ${frames.length} frames (stopped at error). ${err.message}`;
+      } else {
+        lastAction = `❌ ${err.message}`;
+      }
       console.error('[Tutorial] AHB error:', err);
       tutorialActive = false;
     } finally {
@@ -422,7 +460,7 @@
       console.log('[Full Mechanics] Cleared old state');
 
       // Run comprehensive mechanics demo
-      await XLN.prepopulateFullMechanics($isolatedEnv, XLN.process);
+      await XLN.prepopulateFullMechanics($isolatedEnv);
 
       // CRITICAL: Set timeIndex BEFORE history to avoid race condition
       const frames = $isolatedEnv.history || [];
@@ -2340,163 +2378,50 @@
         </div>
       {:else}
         <!-- ============================================================ -->
-        <!-- 3-LEVEL PRESET SYSTEM (Game-Style) -->
+        <!-- SCENARIOS (Flat List) -->
         <!-- ============================================================ -->
         <div class="preset-system">
-          <h5>Select Difficulty</h5>
-
-          <!-- ELEMENTARY -->
-          <button
-            class="category-btn elementary"
-            class:expanded={expandedCategory === 'elementary'}
-            on:click={() => expandedCategory = expandedCategory === 'elementary' ? null : 'elementary'}
-            disabled={loading}
-          >
-            <div class="category-main">
-              <span class="level">LVL 1</span>
-              <div class="category-info">
-                <h6>ELEMENTARY</h6>
-                <p>Basics · First steps · Sandbox</p>
+          <h5>Scenarios</h5>
+          <div class="preset-list">
+            <!-- AHB FIRST with glow - recommended starting point -->
+            <button class="preset-item recommended" on:click={startAHBTutorial} disabled={loading}>
+              <span class="icon">ahb</span>
+              <div class="info">
+                <strong>Alice-Hub-Bob</strong>
+                <p>Auto-play tutorial · Bilateral consensus</p>
               </div>
-            </div>
-            <span class="arrow">{expandedCategory === 'elementary' ? '▼' : '▶'}</span>
-          </button>
+            </button>
 
-          {#if expandedCategory === 'elementary'}
-            <div class="preset-list">
-              <!-- AHB FIRST with glow - recommended starting point -->
-              <button class="preset-item recommended" on:click={startAHBTutorial} disabled={loading}>
-                <span class="icon">ahb</span>
-                <div class="info">
-                  <strong>Alice-Hub-Bob</strong>
-                  <p>3 min · 9 frames · Auto-play tutorial</p>
-                </div>
-              </button>
-
-              <button class="preset-item" on:click={() => runPreset('empty')} disabled={loading}>
-                <span class="icon">□</span>
-                <div class="info">
-                  <strong>Empty J-Machine</strong>
-                  <p>Clean slate · Manual exploration</p>
-                </div>
-              </button>
-
-              <button class="preset-item" on:click={createHub} disabled={loading}>
-                <span class="icon">3×3</span>
-                <div class="info">
-                  <strong>Grid 3×3 Hub</strong>
-                  <p>9 entities · Pinnacle topology</p>
-                </div>
-              </button>
-            </div>
-          {/if}
-
-          <!-- INTERMEDIATE (CEFI) -->
-          <button
-            class="category-btn intermediate"
-            class:expanded={expandedCategory === 'intermediate'}
-            on:click={() => expandedCategory = expandedCategory === 'intermediate' ? null : 'intermediate'}
-            disabled={loading}
-          >
-            <div class="category-main">
-              <span class="level">LVL 2</span>
-              <div class="category-info">
-                <h6>INTERMEDIATE</h6>
-                <p>Real banking models · Central banks</p>
+            <button class="preset-item" on:click={() => runPreset('empty')} disabled={loading}>
+              <span class="icon">□</span>
+              <div class="info">
+                <strong>Empty J-Machine</strong>
+                <p>Clean slate · Manual exploration</p>
               </div>
-            </div>
-            <span class="arrow">{expandedCategory === 'intermediate' ? '▼' : '▶'}</span>
-          </button>
+            </button>
 
-          {#if expandedCategory === 'intermediate'}
-            <div class="preset-list">
-              <button class="preset-item" on:click={startHTopologyTutorial} disabled={loading}>
-                <span class="icon">H</span>
-                <div class="info">
-                  <strong>H-Topology Network</strong>
-                  <p>6 entities · Hub routing · 5 min tutorial</p>
-                </div>
-              </button>
-
-              <button class="preset-item" on:click={() => createEconomyWithTopology('star')} disabled={loading}>
-                <span class="icon">★</span>
-                <div class="info">
-                  <strong>STAR (USA)</strong>
-                  <p>Fed-centric · No interbank · Max control</p>
-                </div>
-              </button>
-
-              <button class="preset-item" on:click={() => createEconomyWithTopology('mesh')} disabled={loading}>
-                <span class="icon">⬢</span>
-                <div class="info">
-                  <strong>MESH (Eurozone)</strong>
-                  <p>P2P interbank · ECB emergency</p>
-                </div>
-              </button>
-
-              <button class="preset-item" on:click={() => createEconomyWithTopology('tiered')} disabled={loading}>
-                <span class="icon">▲</span>
-                <div class="info">
-                  <strong>TIERED (China)</strong>
-                  <p>6 layers · No tier jumping</p>
-                </div>
-              </button>
-
-              <button class="preset-item" on:click={() => createEconomyWithTopology('correspondent')} disabled={loading}>
-                <span class="icon">◈</span>
-                <div class="info">
-                  <strong>CORRESPONDENT (IMF)</strong>
-                  <p>Gateway banks · FX routing</p>
-                </div>
-              </button>
-            </div>
-          {/if}
-
-          <!-- ADVANCED -->
-          <button
-            class="category-btn advanced"
-            class:expanded={expandedCategory === 'advanced'}
-            on:click={() => expandedCategory = expandedCategory === 'advanced' ? null : 'advanced'}
-            disabled={loading}
-          >
-            <div class="category-main">
-              <span class="level">LVL 3</span>
-              <div class="category-info">
-                <h6>ADVANCED</h6>
-                <p>Experimental · Complex · Research</p>
+            <button class="preset-item" on:click={createHub} disabled={loading}>
+              <span class="icon">3×3</span>
+              <div class="info">
+                <strong>Grid 3×3 Hub</strong>
+                <p>9 entities · Pinnacle topology</p>
               </div>
-            </div>
-            <span class="arrow">{expandedCategory === 'advanced' ? '▼' : '▶'}</span>
-          </button>
-
-          {#if expandedCategory === 'advanced'}
-            <div class="preset-list">
-              <button class="preset-item" on:click={startFullMechanicsTutorial} disabled={loading}>
-                <span class="icon">10</span>
-                <div class="info">
-                  <strong>All 10 Mechanics</strong>
-                  <p>15 frames · Complete tour · 8 min</p>
-                </div>
-              </button>
-
-              <button class="preset-item" on:click={() => createEconomyWithTopology('hybrid')} disabled={loading}>
-                <span class="icon">◐</span>
-                <div class="info">
-                  <strong>HYBRID (Adaptive)</strong>
-                  <p>Crisis mode · Auto-switching · Optimal</p>
-                </div>
-              </button>
-
-              <button class="preset-item" disabled>
-                <span class="icon">S&P</span>
-                <div class="info">
-                  <strong>S&P 500 Corporate</strong>
-                  <p>50 companies · Coming soon</p>
-                </div>
-              </button>
-            </div>
-          {/if}
+            </button>
+          </div>
         </div>
+
+        <!-- SCENARIO CODE - Shows current tutorial code with frame markers -->
+        {#if $isolatedHistory && $isolatedHistory.length > 0}
+          <div class="scenario-code-section">
+            <h5>Scenario Code (Frame {$isolatedTimeIndex >= 0 ? $isolatedTimeIndex : 'LIVE'})</h5>
+            <textarea
+              bind:this={scenarioCodeTextarea}
+              class="scenario-code-textarea"
+              readonly
+              spellcheck="false"
+            >{scenarioCode}</textarea>
+          </div>
+        {/if}
 
         <div class="action-section">
           <h5>Jurisdiction (EVM Instance)</h5>
@@ -2534,129 +2459,6 @@
                Lazy: In-browser only entities (faster, hash-based IDs, no gas)
             {/if}
           </p>
-        </div>
-
-        <div class="action-section topology-builder">
-          <h5> Economic Topology Builder</h5>
-          <p class="topology-intro">XLN = SUPERSET of all financial systems. Choose your model:</p>
-
-          <div class="topology-grid">
-            <button
-              class="topology-card"
-              class:active={selectedTopology === 'hybrid'}
-              on:click={() => selectedTopology = 'hybrid'}
-              disabled={loading || entityIds.length > 0}
-            >
-              <div class="badge-new">DEFAULT</div>
-              <div class="topology-icon"></div>
-              <h6>HYBRID</h6>
-              <p class="topology-model">XLN Native</p>
-              <ul class="topology-features">
-                <li>Adaptive routing</li>
-                <li>Crisis → Fed mode</li>
-                <li>Best of all worlds</li>
-              </ul>
-            </button>
-
-            <button
-              class="topology-card"
-              class:active={selectedTopology === 'star'}
-              on:click={() => selectedTopology = 'star'}
-              disabled={loading || entityIds.length > 0}
-            >
-              <div class="topology-icon"></div>
-              <h6>STAR</h6>
-              <p class="topology-model">USA/Canada</p>
-              <ul class="topology-features">
-                <li>Fed-centric</li>
-                <li>No interbank</li>
-                <li>Max control</li>
-              </ul>
-            </button>
-
-            <button
-              class="topology-card"
-              class:active={selectedTopology === 'mesh'}
-              on:click={() => selectedTopology = 'mesh'}
-              disabled={loading || entityIds.length > 0}
-            >
-              <div class="topology-icon"></div>
-              <h6>MESH</h6>
-              <p class="topology-model">Eurozone</p>
-              <ul class="topology-features">
-                <li>P2P interbank</li>
-                <li>ECB emergency</li>
-                <li>Decentralized</li>
-              </ul>
-            </button>
-
-            <button
-              class="topology-card"
-              class:active={selectedTopology === 'tiered'}
-              on:click={() => selectedTopology = 'tiered'}
-              disabled={loading || entityIds.length > 0}
-            >
-              <div class="topology-icon"></div>
-              <h6>TIERED</h6>
-              <p class="topology-model">China/Japan</p>
-              <ul class="topology-features">
-                <li>6 layers strict</li>
-                <li>No tier jumping</li>
-                <li>Command economy</li>
-              </ul>
-            </button>
-
-            <button
-              class="topology-card"
-              class:active={selectedTopology === 'correspondent'}
-              on:click={() => selectedTopology = 'correspondent'}
-              disabled={loading || entityIds.length > 0}
-            >
-              <div class="topology-icon"></div>
-              <h6>CORRESPONDENT</h6>
-              <p class="topology-model">IMF/DevCo</p>
-              <ul class="topology-features">
-                <li>Chain routing</li>
-                <li>Gateway bank</li>
-                <li>FX fees</li>
-              </ul>
-            </button>
-
-            <button
-              class="topology-card sp500-card"
-              class:active={selectedTopology === 'sp500'}
-              on:click={() => selectedTopology = 'sp500'}
-              disabled={loading || entityIds.length > 0}
-            >
-              <div class="topology-icon"></div>
-              <h6>S&P 500</h6>
-              <p class="topology-model">Corporate Settlement</p>
-              <ul class="topology-features">
-                <li>▸ 50 real companies</li>
-                <li>▸ AAPL MSFT GOOGL</li>
-                <li>▸ P2P corporate</li>
-              </ul>
-            </button>
-          </div>
-
-          <button
-            class="demo-btn create-economy-btn"
-            on:click={() => createEconomyWithTopology(selectedTopology)}
-            disabled={loading || entityIds.length > 0}
-          >
-             Create {selectedTopology.toUpperCase()} Economy
-          </button>
-
-          {#if fedPaymentInterval}
-            <button class="demo-btn stop-btn" on:click={stopFedPaymentLoop}>
-              ⏹️ Stop Payment Loop
-            </button>
-            <p class="step-help live-indicator">🔴 LIVE: {selectedTopology.toUpperCase()} topology running...</p>
-          {:else if entityIds.length > 0}
-            <button class="demo-btn play-btn" on:click={startFedPaymentLoop}>
-               Restart Payment Loop
-            </button>
-          {/if}
         </div>
 
         <div class="action-section banker-demo">
@@ -2937,6 +2739,43 @@
     background: linear-gradient(135deg, #00dd38, #00aa2a);
     box-shadow: 0 0 20px rgba(0, 255, 65, 0.5);
     transform: translateY(-1px);
+  }
+
+  /* Scenario Code Section */
+  .scenario-code-section {
+    padding: 12px;
+    background: #1a1a1a;
+    border-top: 1px solid #3e3e3e;
+    border-bottom: 1px solid #3e3e3e;
+  }
+
+  .scenario-code-section h5 {
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    color: #00ff41;
+    font-family: 'Monaco', 'Menlo', monospace;
+  }
+
+  .scenario-code-textarea {
+    width: 100%;
+    height: 300px;
+    padding: 12px;
+    background: #0d0d0d;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #9cdcfe;
+    font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+    font-size: 11px;
+    line-height: 18px;
+    resize: vertical;
+    white-space: pre;
+    overflow-x: auto;
+    overflow-y: scroll;
+    box-sizing: border-box;
+  }
+
+  .scenario-code-textarea:focus {
+    outline: 1px solid #007acc;
   }
 
   .mode-selector {

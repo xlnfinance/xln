@@ -15,6 +15,7 @@ import { createAddressFromPrivateKey, hexToBytes, createAccount, bytesToHex } fr
 import type { Address } from '@ethereumjs/util';
 import { Common, Hardfork, Chain } from '@ethereumjs/common';
 import { ethers } from 'ethers';
+import { safeStringify } from '$lib/utils/safeStringify';
 
 /** EVM event emitted from the BrowserVM */
 export interface EVMEvent {
@@ -40,6 +41,7 @@ export class BrowserVMProvider {
   private entityProviderInterface: ethers.Interface | null = null;
   private initialized = false;
   private blockHeight = 0; // Track J-Machine block height
+  private eventCallbacks: Set<(event: EVMEvent) => void> = new Set();
 
   constructor() {
     // Hardhat default account #0
@@ -290,8 +292,8 @@ export class BrowserVMProvider {
     return account?.nonce || 0n;
   }
 
-  /** Debug: Fund entity reserves (uses mintToReserve in testMode) */
-  async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<void> {
+  /** Debug: Fund entity reserves (uses mintToReserve in testMode) - emits ReserveUpdated event */
+  async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<EVMEvent[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
@@ -319,10 +321,14 @@ export class BrowserVMProvider {
     }
 
     console.log(`[BrowserVM] Funded ${entityId.slice(0, 10)}... with ${amount} of token ${tokenId}`);
+    console.log(`[BrowserVM] debugFundReserves: logs=${result.execResult.logs?.length || 0}`);
+
+    // Emit events to j-watcher subscribers
+    return this.emitEvents(result.execResult.logs || []);
   }
 
-  /** Execute R2R transfer */
-  async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<void> {
+  /** Execute R2R transfer - emits ReserveUpdated events */
+  async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<EVMEvent[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
@@ -349,6 +355,9 @@ export class BrowserVMProvider {
     }
 
     console.log(`[BrowserVM] Transferred ${amount} from ${from.slice(0, 10)}... to ${to.slice(0, 10)}...`);
+
+    // Emit events to j-watcher subscribers
+    return this.emitEvents(result.execResult.logs || []);
   }
 
   /** Get contract address */
@@ -373,8 +382,8 @@ export class BrowserVMProvider {
     };
   }
 
-  /** Prefund account (R2C - Reserve to Collateral) */
-  async prefundAccount(entityId: string, counterpartyId: string, tokenId: number, amount: bigint): Promise<void> {
+  /** Prefund account (R2C - Reserve to Collateral) - emits SettlementProcessed event */
+  async prefundAccount(entityId: string, counterpartyId: string, tokenId: number, amount: bigint): Promise<EVMEvent[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
     // Use ethers Interface for ABI encoding (same as mainnet)
@@ -396,6 +405,10 @@ export class BrowserVMProvider {
     }
     this.incrementBlock(); // Transaction mined successfully
     console.log(`[BrowserVM] Prefunded ${amount} from ${entityId.slice(0, 10)}... to account with ${counterpartyId.slice(0, 10)}...`);
+    console.log(`[BrowserVM] prefundAccount: logs=${result.execResult.logs?.length || 0}`);
+
+    // Emit events to j-watcher subscribers
+    return this.emitEvents(result.execResult.logs || []);
   }
 
   /** Get collateral for an account */
@@ -491,25 +504,44 @@ export class BrowserVMProvider {
     }
   }
 
-  /** Process a full batch */
+  /** Process a full batch - executes R2R, R2C, and settlements */
   async processBatch(entityId: string, batch: {
     reserveToReserve?: Array<{toEntity: string, tokenId: number, amount: bigint}>,
     reserveToCollateral?: Array<{counterparty: string, tokenId: number, amount: bigint}>,
     settlements?: Array<{leftEntity: string, rightEntity: string, diffs: any[]}>,
-  }): Promise<boolean> {
+  }): Promise<EVMEvent[]> {
     if (!this.depositoryAddress) throw new Error('Depository not deployed');
 
-    // For simplicity, execute individual operations
-    // In production, encode full Batch struct and call processBatch
+    const allEvents: EVMEvent[] = [];
 
+    // Execute R2R (Reserve to Reserve) transfers
     if (batch.reserveToReserve) {
       for (const r2r of batch.reserveToReserve) {
-        await this.reserveToReserve(entityId, r2r.toEntity, r2r.tokenId, r2r.amount);
+        const events = await this.reserveToReserve(entityId, r2r.toEntity, r2r.tokenId, r2r.amount);
+        allEvents.push(...events);
       }
     }
 
-    console.log(`[BrowserVM] Batch processed for ${entityId.slice(0, 10)}...`);
-    return true;
+    // Execute R2C (Reserve to Collateral) prefunds
+    if (batch.reserveToCollateral) {
+      for (const r2c of batch.reserveToCollateral) {
+        const events = await this.prefundAccount(entityId, r2c.counterparty, r2c.tokenId, r2c.amount);
+        allEvents.push(...events);
+      }
+    }
+
+    // Execute settlements
+    if (batch.settlements) {
+      for (const settle of batch.settlements) {
+        const result = await this.settleWithInsurance(settle.leftEntity, settle.rightEntity, settle.diffs);
+        if (result.logs) {
+          allEvents.push(...result.logs);
+        }
+      }
+    }
+
+    console.log(`[BrowserVM] Batch processed for ${entityId.slice(0, 10)}...: ${allEvents.length} events`);
+    return allEvents;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -660,8 +692,8 @@ export class BrowserVMProvider {
       return { success: false, logs: [] };
     }
 
-    // Parse logs
-    const logs = this.parseLogs(result.execResult.logs || []);
+    // Parse and emit logs to j-watcher subscribers
+    const logs = this.emitEvents(result.execResult.logs || []);
 
     const insuranceCount = insuranceRegs.length;
     console.log(`[BrowserVM] Settle completed: ${diffs.length} diffs, ${insuranceCount} insurance regs`);
@@ -698,11 +730,33 @@ export class BrowserVMProvider {
   //  ENTITY PROVIDER STUBS - Used by JurisdictionPanel
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /** Subscribe to all EVM events */
+  /** Subscribe to all EVM events - j-watcher uses this for BrowserVM mode */
   onAny(callback: (event: EVMEvent) => void): () => void {
-    // TODO: Implement event subscription when needed
-    console.log('[BrowserVM] onAny stub - event subscription not yet implemented');
-    return () => {}; // Return empty unsubscribe function
+    this.eventCallbacks.add(callback);
+    console.log(`[BrowserVM] onAny registered (${this.eventCallbacks.size} callbacks)`);
+    return () => {
+      this.eventCallbacks.delete(callback);
+      console.log(`[BrowserVM] onAny unsubscribed (${this.eventCallbacks.size} callbacks)`);
+    };
+  }
+
+  /** Emit events to all registered callbacks */
+  private emitEvents(logs: any[]): EVMEvent[] {
+    console.log(`🔊 [BrowserVM] emitEvents ENTRY: raw logs=${logs.length}, callbacks=${this.eventCallbacks.size}`);
+    const events = this.parseLogs(logs);
+    console.log(`🔊 [BrowserVM] emitEvents: parsed ${events.length} events`);
+    for (const event of events) {
+      console.log(`   📣 EVENT: ${event.name} | ${safeStringify(event.args).slice(0,80)}`);
+      for (const cb of this.eventCallbacks) {
+        try {
+          cb(event);
+          console.log(`   ✓ cb fired for ${event.name}`);
+        } catch (err) {
+          console.error(`   ❌ cb error:`, err);
+        }
+      }
+    }
+    return events;
   }
 
   /** Get next available entity number */

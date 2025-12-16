@@ -29,9 +29,9 @@ test.describe('AHB Demo - Critical Path', () => {
 
     // Navigate to /view
     console.log('🌐 Navigating to /view...');
-    await page.goto('https://localhost:8080/view', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.goto('https://localhost:8080/view', { waitUntil: 'networkidle', timeout: 3000 });
 
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(500);
 
     // CRITICAL: Clear database to force fresh AHB run
     console.log('🗑️  Clearing database...');
@@ -40,7 +40,7 @@ test.describe('AHB Demo - Critical Path', () => {
       await runtime.clearDB();
       console.log('[TEST] Database cleared');
     });
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(200);
 
     // Click AHB button
     console.log('🖱️  Clicking AHB button...');
@@ -48,13 +48,13 @@ test.describe('AHB Demo - Critical Path', () => {
     await ahbButton.click();
     console.log('✅ Clicked AHB');
 
-    console.log('⏳ Waiting for prepopulate (checking for [Architect] prepopulateAHB returned)...');
+    console.log('⏳ Waiting for prepopulate...');
 
     // Wait for history to populate (AHB creates 9+ frames)
     await page.waitForFunction(() => {
       const env = (window as any).xlnEnv;
       return env?.history?.length >= 9;
-    }, { timeout: 30000 });
+    }, { timeout: 3000 });
 
     console.log('✅ AHB loaded - history frames found');
 
@@ -126,8 +126,8 @@ test.describe('AHB Demo - Critical Path', () => {
   });
 
   test('Status message shows correct frame count', async ({ page }) => {
-    await page.goto('https://localhost:8080/view', { waitUntil: 'networkidle' });
-    await page.waitForTimeout(2000);
+    await page.goto('https://localhost:8080/view', { waitUntil: 'networkidle', timeout: 3000 });
+    await page.waitForTimeout(500);
 
     // Close welcome modal
     const welcomeClose = page.locator('.tutorial-overlay button').first();
@@ -137,9 +137,9 @@ test.describe('AHB Demo - Critical Path', () => {
 
     // Expand and click AHB
     await page.getByRole('button', { name: /ELEMENTARY/ }).click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(200);
     await page.getByRole('button', { name: /Alice-Hub-Bob/ }).click();
-    await page.waitForTimeout(6000);
+    await page.waitForTimeout(2000);
 
     // Check status message
     const statusText = await page.locator('.action-section p, [class*="status"], [class*="action"]').filter({ hasText: /frames loaded/ }).first().textContent();

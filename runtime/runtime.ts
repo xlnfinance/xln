@@ -134,6 +134,63 @@ import {
 } from './utils';
 import { logError } from './logger';
 
+// --- Clean Log Capture (for debugging without file:line noise) ---
+const cleanLogs: string[] = [];
+const MAX_CLEAN_LOGS = 2000;
+
+// Wrap console to capture clean logs (browser only)
+if (isBrowser) {
+  const originalLog = console.log;
+  const originalWarn = console.warn;
+  const originalError = console.error;
+  const originalDebug = console.debug;
+
+  const formatArgs = (args: any[]): string => {
+    return args.map(a => {
+      if (typeof a === 'string') return a;
+      if (typeof a === 'bigint') return a.toString() + 'n';
+      try { return JSON.stringify(a); } catch { return String(a); }
+    }).join(' ');
+  };
+
+  const addCleanLog = (level: string, msg: string) => {
+    const ts = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
+    cleanLogs.push(`[${ts}] ${level}: ${msg}`);
+    if (cleanLogs.length > MAX_CLEAN_LOGS) cleanLogs.shift();
+  };
+
+  console.log = function(...args: any[]) {
+    originalLog.apply(console, args);
+    addCleanLog('LOG', formatArgs(args));
+  };
+  console.warn = function(...args: any[]) {
+    originalWarn.apply(console, args);
+    addCleanLog('WARN', formatArgs(args));
+  };
+  console.error = function(...args: any[]) {
+    originalError.apply(console, args);
+    addCleanLog('ERR', formatArgs(args));
+  };
+  console.debug = function(...args: any[]) {
+    originalDebug.apply(console, args);
+    addCleanLog('DBG', formatArgs(args));
+  };
+}
+
+/** Get all clean logs as text (no file:line references) */
+export const getCleanLogs = (): string => cleanLogs.join('\n');
+
+/** Clear clean logs buffer */
+export const clearCleanLogs = (): void => { cleanLogs.length = 0; };
+
+/** Copy clean logs to clipboard and return count */
+export const copyCleanLogs = async (): Promise<number> => {
+  if (isBrowser && navigator.clipboard) {
+    await navigator.clipboard.writeText(getCleanLogs());
+  }
+  return cleanLogs.length;
+};
+
 // --- Database Setup ---
 // Level polyfill: Node.js uses filesystem, Browser uses IndexedDB
 export const db: Level<Buffer, Buffer> = new Level('db', {
@@ -199,10 +256,56 @@ export const registerEnvChangeCallback = (callback: (env: Env) => void) => {
   envChangeCallback = callback;
 };
 
+/**
+ * Get the module-level env (used for j-watcher and runtime tick)
+ * CRITICAL: This returns the SAME env that the runtime tick processes!
+ * View.svelte should use this instead of createEmptyEnv() for proper event routing.
+ */
+export const getEnv = (): Env | null => {
+  return env || null;
+};
+
+/**
+ * Initialize module-level env if not already set
+ * Call this early in frontend initialization before prepopulate
+ */
+export const initEnv = (): Env => {
+  if (!env) {
+    env = createEmptyEnv();
+    console.log('🌍 Runtime env initialized (module-level)');
+  }
+  return env;
+};
+
 const notifyEnvChange = (env: Env) => {
   if (envChangeCallback) {
     envChangeCallback(env);
   }
+};
+
+/**
+ * Process any pending j-events after j-block finalization
+ * Called automatically after each BrowserVM batch execution
+ * This is the R-machine routing j-events from jReplicas to eReplicas
+ */
+export const processJBlockEvents = async (): Promise<void> => {
+  if (!env) {
+    console.warn('⚠️ processJBlockEvents: No env available');
+    return;
+  }
+
+  const pending = env.runtimeInput.entityInputs.length;
+  if (pending === 0) return;
+
+  console.log(`🔗 J-BLOCK: ${pending} j-events queued → routing to eReplicas`);
+  const toProcess = [...env.runtimeInput.entityInputs];
+  env.runtimeInput.entityInputs = [];
+
+  await applyRuntimeInput(env, {
+    runtimeTxs: [],
+    entityInputs: toProcess,
+  });
+  console.log(`   ✓ ${toProcess.length} j-events processed`);
 };
 
 // J-Watcher initialization
@@ -1027,6 +1130,7 @@ export {
   classifyBilateralState,
   getAccountBarVisual,
   clearDatabaseAndHistory,
+  // Clean logs: getCleanLogs, clearCleanLogs, copyCleanLogs - exported at definition
   connectToEthereum,
   // Entity creation functions
   createLazyEntity,
@@ -1069,6 +1173,7 @@ export {
   searchEntityNames,
   setBrowserVMJurisdiction,
   getBrowserVMInstance,
+  // getEnv, initEnv, processJBlockEvents - already exported inline above
   submitProcessBatch,
   submitPrefundAccount,
   submitSettle,
@@ -1573,19 +1678,22 @@ import { prepopulate as prepopulateImpl } from './prepopulate';
 import { prepopulateAHB as prepopulateAHBImpl } from './prepopulate-ahb';
 import { prepopulateFullMechanics as prepopulateFullMechanicsImpl } from './prepopulate-full-mechanics';
 
-// Wrap prepopulate functions to match API signature (bind process as second parameter)
+// Re-export prepopulate functions (they use lazy-loaded process internally)
 export const prepopulate = async (env: Env): Promise<Env> => {
-  await prepopulateImpl(env, process);
+  await prepopulateImpl(env);
   return env;
 };
 
-export const prepopulateAHB = async (env: Env): Promise<Env> => {
-  await prepopulateAHBImpl(env, process); // Use regular process (cascades fully)
-  return env;
+export const prepopulateAHB = async (passedEnv: Env): Promise<Env> => {
+  // Sync module-level env with passed env so j-watcher events route correctly
+  env = passedEnv;
+  console.log('🌍 Module-level env synced with frontend env');
+  await prepopulateAHBImpl(passedEnv);
+  return passedEnv;
 };
 
 export const prepopulateFullMechanics = async (env: Env): Promise<Env> => {
-  await prepopulateFullMechanicsImpl(env, process);
+  await prepopulateFullMechanicsImpl(env);
   return env;
 };
 

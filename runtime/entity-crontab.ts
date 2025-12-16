@@ -249,9 +249,16 @@ async function broadcastBatchHandler(replica: EntityReplica): Promise<EntityInpu
     return outputs;
   }
 
-  // Broadcast batch to Depository contract
+  // Get BrowserVM instance from runtime (proper architecture - not window global)
+  const { getBrowserVMInstance } = await import('./evm');
+  const browserVM = getBrowserVMInstance();
+  if (browserVM) {
+    console.log(`📤 CRONTAB: Using BrowserVM for batch broadcast`);
+  }
+
+  // Broadcast batch to Depository contract (or BrowserVM in browser mode)
   const { broadcastBatch } = await import('./j-batch');
-  const result = await broadcastBatch(replica.entityId, replica.state.jBatchState, jurisdiction);
+  const result = await broadcastBatch(replica.entityId, replica.state.jBatchState, jurisdiction, browserVM);
 
   if (result.success) {
     console.log(`✅ jBatch broadcasted successfully: ${result.txHash}`);

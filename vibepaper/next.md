@@ -1,5 +1,197 @@
 # Next Session Tasks
 
+## ✅ COMPLETED: AHB REA Flow Rewrite (2025-12-15)
+
+### Problem (SOLVED)
+`prepopulate-ahb.ts` directly mutated state instead of using proper R→E→A flow:
+- `syncReservesFromBrowserVM()` directly set `replica.state.reserves` ❌ DELETED
+- `executeR2C()` directly mutated `delta.collateral` ❌ DELETED
+
+### Solution
+Replaced with proper R→E→A flow:
+- R2R: BrowserVM.reserveToReserve() → processJEvents() → j-events.ts handles ReserveUpdated
+- R2C: deposit_collateral EntityTx → broadcastBatch() → processJEvents() → j-events.ts handles SettlementProcessed
+
+### Target Architecture
+```
+Entity creates deposit_collateral EntityTx
+    → adds to jBatch (j-batch.ts)
+        → crontab triggers broadcastBatch()
+            → BrowserVM.processBatch() executes on-chain
+                → BrowserVM emits parsed events (SettlementProcessed, ReserveUpdated)
+                    → j-watcher polls BrowserVM for new blocks/events
+                        → j-watcher creates j_event EntityInput
+                            → normal R→E→A flow processes
+                                → A-machine updates delta.collateral via bilateral consensus
+```
+
+### Implementation Steps
+
+#### 1. BrowserVM Event Emission (browserVMProvider.ts)
+**File:** `frontend/src/lib/view/utils/browserVMProvider.ts`
+
+Current state:
+- `parseLogs()` exists (line 673) - decodes EVM logs to events
+- `onAny()` is stub (line 702) - "not yet implemented"
+- `prefundAccount()` doesn't return/emit events after execution
+- `processBatch()` handles R2R but NOT R2C (line 495)
+
+Changes needed:
+```typescript
+// Add event callback storage
+private eventCallbacks: Set<(event: EVMEvent) => void> = new Set();
+
+// Implement onAny
+onAny(callback: (event: EVMEvent) => void): () => void {
+  this.eventCallbacks.add(callback);
+  return () => this.eventCallbacks.delete(callback);
+}
+
+// Add emitEvents helper
+private emitEvents(logs: any[]): EVMEvent[] {
+  const events = this.parseLogs(logs);
+  events.forEach(e => this.eventCallbacks.forEach(cb => cb(e)));
+  return events;
+}
+
+// Modify prefundAccount to emit events
+async prefundAccount(...): Promise<EVMEvent[]> {
+  // ... existing tx execution ...
+  return this.emitEvents(result.execResult.logs || []);
+}
+
+// Add R2C to processBatch
+if (batch.reserveToCollateral) {
+  for (const r2c of batch.reserveToCollateral) {
+    await this.prefundAccount(entityId, r2c.counterparty, r2c.tokenId, r2c.amount);
+  }
+}
+```
+
+#### 2. j-batch BrowserVM Support (j-batch.ts)
+**File:** `runtime/j-batch.ts`
+
+Current state:
+- `broadcastBatch()` uses `connectToEthereum()` (ethers RPC only)
+- No BrowserVM code path
+
+Changes needed:
+```typescript
+export async function broadcastBatch(
+  entityId: string,
+  jBatchState: JBatchState,
+  jurisdiction: any,
+  browserVM?: BrowserEVM  // Add optional BrowserVM param
+): Promise<{ success: boolean; events?: EVMEvent[] }> {
+
+  if (browserVM) {
+    // BrowserVM path - direct execution
+    const events = await browserVM.processBatch(entityId, jBatchState.batch);
+    jBatchState.batch = createEmptyBatch();
+    return { success: true, events };
+  }
+
+  // Existing ethers path...
+}
+```
+
+#### 3. j-watcher BrowserVM Polling (j-event-watcher.ts)
+**File:** `runtime/j-event-watcher.ts`
+
+Current state:
+- Uses `ethers.Contract.queryFilter()` for events
+- Polls real blockchain RPC
+- No BrowserVM support
+
+Changes needed:
+```typescript
+// Add BrowserVM mode
+export class JEventWatcher {
+  private browserVM?: BrowserEVM;
+  private lastBrowserVMBlock = 0;
+
+  // Add BrowserVM constructor option
+  constructor(config: JEventWatcherConfig & { browserVM?: BrowserEVM }) {
+    if (config.browserVM) {
+      this.browserVM = config.browserVM;
+      this.setupBrowserVMPolling();
+    } else {
+      // existing ethers setup
+    }
+  }
+
+  private setupBrowserVMPolling() {
+    // Subscribe to BrowserVM events
+    this.browserVM!.onAny((event) => {
+      this.processEvent(event);
+    });
+  }
+}
+```
+
+#### 4. AHB Rewrite (prepopulate-ahb.ts)
+**File:** `runtime/prepopulate-ahb.ts`
+
+Delete:
+- `syncReservesFromBrowserVM()` function entirely
+- `executeR2C()` function entirely
+- All direct `replica.state.reserves.set()` calls
+- All direct `delta.collateral = ` mutations
+
+Replace with proper EntityTx flow:
+```typescript
+// INSTEAD OF:
+await executeR2C(env, alice.id, hub.id, USDC_TOKEN_ID, amount, browserVM, 'Alice');
+
+// USE:
+await processUntilEmpty(env, [{
+  entityId: alice.id,
+  signerId: alice.signer,
+  entityTxs: [{
+    type: 'deposit_collateral',
+    data: {
+      counterpartyId: hub.id,
+      tokenId: USDC_TOKEN_ID,
+      amount: amount
+    }
+  }]
+}]);
+```
+
+#### 5. Cleanup Dead Code
+**File:** `runtime/xln-api.ts`
+- Remove `applyServerInput` declaration (line 206) - never implemented
+
+### Key Files Reference
+
+| File | Purpose | Changes |
+|------|---------|---------|
+| `runtime/prepopulate-ahb.ts` | AHB demo | Remove hacks, use EntityTx |
+| `runtime/j-batch.ts` | Batch accumulation | Add BrowserVM path |
+| `runtime/j-event-watcher.ts` | Event polling | Add BrowserVM mode |
+| `frontend/.../browserVMProvider.ts` | In-browser EVM | Add event emission, R2C |
+| `runtime/entity-tx/handlers/deposit-collateral.ts` | R2C handler | Already correct (uses jBatch) |
+| `runtime/entity-tx/j-events.ts` | Event→EntityInput | Already correct |
+| `runtime/xln-api.ts` | API types | Remove dead applyServerInput |
+
+### Test Criteria
+1. AHB loads with 14 frames
+2. `delta.collateral` updated via A-machine (not direct mutation)
+3. `delta.ondelta` correct after settlements
+4. `inCapacity`/`outCapacity` derived correctly
+5. Bilateral sync passes (`assertBilateralSync` in AHB)
+6. Console shows proper R→E→A flow logs
+
+### Documentation Reference
+- `vibepaper/flow.md` - Complete R→E→A execution trace
+- `vibepaper/docs/jea.md` - J-E-A architecture explanation
+- `runtime/entity-tx/handlers/deposit-collateral.ts:43` - "CRITICAL: Do NOT update state here - wait for SettlementProcessed event"
+
+### Branch
+Start from: `stable` branch at commit `963eb72` (has deriveDelta fix only)
+
+---
+
 ## Completed (2025-11-28)
 
 ### TypeScript Refactoring - 42 errors → 0 errors

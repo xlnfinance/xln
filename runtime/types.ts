@@ -605,6 +605,15 @@ export type AccountTx =
         tokenId: number;
         amount: bigint; // How much collateral requested for insurance
       };
+    }
+  | {
+      type: 'j_sync';
+      data: {
+        jBlockNumber: number;  // Block number from j-machine (both sides must match)
+        tokenId: number;
+        collateral: bigint;    // Absolute collateral from j-event
+        ondelta: bigint;       // Absolute ondelta from j-event
+      };
     };
 
 export interface EntityState {

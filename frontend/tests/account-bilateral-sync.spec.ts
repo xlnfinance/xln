@@ -18,10 +18,10 @@ test('account bilateral sync on frame 12', async ({ page }) => {
     // Find Bob (0x...0003) and Hub (0x...0002)
     const bobReplica = Array.from(env.eReplicas.values()).find((r: any) =>
       r.state?.entityId?.endsWith('0003')
-    );
+    ) as any;
     const hubReplica = Array.from(env.eReplicas.values()).find((r: any) =>
       r.state?.entityId?.endsWith('0002')
-    );
+    ) as any;
 
     if (!bobReplica || !hubReplica) {
       return {
@@ -64,6 +64,11 @@ test('account bilateral sync on frame 12', async ({ page }) => {
   console.log('\n📊 ACCOUNT DATA:');
   console.log('Bob view:', accountData.bob);
   console.log('Hub view:', accountData.hub);
+
+  // Fail fast if data retrieval failed
+  if ('error' in accountData || !accountData.bob || !accountData.hub) {
+    throw new Error(`Failed to retrieve account data: ${JSON.stringify(accountData)}`);
+  }
 
   // CRITICAL ASSERTIONS: Both sides must have accounts
   expect(accountData.bob.hasAccount, 'Bob should have account with Hub').toBe(true);

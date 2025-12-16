@@ -1,17 +1,10 @@
 #!/usr/bin/env bun
 /**
  * Test AHB in Node/Bun (no browser!)
+ *
+ * NOTE: Do NOT mock window - BrowserVMProvider uses `typeof window !== 'undefined'`
+ * to detect browser vs CLI and uses filesystem for CLI mode.
  */
-
-// Mock browser globals for Node/Bun execution
-global.window = {
-  frontendLogs: { enabled: false }
-} as any;
-global.document = {
-  querySelectorAll: () => [],
-  querySelector: () => null,
-  body: {}
-} as any;
 
 const runtime = await import('./runtime/runtime.ts');
 

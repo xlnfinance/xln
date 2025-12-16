@@ -329,45 +329,87 @@ export function getBatchSize(batch: JBatch): number {
 }
 
 /**
- * Broadcast batch to Depository contract
+ * BrowserVM interface for batch processing
+ * Matches frontend/src/lib/view/utils/browserVMProvider.ts
+ */
+export interface BrowserVMBatchProcessor {
+  processBatch(entityId: string, batch: {
+    reserveToReserve?: Array<{toEntity: string, tokenId: number, amount: bigint}>,
+    reserveToCollateral?: Array<{counterparty: string, tokenId: number, amount: bigint}>,
+    settlements?: Array<{leftEntity: string, rightEntity: string, diffs: any[]}>,
+  }): Promise<any[]>;
+}
+
+/**
+ * Broadcast batch to Depository contract (ethers or BrowserVM)
  * Reference: 2019src.txt lines 3384-3399
  */
 export async function broadcastBatch(
   entityId: string,
   jBatchState: JBatchState,
-  jurisdiction: any // JurisdictionConfig
-): Promise<{ success: boolean; txHash?: string; error?: string }> {
+  jurisdiction: any, // JurisdictionConfig
+  browserVM?: BrowserVMBatchProcessor // Optional BrowserVM for simnet mode
+): Promise<{ success: boolean; txHash?: string; events?: any[]; error?: string }> {
   if (isBatchEmpty(jBatchState.batch)) {
     console.log('📦 jBatch: Empty batch, skipping broadcast');
     return { success: true };
   }
 
   const batchSize = getBatchSize(jBatchState.batch);
-  console.log(`📤 Broadcasting batch for ${entityId.slice(-4)}: ${batchSize} operations`);
-  console.log(`📤 Batch contents:`, safeStringify(jBatchState.batch, 2));
+  const b = jBatchState.batch;
+  console.log(`📤 BATCH: ${entityId.slice(-4)} | ${batchSize} ops | R→C=${b.reserveToCollateral.length} S=${b.settlements.length} R→R=${b.reserveToReserve.length}`);
 
   try {
+    // BrowserVM path - direct in-browser execution
+    if (browserVM) {
+
+      // Transform batch to BrowserVM format
+      const browserVMBatch = {
+        reserveToReserve: jBatchState.batch.reserveToReserve.map(r => ({
+          toEntity: r.receivingEntity,
+          tokenId: r.tokenId,
+          amount: r.amount,
+        })),
+        reserveToCollateral: jBatchState.batch.reserveToCollateral.flatMap(r =>
+          r.pairs.map(p => ({
+            counterparty: p.entity,
+            tokenId: r.tokenId,
+            amount: p.amount,
+          }))
+        ),
+        settlements: jBatchState.batch.settlements.map(s => ({
+          leftEntity: s.leftEntity,
+          rightEntity: s.rightEntity,
+          diffs: s.diffs,
+        })),
+      };
+
+      const events = await browserVM.processBatch(entityId, browserVMBatch);
+      console.log(`   ✅ BrowserVM: ${events.length} events`);
+
+      // NOTE: j-events are queued in env.runtimeInput.entityInputs by j-watcher
+      // Caller must process them (prepopulate calls processJEvents, browser needs interval)
+
+      // Clear batch after successful broadcast
+      jBatchState.batch = createEmptyBatch();
+      jBatchState.lastBroadcast = Date.now();
+      jBatchState.broadcastCount++;
+      jBatchState.failedAttempts = 0;
+
+      return { success: true, events };
+    }
+
+    // Ethers path - real blockchain RPC
     const { connectToEthereum } = await import('./evm');
-
-    // Connect to jurisdiction
     const { depository } = await connectToEthereum(jurisdiction);
-
-    console.log(`📤 Submitting batch to Depository contract...`);
-    console.log(`   Entity: ${entityId.slice(-4)}`);
-    console.log(`   Operations: R→C=${jBatchState.batch.reserveToCollateral.length}, Settlements=${jBatchState.batch.settlements.length}, R→R=${jBatchState.batch.reserveToReserve.length}`);
 
     // Submit to Depository.processBatch (same pattern as evm.ts:338)
     const tx = await depository['processBatch']!(entityId, jBatchState.batch, {
       gasLimit: 5000000, // High limit for complex batches
     });
 
-    console.log(`⏳ Waiting for batch transaction to mine: ${tx.hash}`);
     const receipt = await tx.wait();
-
-    console.log(`✅ Batch broadcasted successfully!`);
-    console.log(`   Tx Hash: ${receipt.transactionHash}`);
-    console.log(`   Block: ${receipt.blockNumber}`);
-    console.log(`   Gas Used: ${receipt.gasUsed.toString()}`);
+    console.log(`   ✅ Ethers: block=${receipt.blockNumber} gas=${receipt.gasUsed}`);
 
     // Clear batch after successful broadcast
     jBatchState.batch = createEmptyBatch();
@@ -381,7 +423,7 @@ export async function broadcastBatch(
     };
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    console.error(`❌ Batch broadcast failed for ${entityId.slice(-4)}:`, error);
+    console.error(`   ❌ BATCH FAIL: ${entityId.slice(-4)} | ${errorMessage}`);
     jBatchState.failedAttempts++;
 
     return {

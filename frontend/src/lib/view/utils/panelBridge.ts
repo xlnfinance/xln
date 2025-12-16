@@ -25,6 +25,9 @@ type EventMap = {
   'openEntityOperations': { entityId: string; entityName: string; signerId?: string }; // Open entity panel
   'openJurisdiction': { jurisdictionName: string }; // Open jurisdiction panel (J-Machine click)
   'focusPanel': { panelId: string }; // Focus any panel by ID
+  'scenario:loaded': { name: string; frames: number }; // Scenario loaded successfully
+  'camera:update': { position: { x: number; y: number; z: number }; target: { x: number; y: number; z: number }; distance?: number }; // Camera position changed
+  'timeMachine:play': {}; // Time machine playback started
 };
 
 class PanelBridge {

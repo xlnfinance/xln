@@ -262,6 +262,19 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // Add success message to chat
       addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(entityTx.data.targetEntityId)}`);
 
+      // CRITICAL: Notify counterparty to create mirror account
+      // Without this, Hub won't know about Alice-Hub account when j-events arrive!
+      const counterpartySigner = entityTx.data.targetEntityId.slice(0, 10) + '-signer'; // TODO: Get real signer
+      outputs.push({
+        entityId: entityTx.data.targetEntityId,
+        signerId: counterpartySigner,
+        entityTxs: [{
+          type: 'openAccount',
+          data: { targetEntityId: entityState.entityId }
+        }]
+      });
+      console.log(`📤 Sent openAccount request to counterparty ${formatEntityId(entityTx.data.targetEntityId)}`);
+
       // Broadcast updated profile to gossip layer
       if (env.gossip) {
         const profile = buildEntityProfile(newState);
@@ -429,9 +442,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         return { newState: entityState, outputs: [] };
       }
 
-      // Determine canonical side (left/right)
+      // Determine canonical side - credit limit I'm setting for my COUNTERPARTY to use
+      // If I'm LEFT and extend credit → set rightCreditLimit (credit available TO right/counterparty)
+      // If I'm RIGHT and extend credit → set leftCreditLimit (credit available TO left/counterparty)
       const isLeftEntity = entityState.entityId < counterpartyEntityId;
-      const side = isLeftEntity ? 'left' : 'right';
+      const side = isLeftEntity ? 'right' : 'left';
 
       // Create set_credit_limit account transaction
       const accountTx: AccountTx = {
@@ -446,7 +461,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // Add to account mempool
       accountMachine.mempool.push(accountTx);
       console.log(`💳 Added set_credit_limit to mempool for account with ${counterpartyEntityId.slice(-4)}`);
-      console.log(`💳 We are ${side} entity, extending credit of ${amount} for token ${tokenId}`);
+      console.log(`💳 Setting ${side}CreditLimit=${amount} (counterparty is ${side}) for token ${tokenId}`);
 
       addMessage(newState, `💳 Extended credit of ${amount} to ${counterpartyEntityId.slice(-4)}`);
 

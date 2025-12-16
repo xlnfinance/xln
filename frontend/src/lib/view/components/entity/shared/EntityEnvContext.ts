@@ -38,6 +38,8 @@ export interface XLNFunctions {
   safeStringify: (obj: unknown) => string;
   generateEntityAvatar: (entityId: string) => string;
   generateSignerAvatar: (signerId: string) => string;
+  classifyBilateralState?: (myAccount: unknown, peerCurrentHeight: number | undefined, isLeft: boolean) => { state: string; isLeftEntity: boolean; shouldRollback: boolean; pendingHeight: number | null; mempoolCount: number };
+  getAccountBarVisual?: (leftState: unknown, rightState: unknown) => { glowColor: string | null; glowSide: string | null; glowIntensity: number; isDashed: boolean; pulseSpeed: number };
 }
 
 /**

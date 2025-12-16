@@ -217,8 +217,7 @@ export async function proposeAccountFrame(
   try {
     newFrame = validateAccountFrameStrict(frameData, 'proposeAccountFrame');
   } catch (error) {
-    logError("FRAME_CONSENSUS", `❌ Frame validation failed:`, error);
-    logError("FRAME_CONSENSUS", `❌ Frame data:`, safeStringify(frameData, 2));
+    console.warn(`⚠️ Frame validation failed: ${error instanceof Error ? error.message : String(error)}`);
     return {
       success: false,
       error: `Frame validation failed: ${(error as Error).message}`,
@@ -229,7 +228,7 @@ export async function proposeAccountFrame(
   // Validate frame size (Bitcoin 1MB block limit)
   const frameSize = safeStringify(newFrame).length;
   if (frameSize > MAX_FRAME_SIZE_BYTES) {
-    logError("FRAME_CONSENSUS", `❌ Frame too large: ${frameSize} bytes > ${MAX_FRAME_SIZE_BYTES} bytes (1MB)`);
+    console.warn(`⚠️ Frame too large: ${frameSize} bytes`);
     return {
       success: false,
       error: `Frame exceeds 1MB limit: ${frameSize} bytes`,
@@ -399,10 +398,7 @@ export async function handleAccountInput(
       : accountMachine.currentFrame.stateHash || '';
 
     if (receivedFrame.prevFrameHash !== expectedPrevFrameHash) {
-      logError("FRAME_CONSENSUS", `❌ FRAME-CHAIN-BROKEN: prevFrameHash mismatch`);
-      logError("FRAME_CONSENSUS", `  Expected: ${expectedPrevFrameHash.slice(0, 16)}...`);
-      logError("FRAME_CONSENSUS", `  Received: ${receivedFrame.prevFrameHash.slice(0, 16)}...`);
-      logError("FRAME_CONSENSUS", `  Current height: ${accountMachine.currentHeight}`);
+      console.warn(`⚠️ FRAME-CHAIN: prevHash mismatch at height ${accountMachine.currentHeight}`);
       return {
         success: false,
         error: `Frame chain broken: prevFrameHash mismatch (expected ${expectedPrevFrameHash.slice(0, 16)}...)`,
@@ -444,7 +440,7 @@ export async function handleAccountInput(
           // Continue to process their frame below
         } else {
           // Should never rollback twice
-          logError("FRAME_CONSENSUS", `❌ FATAL: Right side rolled back ${accountMachine.rollbackCount} times - consensus broken`);
+          console.warn(`⚠️ ROLLBACK-LIMIT: ${accountMachine.rollbackCount}x - consensus stalled`);
           return { success: false, error: 'Multiple rollbacks detected - consensus failure', events };
         }
       }
@@ -518,20 +514,8 @@ export async function handleAccountInput(
     console.log(`  Their claimed: ${theirClaimedState.slice(0, 32)}...`);
 
     if (ourComputedState !== theirClaimedState) {
-      logError("FRAME_CONSENSUS", `❌ CONSENSUS-FAILURE: Both sides computed different final states!`);
-
-      // DUMP EVERYTHING - FULL DATA STRUCTURES
-      logError("FRAME_CONSENSUS", `❌ FULL CONSENSUS FAILURE DUMP:`);
-      logError("FRAME_CONSENSUS", `❌ AccountMachine BEFORE:`, safeStringify(accountMachine));
-      logError("FRAME_CONSENSUS", `❌ ClonedMachine AFTER:`, safeStringify(clonedMachine));
-      logError("FRAME_CONSENSUS", `❌ ReceivedFrame COMPLETE:`, safeStringify(receivedFrame));
-      logError("FRAME_CONSENSUS", `❌ OurComputedState:`, ourComputedState);
-      logError("FRAME_CONSENSUS", `❌ TheirClaimedState:`, theirClaimedState);
-      logError("FRAME_CONSENSUS", `❌ OurFinalDeltas:`, ourFinalDeltas.map(d => d.toString()));
-      logError("FRAME_CONSENSUS", `❌ TheirFrameDeltas:`, receivedFrame.deltas.map(d => d.toString()));
-      const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-      logError("FRAME_CONSENSUS", `❌ isLeft=${isLeftEntity}, fromEntity=${accountMachine.proofHeader.fromEntity}, toEntity=${accountMachine.proofHeader.toEntity}`);
-
+      // Compact error - full dump only if DEBUG enabled
+      console.warn(`⚠️ CONSENSUS: Frame ${receivedFrame.height} - state mismatch (our: ${ourComputedState.slice(0,16)}... vs their: ${theirClaimedState.slice(0,16)}...)`);
       return { success: false, error: `Bilateral consensus failure - states don't match`, events };
     }
 
@@ -693,7 +677,7 @@ export async function generateAccountProof(accountMachine: AccountMachine): Prom
       .map(tokenId => {
         const delta = accountMachine.deltas.get(tokenId);
         if (!delta) {
-          logError("FRAME_CONSENSUS", `❌ Missing delta for tokenId ${tokenId} in account ${accountMachine.counterpartyEntityId}`);
+          console.warn(`⚠️ Missing delta for token ${tokenId}`);
           throw new Error(`Critical financial data missing: delta for token ${tokenId}`);
         }
         return delta.ondelta + delta.offdelta; // Total delta for each token
