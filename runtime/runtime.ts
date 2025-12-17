@@ -1688,6 +1688,11 @@ export const scenarios = {
     await ahb(env);
     return env;
   },
+  grid: async (env: Env): Promise<Env> => {
+    const { grid } = await import('./scenarios/grid');
+    await grid(env);
+    return env;
+  },
   fullMechanics: async (env: Env): Promise<Env> => {
     await prepopulateFullMechanicsImpl(env);
     return env;
