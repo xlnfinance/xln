@@ -731,6 +731,34 @@ let vrHammer: VRHammer | null = null;
       }
     });
 
+    // Update J-Machine labels with current time-sliced jHeight (reactive to time machine)
+    jurisdictionsArray.forEach((jurisdiction) => {
+      const jMachineGroup = jMachines.get(jurisdiction.name);
+      if (jMachineGroup) {
+        // Find the label sprite (last child added in createJMachine)
+        const label = jMachineGroup.children.find((child: any) => child.isSprite);
+        if (label && label.material && label.material.map) {
+          // Recreate label texture with updated jHeight
+          const canvas = document.createElement('canvas');
+          const context = canvas.getContext('2d');
+          if (context) {
+            canvas.width = 256;
+            canvas.height = 64;
+            context.fillStyle = '#66ccff';
+            context.font = 'bold 28px monospace';
+            context.textAlign = 'center';
+            const shortName = jurisdiction.name.split(' ')[0].substring(0, 8);
+            context.fillText(`${shortName} (#${jurisdiction.jMachine.jHeight})`, 128, 40);
+
+            // Update texture
+            const texture = new THREE.CanvasTexture(canvas);
+            label.material.map = texture;
+            label.material.needsUpdate = true;
+          }
+        }
+      }
+    });
+
     // Sync J mempool visual: show tx cubes based on actual mempool contents from snapshot
     const activeJurisdiction = jurisdictionsArray.find(x => x.name === activeJurisdictionName);
     const activeJMachine = activeJurisdiction ? jMachines.get(activeJurisdiction.name) : undefined;

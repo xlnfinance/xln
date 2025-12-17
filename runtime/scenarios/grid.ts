@@ -40,7 +40,8 @@ function pushSnapshot(env: Env, tag: string, description: string, metadata: Reco
   console.log(`📸 Snapshot: ${description}`);
 }
 
-const GRID_SIZE = 16; // 16×16 = 256 nodes
+// Grid dimensions: 8×8×4 = 256 nodes (3D cube, not flat!)
+const GRID_DIMS = { x: 8, y: 8, z: 4 };
 const GRID_SPACING = 40; // px between nodes
 const J_MARGIN = 200; // Grid margin around J-Machine
 const USDC_TOKEN_ID = 1;
@@ -70,28 +71,29 @@ export async function grid(env: Env): Promise<void> {
   await pushSnapshot(env, 'INIT', 'J-Machine initialized');
 
   // ============================================================================
-  // PHASE 0: CREATE 256-NODE GRID AROUND J-MACHINE
+  // PHASE 0: CREATE 256-NODE 3D GRID AROUND J-MACHINE
   // ============================================================================
 
-  console.log('📐 Creating 16×16 grid (256 nodes)...');
+  console.log(`📐 Creating ${GRID_DIMS.x}×${GRID_DIMS.y}×${GRID_DIMS.z} 3D grid (${GRID_DIMS.x * GRID_DIMS.y * GRID_DIMS.z} nodes)...`);
   console.log(`   Grid spacing: ${GRID_SPACING}px`);
   console.log(`   J-Machine margin: ${J_MARGIN}px\n`);
 
-  // Grid positioned 200px below J-Machine (y=400) in XZ plane
+  // Grid positioned around J-Machine (centered at origin below J-Machine)
   const gridEntities = await createGridEntities(
     env,
-    GRID_SIZE,
+    GRID_DIMS,
     jurisdiction,
-    { x: 0, y: 400, z: 0 }, // Below J-Machine
+    { x: 0, y: 400, z: 0 }, // Below J-Machine (y=600)
     GRID_SPACING
   );
 
-  console.log(`✅ Created ${gridEntities.length} grid nodes`);
+  console.log(`✅ Created ${gridEntities.length} grid nodes in 3D formation`);
 
-  await pushSnapshot(env, 'GRID-CREATED', `256 nodes in ${GRID_SIZE}×${GRID_SIZE} grid around J-Machine`, {
-    gridSize: GRID_SIZE,
+  await pushSnapshot(env, 'GRID-CREATED', `${gridEntities.length} nodes in ${GRID_DIMS.x}×${GRID_DIMS.y}×${GRID_DIMS.z} 3D grid`, {
+    gridDimensions: GRID_DIMS,
     totalNodes: gridEntities.length,
-    margin: J_MARGIN
+    margin: J_MARGIN,
+    formation: '3D cube'
   });
 
   // ============================================================================
