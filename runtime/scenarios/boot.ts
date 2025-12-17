@@ -111,11 +111,11 @@ export async function createNumberedEntity(
 }
 
 /**
- * Create grid of entities
+ * Create 3D grid of entities (NxMxZ)
  */
 export async function createGridEntities(
   env: Env,
-  gridSize: number,
+  dimensions: { x: number; y: number; z: number }, // Grid size in each dimension
   jurisdiction: JurisdictionConfig,
   centerOffset: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 },
   spacing: number = 40
@@ -123,22 +123,24 @@ export async function createGridEntities(
   const entities: string[] = [];
   let entityNum = 1;
 
-  for (let row = 0; row < gridSize; row++) {
-    for (let col = 0; col < gridSize; col++) {
-      const x = centerOffset.x + (col - gridSize / 2 + 0.5) * spacing;
-      const y = centerOffset.y + (row - gridSize / 2 + 0.5) * spacing;
-      const z = centerOffset.z;
+  for (let zi = 0; zi < dimensions.z; zi++) {
+    for (let yi = 0; yi < dimensions.y; yi++) {
+      for (let xi = 0; xi < dimensions.x; xi++) {
+        const x = centerOffset.x + (xi - dimensions.x / 2 + 0.5) * spacing;
+        const y = centerOffset.y + (yi - dimensions.y / 2 + 0.5) * spacing;
+        const z = centerOffset.z + (zi - dimensions.z / 2 + 0.5) * spacing;
 
-      const entityId = await createNumberedEntity(
-        env,
-        entityNum,
-        `Node${entityNum}`,
-        jurisdiction,
-        { x, y, z }
-      );
+        const entityId = await createNumberedEntity(
+          env,
+          entityNum,
+          `Node${entityNum}`,
+          jurisdiction,
+          { x, y, z }
+        );
 
-      entities.push(entityId);
-      entityNum++;
+        entities.push(entityId);
+        entityNum++;
+      }
     }
   }
 
