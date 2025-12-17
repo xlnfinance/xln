@@ -724,7 +724,7 @@ let vrHammer: VRHammer | null = null;
     jurisdictionsArray.forEach((jurisdiction) => {
       if (!jMachines.has(jurisdiction.name)) {
         console.log(`[Graph3D] Creating J-Machine for jurisdiction: ${jurisdiction.name} at position`, jurisdiction.jMachine.position);
-        const jMachineGroup = createJMachine(12, jurisdiction.jMachine.position, jurisdiction.name); // 2x smaller for Fed Chair UX
+        const jMachineGroup = createJMachine(12, jurisdiction.jMachine.position, jurisdiction.name, jurisdiction.jMachine.jHeight); // 2x smaller for Fed Chair UX
         scene.add(jMachineGroup);
         jMachines.set(jurisdiction.name, jMachineGroup);
         console.log(`[Graph3D] ✅ J-Machine created, scene now has ${scene.children.length} objects`);
@@ -1399,7 +1399,8 @@ let vrHammer: VRHammer | null = null;
   function createJMachine(
     size: number = 25,
     position: { x: number; y: number; z: number } = { x: 0, y: 200, z: 0 },
-    name: string = 'J-MACHINE'
+    name: string = 'J-MACHINE',
+    jHeight: number = 0
   ): THREE.Group {
     const group = new THREE.Group();
     group.position.set(position.x, position.y, position.z); // Position from jurisdiction config
@@ -1439,7 +1440,7 @@ let vrHammer: VRHammer | null = null;
 
     // Pure cube - no corner spheres
 
-    // Add label with J-machine number
+    // Add label with jurisdiction name + block height
     const canvas = document.createElement('canvas');
     const context = canvas.getContext('2d');
     if (context) {
@@ -1448,7 +1449,9 @@ let vrHammer: VRHammer | null = null;
       context.fillStyle = '#66ccff';
       context.font = 'bold 28px monospace';
       context.textAlign = 'center';
-      context.fillText(`J-machine #1`, 128, 40);
+      // Format: "J1 (#123)" - short name + height
+      const shortName = name.split(' ')[0].substring(0, 8);
+      context.fillText(`${shortName} (#${jHeight})`, 128, 40);
     }
 
     const texture = new THREE.CanvasTexture(canvas);

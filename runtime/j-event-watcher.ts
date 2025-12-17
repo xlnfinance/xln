@@ -70,8 +70,6 @@ export class JEventWatcher {
     'event ControlSharesReceived(address indexed entityProvider, address indexed fromEntity, uint256 indexed tokenId, uint256 amount, bytes data)',
     'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
     'event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint256 indexed tokenId, uint256 amount)',
-    'event SettlementProcessed(bytes32 indexed leftEntity, bytes32 indexed rightEntity, uint256 indexed tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)',
-    'event TransferReserveToCollateral(bytes32 indexed receivingEntity, bytes32 indexed counterentity, uint256 collateral, int256 ondelta, uint256 indexed tokenId)',
   ];
 
   constructor(config: WatcherConfig) {
@@ -226,10 +224,6 @@ export class JEventWatcher {
     switch (event.name) {
       case 'ReserveUpdated':
         return event.args.entity === entityId;
-      case 'SettlementProcessed':
-        return event.args.leftEntity === entityId || event.args.rightEntity === entityId;
-      case 'TransferReserveToCollateral':
-        return event.args.receivingEntity === entityId || event.args.counterentity === entityId;
       case 'AccountSettled': {
         // AccountSettled has array of Settled structs - check if entity is left or right in any
         const settledArray = event.args[''] || event.args[0] || [];
@@ -276,53 +270,6 @@ export class JEventWatcher {
           },
         };
 
-      case 'SettlementProcessed': {
-        // Determine if this entity is left or right in the bilateral relationship
-        const isLeft = entityId === event.args.leftEntity;
-        return {
-          type: 'j_event' as const,
-          data: {
-            ...baseData,
-            event: {
-              type: 'SettlementProcessed',
-              data: {
-                leftEntity: event.args.leftEntity,
-                rightEntity: event.args.rightEntity,
-                counterpartyEntityId: isLeft ? event.args.rightEntity : event.args.leftEntity,
-                tokenId: Number(event.args.tokenId),
-                ownReserve: (isLeft ? event.args.leftReserve : event.args.rightReserve)?.toString() || '0',
-                counterpartyReserve: (isLeft ? event.args.rightReserve : event.args.leftReserve)?.toString() || '0',
-                collateral: event.args.collateral?.toString() || '0',
-                ondelta: event.args.ondelta?.toString() || '0',
-                side: isLeft ? 'left' : 'right',
-              },
-            },
-          },
-        };
-      }
-
-      case 'TransferReserveToCollateral': {
-        // Determine if this entity is receiving or counterparty
-        const isReceiving = entityId === event.args.receivingEntity;
-        return {
-          type: 'j_event' as const,
-          data: {
-            ...baseData,
-            event: {
-              type: 'TransferReserveToCollateral',
-              data: {
-                receivingEntity: event.args.receivingEntity,
-                counterentity: event.args.counterentity,
-                collateral: event.args.collateral?.toString() || '0',
-                ondelta: event.args.ondelta?.toString() || '0',
-                tokenId: Number(event.args.tokenId),
-                side: isReceiving ? 'receiving' : 'counterparty',
-              },
-            },
-          },
-        };
-      }
-
       case 'AccountSettled': {
         // AccountSettled has array of Settled structs
         // Find the settlement relevant to this entity
@@ -343,7 +290,7 @@ export class JEventWatcher {
               data: {
                 ...baseData,
                 event: {
-                  type: 'AccountSettled',
+                  type: 'AccountSettled', // Matches contract event name (Account.sol)
                   data: {
                     leftEntity: left,
                     rightEntity: right,
@@ -512,52 +459,28 @@ export class JEventWatcher {
 
     // Get all relevant events for this entity
     const reserveFilter = this.depositoryContract.filters['ReserveUpdated'];
-    const settlementFilter = this.depositoryContract.filters['SettlementProcessed'];
-    const r2cFilter = this.depositoryContract.filters['TransferReserveToCollateral'];
 
-    if (!reserveFilter || !settlementFilter || !r2cFilter) {
+    if (!reserveFilter) {
       throw new Error('Contract filters not available');
     }
 
-    const [reserveEvents, settlementEventsLeft, settlementEventsRight, r2cEventsReceiving, r2cEventsCounterparty] = await Promise.all([
+    // Note: AccountSettled event support for ethers RPC mode can be added here when needed
+    // Currently only supporting ReserveUpdated for RPC mode (BrowserVM has full AccountSettled support)
+    const [reserveEvents] = await Promise.all([
       this.depositoryContract.queryFilter(
         reserveFilter(entityId),
         fromBlock,
         toBlock
       ),
-      this.depositoryContract.queryFilter(
-        settlementFilter(entityId, null, null),
-        fromBlock,
-        toBlock
-      ),
-      this.depositoryContract.queryFilter(
-        settlementFilter(null, entityId, null),
-        fromBlock,
-        toBlock
-      ),
-      this.depositoryContract.queryFilter(
-        r2cFilter(entityId, null, null), // receivingEntity
-        fromBlock,
-        toBlock
-      ),
-      this.depositoryContract.queryFilter(
-        r2cFilter(null, entityId, null), // counterentity
-        fromBlock,
-        toBlock
-      )
     ]);
 
     if (HEAVY_LOGS) {
-      console.log(`🔭🔍 EVENT-QUERY: Entity ${entityId.slice(0,10)}... - Reserve: ${reserveEvents.length}, SettlementLeft: ${settlementEventsLeft.length}, SettlementRight: ${settlementEventsRight.length}, R2C: ${r2cEventsReceiving.length + r2cEventsCounterparty.length}`);
+      console.log(`🔭🔍 EVENT-QUERY: Entity ${entityId.slice(0,10)}... - Reserve: ${reserveEvents.length}`);
     }
 
     // Combine and sort chronologically
     const allEvents = [
       ...reserveEvents.map(e => ({ ...e, eventType: 'ReserveUpdated' })),
-      ...settlementEventsLeft.map(e => ({ ...e, eventType: 'SettlementProcessed', side: 'left' })),
-      ...settlementEventsRight.map(e => ({ ...e, eventType: 'SettlementProcessed', side: 'right' })),
-      ...r2cEventsReceiving.map(e => ({ ...e, eventType: 'TransferReserveToCollateral', side: 'receiving' })),
-      ...r2cEventsCounterparty.map(e => ({ ...e, eventType: 'TransferReserveToCollateral', side: 'counterparty' }))
     ].sort((a, b) => {
       if (a.blockNumber !== b.blockNumber) {
         return a.blockNumber - b.blockNumber;
@@ -605,67 +528,9 @@ export class JEventWatcher {
       if (DEBUG) {
         console.log(`🔭💰 R2R-EVENT: Entity ${entityId.slice(0,10)}... Token ${event.args.tokenId} Balance ${(Number(event.args.newBalance) / 1e18).toFixed(4)} (block ${event.blockNumber})`);
       }
-
-    } else if (event.eventType === 'SettlementProcessed') {
-      const isLeft = event.side === 'left';
-      const counterpartyId = isLeft ? event.args.rightEntity.toString() : event.args.leftEntity.toString();
-      const ownReserve = isLeft ? event.args.leftReserve : event.args.rightReserve;
-      const counterpartyReserve = isLeft ? event.args.rightReserve : event.args.leftReserve;
-      const ondelta = isLeft ? event.args.ondelta : -event.args.ondelta;
-
-      entityTx = {
-        type: 'j_event' as const,
-        data: {
-          from: signerId,
-          event: {
-            type: 'SettlementProcessed',
-            data: {
-              leftEntity: event.args.leftEntity.toString(),
-              rightEntity: event.args.rightEntity.toString(),
-              counterpartyEntityId: counterpartyId,
-              tokenId: Number(event.args.tokenId),
-              ownReserve: ownReserve.toString(),
-              counterpartyReserve: counterpartyReserve.toString(),
-              collateral: event.args.collateral.toString(),
-              ondelta: ondelta.toString(),
-              side: event.side,
-            },
-          },
-          observedAt: Date.now(),
-          blockNumber: event.blockNumber,
-          transactionHash: event.transactionHash,
-        },
-      };
-
-      if (DEBUG) {
-        console.log(`🔭💱 SETTLE-EVENT: Entity ${entityId.slice(0,10)}... vs ${counterpartyId.slice(0,10)}... (${event.side} side, block ${event.blockNumber})`);
-      }
-    } else if (event.eventType === 'TransferReserveToCollateral') {
-      entityTx = {
-        type: 'j_event' as const,
-        data: {
-          from: signerId,
-          event: {
-            type: 'TransferReserveToCollateral',
-            data: {
-              receivingEntity: event.args.receivingEntity.toString(),
-              counterentity: event.args.counterentity.toString(),
-              collateral: event.args.collateral.toString(),
-              ondelta: event.args.ondelta.toString(),
-              tokenId: Number(event.args.tokenId),
-              side: event.side, // 'receiving' or 'counterparty'
-            },
-          },
-          observedAt: Date.now(),
-          blockNumber: event.blockNumber,
-          transactionHash: event.transactionHash,
-        },
-      };
-
-      if (DEBUG) {
-        console.log(`🔭💰 R2C-EVENT: Entity ${entityId.slice(0,10)}... (${event.side} side) collateral=${event.args.collateral.toString()}, block ${event.blockNumber}`);
-      }
     }
+    // Note: AccountSettled event handling for ethers RPC mode removed
+    // BrowserVM mode has full AccountSettled support in browserVMEventToEntityTx()
 
     if (entityTx) {
       // Feed to runtime processing queue
