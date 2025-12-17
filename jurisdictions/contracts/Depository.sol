@@ -91,16 +91,13 @@ contract Depository is ReentrancyGuardLite {
 
 
   // EntityScore tracking removed for size reduction
-
-
-  event AccountSettled(Settled[]);
-
   // Hub tracking removed for size reduction
-  
-  event TransferReserveToCollateral(bytes32 indexed receivingEntity, bytes32 indexed counterentity, uint collateral, int ondelta, uint tokenId);
+
+  // Events related to disputes and cooperative closures
   event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes initialArguments);
   event CooperativeClose(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed cooperativeNonce);
-  
+
+  // Events for reserve tracking (used by j-watcher)
   event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint indexed tokenId, uint amount);
 
   /**
@@ -121,27 +118,6 @@ contract Depository is ReentrancyGuardLite {
    * @param newBalance The absolute new balance of the token for the entity.
    */
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
-
-  /**
-   * @notice Emitted when entities settle off-chain account differences
-   * @dev This event contains final absolute values after settlement processing
-   * @param leftEntity The first entity in the settlement
-   * @param rightEntity The second entity in the settlement
-   * @param tokenId The token being settled
-   * @param leftReserve Final absolute reserve balance for left entity
-   * @param rightReserve Final absolute reserve balance for right entity
-   * @param collateral Final absolute collateral amount
-   * @param ondelta Final ondelta value
-   */
-  event SettlementProcessed(
-    bytes32 indexed leftEntity,
-    bytes32 indexed rightEntity,
-    uint indexed tokenId,
-    uint leftReserve,
-    uint rightReserve,
-    uint collateral,
-    int ondelta
-  );
 
   //event ChannelUpdated(address indexed receiver, address indexed addr, uint tokenId);
 
@@ -343,66 +319,6 @@ contract Depository is ReentrancyGuardLite {
     return _processBatch(entity, batch);
   }
 
-
-  // ========== ACCOUNT PREFUNDING FUNCTION ==========
-  // Allows an entity to fund an account's collateral from their reserves
-  // TODO: make private - currently public for testing convenience
-  function prefundAccount(
-    bytes32 fundingEntity,
-    bytes32 counterpartyEntity,
-    uint tokenId,
-    uint amount
-  ) public whenNotPaused nonReentrant returns (bool) {
-    if (!testMode) revert E2(); // Production: use processBatchWithHanko
-    if (fundingEntity == counterpartyEntity) revert E2();
-    if (amount == 0) revert E1();
-
-    // Ensure entities are in canonical order
-    bytes32 leftEntity = fundingEntity < counterpartyEntity ? fundingEntity : counterpartyEntity;
-    bytes32 rightEntity = fundingEntity < counterpartyEntity ? counterpartyEntity : fundingEntity;
-
-    // Canonical account key: 64 bytes (sorted entity pair)
-    bytes memory ch_key = accountKey(leftEntity, rightEntity);
-
-    enforceDebts(fundingEntity, tokenId);
-
-    if (_reserves[fundingEntity][tokenId] < amount) revert E3();
-    
-    // Move funds from reserves to account collateral
-    _reserves[fundingEntity][tokenId] -= amount;
-    emit ReserveUpdated(fundingEntity, tokenId, _reserves[fundingEntity][tokenId]);
-
-    AccountCollateral storage col = _collaterals[ch_key][tokenId];
-    col.collateral += amount;
-
-    // CRITICAL: When funding entity is LEFT, ondelta increases (gives LEFT outCapacity)
-    // When funding entity is RIGHT, ondelta decreases (gives RIGHT outCapacity)
-    if (fundingEntity == leftEntity) {
-      col.ondelta += int256(amount);  // LEFT deposits → ondelta increases
-    } else {
-      col.ondelta -= int256(amount);  // RIGHT deposits → ondelta decreases
-    }
-
-    // Emit SettlementProcessed event to notify both entities
-    emit SettlementProcessed(
-      leftEntity,
-      rightEntity,
-      tokenId,
-      _reserves[leftEntity][tokenId],
-      _reserves[rightEntity][tokenId],
-      col.collateral,
-      col.ondelta
-    );
-    
-    
-    
-    
-    
-    
-    
-    
-    return true;
-  }
 
   // ========== DIRECT R2R FUNCTION ==========
   // Simple reserve-to-reserve transfer (simpler than batch)
@@ -926,9 +842,23 @@ contract Depository is ReentrancyGuardLite {
           col.ondelta += int(amount);
         }
 
-        emit TransferReserveToCollateral(receivingEntity, counterentity, col.collateral, col.ondelta, tokenId);
+        // Emit AccountSettled event (canonical ordering: left < right)
+        bytes32 leftEntity = receivingEntity < counterentity ? receivingEntity : counterentity;
+        bytes32 rightEntity = receivingEntity < counterentity ? counterentity : receivingEntity;
 
-        
+        Settled[] memory settledEvents = new Settled[](1);
+        settledEvents[0] = Settled({
+          left: leftEntity,
+          right: rightEntity,
+          tokenId: tokenId,
+          leftReserve: _reserves[leftEntity][tokenId],
+          rightReserve: _reserves[rightEntity][tokenId],
+          collateral: col.collateral,
+          ondelta: col.ondelta
+        });
+        emit AccountSettled(settledEvents);
+
+
       } else {
         
         return false;

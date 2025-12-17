@@ -190,7 +190,8 @@ export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntit
     }
     
     if (DEBUG) console.log(`✅ Reserve transfer processed: ${direction} ${amount} token ${tokenId}`);
-  } else if (event.type === 'SettlementProcessed') {
+  } else if (event.type === 'AccountSettled') {
+    // Universal settlement event (covers R2C, C2R, settle, rebalance)
     const { counterpartyEntityId, tokenId, ownReserve, collateral, ondelta } = event.data;
     const tokenIdNum = Number(tokenId);
     const cpShort = (counterpartyEntityId as string).slice(-4);
@@ -223,40 +224,6 @@ export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntit
       console.log(`   💰 [2/3] Settlement: ${entityShort}↔${cpShort} | coll ${oldColl}→${delta.collateral} | ondelta ${oldOndelta}→${delta.ondelta}`);
     } else {
       console.warn(`   ⚠️ Settlement: No account for ${cpShort}`);
-    }
-  } else if (event.type === 'TransferReserveToCollateral') {
-    const { receivingEntity, counterentity, collateral, ondelta, tokenId, side } = event.data;
-    const tokenIdNum = Number(tokenId);
-
-    // Determine counterparty from our perspective
-    const counterpartyEntityId = (side === 'receiving' ? counterentity : receivingEntity) as string;
-    const cpShort2 = counterpartyEntityId.slice(-4);
-
-    // DIRECT UPDATE - J-machine is authoritative, same pattern as ReserveUpdated
-    const account = newEntityState.accounts.get(counterpartyEntityId);
-    if (account) {
-      let delta = account.deltas.get(tokenIdNum);
-      if (!delta) {
-        const defaultCreditLimit = getDefaultCreditLimit(tokenIdNum);
-        delta = {
-          tokenId: tokenIdNum,
-          collateral: 0n,
-          ondelta: 0n,
-          offdelta: 0n,
-          leftCreditLimit: defaultCreditLimit,
-          rightCreditLimit: defaultCreditLimit,
-          leftAllowance: 0n,
-          rightAllowance: 0n,
-        };
-        account.deltas.set(tokenIdNum, delta);
-      }
-      const oldColl = delta.collateral;
-      const oldOndelta = delta.ondelta;
-      delta.collateral = BigInt(collateral as string | number | bigint);
-      delta.ondelta = BigInt(ondelta as string | number | bigint);
-      console.log(`   💰 [2/3] R→C: ${entityShort}↔${cpShort2} | coll ${oldColl}→${delta.collateral} | ondelta ${oldOndelta}→${delta.ondelta}`);
-    } else {
-      console.warn(`   ⚠️ R→C: No account for ${cpShort2}`);
     }
   } else if (event.type === 'InsuranceRegistered') {
     const { insured, insurer, tokenId, limit, expiresAt } = event.data;

@@ -11,7 +11,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { panelBridge } from '../utils/panelBridge';
   // @ts-ignore - Vite raw import
-  import prepopulateAHBCode from '../../../../../runtime/prepopulate-ahb.ts?raw';
+  import prepopulateAHBCode from '../../../../../runtime/scenarios/ahb.ts?raw';
   import { shortAddress } from '$lib/utils/format';
   import { getXLN } from '$lib/stores/xlnStore';
   import SolvencyPanel from './SolvencyPanel.svelte';
@@ -353,17 +353,17 @@
       }
 
       // CRITICAL: Clear old state BEFORE running demo
-      // Note: prepopulateAHB will auto-create BrowserVM if needed
       console.log('[Architect] BEFORE clear: eReplicas =', $isolatedEnv.eReplicas.size);
       $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
       console.log('[Architect] AFTER clear: eReplicas =', $isolatedEnv.eReplicas.size);
 
-      // Run prepopulateAHB (runtime.ts wraps with process internally)
-      console.log('[Architect] Calling prepopulateAHB...');
-      await XLN.prepopulateAHB($isolatedEnv);
-      console.log('[Architect] prepopulateAHB returned');
-      console.log('[Architect] AFTER prepopulate: eReplicas =', $isolatedEnv.eReplicas.size, 'history =', $isolatedEnv.history?.length);
+      // Run the ACTUAL AHB scenario (same code as CLI)
+      console.log('[Architect] Running scenarios/ahb.ts...');
+      await XLN.scenarios.ahb($isolatedEnv);
+      console.log('[AHB] ✅ Scenario complete!');
+
+      console.log('[Architect] AFTER setup: eReplicas =', $isolatedEnv.eReplicas.size, 'history =', $isolatedEnv.history?.length);
 
       // Update isolated stores
       // CRITICAL: Set timeIndex BEFORE history to avoid race condition

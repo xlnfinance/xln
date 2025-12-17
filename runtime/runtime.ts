@@ -1673,7 +1673,6 @@ export const clearDB = async (): Promise<void> => {
 
 // === PREPOPULATE FUNCTION ===
 import { prepopulate as prepopulateImpl } from './prepopulate';
-import { prepopulateAHB as prepopulateAHBImpl } from './prepopulate-ahb';
 import { prepopulateFullMechanics as prepopulateFullMechanicsImpl } from './prepopulate-full-mechanics';
 
 // Re-export prepopulate functions (they use lazy-loaded process internally)
@@ -1682,18 +1681,24 @@ export const prepopulate = async (env: Env): Promise<Env> => {
   return env;
 };
 
-export const prepopulateAHB = async (passedEnv: Env): Promise<Env> => {
-  // Sync module-level env with passed env so j-watcher events route correctly
-  env = passedEnv;
-  console.log('🌍 Module-level env synced with frontend env');
-  await prepopulateAHBImpl(passedEnv);
-  return passedEnv;
+// Scenarios namespace for better organization
+export const scenarios = {
+  ahb: async (env: Env): Promise<Env> => {
+    const { ahb } = await import('./scenarios/ahb');
+    await ahb(env);
+    return env;
+  },
+  fullMechanics: async (env: Env): Promise<Env> => {
+    await prepopulateFullMechanicsImpl(env);
+    return env;
+  },
 };
 
-export const prepopulateFullMechanics = async (env: Env): Promise<Env> => {
-  await prepopulateFullMechanicsImpl(env);
-  return env;
-};
+// Deprecated: Use scenarios.ahb instead
+export const prepopulateAHB = scenarios.ahb;
+
+// Deprecated: Use scenarios.fullMechanics instead
+export const prepopulateFullMechanics = scenarios.fullMechanics;
 
 // === SCENARIO SYSTEM ===
 export { parseScenario, mergeAndSortEvents } from './scenarios/parser.js';

@@ -382,13 +382,39 @@ export class BrowserVMProvider {
     };
   }
 
-  /** Prefund account (R2C - Reserve to Collateral) - emits SettlementProcessed event */
-  async prefundAccount(entityId: string, counterpartyId: string, tokenId: number, amount: bigint): Promise<EVMEvent[]> {
+  /**
+   * R2C (Reserve to Collateral) - Move funds from reserve to bilateral account collateral
+   * Emits AccountSettled event for j-watcher
+   * Note: Solidity prefundAccount() was deleted - this is BrowserVM-only implementation
+   */
+  async reserveToCollateralDirect(entityId: string, counterpartyId: string, tokenId: number, amount: bigint): Promise<EVMEvent[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
-    // Use ethers Interface for ABI encoding (same as mainnet)
-    // Note: prefundAccount(bytes32 fundingEntity, bytes32 counterpartyEntity, uint tokenId, uint amount)
-    const callData = this.depositoryInterface.encodeFunctionData('prefundAccount', [entityId, counterpartyId, tokenId, amount]);
+    // Use settle() with appropriate diffs to achieve R2C effect
+    // settleDiffs: { tokenId, leftDiff, rightDiff, collateralDiff, ondeltaDiff }
+    const isLeft = BigInt(entityId) < BigInt(counterpartyId);
+    const leftEntity = isLeft ? entityId : counterpartyId;
+    const rightEntity = isLeft ? counterpartyId : entityId;
+
+    // R2C: Reduce entity's reserve, increase collateral + ondelta
+    // If entity is LEFT: leftDiff = -amount, collateralDiff = +amount, ondeltaDiff = +amount
+    // If entity is RIGHT: rightDiff = -amount, collateralDiff = +amount, ondeltaDiff = -amount
+    const diffs = [{
+      tokenId,
+      leftDiff: isLeft ? -BigInt(amount) : 0n,
+      rightDiff: isLeft ? 0n : -BigInt(amount),
+      collateralDiff: BigInt(amount),
+      ondeltaDiff: isLeft ? BigInt(amount) : -BigInt(amount),
+    }];
+
+    const callData = this.depositoryInterface.encodeFunctionData('settle', [
+      leftEntity,
+      rightEntity,
+      diffs,
+      [], // forgiveDebtsInTokenIds
+      [], // insuranceRegs
+      '0x', // sig (testMode skips verification)
+    ]);
 
     const currentNonce = await this.getCurrentNonce();
     const tx = createLegacyTx({
@@ -401,13 +427,12 @@ export class BrowserVMProvider {
 
     const result = await runTx(this.vm, { tx });
     if (result.execResult.exceptionError) {
-      throw new Error(`prefundAccount failed: ${result.execResult.exceptionError}`);
+      throw new Error(`R2C failed: ${result.execResult.exceptionError}`);
     }
-    this.incrementBlock(); // Transaction mined successfully
-    console.log(`[BrowserVM] Prefunded ${amount} from ${entityId.slice(0, 10)}... to account with ${counterpartyId.slice(0, 10)}...`);
-    console.log(`[BrowserVM] prefundAccount: logs=${result.execResult.logs?.length || 0}`);
+    this.incrementBlock();
+    console.log(`[BrowserVM] R2C: ${amount} from ${entityId.slice(0, 10)}... → account with ${counterpartyId.slice(0, 10)}...`);
+    console.log(`[BrowserVM] R2C: logs=${result.execResult.logs?.length || 0}`);
 
-    // Emit events to j-watcher subscribers
     return this.emitEvents(result.execResult.logs || []);
   }
 
@@ -522,10 +547,10 @@ export class BrowserVMProvider {
       }
     }
 
-    // Execute R2C (Reserve to Collateral) prefunds
+    // Execute R2C (Reserve to Collateral) deposits
     if (batch.reserveToCollateral) {
       for (const r2c of batch.reserveToCollateral) {
-        const events = await this.prefundAccount(entityId, r2c.counterparty, r2c.tokenId, r2c.amount);
+        const events = await this.reserveToCollateralDirect(entityId, r2c.counterparty, r2c.tokenId, r2c.amount);
         allEvents.push(...events);
       }
     }

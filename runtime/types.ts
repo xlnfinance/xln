@@ -227,7 +227,7 @@ export type JurisdictionEvent =
       };
     }
   | {
-      type: 'SettlementProcessed';
+      type: 'AccountSettled';
       data: {
         leftEntity: string;
         rightEntity: string;
@@ -238,17 +238,6 @@ export type JurisdictionEvent =
         collateral: string;
         ondelta: string;
         side: 'left' | 'right';
-      };
-    }
-  | {
-      type: 'TransferReserveToCollateral';
-      data: {
-        receivingEntity: string;
-        counterentity: string;
-        collateral: string;
-        ondelta: string;
-        tokenId: number;
-        side: 'receiving' | 'counterparty';
       };
     }
   | {
