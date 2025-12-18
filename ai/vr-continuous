@@ -1,5 +1,5 @@
 #!/bin/bash
-export PATH="/opt/homebrew/bin:/Users/zigota/Library/Python/3.9/bin:/usr/bin:$PATH"
+export PATH="/opt/homebrew/bin:/Users/$(whoami)/Library/Python/3.9/bin:/usr/bin:$PATH"
 export LANG=en_US.UTF-8
 
 LOG="/tmp/vr-debug.log"
@@ -13,7 +13,7 @@ echo "File: $AUDIO" >> "$LOG"
 # Trap SIGTERM BEFORE starting rec (prevents race condition)
 trap 'echo "Got TERM, sending INT to background jobs" >> "$LOG"; kill -INT $(jobs -p) 2>/dev/null' TERM
 
-# Record in background (no subshell!)
+# Record in background
 rec "$AUDIO" rate 16k channels 1 2>/dev/null &
 REC_PID=$!
 echo "Recording PID: $REC_PID" >> "$LOG"
@@ -35,7 +35,7 @@ fi
 SIZE=$(stat -f%z "$AUDIO" 2>/dev/null || echo 0)
 echo "Audio size: $SIZE bytes" >> "$LOG"
 
-# Transcribe (HTTP → CLI fallback)
+# Transcribe via HTTP
 START=$(python3 -c "import time; print(int(time.time()*1000))")
 TEXT=""
 
@@ -48,8 +48,6 @@ else
     exit 4
 fi
 
-# No CLI fallback - HTTP only for speed!
-
 MS=$(( $(python3 -c "import time; print(int(time.time()*1000))") - START ))
 echo "Transcribe time: ${MS}ms" >> "$LOG"
 
@@ -61,18 +59,39 @@ fi
 
 echo "Pasting: $TEXT" >> "$LOG"
 
-# Atomic paste via AppleScript (no race conditions, no verification loops)
-osascript 2>/dev/null << APPLESCRIPT
-set the clipboard to "$TEXT"
-delay 0.05
-tell application "System Events" to keystroke "v" using command down
-APPLESCRIPT
+# Method 1: Direct keystroke simulation (most reliable)
+# Escape special characters for AppleScript
+ESCAPED=$(printf "%s" "$TEXT" | sed 's/\\/\\\\/g; s/"/\\"/g')
 
-if [ $? -ne 0 ]; then
-    echo "ERROR: Paste failed" >> "$LOG"
-    exit 9
+# Small delay to ensure target app is ready
+sleep 0.1
+
+# Type the text directly (no clipboard interference)
+osascript -e "tell application \"System Events\" to keystroke \"$ESCAPED\"" 2>> "$LOG"
+
+if [ $? -eq 0 ]; then
+    echo "SUCCESS: ${MS}ms (typed directly)" >> "$LOG"
+    echo "$MS"
+else
+    # Fallback: Clipboard method
+    echo "Direct typing failed, using clipboard..." >> "$LOG"
+
+    # Save old clipboard
+    OLD_CLIP=$(pbpaste 2>/dev/null || echo "")
+
+    # Copy new text
+    printf "%s" "$TEXT" | pbcopy
+
+    # Wait for clipboard
+    sleep 0.2
+
+    # Paste
+    osascript -e 'tell application "System Events" to keystroke "v" using command down' 2>/dev/null
+
+    # Restore old clipboard after short delay
+    sleep 0.3
+    printf "%s" "$OLD_CLIP" | pbcopy 2>/dev/null
+
+    echo "SUCCESS: ${MS}ms (via clipboard)" >> "$LOG"
+    echo "$MS"
 fi
-
-echo "SUCCESS: ${MS}ms" >> "$LOG"
-echo "$MS"
-echo "TEXT:$TEXT"
