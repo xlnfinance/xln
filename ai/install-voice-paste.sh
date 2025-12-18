@@ -46,6 +46,11 @@ echo "  2) Parakeet 0.6B (60x faster, 2GB RAM, ~15ms, 25 languages)"
 echo ""
 read -p "Choice [1/2]: " MODEL_CHOICE
 
+# Install Flask (required for HTTP server)
+echo "${YELLOW}→ Installing Flask...${NC}"
+pip3 install flask
+echo "${GREEN}✓ Flask installed${NC}"
+
 if [ "$MODEL_CHOICE" = "2" ]; then
     MODEL="parakeet"
     echo "${YELLOW}→ Installing Parakeet-MLX...${NC}"
