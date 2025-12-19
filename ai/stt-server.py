@@ -7,16 +7,10 @@ import mlx_whisper
 
 app = Flask(__name__)
 
-print("Loading Whisper model into memory...")
 MODEL_PATH = "mlx-community/whisper-large-v3-mlx"
-model = None
 
-try:
-    model = mlx_whisper.load_models.load_model(MODEL_PATH)
-    print(f"✅ Model loaded: {MODEL_PATH}")
-except Exception as e:
-    print(f"❌ Failed to load model: {e}")
-    sys.exit(1)
+print(f"Server starting with model: {MODEL_PATH}")
+print(f"Model will load on first request (~2s first time, then cached)")
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
@@ -31,11 +25,12 @@ def transcribe():
     audio_file.save(temp_path)
 
     try:
+        # Don't force language - let Whisper auto-detect for mixed language support
         result = mlx_whisper.transcribe(
             temp_path,
             path_or_hf_repo=MODEL_PATH,
             task=task,
-            language=language,
+            language=None,  # Auto-detect allows code-switching (RU+EN mixed)
             verbose=False
         )
 

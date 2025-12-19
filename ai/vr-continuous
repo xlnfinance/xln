@@ -59,39 +59,40 @@ fi
 
 echo "Pasting: $TEXT" >> "$LOG"
 
-# Method 1: Direct keystroke simulation (most reliable)
-# Escape special characters for AppleScript
-ESCAPED=$(printf "%s" "$TEXT" | sed 's/\\/\\\\/g; s/"/\\"/g')
+# Copy to clipboard
+printf "%s" "$TEXT" | pbcopy
 
-# Small delay to ensure target app is ready
-sleep 0.1
+# Wait for clipboard to update (prevent race condition)
+VERIFIED=false
+for i in {1..20}; do
+    CURRENT=$(pbpaste 2>/dev/null)
+    if [ "$CURRENT" = "$TEXT" ]; then
+        VERIFIED=true
+        echo "Clipboard ready after ${i}0ms" >> "$LOG"
+        break
+    fi
+    sleep 0.01
+done
 
-# Type the text directly (no clipboard interference)
-osascript -e "tell application \"System Events\" to keystroke \"$ESCAPED\"" 2>> "$LOG"
-
-if [ $? -eq 0 ]; then
-    echo "SUCCESS: ${MS}ms (typed directly)" >> "$LOG"
-    echo "$MS"
-else
-    # Fallback: Clipboard method
-    echo "Direct typing failed, using clipboard..." >> "$LOG"
-
-    # Save old clipboard
-    OLD_CLIP=$(pbpaste 2>/dev/null || echo "")
-
-    # Copy new text
-    printf "%s" "$TEXT" | pbcopy
-
-    # Wait for clipboard
-    sleep 0.2
-
-    # Paste
-    osascript -e 'tell application "System Events" to keystroke "v" using command down' 2>/dev/null
-
-    # Restore old clipboard after short delay
-    sleep 0.3
-    printf "%s" "$OLD_CLIP" | pbcopy 2>/dev/null
-
-    echo "SUCCESS: ${MS}ms (via clipboard)" >> "$LOG"
-    echo "$MS"
+if [ "$VERIFIED" = false ]; then
+    echo "ERROR: Clipboard not ready" >> "$LOG"
+    exit 8
 fi
+
+# Get active app
+ACTIVE_APP=$(osascript -e 'tell application "System Events" to get name of first process whose frontmost is true' 2>/dev/null)
+echo "Active app: $ACTIVE_APP" >> "$LOG"
+
+# Paste
+if [[ "$ACTIVE_APP" =~ (ghostty|iTerm|Terminal|Warp|Alacritty|kitty) ]]; then
+    # Terminal: Cmd+V
+    osascript -e 'tell application "System Events" to keystroke "v" using command down' 2>/dev/null
+    echo "SUCCESS: ${MS}ms (terminal)" >> "$LOG"
+else
+    # GUI: direct typing (avoids Select All in some apps)
+    ESCAPED=$(printf "%s" "$TEXT" | sed 's/\\/\\\\/g; s/"/\\"/g')
+    osascript -e "tell application \"System Events\" to keystroke \"$ESCAPED\"" 2>> "$LOG"
+    echo "SUCCESS: ${MS}ms (GUI)" >> "$LOG"
+fi
+
+echo "$MS"
