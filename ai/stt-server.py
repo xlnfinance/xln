@@ -4,13 +4,18 @@ import os
 import sys
 from flask import Flask, request, jsonify
 import mlx_whisper
+from threading import Lock
 
 app = Flask(__name__)
 
 MODEL_PATH = "mlx-community/whisper-large-v3-mlx"
 
+# Lock to prevent concurrent MLX GPU access (prevents Metal encoder crashes)
+inference_lock = Lock()
+
 print(f"Server starting with model: {MODEL_PATH}")
 print(f"Model will load on first request (~2s first time, then cached)")
+print(f"Thread-safe mode: Sequential processing (prevents GPU conflicts)")
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
@@ -25,14 +30,17 @@ def transcribe():
     audio_file.save(temp_path)
 
     try:
-        # Don't force language - let Whisper auto-detect for mixed language support
-        result = mlx_whisper.transcribe(
-            temp_path,
-            path_or_hf_repo=MODEL_PATH,
-            task=task,
-            language=None,  # Auto-detect allows code-switching (RU+EN mixed)
-            verbose=False
-        )
+        # Serialize GPU access to prevent Metal encoder conflicts
+        with inference_lock:
+            # Don't force language - let Whisper auto-detect for mixed language support
+            result = mlx_whisper.transcribe(
+                temp_path,
+                path_or_hf_repo=MODEL_PATH,
+                task=task,
+                language=None,  # Auto-detect allows code-switching (RU+EN mixed)
+                verbose=False,
+                fp16=False  # Disable FP16 to reduce GPU memory conflicts
+            )
 
         text = result.get("text", "").strip()
         os.remove(temp_path)
