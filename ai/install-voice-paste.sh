@@ -347,13 +347,29 @@ hs.hotkey.bind({"cmd"}, ".",
     function() stopRecording() end,
     function() startRecording("translate-en") end)
 
--- Auto-start STT server with ffmpeg PATH
-hs.task.new("/usr/bin/env", nil, function(exitCode, stdOut, stdErr)
-    if exitCode ~= 0 then
-        print("STT server failed to start: " .. tostring(stdErr))
-    end
-end, {"bash", "-c", "export PATH=/opt/homebrew/bin:$PATH && python3 " .. os.getenv("HOME") .. "/xln/ai/stt-server.py"}):start()
-print("Started STT server")
+-- Auto-start STT server (only if not already running)
+local function startSTTServer()
+    -- Check if server already running
+    local checkTask = hs.task.new("/usr/bin/pgrep", function(exitCode, stdOut, stdErr)
+        if exitCode == 0 then
+            print("STT server already running (PID: " .. stdOut:gsub("%s+", "") .. ")")
+        else
+            -- Start server
+            print("Starting STT server...")
+            hs.task.new("/usr/bin/env", function(exitCode, stdOut, stdErr)
+                if exitCode ~= 0 and stdErr and stdErr ~= "" then
+                    print("STT server error: " .. stdErr)
+                end
+                return true  -- MUST return boolean
+            end, {"bash", "-c", "export PATH=/opt/homebrew/bin:$PATH && python3 " .. os.getenv("HOME") .. "/xln/ai/stt-server.py > /tmp/stt-server.log 2>&1"}):start()
+            print("STT server started (logs: /tmp/stt-server.log)")
+        end
+        return true  -- MUST return boolean
+    end, {"-f", "stt-server.py"})
+    checkTask:start()
+end
+
+startSTTServer()
 
 hs.alert.show("🎤\n⌘, = Auto\n⌘. = →EN", 2)
 print("Voice ready")
