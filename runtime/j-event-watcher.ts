@@ -53,6 +53,7 @@ export class JEventWatcher {
   private depositoryContract: ethers.Contract | null = null;
   private signers: Map<string, SignerConfig> = new Map();
   private isWatching: boolean = false;
+  private syntheticTxCounter: number = 0;
 
   // BrowserVM mode (simnet)
   private browserVM: BrowserVMEventSource | null = null;
@@ -244,11 +245,12 @@ export class JEventWatcher {
    * @param entityId - The entity this event is being created for (for left/right determination)
    */
   private browserVMEventToEntityTx(event: BrowserVMEvent, signerId: string, blockNumber: number, entityId: string): any {
+    const observedAt = this.getEventTimestamp();
     const baseData = {
       from: signerId,
-      observedAt: Date.now(),
+      observedAt,
       blockNumber,
-      transactionHash: `browservm-${Date.now()}`, // Synthetic tx hash for BrowserVM
+      transactionHash: `browservm-${observedAt}-${this.syntheticTxCounter++}`,
     };
 
     switch (event.name) {
@@ -519,7 +521,7 @@ export class JEventWatcher {
               decimals: 18,
             },
           },
-          observedAt: Date.now(),
+          observedAt: this.getEventTimestamp(),
           blockNumber: event.blockNumber,
           transactionHash: event.transactionHash,
         },
@@ -577,6 +579,10 @@ export class JEventWatcher {
       isWatching: this.isWatching,
       signerCount: this.signers.size,
     };
+  }
+
+  private getEventTimestamp(): number {
+    return this.env?.disableAutoSnapshots ? this.env.timestamp : Date.now();
   }
 }
 

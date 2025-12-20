@@ -18,6 +18,7 @@
   import AccountDropdown from './AccountDropdown.svelte';
   import PaymentPanel from './PaymentPanel.svelte';
   import SettlementPanel from './SettlementPanel.svelte';
+  import InsurancePanel from '$lib/view/panels/InsurancePanel.svelte';
   import { xlnFunctions } from '../../stores/xlnStore';
 
   export let tab: Tab;
@@ -332,6 +333,22 @@
             <h3>Reserves</h3>
           </div>
           <p class="empty-reserves">No reserves yet - deposit assets via Depository.sol</p>
+        </div>
+      {/if}
+
+      <!-- Insurance Lines - Always Visible (after Reserves, before Accounts) -->
+      {#if replica?.state?.insuranceLines && replica.state.insuranceLines.length > 0}
+        <div class="entity-insurance-section">
+          <div class="insurance-header">
+            <h3>🛡️ Insurance Coverage</h3>
+          </div>
+          <div class="insurance-content">
+            <InsurancePanel
+              isolatedEnv={contextReplicas ? { subscribe: (fn) => contextReplicas.subscribe((val) => fn({ eReplicas: val })) } : undefined}
+              isolatedHistory={contextHistory}
+              isolatedTimeIndex={contextTimeIndex}
+            />
+          </div>
         </div>
       {/if}
 
@@ -662,6 +679,29 @@
     font-style: italic;
     text-align: center;
     margin: 0;
+  }
+
+  /* Insurance section */
+  .entity-insurance-section {
+    margin: 16px;
+    padding: 16px;
+    background: rgba(138, 43, 226, 0.1);
+    border: 1px solid rgba(138, 43, 226, 0.3);
+    border-radius: 8px;
+  }
+
+  .insurance-header {
+    margin-bottom: 12px;
+  }
+
+  .insurance-header h3 {
+    margin: 0;
+    font-size: 16px;
+    color: #fff;
+  }
+
+  .insurance-content {
+    min-height: 150px;
   }
 
   /* Always-visible accounts section */

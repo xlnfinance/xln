@@ -126,9 +126,9 @@ bun run check 2>&1 | grep "error TS" > /tmp/ts-errors.txt
 ---
 
 ### 8. **Documentation Cleanup** [1 hour]
-**Problem:** docs/ and vibepaper/ overlap, some files outdated
+**Problem:** docs/ and docs/ overlap, some files outdated
 **Fix:**
-1. Move all architecture docs to vibepaper/
+1. Move all architecture docs to docs/
 2. Delete docs/ or repurpose for API docs
 3. Update README.md with current state
 4. Add FREQUENTLY_ASKED.md (reduce Claude re-explaining)

@@ -15,7 +15,7 @@ import { cloneEntityState, addMessage } from '../state-helpers';
 import { submitSettle } from '../evm';
 import { logError } from '../logger';
 
-export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<{ newState: EntityState, outputs: EntityInput[] }> => {
+export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<{ newState: EntityState, outputs: EntityInput[], jOutputs?: JInput[] }> => {
   if (!entityTx) {
     logError("ENTITY_TX", `❌ EntityTx is undefined!`);
     return { newState: entityState, outputs: [] };
@@ -170,7 +170,15 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     }
 
     if (entityTx.type === 'j_event') {
-      const newState = handleJEvent(entityState, entityTx.data);
+      // Emit J-event received
+      env.emit('JEventReceived', {
+        entityId: entityState.entityId,
+        eventType: entityTx.data.event.type,
+        blockNumber: entityTx.data.blockNumber,
+        txHash: entityTx.data.transactionHash,
+      });
+
+      const newState = handleJEvent(entityState, entityTx.data, env);
       return { newState, outputs: [] };
     }
 
@@ -181,6 +189,12 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
     if (entityTx.type === 'openAccount') {
       console.log(`💳 OPEN-ACCOUNT: Opening account with ${entityTx.data.targetEntityId}`);
+
+      // Emit account opening event
+      env.emit('AccountOpening', {
+        entityId: entityState.entityId,
+        counterpartyId: entityTx.data.targetEntityId,
+      });
 
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
@@ -288,6 +302,15 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     if (entityTx.type === 'directPayment') {
       console.error(`💸💸💸 DIRECT-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`);
       console.error(`   Amount: ${entityTx.data.amount}, Route: ${entityTx.data.route?.map(r => r.slice(-4)).join('→') || 'none'}`);
+
+      // Emit payment initiation event
+      env.emit('PaymentInitiated', {
+        fromEntity: entityState.entityId,
+        toEntity: entityTx.data.targetEntityId,
+        tokenId: entityTx.data.tokenId,
+        amount: entityTx.data.amount.toString(),
+        route: entityTx.data.route,
+      });
 
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
@@ -425,7 +448,19 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
     if (entityTx.type === 'j_broadcast') {
       const { handleJBroadcast } = await import('./handlers/j-broadcast');
-      return await handleJBroadcast(entityState, entityTx);
+      const result = await handleJBroadcast(entityState, entityTx, env);
+      // j_broadcast returns jOutputs to queue to J-mempool
+      return result;
+    }
+
+    if (entityTx.type === 'mintReserves') {
+      const { handleMintReserves } = await import('./handlers/mint-reserves');
+      return await handleMintReserves(entityState, entityTx);
+    }
+
+    if (entityTx.type === 'createSettlement') {
+      const { handleCreateSettlement } = await import('./handlers/create-settlement');
+      return await handleCreateSettlement(entityState, entityTx);
     }
 
     if (entityTx.type === 'extendCredit') {
@@ -553,9 +588,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     }
 
     console.warn(`⚠️ Unhandled EntityTx type: ${entityTx.type}`);
-    return { newState: entityState, outputs: [] };
+    return { newState: entityState, outputs: [], jOutputs: [] };
   } catch (error) {
     log.error(`❌ Transaction execution error: ${error}`);
-    return { newState: entityState, outputs: [] }; // Return unchanged state on error
+    return { newState: entityState, outputs: [], jOutputs: [] }; // Return unchanged state on error
   }
 };

@@ -12,7 +12,7 @@
 ├── runtime/           ← PUBLIC: Core protocol code
 ├── jurisdictions/     ← PUBLIC: Smart contracts
 ├── frontend/          ← PUBLIC: UI (with tests)
-├── vibepaper/         ← PUBLIC: Documentation
+├── docs/         ← PUBLIC: Documentation
 ├── .archive/          ← PRIVATE: Old implementations (reference only)
 ├── CLAUDE.md          ← PUBLIC: How we work (transparency)
 └── LAUNCH_CHECKLIST.md ← PUBLIC: Quality standards
@@ -29,7 +29,7 @@ root@xln.finance:/root/xln ← Production server (deploys from THIS repo)
 | runtime/ | ✅ | ✅ | ✅ | Core protocol (show quality) |
 | jurisdictions/ | ✅ | ✅ | ✅ | Smart contracts (open source) |
 | frontend/ | ✅ | ✅ | ✅ | UI + tests |
-| vibepaper/ | ✅ | ✅ | ❌ | Docs (not needed on server) |
+| docs/ | ✅ | ✅ | ❌ | Docs (not needed on server) |
 | reports/ | ✅ | ❌ | ❌ | Internal analysis |
 | scripts/ | ✅ | ❌ | ❌ | Deployment scripts |
 | research/ | ✅ | ❌ | ❌ | Experiments |
@@ -73,7 +73,7 @@ xln/
 │   ├── tests/
 │   └── static/
 │
-├── vibepaper/                  # PUBLISHED
+├── docs/                  # PUBLISHED
 │   ├── readme.md
 │   └── jea.md
 │
@@ -92,7 +92,7 @@ xln/
 ├── runtime/           # Same as private
 ├── jurisdictions/     # Same as private
 ├── frontend/          # Same as private
-├── vibepaper/         # Same as private
+├── docs/         # Same as private
 ├── CLAUDE.md          # Same as private
 ├── README.md          # Same as private
 └── LICENSE            # MIT/Apache

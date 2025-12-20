@@ -35,16 +35,36 @@ fi
 SIZE=$(stat -f%z "$AUDIO" 2>/dev/null || echo 0)
 echo "Audio size: $SIZE bytes" >> "$LOG"
 
-# Transcribe via HTTP
+# Transcribe via HTTP with retry
 START=$(python3 -c "import time; print(int(time.time()*1000))")
 TEXT=""
+RETRY_COUNT=0
+MAX_RETRIES=2
 
 echo "Trying HTTP transcribe..." >> "$LOG"
-if RES=$(curl -sf http://localhost:5001/transcribe -F "file=@$AUDIO" -F "task=$([ "$LANG_ARG" = "translate-en" ] && echo translate || echo transcribe)" 2>&1); then
-    TEXT=$(echo "$RES" | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null)
-    echo "HTTP result: $TEXT" >> "$LOG"
-else
-    echo "ERROR: HTTP server failed (curl exit $?)" >> "$LOG"
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if RES=$(curl -sf --max-time 10 http://localhost:5001/transcribe -F "file=@$AUDIO" -F "task=$([ "$LANG_ARG" = "translate-en" ] && echo translate || echo transcribe)" 2>&1); then
+        TEXT=$(echo "$RES" | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null)
+        if [ -n "$TEXT" ]; then
+            echo "HTTP result: $TEXT" >> "$LOG"
+            break
+        else
+            echo "WARNING: Empty response, retrying..." >> "$LOG"
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            sleep 0.5
+        fi
+    else
+        CURL_EXIT=$?
+        echo "WARNING: HTTP failed (curl exit $CURL_EXIT), retry $RETRY_COUNT/$MAX_RETRIES" >> "$LOG"
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+            sleep 0.5
+        fi
+    fi
+done
+
+if [ -z "$TEXT" ]; then
+    echo "ERROR: HTTP server failed after $MAX_RETRIES retries" >> "$LOG"
     exit 4
 fi
 

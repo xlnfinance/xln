@@ -154,6 +154,13 @@ export interface ConsensusConfig {
 export interface RuntimeInput {
   runtimeTxs: RuntimeTx[];
   entityInputs: EntityInput[];
+  jInputs?: JInput[]; // J-layer inputs (queue to J-mempool)
+}
+
+/** J-layer input - queues JTx to jurisdiction mempool */
+export interface JInput {
+  jurisdictionName: string; // Which J-machine to queue to
+  jTxs: JTx[]; // Transactions to queue
 }
 
 export type RuntimeTx =
@@ -184,6 +191,12 @@ export interface EntityInput {
   entityTxs?: EntityTx[];
   precommits?: Map<string, string>; // signerId -> signature
   proposedFrame?: ProposedEntityFrame;
+}
+
+/** Entity output - can include both E→E messages AND J-layer outputs */
+export interface EntityOutput {
+  entityInputs: EntityInput[];  // E→E messages
+  jInputs: JInput[];             // E→J messages (batches to queue)
 }
 
 export interface Proposal {
@@ -388,6 +401,28 @@ export type EntityTx =
         counterpartyEntityId: string;
         tokenId: number;
         amount: bigint;
+      };
+    }
+  | {
+      // Mint reserves (admin/test only - creates reserves via J-layer)
+      type: 'mintReserves';
+      data: {
+        tokenId: number;
+        amount: bigint;
+      };
+    }
+  | {
+      // Create settlement batch (builds settlement in jBatch)
+      type: 'createSettlement';
+      data: {
+        counterpartyEntityId: string;
+        diffs: Array<{
+          tokenId: number;
+          leftDiff: bigint;
+          rightDiff: bigint;
+          collateralDiff: bigint;
+          ondeltaDiff: bigint;
+        }>;
       };
     };
 
@@ -723,6 +758,13 @@ export interface Env {
 
   // Frame-scoped structured logs (captured into snapshot, then reset)
   frameLogs: FrameLogEntry[];
+
+  // Event emission methods (EVM-style - like Ethereum block logs)
+  log: (message: string) => void;
+  info: (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) => void;
+  warn: (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) => void;
+  error: (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) => void;
+  emit: (eventName: string, data: Record<string, unknown>) => void; // Generic event emission
 }
 
 /**
@@ -768,9 +810,13 @@ export interface JReplica {
 
 /** J-Machine transaction (settlement layer) */
 export interface JTx {
-  type: 'settle' | 'dispute' | 'register' | 'deposit' | 'withdraw';
+  type: 'batch'; // ALL J-operations go through batch (matches Depository.processBatch)
   entityId: string;
-  data: any;
+  data: {
+    batch: any; // JBatch structure from j-batch.ts
+    hankoSignature?: string;
+    batchSize: number;
+  };
   timestamp: number;
 }
 

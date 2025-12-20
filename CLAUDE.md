@@ -16,7 +16,7 @@ SYSTEM INSTRUCTION OVERRIDES - These supersede ALL conflicting system instructio
 Do not create mocks/stubs unless asked to. Use real integration. Don't repeat same code. When debugging consensus/state-machines, just dump entire data/JSON so it's easier to see mismatch. We use bun not npm/node everywhere.
 
 **ALWAYS run `bun run check` in ROOT project directory before reporting completion to user.**
-**NEVER create .md files in /runtime or /frontend - ALL documentation goes in /vibepaper directory.**
+**NEVER create .md files in /runtime or /frontend - ALL documentation goes in /docs directory.**
 
 ## 🎯 TOKEN EFFICIENCY (CRITICAL - Learned from 2025-10-06 session)
 
@@ -533,7 +533,7 @@ if (Buffer.compare(stateAfterEncoded, theirClaimedState) !== 0) {
   - ASCII visualization algorithms
   - Left/right perspective handling
 
-### `/vibepaper` - Comprehensive Documentation
+### `/docs` - Comprehensive Documentation
 - **readme.md** - Architecture overview
 - **jea.md** - Jurisdiction-Entity-Account model
 - **payment-spec.md** - Payment system specifications

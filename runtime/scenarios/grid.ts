@@ -40,10 +40,10 @@ function pushSnapshot(env: Env, tag: string, description: string, metadata: Reco
   console.log(`📸 Snapshot: ${description}`);
 }
 
-// Grid dimensions: 8×8×4 = 256 nodes (3D cube, not flat!)
-const GRID_DIMS = { x: 8, y: 8, z: 4 };
-const GRID_SPACING = 40; // px between nodes
-const J_MARGIN = 200; // Grid margin around J-Machine
+// Grid dimensions: 2×2×2 = 8 nodes (3D cube, not flat!)
+const GRID_DIMS = { x: 2, y: 2, z: 2 };
+const GRID_SPACING = 60; // px between nodes
+const J_MARGIN = 150; // Grid margin around J-Machine
 const USDC_TOKEN_ID = 1;
 
 function usd(amount: number): bigint {
@@ -51,7 +51,7 @@ function usd(amount: number): bigint {
 }
 
 export async function grid(env: Env): Promise<void> {
-  console.log('🔲 GRID SCALABILITY SCENARIO\n');
+  console.log('🔲 GRID SCALABILITY SCENARIO (2×2×2 = 8 nodes)\n');
   console.log('Demonstrating: Broadcast bottleneck → Hub-spoke scaling\n');
 
   env.disableAutoSnapshots = true;
@@ -71,7 +71,7 @@ export async function grid(env: Env): Promise<void> {
   await pushSnapshot(env, 'INIT', 'J-Machine initialized');
 
   // ============================================================================
-  // PHASE 0: CREATE 256-NODE 3D GRID AROUND J-MACHINE
+  // PHASE 0: CREATE 8-NODE 3D GRID AROUND J-MACHINE
   // ============================================================================
 
   console.log(`📐 Creating ${GRID_DIMS.x}×${GRID_DIMS.y}×${GRID_DIMS.z} 3D grid (${GRID_DIMS.x * GRID_DIMS.y * GRID_DIMS.z} nodes)...`);
@@ -102,67 +102,103 @@ export async function grid(env: Env): Promise<void> {
   // ============================================================================
 
   console.log('\n💥 PHASE 1: BROADCAST BOTTLENECK\n');
-  console.log('All 256 nodes broadcasting to single J-Machine...');
+  console.log('All 8 nodes broadcasting to single J-Machine...');
 
-  // Import R2R helpers
-  const { reserveToReserve } = await import('../evm');
+  // Get jReplica for mempool operations
+  const jReplica = env.jReplicas?.get('Grid Demo');
+  if (!jReplica) throw new Error('J-Machine not found');
 
-  // Fund first 64 nodes (quarter of grid) to avoid overwhelming
-  const fundedNodes = gridEntities.slice(0, 64);
-
-  for (let i = 0; i < fundedNodes.length; i++) {
-    const nodeId = fundedNodes[i];
-
-    // R2R: Hub → Node ($100K each)
-    await reserveToReserve(nodeId, nodeId, USDC_TOKEN_ID, usd(100_000), browserVM);
-
-    if (i % 16 === 15) {
-      console.log(`   Funded ${i + 1}/${fundedNodes.length} nodes`);
-    }
+  // Fund all nodes with initial reserves (direct BrowserVM call)
+  console.log('💰 Funding nodes with initial reserves...');
+  for (let i = 0; i < gridEntities.length; i++) {
+    const nodeId = gridEntities[i];
+    await browserVM.debugFundReserves(nodeId, USDC_TOKEN_ID, usd(100_000));
   }
 
-  console.log(`✅ Funded ${fundedNodes.length} nodes with $100K each`);
+  // Process j_events from BrowserVM
+  const { processJEvents } = await import('../j-event-watcher');
+  await processJEvents(env);
+
+  console.log(`✅ Funded ${gridEntities.length} nodes with $100K each`);
 
   await pushSnapshot(env, 'BROADCAST-FUNDED', 'Nodes funded - ready to broadcast', {
-    fundedNodes: fundedNodes.length,
+    fundedNodes: gridEntities.length,
     reservePerNode: '$100K'
   });
 
-  // Simulate broadcast: Each node sends tx to J-Machine
-  // In real scenario, this would create mempool overflow
-  console.log('\n📡 Broadcasting transactions to J-Machine...');
-  console.log('   (Simulating 64 concurrent txs → single mempool)');
+  // Phase 1b: Add R2R txs to mempool (broadcast simulation)
+  console.log('\n📡 Broadcasting R2R transactions to J-Machine mempool...');
+  console.log('   (8 concurrent txs → single mempool)');
 
-  // TODO: Actually send transactions when we have proper broadcast visualization
-  // For now, just document the bottleneck
+  // Each node sends $10K to next node (circular)
+  for (let i = 0; i < gridEntities.length; i++) {
+    const fromNode = gridEntities[i];
+    const toNode = gridEntities[(i + 1) % gridEntities.length]; // Circular
 
-  await pushSnapshot(env, 'BROADCAST-BOTTLENECK', 'Broadcast bottleneck: 64 txs → 1 mempool', {
+    // Add to J-Machine mempool (PENDING state - yellow cubes!)
+    jReplica.mempool.push({
+      type: 'r2r',
+      from: fromNode,
+      to: toNode,
+      amount: usd(10_000),
+      timestamp: env.timestamp
+    });
+  }
+
+  console.log(`✅ ${gridEntities.length} txs in J-Machine mempool (yellow cubes!)`);
+
+  await pushSnapshot(env, 'BROADCAST-BOTTLENECK', 'Broadcast bottleneck: 8 txs in mempool', {
     phase: 'broadcast',
-    txCount: fundedNodes.length,
+    txCount: gridEntities.length,
     bottleneck: 'J-Machine mempool capacity',
-    complexity: 'O(n) txs to single validator'
+    complexity: 'O(n) txs to single validator',
+    mempoolSize: jReplica.mempool.length
   });
 
   console.log('\n⚠️  BROADCAST BOTTLENECK OBSERVED:');
-  console.log('   • 64 nodes × 1 tx each = 64 concurrent broadcasts');
+  console.log('   • 8 nodes × 1 tx each = 8 concurrent broadcasts');
   console.log('   • Single J-Machine mempool capacity: ~10-20 txs/block');
-  console.log('   • Result: Queue buildup, delayed confirmations');
+  console.log('   • Result: All fit in one block, but imagine 256+ nodes');
   console.log('   • Scaling limit: Block capacity (NOT network mesh)');
+
+  // Phase 1c: Execute the batch (J-Block clears mempool)
+  console.log('\n⚡ J-Block #1: Processing batch...');
+
+  // Execute all R2R txs from mempool
+  for (const tx of jReplica.mempool) {
+    if (tx.type === 'r2r' && tx.from && tx.to && tx.amount) {
+      await browserVM.reserveToReserve(tx.from, tx.to, USDC_TOKEN_ID, tx.amount);
+    }
+  }
+
+  // Clear mempool (batch processed)
+  jReplica.mempool = [];
+
+  // Process j_events from BrowserVM
+  await processJEvents(env);
+
+  console.log('✅ J-Block #1 executed - all R2R txs processed');
+
+  await pushSnapshot(env, 'BROADCAST-EXECUTED', 'J-Block processed 8 txs', {
+    phase: 'execution',
+    txCount: gridEntities.length,
+    mempoolSize: jReplica.mempool.length
+  });
 
   // ============================================================================
   // PHASE 2: HUB-SPOKE SCALING
-  // Create 8 routing hubs, nodes route through nearest hub
+  // Create 2 routing hubs, nodes route through nearest hub
   // ============================================================================
 
   console.log('\n\n🌐 PHASE 2: HUB-SPOKE TOPOLOGY\n');
-  console.log('Creating 8 routing hubs in ring formation...');
+  console.log('Creating 2 routing hubs in ring formation...');
 
-  // Create 8 hubs in a ring around J-Machine (between grid and J)
-  const HUB_RADIUS = 150; // px from center
+  // Create 2 hubs in a ring around J-Machine (between grid and J)
+  const HUB_RADIUS = 100; // px from center
   const hubs: string[] = [];
 
-  for (let i = 0; i < 8; i++) {
-    const angle = (i / 8) * Math.PI * 2;
+  for (let i = 0; i < 2; i++) {
+    const angle = (i / 2) * Math.PI * 2;
     const x = Math.cos(angle) * HUB_RADIUS;
     const z = Math.sin(angle) * HUB_RADIUS;
     const y = 500; // Between grid (y=400) and J-Machine (y=600)
@@ -181,7 +217,7 @@ export async function grid(env: Env): Promise<void> {
   console.log(`✅ Created ${hubs.length} routing hubs`);
   console.log('   Position: Ring formation between grid and J-Machine');
 
-  await pushSnapshot(env, 'HUBS-CREATED', '8 routing hubs form ring topology', {
+  await pushSnapshot(env, 'HUBS-CREATED', '2 routing hubs form ring topology', {
     hubCount: hubs.length,
     hubRadius: HUB_RADIUS,
     topology: 'ring'

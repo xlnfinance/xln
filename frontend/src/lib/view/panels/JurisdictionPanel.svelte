@@ -22,7 +22,7 @@
   let selectedJurisdictionName = $state<string | null>(null);
 
   // Tab state
-  let activeTab = $state<'overview' | 'balances' | 'mempool'>('overview');
+  let activeTab = $state<'overview' | 'balances'>('balances'); // Start with Balances
 
   // ═══════════════════════════════════════════════════════════════════════════
   //          TIME-TRAVEL AWARE DATA DERIVATION
@@ -241,14 +241,11 @@
 
   <!-- Tabs -->
   <div class="tabs">
+    <button class="tab" class:active={activeTab === 'balances'} onclick={() => activeTab = 'balances'}>
+      💰 Balances ({reserves.length + collaterals.length + mempool.length})
+    </button>
     <button class="tab" class:active={activeTab === 'overview'} onclick={() => activeTab = 'overview'}>
       Overview
-    </button>
-    <button class="tab" class:active={activeTab === 'balances'} onclick={() => activeTab = 'balances'}>
-      Balances ({reserves.length + collaterals.length})
-    </button>
-    <button class="tab" class:active={activeTab === 'mempool'} onclick={() => activeTab = 'mempool'}>
-      Mempool ({mempool.length})
     </button>
   </div>
 
@@ -328,7 +325,41 @@
       </div>
 
     {:else if activeTab === 'balances'}
-      <!-- Balances tab - Reserves + Collaterals + Disputes -->
+      <!-- Balances tab - Mempool (pending) + Reserves + Collaterals -->
+
+      <!-- Mempool Section (Pending - will be processed soon) -->
+      <div class="section mempool-section">
+        <div class="section-header">
+          <span class="section-title">⏳ Mempool (Pending Execution)</span>
+          <span class="count pending">{mempool.length}</span>
+        </div>
+        {#if mempool.length === 0}
+          <div class="empty">No pending transactions</div>
+        {:else}
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Type</th>
+                <th>From</th>
+                <th>To</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each mempool as tx, i}
+                <tr class="mempool-tx">
+                  <td class="tx-index">#{i + 1}</td>
+                  <td class="tx-type-cell">{tx.type || tx.kind || 'tx'}</td>
+                  <td class="mono">{tx.from || tx.entityId ? formatEntityId(tx.from || tx.entityId) : '-'}</td>
+                  <td class="mono">{tx.to || tx.targetEntityId ? formatEntityId(tx.to || tx.targetEntityId) : '-'}</td>
+                  <td>{tx.amount ? formatBalance(BigInt(tx.amount)) : '-'}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      </div>
 
       <!-- Reserves Section (R2C: Reserve-to-Collateral) -->
       <div class="section">
@@ -409,37 +440,6 @@
           <span class="count">0</span>
         </div>
         <div class="empty">No active disputes</div>
-      </div>
-
-    {:else if activeTab === 'mempool'}
-      <!-- Mempool tab -->
-      <div class="section">
-        <div class="section-header">
-          <span class="section-title">Pending Transactions</span>
-          <span class="count">{mempool.length}</span>
-        </div>
-        {#if mempool.length === 0}
-          <div class="empty">Mempool empty - no pending txs</div>
-        {:else}
-          <div class="storage-table">
-            {#each mempool as tx, i}
-              <div class="storage-row mempool-tx" role="row">
-                <span class="tx-index">#{i + 1}</span>
-                <span class="tx-type">{tx.type || tx.kind || 'unknown'}</span>
-                {#if tx.from || tx.entityId}
-                  <span class="tx-from">{formatEntityId(tx.from || tx.entityId)}</span>
-                {/if}
-                {#if tx.to || tx.targetEntityId}
-                  <span class="tx-arrow">→</span>
-                  <span class="tx-to">{formatEntityId(tx.to || tx.targetEntityId)}</span>
-                {/if}
-                {#if tx.amount}
-                  <span class="tx-amount">{formatBalance(BigInt(tx.amount))}</span>
-                {/if}
-              </div>
-            {/each}
-          </div>
-        {/if}
       </div>
     {/if}
   </div>
@@ -619,7 +619,39 @@
     max-width: 200px;
   }
 
+  /* Mempool section - visually distinct as "pending" */
   .mempool-section {
+    background: rgba(255, 193, 7, 0.05);
+    border: 1px solid rgba(255, 193, 7, 0.3);
+    margin-bottom: 16px; /* Space before Reserves section */
+  }
+
+  .mempool-section .section-header {
+    background: rgba(255, 193, 7, 0.1);
+  }
+
+  .count.pending {
+    background: rgba(255, 193, 7, 0.3);
+    color: #ffd700;
+  }
+
+  .mempool-tx {
+    background: rgba(255, 193, 7, 0.03);
+  }
+
+  .tx-index {
+    color: #888;
+    font-size: 10px;
+  }
+
+  .tx-type-cell {
+    font-family: 'Consolas', monospace;
+    font-size: 11px;
+    color: #ffd700;
+  }
+
+  /* Legacy mempool-section (keep for overview tab inline mempool) */
+  .info-row.mempool-section {
     flex-direction: column;
     align-items: flex-start;
     gap: 4px;

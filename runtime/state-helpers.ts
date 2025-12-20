@@ -213,6 +213,9 @@ export const captureSnapshot = (
 
   // Capture and reset frame logs
   const frameLogs = env.frameLogs ? [...env.frameLogs] : [];
+  if (frameLogs.length > 0) {
+    console.log(`📋 Capturing ${frameLogs.length} frame events into snapshot`);
+  }
   if (env.frameLogs) {
     env.frameLogs = [];
   }

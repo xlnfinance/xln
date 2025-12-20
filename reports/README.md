@@ -43,7 +43,7 @@ All reports follow: `YYYY-MM-DD-short-description.md`
 **Purpose:** Showcase quality, attract contributors, demonstrate tech
 **Contains:**
 - Clean, documented code
-- High-level architecture docs (vibepaper/)
+- High-level architecture docs (docs/)
 - Public-facing README
 - MIT/Apache license
 

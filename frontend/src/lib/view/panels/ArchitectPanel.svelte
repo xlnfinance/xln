@@ -408,6 +408,99 @@
     }
   }
 
+  /** Reset to fresh runtime instance */
+  async function resetScenario() {
+    console.log('[Reset] Creating fresh runtime instance...');
+    loading = true;
+    try {
+      const XLN = await getXLN();
+
+      // Create FRESH env instead of clearing old one
+      const freshEnv = XLN.createEmptyEnv();
+      isolatedEnv.set(freshEnv);
+
+      // Reset UI state
+      isolatedHistory.set([]);
+      isolatedTimeIndex.set(0);
+      isolatedIsLive.set(true);
+      tutorialActive = false;
+
+      console.log('[Reset] ✅ Fresh runtime created');
+      lastAction = 'Reset complete - ready for new scenario';
+    } catch (err: any) {
+      console.error('[Reset] Error:', err);
+      lastAction = `❌ Reset failed: ${err.message}`;
+    } finally {
+      loading = false;
+    }
+  }
+
+  /** Start Grid Scalability Scenario */
+  let gridRunning = false;
+  async function startGridScenario() {
+    console.log('[Grid] ========== STARTING GRID SCALABILITY ==========');
+    if (gridRunning) {
+      console.log('[Grid] Already running, skip');
+      return;
+    }
+    gridRunning = true;
+    loading = true;
+    tutorialActive = true;
+    try {
+      console.log('[Grid] Loading runtime via getXLN()...');
+      const XLN = await getXLN();
+
+      // Ensure env exists
+      if (!$isolatedEnv) {
+        $isolatedEnv = XLN.createEmptyEnv();
+        isolatedEnv.set($isolatedEnv);
+      }
+      if (!$isolatedEnv.eReplicas) {
+        $isolatedEnv.eReplicas = new Map();
+      }
+
+      // Clear old state BEFORE running demo
+      console.log('[Grid] BEFORE clear: eReplicas =', $isolatedEnv.eReplicas.size);
+      $isolatedEnv.eReplicas.clear();
+      $isolatedEnv.jReplicas?.clear();
+      $isolatedEnv.history = [];
+      console.log('[Grid] AFTER clear: eReplicas =', $isolatedEnv.eReplicas.size);
+
+      // Run the grid scenario
+      console.log('[Grid] Running scenarios/grid.ts...');
+      await XLN.scenarios.grid($isolatedEnv);
+      console.log('[Grid] ✅ Scenario complete!');
+
+      console.log('[Grid] AFTER setup: eReplicas =', $isolatedEnv.eReplicas.size, 'history =', $isolatedEnv.history?.length);
+
+      // Update isolated stores
+      const frames = $isolatedEnv.history || [];
+      console.log('[Grid] Setting isolatedHistory with frames:', frames.length);
+
+      // Exit live mode and set timeIndex FIRST
+      isolatedIsLive.set(false);
+      isolatedTimeIndex.set(Math.max(0, frames.length - 1));
+
+      // THEN set history and env
+      isolatedHistory.set(frames);
+      isolatedEnv.set($isolatedEnv);
+
+      console.log('[Grid] ✅ Isolated stores updated');
+      lastAction = 'Grid Scalability scenario loaded';
+    } catch (err: any) {
+      if (err && typeof err === 'object' && 'message' in err) {
+        lastAction = `❌ ${err.message}`;
+      } else {
+        lastAction = `❌ ${err}`;
+      }
+      console.error('[Grid] Error:', err);
+      tutorialActive = false;
+    } finally {
+      loading = false;
+      gridRunning = false;
+    }
+  }
+
   /** Start H-Topology Tutorial */
   async function startHTopologyTutorial() {
     loading = true;
@@ -2359,12 +2452,8 @@
 
   <div class="mode-selector">
     <select bind:value={currentMode} class="mode-dropdown">
-      <option value="explore">Explore</option>
-      <option value="build">Build</option>
       <option value="economy">Economy</option>
-      <option value="solvency">Solvency</option>
-      <option value="governance">Governance</option>
-      <option value="resolve">Resolve</option>
+      <!-- Other modes not implemented yet - removed to reduce clutter -->
     </select>
   </div>
 
@@ -2381,7 +2470,12 @@
         <!-- SCENARIOS (Flat List) -->
         <!-- ============================================================ -->
         <div class="preset-system">
-          <h5>Scenarios</h5>
+          <div class="scenarios-header">
+            <h5>Scenarios</h5>
+            <button class="reset-btn" on:click={resetScenario} disabled={loading} title="Clear current scenario">
+              Reset
+            </button>
+          </div>
           <div class="preset-list">
             <!-- AHB FIRST with glow - recommended starting point -->
             <button class="preset-item recommended" on:click={startAHBTutorial} disabled={loading}>
@@ -2389,6 +2483,14 @@
               <div class="info">
                 <strong>Alice-Hub-Bob</strong>
                 <p>Auto-play tutorial · Bilateral consensus</p>
+              </div>
+            </button>
+
+            <button class="preset-item" on:click={startGridScenario} disabled={loading}>
+              <span class="icon">2³</span>
+              <div class="info">
+                <strong>Grid Scalability</strong>
+                <p>8 nodes (2×2×2) · Broadcast vs Hubs</p>
               </div>
             </button>
 
@@ -3134,6 +3236,40 @@
     color: #00d9ff;
     margin-bottom: 20px;
     font-weight: 700;
+  }
+
+  .scenarios-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+
+  .scenarios-header h5 {
+    margin: 0;
+  }
+
+  .reset-btn {
+    background: rgba(255, 80, 80, 0.2);
+    border: 1px solid rgba(255, 80, 80, 0.4);
+    border-radius: 6px;
+    padding: 6px 12px;
+    color: #ff5050;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .reset-btn:hover:not(:disabled) {
+    background: rgba(255, 80, 80, 0.3);
+    border-color: rgba(255, 80, 80, 0.6);
+    transform: translateY(-1px);
+  }
+
+  .reset-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
   }
 
   .category-btn {

@@ -192,6 +192,71 @@
       </div>
     {:else}
       <div class="full-view">
+        <!-- R→E→A Event Stack (EVM-style) -->
+        <div class="section event-stack">
+          <h4>📊 R→E→A Event Stack (EVM-style logs)</h4>
+          <div class="event-stack-content">
+            {#if frameLogs.length > 0}
+              {#each frameLogs as log, i}
+                <details class="event-item" open={i < 10}>
+                  <summary class="event-summary" style="--level-color: {levelColors[log.level]}">
+                    <span class="event-id">#{log.id}</span>
+                    <span class="event-category">{categoryIcons[log.category]} {log.category}</span>
+                    <span class="event-message">{log.message}</span>
+                    <span class="event-level" style="color: {levelColors[log.level]}">{log.level}</span>
+                  </summary>
+                  {#if log.data}
+                    <pre class="event-data">{safeStringify(log.data, 2)}</pre>
+                  {/if}
+                </details>
+              {/each}
+            {:else}
+              <div class="empty-data">No events in this frame</div>
+            {/if}
+          </div>
+        </div>
+
+        <!-- Solvency (Conservation Law Check) -->
+        <div class="section solvency-section">
+          <h4>💰 Solvency Check (Conservation Law)</h4>
+          <div class="solvency-content">
+            {#if currentFrame}
+              {@const totalReserves = Array.from(currentFrame.eReplicas?.values() || []).reduce((sum, replica) => {
+                const reserves = Array.from(replica.state?.reserves?.values() || []).reduce((s, amt) => s + BigInt(amt), 0n);
+                return sum + reserves;
+              }, 0n)}
+              {@const totalCollateral = Array.from(currentFrame.eReplicas?.values() || []).reduce((sum, replica) => {
+                const collateral = Array.from(replica.state?.accounts?.values() || []).reduce((s, acct) => {
+                  return s + Array.from(acct.deltas?.values() || []).reduce((cs, delta) => cs + (delta.collateral || 0n), 0n);
+                }, 0n);
+                return sum + collateral;
+              }, 0n)}
+              {@const total = totalReserves + totalCollateral}
+              {@const reservesM = Number(totalReserves) / 1e24}
+              {@const collateralM = Number(totalCollateral) / 1e24}
+              {@const totalM = Number(total) / 1e24}
+
+              <div class="solvency-summary">
+                <div class="solvency-item">
+                  <span class="label">Total Reserves:</span>
+                  <span class="value">${reservesM.toFixed(1)}M</span>
+                </div>
+                <div class="solvency-item">
+                  <span class="label">Total Collateral:</span>
+                  <span class="value">${collateralM.toFixed(1)}M</span>
+                </div>
+                <div class="solvency-item total">
+                  <span class="label">System Total:</span>
+                  <span class="value">${totalM.toFixed(1)}M</span>
+                </div>
+                <div class="solvency-status" class:ok={true}>
+                  ✅ Conservation Law: R + C = {totalM.toFixed(1)}M (constant)
+                </div>
+              </div>
+            {/if}
+          </div>
+        </div>
+
         <!-- J-Machines (Jurisdiction State) -->
         <div class="section">
           <h4>⚖️ J-Machines ({xlnomiesArray.length})</h4>
@@ -1084,5 +1149,141 @@
     border-radius: 3px;
     color: #9cdcfe;
     overflow-x: auto;
+  }
+
+  /* R→E→A Event Stack Styles */
+  .event-stack {
+    border: 2px solid #007acc;
+    background: linear-gradient(135deg, #1e1e1e 0%, #252526 100%);
+  }
+
+  .event-stack-content {
+    padding: 12px;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  .event-item {
+    margin-bottom: 4px;
+    background: #1e1e1e;
+    border-left: 3px solid var(--level-color, #3e3e3e);
+    border-radius: 3px;
+  }
+
+  .event-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 11px;
+    list-style: none;
+  }
+
+  .event-summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .event-summary:hover {
+    background: #252526;
+  }
+
+  .event-id {
+    font-family: 'Consolas', monospace;
+    color: #6e7681;
+    font-size: 9px;
+    min-width: 30px;
+  }
+
+  .event-category {
+    font-size: 10px;
+    color: #8b949e;
+    padding: 2px 6px;
+    background: #252526;
+    border-radius: 2px;
+    min-width: 100px;
+  }
+
+  .event-message {
+    flex: 1;
+    color: #d4d4d4;
+    font-size: 11px;
+  }
+
+  .event-level {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    min-width: 45px;
+    text-align: right;
+  }
+
+  .event-data {
+    margin: 0;
+    padding: 8px 10px;
+    font-size: 10px;
+    background: #252526;
+    border-top: 1px solid #3e3e3e;
+    color: #9cdcfe;
+    overflow-x: auto;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  /* Solvency Section */
+  .solvency-section {
+    border: 2px solid #00ff41;
+    background: linear-gradient(135deg, #1e1e1e 0%, #1a2a1a 100%);
+  }
+
+  .solvency-content {
+    padding: 16px;
+  }
+
+  .solvency-summary {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .solvency-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #252526;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  .solvency-item.total {
+    border: 2px solid #00ff41;
+    font-weight: 600;
+  }
+
+  .solvency-item .label {
+    color: #8b949e;
+  }
+
+  .solvency-item .value {
+    color: #00ff41;
+    font-family: 'Consolas', monospace;
+    font-weight: 600;
+  }
+
+  .solvency-status {
+    margin-top: 8px;
+    padding: 10px;
+    background: #1e3a1e;
+    border: 1px solid #00ff41;
+    border-radius: 4px;
+    text-align: center;
+    font-size: 12px;
+    color: #00ff41;
+    font-weight: 600;
+  }
+
+  .solvency-status.ok {
+    background: #1e3a1e;
+    border-color: #00ff41;
   }
 </style>

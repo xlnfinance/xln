@@ -203,14 +203,19 @@ export interface XLNModule {
 
   // Runtime operations
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>;
-  runDemo: (env: Env) => Promise<Env>;
-  runDemoWrapper: () => Promise<void>;
+  // runDemo: REMOVED - use scenarios.ahb(env) or scenarios.grid(env) instead
 
   // Environment creation
   createEmptyEnv: () => Env;
 
-  // Prepopulation
-  prepopulate: (env: Env) => Promise<Env>;
+  // Scenarios namespace (replaces legacy prepopulate functions)
+  scenarios: {
+    ahb: (env: Env) => Promise<Env>;
+    grid: (env: Env) => Promise<Env>;
+    fullMechanics: (env: Env) => Promise<Env>;
+  };
+
+  // Deprecated aliases (backwards compatibility - will be removed)
   prepopulateAHB: (env: Env) => Promise<Env>;
   prepopulateFullMechanics: (env: Env) => Promise<Env>;
 

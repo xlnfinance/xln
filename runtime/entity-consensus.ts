@@ -186,7 +186,7 @@ export const applyEntityInput = async (
   env: Env,
   entityReplica: EntityReplica,
   entityInput: EntityInput,
-): Promise<{ newState: EntityState, outputs: EntityInput[] }> => {
+): Promise<{ newState: EntityState, outputs: EntityInput[], jOutputs: JInput[] }> => {
   // IMMUTABILITY: Clone replica at function start (fintech-safe, hacker-proof)
   // Prevents state mutations from escaping function scope
   const workingReplica = cloneEntityReplica(entityReplica);
@@ -218,14 +218,15 @@ export const applyEntityInput = async (
   // SECURITY: Validate all inputs
   if (!validateEntityInput(entityInput)) {
     log.error(`❌ Invalid input for ${entityInput.entityId}:${entityInput.signerId}`);
-    return { newState: workingReplica.state, outputs: [] };
+    return { newState: workingReplica.state, outputs: [], jOutputs: [] };
   }
   if (!validateEntityReplica(workingReplica)) {
     log.error(`❌ Invalid replica state for ${workingReplica.entityId}:${workingReplica.signerId}`);
-    return { newState: workingReplica.state, outputs: [] };
+    return { newState: workingReplica.state, outputs: [], jOutputs: [] };
   }
 
   const entityOutbox: EntityInput[] = [];
+  const jOutbox: JInput[] = []; // J-layer outputs
 
   // ⏰ Execute crontab tasks (periodic checks like account timeouts)
   const { executeCrontab, initCrontab } = await import('./entity-crontab');
@@ -285,7 +286,7 @@ export const applyEntityInput = async (
     const proposerId = workingReplica.state.config.validators[0];
     if (!proposerId) {
       logError("FRAME_CONSENSUS", `❌ No proposer found in validators: ${workingReplica.state.config.validators}`);
-      return { newState: workingReplica.state, outputs: entityOutbox };
+      return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox };
     }
 
     const txCount = workingReplica.mempool.length;
@@ -320,7 +321,7 @@ export const applyEntityInput = async (
           logError("FRAME_CONSENSUS", `❌ BYZANTINE: Commit frame doesn't match locked frame!`);
           logError("FRAME_CONSENSUS", `   Locked: ${workingReplica.lockedFrame.hash}`);
           logError("FRAME_CONSENSUS", `   Commit: ${entityInput.proposedFrame.hash}`);
-          return { newState: workingReplica.state, outputs: entityOutbox };
+          return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox };
         }
         console.log(`✅ Commit validation: matches locked frame ${workingReplica.lockedFrame.hash.slice(0,10)}`);
       }
@@ -332,10 +333,20 @@ export const applyEntityInput = async (
           logError("FRAME_CONSENSUS", `❌ BYZANTINE: Invalid signature format from ${signerId}`);
           logError("FRAME_CONSENSUS", `   Expected: ${expectedSig.slice(0,30)}...`);
           logError("FRAME_CONSENSUS", `   Received: ${signature.slice(0,30)}...`);
-          return { newState: workingReplica.state, outputs: entityOutbox };
+          return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox };
         }
       }
       console.log(`✅ All ${entityInput.precommits.size} signatures validated for frame ${entityInput.proposedFrame.hash.slice(0,10)}`);
+
+      // Emit frame commit event
+      env.emit('EntityFrameCommitted', {
+        entityId: entityInput.entityId,
+        signerId: workingReplica.signerId,
+        height: workingReplica.state.height + 1,
+        frameHash: entityInput.proposedFrame.hash,
+        txCount: entityInput.proposedFrame.txs.length,
+        signatures: entityInput.precommits.size,
+      });
 
       // Apply the committed frame with incremented height
       workingReplica.state = {
@@ -362,7 +373,7 @@ export const applyEntityInput = async (
         );
 
       // Return early - commit notifications don't trigger further processing
-      return { newState: workingReplica.state, outputs: entityOutbox };
+      return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox };
     }
   }
 
@@ -396,7 +407,7 @@ export const applyEntityInput = async (
       const proposerId = config.validators[0];
       if (!proposerId) {
         logError("FRAME_CONSENSUS", `❌ No proposer found in validators: ${config.validators}`);
-        return { newState: workingReplica.state, outputs: entityOutbox };
+        return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox };
       }
       console.log(
         `🔍 PROPOSER: [${timestamp}] ${workingReplica.signerId} sending precommit to ${proposerId} for entity ${entityInput.entityId.slice(0, 10)}, proposal ${frameHash}, sig: ${frameSignature.slice(0, 20)}...`,
@@ -419,7 +430,7 @@ export const applyEntityInput = async (
     for (const [signerId, signature] of entityInput.precommits) {
       if (detectByzantineFault(workingReplica.proposal.signatures, signerId, signature)) {
         log.error(`❌ Rejecting Byzantine input from ${signerId}`);
-        return { newState: workingReplica.state, outputs: entityOutbox }; // Return early, don't process malicious input
+        return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox }; // Return early, don't process malicious input
       }
       workingReplica.proposal.signatures.set(signerId, signature);
     }
@@ -435,7 +446,7 @@ export const applyEntityInput = async (
     // SECURITY: Validate voting power
     if (!validateVotingPower(totalPower)) {
       log.error(`❌ Invalid voting power calculation: ${totalPower}`);
-      return { newState: workingReplica.state, outputs: entityOutbox };
+      return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox };
     }
 
     if (DEBUG) {
@@ -533,7 +544,7 @@ export const applyEntityInput = async (
     if (isSingleSigner) {
       console.log(`🚀 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
       // For single signer entities, directly apply transactions without consensus
-      const { newState: newEntityState, outputs: frameOutputs } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool);
+      const { newState: newEntityState, outputs: frameOutputs, jOutputs: frameJOutputs } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool);
       workingReplica.state = {
         ...newEntityState,
         height: workingReplica.state.height + 1,
@@ -541,7 +552,7 @@ export const applyEntityInput = async (
 
       // Add any outputs generated by entity transactions to the outbox
       entityOutbox.push(...frameOutputs);
-      // SINGLE-SIGNER-OUTPUTS removed - too noisy
+      jOutbox.push(...frameJOutputs); // CRITICAL: Collect J-outputs!
 
       // Clear mempool after direct application
       workingReplica.mempool.length = 0;
@@ -551,7 +562,8 @@ export const applyEntityInput = async (
           `    ⚡ Single signer entity: transactions applied directly, height: ${workingReplica.state.height}`,
         );
       // SINGLE-SIGNER-RETURN removed - too noisy
-      return { newState: workingReplica.state, outputs: entityOutbox }; // Skip the full consensus process
+      console.log(`🔥 SINGLE-SIGNER RETURN: entityOutbox=${entityOutbox.length}, jOutbox=${jOutbox.length}`);
+      return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox }; // Skip the full consensus process
     }
 
     if (DEBUG)
@@ -570,7 +582,7 @@ export const applyEntityInput = async (
     // SECURITY: Validate timestamp
     if (!validateTimestamp(newTimestamp, env.timestamp)) {
       log.error(`❌ Invalid proposal timestamp: ${newTimestamp}`);
-      return { newState: workingReplica.state, outputs: entityOutbox };
+      return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox };
     }
 
     const frameHash = `frame_${workingReplica.state.height + 1}_${newTimestamp}`;
@@ -612,7 +624,7 @@ export const applyEntityInput = async (
     const proposerId = workingReplica.state.config.validators[0];
     if (!proposerId) {
       logError("FRAME_CONSENSUS", `❌ No proposer found in validators: ${workingReplica.state.config.validators}`);
-      return { newState: workingReplica.state, outputs: entityOutbox };
+      return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox };
     }
     console.log(`🔥 BOB-TO-ALICE: Bob sending ${workingReplica.mempool.length} txs to proposer ${proposerId}`);
     console.log(
@@ -671,14 +683,14 @@ export const applyEntityInput = async (
     }
   });
 
-  return { newState: workingReplica.state, outputs: entityOutbox };
+  return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox };
 };
 
 export const applyEntityFrame = async (
   env: Env,
   entityState: EntityState,
   entityTxs: EntityTx[],
-): Promise<{ newState: EntityState, outputs: EntityInput[] }> => {
+): Promise<{ newState: EntityState, outputs: EntityInput[], jOutputs: JInput[] }> => {
   console.log(`🎯 APPLY-ENTITY-FRAME: Processing ${entityTxs.length} transactions`);
   entityTxs.forEach((tx, index) => {
     console.log(`🎯 Transaction ${index}: type="${tx.type}", data=`, tx.data);
@@ -686,14 +698,16 @@ export const applyEntityFrame = async (
 
   let currentEntityState = entityState;
   const allOutputs: EntityInput[] = [];
+  const allJOutputs: JInput[] = []; // Collect J-outputs
 
   // Track accounts that need frame proposals during this processing round
   const proposableAccounts = new Set<string>();
 
   for (const entityTx of entityTxs) {
-    const { newState, outputs } = await applyEntityTx(env, currentEntityState, entityTx);
+    const { newState, outputs, jOutputs } = await applyEntityTx(env, currentEntityState, entityTx);
     currentEntityState = newState;
     allOutputs.push(...outputs);
+    if (jOutputs) allJOutputs.push(...jOutputs);
 
     // Debug: Log all account mempools after each tx
     if (entityTx.type === 'extendCredit') {
@@ -840,7 +854,7 @@ export const applyEntityFrame = async (
     }
   }
 
-  return { newState: currentEntityState, outputs: allOutputs };
+  return { newState: currentEntityState, outputs: allOutputs, jOutputs: allJOutputs };
 };
 
 // === HELPER FUNCTIONS ===

@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Repository Restructure** - Essence-driven naming
-  - `/docs` → `/vibepaper` (eternal documentation)
+  - `/docs` → `/docs` (eternal documentation)
   - `/src` → `/runtime` (consensus engine)
   - `/contracts` → `/jurisdictions` (multi-chain contracts)
   - `/scenarios` → `/worlds` (economic simulations)
@@ -56,7 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 - readme.md - Updated with new structure + roadmap
-- /vibepaper/xlnview.md - Panel architecture spec
+- /docs/xlnview.md - Panel architecture spec
 - /simnet/readme.md - BrowserVM setup guide
 - /proofs/readme.md - Test strategy
 - restructure.md - Migration notes
