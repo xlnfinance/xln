@@ -521,6 +521,16 @@ export async function handleAccountInput(
 
     console.log(`✅ CONSENSUS-SUCCESS: Both sides computed identical state for frame ${receivedFrame.height}`);
 
+    // Emit bilateral consensus event
+    env.emit('BilateralFrameCommitted', {
+      fromEntity: input.fromEntityId,
+      toEntity: accountMachine.proofHeader.fromEntity,
+      height: receivedFrame.height,
+      txCount: receivedFrame.accountTxs.length,
+      tokenIds: receivedFrame.tokenIds,
+      stateHash: receivedFrame.stateHash,
+    });
+
     // Commit frame
     accountMachine.deltas = clonedMachine.deltas;
 

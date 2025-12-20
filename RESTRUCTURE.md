@@ -7,7 +7,7 @@
 ```
 OLD                  →  NEW                   ESSENCE
 ─────────────────────────────────────────────────────────────────
-/docs                →  /vibepaper            Philosophy, vision, specs
+/docs                →  /docs            Philosophy, vision, specs
 /src                 →  /runtime              Consensus engine + state machines
 /contracts           →  /jurisdictions        On-chain J-machine layer
 /scenarios           →  /worlds               Economic simulations
@@ -17,7 +17,7 @@ OLD                  →  NEW                   ESSENCE
 
 ## Why
 
-**vibepaper/** - Documentation is energy, not bureaucracy. This is where the vibe lives.
+**docs/** - Documentation is energy, not bureaucracy. This is where the vibe lives.
 
 **runtime/** - Pure consensus. Entity machines, account consensus, deterministic ticks. What it DOES.
 
@@ -43,7 +43,7 @@ OLD                  →  NEW                   ESSENCE
 - `bun run check` → validates `runtime/` + `frontend/`
 - Contract scripts → use `cd jurisdictions`
 - Scenario loading → fetches from `/worlds/`
-- Docs → live in `vibepaper/`
+- Docs → live in `docs/`
 
 ## New Structure Benefits
 
@@ -51,6 +51,6 @@ OLD                  →  NEW                   ESSENCE
 2. **Multi-Chain Ready**: "jurisdictions" (plural) anticipates L2s
 3. **Modular UI**: `/view` components, `/frontend` app that uses them
 4. **BrowserVM Home**: `/simnet` for offline simulation configs
-5. **Poetic**: "vibepaper" > "docs", "worlds" > "scenarios"
+5. **Poetic**: "docs" > "docs", "worlds" > "scenarios"
 
 **Status:** COMPLETE - Ready to build.

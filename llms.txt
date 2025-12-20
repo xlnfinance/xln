@@ -149,7 +149,7 @@ xln/
     snapshot-coder.ts            240 lines - Deterministic RLP serialization
     evm.ts                       980 lines - Blockchain integration
 
-  vibepaper/
+  docs/
     emc2.md                      33 lines - ⚡ Energy-Mass-Credit equivalence (CRITICAL PATH)
     docs/12_invariant.md         80 lines - ⚡ RCPAN innovation (CRITICAL PATH)
     docs/jea.md                  134 lines - ⚡ Jurisdiction-Entity-Account model (CRITICAL PATH)
@@ -9982,7 +9982,7 @@ export const submitReserveToReserve = async (jurisdiction: JurisdictionConfig, f
 };
 
 
-//vibepaper/emc2.md (33 lines)
+//docs/emc2.md (33 lines)
 Δ
 
 −Lₗ ≤ Δ ≤ C + Lᵣ
@@ -10017,7 +10017,7 @@ flexible credit-collateral security model
 banking-like UX
 
 
-//vibepaper/docs/12_invariant.md (80 lines)
+//docs/docs/12_invariant.md (80 lines)
 # 1.2 RCPAN Invariant 
 
 [pairing: Pye Corner Audio - The Simplest Equation](https://www.youtube.com/watch?v=Vp0a8tdzJmk) (but yes, technically it's inequality)
@@ -10099,7 +10099,7 @@ Follow for news, analysis, and a verification-first roadmap (proof sketch, bench
 
 🔗 https://github.com/xlnfinance/xln
 
-//vibepaper/docs/jea.md (134 lines)
+//docs/docs/jea.md (134 lines)
 🏛️ JEA: Jurisdiction-Entity-Account Model
 
 “JEA is not just a technical pattern — it’s a legal operating system for programmable institutions.”
@@ -10235,7 +10235,7 @@ JEA is to blockchain what OSI was to networking — a layered abstraction that m
 
 “You don’t need one chain to rule them all. You just need a structure where trust can be scoped, verified, and proven.”
 
-//vibepaper/docs/11_Jurisdiction_Machine.md (43 lines)
+//docs/docs/11_Jurisdiction_Machine.md (43 lines)
 # 1.1 Jurisdiction Machine / J-machine
 
 ## 1.1.1 TradFi J-machine
@@ -10280,7 +10280,7 @@ We generalize all layer2 actors bounded to specific J-machine as E-machines. Thi
 Namely, in TradFi we superset {RTGS, Central Banks and Central Securities Depositaries} as a single-signer J-machine. Likewise, we claim "blockchains" or "cryptocurrencies" should have never existed as buzzwords: it's a multi-signer J-machine.
  
 
-//vibepaper/priorart.md (62 lines)
+//docs/priorart.md (62 lines)
 # Prior Art
 
 Xln is built on shoulders of giants.

@@ -11,7 +11,7 @@
 
 **Contains:**
 - ✅ Production code (runtime/, jurisdictions/, frontend/)
-- ✅ Public documentation (vibepaper/, CLAUDE.md, README.md)
+- ✅ Public documentation (docs/, CLAUDE.md, README.md)
 - ✅ Tests (frontend/tests/, but not _reports/)
 - ✅ MIT/Apache license
 - ❌ No _reports/ (competitive intelligence)
@@ -78,7 +78,7 @@ git push origin main  # Push to public GitHub
 |------|--------|---------|--------|
 | runtime.ts | ✅ | ✅ | Core code = showcase quality |
 | Depository.sol | ✅ | ✅ | Smart contracts = open source |
-| vibepaper/ | ✅ | ✅ | Architecture docs = attract talent |
+| docs/ | ✅ | ✅ | Architecture docs = attract talent |
 | CLAUDE.md | ✅ | ✅ | Shows how we work = transparency |
 | _reports/seo/ | ❌ | ✅ | Competitive analysis = private |
 | _scripts/deploy.sh | ❌ | ✅ | Server secrets = private |

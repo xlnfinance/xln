@@ -364,12 +364,20 @@ export async function broadcastBatch(
     if (browserVM) {
 
       // Transform batch to BrowserVM format
+      console.log(`🔍 BATCH TRANSFORM: reserveToReserve array length: ${jBatchState.batch.reserveToReserve.length}`);
+      if (jBatchState.batch.reserveToReserve.length > 0) {
+        console.log(`🔍 BATCH TRANSFORM: first R2R:`, jBatchState.batch.reserveToReserve[0]);
+      }
+
       const browserVMBatch = {
-        reserveToReserve: jBatchState.batch.reserveToReserve.map(r => ({
-          toEntity: r.receivingEntity,
-          tokenId: r.tokenId,
-          amount: r.amount,
-        })),
+        reserveToReserve: jBatchState.batch.reserveToReserve.map(r => {
+          console.log(`🔍 TRANSFORM R2R: receivingEntity=${r.receivingEntity?.slice(0,10)}, toEntity=${r.receivingEntity?.slice(0,10)}`);
+          return {
+            toEntity: r.receivingEntity,
+            tokenId: r.tokenId,
+            amount: r.amount,
+          };
+        }),
         reserveToCollateral: jBatchState.batch.reserveToCollateral.flatMap(r =>
           r.pairs.map(p => ({
             counterparty: p.entity,
@@ -384,6 +392,7 @@ export async function broadcastBatch(
         })),
       };
 
+      console.log(`🔍 BEFORE processBatch:`, browserVMBatch.reserveToReserve);
       const events = await browserVM.processBatch(entityId, browserVMBatch);
       console.log(`   ✅ BrowserVM: ${events.length} events`);
 

@@ -11,7 +11,7 @@ Byzantine consensus meets Bloomberg Terminal meets VR. Run complete economic sim
 
 ```
 Core:
-  /vibepaper/           Philosophy, architecture, eternal specs
+  /docs/           Philosophy, architecture, eternal specs
   /runtime/             Consensus engine (BFT entity + bilateral account state machines)
   /jurisdictions/       Solidity contracts (Ethereum, Polygon, Arbitrum, ...)
   /worlds/              Economic simulations (.xln.js scenario files)
@@ -123,7 +123,7 @@ bun test-ethereumjs-vm.ts       # BrowserVM smoke test
 
 **Tech:** Dockview (2.8k stars), Svelte reactivity, localStorage persistence
 
-**Source:** `/view/` + `/vibepaper/xlnview.md`
+**Source:** `/view/` + `/docs/xlnview.md`
 
 ---
 
@@ -158,7 +158,7 @@ bun test-ethereumjs-vm.ts
 
 ## 📚 Documentation
 
-### Forever (vibepaper/)
+### Forever (docs/)
 - `xlnview.md` - Panel architecture + BrowserVM integration
 - `jea.md` - Jurisdiction-Entity-Account model
 - `governance-architecture.md` - Multi-sig voting system
@@ -173,7 +173,7 @@ bun test-ethereumjs-vm.ts
 
 ## 🔥 Recent Updates (Oct 2025)
 
-- ✅ **Repository restructure** - Essence-driven naming (vibepaper, runtime, jurisdictions, worlds)
+- ✅ **Repository restructure** - Essence-driven naming (docs, runtime, jurisdictions, worlds)
 - ✅ **BrowserVM integration** - Offline simnet with @ethereumjs/vm
 - ✅ **Panel workspace** - Dockview-based Bloomberg Terminal UX
 - ✅ **WebGPU/WebGL switch** - Runtime renderer toggle (future-proof)
@@ -223,11 +223,11 @@ bun test-ethereumjs-vm.ts
 
 **Start here:**
 1. `workflow.md` - Daily dev commands
-2. `/vibepaper/xlnview.md` - Panel architecture + BrowserVM
-3. `/vibepaper/jea.md` - Jurisdiction-Entity-Account model
+2. `/docs/xlnview.md` - Panel architecture + BrowserVM
+3. `/docs/jea.md` - Jurisdiction-Entity-Account model
 4. `/simnet/readme.md` - Offline blockchain setup
 
-**For deep dives:** `/vibepaper/sessions/`
+**For deep dives:** `/docs/sessions/`
 
 ---
 

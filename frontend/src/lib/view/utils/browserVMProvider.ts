@@ -539,11 +539,25 @@ export class BrowserVMProvider {
 
     const allEvents: EVMEvent[] = [];
 
-    // Execute R2R (Reserve to Reserve) transfers
+    // Execute R2R (Reserve to Reserve) transfers OR mints
     if (batch.reserveToReserve) {
       for (const r2r of batch.reserveToReserve) {
-        const events = await this.reserveToReserve(entityId, r2r.toEntity, r2r.tokenId, r2r.amount);
-        allEvents.push(...events);
+        // Use "toEntity" field (converted from receivingEntity by j-batch.ts)
+        console.log(`[BrowserVM] R2R: entityId=${entityId?.slice(0,10)}, toEntity=${r2r.toEntity?.slice(0,10)}, token=${r2r.tokenId}, amount=${r2r.amount}`);
+
+        // If toEntity = entityId, this is a MINT (no sender)
+        // Otherwise it's a transfer FROM entityId TO toEntity
+        if (r2r.toEntity === entityId) {
+          // MINT: Call debugFundReserves (mints from Depository)
+          console.log(`[BrowserVM] MINT detected (toEntity === entityId)`);
+          const events = await this.debugFundReserves(r2r.toEntity, r2r.tokenId, r2r.amount);
+          allEvents.push(...events);
+        } else {
+          // R2R: Transfer from entityId to toEntity
+          console.log(`[BrowserVM] R2R transfer`);
+          const events = await this.reserveToReserve(entityId, r2r.toEntity, r2r.tokenId, r2r.amount);
+          allEvents.push(...events);
+        }
       }
     }
 

@@ -78,7 +78,7 @@ function generateSemanticOverview(contractsDir, runtimeDir, docsDir, worldsDir, 
 
   CORE_FILES.docs.forEach(file => {
     const content = readFileContent(docsDir, file);
-    if (content) fileSizes[`vibepaper/${file}`] = countLines(content);
+    if (content) fileSizes[`docs/${file}`] = countLines(content);
   });
 
   CORE_FILES.worlds.forEach(file => {
@@ -243,12 +243,12 @@ xln/
     snapshot-coder.ts            ${fileSizes['runtime/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
     evm.ts                       ${fileSizes['runtime/evm.ts'] || '?'} lines - Blockchain integration
 
-  vibepaper/
-    emc2.md                      ${fileSizes['vibepaper/emc2.md'] || '?'} lines - ⚡ Energy-Mass-Credit equivalence (CRITICAL PATH)
-    docs/12_invariant.md         ${fileSizes['vibepaper/docs/12_invariant.md'] || '?'} lines - ⚡ RCPAN innovation (CRITICAL PATH)
-    docs/JEA.md                  ${fileSizes['vibepaper/docs/JEA.md'] || '?'} lines - ⚡ Jurisdiction-Entity-Account model (CRITICAL PATH)
-    docs/11_Jurisdiction_Machine.md  ${fileSizes['vibepaper/docs/11_Jurisdiction_Machine.md'] || '?'} lines - Architecture deep-dive
-    PriorArt.md                  ${fileSizes['vibepaper/PriorArt.md'] || '?'} lines - Why Lightning/rollups don't work
+  docs/
+    emc2.md                      ${fileSizes['docs/emc2.md'] || '?'} lines - ⚡ Energy-Mass-Credit equivalence (CRITICAL PATH)
+    docs/12_invariant.md         ${fileSizes['docs/docs/12_invariant.md'] || '?'} lines - ⚡ RCPAN innovation (CRITICAL PATH)
+    docs/JEA.md                  ${fileSizes['docs/docs/JEA.md'] || '?'} lines - ⚡ Jurisdiction-Entity-Account model (CRITICAL PATH)
+    docs/11_Jurisdiction_Machine.md  ${fileSizes['docs/docs/11_Jurisdiction_Machine.md'] || '?'} lines - Architecture deep-dive
+    PriorArt.md                  ${fileSizes['docs/PriorArt.md'] || '?'} lines - Why Lightning/rollups don't work
 
   worlds/
     architecture.md              ${fileSizes['worlds/architecture.md'] || '?'} lines - Scenario architecture, EntityInput primitives
@@ -282,8 +282,11 @@ function generateContext() {
   const projectRoot = path.resolve(__dirname, '../../');
   const contractsDir = path.join(projectRoot, 'jurisdictions/contracts');
   const runtimeDir = path.join(projectRoot, 'runtime');
-  const docsDir = path.join(projectRoot, 'vibepaper');
+  const docsDir = path.join(projectRoot, 'docs');
   const worldsDir = path.join(projectRoot, 'worlds');
+
+  // Check for --sol flag
+  const solOnly = process.argv.includes('--sol');
 
   // Track file sizes for token breakdown
   const fileStats = [];
@@ -301,35 +304,38 @@ function generateContext() {
     }
   });
 
-  CORE_FILES.runtime.forEach(file => {
-    const content = readFileContent(runtimeDir, file);
-    if (content) {
-      const lines = countLines(content);
-      const bytes = Buffer.byteLength(content, 'utf8');
-      fileStats.push({ file: `runtime/${file}`, lines, bytes });
-      allFiles.push({ path: `runtime/${file}`, content, lines });
-    }
-  });
+  // Skip runtime/docs/worlds if --sol flag is present
+  if (!solOnly) {
+    CORE_FILES.runtime.forEach(file => {
+      const content = readFileContent(runtimeDir, file);
+      if (content) {
+        const lines = countLines(content);
+        const bytes = Buffer.byteLength(content, 'utf8');
+        fileStats.push({ file: `runtime/${file}`, lines, bytes });
+        allFiles.push({ path: `runtime/${file}`, content, lines });
+      }
+    });
 
-  CORE_FILES.docs.forEach(file => {
-    const content = readFileContent(docsDir, file);
-    if (content) {
-      const lines = countLines(content);
-      const bytes = Buffer.byteLength(content, 'utf8');
-      fileStats.push({ file: `vibepaper/${file}`, lines, bytes });
-      allFiles.push({ path: `vibepaper/${file}`, content, lines });
-    }
-  });
+    CORE_FILES.docs.forEach(file => {
+      const content = readFileContent(docsDir, file);
+      if (content) {
+        const lines = countLines(content);
+        const bytes = Buffer.byteLength(content, 'utf8');
+        fileStats.push({ file: `docs/${file}`, lines, bytes });
+        allFiles.push({ path: `docs/${file}`, content, lines });
+      }
+    });
 
-  CORE_FILES.worlds.forEach(file => {
-    const content = readFileContent(worldsDir, file);
-    if (content) {
-      const lines = countLines(content);
-      const bytes = Buffer.byteLength(content, 'utf8');
-      fileStats.push({ file: `worlds/${file}`, lines, bytes });
-      allFiles.push({ path: `worlds/${file}`, content, lines });
-    }
-  });
+    CORE_FILES.worlds.forEach(file => {
+      const content = readFileContent(worldsDir, file);
+      if (content) {
+        const lines = countLines(content);
+        const bytes = Buffer.byteLength(content, 'utf8');
+        fileStats.push({ file: `worlds/${file}`, lines, bytes });
+        allFiles.push({ path: `worlds/${file}`, content, lines });
+      }
+    });
+  }
 
   // Calculate total bytes for all content
   const totalBytes = fileStats.reduce((sum, f) => sum + f.bytes, 0);
@@ -347,9 +353,13 @@ function generateContext() {
   return { output, fileStats };
 }
 
+// Check for --sol flag
+const solOnly = process.argv.includes('--sol');
+
 // Generate and write
 const { output: context, fileStats } = generateContext();
-const outputPath = path.join(__dirname, '../../frontend/static/llms.txt');
+const outputFilename = solOnly ? 'llms_sol.txt' : 'llms.txt';
+const outputPath = path.join(__dirname, '../../frontend/static/', outputFilename);
 
 // Ensure directory exists
 const outputDir = path.dirname(outputPath);
@@ -365,9 +375,9 @@ const bytes = Buffer.byteLength(context, 'utf8');
 const kb = (bytes / 1024).toFixed(1);
 const tokensTotal = Math.round(bytes / 3.5);
 
-console.log('✅ llms.txt generated');
+console.log(`✅ ${outputFilename} generated`);
 console.log(`📊 ${lines.toLocaleString()} lines, ${kb} KB, ~${tokensTotal.toLocaleString()} tokens`);
-console.log(`🌐 xln.finance/llms.txt`);
+console.log(`🌐 xln.finance/${outputFilename}`);
 console.log(`📁 Contracts: ${CORE_FILES.contracts.length} | Runtime: ${CORE_FILES.runtime.length} | Docs: ${CORE_FILES.docs.length} | Worlds: ${CORE_FILES.worlds.length}`);
 
 // Token breakdown by file (top 15)

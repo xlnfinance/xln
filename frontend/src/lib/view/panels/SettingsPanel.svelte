@@ -10,6 +10,7 @@
   import { onMount, onDestroy } from 'svelte';
   import type { Writable } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
+  import ConsolePanel from './ConsolePanel.svelte';
 
   // Props (isolated stores - reserved for future time-travel settings UI)
   export let isolatedEnv: Writable<any>; void isolatedEnv;
@@ -101,7 +102,12 @@
   };
 
   let settings: ViewSettings = { ...DEFAULT_SETTINGS };
-  let activeCategory: 'scene' | 'camera' | 'entities' | 'effects' | 'performance' = 'scene';
+  let activeCategory: 'scene' | 'camera' | 'entities' | 'effects' | 'performance' | 'console' | 'layout' = 'scene';
+
+  // Layout config state
+  let layoutJson = '';
+  let layoutError = '';
+  let layoutSuccess = '';
 
   // Load settings from localStorage on mount
   async function loadSettings() {
@@ -173,6 +179,117 @@
     panelBridge.emit('camera:focus', { target: { x: 0, y: 0, z: 0 } });
   }
 
+  // Layout management functions
+  function exportLayout() {
+    try {
+      // Get dockview instance from window (exposed by View.svelte)
+      const dockview = (window as any).__dockview_instance;
+      if (!dockview) {
+        layoutError = 'Dockview not available';
+        return;
+      }
+
+      // Export layout + camera settings
+      const config = {
+        version: '1.0.0',
+        timestamp: new Date().toISOString(),
+        dockview: dockview.toJSON(),
+        camera: {
+          position: liveCameraState.position,
+          target: liveCameraState.target,
+          distance: liveCameraState.distance,
+        },
+        settings: settings,
+      };
+
+      layoutJson = JSON.stringify(config, null, 2);
+      layoutSuccess = '✅ Layout exported! Copy from textarea below.';
+      layoutError = '';
+    } catch (err) {
+      layoutError = `Export failed: ${err}`;
+      layoutSuccess = '';
+    }
+  }
+
+  function importLayout() {
+    try {
+      const dockview = (window as any).__dockview_instance;
+      if (!dockview) {
+        layoutError = 'Dockview not available';
+        return;
+      }
+
+      const config = JSON.parse(layoutJson);
+
+      // Restore dockview layout
+      if (config.dockview) {
+        dockview.fromJSON(config.dockview);
+      }
+
+      // Restore camera
+      if (config.camera) {
+        panelBridge.emit('camera:restore', config.camera);
+      }
+
+      // Restore settings
+      if (config.settings) {
+        settings = { ...DEFAULT_SETTINGS, ...config.settings };
+        saveSettings();
+        panelBridge.emit('settings:reset', {});
+      }
+
+      layoutSuccess = '✅ Layout imported successfully!';
+      layoutError = '';
+    } catch (err) {
+      layoutError = `Import failed: ${err instanceof Error ? err.message : String(err)}`;
+      layoutSuccess = '';
+    }
+  }
+
+  function saveLayoutToLocalStorage() {
+    try {
+      const dockview = (window as any).__dockview_instance;
+      if (!dockview) {
+        layoutError = 'Dockview not available';
+        return;
+      }
+
+      const config = {
+        version: '1.0.0',
+        timestamp: new Date().toISOString(),
+        dockview: dockview.toJSON(),
+        camera: {
+          position: liveCameraState.position,
+          target: liveCameraState.target,
+          distance: liveCameraState.distance,
+        },
+        settings: settings,
+      };
+
+      localStorage.setItem('xln-workspace-layout', JSON.stringify(config));
+      layoutSuccess = '✅ Layout saved to browser storage!';
+      layoutError = '';
+    } catch (err) {
+      layoutError = `Save failed: ${err}`;
+    }
+  }
+
+  function loadLayoutFromLocalStorage() {
+    try {
+      const stored = localStorage.getItem('xln-workspace-layout');
+      if (!stored) {
+        layoutError = 'No saved layout found';
+        return;
+      }
+
+      layoutJson = stored; // Don't parse - it's already a JSON string
+      layoutSuccess = '✅ Layout loaded! Click Import to apply.';
+      layoutError = '';
+    } catch (err) {
+      layoutError = `Load failed: ${err}`;
+    }
+  }
+
   // Load on mount
   loadSettings();
 </script>
@@ -214,6 +331,18 @@
       on:click={() => activeCategory = 'performance'}
     >
        Performance
+    </button>
+    <button
+      class:active={activeCategory === 'console'}
+      on:click={() => activeCategory = 'console'}
+    >
+      📋 Console
+    </button>
+    <button
+      class:active={activeCategory === 'layout'}
+      on:click={() => activeCategory = 'layout'}
+    >
+      📐 Layout
     </button>
   </div>
 
@@ -587,6 +716,79 @@
           <span>Show FPS & Stats Overlay</span>
         </label>
       </div>
+
+    {:else if activeCategory === 'console'}
+      <h4>📋 Console Viewer</h4>
+      <p style="font-size: 12px; color: #888; margin-bottom: 16px;">
+        Real-time console output viewer (useful for VR browsers without DevTools)
+      </p>
+
+      <!-- Embed ConsolePanel content here -->
+      <div class="console-embed">
+        <ConsolePanel
+          {isolatedEnv}
+          {isolatedHistory}
+          {isolatedTimeIndex}
+        />
+      </div>
+
+    {:else if activeCategory === 'layout'}
+      <h4>📐 Workspace Layout Manager</h4>
+      <p style="font-size: 12px; color: #888; margin-bottom: 16px;">
+        Export/import complete workspace configuration: panel sizes, tab order, camera position, and all settings.
+      </p>
+
+      <!-- Action buttons -->
+      <div class="layout-actions">
+        <button class="action-btn primary" on:click={exportLayout}>
+          📤 Export Current Layout
+        </button>
+        <button class="action-btn" on:click={saveLayoutToLocalStorage}>
+          💾 Save to Browser
+        </button>
+        <button class="action-btn" on:click={loadLayoutFromLocalStorage}>
+          📂 Load from Browser
+        </button>
+        <button class="action-btn success" on:click={importLayout}>
+          📥 Import & Apply
+        </button>
+      </div>
+
+      <!-- Status messages -->
+      {#if layoutSuccess}
+        <div class="status-message success">{layoutSuccess}</div>
+      {/if}
+      {#if layoutError}
+        <div class="status-message error">{layoutError}</div>
+      {/if}
+
+      <!-- Layout config textarea -->
+      <div class="setting-group">
+        <label>
+          <span style="font-size: 13px; font-weight: 500;">Layout Configuration JSON</span>
+          <p style="font-size: 11px; color: #888; margin: 4px 0 8px;">
+            Copy this JSON to save your layout. Paste here and click "Import & Apply" to restore.
+          </p>
+          <textarea
+            bind:value={layoutJson}
+            placeholder="Exported layout JSON will appear here..."
+            rows="20"
+            style="width: 100%; font-family: 'Consolas', monospace; font-size: 11px; background: #252526; color: #9cdcfe; border: 1px solid #3e3e3e; border-radius: 4px; padding: 12px;"
+          ></textarea>
+        </label>
+      </div>
+
+      <!-- What's included -->
+      <div class="layout-info">
+        <h5 style="font-size: 12px; color: #ccc; margin: 16px 0 8px;">Included in Layout:</h5>
+        <ul style="font-size: 11px; color: #888; margin: 0; padding-left: 20px;">
+          <li>Panel sizes and positions</li>
+          <li>Tab order and active tab</li>
+          <li>Camera position, target, and distance</li>
+          <li>All visual settings (grid, labels, effects, etc.)</li>
+          <li>Performance toggles (renderer, anti-alias, etc.)</li>
+        </ul>
+      </div>
     {/if}
   </div>
 </div>
@@ -608,6 +810,77 @@
     align-items: center;
     padding: 16px;
     border-bottom: 1px solid #333;
+  }
+
+  .console-embed {
+    width: 100%;
+    height: 500px;
+    border: 1px solid #333;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  /* Layout Manager Styles */
+  .layout-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .action-btn {
+    padding: 8px 16px;
+    font-size: 12px;
+    background: #252526;
+    border: 1px solid #3e3e3e;
+    color: #ccc;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .action-btn:hover {
+    background: #37373d;
+    border-color: #007acc;
+  }
+
+  .action-btn.primary {
+    background: #0e639c;
+    border-color: #1177bb;
+    color: #fff;
+  }
+
+  .action-btn.success {
+    background: #1a7f37;
+    border-color: #2ea043;
+    color: #fff;
+  }
+
+  .status-message {
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+
+  .status-message.success {
+    background: rgba(26, 127, 55, 0.2);
+    border: 1px solid #2ea043;
+    color: #3fb950;
+  }
+
+  .status-message.error {
+    background: rgba(248, 81, 73, 0.2);
+    border: 1px solid #f85149;
+    color: #ff7b72;
+  }
+
+  .layout-info {
+    margin-top: 16px;
+    padding: 12px;
+    background: #252526;
+    border: 1px solid #3e3e3e;
+    border-radius: 4px;
   }
 
   .header h3 {

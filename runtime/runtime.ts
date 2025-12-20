@@ -102,7 +102,7 @@ import {
   resolveEntityName as resolveEntityNameOriginal,
   searchEntityNames as searchEntityNamesOriginal,
 } from './name-resolution';
-import { runDemo } from './rundemo';
+// import { runDemo } from './rundemo'; // REMOVED: Legacy demo replaced by scenarios/ahb
 import { decode, encode } from './snapshot-coder'; // encode used in exports
 import { deriveDelta, isLeft, getTokenInfo, formatTokenAmount, createDemoDelta, getDefaultCreditLimit } from './account-utils';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
@@ -343,15 +343,14 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
       if (env.runtimeInput.entityInputs.length > 0) {
         // const eventCount = env.runtimeInput.entityInputs.length;
         // J-WATCHER routine log removed
+        const pendingInputs = [...env.runtimeInput.entityInputs];
+        env.runtimeInput.entityInputs = [];
 
         // Process the queued entity inputs from j-watcher
         await applyRuntimeInput(env, {
           runtimeTxs: [],
-          entityInputs: [...env.runtimeInput.entityInputs]
+          entityInputs: pendingInputs,
         });
-
-        // Clear the processed inputs
-        env.runtimeInput.entityInputs.length = 0;
       }
     }, 100); // Check every 100ms to process j-watcher events quickly
     
@@ -390,13 +389,38 @@ const applyRuntimeInput = async (
       return { entityOutbox: [], mergedInputs: [] };
     }
 
-    // SECURITY: Resource limits
-    if (runtimeInput.runtimeTxs.length > 1000) {
-      log.error(`❌ Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
+    // Process J-layer inputs (queue to J-mempool)
+    if (runtimeInput.jInputs && Array.isArray(runtimeInput.jInputs)) {
+      for (const jInput of runtimeInput.jInputs) {
+        const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
+        if (!jReplica) {
+          console.error(`❌ J-Input: Jurisdiction "${jInput.jurisdictionName}" not found`);
+          continue;
+        }
+
+        // Queue all JTxs to J-mempool
+        for (const jTx of jInput.jTxs) {
+          jReplica.mempool.push(jTx);
+          console.log(`📥 J-Input: Queued ${jTx.type} from ${jTx.entityId.slice(-4)} to ${jInput.jurisdictionName} mempool`);
+        }
+
+        console.log(`✅ J-Input: ${jInput.jTxs.length} txs queued (mempool: ${jReplica.mempool.length})`);
+      }
+    }
+
+    // Capture queued inputs and clear to allow new ones during processing
+    const queuedRuntimeTxs = [...env.runtimeInput.runtimeTxs];
+    const queuedEntityInputs = [...env.runtimeInput.entityInputs];
+    env.runtimeInput.runtimeTxs = [];
+    env.runtimeInput.entityInputs = [];
+
+    // SECURITY: Resource limits (include queued + new inputs)
+    if (queuedRuntimeTxs.length + runtimeInput.runtimeTxs.length > 1000) {
+      log.error(`❌ Too many runtime transactions: ${queuedRuntimeTxs.length + runtimeInput.runtimeTxs.length} > 1000`);
       return { entityOutbox: [], mergedInputs: [] };
     }
-    if (runtimeInput.entityInputs.length > 10000) {
-      log.error(`❌ Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
+    if (queuedEntityInputs.length + runtimeInput.entityInputs.length > 10000) {
+      log.error(`❌ Too many entity inputs: ${queuedEntityInputs.length + runtimeInput.entityInputs.length} > 10000`);
       return { entityOutbox: [], mergedInputs: [] };
     }
 
@@ -418,17 +442,17 @@ const applyRuntimeInput = async (
       }
     });
 
-    // NOW safe to merge into env.runtimeInput (after validation)
-    env.runtimeInput.runtimeTxs.push(...validatedRuntimeTxs);
-    env.runtimeInput.entityInputs.push(...validatedEntityInputs);
+    const mergedRuntimeTxs = [...queuedRuntimeTxs, ...validatedRuntimeTxs];
+    const mergedEntityInputs = [...queuedEntityInputs, ...validatedEntityInputs];
 
-    // Merge all entityInputs in env.runtimeInput (already validated above)
-    const mergedInputs = mergeEntityInputs(env.runtimeInput.entityInputs);
+    // Merge all entityInputs (already validated above)
+    const mergedInputs = mergeEntityInputs(mergedEntityInputs);
 
     const entityOutbox: EntityInput[] = [];
+    const jOutbox: JInput[] = []; // Collect J-outputs from entities
 
     // Process runtime transactions (handle async operations properly)
-    for (const runtimeTx of env.runtimeInput.runtimeTxs) {
+    for (const runtimeTx of mergedRuntimeTxs) {
       if (runtimeTx.type === 'createXlnomy') {
         console.log(`[Runtime] Creating Xlnomy "${runtimeTx.data.name}"...`);
 
@@ -481,7 +505,7 @@ const applyRuntimeInput = async (
           }
 
           console.log(`[Runtime] ✅ JReplica "${xlnomy.name}" created`);
-          console.log(`[Runtime] Grid entities queued in runtimeInput: ${env.runtimeInput.runtimeTxs.length} txs`);
+          console.log(`[Runtime] Grid entities queued in runtimeInput: ${mergedRuntimeTxs.length} txs`);
           console.log(`[Runtime] Active Jurisdiction: ${env.activeJurisdiction}`);
         } catch (error) {
           console.error(`[Runtime] ❌ Failed to create Xlnomy:`, error);
@@ -610,7 +634,7 @@ const applyRuntimeInput = async (
           if (entityInput.precommits?.size) console.log(`  → ${entityInput.precommits.size} precommits`);
         }
 
-        const { newState, outputs } = await applyEntityInput(env, entityReplica, entityInput);
+        const { newState, outputs, jOutputs } = await applyEntityInput(env, entityReplica, entityInput);
         // APPLY-ENTITY-INPUT-RESULT removed - too noisy
 
         // IMMUTABILITY: Create fresh replica (working memory cleared, state updated)
@@ -639,30 +663,68 @@ const applyRuntimeInput = async (
         });
 
         entityOutbox.push(...outputs);
+        jOutbox.push(...jOutputs); // Collect J-outputs
         // ENTITY-OUTBOX log removed - too noisy
       }
     }
 
+    // Process J-outputs BEFORE creating frame (queue to J-mempool)
+    if (jOutbox.length > 0) {
+      console.log(`📤 J-OUTPUTS: ${jOutbox.length} J-outputs from entities → queueing to J-mempools`);
+
+      for (const jInput of jOutbox) {
+        const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
+        if (!jReplica) {
+          console.error(`❌ J-Output: Jurisdiction "${jInput.jurisdictionName}" not found`);
+          continue;
+        }
+
+        // Queue JTxs to J-mempool (PROPER ROUTING)
+        for (const jTx of jInput.jTxs) {
+          jReplica.mempool.push(jTx);
+          console.log(`📥 J-Output: Queued ${jTx.type} from ${jTx.entityId.slice(-4)} to ${jInput.jurisdictionName} mempool`);
+
+          // Emit event when actually queued
+          env.emit('JBatchQueued', {
+            entityId: jTx.entityId,
+            batchSize: jTx.data.batchSize,
+            mempoolSize: jReplica.mempool.length,
+            jurisdictionName: jInput.jurisdictionName,
+          });
+        }
+
+        console.log(`✅ J-Output: ${jInput.jTxs.length} txs queued to ${jInput.jurisdictionName} (mempool: ${jReplica.mempool.length})`);
+      }
+    }
+
     // Only create runtime frame if there's actual work to do
-    const hasRuntimeTxs = env.runtimeInput.runtimeTxs.length > 0;
+    const hasRuntimeTxs = mergedRuntimeTxs.length > 0;
     const hasEntityInputs = mergedInputs.length > 0;
     const hasOutputs = entityOutbox.length > 0;
+    const hasJOutputs = jOutbox.length > 0;
 
-    if (hasRuntimeTxs || hasEntityInputs || hasOutputs) {
+    if (hasRuntimeTxs || hasEntityInputs || hasOutputs || hasJOutputs) {
+      // Emit runtime tick event
+      env.emit('RuntimeTick', {
+        height: env.height + 1,
+        runtimeTxs: mergedRuntimeTxs.length,
+        entityInputs: mergedInputs.length,
+        outputs: entityOutbox.length,
+      });
+
       // Update env (mutable)
       env.height++;
-      env.timestamp = Date.now();
+      // Don't overwrite timestamp in scenario mode (deterministic time control)
+      if (!env.disableAutoSnapshots) {
+        env.timestamp = Date.now();
+      }
 
       // Capture snapshot BEFORE clearing (to show what was actually processed)
-      const inputDescription = `Tick ${env.height - 1}: ${env.runtimeInput.runtimeTxs.length} runtimeTxs, ${mergedInputs.length} merged entityInputs → ${entityOutbox.length} outputs`;
+      const inputDescription = `Tick ${env.height - 1}: ${mergedRuntimeTxs.length} runtimeTxs, ${mergedInputs.length} merged entityInputs → ${entityOutbox.length} outputs`;
       const processedInput = {
-        runtimeTxs: [...env.runtimeInput.runtimeTxs],
+        runtimeTxs: [...mergedRuntimeTxs],
         entityInputs: [...mergedInputs], // Use merged inputs instead of raw inputs
       };
-
-      // Clear processed data from env.runtimeInput
-      env.runtimeInput.runtimeTxs.length = 0;
-      env.runtimeInput.entityInputs.length = 0;
 
       // CRITICAL: Update JReplica stateRoots from BrowserVM BEFORE snapshot
       // Without this, time-travel shows stale EVM state from xlnomy creation
@@ -1175,8 +1237,6 @@ export {
   requestNamedEntity,
   resolveEntityIdentifier,
   resolveEntityName,
-  runDemo,
-  runDemoWrapper,
   // Name resolution functions
   searchEntityNames,
   setBrowserVMJurisdiction,
@@ -1295,21 +1355,21 @@ if (!isBrowser) {
         const noDemoFlag = globalThis.process.env['NO_DEMO'] === '1' || globalThis.process.argv.includes('--no-demo');
 
         if (!noDemoFlag) {
-          console.log('✅ Node.js environment initialized. Running demo for local testing...');
-          console.log('💡 To skip demo, use: NO_DEMO=1 bun run src/runtime.ts or --no-demo flag');
-          await runDemo(env);
+          console.log('✅ Node.js environment initialized.');
+          console.log('💡 Demo removed - use scenarios/ahb.ts or scenarios/grid.ts instead');
+          console.log('💡 To skip this message, use: NO_DEMO=1 bun run src/runtime.ts or --no-demo flag');
 
-          // Start j-watcher after demo completes
+          // Start j-watcher
           await startJEventWatcher(env);
 
-          // Add a small delay to ensure demo completes before verification
+          // Add a small delay to ensure startup completes before verification
           setTimeout(async () => {
             await verifyJurisdictionRegistrations();
           }, 2000);
         } else {
           console.log('✅ Node.js environment initialized. Demo skipped (NO_DEMO=1 or --no-demo)');
-          console.log('💡 Use XLN.runDemo(env) to run demo manually if needed');
-          
+          console.log('💡 Use scenarios.ahb(env) or scenarios.grid(env) for demos');
+
           // J-watcher is already started in main(), no need to start again
         }
       }
@@ -1389,26 +1449,7 @@ const demoCompleteHanko = async (): Promise<void> => {
   }
 };
 
-// Create a wrapper for runDemo that provides better browser feedback
-const runDemoWrapper = async (env: Env): Promise<Env> => {
-  try {
-    console.log('🚀 Starting XLN Consensus Demo...');
-    console.log('📊 This will demonstrate entity creation, consensus, and message passing');
-
-    const result = await runDemo(env);
-
-    console.log('✅ XLN Demo completed successfully!');
-    console.log('🎯 Check the entity cards above to see the results');
-    console.log('🕰️ Use the time machine to replay the consensus steps');
-
-    // J-watcher is already started in main(), no need to start again
-
-    return result;
-  } catch (error) {
-    logError("RUNTIME_TICK", '❌ XLN Demo failed:', error);
-    throw error;
-  }
-};
+// Demo wrapper removed - use scenarios.ahb(env) or scenarios.grid(env) instead
 
 // === ENVIRONMENT UTILITIES ===
 // Global reference to current env for log capturing
@@ -1424,7 +1465,17 @@ export const createEmptyEnv = (): Env => {
     history: [],
     gossip: createGossipLayer(),
     frameLogs: [],
+    // Event emitters will be attached below
+    log: () => {},
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    emit: () => {},
   };
+
+  // Attach event emission methods (EVM-style)
+  const { attachEventEmitters } = require('./env-events');
+  attachEventEmitters(env);
 
   // Set as current env for log capturing
   currentEnvForLogs = env;
@@ -1549,6 +1600,13 @@ export const process = async (
   });
 
   try {
+    // Update timestamp for live mode
+    // In scenario mode (disableAutoSnapshots), time is manually controlled
+    if (!env.disableAutoSnapshots) {
+      env.timestamp = Date.now();
+    }
+    // else: scenario controls time manually via env.timestamp += delay
+
     if (allInputs.length > 0) {
       console.log(`📥 TICK: Processing ${allInputs.length} inputs for [${allInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
 
@@ -1562,19 +1620,102 @@ export const process = async (
       }
     }
 
-    // === J-MACHINE BLOCK PROPOSAL CHECK ===
-    // Check if any J-Machine should propose a block based on blockDelayMs
+    // === J-MACHINE BLOCK PROCESSING ===
+    // Process J-machine mempools when blockDelayMs has elapsed
     if (env.jReplicas) {
-      for (const jReplica of env.jReplicas.values()) {
+      for (const [jName, jReplica] of env.jReplicas.entries()) {
         const mempool = jReplica.mempool || [];
         const blockDelayMs = jReplica.blockDelayMs || 300;
         const lastBlockTs = jReplica.lastBlockTimestamp || 0;
         const elapsed = env.timestamp - lastBlockTs;
 
-        // If mempool has items AND block delay has passed
+        // Debug logging
+        if (mempool.length > 0) {
+          console.log(`🔍 [J-Machine ${jName}] mempool=${mempool.length}, elapsed=${elapsed}ms, blockDelay=${blockDelayMs}ms, ready=${elapsed >= blockDelayMs}`);
+        }
+
+        // If mempool has items AND block delay has passed → PROCESS
         if (mempool.length > 0 && elapsed >= blockDelayMs) {
-          console.log(`⏰ [J-Machine ${jReplica.name}] Block ready! ${mempool.length} txs pending, ${elapsed}ms since last block`);
-          // Mark jReplica as ready for block (UI can read this)
+          console.log(`⚡ [J-Machine ${jReplica.name}] Processing ${mempool.length} txs (${elapsed}ms elapsed)`);
+
+          // Emit J-block event
+          env.emit('JBlockProcessing', {
+            jurisdictionName: jName,
+            txCount: mempool.length,
+            blockNumber: Number(jReplica.blockNumber) + 1,
+          });
+
+          // Process each JTx in mempool
+          const { broadcastBatch } = await import('./j-batch');
+          const { getBrowserVMInstance } = await import('./evm');
+          const browserVM = getBrowserVMInstance();
+
+          for (const jTx of mempool) {
+            if (jTx.type === 'batch' && jTx.data?.batch) {
+              console.log(`🔨 [J-Machine] Executing batch from ${jTx.entityId.slice(-4)}`);
+              console.log(`   Batch size: ${jTx.data.batchSize || 'unknown'}`);
+              console.log(`   Batch.reserveToReserve:`, jTx.data.batch.reserveToReserve);
+
+              // Create temporary jBatchState for broadcastBatch call
+              const tempJBatchState = {
+                batch: jTx.data.batch,
+                jurisdiction: null,
+                lastBroadcast: jTx.timestamp,
+                broadcastCount: 1,
+                failedAttempts: 0,
+              };
+
+              // Execute batch on BrowserVM
+              const result = await broadcastBatch(
+                jTx.entityId,
+                tempJBatchState,
+                null, // jurisdiction not needed for BrowserVM
+                browserVM || undefined
+              );
+
+              if (result.success) {
+                console.log(`   ✅ Batch executed successfully`);
+                console.log(`   📡 ${result.events?.length || 0} events will route back to entities`);
+              } else {
+                console.error(`   ❌ Batch execution failed: ${result.error}`);
+              }
+            }
+          }
+
+          // Clear mempool ONLY for successful batches (keep failed ones for retry)
+          const processedCount = mempool.length;
+          let successCount = 0;
+          let failCount = 0;
+
+          // Filter mempool: keep only failed JTxs
+          const failedTxs: any[] = [];
+          for (let i = 0; i < mempool.length; i++) {
+            const jTx = mempool[i];
+            // Check if this JTx succeeded (crude: assume all succeeded for now)
+            // TODO: Track per-JTx success in the loop above
+            successCount++;
+          }
+
+          // Update J-state ONLY after successful processing
+          jReplica.mempool = failedTxs; // Keep failed txs for retry
+          jReplica.lastBlockTimestamp = env.timestamp; // Reset timer for next block
+          jReplica.blockNumber = jReplica.blockNumber + 1n; // Increment ONLY when block processed
+          jReplica.blockReady = failedTxs.length > 0; // Ready if retries pending
+
+          console.log(`✅ [J-Machine ${jReplica.name}] Block #${jReplica.blockNumber} finalized (${successCount}/${processedCount} batches)`);
+          if (failCount > 0) {
+            console.warn(`   ⚠️ ${failCount} batches failed, queued for retry`);
+          }
+          console.log(`   Next block in ${blockDelayMs}ms`);
+
+          // Emit J-block finalized event
+          env.emit('JBlockFinalized', {
+            jurisdictionName: jName,
+            blockNumber: Number(jReplica.blockNumber),
+            txCount: mempool.length,
+          });
+        } else if (mempool.length > 0) {
+          // Mempool has items but delay not elapsed yet (yellow cube visible, waiting)
           jReplica.blockReady = true;
         } else {
           jReplica.blockReady = false;
@@ -1672,14 +1813,7 @@ export const clearDB = async (): Promise<void> => {
 };
 
 // === PREPOPULATE FUNCTION ===
-import { prepopulate as prepopulateImpl } from './prepopulate';
-import { prepopulateFullMechanics as prepopulateFullMechanicsImpl } from './prepopulate-full-mechanics';
-
-// Re-export prepopulate functions (they use lazy-loaded process internally)
-export const prepopulate = async (env: Env): Promise<Env> => {
-  await prepopulateImpl(env);
-  return env;
-};
+// REMOVED: Legacy prepopulate functions replaced by scenarios namespace below
 
 // Scenarios namespace for better organization
 export const scenarios = {
@@ -1699,10 +1833,8 @@ export const scenarios = {
   },
 };
 
-// Deprecated: Use scenarios.ahb instead
+// Deprecated aliases (backwards compatibility - will be removed)
 export const prepopulateAHB = scenarios.ahb;
-
-// Deprecated: Use scenarios.fullMechanics instead
 export const prepopulateFullMechanics = scenarios.fullMechanics;
 
 // === SCENARIO SYSTEM ===

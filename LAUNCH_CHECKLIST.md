@@ -81,7 +81,7 @@
 ### **Marketing**
 - [ ] **Demo video** - Record VR session showing bank emoji labels
 - [ ] **Twitter announcement** - Craft launch tweet
-- [ ] **Documentation site** - Deploy vibepaper docs to separate domain
+- [ ] **Documentation site** - Deploy docs docs to separate domain
 
 ---
 

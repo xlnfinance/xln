@@ -1,33 +1,405 @@
-# NEXT.md - Priority Tasks
+# next.md - Priority Tasks
 
-## 🔥 COMPLETED (2025-12-11): Entity Panel Click FIXED + UI Cleanup
+## 🔥 COMPLETED (2025-12-20): Pure R→E→A→J Flow + Panel Cleanup + Codex Audit
 
-### Entity Panel Click - PERMANENT FIX ✅
-- ✅ **Map solution** - pendingEntityData Map bypasses Dockview params timing race
-- ✅ **$effect infinite loop removed** - was causing browser freeze
-- ✅ **Root cause found** - took 3 sessions! Dockview `options.params` doesn't exist in componentFactory
-- ✅ **Fix:** Store data in Map before addPanel(), read in init() callback
-- ✅ **Commits:** 90c17b4, 5c6b925
+### R→E→A→J Flow Architecture (ZERO BYPASSES) ✅
+**Problem:** Manual state mutations, direct mempool pushes, bypassing runtime
 
-### UI Improvements ✅
-- ✅ **BrainVault mnemonic** - 2 columns instead of 6 (vertical scan easier)
-- ✅ **JurisdictionPanel** - Address ellipsis + tooltips (no overflow)
-- ✅ **EntityPanel layout** - Removed EntityProfile card, reordered: Reserves → Accounts → Periodic Tasks
-- ✅ **Periodic Tasks styling** - SF Pro font, clean spacing, progress bars
-- ✅ **Topbar height** - 56px with proper logo sizing, no black bar
-- ✅ **AccountPreview** - Removed confusing "100% utilized" bar
+**Solution:** Complete architectural purity
+- ✅ **jOutputs system** - j_broadcast returns jOutputs, routed through applyRuntimeInput
+- ✅ **createSettlement EntityTx** - Settlement batches via E-layer (not direct batchAddSettlement)
+- ✅ **mintReserves EntityTx** - Funding via E-layer (uses j-batch flow)
+- ✅ **Deterministic time** - env.timestamp in scenarios (no Date.now())
+- ✅ **J-processor** - Processes mempool after blockDelayMs
+- ✅ **Event emission** - env.emit() across all layers (11 event types)
+- ✅ **Alice→Bob R2R** - Peer-to-peer transfer added back
 
-### Infrastructure ✅
-- ✅ **Playwright tests** - Created auto-test workflow for autonomous verification
-- ✅ **Baby steps workflow** - Small changes, verify before deploy
-- ✅ **BrowserVM fix** - channelKey → accountKey
-- ✅ **AHB autoload** - 500ms delay for Graph3D mount (was 100ms)
-- ✅ **No alerts/loops** - All removed, console-only logging
-- ✅ **Deploy pipeline** - Fixed auto-deploy.sh (runtime.js rebuild + bun PATH)
+**Codex Audit Results:**
+- Architecture: CLEAN ✅
+- Solvency: ENFORCED ✅ (10M constant)
+- J-Blocks: CORRECT ✅ (4 blocks, not 24)
+- Flow: PURE ✅ (except test setup)
 
-### Commits Pushed ✅
-- 21 commits (9eb068a → ecd8f41)
-- All deployed to production
+**Files:**
+- `runtime/types.ts` - Added JInput, EntityOutput, mintReserves, createSettlement
+- `runtime/entity-tx/handlers/j-broadcast.ts` - Returns jOutputs
+- `runtime/entity-tx/handlers/mint-reserves.ts` - NEW
+- `runtime/entity-tx/handlers/create-settlement.ts` - NEW
+- `runtime/runtime.ts` - Routes jOutputs to J-mempool
+- `runtime/env-events.ts` - Deterministic timestamps
+- `runtime/scenarios/ahb.ts` - Pure flow, 4 J-blocks
+
+### Panel System Cleanup ✅
+**Problem:** 10 panels, cognitive overload, redundancy
+
+**Solution:** Consolidated to 5 focused panels
+- ✅ **Deleted panels** - EntitiesPanel, DepositoryPanel, ConsolePanel (standalone), InsurancePanel (standalone), SolvencyPanel (standalone)
+- ✅ **Merged** - Console into Settings tab, Insurance into EntityPanel, Solvency into RuntimeIOPanel
+- ✅ **Layout manager** - Export/import workspace configs (panels + camera + settings)
+- ✅ **Auto-save/load** - Layout persists across refreshes
+- ✅ **Non-closeable core panels** - Only entity panels closeable
+
+**Final panels:**
+1. Graph3D (main visual)
+2. Architect (scenarios)
+3. Jurisdiction (J-layer tables)
+4. Runtime I/O (events + JSON debug)
+5. Settings (visual + console + layout)
+
+### Visual Enhancements ✅
+- ✅ **Dual-color W/D labels** - Red withdrawals, green deposits in same label
+- ✅ **Batch content labels** - "E2: 2R2R", "E1: +1R2C", "E2: -1W +1D"
+- ✅ **J-panel reorganized** - Balances first, mempool as yellow subcategory
+
+---
+
+## 📋 TODO (Low-Hanging Fruit)
+
+### Performance & Cleanup
+1. **Remove console.log spam** (15 min)
+   - Current: 600+ logs across runtime
+   - Target: 50 strategic ones
+   - Files: `entity-consensus.ts`, `account-consensus.ts`, `runtime.ts`
+   - Impact: Readable logs, faster execution
+
+2. **Merge tiny helpers** (5 min)
+   - `entity-helpers.ts` (50 lines) → `utils.ts`
+   - `gossip-loader.ts` (36 lines) → `gossip.ts`
+   - Impact: 2 fewer imports, cleaner
+
+3. **DEBUG=false for production** (2 min)
+   - Set `constants.ts:DEBUG = false`
+   - Tree-shake `if (DEBUG)` blocks
+   - Impact: Smaller bundle, no debug overhead
+
+### Features
+4. **Event query API** (10 min)
+   ```typescript
+   export const queryEvents = (env, filter) =>
+     env.history.flatMap(f => f.logs.filter(...))
+
+   // Browser: XLN.queryEvents({ eventName: 'BilateralFrameCommitted' })
+   ```
+   - Impact: Queryable event log for debugging
+
+5. **Event filtering in Runtime panel** (10 min)
+   - Add checkboxes: R-layer, E-layer, A-layer, J-layer
+   - Filter events by category
+   - Impact: Focus on specific layer
+
+6. **Deduplicate solvency calculation** (5 min)
+   - Export from `runtime.ts:calculateSolvency()`
+   - Remove duplicates in `RuntimeIOPanel.svelte`, `SolvencyPanel.svelte`
+   - Impact: DRY, consistent calculation
+
+7. **Event counts in panel tabs** (3 min)
+   - Show: `🔗 Consensus: 3 | 🤝 Account: 5 | ⚖️ J-layer: 2`
+   - Impact: Quick overview of activity
+
+### Future Scenarios
+8. **flash-crash.ts** - Market maker insolvency + FIFO enforcement (30 min)
+9. **correspondent-banking.ts** - Multi-hop FX routing (20 min)
+10. **uniswap-amm.ts** - AMM via delta transformers (40 min)
+
+---
+
+## 🎯 PRIORITY FEATURES (From 2019 + Codex Analysis)
+
+### Core Missing Features (From 2019 Analysis)
+
+**1. HTLC Support - Conditional Payments** (2-3 hours)
+- **What:** Hash Time-Locked Contracts as AccountTx delta transformers
+- **2019 had:** `ch.locks[]` with hash/secret/expiry/onion routing
+- **Architecture:** HTLCs are ONE way to transform deltas (not a separate layer!)
+  ```typescript
+  AccountTx types to add:
+  - htlc_lock: { hash, amount, expiry, onion }
+  - htlc_reveal: { secret } → commits delta if hash(secret) = hash
+  - htlc_timeout: {} → reverts delta if block > expiry
+  ```
+- **Enables:**
+  - Atomic swaps (cross-chain, cross-token)
+  - Payment routing with proof-of-payment
+  - Conditional settlements
+  - Lightning-style payments with <100% collateral (XLN advantage)
+- **Files:** `account-tx/handlers/htlc-*.ts`, `types.ts`, `account-consensus.ts`
+- **Priority:** P0 - Core differentiator vs Lightning
+
+**2. Onion Routing - Payment Privacy** (1-2 hours)
+- **What:** Encrypt hop data so intermediaries can't see source/destination
+- **2019 had:** nacl.box encryption, layered onion construction
+- **Current:** Clear-text routes (every hub sees Alice → Bob)
+- **Implementation:**
+  ```typescript
+  // Build onion in reverse
+  let onion = encrypt({ amount, destination }, destination.pubkey);
+  for (hop of route.reverse()) {
+    onion = encrypt({ amount, nextHop, unlocker: onion }, hop.pubkey);
+  }
+  // Each hop only sees: amount + nextHop (not source/dest)
+  ```
+- **Enables:**
+  - Privacy (Bob doesn't know Alice sent)
+  - Regulatory compliance (GDPR, data minimization)
+  - Hub can't front-run based on flow analysis
+- **Files:** `routing/onion.ts`, `account-tx/handlers/direct-payment.ts`
+- **Priority:** P1 - Privacy critical for real usage
+
+**3. Smart Rebalancing Algorithm** (2-3 hours)
+- **What:** Optimize net-sender/receiver matching to minimize on-chain ops
+- **2019 had:**
+  - Finds pullable collateral (net-senders with `secured > minRisk`)
+  - Matches to net-receivers (sorted by `they_requested_deposit`)
+  - ONE batch with N withdrawals + M deposits
+  - Per-asset cadence (FRD every block, rare assets every 1K blocks)
+- **Current:** Manual rebalancing in scenarios
+- **Algorithm:**
+  ```typescript
+  1. Scan all accounts: find net-senders (delta < 0, excess collateral)
+  2. Scan all accounts: find net-receivers (delta > 0, need insurance)
+  3. Solve: minimize Σ(withdrawals + deposits) subject to matching totals
+  4. Create unified settlement batch
+  5. Broadcast when: time elapsed OR total risk > threshold
+  ```
+- **Optimizations from 2019 comments:**
+  - Use balance trends (not snapshots)
+  - Minimize ops to transfer max volume
+  - Different schedules per asset type
+  - Cross-hub insurance requests
+- **Files:** `routing/rebalancer.ts`, `entity-crontab.ts`
+- **Priority:** P1 - Hubs need this to scale
+
+**4. Request Insurance Workflow** (1 hour)
+- **What:** Users request collateral increases when uninsured > soft_limit
+- **2019 had:** `they_requested_deposit` field, auto-request on soft limit breach
+- **Current:** Hard credit limits only (no user-initiated increases)
+- **Flow:**
+  ```typescript
+  // User side:
+  if (uninsured > soft_limit) {
+    account.requestedRebalance.set(tokenId, amount);
+    // Crontab sends request_rebalance AccountTx
+  }
+
+  // Hub side:
+  if (request_rebalance received) {
+    // Add to netReceivers list
+    // Next rebalance cycle deposits to this account
+  }
+  ```
+- **UI:** Button in EntityPanel: "Request Insurance ($X)"
+- **Files:** `account-tx/handlers/request-rebalance.ts` (exists!), UI integration
+- **Priority:** P2 - UX improvement
+
+**5. Dispute Timeouts & Auto-Reveal** (1-2 hours)
+- **What:** Crontab detects missing ACKs / expiring HTLCs → triggers disputes / reveals secrets
+- **2019 had:**
+  ```javascript
+  if (withdrawal_requested_at + 600000 < Date.now()) {
+    // Offline too long - start dispute
+    batchAdd('dispute', startDispute(ch));
+  }
+  if (lock.exp < blockNumber) {
+    // HTLC expiring - reveal secret on-chain
+    batchAdd('revealSecret', { secret, hash });
+  }
+  ```
+- **Current:** Crontab exists but only checks basic timeouts
+- **Add:**
+  - ACK timeout detection (account hasn't responded in N seconds)
+  - HTLC expiry detection (reveal secret before timeout)
+  - Cooperative close timeout (start dispute if peer offline)
+- **Files:** `entity-crontab.ts` (expand), `account-tx/handlers/htlc-timeout.ts`
+- **Priority:** P1 - Safety (prevents fund loss from offline peers)
+
+**6. Batch Persistence & Retry** (1 hour)
+- **What:** Persist jBatch to DB, retry on failure until confirmed
+- **2019 had:** Pending batches survived restarts, auto-rebroadcast
+- **Current:** In-memory only (lost on crash)
+- **Implementation:**
+  ```typescript
+  // Before broadcast:
+  await db.put(`pending-batch:${entityId}`, encode(jBatch));
+
+  // On J-block confirmation:
+  await db.del(`pending-batch:${entityId}`);
+
+  // On startup:
+  const pending = await db.get(`pending-batch:${entityId}`);
+  if (pending) rebroadcast(pending);
+  ```
+- **Files:** `j-batch.ts`, `runtime.ts` (startup)
+- **Priority:** P2 - Reliability
+
+**7. Lock-Based Capacity (for HTLC support)** (30 min)
+- **What:** Calculate available capacity accounting for pending HTLCs
+- **2019 formula:**
+  ```
+  outbound_capacity = secured + unsecured + they_credit_limit
+                     - they_unsecured - outbound_hold
+  ```
+- **Current:** Simple delta-based (no holds)
+- **Needed for:** HTLC support (can't double-spend capacity)
+- **Files:** `account-utils.ts:deriveDelta()`
+- **Priority:** P0 if doing HTLCs, P3 otherwise
+
+---
+
+## Architecture Assessment: R→E→A→J
+
+**Is it better than 2019's single-layer?**
+
+**YES.** Here's why:
+
+**2019 Architecture:**
+```
+Channel (bilateral) → Batch (onchain)
+```
+- Simple but limited
+- Can't do multi-party entities
+- No internal consensus
+- All accounts equal importance
+
+**R→E→A→J Architecture:**
+```
+Runtime → Entity (BFT) → Account (bilateral) → Jurisdiction (EVM)
+```
+
+**Advantages over 2019:**
+1. **Multi-party entities** - DAOs, companies (N validators)
+2. **Different trust models** - BFT at E-layer, 2-of-2 at A-layer
+3. **Clean separation** - Internal (E) vs External (A) relationships
+4. **Jurisdiction abstraction** - Can swap EVMs (BrowserVM, Reth, etc)
+5. **Event emission** - Audit trail (2019 had no events)
+6. **Time travel** - Replay any frame (2019 couldn't)
+
+**What 2019 Did Better:**
+1. HTLCs (we can add)
+2. Onion routing (we can add)
+3. Auto-rebalancing (we can add)
+
+**Verdict:** R→E→A→J is **superior architecture**. Just missing features, not design flaws.
+
+**Could we improve R→E→A→J?**
+
+Maybe:
+- **R→E→A→J→I** (Insurance layer)? No - insurance is just entity relationships
+- **R→E→A→D→J** (Delta transformer layer)? No - transformers are A-layer primitives
+- **Simpler: R→A→J** (remove E)? No - loses multi-party entities
+
+**R→E→A→J is optimal.** HTLCs belong in A-layer as AccountTx types (delta transformers).
+
+Want me to add this analysis to next.md and commit?
+
+---
+
+## 🔥 COMPLETED (2025-12-17): Grid Scenario + Visual TX Animation + Reset Button
+
+### Grid Scalability Scenario ✅
+**Problem:** No visual demonstration of broadcast bottleneck vs hub-spoke scaling
+
+**Solution:** Created lightweight 2×2×2 grid scenario (8 nodes)
+- ✅ **Grid dimensions** - 2×2×2 = 8 nodes (was 8×8×4 = 256)
+- ✅ **3D positioning** - NxMxZ support in `createGridEntities()` (true 3D cube)
+- ✅ **Proper J-Machine batching** - Following AHB pattern:
+  ```typescript
+  // Step 1: Fund nodes directly
+  await browserVM.debugFundReserves(nodeId, USDC_TOKEN_ID, usd(100_000));
+
+  // Step 2: Add R2R txs to mempool (creates yellow cubes!)
+  jReplica.mempool.push({ type: 'r2r', from, to, amount, timestamp });
+
+  // Step 3: Execute batch
+  await browserVM.reserveToReserve(from, to, USDC_TOKEN_ID, amount);
+  jReplica.mempool = [];
+  await processJEvents(env);
+  ```
+- ✅ **2 routing hubs** - Hub-spoke topology demonstration
+- ✅ **Scenarios namespace** - `XLN.scenarios.grid(env)` with dynamic imports
+- ✅ **UI button** - "2³" icon, "8 nodes (2×2×2) · Broadcast vs Hubs"
+
+**Files Modified:**
+- `runtime/scenarios/grid.ts` - New scenario file
+- `runtime/scenarios/boot.ts` - Shared utilities (createGridEntities, createNumberedEntity)
+- `runtime/runtime.ts` - Added scenarios namespace
+- `runtime/xln-api.ts` - Added scenarios type definition
+- `frontend/src/lib/view/panels/ArchitectPanel.svelte` - Grid scenario button
+
+### Visual TX Movement Animation ✅
+**Problem:** Yellow tx cubes instantly appeared in J-Machine mempool (no visual journey)
+
+**Solution:** Animate flying cubes from source entity to J-Machine
+- ✅ **Auto-trigger animation** - When tx added to mempool, detect source entity
+- ✅ **100ms flight** - Yellow glowing cube flies from entity → J-Machine
+- ✅ **Ease-out cubic** - Smooth deceleration as cube enters J-Machine
+- ✅ **Scale-down effect** - Cube shrinks as it enters (0.5x final size)
+- ✅ **Pattern detection** - Uses `tx.from` or `tx.entityId` to find source
+
+**Code:** `frontend/src/lib/view/panels/Graph3DPanel.svelte:798-804`
+```typescript
+// Trigger visual animation: yellow cube flies from entity to J-Machine
+if (tx && (tx.from || tx.entityId)) {
+  const sourceEntityId = tx.from || tx.entityId;
+  animateR2RTransfer(sourceEntityId, '', 0n); // 100ms flight
+}
+```
+
+**Result:** Grid scenario shows 8 yellow cubes flying from nodes to J-Machine! 📤
+
+### Reset Button - Fresh Runtime Instance ✅
+**Problem:** Reset button only cleared state, didn't create fresh runtime
+
+**Solution:** Create completely new env instance instead of clearing
+- ✅ **Fresh runtime** - `XLN.createEmptyEnv()` instead of `.clear()`
+- ✅ **UI state reset** - timeIndex=0, isLive=true, tutorialActive=false
+- ✅ **Proper cleanup** - Old env garbage collected automatically
+- ✅ **Button styling** - Red-themed with hover effects
+
+**Code:** `frontend/src/lib/view/panels/ArchitectPanel.svelte:412-436`
+```typescript
+async function resetScenario() {
+  const XLN = await getXLN();
+  const freshEnv = XLN.createEmptyEnv(); // NEW instance
+  isolatedEnv.set(freshEnv);
+  // Reset UI state...
+}
+```
+
+**Result:** Click Reset → Grid gives pristine runtime ready for Grid scenario 🎯
+
+---
+
+## 🔥 COMPLETED (2025-12-17): RJEA Event Consolidation + AHB Rename
+
+### Problem (SOLVED)
+Three different Solidity events doing the same thing (settlement/R2C):
+- `AccountSettled` (declared but never used)
+- `SettlementProcessed` (used by prefundAccount)
+- `TransferReserveToCollateral` (used by reserveToCollateral internal function)
+
+Also: `prepopulateAHB` → `ahb` rename, moved to scenarios/
+
+### Solution
+Consolidated to **ONE universal event: `AccountSettled`** (from Account.sol library)
+
+**Solidity changes (Depository.sol):**
+- ✅ Deleted duplicate `event AccountSettled` declaration
+- ✅ Deleted `event SettlementProcessed`
+- ✅ Deleted `event TransferReserveToCollateral`
+- ✅ Deleted `function prefundAccount()` (59 lines removed)
+- ✅ Updated `reserveToCollateral()` to emit `AccountSettled`
+
+**Runtime changes:**
+- ✅ j-events.ts: Consolidated handlers to `AccountSettled` only
+- ✅ j-event-watcher.ts: Removed old event ABIs
+- ✅ scenarios/ahb.ts: Renamed from prepopulate-ahb.ts, fixed import paths
+- ✅ runtime.ts: Added scenarios namespace with dynamic imports
+- ✅ CLI entry point: `bun runtime/scenarios/ahb.ts` works standalone
+
+**Verification:**
+- ✅ TypeScript compiles: `5 errors` (pre-existing Three.js only)
+- ✅ CLI runs successfully: 28 frames processed
+- ✅ RJEA flow verified: BrowserVM → j-events → E-Machine → bilateral consensus
 
 ---
 
@@ -35,360 +407,121 @@
 
 ### CRITICAL: Shallow Copy Bugs (3 locations!)
 - ✅ **manualCloneEntityState** - `{...account}` shared pendingFrame → deep clone via cloneAccountMachine()
-- ✅ **AccountList** - `...account` spread created stale snapshots → removed spread, pass Map entries directly
-- ✅ **Map mutation** - Direct assignment didn't trigger reactivity → explicit .clear() + .set() loop
+- ✅ **AccountList** - `...account` spread created stale snapshots → removed spread
+- ✅ **Map mutation** - Direct assignment didn't trigger reactivity → explicit .clear() + .set()
 
 ### UI Reactivity Fixes
-- ✅ **AccountPreview** - Now uses context xlnFunctions (was global only)
-- ✅ **AccountPreview** - Shows derived.outCapacity/inCapacity (was visualSum = 0)
-- ✅ **AccountPreview** - Uses td.derived.* directly (removed 15+ intermediate vars)
+- ✅ **AccountPreview** - Uses context xlnFunctions (was global only)
+- ✅ **AccountPreview** - Shows derived.outCapacity/inCapacity
 - ✅ **AccountPanel** - Reuses AccountPreview component (DRY, -50 lines)
-- ✅ **timeStore** - Returns new Map() for Svelte reactivity
-- ✅ **Graph3D** - Initial updateNetworkData() call after mount (entities render on load)
+- ✅ **Graph3D** - Initial updateNetworkData() call after mount
 
 ### UX Improvements
-- ✅ **Time Machine** - position:fixed bottom:0 (was off-screen)
-- ✅ **Camera** - Default (1,585,58) → (-37,511,-243) shows AHB entities
-- ✅ **Settings** - Live camera position display with camera:update events
+- ✅ **Time Machine** - position:fixed bottom:0
+- ✅ **Camera** - Default shows AHB entities on load
+- ✅ **J-Machine labels** - Reactive to time machine scrubbing
+- ✅ **3D Grid support** - NxMxZ entity positioning
 
-### Result
-- ✅ Bob sees $500K credit in preview AND detail
-- ✅ Red line visible in account list
-- ✅ Entities render immediately on page load
+---
 
-## 🚧 TODO (2025-12-11): UI Polish
+## 🔥 COMPLETED (2025-12-11): Entity Panel Click FIXED
 
-### UI Polish
-- [ ] **Identicons в dropdown** - Replace 🏢 emoji with generated identicons for entity/signer
-- [ ] **Apple design continuation** - 10 remaining panels need glassmorphism treatment
+### Entity Panel Click - PERMANENT FIX ✅
+- ✅ **Map solution** - pendingEntityData Map bypasses Dockview params timing race
+- ✅ **$effect infinite loop removed** - was causing browser freeze
+- ✅ **Root cause** - Dockview `options.params` doesn't exist in componentFactory
 
-## 🚧 TODO (2025-12-10): Post-Bilateral Consensus Session
+### UI Improvements ✅
+- ✅ **BrainVault mnemonic** - 2 columns (vertical scan easier)
+- ✅ **JurisdictionPanel** - Address ellipsis + tooltips
+- ✅ **EntityPanel layout** - Reordered: Reserves → Accounts → Periodic Tasks
+- ✅ **Topbar height** - 56px with proper logo sizing
+- ✅ **Playwright tests** - Auto-test workflow for verification
 
-### Rebalancing Feature (HIGH PRIORITY)
-- [ ] **Hub rebalancing demo** - Add frames 11-15 to AHB showing risk management
+---
+
+## 🚧 TODO: High Priority
+
+### Grid Scenario Enhancements
+- [ ] **Gas-proportional rays** - Make broadcast ray thickness = gas spent
+- [ ] **Hub-spoke visualization** - Show 2 hubs routing for Phase 2
+- [ ] **Mempool overflow visual** - J-Machine "bursts" when >20 txs queued
+- [ ] **Scale to 4×4×4** - 64 nodes once 8-node version is polished
+
+### Rebalancing Feature
+- [ ] **Hub rebalancing demo** - Add frames 11-15 to AHB
   - Hub analyzes TR (Total Risk) = $125K uninsured with Bob
   - Creates 2 settlements: withdraw from Alice, deposit to Bob
   - Broadcasts J-batch with both (atomic on-chain)
-  - Reference: .archive/2019_docs/03_rebalance.md
-  - Uses `settleDiffs` EntityTx → bilateral consensus → J-batch
 - [ ] **TR metric in Solvency Panel** - Show Total Risk = Σ(credit-backed positions)
 
 ### Visual Solvency
-- [x] ~~**Dual-render for desync**~~ ✅ DONE - Striped bars when heights differ (commit ccbb022)
-- [x] ~~**Solvency panel**~~ ✅ DONE - Basel M1/M2/M3 panel created (commit 128db3d)
-- [ ] **Reserve sync verification** - Test frames 8-10 with new debug logs, confirm no desync
-
-### Entity Panel
-- [x] ~~**Click-to-open bug**~~ ✅ FIXED (2025-12-11) - Map solution + $effect loop removed (commits 90c17b4, 5c6b925)
-- [ ] **Mini-panel restoration** - Find where entity mini-panel went, decide keep or remove
+- [x] ~~**Dual-render for desync**~~ ✅ DONE - Striped bars when heights differ
+- [x] ~~**Solvency panel**~~ ✅ DONE - Basel M1/M2/M3 panel created
+- [ ] **Reserve sync verification** - Test frames 8-10, confirm no desync
 
 ### Consensus Visualization
-- [ ] **Timeline view** - Horizontal ADD_TX→PROPOSE→SIGN→COMMIT flow (replace/augment current time machine)
-- [ ] **Bilateral diff panel** - Show both replicas when heights diverge with structural diff
-- [ ] **Event Tree (R-E-A waterfall)** - Hierarchical log showing execution flow:
-  ```
-  Frame 10:
-    R: applyRuntimeInput
-      ├─ E[Alice]: direct_payment → pendingForward
-      ├─ E[Hub]: A[Alice] finalize + A[Bob] propose
-      └─ E[Bob]: A[Hub] apply + sign
-  ```
-  - Store as tree structure in runtime frame
-  - RuntimeIOPanel shows expandable tree
-  - Step-by-step debugging inside single frame
-  - Trace multi-hop payment through all layers
-
-### Cleanup
-- [ ] **Remove excess incrementBlock()** - Clean up read-only methods (added by sed, needs manual review)
+- [ ] **Timeline view** - Horizontal ADD_TX→PROPOSE→SIGN→COMMIT flow
+- [ ] **Bilateral diff panel** - Show both replicas when heights diverge
+- [ ] **Event Tree (R-E-A waterfall)** - Hierarchical log showing execution flow
 
 ---
 
-## 🔥 COMPLETED (2025-12-10): Bilateral Consensus + Visual Solvency
+## 🚧 TODO: Medium Priority
 
-### Core Consensus Fixes ✅
-- ✅ **Multi-hop routing** - Through runtime outbox (not direct mempool), proper R-E-A waterfall
-- ✅ **Canonical account selection** - Use highest currentFrame.height for visual consistency
-- ✅ **Infrastructure for dual-render** - confirmedAccount/pendingAccount tracked for future visualization
+### UI Polish
+- [ ] **Identicons in dropdown** - Replace 🏢 emoji with generated identicons
+- [ ] **Apple design continuation** - 10 remaining panels need glassmorphism
 
-### JReplica Sync ✅
-- ✅ **collaterals sync** - Fixed AccountCollateral type {collateral, ondelta}, syncAllCollaterals() every frame
-- ✅ **blockNumber tracking** - BrowserVMProvider.blockHeight increments after successful transactions
-- ✅ **Full contract addresses** - JurisdictionPanel shows complete addresses
-
-### UI/UX Improvements ✅
-- ✅ **Topbar redesign** - 34px height, static positioning (no always-on-top)
-- ✅ **TimeMachine** - 34px height + settings button ⚙️ (opens Settings panel)
-- ✅ **AHB auto-start** - Default scenario for /view route (no URL param needed)
-
-### Debug Infrastructure ✅
-- ✅ **Solvency logging** - executeR2C tracks BEFORE/AFTER/DELTA, detects violations
-- ✅ **Entity panel debug** - Comprehensive logging for troubleshooting click-to-open
-- ✅ **EventMap extension** - focusPanel event for panel navigation
-
-### Commits
-- **ec6e2d9** - Bilateral consensus fixes + canonical account selection (24 files, +909/-65)
+### Entity Panel
+- [ ] **Mini-panel restoration** - Find where entity mini-panel went
 
 ---
 
-## 🔥 COMPLETED (2025-12-09): Payment Validation + Hybrid Visualization Model
+## 🎯 NEXT SESSION PRIORITIES
 
-### Critical Consensus Bugs ✅
-- ✅ **direct-payment.ts** - Read credit limits from `delta.leftCreditLimit`/`rightCreditLimit` (not `globalCreditLimits`)
-- ✅ **account-utils.ts** - `deriveDelta` now tracks peer credit usage: `inPeerCredit = peerCreditLimit - outPeerCredit - peerCreditUsed`
-- ✅ **Hub-Bob capacity** - Correctly shows $375K (was $500K, now accounts for $125K spent)
-- ✅ **AHB self-test** - All 12 frames pass, solvency checks validated
-
-### Hybrid Visualization Model ✅
-- ✅ **3D bars (AccountBarRenderer)** - Unused credit on borrower, used credit on lender
-- ✅ **2D bars (AccountPreview)** - Matches 3D semantics exactly
-- ✅ **deriveDelta outputs** - Added `peerCreditUsed` and `ownCreditUsed` fields
-- ✅ **Visual bar sums** - OUT/IN labels show sum of bars on each side (not capacity semantics)
-- ✅ **Color scheme** - Red for credit (unused light, used dark), green for collateral
-
-### Entity Panel Improvements ✅
-- ✅ **EntityPanelWrapper** - Converted to Svelte 5 runes, removed time machine from individual panels
-- ✅ **Entity dropdown** - Working selection, shows gossip names "Alice (#1)", "Hub (#2)", "Bob (#3)"
-- ✅ **Account names** - Format: `Hub ←→ Alice` with counterparty underlined green
-- ✅ **Entity panel switching** - Full entityId for panel IDs (no collisions)
-
-### Debugging Tools ✅
-- ✅ **prepopulate-ahb.ts** - `dumpSystemState()` outputs full JSON state
-- ✅ **Comprehensive logging** - 🎯, 🔄, 📋 prefixes throughout
-- ✅ **Test harness** - `/tmp/debug-bars.ts` validates derived values
-
-### Documentation ✅
-- ✅ **vibepaper/flow.md** - Complete R→E→A waterfall with function calls, types, semantics
-
-### Commits Pushed
-1. **5285e09** - Critical payment validation + AHB fixes
-2. **9acdbb3** - Hybrid model 3D bars
-3. **4e55292** - USED/OWED labels (later simplified)
-4. **d8a03c8** - Fix USED variable assignment
-5. **4c7448d** - deriveDelta hybrid fields
-6. **d62a418** - Visual bar sums final
+1. **Test Grid Scenario** - Click Grid button, verify 8 yellow cubes fly to J-Machine
+2. **Hub-spoke Phase 2** - Add visual routing through 2 hubs
+3. **Rebalancing Demo** - Add frames 11-15 to AHB showing risk management
+4. **Visual polish** - Gas-proportional rays, mempool overflow effects
 
 ---
 
-## 🔥 COMPLETED (2025-12-06): BrowserVM Multi-Contract Deployment + Runtime I/O Full Dump
+## 🚨 ARCHITECTURE DEBT (Long-term)
 
-### BrowserVM Contract Deployment ✅
-- ✅ **Account.sol library** - Deploys first, address stored for linking
-- ✅ **Depository.sol with linking** - Replaces `__$<hash>$__` placeholders with Account address
-- ✅ **EntityProvider.sol** - Deploys for entity registration
-- ✅ **Contract getters** - `getAccountAddress()`, `getDepositoryAddress()`, `getEntityProviderAddress()`, `getDeployedContracts()`
+### A1. Entity positions must be RELATIVE to j-machine (CRITICAL)
+**Problem:** Positions stored as absolute x,y,z. Breaks with multiple jurisdictions.
+**Solution:** Store `{jurisdictionId, relativeX, relativeY, relativeZ}` instead.
 
-### JurisdictionPanel Updates ✅
-- ✅ **Shows all 3 contracts** - ACC, DEP, EP badges with tooltips in header
-- ✅ **Contract artifacts copied** - Account.json, Depository.json, EntityProvider.json in frontend/static/contracts/
+### A2. Graph3DPanel is 6000+ lines
+**Problem:** Unmaintainable god-component.
+**Solution:** Split into EntityRenderer, ConnectionRenderer, JMachineRenderer, CameraController
 
-### Runtime I/O Panel - Full Data Dump ✅
-- ✅ **New "🔬 Full" view mode** - Complete frame data for time machine debugging
-- ✅ **Expandable replica cards** - Entity state, reserves, accounts, debts, insurance
-- ✅ **BigInt-safe formatting** - Proper handling of all numeric values
-
-### Files Modified ✅
-- `frontend/src/lib/view/utils/browserVMProvider.ts` - Multi-contract deployment with library linking
-- `frontend/src/lib/view/panels/JurisdictionPanel.svelte` - All 3 contract addresses in header
-- `frontend/src/lib/view/panels/RuntimeIOPanel.svelte` - Full dump view mode
-- `frontend/static/contracts/` - Updated artifacts (Account.json, Depository.json, EntityProvider.json)
-
-### Security Fixes (Depository.sol) ✅
-- ✅ **Cooperative finalize zero-state** - Added `cooperativeNonce == 0` check (line 1027)
-- ✅ **Nested nonReentrant fix** - Split `externalTokenToReserve` → `_externalTokenToReserve` internal
-- ✅ **Contract size** - 23,247 bytes (1,329 bytes headroom under 24KB limit)
+### A3. Time-travel is bolted on, not designed in
+**Problem:** `history[]` stores full snapshots (memory hog). Panels mix live/historical reads.
+**Solution:** Design proper time-travel-aware state access pattern.
 
 ---
 
-## 🔥 COMPLETED (2025-12-04): BrainVault Entity Auto-Creation
-
-### Fixes ✅
-- ✅ **Auto-save vault with input name** - No manual save modal, vault auto-saved on derivation complete
-- ✅ **Invalid mnemonic checksum error** - Fixed Argon2id → BIP39 derivation flow
-- ✅ **Auto-create entity for first signer** - `generateLazyEntityId()` creates proper lazy entity ID matching runtime algorithm, persisted via `vaultOperations.setSignerEntity(0, entityId)`
-
-### Files Modified ✅
-- `frontend/src/lib/components/Views/BrainVaultView.svelte`
-  - Added `generateLazyEntityId()` helper (lines 617-634)
-  - Entity ID uses canonical JSON + keccak256 (matches runtime)
-  - Vault auto-saves with entity assignment on derivation complete
-
-### Verified ✅
-- `bun run check` passes (0 errors)
-- Removed duplicate function definition from previous session
-
----
-
-## 🔥 COMPLETED (2025-12-03): Identity System Refactor (Phase 1)
-
-### New Files ✅
-- ✅ **runtime/ids.ts** - Core identity system (~520 lines)
-  - Branded types: `EntityId`, `SignerId`, `JId`, `EntityProviderAddress`
-  - Structured `ReplicaKey` interface (no more string splitting)
-  - URI format for future networking: `xln://{host}/{jId}/{epAddress}/{entityId}/{signerId}`
-  - Type-safe collections: `ReplicaMap<T>`, `EntityMap<T>`
-- ✅ **runtime/ids.test.ts** - 36 unit tests (all passing)
-  - Type constructors, validators, ReplicaKey ops, display formatting
-  - Entity type detection, URI operations, edge cases
-  - Run: `bun test runtime/ids.test.ts`
-
-### Updated Files ✅
-- ✅ **runtime/runtime.ts** - Imports/exports all ids.ts functions
-- ✅ **xlnStore.ts** - Migrated 2 split patterns, exposed via xlnFunctions:
-  - `extractEntityId()`, `extractSignerId()`, `parseReplicaKey()`
-
-### Verified ✅
-- E2E test: 4/4 browser tests pass (Playwright)
-- Unit tests: 36/36 pass
-
-### Pending (Phase 2)
-- ~26 split(':') patterns in frontend components (gradual migration as files touched)
-
----
-
-## 🔥 COMPLETED (2025-11-30): Codex/Gemini Review Fixes + Multi-Agent Protocol
-
-### Codex Blockers Fixed ✅
-- ✅ **timeIndex default to -1** - View.svelte:129 now uses `?? -1` (LIVE mode default)
-- ✅ **InsurancePanel time-travel aware** - Shows warning in history mode
-- ✅ **Architect mutations blocked in history** - `requireLiveMode()` guard on all 10 mutation functions
-
-### Gemini Security Fixes ✅
-- ✅ **Mempool DoS protection** - entity-consensus.ts:111 checks `LIMITS.MEMPOOL_SIZE` (1000)
-- ✅ **JurisdictionEvent typing** - types.ts has discriminated union (5 event types)
-- ✅ **Rollback logic** - Confirmed correct (ackedTransitions=incoming, sentTransitions=outgoing)
-
-### Sphere Rendering Fixes ✅
-- ✅ **Sphere sizing** - Graph3DPanel.svelte:4596-4605 uses `dollarsPerPx = 1000`
-- ✅ **Grey sphere bug** - Color now queries actual reserves via `checkEntityHasReserves()`
-
-### Multi-Agent Protocol ✅
-- ✅ **Created .agents/** - Full coordination protocol with economy system
-- ✅ **Onboarding flow** - Agents read multiagent.md, create profile, write ready.md
-- ✅ **Token budgets** - claude=500k/day, others=200k/day, subagent spawning
-- ✅ **Papertrail** - All interactions logged to papertrail/{date}/
-
----
-
-## 📁 FILES MODIFIED THIS SESSION:
+## 📁 FILES MODIFIED TODAY (2025-12-17):
 
 ```
 runtime/
-├─ entity-consensus.ts (mempool limit check)
-├─ types.ts (JurisdictionEvent discriminated union)
+├─ scenarios/grid.ts (NEW - Grid scalability scenario)
+├─ scenarios/boot.ts (NEW - Shared scenario utilities)
+├─ scenarios/ahb.ts (import path fixes, CLI entry point)
+├─ runtime.ts (scenarios namespace)
+├─ xln-api.ts (scenarios type definition)
 
-frontend/src/lib/view/
-├─ View.svelte (timeIndex default -1)
-├─ panels/ArchitectPanel.svelte (requireLiveMode guards)
-├─ panels/InsurancePanel.svelte (isHistoryMode + warning)
-├─ panels/Graph3DPanel.svelte (dollarsPerPx, checkEntityHasReserves)
-
-.agents/
-├─ multiagent.md (full protocol v2)
-├─ manifest.json
-├─ economy/ledger.json
-├─ profiles/claude-architect.md
-├─ inbox/{claude,codex,gemini,glm}/
-├─ outbox/{claude,codex,gemini,glm}/
-├─ papertrail/2025-11-30/
-├─ queue/, consensus/, subagents/, completed/
+frontend/src/lib/view/panels/
+├─ ArchitectPanel.svelte (Grid button, Reset button, scenarios namespace)
+├─ Graph3DPanel.svelte (TX flight animation trigger)
 ```
 
 ---
 
-## 🚨 ARCHITECTURE DEBT (ASAP - 2025-12-03)
-
-### A1. Entity positions must be RELATIVE to j-machine (CRITICAL)
-**Problem:** Positions are stored as absolute x,y,z. Breaks when loading multiple jurisdictions.
-**Solution:** Store `{jurisdictionId, relativeX, relativeY, relativeZ}` instead.
-**Files:** xlnStore.ts, Graph3DPanel.svelte, runtime/types.ts
-
-### A2. Replica key parsing is error-prone
-**Problem:** `replicaKey.split(':')[0]` vs `[1]` causes bugs (just fixed one).
-**Solution:** Add `parseReplicaKey(key): {entityId, signerId}` helper in runtime.
-**Files:** runtime/utils.ts (new), xlnStore.ts, Graph3DPanel.svelte
-
-### A3. xlnomies inconsistent type (Map vs Array)
-**Problem:** `env.xlnomies` is Map in live mode, Array in history. Code has dual handling.
-**Solution:** Always use Map. Serialize properly in history snapshots.
-**Files:** runtime/types.ts, state-helpers.ts, Graph3DPanel.svelte:611-614
-
-### A4. Time-travel is bolted on, not designed in
-**Problem:** `history[]` stores full snapshots (memory hog). Panels mix live/historical reads.
-**Solution:** Design proper time-travel-aware state access pattern.
-**Files:** xlnStore.ts, all panels that read replicas
-
-### A5. Graph3DPanel is 6000+ lines
-**Problem:** Unmaintainable god-component.
-**Solution:** Split: EntityRenderer, ConnectionRenderer, JMachineRenderer, CameraController
-**Files:** Graph3DPanel.svelte → multiple files
-
-### A6. Profiles vs Replicas vs Entities confusion
-**Problem:** Three overlapping concepts. Which is source of truth?
-- `gossipProfiles` - from gossip layer
-- `replicas` - from consensus
-- Entities in EntitiesPanel
-**Solution:** Define clear ownership: Entity is canonical, replica is state, profile is metadata.
-**Files:** Needs design doc first
-
-### A7. Frontend reimplements runtime types
-**Problem:** `xlnFunctions` wraps XLN instance methods with different error handling.
-**Solution:** Single source of truth in runtime, frontend just consumes.
-**Files:** xlnStore.ts:198-344
-
----
-
-## 🎯 NEXT SESSION PRIORITIES:
-
-### 1. Visual E2E Testing (HIGH)
-- Run AHB demo end-to-end
-- Verify sphere sizes look correct with new formula
-- Confirm grey/green coloring matches reserves
-
-### 2. Multi-Agent Onboarding (HIGH)
-- Invite codex-reviewer, gemini-tester to .agents/
-- Create first task in queue/
-- Test consensus flow
-
-### 3. SettingsPanel Slider (MEDIUM)
-- Add `dollarsPerPx` slider to SettingsPanel
-- Auto-adjust to prevent sphere overlap
-
-### 4. File Splitting (LOW)
-- ArchitectPanel.svelte is huge (~2300 lines)
-- Consider splitting into sub-components
-
----
-
-## 📋 LOW HANGS (can do quickly):
+## 📋 LOW HANGS (Quick wins):
 
 1. **Settings slider for dollarsPerPx** - ~20 lines in SettingsPanel.svelte
 2. **Kill stale background shells** - Many zombie processes running
 3. **Add .agents/ to .gitignore** - Prevent papertrail from bloating repo
-
----
-
-## 🤖 MULTI-AGENT ONBOARDING PROMPT:
-
-```
-You are joining the XLN multi-agent development team.
-READ THIS FIRST: /Users/zigota/xln/.agents/multiagent.md
-
-After reading:
-1. Create your profile in .agents/profiles/{your-codename}.md
-2. Write "ready" to .agents/inbox/{your-codename}/ready.md
-3. Check .agents/queue/ for unclaimed tasks
-4. Follow papertrail protocol for ALL interactions
-
-Your codename: codex-reviewer | gemini-tester | glm-auditor
-```
-
----
-
-## 📝 HUMAN COMMANDS (1 letter):
-
-- `y` = approve & continue
-- `n` = reject (explain why)
-- `?` = show status
-- `!` = emergency stop
-- `1-9` = pick option
-- ` ` = skip/next

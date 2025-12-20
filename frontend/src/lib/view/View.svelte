@@ -12,8 +12,6 @@
   import { DockviewComponent } from 'dockview';
   import './utils/frontendLogger'; // Initialize global log control
   import Graph3DPanel from './panels/Graph3DPanel.svelte';
-  import EntitiesPanel from './panels/EntitiesPanel.svelte';
-  import DepositoryPanel from './panels/DepositoryPanel.svelte';
   import ArchitectPanel from './panels/ArchitectPanel.svelte';
   import ConsolePanel from './panels/ConsolePanel.svelte';
   import RuntimeIOPanel from './panels/RuntimeIOPanel.svelte';
@@ -21,6 +19,10 @@
   import InsurancePanel from './panels/InsurancePanel.svelte';
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
   import SolvencyPanel from './panels/SolvencyPanel.svelte';
+  // REMOVED PANELS:
+  // - EntitiesPanel: Graph3D entity cards provide better UX
+  // - DepositoryPanel: JurisdictionPanel shows same data with better tables
+  // - ConsolePanel: Now embedded in SettingsPanel as tab
   import EntityPanelWrapper from './panels/wrappers/EntityPanelWrapper.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
   import Tutorial from './components/Tutorial.svelte';
@@ -264,17 +266,6 @@
               isolatedTimeIndex: localTimeIndex
             }
           });
-        } else if (options.name === 'entities') {
-          component = mount(EntitiesPanel, {
-            target: div,
-            props: {
-              isolatedEnv: localEnvStore,
-              isolatedHistory: localHistoryStore,
-              isolatedTimeIndex: localTimeIndex
-            }
-          });
-        } else if (options.name === 'depository') {
-          component = mount(DepositoryPanel, { target: div });
         } else if (options.name === 'architect') {
           component = mount(ArchitectPanel, {
             target: div,
@@ -380,16 +371,36 @@
       },
     });
 
-    // Clear any saved layout to ensure fresh default layout
-    localStorage.removeItem('xln-dockview-layout');
+    // Expose dockview to window for Settings panel access
+    if (typeof window !== 'undefined') {
+      (window as any).__dockview_instance = dockview;
+    }
+
+    // Try to restore saved layout from localStorage
+    const savedLayout = localStorage.getItem('xln-workspace-layout');
+    let shouldRestoreLayout = false;
+    if (savedLayout) {
+      try {
+        const config = JSON.parse(savedLayout);
+        if (config.dockview) {
+          console.log('[View] Found saved layout, will restore after creating panels');
+          shouldRestoreLayout = true;
+        }
+      } catch (err) {
+        console.warn('[View] Invalid saved layout, using defaults');
+        localStorage.removeItem('xln-workspace-layout');
+      }
+    }
 
     // Default layout: Graph3D (2/3) + Right sidebar (1/3) with ALL panels stacked
-    // Dockview: 'within' adds tabs to the END of the group - so add in desired order
-    // Final desired tab order: Architect | Entities | Console | Depository | Runtime I/O | Settings | Insurance
+    // Core panels are NON-CLOSEABLE (entity panels are closeable)
     const graph3d = dockview.addPanel({
       id: 'graph3d',
       component: 'graph3d',
       title: '🌐 Graph3D',
+      params: {
+        closeable: false, // Core panel - cannot close
+      },
     });
 
     // Architect FIRST (leftmost tab) - create the right panel group
@@ -398,33 +409,16 @@
       component: 'architect',
       title: '🎬 Architect',
       position: { direction: 'right', referencePanel: 'graph3d' },
+      params: {
+        closeable: false, // Core panel - cannot close
+      },
     });
 
     // Add remaining panels in order (they append to the tab group)
     // ALL panels after Architect get inactive:true to prevent stealing focus
-    dockview.addPanel({
-      id: 'entities',
-      component: 'entities',
-      title: '🏢 Entities',
-      position: { direction: 'within', referencePanel: 'architect' },
-      inactive: true,
-    });
 
-    dockview.addPanel({
-      id: 'console',
-      component: 'console',
-      title: '📋 Console',
-      position: { direction: 'within', referencePanel: 'architect' },
-      inactive: true,
-    });
-
-    dockview.addPanel({
-      id: 'depository',
-      component: 'depository',
-      title: '💰 Depository',
-      position: { direction: 'within', referencePanel: 'architect' },
-      inactive: true,
-    });
+    // Console REMOVED - now embedded in Settings panel as tab
+    // Depository REMOVED - JurisdictionPanel shows same data
 
     dockview.addPanel({
       id: 'jurisdiction',
@@ -432,6 +426,9 @@
       title: '🏛️ Jurisdiction',
       position: { direction: 'within', referencePanel: 'architect' },
       inactive: true,
+      params: {
+        closeable: false, // Core panel - cannot close
+      },
     });
 
     dockview.addPanel({
@@ -440,6 +437,9 @@
       title: '🔄 Runtime I/O',
       position: { direction: 'within', referencePanel: 'architect' },
       inactive: true,
+      params: {
+        closeable: false, // Core panel - cannot close
+      },
     });
 
     dockview.addPanel({
@@ -448,25 +448,38 @@
       title: '⚙️ Settings',
       position: { direction: 'within', referencePanel: 'architect' },
       inactive: true,
+      params: {
+        closeable: false, // Core panel - cannot close
+      },
     });
 
-    dockview.addPanel({
-      id: 'insurance',
-      component: 'insurance',
-      title: '🛡️ Insurance',
-      position: { direction: 'within', referencePanel: 'architect' },
-      inactive: true,
-    });
+    // REMOVED PANELS (merged elsewhere):
+    // - Insurance: now in EntityPanel after Reserves
+    // - Solvency: now in RuntimeIOPanel as first section
 
-    // Architect should already be active (it was created first in the group)
-    // But ensure it with a setTimeout as final guarantee
-    setTimeout(() => {
-      const architectPanel = dockview.getPanel('architect');
-      if (architectPanel) {
-        architectPanel.api.setActive();
-        console.log('[View] ✅ Architect panel set as active tab');
-      }
-    }, 0);
+    // Restore saved layout if available
+    if (shouldRestoreLayout && savedLayout) {
+      setTimeout(() => {
+        try {
+          const config = JSON.parse(savedLayout);
+          if (config.dockview) {
+            dockview.fromJSON(config.dockview);
+            console.log('[View] ✅ Layout restored from localStorage');
+          }
+        } catch (err) {
+          console.warn('[View] Failed to restore layout:', err);
+        }
+      }, 100);
+    } else {
+      // Architect should already be active (it was created first in the group)
+      setTimeout(() => {
+        const architectPanel = dockview.getPanel('architect');
+        if (architectPanel) {
+          architectPanel.api.setActive();
+          console.log('[View] ✅ Architect panel set as active tab');
+        }
+      }, 0);
+    }
 
     // Set initial sizes based on mode
     const graph3dApi = dockview.getPanel('graph3d');
@@ -489,15 +502,23 @@
     // TODO: Custom layout serialization that doesn't use fromJSON/toJSON
     // Save panel IDs, positions, sizes manually and recreate on mount
 
-    // Save layout on change (for future custom implementation)
+    // Auto-save layout on ANY change (debounced)
+    let saveLayoutTimer: ReturnType<typeof setTimeout> | null = null;
     dockview.onDidLayoutChange(() => {
-      try {
-        const layout = dockview.toJSON();
-        localStorage.setItem('xln-dockview-layout', JSON.stringify(layout));
-        console.log('[View] Layout saved (custom restore pending)');
-      } catch (err) {
-        console.warn('[View] Failed to save layout:', err);
-      }
+      if (saveLayoutTimer) clearTimeout(saveLayoutTimer);
+      saveLayoutTimer = setTimeout(() => {
+        try {
+          const config = {
+            version: '1.0.0',
+            timestamp: new Date().toISOString(),
+            dockview: dockview.toJSON(),
+          };
+          localStorage.setItem('xln-workspace-layout', JSON.stringify(config));
+          console.log('[View] ✅ Layout auto-saved');
+        } catch (err) {
+          console.warn('[View] Failed to auto-save layout:', err);
+        }
+      }, 500); // Debounce 500ms
     });
 
     // Listen for entity panel requests from Graph3D (click on entity node)
@@ -530,7 +551,10 @@
           id: panelId,
           component: 'entity-panel',
           title: `🏢 ${entityName || entityId.slice(0, 10) + '...'}`,
-          position: { direction: 'within', referencePanel: 'architect' }
+          position: { direction: 'within', referencePanel: 'architect' },
+          params: {
+            closeable: true, // Entity panels ARE closeable (dynamic)
+          },
         });
         console.log('[View] ✅ Entity panel created:', entityId.slice(0, 10));
       } catch (err) {

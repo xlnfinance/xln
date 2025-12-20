@@ -380,7 +380,7 @@ This is not a limitation. It's a design principle.
 
 ## References
 
-- [FIFO Debt Enforcement](/vibepaper/readme.md#rcpe-primitive)
-- [J-Machine Architecture](/vibepaper/jea.md)
-- [Prior Art: Why Not Lightning?](/vibepaper/priorart.md)
+- [FIFO Debt Enforcement](/docs/readme.md#rcpe-primitive)
+- [J-Machine Architecture](/docs/jea.md)
+- [Prior Art: Why Not Lightning?](/docs/priorart.md)
 - [Depository.sol Implementation](/jurisdictions/contracts/Depository.sol)

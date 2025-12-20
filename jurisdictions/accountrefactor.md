@@ -327,7 +327,7 @@ struct AccountInfo { ... }
 struct AccountCollateral { ... }
 ```
 
-**Rationale:** XLN calls bilateral relationships "accounts", not "channels" (see vibepaper/jea.md).
+**Rationale:** XLN calls bilateral relationships "accounts", not "channels" (see docs/jea.md).
 
 ---
 
@@ -1075,7 +1075,7 @@ Step 5: Deploy to Base                        30m
 - **EIP-170:** Contract size limit (24KB)
 - **Solidity docs:** Libraries and storage
 - **Current contract:** `/Users/zigota/xln/jurisdictions/contracts/Depository.sol`
-- **XLN architecture:** `/Users/zigota/xln/vibepaper/jea.md`
+- **XLN architecture:** `/Users/zigota/xln/docs/jea.md`
 
 ---
 

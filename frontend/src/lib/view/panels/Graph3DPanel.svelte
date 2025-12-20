@@ -794,6 +794,15 @@ let vrHammer: VRHammer | null = null;
       while (jMachineTxBoxes.length < mempoolSize) {
         const txIndex = jMachineTxBoxes.length;
         const tx = mempool[txIndex];
+
+        // Trigger visual animation: yellow cube flies from entity to J-Machine
+        if (tx && (tx.from || tx.entityId)) {
+          const sourceEntityId = tx.from || tx.entityId;
+          // Animate flying cube from entity to J-Machine (100ms flight)
+          animateR2RTransfer(sourceEntityId, '', 0n);
+          console.log(`[Graph3D] 📤 TX flying from entity ${sourceEntityId.slice(-4)} to J-Machine`);
+        }
+
         const txCube = createMempoolTxCube(txIndex, tx, nextBlockHeight);
         activeJMachine.add(txCube);
         jMachineTxBoxes.push(txCube);
@@ -880,29 +889,104 @@ let vrHammer: VRHammer | null = null;
     return group;
   }
 
-  // Format mempool tx into short label: "#2 R2R: 1→2 $3M"
+  // Format mempool tx into detailed label with batch contents
   function formatMempoolTxLabel(tx: any, blockHeight?: number): string {
+    if (!tx) return 'batch';
+
+    // If it's a batch with data, show detailed contents
+    if (tx.type === 'batch' && tx.data?.batch) {
+      const batch = tx.data.batch;
+      const parts: string[] = [];
+
+      // R2R operations (neutral - white)
+      const r2rCount = batch.reserveToReserve?.length || 0;
+      if (r2rCount > 0) parts.push(`${r2rCount}R2R`);
+
+      // R2C operations (deposits - green)
+      const r2cCount = batch.reserveToCollateral?.length || 0;
+      if (r2cCount > 0) parts.push(`+${r2cCount}R2C`);
+
+      // Settlements (red/green based on diffs)
+      const settlements = batch.settlements || [];
+      let withdrawals = 0; // Red (collateral out)
+      let deposits = 0; // Green (collateral in)
+
+      for (const settle of settlements) {
+        for (const diff of settle.diffs || []) {
+          if (diff.collateralDiff < 0) withdrawals++;
+          if (diff.collateralDiff > 0) deposits++;
+        }
+      }
+
+      if (withdrawals > 0) parts.push(`-${withdrawals}W`); // W=withdrawal (red)
+      if (deposits > 0) parts.push(`+${deposits}D`); // D=deposit (green)
+
+      const summary = parts.join(' ') || 'empty';
+      const fromEntity = tx.entityId?.slice(-1) || '?';
+      return `E${fromEntity}: ${summary}`;
+    }
+
+    // Legacy format
     const blockPrefix = blockHeight !== undefined ? `#${blockHeight} ` : '';
     const type = (tx.type || 'tx').toUpperCase();
-    const from = tx.from?.slice(-1) || '?'; // Last digit of address
+    const from = tx.from?.slice(-1) || '?';
     const to = tx.to?.slice(-1) || '?';
     const amount = tx.amount ? `$${Number(tx.amount / (10n ** 18n) / 1_000_000n)}M` : '';
     return `${blockPrefix}${type}: ${from}→${to} ${amount}`.trim();
   }
 
-  // Create text sprite for tx label
+  // Create text sprite for tx label with dual-color support for mixed W/D
   function createTxLabelSprite(text: string): THREE.Sprite {
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d')!;
-    canvas.width = 128;
-    canvas.height = 32;
+    canvas.width = 256;
+    canvas.height = 48;
 
-    // Draw text
-    ctx.fillStyle = '#ffcc00';
+    // Background
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
     ctx.font = 'bold 14px monospace';
-    ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(text, 64, 16);
+
+    // Check if text has BOTH withdrawals and deposits
+    const hasWithdrawals = text.includes('-') && text.includes('W');
+    const hasDeposits = text.includes('+') && text.includes('D');
+
+    if (hasWithdrawals && hasDeposits) {
+      // Dual-color: Split text and render each part separately
+      // Example: "E2: -1W +1D" → "E2: " (yellow) + "-1W" (red) + " " + "+1D" (green)
+      const parts = text.split(/(\-\d+W|\+\d+D)/g).filter(p => p);
+
+      ctx.textAlign = 'left';
+      let x = 10; // Start position
+
+      for (const part of parts) {
+        if (part.match(/\-\d+W/)) {
+          ctx.fillStyle = '#ff4444'; // Red for withdrawals
+        } else if (part.match(/\+\d+D/)) {
+          ctx.fillStyle = '#00ff88'; // Green for deposits
+        } else {
+          ctx.fillStyle = '#ffcc00'; // Yellow for entity/neutral
+        }
+
+        ctx.fillText(part, x, 24);
+        x += ctx.measureText(part).width;
+      }
+    } else {
+      // Single color (existing logic)
+      ctx.textAlign = 'center';
+
+      if (hasDeposits) {
+        ctx.fillStyle = '#00ff88'; // Green
+      } else if (hasWithdrawals) {
+        ctx.fillStyle = '#ff4444'; // Red
+      } else {
+        ctx.fillStyle = '#ffcc00'; // Yellow
+      }
+
+      ctx.fillText(text, 128, 24);
+    }
 
     const texture = new THREE.CanvasTexture(canvas);
     const spriteMaterial = new THREE.SpriteMaterial({
