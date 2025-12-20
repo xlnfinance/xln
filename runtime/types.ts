@@ -3,7 +3,91 @@
  * All interfaces and type definitions used across the XLN system
  *
  * ═══════════════════════════════════════════════════════════════════════
- * XLN MESSAGE FLOW: Runtime → Entity → Account (R→E→A)
+ * R→E→A→J ARCHITECTURE (Hierarchical Containment)
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * The naming reflects CONTAINMENT HIERARCHY (what contains what):
+ *
+ * Runtime (R) - Top-level coordinator
+ *   ├─ Contains: J-replicas (jurisdictions) + E-replicas (entities)
+ *   ├─ Responsibilities:
+ *   │   - Tick orchestration (100ms discrete steps)
+ *   │   - Input routing (entityInputs → E-layer, jInputs → J-layer)
+ *   │   - Output merging (prevents same-tick cascades)
+ *   │   - Env lifecycle (state, history, snapshots, time machine)
+ *   └─ Why "Runtime"?
+ *       - It's the runtime environment for all state machines
+ *       - Like OS: manages processes (E-replicas), resources (J-state)
+ *       - Provides deterministic execution (env.timestamp control)
+ *
+ * Entity (E) - BFT consensus state machines
+ *   ├─ Contains: A-machines (bilateral accounts in entity.state.accounts)
+ *   ├─ Responsibilities:
+ *   │   - Multi-party consensus (threshold signatures)
+ *   │   - Internal governance (proposals, votes)
+ *   │   - Account management (owns bilateral relationships)
+ *   │   - J-batch accumulation (queue operations for on-chain)
+ *   └─ Why Entity-first?
+ *       - Entities own accounts (not vice versa)
+ *       - Entity = legal/organizational boundary
+ *       - Account exists WITHIN entity context
+ *
+ * Account (A) - Bilateral consensus machines
+ *   ├─ Contains: Per-token deltas (giant table, indexed by tokenId)
+ *   ├─ Responsibilities:
+ *   │   - 2-of-2 signatures (both entities must agree)
+ *   │   - Frame-based consensus (propose → sign → commit)
+ *   │   - Delta transformations (payments, HTLCs, swaps)
+ *   │   - Credit limits (left/right perspective)
+ *   └─ Why Account-before-Jurisdiction?
+ *       - Accounts are off-chain (high frequency)
+ *       - J-layer is final settlement (low frequency)
+ *       - A→J not J→A (accounts settle TO jurisdiction)
+ *
+ * Jurisdiction (J) - EVM settlement layer
+ *   ├─ Contains: On-chain state (reserves, collaterals, EVM contracts)
+ *   ├─ Responsibilities:
+ *   │   - Mempool (batches pending execution)
+ *   │   - Block processing (executes batches after blockDelayMs)
+ *   │   - FIFO debt enforcement (enforceDebts on reserve updates)
+ *   │   - Final truth (on-chain state root)
+ *   └─ Why Jurisdiction-last?
+ *       - Slowest layer (block time delay)
+ *       - Highest finality (on-chain proof)
+ *       - Other layers settle TO it (terminal layer)
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * WHY R→E→A→J (Not J→E→A→R or E→A→J→R)?
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * 1. CONTAINMENT HIERARCHY:
+ *    Runtime contains {jReplicas, eReplicas}
+ *    Entity contains {accounts}
+ *    Account contains {deltas}
+ *    Jurisdiction contains {reserves, collaterals}
+ *
+ * 2. EXECUTION FLOW MATCHES:
+ *    User action → Runtime.process()
+ *                → applyEntityInput (E-layer)
+ *                  → applyEntityTx (E-machine)
+ *                    → processAccountTx (A-machine)
+ *                      → jOutputs → J-mempool
+ *                        → J-processor → BrowserVM
+ *
+ * 3. MENTAL MODEL:
+ *    "Runtime runs Entities which manage Accounts that settle via Jurisdictions"
+ *    Not: "Jurisdictions run Entities..." (backwards)
+ *    Not: "Entities run Runtime..." (inverted)
+ *
+ * 4. ALTERNATIVE ORDERS (Why They're Wrong):
+ *    - J→E→A→R: Implies J contains E (wrong - E registers WITH J)
+ *    - E→A→J→R: Implies R is innermost (wrong - R is outermost)
+ *    - A→E→J→R: Implies A contains E (backwards!)
+ *
+ * R→E→A→J is the NATURAL order: container → contained → contained → terminal.
+ *
+ * ═══════════════════════════════════════════════════════════════════════
+ * XLN MESSAGE FLOW: Runtime → Entity → Account → Jurisdiction
  * ═══════════════════════════════════════════════════════════════════════
  *
  * 1. RuntimeInput (External trigger - 100ms tick or user action)
