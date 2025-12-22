@@ -338,9 +338,9 @@ describe("Depository", function () {
       proofbody.subcontracts.push({ 
         subcontractProviderAddress: await scProvider.getAddress(), 
         encodedBatch,
-        allowences: [
-          { deltaIndex: 0, leftAllowence: 1000, rightAllowence: 1000 },
-          { deltaIndex: 1, leftAllowence: 1000, rightAllowence: 1000 },
+        allowances: [
+          { deltaIndex: 0, leftAllowance: 1000, rightAllowance: 1000 },
+          { deltaIndex: 1, leftAllowance: 1000, rightAllowance: 1000 },
         ]
       })
 

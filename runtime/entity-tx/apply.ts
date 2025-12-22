@@ -220,7 +220,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
             prevFrameHash: '',
             tokenIds: [],
             deltas: [],
-            stateHash: ''
+            stateHash: '',
+            byLeft: entityState.entityId < entityTx.data.targetEntityId,
           },
           sentTransitions: 0,
           ackedTransitions: 0,
@@ -247,6 +248,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           frameHistory: [],
           pendingWithdrawals: new Map(),
           requestedRebalance: new Map(),
+          locks: new Map(), // HTLC: Initialize empty locks
         });
       }
 
@@ -278,16 +280,24 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // CRITICAL: Notify counterparty to create mirror account
       // Without this, Hub won't know about Alice-Hub account when j-events arrive!
-      const counterpartySigner = entityTx.data.targetEntityId.slice(0, 10) + '-signer'; // TODO: Get real signer
+      // Look up actual signer from env.eReplicas (key format: entityId:signerId)
+      const targetEntityId = entityTx.data.targetEntityId;
+      let counterpartySigner = 's1'; // Fallback
+      for (const [replicaKey] of env.eReplicas.entries()) {
+        if (replicaKey.startsWith(targetEntityId + ':')) {
+          counterpartySigner = replicaKey.split(':')[1] || 's1';
+          break;
+        }
+      }
       outputs.push({
-        entityId: entityTx.data.targetEntityId,
+        entityId: targetEntityId,
         signerId: counterpartySigner,
         entityTxs: [{
           type: 'openAccount',
           data: { targetEntityId: entityState.entityId }
         }]
       });
-      console.log(`📤 Sent openAccount request to counterparty ${formatEntityId(entityTx.data.targetEntityId)}`);
+      console.log(`📤 Sent openAccount request to counterparty ${formatEntityId(targetEntityId)} (signer: ${counterpartySigner})`);
 
       // Broadcast updated profile to gossip layer
       if (env.gossip) {
@@ -297,6 +307,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       return { newState, outputs };
+    }
+
+    if (entityTx.type === 'htlcPayment') {
+      const { handleHtlcPayment } = await import('./handlers/htlc-payment');
+      return await handleHtlcPayment(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'directPayment') {

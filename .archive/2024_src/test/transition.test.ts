@@ -27,8 +27,8 @@ describe('Transition Unit Tests', function() {
           tokenId: 1,
           leftCreditLimit: 100n,
           rightCreditLimit: 100n,
-          leftAllowence: 0n,
-          rightAllowence: 0n,
+          leftAllowance: 0n,
+          rightAllowance: 0n,
           collateral: 0n,
           ondelta: 0n,
           offdelta: 0n,
@@ -40,8 +40,8 @@ describe('Transition Unit Tests', function() {
               offdelta: 0n,
               leftCreditLimit: 100n,
               rightCreditLimit: 100n,
-              leftAllowence: 0n,
-              rightAllowence: 0n
+              leftAllowance: 0n,
+              rightAllowance: 0n
             }
           ],
           cooperativeNonce: 0,

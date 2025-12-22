@@ -542,6 +542,10 @@ const applyRuntimeInput = async (
 
             // 📦 J-Batch system - will be initialized on first use
             jBatchState: undefined,
+
+            // 🔒 HTLC routing and fee tracking
+            htlcRoutes: new Map(),
+            htlcFeesEarned: 0n,
           },
         };
 
@@ -1617,6 +1621,15 @@ export const process = async (
 
       if (result.entityOutbox.length > 0) {
         console.log(`📤 TICK: ${result.entityOutbox.length} outputs queued for next tick → [${result.entityOutbox.map(o => o.entityId.slice(-4)).join(',')}]`);
+        // DEBUG: Check if prevSignatures survives the queue
+        for (const out of result.entityOutbox) {
+          for (const tx of out.entityTxs || []) {
+            if (tx.type === 'accountInput' && tx.data) {
+              const d = tx.data as any;
+              console.log(`🔍 QUEUED: ${out.entityId.slice(-4)} accountInput h=${d.height} prevSigs=${!!d.prevSignatures}`);
+            }
+          }
+        }
       }
     }
 

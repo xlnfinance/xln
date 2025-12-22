@@ -8,8 +8,8 @@ export interface Delta {
   offdelta: bigint;
   leftCreditLimit: bigint;
   rightCreditLimit: bigint;
-  leftAllowence: bigint;
-  rightAllowence: bigint;
+  leftAllowance: bigint;
+  rightAllowance: bigint;
 }
 
 export interface ProposedEventData {
@@ -25,8 +25,8 @@ export interface Subchannel {
   tokenId: number;
   leftCreditLimit: bigint;
   rightCreditLimit: bigint;
-  leftAllowence: bigint;
-  rightAllowence: bigint;
+  leftAllowance: bigint;
+  rightAllowance: bigint;
   collateral: bigint;
   ondelta: bigint;
   offdelta: bigint;
@@ -45,8 +45,8 @@ export function createSubchannelData(chainId: number, tokenId: number): Subchann
     offdelta: 0n,
     leftCreditLimit: 0n,
     rightCreditLimit: 0n,
-    leftAllowence: 0n,
-    rightAllowence: 0n
+    leftAllowance: 0n,
+    rightAllowance: 0n
   };
 
   const subchannel: Subchannel = {
@@ -54,8 +54,8 @@ export function createSubchannelData(chainId: number, tokenId: number): Subchann
     tokenId: tokenId,
     leftCreditLimit: 0n,
     rightCreditLimit: 0n,
-    leftAllowence: 0n,
-    rightAllowence: 0n,
+    leftAllowance: 0n,
+    rightAllowance: 0n,
     collateral: 0n,
     ondelta: 0n,
     offdelta: 0n,

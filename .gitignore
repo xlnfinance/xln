@@ -25,7 +25,6 @@ frontend/src/lib/generated/version.ts
 # Backend generated files
 dist/
 jurisdictions.json
-db/
 
 # Contract artifacts (jurisdictions/)
 jurisdictions/artifacts/
@@ -37,11 +36,11 @@ jurisdictions/ignition/deployments/chain-1337/
 pids/
 *.pid
 
-# E2E test artifacts (proofs/)
-proofs/test-results/
-proofs/**/test-results/
-proofs/playwright-report/
-proofs/screenshots/
+# Test artifacts
+tests/test-results/
+tests/**/test-results/
+tests/playwright-report/
+tests/screenshots/
 playwright-report/
 test-results/
 .playwright-mcp/
@@ -49,9 +48,9 @@ test-results/
 # Archive (old implementations)
 # .archive/ - NOW PUBLIC (was private, going open source)
 
-# Simnet state
-simnet/state/
-simnet/*.db
+# Simnet state (removed)
+# simnet/state/
+# simnet/*.db
 
 # Production/deployment scripts
 PRODUCTION-FIX-LOG.md
@@ -63,18 +62,10 @@ start-production.sh
 
 # Legacy
 nul
-*.pem
 
 # Development certificates (generated locally)
 *.pem
 
-# macOS junk
-.DS_Store
-**/.DS_Store
-
-# Test artifacts
-playwright-report/
-test-results/
 
 # Development database
 db/
@@ -87,9 +78,9 @@ yarn.lock
 # Private internal files (never in public repo)
 # Naming convention: Keep strategy/sensitive docs in these directories
 # Public repo = showcase. Private repo = real work.
-reports/        # SEO audits, test results, architecture analysis
-private/        # Deployment automation, monitoring, CI/CD
-research/       # Experimental features not ready for public
+# reports/      # REMOVED - no longer generating session reports
+# private/      # REMOVED - empty folder deleted
+# research/     # REMOVED - moved to docs/research/
 
 # Voice paste transcriptions
 ai/*.txt

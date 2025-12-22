@@ -31,7 +31,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         prevFrameHash: '',
         tokenIds: [],
         deltas: [],
-        stateHash: ''
+        stateHash: '',
+        byLeft: state.entityId < input.fromEntityId, // Determine perspective
       },
       sentTransitions: 0,
       ackedTransitions: 0,
@@ -57,7 +58,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       },
       frameHistory: [],
       pendingWithdrawals: new Map(),
-          requestedRebalance: new Map(), // Phase 2: C→R withdrawal tracking
+      requestedRebalance: new Map(), // Phase 2: C→R withdrawal tracking
+      locks: new Map(), // HTLC: Empty locks map
     };
 
     newState.accounts.set(input.fromEntityId, accountMachine);
@@ -79,6 +81,109 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
     if (result.success) {
       addMessages(newState, result.events);
+
+      // === HTLC LOCK PROCESSING: Check if we need to forward ===
+      // CRITICAL: Only process NEW locks (prevent replay on re-processing same frame)
+      // Check if this is a NEW frame (just committed) by comparing heights
+      const justCommittedFrame = input.newAccountFrame;
+      const isNewFrame = justCommittedFrame && justCommittedFrame.height > (accountMachine.currentHeight - 1);
+
+      console.log(`🔍 HTLC-CHECK: isNewFrame=${isNewFrame}, inputHeight=${justCommittedFrame?.height}, currentHeight=${accountMachine.currentHeight}`);
+      console.log(`🔍 HTLC-CHECK: accountMachine.locks.size=${accountMachine.locks.size}`);
+
+      if (isNewFrame && justCommittedFrame.accountTxs) {
+        for (const accountTx of justCommittedFrame.accountTxs) {
+          console.log(`🔍 HTLC-CHECK: Checking committed tx type=${accountTx.type}`);
+          if (accountTx.type === 'htlc_lock') {
+            console.log(`🔍 HTLC-CHECK: Found htlc_lock in committed frame!`);
+            const lock = accountMachine.locks.get(accountTx.data.lockId);
+            console.log(`🔍 HTLC-CHECK: lock found? ${!!lock}`);
+            if (!lock) {
+              console.log(`❌ HTLC-CHECK: Lock not in accountMachine.locks (lockId=${accountTx.data.lockId.slice(0,16)}...)`);
+              continue;
+            }
+
+            // Check routing info (cleartext for Phase 2)
+            const routingInfo = (accountTx.data as any).routingInfo;
+            console.log(`🔍 HTLC-ROUTING: routingInfo exists? ${!!routingInfo}`);
+            if (routingInfo) {
+              console.log(`🔍 HTLC-ROUTING: finalRecipient=${routingInfo.finalRecipient?.slice(-4)}, us=${newState.entityId.slice(-4)}, match=${routingInfo.finalRecipient === newState.entityId}`);
+            }
+            if (!routingInfo) continue;
+
+            // Are we the final recipient?
+            if (routingInfo.finalRecipient === newState.entityId) {
+              console.log(`🎯 HTLC-ROUTING: WE ARE FINAL RECIPIENT!`);
+              // Final recipient - reveal immediately
+              if (routingInfo.secret) {
+                accountMachine.mempool.push({
+                  type: 'htlc_reveal',
+                  data: {
+                    lockId: lock.lockId,
+                    secret: routingInfo.secret
+                  }
+                });
+                console.log(`🎯 HTLC: Final recipient, revealing secret`);
+              }
+            } else if (routingInfo.route && routingInfo.route.length > 0) {
+              // Intermediary - determine next hop from route
+              // routingInfo.route is from sender's perspective: [hub, bob] when Hub receives
+              const actualNextHop = routingInfo.route[0]; // First in remaining route = our next hop
+
+              if (!actualNextHop) {
+                console.log(`❌ HTLC: No next hop in route`);
+                continue;
+              }
+
+              // Register route for backward propagation
+              newState.htlcRoutes.set(lock.hashlock, {
+                hashlock: lock.hashlock,
+                inboundEntity: accountMachine.counterpartyEntityId,
+                inboundLockId: lock.lockId,
+                outboundEntity: actualNextHop,
+                outboundLockId: `${lock.lockId}-fwd`,
+                createdTimestamp: env.timestamp
+              });
+
+              const nextAccount = newState.accounts.get(actualNextHop);
+              if (nextAccount) {
+                // Calculate forwarded amounts/timelocks
+                const { calculateHtlcFee, calculateHtlcFeeAmount } = await import('../../htlc-utils');
+                const forwardAmount = calculateHtlcFee(lock.amount);
+                const feeAmount = calculateHtlcFeeAmount(lock.amount);
+
+                // Track fees earned
+                newState.htlcFeesEarned += feeAmount;
+
+                // Forward HTLC with reduced timelock/height
+                // Update routing info: advance to next hop in route
+                const forwardRoute = routingInfo.route?.slice(1); // Remove current hop
+                const nextNextHop = forwardRoute && forwardRoute.length > 0 ? forwardRoute[0] : null;
+
+                nextAccount.mempool.push({
+                  type: 'htlc_lock',
+                  data: {
+                    lockId: `${lock.lockId}-fwd`,
+                    hashlock: lock.hashlock,
+                    timelock: lock.timelock - BigInt(10000), // 10s less
+                    revealBeforeHeight: lock.revealBeforeHeight - 1,
+                    amount: forwardAmount,
+                    tokenId: lock.tokenId,
+                    routingInfo: {
+                      nextHop: nextNextHop,
+                      finalRecipient: routingInfo.finalRecipient,
+                      route: forwardRoute,
+                      secret: routingInfo.secret
+                    }
+                  }
+                });
+
+                console.log(`➡️ HTLC: Forwarding to ${actualNextHop.slice(-4)}, amount ${forwardAmount} (fee ${feeAmount})`);
+              }
+            }
+          }
+        }
+      }
 
       // CRITICAL: Process multi-hop forwarding (consume pendingForward)
       // Skip if env.skipPendingForward (for AHB demo frame separation)
@@ -110,6 +215,39 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         }
 
         delete accountMachine.pendingForward;
+      }
+
+      // === HTLC SECRET PROPAGATION ===
+      // Check if any reveals happened in this frame
+      const revealedSecrets = result.revealedSecrets || [];
+      console.log(`🔍 HTLC-SECRET-CHECK: ${revealedSecrets.length} secrets revealed in frame`);
+
+      for (const { secret, hashlock } of revealedSecrets) {
+        console.log(`🔍 HTLC-SECRET: Processing revealed secret for hash ${hashlock.slice(0,16)}...`);
+        const route = newState.htlcRoutes.get(hashlock);
+        if (route) {
+          // Store secret
+          route.secret = secret;
+
+          // Propagate backward to sender (2024 hashlockMap pattern)
+          if (route.inboundEntity && route.inboundLockId) {
+            const senderAccount = newState.accounts.get(route.inboundEntity);
+            if (senderAccount) {
+              senderAccount.mempool.push({
+                type: 'htlc_reveal',
+                data: {
+                  lockId: route.inboundLockId,
+                  secret
+                }
+              });
+              console.log(`⬅️ HTLC: Propagating secret to ${route.inboundEntity.slice(-4)}`);
+            }
+          } else {
+            console.log(`✅ HTLC: Payment complete (we initiated)`);
+          }
+        } else {
+          console.log(`⚠️ HTLC: No route found for hashlock ${hashlock.slice(0,16)}...`);
+        }
       }
 
       // Send response (ACK + optional new frame)

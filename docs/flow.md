@@ -252,7 +252,7 @@ Credit Limits:
 
 Key formula:
 ```typescript
-outCapacity = inCollateral + outOwnCredit + inPeerCredit - outAllowence
+outCapacity = inCollateral + outOwnCredit + inPeerCredit - outAllowance
 ```
 
 ## consensus flow

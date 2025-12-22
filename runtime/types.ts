@@ -433,6 +433,18 @@ export type EntityTx =
       };
     }
   | {
+      type: 'htlcPayment';
+      data: {
+        targetEntityId: string;
+        tokenId: number;
+        amount: bigint;
+        route: string[]; // Full path from source to target
+        description?: string;
+        secret?: string;   // Optional - generated if not provided
+        hashlock?: string; // Optional - generated if not provided
+      };
+    }
+  | {
       type: 'requestWithdrawal';
       data: {
         counterpartyEntityId: string;
@@ -530,6 +542,49 @@ export interface AccountSnapshot {
   stateHash?: string; // Optional hash for cryptographic verification
 }
 
+// ═══════════════════════════════════════════════════════════════
+// HTLC (Hash Time-Locked Contracts)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * HTLC Lock - Conditional payment held until secret reveal or timeout
+ * Reference: 2024 StoredSubcontract (ChannelState.ts:4-11)
+ */
+export interface HtlcLock {
+  lockId: string;              // keccak256(hash + height + nonce)
+  hashlock: string;            // keccak256(secret) - 32 bytes hex
+  timelock: bigint;            // Expiry timestamp (unix-ms)
+  revealBeforeHeight: number;  // J-block height deadline (enforced on-chain)
+  amount: bigint;              // Locked amount
+  tokenId: number;             // Token being locked
+  senderIsLeft: boolean;       // Who initiated (canonical direction)
+  createdHeight: number;       // AccountFrame height when created
+  createdTimestamp: number;    // When lock was added (for logging)
+
+  // Onion routing (optional - cleartext in Phase 2, encrypted in Phase 3)
+  encryptedPackage?: string;   // Encrypted next-hop data
+}
+
+/**
+ * HTLC Routing Context (replaces 2024 User.hashlockMap)
+ * Tracks inbound/outbound hops for automatic secret propagation
+ */
+export interface HtlcRoute {
+  hashlock: string;
+
+  // Inbound hop (who sent us this HTLC)
+  inboundEntity?: string;
+  inboundLockId?: string;
+
+  // Outbound hop (who we forwarded to)
+  outboundEntity?: string;
+  outboundLockId?: string;
+
+  // Resolution
+  secret?: string;
+  createdTimestamp: number;
+}
+
 export interface AccountMachine {
   counterpartyEntityId: string;
   mempool: AccountTx[]; // Unprocessed account transactions
@@ -539,6 +594,9 @@ export interface AccountMachine {
 
   // Per-token delta states (giant per-token table like old_src)
   deltas: Map<number, Delta>; // tokenId -> Delta
+
+  // HTLC state (conditional payments)
+  locks: Map<string, HtlcLock>; // lockId → lock details
 
   // Global credit limits (in reference currency - USDC)
   globalCreditLimits: {
@@ -572,6 +630,13 @@ export interface AccountMachine {
   proofBody: {
     tokenIds: number[];
     deltas: bigint[];
+    // HTLC transformers (like 2024 subcontracts - sorted by deltaIndex)
+    htlcLocks?: Array<{
+      deltaIndex: number;       // Index in tokenIds array
+      amount: bigint;
+      revealedUntilBlock: number; // revealBeforeHeight
+      hash: string;             // hashlock
+    }>;
   };
   hankoSignature?: string; // Last signed proof by counterparty
   // Historical frame log - grows until manually pruned by entity
@@ -607,7 +672,7 @@ export interface AccountFrame {
   accountTxs: AccountTx[]; // Renamed from transitions
   prevFrameHash: string; // Hash of previous frame (creates chain linkage, not state linkage)
   stateHash: string;
-  // Removed isProposer - both sides can propose bilaterally
+  byLeft?: boolean; // Who proposed this frame (left or right entity)
   tokenIds: number[]; // Array of token IDs in this frame
   deltas: bigint[]; // Array of deltas corresponding to tokenIds (ondelta+offdelta for quick access)
   fullDeltaStates?: Delta[]; // OPTIONAL: Full delta objects (includes credit limits, allowances, collateral)
@@ -636,6 +701,10 @@ export interface Delta {
   rightCreditLimit: bigint;
   leftAllowance: bigint;
   rightAllowance: bigint;
+
+  // HTLC holds (capacity locked in pending HTLCs)
+  leftHtlcHold?: bigint;  // Left's outgoing HTLC holds
+  rightHtlcHold?: bigint; // Right's outgoing HTLC holds
 }
 
 // Derived account balance information per token
@@ -646,8 +715,8 @@ export interface DerivedDelta {
   outCollateral: bigint;
   inOwnCredit: bigint;
   outPeerCredit: bigint;
-  inAllowence: bigint;
-  outAllowence: bigint;
+  inAllowance: bigint;
+  outAllowance: bigint;
   totalCapacity: bigint;
   ownCreditLimit: bigint;
   peerCreditLimit: bigint;
@@ -714,6 +783,33 @@ export type AccountTx =
         amount: bigint; // How much collateral requested for insurance
       };
     }
+  // === HTLC TRANSACTION TYPES ===
+  | {
+      type: 'htlc_lock';
+      data: {
+        lockId: string;
+        hashlock: string;
+        timelock: bigint;
+        revealBeforeHeight: number;
+        amount: bigint;
+        tokenId: number;
+        encryptedPackage?: string;
+        routingInfo?: any; // Cleartext fallback for Phase 2 testing
+      };
+    }
+  | {
+      type: 'htlc_reveal';
+      data: {
+        lockId: string;
+        secret: string;
+      };
+    }
+  | {
+      type: 'htlc_timeout';
+      data: {
+        lockId: string;
+      };
+    }
   | {
       type: 'j_sync';
       data: {
@@ -755,6 +851,10 @@ export interface EntityState {
     remaining: bigint;
     expiresAt: bigint;
   }>;
+
+  // 🔒 HTLC Routing - Multi-hop payment tracking (like 2024 hashlockMap)
+  htlcRoutes: Map<string, HtlcRoute>; // hashlock → routing context
+  htlcFeesEarned: bigint; // Running total of HTLC routing fees collected
 
   // 💳 Debts - amounts owed to creditors (from FIFO queue)
   debts?: Array<{

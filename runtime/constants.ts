@@ -54,6 +54,32 @@ export const FINANCIAL = {
 } as const;
 
 // ═══════════════════════════════════════════════════════════════
+// HTLC (Hash Time-Locked Contracts)
+// ═══════════════════════════════════════════════════════════════
+
+export const HTLC = {
+  /** Minimum timelock delta per hop (simnet-optimized for speed) */
+  MIN_TIMELOCK_DELTA_MS: 10_000, // 10 seconds per hop
+
+  /** Maximum hops for HTLC routing (prevents loops) */
+  MAX_HOPS: 20,
+
+  /** Default HTLC expiry (30s = 3 hops × 10s) */
+  DEFAULT_EXPIRY_MS: 30_000,
+
+  /** Base fee in USD (micro basis points) */
+  BASE_FEE_USD: 0n, // No base fee
+
+  /** Fee rate in micro basis points (μbp) */
+  // 1 μbp = 0.0001 bp = 0.00001% = 1/10,000,000
+  // 100 μbp = 0.01 bp = 0.001% = 1 bp for hubs
+  FEE_RATE_UBP: 100n, // 1 basis point for hubs to see profits
+
+  /** Fee denominator for μbp calculation */
+  FEE_DENOMINATOR: 10_000_000n, // Fee = (amount × FEE_RATE_UBP) / FEE_DENOMINATOR
+} as const;
+
+// ═══════════════════════════════════════════════════════════════
 // TIMING & SYNCHRONIZATION
 // ═══════════════════════════════════════════════════════════════
 

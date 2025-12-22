@@ -264,8 +264,8 @@ export namespace Transition {
         tokenId: 0,
         leftCreditLimit: 0n,
         rightCreditLimit: 0n,
-        leftAllowence: 0n,
-        rightAllowence: 0n,
+        leftAllowance: 0n,
+        rightAllowance: 0n,
         collateral: 0n,
         ondelta: 0n,
         offdelta: 0n,
@@ -308,8 +308,8 @@ export namespace Transition {
           offdelta: 0n,
           leftCreditLimit: 0n,
           rightCreditLimit: 0n,
-          leftAllowence: 0n,
-          rightAllowence: 0n
+          leftAllowance: 0n,
+          rightAllowance: 0n
         });
       } else {
         console.log(dryRun, state);

@@ -979,15 +979,15 @@ contract Depository is Console, ReentrancyGuardLite {
 
 
 
-  struct Allowence {
+  struct Allowance {
     uint deltaIndex;
-    uint rightAllowence;
-    uint leftAllowence;
+    uint rightAllowance;
+    uint leftAllowance;
   }
   struct SubcontractClause {
     address subcontractProviderAddress;
     bytes encodedBatch;
-    Allowence[] allowences;
+    Allowance[] allowances;
   }
 
   struct ProofBody{
@@ -1772,15 +1772,15 @@ contract Depository is Console, ReentrancyGuardLite {
 
       require(newDeltas.length == deltas.length, "Depository: invalid subcontract response");
 
-      for (uint256 j = 0; j < sc.allowences.length; j++) {
-        Allowence memory allowance = sc.allowences[j];
+      for (uint256 j = 0; j < sc.allowances.length; j++) {
+        Allowance memory allowance = sc.allowances[j];
         require(allowance.deltaIndex < newDeltas.length, "Depository: invalid allowance index");
         int difference = newDeltas[allowance.deltaIndex] - deltas[allowance.deltaIndex];
 
         if (difference > 0) {
-          require(uint256(difference) <= allowance.rightAllowence, "Depository: allowance exceeded (right)");
+          require(uint256(difference) <= allowance.rightAllowance, "Depository: allowance exceeded (right)");
         } else if (difference < 0) {
-          require(uint256(-difference) <= allowance.leftAllowence, "Depository: allowance exceeded (left)");
+          require(uint256(-difference) <= allowance.leftAllowance, "Depository: allowance exceeded (left)");
         }
       }
 

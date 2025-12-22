@@ -27,17 +27,17 @@
     let outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
     let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
 
-    let inAllowence: bigint = delta.rightAllowance ?? 0n;
-    let outAllowence: bigint = delta.leftAllowance ?? 0n;
+    let inAllowance: bigint = delta.rightAllowance ?? 0n;
+    let outAllowance: bigint = delta.leftAllowance ?? 0n;
 
     const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
 
-    let inCapacity = nonNegative((outCollateral + inOwnCredit + outPeerCredit) - inAllowence);
-    let outCapacity = nonNegative((inCollateral + outOwnCredit + inPeerCredit) - outAllowence);
+    let inCapacity = nonNegative((outCollateral + inOwnCredit + outPeerCredit) - inAllowance);
+    let outCapacity = nonNegative((inCollateral + outOwnCredit + inPeerCredit) - outAllowance);
 
     if (!isLeftPerspective) {
-      [inCollateral, inAllowence, inCapacity, outCollateral, outAllowence, outCapacity] =
-      [outCollateral, outAllowence, outCapacity, inCollateral, inAllowence, inCapacity];
+      [inCollateral, inAllowance, inCapacity, outCollateral, outAllowance, outCapacity] =
+      [outCollateral, outAllowance, outCapacity, inCollateral, inAllowance, inCapacity];
 
       [ownCreditLimit, peerCreditLimit] = [peerCreditLimit, ownCreditLimit];
       [outOwnCredit, inOwnCredit, outPeerCredit, inPeerCredit] =
@@ -63,8 +63,8 @@
       outCollateral,
       inOwnCredit,
       outPeerCredit,
-      inAllowence,
-      outAllowence,
+      inAllowance,
+      outAllowance,
       totalCapacity,
       ownCreditLimit,
       peerCreditLimit,

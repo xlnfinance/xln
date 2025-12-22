@@ -63,16 +63,16 @@ struct InsuranceRegistration {
 
 // ========== TRANSFORMERS (was Subcontracts) ==========
 
-struct Allowence {
+struct Allowance {
   uint deltaIndex;
-  uint rightAllowence;
-  uint leftAllowence;
+  uint rightAllowance;
+  uint leftAllowance;
 }
 
 struct TransformerClause {
   address transformerAddress;
   bytes encodedBatch;
-  Allowence[] allowences;
+  Allowance[] allowances;
 }
 
 struct ProofBody {
