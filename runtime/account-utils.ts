@@ -62,21 +62,34 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   const peerCreditUsed = totalDelta < 0n ? nonNegative(-totalDelta - collateral) : 0n;
   const ownCreditUsed = totalDelta > 0n ? nonNegative(totalDelta - collateral) : 0n;
 
-  let inAllowence = delta.rightAllowance;
-  let outAllowence = delta.leftAllowance;
+  let inAllowance = delta.rightAllowance;
+  let outAllowance = delta.leftAllowance;
 
   const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
 
+  // HTLC holds (capacity locked in pending HTLCs)
+  const leftHold = delta.leftHtlcHold || 0n;
+  const rightHold = delta.rightHtlcHold || 0n;
+
   // Original formula: in* components for inCapacity, out* components for outCapacity
-  let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowence);
-  let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowence);
+  let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowance);
+  let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowance);
+
+  // CRITICAL: Deduct HTLC holds from capacity (prevents double-spend)
+  if (isLeft) {
+    outCapacity = nonNegative(outCapacity - leftHold);
+    inCapacity = nonNegative(inCapacity - rightHold);
+  } else {
+    outCapacity = nonNegative(outCapacity - rightHold);
+    inCapacity = nonNegative(inCapacity - leftHold);
+  }
 
   if (!isLeft) {
     // Flip for RIGHT entity perspective
-    [inCollateral, inAllowence, inCapacity,
-     outCollateral, outAllowence, outCapacity] =
-    [outCollateral, outAllowence, outCapacity,
-     inCollateral, inAllowence, inCapacity];
+    [inCollateral, inAllowance, inCapacity,
+     outCollateral, outAllowance, outCapacity] =
+    [outCollateral, outAllowance, outCapacity,
+     inCollateral, inAllowance, inCapacity];
 
     [ownCreditLimit, peerCreditLimit] = [peerCreditLimit, ownCreditLimit];
     [outOwnCredit, inOwnCredit, outPeerCredit, inPeerCredit] =
@@ -115,8 +128,8 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
     outCollateral,
     inOwnCredit,
     outPeerCredit,
-    inAllowence,
-    outAllowence,
+    inAllowance,
+    outAllowance,
     totalCapacity,
     ownCreditLimit,
     peerCreditLimit,

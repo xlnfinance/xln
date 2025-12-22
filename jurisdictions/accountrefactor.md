@@ -667,7 +667,7 @@ bunx hardhat run scripts/deploy.js --network baseSepolia
 - Settlement
 - ProofBody
 - SubcontractClause
-- Allowence
+- Allowance
 - InitialDisputeProof
 - FinalDisputeProof
 - CooperativeDisputeProof

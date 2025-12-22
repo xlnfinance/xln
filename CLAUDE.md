@@ -2,12 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**🤖 AGENTIC MODE: Read [agentic.md](./agentic.md) FIRST for autonomous execution protocol (80% confidence threshold)**
-**🧠 RESPONSE FORMAT: Read [adhd.md](./adhd.md) for visual hierarchy, ASCII headers, scannable layout (zero-attention-span optimized)**
+**🤖 AGENTIC MODE: Read [docs/contributing/agentic.md](./docs/contributing/agentic.md) FIRST for autonomous execution protocol (80% confidence threshold)**
+**🧠 RESPONSE FORMAT: Read [docs/contributing/adhd-format.md](./docs/contributing/adhd-format.md) for visual hierarchy, ASCII headers, scannable layout (zero-attention-span optimized)**
 
 **💎 MISSION: Building XLN for eternity. Code so secure even an 18-year-old hacker can't break it. Fintech-grade, audit-ready, deterministic. Focus on J/E/A trilayer correctness BEFORE features. No state mutations, pure functions only, immutable everywhere.**
 
-**🐛 BUG PREVENTION: Read [BUG_PREVENTION.md](./BUG_PREVENTION.md) - ALWAYS run `bun run check` before commit, test every button in browser with F12 console open, never swallow errors silently.**
+**🐛 BUG PREVENTION: Read [docs/contributing/bug-prevention.md](./docs/contributing/bug-prevention.md) - ALWAYS run `bun run check` before commit, test every button in browser with F12 console open, never swallow errors silently.**
 
 # CRITICAL CLAUDE CODE OVERRIDES
 

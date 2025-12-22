@@ -86,7 +86,7 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
     })),
     tokenIds: frame.tokenIds,
     deltas: frame.deltas.map(d => d.toString()), // Quick access sums
-    // AUDIT FIX: Include FULL delta state (credit limits, allowances, collateral)
+    // AUDIT FIX: Include FULL delta state (credit limits, allowances, collateral, HTLC holds)
     fullDeltaStates: frame.fullDeltaStates?.map(delta => ({
       tokenId: delta.tokenId,
       collateral: delta.collateral.toString(),
@@ -96,6 +96,8 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
       rightCreditLimit: delta.rightCreditLimit.toString(),
       leftAllowance: delta.leftAllowance.toString(),
       rightAllowance: delta.rightAllowance.toString(),
+      leftHtlcHold: (delta.leftHtlcHold || 0n).toString(),   // HTLC holds
+      rightHtlcHold: (delta.rightHtlcHold || 0n).toString(), // HTLC holds
     }))
   };
 
@@ -146,16 +148,36 @@ export async function proposeAccountFrame(
   // Clone account machine for validation
   const clonedMachine = cloneAccountMachine(accountMachine);
 
+  // Get entity's synced J-height for deterministic HTLC validation
+  const ourEntityId = accountMachine.proofHeader.fromEntity;
+  const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
+  const currentJHeight = ourReplica?.state.jBlock || 0;
+
   // Process all transactions on the clone
   const allEvents: string[] = [];
+  const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
+
   for (const accountTx of accountMachine.mempool) {
-    const result = processAccountTx(clonedMachine, accountTx, true); // Processing our own transactions
+    const result = await processAccountTx(
+      clonedMachine,
+      accountTx,
+      true, // Processing our own transactions
+      env.timestamp, // DETERMINISTIC timestamp
+      currentJHeight  // Entity's synced J-height
+    );
 
     if (!result.success) {
       return { success: false, error: `Tx validation failed: ${result.error}`, events: allEvents };
     }
 
     allEvents.push(...result.events);
+
+    // Collect revealed secrets for backward propagation
+    console.log(`🔍 TX-RESULT: type=${accountTx.type}, hasSecret=${!!result.secret}, hasHashlock=${!!result.hashlock}`);
+    if (result.secret && result.hashlock) {
+      console.log(`✅ Collected secret from ${accountTx.type}`);
+      revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
+    }
   }
 
   // CRITICAL FIX: Extract FULL delta state from clonedMachine.deltas (after processing)
@@ -194,6 +216,9 @@ export async function proposeAccountFrame(
     rightCreditLimit: d.rightCreditLimit?.toString(),
   })));
 
+  // Determine if we're left entity (for byLeft field)
+  const weAreLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
+
   // Create account frame matching the real AccountFrame interface
   const frameData = {
     height: accountMachine.currentHeight + 1,
@@ -204,6 +229,7 @@ export async function proposeAccountFrame(
       ? 'genesis'
       : accountMachine.currentFrame.stateHash || '',
     stateHash: '', // Will be filled after hash calculation
+    byLeft: weAreLeft, // Who proposed this frame
     tokenIds: finalTokenIds, // Use computed state from clonedMachine.deltas
     deltas: finalDeltas,      // Quick access: ondelta+offdelta sums
     fullDeltaStates          // AUDIT FIX: Full Delta objects for dispute proofs
@@ -259,7 +285,7 @@ export async function proposeAccountFrame(
     counter: skipCounterIncrement ? accountMachine.proofHeader.cooperativeNonce : ++accountMachine.proofHeader.cooperativeNonce,
   };
 
-  return { success: true, accountInput, events };
+  return { success: true, accountInput, events, revealedSecrets };
 }
 
 /**
@@ -335,6 +361,13 @@ export async function handleAccountInput(
           accountMachine.deltas.set(tokenId, { ...delta }); // Shallow copy of delta object
         }
 
+        // HTLC: Copy locks from cloned state
+        accountMachine.locks.clear();
+        for (const [lockId, lock] of accountMachine.clonedForValidation.locks.entries()) {
+          accountMachine.locks.set(lockId, { ...lock });
+        }
+        console.log(`🔒 COMMIT: Copied ${accountMachine.locks.size} HTLC locks`);
+
         // AFTER commit
         console.log(`💳💳💳 PROPOSER-COMMIT COMPLETE: Deltas after commit for ${accountMachine.counterpartyEntityId.slice(-4)}:`,
           Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
@@ -352,6 +385,7 @@ export async function handleAccountInput(
           tokenIds: accountMachine.pendingFrame.tokenIds,
           deltas: accountMachine.pendingFrame.deltas,
           stateHash: accountMachine.pendingFrame.stateHash,
+          byLeft: accountMachine.pendingFrame.byLeft,
         };
         accountMachine.currentHeight = accountMachine.pendingFrame.height;
 
@@ -375,6 +409,7 @@ export async function handleAccountInput(
       // CRITICAL: Don't return yet! Check if they also sent a new frame in same message
       // Channel.ts pattern: ACK + new frame can be batched (line 576-612)
       if (!input.newAccountFrame) {
+        console.log(`🔍 RETURN-ACK-ONLY: frame ${input.height} ACKed, no new frame bundled`);
         return { success: true, events }; // Only ACK, no new frame
       }
       // Fall through to process newAccountFrame below
@@ -417,10 +452,24 @@ export async function handleAccountInput(
       const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
       if (isLeftEntity) {
-        // We are LEFT - ignore their frame, keep ours (deterministic tiebreaker)
-        console.log(`📤 LEFT-WINS: Ignoring right's frame ${receivedFrame.height}, waiting for them to accept ours`);
-        // This is NOT an error - it's correct consensus behavior (no response needed)
-        return { success: true, events };
+        // We are LEFT - ignore their frame, but re-send our pending frame so they can roll back and ACK
+        console.log(`📤 LEFT-WINS: Ignoring right's frame ${receivedFrame.height}, re-sending ours for acknowledgement`);
+
+        const pendingFrame = accountMachine.pendingFrame;
+        const resendSignature = signAccountFrame(accountMachine.proofHeader.fromEntity, pendingFrame.stateHash);
+
+        const response: AccountInput = {
+          fromEntityId: accountMachine.proofHeader.fromEntity,
+          toEntityId: input.fromEntityId,
+          height: pendingFrame.height,
+          newAccountFrame: pendingFrame,
+          newSignatures: [resendSignature],
+          // Reuse last outbound counter to avoid tripping replay protection on their side
+          counter: accountMachine.proofHeader.cooperativeNonce,
+        };
+
+        events.push(`📤 LEFT-WINS: Re-sent frame ${pendingFrame.height} (counter=${response.counter})`);
+        return { success: true, response, events };
       } else {
         // We are RIGHT - rollback our frame, accept theirs
         if (accountMachine.rollbackCount === 0) {
@@ -471,17 +520,34 @@ export async function handleAccountInput(
       }
     }
 
+    // Get entity's synced J-height for deterministic HTLC validation
+    const ourEntityId = accountMachine.proofHeader.fromEntity;
+    const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
+    const currentJHeight = ourReplica?.state.jBlock || 0;
+
     // Apply frame transactions to clone (as receiver)
     const clonedMachine = cloneAccountMachine(accountMachine);
     const processEvents: string[] = [];
+    const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
 
     for (const accountTx of receivedFrame.accountTxs) {
       // When receiving a frame, we process transactions from counterparty's perspective (incoming)
-      const result = processAccountTx(clonedMachine, accountTx, false); // Processing their transactions = incoming
+      const result = await processAccountTx(
+        clonedMachine,
+        accountTx,
+        false, // Processing their transactions = incoming
+        env.timestamp, // DETERMINISTIC timestamp
+        currentJHeight  // Entity's synced J-height
+      );
       if (!result.success) {
         return { success: false, error: `Frame application failed: ${result.error}`, events };
       }
       processEvents.push(...result.events);
+
+      // Collect revealed secrets (CRITICAL for multi-hop)
+      if (result.secret && result.hashlock) {
+        revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
+      }
     }
 
     // STATE VERIFICATION: Compare deltas directly (both sides compute identically)
@@ -532,7 +598,10 @@ export async function handleAccountInput(
     });
 
     // Commit frame
+    console.log(`🔍 RECEIVER-COMMIT: clonedMachine.locks.size=${clonedMachine.locks.size}`);
     accountMachine.deltas = clonedMachine.deltas;
+    accountMachine.locks = clonedMachine.locks; // HTLC: Copy locks
+    console.log(`🔍 RECEIVER-COMMIT: accountMachine.locks.size after copy=${accountMachine.locks.size}`);
 
     // Log committed deltas for debugging credit limits
     console.log(`💳 COMMIT: Deltas after commit for ${accountMachine.counterpartyEntityId.slice(-4)}:`,
@@ -559,6 +628,7 @@ export async function handleAccountInput(
       tokenIds: receivedFrame.tokenIds,
       deltas: receivedFrame.deltas,
       stateHash: receivedFrame.stateHash,
+      byLeft: receivedFrame.byLeft, // Copy proposer info
     };
     accountMachine.currentHeight = receivedFrame.height;
 
@@ -581,6 +651,7 @@ export async function handleAccountInput(
     // CHANNEL.TS PATTERN (Lines 576-612): Batch ACK + new frame in same message!
     // Check if we should batch BEFORE incrementing counter
     let batchedWithNewFrame = false;
+    let proposeResult: Awaited<ReturnType<typeof proposeAccountFrame>> | undefined;
     const response: AccountInput = {
       fromEntityId: accountMachine.proofHeader.fromEntity,
       toEntityId: input.fromEntityId,
@@ -594,7 +665,7 @@ export async function handleAccountInput(
       console.log(`📦 BATCH-OPTIMIZATION: Sending ACK + new frame in single message (Channel.ts pattern)`);
 
       // Pass skipCounterIncrement=true since we'll increment for the whole batch below
-      const proposeResult = await proposeAccountFrame(env, accountMachine, true);
+      proposeResult = await proposeAccountFrame(env, accountMachine, true);
 
       if (proposeResult.success && proposeResult.accountInput) {
         batchedWithNewFrame = true;
@@ -616,9 +687,17 @@ export async function handleAccountInput(
     response.counter = ++accountMachine.proofHeader.cooperativeNonce;
     console.log(`🔢 Message counter: ${response.counter} (batched=${batchedWithNewFrame})`);
 
-    return { success: true, response, events };
+    // Merge revealed secrets from BOTH incoming frame AND proposed frame
+    const allRevealedSecrets = [
+      ...revealedSecrets, // From incoming frame (line 493)
+      ...(proposeResult?.revealedSecrets || []) // From our proposed frame (if batched)
+    ];
+
+    console.log(`🔍 RETURN-RESPONSE: h=${response.height} prevSigs=${!!response.prevSignatures} newFrame=${!!response.newAccountFrame}`);
+    return { success: true, response, events, revealedSecrets: allRevealedSecrets };
   }
 
+  console.log(`🔍 RETURN-NO-RESPONSE: No response object`);
   return { success: true, events };
 }
 

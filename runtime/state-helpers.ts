@@ -95,6 +95,14 @@ function manualCloneEntityState(entityState: EntityState): EntityState {
     accountInputQueue: cloneArray(entityState.accountInputQueue || []),
     // CRITICAL: Explicit jBlock preservation for financial integrity
     jBlock: entityState.jBlock ?? 0,
+    // HTLC routing table (deep clone)
+    htlcRoutes: new Map(
+      Array.from((entityState.htlcRoutes || new Map()).entries()).map(([hashlock, route]) => [
+        hashlock,
+        { ...route } // Clone route object
+      ])
+    ),
+    htlcFeesEarned: entityState.htlcFeesEarned || 0n,
   };
 }
 
@@ -310,9 +318,11 @@ export const captureSnapshot = (
  */
 export function cloneAccountMachine(account: AccountMachine): AccountMachine {
   try {
-    return structuredClone(account);
+    const cloned = structuredClone(account);
+    console.log(`✅ structuredClone used for AccountMachine, locks.size=${cloned.locks.size}`);
+    return cloned;
   } catch (error) {
-    // structuredClone warning removed - browser limitation
+    console.log(`⚠️ structuredClone failed, using manual clone`);
     return manualCloneAccountMachine(account);
   }
 }
@@ -366,6 +376,14 @@ function manualCloneAccountMachine(account: AccountMachine): AccountMachine {
   if (account.hankoSignature) {
     result.hankoSignature = account.hankoSignature;
   }
+
+  // HTLC state (deep clone locks Map)
+  result.locks = new Map(
+    Array.from(account.locks.entries()).map(([lockId, lock]) => [
+      lockId,
+      { ...lock } // Clone lock object
+    ])
+  );
 
   return result;
 }

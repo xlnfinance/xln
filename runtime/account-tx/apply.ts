@@ -12,19 +12,26 @@ import { handleRequestWithdrawal } from './handlers/request-withdrawal';
 import { handleApproveWithdrawal } from './handlers/approve-withdrawal';
 import { handleRequestRebalance } from './handlers/request-rebalance';
 import { handleJSync } from './handlers/j-sync';
+import { handleHtlcLock } from './handlers/htlc-lock';
+import { handleHtlcReveal } from './handlers/htlc-reveal';
+import { handleHtlcTimeout } from './handlers/htlc-timeout';
 
 /**
  * Process single AccountTx through bilateral consensus
  * @param accountMachine - The account machine state
  * @param accountTx - The transaction to process
  * @param isOurFrame - Whether we're processing our own frame (vs counterparty's)
- * @returns Result with success, events, and optional error
+ * @param currentTimestamp - Current timestamp (for HTLC timelock validation)
+ * @param currentHeight - Current J-block height (for HTLC revealBeforeHeight validation)
+ * @returns Result with success, events, and optional error (may include secret/hashlock for HTLC routing)
  */
-export function processAccountTx(
+export async function processAccountTx(
   accountMachine: AccountMachine,
   accountTx: AccountTx,
-  isOurFrame: boolean = true
-): { success: boolean; events: string[]; error?: string } {
+  isOurFrame: boolean = true,
+  currentTimestamp: number = Date.now(),
+  currentHeight: number = 0
+): Promise<{ success: boolean; events: string[]; error?: string; secret?: string; hashlock?: string }> {
   console.log(`🔄 Processing ${accountTx.type} for ${accountMachine.counterpartyEntityId.slice(-4)} (ourFrame: ${isOurFrame})`);
 
   // Route to appropriate handler based on transaction type
@@ -62,6 +69,32 @@ export function processAccountTx(
 
     case 'j_sync':
       return handleJSync(accountMachine, accountTx as Extract<AccountTx, { type: 'j_sync' }>, isOurFrame);
+
+    // === HTLC HANDLERS ===
+    case 'htlc_lock':
+      return await handleHtlcLock(
+        accountMachine,
+        accountTx as Extract<AccountTx, { type: 'htlc_lock' }>,
+        isOurFrame,
+        currentTimestamp,
+        currentHeight
+      );
+
+    case 'htlc_reveal':
+      return await handleHtlcReveal(
+        accountMachine,
+        accountTx as Extract<AccountTx, { type: 'htlc_reveal' }>,
+        isOurFrame,
+        currentHeight
+      );
+
+    case 'htlc_timeout':
+      return await handleHtlcTimeout(
+        accountMachine,
+        accountTx as Extract<AccountTx, { type: 'htlc_timeout' }>,
+        isOurFrame,
+        currentHeight
+      );
 
     case 'account_frame':
       // This should never be called - frames are handled by frame-level consensus

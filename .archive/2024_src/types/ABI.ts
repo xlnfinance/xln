@@ -100,17 +100,17 @@ export const ProofbodyABI = {
             },
             {
             "internalType": "uint256",
-            "name": "rightAllowence",
+            "name": "rightAllowance",
             "type": "uint256"
             },
             {
             "internalType": "uint256",
-            "name": "leftAllowence",
+            "name": "leftAllowance",
             "type": "uint256"
             }
         ],
-        "internalType": "struct Depository.Allowence[]",
-        "name": "allowences",
+        "internalType": "struct Depository.Allowance[]",
+        "name": "allowances",
         "type": "tuple[]"
         }
     ],

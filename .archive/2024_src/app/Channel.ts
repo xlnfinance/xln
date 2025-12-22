@@ -509,7 +509,7 @@ export default class Channel {
       proofbody[i].subcontracts.push({
         subcontractProviderAddress: ENV.subcontractProviderAddress,
         encodedBatch: encodedBatch,
-        allowences: [] // Implement allowance logic if needed
+        allowances: [] // Implement allowance logic if needed
       });
 
 
@@ -653,22 +653,22 @@ export default class Channel {
       let outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
       let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
     
-      let inAllowence = d.rightAllowence;
-      let outAllowence = d.leftAllowence;
+      let inAllowance = d.rightAllowance;
+      let outAllowance = d.leftAllowance;
     
       const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
     
-      let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowence);
-      let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowence);
+      let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowance);
+      let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowance);
     
       if (!isLeft) {
         // flip the view
 
 
-        [inCollateral, inAllowence, inCapacity,
-         outCollateral, outAllowence, outCapacity] = 
-        [outCollateral, outAllowence, outCapacity,
-         inCollateral, inAllowence, inCapacity];
+        [inCollateral, inAllowance, inCapacity,
+         outCollateral, outAllowance, outCapacity] = 
+        [outCollateral, outAllowance, outCapacity,
+         inCollateral, inAllowance, inCapacity];
 
         [ownCreditLimit, peerCreditLimit] = [peerCreditLimit, ownCreditLimit];
         // swap in<->out own<->peer credit
@@ -701,8 +701,8 @@ export default class Channel {
         outCollateral,
         inOwnCredit,
         outPeerCredit,
-        inAllowence,
-        outAllowence,
+        inAllowance,
+        outAllowance,
         totalCapacity,
         ownCreditLimit,
         peerCreditLimit,

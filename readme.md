@@ -11,20 +11,23 @@ Byzantine consensus meets Bloomberg Terminal meets VR. Run complete economic sim
 
 ```
 Core:
-  /docs/           Philosophy, architecture, eternal specs
+  /docs/                Philosophy, architecture, eternal specs
   /runtime/             Consensus engine (BFT entity + bilateral account state machines)
+    /account-tx/        Account transaction handlers
+    /entity-tx/         Entity transaction handlers
+    /scenarios/         Economic simulations (ahb.ts, grid.ts, etc.)
+    /evms/              EVM integrations (BrowserVM, remote)
   /jurisdictions/       Solidity contracts (Ethereum, Polygon, Arbitrum, ...)
-  /worlds/              Economic simulations (.xln.js scenario files)
-  /view/                Panel UI components (Graph3D, Entities, Depository, Architect)
-  /frontend/            Main xln.finance app (uses /view)
-  /simnet/              BrowserVM genesis configs (offline blockchain)
-  /proofs/              Validation tests (Playwright E2E + smoke tests)
+  /frontend/            Main xln.finance app + 3D visualization
+    /src/lib/components/   UI panels (Entity, Network, TimeMachine, etc.)
+  /tests/               E2E tests (Playwright)
 
 Dev:
+  /scripts/             Utilities (playwright helpers, deployment, debug)
+  /ai/                  AI integrations (STT server, telegram bot, council)
   bootstrap.sh          One-command setup
-  workflow.md           Daily commands
-  claude.md             AI instructions
-  .archive/             Old implementations (never deleted)
+  CLAUDE.md             AI instructions
+  .archive/             Old implementations (historical reference)
 
 ---
 
@@ -99,8 +102,8 @@ cd frontend && bun run dev      # Vite dev server
 cd frontend && bun run build    # Production build
 
 # Testing
-bun run proofs                  # Playwright E2E tests
-bun test-ethereumjs-vm.ts       # BrowserVM smoke test
+bunx playwright test            # E2E tests
+bunx playwright test tests/ahb-smoke.spec.ts  # AHB smoke test
 ```
 
 ---
@@ -123,7 +126,7 @@ bun test-ethereumjs-vm.ts       # BrowserVM smoke test
 
 **Tech:** Dockview (2.8k stars), Svelte reactivity, localStorage persistence
 
-**Source:** `/view/` + `/docs/xlnview.md`
+**Source:** `/frontend/src/lib/components/` + `/docs/xlnview.md`
 
 ---
 
@@ -137,13 +140,9 @@ bun test-ethereumjs-vm.ts       # BrowserVM smoke test
 - **Reset:** Refresh page = new universe
 - **Persistent:** Optional IndexedDB (resume sessions)
 
-**Config:** `/simnet/genesis.json`
+**Config:** Genesis configs in `runtime/evms/browser-evm.ts`
 
-**Demo:**
-```bash
-bun test-ethereumjs-vm.ts
-# ✅ Deploys contract, funds entities, executes transfers
-```
+**Demo:** Load any scenario (AHB, Grid) - BrowserVM deploys contracts automatically
 
 ---
 
@@ -156,18 +155,54 @@ bun test-ethereumjs-vm.ts
 
 ---
 
-## 📚 Documentation
+## 📚 Documentation Tree
 
-### Forever (docs/)
-- `xlnview.md` - Panel architecture + BrowserVM integration
-- `jea.md` - Jurisdiction-Entity-Account model
-- `governance-architecture.md` - Multi-sig voting system
-- `sessions/` - Technical deep-dives
+```
+Root:
+  readme.md              This file - project overview
+  CLAUDE.md              AI assistant instructions
+  changelog.md           Version history
 
-### Disposable (Root .md)
-- `workflow.md` - Daily dev commands
-- `restructure.md` - Migration notes (Oct 2025 - delete later)
-- `claude.md` - AI assistant instructions
+/docs/
+  ├── contributing/      How to develop on XLN
+  │   ├── workflow.md           Daily commands (bun run dev, etc)
+  │   ├── bug-prevention.md     Pre-commit checklist
+  │   ├── agentic.md            AI autonomous execution (80% rule)
+  │   └── adhd-format.md        Response formatting guide
+  │
+  ├── research/          Explorations & specifications
+  │   ├── insurance/            Insurance layer designs
+  │   │   ├── claude-analysis.md
+  │   │   ├── codex-analysis.md
+  │   │   └── gemini-analysis.md
+  │   ├── depository-core.md    Contract logic summary
+  │   └── rollups-position.md   XLN vs rollups comparison
+  │
+  ├── planning/          Active & historical planning
+  │   ├── active/
+  │   │   └── next.md           Current priority tasks
+  │   ├── completed/            Finished refactors
+  │   └── launch-checklist.md   Pre-launch verification
+  │
+  ├── about/             Philosophy & origin
+  │   ├── homakov.md            Founder's vision
+  │   └── repo-structure.md     Private vs public repos
+  │
+  ├── testing/           Test procedures
+  │   └── ahb-demo.md           AHB demo steps
+  │
+  └── docs/              Core architecture (existing)
+      ├── rjea.md               R→E→A→J flow explanation
+      ├── xlnview.md            Panel architecture
+      ├── flow.md               Transaction flow
+      └── ...                   (eternal specs)
+```
+
+**Quick links:**
+- New to XLN? Start with [docs/about/homakov.md](docs/about/homakov.md)
+- Want to contribute? Read [docs/contributing/workflow.md](docs/contributing/workflow.md)
+- Current priorities? Check [docs/planning/active/next.md](docs/planning/active/next.md)
+- Architecture deep-dive? See [docs/docs/rjea.md](docs/docs/rjea.md)
 
 ---
 
@@ -222,12 +257,12 @@ bun test-ethereumjs-vm.ts
 ## 📖 Learn More
 
 **Start here:**
-1. `workflow.md` - Daily dev commands
-2. `/docs/xlnview.md` - Panel architecture + BrowserVM
-3. `/docs/jea.md` - Jurisdiction-Entity-Account model
-4. `/simnet/readme.md` - Offline blockchain setup
+1. [docs/contributing/workflow.md](docs/contributing/workflow.md) - Daily dev commands
+2. [docs/docs/xlnview.md](docs/docs/xlnview.md) - Panel architecture + BrowserVM
+3. [docs/docs/rjea.md](docs/docs/rjea.md) - R→E→A→J flow explanation
+4. [simnet/readme.md](simnet/readme.md) - Offline blockchain setup
 
-**For deep dives:** `/docs/sessions/`
+**For deep dives:** [docs/docs/](docs/docs/)
 
 ---
 

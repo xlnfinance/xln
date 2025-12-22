@@ -8,11 +8,11 @@ export default defineConfig({
     ['html', { open: 'never' }], // artifact
     ['json'], // optional, for parsing
   ],
-  testDir: './e2e',
+  testDir: './tests',
   timeout: 60000, // 60s for AHB prepopulate
   workers: 1,
   // retries: 1,
-  outputDir: './e2e/test-results',
+  outputDir: './tests/test-results',
   use: {
     baseURL: 'https://localhost:8080',
     headless: process.env['HEADED'] !== 'true', // Headless by default, use HEADED=true for visual

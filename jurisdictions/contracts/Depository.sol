@@ -514,7 +514,7 @@ contract Depository is ReentrancyGuardLite {
   // ReserveToCollateral and EntityAmount (was AddrAmountPair) are in Types.sol
 
 
-  // Allowence, TransformerClause, ProofBody, InitialDisputeProof, FinalDisputeProof, Debt are in Types.sol
+  // Allowance, TransformerClause, ProofBody, InitialDisputeProof, FinalDisputeProof, Debt are in Types.sol
 
   // ═══════════════════════════════════════════════════════════════════════════
   //                              INSURANCE
@@ -1038,11 +1038,11 @@ contract Depository is ReentrancyGuardLite {
         i < decodedRight.length ? decodedRight[i] : bytes("")
       );
 
-      for (uint256 j = 0; j < tc.allowences.length; j++) {
-        Allowence memory allow = tc.allowences[j];
+      for (uint256 j = 0; j < tc.allowances.length; j++) {
+        Allowance memory allow = tc.allowances[j];
         int diff = newDeltas[allow.deltaIndex] - deltas[allow.deltaIndex];
-        if (diff > 0 && uint256(diff) > allow.leftAllowence) revert E2();
-        if (diff < 0 && uint256(-diff) > allow.rightAllowence) revert E2();
+        if (diff > 0 && uint256(diff) > allow.leftAllowance) revert E2();
+        if (diff < 0 && uint256(-diff) > allow.rightAllowance) revert E2();
       }
       deltas = newDeltas;
     }
