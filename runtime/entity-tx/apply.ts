@@ -255,6 +255,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           pendingWithdrawals: new Map(),
           requestedRebalance: new Map(),
           locks: new Map(), // HTLC: Initialize empty locks
+          swapOffers: new Map(), // Swap: Initialize empty offers
         });
       }
 
@@ -533,6 +534,94 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.error(`💸 DIRECT-PAYMENT RETURN: outputs.length=${outputs.length}`);
       if (outputs.length > 0) {
         console.error(`   Output entities: [${outputs.map(o => o.entityId.slice(-4)).join(',')}]`);
+      }
+
+      return { newState, outputs };
+    }
+
+    // === SWAP ENTITY HANDLERS ===
+    if (entityTx.type === 'placeSwapOffer') {
+      console.log(`📊 PLACE-SWAP-OFFER: ${entityState.entityId.slice(-4)} placing offer with ${entityTx.data.counterpartyEntityId.slice(-4)}`);
+
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, minFillRatio } = entityTx.data;
+
+      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      if (!accountMachine) {
+        console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap offer`);
+        return { newState: entityState, outputs: [] };
+      }
+
+      const accountTx: AccountTx = {
+        type: 'swap_offer',
+        data: { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, minFillRatio },
+      };
+
+      accountMachine.mempool.push(accountTx);
+      console.log(`📊 Added swap_offer to mempool for account with ${counterpartyEntityId.slice(-4)}`);
+
+      const firstValidator = entityState.config.validators[0];
+      if (firstValidator) {
+        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
+      }
+
+      return { newState, outputs };
+    }
+
+    if (entityTx.type === 'resolveSwap') {
+      console.log(`💱 RESOLVE-SWAP: ${entityState.entityId.slice(-4)} resolving offer with ${entityTx.data.counterpartyEntityId.slice(-4)}`);
+
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const { counterpartyEntityId, offerId, fillRatio, cancelRemainder } = entityTx.data;
+
+      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      if (!accountMachine) {
+        console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap resolve`);
+        return { newState: entityState, outputs: [] };
+      }
+
+      const accountTx: AccountTx = {
+        type: 'swap_resolve',
+        data: { offerId, fillRatio, cancelRemainder },
+      };
+
+      accountMachine.mempool.push(accountTx);
+      console.log(`💱 Added swap_resolve to mempool for account with ${counterpartyEntityId.slice(-4)}`);
+
+      const firstValidator = entityState.config.validators[0];
+      if (firstValidator) {
+        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
+      }
+
+      return { newState, outputs };
+    }
+
+    if (entityTx.type === 'cancelSwap') {
+      console.log(`📊 CANCEL-SWAP: ${entityState.entityId.slice(-4)} cancelling offer with ${entityTx.data.counterpartyEntityId.slice(-4)}`);
+
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const { counterpartyEntityId, offerId } = entityTx.data;
+
+      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      if (!accountMachine) {
+        console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap cancel`);
+        return { newState: entityState, outputs: [] };
+      }
+
+      const accountTx: AccountTx = {
+        type: 'swap_cancel',
+        data: { offerId },
+      };
+
+      accountMachine.mempool.push(accountTx);
+      console.log(`📊 Added swap_cancel to mempool for account with ${counterpartyEntityId.slice(-4)}`);
+
+      const firstValidator = entityState.config.validators[0];
+      if (firstValidator) {
+        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
       }
 
       return { newState, outputs };

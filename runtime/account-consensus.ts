@@ -16,7 +16,7 @@ import { AccountMachine, AccountFrame, AccountTx, AccountInput, Env, EntityState
 import { cloneAccountMachine } from './state-helpers';
 import { isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-crypto';
-import { cryptoHash as hash } from './utils';
+import { cryptoHash as hash, formatEntityId } from './utils';
 import { logError } from './logger';
 import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
@@ -98,6 +98,8 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
       rightAllowance: delta.rightAllowance.toString(),
       leftHtlcHold: (delta.leftHtlcHold || 0n).toString(),   // HTLC holds
       rightHtlcHold: (delta.rightHtlcHold || 0n).toString(), // HTLC holds
+      leftSwapHold: (delta.leftSwapHold || 0n).toString(),   // Swap holds
+      rightSwapHold: (delta.rightSwapHold || 0n).toString(), // Swap holds
     }))
   };
 
@@ -144,6 +146,7 @@ export async function proposeAccountFrame(
   }
 
   console.log(`✅ E-MACHINE: Creating frame with ${accountMachine.mempool.length} transactions...`);
+  console.log(`🔍 PROOF-HEADER: from=${formatEntityId(accountMachine.proofHeader.fromEntity)}, to=${formatEntityId(accountMachine.proofHeader.toEntity)}`);
 
   // Clone account machine for validation
   const clonedMachine = cloneAccountMachine(accountMachine);
@@ -156,6 +159,17 @@ export async function proposeAccountFrame(
   // Process all transactions on the clone
   const allEvents: string[] = [];
   const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
+  const swapOffersCreated: Array<{
+    offerId: string;
+    makerId: string;
+    accountId: string;
+    giveTokenId: number;
+    giveAmount: bigint;
+    wantTokenId: number;
+    wantAmount: bigint;
+    minFillRatio: number;
+  }> = [];
+  const swapOffersCancelled: Array<{ offerId: string; accountId: string }> = [];
 
   for (const accountTx of accountMachine.mempool) {
     const result = await processAccountTx(
@@ -167,6 +181,12 @@ export async function proposeAccountFrame(
     );
 
     if (!result.success) {
+      // CRITICAL: Remove failed tx from mempool to prevent blocking future proposals
+      const failedIndex = accountMachine.mempool.indexOf(accountTx);
+      if (failedIndex >= 0) {
+        accountMachine.mempool.splice(failedIndex, 1);
+        console.log(`⚠️ Removed failed tx from mempool: ${accountTx.type} (${result.error})`);
+      }
       return { success: false, error: `Tx validation failed: ${result.error}`, events: allEvents };
     }
 
@@ -177,6 +197,18 @@ export async function proposeAccountFrame(
     if (result.secret && result.hashlock) {
       console.log(`✅ Collected secret from ${accountTx.type}`);
       revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
+    }
+
+    // Collect swap offers for orderbook integration
+    if (result.swapOfferCreated) {
+      console.log(`📊 Collected swap offer: ${result.swapOfferCreated.offerId}`);
+      swapOffersCreated.push(result.swapOfferCreated);
+    }
+
+    // Collect cancelled offers for orderbook cleanup
+    if (result.swapOfferCancelled) {
+      console.log(`📊 Collected swap cancel: ${result.swapOfferCancelled.offerId}`);
+      swapOffersCancelled.push(result.swapOfferCancelled);
     }
   }
 
@@ -286,7 +318,7 @@ export async function proposeAccountFrame(
     counter: skipCounterIncrement ? accountMachine.proofHeader.cooperativeNonce : ++accountMachine.proofHeader.cooperativeNonce,
   };
 
-  return { success: true, accountInput, events, revealedSecrets };
+  return { success: true, accountInput, events, revealedSecrets, swapOffersCreated, swapOffersCancelled };
 }
 
 /**
@@ -368,6 +400,15 @@ export async function handleAccountInput(
           accountMachine.locks.set(lockId, { ...lock });
         }
         console.log(`🔒 COMMIT: Copied ${accountMachine.locks.size} HTLC locks`);
+
+        // SWAP: Copy swapOffers from cloned state
+        if (!accountMachine.swapOffers) accountMachine.swapOffers = new Map();
+        accountMachine.swapOffers.clear();
+        if (accountMachine.clonedForValidation.swapOffers) {
+          for (const [offerId, offer] of accountMachine.clonedForValidation.swapOffers.entries()) {
+            accountMachine.swapOffers.set(offerId, { ...offer });
+          }
+        }
 
         // AFTER commit
         console.log(`💳💳💳 PROPOSER-COMMIT COMPLETE: Deltas after commit for ${accountMachine.counterpartyEntityId.slice(-4)}:`,
@@ -516,6 +557,17 @@ export async function handleAccountInput(
     const clonedMachine = cloneAccountMachine(accountMachine);
     const processEvents: string[] = [];
     const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
+    const swapOffersCreated: Array<{
+      offerId: string;
+      makerId: string;
+      accountId: string;
+      giveTokenId: number;
+      giveAmount: bigint;
+      wantTokenId: number;
+      wantAmount: bigint;
+      minFillRatio: number;
+    }> = [];
+    const swapOffersCancelled: Array<{ offerId: string; accountId: string }> = [];
 
     for (const accountTx of receivedFrame.accountTxs) {
       // When receiving a frame, we process transactions from counterparty's perspective (incoming)
@@ -534,6 +586,14 @@ export async function handleAccountInput(
       // Collect revealed secrets (CRITICAL for multi-hop)
       if (result.secret && result.hashlock) {
         revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
+      }
+
+      // Collect swap offers for orderbook integration
+      if (result.swapOfferCreated) {
+        swapOffersCreated.push(result.swapOfferCreated);
+      }
+      if (result.swapOfferCancelled) {
+        swapOffersCancelled.push(result.swapOfferCancelled);
       }
     }
 
@@ -600,6 +660,15 @@ export async function handleAccountInput(
       accountMachine.locks.set(lockId, { ...lock });
     }
     console.log(`🔍 RECEIVER-COMMIT: accountMachine.locks.size after copy=${accountMachine.locks.size}`);
+
+    // SWAP: Copy swapOffers from cloned state
+    if (!accountMachine.swapOffers) accountMachine.swapOffers = new Map();
+    accountMachine.swapOffers.clear();
+    if (clonedMachine.swapOffers) {
+      for (const [offerId, offer] of clonedMachine.swapOffers.entries()) {
+        accountMachine.swapOffers.set(offerId, { ...offer });
+      }
+    }
 
     // Log committed deltas for debugging credit limits
     console.log(`💳 COMMIT: Deltas after commit for ${accountMachine.counterpartyEntityId.slice(-4)}:`,
@@ -691,12 +760,22 @@ export async function handleAccountInput(
       ...(proposeResult?.revealedSecrets || []) // From our proposed frame (if batched)
     ];
 
+    // Merge swap offers from BOTH incoming frame AND proposed frame
+    const allSwapOffersCreated = [
+      ...swapOffersCreated,
+      ...(proposeResult?.swapOffersCreated || [])
+    ];
+    const allSwapOffersCancelled = [
+      ...swapOffersCancelled,
+      ...(proposeResult?.swapOffersCancelled || [])
+    ];
+
     console.log(`🔍 RETURN-RESPONSE: h=${response.height} prevSigs=${!!response.prevSignatures} newFrame=${!!response.newAccountFrame}`);
-    return { success: true, response, events, revealedSecrets: allRevealedSecrets };
+    return { success: true, response, events, revealedSecrets: allRevealedSecrets, swapOffersCreated: allSwapOffersCreated, swapOffersCancelled: allSwapOffersCancelled };
   }
 
   console.log(`🔍 RETURN-NO-RESPONSE: No response object`);
-  return { success: true, events };
+  return { success: true, events, swapOffersCreated: [], swapOffersCancelled: [] };
 }
 
 // === E-MACHINE INTEGRATION ===

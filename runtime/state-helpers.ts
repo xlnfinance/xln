@@ -42,11 +42,14 @@ export const cloneArray = <T>(arr: T[]) => [...arr];
  * This prevents the jBlock corruption bugs that occur with manual state spreading
  */
 export function cloneEntityState(entityState: EntityState): EntityState {
-  // jBlock validation (no logging)
-
   // Use structuredClone for deep cloning with fallback
   try {
     const cloned = structuredClone(entityState);
+
+    // CRITICAL: Validate entityId was preserved correctly
+    if (!cloned.entityId || cloned.entityId !== entityState.entityId) {
+      cloned.entityId = entityState.entityId; // Force preserve entityId
+    }
 
     // CRITICAL: Validate lastFinalizedJHeight was preserved correctly
     if (typeof cloned.lastFinalizedJHeight !== 'number') {
@@ -77,6 +80,7 @@ export function cloneEntityState(entityState: EntityState): EntityState {
 function manualCloneEntityState(entityState: EntityState): EntityState {
   return {
     ...entityState,
+    entityId: entityState.entityId, // CRITICAL: Explicitly preserve entityId
     nonces: cloneMap(entityState.nonces),
     messages: cloneArray(entityState.messages),
     proposals: new Map(
@@ -105,6 +109,8 @@ function manualCloneEntityState(entityState: EntityState): EntityState {
       ])
     ),
     htlcFeesEarned: entityState.htlcFeesEarned || 0n,
+    // Orderbook extension (hub-only, contains TypedArrays - structuredClone handles them)
+    ...(entityState.orderbookExt && { orderbookExt: structuredClone(entityState.orderbookExt) }),
   };
 }
 
@@ -384,6 +390,14 @@ function manualCloneAccountMachine(account: AccountMachine): AccountMachine {
     Array.from(account.locks.entries()).map(([lockId, lock]) => [
       lockId,
       { ...lock } // Clone lock object
+    ])
+  );
+
+  // Swap state (deep clone swapOffers Map)
+  result.swapOffers = new Map(
+    Array.from((account.swapOffers || new Map()).entries()).map(([offerId, offer]) => [
+      offerId,
+      { ...offer } // Clone offer object
     ])
   );
 

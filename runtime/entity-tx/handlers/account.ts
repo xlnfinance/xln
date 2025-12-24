@@ -1,6 +1,8 @@
 import { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages } from '../../state-helpers';
+import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
+import { formatEntityId } from '../../utils';
 
 export async function handleAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
   console.log(`🚀 APPLY accountInput: ${input.fromEntityId.slice(-4)} → ${input.toEntityId.slice(-4)}`);
@@ -60,6 +62,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       pendingWithdrawals: new Map(),
       requestedRebalance: new Map(), // Phase 2: C→R withdrawal tracking
       locks: new Map(), // HTLC: Empty locks map
+      swapOffers: new Map(), // Swap: Empty offers map
     };
 
     newState.accounts.set(input.fromEntityId, accountMachine);
@@ -255,6 +258,27 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         }
       }
 
+      // === ORDERBOOK SWAP MATCHING ===
+      // Process swap offers through hub's orderbook extension
+      const swapOffersCreated = result.swapOffersCreated || [];
+      if (swapOffersCreated.length > 0) {
+        console.log(`📊 ORDERBOOK-CHECK: ${swapOffersCreated.length} swap offers, hasExt=${!!newState.orderbookExt}`);
+        if (newState.orderbookExt) {
+          console.log(`📊 ORDERBOOK: Processing ${swapOffersCreated.length} swap offers`);
+          const orderbookOutputs = await processOrderbookSwaps(env, newState, swapOffersCreated);
+          console.log(`📊 ORDERBOOK: Generated ${orderbookOutputs.length} outputs`);
+          outputs.push(...orderbookOutputs);
+        }
+      }
+
+      // === ORDERBOOK CLEANUP ===
+      // Remove cancelled/filled orders from orderbook
+      const swapOffersCancelled = result.swapOffersCancelled || [];
+      if (swapOffersCancelled.length > 0 && newState.orderbookExt) {
+        console.log(`📊 ORDERBOOK-CLEANUP: Removing ${swapOffersCancelled.length} cancelled orders`);
+        processOrderbookCancels(newState, swapOffersCancelled);
+      }
+
       // Send response (ACK + optional new frame)
       if (result.response) {
         console.log(`📤 Sending response to ${result.response.toEntityId.slice(-4)}`);
@@ -294,4 +318,196 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   }
 
   return { newState, outputs };
+}
+
+/**
+ * Process swap offers through hub's orderbook
+ * Returns EntityInputs containing swap_resolve transactions
+ */
+async function processOrderbookSwaps(
+  env: Env,
+  hubState: EntityState,
+  swapOffers: Array<{
+    offerId: string;
+    makerId: string;
+    accountId: string;
+    giveTokenId: number;
+    giveAmount: bigint;
+    wantTokenId: number;
+    wantAmount: bigint;
+    minFillRatio: number;
+  }>
+): Promise<EntityInput[]> {
+  const outputs: EntityInput[] = [];
+  const ext = hubState.orderbookExt as OrderbookExtState | undefined;
+  if (!ext) return outputs;
+
+  for (const offer of swapOffers) {
+    const { pairId } = canonicalPair(offer.giveTokenId, offer.wantTokenId);
+    const bookKey = pairId;  // Later: `${jId}/${pairId}` for cross-J
+
+    // Get or create book for this pair
+    let book = ext.books.get(bookKey);
+    if (!book) {
+      book = createBook({
+        tick: 1,
+        pmin: 1,
+        pmax: 10_000_000,
+        maxOrders: 10000,
+        stpPolicy: 0,
+      });
+    }
+
+    // Convert swap offer to orderbook command
+    const side = deriveSide(offer.giveTokenId, offer.wantTokenId);
+    const LOT_SCALE = 10n ** 12n;  // 10^12-scale lots (max ~4294 ETH per order)
+
+    let priceTicks: number;
+    let qtyLots: number;
+
+    if (side === 1) {  // SELL base
+      priceTicks = Number((offer.wantAmount * 100n) / offer.giveAmount);
+      qtyLots = Number(offer.giveAmount / LOT_SCALE);
+    } else {  // BUY base
+      priceTicks = Number((offer.giveAmount * 100n) / offer.wantAmount);
+      qtyLots = Number(offer.wantAmount / LOT_SCALE);
+    }
+
+    // Namespace orderId by accountId to prevent cross-account collisions
+    const namespacedOrderId = `${offer.accountId}:${offer.offerId}`;
+    console.log(`📊 ORDERBOOK ADD: maker=${formatEntityId(offer.makerId)}, orderId=${namespacedOrderId.slice(-20)}, side=${side}, price=${priceTicks}, qty=${qtyLots}`);
+
+    // Apply order to book
+    const result = applyCommand(book, {
+      kind: 0,
+      ownerId: offer.makerId,
+      orderId: namespacedOrderId,
+      side,
+      tif: 0,  // GTC
+      postOnly: false,
+      priceTicks,
+      qtyLots,
+    });
+
+    book = result.state;
+    ext.books.set(bookKey, book);
+
+    // Process trade events → emit swap_resolve transactions
+    // Track cumulative fills per order with qty info
+    const fillsPerOrder = new Map<string, { filledQty: number; orderQty: number }>();
+
+    for (const event of result.events) {
+      if (event.type === 'TRADE') {
+        const extractOfferId = (namespacedId: string) => {
+          const lastColon = namespacedId.lastIndexOf(':');
+          return lastColon >= 0 ? namespacedId.slice(lastColon + 1) : namespacedId;
+        };
+        const makerOfferId = extractOfferId(event.makerOrderId);
+        const takerOfferId = extractOfferId(event.takerOrderId);
+
+        // Accumulate fills with proper qty tracking
+        // Maker: use makerQtyBefore (qty at time of trade)
+        // Taker: use takerQtyTotal (taker's total order qty)
+        const makerEntry = fillsPerOrder.get(event.makerOrderId) || { filledQty: 0, orderQty: event.makerQtyBefore };
+        makerEntry.filledQty += event.qty;
+        fillsPerOrder.set(event.makerOrderId, makerEntry);
+
+        const takerEntry = fillsPerOrder.get(event.takerOrderId) || { filledQty: 0, orderQty: event.takerQtyTotal };
+        takerEntry.filledQty += event.qty;
+        fillsPerOrder.set(event.takerOrderId, takerEntry);
+
+        console.log(`📊 ORDERBOOK TRADE: ${makerOfferId} ↔ ${takerOfferId} @ ${event.price}, qty=${event.qty}`);
+        console.log(`   maker=${formatEntityId(event.makerOwnerId)} (had ${event.makerQtyBefore}), taker=${formatEntityId(event.takerOwnerId)} (order ${event.takerQtyTotal})`);
+      }
+    }
+
+    // Emit swap_resolve for each filled order with correct fill ratio
+    const MAX_FILL_RATIO = 65535;
+
+    for (const [namespacedOrderId, { filledQty, orderQty }] of fillsPerOrder) {
+      const extractOfferId = (namespacedId: string) => {
+        const lastColon = namespacedId.lastIndexOf(':');
+        return lastColon >= 0 ? namespacedId.slice(lastColon + 1) : namespacedId;
+      };
+      const offerId = extractOfferId(namespacedOrderId);
+
+      const extractAccountId = (namespacedId: string) => {
+        const lastColon = namespacedId.lastIndexOf(':');
+        return lastColon >= 0 ? namespacedId.slice(0, lastColon) : '';
+      };
+      const accountId = extractAccountId(namespacedOrderId);
+
+      const account = hubState.accounts.get(accountId);
+      if (!account) continue;
+
+      // Calculate fill ratio from trade qty vs order qty at time of trade
+      const fillRatio = orderQty > 0
+        ? Math.floor(MAX_FILL_RATIO * (filledQty / orderQty))
+        : 0;
+
+      // Determine if order is fully filled (no remainder in book)
+      const orderStillInBook = book.orderIdToIdx.has(namespacedOrderId) &&
+        book.orderActive[book.orderIdToIdx.get(namespacedOrderId)!];
+
+      account.mempool.push({
+        type: 'swap_resolve',
+        data: {
+          offerId,
+          fillRatio: Math.min(fillRatio, MAX_FILL_RATIO),
+          cancelRemainder: !orderStillInBook,
+        }
+      });
+      console.log(`📤 ORDERBOOK: Queued swap_resolve for ${offerId.slice(-8)}, fill=${(fillRatio/MAX_FILL_RATIO*100).toFixed(1)}%, cancel=${!orderStillInBook}`);
+    }
+  }
+
+  return outputs;
+}
+
+/** Find the account ID for an entity (hub perspective) */
+function findAccountId(hubState: EntityState, entityId: string): string | null {
+  for (const [counterpartyId, _] of hubState.accounts) {
+    if (counterpartyId === entityId) {
+      return counterpartyId;
+    }
+  }
+  return null;
+}
+
+/**
+ * Remove cancelled/filled orders from hub's orderbook
+ * Called after swap_cancel or swap_resolve with cancelRemainder=true
+ */
+function processOrderbookCancels(
+  hubState: EntityState,
+  cancels: Array<{ offerId: string; accountId: string }>
+): void {
+  const ext = hubState.orderbookExt as OrderbookExtState | undefined;
+  if (!ext) return;
+
+  for (const { offerId, accountId } of cancels) {
+    // The orderId in the book is namespaced as accountId:offerId
+    const namespacedOrderId = `${accountId}:${offerId}`;
+
+    // Find which book this order is in and cancel it
+    for (const [bookKey, book] of ext.books) {
+      const orderIdx = book.orderIdToIdx.get(namespacedOrderId);
+      if (orderIdx !== undefined && book.orderActive[orderIdx]) {
+        // Get the order's owner to pass for cancel validation
+        const ownerId = book.owners[book.orderOwnerIdx[orderIdx]];
+
+        const result = applyCommand(book, {
+          kind: 1, // CANCEL
+          ownerId,
+          orderId: namespacedOrderId,
+        });
+
+        if (result.events.some(e => e.type === 'CANCELED')) {
+          ext.books.set(bookKey, result.state);
+          console.log(`📊 ORDERBOOK-CLEANUP: Removed ${offerId.slice(-8)} from book ${bookKey}`);
+        }
+        break; // Order only exists in one book
+      }
+    }
+  }
 }
