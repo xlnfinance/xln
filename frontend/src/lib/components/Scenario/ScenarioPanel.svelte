@@ -1,4 +1,57 @@
 <script lang="ts">
+  // Quick-run TypeScript scenarios (programmatic, not DSL-based)
+  const quickScenarios = [
+    { id: 'ahb', name: 'AHB', description: 'Alice → Hub → Bob demo' },
+    { id: 'lockAhb', name: 'HTLC', description: 'Hash-locked payments' },
+    { id: 'swap', name: 'Swap', description: 'Multi-token bilateral swaps' },
+  ];
+
+  let quickRunning: string | null = null;
+  let quickResult: { success: boolean; message: string } | null = null;
+
+  async function runQuickScenario(id: string) {
+    quickRunning = id;
+    quickResult = null;
+    executionOutput = [];
+
+    const addOutput = (line: string, type: 'info' | 'success' | 'error' | 'step' = 'info') => {
+      executionOutput = [...executionOutput, { timestamp: Date.now(), line, type }];
+      setTimeout(() => {
+        if (executionOutputEl) {
+          executionOutputEl.scrollTop = executionOutputEl.scrollHeight;
+        }
+      }, 50);
+    };
+
+    try {
+      addOutput(`🚀 Running ${id} scenario...`, 'step');
+
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+      const { getEnv } = await import('$lib/stores/xlnStore');
+      const env = getEnv();
+
+      if (!env) {
+        throw new Error('Environment not initialized');
+      }
+
+      // Call the scenario from runtime.scenarios namespace
+      if (!XLN.scenarios || !XLN.scenarios[id]) {
+        throw new Error(`Scenario '${id}' not found in runtime.scenarios`);
+      }
+
+      await XLN.scenarios[id](env);
+
+      addOutput(`✅ ${id} scenario complete!`, 'success');
+      quickResult = { success: true, message: `${id} completed` };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      addOutput(`❌ ${msg}`, 'error');
+      quickResult = { success: false, message: msg };
+    } finally {
+      quickRunning = null;
+    }
+  }
 
   // Available scenarios
   const availableScenarios = [
@@ -192,6 +245,24 @@
   <!-- Header -->
   <div class="panel-header">
     <h3>🎬 Scenarios</h3>
+  </div>
+
+  <!-- Quick Run Buttons (TypeScript scenarios) -->
+  <div class="quick-scenarios">
+    <div class="quick-label">Quick Run:</div>
+    <div class="quick-buttons">
+      {#each quickScenarios as qs}
+        <button
+          class="quick-btn"
+          class:running={quickRunning === qs.id}
+          disabled={quickRunning !== null}
+          on:click={() => runQuickScenario(qs.id)}
+          title={qs.description}
+        >
+          {quickRunning === qs.id ? '⏳' : '▶️'} {qs.name}
+        </button>
+      {/each}
+    </div>
   </div>
 
   <!-- Scenario Selector -->
@@ -515,5 +586,49 @@
 
   .execution-viewer::-webkit-scrollbar-thumb:hover {
     background: rgba(0, 255, 136, 0.5);
+  }
+
+  /* Quick-run scenarios */
+  .quick-scenarios {
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(35, 35, 35, 0.6);
+  }
+
+  .quick-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .quick-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .quick-btn {
+    padding: 6px 12px;
+    background: rgba(0, 122, 204, 0.2);
+    border: 1px solid rgba(0, 122, 204, 0.4);
+    border-radius: 4px;
+    color: #00aaff;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+
+  .quick-btn:hover {
+    background: rgba(0, 122, 204, 0.4);
+    border-color: rgba(0, 122, 204, 0.7);
+    color: #ffffff;
+  }
+
+  .quick-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>

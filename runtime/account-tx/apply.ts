@@ -15,6 +15,9 @@ import { handleJSync } from './handlers/j-sync';
 import { handleHtlcLock } from './handlers/htlc-lock';
 import { handleHtlcReveal } from './handlers/htlc-reveal';
 import { handleHtlcTimeout } from './handlers/htlc-timeout';
+import { handleSwapOffer } from './handlers/swap-offer';
+import { handleSwapResolve } from './handlers/swap-resolve';
+import { handleSwapCancel } from './handlers/swap-cancel';
 
 /**
  * Process single AccountTx through bilateral consensus
@@ -92,6 +95,31 @@ export async function processAccountTx(
       return await handleHtlcTimeout(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'htlc_timeout' }>,
+        isOurFrame,
+        currentHeight
+      );
+
+    // === SWAP HANDLERS ===
+    case 'swap_offer':
+      return await handleSwapOffer(
+        accountMachine,
+        accountTx as Extract<AccountTx, { type: 'swap_offer' }>,
+        isOurFrame,
+        currentHeight
+      );
+
+    case 'swap_resolve':
+      return await handleSwapResolve(
+        accountMachine,
+        accountTx as Extract<AccountTx, { type: 'swap_resolve' }>,
+        isOurFrame,
+        currentHeight
+      );
+
+    case 'swap_cancel':
+      return await handleSwapCancel(
+        accountMachine,
+        accountTx as Extract<AccountTx, { type: 'swap_cancel' }>,
         isOurFrame,
         currentHeight
       );

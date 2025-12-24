@@ -40,6 +40,7 @@ import {
   transferNameBetweenEntities,
 } from './evm';
 import { createGossipLayer } from './gossip';
+import { attachEventEmitters } from './env-events';
 import {
   parseReplicaKey,
   extractEntityId,
@@ -1479,7 +1480,6 @@ export const createEmptyEnv = (): Env => {
   };
 
   // Attach event emission methods (EVM-style)
-  const { attachEventEmitters } = require('./env-events');
   attachEventEmitters(env);
 
   // Set as current env for log capturing
@@ -1825,6 +1825,16 @@ export const scenarios = {
   ahb: async (env: Env): Promise<Env> => {
     const { ahb } = await import('./scenarios/ahb');
     await ahb(env);
+    return env;
+  },
+  lockAhb: async (env: Env): Promise<Env> => {
+    const { lockAhb } = await import('./scenarios/lock-ahb');
+    await lockAhb(env);
+    return env;
+  },
+  swap: async (env: Env): Promise<Env> => {
+    const { swap } = await import('./scenarios/swap');
+    await swap(env);
     return env;
   },
   grid: async (env: Env): Promise<Env> => {

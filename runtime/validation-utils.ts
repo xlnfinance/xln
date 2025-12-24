@@ -133,10 +133,14 @@ export function createDefaultDelta(tokenId: number): Delta {
     collateral: 0n,
     ondelta: 0n,
     offdelta: 0n,
-    leftCreditLimit: 1000000000000000000000000n, // 1M with 18 decimals
-    rightCreditLimit: 1000000000000000000000000n,
+    leftCreditLimit: 0n, // Require explicit extendCredit
+    rightCreditLimit: 0n,
     leftAllowance: 0n,
     rightAllowance: 0n,
+    leftHtlcHold: 0n,
+    rightHtlcHold: 0n,
+    leftSwapHold: 0n,
+    rightSwapHold: 0n,
   };
 }
 

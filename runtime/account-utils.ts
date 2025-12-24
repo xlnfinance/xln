@@ -68,14 +68,22 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   const totalCapacity = collateral + ownCreditLimit + peerCreditLimit;
 
   // HTLC holds (capacity locked in pending HTLCs)
-  const leftHold = delta.leftHtlcHold || 0n;
-  const rightHold = delta.rightHtlcHold || 0n;
+  const leftHtlcHold = delta.leftHtlcHold || 0n;
+  const rightHtlcHold = delta.rightHtlcHold || 0n;
+
+  // Swap holds (capacity locked in pending swap offers)
+  const leftSwapHold = delta.leftSwapHold || 0n;
+  const rightSwapHold = delta.rightSwapHold || 0n;
+
+  // Total holds = HTLC + Swap
+  const leftHold = leftHtlcHold + leftSwapHold;
+  const rightHold = rightHtlcHold + rightSwapHold;
 
   // Original formula: in* components for inCapacity, out* components for outCapacity
   let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowance);
   let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowance);
 
-  // CRITICAL: Deduct HTLC holds from capacity (prevents double-spend)
+  // CRITICAL: Deduct holds from capacity (prevents double-spend)
   if (isLeft) {
     outCapacity = nonNegative(outCapacity - leftHold);
     inCapacity = nonNegative(inCapacity - rightHold);

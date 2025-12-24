@@ -511,6 +511,37 @@ export type EntityTx =
       };
     }
   | {
+      // Place swap offer in bilateral account (user → hub)
+      type: 'placeSwapOffer';
+      data: {
+        counterpartyEntityId: string; // Hub
+        offerId: string;
+        giveTokenId: number;
+        giveAmount: bigint;
+        wantTokenId: number;
+        wantAmount: bigint;
+        minFillRatio: number; // 0-65535
+      };
+    }
+  | {
+      // Resolve swap offer in bilateral account (hub → user)
+      type: 'resolveSwap';
+      data: {
+        counterpartyEntityId: string; // User who placed the offer
+        offerId: string;
+        fillRatio: number; // 0-65535
+        cancelRemainder: boolean;
+      };
+    }
+  | {
+      // Cancel swap offer (user cancels their own offer)
+      type: 'cancelSwap';
+      data: {
+        counterpartyEntityId: string;
+        offerId: string;
+      };
+    }
+  | {
       // Mint reserves (admin/test only - creates reserves via J-layer)
       type: 'mintReserves';
       data: {
@@ -576,6 +607,18 @@ export interface HtlcLock {
   encryptedPackage?: string;   // Encrypted next-hop data
 }
 
+// Swap offer (limit order) in bilateral account
+export interface SwapOffer {
+  offerId: string;              // UUID for this offer
+  giveTokenId: number;          // Token maker is giving
+  giveAmount: bigint;           // Original amount (partial fills reduce this)
+  wantTokenId: number;          // Token maker wants in return
+  wantAmount: bigint;           // Corresponding want amount (maintains ratio)
+  minFillRatio: number;         // 0-65535, minimum acceptable fill
+  makerIsLeft: boolean;         // Who created this offer (canonical direction)
+  createdHeight: number;        // AccountFrame height when created
+}
+
 /**
  * HTLC Routing Context (replaces 2024 User.hashlockMap)
  * Tracks inbound/outbound hops for automatic secret propagation
@@ -608,6 +651,9 @@ export interface AccountMachine {
 
   // HTLC state (conditional payments)
   locks: Map<string, HtlcLock>; // lockId → lock details
+
+  // Swap offers (limit orders)
+  swapOffers: Map<string, SwapOffer>; // offerId → offer details
 
   // Global credit limits (in reference currency - USDC)
   globalCreditLimits: {
@@ -716,6 +762,10 @@ export interface Delta {
   // HTLC holds (capacity locked in pending HTLCs)
   leftHtlcHold?: bigint;  // Left's outgoing HTLC holds
   rightHtlcHold?: bigint; // Right's outgoing HTLC holds
+
+  // Swap holds (capacity locked in pending swap offers)
+  leftSwapHold?: bigint;  // Left's locked swap offer amounts
+  rightSwapHold?: bigint; // Right's locked swap offer amounts
 }
 
 // Derived account balance information per token
@@ -737,6 +787,15 @@ export interface DerivedDelta {
   inPeerCredit: bigint;
   ascii: string; // ASCII visualization from deriveDelta (like old_src)
 }
+
+/**
+ * Account Events - Bubbled up from A-layer to E-layer
+ * Used for routing (HTLC secrets) and matching (swap offers)
+ */
+export type AccountEvent =
+  | { type: 'htlc_revealed'; hashlock: string; secret: string }
+  | { type: 'swap_offer_created'; offerId: string; makerId: string; accountId: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; minFillRatio: number }
+  | { type: 'swap_offer_cancelled'; offerId: string; accountId: string };
 
 // Account transaction types
 export type AccountTx =
@@ -819,6 +878,32 @@ export type AccountTx =
       type: 'htlc_timeout';
       data: {
         lockId: string;
+      };
+    }
+  // === SWAP TRANSACTION TYPES ===
+  | {
+      type: 'swap_offer';
+      data: {
+        offerId: string;          // UUID, not array index
+        giveTokenId: number;
+        giveAmount: bigint;
+        wantTokenId: number;
+        wantAmount: bigint;       // at this ratio
+        minFillRatio: number;     // 0-65535 (uint16), minimum partial fill
+      };
+    }
+  | {
+      type: 'swap_cancel';
+      data: {
+        offerId: string;
+      };
+    }
+  | {
+      type: 'swap_resolve';
+      data: {
+        offerId: string;
+        fillRatio: number;        // 0-65535 (uint16)
+        cancelRemainder: boolean; // true = fill + cancel, false = fill + keep open
       };
     }
   | {
@@ -922,6 +1007,9 @@ export interface EntityState {
     amount: bigint;
     index: number;
   }>;
+
+  // 📊 Orderbook Extension - Hub matching engine (typed in orderbook/types.ts)
+  orderbookExt?: any; // OrderbookExtState - avoid circular import
 }
 
 export interface ProposedEntityFrame {

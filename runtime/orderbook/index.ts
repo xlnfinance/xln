@@ -1,10 +1,9 @@
 /**
  * XLN Orderbook Module
  *
- * Modular limit order book for bilateral swaps.
- * Can be used as entity extension for hub matching.
+ * Pure function limit order book for hub entity extension.
+ * Integrated into RJEA flow via EntityState.ext.orderbook.
  */
 
 export * from './types';
-export * from './engine';
-export { OrderbookManager } from './manager';
+export * from './core';

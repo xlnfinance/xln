@@ -211,6 +211,8 @@ export interface XLNModule {
   // Scenarios namespace (replaces legacy prepopulate functions)
   scenarios: {
     ahb: (env: Env) => Promise<Env>;
+    lockAhb: (env: Env) => Promise<Env>;
+    swap: (env: Env) => Promise<Env>;
     grid: (env: Env) => Promise<Env>;
     fullMechanics: (env: Env) => Promise<Env>;
   };

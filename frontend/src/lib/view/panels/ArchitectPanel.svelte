@@ -408,6 +408,106 @@
     }
   }
 
+  /** Start HTLC Tutorial (lock-ahb scenario) */
+  let htlcRunning = false;
+  async function startHTLCTutorial() {
+    console.log('[HTLC] ========== STARTING HTLC ==========');
+    if (htlcRunning) {
+      console.log('[HTLC] Already running, skip');
+      return;
+    }
+    htlcRunning = true;
+    loading = true;
+    try {
+      const XLN = await getXLN();
+      if (!$isolatedEnv) {
+        $isolatedEnv = XLN.createEmptyEnv();
+        isolatedEnv.set($isolatedEnv);
+      }
+      if (!$isolatedEnv.eReplicas) {
+        $isolatedEnv.eReplicas = new Map();
+      }
+      $isolatedEnv.eReplicas.clear();
+      $isolatedEnv.history = [];
+
+      console.log('[HTLC] Running scenarios/lock-ahb.ts...');
+      await XLN.scenarios.lockAhb($isolatedEnv);
+      console.log('[HTLC] ✅ Scenario complete!');
+
+      const frames = $isolatedEnv.history || [];
+      isolatedIsLive.set(false);
+      isolatedTimeIndex.set(Math.max(0, frames.length - 1));
+      isolatedHistory.set(frames);
+      isolatedEnv.set($isolatedEnv);
+      lastAction = `HTLC: ${frames.length} frames loaded.`;
+    } catch (err: any) {
+      const frames = $isolatedEnv?.history || [];
+      if (frames.length > 0) {
+        isolatedIsLive.set(false);
+        isolatedTimeIndex.set(Math.max(0, frames.length - 1));
+        isolatedHistory.set(frames);
+        isolatedEnv.set($isolatedEnv);
+        lastAction = `HTLC: ${frames.length} frames (error). ${err.message}`;
+      } else {
+        lastAction = `❌ ${err.message}`;
+      }
+      console.error('[HTLC] error:', err);
+    } finally {
+      loading = false;
+      htlcRunning = false;
+    }
+  }
+
+  /** Start Swap Tutorial */
+  let swapRunning = false;
+  async function startSwapTutorial() {
+    console.log('[SWAP] ========== STARTING SWAP ==========');
+    if (swapRunning) {
+      console.log('[SWAP] Already running, skip');
+      return;
+    }
+    swapRunning = true;
+    loading = true;
+    try {
+      const XLN = await getXLN();
+      if (!$isolatedEnv) {
+        $isolatedEnv = XLN.createEmptyEnv();
+        isolatedEnv.set($isolatedEnv);
+      }
+      if (!$isolatedEnv.eReplicas) {
+        $isolatedEnv.eReplicas = new Map();
+      }
+      $isolatedEnv.eReplicas.clear();
+      $isolatedEnv.history = [];
+
+      console.log('[SWAP] Running scenarios/swap.ts...');
+      await XLN.scenarios.swap($isolatedEnv);
+      console.log('[SWAP] ✅ Scenario complete!');
+
+      const frames = $isolatedEnv.history || [];
+      isolatedIsLive.set(false);
+      isolatedTimeIndex.set(Math.max(0, frames.length - 1));
+      isolatedHistory.set(frames);
+      isolatedEnv.set($isolatedEnv);
+      lastAction = `Swap: ${frames.length} frames loaded.`;
+    } catch (err: any) {
+      const frames = $isolatedEnv?.history || [];
+      if (frames.length > 0) {
+        isolatedIsLive.set(false);
+        isolatedTimeIndex.set(Math.max(0, frames.length - 1));
+        isolatedHistory.set(frames);
+        isolatedEnv.set($isolatedEnv);
+        lastAction = `Swap: ${frames.length} frames (error). ${err.message}`;
+      } else {
+        lastAction = `❌ ${err.message}`;
+      }
+      console.error('[SWAP] error:', err);
+    } finally {
+      loading = false;
+      swapRunning = false;
+    }
+  }
+
   /** Reset to fresh runtime instance */
   async function resetScenario() {
     console.log('[Reset] Creating fresh runtime instance...');
@@ -2483,6 +2583,22 @@
               <div class="info">
                 <strong>Alice-Hub-Bob</strong>
                 <p>Auto-play tutorial · Bilateral consensus</p>
+              </div>
+            </button>
+
+            <button class="preset-item" on:click={startHTLCTutorial} disabled={loading}>
+              <span class="icon">🔒</span>
+              <div class="info">
+                <strong>HTLC Payments</strong>
+                <p>Hash-locked · Multi-hop routing</p>
+              </div>
+            </button>
+
+            <button class="preset-item" on:click={startSwapTutorial} disabled={loading}>
+              <span class="icon">⇄</span>
+              <div class="info">
+                <strong>Token Swaps</strong>
+                <p>Bilateral · Partial fills</p>
               </div>
             </button>
 

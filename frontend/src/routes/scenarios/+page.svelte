@@ -13,6 +13,16 @@
       id: 'ahb',
       title: 'Alice → Hub → Bob',
       description: 'Educational demo: 3 entities, reserve distribution, bilateral accounts, off-chain payment routing. Step through 12 frames to understand XLN mechanics.',
+    },
+    {
+      id: 'lockAhb',
+      title: 'HTLC Payments',
+      description: 'Hash-locked payments with secret reveal. Same AHB network but using HTLCs for trustless multi-hop routing. Run via CLI: bun runtime/scenarios/lock-ahb.ts',
+    },
+    {
+      id: 'swap',
+      title: 'Multi-Token Swaps',
+      description: 'Same-J bilateral swaps: limit orders with partial fills, minFillRatio enforcement, per-token holds. Run via CLI: bun runtime/scenarios/swap.ts',
     }
   ];
 
@@ -106,6 +116,7 @@
     padding: 2rem;
     padding-top: 4rem; /* Account for fixed topbar */
     font-family: 'Inter', -apple-system, sans-serif;
+    overflow-y: auto;
   }
 
   .scenarios-page.has-fullscreen {

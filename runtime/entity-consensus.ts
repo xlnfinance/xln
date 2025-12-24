@@ -351,6 +351,7 @@ export const applyEntityInput = async (
       // Apply the committed frame with incremented height
       workingReplica.state = {
         ...entityInput.proposedFrame.newState,
+        entityId: workingReplica.state.entityId, // PRESERVE: Never lose entityId
         height: workingReplica.state.height + 1,
       };
 
@@ -464,6 +465,7 @@ export const applyEntityInput = async (
       // Commit phase - use pre-computed state with incremented height
       workingReplica.state = {
         ...workingReplica.proposal.newState,
+        entityId: workingReplica.state.entityId, // PRESERVE: Never lose entityId
         height: workingReplica.state.height + 1,
       };
       // DEBUG removed: → Threshold reached! Committing frame, height: ${workingReplica.state.height}`);
@@ -547,6 +549,7 @@ export const applyEntityInput = async (
       const { newState: newEntityState, outputs: frameOutputs, jOutputs: frameJOutputs } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool);
       workingReplica.state = {
         ...newEntityState,
+        entityId: workingReplica.state.entityId, // PRESERVE: Never lose entityId
         height: workingReplica.state.height + 1,
       };
 
@@ -594,6 +597,7 @@ export const applyEntityInput = async (
       hash: frameHash,
       newState: {
         ...newEntityState,
+        entityId: workingReplica.state.entityId, // PRESERVE: Never lose entityId in proposal
         height: workingReplica.state.height + 1,
         timestamp: newTimestamp, // Set new deterministic timestamp in proposed state
       },
