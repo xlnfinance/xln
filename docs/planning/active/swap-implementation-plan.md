@@ -258,6 +258,16 @@ HTLCs are binary (0% or 100%). For partial fills, we need to signal a ratio.
 
 Inspired by PayWord (Rivest & Shamir, 1996) - hash chains for micropayments.
 
+**CRITICAL: Taker-Generated Ladder (Gemini fix)**
+
+The TAKER (filler) generates the HashLadder, not the maker:
+- Maker (Alice): Commits to swap terms (ETH/USDC ratio, max amount)
+- Taker (Hub): Commits to HashLadder representing 0-100% fill capability
+- Execution: Hub reveals preimage for 75% → claims 75% of Alice's ETH
+- Atomic: Alice sees preimage → uses it to claim 75% of Hub's USDC on other chain
+
+This makes the swap "Taker-Driven" - the filler holds the option to execute.
+
 ```typescript
 // runtime/crypto/hash-ladder.ts
 
@@ -304,24 +314,26 @@ function signalRatio(bps: number, secrets: [string, string]): RatioProof {
 }
 ```
 
-#### Step 3.1: Cross-J Swap Flow
+#### Step 3.1: Cross-J Swap Flow (Taker-Driven)
 
 ```
 1. Alice wants: Sell 2 ETH (Ethereum) for 6000 USDC (Arbitrum)
 
 2. Setup phase:
-   - A-H Ethereum account: Alice creates swap_offer for 2 ETH
-   - A-H Arbitrum account: Hub creates conditional_receive for 6000 USDC
-   - Both reference same swapId + HashLadder commitment
+   - Alice: Creates swap_offer on A-H Ethereum account (2 ETH, wants 6000 USDC)
+   - Hub (TAKER): Generates HashLadder secrets, commits targets to BOTH accounts
+   - A-H Ethereum: Alice's offer + Hub's ladder commitment
+   - A-H Arbitrum: Hub locks 6000 USDC + same ladder commitment
 
-3. Fill phase:
+3. Fill phase (Hub-driven):
    - Hub decides to fill 75% (7500 bps)
-   - Hub reveals HashLadder proof for 7500
-   - Both accounts verify and apply partial fill
+   - Hub reveals HashLadder preimages proving 75%
+   - Hub claims 1.5 ETH on Ethereum account
 
-4. Settlement:
-   - Ethereum: Alice sends 1.5 ETH to Hub
-   - Arbitrum: Hub sends 4500 USDC to Alice
+4. Settlement (atomic):
+   - Alice sees Hub's revealed preimages on Ethereum
+   - Alice uses SAME preimages to claim 4500 USDC on Arbitrum
+   - Atomicity: Hub can't claim ETH without revealing proof Alice needs
 ```
 
 #### Step 3.2: Scenario - scenarios/swap-cross-j.ts
@@ -329,51 +341,91 @@ function signalRatio(bps: number, secrets: [string, string]): RatioProof {
 ```typescript
 // Setup: A-H accounts on both Ethereum and Arbitrum
 
-// Step 1: Alice initiates cross-J swap
+// Step 1: Alice creates cross-J swap offer
 const swapId = 'cross-1';
-const [secretHigh, secretLow] = [randomBytes(32), randomBytes(32)];
-const ratioLadder = createRatioLadder(secretHigh, secretLow);
 
-// On Ethereum account
 await aliceHubEth.addAccountTx({
   type: 'cross_swap_offer',
   data: {
     swapId,
     giveTokenId: ETH,
     giveAmount: 2n * 10n**18n,
-    ratioLadderHigh: ratioLadder.ladderHigh.target,
-    ratioLadderLow: ratioLadder.ladderLow.target,
+    wantTokenId: USDC,
+    wantAmount: 6000n * 10n**6n,
+    wantJurisdiction: 'arbitrum',
+    expiresAtHeight: currentHeight + 1000,
   }
 });
 
-// On Arbitrum account (Hub commits to receive)
-await hubAliceArb.addAccountTx({
-  type: 'cross_swap_commit',
+// Step 2: Hub (TAKER) commits HashLadder to both accounts
+const [secretHigh, secretLow] = [randomBytes(32), randomBytes(32)];
+const ratioLadder = createRatioLadder(secretHigh, secretLow);
+
+// Hub commits on Ethereum (where Alice's offer is)
+await hubAliceEth.addAccountTx({
+  type: 'cross_swap_accept',
   data: {
     swapId,
-    receiveTokenId: USDC,
-    receiveAmount: 6000n * 10n**6n,
     ratioLadderHigh: ratioLadder.ladderHigh.target,
     ratioLadderLow: ratioLadder.ladderLow.target,
   }
 });
 
-// Step 2: Hub fills 75%
+// Hub locks USDC on Arbitrum with same ladder
+await hubAliceArb.addAccountTx({
+  type: 'cross_swap_lock',
+  data: {
+    swapId,
+    giveTokenId: USDC,
+    giveAmount: 6000n * 10n**6n,  // Hub's side
+    ratioLadderHigh: ratioLadder.ladderHigh.target,
+    ratioLadderLow: ratioLadder.ladderLow.target,
+  }
+});
+
+// Step 3: Hub fills 75% by revealing preimages
 const proof = signalRatio(7500, [secretHigh, secretLow]);
 
-// Both accounts receive the proof and verify
-await aliceHubEth.addAccountTx({
-  type: 'cross_swap_fill',
-  data: { swapId, ...proof }
-});
-await hubAliceArb.addAccountTx({
+// Hub claims 1.5 ETH on Ethereum
+await hubAliceEth.addAccountTx({
   type: 'cross_swap_fill',
   data: { swapId, ...proof }
 });
 
-// Assert: 1.5 ETH moved on Ethereum
-// Assert: 4500 USDC moved on Arbitrum
+// Step 4: Alice sees proof, claims 4500 USDC on Arbitrum
+// (Same preimages work on both chains - atomic!)
+await aliceHubArb.addAccountTx({
+  type: 'cross_swap_claim',
+  data: { swapId, ...proof }  // Alice reuses Hub's revealed preimages
+});
+
+// Assert: 1.5 ETH moved on Ethereum (Hub received)
+// Assert: 4500 USDC moved on Arbitrum (Alice received)
+// Assert: Remaining 0.5 ETH offer still open (or cancelled)
 ```
+
+## Implementation Notes (Gemini Review)
+
+### Expired Offer Pruning
+Offers have `expiresAtHeight` but need explicit cleanup:
+- In `swap_fill`: Check expiry before processing, reject if expired
+- In account tick/maintenance: Prune expired offers, release holds
+- Without pruning, `offers` Map grows indefinitely
+
+### Delta Update Rules (Same as HTLCs)
+Canonical direction per token:
+- Left gives → delta decreases (negative)
+- Right gives → delta increases (positive)
+
+Example: Alice (Left) swaps 1 ETH for 3000 USDC
+- ETH Delta: Alice gives → `-1 ETH`
+- USDC Delta: Alice receives → `+3000 USDC`
+
+### Race Conditions: Cancel vs Fill
+Account layer linearizes (whoever's tx lands first wins), but:
+- OrderbookExtension must handle "fill failed, offer gone" gracefully
+- Don't crash on stale fills - just skip and log
+- Return failure event so extension can update its book state
 
 ## Testing Checklist
 
@@ -384,20 +436,25 @@ await hubAliceArb.addAccountTx({
 - [ ] swap_fill works for 100% fill
 - [ ] swap_fill works for partial fill (respects minFillBps)
 - [ ] swap_fill rejects below minFillBps
-- [ ] swap_fill updates deltas atomically
+- [ ] swap_fill updates deltas atomically (both tokens)
+- [ ] swap_fill rejects expired offers
 - [ ] swap_cancel releases hold
-- [ ] Expired offers auto-cancel (or reject fills)
+- [ ] Expired offers pruned on tick
+- [ ] Race condition: cancel before fill handled gracefully
 
 ### Phase 2: Orderbook
 - [ ] Extension ingests offers from multiple accounts
 - [ ] Price-time priority matching
 - [ ] Partial fills propagate correctly
 - [ ] Hub can be market maker (own inventory)
+- [ ] Failed fills (offer gone) handled gracefully
 
 ### Phase 3: Cross-J
 - [ ] HashLadder creation and verification
 - [ ] Ratio encoding/decoding (basis points)
+- [ ] Taker-generated ladder (Hub commits, Hub reveals)
 - [ ] Cross-account swap coordination
+- [ ] Alice can claim using Hub's revealed preimages
 - [ ] Dispute resolution (reveal ladder on-chain)
 
 ## References
