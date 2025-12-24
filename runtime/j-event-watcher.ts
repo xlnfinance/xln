@@ -15,7 +15,41 @@ import type { Env } from './types.js';
 const DEBUG = false; // Reduced j-watcher verbosity
 const HEAVY_LOGS = false;
 
-// Event types we care about from the jurisdiction
+// ═══════════════════════════════════════════════════════════════════════════
+// CANONICAL J-EVENTS (Single Source of Truth - must match Depository.sol)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// These are the ONLY events that update entity state. Each has ONE purpose:
+//
+// ReserveUpdated  - Entity reserve balance changed (mint, R2R, settlement)
+//                   Handler: entity.reserves[tokenId] = newBalance
+//
+// AccountSettled  - Bilateral account state changed
+//                   Handler: entity.accounts[counterparty] = { collateral, ondelta, reserves }
+//
+// Design: One event = One state change. No redundant events.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Canonical J-Event types that j-watcher processes.
+ * MUST match Depository.sol and Account.sol event definitions.
+ */
+export const CANONICAL_J_EVENTS = ['ReserveUpdated', 'AccountSettled'] as const;
+export type CanonicalJEvent = (typeof CANONICAL_J_EVENTS)[number];
+
+/**
+ * Verify that an event name is a canonical j-event we handle.
+ * Call this at startup to catch mismatches between Solidity and TypeScript.
+ */
+export function assertCanonicalEvent(eventName: string): asserts eventName is CanonicalJEvent {
+  if (!CANONICAL_J_EVENTS.includes(eventName as CanonicalJEvent)) {
+    throw new Error(
+      `J-EVENT PARITY ERROR: "${eventName}" is not a canonical j-event.\n` +
+      `Canonical events: ${CANONICAL_J_EVENTS.join(', ')}\n` +
+      `If Solidity added a new event, add it to CANONICAL_J_EVENTS in j-event-watcher.ts`
+    );
+  }
+}
 
 /**
  * BrowserVM event interface (matches browserVMProvider.ts EVMEvent)
@@ -23,14 +57,19 @@ const HEAVY_LOGS = false;
 export interface BrowserVMEvent {
   name: string;
   args: Record<string, any>;
+  blockNumber?: number;
+  blockHash?: string;
+  timestamp?: number;
 }
 
 /**
- * BrowserVM interface for event subscription
+ * BrowserVM interface for event subscription.
+ * onAny receives BATCHED events (all events from one tx/block together).
  */
 export interface BrowserVMEventSource {
-  onAny(callback: (event: BrowserVMEvent) => void): () => void;
+  onAny(callback: (events: BrowserVMEvent[]) => void): () => void;
   getBlockNumber(): bigint;
+  getBlockHash(): string;
 }
 
 interface WatcherConfig {
@@ -60,20 +99,60 @@ export class JEventWatcher {
   private browserVMUnsubscribe: (() => void) | null = null;
   private env: Env | null = null; // Store env reference for BrowserVM event handling
 
-  // Minimal ABIs for events we need
+  // Minimal ABIs for events we need (EntityProvider events, not j-events)
   private entityProviderABI = [
     'event EntityRegistered(bytes32 indexed entityId, uint256 indexed entityNumber, bytes32 boardHash)',
     'event ControlSharesReleased(bytes32 indexed entityId, address indexed depository, uint256 controlAmount, uint256 dividendAmount, string purpose)',
     'event NameAssigned(string indexed name, uint256 indexed entityNumber)',
   ];
 
+  // Canonical j-events ABI - MUST match CANONICAL_J_EVENTS
   private depositoryABI = [
-    'event ControlSharesReceived(address indexed entityProvider, address indexed fromEntity, uint256 indexed tokenId, uint256 amount, bytes data)',
+    // Canonical j-events (update entity state)
     'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
-    'event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint256 indexed tokenId, uint256 amount)',
+    'event AccountSettled(tuple(bytes32 left, bytes32 right, uint256 tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)[])',
   ];
 
+  /**
+   * Verify ABI parity between depositoryABI and CANONICAL_J_EVENTS.
+   * Throws on mismatch - catches Solidity/TypeScript drift at startup.
+   */
+  private verifyABIParity(): void {
+    // Extract event names from ABI strings
+    const abiEventNames = this.depositoryABI.map(abi => {
+      const match = abi.match(/^event\s+(\w+)/);
+      return match ? match[1] : null;
+    }).filter(Boolean) as string[];
+
+    // Check each canonical event is in ABI
+    for (const canonicalEvent of CANONICAL_J_EVENTS) {
+      if (!abiEventNames.includes(canonicalEvent)) {
+        throw new Error(
+          `J-EVENT ABI PARITY ERROR: "${canonicalEvent}" is in CANONICAL_J_EVENTS but missing from depositoryABI.\n` +
+          `Add the event ABI string to depositoryABI in j-event-watcher.ts`
+        );
+      }
+    }
+
+    // Check each ABI event is canonical
+    for (const abiEvent of abiEventNames) {
+      if (!CANONICAL_J_EVENTS.includes(abiEvent as CanonicalJEvent)) {
+        throw new Error(
+          `J-EVENT ABI PARITY ERROR: "${abiEvent}" is in depositoryABI but not in CANONICAL_J_EVENTS.\n` +
+          `Either add it to CANONICAL_J_EVENTS or remove from depositoryABI`
+        );
+      }
+    }
+
+    if (DEBUG) {
+      console.log(`🔭✅ J-WATCHER: ABI parity verified - ${CANONICAL_J_EVENTS.join(', ')}`);
+    }
+  }
+
   constructor(config: WatcherConfig) {
+    // Verify ABI parity at initialization
+    this.verifyABIParity();
+
     // BrowserVM mode - subscribe to events directly, no RPC needed
     if (config.browserVM) {
       this.browserVM = config.browserVM;
@@ -133,13 +212,14 @@ export class JEventWatcher {
     this.isWatching = true;
     this.env = env; // Store for BrowserVM event handler
 
-    // BrowserVM mode - subscribe to events directly
+    // BrowserVM mode - subscribe to batched events
     if (this.browserVM) {
       console.log('🔭 J-WATCHER: Starting BrowserVM subscription mode...');
-      this.browserVMUnsubscribe = this.browserVM.onAny((event) => {
-        this.handleBrowserVMEvent(event);
+      this.browserVMUnsubscribe = this.browserVM.onAny((events) => {
+        // Events arrive as batch (all events from one tx/block)
+        this.handleBrowserVMEventBatch(events);
       });
-      console.log('🔭 J-WATCHER: Started with BrowserVM event subscription');
+      console.log('🔭 J-WATCHER: Started with BrowserVM event subscription (batched)');
       return;
     }
 
@@ -171,111 +251,105 @@ export class JEventWatcher {
   }
 
   /**
-   * Handle BrowserVM event - convert to EntityInput and queue
+   * Handle batched BrowserVM events - all events from one tx/block arrive together.
+   * Creates ONE j_event EntityTx per entity containing ALL relevant events.
    */
-  private handleBrowserVMEvent(event: BrowserVMEvent): void {
-    console.log(`🔭 handleBrowserVMEvent CALLED: ${event.name}`);
-
+  private handleBrowserVMEventBatch(events: BrowserVMEvent[]): void {
     if (!this.env) {
-      console.error('🔭❌ J-WATCHER: No env reference for BrowserVM event');
+      console.error('🔭❌ J-WATCHER: No env reference for BrowserVM events');
       return;
     }
 
-    const blockNumber = this.browserVM ? Number(this.browserVM.getBlockNumber()) : 0;
+    // Filter to canonical events only
+    const canonicalEvents = events.filter(e => CANONICAL_J_EVENTS.includes(e.name as CanonicalJEvent));
+    if (canonicalEvents.length === 0) {
+      if (DEBUG) console.log(`J-WATCHER: No canonical events in batch of ${events.length}`);
+      return;
+    }
 
-    // 1) J-EVENT THROUGH: Event received from BrowserVM/blockchain
-    console.log(`📡 [1/3] J-EVENT-IN: ${event.name} | eReplicas=${this.env.eReplicas.size}`);
+    // All events in batch share same block info (they're from same tx)
+    const firstEvent = canonicalEvents[0];
+    const blockNumber = firstEvent.blockNumber ?? Number(this.browserVM!.getBlockNumber());
+    const blockHash = firstEvent.blockHash ?? this.browserVM!.getBlockHash();
 
-    // Find all proposer replicas that should receive this event
-    let foundAny = false;
+    console.log(`📡 [1/3] J-EVENT-BATCH: ${canonicalEvents.length} events from block ${blockNumber}`);
+
+    // Group events by relevant entity
+    // Each entity gets ONE observation containing ALL its relevant events
+    const eventsByEntity = new Map<string, { signerId: string; events: BrowserVMEvent[] }>();
+
     for (const [replicaKey, replica] of this.env.eReplicas.entries()) {
-      console.log(`   checking replica: ${replicaKey.slice(-12)} isProposer=${replica.isProposer}`);
       if (!replica.isProposer) continue;
 
       const [entityId, signerId] = replicaKey.split(':');
       if (!entityId || !signerId) continue;
 
-      // Check if this event is relevant to this entity
-      const isRelevant = this.isEventRelevantToEntity(event, entityId);
-      console.log(`   relevant to ${entityId.slice(-4)}? ${isRelevant}`);
-      if (!isRelevant) continue;
+      // Find all events relevant to this entity
+      const relevantEvents = canonicalEvents.filter(e => this.isEventRelevantToEntity(e, entityId));
+      if (relevantEvents.length === 0) continue;
 
-      // Convert BrowserVM event to EntityTx (pass entityId for left/right determination)
-      const entityTx = this.browserVMEventToEntityTx(event, signerId, blockNumber, entityId);
-      if (!entityTx) { console.log(`   ❌ entityTx conversion failed`); continue; }
+      // Accumulate (in case multiple signers for same entity)
+      if (!eventsByEntity.has(entityId)) {
+        eventsByEntity.set(entityId, { signerId, events: [] });
+      }
+      // Merge events (dedup handled later in j-events.ts)
+      for (const e of relevantEvents) {
+        eventsByEntity.get(entityId)!.events.push(e);
+      }
+    }
 
-      foundAny = true;
-      // Queue the event for processing
-      console.log(`   📮 QUEUE → ${entityId.slice(-4)} (pending will be ${this.env.runtimeInput.entityInputs.length + 1})`);
+    // Create ONE j_event EntityTx per entity with ALL its events
+    for (const [entityId, { signerId, events: relevantEvents }] of eventsByEntity) {
+      // Convert all events to j_event format (flatMap because AccountSettled can have multiple)
+      const jEvents = relevantEvents.flatMap(e => this.browserVMEventToJEvents(e, blockNumber, blockHash, entityId));
+
+      if (jEvents.length === 0) continue;
+
+      // Create single EntityTx with all events for this block
+      const entityTx = {
+        type: 'j_event' as const,
+        data: {
+          from: signerId,
+          observedAt: this.getEventTimestamp(),
+          blockNumber,
+          blockHash,
+          transactionHash: `browservm-${blockNumber}-${this.syntheticTxCounter++}`,
+          // Pass all events in one observation
+          events: jEvents,
+          // For backwards compat, also include first event as 'event'
+          event: jEvents[0],
+        },
+      };
+
+      console.log(`   📮 QUEUE → ${entityId.slice(-4)} (${jEvents.length} events from block ${blockNumber})`);
       this.env.runtimeInput.entityInputs.push({
         entityId,
         signerId,
         entityTxs: [entityTx],
       });
     }
-    if (!foundAny) {
-      console.log(`   ⚠️ No replicas matched event ${event.name}`);
-    }
   }
 
   /**
-   * Check if a BrowserVM event is relevant to an entity
+   * Convert single BrowserVM event to JurisdictionEvent(s) format.
+   * Returns ARRAY because AccountSettled can contain multiple settlements for same entity.
    */
-  private isEventRelevantToEntity(event: BrowserVMEvent, entityId: string): boolean {
+  private browserVMEventToJEvents(event: BrowserVMEvent, blockNumber: number, blockHash: string, entityId: string): any[] {
     switch (event.name) {
       case 'ReserveUpdated':
-        return event.args.entity === entityId;
-      case 'AccountSettled': {
-        // AccountSettled has array of Settled structs - check if entity is left or right in any
-        const settledArray = event.args[''] || event.args[0] || [];
-        for (const settled of settledArray) {
-          const left = settled[0] || settled.left;
-          const right = settled[1] || settled.right;
-          if (left === entityId || right === entityId) return true;
-        }
-        return false;
-      }
-      default:
-        return false;
-    }
-  }
-
-  /**
-   * Convert BrowserVM event to EntityTx format
-   * @param entityId - The entity this event is being created for (for left/right determination)
-   */
-  private browserVMEventToEntityTx(event: BrowserVMEvent, signerId: string, blockNumber: number, entityId: string): any {
-    const observedAt = this.getEventTimestamp();
-    const baseData = {
-      from: signerId,
-      observedAt,
-      blockNumber,
-      transactionHash: `browservm-${observedAt}-${this.syntheticTxCounter++}`,
-    };
-
-    switch (event.name) {
-      case 'ReserveUpdated':
-        return {
-          type: 'j_event' as const,
+        return [{
+          type: 'ReserveUpdated',
           data: {
-            ...baseData,
-            event: {
-              type: 'ReserveUpdated',
-              data: {
-                entity: event.args.entity,
-                tokenId: Number(event.args.tokenId),
-                newBalance: event.args.newBalance?.toString() || '0',
-                symbol: `TKN${event.args.tokenId}`,
-                decimals: 18,
-              },
-            },
+            entity: event.args.entity,
+            tokenId: Number(event.args.tokenId),
+            newBalance: event.args.newBalance?.toString() || '0',
           },
-        };
+        }];
 
       case 'AccountSettled': {
-        // AccountSettled has array of Settled structs
-        // Find the settlement relevant to this entity
-        const settledArray = event.args[''] || event.args[0] || [];
+        // Return ALL settlements relevant to this entity (not just first)
+        const results: any[] = [];
+        const settledArray = event.args.settled || event.args[''] || event.args[0] || [];
         for (const settled of settledArray) {
           const left = settled[0] || settled.left;
           const right = settled[1] || settled.right;
@@ -287,34 +361,51 @@ export class JEventWatcher {
             const ondelta = (settled[6] ?? settled.ondelta ?? 0n).toString();
             const isLeft = entityId === left;
 
-            return {
-              type: 'j_event' as const,
+            results.push({
+              type: 'AccountSettled',
               data: {
-                ...baseData,
-                event: {
-                  type: 'AccountSettled', // Matches contract event name (Account.sol)
-                  data: {
-                    leftEntity: left,
-                    rightEntity: right,
-                    counterpartyEntityId: isLeft ? right : left,
-                    tokenId,
-                    ownReserve: isLeft ? leftReserve : rightReserve,
-                    counterpartyReserve: isLeft ? rightReserve : leftReserve,
-                    collateral,
-                    ondelta,
-                    side: isLeft ? 'left' : 'right',
-                  },
-                },
+                leftEntity: left,
+                rightEntity: right,
+                counterpartyEntityId: isLeft ? right : left,
+                tokenId,
+                ownReserve: isLeft ? leftReserve : rightReserve,
+                counterpartyReserve: isLeft ? rightReserve : leftReserve,
+                collateral,
+                ondelta,
+                side: isLeft ? 'left' : 'right',
               },
-            };
+            });
           }
         }
-        return null;
+        return results;
       }
 
       default:
-        console.log(`🔭⚠️ [BrowserVM] Unknown event type: ${event.name}`);
-        return null;
+        return [];
+    }
+  }
+
+  /**
+   * Check if a BrowserVM event is relevant to an entity
+   * Only handles CANONICAL_J_EVENTS - ReserveUpdated and AccountSettled
+   */
+  private isEventRelevantToEntity(event: BrowserVMEvent, entityId: string): boolean {
+    switch (event.name) {
+      case 'ReserveUpdated':
+        return event.args.entity === entityId;
+      case 'AccountSettled': {
+        // AccountSettled has array of Settled structs - check if entity is left or right in any
+        // Can be event.args.settled (named param) or event.args[0] (unnamed) or event.args['']
+        const settledArray = event.args.settled || event.args[''] || event.args[0] || [];
+        for (const settled of settledArray) {
+          const left = settled[0] || settled.left;
+          const right = settled[1] || settled.right;
+          if (left === entityId || right === entityId) return true;
+        }
+        return false;
+      }
+      default:
+        return false;
     }
   }
 
@@ -354,7 +445,7 @@ export class JEventWatcher {
         console.log(`🔭🔍 SYNC-START: Current blockchain block=${currentBlock}, total eReplicas=${env.eReplicas.size}`);
         console.log(`🔭🔍 SYNC-ENV-TIMESTAMP: env.timestamp=${env.timestamp}`);
         for (const [replicaKey, replica] of env.eReplicas.entries()) {
-          console.log(`🔭🔍 REPLICA-STATE: ${replicaKey} → jBlock=${replica.state.jBlock}, height=${replica.state.height}, isProposer=${replica.isProposer}`);
+          console.log(`🔭🔍 REPLICA-STATE: ${replicaKey} → jBlock=${replica.state.lastFinalizedJHeight}, height=${replica.state.height}, isProposer=${replica.isProposer}`);
         }
       }
 
@@ -365,7 +456,7 @@ export class JEventWatcher {
         if (replica.isProposer) {
           const [entityId, signerId] = replicaKey.split(':');
           if (!entityId || !signerId) continue;
-          const lastJBlock = replica.state.jBlock || 0;
+          const lastJBlock = replica.state.lastFinalizedJHeight || 0;
 
           if (DEBUG) {
             console.log(`🔭🔍 REPLICA-CHECK: ${signerId} → Entity ${entityId.slice(0,10)}... jBlock=${lastJBlock}, currentBlock=${currentBlock}, isProposer=${replica.isProposer}`);
@@ -439,12 +530,26 @@ export class JEventWatcher {
 
       console.log(`🔭📦 ENTITY-SYNC: Found ${events.length} new events for entity ${entityId.slice(0,10)}... in blocks ${fromBlock}-${toBlock}`);
 
-      // Process events chronologically and feed to proposer
+      // Batch events by block for JBlock consensus
+      const batches = new Map<string, { blockNumber: number; blockHash?: string; events: any[] }>();
+
       for (const event of events) {
-        this.feedEventToProposer(entityId, signerId, event, env);
+        const blockNumber = event.blockNumber ?? 0;
+        const blockHash = event.blockHash || '';
+        const key = `${blockNumber}:${blockHash || '0x0'}`;
+        if (!batches.has(key)) {
+          batches.set(key, { blockNumber, blockHash, events: [] });
+        }
+        batches.get(key)!.events.push(event);
       }
 
-      console.log(`🔭✅ ENTITY-SYNC: Queued ${events.length} events for entity ${entityId.slice(0,10)}... (${signerId})`);
+      const batchList = Array.from(batches.values()).sort((a, b) => a.blockNumber - b.blockNumber);
+      for (const batch of batchList) {
+        const blockHash = await this.resolveBlockHash(batch.blockNumber, batch.blockHash);
+        this.queueEventBatchToProposer(entityId, signerId, batch.events, batch.blockNumber, blockHash, env);
+      }
+
+      console.log(`🔭✅ ENTITY-SYNC: Queued ${events.length} events in ${batchList.length} batches for entity ${entityId.slice(0,10)}... (${signerId})`);
 
     } catch (error) {
       console.error(`🔭❌ ENTITY-SYNC: Error syncing entity ${entityId.slice(0,10)}...`, error instanceof Error ? error.message : String(error));
@@ -501,50 +606,89 @@ export class JEventWatcher {
   }
 
   /**
-   * Feed event to proposer replica via runtime entityInputs
+   * Resolve block hash for RPC batches (fallback to provider if needed).
    */
-  private feedEventToProposer(entityId: string, signerId: string, event: any, env: Env): void {
-    let entityTx;
+  private async resolveBlockHash(blockNumber: number, blockHash?: string): Promise<string> {
+    if (blockHash && blockHash !== '0x0') {
+      return blockHash;
+    }
 
+    if (!this.provider) {
+      return '0x0';
+    }
+
+    try {
+      const block = await this.provider.getBlock(blockNumber);
+      return block?.hash || '0x0';
+    } catch {
+      return '0x0';
+    }
+  }
+
+  /**
+   * Convert a single RPC event into a J-event payload.
+   */
+  private rpcEventToJEvent(entityId: string, event: any): any | null {
     if (event.eventType === 'ReserveUpdated') {
-      entityTx = {
-        type: 'j_event' as const,
-        data: {
-          from: signerId,
-          event: {
-            type: 'ReserveUpdated',
-            data: {
-              entity: entityId,
-              tokenId: Number(event.args.tokenId),
-              newBalance: event.args.newBalance.toString(),
-              symbol: `TKN${event.args.tokenId}`,
-              decimals: 18,
-            },
-          },
-          observedAt: this.getEventTimestamp(),
-          blockNumber: event.blockNumber,
-          transactionHash: event.transactionHash,
-        },
-      };
-
       if (DEBUG) {
         console.log(`🔭💰 R2R-EVENT: Entity ${entityId.slice(0,10)}... Token ${event.args.tokenId} Balance ${(Number(event.args.newBalance) / 1e18).toFixed(4)} (block ${event.blockNumber})`);
       }
-    }
-    // Note: AccountSettled event handling for ethers RPC mode removed
-    // BrowserVM mode has full AccountSettled support in browserVMEventToEntityTx()
 
-    if (entityTx) {
-      // Feed to runtime processing queue
-      console.log(`🚨 J-WATCHER-CREATING-EVENT: ${signerId} creating j-event ${event.eventType} block=${event.blockNumber} for entity ${entityId.slice(0,10)}...`);
-      env.runtimeInput.entityInputs.push({
-        entityId: entityId,
-        signerId: signerId,
-        entityTxs: [entityTx],
-      });
-
-      console.log(`🔭✅ J-WATCHER-QUEUED: ${signerId} → Entity ${entityId.slice(0,10)}... (${event.eventType}) block=${event.blockNumber} - Queue length now: ${env.runtimeInput.entityInputs.length}`);
+      return {
+        type: 'ReserveUpdated',
+        data: {
+          entity: entityId,
+          tokenId: Number(event.args.tokenId),
+          newBalance: event.args.newBalance.toString(),
+          symbol: `TKN${event.args.tokenId}`,
+          decimals: 18,
+        },
+      };
     }
+
+    return null;
+  }
+
+  /**
+   * Feed a batched set of events to a proposer replica via runtime entityInputs.
+   */
+  private queueEventBatchToProposer(
+    entityId: string,
+    signerId: string,
+    events: any[],
+    blockNumber: number,
+    blockHash: string,
+    env: Env
+  ): void {
+    const jEvents = events
+      .map(event => this.rpcEventToJEvent(entityId, event))
+      .filter(Boolean);
+
+    if (jEvents.length === 0) {
+      return;
+    }
+
+    const entityTx = {
+      type: 'j_event' as const,
+      data: {
+        from: signerId,
+        observedAt: this.getEventTimestamp(),
+        blockNumber,
+        blockHash,
+        transactionHash: `rpc-${blockNumber}-${this.syntheticTxCounter++}`,
+        events: jEvents,
+        event: jEvents[0],
+      },
+    };
+
+    console.log(`🚨 J-WATCHER-CREATING-EVENT: ${signerId} creating j-event batch block=${blockNumber} for entity ${entityId.slice(0,10)}... (${jEvents.length} events)`);
+    env.runtimeInput.entityInputs.push({
+      entityId: entityId,
+      signerId: signerId,
+      entityTxs: [entityTx],
+    });
+
+    console.log(`🔭✅ J-WATCHER-QUEUED: ${signerId} → Entity ${entityId.slice(0,10)}... (${jEvents.length} events) block=${blockNumber} - Queue length now: ${env.runtimeInput.entityInputs.length}`);
   }
 
   /**

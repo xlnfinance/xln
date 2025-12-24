@@ -29,9 +29,13 @@ export async function handleHtlcReveal(
   const { lockId, secret } = accountTx.data;
   const events: string[] = [];
 
+  console.log(`🔓 REVEAL: lockId=${lockId.slice(0,16)}..., locks.size=${accountMachine.locks.size}`);
+  console.log(`🔓 REVEAL: Available lockIds: ${Array.from(accountMachine.locks.keys()).map(k => k.slice(0,16)).join(', ')}`);
+
   // 1. Find lock
   const lock = accountMachine.locks.get(lockId);
   if (!lock) {
+    console.log(`🔓 REVEAL FAIL: Lock ${lockId.slice(0,16)}... not found`);
     return { success: false, error: `Lock ${lockId} not found`, events };
   }
 
@@ -60,11 +64,14 @@ export async function handleHtlcReveal(
     return { success: false, error: `Delta ${lock.tokenId} not found`, events };
   }
 
-  // 5. Apply canonical delta (2024 pattern from SettlePayment:127-128)
-  // If left locked → right receives → delta increases (positive)
-  // If right locked → left receives → delta decreases (negative)
-  const canonicalDelta = lock.senderIsLeft ? lock.amount : -lock.amount;
+  // 5. Apply canonical delta (2024 pattern from DirectPayment:337)
+  // If left sends → delta decreases (negative)
+  // If right sends → delta increases (positive)
+  const canonicalDelta = lock.senderIsLeft ? -lock.amount : lock.amount;
+  console.log(`🔓 REVEAL-DELTA: senderIsLeft=${lock.senderIsLeft}, amount=${lock.amount}, canonicalDelta=${canonicalDelta}`);
+  console.log(`🔓 REVEAL-DELTA: offdelta BEFORE=${delta.offdelta}`);
   delta.offdelta += canonicalDelta;
+  console.log(`🔓 REVEAL-DELTA: offdelta AFTER=${delta.offdelta}`);
 
   // 6. Release hold
   if (lock.senderIsLeft) {

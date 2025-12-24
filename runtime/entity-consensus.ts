@@ -730,19 +730,15 @@ export const applyEntityFrame = async (
 
       if (accountMachine) {
         // Add to proposable if:
-        // 1. Received a NEW frame that needs ACK (newAccountFrame)
-        // 2. Received an ACK (height with prevSignatures) AND we have mempool items
-        // 3. Received account transactions that need processing
-        const isNewFrame = entityTx.data.newAccountFrame;
+        // - We have pending mempool items and no pending frame
         const isAck = entityTx.data.height && entityTx.data.prevSignatures;
         const hasPendingTxs = accountMachine.mempool.length > 0;
 
         // Only propose if we have something to send:
-        // - Need to ACK a new frame
         // - Have transactions in mempool
-        if (isNewFrame || (hasPendingTxs && !accountMachine.pendingFrame)) {
+        if (hasPendingTxs && !accountMachine.pendingFrame) {
           proposableAccounts.add(fromEntity);
-          console.log(`🔄 Added ${fromEntity.slice(0,10)} to proposable - NewFrame:${isNewFrame}, Pending:${hasPendingTxs}`);
+          console.log(`🔄 Added ${fromEntity.slice(0,10)} to proposable - Pending:${hasPendingTxs}`);
         } else if (isAck) {
           console.log(`✅ Received ACK from ${fromEntity.slice(0,10)}, no action needed (mempool empty)`);
         }
@@ -774,7 +770,7 @@ export const applyEntityFrame = async (
       const accountMachine = currentEntityState.accounts.get(targetEntity);
       if (accountMachine) {
         const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
-        if (isLeft) {
+        if (isLeft && accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
           proposableAccounts.add(targetEntity);
           console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (new account opened)`);
         }
@@ -806,7 +802,12 @@ export const applyEntityFrame = async (
   additionalAccounts.forEach(accountId => proposableAccounts.add(accountId));
 
   // CRITICAL: Deterministic ordering
-  const accountsToProposeFrames = Array.from(proposableAccounts).sort();
+  const accountsToProposeFrames = Array.from(proposableAccounts)
+    .filter(accountId => {
+      const accountMachine = currentEntityState.accounts.get(accountId);
+      return accountMachine ? accountMachine.mempool.length > 0 && !accountMachine.pendingFrame : false;
+    })
+    .sort();
   console.error(`   TOTAL accounts to propose: ${accountsToProposeFrames.length}`);
 
   if (accountsToProposeFrames.length > 0) {

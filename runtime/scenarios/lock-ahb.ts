@@ -1117,6 +1117,8 @@ export async function ahb(env: Env): Promise<void> {
     await process(env);
     // Tick 3: Bob receives ACK, commits frame
     await process(env);
+    // Tick 4: Extra tick to ensure all ACKs delivered (left-wins resend adds traffic)
+    await process(env);
 
     // ✅ ASSERT: Credit extension delivered - Bob-Hub has leftCreditLimit = $500K
     // Bob (0x0003) > Hub (0x0002) → Bob is RIGHT, Hub is LEFT
@@ -1277,28 +1279,34 @@ export async function ahb(env: Env): Promise<void> {
     await process(env);
     logPending();
 
-    // Verify total shift = $250K
+    // Verify total shift = $250K (A-H) and $250K minus HTLC fee (H-B)
+    // HTLC routing takes a fee on forwarded payments (payment1 only, payment2 is direct)
+    const { calculateHtlcFeeAmount } = await import('../htlc-utils');
+    const htlcFee = calculateHtlcFeeAmount(payment1);
+
     const ahDeltaFinal = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const hbDeltaFinal = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
-    const expectedShift = -(payment1 + payment2); // -$250K
+    const expectedAHShift = -(payment1 + payment2); // -$250K (full amount from Alice)
+    const expectedHBShift = -(payment1 - htlcFee + payment2); // -$250K + fee (Hub keeps fee on forwarded payment)
 
-    if (ahDeltaFinal !== expectedShift) {
-      throw new Error(`❌ ASSERTION FAILED: A-H shift=${ahDeltaFinal}, expected ${expectedShift}`);
+    if (ahDeltaFinal !== expectedAHShift) {
+      throw new Error(`❌ ASSERTION FAILED: A-H shift=${ahDeltaFinal}, expected ${expectedAHShift}`);
     }
-    if (hbDeltaFinal !== expectedShift) {
-      throw new Error(`❌ ASSERTION FAILED: H-B shift=${hbDeltaFinal}, expected ${expectedShift}`);
+    if (hbDeltaFinal !== expectedHBShift) {
+      throw new Error(`❌ ASSERTION FAILED: H-B shift=${hbDeltaFinal}, expected ${expectedHBShift} (includes fee=${htlcFee})`);
     }
-    console.log(`✅ Total shift verified: A-H=${ahDeltaFinal}, H-B=${hbDeltaFinal} (both -$250K as expected)`);
+    console.log(`✅ Total shift verified: A-H=${ahDeltaFinal}, H-B=${hbDeltaFinal} (fee=${htlcFee})`);
 
-    // Verify Bob's view
+    // Verify Bob's view (Bob receives payment1 minus fee + payment2)
+    const expectedBobReceived = (payment1 - htlcFee) + payment2;
     const [, bobRep] = findReplica(env, bob.id);
     const bobHubAcc = bobRep.state.accounts.get(hub.id);
     const bobDelta = bobHubAcc?.deltas.get(USDC_TOKEN_ID);
     if (bobDelta) {
       const bobDerived = deriveDelta(bobDelta, false); // Bob is RIGHT
-      console.log(`   Bob outCapacity: ${bobDerived.outCapacity} (received $250K)`);
-      if (bobDerived.outCapacity !== payment1 + payment2) {
-        throw new Error(`❌ ASSERTION FAILED: Bob outCapacity=${bobDerived.outCapacity}, expected ${payment1 + payment2}`);
+      console.log(`   Bob outCapacity: ${bobDerived.outCapacity} (received $${Number(expectedBobReceived) / 1e18})`);
+      if (bobDerived.outCapacity !== expectedBobReceived) {
+        throw new Error(`❌ ASSERTION FAILED: Bob outCapacity=${bobDerived.outCapacity}, expected ${expectedBobReceived}`);
       }
     }
 
@@ -1389,19 +1397,19 @@ export async function ahb(env: Env): Promise<void> {
     const ahDeltaRev = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const bhDeltaRev = getOffdelta(env, bob.id, hub.id, USDC_TOKEN_ID);
 
-    // After $250K A→B and $50K B→A:
-    // A-H: -$250K + $50K = -$200K (Alice's debt reduced)
-    // B-H: -$250K + $50K = -$200K (Hub's debt to Bob reduced)
+    // After $250K A→B (with HTLC fee on forwarded payment1) and $50K B→A:
+    // A-H: -$250K + $50K = -$200K (Alice's debt reduced - no fee on her side)
+    // B-H: -(payment1-fee + payment2) + $50K = Hub's debt to Bob
     const expectedAH = -(payment1 + payment2) + reversePayment; // -$200K
-    const expectedBH = -(payment1 + payment2) + reversePayment; // -$200K
+    const expectedBH = -(payment1 - htlcFee + payment2) + reversePayment; // -$200K + fee kept
 
     if (ahDeltaRev !== expectedAH) {
       throw new Error(`❌ REVERSE PAYMENT FAIL: A-H offdelta=${ahDeltaRev}, expected ${expectedAH}`);
     }
     if (bhDeltaRev !== expectedBH) {
-      throw new Error(`❌ REVERSE PAYMENT FAIL: B-H offdelta=${bhDeltaRev}, expected ${expectedBH}`);
+      throw new Error(`❌ REVERSE PAYMENT FAIL: B-H offdelta=${bhDeltaRev}, expected ${expectedBH} (fee=${htlcFee})`);
     }
-    console.log(`✅ Reverse payment B→H→A verified: A-H=${ahDeltaRev}, B-H=${bhDeltaRev} (both -$200K)`);
+    console.log(`✅ Reverse payment B→H→A verified: A-H=${ahDeltaRev}, B-H=${bhDeltaRev} (fee=${htlcFee})`);
 
     await pushSnapshot(env, 'Frame 21: Reverse payment complete', {
       title: '✅ Reverse Payment: $50K B→A',

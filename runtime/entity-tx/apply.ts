@@ -1,5 +1,5 @@
 import { calculateQuorumPower } from '../entity-consensus';
-import { formatEntityId } from '../entity-helpers';
+import { formatEntityId } from '../utils';
 import { processProfileUpdate } from '../name-resolution';
 import { db } from '../runtime';
 import { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput } from '../types';
@@ -188,12 +188,18 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     }
 
     if (entityTx.type === 'openAccount') {
-      console.log(`💳 OPEN-ACCOUNT: Opening account with ${entityTx.data.targetEntityId}`);
+      const targetEntityId = entityTx.data.targetEntityId;
+      if (entityState.accounts.has(targetEntityId)) {
+        console.log(`💳 OPEN-ACCOUNT: Account with ${formatEntityId(targetEntityId)} already exists, skipping duplicate request`);
+        return { newState: entityState, outputs: [] };
+      }
+
+      console.log(`💳 OPEN-ACCOUNT: Opening account with ${targetEntityId}`);
 
       // Emit account opening event
       env.emit('AccountOpening', {
         entityId: entityState.entityId,
-        counterpartyId: entityTx.data.targetEntityId,
+        counterpartyId: targetEntityId,
       });
 
       const newState = cloneEntityState(entityState);
@@ -203,15 +209,15 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       addMessage(newState, `💳 Opening account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);
 
       // STEP 1: Create local account machine
-      if (!newState.accounts.has(entityTx.data.targetEntityId)) {
-        console.log(`💳 LOCAL-ACCOUNT: Creating local account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);
+      if (!newState.accounts.has(targetEntityId)) {
+        console.log(`💳 LOCAL-ACCOUNT: Creating local account with Entity ${formatEntityId(targetEntityId)}...`);
 
         // CONSENSUS FIX: Start with empty deltas - let all delta creation happen through transactions
         // This ensures both sides have identical delta Maps (matches Channel.ts pattern)
         const initialDeltas = new Map<number, Delta>();
 
-        newState.accounts.set(entityTx.data.targetEntityId, {
-          counterpartyEntityId: entityTx.data.targetEntityId,
+        newState.accounts.set(targetEntityId, {
+          counterpartyEntityId: targetEntityId,
           mempool: [],
           currentFrame: {
             height: 0,
@@ -240,7 +246,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           // Removed isProposer - use isLeft() function like old_src Channel.ts
           proofHeader: {
             fromEntity: entityState.entityId,
-            toEntity: entityTx.data.targetEntityId,
+            toEntity: targetEntityId,
             cooperativeNonce: 0,
             disputeNonce: 0,
           },
@@ -257,7 +263,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`💳 Adding account setup transactions to local mempool for ${formatEntityId(entityTx.data.targetEntityId)}`);
 
       // Get the account machine we just created
-      const localAccount = newState.accounts.get(entityTx.data.targetEntityId);
+      const localAccount = newState.accounts.get(targetEntityId);
       if (!localAccount) {
         throw new Error(`CRITICAL: Account machine not found after creation`);
       }
@@ -276,12 +282,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`   Transactions: [add_delta] - credit limits start at 0, must be explicitly set`);
 
       // Add success message to chat
-      addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(entityTx.data.targetEntityId)}`);
+      addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(targetEntityId)}`);
 
       // CRITICAL: Notify counterparty to create mirror account
       // Without this, Hub won't know about Alice-Hub account when j-events arrive!
       // Look up actual signer from env.eReplicas (key format: entityId:signerId)
-      const targetEntityId = entityTx.data.targetEntityId;
       let counterpartySigner = 's1'; // Fallback
       for (const [replicaKey] of env.eReplicas.entries()) {
         if (replicaKey.startsWith(targetEntityId + ':')) {

@@ -46,7 +46,7 @@
   // J-machine status (derived from environment)
   $: jMachineStatus = (() => {
     if (!$xlnEnvironment) return { block: 0, events: 0, height: 0 };
-    const maxJBlock = Math.max(0, ...Array.from($xlnEnvironment.eReplicas?.values() || []).map((r: any) => r.state?.jBlock || 0));
+    const maxJBlock = Math.max(0, ...Array.from($xlnEnvironment.eReplicas?.values() || []).map((r: any) => r.state?.lastFinalizedJHeight || 0));
     return {
       block: maxJBlock,
       events: $xlnEnvironment?.runtimeInput?.entityInputs?.length || 0,
@@ -65,7 +65,7 @@
           return {
             entityId: entityId?.slice(0,10) + '...' || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })(),
             signerId,
-            jBlock: replica.state.jBlock,
+            jBlock: replica.state.lastFinalizedJHeight,
           };
         });
 

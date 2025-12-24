@@ -385,7 +385,7 @@
                         <div class="data-row"><span>Signer:</span> <code>{replica.signerId}</code></div>
                         <div class="data-row"><span>Is Proposer:</span> {replica.isProposer}</div>
                         <div class="data-row"><span>State Height:</span> {replica.state?.height}</div>
-                        <div class="data-row"><span>J-Block:</span> {replica.state?.jBlock || 0}</div>
+                        <div class="data-row"><span>J-Block:</span> {replica.state?.lastFinalizedJHeight || 0}</div>
                       </div>
 
                       <!-- Reserves -->

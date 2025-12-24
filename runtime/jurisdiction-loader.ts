@@ -48,9 +48,29 @@ export function loadJurisdictions(): JurisdictionsData {
     return cachedJurisdictions;
   }
 
+  const defaultJurisdictions: JurisdictionsData = {
+    version: '1.0.0',
+    lastUpdated: new Date().toISOString(),
+    jurisdictions: {},
+    defaults: {
+      timeout: 30000,
+      retryAttempts: 3,
+      gasLimit: 1000000,
+    },
+  };
+
   try {
     const fs = require('fs'); // Dynamic require for Node.js only
-    const jurisdictionsContent = fs.readFileSync('./jurisdictions.json', 'utf8');
+    const path = require('path');
+    const filePath = path.resolve(process.cwd(), 'jurisdictions.json');
+
+    if (!fs.existsSync(filePath)) {
+      console.warn('INFO: jurisdictions.json not found; using defaults');
+      cachedJurisdictions = defaultJurisdictions;
+      return cachedJurisdictions;
+    }
+
+    const jurisdictionsContent = fs.readFileSync(filePath, 'utf8');
     cachedJurisdictions = JSON.parse(jurisdictionsContent);
 
     console.log('📋 Jurisdictions loaded from file (cached for future use)');
@@ -60,18 +80,8 @@ export function loadJurisdictions(): JurisdictionsData {
 
     return cachedJurisdictions!;
   } catch (error) {
-    console.error('❌ Failed to load jurisdictions.json:', error);
-    // Return a default structure if file doesn't exist
-    cachedJurisdictions = {
-      version: "1.0.0",
-      lastUpdated: new Date().toISOString(),
-      jurisdictions: {},
-      defaults: {
-        timeout: 30000,
-        retryAttempts: 3,
-        gasLimit: 1000000
-      }
-    };
+    console.error('ERROR: Failed to load jurisdictions.json:', error);
+    cachedJurisdictions = defaultJurisdictions;
     return cachedJurisdictions;
   }
 }

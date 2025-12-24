@@ -148,7 +148,7 @@ bunx hardhat run scripts/verify-contract-functions.cjs --network ethereum
 
 #### Configuration
 - `jurisdictions.json`: Contract addresses and network config
-- `CLAUDE.md`: Development guidelines and overrides
+- `claude.md`: Development guidelines and overrides
 - `contracts/`: Solidity contracts with Hardhat deployment
 
 ### Development Philosophy

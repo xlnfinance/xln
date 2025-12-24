@@ -309,21 +309,30 @@ export interface VoteData {
 }
 
 /**
+ * Common metadata for all J-events (for JBlock tracking)
+ */
+interface JEventMetadata {
+  blockNumber?: number;      // J-block number where event occurred
+  blockHash?: string;        // J-block hash for consensus
+  transactionHash?: string;  // On-chain transaction hash
+}
+
+/**
  * Jurisdiction event types - discriminated union for type safety
  * Each on-chain event has its own typed data structure
  */
 export type JurisdictionEvent =
-  | {
+  | (JEventMetadata & {
       type: 'ReserveUpdated';
       data: {
         entity: string;
         tokenId: number;
         newBalance: string;
-        symbol: string;
-        decimals: number;
+        symbol?: string;   // Optional - BrowserVM doesn't have token registry
+        decimals?: number; // Optional - use TOKEN_REGISTRY lookup if missing
       };
-    }
-  | {
+    })
+  | (JEventMetadata & {
       type: 'AccountSettled';
       data: {
         leftEntity: string;
@@ -336,8 +345,8 @@ export type JurisdictionEvent =
         ondelta: string;
         side: 'left' | 'right';
       };
-    }
-  | {
+    })
+  | (JEventMetadata & {
       type: 'InsuranceClaimed';
       data: {
         entityId: string;
@@ -346,24 +355,26 @@ export type JurisdictionEvent =
         amount: string;
         claimReason: string;
       };
-    }
-  | {
+    })
+  | (JEventMetadata & {
       type: 'GovernanceEnabled';
       data: {
         entityId: string;
         proposalThreshold: number;
       };
-    };
+    });
 
 /**
  * Jurisdiction event data for j_event transactions
- * Now with typed event discriminated union
+ * Now with typed event discriminated union and JBlock consensus info
  */
 export interface JurisdictionEventData {
   from: string;
   event: JurisdictionEvent;
+  events?: JurisdictionEvent[]; // Batched events from same block
   observedAt: number;
   blockNumber: number;
+  blockHash: string;  // Block hash for JBlock consensus
   transactionHash: string;
 }
 
@@ -820,6 +831,52 @@ export type AccountTx =
       };
     };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// J-BLOCK CONSENSUS (Multi-signer agreement on J-machine state)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Each signer independently observes J-machine blocks and submits observations.
+// Entity finalizes a JBlock when threshold signers agree on (jHeight, jBlockHash).
+// This ensures Byzantine-tolerant J-machine state tracking without extra signatures.
+//
+// Flow:
+// 1. Signer observes J-block N with events relevant to entity
+// 2. Signer submits JBlockObservation as EntityTx
+// 3. Entity collects observations from all signers
+// 4. When threshold agree on same (jHeight, jBlockHash) → finalize
+// 5. Apply events from finalized JBlock to entity state
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Observation of a J-block by a single signer.
+ * Submitted as j_event EntityTx, aggregated by entity consensus.
+ */
+export interface JBlockObservation {
+  signerId: string;              // Who observed this
+  jHeight: number;               // J-machine block number
+  jBlockHash: string;            // EVM block hash (or BrowserVM frame hash)
+  events: JurisdictionEvent[];   // Events relevant to this entity in this block
+  observedAt: number;            // When signer observed this (for timeout detection)
+}
+
+/**
+ * Finalized J-block after threshold agreement.
+ * Events from this block can be safely applied to entity state.
+ */
+export interface JBlockFinalized {
+  jHeight: number;
+  jBlockHash: string;
+  events: JurisdictionEvent[];
+  finalizedAt: number;           // When consensus was reached
+  signerCount: number;           // How many signers agreed (for audit)
+}
+
+/**
+ * Liveness sync - empty block observation to prove chain is alive.
+ * Required every JBLOCK_LIVENESS_INTERVAL blocks even if no events.
+ */
+export const JBLOCK_LIVENESS_INTERVAL = 100;
+
 export interface EntityState {
   entityId: string; // The entity ID this state belongs to
   height: number;
@@ -832,8 +889,10 @@ export interface EntityState {
   // 💰 Financial state
   reserves: Map<string, bigint>; // tokenId -> amount only, metadata from TOKEN_REGISTRY
   accounts: Map<string, AccountMachine>; // counterpartyEntityId -> account state
-  // 🔭 J-machine tracking
-  jBlock: number; // Last processed J-machine block number
+  // 🔭 J-machine tracking (JBlock consensus)
+  lastFinalizedJHeight: number;           // Last finalized J-block height
+  jBlockObservations: JBlockObservation[]; // Pending observations from signers
+  jBlockChain: JBlockFinalized[];          // Finalized J-blocks (prunable)
 
   // 🔗 Account machine integration
   accountInputQueue?: AccountInput[]; // Queue of settlement events to be processed by a-machine

@@ -120,9 +120,9 @@ export const encode = (data: any): Buffer => {
   const replicasMap = data?.eReplicas || data?.replicas;
   if (replicasMap) {
     for (const [replicaKey, replica] of replicasMap.entries()) {
-      if (replica && replica.state && typeof replica.state.jBlock !== 'number') {
+      if (replica && replica.state && typeof replica.state.lastFinalizedJHeight !== 'number') {
         console.error(`💥 CRITICAL: Invalid jBlock for ${replicaKey.slice(0,20)}... - auto-fixing to 0`);
-        replica.state.jBlock = 0;
+        replica.state.lastFinalizedJHeight = 0;
       }
     }
   }
@@ -155,13 +155,13 @@ export const decode = (buffer: Buffer): any => {
     if (decodedReplicas) {
       for (const [replicaKey, replica] of decodedReplicas.entries()) {
         if (replica && replica.state) {
-          const jBlock = replica.state.jBlock;
+          const jBlock = replica.state.lastFinalizedJHeight;
           if (typeof jBlock !== 'number') {
             // IMPORTANT: Don't reset to 0 - this causes re-processing of ALL events!
             // If jBlock is missing, use the snapshot height as a safe fallback
             const fallbackJBlock = Number(decoded.height) || 0;
             console.warn(`⚠️ jBlock missing for replica ${replicaKey}, using height ${fallbackJBlock} as fallback`);
-            replica.state.jBlock = fallbackJBlock;
+            replica.state.lastFinalizedJHeight = fallbackJBlock;
           }
         }
       }

@@ -72,11 +72,9 @@ export const DEPOSITORY_ABI = [
   'function getInsuranceLines(bytes32 insured) external view returns (tuple(bytes32 insurer, uint256 tokenId, uint256 remaining, uint64 expiresAt)[])',
   'function getInsuranceLinesCount(bytes32 insured) external view returns (uint256)',
   'function getAvailableInsurance(bytes32 insured, uint256 tokenId) external view returns (uint256)',
-  // Events
-  'event ReserveMinted(bytes32 indexed entity, uint256 indexed tokenId, uint256 amount, uint256 newBalance)',
+  // Canonical J-Events (must match CANONICAL_J_EVENTS in j-event-watcher.ts)
   'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
-  'event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint256 indexed tokenId, uint256 amount)',
-  'event SettlementProcessed(bytes32 indexed leftEntity, bytes32 indexed rightEntity, uint256 indexed tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)',
+  // Note: AccountSettled is emitted via DELEGATECALL from Account.sol - parsed directly from logs
   // Insurance events
   'event InsuranceRegistered(bytes32 indexed insured, bytes32 indexed insurer, uint256 indexed tokenId, uint256 limit, uint64 expiresAt)',
   'event InsuranceClaimed(bytes32 indexed insured, bytes32 indexed insurer, bytes32 indexed creditor, uint256 tokenId, uint256 amount)',

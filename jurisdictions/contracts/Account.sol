@@ -12,13 +12,34 @@ import "./DeltaTransformer.sol";
  */
 library Account {
 
-  // ========== EVENTS (emitted via DELEGATECALL, attributed to Depository) ==========
-  event AccountSettled(Settled[]);
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CANONICAL J-EVENTS (Single Source of Truth - must match j-event-watcher.ts)
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // AccountSettled  - Bilateral account state changed (reserves, collateral, ondelta)
+  // ReserveUpdated  - Entity reserve balance changed (also in Depository.sol)
+  //
+  // Design: One event = One state change. No redundant events.
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * @notice Emitted when bilateral account state changes via settlement.
+   * @dev THE canonical event for account state. Contains full state for both entities.
+   *      j-watcher uses: entity.accounts[counterparty] = { reserves, collateral, ondelta }
+   */
+  event AccountSettled(Settled[] settled);
+
+  /**
+   * @notice Emitted when reserves change during settlement.
+   * @dev Mirror of Depository.sol ReserveUpdated - emitted here via DELEGATECALL.
+   */
+  event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
+
+  // ========== OTHER EVENTS ==========
   event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes initialArguments);
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
   event InsuranceRegistered(bytes32 indexed insured, bytes32 indexed insurer, uint256 indexed tokenId, uint256 limit, uint256 expiresAt);
-  event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
 
   // ========== ERRORS ==========
   error E2(); // Unauthorized

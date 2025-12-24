@@ -105,6 +105,7 @@ export async function handleHtlcLock(
     encryptedPackage
   };
 
+  console.log(`🔒 BEFORE SET: locks.size=${accountMachine.locks?.size}, lockId=${lockId.slice(0,16)}`);
   accountMachine.locks.set(lockId, lock);
   console.log(`✅ Lock added to Map: ${lockId.slice(0,16)}..., locks.size=${accountMachine.locks.size}`);
 

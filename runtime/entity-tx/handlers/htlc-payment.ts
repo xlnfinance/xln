@@ -103,7 +103,7 @@ export async function handleHtlcPayment(
   const totalHops = route.length - 1; // Minus sender
   const hopIndex = 0; // We're always hop 0 (sender) in this handler
   const baseTimelock = BigInt(env.timestamp + HTLC.DEFAULT_EXPIRY_MS);
-  const baseHeight = newState.jBlock || 0;
+  const baseHeight = newState.lastFinalizedJHeight || 0;
 
   const timelock = calculateHopTimelock(baseTimelock, hopIndex, totalHops);
   const revealBeforeHeight = calculateHopRevealHeight(baseHeight, hopIndex, totalHops);
