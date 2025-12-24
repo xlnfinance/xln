@@ -97,22 +97,26 @@ contract Depository is ReentrancyGuardLite {
   event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes initialArguments);
   event CooperativeClose(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed cooperativeNonce);
 
-  // Events for reserve tracking (used by j-watcher)
-  event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint indexed tokenId, uint amount);
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CANONICAL J-EVENTS (Single Source of Truth - must match j-event-watcher.ts)
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // These events are the ONLY events that j-watcher processes for entity state.
+  // Each event type has exactly ONE purpose:
+  //
+  // ReserveUpdated  - Entity reserve balance changed (mint, R2R, settlement)
+  // AccountSettled  - Bilateral account state changed (in Account.sol)
+  //
+  // REMOVED (redundant):
+  // - ReserveMinted: redundant with ReserveUpdated (newBalance is sufficient)
+  // - ReserveTransferred: redundant with 2x ReserveUpdated (one per entity)
+  // - SettlementProcessed: duplicate of AccountSettled
+  // ═══════════════════════════════════════════════════════════════════════════
 
   /**
-   * @notice Emitted when reserves are minted (created from thin air) to an entity.
-   * @dev This is distinct from ReserveTransferred (which moves existing reserves).
-   * @param entity The entity receiving the minted reserves.
-   * @param tokenId The internal ID of the token.
-   * @param amount The amount minted.
-   * @param newBalance The absolute new balance after minting.
-   */
-  event ReserveMinted(bytes32 indexed entity, uint indexed tokenId, uint amount, uint newBalance);
-
-  /**
-   * @notice Emitted whenever an entity's reserve balance for a specific token changes.
-   * @dev This is the primary event for j-watchers to sync entity state.
+   * @notice Emitted whenever an entity's reserve balance changes.
+   * @dev This is THE canonical event for reserve state. Covers: mint, R2R, settlement.
+   *      j-watcher uses this to set entity.reserves[tokenId] = newBalance
    * @param entity The entity whose reserve was updated.
    * @param tokenId The internal ID of the token.
    * @param newBalance The absolute new balance of the token for the entity.
@@ -279,7 +283,7 @@ contract Depository is ReentrancyGuardLite {
     _reserves[entity][tokenId] += amount;
     uint newBalance = _reserves[entity][tokenId];
 
-    emit ReserveMinted(entity, tokenId, amount, newBalance);
+    // Single canonical event for reserve changes
     emit ReserveUpdated(entity, tokenId, newBalance);
 
     
@@ -339,10 +343,9 @@ contract Depository is ReentrancyGuardLite {
     _reserves[fromEntity][tokenId] -= amount;
     _reserves[toEntity][tokenId] += amount;
 
-    // Emit events for j-watcher
+    // Single canonical event per entity whose reserve changed
     emit ReserveUpdated(fromEntity, tokenId, _reserves[fromEntity][tokenId]);
     emit ReserveUpdated(toEntity, tokenId, _reserves[toEntity][tokenId]);
-    emit ReserveTransferred(fromEntity, toEntity, tokenId, amount);
 
     
     return true;
@@ -710,9 +713,9 @@ contract Depository is ReentrancyGuardLite {
     
     
     
+    // Single canonical event per entity whose reserve changed
     emit ReserveUpdated(entity, params.tokenId, _reserves[entity][params.tokenId]);
     emit ReserveUpdated(params.receivingEntity, params.tokenId, _reserves[params.receivingEntity][params.tokenId]);
-    emit ReserveTransferred(entity, params.receivingEntity, params.tokenId, params.amount);
     
   }
 
@@ -856,7 +859,7 @@ contract Depository is ReentrancyGuardLite {
           collateral: col.collateral,
           ondelta: col.ondelta
         });
-        emit AccountSettled(settledEvents);
+        emit Account.AccountSettled(settledEvents);
 
 
       } else {

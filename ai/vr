@@ -1,2 +1,0 @@
-#!/bin/bash
-cd /Users/zigota/xln/ai && bun run voice-record.ts

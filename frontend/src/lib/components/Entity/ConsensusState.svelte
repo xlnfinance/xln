@@ -20,7 +20,7 @@
     </div>
     <div class="consensus-item">
       <span class="consensus-label">J-Block:</span>
-      <span class="consensus-value consensus-jblock">🔭 {replica.state?.jBlock || 0}</span>
+      <span class="consensus-value consensus-jblock">🔭 {replica.state?.lastFinalizedJHeight || 0}</span>
     </div>
     <div class="consensus-item">
       <span class="consensus-label">Messages:</span>

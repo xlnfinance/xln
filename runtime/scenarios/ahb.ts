@@ -1145,6 +1145,8 @@ export async function ahb(env: Env): Promise<void> {
     await process(env);
     // Tick 3: Bob receives ACK, commits frame
     await process(env);
+    // Tick 4: Extra tick to ensure all ACKs delivered (left-wins resend adds traffic)
+    await process(env);
 
     // ✅ ASSERT: Credit extension delivered - Bob-Hub has leftCreditLimit = $500K
     // Bob (0x0003) > Hub (0x0002) → Bob is RIGHT, Hub is LEFT

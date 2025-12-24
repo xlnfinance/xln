@@ -151,7 +151,7 @@ export async function proposeAccountFrame(
   // Get entity's synced J-height for deterministic HTLC validation
   const ourEntityId = accountMachine.proofHeader.fromEntity;
   const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
-  const currentJHeight = ourReplica?.state.jBlock || 0;
+  const currentJHeight = ourReplica?.state.lastFinalizedJHeight || 0;
 
   // Process all transactions on the clone
   const allEvents: string[] = [];
@@ -270,6 +270,7 @@ export async function proposeAccountFrame(
   accountMachine.pendingFrame = newFrame;
   accountMachine.sentTransitions = accountMachine.mempool.length;
   accountMachine.clonedForValidation = clonedMachine;
+  console.log(`🔒 PROPOSE: Storing clonedForValidation with locks.size=${clonedMachine.locks.size}`);
 
   // Clear mempool
   accountMachine.mempool = [];
@@ -452,24 +453,10 @@ export async function handleAccountInput(
       const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
       if (isLeftEntity) {
-        // We are LEFT - ignore their frame, but re-send our pending frame so they can roll back and ACK
-        console.log(`📤 LEFT-WINS: Ignoring right's frame ${receivedFrame.height}, re-sending ours for acknowledgement`);
-
-        const pendingFrame = accountMachine.pendingFrame;
-        const resendSignature = signAccountFrame(accountMachine.proofHeader.fromEntity, pendingFrame.stateHash);
-
-        const response: AccountInput = {
-          fromEntityId: accountMachine.proofHeader.fromEntity,
-          toEntityId: input.fromEntityId,
-          height: pendingFrame.height,
-          newAccountFrame: pendingFrame,
-          newSignatures: [resendSignature],
-          // Reuse last outbound counter to avoid tripping replay protection on their side
-          counter: accountMachine.proofHeader.cooperativeNonce,
-        };
-
-        events.push(`📤 LEFT-WINS: Re-sent frame ${pendingFrame.height} (counter=${response.counter})`);
-        return { success: true, response, events };
+        // We are LEFT - ignore their frame, keep ours (deterministic tiebreaker)
+        console.log(`📤 LEFT-WINS: Ignoring right's frame ${receivedFrame.height}, waiting for them to accept ours`);
+        // This is NOT an error - it's correct consensus behavior (Channel.ts handlePendingBlock)
+        return { success: true, events };
       } else {
         // We are RIGHT - rollback our frame, accept theirs
         if (accountMachine.rollbackCount === 0) {
@@ -523,7 +510,7 @@ export async function handleAccountInput(
     // Get entity's synced J-height for deterministic HTLC validation
     const ourEntityId = accountMachine.proofHeader.fromEntity;
     const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
-    const currentJHeight = ourReplica?.state.jBlock || 0;
+    const currentJHeight = ourReplica?.state.lastFinalizedJHeight || 0;
 
     // Apply frame transactions to clone (as receiver)
     const clonedMachine = cloneAccountMachine(accountMachine);
@@ -597,10 +584,21 @@ export async function handleAccountInput(
       stateHash: receivedFrame.stateHash,
     });
 
-    // Commit frame
+    // Commit frame - CRITICAL FIX: Use explicit copy pattern (same as Proposer commit)
+    // Direct Map assignment can fail with deep clones - explicit copy is safer
     console.log(`🔍 RECEIVER-COMMIT: clonedMachine.locks.size=${clonedMachine.locks.size}`);
-    accountMachine.deltas = clonedMachine.deltas;
-    accountMachine.locks = clonedMachine.locks; // HTLC: Copy locks
+    console.log(`🔍 RECEIVER-COMMIT: clonedMachine.deltas before copy:`,
+      Array.from(clonedMachine.deltas.entries()).map(([tid, d]) => ({ tid, offdelta: d.offdelta?.toString() })));
+
+    accountMachine.deltas.clear();
+    for (const [tokenId, delta] of clonedMachine.deltas.entries()) {
+      accountMachine.deltas.set(tokenId, { ...delta }); // Shallow copy of delta object
+    }
+
+    accountMachine.locks.clear();
+    for (const [lockId, lock] of clonedMachine.locks.entries()) {
+      accountMachine.locks.set(lockId, { ...lock });
+    }
     console.log(`🔍 RECEIVER-COMMIT: accountMachine.locks.size after copy=${accountMachine.locks.size}`);
 
     // Log committed deltas for debugging credit limits

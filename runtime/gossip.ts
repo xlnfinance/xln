@@ -83,26 +83,45 @@ export function createGossipLayer(): GossipLayer {
   };
 }
 
-// Demo usage (commented out)
-/*
-const gossipLayer = createGossipLayer();
+// === PERSISTENCE (from gossip-loader.ts) ===
 
-// Announce Alice's profile
-gossipLayer.announce({
-  entityId: "alice",
-  capabilities: ["trader", "swap:memecoins"],
-  hubs: ["hubX1"],
-  metadata: { region: "US", version: "1.0.0" }
-});
+/**
+ * Load persisted profiles from database into gossip layer
+ * @param db - LevelDB-like database instance
+ * @param gossip - Gossip layer to announce profiles to
+ * @returns Number of profiles loaded
+ */
+export async function loadPersistedProfiles(db: any, gossip: { announce: (p: Profile) => void }): Promise<number> {
+  try {
+    let profileCount = 0;
+    const iterator = db.iterator({ gte: 'profile:', lt: 'profile:\xFF' });
 
-// Announce hubX1's profile
-gossipLayer.announce({
-  entityId: "hubX1",
-  capabilities: ["router", "hub", "swap:all"],
-  hubs: [],
-  metadata: { capacity: 1000, uptime: "99.9%" }
-});
+    for await (const [key, value] of iterator) {
+      try {
+        const profile = JSON.parse(value);
+        gossip.announce({
+          entityId: profile.entityId,
+          capabilities: profile.capabilities || [],
+          hubs: profile.hubs || [],
+          metadata: {
+            name: profile.name,
+            avatar: profile.avatar,
+            bio: profile.bio,
+            website: profile.website,
+            lastUpdated: profile.lastUpdated,
+            hankoSignature: profile.hankoSignature,
+          },
+        });
+        profileCount++;
+      } catch (parseError) {
+        console.warn(`⚠️ Failed to parse profile from key ${key}:`, parseError);
+      }
+    }
 
-// List all profiles
-console.log("All profiles:", gossipLayer.getProfiles());
-*/
+    console.log(`📡 Restored ${profileCount} profiles from DB into gossip`);
+    return profileCount;
+  } catch (error) {
+    console.error('❌ Failed to load persisted profiles:', error);
+    return 0;
+  }
+}

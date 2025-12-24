@@ -22,6 +22,7 @@ export interface EVMEvent {
   name: string;
   args: Record<string, unknown>;
   blockNumber?: number;
+  blockHash?: string;  // Block hash for JBlock consensus
   timestamp?: number;
 }
 
@@ -41,7 +42,13 @@ export class BrowserVMProvider {
   private entityProviderInterface: ethers.Interface | null = null;
   private initialized = false;
   private blockHeight = 0; // Track J-Machine block height
-  private eventCallbacks: Set<(event: EVMEvent) => void> = new Set();
+  private blockHash = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Current block hash
+  private prevBlockHash = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Previous block hash
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Event callbacks receive BATCHES of events (all events from one tx/block)
+  // This matches real blockchain behavior where events are grouped by block
+  // ─────────────────────────────────────────────────────────────────────────────
+  private eventCallbacks: Set<(events: EVMEvent[]) => void> = new Set();
 
   constructor() {
     // Hardhat default account #0
@@ -740,11 +747,11 @@ export class BrowserVMProvider {
     return { success: true, logs };
   }
 
-  /** Parse EVM logs into decoded events */
-  private parseLogs(logs: any[]): any[] {
+  /** Parse EVM logs into decoded events with block info for JBlock consensus */
+  private parseLogs(logs: any[]): EVMEvent[] {
     if (!this.depositoryInterface) return [];
 
-    const decoded: any[] = [];
+    const decoded: EVMEvent[] = [];
     for (const log of logs) {
       try {
         const topics = log[1].map((t: Uint8Array) => bytesToHex(t));
@@ -756,6 +763,9 @@ export class BrowserVMProvider {
             args: Object.fromEntries(
               parsed.fragment.inputs.map((input, i) => [input.name, parsed.args[i]])
             ),
+            blockNumber: this.blockHeight,
+            blockHash: this.blockHash,
+            timestamp: Date.now(),
           });
         }
       } catch {
@@ -770,7 +780,11 @@ export class BrowserVMProvider {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /** Subscribe to all EVM events - j-watcher uses this for BrowserVM mode */
-  onAny(callback: (event: EVMEvent) => void): () => void {
+  /**
+   * Subscribe to batched events. Callback receives ALL events from a single
+   * transaction/block together, matching real blockchain behavior.
+   */
+  onAny(callback: (events: EVMEvent[]) => void): () => void {
     this.eventCallbacks.add(callback);
     console.log(`[BrowserVM] onAny registered (${this.eventCallbacks.size} callbacks)`);
     return () => {
@@ -779,22 +793,32 @@ export class BrowserVMProvider {
     };
   }
 
-  /** Emit events to all registered callbacks */
+  /**
+   * Emit events to all registered callbacks as a BATCH.
+   * All events from one transaction are sent together, matching blockchain behavior.
+   */
   private emitEvents(logs: any[]): EVMEvent[] {
     console.log(`🔊 [BrowserVM] emitEvents ENTRY: raw logs=${logs.length}, callbacks=${this.eventCallbacks.size}`);
     const events = this.parseLogs(logs);
     console.log(`🔊 [BrowserVM] emitEvents: parsed ${events.length} events`);
+
+    // Log individual events for debugging
     for (const event of events) {
-      console.log(`   📣 EVENT: ${event.name} | ${safeStringify(event.args).slice(0,80)}`);
+      console.log(`   📣 EVENT: ${event.name} | ${safeStringify(event.args).slice(0, 80)}`);
+    }
+
+    // Emit BATCH to each callback (not one-by-one)
+    if (events.length > 0) {
       for (const cb of this.eventCallbacks) {
         try {
-          cb(event);
-          console.log(`   ✓ cb fired for ${event.name}`);
+          cb(events);
+          console.log(`   ✓ batch of ${events.length} events fired to callback`);
         } catch (err) {
           console.error(`   ❌ cb error:`, err);
         }
       }
     }
+
     return events;
   }
 
@@ -945,9 +969,25 @@ export class BrowserVMProvider {
     return this.blockHeight;
   }
 
-  /** Increment block height (called after successful transaction) */
+  /**
+   * Increment block height and compute new block hash.
+   * Block hash = keccak256(prevBlockHash + blockHeight + timestamp)
+   * This mimics ETH block structure for JBlock consensus.
+   */
   private incrementBlock(): void {
+    this.prevBlockHash = this.blockHash;
     this.blockHeight++;
+    // Compute deterministic block hash using ethers.js keccak256
+    const packed = ethers.solidityPacked(
+      ['bytes32', 'uint256', 'uint256'],
+      [this.prevBlockHash, this.blockHeight, Date.now()]
+    );
+    this.blockHash = ethers.keccak256(packed);
+  }
+
+  /** Get current block hash */
+  getBlockHash(): string {
+    return this.blockHash;
   }
 
   /** Check if saved state exists */

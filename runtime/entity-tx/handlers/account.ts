@@ -86,12 +86,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       // CRITICAL: Only process NEW locks (prevent replay on re-processing same frame)
       // Check if this is a NEW frame (just committed) by comparing heights
       const justCommittedFrame = input.newAccountFrame;
-      const isNewFrame = justCommittedFrame && justCommittedFrame.height > (accountMachine.currentHeight - 1);
+      const isNewFrame = Boolean(justCommittedFrame && justCommittedFrame.height > (accountMachine.currentHeight - 1));
 
-      console.log(`🔍 HTLC-CHECK: isNewFrame=${isNewFrame}, inputHeight=${justCommittedFrame?.height}, currentHeight=${accountMachine.currentHeight}`);
-      console.log(`🔍 HTLC-CHECK: accountMachine.locks.size=${accountMachine.locks.size}`);
-
-      if (isNewFrame && justCommittedFrame.accountTxs) {
+      if (isNewFrame && justCommittedFrame?.accountTxs) {
+        console.log(`🔍 HTLC-CHECK: isNewFrame=${isNewFrame}, inputHeight=${justCommittedFrame.height}, currentHeight=${accountMachine.currentHeight}`);
+        console.log(`🔍 HTLC-CHECK: accountMachine.locks.size=${accountMachine.locks.size}`);
         for (const accountTx of justCommittedFrame.accountTxs) {
           console.log(`🔍 HTLC-CHECK: Checking committed tx type=${accountTx.type}`);
           if (accountTx.type === 'htlc_lock') {
@@ -127,8 +126,12 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               }
             } else if (routingInfo.route && routingInfo.route.length > 0) {
               // Intermediary - determine next hop from route
-              // routingInfo.route is from sender's perspective: [hub, bob] when Hub receives
-              const actualNextHop = routingInfo.route[0]; // First in remaining route = our next hop
+              // routingInfo.route when Hub receives is [hub, bob] - we need to skip ourselves
+              // Find our position in route and take the next element
+              const ourIndex = routingInfo.route.indexOf(newState.entityId);
+              const actualNextHop = ourIndex >= 0 && ourIndex < routingInfo.route.length - 1
+                ? routingInfo.route[ourIndex + 1]
+                : routingInfo.route[routingInfo.route.length - 1]; // Fallback to last hop
 
               if (!actualNextHop) {
                 console.log(`❌ HTLC: No next hop in route`);
@@ -156,9 +159,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 newState.htlcFeesEarned += feeAmount;
 
                 // Forward HTLC with reduced timelock/height
-                // Update routing info: advance to next hop in route
-                const forwardRoute = routingInfo.route?.slice(1); // Remove current hop
-                const nextNextHop = forwardRoute && forwardRoute.length > 0 ? forwardRoute[0] : null;
+                // Update routing info: advance past ourselves in route
+                const forwardRoute = ourIndex >= 0
+                  ? routingInfo.route?.slice(ourIndex + 1) // Skip ourselves and before
+                  : routingInfo.route?.slice(1); // Fallback: just remove first
+                const nextNextHop = forwardRoute && forwardRoute.length > 1 ? forwardRoute[1] : null;
 
                 nextAccount.mempool.push({
                   type: 'htlc_lock',

@@ -10,23 +10,18 @@ AUDIO=~/records/$(date +%Y-%m-%d)/$(date +%H-%M-%S).wav
 mkdir -p $(dirname "$AUDIO")
 echo "File: $AUDIO" >> "$LOG"
 
-# Trap SIGTERM BEFORE starting rec (prevents race condition)
 trap 'echo "Got TERM, sending INT to background jobs" >> "$LOG"; kill -INT $(jobs -p) 2>/dev/null' TERM
 
-# Record in background
 rec "$AUDIO" rate 16k channels 1 2>/dev/null &
 REC_PID=$!
 echo "Recording PID: $REC_PID" >> "$LOG"
 
-# Wait for rec
 wait $REC_PID 2>/dev/null
 REC_EXIT=$?
 echo "rec exit code: $REC_EXIT" >> "$LOG"
 
-# Give rec time to flush file
 sleep 0.3
 
-# Check audio exists
 if [ ! -s "$AUDIO" ]; then
     echo "ERROR: No audio file" >> "$LOG"
     exit 2
@@ -35,7 +30,6 @@ fi
 SIZE=$(stat -f%z "$AUDIO" 2>/dev/null || echo 0)
 echo "Audio size: $SIZE bytes" >> "$LOG"
 
-# Transcribe via HTTP with retry
 START=$(python3 -c "import time; print(int(time.time()*1000))")
 TEXT=""
 RETRY_COUNT=0
@@ -43,7 +37,7 @@ MAX_RETRIES=2
 
 echo "Trying HTTP transcribe..." >> "$LOG"
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if RES=$(curl -sf --max-time 10 http://localhost:5001/transcribe -F "file=@$AUDIO" -F "task=$([ "$LANG_ARG" = "translate-en" ] && echo translate || echo transcribe)" 2>&1); then
+    if RES=$(curl -sf --max-time 30 http://localhost:5001/transcribe -F "file=@$AUDIO" -F "task=$([ "$LANG_ARG" = "translate-en" ] && echo translate || echo transcribe)" 2>&1); then
         TEXT=$(echo "$RES" | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null)
         if [ -n "$TEXT" ]; then
             echo "HTTP result: $TEXT" >> "$LOG"
@@ -71,7 +65,6 @@ fi
 MS=$(( $(python3 -c "import time; print(int(time.time()*1000))") - START ))
 echo "Transcribe time: ${MS}ms" >> "$LOG"
 
-# Paste
 if [ -z "$TEXT" ]; then
     echo "ERROR: Empty text" >> "$LOG"
     exit 3
@@ -79,10 +72,8 @@ fi
 
 echo "Pasting: $TEXT" >> "$LOG"
 
-# Copy to clipboard
 printf "%s" "$TEXT" | pbcopy
 
-# Wait for clipboard to update (prevent race condition)
 VERIFIED=false
 for i in {1..20}; do
     CURRENT=$(pbpaste 2>/dev/null)
@@ -99,17 +90,13 @@ if [ "$VERIFIED" = false ]; then
     exit 8
 fi
 
-# Get active app
 ACTIVE_APP=$(osascript -e 'tell application "System Events" to get name of first process whose frontmost is true' 2>/dev/null)
 echo "Active app: $ACTIVE_APP" >> "$LOG"
 
-# Paste
 if [[ "$ACTIVE_APP" =~ (ghostty|iTerm|Terminal|Warp|Alacritty|kitty) ]]; then
-    # Terminal: Cmd+V
     osascript -e 'tell application "System Events" to keystroke "v" using command down' 2>/dev/null
     echo "SUCCESS: ${MS}ms (terminal)" >> "$LOG"
 else
-    # GUI: direct typing (avoids Select All in some apps)
     ESCAPED=$(printf "%s" "$TEXT" | sed 's/\\/\\\\/g; s/"/\\"/g')
     osascript -e "tell application \"System Events\" to keystroke \"$ESCAPED\"" 2>> "$LOG"
     echo "SUCCESS: ${MS}ms (GUI)" >> "$LOG"

@@ -9,53 +9,30 @@ pragma solidity ^0.8.24;
  */
 interface IDepository {
 
-  // ========== EVENTS ==========
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CANONICAL J-EVENTS (Single Source of Truth - must match j-event-watcher.ts)
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // These events are the ONLY events that j-watcher processes for entity state.
+  // Each event type has exactly ONE purpose:
+  //
+  // ReserveUpdated  - Entity reserve balance changed (mint, R2R, settlement)
+  // AccountSettled  - Bilateral account state changed (defined in Account.sol)
+  //
+  // Design: One event = One state change. No redundant events.
+  // ═══════════════════════════════════════════════════════════════════════════
 
   /**
-   * @notice Emitted when entity reserves change
+   * @notice Emitted whenever an entity's reserve balance changes.
+   * @dev THE canonical event for reserve state. Covers: mint, R2R, settlement.
+   *      j-watcher uses: entity.reserves[tokenId] = newBalance
    * @param entity Entity identifier (bytes32)
    * @param tokenId Internal token identifier
    * @param newBalance Absolute new balance
    */
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
 
-  /**
-   * @notice Emitted on R2R transfer
-   * @param from Sender entity
-   * @param to Recipient entity
-   * @param tokenId Token identifier
-   * @param amount Transfer amount
-   */
-  event ReserveTransferred(bytes32 indexed from, bytes32 indexed to, uint indexed tokenId, uint amount);
-
-  /**
-   * @notice Emitted when reserves are minted to an entity
-   * @param entity Entity receiving minted reserves
-   * @param tokenId Token identifier
-   * @param amount Amount minted
-   * @param newBalance New total balance after minting
-   */
-  event ReserveMinted(bytes32 indexed entity, uint indexed tokenId, uint amount, uint newBalance);
-
-  /**
-   * @notice Emitted on bilateral settlement
-   * @param leftEntity First entity (lexicographically lower)
-   * @param rightEntity Second entity (lexicographically higher)
-   * @param tokenId Token identifier
-   * @param leftReserve Final left reserve
-   * @param rightReserve Final right reserve
-   * @param collateral Final collateral
-   * @param ondelta Final ondelta value
-   */
-  event SettlementProcessed(
-    bytes32 indexed leftEntity,
-    bytes32 indexed rightEntity,
-    uint indexed tokenId,
-    uint leftReserve,
-    uint rightReserve,
-    uint collateral,
-    int ondelta
-  );
+  // NOTE: AccountSettled is defined in Account.sol as it uses the Settled struct
 
   // ========== CORE FUNCTIONS ==========
 

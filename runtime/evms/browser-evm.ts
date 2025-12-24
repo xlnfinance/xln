@@ -47,6 +47,7 @@ export class BrowserEVM implements JurisdictionEVM {
 
   // Event subscription for j-watcher (proxied from BrowserVMProvider)
   onAny(callback: (event: any) => void): () => void { return this.provider.onAny(callback); }
+  getBlockHash(): string { return this.provider.getBlockHash(); }
 
   // JurisdictionEVM interface
   async deployContract(bytecode: string, args?: any[]): Promise<string> { throw new Error('Not implemented'); }

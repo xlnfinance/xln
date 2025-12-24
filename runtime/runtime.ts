@@ -93,8 +93,7 @@ import {
   safeParseReplicaKey,
   safeExtractEntityId,
 } from './ids';
-import { type Profile } from './gossip.js';
-import { loadPersistedProfiles } from './gossip-loader';
+import { type Profile, loadPersistedProfiles } from './gossip.js';
 import { setupJEventWatcher, JEventWatcher } from './j-event-watcher';
 import {
   createProfileUpdateTx,
@@ -116,7 +115,7 @@ import {
   FINANCIAL_CONSTANTS
 } from './financial-utils';
 import { captureSnapshot, cloneEntityReplica } from './state-helpers';
-import { getEntityShortId, getEntityNumber, formatEntityId } from './entity-helpers';
+import { getEntityShortId, getEntityNumber, formatEntityId } from './utils';
 import { safeStringify } from './serialization-utils';
 import { validateDelta, validateAccountDeltas, createDefaultDelta, isDelta, validateEntityInput, validateEntityOutput } from './validation-utils';
 import { EntityInput, EntityReplica, Env, RuntimeInput, JReplica } from './types';
@@ -534,8 +533,10 @@ const applyRuntimeInput = async (
             reserves: new Map(), // tokenId -> bigint amount
             accounts: new Map(), // counterpartyEntityId -> AccountMachine
 
-            // 🔭 J-machine tracking
-            jBlock: 0, // Must start from 0 to resync all reserves
+            // 🔭 J-machine tracking (JBlock consensus)
+            lastFinalizedJHeight: 0,
+            jBlockObservations: [],
+            jBlockChain: [],
 
             // ⏰ Crontab system - will be initialized on first use
             crontabState: undefined,
@@ -560,7 +561,7 @@ const applyRuntimeInput = async (
         env.eReplicas.set(replicaKey, replica);
         // Validate jBlock immediately after creation
         const createdReplica = env.eReplicas.get(replicaKey);
-        const actualJBlock = createdReplica?.state.jBlock;
+        const actualJBlock = createdReplica?.state.lastFinalizedJHeight;
         // REPLICA-DEBUG removed
 
         // Broadcast initial profile to gossip layer
@@ -585,7 +586,7 @@ const applyRuntimeInput = async (
           logError("RUNTIME_TICK", `💥   Expected: 0 (number), Got: ${typeof actualJBlock}, Value: ${actualJBlock}`);
           // Force fix immediately
           if (createdReplica) {
-            createdReplica.state.jBlock = 0;
+            createdReplica.state.lastFinalizedJHeight = 0;
             console.log(`💥   FIXED: Set jBlock to 0 for replica ${replicaKey}`);
           }
         }
@@ -1060,7 +1061,7 @@ const main = async (): Promise<Env> => {
     console.log(`🔍   Total replicas: ${env.eReplicas.size}`);
     for (const [replicaKey, replica] of env.eReplicas.entries()) {
       const { entityId, signerId } = parseReplicaKey(replicaKey);
-      console.log(`🔍   Entity ${entityId.slice(0,10)}... (${signerId}): jBlock=${replica.state.jBlock}, isProposer=${replica.isProposer}`);
+      console.log(`🔍   Entity ${entityId.slice(0,10)}... (${signerId}): jBlock=${replica.state.lastFinalizedJHeight}, isProposer=${replica.isProposer}`);
     }
   }
 
@@ -1190,7 +1191,7 @@ export const getJWatcherStatus = () => {
         return {
           entityId: entityId.slice(0,10) + '...',
           signerId,
-          jBlock: replica.state.jBlock,
+          lastFinalizedJHeight: replica.state.lastFinalizedJHeight,
         };
       }),
     nextSyncIn: Math.floor((1000 - (Date.now() % 1000)) / 100) / 10, // Seconds until next 1s sync
@@ -1616,20 +1617,11 @@ export const process = async (
 
       const result = await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: allInputs });
 
-      // Store outputs for NEXT tick (never process in same tick)
+      // Store outputs for NEXT tick
       env.pendingOutputs = result.entityOutbox;
 
       if (result.entityOutbox.length > 0) {
         console.log(`📤 TICK: ${result.entityOutbox.length} outputs queued for next tick → [${result.entityOutbox.map(o => o.entityId.slice(-4)).join(',')}]`);
-        // DEBUG: Check if prevSignatures survives the queue
-        for (const out of result.entityOutbox) {
-          for (const tx of out.entityTxs || []) {
-            if (tx.type === 'accountInput' && tx.data) {
-              const d = tx.data as any;
-              console.log(`🔍 QUEUED: ${out.entityId.slice(-4)} accountInput h=${d.height} prevSigs=${!!d.prevSignatures}`);
-            }
-          }
-        }
       }
     }
 

@@ -1,12 +1,40 @@
-# 1.0 Unified Financial Theory DRAFT
+# 1.0 Unified Financial Theory: Reserve-Credit Programmable Account Network
 ### Egor Homakov / h@xln.finance
 
 ### [Optional Q&A](00_QA.md)
 
-This document challenges fundamental assumptions about financial systems. Sacred cows will be slaughtered. If you're emotionally attached to traditional state channels or rollups, you might want to grab a coffee first. 
+This document challenges fundamental assumptions about financial systems.
 
 Traditionally, whitepapers are dry, boring and overloaded with formulas. 
-We're doing the opposite: just 3 invariants, ASCII diagrams, VR scenes, lots of visual thinking, and yes - a soundtrack pairing.
+We're doing the opposite: just 3 invariants, ASCII diagrams, VR scenes, and yes - a soundtrack pairing.
+
+
+
+
+
+
+Traditional finance is a mess of terminology and regulations
+
+We propose a new financial system - xln, redesigned from first principles. We believe humanity deserves Scalable, Secure & Simple value network.
+
+
+
+
+triple-S manifesto:
+
+Scalable
+Secure
+Simple
+
+
+
+UFT (Unified Financial Theory) is a new way individuals
+
+xln is mathematically impossible to compete with. 
+xln is first ever algorithmically enforceable debt. 
+xln solves Data Availability Paradox of Rollups, Plasma and Big Blockers by entirely sidestepping it. 
+xln solves Inbound Capacity Wall of state channels
+xln solves Diamond-Dybvig hub run problem.
 
 Complex systems deserve rich explanations. Finance is music, not math alone.
 
@@ -70,6 +98,7 @@ RCPAN (xln) superset invariant:
 −leftCreditLimit ≤ Δ ≤ collateral + rightCreditLimit
 [---.===---]
 ```
+
 
 
 Last, but not least, we claim that the most important inter-human network, the financial layer, should not be dull and boring. **We see the world as a vibrant dance of colorful state machines.** We aim to develop as many visualizations as possible, with all sorts of mediums: 2D/3D/VR/ASCII/etc to deliver the semantic message of credit-collateral layout. Soon, it will feel natural and simple, just as using cash.

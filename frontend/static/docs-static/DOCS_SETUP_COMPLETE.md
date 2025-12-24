@@ -11,7 +11,7 @@
 ```
 /frontend/src/routes/docs/
 ├── +layout.svelte                    # Applies DocsLayout to all docs
-├── +page.md                          # Docs home (migrated from README.md)
+├── +page.md                          # Docs home (migrated from readme.md)
 └── architecture/
     └── contracts/+page.md            # Smart contracts docs with interactive components
 ```

@@ -34,6 +34,28 @@ Bilateral swaps are the killer feature of XLN - instant, free token exchanges be
 
 ## Data Structures
 
+### Fill Ratio: uint16 (0-65535), NOT bps
+
+We use full uint16 range for maximum granularity:
+- `0` = 0% fill
+- `65535` = 100% fill
+- `32768` = ~50% fill
+
+This is more granular than bps (0-10000) and matches HashLadder's 2x8-bit encoding.
+
+### Canonical Pair Ordering (Codex fix)
+
+To prevent buy/sell orders going into different books:
+```typescript
+// Always normalize: base = min(tokenA, tokenB), quote = max
+const { base, quote, pairId } = canonicalPair(tokenA, tokenB);
+// pairId = "1/2" for tokens 1 and 2
+
+// Derive side from which token you're giving
+const side = deriveSide(giveTokenId, wantTokenId);
+// Giving base (lower id) = SELL, Giving quote (higher id) = BUY
+```
+
 ### Account Layer (runtime/types.ts)
 
 ```typescript
@@ -43,39 +65,58 @@ interface SwapOffer {
   giveAmount: bigint;
   wantTokenId: number;
   wantAmount: bigint;        // at this ratio
-  minFillBps: number;        // 0-10000, minimum partial fill (basis points)
+  minFillRatio: number;      // 0-65535 (uint16), minimum partial fill
   expiresAtHeight: number;   // auto-cancel, prevents state bloat
   makerIsLeft: boolean;
-}
-
-interface SwapFill {
-  offerId: string;
-  fillBps: number;           // 0-10000 (basis points, not float!)
 }
 
 // AccountMachine additions
 interface AccountMachine {
   // ... existing fields
-  offers: Map<string, SwapOffer>;
-  leftOfferHold: bigint;     // capacity locked for offers
-  rightOfferHold: bigint;
+  swapOffers: Map<string, SwapOffer>;  // bilateral swap offers
+  leftSwapHold: bigint;      // capacity locked for offers (added to deriveDelta)
+  rightSwapHold: bigint;
 }
 ```
 
-### Entity Layer (runtime/entity-extensions/orderbook.ts)
+### Account Transactions
+
+**User can:**
+- `swap_offer` - Create limit order (locks capacity)
+- `swap_cancel` - Request cancellation
+
+**Hub (counterparty) can:**
+- `swap_resolve` - Fill 0-100% AND optionally cancel remainder (merged tx)
 
 ```typescript
-interface OrderbookExtension {
-  name: 'orderbook';
-  books: Map<string, BookState>;  // "ETH/USDC" -> order book
+type AccountTx =
+  | { type: 'swap_offer'; data: SwapOfferData }
+  | { type: 'swap_cancel'; data: { offerId: string } }
+  | { type: 'swap_resolve'; data: SwapResolveData };  // Hub only
 
-  // Called when account emits swap_offer
-  onSwapOffer(accountId: string, offer: SwapOffer): void;
+interface SwapOfferData {
+  offerId: string;
+  giveTokenId: number;
+  giveAmount: bigint;
+  wantTokenId: number;
+  wantAmount: bigint;
+  minFillRatio: number;      // 0-65535
+  expiresAtHeight: number;
+}
 
-  // Called on tick - match and generate fills
-  onTick(height: number): EntityTx[];
+interface SwapResolveData {
+  offerId: string;
+  fillRatio: number;         // 0-65535 (uint16)
+  cancelRemainder: boolean;  // true = fill + cancel, false = fill + keep open
 }
 ```
+
+### Entity Layer (runtime/orderbook/)
+
+Already implemented in `runtime/orderbook/`:
+- `types.ts` - canonicalPair, deriveSide, Side, TIF
+- `engine.ts` - O(1) matching, bitmap best-price
+- `manager.ts` - multi-book lifecycle, offer ingestion
 
 ## Implementation Steps
 

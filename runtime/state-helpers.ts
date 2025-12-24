@@ -48,12 +48,12 @@ export function cloneEntityState(entityState: EntityState): EntityState {
   try {
     const cloned = structuredClone(entityState);
 
-    // CRITICAL: Validate jBlock was preserved correctly
-    if (typeof cloned.jBlock !== 'number') {
-      console.error(`💥 CLONE-CORRUPTION: structuredClone corrupted jBlock!`);
-      console.error(`💥   Original: ${entityState.jBlock} (${typeof entityState.jBlock})`);
-      console.error(`💥   Cloned: ${cloned.jBlock} (${typeof cloned.jBlock})`);
-      cloned.jBlock = entityState.jBlock ?? 0; // Force fix
+    // CRITICAL: Validate lastFinalizedJHeight was preserved correctly
+    if (typeof cloned.lastFinalizedJHeight !== 'number') {
+      console.error(`💥 CLONE-CORRUPTION: structuredClone corrupted lastFinalizedJHeight!`);
+      console.error(`💥   Original: ${entityState.lastFinalizedJHeight} (${typeof entityState.lastFinalizedJHeight})`);
+      console.error(`💥   Cloned: ${cloned.lastFinalizedJHeight} (${typeof cloned.lastFinalizedJHeight})`);
+      cloned.lastFinalizedJHeight = entityState.lastFinalizedJHeight ?? 0; // Force fix
     }
 
     // CLONE-SUCCESS removed
@@ -93,8 +93,10 @@ function manualCloneEntityState(entityState: EntityState): EntityState {
       ]),
     ),
     accountInputQueue: cloneArray(entityState.accountInputQueue || []),
-    // CRITICAL: Explicit jBlock preservation for financial integrity
-    jBlock: entityState.jBlock ?? 0,
+    // JBlock consensus state
+    lastFinalizedJHeight: entityState.lastFinalizedJHeight ?? 0,
+    jBlockObservations: cloneArray(entityState.jBlockObservations || []),
+    jBlockChain: cloneArray(entityState.jBlockChain || []),
     // HTLC routing table (deep clone)
     htlcRoutes: new Map(
       Array.from((entityState.htlcRoutes || new Map()).entries()).map(([hashlock, route]) => [
