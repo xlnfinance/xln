@@ -483,7 +483,14 @@ async function swapWithOrderbook(env: Env): Promise<Env> {
     minTradeSize: 0n,
     supportedPairs: ['1/2'],
   });
-  console.log('✅ Hub orderbook extension initialized\n');
+  console.log('✅ Hub orderbook extension initialized');
+  assert(!!hubRep.state.orderbookExt, 'orderbookExt initialized on hub state');
+
+  // Verify it persists after a process cycle
+  await process(env);
+  const [, hubRepAfterProcess] = findReplica(env, hub.id);
+  assert(!!hubRepAfterProcess.state.orderbookExt, 'orderbookExt persists after process()');
+  console.log('✅ Hub orderbookExt persists through process cycle\n');
 
   // Add Bob
   console.log('📦 Adding Bob...');
