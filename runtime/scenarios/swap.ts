@@ -889,8 +889,7 @@ if (import.meta.main) {
     await multiPartyTrading(env);
 
     console.log('✅ ALL SWAP PHASES COMPLETE!');
-    // Note: Bun 1.3.5 has a segfault bug on exit - avoid process.exit
-    // process.exit(0);
+    process.exit(0);
   } catch (error) {
     console.error('\n❌ SWAP scenario FAILED:', error);
     process.exit(1);
