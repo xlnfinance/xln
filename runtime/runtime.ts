@@ -1348,88 +1348,9 @@ export type {
   JurisdictionInfo,
 } from './ids';
 
-// The browser-specific auto-execution logic has been removed.
-// The consuming application (e.g., index.html) is now responsible for calling main().
-
-// --- Node.js auto-execution for local testing ---
-// This part will only run when the script is executed directly in Node.js.
-if (!isBrowser) {
-  main()
-    .then(async env => {
-      if (env) {
-        // Check if demo should run automatically (can be disabled with NO_DEMO=1)
-        const noDemoFlag = globalThis.process.env['NO_DEMO'] === '1' || globalThis.process.argv.includes('--no-demo');
-
-        if (!noDemoFlag) {
-          console.log('✅ Node.js environment initialized.');
-          console.log('💡 Demo removed - use scenarios/ahb.ts or scenarios/grid.ts instead');
-          console.log('💡 To skip this message, use: NO_DEMO=1 bun run src/runtime.ts or --no-demo flag');
-
-          // Start j-watcher
-          await startJEventWatcher(env);
-
-          // Add a small delay to ensure startup completes before verification
-          setTimeout(async () => {
-            await verifyJurisdictionRegistrations();
-          }, 2000);
-        } else {
-          console.log('✅ Node.js environment initialized. Demo skipped (NO_DEMO=1 or --no-demo)');
-          console.log('💡 Use scenarios.ahb(env) or scenarios.grid(env) for demos');
-
-          // J-watcher is already started in main(), no need to start again
-        }
-      }
-    })
-    .catch(error => {
-      logError("RUNTIME_TICK", '❌ An error occurred during Node.js auto-execution:', error);
-    });
-}
-
-// === BLOCKCHAIN VERIFICATION ===
-const verifyJurisdictionRegistrations = async () => {
-  console.log('\n🔍 === JURISDICTION VERIFICATION ===');
-  console.log('📋 Verifying entity registrations across all jurisdictions...\n');
-
-  const jurisdictions = await getAvailableJurisdictions();
-
-  for (const jurisdiction of jurisdictions) {
-    try {
-      console.log(`🏛️ ${jurisdiction.name}:`);
-      console.log(`   📡 RPC: ${jurisdiction.address}`);
-      console.log(`   📄 Contract: ${jurisdiction.entityProviderAddress}`);
-
-      // Connect to this jurisdiction's network
-      const { entityProvider } = await connectToEthereum(jurisdiction);
-
-      // Get next entity number (indicates how many are registered)
-      const nextNumber = await entityProvider['nextNumber']!();
-      const registeredCount = Number(nextNumber) - 1;
-
-      console.log(`   📊 Registered Entities: ${registeredCount}`);
-
-      // Read registered entities
-      if (registeredCount > 0) {
-        console.log(`   📝 Entity Details:`);
-        for (let i = 1; i <= registeredCount; i++) {
-          try {
-            const entityId = generateNumberedEntityId(i);
-            const entityInfo = await entityProvider['entities']!(entityId);
-            console.log(`      #${i}: ${entityId.slice(0, 10)}... (Block: ${entityInfo.registrationBlock})`);
-          } catch (error) {
-            console.log(`      #${i}: Error reading entity data`);
-          }
-        }
-      }
-
-      console.log('');
-    } catch (error) {
-      logError("RUNTIME_TICK", `   ❌ Failed to verify ${jurisdiction.name}:`, error instanceof Error ? error.message : error);
-      console.log('');
-    }
-  }
-
-  console.log('✅ Jurisdiction verification complete!\n');
-};
+// Runtime is a pure library - no auto-execution side effects.
+// Use xln.ts as CLI entry point: `bun run xln.ts`
+// Browser: index.html calls xln.main() explicitly
 
 // === HANKO DEMO FUNCTION ===
 
