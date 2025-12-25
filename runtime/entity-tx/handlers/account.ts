@@ -425,20 +425,38 @@ async function processOrderbookSwaps(
     const MAX_FILL_RATIO = 65535;
 
     for (const [namespacedOrderId, { filledQty, orderQty }] of fillsPerOrder) {
-      const extractOfferId = (namespacedId: string) => {
-        const lastColon = namespacedId.lastIndexOf(':');
-        return lastColon >= 0 ? namespacedId.slice(lastColon + 1) : namespacedId;
-      };
-      const offerId = extractOfferId(namespacedOrderId);
+      // namespacedOrderId format: "fromEntity:toEntity:offerId"
+      // Entity IDs are 66 chars (0x + 64 hex), separated by colons
+      // Example: "0x000...001:0x000...002:my-order-id"
+      const lastColon = namespacedOrderId.lastIndexOf(':');
+      if (lastColon === -1) {
+        console.warn(`📊 ORDERBOOK: Invalid order ID format: ${namespacedOrderId}`);
+        continue;
+      }
+      const offerId = namespacedOrderId.slice(lastColon + 1);
+      const accountIdPart = namespacedOrderId.slice(0, lastColon); // "fromEntity:toEntity"
 
-      const extractAccountId = (namespacedId: string) => {
-        const lastColon = namespacedId.lastIndexOf(':');
-        return lastColon >= 0 ? namespacedId.slice(0, lastColon) : '';
-      };
-      const accountId = extractAccountId(namespacedOrderId);
+      // Split accountId to get both entity IDs
+      // Format: "0x...fromEntity:0x...toEntity"
+      const colonIdx = accountIdPart.indexOf(':', 2); // Skip "0x", find next colon
+      if (colonIdx === -1) {
+        console.warn(`📊 ORDERBOOK: Invalid accountId format: ${accountIdPart}`);
+        continue;
+      }
+      const fromEntity = accountIdPart.slice(0, colonIdx);
+      const toEntity = accountIdPart.slice(colonIdx + 1);
 
-      const account = hubState.accounts.get(accountId);
-      if (!account) continue;
+      // Find the account - hub's accounts are keyed by counterparty ID
+      // Try both entities to find the one that's in hub's account map
+      let account = hubState.accounts.get(fromEntity);
+      if (!account) {
+        account = hubState.accounts.get(toEntity);
+      }
+
+      if (!account) {
+        console.warn(`📊 ORDERBOOK: No account found for order ${offerId}, tried ${fromEntity.slice(-8)} and ${toEntity.slice(-8)}`);
+        continue;
+      }
 
       // Calculate fill ratio from trade qty vs order qty at time of trade
       const fillRatio = orderQty > 0

@@ -119,16 +119,19 @@ export async function handleSwapResolve(
     // If maker is Right: Right gives giveToken → offdelta increases (more positive)
     //                    Right receives wantToken → offdelta decreases (less positive)
 
+    // offdelta semantics: positive = Right owes Left, negative = Left owes Right
+    // When you GIVE (pay), your debt DECREASES
+    // When you RECEIVE, your debt INCREASES
     if (offer.makerIsLeft) {
-      // Left (maker) gives giveToken → Right receives
+      // Left gives giveToken → Left paid → Left's debt decreases → offdelta decreases (more negative = Left owes more)
+      // Left receives wantToken → Left got value → Left's debt increases → offdelta increases (less negative)
       giveDelta.offdelta -= filledGive;
-      // Left (maker) receives wantToken ← Right gives
       wantDelta.offdelta += filledWant;
     } else {
-      // Right (maker) gives giveToken → Left receives
-      giveDelta.offdelta += filledGive;
-      // Right (maker) receives wantToken ← Left gives
-      wantDelta.offdelta -= filledWant;
+      // Right gives giveToken → Right paid → Right's debt decreases → offdelta decreases (less positive = Right owes less)
+      // Right receives wantToken → Right got value → Right's debt increases → offdelta increases (more positive)
+      giveDelta.offdelta -= filledGive;
+      wantDelta.offdelta += filledWant;
     }
 
     events.push(`💱 Swap filled: ${filledGive} token${offer.giveTokenId} for ${filledWant} token${offer.wantTokenId}`);
