@@ -1,6 +1,7 @@
 import { calculateQuorumPower } from '../entity-consensus';
 import { formatEntityId } from '../utils';
 import { processProfileUpdate } from '../name-resolution';
+import { createOrderbookExtState } from '../orderbook';
 import { db } from '../runtime';
 import { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput } from '../types';
 import { DEBUG, log } from '../utils';
@@ -169,6 +170,26 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       return { newState: entityState, outputs: [] };
     }
 
+    if (entityTx.type === 'initOrderbookExt') {
+      if (entityState.orderbookExt) {
+        return { newState: entityState, outputs: [] };
+      }
+
+      const hubProfile = {
+        entityId: entityState.entityId,
+        name: entityTx.data.name,
+        spreadDistribution: entityTx.data.spreadDistribution,
+        referenceTokenId: entityTx.data.referenceTokenId,
+        minTradeSize: entityTx.data.minTradeSize,
+        supportedPairs: [...entityTx.data.supportedPairs],
+      };
+
+      const newState = cloneEntityState(entityState);
+      newState.orderbookExt = createOrderbookExtState(hubProfile);
+
+      return { newState, outputs: [] };
+    }
+
     if (entityTx.type === 'j_event') {
       // Emit J-event received
       env.emit('JEventReceived', {
@@ -307,7 +328,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Broadcast updated profile to gossip layer
       if (env.gossip) {
-        const profile = buildEntityProfile(newState);
+        const profile = buildEntityProfile(newState, undefined, env.scenarioMode ? env.timestamp : undefined);
         env.gossip.announce(profile);
         console.log(`📡 Broadcast profile for ${entityState.entityId} with ${newState.accounts.size} accounts`);
       }
@@ -561,6 +582,18 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       accountMachine.mempool.push(accountTx);
       console.log(`📊 Added swap_offer to mempool for account with ${counterpartyEntityId.slice(-4)}`);
 
+      // Add to swapBook (E-Machine aggregated view)
+      newState.swapBook.set(offerId, {
+        offerId,
+        accountId: counterpartyEntityId,
+        giveTokenId,
+        giveAmount,
+        wantTokenId,
+        wantAmount,
+        minFillRatio: minFillRatio ?? 0,
+        createdAt: BigInt(env.timestamp),
+      });
+
       const firstValidator = entityState.config.validators[0];
       if (firstValidator) {
         outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
@@ -618,6 +651,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       accountMachine.mempool.push(accountTx);
       console.log(`📊 Added swap_cancel to mempool for account with ${counterpartyEntityId.slice(-4)}`);
+
+      // Remove from swapBook (E-Machine aggregated view)
+      newState.swapBook.delete(offerId);
 
       const firstValidator = entityState.config.validators[0];
       if (firstValidator) {

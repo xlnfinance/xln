@@ -542,6 +542,23 @@ export type EntityTx =
       };
     }
   | {
+      // Initialize orderbook extension (hub only)
+      type: 'initOrderbookExt';
+      data: {
+        name: string;
+        spreadDistribution: {
+          makerBps: number;
+          takerBps: number;
+          hubBps: number;
+          makerReferrerBps: number;
+          takerReferrerBps: number;
+        };
+        referenceTokenId: number;
+        minTradeSize: bigint;
+        supportedPairs: string[];
+      };
+    }
+  | {
       // Mint reserves (admin/test only - creates reserves via J-layer)
       type: 'mintReserves';
       data: {
@@ -617,6 +634,10 @@ export interface SwapOffer {
   minFillRatio: number;         // 0-65535, minimum acceptable fill
   makerIsLeft: boolean;         // Who created this offer (canonical direction)
   createdHeight: number;        // AccountFrame height when created
+  // Quantized amounts for orderbook consistency (set by hub when adding to book)
+  // These ensure fill ratios computed from lots match settlement amounts exactly
+  quantizedGive?: bigint;       // giveAmount rounded to LOT_SCALE multiple
+  quantizedWant?: bigint;       // wantAmount scaled proportionally
 }
 
 /**
@@ -1010,6 +1031,35 @@ export interface EntityState {
 
   // 📊 Orderbook Extension - Hub matching engine (typed in orderbook/types.ts)
   orderbookExt?: any; // OrderbookExtState - avoid circular import
+
+  // 📖 Aggregated Books - E-Machine view of all A-Machine positions
+  // Mirrors A-Machine state for easy UI access, updated on frame commits
+  swapBook: Map<string, SwapBookEntry>;  // offerId → entry
+  lockBook: Map<string, LockBookEntry>;  // lockId → entry
+}
+
+/** Aggregated swap order entry at E-Machine level */
+export interface SwapBookEntry {
+  offerId: string;
+  accountId: string;        // counterparty entity ID where order lives
+  giveTokenId: number;
+  giveAmount: bigint;       // remaining amount
+  wantTokenId: number;
+  wantAmount: bigint;       // remaining want
+  minFillRatio: number;
+  createdAt: bigint;
+}
+
+/** Aggregated HTLC lock entry at E-Machine level */
+export interface LockBookEntry {
+  lockId: string;
+  accountId: string;        // counterparty entity ID where lock lives
+  tokenId: number;
+  amount: bigint;
+  hashlock: string;
+  timelock: bigint;
+  direction: 'outgoing' | 'incoming';
+  createdAt: bigint;
 }
 
 export interface ProposedEntityFrame {
@@ -1080,8 +1130,20 @@ export interface Env {
   // Active jurisdiction
   activeJurisdiction?: string; // Currently active J-replica name
 
-  // Snapshot control (for prepopulate demos)
-  disableAutoSnapshots?: boolean; // When true, captureSnapshot skips automatic tick frames
+  // Scenario mode: deterministic time control (scenarios set env.timestamp manually)
+  scenarioMode?: boolean; // When true, runtime doesn't auto-update timestamp
+
+  // Frame display duration hint (for time-travel visualization)
+  frameDisplayMs?: number; // How long to display this frame (default: 100ms)
+
+  // Pending subtitle for next snapshot (set before process(), consumed by captureSnapshot)
+  pendingSubtitle?: {
+    title: string;           // Technical summary (e.g., "Reserve-to-Reserve Transfer")
+    what: string;            // What's happening
+    why: string;             // Why it matters
+    tradfiParallel: string;  // Traditional finance equivalent
+    keyMetrics?: string[];   // Bullet points of key numbers
+  };
 
   // E→E message queue (always spans ticks - no same-tick cascade)
   pendingOutputs?: EntityInput[]; // Outputs queued for next tick
@@ -1193,6 +1255,8 @@ export interface EnvSnapshot {
   };
   // Frame-specific structured logs
   logs?: FrameLogEntry[];
+  // Display duration hint for time-travel visualization (default: 100ms)
+  displayMs?: number;
 }
 
 // Entity types - canonical definition in ids.ts

@@ -146,6 +146,18 @@ export async function handleHtlcPayment(
     console.log(`🔒 Added HTLC lock to mempool for account with ${formatEntityId(nextHop)}`);
     console.log(`🔒 Lock ID: ${lockId.slice(0,16)}..., expires block ${revealBeforeHeight}`);
 
+    // Add to lockBook (E-Machine aggregated view)
+    newState.lockBook.set(lockId, {
+      lockId,
+      accountId: nextHop,
+      tokenId,
+      amount,
+      hashlock,
+      timelock,
+      direction: 'outgoing',
+      createdAt: BigInt(env.timestamp),
+    });
+
     addMessage(newState,
       `🔒 HTLC: Locking ${amount} (token ${tokenId}) to ${formatEntityId(targetEntityId)} via ${route.length - 1} hops`
     );
