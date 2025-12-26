@@ -48,6 +48,10 @@ const ONE_TOKEN = 10n ** DECIMALS;
 
 const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) throw new Error(`ASSERT: ${message}`);
+}
+
 type ReplicaEntry = [string, EntityReplica];
 
 function findReplica(env: Env, entityId: string): ReplicaEntry {
@@ -510,8 +514,7 @@ async function pushSnapshot(
 
 export async function ahb(env: Env): Promise<void> {
   const process = await getProcess();
-  pushSnapshotCount = 0; // RESET: Track if demo runs multiple times
-  env.disableAutoSnapshots = true; // DISABLE automatic tick snapshots - we use manual pushSnapshot instead
+  env.scenarioMode = true; // Deterministic time control
 
   try {
     console.log('[AHB] ========================================');
@@ -1219,6 +1222,14 @@ export async function ahb(env: Env): Promise<void> {
     console.log(`   A-H delta: ${ahDelta1} (still 0 - locked, not settled)`);
     console.log(`   H-B delta: ${hbDelta1} (still 0 - locked, not settled)`);
 
+    // Verify E-Machine lockBook is populated
+    const [, aliceRepHtlc] = findReplica(env, alice.id);
+    const [, hubRepHtlc] = findReplica(env, hub.id);
+    console.log(`   📖 Alice lockBook size: ${aliceRepHtlc.state.lockBook.size}`);
+    console.log(`   📖 Hub lockBook size: ${hubRepHtlc.state.lockBook.size}`);
+    assert(aliceRepHtlc.state.lockBook.size > 0, 'Alice lockBook should have HTLC entry');
+    console.log('   ✅ E-Machine lockBook populated');
+
     // TODO: Add frames for Bob revealing secret, then verify deltas change
 
     console.log('\n═══════════════════════════════════════');
@@ -1612,9 +1623,9 @@ export async function ahb(env: Env): Promise<void> {
     console.log('Phase 4: Reverse payment B→H→A ($50K) - net $200K');
     console.log('Phase 5: Rebalancing - TR $200K → $0');
     console.log('=====================================\n');
-    console.log(`[AHB] Snapshots: ${pushSnapshotCount}, history: ${env.history?.length}`);
+    console.log(`[AHB] History frames: ${env.history?.length}`);
   } finally {
-    env.disableAutoSnapshots = false; // ALWAYS re-enable, even on error
+    env.scenarioMode = false; // ALWAYS re-enable live mode, even on error
   }
 }
 
