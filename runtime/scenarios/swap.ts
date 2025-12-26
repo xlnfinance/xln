@@ -3,6 +3,7 @@
  *
  * Tests same-J (same jurisdiction) swaps between Alice and Hub.
  * Hub acts as market maker, filling Alice's limit orders.
+ * Uses REAL BrowserVM for J-Machine (same as ahb.ts).
  *
  * Test flow:
  * 1. Setup: Alice-Hub account with ETH (token 1) and USDC (token 2)
@@ -16,18 +17,31 @@
  * Run with: bun runtime/scenarios/swap.ts
  */
 
-import type { Env, EntityInput } from '../types';
+import type { Env, EntityInput, JurisdictionConfig } from '../types';
+import { getBestAsk } from '../orderbook/core';
+import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
 
 // Lazy-loaded runtime functions
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
+
+let _processWithStep: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 
 const getProcess = async () => {
   if (!_process) {
     const runtime = await import('../runtime');
     _process = runtime.process;
   }
-  return _process;
+  if (!_processWithStep) {
+    _processWithStep = async (env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => {
+      if (env.scenarioMode) {
+        const step = typeof delay === 'number' && delay > 0 ? delay : 1;
+        env.timestamp = (env.timestamp || 0) + step;
+      }
+      return _process!(env, inputs, delay, single);
+    };
+  }
+  return _processWithStep;
 };
 
 const getApplyRuntimeInput = async () => {
@@ -37,6 +51,26 @@ const getApplyRuntimeInput = async () => {
   }
   return _applyRuntimeInput;
 };
+
+// Helper: Process until no outputs generated (convergence)
+async function converge(env: Env, maxCycles = 10): Promise<void> {
+  const process = await getProcess();
+  for (let i = 0; i < maxCycles; i++) {
+    await process(env);
+    // Check if all mempools are empty and no pending frames
+    let hasWork = false;
+    for (const [, replica] of env.eReplicas) {
+      for (const [, account] of replica.state.accounts) {
+        if (account.mempool.length > 0 || account.pendingFrame) {
+          hasWork = true;
+          break;
+        }
+      }
+      if (hasWork) break;
+    }
+    if (!hasWork) return;
+  }
+}
 
 // Token IDs
 const ETH_TOKEN_ID = 1;
@@ -61,6 +95,18 @@ function assert(condition: boolean, message: string): void {
   console.log(`✅ ${message}`);
 }
 
+function assertSnapshotCounts(env: Env, expectedJ: number, expectedE: number, label: string): void {
+  const history = env.history || [];
+  assert(history.length > 0, `${label}: snapshot exists`);
+
+  const snapshot = history[history.length - 1];
+  const jCount = snapshot?.jReplicas?.length ?? 0;
+  const eCount = snapshot?.eReplicas?.size ?? 0;
+
+  assert(jCount === expectedJ, `${label}: snapshot jReplicas = ${expectedJ} (got ${jCount})`);
+  assert(eCount === expectedE, `${label}: snapshot eReplicas = ${expectedE} (got ${eCount})`);
+}
+
 function findReplica(env: Env, entityId: string) {
   const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
   if (!entry) {
@@ -73,9 +119,24 @@ export async function swap(env: Env): Promise<void> {
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
 
+  if (env.scenarioMode && env.height === 0) {
+    env.timestamp = 1;
+  }
+
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('                   SWAP SCENARIO: Same-J Swaps                  ');
   console.log('═══════════════════════════════════════════════════════════════\n');
+
+  // ============================================================================
+  // SETUP: BrowserVM + J-Machine (same as ahb.ts)
+  // ============================================================================
+  console.log('🏛️ Setting up BrowserVM J-Machine...');
+
+  const browserVM = await ensureBrowserVM();
+  const depositoryAddress = browserVM.getDepositoryAddress();
+  createJReplica(env, 'Swap Demo', depositoryAddress, { x: 0, y: 100, z: 0 });
+  const jurisdiction = createJurisdictionConfig('Swap Demo', depositoryAddress);
+  console.log('✅ BrowserVM J-Machine created\n');
 
   // ============================================================================
   // SETUP: Create Alice and Hub entities
@@ -118,7 +179,7 @@ export async function swap(env: Env): Promise<void> {
     signerId: alice.signer,
     entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }],
   }]);
-  await process(env); // Hub receives and creates reciprocal account
+  await converge(env); // Wait for bilateral account creation
 
   const [, aliceRep] = findReplica(env, alice.id);
   assert(aliceRep.state.accounts.has(hub.id), 'Alice-Hub account exists');
@@ -152,8 +213,8 @@ export async function swap(env: Env): Promise<void> {
     },
   ]);
 
-  // Wait for all credit frames to converge (max 3 ticks)
-  for (let i = 0; i < 3; i++) await process(env);
+  // Wait for all credit frames to converge
+  await converge(env);
 
   console.log('  ✅ Bidirectional credit established\n');
 
@@ -184,18 +245,24 @@ export async function swap(env: Env): Promise<void> {
       },
     }],
   }]);
-  await process(env); // Hub receives proposal
-  await process(env); // Alice receives ACK
-  await process(env); // Extra tick for safety
+  await converge(env); // Wait for full consensus
 
-  // Verify offer was created
+  // Verify offer was created in A-Machine
   const [, aliceRep1] = findReplica(env, alice.id);
   const aliceHubAccount1 = aliceRep1.state.accounts.get(hub.id);
-  assert(aliceHubAccount1?.swapOffers?.has(offerId1), 'Offer created in account');
+  assert(aliceHubAccount1?.swapOffers?.has(offerId1), 'Offer created in A-Machine account');
 
   const offer1 = aliceHubAccount1?.swapOffers?.get(offerId1);
   assert(offer1?.giveAmount === eth(2), 'Offer giveAmount = 2 ETH');
   assert(offer1?.wantAmount === usdc(6000), 'Offer wantAmount = 6000 USDC');
+
+  // Verify offer was added to E-Machine swapBook
+  assert(aliceRep1.state.swapBook.has(offerId1), 'Offer added to E-Machine swapBook');
+  const swapBookEntry1 = aliceRep1.state.swapBook.get(offerId1);
+  assert(swapBookEntry1?.accountId === hub.id, 'swapBook entry accountId = hub');
+  assert(swapBookEntry1?.giveAmount === eth(2), 'swapBook giveAmount = 2 ETH');
+  assert(swapBookEntry1?.wantAmount === usdc(6000), 'swapBook wantAmount = 6000 USDC');
+  console.log('  ✅ E-Machine swapBook updated');
 
   // Check hold was applied
   const ethDelta1 = aliceHubAccount1?.deltas.get(ETH_TOKEN_ID);
@@ -223,9 +290,7 @@ export async function swap(env: Env): Promise<void> {
       },
     }],
   }]);
-  await process(env); // Alice receives
-  await process(env); // Hub receives ACK
-  await process(env); // Extra tick
+  await converge(env);
 
   // Verify partial fill
   const [, aliceRep2] = findReplica(env, alice.id);
@@ -274,9 +339,8 @@ export async function swap(env: Env): Promise<void> {
       },
     }],
   }]);
-  await process(env);
-  await process(env);
-  await process(env);
+  await converge(env);
+  await converge(env);
 
   // Verify offer removed
   const [, aliceRep3] = findReplica(env, alice.id);
@@ -321,14 +385,14 @@ export async function swap(env: Env): Promise<void> {
       },
     }],
   }]);
-  await process(env);
-  await process(env);
-  await process(env);
+  await converge(env);
+  await converge(env);
 
-  // Verify offer created
+  // Verify offer created in A-Machine and E-Machine
   const [, aliceRep4] = findReplica(env, alice.id);
   const account4 = aliceRep4.state.accounts.get(hub.id);
-  assert(account4?.swapOffers?.has(offerId2), 'Order 2 created');
+  assert(account4?.swapOffers?.has(offerId2), 'Order 2 created in A-Machine');
+  assert(aliceRep4.state.swapBook.has(offerId2), 'Order 2 in E-Machine swapBook');
 
   // Alice cancels
   console.log('📊 Alice: swap_cancel');
@@ -343,20 +407,20 @@ export async function swap(env: Env): Promise<void> {
       },
     }],
   }]);
-  await process(env);
-  await process(env);
-  await process(env);
+  await converge(env);
+  await converge(env);
 
-  // Verify cancelled
+  // Verify cancelled in A-Machine and E-Machine
   const [, aliceRep5] = findReplica(env, alice.id);
   const account5 = aliceRep5.state.accounts.get(hub.id);
-  assert(!account5?.swapOffers?.has(offerId2), 'Order 2 cancelled');
+  assert(!account5?.swapOffers?.has(offerId2), 'Order 2 cancelled in A-Machine');
+  assert(!aliceRep5.state.swapBook.has(offerId2), 'Order 2 removed from E-Machine swapBook');
 
   // Verify hold released
   const ethDelta5 = account5?.deltas.get(ETH_TOKEN_ID);
   assert(ethDelta5?.leftSwapHold === 0n, 'Hold released after cancel');
 
-  console.log('  ✅ Order cancelled, hold released\n');
+  console.log('  ✅ Order cancelled, swapBook cleaned, hold released\n');
 
   // ============================================================================
   // TEST 5: minFillRatio enforcement
@@ -386,9 +450,8 @@ export async function swap(env: Env): Promise<void> {
       },
     }],
   }]);
-  await process(env);
-  await process(env);
-  await process(env);
+  await converge(env);
+  await converge(env);
 
   // Hub tries to fill only 50% - should fail
   console.log('💱 Hub: swap_resolve (50% fill - should fail)');
@@ -405,9 +468,8 @@ export async function swap(env: Env): Promise<void> {
       },
     }],
   }]);
-  await process(env);
-  await process(env);
-  await process(env);
+  await converge(env);
+  await converge(env);
 
   // Verify offer still exists (fill was rejected)
   const [, aliceRep6] = findReplica(env, alice.id);
@@ -431,7 +493,7 @@ export async function swap(env: Env): Promise<void> {
     }],
   }]);
   // Need enough ticks for full round-trip: propose → receive → ACK → commit
-  for (let i = 0; i < 5; i++) await process(env);
+  await converge(env);
 
   // Verify offer removed (filled + cancelled)
   const [, aliceRep7] = findReplica(env, alice.id);
@@ -460,7 +522,7 @@ export async function swap(env: Env): Promise<void> {
 // PHASE 2: OrderbookExtension - Hub-based matching
 // ============================================================================
 
-async function swapWithOrderbook(env: Env): Promise<Env> {
+export async function swapWithOrderbook(env: Env): Promise<Env> {
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
 
@@ -473,21 +535,27 @@ async function swapWithOrderbook(env: Env): Promise<Env> {
   const hub = { id: '0x' + '2'.padStart(64, '0'), signer: 's2' };
 
   // Initialize hub's orderbook extension (required for RJEA flow)
-  const { createOrderbookExtState, DEFAULT_SPREAD_DISTRIBUTION } = await import('../orderbook');
-  const [, hubRep] = findReplica(env, hub.id);
-  hubRep.state.orderbookExt = createOrderbookExtState({
+  const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../orderbook');
+  await process(env, [{
     entityId: hub.id,
-    name: 'Test Hub',
-    spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
-    referenceTokenId: USDC_TOKEN_ID,
-    minTradeSize: 0n,
-    supportedPairs: ['1/2'],
-  });
+    signerId: hub.signer,
+    entityTxs: [{
+      type: 'initOrderbookExt',
+      data: {
+        name: 'Test Hub',
+        spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
+        referenceTokenId: USDC_TOKEN_ID,
+        minTradeSize: 0n,
+        supportedPairs: ['1/2'],
+      },
+    }],
+  }]);
+  const [, hubRep] = findReplica(env, hub.id);
   console.log('✅ Hub orderbook extension initialized');
   assert(!!hubRep.state.orderbookExt, 'orderbookExt initialized on hub state');
 
   // Verify it persists after a process cycle
-  await process(env);
+  await converge(env);
   const [, hubRepAfterProcess] = findReplica(env, hub.id);
   assert(!!hubRepAfterProcess.state.orderbookExt, 'orderbookExt persists after process()');
   console.log('✅ Hub orderbookExt persists through process cycle\n');
@@ -511,7 +579,7 @@ async function swapWithOrderbook(env: Env): Promise<Env> {
       },
     },
   }], entityInputs: [] });
-  await process(env);
+  await converge(env);
   console.log('  ✅ Bob created\n');
 
   // Open Bob↔Hub account
@@ -519,7 +587,7 @@ async function swapWithOrderbook(env: Env): Promise<Env> {
   await process(env, [
     { entityId: bob.id, signerId: bob.signer, entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }] },
   ]);
-  for (let i = 0; i < 3; i++) await process(env);
+  await converge(env);
   console.log('  ✅ Account opened\n');
 
   // Extend credit for Bob↔Hub
@@ -534,7 +602,7 @@ async function swapWithOrderbook(env: Env): Promise<Env> {
       { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC_TOKEN_ID, amount: usdc(1_000_000) } },
     ]},
   ]);
-  for (let i = 0; i < 5; i++) await process(env);
+  await converge(env);
   console.log('  ✅ Credit extended\n');
 
   // ============================================================================
@@ -563,7 +631,7 @@ async function swapWithOrderbook(env: Env): Promise<Env> {
     }],
   }]);
   // Wait for hub to process Alice's swap offer through orderbook
-  for (let i = 0; i < 8; i++) await process(env);
+  await converge(env);
 
   // Verify Alice's offer exists in bilateral account
   const [, hubRepCheck] = findReplica(env, hub.id);
@@ -599,7 +667,7 @@ async function swapWithOrderbook(env: Env): Promise<Env> {
   // Hub's entity layer sees swapOffersCreated events, runs processOrderbookSwaps,
   // which adds matching orders to the book, detects trades, and queues swap_resolve txs
   console.log('🔄 Step 3: Waiting for RJEA matching and settlement...');
-  for (let i = 0; i < 15; i++) await process(env);
+  await converge(env);
 
   // Verify the trades occurred via RJEA flow by checking bilateral accounts
   // After matching: Alice should have traded 1 ETH (Bob's buy qty), Bob should have filled
@@ -658,10 +726,32 @@ async function swapWithOrderbook(env: Env): Promise<Env> {
   // Phase 2 adds: Alice trades more ETH for USDC, Bob trades USDC for ETH
   // The exact amounts depend on whether RJEA matching triggered swap_resolve
 
-  // Check if any trading happened by looking at Bob's deltas (fresh from Phase 2)
-  // If RJEA flow worked, Bob should have non-zero deltas
+  // ═══════════════════════════════════════════════════════════════
+  // ASSERTIONS: Verify RJEA flow worked correctly
+  // ═══════════════════════════════════════════════════════════════
+
+  // Bob should have traded via RJEA (has non-zero deltas)
   const bobTraded = (bobEth?.offdelta ?? 0n) !== 0n || (bobUsdc?.offdelta ?? 0n) !== 0n;
-  console.log(`\n  Bob traded via RJEA: ${bobTraded}`);
+  assert(bobTraded, 'Bob should have traded via RJEA flow');
+
+  // Bob wanted 1 ETH @ 3100 USDC - should have received ETH, given USDC
+  // Bob is Right relative to Hub (Hub = 0x0002..., Bob = 0x0003...)
+  // CANONICAL semantics: Right pays → offdelta INCREASES, Right receives → offdelta DECREASES
+  // Bob gives USDC → offdelta increases (positive)
+  // Bob receives ETH → offdelta decreases (negative)
+  assert((bobEth?.offdelta ?? 0n) < 0n, `Bob should have received ETH (Right receives = negative), got ${bobEth?.offdelta ?? 0n}`);
+  assert((bobUsdc?.offdelta ?? 0n) > 0n, `Bob should have given USDC (Right pays = positive), got ${bobUsdc?.offdelta ?? 0n}`);
+
+  // Alice's offer should be partially filled (started with 2 ETH, Bob took ~1)
+  // Note: exact amount may vary slightly due to uint16 fillRatio granularity
+  const aliceOfferRemaining = aliceAccount?.swapOffers?.get('alice-sell-001');
+  if (aliceOfferRemaining) {
+    const remainingEth = Number(aliceOfferRemaining.giveAmount) / 1e18;
+    assert(remainingEth >= 0.99 && remainingEth <= 1.01,
+      `Alice should have ~1 ETH remaining, got ${remainingEth}`);
+  }
+
+  console.log('  ✅ Phase 2 assertions passed');
 
   console.log('\n═══════════════════════════════════════════════════════════════');
   console.log('              PHASE 2: ORDERBOOK TEST COMPLETE                  ');
@@ -674,7 +764,7 @@ async function swapWithOrderbook(env: Env): Promise<Env> {
 // PHASE 3: Multi-Party Trading - Carol & Dave eating larger orders
 // ============================================================================
 
-async function multiPartyTrading(env: Env): Promise<Env> {
+export async function multiPartyTrading(env: Env): Promise<Env> {
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
 
@@ -706,6 +796,10 @@ async function multiPartyTrading(env: Env): Promise<Env> {
       },
     }], entityInputs: [] });
     await process(env);
+
+    if (entity === carol) {
+      assertSnapshotCounts(env, 1, 4, 'After Carol import');
+    }
   }
   console.log('  ✅ Carol and Dave created\n');
 
@@ -715,7 +809,7 @@ async function multiPartyTrading(env: Env): Promise<Env> {
     await process(env, [
       { entityId: entity.id, signerId: entity.signer, entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }] },
     ]);
-    for (let i = 0; i < 3; i++) await process(env);
+    await converge(env);
   }
   console.log('  ✅ Accounts opened\n');
 
@@ -732,7 +826,7 @@ async function multiPartyTrading(env: Env): Promise<Env> {
         { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC_TOKEN_ID, amount: usdc(1_000_000) } },
       ]},
     ]);
-    for (let i = 0; i < 3; i++) await process(env);
+    await converge(env);
   }
   console.log('  ✅ Credit extended\n');
 
@@ -756,7 +850,7 @@ async function multiPartyTrading(env: Env): Promise<Env> {
       },
     }],
   }]);
-  for (let i = 0; i < 5; i++) await process(env);
+  await converge(env);
 
   // Print orderbook
   const { renderAscii } = await import('../orderbook');
@@ -787,7 +881,7 @@ async function multiPartyTrading(env: Env): Promise<Env> {
       },
     }],
   }]);
-  for (let i = 0; i < 8; i++) await process(env);
+  await converge(env);
 
   // Print orderbook after trade
   const [, hubRep2] = findReplica(env, hub.id);
@@ -817,7 +911,7 @@ async function multiPartyTrading(env: Env): Promise<Env> {
       },
     }],
   }]);
-  for (let i = 0; i < 5; i++) await process(env);
+  await converge(env);
 
   // Print orderbook with two price levels
   const [, hubRep3] = findReplica(env, hub.id);
@@ -847,7 +941,7 @@ async function multiPartyTrading(env: Env): Promise<Env> {
       },
     }],
   }]);
-  for (let i = 0; i < 10; i++) await process(env);
+  await converge(env);
 
   // Final orderbook state
   const [, hubRepFinal] = findReplica(env, hub.id);
@@ -870,6 +964,40 @@ async function multiPartyTrading(env: Env): Promise<Env> {
   console.log(`  Carol: ${Number(carolEth) / 1e18} ETH, ${Number(carolUsdc) / 1e18} USDC`);
   console.log(`  Dave:  ${Number(daveEth) / 1e18} ETH, ${Number(daveUsdc) / 1e18} USDC`);
 
+  // ═══════════════════════════════════════════════════════════════
+  // ASSERTIONS: Verify multi-party trading worked correctly
+  // ═══════════════════════════════════════════════════════════════
+
+  // Carol sold ETH (total 15 ETH across two orders: 10 @ 2900, 5 @ 3100)
+  // Carol is Right relative to Hub (Hub = 0x0002..., Carol = 0x0004...)
+  // CANONICAL: Right pays → offdelta INCREASES, Right receives → offdelta DECREASES
+  // Carol gives ETH → offdelta increases (positive)
+  assert(carolEth > 0n, `Carol should have given ETH (Right pays = positive), got ${carolEth}`);
+
+  // Carol receives USDC → offdelta decreases (negative)
+  assert(carolUsdc < 0n, `Carol should have received USDC (Right receives = negative), got ${carolUsdc}`);
+
+  // Dave bought ETH (total 18 ETH: 3 @ 3000 + 15 @ 3200 sweep, but only 15 available)
+  // Dave is Right relative to Hub (Hub = 0x0002..., Dave = 0x0005...)
+  // Dave gives USDC → offdelta increases (positive)
+  assert(daveUsdc > 0n, `Dave should have given USDC (Right pays = positive), got ${daveUsdc}`);
+
+  // Dave receives ETH → offdelta decreases (negative)
+  assert(daveEth < 0n, `Dave should have received ETH (Right receives = negative), got ${daveEth}`);
+
+  // Verify Carol sold at least 15 ETH (her total orders)
+  // Note: Dave may receive more due to Alice's remaining order from Phase 2
+  assert(carolEth >= eth(15),
+    `Carol should have sold at least 15 ETH, got ${Number(carolEth) / 1e18}`);
+
+  // Orderbook ask side should be empty after Dave's sweep
+  // (Dave's remaining unfilled bid may still be there)
+  // Use getBestAsk which returns null when no asks exist
+  const hasAsks = bookFinal ? getBestAsk(bookFinal) !== null : false;
+  assert(!hasAsks, 'Orderbook asks should be empty after sweep');
+
+  console.log('  ✅ Phase 3 assertions passed');
+
   console.log('\n═══════════════════════════════════════════════════════════════');
   console.log('           PHASE 3: MULTI-PARTY TRADING COMPLETE               ');
   console.log('═══════════════════════════════════════════════════════════════\n');
@@ -883,17 +1011,20 @@ if (import.meta.main) {
 
   const runtime = await import('../runtime');
   const env = runtime.createEmptyEnv();
-  env.disableAutoSnapshots = true; // Disable slow snapshots for faster testing
+  env.scenarioMode = true; // Deterministic time control
 
   try {
-    // Phase 1: Basic bilateral swaps (Alice-Hub already set up)
+    // Phase 1: Basic bilateral swaps
     await swap(env);
+    console.log('✅ PHASE 1 COMPLETE!');
 
-    // Phase 2: Orderbook matching (reuse same env)
+    // Phase 2: Orderbook matching
     await swapWithOrderbook(env);
+    console.log('✅ PHASE 2 COMPLETE!');
 
-    // Phase 3: Multi-party trading with Carol & Dave
+    // Phase 3: Multi-party trading
     await multiPartyTrading(env);
+    console.log('✅ PHASE 3 COMPLETE!');
 
     console.log('✅ ALL SWAP PHASES COMPLETE!');
     process.exit(0);
