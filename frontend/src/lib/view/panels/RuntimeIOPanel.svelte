@@ -166,7 +166,11 @@
   $: replicasArray = currentFrame?.eReplicas ? mapToArray(currentFrame.eReplicas) : [];
 
   // Get xlnomies (J-Machine state) as array
-  $: xlnomiesArray = currentFrame?.xlnomies || [];
+  // jReplicas is a Map, convert to array for display
+  $: xlnomiesArray = (currentFrame?.jReplicas ?
+    (currentFrame.jReplicas instanceof Map ?
+      Array.from(currentFrame.jReplicas.values()) :
+      Object.values(currentFrame.jReplicas)) : []) as Array<{ name: string; jMachine?: { blockNumber?: number; entities?: any[] } }>;
 
   // Toggle xlnomy expansion
   function toggleXlnomy(name: string) {
@@ -221,13 +225,13 @@
           <h4>💰 Solvency Check (Conservation Law)</h4>
           <div class="solvency-content">
             {#if currentFrame}
-              {@const totalReserves = Array.from(currentFrame.eReplicas?.values() || []).reduce((sum, replica) => {
-                const reserves = Array.from(replica.state?.reserves?.values() || []).reduce((s, amt) => s + BigInt(amt), 0n);
+              {@const totalReserves = Array.from(currentFrame.eReplicas?.values() || []).reduce((sum: bigint, replica: any) => {
+                const reserves = Array.from(replica.state?.reserves?.values() || []).reduce((s: bigint, amt: any) => s + BigInt(amt), 0n);
                 return sum + reserves;
               }, 0n)}
-              {@const totalCollateral = Array.from(currentFrame.eReplicas?.values() || []).reduce((sum, replica) => {
-                const collateral = Array.from(replica.state?.accounts?.values() || []).reduce((s, acct) => {
-                  return s + Array.from(acct.deltas?.values() || []).reduce((cs, delta) => cs + (delta.collateral || 0n), 0n);
+              {@const totalCollateral = Array.from(currentFrame.eReplicas?.values() || []).reduce((sum: bigint, replica: any) => {
+                const collateral = Array.from(replica.state?.accounts?.values() || []).reduce((s: bigint, acct: any) => {
+                  return s + Array.from(acct.deltas?.values() || []).reduce((cs: bigint, delta: any) => cs + (delta.collateral || 0n), 0n);
                 }, 0n);
                 return sum + collateral;
               }, 0n)}

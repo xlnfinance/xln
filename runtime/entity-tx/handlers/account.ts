@@ -237,6 +237,14 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           // Store secret
           route.secret = secret;
 
+          // Remove from lockBook (E-Machine aggregated view) - payment settled
+          if (route.outboundLockId) {
+            newState.lockBook.delete(route.outboundLockId);
+          }
+          if (route.inboundLockId) {
+            newState.lockBook.delete(route.inboundLockId);
+          }
+
           // Propagate backward to sender (2024 hashlockMap pattern)
           if (route.inboundEntity && route.inboundLockId) {
             const senderAccount = newState.accounts.get(route.inboundEntity);
@@ -274,9 +282,16 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       // === ORDERBOOK CLEANUP ===
       // Remove cancelled/filled orders from orderbook
       const swapOffersCancelled = result.swapOffersCancelled || [];
-      if (swapOffersCancelled.length > 0 && newState.orderbookExt) {
-        console.log(`📊 ORDERBOOK-CLEANUP: Removing ${swapOffersCancelled.length} cancelled orders`);
-        processOrderbookCancels(newState, swapOffersCancelled);
+      if (swapOffersCancelled.length > 0) {
+        // Update E-Machine swapBook
+        for (const { offerId } of swapOffersCancelled) {
+          newState.swapBook.delete(offerId);
+        }
+        // Update hub orderbook extension if present
+        if (newState.orderbookExt) {
+          console.log(`📊 ORDERBOOK-CLEANUP: Removing ${swapOffersCancelled.length} cancelled orders`);
+          processOrderbookCancels(newState, swapOffersCancelled);
+        }
       }
 
       // Send response (ACK + optional new frame)
@@ -346,38 +361,72 @@ async function processOrderbookSwaps(
     const { pairId } = canonicalPair(offer.giveTokenId, offer.wantTokenId);
     const bookKey = pairId;  // Later: `${jId}/${pairId}` for cross-J
 
-    // Get or create book for this pair
+    // Convert swap offer to orderbook command
+    const side = deriveSide(offer.giveTokenId, offer.wantTokenId);
+    const LOT_SCALE = 10n ** 12n;  // 10^12-scale lots (max ~4294 ETH per order)
+    const MAX_LOTS = 0xFFFFFFFFn;  // Uint32 max
+
+    let priceTicks: bigint;
+    let qtyLots: bigint;
+
+    if (side === 1) {  // SELL base
+      priceTicks = (offer.wantAmount * 100n) / offer.giveAmount;
+      qtyLots = offer.giveAmount / LOT_SCALE;
+    } else {  // BUY base
+      priceTicks = (offer.giveAmount * 100n) / offer.wantAmount;
+      qtyLots = offer.wantAmount / LOT_SCALE;
+    }
+
+    // Validate: reject orders that would overflow Uint32 or be zero
+    if (qtyLots === 0n) {
+      console.warn(`📊 ORDERBOOK REJECT: Order too small (qty rounds to 0 lots), offerId=${offer.offerId}`);
+      continue;
+    }
+    if (qtyLots > MAX_LOTS) {
+      console.warn(`📊 ORDERBOOK REJECT: Order too large (${qtyLots} > ${MAX_LOTS} lots), offerId=${offer.offerId}`);
+      continue;
+    }
+    if (priceTicks <= 0n || priceTicks > MAX_LOTS) {
+      console.warn(`📊 ORDERBOOK REJECT: Invalid price ticks (${priceTicks}), offerId=${offer.offerId}`);
+      continue;
+    }
+
+    // Get or create book for this pair (minimal grid for faster snapshots)
     let book = ext.books.get(bookKey);
     if (!book) {
+      const BOOK_LEVELS = 100;
+      const PRICE_TICK = 1000;
+      const center = Number(priceTicks);
+      const halfRange = PRICE_TICK * Math.floor(BOOK_LEVELS / 2);
+      const pmin = Math.max(1, center - halfRange);
+      const pmax = pmin + PRICE_TICK * (BOOK_LEVELS - 1);
+
       book = createBook({
-        tick: 1,
-        pmin: 1,
-        pmax: 10_000_000,
+        tick: PRICE_TICK,
+        pmin,
+        pmax,
         maxOrders: 10000,
         stpPolicy: 0,
       });
     }
 
-    // Convert swap offer to orderbook command
-    const side = deriveSide(offer.giveTokenId, offer.wantTokenId);
-    const LOT_SCALE = 10n ** 12n;  // 10^12-scale lots (max ~4294 ETH per order)
-
-    let priceTicks: number;
-    let qtyLots: number;
-
-    if (side === 1) {  // SELL base
-      priceTicks = Number((offer.wantAmount * 100n) / offer.giveAmount);
-      qtyLots = Number(offer.giveAmount / LOT_SCALE);
-    } else {  // BUY base
-      priceTicks = Number((offer.giveAmount * 100n) / offer.wantAmount);
-      qtyLots = Number(offer.wantAmount / LOT_SCALE);
-    }
+    // QUANTIZATION FIX: Store quantized amounts in offer for consistent settlement
+    // This ensures fill ratios from lots match exactly with settlement amounts
+    // quantizedGive = qtyLots * LOT_SCALE (rounds down to lot boundary)
+    // quantizedWant = proportionally scaled to maintain price ratio
+    const quantizedGive = qtyLots * LOT_SCALE;
+    const quantizedWant = offer.giveAmount > 0n
+      ? (quantizedGive * offer.wantAmount) / offer.giveAmount
+      : 0n;
+    offer.quantizedGive = quantizedGive;
+    offer.quantizedWant = quantizedWant;
 
     // Namespace orderId by accountId to prevent cross-account collisions
     const namespacedOrderId = `${offer.accountId}:${offer.offerId}`;
     console.log(`📊 ORDERBOOK ADD: maker=${formatEntityId(offer.makerId)}, orderId=${namespacedOrderId.slice(-20)}, side=${side}, price=${priceTicks}, qty=${qtyLots}`);
 
-    // Apply order to book
+    // Apply order to book (convert BigInt to Number only after validation)
+    // Pass minFillRatio to orderbook for pre-flight simulation
     const result = applyCommand(book, {
       kind: 0,
       ownerId: offer.makerId,
@@ -385,16 +434,18 @@ async function processOrderbookSwaps(
       side,
       tif: 0,  // GTC
       postOnly: false,
-      priceTicks,
-      qtyLots,
+      priceTicks: Number(priceTicks),
+      qtyLots: Number(qtyLots),
+      minFillRatio: offer.minFillRatio ?? 0,
     });
 
     book = result.state;
     ext.books.set(bookKey, book);
 
     // Process trade events → emit swap_resolve transactions
-    // Track cumulative fills per order with qty info
-    const fillsPerOrder = new Map<string, { filledQty: number; orderQty: number }>();
+    // Track cumulative fills per order in LOTS (orderbook units)
+    // We'll convert back to wei using LOT_SCALE when computing fillRatio
+    const fillsPerOrder = new Map<string, { filledLots: number; originalLots: number }>();
 
     for (const event of result.events) {
       if (event.type === 'TRADE') {
@@ -405,16 +456,26 @@ async function processOrderbookSwaps(
         const makerOfferId = extractOfferId(event.makerOrderId);
         const takerOfferId = extractOfferId(event.takerOrderId);
 
-        // Accumulate fills with proper qty tracking
-        // Maker: use makerQtyBefore (qty at time of trade)
-        // Taker: use takerQtyTotal (taker's total order qty)
-        const makerEntry = fillsPerOrder.get(event.makerOrderId) || { filledQty: 0, orderQty: event.makerQtyBefore };
-        makerEntry.filledQty += event.qty;
-        fillsPerOrder.set(event.makerOrderId, makerEntry);
+        // Accumulate fills in lots
+        // makerQtyBefore: maker's qty BEFORE this trade (i.e., what's on the book before matching)
+        // First trade for a maker captures the full order size via makerQtyBefore
+        const makerEntry = fillsPerOrder.get(event.makerOrderId);
+        if (!makerEntry) {
+          // First trade: originalLots = makerQtyBefore (the full order size before any fills)
+          fillsPerOrder.set(event.makerOrderId, { filledLots: event.qty, originalLots: event.makerQtyBefore });
+        } else {
+          makerEntry.filledLots += event.qty;
+          fillsPerOrder.set(event.makerOrderId, makerEntry);
+        }
 
-        const takerEntry = fillsPerOrder.get(event.takerOrderId) || { filledQty: 0, orderQty: event.takerQtyTotal };
-        takerEntry.filledQty += event.qty;
-        fillsPerOrder.set(event.takerOrderId, takerEntry);
+        // Taker: use takerQtyTotal as the original order size
+        const takerEntry = fillsPerOrder.get(event.takerOrderId);
+        if (!takerEntry) {
+          fillsPerOrder.set(event.takerOrderId, { filledLots: event.qty, originalLots: event.takerQtyTotal });
+        } else {
+          takerEntry.filledLots += event.qty;
+          fillsPerOrder.set(event.takerOrderId, takerEntry);
+        }
 
         console.log(`📊 ORDERBOOK TRADE: ${makerOfferId} ↔ ${takerOfferId} @ ${event.price}, qty=${event.qty}`);
         console.log(`   maker=${formatEntityId(event.makerOwnerId)} (had ${event.makerQtyBefore}), taker=${formatEntityId(event.takerOwnerId)} (order ${event.takerQtyTotal})`);
@@ -424,21 +485,18 @@ async function processOrderbookSwaps(
     // Emit swap_resolve for each filled order with correct fill ratio
     const MAX_FILL_RATIO = 65535;
 
-    for (const [namespacedOrderId, { filledQty, orderQty }] of fillsPerOrder) {
+    for (const [namespacedOrderId, { filledLots, originalLots }] of fillsPerOrder) {
       // namespacedOrderId format: "fromEntity:toEntity:offerId"
-      // Entity IDs are 66 chars (0x + 64 hex), separated by colons
-      // Example: "0x000...001:0x000...002:my-order-id"
       const lastColon = namespacedOrderId.lastIndexOf(':');
       if (lastColon === -1) {
         console.warn(`📊 ORDERBOOK: Invalid order ID format: ${namespacedOrderId}`);
         continue;
       }
       const offerId = namespacedOrderId.slice(lastColon + 1);
-      const accountIdPart = namespacedOrderId.slice(0, lastColon); // "fromEntity:toEntity"
+      const accountIdPart = namespacedOrderId.slice(0, lastColon);
 
       // Split accountId to get both entity IDs
-      // Format: "0x...fromEntity:0x...toEntity"
-      const colonIdx = accountIdPart.indexOf(':', 2); // Skip "0x", find next colon
+      const colonIdx = accountIdPart.indexOf(':', 2);
       if (colonIdx === -1) {
         console.warn(`📊 ORDERBOOK: Invalid accountId format: ${accountIdPart}`);
         continue;
@@ -447,7 +505,6 @@ async function processOrderbookSwaps(
       const toEntity = accountIdPart.slice(colonIdx + 1);
 
       // Find the account - hub's accounts are keyed by counterparty ID
-      // Try both entities to find the one that's in hub's account map
       let account = hubState.accounts.get(fromEntity);
       if (!account) {
         account = hubState.accounts.get(toEntity);
@@ -458,9 +515,12 @@ async function processOrderbookSwaps(
         continue;
       }
 
-      // Calculate fill ratio from trade qty vs order qty at time of trade
-      const fillRatio = orderQty > 0
-        ? Math.floor(MAX_FILL_RATIO * (filledQty / orderQty))
+      // Calculate fill ratio using BigInt math to avoid precision loss
+      // fillRatio = (filledLots / originalLots) * MAX_FILL_RATIO
+      const filledBig = BigInt(filledLots);
+      const originalBig = BigInt(originalLots);
+      const fillRatio = originalBig > 0n
+        ? Number((filledBig * BigInt(MAX_FILL_RATIO)) / originalBig)
         : 0;
 
       // Determine if order is fully filled (no remainder in book)

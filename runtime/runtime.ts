@@ -316,44 +316,40 @@ export const processJBlockEvents = async (): Promise<void> => {
 
 // J-Watcher initialization
 const startJEventWatcher = async (env: Env): Promise<void> => {
+  // BrowserVM is the default - it handles events synchronously via processJBlockEvents()
+  // External RPC watcher is disabled until we support remote jurisdictions
+  const browserVM = getBrowserVMInstance();
+  if (browserVM) {
+    console.log('🔭 J-WATCHER: Using BrowserVM (external RPC not needed)');
+    return;
+  }
+
+  // External RPC mode (future - not yet supported)
   try {
-    // Get the Arrakis jurisdiction (primary testnet)
     const arrakis = await getJurisdictionByAddress('arrakis');
     if (!arrakis) {
       console.warn('⚠️ Arrakis jurisdiction not found, skipping j-watcher');
       return;
     }
 
-    // Set up j-watcher with the deployed contracts
     jWatcher = await setupJEventWatcher(
       env,
-      arrakis.address, // RPC URL (via /rpc/arrakis proxy)
+      arrakis.address,
       arrakis.entityProviderAddress,
       arrakis.depositoryAddress
     );
 
-    console.log('✅ J-Event Watcher started successfully');
+    console.log('✅ J-Event Watcher started (external RPC)');
     console.log(`🔭 Monitoring: ${arrakis.address}`);
-    console.log(`📍 EntityProvider: ${arrakis.entityProviderAddress}`);
-    console.log(`📍 Depository: ${arrakis.depositoryAddress}`);
-    
-    // J-watcher now handles its own periodic sync every 500ms
-    // Set up a periodic check to process any queued events from j-watcher
+
     setInterval(async () => {
       if (env.runtimeInput.entityInputs.length > 0) {
-        // const eventCount = env.runtimeInput.entityInputs.length;
-        // J-WATCHER routine log removed
         const pendingInputs = [...env.runtimeInput.entityInputs];
         env.runtimeInput.entityInputs = [];
-
-        // Process the queued entity inputs from j-watcher
-        await applyRuntimeInput(env, {
-          runtimeTxs: [],
-          entityInputs: pendingInputs,
-        });
+        await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: pendingInputs });
       }
-    }, 100); // Check every 100ms to process j-watcher events quickly
-    
+    }, 100);
+
   } catch (error) {
     logError("RUNTIME_TICK", '❌ Failed to start J-Event Watcher:', error);
   }
@@ -548,6 +544,10 @@ const applyRuntimeInput = async (
             // 🔒 HTLC routing and fee tracking
             htlcRoutes: new Map(),
             htlcFeesEarned: 0n,
+
+            // 📖 Aggregated books (E-Machine view of A-Machine positions)
+            swapBook: new Map(),
+            lockBook: new Map(),
           },
         };
 
@@ -572,7 +572,7 @@ const applyRuntimeInput = async (
             capabilities: [],
             hubs: [],
             metadata: {
-              lastUpdated: Date.now(),
+              lastUpdated: env.scenarioMode ? env.timestamp : Date.now(),
               routingFeePPM: 100, // Default 100 PPM (0.01%)
               baseFee: 0n,
             },
@@ -721,7 +721,7 @@ const applyRuntimeInput = async (
       // Update env (mutable)
       env.height++;
       // Don't overwrite timestamp in scenario mode (deterministic time control)
-      if (!env.disableAutoSnapshots) {
+      if (!env.scenarioMode) {
         env.timestamp = Date.now();
       }
 
@@ -882,17 +882,9 @@ const main = async (): Promise<Env> => {
   console.log('📡 Loading persisted profiles from database...');
   await loadPersistedProfiles(db, gossipLayer);
 
-  // First, create default environment with gossip layer
-  env = {
-    eReplicas: new Map(),
-    jReplicas: new Map(),
-    height: 0,
-    timestamp: Date.now(),
-    runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    history: [],
-    gossip: gossipLayer,
-    frameLogs: [],
-  };
+  // First, create default environment with gossip layer and event emitters
+  env = createEmptyEnv();
+  env.gossip = gossipLayer; // Override default gossip with persisted profiles
 
   // Try to load saved state from database
   try {
@@ -981,24 +973,24 @@ const main = async (): Promise<Env> => {
         }
       }
 
-      env = {
-        // CRITICAL: Clone the eReplicas Map to avoid mutating snapshot data!
-        eReplicas: new Map(Array.from(eReplicasMap).map(([key, replica]): [string, EntityReplica] => {
-          return [key, cloneEntityReplica(replica)];
-        })),
-        jReplicas: jReplicasMap,
-        height: latestSnapshot.height,
-        timestamp: latestSnapshot.timestamp,
-        // CRITICAL: runtimeInput must start EMPTY on restore!
-        // The snapshot's runtimeInput was already processed
-        runtimeInput: {
-          runtimeTxs: [],
-          entityInputs: []
-        },
-        history: snapshots, // Include the loaded history
-        gossip: gossipLayer, // Use restored gossip layer
-        frameLogs: [],
+      // Create env with proper event emitters, then populate from snapshot
+      env = createEmptyEnv();
+      // CRITICAL: Clone the eReplicas Map to avoid mutating snapshot data!
+      env.eReplicas = new Map(Array.from(eReplicasMap).map(([key, replica]): [string, EntityReplica] => {
+        return [key, cloneEntityReplica(replica)];
+      }));
+      env.jReplicas = jReplicasMap;
+      env.height = latestSnapshot.height;
+      env.timestamp = latestSnapshot.timestamp;
+      // CRITICAL: runtimeInput must start EMPTY on restore!
+      // The snapshot's runtimeInput was already processed
+      env.runtimeInput = {
+        runtimeTxs: [],
+        entityInputs: []
       };
+      env.history = snapshots; // Include the loaded history
+      env.gossip = gossipLayer; // Use restored gossip layer
+      env.frameLogs = [];
       console.log(`✅ History restored. Runtime is at height ${env.height} with ${env.history.length} snapshots.`);
       console.log(`📈 Snapshot details:`, {
         height: env.height,
@@ -1238,6 +1230,7 @@ export {
   hashBoard,
   isEntityRegistered,
   main,
+  startJEventWatcher,
   // Blockchain registration functions
   registerNumberedEntityOnChain,
   requestNamedEntity,
@@ -1527,11 +1520,10 @@ export const process = async (
 
   try {
     // Update timestamp for live mode
-    // In scenario mode (disableAutoSnapshots), time is manually controlled
-    if (!env.disableAutoSnapshots) {
+    // In scenario mode, time is manually controlled via env.timestamp
+    if (!env.scenarioMode) {
       env.timestamp = Date.now();
     }
-    // else: scenario controls time manually via env.timestamp += delay
 
     if (allInputs.length > 0) {
       console.log(`📥 TICK: Processing ${allInputs.length} inputs for [${allInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
@@ -1669,7 +1661,9 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
     await db.put(Buffer.from('latest_height'), Buffer.from(String(env.height)));
 
     // Save environment snapshot (jReplicas with stateRoot are serializable)
+    // CRITICAL: Exclude 'history' to prevent exponential growth (history contains all previous snapshots)
     const snapshot = JSON.stringify(env, (k, v) => {
+      if (k === 'history') return undefined; // Skip history - it's rebuilt from individual snapshots
       return typeof v === 'bigint' ? String(v) :
         v instanceof Uint8Array ? Array.from(v) :
         v instanceof Map ? Array.from(v.entries()) : v;
@@ -1754,8 +1748,11 @@ export const scenarios = {
     return env;
   },
   swap: async (env: Env): Promise<Env> => {
-    const { swap } = await import('./scenarios/swap');
-    await swap(env);
+    const { swap, swapWithOrderbook, multiPartyTrading } = await import('./scenarios/swap');
+    // Run all 3 phases for complete swap demo (Alice, Hub, Bob, Carol, Dave)
+    await swap(env);             // Phase 1: Alice + Hub basic bilateral swaps
+    await swapWithOrderbook(env); // Phase 2: Add Bob, orderbook matching
+    await multiPartyTrading(env); // Phase 3: Add Carol + Dave, multi-party
     return env;
   },
   grid: async (env: Env): Promise<Env> => {

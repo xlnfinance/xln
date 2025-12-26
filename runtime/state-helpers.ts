@@ -109,8 +109,83 @@ function manualCloneEntityState(entityState: EntityState): EntityState {
       ])
     ),
     htlcFeesEarned: entityState.htlcFeesEarned || 0n,
-    // Orderbook extension (hub-only, contains TypedArrays - structuredClone handles them)
-    ...(entityState.orderbookExt && { orderbookExt: structuredClone(entityState.orderbookExt) }),
+    // Orderbook extension (hub-only, contains TypedArrays)
+    // Must manually clone since structuredClone failed (we're in fallback path)
+    ...(entityState.orderbookExt && { orderbookExt: cloneOrderbookExt(entityState.orderbookExt) }),
+    // Aggregated books (E-Machine view of A-Machine positions)
+    swapBook: new Map(
+      Array.from((entityState.swapBook || new Map()).entries()).map(([id, entry]) => [
+        id,
+        { ...entry }
+      ])
+    ),
+    lockBook: new Map(
+      Array.from((entityState.lockBook || new Map()).entries()).map(([id, entry]) => [
+        id,
+        { ...entry }
+      ])
+    ),
+  };
+}
+
+/**
+ * Manually clone OrderbookExtState for environments without structuredClone
+ * TypedArrays must be explicitly copied via their constructors
+ */
+function cloneOrderbookExt(ext: EntityState['orderbookExt']): EntityState['orderbookExt'] {
+  if (!ext) return undefined;
+
+  const clonedBooks = new Map<string, any>();
+  for (const [key, book] of ext.books) {
+    clonedBooks.set(key, cloneBookState(book));
+  }
+
+  // Clone referrals Map
+  const clonedReferrals = new Map<string, any>();
+  if (ext.referrals) {
+    for (const [key, referral] of ext.referrals) {
+      clonedReferrals.set(key, { ...referral });
+    }
+  }
+
+  // Clone hubProfile with nested arrays
+  const clonedHubProfile = ext.hubProfile ? {
+    ...ext.hubProfile,
+    supportedPairs: ext.hubProfile.supportedPairs ? [...ext.hubProfile.supportedPairs] : [],
+  } : undefined;
+
+  return {
+    books: clonedBooks,
+    referrals: clonedReferrals,
+    hubProfile: clonedHubProfile,
+  };
+}
+
+/**
+ * Clone a BookState with TypedArrays properly copied
+ */
+function cloneBookState(book: any): any {
+  return {
+    ...book,
+    // Clone TypedArrays via slice() which creates new underlying ArrayBuffer
+    orderPriceIdx: book.orderPriceIdx?.slice?.() ?? book.orderPriceIdx,
+    orderQtyLots: book.orderQtyLots?.slice?.() ?? book.orderQtyLots,
+    orderOwnerIdx: book.orderOwnerIdx?.slice?.() ?? book.orderOwnerIdx,
+    orderSide: book.orderSide?.slice?.() ?? book.orderSide,
+    orderPrev: book.orderPrev?.slice?.() ?? book.orderPrev,
+    orderNext: book.orderNext?.slice?.() ?? book.orderNext,
+    orderActive: book.orderActive?.slice?.() ?? book.orderActive,
+    levelHeadBid: book.levelHeadBid?.slice?.() ?? book.levelHeadBid,
+    levelTailBid: book.levelTailBid?.slice?.() ?? book.levelTailBid,
+    levelHeadAsk: book.levelHeadAsk?.slice?.() ?? book.levelHeadAsk,
+    levelTailAsk: book.levelTailAsk?.slice?.() ?? book.levelTailAsk,
+    bitmapBid: book.bitmapBid?.slice?.() ?? book.bitmapBid,
+    bitmapAsk: book.bitmapAsk?.slice?.() ?? book.bitmapAsk,
+    // Clone mutable reference types
+    owners: [...(book.owners || [])],
+    orderIds: [...(book.orderIds || [])],
+    orderIdToIdx: new Map(book.orderIdToIdx || []),
+    ownerToIdx: new Map(book.ownerToIdx || []),
   };
 }
 
@@ -156,10 +231,8 @@ export const captureSnapshot = (
   runtimeOutputs: EntityInput[],
   description: string,
 ): void => {
-  // Skip automatic snapshots if disabled (for prepopulate demos)
-  if (env.disableAutoSnapshots) {
-    return;
-  }
+  // Snapshots ALWAYS happen - they're essential for time-travel debugging
+  // Use env.frameDisplayMs to hint how long to display important frames
 
   const gossipProfiles = env.gossip?.getProfiles
     ? env.gossip.getProfiles().map((profile: Profile) => {
@@ -261,7 +334,15 @@ export const captureSnapshot = (
     description,
     gossip: { profiles: gossipProfiles },
     logs: frameLogs,
+    // Display duration hint for time-travel visualization (consumed and cleared)
+    ...(env.frameDisplayMs && { displayMs: env.frameDisplayMs }),
+    // Educational subtitle (consumed and cleared)
+    ...(env.pendingSubtitle && { subtitle: { ...env.pendingSubtitle } }),
   };
+
+  // Clear consumed hints after snapshot
+  env.frameDisplayMs = undefined;
+  env.pendingSubtitle = undefined;
 
   envHistory.push(snapshot);
 
