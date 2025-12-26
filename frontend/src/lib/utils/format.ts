@@ -16,6 +16,27 @@ export function shortAddress(address: string, prefixLen = 3, suffixLen = 3): str
 }
 
 /**
+ * Format entity ID to short form (last 4 chars or "0001" style for numbered entities)
+ * @param entityId Full entity ID (0x + 64 hex chars)
+ */
+export function formatEntityId(entityId: string): string {
+  if (!entityId || entityId.length < 10) return entityId;
+
+  // Check if it's a numbered entity (0x0000...0001 format)
+  const withoutPrefix = entityId.slice(2);
+  const leadingZeros = withoutPrefix.match(/^0*/)?.[0]?.length || 0;
+
+  if (leadingZeros >= 60) {
+    // Numbered entity - show the number
+    const num = parseInt(withoutPrefix, 16);
+    return `#${num}`;
+  }
+
+  // Regular entity - show last 4 chars
+  return `${entityId.slice(-4)}`;
+}
+
+/**
  * Format a large number with k/M/B suffixes
  * @param value Number to format
  * @param decimals Number of decimal places (default 1)
