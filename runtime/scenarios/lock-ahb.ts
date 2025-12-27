@@ -1290,6 +1290,16 @@ export async function ahb(env: Env): Promise<void> {
     await process(env);
     logPending();
 
+    // Frame 18: Alice commits A-H reveal (secret propagated from Hub)
+    console.log('🏃 FRAME 18: Alice commits A-H reveal');
+    await process(env);
+    logPending();
+
+    // Frame 19: Hub ACKs Alice
+    console.log('🏃 FRAME 19: Hub ACKs Alice');
+    await process(env);
+    logPending();
+
     // Verify total shift = $250K (A-H) and $250K minus HTLC fee (H-B)
     // HTLC routing takes a fee on forwarded payments (payment1 only, payment2 is direct)
     const { calculateHtlcFeeAmount } = await import('../htlc-utils');

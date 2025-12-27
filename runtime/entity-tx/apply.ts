@@ -3,20 +3,31 @@ import { formatEntityId } from '../utils';
 import { processProfileUpdate } from '../name-resolution';
 import { createOrderbookExtState } from '../orderbook';
 import { db } from '../runtime';
-import { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput } from '../types';
+import { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput } from '../types';
 import { DEBUG, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { buildEntityProfile } from '../gossip-helper';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
-import { handleAccountInput } from './handlers/account';
+import { handleAccountInput, type MempoolOp, type SwapOfferEvent, type SwapCancelEvent } from './handlers/account';
 import { handleJEvent } from './j-events';
+
+// Extended return type including pure events from handlers
+export interface ApplyEntityTxResult {
+  newState: EntityState;
+  outputs: EntityInput[];
+  jOutputs?: JInput[];
+  // Pure events for entity-level orchestration
+  mempoolOps?: MempoolOp[];
+  swapOffersCreated?: SwapOfferEvent[];
+  swapOffersCancelled?: SwapCancelEvent[];
+}
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
 import { cloneEntityState, addMessage } from '../state-helpers';
 import { submitSettle } from '../evm';
 import { logError } from '../logger';
 
-export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<{ newState: EntityState, outputs: EntityInput[], jOutputs?: JInput[] }> => {
+export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<ApplyEntityTxResult> => {
   if (!entityTx) {
     logError("ENTITY_TX", `❌ EntityTx is undefined!`);
     return { newState: entityState, outputs: [] };
@@ -205,7 +216,13 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
     if (entityTx.type === 'accountInput') {
       const result = await handleAccountInput(entityState, entityTx.data, env);
-      return result;
+      return {
+        newState: result.newState,
+        outputs: result.outputs,
+        mempoolOps: result.mempoolOps,
+        swapOffersCreated: result.swapOffersCreated,
+        swapOffersCancelled: result.swapOffersCancelled,
+      };
     }
 
     if (entityTx.type === 'openAccount') {
@@ -356,6 +373,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
       console.error(`   Outputs array initialized, length: ${outputs.length}`);
 
       // Extract payment details
@@ -439,12 +457,13 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         },
       };
 
-      // Add to account machine mempool
+      // Add to account machine mempool via pure mempoolOps
       const accountMachine = newState.accounts.get(nextHop);
       if (accountMachine) {
-        accountMachine.mempool.push(accountTx);
-        console.log(`💸 Added payment to mempool for account with ${formatEntityId(nextHop)}`);
-        console.log(`💸 Account mempool now has ${accountMachine.mempool.length} pending transactions`);
+        // Pure: return mempoolOp instead of mutating directly
+        mempoolOps.push({ accountId: nextHop, tx: accountTx });
+        console.log(`💸 Added payment to mempoolOps for account with ${formatEntityId(nextHop)}`);
+        console.log(`💸 mempoolOps now has ${mempoolOps.length} pending transactions`);
         const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
         console.log(`💸 Is left entity: ${isLeft}, Has pending frame: ${!!accountMachine.pendingFrame}`);
 
@@ -453,14 +472,10 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           `💸 Sending ${amount} (token ${tokenId}) to ${formatEntityId(targetEntityId)} via ${route.length - 1} hops`
         );
 
-        // The payment is now in our local mempool with the next hop
-        // It will be processed through bilateral consensus in the next round
-        // The auto-propose logic in entity-consensus will handle proposing the frame
+        // The payment is now queued for entity-level orchestration
+        // Entity-consensus will apply mempoolOps and add to proposableAccounts
         console.log(`💸 Payment queued for bilateral consensus with ${formatEntityId(nextHop)}`);
-        console.log(`💸 Account ${formatEntityId(nextHop)} should be added to proposableAccounts`);
-
-        // Note: The entity-consensus applyEntityFrame will add this account to proposableAccounts
-        // and trigger bilateral frame proposal at the end of the processing round
+        console.log(`💸 Account ${formatEntityId(nextHop)} will be added to proposableAccounts`);
 
         // Return a trigger output to ensure process() continues
         // This ensures the AUTO-PROPOSE logic runs to process the payment
@@ -473,9 +488,10 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           });
         }
         console.log(`💸 Added processing trigger to ensure bilateral consensus runs`);
+        console.log(`💸 DIRECT-PAYMENT RETURN: outputs.length=${outputs.length}`);
       }
 
-      return { newState, outputs };
+      return { newState, outputs, mempoolOps };
     }
 
     if (entityTx.type === 'deposit_collateral') {
@@ -510,6 +526,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
       const { counterpartyEntityId, tokenId, amount } = entityTx.data;
 
       // Get account machine
@@ -535,9 +552,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         },
       };
 
-      // Add to account mempool
-      accountMachine.mempool.push(accountTx);
-      console.log(`💳 Added set_credit_limit to mempool for account with ${counterpartyEntityId.slice(-4)}`);
+      // Pure: return mempoolOp instead of mutating directly
+      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+      console.log(`💳 Added set_credit_limit to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
       console.log(`💳 Setting ${side}CreditLimit=${amount} (counterparty is ${side}) for token ${tokenId}`);
 
       addMessage(newState, `💳 Extended credit of ${amount} to ${counterpartyEntityId.slice(-4)}`);
@@ -552,12 +569,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         });
       }
 
-      console.error(`💸 DIRECT-PAYMENT RETURN: outputs.length=${outputs.length}`);
-      if (outputs.length > 0) {
-        console.error(`   Output entities: [${outputs.map(o => o.entityId.slice(-4)).join(',')}]`);
-      }
+      console.log(`💸 DIRECT-PAYMENT RETURN: outputs.length=${outputs.length}`);
 
-      return { newState, outputs };
+      return { newState, outputs, mempoolOps };
     }
 
     // === SWAP ENTITY HANDLERS ===
@@ -566,6 +580,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
       const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, minFillRatio } = entityTx.data;
 
       const accountMachine = newState.accounts.get(counterpartyEntityId);
@@ -579,8 +594,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         data: { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, minFillRatio },
       };
 
-      accountMachine.mempool.push(accountTx);
-      console.log(`📊 Added swap_offer to mempool for account with ${counterpartyEntityId.slice(-4)}`);
+      // Pure: return mempoolOp instead of mutating directly
+      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+      console.log(`📊 Added swap_offer to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
 
       // Add to swapBook (E-Machine aggregated view)
       newState.swapBook.set(offerId, {
@@ -599,7 +615,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
       }
 
-      return { newState, outputs };
+      return { newState, outputs, mempoolOps };
     }
 
     if (entityTx.type === 'resolveSwap') {
@@ -607,6 +623,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
       const { counterpartyEntityId, offerId, fillRatio, cancelRemainder } = entityTx.data;
 
       const accountMachine = newState.accounts.get(counterpartyEntityId);
@@ -620,15 +637,16 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         data: { offerId, fillRatio, cancelRemainder },
       };
 
-      accountMachine.mempool.push(accountTx);
-      console.log(`💱 Added swap_resolve to mempool for account with ${counterpartyEntityId.slice(-4)}`);
+      // Pure: return mempoolOp instead of mutating directly
+      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+      console.log(`💱 Added swap_resolve to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
 
       const firstValidator = entityState.config.validators[0];
       if (firstValidator) {
         outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
       }
 
-      return { newState, outputs };
+      return { newState, outputs, mempoolOps };
     }
 
     if (entityTx.type === 'cancelSwap') {
@@ -636,6 +654,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
       const { counterpartyEntityId, offerId } = entityTx.data;
 
       const accountMachine = newState.accounts.get(counterpartyEntityId);
@@ -649,8 +668,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         data: { offerId },
       };
 
-      accountMachine.mempool.push(accountTx);
-      console.log(`📊 Added swap_cancel to mempool for account with ${counterpartyEntityId.slice(-4)}`);
+      // Pure: return mempoolOp instead of mutating directly
+      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+      console.log(`📊 Added swap_cancel to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
 
       // Remove from swapBook (E-Machine aggregated view)
       newState.swapBook.delete(offerId);
@@ -660,7 +680,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
       }
 
-      return { newState, outputs };
+      return { newState, outputs, mempoolOps };
     }
 
     if (entityTx.type === 'requestWithdrawal') {
