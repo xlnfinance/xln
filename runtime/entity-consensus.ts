@@ -588,6 +588,11 @@ export const applyEntityInput = async (
       return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox };
     }
 
+    // TODO(bft-hardening): Replace weak placeholder hash with cryptographic commitment
+    // Current: height + timestamp only - validators don't sign actual state content
+    // Required: Merkle root over transactions + keccak256(orderbookExt + accountStates)
+    // Impact: Without this, equivocation attacks possible in multi-validator setup
+    // See: docs/htlc-hardening.md for full security audit
     const frameHash = `frame_${workingReplica.state.height + 1}_${newTimestamp}`;
     const selfSignature = `sig_${workingReplica.signerId}_${frameHash}`;
 
@@ -707,11 +712,21 @@ export const applyEntityFrame = async (
   // Track accounts that need frame proposals during this processing round
   const proposableAccounts = new Set<string>();
 
+  // === AGGREGATE PURE EVENTS FROM ALL HANDLERS ===
+  const allMempoolOps: Array<{ accountId: string; tx: any }> = [];
+  const allSwapOffersCreated: Array<any> = [];
+  const allSwapOffersCancelled: Array<any> = [];
+
   for (const entityTx of entityTxs) {
-    const { newState, outputs, jOutputs } = await applyEntityTx(env, currentEntityState, entityTx);
+    const { newState, outputs, jOutputs, mempoolOps, swapOffersCreated, swapOffersCancelled } = await applyEntityTx(env, currentEntityState, entityTx);
     currentEntityState = newState;
     allOutputs.push(...outputs);
     if (jOutputs) allJOutputs.push(...jOutputs);
+
+    // Collect pure events for post-loop processing
+    if (mempoolOps) allMempoolOps.push(...mempoolOps);
+    if (swapOffersCreated) allSwapOffersCreated.push(...swapOffersCreated);
+    if (swapOffersCancelled) allSwapOffersCancelled.push(...swapOffersCancelled);
 
     // Debug: Log all account mempools after each tx
     if (entityTx.type === 'extendCredit') {
@@ -792,18 +807,60 @@ export const applyEntityFrame = async (
     }
   }
 
-  // AUTO-PROPOSE: Process all proposable accounts plus any with pending transactions
-  console.error(`\n🚀🚀🚀 AUTO-PROPOSE START 🚀🚀🚀`);
-  console.error(`   Entity: ${currentEntityState.entityId.slice(-4)}`);
-  console.error(`   Proposable accounts collected: ${Array.from(proposableAccounts).map(id => id.slice(-4)).join(', ') || 'none'}`);
+  // === APPLY AGGREGATED PURE EVENTS ===
 
-  const { getAccountsToProposeFrames, proposeAccountFrame } = await import('./account-consensus');
+  // 1. Apply mempoolOps from handlers (HTLC forwards, reveals, direct payments)
+  if (allMempoolOps.length > 0) {
+    console.log(`📦 ENTITY-ORCHESTRATOR: Applying ${allMempoolOps.length} mempoolOps`);
+    for (const { accountId, tx } of allMempoolOps) {
+      const account = currentEntityState.accounts.get(accountId);
+      if (account) {
+        account.mempool.push(tx);
+        proposableAccounts.add(accountId);
+        console.log(`📦   → ${accountId.slice(-8)}: ${tx.type}`);
+      } else {
+        console.warn(`📦   ⚠️ Account ${accountId.slice(-8)} not found for mempoolOp`);
+      }
+    }
+  }
 
-  // Add accounts with mempool items that weren't already added
-  console.error(`   Calling getAccountsToProposeFrames...`);
-  const additionalAccounts = getAccountsToProposeFrames(currentEntityState);
-  console.error(`   Additional accounts: ${additionalAccounts.map(id => id.slice(-4)).join(', ') || 'none'}`);
-  additionalAccounts.forEach(accountId => proposableAccounts.add(accountId));
+  // 2. Run orderbook matching on aggregated swap offers (batch matching)
+  if (allSwapOffersCreated.length > 0 && currentEntityState.orderbookExt) {
+    console.log(`📊 ENTITY-ORCHESTRATOR: Batch matching ${allSwapOffersCreated.length} swap offers`);
+    const { processOrderbookSwaps } = await import('./entity-tx/handlers/account');
+    const matchResult = processOrderbookSwaps(currentEntityState, allSwapOffersCreated);
+
+    // Apply match results to account mempools
+    for (const { accountId, tx } of matchResult.mempoolOps) {
+      const account = currentEntityState.accounts.get(accountId);
+      if (account) {
+        account.mempool.push(tx);
+        proposableAccounts.add(accountId);
+        console.log(`📊   → ${accountId.slice(-8)}: ${tx.type}`);
+      }
+    }
+
+    // Apply book updates
+    const ext = currentEntityState.orderbookExt as any;
+    for (const { pairId, book } of matchResult.bookUpdates) {
+      ext.books.set(pairId, book);
+    }
+  }
+
+  // 3. Process swap cancellations
+  if (allSwapOffersCancelled.length > 0 && currentEntityState.orderbookExt) {
+    console.log(`📊 ENTITY-ORCHESTRATOR: Processing ${allSwapOffersCancelled.length} swap cancels`);
+    const { processOrderbookCancels } = await import('./entity-tx/handlers/account');
+    const bookUpdates = processOrderbookCancels(currentEntityState, allSwapOffersCancelled);
+
+    const ext = currentEntityState.orderbookExt as any;
+    for (const { pairId, book } of bookUpdates) {
+      ext.books.set(pairId, book);
+    }
+  }
+
+  // AUTO-PROPOSE: No O(n) scan needed - proposableAccounts already tracks touched accounts
+  const { proposeAccountFrame } = await import('./account-consensus');
 
   // CRITICAL: Deterministic ordering
   const accountsToProposeFrames = Array.from(proposableAccounts)
@@ -812,23 +869,15 @@ export const applyEntityFrame = async (
       return accountMachine ? accountMachine.mempool.length > 0 && !accountMachine.pendingFrame : false;
     })
     .sort();
-  console.error(`   TOTAL accounts to propose: ${accountsToProposeFrames.length}`);
 
   if (accountsToProposeFrames.length > 0) {
-    console.error(`   Proposing frames for: [${accountsToProposeFrames.map(id => id.slice(-4)).join(',')}]`);
 
     for (const counterpartyEntityId of accountsToProposeFrames) {
-      console.error(`\n   📝 Proposing for account ${counterpartyEntityId.slice(-4)}...`);
-
       const accountMachine = currentEntityState.accounts.get(counterpartyEntityId);
       if (accountMachine) {
-        console.error(`      Mempool: ${accountMachine.mempool.length}, Pending: ${!!accountMachine.pendingFrame}`);
         const proposal = await proposeAccountFrame(env, accountMachine);
-        console.error(`      Proposal: success=${proposal.success}, hasInput=${!!proposal.accountInput}, error=${proposal.error || 'none'}`);
 
         if (proposal.success && proposal.accountInput) {
-          console.error(`      ✅ SUCCESS! Creating output for ${proposal.accountInput.toEntityId.slice(-4)}`);
-
           // Get the proposer of the target entity from env
           let targetProposerId = 'alice'; // Default fallback
           const targetReplicaKeys = Array.from(env.eReplicas.keys()).filter(key => key.startsWith(proposal.accountInput!.toEntityId + ':'));
@@ -850,7 +899,6 @@ export const applyEntityFrame = async (
             }]
           };
           allOutputs.push(outputEntityInput);
-          console.error(`   ✅ AUTO-PROPOSE added output for ${proposal.accountInput.toEntityId.slice(-4)}, allOutputs.length=${allOutputs.length}`);
 
           // Add events to entity messages with size limiting
           addMessages(currentEntityState, proposal.events);

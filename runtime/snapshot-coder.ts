@@ -6,18 +6,90 @@
 // Configuration flag - change this to test different encoders
 const USE_MSGPACK = false;
 
-// JSON encoder imports and setup
-const jsonReplacer = (key: string, value: any) => {
-  if (key === 'clonedForValidation') {
+// JSON encoder imports and setup - cycle-safe
+const createSafeJsonReplacer = () => {
+  const seen = new WeakSet();
+  return (key: string, value: any) => {
+    // Skip fields that may contain cycles (ethers providers, validation state)
+    if (key === 'clonedForValidation' || key === 'jurisdiction' || key === 'provider' || key === 'ethersProvider') {
+      return undefined;
+    }
+    // Handle Maps BEFORE cycle detection (Map entries need processing)
+    if (value instanceof Map) {
+      const entries = Array.from(value.entries());
+      return { _dataType: 'Map', value: entries };
+    }
+    // Handle BigInts
+    if (typeof value === 'bigint') {
+      return { _dataType: 'BigInt', value: value.toString() };
+    }
+    // Cycle detection for objects (skip arrays - they're rarely the cause of true cycles)
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      if (seen.has(value)) {
+        return undefined; // Silent skip
+      }
+      seen.add(value);
+    }
+    return value;
+  };
+};
+
+/**
+ * Remove cycles from an object by replacing cyclic references with undefined
+ */
+const removeCycles = (obj: any, seen = new WeakSet()): any => {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+
+  // Handle BigInt
+  if (typeof obj === 'bigint') {
+    return { _dataType: 'BigInt', value: obj.toString() };
+  }
+
+  // Skip known problematic keys
+  if (obj.clonedForValidation !== undefined) {
+    const { clonedForValidation, ...rest } = obj;
+    return removeCycles(rest, seen);
+  }
+  if (obj.jurisdiction !== undefined) {
+    const { jurisdiction, ...rest } = obj;
+    return removeCycles(rest, seen);
+  }
+  if (obj.provider !== undefined) {
+    const { provider, ...rest } = obj;
+    return removeCycles(rest, seen);
+  }
+
+  // Check for cycles
+  if (seen.has(obj)) {
     return undefined;
   }
-  if (value instanceof Map) {
-    return { _dataType: 'Map', value: Array.from(value.entries()) };
+  seen.add(obj);
+
+  // Handle Map
+  if (obj instanceof Map) {
+    const entries = Array.from(obj.entries()).map(([k, v]) => [
+      removeCycles(k, seen),
+      removeCycles(v, seen)
+    ]);
+    return { _dataType: 'Map', value: entries };
   }
-  if (typeof value === 'bigint') {
-    return { _dataType: 'BigInt', value: value.toString() };
+
+  // Handle Array
+  if (Array.isArray(obj)) {
+    return obj.map(item => removeCycles(item, seen));
   }
-  return value;
+
+  // Handle plain object
+  const result: any = {};
+  for (const key of Object.keys(obj)) {
+    if (key === 'clonedForValidation' || key === 'jurisdiction' || key === 'provider' || key === 'ethersProvider') {
+      continue;
+    }
+    result[key] = removeCycles(obj[key], seen);
+  }
+  return result;
 };
 
 const jsonReviver = (_key: string, value: any) => {
@@ -132,8 +204,9 @@ export const encode = (data: any): Buffer => {
     // This should not happen in current config (USE_MSGPACK = false)
     throw new Error('Msgpack mode requires async initialization - use encodeAsync instead');
   } else {
-    // Simple JSON encoding
-    return Buffer.from(JSON.stringify(data, jsonReplacer));
+    // Simple JSON encoding with cycle-safe pre-processing
+    const safeCopy = removeCycles(data);
+    return Buffer.from(JSON.stringify(safeCopy, createSafeJsonReplacer()));
   }
 };
 

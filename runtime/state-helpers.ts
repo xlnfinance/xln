@@ -41,7 +41,7 @@ export const cloneArray = <T>(arr: T[]) => [...arr];
  * Creates a safe deep clone of entity state with guaranteed jBlock preservation
  * This prevents the jBlock corruption bugs that occur with manual state spreading
  */
-export function cloneEntityState(entityState: EntityState): EntityState {
+export function cloneEntityState(entityState: EntityState, forSnapshot: boolean = false): EntityState {
   // Use structuredClone for deep cloning with fallback
   try {
     const cloned = structuredClone(entityState);
@@ -59,14 +59,18 @@ export function cloneEntityState(entityState: EntityState): EntityState {
       cloned.lastFinalizedJHeight = entityState.lastFinalizedJHeight ?? 0; // Force fix
     }
 
-    // CLONE-SUCCESS removed
+    // For snapshots, remove clonedForValidation from all accounts to avoid cycles
+    if (forSnapshot) {
+      for (const account of cloned.accounts.values()) {
+        delete (account as any).clonedForValidation;
+      }
+    }
 
     // VALIDATE AT SOURCE: Guarantee type safety from this point forward
     return validateEntityState(cloned, 'cloneEntityState.structuredClone');
   } catch (error) {
     // structuredClone warning removed - browser limitation, not actionable
-    const manual = manualCloneEntityState(entityState);
-    // MANUAL-CLONE success removed - too noisy
+    const manual = manualCloneEntityState(entityState, forSnapshot);
 
     // VALIDATE AT SOURCE: Guarantee type safety from manual clone path too
     return validateEntityState(manual, 'cloneEntityState.manual');
@@ -77,7 +81,7 @@ export function cloneEntityState(entityState: EntityState): EntityState {
  * Manual entity state cloning with explicit jBlock preservation
  * Fallback for environments that don't support structuredClone
  */
-function manualCloneEntityState(entityState: EntityState): EntityState {
+function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean = false): EntityState {
   return {
     ...entityState,
     entityId: entityState.entityId, // CRITICAL: Explicitly preserve entityId
@@ -93,7 +97,7 @@ function manualCloneEntityState(entityState: EntityState): EntityState {
     accounts: new Map(
       Array.from(entityState.accounts.entries()).map(([id, account]) => [
         id,
-        cloneAccountMachine(account), // CRITICAL FIX: Deep clone including pendingFrame and clonedForValidation
+        cloneAccountMachine(account, forSnapshot), // forSnapshot excludes clonedForValidation
       ]),
     ),
     accountInputQueue: cloneArray(entityState.accountInputQueue || []),
@@ -193,11 +197,11 @@ function cloneBookState(book: any): any {
  * Deep clone entity replica with all nested state properly cloned
  * Uses cloneEntityState as the entry point for state cloning
  */
-export const cloneEntityReplica = (replica: EntityReplica): EntityReplica => {
+export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean = false): EntityReplica => {
   return {
     entityId: replica.entityId,
     signerId: replica.signerId,
-    state: cloneEntityState(replica.state), // Use unified entity state cloning
+    state: cloneEntityState(replica.state, forSnapshot), // forSnapshot excludes clonedForValidation
     mempool: cloneArray(replica.mempool),
     ...(replica.proposal && {
       proposal: {
@@ -312,7 +316,7 @@ export const captureSnapshot = (
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: env.timestamp,
-    eReplicas: new Map(Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica)])),
+    eReplicas: new Map(Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica, true)])), // forSnapshot=true excludes clonedForValidation
     jReplicas,
     runtimeInput: {
       runtimeTxs: [...runtimeInput.runtimeTxs],
@@ -405,21 +409,31 @@ export const captureSnapshot = (
 /**
  * Clone AccountMachine for validation (replaces dryRun pattern)
  */
-export function cloneAccountMachine(account: AccountMachine): AccountMachine {
+export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolean = false): AccountMachine {
+  // For snapshots, exclude clonedForValidation to avoid cycles
+  if (forSnapshot) {
+    const { clonedForValidation, ...accountWithoutCloned } = account as any;
+    try {
+      return structuredClone(accountWithoutCloned) as AccountMachine;
+    } catch {
+      return manualCloneAccountMachine(account, true);
+    }
+  }
+
+  // Normal clone - preserve clonedForValidation for consensus
   try {
     const cloned = structuredClone(account);
-    console.log(`✅ structuredClone used for AccountMachine, locks.size=${cloned.locks.size}`);
     return cloned;
   } catch (error) {
     console.log(`⚠️ structuredClone failed, using manual clone`);
-    return manualCloneAccountMachine(account);
+    return manualCloneAccountMachine(account, false);
   }
 }
 
 /**
  * Manual AccountMachine cloning
  */
-function manualCloneAccountMachine(account: AccountMachine): AccountMachine {
+function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidation: boolean = false): AccountMachine {
   const result: AccountMachine = {
     counterpartyEntityId: account.counterpartyEntityId,
     mempool: [...account.mempool],
@@ -458,8 +472,8 @@ function manualCloneAccountMachine(account: AccountMachine): AccountMachine {
     };
   }
 
-  if (account.clonedForValidation) {
-    result.clonedForValidation = manualCloneAccountMachine(account.clonedForValidation);
+  if (account.clonedForValidation && !skipClonedForValidation) {
+    result.clonedForValidation = manualCloneAccountMachine(account.clonedForValidation, true);
   }
 
   if (account.hankoSignature) {
