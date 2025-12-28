@@ -24,7 +24,7 @@ export async function handleSwapCancel(
   accountTx: Extract<AccountTx, { type: 'swap_cancel' }>,
   isOurFrame: boolean,
   currentHeight: number
-): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelled?: { offerId: string; accountId: string } }> {
+): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelled?: { offerId: string; accountId: string; makerId: string } }> {
   const { offerId } = accountTx.data;
   const events: string[] = [];
 
@@ -63,8 +63,9 @@ export async function handleSwapCancel(
   accountMachine.swapOffers.delete(offerId);
 
   const accountId = `${fromEntity}:${toEntity}`;
+  const makerId = offer.makerIsLeft ? fromEntity : toEntity;
 
   events.push(`📊 Swap offer cancelled: ${offerId.slice(0,8)}... (released ${offer.giveAmount} token${offer.giveTokenId})`);
 
-  return { success: true, events, swapOfferCancelled: { offerId, accountId } };
+  return { success: true, events, swapOfferCancelled: { offerId, accountId, makerId } };
 }

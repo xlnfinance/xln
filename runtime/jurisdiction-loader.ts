@@ -62,10 +62,13 @@ export function loadJurisdictions(): JurisdictionsData {
   try {
     const fs = require('fs'); // Dynamic require for Node.js only
     const path = require('path');
-    const filePath = path.resolve(process.cwd(), 'jurisdictions.json');
+    // Try multiple locations: /jurisdictions/jurisdictions.json (new), then root (legacy)
+    const newPath = path.resolve(process.cwd(), 'jurisdictions', 'jurisdictions.json');
+    const legacyPath = path.resolve(process.cwd(), 'jurisdictions.json');
+    const filePath = fs.existsSync(newPath) ? newPath : legacyPath;
 
     if (!fs.existsSync(filePath)) {
-      console.warn('INFO: jurisdictions.json not found; using defaults');
+      console.warn('INFO: jurisdictions.json not found in /jurisdictions/ or root; using defaults');
       cachedJurisdictions = defaultJurisdictions;
       return cachedJurisdictions;
     }

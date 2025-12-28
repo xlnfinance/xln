@@ -508,8 +508,7 @@ async function pushSnapshot(
 
 export async function ahb(env: Env): Promise<void> {
   const process = await getProcess();
-  pushSnapshotCount = 0; // RESET: Track if demo runs multiple times
-  env.disableAutoSnapshots = true; // DISABLE automatic tick snapshots - we use manual pushSnapshot instead
+  env.scenarioMode = true; // Deterministic time control (scenarios set env.timestamp manually)
 
   try {
     console.log('[AHB] ========================================');
@@ -1699,9 +1698,9 @@ export async function ahb(env: Env): Promise<void> {
     console.log('Phase 4: Reverse payment B→H→A ($50K) - net $200K');
     console.log('Phase 5: Rebalancing - TR $200K → $0');
     console.log('=====================================\n');
-    console.log(`[AHB] Snapshots: ${pushSnapshotCount}, history: ${env.history?.length}`);
+    console.log(`[AHB] History frames: ${env.history?.length}`);
   } finally {
-    env.disableAutoSnapshots = false; // ALWAYS re-enable, even on error
+    env.scenarioMode = false; // ALWAYS re-enable live mode, even on error
   }
 }
 

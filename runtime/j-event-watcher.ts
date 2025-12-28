@@ -726,7 +726,7 @@ export class JEventWatcher {
   }
 
   private getEventTimestamp(): number {
-    return this.env?.disableAutoSnapshots ? this.env.timestamp : Date.now();
+    return this.env?.scenarioMode ? this.env.timestamp : Date.now();
   }
 }
 

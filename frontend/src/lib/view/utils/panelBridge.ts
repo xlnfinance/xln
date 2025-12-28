@@ -27,6 +27,7 @@ type EventMap = {
   'focusPanel': { panelId: string }; // Focus any panel by ID
   'scenario:loaded': { name: string; frames: number }; // Scenario loaded successfully
   'camera:update': { position: { x: number; y: number; z: number }; target: { x: number; y: number; z: number }; distance?: number }; // Camera position changed
+  'camera:restore': { position: { x: number; y: number; z: number }; target: { x: number; y: number; z: number }; distance?: number }; // Restore saved camera position
   'timeMachine:play': {}; // Time machine playback started
   'playback:speed': number; // Playback speed multiplier from TimeMachine
 };

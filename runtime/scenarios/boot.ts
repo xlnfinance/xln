@@ -42,7 +42,7 @@ export function createJReplica(
     stateRoot: new Uint8Array(32),
     mempool: [],
     blockDelayMs: 300,
-    lastBlockTimestamp: Date.now(),
+    lastBlockTimestamp: env.scenarioMode ? env.timestamp : Date.now(),
     position,
     contracts: {
       depository: depositoryAddress,

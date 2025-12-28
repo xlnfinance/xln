@@ -20,7 +20,7 @@ let globalLogId = 0;
  */
 export function attachEventEmitters(env: Env): void {
   // Helper: Get deterministic timestamp (scenario mode uses env.timestamp, live uses Date.now())
-  const getTimestamp = () => env.disableAutoSnapshots ? env.timestamp : Date.now();
+  const getTimestamp = () => env.scenarioMode ? env.timestamp : Date.now();
 
   // Simple log (like console.log but captured)
   env.log = (message: string) => {

@@ -3,14 +3,25 @@ export PATH="/opt/homebrew/bin:/Users/$(whoami)/Library/Python/3.9/bin:/usr/bin:
 export LANG=en_US.UTF-8
 
 LOG="/tmp/vr-debug.log"
+LOCKFILE="/tmp/vr-transcribe.lock"
+
+# Prevent race conditions - only one transcription at a time
+if [ -f "$LOCKFILE" ]; then
+    LOCK_PID=$(cat "$LOCKFILE" 2>/dev/null)
+    if kill -0 "$LOCK_PID" 2>/dev/null; then
+        echo "=== $(date '+%H:%M:%S') BLOCKED (PID $LOCK_PID active) ===" >> "$LOG"
+        exit 5
+    fi
+fi
+echo $$ > "$LOCKFILE"
+trap 'rm -f "$LOCKFILE"; kill -INT $(jobs -p) 2>/dev/null' EXIT TERM INT
+
 echo "=== $(date '+%H:%M:%S') START ===" >> "$LOG"
 
 LANG_ARG="${1:-auto}"
 AUDIO=~/records/$(date +%Y-%m-%d)/$(date +%H-%M-%S).wav
 mkdir -p $(dirname "$AUDIO")
 echo "File: $AUDIO" >> "$LOG"
-
-trap 'echo "Got TERM, sending INT to background jobs" >> "$LOG"; kill -INT $(jobs -p) 2>/dev/null' TERM
 
 rec "$AUDIO" rate 16k channels 1 2>/dev/null &
 REC_PID=$!
@@ -31,44 +42,26 @@ SIZE=$(stat -f%z "$AUDIO" 2>/dev/null || echo 0)
 echo "Audio size: $SIZE bytes" >> "$LOG"
 
 START=$(python3 -c "import time; print(int(time.time()*1000))")
-TEXT=""
-RETRY_COUNT=0
-MAX_RETRIES=2
 
 echo "Trying HTTP transcribe..." >> "$LOG"
-while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-    if RES=$(curl -sf --max-time 30 http://localhost:5001/transcribe -F "file=@$AUDIO" -F "task=$([ "$LANG_ARG" = "translate-en" ] && echo translate || echo transcribe)" 2>&1); then
-        TEXT=$(echo "$RES" | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null)
-        if [ -n "$TEXT" ]; then
-            echo "HTTP result: $TEXT" >> "$LOG"
-            break
-        else
-            echo "WARNING: Empty response, retrying..." >> "$LOG"
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            sleep 0.5
-        fi
-    else
-        CURL_EXIT=$?
-        echo "WARNING: HTTP failed (curl exit $CURL_EXIT), retry $RETRY_COUNT/$MAX_RETRIES" >> "$LOG"
-        RETRY_COUNT=$((RETRY_COUNT + 1))
-        if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
-            sleep 0.5
-        fi
-    fi
-done
+RES=$(curl -sf --max-time 100 http://localhost:5001/transcribe -F "file=@$AUDIO" -F "task=$([ "$LANG_ARG" = "translate-en" ] && echo translate || echo transcribe)" 2>&1)
+CURL_EXIT=$?
+
+if [ $CURL_EXIT -ne 0 ]; then
+    echo "ERROR: HTTP failed (curl exit $CURL_EXIT)" >> "$LOG"
+    exit 4
+fi
+
+TEXT=$(echo "$RES" | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null)
+echo "HTTP result: $TEXT" >> "$LOG"
 
 if [ -z "$TEXT" ]; then
-    echo "ERROR: HTTP server failed after $MAX_RETRIES retries" >> "$LOG"
+    echo "ERROR: Empty response from server" >> "$LOG"
     exit 4
 fi
 
 MS=$(( $(python3 -c "import time; print(int(time.time()*1000))") - START ))
 echo "Transcribe time: ${MS}ms" >> "$LOG"
-
-if [ -z "$TEXT" ]; then
-    echo "ERROR: Empty text" >> "$LOG"
-    exit 3
-fi
 
 echo "Pasting: $TEXT" >> "$LOG"
 

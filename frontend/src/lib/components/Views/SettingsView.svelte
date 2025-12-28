@@ -241,8 +241,9 @@
     try {
       const xln = await getXLN();
       const env = $xlnEnvironment || await xln.main();
-      const result = await xln.runDemo(env);
-      xlnEnvironment.set(result);
+      // runDemo removed - use scenarios.ahb instead
+      await xln.prepopulateAHB(env);
+      xlnEnvironment.set(env);
     } catch (error) {
       console.error('❌ Demo failed:', error);
       alert(`Demo failed: ${(error as Error)?.message || 'Unknown error'}`);
@@ -261,7 +262,7 @@
       if (selectedPreset === 'ahb') {
         await xln.prepopulateAHB(env);
       } else {
-        await xln.prepopulate(env);
+        await xln.prepopulateFullMechanics(env);
       }
     } catch (error) {
       console.error('❌ Prepopulation failed:', error);

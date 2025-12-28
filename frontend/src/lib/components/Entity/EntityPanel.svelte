@@ -344,9 +344,9 @@
           </div>
           <div class="insurance-content">
             <InsurancePanel
-              isolatedEnv={contextReplicas ? { subscribe: (fn) => contextReplicas.subscribe((val) => fn({ eReplicas: val })) } : undefined}
-              isolatedHistory={contextHistory}
-              isolatedTimeIndex={contextTimeIndex}
+              isolatedEnv={contextReplicas ? { subscribe: (fn: any) => contextReplicas.subscribe((val: any) => fn({ eReplicas: val })) } as any : undefined}
+              isolatedHistory={contextHistory as any}
+              isolatedTimeIndex={contextTimeIndex as any}
             />
           </div>
         </div>

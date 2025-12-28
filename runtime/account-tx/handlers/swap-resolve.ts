@@ -18,6 +18,16 @@
  * Delta rules (same as HTLC):
  * - Left gives → offdelta decreases (negative)
  * - Right gives → offdelta increases (positive)
+ *
+ * TODO(liquidation): Add solvency check after delta updates
+ * If abs(offdelta) > collateral for either party, trigger forced liquidation:
+ * - Clear all open orders for insolvent party
+ * - Seize collateral proportionally
+ * - Emit LIQUIDATION event for on-chain settlement
+ *
+ * TODO(fees): Add fee collection on matched trades
+ * - Hub takes spread (e.g., 0.1% of filledWant)
+ * - Fee accrues to hub's delta, incentivizes market making
  */
 
 import { AccountMachine, AccountTx } from '../../types';
@@ -64,12 +74,17 @@ export async function handleSwapResolve(
   }
 
   // 4. Calculate fill amounts
-  // filledGive anchors the fill, filledWant derived to preserve exact price ratio
-  // This prevents rounding leakage where maker could lose value
-  const filledGive = (offer.giveAmount * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
-  // Derive filledWant from filledGive to strictly enforce price: want/give ratio
-  const filledWant = offer.giveAmount > 0n
-    ? (filledGive * offer.wantAmount) / offer.giveAmount
+  // Use quantized amounts if available (set by orderbook) for exact lot-to-wei consistency
+  // This ensures fill ratios computed from lots match settlement amounts exactly
+  const effectiveGive = offer.quantizedGive ?? offer.giveAmount;
+  const effectiveWant = offer.quantizedWant ?? offer.wantAmount;
+
+  // filledGive anchors the fill, filledWant derived using ceil() to protect maker
+  // Maker must receive AT LEAST their limit price - taker pays any dust
+  const filledGive = (effectiveGive * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
+  // Ceiling division: (a * b + c - 1) / c ensures maker gets >= limit price
+  const filledWant = effectiveGive > 0n
+    ? (filledGive * effectiveWant + effectiveGive - 1n) / effectiveGive
     : 0n;
 
   // 5. Get or create deltas for both tokens
@@ -108,30 +123,24 @@ export async function handleSwapResolve(
   // 6. Update deltas atomically if filling
   if (filledGive > 0n) {
     // Maker gives giveToken, receives wantToken
-    // Taker gives wantToken, receives giveToken
+    // Taker (counterparty) gives wantToken, receives giveToken
     //
-    // Delta semantics (canonical):
+    // CANONICAL Delta semantics (from direct-payment.ts):
     // - Positive offdelta = Right owes Left
     // - Negative offdelta = Left owes Right
-    //
-    // If maker is Left: Left gives giveToken → offdelta decreases (more negative)
-    //                   Left receives wantToken → offdelta increases (less negative)
-    // If maker is Right: Right gives giveToken → offdelta increases (more positive)
-    //                    Right receives wantToken → offdelta decreases (less positive)
+    // - Left pays → offdelta DECREASES
+    // - Right pays → offdelta INCREASES
 
-    // offdelta semantics: positive = Right owes Left, negative = Left owes Right
-    // When you GIVE (pay), your debt DECREASES
-    // When you RECEIVE, your debt INCREASES
     if (offer.makerIsLeft) {
-      // Left gives giveToken → Left paid → Left's debt decreases → offdelta decreases (more negative = Left owes more)
-      // Left receives wantToken → Left got value → Left's debt increases → offdelta increases (less negative)
+      // Maker (Left) gives giveToken → Left pays → offdelta decreases
+      // Maker (Left) receives wantToken → Right pays → offdelta increases
       giveDelta.offdelta -= filledGive;
       wantDelta.offdelta += filledWant;
     } else {
-      // Right gives giveToken → Right paid → Right's debt decreases → offdelta decreases (less positive = Right owes less)
-      // Right receives wantToken → Right got value → Right's debt increases → offdelta increases (more positive)
-      giveDelta.offdelta -= filledGive;
-      wantDelta.offdelta += filledWant;
+      // Maker (Right) gives giveToken → Right pays → offdelta INCREASES
+      // Maker (Right) receives wantToken → Left pays → offdelta DECREASES
+      giveDelta.offdelta += filledGive;
+      wantDelta.offdelta -= filledWant;
     }
 
     events.push(`💱 Swap filled: ${filledGive} token${offer.giveTokenId} for ${filledWant} token${offer.wantTokenId}`);
@@ -151,7 +160,7 @@ export async function handleSwapResolve(
 
   if (cancelRemainder || fillRatio === MAX_FILL_RATIO) {
     // Cancel or fully filled - remove offer and notify orderbook
-    const remainingHold = offer.giveAmount - filledGive;
+    const remainingHold = effectiveGive - filledGive;
     if (remainingHold > 0n) {
       // Release remaining hold
       if (offer.makerIsLeft) {
@@ -164,9 +173,14 @@ export async function handleSwapResolve(
     swapOfferCancelled = { offerId, accountId };
     events.push(`📊 Swap offer ${offerId.slice(0,8)}... ${fillRatio === MAX_FILL_RATIO ? 'fully filled' : 'cancelled'}`);
   } else {
-    // Partial fill - update remaining amounts
-    offer.giveAmount -= filledGive;
-    offer.wantAmount -= filledWant;
+    // Partial fill - update remaining amounts (use quantized values for consistency)
+    offer.giveAmount = effectiveGive - filledGive;
+    offer.wantAmount = effectiveWant - filledWant;
+    // Update quantized amounts too
+    if (offer.quantizedGive !== undefined) {
+      offer.quantizedGive = offer.giveAmount;
+      offer.quantizedWant = offer.wantAmount;
+    }
     events.push(`📊 Swap offer ${offerId.slice(0,8)}... partially filled, ${offer.giveAmount} remaining`);
   }
 

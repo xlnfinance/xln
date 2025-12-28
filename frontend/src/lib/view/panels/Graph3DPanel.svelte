@@ -736,7 +736,7 @@ let vrHammer: VRHammer | null = null;
       const jMachineGroup = jMachines.get(jurisdiction.name);
       if (jMachineGroup) {
         // Find the label sprite (last child added in createJMachine)
-        const label = jMachineGroup.children.find((child: any) => child.isSprite);
+        const label = jMachineGroup.children.find((child: any) => child.isSprite) as THREE.Sprite | undefined;
         if (label && label.material && label.material.map) {
           // Recreate label texture with updated jHeight
           const canvas = document.createElement('canvas');
@@ -1562,8 +1562,9 @@ let vrHammer: VRHammer | null = null;
       context.font = 'bold 28px monospace';
       context.textAlign = 'center';
       // Format: "J1 (#123)" - short name + height
-      const shortName = name.split(' ')[0].substring(0, 8);
-      context.fillText(`${shortName} (#${jHeight})`, 128, 40);
+      const nameParts = (name ?? 'J').split(' ');
+      const shortName = (nameParts[0] ?? 'J').substring(0, 8);
+      context.fillText(`${shortName} (#${jHeight ?? 0})`, 128, 40);
     }
 
     const texture = new THREE.CanvasTexture(canvas);
