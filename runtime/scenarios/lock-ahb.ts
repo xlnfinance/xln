@@ -15,38 +15,46 @@
  * - Griefing protection (timelock cascade)
  */
 
-import type { Env, EntityInput, EnvSnapshot, EntityReplica, Delta } from '../types';
+import type { Env, EntityInput, EntityReplica, Delta } from '../types';
 import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from '../evm';
-import { cloneEntityReplica } from '../state-helpers';
-import type { Profile } from '../gossip';
 import { BrowserEVM } from '../evms/browser-evm';
 import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
-
-// Lazy-loaded runtime functions to avoid circular dependency (runtime.ts imports this file)
-let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
-let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
-
-const getProcess = async () => {
-  if (!_process) {
-    const runtime = await import('../runtime');
-    _process = runtime.process;
-  }
-  return _process;
-};
-
-const getApplyRuntimeInput = async () => {
-  if (!_applyRuntimeInput) {
-    const runtime = await import('../runtime');
-    _applyRuntimeInput = runtime.applyRuntimeInput;
-  }
-  return _applyRuntimeInput;
-};
+import { getProcess, getApplyRuntimeInput, usd, snap, checkSolvency } from './helpers';
 
 const USDC_TOKEN_ID = 1;
-const DECIMALS = 18n;
-const ONE_TOKEN = 10n ** DECIMALS;
 
-const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
+// Transition wrapper: pushSnapshot -> snap + process (to be removed later)
+// This maintains backward compatibility while we migrate calls
+// Note: The old pushSnapshot had complex signature. This version accepts:
+// - env, title, opts (required)
+// - Optional 4th param: either EntityInput[] OR {expectedSolvency: bigint} to merge into opts
+async function pushSnapshot(
+  env: Env,
+  title: string,
+  opts: {
+    what?: string;
+    why?: string;
+    tradfiParallel?: string;
+    keyMetrics?: string[];
+    expectedSolvency?: bigint;
+    description?: string;
+  },
+  fourthArg?: EntityInput[] | { expectedSolvency?: bigint }
+): Promise<void> {
+  const process = await getProcess();
+
+  // Handle 4th arg: can be inputs array OR extra solvency opts
+  let inputs: EntityInput[] | undefined;
+  if (Array.isArray(fourthArg)) {
+    inputs = fourthArg;
+  } else if (fourthArg && typeof fourthArg === 'object' && 'expectedSolvency' in fourthArg) {
+    // Merge expectedSolvency into opts
+    opts = { ...opts, expectedSolvency: fourthArg.expectedSolvency };
+  }
+
+  snap(env, title, opts);
+  await process(env, inputs);
+}
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`ASSERT: ${message}`);
@@ -60,57 +68,6 @@ function findReplica(env: Env, entityId: string): ReplicaEntry {
     throw new Error(`AHB: Replica for entity ${entityId} not found`);
   }
   return entry as ReplicaEntry;
-}
-
-function cloneProfilesForSnapshot(env: Env): { profiles: Profile[] } | undefined {
-  if (!env.gossip || typeof env.gossip.getProfiles !== 'function') {
-    return undefined;
-  }
-
-  const profiles = env.gossip.getProfiles().map((profile: Profile): Profile => {
-    let clonedMetadata: Profile['metadata'] = undefined;
-    if (profile.metadata) {
-      clonedMetadata = { ...profile.metadata };
-      clonedMetadata.lastUpdated = clonedMetadata.lastUpdated ?? Date.now();
-      if (clonedMetadata.baseFee !== undefined) {
-        clonedMetadata.baseFee = BigInt(clonedMetadata.baseFee.toString());
-      }
-    }
-
-    const clonedAccounts = profile.accounts
-      ? profile.accounts.map((account) => {
-          const tokenCapacities = new Map<number, { inCapacity: bigint; outCapacity: bigint }>();
-          if (account.tokenCapacities) {
-            for (const [tokenId, capacities] of account.tokenCapacities.entries()) {
-              tokenCapacities.set(tokenId, {
-                inCapacity: capacities.inCapacity,
-                outCapacity: capacities.outCapacity,
-              });
-            }
-          }
-
-          return {
-            counterpartyId: account.counterpartyId,
-            tokenCapacities,
-          };
-        })
-      : [];
-
-    const profileClone: Profile = {
-      entityId: profile.entityId,
-      capabilities: [...profile.capabilities],
-      hubs: [...profile.hubs],
-      accounts: clonedAccounts,
-    };
-
-    if (clonedMetadata) {
-      profileClone.metadata = clonedMetadata;
-    }
-
-    return profileClone;
-  });
-
-  return { profiles };
 }
 
 // J-Watcher instance for BrowserVM event subscription
@@ -229,54 +186,6 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
   console.log('='.repeat(80) + '\n');
 }
 
-interface FrameSubtitle {
-  title: string;           // Short header (e.g., "Reserve-to-Reserve Transfer")
-  what: string;            // What's happening technically
-  why: string;             // Why this matters
-  tradfiParallel: string;  // Traditional finance equivalent
-  keyMetrics?: string[];   // Optional: bullet points of key numbers
-}
-
-let pushSnapshotCount = 0;
-
-// System solvency check - inline for self-contained testing
-function checkSolvency(env: Env, expected: bigint, label: string, optional: boolean = false): void {
-  let reserves = 0n;
-  let collateral = 0n;
-
-  console.log(`[SOLVENCY ${label}] Checking ${env.eReplicas.size} replicas...`);
-
-  for (const [replicaKey, replica] of env.eReplicas) {
-    let replicaReserves = 0n;
-    for (const [tokenKey, amount] of replica.state.reserves) {
-      replicaReserves += amount;
-      reserves += amount;
-    }
-    console.log(`  [${replicaKey.slice(0,20)}] reserves=${replicaReserves / 10n**18n}M`);
-
-    for (const [counterpartyId, account] of replica.state.accounts) {
-      if (replica.state.entityId < counterpartyId) {
-        for (const [, delta] of account.deltas) {
-          collateral += delta.collateral;
-        }
-      }
-    }
-  }
-
-  const total = reserves + collateral;
-  console.log(`[SOLVENCY ${label}] Total: reserves=${reserves / 10n**18n}M, collateral=${collateral / 10n**18n}M, sum=${total / 10n**18n}M`);
-
-  if (total !== expected) {
-    console.error(`❌ [${label}] SOLVENCY FAIL: ${total} !== ${expected}`);
-    if (!optional) {
-      throw new Error(`SOLVENCY VIOLATION at "${label}": got ${total}, expected ${expected}`);
-    } else {
-      console.warn(`⚠️  [${label}] Solvency check failed but continuing (optional mode)`);
-    }
-  } else {
-    console.log(`✅ [${label}] Solvency OK`);
-  }
-}
 
 // Get offdelta for a bilateral account (uses LEFT entity's view - canonical)
 function getOffdelta(env: Env, entityA: string, entityB: string, tokenId: number): bigint {
@@ -362,155 +271,9 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
   console.log(`✅ [${label}] Bilateral sync OK: ${entityA.slice(-4)}←→${entityB.slice(-4)} token ${tokenId} - all ${fieldsToCheck.length} fields match`);
 }
 
-// Verify payment moved through accounts - throws on failure
-// verifyPayment DELETED - was causing false positives due to incorrect delta semantics expectations
-// TODO: Re-implement with correct bilateral consensus understanding
 
-interface SnapshotOptions {
-  expectedSolvency?: bigint;      // Self-test: throws if solvency doesn't match
-  entityInputs?: EntityInput[];   // Entity inputs for J-Machine visualization
-}
-
-async function pushSnapshot(
-  env: Env,
-  description: string,
-  subtitle: FrameSubtitle,
-  options: SnapshotOptions = {}
-) {
-  pushSnapshotCount++;
-  console.log(`[pushSnapshot #${pushSnapshotCount}] Called for: "${description}"`);
-
-  // SELF-TEST: Verify solvency at every frame
-  if (options.expectedSolvency !== undefined) {
-    checkSolvency(env, options.expectedSolvency, `Frame ${pushSnapshotCount}`);
-  }
-
-  const gossipSnapshot = cloneProfilesForSnapshot(env);
-
-  // CRITICAL: Capture fresh stateRoot from BrowserVM for time-travel
-  const browserVM = getBrowserVMInstance();
-  let freshStateRoot: Uint8Array | null = null;
-  if (browserVM?.captureStateRoot && env.jReplicas) {
-    try {
-      freshStateRoot = await browserVM.captureStateRoot();
-      // Also update live jReplicas so next snapshot has correct base
-      for (const [name, jReplica] of env.jReplicas.entries()) {
-        jReplica.stateRoot = freshStateRoot;
-      }
-    } catch (e) {
-      // Silent fail - stateRoot capture is optional
-    }
-  }
-
-  // Clone jReplicas for this frame (J-Machine state) + SYNC reserves/collaterals from eReplicas
-  const jReplicasSnapshot = env.jReplicas ? Array.from(env.jReplicas.values()).map(jr => {
-    // Sync reserves from eReplicas into JReplica
-    const reserves = new Map<string, Map<number, bigint>>();
-    const registeredEntities = new Map<string, { name: string; quorum: string[]; threshold: number }>();
-    // Collaterals: channelKey → tokenId → { collateral, ondelta }
-    const collaterals = new Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>();
-
-    // Aggregate reserves and collaterals from all entity replicas
-    for (const [key, replica] of env.eReplicas.entries()) {
-      const entityId = key.split(':')[0];
-      if (replica.state?.reserves) {
-        const tokenMap = new Map<number, bigint>();
-        // Handle both Map and plain object
-        if (replica.state.reserves instanceof Map) {
-          replica.state.reserves.forEach((amount: bigint, tokenId: string) => {
-            tokenMap.set(Number(tokenId), amount);
-          });
-        } else {
-          for (const [tokenId, amount] of Object.entries(replica.state.reserves as Record<string, bigint>)) {
-            tokenMap.set(Number(tokenId), BigInt(amount));
-          }
-        }
-        if (tokenMap.size > 0) {
-          reserves.set(entityId, tokenMap);
-        }
-      }
-
-      // Extract collaterals from bilateral accounts (only for LEFT entity to avoid duplicates)
-      if (replica.state?.accounts) {
-        for (const [counterpartyId, account] of replica.state.accounts.entries()) {
-          // Only capture from LEFT entity (smaller ID) to avoid duplicates
-          if (entityId < counterpartyId && account.deltas) {
-            // Create channel key: LEFT-RIGHT (canonical ordering)
-            const channelKey = `${entityId.slice(-4)}-${counterpartyId.slice(-4)}`;
-            const tokenMap = new Map<number, { collateral: bigint; ondelta: bigint }>();
-
-            for (const [tokenId, delta] of account.deltas.entries()) {
-              if (delta.collateral > 0n || delta.ondelta !== 0n) {
-                tokenMap.set(Number(tokenId), {
-                  collateral: delta.collateral,
-                  ondelta: delta.ondelta,
-                });
-              }
-            }
-
-            if (tokenMap.size > 0) {
-              collaterals.set(channelKey, tokenMap);
-            }
-          }
-        }
-      }
-
-      // Add entity to registeredEntities
-      if (!registeredEntities.has(entityId)) {
-        registeredEntities.set(entityId, {
-          name: replica.name || `E${entityId.slice(-4)}`,
-          quorum: replica.quorum || [],
-          threshold: replica.threshold || 1,
-        });
-      }
-    }
-
-    return {
-      name: jr.name,
-      blockNumber: jr.blockNumber,
-      stateRoot: new Uint8Array(jr.stateRoot),
-      mempool: [...jr.mempool],
-      blockDelayMs: jr.blockDelayMs || 300,
-      lastBlockTimestamp: jr.lastBlockTimestamp || 0,
-      position: { ...jr.position },
-      contracts: jr.contracts ? { ...jr.contracts } : undefined,
-      reserves,
-      collaterals,  // NEW: collateral state from bilateral accounts
-      registeredEntities,
-    };
-  }) : [];
-
-  const snapshot: EnvSnapshot = {
-    height: env.height,
-    timestamp: Date.now(),
-    eReplicas: new Map(
-      Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica)]),
-    ),
-    jReplicas: jReplicasSnapshot,
-    runtimeInput: {
-      runtimeTxs: [],
-      entityInputs: options.entityInputs || [],
-    },
-    runtimeOutputs: [],
-    description,
-    subtitle, // Fed Chair educational content
-    logs: [...env.frameLogs], // Copy logs accumulated during this frame
-    ...(gossipSnapshot ? { gossip: gossipSnapshot } : {}),
-  };
-
-  if (!env.history) {
-    console.log(`[pushSnapshot] Creating new history array`);
-    env.history = [];
-  }
-
-  const beforeLength = env.history.length;
-  env.history.push(snapshot);
-  const afterLength = env.history.length;
-  console.log(`📸 Snapshot: ${description} (history: ${beforeLength} → ${afterLength}, logs: ${env.frameLogs.length})`);
-
-  // Clear frame logs for next frame
-  env.frameLogs = [];
-}
+// Alias for runtime.ts compatibility
+export { ahb as lockAhb };
 
 export async function ahb(env: Env): Promise<void> {
   const process = await getProcess();
@@ -600,17 +363,15 @@ export async function ahb(env: Env): Promise<void> {
     // Define total system solvency - $10M minted to Hub
     const TOTAL_SOLVENCY = usd(10_000_000);
 
-    await pushSnapshot(env, 'Frame 0: Clean Slate - J-Machine Ready', {
-      title: 'Jurisdiction Machine Deployed',
-      what: 'The J-Machine (Jurisdiction Machine) is deployed on-chain. It represents the EVM smart contracts (Depository.sol, EntityProvider.sol) that will process settlements.',
-      why: 'Before any entities exist, the jurisdiction infrastructure must be in place. Think of this as deploying the central bank\'s core settlement system.',
-      tradfiParallel: 'Like the Federal Reserve deploying its Fedwire Funds Service before any banks can participate.',
-      keyMetrics: [
-        'J-Machine: Deployed at origin',
-        'Entities: 0 (none created yet)',
-        'Reserves: Empty',
-      ]
-    }, { expectedSolvency: 0n }); // Frame 0: No tokens yet
+    snap(env, 'Jurisdiction Machine Deployed', {
+      description: 'Frame 0: Clean Slate - J-Machine Ready',
+      what: 'The J-Machine (Jurisdiction Machine) is deployed on-chain.',
+      why: 'Before any entities exist, the jurisdiction infrastructure must be in place.',
+      tradfiParallel: 'Like the Federal Reserve deploying its Fedwire Funds Service.',
+      keyMetrics: ['J-Machine: Deployed', 'Entities: 0', 'Reserves: Empty'],
+      expectedSolvency: 0n,
+    });
+    await process(env); // Frame 0: No tokens yet
 
     // ============================================================================
     // STEP 0b: Create entities
@@ -681,18 +442,16 @@ export async function ahb(env: Env): Promise<void> {
     jWatcherInstance = await setupBrowserVMWatcher(env, browserVM);
     console.log('✅ j-watcher subscribed to BrowserVM events');
 
-    // Push Frame 0.5: Entities created but not yet funded
-    await pushSnapshot(env, 'Entities Created: Alice, Hub, Bob', {
-      title: 'Three Entities Deployed',
-      what: 'Alice, Hub, and Bob entities are now registered in the J-Machine. They appear in the 3D visualization but have no reserves yet (grey spheres).',
-      why: 'Before entities can transact, they must be registered in the jurisdiction. This establishes their identity and governance structure.',
-      tradfiParallel: 'Like banks registering with the Federal Reserve before opening for business.',
-      keyMetrics: [
-        'Entities: 3 (Alice, Hub, Bob)',
-        'Reserves: All $0 (grey - unfunded)',
-        'Accounts: None opened yet',
-      ]
-    }, { expectedSolvency: 0n }); // No tokens minted yet
+    // Frame 0.5: Entities created but not yet funded
+    snap(env, 'Three Entities Deployed', {
+      description: 'Entities Created: Alice, Hub, Bob',
+      what: 'Alice, Hub, and Bob entities are now registered in the J-Machine.',
+      why: 'Before entities can transact, they must be registered in the jurisdiction.',
+      tradfiParallel: 'Like banks registering with the Federal Reserve.',
+      keyMetrics: ['Entities: 3', 'Reserves: $0', 'Accounts: None'],
+      expectedSolvency: 0n,
+    });
+    await process(env);
 
     // ============================================================================
     // STEP 1: Initial State - Hub funded with $10M USDC via REAL BrowserVM tx
@@ -716,24 +475,20 @@ export async function ahb(env: Env): Promise<void> {
     }
     console.log(`✅ ASSERT Frame 1: Hub reserve = $${hubReserve1 / 10n**18n}M ✓`);
 
-    await pushSnapshot(env, 'Initial State: Hub Funded', {
-      title: 'Initial Liquidity Provision',
-      what: 'Hub entity receives $10M USDC reserve balance on Depository.sol (on-chain via BrowserVM)',
-      why: 'Reserve balances are the source of liquidity for off-chain bilateral accounts. Think of this as the hub depositing cash into its custody account.',
-      tradfiParallel: 'Like a correspondent bank depositing USD reserves at the Federal Reserve to enable wire transfers',
-      keyMetrics: [
-        'Hub Reserve: $10M USDC',
-        'Alice Reserve: $0 (grey - no funds)',
-        'Bob Reserve: $0 (grey - no funds)',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY }); // $10M minted to Hub
-
     // ============================================================================
     // STEP 2-4: Hub R2R Batch (Alice + Bob fundings)
     // ============================================================================
     console.log('\n🔄 FRAME 2: Hub creating R2R batch (Alice + Bob)');
 
     // Hub creates TWO R2R operations in jBatch
+    snap(env, 'Initial Liquidity Provision', {
+      description: 'Initial State: Hub Funded',
+      what: 'Hub receives $10M USDC reserve on Depository.sol',
+      why: 'Reserves are the source of liquidity for off-chain accounts.',
+      tradfiParallel: 'Like a bank depositing USD reserves at the Federal Reserve.',
+      keyMetrics: ['Hub: $10M', 'Alice: $0', 'Bob: $0'],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
     await process(env, [{
       entityId: hub.id,
       signerId: 's2',

@@ -54,7 +54,7 @@ export async function grid(env: Env): Promise<void> {
   console.log('🔲 GRID SCALABILITY SCENARIO (2×2×2 = 8 nodes)\n');
   console.log('Demonstrating: Broadcast bottleneck → Hub-spoke scaling\n');
 
-  env.disableAutoSnapshots = true;
+  env.scenarioMode = true; // Deterministic time control
 
   // ============================================================================
   // SETUP: BrowserVM + J-Machine + Jurisdiction
@@ -322,7 +322,7 @@ export async function grid(env: Env): Promise<void> {
   console.log('🎯 Key insight: Hubs aren\'t centralization - they\'re MATH');
   console.log('   O(n²) mesh → O(n) broadcast → O(1) hub-spoke\n');
 
-  env.disableAutoSnapshots = false;
+  env.scenarioMode = false;
 }
 
 // ===== CLI ENTRY POINT =====

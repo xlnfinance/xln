@@ -1136,13 +1136,17 @@ export interface Env {
   // Frame display duration hint (for time-travel visualization)
   frameDisplayMs?: number; // How long to display this frame (default: 100ms)
 
-  // Pending subtitle for next snapshot (set before process(), consumed by captureSnapshot)
-  pendingSubtitle?: {
-    title: string;           // Technical summary (e.g., "Reserve-to-Reserve Transfer")
-    what: string;            // What's happening
-    why: string;             // Why it matters
-    tradfiParallel: string;  // Traditional finance equivalent
-    keyMetrics?: string[];   // Bullet points of key numbers
+  // Snapshot extras for scenarios (set before process(), consumed by captureSnapshot)
+  extra?: {
+    subtitle?: {
+      title: string;
+      what?: string;
+      why?: string;
+      tradfiParallel?: string;
+      keyMetrics?: string[];
+    };
+    expectedSolvency?: bigint;
+    description?: string;
   };
 
   // E→E message queue (always spans ticks - no same-tick cascade)

@@ -179,154 +179,25 @@ echo "${CYAN}                          SETUP FILES${NC}"
 echo "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-# STT Server
-if [ -f ~/xln/ai/stt-server.py ]; then
-    echo "${GREEN}✓ stt-server.py exists (not overwriting)${NC}"
-else
-    echo "${YELLOW}→ Creating stt-server.py...${NC}"
-    cat > ~/xln/ai/stt-server.py << 'EOFPYTHON'
-#!/usr/bin/env python3
-"""XLN STT Server - MLX Whisper
-Config: ~/.xln-voice-config
-"""
-import os
-import sys
-import signal
-import atexit
-from flask import Flask, request, jsonify
-import mlx_whisper
-from threading import Lock
+# Verify required files exist (source of truth is the actual files, not this installer)
+MISSING_FILES=()
+[ ! -f ~/xln/ai/stt-server.py ] && MISSING_FILES+=("stt-server.py")
+[ ! -f ~/xln/ai/vr-continuous ] && MISSING_FILES+=("vr-continuous")
 
-app = Flask(__name__)
-
-CONFIG_PATH = os.path.expanduser("~/.xln-voice-config")
-PIDFILE = "/tmp/stt-server.pid"
-
-MODELS = {
-    "tiny": "mlx-community/whisper-tiny",
-    "medium": "mlx-community/whisper-medium-mlx",
-    "large-v3": "mlx-community/whisper-large-v3-mlx",
-}
-
-def load_config():
-    config = {"model": "large-v3"}
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH) as f:
-            for line in f:
-                line = line.strip()
-                if '=' in line and not line.startswith('#'):
-                    key, value = line.split('=', 1)
-                    config[key.lower().strip()] = value.strip()
-    return config
-
-config = load_config()
-MODEL_NAME = config.get("model", "large-v3")
-MODEL_PATH = MODELS.get(MODEL_NAME, MODELS["large-v3"])
-
-inference_lock = Lock()
-
-def cleanup():
-    if os.path.exists(PIDFILE):
-        os.remove(PIDFILE)
-
-def signal_handler(sig, frame):
-    cleanup()
-    sys.exit(0)
-
-atexit.register(cleanup)
-signal.signal(signal.SIGTERM, signal_handler)
-signal.signal(signal.SIGINT, signal_handler)
-
-with open(PIDFILE, 'w') as f:
-    f.write(str(os.getpid()))
-
-print(f"Model: {MODEL_NAME} -> {MODEL_PATH}")
-print(f"PID: {os.getpid()}")
-
-@app.route('/transcribe', methods=['POST'])
-def transcribe():
-    if 'file' not in request.files:
-        return jsonify({'error': 'No file provided'}), 400
-    audio_file = request.files['file']
-    task = request.form.get('task', 'transcribe')
-    temp_path = f"/tmp/whisper_upload_{os.getpid()}.wav"
-    audio_file.save(temp_path)
-    try:
-        with inference_lock:
-            result = mlx_whisper.transcribe(
-                temp_path, path_or_hf_repo=MODEL_PATH,
-                task=task, language=None, verbose=False, fp16=False
-            )
-        text = result.get("text", "").strip()
-        os.remove(temp_path)
-        return jsonify({'text': text, 'language': result.get('language', 'unknown'), 'task': task})
-    except Exception as e:
-        if os.path.exists(temp_path): os.remove(temp_path)
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/', methods=['GET'])
-def health():
-    return jsonify({'status': 'ok', 'engine': 'mlx-whisper', 'model': MODEL_NAME, 'model_path': MODEL_PATH})
-
-if __name__ == '__main__':
-    print(f"Starting server on http://0.0.0.0:5001")
-    app.run(host='0.0.0.0', port=5001, debug=False, threaded=True)
-EOFPYTHON
-    chmod +x ~/xln/ai/stt-server.py
-    echo "${GREEN}✓ Created stt-server.py${NC}"
+if [ ${#MISSING_FILES[@]} -gt 0 ]; then
+    echo "${RED}✗ Missing required files: ${MISSING_FILES[*]}${NC}"
+    echo "  These files should exist in ~/xln/ai/"
+    echo "  Clone the xln repo or restore from backup."
+    exit 1
 fi
 
-# vr-continuous
-if [ -f ~/xln/ai/vr-continuous ]; then
-    echo "${GREEN}✓ vr-continuous exists (not overwriting)${NC}"
-else
-    echo "${YELLOW}→ Creating vr-continuous...${NC}"
-    cat > ~/xln/ai/vr-continuous << 'EOFSCRIPT'
-#!/bin/bash
-export PATH="/opt/homebrew/bin:/Users/$(whoami)/Library/Python/3.9/bin:/usr/bin:$PATH"
-export LANG=en_US.UTF-8
+echo "${GREEN}✓ stt-server.py${NC}"
+echo "${GREEN}✓ vr-continuous${NC}"
+chmod +x ~/xln/ai/stt-server.py ~/xln/ai/vr-continuous
 
-LOG="/tmp/vr-debug.log"
-echo "=== $(date '+%H:%M:%S') ===" >> "$LOG"
-
-LANG_ARG="${1:-auto}"
-AUDIO=~/records/$(date +%Y-%m-%d)/$(date +%H-%M-%S).wav
-mkdir -p $(dirname "$AUDIO")
-
-trap 'kill -INT $(jobs -p) 2>/dev/null' TERM
-rec "$AUDIO" rate 16k channels 1 2>/dev/null &
-wait $! 2>/dev/null
-sleep 0.3
-
-[ ! -s "$AUDIO" ] && exit 2
-
-START=$(python3 -c "import time; print(int(time.time()*1000))")
-RES=$(curl -sf --max-time 30 http://localhost:5001/transcribe -F "file=@$AUDIO" -F "task=$([ "$LANG_ARG" = "translate-en" ] && echo translate || echo transcribe)" 2>&1) || exit 4
-TEXT=$(echo "$RES" | python3 -c "import sys,json; print(json.load(sys.stdin).get('text',''))" 2>/dev/null)
-[ -z "$TEXT" ] && exit 3
-
-MS=$(( $(python3 -c "import time; print(int(time.time()*1000))") - START ))
-echo "[$MS ms] $TEXT" >> "$LOG"
-
-printf "%s" "$TEXT" | pbcopy
-for i in {1..20}; do [ "$(pbpaste)" = "$TEXT" ] && break; sleep 0.01; done
-
-ACTIVE_APP=$(osascript -e 'tell application "System Events" to get name of first process whose frontmost is true' 2>/dev/null)
-if [[ "$ACTIVE_APP" =~ (ghostty|iTerm|Terminal|Warp|Alacritty|kitty) ]]; then
-    osascript -e 'tell application "System Events" to keystroke "v" using command down' 2>/dev/null
-else
-    ESCAPED=$(printf "%s" "$TEXT" | sed 's/\\/\\\\/g; s/"/\\"/g')
-    osascript -e "tell application \"System Events\" to keystroke \"$ESCAPED\"" 2>/dev/null
-fi
-echo "$MS"
-EOFSCRIPT
-    chmod +x ~/xln/ai/vr-continuous
-    echo "${GREEN}✓ Created vr-continuous${NC}"
-fi
-
-# Hammerspoon
+# Hammerspoon config (only file we create, since it lives outside repo)
 if [ "$HS_CONFIGURED" = true ]; then
-    echo "${GREEN}✓ Hammerspoon config exists (not overwriting)${NC}"
+    echo "${GREEN}✓ Hammerspoon config exists${NC}"
 else
     echo "${YELLOW}→ Creating Hammerspoon config...${NC}"
     mkdir -p ~/.hammerspoon
@@ -343,6 +214,7 @@ function startRecording(lang)
         local ms = out and tonumber(out:match("%d+")) or 0
         if code == 0 then hs.alert.show("✅ " .. ms .. "ms", 1)
         elseif code == 4 then hs.alert.show("❌ Server down", 2)
+        elseif code == 5 then hs.alert.show("⏳ Busy", 1)
         else hs.alert.show("❌ Error " .. code, 2) end
         recording, currentTask = false, nil
     end, {lang})
@@ -364,6 +236,11 @@ hs.task.new("/usr/bin/pgrep", function(code)
         hs.task.new("/usr/bin/env", nil, {"bash", "-c", "python3 ~/xln/ai/stt-server.py > /tmp/stt-server.log 2>&1"}):start()
     end
 end, {"-f", "stt-server.py"}):start()
+
+-- Kill server on Hammerspoon quit/reload
+hs.shutdownCallback = function()
+    os.execute("pkill -f stt-server.py")
+end
 
 hs.alert.show("🎤 ⌘, / ⌘.", 2)
 EOFLUA

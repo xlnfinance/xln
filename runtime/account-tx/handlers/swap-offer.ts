@@ -29,7 +29,11 @@ export async function handleSwapOffer(
     accountMachine.swapOffers = new Map();
   }
 
-  // 1. Validate offerId uniqueness
+  // 1. Validate offerId format and uniqueness
+  // offerId must not contain colons - they're used as delimiters in namespaced IDs
+  if (offerId.includes(':')) {
+    return { success: false, error: `Invalid offerId: colons not allowed (got ${offerId})`, events };
+  }
   if (accountMachine.swapOffers.has(offerId)) {
     return { success: false, error: `Offer ${offerId} already exists`, events };
   }

@@ -227,16 +227,22 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
   };
 };
 
-export const captureSnapshot = (
+export const captureSnapshot = async (
   env: Env,
   envHistory: EnvSnapshot[],
   db: any,
   runtimeInput: RuntimeInput,
   runtimeOutputs: EntityInput[],
   description: string,
-): void => {
+): Promise<void> => {
   // Snapshots ALWAYS happen - they're essential for time-travel debugging
   // Use env.frameDisplayMs to hint how long to display important frames
+
+  // Solvency check if set (from scenarios)
+  if (env.extra?.expectedSolvency !== undefined) {
+    const { checkSolvency } = await import('./scenarios/solvency-check');
+    checkSolvency(env, env.extra.expectedSolvency, `Frame ${envHistory.length}`);
+  }
 
   const gossipProfiles = env.gossip?.getProfiles
     ? env.gossip.getProfiles().map((profile: Profile) => {
@@ -253,14 +259,34 @@ export const captureSnapshot = (
       })
     : [];
 
-  // Clone jReplicas (J-layer state) + SYNC reserves from eReplicas for time travel
+  // Capture fresh stateRoot from BrowserVM for time-travel (if available)
+  let freshStateRoot: Uint8Array | null = null;
+  if (env.jReplicas) {
+    try {
+      const { getBrowserVMInstance } = await import('./evm');
+      const browserVM = getBrowserVMInstance();
+      if (browserVM?.captureStateRoot) {
+        freshStateRoot = await browserVM.captureStateRoot();
+        // Update live jReplicas so next snapshot has correct base
+        for (const [, jReplica] of env.jReplicas.entries()) {
+          jReplica.stateRoot = freshStateRoot;
+        }
+      }
+    } catch {
+      // Silent fail - stateRoot capture is optional
+    }
+  }
+
+  // Clone jReplicas (J-layer state) + SYNC reserves/collaterals from eReplicas for time travel
   const jReplicas: JReplica[] = env.jReplicas
     ? Array.from(env.jReplicas.values()).map(jr => {
         // Sync reserves from eReplicas into JReplica snapshot
         const reserves = new Map<string, Map<number, bigint>>();
         const registeredEntities = new Map<string, { name: string; quorum: string[]; threshold: number }>();
+        // Collaterals: channelKey → tokenId → { collateral, ondelta }
+        const collaterals = new Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>();
 
-        // Aggregate reserves from all entity replicas
+        // Aggregate reserves and collaterals from all entity replicas
         for (const [key, replica] of env.eReplicas.entries()) {
           const entityId = key.split(':')[0];
           if (replica.state?.reserves) {
@@ -279,6 +305,32 @@ export const captureSnapshot = (
               reserves.set(entityId, tokenMap);
             }
           }
+
+          // Extract collaterals from bilateral accounts (only for LEFT entity to avoid duplicates)
+          if (replica.state?.accounts) {
+            for (const [counterpartyId, account] of replica.state.accounts.entries()) {
+              // Only capture from LEFT entity (smaller ID) to avoid duplicates
+              if (entityId < counterpartyId && account.deltas) {
+                // Create channel key: LEFT-RIGHT (canonical ordering)
+                const channelKey = `${entityId.slice(-4)}-${counterpartyId.slice(-4)}`;
+                const tokenMap = new Map<number, { collateral: bigint; ondelta: bigint }>();
+
+                for (const [tokenId, delta] of account.deltas.entries()) {
+                  if (delta.collateral > 0n || delta.ondelta !== 0n) {
+                    tokenMap.set(Number(tokenId), {
+                      collateral: delta.collateral,
+                      ondelta: delta.ondelta,
+                    });
+                  }
+                }
+
+                if (tokenMap.size > 0) {
+                  collaterals.set(channelKey, tokenMap);
+                }
+              }
+            }
+          }
+
           // Add entity to registeredEntities
           if (!registeredEntities.has(entityId)) {
             registeredEntities.set(entityId, {
@@ -292,13 +344,14 @@ export const captureSnapshot = (
         return {
           name: jr.name,
           blockNumber: jr.blockNumber,
-          stateRoot: new Uint8Array(jr.stateRoot),
+          stateRoot: freshStateRoot ? new Uint8Array(freshStateRoot) : new Uint8Array(jr.stateRoot),
           mempool: [...jr.mempool],
           blockDelayMs: jr.blockDelayMs || 300,
           lastBlockTimestamp: jr.lastBlockTimestamp || 0,
           position: { ...jr.position },
           contracts: jr.contracts ? { ...jr.contracts } : undefined,
           reserves,
+          collaterals,  // Collateral state from bilateral accounts
           registeredEntities,
         };
       })
@@ -335,18 +388,16 @@ export const captureSnapshot = (
       ...(output.precommits && { precommits: new Map(output.precommits) }),
       ...(output.proposedFrame && { proposedFrame: output.proposedFrame }),
     })),
-    description,
+    description: env.extra?.description || description,
     gossip: { profiles: gossipProfiles },
     logs: frameLogs,
-    // Display duration hint for time-travel visualization (consumed and cleared)
     ...(env.frameDisplayMs && { displayMs: env.frameDisplayMs }),
-    // Educational subtitle (consumed and cleared)
-    ...(env.pendingSubtitle && { subtitle: { ...env.pendingSubtitle } }),
+    ...(env.extra?.subtitle && { subtitle: { ...env.extra.subtitle } }),
   };
 
-  // Clear consumed hints after snapshot
+  // Clear consumed extras
   env.frameDisplayMs = undefined;
-  env.pendingSubtitle = undefined;
+  env.extra = undefined;
 
   envHistory.push(snapshot);
 

@@ -4,6 +4,14 @@
  * Limit order book using SoA (Struct of Arrays) for performance.
  * All functions are pure - state is passed in, new state returned.
  * Designed for integration into RJEA flow.
+ *
+ * TODO(snapshot-perf): TypedArray serialization degrades after JSON round-trip
+ * Current: Int32Array/Uint32Array serialize to number[] via JSON.stringify
+ * Impact: After snapshot restore, arrays become regular JS arrays (slower iteration)
+ * Fix: Update snapshot-coder.ts to detect and restore TypedArray types:
+ *   - Serialize: { _type: 'Int32Array', data: [...] }
+ *   - Deserialize: new Int32Array(obj.data)
+ * Priority: Medium (functional correctness preserved, only perf affected)
  */
 
 // ============================================================================
@@ -80,7 +88,9 @@ export interface BookState {
 
 const EMPTY = -1;
 const BITWORD = 32;
-const MAX_QTY = 1_000_000_000_000;  // 10^12 allows up to 1000 tokens at gwei-lot scale
+// Uint32 max = 4,294,967,295 (~4.3 billion)
+// With LOT_SCALE = 10^12, this allows ~4294 ETH per order
+const MAX_QTY = 0xFFFFFFFF;  // Uint32 max - matches storage type
 const PRIME = 0x1_0000_01n;
 
 // ============================================================================
@@ -362,8 +372,10 @@ export function applyCommand(
       // Self-trade prevention
       if (makerOwnerIdx === takerOwnerIdx) {
         if (stpPolicy === 1) {
+          // Cancel taker: return 0 to break outer matching loop
+          // (returning remaining would cause infinite loop since maker isn't modified)
           events.push({ type: 'REJECT', orderId: takerOrderId, ownerId: takerOwnerId, reason: 'STP cancel taker' });
-          return remaining;
+          return 0;
         }
         if (stpPolicy === 2) {
           // Reduce maker and skip the self-cross qty
@@ -455,38 +467,61 @@ export function applyCommand(
       }
     }
 
-    // For FOK: pre-check if we CAN fill entire qty (dry run)
-    if (tif === 2) {
-      let simRemaining = qtyLots;
-      if (side === 0) {
-        let simBestAsk = m.bestAskIdx;
-        while (simRemaining > 0 && simBestAsk !== EMPTY && simBestAsk <= levelIdx) {
-          let headIdx = m.levelHeadAsk[simBestAsk];
-          while (headIdx !== EMPTY && simRemaining > 0) {
-            const makerQty = m.orderQtyLots[headIdx];
-            simRemaining -= Math.min(makerQty, simRemaining);
+    // Dry-run simulation to check FOK and minFillRatio BEFORE mutating state
+    // This prevents partial fills that would need rollback
+    let simRemaining = qtyLots;
+    if (side === 0) {
+      let simBestAsk = m.bestAskIdx;
+      while (simRemaining > 0 && simBestAsk !== EMPTY && simBestAsk <= levelIdx) {
+        let headIdx = m.levelHeadAsk[simBestAsk];
+        while (headIdx !== EMPTY && simRemaining > 0) {
+          // Skip self-trades in simulation (STP would prevent them)
+          if (stpPolicy > 0 && m.orderOwnerIdx[headIdx] === ownerIdx) {
             headIdx = m.orderNext[headIdx];
+            continue;
           }
-          if (simRemaining > 0) {
-            simBestAsk = findNextNonEmpty(m.bitmapAsk, levels, simBestAsk + 1);
-          }
+          const makerQty = m.orderQtyLots[headIdx];
+          simRemaining -= Math.min(makerQty, simRemaining);
+          headIdx = m.orderNext[headIdx];
         }
-      } else {
-        let simBestBid = m.bestBidIdx;
-        while (simRemaining > 0 && simBestBid !== EMPTY && simBestBid >= levelIdx) {
-          let headIdx = m.levelHeadBid[simBestBid];
-          while (headIdx !== EMPTY && simRemaining > 0) {
-            const makerQty = m.orderQtyLots[headIdx];
-            simRemaining -= Math.min(makerQty, simRemaining);
-            headIdx = m.orderNext[headIdx];
-          }
-          if (simRemaining > 0) {
-            simBestBid = findPrevNonEmpty(m.bitmapBid, simBestBid - 1);
-          }
+        if (simRemaining > 0) {
+          simBestAsk = findNextNonEmpty(m.bitmapAsk, levels, simBestAsk + 1);
         }
       }
-      if (simRemaining > 0) {
-        events.push({ type: 'REJECT', orderId, ownerId, reason: 'FOK cannot fill entirely' });
+    } else {
+      let simBestBid = m.bestBidIdx;
+      while (simRemaining > 0 && simBestBid !== EMPTY && simBestBid >= levelIdx) {
+        let headIdx = m.levelHeadBid[simBestBid];
+        while (headIdx !== EMPTY && simRemaining > 0) {
+          // Skip self-trades in simulation (STP would prevent them)
+          if (stpPolicy > 0 && m.orderOwnerIdx[headIdx] === ownerIdx) {
+            headIdx = m.orderNext[headIdx];
+            continue;
+          }
+          const makerQty = m.orderQtyLots[headIdx];
+          simRemaining -= Math.min(makerQty, simRemaining);
+          headIdx = m.orderNext[headIdx];
+        }
+        if (simRemaining > 0) {
+          simBestBid = findPrevNonEmpty(m.bitmapBid, simBestBid - 1);
+        }
+      }
+    }
+
+    // Check FOK constraint
+    if (tif === 2 && simRemaining > 0) {
+      events.push({ type: 'REJECT', orderId, ownerId, reason: 'FOK cannot fill entirely' });
+      return { state, events };
+    }
+
+    // Check minFillRatio constraint BEFORE mutating state
+    // For IOC/FOK orders, reject if can't fill immediately
+    // For GTC orders, minFillRatio is enforced at swap_resolve time (allows resting on book)
+    if (minFillRatio > 0 && (tif === 1 || tif === 2)) {
+      const simFilledQty = qtyLots - simRemaining;
+      const simFillRatio = Math.floor((simFilledQty / qtyLots) * MAX_FILL_RATIO);
+      if (simFillRatio < minFillRatio) {
+        events.push({ type: 'REJECT', orderId, ownerId, reason: `minFillRatio not met: ${simFillRatio} < ${minFillRatio} (pre-check)` });
         return { state, events };
       }
     }
@@ -510,18 +545,9 @@ export function applyCommand(
       }
     }
 
-    // Check minFillRatio (applies to all TIFs)
-    // minFillRatio uses uint16 scale (0-65535) matching swap protocol
+    // minFillRatio already checked in pre-flight simulation above
+    // No post-check needed - state only mutated if pre-check passed
     const filledQty = qtyLots - remaining;
-    const actualFillRatio = Math.floor((filledQty / qtyLots) * MAX_FILL_RATIO);
-    if (minFillRatio > 0 && actualFillRatio < minFillRatio) {
-      // Note: For a pure implementation, we'd need to rollback the fills
-      // For now, reject early in a future refactor that does dry-run first
-      // This check is after the fact - in production would need transaction semantics
-      events.push({ type: 'REJECT', orderId, ownerId, reason: `minFillRatio not met: ${actualFillRatio} < ${minFillRatio} (uint16 scale)` });
-      // TODO: Full rollback would require transactional matching
-      return { state, events };
-    }
 
     // Handle remaining qty based on TIF
     if (remaining > 0) {

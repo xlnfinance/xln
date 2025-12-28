@@ -82,7 +82,7 @@ def transcribe():
                 task=task,
                 language=None,
                 verbose=False,
-                fp16=False
+                fp16=True
             )
 
         text = result.get("text", "").strip()

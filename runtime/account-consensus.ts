@@ -383,6 +383,9 @@ export async function handleAccountInput(
         // BEFORE commit - clonedForValidation
         console.log(`📊 BEFORE COMMIT - clonedForValidation.deltas:`, Array.from(accountMachine.clonedForValidation.deltas.entries()).map(([tokenId, delta]) => ({
           tokenId,
+          collateral: delta.collateral?.toString(),
+          ondelta: delta.ondelta?.toString(),
+          offdelta: delta.offdelta?.toString(),
           leftCreditLimit: delta.leftCreditLimit?.toString(),
           rightCreditLimit: delta.rightCreditLimit?.toString(),
         })));
@@ -415,6 +418,8 @@ export async function handleAccountInput(
           Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
             tokenId,
             collateral: delta.collateral?.toString(),
+            ondelta: delta.ondelta?.toString(),
+            offdelta: delta.offdelta?.toString(),
             leftCreditLimit: delta.leftCreditLimit?.toString(),
             rightCreditLimit: delta.rightCreditLimit?.toString(),
           })));

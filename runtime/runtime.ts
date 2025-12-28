@@ -781,6 +781,8 @@ const applyRuntimeInput = async (
       await captureSnapshot(env, env.history, db, processedInput, entityOutbox, inputDescription);
     } else {
       console.log(`⚪ SKIP-FRAME: No runtimeTxs, entityInputs, or outputs - not creating empty frame`);
+      // Clear env.extra even when skipping frame to prevent stale solvency expectations
+      env.extra = undefined;
     }
 
     // Notify Svelte about environment changes
@@ -846,8 +848,8 @@ const applyRuntimeInput = async (
     // APPLY-SERVER-INPUT-FINAL-RETURN removed
     return { entityOutbox, mergedInputs };
   } catch (error) {
-    log.error(`❌ Error processing runtime input:`, error);
-    return { entityOutbox: [], mergedInputs: [] };
+    console.error(`❌ CRITICAL: applyRuntimeInput failed!`, error);
+    throw error; // Don't swallow - fail fast and loud
   }
 };
 
@@ -1530,12 +1532,18 @@ export const process = async (
 
       const result = await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: allInputs });
 
+      // DEBUG: Log what applyRuntimeInput returned
+      console.log(`🔍 PROCESS-DEBUG: applyRuntimeInput returned entityOutbox.length=${result.entityOutbox.length}`);
+
       // Store outputs for NEXT tick
       env.pendingOutputs = result.entityOutbox;
 
       if (result.entityOutbox.length > 0) {
         console.log(`📤 TICK: ${result.entityOutbox.length} outputs queued for next tick → [${result.entityOutbox.map(o => o.entityId.slice(-4)).join(',')}]`);
       }
+    } else {
+      // No inputs to process - clear env.extra to prevent stale solvency expectations
+      env.extra = undefined;
     }
 
     // === J-MACHINE BLOCK PROCESSING ===
