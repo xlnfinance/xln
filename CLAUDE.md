@@ -89,4 +89,3 @@ Auto-rebuild: `bun run dev`. Time-travel: read from `env` not live stores. Bilat
 - localhost:8080 only entry point
 - lowercase .md filenames (next.md, readme.md)
 - "xln" lowercase always, never "XLN"
-- Completed Dec 2024: HTLC support, lock-ahb scenario, orderbook engine, swap implementation (offer/resolve/cancel + swapBook/lockBook)
