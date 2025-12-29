@@ -15,7 +15,7 @@ import { createAddressFromPrivateKey, hexToBytes, createAccount, bytesToHex } fr
 import type { Address } from '@ethereumjs/util';
 import { Common, Hardfork, Chain } from '@ethereumjs/common';
 import { ethers } from 'ethers';
-import { safeStringify } from '$lib/utils/safeStringify';
+import { safeStringify } from './serialization-utils.js';
 
 /** EVM event emitted from the BrowserVM */
 export interface EVMEvent {
@@ -40,6 +40,7 @@ export class BrowserVMProvider {
   private entityProviderArtifact: any = null;
   private depositoryInterface: ethers.Interface | null = null;
   private entityProviderInterface: ethers.Interface | null = null;
+  private accountInterface: ethers.Interface | null = null;
   private initialized = false;
   private blockHeight = 0; // Track J-Machine block height
   private blockHash = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Current block hash
@@ -94,7 +95,8 @@ export class BrowserVMProvider {
     // Create ethers Interfaces for ABI encoding
     this.depositoryInterface = new ethers.Interface(this.depositoryArtifact.abi);
     this.entityProviderInterface = new ethers.Interface(this.entityProviderArtifact.abi);
-    console.log('[BrowserVM] Loaded all contract artifacts');
+    this.accountInterface = new ethers.Interface(this.accountArtifact.abi);
+    console.log('[BrowserVM] Loaded all contract artifacts (including Account library)');
 
     // Create VM with evmOpts to disable contract size limit
     this.vm = await createVM({
@@ -520,12 +522,13 @@ export class BrowserVMProvider {
     }, { common: this.common }).sign(this.deployerPrivKey);
 
     const result = await runTx(this.vm, { tx });
-    this.incrementBlock(); // Transaction mined successfully
+
     if (result.execResult.exceptionError) {
       console.error(`[BrowserVM] enforceDebts failed:`, result.execResult.exceptionError);
       return 0n;
     }
-    this.incrementBlock();
+
+    this.incrementBlock(); // Transaction mined successfully
 
     try {
       const decoded = this.depositoryInterface.decodeFunctionResult('enforceDebts', result.execResult.returnValue);
@@ -537,57 +540,48 @@ export class BrowserVMProvider {
   }
 
   /** Process a full batch - executes R2R, R2C, and settlements */
-  async processBatch(entityId: string, batch: {
-    reserveToReserve?: Array<{toEntity: string, tokenId: number, amount: bigint}>,
-    reserveToCollateral?: Array<{counterparty: string, tokenId: number, amount: bigint}>,
-    settlements?: Array<{leftEntity: string, rightEntity: string, diffs: any[]}>,
-  }): Promise<EVMEvent[]> {
-    if (!this.depositoryAddress) throw new Error('Depository not deployed');
-
-    const allEvents: EVMEvent[] = [];
-
-    // Execute R2R (Reserve to Reserve) transfers OR mints
-    if (batch.reserveToReserve) {
-      for (const r2r of batch.reserveToReserve) {
-        // Use "toEntity" field (converted from receivingEntity by j-batch.ts)
-        console.log(`[BrowserVM] R2R: entityId=${entityId?.slice(0,10)}, toEntity=${r2r.toEntity?.slice(0,10)}, token=${r2r.tokenId}, amount=${r2r.amount}`);
-
-        // If toEntity = entityId, this is a MINT (no sender)
-        // Otherwise it's a transfer FROM entityId TO toEntity
-        if (r2r.toEntity === entityId) {
-          // MINT: Call debugFundReserves (mints from Depository)
-          console.log(`[BrowserVM] MINT detected (toEntity === entityId)`);
-          const events = await this.debugFundReserves(r2r.toEntity, r2r.tokenId, r2r.amount);
-          allEvents.push(...events);
-        } else {
-          // R2R: Transfer from entityId to toEntity
-          console.log(`[BrowserVM] R2R transfer`);
-          const events = await this.reserveToReserve(entityId, r2r.toEntity, r2r.tokenId, r2r.amount);
-          allEvents.push(...events);
-        }
-      }
+  /** Process batch - calls Depository.processBatch() directly (no TS logic duplication) */
+  async processBatch(entityId: string, batch: any): Promise<EVMEvent[]> {
+    if (!this.depositoryAddress || !this.depositoryInterface) {
+      throw new Error('Depository not deployed');
     }
 
-    // Execute R2C (Reserve to Collateral) deposits
-    if (batch.reserveToCollateral) {
-      for (const r2c of batch.reserveToCollateral) {
-        const events = await this.reserveToCollateralDirect(entityId, r2c.counterparty, r2c.tokenId, r2c.amount);
-        allEvents.push(...events);
-      }
+    console.log(`[BrowserVM] processBatch: entity ${entityId.slice(0,10)}, calling contract...`);
+
+    // Call Depository.processBatch() - ALL logic in Solidity (single source of truth)
+    const callData = this.depositoryInterface.encodeFunctionData('processBatch', [entityId, batch]);
+
+    const currentNonce = await this.getCurrentNonce();
+    const tx = createLegacyTx({
+      to: this.depositoryAddress,
+      gasLimit: 10000000n,
+      gasPrice: 10n,
+      data: hexToBytes(callData as `0x${string}`),
+      nonce: currentNonce,
+    }, { common: this.common }).sign(this.deployerPrivKey);
+
+    const result = await runTx(this.vm, { tx });
+
+    if (result.execResult.exceptionError) {
+      console.error('[BrowserVM] processBatch revert:', safeStringify(result.execResult.exceptionError));
+      console.error('  returnData:', bytesToHex(result.execResult.returnValue));
+      throw new Error(`Batch processing failed: ${result.execResult.exceptionError.error || 'revert'}`);
     }
 
-    // Execute settlements
-    if (batch.settlements) {
-      for (const settle of batch.settlements) {
-        const result = await this.settleWithInsurance(settle.leftEntity, settle.rightEntity, settle.diffs);
-        if (result.logs) {
-          allEvents.push(...result.logs);
-        }
-      }
-    }
+    this.incrementBlock();
 
-    console.log(`[BrowserVM] Batch processed for ${entityId.slice(0, 10)}...: ${allEvents.length} events`);
-    return allEvents;
+    // Log raw events before parsing
+    const rawLogs = result.execResult.logs || [];
+    console.log(`[BrowserVM] processBatch raw logs: ${rawLogs.length}`);
+    rawLogs.forEach((log: any, i: number) => {
+      console.log(`   Log ${i}: topics=${log[1]?.length || 0}, data=${log[2]?.length || 0} bytes`);
+    });
+
+    const events = this.emitEvents(rawLogs);
+    console.log(`[BrowserVM] ✅ Batch processed: ${events.length} events`);
+    events.forEach(e => console.log(`   - ${e.name}`));
+
+    return events;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -677,7 +671,6 @@ export class BrowserVMProvider {
       console.error('[BrowserVM] getAvailableInsurance failed:', result.execResult.exceptionError);
       return 0n;
     }
-    this.incrementBlock();
 
     try {
       const decoded = this.depositoryInterface.decodeFunctionResult('getAvailableInsurance', result.execResult.returnValue);
@@ -747,36 +740,50 @@ export class BrowserVMProvider {
     return { success: true, logs };
   }
 
-  /** Parse EVM logs into decoded events with block info for JBlock consensus */
+  /** Parse EVM logs into decoded events with block info for JBlock consensus.
+   *  Checks both Depository and Account library interfaces since library events
+   *  (like Account.AccountSettled) have different topic signatures.
+   */
   private parseLogs(logs: any[]): EVMEvent[] {
-    if (!this.depositoryInterface) return [];
+    // Collect all interfaces that can parse events
+    const interfaces = [
+      this.depositoryInterface,
+      this.accountInterface,
+    ].filter((iface): iface is ethers.Interface => iface !== null);
+
+    if (interfaces.length === 0) return [];
 
     const decoded: EVMEvent[] = [];
     for (const log of logs) {
-      try {
-        const topics = log[1].map((t: Uint8Array) => bytesToHex(t));
-        const data = bytesToHex(log[2]);
-        const parsed = this.depositoryInterface.parseLog({ topics, data });
-        if (parsed) {
-          decoded.push({
-            name: parsed.name,
-            args: Object.fromEntries(
-              parsed.fragment.inputs.map((input, i) => [input.name, parsed.args[i]])
-            ),
-            blockNumber: this.blockHeight,
-            blockHash: this.blockHash,
-            timestamp: Date.now(),
-          });
+      const topics = log[1].map((t: Uint8Array) => bytesToHex(t));
+      const data = bytesToHex(log[2]);
+
+      // Try each interface until one successfully parses the log
+      for (const iface of interfaces) {
+        try {
+          const parsed = iface.parseLog({ topics, data });
+          if (parsed) {
+            decoded.push({
+              name: parsed.name,
+              args: Object.fromEntries(
+                parsed.fragment.inputs.map((input, i) => [input.name, parsed.args[i]])
+              ),
+              blockNumber: this.blockHeight,
+              blockHash: this.blockHash,
+              timestamp: Date.now(),
+            });
+            break; // Found a match, move to next log
+          }
+        } catch {
+          // This interface can't parse this log, try next
         }
-      } catch {
-        // Skip unparseable logs
       }
     }
     return decoded;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
-  //  ENTITY PROVIDER STUBS - Used by JurisdictionPanel
+  //  ENTITY PROVIDER QUERIES - Real contract calls via BrowserVM
   // ═══════════════════════════════════════════════════════════════════════════
 
   /** Subscribe to all EVM events - j-watcher uses this for BrowserVM mode */
@@ -822,16 +829,57 @@ export class BrowserVMProvider {
     return events;
   }
 
-  /** Get next available entity number */
+  /** Get next available entity number from EntityProvider contract */
   async getNextEntityNumber(): Promise<number> {
-    // TODO: Read from EntityProvider contract when implemented
-    return 1;
+    if (!this.entityProviderAddress || !this.entityProviderInterface) {
+      throw new Error('EntityProvider not deployed');
+    }
+
+    // Read nextNumber public variable
+    const callData = this.entityProviderInterface.encodeFunctionData('nextNumber');
+
+    const result = await this.vm.evm.runCall({
+      to: this.entityProviderAddress,
+      data: hexToBytes(callData as `0x${string}`),
+    });
+
+    if (result.execResult.exceptionError) {
+      console.error(`[BrowserVM] getNextEntityNumber failed: ${result.execResult.exceptionError}`);
+      return 1;
+    }
+
+    const decoded = this.entityProviderInterface.decodeFunctionResult('nextNumber', result.execResult.returnValue);
+    return Number(decoded[0]);
   }
 
-  /** Get entity info by ID */
-  async getEntityInfo(entityId: string): Promise<{ exists: boolean; name?: string; quorum?: string[]; threshold?: number }> {
-    // TODO: Read from EntityProvider contract when implemented
-    return { exists: false };
+  /** Get entity info by ID from EntityProvider contract */
+  async getEntityInfo(entityId: string): Promise<{ exists: boolean; name?: string; currentBoardHash?: string; registrationBlock?: number }> {
+    if (!this.entityProviderAddress || !this.entityProviderInterface) {
+      throw new Error('EntityProvider not deployed');
+    }
+
+    // Use getEntityInfo view function
+    const callData = this.entityProviderInterface.encodeFunctionData('getEntityInfo', [entityId]);
+
+    const result = await this.vm.evm.runCall({
+      to: this.entityProviderAddress,
+      data: hexToBytes(callData as `0x${string}`),
+    });
+
+    if (result.execResult.exceptionError) {
+      console.error(`[BrowserVM] getEntityInfo failed: ${result.execResult.exceptionError}`);
+      return { exists: false };
+    }
+
+    // Decode: (bool exists, bytes32 currentBoardHash, bytes32 proposedBoardHash, uint256 registrationBlock, string name)
+    const decoded = this.entityProviderInterface.decodeFunctionResult('getEntityInfo', result.execResult.returnValue);
+
+    return {
+      exists: decoded[0] as boolean,
+      currentBoardHash: decoded[1] as string,
+      name: decoded[4] as string || undefined,
+      registrationBlock: Number(decoded[3]),
+    };
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -994,7 +1042,38 @@ export class BrowserVMProvider {
   hasSavedState(key: string = 'xln-evm-state'): boolean {
     return localStorage.getItem(key) !== null;
   }
-}
 
-// Singleton instance
-export const browserVMProvider = new BrowserVMProvider();
+  /** Register numbered entities via EntityProvider contract */
+  async registerNumberedEntitiesBatch(boardHashes: string[]): Promise<number[]> {
+    if (!this.entityProviderAddress || !this.entityProviderInterface) {
+      throw new Error('EntityProvider not deployed');
+    }
+
+    // Encode contract call
+    const callData = this.entityProviderInterface.encodeFunctionData('registerNumberedEntitiesBatch', [boardHashes]);
+    const currentNonce = await this.getCurrentNonce();
+
+    const tx = createLegacyTx({
+      to: this.entityProviderAddress,
+      gasLimit: 5000000n,
+      gasPrice: 10n,
+      data: hexToBytes(callData as `0x${string}`),
+      nonce: currentNonce,
+    }, { common: this.common }).sign(this.deployerPrivKey);
+
+    const result = await runTx(this.vm, { tx });
+    this.incrementBlock();
+
+    if (result.execResult.exceptionError) {
+      throw new Error(`registerNumberedEntitiesBatch failed: ${result.execResult.exceptionError}`);
+    }
+
+    // Decode return value - array of uint256 entity numbers
+    const decoded = this.entityProviderInterface.decodeFunctionResult('registerNumberedEntitiesBatch', result.execResult.returnValue);
+    const entityNumbers = (decoded[0] as bigint[]).map((n: bigint) => Number(n));
+
+    console.log(`[BrowserVM] registerNumberedEntitiesBatch: ${boardHashes.length} entities → [${entityNumbers.join(',')}]`);
+    return entityNumbers;
+  }
+
+}

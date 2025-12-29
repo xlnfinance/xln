@@ -4,7 +4,7 @@
  */
 
 import type { JurisdictionEVM, XlnomySnapshot } from '../types.js';
-import { BrowserVMProvider } from '../../frontend/src/lib/view/utils/browserVMProvider.js';
+import { BrowserVMProvider } from '../browservm.js';
 
 // Singleton across bundles via window global
 declare global {
@@ -40,14 +40,13 @@ export class BrowserEVM implements JurisdictionEVM {
   async getReserves(entityId: string, tokenId: number) { return this.provider.getReserves(entityId, tokenId); }
   async getCollateral(entity1: string, entity2: string, tokenId: number) { return this.provider.getCollateral(entity1, entity2, tokenId); }
   async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint) { return this.provider.reserveToReserve(from, to, tokenId, amount); }
-  async prefundAccount(entityId: string, counterpartyId: string, tokenId: number, amount: bigint) { return this.provider.prefundAccount(entityId, counterpartyId, tokenId, amount); }
-  async executeTx(tx: { to: string; data: string; gasLimit?: bigint }) { return this.provider.executeTx(tx); }
-  async executeBatch(entityId: string, batch: any) { return this.provider.executeBatch(entityId, batch); }
   async processBatch(entityId: string, batch: any) { return this.provider.processBatch(entityId, batch); }
 
   // Event subscription for j-watcher (proxied from BrowserVMProvider)
   onAny(callback: (event: any) => void): () => void { return this.provider.onAny(callback); }
   getBlockHash(): string { return this.provider.getBlockHash(); }
+  async registerNumberedEntitiesBatch(boardHashes: string[]): Promise<number[]> { return this.provider.registerNumberedEntitiesBatch(boardHashes); }
+  async getEntityInfo(entityId: string) { return this.provider.getEntityInfo(entityId); }
 
   // JurisdictionEVM interface
   async deployContract(bytecode: string, args?: any[]): Promise<string> { throw new Error('Not implemented'); }

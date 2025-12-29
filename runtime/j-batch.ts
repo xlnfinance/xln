@@ -48,7 +48,7 @@ export interface JBatch {
     }>;
   }>;
 
-  // Settlements (simplified R↔C operations via settle())
+  // Settlements - MUST match Solidity Settlement struct exactly
   settlements: Array<{
     leftEntity: string;
     rightEntity: string;
@@ -61,20 +61,23 @@ export interface JBatch {
     }>;
     forgiveDebtsInTokenIds: number[];
     insuranceRegs: Array<{
-      insured: string;      // Entity being covered
-      insurer: string;      // Entity providing coverage
+      insured: string;
+      insurer: string;
       tokenId: number;
-      limit: bigint;        // Max coverage amount
-      expiresAt: bigint;    // Block timestamp expiration
+      limit: bigint;
+      expiresAt: bigint;
     }>;
-    sig: string;            // Counterparty signature (empty for unsigned)
+    sig: string; // Signature (0x for testMode)
+    entityProvider: string; // EntityProvider address
+    hankoData: string; // Hanko signature data
+    nonce: number; // Settlement nonce
   }>;
 
   // Dispute/Cooperative proofs (DEPRECATED in current Depository.sol - empty arrays for now)
   cooperativeUpdate: never[];
   cooperativeDisputeProof: never[];
-  initialDisputeProof: never[];
-  finalDisputeProof: never[];
+  disputeStarts: never[];
+  disputeFinalizations: never[];
 
   // Flashloans (for atomic batch execution)
   flashloans: Array<{
@@ -102,16 +105,14 @@ export interface JBatchState {
  */
 export function createEmptyBatch(): JBatch {
   return {
-    reserveToExternalToken: [],
-    externalTokenToReserve: [],
+    flashloans: [],
     reserveToReserve: [],
     reserveToCollateral: [],
     settlements: [],
-    cooperativeUpdate: [],
-    cooperativeDisputeProof: [],
-    initialDisputeProof: [],
-    finalDisputeProof: [],
-    flashloans: [],
+    disputeStarts: [], // Match Solidity: InitialDisputeProof[]
+    disputeFinalizations: [], // Match Solidity: FinalDisputeProof[]
+    externalTokenToReserve: [],
+    reserveToExternalToken: [],
     hub_id: 0,
   };
 }
@@ -134,16 +135,14 @@ export function initJBatch(): JBatchState {
  */
 export function isBatchEmpty(batch: JBatch): boolean {
   return (
-    batch.reserveToExternalToken.length === 0 &&
-    batch.externalTokenToReserve.length === 0 &&
+    batch.flashloans.length === 0 &&
     batch.reserveToReserve.length === 0 &&
     batch.reserveToCollateral.length === 0 &&
     batch.settlements.length === 0 &&
-    batch.cooperativeUpdate.length === 0 &&
-    batch.cooperativeDisputeProof.length === 0 &&
-    batch.initialDisputeProof.length === 0 &&
-    batch.finalDisputeProof.length === 0 &&
-    batch.flashloans.length === 0
+    batch.disputeStarts.length === 0 &&
+    batch.disputeFinalizations.length === 0 &&
+    batch.externalTokenToReserve.length === 0 &&
+    batch.reserveToExternalToken.length === 0
   );
 }
 
@@ -210,7 +209,10 @@ export function batchAddSettlement(
   }>,
   forgiveDebtsInTokenIds: number[] = [],
   insuranceRegs: InsuranceReg[] = [],
-  sig: string = '0x'
+  sig: string = '0x',
+  entityProvider: string = '0x0000000000000000000000000000000000000000', // Default for testMode
+  hankoData: string = '0x', // Default for testMode
+  nonce: number = 0 // Default for testMode
 ): void {
   // Validate entities are in canonical order
   if (leftEntity >= rightEntity) {
@@ -251,6 +253,9 @@ export function batchAddSettlement(
       forgiveDebtsInTokenIds,
       insuranceRegs,
       sig,
+      entityProvider, // testMode default
+      hankoData, // testMode default
+      nonce, // testMode default
     });
   }
 
@@ -315,16 +320,14 @@ export function batchAddReserveToReserve(
  */
 export function getBatchSize(batch: JBatch): number {
   return (
-    batch.reserveToExternalToken.length +
-    batch.externalTokenToReserve.length +
+    batch.flashloans.length +
     batch.reserveToReserve.length +
     batch.reserveToCollateral.length +
     batch.settlements.length +
-    batch.cooperativeUpdate.length +
-    batch.cooperativeDisputeProof.length +
-    batch.initialDisputeProof.length +
-    batch.finalDisputeProof.length +
-    batch.flashloans.length
+    batch.disputeStarts.length +
+    batch.disputeFinalizations.length +
+    batch.externalTokenToReserve.length +
+    batch.reserveToExternalToken.length
   );
 }
 
@@ -363,37 +366,9 @@ export async function broadcastBatch(
     // BrowserVM path - direct in-browser execution
     if (browserVM) {
 
-      // Transform batch to BrowserVM format
-      console.log(`🔍 BATCH TRANSFORM: reserveToReserve array length: ${jBatchState.batch.reserveToReserve.length}`);
-      if (jBatchState.batch.reserveToReserve.length > 0) {
-        console.log(`🔍 BATCH TRANSFORM: first R2R:`, jBatchState.batch.reserveToReserve[0]);
-      }
-
-      const browserVMBatch = {
-        reserveToReserve: jBatchState.batch.reserveToReserve.map(r => {
-          console.log(`🔍 TRANSFORM R2R: receivingEntity=${r.receivingEntity?.slice(0,10)}, toEntity=${r.receivingEntity?.slice(0,10)}`);
-          return {
-            toEntity: r.receivingEntity,
-            tokenId: r.tokenId,
-            amount: r.amount,
-          };
-        }),
-        reserveToCollateral: jBatchState.batch.reserveToCollateral.flatMap(r =>
-          r.pairs.map(p => ({
-            counterparty: p.entity,
-            tokenId: r.tokenId,
-            amount: p.amount,
-          }))
-        ),
-        settlements: jBatchState.batch.settlements.map(s => ({
-          leftEntity: s.leftEntity,
-          rightEntity: s.rightEntity,
-          diffs: s.diffs,
-        })),
-      };
-
-      console.log(`🔍 BEFORE processBatch:`, browserVMBatch.reserveToReserve);
-      const events = await browserVM.processBatch(entityId, browserVMBatch);
+      // Pass batch directly to contract (no transformation - Solidity handles everything)
+      console.log(`📦 Calling Depository.processBatch() with full batch (${getBatchSize(jBatchState.batch)} ops)...`);
+      const events = await browserVM.processBatch(entityId, jBatchState.batch);
       console.log(`   ✅ BrowserVM: ${events.length} events`);
 
       // NOTE: j-events are queued in env.runtimeInput.entityInputs by j-watcher

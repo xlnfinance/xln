@@ -18,7 +18,7 @@ import { cloneEntityState, addMessage } from '../../state-helpers';
 export async function handleDepositCollateral(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'deposit_collateral' }>
-): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
+): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: any[] }> {
   const { counterpartyId, tokenId, amount } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
@@ -67,5 +67,24 @@ export async function handleDepositCollateral(
   console.log(`   Counterparty: ${counterpartyId.slice(-4)}`);
   console.log(`   Token: ${tokenId}, Amount: ${amount}`);
 
-  return { newState, outputs };
+  // Generate JTx output to broadcast batch to J-Machine
+  const { getBatchSize } = await import('../../j-batch');
+  const batchSize = getBatchSize(newState.jBatchState.batch);
+
+  const jOutputs = [{
+    jurisdictionName: entityState.config.jurisdiction?.name || 'default',
+    jTxs: [{
+      type: 'batch' as const,
+      entityId: entityState.entityId,
+      data: {
+        batch: newState.jBatchState.batch,
+        batchSize,
+      },
+      timestamp: Date.now(), // Will be overwritten by runtime with env.timestamp
+    }]
+  }];
+
+  console.log(`📤 [1/6] deposit_collateral: Generated jOutput (batch size: ${batchSize}, jurisdiction: ${jOutputs[0].jurisdictionName})`);
+
+  return { newState, outputs, jOutputs };
 }

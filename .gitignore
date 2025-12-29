@@ -87,3 +87,4 @@ ai/*.txt
 *.wav
 *.m4a
 ai/mlx_models/
+ai/.venv/

@@ -14,12 +14,11 @@
  * Each frame includes Fed-style subtitles explaining what/why/tradfi-parallel
  */
 
-import type { Env, EntityInput, EnvSnapshot, EntityReplica, Delta } from '../types';
+import type { Env, EntityInput, EntityReplica, Delta } from '../types';
 import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from '../evm';
-import { cloneEntityReplica } from '../state-helpers';
-import type { Profile } from '../gossip';
 import { BrowserEVM } from '../evms/browser-evm';
 import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
+import { snap, checkSolvency } from './helpers';
 
 // Lazy-loaded runtime functions to avoid circular dependency (runtime.ts imports this file)
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -47,6 +46,13 @@ const ONE_TOKEN = 10n ** DECIMALS;
 
 const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 
+// Jurisdiction name for AHB demo
+const AHB_JURISDICTION = 'AHB Demo';
+
+// NOTE: Manual J-Machine queuing functions REMOVED
+// Entities now output jOutputs via process() which auto-queue to J-Machine
+// This prevents duplicate queuing and duplicate execution
+
 type ReplicaEntry = [string, EntityReplica];
 
 function findReplica(env: Env, entityId: string): ReplicaEntry {
@@ -55,57 +61,6 @@ function findReplica(env: Env, entityId: string): ReplicaEntry {
     throw new Error(`AHB: Replica for entity ${entityId} not found`);
   }
   return entry as ReplicaEntry;
-}
-
-function cloneProfilesForSnapshot(env: Env): { profiles: Profile[] } | undefined {
-  if (!env.gossip || typeof env.gossip.getProfiles !== 'function') {
-    return undefined;
-  }
-
-  const profiles = env.gossip.getProfiles().map((profile: Profile): Profile => {
-    let clonedMetadata: Profile['metadata'] = undefined;
-    if (profile.metadata) {
-      clonedMetadata = { ...profile.metadata };
-      clonedMetadata.lastUpdated = clonedMetadata.lastUpdated ?? Date.now();
-      if (clonedMetadata.baseFee !== undefined) {
-        clonedMetadata.baseFee = BigInt(clonedMetadata.baseFee.toString());
-      }
-    }
-
-    const clonedAccounts = profile.accounts
-      ? profile.accounts.map((account) => {
-          const tokenCapacities = new Map<number, { inCapacity: bigint; outCapacity: bigint }>();
-          if (account.tokenCapacities) {
-            for (const [tokenId, capacities] of account.tokenCapacities.entries()) {
-              tokenCapacities.set(tokenId, {
-                inCapacity: capacities.inCapacity,
-                outCapacity: capacities.outCapacity,
-              });
-            }
-          }
-
-          return {
-            counterpartyId: account.counterpartyId,
-            tokenCapacities,
-          };
-        })
-      : [];
-
-    const profileClone: Profile = {
-      entityId: profile.entityId,
-      capabilities: [...profile.capabilities],
-      hubs: [...profile.hubs],
-      accounts: clonedAccounts,
-    };
-
-    if (clonedMetadata) {
-      profileClone.metadata = clonedMetadata;
-    }
-
-    return profileClone;
-  });
-
-  return { profiles };
 }
 
 // J-Watcher instance for BrowserVM event subscription
@@ -223,55 +178,6 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
   console.log('='.repeat(80) + '\n');
 }
 
-interface FrameSubtitle {
-  title: string;           // Short header (e.g., "Reserve-to-Reserve Transfer")
-  what: string;            // What's happening technically
-  why: string;             // Why this matters
-  tradfiParallel: string;  // Traditional finance equivalent
-  keyMetrics?: string[];   // Optional: bullet points of key numbers
-}
-
-let pushSnapshotCount = 0;
-
-// System solvency check - inline for self-contained testing
-function checkSolvency(env: Env, expected: bigint, label: string, optional: boolean = false): void {
-  let reserves = 0n;
-  let collateral = 0n;
-
-  console.log(`[SOLVENCY ${label}] Checking ${env.eReplicas.size} replicas...`);
-
-  for (const [replicaKey, replica] of env.eReplicas) {
-    let replicaReserves = 0n;
-    for (const [tokenKey, amount] of replica.state.reserves) {
-      replicaReserves += amount;
-      reserves += amount;
-    }
-    console.log(`  [${replicaKey.slice(0,20)}] reserves=${replicaReserves / 10n**18n}M`);
-
-    for (const [counterpartyId, account] of replica.state.accounts) {
-      if (replica.state.entityId < counterpartyId) {
-        for (const [, delta] of account.deltas) {
-          collateral += delta.collateral;
-        }
-      }
-    }
-  }
-
-  const total = reserves + collateral;
-  console.log(`[SOLVENCY ${label}] Total: reserves=${reserves / 10n**18n}M, collateral=${collateral / 10n**18n}M, sum=${total / 10n**18n}M`);
-
-  if (total !== expected) {
-    console.error(`❌ [${label}] SOLVENCY FAIL: ${total} !== ${expected}`);
-    if (!optional) {
-      throw new Error(`SOLVENCY VIOLATION at "${label}": got ${total}, expected ${expected}`);
-    } else {
-      console.warn(`⚠️  [${label}] Solvency check failed but continuing (optional mode)`);
-    }
-  } else {
-    console.log(`✅ [${label}] Solvency OK`);
-  }
-}
-
 // Get offdelta for a bilateral account (uses LEFT entity's view - canonical)
 function getOffdelta(env: Env, entityA: string, entityB: string, tokenId: number): bigint {
   // Always use LEFT entity (smaller ID) as canonical source
@@ -360,151 +266,6 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
 // verifyPayment DELETED - was causing false positives due to incorrect delta semantics expectations
 // TODO: Re-implement with correct bilateral consensus understanding
 
-interface SnapshotOptions {
-  expectedSolvency?: bigint;      // Self-test: throws if solvency doesn't match
-  entityInputs?: EntityInput[];   // Entity inputs for J-Machine visualization
-}
-
-async function pushSnapshot(
-  env: Env,
-  description: string,
-  subtitle: FrameSubtitle,
-  options: SnapshotOptions = {}
-) {
-  pushSnapshotCount++;
-  console.log(`[pushSnapshot #${pushSnapshotCount}] Called for: "${description}"`);
-
-  // SELF-TEST: Verify solvency at every frame
-  if (options.expectedSolvency !== undefined) {
-    checkSolvency(env, options.expectedSolvency, `Frame ${pushSnapshotCount}`);
-  }
-
-  const gossipSnapshot = cloneProfilesForSnapshot(env);
-
-  // CRITICAL: Capture fresh stateRoot from BrowserVM for time-travel
-  const browserVM = getBrowserVMInstance();
-  let freshStateRoot: Uint8Array | null = null;
-  if (browserVM?.captureStateRoot && env.jReplicas) {
-    try {
-      freshStateRoot = await browserVM.captureStateRoot();
-      // Also update live jReplicas so next snapshot has correct base
-      for (const [name, jReplica] of env.jReplicas.entries()) {
-        jReplica.stateRoot = freshStateRoot;
-      }
-    } catch (e) {
-      // Silent fail - stateRoot capture is optional
-    }
-  }
-
-  // Clone jReplicas for this frame (J-Machine state) + SYNC reserves/collaterals from eReplicas
-  const jReplicasSnapshot = env.jReplicas ? Array.from(env.jReplicas.values()).map(jr => {
-    // Sync reserves from eReplicas into JReplica
-    const reserves = new Map<string, Map<number, bigint>>();
-    const registeredEntities = new Map<string, { name: string; quorum: string[]; threshold: number }>();
-    // Collaterals: channelKey → tokenId → { collateral, ondelta }
-    const collaterals = new Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>();
-
-    // Aggregate reserves and collaterals from all entity replicas
-    for (const [key, replica] of env.eReplicas.entries()) {
-      const entityId = key.split(':')[0];
-      if (replica.state?.reserves) {
-        const tokenMap = new Map<number, bigint>();
-        // Handle both Map and plain object
-        if (replica.state.reserves instanceof Map) {
-          replica.state.reserves.forEach((amount: bigint, tokenId: string) => {
-            tokenMap.set(Number(tokenId), amount);
-          });
-        } else {
-          for (const [tokenId, amount] of Object.entries(replica.state.reserves as Record<string, bigint>)) {
-            tokenMap.set(Number(tokenId), BigInt(amount));
-          }
-        }
-        if (tokenMap.size > 0) {
-          reserves.set(entityId, tokenMap);
-        }
-      }
-
-      // Extract collaterals from bilateral accounts (only for LEFT entity to avoid duplicates)
-      if (replica.state?.accounts) {
-        for (const [counterpartyId, account] of replica.state.accounts.entries()) {
-          // Only capture from LEFT entity (smaller ID) to avoid duplicates
-          if (entityId < counterpartyId && account.deltas) {
-            // Create channel key: LEFT-RIGHT (canonical ordering)
-            const channelKey = `${entityId.slice(-4)}-${counterpartyId.slice(-4)}`;
-            const tokenMap = new Map<number, { collateral: bigint; ondelta: bigint }>();
-
-            for (const [tokenId, delta] of account.deltas.entries()) {
-              if (delta.collateral > 0n || delta.ondelta !== 0n) {
-                tokenMap.set(Number(tokenId), {
-                  collateral: delta.collateral,
-                  ondelta: delta.ondelta,
-                });
-              }
-            }
-
-            if (tokenMap.size > 0) {
-              collaterals.set(channelKey, tokenMap);
-            }
-          }
-        }
-      }
-
-      // Add entity to registeredEntities
-      if (!registeredEntities.has(entityId)) {
-        registeredEntities.set(entityId, {
-          name: replica.name || `E${entityId.slice(-4)}`,
-          quorum: replica.quorum || [],
-          threshold: replica.threshold || 1,
-        });
-      }
-    }
-
-    return {
-      name: jr.name,
-      blockNumber: jr.blockNumber,
-      stateRoot: new Uint8Array(jr.stateRoot),
-      mempool: [...jr.mempool],
-      blockDelayMs: jr.blockDelayMs || 300,
-      lastBlockTimestamp: jr.lastBlockTimestamp || 0,
-      position: { ...jr.position },
-      contracts: jr.contracts ? { ...jr.contracts } : undefined,
-      reserves,
-      collaterals,  // NEW: collateral state from bilateral accounts
-      registeredEntities,
-    };
-  }) : [];
-
-  const snapshot: EnvSnapshot = {
-    height: env.height,
-    timestamp: Date.now(),
-    eReplicas: new Map(
-      Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica)]),
-    ),
-    jReplicas: jReplicasSnapshot,
-    runtimeInput: {
-      runtimeTxs: [],
-      entityInputs: options.entityInputs || [],
-    },
-    runtimeOutputs: [],
-    description,
-    subtitle, // Fed Chair educational content
-    frameLogs: [...env.frameLogs], // Copy logs accumulated during this frame
-    ...(gossipSnapshot ? { gossip: gossipSnapshot } : {}),
-  };
-
-  if (!env.history) {
-    console.log(`[pushSnapshot] Creating new history array`);
-    env.history = [];
-  }
-
-  const beforeLength = env.history.length;
-  env.history.push(snapshot);
-  const afterLength = env.history.length;
-  console.log(`📸 Snapshot: ${description} (history: ${beforeLength} → ${afterLength}, logs: ${env.frameLogs.length})`);
-
-  // Clear frame logs for next frame
-  env.frameLogs = [];
-}
 
 export async function ahb(env: Env): Promise<void> {
   const process = await getProcess();
@@ -553,7 +314,7 @@ export async function ahb(env: Env): Promise<void> {
     if (!arrakis) {
       console.log('[AHB] No jurisdiction found - using BrowserVM jurisdiction');
       arrakis = {
-        name: 'Arrakis (BrowserVM)',
+        name: 'AHB Demo', // MUST match jReplica name for routing
         chainId: 31337,
         entityProviderAddress: '0x0000000000000000000000000000000000000000',
         depositoryAddress: browserVM.getDepositoryAddress(),
@@ -577,7 +338,7 @@ export async function ahb(env: Env): Promise<void> {
       blockNumber: 0n,
       stateRoot: new Uint8Array(32), // Will be captured from BrowserVM
       mempool: [] as any[],
-      blockDelayMs: 300,             // 300ms delay before processing mempool (visual delay)
+      blockDelayMs: 200,             // 200ms block time (2 ticks minimum for visualization)
       lastBlockTimestamp: env.timestamp,  // Use env.timestamp for determinism
       position: { x: 0, y: 600, z: 0 }, // Match EVM jMachine.position for consistent entity placement
       contracts: {
@@ -594,8 +355,8 @@ export async function ahb(env: Env): Promise<void> {
     // Define total system solvency - $10M minted to Hub
     const TOTAL_SOLVENCY = usd(10_000_000);
 
-    await pushSnapshot(env, 'Frame 0: Clean Slate - J-Machine Ready', {
-      title: 'Jurisdiction Machine Deployed',
+    snap(env, 'Jurisdiction Machine Deployed', {
+      description: 'Frame 0: Clean Slate - J-Machine Ready',
       what: 'The J-Machine (Jurisdiction Machine) is deployed on-chain. It represents the EVM smart contracts (Depository.sol, EntityProvider.sol) that will process settlements.',
       why: 'Before any entities exist, the jurisdiction infrastructure must be in place. Think of this as deploying the central bank\'s core settlement system.',
       tradfiParallel: 'Like the Federal Reserve deploying its Fedwire Funds Service before any banks can participate.',
@@ -603,8 +364,10 @@ export async function ahb(env: Env): Promise<void> {
         'J-Machine: Deployed at origin',
         'Entities: 0 (none created yet)',
         'Reserves: Empty',
-      ]
-    }, { expectedSolvency: 0n }); // Frame 0: No tokens yet
+      ],
+      expectedSolvency: 0n, // Frame 0: No tokens yet
+    });
+    await process(env);
 
     // ============================================================================
     // STEP 0b: Create entities
@@ -620,18 +383,34 @@ export async function ahb(env: Env): Promise<void> {
     };
 
     const entityNames = ['Alice', 'Hub', 'Bob'] as const;
-    const entities: Array<{id: string, signer: string, name: string}> = [];
+    const entities: Array<{id: string, signer: string, name: string, boardHash: string}> = [];
     const createEntityTxs = [];
+
+    // Import board hashing utilities
+    const { encodeBoard, hashBoard } = await import('../entity-factory');
 
     for (let i = 0; i < 3; i++) {
       const name = entityNames[i];
       const signer = `s${i + 1}`;
       const position = AHB_POSITIONS[name];
 
-      // SIMPLE FALLBACK ONLY (no blockchain calls in demos)
-      const entityNumber = i + 1;
+      // Create placeholder entity ID (will be corrected after registration)
+      // Use i+2 because EntityProvider reserves #1 for Foundation
+      const entityNumber = i + 2; // [2,3,4] to match on-chain registration
       const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
-      entities.push({ id: entityId, signer, name });
+
+      // Compute boardHash for on-chain registration
+      const config = {
+        mode: 'proposer-based' as const,
+        threshold: 1n,
+        validators: [signer],
+        shares: { [signer]: 1n },
+        jurisdiction: arrakis
+      };
+      const encodedBoard = encodeBoard(config);
+      const boardHash = hashBoard(encodedBoard);
+
+      entities.push({ id: entityId, signer, name, boardHash });
 
       createEntityTxs.push({
         type: 'importReplica' as const,
@@ -665,6 +444,23 @@ export async function ahb(env: Env): Promise<void> {
 
     console.log(`\n  ✅ Created: ${alice.name}, ${hub.name}, ${bob.name}`);
 
+    // CRITICAL: Register entities on-chain in EntityProvider
+    // Without this, Depository.settle() reverts with E7 (InvalidParty)
+    console.log('\n📋 Registering entities on-chain in EntityProvider...');
+    const boardHashes = entities.map(e => e.boardHash);
+    const entityNumbers = await browserVM.registerNumberedEntitiesBatch(boardHashes);
+    console.log(`✅ Registered on-chain: ${entityNumbers.map((n, i) => `${entities[i]?.name}=#${n}`).join(', ')}`);
+
+    // Verify entity IDs match registration (should be [2,3,4])
+    entities.forEach((entity, i) => {
+      const expectedNumber = entityNumbers[i];
+      const actualNumber = parseInt(entity.id, 16);
+      if (expectedNumber !== actualNumber) {
+        throw new Error(`Entity ID mismatch: ${entity.name} expected #${expectedNumber}, got #${actualNumber}`);
+      }
+      console.log(`   ✓ ${entity.name}: Entity #${expectedNumber}`);
+    });
+
     // ============================================================================
     // Set up j-watcher subscription to BrowserVM for proper R→E→A event flow
     // ============================================================================
@@ -676,8 +472,8 @@ export async function ahb(env: Env): Promise<void> {
     console.log('✅ j-watcher subscribed to BrowserVM events');
 
     // Push Frame 0.5: Entities created but not yet funded
-    await pushSnapshot(env, 'Entities Created: Alice, Hub, Bob', {
-      title: 'Three Entities Deployed',
+    snap(env, 'Three Entities Deployed', {
+      description: 'Entities Created: Alice, Hub, Bob',
       what: 'Alice, Hub, and Bob entities are now registered in the J-Machine. They appear in the 3D visualization but have no reserves yet (grey spheres).',
       why: 'Before entities can transact, they must be registered in the jurisdiction. This establishes their identity and governance structure.',
       tradfiParallel: 'Like banks registering with the Federal Reserve before opening for business.',
@@ -685,8 +481,10 @@ export async function ahb(env: Env): Promise<void> {
         'Entities: 3 (Alice, Hub, Bob)',
         'Reserves: All $0 (grey - unfunded)',
         'Accounts: None opened yet',
-      ]
-    }, { expectedSolvency: 0n }); // No tokens minted yet
+      ],
+      expectedSolvency: 0n, // No tokens minted yet
+    });
+    await process(env);
 
     // ============================================================================
     // STEP 1: Initial State - Hub funded with $10M USDC via REAL BrowserVM tx
@@ -696,10 +494,29 @@ export async function ahb(env: Env): Promise<void> {
     // NOTE: BrowserVM is reset in View.svelte at runtime creation time
     // This ensures fresh state on every page load/HMR
 
-    // REAL BrowserVM transaction: debugFundReserves
-    await browserVM.debugFundReserves(hub.id, USDC_TOKEN_ID, usd(10_000_000));
+    // Hub creates mint_reserves tx → generates jOutput with mint batch
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [
+        {
+          type: 'mintReserves',
+          data: {
+            tokenId: USDC_TOKEN_ID,
+            amount: usd(10_000_000),
+          }
+        },
+        {
+          type: 'j_broadcast',
+          data: {}
+        }
+      ]
+    }]);
 
-    // Process j_events from BrowserVM (ReserveUpdated events update replica.state.reserves)
+    // Wait for J-Machine to execute mint (next tick after blockDelay)
+    await process(env); // Tick to execute J-Machine mempool
+
+    // Process j-events from execution
     await processJEvents(env);
 
     // ✅ ASSERT: J-event delivered - Hub reserve updated
@@ -710,8 +527,8 @@ export async function ahb(env: Env): Promise<void> {
     }
     console.log(`✅ ASSERT Frame 1: Hub reserve = $${hubReserve1 / 10n**18n}M ✓`);
 
-    await pushSnapshot(env, 'Initial State: Hub Funded', {
-      title: 'Initial Liquidity Provision',
+    snap(env, 'Initial Liquidity Provision', {
+      description: 'Initial State: Hub Funded',
       what: 'Hub entity receives $10M USDC reserve balance on Depository.sol (on-chain via BrowserVM)',
       why: 'Reserve balances are the source of liquidity for off-chain bilateral accounts. Think of this as the hub depositing cash into its custody account.',
       tradfiParallel: 'Like a correspondent bank depositing USD reserves at the Federal Reserve to enable wire transfers',
@@ -719,37 +536,39 @@ export async function ahb(env: Env): Promise<void> {
         'Hub Reserve: $10M USDC',
         'Alice Reserve: $0 (grey - no funds)',
         'Bob Reserve: $0 (grey - no funds)',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY }); // $10M minted to Hub
+      ],
+      expectedSolvency: TOTAL_SOLVENCY, // $10M minted to Hub
+    });
+    await process(env);
 
     // ============================================================================
     // STEP 2: Hub R2R → Alice ($3M USDC) - REAL TX goes to J-Machine mempool
     // ============================================================================
     console.log('\n🔄 FRAME 2: Hub → Alice R2R - TX ENTERS MEMPOOL (PENDING)');
 
-    // Get jReplica for mempool operations
-    const jReplica = env.jReplicas.get('AHB Demo');
-
-    // R2R Step 1: Add to J-Machine mempool (PENDING state)
-    // TX sits in mempool as yellow cube until next frame processes it
-    if (jReplica) {
-      jReplica.mempool.push({ type: 'r2r', from: hub.id, to: alice.id, amount: usd(3_000_000), timestamp: env.timestamp });
-    }
-
+    // Step 1: Hub creates reserve_to_reserve tx (adds to jBatch)
+    // Step 2: Hub broadcasts batch via j_broadcast (generates jOutput)
     const r2rTx1: EntityInput = {
       entityId: hub.id,
       signerId: hub.signer,
-      entityTxs: [{
-        type: 'payFromReserve' as any,
-        kind: 'payFromReserve',
-        targetEntityId: alice.id,
-        tokenId: USDC_TOKEN_ID,
-        amount: usd(3_000_000),
-      }]
+      entityTxs: [
+        {
+          type: 'reserve_to_reserve',
+          data: {
+            toEntityId: alice.id,
+            tokenId: USDC_TOKEN_ID,
+            amount: usd(3_000_000),
+          }
+        },
+        {
+          type: 'j_broadcast',
+          data: {}
+        }
+      ]
     };
 
-    await pushSnapshot(env, 'Hub → Alice: R2R Pending in Mempool', {
-      title: 'R2R #1: TX Enters J-Machine Mempool',
+    snap(env, 'R2R #1: TX Enters J-Machine Mempool', {
+      description: 'Hub → Alice: R2R Pending in Mempool',
       what: 'Hub submits reserveToReserve(Alice, $3M). TX is PENDING in J-Machine mempool (yellow cube). Not yet finalized.',
       why: 'J-Machine batches transactions. TX waits in mempool until block creation.',
       tradfiParallel: 'Like submitting a Fedwire - queued for batch settlement',
@@ -757,19 +576,35 @@ export async function ahb(env: Env): Promise<void> {
         'J-Machine mempool: 1 pending tx',
         'Hub Reserve: $10M (unchanged)',
         'Alice Reserve: $0 (unchanged)',
-      ]
-    }, { entityInputs: [r2rTx1], expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env, [r2rTx1]);
+
+    // ASSERT: J-Machine mempool should have Hub→Alice R2R batch
+    const jReplicaAfterR2R1 = env.jReplicas.get('AHB Demo');
+    if (!jReplicaAfterR2R1) throw new Error('J-Machine not found');
+    console.log(`\n[MEMPOOL ASSERT #1] After Hub→Alice R2R: mempool=${jReplicaAfterR2R1.mempool.length}`);
+    if (jReplicaAfterR2R1.mempool.length === 0) {
+      throw new Error('MEMPOOL FAIL: Expected Hub→Alice batch in mempool, got 0! payFromReserve not generating jOutput?');
+    }
+    console.log(`✅ MEMPOOL: ${jReplicaAfterR2R1.mempool.length} batches pending`);
+
+    // Check snapshot captured it
+    const lastSnap = env.history[env.history.length - 1];
+    const snapMempool = lastSnap?.jReplicas?.[0]?.mempool?.length || 0;
+    console.log(`[SNAPSHOT ASSERT #1] Last snapshot mempool=${snapMempool}`);
+    if (snapMempool === 0) {
+      throw new Error('SNAPSHOT FAIL: Mempool not visible! Executed in same tick?');
+    }
+    console.log(`✅ SNAPSHOT: Mempool visible with ${snapMempool} batches\n`);
 
     // ============================================================================
     // STEP 3: Hub R2R → Bob ($2M USDC) - Second TX to mempool (PENDING)
     // ============================================================================
     console.log('\n🔄 FRAME 3: Hub → Bob R2R - TX ENTERS MEMPOOL (PENDING)');
 
-    // R2R Step 1: Add to J-Machine mempool (PENDING state)
-    if (jReplica) {
-      jReplica.mempool.push({ type: 'r2r', from: hub.id, to: bob.id, amount: usd(2_000_000), timestamp: env.timestamp });
-    }
-
+    // Entity creates payFromReserve tx → generates jOutput → process() auto-queues to J-Machine
     const r2rTx2: EntityInput = {
       entityId: hub.id,
       signerId: hub.signer,
@@ -782,8 +617,8 @@ export async function ahb(env: Env): Promise<void> {
       }]
     };
 
-    await pushSnapshot(env, 'Hub → Bob: R2R Pending in Mempool', {
-      title: 'R2R #2: TX Enters J-Machine Mempool',
+    snap(env, 'R2R #2: TX Enters J-Machine Mempool', {
+      description: 'Hub → Bob: R2R Pending in Mempool',
       what: 'Hub submits reserveToReserve(Bob, $2M). Second TX is PENDING in mempool.',
       why: 'Multiple R2R txs accumulate in mempool before batch processing.',
       tradfiParallel: 'Like queuing multiple Fedwires - batched for efficiency',
@@ -791,8 +626,10 @@ export async function ahb(env: Env): Promise<void> {
         'J-Machine mempool: 2 pending txs',
         'Hub Reserve: $10M (unchanged)',
         'Bob Reserve: $0 (unchanged)',
-      ]
-    }, { entityInputs: [r2rTx2], expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env, [r2rTx2]);
 
     // ============================================================================
     // STEP 4: J-BLOCK #1 - Execute Hub's funding R2Rs (Alice & Bob get funded)
@@ -806,12 +643,11 @@ export async function ahb(env: Env): Promise<void> {
     // Process j_events from BrowserVM
     await processJEvents(env);
 
-    // Clear mempool after J-Block finalized
-    if (jReplica) {
-      jReplica.mempool = [];
-      jReplica.lastBlockTimestamp = env.timestamp;
-      jReplica.blockNumber += 1n;
-    }
+    // NOTE: J-Machine block processing in process() automatically:
+    // - Clears mempool (keeps failed txs for retry)
+    // - Updates lastBlockTimestamp
+    // - Increments blockNumber
+    // No manual clearing needed!
 
     // Verify Hub funding reserves
     const fundedAliceReserves = await browserVM.getReserves(alice.id, USDC_TOKEN_ID);
@@ -820,8 +656,8 @@ export async function ahb(env: Env): Promise<void> {
     console.log(`  Alice: ${Number(fundedAliceReserves) / 1e18} USDC`);
     console.log(`  Bob: ${Number(fundedBobReserves) / 1e18} USDC`);
 
-    await pushSnapshot(env, 'Hub Fundings Complete: Alice & Bob funded', {
-      title: 'J-Block #1: Hub Fundings Executed',
+    snap(env, 'J-Block #1: Hub Fundings Executed', {
+      description: 'Hub Fundings Complete: Alice & Bob funded',
       what: 'Hub distributed $3M to Alice, $2M to Bob. Both entities now have reserve balances.',
       why: 'Funding R2Rs executed first - entities need reserves before they can transact.',
       tradfiParallel: 'Like initial capital injection: entities receive operating funds',
@@ -830,19 +666,17 @@ export async function ahb(env: Env): Promise<void> {
         'Alice: $3M reserve (funded)',
         'Bob: $2M reserve (funded)',
         'Next: Alice → Bob transfer',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // ============================================================================
     // STEP 5: Alice R2R → Bob ($500K) - NOW Alice has funds!
     // ============================================================================
     console.log('\n🔄 FRAME 5: Alice → Bob R2R - TX ENTERS MEMPOOL (PENDING)');
 
-    // R2R Step 1: Add to J-Machine mempool (PENDING state)
-    if (jReplica) {
-      jReplica.mempool.push({ type: 'r2r', from: alice.id, to: bob.id, amount: usd(500_000), timestamp: env.timestamp });
-    }
-
+    // Entity creates payFromReserve tx → generates jOutput → process() auto-queues to J-Machine
     const r2rTx3: EntityInput = {
       entityId: alice.id,
       signerId: alice.signer,
@@ -855,8 +689,8 @@ export async function ahb(env: Env): Promise<void> {
       }]
     };
 
-    await pushSnapshot(env, 'Alice → Bob: R2R Pending in Mempool', {
-      title: 'R2R: Alice → Bob Enters Mempool',
+    snap(env, 'R2R: Alice → Bob Enters Mempool', {
+      description: 'Alice → Bob: R2R Pending in Mempool',
       what: 'Alice (now funded with $3M) sends $500K to Bob. TX is PENDING in mempool.',
       why: 'Alice has funds now! This demonstrates peer-to-peer R2R (not just Hub distribution).',
       tradfiParallel: 'Interbank transfer: one funded bank pays another',
@@ -864,8 +698,10 @@ export async function ahb(env: Env): Promise<void> {
         'Alice: $3M reserve (has funds!)',
         'Mempool: 1 pending tx',
         'Next: J-Block #2 execution',
-      ]
-    }, { entityInputs: [r2rTx3], expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env, [r2rTx3]);
 
     // ============================================================================
     // STEP 6: J-BLOCK #2 - Execute Alice → Bob R2R
@@ -878,12 +714,7 @@ export async function ahb(env: Env): Promise<void> {
     // Process j_events from BrowserVM
     await processJEvents(env);
 
-    // Clear mempool after J-Block finalized
-    if (jReplica) {
-      jReplica.mempool = [];
-      jReplica.lastBlockTimestamp = env.timestamp;
-      jReplica.blockNumber += 1n;
-    }
+    // NOTE: J-Machine block processing in process() automatically handles mempool clearing
 
     // Verify final reserves from BrowserVM
     const finalHubReserves = await browserVM.getReserves(hub.id, USDC_TOKEN_ID);
@@ -895,8 +726,8 @@ export async function ahb(env: Env): Promise<void> {
     console.log(`  Alice: ${Number(finalAliceReserves) / 1e18} USDC`);
     console.log(`  Bob: ${Number(finalBobReserves) / 1e18} USDC`);
 
-    await pushSnapshot(env, 'R2R Complete: All reserves distributed', {
-      title: 'Phase 1 Complete: Reserve Distribution',
+    snap(env, 'Phase 1 Complete: Reserve Distribution', {
+      description: 'R2R Complete: All reserves distributed',
       what: 'Hub: $5M, Alice: $2.5M, Bob: $2.5M. Total: $10M preserved. All entities now have visible reserves.',
       why: 'R2R transfers are pure on-chain settlement. Now we move to Phase 2: Bilateral Accounts.',
       tradfiParallel: 'Like Fedwire settlement: instant, final, auditable transfers between reserve accounts',
@@ -905,8 +736,10 @@ export async function ahb(env: Env): Promise<void> {
         'Alice: $2.5M reserve',
         'Bob: $2.5M reserve',
         'Next: Open bilateral accounts',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // ============================================================================
     // PHASE 2: BILATERAL ACCOUNTS
@@ -937,8 +770,8 @@ export async function ahb(env: Env): Promise<void> {
     }
     console.log(`✅ ASSERT Frame 6: Alice-Hub account EXISTS`);
 
-    await pushSnapshot(env, 'Alice ↔ Hub: Account Created', {
-      title: 'Bilateral Account: Alice ↔ Hub (A-H)',
+    snap(env, 'Bilateral Account: Alice ↔ Hub (A-H)', {
+      description: 'Alice ↔ Hub: Account Created',
       what: 'Alice opens bilateral account with Hub. Creates off-chain channel for instant payments.',
       why: 'Bilateral accounts enable unlimited off-chain transactions with final on-chain settlement.',
       tradfiParallel: 'Like opening a margin account: enables trading before settlement.',
@@ -947,8 +780,10 @@ export async function ahb(env: Env): Promise<void> {
         'Collateral: $0 (empty)',
         'Credit limits: Default',
         'Ready for R2C prefunding',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // ============================================================================
     // STEP 7: Open Bob-Hub Bilateral Account
@@ -977,8 +812,8 @@ export async function ahb(env: Env): Promise<void> {
     }
     console.log(`✅ ASSERT Frame 7: Hub-Bob accounts EXIST (both directions)`);
 
-    await pushSnapshot(env, 'Bob ↔ Hub: Account Created', {
-      title: 'Bilateral Account: Bob ↔ Hub (B-H)',
+    snap(env, 'Bilateral Account: Bob ↔ Hub (B-H)', {
+      description: 'Bob ↔ Hub: Account Created',
       what: 'Bob opens bilateral account with Hub. Now both spoke entities connected to hub.',
       why: 'Star topology: Alice and Bob both connect to Hub. Hub routes payments between them.',
       tradfiParallel: 'Like correspondent banking: small banks connect to large banks for interbank settlement.',
@@ -986,8 +821,10 @@ export async function ahb(env: Env): Promise<void> {
         'Account B-H: CREATED',
         'Topology: Alice ↔ Hub ↔ Bob',
         'Ready for credit extension',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // ============================================================================
     // STEP 8: Alice R2C - Reserve to Collateral (BATCH CREATION)
@@ -1012,69 +849,84 @@ export async function ahb(env: Env): Promise<void> {
       }]
     }]);
 
-    // Step 2: Copy jBatch to jReplica.mempool for visualization (yellow cubes!)
-    const [, aliceReplicaForBatch] = findReplica(env, alice.id);
-    // jReplica already declared above for R2R mempool pushes
-    if (aliceReplicaForBatch.state.jBatchState && jReplica) {
-      // Add batch to jReplica mempool so it shows as pending (yellow cube)
-      jReplica.mempool.push({
-        type: 'r2c_batch',
-        entityId: alice.id,
-        batch: JSON.parse(JSON.stringify(aliceReplicaForBatch.state.jBatchState.batch, (_, v) =>
-          typeof v === 'bigint' ? v.toString() : v
-        )),
-        timestamp: Date.now(),
-      });
-      console.log(`[Frame 8] Added batch to jReplica.mempool (${jReplica.mempool.length} pending)`);
-    }
+    // Entity already queued batch via jOutput (no manual queuing needed)
+    // deposit_collateral tx generates jOutput → process() adds to J-mempool automatically
 
-    // Snapshot BEFORE broadcast - shows batch pending in mempool
-    await pushSnapshot(env, 'Alice R2C: Batch Created (Pending)', {
-      title: 'J-Batch Pending: Alice R2C $500K',
+    // ASSERT: Batch should be in J-Machine mempool now
+    const jReplica = env.jReplicas.get('AHB Demo');
+    if (!jReplica) throw new Error('J-Machine not found');
+    console.log(`[Frame 8 ASSERT] J-Machine mempool after deposit_collateral: ${jReplica.mempool.length} items`);
+    if (jReplica.mempool.length === 0) {
+      throw new Error('ASSERT FAIL: J-Machine mempool is EMPTY after deposit_collateral! jOutput not generated or not routed.');
+    }
+    console.log(`✅ ASSERT: Batch in J-Machine mempool`);
+
+    // Snapshot - shows batch pending in mempool
+    snap(env, 'J-Batch Pending: Alice R2C $500K', {
+      description: 'Alice R2C: Batch Created (Pending)',
       what: 'Alice created jBatch for R2C. Batch sits in J-Machine mempool awaiting next block.',
       why: 'Batches accumulate before on-chain submission. Yellow cube = pending batch.',
       tradfiParallel: 'Like a wire transfer queued at end-of-day batch processing.',
       keyMetrics: [
         'jReplica mempool: 1 pending batch',
         'Batch: R2C $500K Alice→A-H account',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // ============================================================================
     // STEP 8.5: Mempool Delay (BATCH PENDING - Visual Yellow Cube)
     // ============================================================================
     console.log('\n⏳ FRAME 8.5: Mempool Delay - Batch pending in J-Machine');
 
-    // Show ms-based delay (block creation waits until lastBlockTimestamp + blockDelayMs)
-    const elapsedMs = jReplica ? env.timestamp - (jReplica.lastBlockTimestamp || 0) : 0;
-    const delayMs = jReplica?.blockDelayMs || 300;
+    // Read jReplica for status display (read-only)
+    const jReplicaStatus = env.jReplicas?.get(AHB_JURISDICTION);
+    const elapsedMs = jReplicaStatus ? env.timestamp - (jReplicaStatus.lastBlockTimestamp || 0) : 0;
+    const delayMs = jReplicaStatus?.blockDelayMs || 1000;
     console.log(`[Frame 8.5] elapsed=${elapsedMs}ms, blockDelayMs=${delayMs}ms`);
 
     // Snapshot showing batch still pending in mempool (yellow cube persists)
-    await pushSnapshot(env, 'J-Machine: Mempool Processing Delay', {
-      title: 'J-Batch Queued: Awaiting Block Creation',
+    snap(env, 'J-Batch Queued: Awaiting Block Creation', {
+      description: 'J-Machine: Mempool Processing Delay',
       what: `Batch sits in mempool for ${delayMs}ms before on-chain submission.`,
       why: 'Batching improves gas efficiency. Multiple settlements can be combined into one block.',
       tradfiParallel: 'Like SWIFT netting - accumulate transactions, settle in batch.',
       keyMetrics: [
-        `Mempool: ${jReplica?.mempool?.length || 0} batch(es) pending`,
+        `Mempool: ${jReplicaStatus?.mempool?.length || 0} batch(es) pending`,
         `Block delay: ${delayMs}ms`,
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // ============================================================================
     // STEP 9: Alice R2C - Broadcast (BLOCK CREATION)
     // ============================================================================
     console.log('\n💰 FRAME 9: Alice R2C - Broadcast jBatch');
 
+    // DEBUG: Check Alice's on-chain reserves + EntityProvider registration
+    const aliceOnChainReserves = await browserVM.getReserves(alice.id, USDC_TOKEN_ID);
+    console.log(`[Frame 9 DEBUG] Alice on-chain reserves: ${aliceOnChainReserves / 10n**18n}M`);
+
+    // Entities were registered earlier (line 687), trust the registration
+    console.log(`[Frame 9 DEBUG] Alice entity #2, Hub entity #3 (registered on-chain)`);
+
+    // Get fresh Alice replica with jBatchState from Step 8
+    const [, aliceReplicaForBatch] = findReplica(env, alice.id);
+
     // Step 3: Broadcast jBatch to BrowserVM (triggers on-chain tx)
     if (aliceReplicaForBatch.state.jBatchState) {
       console.log(`[Frame 9] Broadcasting jBatch...`);
       const { broadcastBatch } = await import('../j-batch');
-      await broadcastBatch(alice.id, aliceReplicaForBatch.state.jBatchState, null, browserVM);
-      console.log(`[Frame 9] broadcastBatch completed`);
-      // Clear mempool after broadcast
-      if (jReplica) jReplica.mempool = [];
+      const result = await broadcastBatch(alice.id, aliceReplicaForBatch.state.jBatchState, null, browserVM);
+      console.log(`[Frame 9] broadcastBatch completed, returned ${result.events?.length || 0} events`);
+
+      // j-watcher auto-queues events via BrowserVM.onAny() subscription
+      // Events are transformed to EntityInput format automatically
+      console.log(`[Frame 9] Events emitted to j-watcher subscription`);
+
+      // NOTE: J-Machine block processing in process() automatically handles mempool clearing
     } else {
       console.error(`[Frame 9] ❌ NO jBatchState!`);
     }
@@ -1105,8 +957,8 @@ export async function ahb(env: Env): Promise<void> {
     // CRITICAL: Verify bilateral sync after R2C collateral deposit
     assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'Frame 9 - Alice R2C Collateral');
 
-    await pushSnapshot(env, 'Alice R2C: $500K Reserve → Collateral', {
-      title: 'Reserve-to-Collateral (R2C): Alice → A-H Account',
+    snap(env, 'Reserve-to-Collateral (R2C): Alice → A-H Account', {
+      description: 'Alice R2C: $500K Reserve → Collateral',
       what: 'Alice moves $500K from reserve to A-H account collateral. J-Machine processed batch.',
       why: 'Collateral enables off-chain payments. Alice can now send up to $500K to Hub instantly.',
       tradfiParallel: 'Like posting margin: Alice locks funds in the bilateral account as security.',
@@ -1115,8 +967,10 @@ export async function ahb(env: Env): Promise<void> {
         'A-H Collateral: $0 → $500K',
         'Alice outCapacity: $500K',
         'Settlement broadcast to J-Machine',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY }); // R2C moves funds, doesn't create/destroy
+      ],
+      expectedSolvency: TOTAL_SOLVENCY, // R2C moves funds, doesn't create/destroy
+    });
+    await process(env);
 
     // ============================================================================
     // STEP 9: Bob Credit Extension - set_credit_limit
@@ -1161,8 +1015,8 @@ export async function ahb(env: Env): Promise<void> {
     // Verify bilateral sync
     assertBilateralSync(env, bob.id, hub.id, USDC_TOKEN_ID, 'Frame 9 - Bob Credit Extension');
 
-    await pushSnapshot(env, 'Bob Credit Extension: $500K', {
-      title: 'Credit Extension: Bob → Hub',
+    snap(env, 'Credit Extension: Bob → Hub', {
+      description: 'Bob Credit Extension: $500K',
       what: 'Bob extends $500K credit limit to Hub in B-H account. Purely off-chain, no collateral.',
       why: 'Credit extension allows Hub to owe Bob. Bob trusts Hub up to $500K.',
       tradfiParallel: 'Like a credit line: Bob says "Hub can owe me up to $500K".',
@@ -1171,8 +1025,10 @@ export async function ahb(env: Env): Promise<void> {
         'Bob collateral: $0 (receiver)',
         'Hub can owe Bob: $500K max',
         'Ready for routed payment!',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY }); // Credit extension is off-chain, no on-chain impact
+      ],
+      expectedSolvency: TOTAL_SOLVENCY, // Credit extension is off-chain, no on-chain impact
+    });
+    await process(env);
 
     // ============================================================================
     // STEP 10: Off-Chain Payment Alice → Hub → Bob
@@ -1213,20 +1069,24 @@ export async function ahb(env: Env): Promise<void> {
     }]);
     logPending();
 
-    await pushSnapshot(env, 'Frame 10: Alice initiates A→H→B', {
-      title: 'Payment 1/2: Alice → Hub',
+    snap(env, 'Payment 1/2: Alice → Hub', {
+      description: 'Frame 10: Alice initiates A→H→B',
       what: 'Alice sends $125K, Hub receives and forwards proposal to Bob',
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // Frame 11: Hub + Alice process (Hub forwards to Bob, Alice gets ACK)
     console.log('🏃 FRAME 11: Hub forwards, Alice commits');
     await process(env);
     logPending();
 
-    await pushSnapshot(env, 'Frame 11: Hub forwards to Bob', {
-      title: 'Payment 1/2: Hub → Bob proposal',
+    snap(env, 'Payment 1/2: Hub → Bob proposal', {
+      description: 'Frame 11: Hub forwards to Bob',
       what: 'Hub-Alice commits, Hub proposes to Bob',
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // Frame 12: Bob ACKs Hub
     console.log('🏃 FRAME 12: Bob ACKs Hub');
@@ -1252,10 +1112,12 @@ export async function ahb(env: Env): Promise<void> {
     }
     console.log(`   ✅ After payment 1: A-H=${ahDelta1}, H-B=${hbDelta1} (both -$125K as expected)`);
 
-    await pushSnapshot(env, 'Frame 13: Payment 1 complete', {
-      title: 'Payment 1/2 Complete',
+    snap(env, 'Payment 1/2 Complete', {
+      description: 'Frame 13: Payment 1 complete',
       what: `A→H→B $125K done. A-H shift: -$125K, H-B shift: -$125K`,
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // ============================================================================
     // PAYMENT 2: A → H → B ($125K) - Second payment, total shift = $250K
@@ -1280,19 +1142,23 @@ export async function ahb(env: Env): Promise<void> {
     }]);
     logPending();
 
-    await pushSnapshot(env, 'Frame 14: Alice initiates second payment', {
-      title: 'Payment 2/2: Alice → Hub',
+    snap(env, 'Payment 2/2: Alice → Hub', {
+      description: 'Frame 14: Alice initiates second payment',
       what: 'Second $125K payment to reach $250K total shift',
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // Frame 15: Hub forwards, Alice commits A-H
     console.log('🏃 FRAME 15: Hub forwards, Alice commits A-H');
     await process(env);
     logPending();
 
-    await pushSnapshot(env, 'Frame 15: Hub forwards second payment', {
-      title: 'Payment 2/2: Hub → Bob proposal',
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+    snap(env, 'Payment 2/2: Hub → Bob proposal', {
+      description: 'Frame 15: Hub forwards second payment',
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // Frame 16: Bob ACKs Hub
     console.log('🏃 FRAME 16: Bob ACKs Hub');
@@ -1329,16 +1195,18 @@ export async function ahb(env: Env): Promise<void> {
       }
     }
 
-    await pushSnapshot(env, 'Frame 17: Both payments complete - $250K shifted', {
-      title: '✅ Payments Complete: $250K A→B',
+    snap(env, 'Payments Complete: $250K A→B', {
+      description: 'Frame 17: Both payments complete - $250K shifted',
       what: 'Two $125K payments complete. Total: $250K shifted from Alice to Bob via Hub.',
       why: 'Hub now has $250K uninsured liability to Bob (TR=$250K). Rebalancing needed!',
       keyMetrics: [
         'A-H shift: -$250K (Alice paid Hub)',
         'H-B shift: -$250K (Hub owes Bob)',
         'TR (Total Risk): $250K uninsured',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // ============================================================================
     // PHASE 4: REVERSE PAYMENT B→H→A (Bob pays Alice $50K via Hub)
@@ -1375,10 +1243,12 @@ export async function ahb(env: Env): Promise<void> {
     console.log(`   After Bob initiates: B-H offdelta=${bhDelta18}, H-A offdelta=${haExpected18}`);
     // Note: At this point Bob's local mempool has the tx but Hub hasn't received yet
 
-    await pushSnapshot(env, 'Frame 18: Bob initiates B→H→A', {
-      title: 'Reverse Payment: Bob → Hub',
+    snap(env, 'Reverse Payment: Bob → Hub', {
+      description: 'Frame 18: Bob initiates B→H→A',
       what: 'Bob sends $50K to Alice via Hub. First hop: B→H',
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // Frame 19: Hub receives from Bob, forwards to Alice
     console.log('🏃 FRAME 19: Hub receives B→H, forwards to Alice');
@@ -1397,10 +1267,12 @@ export async function ahb(env: Env): Promise<void> {
       console.warn(`⚠️ B-H shift unexpected: got ${bhDelta19}, expected ${expectedBH19}`);
     }
 
-    await pushSnapshot(env, 'Frame 19: Hub forwards to Alice', {
-      title: 'Reverse Payment: Hub → Alice',
+    snap(env, 'Reverse Payment: Hub → Alice', {
+      description: 'Frame 19: Hub forwards to Alice',
       what: 'Hub receives B→H and forwards H→A proposal',
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // Frame 20: Alice ACKs Hub
     console.log('🏃 FRAME 20: Alice ACKs Hub');
@@ -1430,15 +1302,17 @@ export async function ahb(env: Env): Promise<void> {
     }
     console.log(`✅ Reverse payment B→H→A verified: A-H=${ahDeltaRev}, B-H=${bhDeltaRev} (both -$200K)`);
 
-    await pushSnapshot(env, 'Frame 21: Reverse payment complete', {
-      title: '✅ Reverse Payment: $50K B→A',
+    snap(env, 'Reverse Payment: $50K B→A', {
+      description: 'Frame 21: Reverse payment complete',
       what: 'Bob paid Alice $50K via Hub. Net position: $200K shifted A→B.',
       keyMetrics: [
         'A-H shift: -$200K (was -$250K)',
         'B-H shift: -$200K (was -$250K)',
         'TR: $200K (reduced from $250K)',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // ============================================================================
     // PHASE 5: REBALANCING - Reduce Total Risk from $200K to $0
@@ -1492,8 +1366,8 @@ export async function ahb(env: Env): Promise<void> {
       }]
     );
 
-    await pushSnapshot(env, 'Frame 22: Alice-Hub Settlement initiated', {
-      title: 'Rebalancing 1/2: Pull from Net-Sender',
+    snap(env, 'Rebalancing 1/2: Pull from Net-Sender', {
+      description: 'Frame 22: Alice-Hub Settlement initiated',
       what: 'Hub withdraws $200K from Alice (net-sender) via A-H collateral.',
       why: 'Alice spent $200K off-chain → excess collateral. Hub pulls to rebalance.',
       tradfiParallel: 'Like margin release: net-sender\'s locked funds freed for redistribution.',
@@ -1501,8 +1375,10 @@ export async function ahb(env: Env): Promise<void> {
         'Alice = NET-SENDER (spent $200K)',
         'A-H collateral: $500K → $300K',
         'Hub reserve: +$200K (pulled)',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // ✅ Store pre-settlement state for assertions
     const [, alicePreSettle] = findReplica(env, alice.id);
@@ -1521,6 +1397,8 @@ export async function ahb(env: Env): Promise<void> {
       throw new Error(`❌ ASSERTION FAILED: Alice-Hub settlement returned no events (expected AccountSettled)`);
     }
     console.log(`✅ Alice-Hub settlement broadcast: ${ahSettleResult.events.length} events`);
+
+    // Queue events for processing
 
     // Process j_events from BrowserVM (SettlementProcessed events)
     await processJEvents(env);
@@ -1555,15 +1433,17 @@ export async function ahb(env: Env): Promise<void> {
 
     console.log(`   A-H after settlement: collateral=${ahDeltaRebal?.collateral}, ondelta=${ahDeltaRebal?.ondelta}`);
 
-    await pushSnapshot(env, 'Frame 23: Alice-Hub Settlement complete', {
-      title: 'Rebalancing 1/2: Net-Sender Pulled',
+    snap(env, 'Rebalancing 1/2: Net-Sender Pulled', {
+      description: 'Frame 23: Alice-Hub Settlement complete',
       what: 'Hub pulled $200K from Alice (net-sender). Ready to deposit to Bob.',
       keyMetrics: [
         'A-H collateral: $300K (Alice\'s excess released)',
         'Hub reserve: +$200K (holding for Bob)',
         'Next: deposit to net-receiver',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // ============================================================================
     // STEP 24: Hub-Bob Settlement (Hub deposits to insure Bob)
@@ -1601,8 +1481,8 @@ export async function ahb(env: Env): Promise<void> {
     const hubPreHBReserve = hubPreHBSettle.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
     console.log(`   H-B pre-settlement: collateral=${hbPreCollateral}, Hub reserve=${hubPreHBReserve}`);
 
-    await pushSnapshot(env, 'Frame 24: Hub-Bob Settlement initiated', {
-      title: 'Rebalancing 2/2: Deposit to Net-Receiver',
+    snap(env, 'Rebalancing 2/2: Deposit to Net-Receiver', {
+      description: 'Frame 24: Hub-Bob Settlement initiated',
       what: 'Hub deposits $200K to Bob (net-receiver) via H-B collateral.',
       why: 'Bob received $200K off-chain → needs collateral. Hub deposits to insure.',
       tradfiParallel: 'Like margin posting: net-receiver gets collateral backing.',
@@ -1610,8 +1490,10 @@ export async function ahb(env: Env): Promise<void> {
         'Bob = NET-RECEIVER (received $200K)',
         'H-B collateral: $0 → $200K',
         'Hub reserve: -$200K (deposited)',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // Broadcast settlement to BrowserVM
     console.log('🏦 Broadcasting Hub-Bob settlement jBatch to BrowserVM...');
@@ -1623,6 +1505,8 @@ export async function ahb(env: Env): Promise<void> {
       throw new Error(`❌ ASSERTION FAILED: Hub-Bob settlement returned no events (expected AccountSettled)`);
     }
     console.log(`✅ Hub-Bob settlement broadcast: ${hbSettleResult.events.length} events`);
+
+    // Queue events for processing
 
     // Process j_events from BrowserVM (SettlementProcessed events)
     await processJEvents(env);
@@ -1656,23 +1540,25 @@ export async function ahb(env: Env): Promise<void> {
 
     console.log(`   H-B after settlement: collateral=${hbDeltaRebal?.collateral}, ondelta=${hbDeltaRebal?.ondelta}`);
 
-    await pushSnapshot(env, 'Frame 25: Hub-Bob Settlement complete', {
-      title: 'Rebalancing 2/2: Net-Receiver Insured',
+    snap(env, 'Rebalancing 2/2: Net-Receiver Insured', {
+      description: 'Frame 25: Hub-Bob Settlement complete',
       what: 'Hub deposited $200K to Bob (net-receiver). Bob now fully collateralized.',
       keyMetrics: [
         'H-B collateral: $200K (Bob\'s insurance)',
         'Bob\'s uninsured balance: $200K → $0',
         'Rebalance complete!',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // ============================================================================
     // FINAL STATE: Rebalancing Complete
     // ============================================================================
     console.log('\n📊 FRAME 26: Final State - Rebalancing Complete');
 
-    await pushSnapshot(env, 'Frame 26: Rebalancing Complete - TR = $0', {
-      title: '✅ Rebalancing Complete: Zero Risk',
+    snap(env, 'Rebalancing Complete: Zero Risk', {
+      description: 'Frame 26: Rebalancing Complete - TR = $0',
       what: 'Net-sender (Alice) → Hub → Net-receiver (Bob). All positions collateralized.',
       why: 'Rebalance moved collateral from spenders to receivers. Bob\'s uninsured risk eliminated.',
       tradfiParallel: 'Like end-of-day netting: excess margin released, deficits covered.',
@@ -1681,8 +1567,10 @@ export async function ahb(env: Env): Promise<void> {
         'Alice (net-sender): collateral released',
         'Bob (net-receiver): collateral deposited',
         'System: 100% collateralized',
-      ]
-    }, { expectedSolvency: TOTAL_SOLVENCY });
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
 
     // FINAL BILATERAL SYNC CHECK - All accounts must be synced
     console.log('\n🔍 FINAL VERIFICATION: All bilateral accounts...');
