@@ -1215,6 +1215,7 @@ export interface JTx {
     batchSize: number;
   };
   timestamp: number;
+  expectedJBlock?: number; // Expected j-block height (for replay protection)
 }
 
 export interface RuntimeSnapshot {

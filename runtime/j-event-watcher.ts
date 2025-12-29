@@ -387,7 +387,7 @@ export class JEventWatcher {
 
   /**
    * Check if a BrowserVM event is relevant to an entity
-   * Only handles CANONICAL_J_EVENTS - ReserveUpdated and AccountSettled
+   * Only handles CANONICAL_J_EVENTS - ReserveUpdated, AccountSettled
    */
   private isEventRelevantToEntity(event: BrowserVMEvent, entityId: string): boolean {
     switch (event.name) {
@@ -404,6 +404,7 @@ export class JEventWatcher {
         }
         return false;
       }
+
       default:
         return false;
     }

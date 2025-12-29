@@ -5,6 +5,51 @@
 Mission: Fintech-grade, deterministic. J/E/A trilayer correctness before features. Pure functions only.
 ALWAYS: `bun run check` before commit. Test in browser F12 console. Never swallow errors.
 
+## 🚫 ZERO TOLERANCE: NO HACKS, NO WORKAROUNDS
+
+**ABSOLUTE RULE - violation = stop and report immediately:**
+
+1. **NO "temporary" solutions** - if you write a stub/hack/workaround, STOP and tell user explicitly
+2. **NO silent compromises** - if proper fix is unclear/hard, ASK before making shortcuts
+3. **NO "it works for now"** - either fix properly or document limitation + get approval
+4. **NO hiding uncertainty** - if confidence <80% on implementation approach, STOP and discuss
+
+**Examples of BANNED patterns:**
+```typescript
+// ❌ NEVER: Stub that "returns fake data but works for testMode"
+async registerEntities() { return [2,3,4]; }  // Not actually registering!
+
+// ❌ NEVER: Conditional skip of broken logic
+if (value !== '0') { updateState(); }  // Hiding root cause!
+
+// ❌ NEVER: "I'll fix this later" comments
+// TODO: Implement proper state persistence  // No! Fix now or ask.
+```
+
+**What TO do instead:**
+- Stop coding
+- Explain the blocker clearly: "EntityProvider registration fails because @ethereumjs/vm state doesn't persist after runTx"
+- Present options: "A) Debug VM state, B) Workaround in contract, C) Different approach"
+- Get user decision
+- Then implement properly
+
+**Remembered from 2025-12-29 session:** Spent 2+ hours on hacks (fake registration, event patches, ownReserve='0' conditionals) instead of stopping and asking. User found out from Opus review. Never again.
+
+## 🎲 DETERMINISM: NO RANDOMNESS IN RJEA FLOW
+
+**PROHIBITED in Runtime/Entity/Account/Jurisdiction cascade:**
+- `Date.now()` - use env.timestamp (controlled)
+- `Math.random()` - use deterministic PRNG with seed
+- `setInterval/setTimeout` - use tick-based delays (env.timestamp checks)
+- `crypto.randomBytes()` - use seeded generator
+
+**Only allowed in:**
+- UI layer (visualization, not state)
+- Initial setup (before any frames)
+- External I/O (user input timestamps)
+
+**RJEA flow must be pure:** `(prevEnv, inputs) → nextEnv` - same inputs = same outputs, always.
+
 # CRITICAL OVERRIDES
 
 Do not create mocks/stubs unless asked. Use real integration. When debugging consensus/state-machines, dump entire data/JSON. Use bun everywhere (not npm/node).

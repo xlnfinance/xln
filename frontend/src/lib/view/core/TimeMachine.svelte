@@ -2,8 +2,8 @@
   import { onDestroy, onMount } from 'svelte';
   import { type Writable } from 'svelte/store';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
-  import { browserVMProvider } from '../utils/browserVMProvider';
   import { panelBridge } from '../utils/panelBridge';
+  // BrowserVM accessed via window.__xlnBrowserVM (set by View.svelte)
 
   // Props: REQUIRED isolated stores (no fallbacks)
   export let history: Writable<any[]>;
@@ -26,12 +26,12 @@
         : Object.values(frame.jReplicas);
       const stateRoot = jReplicas[0]?.stateRoot;
       if (stateRoot && stateRoot.length === 32) {
-        browserVMProvider.timeTravel(new Uint8Array(stateRoot))
+        (window as any).__xlnBrowserVM?.timeTravel(new Uint8Array(stateRoot))
           .then(() => {
             console.log(`[TimeMachine] EVM restored to frame ${targetIndex}`);
             panelBridge.emit('time:changed', { frame: targetIndex, block: Number(jReplicas[0]?.blockNumber || 0) });
           })
-          .catch(e => console.warn('[TimeMachine] timeTravel failed:', e));
+          .catch((e: any) => console.warn('[TimeMachine] timeTravel failed:', e));
       }
     }
     lastTimeTravelIndex = $timeIndex;
@@ -129,8 +129,10 @@
     const snapshot = $history[frameIndex];
     if (!snapshot?.timestamp) return '0:00.000';
 
-    const firstTimestamp = $history[0]?.timestamp || 0;
-    const elapsed = snapshot.timestamp - firstTimestamp;
+    // CRITICAL: timestamps are bigint in XLN, convert to number for math
+    const firstTimestamp = Number($history[0]?.timestamp || 0n);
+    const currentTimestamp = Number(snapshot.timestamp);
+    const elapsed = currentTimestamp - firstTimestamp;
 
     const minutes = Math.floor(elapsed / 60000);
     const seconds = Math.floor((elapsed % 60000) / 1000);

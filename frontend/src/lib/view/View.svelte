@@ -80,30 +80,27 @@
     console.log('[View] onMount started - initializing isolated XLN');
     console.log('[View] 🎬 scenarioId prop:', scenarioId || '(empty)');
 
-    // Initialize isolated XLN runtime (simnet - BrowserVM mode)
+    // Initialize isolated XLN runtime (runtime handles BrowserVM internally)
     try {
-      // Step 1: Initialize BrowserVM (deploy Depository in-browser)
-      const { browserVMProvider } = await import('./utils/browserVMProvider');
-
-      // Reset BrowserVM to ensure fresh state (prevents stale reserves from previous runs)
-      // This is critical for scenario re-runs and HMR during development
-      await browserVMProvider.reset();
-      console.log('[View] BrowserVM reset to fresh state');
-
-      const depositoryAddress = browserVMProvider.getDepositoryAddress();
-
-      console.log('[View] BrowserVM ready:', { depositoryAddress });
-
-      // Step 2: Load XLN runtime
+      // Load XLN runtime - it includes BrowserEVM
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-      // Step 3: Register BrowserVM jurisdiction (overrides DEFAULT_JURISDICTIONS)
-      XLN.setBrowserVMJurisdiction(depositoryAddress, browserVMProvider);
-      console.log('[View] ✅ BrowserVM jurisdiction registered with browserVM instance');
+      // Create BrowserVM from runtime (not frontend)
+      const { BrowserEVM } = XLN;
+      const browserVM = new BrowserEVM();
+      await browserVM.init();
+      console.log('[View] BrowserVM initialized from runtime');
 
-      // Expose browserVM on window for JurisdictionPanel to access
-      (window as any).__xlnBrowserVM = browserVMProvider;
+      const depositoryAddress = browserVM.getDepositoryAddress();
+
+      // Register with runtime
+      XLN.setBrowserVMJurisdiction(depositoryAddress, browserVM);
+
+      // Expose for panels that need direct access (time-travel, insurance queries)
+      (window as any).__xlnBrowserVM = browserVM;
+
+      console.log('[View] ✅ BrowserVM ready:', depositoryAddress);
 
       // CRITICAL: Initialize global xlnInstance for utility functions (deriveDelta, etc)
       // Graph3DPanel needs xlnFunctions even when using isolated stores

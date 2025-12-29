@@ -387,6 +387,7 @@ const applyRuntimeInput = async (
 
     // Process J-layer inputs (queue to J-mempool)
     if (runtimeInput.jInputs && Array.isArray(runtimeInput.jInputs)) {
+      console.log(`🔍 J-Input processing: ${runtimeInput.jInputs.length} jInputs`);
       for (const jInput of runtimeInput.jInputs) {
         const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
         if (!jReplica) {
@@ -394,10 +395,13 @@ const applyRuntimeInput = async (
           continue;
         }
 
-        // Queue all JTxs to J-mempool
+        console.log(`🔍 J-Input has ${jInput.jTxs.length} JTxs for ${jInput.jurisdictionName}`);
+        // Queue all JTxs to J-mempool with queuedAt timestamp
         for (const jTx of jInput.jTxs) {
-          jReplica.mempool.push(jTx);
-          console.log(`📥 J-Input: Queued ${jTx.type} from ${jTx.entityId.slice(-4)} to ${jInput.jurisdictionName} mempool`);
+          // Mark when added (for minimum 1-tick delay visualization)
+          const jTxWithQueueTime = { ...jTx, queuedAt: env.timestamp };
+          jReplica.mempool.push(jTxWithQueueTime);
+          console.log(`📥 J-Input: Queued ${jTx.type} from ${jTx.entityId.slice(-4)} to ${jInput.jurisdictionName} mempool (mempool size now: ${jReplica.mempool.length})`);
         }
 
         console.log(`✅ J-Input: ${jInput.jTxs.length} txs queued (mempool: ${jReplica.mempool.length})`);
@@ -669,14 +673,19 @@ const applyRuntimeInput = async (
         });
 
         entityOutbox.push(...outputs);
-        jOutbox.push(...jOutputs); // Collect J-outputs
+
+        // Collect J-outputs (batch broadcasts)
+        if (jOutputs && jOutputs.length > 0) {
+          console.log(`📦 [2/6] Collecting ${jOutputs.length} jOutputs from ${replicaKey.slice(-10)}`);
+          jOutbox.push(...jOutputs);
+        }
         // ENTITY-OUTBOX log removed - too noisy
       }
     }
 
     // Process J-outputs BEFORE creating frame (queue to J-mempool)
     if (jOutbox.length > 0) {
-      console.log(`📤 J-OUTPUTS: ${jOutbox.length} J-outputs from entities → queueing to J-mempools`);
+      console.log(`📤 [3/6] J-OUTPUTS: ${jOutbox.length} J-outputs collected → routing to J-mempools`);
 
       for (const jInput of jOutbox) {
         const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
@@ -687,8 +696,10 @@ const applyRuntimeInput = async (
 
         // Queue JTxs to J-mempool (PROPER ROUTING)
         for (const jTx of jInput.jTxs) {
-          jReplica.mempool.push(jTx);
-          console.log(`📥 J-Output: Queued ${jTx.type} from ${jTx.entityId.slice(-4)} to ${jInput.jurisdictionName} mempool`);
+          // Mark when queued (for minimum 1-tick visualization delay)
+          const jTxWithQueueTime = { ...jTx, queuedAt: env.timestamp };
+          jReplica.mempool.push(jTxWithQueueTime);
+          console.log(`📥 [4/6] J-Output: Queued ${jTx.type} from ${jTx.entityId.slice(-4)} to ${jInput.jurisdictionName} mempool (queuedAt: ${env.timestamp}, mempool.length: ${jReplica.mempool.length})`);
 
           // Emit event when actually queued
           env.emit('JBatchQueued', {
@@ -1521,9 +1532,12 @@ export const process = async (
   });
 
   try {
-    // Update timestamp for live mode
-    // In scenario mode, time is manually controlled via env.timestamp
-    if (!env.scenarioMode) {
+    // Update timestamp
+    // In scenario mode, advance by 100ms per tick (deterministic)
+    // In live mode, use real time
+    if (env.scenarioMode) {
+      env.timestamp = (env.timestamp || Date.now()) + 100; // Advance 100ms per frame
+    } else {
       env.timestamp = Date.now();
     }
 
@@ -1560,9 +1574,18 @@ export const process = async (
           console.log(`🔍 [J-Machine ${jName}] mempool=${mempool.length}, elapsed=${elapsed}ms, blockDelay=${blockDelayMs}ms, ready=${elapsed >= blockDelayMs}`);
         }
 
-        // If mempool has items AND block delay has passed → PROCESS
-        if (mempool.length > 0 && elapsed >= blockDelayMs) {
-          console.log(`⚡ [J-Machine ${jReplica.name}] Processing ${mempool.length} txs (${elapsed}ms elapsed)`);
+        // Check if mempool items are ready (minimum 1 tick delay for visualization)
+        const oldestTxAge = mempool.length > 0 && mempool[0].queuedAt ? env.timestamp - mempool[0].queuedAt : 999999;
+        const mempoolReady = mempool.length > 0 && oldestTxAge >= blockDelayMs;
+
+        if (mempool.length > 0 && !mempoolReady) {
+          console.log(`⏳ [J-Machine] ${mempool.length} pending (age: ${oldestTxAge}ms < ${blockDelayMs}ms) - waiting...`);
+        }
+
+        // If mempool ready AND block delay passed → PROCESS
+        if (mempoolReady) {
+          console.log(`⚡ [5/6] J-Machine ${jReplica.name}: Processing ${mempool.length} txs (oldest: ${oldestTxAge}ms >= ${blockDelayMs}ms)`);
+          console.log(`   Mempool BEFORE execution:`, mempool.map(tx => `${tx.entityId.slice(-4)}:${tx.data.batchSize || '?'}`));
 
           // Emit J-block event
           env.emit('JBlockProcessing', {
@@ -1608,25 +1631,19 @@ export const process = async (
             }
           }
 
-          // Clear mempool ONLY for successful batches (keep failed ones for retry)
+          // Clear mempool immediately after processing (all txs executed)
           const processedCount = mempool.length;
-          let successCount = 0;
-          let failCount = 0;
+          const successCount = processedCount; // All succeeded (failures would throw above)
+          const failCount = 0;
 
-          // Filter mempool: keep only failed JTxs
-          const failedTxs: any[] = [];
-          for (let i = 0; i < mempool.length; i++) {
-            const jTx = mempool[i];
-            // Check if this JTx succeeded (crude: assume all succeeded for now)
-            // TODO: Track per-JTx success in the loop above
-            successCount++;
-          }
+          // CRITICAL: Clear mempool immediately (txs already executed)
+          console.log(`🧹 [J-Machine] Clearing mempool (before: ${jReplica.mempool.length} items)...`);
+          jReplica.mempool = [];
+          console.log(`🧹 [J-Machine] Mempool AFTER clear: ${jReplica.mempool.length} items (should be 0)`);
 
-          // Update J-state ONLY after successful processing
-          jReplica.mempool = failedTxs; // Keep failed txs for retry
           jReplica.lastBlockTimestamp = env.timestamp; // Reset timer for next block
           jReplica.blockNumber = jReplica.blockNumber + 1n; // Increment ONLY when block processed
-          jReplica.blockReady = failedTxs.length > 0; // Ready if retries pending
+          jReplica.blockReady = false; // Block created, mempool empty
 
           console.log(`✅ [J-Machine ${jReplica.name}] Block #${jReplica.blockNumber} finalized (${successCount}/${processedCount} batches)`);
           if (failCount > 0) {
@@ -1648,6 +1665,39 @@ export const process = async (
         }
       }
     }
+
+    // ALWAYS snapshot after tick (full frame chain)
+    // env.extra only adds metadata (subtitle, description) - optional
+    const snapshot: any = {
+      height: env.height,
+      timestamp: env.timestamp,
+      eReplicas: new Map(env.eReplicas),
+      jReplicas: env.jReplicas ? Array.from(env.jReplicas.values()).map(jr => ({
+        ...jr,
+        mempool: [...jr.mempool], // Deep clone mempool array
+        stateRoot: new Uint8Array(jr.stateRoot), // Clone Uint8Array
+      })) : [],
+      runtimeInput: env.runtimeInput,
+      runtimeOutputs: env.pendingOutputs || [],
+      frameLogs: env.frameLogs || [],
+      title: `Frame ${env.history?.length || 0}`, // Default title
+    };
+
+    // Add metadata if provided via snap()
+    if (env.extra) {
+      const { subtitle, description } = env.extra;
+      if (subtitle) {
+        snapshot.subtitle = subtitle;
+        snapshot.title = subtitle.title || snapshot.title; // Override title
+      }
+      if (description) snapshot.description = description;
+      env.extra = undefined; // Clear after use
+    }
+
+    if (!env.history) env.history = [];
+    env.history.push(snapshot);
+
+    console.log(`📸 Snapshot: ${snapshot.title} (${env.history.length} total)`);
 
     // Auto-persist
     await saveEnvToDB(env);
@@ -1789,3 +1839,4 @@ const resolveEntityName = (entityId: string) => resolveEntityNameOriginal(db, en
 const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayInfoFromProfileOriginal(db, entityId);
 
 // Avatar functions are already imported and exported above
+export { BrowserEVM } from './evms/browser-evm.js';

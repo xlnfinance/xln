@@ -190,6 +190,7 @@ function tryFinalizeJBlocks(state: EntityState, threshold: bigint): EntityState 
   // Step 2: Check each group for threshold agreement
   // ─────────────────────────────────────────────────────────────────────────────
   const finalizedHeights: number[] = [];
+  console.log(`   📊 OBSERVATION-GROUPS: ${observationGroups.size} groups, keys=[${Array.from(observationGroups.keys()).join(', ')}]`);
 
   for (const [_key, observations] of observationGroups) {
     // Count UNIQUE signers (ignore duplicate submissions from same signer)
@@ -201,13 +202,25 @@ function tryFinalizeJBlocks(state: EntityState, threshold: bigint): EntityState 
       const jHeight = observations[0].jHeight;
       const jBlockHash = observations[0].jBlockHash;
 
+      // ─────────────────────────────────────────────────────────────────────────
+      // IDEMPOTENCY CHECK: Skip if this block height was already finalized
+      // ─────────────────────────────────────────────────────────────────────────
+      // This can happen if:
+      // 1. Multiple observation groups exist for same height (different hashes)
+      // 2. A previous iteration of this loop already finalized this height
+      // 3. Block was finalized in a previous call (caught at handleJEvent entry)
+      console.log(`   🔍 CHECK-FINALIZE: jHeight=${jHeight}, jBlockChain.length=${state.jBlockChain.length}, heights=[${state.jBlockChain.map(b => b.jHeight).join(',')}]`);
+      const alreadyInChain = state.jBlockChain.some(b => b.jHeight === jHeight);
+      if (alreadyInChain) {
+        console.log(`   ⏭️ SKIP-FINALIZE: block ${jHeight} already in jBlockChain`);
+        continue;
+      }
+
       console.log(`   ✅ J-BLOCK FINALIZED: height=${jHeight} (${signerCount}/${threshold} signers)`);
 
       // ─────────────────────────────────────────────────────────────────────────
       // Step 3: Merge events from all observations
       // ─────────────────────────────────────────────────────────────────────────
-      // All honest signers should see identical events. We merge/dedup in case
-      // of minor ordering differences or duplicate submissions.
       const events = mergeSignerObservations(observations);
 
       // ─────────────────────────────────────────────────────────────────────────
@@ -221,17 +234,25 @@ function tryFinalizeJBlocks(state: EntityState, threshold: bigint): EntityState 
         signerCount,
       };
 
+      // CRITICAL: Add to jBlockChain BEFORE applying events
+      // This prevents duplicate finalization in subsequent loop iterations
+      state.jBlockChain.push(finalized);
+      state.lastFinalizedJHeight = jHeight;
+      finalizedHeights.push(jHeight);
+      console.log(`   ✅ Added block ${jHeight} to jBlockChain (length: ${state.jBlockChain.length})`);
+
       // ─────────────────────────────────────────────────────────────────────────
       // Step 5: Apply all events from this finalized block
       // ─────────────────────────────────────────────────────────────────────────
       for (const event of events) {
         state = applyFinalizedJEvent(state, event);
+        // applyFinalizedJEvent clones state - ensure jBlockChain preserved
+        if (!state.jBlockChain.some(b => b.jHeight === jHeight)) {
+          console.log(`   ⚠️  CLONE LOST jBlockChain - restoring block ${jHeight}`);
+          state.jBlockChain.push(finalized);
+          state.lastFinalizedJHeight = jHeight;
+        }
       }
-
-      // Update entity's j-block tracking
-      state.lastFinalizedJHeight = Math.max(state.lastFinalizedJHeight, jHeight);
-      state.jBlockChain.push(finalized);
-      finalizedHeights.push(jHeight);
 
       console.log(`   📦 Applied ${events.length} events from j-block ${jHeight}`);
     }
@@ -341,7 +362,9 @@ function applyFinalizedJEvent(entityState: EntityState, event: JurisdictionEvent
     const decimals = getTokenDecimals(tokenIdNum);
 
     // Update own reserves based on the settlement (entity-level)
-    newState.reserves.set(String(tokenId), BigInt(ownReserve as string | number | bigint));
+    if (ownReserve) {
+      newState.reserves.set(String(tokenId), BigInt(ownReserve as string | number | bigint));
+    }
 
     // DIRECT UPDATE - J-machine is authoritative
     const account = newState.accounts.get(counterpartyEntityId as string);

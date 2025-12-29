@@ -6,7 +6,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { panelBridge } from '../utils/panelBridge';
-  import { browserVMProvider } from '../utils/browserVMProvider';
+  // BrowserVM accessed via window.__xlnBrowserVM (set by View.svelte)
   import type { Writable } from 'svelte/store';
 
   // --- PROPS (passed from View.svelte) ---
@@ -65,14 +65,14 @@
   }
 
   async function fetchInsuranceData() {
-    if (!selectedEntityId || !browserVMProvider.isInitialized()) return;
+    if (!selectedEntityId || !(window as any).__xlnBrowserVM.isInitialized()) return;
 
     isLoading = true;
     errorMessage = null;
     try {
       // Use the function implemented by Claude to get on-chain insurance data
-      const lines = await browserVMProvider.getInsuranceLines(selectedEntityId);
-      insuranceLines = lines.map(line => ({
+      const lines = await (window as any).__xlnBrowserVM.getInsuranceLines(selectedEntityId);
+      insuranceLines = lines.map((line: any) => ({
         ...line,
         // Convert BigInts from contract to something more usable if needed
         remaining: BigInt(line.remaining),
