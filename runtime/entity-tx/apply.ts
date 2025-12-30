@@ -227,16 +227,16 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
     if (entityTx.type === 'openAccount') {
       const targetEntityId = entityTx.data.targetEntityId;
-      // Use canonical key for account storage (both entities use same key)
-      const accountKey = canonicalAccountKey(entityState.entityId, targetEntityId);
+      // Account keyed by counterparty ID (simpler than canonical)
+      const counterpartyId = targetEntityId;
       const isLeft = entityState.entityId < targetEntityId;
 
-      if (entityState.accounts.has(accountKey)) {
-        console.log(`💳 OPEN-ACCOUNT: Account with ${formatEntityId(targetEntityId)} already exists, skipping duplicate request`);
+      if (entityState.accounts.has(counterpartyId)) {
+        console.log(`💳 OPEN-ACCOUNT: Account with ${formatEntityId(counterpartyId)} already exists, skipping duplicate request`);
         return { newState: entityState, outputs: [] };
       }
 
-      console.log(`💳 OPEN-ACCOUNT: Opening account with ${targetEntityId} (canonical key: ${accountKey.slice(-20)})`);
+      console.log(`💳 OPEN-ACCOUNT: Opening account with ${counterpartyId} (counterparty: ${counterpartyId.slice(-4)})`);
 
       // Emit account opening event
       env.emit('AccountOpening', {
@@ -250,19 +250,19 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // Add chat message about account opening
       addMessage(newState, `💳 Opening account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);
 
-      // STEP 1: Create local account machine with CANONICAL representation
-      if (!newState.accounts.has(accountKey)) {
-        console.log(`💳 LOCAL-ACCOUNT: Creating local account with Entity ${formatEntityId(targetEntityId)}...`);
+      // STEP 1: Create local account machine
+      if (!newState.accounts.has(counterpartyId)) {
+        console.log(`💳 LOCAL-ACCOUNT: Creating local account with Entity ${formatEntityId(counterpartyId)}...`);
 
         // CONSENSUS FIX: Start with empty deltas - let all delta creation happen through transactions
         // This ensures both sides have identical delta Maps (matches Channel.ts pattern)
         const initialDeltas = new Map<number, Delta>();
 
-        // CANONICAL: Store leftEntity/rightEntity (sorted), NOT counterpartyEntityId
-        const leftEntity = isLeft ? entityState.entityId : targetEntityId;
-        const rightEntity = isLeft ? targetEntityId : entityState.entityId;
+        // CANONICAL: Store leftEntity/rightEntity (sorted) for AccountMachine internals
+        const leftEntity = isLeft ? entityState.entityId : counterpartyId;
+        const rightEntity = isLeft ? counterpartyId : entityState.entityId;
 
-        newState.accounts.set(accountKey, {
+        newState.accounts.set(counterpartyId, {
           leftEntity,
           rightEntity,
           mempool: [],
@@ -293,7 +293,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           // Removed isProposer - use isLeft() function like old_src Channel.ts
           proofHeader: {
             fromEntity: entityState.entityId,  // Perspective-dependent for signing
-            toEntity: targetEntityId,
+            toEntity: counterpartyId,
             cooperativeNonce: 0,
             disputeNonce: 0,
           },
@@ -316,7 +316,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`💳 Adding account setup transactions to local mempool for ${formatEntityId(entityTx.data.targetEntityId)}`);
 
       // Get the account machine we just created
-      const localAccount = newState.accounts.get(accountKey);
+      const localAccount = newState.accounts.get(counterpartyId);
       if (!localAccount) {
         throw new Error(`CRITICAL: Account machine not found after creation`);
       }
@@ -335,7 +335,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`   Transactions: [add_delta] - credit limits start at 0, must be explicitly set`);
 
       // Add success message to chat
-      addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(targetEntityId)}`);
+      addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
 
       // CRITICAL: Notify counterparty to create mirror account
       // Without this, Hub won't know about Alice-Hub account when j-events arrive!
