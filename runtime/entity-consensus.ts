@@ -891,7 +891,7 @@ export const applyEntityFrame = async (
         return false;
       }
       if (accountMachine.pendingFrame) {
-        console.log(`🔍 FILTER: Account ${accountId.slice(-8)} has pendingFrame - SKIP (will batch on ACK)`);
+        console.log(`🔍 FILTER: Account ${accountId.slice(-8)} has pendingFrame h${accountMachine.pendingFrame.height} - SKIP (will batch on ACK)`);
         return false;
       }
       console.log(`🔍 FILTER: Account ${accountId.slice(-8)} READY - proposing (mempool: ${accountMachine.mempool.length})`);
@@ -936,8 +936,6 @@ export const applyEntityFrame = async (
 
           // Add events to entity messages with size limiting
           addMessages(currentEntityState, proposal.events);
-        } else if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
-          deferredAccounts.set(accountKey, true);
         }
       }
     }
