@@ -109,6 +109,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       requestedRebalance: new Map(), // Phase 2: C→R withdrawal tracking
       locks: new Map(), // HTLC: Empty locks map
       swapOffers: new Map(), // Swap: Empty offers map
+      // Bilateral J-event consensus
+      leftJObservations: [],
+      rightJObservations: [],
+      jEventChain: [],
+      lastFinalizedJHeight: 0,
     };
 
     newState.accounts.set(input.fromEntityId, accountMachine);
@@ -140,8 +145,37 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       if (isNewFrame && justCommittedFrame?.accountTxs) {
         console.log(`🔍 HTLC-CHECK: isNewFrame=${isNewFrame}, inputHeight=${justCommittedFrame.height}, currentHeight=${accountMachine.currentHeight}`);
         console.log(`🔍 HTLC-CHECK: accountMachine.locks.size=${accountMachine.locks.size}`);
+        console.log(`🔍 FRAME-TXS: ${justCommittedFrame.accountTxs.length} txs in frame:`, justCommittedFrame.accountTxs.map(tx => tx.type));
         for (const accountTx of justCommittedFrame.accountTxs) {
           console.log(`🔍 HTLC-CHECK: Checking committed tx type=${accountTx.type}`);
+
+          // === J-EVENT BILATERAL CONSENSUS ===
+          if (accountTx.type === 'j_event_claim') {
+            const { jHeight, jBlockHash, events, observedAt } = accountTx.data;
+            console.log(`📥 j_event_claim: Counterparty claims jHeight=${jHeight}`);
+
+            // Determine which side counterparty is
+            const weAreLeft = newState.entityId < accountMachine.counterpartyEntityId;
+            const theyAreLeft = !weAreLeft;
+
+            const obs = { jHeight, jBlockHash, events, observedAt };
+
+            // Store THEIR observation in appropriate array
+            if (theyAreLeft) {
+              accountMachine.leftJObservations.push(obs);
+              console.log(`   📝 Stored LEFT obs from counterparty (${accountMachine.leftJObservations.length} total)`);
+            } else {
+              accountMachine.rightJObservations.push(obs);
+              console.log(`   📝 Stored RIGHT obs from counterparty (${accountMachine.rightJObservations.length} total)`);
+            }
+
+            // Try finalize now that we have counterparty's observation
+            const { tryFinalizeAccountJEvents } = await import('../j-events');
+            tryFinalizeAccountJEvents(accountMachine, accountMachine.counterpartyEntityId, env);
+
+            continue; // Move to next tx
+          }
+
           if (accountTx.type === 'htlc_lock') {
             console.log(`🔍 HTLC-CHECK: Found htlc_lock in committed frame!`);
             const lock = accountMachine.locks.get(accountTx.data.lockId);

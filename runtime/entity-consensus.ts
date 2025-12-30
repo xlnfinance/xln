@@ -720,6 +720,16 @@ export const applyEntityFrame = async (
   for (const entityTx of entityTxs) {
     const { newState, outputs, jOutputs, mempoolOps, swapOffersCreated, swapOffersCancelled } = await applyEntityTx(env, currentEntityState, entityTx);
     currentEntityState = newState;
+
+    // DEBUG: Check account mempools IMMEDIATELY after entityTx
+    if (entityTx.type === 'j_event') {
+      for (const [cpId, acct] of currentEntityState.accounts) {
+        if (acct.mempool.length > 0) {
+          console.log(`🔍 [Frame ${env.height}] AFTER-ENTITY-TX(j_event): Account ${cpId.slice(-4)} mempool:`, acct.mempool.map((tx: any) => tx.type));
+        }
+      }
+    }
+
     allOutputs.push(...outputs);
     if (jOutputs) allJOutputs.push(...jOutputs);
 
@@ -874,7 +884,10 @@ export const applyEntityFrame = async (
 
     for (const counterpartyEntityId of accountsToProposeFrames) {
       const accountMachine = currentEntityState.accounts.get(counterpartyEntityId);
+      console.log(`🔍 [Frame ${env.height}] BEFORE-PROPOSE: Getting account for ${counterpartyEntityId.slice(-4)}`);
       if (accountMachine) {
+        console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME for ${counterpartyEntityId.slice(-4)}: mempool=${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
+        console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: leftJObs=${accountMachine.leftJObservations?.length || 0}, rightJObs=${accountMachine.rightJObservations?.length || 0}`);
         const proposal = await proposeAccountFrame(env, accountMachine);
 
         if (proposal.success && proposal.accountInput) {

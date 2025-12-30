@@ -73,6 +73,44 @@ export async function processAccountTx(
     case 'j_sync':
       return handleJSync(accountMachine, accountTx as Extract<AccountTx, { type: 'j_sync' }>, isOurFrame);
 
+    case 'j_event_claim': {
+      // Bilateral J-event consensus: Counterparty claims they observed a j-event
+      const { jHeight, jBlockHash, events, observedAt } = accountTx.data;
+      console.log(`📥 j_event_claim: Counterparty claims jHeight=${jHeight}, hash=${jBlockHash.slice(0,10)}`);
+
+      // Initialize consensus fields if missing
+      if (!accountMachine.leftJObservations) accountMachine.leftJObservations = [];
+      if (!accountMachine.rightJObservations) accountMachine.rightJObservations = [];
+      if (!accountMachine.jEventChain) accountMachine.jEventChain = [];
+      if (accountMachine.lastFinalizedJHeight === undefined) accountMachine.lastFinalizedJHeight = 0;
+
+      // Determine which side counterparty is (they're the OTHER side from us)
+      // accountMachine.proofHeader.fromEntity = our entity ID
+      // accountMachine.counterpartyEntityId = their entity ID
+      const weAreLeft = accountMachine.proofHeader.fromEntity < accountMachine.counterpartyEntityId;
+      const theyAreLeft = !weAreLeft;
+
+      console.log(`   🔍 HANDLER: fromEntity=${accountMachine.proofHeader.fromEntity.slice(-4)}, counterparty=${accountMachine.counterpartyEntityId.slice(-4)}`);
+      console.log(`   🔍 HANDLER: weAreLeft=${weAreLeft}, theyAreLeft=${theyAreLeft}`);
+
+      const obs = { jHeight, jBlockHash, events, observedAt };
+
+      // Store THEIR observation in appropriate array
+      if (theyAreLeft) {
+        accountMachine.leftJObservations.push(obs);
+        console.log(`   📝 Stored LEFT obs from counterparty (${accountMachine.leftJObservations.length} total)`);
+      } else {
+        accountMachine.rightJObservations.push(obs);
+        console.log(`   📝 Stored RIGHT obs from counterparty (${accountMachine.rightJObservations.length} total)`);
+      }
+
+      // Try finalize if both sides have matching observations
+      const { tryFinalizeAccountJEvents } = await import('../entity-tx/j-events');
+      tryFinalizeAccountJEvents(accountMachine, accountMachine.counterpartyEntityId, { timestamp: currentTimestamp });
+
+      return { success: true, events: [`📥 J-event claim processed`] };
+    }
+
     // === HTLC HANDLERS ===
     case 'htlc_lock':
       return await handleHtlcLock(

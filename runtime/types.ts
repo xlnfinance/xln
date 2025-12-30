@@ -434,6 +434,16 @@ export type EntityTx =
       data: { targetEntityId: string };
     }
   | {
+      type: 'j_event_account_claim';
+      data: {
+        counterpartyEntityId: string; // Which account this observation is for
+        jHeight: number;
+        jBlockHash: string;
+        events: any[];
+        observedAt: number;
+      };
+    }
+  | {
       type: 'directPayment';
       data: {
         targetEntityId: string;
@@ -661,7 +671,10 @@ export interface HtlcRoute {
 }
 
 export interface AccountMachine {
-  counterpartyEntityId: string;
+  // CANONICAL REPRESENTATION (like Channel.ts - both entities store IDENTICAL structure)
+  leftEntity: string;   // Lower entity ID (canonical left)
+  rightEntity: string;  // Higher entity ID (canonical right)
+
   mempool: AccountTx[]; // Unprocessed account transactions
   currentFrame: AccountFrame; // Current agreed state (includes full transaction history for replay/audit)
   sentTransitions: number; // Number of transitions sent but not yet confirmed
@@ -689,6 +702,12 @@ export interface AccountMachine {
 
   // Rollback support for bilateral disagreements
   rollbackCount: number;
+
+  // Bilateral J-event consensus (2-of-2 agreement on jurisdiction events)
+  leftJObservations: Array<{ jHeight: number; jBlockHash: string; events: any[]; observedAt: number }>;
+  rightJObservations: Array<{ jHeight: number; jBlockHash: string; events: any[]; observedAt: number }>;
+  jEventChain: Array<{ jHeight: number; jBlockHash: string; events: any[]; finalizedAt: number }>;
+  lastFinalizedJHeight: number;
 
   // CHANNEL.TS REFERENCE: Proper message counters (NOT timestamps!)
   sendCounter: number;    // Incremented for each outgoing message
