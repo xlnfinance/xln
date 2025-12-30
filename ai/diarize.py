@@ -79,10 +79,14 @@ def main():
     hf_token = os.getenv("HF_TOKEN")
     if not hf_token:
         try:
-            from huggingface_hub import HfFolder
-            hf_token = HfFolder.get_token()
+            from huggingface_hub import get_token
+            hf_token = get_token()
         except:
-            pass
+            try:
+                from huggingface_hub import HfFolder
+                hf_token = HfFolder.get_token()
+            except:
+                pass
 
     if not hf_token:
         print("ERROR: No HuggingFace token found")

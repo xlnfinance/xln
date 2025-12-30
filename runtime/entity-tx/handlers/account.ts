@@ -58,19 +58,26 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   const allSwapOffersCreated: SwapOfferEvent[] = [];
   const allSwapOffersCancelled: SwapCancelEvent[] = [];
 
-  // Get or create account machine for this counterparty
-  let accountMachine = newState.accounts.get(input.fromEntityId);
+  // Get or create account machine (CANONICAL KEY: both entities use same key)
+  const { canonicalAccountKey } = await import('../state-helpers');
+  const canonicalKey = canonicalAccountKey(state.entityId, input.fromEntityId);
+  let accountMachine = newState.accounts.get(canonicalKey);
   let isNewAccount = false;
 
   if (!accountMachine) {
     isNewAccount = true;
-    console.log(`💳 Creating new account machine for ${input.fromEntityId.slice(-4)}`);
+    console.log(`💳 Creating new account machine for ${input.fromEntityId.slice(-4)} (canonical key: ${canonicalKey.slice(-20)})`);
 
     // CONSENSUS FIX: Start with empty deltas (Channel.ts pattern)
     const initialDeltas = new Map();
 
+    // CANONICAL: Sort entities (left < right) like Channel.ts
+    const leftEntity = state.entityId < input.fromEntityId ? state.entityId : input.fromEntityId;
+    const rightEntity = state.entityId < input.fromEntityId ? input.fromEntityId : state.entityId;
+
     accountMachine = {
-      counterpartyEntityId: input.fromEntityId,
+      leftEntity,
+      rightEntity,
       mempool: [],
       currentFrame: {
         height: 0,
@@ -80,7 +87,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         tokenIds: [],
         deltas: [],
         stateHash: '',
-        byLeft: state.entityId < input.fromEntityId, // Determine perspective
+        byLeft: state.entityId === leftEntity, // Am I left entity?
       },
       sentTransitions: 0,
       ackedTransitions: 0,
@@ -116,7 +123,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       lastFinalizedJHeight: 0,
     };
 
-    newState.accounts.set(input.fromEntityId, accountMachine);
+    // Store with CANONICAL key (both entities use same key)
+    const { canonicalAccountKey } = await import('../state-helpers');
+    const canonicalKey = canonicalAccountKey(state.entityId, input.fromEntityId);
+    newState.accounts.set(canonicalKey, accountMachine);
+    console.log(`✅ Account created with canonical key: ${canonicalKey.slice(-20)}`);
   }
 
   // FINTECH-SAFETY: Ensure accountMachine exists
@@ -155,7 +166,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             console.log(`📥 j_event_claim: Counterparty claims jHeight=${jHeight}`);
 
             // Determine which side counterparty is
-            const weAreLeft = newState.entityId < accountMachine.counterpartyEntityId;
+            const { iAmLeft: weAreLeft, counterparty } = await import('../state-helpers').then(m => m.getAccountPerspective(accountMachine, newState.entityId));
             const theyAreLeft = !weAreLeft;
 
             const obs = { jHeight, jBlockHash, events, observedAt };
@@ -171,7 +182,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
             // Try finalize now that we have counterparty's observation
             const { tryFinalizeAccountJEvents } = await import('../j-events');
-            tryFinalizeAccountJEvents(accountMachine, accountMachine.counterpartyEntityId, env);
+            tryFinalizeAccountJEvents(accountMachine, counterparty, env);
 
             continue; // Move to next tx
           }
@@ -225,9 +236,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               }
 
               // Register route for backward propagation
+              const inboundEntity = newState.entityId === accountMachine.leftEntity ? accountMachine.rightEntity : accountMachine.leftEntity;
               newState.htlcRoutes.set(lock.hashlock, {
                 hashlock: lock.hashlock,
-                inboundEntity: accountMachine.counterpartyEntityId,
+                inboundEntity,
                 inboundLockId: lock.lockId,
                 outboundEntity: actualNextHop,
                 outboundLockId: `${lock.lockId}-fwd`,
