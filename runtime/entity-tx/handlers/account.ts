@@ -58,21 +58,22 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   const allSwapOffersCreated: SwapOfferEvent[] = [];
   const allSwapOffersCancelled: SwapCancelEvent[] = [];
 
-  // Get or create account machine (CANONICAL KEY: both entities use same key)
-  const canonicalKey = canonicalAccountKey(state.entityId, input.fromEntityId);
-  let accountMachine = newState.accounts.get(canonicalKey);
+  // Get or create account machine (KEY: counterparty ID for simpler lookups)
+  // AccountMachine still uses canonical left/right internally
+  const counterpartyId = input.fromEntityId;
+  let accountMachine = newState.accounts.get(counterpartyId);
   let isNewAccount = false;
 
   if (!accountMachine) {
     isNewAccount = true;
-    console.log(`💳 Creating new account machine for ${input.fromEntityId.slice(-4)} (canonical key: ${canonicalKey.slice(-20)})`);
+    console.log(`💳 Creating new account machine for ${counterpartyId.slice(-4)} (counterparty: ${counterpartyId.slice(-4)})`);
 
     // CONSENSUS FIX: Start with empty deltas (Channel.ts pattern)
     const initialDeltas = new Map();
 
-    // CANONICAL: Sort entities (left < right) like Channel.ts
-    const leftEntity = state.entityId < input.fromEntityId ? state.entityId : input.fromEntityId;
-    const rightEntity = state.entityId < input.fromEntityId ? input.fromEntityId : state.entityId;
+    // CANONICAL: Sort entities (left < right) for AccountMachine internals (like Channel.ts)
+    const leftEntity = state.entityId < counterpartyId ? state.entityId : counterpartyId;
+    const rightEntity = state.entityId < counterpartyId ? counterpartyId : state.entityId;
 
     accountMachine = {
       leftEntity,
@@ -102,7 +103,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       receiveCounter: 0,
       proofHeader: {
         fromEntity: state.entityId,
-        toEntity: input.fromEntityId,
+        toEntity: counterpartyId,
         cooperativeNonce: 0,
         disputeNonce: 0,
       },
@@ -122,9 +123,9 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       lastFinalizedJHeight: 0,
     };
 
-    // Store with CANONICAL key (already computed above)
-    newState.accounts.set(canonicalKey, accountMachine);
-    console.log(`✅ Account created with canonical key: ${canonicalKey.slice(-20)}`);
+    // Store with counterparty ID as key (simpler than canonical)
+    newState.accounts.set(counterpartyId, accountMachine);
+    console.log(`✅ Account created with counterparty key: ${counterpartyId.slice(-4)}`);
   }
 
   // FINTECH-SAFETY: Ensure accountMachine exists
@@ -243,7 +244,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 createdTimestamp: env.timestamp
               });
 
-              const nextAccount = newState.accounts.get(canonicalAccountKey(state.entityId, actualNextHop));
+              const nextAccount = newState.accounts.get(actualNextHop); // counterparty ID is key
               if (nextAccount) {
                 // Calculate forwarded amounts/timelocks
                 const { calculateHtlcFee, calculateHtlcFeeAmount } = await import('../../htlc-utils');
@@ -296,7 +297,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         const nextHop = forward.route.length > 1 ? forward.route[1] : null;
 
         if (nextHop) {
-          const nextHopAccountKey = canonicalAccountKey(state.entityId, nextHop);
+          const nextHopAccountKey = nextHop; // counterparty ID is key
           const nextHopAccount = newState.accounts.get(nextHopAccountKey);
           if (nextHopAccount) {
             // Forward full amount (no fees for simplicity)
@@ -534,18 +535,18 @@ export function processOrderbookSwaps(
     const MAX_FILL_RATIO = 65535;
 
     for (const [namespacedOrderId, { filledLots, originalLots }] of fillsPerOrder) {
+      // Parse namespacedOrderId format: "counterpartyId:offerId"
+      // counterpartyId is the Map key used to store the account
       const lastColon = namespacedOrderId.lastIndexOf(':');
       if (lastColon === -1) continue;
       const offerId = namespacedOrderId.slice(lastColon + 1);
-      const accountIdPart = namespacedOrderId.slice(0, lastColon);
+      const accountId = namespacedOrderId.slice(0, lastColon);
 
-      const colonIdx = accountIdPart.indexOf(':', 2);
-      if (colonIdx === -1) continue;
-      const fromEntity = accountIdPart.slice(0, colonIdx);
-      const toEntity = accountIdPart.slice(colonIdx + 1);
-
-      // Determine which account to push to
-      const accountId = hubState.accounts.has(fromEntity) ? fromEntity : toEntity;
+      // Verify account exists in hub's state (canonical key)
+      if (!hubState.accounts.has(accountId)) {
+        console.warn(`⚠️ ORDERBOOK: Account ${accountId.slice(-20)} not found for swap_resolve, skipping`);
+        continue;
+      }
 
       const filledBig = BigInt(filledLots);
       const originalBig = BigInt(originalLots);

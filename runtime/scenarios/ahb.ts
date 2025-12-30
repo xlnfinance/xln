@@ -181,13 +181,9 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
 
 // Get offdelta for a bilateral account (uses LEFT entity's view - canonical)
 function getOffdelta(env: Env, entityA: string, entityB: string, tokenId: number): bigint {
-  // Always use LEFT entity (smaller ID) as canonical source
-  const leftId = entityA < entityB ? entityA : entityB;
-  const rightId = entityA < entityB ? entityB : entityA;
-
-  const [, leftReplica] = findReplica(env, leftId);
-  const canonicalKey = canonicalAccountKey(leftId, rightId);
-  const account = leftReplica?.state?.accounts?.get(canonicalKey);
+  // Use entityA's perspective: lookup account by counterparty (entityB)
+  const [, replicaA] = findReplica(env, entityA);
+  const account = replicaA?.state?.accounts?.get(entityB); // counterparty ID is key
   const delta = account?.deltas?.get(tokenId);
 
   return delta?.offdelta ?? 0n;
@@ -198,20 +194,19 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
   const [, replicaA] = findReplica(env, entityA);
   const [, replicaB] = findReplica(env, entityB);
 
-  // CANONICAL: Both entities use SAME key for account
-  const canonicalKey = canonicalAccountKey(entityA, entityB);
-  const accountFromA = replicaA?.state?.accounts?.get(canonicalKey);
-  const accountFromB = replicaB?.state?.accounts?.get(canonicalKey);
+  // Each entity stores account keyed by counterparty ID
+  const accountFromA = replicaA?.state?.accounts?.get(entityB); // A's view: key=B
+  const accountFromB = replicaB?.state?.accounts?.get(entityA); // B's view: key=A
 
-  console.log(`\n[BILATERAL-SYNC ${label}] Checking ${entityA.slice(-4)}←→${entityB.slice(-4)} (canonical key: ${canonicalKey.slice(-20)}) for token ${tokenId}...`);
+  console.log(`\n[BILATERAL-SYNC ${label}] Checking ${entityA.slice(-4)}←→${entityB.slice(-4)} for token ${tokenId}...`);
 
   // Both sides must have the account
   if (!accountFromA) {
-    console.error(`❌ Entity ${entityA.slice(-4)} has NO account for key ${canonicalKey.slice(-20)}`);
+    console.error(`❌ Entity ${entityA.slice(-4)} has NO account with counterparty ${entityB.slice(-4)}`);
     throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityA.slice(-4)} missing account`);
   }
   if (!accountFromB) {
-    console.error(`❌ Entity ${entityB.slice(-4)} has NO account for key ${canonicalKey.slice(-20)}`);
+    console.error(`❌ Entity ${entityB.slice(-4)} has NO account with counterparty ${entityA.slice(-4)}`);
     throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityB.slice(-4)} missing account`);
   }
 
@@ -766,7 +761,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // ✅ ASSERT Frame 6: Alice-Hub account exists (bidirectional)
     const [, aliceRep6] = findReplica(env, alice.id);
-    const aliceHubAcc6 = aliceRep6?.state?.accounts?.get(canonicalAccountKey(alice.id, hub.id));
+    const aliceHubAcc6 = aliceRep6?.state?.accounts?.get(hub.id);
     if (!aliceHubAcc6) {
       console.error(`❌ Available accounts:`, Array.from(aliceRep6.state.accounts.keys()));
       throw new Error(`ASSERT FAIL Frame 6: Alice-Hub account does NOT exist!`);
@@ -808,7 +803,7 @@ export async function ahb(env: Env): Promise<void> {
     // ✅ ASSERT Frame 7: Both Hub-Bob accounts exist (bidirectional)
     const [, hubRep7] = findReplica(env, hub.id);
     const [, bobRep7] = findReplica(env, bob.id);
-    const canonicalHubBobKey = canonicalAccountKey(hub.id, bob.id);
+    const canonicalHubBobKey = bob.id;
     const hubBobAcc7 = hubRep7?.state?.accounts?.get(canonicalHubBobKey);
     const bobHubAcc7 = bobRep7?.state?.accounts?.get(canonicalHubBobKey);
     if (!hubBobAcc7 || !bobHubAcc7) {
@@ -937,7 +932,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // ✅ ASSERT: R2C delivered - Alice delta.collateral = $500K
     const [, aliceRep9] = findReplica(env, alice.id);
-    const aliceHubKey9 = canonicalAccountKey(alice.id, hub.id);
+    const aliceHubKey9 = hub.id;
     console.log(`🔍 ASSERT Frame 9: Looking up account with key ${aliceHubKey9}`);
     console.log(`🔍 ASSERT Frame 9: Alice has accounts:`, Array.from(aliceRep9.state.accounts.keys()));
     const aliceHubAccount9 = aliceRep9.state.accounts.get(aliceHubKey9);
@@ -1014,7 +1009,7 @@ export async function ahb(env: Env): Promise<void> {
     // Bob (0x0003) > Hub (0x0002) → Bob is RIGHT, Hub is LEFT
     // Bob extending credit sets leftCreditLimit (credit available TO Hub/LEFT)
     const [, bobRep9] = findReplica(env, bob.id);
-    const bobHubAccount9 = bobRep9.state.accounts.get(canonicalAccountKey(bob.id, hub.id));
+    const bobHubAccount9 = bobRep9.state.accounts.get(bob.id);
     const bobDelta9 = bobHubAccount9?.deltas.get(USDC_TOKEN_ID);
     if (!bobDelta9 || bobDelta9.leftCreditLimit !== bobCreditAmount) {
       const actual = bobDelta9?.leftCreditLimit || 0n;
@@ -1194,7 +1189,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // Verify Bob's view
     const [, bobRep] = findReplica(env, bob.id);
-    const bobHubAcc = bobRep.state.accounts.get(canonicalAccountKey(bob.id, hub.id));
+    const bobHubAcc = bobRep.state.accounts.get(bob.id);
     const bobDelta = bobHubAcc?.deltas.get(USDC_TOKEN_ID);
     if (bobDelta) {
       const bobDerived = deriveDelta(bobDelta, false); // Bob is RIGHT
@@ -1389,7 +1384,7 @@ export async function ahb(env: Env): Promise<void> {
     // ✅ Store pre-settlement state for assertions
     const [, alicePreSettle] = findReplica(env, alice.id);
     const [, hubPreSettle] = findReplica(env, hub.id);
-    const ahPreCollateral = alicePreSettle.state.accounts.get(canonicalAccountKey(alice.id, hub.id))?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+    const ahPreCollateral = alicePreSettle.state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
     const hubPreReserve = hubPreSettle.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
     console.log(`   A-H pre-settlement: collateral=${ahPreCollateral}, Hub reserve=${hubPreReserve}`);
 
@@ -1417,7 +1412,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // ✅ ASSERT: A-H collateral decreased by $200K (net-sender pulled)
     const [, aliceRepRebal] = findReplica(env, alice.id);
-    const ahAccountRebal = aliceRepRebal.state.accounts.get(canonicalAccountKey(alice.id, hub.id));
+    const ahAccountRebal = aliceRepRebal.state.accounts.get(hub.id);
     const ahDeltaRebal = ahAccountRebal?.deltas.get(USDC_TOKEN_ID);
     const expectedAHCollateral = ahPreCollateral - rebalanceAmount;
     if (!ahDeltaRebal || ahDeltaRebal.collateral !== expectedAHCollateral) {
@@ -1485,7 +1480,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // ✅ Store pre-settlement state for H-B assertions
     const [, hubPreHBSettle] = findReplica(env, hub.id);
-    const hbPreCollateral = hubPreHBSettle.state.accounts.get(canonicalAccountKey(hub.id, bob.id))?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+    const hbPreCollateral = hubPreHBSettle.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
     const hubPreHBReserve = hubPreHBSettle.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
     console.log(`   H-B pre-settlement: collateral=${hbPreCollateral}, Hub reserve=${hubPreHBReserve}`);
 
@@ -1527,7 +1522,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // ✅ ASSERT: H-B collateral increased by $200K (net-receiver insured)
     const [, hubRepRebal] = findReplica(env, hub.id);
-    const hbAccountRebal = hubRepRebal.state.accounts.get(canonicalAccountKey(hub.id, bob.id));
+    const hbAccountRebal = hubRepRebal.state.accounts.get(bob.id);
     const hbDeltaRebal = hbAccountRebal?.deltas.get(USDC_TOKEN_ID);
     const expectedHBCollateral = hbPreCollateral + rebalanceAmount;
     if (!hbDeltaRebal || hbDeltaRebal.collateral !== expectedHBCollateral) {

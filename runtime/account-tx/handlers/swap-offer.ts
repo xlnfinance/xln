@@ -14,6 +14,7 @@ import { AccountMachine, AccountTx, SwapOffer } from '../../types';
 import { deriveDelta, isLeft } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { formatEntityId } from '../../utils';
+import { canonicalAccountKey } from '../../state-helpers';
 
 export async function handleSwapOffer(
   accountMachine: AccountMachine,
@@ -108,13 +109,16 @@ export async function handleSwapOffer(
   console.log(`📊 SWAP-OFFER: from=${formatEntityId(fromEntity)}, to=${formatEntityId(toEntity)}, makerIsLeft=${makerIsLeft}, maker=${formatEntityId(makerId)}`);
 
   // Return swap offer event for orderbook integration (hub processes these)
+  // accountId = the Map key hub uses to store this account
+  // Hub stores accounts keyed by counterparty: accounts.get(alice.id), accounts.get(bob.id)
+  // So accountId = makerId (Hub's counterparty for this account)
   return {
     success: true,
     events,
     swapOfferCreated: {
       offerId,
       makerId,
-      accountId: `${fromEntity}:${toEntity}`,
+      accountId: makerId, // Hub's Map key = maker's entity ID
       giveTokenId,
       giveAmount,
       wantTokenId,

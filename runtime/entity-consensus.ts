@@ -787,38 +787,36 @@ export const applyEntityFrame = async (
       // We need to find which account got the payment and mark it for frame proposal
 
       // Check all accounts to see which one has new mempool items
-      // Note: accountKey is now the canonical key (e.g., "alice:bob")
-      for (const [accountKey, accountMachine] of currentEntityState.accounts) {
+      // Note: accountKey is counterparty ID (e.g., "alice", "bob")
+      for (const [counterpartyId, accountMachine] of currentEntityState.accounts) {
         const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
-        console.log(`🔍 Checking account ${accountKey.slice(-10)}: mempool=${accountMachine.mempool.length}, isLeft=${isLeft}, pendingFrame=${!!accountMachine.pendingFrame}`);
+        console.log(`🔍 Checking account ${counterpartyId.slice(-10)}: mempool=${accountMachine.mempool.length}, isLeft=${isLeft}, pendingFrame=${!!accountMachine.pendingFrame}`);
         if (accountMachine.mempool.length > 0) {
-          proposableAccounts.add(accountKey);
-          console.log(`🔄 ✅ Added ${accountKey.slice(-10)} to proposableAccounts (has ${accountMachine.mempool.length} mempool items)`);
+          proposableAccounts.add(counterpartyId);
+          console.log(`🔄 ✅ Added ${counterpartyId.slice(-10)} to proposableAccounts (has ${accountMachine.mempool.length} mempool items)`);
         }
       }
     } else if (entityTx.type === 'openAccount' && entityTx.data) {
       // Account opened - may need initial frame
       const targetEntity = entityTx.data.targetEntityId;
-      // Use canonical key for account lookup
-      const openAccountKey = canonicalAccountKey(currentEntityState.entityId, targetEntity);
-      const accountMachine = currentEntityState.accounts.get(openAccountKey);
+      // Account keyed by counterparty ID
+      const accountMachine = currentEntityState.accounts.get(targetEntity);
       if (accountMachine) {
         const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
         if (isLeft && accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
-          proposableAccounts.add(openAccountKey);
+          proposableAccounts.add(targetEntity);
           console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (new account opened)`);
         }
       }
     } else if (entityTx.type === 'extendCredit' && entityTx.data) {
       // Credit extension - mark account for proposal
       const counterpartyId = entityTx.data.counterpartyEntityId;
-      // Use canonical key for account lookup
-      const extendCreditKey = canonicalAccountKey(currentEntityState.entityId, counterpartyId);
-      const accountMachine = currentEntityState.accounts.get(extendCreditKey);
+      // Account keyed by counterparty ID
+      const accountMachine = currentEntityState.accounts.get(counterpartyId);
       console.log(`💳 EXTEND-CREDIT: Checking account ${counterpartyId.slice(0,10)} for proposal`);
       console.log(`💳 EXTEND-CREDIT: accountMachine exists: ${!!accountMachine}, mempool: ${accountMachine?.mempool?.length || 0}`);
       if (accountMachine && accountMachine.mempool.length > 0) {
-        proposableAccounts.add(extendCreditKey);
+        proposableAccounts.add(counterpartyId);
         console.log(`💳 ✅ Added ${counterpartyId.slice(0,10)} to proposableAccounts (credit extension)`);
       }
     }
