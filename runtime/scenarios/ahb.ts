@@ -667,17 +667,24 @@ export async function ahb(env: Env): Promise<void> {
     // ============================================================================
     console.log('\n🔄 FRAME 5: Alice → Bob R2R - TX ENTERS MEMPOOL (PENDING)');
 
-    // Entity creates payFromReserve tx → generates jOutput → process() auto-queues to J-Machine
+    // Alice creates reserve_to_reserve tx → generates jOutput → process() auto-queues to J-Machine
     const r2rTx3: EntityInput = {
       entityId: alice.id,
       signerId: alice.signer,
-      entityTxs: [{
-        type: 'payFromReserve' as any,
-        kind: 'payFromReserve',
-        targetEntityId: bob.id,
-        tokenId: USDC_TOKEN_ID,
-        amount: usd(500_000),
-      }]
+      entityTxs: [
+        {
+          type: 'reserve_to_reserve',
+          data: {
+            toEntityId: bob.id,
+            tokenId: USDC_TOKEN_ID,
+            amount: usd(500_000),
+          }
+        },
+        {
+          type: 'j_broadcast',
+          data: {}
+        }
+      ]
     };
 
     snap(env, 'R2R: Alice → Bob Enters Mempool', {
@@ -699,10 +706,10 @@ export async function ahb(env: Env): Promise<void> {
     // ============================================================================
     console.log('\n⚡ FRAME 6: J-Block #2 - Execute Alice → Bob Transfer');
 
-    // Execute Alice → Bob R2R
-    await browserVM.reserveToReserve(alice.id, bob.id, USDC_TOKEN_ID, usd(500_000));
+    // J-Machine processes mempool (Alice's R2R batch from Frame 5)
+    await process(env);
 
-    // Process j_events from BrowserVM
+    // Process j-events from BrowserVM execution
     await processJEvents(env);
 
     // NOTE: J-Machine block processing in process() automatically handles mempool clearing
@@ -1312,9 +1319,6 @@ export async function ahb(env: Env): Promise<void> {
 
     const rebalanceAmount = usd(200_000);
 
-    // Import jBatch functions for BrowserVM settlements
-    const { batchAddSettlement, initJBatch } = await import('../j-batch');
-
     // ============================================================================
     // STEP 22: Alice-Hub Settlement (Alice withdraws to pay Hub on-chain)
     // ============================================================================
@@ -1325,26 +1329,26 @@ export async function ahb(env: Env): Promise<void> {
     // Invariant: leftDiff + rightDiff + collateralDiff = 0
     //   +$250K + 0 + (-$250K) = 0 ✓
 
-    // Create jBatch for Alice with the settlement
-    const [, aliceReplicaRebal] = findReplica(env, alice.id);
-    if (!aliceReplicaRebal.state.jBatchState) {
-      aliceReplicaRebal.state.jBatchState = initJBatch();
-    }
-
-    // Add settlement to batch: Alice(LEFT) ↔ Hub(RIGHT)
-    // Alice owes Hub $200K from off-chain payment. Hub withdraws from A-H collateral.
-    batchAddSettlement(
-      aliceReplicaRebal.state.jBatchState,
-      alice.id,  // leftEntity (0x0001)
-      hub.id,    // rightEntity (0x0002)
-      [{
-        tokenId: USDC_TOKEN_ID,
-        leftDiff: 0n,                      // Alice reserve unchanged (she already spent via payment)
-        rightDiff: rebalanceAmount,        // Hub reserve +$200K (Hub receives what Alice owed)
-        collateralDiff: -rebalanceAmount,  // Account collateral -$200K
-        ondeltaDiff: rebalanceAmount,      // ondelta +$200K (settles off-chain debt)
-      }]
-    );
+    // Alice creates settlement via EntityTx (PROPER RJEA FLOW)
+    await process(env, [{
+      entityId: alice.id,
+      signerId: alice.signer,
+      entityTxs: [
+        {
+          type: 'createSettlement',
+          data: {
+            counterpartyEntityId: hub.id,
+            diffs: [{
+              tokenId: USDC_TOKEN_ID,
+              leftDiff: 0n,                      // Alice reserve unchanged (she already spent via payment)
+              rightDiff: rebalanceAmount,        // Hub reserve +$200K (Hub receives what Alice owed)
+              collateralDiff: -rebalanceAmount,  // Account collateral -$200K
+              ondeltaDiff: rebalanceAmount,      // ondelta +$200K (settles off-chain debt)
+            }]
+          }
+        }
+      ]
+    }]);
 
     snap(env, 'Rebalancing 1/2: Pull from Net-Sender', {
       description: 'Frame 22: Alice-Hub Settlement initiated',
@@ -1436,25 +1440,26 @@ export async function ahb(env: Env): Promise<void> {
     // Invariant: leftDiff + rightDiff + collateralDiff = 0
     //   (-$200K) + 0 + (+$200K) = 0 ✓
 
-    // Create jBatch for Hub with the settlement
-    const [, hubReplicaRebal] = findReplica(env, hub.id);
-    if (!hubReplicaRebal.state.jBatchState) {
-      hubReplicaRebal.state.jBatchState = initJBatch();
-    }
-
-    // Add settlement to batch: Hub(LEFT) ↔ Bob(RIGHT)
-    batchAddSettlement(
-      hubReplicaRebal.state.jBatchState,
-      hub.id,   // leftEntity (0x0002)
-      bob.id,   // rightEntity (0x0003)
-      [{
-        tokenId: USDC_TOKEN_ID,
-        leftDiff: -rebalanceAmount,        // Hub reserve -$200K
-        rightDiff: 0n,                      // Bob reserve unchanged
-        collateralDiff: rebalanceAmount,   // Account collateral +$200K
-        ondeltaDiff: rebalanceAmount,       // ondelta +$200K (insures Bob's position)
-      }]
-    );
+    // Hub creates settlement via EntityTx (PROPER RJEA FLOW)
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [
+        {
+          type: 'createSettlement',
+          data: {
+            counterpartyEntityId: bob.id,
+            diffs: [{
+              tokenId: USDC_TOKEN_ID,
+              leftDiff: -rebalanceAmount,        // Hub reserve -$200K
+              rightDiff: 0n,                      // Bob reserve unchanged
+              collateralDiff: rebalanceAmount,   // Account collateral +$200K
+              ondeltaDiff: rebalanceAmount,       // ondelta +$200K (insures Bob's position)
+            }]
+          }
+        }
+      ]
+    }]);
 
     // ✅ Store pre-settlement state for H-B assertions
     const [, hubPreHBSettle] = findReplica(env, hub.id);
