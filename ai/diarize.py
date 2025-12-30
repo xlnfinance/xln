@@ -8,6 +8,7 @@ import sys
 import json
 from pathlib import Path
 import torch
+import torchaudio
 from pyannote.audio import Pipeline
 
 def merge_speakers_with_transcript(diarization, transcript_json):
@@ -94,9 +95,14 @@ def main():
     if device == "mps":
         pipeline.to(torch.device("mps"))
 
-    # Run diarization
-    print(f"Diarizing {audio_path}...")
-    diarization = pipeline(audio_path)
+    # Load audio file (workaround for torchcodec issue)
+    print(f"Loading {audio_path}...")
+    waveform, sample_rate = torchaudio.load(audio_path)
+
+    # Run diarization with preloaded audio
+    print(f"Diarizing...")
+    audio_dict = {"waveform": waveform, "sample_rate": sample_rate}
+    diarization = pipeline(audio_dict)
 
     print(f"Found {len(set(diarization.labels()))} speakers")
 

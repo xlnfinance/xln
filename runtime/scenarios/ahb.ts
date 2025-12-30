@@ -338,7 +338,7 @@ export async function ahb(env: Env): Promise<void> {
       blockNumber: 0n,
       stateRoot: new Uint8Array(32), // Will be captured from BrowserVM
       mempool: [] as any[],
-      blockDelayMs: 200,             // 200ms block time (2 ticks minimum for visualization)
+      blockDelayMs: 100,             // 100ms block time (1 tick minimum for visualization)
       lastBlockTimestamp: env.timestamp,  // Use env.timestamp for determinism
       position: { x: 0, y: 600, z: 0 }, // Match EVM jMachine.position for consistent entity placement
       contracts: {
@@ -494,29 +494,12 @@ export async function ahb(env: Env): Promise<void> {
     // NOTE: BrowserVM is reset in View.svelte at runtime creation time
     // This ensures fresh state on every page load/HMR
 
-    // Hub creates mint_reserves tx → generates jOutput with mint batch
-    await process(env, [{
-      entityId: hub.id,
-      signerId: hub.signer,
-      entityTxs: [
-        {
-          type: 'mintReserves',
-          data: {
-            tokenId: USDC_TOKEN_ID,
-            amount: usd(10_000_000),
-          }
-        },
-        {
-          type: 'j_broadcast',
-          data: {}
-        }
-      ]
-    }]);
+    // Mint is ADMINISTRATIVE operation (onlyAdmin), not entity→J batch flow
+    // Use debugFundReserves (calls Depository.mintToReserve) directly
+    const mintEvents = await browserVM.debugFundReserves(hub.id, USDC_TOKEN_ID, usd(10_000_000));
+    console.log(`✅ Minted $10M USDC to Hub (events: ${mintEvents.length})`);
 
-    // Wait for J-Machine to execute mint (next tick after blockDelay)
-    await process(env); // Tick to execute J-Machine mempool
-
-    // Process j-events from execution
+    // Feed mint events back to entity (ReserveUpdated)
     await processJEvents(env);
 
     // ✅ ASSERT: J-event delivered - Hub reserve updated
@@ -604,17 +587,24 @@ export async function ahb(env: Env): Promise<void> {
     // ============================================================================
     console.log('\n🔄 FRAME 3: Hub → Bob R2R - TX ENTERS MEMPOOL (PENDING)');
 
-    // Entity creates payFromReserve tx → generates jOutput → process() auto-queues to J-Machine
+    // Hub creates reserve_to_reserve tx → generates jOutput → process() auto-queues to J-Machine
     const r2rTx2: EntityInput = {
       entityId: hub.id,
       signerId: hub.signer,
-      entityTxs: [{
-        type: 'payFromReserve' as any,
-        kind: 'payFromReserve',
-        targetEntityId: bob.id,
-        tokenId: USDC_TOKEN_ID,
-        amount: usd(2_000_000),
-      }]
+      entityTxs: [
+        {
+          type: 'reserve_to_reserve',
+          data: {
+            toEntityId: bob.id,
+            tokenId: USDC_TOKEN_ID,
+            amount: usd(2_000_000),
+          }
+        },
+        {
+          type: 'j_broadcast',
+          data: {}
+        }
+      ]
     };
 
     snap(env, 'R2R #2: TX Enters J-Machine Mempool', {
@@ -636,11 +626,12 @@ export async function ahb(env: Env): Promise<void> {
     // ============================================================================
     console.log('\n⚡ FRAME 4: J-Block #1 - Execute Hub Fundings');
 
-    // Execute Hub's 2 funding R2Rs
-    await browserVM.reserveToReserve(hub.id, alice.id, USDC_TOKEN_ID, usd(3_000_000));
-    await browserVM.reserveToReserve(hub.id, bob.id, USDC_TOKEN_ID, usd(2_000_000));
+    // J-Machine processes mempool (Hub's 2 R2R batches)
+    // IMPORTANT: Frame 2 broadcast one batch, Frame 3 broadcast another - mempool has 2 batches BUT
+    // j_broadcast CLEARS jBatch after creating jOutput, so we have 2 SEPARATE batches each with 1 R2R
+    await process(env);
 
-    // Process j_events from BrowserVM
+    // Process j-events from BrowserVM execution
     await processJEvents(env);
 
     // NOTE: J-Machine block processing in process() automatically:
@@ -836,30 +827,34 @@ export async function ahb(env: Env): Promise<void> {
 
     // PROPER R→E→A FLOW for R2C:
     // Step 1: Entity creates deposit_collateral EntityTx → adds to jBatch
+    // Step 2: Entity broadcasts via j_broadcast → generates jOutput → routes to J-mempool
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
-      entityTxs: [{
-        type: 'deposit_collateral',
-        data: {
-          counterpartyId: hub.id,
-          tokenId: USDC_TOKEN_ID,
-          amount: aliceCollateralAmount
+      entityTxs: [
+        {
+          type: 'deposit_collateral',
+          data: {
+            counterpartyId: hub.id,
+            tokenId: USDC_TOKEN_ID,
+            amount: aliceCollateralAmount
+          }
+        },
+        {
+          type: 'j_broadcast',
+          data: {}
         }
-      }]
+      ]
     }]);
-
-    // Entity already queued batch via jOutput (no manual queuing needed)
-    // deposit_collateral tx generates jOutput → process() adds to J-mempool automatically
 
     // ASSERT: Batch should be in J-Machine mempool now
     const jReplica = env.jReplicas.get('AHB Demo');
     if (!jReplica) throw new Error('J-Machine not found');
-    console.log(`[Frame 8 ASSERT] J-Machine mempool after deposit_collateral: ${jReplica.mempool.length} items`);
+    console.log(`[Frame 8 ASSERT] J-Machine mempool after j_broadcast: ${jReplica.mempool.length} items`);
     if (jReplica.mempool.length === 0) {
-      throw new Error('ASSERT FAIL: J-Machine mempool is EMPTY after deposit_collateral! jOutput not generated or not routed.');
+      throw new Error('ASSERT FAIL: J-Machine mempool is EMPTY after j_broadcast! jOutput not routed.');
     }
-    console.log(`✅ ASSERT: Batch in J-Machine mempool`);
+    console.log(`✅ ASSERT: R2C batch in J-Machine mempool`);
 
     // Snapshot - shows batch pending in mempool
     snap(env, 'J-Batch Pending: Alice R2C $500K', {
@@ -901,37 +896,22 @@ export async function ahb(env: Env): Promise<void> {
     await process(env);
 
     // ============================================================================
-    // STEP 9: Alice R2C - Broadcast (BLOCK CREATION)
+    // STEP 9: Alice R2C - J-Machine Block Execution
     // ============================================================================
-    console.log('\n💰 FRAME 9: Alice R2C - Broadcast jBatch');
+    console.log('\n💰 FRAME 9: J-Machine processes R2C batch from mempool');
 
     // DEBUG: Check Alice's on-chain reserves + EntityProvider registration
     const aliceOnChainReserves = await browserVM.getReserves(alice.id, USDC_TOKEN_ID);
     console.log(`[Frame 9 DEBUG] Alice on-chain reserves: ${aliceOnChainReserves / 10n**18n}M`);
 
-    // Entities were registered earlier (line 687), trust the registration
+    // Entities were registered earlier, trust the registration
     console.log(`[Frame 9 DEBUG] Alice entity #2, Hub entity #3 (registered on-chain)`);
 
-    // Get fresh Alice replica with jBatchState from Step 8
-    const [, aliceReplicaForBatch] = findReplica(env, alice.id);
+    // J-Machine processes mempool automatically (batch already queued in STEP 8)
+    // process() triggers J-Machine mempool execution → BrowserVM.processBatch → events
+    await process(env);
 
-    // Step 3: Broadcast jBatch to BrowserVM (triggers on-chain tx)
-    if (aliceReplicaForBatch.state.jBatchState) {
-      console.log(`[Frame 9] Broadcasting jBatch...`);
-      const { broadcastBatch } = await import('../j-batch');
-      const result = await broadcastBatch(alice.id, aliceReplicaForBatch.state.jBatchState, null, browserVM);
-      console.log(`[Frame 9] broadcastBatch completed, returned ${result.events?.length || 0} events`);
-
-      // j-watcher auto-queues events via BrowserVM.onAny() subscription
-      // Events are transformed to EntityInput format automatically
-      console.log(`[Frame 9] Events emitted to j-watcher subscription`);
-
-      // NOTE: J-Machine block processing in process() automatically handles mempool clearing
-    } else {
-      console.error(`[Frame 9] ❌ NO jBatchState!`);
-    }
-
-    // Step 4: Process j_events from BrowserVM (SettlementProcessed updates delta.collateral)
+    // Process j-events from BrowserVM execution (AccountSettled updates delta.collateral)
     await processJEvents(env);
 
     // ✅ ASSERT: R2C delivered - Alice delta.collateral = $500K
@@ -1333,7 +1313,7 @@ export async function ahb(env: Env): Promise<void> {
     const rebalanceAmount = usd(200_000);
 
     // Import jBatch functions for BrowserVM settlements
-    const { batchAddSettlement, initJBatch, broadcastBatch } = await import('../j-batch');
+    const { batchAddSettlement, initJBatch } = await import('../j-batch');
 
     // ============================================================================
     // STEP 22: Alice-Hub Settlement (Alice withdraws to pay Hub on-chain)
@@ -1387,20 +1367,21 @@ export async function ahb(env: Env): Promise<void> {
     const hubPreReserve = hubPreSettle.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
     console.log(`   A-H pre-settlement: collateral=${ahPreCollateral}, Hub reserve=${hubPreReserve}`);
 
-    // Broadcast settlement to BrowserVM
-    console.log('🏦 Broadcasting Alice-Hub settlement jBatch to BrowserVM...');
-    const ahSettleResult = await broadcastBatch(alice.id, aliceReplicaRebal.state.jBatchState, null, browserVM);
-    if (!ahSettleResult.success) {
-      throw new Error(`❌ ASSERTION FAILED: Alice-Hub settlement failed: ${ahSettleResult.error || 'unknown error'}`);
-    }
-    if (!ahSettleResult.events || ahSettleResult.events.length === 0) {
-      throw new Error(`❌ ASSERTION FAILED: Alice-Hub settlement returned no events (expected AccountSettled)`);
-    }
-    console.log(`✅ Alice-Hub settlement broadcast: ${ahSettleResult.events.length} events`);
+    // Broadcast settlement to J-Machine via jOutput pattern
+    console.log('🏦 Broadcasting Alice-Hub settlement jBatch via j_broadcast...');
+    await process(env, [{
+      entityId: alice.id,
+      signerId: alice.signer,
+      entityTxs: [{
+        type: 'j_broadcast',
+        data: {}
+      }]
+    }]);
 
-    // Queue events for processing
+    // Wait for J-Machine to execute settlement batch
+    await process(env);
 
-    // Process j_events from BrowserVM (SettlementProcessed events)
+    // Process j_events from BrowserVM (AccountSettled events)
     await processJEvents(env);
 
     // Frame 23: Process any pending outputs
@@ -1495,20 +1476,21 @@ export async function ahb(env: Env): Promise<void> {
     });
     await process(env);
 
-    // Broadcast settlement to BrowserVM
-    console.log('🏦 Broadcasting Hub-Bob settlement jBatch to BrowserVM...');
-    const hbSettleResult = await broadcastBatch(hub.id, hubReplicaRebal.state.jBatchState, null, browserVM);
-    if (!hbSettleResult.success) {
-      throw new Error(`❌ ASSERTION FAILED: Hub-Bob settlement failed: ${hbSettleResult.error || 'unknown error'}`);
-    }
-    if (!hbSettleResult.events || hbSettleResult.events.length === 0) {
-      throw new Error(`❌ ASSERTION FAILED: Hub-Bob settlement returned no events (expected AccountSettled)`);
-    }
-    console.log(`✅ Hub-Bob settlement broadcast: ${hbSettleResult.events.length} events`);
+    // Broadcast settlement to J-Machine via jOutput pattern
+    console.log('🏦 Broadcasting Hub-Bob settlement jBatch via j_broadcast...');
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'j_broadcast',
+        data: {}
+      }]
+    }]);
 
-    // Queue events for processing
+    // Wait for J-Machine to execute settlement batch
+    await process(env);
 
-    // Process j_events from BrowserVM (SettlementProcessed events)
+    // Process j_events from BrowserVM (AccountSettled events)
     await processJEvents(env);
 
     // Frame 25: Process any pending outputs
