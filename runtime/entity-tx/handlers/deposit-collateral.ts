@@ -60,31 +60,13 @@ export async function handleDepositCollateral(
   );
 
   addMessage(newState,
-    `📦 Queued R→C: ${amount} token ${tokenId} to account with ${counterpartyId.slice(-4)} (will broadcast in next batch)`
+    `📦 Queued R→C: ${amount} token ${tokenId} to account with ${counterpartyId.slice(-4)} (use j_broadcast to commit)`
   );
 
   console.log(`✅ deposit_collateral: Added to jBatch for ${entityState.entityId.slice(-4)}`);
   console.log(`   Counterparty: ${counterpartyId.slice(-4)}`);
   console.log(`   Token: ${tokenId}, Amount: ${amount}`);
+  console.log(`   ⚠️  Remember to send j_broadcast tx to commit batch to J-Machine`);
 
-  // Generate JTx output to broadcast batch to J-Machine
-  const { getBatchSize } = await import('../../j-batch');
-  const batchSize = getBatchSize(newState.jBatchState.batch);
-
-  const jOutputs = [{
-    jurisdictionName: entityState.config.jurisdiction?.name || 'default',
-    jTxs: [{
-      type: 'batch' as const,
-      entityId: entityState.entityId,
-      data: {
-        batch: newState.jBatchState.batch,
-        batchSize,
-      },
-      timestamp: Date.now(), // Will be overwritten by runtime with env.timestamp
-    }]
-  }];
-
-  console.log(`📤 [1/6] deposit_collateral: Generated jOutput (batch size: ${batchSize}, jurisdiction: ${jOutputs[0].jurisdictionName})`);
-
-  return { newState, outputs, jOutputs };
+  return { newState, outputs };
 }
