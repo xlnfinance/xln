@@ -49,8 +49,9 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   console.log(`🚀 APPLY accountInput: ${input.fromEntityId.slice(-4)} → ${input.toEntityId.slice(-4)}`);
   console.log(`🚀 APPLY accountInput details: height=${input.height}, hasNewFrame=${!!input.newAccountFrame}, hasPrevSigs=${!!input.prevSignatures}, counter=${input.counter}`);
 
-  // Create immutable copy of current state
-  const newState: EntityState = cloneEntityState(state);
+  // CRITICAL: Don't clone here - state already cloned at entity level (applyEntityTx)
+  // Cloning here causes ackedTransitions updates to be lost between sequential messages
+  const newState: EntityState = state;  // Use state directly
   const outputs: EntityInput[] = [];
 
   // Collect events for entity-level orchestration (pure - no direct mempool mutation)
