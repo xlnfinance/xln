@@ -77,7 +77,7 @@ const getTokenDecimals = (tokenId: number): number => {
  * @param env - Runtime environment
  * @returns Updated state (may include finalized events if threshold met)
  */
-export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): EntityState => {
+export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): { newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> } => {
   const { from: signerId, observedAt, blockNumber, blockHash } = entityTxData;
   // j-watcher now sends batched events - use 'events' array, fallback to single 'event'
   const rawEvents = (entityTxData as any).events || [entityTxData.event];
@@ -92,7 +92,7 @@ export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntit
   const alreadyFinalized = entityState.jBlockChain.some(b => b.jHeight === blockNumber);
   if (alreadyFinalized) {
     console.log(`   ⏭️ SKIP: block ${blockNumber} already finalized`);
-    return entityState;
+    return { newState: entityState, mempoolOps: [] };
   }
 
   // Skip blocks at or below lastFinalizedJHeight (monotonic progress only)
@@ -102,7 +102,7 @@ export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntit
   // to track exact block hashes and reject conflicting observations
   if (blockNumber <= entityState.lastFinalizedJHeight) {
     console.log(`   ⏭️ SKIP: stale block (${blockNumber} <= finalized ${entityState.lastFinalizedJHeight})`);
-    return entityState;
+    return { newState: entityState, mempoolOps: [] };
   }
 
   // Convert raw events to JurisdictionEvent format
@@ -129,7 +129,7 @@ export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntit
 
   // Try to finalize - with batching, single-signer entities finalize immediately
   // with ALL events from the block (no more race condition)
-  const { newState, mempoolOps } = tryFinalizeJBlocks(newEntityState, entityState.config.threshold);
+  const { newState, mempoolOps } = tryFinalizeJBlocks(newEntityState, entityState.config.threshold, env);
   newEntityState = newState;
 
   // DEBUG: Dump account mempools after j-event processing
@@ -261,11 +261,13 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
  *
  * @param state - Entity state with pending jBlockObservations
  * @param threshold - Required number of agreeing signers (from entity config)
+ * @param env - Runtime environment for deterministic timestamps
  * @returns Updated state with finalized events applied
  */
 function tryFinalizeJBlocks(
   state: EntityState,
-  threshold: bigint
+  threshold: bigint,
+  env: Env
 ): { newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> } {
   const allMempoolOps: Array<{ accountId: string; tx: any }> = [];
 
@@ -500,9 +502,9 @@ function applyFinalizedJEvent(
     }
 
     // Add j_event_claim via mempoolOps (auto-triggers proposableAccounts + account frame)
-    // Use canonical key for accountId
+    // Account keyed by counterparty ID
     mempoolOps.push({
-      accountId: settleAccountKey,
+      accountId: counterpartyEntityId as string,
       tx: { type: 'j_event_claim', data: { jHeight, jBlockHash, events: [event], observedAt: obs.observedAt } },
     });
     console.log(`   📮 j_event_claim → mempoolOps[${mempoolOps.length}] (will auto-propose frame)`);

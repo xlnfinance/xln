@@ -1014,6 +1014,8 @@ export interface EntityState {
   // 💰 Financial state
   reserves: Map<string, bigint>; // tokenId -> amount only, metadata from TOKEN_REGISTRY
   accounts: Map<string, AccountMachine>; // canonicalKey "left:right" -> account state
+  // Account frame scheduling (accounts blocked by pendingFrame, retried on next ACK)
+  deferredAccountProposals?: Map<string, true>;
   // 🔭 J-machine tracking (JBlock consensus)
   lastFinalizedJHeight: number;           // Last finalized J-block height
   jBlockObservations: JBlockObservation[]; // Pending observations from signers

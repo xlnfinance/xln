@@ -533,6 +533,7 @@ const applyRuntimeInput = async (
             // 💰 Initialize financial state
             reserves: new Map(), // tokenId -> bigint amount
             accounts: new Map(), // counterpartyEntityId -> AccountMachine
+            deferredAccountProposals: new Map(),
 
             // 🔭 J-machine tracking (JBlock consensus)
             lastFinalizedJHeight: 0,

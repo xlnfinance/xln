@@ -395,9 +395,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // If no route provided, check for direct account or calculate route
       if (!route || route.length === 0) {
-        // Check if we have a direct account with target (use canonical key)
+        // Check if we have a direct account with target
         // Account keyed by counterparty ID
-        if (newState.accounts.has(targetAccountKey)) {
+        if (newState.accounts.has(targetEntityId)) {
           console.log(`💸 Direct account exists with ${formatEntityId(targetEntityId)}`);
           route = [entityState.entityId, targetEntityId];
         } else {
@@ -451,9 +451,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         return { newState, outputs: [] };
       }
 
-      // Check if we have an account with next hop (use canonical key)
+      // Check if we have an account with next hop
       // Account keyed by counterparty ID
-      if (!newState.accounts.has(nextHopAccountKey)) {
+      if (!newState.accounts.has(nextHop)) {
         logError("ENTITY_TX", `❌ No account with next hop: ${nextHop}`);
         addMessage(newState, `❌ Payment failed: No account with ${formatEntityId(nextHop)}`);
         return { newState, outputs: [] };
@@ -476,8 +476,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // Add to account machine mempool via pure mempoolOps
       const accountMachine = newState.accounts.get(nextHop);
       if (accountMachine) {
-        // Pure: return mempoolOp instead of mutating directly (use canonical key)
-        mempoolOps.push({ accountId: nextHopAccountKey, tx: accountTx });
+        // Pure: return mempoolOp instead of mutating directly
+        mempoolOps.push({ accountId: nextHop, tx: accountTx });
         console.log(`💸 Added payment to mempoolOps for account with ${formatEntityId(nextHop)}`);
         console.log(`💸 mempoolOps now has ${mempoolOps.length} pending transactions`);
         const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
@@ -569,8 +569,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         },
       };
 
-      // Pure: return mempoolOp instead of mutating directly (use canonical key)
-      mempoolOps.push({ accountId: creditAccountKey, tx: accountTx });
+      // Pure: return mempoolOp instead of mutating directly
+      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
       console.log(`💳 Added set_credit_limit to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
       console.log(`💳 Setting ${side}CreditLimit=${amount} (counterparty is ${side}) for token ${tokenId}`);
 
@@ -613,8 +613,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         data: { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, minFillRatio },
       };
 
-      // Pure: return mempoolOp instead of mutating directly (use canonical key)
-      mempoolOps.push({ accountId: swapAccountKey, tx: accountTx });
+      // Pure: return mempoolOp instead of mutating directly
+      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
       console.log(`📊 Added swap_offer to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
 
       // Add to swapBook (E-Machine aggregated view, use canonical key)
