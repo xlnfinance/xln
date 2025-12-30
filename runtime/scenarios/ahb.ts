@@ -803,9 +803,9 @@ export async function ahb(env: Env): Promise<void> {
     // ✅ ASSERT Frame 7: Both Hub-Bob accounts exist (bidirectional)
     const [, hubRep7] = findReplica(env, hub.id);
     const [, bobRep7] = findReplica(env, bob.id);
-    const canonicalHubBobKey = bob.id;
-    const hubBobAcc7 = hubRep7?.state?.accounts?.get(canonicalHubBobKey);
-    const bobHubAcc7 = bobRep7?.state?.accounts?.get(canonicalHubBobKey);
+    // Hub's view: counterparty=Bob, Bob's view: counterparty=Hub
+    const hubBobAcc7 = hubRep7?.state?.accounts?.get(bob.id);
+    const bobHubAcc7 = bobRep7?.state?.accounts?.get(hub.id);
     if (!hubBobAcc7 || !bobHubAcc7) {
       console.error(`❌ Hub available accounts:`, Array.from(hubRep7.state.accounts.keys()));
       console.error(`❌ Bob available accounts:`, Array.from(bobRep7.state.accounts.keys()));
