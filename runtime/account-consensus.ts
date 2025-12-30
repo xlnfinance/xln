@@ -369,6 +369,7 @@ export async function handleAccountInput(
       // DoS FIX: Update counter AFTER signature verified (prevents counter desync attacks)
       if (input.counter !== undefined) {
         accountMachine.ackedTransitions = input.counter;
+        console.log(`✅ ACK-BLOCK COUNTER-UPDATE: ackedTransitions now ${accountMachine.ackedTransitions} (from ACK processing)`);
       }
 
       // CRITICAL DEBUG: Log what we're committing
