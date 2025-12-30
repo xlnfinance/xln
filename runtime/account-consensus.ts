@@ -723,6 +723,12 @@ export async function handleAccountInput(
     }
     console.log(`📚 Frame ${receivedFrame.height} accepted and added to history (total: ${accountMachine.frameHistory.length})`);
 
+    // CRITICAL: Update ackedTransitions after successfully processing incoming frame
+    if (input.counter !== undefined) {
+      accountMachine.ackedTransitions = input.counter;
+      console.log(`✅ COUNTER-UPDATE: ackedTransitions now ${accountMachine.ackedTransitions} (next expected: ${accountMachine.ackedTransitions + 1})`);
+    }
+
     events.push(...processEvents);
     events.push(`🤝 Accepted frame ${receivedFrame.height} from Entity ${input.fromEntityId.slice(-4)}`);
 
