@@ -13,7 +13,7 @@
  */
 
 import type { EntityState, EntityTx, EntityInput } from '../../types';
-import { cloneEntityState, addMessage } from '../../state-helpers';
+import { cloneEntityState, addMessage, canonicalAccountKey } from '../../state-helpers';
 
 export async function handleDepositCollateral(
   entityState: EntityState,
@@ -32,8 +32,9 @@ export async function handleDepositCollateral(
     return { newState, outputs };
   }
 
-  // Validate: Does account exist?
-  if (!entityState.accounts.has(counterpartyId)) {
+  // Validate: Does account exist? (use canonical key)
+  const depositAccountKey = canonicalAccountKey(entityState.entityId, counterpartyId);
+  if (!entityState.accounts.has(depositAccountKey)) {
     addMessage(newState,
       `❌ Cannot deposit collateral: no account with ${counterpartyId.slice(-4)}`
     );

@@ -19,6 +19,7 @@ import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdicti
 import { BrowserEVM } from '../evms/browser-evm';
 import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
 import { snap, checkSolvency } from './helpers';
+import { canonicalAccountKey } from '../state-helpers';
 
 // Lazy-loaded runtime functions to avoid circular dependency (runtime.ts imports this file)
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -762,7 +763,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // ✅ ASSERT Frame 6: Alice-Hub account exists (bidirectional)
     const [, aliceRep6] = findReplica(env, alice.id);
-    const aliceHubAcc6 = aliceRep6?.state?.accounts?.get(hub.id);
+    const aliceHubAcc6 = aliceRep6?.state?.accounts?.get(canonicalAccountKey(alice.id, hub.id));
     if (!aliceHubAcc6) {
       throw new Error(`ASSERT FAIL Frame 6: Alice-Hub account does NOT exist!`);
     }
@@ -803,8 +804,8 @@ export async function ahb(env: Env): Promise<void> {
     // ✅ ASSERT Frame 7: Both Hub-Bob accounts exist (bidirectional)
     const [, hubRep7] = findReplica(env, hub.id);
     const [, bobRep7] = findReplica(env, bob.id);
-    const hubBobAcc7 = hubRep7?.state?.accounts?.get(bob.id);
-    const bobHubAcc7 = bobRep7?.state?.accounts?.get(hub.id);
+    const hubBobAcc7 = hubRep7?.state?.accounts?.get(canonicalAccountKey(hub.id, bob.id));
+    const bobHubAcc7 = bobRep7?.state?.accounts?.get(canonicalAccountKey(bob.id, hub.id));
     if (!hubBobAcc7 || !bobHubAcc7) {
       throw new Error(`ASSERT FAIL Frame 7: Hub-Bob account does NOT exist! Hub→Bob: ${!!hubBobAcc7}, Bob→Hub: ${!!bobHubAcc7}`);
     }
@@ -921,15 +922,18 @@ export async function ahb(env: Env): Promise<void> {
     // Process j-events from BrowserVM execution (AccountSettled → j_event_claim to account mempool)
     await processJEvents(env);
 
-    // Bilateral consensus: j_event_claims in account mempools → need ticks for account frames
-    await process(env); // Tick 1: Propose frames with j_event_claim
-    await process(env); // Tick 2: Counterparty commits
-    await process(env); // Tick 3: Both entities have observations → finalize
-    await process(env); // Tick 4: Ensure all mempools drained
+    // Bilateral consensus: j_event_claims in account mempools → need MANY ticks
+    // Due to timing: mempoolOps processed AFTER proposals in same tick
+    await process(env); // Tick 1: mempoolOps→mempool, proposableAccounts updated
+    await process(env); // Tick 2: Propose frames with j_event_claim
+    await process(env); // Tick 3: Counterparty commits
+    await process(env); // Tick 4: Both entities have observations → finalize
+    await process(env); // Tick 5: Ensure all mempools drained
+    await process(env); // Tick 6: Extra safety
 
     // ✅ ASSERT: R2C delivered - Alice delta.collateral = $500K
     const [, aliceRep9] = findReplica(env, alice.id);
-    const aliceHubAccount9 = aliceRep9.state.accounts.get(hub.id);
+    const aliceHubAccount9 = aliceRep9.state.accounts.get(canonicalAccountKey(alice.id, hub.id));
     const aliceDelta9 = aliceHubAccount9?.deltas.get(USDC_TOKEN_ID);
     if (!aliceDelta9 || aliceDelta9.collateral !== aliceCollateralAmount) {
       const actual = aliceDelta9?.collateral || 0n;
@@ -998,7 +1002,7 @@ export async function ahb(env: Env): Promise<void> {
     // Bob (0x0003) > Hub (0x0002) → Bob is RIGHT, Hub is LEFT
     // Bob extending credit sets leftCreditLimit (credit available TO Hub/LEFT)
     const [, bobRep9] = findReplica(env, bob.id);
-    const bobHubAccount9 = bobRep9.state.accounts.get(hub.id);
+    const bobHubAccount9 = bobRep9.state.accounts.get(canonicalAccountKey(bob.id, hub.id));
     const bobDelta9 = bobHubAccount9?.deltas.get(USDC_TOKEN_ID);
     if (!bobDelta9 || bobDelta9.leftCreditLimit !== bobCreditAmount) {
       const actual = bobDelta9?.leftCreditLimit || 0n;
@@ -1178,7 +1182,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // Verify Bob's view
     const [, bobRep] = findReplica(env, bob.id);
-    const bobHubAcc = bobRep.state.accounts.get(hub.id);
+    const bobHubAcc = bobRep.state.accounts.get(canonicalAccountKey(bob.id, hub.id));
     const bobDelta = bobHubAcc?.deltas.get(USDC_TOKEN_ID);
     if (bobDelta) {
       const bobDerived = deriveDelta(bobDelta, false); // Bob is RIGHT
@@ -1373,7 +1377,7 @@ export async function ahb(env: Env): Promise<void> {
     // ✅ Store pre-settlement state for assertions
     const [, alicePreSettle] = findReplica(env, alice.id);
     const [, hubPreSettle] = findReplica(env, hub.id);
-    const ahPreCollateral = alicePreSettle.state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+    const ahPreCollateral = alicePreSettle.state.accounts.get(canonicalAccountKey(alice.id, hub.id))?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
     const hubPreReserve = hubPreSettle.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
     console.log(`   A-H pre-settlement: collateral=${ahPreCollateral}, Hub reserve=${hubPreReserve}`);
 
@@ -1401,7 +1405,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // ✅ ASSERT: A-H collateral decreased by $200K (net-sender pulled)
     const [, aliceRepRebal] = findReplica(env, alice.id);
-    const ahAccountRebal = aliceRepRebal.state.accounts.get(hub.id);
+    const ahAccountRebal = aliceRepRebal.state.accounts.get(canonicalAccountKey(alice.id, hub.id));
     const ahDeltaRebal = ahAccountRebal?.deltas.get(USDC_TOKEN_ID);
     const expectedAHCollateral = ahPreCollateral - rebalanceAmount;
     if (!ahDeltaRebal || ahDeltaRebal.collateral !== expectedAHCollateral) {
@@ -1469,7 +1473,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // ✅ Store pre-settlement state for H-B assertions
     const [, hubPreHBSettle] = findReplica(env, hub.id);
-    const hbPreCollateral = hubPreHBSettle.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+    const hbPreCollateral = hubPreHBSettle.state.accounts.get(canonicalAccountKey(hub.id, bob.id))?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
     const hubPreHBReserve = hubPreHBSettle.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
     console.log(`   H-B pre-settlement: collateral=${hbPreCollateral}, Hub reserve=${hubPreHBReserve}`);
 
@@ -1511,7 +1515,7 @@ export async function ahb(env: Env): Promise<void> {
 
     // ✅ ASSERT: H-B collateral increased by $200K (net-receiver insured)
     const [, hubRepRebal] = findReplica(env, hub.id);
-    const hbAccountRebal = hubRepRebal.state.accounts.get(bob.id);
+    const hbAccountRebal = hubRepRebal.state.accounts.get(canonicalAccountKey(hub.id, bob.id));
     const hbDeltaRebal = hbAccountRebal?.deltas.get(USDC_TOKEN_ID);
     const expectedHBCollateral = hbPreCollateral + rebalanceAmount;
     if (!hbDeltaRebal || hbDeltaRebal.collateral !== expectedHBCollateral) {

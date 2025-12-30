@@ -4,6 +4,7 @@
  */
 
 import { AccountMachine, AccountTx } from '../../types';
+import { getAccountPerspective } from '../../state-helpers';
 
 export function handleSetCreditLimit(
   accountMachine: AccountMachine,
@@ -13,7 +14,8 @@ export function handleSetCreditLimit(
   const { tokenId, amount, side } = accountTx.data;
   const events: string[] = [];
 
-  console.log(`💳 SET-CREDIT-LIMIT HANDLER: tokenId=${tokenId}, amount=${amount.toString()}, side=${side}, counterparty=${accountMachine.counterpartyEntityId.slice(-4)}`);
+  const { counterparty } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
+  console.log(`💳 SET-CREDIT-LIMIT HANDLER: tokenId=${tokenId}, amount=${amount.toString()}, side=${side}, counterparty=${counterparty.slice(-4)}`);
 
   // Get or create delta - credit extension can happen before collateral deposit
   let delta = accountMachine.deltas.get(tokenId);

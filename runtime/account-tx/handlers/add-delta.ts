@@ -4,6 +4,7 @@
  */
 
 import { AccountMachine, AccountTx } from '../../types';
+import { getAccountPerspective } from '../../state-helpers';
 
 export function handleAddDelta(
   accountMachine: AccountMachine,
@@ -32,7 +33,8 @@ export function handleAddDelta(
   };
 
   accountMachine.deltas.set(tokenId, newDelta);
-  console.log(`✅ Added delta for token ${tokenId} to account with ${accountMachine.counterpartyEntityId.slice(-4)}`);
+  const { counterparty } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
+  console.log(`✅ Added delta for token ${tokenId} to account with ${counterparty.slice(-4)}`);
 
   events.push(`➕ Added token ${tokenId} to account`);
   return { success: true, events };

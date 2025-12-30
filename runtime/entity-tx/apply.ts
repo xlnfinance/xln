@@ -23,7 +23,7 @@ export interface ApplyEntityTxResult {
 }
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
-import { cloneEntityState, addMessage } from '../state-helpers';
+import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
 import { submitSettle } from '../evm';
 import { logError } from '../logger';
 
@@ -227,12 +227,16 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
     if (entityTx.type === 'openAccount') {
       const targetEntityId = entityTx.data.targetEntityId;
-      if (entityState.accounts.has(targetEntityId)) {
+      // Use canonical key for account storage (both entities use same key)
+      const accountKey = canonicalAccountKey(entityState.entityId, targetEntityId);
+      const isLeft = entityState.entityId < targetEntityId;
+
+      if (entityState.accounts.has(accountKey)) {
         console.log(`💳 OPEN-ACCOUNT: Account with ${formatEntityId(targetEntityId)} already exists, skipping duplicate request`);
         return { newState: entityState, outputs: [] };
       }
 
-      console.log(`💳 OPEN-ACCOUNT: Opening account with ${targetEntityId}`);
+      console.log(`💳 OPEN-ACCOUNT: Opening account with ${targetEntityId} (canonical key: ${accountKey.slice(-20)})`);
 
       // Emit account opening event
       env.emit('AccountOpening', {
@@ -246,16 +250,21 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // Add chat message about account opening
       addMessage(newState, `💳 Opening account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);
 
-      // STEP 1: Create local account machine
-      if (!newState.accounts.has(targetEntityId)) {
+      // STEP 1: Create local account machine with CANONICAL representation
+      if (!newState.accounts.has(accountKey)) {
         console.log(`💳 LOCAL-ACCOUNT: Creating local account with Entity ${formatEntityId(targetEntityId)}...`);
 
         // CONSENSUS FIX: Start with empty deltas - let all delta creation happen through transactions
         // This ensures both sides have identical delta Maps (matches Channel.ts pattern)
         const initialDeltas = new Map<number, Delta>();
 
-        newState.accounts.set(targetEntityId, {
-          counterpartyEntityId: targetEntityId,
+        // CANONICAL: Store leftEntity/rightEntity (sorted), NOT counterpartyEntityId
+        const leftEntity = isLeft ? entityState.entityId : targetEntityId;
+        const rightEntity = isLeft ? targetEntityId : entityState.entityId;
+
+        newState.accounts.set(accountKey, {
+          leftEntity,
+          rightEntity,
           mempool: [],
           currentFrame: {
             height: 0,
@@ -265,7 +274,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
             tokenIds: [],
             deltas: [],
             stateHash: '',
-            byLeft: entityState.entityId < entityTx.data.targetEntityId,
+            byLeft: isLeft,
           },
           sentTransitions: 0,
           ackedTransitions: 0,
@@ -283,7 +292,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           receiveCounter: 0, // Like Channel.ts line 132
           // Removed isProposer - use isLeft() function like old_src Channel.ts
           proofHeader: {
-            fromEntity: entityState.entityId,
+            fromEntity: entityState.entityId,  // Perspective-dependent for signing
             toEntity: targetEntityId,
             cooperativeNonce: 0,
             disputeNonce: 0,
@@ -294,6 +303,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           requestedRebalance: new Map(),
           locks: new Map(), // HTLC: Initialize empty locks
           swapOffers: new Map(), // Swap: Initialize empty offers
+          // Bilateral J-event consensus
+          leftJObservations: [],
+          rightJObservations: [],
+          jEventChain: [],
+          lastFinalizedJHeight: 0,
         });
       }
 
@@ -302,7 +316,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`💳 Adding account setup transactions to local mempool for ${formatEntityId(entityTx.data.targetEntityId)}`);
 
       // Get the account machine we just created
-      const localAccount = newState.accounts.get(targetEntityId);
+      const localAccount = newState.accounts.get(accountKey);
       if (!localAccount) {
         throw new Error(`CRITICAL: Account machine not found after creation`);
       }
@@ -381,8 +395,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // If no route provided, check for direct account or calculate route
       if (!route || route.length === 0) {
-        // Check if we have a direct account with target
-        if (newState.accounts.has(targetEntityId)) {
+        // Check if we have a direct account with target (use canonical key)
+        const targetAccountKey = canonicalAccountKey(entityState.entityId, targetEntityId);
+        if (newState.accounts.has(targetAccountKey)) {
           console.log(`💸 Direct account exists with ${formatEntityId(targetEntityId)}`);
           route = [entityState.entityId, targetEntityId];
         } else {
@@ -436,8 +451,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         return { newState, outputs: [] };
       }
 
-      // Check if we have an account with next hop
-      if (!newState.accounts.has(nextHop)) {
+      // Check if we have an account with next hop (use canonical key)
+      const nextHopAccountKey = canonicalAccountKey(entityState.entityId, nextHop);
+      if (!newState.accounts.has(nextHopAccountKey)) {
         logError("ENTITY_TX", `❌ No account with next hop: ${nextHop}`);
         addMessage(newState, `❌ Payment failed: No account with ${formatEntityId(nextHop)}`);
         return { newState, outputs: [] };
@@ -458,10 +474,10 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       };
 
       // Add to account machine mempool via pure mempoolOps
-      const accountMachine = newState.accounts.get(nextHop);
+      const accountMachine = newState.accounts.get(nextHopAccountKey);
       if (accountMachine) {
-        // Pure: return mempoolOp instead of mutating directly
-        mempoolOps.push({ accountId: nextHop, tx: accountTx });
+        // Pure: return mempoolOp instead of mutating directly (use canonical key)
+        mempoolOps.push({ accountId: nextHopAccountKey, tx: accountTx });
         console.log(`💸 Added payment to mempoolOps for account with ${formatEntityId(nextHop)}`);
         console.log(`💸 mempoolOps now has ${mempoolOps.length} pending transactions`);
         const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
@@ -529,8 +545,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const mempoolOps: MempoolOp[] = [];
       const { counterpartyEntityId, tokenId, amount } = entityTx.data;
 
-      // Get account machine
-      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      // Get account machine (use canonical key)
+      const creditAccountKey = canonicalAccountKey(entityState.entityId, counterpartyEntityId);
+      const accountMachine = newState.accounts.get(creditAccountKey);
       if (!accountMachine) {
         console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for credit extension`);
         return { newState: entityState, outputs: [] };
@@ -552,8 +569,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         },
       };
 
-      // Pure: return mempoolOp instead of mutating directly
-      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+      // Pure: return mempoolOp instead of mutating directly (use canonical key)
+      mempoolOps.push({ accountId: creditAccountKey, tx: accountTx });
       console.log(`💳 Added set_credit_limit to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
       console.log(`💳 Setting ${side}CreditLimit=${amount} (counterparty is ${side}) for token ${tokenId}`);
 
@@ -583,7 +600,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const mempoolOps: MempoolOp[] = [];
       const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, minFillRatio } = entityTx.data;
 
-      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      // Use canonical key for account lookup
+      const swapAccountKey = canonicalAccountKey(entityState.entityId, counterpartyEntityId);
+      const accountMachine = newState.accounts.get(swapAccountKey);
       if (!accountMachine) {
         console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap offer`);
         return { newState: entityState, outputs: [] };
@@ -594,14 +613,14 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         data: { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, minFillRatio },
       };
 
-      // Pure: return mempoolOp instead of mutating directly
-      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+      // Pure: return mempoolOp instead of mutating directly (use canonical key)
+      mempoolOps.push({ accountId: swapAccountKey, tx: accountTx });
       console.log(`📊 Added swap_offer to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
 
-      // Add to swapBook (E-Machine aggregated view)
+      // Add to swapBook (E-Machine aggregated view, use canonical key)
       newState.swapBook.set(offerId, {
         offerId,
-        accountId: counterpartyEntityId,
+        accountId: swapAccountKey,
         giveTokenId,
         giveAmount,
         wantTokenId,
@@ -626,7 +645,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const mempoolOps: MempoolOp[] = [];
       const { counterpartyEntityId, offerId, fillRatio, cancelRemainder } = entityTx.data;
 
-      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      // Use canonical key for account lookup
+      const resolveAccountKey = canonicalAccountKey(entityState.entityId, counterpartyEntityId);
+      const accountMachine = newState.accounts.get(resolveAccountKey);
       if (!accountMachine) {
         console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap resolve`);
         return { newState: entityState, outputs: [] };
@@ -637,8 +658,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         data: { offerId, fillRatio, cancelRemainder },
       };
 
-      // Pure: return mempoolOp instead of mutating directly
-      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+      // Pure: return mempoolOp instead of mutating directly (use canonical key)
+      mempoolOps.push({ accountId: resolveAccountKey, tx: accountTx });
       console.log(`💱 Added swap_resolve to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
 
       const firstValidator = entityState.config.validators[0];
@@ -657,7 +678,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const mempoolOps: MempoolOp[] = [];
       const { counterpartyEntityId, offerId } = entityTx.data;
 
-      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      // Use canonical key for account lookup
+      const cancelAccountKey = canonicalAccountKey(entityState.entityId, counterpartyEntityId);
+      const accountMachine = newState.accounts.get(cancelAccountKey);
       if (!accountMachine) {
         console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap cancel`);
         return { newState: entityState, outputs: [] };
@@ -668,8 +691,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         data: { offerId },
       };
 
-      // Pure: return mempoolOp instead of mutating directly
-      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+      // Pure: return mempoolOp instead of mutating directly (use canonical key)
+      mempoolOps.push({ accountId: cancelAccountKey, tx: accountTx });
       console.log(`📊 Added swap_cancel to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
 
       // Remove from swapBook (E-Machine aggregated view)
@@ -703,8 +726,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         }
       }
 
-      // Step 2: Validate account exists
-      if (!newState.accounts.has(counterpartyEntityId)) {
+      // Step 2: Validate account exists (use canonical key)
+      const settleAccountKey = canonicalAccountKey(entityState.entityId, counterpartyEntityId);
+      if (!newState.accounts.has(settleAccountKey)) {
         logError("ENTITY_TX", `❌ No account exists with ${formatEntityId(counterpartyEntityId)}`);
         throw new Error(`No account with ${counterpartyEntityId}`);
       }

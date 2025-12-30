@@ -8,7 +8,7 @@ import { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env
 import { DEBUG, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
-import { addMessages, cloneEntityReplica } from './state-helpers';
+import { addMessages, cloneEntityReplica, canonicalAccountKey, getAccountPerspective } from './state-helpers';
 import { LIMITS } from './constants';
 
 // === SECURITY VALIDATION ===
@@ -755,7 +755,9 @@ export const applyEntityFrame = async (
     // Track which accounts need proposals based on transaction type
     if (entityTx.type === 'accountInput' && entityTx.data) {
       const fromEntity = entityTx.data.fromEntityId;
-      const accountMachine = currentEntityState.accounts.get(fromEntity);
+      // Use canonical key for account lookup
+      const accountInputKey = canonicalAccountKey(currentEntityState.entityId, fromEntity);
+      const accountMachine = currentEntityState.accounts.get(accountInputKey);
 
       if (accountMachine) {
         // Add to proposable if:
@@ -766,7 +768,7 @@ export const applyEntityFrame = async (
         // Only propose if we have something to send:
         // - Have transactions in mempool
         if (hasPendingTxs && !accountMachine.pendingFrame) {
-          proposableAccounts.add(fromEntity);
+          proposableAccounts.add(accountInputKey);
           console.log(`🔄 Added ${fromEntity.slice(0,10)} to proposable - Pending:${hasPendingTxs}`);
         } else if (isAck) {
           console.log(`✅ Received ACK from ${fromEntity.slice(0,10)}, no action needed (mempool empty)`);
@@ -785,33 +787,38 @@ export const applyEntityFrame = async (
       // We need to find which account got the payment and mark it for frame proposal
 
       // Check all accounts to see which one has new mempool items
-      for (const [counterpartyId, accountMachine] of currentEntityState.accounts) {
+      // Note: accountKey is now the canonical key (e.g., "alice:bob")
+      for (const [accountKey, accountMachine] of currentEntityState.accounts) {
         const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
-        console.log(`🔍 Checking account ${counterpartyId.slice(0,10)}: mempool=${accountMachine.mempool.length}, isLeft=${isLeft}, pendingFrame=${!!accountMachine.pendingFrame}`);
+        console.log(`🔍 Checking account ${accountKey.slice(-10)}: mempool=${accountMachine.mempool.length}, isLeft=${isLeft}, pendingFrame=${!!accountMachine.pendingFrame}`);
         if (accountMachine.mempool.length > 0) {
-          proposableAccounts.add(counterpartyId);
-          console.log(`🔄 ✅ Added ${counterpartyId.slice(0,10)} to proposableAccounts (has ${accountMachine.mempool.length} mempool items)`);
+          proposableAccounts.add(accountKey);
+          console.log(`🔄 ✅ Added ${accountKey.slice(-10)} to proposableAccounts (has ${accountMachine.mempool.length} mempool items)`);
         }
       }
     } else if (entityTx.type === 'openAccount' && entityTx.data) {
       // Account opened - may need initial frame
       const targetEntity = entityTx.data.targetEntityId;
-      const accountMachine = currentEntityState.accounts.get(targetEntity);
+      // Use canonical key for account lookup
+      const openAccountKey = canonicalAccountKey(currentEntityState.entityId, targetEntity);
+      const accountMachine = currentEntityState.accounts.get(openAccountKey);
       if (accountMachine) {
         const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
         if (isLeft && accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
-          proposableAccounts.add(targetEntity);
+          proposableAccounts.add(openAccountKey);
           console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (new account opened)`);
         }
       }
     } else if (entityTx.type === 'extendCredit' && entityTx.data) {
       // Credit extension - mark account for proposal
       const counterpartyId = entityTx.data.counterpartyEntityId;
-      const accountMachine = currentEntityState.accounts.get(counterpartyId);
+      // Use canonical key for account lookup
+      const extendCreditKey = canonicalAccountKey(currentEntityState.entityId, counterpartyId);
+      const accountMachine = currentEntityState.accounts.get(extendCreditKey);
       console.log(`💳 EXTEND-CREDIT: Checking account ${counterpartyId.slice(0,10)} for proposal`);
       console.log(`💳 EXTEND-CREDIT: accountMachine exists: ${!!accountMachine}, mempool: ${accountMachine?.mempool?.length || 0}`);
       if (accountMachine && accountMachine.mempool.length > 0) {
-        proposableAccounts.add(counterpartyId);
+        proposableAccounts.add(extendCreditKey);
         console.log(`💳 ✅ Added ${counterpartyId.slice(0,10)} to proposableAccounts (credit extension)`);
       }
     }
@@ -882,11 +889,12 @@ export const applyEntityFrame = async (
 
   if (accountsToProposeFrames.length > 0) {
 
-    for (const counterpartyEntityId of accountsToProposeFrames) {
-      const accountMachine = currentEntityState.accounts.get(counterpartyEntityId);
-      console.log(`🔍 [Frame ${env.height}] BEFORE-PROPOSE: Getting account for ${counterpartyEntityId.slice(-4)}`);
+    for (const accountKey of accountsToProposeFrames) {
+      const accountMachine = currentEntityState.accounts.get(accountKey);
+      const { counterparty: cpId } = accountMachine ? getAccountPerspective(accountMachine, currentEntityState.entityId) : { counterparty: 'unknown' };
+      console.log(`🔍 [Frame ${env.height}] BEFORE-PROPOSE: Getting account for ${cpId.slice(-4)}`);
       if (accountMachine) {
-        console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME for ${counterpartyEntityId.slice(-4)}: mempool=${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
+        console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME for ${cpId.slice(-4)}: mempool=${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
         console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: leftJObs=${accountMachine.leftJObservations?.length || 0}, rightJObs=${accountMachine.rightJObservations?.length || 0}`);
         const proposal = await proposeAccountFrame(env, accountMachine);
 
