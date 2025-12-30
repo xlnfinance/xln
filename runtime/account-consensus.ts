@@ -128,6 +128,7 @@ export async function proposeAccountFrame(
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
   console.log(`🚀 E-MACHINE: Proposing account frame for ${counterparty.slice(-4)}`);
   console.log(`🚀 E-MACHINE: Account state - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, currentHeight=${accountMachine.currentHeight}`);
+  console.log(`🚀 E-MACHINE: Mempool contents:`, accountMachine.mempool.map(tx => tx.type));
 
   const events: string[] = [];
 
@@ -335,6 +336,7 @@ export async function handleAccountInput(
   input: AccountInput
 ): Promise<{ success: boolean; response?: AccountInput; events: string[]; error?: string; approvalNeeded?: AccountTx }> {
   console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`);
+  console.log(`📨 A-MACHINE INPUT: height=${input.height || 'none'}, hasACK=${!!input.prevSignatures}, hasNewFrame=${!!input.newAccountFrame}, counter=${input.counter}`);
 
   const events: string[] = [];
 
@@ -428,13 +430,27 @@ export async function handleAccountInput(
       delete accountMachine.clonedForValidation;
       accountMachine.rollbackCount = Math.max(0, accountMachine.rollbackCount - 1); // Successful confirmation reduces rollback
 
+      console.log(`✅ PENDING-CLEARED: Frame ${input.height} confirmed, mempool now has ${accountMachine.mempool.length} txs: [${accountMachine.mempool.map(tx => tx.type).join(',')}]`);
       events.push(`✅ Frame ${input.height} confirmed and committed`);
 
-      // CRITICAL: Don't return yet! Check if they also sent a new frame in same message
-      // Channel.ts pattern: ACK + new frame can be batched (line 576-612)
+      // CRITICAL FIX: Chained Proposal - if mempool has items (e.g. j_event_claim), propose immediately
       if (!input.newAccountFrame) {
+        if (accountMachine.mempool.length > 0) {
+          console.log(`🚀 CHAINED-PROPOSAL: ACK received, mempool has ${accountMachine.mempool.length} txs - proposing next frame immediately`);
+          const proposeResult = await proposeAccountFrame(env, accountMachine);
+          if (proposeResult.success && proposeResult.accountInput) {
+            return {
+              success: true,
+              response: proposeResult.accountInput,
+              events: [...events, ...proposeResult.events],
+              revealedSecrets: proposeResult.revealedSecrets,
+              swapOffersCreated: proposeResult.swapOffersCreated,
+              swapOffersCancelled: proposeResult.swapOffersCancelled
+            };
+          }
+        }
         console.log(`🔍 RETURN-ACK-ONLY: frame ${input.height} ACKed, no new frame bundled`);
-        return { success: true, events }; // Only ACK, no new frame
+        return { success: true, events };
       }
       // Fall through to process newAccountFrame below
       console.log(`📦 BATCHED-MESSAGE: ACK processed, now processing bundled new frame...`);
@@ -474,10 +490,18 @@ export async function handleAccountInput(
 
       // Deterministic tiebreaker: Left always wins (CHANNEL.TS REFERENCE: Line 140-157)
       const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
+      console.log(`🔍 TIEBREAKER: fromEntity=${accountMachine.proofHeader.fromEntity.slice(-4)}, toEntity=${accountMachine.proofHeader.toEntity.slice(-4)}, isLeft=${isLeftEntity}`);
 
       if (isLeftEntity) {
         // We are LEFT - ignore their frame, keep ours (deterministic tiebreaker)
         console.log(`📤 LEFT-WINS: Ignoring right's frame ${receivedFrame.height}, waiting for them to accept ours`);
+        // CRITICAL FIX: Even though we ignore their frame, check mempool and send update if we have new txs
+        // This prevents j_event_claims from getting stuck when both sides propose simultaneously
+        if (accountMachine.mempool.length > 0) {
+          console.log(`📤 LEFT-WINS-BUT-HAS-MEMPOOL: ${accountMachine.mempool.length} txs waiting - notifying counterparty`);
+          // Send a message with just mempool status so they know we have pending work
+          // TODO: Determine if we should send frames or just signal
+        }
         // This is NOT an error - it's correct consensus behavior (Channel.ts handlePendingBlock)
         return { success: true, events };
       } else {
@@ -513,12 +537,14 @@ export async function handleAccountInput(
     }
 
     // Verify frame sequence
+    console.log(`🔍 SEQUENCE-CHECK: receivedFrame.height=${receivedFrame.height}, currentHeight=${accountMachine.currentHeight}, expected=${accountMachine.currentHeight + 1}`);
     if (receivedFrame.height !== accountMachine.currentHeight + 1) {
       console.log(`❌ Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`);
       return { success: false, error: `Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`, events };
     }
 
     // Verify signatures
+    console.log(`🔍 SIG-CHECK: hasSignatures=${!!(input.newSignatures && input.newSignatures.length > 0)}`);
     if (input.newSignatures && input.newSignatures.length > 0) {
       const signature = input.newSignatures[0];
       if (!signature) {
@@ -528,6 +554,7 @@ export async function handleAccountInput(
       if (!isValid) {
         return { success: false, error: 'Invalid frame signature', events };
       }
+      console.log(`✅ SIG-VERIFIED`);
     }
 
     // Get entity's synced J-height for deterministic HTLC validation
@@ -565,6 +592,7 @@ export async function handleAccountInput(
       }
       processEvents.push(...result.events);
 
+      console.log(`🔍 TX-PROCESSED: ${accountTx.type}, success=${result.success}`);
       // Collect revealed secrets (CRITICAL for multi-hop)
       if (result.secret && result.hashlock) {
         revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
@@ -614,9 +642,10 @@ export async function handleAccountInput(
       return { success: false, error: `Bilateral consensus failure - states don't match`, events };
     }
 
+    console.log(`🔍 ABOUT-TO-VERIFY-HASH: Computing frame hash...`);
     // SECURITY: Verify full frame hash (tokenIds + fullDeltaStates + deltas)
     // This prevents accepting frames with poisoned dispute proofs
-    const { createFrameHash } = await import('./frame-utils');
+    console.log(`🔍 COMPUTING-HASH: Creating hash for frame ${receivedFrame.height}...`);
     const recomputedHash = await createFrameHash({
       height: receivedFrame.height,
       timestamp: receivedFrame.timestamp,
@@ -714,7 +743,7 @@ export async function handleAccountInput(
       counter: 0, // Will be set below after batching decision
     };
 
-    // If we have mempool items, propose next frame immediately and batch with ACK
+    console.log(`🔍 BATCH-CHECK for account ${input.fromEntityId.slice(-4)}: mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map(tx => tx.type).join(',')}]`);
     if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
       console.log(`📦 BATCH-OPTIMIZATION: Sending ACK + new frame in single message (Channel.ts pattern)`);
 

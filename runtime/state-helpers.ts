@@ -126,6 +126,7 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
         cloneAccountMachine(account, forSnapshot), // forSnapshot excludes clonedForValidation
       ]),
     ),
+    deferredAccountProposals: cloneMap(entityState.deferredAccountProposals || new Map()),
     accountInputQueue: cloneArray(entityState.accountInputQueue || []),
     // JBlock consensus state
     lastFinalizedJHeight: entityState.lastFinalizedJHeight ?? 0,

@@ -831,7 +831,7 @@ export const applyEntityFrame = async (
       if (account) {
         account.mempool.push(tx);
         proposableAccounts.add(accountId);
-        console.log(`📦   → ${accountId.slice(-8)}: ${tx.type}`);
+        console.log(`📦   → ${accountId.slice(-8)}: ${tx.type} (mempool now: ${account.mempool.length} txs, pendingFrame=${!!account.pendingFrame ? 'h'+account.pendingFrame.height : 'none'})`);
       } else {
         console.warn(`📦   ⚠️ Account ${accountId.slice(-8)} not found for mempoolOp`);
       }
@@ -873,14 +873,29 @@ export const applyEntityFrame = async (
     }
   }
 
-  // AUTO-PROPOSE: No O(n) scan needed - proposableAccounts already tracks touched accounts
+  // AUTO-PROPOSE: Propose account frames for touched accounts (Channel.ts pattern)
   const { proposeAccountFrame } = await import('./account-consensus');
 
   // CRITICAL: Deterministic ordering
+  // Simple filter: propose if ready (mempool non-empty, no pendingFrame)
+  // If pendingFrame exists, skip - will be handled by BATCH-CHECK when ACK arrives
   const accountsToProposeFrames = Array.from(proposableAccounts)
     .filter(accountId => {
       const accountMachine = currentEntityState.accounts.get(accountId);
-      return accountMachine ? accountMachine.mempool.length > 0 && !accountMachine.pendingFrame : false;
+      if (!accountMachine) {
+        console.log(`🔍 FILTER: Account ${accountId.slice(-8)} not found - skip`);
+        return false;
+      }
+      if (accountMachine.mempool.length === 0) {
+        console.log(`🔍 FILTER: Account ${accountId.slice(-8)} mempool empty - skip`);
+        return false;
+      }
+      if (accountMachine.pendingFrame) {
+        console.log(`🔍 FILTER: Account ${accountId.slice(-8)} has pendingFrame - SKIP (will batch on ACK)`);
+        return false;
+      }
+      console.log(`🔍 FILTER: Account ${accountId.slice(-8)} READY - proposing (mempool: ${accountMachine.mempool.length})`);
+      return true;
     })
     .sort();
 
@@ -893,6 +908,7 @@ export const applyEntityFrame = async (
       if (accountMachine) {
         console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME for ${cpId.slice(-4)}: mempool=${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
         console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: leftJObs=${accountMachine.leftJObservations?.length || 0}, rightJObs=${accountMachine.rightJObservations?.length || 0}`);
+        console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: Full mempool details:`, accountMachine.mempool.map((tx, i) => `${i}:${tx.type}`).join(', '));
         const proposal = await proposeAccountFrame(env, accountMachine);
 
         if (proposal.success && proposal.accountInput) {
@@ -920,6 +936,8 @@ export const applyEntityFrame = async (
 
           // Add events to entity messages with size limiting
           addMessages(currentEntityState, proposal.events);
+        } else if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
+          deferredAccounts.set(accountKey, true);
         }
       }
     }
