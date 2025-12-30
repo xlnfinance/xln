@@ -17,7 +17,7 @@
 import type { Env, EntityInput, EnvSnapshot, EntityReplica, Delta } from './types';
 import { applyRuntimeInput } from './runtime';
 import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from './evm';
-import { cloneEntityReplica } from './state-helpers';
+import { cloneEntityReplica, canonicalAccountKey } from './state-helpers';
 import type { Profile } from './gossip';
 import { BrowserEVM } from './evms/browser-evm';
 import { setupBrowserVMWatcher, type JEventWatcher } from './j-event-watcher';
@@ -946,7 +946,7 @@ export async function prepopulateAHB(env: Env): Promise<void> {
 
     // ✅ ASSERT: R2C delivered - Alice delta.collateral = $500K
     const [, aliceRep8] = findReplica(env, alice.id);
-    const aliceHubAccount8 = aliceRep8.state.accounts.get(hub.id);
+    const aliceHubAccount8 = aliceRep8.state.accounts.get(canonicalAccountKey(alice.id, hub.id));
     const aliceDelta8 = aliceHubAccount8?.deltas.get(USDC_TOKEN_ID);
     if (!aliceDelta8 || aliceDelta8.collateral !== aliceCollateralAmount) {
       const actual = aliceDelta8?.collateral || 0n;
@@ -995,7 +995,7 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     // Bob (0x0003) > Hub (0x0002) → Bob is RIGHT, Hub is LEFT
     // Bob extending credit sets leftCreditLimit (credit available TO Hub/LEFT)
     const [, bobRep9] = findReplica(env, bob.id);
-    const bobHubAccount9 = bobRep9.state.accounts.get(hub.id);
+    const bobHubAccount9 = bobRep9.state.accounts.get(canonicalAccountKey(bob.id, hub.id));
     const bobDelta9 = bobHubAccount9?.deltas.get(USDC_TOKEN_ID);
     if (!bobDelta9 || bobDelta9.leftCreditLimit !== bobCreditAmount) {
       const actual = bobDelta9?.leftCreditLimit || 0n;
@@ -1140,7 +1140,7 @@ export async function prepopulateAHB(env: Env): Promise<void> {
 
     // Verify Bob's view
     const [, bobRep] = findReplica(env, bob.id);
-    const bobHubAcc = bobRep.state.accounts.get(hub.id);
+    const bobHubAcc = bobRep.state.accounts.get(canonicalAccountKey(bob.id, hub.id));
     const bobDelta = bobHubAcc?.deltas.get(USDC_TOKEN_ID);
     if (bobDelta) {
       const bobDerived = deriveDelta(bobDelta, false); // Bob is RIGHT
@@ -1238,7 +1238,7 @@ export async function prepopulateAHB(env: Env): Promise<void> {
 
     // Verify A-H collateral reduced
     const [, aliceRepRebal] = findReplica(env, alice.id);
-    const ahAccountRebal = aliceRepRebal.state.accounts.get(hub.id);
+    const ahAccountRebal = aliceRepRebal.state.accounts.get(canonicalAccountKey(alice.id, hub.id));
     const ahDeltaRebal = ahAccountRebal?.deltas.get(USDC_TOKEN_ID);
     console.log(`   A-H after settlement: collateral=${ahDeltaRebal?.collateral}, ondelta=${ahDeltaRebal?.ondelta}`);
 
@@ -1308,7 +1308,7 @@ export async function prepopulateAHB(env: Env): Promise<void> {
 
     // Verify H-B collateral increased
     const [, hubRepRebal] = findReplica(env, hub.id);
-    const hbAccountRebal = hubRepRebal.state.accounts.get(bob.id);
+    const hbAccountRebal = hubRepRebal.state.accounts.get(canonicalAccountKey(hub.id, bob.id));
     const hbDeltaRebal = hbAccountRebal?.deltas.get(USDC_TOKEN_ID);
     console.log(`   H-B after settlement: collateral=${hbDeltaRebal?.collateral}, ondelta=${hbDeltaRebal?.ondelta}`);
 

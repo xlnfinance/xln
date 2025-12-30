@@ -243,7 +243,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 createdTimestamp: env.timestamp
               });
 
-              const nextAccount = newState.accounts.get(actualNextHop);
+              const nextAccount = newState.accounts.get(canonicalAccountKey(state.entityId, actualNextHop));
               if (nextAccount) {
                 // Calculate forwarded amounts/timelocks
                 const { calculateHtlcFee, calculateHtlcFeeAmount } = await import('../../htlc-utils');
@@ -296,13 +296,14 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         const nextHop = forward.route.length > 1 ? forward.route[1] : null;
 
         if (nextHop) {
-          const nextHopAccount = newState.accounts.get(nextHop);
+          const nextHopAccountKey = canonicalAccountKey(state.entityId, nextHop);
+          const nextHopAccount = newState.accounts.get(nextHopAccountKey);
           if (nextHopAccount) {
             // Forward full amount (no fees for simplicity)
             const forwardAmount = forward.amount;
 
             mempoolOps.push({
-              accountId: nextHop,
+              accountId: nextHopAccountKey, // CRITICAL: Use canonical key, not entity ID!
               tx: {
                 type: 'direct_payment',
                 data: {
@@ -316,7 +317,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               }
             });
 
-            console.log(`⚡ Multi-hop: Forwarding ${forwardAmount} to ${nextHop.slice(-4)} (no fee)`);
+            console.log(`⚡ Multi-hop: Forwarding ${forwardAmount} to ${nextHop.slice(-4)} via account ${nextHopAccountKey.slice(-8)} (no fee)`);
           }
         }
 
