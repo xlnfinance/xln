@@ -1,6 +1,6 @@
 import { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env } from '../types';
 import { DEBUG } from '../utils';
-import { cloneEntityState, addMessage } from '../state-helpers';
+import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
 import { getTokenInfo, getDefaultCreditLimit } from '../account-utils';
 import { safeStringify } from '../serialization-utils';
 import { CANONICAL_J_EVENTS } from '../j-event-watcher';
@@ -471,7 +471,9 @@ function applyFinalizedJEvent(
     }
 
     // BILATERAL J-EVENT CONSENSUS: Need 2-of-2 agreement before applying to account
-    const account = newState.accounts.get(counterpartyEntityId as string);
+    // Use canonical key for account lookup
+    const settleAccountKey = canonicalAccountKey(entityState.entityId, counterpartyEntityId as string);
+    const account = newState.accounts.get(settleAccountKey);
     if (!account) {
       console.warn(`   ⚠️ No account for ${cpShort}`);
       return newState;
@@ -498,8 +500,9 @@ function applyFinalizedJEvent(
     }
 
     // Add j_event_claim via mempoolOps (auto-triggers proposableAccounts + account frame)
+    // Use canonical key for accountId
     mempoolOps.push({
-      accountId: counterpartyEntityId as string,
+      accountId: settleAccountKey,
       tx: { type: 'j_event_claim', data: { jHeight, jBlockHash, events: [event], observedAt: obs.observedAt } },
     });
     console.log(`   📮 j_event_claim → mempoolOps[${mempoolOps.length}] (will auto-propose frame)`);

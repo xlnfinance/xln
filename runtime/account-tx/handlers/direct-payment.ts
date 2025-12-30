@@ -7,6 +7,7 @@
 import { AccountMachine, AccountTx } from '../../types';
 import { deriveDelta, getDefaultCreditLimit } from '../../account-utils';
 import { safeStringify } from '../../serialization-utils';
+import { getAccountPerspective } from '../../state-helpers';
 
 export function handleDirectPayment(
   accountMachine: AccountMachine,
@@ -149,8 +150,9 @@ export function handleDirectPayment(
   console.log(`🔍 NEW-TOTAL: ondelta=${delta.ondelta} + offdelta=${delta.offdelta} = ${delta.ondelta + delta.offdelta}`);
 
   // Events differ by perspective but state is identical
+  const { counterparty: cpForEvent } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
   if (isOurFrame) {
-    events.push(`💸 Sent ${amount.toString()} token ${tokenId} to Entity ${accountMachine.counterpartyEntityId.slice(-4)} ${description ? '(' + description + ')' : ''}`);
+    events.push(`💸 Sent ${amount.toString()} token ${tokenId} to Entity ${cpForEvent.slice(-4)} ${description ? '(' + description + ')' : ''}`);
   } else {
     events.push(`💰 Received ${amount.toString()} token ${tokenId} from Entity ${paymentFromEntity.slice(-4)} ${description ? '(' + description + ')' : ''}`);
   }
@@ -194,7 +196,7 @@ export function handleDirectPayment(
         return { success: false, error: 'Invalid route: no next hop', events };
       }
 
-      if (accountMachine.counterpartyEntityId === nextHop) {
+      if (cpForEvent === nextHop) {
         console.error(`❌ Routing error: received from ${nextHop} but should forward to them`);
       } else {
         // Add forwarding event

@@ -4,6 +4,7 @@
  */
 
 import { AccountMachine, AccountTx } from '../types';
+import { getAccountPerspective } from '../state-helpers';
 import { handleAddDelta } from './handlers/add-delta';
 import { handleSetCreditLimit } from './handlers/set-credit-limit';
 import { handleDirectPayment } from './handlers/direct-payment';
@@ -35,7 +36,10 @@ export async function processAccountTx(
   currentTimestamp: number = Date.now(),
   currentHeight: number = 0
 ): Promise<{ success: boolean; events: string[]; error?: string; secret?: string; hashlock?: string }> {
-  console.log(`🔄 Processing ${accountTx.type} for ${accountMachine.counterpartyEntityId.slice(-4)} (ourFrame: ${isOurFrame})`);
+  // Derive counterparty from canonical left/right using proofHeader's fromEntity as "me"
+  const myEntityId = accountMachine.proofHeader.fromEntity;
+  const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
+  console.log(`🔄 Processing ${accountTx.type} for ${counterparty.slice(-4)} (ourFrame: ${isOurFrame})`);
 
   // Route to appropriate handler based on transaction type
   switch (accountTx.type) {
@@ -84,14 +88,13 @@ export async function processAccountTx(
       if (!accountMachine.jEventChain) accountMachine.jEventChain = [];
       if (accountMachine.lastFinalizedJHeight === undefined) accountMachine.lastFinalizedJHeight = 0;
 
-      // Determine which side counterparty is (they're the OTHER side from us)
-      // accountMachine.proofHeader.fromEntity = our entity ID
-      // accountMachine.counterpartyEntityId = their entity ID
-      const weAreLeft = accountMachine.proofHeader.fromEntity < accountMachine.counterpartyEntityId;
-      const theyAreLeft = !weAreLeft;
+      // Determine which side counterparty is using canonical left/right
+      // proofHeader.fromEntity = our entity ID (perspective-dependent)
+      const { iAmLeft, counterparty: cpId } = getAccountPerspective(accountMachine, myEntityId);
+      const theyAreLeft = !iAmLeft;
 
-      console.log(`   🔍 HANDLER: fromEntity=${accountMachine.proofHeader.fromEntity.slice(-4)}, counterparty=${accountMachine.counterpartyEntityId.slice(-4)}`);
-      console.log(`   🔍 HANDLER: weAreLeft=${weAreLeft}, theyAreLeft=${theyAreLeft}`);
+      console.log(`   🔍 HANDLER: fromEntity=${myEntityId.slice(-4)}, counterparty=${cpId.slice(-4)}`);
+      console.log(`   🔍 HANDLER: iAmLeft=${iAmLeft}, theyAreLeft=${theyAreLeft}`);
 
       const obs = { jHeight, jBlockHash, events, observedAt };
 
@@ -106,7 +109,7 @@ export async function processAccountTx(
 
       // Try finalize if both sides have matching observations
       const { tryFinalizeAccountJEvents } = await import('../entity-tx/j-events');
-      tryFinalizeAccountJEvents(accountMachine, accountMachine.counterpartyEntityId, { timestamp: currentTimestamp });
+      tryFinalizeAccountJEvents(accountMachine, cpId, { timestamp: currentTimestamp });
 
       return { success: true, events: [`📥 J-event claim processed`] };
     }

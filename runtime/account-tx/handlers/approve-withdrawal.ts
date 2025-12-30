@@ -5,6 +5,7 @@
  */
 
 import { AccountMachine, AccountTx } from '../../types';
+import { getAccountPerspective } from '../../state-helpers';
 
 export function handleApproveWithdrawal(
   accountMachine: AccountMachine,
@@ -38,12 +39,13 @@ export function handleApproveWithdrawal(
 
   // If we initiated, we can now submit C→R to jBatch
   if (request.direction === 'outgoing') {
+    const { counterparty } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
     return {
       success: true,
       events,
       jBatchAction: {
         type: 'collateral_to_reserve',
-        counterpartyId: accountMachine.counterpartyEntityId,
+        counterpartyId: counterparty,
         tokenId,
         amount,
       }

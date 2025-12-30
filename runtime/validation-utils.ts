@@ -349,9 +349,16 @@ export function validateAccountFrame(value: unknown, context = 'AccountFrame'): 
 export function validateAccountMachine(value: unknown, context = 'AccountMachine'): AccountMachine {
   const obj = validateObject(value, context);
 
-  // Basic validation of critical fields
-  if (!obj['counterpartyEntityId'] || typeof obj['counterpartyEntityId'] !== 'string') {
-    throw new FinancialDataCorruptionError(`${context}.counterpartyEntityId must be a string`);
+  // CANONICAL REPRESENTATION: Validate leftEntity/rightEntity (not counterpartyEntityId)
+  if (!obj['leftEntity'] || typeof obj['leftEntity'] !== 'string') {
+    throw new FinancialDataCorruptionError(`${context}.leftEntity must be a string`);
+  }
+  if (!obj['rightEntity'] || typeof obj['rightEntity'] !== 'string') {
+    throw new FinancialDataCorruptionError(`${context}.rightEntity must be a string`);
+  }
+  // Validate canonical ordering: leftEntity < rightEntity
+  if (obj['leftEntity'] >= obj['rightEntity']) {
+    throw new FinancialDataCorruptionError(`${context} canonical order violated: leftEntity must be < rightEntity`);
   }
 
   if (!obj['deltas'] || !(obj['deltas'] instanceof Map)) {

@@ -13,7 +13,7 @@
  */
 
 import { AccountMachine, AccountFrame, AccountTx, AccountInput, Env, EntityState } from './types';
-import { cloneAccountMachine } from './state-helpers';
+import { cloneAccountMachine, getAccountPerspective } from './state-helpers';
 import { isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-crypto';
 import { cryptoHash as hash, formatEntityId } from './utils';
@@ -123,7 +123,10 @@ export async function proposeAccountFrame(
   accountMachine: AccountMachine,
   skipCounterIncrement: boolean = false
 ): Promise<{ success: boolean; accountInput?: AccountInput; events: string[]; error?: string }> {
-  console.log(`🚀 E-MACHINE: Proposing account frame for ${accountMachine.counterpartyEntityId.slice(-4)}`);
+  // Derive counterparty from canonical left/right
+  const myEntityId = accountMachine.proofHeader.fromEntity;
+  const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
+  console.log(`🚀 E-MACHINE: Proposing account frame for ${counterparty.slice(-4)}`);
   console.log(`🚀 E-MACHINE: Account state - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, currentHeight=${accountMachine.currentHeight}`);
 
   const events: string[] = [];
@@ -372,7 +375,8 @@ export async function handleAccountInput(
 
       // Commit using cloned state
       if (accountMachine.clonedForValidation) {
-        console.log(`🔓🔓🔓 PROPOSER-COMMIT STARTING FOR ENTITY ${accountMachine.proofHeader.fromEntity.slice(-4)} with counterparty ${accountMachine.counterpartyEntityId.slice(-4)}`);
+        const { counterparty: cpForLog } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
+        console.log(`🔓🔓🔓 PROPOSER-COMMIT STARTING FOR ENTITY ${accountMachine.proofHeader.fromEntity.slice(-4)} with counterparty ${cpForLog.slice(-4)}`);
         console.log(`🔓 clonedForValidation exists: ${!!accountMachine.clonedForValidation}`);
         console.log(`🔓 clonedForValidation.deltas.size: ${accountMachine.clonedForValidation.deltas.size}`);
 
@@ -417,7 +421,7 @@ export async function handleAccountInput(
         }
 
         // AFTER commit
-        console.log(`💳💳💳 PROPOSER-COMMIT COMPLETE: Deltas after commit for ${accountMachine.counterpartyEntityId.slice(-4)}:`,
+        console.log(`💳💳💳 PROPOSER-COMMIT COMPLETE: Deltas after commit for ${cpForLog.slice(-4)}:`,
           Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
             tokenId,
             collateral: delta.collateral?.toString(),
@@ -679,7 +683,8 @@ export async function handleAccountInput(
     }
 
     // Log committed deltas for debugging credit limits
-    console.log(`💳 COMMIT: Deltas after commit for ${accountMachine.counterpartyEntityId.slice(-4)}:`,
+    const { counterparty: cpForCommitLog } = getAccountPerspective(accountMachine, ourEntityId);
+    console.log(`💳 COMMIT: Deltas after commit for ${cpForCommitLog.slice(-4)}:`,
       Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
         tokenId,
         collateral: delta.collateral?.toString(),
@@ -827,9 +832,9 @@ export function getAccountsToProposeFrames(entityState: EntityState): string[] {
     return accountsToProposeFrames;
   }
 
-  for (const [counterpartyEntityId, accountMachine] of entityState.accounts) {
+  for (const [accountKey, accountMachine] of entityState.accounts) {
     if (shouldProposeFrame(accountMachine)) {
-      accountsToProposeFrames.push(counterpartyEntityId);
+      accountsToProposeFrames.push(accountKey);
     }
   }
 

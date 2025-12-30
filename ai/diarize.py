@@ -8,7 +8,6 @@ import sys
 import json
 from pathlib import Path
 import torch
-import torchaudio
 from pyannote.audio import Pipeline
 
 def merge_speakers_with_transcript(diarization, transcript_json):
@@ -75,31 +74,27 @@ def main():
     transcript_path = sys.argv[2]
     output_path = sys.argv[3] if len(sys.argv) > 3 else "diarized_output.txt"
 
-    # Get token from env or cached login
+    # Try multiple token sources
     hf_token = os.getenv("HF_TOKEN")
     if not hf_token:
-        try:
-            from huggingface_hub import get_token
-            hf_token = get_token()
-        except:
-            try:
-                from huggingface_hub import HfFolder
-                hf_token = HfFolder.get_token()
-            except:
-                pass
+        # Try HF cache file
+        token_file = os.path.expanduser("~/.cache/huggingface/token")
+        if os.path.exists(token_file):
+            with open(token_file) as f:
+                hf_token = f.read().strip()
 
     if not hf_token:
         print("ERROR: No HuggingFace token found")
-        print("Option 1: huggingface-cli login")
-        print("Option 2: export HF_TOKEN=hf_...")
+        print("Option 1: export HF_TOKEN=hf_...")
+        print("Option 2: huggingface-cli login")
         sys.exit(1)
 
     # Use MPS (Metal Performance Shaders) for Apple Silicon GPU
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    # Load diarization pipeline
-    print("Loading pyannote pipeline (first run downloads ~300MB)...")
+    # Load diarization pipeline (cached after first run)
+    print("Loading pyannote pipeline...")
     pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1",
         token=hf_token
@@ -108,16 +103,15 @@ def main():
     if device == "mps":
         pipeline.to(torch.device("mps"))
 
-    # Load audio file (workaround for torchcodec issue)
-    print(f"Loading {audio_path}...")
-    waveform, sample_rate = torchaudio.load(audio_path)
+    # Run diarization (GPU accelerated on MPS)
+    print(f"Diarizing {audio_path}...")
+    import time
+    start = time.time()
+    diarization = pipeline(audio_path)
+    elapsed = time.time() - start
 
-    # Run diarization with preloaded audio
-    print(f"Diarizing...")
-    audio_dict = {"waveform": waveform, "sample_rate": sample_rate}
-    diarization = pipeline(audio_dict)
-
-    print(f"Found {len(set(diarization.labels()))} speakers")
+    num_speakers = len(set(diarization.labels()))
+    print(f"Found {num_speakers} speakers ({elapsed:.1f}s)")
 
     # Merge with transcript
     print(f"Merging with transcript {transcript_path}...")

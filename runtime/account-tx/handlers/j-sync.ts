@@ -12,6 +12,7 @@
 
 import { AccountMachine, AccountTx } from '../../types';
 import { getDefaultCreditLimit } from '../../account-utils';
+import { getAccountPerspective } from '../../state-helpers';
 
 export function handleJSync(
   accountMachine: AccountMachine,
@@ -22,7 +23,8 @@ export function handleJSync(
   const events: string[] = [];
 
   const entityShort = accountMachine.proofHeader.fromEntity.slice(-4);
-  const counterpartyShort = accountMachine.counterpartyEntityId.slice(-4);
+  const { counterparty } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
+  const counterpartyShort = counterparty.slice(-4);
 
   // 3) A-MACHINE FINALIZES: j_sync applied to account delta
   console.log(`💰 [3/3] A-MACHINE: ${entityShort}↔${counterpartyShort} | coll=${collateral} delta=${ondelta}`);

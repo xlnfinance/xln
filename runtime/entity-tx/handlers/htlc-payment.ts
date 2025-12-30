@@ -7,7 +7,7 @@
  */
 
 import { EntityState, EntityInput, AccountTx, Env } from '../../types';
-import { cloneEntityState } from '../../state-helpers';
+import { cloneEntityState, canonicalAccountKey } from '../../state-helpers';
 import { generateHashlock, generateLockId, calculateHopTimelock, calculateHopRevealHeight } from '../../htlc-utils';
 import { HTLC } from '../../constants';
 
@@ -48,7 +48,8 @@ export async function handleHtlcPayment(
 
   // If no route provided, check for direct account or calculate route
   if (!route || route.length === 0) {
-    if (newState.accounts.has(targetEntityId)) {
+    const directAccountKey = canonicalAccountKey(entityState.entityId, targetEntityId);
+    if (newState.accounts.has(directAccountKey)) {
       console.log(`🔒 Direct account exists with ${formatEntityId(targetEntityId)}`);
       route = [entityState.entityId, targetEntityId];
     } else {
@@ -92,8 +93,9 @@ export async function handleHtlcPayment(
     return { newState, outputs: [] };
   }
 
-  // Check if we have an account with next hop
-  if (!newState.accounts.has(nextHop)) {
+  // Check if we have an account with next hop (use canonical key)
+  const nextHopAccountKey = canonicalAccountKey(entityState.entityId, nextHop);
+  if (!newState.accounts.has(nextHopAccountKey)) {
     logError("HTLC_PAYMENT", `❌ No account with next hop: ${nextHop}`);
     addMessage(newState, `❌ HTLC payment failed: No account with ${formatEntityId(nextHop)}`);
     return { newState, outputs: [] };
@@ -139,17 +141,17 @@ export async function handleHtlcPayment(
     },
   };
 
-  // Add to account machine mempool
-  const accountMachine = newState.accounts.get(nextHop);
+  // Add to account machine mempool (use canonical key)
+  const accountMachine = newState.accounts.get(nextHopAccountKey);
   if (accountMachine) {
     accountMachine.mempool.push(accountTx);
     console.log(`🔒 Added HTLC lock to mempool for account with ${formatEntityId(nextHop)}`);
     console.log(`🔒 Lock ID: ${lockId.slice(0,16)}..., expires block ${revealBeforeHeight}`);
 
-    // Add to lockBook (E-Machine aggregated view)
+    // Add to lockBook (E-Machine aggregated view, use canonical key)
     newState.lockBook.set(lockId, {
       lockId,
-      accountId: nextHop,
+      accountId: nextHopAccountKey,
       tokenId,
       amount,
       hashlock,
