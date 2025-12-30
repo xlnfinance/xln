@@ -186,7 +186,8 @@ function getOffdelta(env: Env, entityA: string, entityB: string, tokenId: number
   const rightId = entityA < entityB ? entityB : entityA;
 
   const [, leftReplica] = findReplica(env, leftId);
-  const account = leftReplica?.state?.accounts?.get(rightId);
+  const canonicalKey = canonicalAccountKey(leftId, rightId);
+  const account = leftReplica?.state?.accounts?.get(canonicalKey);
   const delta = account?.deltas?.get(tokenId);
 
   return delta?.offdelta ?? 0n;
