@@ -304,11 +304,10 @@ export async function proposeAccountFrame(
   // Generate signature
   const signature = signAccountFrame(accountMachine.proofHeader.fromEntity, newFrame.stateHash);
 
-  // Set pending state
+  // Set pending state (no longer storing clone - re-execution on commit)
   accountMachine.pendingFrame = newFrame;
   accountMachine.sentTransitions = accountMachine.mempool.length;
-  accountMachine.clonedForValidation = clonedMachine;
-  console.log(`🔒 PROPOSE: Account ${accountMachine.proofHeader.fromEntity.slice(-4)}:${accountMachine.proofHeader.toEntity.slice(-4)} pendingFrame=${newFrame.height}, locks.size=${clonedMachine.locks.size}`);
+  console.log(`🔒 PROPOSE: Account ${accountMachine.proofHeader.fromEntity.slice(-4)}:${accountMachine.proofHeader.toEntity.slice(-4)} pendingFrame=${newFrame.height}, txs=${newFrame.accountTxs.length}`);
 
   // Clear mempool
   accountMachine.mempool = [];
@@ -348,8 +347,8 @@ export async function handleAccountInput(
       return { success: false, error: `Replay attack detected: counter ${input.counter} invalid (expected ${accountMachine.ackedTransitions + 1})`, events };
     }
 
-    // Update acked counter only after validation passes
-    accountMachine.ackedTransitions = input.counter;
+    // DoS FIX: Update counter AFTER signature verification (moved below)
+    // If we update here, attacker can desync counters with invalid signatures
   } else {
     // Counter is REQUIRED for all messages (replay protection)
     return { success: false, error: 'Missing counter - replay protection requires sequential counter', events };
@@ -365,6 +364,11 @@ export async function handleAccountInput(
 
     const signature = input.prevSignatures[0];
     if (input.prevSignatures.length > 0 && signature && verifyAccountSignature(expectedSigner, frameHash, signature)) {
+      // DoS FIX: Update counter AFTER signature verified (prevents counter desync attacks)
+      if (input.counter !== undefined) {
+        accountMachine.ackedTransitions = input.counter;
+      }
+
       // CRITICAL DEBUG: Log what we're committing
       console.log(`🔒 COMMIT: Frame ${accountMachine.pendingFrame.height}`);
       console.log(`  Transactions: ${accountMachine.pendingFrame.accountTxs.length}`);
@@ -373,72 +377,18 @@ export async function handleAccountInput(
       console.log(`  Deltas: ${accountMachine.pendingFrame.deltas.map(d => `${d}`).join(',')}`);
       console.log(`  StateHash: ${frameHash.slice(0,16)}...`);
 
-      // Commit using cloned state
-      if (accountMachine.clonedForValidation) {
+      // PROPOSER COMMIT: Re-execute txs on REAL state (Channel.ts pattern)
+      // This eliminates fragile manual field copying
+      {
         const { counterparty: cpForLog } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
-        console.log(`🔓🔓🔓 PROPOSER-COMMIT STARTING FOR ENTITY ${accountMachine.proofHeader.fromEntity.slice(-4)} with counterparty ${cpForLog.slice(-4)}`);
-        console.log(`🔓 clonedForValidation exists: ${!!accountMachine.clonedForValidation}`);
-        console.log(`🔓 clonedForValidation.deltas.size: ${accountMachine.clonedForValidation.deltas.size}`);
+        console.log(`🔓 PROPOSER-COMMIT: Re-executing ${accountMachine.pendingFrame.accountTxs.length} txs for ${cpForLog.slice(-4)}`);
 
-        // BEFORE commit
-        console.log(`📊 BEFORE COMMIT - accountMachine.deltas:`, Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
-          tokenId,
-          leftCreditLimit: delta.leftCreditLimit?.toString(),
-          rightCreditLimit: delta.rightCreditLimit?.toString(),
-        })));
-
-        // BEFORE commit - clonedForValidation
-        console.log(`📊 BEFORE COMMIT - clonedForValidation.deltas:`, Array.from(accountMachine.clonedForValidation.deltas.entries()).map(([tokenId, delta]) => ({
-          tokenId,
-          collateral: delta.collateral?.toString(),
-          ondelta: delta.ondelta?.toString(),
-          offdelta: delta.offdelta?.toString(),
-          leftCreditLimit: delta.leftCreditLimit?.toString(),
-          rightCreditLimit: delta.rightCreditLimit?.toString(),
-        })));
-
-        // CRITICAL FIX: Copy each delta individually to ensure proper mutation propagation
-        // Direct Map assignment can fail with deep clones - explicit copy is safer
-        accountMachine.deltas.clear();
-        for (const [tokenId, delta] of accountMachine.clonedForValidation.deltas.entries()) {
-          accountMachine.deltas.set(tokenId, { ...delta }); // Shallow copy of delta object
+        // Re-execute all frame txs on REAL accountMachine (deterministic)
+        for (const tx of accountMachine.pendingFrame.accountTxs) {
+          await processAccountTx(accountMachine, tx, true, env.timestamp, accountMachine.currentHeight);
         }
 
-        // HTLC: Copy locks from cloned state
-        accountMachine.locks.clear();
-        for (const [lockId, lock] of accountMachine.clonedForValidation.locks.entries()) {
-          accountMachine.locks.set(lockId, { ...lock });
-        }
-        console.log(`🔒 COMMIT: Copied ${accountMachine.locks.size} HTLC locks`);
-
-        // SWAP: Copy swapOffers from cloned state
-        if (!accountMachine.swapOffers) accountMachine.swapOffers = new Map();
-        accountMachine.swapOffers.clear();
-        if (accountMachine.clonedForValidation.swapOffers) {
-          for (const [offerId, offer] of accountMachine.clonedForValidation.swapOffers.entries()) {
-            accountMachine.swapOffers.set(offerId, { ...offer });
-          }
-        }
-
-        // J-EVENT CONSENSUS: Copy bilateral j-event state from cloned state
-        // CRITICAL: These fields are mutated by tryFinalizeAccountJEvents during processAccountTx
-        // Without this, j-event finalization results (collateral updates) are lost!
-        if (accountMachine.clonedForValidation.leftJObservations) {
-          accountMachine.leftJObservations = [...accountMachine.clonedForValidation.leftJObservations];
-        }
-        if (accountMachine.clonedForValidation.rightJObservations) {
-          accountMachine.rightJObservations = [...accountMachine.clonedForValidation.rightJObservations];
-        }
-        if (accountMachine.clonedForValidation.jEventChain) {
-          accountMachine.jEventChain = [...accountMachine.clonedForValidation.jEventChain];
-        }
-        if (accountMachine.clonedForValidation.lastFinalizedJHeight !== undefined) {
-          accountMachine.lastFinalizedJHeight = accountMachine.clonedForValidation.lastFinalizedJHeight;
-        }
-        console.log(`🏛️ COMMIT: Copied j-event consensus state (lastFinalizedJHeight=${accountMachine.lastFinalizedJHeight})`);
-
-        // AFTER commit
-        console.log(`💳💳💳 PROPOSER-COMMIT COMPLETE: Deltas after commit for ${cpForLog.slice(-4)}:`,
+        console.log(`💳 PROPOSER-COMMIT COMPLETE: Deltas after re-execution for ${cpForLog.slice(-4)}:`,
           Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
             tokenId,
             collateral: delta.collateral?.toString(),
@@ -447,6 +397,9 @@ export async function handleAccountInput(
             leftCreditLimit: delta.leftCreditLimit?.toString(),
             rightCreditLimit: delta.rightCreditLimit?.toString(),
           })));
+
+        // Clean up clone (no longer needed with re-execution)
+        delete accountMachine.clonedForValidation;
 
         accountMachine.currentFrame = {
           height: accountMachine.pendingFrame.height,
@@ -661,6 +614,28 @@ export async function handleAccountInput(
       return { success: false, error: `Bilateral consensus failure - states don't match`, events };
     }
 
+    // SECURITY: Verify full frame hash (tokenIds + fullDeltaStates + deltas)
+    // This prevents accepting frames with poisoned dispute proofs
+    const { createFrameHash } = await import('./frame-utils');
+    const recomputedHash = await createFrameHash({
+      height: receivedFrame.height,
+      timestamp: receivedFrame.timestamp,
+      accountTxs: receivedFrame.accountTxs,
+      prevFrameHash: receivedFrame.prevFrameHash,
+      tokenIds: ourFinalTokenIds,
+      deltas: ourFinalDeltas,
+      fullDeltaStates: [], // Will be populated by createFrameHash
+      stateHash: '', // Computed by createFrameHash
+      byLeft: receivedFrame.byLeft,
+    });
+
+    if (recomputedHash !== receivedFrame.stateHash) {
+      console.warn(`⚠️ SECURITY: Frame hash mismatch after validation`);
+      console.warn(`   Recomputed: ${recomputedHash.slice(0,16)}...`);
+      console.warn(`   Claimed:    ${receivedFrame.stateHash.slice(0,16)}...`);
+      return { success: false, error: `Frame hash verification failed - dispute proof mismatch`, events };
+    }
+
     console.log(`✅ CONSENSUS-SUCCESS: Both sides computed identical state for frame ${receivedFrame.height}`);
 
     // Emit bilateral consensus event
@@ -673,52 +648,17 @@ export async function handleAccountInput(
       stateHash: receivedFrame.stateHash,
     });
 
-    // Commit frame - CRITICAL FIX: Use explicit copy pattern (same as Proposer commit)
-    // Direct Map assignment can fail with deep clones - explicit copy is safer
-    console.log(`🔍 RECEIVER-COMMIT: clonedMachine.locks.size=${clonedMachine.locks.size}`);
-    console.log(`🔍 RECEIVER-COMMIT: clonedMachine.deltas before copy:`,
-      Array.from(clonedMachine.deltas.entries()).map(([tid, d]) => ({ tid, offdelta: d.offdelta?.toString() })));
-
-    accountMachine.deltas.clear();
-    for (const [tokenId, delta] of clonedMachine.deltas.entries()) {
-      accountMachine.deltas.set(tokenId, { ...delta }); // Shallow copy of delta object
-    }
-
-    accountMachine.locks.clear();
-    for (const [lockId, lock] of clonedMachine.locks.entries()) {
-      accountMachine.locks.set(lockId, { ...lock });
-    }
-    console.log(`🔍 RECEIVER-COMMIT: accountMachine.locks.size after copy=${accountMachine.locks.size}`);
-
-    // SWAP: Copy swapOffers from cloned state
-    if (!accountMachine.swapOffers) accountMachine.swapOffers = new Map();
-    accountMachine.swapOffers.clear();
-    if (clonedMachine.swapOffers) {
-      for (const [offerId, offer] of clonedMachine.swapOffers.entries()) {
-        accountMachine.swapOffers.set(offerId, { ...offer });
-      }
-    }
-
-    // J-EVENT CONSENSUS: Copy bilateral j-event state from cloned state (same as proposer commit)
-    // CRITICAL: These fields are mutated by tryFinalizeAccountJEvents during processAccountTx
-    // Without this, j-event finalization results (collateral updates) are lost!
-    if (clonedMachine.leftJObservations) {
-      accountMachine.leftJObservations = [...clonedMachine.leftJObservations];
-    }
-    if (clonedMachine.rightJObservations) {
-      accountMachine.rightJObservations = [...clonedMachine.rightJObservations];
-    }
-    if (clonedMachine.jEventChain) {
-      accountMachine.jEventChain = [...clonedMachine.jEventChain];
-    }
-    if (clonedMachine.lastFinalizedJHeight !== undefined) {
-      accountMachine.lastFinalizedJHeight = clonedMachine.lastFinalizedJHeight;
-    }
-    console.log(`🏛️ RECEIVER-COMMIT: Copied j-event consensus state (lastFinalizedJHeight=${accountMachine.lastFinalizedJHeight})`);
-
-    // Log committed deltas for debugging credit limits
+    // RECEIVER COMMIT: Re-execute txs on REAL state (Channel.ts pattern)
+    // This eliminates fragile manual field copying
     const { counterparty: cpForCommitLog } = getAccountPerspective(accountMachine, ourEntityId);
-    console.log(`💳 COMMIT: Deltas after commit for ${cpForCommitLog.slice(-4)}:`,
+    console.log(`🔍 RECEIVER-COMMIT: Re-executing ${receivedFrame.accountTxs.length} txs for ${cpForCommitLog.slice(-4)}`);
+
+    // Re-execute all frame txs on REAL accountMachine (deterministic)
+    for (const tx of receivedFrame.accountTxs) {
+      await processAccountTx(accountMachine, tx, false, env.timestamp, accountMachine.currentHeight);
+    }
+
+    console.log(`💳 RECEIVER-COMMIT COMPLETE: Deltas after re-execution for ${cpForCommitLog.slice(-4)}:`,
       Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
         tokenId,
         collateral: delta.collateral?.toString(),

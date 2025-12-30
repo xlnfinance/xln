@@ -33,7 +33,7 @@ export async function handleDepositCollateral(
   }
 
   // Validate: Does account exist? (use canonical key)
-  const depositAccountKey = canonicalAccountKey(entityState.entityId, counterpartyId);
+  // Account keyed by counterparty ID
   if (!entityState.accounts.has(depositAccountKey)) {
     addMessage(newState,
       `❌ Cannot deposit collateral: no account with ${counterpartyId.slice(-4)}`

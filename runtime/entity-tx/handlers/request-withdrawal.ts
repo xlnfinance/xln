@@ -8,14 +8,15 @@ export function handleRequestWithdrawal(
   const { counterpartyEntityId, tokenId, amount } = entityTx.data;
 
   // Find or create account (use canonical key)
-  const withdrawalAccountKey = canonicalAccountKey(state.entityId, counterpartyEntityId);
-  let accountMachine = state.accounts.get(withdrawalAccountKey);
+  // Account keyed by counterparty ID
+  let accountMachine = state.accounts.get(counterpartyEntityId);
   if (!accountMachine) {
     throw new Error(`No account exists with ${counterpartyEntityId.slice(-8)}`);
   }
 
-  // Generate unique request ID (simple hash for demo - use deterministic RNG in production)
-  const requestId = `${state.entityId.slice(0,4)}${counterpartyEntityId.slice(0,4)}${tokenId}${Date.now()}`.slice(0, 16);
+  // DETERMINISTIC: Use height + counter for withdrawal ID (not Date.now())
+  const withdrawalCounter = accountMachine?.sendCounter || 0;
+  const requestId = `w-${state.entityId.slice(-4)}-${state.height}-${withdrawalCounter}`;
 
   // Create request_withdrawal AccountTx
   const accountTx: AccountTx = {
