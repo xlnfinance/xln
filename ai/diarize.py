@@ -75,10 +75,19 @@ def main():
     transcript_path = sys.argv[2]
     output_path = sys.argv[3] if len(sys.argv) > 3 else "diarized_output.txt"
 
-    if not os.getenv("HF_TOKEN"):
-        print("ERROR: HF_TOKEN environment variable not set")
-        print("Get token at: https://huggingface.co/settings/tokens")
-        print("Then: export HF_TOKEN=hf_...")
+    # Get token from env or cached login
+    hf_token = os.getenv("HF_TOKEN")
+    if not hf_token:
+        try:
+            from huggingface_hub import HfFolder
+            hf_token = HfFolder.get_token()
+        except:
+            pass
+
+    if not hf_token:
+        print("ERROR: No HuggingFace token found")
+        print("Option 1: huggingface-cli login")
+        print("Option 2: export HF_TOKEN=hf_...")
         sys.exit(1)
 
     # Use MPS (Metal Performance Shaders) for Apple Silicon GPU
@@ -89,7 +98,7 @@ def main():
     print("Loading pyannote pipeline (first run downloads ~300MB)...")
     pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1",
-        token=os.getenv("HF_TOKEN")
+        token=hf_token
     )
 
     if device == "mps":

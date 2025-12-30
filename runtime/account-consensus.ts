@@ -171,7 +171,10 @@ export async function proposeAccountFrame(
   }> = [];
   const swapOffersCancelled: Array<{ offerId: string; accountId: string }> = [];
 
+  console.log(`🔍 MEMPOOL-BEFORE-PROCESS: ${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
+
   for (const accountTx of accountMachine.mempool) {
+    console.log(`   🔍 Processing accountTx type=${accountTx.type}`);
     const result = await processAccountTx(
       clonedMachine,
       accountTx,

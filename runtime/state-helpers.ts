@@ -14,6 +14,32 @@ import { safeStringify, safeParse } from './serialization-utils';
 const MESSAGE_LIMIT = 10;
 
 /**
+ * CANONICAL ACCOUNT KEY: Bilateral accounts stored in sorted form (left < right)
+ * Pattern from Channel.ts - ensures both entities reference SAME account object
+ */
+export function canonicalAccountKey(entity1: string, entity2: string): string {
+  return entity1 < entity2 ? `${entity1}:${entity2}` : `${entity2}:${entity1}`;
+}
+
+/**
+ * Get account perspective: Am I left or right? Derive from/to for current operation.
+ */
+export function getAccountPerspective(account: AccountMachine, myEntityId: string): {
+  iAmLeft: boolean;
+  from: string;
+  to: string;
+  counterparty: string;
+} {
+  const iAmLeft = myEntityId === account.leftEntity;
+  return {
+    iAmLeft,
+    from: iAmLeft ? account.leftEntity : account.rightEntity,
+    to: iAmLeft ? account.rightEntity : account.leftEntity,
+    counterparty: iAmLeft ? account.rightEntity : account.leftEntity,
+  };
+}
+
+/**
  * Add message to EntityState with automatic size limiting
  * Prevents unbounded message array growth that causes snapshot bloat
  */

@@ -129,10 +129,103 @@ export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntit
 
   // Try to finalize - with batching, single-signer entities finalize immediately
   // with ALL events from the block (no more race condition)
-  newEntityState = tryFinalizeJBlocks(newEntityState, entityState.config.threshold);
+  const { newState, mempoolOps } = tryFinalizeJBlocks(newEntityState, entityState.config.threshold);
+  newEntityState = newState;
 
-  return newEntityState;
+  // DEBUG: Dump account mempools after j-event processing
+  for (const [cpId, account] of newEntityState.accounts) {
+    if (account.mempool.length > 0 || account.leftJObservations.length > 0 || account.rightJObservations.length > 0) {
+      console.log(`🔍 AFTER-J-EVENT: Account ${cpId.slice(-4)} mempool=${account.mempool.length} txs:`, account.mempool.map((tx: any) => tx.type));
+      console.log(`🔍 AFTER-J-EVENT: leftJObs=${account.leftJObservations?.length || 0}, rightJObs=${account.rightJObservations?.length || 0}`);
+    }
+  }
+
+  if (mempoolOps.length > 0) {
+    console.log(`   📦 handleJEvent: Returning ${mempoolOps.length} mempoolOps for bilateral consensus`);
+  }
+
+  // Return both newState and mempoolOps
+  return { newState: newEntityState, mempoolOps };
 };
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BILATERAL J-EVENT CONSENSUS: 2-of-2 agreement on AccountSettled events
+// ═══════════════════════════════════════════════════════════════════════════════
+/**
+ * Finalize AccountSettled when BOTH entities agree (2-of-2).
+ * Called after receiving j_event_claim from counterparty.
+ */
+export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, env: any): void {
+  // Find matching (jHeight, jBlockHash) in left + right observations
+  const leftMap = new Map();
+  const rightMap = new Map();
+
+  for (const obs of account.leftJObservations) {
+    leftMap.set(`${obs.jHeight}:${obs.jBlockHash}`, obs);
+  }
+  for (const obs of account.rightJObservations) {
+    rightMap.set(`${obs.jHeight}:${obs.jBlockHash}`, obs);
+  }
+
+  const matches = Array.from(leftMap.keys()).filter(k => rightMap.has(k));
+
+  if (matches.length === 0) {
+    console.log(`   🔍 BILATERAL: left=${account.leftJObservations.length}, right=${account.rightJObservations.length}, matches=0`);
+    return;
+  }
+
+  console.log(`   🤝 BILATERAL-MATCH: ${matches.length} j-blocks agreed!`);
+
+  for (const key of matches) {
+    const leftObs = leftMap.get(key)!;
+    const jHeight = leftObs.jHeight;
+
+    // Skip already finalized
+    if (account.lastFinalizedJHeight >= jHeight) continue;
+    if (account.jEventChain.some((b: any) => b.jHeight === jHeight)) continue;
+
+    console.log(`   ✅ BILATERAL-FINALIZE: jHeight=${jHeight}`);
+
+    // Apply events (from left observation - both should be identical)
+    for (const event of leftObs.events) {
+      if (event.type === 'AccountSettled') {
+        const { tokenId, collateral, ondelta } = event.data;
+        const tokenIdNum = Number(tokenId);
+
+        let delta = account.deltas.get(tokenIdNum);
+        if (!delta) {
+          const defaultCreditLimit = getDefaultCreditLimit(tokenIdNum);
+          delta = {
+            tokenId: tokenIdNum,
+            collateral: 0n,
+            ondelta: 0n,
+            offdelta: 0n,
+            leftCreditLimit: defaultCreditLimit,
+            rightCreditLimit: defaultCreditLimit,
+            leftAllowance: 0n,
+            rightAllowance: 0n,
+          };
+          account.deltas.set(tokenIdNum, delta);
+        }
+
+        const oldColl = delta.collateral;
+        delta.collateral = BigInt(collateral);
+        delta.ondelta = BigInt(ondelta);
+        console.log(`   💰 BILATERAL-APPLIED: coll ${oldColl}→${delta.collateral}`);
+      }
+    }
+
+    // Add to jEventChain (replay prevention)
+    account.jEventChain.push({ jHeight, jBlockHash: leftObs.jBlockHash, events: leftObs.events, finalizedAt: env.timestamp || Date.now() });
+    account.lastFinalizedJHeight = Math.max(account.lastFinalizedJHeight, jHeight);
+  }
+
+  // Prune finalized
+  const finalizedHeights = new Set(matches.map(k => leftMap.get(k)!.jHeight));
+  account.leftJObservations = account.leftJObservations.filter((o: any) => !finalizedHeights.has(o.jHeight));
+  account.rightJObservations = account.rightJObservations.filter((o: any) => !finalizedHeights.has(o.jHeight));
+  console.log(`   🧹 Pruned ${finalizedHeights.size} finalized (left=${account.leftJObservations.length}, right=${account.rightJObservations.length} pending)`);
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // J-BLOCK CONSENSUS: Multi-signer agreement on jurisdiction (blockchain) state
@@ -170,7 +263,12 @@ export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntit
  * @param threshold - Required number of agreeing signers (from entity config)
  * @returns Updated state with finalized events applied
  */
-function tryFinalizeJBlocks(state: EntityState, threshold: bigint): EntityState {
+function tryFinalizeJBlocks(
+  state: EntityState,
+  threshold: bigint
+): { newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> } {
+  const allMempoolOps: Array<{ accountId: string; tx: any }> = [];
+
   // ─────────────────────────────────────────────────────────────────────────────
   // Step 1: Group observations by (height, hash)
   // ─────────────────────────────────────────────────────────────────────────────
@@ -245,7 +343,9 @@ function tryFinalizeJBlocks(state: EntityState, threshold: bigint): EntityState 
       // Step 5: Apply all events from this finalized block
       // ─────────────────────────────────────────────────────────────────────────
       for (const event of events) {
-        state = applyFinalizedJEvent(state, event);
+        const { newState, mempoolOps } = applyFinalizedJEvent(state, event);
+        state = newState;
+        allMempoolOps.push(...mempoolOps);
         // applyFinalizedJEvent clones state - ensure jBlockChain preserved
         if (!state.jBlockChain.some(b => b.jHeight === jHeight)) {
           console.log(`   ⚠️  CLONE LOST jBlockChain - restoring block ${jHeight}`);
@@ -272,7 +372,7 @@ function tryFinalizeJBlocks(state: EntityState, threshold: bigint): EntityState 
     console.log(`   🧹 Pruned finalized heights [${finalizedHeights.join(',')}] (${state.jBlockObservations.length} pending)`);
   }
 
-  return state;
+  return { newState: state, mempoolOps: allMempoolOps };
 }
 
 /**
@@ -327,7 +427,10 @@ function mergeSignerObservations(observations: JBlockObservation[]): Jurisdictio
  * @param event - Finalized j-event to apply
  * @returns New state with event applied
  */
-function applyFinalizedJEvent(entityState: EntityState, event: JurisdictionEvent): EntityState {
+function applyFinalizedJEvent(
+  entityState: EntityState,
+  event: JurisdictionEvent
+): { newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> } {
   const entityShort = entityState.entityId.slice(-4);
   const blockNumber = event.blockNumber ?? 0;
   const transactionHash = event.transactionHash || 'unknown';
@@ -335,6 +438,7 @@ function applyFinalizedJEvent(entityState: EntityState, event: JurisdictionEvent
 
   // Clone state for mutation
   const newState = cloneEntityState(entityState);
+  const mempoolOps: Array<{ accountId: string; tx: any }> = [];
 
   // ═══════════════════════════════════════════════════════════════════════════
   // CANONICAL J-EVENTS
@@ -361,40 +465,47 @@ function applyFinalizedJEvent(entityState: EntityState, event: JurisdictionEvent
     const tokenSymbol = getTokenSymbol(tokenIdNum);
     const decimals = getTokenDecimals(tokenIdNum);
 
-    // Update own reserves based on the settlement (entity-level)
+    // Update own reserves (entity-level, unilateral OK)
     if (ownReserve) {
       newState.reserves.set(String(tokenId), BigInt(ownReserve as string | number | bigint));
     }
 
-    // DIRECT UPDATE - J-machine is authoritative
+    // BILATERAL J-EVENT CONSENSUS: Need 2-of-2 agreement before applying to account
     const account = newState.accounts.get(counterpartyEntityId as string);
-    if (account) {
-      let delta = account.deltas.get(tokenIdNum);
-      if (!delta) {
-        const defaultCreditLimit = getDefaultCreditLimit(tokenIdNum);
-        delta = {
-          tokenId: tokenIdNum,
-          collateral: 0n,
-          ondelta: 0n,
-          offdelta: 0n,
-          leftCreditLimit: defaultCreditLimit,
-          rightCreditLimit: defaultCreditLimit,
-          leftAllowance: 0n,
-          rightAllowance: 0n,
-        };
-        account.deltas.set(tokenIdNum, delta);
-      }
-      const oldColl = delta.collateral;
-      const oldOndelta = delta.ondelta;
-      delta.collateral = BigInt(collateral as string | number | bigint);
-      delta.ondelta = BigInt(ondelta as string | number | bigint);
-      console.log(`   💰 [3/3] J-APPLIED: ${entityShort}↔${cpShort} | coll ${oldColl}→${delta.collateral} | ondelta ${oldOndelta}→${delta.ondelta}`);
-    } else {
-      console.warn(`   ⚠️ Settlement: No account for ${cpShort}`);
+    if (!account) {
+      console.warn(`   ⚠️ No account for ${cpShort}`);
+      return newState;
     }
 
+    // Initialize consensus fields
+    if (!account.leftJObservations) account.leftJObservations = [];
+    if (!account.rightJObservations) account.rightJObservations = [];
+    if (!account.jEventChain) account.jEventChain = [];
+    if (account.lastFinalizedJHeight === undefined) account.lastFinalizedJHeight = 0;
+
+    const isLeft = entityState.entityId < (counterpartyEntityId as string);
+    const jHeight = event.blockNumber ?? blockNumber;
+    const jBlockHash = event.blockHash || '';
+
+    // Store OWN observation
+    const obs = { jHeight, jBlockHash, events: [event], observedAt: entityState.timestamp || 0 };
+    if (isLeft) {
+      account.leftJObservations.push(obs);
+      console.log(`   📝 LEFT obs: jHeight=${jHeight}`);
+    } else {
+      account.rightJObservations.push(obs);
+      console.log(`   📝 RIGHT obs: jHeight=${jHeight}`);
+    }
+
+    // Add j_event_claim via mempoolOps (auto-triggers proposableAccounts + account frame)
+    mempoolOps.push({
+      accountId: counterpartyEntityId as string,
+      tx: { type: 'j_event_claim', data: { jHeight, jBlockHash, events: [event], observedAt: obs.observedAt } },
+    });
+    console.log(`   📮 j_event_claim → mempoolOps[${mempoolOps.length}] (will auto-propose frame)`);
+
     const collDisplay = (Number(collateral) / (10 ** decimals)).toFixed(4);
-    addMessage(newState, `⚖️ SETTLED: ${tokenSymbol} with ${cpShort} | coll=${collDisplay} ondelta=${ondelta} | Block ${blockNumber}`);
+    addMessage(newState, `⚖️ OBSERVED: ${tokenSymbol} ${cpShort} | coll=${collDisplay} | j-block ${blockNumber} (awaiting 2-of-2)`);
 
   // ═══════════════════════════════════════════════════════════════════════════
   // FUTURE J-EVENTS (when added to Solidity - handlers ready)
@@ -489,5 +600,5 @@ function applyFinalizedJEvent(entityState: EntityState, event: JurisdictionEvent
     console.warn(`⚠️ Unknown j-event type: ${event.type}. Canonical events: ${CANONICAL_J_EVENTS.join(', ')}`);
   }
 
-  return newState;
+  return { newState, mempoolOps };
 }

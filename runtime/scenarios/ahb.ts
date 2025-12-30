@@ -918,8 +918,14 @@ export async function ahb(env: Env): Promise<void> {
     // process() triggers J-Machine mempool execution → BrowserVM.processBatch → events
     await process(env);
 
-    // Process j-events from BrowserVM execution (AccountSettled updates delta.collateral)
+    // Process j-events from BrowserVM execution (AccountSettled → j_event_claim to account mempool)
     await processJEvents(env);
+
+    // Bilateral consensus: j_event_claims in account mempools → need ticks for account frames
+    await process(env); // Tick 1: Propose frames with j_event_claim
+    await process(env); // Tick 2: Counterparty commits
+    await process(env); // Tick 3: Both entities have observations → finalize
+    await process(env); // Tick 4: Ensure all mempools drained
 
     // ✅ ASSERT: R2C delivered - Alice delta.collateral = $500K
     const [, aliceRep9] = findReplica(env, alice.id);

@@ -210,8 +210,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         txHash: entityTx.data.transactionHash,
       });
 
-      const newState = handleJEvent(entityState, entityTx.data, env);
-      return { newState, outputs: [] };
+      const { newState, mempoolOps } = handleJEvent(entityState, entityTx.data, env);
+      return { newState, outputs: [], mempoolOps: mempoolOps || [] };
     }
 
     if (entityTx.type === 'accountInput') {
