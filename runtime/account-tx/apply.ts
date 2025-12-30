@@ -78,9 +78,9 @@ export async function processAccountTx(
       return handleJSync(accountMachine, accountTx as Extract<AccountTx, { type: 'j_sync' }>, isOurFrame);
 
     case 'j_event_claim': {
-      // Bilateral J-event consensus: Counterparty claims they observed a j-event
+      // Bilateral J-event consensus: Store observation with correct left/right attribution
       const { jHeight, jBlockHash, events, observedAt } = accountTx.data;
-      console.log(`📥 j_event_claim: Counterparty claims jHeight=${jHeight}, hash=${jBlockHash.slice(0,10)}`);
+      console.log(`📥 j_event_claim: jHeight=${jHeight}, hash=${jBlockHash.slice(0,10)}, isOurFrame=${isOurFrame}`);
 
       // Initialize consensus fields if missing
       if (!accountMachine.leftJObservations) accountMachine.leftJObservations = [];
@@ -88,23 +88,25 @@ export async function processAccountTx(
       if (!accountMachine.jEventChain) accountMachine.jEventChain = [];
       if (accountMachine.lastFinalizedJHeight === undefined) accountMachine.lastFinalizedJHeight = 0;
 
-      // Determine which side counterparty is using canonical left/right
-      // proofHeader.fromEntity = our entity ID (perspective-dependent)
+      // AUTH: Determine whose observation this is (2024 Transition.ts pattern)
+      // isOurFrame = are WE the frame proposer? (like block.isLeft === channel.isLeft in 2024)
       const { iAmLeft, counterparty: cpId } = getAccountPerspective(accountMachine, myEntityId);
-      const theyAreLeft = !iAmLeft;
 
-      console.log(`   🔍 HANDLER: fromEntity=${myEntityId.slice(-4)}, counterparty=${cpId.slice(-4)}`);
-      console.log(`   🔍 HANDLER: iAmLeft=${iAmLeft}, theyAreLeft=${theyAreLeft}`);
+      // If isOurFrame=true: this is OUR claim (store in our side)
+      // If isOurFrame=false: this is THEIR claim (store in their side)
+      const claimIsFromLeft = isOurFrame ? iAmLeft : !iAmLeft;
+
+      console.log(`   🔍 AUTH: iAmLeft=${iAmLeft}, isOurFrame=${isOurFrame}, claimIsFromLeft=${claimIsFromLeft}`);
 
       const obs = { jHeight, jBlockHash, events, observedAt };
 
-      // Store THEIR observation in appropriate array
-      if (theyAreLeft) {
+      // Store observation with correct left/right attribution
+      if (claimIsFromLeft) {
         accountMachine.leftJObservations.push(obs);
-        console.log(`   📝 Stored LEFT obs from counterparty (${accountMachine.leftJObservations.length} total)`);
+        console.log(`   📝 Stored LEFT obs (${accountMachine.leftJObservations.length} total)`);
       } else {
         accountMachine.rightJObservations.push(obs);
-        console.log(`   📝 Stored RIGHT obs from counterparty (${accountMachine.rightJObservations.length} total)`);
+        console.log(`   📝 Stored RIGHT obs (${accountMachine.rightJObservations.length} total)`);
       }
 
       // Try finalize if both sides have matching observations

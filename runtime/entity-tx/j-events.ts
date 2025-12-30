@@ -215,8 +215,8 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
       }
     }
 
-    // Add to jEventChain (replay prevention)
-    account.jEventChain.push({ jHeight, jBlockHash: leftObs.jBlockHash, events: leftObs.events, finalizedAt: env.timestamp || Date.now() });
+    // Add to jEventChain (replay prevention) - DETERMINISTIC timestamp
+    account.jEventChain.push({ jHeight, jBlockHash: leftObs.jBlockHash, events: leftObs.events, finalizedAt: env.timestamp });
     account.lastFinalizedJHeight = Math.max(account.lastFinalizedJHeight, jHeight);
   }
 
@@ -322,13 +322,13 @@ function tryFinalizeJBlocks(
       const events = mergeSignerObservations(observations);
 
       // ─────────────────────────────────────────────────────────────────────────
-      // Step 4: Create finalized block record
+      // Step 4: Create finalized block record - DETERMINISTIC timestamp
       // ─────────────────────────────────────────────────────────────────────────
       const finalized: JBlockFinalized = {
         jHeight,
         jBlockHash,
         events,
-        finalizedAt: Date.now(),
+        finalizedAt: env.timestamp, // DETERMINISTIC
         signerCount,
       };
 
@@ -472,8 +472,8 @@ function applyFinalizedJEvent(
 
     // BILATERAL J-EVENT CONSENSUS: Need 2-of-2 agreement before applying to account
     // Use canonical key for account lookup
-    const settleAccountKey = canonicalAccountKey(entityState.entityId, counterpartyEntityId as string);
-    const account = newState.accounts.get(settleAccountKey);
+    // Account keyed by counterparty ID
+    const account = newState.accounts.get(counterpartyEntityId as string);
     if (!account) {
       console.warn(`   ⚠️ No account for ${cpShort}`);
       return newState;

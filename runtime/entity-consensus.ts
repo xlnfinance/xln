@@ -755,9 +755,8 @@ export const applyEntityFrame = async (
     // Track which accounts need proposals based on transaction type
     if (entityTx.type === 'accountInput' && entityTx.data) {
       const fromEntity = entityTx.data.fromEntityId;
-      // Use canonical key for account lookup
-      const accountInputKey = canonicalAccountKey(currentEntityState.entityId, fromEntity);
-      const accountMachine = currentEntityState.accounts.get(accountInputKey);
+      // Account keyed by counterparty ID (fromEntity is our counterparty)
+      const accountMachine = currentEntityState.accounts.get(fromEntity);
 
       if (accountMachine) {
         // Add to proposable if:
@@ -768,7 +767,7 @@ export const applyEntityFrame = async (
         // Only propose if we have something to send:
         // - Have transactions in mempool
         if (hasPendingTxs && !accountMachine.pendingFrame) {
-          proposableAccounts.add(accountInputKey);
+          proposableAccounts.add(fromEntity); // counterparty ID
           console.log(`🔄 Added ${fromEntity.slice(0,10)} to proposable - Pending:${hasPendingTxs}`);
         } else if (isAck) {
           console.log(`✅ Received ACK from ${fromEntity.slice(0,10)}, no action needed (mempool empty)`);

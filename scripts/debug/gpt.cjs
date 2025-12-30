@@ -2,6 +2,7 @@
 // Output: frontend/static/llms.txt (accessible at xln.finance/llms.txt)
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 
 // ⭐ CORE FILES ONLY - Everything an LLM needs to understand XLN
 // 🔴 READ ORDER: Solidity contracts FIRST (source of truth), then TypeScript runtime
@@ -86,7 +87,12 @@ function generateSemanticOverview(contractsDir, runtimeDir, docsDir, worldsDir, 
     if (content) fileSizes[`worlds/${file}`] = countLines(content);
   });
 
+  // Get git commit and timestamp
+  const gitCommit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim().substring(0, 7);
+  const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
   return `# XLN Context - Core System Files (~${Math.round(totalTokens / 1000)}k tokens)
+# Generated: ${timestamp} | Git: ${gitCommit}
 
 ## THE CORE INNOVATION: RCPAN Invariant
 

@@ -48,7 +48,7 @@ export async function handleHtlcPayment(
 
   // If no route provided, check for direct account or calculate route
   if (!route || route.length === 0) {
-    const directAccountKey = canonicalAccountKey(entityState.entityId, targetEntityId);
+    // Account keyed by counterparty ID
     if (newState.accounts.has(directAccountKey)) {
       console.log(`🔒 Direct account exists with ${formatEntityId(targetEntityId)}`);
       route = [entityState.entityId, targetEntityId];
@@ -94,7 +94,7 @@ export async function handleHtlcPayment(
   }
 
   // Check if we have an account with next hop (use canonical key)
-  const nextHopAccountKey = canonicalAccountKey(entityState.entityId, nextHop);
+  // Account keyed by counterparty ID
   if (!newState.accounts.has(nextHopAccountKey)) {
     logError("HTLC_PAYMENT", `❌ No account with next hop: ${nextHop}`);
     addMessage(newState, `❌ HTLC payment failed: No account with ${formatEntityId(nextHop)}`);
@@ -142,7 +142,7 @@ export async function handleHtlcPayment(
   };
 
   // Add to account machine mempool (use canonical key)
-  const accountMachine = newState.accounts.get(nextHopAccountKey);
+  const accountMachine = newState.accounts.get(nextHop);
   if (accountMachine) {
     accountMachine.mempool.push(accountTx);
     console.log(`🔒 Added HTLC lock to mempool for account with ${formatEntityId(nextHop)}`);
