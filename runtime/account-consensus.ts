@@ -308,7 +308,7 @@ export async function proposeAccountFrame(
   accountMachine.pendingFrame = newFrame;
   accountMachine.sentTransitions = accountMachine.mempool.length;
   accountMachine.clonedForValidation = clonedMachine;
-  console.log(`🔒 PROPOSE: Storing clonedForValidation with locks.size=${clonedMachine.locks.size}`);
+  console.log(`🔒 PROPOSE: Account ${accountMachine.proofHeader.fromEntity.slice(-4)}:${accountMachine.proofHeader.toEntity.slice(-4)} pendingFrame=${newFrame.height}, locks.size=${clonedMachine.locks.size}`);
 
   // Clear mempool
   accountMachine.mempool = [];
@@ -335,7 +335,7 @@ export async function handleAccountInput(
   accountMachine: AccountMachine,
   input: AccountInput
 ): Promise<{ success: boolean; response?: AccountInput; events: string[]; error?: string; approvalNeeded?: AccountTx }> {
-  console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}`);
+  console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`);
 
   const events: string[] = [];
 

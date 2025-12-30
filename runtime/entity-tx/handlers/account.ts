@@ -1,6 +1,6 @@
 import { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
-import { cloneEntityState, addMessage, addMessages } from '../../state-helpers';
+import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective } from '../../state-helpers';
 import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
 import { formatEntityId } from '../../utils';
 
@@ -59,7 +59,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   const allSwapOffersCancelled: SwapCancelEvent[] = [];
 
   // Get or create account machine (CANONICAL KEY: both entities use same key)
-  const { canonicalAccountKey } = await import('../state-helpers');
   const canonicalKey = canonicalAccountKey(state.entityId, input.fromEntityId);
   let accountMachine = newState.accounts.get(canonicalKey);
   let isNewAccount = false;
@@ -123,9 +122,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       lastFinalizedJHeight: 0,
     };
 
-    // Store with CANONICAL key (both entities use same key)
-    const { canonicalAccountKey } = await import('../state-helpers');
-    const canonicalKey = canonicalAccountKey(state.entityId, input.fromEntityId);
+    // Store with CANONICAL key (already computed above)
     newState.accounts.set(canonicalKey, accountMachine);
     console.log(`✅ Account created with canonical key: ${canonicalKey.slice(-20)}`);
   }
@@ -140,7 +137,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
   // CHANNEL.TS PATTERN: Process frame-level consensus ONLY
   if (input.height || input.newAccountFrame) {
-    console.log(`🤝 Processing frame from ${input.fromEntityId.slice(-4)}`);
+    console.log(`🤝 Processing frame from ${input.fromEntityId.slice(-4)}, accountMachine.pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}`);
 
     const result = await processAccountInput(env, accountMachine, input);
 
@@ -166,7 +163,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             console.log(`📥 j_event_claim: Counterparty claims jHeight=${jHeight}`);
 
             // Determine which side counterparty is
-            const { iAmLeft: weAreLeft, counterparty } = await import('../state-helpers').then(m => m.getAccountPerspective(accountMachine, newState.entityId));
+            const { iAmLeft: weAreLeft, counterparty } = getAccountPerspective(accountMachine, newState.entityId);
             const theyAreLeft = !weAreLeft;
 
             const obs = { jHeight, jBlockHash, events, observedAt };

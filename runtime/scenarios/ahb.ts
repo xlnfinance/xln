@@ -197,30 +197,32 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
   const [, replicaA] = findReplica(env, entityA);
   const [, replicaB] = findReplica(env, entityB);
 
-  const accountAB = replicaA?.state?.accounts?.get(entityB);
-  const accountBA = replicaB?.state?.accounts?.get(entityA);
+  // Use CANONICAL key (both entities reference SAME account)
+  const canonicalKey = canonicalAccountKey(entityA, entityB);
+  const accountFromA = replicaA?.state?.accounts?.get(canonicalKey);
+  const accountFromB = replicaB?.state?.accounts?.get(canonicalKey);
 
-  console.log(`\n[BILATERAL-SYNC ${label}] Checking ${entityA.slice(-4)}←→${entityB.slice(-4)} for token ${tokenId}...`);
+  console.log(`\n[BILATERAL-SYNC ${label}] Checking ${entityA.slice(-4)}←→${entityB.slice(-4)} (key: ${canonicalKey.slice(-20)}) for token ${tokenId}...`);
 
-  // Both sides must have the account
-  if (!accountAB) {
-    console.error(`❌ Entity ${entityA.slice(-4)} has NO account with ${entityB.slice(-4)}`);
-    throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityA.slice(-4)} missing account with ${entityB.slice(-4)}`);
+  // Both sides must have the account (same canonical key)
+  if (!accountFromA) {
+    console.error(`❌ Entity ${entityA.slice(-4)} has NO account for canonical key ${canonicalKey.slice(-20)}`);
+    throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityA.slice(-4)} missing account`);
   }
-  if (!accountBA) {
-    console.error(`❌ Entity ${entityB.slice(-4)} has NO account with ${entityA.slice(-4)}`);
-    throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityB.slice(-4)} missing account with ${entityA.slice(-4)}`);
+  if (!accountFromB) {
+    console.error(`❌ Entity ${entityB.slice(-4)} has NO account for canonical key ${canonicalKey.slice(-20)}`);
+    throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityB.slice(-4)} missing account`);
   }
 
-  const deltaAB = accountAB.deltas?.get(tokenId);
-  const deltaBA = accountBA.deltas?.get(tokenId);
+  const deltaFromA = accountFromA.deltas?.get(tokenId);
+  const deltaFromB = accountFromB.deltas?.get(tokenId);
 
   // Both sides must have the delta for this token
-  if (!deltaAB) {
+  if (!deltaFromA) {
     console.error(`❌ Entity ${entityA.slice(-4)} account has NO delta for token ${tokenId}`);
     throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityA.slice(-4)} missing delta for token ${tokenId}`);
   }
-  if (!deltaBA) {
+  if (!deltaFromB) {
     console.error(`❌ Entity ${entityB.slice(-4)} account has NO delta for token ${tokenId}`);
     throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityB.slice(-4)} missing delta for token ${tokenId}`);
   }
@@ -238,8 +240,8 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
 
   const errors: string[] = [];
   for (const field of fieldsToCheck) {
-    const valueAB = deltaAB[field];
-    const valueBA = deltaBA[field];
+    const valueAB = deltaFromA[field];
+    const valueBA = deltaFromB[field];
 
     if (valueAB !== valueBA) {
       const msg = `  ${field}: ${entityA.slice(-4)} has ${valueAB}, ${entityB.slice(-4)} has ${valueBA}`;
@@ -254,8 +256,8 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
     console.error(`   Mismatched fields:\n${errors.join('\n')}`);
 
     // Dump full state for debugging
-    console.error(`\n   Full deltaAB (${entityA.slice(-4)} view):`, deltaAB);
-    console.error(`   Full deltaBA (${entityB.slice(-4)} view):`, deltaBA);
+    console.error(`\n   Full deltaFromA (${entityA.slice(-4)} view):`, deltaFromA);
+    console.error(`   Full deltaFromB (${entityB.slice(-4)} view):`, deltaFromB);
 
     throw new Error(`BILATERAL-SYNC VIOLATION: ${errors.length} field(s) differ between ${entityA.slice(-4)} and ${entityB.slice(-4)}`);
   }
