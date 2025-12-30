@@ -512,7 +512,8 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
  */
 function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidation: boolean = false): AccountMachine {
   const result: AccountMachine = {
-    counterpartyEntityId: account.counterpartyEntityId,
+    leftEntity: account.leftEntity,
+    rightEntity: account.rightEntity,
     mempool: [...account.mempool],
     currentFrame: {
       ...account.currentFrame,
