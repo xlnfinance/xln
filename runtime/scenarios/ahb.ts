@@ -108,7 +108,7 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
   // Build JSON-serializable state object
   const state: Record<string, any> = {
     label,
-    timestamp: env.timestamp, // System-level time from runtime frame
+    timestamp: Date.now(),
     height: env.height,
     entities: {} as Record<string, any>,
   };
@@ -197,20 +197,20 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
   const [, replicaA] = findReplica(env, entityA);
   const [, replicaB] = findReplica(env, entityB);
 
-  // Use CANONICAL key (both entities reference SAME account)
+  // CANONICAL: Both entities use SAME key for account
   const canonicalKey = canonicalAccountKey(entityA, entityB);
   const accountFromA = replicaA?.state?.accounts?.get(canonicalKey);
   const accountFromB = replicaB?.state?.accounts?.get(canonicalKey);
 
-  console.log(`\n[BILATERAL-SYNC ${label}] Checking ${entityA.slice(-4)}←→${entityB.slice(-4)} (key: ${canonicalKey.slice(-20)}) for token ${tokenId}...`);
+  console.log(`\n[BILATERAL-SYNC ${label}] Checking ${entityA.slice(-4)}←→${entityB.slice(-4)} (canonical key: ${canonicalKey.slice(-20)}) for token ${tokenId}...`);
 
-  // Both sides must have the account (same canonical key)
+  // Both sides must have the account
   if (!accountFromA) {
-    console.error(`❌ Entity ${entityA.slice(-4)} has NO account for canonical key ${canonicalKey.slice(-20)}`);
+    console.error(`❌ Entity ${entityA.slice(-4)} has NO account for key ${canonicalKey.slice(-20)}`);
     throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityA.slice(-4)} missing account`);
   }
   if (!accountFromB) {
-    console.error(`❌ Entity ${entityB.slice(-4)} has NO account for canonical key ${canonicalKey.slice(-20)}`);
+    console.error(`❌ Entity ${entityB.slice(-4)} has NO account for key ${canonicalKey.slice(-20)}`);
     throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityB.slice(-4)} missing account`);
   }
 
@@ -767,6 +767,7 @@ export async function ahb(env: Env): Promise<void> {
     const [, aliceRep6] = findReplica(env, alice.id);
     const aliceHubAcc6 = aliceRep6?.state?.accounts?.get(canonicalAccountKey(alice.id, hub.id));
     if (!aliceHubAcc6) {
+      console.error(`❌ Available accounts:`, Array.from(aliceRep6.state.accounts.keys()));
       throw new Error(`ASSERT FAIL Frame 6: Alice-Hub account does NOT exist!`);
     }
     console.log(`✅ ASSERT Frame 6: Alice-Hub account EXISTS`);
@@ -806,10 +807,13 @@ export async function ahb(env: Env): Promise<void> {
     // ✅ ASSERT Frame 7: Both Hub-Bob accounts exist (bidirectional)
     const [, hubRep7] = findReplica(env, hub.id);
     const [, bobRep7] = findReplica(env, bob.id);
-    const hubBobAcc7 = hubRep7?.state?.accounts?.get(canonicalAccountKey(hub.id, bob.id));
-    const bobHubAcc7 = bobRep7?.state?.accounts?.get(canonicalAccountKey(bob.id, hub.id));
+    const canonicalHubBobKey = canonicalAccountKey(hub.id, bob.id);
+    const hubBobAcc7 = hubRep7?.state?.accounts?.get(canonicalHubBobKey);
+    const bobHubAcc7 = bobRep7?.state?.accounts?.get(canonicalHubBobKey);
     if (!hubBobAcc7 || !bobHubAcc7) {
-      throw new Error(`ASSERT FAIL Frame 7: Hub-Bob account does NOT exist! Hub→Bob: ${!!hubBobAcc7}, Bob→Hub: ${!!bobHubAcc7}`);
+      console.error(`❌ Hub available accounts:`, Array.from(hubRep7.state.accounts.keys()));
+      console.error(`❌ Bob available accounts:`, Array.from(bobRep7.state.accounts.keys()));
+      throw new Error(`ASSERT FAIL Frame 7: Hub-Bob account does NOT exist! Hub view: ${!!hubBobAcc7}, Bob view: ${!!bobHubAcc7}`);
     }
     console.log(`✅ ASSERT Frame 7: Hub-Bob accounts EXIST (both directions)`);
 
@@ -921,22 +925,27 @@ export async function ahb(env: Env): Promise<void> {
     // process() triggers J-Machine mempool execution → BrowserVM.processBatch → events
     await process(env);
 
-    // Process j-events from BrowserVM execution (AccountSettled → j_event_claim to account mempool)
+    // Process j-events from BrowserVM execution (AccountSettled updates delta.collateral)
     await processJEvents(env);
 
-    // Bilateral consensus: j_event_claims in account mempools → need MANY ticks
-    // Due to timing: mempoolOps processed AFTER proposals in same tick
-    await process(env); // Tick 1: mempoolOps→mempool, proposableAccounts updated
-    await process(env); // Tick 2: Propose frames with j_event_claim
-    await process(env); // Tick 3: Counterparty commits
-    await process(env); // Tick 4: Both entities have observations → finalize
-    await process(env); // Tick 5: Ensure all mempools drained
-    await process(env); // Tick 6: Extra safety
+    // CRITICAL: Process bilateral j_event_claim frame ACKs
+    // After processJEvents, j_event_claim frames are PROPOSED but not yet COMMITTED
+    // Need additional process() rounds to complete bilateral consensus
+    await process(env); // Process j_event_claim frame proposals
+    await process(env); // Process ACK responses and commit frames
 
     // ✅ ASSERT: R2C delivered - Alice delta.collateral = $500K
     const [, aliceRep9] = findReplica(env, alice.id);
-    const aliceHubAccount9 = aliceRep9.state.accounts.get(canonicalAccountKey(alice.id, hub.id));
+    const aliceHubKey9 = canonicalAccountKey(alice.id, hub.id);
+    console.log(`🔍 ASSERT Frame 9: Looking up account with key ${aliceHubKey9}`);
+    console.log(`🔍 ASSERT Frame 9: Alice has accounts:`, Array.from(aliceRep9.state.accounts.keys()));
+    const aliceHubAccount9 = aliceRep9.state.accounts.get(aliceHubKey9);
+    console.log(`🔍 ASSERT Frame 9: Account found? ${!!aliceHubAccount9}`);
+    if (aliceHubAccount9) {
+      console.log(`🔍 ASSERT Frame 9: Account deltas:`, Array.from(aliceHubAccount9.deltas.keys()));
+    }
     const aliceDelta9 = aliceHubAccount9?.deltas.get(USDC_TOKEN_ID);
+    console.log(`🔍 ASSERT Frame 9: Delta found? ${!!aliceDelta9}, collateral=${aliceDelta9?.collateral || 0n}`);
     if (!aliceDelta9 || aliceDelta9.collateral !== aliceCollateralAmount) {
       const actual = aliceDelta9?.collateral || 0n;
       throw new Error(`ASSERT FAIL Frame 9: Alice-Hub collateral = ${actual}, expected ${aliceCollateralAmount}. R2C j-event NOT delivered!`);

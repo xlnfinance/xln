@@ -6,13 +6,18 @@ Requires: HF_TOKEN env var with Hugging Face token
 import os
 import sys
 import json
+import warnings
 from pathlib import Path
 import torch
 import torchaudio
 from pyannote.audio import Pipeline
 
+# Suppress noisy warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="pyannote.audio.core.io")
+warnings.filterwarnings("ignore", category=UserWarning, module="torchaudio._backend")
+
 def merge_speakers_with_transcript(diarization, transcript_json):
-    """Merge speaker labels with transcribed words based on timestamps"""
+    """Merge speaker labels with transcribed words - compact format"""
 
     with open(transcript_json) as f:
         data = json.load(f)
@@ -26,8 +31,11 @@ def merge_speakers_with_transcript(diarization, transcript_json):
             'speaker': speaker
         })
 
-    # Assign speakers to segments
+    # Assign speakers to segments and group consecutive same-speaker segments
+    current_speaker = None
+    current_text = []
     output_lines = []
+
     for segment in data['segments']:
         seg_start = segment['start']
         seg_end = segment['end']
@@ -50,11 +58,20 @@ def merge_speakers_with_transcript(diarization, transcript_json):
                     break
 
         speaker_label = speaker if speaker else "UNKNOWN"
-        timestamp = f"[{format_time(seg_start)} --> {format_time(seg_end)}]"
 
-        output_lines.append(f"[{speaker_label}] {timestamp} {seg_text}")
+        # If speaker changed, output previous speaker's text
+        if current_speaker and speaker_label != current_speaker:
+            output_lines.append(f"{current_speaker}: {' '.join(current_text)}")
+            current_text = []
 
-    return "\n".join(output_lines)
+        current_speaker = speaker_label
+        current_text.append(seg_text)
+
+    # Output final speaker's text
+    if current_speaker and current_text:
+        output_lines.append(f"{current_speaker}: {' '.join(current_text)}")
+
+    return "\n\n".join(output_lines)
 
 def format_time(seconds):
     """Format seconds to HH:MM:SS.mmm"""
@@ -109,14 +126,48 @@ def main():
     import time
     start = time.time()
     waveform, sample_rate = torchaudio.load(audio_path)
+    duration = waveform.shape[1] / sample_rate
+    print(f"Loaded {duration/60:.1f} minutes of audio")
+
+    # Progress hook with ETA
+    last_update = [0]  # mutable for closure
+    def show_progress(name=None, step_name=None, completed=None, total=None, **kwargs):
+        if isinstance(step_name, str):
+            if completed is not None and total is not None:
+                pct = int(100 * completed / total)
+                print(f"  [{pct:3d}%] {step_name} ({completed}/{total})", flush=True)
+            else:
+                print(f"  → {step_name}", flush=True)
+        elif completed is not None and total is not None:
+            pct = int(100 * completed / total)
+            # Only print every 5% to reduce spam
+            if pct >= last_update[0] + 5 or completed == 0 or completed == total:
+                elapsed_so_far = time.time() - start
+                if completed > 0:
+                    eta_sec = (elapsed_so_far / completed) * (total - completed)
+                    eta_min = int(eta_sec / 60)
+                    print(f"  [{pct:3d}%] Processing ({completed}/{total}) - ETA {eta_min}min", flush=True)
+                else:
+                    print(f"  [{pct:3d}%] Processing ({completed}/{total})", flush=True)
+                last_update[0] = pct
 
     # Run diarization (GPU accelerated on MPS)
-    print(f"Diarizing...")
+    print(f"Diarizing (this may take 5-15min)...")
     audio_dict = {"waveform": waveform, "sample_rate": sample_rate}
-    diarization = pipeline(audio_dict)
+
+    # Add num_speakers hint if you know exact count, otherwise use min/max:
+    # result = pipeline(audio_dict, hook=show_progress, num_speakers=2)  # exact
+    result = pipeline(audio_dict, hook=show_progress, min_speakers=1, max_speakers=2)
     elapsed = time.time() - start
 
-    num_speakers = len(set(diarization.labels()))
+    # Extract Annotation from DiarizeOutput
+    diarization = result.speaker_diarization if hasattr(result, 'speaker_diarization') else result
+
+    # Get unique speakers
+    speakers = set()
+    for turn, _, speaker in diarization.itertracks(yield_label=True):
+        speakers.add(speaker)
+    num_speakers = len(speakers)
     print(f"Found {num_speakers} speakers ({elapsed:.1f}s)")
 
     # Merge with transcript

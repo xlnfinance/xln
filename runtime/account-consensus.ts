@@ -420,6 +420,23 @@ export async function handleAccountInput(
           }
         }
 
+        // J-EVENT CONSENSUS: Copy bilateral j-event state from cloned state
+        // CRITICAL: These fields are mutated by tryFinalizeAccountJEvents during processAccountTx
+        // Without this, j-event finalization results (collateral updates) are lost!
+        if (accountMachine.clonedForValidation.leftJObservations) {
+          accountMachine.leftJObservations = [...accountMachine.clonedForValidation.leftJObservations];
+        }
+        if (accountMachine.clonedForValidation.rightJObservations) {
+          accountMachine.rightJObservations = [...accountMachine.clonedForValidation.rightJObservations];
+        }
+        if (accountMachine.clonedForValidation.jEventChain) {
+          accountMachine.jEventChain = [...accountMachine.clonedForValidation.jEventChain];
+        }
+        if (accountMachine.clonedForValidation.lastFinalizedJHeight !== undefined) {
+          accountMachine.lastFinalizedJHeight = accountMachine.clonedForValidation.lastFinalizedJHeight;
+        }
+        console.log(`🏛️ COMMIT: Copied j-event consensus state (lastFinalizedJHeight=${accountMachine.lastFinalizedJHeight})`);
+
         // AFTER commit
         console.log(`💳💳💳 PROPOSER-COMMIT COMPLETE: Deltas after commit for ${cpForLog.slice(-4)}:`,
           Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
@@ -681,6 +698,23 @@ export async function handleAccountInput(
         accountMachine.swapOffers.set(offerId, { ...offer });
       }
     }
+
+    // J-EVENT CONSENSUS: Copy bilateral j-event state from cloned state (same as proposer commit)
+    // CRITICAL: These fields are mutated by tryFinalizeAccountJEvents during processAccountTx
+    // Without this, j-event finalization results (collateral updates) are lost!
+    if (clonedMachine.leftJObservations) {
+      accountMachine.leftJObservations = [...clonedMachine.leftJObservations];
+    }
+    if (clonedMachine.rightJObservations) {
+      accountMachine.rightJObservations = [...clonedMachine.rightJObservations];
+    }
+    if (clonedMachine.jEventChain) {
+      accountMachine.jEventChain = [...clonedMachine.jEventChain];
+    }
+    if (clonedMachine.lastFinalizedJHeight !== undefined) {
+      accountMachine.lastFinalizedJHeight = clonedMachine.lastFinalizedJHeight;
+    }
+    console.log(`🏛️ RECEIVER-COMMIT: Copied j-event consensus state (lastFinalizedJHeight=${accountMachine.lastFinalizedJHeight})`);
 
     // Log committed deltas for debugging credit limits
     const { counterparty: cpForCommitLog } = getAccountPerspective(accountMachine, ourEntityId);
