@@ -560,19 +560,21 @@ export async function handleAccountInput(
       return { success: false, error: `Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`, events };
     }
 
-    // Verify signatures
+    // SECURITY: Verify signatures (REQUIRED for all frames)
     console.log(`🔍 SIG-CHECK: hasSignatures=${!!(input.newSignatures && input.newSignatures.length > 0)}`);
-    if (input.newSignatures && input.newSignatures.length > 0) {
-      const signature = input.newSignatures[0];
-      if (!signature) {
-        return { success: false, error: 'Missing signature in newSignatures array', events };
-      }
-      const isValid = verifyAccountSignature(input.fromEntityId, receivedFrame.stateHash, signature);
-      if (!isValid) {
-        return { success: false, error: 'Invalid frame signature', events };
-      }
-      console.log(`✅ SIG-VERIFIED`);
+    if (!input.newSignatures || input.newSignatures.length === 0) {
+      return { success: false, error: 'SECURITY: Frame must have signatures', events };
     }
+
+    const signature = input.newSignatures[0];
+    if (!signature) {
+      return { success: false, error: 'Missing signature in newSignatures array', events };
+    }
+    const isValid = verifyAccountSignature(input.fromEntityId, receivedFrame.stateHash, signature);
+    if (!isValid) {
+      return { success: false, error: 'Invalid frame signature', events };
+    }
+    console.log(`✅ SIG-VERIFIED`);
 
     // Get entity's synced J-height for deterministic HTLC validation
     const ourEntityId = accountMachine.proofHeader.fromEntity;
