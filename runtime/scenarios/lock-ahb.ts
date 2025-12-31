@@ -727,8 +727,8 @@ export async function ahb(env: Env): Promise<void> {
     // ✅ ASSERT Frame 7: Both Hub-Bob accounts exist (bidirectional)
     const [, hubRep7] = findReplica(env, hub.id);
     const [, bobRep7] = findReplica(env, bob.id);
-    const hubBobAcc7 = hubRep7?.state?.accounts?.get(bob.id);
-    const bobHubAcc7 = bobRep7?.state?.accounts?.get(bob.id);
+    const hubBobAcc7 = hubRep7?.state?.accounts?.get(bob.id); // Hub's account with Bob
+    const bobHubAcc7 = bobRep7?.state?.accounts?.get(hub.id); // Bob's account with Hub (counterparty key)
     if (!hubBobAcc7 || !bobHubAcc7) {
       throw new Error(`ASSERT FAIL Frame 7: Hub-Bob account does NOT exist! Hub→Bob: ${!!hubBobAcc7}, Bob→Hub: ${!!bobHubAcc7}`);
     }
@@ -885,7 +885,7 @@ export async function ahb(env: Env): Promise<void> {
     // Bob (0x0003) > Hub (0x0002) → Bob is RIGHT, Hub is LEFT
     // Bob extending credit sets leftCreditLimit (credit available TO Hub/LEFT)
     const [, bobRep9] = findReplica(env, bob.id);
-    const bobHubAccount9 = bobRep9.state.accounts.get(bob.id);
+    const bobHubAccount9 = bobRep9.state.accounts.get(hub.id); // Account keyed by counterparty
     const bobDelta9 = bobHubAccount9?.deltas.get(USDC_TOKEN_ID);
     if (!bobDelta9 || bobDelta9.leftCreditLimit !== bobCreditAmount) {
       const actual = bobDelta9?.leftCreditLimit || 0n;
