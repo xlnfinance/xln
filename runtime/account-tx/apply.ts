@@ -34,7 +34,8 @@ export async function processAccountTx(
   accountTx: AccountTx,
   isOurFrame: boolean = true,
   currentTimestamp: number = Date.now(),
-  currentHeight: number = 0
+  currentHeight: number = 0,
+  isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string; secret?: string; hashlock?: string }> {
   // Derive counterparty from canonical left/right using proofHeader's fromEntity as "me"
   const myEntityId = accountMachine.proofHeader.fromEntity;
@@ -109,9 +110,18 @@ export async function processAccountTx(
         console.log(`   📝 Stored RIGHT obs (${accountMachine.rightJObservations.length} total)`);
       }
 
-      // Try finalize if both sides have matching observations
-      const { tryFinalizeAccountJEvents } = await import('../entity-tx/j-events');
-      tryFinalizeAccountJEvents(accountMachine, cpId, { timestamp: currentTimestamp });
+      // CRITICAL: Only finalize during COMMIT (on real accountMachine), not VALIDATION (on clone)
+      // Validation happens on clonedMachine which gets discarded - finalization would be lost!
+      if (!isValidation) {
+        const { tryFinalizeAccountJEvents } = await import('../entity-tx/j-events');
+        tryFinalizeAccountJEvents(accountMachine, cpId, { timestamp: currentTimestamp });
+
+        // DEBUG: Check if bilateral finalization persisted
+        const delta = accountMachine.deltas.get(1); // USDC token
+        console.log(`🔍 AFTER-BILATERAL-FINALIZE (isValidation=${isValidation}): collateral=${delta?.collateral || 0n}`);
+      } else {
+        console.log(`⏭️ SKIP-BILATERAL-FINALIZE: On validation clone, will finalize during commit`);
+      }
 
       return { success: true, events: [`📥 J-event claim processed`] };
     }

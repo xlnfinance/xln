@@ -586,7 +586,8 @@ export async function handleAccountInput(
         accountTx,
         false, // Processing their transactions = incoming
         env.timestamp, // DETERMINISTIC timestamp
-        currentJHeight  // Entity's synced J-height
+        currentJHeight,  // Entity's synced J-height
+        true // isValidation = true (on clone, skip bilateral finalization)
       );
       if (!result.success) {
         return { success: false, error: `Frame application failed: ${result.error}`, events };

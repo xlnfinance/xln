@@ -962,6 +962,19 @@ export async function ahb(env: Env): Promise<void> {
     console.log(`✅ ASSERT Frame 9: R2C complete - collateral=$500K, ondelta=$500K, Alice reserve=$2M ✓`);
 
     // CRITICAL: Verify bilateral sync after R2C collateral deposit
+    const [, aliceRepSync] = findReplica(env, alice.id);
+    const [, hubRepSync] = findReplica(env, hub.id);
+    console.log(`\n🔍 PRE-ASSERT STATE DUMP:`);
+    console.log(`Alice account with Hub:`, aliceRepSync.state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID));
+    console.log(`Alice LEFT/RIGHT obs:`, {
+      left: aliceRepSync.state.accounts.get(hub.id)?.leftJObservations?.length || 0,
+      right: aliceRepSync.state.accounts.get(hub.id)?.rightJObservations?.length || 0
+    });
+    console.log(`Hub account with Alice:`, hubRepSync.state.accounts.get(alice.id)?.deltas.get(USDC_TOKEN_ID));
+    console.log(`Hub LEFT/RIGHT obs:`, {
+      left: hubRepSync.state.accounts.get(alice.id)?.leftJObservations?.length || 0,
+      right: hubRepSync.state.accounts.get(alice.id)?.rightJObservations?.length || 0
+    });
     assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'Frame 9 - Alice R2C Collateral');
 
     snap(env, 'Reserve-to-Collateral (R2C): Alice → A-H Account', {
@@ -1012,7 +1025,7 @@ export async function ahb(env: Env): Promise<void> {
     // Bob (0x0003) > Hub (0x0002) → Bob is RIGHT, Hub is LEFT
     // Bob extending credit sets leftCreditLimit (credit available TO Hub/LEFT)
     const [, bobRep9] = findReplica(env, bob.id);
-    const bobHubAccount9 = bobRep9.state.accounts.get(bob.id);
+    const bobHubAccount9 = bobRep9.state.accounts.get(hub.id); // Account keyed by counterparty
     const bobDelta9 = bobHubAccount9?.deltas.get(USDC_TOKEN_ID);
     if (!bobDelta9 || bobDelta9.leftCreditLimit !== bobCreditAmount) {
       const actual = bobDelta9?.leftCreditLimit || 0n;

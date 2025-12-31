@@ -211,7 +211,7 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
         const oldColl = delta.collateral;
         delta.collateral = BigInt(collateral);
         delta.ondelta = BigInt(ondelta);
-        console.log(`   💰 BILATERAL-APPLIED: coll ${oldColl}→${delta.collateral}`);
+        console.log(`   💰 BILATERAL-APPLIED for ${counterpartyId.slice(-4)}: coll ${oldColl}→${delta.collateral}, ondelta=${delta.ondelta}`);
       }
     }
 
