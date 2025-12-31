@@ -631,6 +631,18 @@ export async function handleAccountInput(
 
     console.log(`🔍 RECEIVER: Computed ${ourFinalTokenIds.length} tokens after filtering: [${ourFinalTokenIds.join(', ')}]`);
 
+    // CRITICAL: Extract FULL delta states for hash verification (same as proposer does)
+    // This ensures hash verification includes credit limits, collateral, allowances
+    const ourFullDeltaStates: import('./types').Delta[] = [];
+    for (const [tokenId, delta] of sortedOurTokens) {
+      const totalDelta = delta.ondelta + delta.offdelta;
+      // Apply SAME filtering as proposer (skip unused tokens)
+      if (totalDelta === 0n && delta.leftCreditLimit === 0n && delta.rightCreditLimit === 0n) {
+        continue;
+      }
+      ourFullDeltaStates.push({ ...delta });
+    }
+
     const ourComputedState = Buffer.from(ourFinalDeltas.map(d => d.toString()).join(',')).toString('hex');
     const theirClaimedState = Buffer.from(receivedFrame.deltas.map(d => d.toString()).join(',')).toString('hex');
 
@@ -655,7 +667,7 @@ export async function handleAccountInput(
       prevFrameHash: receivedFrame.prevFrameHash,
       tokenIds: ourFinalTokenIds,
       deltas: ourFinalDeltas,
-      fullDeltaStates: [], // Will be populated by createFrameHash
+      fullDeltaStates: ourFullDeltaStates, // CRITICAL FIX: Compute from clonedMachine like proposer does
       stateHash: '', // Computed by createFrameHash
       byLeft: receivedFrame.byLeft,
     });
