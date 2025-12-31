@@ -20,7 +20,8 @@ export async function handleHtlcLock(
   accountTx: Extract<AccountTx, { type: 'htlc_lock' }>,
   isOurFrame: boolean,
   currentTimestamp: number,
-  currentHeight: number
+  currentHeight: number,
+  isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
   console.log('🔒 handleHtlcLock CALLED');
   const { lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId, encryptedPackage } = accountTx.data;
@@ -105,17 +106,24 @@ export async function handleHtlcLock(
     encryptedPackage
   };
 
-  console.log(`🔒 BEFORE SET: locks.size=${accountMachine.locks?.size}, lockId=${lockId.slice(0,16)}`);
-  accountMachine.locks.set(lockId, lock);
-  console.log(`✅ Lock added to Map: ${lockId.slice(0,16)}..., locks.size=${accountMachine.locks.size}`);
+  // CRITICAL: Only update lockBook during COMMIT, not VALIDATION
+  // During validation (on clonedMachine), skip lock storage to avoid data loss
+  // Validation clone is discarded - locks must only be created during commit on real accountMachine
+  if (!isValidation) {
+    console.log(`🔒 COMMIT: Adding lock to lockBook, lockId=${lockId.slice(0,16)}`);
+    accountMachine.locks.set(lockId, lock);
+    console.log(`✅ Lock added to Map: ${lockId.slice(0,16)}..., locks.size=${accountMachine.locks.size}`);
 
-  // 8. Update capacity hold (prevents double-spend)
-  if (senderIsLeft) {
-    delta.leftHtlcHold += amount;
-    console.log(`✅ Updated leftHtlcHold: ${delta.leftHtlcHold}`);
+    // 8. Update capacity hold (prevents double-spend)
+    if (senderIsLeft) {
+      delta.leftHtlcHold += amount;
+      console.log(`✅ Updated leftHtlcHold: ${delta.leftHtlcHold}`);
+    } else {
+      delta.rightHtlcHold += amount;
+      console.log(`✅ Updated rightHtlcHold: ${delta.rightHtlcHold}`);
+    }
   } else {
-    delta.rightHtlcHold += amount;
-    console.log(`✅ Updated rightHtlcHold: ${delta.rightHtlcHold}`);
+    console.log(`⏭️ VALIDATION: Skipping lockBook update (will commit later)`);
   }
 
   events.push(`🔒 HTLC locked: ${amount} token ${tokenId}, expires block ${revealBeforeHeight}, hash ${hashlock.slice(0,16)}...`);

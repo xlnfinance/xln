@@ -20,7 +20,8 @@ export async function handleSwapOffer(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'swap_offer' }>,
   isOurFrame: boolean,
-  currentHeight: number
+  currentHeight: number,
+  isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
   const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, minFillRatio } = accountTx.data;
   const events: string[] = [];
@@ -95,13 +96,21 @@ export async function handleSwapOffer(
     createdHeight: currentHeight,
   };
 
-  accountMachine.swapOffers.set(offerId, offer);
+  // CRITICAL: Only update swapOffers during COMMIT, not VALIDATION
+  // During validation (on clonedMachine), skip offer storage to avoid data loss
+  // Validation clone is discarded - offers must only be created during commit on real accountMachine
+  if (!isValidation) {
+    accountMachine.swapOffers.set(offerId, offer);
+    console.log(`📊 COMMIT: Swap offer created, offerId=${offerId.slice(0,8)}`);
 
-  // 7. Lock capacity
-  if (makerIsLeft) {
-    delta.leftSwapHold += giveAmount;
+    // 7. Lock capacity
+    if (makerIsLeft) {
+      delta.leftSwapHold += giveAmount;
+    } else {
+      delta.rightSwapHold += giveAmount;
+    }
   } else {
-    delta.rightSwapHold += giveAmount;
+    console.log(`⏭️ VALIDATION: Skipping swapOffers update (will commit later)`);
   }
 
   const makerId = makerIsLeft ? fromEntity : toEntity;

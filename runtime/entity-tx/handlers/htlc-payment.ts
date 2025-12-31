@@ -48,8 +48,8 @@ export async function handleHtlcPayment(
 
   // If no route provided, check for direct account or calculate route
   if (!route || route.length === 0) {
-    // Account keyed by counterparty ID
-    if (newState.accounts.has(directAccountKey)) {
+    // Account keyed by counterparty ID (no canonical helper needed)
+    if (newState.accounts.has(targetEntityId)) {
       console.log(`🔒 Direct account exists with ${formatEntityId(targetEntityId)}`);
       route = [entityState.entityId, targetEntityId];
     } else {
@@ -93,10 +93,10 @@ export async function handleHtlcPayment(
     return { newState, outputs: [] };
   }
 
-  // Check if we have an account with next hop (use canonical key)
-  // Account keyed by counterparty ID
-  if (!newState.accounts.has(nextHopAccountKey)) {
-    logError("HTLC_PAYMENT", `❌ No account with next hop: ${nextHop}`);
+  // Check if we have an account with next hop
+  // Accounts keyed by counterparty ID (simpler than canonical)
+  if (!newState.accounts.has(nextHop)) {
+    logError("HTLC_PAYMENT", `❌ No account with next hop: ${nextHop.slice(-4)}`);
     addMessage(newState, `❌ HTLC payment failed: No account with ${formatEntityId(nextHop)}`);
     return { newState, outputs: [] };
   }
@@ -141,17 +141,17 @@ export async function handleHtlcPayment(
     },
   };
 
-  // Add to account machine mempool (use canonical key)
+  // Add to account machine mempool (use counterparty ID as key)
   const accountMachine = newState.accounts.get(nextHop);
   if (accountMachine) {
     accountMachine.mempool.push(accountTx);
     console.log(`🔒 Added HTLC lock to mempool for account with ${formatEntityId(nextHop)}`);
     console.log(`🔒 Lock ID: ${lockId.slice(0,16)}..., expires block ${revealBeforeHeight}`);
 
-    // Add to lockBook (E-Machine aggregated view, use canonical key)
+    // Add to lockBook (E-Machine aggregated view)
     newState.lockBook.set(lockId, {
       lockId,
-      accountId: nextHopAccountKey,
+      accountId: nextHop, // Use counterparty ID as key (simpler than canonical)
       tokenId,
       amount,
       hashlock,

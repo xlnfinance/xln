@@ -133,7 +133,8 @@ export async function processAccountTx(
         accountTx as Extract<AccountTx, { type: 'htlc_lock' }>,
         isOurFrame,
         currentTimestamp,
-        currentHeight
+        currentHeight,
+        isValidation
       );
 
     case 'htlc_reveal':
@@ -158,7 +159,8 @@ export async function processAccountTx(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'swap_offer' }>,
         isOurFrame,
-        currentHeight
+        currentHeight,
+        isValidation
       );
 
     case 'swap_resolve':
