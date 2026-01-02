@@ -54,9 +54,11 @@ export async function handleSwapOffer(
     return { success: false, error: `Invalid minFillRatio: ${minFillRatio}`, events };
   }
 
-  // 3. Determine maker perspective
-  const { fromEntity, toEntity } = accountMachine.proofHeader;
-  const weAreLeft = isLeft(fromEntity, toEntity);
+  // 3. Determine maker perspective using CANONICAL entities
+  // CRITICAL: Use leftEntity/rightEntity (canonical, same on both sides)
+  // NOT fromEntity/toEntity (perspective-dependent, can flip!)
+  const { leftEntity, rightEntity } = accountMachine;
+  const weAreLeft = accountMachine.proofHeader.fromEntity === leftEntity;
 
   // Maker is whoever created this frame (isOurFrame means WE created it)
   // If isOurFrame=true: we are the maker
