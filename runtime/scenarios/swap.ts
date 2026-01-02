@@ -956,8 +956,9 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
 
   // Print final positions
   console.log('\n📊 Final positions:');
-  const carolAccount = hubRepFinal.state.accounts.get(canonicalAccountKey(hub.id, carol.id));
-  const daveAccount = hubRepFinal.state.accounts.get(canonicalAccountKey(hub.id, dave.id));
+  // Account keyed by counterparty ID (from Hub's perspective)
+  const carolAccount = hubRepFinal.state.accounts.get(carol.id);
+  const daveAccount = hubRepFinal.state.accounts.get(dave.id);
 
   const carolEth = carolAccount?.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
   const carolUsdc = carolAccount?.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
