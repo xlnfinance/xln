@@ -98,43 +98,34 @@ export async function handleSwapOffer(
     createdHeight: currentHeight,
   };
 
-  // CRITICAL: Only update PERSISTENT state during COMMIT, not VALIDATION
-  // During validation (on clonedMachine), skip offer storage to avoid data loss
-  // Validation clone is discarded - offers must only be created during commit on real accountMachine
-  //
-  // AUDIT FIX (CRITICAL-2): BOTH swapOffers AND holds must be guarded!
-  // Otherwise validation clone has holds applied but real state doesn't until commit,
-  // causing state hash mismatch between validation and commit phases.
-  if (!isValidation) {
-    accountMachine.swapOffers.set(offerId, offer);
-    console.log(`📊 COMMIT: Swap offer created, offerId=${offerId.slice(0,8)}`);
-
-    // 7. Lock capacity (ONLY during commit - holds affect state hash)
-    if (makerIsLeft) {
-      delta.leftSwapHold += giveAmount;
-    } else {
-      delta.rightSwapHold += giveAmount;
-    }
+  // 7. Lock capacity (CRITICAL PER CODEX: Apply during BOTH validation and commit!)
+  // Holds ARE consensus-critical - included in fullDeltaStates hash
+  // Must be in BOTH validation (for hash) and commit (for real state) to match
+  if (makerIsLeft) {
+    delta.leftSwapHold += giveAmount;
   } else {
-    console.log(`⏭️ VALIDATION: Skipping swapOffers AND holds update (will commit later)`);
+    delta.rightSwapHold += giveAmount;
   }
 
-  const makerId = makerIsLeft ? fromEntity : toEntity;
+  // 8. Store offer (only during commit - metadata, not in state hash)
+  if (!isValidation) {
+    accountMachine.swapOffers.set(offerId, offer);
+    console.log(`📊 COMMIT: Swap offer stored (holds already applied in validation)`);
+  } else {
+    console.log(`⏭️ VALIDATION: Holds applied, swapOffers storage deferred`);
+  }
 
   events.push(`📊 Swap offer created: ${offerId.slice(0,8)}... give ${giveAmount} token${giveTokenId} for ${wantAmount} token${wantTokenId}`);
-  console.log(`📊 SWAP-OFFER: from=${formatEntityId(fromEntity)}, to=${formatEntityId(toEntity)}, makerIsLeft=${makerIsLeft}, maker=${formatEntityId(makerId)}`);
 
-  // AUDIT FIX (CRITICAL-1): Return BOTH makerIsLeft AND fromEntity/toEntity in event
-  // The entity handler will enrich with accountId based on its own perspective
-  // This avoids accountId computation confusion at the account level
+  // Return event with canonical entities for deterministic attribution
   return {
     success: true,
     events,
     swapOfferCreated: {
       offerId,
-      makerIsLeft,       // Simple boolean for direction
-      fromEntity,        // Account pair - needed for entity-level accountId derivation
-      toEntity,          // Account pair - needed for entity-level accountId derivation
+      makerIsLeft,
+      fromEntity: leftEntity,   // Canonical entities (same on both sides)
+      toEntity: rightEntity,
       giveTokenId,
       giveAmount,
       wantTokenId,
