@@ -381,8 +381,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         console.log(`📊 SWAP-EVENTS: Collected ${swapOffersCancelled.length} swap cancels`);
         allSwapOffersCancelled.push(...swapOffersCancelled);
         // Update E-Machine swapBook immediately (this is entity state, not mempool)
-        for (const { offerId } of swapOffersCancelled) {
-          newState.swapBook.delete(offerId);
+        // AUDIT FIX (CRITICAL-6): Use namespaced key for swapBook delete
+        for (const { offerId, accountId } of swapOffersCancelled) {
+          const swapBookKey = `${accountId}:${offerId}`;
+          newState.swapBook.delete(swapBookKey);
         }
       }
 
@@ -446,6 +448,10 @@ export function processOrderbookSwaps(
   const ext = hubState.orderbookExt as OrderbookExtState | undefined;
   if (!ext) return { mempoolOps, bookUpdates };
 
+  // AUDIT FIX (CRITICAL-5): Cache book updates within batch to avoid stale snapshots
+  // Without this, same-tick offers don't see each other's fills
+  const bookCache = new Map<string, BookState>();
+
   for (const offer of swapOffers) {
     // Use accountId enriched by entity handler (already has correct counterparty ID)
     const accountId = offer.accountId!;
@@ -455,6 +461,11 @@ export function processOrderbookSwaps(
     const bookKey = pairId;
 
     const side = deriveSide(offer.giveTokenId, offer.wantTokenId);
+    // LOT_SCALE = 10^12: Orderbook works in lots for uint32 efficiency
+    // For 18-decimal tokens: 1 lot = 10^12 wei = 0.000001 tokens
+    // This allows up to ~4.2M lots per order (uint32 max), sufficient for most trades
+    // NOTE (MEDIUM-1): Amounts below LOT_SCALE will be truncated to 0 lots and rejected
+    // This is acceptable: sub-$0.001 orders at typical ETH prices are uneconomical anyway
     const LOT_SCALE = 10n ** 12n;
     const MAX_LOTS = 0xFFFFFFFFn;
 
@@ -470,11 +481,12 @@ export function processOrderbookSwaps(
     }
 
     if (qtyLots === 0n || qtyLots > MAX_LOTS || priceTicks <= 0n || priceTicks > MAX_LOTS) {
-      console.warn(`📊 ORDERBOOK REJECT: Invalid order, offerId=${offer.offerId}`);
+      console.warn(`📊 ORDERBOOK REJECT: Invalid order (qty=${qtyLots}, price=${priceTicks}), offerId=${offer.offerId}`);
       continue;
     }
 
-    let book = ext.books.get(bookKey);
+    // AUDIT FIX (CRITICAL-5): Use cached book if available, otherwise load from ext.books
+    let book = bookCache.get(bookKey) || ext.books.get(bookKey);
     if (!book) {
       const BOOK_LEVELS = 100;
       const PRICE_TICK = 1000;
@@ -509,6 +521,8 @@ export function processOrderbookSwaps(
     });
 
     book = result.state;
+    // AUDIT FIX (CRITICAL-5): Cache updated book for next offer in same batch
+    bookCache.set(bookKey, book);
     bookUpdates.push({ pairId: bookKey, book });
 
     // Process trade events

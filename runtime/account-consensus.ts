@@ -163,10 +163,14 @@ export async function proposeAccountFrame(
   // Process all transactions on the clone
   const allEvents: string[] = [];
   const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
+  // AUDIT FIX (CRITICAL-1): SwapOfferEvent carries makerIsLeft + fromEntity/toEntity
+  // Entity handler will enrich with accountId based on its own perspective
   const swapOffersCreated: Array<{
     offerId: string;
-    makerId: string;
-    accountId: string;
+    makerIsLeft: boolean;
+    fromEntity: string;
+    toEntity: string;
+    accountId?: string;  // Enriched by entity handler
     giveTokenId: number;
     giveAmount: bigint;
     wantTokenId: number;
@@ -587,10 +591,13 @@ export async function handleAccountInput(
     const clonedMachine = cloneAccountMachine(accountMachine);
     const processEvents: string[] = [];
     const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
+    // AUDIT FIX (CRITICAL-1): SwapOfferEvent carries makerIsLeft + fromEntity/toEntity
     const swapOffersCreated: Array<{
       offerId: string;
-      makerId: string;
-      accountId: string;
+      makerIsLeft: boolean;
+      fromEntity: string;
+      toEntity: string;
+      accountId?: string;
       giveTokenId: number;
       giveAmount: bigint;
       wantTokenId: number;

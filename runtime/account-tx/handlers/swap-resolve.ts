@@ -156,7 +156,10 @@ export async function handleSwapResolve(
   }
 
   // 8. Handle remainder
-  const accountId = `${fromEntity}:${toEntity}`;
+  // AUDIT FIX (CRITICAL-3): Use counterparty ID format, not canonical pair format
+  // This ensures orderbook cancellation finds the correct entry
+  // The maker is who created this offer (makerIsLeft determines left vs right)
+  const makerId = offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity;
   let swapOfferCancelled: { offerId: string; accountId: string } | undefined;
 
   if (cancelRemainder || fillRatio === MAX_FILL_RATIO) {
@@ -171,7 +174,7 @@ export async function handleSwapResolve(
       }
     }
     accountMachine.swapOffers.delete(offerId);
-    swapOfferCancelled = { offerId, accountId };
+    swapOfferCancelled = { offerId, accountId: makerId };
     events.push(`📊 Swap offer ${offerId.slice(0,8)}... ${fillRatio === MAX_FILL_RATIO ? 'fully filled' : 'cancelled'}`);
   } else {
     // Partial fill - update remaining amounts (use quantized values for consistency)

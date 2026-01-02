@@ -622,8 +622,10 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
       console.log(`📊 Added swap_offer to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
 
-      // Add to swapBook (E-Machine aggregated view, keyed by counterparty)
-      newState.swapBook.set(offerId, {
+      // AUDIT FIX (CRITICAL-6): Use namespaced key to prevent offerId collisions across accounts
+      // Key format: accountId:offerId (same as orderbook uses)
+      const swapBookKey = `${counterpartyEntityId}:${offerId}`;
+      newState.swapBook.set(swapBookKey, {
         offerId,
         accountId: counterpartyEntityId,
         giveTokenId,
@@ -700,8 +702,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
       console.log(`📊 Added swap_cancel to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
 
-      // Remove from swapBook (E-Machine aggregated view)
-      newState.swapBook.delete(offerId);
+      // AUDIT FIX (CRITICAL-6): Use namespaced key for swapBook delete
+      const swapBookKey = `${counterpartyEntityId}:${offerId}`;
+      newState.swapBook.delete(swapBookKey);
 
       const firstValidator = entityState.config.validators[0];
       if (firstValidator) {
