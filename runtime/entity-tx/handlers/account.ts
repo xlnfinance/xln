@@ -17,6 +17,7 @@ export interface SwapOfferEvent {
   makerIsLeft: boolean;     // Simple boolean (account-level context)
   fromEntity: string;       // Account pair (left entity)
   toEntity: string;         // Account pair (right entity)
+  accountId?: string;       // Added by entity handler (Hub's Map key for this account)
   giveTokenId: number;
   giveAmount: bigint;
   wantTokenId: number;
@@ -446,10 +447,9 @@ export function processOrderbookSwaps(
   if (!ext) return { mempoolOps, bookUpdates };
 
   for (const offer of swapOffers) {
-    // Derive accountId: Hub's Map key for this account
-    // Hub processes events from accounts keyed by counterparty
-    // offer has {fromEntity, toEntity} pair - one is Hub, other is counterparty
-    const accountId = offer.fromEntity === hubState.entityId ? offer.toEntity : offer.fromEntity;
+    // Use accountId enriched by entity handler (already has correct counterparty ID)
+    const accountId = offer.accountId!;
+    console.log(`📊 ORDERBOOK-PROCESS: offerId=${offer.offerId}, accountId=${accountId.slice(-8)}`);
 
     const { pairId } = canonicalPair(offer.giveTokenId, offer.wantTokenId);
     const bookKey = pairId;
