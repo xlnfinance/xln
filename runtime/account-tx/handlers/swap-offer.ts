@@ -114,20 +114,25 @@ export async function handleSwapOffer(
   }
 
   const makerId = makerIsLeft ? fromEntity : toEntity;
+
+  // CRITICAL: For Hub's orderbook, accountId = counterparty ID (the key Hub uses)
+  // Since this runs on BOTH entities' accounts, we need generic logic:
+  // accountId should always be the maker's entity ID (the one creating the offer)
+  // Hub will use this to look up accounts.get(makerId)
+  const accountId = makerId;
+
   events.push(`📊 Swap offer created: ${offerId.slice(0,8)}... give ${giveAmount} token${giveTokenId} for ${wantAmount} token${wantTokenId}`);
   console.log(`📊 SWAP-OFFER: from=${formatEntityId(fromEntity)}, to=${formatEntityId(toEntity)}, makerIsLeft=${makerIsLeft}, maker=${formatEntityId(makerId)}`);
+  console.log(`📊 SWAP-OFFER: Computed accountId=${accountId.slice(-8)} (Hub's Map key for this account)`);
 
   // Return swap offer event for orderbook integration (hub processes these)
-  // accountId = the Map key hub uses to store this account
-  // Hub stores accounts keyed by counterparty: accounts.get(alice.id), accounts.get(bob.id)
-  // So accountId = makerId (Hub's counterparty for this account)
   return {
     success: true,
     events,
     swapOfferCreated: {
       offerId,
       makerId,
-      accountId: makerId, // Hub's Map key = maker's entity ID
+      accountId, // Hub's Map key = non-Hub entity's ID
       giveTokenId,
       giveAmount,
       wantTokenId,

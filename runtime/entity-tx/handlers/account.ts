@@ -14,8 +14,9 @@ export interface MempoolOp {
 
 export interface SwapOfferEvent {
   offerId: string;
-  makerId: string;
-  accountId: string;
+  makerIsLeft: boolean;     // Simple boolean (account-level context)
+  fromEntity: string;       // Account pair (left entity)
+  toEntity: string;         // Account pair (right entity)
   giveTokenId: number;
   giveAmount: bigint;
   wantTokenId: number;
@@ -445,6 +446,11 @@ export function processOrderbookSwaps(
   if (!ext) return { mempoolOps, bookUpdates };
 
   for (const offer of swapOffers) {
+    // Derive accountId: Hub's Map key for this account
+    // Hub processes events from accounts keyed by counterparty
+    // offer has {fromEntity, toEntity} pair - one is Hub, other is counterparty
+    const accountId = offer.fromEntity === hubState.entityId ? offer.toEntity : offer.fromEntity;
+
     const { pairId } = canonicalPair(offer.giveTokenId, offer.wantTokenId);
     const bookKey = pairId;
 
@@ -486,12 +492,13 @@ export function processOrderbookSwaps(
       });
     }
 
-    const namespacedOrderId = `${offer.accountId}:${offer.offerId}`;
-    console.log(`📊 ORDERBOOK ADD: maker=${formatEntityId(offer.makerId)}, orderId=${namespacedOrderId.slice(-20)}, side=${side}, price=${priceTicks}, qty=${qtyLots}`);
+    const makerId = offer.makerIsLeft ? offer.fromEntity : offer.toEntity;
+    const namespacedOrderId = `${accountId}:${offer.offerId}`;
+    console.log(`📊 ORDERBOOK ADD: maker=${formatEntityId(makerId)}, orderId=${namespacedOrderId.slice(-20)}, side=${side}, price=${priceTicks}, qty=${qtyLots}`);
 
     const result = applyCommand(book, {
       kind: 0,
-      ownerId: offer.makerId,
+      ownerId: makerId,
       orderId: namespacedOrderId,
       side,
       tif: 0,
@@ -543,11 +550,17 @@ export function processOrderbookSwaps(
       const offerId = namespacedOrderId.slice(lastColon + 1);
       const accountId = namespacedOrderId.slice(0, lastColon);
 
-      // Verify account exists in hub's state (canonical key)
+      // Verify account exists in hub's state
+      console.log(`🔍 ORDERBOOK-LOOKUP: Looking for accountId="${accountId}"`);
+      console.log(`🔍 ORDERBOOK-LOOKUP: Hub accounts:`, Array.from(hubState.accounts.keys()));
+      console.log(`🔍 ORDERBOOK-LOOKUP: Match found:`, hubState.accounts.has(accountId));
       if (!hubState.accounts.has(accountId)) {
-        console.warn(`⚠️ ORDERBOOK: Account ${accountId.slice(-20)} not found for swap_resolve, skipping`);
+        console.warn(`⚠️ ORDERBOOK: Account not found for swap_resolve, skipping`);
+        console.warn(`   Looking for: "${accountId}"`);
+        console.warn(`   Hub has: ${Array.from(hubState.accounts.keys()).map(k => `"${k}"`).join(', ')}`);
         continue;
       }
+      console.log(`✅ ORDERBOOK-LOOKUP: Found account for ${accountId.slice(-8)}, generating swap_resolve`);
 
       const filledBig = BigInt(filledLots);
       const originalBig = BigInt(originalLots);
