@@ -23,7 +23,8 @@ export async function handleSwapCancel(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'swap_cancel' }>,
   isOurFrame: boolean,
-  currentHeight: number
+  currentHeight: number,
+  isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelled?: { offerId: string; accountId: string; makerId: string } }> {
   const { offerId } = accountTx.data;
   const events: string[] = [];
@@ -46,7 +47,7 @@ export async function handleSwapCancel(
     return { success: false, error: `Only maker can cancel swap offer`, events };
   }
 
-  // 3. Release hold
+  // 3. Release hold (always - affects delta validation)
   const giveDelta = accountMachine.deltas.get(offer.giveTokenId);
   if (giveDelta) {
     if (giveDelta.leftSwapHold === undefined) giveDelta.leftSwapHold = 0n;
@@ -59,8 +60,13 @@ export async function handleSwapCancel(
     }
   }
 
-  // 4. Remove offer
-  accountMachine.swapOffers.delete(offerId);
+  // 4. Remove offer (only during commit, not validation)
+  if (!isValidation) {
+    accountMachine.swapOffers.delete(offerId);
+    console.log(`📊 COMMIT: Swap offer removed, offerId=${offerId.slice(0,8)}`);
+  } else {
+    console.log(`⏭️ VALIDATION: Skipping swapOffers removal (will commit later)`);
+  }
 
   const accountId = `${fromEntity}:${toEntity}`;
   const makerId = offer.makerIsLeft ? fromEntity : toEntity;
