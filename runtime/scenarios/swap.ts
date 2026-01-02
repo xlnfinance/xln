@@ -692,9 +692,11 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
     }
   }
 
-  // Check Alice's offer - should be partially filled (1 of 2 ETH)
-  const aliceAccount = hubRepAfter.state.accounts.get(hub.id);
-  const bobAccount = hubRepAfter.state.accounts.get(bob.id);
+  // Check Alice's and Bob's accounts from their own perspectives
+  const [, aliceRepAfter] = findReplica(env, alice.id);
+  const [, bobRepAfter] = findReplica(env, bob.id);
+  const aliceAccount = aliceRepAfter.state.accounts.get(hub.id);  // Alice's account WITH Hub
+  const bobAccount = bobRepAfter.state.accounts.get(hub.id);      // Bob's account WITH Hub
 
   console.log(`  Alice offer exists: ${aliceAccount?.swapOffers?.has('alice-sell-001')}`);
   console.log(`  Bob offer exists: ${bobAccount?.swapOffers?.has('bob-buy-001')}`);

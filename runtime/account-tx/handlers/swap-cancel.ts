@@ -47,10 +47,10 @@ export async function handleSwapCancel(
     return { success: false, error: `Only maker can cancel swap offer`, events };
   }
 
-  // 3. Release hold (ONLY during commit, not validation)
-  // AUDIT FIX (MEDIUM-2): Guard hold releases with isValidation to prevent state mismatch
+  // 3. Release hold (CRITICAL: Apply during BOTH validation and commit!)
+  // Holds are consensus-critical - must be in state hash
   const giveDelta = accountMachine.deltas.get(offer.giveTokenId);
-  if (giveDelta && !isValidation) {
+  if (giveDelta) {
     if (giveDelta.leftSwapHold === undefined) giveDelta.leftSwapHold = 0n;
     if (giveDelta.rightSwapHold === undefined) giveDelta.rightSwapHold = 0n;
 
@@ -59,9 +59,7 @@ export async function handleSwapCancel(
     } else {
       giveDelta.rightSwapHold -= offer.giveAmount;
     }
-    console.log(`📊 COMMIT: Released hold ${offer.giveAmount} for token${offer.giveTokenId}`);
-  } else if (isValidation) {
-    console.log(`⏭️ VALIDATION: Skipping hold release (will commit later)`);
+    console.log(`📊 ${isValidation ? 'VALIDATION' : 'COMMIT'}: Released hold ${offer.giveAmount} for token${offer.giveTokenId}`);
   }
 
   // 4. Remove offer (only during commit, not validation)
