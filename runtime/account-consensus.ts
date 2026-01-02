@@ -183,8 +183,9 @@ export async function proposeAccountFrame(
       clonedMachine,
       accountTx,
       true, // Processing our own transactions
-      env.timestamp, // DETERMINISTIC timestamp
-      currentJHeight  // Entity's synced J-height
+      env.timestamp, // Will be replaced by frame.timestamp during commit
+      currentJHeight,  // Entity's synced J-height
+      true // isValidation = true (on clone, skip persistent state updates)
     );
 
     if (!result.success) {
