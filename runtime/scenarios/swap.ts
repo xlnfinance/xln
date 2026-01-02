@@ -636,9 +636,9 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   // Wait for hub to process Alice's swap offer through orderbook
   await converge(env);
 
-  // Verify Alice's offer exists in bilateral account
+  // Verify Alice's offer exists in bilateral account (from Hub's perspective)
   const [, hubRepCheck] = findReplica(env, hub.id);
-  const aliceAccountCheck = hubRepCheck.state.accounts.get(hub.id);
+  const aliceAccountCheck = hubRepCheck.state.accounts.get(alice.id);  // Hub's account WITH Alice
   const aliceOffer = aliceAccountCheck?.swapOffers?.get('alice-sell-001');
   assert(!!aliceOffer, 'Alice offer should exist in Hub bilateral account');
   console.log('  ✅ Alice offer created in bilateral account\n');
