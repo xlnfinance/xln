@@ -724,6 +724,7 @@ export interface AccountMachine {
     cooperativeNonce: number;
     disputeNonce: number;
   };
+  // Simple proofBody for internal use (computed on demand from deltas/locks/swapOffers)
   proofBody: {
     tokenIds: number[];
     deltas: bigint[];
@@ -734,6 +735,17 @@ export interface AccountMachine {
       revealedUntilBlock: number; // revealBeforeHeight
       hash: string;             // hashlock
     }>;
+  };
+  // ABI-encoded proofBody for on-chain disputes (built by proof-builder.ts)
+  abiProofBody?: {
+    encodedProofBody: string;   // ABI-encoded bytes for contract call
+    proofBodyHash: string;      // keccak256(encodedProofBody) - signed for disputes
+    lastUpdatedHeight: number;  // Frame height when last computed
+  };
+  // Dispute configuration (per-side delay settings)
+  disputeConfig: {
+    leftDisputeDelay: number;   // uint16 - value * 10 = blocks
+    rightDisputeDelay: number;  // uint16 - value * 10 = blocks
   };
   hankoSignature?: string; // Last signed proof by counterparty
   // Historical frame log - grows until manually pruned by entity

@@ -33,6 +33,7 @@ export class BrowserEVM implements JurisdictionEVM {
   async init() { return this.provider.init(); }
   async reset() { return this.provider.reset(); }
   getDepositoryAddress() { return this.provider.getDepositoryAddress(); }
+  getDeltaTransformerAddress() { return this.provider.getDeltaTransformerAddress(); }
   getBlockNumber() { return this.provider.getBlockNumber(); }
   async captureStateRoot() { return this.provider.captureStateRoot(); }
   async timeTravel(stateRoot: Uint8Array) { return this.provider.timeTravel(stateRoot); }
@@ -67,6 +68,7 @@ export class BrowserEVM implements JurisdictionEVM {
       contracts: {
         entityProviderAddress: '0x0000000000000000000000000000000000000000',
         depositoryAddress: this.provider.getDepositoryAddress(),
+        deltaTransformerAddress: this.provider.getDeltaTransformerAddress(),
       },
       evmState: { vmState: null },
       entities: [],

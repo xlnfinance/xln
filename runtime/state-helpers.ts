@@ -537,6 +537,7 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
       tokenIds: [...account.proofBody.tokenIds],
       deltas: [...account.proofBody.deltas],
     },
+    disputeConfig: { ...account.disputeConfig }, // Dispute delay configuration
     pendingWithdrawals: new Map(account.pendingWithdrawals), // Phase 2: Clone withdrawal tracking
     requestedRebalance: new Map(account.requestedRebalance), // Phase 3: Clone rebalance hints
   };
@@ -557,6 +558,11 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
 
   if (account.hankoSignature) {
     result.hankoSignature = account.hankoSignature;
+  }
+
+  // ABI-encoded proofBody for on-chain disputes
+  if (account.abiProofBody) {
+    result.abiProofBody = { ...account.abiProofBody };
   }
 
   // HTLC state (deep clone locks Map)
