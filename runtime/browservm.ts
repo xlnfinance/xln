@@ -32,15 +32,18 @@ export class BrowserVMProvider {
   private accountAddress: Address | null = null;
   private depositoryAddress: Address | null = null;
   private entityProviderAddress: Address | null = null;
+  private deltaTransformerAddress: Address | null = null;
   private deployerPrivKey: Uint8Array;
   private deployerAddress: Address;
   private nonce = 0n;
   private accountArtifact: any = null;
   private depositoryArtifact: any = null;
   private entityProviderArtifact: any = null;
+  private deltaTransformerArtifact: any = null;
   private depositoryInterface: ethers.Interface | null = null;
   private entityProviderInterface: ethers.Interface | null = null;
   private accountInterface: ethers.Interface | null = null;
+  private deltaTransformerInterface: ethers.Interface | null = null;
   private initialized = false;
   private blockHeight = 0; // Track J-Machine block height
   private blockHash = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Current block hash
@@ -67,19 +70,22 @@ export class BrowserVMProvider {
     // Load artifacts - browser uses fetch, CLI uses file read
     if (typeof window !== 'undefined') {
       // Browser: fetch from static/
-      const [accountResp, depositoryResp, entityProviderResp] = await Promise.all([
+      const [accountResp, depositoryResp, entityProviderResp, deltaTransformerResp] = await Promise.all([
         fetch('/contracts/Account.json'),
         fetch('/contracts/Depository.json'),
         fetch('/contracts/EntityProvider.json'),
+        fetch('/contracts/DeltaTransformer.json'),
       ]);
 
       if (!accountResp.ok) throw new Error(`Failed to load Account artifact: ${accountResp.status}`);
       if (!depositoryResp.ok) throw new Error(`Failed to load Depository artifact: ${depositoryResp.status}`);
       if (!entityProviderResp.ok) throw new Error(`Failed to load EntityProvider artifact: ${entityProviderResp.status}`);
+      if (!deltaTransformerResp.ok) throw new Error(`Failed to load DeltaTransformer artifact: ${deltaTransformerResp.status}`);
 
       this.accountArtifact = await accountResp.json();
       this.depositoryArtifact = await depositoryResp.json();
       this.entityProviderArtifact = await entityProviderResp.json();
+      this.deltaTransformerArtifact = await deltaTransformerResp.json();
     } else {
       // CLI: read from jurisdictions/artifacts/
       const fs = await import('fs');
@@ -89,6 +95,7 @@ export class BrowserVMProvider {
       this.accountArtifact = JSON.parse(fs.readFileSync(path.join(basePath, 'Account.sol/Account.json'), 'utf-8'));
       this.depositoryArtifact = JSON.parse(fs.readFileSync(path.join(basePath, 'Depository.sol/Depository.json'), 'utf-8'));
       this.entityProviderArtifact = JSON.parse(fs.readFileSync(path.join(basePath, 'EntityProvider.sol/EntityProvider.json'), 'utf-8'));
+      this.deltaTransformerArtifact = JSON.parse(fs.readFileSync(path.join(basePath, 'DeltaTransformer.sol/DeltaTransformer.json'), 'utf-8'));
       console.log('[BrowserVM] Loaded artifacts from filesystem (CLI mode)');
     }
 
@@ -96,7 +103,8 @@ export class BrowserVMProvider {
     this.depositoryInterface = new ethers.Interface(this.depositoryArtifact.abi);
     this.entityProviderInterface = new ethers.Interface(this.entityProviderArtifact.abi);
     this.accountInterface = new ethers.Interface(this.accountArtifact.abi);
-    console.log('[BrowserVM] Loaded all contract artifacts (including Account library)');
+    this.deltaTransformerInterface = new ethers.Interface(this.deltaTransformerArtifact.abi);
+    console.log('[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)');
 
     // Create VM with evmOpts to disable contract size limit
     this.vm = await createVM({
@@ -115,10 +123,11 @@ export class BrowserVMProvider {
     await this.vm.stateManager.putAccount(this.deployerAddress, deployerAccount);
     console.log(`[BrowserVM] Deployer funded: ${this.deployerAddress.toString()}`);
 
-    // Deploy contracts in order: Account (library) → Depository (with linking) → EntityProvider
+    // Deploy contracts in order: Account (library) → Depository (with linking) → EntityProvider → DeltaTransformer
     await this.deployAccount();
     await this.deployDepository();
     await this.deployEntityProvider();
+    await this.deployDeltaTransformer();
 
     this.initialized = true;
     console.log('[BrowserVM] All contracts deployed successfully');
@@ -133,6 +142,7 @@ export class BrowserVMProvider {
     this.accountAddress = null;
     this.depositoryAddress = null;
     this.entityProviderAddress = null;
+    this.deltaTransformerAddress = null;
     this.nonce = 0n;
     await this.init();
     console.log('[BrowserVM] Reset complete - fresh contracts deployed');
@@ -236,6 +246,42 @@ export class BrowserVMProvider {
 
     this.entityProviderAddress = result.createdAddress!;
     console.log(`[BrowserVM] EntityProvider deployed at: ${this.entityProviderAddress.toString()}`);
+  }
+
+  /** Deploy DeltaTransformer contract (HTLC + Swap transformer) */
+  private async deployDeltaTransformer(): Promise<void> {
+    console.log('[BrowserVM] Deploying DeltaTransformer...');
+    const currentNonce = await this.getCurrentNonce();
+
+    const tx = createLegacyTx({
+      gasLimit: 100000000n,
+      gasPrice: 10n,
+      data: this.deltaTransformerArtifact.bytecode,
+      nonce: currentNonce,
+    }, { common: this.common }).sign(this.deployerPrivKey);
+
+    const result = await runTx(this.vm, { tx });
+    this.incrementBlock(); // Transaction mined successfully
+
+    if (result.execResult.exceptionError) {
+      console.error('[BrowserVM] DeltaTransformer deployment failed:', result.execResult.exceptionError);
+      throw new Error(`DeltaTransformer deployment failed: ${result.execResult.exceptionError}`);
+    }
+
+    this.deltaTransformerAddress = result.createdAddress!;
+    console.log(`[BrowserVM] DeltaTransformer deployed at: ${this.deltaTransformerAddress.toString()}`);
+
+    // Update proof-builder with deployed address
+    const { setDeltaTransformerAddress } = await import('./proof-builder.js');
+    setDeltaTransformerAddress(this.deltaTransformerAddress.toString());
+  }
+
+  /** Get DeltaTransformer contract address */
+  getDeltaTransformerAddress(): string {
+    if (!this.deltaTransformerAddress) {
+      throw new Error('DeltaTransformer not deployed');
+    }
+    return this.deltaTransformerAddress.toString();
   }
 
   /** Get entity reserves for a token */

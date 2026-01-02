@@ -298,6 +298,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
             disputeNonce: 0,
           },
           proofBody: { tokenIds: [], deltas: [] },
+          // Dispute configuration (default: 20 blocks = 2 * 10)
+          disputeConfig: {
+            leftDisputeDelay: 2,  // 20 blocks for left entity
+            rightDisputeDelay: 2, // 20 blocks for right entity
+          },
           frameHistory: [],
           pendingWithdrawals: new Map(),
           requestedRebalance: new Map(),

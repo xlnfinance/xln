@@ -887,9 +887,18 @@ export function getAccountsToProposeFrames(entityState: EntityState): string[] {
 /**
  * Generate account proof for dispute resolution (like old_src Channel.getSubchannelProofs)
  * Must be ABI-compatible with Depository contract
+ *
+ * DUAL-TRACK APPROACH:
+ * - proofBody: Simple internal representation (tokenIds + deltas)
+ * - abiProofBody: ABI-encoded for on-chain disputes (includes transformers)
  */
-export async function generateAccountProof(accountMachine: AccountMachine): Promise<{ proofHash: string; signature: string }> {
-  // Update proofBody with current state (like old_src does before signing)
+export async function generateAccountProof(accountMachine: AccountMachine): Promise<{
+  proofHash: string;
+  signature: string;
+  abiEncodedProofBody?: string;
+  abiProofBodyHash?: string;
+}> {
+  // Update simple proofBody with current state (like old_src does before signing)
   accountMachine.proofBody = {
     tokenIds: Array.from(accountMachine.deltas.keys()).sort((a, b) => a - b), // Deterministic order
     deltas: Array.from(accountMachine.deltas.keys())
@@ -897,14 +906,25 @@ export async function generateAccountProof(accountMachine: AccountMachine): Prom
       .map(tokenId => {
         const delta = accountMachine.deltas.get(tokenId);
         if (!delta) {
-          console.warn(`⚠️ Missing delta for token ${tokenId}`);
+          console.warn(`Missing delta for token ${tokenId}`);
           throw new Error(`Critical financial data missing: delta for token ${tokenId}`);
         }
         return delta.ondelta + delta.offdelta; // Total delta for each token
       }),
   };
 
-  // Create proof structure compatible with Depository.sol
+  // Build ABI-encoded proofBody for on-chain disputes
+  const { buildAccountProofBody } = await import('./proof-builder.js');
+  const abiResult = buildAccountProofBody(accountMachine);
+
+  // Store ABI-encoded proofBody for later dispute submission
+  accountMachine.abiProofBody = {
+    encodedProofBody: abiResult.encodedProofBody,
+    proofBodyHash: abiResult.proofBodyHash,
+    lastUpdatedHeight: accountMachine.currentHeight,
+  };
+
+  // Create proof structure compatible with Depository.sol (legacy format)
   const proofData = {
     fromEntity: accountMachine.proofHeader.fromEntity,
     toEntity: accountMachine.proofHeader.toEntity,
@@ -925,9 +945,15 @@ export async function generateAccountProof(accountMachine: AccountMachine): Prom
   // Store signature for later use
   accountMachine.hankoSignature = signature;
 
-  console.log(`🔐 Generated account proof: ${accountMachine.proofBody.tokenIds.length} tokens, hash: 0x${proofHash.slice(0, 20)}...`);
-  console.log(`🔐 ProofBody tokens: [${accountMachine.proofBody.tokenIds.join(',')}]`);
-  console.log(`🔐 ProofBody deltas: [${accountMachine.proofBody.deltas.map(d => d.toString()).join(',')}]`);
+  console.log(`Generated account proof: ${accountMachine.proofBody.tokenIds.length} tokens`);
+  console.log(`  Simple hash: 0x${proofHash.slice(0, 20)}...`);
+  console.log(`  ABI hash: ${abiResult.proofBodyHash.slice(0, 20)}...`);
+  console.log(`  Locks: ${accountMachine.locks.size}, Swaps: ${accountMachine.swapOffers.size}`);
 
-  return { proofHash: `0x${proofHash}`, signature };
+  return {
+    proofHash: `0x${proofHash}`,
+    signature,
+    abiEncodedProofBody: abiResult.encodedProofBody,
+    abiProofBodyHash: abiResult.proofBodyHash,
+  };
 }
