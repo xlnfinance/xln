@@ -403,8 +403,9 @@ export async function handleAccountInput(
         console.log(`🔓 PROPOSER-COMMIT: Re-executing ${accountMachine.pendingFrame.accountTxs.length} txs for ${cpForLog.slice(-4)}`);
 
         // Re-execute all frame txs on REAL accountMachine (deterministic)
+        // CRITICAL: Use frame.timestamp for determinism (HTLC validation must use agreed consensus time)
         for (const tx of accountMachine.pendingFrame.accountTxs) {
-          await processAccountTx(accountMachine, tx, true, env.timestamp, accountMachine.currentHeight);
+          await processAccountTx(accountMachine, tx, true, accountMachine.pendingFrame.timestamp, accountMachine.currentHeight);
         }
 
         console.log(`💳 PROPOSER-COMMIT COMPLETE: Deltas after re-execution for ${cpForLog.slice(-4)}:`,
@@ -599,11 +600,12 @@ export async function handleAccountInput(
 
     for (const accountTx of receivedFrame.accountTxs) {
       // When receiving a frame, we process transactions from counterparty's perspective (incoming)
+      // CRITICAL: Use receivedFrame.timestamp for determinism (HTLC validation must use agreed consensus time)
       const result = await processAccountTx(
         clonedMachine,
         accountTx,
         false, // Processing their transactions = incoming
-        env.timestamp, // DETERMINISTIC timestamp
+        receivedFrame.timestamp, // DETERMINISTIC: Use frame's consensus timestamp
         currentJHeight,  // Entity's synced J-height
         true // isValidation = true (on clone, skip bilateral finalization)
       );
@@ -715,8 +717,9 @@ export async function handleAccountInput(
     console.log(`🔍 RECEIVER-COMMIT: Re-executing ${receivedFrame.accountTxs.length} txs for ${cpForCommitLog.slice(-4)}`);
 
     // Re-execute all frame txs on REAL accountMachine (deterministic)
+    // CRITICAL: Use receivedFrame.timestamp for determinism (HTLC validation must use agreed consensus time)
     for (const tx of receivedFrame.accountTxs) {
-      await processAccountTx(accountMachine, tx, false, env.timestamp, accountMachine.currentHeight);
+      await processAccountTx(accountMachine, tx, false, receivedFrame.timestamp, accountMachine.currentHeight);
     }
 
     console.log(`💳 RECEIVER-COMMIT COMPLETE: Deltas after re-execution for ${cpForCommitLog.slice(-4)}:`,

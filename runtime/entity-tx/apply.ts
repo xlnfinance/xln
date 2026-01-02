@@ -622,10 +622,10 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
       console.log(`📊 Added swap_offer to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
 
-      // Add to swapBook (E-Machine aggregated view, use canonical key)
+      // Add to swapBook (E-Machine aggregated view, keyed by counterparty)
       newState.swapBook.set(offerId, {
         offerId,
-        accountId: swapAccountKey,
+        accountId: counterpartyEntityId,
         giveTokenId,
         giveAmount,
         wantTokenId,
@@ -663,8 +663,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         data: { offerId, fillRatio, cancelRemainder },
       };
 
-      // Pure: return mempoolOp instead of mutating directly (use canonical key)
-      mempoolOps.push({ accountId: resolveAccountKey, tx: accountTx });
+      // Pure: return mempoolOp instead of mutating directly (keyed by counterparty)
+      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
       console.log(`💱 Added swap_resolve to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
 
       const firstValidator = entityState.config.validators[0];
