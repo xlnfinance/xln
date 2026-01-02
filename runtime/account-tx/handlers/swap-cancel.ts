@@ -47,9 +47,10 @@ export async function handleSwapCancel(
     return { success: false, error: `Only maker can cancel swap offer`, events };
   }
 
-  // 3. Release hold (always - affects delta validation)
+  // 3. Release hold (ONLY during commit, not validation)
+  // AUDIT FIX (MEDIUM-2): Guard hold releases with isValidation to prevent state mismatch
   const giveDelta = accountMachine.deltas.get(offer.giveTokenId);
-  if (giveDelta) {
+  if (giveDelta && !isValidation) {
     if (giveDelta.leftSwapHold === undefined) giveDelta.leftSwapHold = 0n;
     if (giveDelta.rightSwapHold === undefined) giveDelta.rightSwapHold = 0n;
 
@@ -58,6 +59,9 @@ export async function handleSwapCancel(
     } else {
       giveDelta.rightSwapHold -= offer.giveAmount;
     }
+    console.log(`📊 COMMIT: Released hold ${offer.giveAmount} for token${offer.giveTokenId}`);
+  } else if (isValidation) {
+    console.log(`⏭️ VALIDATION: Skipping hold release (will commit later)`);
   }
 
   // 4. Remove offer (only during commit, not validation)
@@ -68,8 +72,11 @@ export async function handleSwapCancel(
     console.log(`⏭️ VALIDATION: Skipping swapOffers removal (will commit later)`);
   }
 
-  const accountId = `${fromEntity}:${toEntity}`;
-  const makerId = offer.makerIsLeft ? fromEntity : toEntity;
+  // AUDIT FIX (CRITICAL-3): Use counterparty ID format, not canonical pair format
+  // The maker is who created this offer (makerIsLeft determines left vs right)
+  const makerId = offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity;
+  // accountId for orderbook lookup = counterparty ID (Hub's Map key)
+  const accountId = makerId;
 
   events.push(`📊 Swap offer cancelled: ${offerId.slice(0,8)}... (released ${offer.giveAmount} token${offer.giveTokenId})`);
 

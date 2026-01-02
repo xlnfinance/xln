@@ -841,8 +841,28 @@ export const applyEntityFrame = async (
   // 2. Run orderbook matching on aggregated swap offers (batch matching)
   if (allSwapOffersCreated.length > 0 && currentEntityState.orderbookExt) {
     console.log(`📊 ENTITY-ORCHESTRATOR: Batch matching ${allSwapOffersCreated.length} swap offers`);
+
+    // AUDIT FIX (CRITICAL-1): Enrich SwapOfferEvent with accountId from Hub's perspective
+    // Hub is running this code, so accountId = the counterparty's entityId (the Map key)
+    // For Hub processing Alice's offer: fromEntity=Hub, toEntity=Alice (from Hub's A-Machine)
+    // So accountId = Alice's entityId (the counterparty who placed the offer)
+    const enrichedOffers = allSwapOffersCreated.map(offer => {
+      // The offer comes from an account where the account's proofHeader has
+      // fromEntity = entity running this code (Hub) and toEntity = counterparty
+      // BUT offers are created by the MAKER, who may be fromEntity or toEntity
+      // depending on makerIsLeft
+      //
+      // SIMPLE RULE: Hub's Map key = counterparty ID
+      // The counterparty is whoever is NOT Hub in this account
+      // Since we're Hub and we're processing, accountId = whichever entity is NOT us
+      const hubId = currentEntityState.entityId;
+      const counterparty = offer.fromEntity === hubId ? offer.toEntity : offer.fromEntity;
+      return { ...offer, accountId: counterparty };
+    });
+    console.log(`📊 ENTITY-ORCHESTRATOR: Enriched ${enrichedOffers.length} offers with accountId`);
+
     const { processOrderbookSwaps } = await import('./entity-tx/handlers/account');
-    const matchResult = processOrderbookSwaps(currentEntityState, allSwapOffersCreated);
+    const matchResult = processOrderbookSwaps(currentEntityState, enrichedOffers);
 
     // Apply match results to account mempools
     for (const { accountId, tx } of matchResult.mempoolOps) {

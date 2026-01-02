@@ -259,9 +259,10 @@ export async function swap(env: Env): Promise<void> {
   assert(offer1?.giveAmount === eth(2), 'Offer giveAmount = 2 ETH');
   assert(offer1?.wantAmount === usdc(6000), 'Offer wantAmount = 6000 USDC');
 
-  // Verify offer was added to E-Machine swapBook
-  assert(aliceRep1.state.swapBook.has(offerId1), 'Offer added to E-Machine swapBook');
-  const swapBookEntry1 = aliceRep1.state.swapBook.get(offerId1);
+  // Verify offer was added to E-Machine swapBook (using namespaced key)
+  const swapBookKey1 = `${hub.id}:${offerId1}`;
+  assert(aliceRep1.state.swapBook.has(swapBookKey1), 'Offer added to E-Machine swapBook');
+  const swapBookEntry1 = aliceRep1.state.swapBook.get(swapBookKey1);
   assert(swapBookEntry1?.accountId === hub.id, 'swapBook entry accountId = canonical(alice, hub)');
   assert(swapBookEntry1?.giveAmount === eth(2), 'swapBook giveAmount = 2 ETH');
   assert(swapBookEntry1?.wantAmount === usdc(6000), 'swapBook wantAmount = 6000 USDC');
@@ -391,11 +392,12 @@ export async function swap(env: Env): Promise<void> {
   await converge(env);
   await converge(env);
 
-  // Verify offer created in A-Machine and E-Machine
+  // Verify offer created in A-Machine and E-Machine (using namespaced key)
   const [, aliceRep4] = findReplica(env, alice.id);
   const account4 = aliceRep4.state.accounts.get(hub.id);
   assert(account4?.swapOffers?.has(offerId2), 'Order 2 created in A-Machine');
-  assert(aliceRep4.state.swapBook.has(offerId2), 'Order 2 in E-Machine swapBook');
+  const swapBookKey2 = `${hub.id}:${offerId2}`;
+  assert(aliceRep4.state.swapBook.has(swapBookKey2), 'Order 2 in E-Machine swapBook');
 
   // Alice cancels
   console.log('📊 Alice: swap_cancel');
@@ -413,11 +415,11 @@ export async function swap(env: Env): Promise<void> {
   await converge(env);
   await converge(env);
 
-  // Verify cancelled in A-Machine and E-Machine
+  // Verify cancelled in A-Machine and E-Machine (using namespaced key)
   const [, aliceRep5] = findReplica(env, alice.id);
   const account5 = aliceRep5.state.accounts.get(hub.id);
   assert(!account5?.swapOffers?.has(offerId2), 'Order 2 cancelled in A-Machine');
-  assert(!aliceRep5.state.swapBook.has(offerId2), 'Order 2 removed from E-Machine swapBook');
+  assert(!aliceRep5.state.swapBook.has(swapBookKey2), 'Order 2 removed from E-Machine swapBook');
 
   // Verify hold released
   const ethDelta5 = account5?.deltas.get(ETH_TOKEN_ID);

@@ -96,43 +96,43 @@ export async function handleSwapOffer(
     createdHeight: currentHeight,
   };
 
-  // CRITICAL: Only update swapOffers during COMMIT, not VALIDATION
+  // CRITICAL: Only update PERSISTENT state during COMMIT, not VALIDATION
   // During validation (on clonedMachine), skip offer storage to avoid data loss
   // Validation clone is discarded - offers must only be created during commit on real accountMachine
+  //
+  // AUDIT FIX (CRITICAL-2): BOTH swapOffers AND holds must be guarded!
+  // Otherwise validation clone has holds applied but real state doesn't until commit,
+  // causing state hash mismatch between validation and commit phases.
   if (!isValidation) {
     accountMachine.swapOffers.set(offerId, offer);
     console.log(`📊 COMMIT: Swap offer created, offerId=${offerId.slice(0,8)}`);
 
-    // 7. Lock capacity
+    // 7. Lock capacity (ONLY during commit - holds affect state hash)
     if (makerIsLeft) {
       delta.leftSwapHold += giveAmount;
     } else {
       delta.rightSwapHold += giveAmount;
     }
   } else {
-    console.log(`⏭️ VALIDATION: Skipping swapOffers update (will commit later)`);
+    console.log(`⏭️ VALIDATION: Skipping swapOffers AND holds update (will commit later)`);
   }
 
   const makerId = makerIsLeft ? fromEntity : toEntity;
 
-  // CRITICAL: For Hub's orderbook, accountId = counterparty ID (the key Hub uses)
-  // Since this runs on BOTH entities' accounts, we need generic logic:
-  // accountId should always be the maker's entity ID (the one creating the offer)
-  // Hub will use this to look up accounts.get(makerId)
-  const accountId = makerId;
-
   events.push(`📊 Swap offer created: ${offerId.slice(0,8)}... give ${giveAmount} token${giveTokenId} for ${wantAmount} token${wantTokenId}`);
   console.log(`📊 SWAP-OFFER: from=${formatEntityId(fromEntity)}, to=${formatEntityId(toEntity)}, makerIsLeft=${makerIsLeft}, maker=${formatEntityId(makerId)}`);
-  console.log(`📊 SWAP-OFFER: Computed accountId=${accountId.slice(-8)} (Hub's Map key for this account)`);
 
-  // Return swap offer event for orderbook integration (hub processes these)
+  // AUDIT FIX (CRITICAL-1): Return BOTH makerIsLeft AND fromEntity/toEntity in event
+  // The entity handler will enrich with accountId based on its own perspective
+  // This avoids accountId computation confusion at the account level
   return {
     success: true,
     events,
     swapOfferCreated: {
       offerId,
-      makerId,
-      accountId, // Hub's Map key = non-Hub entity's ID
+      makerIsLeft,       // Simple boolean for direction
+      fromEntity,        // Account pair - needed for entity-level accountId derivation
+      toEntity,          // Account pair - needed for entity-level accountId derivation
       giveTokenId,
       giveAmount,
       wantTokenId,
