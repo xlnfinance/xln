@@ -40,7 +40,8 @@ export async function handleSwapResolve(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'swap_resolve' }>,
   isOurFrame: boolean,
-  currentHeight: number
+  currentHeight: number,
+  isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelled?: { offerId: string; accountId: string } }> {
   const { offerId, fillRatio, cancelRemainder } = accountTx.data;
   const events: string[] = [];

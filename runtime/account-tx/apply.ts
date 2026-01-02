@@ -168,7 +168,8 @@ export async function processAccountTx(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'swap_resolve' }>,
         isOurFrame,
-        currentHeight
+        currentHeight,
+        isValidation
       );
 
     case 'swap_cancel':
