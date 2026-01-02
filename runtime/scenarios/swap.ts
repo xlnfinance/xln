@@ -712,8 +712,8 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   const [, aliceRepFinal] = findReplica(env, alice.id);
   const [, bobRepFinal] = findReplica(env, bob.id);
 
-  const aliceHubFinal = aliceRepFinal.state.accounts.get(hub.id);
-  const bobHubFinal = bobRepFinal.state.accounts.get(bob.id);
+  const aliceHubFinal = aliceRepFinal.state.accounts.get(hub.id);  // Alice's account WITH Hub
+  const bobHubFinal = bobRepFinal.state.accounts.get(hub.id);      // Bob's account WITH Hub (counterparty key!)
 
   const aliceEth = aliceHubFinal?.deltas.get(ETH_TOKEN_ID);
   const aliceUsdc = aliceHubFinal?.deltas.get(USDC_TOKEN_ID);
