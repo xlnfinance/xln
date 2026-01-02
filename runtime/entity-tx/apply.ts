@@ -696,8 +696,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         data: { offerId },
       };
 
-      // Pure: return mempoolOp instead of mutating directly (use canonical key)
-      mempoolOps.push({ accountId: cancelAccountKey, tx: accountTx });
+      // Pure: return mempoolOp instead of mutating directly
+      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
       console.log(`📊 Added swap_cancel to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
 
       // Remove from swapBook (E-Machine aggregated view)
