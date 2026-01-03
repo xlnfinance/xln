@@ -431,8 +431,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     }
 
     if (entityTx.type === 'directPayment') {
-      console.error(`💸💸💸 DIRECT-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`);
-      console.error(`   Amount: ${entityTx.data.amount}, Route: ${entityTx.data.route?.map(r => r.slice(-4)).join('→') || 'none'}`);
+      console.log(`💸 ═════════════════════════════════════════════════════════════`);
+      console.log(`💸 DIRECT-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`);
+      console.log(`💸 Amount: ${entityTx.data.amount}, TokenId: ${entityTx.data.tokenId}`);
+      console.log(`💸 Route: ${entityTx.data.route?.map(r => r.slice(-4)).join('→') || 'NONE (will calculate)'}`);
+      console.log(`💸 Description: ${entityTx.data.description || 'none'}`);
 
       // Emit payment initiation event
       env.emit('PaymentInitiated', {
@@ -446,7 +449,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
-      console.error(`   Outputs array initialized, length: ${outputs.length}`);
+      console.log(`💸 Initialized: outputs=[], mempoolOps=[]`);
 
       // Extract payment details
       let { targetEntityId, tokenId, amount, route, description } = entityTx.data;
@@ -536,10 +539,16 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       if (accountMachine) {
         // Pure: return mempoolOp instead of mutating directly
         mempoolOps.push({ accountId: nextHop, tx: accountTx });
-        console.log(`💸 Added payment to mempoolOps for account with ${formatEntityId(nextHop)}`);
-        console.log(`💸 mempoolOps now has ${mempoolOps.length} pending transactions`);
+        console.log(`💸 QUEUED TO MEMPOOL: account=${formatEntityId(nextHop)}`);
+        console.log(`💸   AccountTx type: ${accountTx.type}`);
+        console.log(`💸   Amount: ${accountTx.data.amount}`);
+        console.log(`💸   From: ${accountTx.data.fromEntityId.slice(-4)}`);
+        console.log(`💸   To: ${accountTx.data.toEntityId.slice(-4)}`);
+        console.log(`💸   Route after slice: [${accountTx.data.route.map(r => r.slice(-4)).join(',')}]`);
+        console.log(`💸 mempoolOps.length: ${mempoolOps.length}`);
+
         const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
-        console.log(`💸 Is left entity: ${isLeft}, Has pending frame: ${!!accountMachine.pendingFrame}`);
+        console.log(`💸 Account state: isLeft=${isLeft}, hasPendingFrame=${!!accountMachine.pendingFrame}`);
 
         // Message about payment initiation
         addMessage(newState,
@@ -560,9 +569,10 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
             signerId: firstValidator,
             entityTxs: [] // Empty transaction array - just triggers processing
           });
+          console.log(`💸 Added processing trigger: outputs.length=${outputs.length}`);
         }
-        console.log(`💸 Added processing trigger to ensure bilateral consensus runs`);
-        console.log(`💸 DIRECT-PAYMENT RETURN: outputs.length=${outputs.length}`);
+        console.log(`💸 DIRECT-PAYMENT COMPLETE: mempoolOps=${mempoolOps.length}, outputs=${outputs.length}`);
+        console.log(`💸 ═════════════════════════════════════════════════════════════`);
       }
 
       return { newState, outputs, mempoolOps };

@@ -145,7 +145,14 @@ export async function handleHtlcPayment(
     const crypto = entityPubKeys.size === route.length ? new NobleCryptoProvider() : undefined;
 
     envelope = await createOnionEnvelopes(route, secret, entityPubKeys, crypto);
-    console.log(`🧅 Created ${crypto ? 'encrypted' : 'cleartext'} envelope for route length ${route.length}`);
+    console.log(`🧅 ═════════════════════════════════════════════════════════════`);
+    console.log(`🧅 ENVELOPE CREATED at ${formatEntityId(entityState.entityId)}`);
+    console.log(`🧅 Route: ${route.map(r => formatEntityId(r)).join(' → ')}`);
+    console.log(`🧅 Encryption: ${crypto ? 'ENCRYPTED' : 'CLEARTEXT'}`);
+    console.log(`🧅 Secret: ${secret.slice(0,16)}...`);
+    console.log(`🧅 Hashlock: ${hashlock.slice(0,16)}...`);
+    console.log(`🧅 Envelope structure: ${JSON.stringify(envelope, null, 2).slice(0, 300)}...`);
+    console.log(`🧅 ═════════════════════════════════════════════════════════════`);
   } catch (e) {
     logError("HTLC_PAYMENT", `❌ Envelope creation failed: ${e instanceof Error ? e.message : String(e)}`);
     addMessage(newState, `❌ HTLC payment failed: Invalid route`);
