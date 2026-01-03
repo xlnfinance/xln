@@ -105,7 +105,9 @@ export async function handleHtlcPayment(
   // Calculate timelocks and reveal heights (Alice gets most time)
   const totalHops = route.length - 1; // Minus sender
   const hopIndex = 0; // We're always hop 0 (sender) in this handler
-  const baseTimelock = BigInt(env.timestamp + HTLC.DEFAULT_EXPIRY_MS);
+  const minExpiryMs = totalHops * HTLC.MIN_TIMELOCK_DELTA_MS + HTLC.MIN_FORWARD_TIMELOCK_MS;
+  const expiryMs = Math.max(HTLC.DEFAULT_EXPIRY_MS, minExpiryMs);
+  const baseTimelock = BigInt(env.timestamp + expiryMs);
   const baseHeight = newState.lastFinalizedJHeight || 0;
 
   const timelock = calculateHopTimelock(baseTimelock, hopIndex, totalHops);
