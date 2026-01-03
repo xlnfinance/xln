@@ -141,6 +141,21 @@ export function formatRuntime(env: Env, options?: FormatOptions): string {
   output.push(drawBox('RUNTIME STATE', runtimeInfo, 0, true));
   output.push('');
 
+  // J-Replicas (Jurisdictions)
+  if (env.jReplicas && env.jReplicas.size > 0) {
+    output.push('  J-REPLICAS (Jurisdictions):');
+    for (const [jName, jReplica] of env.jReplicas) {
+      const jInfo = [
+        `Name: ${jName}`,
+        `Block: ${jReplica.blockNumber} | State Root: ${(jReplica.stateRoot as any).slice?.(0, 16) || 'N/A'}`,
+        `Mempool: ${jReplica.mempool?.length || 0} txs | Delay: ${jReplica.blockDelayMs}ms`,
+        `Contracts: Depository=${jReplica.contracts?.depository?.slice(-8) || 'N/A'}`
+      ];
+      output.push(drawBox(`J-Replica: ${jName}`, jInfo, 2));
+    }
+    output.push('');
+  }
+
   // Entities
   let entityCount = 0;
   for (const [replicaKey, replica] of env.eReplicas) {
@@ -169,19 +184,18 @@ export function formatEntity(entity: EntityState, options?: FormatOptions): stri
   const entityId = entity.entityId || 'Unknown';
   const title = `Entity: ${formatAddress(entityId)}`;
 
+  // Sort by importance: amounts first, then counts, then technical
   const summary = [
-    `Height: ${entity.height || 0} | J-Height: ${entity.lastFinalizedJHeight || 0}`,
-    `Timestamp: ${formatTimestamp(entity.timestamp)}`,
-    `Reserves: ${formatReserves(entity.reserves)} | Accounts: ${entity.accounts.size}`
+    `Reserves: ${formatReserves(entity.reserves)} | Accounts: ${entity.accounts.size}`,
   ];
 
-  // HTLC stats
+  // HTLC stats (amounts first)
   const lockCount = entity.lockBook?.size || 0;
   const routeCount = entity.htlcRoutes?.size || 0;
   const feesEarned = entity.htlcFeesEarned || 0n;
 
   if (lockCount > 0 || feesEarned > 0n) {
-    summary.push(`HTLC: ${lockCount} locks | Fees: ${formatBigInt(feesEarned)} | Routes: ${routeCount}`);
+    summary.push(`HTLC: Fees=${formatBigInt(feesEarned)} | Locks=${lockCount} | Routes=${routeCount}`);
   }
 
   // Swap stats
@@ -190,26 +204,79 @@ export function formatEntity(entity: EntityState, options?: FormatOptions): stri
     summary.push(`Swaps: ${swapCount} offers`);
   }
 
+  // Technical details last
+  summary.push(`Height: ${entity.height || 0} | J-Height: ${entity.lastFinalizedJHeight || 0} | Time: ${formatTimestamp(entity.timestamp)}`);
+
   output.push(drawBox(title, summary, indent));
 
-  // HTLC detail (if locks exist)
-  if (!opts.showReservesOnly && lockCount > 0 && entity.lockBook) {
+  // HTLC detail (comprehensive: locks + routes + fees)
+  if (!opts.showReservesOnly && (lockCount > 0 || routeCount > 0 || feesEarned > 0n)) {
     output.push('');
-    output.push(' '.repeat(indent) + '  HTLC Locks:');
+    output.push(' '.repeat(indent) + '  HTLC Detail:');
 
-    const locks = Array.from(entity.lockBook.values())
-      .sort((a, b) => Number(b.createdAt) - Number(a.createdAt))
-      .slice(0, opts.maxLocks);
+    // Active locks from lockBook
+    if (lockCount > 0 && entity.lockBook) {
+      output.push(' '.repeat(indent) + `    Locks (${lockCount}):`);
 
-    for (const lock of locks) {
-      const status = getLockStatus(lock, entity);
-      const dir = lock.direction === 'outgoing' ? '→' : '←';
-      output.push(' '.repeat(indent) + `    ${dir} ${formatBigInt(lock.amount)} | ${lock.hashlock.slice(0, 12)}... | ${status}`);
+      const locks = Array.from(entity.lockBook.values())
+        .sort((a, b) => Number(b.createdAt) - Number(a.createdAt))
+        .slice(0, opts.maxLocks);
+
+      for (const lock of locks) {
+        const status = getLockStatus(lock, entity);
+        const dir = lock.direction === 'outgoing' ? '→' : '←';
+        const timeLeft = formatDuration(Number(lock.timelock) - Date.now());
+        output.push(' '.repeat(indent) + `      ${dir} ${formatBigInt(lock.amount)} | hash=${lock.hashlock.slice(0, 12)}... | ${status} | ${timeLeft}`);
+      }
+
+      if (entity.lockBook.size > (opts.maxLocks || 10)) {
+        output.push(' '.repeat(indent) + `      ... and ${entity.lockBook.size - (opts.maxLocks || 10)} more`);
+      }
     }
 
-    if (entity.lockBook.size > (opts.maxLocks || 10)) {
-      output.push(' '.repeat(indent) + `    ... and ${entity.lockBook.size - (opts.maxLocks || 10)} more`);
+    // Active routes (multi-hop tracking)
+    if (routeCount > 0 && entity.htlcRoutes) {
+      output.push(' '.repeat(indent) + `    Routes (${routeCount}):`);
+
+      const routes = Array.from(entity.htlcRoutes.entries()).slice(0, 5);
+      for (const [hashlock, route] of routes) {
+        const inbound = route.inboundEntity ? formatAddress(route.inboundEntity) : 'origin';
+        const outbound = route.outboundEntity ? formatAddress(route.outboundEntity) : 'final';
+        const status = route.secret ? '✓revealed' : 'pending';
+        output.push(' '.repeat(indent) + `      ${inbound} → ${outbound} | hash=${hashlock.slice(0, 12)}... | ${status}`);
+      }
     }
+
+    // Total fees earned
+    if (feesEarned > 0n) {
+      output.push(' '.repeat(indent) + `    Fees Earned: ${formatBigInt(feesEarned)} ✓`);
+    }
+  }
+
+  // Swap detail (offers + orderbook if hub)
+  if (!opts.showReservesOnly && swapCount > 0 && entity.swapBook) {
+    output.push('');
+    output.push(' '.repeat(indent) + `  Swap Offers (${swapCount}):`);
+
+    const swaps = Array.from(entity.swapBook.values())
+      .slice(0, opts.maxSwaps);
+
+    for (const swap of swaps) {
+      const giveSymbol = swap.giveTokenId === 1 ? 'USDC' : 'ETH';
+      const wantSymbol = swap.wantTokenId === 1 ? 'USDC' : 'ETH';
+      output.push(' '.repeat(indent) + `    ${formatBigInt(swap.giveAmount)} ${giveSymbol} → ${formatBigInt(swap.wantAmount)} ${wantSymbol} | min=${swap.minFillRatio}/65535`);
+    }
+
+    if (entity.swapBook.size > (opts.maxSwaps || 10)) {
+      output.push(' '.repeat(indent) + `    ... and ${entity.swapBook.size - (opts.maxSwaps || 10)} more`);
+    }
+  }
+
+  // Orderbook (hub only)
+  if (!opts.showReservesOnly && entity.orderbookExt) {
+    output.push('');
+    output.push(' '.repeat(indent) + '  Orderbook Extension: Active (hub)');
+    // Could expand to show book depth if needed
   }
 
   // Accounts (if not reserves-only)
@@ -244,9 +311,10 @@ export function formatAccount(account: AccountMachine, myEntityId: string, optio
   const counterparty = isLeft ? account.rightEntity : account.leftEntity;
   const title = `Account: ${formatAddress(myEntityId)} ↔ ${formatAddress(counterparty)}`;
 
+  // Sort by importance: state first, then technical
   const summary = [
-    `Frame: ${account.currentHeight} | Mempool: ${account.mempool.length} | Pending: ${account.pendingFrame ? `h${account.pendingFrame.height}` : 'none'}`,
-    `Perspective: ${isLeft ? 'LEFT' : 'RIGHT'} (canonical)`
+    `Perspective: ${isLeft ? 'LEFT' : 'RIGHT'} (canonical)`,
+    `Frame: ${account.currentHeight} | Mempool: ${account.mempool.length} | Pending: ${account.pendingFrame ? `h${account.pendingFrame.height}` : 'none'}`
   ];
 
   output.push(drawBox(title, summary, indent));
@@ -258,20 +326,26 @@ export function formatAccount(account: AccountMachine, myEntityId: string, optio
       if (opts.tokenFilter && !opts.tokenFilter.includes(tokenId)) continue;
 
       const symbol = tokenId === 1 ? 'USDC' : 'ETH';
-      output.push(' '.repeat(indent) + `  Token ${tokenId} (${symbol}):`);
-      output.push(' '.repeat(indent) + `    offdelta: ${formatBigInt(delta.offdelta, 18, symbol)} | ondelta: ${formatBigInt(delta.ondelta, 18, symbol)}`);
-      output.push(' '.repeat(indent) + `    collateral: ${formatBigInt(delta.collateral, 18, symbol)}`);
-
       const htlcHold = (isLeft ? delta.leftHtlcHold : delta.rightHtlcHold) || 0n;
       const swapHold = (isLeft ? delta.leftSwapHold : delta.rightSwapHold) || 0n;
+
+      output.push(' '.repeat(indent) + `  Token ${tokenId} (${symbol}):`);
+
+      // Most important: amounts (offdelta, collateral, holds)
+      output.push(' '.repeat(indent) + `    offdelta: ${formatBigInt(delta.offdelta, 18, symbol)} | collateral: ${formatBigInt(delta.collateral, 18, symbol)}`);
 
       if (htlcHold > 0n || swapHold > 0n) {
         output.push(' '.repeat(indent) + `    Holds: HTLC=${formatBigInt(htlcHold, 18, symbol)} | Swap=${formatBigInt(swapHold, 18, symbol)}`);
       }
+
+      // Secondary: ondelta (less important for most debugging)
+      if (delta.ondelta !== 0n) {
+        output.push(' '.repeat(indent) + `    ondelta: ${formatBigInt(delta.ondelta, 18, symbol)}`);
+      }
     }
   }
 
-  // Active locks
+  // Active locks (show ALL details: lockId, hashlock, sender, expiry)
   if (account.locks && account.locks.size > 0) {
     output.push('');
     output.push(' '.repeat(indent) + `  Locks (${account.locks.size}):`);
@@ -279,11 +353,22 @@ export function formatAccount(account: AccountMachine, myEntityId: string, optio
     const locks = Array.from(account.locks.values()).slice(0, opts.maxLocks);
     for (const lock of locks) {
       const timeLeft = formatDuration(Number(lock.timelock) - Date.now());
-      output.push(' '.repeat(indent) + `    [${lock.lockId.slice(0, 12)}...] ${formatBigInt(lock.amount)} | ${lock.senderIsLeft ? 'L→R' : 'R→L'} | ${timeLeft}`);
+      const direction = lock.senderIsLeft ? 'L→R' : 'R→L';
+      output.push(' '.repeat(indent) + `    Lock: ${lock.lockId.slice(0, 12)}... | ${formatBigInt(lock.amount)}`);
+      output.push(' '.repeat(indent) + `      Hash: ${lock.hashlock.slice(0, 16)}... | ${direction} | Expires: ${timeLeft}`);
+      if (lock.envelope) {
+        const envInfo = lock.envelope.finalRecipient ? 'Final recipient' :
+                       lock.envelope.nextHop ? `→ ${formatAddress(lock.envelope.nextHop)}` : 'Unknown';
+        output.push(' '.repeat(indent) + `      Envelope: ${envInfo}`);
+      }
+    }
+
+    if (account.locks.size > (opts.maxLocks || 10)) {
+      output.push(' '.repeat(indent) + `    ... and ${account.locks.size - (opts.maxLocks || 10)} more locks`);
     }
   }
 
-  // Active swaps
+  // Active swaps (show ALL details: offerId, amounts, fill ratio)
   if (account.swapOffers && account.swapOffers.size > 0) {
     output.push('');
     output.push(' '.repeat(indent) + `  Swap Offers (${account.swapOffers.size}):`);
@@ -292,7 +377,14 @@ export function formatAccount(account: AccountMachine, myEntityId: string, optio
     for (const swap of swaps) {
       const giveSymbol = swap.giveTokenId === 1 ? 'USDC' : 'ETH';
       const wantSymbol = swap.wantTokenId === 1 ? 'USDC' : 'ETH';
-      output.push(' '.repeat(indent) + `    ${formatBigInt(swap.giveAmount)} ${giveSymbol} → ${formatBigInt(swap.wantAmount)} ${wantSymbol}`);
+      const side = swap.makerIsLeft ? '(maker=LEFT)' : '(maker=RIGHT)';
+      output.push(' '.repeat(indent) + `    Offer: ${swap.offerId.slice(0, 12)}...`);
+      output.push(' '.repeat(indent) + `      Give: ${formatBigInt(swap.giveAmount)} ${giveSymbol} | Want: ${formatBigInt(swap.wantAmount)} ${wantSymbol}`);
+      output.push(' '.repeat(indent) + `      MinFill: ${swap.minFillRatio}/65535 | ${side}`);
+    }
+
+    if (account.swapOffers.size > (opts.maxSwaps || 10)) {
+      output.push(' '.repeat(indent) + `    ... and ${account.swapOffers.size - (opts.maxSwaps || 10)} more swaps`);
     }
   }
 
