@@ -1841,3 +1841,6 @@ const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayIn
 
 // Avatar functions are already imported and exported above
 export { BrowserEVM } from './evms/browser-evm.js';
+
+// ASCII visualization exports
+export { formatRuntime, formatEntity, formatAccount, formatOrderbook, formatSummary } from './runtime-ascii';

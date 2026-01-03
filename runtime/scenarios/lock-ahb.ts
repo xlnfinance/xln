@@ -21,6 +21,7 @@ import { BrowserEVM } from '../evms/browser-evm';
 import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
 import { getProcess, getApplyRuntimeInput, usd, snap, checkSolvency } from './helpers';
 import { canonicalAccountKey } from '../state-helpers';
+import { formatRuntime } from '../runtime-ascii';
 
 const USDC_TOKEN_ID = 1;
 
@@ -57,8 +58,17 @@ async function pushSnapshot(
   await process(env, inputs);
 }
 
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) throw new Error(`ASSERT: ${message}`);
+function assert(condition: unknown, message: string, env?: Env): asserts condition {
+  if (!condition) {
+    if (env) {
+      console.log('\n' + '='.repeat(80));
+      console.log('ASSERTION FAILED - FULL RUNTIME STATE:');
+      console.log('='.repeat(80));
+      console.log(formatRuntime(env, { maxAccounts: 5, maxLocks: 20 }));
+      console.log('='.repeat(80) + '\n');
+    }
+    throw new Error(`ASSERT: ${message}`);
+  }
 }
 
 type ReplicaEntry = [string, EntityReplica];
@@ -1809,6 +1819,21 @@ if (import.meta.main) {
   console.log('\n✅ AHB scenario complete!');
   console.log(`📊 Total frames: ${env.history?.length || 0}`);
   console.log('🎉 RJEA event consolidation verified - AccountSettled events working!\n');
+
+  // Dump JSON for deep inspection
+  const { safeStringify } = await import('../serialization-utils');
+  const fs = await import('fs');
+
+  console.log('💾 Dumping JSON state for analysis...');
+  fs.writeFileSync('/tmp/lock-ahb-frames.json', safeStringify(env.history, null, 2));
+  fs.writeFileSync('/tmp/lock-ahb-final.json', safeStringify({
+    eReplicas: Array.from(env.eReplicas.entries()),
+    jReplicas: Array.from(env.jReplicas?.entries() || []),
+    height: env.height,
+    timestamp: env.timestamp
+  }, null, 2));
+  console.log('  ✅ /tmp/lock-ahb-frames.json (all frames)');
+  console.log('  ✅ /tmp/lock-ahb-final.json (final state)\n');
 
   process.exit(0);
 }

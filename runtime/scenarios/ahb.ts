@@ -20,6 +20,7 @@ import { BrowserEVM } from '../evms/browser-evm';
 import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
 import { snap, checkSolvency } from './helpers';
 import { canonicalAccountKey } from '../state-helpers';
+import { formatRuntime } from '../runtime-ascii';
 
 // Lazy-loaded runtime functions to avoid circular dependency (runtime.ts imports this file)
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -62,6 +63,19 @@ function findReplica(env: Env, entityId: string): ReplicaEntry {
     throw new Error(`AHB: Replica for entity ${entityId} not found`);
   }
   return entry as ReplicaEntry;
+}
+
+function assert(condition: unknown, message: string, env?: Env): asserts condition {
+  if (!condition) {
+    if (env) {
+      console.log('\n' + '='.repeat(80));
+      console.log('ASSERTION FAILED - FULL RUNTIME STATE:');
+      console.log('='.repeat(80));
+      console.log(formatRuntime(env, { maxAccounts: 5, maxLocks: 20 }));
+      console.log('='.repeat(80) + '\n');
+    }
+    throw new Error(`ASSERT: ${message}`);
+  }
 }
 
 // J-Watcher instance for BrowserVM event subscription
@@ -1626,6 +1640,21 @@ if (import.meta.main) {
   console.log('\n✅ AHB scenario complete!');
   console.log(`📊 Total frames: ${env.history?.length || 0}`);
   console.log('🎉 RJEA event consolidation verified - AccountSettled events working!\n');
+
+  // Dump JSON for deep inspection
+  const { safeStringify } = await import('../serialization-utils');
+  const fs = await import('fs');
+
+  console.log('💾 Dumping JSON state for analysis...');
+  fs.writeFileSync('/tmp/ahb-frames.json', safeStringify(env.history, null, 2));
+  fs.writeFileSync('/tmp/ahb-final.json', safeStringify({
+    eReplicas: Array.from(env.eReplicas.entries()),
+    jReplicas: Array.from(env.jReplicas?.entries() || []),
+    height: env.height,
+    timestamp: env.timestamp
+  }, null, 2));
+  console.log('  ✅ /tmp/ahb-frames.json (all frames)');
+  console.log('  ✅ /tmp/ahb-final.json (final state)\n');
 
   process.exit(0);
 }
