@@ -56,6 +56,13 @@ export function initCrontab(): CrontabState {
     handler: hubRebalanceHandler,
   });
 
+  tasks.set('checkHtlcTimeouts', {
+    name: 'checkHtlcTimeouts',
+    intervalMs: 5000, // Check HTLC expirations every 5 seconds
+    lastRun: 0,
+    handler: checkHtlcTimeoutsHandler,
+  });
+
   return { tasks };
 }
 
@@ -177,6 +184,80 @@ function createDisputeSuggestionEvent(
       }
     ],
   };
+}
+
+/**
+ * Check all HTLC locks for expiration and auto-timeout
+ *
+ * Pattern:
+ * - Iterate all accounts
+ * - Check locks for currentHeight > revealBeforeHeight
+ * - Generate htlc_timeout mempoolOps for expired locks
+ * - Prevents locks from being stuck forever
+ */
+async function checkHtlcTimeoutsHandler(replica: EntityReplica): Promise<EntityInput[]> {
+  const outputs: EntityInput[] = [];
+  const currentHeight = replica.state.lastFinalizedJHeight || 0;
+  const currentTimestamp = replica.state.timestamp; // Entity's deterministic clock
+
+  console.log(`⏰ HTLC-TIMEOUT-CRON: Checking locks (entity ${replica.entityId.slice(-4)}, height=${currentHeight}, timestamp=${currentTimestamp})`);
+
+  // Collect expired locks per account
+  const expiredLocksByAccount: Array<{ accountId: string; lockId: string; lock: any }> = [];
+  let totalLocks = 0;
+
+  // Iterate over all accounts
+  for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
+    if (!accountMachine.locks || accountMachine.locks.size === 0) continue;
+
+    totalLocks += accountMachine.locks.size;
+
+    // Check each lock for expiration
+    for (const [lockId, lock] of accountMachine.locks.entries()) {
+      console.log(`⏰   Checking lock ${lockId.slice(0,16)}... (heightDeadline=${lock.revealBeforeHeight}, timeDeadline=${lock.timelock})`);
+
+      // Check if lock expired - BOTH conditions (height OR timestamp)
+      // Height: Used when J-blocks are active (on-chain settlement)
+      // Timestamp: Fallback for off-chain timeout (entity's deterministic clock)
+      const heightExpired = currentHeight > 0 && currentHeight > lock.revealBeforeHeight;
+      const timestampExpired = currentTimestamp > Number(lock.timelock);
+      const expired = heightExpired || timestampExpired;
+
+      if (expired) {
+        console.log(`⏰ HTLC-TIMEOUT: Lock ${lockId.slice(0,16)}... EXPIRED`);
+        console.log(`   Height: ${currentHeight} > ${lock.revealBeforeHeight} = ${heightExpired}`);
+        console.log(`   Timestamp: ${currentTimestamp} > ${lock.timelock} = ${timestampExpired}`);
+        console.log(`   Account: ${counterpartyId.slice(-4)}, Amount: ${lock.amount}`);
+
+        expiredLocksByAccount.push({
+          accountId: counterpartyId,
+          lockId,
+          lock
+        });
+      }
+    }
+  }
+
+  console.log(`⏰ HTLC-TIMEOUT-CRON: Scanned ${totalLocks} locks, found ${expiredLocksByAccount.length} expired`);
+
+  // If we found expired locks, generate EntityTx to process them
+  if (expiredLocksByAccount.length > 0) {
+    console.log(`⏰ HTLC-TIMEOUT: Found ${expiredLocksByAccount.length} expired locks`);
+
+    const firstValidator = replica.state.config.validators?.[0];
+    if (firstValidator) {
+      outputs.push({
+        entityId: replica.entityId,
+        signerId: firstValidator,
+        entityTxs: [{
+          type: 'processHtlcTimeouts',
+          data: { expiredLocks: expiredLocksByAccount }
+        }]
+      });
+    }
+  }
+
+  return outputs;
 }
 
 /**

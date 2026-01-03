@@ -929,7 +929,7 @@ export const applyEntityFrame = async (
         console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME for ${cpId.slice(-4)}: mempool=${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
         console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: leftJObs=${accountMachine.leftJObservations?.length || 0}, rightJObs=${accountMachine.rightJObservations?.length || 0}`);
         console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: Full mempool details:`, accountMachine.mempool.map((tx, i) => `${i}:${tx.type}`).join(', '));
-        const proposal = await proposeAccountFrame(env, accountMachine);
+        const proposal = await proposeAccountFrame(env, accountMachine, false, currentEntityState.lastFinalizedJHeight);
 
         if (proposal.success && proposal.accountInput) {
           // Get the proposer of the target entity from env

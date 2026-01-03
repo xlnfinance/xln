@@ -17,7 +17,8 @@ export async function handleHtlcReveal(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'htlc_reveal' }>,
   isOurFrame: boolean,
-  currentHeight: number
+  currentHeight: number,
+  currentTimestamp: number
 ): Promise<{
   success: boolean;
   events: string[];
@@ -39,11 +40,20 @@ export async function handleHtlcReveal(
     return { success: false, error: `Lock ${lockId} not found`, events };
   }
 
-  // 2. Verify not expired (can't reveal after deadline)
+  // 2. Verify not expired - BOTH conditions (height AND timestamp)
+  // Must reveal BEFORE both deadlines for HTLC safety
   if (currentHeight > lock.revealBeforeHeight) {
     return {
       success: false,
-      error: `Lock expired: current height ${currentHeight} > deadline ${lock.revealBeforeHeight}`,
+      error: `Lock expired by height: current ${currentHeight} > deadline ${lock.revealBeforeHeight}`,
+      events
+    };
+  }
+
+  if (currentTimestamp > Number(lock.timelock)) {
+    return {
+      success: false,
+      error: `Lock expired by time: current ${currentTimestamp} > deadline ${lock.timelock}`,
       events
     };
   }

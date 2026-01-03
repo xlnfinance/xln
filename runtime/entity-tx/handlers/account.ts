@@ -85,6 +85,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       currentFrame: {
         height: 0,
         timestamp: env.timestamp,
+        jHeight: 0,
         accountTxs: [],
         prevFrameHash: '',
         tokenIds: [],
@@ -197,95 +198,137 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               continue;
             }
 
-            // Check routing info (cleartext for Phase 2)
-            const routingInfo = (accountTx.data as any).routingInfo;
-            console.log(`🔍 HTLC-ROUTING: routingInfo exists? ${!!routingInfo}`);
-            if (routingInfo) {
-              console.log(`🔍 HTLC-ROUTING: finalRecipient=${routingInfo.finalRecipient?.slice(-4)}, us=${newState.entityId.slice(-4)}, match=${routingInfo.finalRecipient === newState.entityId}`);
+            // Check envelope (onion routing)
+            if (!lock.envelope) {
+              console.log(`⏭️ HTLC: No envelope, skipping forwarding`);
+              continue;
             }
-            if (!routingInfo) continue;
+
+            const envelope = lock.envelope;
+            console.log(`🔍 HTLC-ENVELOPE: finalRecipient=${envelope.finalRecipient}, nextHop=${envelope.nextHop?.slice(-4)}`);
+
+            // Validate envelope structure (safety check)
+            const { validateEnvelope } = await import('../../htlc-envelope-types');
+            try {
+              validateEnvelope(envelope);
+            } catch (e) {
+              console.log(`❌ HTLC: Invalid envelope structure: ${e instanceof Error ? e.message : String(e)}`);
+              continue;
+            }
 
             // Are we the final recipient?
-            if (routingInfo.finalRecipient === newState.entityId) {
+            if (envelope.finalRecipient) {
               console.log(`🎯 HTLC-ROUTING: WE ARE FINAL RECIPIENT!`);
               // Final recipient - reveal immediately
-              if (routingInfo.secret) {
+              if (envelope.secret) {
                 mempoolOps.push({
                   accountId: input.fromEntityId,
                   tx: {
                     type: 'htlc_reveal',
                     data: {
                       lockId: lock.lockId,
-                      secret: routingInfo.secret
+                      secret: envelope.secret
                     }
                   }
                 });
                 console.log(`🎯 HTLC: Final recipient, revealing secret`);
+              } else {
+                console.log(`❌ HTLC: Final recipient envelope missing secret!`);
               }
-            } else if (routingInfo.route && routingInfo.route.length > 0) {
-              // Intermediary - determine next hop from route
-              // routingInfo.route when Hub receives is [hub, bob] - we need to skip ourselves
-              // Find our position in route and take the next element
-              const ourIndex = routingInfo.route.indexOf(newState.entityId);
-              const actualNextHop = ourIndex >= 0 && ourIndex < routingInfo.route.length - 1
-                ? routingInfo.route[ourIndex + 1]
-                : routingInfo.route[routingInfo.route.length - 1]; // Fallback to last hop
-
-              if (!actualNextHop) {
-                console.log(`❌ HTLC: No next hop in route`);
-                continue;
-              }
+            } else if (envelope.nextHop) {
+              // Intermediary - forward to next hop
+              const nextHop = envelope.nextHop;
+              console.log(`➡️ HTLC: Intermediary, forwarding to ${nextHop.slice(-4)}`);
 
               // Register route for backward propagation
-              const inboundEntity = newState.entityId === accountMachine.leftEntity ? accountMachine.rightEntity : accountMachine.leftEntity;
-              newState.htlcRoutes.set(lock.hashlock, {
+              const inboundEntity = newState.entityId === accountMachine.leftEntity
+                ? accountMachine.rightEntity
+                : accountMachine.leftEntity;
+
+              // Create route object (will add pendingFee later)
+              const htlcRoute = {
                 hashlock: lock.hashlock,
                 inboundEntity,
                 inboundLockId: lock.lockId,
-                outboundEntity: actualNextHop,
+                outboundEntity: nextHop,
                 outboundLockId: `${lock.lockId}-fwd`,
                 createdTimestamp: env.timestamp
-              });
+              };
+              newState.htlcRoutes.set(lock.hashlock, htlcRoute);
 
-              const nextAccount = newState.accounts.get(actualNextHop); // counterparty ID is key
+              const nextAccount = newState.accounts.get(nextHop);
+
               if (nextAccount) {
-                // Calculate forwarded amounts/timelocks
+                // Calculate forwarded amounts/timelocks with safety checks
                 const { calculateHtlcFee, calculateHtlcFeeAmount } = await import('../../htlc-utils');
-                const forwardAmount = calculateHtlcFee(lock.amount);
-                const feeAmount = calculateHtlcFeeAmount(lock.amount);
 
-                // Track fees earned
-                newState.htlcFeesEarned += feeAmount;
+                let forwardAmount: bigint;
+                let feeAmount: bigint;
 
-                // Forward HTLC with reduced timelock/height
-                // Update routing info: advance past ourselves in route
-                const forwardRoute = ourIndex >= 0
-                  ? routingInfo.route?.slice(ourIndex + 1) // Skip ourselves and before
-                  : routingInfo.route?.slice(1); // Fallback: just remove first
-                const nextNextHop = forwardRoute && forwardRoute.length > 1 ? forwardRoute[1] : null;
+                try {
+                  forwardAmount = calculateHtlcFee(lock.amount);
+                  feeAmount = calculateHtlcFeeAmount(lock.amount);
+                } catch (e) {
+                  console.log(`❌ HTLC: Fee calculation failed for amount ${lock.amount}: ${e instanceof Error ? e.message : String(e)}`);
+                  console.log(`   Cannot forward - amount too small`);
+                  continue;
+                }
 
+                // Store pending fee (only accrue on successful reveal, not on forward)
+                htlcRoute.pendingFee = feeAmount;
+
+                // Unwrap inner envelope with exception handling (MEDIUM-6)
+                const { unwrapEnvelope } = await import('../../htlc-envelope-types');
+                let innerEnvelope: any = undefined;
+
+                if (envelope.innerEnvelope) {
+                  try {
+                    innerEnvelope = unwrapEnvelope(envelope.innerEnvelope);
+                  } catch (e) {
+                    console.log(`❌ HTLC-GATE: ENVELOPE_UNWRAP_FAIL - ${e instanceof Error ? e.message : String(e)} [lockId=${lock.lockId.slice(0,16)}]`);
+                    continue;
+                  }
+                }
+
+                // Calculate forwarded timelock/height with safety checks
+                const forwardTimelock = lock.timelock - BigInt(10000); // 10s less
+                const forwardHeight = lock.revealBeforeHeight - 1;
+
+                // Validate forwarded lock is still valid (with instrumentation)
+                const currentJHeight = newState.lastFinalizedJHeight || 0;
+
+                // Timelock validation: forward must have breathing room (1s safety margin for processing delays)
+                const SAFETY_MARGIN_MS = 1000;
+                if (forwardTimelock < BigInt(env.timestamp) + BigInt(SAFETY_MARGIN_MS)) {
+                  console.log(`❌ HTLC-GATE: TIMELOCK_TOO_TIGHT - forward=${forwardTimelock}, current+margin=${BigInt(env.timestamp) + BigInt(SAFETY_MARGIN_MS)} [lockId=${lock.lockId.slice(0,16)}]`);
+                  continue;
+                }
+
+                if (forwardHeight <= currentJHeight) {
+                  console.log(`❌ HTLC-GATE: HEIGHT_EXPIRED - forward=${forwardHeight}, current=${currentJHeight}, lock=${lock.revealBeforeHeight} [lockId=${lock.lockId.slice(0,16)}]`);
+                  continue;
+                }
+
+                // Forward HTLC with reduced timelock/height and inner envelope
                 mempoolOps.push({
-                  accountId: actualNextHop,
+                  accountId: nextHop,
                   tx: {
                     type: 'htlc_lock',
                     data: {
                       lockId: `${lock.lockId}-fwd`,
                       hashlock: lock.hashlock,
-                      timelock: lock.timelock - BigInt(10000), // 10s less
-                      revealBeforeHeight: lock.revealBeforeHeight - 1,
+                      timelock: forwardTimelock,
+                      revealBeforeHeight: forwardHeight,
                       amount: forwardAmount,
                       tokenId: lock.tokenId,
-                      routingInfo: {
-                        nextHop: nextNextHop,
-                        finalRecipient: routingInfo.finalRecipient,
-                        route: forwardRoute,
-                        secret: routingInfo.secret
-                      }
+                      envelope: innerEnvelope  // Next hop's envelope
                     }
                   }
                 });
 
-                console.log(`➡️ HTLC: Forwarding to ${actualNextHop.slice(-4)}, amount ${forwardAmount} (fee ${feeAmount})`);
+                console.log(`➡️ HTLC: Forwarding to ${nextHop.slice(-4)}, amount ${forwardAmount} (fee ${feeAmount})`);
+              } else {
+                console.log(`❌ HTLC: No account found for nextHop ${nextHop.slice(-4)}`);
               }
             }
           }
@@ -328,6 +371,24 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         delete accountMachine.pendingForward;
       }
 
+      // === HTLC TIMEOUT CLEANUP (MEDIUM-7) ===
+      // Check if any timeouts happened - clean up htlcRoutes
+      const timedOutHashlocks = result.timedOutHashlocks || [];
+      for (const timedOutHashlock of timedOutHashlocks) {
+        console.log(`⏰ HTLC-TIMEOUT: Cleaning up route for hashlock ${timedOutHashlock.slice(0,16)}...`);
+        const route = newState.htlcRoutes.get(timedOutHashlock);
+        if (route) {
+          // Clear pending fee (won't be earned)
+          if (route.pendingFee) {
+            console.log(`   Clearing pending fee: ${route.pendingFee} (not earned due to timeout)`);
+          }
+
+          // Remove from htlcRoutes (prevent state leak)
+          newState.htlcRoutes.delete(timedOutHashlock);
+          console.log(`   ✅ Route cleaned up`);
+        }
+      }
+
       // === HTLC SECRET PROPAGATION ===
       // Check if any reveals happened in this frame
       const revealedSecrets = result.revealedSecrets || [];
@@ -339,6 +400,13 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         if (route) {
           // Store secret
           route.secret = secret;
+
+          // Accrue fees on successful reveal (not on forward)
+          if (route.pendingFee) {
+            newState.htlcFeesEarned = (newState.htlcFeesEarned || 0n) + route.pendingFee;
+            console.log(`💰 HTLC: Fee earned on reveal: ${route.pendingFee} (total: ${newState.htlcFeesEarned})`);
+            route.pendingFee = undefined; // Clear pending
+          }
 
           // Remove from lockBook (E-Machine aggregated view) - payment settled
           if (route.outboundLockId) {
@@ -642,4 +710,3 @@ export function processOrderbookCancels(
 
   return bookUpdates;
 }
-

@@ -36,7 +36,26 @@ export async function processAccountTx(
   currentTimestamp: number = Date.now(),
   currentHeight: number = 0,
   isValidation: boolean = false
-): Promise<{ success: boolean; events: string[]; error?: string; secret?: string; hashlock?: string }> {
+): Promise<{
+  success: boolean;
+  events: string[];
+  error?: string;
+  secret?: string;
+  hashlock?: string;
+  timedOutHashlock?: string;
+  swapOfferCreated?: {
+    offerId: string;
+    makerIsLeft: boolean;
+    fromEntity: string;
+    toEntity: string;
+    giveTokenId: number;
+    giveAmount: bigint;
+    wantTokenId: number;
+    wantAmount: bigint;
+    minFillRatio: number;
+  };
+  swapOfferCancelled?: { offerId: string; accountId: string; makerId?: string };
+}> {
   // Derive counterparty from canonical left/right using proofHeader's fromEntity as "me"
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
@@ -142,7 +161,8 @@ export async function processAccountTx(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'htlc_reveal' }>,
         isOurFrame,
-        currentHeight
+        currentHeight,
+        currentTimestamp
       );
 
     case 'htlc_timeout':
@@ -150,7 +170,8 @@ export async function processAccountTx(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'htlc_timeout' }>,
         isOurFrame,
-        currentHeight
+        currentHeight,
+        currentTimestamp
       );
 
     // === SWAP HANDLERS ===

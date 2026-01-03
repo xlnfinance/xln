@@ -24,7 +24,7 @@ export async function handleHtlcLock(
   isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
   console.log('🔒 handleHtlcLock CALLED');
-  const { lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId, encryptedPackage } = accountTx.data;
+  const { lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId, envelope } = accountTx.data;
   const events: string[] = [];
 
   // Initialize locks Map if not present (defensive - should be initialized at account creation)
@@ -38,9 +38,17 @@ export async function handleHtlcLock(
     return { success: false, error: `Lock ${lockId} already exists`, events };
   }
 
-  // 2. Validate expiry is in future
+  // 2. Validate expiry is in future - BOTH timelock AND revealBeforeHeight
   if (timelock <= BigInt(currentTimestamp)) {
-    return { success: false, error: `Timelock ${timelock} already expired`, events };
+    return { success: false, error: `Timelock ${timelock} already expired (timestamp)`, events };
+  }
+
+  if (revealBeforeHeight <= currentHeight) {
+    return {
+      success: false,
+      error: `revealBeforeHeight ${revealBeforeHeight} already passed (current height: ${currentHeight})`,
+      events
+    };
   }
 
   // 3. Validate amount > 0
@@ -103,27 +111,31 @@ export async function handleHtlcLock(
     senderIsLeft,
     createdHeight: accountMachine.currentHeight,
     createdTimestamp: currentTimestamp,
-    encryptedPackage
+    envelope
   };
 
-  // CRITICAL: Only update lockBook during COMMIT, not VALIDATION
-  // During validation (on clonedMachine), skip lock storage to avoid data loss
-  // Validation clone is discarded - locks must only be created during commit on real accountMachine
+  // 8. Update capacity hold (prevents double-spend)
+  // CRITICAL CONSENSUS FIX: Apply holds during BOTH validation and commit
+  // Holds must be in frame hash to prevent same-frame over-commit attacks
+  if (senderIsLeft) {
+    delta.leftHtlcHold += amount;
+    if (!isValidation) console.log(`✅ Updated leftHtlcHold: ${delta.leftHtlcHold}`);
+  } else {
+    delta.rightHtlcHold += amount;
+    if (!isValidation) console.log(`✅ Updated rightHtlcHold: ${delta.rightHtlcHold}`);
+  }
+
+  // 9. Add lock to locks Map
+  // CRITICAL CONSENSUS FIX: Add during validation too (prevents duplicate lockId in same frame)
+  // BUT only on commit persist to real accountMachine (validation uses temporary clone)
   if (!isValidation) {
-    console.log(`🔒 COMMIT: Adding lock to lockBook, lockId=${lockId.slice(0,16)}`);
+    console.log(`🔒 COMMIT: Adding lock, lockId=${lockId.slice(0,16)}`);
     accountMachine.locks.set(lockId, lock);
     console.log(`✅ Lock added to Map: ${lockId.slice(0,16)}..., locks.size=${accountMachine.locks.size}`);
-
-    // 8. Update capacity hold (prevents double-spend)
-    if (senderIsLeft) {
-      delta.leftHtlcHold += amount;
-      console.log(`✅ Updated leftHtlcHold: ${delta.leftHtlcHold}`);
-    } else {
-      delta.rightHtlcHold += amount;
-      console.log(`✅ Updated rightHtlcHold: ${delta.rightHtlcHold}`);
-    }
   } else {
-    console.log(`⏭️ VALIDATION: Skipping lockBook update (will commit later)`);
+    // Validation: Add to clone to check duplicates, but clone is discarded
+    accountMachine.locks.set(lockId, lock);
+    console.log(`⏭️ VALIDATION: Lock added to validation clone (dup check), size=${accountMachine.locks.size}`);
   }
 
   events.push(`🔒 HTLC locked: ${amount} token ${tokenId}, expires block ${revealBeforeHeight}, hash ${hashlock.slice(0,16)}...`);

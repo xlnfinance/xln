@@ -269,6 +269,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           currentFrame: {
             height: 0,
             timestamp: env.timestamp,
+            jHeight: 0,
             accountTxs: [],
             prevFrameHash: '',
             tokenIds: [],
@@ -375,6 +376,58 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     if (entityTx.type === 'htlcPayment') {
       const { handleHtlcPayment } = await import('./handlers/htlc-payment');
       return await handleHtlcPayment(entityState, entityTx, env);
+    }
+
+    if (entityTx.type === 'processHtlcTimeouts') {
+      console.log(`⏰ PROCESS-HTLC-TIMEOUTS: Processing ${entityTx.data.expiredLocks?.length || 0} expired locks`);
+
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
+
+      // Convert expired locks to htlc_timeout mempoolOps
+      for (const { accountId, lockId } of entityTx.data.expiredLocks || []) {
+        mempoolOps.push({
+          accountId,
+          tx: {
+            type: 'htlc_timeout',
+            data: { lockId }
+          }
+        });
+        console.log(`⏰   Queued timeout for lock ${lockId.slice(0,16)}... on account ${accountId.slice(-4)}`);
+      }
+
+      return { newState, outputs, mempoolOps };
+    }
+
+    if (entityTx.type === 'manualHtlcLock') {
+      console.log(`🔒 MANUAL-HTLC-LOCK: Creating lock without envelope (timeout test)`);
+
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
+
+      const { counterpartyId, lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId } = entityTx.data;
+
+      mempoolOps.push({
+        accountId: counterpartyId,
+        tx: {
+          type: 'htlc_lock',
+          data: {
+            lockId,
+            hashlock,
+            timelock,
+            revealBeforeHeight,
+            amount,
+            tokenId
+            // NO envelope - for timeout testing
+          }
+        }
+      });
+
+      console.log(`🔒   Queued htlc_lock for ${counterpartyId.slice(-4)}, lockId=${lockId.slice(0,16)}...`);
+
+      return { newState, outputs, mempoolOps };
     }
 
     if (entityTx.type === 'directPayment') {

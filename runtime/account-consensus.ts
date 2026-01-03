@@ -12,7 +12,7 @@
  * - Event Bubbling: Account events bubble up to E-Machine for entity messages
  */
 
-import { AccountMachine, AccountFrame, AccountTx, AccountInput, Env, EntityState } from './types';
+import { AccountMachine, AccountFrame, AccountTx, AccountInput, Env, EntityState, Delta } from './types';
 import { cloneAccountMachine, getAccountPerspective } from './state-helpers';
 import { isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-crypto';
@@ -30,19 +30,47 @@ const MAX_MESSAGE_COUNTER = 1000000;
 const MAX_FRAME_TIMESTAMP_DRIFT_MS = 300000; // 5 minutes
 const MAX_FRAME_SIZE_BYTES = 1048576; // 1MB frame size limit (Bitcoin block size standard)
 
+function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
+  const hasHolds = (delta.leftHtlcHold || 0n) !== 0n ||
+                   (delta.rightHtlcHold || 0n) !== 0n ||
+                   (delta.leftSwapHold || 0n) !== 0n ||
+                   (delta.rightSwapHold || 0n) !== 0n;
+
+  return !(totalDelta === 0n &&
+           delta.leftCreditLimit === 0n &&
+           delta.rightCreditLimit === 0n &&
+           !hasHolds);
+}
+
 // === VALIDATION ===
 
 /**
  * Validate account frame (frame-level validation)
  */
-export function validateAccountFrame(frame: AccountFrame, currentTimestamp?: number): boolean {
+export function validateAccountFrame(
+  frame: AccountFrame,
+  currentTimestamp?: number,
+  previousFrameTimestamp?: number
+): boolean {
   if (frame.height < 0) return false;
+  if (typeof frame.jHeight !== 'number' || frame.jHeight < 0) return false;
   if (frame.accountTxs.length > 100) return false;
   if (frame.tokenIds.length !== frame.deltas.length) return false;
 
-  // Optional timestamp drift check (only if currentTimestamp provided)
+  // CRITICAL: Timestamp validation for HTLC safety
   if (currentTimestamp !== undefined) {
-    if (Math.abs(frame.timestamp - currentTimestamp) > MAX_FRAME_TIMESTAMP_DRIFT_MS) return false;
+    // Check drift (prevent clock manipulation)
+    if (Math.abs(frame.timestamp - currentTimestamp) > MAX_FRAME_TIMESTAMP_DRIFT_MS) {
+      console.log(`❌ Frame timestamp drift too large: ${frame.timestamp} vs ${currentTimestamp}`);
+      return false;
+    }
+
+    // Ensure non-decreasing timestamps (prevent time-travel attacks on HTLCs)
+    // Allow equal timestamps (batched frames), but reject backwards movement
+    if (previousFrameTimestamp !== undefined && frame.timestamp < previousFrameTimestamp - 1000) {
+      console.log(`❌ Frame timestamp went backwards significantly: ${frame.timestamp} < ${previousFrameTimestamp} (delta: ${previousFrameTimestamp - frame.timestamp}ms)`);
+      return false;
+    }
   }
 
   return true;
@@ -79,6 +107,7 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
   const frameData = {
     height: frame.height,
     timestamp: frame.timestamp,
+    jHeight: frame.jHeight,
     prevFrameHash: frame.prevFrameHash, // Chain linkage
     accountTxs: frame.accountTxs.map(tx => ({
       type: tx.type,
@@ -121,8 +150,28 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
 export async function proposeAccountFrame(
   env: Env,
   accountMachine: AccountMachine,
-  skipCounterIncrement: boolean = false
-): Promise<{ success: boolean; accountInput?: AccountInput; events: string[]; error?: string }> {
+  skipCounterIncrement: boolean = false,
+  entityJHeight?: number // Optional: J-height from entity state for HTLC consensus
+): Promise<{
+  success: boolean;
+  accountInput?: AccountInput;
+  events: string[];
+  error?: string;
+  revealedSecrets?: Array<{ secret: string; hashlock: string }>;
+  swapOffersCreated?: Array<{
+    offerId: string;
+    makerIsLeft: boolean;
+    fromEntity: string;
+    toEntity: string;
+    accountId?: string;
+    giveTokenId: number;
+    giveAmount: bigint;
+    wantTokenId: number;
+    wantAmount: bigint;
+    minFillRatio: number;
+  }>;
+  swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
+}> {
   // Derive counterparty from canonical left/right
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
@@ -159,6 +208,7 @@ export async function proposeAccountFrame(
   const ourEntityId = accountMachine.proofHeader.fromEntity;
   const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
   const currentJHeight = ourReplica?.state.lastFinalizedJHeight || 0;
+  const frameJHeight = entityJHeight ?? currentJHeight;
 
   // Process all transactions on the clone
   const allEvents: string[] = [];
@@ -188,7 +238,7 @@ export async function proposeAccountFrame(
       accountTx,
       true, // Processing our own transactions
       env.timestamp, // Will be replaced by frame.timestamp during commit
-      currentJHeight,  // Entity's synced J-height
+      frameJHeight,  // Entity's synced J-height
       true // isValidation = true (on clone, skip persistent state updates)
     );
 
@@ -238,9 +288,13 @@ export async function proposeAccountFrame(
     // This prevents mismatch when one side creates empty delta entries
     const totalDelta = delta.ondelta + delta.offdelta;
 
-    // Skip tokens with zero delta AND zero limits (never used)
-    if (totalDelta === 0n && delta.leftCreditLimit === 0n && delta.rightCreditLimit === 0n) {
-      console.log(`⏭️  Skipping unused token ${tokenId} from frame (zero delta, zero limits)`);
+    // Skip tokens with zero delta AND zero limits AND zero holds (never used)
+    // CRITICAL: Include tokens with HTLC/swap holds even if delta/limits/collateral are zero
+    // NOTE: Collateral changes from j_events are included separately in frame validation
+    // Only skip if delta, limits, AND holds are all zero
+    // Collateral is omitted here because j_events can set it during frame processing
+    if (!shouldIncludeToken(delta, totalDelta)) {
+      console.log(`⏭️  Skipping unused token ${tokenId} from frame (zero delta/limits/holds)`);
       continue;
     }
 
@@ -263,10 +317,18 @@ export async function proposeAccountFrame(
   // Determine if we're left entity (for byLeft field)
   const weAreLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
 
+  // Validate timestamp before creating frame (HTLC safety - prevent time manipulation)
+  const previousTimestamp = accountMachine.currentFrame?.timestamp;
+  if (previousTimestamp !== undefined && env.timestamp < previousTimestamp) {
+    console.log(`❌ E-MACHINE: Cannot propose - timestamp regression: ${env.timestamp} < ${previousTimestamp}`);
+    return { success: false, error: 'Timestamp went backwards', events };
+  }
+
   // Create account frame matching the real AccountFrame interface
   const frameData = {
     height: accountMachine.currentHeight + 1,
     timestamp: env.timestamp, // DETERMINISTIC: Copy from runtime machine
+    jHeight: frameJHeight, // CRITICAL: J-height for HTLC consensus
     accountTxs: [...accountMachine.mempool],
     // CRITICAL: Use stored stateHash from currentFrame (set during commit)
     prevFrameHash: accountMachine.currentHeight === 0
@@ -339,11 +401,33 @@ export async function handleAccountInput(
   env: Env,
   accountMachine: AccountMachine,
   input: AccountInput
-): Promise<{ success: boolean; response?: AccountInput; events: string[]; error?: string; approvalNeeded?: AccountTx }> {
+): Promise<{
+  success: boolean;
+  response?: AccountInput;
+  events: string[];
+  error?: string;
+  approvalNeeded?: AccountTx;
+  revealedSecrets?: Array<{ secret: string; hashlock: string }>;
+  swapOffersCreated?: Array<{
+    offerId: string;
+    makerIsLeft: boolean;
+    fromEntity: string;
+    toEntity: string;
+    accountId?: string;
+    giveTokenId: number;
+    giveAmount: bigint;
+    wantTokenId: number;
+    wantAmount: bigint;
+    minFillRatio: number;
+  }>;
+  swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
+  timedOutHashlocks?: string[];
+}> {
   console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`);
   console.log(`📨 A-MACHINE INPUT: height=${input.height || 'none'}, hasACK=${!!input.prevSignatures}, hasNewFrame=${!!input.newAccountFrame}, counter=${input.counter}`);
 
   const events: string[] = [];
+  const timedOutHashlocks: string[] = [];
 
   // CRITICAL: Counter validation (replay protection) - ALWAYS enforce, no frame 0 exemption
   if (input.counter !== undefined) {
@@ -409,8 +493,16 @@ export async function handleAccountInput(
 
         // Re-execute all frame txs on REAL accountMachine (deterministic)
         // CRITICAL: Use frame.timestamp for determinism (HTLC validation must use agreed consensus time)
+        const pendingJHeight = accountMachine.pendingFrame.jHeight ?? accountMachine.currentHeight;
         for (const tx of accountMachine.pendingFrame.accountTxs) {
-          await processAccountTx(accountMachine, tx, true, accountMachine.pendingFrame.timestamp, accountMachine.currentHeight);
+          const commitResult = await processAccountTx(accountMachine, tx, true, accountMachine.pendingFrame.timestamp, pendingJHeight);
+          if (!commitResult.success) {
+            console.error(`❌ PROPOSER-COMMIT FAILED for tx type=${tx.type}: ${commitResult.error}`);
+            throw new Error(`Frame ${accountMachine.pendingFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);
+          }
+          if (commitResult.timedOutHashlock) {
+            timedOutHashlocks.push(commitResult.timedOutHashlock);
+          }
         }
 
         console.log(`💳 PROPOSER-COMMIT COMPLETE: Deltas after re-execution for ${cpForLog.slice(-4)}:`,
@@ -429,6 +521,7 @@ export async function handleAccountInput(
         accountMachine.currentFrame = {
           height: accountMachine.pendingFrame.height,
           timestamp: accountMachine.pendingFrame.timestamp,
+          jHeight: accountMachine.pendingFrame.jHeight,
           accountTxs: accountMachine.pendingFrame.accountTxs,
           prevFrameHash: accountMachine.pendingFrame.prevFrameHash,
           tokenIds: accountMachine.pendingFrame.tokenIds,
@@ -468,12 +561,13 @@ export async function handleAccountInput(
               events: [...events, ...proposeResult.events],
               revealedSecrets: proposeResult.revealedSecrets,
               swapOffersCreated: proposeResult.swapOffersCreated,
-              swapOffersCancelled: proposeResult.swapOffersCancelled
+              swapOffersCancelled: proposeResult.swapOffersCancelled,
+              timedOutHashlocks
             };
           }
         }
         console.log(`🔍 RETURN-ACK-ONLY: frame ${input.height} ACKed, no new frame bundled`);
-        return { success: true, events };
+        return { success: true, events, timedOutHashlocks };
       }
       // Fall through to process newAccountFrame below
       console.log(`📦 BATCHED-MESSAGE: ACK processed, now processing bundled new frame...`);
@@ -486,7 +580,9 @@ export async function handleAccountInput(
   if (input.newAccountFrame) {
     const receivedFrame = input.newAccountFrame;
 
-    if (!validateAccountFrame(receivedFrame)) {
+    // Validate frame with timestamp checks (HTLC safety)
+    const previousTimestamp = accountMachine.currentFrame?.timestamp;
+    if (!validateAccountFrame(receivedFrame, env.timestamp, previousTimestamp)) {
       return { success: false, error: 'Invalid frame structure', events };
     }
 
@@ -586,6 +682,7 @@ export async function handleAccountInput(
     const ourEntityId = accountMachine.proofHeader.fromEntity;
     const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
     const currentJHeight = ourReplica?.state.lastFinalizedJHeight || 0;
+    const frameJHeight = receivedFrame.jHeight ?? currentJHeight;
 
     // Apply frame transactions to clone (as receiver)
     const clonedMachine = cloneAccountMachine(accountMachine);
@@ -614,7 +711,7 @@ export async function handleAccountInput(
         accountTx,
         false, // Processing their transactions = incoming
         receivedFrame.timestamp, // DETERMINISTIC: Use frame's consensus timestamp
-        currentJHeight,  // Entity's synced J-height
+        frameJHeight,  // Frame's consensus J-height
         true // isValidation = true (on clone, skip bilateral finalization)
       );
       if (!result.success) {
@@ -626,6 +723,9 @@ export async function handleAccountInput(
       // Collect revealed secrets (CRITICAL for multi-hop)
       if (result.secret && result.hashlock) {
         revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
+      }
+      if (result.timedOutHashlock) {
+        timedOutHashlocks.push(result.timedOutHashlock);
       }
 
       // Collect swap offers for orderbook integration
@@ -648,8 +748,8 @@ export async function handleAccountInput(
 
       // CONSENSUS FIX: Apply SAME filtering as proposer
       // Skip tokens with zero delta AND zero limits (never used)
-      if (totalDelta === 0n && delta.leftCreditLimit === 0n && delta.rightCreditLimit === 0n) {
-        console.log(`⏭️  RECEIVER: Skipping unused token ${tokenId} from validation (zero delta, zero limits)`);
+      if (!shouldIncludeToken(delta, totalDelta)) {
+        console.log(`⏭️  RECEIVER: Skipping unused token ${tokenId} from validation (zero delta/limits/holds)`);
         continue;
       }
 
@@ -665,7 +765,7 @@ export async function handleAccountInput(
     for (const [tokenId, delta] of sortedOurTokens) {
       const totalDelta = delta.ondelta + delta.offdelta;
       // Apply SAME filtering as proposer (skip unused tokens)
-      if (totalDelta === 0n && delta.leftCreditLimit === 0n && delta.rightCreditLimit === 0n) {
+      if (!shouldIncludeToken(delta, totalDelta)) {
         continue;
       }
       ourFullDeltaStates.push({ ...delta });
@@ -691,6 +791,7 @@ export async function handleAccountInput(
     const recomputedHash = await createFrameHash({
       height: receivedFrame.height,
       timestamp: receivedFrame.timestamp,
+      jHeight: receivedFrame.jHeight,
       accountTxs: receivedFrame.accountTxs,
       prevFrameHash: receivedFrame.prevFrameHash,
       tokenIds: ourFinalTokenIds,
@@ -727,7 +828,15 @@ export async function handleAccountInput(
     // Re-execute all frame txs on REAL accountMachine (deterministic)
     // CRITICAL: Use receivedFrame.timestamp for determinism (HTLC validation must use agreed consensus time)
     for (const tx of receivedFrame.accountTxs) {
-      await processAccountTx(accountMachine, tx, false, receivedFrame.timestamp, accountMachine.currentHeight);
+      // CRITICAL: Use frame.jHeight for HTLC checks (consensus-aligned height)
+      const jHeightForCommit = receivedFrame.jHeight || accountMachine.currentHeight;
+      const commitResult = await processAccountTx(accountMachine, tx, false, receivedFrame.timestamp, jHeightForCommit);
+
+      // CRITICAL: Verify commit succeeded (Codex: prevent silent divergence)
+      if (!commitResult.success) {
+        console.error(`❌ RECEIVER-COMMIT FAILED for tx type=${tx.type}: ${commitResult.error}`);
+        throw new Error(`Frame ${receivedFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);
+      }
     }
 
     console.log(`💳 RECEIVER-COMMIT COMPLETE: Deltas after re-execution for ${cpForCommitLog.slice(-4)}:`,
@@ -749,6 +858,7 @@ export async function handleAccountInput(
     accountMachine.currentFrame = {
       height: receivedFrame.height,
       timestamp: receivedFrame.timestamp,
+      jHeight: receivedFrame.jHeight,
       accountTxs: receivedFrame.accountTxs,
       prevFrameHash: receivedFrame.prevFrameHash,
       tokenIds: receivedFrame.tokenIds,
@@ -836,11 +946,11 @@ export async function handleAccountInput(
     ];
 
     console.log(`🔍 RETURN-RESPONSE: h=${response.height} prevSigs=${!!response.prevSignatures} newFrame=${!!response.newAccountFrame}`);
-    return { success: true, response, events, revealedSecrets: allRevealedSecrets, swapOffersCreated: allSwapOffersCreated, swapOffersCancelled: allSwapOffersCancelled };
+    return { success: true, response, events, revealedSecrets: allRevealedSecrets, swapOffersCreated: allSwapOffersCreated, swapOffersCancelled: allSwapOffersCancelled, timedOutHashlocks };
   }
 
   console.log(`🔍 RETURN-NO-RESPONSE: No response object`);
-  return { success: true, events, swapOffersCreated: [], swapOffersCancelled: [] };
+  return { success: true, events, swapOffersCreated: [], swapOffersCancelled: [], timedOutHashlocks };
 }
 
 // === E-MACHINE INTEGRATION ===
