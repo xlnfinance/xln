@@ -126,6 +126,54 @@ Core: /runtime. Contracts: /jurisdictions. UI: /frontend. Docs: /docs. Reference
 ## 🛠️ PATTERNS
 Auto-rebuild: `bun run dev`. Time-travel: read from `env` not live stores. Bilateral: left=lower entityId (lexicographic).
 
+## 🔍 DEBUGGING RUNTIME STATE
+
+**Two-mode debugging system (ASCII + JSON):**
+
+### ASCII Mode (Quick Scan)
+```bash
+# Run scenario with full output
+bun runtime/scenarios/lock-ahb.ts > /tmp/debug.log
+
+# Grep for specific info
+grep "Entity.*Alice" /tmp/debug.log        # Find Alice's state
+grep "HTLC.*Pending" /tmp/debug.log        # Find pending locks
+grep "Frame 65" /tmp/debug.log             # Find specific frame
+```
+
+**ASCII functions** (runtime/runtime-ascii.ts):
+- `formatRuntime(env)` - Full env with hierarchical boxes
+- `formatEntity(state)` - Single entity with accounts
+- `formatAccount(account, myId)` - Bilateral account detail
+- On assert fail: auto-dumps full runtime state
+
+### JSON Mode (Deep Analysis)
+```bash
+# Scenarios auto-dump JSON to /tmp/ on completion:
+# - /tmp/{scenario}-frames.json (all history frames)
+# - /tmp/{scenario}-final.json (final state)
+
+# Query with jq
+jq '.eReplicas[0][1].state | {entityId, height, lockBook: (.lockBook | length)}' /tmp/lock-ahb-final.json
+
+# Find entities with fees
+jq '.eReplicas[] | select(.[1].state.htlcFeesEarned != "BigInt(0)")' /tmp/lock-ahb-final.json
+
+# Extract specific account deltas
+jq '.eReplicas[0][1].state.accounts | to_entries[0].value.deltas' /tmp/lock-ahb-final.json
+
+# Compare frames (diff two states)
+diff <(jq '.eReplicas[0][1].state.lockBook' /tmp/frame-65.json) <(jq ... /tmp/frame-70.json)
+```
+
+**Browser console** (F12):
+```javascript
+xln.debug.dumpRuntime()  // ASCII to console
+xln.formatEntity(xln.getEnv().eReplicas.values().next().value.state)
+```
+
+**When debugging consensus issues:** Dump both sides, diff the JSON to find divergence point.
+
 ## 💾 Memories
 
 - tx shortcut acceptable in crypto
@@ -134,3 +182,4 @@ Auto-rebuild: `bun run dev`. Time-travel: read from `env` not live stores. Bilat
 - localhost:8080 only entry point
 - lowercase .md filenames (next.md, readme.md)
 - "xln" lowercase always, never "XLN"
+- Debug with ASCII (quick scan) + JSON (deep analysis) - both auto-dumped on scenario completion
