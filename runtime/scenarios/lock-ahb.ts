@@ -1815,9 +1815,19 @@ export async function ahb(env: Env): Promise<void> {
 if (import.meta.main) {
   console.log('🚀 Running AHB scenario from CLI...\n');
 
+  // Parse CLI args for frame stepping (e.g., bun lock-ahb.ts --10)
+  const args = process.argv.slice(2);
+  const stopArg = args.find(a => a.startsWith('--'))?.slice(2);
+  const stopAtFrame = stopArg ? parseInt(stopArg, 10) : undefined;
+
   // Dynamic import to avoid bundler issues
   const runtime = await import('../runtime');
   const env = runtime.createEmptyEnv();
+
+  if (stopAtFrame !== undefined) {
+    env.stopAtFrame = stopAtFrame;
+    console.log(`⏸️  Frame stepping: Will stop at frame ${stopAtFrame}\n`);
+  }
 
   await ahb(env);
 

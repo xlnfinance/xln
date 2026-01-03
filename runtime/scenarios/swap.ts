@@ -21,6 +21,7 @@ import type { Env, EntityInput, JurisdictionConfig } from '../types';
 import { getBestAsk } from '../orderbook/core';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
 import { canonicalAccountKey } from '../state-helpers';
+import { formatRuntime, formatEntity } from '../runtime-ascii';
 import { formatRuntime } from '../runtime-ascii';
 
 // Lazy-loaded runtime functions

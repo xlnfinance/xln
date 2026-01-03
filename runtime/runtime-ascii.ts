@@ -141,6 +141,48 @@ export function formatRuntime(env: Env, options?: FormatOptions): string {
   output.push(drawBox('RUNTIME STATE', runtimeInfo, 0, true));
   output.push('');
 
+  // Events Stack (hierarchical RJEA log)
+  if (env.frameLogs && env.frameLogs.length > 0) {
+    output.push('  EVENTS (Hierarchical Stack):');
+    output.push('  ' + '─'.repeat(60));
+
+    const recentEvents = env.frameLogs.slice(-50); // Last 50 events
+
+    for (const event of recentEvents) {
+      // Determine indentation based on category/entityId
+      let indent = 2; // Runtime level (no entity)
+      let prefix = 'R';
+
+      if (event.category === 'jurisdiction' || event.category === 'system') {
+        indent = 4; // J-Machine level
+        prefix = '  J';
+      } else if (event.entityId) {
+        indent = 6; // Entity level
+        prefix = `    E:${formatAddress(event.entityId)}`;
+
+        // Account-level events (if message contains account info)
+        if (event.message.includes('Account') || event.message.includes('bilateral')) {
+          indent = 8;
+          prefix = `      A:${formatAddress(event.entityId)}`;
+        }
+      }
+
+      const timestamp = formatTimestamp(event.timestamp, true);
+      const level = event.level === 'error' ? '❌' : event.level === 'warn' ? '⚠️ ' : '  ';
+
+      output.push(' '.repeat(indent) + `${level} [${timestamp}] ${prefix} ${event.message}`);
+
+      // Show data if present (compact)
+      if (event.data && Object.keys(event.data).length > 0) {
+        const dataStr = JSON.stringify(event.data, null, 0).slice(0, 80);
+        output.push(' '.repeat(indent + 2) + `↳ ${dataStr}`);
+      }
+    }
+
+    output.push('  ' + '─'.repeat(60));
+    output.push('');
+  }
+
   // J-Replicas (Jurisdictions)
   if (env.jReplicas && env.jReplicas.size > 0) {
     output.push('  J-REPLICAS (Jurisdictions):');

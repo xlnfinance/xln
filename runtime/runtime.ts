@@ -1506,6 +1506,17 @@ export const process = async (
   inputs?: EntityInput[],
   runtimeDelay = 0
 ) => {
+  // Frame stepping: check if we should stop and dump state
+  if (env.stopAtFrame !== undefined && env.height >= env.stopAtFrame) {
+    console.log(`\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);
+    console.log('═'.repeat(80));
+    const { formatRuntime } = await import('./runtime-ascii');
+    console.log(formatRuntime(env, { maxAccounts: 10, maxLocks: 20, maxSwaps: 20 }));
+    console.log('═'.repeat(80) + '\n');
+    console.log('💾 State captured - use jq on /tmp/{scenario}-runtime.json for deep queries');
+    throw new Error(`FRAME_STEP: Stopped at frame ${env.height} for debugging`);
+  }
+
   // Lock: prevent interleaving
   if (processing) {
     console.warn('⏸️ SKIP: Previous tick still processing');
