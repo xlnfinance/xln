@@ -21,6 +21,7 @@ import type { Env, EntityInput, JurisdictionConfig } from '../types';
 import { getBestAsk } from '../orderbook/core';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
 import { canonicalAccountKey } from '../state-helpers';
+import { formatRuntime } from '../runtime-ascii';
 
 // Lazy-loaded runtime functions
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -89,11 +90,18 @@ const MAX_FILL_RATIO = 65535;
 const HALF_FILL = Math.floor(MAX_FILL_RATIO / 2); // ~50%
 const FULL_FILL = MAX_FILL_RATIO;
 
-function assert(condition: boolean, message: string): void {
+function assert(condition: boolean, message: string, env?: Env): void {
   if (!condition) {
-    throw new Error(`❌ ASSERTION FAILED: ${message}`);
+    if (env) {
+      console.log('\n' + '='.repeat(80));
+      console.log('ASSERTION FAILED - FULL RUNTIME STATE:');
+      console.log('='.repeat(80));
+      console.log(formatRuntime(env, { maxAccounts: 5, maxLocks: 20, maxSwaps: 20 }));
+      console.log('='.repeat(80) + '\n');
+    }
+    throw new Error(`ASSERTION FAILED: ${message}`);
   }
-  console.log(`✅ ${message}`);
+  console.log(`[OK] ${message}`);
 }
 
 function assertSnapshotCounts(env: Env, expectedJ: number, expectedE: number, label: string): void {

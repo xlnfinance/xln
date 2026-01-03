@@ -19,6 +19,9 @@
   import PaymentPanel from './PaymentPanel.svelte';
   import SettlementPanel from './SettlementPanel.svelte';
   import InsurancePanel from '$lib/view/panels/InsurancePanel.svelte';
+  import HtlcActivityPanel from './HtlcActivityPanel.svelte';
+  import UserOrdersPanel from '../Trading/UserOrdersPanel.svelte';
+  import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
   import { xlnFunctions } from '../../stores/xlnStore';
 
   export let tab: Tab;
@@ -76,6 +79,9 @@
   $: proposalsExpanded = $settings.componentStates[`proposals-${tab.id}`] ?? false;
   $: historyExpanded = $settings.componentStates[`history-${tab.id}`] ?? false;
   $: controlsExpanded = $settings.componentStates[`controls-${tab.id}`] ?? false;
+  $: htlcExpanded = $settings.componentStates[`htlc-${tab.id}`] ?? false;
+  $: swapOrdersExpanded = $settings.componentStates[`swaporders-${tab.id}`] ?? false;
+  $: orderbookExpanded = $settings.componentStates[`orderbook-${tab.id}`] ?? false;
 
   function toggleComponent(componentId: string) {
     settingsOperations.toggleComponentState(componentId);
@@ -349,6 +355,35 @@
               isolatedTimeIndex={contextTimeIndex as any}
             />
           </div>
+        </div>
+      {/if}
+
+      <!-- HTLC Activity Section -->
+      {#if replica && replica.state.lockBook && replica.state.lockBook.size > 0}
+        <HtlcActivityPanel replica={replica} bind:expanded={htlcExpanded} />
+      {/if}
+
+      <!-- Swap Orders Section -->
+      {#if replica && replica.state.swapBook && replica.state.swapBook.size > 0}
+        <div class="swap-orders-wrapper">
+          <UserOrdersPanel entityId={replica.state.entityId} />
+        </div>
+      {/if}
+
+      <!-- Orderbook Section (Hubs only) -->
+      {#if replica && replica.state.orderbookExt}
+        <div class="orderbook-wrapper">
+          <div class="section-header" role="button" tabindex="0" on:click={() => toggleComponent(`orderbook-${tab.id}`)} on:keydown={(e) => e.key === 'Enter' && toggleComponent(`orderbook-${tab.id}`)}>
+            <h3>📈 Orderbook</h3>
+            <span class="toggle-icon">{orderbookExpanded ? '▼' : '▶'}</span>
+          </div>
+          {#if orderbookExpanded}
+            <OrderbookPanel
+              hubId={replica.state.entityId}
+              pairId="1/2"
+              depth={10}
+            />
+          {/if}
         </div>
       {/if}
 
