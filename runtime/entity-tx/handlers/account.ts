@@ -2,6 +2,7 @@ import { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx } from
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective } from '../../state-helpers';
 import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
+import { HTLC } from '../../constants';
 import { formatEntityId } from '../../utils';
 
 // === PURE EVENT TYPES ===
@@ -291,7 +292,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 }
 
                 // Calculate forwarded timelock/height with safety checks
-                const forwardTimelock = lock.timelock - BigInt(10000); // 10s less
+                const forwardTimelock = lock.timelock - BigInt(HTLC.MIN_TIMELOCK_DELTA_MS); // Per-hop timelock delta
                 const forwardHeight = lock.revealBeforeHeight - 1;
 
                 // Validate forwarded lock is still valid (with instrumentation)

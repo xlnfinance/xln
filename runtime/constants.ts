@@ -61,10 +61,13 @@ export const HTLC = {
   /** Minimum timelock delta per hop (simnet-optimized for speed) */
   MIN_TIMELOCK_DELTA_MS: 10_000, // 10 seconds per hop
 
+  /** Minimum time remaining for the first forward (prevents TIMELOCK_TOO_TIGHT) */
+  MIN_FORWARD_TIMELOCK_MS: 20_000, // 20 seconds minimum at first hop
+
   /** Maximum hops for HTLC routing (prevents loops) */
   MAX_HOPS: 20,
 
-  /** Default HTLC expiry (30s = 3 hops × 10s) */
+  /** Default HTLC expiry (baseline, may be raised per-route) */
   DEFAULT_EXPIRY_MS: 30_000,
 
   /** Base fee in USD (micro basis points) */
