@@ -45,6 +45,9 @@ export interface GossipLayer {
   profiles: Map<string, Profile>;
   announce: (profile: Profile) => void;
   getProfiles: () => Profile[];
+  getNetworkGraph: () => {
+    findPaths: (source: string, target: string, amount?: bigint, tokenId?: number) => Promise<any[]>;
+  };
 }
 
 export function createGossipLayer(): GossipLayer {
@@ -68,18 +71,73 @@ export function createGossipLayer(): GossipLayer {
     return Array.from(profiles.values());
   };
 
-  const getNetworkGraph = (): Map<string, Set<string>> => {
-    // Build adjacency graph from gossip profiles
-    // For lazy mode: return empty graph (all entities are islands)
-    // For full mode: would parse accounts from replicas
-    return new Map();
+  /**
+   * Get network graph with pathfinding capabilities
+   * Returns object with findPaths() method using Dijkstra algorithm
+   *
+   * TODO: Wire to PathFinder class - currently using simple BFS for stability
+   */
+  const getNetworkGraph = () => {
+    return {
+      findPaths: async (source: string, target: string, amount?: bigint, tokenId: number = 1) => {
+        // Simple BFS pathfinding from profiles
+        // Full Dijkstra in routing/pathfinding.ts (to be integrated)
+
+        const adjacency = new Map<string, Set<string>>();
+
+        // Build adjacency from profiles (capacity-aware)
+        const minAmount = amount || 1n; // Use specified amount or 1 as minimum
+
+        for (const profile of profiles.values()) {
+          if (profile.accounts) {
+            const neighbors = new Set<string>();
+            for (const account of profile.accounts) {
+              const tokenCap = account.tokenCapacities.get(tokenId);
+              // Filter by capacity >= required amount (not just > 0)
+              if (tokenCap && tokenCap.outCapacity >= minAmount) {
+                neighbors.add(account.counterpartyId);
+              }
+            }
+            if (neighbors.size > 0) {
+              adjacency.set(profile.entityId, neighbors);
+            }
+          }
+        }
+
+        // BFS to find path
+        const queue: string[][] = [[source]];
+        const visited = new Set<string>([source]);
+
+        while (queue.length > 0) {
+          const path = queue.shift()!;
+          const current = path[path.length - 1];
+          if (!current) continue; // Safety check
+
+          if (current === target) {
+            return [{ path }]; // Found!
+          }
+
+          const neighbors = adjacency.get(current);
+          if (neighbors) {
+            for (const neighbor of neighbors) {
+              if (neighbor && !visited.has(neighbor)) {
+                visited.add(neighbor);
+                queue.push([...path, neighbor]);
+              }
+            }
+          }
+        }
+
+        return []; // No path found
+      }
+    };
   };
 
   return {
     profiles,
     announce,
     getProfiles,
-    // getNetworkGraph, // TODO: implement
+    getNetworkGraph,
   };
 }
 

@@ -630,8 +630,8 @@ export interface HtlcLock {
   createdHeight: number;       // AccountFrame height when created
   createdTimestamp: number;    // When lock was added (for logging)
 
-  // Onion routing (optional - cleartext in Phase 2, encrypted in Phase 3)
-  encryptedPackage?: string;   // Encrypted next-hop data
+  // Onion routing envelope (cleartext JSON in Phase 2, encrypted in Phase 3)
+  envelope?: import('./htlc-envelope-types').HtlcEnvelope;
 }
 
 // Swap offer (limit order) in bilateral account
@@ -667,6 +667,7 @@ export interface HtlcRoute {
 
   // Resolution
   secret?: string;
+  pendingFee?: bigint; // Fee to accrue on successful reveal (not on forward)
   createdTimestamp: number;
 }
 
@@ -778,6 +779,7 @@ export interface AccountMachine {
 export interface AccountFrame {
   height: number; // Renamed from frameId for S/E/A consistency
   timestamp: number;
+  jHeight: number; // J-machine height agreed for HTLC deadline checks
   accountTxs: AccountTx[]; // Renamed from transitions
   prevFrameHash: string; // Hash of previous frame (creates chain linkage, not state linkage)
   stateHash: string;
@@ -915,8 +917,7 @@ export type AccountTx =
         revealBeforeHeight: number;
         amount: bigint;
         tokenId: number;
-        encryptedPackage?: string;
-        routingInfo?: any; // Cleartext fallback for Phase 2 testing
+        envelope?: import('./htlc-envelope-types').HtlcEnvelope; // Onion routing envelope
       };
     }
   | {

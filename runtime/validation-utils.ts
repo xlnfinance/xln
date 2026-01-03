@@ -323,6 +323,7 @@ export function validateAccountFrame(value: unknown, context = 'AccountFrame'): 
   const validated: AccountFrame = {
     height: validateNumber(obj['height'], `${context}.height`),
     timestamp: validateNumber(obj['timestamp'], `${context}.timestamp`),
+    jHeight: validateNumber(obj['jHeight'], `${context}.jHeight`),
     accountTxs: validateArray(obj['accountTxs'], `${context}.accountTxs`),
     prevFrameHash: validateString(obj['prevFrameHash'], `${context}.prevFrameHash`),
     stateHash: validateString(obj['stateHash'], `${context}.stateHash`),

@@ -14,8 +14,9 @@ export async function handleHtlcTimeout(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'htlc_timeout' }>,
   isOurFrame: boolean,
-  currentHeight: number
-): Promise<{ success: boolean; events: string[]; error?: string }> {
+  currentHeight: number,
+  currentTimestamp: number
+): Promise<{ success: boolean; events: string[]; error?: string; timedOutHashlock?: string }> {
   const { lockId } = accountTx.data;
   const events: string[] = [];
 
@@ -25,12 +26,18 @@ export async function handleHtlcTimeout(
     return { success: false, error: `Lock ${lockId} not found`, events };
   }
 
-  // 2. Verify deadline passed (enforced at J-block height)
-  if (currentHeight <= lock.revealBeforeHeight) {
-    const remaining = lock.revealBeforeHeight - currentHeight;
+  // 2. Verify deadline passed - BOTH conditions (height OR timestamp)
+  // Height: J-block deadline (on-chain enforcement)
+  // Timestamp: Time-based deadline (deterministic entity clock)
+  const heightExpired = currentHeight > 0 && currentHeight > lock.revealBeforeHeight;
+  const timestampExpired = currentTimestamp > Number(lock.timelock);
+
+  if (!heightExpired && !timestampExpired) {
+    const blocksRemaining = lock.revealBeforeHeight - currentHeight;
+    const timeRemaining = Number(lock.timelock) - currentTimestamp;
     return {
       success: false,
-      error: `Lock not expired: ${remaining} blocks remaining (current ${currentHeight}, deadline ${lock.revealBeforeHeight})`,
+      error: `Lock not expired: ${blocksRemaining} blocks OR ${Math.floor(timeRemaining / 1000)}s remaining`,
       events
     };
   }
@@ -53,5 +60,10 @@ export async function handleHtlcTimeout(
 
   events.push(`⏰ HTLC timeout: ${lock.amount} token ${lock.tokenId} returned to sender (lock ${lockId.slice(0,8)}...)`);
 
-  return { success: true, events };
+  // 6. Return hashlock for entity-level cleanup (MEDIUM-7: htlcRoutes cleanup)
+  return {
+    success: true,
+    events,
+    timedOutHashlock: lock.hashlock // Signal to entity layer to clean up htlcRoutes
+  };
 }

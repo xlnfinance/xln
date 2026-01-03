@@ -19,7 +19,7 @@ export async function handleHtlcPayment(
   entityState: EntityState,
   entityTx: Extract<any, { type: 'htlcPayment' }>,
   env: Env
-): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
+): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps?: Array<{ accountId: string; tx: any }> }> {
   console.log(`🔒 HTLC-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`);
   console.log(`   Amount: ${entityTx.data.amount}, Route: ${entityTx.data.route?.map((r: string) => r.slice(-4)).join('→') || 'none'}`);
 
@@ -34,6 +34,7 @@ export async function handleHtlcPayment(
 
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
+  const mempoolOps: Array<{ accountId: string; tx: any }> = [];
 
   // Extract payment details
   let { targetEntityId, tokenId, amount, route, description, secret, hashlock } = entityTx.data;
@@ -56,7 +57,7 @@ export async function handleHtlcPayment(
       // Find route through network using gossip
       if (env.gossip) {
         const networkGraph = env.gossip.getNetworkGraph();
-        const paths = networkGraph.findPaths(entityState.entityId, targetEntityId);
+        const paths = await networkGraph.findPaths(entityState.entityId, targetEntityId, amount, tokenId);
 
         if (paths.length > 0) {
           route = paths[0].path;
@@ -64,12 +65,12 @@ export async function handleHtlcPayment(
         } else {
           logError("HTLC_PAYMENT", `❌ No route found to ${formatEntityId(targetEntityId)}`);
           addMessage(newState, `❌ HTLC payment failed: No route to ${formatEntityId(targetEntityId)}`);
-          return { newState, outputs: [] };
+          return { newState, outputs: [], mempoolOps: [] };
         }
       } else {
         logError("HTLC_PAYMENT", `❌ Cannot find route: Gossip layer not available`);
         addMessage(newState, `❌ HTLC payment failed: Network routing unavailable`);
-        return { newState, outputs: [] };
+        return { newState, outputs: [], mempoolOps: [] };
       }
     }
   }
@@ -121,6 +122,18 @@ export async function handleHtlcPayment(
     createdTimestamp: env.timestamp
   });
 
+  // Create onion envelope (privacy-preserving routing)
+  const { createOnionEnvelopes } = await import('../../htlc-envelope-types');
+  let envelope;
+  try {
+    envelope = createOnionEnvelopes(route, secret);
+    console.log(`🧅 Created envelope for route length ${route.length}`);
+  } catch (e) {
+    logError("HTLC_PAYMENT", `❌ Envelope creation failed: ${e instanceof Error ? e.message : String(e)}`);
+    addMessage(newState, `❌ HTLC payment failed: Invalid route`);
+    return { newState, outputs: [], mempoolOps: [] };
+  }
+
   // Create htlc_lock AccountTx
   const accountTx: AccountTx = {
     type: 'htlc_lock',
@@ -131,21 +144,15 @@ export async function handleHtlcPayment(
       revealBeforeHeight,
       amount,
       tokenId,
-      // Store cleartext routing for Phase 2 (no encryption yet)
-      routingInfo: {
-        nextHop: route[1],
-        finalRecipient: targetEntityId,
-        route: route.slice(1), // Pass along remaining route
-        secret // Always include secret - intermediaries will pass it along
-      }
+      envelope  // Onion envelope (cleartext JSON in Phase 2)
     },
   };
 
-  // Add to account machine mempool (use counterparty ID as key)
+  // Queue mempool operation (entity-consensus will apply + mark account proposable)
   const accountMachine = newState.accounts.get(nextHop);
   if (accountMachine) {
-    accountMachine.mempool.push(accountTx);
-    console.log(`🔒 Added HTLC lock to mempool for account with ${formatEntityId(nextHop)}`);
+    mempoolOps.push({ accountId: nextHop, tx: accountTx });
+    console.log(`🔒 Queued HTLC lock for mempool (account ${formatEntityId(nextHop)})`);
     console.log(`🔒 Lock ID: ${lockId.slice(0,16)}..., expires block ${revealBeforeHeight}`);
 
     // Add to lockBook (E-Machine aggregated view)
@@ -175,5 +182,5 @@ export async function handleHtlcPayment(
     }
   }
 
-  return { newState, outputs };
+  return { newState, outputs, mempoolOps };
 }
