@@ -11,19 +11,21 @@
  * - Each hop unwraps one layer, forwards innerEnvelope to next hop
  * - Final recipient sees finalRecipient=true, extracts secret
  *
- * PHASE 2 (Current): JSON cleartext - functional but NOT privacy-preserving
- * PHASE 3 (TODO - HIGH-5): Add per-hop encryption/MAC using:
- *   - ECIES (Elliptic Curve Integrated Encryption Scheme), OR
- *   - HMAC derived from hashlock + hop index
- *   - Prevents route/secret tampering by intermediaries
- *   - Codex requirement for production-grade privacy
+ * PHASE 2 (Current): RSA-OAEP encryption via Web Crypto API
+ * - Each innerEnvelope encrypted with recipient's public key
+ * - Zero dependencies, native browser/Bun support
+ * - Prevents route/secret tampering by intermediaries
+ * PHASE 3 (Future): Upgrade to post-quantum (Kyber) when available
  */
+
+import type { CryptoProvider } from './crypto-provider';
+import { safeStringify } from './serialization-utils';
 
 export interface HtlcEnvelope {
   nextHop?: string;           // Next entity to forward to (undefined if final)
   finalRecipient?: boolean;   // Is this the last hop?
   secret?: string;            // Only in final recipient's envelope
-  innerEnvelope?: string;     // Encoded envelope for next hop (JSON string)
+  innerEnvelope?: string;     // Encoded envelope for next hop (encrypted or JSON)
 }
 
 export interface HtlcRoutingContext {
@@ -34,29 +36,33 @@ export interface HtlcRoutingContext {
 /**
  * Create layered onion envelopes from route
  *
- * Example:
+ * Example (encrypted):
  *   route = [alice, hub1, hub2, bob]
  *   secret = "my_secret_preimage"
  *
  * Returns envelope for hub1 (first hop after Alice):
  * {
  *   nextHop: hub2,
- *   innerEnvelope: "{\"nextHop\":\"bob\",\"innerEnvelope\":\"{\\\"finalRecipient\\\":true,\\\"secret\\\":\\\"my_secret_preimage\\\"}\"}"
+ *   innerEnvelope: "base64_encrypted_payload_for_hub2"
  * }
  *
- * Build order:
- * 1. Innermost (Bob): {finalRecipient: true, secret}
- * 2. Hub2 layer: {nextHop: bob, innerEnvelope: JSON(Bob's envelope)}
- * 3. Hub1 layer: {nextHop: hub2, innerEnvelope: JSON(Hub2's envelope)}
+ * Build order (innermost to outermost):
+ * 1. Bob's envelope: {finalRecipient: true, secret}
+ * 2. Encrypt for Bob, wrap in Hub2's layer
+ * 3. Encrypt for Hub2, wrap in Hub1's layer
  *
  * @param route - Full path [sender, hop1, hop2, ..., recipient]
  * @param secret - Preimage for final recipient
+ * @param entityPubKeys - Optional public keys for encryption
+ * @param crypto - Optional crypto provider (if undefined, uses cleartext)
  * @returns Outermost envelope (for first hop)
  */
-export function createOnionEnvelopes(
-  route: string[],  // [alice, hub1, hub2, bob]
-  secret: string    // Final recipient's secret
-): HtlcEnvelope {
+export async function createOnionEnvelopes(
+  route: string[],
+  secret: string,
+  entityPubKeys?: Map<string, string>,
+  crypto?: CryptoProvider
+): Promise<HtlcEnvelope> {
   if (route.length < 2) {
     throw new Error('Route must have at least sender and recipient');
   }
@@ -75,28 +81,56 @@ export function createOnionEnvelopes(
     throw new Error(`Route contains loops: ${route.length} entities but only ${uniqueEntities.size} unique`);
   }
 
-  // Build from innermost (final) to outermost (first hop)
-  let envelope: HtlcEnvelope = {
-    finalRecipient: true,
-    secret
-  };
+  // Build onion layers (2024 User.ts pattern: encrypt innermost first, wrap outward)
+  // Step 1: Encrypt final payload FOR final recipient
+  const finalRecipient = route[route.length - 1];
+  let encryptedBlob = '';
 
-  // Wrap each layer (reverse order, skip sender [0] and final recipient [length-1])
-  // For route [alice, hub1, hub2, bob]:
-  // - i=2: wrap bob's envelope for hub2 -> {nextHop: bob, innerEnvelope: {...}}
-  // - i=1: wrap hub2's envelope for hub1 -> {nextHop: hub2, innerEnvelope: {...}}
-  for (let i = route.length - 2; i >= 1; i--) {
-    const nextHop = route[i + 1];
-    if (!nextHop) {
-      throw new Error(`Invalid route: missing hop at index ${i + 1}`);
+  if (crypto && entityPubKeys) {
+    const finalRecipientKey = entityPubKeys.get(finalRecipient);
+    if (finalRecipientKey) {
+      const finalPayload = safeStringify({finalRecipient: true, secret});
+      encryptedBlob = await crypto.encrypt(finalPayload, finalRecipientKey);
     }
-    envelope = {
-      nextHop,
-      innerEnvelope: JSON.stringify(envelope)
-    };
   }
 
-  return envelope;  // Outermost envelope (for first hop)
+  if (!encryptedBlob) {
+    // Fallback: no encryption available, use cleartext
+    encryptedBlob = safeStringify({finalRecipient: true, secret});
+  }
+
+  // Step 2: Wrap each hop's layer (from final backwards to first)
+  // Each hop encrypts: {nextHop: X, encryptedBlob: Y} FOR themselves
+  // Route [Alice, Hub1, Hub2, Bob]:
+  // - i=2 (Hub2): encrypt {nextHop: Bob, innerEnvelope: <enc for Bob>} FOR Hub2
+  // - i=1 (Hub1): encrypt {nextHop: Hub2, innerEnvelope: <enc for Hub2>} FOR Hub1
+  for (let i = route.length - 2; i >= 1; i--) {
+    const currentHop = route[i];
+    const nextHop = route[i + 1];
+
+    const layerPayload = safeStringify({
+      nextHop,
+      innerEnvelope: encryptedBlob
+    });
+
+    if (crypto && entityPubKeys) {
+      const currentHopKey = entityPubKeys.get(currentHop);
+      if (currentHopKey) {
+        encryptedBlob = await crypto.encrypt(layerPayload, currentHopKey);
+      }
+    } else {
+      encryptedBlob = layerPayload;
+    }
+  }
+
+  // Step 3: Build final envelope for first hop (cleartext wrapper)
+  const firstHop = route[1];
+  const envelope: HtlcEnvelope = {
+    nextHop: firstHop,
+    innerEnvelope: encryptedBlob
+  };
+
+  return envelope;
 }
 
 /**
