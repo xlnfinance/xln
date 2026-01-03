@@ -1820,36 +1820,30 @@ if (import.meta.main) {
   console.log(`📊 Total frames: ${env.history?.length || 0}`);
   console.log('🎉 RJEA event consolidation verified - AccountSettled events working!\n');
 
-  // Dump JSON for deep inspection - FULL Env structure
+  // Dump full Env to JSON
   const fs = await import('fs');
 
-  console.log('💾 Dumping full runtime state (Env) for analysis...');
+  console.log('💾 Dumping full runtime (Env) to JSON...');
 
-  // Simple JSON stringify with circular ref handling
+  // Handle circular refs with WeakSet
   const seen = new WeakSet();
-  const envJson = JSON.stringify(env, (key, value) => {
-    // Handle Maps
-    if (value instanceof Map) {
-      return Array.from(value.entries());
-    }
-    // Handle circular refs
+  const envJson = JSON.stringify(env, function(key, value) {
+    if (value instanceof Map) return Array.from(value.entries());
+    if (typeof value === 'bigint') return value.toString();
+    if (typeof value === 'function') return undefined;
+
+    // Detect cycles
     if (typeof value === 'object' && value !== null) {
       if (seen.has(value)) return '[Circular]';
       seen.add(value);
     }
-    // Handle BigInt
-    if (typeof value === 'bigint') {
-      return `BigInt(${value})`;
-    }
-    // Skip functions
-    if (typeof value === 'function') {
-      return '[Function]';
-    }
+
     return value;
   }, 2);
 
   fs.writeFileSync('/tmp/lock-ahb-runtime.json', envJson);
-  console.log('  ✅ /tmp/lock-ahb-runtime.json (full Env: eReplicas, jReplicas, inputs, history)\n');
+  const sizeMB = (envJson.length / 1024 / 1024).toFixed(1);
+  console.log(`  ✅ /tmp/lock-ahb-runtime.json (${sizeMB}MB full Env dump)\n`);
 
   process.exit(0);
 }
