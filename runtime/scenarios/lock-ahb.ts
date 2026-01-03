@@ -1820,20 +1820,36 @@ if (import.meta.main) {
   console.log(`📊 Total frames: ${env.history?.length || 0}`);
   console.log('🎉 RJEA event consolidation verified - AccountSettled events working!\n');
 
-  // Dump JSON for deep inspection
-  const { safeStringify } = await import('../serialization-utils');
+  // Dump JSON for deep inspection - FULL Env structure
   const fs = await import('fs');
 
-  console.log('💾 Dumping JSON state for analysis...');
-  fs.writeFileSync('/tmp/lock-ahb-frames.json', safeStringify(env.history, null, 2));
-  fs.writeFileSync('/tmp/lock-ahb-final.json', safeStringify({
-    eReplicas: Array.from(env.eReplicas.entries()),
-    jReplicas: Array.from(env.jReplicas?.entries() || []),
-    height: env.height,
-    timestamp: env.timestamp
-  }, null, 2));
-  console.log('  ✅ /tmp/lock-ahb-frames.json (all frames)');
-  console.log('  ✅ /tmp/lock-ahb-final.json (final state)\n');
+  console.log('💾 Dumping full runtime state (Env) for analysis...');
+
+  // Simple JSON stringify with circular ref handling
+  const seen = new WeakSet();
+  const envJson = JSON.stringify(env, (key, value) => {
+    // Handle Maps
+    if (value instanceof Map) {
+      return Array.from(value.entries());
+    }
+    // Handle circular refs
+    if (typeof value === 'object' && value !== null) {
+      if (seen.has(value)) return '[Circular]';
+      seen.add(value);
+    }
+    // Handle BigInt
+    if (typeof value === 'bigint') {
+      return `BigInt(${value})`;
+    }
+    // Skip functions
+    if (typeof value === 'function') {
+      return '[Function]';
+    }
+    return value;
+  }, 2);
+
+  fs.writeFileSync('/tmp/lock-ahb-runtime.json', envJson);
+  console.log('  ✅ /tmp/lock-ahb-runtime.json (full Env: eReplicas, jReplicas, inputs, history)\n');
 
   process.exit(0);
 }
