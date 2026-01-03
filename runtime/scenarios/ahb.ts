@@ -1641,20 +1641,25 @@ if (import.meta.main) {
   console.log(`📊 Total frames: ${env.history?.length || 0}`);
   console.log('🎉 RJEA event consolidation verified - AccountSettled events working!\n');
 
-  // Dump JSON for deep inspection
-  const { safeStringify } = await import('../serialization-utils');
+  // Dump JSON for deep inspection - FULL Env structure
   const fs = await import('fs');
 
-  console.log('💾 Dumping JSON state for analysis...');
-  fs.writeFileSync('/tmp/ahb-frames.json', safeStringify(env.history, null, 2));
-  fs.writeFileSync('/tmp/ahb-final.json', safeStringify({
-    eReplicas: Array.from(env.eReplicas.entries()),
-    jReplicas: Array.from(env.jReplicas?.entries() || []),
-    height: env.height,
-    timestamp: env.timestamp
-  }, null, 2));
-  console.log('  ✅ /tmp/ahb-frames.json (all frames)');
-  console.log('  ✅ /tmp/ahb-final.json (final state)\n');
+  console.log('💾 Dumping full runtime state (Env) for analysis...');
+
+  const seen = new WeakSet();
+  const envJson = JSON.stringify(env, (key, value) => {
+    if (value instanceof Map) return Array.from(value.entries());
+    if (typeof value === 'object' && value !== null) {
+      if (seen.has(value)) return '[Circular]';
+      seen.add(value);
+    }
+    if (typeof value === 'bigint') return `BigInt(${value})`;
+    if (typeof value === 'function') return '[Function]';
+    return value;
+  }, 2);
+
+  fs.writeFileSync('/tmp/ahb-runtime.json', envJson);
+  console.log('  ✅ /tmp/ahb-runtime.json (full Env: eReplicas, jReplicas, inputs, history)\n');
 
   process.exit(0);
 }
