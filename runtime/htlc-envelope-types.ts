@@ -84,6 +84,9 @@ export async function createOnionEnvelopes(
   // Build onion layers (2024 User.ts pattern: encrypt innermost first, wrap outward)
   // Step 1: Encrypt final payload FOR final recipient
   const finalRecipient = route[route.length - 1];
+  if (!finalRecipient) {
+    throw new Error('Route must have at least one recipient');
+  }
   let encryptedBlob = '';
 
   if (crypto && entityPubKeys) {
@@ -108,6 +111,10 @@ export async function createOnionEnvelopes(
     const currentHop = route[i];
     const nextHop = route[i + 1];
 
+    if (!currentHop || !nextHop) {
+      throw new Error(`Invalid route segment at index ${i}`);
+    }
+
     const layerPayload = safeStringify({
       nextHop,
       innerEnvelope: encryptedBlob
@@ -125,6 +132,9 @@ export async function createOnionEnvelopes(
 
   // Step 3: Build final envelope for first hop (cleartext wrapper)
   const firstHop = route[1];
+  if (!firstHop) {
+    throw new Error('Route must have at least one hop');
+  }
   const envelope: HtlcEnvelope = {
     nextHop: firstHop,
     innerEnvelope: encryptedBlob
