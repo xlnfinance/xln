@@ -1167,6 +1167,9 @@ export interface Env {
   // Scenario mode: deterministic time control (scenarios set env.timestamp manually)
   scenarioMode?: boolean; // When true, runtime doesn't auto-update timestamp
 
+  // Frame stepping: stop at specific frame for debugging
+  stopAtFrame?: number; // When set, process() stops at this frame and dumps state
+
   // Frame display duration hint (for time-travel visualization)
   frameDisplayMs?: number; // How long to display this frame (default: 100ms)
 
