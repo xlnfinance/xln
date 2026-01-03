@@ -1789,7 +1789,12 @@ export async function ahb(env: Env): Promise<void> {
     console.log('\n🔍 FINAL VERIFICATION: All bilateral accounts...');
     assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'FINAL - Alice-Hub');
     assertBilateralSync(env, hub.id, bob.id, USDC_TOKEN_ID, 'FINAL - Hub-Bob');
-    dumpSystemState(env, 'FINAL STATE (After Rebalancing)', true);
+    // Dump both ASCII (human-readable) and JSON (machine-queryable)
+    console.log('\n' + '═'.repeat(80));
+    console.log('📊 FINAL RUNTIME STATE (ASCII - Human Readable)');
+    console.log('═'.repeat(80));
+    console.log(formatRuntime(env, { maxAccounts: 10, maxLocks: 20, showMempool: false }));
+    console.log('═'.repeat(80) + '\n');
 
     console.log('\n=====================================');
     console.log('✅ AHB Demo Complete with Rebalancing!');

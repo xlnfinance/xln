@@ -1043,9 +1043,12 @@ if (import.meta.main) {
     console.log('✅ PHASE 3 COMPLETE!');
 
     console.log('✅ ALL SWAP PHASES COMPLETE!');
+    // Give the event loop a tick to flush logs and settle before exit.
+    await new Promise(resolve => setTimeout(resolve, 10));
     process.exit(0);
   } catch (error) {
     console.error('\n❌ SWAP scenario FAILED:', error);
+    await new Promise(resolve => setTimeout(resolve, 10));
     process.exit(1);
   }
 }
