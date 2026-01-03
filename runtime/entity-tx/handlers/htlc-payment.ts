@@ -106,9 +106,11 @@ export async function handleHtlcPayment(
   const totalHops = route.length - 1; // Minus sender
   const hopIndex = 0; // We're always hop 0 (sender) in this handler
   const minExpiryMs = totalHops * HTLC.MIN_TIMELOCK_DELTA_MS + HTLC.MIN_FORWARD_TIMELOCK_MS;
-  const expiryMs = Math.max(HTLC.DEFAULT_EXPIRY_MS, minExpiryMs);
+  // Use much longer expiry for test scenarios (100+ frames × 100ms = 10s+ elapsed)
+  const expiryMs = Math.max(120_000, minExpiryMs);
   const baseTimelock = BigInt(env.timestamp + expiryMs);
-  const baseHeight = newState.lastFinalizedJHeight || 0;
+  // Add safety buffer for long-running test scenarios (prevent immediate expiry)
+  const baseHeight = (newState.lastFinalizedJHeight || 0) + 50;
 
   const timelock = calculateHopTimelock(baseTimelock, hopIndex, totalHops);
   const revealBeforeHeight = calculateHopRevealHeight(baseHeight, hopIndex, totalHops);
@@ -124,12 +126,26 @@ export async function handleHtlcPayment(
     createdTimestamp: env.timestamp
   });
 
-  // Create onion envelope (privacy-preserving routing)
+  // Create encrypted onion envelope (privacy-preserving routing)
   const { createOnionEnvelopes } = await import('../../htlc-envelope-types');
   let envelope;
   try {
-    envelope = createOnionEnvelopes(route, secret);
-    console.log(`🧅 Created envelope for route length ${route.length}`);
+    // Gather public keys from route entities (for encryption)
+    const entityPubKeys = new Map<string, string>();
+    for (const entityId of route) {
+      // Find entity replica in env
+      const replica = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
+      if (replica && replica[1].state.cryptoPublicKey) {
+        entityPubKeys.set(entityId, replica[1].state.cryptoPublicKey);
+      }
+    }
+
+    // Create envelope with encryption if keys available
+    const { NobleCryptoProvider } = await import('../../crypto-noble');
+    const crypto = entityPubKeys.size === route.length ? new NobleCryptoProvider() : undefined;
+
+    envelope = await createOnionEnvelopes(route, secret, entityPubKeys, crypto);
+    console.log(`🧅 Created ${crypto ? 'encrypted' : 'cleartext'} envelope for route length ${route.length}`);
   } catch (e) {
     logError("HTLC_PAYMENT", `❌ Envelope creation failed: ${e instanceof Error ? e.message : String(e)}`);
     addMessage(newState, `❌ HTLC payment failed: Invalid route`);

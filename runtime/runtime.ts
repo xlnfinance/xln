@@ -556,6 +556,13 @@ const applyRuntimeInput = async (
           },
         };
 
+        // 🔐 Generate crypto keys for HTLC envelope encryption
+        const { NobleCryptoProvider } = await import('./crypto-noble');
+        const crypto = new NobleCryptoProvider();
+        const { publicKey, privateKey } = await crypto.generateKeyPair();
+        replica.state.cryptoPublicKey = publicKey;
+        replica.state.cryptoPrivateKey = privateKey;
+
         // Only add position if it exists (exactOptionalPropertyTypes compliance)
         if (runtimeTx.data.position) {
           replica.position = {

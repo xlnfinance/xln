@@ -278,15 +278,25 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 // Store pending fee (only accrue on successful reveal, not on forward)
                 htlcRoute.pendingFee = feeAmount;
 
-                // Unwrap inner envelope with exception handling (MEDIUM-6)
+                // Decrypt and unwrap inner envelope with exception handling (MEDIUM-6)
                 const { unwrapEnvelope } = await import('../../htlc-envelope-types');
                 let innerEnvelope: any = undefined;
 
                 if (envelope.innerEnvelope) {
                   try {
-                    innerEnvelope = unwrapEnvelope(envelope.innerEnvelope);
+                    let envelopeData = envelope.innerEnvelope;
+
+                    // Decrypt if crypto keys are configured
+                    if (newState.cryptoPrivateKey) {
+                      const { NobleCryptoProvider } = await import('../../crypto-noble');
+                      const crypto = new NobleCryptoProvider();
+                      envelopeData = await crypto.decrypt(envelope.innerEnvelope, newState.cryptoPrivateKey);
+                    }
+
+                    // Unwrap decrypted envelope
+                    innerEnvelope = unwrapEnvelope(envelopeData);
                   } catch (e) {
-                    console.log(`❌ HTLC-GATE: ENVELOPE_UNWRAP_FAIL - ${e instanceof Error ? e.message : String(e)} [lockId=${lock.lockId.slice(0,16)}]`);
+                    console.log(`❌ HTLC-GATE: ENVELOPE_DECRYPT_FAIL - ${e instanceof Error ? e.message : String(e)} [lockId=${lock.lockId.slice(0,16)}]`);
                     continue;
                   }
                 }

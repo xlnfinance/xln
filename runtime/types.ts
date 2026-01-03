@@ -1051,6 +1051,10 @@ export interface EntityState {
     expiresAt: bigint;
   }>;
 
+  // 🔐 Cryptography - RSA-OAEP keys for HTLC envelope encryption
+  cryptoPublicKey?: string;  // Base64 RSA-OAEP public key (shareable)
+  cryptoPrivateKey?: string; // Base64 RSA-OAEP private key (secret, encrypt at rest in prod)
+
   // 🔒 HTLC Routing - Multi-hop payment tracking (like 2024 hashlockMap)
   htlcRoutes: Map<string, HtlcRoute>; // hashlock → routing context
   htlcFeesEarned: bigint; // Running total of HTLC routing fees collected
