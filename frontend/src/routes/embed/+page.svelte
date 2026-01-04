@@ -1,67 +1,45 @@
 <script lang="ts">
   /**
-   * Embed Route - Full XLN Graph 3D View (Embeddable)
+   * Embed Route - Full XLN Workspace (Embeddable)
    *
-   * Reuses Graph3DPanel.svelte (6159 lines) - don't reinvent
-   * Just hides nav bar for iframe embedding
+   * Uses full View.svelte in dev mode for complete functionality
+   * Supports scenario parameter for auto-loading
    */
 
-  import { page } from '$app/stores';
-  import { writable } from 'svelte/store';
-  import { onMount } from 'svelte';
-  import Graph3DPanel from '$lib/view/panels/Graph3DPanel.svelte';
+  import { browser } from '$app/environment';
+  import View from '$lib/view/View.svelte';
 
-  let scenario = 'phantom-grid';
-  const isolatedEnv = writable<any>(null);
-  const isolatedHistory = writable<any[]>([]);
+  // Parse URL params
+  let embedMode = true;
+  let scenarioId = '';
 
-  onMount(async () => {
-    scenario = $page.url.searchParams.get('s') || $page.url.searchParams.get('scenario') || 'phantom-grid';
-
-    // Load scenario into isolated env
-    const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
-    const XLN = await import(/* @vite-ignore */ runtimeUrl);
-
-    const env = XLN.createEmptyEnv();
-    isolatedEnv.set(env);
-
-    // Load scenario
-    const scenarioText = await fetch(`/scenarios/${scenario}.scenario.txt`).then(r => r.text());
-    const parsed = await XLN.parseScenario(scenarioText);
-
-    // Execute to populate env
-    const context = { entityMapping: new Map() };
-    await XLN.executeScenario(parsed, env, context);
-
-    isolatedHistory.set([...env.history]);
-  });
+  if (browser) {
+    const params = new URLSearchParams(window.location.search);
+    scenarioId = params.get('scenario') || params.get('s') || '';
+  }
 </script>
 
-<!-- Full Graph3DPanel with isolated env -->
-<div class="embed-page">
-  {#if $isolatedEnv}
-    <!-- OLD ROUTE DISABLED: <Graph3DPanel isolatedEnv={isolatedEnv} isolatedHistory={isolatedHistory} embedded={true} /> -->
-    <div class="disabled-message">
-      <h2>Embed route disabled</h2>
-      <p>Visit <a href="/app">/app</a> for the new isolated panel workspace.</p>
-    </div>
-  {:else}
-    <div class="loading">Loading scenario...</div>
-  {/if}
-</div>
+<svelte:head>
+  <title>xln - Embedded Workspace</title>
+</svelte:head>
+
+<!-- Full dev mode workspace for embeds -->
+<View
+  layout="default"
+  networkMode="simnet"
+  {embedMode}
+  {scenarioId}
+  userMode={false}
+/>
 
 <style>
-  .embed-page {
-    width: 100vw;
-    height: 100vh;
+  :global(body) {
     margin: 0;
-    padding: 0;
-    background: #000;
     overflow: hidden;
   }
 
-  /* Hide nav bar in embed mode */
-  :global(.nav-bar) {
+  /* Hide mode toggle in embed */
+  :global(.mode-toggle) {
     display: none !important;
   }
 </style>

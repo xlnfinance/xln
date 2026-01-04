@@ -4,7 +4,7 @@
   import { goto } from '$app/navigation';
   import LandingPage from '../lib/components/Landing/LandingPage.svelte';
   import AdminTopBar from '../lib/components/Layout/AdminTopBar.svelte';
-  import TimeMachine from '../lib/components/Layout/TimeMachine.svelte';
+  import TimeMachine from '../lib/view/core/TimeMachine.svelte';
   import EntityPanel from '../lib/components/Entity/EntityPanel.svelte';
   import TransactionHistoryIO from '../lib/components/IO/TransactionHistoryIO.svelte';
   import EntityFormation from '../lib/components/Formation/EntityFormation.svelte';
@@ -23,10 +23,30 @@
   import { initializeXLN, isLoading, error, replicas, xlnEnvironment, history } from '../lib/stores/xlnStore';
   import { tabOperations, tabs } from '../lib/stores/tabStore';
   import { settingsOperations } from '../lib/stores/settingsStore';
-  import { timeOperations, currentTimeIndex } from '../lib/stores/timeStore';
-  import { viewMode } from '../lib/stores/viewModeStore';
-  import { showingLandingPage } from '../lib/stores/uiStore';
-  import { get } from 'svelte/store';
+  import { timeOperations, currentTimeIndex, isLive, timeState } from '../lib/stores/timeStore';
+  import { appState, appStateOperations } from '../lib/stores/appStateStore';
+  import { get, writable } from 'svelte/store';
+
+  // Create writable wrappers for TimeMachine (it needs Writable, not Readable)
+  const timeIndexWritable = writable(-1);
+  const isLiveWritable = writable(true);
+
+  // Sync derived → writable
+  $: timeIndexWritable.set($currentTimeIndex);
+  $: isLiveWritable.set($isLive);
+
+  // Sync writable → time operations
+  timeIndexWritable.subscribe(val => {
+    if (val !== $currentTimeIndex) {
+      timeOperations.goToTimeIndex(val);
+    }
+  });
+
+  isLiveWritable.subscribe(val => {
+    if (val && !$isLive) {
+      timeOperations.goToLive();
+    }
+  });
 
   let activeTab = 'formation';
   let zenMode = false; // Zen mode: hide UI chrome
@@ -35,7 +55,7 @@
 
   // Sync showLanding with store and toggle app-mode class
   $: {
-    showingLandingPage.set(showLanding);
+    appStateOperations.setLandingVisible(showLanding);
     if (browser) {
       if (showLanding) {
         document.documentElement.classList.remove('app-mode');
@@ -54,10 +74,10 @@
       localStorage.setItem('open', 'true');
       window.location.hash = ''; // Remove hash after processing
       showLanding = false;
-      showingLandingPage.set(false);
+      appStateOperations.setLandingVisible(false);
     } else {
       showLanding = localStorage.getItem('open') !== 'true';
-      showingLandingPage.set(showLanding);
+      appStateOperations.setLandingVisible(showLanding);
     }
   }
 
@@ -184,25 +204,25 @@
   {/if}
   <ErrorDisplay />
 
-  {#if $isLoading && $viewMode !== 'settings'}
+  {#if $isLoading && $appState.viewMode !== 'settings'}
     <div class="loading-container">
       <img src="/img/finis.png" alt="Loading" class="loading-spinner-img" />
     </div>
-  {:else if $error && $viewMode !== 'settings'}
+  {:else if $error && $appState.viewMode !== 'settings'}
     <div class="error-container">
       <div class="error-icon">❌</div>
       <div class="error-text">Failed to load XLN Environment</div>
       <div class="error-details">{$error}</div>
       <button class="retry-btn" on:click={() => initializeXLN()}> Retry </button>
-      <button class="settings-btn" on:click={() => viewMode.set('settings')}>
+      <button class="settings-btn" on:click={() => appStateOperations.setViewMode('settings')}>
         ⚙️ Open Settings
       </button>
     </div>
-  {:else if $viewMode === 'settings'}
+  {:else if $appState.viewMode === 'settings'}
     <!-- Settings always accessible, even during errors -->
     <SettingsView />
   {:else}
-    {#if $viewMode === 'home'}
+    {#if $appState.viewMode === 'home'}
       <!-- Home View: Whitepaper & Introduction -->
       <div class="home-container">
         <h1>xln</h1>
@@ -293,23 +313,23 @@
           <p>Click "Graph 3D" to explore the network, or "Panels" to manage entities directly. Use the time machine to replay any state transition.</p>
         </div>
       </div>
-    {:else if $viewMode === 'docs'}
+    {:else if $appState.viewMode === 'docs'}
       <!-- Docs View: Documentation -->
       <DocsView />
-    {:else if $viewMode === 'brainvault'}
+    {:else if $appState.viewMode === 'brainvault'}
       <!-- BrainVault View: Wallet Generator -->
       <BrainVaultView />
-    {:else if $viewMode === 'graph3d'}
+    {:else if $appState.viewMode === 'graph3d'}
       <!-- Graph View Mode: DISABLED - Use /view route instead -->
       <div class="disabled-message">
         <h2>Graph3D has moved to /view</h2>
         <p>Visit <a href="/view">/view</a> for the new isolated panel workspace.</p>
       </div>
       <!-- <Graph3DPanel {zenMode} {hideButton} {toggleZenMode} /> -->
-    {:else if $viewMode === 'terminal'}
+    {:else if $appState.viewMode === 'terminal'}
       <!-- Terminal View: Command Interface -->
       <TerminalView />
-    {:else if $viewMode === 'panels'}
+    {:else if $appState.viewMode === 'panels'}
       <!-- Panels Mode: Show Entity Panels -->
       <div class="main-content">
         <!-- Entity Panels Container -->
@@ -396,8 +416,13 @@
   {/if}
 
   <!-- Time Machine (fixed at viewport bottom) -->
-  {#if !zenMode && $viewMode !== 'home' && $viewMode !== 'docs' && $viewMode !== 'terminal' && $viewMode !== 'brainvault'}
-    <TimeMachine />
+  {#if !zenMode && $appState.viewMode !== 'home' && $appState.viewMode !== 'docs' && $appState.viewMode !== 'terminal' && $appState.viewMode !== 'brainvault'}
+    <TimeMachine
+      history={history}
+      timeIndex={timeIndexWritable}
+      isLive={isLiveWritable}
+      env={xlnEnvironment}
+    />
   {/if}
 </main>
 {/if}

@@ -1,16 +1,28 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { type Writable } from 'svelte/store';
+  import { type Writable, type Readable } from 'svelte/store';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
   import { panelBridge } from '../utils/panelBridge';
   import { runtimes, activeRuntimeId, runtimeOperations } from '$lib/stores/runtimeStore';
   // BrowserVM accessed via window.__xlnBrowserVM (set by View.svelte)
 
-  // Props: REQUIRED isolated stores (no fallbacks)
-  export let history: Writable<any[]>;
-  export let timeIndex: Writable<number>;
-  export let isLive: Writable<boolean>;
-  export let env: Writable<any>; // For state export
+  // Props: Accept both Writable and Readable stores (for global vs isolated usage)
+  export let history: Writable<any[]> | Readable<any[]>;
+  export let timeIndex: Writable<number> | Readable<number>;
+  export let isLive: Writable<boolean> | Readable<boolean>;
+  export let env: Writable<any> | Readable<any>; // For state export
+
+  // Type guard to check if store is writable
+  function isWritable<T>(store: Writable<T> | Readable<T>): store is Writable<T> {
+    return 'set' in store;
+  }
+
+  // Safe set helper
+  function safeSet<T>(store: Writable<T> | Readable<T>, value: T) {
+    if (isWritable(store)) {
+      store.set(value);
+    }
+  }
 
   // Direct store usage - no fallback logic
   $: maxTimeIndex = Math.max(0, $history.length - 1);
@@ -43,31 +55,31 @@
   $: localTimeOperations = {
     goToTimeIndex: (index: number) => {
       const max = maxTimeIndex;
-      timeIndex.set(Math.max(0, Math.min(index, max)));
-      isLive.set(false);  // Exit live mode when scrubbing
+      safeSet(timeIndex, Math.max(0, Math.min(index, max)));
+      safeSet(isLive, false);  // Exit live mode when scrubbing
     },
     stepForward: () => {
       const current = $timeIndex;
       const max = maxTimeIndex;
       if (current < max) {
-        timeIndex.set(current + 1);
-        isLive.set(false);
+        safeSet(timeIndex, current + 1);
+        safeSet(isLive, false);
       }
     },
     stepBackward: () => {
       const current = $timeIndex;
       if (current > 0) {
-        timeIndex.set(current - 1);
+        safeSet(timeIndex, current - 1);
       }
-      isLive.set(false);
+      safeSet(isLive, false);
     },
     goToHistoryStart: () => {
-      timeIndex.set(0);
-      isLive.set(false);
+      safeSet(timeIndex, 0);
+      safeSet(isLive, false);
     },
     goToLive: () => {
-      timeIndex.set(-1);
-      isLive.set(true);
+      safeSet(timeIndex, -1);
+      safeSet(isLive, true);
     }
   };
 

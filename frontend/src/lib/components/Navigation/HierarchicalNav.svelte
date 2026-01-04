@@ -1,6 +1,6 @@
 <script lang="ts">
   import Breadcrumb from './Breadcrumb.svelte';
-  import { navSelection, navigationOperations } from '$lib/stores/navigationStore';
+  import { appState, appStateOperations } from '$lib/stores/appStateStore';
   import { runtimes, activeRuntimeId } from '$lib/stores/runtimeStore';
   import { activeVault, activeSigner, allVaults } from '$lib/stores/vaultStore';
 
@@ -15,8 +15,8 @@
 
   // Jurisdiction items (from active runtime)
   $: jurisdictionItems = (() => {
-    if (!$navSelection.runtime) return [];
-    const runtime = $runtimes.get($navSelection.runtime);
+    if (!$appState.navigation.runtime) return [];
+    const runtime = $runtimes.get($appState.navigation.runtime);
     if (!runtime?.env?.jReplicas) return [];
 
     return Array.from(runtime.env.jReplicas.keys()).map(jName => ({
@@ -37,8 +37,8 @@
 
   // Entity items (from active runtime, filtered by signer if selected)
   $: entityItems = (() => {
-    if (!$navSelection.runtime) return [];
-    const runtime = $runtimes.get($navSelection.runtime);
+    if (!$appState.navigation.runtime) return [];
+    const runtime = $runtimes.get($appState.navigation.runtime);
     if (!runtime?.env?.eReplicas) return [];
 
     const entities: Array<{id: string, label: string, count?: number}> = [];
@@ -48,7 +48,7 @@
       if (!entityId) continue;
 
       // Filter by selected signer
-      if ($navSelection.signer && !replicaKey.includes($navSelection.signer)) {
+      if ($appState.navigation.signer && !replicaKey.includes($appState.navigation.signer)) {
         continue;
       }
 
@@ -67,14 +67,14 @@
 
   // Account items (from selected entity)
   $: accountItems = (() => {
-    if (!$navSelection.runtime || !$navSelection.entity) return [];
-    const runtime = $runtimes.get($navSelection.runtime);
+    if (!$appState.navigation.runtime || !$appState.navigation.entity) return [];
+    const runtime = $runtimes.get($appState.navigation.runtime);
     if (!runtime?.env?.eReplicas) return [];
 
     // Find replica for this entity
     let targetReplica: any = null;
     for (const [replicaKey, replica] of runtime.env.eReplicas.entries()) {
-      if (replicaKey.startsWith($navSelection.entity + ':')) {
+      if (replicaKey.startsWith($appState.navigation.entity + ':')) {
         targetReplica = replica;
         break;
       }
@@ -95,37 +95,37 @@
 
   // Handlers
   function handleRuntimeSelect(id: string) {
-    navigationOperations.navigate('runtime', id);
+    appStateOperations.navigate('runtime', id);
     // Also update activeRuntimeId for time machine
     activeRuntimeId.set(id);
   }
 
   function handleJurisdictionSelect(id: string) {
-    navigationOperations.navigate('jurisdiction', id);
+    appStateOperations.navigate('jurisdiction', id);
   }
 
   function handleSignerSelect(id: string) {
-    navigationOperations.navigate('signer', id);
+    appStateOperations.navigate('signer', id);
   }
 
   function handleEntitySelect(id: string) {
-    navigationOperations.navigate('entity', id);
+    appStateOperations.navigate('entity', id);
   }
 
   function handleAccountSelect(id: string) {
-    navigationOperations.navigate('account', id);
+    appStateOperations.navigate('account', id);
   }
 
   // Auto-select signer when vault becomes active
-  $: if ($activeSigner && !$navSelection.signer) {
+  $: if ($activeSigner && !$appState.navigation.signer) {
     console.log('[HierarchicalNav] Auto-selecting signer:', $activeSigner.address.slice(0, 10));
-    navigationOperations.navigate('signer', $activeSigner.address);
+    appStateOperations.navigate('signer', $activeSigner.address);
   }
 
   // Auto-select entity when signer has one
-  $: if ($activeSigner?.entityId && !$navSelection.entity) {
+  $: if ($activeSigner?.entityId && !$appState.navigation.entity) {
     console.log('[HierarchicalNav] Auto-selecting entity:', $activeSigner.entityId.slice(0, 10));
-    navigationOperations.navigate('entity', $activeSigner.entityId);
+    appStateOperations.navigate('entity', $activeSigner.entityId);
   }
 
   // New actions
@@ -146,7 +146,7 @@
   <Breadcrumb
     label="Runtime"
     items={runtimeItems}
-    selected={$navSelection.runtime}
+    selected={$appState.navigation.runtime}
     onSelect={handleRuntimeSelect}
     onNew={createRuntime}
   />
@@ -154,16 +154,16 @@
   <Breadcrumb
     label="Jurisdiction"
     items={jurisdictionItems}
-    selected={$navSelection.jurisdiction}
+    selected={$appState.navigation.jurisdiction}
     onSelect={handleJurisdictionSelect}
     onNew={createJurisdiction}
-    disabled={!$navSelection.runtime || jurisdictionItems.length === 0}
+    disabled={!$appState.navigation.runtime || jurisdictionItems.length === 0}
   />
 
   <Breadcrumb
     label="Signer"
     items={signerItems}
-    selected={$navSelection.signer}
+    selected={$appState.navigation.signer}
     onSelect={handleSignerSelect}
     onNew={null}
     disabled={signerItems.length === 0}
@@ -172,19 +172,19 @@
   <Breadcrumb
     label="Entity"
     items={entityItems}
-    selected={$navSelection.entity}
+    selected={$appState.navigation.entity}
     onSelect={handleEntitySelect}
     onNew={createEntity}
-    disabled={!$navSelection.runtime || entityItems.length === 0}
+    disabled={!$appState.navigation.runtime || entityItems.length === 0}
   />
 
   <Breadcrumb
     label="Account"
     items={accountItems}
-    selected={$navSelection.account}
+    selected={$appState.navigation.account}
     onSelect={handleAccountSelect}
     onNew={null}
-    disabled={!$navSelection.entity || accountItems.length === 0}
+    disabled={!$appState.navigation.entity || accountItems.length === 0}
   />
 </nav>
 

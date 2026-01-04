@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { viewMode, viewModeOperations, type ViewMode } from '../../stores/viewModeStore';
+  import { appState, appStateOperations, type ViewMode } from '../../stores/appStateStore';
   import { translations$ } from '$lib/i18n';
-  
+
   $: t = $translations$;
 
   // Dynamic tabs with i18n - keys map to nav.* translations
@@ -15,11 +15,11 @@
     { mode: 'terminal', icon: '💻', labelKey: 'nav.terminal', titleKey: 'nav.terminal' }
   ];
 
-  $: activeView = $viewMode;
+  $: activeView = $appState.viewMode;
 
   function handleChangeView(mode: ViewMode) {
     if (activeView !== mode) {
-      viewModeOperations.set(mode);
+      appStateOperations.setViewMode(mode);
     }
   }
 </script>
