@@ -73,22 +73,41 @@
     }
   }
 
+  // Safe localStorage helpers
+  function safeGetItem(key: string): string | null {
+    try {
+      return localStorage.getItem(key);
+    } catch (error) {
+      console.warn(`localStorage.getItem("${key}") failed:`, error);
+      return null;
+    }
+  }
+
+  function safeSetItem(key: string, value: string): void {
+    try {
+      localStorage.setItem(key, value);
+    } catch (error) {
+      console.warn(`localStorage.setItem("${key}") failed:`, error);
+    }
+  }
+
   // Check if user has unlocked - sync BEFORE mount for SSR hydration
   if (browser) {
     // Check for #MML invite hash FIRST (takes precedence over localStorage)
     if (window.location.hash === '#MML') {
-      localStorage.setItem('open', 'true');
+      safeSetItem('open', 'true');
       window.location.hash = ''; // Remove hash after processing
       showLanding = false;
       appStateOperations.setLandingVisible(false);
     } else {
-      showLanding = localStorage.getItem('open') !== 'true';
+      showLanding = safeGetItem('open') !== 'true';
       appStateOperations.setLandingVisible(showLanding);
     }
   }
 
   function handleUnlock() {
     showLanding = false;
+    safeSetItem('open', 'true');
     if (browser) {
       goto('/app');
     }

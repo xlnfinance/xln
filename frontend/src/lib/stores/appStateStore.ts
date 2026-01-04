@@ -34,25 +34,45 @@ export interface AppState {
   navigation: NavigationSelection;
 }
 
+// Safe localStorage helpers (prevent throws in private/quota-restricted contexts)
+function safeGetItem(key: string): string | null {
+  if (!browser) return null;
+  try {
+    return localStorage.getItem(key);
+  } catch (error) {
+    console.warn(`localStorage.getItem("${key}") failed:`, error);
+    return null;
+  }
+}
+
+function safeSetItem(key: string, value: string): void {
+  if (!browser) return;
+  try {
+    localStorage.setItem(key, value);
+  } catch (error) {
+    console.warn(`localStorage.setItem("${key}") failed (quota/private mode):`, error);
+  }
+}
+
 // Load persisted state
 function loadState(): AppState {
-  if (!browser) {
-    return {
-      mode: 'user',
-      landingVisible: true,
-      viewMode: 'home',
-      navigation: {
-        runtime: 'local',
-        jurisdiction: null,
-        signer: null,
-        entity: null,
-        account: null
-      }
-    };
-  }
+  const defaultState: AppState = {
+    mode: 'user',
+    landingVisible: true,
+    viewMode: 'home',
+    navigation: {
+      runtime: 'local',
+      jurisdiction: null,
+      signer: null,
+      entity: null,
+      account: null
+    }
+  };
 
-  const savedMode = localStorage.getItem('xln-app-mode');
-  const savedViewMode = localStorage.getItem('xln-view-mode');
+  if (!browser) return defaultState;
+
+  const savedMode = safeGetItem('xln-app-mode');
+  const savedViewMode = safeGetItem('xln-view-mode');
 
   return {
     mode: (savedMode === 'dev' || savedMode === 'user') ? savedMode : 'user',
@@ -72,10 +92,8 @@ function loadState(): AppState {
 
 // Save state to localStorage
 function saveState(state: AppState) {
-  if (browser) {
-    localStorage.setItem('xln-app-mode', state.mode);
-    localStorage.setItem('xln-view-mode', state.viewMode);
-  }
+  safeSetItem('xln-app-mode', state.mode);
+  safeSetItem('xln-view-mode', state.viewMode);
 }
 
 // Create store
