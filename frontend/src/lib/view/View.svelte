@@ -27,6 +27,7 @@
   import EntityPanelWrapper from './panels/wrappers/EntityPanelWrapper.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
   import Tutorial from './components/Tutorial.svelte';
+  import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
   import { panelBridge } from './utils/panelBridge';
   import 'dockview/dist/styles/dockview.css';
 
@@ -705,6 +706,11 @@
 </script>
 
 <div class="view-wrapper" class:embed-mode={embedMode}>
+  <!-- Hierarchical Navigation - Visible in dev mode only -->
+  {#if !embedMode && !userMode}
+    <HierarchicalNav />
+  {/if}
+
   <div class="view-container" class:with-timemachine={!collapsed} bind:this={container}></div>
 
   <!-- TimeMachine - Visible in dev mode only (user mode = simple, no time travel) -->
@@ -759,6 +765,11 @@
     background: #1e1e1e;
     display: flex;
     flex-direction: column;
+  }
+
+  /* Account for HierarchicalNav height (48px) in dev mode */
+  .view-wrapper:not(.embed-mode) .view-container {
+    height: calc(100vh - 56px - 48px); /* Topbar + HierarchicalNav */
   }
 
   .view-container {
