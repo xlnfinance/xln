@@ -1621,6 +1621,19 @@ export async function ahb(env: Env): Promise<void> {
   console.log('\n\n⚔️⚔️⚔️ PHASE 6: SIMULTANEOUS BIDIRECTIONAL PAYMENTS ⚔️⚔️⚔️\n');
   console.log('Testing consensus rollback when both sides propose at same tick\n');
 
+  // CRITICAL: Ensure Hub has capacity to send (exhausted after Phase 5 rebalancing)
+  console.log('💳 Setting up bidirectional capacity for Phase 6...');
+  await process(env, [{
+    entityId: hub.id,
+    signerId: hub.signer,
+    entityTxs: [{
+      type: 'extendCredit',
+      data: { counterpartyEntityId: alice.id, tokenId: USDC_TOKEN_ID, amount: usd(100_000) }
+    }]
+  }]);
+  await process(env);
+  console.log('   ✅ Hub→Alice capacity restored\n');
+
   const aliceToHub = usd(10_000);
   const hubToAlice = usd(5_000);
 

@@ -801,12 +801,15 @@ export const applyEntityFrame = async (
 
       // Check all accounts to see which one has new mempool items
       // Note: accountKey is counterparty ID (e.g., "alice", "bob")
+      console.log(`🔍 DIRECT-PAYMENT-SCAN: Entity ${currentEntityState.entityId.slice(-4)} has ${currentEntityState.accounts.size} accounts`);
       for (const [counterpartyId, accountMachine] of currentEntityState.accounts) {
         const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
-        console.log(`🔍 Checking account ${counterpartyId.slice(-10)}: mempool=${accountMachine.mempool.length}, isLeft=${isLeft}, pendingFrame=${!!accountMachine.pendingFrame}`);
-        if (accountMachine.mempool.length > 0) {
+        console.log(`🔍 Checking account ${counterpartyId.slice(-10)}: mempool=${accountMachine.mempool.length}, isLeft=${isLeft}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map((t: any) => t.type).join(',')}]`);
+        if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
           proposableAccounts.add(counterpartyId);
           console.log(`🔄 ✅ Added ${counterpartyId.slice(-10)} to proposableAccounts (has ${accountMachine.mempool.length} mempool items)`);
+        } else if (accountMachine.pendingFrame) {
+          console.log(`🔄 ⏸️  SKIP: ${counterpartyId.slice(-10)} has pendingFrame h${accountMachine.pendingFrame.height} - will propose after ACK`);
         }
       }
     } else if (entityTx.type === 'openAccount' && entityTx.data) {
@@ -933,6 +936,8 @@ export const applyEntityFrame = async (
         console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: Full mempool details:`, accountMachine.mempool.map((tx, i) => `${i}:${tx.type}`).join(', '));
         const proposal = await proposeAccountFrame(env, accountMachine, false, currentEntityState.lastFinalizedJHeight);
 
+        console.log(`📤 PROPOSE-RESULT for ${cpId.slice(-4)}: success=${proposal.success}, hasAccountInput=${!!proposal.accountInput}, error=${proposal.error || 'none'}`);
+
         if (proposal.success && proposal.accountInput) {
           // Get the proposer of the target entity from env
           let targetProposerId = 'alice'; // Default fallback
@@ -955,6 +960,8 @@ export const applyEntityFrame = async (
             }]
           };
           allOutputs.push(outputEntityInput);
+
+          console.log(`📮 ACCOUNT-FRAME-OUTPUT: frame ${proposal.accountInput.height} → Entity ${proposal.accountInput.toEntityId.slice(-4)} (${accountKey.slice(-8)} account)`);
 
           // Add events to entity messages with size limiting
           addMessages(currentEntityState, proposal.events);
