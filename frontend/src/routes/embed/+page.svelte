@@ -43,7 +43,7 @@
     <!-- OLD ROUTE DISABLED: <Graph3DPanel isolatedEnv={isolatedEnv} isolatedHistory={isolatedHistory} embedded={true} /> -->
     <div class="disabled-message">
       <h2>Embed route disabled</h2>
-      <p>Visit <a href="/view">/view</a> for the new isolated panel workspace.</p>
+      <p>Visit <a href="/app">/app</a> for the new isolated panel workspace.</p>
     </div>
   {:else}
     <div class="loading">Loading scenario...</div>

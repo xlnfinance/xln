@@ -34,6 +34,7 @@
   export let networkMode: 'simnet' | 'testnet' | 'mainnet' = 'simnet'; void networkMode;
   export let embedMode: boolean = false; // When true: hide panels, show only 3D + minimal controls
   export let scenarioId: string = ''; // Auto-run scenario on load (e.g. 'ahb', 'fed-chair')
+  export let userMode: boolean = false; // When true: hide network graph, show only active signer's entity
 
   let container: HTMLDivElement;
   let dockview: DockviewComponent;
@@ -163,21 +164,20 @@
       localTimeIndex.set(urlImport?.state.ui?.ti ?? -1);
       localIsLive.set(true);
 
-      // Auto-run scenario if scenarioId is provided (or default to AHB for testing)
-      const effectiveScenarioId = scenarioId || 'ahb'; // Default to AHB for /view route
-      if (effectiveScenarioId) {
-        console.log(`[View] 🎬 Autoplay: Running scenario "${effectiveScenarioId}"${scenarioId ? '' : ' (default)'}...`);
+      // Auto-run scenario if scenarioId is explicitly provided (no default for /app route)
+      if (scenarioId) {
+        console.log(`[View] 🎬 Autoplay: Running scenario "${scenarioId}"...`);
 
         // Supported scenarios (others show error)
         const supportedScenarios = ['ahb'];
 
-        if (!supportedScenarios.includes(effectiveScenarioId)) {
-          console.error(`[View] ❌ SCENARIO NOT IMPLEMENTED: "${effectiveScenarioId}"`);
+        if (!supportedScenarios.includes(scenarioId)) {
+          console.error(`[View] ❌ SCENARIO NOT IMPLEMENTED: "${scenarioId}"`);
           console.error(`[View] 📋 Available scenarios: ${supportedScenarios.join(', ')}`);
-          console.error(`[View] 💡 To add "${effectiveScenarioId}", implement it in View.svelte autoplay section`);
+          console.error(`[View] 💡 To add "${scenarioId}", implement it in View.svelte autoplay section`);
         }
 
-        if (effectiveScenarioId === 'ahb') {
+        if (scenarioId === 'ahb') {
           try {
             // CRITICAL: Clear old state BEFORE running (Architect panel pattern)
             console.log('[View] BEFORE clear: eReplicas =', env.eReplicas?.size || 0);
@@ -389,66 +389,85 @@
       }
     }
 
-    // Default layout: Graph3D (2/3) + Right sidebar (1/3) with ALL panels stacked
-    // Core panels are NON-CLOSEABLE (entity panels are closeable)
-    const graph3d = dockview.addPanel({
-      id: 'graph3d',
-      component: 'graph3d',
-      title: '🌐 Graph3D',
-      params: {
-        closeable: false, // Core panel - cannot close
-      },
-    });
+    // User Mode: Single EntityPanel only (skip network graph + dev panels)
+    // Dev Mode: Full layout with Graph3D + all panels
 
-    // Architect FIRST (leftmost tab) - create the right panel group
-    const architect = dockview.addPanel({
-      id: 'architect',
-      component: 'architect',
-      title: '🎬 Architect',
-      position: { direction: 'right', referencePanel: 'graph3d' },
-      params: {
-        closeable: false, // Core panel - cannot close
-      },
-    });
+    let firstPanel;
 
-    // Add remaining panels in order (they append to the tab group)
-    // ALL panels after Architect get inactive:true to prevent stealing focus
+    if (userMode) {
+      // User mode: Just show EntityPanel for active signer
+      // Will be populated after we find the active signer's entity
+      firstPanel = dockview.addPanel({
+        id: 'user-entity',
+        component: 'entity',
+        title: '💰 My Wallet',
+        params: {
+          closeable: false,
+          tab: null  // Will be set when we find active signer's entity
+        },
+      });
+    } else {
+      // Dev mode: Full network graph + panels (default layout)
+      const graph3d = dockview.addPanel({
+        id: 'graph3d',
+        component: 'graph3d',
+        title: '🌐 Graph3D',
+        params: {
+          closeable: false, // Core panel - cannot close
+        },
+      });
 
-    // Console REMOVED - now embedded in Settings panel as tab
-    // Depository REMOVED - JurisdictionPanel shows same data
+      // Architect FIRST (leftmost tab) - create the right panel group
+      const architect = dockview.addPanel({
+        id: 'architect',
+        component: 'architect',
+        title: '🎬 Architect',
+        position: { direction: 'right', referencePanel: 'graph3d' },
+        params: {
+          closeable: false, // Core panel - cannot close
+        },
+      });
 
-    dockview.addPanel({
-      id: 'jurisdiction',
-      component: 'jurisdiction',
-      title: '🏛️ Jurisdiction',
-      position: { direction: 'within', referencePanel: 'architect' },
-      inactive: true,
-      params: {
-        closeable: false, // Core panel - cannot close
-      },
-    });
+      firstPanel = architect;
+    }
 
-    dockview.addPanel({
-      id: 'runtime-io',
-      component: 'runtime-io',
-      title: '🔄 Runtime I/O',
-      position: { direction: 'within', referencePanel: 'architect' },
-      inactive: true,
-      params: {
-        closeable: false, // Core panel - cannot close
-      },
-    });
+    // Add remaining panels (only in dev mode)
+    if (!userMode) {
+      // ALL panels after Architect get inactive:true to prevent stealing focus
 
-    dockview.addPanel({
-      id: 'settings',
-      component: 'settings',
-      title: '⚙️ Settings',
-      position: { direction: 'within', referencePanel: 'architect' },
-      inactive: true,
-      params: {
-        closeable: false, // Core panel - cannot close
-      },
-    });
+      dockview.addPanel({
+        id: 'jurisdiction',
+        component: 'jurisdiction',
+        title: '🏛️ Jurisdiction',
+        position: { direction: 'within', referencePanel: 'architect' },
+        inactive: true,
+        params: {
+          closeable: false, // Core panel - cannot close
+        },
+      });
+
+      dockview.addPanel({
+        id: 'runtime-io',
+        component: 'runtime-io',
+        title: '🔄 Runtime I/O',
+        position: { direction: 'within', referencePanel: 'architect' },
+        inactive: true,
+        params: {
+          closeable: false, // Core panel - cannot close
+        },
+      });
+
+      dockview.addPanel({
+        id: 'settings',
+        component: 'settings',
+        title: '⚙️ Settings',
+        position: { direction: 'within', referencePanel: 'architect' },
+        inactive: true,
+        params: {
+          closeable: false, // Core panel - cannot close
+        },
+      });
+    }
 
     // REMOVED PANELS (merged elsewhere):
     // - Insurance: now in EntityPanel after Reserves
@@ -479,16 +498,62 @@
     }
 
     // Set initial sizes based on mode
-    const graph3dApi = dockview.getPanel('graph3d');
-    if (graph3dApi) {
-      // Delay size adjustment for AVP compatibility
-      setTimeout(() => {
-        // In embed mode: start fullscreen (100%), user can toggle sidebar
-        // In normal mode: 70:30 split
-        const widthPercent = embedMode ? 1.0 : 0.70;
-        graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
-        console.log(`[View] ✅ Graph3D resized to ${widthPercent * 100}%${embedMode ? ' (embed mode)' : ''}`);
-      }, 100);
+    if (!userMode) {
+      const graph3dApi = dockview.getPanel('graph3d');
+      if (graph3dApi) {
+        // Delay size adjustment for AVP compatibility
+        setTimeout(() => {
+          // In embed mode: start fullscreen (100%), user can toggle sidebar
+          // In normal mode: 70:30 split
+          const widthPercent = embedMode ? 1.0 : 0.70;
+          graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
+          console.log(`[View] ✅ Graph3D resized to ${widthPercent * 100}%${embedMode ? ' (embed mode)' : ''}`);
+        }, 100);
+      }
+    }
+
+    // User mode: Auto-open active signer's EntityPanel (reactive)
+    if (userMode) {
+      // Subscribe to both activeSigner and env changes
+      const { activeSigner } = await import('$lib/stores/vaultStore');
+      const { get } = await import('svelte/store');
+
+      // Reactive: Update when either signer or env changes
+      const unsubSigner = activeSigner.subscribe(currentSigner => {
+        if (!currentSigner?.entityId) return;
+
+        const currentEnv = get(localEnvStore);
+        if (!currentEnv?.eReplicas) return;
+
+        // Find replica with correct key format: entityId:signerId
+        const replicaEntries: [string, any][] = Array.from(currentEnv.eReplicas.entries());
+        const replicaEntry = replicaEntries.find(([key]) =>
+          key.startsWith(currentSigner.entityId! + ':')
+        );
+
+        if (replicaEntry) {
+          const replicaKey: string = replicaEntry[0];
+          const [entityId, signerId] = replicaKey.split(':');
+
+          // Update user-entity panel
+          const userPanel = dockview.getPanel('user-entity');
+          if (userPanel && entityId && signerId) {
+            userPanel.api.updateParameters({
+              tab: {
+                id: 'user-wallet',
+                title: `${currentSigner.name || 'My Wallet'}`,
+                entityId,
+                signerId,
+                jurisdiction: 'browservm',
+                isActive: true
+              }
+            });
+            console.log(`[View] ✅ User mode: Opened entity ${entityId.slice(-4)}`);
+          }
+        }
+      });
+
+      onDestroy(() => unsubSigner());
     }
 
     // DISABLED: Dockview layout persistence (Svelte 5 incompatibility)

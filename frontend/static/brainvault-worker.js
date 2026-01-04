@@ -158,6 +158,40 @@ self.onmessage = async function(e) {
         });
         break;
 
+      case 'derive_batch':
+        // Batch mode: process multiple shards sequentially in this worker
+        // Reduces round-trip overhead (main ↔ worker messaging)
+        await initCrypto();
+        const { nameHashHex: nameHash, passphrase: pass, shardIndices } = data;
+        const batchResults = [];
+
+        for (const idx of shardIndices) {
+          const batchStart = performance.now();
+          const shardSalt = await createShardSalt(nameHash, idx);
+          const shardResult = await deriveShard(pass, shardSalt);
+
+          batchResults.push({
+            shardIndex: idx,
+            resultHex: bytesToHex(shardResult),
+            elapsedMs: performance.now() - batchStart
+          });
+
+          // Send progress for each shard in batch
+          self.postMessage({
+            type: 'shard_complete',
+            id,
+            data: batchResults[batchResults.length - 1]
+          });
+        }
+
+        // Signal batch completion
+        self.postMessage({
+          type: 'batch_complete',
+          id,
+          data: { count: batchResults.length }
+        });
+        break;
+
       default:
         throw new Error(`Unknown message type: ${type}`);
     }

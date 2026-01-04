@@ -270,15 +270,19 @@
     }
   })();
 
-  // Derivation state
-  let workers: Worker[] = [];
-  let workerCount = 1;
-  let maxWorkers = typeof navigator !== 'undefined' ? Math.min(navigator.hardwareConcurrency || 4, 8) : 4;
-  let targetWorkerCount = Math.ceil(maxWorkers / 2); // Start gentle at 50% CPU
-
   // Device memory detection (navigator.deviceMemory gives GB, default 8GB if unavailable)
   let deviceMemoryGB = typeof navigator !== 'undefined' ? ((navigator as any).deviceMemory || 8) : 8;
   let deviceMemoryMB = deviceMemoryGB * 1024;
+
+  // Derivation state
+  let workers: Worker[] = [];
+  let workerCount = 1;
+  // Allow user to configure beyond hardwareConcurrency (they'll find sweet spot)
+  const hardwareCores = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4;
+  // Generous limits - user can experiment (512GB machine can handle 100+ workers)
+  const memoryBasedMax = Math.floor(deviceMemoryGB * 1024 / 256); // 1 worker per 256MB
+  let maxWorkers = Math.max(hardwareCores * 4, 64); // At least 64, or 4x cores
+  let targetWorkerCount = hardwareCores; // Start at 1x cores
 
   // Reactive memory calculations - show TARGET for immediate feedback, not actual workerCount
   $: allocatedMemoryMB = targetWorkerCount * 256;
@@ -792,6 +796,8 @@
             estimatedShardTimeMs = data.estimatedShardTimeMs;
           } else if (type === 'shard_complete') {
             handleShardComplete(data.shardIndex, data.resultHex, data.elapsedMs);
+          } else if (type === 'batch_complete') {
+            handleBatchComplete(i); // Worker i finished batch, give it more work
           } else if (type === 'error') {
             console.error('Worker error:', data.message);
           }
@@ -827,15 +833,41 @@
 
   let nameHashHexGlobal = '';
   let nextShardToDispatch = 0;
+  const BATCH_SIZE = 8; // Shards per batch (user can adjust via settings later)
 
   function dispatchShards(nameHashHex: string) {
     nameHashHexGlobal = nameHashHex;
     nextShardToDispatch = 0;
 
-    // Dispatch one shard to each worker
+    // Dispatch initial batch to each worker
     for (let i = 0; i < workers.length && nextShardToDispatch < shardCount; i++) {
-      dispatchNextShard(workers[i]!);
+      dispatchBatchToWorker(workers[i]!);
     }
+  }
+
+  function dispatchBatchToWorker(worker: Worker) {
+    if (nextShardToDispatch >= shardCount) return;
+
+    // Calculate batch: min(BATCH_SIZE, remaining shards)
+    const remaining = shardCount - nextShardToDispatch;
+    const batchSize = Math.min(BATCH_SIZE, remaining);
+    const shardIndices: number[] = [];
+
+    for (let i = 0; i < batchSize; i++) {
+      shardIndices.push(nextShardToDispatch++);
+      shardStatus[shardIndices[i]!] = 'computing';
+    }
+    shardStatus = shardStatus; // Trigger reactivity
+
+    worker.postMessage({
+      type: 'derive_batch',
+      id: shardIndices[0], // Use first shard index as message ID
+      data: {
+        nameHashHex: nameHashHexGlobal,
+        passphrase,
+        shardIndices,
+      }
+    });
   }
 
   function dispatchNextShard(worker: Worker) {
@@ -872,15 +904,19 @@
     // Save resume token to localStorage
     saveResumeToken();
 
-    // Find the worker that completed this shard and give it more work
-    const workerIndex = workers.findIndex(w => w !== null);
-    if (workerIndex >= 0 && nextShardToDispatch < shardCount) {
-      dispatchNextShard(workers[workerIndex]!);
-    }
+    // Note: Don't dispatch next work here - wait for batch_complete message
+    // This allows worker to finish entire batch before getting new work
 
     // Check if all done
     if (shardsCompleted >= shardCount) {
       await finalizeDeriv();
+    }
+  }
+
+  function handleBatchComplete(workerIndex: number) {
+    // Worker finished its batch, give it the next batch
+    if (workerIndex >= 0 && workerIndex < workers.length && nextShardToDispatch < shardCount) {
+      dispatchBatchToWorker(workers[workerIndex]!);
     }
   }
 
