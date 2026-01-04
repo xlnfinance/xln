@@ -1687,24 +1687,49 @@ export async function ahb(env: Env): Promise<void> {
   // Process bilateral consensus (tiebreaker + rollback + re-proposal)
   console.log('\n🔄 Processing bilateral consensus (may take multiple rounds)...');
 
+  // Track all consensus events
+  const consensusEvents: string[] = [];
+  let rollbackDetected = false;
+  let leftWinsDetected = false;
+
   // Run until both payments settle (max 20 rounds for safety)
   let rounds = 0;
   const maxRounds = 20;
   while (rounds < maxRounds) {
-    const beforeChange = ahDeltaBefore;
+    const beforeRound = env.history?.length || 0;
     await process(env);
     rounds++;
+
+    // Collect events from this round
+    const afterRound = env.history?.length || 0;
+    if (afterRound > beforeRound) {
+      const latestSnapshot = env.history![afterRound - 1];
+      const frameEvents = latestSnapshot?.events || [];
+      for (const evt of frameEvents) {
+        consensusEvents.push(evt);
+        if (evt.includes('ROLLBACK')) rollbackDetected = true;
+        if (evt.includes('LEFT-WINS')) leftWinsDetected = true;
+        console.log(`   📋 Event: ${evt}`);
+      }
+    }
 
     // Check if both payments committed (delta should reflect net change)
     const currentDelta = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const currentNet = currentDelta - ahDeltaBefore;
     const targetNet = -(aliceToHub - hubToAlice);
 
+    console.log(`   Round ${rounds}: delta=${currentDelta}, net=${currentNet}, target=${targetNet}`);
+
     if (currentNet === targetNet) {
       console.log(`   ✅ Both payments settled after ${rounds} rounds`);
       break;
     }
   }
+
+  console.log(`\n📊 Consensus flow summary:`);
+  console.log(`   - Rollback detected: ${rollbackDetected ? '✅' : '❌ MISSING'}`);
+  console.log(`   - LEFT-WINS detected: ${leftWinsDetected ? '✅' : '❌ MISSING'}`);
+  console.log(`   - Total consensus events: ${consensusEvents.length}`);
 
   if (rounds >= maxRounds) {
     console.warn(`   ⚠️ Hit max rounds (${maxRounds}), payments may still be pending`);

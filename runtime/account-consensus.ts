@@ -614,10 +614,15 @@ export async function handleAccountInput(
       if (isLeftEntity) {
         // We are LEFT - ignore their frame, keep ours (deterministic tiebreaker)
         console.log(`📤 LEFT-WINS: Ignoring right's frame ${receivedFrame.height}, waiting for them to accept ours`);
+
+        // EMIT EVENT: Track LEFT wins tiebreaker
+        events.push(`📤 LEFT-WINS: Ignored RIGHT's frame ${receivedFrame.height} (waiting for their ACK)`);
+
         // CRITICAL FIX: Even though we ignore their frame, check mempool and send update if we have new txs
         // This prevents j_event_claims from getting stuck when both sides propose simultaneously
         if (accountMachine.mempool.length > 0) {
           console.log(`📤 LEFT-WINS-BUT-HAS-MEMPOOL: ${accountMachine.mempool.length} txs waiting - notifying counterparty`);
+          events.push(`⚠️ LEFT has ${accountMachine.mempool.length} pending txs while waiting for RIGHT's ACK`);
           // Send a message with just mempool status so they know we have pending work
           // TODO: Determine if we should send frames or just signal
         }
@@ -627,11 +632,16 @@ export async function handleAccountInput(
         // We are RIGHT - rollback our frame, accept theirs
         if (accountMachine.rollbackCount === 0) {
           // First rollback - restore transactions to mempool before discarding frame
+          let restoredTxCount = 0;
           if (accountMachine.pendingFrame) {
-            console.log(`📥 RIGHT-ROLLBACK: Restoring ${accountMachine.pendingFrame.accountTxs.length} txs to mempool`);
+            restoredTxCount = accountMachine.pendingFrame.accountTxs.length;
+            console.log(`📥 RIGHT-ROLLBACK: Restoring ${restoredTxCount} txs to mempool`);
             // CRITICAL: Re-add transactions to mempool (Channel.ts pattern)
             accountMachine.mempool.unshift(...accountMachine.pendingFrame.accountTxs);
             console.log(`📥 Mempool now has ${accountMachine.mempool.length} txs after rollback restore`);
+
+            // EMIT EVENT: Track rollback for debugging
+            events.push(`🔄 ROLLBACK: Discarded our frame ${accountMachine.pendingFrame.height}, restored ${restoredTxCount} txs to mempool`);
           }
 
           accountMachine.sentTransitions = 0;
@@ -639,6 +649,10 @@ export async function handleAccountInput(
           delete accountMachine.clonedForValidation;
           accountMachine.rollbackCount++;
           console.log(`📥 RIGHT-ROLLBACK: Accepting left's frame (rollbacks: ${accountMachine.rollbackCount})`);
+
+          // EMIT EVENT: Track that we accepted LEFT's frame
+          events.push(`📥 Accepted LEFT's frame ${receivedFrame.height} (we are RIGHT, deterministic tiebreaker)`);
+
           // Continue to process their frame below
         } else {
           // Should never rollback twice
