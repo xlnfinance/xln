@@ -1,32 +1,19 @@
 <script>
   /**
-   * /view - XLN Panel Workspace
-   * Production route for embeddable dashboard
-   * Supports ?embed=1 for minimal UI mode
-   * Supports ?scenario=ahb for auto-loading AHB demo
+   * /view - Redirect to /app
+   * Kept for backward compatibility (tests, docs, internal links)
    */
-  import { browser } from '$app/environment';
-  import View from '$lib/view/View.svelte';
+  import { goto } from '$app/navigation';
+  import { onMount } from 'svelte';
 
-  // Parse URL params
-  let embedMode = false;
-  let scenarioId = '';
-  if (browser) {
+  onMount(() => {
+    // Preserve query params when redirecting
     const params = new URLSearchParams(window.location.search);
-    embedMode = params.get('embed') === '1';
-    scenarioId = params.get('scenario') || '';
-  }
+    const target = `/app${params.toString() ? '?' + params.toString() : ''}`;
+    goto(target, { replaceState: true });
+  });
 </script>
 
-<svelte:head>
-  <title>xln - Panel Workspace</title>
-</svelte:head>
-
-<View layout="default" networkMode="simnet" {embedMode} {scenarioId} />
-
-<style>
-  :global(body) {
-    margin: 0;
-    overflow: hidden;
-  }
-</style>
+<div style="padding: 20px; text-align: center;">
+  Redirecting to /app...
+</div>

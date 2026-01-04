@@ -51,7 +51,7 @@
   </div>
 
   <div class="topbar-links">
-    <a href="/view" class="topbar-link" class:active={currentPath === '/view'}>View</a>
+    <a href="/app" class="topbar-link" class:active={currentPath === '/app'}>App</a>
     <a href="/vault" class="topbar-link" class:active={currentPath === '/vault'}>Vault</a>
     <a href="/scenarios" class="topbar-link" class:active={currentPath === '/scenarios'}>Scenarios</a>
     <a href="/docs" class="topbar-link">Docs</a>

@@ -64,7 +64,7 @@
   function handleUnlock() {
     showLanding = false;
     if (browser) {
-      goto('/view');
+      goto('/app');
     }
   }
 
