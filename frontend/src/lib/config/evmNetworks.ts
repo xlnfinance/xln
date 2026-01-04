@@ -26,7 +26,7 @@ export const EVM_NETWORKS: EVMNetwork[] = [
     chainId: 8453,
     name: 'Base',
     symbol: 'ETH',
-    rpcUrl: 'https://base.llamarpc.com',
+    rpcUrl: 'https://mainnet.base.org',  // Official Base RPC (CORS-enabled)
     explorerUrl: 'https://basescan.org',
     explorerName: 'Basescan',
     isTestnet: false,
@@ -39,7 +39,7 @@ export const EVM_NETWORKS: EVMNetwork[] = [
     chainId: 1,
     name: 'Ethereum',
     symbol: 'ETH',
-    rpcUrl: 'https://eth.llamarpc.com',
+    rpcUrl: 'https://ethereum.publicnode.com',  // Public node with CORS
     explorerUrl: 'https://etherscan.io',
     explorerName: 'Etherscan',
     isTestnet: false,
@@ -55,7 +55,7 @@ export const EVM_NETWORKS: EVMNetwork[] = [
     chainId: 137,
     name: 'Polygon',
     symbol: 'MATIC',
-    rpcUrl: 'https://polygon.llamarpc.com',
+    rpcUrl: 'https://polygon-rpc.com',  // Official Polygon RPC
     explorerUrl: 'https://polygonscan.com',
     explorerName: 'Polygonscan',
     isTestnet: false,
@@ -70,7 +70,7 @@ export const EVM_NETWORKS: EVMNetwork[] = [
     chainId: 42161,
     name: 'Arbitrum One',
     symbol: 'ETH',
-    rpcUrl: 'https://arbitrum.llamarpc.com',
+    rpcUrl: 'https://arb1.arbitrum.io/rpc',  // Official Arbitrum RPC
     explorerUrl: 'https://arbiscan.io',
     explorerName: 'Arbiscan',
     isTestnet: false,
@@ -85,7 +85,7 @@ export const EVM_NETWORKS: EVMNetwork[] = [
     chainId: 10,
     name: 'Optimism',
     symbol: 'ETH',
-    rpcUrl: 'https://optimism.llamarpc.com',
+    rpcUrl: 'https://mainnet.optimism.io',  // Official Optimism RPC
     explorerUrl: 'https://optimistic.etherscan.io',
     explorerName: 'Optimistic Etherscan',
     isTestnet: false,
