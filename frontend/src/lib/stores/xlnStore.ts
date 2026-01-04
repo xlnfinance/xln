@@ -116,6 +116,11 @@ export async function initializeXLN(): Promise<Env> {
       history.set(env?.history || []);
       currentHeight.set(env?.height || 0);
 
+      // Sync to runtimeStore (local runtime)
+      import('./runtimeStore').then(({ runtimeOperations }) => {
+        runtimeOperations.updateLocalEnv(env);
+      });
+
       // Extract and persist entity positions from eReplicas (positions are immutable)
       // Positions are RELATIVE to j-machine - store jReplica reference for world position calculation
       if (env?.eReplicas) {
@@ -149,6 +154,11 @@ export async function initializeXLN(): Promise<Env> {
     xlnEnvironment.set(env);
     history.set(env?.history || []);
     currentHeight.set(env?.height || 0);
+
+    // Sync to runtimeStore (local runtime)
+    import('./runtimeStore').then(({ runtimeOperations }) => {
+      runtimeOperations.updateLocalEnv(env);
+    });
 
     // Extract positions from initial load as well
     // Positions are RELATIVE to j-machine - store jReplica reference for world position calculation

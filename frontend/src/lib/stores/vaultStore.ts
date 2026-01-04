@@ -167,6 +167,19 @@ export const vaultOperations = {
     }));
 
     this.saveToStorage();
+
+    // Auto-create ephemeral entity for this signer (async, non-blocking)
+    import('../utils/entityFactory').then(({ autoCreateEntityForSigner }) => {
+      autoCreateEntityForSigner(address).then(entityId => {
+        if (entityId) {
+          this.setSignerEntity(nextIndex, entityId);
+          console.log(`[VaultStore] Auto-created entity ${entityId.slice(0, 10)} for signer ${address.slice(0, 10)}`);
+        }
+      }).catch(err => {
+        console.warn('[VaultStore] Failed to auto-create entity:', err);
+      });
+    });
+
     return newSigner;
   },
 
