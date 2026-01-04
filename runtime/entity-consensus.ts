@@ -733,8 +733,22 @@ export const applyEntityFrame = async (
     allOutputs.push(...outputs);
     if (jOutputs) allJOutputs.push(...jOutputs);
 
-    // Collect pure events for post-loop processing
-    if (mempoolOps) allMempoolOps.push(...mempoolOps);
+    // CRITICAL FIX: Apply mempoolOps IMMEDIATELY instead of batching
+    // This ensures directPayment can detect newly-added mempool items in the same tick
+    if (mempoolOps && mempoolOps.length > 0) {
+      console.log(`📦 ENTITY-ORCHESTRATOR: Applying ${mempoolOps.length} mempoolOps (inline)`);
+      for (const { accountId, tx } of mempoolOps) {
+        const account = currentEntityState.accounts.get(accountId);
+        if (account) {
+          account.mempool.push(tx);
+          proposableAccounts.add(accountId);
+          console.log(`📦   → ${accountId.slice(-8)}: ${tx.type} (mempool now: ${account.mempool.length} txs, pendingFrame=${!!account.pendingFrame ? 'h'+account.pendingFrame.height : 'none'})`);
+        } else {
+          console.warn(`📦   ⚠️ Account ${accountId.slice(-8)} not found for mempoolOp`);
+        }
+      }
+    }
+
     if (swapOffersCreated) allSwapOffersCreated.push(...swapOffersCreated);
     if (swapOffersCancelled) allSwapOffersCancelled.push(...swapOffersCancelled);
 
@@ -823,20 +837,8 @@ export const applyEntityFrame = async (
 
   // === APPLY AGGREGATED PURE EVENTS ===
 
-  // 1. Apply mempoolOps from handlers (HTLC forwards, reveals, direct payments)
-  if (allMempoolOps.length > 0) {
-    console.log(`📦 ENTITY-ORCHESTRATOR: Applying ${allMempoolOps.length} mempoolOps`);
-    for (const { accountId, tx } of allMempoolOps) {
-      const account = currentEntityState.accounts.get(accountId);
-      if (account) {
-        account.mempool.push(tx);
-        proposableAccounts.add(accountId);
-        console.log(`📦   → ${accountId.slice(-8)}: ${tx.type} (mempool now: ${account.mempool.length} txs, pendingFrame=${!!account.pendingFrame ? 'h'+account.pendingFrame.height : 'none'})`);
-      } else {
-        console.warn(`📦   ⚠️ Account ${accountId.slice(-8)} not found for mempoolOp`);
-      }
-    }
-  }
+  // 1. MempoolOps now applied inline (see above in the loop) to fix simultaneous payment bug
+  // This section removed - mempoolOps are applied immediately after each applyEntityTx
 
   // 2. Run orderbook matching on aggregated swap offers (batch matching)
   if (allSwapOffersCreated.length > 0 && currentEntityState.orderbookExt) {

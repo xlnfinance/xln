@@ -281,6 +281,39 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               continue;
             }
 
+            // CRITICAL: Verify envelope matches HTLC lock (prevent replay/manipulation)
+            // This is "verify-after-decrypt" pattern - simpler than AAD
+            // The envelope MUST match the lock that carries it
+            if (lock.amount.toString() !== accountTx.data.amount.toString()) {
+              console.log(`❌ HTLC: Envelope amount mismatch: lock=${lock.amount}, tx=${accountTx.data.amount}`);
+              console.log(`🧅 ═════════════════════════════════════════════════════════════`);
+              continue;
+            }
+            if (lock.tokenId !== accountTx.data.tokenId) {
+              console.log(`❌ HTLC: Envelope tokenId mismatch: lock=${lock.tokenId}, tx=${accountTx.data.tokenId}`);
+              console.log(`🧅 ═════════════════════════════════════════════════════════════`);
+              continue;
+            }
+            if (lock.hashlock !== accountTx.data.hashlock) {
+              console.log(`❌ HTLC: Envelope hashlock mismatch: lock=${lock.hashlock.slice(0,16)}..., tx=${accountTx.data.hashlock.slice(0,16)}...`);
+              console.log(`🧅 ═════════════════════════════════════════════════════════════`);
+              continue;
+            }
+            console.log(`✅ HTLC: Envelope verified - matches lock parameters (amount, tokenId, hashlock)`);
+
+            // For intermediary hops, verify nextHop is a valid entity
+            if (envelope.nextHop && !envelope.finalRecipient) {
+              // Check if we have an account with nextHop (can forward)
+              const hasNextHopAccount = newState.accounts.has(envelope.nextHop);
+              if (!hasNextHopAccount) {
+                console.log(`❌ HTLC: Cannot forward - no account with nextHop ${envelope.nextHop.slice(-4)}`);
+                console.log(`❌ HTLC: Available accounts: [${Array.from(newState.accounts.keys()).map(k => k.slice(-4)).join(', ')}]`);
+                console.log(`🧅 ═════════════════════════════════════════════════════════════`);
+                continue;
+              }
+              console.log(`✅ HTLC: NextHop ${envelope.nextHop.slice(-4)} validated - account exists`);
+            }
+
             // Are we the final recipient?
             if (envelope.finalRecipient) {
               console.log(`🎯 HTLC-ROUTING: WE ARE FINAL RECIPIENT!`);
