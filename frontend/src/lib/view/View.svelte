@@ -27,7 +27,6 @@
   import EntityPanelWrapper from './panels/wrappers/EntityPanelWrapper.svelte';
   import TimeMachine from './core/TimeMachine.svelte';
   import Tutorial from './components/Tutorial.svelte';
-  import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
   import { panelBridge } from './utils/panelBridge';
   import 'dockview/dist/styles/dockview.css';
 
@@ -42,14 +41,14 @@
   let dockview: DockviewComponent;
   let unsubOpenEntity: (() => void) | null = null;
 
-  // Track mode changes to rebuild layout
+  // Track mode changes to update panel visibility
   let currentMode = userMode;
 
-  // Reactive: Rebuild panels when userMode changes
+  // Reactive: Update panel visibility when userMode changes (preserve layout)
   $: if (dockview && currentMode !== userMode) {
     console.log(`[View] 🔄 Mode changed: ${currentMode ? 'user' : 'dev'} → ${userMode ? 'user' : 'dev'}`);
     currentMode = userMode;
-    rebuildPanels();
+    updatePanelsForMode(userMode);
   }
 
   // TimeMachine draggable state
@@ -624,74 +623,87 @@
     }
   }
 
-  // Function to rebuild panels when mode toggles
-  function rebuildPanels() {
+  // Function to update panel visibility when mode toggles (preserves layout)
+  function updatePanelsForMode(isUserMode: boolean) {
     if (!dockview) return;
 
-    console.log(`[View] 🔄 Rebuilding for ${userMode ? 'user' : 'dev'} mode...`);
+    console.log(`[View] 🔄 Updating panels for ${isUserMode ? 'user' : 'dev'} mode...`);
 
-    // Clear all panels
-    const panels = [...dockview.panels];
-    for (const panel of panels) {
-      dockview.removePanel(panel);
-    }
-
-    // Recreate panels based on mode
-    if (userMode) {
-      // User mode: Only BrainVault
-      dockview.addPanel({
-        id: 'brainvault',
-        component: 'brainvault',
-        title: '🔐 Wallet',
-        params: { closeable: false },
+    if (isUserMode) {
+      // User mode: Show only BrainVault, remove dev panels (Dockview doesn't support hiding)
+      const devPanels = ['graph3d', 'architect', 'jurisdiction', 'runtime-io', 'settings'];
+      devPanels.forEach(id => {
+        const panel = dockview.getPanel(id);
+        if (panel) {
+          // Remove panel by calling close on the panel itself
+          panel.api.close();
+        }
       });
-      console.log('[View] ✅ User mode layout');
+
+      // Show BrainVault (create if doesn't exist)
+      let bvPanel = dockview.getPanel('brainvault');
+      if (!bvPanel) {
+        dockview.addPanel({
+          id: 'brainvault',
+          component: 'brainvault',
+          title: '🔐 Wallet',
+          params: { closeable: false },
+        });
+      }
+      console.log('[View] ✅ User mode - BrainVault visible, dev panels removed');
     } else {
-      // Dev mode: Full IDE
-      const graph3d = dockview.addPanel({
-        id: 'graph3d',
-        component: 'graph3d',
-        title: '🌐 Graph3D',
-        params: { closeable: false },
-      });
+      // Dev mode: Remove BrainVault, recreate dev panels
+      const bvPanel = dockview.getPanel('brainvault');
+      if (bvPanel) bvPanel.api.close();
 
-      const architect = dockview.addPanel({
-        id: 'architect',
-        component: 'architect',
-        title: '🎬 Architect',
-        position: { direction: 'right', referencePanel: 'graph3d' },
-        params: { closeable: false },
-      });
+      // Recreate dev panels if they don't exist
+      if (!dockview.getPanel('graph3d')) {
+        const graph3d = dockview.addPanel({
+          id: 'graph3d',
+          component: 'graph3d',
+          title: '🌐 Graph3D',
+          params: { closeable: false },
+        });
 
-      dockview.addPanel({
-        id: 'jurisdiction',
-        component: 'jurisdiction',
-        title: '🏛️ Jurisdiction',
-        position: { direction: 'within', referencePanel: 'architect' },
-        inactive: true,
-        params: { closeable: false },
-      });
+        dockview.addPanel({
+          id: 'architect',
+          component: 'architect',
+          title: '🎬 Architect',
+          position: { direction: 'right', referencePanel: 'graph3d' },
+          params: { closeable: false },
+        });
 
-      dockview.addPanel({
-        id: 'runtime-io',
-        component: 'runtime-io',
-        title: '🔄 Runtime I/O',
-        position: { direction: 'within', referencePanel: 'architect' },
-        inactive: true,
-        params: { closeable: false },
-      });
+        dockview.addPanel({
+          id: 'jurisdiction',
+          component: 'jurisdiction',
+          title: '🏛️ Jurisdiction',
+          position: { direction: 'within', referencePanel: 'architect' },
+          inactive: true,
+          params: { closeable: false },
+        });
 
-      dockview.addPanel({
-        id: 'settings',
-        component: 'settings',
-        title: '⚙️ Settings',
-        position: { direction: 'within', referencePanel: 'architect' },
-        inactive: true,
-        params: { closeable: false },
-      });
+        dockview.addPanel({
+          id: 'runtime-io',
+          component: 'runtime-io',
+          title: '🔄 Runtime I/O',
+          position: { direction: 'within', referencePanel: 'architect' },
+          inactive: true,
+          params: { closeable: false },
+        });
 
-      setTimeout(() => graph3d.api.setSize({ width: window.innerWidth * 0.70 }), 100);
-      console.log('[View] ✅ Dev mode layout');
+        dockview.addPanel({
+          id: 'settings',
+          component: 'settings',
+          title: '⚙️ Settings',
+          position: { direction: 'within', referencePanel: 'architect' },
+          inactive: true,
+          params: { closeable: false },
+        });
+
+        setTimeout(() => graph3d.api.setSize({ width: window.innerWidth * 0.70 }), 100);
+      }
+
+      console.log('[View] ✅ Dev mode - Dev panels visible, BrainVault removed');
     }
   }
 
@@ -706,11 +718,6 @@
 </script>
 
 <div class="view-wrapper" class:embed-mode={embedMode}>
-  <!-- Hierarchical Navigation - Visible in dev mode only -->
-  {#if !embedMode && !userMode}
-    <HierarchicalNav />
-  {/if}
-
   <div class="view-container" class:with-timemachine={!collapsed} bind:this={container}></div>
 
   <!-- TimeMachine - Visible in dev mode only (user mode = simple, no time travel) -->
@@ -765,11 +772,6 @@
     background: #1e1e1e;
     display: flex;
     flex-direction: column;
-  }
-
-  /* Account for HierarchicalNav height (48px) in dev mode */
-  .view-wrapper:not(.embed-mode) .view-container {
-    height: calc(100vh - 56px - 48px); /* Topbar + HierarchicalNav */
   }
 
   .view-container {
