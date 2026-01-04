@@ -3,6 +3,7 @@
   import { HDNodeWallet, Mnemonic } from 'ethers';
   import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
   import WalletView from '$lib/components/Wallet/WalletView.svelte';
+  import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
   import { keccak256, zeroPadValue, toUtf8Bytes } from 'ethers';
   import { vaultState, vaultOperations, activeVault, activeSigner, allVaults, type Vault, type Signer } from '$lib/stores/vaultStore';
   import { EVM_NETWORKS, type EVMNetwork } from '$lib/config/evmNetworks';
@@ -1335,9 +1336,14 @@
 
 <svelte:window on:click={handleClickOutside} />
 
-<div class="brainvault-container" class:deriving={phase === 'deriving'} class:complete={phase === 'complete'}>
-  <!-- Ambient particles - intensify during derivation -->
-  <div class="dust-particles" class:active={phase === 'deriving'}></div>
+<div class="brainvault-wrapper">
+  <!-- Hierarchical Navigation (always visible in user mode) -->
+  <HierarchicalNav />
+
+  <!-- Main BrainVault Content -->
+  <div class="brainvault-container" class:deriving={phase === 'deriving'} class:complete={phase === 'complete'}>
+    <!-- Ambient particles - intensify during derivation -->
+    <div class="dust-particles" class:active={phase === 'deriving'}></div>
 
   <!-- Light rays from logo - EXPLODE during derivation -->
   <!-- Light rays disabled - too distracting during derivation -->
@@ -1358,9 +1364,9 @@
   <!-- Main Content -->
   <div class="main-content">
 
-    <!-- INPUT PHASE -->
-    {#if phase === 'input'}
-      <div class="glass-card">
+    <!-- INPUT SECTION - Always visible, minimized during derivation -->
+    {#if phase === 'input' || phase === 'deriving'}
+      <div class="glass-card input-section" class:minimized={phase === 'deriving'}>
         <!-- Resume Banner -->
         {#if showResumeInput}
           <div class="resume-banner">
@@ -1481,18 +1487,21 @@
           <p><strong>This is permanent.</strong> Name + passphrase + factor = your vault forever. No recovery possible.</p>
         </div>
 
-        <!-- Derive Button -->
-        <button
-          class="derive-btn"
-          disabled={!canDerive}
-          on:click={startDerivation}
-        >
-          {t('vault.derive')}
-        </button>
+        <!-- Derive Button - only visible in input phase -->
+        {#if phase === 'input'}
+          <button
+            class="derive-btn"
+            disabled={!canDerive}
+            on:click={startDerivation}
+          >
+            {t('vault.derive')}
+          </button>
+        {/if}
       </div>
+    {/if}
 
-    <!-- DERIVING PHASE -->
-    {:else if phase === 'deriving'}
+    <!-- DERIVATION OVERLAY - Shows cube grid below inputs during derivation -->
+    {#if phase === 'deriving'}
         <!-- Vault Door Animation - PHARAOH GOLD SHOW -->
         <div class="vault-door-container" class:opening={progress >= 100} style="--progress: {progress}">
           <!-- Golden dust particles floating -->
@@ -1589,9 +1598,10 @@
             <button class="control-btn cancel" on:click={reset}>esc</button>
           </div>
         </div>
+    {/if}
 
     <!-- COMPLETE PHASE -->
-    {:else if phase === 'complete'}
+    {#if phase === 'complete'}
       <div class="glass-card complete tabbed">
         {#if showSuccessHeader}
           <div class="success-header" style="animation: fadeOut 0.5s ease-out 2s forwards;">
@@ -1898,12 +1908,25 @@
       </div>
     {/if}
   </div>
+  <!-- Close main-content -->
 </div>
+<!-- Close brainvault-container -->
+</div>
+<!-- Close brainvault-wrapper -->
 
 <style>
-  .brainvault-container {
+  .brainvault-wrapper {
     width: 100%;
-    min-height: 100vh;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .brainvault-container {
+    flex: 1;
+    overflow-y: auto;
+    width: 100%;
     padding: 20px;
     background: #000;
     background-image:
@@ -2317,6 +2340,14 @@
       0 0 80px rgba(180, 140, 80, 0.05),
       inset 0 1px 0 rgba(180, 140, 80, 0.1);
     position: relative;
+  }
+
+  /* Input section minimized during derivation */
+  .input-section.minimized {
+    opacity: 0.5;
+    pointer-events: none;
+    transform: scale(0.95);
+    transition: all 0.3s ease;
   }
 
   .glass-card::before {
@@ -3445,9 +3476,9 @@
      ═══════════════════════════════════════════════════════════════════════════ */
 
   .vault-door-container {
-    position: fixed;
-    inset: 0;
-    background: #000;
+    position: relative;
+    margin-top: 24px;
+    background: rgba(0, 0, 0, 0.5);
     background-image:
       radial-gradient(ellipse at 50% 30%, rgba(180, 140, 80, 0.15) 0%, transparent 50%),
       radial-gradient(ellipse at 50% 50%, rgba(120, 90, 50, 0.08) 0%, transparent 40%);
@@ -3455,6 +3486,9 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
+    min-height: 400px;
+    border-radius: 2px;
+    border: 1px solid rgba(180, 140, 80, 0.15);
     z-index: 1000;
     overflow: hidden;
   }
