@@ -1,23 +1,21 @@
 <script lang="ts">
   /**
    * /app - XLN Application Workspace
-   * User mode: Simple single-entity view (consumer-focused)
-   * Dev mode: Full network graph + multi-panel inspection
-   *
-   * Both modes share same runtime state (critical for consistency)
-   * Supports ?embed=1 for minimal UI mode
+   * Toggles between:
+   * - User mode: BrainVault interface (wallet creation/management)
+   * - Dev mode: Full network view (developer tools)
    */
   import { browser } from '$app/environment';
+  import BrainVaultView from '$lib/components/Views/BrainVaultView.svelte';
   import View from '$lib/view/View.svelte';
   import { appMode, toggleMode } from '$lib/stores/modeStore';
 
-  // Parse URL params
+  // Parse URL params for dev mode
   let embedMode = false;
   let scenarioId = '';
   if (browser) {
     const params = new URLSearchParams(window.location.search);
     embedMode = params.get('embed') === '1';
-    // Don't auto-load scenario for main app (only if explicitly specified)
     scenarioId = params.get('scenario') || '';
   }
 </script>
@@ -26,7 +24,9 @@
   <title>xln - {$appMode === 'user' ? 'Wallet' : 'Network Workspace'}</title>
 </svelte:head>
 
-<!-- Always use View.svelte (shares runtime state), just pass mode -->
+<!-- View.svelte is base layout for everything -->
+<!-- userMode=true: Simple BrainVault UX (no graph, no time machine) -->
+<!-- userMode=false: Full IDE (graph, panels, time machine) -->
 <View
   layout="default"
   networkMode="simnet"
