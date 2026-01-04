@@ -7,11 +7,18 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 import type { Env } from '@xln/runtime/xln-api';
 
 /**
+ * Counter for deterministic ephemeral entity ID generation
+ * Ensures same signer + counter always generates same entity ID
+ */
+let ephemeralEntityCounter = 0;
+
+/**
  * Generate deterministic ephemeral entity ID from signer address
- * Format: keccak256(signerId + timestamp)
+ * Format: keccak256(signerId + counter)
+ * Uses counter instead of Date.now() to maintain RJEA determinism
  */
 export function generateEphemeralEntityId(signerId: string): string {
-  const data = signerId + Date.now().toString();
+  const data = signerId + (ephemeralEntityCounter++).toString();
   return keccak256(toUtf8Bytes(data));
 }
 

@@ -281,8 +281,8 @@
   const hardwareCores = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4;
   // Generous limits - user can experiment (512GB machine can handle 100+ workers)
   const memoryBasedMax = Math.floor(deviceMemoryGB * 1024 / 256); // 1 worker per 256MB
-  let maxWorkers = Math.max(hardwareCores * 4, 64); // At least 64, or 4x cores
-  let targetWorkerCount = hardwareCores; // Start at 1x cores
+  let maxWorkers = Math.min(hardwareCores * 2, 64); // Cap at 64 or 2x cores (whichever is smaller)
+  let targetWorkerCount = Math.min(hardwareCores * 2, 64); // Start at 2x cores for better parallelism
 
   // Reactive memory calculations - show TARGET for immediate feedback, not actual workerCount
   $: allocatedMemoryMB = targetWorkerCount * 256;
@@ -651,11 +651,12 @@
     : 0;
 
   // Shard grid dimensions (for visualization)
-  // For very large shard counts, cap visual grid at 64x64 (4096 visible cells)
-  // Each visual cell represents a chunk of shards
-  $: maxVisualCols = 64;
-  $: visualShardCount = Math.min(shardCount, maxVisualCols * maxVisualCols);
-  $: gridCols = Math.min(Math.ceil(Math.sqrt(shardCount)), maxVisualCols);
+  // Exact grid dimensions per factor (1:1 shard-to-cube mapping up to factor 5)
+  // Factor 1 = 1×1, Factor 2 = 2×2, Factor 3 = 4×4, Factor 4 = 8×8, Factor 5 = 16×16
+  // Factor 6+ uses aggregation to keep grid manageable
+  $: gridSize = Math.min(Math.ceil(Math.sqrt(shardCount)), 64); // Max 64×64 visual grid
+  $: visualShardCount = factor <= 5 ? shardCount : Math.min(shardCount, 64 * 64);
+  $: gridCols = gridSize;
   $: gridRows = Math.ceil(visualShardCount / gridCols);
   $: shardsPerCell = Math.ceil(shardCount / visualShardCount);
 
@@ -833,7 +834,7 @@
 
   let nameHashHexGlobal = '';
   let nextShardToDispatch = 0;
-  const BATCH_SIZE = 8; // Shards per batch (user can adjust via settings later)
+  const BATCH_SIZE = 16; // Shards per batch - larger batches reduce message overhead
 
   function dispatchShards(nameHashHex: string) {
     nameHashHexGlobal = nameHashHex;
@@ -1033,12 +1034,15 @@
         worker.onmessage = (e) => {
           const { type, data } = e.data;
           if (type === 'ready') {
-            // Dispatch work immediately
+            // Dispatch batch immediately
             if (nextShardToDispatch < shardCount) {
-              dispatchNextShard(worker);
+              dispatchBatchToWorker(worker);
             }
           } else if (type === 'shard_complete') {
             handleShardComplete(data.shardIndex, data.resultHex, data.elapsedMs);
+          } else if (type === 'batch_complete') {
+            const workerIndex = workers.indexOf(worker);
+            handleBatchComplete(workerIndex);
           } else if (type === 'error') {
             console.error('Worker error:', data.message);
           }
@@ -1158,14 +1162,14 @@
         nextShardToDispatch++;
       }
 
-      // Dispatch remaining shards
+      // Dispatch remaining shards in batches
       for (let i = 0; i < workers.length && nextShardToDispatch < shardCount; i++) {
         // Find next incomplete shard
         while (nextShardToDispatch < shardCount && shardResults.has(nextShardToDispatch)) {
           nextShardToDispatch++;
         }
         if (nextShardToDispatch < shardCount) {
-          dispatchNextShard(workers[i]!);
+          dispatchBatchToWorker(workers[i]!);
         }
       }
 
@@ -3926,45 +3930,71 @@
   /* Mini shard grid under pyramid */
   .mini-shard-grid {
     display: grid;
-    grid-template-columns: repeat(var(--cols, 16), 10px);
-    gap: 2px;
+    grid-template-columns: repeat(var(--cols, 16), 16px);
+    gap: 3px;
     width: fit-content;
-    margin: 16px auto 0;
-    padding: 8px;
-    background: rgba(0, 0, 0, 0.3);
-    border-radius: 8px;
+    margin: 24px auto 0;
+    padding: 12px;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 200, 100, 0.1);
   }
 
   .mini-shard {
-    width: 10px;
-    height: 10px;
-    border-radius: 2px;
-    transition: all 0.2s ease-out;
+    width: 16px;
+    height: 16px;
+    border-radius: 3px;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    transform-style: preserve-3d;
   }
 
   .mini-shard.pending {
-    background: rgba(80, 60, 30, 0.4);
-    border: 1px solid rgba(180, 140, 80, 0.1);
+    background: linear-gradient(135deg,
+      rgba(40, 35, 30, 0.6) 0%,
+      rgba(60, 50, 40, 0.4) 100%);
+    border: 1px solid rgba(100, 80, 60, 0.2);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
   }
 
   .mini-shard.computing {
-    background: radial-gradient(circle at center,
-      rgba(255, 200, 100, 0.9) 0%,
-      rgba(255, 180, 80, 0.7) 50%,
-      rgba(180, 140, 80, 0.4) 100%);
-    box-shadow: 0 0 8px rgba(255, 200, 100, 0.6);
-    animation: mini-shard-pulse 0.6s ease-in-out infinite;
+    background: linear-gradient(135deg,
+      rgba(168, 85, 247, 0.8) 0%,
+      rgba(139, 92, 246, 0.6) 100%);
+    border: 1px solid rgba(168, 85, 247, 0.9);
+    box-shadow:
+      0 0 12px rgba(168, 85, 247, 0.6),
+      0 0 20px rgba(168, 85, 247, 0.3),
+      inset 0 1px 2px rgba(255, 255, 255, 0.3);
+    animation: cube-pulse 1s ease-in-out infinite;
   }
 
   .mini-shard.complete {
-    background: linear-gradient(135deg, rgba(255, 220, 120, 0.9) 0%, rgba(230, 180, 80, 0.8) 100%);
-    border: 1px solid rgba(255, 220, 120, 0.8);
-    box-shadow: 0 0 4px rgba(255, 200, 100, 0.3);
+    background: linear-gradient(135deg,
+      rgba(52, 211, 153, 0.9) 0%,
+      rgba(16, 185, 129, 0.8) 100%);
+    border: 1px solid rgba(52, 211, 153, 1);
+    box-shadow:
+      0 0 8px rgba(52, 211, 153, 0.4),
+      inset 0 1px 2px rgba(255, 255, 255, 0.4),
+      inset 0 -1px 2px rgba(0, 0, 0, 0.2);
   }
 
-  @keyframes mini-shard-pulse {
-    0%, 100% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(1.1); opacity: 0.8; }
+  @keyframes cube-pulse {
+    0%, 100% {
+      transform: scale(1) translateZ(0);
+      box-shadow:
+        0 0 12px rgba(168, 85, 247, 0.6),
+        0 0 20px rgba(168, 85, 247, 0.3),
+        inset 0 1px 2px rgba(255, 255, 255, 0.3);
+    }
+    50% {
+      transform: scale(1.15) translateZ(4px);
+      box-shadow:
+        0 0 16px rgba(168, 85, 247, 0.8),
+        0 0 28px rgba(168, 85, 247, 0.5),
+        inset 0 1px 2px rgba(255, 255, 255, 0.5);
+    }
   }
 
   .thread-control {
