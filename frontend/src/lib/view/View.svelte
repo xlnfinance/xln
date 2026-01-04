@@ -19,6 +19,7 @@
   import InsurancePanel from './panels/InsurancePanel.svelte';
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
   import SolvencyPanel from './panels/SolvencyPanel.svelte';
+  import BrainVaultView from '$lib/components/Views/BrainVaultView.svelte';
   // REMOVED PANELS:
   // - EntitiesPanel: Graph3D entity cards provide better UX
   // - DepositoryPanel: JurisdictionPanel shows same data with better tables
@@ -29,12 +30,12 @@
   import { panelBridge } from './utils/panelBridge';
   import 'dockview/dist/styles/dockview.css';
 
-  // Props for future layout/mode switching (passed from parent, reserved for future use)
+  // Props for layout/mode switching
   export let layout: string = 'default'; void layout;
   export let networkMode: 'simnet' | 'testnet' | 'mainnet' = 'simnet'; void networkMode;
   export let embedMode: boolean = false; // When true: hide panels, show only 3D + minimal controls
   export let scenarioId: string = ''; // Auto-run scenario on load (e.g. 'ahb', 'fed-chair')
-  export let userMode: boolean = false; // When true: hide network graph, show only active signer's entity
+  export let userMode: boolean = false; // When true: simple BrainVault UX (no graph, no time machine)
 
   let container: HTMLDivElement;
   let dockview: DockviewComponent;
@@ -263,6 +264,11 @@
               isolatedTimeIndex: localTimeIndex
             }
           });
+        } else if (options.name === 'brainvault') {
+          component = mount(BrainVaultView, {
+            target: div,
+            props: {}  // BrainVault manages its own state
+          });
         } else if (options.name === 'architect') {
           component = mount(ArchitectPanel, {
             target: div,
@@ -389,50 +395,40 @@
       }
     }
 
-    // User Mode: Single EntityPanel only (skip network graph + dev panels)
-    // Dev Mode: Full layout with Graph3D + all panels
-
-    let firstPanel;
+    // User mode: Simple BrainVault UX (no graph, no dev panels)
+    // Dev mode: Full IDE with graph + all panels
 
     if (userMode) {
-      // User mode: Just show EntityPanel for active signer
-      // Will be populated after we find the active signer's entity
-      firstPanel = dockview.addPanel({
-        id: 'user-entity',
-        component: 'entity',
-        title: '💰 My Wallet',
+      // User mode: Only BrainVault panel
+      dockview.addPanel({
+        id: 'brainvault',
+        component: 'brainvault',
+        title: '🔐 Wallet',
         params: {
           closeable: false,
-          tab: null  // Will be set when we find active signer's entity
         },
       });
     } else {
-      // Dev mode: Full network graph + panels (default layout)
+      // Dev mode: Full layout
       const graph3d = dockview.addPanel({
         id: 'graph3d',
         component: 'graph3d',
         title: '🌐 Graph3D',
         params: {
-          closeable: false, // Core panel - cannot close
+          closeable: false,
         },
       });
 
-      // Architect FIRST (leftmost tab) - create the right panel group
       const architect = dockview.addPanel({
         id: 'architect',
         component: 'architect',
         title: '🎬 Architect',
         position: { direction: 'right', referencePanel: 'graph3d' },
         params: {
-          closeable: false, // Core panel - cannot close
+          closeable: false,
         },
       });
 
-      firstPanel = architect;
-    }
-
-    // Add remaining panels (only in dev mode)
-    if (!userMode) {
       // ALL panels after Architect get inactive:true to prevent stealing focus
 
       dockview.addPanel({
@@ -497,63 +493,17 @@
       }, 0);
     }
 
-    // Set initial sizes based on mode
-    if (!userMode) {
-      const graph3dApi = dockview.getPanel('graph3d');
-      if (graph3dApi) {
-        // Delay size adjustment for AVP compatibility
-        setTimeout(() => {
-          // In embed mode: start fullscreen (100%), user can toggle sidebar
-          // In normal mode: 70:30 split
-          const widthPercent = embedMode ? 1.0 : 0.70;
-          graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
-          console.log(`[View] ✅ Graph3D resized to ${widthPercent * 100}%${embedMode ? ' (embed mode)' : ''}`);
-        }, 100);
-      }
-    }
-
-    // User mode: Auto-open active signer's EntityPanel (reactive)
-    if (userMode) {
-      // Subscribe to both activeSigner and env changes
-      const { activeSigner } = await import('$lib/stores/vaultStore');
-      const { get } = await import('svelte/store');
-
-      // Reactive: Update when either signer or env changes
-      const unsubSigner = activeSigner.subscribe(currentSigner => {
-        if (!currentSigner?.entityId) return;
-
-        const currentEnv = get(localEnvStore);
-        if (!currentEnv?.eReplicas) return;
-
-        // Find replica with correct key format: entityId:signerId
-        const replicaEntries: [string, any][] = Array.from(currentEnv.eReplicas.entries());
-        const replicaEntry = replicaEntries.find(([key]) =>
-          key.startsWith(currentSigner.entityId! + ':')
-        );
-
-        if (replicaEntry) {
-          const replicaKey: string = replicaEntry[0];
-          const [entityId, signerId] = replicaKey.split(':');
-
-          // Update user-entity panel
-          const userPanel = dockview.getPanel('user-entity');
-          if (userPanel && entityId && signerId) {
-            userPanel.api.updateParameters({
-              tab: {
-                id: 'user-wallet',
-                title: `${currentSigner.name || 'My Wallet'}`,
-                entityId,
-                signerId,
-                jurisdiction: 'browservm',
-                isActive: true
-              }
-            });
-            console.log(`[View] ✅ User mode: Opened entity ${entityId.slice(-4)}`);
-          }
-        }
-      });
-
-      onDestroy(() => unsubSigner());
+    // Set initial sizes (Graph3D panel)
+    const graph3dApi = dockview.getPanel('graph3d');
+    if (graph3dApi) {
+      // Delay size adjustment for AVP compatibility
+      setTimeout(() => {
+        // In embed mode: start fullscreen (100%), user can toggle sidebar
+        // In normal mode: 70:30 split
+        const widthPercent = embedMode ? 1.0 : 0.70;
+        graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
+        console.log(`[View] ✅ Graph3D resized to ${widthPercent * 100}%${embedMode ? ' (embed mode)' : ''}`);
+      }, 100);
     }
 
     // DISABLED: Dockview layout persistence (Svelte 5 incompatibility)
@@ -676,17 +626,18 @@
 <div class="view-wrapper" class:embed-mode={embedMode}>
   <div class="view-container" class:with-timemachine={!collapsed} bind:this={container}></div>
 
-  <!-- TimeMachine - Always visible (like YouTube progress bar) -->
-  <div class="time-machine-bar" class:collapsed class:embed={embedMode} data-position={timeMachinePosition}>
-    {#if !embedMode}
-      <div class="drag-handle" title="Drag to reposition">⋮⋮</div>
-    {/if}
-    <TimeMachine
-      history={localHistoryStore}
-      timeIndex={localTimeIndex}
-      isLive={localIsLive}
-      env={localEnvStore}
-    />
+  <!-- TimeMachine - Visible in dev mode only (user mode = simple, no time travel) -->
+  {#if !userMode}
+    <div class="time-machine-bar" class:collapsed class:embed={embedMode} data-position={timeMachinePosition}>
+      {#if !embedMode}
+        <div class="drag-handle" title="Drag to reposition">⋮⋮</div>
+      {/if}
+      <TimeMachine
+        history={localHistoryStore}
+        timeIndex={localTimeIndex}
+        isLive={localIsLive}
+        env={localEnvStore}
+      />
     {#if !embedMode}
       <button class="collapse-btn" on:click={() => collapsed = !collapsed}>
         {collapsed ? '▲' : '▼'}
@@ -699,10 +650,11 @@
         {timeMachinePosition === 'bottom' ? '⬆️' : '⬇️'}
       </button>
     {/if}
-  </div>
+    </div>
+  {/if}
 
-  {#if !embedMode}
-    <!-- Interactive Tutorial (first-time users) -->
+  {#if !embedMode && !userMode}
+    <!-- Interactive Tutorial (first-time users, dev mode only) -->
     <Tutorial />
   {/if}
 
