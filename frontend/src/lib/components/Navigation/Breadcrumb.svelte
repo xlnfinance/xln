@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
+
   export let label: string;
   export let items: Array<{id: string, label: string, count?: number}>;
   export let selected: string | null;
@@ -7,6 +9,7 @@
   export let disabled: boolean = false;
 
   let showMenu = false;
+  let dropdownElement: HTMLDivElement;
 
   function handleSelect(id: string) {
     onSelect(id);
@@ -19,9 +22,24 @@
       showMenu = false;
     }
   }
+
+  // Click outside handler to close dropdown
+  function handleClickOutside(event: MouseEvent) {
+    if (showMenu && dropdownElement && !dropdownElement.contains(event.target as Node)) {
+      showMenu = false;
+    }
+  }
+
+  onMount(() => {
+    document.addEventListener('click', handleClickOutside);
+  });
+
+  onDestroy(() => {
+    document.removeEventListener('click', handleClickOutside);
+  });
 </script>
 
-<div class="breadcrumb-dropdown" class:disabled>
+<div class="breadcrumb-dropdown" class:disabled bind:this={dropdownElement}>
   <button
     class="breadcrumb-trigger"
     disabled={disabled}

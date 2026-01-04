@@ -2,7 +2,7 @@
   import Breadcrumb from './Breadcrumb.svelte';
   import { navSelection, navigationOperations } from '$lib/stores/navigationStore';
   import { runtimes, activeRuntimeId } from '$lib/stores/runtimeStore';
-  import { activeVault, allVaults } from '$lib/stores/vaultStore';
+  import { activeVault, activeSigner, allVaults } from '$lib/stores/vaultStore';
 
   // Compute items for each level based on current selection
 
@@ -114,6 +114,18 @@
 
   function handleAccountSelect(id: string) {
     navigationOperations.navigate('account', id);
+  }
+
+  // Auto-select signer when vault becomes active
+  $: if ($activeSigner && !$navSelection.signer) {
+    console.log('[HierarchicalNav] Auto-selecting signer:', $activeSigner.address.slice(0, 10));
+    navigationOperations.navigate('signer', $activeSigner.address);
+  }
+
+  // Auto-select entity when signer has one
+  $: if ($activeSigner?.entityId && !$navSelection.entity) {
+    console.log('[HierarchicalNav] Auto-selecting entity:', $activeSigner.entityId.slice(0, 10));
+    navigationOperations.navigate('entity', $activeSigner.entityId);
   }
 
   // New actions
