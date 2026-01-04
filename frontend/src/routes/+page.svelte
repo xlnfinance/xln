@@ -31,19 +31,25 @@
   const timeIndexWritable = writable(-1);
   const isLiveWritable = writable(true);
 
+  // Track last synced values to prevent update loops
+  let lastSyncedTimeIndex = -1;
+  let lastSyncedIsLive = true;
+
   // Sync derived → writable
   $: timeIndexWritable.set($currentTimeIndex);
   $: isLiveWritable.set($isLive);
 
-  // Sync writable → time operations
+  // Sync writable → time operations (with explicit tracking to avoid loops)
   timeIndexWritable.subscribe(val => {
-    if (val !== $currentTimeIndex) {
+    if (val !== lastSyncedTimeIndex) {
+      lastSyncedTimeIndex = val;
       timeOperations.goToTimeIndex(val);
     }
   });
 
   isLiveWritable.subscribe(val => {
-    if (val && !$isLive) {
+    if (val !== lastSyncedIsLive && val && !$isLive) {
+      lastSyncedIsLive = val;
       timeOperations.goToLive();
     }
   });
@@ -320,10 +326,10 @@
       <!-- BrainVault View: Wallet Generator -->
       <BrainVaultView />
     {:else if $appState.viewMode === 'graph3d'}
-      <!-- Graph View Mode: DISABLED - Use /view route instead -->
+      <!-- Graph View Mode: DISABLED - Use /app route instead -->
       <div class="disabled-message">
-        <h2>Graph3D has moved to /view</h2>
-        <p>Visit <a href="/view">/view</a> for the new isolated panel workspace.</p>
+        <h2>Graph3D has moved to /app</h2>
+        <p>Visit <a href="/app">/app</a> for the full workspace with dev tools.</p>
       </div>
       <!-- <Graph3DPanel {zenMode} {hideButton} {toggleZenMode} /> -->
     {:else if $appState.viewMode === 'terminal'}
