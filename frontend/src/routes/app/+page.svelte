@@ -38,7 +38,7 @@
 <!-- Mode Toggle Button (bottom-right) -->
 <button
   class="mode-toggle"
-  onclick={() => toggleMode()}
+  on:click={() => toggleMode()}
   title="Switch to {$appMode === 'user' ? 'developer' : 'user'} mode"
 >
   {$appMode === 'user' ? 'Dev' : 'User'}
