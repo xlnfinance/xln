@@ -2234,18 +2234,9 @@
     transform: scale(1.05);
   }
 
-  /* Logo shrinks after derivation complete */
+  /* Logo HIDES after derivation complete */
   .triangle-logo.complete {
-    width: 50px;
-    opacity: 0.7;
-    filter: drop-shadow(0 0 20px rgba(180, 140, 80, 0.2));
-    animation: none;
-    transition: all 0.5s ease;
-  }
-
-  .triangle-logo.complete:hover {
-    opacity: 0.9;
-    transform: scale(1.1);
+    display: none;
   }
 
   .wordmark {

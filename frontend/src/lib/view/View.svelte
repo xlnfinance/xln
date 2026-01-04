@@ -254,7 +254,13 @@
       console.error('[View] ❌ Failed to initialize XLN:', err);
     }
 
-    // Create Dockview
+    // Skip Dockview creation in user mode (BrainVault rendered directly)
+    if (userMode) {
+      console.log('[View] User mode - skipping Dockview creation');
+      return;
+    }
+
+    // Create Dockview (dev mode only)
     dockview = new DockviewComponent(container, {
       className: 'dockview-theme-dark',
       createComponent: (options) => {
@@ -405,75 +411,60 @@
       }
     }
 
-    // User mode: Simple BrainVault UX (no graph, no dev panels)
-    // Dev mode: Full IDE with graph + all panels
+    // Dev mode: Full layout (user mode already returned early)
+    const graph3d = dockview.addPanel({
+      id: 'graph3d',
+      component: 'graph3d',
+      title: '🌐 Graph3D',
+      params: {
+        closeable: false,
+      },
+    });
 
-    if (userMode) {
-      // User mode: Only BrainVault panel
-      dockview.addPanel({
-        id: 'brainvault',
-        component: 'brainvault',
-        title: '🔐 Wallet',
-        params: {
-          closeable: false,
-        },
-      });
-    } else {
-      // Dev mode: Full layout
-      const graph3d = dockview.addPanel({
-        id: 'graph3d',
-        component: 'graph3d',
-        title: '🌐 Graph3D',
-        params: {
-          closeable: false,
-        },
-      });
+    const architect = dockview.addPanel({
+      id: 'architect',
+      component: 'architect',
+      title: '🎬 Architect',
+      position: { direction: 'right', referencePanel: 'graph3d' },
+      params: {
+        closeable: false,
+      },
+    });
 
-      const architect = dockview.addPanel({
-        id: 'architect',
-        component: 'architect',
-        title: '🎬 Architect',
-        position: { direction: 'right', referencePanel: 'graph3d' },
-        params: {
-          closeable: false,
-        },
-      });
+    // ALL panels after Architect get inactive:true to prevent stealing focus
 
-      // ALL panels after Architect get inactive:true to prevent stealing focus
+    dockview.addPanel({
+      id: 'jurisdiction',
+      component: 'jurisdiction',
+      title: '🏛️ Jurisdiction',
+      position: { direction: 'within', referencePanel: 'architect' },
+      inactive: true,
+      params: {
+        closeable: false, // Core panel - cannot close
+      },
+    });
 
-      dockview.addPanel({
-        id: 'jurisdiction',
-        component: 'jurisdiction',
-        title: '🏛️ Jurisdiction',
-        position: { direction: 'within', referencePanel: 'architect' },
-        inactive: true,
-        params: {
-          closeable: false, // Core panel - cannot close
-        },
-      });
+    dockview.addPanel({
+      id: 'runtime-io',
+      component: 'runtime-io',
+      title: '🔄 Runtime I/O',
+      position: { direction: 'within', referencePanel: 'architect' },
+      inactive: true,
+      params: {
+        closeable: false, // Core panel - cannot close
+      },
+    });
 
-      dockview.addPanel({
-        id: 'runtime-io',
-        component: 'runtime-io',
-        title: '🔄 Runtime I/O',
-        position: { direction: 'within', referencePanel: 'architect' },
-        inactive: true,
-        params: {
-          closeable: false, // Core panel - cannot close
-        },
-      });
-
-      dockview.addPanel({
-        id: 'settings',
-        component: 'settings',
-        title: '⚙️ Settings',
-        position: { direction: 'within', referencePanel: 'architect' },
-        inactive: true,
-        params: {
-          closeable: false, // Core panel - cannot close
-        },
-      });
-    }
+    dockview.addPanel({
+      id: 'settings',
+      component: 'settings',
+      title: '⚙️ Settings',
+      position: { direction: 'within', referencePanel: 'architect' },
+      inactive: true,
+      params: {
+        closeable: false, // Core panel - cannot close
+      },
+    });
 
     // REMOVED PANELS (merged elsewhere):
     // - Insurance: now in EntityPanel after Reserves
@@ -718,7 +709,15 @@
 </script>
 
 <div class="view-wrapper" class:embed-mode={embedMode}>
-  <div class="view-container" class:with-timemachine={!collapsed} bind:this={container}></div>
+  <!-- User mode: BrainVault full-screen (not in dockview) -->
+  {#if userMode}
+    <div class="user-mode-container">
+      <BrainVaultView />
+    </div>
+  {:else}
+    <!-- Dev mode: Dockview with all panels -->
+    <div class="view-container" class:with-timemachine={!collapsed} bind:this={container}></div>
+  {/if}
 
   <!-- TimeMachine - Visible in dev mode only (user mode = simple, no time travel) -->
   {#if !userMode}
@@ -772,6 +771,13 @@
     background: #1e1e1e;
     display: flex;
     flex-direction: column;
+  }
+
+  .user-mode-container {
+    flex: 1;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
   }
 
   .view-container {
