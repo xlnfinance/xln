@@ -8,7 +8,7 @@
   import { browser } from '$app/environment';
   import BrainVaultView from '$lib/components/Views/BrainVaultView.svelte';
   import View from '$lib/view/View.svelte';
-  import { appMode, toggleMode } from '$lib/stores/modeStore';
+  import { appState, toggleMode } from '$lib/stores/appStateStore';
 
   // Parse URL params for dev mode
   let embedMode = false;
@@ -21,7 +21,7 @@
 </script>
 
 <svelte:head>
-  <title>xln - {$appMode === 'user' ? 'Wallet' : 'Network Workspace'}</title>
+  <title>xln - {$appState.mode === 'user' ? 'Wallet' : 'Network Workspace'}</title>
 </svelte:head>
 
 <!-- View.svelte is base layout for everything -->
@@ -32,16 +32,16 @@
   networkMode="simnet"
   {embedMode}
   {scenarioId}
-  userMode={$appMode === 'user'}
+  userMode={$appState.mode === 'user'}
 />
 
 <!-- Mode Toggle Button (bottom-right) -->
 <button
   class="mode-toggle"
   on:click={() => toggleMode()}
-  title="Switch to {$appMode === 'user' ? 'developer' : 'user'} mode"
+  title="Switch to {$appState.mode === 'user' ? 'developer' : 'user'} mode"
 >
-  {$appMode === 'user' ? 'Dev' : 'User'}
+  {$appState.mode === 'user' ? 'Dev' : 'User'}
 </button>
 
 <style>
