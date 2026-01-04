@@ -41,6 +41,16 @@
   let dockview: DockviewComponent;
   let unsubOpenEntity: (() => void) | null = null;
 
+  // Track mode changes to rebuild layout
+  let currentMode = userMode;
+
+  // Reactive: Rebuild panels when userMode changes
+  $: if (dockview && currentMode !== userMode) {
+    console.log(`[View] 🔄 Mode changed: ${currentMode ? 'user' : 'dev'} → ${userMode ? 'user' : 'dev'}`);
+    currentMode = userMode;
+    rebuildPanels();
+  }
+
   // TimeMachine draggable state
   let timeMachinePosition: 'bottom' | 'top' | 'left' | 'right' = 'bottom';
   let collapsed = false;
@@ -610,6 +620,77 @@
       const widthPercent = showSidebarInEmbed ? 0.70 : 1.0;
       graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
       console.log(`[View] Embed sidebar ${showSidebarInEmbed ? 'shown' : 'hidden'}`);
+    }
+  }
+
+  // Function to rebuild panels when mode toggles
+  function rebuildPanels() {
+    if (!dockview) return;
+
+    console.log(`[View] 🔄 Rebuilding for ${userMode ? 'user' : 'dev'} mode...`);
+
+    // Clear all panels
+    const panels = [...dockview.panels];
+    for (const panel of panels) {
+      dockview.removePanel(panel);
+    }
+
+    // Recreate panels based on mode
+    if (userMode) {
+      // User mode: Only BrainVault
+      dockview.addPanel({
+        id: 'brainvault',
+        component: 'brainvault',
+        title: '🔐 Wallet',
+        params: { closeable: false },
+      });
+      console.log('[View] ✅ User mode layout');
+    } else {
+      // Dev mode: Full IDE
+      const graph3d = dockview.addPanel({
+        id: 'graph3d',
+        component: 'graph3d',
+        title: '🌐 Graph3D',
+        params: { closeable: false },
+      });
+
+      const architect = dockview.addPanel({
+        id: 'architect',
+        component: 'architect',
+        title: '🎬 Architect',
+        position: { direction: 'right', referencePanel: 'graph3d' },
+        params: { closeable: false },
+      });
+
+      dockview.addPanel({
+        id: 'jurisdiction',
+        component: 'jurisdiction',
+        title: '🏛️ Jurisdiction',
+        position: { direction: 'within', referencePanel: 'architect' },
+        inactive: true,
+        params: { closeable: false },
+      });
+
+      dockview.addPanel({
+        id: 'runtime-io',
+        component: 'runtime-io',
+        title: '🔄 Runtime I/O',
+        position: { direction: 'within', referencePanel: 'architect' },
+        inactive: true,
+        params: { closeable: false },
+      });
+
+      dockview.addPanel({
+        id: 'settings',
+        component: 'settings',
+        title: '⚙️ Settings',
+        position: { direction: 'within', referencePanel: 'architect' },
+        inactive: true,
+        params: { closeable: false },
+      });
+
+      setTimeout(() => graph3d.api.setSize({ width: window.innerWidth * 0.70 }), 100);
+      console.log('[View] ✅ Dev mode layout');
     }
   }
 
