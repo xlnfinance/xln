@@ -20,6 +20,7 @@
   import SettlementPanel from './SettlementPanel.svelte';
   import InsurancePanel from '$lib/view/panels/InsurancePanel.svelte';
   import HtlcActivityPanel from './HtlcActivityPanel.svelte';
+  import SwapPanel from './SwapPanel.svelte';
   import UserOrdersPanel from '../Trading/UserOrdersPanel.svelte';
   import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
   import { xlnFunctions } from '../../stores/xlnStore';
@@ -81,6 +82,7 @@
   $: controlsExpanded = $settings.componentStates[`controls-${tab.id}`] ?? false;
   $: htlcExpanded = $settings.componentStates[`htlc-${tab.id}`] ?? false;
   $: swapOrdersExpanded = $settings.componentStates[`swaporders-${tab.id}`] ?? false;
+  $: swapExpanded = $settings.componentStates[`swap-${tab.id}`] ?? false;
   $: orderbookExpanded = $settings.componentStates[`orderbook-${tab.id}`] ?? false;
 
   function toggleComponent(componentId: string) {
@@ -595,6 +597,30 @@
       style="max-height: none; overflow-y: auto;"
     >
       <SettlementPanel entityId={replica?.entityId || tab.entityId} />
+    </div>
+  </div>
+
+  <!-- Swap Trading Controls -->
+  <div
+    class="entity-component"
+    class:collapsed={!swapExpanded}
+  >
+    <div
+      class="component-header"
+      role="button"
+      tabindex="0"
+      on:click={() => toggleComponent(`swap-${tab.id}`)}
+      on:keydown={(e) => e.key === 'Enter' && toggleComponent(`swap-${tab.id}`)}
+    >
+      <span class="component-icon">💱</span>
+      <span class="component-title">Swap Trading</span>
+      <span class="toggle-icon">{swapExpanded ? '▼' : '▶'}</span>
+    </div>
+    <div
+      class="component-content"
+      style="max-height: none; overflow-y: auto;"
+    >
+      <SwapPanel replica={replica} {tab} />
     </div>
   </div>
     {/if}
