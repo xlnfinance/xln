@@ -1375,9 +1375,9 @@
   <!-- Main Content -->
   <div class="main-content">
 
-    <!-- INPUT SECTION - Always visible, inline with derivation -->
+    <!-- INPUT SECTION - Always visible at top -->
     {#if phase === 'input' || phase === 'deriving'}
-      <div class="glass-card input-section" class:inline={phase === 'deriving'}>
+      <div class="glass-card input-section">
         <!-- Resume Banner -->
         {#if showResumeInput}
           <div class="resume-banner">
@@ -2345,11 +2345,9 @@
   }
 
   /* Input section minimized during derivation */
-  .input-section.inline {
-    opacity: 0.5;
-    pointer-events: none;
-    transform: scale(0.95);
-    transition: all 0.3s ease;
+  /* Input section stays visible during derivation */
+  .input-section {
+    margin-bottom: 24px; /* Space for derivation section below */
   }
 
   .glass-card::before {
