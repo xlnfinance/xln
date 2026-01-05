@@ -1621,18 +1621,21 @@ export async function ahb(env: Env): Promise<void> {
   console.log('\n\n⚔️⚔️⚔️ PHASE 6: SIMULTANEOUS BIDIRECTIONAL PAYMENTS ⚔️⚔️⚔️\n');
   console.log('Testing consensus rollback when both sides propose at same tick\n');
 
-  // CRITICAL: Ensure Hub has capacity to send (exhausted after Phase 5 rebalancing)
-  console.log('💳 Setting up bidirectional capacity for Phase 6...');
+  // CRITICAL: For Hub to send to Alice, ALICE must extend credit TO Hub
+  // extendCredit semantic: "I extend credit to counterparty" = "counterparty can borrow from me"
+  console.log('💳 Alice extending credit to Hub (so Hub can send)...');
   await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
+    entityId: alice.id,  // Alice is creditor
+    signerId: alice.signer,
     entityTxs: [{
       type: 'extendCredit',
-      data: { counterpartyEntityId: alice.id, tokenId: USDC_TOKEN_ID, amount: usd(100_000) }
+      data: { counterpartyEntityId: hub.id, tokenId: USDC_TOKEN_ID, amount: usd(100_000) }
     }]
   }]);
-  await process(env);
-  console.log('   ✅ Hub→Alice capacity restored\n');
+  await process(env); // Propose
+  await process(env); // ACK
+  await process(env); // Commit
+  console.log('   ✅ Hub can now send to Alice (rightCreditLimit set)\n');
 
   const aliceToHub = usd(10_000);
   const hubToAlice = usd(5_000);
