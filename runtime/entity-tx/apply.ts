@@ -521,28 +521,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         return { newState, outputs: [] };
       }
 
-      // VALIDATION 1/2: Check capacity at EntityTx level (fail-fast, user-facing)
-      const { deriveDelta } = await import('../account-utils');
-      const delta = accountMachine.deltas.get(tokenId);
-      if (!delta) {
-        logError("ENTITY_TX", `❌ No delta for token ${tokenId} in account with ${nextHop}`);
-        addMessage(newState, `❌ Payment failed: Token ${tokenId} not configured`);
-        return { newState, outputs: [] };
-      }
-
-      // Determine if sender (current entity) is LEFT
-      const senderIsLeft = entityState.entityId === accountMachine.leftEntity;
-      const senderDerived = deriveDelta(delta, senderIsLeft);
-
-      if (amount > senderDerived.outCapacity) {
-        const error = `Insufficient capacity: need ${amount}, available ${senderDerived.outCapacity}`;
-        logError("ENTITY_TX", `❌ CAPACITY-CHECK: ${error}`);
-        addMessage(newState, `❌ Payment failed: ${error}`);
-        console.log(`💸 ❌ VALIDATION-FAIL: ${error}`);
-        return { newState, outputs: [] }; // Fail immediately, don't queue
-      }
-
-      console.log(`💸 ✅ CAPACITY-OK: ${amount} <= ${senderDerived.outCapacity} (available capacity)`);
+      // Capacity validation deferred to account-level (bilateral consensus)
+      // Entity-level state may be stale before bilateral frames settle
 
       // Create AccountTx for the payment
       // CRITICAL: ALWAYS include fromEntityId/toEntityId for deterministic consensus
