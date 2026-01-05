@@ -1368,14 +1368,8 @@
     <div class="light-flood" style="--progress: {progress}"></div>
   {/if}
 
-  <!-- Header - minimalist (logo hidden for professional fintech UI) -->
+  <!-- Header - minimalist (no logo, clean fintech UI) -->
   <div class="header" class:deriving={phase === 'deriving'}>
-    {#if phase === 'complete'}
-      <!-- Only show subtle logo after completion -->
-      <div class="logo-subtle">
-        <img src="/img/l.png" alt="xln" class="triangle-logo-small" />
-      </div>
-    {/if}
   </div>
 
   <!-- Main Content -->
