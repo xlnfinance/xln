@@ -1513,20 +1513,10 @@
 
     <!-- DERIVATION OVERLAY - Shows cube grid below inputs during derivation -->
     {#if phase === 'deriving'}
-        <!-- Vault Door Animation - PHARAOH GOLD SHOW -->
-        <div class="vault-door-container" class:opening={progress >= 100} style="--progress: {progress}">
-          <!-- Golden dust particles floating -->
-          <div class="pharaoh-dust"></div>
-          <!-- Golden light rays emanating from pyramid -->
-          <div class="pharaoh-rays"></div>
-          <!-- Golden light flood that intensifies with progress -->
-          <div class="pharaoh-flood"></div>
-
-          <div class="vault-split-left"></div>
-          <div class="vault-split-right"></div>
-
-          <!-- Monumental Pyramid Visualization -->
-          <div class="pyramid-visualization">
+        <!-- Clean progress container (no pharaoh effects) -->
+        <div class="clean-progress-container">
+          <!-- Simple progress display -->
+          <div class="simple-progress">
             <div class="pyramid-logo" style="--progress: {progress}%">
               <!-- Pyramid triangle removed - minimalist UI -->
               <div class="pyramid-glow pharaoh-glow"></div>
