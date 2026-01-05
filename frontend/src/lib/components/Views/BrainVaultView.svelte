@@ -282,8 +282,16 @@
   const hardwareCores = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4;
   // Generous limits - user can experiment (512GB machine can handle 100+ workers)
   const memoryBasedMax = Math.floor(deviceMemoryGB * 1024 / 256); // 1 worker per 256MB
-  let maxWorkers = Math.min(hardwareCores * 2, 64); // Cap at 64 or 2x cores (whichever is smaller)
-  let targetWorkerCount = Math.min(hardwareCores * 2, 64); // Start at 2x cores for better parallelism
+
+  // M3 Ultra optimization: 32 cores → 128 workers (Argon2id is memory-bound)
+  const computeMaxWorkers = () => {
+    const coreBased = hardwareCores * 4; // 4x for memory-bound (32 cores → 128)
+    const memBased = Math.min(memoryBasedMax, 256); // Cap at 256 (diminishing returns)
+    return Math.min(coreBased, memBased);
+  };
+
+  let maxWorkers = computeMaxWorkers();
+  let targetWorkerCount = Math.min(hardwareCores * 2, maxWorkers); // Start at 2x cores
 
   // Reactive memory calculations - show TARGET for immediate feedback, not actual workerCount
   $: allocatedMemoryMB = targetWorkerCount * 256;
@@ -835,7 +843,9 @@
 
   let nameHashHexGlobal = '';
   let nextShardToDispatch = 0;
-  const BATCH_SIZE = 16; // Shards per batch - larger batches reduce message overhead
+
+  // Dynamic batch size: more workers = larger batches (M3 Ultra: 32-64 shards/batch)
+  $: BATCH_SIZE = targetWorkerCount >= 64 ? 32 : targetWorkerCount >= 32 ? 24 : 16;
 
   function dispatchShards(nameHashHex: string) {
     nameHashHexGlobal = nameHashHex;
