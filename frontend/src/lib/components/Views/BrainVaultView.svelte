@@ -293,6 +293,11 @@
   let maxWorkers = computeMaxWorkers();
   let targetWorkerCount = Math.min(hardwareCores * 2, maxWorkers); // Start at 2x cores
 
+  // Reactive: Adjust workers when user changes slider during derivation
+  $: if (phase === 'deriving' && targetWorkerCount !== workerCount) {
+    adjustWorkers();
+  }
+
   // Reactive memory calculations - show TARGET for immediate feedback, not actual workerCount
   $: allocatedMemoryMB = targetWorkerCount * 256;
   $: memoryPercent = Math.min(100, (allocatedMemoryMB / deviceMemoryMB) * 100);
