@@ -743,7 +743,38 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       return { newState, outputs, mempoolOps };
     }
 
-    if (entityTx.type === 'cancelSwap') {
+    if (entityTx.type === 'fillSwapOffer') {
+      // Alias for swap fill/resolve
+      console.log(`💱 FILL-SWAP-OFFER: ${entityState.entityId.slice(-4)} filling offer`);
+
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
+      const { offerId, counterpartyId, fillRatio } = entityTx.data;
+
+      const accountMachine = newState.accounts.get(counterpartyId);
+      if (!accountMachine) {
+        console.error(`❌ No account with ${counterpartyId.slice(-4)}`);
+        return { newState: entityState, outputs: [] };
+      }
+
+      // Create swap_resolve AccountTx
+      const accountTx: AccountTx = {
+        type: 'swap_resolve',
+        data: { offerId, fillRatio, cancelRemainder: false },
+      };
+
+      mempoolOps.push({ accountId: counterpartyId, tx: accountTx });
+
+      const firstValidator = entityState.config.validators[0];
+      if (firstValidator) {
+        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
+      }
+
+      return { newState, outputs, mempoolOps };
+    }
+
+    if (entityTx.type === 'cancelSwapOffer' || entityTx.type === 'cancelSwap') {
       console.log(`📊 CANCEL-SWAP: ${entityState.entityId.slice(-4)} cancelling offer with ${entityTx.data.counterpartyEntityId.slice(-4)}`);
 
       const newState = cloneEntityState(entityState);
