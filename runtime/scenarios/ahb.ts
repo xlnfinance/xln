@@ -49,10 +49,15 @@ const ONE_TOKEN = 10n ** DECIMALS;
 
 const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 
-const AHB_STRESS = process.env.AHB_STRESS === '1';
-const AHB_STRESS_ITERS = Number.parseInt(process.env.AHB_STRESS_ITERS || '100', 10);
-const AHB_STRESS_AMOUNT_USD = Number.parseInt(process.env.AHB_STRESS_AMOUNT || '1', 10);
-const AHB_STRESS_DRAIN_EVERY = Number.parseInt(process.env.AHB_STRESS_DRAIN_EVERY || '0', 10);
+// Browser-safe env access (process.env only in Node)
+const isBrowser = typeof window !== 'undefined';
+const getEnv = (key: string, defaultVal: string) =>
+  isBrowser ? defaultVal : (typeof process !== 'undefined' ? process.env[key] || defaultVal : defaultVal);
+
+const AHB_STRESS = getEnv('AHB_STRESS', '0') === '1';
+const AHB_STRESS_ITERS = Number.parseInt(getEnv('AHB_STRESS_ITERS', '100'), 10);
+const AHB_STRESS_AMOUNT_USD = Number.parseInt(getEnv('AHB_STRESS_AMOUNT', '1'), 10);
+const AHB_STRESS_DRAIN_EVERY = Number.parseInt(getEnv('AHB_STRESS_DRAIN_EVERY', '0'), 10);
 
 // Jurisdiction name for AHB demo
 const AHB_JURISDICTION = 'AHB Demo';
