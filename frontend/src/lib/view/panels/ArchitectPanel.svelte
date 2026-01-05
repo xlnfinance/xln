@@ -508,6 +508,62 @@
     }
   }
 
+  /** Start Swap Market (8 users, 3 orderbooks) */
+  async function runSwapMarket() {
+    if (!requireLiveMode('run swap-market')) return;
+    loading = true;
+    try {
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      $isolatedEnv.eReplicas.clear();
+      $isolatedEnv.history = [];
+
+      console.log('[SWAP-MARKET] Running...');
+      await XLN.scenarios.swapMarket($isolatedEnv);
+
+      const frames = $isolatedEnv.history || [];
+      isolatedIsLive.set(false);
+      isolatedTimeIndex.set(0);
+      isolatedHistory.set(frames);
+      isolatedEnv.set($isolatedEnv);
+
+      lastAction = `Swap Market: ${frames.length} frames`;
+    } catch (err: any) {
+      lastAction = `❌ ${err.message}`;
+    } finally {
+      loading = false;
+    }
+  }
+
+  /** Start Rapid Fire stress test */
+  async function runRapidFire() {
+    if (!requireLiveMode('run rapid-fire')) return;
+    loading = true;
+    try {
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+
+      $isolatedEnv.eReplicas.clear();
+      $isolatedEnv.history = [];
+
+      console.log('[RAPID-FIRE] Running...');
+      await XLN.scenarios.rapidFire($isolatedEnv);
+
+      const frames = $isolatedEnv.history || [];
+      isolatedIsLive.set(false);
+      isolatedTimeIndex.set(0);
+      isolatedHistory.set(frames);
+      isolatedEnv.set($isolatedEnv);
+
+      lastAction = `Rapid Fire: ${frames.length} frames`;
+    } catch (err: any) {
+      lastAction = `❌ ${err.message}`;
+    } finally {
+      loading = false;
+    }
+  }
+
   /** Reset to fresh runtime instance */
   async function resetScenario() {
     console.log('[Reset] Creating fresh runtime instance...');
@@ -2591,6 +2647,30 @@
               <div class="info">
                 <strong>HTLC Payments</strong>
                 <p>Hash-locked · Multi-hop routing</p>
+              </div>
+            </button>
+
+            <button class="preset-item" on:click={startSwapTutorial} disabled={loading}>
+              <span class="icon">⇄</span>
+              <div class="info">
+                <strong>Token Swaps</strong>
+                <p>Bilateral · Partial fills</p>
+              </div>
+            </button>
+
+            <button class="preset-item" on:click={runSwapMarket} disabled={loading}>
+              <span class="icon">💱</span>
+              <div class="info">
+                <strong>Swap Market</strong>
+                <p>8 users · 3 orderbooks · Realistic trading</p>
+              </div>
+            </button>
+
+            <button class="preset-item" on:click={runRapidFire} disabled={loading}>
+              <span class="icon">⚡</span>
+              <div class="info">
+                <strong>Rapid Fire</strong>
+                <p>200 payments · Stress test · 1600 tx/s</p>
               </div>
             </button>
 
