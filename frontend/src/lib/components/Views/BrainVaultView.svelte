@@ -1368,20 +1368,22 @@
     <div class="light-flood" style="--progress: {progress}"></div>
   {/if}
 
-  <!-- Header with Monumental Triangle - 2x larger -->
+  <!-- Header - minimalist (logo hidden for professional fintech UI) -->
   <div class="header" class:deriving={phase === 'deriving'}>
-    <div class="logo-monument monument-xl" class:deriving={phase === 'deriving'}>
-      <div class="logo-glow" class:active={phase === 'deriving'}></div>
-      <img src="/img/l.png" alt="xln" class="triangle-logo" class:deriving={phase === 'deriving'} class:complete={phase === 'complete'} />
-    </div>
+    {#if phase === 'complete'}
+      <!-- Only show subtle logo after completion -->
+      <div class="logo-subtle">
+        <img src="/img/l.png" alt="xln" class="triangle-logo-small" />
+      </div>
+    {/if}
   </div>
 
   <!-- Main Content -->
   <div class="main-content">
 
-    <!-- INPUT SECTION - Always visible, minimized during derivation -->
+    <!-- INPUT SECTION - Always visible, inline with derivation -->
     {#if phase === 'input' || phase === 'deriving'}
-      <div class="glass-card input-section" class:minimized={phase === 'deriving'}>
+      <div class="glass-card input-section" class:inline={phase === 'deriving'}>
         <!-- Resume Banner -->
         {#if showResumeInput}
           <div class="resume-banner">
@@ -1532,7 +1534,7 @@
           <!-- Monumental Pyramid Visualization -->
           <div class="pyramid-visualization">
             <div class="pyramid-logo" style="--progress: {progress}%">
-              <img src="/img/l.png" alt="xln" class="pyramid-triangle pharaoh-blazing" />
+              <!-- Pyramid triangle removed - minimalist UI -->
               <div class="pyramid-glow pharaoh-glow"></div>
               <!-- Light escaping from pyramid cracks -->
               <div class="pharaoh-crack left"></div>
@@ -2349,7 +2351,7 @@
   }
 
   /* Input section minimized during derivation */
-  .input-section.minimized {
+  .input-section.inline {
     opacity: 0.5;
     pointer-events: none;
     transform: scale(0.95);
