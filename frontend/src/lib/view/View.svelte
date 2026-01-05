@@ -632,16 +632,23 @@
       });
 
       // Show BrainVault (create if doesn't exist)
-      let bvPanel = dockview.getPanel('brainvault');
+      const bvPanel = dockview.getPanel('brainvault');
       if (!bvPanel) {
-        dockview.addPanel({
-          id: 'brainvault',
-          component: 'brainvault',
-          title: '🔐 Wallet',
-          params: { closeable: false },
-        });
+        try {
+          dockview.addPanel({
+            id: 'brainvault',
+            component: 'brainvault',
+            title: '🔐 Wallet',
+            params: { closeable: false },
+          });
+          console.log('[View] ✅ Created BrainVault panel');
+        } catch (e) {
+          console.warn('[View] BrainVault panel already exists (race condition)', e);
+        }
+      } else {
+        console.log('[View] ✅ BrainVault panel already exists, reusing');
       }
-      console.log('[View] ✅ User mode - BrainVault visible, dev panels removed');
+      console.log('[View] ✅ User mode active - dev panels removed');
     } else {
       // Dev mode: Remove BrainVault, recreate dev panels
       const bvPanel = dockview.getPanel('brainvault');
