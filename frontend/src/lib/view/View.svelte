@@ -360,7 +360,9 @@
               const data = pendingEntityData.get(panelId);
 
               if (!data) {
-                console.error('[View] ❌ No pending data for:', panelId);
+                console.warn('[View] ⚠️ No data for panel (entity no longer exists):', panelId);
+                // Close panel instead of erroring (entity from old scenario)
+                parameters.api.close();
                 return;
               }
 
