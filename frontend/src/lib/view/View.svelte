@@ -471,17 +471,19 @@
     // - Insurance: now in EntityPanel after Reserves
     // - Solvency: now in RuntimeIOPanel as first section
 
-    // Restore saved layout if available
+    // Restore saved layout if available (clear on any error)
     if (shouldRestoreLayout && savedLayout) {
       setTimeout(() => {
         try {
           const config = JSON.parse(savedLayout);
           if (config.dockview) {
             dockview.fromJSON(config.dockview);
-            console.log('[View] ✅ Layout restored from localStorage');
+            console.log('[View] ✅ Layout restored');
           }
         } catch (err) {
-          console.warn('[View] Failed to restore layout:', err);
+          console.warn('[View] Layout restore failed, clearing:', err);
+          localStorage.removeItem('xln-dockview-layout');
+          localStorage.removeItem('dockview-layout');
         }
       }, 100);
     } else {
