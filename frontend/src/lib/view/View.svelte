@@ -654,15 +654,17 @@
       const bvPanel = dockview.getPanel('brainvault');
       if (bvPanel) bvPanel.api.close();
 
-      // Recreate dev panels if they don't exist
+      // Recreate dev panels (check each individually)
       if (!dockview.getPanel('graph3d')) {
-        const graph3d = dockview.addPanel({
+        dockview.addPanel({
           id: 'graph3d',
           component: 'graph3d',
           title: '🌐 Graph3D',
           params: { closeable: false },
         });
+      }
 
+      if (!dockview.getPanel('architect')) {
         dockview.addPanel({
           id: 'architect',
           component: 'architect',
@@ -670,7 +672,9 @@
           position: { direction: 'right', referencePanel: 'graph3d' },
           params: { closeable: false },
         });
+      }
 
+      if (!dockview.getPanel('jurisdiction')) {
         dockview.addPanel({
           id: 'jurisdiction',
           component: 'jurisdiction',
@@ -679,7 +683,9 @@
           inactive: true,
           params: { closeable: false },
         });
+      }
 
+      if (!dockview.getPanel('runtime-io')) {
         dockview.addPanel({
           id: 'runtime-io',
           component: 'runtime-io',
@@ -688,7 +694,9 @@
           inactive: true,
           params: { closeable: false },
         });
+      }
 
+      if (!dockview.getPanel('settings')) {
         dockview.addPanel({
           id: 'settings',
           component: 'settings',
