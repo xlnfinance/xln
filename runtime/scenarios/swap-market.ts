@@ -360,7 +360,7 @@ export async function swapMarket(env: Env): Promise<void> {
 
   console.log('🎯 Takers executing market orders...\n');
 
-  // Carol buys ETH (sweeps best ask)
+  // Carol buys ETH (sweeps best ask via Hub)
   console.log('💱 Carol: Market buy 3 ETH (hits Bob\'s ask @ $3050)');
   await process(env, [{
     entityId: carol.id,
@@ -369,14 +369,14 @@ export async function swapMarket(env: Env): Promise<void> {
       type: 'fillSwapOffer',
       data: {
         offerId: 'bob-eth-ask',
-        counterpartyId: bob.id,
+        counterpartyId: hub.id, // Carol's account is with Hub
         fillRatio: Math.floor(MAX_FILL_RATIO * 0.6), // 60% fill = 3 ETH
       },
     }],
   }]);
-  console.log('  ✅ Carol bought 3 ETH for $9150\n');
+  console.log('  ✅ Carol bought 3 ETH via Hub\n');
 
-  // Dave sells BTC (hits Alice's bid)
+  // Dave sells BTC (hits Alice's bid via Hub)
   console.log('💱 Dave: Market sell 1 BTC (hits Alice\'s bid @ $59000)');
   await process(env, [{
     entityId: dave.id,
@@ -385,14 +385,14 @@ export async function swapMarket(env: Env): Promise<void> {
       type: 'fillSwapOffer',
       data: {
         offerId: 'alice-btc-bid',
-        counterpartyId: alice.id,
+        counterpartyId: hub.id, // Dave's account is with Hub
         fillRatio: MAX_FILL_RATIO, // 100% fill = 1 BTC
       },
     }],
   }]);
-  console.log('  ✅ Dave sold 1 BTC for $59000\n');
+  console.log('  ✅ Dave sold 1 BTC via Hub\n');
 
-  // Frank trades DAI (sweeps Bob's ask)
+  // Frank trades DAI (sweeps Bob's ask via Hub)
   console.log('💱 Frank: Market buy 10000 DAI (hits Bob\'s ask @ $1.001)');
   await process(env, [{
     entityId: frank.id,
@@ -401,7 +401,7 @@ export async function swapMarket(env: Env): Promise<void> {
       type: 'fillSwapOffer',
       data: {
         offerId: 'bob-dai-ask',
-        counterpartyId: bob.id,
+        counterpartyId: hub.id, // Frank's account is with Hub
         fillRatio: Math.floor(MAX_FILL_RATIO * 0.2), // 20% fill = 10000 DAI
       },
     }],
