@@ -21,6 +21,7 @@ import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
 import { snap, checkSolvency } from './helpers';
 import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime } from '../runtime-ascii';
+import { deriveDelta } from '../account-utils';
 
 // Lazy-loaded runtime functions to avoid circular dependency (runtime.ts imports this file)
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -1640,7 +1641,10 @@ export async function ahb(env: Env): Promise<void> {
   // CRITICAL: For Hub to send to Alice, ALICE must extend credit TO Hub
   // extendCredit semantic: "I extend credit to counterparty" = "counterparty can borrow from me"
   console.log('💳 Alice extending credit to Hub (so Hub can send)...');
-  const phase6Credit = usd(100_000);
+  const aliceToHub = usd(10_000);
+  const hubToAlice = usd(5_000);
+  const phase6Credit = usd(500_000); // Cover existing debt + payments
+
   await process(env, [{
     entityId: alice.id,  // Alice is creditor
     signerId: alice.signer,
@@ -1662,10 +1666,19 @@ export async function ahb(env: Env): Promise<void> {
     const mempoolClear = (aliceAccount.mempool.length === 0) && (hubAccount.mempool.length === 0);
     return Boolean(creditApplied && noPending && mempoolClear);
   }, 8, 'Phase 6 A→H credit convergence');
-  console.log('   ✅ Hub can now send to Alice (rightCreditLimit set)\n');
 
-  const aliceToHub = usd(10_000);
-  const hubToAlice = usd(5_000);
+  // Preflight: Verify both have capacity (fail-fast with clear error)
+  const [, aliceCheck] = findReplica(env, alice.id);
+  const [, hubCheck] = findReplica(env, hub.id);
+  const { deriveDelta } = await import('../account-utils');
+  const aliceCap = deriveDelta(aliceCheck.state.accounts.get(hub.id)!.deltas.get(USDC_TOKEN_ID)!, true).outCapacity;
+  const hubCap = deriveDelta(hubCheck.state.accounts.get(alice.id)!.deltas.get(USDC_TOKEN_ID)!, false).outCapacity;
+
+  console.log(`   Alice capacity: ${aliceCap} (need ${aliceToHub})`);
+  console.log(`   Hub capacity: ${hubCap} (need ${hubToAlice})`);
+  assert(aliceCap >= aliceToHub, `Alice insufficient: need ${aliceToHub}, has ${aliceCap}`);
+  assert(hubCap >= hubToAlice, `Hub insufficient: need ${hubToAlice}, has ${hubCap}`);
+  console.log('   ✅ Both have capacity\n');
 
   console.log('💥 SIMULTANEOUS: Alice→Hub $10K + Hub→Alice $5K (SAME TICK)');
 
