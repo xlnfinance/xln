@@ -361,8 +361,7 @@
 
               if (!data) {
                 console.warn('[View] ⚠️ No data for panel (entity no longer exists):', panelId);
-                // Close panel instead of erroring (entity from old scenario)
-                parameters.api.close();
+                // Can't close during init - just skip mounting, dockview will clean up
                 return;
               }
 
