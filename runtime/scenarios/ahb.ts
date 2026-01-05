@@ -1832,6 +1832,30 @@ export async function ahb(env: Env): Promise<void> {
   console.log('   - Rollback + re-proposal: ✅');
   console.log('   - sentTransitions counter: ✅\n');
 
+  // ============================================================================
+  // PHASE 7: DISPUTE GAME (On-Chain Enforcement)
+  // ============================================================================
+  // TODO: Test dispute resolution with 5 J-frame delay
+  // 1. Alice creates fraudulent state (inflates her balance)
+  // 2. Hub submits initialDisputeProof to Depository.sol
+  // 3. Wait 5 J-frames (dispute window)
+  // 4. Hub submits finalDisputeProof with correct account state
+  // 5. Verify: Hub wins dispute, Alice loses collateral
+  // 6. Verify: Account state enforced on-chain matches bilateral consensus
+  //
+  // This proves:
+  // - Account proof hashes are correctly generated
+  // - Depository.sol validates proofs correctly
+  // - Dispute mechanism enforces bilateral consensus on-chain
+  // - 5 J-frame window sufficient for counterparty response
+  //
+  // Implementation needs:
+  // - buildDisputeProof() from proof-builder.ts
+  // - Submit via processBatch with initialDisputeProof/finalDisputeProof
+  // - Advance J-machine by 5 blocks
+  // - Verify collateral seizure via enforceDebts()
+  console.log('⚠️  PHASE 7 (DISPUTE GAME): Not yet implemented - see TODO above\n');
+
   if (AHB_STRESS) {
     const stressIters = Number.isFinite(AHB_STRESS_ITERS) && AHB_STRESS_ITERS > 0 ? AHB_STRESS_ITERS : 100;
     const stressUsd = Number.isFinite(AHB_STRESS_AMOUNT_USD) && AHB_STRESS_AMOUNT_USD > 0 ? AHB_STRESS_AMOUNT_USD : 1;
@@ -1929,6 +1953,7 @@ export async function ahb(env: Env): Promise<void> {
     console.log('Phase 4: Reverse payment B→H→A ($50K) - net $200K');
     console.log('Phase 5: Rebalancing - TR $200K → $0');
     console.log('Phase 6: Simultaneous bidirectional payments (rollback test)');
+    console.log('Phase 7: Dispute game (TODO - on-chain enforcement)');
     console.log('=====================================\n');
     console.log(`[AHB] History frames: ${env.history?.length}`);
   } finally {
