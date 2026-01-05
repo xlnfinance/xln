@@ -531,7 +531,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       // Determine if sender (current entity) is LEFT
-      const senderIsLeft = entityState.entityId === accountMachine.proofHeader.fromEntity;
+      const senderIsLeft = entityState.entityId === accountMachine.leftEntity;
       const senderDerived = deriveDelta(delta, senderIsLeft);
 
       if (amount > senderDerived.outCapacity) {
