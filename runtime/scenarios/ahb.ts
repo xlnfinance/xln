@@ -101,6 +101,22 @@ async function processJEvents(env: Env): Promise<void> {
   }
 }
 
+async function processUntil(
+  env: Env,
+  predicate: () => boolean,
+  maxRounds: number = 10,
+  label: string = 'condition'
+): Promise<void> {
+  const process = await getProcess();
+  for (let round = 0; round < maxRounds; round++) {
+    if (predicate()) return;
+    await process(env);
+  }
+  if (!predicate()) {
+    throw new Error(`processUntil: ${label} not satisfied after ${maxRounds} rounds`);
+  }
+}
+
 
 
 /**
@@ -1624,17 +1640,28 @@ export async function ahb(env: Env): Promise<void> {
   // CRITICAL: For Hub to send to Alice, ALICE must extend credit TO Hub
   // extendCredit semantic: "I extend credit to counterparty" = "counterparty can borrow from me"
   console.log('💳 Alice extending credit to Hub (so Hub can send)...');
+  const phase6Credit = usd(100_000);
   await process(env, [{
     entityId: alice.id,  // Alice is creditor
     signerId: alice.signer,
     entityTxs: [{
       type: 'extendCredit',
-      data: { counterpartyEntityId: hub.id, tokenId: USDC_TOKEN_ID, amount: usd(100_000) }
+      data: { counterpartyEntityId: hub.id, tokenId: USDC_TOKEN_ID, amount: phase6Credit }
     }]
   }]);
-  await process(env); // Propose
-  await process(env); // ACK
-  await process(env); // Commit
+  await processUntil(env, () => {
+    const [, aliceRep] = findReplica(env, alice.id);
+    const [, hubRep] = findReplica(env, hub.id);
+    const aliceAccount = aliceRep.state.accounts.get(hub.id);
+    const hubAccount = hubRep.state.accounts.get(alice.id);
+    if (!aliceAccount || !hubAccount) return false;
+    const aliceDelta = aliceAccount.deltas.get(USDC_TOKEN_ID);
+    const hubDelta = hubAccount.deltas.get(USDC_TOKEN_ID);
+    const creditApplied = aliceDelta?.rightCreditLimit === phase6Credit && hubDelta?.rightCreditLimit === phase6Credit;
+    const noPending = !aliceAccount.pendingFrame && !hubAccount.pendingFrame;
+    const mempoolClear = (aliceAccount.mempool.length === 0) && (hubAccount.mempool.length === 0);
+    return Boolean(creditApplied && noPending && mempoolClear);
+  }, 8, 'Phase 6 A→H credit convergence');
   console.log('   ✅ Hub can now send to Alice (rightCreditLimit set)\n');
 
   const aliceToHub = usd(10_000);
