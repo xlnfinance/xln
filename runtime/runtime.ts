@@ -1832,6 +1832,16 @@ export const scenarios = {
     await multiPartyTrading(env); // Phase 3: Add Carol + Dave, multi-party
     return env;
   },
+  swapMarket: async (env: Env): Promise<Env> => {
+    const { swapMarket } = await import('./scenarios/swap-market');
+    await swapMarket(env);
+    return env;
+  },
+  rapidFire: async (env: Env): Promise<Env> => {
+    const { rapidFire } = await import('./scenarios/rapid-fire');
+    await rapidFire(env);
+    return env;
+  },
   grid: async (env: Env): Promise<Env> => {
     const { grid } = await import('./scenarios/grid');
     await grid(env);
