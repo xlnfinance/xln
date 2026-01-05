@@ -26,7 +26,7 @@ export const EVM_NETWORKS: EVMNetwork[] = [
     chainId: 8453,
     name: 'Base',
     symbol: 'ETH',
-    rpcUrl: 'https://mainnet.base.org',  // Official Base RPC (CORS-enabled)
+    rpcUrl: 'https://base.llamarpc.com',  // Public RPC with CORS support
     explorerUrl: 'https://basescan.org',
     explorerName: 'Basescan',
     isTestnet: false,

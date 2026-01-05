@@ -180,7 +180,7 @@ export async function rapidFire(env: Env): Promise<void> {
 
   const paymentAmount = ONE; // $1 per payment
   const paymentCount = 100;
-  const batchSize = 10; // Send 10 at a time to avoid overwhelming
+  const batchSize = 5; // Smaller batches for better convergence
 
   let forwardCount = 0;
   let reverseCount = 0;
@@ -231,8 +231,8 @@ export async function rapidFire(env: Env): Promise<void> {
     // Submit batch
     await process(env, batchInputs);
 
-    // Allow bilateral consensus to settle
-    await converge(env, 20);
+    // Allow bilateral consensus to settle (more rounds for multi-hop)
+    await converge(env, 50); // Each payment is 2 hops (A→H, H→B), needs ~8 rounds each
 
     const elapsed = Date.now() - batchStart;
     if (batch % 2 === 0) {
@@ -245,8 +245,8 @@ export async function rapidFire(env: Env): Promise<void> {
   console.log(`   Throughput: ${((forwardCount + reverseCount) / (totalTime / 1000)).toFixed(1)} payments/sec`);
 
   // Final convergence - drain all pending ACKs
-  console.log('\n🔄 Final convergence (draining pending frames)...');
-  await converge(env, 50); // Allow up to 50 rounds for full settlement
+  console.log('\n🔄 Final convergence (draining all pending frames)...');
+  await converge(env, 200); // High-load needs many rounds to drain
   console.log('   ✅ All frames settled\n');
 
   // ============================================================================
