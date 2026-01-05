@@ -254,13 +254,11 @@
       console.error('[View] ❌ Failed to initialize XLN:', err);
     }
 
-    // Skip Dockview creation in user mode (BrainVault rendered directly)
-    if (userMode) {
-      console.log('[View] User mode - skipping Dockview creation');
-      return;
-    }
+    // ALWAYS create Dockview (hide in user mode, show in dev mode)
+    // This allows mode switching without recreating dockview
+    console.log('[View] Creating Dockview (mode will toggle visibility)...');
 
-    // Create Dockview (dev mode only)
+    // Create Dockview
     dockview = new DockviewComponent(container, {
       className: 'dockview-theme-dark',
       createComponent: (options) => {
