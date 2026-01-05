@@ -49,6 +49,11 @@ const ONE_TOKEN = 10n ** DECIMALS;
 
 const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 
+const AHB_STRESS = process.env.AHB_STRESS === '1';
+const AHB_STRESS_ITERS = Number.parseInt(process.env.AHB_STRESS_ITERS || '100', 10);
+const AHB_STRESS_AMOUNT_USD = Number.parseInt(process.env.AHB_STRESS_AMOUNT || '1', 10);
+const AHB_STRESS_DRAIN_EVERY = Number.parseInt(process.env.AHB_STRESS_DRAIN_EVERY || '0', 10);
+
 // Jurisdiction name for AHB demo
 const AHB_JURISDICTION = 'AHB Demo';
 
@@ -1758,13 +1763,18 @@ export async function ahb(env: Env): Promise<void> {
     // Collect events from this round
     const afterRound = env.history?.length || 0;
     if (afterRound > beforeRound) {
-      const latestSnapshot = env.history![afterRound - 1];
-      const frameEvents = latestSnapshot?.events || [];
-      for (const evt of frameEvents) {
-        consensusEvents.push(evt);
-        if (evt.includes('ROLLBACK')) rollbackDetected = true;
-        if (evt.includes('LEFT-WINS')) leftWinsDetected = true;
-        console.log(`   📋 Event: ${evt}`);
+      for (let i = beforeRound; i < afterRound; i++) {
+        const snapshot = env.history![i];
+        const frameLogs = (snapshot as any)?.logs || (snapshot as any)?.frameLogs || [];
+        for (const entry of frameLogs) {
+          if (entry.category !== 'consensus') continue;
+          const msg = entry.message || '';
+          if (!msg) continue;
+          consensusEvents.push(msg);
+          if (msg.includes('ROLLBACK')) rollbackDetected = true;
+          if (msg.includes('LEFT-WINS')) leftWinsDetected = true;
+          console.log(`   📋 Event: ${msg}`);
+        }
       }
     }
 
@@ -1821,6 +1831,84 @@ export async function ahb(env: Env): Promise<void> {
   console.log('   - Hub→Alice $5K: ✅');
   console.log('   - Rollback + re-proposal: ✅');
   console.log('   - sentTransitions counter: ✅\n');
+
+  if (AHB_STRESS) {
+    const stressIters = Number.isFinite(AHB_STRESS_ITERS) && AHB_STRESS_ITERS > 0 ? AHB_STRESS_ITERS : 100;
+    const stressUsd = Number.isFinite(AHB_STRESS_AMOUNT_USD) && AHB_STRESS_AMOUNT_USD > 0 ? AHB_STRESS_AMOUNT_USD : 1;
+    const stressAmount = usd(stressUsd);
+
+    console.log(`\n🚧 PHASE 7: STRESS TEST (${stressIters} ticks, $${stressUsd} both directions)`);
+
+    const stressDeltaBefore = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
+    for (let i = 0; i < stressIters; i++) {
+      await process(env, [
+        {
+          entityId: alice.id,
+          signerId: alice.signer,
+          entityTxs: [{
+            type: 'directPayment',
+            data: {
+              targetEntityId: hub.id,
+              tokenId: USDC_TOKEN_ID,
+              amount: stressAmount,
+              route: [alice.id, hub.id],
+              description: `Stress A→H #${i + 1}`
+            }
+          }]
+        },
+        {
+          entityId: hub.id,
+          signerId: hub.signer,
+          entityTxs: [{
+            type: 'directPayment',
+            data: {
+              targetEntityId: alice.id,
+              tokenId: USDC_TOKEN_ID,
+              amount: stressAmount,
+              route: [hub.id, alice.id],
+              description: `Stress H→A #${i + 1}`
+            }
+          }]
+        }
+      ]);
+
+      if (AHB_STRESS_DRAIN_EVERY > 0 && (i + 1) % AHB_STRESS_DRAIN_EVERY === 0) {
+        await processUntil(env, () => {
+          const [, aliceRep] = findReplica(env, alice.id);
+          const [, hubRep] = findReplica(env, hub.id);
+          const aliceAccount = aliceRep.state.accounts.get(hub.id);
+          const hubAccount = hubRep.state.accounts.get(alice.id);
+          const noPendingFrames = !aliceAccount?.pendingFrame && !hubAccount?.pendingFrame;
+          const mempoolClear = (aliceAccount?.mempool.length === 0) && (hubAccount?.mempool.length === 0);
+          const noPendingOutputs = (env.pendingOutputs?.length || 0) === 0;
+          return Boolean(noPendingFrames && mempoolClear && noPendingOutputs);
+        }, Math.max(400, AHB_STRESS_DRAIN_EVERY * 20), `Phase 7 batch drain @${i + 1}/${stressIters}`);
+      }
+    }
+
+    await processUntil(env, () => {
+      const [, aliceRep] = findReplica(env, alice.id);
+      const [, hubRep] = findReplica(env, hub.id);
+      const aliceAccount = aliceRep.state.accounts.get(hub.id);
+      const hubAccount = hubRep.state.accounts.get(alice.id);
+      const noPendingFrames = !aliceAccount?.pendingFrame && !hubAccount?.pendingFrame;
+      const mempoolClear = (aliceAccount?.mempool.length === 0) && (hubAccount?.mempool.length === 0);
+      const noPendingOutputs = (env.pendingOutputs?.length || 0) === 0;
+      return Boolean(noPendingFrames && mempoolClear && noPendingOutputs);
+    }, Math.max(800, stressIters * 20), 'Phase 7 ACK drain');
+
+    const stressDeltaAfter = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
+    console.log(`   Stress delta before: ${stressDeltaBefore}`);
+    console.log(`   Stress delta after:  ${stressDeltaAfter}`);
+    assert(
+      stressDeltaAfter === stressDeltaBefore,
+      `Stress net delta changed: before=${stressDeltaBefore} after=${stressDeltaAfter}`,
+      env
+    );
+
+    assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'STRESS - Alice-Hub');
+    console.log('   ✅ Stress test: net delta stable + bilateral sync');
+  }
 
     // FINAL BILATERAL SYNC CHECK - All accounts must be synced
     console.log('\n🔍 FINAL VERIFICATION: All bilateral accounts...');
