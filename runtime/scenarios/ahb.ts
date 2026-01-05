@@ -1670,7 +1670,6 @@ export async function ahb(env: Env): Promise<void> {
   // Preflight: Verify both have capacity (fail-fast with clear error)
   const [, aliceCheck] = findReplica(env, alice.id);
   const [, hubCheck] = findReplica(env, hub.id);
-  const { deriveDelta } = await import('../account-utils');
   const aliceCap = deriveDelta(aliceCheck.state.accounts.get(hub.id)!.deltas.get(USDC_TOKEN_ID)!, true).outCapacity;
   const hubCap = deriveDelta(hubCheck.state.accounts.get(alice.id)!.deltas.get(USDC_TOKEN_ID)!, false).outCapacity;
 
@@ -1778,6 +1777,16 @@ export async function ahb(env: Env): Promise<void> {
 
     if (currentNet === targetNet) {
       console.log(`   ✅ Both payments settled after ${rounds} rounds`);
+      // Ensure any pending ACKs are processed before final sync checks.
+      await processUntil(env, () => {
+        const [, aliceRep] = findReplica(env, alice.id);
+        const [, hubRep] = findReplica(env, hub.id);
+        const aliceAccount = aliceRep.state.accounts.get(hub.id);
+        const hubAccount = hubRep.state.accounts.get(alice.id);
+        const noPendingFrames = !aliceAccount?.pendingFrame && !hubAccount?.pendingFrame;
+        const noPendingOutputs = (env.pendingOutputs?.length || 0) === 0;
+        return Boolean(noPendingFrames && noPendingOutputs);
+      }, 8, 'Phase 6 ACK drain');
       break;
     }
   }
