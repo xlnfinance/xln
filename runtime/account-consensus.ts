@@ -617,6 +617,11 @@ export async function handleAccountInput(
 
         // EMIT EVENT: Track LEFT wins tiebreaker
         events.push(`📤 LEFT-WINS: Ignored RIGHT's frame ${receivedFrame.height} (waiting for their ACK)`);
+        env.info('consensus', 'LEFT-WINS', {
+          fromEntity: accountMachine.proofHeader.fromEntity,
+          toEntity: accountMachine.proofHeader.toEntity,
+          height: receivedFrame.height,
+        }, accountMachine.proofHeader.fromEntity);
 
         // CRITICAL FIX: Even though we ignore their frame, check mempool and send update if we have new txs
         // This prevents j_event_claims from getting stuck when both sides propose simultaneously
@@ -642,6 +647,12 @@ export async function handleAccountInput(
 
             // EMIT EVENT: Track rollback for debugging
             events.push(`🔄 ROLLBACK: Discarded our frame ${accountMachine.pendingFrame.height}, restored ${restoredTxCount} txs to mempool`);
+            env.info('consensus', 'ROLLBACK', {
+              fromEntity: accountMachine.proofHeader.fromEntity,
+              toEntity: accountMachine.proofHeader.toEntity,
+              height: accountMachine.pendingFrame.height,
+              restoredTxCount,
+            }, accountMachine.proofHeader.fromEntity);
           }
 
           accountMachine.sentTransitions = 0;
