@@ -514,11 +514,35 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Check if we have an account with next hop
       // Account keyed by counterparty ID
-      if (!newState.accounts.has(nextHop)) {
+      const accountMachine = newState.accounts.get(nextHop);
+      if (!accountMachine) {
         logError("ENTITY_TX", `❌ No account with next hop: ${nextHop}`);
         addMessage(newState, `❌ Payment failed: No account with ${formatEntityId(nextHop)}`);
         return { newState, outputs: [] };
       }
+
+      // VALIDATION 1/2: Check capacity at EntityTx level (fail-fast, user-facing)
+      const { deriveDelta } = await import('../account-utils');
+      const delta = accountMachine.deltas.get(tokenId);
+      if (!delta) {
+        logError("ENTITY_TX", `❌ No delta for token ${tokenId} in account with ${nextHop}`);
+        addMessage(newState, `❌ Payment failed: Token ${tokenId} not configured`);
+        return { newState, outputs: [] };
+      }
+
+      // Determine if sender (current entity) is LEFT
+      const senderIsLeft = entityState.entityId === accountMachine.proofHeader.fromEntity;
+      const senderDerived = deriveDelta(delta, senderIsLeft);
+
+      if (amount > senderDerived.outCapacity) {
+        const error = `Insufficient capacity: need ${amount}, available ${senderDerived.outCapacity}`;
+        logError("ENTITY_TX", `❌ CAPACITY-CHECK: ${error}`);
+        addMessage(newState, `❌ Payment failed: ${error}`);
+        console.log(`💸 ❌ VALIDATION-FAIL: ${error}`);
+        return { newState, outputs: [] }; // Fail immediately, don't queue
+      }
+
+      console.log(`💸 ✅ CAPACITY-OK: ${amount} <= ${senderDerived.outCapacity} (available capacity)`);
 
       // Create AccountTx for the payment
       // CRITICAL: ALWAYS include fromEntityId/toEntityId for deterministic consensus
@@ -535,7 +559,6 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       };
 
       // Add to account machine mempool via pure mempoolOps
-      const accountMachine = newState.accounts.get(nextHop);
       if (accountMachine) {
         // Pure: return mempoolOp instead of mutating directly
         mempoolOps.push({ accountId: nextHop, tx: accountTx });
