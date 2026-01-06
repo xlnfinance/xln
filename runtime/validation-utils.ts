@@ -182,8 +182,13 @@ export function validateEntityInput(input: unknown): EntityInput {
     throw new Error(`FINANCIAL-SAFETY: signerId is missing or invalid - payment routing will fail`);
   }
 
-  if (!obj.entityTxs || !Array.isArray(obj.entityTxs)) {
-    throw new Error(`FINANCIAL-SAFETY: entityTxs is missing or invalid`);
+  // entityTxs optional if proposedFrame or precommits present (multi-signer proposals)
+  if (!obj.entityTxs && !obj.proposedFrame && !obj.precommits) {
+    throw new Error(`FINANCIAL-SAFETY: entityTxs, proposedFrame, or precommits required`);
+  }
+
+  if (obj.entityTxs && !Array.isArray(obj.entityTxs)) {
+    throw new Error(`FINANCIAL-SAFETY: entityTxs must be array`);
   }
 
   return obj as EntityInput;
