@@ -19,6 +19,7 @@
 
 import type { Env, EntityInput } from '../types';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
+import { findReplica, getOffdelta, converge, assert } from './helpers';
 
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
@@ -44,40 +45,7 @@ const DECIMALS = 18n;
 const ONE = 10n ** DECIMALS;
 const usd = (amount: number | bigint) => BigInt(amount) * ONE;
 
-function assert(condition: boolean, message: string): void {
-  if (!condition) throw new Error(`❌ ${message}`);
-  console.log(`✅ ${message}`);
-}
-
-async function converge(env: Env, maxCycles = 10): Promise<void> {
-  const process = await getProcess();
-  for (let i = 0; i < maxCycles; i++) {
-    await process(env);
-    let hasWork = false;
-    for (const [, replica] of env.eReplicas) {
-      for (const [, account] of replica.state.accounts) {
-        if (account.mempool.length > 0 || account.pendingFrame) {
-          hasWork = true;
-          break;
-        }
-      }
-      if (hasWork) break;
-    }
-    if (!hasWork) return;
-  }
-}
-
-function findReplica(env: Env, entityId: string) {
-  const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
-  if (!entry) throw new Error(`Replica not found: ${entityId}`);
-  return entry;
-}
-
-function getOffdelta(env: Env, leftId: string, rightId: string, tokenId: number): bigint {
-  const [, leftRep] = findReplica(env, leftId);
-  const account = leftRep.state.accounts.get(rightId);
-  return account?.deltas.get(tokenId)?.offdelta || 0n;
-}
+// Using helpers from helpers.ts (no duplication)
 
 export async function rapidFire(env: Env): Promise<void> {
   const process = await getProcess();
