@@ -277,7 +277,9 @@
 
   // Derivation state
   let workers: Worker[] = [];
+  const drainingWorkers = new Set<Worker>();
   let workerCount = 1;
+  let activeWorkerCount = 1;
   // Allow user to configure beyond hardwareConcurrency (they'll find sweet spot)
   const hardwareCores = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4;
   // Generous limits - user can experiment (512GB machine can handle 100+ workers)
@@ -292,9 +294,14 @@
 
   let maxWorkers = computeMaxWorkers();
   let targetWorkerCount = Math.min(hardwareCores * 2, maxWorkers); // Start at 2x cores
+  let effectiveTargetWorkerCount = targetWorkerCount;
+
+  $: effectiveTargetWorkerCount = shardCount > 0
+    ? Math.min(targetWorkerCount, shardCount)
+    : targetWorkerCount;
 
   // Reactive: Adjust workers when user changes slider during derivation
-  $: if (phase === 'deriving' && targetWorkerCount !== workerCount) {
+  $: if (phase === 'deriving' && effectiveTargetWorkerCount !== activeWorkerCount) {
     adjustWorkers();
   }
 
@@ -768,9 +775,64 @@
   // DERIVATION LOGIC
   // ============================================================================
 
+  function syncWorkerCounts(): void {
+    workerCount = workers.length;
+    activeWorkerCount = workers.length - drainingWorkers.size;
+  }
+
+  function isWorkerDraining(worker: Worker): boolean {
+    return drainingWorkers.has(worker);
+  }
+
+  function markWorkerDraining(worker: Worker): void {
+    if (!drainingWorkers.has(worker)) {
+      drainingWorkers.add(worker);
+      syncWorkerCounts();
+    }
+  }
+
+  function shutdownWorker(worker: Worker): void {
+    drainingWorkers.delete(worker);
+    const index = workers.indexOf(worker);
+    if (index >= 0) {
+      workers.splice(index, 1);
+    }
+    worker.terminate();
+    syncWorkerCounts();
+  }
+
+  function attachWorkerHandlers(
+    worker: Worker,
+    opts: { onReady?: () => void; onError?: (err: unknown) => void } = {}
+  ): void {
+    worker.onmessage = (e) => {
+      const { type, data } = e.data;
+
+      if (type === 'ready') {
+        opts.onReady?.();
+      } else if (type === 'probe_result') {
+        estimatedShardTimeMs = data.estimatedShardTimeMs;
+      } else if (type === 'shard_complete') {
+        handleShardComplete(data.shardIndex, data.resultHex, data.elapsedMs);
+      } else if (type === 'batch_complete') {
+        handleBatchComplete(worker);
+      } else if (type === 'error') {
+        console.error('Worker error:', data.message);
+      }
+    };
+
+    worker.onerror = (e) => {
+      console.error('Worker error:', e);
+      opts.onError?.(e);
+    };
+  }
+
   async function startDerivation() {
-    phase = 'deriving';
     shardCount = getShardCount(factor);
+    const initialWorkers = Math.min(targetWorkerCount, shardCount);
+    workerCount = initialWorkers;
+    activeWorkerCount = initialWorkers;
+    phase = 'deriving';
     shardsCompleted = 0;
     shardResults = new Map();
     shardStatus = Array(shardCount).fill('pending');
@@ -784,44 +846,32 @@
 
     // Create workers - start at targetWorkerCount (50% of maxWorkers by default)
     const cpuCores = navigator.hardwareConcurrency || 4;
-    workerCount = Math.min(targetWorkerCount, shardCount);
-    console.log(`[BrainVault] Using ${workerCount} workers (${cpuCores} cores, max ${maxWorkers}, starting at ${targetWorkerCount})`);
+    console.log(`[BrainVault] Using ${initialWorkers} workers (${cpuCores} cores, max ${maxWorkers}, starting at ${targetWorkerCount})`);
 
     // Hash the name first using the worker
     const nameHashHex = await workerHashName(name);
 
     // Create workers
     workers = [];
+    drainingWorkers.clear();
     const workerPromises: Promise<void>[] = [];
 
-    for (let i = 0; i < workerCount; i++) {
+    for (let i = 0; i < initialWorkers; i++) {
       const worker = new Worker('/brainvault-worker.js', { type: 'module' });
       workers.push(worker);
 
       const initPromise = new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('Worker init timeout')), 30000);
-
-        worker.onmessage = (e) => {
-          const { type, data } = e.data;
-
-          if (type === 'ready') {
+        attachWorkerHandlers(worker, {
+          onReady: () => {
             clearTimeout(timeout);
             resolve();
-          } else if (type === 'probe_result') {
-            estimatedShardTimeMs = data.estimatedShardTimeMs;
-          } else if (type === 'shard_complete') {
-            handleShardComplete(data.shardIndex, data.resultHex, data.elapsedMs);
-          } else if (type === 'batch_complete') {
-            handleBatchComplete(i); // Worker i finished batch, give it more work
-          } else if (type === 'error') {
-            console.error('Worker error:', data.message);
-          }
-        };
-
-        worker.onerror = (e) => {
-          clearTimeout(timeout);
-          reject(e);
-        };
+          },
+          onError: (err) => {
+            clearTimeout(timeout);
+            reject(err instanceof Error ? err : new Error('Worker init failed'));
+          },
+        });
       });
 
       worker.postMessage({ type: 'init', id: i });
@@ -829,6 +879,7 @@
     }
 
     try {
+      syncWorkerCounts();
       await Promise.all(workerPromises);
 
       // Probe first worker for time estimate
@@ -863,6 +914,7 @@
   }
 
   function dispatchBatchToWorker(worker: Worker) {
+    if (isWorkerDraining(worker)) return;
     if (nextShardToDispatch >= shardCount) return;
 
     // Calculate batch: min(BATCH_SIZE, remaining shards)
@@ -930,10 +982,15 @@
     }
   }
 
-  function handleBatchComplete(workerIndex: number) {
+  function handleBatchComplete(worker: Worker) {
+    if (isWorkerDraining(worker)) {
+      shutdownWorker(worker);
+      return;
+    }
+
     // Worker finished its batch, give it the next batch
-    if (workerIndex >= 0 && workerIndex < workers.length && nextShardToDispatch < shardCount) {
-      dispatchBatchToWorker(workers[workerIndex]!);
+    if (nextShardToDispatch < shardCount) {
+      dispatchBatchToWorker(worker);
     }
   }
 
@@ -1022,56 +1079,46 @@
       worker?.terminate();
     }
     workers = [];
+    drainingWorkers.clear();
+    syncWorkerCounts();
   }
 
   // Dynamic worker scaling based on user slider
   async function adjustWorkers() {
     if (phase !== 'deriving') return;
 
-    const currentCount = workers.length;
-    const target = targetWorkerCount;
+    const currentCount = activeWorkerCount;
+    const target = effectiveTargetWorkerCount;
 
     if (target < currentCount) {
-      // Scale down: terminate excess workers (they'll finish current shard first)
-      const excessWorkers = workers.splice(target);
-      for (const w of excessWorkers) {
-        w?.terminate();
+      // Scale down: drain excess workers (no new batches, terminate after batch_complete)
+      const activeWorkers = workers.filter(worker => !drainingWorkers.has(worker));
+      const excess = currentCount - target;
+      const toDrain = activeWorkers.slice(-1 * excess);
+      for (const worker of toDrain) {
+        markWorkerDraining(worker);
       }
-      workerCount = workers.length;
     } else if (target > currentCount && nextShardToDispatch < shardCount) {
       // Scale up: add more workers
       const workersToAdd = target - currentCount;
+      const currentTotal = workers.length;
 
       for (let i = 0; i < workersToAdd && nextShardToDispatch < shardCount; i++) {
         const worker = new Worker('/brainvault-worker.js', { type: 'module' });
         workers.push(worker);
 
-        // Set up message handler
-        worker.onmessage = (e) => {
-          const { type, data } = e.data;
-          if (type === 'ready') {
-            // Dispatch batch immediately
-            if (nextShardToDispatch < shardCount) {
+        attachWorkerHandlers(worker, {
+          onReady: () => {
+            if (nextShardToDispatch < shardCount && !isWorkerDraining(worker)) {
               dispatchBatchToWorker(worker);
             }
-          } else if (type === 'shard_complete') {
-            handleShardComplete(data.shardIndex, data.resultHex, data.elapsedMs);
-          } else if (type === 'batch_complete') {
-            const workerIndex = workers.indexOf(worker);
-            handleBatchComplete(workerIndex);
-          } else if (type === 'error') {
-            console.error('Worker error:', data.message);
-          }
-        };
+          },
+        });
 
-        worker.onerror = (e) => {
-          console.error('Worker error:', e);
-        };
-
-        worker.postMessage({ type: 'init', id: currentCount + i });
+        worker.postMessage({ type: 'init', id: currentTotal + i });
       }
-      workerCount = workers.length;
     }
+    syncWorkerCounts();
   }
 
   function saveResumeToken() {

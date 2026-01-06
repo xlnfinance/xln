@@ -17,7 +17,7 @@
 
 import type { Env, EntityInput } from '../types';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
-import { formatRuntime } from '../runtime-ascii';
+import { findReplica, converge, assert } from './helpers';
 
 // Lazy-loaded runtime functions
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -56,34 +56,7 @@ const dai = (amount: number | bigint) => BigInt(amount) * ONE;
 // Fill ratios
 const MAX_FILL_RATIO = 65535;
 
-function assert(condition: boolean, message: string): void {
-  if (!condition) throw new Error(`❌ ${message}`);
-  console.log(`✅ ${message}`);
-}
-
-async function converge(env: Env, maxCycles = 10): Promise<void> {
-  const process = await getProcess();
-  for (let i = 0; i < maxCycles; i++) {
-    await process(env);
-    let hasWork = false;
-    for (const [, replica] of env.eReplicas) {
-      for (const [, account] of replica.state.accounts) {
-        if (account.mempool.length > 0 || account.pendingFrame) {
-          hasWork = true;
-          break;
-        }
-      }
-      if (hasWork) break;
-    }
-    if (!hasWork) return;
-  }
-}
-
-function findReplica(env: Env, entityId: string) {
-  const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
-  if (!entry) throw new Error(`Replica for entity ${entityId} not found`);
-  return entry;
-}
+// Using helpers from helpers.ts (no duplication)
 
 export async function swapMarket(env: Env): Promise<void> {
   const process = await getProcess();
