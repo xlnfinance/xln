@@ -725,15 +725,12 @@
 </script>
 
 <div class="view-wrapper" class:embed-mode={embedMode}>
-  <!-- User mode: BrainVault full-screen (not in dockview) -->
-  {#if userMode}
-    <div class="user-mode-container">
-      <BrainVaultView />
-    </div>
-  {:else}
-    <!-- Dev mode: Dockview with all panels -->
-    <div class="view-container" class:with-timemachine={!collapsed} bind:this={container}></div>
-  {/if}
+  <!-- Always render both, toggle visibility via CSS -->
+  <div class="user-mode-container" class:hidden={!userMode}>
+    <BrainVaultView />
+  </div>
+
+  <div class="view-container" class:hidden={userMode} class:with-timemachine={!collapsed} bind:this={container}></div>
 
   <!-- TimeMachine - Visible in dev mode only (user mode = simple, no time travel) -->
   {#if !userMode}
@@ -796,10 +793,18 @@
     overflow: auto;
   }
 
+  .user-mode-container.hidden {
+    display: none;
+  }
+
   .view-container {
     flex: 1;
     width: 100%;
     min-height: 0; /* Allow flex shrink */
+  }
+
+  .view-container.hidden {
+    display: none;
   }
 
   .view-container.with-timemachine {
