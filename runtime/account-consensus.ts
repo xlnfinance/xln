@@ -16,7 +16,7 @@ import { AccountMachine, AccountFrame, AccountTx, AccountInput, Env, EntityState
 import { cloneAccountMachine, getAccountPerspective } from './state-helpers';
 import { isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-crypto';
-import { cryptoHash as hash, formatEntityId } from './utils';
+import { cryptoHash as hash, formatEntityId, HEAVY_LOGS } from './utils';
 import { logError } from './logger';
 import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
@@ -199,7 +199,7 @@ export async function proposeAccountFrame(
   }
 
   console.log(`✅ E-MACHINE: Creating frame with ${accountMachine.mempool.length} transactions...`);
-  console.log(`🔍 PROOF-HEADER: from=${formatEntityId(accountMachine.proofHeader.fromEntity)}, to=${formatEntityId(accountMachine.proofHeader.toEntity)}`);
+  if (HEAVY_LOGS) console.log(`🔍 PROOF-HEADER: from=${formatEntityId(accountMachine.proofHeader.fromEntity)}, to=${formatEntityId(accountMachine.proofHeader.toEntity)}`);
 
   // Clone account machine for validation
   const clonedMachine = cloneAccountMachine(accountMachine);
@@ -229,7 +229,7 @@ export async function proposeAccountFrame(
   }> = [];
   const swapOffersCancelled: Array<{ offerId: string; accountId: string }> = [];
 
-  console.log(`🔍 MEMPOOL-BEFORE-PROCESS: ${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
+  if (HEAVY_LOGS) console.log(`🔍 MEMPOOL-BEFORE-PROCESS: ${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
 
   for (const accountTx of accountMachine.mempool) {
     console.log(`   🔍 Processing accountTx type=${accountTx.type}`);
@@ -255,7 +255,7 @@ export async function proposeAccountFrame(
     allEvents.push(...result.events);
 
     // Collect revealed secrets for backward propagation
-    console.log(`🔍 TX-RESULT: type=${accountTx.type}, hasSecret=${!!result.secret}, hasHashlock=${!!result.hashlock}`);
+    if (HEAVY_LOGS) console.log(`🔍 TX-RESULT: type=${accountTx.type}, hasSecret=${!!result.secret}, hasHashlock=${!!result.hashlock}`);
     if (result.secret && result.hashlock) {
       console.log(`✅ Collected secret from ${accountTx.type}`);
       revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
@@ -444,10 +444,10 @@ export async function handleAccountInput(
       // For ACKs, counter should match or exceed ackedTransitions (to account for our proposal increment)
       // Just validate it's in valid range and not going backwards
       counterValid = input.counter > 0 && input.counter <= MAX_MESSAGE_COUNTER && input.counter >= accountMachine.ackedTransitions;
-      console.log(`🔍 Counter validation (ACK for pendingFrame): ${input.counter} vs acked=${accountMachine.ackedTransitions}, valid=${counterValid}`);
+      if (HEAVY_LOGS) console.log(`🔍 Counter validation (ACK for pendingFrame): ${input.counter} vs acked=${accountMachine.ackedTransitions}, valid=${counterValid}`);
     } else {
       counterValid = validateMessageCounter(accountMachine, input.counter);
-      console.log(`🔍 Counter validation: ${input.counter} vs acked=${accountMachine.ackedTransitions}, height=${accountMachine.currentHeight}, valid=${counterValid}`);
+      if (HEAVY_LOGS) console.log(`🔍 Counter validation: ${input.counter} vs acked=${accountMachine.ackedTransitions}, height=${accountMachine.currentHeight}, valid=${counterValid}`);
     }
 
     if (!counterValid) {
@@ -545,6 +545,9 @@ export async function handleAccountInput(
       accountMachine.sentTransitions = 0;
       delete accountMachine.clonedForValidation;
       accountMachine.rollbackCount = Math.max(0, accountMachine.rollbackCount - 1); // Successful confirmation reduces rollback
+      if (accountMachine.rollbackCount === 0) {
+        delete accountMachine.lastRollbackFrameHash; // Reset deduplication on full resolution
+      }
 
       console.log(`✅ PENDING-CLEARED: Frame ${input.height} confirmed, mempool now has ${accountMachine.mempool.length} txs: [${accountMachine.mempool.map(tx => tx.type).join(',')}]`);
       events.push(`✅ Frame ${input.height} confirmed and committed`);
@@ -566,7 +569,7 @@ export async function handleAccountInput(
             };
           }
         }
-        console.log(`🔍 RETURN-ACK-ONLY: frame ${input.height} ACKed, no new frame bundled`);
+        if (HEAVY_LOGS) console.log(`🔍 RETURN-ACK-ONLY: frame ${input.height} ACKed, no new frame bundled`);
         return { success: true, events, timedOutHashlocks };
       }
       // Fall through to process newAccountFrame below
@@ -609,7 +612,7 @@ export async function handleAccountInput(
 
       // Deterministic tiebreaker: Left always wins (CHANNEL.TS REFERENCE: Line 140-157)
       const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-      console.log(`🔍 TIEBREAKER: fromEntity=${accountMachine.proofHeader.fromEntity.slice(-4)}, toEntity=${accountMachine.proofHeader.toEntity.slice(-4)}, isLeft=${isLeftEntity}`);
+      if (HEAVY_LOGS) console.log(`🔍 TIEBREAKER: fromEntity=${accountMachine.proofHeader.fromEntity.slice(-4)}, toEntity=${accountMachine.proofHeader.toEntity.slice(-4)}, isLeft=${isLeftEntity}`);
 
       if (isLeftEntity) {
         // We are LEFT - ignore their frame, keep ours (deterministic tiebreaker)
@@ -635,7 +638,12 @@ export async function handleAccountInput(
         return { success: true, events };
       } else {
         // We are RIGHT - rollback our frame, accept theirs
-        if (accountMachine.rollbackCount === 0) {
+        // DEDUPLICATION: Check if we already rolled back this exact frame
+        const receivedHash = receivedFrame.stateHash;
+        if (accountMachine.lastRollbackFrameHash === receivedHash) {
+          console.log(`⚠️ ROLLBACK-DEDUPE: Already rolled back for frame ${receivedHash.slice(0, 16)}... - ignoring duplicate`);
+          // Don't increment rollbackCount again, just process their frame
+        } else if (accountMachine.rollbackCount === 0) {
           // First rollback - restore transactions to mempool before discarding frame
           let restoredTxCount = 0;
           if (accountMachine.pendingFrame) {
@@ -659,6 +667,7 @@ export async function handleAccountInput(
           delete accountMachine.pendingFrame;
           delete accountMachine.clonedForValidation;
           accountMachine.rollbackCount++;
+          accountMachine.lastRollbackFrameHash = receivedHash; // Track this rollback
           console.log(`📥 RIGHT-ROLLBACK: Accepting left's frame (rollbacks: ${accountMachine.rollbackCount})`);
 
           // EMIT EVENT: Track that we accepted LEFT's frame
@@ -666,29 +675,25 @@ export async function handleAccountInput(
 
           // Continue to process their frame below
         } else {
-          // Should never rollback twice
+          // Should never rollback twice (unless duplicate messages)
           console.warn(`⚠️ ROLLBACK-LIMIT: ${accountMachine.rollbackCount}x - consensus stalled`);
           return { success: false, error: 'Multiple rollbacks detected - consensus failure', events };
         }
       }
     }
 
-    // CHANNEL.TS REFERENCE: Lines 161-164 - Decrement rollbacks on successful confirmation
-    if (accountMachine.pendingFrame && receivedFrame.height === accountMachine.currentHeight + 1 && accountMachine.rollbackCount > 0) {
-      // They accepted our frame after we had rollbacks - decrement
-      accountMachine.rollbackCount--;
-      console.log(`✅ ROLLBACK-RESOLVED: They accepted our frame (rollbacks: ${accountMachine.rollbackCount})`);
-    }
+    // NOTE: rollbackCount decrement happens in ACK block (line 547) when pendingFrame confirmed
+    // This ensures we only decrement once per rollback resolution (no double-decrement)
 
     // Verify frame sequence
-    console.log(`🔍 SEQUENCE-CHECK: receivedFrame.height=${receivedFrame.height}, currentHeight=${accountMachine.currentHeight}, expected=${accountMachine.currentHeight + 1}`);
+    if (HEAVY_LOGS) console.log(`🔍 SEQUENCE-CHECK: receivedFrame.height=${receivedFrame.height}, currentHeight=${accountMachine.currentHeight}, expected=${accountMachine.currentHeight + 1}`);
     if (receivedFrame.height !== accountMachine.currentHeight + 1) {
       console.log(`❌ Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`);
       return { success: false, error: `Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`, events };
     }
 
     // SECURITY: Verify signatures (REQUIRED for all frames)
-    console.log(`🔍 SIG-CHECK: hasSignatures=${!!(input.newSignatures && input.newSignatures.length > 0)}`);
+    if (HEAVY_LOGS) console.log(`🔍 SIG-CHECK: hasSignatures=${!!(input.newSignatures && input.newSignatures.length > 0)}`);
     if (!input.newSignatures || input.newSignatures.length === 0) {
       return { success: false, error: 'SECURITY: Frame must have signatures', events };
     }
@@ -744,7 +749,7 @@ export async function handleAccountInput(
       }
       processEvents.push(...result.events);
 
-      console.log(`🔍 TX-PROCESSED: ${accountTx.type}, success=${result.success}`);
+      if (HEAVY_LOGS) console.log(`🔍 TX-PROCESSED: ${accountTx.type}, success=${result.success}`);
       // Collect revealed secrets (CRITICAL for multi-hop)
       if (result.secret && result.hashlock) {
         revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
@@ -782,7 +787,7 @@ export async function handleAccountInput(
       ourFinalDeltas.push(totalDelta);
     }
 
-    console.log(`🔍 RECEIVER: Computed ${ourFinalTokenIds.length} tokens after filtering: [${ourFinalTokenIds.join(', ')}]`);
+    if (HEAVY_LOGS) console.log(`🔍 RECEIVER: Computed ${ourFinalTokenIds.length} tokens after filtering: [${ourFinalTokenIds.join(', ')}]`);
 
     // CRITICAL: Extract FULL delta states for hash verification (same as proposer does)
     // This ensures hash verification includes credit limits, collateral, allowances
@@ -799,7 +804,7 @@ export async function handleAccountInput(
     const ourComputedState = Buffer.from(ourFinalDeltas.map(d => d.toString()).join(',')).toString('hex');
     const theirClaimedState = Buffer.from(receivedFrame.deltas.map(d => d.toString()).join(',')).toString('hex');
 
-    console.log(`🔍 STATE-VERIFY Frame ${receivedFrame.height}:`);
+    if (HEAVY_LOGS) console.log(`🔍 STATE-VERIFY Frame ${receivedFrame.height}:`);
     console.log(`  Our computed:  ${ourComputedState.slice(0, 32)}...`);
     console.log(`  Their claimed: ${theirClaimedState.slice(0, 32)}...`);
 
@@ -809,10 +814,10 @@ export async function handleAccountInput(
       return { success: false, error: `Bilateral consensus failure - states don't match`, events };
     }
 
-    console.log(`🔍 ABOUT-TO-VERIFY-HASH: Computing frame hash...`);
+    if (HEAVY_LOGS) console.log(`🔍 ABOUT-TO-VERIFY-HASH: Computing frame hash...`);
     // SECURITY: Verify full frame hash (tokenIds + fullDeltaStates + deltas)
     // This prevents accepting frames with poisoned dispute proofs
-    console.log(`🔍 COMPUTING-HASH: Creating hash for frame ${receivedFrame.height}...`);
+    if (HEAVY_LOGS) console.log(`🔍 COMPUTING-HASH: Creating hash for frame ${receivedFrame.height}...`);
     const recomputedHash = await createFrameHash({
       height: receivedFrame.height,
       timestamp: receivedFrame.timestamp,
@@ -848,7 +853,7 @@ export async function handleAccountInput(
     // RECEIVER COMMIT: Re-execute txs on REAL state (Channel.ts pattern)
     // This eliminates fragile manual field copying
     const { counterparty: cpForCommitLog } = getAccountPerspective(accountMachine, ourEntityId);
-    console.log(`🔍 RECEIVER-COMMIT: Re-executing ${receivedFrame.accountTxs.length} txs for ${cpForCommitLog.slice(-4)}`);
+    if (HEAVY_LOGS) console.log(`🔍 RECEIVER-COMMIT: Re-executing ${receivedFrame.accountTxs.length} txs for ${cpForCommitLog.slice(-4)}`);
 
     // Re-execute all frame txs on REAL accountMachine (deterministic)
     // CRITICAL: Use receivedFrame.timestamp for determinism (HTLC validation must use agreed consensus time)
@@ -927,7 +932,7 @@ export async function handleAccountInput(
       counter: 0, // Will be set below after batching decision
     };
 
-    console.log(`🔍 BATCH-CHECK for account ${input.fromEntityId.slice(-4)}: mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map(tx => tx.type).join(',')}]`);
+    if (HEAVY_LOGS) console.log(`🔍 BATCH-CHECK for account ${input.fromEntityId.slice(-4)}: mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map(tx => tx.type).join(',')}]`);
     if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
       console.log(`📦 BATCH-OPTIMIZATION: Sending ACK + new frame in single message (Channel.ts pattern)`);
 
@@ -970,11 +975,11 @@ export async function handleAccountInput(
       ...(proposeResult?.swapOffersCancelled || [])
     ];
 
-    console.log(`🔍 RETURN-RESPONSE: h=${response.height} prevSigs=${!!response.prevSignatures} newFrame=${!!response.newAccountFrame}`);
+    if (HEAVY_LOGS) console.log(`🔍 RETURN-RESPONSE: h=${response.height} prevSigs=${!!response.prevSignatures} newFrame=${!!response.newAccountFrame}`);
     return { success: true, response, events, revealedSecrets: allRevealedSecrets, swapOffersCreated: allSwapOffersCreated, swapOffersCancelled: allSwapOffersCancelled, timedOutHashlocks };
   }
 
-  console.log(`🔍 RETURN-NO-RESPONSE: No response object`);
+  if (HEAVY_LOGS) console.log(`🔍 RETURN-NO-RESPONSE: No response object`);
   return { success: true, events, swapOffersCreated: [], swapOffersCancelled: [], timedOutHashlocks };
 }
 

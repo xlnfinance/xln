@@ -707,7 +707,10 @@
           params: { closeable: false },
         });
 
-        setTimeout(() => graph3d.api.setSize({ width: window.innerWidth * 0.70 }), 100);
+        const graph3dApi = dockview.getPanel('graph3d');
+        if (graph3dApi) {
+          setTimeout(() => graph3dApi.api.setSize({ width: window.innerWidth * 0.70 }), 100);
+        }
       }
 
       console.log('[View] ✅ Dev mode - Dev panels visible, BrainVault removed');

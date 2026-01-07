@@ -59,6 +59,9 @@ const MAX_FILL_RATIO = 65535;
 // Using helpers from helpers.ts (no duplication)
 
 export async function swapMarket(env: Env): Promise<void> {
+  // Register test keys for real signatures
+  const { registerTestKeys } = await import('../account-crypto');
+  await registerTestKeys(['s1', 's2', 's3', 'hub', 'alice', 'bob', 'carol', 'dave', 'frank']);
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
 

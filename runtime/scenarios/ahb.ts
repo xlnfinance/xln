@@ -308,6 +308,10 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
 
 
 export async function ahb(env: Env): Promise<void> {
+  // Register test keys for real signatures (deterministic for scenarios)
+  const { registerTestKeys } = await import('../account-crypto');
+  await registerTestKeys(['s1', 's2', 's3', 's4', 'hub', 'alice', 'bob', 'bank']);
+
   const process = await getProcess();
   env.scenarioMode = true; // Deterministic time control (scenarios set env.timestamp manually)
 
