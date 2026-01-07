@@ -703,6 +703,7 @@ export interface AccountMachine {
 
   // Rollback support for bilateral disagreements
   rollbackCount: number;
+  lastRollbackFrameHash?: string; // Track last rollback to prevent duplicate increments
 
   // Bilateral J-event consensus (2-of-2 agreement on jurisdiction events)
   leftJObservations: Array<{ jHeight: number; jBlockHash: string; events: any[]; observedAt: number }>;

@@ -4,17 +4,13 @@
  * Runs core scenarios sequentially with a fresh env per run.
  * Optional stress run: SCENARIO_STRESS=1
  * Repeat runs: SCENARIO_ITERS=3
+ * Filter: SCENARIO_ONLY=swap-market
  *
  * Run with: bun runtime/scenarios/all-scenarios.ts
  */
 
 import type { Env } from '../types';
-
-type ScenarioSpec = {
-  name: string;
-  load?: () => Promise<(env: Env) => Promise<void>>;
-  skipReason?: string;
-};
+import { SCENARIOS, type ScenarioMetadata } from './index';
 
 type ScenarioResult = {
   name: string;
@@ -34,51 +30,35 @@ async function getCreateEmptyEnv(): Promise<() => Env> {
   return _createEmptyEnv;
 }
 
-const iterations = Math.max(1, Number.parseInt(process.env.SCENARIO_ITERS ?? '1', 10) || 1);
-const includeStress = process.env.SCENARIO_STRESS === '1';
+const isBrowser = typeof window !== 'undefined';
+const getEnvVar = (key: string, defaultVal: string) =>
+  isBrowser ? defaultVal : (typeof process !== 'undefined' ? process.env[key] || defaultVal : defaultVal);
 
-const scenarios: ScenarioSpec[] = [
-  { name: 'AHB', load: async () => (await import('./ahb')).ahb },
-  { name: 'HTLC AHB', load: async () => (await import('./lock-ahb')).lockAhb },
-  { name: 'HTLC 4-Hop', load: async () => (await import('./htlc-4hop')).test4HopHtlc },
-  { name: 'Swap Trading', load: async () => (await import('./swap')).swap },
-  { name: 'Swap Market', load: async () => (await import('./swap-market')).swapMarket },
-  { name: 'Grid', load: async () => (await import('./grid')).grid },
-];
+const iterations = Math.max(1, Number.parseInt(getEnvVar('SCENARIO_ITERS', '1'), 10) || 1);
+const includeStress = getEnvVar('SCENARIO_STRESS', '0') === '1';
+const onlyScenario = getEnvVar('SCENARIO_ONLY', ''); // Filter to single scenario
 
-if (includeStress) {
-  scenarios.push({ name: 'Rapid Fire', load: async () => (await import('./rapid-fire')).rapidFire });
-} else {
-  scenarios.push({ name: 'Rapid Fire', skipReason: 'known throughput limit (enable with SCENARIO_STRESS=1)' });
-}
+// Auto-filter scenarios based on env vars
+const scenariosToRun = SCENARIOS.filter(s => {
+  if (onlyScenario && s.id !== onlyScenario) return false;
+  if (!includeStress && s.tags.includes('stress')) return false;
+  return true;
+});
 
 async function runScenario(
-  spec: ScenarioSpec,
+  scenario: ScenarioMetadata,
   iteration: number,
   results: ScenarioResult[]
 ): Promise<void> {
-  if (spec.skipReason || !spec.load) {
-    results.push({
-      name: spec.name,
-      iteration: 0,
-      frames: 0,
-      duration: 0,
-      status: 'skip',
-      error: spec.skipReason,
-    });
-    return;
-  }
-
   const createEmptyEnv = await getCreateEmptyEnv();
-  const run = await spec.load();
   const env = createEmptyEnv();
   env.scenarioMode = true;
 
   const start = Date.now();
   try {
-    await run(env);
+    await scenario.run(env);
     results.push({
-      name: spec.name,
+      name: scenario.name,
       iteration,
       frames: env.history?.length || 0,
       duration: Date.now() - start,
@@ -86,7 +66,7 @@ async function runScenario(
     });
   } catch (err: any) {
     results.push({
-      name: spec.name,
+      name: scenario.name,
       iteration,
       frames: env.history?.length || 0,
       duration: Date.now() - start,
@@ -105,23 +85,16 @@ async function runAllScenarios() {
   const startTime = Date.now();
   const results: ScenarioResult[] = [];
 
-  for (const spec of scenarios) {
-    if (spec.skipReason) {
-      console.log(`\n📋 ${spec.name}: SKIPPED`);
-      console.log(`⚠️  ${spec.skipReason}\n`);
-      await runScenario(spec, 0, results);
-      continue;
-    }
-
+  for (const scenario of scenariosToRun) {
     for (let i = 1; i <= iterations; i++) {
-      const label = iterations > 1 ? `${spec.name} (run ${i}/${iterations})` : spec.name;
+      const label = iterations > 1 ? `${scenario.name} (run ${i}/${iterations})` : scenario.name;
       console.log(`\n📋 ${label}\n`);
-      await runScenario(spec, i, results);
+      await runScenario(scenario, i, results);
       const last = results[results.length - 1];
       if (last?.status === 'pass') {
-        console.log(`✅ ${spec.name}: ${last.frames} frames in ${last.duration}ms\n`);
+        console.log(`✅ ${scenario.name}: ${last.frames} frames in ${last.duration}ms\n`);
       } else if (last?.status === 'fail') {
-        console.error(`❌ ${spec.name} FAILED: ${last.error}\n`);
+        console.error(`❌ ${scenario.name} FAILED: ${last.error}\n`);
       }
     }
   }

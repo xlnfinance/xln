@@ -3,7 +3,7 @@ import { handleAccountInput as processAccountInput } from '../../account-consens
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective } from '../../state-helpers';
 import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
 import { HTLC } from '../../constants';
-import { formatEntityId } from '../../utils';
+import { formatEntityId, HEAVY_LOGS } from '../../utils';
 
 // === PURE EVENT TYPES ===
 // Events returned by handlers, applied by entity orchestrator
@@ -157,11 +157,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       const isNewFrame = Boolean(justCommittedFrame && justCommittedFrame.height > (accountMachine.currentHeight - 1));
 
       if (isNewFrame && justCommittedFrame?.accountTxs) {
-        console.log(`🔍 HTLC-CHECK: isNewFrame=${isNewFrame}, inputHeight=${justCommittedFrame.height}, currentHeight=${accountMachine.currentHeight}`);
-        console.log(`🔍 HTLC-CHECK: accountMachine.locks.size=${accountMachine.locks.size}`);
-        console.log(`🔍 FRAME-TXS: ${justCommittedFrame.accountTxs.length} txs in frame:`, justCommittedFrame.accountTxs.map(tx => tx.type));
+        if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: isNewFrame=${isNewFrame}, inputHeight=${justCommittedFrame.height}, currentHeight=${accountMachine.currentHeight}`);
+        if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: accountMachine.locks.size=${accountMachine.locks.size}`);
+        if (HEAVY_LOGS) console.log(`🔍 FRAME-TXS: ${justCommittedFrame.accountTxs.length} txs in frame:`, justCommittedFrame.accountTxs.map(tx => tx.type));
         for (const accountTx of justCommittedFrame.accountTxs) {
-          console.log(`🔍 HTLC-CHECK: Checking committed tx type=${accountTx.type}`);
+          if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: Checking committed tx type=${accountTx.type}`);
 
           // === J-EVENT BILATERAL CONSENSUS ===
           if (accountTx.type === 'j_event_claim') {
@@ -191,9 +191,9 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           }
 
           if (accountTx.type === 'htlc_lock') {
-            console.log(`🔍 HTLC-CHECK: Found htlc_lock in committed frame!`);
+            if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: Found htlc_lock in committed frame!`);
             const lock = accountMachine.locks.get(accountTx.data.lockId);
-            console.log(`🔍 HTLC-CHECK: lock found? ${!!lock}`);
+            if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: lock found? ${!!lock}`);
             if (!lock) {
               console.log(`❌ HTLC-CHECK: Lock not in accountMachine.locks (lockId=${accountTx.data.lockId.slice(0,16)}...)`);
               continue;
@@ -517,10 +517,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       // === HTLC SECRET PROPAGATION ===
       // Check if any reveals happened in this frame
       const revealedSecrets = result.revealedSecrets || [];
-      console.log(`🔍 HTLC-SECRET-CHECK: ${revealedSecrets.length} secrets revealed in frame`);
+      if (HEAVY_LOGS) console.log(`🔍 HTLC-SECRET-CHECK: ${revealedSecrets.length} secrets revealed in frame`);
 
       for (const { secret, hashlock } of revealedSecrets) {
-        console.log(`🔍 HTLC-SECRET: Processing revealed secret for hash ${hashlock.slice(0,16)}...`);
+        if (HEAVY_LOGS) console.log(`🔍 HTLC-SECRET: Processing revealed secret for hash ${hashlock.slice(0,16)}...`);
         const route = newState.htlcRoutes.get(hashlock);
         if (route) {
           // Store secret
@@ -586,6 +586,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         console.log(`📤 Sending response to ${result.response.toEntityId.slice(-4)}`);
 
         // Get target proposer
+        // IMPORTANT: Send only to PROPOSER - bilateral consensus between entity proposers
+        // Multi-validator entities sync account state via entity-level consensus (not bilateral broadcast)
         let targetProposerId = 'alice';
         const targetReplicaKeys = Array.from(env.eReplicas.keys()).filter(key =>
           key.startsWith(result.response!.toEntityId + ':')
@@ -758,9 +760,9 @@ export function processOrderbookSwaps(
       const accountId = namespacedOrderId.slice(0, lastColon);
 
       // Verify account exists in hub's state
-      console.log(`🔍 ORDERBOOK-LOOKUP: Looking for accountId="${accountId}"`);
-      console.log(`🔍 ORDERBOOK-LOOKUP: Hub accounts:`, Array.from(hubState.accounts.keys()));
-      console.log(`🔍 ORDERBOOK-LOOKUP: Match found:`, hubState.accounts.has(accountId));
+      if (HEAVY_LOGS) console.log(`🔍 ORDERBOOK-LOOKUP: Looking for accountId="${accountId}"`);
+      if (HEAVY_LOGS) console.log(`🔍 ORDERBOOK-LOOKUP: Hub accounts:`, Array.from(hubState.accounts.keys()));
+      if (HEAVY_LOGS) console.log(`🔍 ORDERBOOK-LOOKUP: Match found:`, hubState.accounts.has(accountId));
       if (!hubState.accounts.has(accountId)) {
         console.warn(`⚠️ ORDERBOOK: Account not found for swap_resolve, skipping`);
         console.warn(`   Looking for: "${accountId}"`);

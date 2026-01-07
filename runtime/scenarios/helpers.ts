@@ -64,6 +64,12 @@ export async function converge(env: Env, maxCycles = 10): Promise<void> {
     await process(env);
     let hasWork = false;
     for (const [, replica] of env.eReplicas) {
+      // Check entity-level work (multi-signer consensus)
+      if (replica.mempool.length > 0 || replica.proposal || replica.lockedFrame) {
+        hasWork = true;
+        break;
+      }
+      // Check account-level work (bilateral consensus)
       for (const [, account] of replica.state.accounts) {
         if (account.mempool.length > 0 || account.pendingFrame) {
           hasWork = true;

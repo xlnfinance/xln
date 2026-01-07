@@ -4,7 +4,7 @@ import { processProfileUpdate } from '../name-resolution';
 import { createOrderbookExtState } from '../orderbook';
 import { db } from '../runtime';
 import { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput } from '../types';
-import { DEBUG, log } from '../utils';
+import { DEBUG, HEAVY_LOGS, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { buildEntityProfile } from '../gossip-helper';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused

@@ -132,8 +132,9 @@ export const hash = (data: Buffer | string): Buffer => {
   return Buffer.from(result as any);
 };
 
-// Global debug flag
-export const DEBUG = true;
+// Global debug flags (disable for production-clean output)
+export const DEBUG = false; // General debug info (consensus checkpoints, critical events)
+export const HEAVY_LOGS = false; // Verbose traces (input details, signature checks, every frame step)
 
 // Function to clear the database and reset in-memory history
 export const clearDatabase = async (db?: any) => {

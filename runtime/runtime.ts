@@ -116,7 +116,7 @@ import {
   FINANCIAL_CONSTANTS
 } from './financial-utils';
 import { captureSnapshot, cloneEntityReplica } from './state-helpers';
-import { getEntityShortId, getEntityNumber, formatEntityId } from './utils';
+import { getEntityShortId, getEntityNumber, formatEntityId, HEAVY_LOGS } from './utils';
 import { safeStringify } from './serialization-utils';
 import { validateDelta, validateAccountDeltas, createDefaultDelta, isDelta, validateEntityInput, validateEntityOutput } from './validation-utils';
 import { EntityInput, EntityReplica, Env, RuntimeInput, JReplica } from './types';
@@ -387,7 +387,7 @@ const applyRuntimeInput = async (
 
     // Process J-layer inputs (queue to J-mempool)
     if (runtimeInput.jInputs && Array.isArray(runtimeInput.jInputs)) {
-      console.log(`🔍 J-Input processing: ${runtimeInput.jInputs.length} jInputs`);
+      if (HEAVY_LOGS) console.log(`🔍 J-Input processing: ${runtimeInput.jInputs.length} jInputs`);
       for (const jInput of runtimeInput.jInputs) {
         const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
         if (!jReplica) {
@@ -395,7 +395,7 @@ const applyRuntimeInput = async (
           continue;
         }
 
-        console.log(`🔍 J-Input has ${jInput.jTxs.length} JTxs for ${jInput.jurisdictionName}`);
+        if (HEAVY_LOGS) console.log(`🔍 J-Input has ${jInput.jTxs.length} JTxs for ${jInput.jurisdictionName}`);
         // Queue all JTxs to J-mempool with queuedAt timestamp
         for (const jTx of jInput.jTxs) {
           // Mark when added (for minimum 1-tick delay visualization)
@@ -647,24 +647,24 @@ const applyRuntimeInput = async (
       if (entityReplica) {
         if (DEBUG) {
           console.log(`Processing input for ${replicaKey}:`);
-          if (entityInput.entityTxs!.length) console.log(`  → ${entityInput.entityTxs!.length} transactions`);
+          if (entityInput.entityTxs?.length) console.log(`  → ${entityInput.entityTxs.length} transactions`);
           if (entityInput.proposedFrame) console.log(`  → Proposed frame: ${entityInput.proposedFrame.hash}`);
           if (entityInput.precommits?.size) console.log(`  → ${entityInput.precommits.size} precommits`);
         }
 
-        const { newState, outputs, jOutputs } = await applyEntityInput(env, entityReplica, entityInput);
+        const { newState, outputs, jOutputs, workingReplica } = await applyEntityInput(env, entityReplica, entityInput);
         // APPLY-ENTITY-INPUT-RESULT removed - too noisy
 
-        // IMMUTABILITY: Create fresh replica (working memory cleared, state updated)
-        // applyEntityInput clones internally, so mempool/proposal mutations stay local
-        // Reset working memory to prevent stale data from previous frames
+        // IMMUTABILITY: Update replica with new state from applyEntityInput
+        // CRITICAL: Preserve proposal/lockedFrame from workingReplica (multi-signer consensus)
+        // Only cleared when threshold reached and frame committed (handled in entity-consensus.ts)
         env.eReplicas.set(replicaKey, {
           ...entityReplica,
           state: newState,
-          mempool: [], // Fresh mempool (applyEntityInput already processed txs)
-          proposal: undefined, // Clear proposal after commit
-          lockedFrame: undefined, // Clear lock
-          sentTransitions: 0 // Reset counter
+          mempool: workingReplica.mempool, // Preserve mempool state
+          proposal: workingReplica.proposal, // CRITICAL: Preserve for multi-signer threshold
+          lockedFrame: workingReplica.lockedFrame, // CRITICAL: Preserve validator locks
+          sentTransitions: workingReplica.sentTransitions ?? 0, // Preserve counter
         });
 
         // FINTECH-LEVEL TYPE SAFETY: Validate all entity outputs before routing
@@ -1070,12 +1070,12 @@ const main = async (): Promise<Env> => {
 
   // Debug final state before starting j-watcher
   if (isBrowser) {
-    console.log(`🔍 BROWSER-DEBUG: Final state before j-watcher start:`);
-    console.log(`🔍   Environment height: ${env.height}`);
-    console.log(`🔍   Total replicas: ${env.eReplicas.size}`);
+    if (HEAVY_LOGS) console.log(`🔍 BROWSER-DEBUG: Final state before j-watcher start:`);
+    if (HEAVY_LOGS) console.log(`🔍   Environment height: ${env.height}`);
+    if (HEAVY_LOGS) console.log(`🔍   Total replicas: ${env.eReplicas.size}`);
     for (const [replicaKey, replica] of env.eReplicas.entries()) {
       const { entityId, signerId } = parseReplicaKey(replicaKey);
-      console.log(`🔍   Entity ${entityId.slice(0,10)}... (${signerId}): jBlock=${replica.state.lastFinalizedJHeight}, isProposer=${replica.isProposer}`);
+      if (HEAVY_LOGS) console.log(`🔍   Entity ${entityId.slice(0,10)}... (${signerId}): jBlock=${replica.state.lastFinalizedJHeight}, isProposer=${replica.isProposer}`);
     }
   }
 
@@ -1566,7 +1566,7 @@ export const process = async (
       const result = await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: allInputs });
 
       // DEBUG: Log what applyRuntimeInput returned
-      console.log(`🔍 PROCESS-DEBUG: applyRuntimeInput returned entityOutbox.length=${result.entityOutbox.length}`);
+      if (HEAVY_LOGS) console.log(`🔍 PROCESS-DEBUG: applyRuntimeInput returned entityOutbox.length=${result.entityOutbox.length}`);
 
       // Store outputs for NEXT tick
       env.pendingOutputs = result.entityOutbox;
@@ -1590,7 +1590,7 @@ export const process = async (
 
         // Debug logging
         if (mempool.length > 0) {
-          console.log(`🔍 [J-Machine ${jName}] mempool=${mempool.length}, elapsed=${elapsed}ms, blockDelay=${blockDelayMs}ms, ready=${elapsed >= blockDelayMs}`);
+          if (HEAVY_LOGS) console.log(`🔍 [J-Machine ${jName}] mempool=${mempool.length}, elapsed=${elapsed}ms, blockDelay=${blockDelayMs}ms, ready=${elapsed >= blockDelayMs}`);
         }
 
         // Check if mempool items are ready (minimum 1 tick delay for visualization)
@@ -1861,6 +1861,10 @@ export const prepopulateFullMechanics = scenarios.fullMechanics;
 export { parseScenario, mergeAndSortEvents } from './scenarios/parser.js';
 export { executeScenario } from './scenarios/executor.js';
 export { loadScenarioFromFile, loadScenarioFromText } from './scenarios/loader.js';
+export { SCENARIOS, getScenario, getScenariosByTag, type ScenarioMetadata } from './scenarios/index.js';
+
+// === CRYPTOGRAPHIC SIGNATURES ===
+export { deriveSignerKey, registerSignerKey, registerTestKeys, clearSignerKeys, signAccountFrame, verifyAccountSignature } from './account-crypto.js';
 
 // === NAME RESOLUTION WRAPPERS (override imports) ===
 const searchEntityNames = (query: string, limit?: number) => searchEntityNamesOriginal(db, query, limit);
