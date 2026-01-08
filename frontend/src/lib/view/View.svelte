@@ -798,6 +798,7 @@
     width: 100%;
     height: 100%;
     overflow: auto;
+    padding-bottom: 52px; /* Space for TimeMachine bar */
   }
 
   .user-mode-container.hidden {

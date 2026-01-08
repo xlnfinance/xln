@@ -80,33 +80,39 @@
       : (currentFrame?.jReplicas ? Object.keys(currentFrame.jReplicas).length : 0)
   );
 
-  // Solvency calculation
+  // Solvency calculation (LEFT-only to avoid double-counting)
   const solvency = $derived.by(() => {
     if (!currentFrame?.eReplicas) return { reserves: 0n, collateral: 0n, total: 0n };
 
     let reserves = 0n;
     let collateral = 0n;
 
-    const replicas = currentFrame.eReplicas instanceof Map
-      ? Array.from(currentFrame.eReplicas.values())
-      : Object.values(currentFrame.eReplicas || {});
+    const replicaEntries = currentFrame.eReplicas instanceof Map
+      ? Array.from(currentFrame.eReplicas.entries())
+      : Object.entries(currentFrame.eReplicas || {});
 
-    for (const replica of replicas) {
-      // Sum reserves
-      const res = (replica as any).state?.reserves;
+    for (const entry of replicaEntries) {
+      const [key, replica] = entry as [string, any];
+      const parts = key.split(':');
+      const eId = parts[0] || '';
+      // Sum reserves (always count - reserves are per-entity)
+      const res = replica?.state?.reserves;
       if (res instanceof Map) {
         for (const amt of res.values()) {
           reserves += BigInt(amt || 0);
         }
       }
-      // Sum collateral from accounts
-      const accts = (replica as any).state?.accounts;
+      // Sum collateral ONLY from LEFT perspective (eId < aId)
+      const accts = replica?.state?.accounts;
       if (accts instanceof Map) {
-        for (const acct of accts.values()) {
-          const deltas = (acct as any).deltas;
-          if (deltas instanceof Map) {
-            for (const delta of deltas.values()) {
-              collateral += BigInt((delta as any).collateral || 0);
+        for (const [aId, acct] of accts.entries()) {
+          // Only count if we're the LEFT entity (canonical)
+          if (eId && eId < aId) {
+            const deltas = (acct as any).deltas;
+            if (deltas instanceof Map) {
+              for (const delta of deltas.values()) {
+                collateral += BigInt((delta as any).collateral || 0);
+              }
             }
           }
         }

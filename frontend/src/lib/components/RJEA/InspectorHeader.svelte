@@ -11,6 +11,7 @@
 
   import type { Writable } from 'svelte/store';
   import { activeSigner, activeVault } from '$lib/stores/vaultStore';
+  import { xlnFunctions } from '$lib/stores/xlnStore';
   import { shortAddress } from '$lib/utils/format';
 
   interface Props {
@@ -49,11 +50,12 @@
   });
 
   // Format balance for display
-  function formatBalance(amount: bigint): string {
-    const decimals = 18n;
-    const divisor = 10n ** decimals;
+  function formatBalance(amount: bigint, decimals: number = 18): string {
+    const dec = BigInt(decimals);
+    const divisor = 10n ** dec;
     const whole = amount / divisor;
-    const frac = (amount % divisor) / (10n ** 16n); // 2 decimal places
+    const fracDivisor = 10n ** (dec - 2n); // 2 decimal places
+    const frac = fracDivisor > 0n ? (amount % divisor) / fracDivisor : 0n;
     return `${whole}.${frac.toString().padStart(2, '0')}`;
   }
 </script>
@@ -69,8 +71,9 @@
         {shortAddress(signer.address)}
       </span>
       {#if balance}
+        {@const tokenInfo = $xlnFunctions?.getTokenInfo(Number(balance.tokenId)) ?? { symbol: 'TKN', decimals: 18 }}
         <span class="balance">
-          {formatBalance(balance.amount)} USDC
+          {formatBalance(balance.amount, tokenInfo.decimals)} {tokenInfo.symbol}
         </span>
       {/if}
     {:else}

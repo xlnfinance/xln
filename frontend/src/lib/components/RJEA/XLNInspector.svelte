@@ -45,23 +45,41 @@
 
   // Active tab state
   let activeTab = $state<'runtime' | 'jurisdiction' | 'entity'>('entity');
+  let showDebugTabs = $state(false);
 
   // Entity selection (for entity tab)
   let selectedEntityId = $state<string | null>(null);
   let selectedSignerId = $state<string | null>(null);
 
-  // Derive available entities from env
-  const entities = $derived.by(() => {
+  // Get current frame (time-aware)
+  const currentFrame = $derived.by(() => {
+    const timeIdx = isolatedTimeIndex ? $isolatedTimeIndex : -1;
+    const hist = isolatedHistory ? $isolatedHistory : [];
     const env = $isolatedEnv;
-    if (!env?.eReplicas) return [];
+
+    if (timeIdx != null && timeIdx >= 0 && hist && hist.length > 0) {
+      const idx = Math.min(timeIdx, hist.length - 1);
+      return hist[idx];
+    }
+    return env; // Live mode
+  });
+
+  // Derive available entities from current frame (time-aware)
+  const entities = $derived.by(() => {
+    const frame = currentFrame;
+    if (!frame?.eReplicas) return [];
 
     const list: Array<{ entityId: string; signerId: string; name: string }> = [];
-    if (env.eReplicas instanceof Map) {
-      for (const [key, replica] of env.eReplicas) {
-        const [entityId, signerId] = key.split(':');
-        const name = replica?.state?.name || entityId.slice(0, 8);
-        list.push({ entityId, signerId, name });
-      }
+    const replicas = frame.eReplicas instanceof Map
+      ? frame.eReplicas
+      : new Map(Object.entries(frame.eReplicas || {}));
+
+    for (const [key, replica] of replicas) {
+      const parts = (key as string).split(':');
+      const entityId = parts[0] || '';
+      const signerId = parts[1] || '';
+      const name = (replica as any)?.state?.name || entityId.slice(0, 8);
+      list.push({ entityId, signerId, name });
     }
     return list;
   });
@@ -102,24 +120,36 @@
   <div class="tab-bar">
     <button
       class="tab"
-      class:active={activeTab === 'runtime'}
-      onclick={() => activeTab = 'runtime'}
-    >
-      Runtime
-    </button>
-    <button
-      class="tab"
-      class:active={activeTab === 'jurisdiction'}
-      onclick={() => activeTab = 'jurisdiction'}
-    >
-      Jurisdiction
-    </button>
-    <button
-      class="tab"
       class:active={activeTab === 'entity'}
       onclick={() => activeTab = 'entity'}
     >
       Entity
+    </button>
+
+    {#if showDebugTabs}
+      <button
+        class="tab"
+        class:active={activeTab === 'jurisdiction'}
+        onclick={() => activeTab = 'jurisdiction'}
+      >
+        Jurisdiction
+      </button>
+      <button
+        class="tab"
+        class:active={activeTab === 'runtime'}
+        onclick={() => activeTab = 'runtime'}
+      >
+        Runtime
+      </button>
+    {/if}
+
+    <button
+      class="tab debug-toggle"
+      class:active={showDebugTabs}
+      onclick={() => showDebugTabs = !showDebugTabs}
+      title={showDebugTabs ? 'Hide debug tabs' : 'Show debug tabs'}
+    >
+      {showDebugTabs ? '...' : 'Debug'}
     </button>
   </div>
 
@@ -140,21 +170,21 @@
       />
 
     {:else if activeTab === 'entity'}
-      <!-- Entity Selector -->
+      <!-- Entity Selector (use eId:sId composite key for multi-sig) -->
       {#if entities.length > 1}
         <div class="entity-selector">
           <select
-            value={selectedEntityId}
+            value={selectedEntityId && selectedSignerId ? `${selectedEntityId}:${selectedSignerId}` : ''}
             onchange={(e) => {
-              const selected = entities.find(ent => ent.entityId === e.currentTarget.value);
-              if (selected) {
-                selectEntity(selected.entityId, selected.signerId);
+              const [eId, sId] = e.currentTarget.value.split(':');
+              if (eId && sId) {
+                selectEntity(eId, sId);
               }
             }}
           >
             {#each entities as entity}
-              <option value={entity.entityId}>
-                {entity.name} ({entity.entityId.slice(0, 8)}...)
+              <option value={`${entity.entityId}:${entity.signerId}`}>
+                {entity.name} ({entity.entityId.slice(0, 8)}:{entity.signerId.slice(0, 4)})
               </option>
             {/each}
           </select>
@@ -212,6 +242,22 @@
   .tab.active {
     background: var(--accent-blue, #1f6feb);
     color: white;
+  }
+
+  .tab.debug-toggle {
+    margin-left: auto;
+    padding: 6px 10px;
+    font-size: 11px;
+    opacity: 0.7;
+  }
+
+  .tab.debug-toggle:hover {
+    opacity: 1;
+  }
+
+  .tab.debug-toggle.active {
+    background: var(--bg-tertiary, #21262d);
+    color: var(--text-primary, #e6edf3);
   }
 
   .tab-content {
