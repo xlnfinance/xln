@@ -4,7 +4,7 @@
  */
 
 import { encode } from './snapshot-coder';
-import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, RuntimeInput, AccountMachine, JReplica } from './types';
+import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, RuntimeInput, AccountMachine, JReplica, LogCategory } from './types';
 import type { Profile } from './gossip';
 import { DEBUG } from './utils';
 import { validateEntityState } from './validation-utils';
@@ -56,6 +56,26 @@ export function addMessage(state: EntityState, message: string): void {
 export function addMessages(state: EntityState, messages: string[]): void {
   for (const msg of messages) {
     addMessage(state, msg);
+  }
+}
+
+/**
+ * Emit structured events with a scoped path for time-travel debugging.
+ * This keeps per-frame logs queryable without bloating state.messages.
+ */
+export function emitScopedEvents(
+  env: Env,
+  category: LogCategory,
+  scope: string,
+  messages: string[],
+  data: Record<string, unknown> = {},
+  entityId?: string,
+): void {
+  if (!messages || messages.length === 0) return;
+
+  const payload = { path: scope, ...data };
+  for (const message of messages) {
+    env.info(category, message, payload, entityId);
   }
 }
 

@@ -1,6 +1,6 @@
 import { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
-import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective } from '../../state-helpers';
+import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
 import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
 import { HTLC } from '../../constants';
 import { formatEntityId, HEAVY_LOGS } from '../../utils';
@@ -149,6 +149,20 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
     if (result.success) {
       addMessages(newState, result.events);
+      emitScopedEvents(
+        env,
+        'account',
+        `E/A/${newState.entityId.slice(-4)}:${counterpartyId.slice(-4)}/consensus`,
+        result.events,
+        {
+          entityId: newState.entityId,
+          counterpartyId,
+          frameHeight: input.newAccountFrame?.height ?? input.height,
+          counter: input.counter,
+          hasNewFrame: Boolean(input.newAccountFrame),
+        },
+        newState.entityId,
+      );
 
       // === HTLC LOCK PROCESSING: Check if we need to forward ===
       // CRITICAL: Only process NEW locks (prevent replay on re-processing same frame)

@@ -1,9 +1,8 @@
-/**
- * XLN Scenario Registry
- * Central export of all scenarios with metadata for frontend integration
- */
-
 import type { Env } from '../types';
+
+// ============================================================================
+// SCENARIO REGISTRY - Used by runtime.ts exports and all-scenarios.ts
+// ============================================================================
 
 export interface ScenarioMetadata {
   id: string;
@@ -13,81 +12,99 @@ export interface ScenarioMetadata {
   run: (env: Env) => Promise<void>;
 }
 
-// Import scenario functions
-import { ahb } from './ahb';
-import { lockAhb } from './lock-ahb';
-import { swap } from './swap';
-import { swapMarket } from './swap-market';
-import { rapidFire } from './rapid-fire';
-import { multiSig } from './multi-sig';
-import { htlc4hop } from './htlc-4hop';
-
-/**
- * All registered scenarios
- * Auto-wired to frontend ArchitectPanel dropdown
- */
+// Lazy-load scenarios - run is async callable that imports on first call
 export const SCENARIOS: ScenarioMetadata[] = [
   {
     id: 'ahb',
     name: 'Alice-Hub-Bob Triangle',
     description: 'Full bilateral consensus test with 6 phases, simultaneous payments, rollback verification',
     tags: ['consensus', 'core', 'bilateral'],
-    run: ahb,
+    run: async (env: Env) => (await import('./ahb')).ahb(env),
   },
   {
     id: 'lock-ahb',
     name: 'HTLC Multi-Hop (A→H→B)',
     description: '3-hop onion routed HTLC with encrypted envelopes, automatic secret propagation, fee collection',
     tags: ['htlc', 'routing', 'onion'],
-    run: lockAhb,
+    run: async (env: Env) => (await import('./lock-ahb')).lockAhb(env),
   },
   {
     id: 'htlc-4hop',
     name: 'HTLC 4-Hop Chain',
-    description: 'Extended routing path testing envelope forwarding and fee accumulation',
+    description: '4-hop onion routed payment through 3 hubs, fee cascade verification',
     tags: ['htlc', 'routing'],
-    run: htlc4hop,
+    run: async (env: Env) => (await import('./htlc-4hop')).htlc4hop(env),
   },
   {
     id: 'swap',
-    name: 'Swap Market (Simple)',
-    description: 'Basic swap orderbook with limit orders, fills, cancels',
+    name: 'Swap Orderbook',
+    description: 'Bilateral swap orderbook with limit orders, partial fills, cancel',
     tags: ['swap', 'orderbook'],
-    run: swap,
+    run: async (env: Env) => (await import('./swap')).swap(env),
   },
   {
     id: 'swap-market',
     name: 'Multi-Party Swap Market',
-    description: '8 traders, 3 orderbooks (USDC/ETH, USDC/BTC, USDC/DAI), realistic market simulation',
+    description: '8 traders, 3 orderbooks, realistic market simulation',
     tags: ['swap', 'orderbook', 'stress'],
-    run: swapMarket,
+    run: async (env: Env) => (await import('./swap-market')).swapMarket(env),
+  },
+  {
+    id: 'multi-sig',
+    name: 'Multi-Signer BFT',
+    description: '2-of-3 threshold consensus, byzantine tolerance, offline validator simulation',
+    tags: ['consensus', 'bft', 'multi-sig'],
+    run: async (env: Env) => (await import('./multi-sig')).multiSig(env),
   },
   {
     id: 'rapid-fire',
     name: 'Rapid-Fire Stress Test',
-    description: '200 payments in 10 seconds, bidirectional high-load consensus testing',
+    description: '200 payments in 10s, bidirectional high-load, rollback handling',
     tags: ['stress', 'bilateral'],
-    run: rapidFire,
-  },
-  {
-    id: 'multi-sig',
-    name: 'Multi-Signer BFT (2-of-3)',
-    description: 'Byzantine fault tolerance with threshold consensus, negative tests, offline validator simulation',
-    tags: ['consensus', 'bft', 'multi-sig'],
-    run: multiSig,
+    run: async (env: Env) => (await import('./rapid-fire')).rapidFire(env),
   },
 ];
 
-/**
- * Get scenario by ID
- */
 export function getScenario(id: string): ScenarioMetadata | undefined {
   return SCENARIOS.find(s => s.id === id);
 }
 
-/**
- * Get scenarios by tag
- */
 export function getScenariosByTag(tag: string): ScenarioMetadata[] {
   return SCENARIOS.filter(s => s.tags.includes(tag));
 }
+
+// ============================================================================
+// CODEX-STYLE REGISTRY (for all-scenarios.ts lazy loading)
+// ============================================================================
+
+export type ScenarioEntry = {
+  key: string;
+  name: string;
+  load: () => Promise<(env: Env) => Promise<void>>;
+  requiresStress?: boolean;
+};
+
+export const scenarioRegistry: ScenarioEntry[] = [
+  { key: 'ahb', name: 'AHB', load: async () => (await import('./ahb')).ahb },
+  { key: 'lock-ahb', name: 'HTLC AHB', load: async () => (await import('./lock-ahb')).lockAhb },
+  { key: 'htlc-4hop', name: 'HTLC 4-Hop', load: async () => (await import('./htlc-4hop')).htlc4hop },
+  { key: 'swap', name: 'Swap Trading', load: async () => (await import('./swap')).swap },
+  { key: 'swap-market', name: 'Swap Market', load: async () => (await import('./swap-market')).swapMarket },
+  { key: 'grid', name: 'Grid', load: async () => (await import('./grid')).grid },
+  { key: 'multi-sig', name: 'Multi-Sig', load: async () => (await import('./multi-sig')).multiSig },
+  {
+    key: 'insurance-cascade',
+    name: 'Insurance Cascade',
+    load: async () => {
+      const { insuranceCascadeScenario } = await import('./insurance-cascade');
+      const { process } = await import('../runtime');
+      return async (env: Env) => insuranceCascadeScenario(env, process);
+    },
+  },
+  {
+    key: 'rapid-fire',
+    name: 'Rapid Fire',
+    requiresStress: true,
+    load: async () => (await import('./rapid-fire')).rapidFire,
+  },
+];

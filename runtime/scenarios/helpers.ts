@@ -2,7 +2,8 @@
  * Shared scenario helpers
  */
 
-import type { Env, EntityInput } from '../types';
+import type { Env, EntityInput, EntityReplica, Delta } from '../types';
+import { formatRuntime } from '../runtime-ascii';
 
 // Lazy-loaded process to avoid circular deps
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -54,6 +55,67 @@ export function getOffdelta(env: Env, leftId: string, rightId: string, tokenId: 
 // CONVERGENCE HELPERS
 // ============================================================================
 
+function filterOfflineInputs(
+  inputs: EntityInput[],
+  offlineSigners: Set<string>,
+): { filtered: EntityInput[]; dropped: EntityInput[] } {
+  if (offlineSigners.size === 0) {
+    return { filtered: inputs, dropped: [] };
+  }
+
+  const filtered: EntityInput[] = [];
+  const dropped: EntityInput[] = [];
+
+  for (const input of inputs) {
+    if (offlineSigners.has(input.signerId)) {
+      dropped.push(input);
+    } else {
+      filtered.push(input);
+    }
+  }
+
+  return { filtered, dropped };
+}
+
+export async function processWithOffline(
+  env: Env,
+  inputs: EntityInput[] | undefined,
+  offlineSigners: Set<string>,
+  reason: string = 'offline',
+): Promise<Env> {
+  const process = await getProcess();
+
+  if (offlineSigners.size === 0) {
+    return process(env, inputs);
+  }
+
+  const pending = env.pendingOutputs || [];
+  const { filtered: filteredPending, dropped: droppedPending } = filterOfflineInputs(pending, offlineSigners);
+  if (droppedPending.length > 0) {
+    env.info('network', 'OFFLINE_SIGNER_DROP', {
+      reason,
+      source: 'pendingOutputs',
+      signers: Array.from(new Set(droppedPending.map(i => i.signerId))),
+      count: droppedPending.length,
+      entities: Array.from(new Set(droppedPending.map(i => i.entityId))),
+    });
+  }
+  env.pendingOutputs = filteredPending;
+
+  const { filtered: filteredInputs, dropped: droppedInputs } = filterOfflineInputs(inputs || [], offlineSigners);
+  if (droppedInputs.length > 0) {
+    env.info('network', 'OFFLINE_SIGNER_DROP', {
+      reason,
+      source: 'inputs',
+      signers: Array.from(new Set(droppedInputs.map(i => i.signerId))),
+      count: droppedInputs.length,
+      entities: Array.from(new Set(droppedInputs.map(i => i.entityId))),
+    });
+  }
+
+  return process(env, filteredInputs);
+}
+
 /**
  * Process frames until all mempools empty and no pending frames
  * Standard convergence - used in all scenarios
@@ -99,6 +161,38 @@ export async function processUntil(
   }
   if (!predicate()) {
     throw new Error(`processUntil: ${label} not satisfied after ${maxRounds} rounds`);
+  }
+}
+
+/**
+ * Converge with offline signers (drops inputs to specified signerIds)
+ * Checks BOTH entity-level AND account-level work (like regular converge)
+ */
+export async function convergeWithOffline(
+  env: Env,
+  offlineSigners: Set<string>,
+  maxCycles = 10,
+  reason: string = 'offline',
+): Promise<void> {
+  for (let i = 0; i < maxCycles; i++) {
+    await processWithOffline(env, undefined, offlineSigners, reason);
+    let hasWork = false;
+    for (const [, replica] of env.eReplicas) {
+      // Check entity-level work (multi-signer consensus) - CRITICAL for multi-sig
+      if (replica.mempool.length > 0 || replica.proposal || replica.lockedFrame) {
+        hasWork = true;
+        break;
+      }
+      // Check account-level work (bilateral consensus)
+      for (const [, account] of replica.state.accounts) {
+        if (account.mempool.length > 0 || account.pendingFrame) {
+          hasWork = true;
+          break;
+        }
+      }
+      if (hasWork) break;
+    }
+    if (!hasWork) return;
   }
 }
 

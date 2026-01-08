@@ -56,6 +56,24 @@ export async function deriveSignerKey(masterSeed: Uint8Array, signerId: string):
 }
 
 /**
+ * Register signer keys derived from a deterministic seed
+ * Formula: privateKey = HMAC-SHA256(seed, signerId)
+ */
+export async function registerSeededKeys(
+  seed: Uint8Array | string,
+  signerIds: string[]
+): Promise<void> {
+  const seedBytes = typeof seed === 'string' ? new TextEncoder().encode(seed) : seed;
+
+  for (const signerId of signerIds) {
+    const privateKey = await deriveSignerKey(seedBytes, signerId);
+    registerSignerKey(signerId, privateKey);
+  }
+
+  console.log(`🔑 Registered ${signerIds.length} keys from seed`);
+}
+
+/**
  * Register signer keys (called when BrainVault unlocked)
  */
 export function registerSignerKey(signerId: string, privateKey: Uint8Array): void {
@@ -70,11 +88,12 @@ export async function registerTestKeys(signerIds: string[]): Promise<void> {
   const testMasterSeed = new Uint8Array(32);
   testMasterSeed.fill(42); // Deterministic test seed
 
+  // Use registerSeededKeys but suppress its log (we log our own below)
+  const seedBytes = testMasterSeed;
   for (const signerId of signerIds) {
-    const privateKey = await deriveSignerKey(testMasterSeed, signerId);
+    const privateKey = await deriveSignerKey(seedBytes, signerId);
     registerSignerKey(signerId, privateKey);
   }
-
   console.log(`🔑 Registered ${signerIds.length} test keys (deterministic from signerId)`);
 }
 

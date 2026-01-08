@@ -8,7 +8,7 @@ import { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
-import { addMessages, cloneEntityReplica, canonicalAccountKey, getAccountPerspective } from './state-helpers';
+import { addMessages, cloneEntityReplica, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from './state-helpers';
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
 
@@ -967,6 +967,19 @@ export const applyEntityFrame = async (
 
           // Add events to entity messages with size limiting
           addMessages(currentEntityState, proposal.events);
+          emitScopedEvents(
+            env,
+            'account',
+            `E/A/${currentEntityState.entityId.slice(-4)}:${cpId.slice(-4)}/propose`,
+            proposal.events,
+            {
+              entityId: currentEntityState.entityId,
+              counterpartyId: cpId,
+              frameHeight: proposal.accountInput.height,
+              accountKey,
+            },
+            currentEntityState.entityId,
+          );
         }
       }
     }
