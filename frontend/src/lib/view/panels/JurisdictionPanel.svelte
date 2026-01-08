@@ -12,11 +12,11 @@
   // Props
   interface Props {
     isolatedEnv: Writable<any>;
-    isolatedHistory?: Writable<any[]>;
-    isolatedTimeIndex?: Writable<number>;
+    isolatedHistory?: Writable<any[]> | undefined;
+    isolatedTimeIndex?: Writable<number> | undefined;
   }
 
-  let { isolatedEnv, isolatedHistory, isolatedTimeIndex }: Props = $props();
+  let { isolatedEnv, isolatedHistory = undefined, isolatedTimeIndex = undefined }: Props = $props();
 
   // Selected jurisdiction
   let selectedJurisdictionName = $state<string | null>(null);
