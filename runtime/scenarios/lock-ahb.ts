@@ -1832,9 +1832,9 @@ if (import.meta.main) {
     console.log(`⏸️  Frame stepping: Will stop at frame ${stopAtFrame}\n`);
   }
 
-  await ahb(env);
+  await lockAhb(env);
 
-  console.log('\n✅ AHB scenario complete!');
+  console.log('\n✅ HTLC AHB scenario complete!');
   console.log(`📊 Total frames: ${env.history?.length || 0}`);
   console.log('🎉 RJEA event consolidation verified - AccountSettled events working!\n');
 

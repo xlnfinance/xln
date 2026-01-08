@@ -20,6 +20,7 @@
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
   import SolvencyPanel from './panels/SolvencyPanel.svelte';
   import BrainVaultView from '$lib/components/Views/BrainVaultView.svelte';
+  import XLNInspector from '$lib/components/RJEA/XLNInspector.svelte';
   // REMOVED PANELS:
   // - EntitiesPanel: Graph3D entity cards provide better UX
   // - DepositoryPanel: JurisdictionPanel shows same data with better tables
@@ -730,13 +731,17 @@
 <div class="view-wrapper" class:embed-mode={embedMode}>
   <!-- Always render both, toggle visibility via CSS -->
   <div class="user-mode-container" class:hidden={!userMode}>
-    <BrainVaultView />
+    <XLNInspector
+      isolatedEnv={localEnvStore}
+      isolatedHistory={localHistoryStore}
+      isolatedTimeIndex={localTimeIndex}
+      isolatedIsLive={localIsLive}
+    />
   </div>
 
   <div class="view-container" class:hidden={userMode} class:with-timemachine={!collapsed} bind:this={container}></div>
 
-  <!-- TimeMachine - Visible in dev mode only (user mode = simple, no time travel) -->
-  {#if !userMode}
+  <!-- TimeMachine - Visible in both modes for time-travel debugging -->
     <div class="time-machine-bar" class:collapsed class:embed={embedMode} data-position={timeMachinePosition}>
       {#if !embedMode}
         <div class="drag-handle" title="Drag to reposition">⋮⋮</div>
@@ -760,7 +765,6 @@
       </button>
     {/if}
     </div>
-  {/if}
 
   {#if !embedMode && !userMode}
     <!-- Interactive Tutorial (first-time users, dev mode only) -->
