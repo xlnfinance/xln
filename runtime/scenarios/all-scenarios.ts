@@ -4,13 +4,13 @@
  * Runs core scenarios sequentially with a fresh env per run.
  * Optional stress run: SCENARIO_STRESS=1
  * Repeat runs: SCENARIO_ITERS=3
- * Filter: SCENARIO_ONLY=swap-market
+ * Filter: SCENARIO_ONLY=swap-market, SCENARIO_SKIP=grid
  *
  * Run with: bun runtime/scenarios/all-scenarios.ts
  */
 
 import type { Env } from '../types';
-import { SCENARIOS, type ScenarioMetadata } from './index';
+import { scenarioRegistry, type ScenarioEntry } from './index';
 
 type ScenarioResult = {
   name: string;
@@ -36,17 +36,30 @@ const getEnvVar = (key: string, defaultVal: string) =>
 
 const iterations = Math.max(1, Number.parseInt(getEnvVar('SCENARIO_ITERS', '1'), 10) || 1);
 const includeStress = getEnvVar('SCENARIO_STRESS', '0') === '1';
-const onlyScenario = getEnvVar('SCENARIO_ONLY', ''); // Filter to single scenario
+const onlyScenarioRaw = getEnvVar('SCENARIO_ONLY', '');
+const skipScenarioRaw = getEnvVar('SCENARIO_SKIP', '');
+
+const parseList = (value: string) =>
+  value.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+
+const onlyScenario = parseList(onlyScenarioRaw);
+const skipScenario = new Set(parseList(skipScenarioRaw));
 
 // Auto-filter scenarios based on env vars
-const scenariosToRun = SCENARIOS.filter(s => {
-  if (onlyScenario && s.id !== onlyScenario) return false;
-  if (!includeStress && s.tags.includes('stress')) return false;
+const scenariosToRun = scenarioRegistry.filter(s => {
+  if (onlyScenario.length > 0) {
+    const key = s.key.toLowerCase();
+    const name = s.name.toLowerCase();
+    return onlyScenario.includes(key) || onlyScenario.includes(name);
+  }
+  if (skipScenario.has(s.key.toLowerCase()) || skipScenario.has(s.name.toLowerCase())) {
+    return false;
+  }
   return true;
 });
 
 async function runScenario(
-  scenario: ScenarioMetadata,
+  scenario: ScenarioEntry,
   iteration: number,
   results: ScenarioResult[]
 ): Promise<void> {
@@ -56,7 +69,8 @@ async function runScenario(
 
   const start = Date.now();
   try {
-    await scenario.run(env);
+    const run = await scenario.load();
+    await run(env);
     results.push({
       name: scenario.name,
       iteration,
@@ -86,6 +100,19 @@ async function runAllScenarios() {
   const results: ScenarioResult[] = [];
 
   for (const scenario of scenariosToRun) {
+    if (scenario.requiresStress && !includeStress) {
+      results.push({
+        name: scenario.name,
+        iteration: 0,
+        frames: 0,
+        duration: 0,
+        status: 'skip',
+        error: 'requires SCENARIO_STRESS=1',
+      });
+      console.log(`\n📋 ${scenario.name}: SKIPPED`);
+      console.log('⚠️  requires SCENARIO_STRESS=1\n');
+      continue;
+    }
     for (let i = 1; i <= iterations; i++) {
       const label = iterations > 1 ? `${scenario.name} (run ${i}/${iterations})` : scenario.name;
       console.log(`\n📋 ${label}\n`);

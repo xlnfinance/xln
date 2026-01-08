@@ -17,18 +17,21 @@
 
 import type { Env } from '../types';
 import { ensureBrowserVM, createJReplica } from './boot';
-import { findReplica, converge, assert } from './helpers';
+import { findReplica, assert, processWithOffline, convergeWithOffline } from './helpers';
 
 const USDC = 1;
 const ONE = 10n ** 18n;
 const usd = (amount: number | bigint) => BigInt(amount) * ONE;
 
 export async function multiSig(env: Env): Promise<void> {
-  // Register test keys for real signatures
-  const { registerTestKeys } = await import('../account-crypto');
-  await registerTestKeys(['s1', 's2', 's3', 'hub', 't1', 't2', 't3', 'b1', 'b2']);
+  const { clearSignerKeys, registerSeededKeys } = await import('../account-crypto');
+  const runtimeSeed = process.env.RUNTIME_SEED || 'xln-runtime-seed';
+  const offlineSigners = new Set<string>();
 
-  const { process, applyRuntimeInput } = await import('../runtime');
+  clearSignerKeys();
+  await registerSeededKeys(runtimeSeed, ['s1', 's2', 's3', 'hub', 't1', 't2', 't3']);
+
+  const { applyRuntimeInput } = await import('../runtime');
 
   if (env.scenarioMode && env.height === 0) {
     env.timestamp = 1;
@@ -127,14 +130,14 @@ export async function multiSig(env: Env): Promise<void> {
   console.log('🔗 Opening Alice-Hub account (multi-sig)...');
 
   // s1 proposes openAccount
-  await process(env, [{
+  await processWithOffline(env, [{
     entityId: alice.id,
     signerId: 's1',
     entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }],
-  }]);
+  }], offlineSigners);
 
   // Multi-sig: wait for s2, s3 to sign, then commit
-  await converge(env, 20);
+  await convergeWithOffline(env, offlineSigners, 20);
 
   // Verify account exists (check all validators)
   console.log('\\n🔍 Checking account state across all validators...');
@@ -188,13 +191,13 @@ export async function multiSig(env: Env): Promise<void> {
   });
 
   // Proposer creates a proposal (dummy operation)
-  await process(env, [{
+  await processWithOffline(env, [{
     entityId: testEntity.id,
     signerId: 't1',
     entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id }}],
-  }]);
+  }], offlineSigners);
 
-  await process(env); // Propagate proposal (but no validators exist to sign)
+  await processWithOffline(env, undefined, offlineSigners); // Propagate proposal (but no validators exist to sign)
 
   const [, t1Rep] = findReplica(env, testEntity.id);
   assert(t1Rep.proposal, 'Proposer should have proposal');
@@ -203,9 +206,9 @@ export async function multiSig(env: Env): Promise<void> {
   const heightBefore = t1Rep.state.height;
 
   // Process multiple rounds - proposal should NOT commit with only 1/3 signatures
-  await process(env);
-  await process(env);
-  await process(env);
+  await processWithOffline(env, undefined, offlineSigners);
+  await processWithOffline(env, undefined, offlineSigners);
+  await processWithOffline(env, undefined, offlineSigners);
   const [, t1AfterWait] = findReplica(env, testEntity.id);
   assert(t1AfterWait.state.height === heightBefore, `Height should NOT change with only 1/3 signatures: ${t1AfterWait.state.height} === ${heightBefore}`);
   assert(t1AfterWait.proposal, 'Proposal should still exist (not committed)');
@@ -221,31 +224,30 @@ export async function multiSig(env: Env): Promise<void> {
   console.log('  TEST 1: Byzantine Tolerance (s3 offline)                     ');
   console.log('═══════════════════════════════════════════════════════════════\\n');
 
-  console.log('📴 Simulating s3 offline (remove from env)...');
-  const s3Key = `${alice.id}:s3`;
-  const s3Backup = env.eReplicas.get(s3Key);
-  env.eReplicas.delete(s3Key); // Remove s3 from processing
-  console.log('   s3 removed from network\\n');
+  console.log('📴 Simulating s3 offline (drop inputs to signer)...');
+  offlineSigners.add('s3');
+  env.info('network', 'OFFLINE_SIGNER', { signerId: 's3', reason: 'byzantine test' }, alice.id);
+  console.log('   s3 input delivery disabled\\n');
 
   console.log('💼 s1 proposes: openAccount with testEntity (2-of-3, s3 offline)');
   const heightBeforeOffline = (await findReplica(env, alice.id))[1].state.height;
 
-  await process(env, [{
+  await processWithOffline(env, [{
     entityId: alice.id,
     signerId: 's1',
     entityTxs: [{ type: 'openAccount', data: { targetEntityId: testEntity.id }}],
-  }]);
+  }], offlineSigners);
 
   // Converge - only s1 and s2 available
-  await converge(env, 10);
+  await convergeWithOffline(env, offlineSigners, 10, 's3-offline');
 
   const [, s1AfterOffline] = findReplica(env, alice.id);
   assert(s1AfterOffline.state.height > heightBeforeOffline, `Frame should commit with 2/3 (s1+s2): ${s1AfterOffline.state.height} > ${heightBeforeOffline}`);
   assert(!s1AfterOffline.proposal, 'Proposal should be cleared after commit');
   console.log(`   ✅ Frame committed with s3 offline (height ${heightBeforeOffline} → ${s1AfterOffline.state.height})`);
 
-  // Restore s3
-  if (s3Backup) env.eReplicas.set(s3Key, s3Backup);
+  // Restore s3 input delivery
+  offlineSigners.delete('s3');
 
   console.log('\\n✅ TEST 1 COMPLETE: Byzantine tolerance proven!\\n');
   console.log('   s1 + s2 = 2/3 threshold ✅');
@@ -256,7 +258,7 @@ export async function multiSig(env: Env): Promise<void> {
   // ============================================================================
   console.log('💳 Setting up credit...');
 
-  await process(env, [
+  await processWithOffline(env, [
     {
       entityId: alice.id,
       signerId: 's1',
@@ -267,9 +269,9 @@ export async function multiSig(env: Env): Promise<void> {
       signerId: 'hub',
       entityTxs: [{ type: 'extendCredit', data: { counterpartyEntityId: alice.id, tokenId: USDC, amount: usd(1_000_000) } }],
     },
-  ]);
+  ], offlineSigners);
 
-  await converge(env, 50); // More rounds for multi-sig + bilateral
+  await convergeWithOffline(env, offlineSigners, 50); // More rounds for multi-sig + bilateral
 
   // Verify credit was applied
   const [, aliceAfterCredit] = findReplica(env, alice.id);
@@ -328,7 +330,7 @@ export async function multiSig(env: Env): Promise<void> {
   const paymentAmount = usd(1000);
 
   console.log('💸 s1 proposes: Alice→Hub $1000');
-  await process(env, [{
+  await processWithOffline(env, [{
     entityId: alice.id,
     signerId: 's1', // Proposer
     entityTxs: [{
@@ -341,10 +343,10 @@ export async function multiSig(env: Env): Promise<void> {
         description: 'Multi-sig test payment',
       },
     }],
-  }]);
+  }], offlineSigners);
 
   // ASSERTION 1: After proposal, s1 should have proposal with 1 signature (self)
-  await process(env); // Let proposal propagate to other validators
+  await processWithOffline(env, undefined, offlineSigners); // Let proposal propagate to other validators
 
   const [, s1AfterPropose] = findReplica(env, alice.id);
   assert(s1AfterPropose.proposal, 'Proposer should have proposal after mempool tx');
@@ -359,7 +361,7 @@ export async function multiSig(env: Env): Promise<void> {
   console.log(`   ✅ Validators s2, s3 locked proposal`);
 
   // ASSERTION 3: Process one more round to collect precommits
-  await process(env);
+  await processWithOffline(env, undefined, offlineSigners);
   const [, s1AfterPrecommits] = findReplica(env, alice.id);
   console.log(`   Signatures collected: ${s1AfterPrecommits.proposal?.signatures.size || 0}/3`);
 
@@ -370,7 +372,7 @@ export async function multiSig(env: Env): Promise<void> {
 
   // ASSERTION 4: Next process() should commit (height increments)
   const heightBeforeCommit = s1AfterPrecommits.state.height;
-  await process(env);
+  await processWithOffline(env, undefined, offlineSigners);
   const [, s1PostCommit] = findReplica(env, alice.id);
   assert(s1PostCommit.state.height === heightBeforeCommit + 1, `Height should increment after commit: ${s1PostCommit.state.height} vs ${heightBeforeCommit + 1}`);
   assert(!s1PostCommit.proposal, 'Proposal should be cleared after commit');
@@ -380,7 +382,7 @@ export async function multiSig(env: Env): Promise<void> {
 
   // Converge bilateral account consensus
   console.log('🔄 Converging bilateral accounts...');
-  await converge(env, 20);
+  await convergeWithOffline(env, offlineSigners, 20);
 
   // Verify payment applied
   const [, aliceRep3] = findReplica(env, alice.id);
