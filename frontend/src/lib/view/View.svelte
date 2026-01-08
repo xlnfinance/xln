@@ -20,7 +20,7 @@
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
   import SolvencyPanel from './panels/SolvencyPanel.svelte';
   import BrainVaultView from '$lib/components/Views/BrainVaultView.svelte';
-  import XLNInspector from '$lib/components/RJEA/XLNInspector.svelte';
+  import UserModePanel from './UserModePanel.svelte';
   // REMOVED PANELS:
   // - EntitiesPanel: Graph3D entity cards provide better UX
   // - DepositoryPanel: JurisdictionPanel shows same data with better tables
@@ -731,7 +731,7 @@
 <div class="view-wrapper" class:embed-mode={embedMode}>
   <!-- Always render both, toggle visibility via CSS -->
   <div class="user-mode-container" class:hidden={!userMode}>
-    <XLNInspector
+    <UserModePanel
       isolatedEnv={localEnvStore}
       isolatedHistory={localHistoryStore}
       isolatedTimeIndex={localTimeIndex}
