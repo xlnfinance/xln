@@ -32,13 +32,8 @@
   let customTokenInfo: TokenInfo | null = null;
   let loadingCustomToken = false;
 
-  // Network dropdown state
-  let networkDropdownOpen = false;
+  // Token dropdown state
   let tokenDropdownOpen = false;
-
-  // Get mainnets only for default display
-  $: mainnetNetworks = EVM_NETWORKS.filter(n => !n.isTestnet);
-  $: testnetNetworks = EVM_NETWORKS.filter(n => n.isTestnet);
 
   // Get tokens for selected network
   $: availableTokens = selectedNetwork?.tokens || [];
@@ -210,11 +205,6 @@
     }
   }
 
-  function selectNetwork(network: EVMNetwork) {
-    selectedNetwork = network;
-    networkDropdownOpen = false;
-  }
-
   function selectToken(token: TokenInfo) {
     selectedToken = token;
     isCustomToken = false;
@@ -354,46 +344,6 @@
       >
         ERC20 Token
       </button>
-    </div>
-  </div>
-
-  <!-- Network Selector -->
-  <div class="field-group">
-    <label>Network</label>
-    <div class="dropdown" class:open={networkDropdownOpen}>
-      <button class="dropdown-trigger" on:click={() => networkDropdownOpen = !networkDropdownOpen}>
-        <span class="network-name">{selectedNetwork.name}</span>
-        <span class="network-chain">({selectedNetwork.symbol})</span>
-        <span class="dropdown-arrow">{networkDropdownOpen ? '^' : 'v'}</span>
-      </button>
-      {#if networkDropdownOpen}
-        <div class="dropdown-menu">
-          <div class="dropdown-section">
-            <span class="section-label">Mainnets</span>
-            {#each mainnetNetworks as network}
-              <button
-                class="dropdown-item"
-                class:selected={network.chainId === selectedNetwork.chainId}
-                on:click={() => selectNetwork(network)}
-              >
-                {network.name} <span class="chain-id">({network.symbol})</span>
-              </button>
-            {/each}
-          </div>
-          <div class="dropdown-section">
-            <span class="section-label">Testnets</span>
-            {#each testnetNetworks as network}
-              <button
-                class="dropdown-item"
-                class:selected={network.chainId === selectedNetwork.chainId}
-                on:click={() => selectNetwork(network)}
-              >
-                {network.name} <span class="chain-id">({network.symbol})</span>
-              </button>
-            {/each}
-          </div>
-        </div>
-      {/if}
     </div>
   </div>
 

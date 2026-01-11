@@ -47,7 +47,7 @@ export async function multiSig(env: Env): Promise<void> {
   console.log('🏛️  Setting up BrowserVM...');
   const browserVM = await ensureBrowserVM();
   const depositoryAddress = browserVM.getDepositoryAddress();
-  createJReplica(env, 'MultiSig', depositoryAddress, { x: 0, y: 0, z: 0 });
+  createJReplica(env, 'MultiSig', depositoryAddress, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
   console.log('✅ BrowserVM ready\n');
 
   // ============================================================================

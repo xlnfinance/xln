@@ -4,7 +4,7 @@
    *
    * Sleek fintech UI with:
    * - Portfolio value display
-   * - Network/J-machine selector
+   * - J-machine integration (future)
    * - Token list with balances
    * - Send/Receive/Bridge actions
    * - Activity tab with Etherscan links
@@ -21,12 +21,14 @@
   export let walletAddress: string;
   export let entityId: string;
   export let identiconSrc: string = '';
+  export let networkEnabled: boolean = false;
 
   const dispatch = createEventDispatcher();
 
   // Tabs
   type Tab = 'tokens' | 'activity' | 'send' | 'receive' | 'bridge';
   let activeTab: Tab = 'tokens';
+  const canBridge = !!entityId;
 
   // Portfolio state (will be populated by TokenList)
   let portfolioValue = 0;
@@ -95,8 +97,10 @@
     <button
       class="action-btn"
       class:active={activeTab === 'bridge'}
+      class:disabled={!canBridge}
       on:click={() => activeTab = 'bridge'}
       title="Bridge tokens to xln Entity for instant payments"
+      disabled={!canBridge}
     >
       <div class="btn-icon"><Repeat size={18} /></div>
       <span>Bridge</span>
@@ -129,39 +133,48 @@
             {/if}
           </button>
           <p class="receive-hint">
-            Share this address to receive tokens on Ethereum mainnet or compatible networks
+            Share this address to receive assets when on-chain bridges are enabled
           </p>
         </div>
       </div>
     {:else if activeTab === 'bridge'}
       <div class="bridge-tab">
-        <DepositToEntity {privateKey} {walletAddress} {entityId} />
+        {#if !canBridge}
+          <div class="bridge-empty">
+            Select an Entity above to deposit to its reserves.
+          </div>
+        {:else}
+          <DepositToEntity {privateKey} {walletAddress} {entityId} />
+        {/if}
       </div>
     {:else}
       <!-- Default: Tokens + Activity inline -->
       <TokenList
         {privateKey}
         {walletAddress}
+        enabled={networkEnabled}
         on:portfolioUpdate={handlePortfolioUpdate}
       />
 
       <!-- Activity Section (inline) -->
-      <div class="activity-section">
-        <div class="activity-header">
-          <span class="activity-title">Recent</span>
-          <a
-            href={getEtherscanLink()}
-            target="_blank"
-            rel="noopener noreferrer"
-            class="view-all-link"
-          >
-            View All <ExternalLink size={12} />
-          </a>
+      {#if networkEnabled}
+        <div class="activity-section">
+          <div class="activity-header">
+            <span class="activity-title">Recent</span>
+            <a
+              href={getEtherscanLink()}
+              target="_blank"
+              rel="noopener noreferrer"
+              class="view-all-link"
+            >
+              View All <ExternalLink size={12} />
+            </a>
+          </div>
+          <div class="activity-empty">
+            <span>No recent activity</span>
+          </div>
         </div>
-        <div class="activity-empty">
-          <span>No recent activity</span>
-        </div>
-      </div>
+      {/if}
     {/if}
   </div>
 </div>
@@ -253,6 +266,18 @@
     color: rgba(255, 200, 100, 1);
   }
 
+  .action-btn.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .action-btn.disabled:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
+    transform: none;
+  }
+
   .btn-icon {
     width: 36px;
     height: 36px;
@@ -303,6 +328,13 @@
     min-height: 300px;
     max-height: 500px;
     overflow-y: auto;
+  }
+
+  .bridge-empty {
+    padding: 24px;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 13px;
   }
 
   /* Activity Tab */

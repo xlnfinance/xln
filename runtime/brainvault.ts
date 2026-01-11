@@ -1,5 +1,5 @@
 /**
- * BrainVault v2.0 - Sharded Memory-Hard Key Derivation
+ * BrainVault v2.1 - Sharded Memory-Hard Key Derivation
  *
  * Core algorithm: argon2id sharded + BLAKE3 final hash
  *
@@ -15,14 +15,17 @@
  * - BLAKE3 for final hash: faster than SHA256, equally secure, streaming-friendly
  */
 
+import { blake3 } from '@noble/hashes/blake3.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+
 // Constants - NEVER CHANGE THESE (changing = different wallet)
 export const BRAINVAULT_V2 = {
-  ALG_ID: 'brainvault/argon2id-sharded/v2.0',
+  ALG_ID: 'brainvault/argon2id-sharded/v2.1',
   SHARD_MEMORY_KB: 256 * 1024,    // 256MB per shard
   ARGON_TIME_COST: 1,              // Single iteration per shard
   ARGON_PARALLELISM: 1,            // No internal parallelism (shards provide it)
   SHARD_OUTPUT_BYTES: 32,          // 256 bits per shard
-  MIN_NAME_LENGTH: 4,
+  MIN_NAME_LENGTH: 1,
   MIN_PASSPHRASE_LENGTH: 6,
   MIN_FACTOR: 1,
   MAX_FACTOR: 9,
@@ -177,11 +180,19 @@ export interface DerivationResult {
 }
 
 export interface ResumeToken {
-  version: 'bv2';
+  version: 'bv2.1';
   nameHash: string;
   factor: number;
   completedShards: number[];
   shardResults: Record<number, string>;  // hex encoded
+  name?: string;
+}
+
+/**
+ * Hash a vault name (BLAKE3 over UTF-8)
+ */
+export async function hashName(name: string): Promise<string> {
+  return bytesToHex(blake3(new TextEncoder().encode(name)));
 }
 
 /**
@@ -189,21 +200,23 @@ export interface ResumeToken {
  */
 export async function createShardSalt(
   nameHash: Uint8Array,
-  shardIndex: number
+  shardIndex: number,
+  shardCount: number
 ): Promise<Uint8Array> {
-  const { blake3 } = await import('hash-wasm');
-
-  // salt = BLAKE3(nameHash || ALG_ID || shardIndex as uint32 BE)
+  // salt = BLAKE3(nameHash || ALG_ID || shardCount || shardIndex as uint32 BE)
+  const algIdBytes = new TextEncoder().encode(BRAINVAULT_V2.ALG_ID);
+  const countBytes = new Uint8Array(4);
+  new DataView(countBytes.buffer).setUint32(0, shardCount, false);
   const indexBytes = new Uint8Array(4);
   new DataView(indexBytes.buffer).setUint32(0, shardIndex, false);
 
-  const combined = new Uint8Array(nameHash.length + BRAINVAULT_V2.ALG_ID.length + 4);
+  const combined = new Uint8Array(nameHash.length + algIdBytes.length + 4 + 4);
   combined.set(nameHash, 0);
-  combined.set(new TextEncoder().encode(BRAINVAULT_V2.ALG_ID), nameHash.length);
-  combined.set(indexBytes, nameHash.length + BRAINVAULT_V2.ALG_ID.length);
+  combined.set(algIdBytes, nameHash.length);
+  combined.set(countBytes, nameHash.length + algIdBytes.length);
+  combined.set(indexBytes, nameHash.length + algIdBytes.length + 4);
 
-  const hash = await blake3(combined);
-  return hexToBytes(hash);
+  return blake3(combined);
 }
 
 /**
@@ -235,8 +248,6 @@ export async function combineShards(
   shardResults: Uint8Array[],
   factor: number
 ): Promise<Uint8Array> {
-  const { blake3 } = await import('hash-wasm');
-
   // Concatenate all shards in order
   const totalLength = shardResults.reduce((sum, s) => sum + s.length, 0);
   const combined = new Uint8Array(totalLength);
@@ -246,14 +257,15 @@ export async function combineShards(
     offset += shard.length;
   }
 
-  // Add factor to prevent collisions between different factor levels
-  const factorByte = new Uint8Array([factor]);
-  const withFactor = new Uint8Array(combined.length + 1);
-  withFactor.set(combined, 0);
-  withFactor.set(factorByte, combined.length);
+  // Domain-separated final hash (binds factor and KDF params)
+  const shardCount = shardResults.length;
+  const domainTag = `${BRAINVAULT_V2.ALG_ID}|mem=${BRAINVAULT_V2.SHARD_MEMORY_KB}|t=${BRAINVAULT_V2.ARGON_TIME_COST}|p=${BRAINVAULT_V2.ARGON_PARALLELISM}|out=${BRAINVAULT_V2.SHARD_OUTPUT_BYTES}|shards=${shardCount}|factor=${factor}`;
+  const domainBytes = new TextEncoder().encode(domainTag);
+  const withDomain = new Uint8Array(combined.length + domainBytes.length);
+  withDomain.set(combined, 0);
+  withDomain.set(domainBytes, combined.length);
 
-  const hash = await blake3(withFactor);
-  return hexToBytes(hash);
+  return blake3(withDomain);
 }
 
 /**
@@ -264,16 +276,13 @@ export async function deriveKey(
   context: string,
   length: number = 32
 ): Promise<Uint8Array> {
-  const { blake3 } = await import('hash-wasm');
-
   const contextBytes = new TextEncoder().encode(context);
   const input = new Uint8Array(masterKey.length + contextBytes.length);
   input.set(masterKey, 0);
   input.set(contextBytes, masterKey.length);
 
   // BLAKE3 can output variable length
-  const hash = await blake3(input, length * 8); // bits
-  return hexToBytes(hash);
+  return blake3(input, { dkLen: length });
 }
 
 /**
@@ -284,9 +293,8 @@ export async function entropyToMnemonic(entropy: Uint8Array): Promise<string> {
   const wordlist = await getBIP39Wordlist();
 
   // Add checksum: SHA256 of entropy, take first entropy.length/32 bits
-  const { sha256 } = await import('hash-wasm');
-  const checksumHash = await sha256(entropy);
-  const checksumBits = hexToBits(checksumHash).slice(0, entropy.length * 8 / 32);
+  const checksumHash = sha256(entropy);
+  const checksumBits = bytesToBits(checksumHash).slice(0, entropy.length * 8 / 32);
 
   // Combine entropy bits + checksum bits
   const entropyBits = bytesToBits(entropy);
@@ -310,25 +318,8 @@ export async function deriveEthereumAddress(
   mnemonic: string,
   passphrase: string = ''
 ): Promise<string> {
-  const { pbkdf2, sha256 } = await import('hash-wasm');
-  const { keccak256 } = await import('ethers');
-
-  // BIP39 seed = PBKDF2(mnemonic, "mnemonic" + passphrase, 2048, 64)
-  const seed = await pbkdf2({
-    password: mnemonic,
-    salt: 'mnemonic' + passphrase,
-    iterations: 2048,
-    hashLength: 64,
-    hashFunction: sha256,
-    outputType: 'binary',
-  });
-
-  // BIP32 master key derivation (simplified - using first 32 bytes as private key)
-  // In production, should use proper BIP32/BIP44 path m/44'/60'/0'/0/0
   const { HDNodeWallet } = await import('ethers');
-  const hdNode = HDNodeWallet.fromSeed(new Uint8Array(seed));
-  const wallet = hdNode.derivePath("m/44'/60'/0'/0/0");
-
+  const wallet = HDNodeWallet.fromPhrase(mnemonic, passphrase).derivePath("m/44'/60'/0'/0/0");
   return wallet.address;
 }
 
@@ -378,16 +369,18 @@ export async function deriveSitePassword(
 export function createResumeToken(
   nameHash: Uint8Array,
   factor: number,
-  shardResults: Map<number, Uint8Array>
+  shardResults: Map<number, Uint8Array>,
+  name?: string,
 ): string {
   const token: ResumeToken = {
-    version: 'bv2',
+    version: 'bv2.1',
     nameHash: bytesToHex(nameHash),
     factor,
     completedShards: Array.from(shardResults.keys()).sort((a, b) => a - b),
     shardResults: Object.fromEntries(
       Array.from(shardResults.entries()).map(([k, v]) => [k, bytesToHex(v)])
     ),
+    ...(name ? { name } : {}),
   };
   return btoa(JSON.stringify(token));
 }
@@ -399,7 +392,7 @@ export function parseResumeToken(tokenStr: string): ResumeToken | null {
   try {
     const json = atob(tokenStr);
     const token = JSON.parse(json) as ResumeToken;
-    if (token.version !== 'bv2') return null;
+    if (token.version !== 'bv2.1') return null;
     return token;
   } catch {
     return null;

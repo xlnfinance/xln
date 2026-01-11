@@ -16,6 +16,7 @@
 
   export let privateKey: string; void privateKey; // Reserved for signing
   export let walletAddress: string;
+  export let enabled: boolean = true;
 
   const dispatch = createEventDispatcher();
 
@@ -62,6 +63,10 @@
   }
 
   async function fetchBalances() {
+    if (!enabled) {
+      loading = false;
+      return;
+    }
     if (!walletAddress) return;
 
     loading = true;
@@ -170,7 +175,7 @@
   }
 
   onMount(() => {
-    startRefreshTimer();
+    if (enabled) startRefreshTimer();
   });
 
   onDestroy(() => {
@@ -178,8 +183,15 @@
   });
 
   // Re-fetch when network changes
-  $: if (selectedNetwork && walletAddress) {
+  $: if (enabled && selectedNetwork && walletAddress) {
     fetchBalances();
+  }
+
+  $: if (!enabled) {
+    loading = false;
+    tokenBalances = [];
+    lastUpdated = null;
+    stopRefreshTimer();
   }
 </script>
 
@@ -190,7 +202,7 @@
     <button
       class="refresh-btn"
       on:click={fetchBalances}
-      disabled={loading}
+      disabled={!enabled || loading}
       title="Refresh balances"
     >
       <span class:spinning={loading}><RefreshCw size={14} /></span>
@@ -199,7 +211,12 @@
 
   <!-- Token Items -->
   <div class="tokens">
-    {#if loading && tokenBalances.length === 0}
+    {#if !enabled}
+      <div class="empty-state">
+        <span class="empty-text">On-chain disabled</span>
+        <span class="empty-hint">Balances are unavailable</span>
+      </div>
+    {:else if loading && tokenBalances.length === 0}
       <div class="loading-state">
         <div class="loading-spinner" />
         <span>Loading balances...</span>

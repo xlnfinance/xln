@@ -1,88 +1,39 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { HDNodeWallet, Mnemonic } from 'ethers';
   import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
   import WalletView from '$lib/components/Wallet/WalletView.svelte';
   import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
-  import { keccak256, zeroPadValue, toUtf8Bytes } from 'ethers';
-  import { vaultState, vaultOperations, activeVault, activeSigner, allVaults, type Vault, type Signer } from '$lib/stores/vaultStore';
-  import { EVM_NETWORKS, type EVMNetwork } from '$lib/config/evmNetworks';
+  import { vaultOperations, activeVault, activeSigner, allVaults, type Vault, type Signer } from '$lib/stores/vaultStore';
+  import { deriveRequestSignal, showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { Copy, Check, Settings } from 'lucide-svelte';
+  import {
+    BRAINVAULT_V2,
+    bytesToHex,
+    combineShards,
+    createResumeToken,
+    deriveEthereumAddress,
+    deriveKey,
+    deriveSitePassword as deriveSitePasswordFromRuntime,
+    entropyToMnemonic,
+    estimatePasswordStrength,
+    formatDuration,
+    getShardCount,
+    hashName,
+    hexToBytes,
+    parseResumeToken,
+  } from '@xln/runtime/brainvault';
+  import { generateLazyEntityId } from '@xln/runtime/entity-factory';
+
+  // Props
+  export let embedded: boolean = false;
 
   // Initialize i18n
   let i18nReady = false;
   $: t = $translations$;
 
   // ============================================================================
-  // CRYPTO WORKER HELPER
-  // We use a dedicated worker for all BLAKE3 operations since hash-wasm
-  // doesn't work well in the main thread (Buffer polyfill issues)
-  // ============================================================================
-
-  let cryptoWorker: Worker | null = null;
-  let cryptoWorkerId = 0;
-  const cryptoCallbacks = new Map<number, { resolve: (data: any) => void; reject: (err: Error) => void }>();
-
-  async function initCryptoWorker(): Promise<void> {
-    if (cryptoWorker) return;
-
-    cryptoWorker = new Worker('/brainvault-worker.js', { type: 'module' });
-
-    cryptoWorker.onmessage = (e) => {
-      const { type, id, data } = e.data;
-      const callback = cryptoCallbacks.get(id);
-      if (!callback) return;
-
-      if (type === 'error') {
-        callback.reject(new Error(data.message));
-      } else {
-        callback.resolve(data);
-      }
-      cryptoCallbacks.delete(id);
-    };
-
-    // Wait for worker to be ready
-    return new Promise((resolve, reject) => {
-      const id = ++cryptoWorkerId;
-      const timeout = setTimeout(() => reject(new Error('Crypto worker init timeout')), 10000);
-      cryptoCallbacks.set(id, {
-        resolve: () => { clearTimeout(timeout); resolve(); },
-        reject: (err) => { clearTimeout(timeout); reject(err); }
-      });
-      cryptoWorker!.postMessage({ type: 'init', id });
-    });
-  }
-
-  async function workerBlake3(inputHex: string): Promise<string> {
-    await initCryptoWorker();
-    return new Promise((resolve, reject) => {
-      const id = ++cryptoWorkerId;
-      cryptoCallbacks.set(id, { resolve: (d) => resolve(d.resultHex), reject });
-      cryptoWorker!.postMessage({ type: 'blake3', id, data: { inputHex } });
-    });
-  }
-
-  async function workerHashName(name: string): Promise<string> {
-    await initCryptoWorker();
-    return new Promise((resolve, reject) => {
-      const id = ++cryptoWorkerId;
-      cryptoCallbacks.set(id, { resolve: (d) => resolve(d.nameHashHex), reject });
-      cryptoWorker!.postMessage({ type: 'hash_name', id, data: { name } });
-    });
-  }
-
-  // ============================================================================
   // CONSTANTS
   // ============================================================================
-
-  const BRAINVAULT_V2 = {
-    ALG_ID: 'brainvault/argon2id-sharded/v2.0',
-    SHARD_MEMORY_KB: 256 * 1024,
-    MIN_NAME_LENGTH: 1,
-    MIN_PASSPHRASE_LENGTH: 6,
-    MIN_FACTOR: 1,
-    MAX_FACTOR: 9,
-  };
 
   // Attack cost assumes: $0.05/GB-hour on AWS, 1M password guesses
   // Time to crack = shards × 256MB × $0.05/GB-hr × 1M guesses
@@ -293,7 +244,7 @@
   };
 
   let maxWorkers = computeMaxWorkers();
-  let targetWorkerCount = Math.min(hardwareCores * 2, maxWorkers); // Start at 2x cores
+  let targetWorkerCount = Math.max(1, Math.min(Math.ceil(maxWorkers * 2 / 3), maxWorkers)); // Start at ~2/3 capacity
   let effectiveTargetWorkerCount = targetWorkerCount;
 
   $: effectiveTargetWorkerCount = shardCount > 0
@@ -310,7 +261,7 @@
   $: memoryPercent = Math.min(100, (allocatedMemoryMB / deviceMemoryMB) * 100);
   let shardCount = 0;
   let shardsCompleted = 0;
-  let shardResults: Map<number, string> = new Map();
+  let shardResults: Map<number, Uint8Array> = new Map();
   let shardStatus: ('pending' | 'computing' | 'complete')[] = [];
   let estimatedShardTimeMs = 3000;
   let startTime = 0;
@@ -349,7 +300,7 @@
 
     // Check if there's an active vault
     const vault = $activeVault;
-    if (vault) {
+    if (vault && !$showVaultPanel) {
       // Restore state from saved vault
       name = vault.id;
       mnemonic12 = vault.seed;
@@ -374,18 +325,9 @@
   // Vault management state
   let vaultDropdownOpen = false;
   let signerDropdownOpen = false;
-  let networkDropdownOpen = false;
   let showSaveVaultModal = false;
   let vaultNameInput = '';
   let addressCopied = false;
-
-  // Network state
-  let selectedNetwork: EVMNetwork = EVM_NETWORKS[0]!;
-
-  function selectNetwork(network: EVMNetwork) {
-    selectedNetwork = network;
-    networkDropdownOpen = false;
-  }
 
   function copyAddress() {
     navigator.clipboard.writeText(currentSignerAddress);
@@ -404,23 +346,6 @@
     if (!target.closest('.context-dropdown')) {
       vaultDropdownOpen = false;
       signerDropdownOpen = false;
-      networkDropdownOpen = false;
-    }
-  }
-
-  // Network connection status
-  type NetworkStatus = 'connected' | 'connecting' | 'error';
-  let networkStatus: NetworkStatus = 'connecting';
-
-  async function checkNetworkConnection() {
-    try {
-      networkStatus = 'connecting';
-      const { JsonRpcProvider } = await import('ethers');
-      const provider = new JsonRpcProvider(selectedNetwork.rpcUrl);
-      await provider.getBlockNumber();
-      networkStatus = 'connected';
-    } catch {
-      networkStatus = 'error';
     }
   }
 
@@ -437,9 +362,14 @@
     return '$' + value.toFixed(2);
   }
 
-  // Check network on mount and when network changes
-  $: if (selectedNetwork && phase === 'complete') {
-    checkNetworkConnection();
+  let lastDeriveRequest = 0;
+  $: if ($deriveRequestSignal !== lastDeriveRequest) {
+    lastDeriveRequest = $deriveRequestSignal;
+    deriveNewVault();
+  }
+
+  $: if (phase === 'complete' && $showVaultPanel) {
+    vaultUiOperations.hideVault();
   }
 
   // Reactive: Get current vault/signer for display
@@ -492,11 +422,6 @@
     vaultOperations.selectSigner(index);
     signerDropdownOpen = false;
   }
-
-  // Initialize vault store from localStorage
-  onMount(() => {
-    vaultOperations.initialize();
-  });
 
   // ============================================================================
   // AUDIO & HAPTICS - Mechanical vault clicks and mobile feedback
@@ -657,7 +582,22 @@
   // COMPUTED
   // ============================================================================
 
-  $: passwordStrength = estimatePasswordStrength(passphrase);
+  const STRENGTH_COLORS: Record<string, string> = {
+    weak: '#ef4444',
+    fair: '#f59e0b',
+    good: '#84cc16',
+    strong: '#22c55e',
+    excellent: '#06b6d4',
+  };
+
+  $: passwordStrength = (() => {
+    const strength = estimatePasswordStrength(passphrase);
+    return {
+      bits: strength.bits,
+      rating: strength.rating,
+      color: STRENGTH_COLORS[strength.rating] ?? '#666',
+    };
+  })();
   $: factorInfo = FACTOR_INFO[factor - 1]!;
   $: canDerive = name.length >= BRAINVAULT_V2.MIN_NAME_LENGTH &&
                  passphrase.length >= BRAINVAULT_V2.MIN_PASSPHRASE_LENGTH;
@@ -685,90 +625,10 @@
   // UTILITY FUNCTIONS
   // ============================================================================
 
-  // Native SHA256 using Web Crypto API (browser built-in)
-  async function sha256(data: Uint8Array): Promise<string> {
-    const hashBuffer = await crypto.subtle.digest('SHA-256', data.buffer as ArrayBuffer);
-    const hashArray = new Uint8Array(hashBuffer);
-    return bytesToHex(hashArray);
-  }
-
-  function hexToBytes(hex: string): Uint8Array {
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < bytes.length; i++) {
-      bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
-    }
-    return bytes;
-  }
-
-  function bytesToHex(bytes: Uint8Array): string {
-    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-
-  function estimatePasswordStrength(pw: string): { bits: number; rating: string; color: string } {
-    if (!pw) return { bits: 0, rating: 'none', color: '#666' };
-
-    const charsets = {
-      lowercase: /[a-z]/.test(pw) ? 26 : 0,
-      uppercase: /[A-Z]/.test(pw) ? 26 : 0,
-      digits: /\d/.test(pw) ? 10 : 0,
-      special: /[^a-zA-Z0-9]/.test(pw) ? 33 : 0,
-    };
-
-    const poolSize = Object.values(charsets).reduce((a, b) => a + b, 0);
-    const bits = poolSize > 0 ? Math.log2(poolSize) * pw.length : 0;
-
-    if (bits < 40) return { bits: Math.round(bits), rating: 'weak', color: '#ef4444' };
-    if (bits < 60) return { bits: Math.round(bits), rating: 'fair', color: '#f59e0b' };
-    if (bits < 80) return { bits: Math.round(bits), rating: 'good', color: '#84cc16' };
-    if (bits < 100) return { bits: Math.round(bits), rating: 'strong', color: '#22c55e' };
-    return { bits: Math.round(bits), rating: 'excellent', color: '#06b6d4' };
-  }
-
-  function formatDuration(ms: number): string {
-    if (ms < 1000) return `${Math.round(ms)}ms`;
-    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-    if (ms < 3600000) {
-      const mins = Math.floor(ms / 60000);
-      const secs = Math.round((ms % 60000) / 1000);
-      return `${mins}m ${secs}s`;
-    }
-    const hours = Math.floor(ms / 3600000);
-    const mins = Math.round((ms % 3600000) / 60000);
-    return `${hours}h ${mins}m`;
-  }
-
-  function getShardCount(f: number): number {
-    return Math.pow(4, f - 1);
-  }
-
   async function copyToClipboard(text: string, field: string) {
     await navigator.clipboard.writeText(text);
     copiedField = field;
     setTimeout(() => copiedField = null, 2000);
-  }
-
-  /**
-   * Generate a lazy entity ID using the same algorithm as the runtime.
-   * For a single-signer entity: validators=[{name: address, weight: 1}], threshold=1
-   * Algorithm: sort validators by name, JSON stringify, keccak256 hash
-   */
-  function generateLazyEntityId(signerAddress: string): string {
-    // For single-signer entity: validators=[{name, weight}], threshold=1
-    const validatorData = [{ name: signerAddress, weight: 1 }];
-
-    // Sort by name for canonical ordering (already sorted for single validator)
-    const sortedValidators = validatorData.slice().sort((a, b) => a.name.localeCompare(b.name));
-
-    const quorumData = {
-      validators: sortedValidators,
-      threshold: '1', // threshold.toString() for single signer
-    };
-
-    // Canonical JSON serialization (matches runtime's algorithm)
-    const serialized = JSON.stringify(quorumData);
-
-    // Hash with keccak256 to generate entity ID
-    return keccak256(toUtf8Bytes(serialized));
   }
 
   // ============================================================================
@@ -813,9 +673,7 @@
       } else if (type === 'probe_result') {
         estimatedShardTimeMs = data.estimatedShardTimeMs;
       } else if (type === 'shard_complete') {
-        handleShardComplete(data.shardIndex, data.resultHex, data.elapsedMs);
-      } else if (type === 'batch_complete') {
-        handleBatchComplete(worker);
+        handleShardComplete(worker, data.shardIndex, data.resultHex, data.elapsedMs);
       } else if (type === 'error') {
         console.error('Worker error:', data.message);
       }
@@ -829,9 +687,10 @@
 
   async function startDerivation() {
     shardCount = getShardCount(factor);
-    const initialWorkers = Math.min(targetWorkerCount, shardCount);
+    let initialWorkers = Math.min(targetWorkerCount, shardCount);
     workerCount = initialWorkers;
     activeWorkerCount = initialWorkers;
+    finalizeInProgress = false;
     phase = 'deriving';
     shardsCompleted = 0;
     shardResults = new Map();
@@ -849,38 +708,61 @@
     console.log(`[BrainVault] Using ${initialWorkers} workers (${cpuCores} cores, max ${maxWorkers}, starting at ${targetWorkerCount})`);
 
     // Hash the name first using the worker
-    const nameHashHex = await workerHashName(name);
-
-    // Create workers
-    workers = [];
-    drainingWorkers.clear();
-    const workerPromises: Promise<void>[] = [];
-
-    for (let i = 0; i < initialWorkers; i++) {
-      const worker = new Worker('/brainvault-worker.js', { type: 'module' });
-      workers.push(worker);
-
-      const initPromise = new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('Worker init timeout')), 30000);
-        attachWorkerHandlers(worker, {
-          onReady: () => {
-            clearTimeout(timeout);
-            resolve();
-          },
-          onError: (err) => {
-            clearTimeout(timeout);
-            reject(err instanceof Error ? err : new Error('Worker init failed'));
-          },
-        });
-      });
-
-      worker.postMessage({ type: 'init', id: i });
-      workerPromises.push(initPromise);
-    }
+    const nameHashHex = await hashName(name);
 
     try {
-      syncWorkerCounts();
-      await Promise.all(workerPromises);
+      let attempts = 0;
+      while (true) {
+        // Create workers
+        workers = [];
+        drainingWorkers.clear();
+        const workerPromises: Promise<void>[] = [];
+
+        for (let i = 0; i < initialWorkers; i++) {
+          const worker = new Worker('/brainvault-worker.js', { type: 'module' });
+          workers.push(worker);
+
+          const initPromise = new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Worker init timeout')), 30000);
+            attachWorkerHandlers(worker, {
+              onReady: () => {
+                clearTimeout(timeout);
+                resolve();
+              },
+              onError: (err) => {
+                clearTimeout(timeout);
+                reject(err instanceof Error ? err : new Error('Worker init failed'));
+              },
+            });
+          });
+
+          worker.postMessage({ type: 'init', id: i });
+          workerPromises.push(initPromise);
+        }
+
+        try {
+          syncWorkerCounts();
+          await Promise.all(workerPromises);
+          break;
+        } catch (err) {
+          terminateWorkers();
+          const message = err instanceof Error ? err.message : String(err);
+          if (attempts < 2 && /out of memory|memory/i.test(message) && initialWorkers > 1) {
+            const reduced = Math.max(1, Math.floor(initialWorkers / 2));
+            if (reduced === initialWorkers) {
+              throw err;
+            }
+            initialWorkers = reduced;
+            workerCount = initialWorkers;
+            activeWorkerCount = initialWorkers;
+            targetWorkerCount = Math.min(targetWorkerCount, initialWorkers);
+            attempts += 1;
+            console.warn(`[BrainVault] Reducing workers to ${initialWorkers} after init failure`);
+            continue;
+          }
+          throw err;
+        }
+      }
 
       // Probe first worker for time estimate
       workers[0]?.postMessage({ type: 'probe', id: 0 });
@@ -899,47 +781,23 @@
 
   let nameHashHexGlobal = '';
   let nextShardToDispatch = 0;
-
-  // Dynamic batch size: more workers = larger batches (M3 Ultra: 32-64 shards/batch)
-  $: BATCH_SIZE = targetWorkerCount >= 64 ? 32 : targetWorkerCount >= 32 ? 24 : 16;
+  let finalizeInProgress = false;
 
   function dispatchShards(nameHashHex: string) {
     nameHashHexGlobal = nameHashHex;
     nextShardToDispatch = 0;
 
-    // Dispatch initial batch to each worker
+    // Dispatch initial shard to each worker
     for (let i = 0; i < workers.length && nextShardToDispatch < shardCount; i++) {
-      dispatchBatchToWorker(workers[i]!);
+      dispatchNextShard(workers[i]!);
     }
-  }
-
-  function dispatchBatchToWorker(worker: Worker) {
-    if (isWorkerDraining(worker)) return;
-    if (nextShardToDispatch >= shardCount) return;
-
-    // Calculate batch: min(BATCH_SIZE, remaining shards)
-    const remaining = shardCount - nextShardToDispatch;
-    const batchSize = Math.min(BATCH_SIZE, remaining);
-    const shardIndices: number[] = [];
-
-    for (let i = 0; i < batchSize; i++) {
-      shardIndices.push(nextShardToDispatch++);
-      shardStatus[shardIndices[i]!] = 'computing';
-    }
-    shardStatus = shardStatus; // Trigger reactivity
-
-    worker.postMessage({
-      type: 'derive_batch',
-      id: shardIndices[0], // Use first shard index as message ID
-      data: {
-        nameHashHex: nameHashHexGlobal,
-        passphrase,
-        shardIndices,
-      }
-    });
   }
 
   function dispatchNextShard(worker: Worker) {
+    if (isWorkerDraining(worker)) return;
+    while (nextShardToDispatch < shardCount && shardResults.has(nextShardToDispatch)) {
+      nextShardToDispatch++;
+    }
     if (nextShardToDispatch >= shardCount) return;
 
     const shardIndex = nextShardToDispatch++;
@@ -953,15 +811,20 @@
         nameHashHex: nameHashHexGlobal,
         passphrase,
         shardIndex,
+        shardCount,
       }
     });
   }
 
-  async function handleShardComplete(shardIndex: number, resultHex: string, elapsedMs: number) {
-    shardResults.set(shardIndex, resultHex);
+  async function handleShardComplete(worker: Worker, shardIndex: number, resultHex: string, elapsedMs: number) {
+    if (shardResults.has(shardIndex)) {
+      return;
+    }
+
+    shardResults.set(shardIndex, hexToBytes(resultHex));
     shardStatus[shardIndex] = 'complete';
     shardStatus = shardStatus;
-    shardsCompleted++;
+    shardsCompleted = shardResults.size;
 
     // Play sound for completed shard
     const intensity = 0.5 + (shardsCompleted / shardCount) * 0.5; // Gets louder as we progress
@@ -973,24 +836,21 @@
     // Save resume token to localStorage
     saveResumeToken();
 
-    // Note: Don't dispatch next work here - wait for batch_complete message
-    // This allows worker to finish entire batch before getting new work
-
-    // Check if all done
-    if (shardsCompleted >= shardCount) {
-      await finalizeDeriv();
-    }
-  }
-
-  function handleBatchComplete(worker: Worker) {
     if (isWorkerDraining(worker)) {
       shutdownWorker(worker);
-      return;
+    } else {
+      dispatchNextShard(worker);
     }
 
-    // Worker finished its batch, give it the next batch
-    if (nextShardToDispatch < shardCount) {
-      dispatchBatchToWorker(worker);
+    // Check if all done
+    if (!finalizeInProgress && shardResults.size >= shardCount) {
+      finalizeInProgress = true;
+      try {
+        await finalizeDeriv();
+      } catch (err) {
+        finalizeInProgress = false;
+        throw err;
+      }
     }
   }
 
@@ -1006,49 +866,27 @@
     // Collect results in order
     const orderedResults: Uint8Array[] = [];
     for (let i = 0; i < shardCount; i++) {
-      const hex = shardResults.get(i);
-      if (!hex) throw new Error(`Missing shard ${i}`);
-      orderedResults.push(hexToBytes(hex));
+      const shard = shardResults.get(i);
+      if (!shard) throw new Error(`Missing shard ${i}`);
+      orderedResults.push(shard);
     }
 
-    // Combine with BLAKE3
-    const totalLength = orderedResults.reduce((sum, s) => sum + s.length, 0);
-    const combined = new Uint8Array(totalLength + 1);
-    let offset = 0;
-    for (const shard of orderedResults) {
-      combined.set(shard, offset);
-      offset += shard.length;
-    }
-    combined[totalLength] = factor; // Add factor to prevent collisions
+    const masterKey = await combineShards(orderedResults, factor);
+    masterKeyHex = bytesToHex(masterKey);
 
-    masterKeyHex = await workerBlake3(bytesToHex(combined));
-
-    // Derive BIP39 entropy
-    const masterKey = hexToBytes(masterKeyHex);
-    const entropyInput = new Uint8Array(masterKey.length + 20);
-    entropyInput.set(masterKey, 0);
-    entropyInput.set(new TextEncoder().encode('bip39/entropy/v2.0'), masterKey.length);
-    const entropyHex = await workerBlake3(bytesToHex(entropyInput));
-    const entropy = hexToBytes(entropyHex);
-
-    // Generate mnemonic
+    // Derive BIP39 entropy + mnemonic
+    const entropy = await deriveKey(masterKey, 'bip39/entropy/v2.0', 32);
     mnemonic24 = await entropyToMnemonic(entropy);
     mnemonic12 = mnemonic24.split(' ').slice(0, 12).join(' ');
 
     // Derive device passphrase
-    const passInput = new Uint8Array(masterKey.length + 24);
-    passInput.set(masterKey, 0);
-    passInput.set(new TextEncoder().encode('bip39/passphrase/v2.0'), masterKey.length);
-    devicePassphrase = await workerBlake3(bytesToHex(passInput));
+    const deviceKey = await deriveKey(masterKey, 'bip39/passphrase/v2.0', 32);
+    devicePassphrase = bytesToHex(deviceKey);
 
-    // Derive Ethereum address using ethers directly
-    // We use the mnemonic without device passphrase for MetaMask compatibility
-    // The device passphrase is only for hardware wallet hidden wallets
-    // HDNodeWallet.fromPhrase creates a wallet at the Ethereum default path m/44'/60'/0'/0/0
-    const wallet = HDNodeWallet.fromPhrase(mnemonic24);
-    ethereumAddress = wallet.address;
+    // Derive Ethereum address using the standard path (m/44'/60'/0'/0/0)
+    ethereumAddress = await deriveEthereumAddress(mnemonic24);
     // Entity ID is a lazy entity ID for a single-signer quorum (matches runtime algorithm)
-    entityId = generateLazyEntityId(wallet.address);
+    entityId = generateLazyEntityId([ethereumAddress], 1n);
 
     // Clear localStorage resume token
     localStorage.removeItem('brainvault_resume');
@@ -1091,7 +929,7 @@
     const target = effectiveTargetWorkerCount;
 
     if (target < currentCount) {
-      // Scale down: drain excess workers (no new batches, terminate after batch_complete)
+      // Scale down: drain excess workers (no new shards assigned)
       const activeWorkers = workers.filter(worker => !drainingWorkers.has(worker));
       const excess = currentCount - target;
       const toDrain = activeWorkers.slice(-1 * excess);
@@ -1109,9 +947,7 @@
 
         attachWorkerHandlers(worker, {
           onReady: () => {
-            if (nextShardToDispatch < shardCount && !isWorkerDraining(worker)) {
-              dispatchBatchToWorker(worker);
-            }
+            dispatchNextShard(worker);
           },
         });
 
@@ -1122,17 +958,9 @@
   }
 
   function saveResumeToken() {
-    const token = {
-      version: 'bv2',
-      nameHash: nameHashHexGlobal,
-      factor,
-      completedShards: Array.from(shardResults.keys()).sort((a, b) => a - b),
-      shardResults: Object.fromEntries(
-        Array.from(shardResults.entries()).map(([k, v]) => [k.toString(), v])
-      ),
-      name, // Needed for UI
-    };
-    localStorage.setItem('brainvault_resume', JSON.stringify(token));
+    if (!nameHashHexGlobal) return;
+    const token = createResumeToken(hexToBytes(nameHashHexGlobal), factor, shardResults, name);
+    localStorage.setItem('brainvault_resume', token);
   }
 
   async function loadResumeToken() {
@@ -1143,9 +971,9 @@
     }
 
     try {
-      const token = JSON.parse(saved);
-      if (token.version !== 'bv2') {
-        alert('Invalid resume token version');
+      const token = parseResumeToken(saved);
+      if (!token) {
+        alert('Invalid resume token');
         return;
       }
 
@@ -1153,7 +981,9 @@
       name = token.name || '';
       factor = token.factor;
       shardCount = getShardCount(factor);
-      shardResults = new Map(Object.entries(token.shardResults).map(([k, v]) => [parseInt(k), v as string]));
+      shardResults = new Map(
+        Object.entries(token.shardResults).map(([k, v]) => [parseInt(k, 10), hexToBytes(v as string)])
+      );
       shardsCompleted = shardResults.size;
       shardStatus = Array(shardCount).fill('pending');
       for (const idx of shardResults.keys()) {
@@ -1173,6 +1003,7 @@
       phase = 'deriving';
       startTime = Date.now();
       elapsedMs = 0;
+      finalizeInProgress = false;
 
       elapsedInterval = setInterval(() => {
         elapsedMs = Date.now() - startTime;
@@ -1201,7 +1032,7 @@
               clearTimeout(timeout);
               resolve();
             } else if (type === 'shard_complete') {
-              handleShardComplete(data.shardIndex, data.resultHex, data.elapsedMs);
+              handleShardComplete(worker, data.shardIndex, data.resultHex, data.elapsedMs);
             } else if (type === 'error') {
               console.error('Worker error:', data.message);
             }
@@ -1225,15 +1056,9 @@
         nextShardToDispatch++;
       }
 
-      // Dispatch remaining shards in batches
+      // Dispatch remaining shards
       for (let i = 0; i < workers.length && nextShardToDispatch < shardCount; i++) {
-        // Find next incomplete shard
-        while (nextShardToDispatch < shardCount && shardResults.has(nextShardToDispatch)) {
-          nextShardToDispatch++;
-        }
-        if (nextShardToDispatch < shardCount) {
-          dispatchBatchToWorker(workers[i]!);
-        }
+        dispatchNextShard(workers[i]!);
       }
 
     } catch (err) {
@@ -1242,84 +1067,23 @@
     }
   }
 
-  async function entropyToMnemonic(entropy: Uint8Array): Promise<string> {
-    const wordlist = getBIP39Wordlist();
-
-    // Checksum
-    const checksumHash = await sha256(entropy);
-    const checksumBits = hexToBits(checksumHash).slice(0, entropy.length * 8 / 32);
-
-    const entropyBits = bytesToBits(entropy);
-    const allBits = entropyBits + checksumBits;
-
-    const words: string[] = [];
-    for (let i = 0; i < allBits.length; i += 11) {
-      const chunk = allBits.slice(i, i + 11);
-      const index = parseInt(chunk, 2);
-      words.push(wordlist[index]!);
-    }
-
-    return words.join(' ');
-  }
-
-  function bytesToBits(bytes: Uint8Array): string {
-    return Array.from(bytes).map(b => b.toString(2).padStart(8, '0')).join('');
-  }
-
-  function hexToBits(hex: string): string {
-    return hex.split('').map(c => parseInt(c, 16).toString(2).padStart(4, '0')).join('');
-  }
-
   // Password manager - auto-derive on domain change
   $: if (siteDomain.trim() && masterKeyHex && phase === 'complete') {
     deriveSitePasswordReactive();
   }
 
   async function deriveSitePasswordReactive() {
-    await deriveSitePassword();
+    await updateSitePassword();
   }
 
-  async function deriveSitePassword() {
+  async function updateSitePassword() {
     if (!siteDomain.trim() || !masterKeyHex) {
       sitePassword = '';
       return;
     }
 
     const domain = siteDomain.trim().toLowerCase();
-    const masterKey = hexToBytes(masterKeyHex);
-    const input = new Uint8Array(masterKey.length + domain.length + 14);
-    input.set(masterKey, 0);
-    input.set(new TextEncoder().encode('site-password:'), masterKey.length);
-    input.set(new TextEncoder().encode(domain), masterKey.length + 14);
-
-    const rawHex = await workerBlake3(bytesToHex(input));
-    const raw = hexToBytes(rawHex);
-
-    const lowers = 'abcdefghijklmnopqrstuvwxyz';
-    const uppers = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    const digits = '0123456789';
-    const specials = '!@#$%^&*()-_=+[]{}:,./?';
-    const all = lowers + uppers + digits + specials;
-
-    const passwordChars: string[] = [
-      lowers[raw[0]! % lowers.length]!,
-      uppers[raw[1]! % uppers.length]!,
-      digits[raw[2]! % digits.length]!,
-      specials[raw[3]! % specials.length]!,
-    ];
-
-    const length = 20;
-    for (let i = 4; i < length; i++) {
-      passwordChars.push(all[raw[i]! % all.length]!);
-    }
-
-    // Shuffle
-    for (let i = passwordChars.length - 1; i > 0; i--) {
-      const j = raw[length + i]! % (i + 1);
-      [passwordChars[i], passwordChars[j]] = [passwordChars[j]!, passwordChars[i]!];
-    }
-
-    sitePassword = passwordChars.join('');
+    sitePassword = await deriveSitePasswordFromRuntime(masterKeyHex, domain, 20);
   }
 
   function reset() {
@@ -1375,8 +1139,8 @@
       const saved = localStorage.getItem('brainvault_resume');
       if (saved) {
         try {
-          const token = JSON.parse(saved);
-          if (token.completedShards?.length > 0) {
+          const token = parseResumeToken(saved);
+          if (token?.completedShards?.length) {
             showResumeInput = true;
             name = token.name || '';
             factor = token.factor;
@@ -1390,30 +1154,19 @@
     };
   });
 
-  // BIP39 wordlist
-  function getBIP39Wordlist(): string[] {
-    return ["abandon","ability","able","about","above","absent","absorb","abstract","absurd","abuse","access","accident","account","accuse","achieve","acid","acoustic","acquire","across","act","action","actor","actress","actual","adapt","add","addict","address","adjust","admit","adult","advance","advice","aerobic","affair","afford","afraid","again","age","agent","agree","ahead","aim","air","airport","aisle","alarm","album","alcohol","alert","alien","all","alley","allow","almost","alone","alpha","already","also","alter","always","amateur","amazing","among","amount","amused","analyst","anchor","ancient","anger","angle","angry","animal","ankle","announce","annual","another","answer","antenna","antique","anxiety","any","apart","apology","appear","apple","approve","april","arch","arctic","area","arena","argue","arm","armed","armor","army","around","arrange","arrest","arrive","arrow","art","artefact","artist","artwork","ask","aspect","assault","asset","assist","assume","asthma","athlete","atom","attack","attend","attitude","attract","auction","audit","august","aunt","author","auto","autumn","average","avocado","avoid","awake","aware","away","awesome","awful","awkward","axis","baby","bachelor","bacon","badge","bag","balance","balcony","ball","bamboo","banana","banner","bar","barely","bargain","barrel","base","basic","basket","battle","beach","bean","beauty","because","become","beef","before","begin","behave","behind","believe","below","belt","bench","benefit","best","betray","better","between","beyond","bicycle","bid","bike","bind","biology","bird","birth","bitter","black","blade","blame","blanket","blast","bleak","bless","blind","blood","blossom","blouse","blue","blur","blush","board","boat","body","boil","bomb","bone","bonus","book","boost","border","boring","borrow","boss","bottom","bounce","box","boy","bracket","brain","brand","brass","brave","bread","breeze","brick","bridge","brief","bright","bring","brisk","broccoli","broken","bronze","broom","brother","brown","brush","bubble","buddy","budget","buffalo","build","bulb","bulk","bullet","bundle","bunker","burden","burger","burst","bus","business","busy","butter","buyer","buzz","cabbage","cabin","cable","cactus","cage","cake","call","calm","camera","camp","can","canal","cancel","candy","cannon","canoe","canvas","canyon","capable","capital","captain","car","carbon","card","cargo","carpet","carry","cart","case","cash","casino","castle","casual","cat","catalog","catch","category","cattle","caught","cause","caution","cave","ceiling","celery","cement","census","century","cereal","certain","chair","chalk","champion","change","chaos","chapter","charge","chase","chat","cheap","check","cheese","chef","cherry","chest","chicken","chief","child","chimney","choice","choose","chronic","chuckle","chunk","churn","cigar","cinnamon","circle","citizen","city","civil","claim","clap","clarify","claw","clay","clean","clerk","clever","click","client","cliff","climb","clinic","clip","clock","clog","close","cloth","cloud","clown","club","clump","cluster","clutch","coach","coast","coconut","code","coffee","coil","coin","collect","color","column","combine","come","comfort","comic","common","company","concert","conduct","confirm","congress","connect","consider","control","convince","cook","cool","copper","copy","coral","core","corn","correct","cost","cotton","couch","country","couple","course","cousin","cover","coyote","crack","cradle","craft","cram","crane","crash","crater","crawl","crazy","cream","credit","creek","crew","cricket","crime","crisp","critic","crop","cross","crouch","crowd","crucial","cruel","cruise","crumble","crunch","crush","cry","crystal","cube","culture","cup","cupboard","curious","current","curtain","curve","cushion","custom","cute","cycle","dad","damage","damp","dance","danger","daring","dash","daughter","dawn","day","deal","debate","debris","decade","december","decide","decline","decorate","decrease","deer","defense","define","defy","degree","delay","deliver","demand","demise","denial","dentist","deny","depart","depend","deposit","depth","deputy","derive","describe","desert","design","desk","despair","destroy","detail","detect","develop","device","devote","diagram","dial","diamond","diary","dice","diesel","diet","differ","digital","dignity","dilemma","dinner","dinosaur","direct","dirt","disagree","discover","disease","dish","dismiss","disorder","display","distance","divert","divide","divorce","dizzy","doctor","document","dog","doll","dolphin","domain","donate","donkey","donor","door","dose","double","dove","draft","dragon","drama","drastic","draw","dream","dress","drift","drill","drink","drip","drive","drop","drum","dry","duck","dumb","dune","during","dust","dutch","duty","dwarf","dynamic","eager","eagle","early","earn","earth","easily","east","easy","echo","ecology","economy","edge","edit","educate","effort","egg","eight","either","elbow","elder","electric","elegant","element","elephant","elevator","elite","else","embark","embody","embrace","emerge","emotion","employ","empower","empty","enable","enact","end","endless","endorse","enemy","energy","enforce","engage","engine","enhance","enjoy","enlist","enough","enrich","enroll","ensure","enter","entire","entry","envelope","episode","equal","equip","era","erase","erode","erosion","error","erupt","escape","essay","essence","estate","eternal","ethics","evidence","evil","evoke","evolve","exact","example","excess","exchange","excite","exclude","excuse","execute","exercise","exhaust","exhibit","exile","exist","exit","exotic","expand","expect","expire","explain","expose","express","extend","extra","eye","eyebrow","fabric","face","faculty","fade","faint","faith","fall","false","fame","family","famous","fan","fancy","fantasy","farm","fashion","fat","fatal","father","fatigue","fault","favorite","feature","february","federal","fee","feed","feel","female","fence","festival","fetch","fever","few","fiber","fiction","field","figure","file","film","filter","final","find","fine","finger","finish","fire","firm","first","fiscal","fish","fit","fitness","fix","flag","flame","flash","flat","flavor","flee","flight","flip","float","flock","floor","flower","fluid","flush","fly","foam","focus","fog","foil","fold","follow","food","foot","force","forest","forget","fork","fortune","forum","forward","fossil","foster","found","fox","fragile","frame","frequent","fresh","friend","fringe","frog","front","frost","frown","frozen","fruit","fuel","fun","funny","furnace","fury","future","gadget","gain","galaxy","gallery","game","gap","garage","garbage","garden","garlic","garment","gas","gasp","gate","gather","gauge","gaze","general","genius","genre","gentle","genuine","gesture","ghost","giant","gift","giggle","ginger","giraffe","girl","give","glad","glance","glare","glass","glide","glimpse","globe","gloom","glory","glove","glow","glue","goat","goddess","gold","good","goose","gorilla","gospel","gossip","govern","gown","grab","grace","grain","grant","grape","grass","gravity","great","green","grid","grief","grit","grocery","group","grow","grunt","guard","guess","guide","guilt","guitar","gun","gym","habit","hair","half","hammer","hamster","hand","happy","harbor","hard","harsh","harvest","hat","have","hawk","hazard","head","health","heart","heavy","hedgehog","height","hello","helmet","help","hen","hero","hidden","high","hill","hint","hip","hire","history","hobby","hockey","hold","hole","holiday","hollow","home","honey","hood","hope","horn","horror","horse","hospital","host","hotel","hour","hover","hub","huge","human","humble","humor","hundred","hungry","hunt","hurdle","hurry","hurt","husband","hybrid","ice","icon","idea","identify","idle","ignore","ill","illegal","illness","image","imitate","immense","immune","impact","impose","improve","impulse","inch","include","income","increase","index","indicate","indoor","industry","infant","inflict","inform","inhale","inherit","initial","inject","injury","inmate","inner","innocent","input","inquiry","insane","insect","inside","inspire","install","intact","interest","into","invest","invite","involve","iron","island","isolate","issue","item","ivory","jacket","jaguar","jar","jazz","jealous","jeans","jelly","jewel","job","join","joke","journey","joy","judge","juice","jump","jungle","junior","junk","just","kangaroo","keen","keep","ketchup","key","kick","kid","kidney","kind","kingdom","kiss","kit","kitchen","kite","kitten","kiwi","knee","knife","knock","know","lab","label","labor","ladder","lady","lake","lamp","language","laptop","large","later","latin","laugh","laundry","lava","law","lawn","lawsuit","layer","lazy","leader","leaf","learn","leave","lecture","left","leg","legal","legend","leisure","lemon","lend","length","lens","leopard","lesson","letter","level","liar","liberty","library","license","life","lift","light","like","limb","limit","link","lion","liquid","list","little","live","lizard","load","loan","lobster","local","lock","logic","lonely","long","loop","lottery","loud","lounge","love","loyal","lucky","luggage","lumber","lunar","lunch","luxury","lyrics","machine","mad","magic","magnet","maid","mail","main","major","make","mammal","man","manage","mandate","mango","mansion","manual","maple","marble","march","margin","marine","market","marriage","mask","mass","master","match","material","math","matrix","matter","maximum","maze","meadow","mean","measure","meat","mechanic","medal","media","melody","melt","member","memory","mention","menu","mercy","merge","merit","merry","mesh","message","metal","method","middle","midnight","milk","million","mimic","mind","minimum","minor","minute","miracle","mirror","misery","miss","mistake","mix","mixed","mixture","mobile","model","modify","mom","moment","monitor","monkey","monster","month","moon","moral","more","morning","mosquito","mother","motion","motor","mountain","mouse","move","movie","much","muffin","mule","multiply","muscle","museum","mushroom","music","must","mutual","myself","mystery","myth","naive","name","napkin","narrow","nasty","nation","nature","near","neck","need","negative","neglect","neither","nephew","nerve","nest","net","network","neutral","never","news","next","nice","night","noble","noise","nominee","noodle","normal","north","nose","notable","note","nothing","notice","novel","now","nuclear","number","nurse","nut","oak","obey","object","oblige","obscure","observe","obtain","obvious","occur","ocean","october","odor","off","offer","office","often","oil","okay","old","olive","olympic","omit","once","one","onion","online","only","open","opera","opinion","oppose","option","orange","orbit","orchard","order","ordinary","organ","orient","original","orphan","ostrich","other","outdoor","outer","output","outside","oval","oven","over","own","owner","oxygen","oyster","ozone","pact","paddle","page","pair","palace","palm","panda","panel","panic","panther","paper","parade","parent","park","parrot","party","pass","patch","path","patient","patrol","pattern","pause","pave","payment","peace","peanut","pear","peasant","pelican","pen","penalty","pencil","people","pepper","perfect","permit","person","pet","phone","photo","phrase","physical","piano","picnic","picture","piece","pig","pigeon","pill","pilot","pink","pioneer","pipe","pistol","pitch","pizza","place","planet","plastic","plate","play","please","pledge","pluck","plug","plunge","poem","poet","point","polar","pole","police","pond","pony","pool","popular","portion","position","possible","post","potato","pottery","poverty","powder","power","practice","praise","predict","prefer","prepare","present","pretty","prevent","price","pride","primary","print","priority","prison","private","prize","problem","process","produce","profit","program","project","promote","proof","property","prosper","protect","proud","provide","public","pudding","pull","pulp","pulse","pumpkin","punch","pupil","puppy","purchase","purity","purpose","purse","push","put","puzzle","pyramid","quality","quantum","quarter","question","quick","quit","quiz","quote","rabbit","raccoon","race","rack","radar","radio","rail","rain","raise","rally","ramp","ranch","random","range","rapid","rare","rate","rather","raven","raw","razor","ready","real","reason","rebel","rebuild","recall","receive","recipe","record","recycle","reduce","reflect","reform","refuse","region","regret","regular","reject","relax","release","relief","rely","remain","remember","remind","remove","render","renew","rent","reopen","repair","repeat","replace","report","require","rescue","resemble","resist","resource","response","result","retire","retreat","return","reunion","reveal","review","reward","rhythm","rib","ribbon","rice","rich","ride","ridge","rifle","right","rigid","ring","riot","ripple","risk","ritual","rival","river","road","roast","robot","robust","rocket","romance","roof","rookie","room","rose","rotate","rough","round","route","royal","rubber","rude","rug","rule","run","runway","rural","sad","saddle","sadness","safe","sail","salad","salmon","salon","salt","salute","same","sample","sand","satisfy","satoshi","sauce","sausage","save","say","scale","scan","scare","scatter","scene","scheme","school","science","scissors","scorpion","scout","scrap","screen","script","scrub","sea","search","season","seat","second","secret","section","security","seed","seek","segment","select","sell","seminar","senior","sense","sentence","series","service","session","settle","setup","seven","shadow","shaft","shallow","share","shed","shell","sheriff","shield","shift","shine","ship","shiver","shock","shoe","shoot","shop","short","shoulder","shove","shrimp","shrug","shuffle","shy","sibling","sick","side","siege","sight","sign","silent","silk","silly","silver","similar","simple","since","sing","siren","sister","situate","six","size","skate","sketch","ski","skill","skin","skirt","skull","slab","slam","sleep","slender","slice","slide","slight","slim","slogan","slot","slow","slush","small","smart","smile","smoke","smooth","snack","snake","snap","sniff","snow","soap","soccer","social","sock","soda","soft","solar","soldier","solid","solution","solve","someone","song","soon","sorry","sort","soul","sound","soup","source","south","space","spare","spatial","spawn","speak","special","speed","spell","spend","sphere","spice","spider","spike","spin","spirit","split","spoil","sponsor","spoon","sport","spot","spray","spread","spring","spy","square","squeeze","squirrel","stable","stadium","staff","stage","stairs","stamp","stand","start","state","stay","steak","steel","stem","step","stereo","stick","still","sting","stock","stomach","stone","stool","story","stove","strategy","street","strike","strong","struggle","student","stuff","stumble","style","subject","submit","subway","success","such","sudden","suffer","sugar","suggest","suit","summer","sun","sunny","sunset","super","supply","supreme","sure","surface","surge","surprise","surround","survey","suspect","sustain","swallow","swamp","swap","swarm","swear","sweet","swift","swim","swing","switch","sword","symbol","symptom","syrup","system","table","tackle","tag","tail","talent","talk","tank","tape","target","task","taste","tattoo","taxi","teach","team","tell","ten","tenant","tennis","tent","term","test","text","thank","that","theme","then","theory","there","they","thing","this","thought","three","thrive","throw","thumb","thunder","ticket","tide","tiger","tilt","timber","time","tiny","tip","tired","tissue","title","toast","tobacco","today","toddler","toe","together","toilet","token","tomato","tomorrow","tone","tongue","tonight","tool","tooth","top","topic","topple","torch","tornado","tortoise","toss","total","tourist","toward","tower","town","toy","track","trade","traffic","tragic","train","transfer","trap","trash","travel","tray","treat","tree","trend","trial","tribe","trick","trigger","trim","trip","trophy","trouble","truck","true","truly","trumpet","trust","truth","try","tube","tuition","tumble","tuna","tunnel","turkey","turn","turtle","twelve","twenty","twice","twin","twist","two","type","typical","ugly","umbrella","unable","unaware","uncle","uncover","under","undo","unfair","unfold","unhappy","uniform","unique","unit","universe","unknown","unlock","until","unusual","unveil","update","upgrade","uphold","upon","upper","upset","urban","urge","usage","use","used","useful","useless","usual","utility","vacant","vacuum","vague","valid","valley","valve","van","vanish","vapor","various","vast","vault","vehicle","velvet","vendor","venture","venue","verb","verify","version","very","vessel","veteran","viable","vibrant","vicious","victory","video","view","village","vintage","violin","virtual","virus","visa","visit","visual","vital","vivid","vocal","voice","void","volcano","volume","vote","voyage","wage","wagon","wait","walk","wall","walnut","want","warfare","warm","warrior","wash","wasp","waste","water","wave","way","wealth","weapon","wear","weasel","weather","web","wedding","weekend","weird","welcome","west","wet","whale","what","wheat","wheel","when","where","whip","whisper","wide","width","wife","wild","will","win","window","wine","wing","wink","winner","winter","wire","wisdom","wise","wish","witness","wolf","woman","wonder","wood","wool","word","work","world","worry","worth","wrap","wreck","wrestle","wrist","write","wrong","yard","year","yellow","you","young","youth","zebra","zero","zone","zoo"];
-  }
 </script>
 
 <svelte:window on:click={handleClickOutside} />
 
-<div class="brainvault-wrapper">
-  <!-- Hierarchical Navigation (always visible in user mode) -->
-  <HierarchicalNav />
+<div class="brainvault-wrapper" class:embedded>
+  <!-- Hierarchical Navigation (only in standalone mode) -->
+  {#if !embedded}
+    <HierarchicalNav />
+  {/if}
 
   <!-- Main BrainVault Content -->
   <div class="brainvault-container" class:deriving={phase === 'deriving'} class:complete={phase === 'complete'}>
-    <!-- Ambient particles - intensify during derivation -->
-    <div class="dust-particles" class:active={phase === 'deriving'}></div>
-
-  <!-- Light rays from logo - EXPLODE during derivation -->
-  <!-- Light rays disabled - too distracting during derivation -->
-
-  <!-- Golden light flood during derivation -->
-  {#if phase === 'deriving'}
-    <div class="light-flood" style="--progress: {progress}"></div>
-  {/if}
+    <!-- Ambient particles disabled for minimalist mode -->
 
   <!-- Header - minimalist (no logo, clean fintech UI) -->
   <div class="header" class:deriving={phase === 'deriving'}>
@@ -1424,7 +1177,7 @@
 
     <!-- INPUT SECTION - Always visible at top -->
     {#if phase === 'input' || phase === 'deriving'}
-      <div class="glass-card input-section">
+      <div class="glass-card input-section" class:deriving={phase === 'deriving'}>
         <!-- Resume Banner -->
         {#if showResumeInput}
           <div class="resume-banner">
@@ -1555,97 +1308,86 @@
             {t('vault.derive')}
           </button>
         {/if}
+
+        {#if phase === 'deriving'}
+          <div class="input-progress">
+            <div class="clean-progress-container">
+              <div class="simple-progress">
+                <div class="pyramid-logo" style="--progress: {progress}%">
+                </div>
+                <div class="pyramid-progress-text">{Math.floor(progress)}%</div>
+
+                <div class="pyramid-stats">
+                  <div class="stat-row">
+                    <span class="stat-label">SHARDS</span>
+                    <span class="stat-value">{shardsCompleted}/{shardCount}</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">THREADS</span>
+                    <span class="stat-value">{workerCount}/{maxWorkers}</span>
+                  </div>
+                  <div class="stat-row">
+                    <span class="stat-label">MEMORY</span>
+                    <span class="stat-value">{allocatedMemoryMB}MB</span>
+                  </div>
+                </div>
+
+                <div class="pyramid-progress-bar">
+                  <div class="pyramid-progress-fill" style="width: {progress}%"></div>
+                </div>
+
+                <div class="speed-control">
+                  <div class="speed-header">
+                    <span class="speed-label">SPEED</span>
+                    <span class="speed-eta">ETA: {formatDuration(projectedRemainingMs)}</span>
+                  </div>
+                  <div class="speed-slider-wrapper">
+                    <span class="speed-min">🐢</span>
+                    <input
+                      type="range"
+                      min="1"
+                      max={maxWorkers}
+                      bind:value={targetWorkerCount}
+                      on:input={adjustWorkers}
+                      class="speed-slider"
+                    />
+                    <span class="speed-max">🚀</span>
+                  </div>
+                  <div class="speed-details">
+                    <span class="speed-threads">{targetWorkerCount} threads</span>
+                    <span class="speed-memory">{allocatedMemoryMB}MB RAM</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mini-shard-grid" style="--cols: {Math.ceil(Math.sqrt(visualShardCount))}">
+                {#each Array(visualShardCount) as _, cellIdx}
+                  {@const startShard = cellIdx * shardsPerCell}
+                  {@const endShard = Math.min(startShard + shardsPerCell, shardCount)}
+                  {@const cellShards = shardStatus.slice(startShard, endShard)}
+                  {@const completedInCell = cellShards.filter(s => s === 'complete').length}
+                  {@const computingInCell = cellShards.filter(s => s === 'computing').length}
+                  {@const cellProgress = completedInCell / cellShards.length}
+                  <div
+                    class="mini-shard"
+                    class:pending={cellProgress === 0 && computingInCell === 0}
+                    class:computing={computingInCell > 0}
+                    class:complete={cellProgress === 1}
+                  ></div>
+                {/each}
+              </div>
+
+              <div class="vault-info">
+                <div class="vault-time">{formatDuration(remainingMs)} remaining</div>
+              </div>
+
+              <div class="anim-controls">
+                <button class="control-btn cancel" on:click={reset} title="Cancel derivation">Cancel</button>
+              </div>
+            </div>
+          </div>
+        {/if}
       </div>
-    {/if}
-
-    <!-- DERIVATION OVERLAY - Shows cube grid below inputs during derivation -->
-    {#if phase === 'deriving'}
-        <!-- Clean progress container (no pharaoh effects) -->
-        <div class="clean-progress-container">
-          <!-- Simple progress display -->
-          <div class="simple-progress">
-            <div class="pyramid-logo" style="--progress: {progress}%">
-              <!-- Pyramid triangle removed - minimalist UI -->
-              <div class="pyramid-glow pharaoh-glow"></div>
-              <!-- Light escaping from pyramid cracks -->
-              <div class="pharaoh-crack left"></div>
-              <div class="pharaoh-crack right"></div>
-            </div>
-            <div class="pyramid-progress-text">{Math.floor(progress)}%</div>
-
-            <div class="pyramid-stats">
-              <div class="stat-row">
-                <span class="stat-label">SHARDS</span>
-                <span class="stat-value">{shardsCompleted}/{shardCount}</span>
-              </div>
-              <div class="stat-row">
-                <span class="stat-label">THREADS</span>
-                <span class="stat-value">{workerCount}/{maxWorkers}</span>
-              </div>
-              <div class="stat-row">
-                <span class="stat-label">MEMORY</span>
-                <span class="stat-value">{allocatedMemoryMB}MB</span>
-              </div>
-            </div>
-
-            <!-- Progress bar -->
-            <div class="pyramid-progress-bar">
-              <div class="pyramid-progress-fill" style="width: {progress}%"></div>
-            </div>
-
-            <!-- Speed control slider - more threads = faster but more RAM -->
-            <div class="speed-control">
-              <div class="speed-header">
-                <span class="speed-label">SPEED</span>
-                <span class="speed-eta">ETA: {formatDuration(projectedRemainingMs)}</span>
-              </div>
-              <div class="speed-slider-wrapper">
-                <span class="speed-min">🐢</span>
-                <input
-                  type="range"
-                  min="1"
-                  max={maxWorkers}
-                  bind:value={targetWorkerCount}
-                  on:input={adjustWorkers}
-                  class="speed-slider"
-                />
-                <span class="speed-max">🚀</span>
-              </div>
-              <div class="speed-details">
-                <span class="speed-threads">{targetWorkerCount} threads</span>
-                <span class="speed-memory">{allocatedMemoryMB}MB RAM</span>
-              </div>
-            </div>
-
-          </div>
-
-          <!-- Shard grid under pyramid -->
-          <div class="mini-shard-grid" style="--cols: {Math.ceil(Math.sqrt(visualShardCount))}">
-            {#each Array(visualShardCount) as _, cellIdx}
-              {@const startShard = cellIdx * shardsPerCell}
-              {@const endShard = Math.min(startShard + shardsPerCell, shardCount)}
-              {@const cellShards = shardStatus.slice(startShard, endShard)}
-              {@const completedInCell = cellShards.filter(s => s === 'complete').length}
-              {@const computingInCell = cellShards.filter(s => s === 'computing').length}
-              {@const cellProgress = completedInCell / cellShards.length}
-              <div
-                class="mini-shard"
-                class:pending={cellProgress === 0 && computingInCell === 0}
-                class:computing={computingInCell > 0}
-                class:complete={cellProgress === 1}
-              ></div>
-            {/each}
-          </div>
-
-          <div class="vault-info">
-            <div class="vault-time">{formatDuration(remainingMs)} remaining</div>
-          </div>
-
-          <!-- Controls bar -->
-          <div class="anim-controls">
-            <button class="control-btn cancel" on:click={reset}>esc</button>
-          </div>
-        </div>
     {/if}
 
     <!-- COMPLETE PHASE -->
@@ -1675,13 +1417,14 @@
 
         <!-- Tab Content -->
         <div class="complete-tab-content">
-          <!-- Unified Context Bar: Vault+Signer | Network (always visible) -->
+          <!-- Unified Context Bar: Vault+Signer (always visible) -->
+          {#if !embedded}
           <div class="context-bar">
                 <!-- Combined Vault + Signer Dropdown -->
                 <div class="context-dropdown vault-signer-combo" class:open={vaultDropdownOpen}>
                   <button
                     class="context-trigger pill"
-                    on:click|stopPropagation={() => { vaultDropdownOpen = !vaultDropdownOpen; networkDropdownOpen = false; }}
+                    on:click|stopPropagation={() => { vaultDropdownOpen = !vaultDropdownOpen; }}
                   >
                     <img src={currentSignerIdenticon} alt="" class="context-identicon" />
                     <div class="context-info">
@@ -1713,14 +1456,6 @@
                                   <code class="menu-item-addr">{signer.address.slice(0, 6)}...{signer.address.slice(-4)}</code>
                                 </div>
                               </button>
-                              <a
-                                href="{selectedNetwork.explorerUrl}/address/{signer.address}"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                class="explorer-link"
-                                title="View on {selectedNetwork.explorerName}"
-                                on:click|stopPropagation
-                              >↗</a>
                             </div>
                           {/each}
                           <button class="menu-item add-action indent" on:click={handleAddSigner}>
@@ -1761,45 +1496,6 @@
                   {/if}
                 </div>
 
-                <!-- Network Dropdown -->
-                <div class="context-dropdown" class:open={networkDropdownOpen}>
-                  <button
-                    class="context-trigger pill"
-                    on:click|stopPropagation={() => { networkDropdownOpen = !networkDropdownOpen; vaultDropdownOpen = false; }}
-                  >
-                    <span class="network-dot" style="background: {networkStatus === 'connected' ? '#00ff88' : networkStatus === 'connecting' ? '#ffcc00' : '#ff4466'}"></span>
-                    <span class="context-label">{selectedNetwork.name}</span>
-                    <span class="dropdown-arrow">▼</span>
-                  </button>
-                  {#if networkDropdownOpen}
-                    <div class="context-menu">
-                      <div class="menu-section-label">Mainnets</div>
-                      {#each EVM_NETWORKS.filter(n => !n.isTestnet) as network}
-                        <button
-                          class="menu-item"
-                          class:active={network.chainId === selectedNetwork.chainId}
-                          on:click={() => selectNetwork(network)}
-                        >
-                          <span class="network-dot" style="background: #00ff88"></span>
-                          <span class="menu-item-label">{network.name}</span>
-                        </button>
-                      {/each}
-                      <div class="menu-divider"></div>
-                      <div class="menu-section-label">Testnets</div>
-                      {#each EVM_NETWORKS.filter(n => n.isTestnet) as network}
-                        <button
-                          class="menu-item"
-                          class:active={network.chainId === selectedNetwork.chainId}
-                          on:click={() => selectNetwork(network)}
-                        >
-                          <span class="network-dot" style="background: #ff9944"></span>
-                          <span class="menu-item-label">{network.name}</span>
-                        </button>
-                      {/each}
-                    </div>
-                  {/if}
-                </div>
-
                 <!-- Settings Gear Icon -->
                 <button
                   class="settings-gear"
@@ -1809,6 +1505,7 @@
                   ⚙️
                 </button>
               </div>
+          {/if}
 
           <!-- Unified Wallet View (no tabs) -->
           <WalletView
@@ -1816,6 +1513,7 @@
               walletAddress={currentSignerAddress}
               {entityId}
               identiconSrc={currentSignerIdenticon}
+              networkEnabled={false}
               on:portfolioUpdate={handlePortfolioUpdate}
             />
 
@@ -1965,10 +1663,17 @@
 <style>
   .brainvault-wrapper {
     width: 100%;
-    height: 100vh;
+    height: 100%;
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+  }
+
+  .brainvault-wrapper.embedded {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
   }
 
   .brainvault-container {
@@ -1987,6 +1692,71 @@
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
+  }
+
+  .brainvault-wrapper.embedded .brainvault-container {
+    overflow: visible;
+    background: linear-gradient(180deg, #0b0f14 0%, #06080b 100%);
+    background-image: none;
+  }
+
+  .brainvault-wrapper.embedded .glass-card {
+    border-radius: 12px;
+    border-color: rgba(255, 255, 255, 0.08);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  }
+
+  .brainvault-wrapper.embedded .input-section.deriving {
+    padding-bottom: 8px;
+  }
+
+  .brainvault-wrapper.embedded .input-progress {
+    margin-top: 6px;
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .brainvault-wrapper.embedded .input-progress .clean-progress-container {
+    gap: 8px;
+  }
+
+  .brainvault-wrapper.embedded .input-progress .pyramid-logo {
+    display: none;
+  }
+
+  .brainvault-wrapper.embedded .input-progress .pyramid-progress-text {
+    font-size: 36px;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .brainvault-wrapper.embedded .pyramid-progress-bar {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .brainvault-wrapper.embedded .pyramid-progress-fill {
+    background: linear-gradient(90deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.5));
+  }
+
+  .brainvault-wrapper.embedded .mini-shard-grid {
+    display: none;
+  }
+
+  .brainvault-wrapper.embedded .vault-info {
+    margin-top: 8px;
+  }
+
+  .brainvault-wrapper.embedded .anim-controls {
+    position: static;
+    transform: none;
+    margin-top: 8px;
+  }
+
+  .brainvault-wrapper.embedded .dust-particles,
+  .brainvault-wrapper.embedded .light-rays,
+  .brainvault-wrapper.embedded .pharaoh-dust,
+  .brainvault-wrapper.embedded .pharaoh-rays,
+  .brainvault-wrapper.embedded .pharaoh-glow {
+    display: none;
   }
 
   /* Dune-style dust particles */
@@ -2359,12 +2129,12 @@
     margin: 0 auto;
     position: relative;
     z-index: 1;
-    flex: 1;
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
     min-height: 0;
     box-sizing: border-box;
-    overflow: hidden;
+    overflow: visible;
   }
 
   /* Glass Card - Sacred Chamber */
@@ -2381,10 +2151,55 @@
     position: relative;
   }
 
-  /* Input section minimized during derivation */
-  /* Input section stays visible during derivation */
   .input-section {
-    margin-bottom: 24px; /* Space for derivation section below */
+    margin-bottom: 0;
+  }
+
+  .input-section.deriving {
+    padding-bottom: 18px;
+  }
+
+  .input-progress {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(255, 200, 100, 0.12);
+  }
+
+  .input-progress .clean-progress-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+  }
+
+  .input-progress .simple-progress {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .input-progress .pyramid-logo {
+    width: 96px;
+    height: 96px;
+  }
+
+  .input-progress .pyramid-progress-text {
+    font-size: 48px;
+    letter-spacing: 2px;
+  }
+
+  .input-progress .pyramid-stats {
+    gap: 20px;
+  }
+
+  .input-progress .mini-shard-grid {
+    margin: 16px auto 0;
+  }
+
+  .input-progress .speed-control {
+    width: 100%;
+    max-width: 520px;
   }
 
   .glass-card::before {

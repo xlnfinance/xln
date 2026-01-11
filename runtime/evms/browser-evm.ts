@@ -42,6 +42,7 @@ export class BrowserEVM implements JurisdictionEVM {
   async getCollateral(entity1: string, entity2: string, tokenId: number) { return this.provider.getCollateral(entity1, entity2, tokenId); }
   async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint) { return this.provider.reserveToReserve(from, to, tokenId, amount); }
   async processBatch(entityId: string, batch: any) { return this.provider.processBatch(entityId, batch); }
+  getProvider() { return this.provider; }
 
   // Event subscription for j-watcher (proxied from BrowserVMProvider)
   onAny(callback: (event: any) => void): () => void { return this.provider.onAny(callback); }
@@ -55,7 +56,7 @@ export class BrowserEVM implements JurisdictionEVM {
   async send(to: string, data: string, value?: bigint): Promise<string> { return this.provider.executeTx({ to, data, gasLimit: 1000000n }); }
   async getBlock(): Promise<number> { return 0; }
   async getBalance(address: string): Promise<bigint> { throw new Error('Not implemented'); }
-  getEntityProviderAddress(): string { return '0x0000000000000000000000000000000000000000'; }
+  getEntityProviderAddress(): string { return this.provider.getEntityProviderAddress(); }
 
   async serialize(): Promise<XlnomySnapshot> {
     return {
@@ -66,7 +67,7 @@ export class BrowserEVM implements JurisdictionEVM {
       blockTimeMs: 1000,
       jMachine: { position: { x: 0, y: 600, z: 0 }, capacity: 3, jHeight: 0 },
       contracts: {
-        entityProviderAddress: '0x0000000000000000000000000000000000000000',
+        entityProviderAddress: this.provider.getEntityProviderAddress(),
         depositoryAddress: this.provider.getDepositoryAddress(),
         deltaTransformerAddress: this.provider.getDeltaTransformerAddress(),
       },

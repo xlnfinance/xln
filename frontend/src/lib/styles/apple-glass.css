@@ -68,6 +68,16 @@
   --blur-sm: 16px;
   --blur-md: 24px;
   --blur-lg: 40px;
+
+  /* Dropdown tokens (unified) */
+  --dropdown-bg: var(--glass-bg);
+  --dropdown-bg-hover: var(--glass-bg-hover);
+  --dropdown-border: var(--glass-border);
+  --dropdown-text: var(--text-primary);
+  --dropdown-menu-bg: rgba(12, 18, 28, 0.95);
+  --dropdown-item-hover: rgba(255, 255, 255, 0.06);
+  --dropdown-selected: rgba(0, 122, 255, 0.18);
+  --dropdown-radius: 10px;
 }
 
 /* ============================================================================
@@ -195,6 +205,29 @@ body {
   outline: none;
   border-color: var(--accent-gold);
   box-shadow: 0 0 0 4px var(--accent-gold-glow);
+}
+
+/* Unified select styling */
+select {
+  background: var(--dropdown-bg);
+  border: 1px solid var(--dropdown-border);
+  color: var(--dropdown-text);
+  border-radius: var(--dropdown-radius);
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  line-height: 1.2;
+  backdrop-filter: blur(var(--blur-sm));
+}
+
+select:focus {
+  outline: none;
+  border-color: var(--accent-blue);
+  box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.35);
+}
+
+select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* Glass card */

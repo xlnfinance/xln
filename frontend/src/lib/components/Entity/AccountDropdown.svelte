@@ -1,138 +1,160 @@
 <script lang="ts">
+  /**
+   * AccountDropdown - Account selector for bilateral relationships
+   * Uses unified Dropdown base component
+   */
   import { createEventDispatcher } from 'svelte';
-  import { xlnFunctions } from '../../stores/xlnStore';
+  import { xlnFunctions, xlnInstance } from '../../stores/xlnStore';
   import type { EntityReplica, AccountMachine } from '$lib/types/ui';
-  import { ChevronDown } from 'lucide-svelte';
+  import Dropdown from '$lib/components/UI/Dropdown.svelte';
 
-  export let replica: EntityReplica;
+  export let replica: EntityReplica | null = null;
   export let selectedAccountId: string | null = null;
+  export let allowAdd: boolean = false;
 
   const dispatch = createEventDispatcher();
 
   let isOpen = false;
 
-  // Get available accounts from entity state
-  $: availableAccounts = Array.from(replica?.state?.accounts?.entries() || [] as [string, AccountMachine][])
-    .map(([counterpartyId, account]: [string, AccountMachine]) => ({
-      id: counterpartyId,
-      account,
-      entityShortId: $xlnFunctions?.getEntityShortId?.(counterpartyId) || counterpartyId.slice(-4),
-      avatarUrl: $xlnFunctions?.generateEntityAvatar?.(counterpartyId) || '',
-      status: account.mempool?.length > 0 ? 'pending' : 'synced'
-    }));
+  // Build account list reactively
+  interface AccountItem {
+    id: string;
+    shortId: string;
+    avatarUrl: string;
+    status: 'synced' | 'pending';
+    pendingCount: number;
+  }
 
-  $: selectedAccount = availableAccounts.find(acc => acc.id === selectedAccountId);
+  $: xlnReady = !!$xlnInstance;
+  $: accounts = buildAccountList(replica, xlnReady ? $xlnFunctions : null);
+
+  function buildAccountList(replica: EntityReplica | null, xlnFuncs: any): AccountItem[] {
+    if (!replica?.state?.accounts) return [];
+
+    const items: AccountItem[] = [];
+    const accountsMap = replica.state.accounts;
+
+    for (const [counterpartyId, account] of accountsMap.entries()) {
+      const acc = account as AccountMachine;
+      items.push({
+        id: counterpartyId,
+        shortId: xlnFuncs?.getEntityShortId?.(counterpartyId) || counterpartyId.slice(-4),
+        avatarUrl: xlnFuncs?.generateEntityAvatar?.(counterpartyId) || '',
+        status: acc.mempool?.length > 0 ? 'pending' : 'synced',
+        pendingCount: acc.mempool?.length || 0
+      });
+    }
+
+    return items;
+  }
+
+  $: selectedAccount = accounts.find(acc => acc.id === selectedAccountId);
+
   $: displayText = selectedAccount
-    ? `Entity #${selectedAccount.entityShortId} (${selectedAccount.status})`
+    ? `Account #${selectedAccount.shortId}`
     : 'Select Account...';
 
-  function selectAccount(accountId: string) {
+  function selectAccount(accountId: string | null) {
     dispatch('accountSelect', { accountId });
     isOpen = false;
   }
 
-  function handleClickOutside(event: MouseEvent) {
-    const target = event.target as HTMLElement;
-    if (!target.closest('.account-dropdown-custom')) {
-      isOpen = false;
-    }
+  function handleAddAccount() {
+    if (!allowAdd || !replica) return;
+    dispatch('addAccount', { replica });
+    isOpen = false;
   }
 </script>
 
-<svelte:window on:click={handleClickOutside} />
-
-<div class="account-dropdown-custom" class:open={isOpen}>
-  <button
-    class="dropdown-trigger"
-    on:click|stopPropagation={() => isOpen = !isOpen}
-  >
+<Dropdown bind:open={isOpen} minWidth={180} maxWidth={300}>
+  <span slot="trigger" class="trigger-content">
     {#if selectedAccount?.avatarUrl}
-      <img src={selectedAccount.avatarUrl} alt="" class="account-avatar" />
+      <img src={selectedAccount.avatarUrl} alt="" class="trigger-avatar" />
     {/if}
-    <span class="dropdown-text">{displayText}</span>
-    <ChevronDown size={14} class="chevron" />
-  </button>
+    <span class="trigger-text">{displayText}</span>
+    <span class="trigger-arrow" class:open={isOpen}>▼</span>
+  </span>
 
-  {#if isOpen}
-    <div class="dropdown-menu">
-      {#if availableAccounts.length === 0}
-        <div class="empty-state">No accounts available</div>
-      {:else}
-        {#each availableAccounts as acc (acc.id)}
-          <button
-            class="account-item"
-            class:selected={acc.id === selectedAccountId}
-            on:click|stopPropagation={() => selectAccount(acc.id)}
-          >
-            {#if acc.avatarUrl}
-              <img src={acc.avatarUrl} alt="" class="account-avatar" />
-            {/if}
-            <span class="account-name">Entity #{acc.entityShortId}</span>
-            <span class="account-status" class:pending={acc.status === 'pending'}>
-              {acc.status === 'pending' ? `${acc.account.mempool.length} pending` : 'Synced'}
-            </span>
-          </button>
-        {/each}
-      {/if}
-    </div>
-  {/if}
-</div>
+  <div slot="menu" class="menu-content">
+    <!-- Back to entity option -->
+    {#if selectedAccountId}
+      <button class="menu-item back-item" on:click={() => selectAccount(null)}>
+        <span class="back-arrow">←</span>
+        <span>Back to Entity</span>
+      </button>
+      <div class="menu-divider"></div>
+    {/if}
+
+    <!-- Account list -->
+    {#if accounts.length === 0}
+      <div class="empty-state">No accounts</div>
+    {:else}
+      {#each accounts as account (account.id)}
+        <button
+          class="menu-item account-item"
+          class:selected={account.id === selectedAccountId}
+          on:click={() => selectAccount(account.id)}
+        >
+          {#if account.avatarUrl}
+            <img src={account.avatarUrl} alt="" class="account-avatar" />
+          {/if}
+          <span class="account-name">Account #{account.shortId}</span>
+          <span class="account-status" class:pending={account.status === 'pending'}>
+            {account.status === 'pending' ? `${account.pendingCount} pending` : 'Synced'}
+          </span>
+        </button>
+      {/each}
+    {/if}
+
+    {#if allowAdd && replica}
+      <div class="menu-divider"></div>
+      <button class="menu-item add-item" on:click={handleAddAccount}>
+        <span class="account-name">+ Add Account</span>
+      </button>
+    {/if}
+  </div>
+</Dropdown>
 
 <style>
-  .account-dropdown-custom {
-    position: relative;
-    display: inline-block;
-  }
-
-  .dropdown-trigger {
+  .trigger-content {
     display: flex;
     align-items: center;
     gap: 8px;
-    background: #2d2d2d;
-    border: 1px solid #3e3e3e;
-    border-radius: 6px;
-    color: #e1e1e1;
-    padding: 8px 12px;
-    font-size: 0.9em;
-    min-width: 200px;
-    cursor: pointer;
-    transition: all 0.15s ease;
+    width: 100%;
   }
 
-  .dropdown-trigger:hover {
-    background: #353535;
-    border-color: #4e4e4e;
-  }
-
-  .account-avatar {
-    width: 24px;
-    height: 24px;
+  .trigger-avatar {
+    width: 20px;
+    height: 20px;
     border-radius: 4px;
     flex-shrink: 0;
   }
 
-  .dropdown-text {
+  .trigger-text {
     flex: 1;
     text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .dropdown-menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    right: 0;
-    background: rgba(20, 20, 20, 0.98);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
+  .trigger-arrow {
+    color: #888;
+    font-size: 10px;
+    transition: transform 0.2s;
+    flex-shrink: 0;
+  }
+
+  .trigger-arrow.open {
+    transform: rotate(180deg);
+  }
+
+  /* Menu */
+  .menu-content {
     padding: 4px;
-    max-height: 300px;
-    overflow-y: auto;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-    z-index: 1000;
   }
 
-  .account-item {
+  .menu-item {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -142,25 +164,53 @@
     border: none;
     border-radius: 4px;
     color: #e1e1e1;
+    font-size: 13px;
     cursor: pointer;
-    transition: background 0.15s ease;
+    transition: background 0.1s;
+    text-align: left;
   }
 
-  .account-item:hover {
+  .menu-item:hover {
     background: rgba(255, 255, 255, 0.05);
   }
 
-  .account-item.selected {
+  .menu-item.selected {
     background: rgba(0, 122, 255, 0.15);
+  }
+
+  .back-item {
+    color: #888;
+  }
+
+  .back-arrow {
+    font-size: 14px;
+  }
+
+  .menu-divider {
+    height: 1px;
+    background: #333;
+    margin: 4px 8px;
+  }
+
+  .empty-state {
+    padding: 16px;
+    text-align: center;
+    color: #666;
+    font-size: 13px;
+  }
+
+  .account-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
   }
 
   .account-name {
     flex: 1;
-    text-align: left;
   }
 
   .account-status {
-    font-size: 0.8em;
+    font-size: 11px;
     color: #0f8;
     font-weight: 500;
   }
@@ -169,15 +219,7 @@
     color: #fa4;
   }
 
-  .empty-state {
-    padding: 16px;
-    text-align: center;
-    color: #888;
-    font-size: 0.85em;
-  }
-
-  .chevron {
-    flex-shrink: 0;
-    opacity: 0.5;
+  .add-item {
+    color: #7aa8ff;
   }
 </style>

@@ -6,6 +6,18 @@ import { get } from 'svelte/store';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type { Env } from '@xln/runtime/xln-api';
 
+type JurisdictionConfig = {
+  name: string;
+  address: string;
+  entityProviderAddress: string;
+  depositoryAddress: string;
+  chainId?: number;
+};
+
+const inflightAutoCreates = new Map<string, Promise<string | null>>();
+let warnedMissingEnv = false;
+let isCreatingJMachine = false;
+
 /**
  * Counter for deterministic ephemeral entity ID generation
  * Ensures same signer + counter always generates same entity ID
@@ -69,6 +81,133 @@ export async function createEphemeralEntity(
   return entityId;
 }
 
+function findReplicaBySigner(env: Env, signerId: string): any | null {
+  const reps = (env as any)?.eReplicas;
+  if (!reps) return null;
+  const replicas = reps instanceof Map ? reps : new Map(Object.entries(reps || {}));
+  for (const [, replica] of replicas) {
+    const rep = replica as any;
+    if (rep?.signerId?.toLowerCase?.() === signerId.toLowerCase()) {
+      return rep;
+    }
+  }
+  return null;
+}
+
+function listJMachineNames(env: Env): string[] {
+  const jReplicas = (env as any)?.jReplicas;
+  if (!jReplicas) return [];
+  if (jReplicas instanceof Map) return Array.from(jReplicas.keys());
+  if (Array.isArray(jReplicas)) return jReplicas.map((jr: any) => jr?.name).filter(Boolean);
+  return Object.keys(jReplicas || {});
+}
+
+function getJReplica(env: Env, name?: string): any | null {
+  const jReplicas = (env as any)?.jReplicas;
+  if (!jReplicas) return null;
+  if (jReplicas instanceof Map) {
+    if (name && jReplicas.has(name)) return jReplicas.get(name);
+    return jReplicas.values().next().value || null;
+  }
+  if (Array.isArray(jReplicas)) {
+    if (name) return jReplicas.find((jr: any) => jr?.name === name) || null;
+    return jReplicas[0] || null;
+  }
+  if (name && jReplicas[name]) return jReplicas[name];
+  const record = jReplicas as Record<string, any>;
+  const keys = Object.keys(record);
+  const firstKey = keys[0];
+  if (!firstKey) return null;
+  return record[firstKey];
+}
+
+function buildJurisdictionConfig(env: Env, name?: string): JurisdictionConfig | null {
+  const jReplica = getJReplica(env, name);
+  if (!jReplica) return null;
+
+  const depositoryAddress = jReplica?.contracts?.depository || jReplica?.contracts?.depositoryAddress;
+  const entityProviderAddress = jReplica?.contracts?.entityProvider || jReplica?.contracts?.entityProviderAddress;
+  if (!depositoryAddress || !entityProviderAddress) return null;
+
+  return {
+    name: jReplica?.name || name || 'browservm',
+    address: 'browservm://',
+    entityProviderAddress,
+    depositoryAddress,
+  };
+}
+
+async function ensureJMachine(env: Env): Promise<string | null> {
+  if (isCreatingJMachine) return null;
+  const names = listJMachineNames(env);
+  if (names.length > 0) return (env as any)?.activeJurisdiction || names[0];
+
+  isCreatingJMachine = true;
+  try {
+    const { getXLN } = await import('$lib/stores/xlnStore');
+    const xln = await getXLN();
+    const name = 'xlnomy1';
+    await xln.applyRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'createXlnomy',
+        data: {
+          name,
+          evmType: 'browservm',
+          blockTimeMs: 1000,
+          autoGrid: false
+        }
+      }],
+      entityInputs: []
+    });
+    return name;
+  } finally {
+    isCreatingJMachine = false;
+  }
+}
+
+export async function createNumberedSelfEntity(
+  env: Env,
+  signerAddress: string,
+  jurisdictionName?: string
+): Promise<string | null> {
+  const jName = jurisdictionName || (env as any)?.activeJurisdiction || await ensureJMachine(env);
+  if (!jName) return null;
+
+  const jurisdiction = buildJurisdictionConfig(env, jName);
+  if (!jurisdiction) return null;
+
+  const { getXLN } = await import('$lib/stores/xlnStore');
+  const xln = await getXLN();
+  const creation = await xln.createNumberedEntity(
+    `self-${signerAddress.slice(0, 6)}`,
+    [signerAddress],
+    1n,
+    jurisdiction
+  );
+
+  const runtimeTx = {
+    type: 'importReplica' as const,
+    entityId: creation.entityId,
+    signerId: signerAddress,
+    data: {
+      config: creation.config,
+      isProposer: true
+    }
+  };
+
+  const result = await xln.applyRuntimeInput(env, {
+    runtimeTxs: [runtimeTx],
+    entityInputs: []
+  });
+
+  const maybeProcess = (xln as any).process;
+  if (result?.entityOutbox?.length && typeof maybeProcess === 'function') {
+    await maybeProcess(env, result.entityOutbox);
+  }
+
+  return creation.entityId;
+}
+
 /**
  * Auto-create entity when signer is added to vault
  * Hook this into vaultStore operations
@@ -77,19 +216,45 @@ export async function autoCreateEntityForSigner(
   signerAddress: string,
   jurisdiction: string = 'default'
 ): Promise<string | null> {
-  try {
-    const { xlnEnvironment } = await import('$lib/stores/xlnStore');
-    const env = get(xlnEnvironment);
+  if (!signerAddress) return null;
+  if (inflightAutoCreates.has(signerAddress)) {
+    return inflightAutoCreates.get(signerAddress) || null;
+  }
 
-    if (!env) {
-      console.warn('[EntityFactory] No env available, skipping auto-create');
+  const task = (async () => {
+    try {
+      const { xlnEnvironment } = await import('$lib/stores/xlnStore');
+      const { activeEnv } = await import('$lib/stores/runtimeStore');
+      const env = get(xlnEnvironment) || get(activeEnv);
+
+      if (!env) {
+        if (!warnedMissingEnv) {
+          warnedMissingEnv = true;
+          console.warn('[EntityFactory] No env available, skipping auto-create');
+        }
+        return null;
+      }
+
+      const existing = findReplicaBySigner(env, signerAddress);
+      if (existing?.entityId) return existing.entityId;
+
+      const names = listJMachineNames(env);
+      const targetJurisdiction =
+        (jurisdiction && jurisdiction !== 'default' && names.includes(jurisdiction))
+          ? jurisdiction
+          : (env.activeJurisdiction || names[0] || null);
+
+      return await createNumberedSelfEntity(env, signerAddress, targetJurisdiction || undefined);
+    } catch (error) {
+      console.error('[EntityFactory] Failed to auto-create entity:', error);
       return null;
     }
+  })();
 
-    const entityId = await createEphemeralEntity(signerAddress, jurisdiction, env);
-    return entityId;
-  } catch (error) {
-    console.error('[EntityFactory] Failed to auto-create entity:', error);
-    return null;
+  inflightAutoCreates.set(signerAddress, task);
+  try {
+    return await task;
+  } finally {
+    inflightAutoCreates.delete(signerAddress);
   }
 }

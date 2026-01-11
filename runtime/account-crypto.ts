@@ -36,23 +36,27 @@ export async function deriveSignerKey(masterSeed: Uint8Array, signerId: string):
   const isBrowser = typeof window !== 'undefined';
 
   if (isBrowser) {
-    // Browser: use hash-wasm
-    const { hmac, sha256 } = await import('hash-wasm');
-    const privateKeyHex = await hmac(sha256, masterSeed, signerId);
-
-    // Convert hex to bytes
-    const privateKey = new Uint8Array(32);
-    for (let i = 0; i < 32; i++) {
-      privateKey[i] = parseInt(privateKeyHex.slice(i * 2, i * 2 + 2), 16);
+    if (!globalThis.crypto?.subtle) {
+      throw new Error('WebCrypto is required for browser HMAC');
     }
-    return privateKey;
-  } else {
-    // Node/Bun: use built-in crypto
-    const { createHmac } = await import('crypto');
-    const hmac = createHmac('sha256', Buffer.from(masterSeed));
-    hmac.update(signerId);
-    return new Uint8Array(hmac.digest());
+
+    const key = await globalThis.crypto.subtle.importKey(
+      'raw',
+      masterSeed,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign']
+    );
+    const message = new TextEncoder().encode(signerId);
+    const signature = await globalThis.crypto.subtle.sign('HMAC', key, message);
+    return new Uint8Array(signature);
   }
+
+  // Node/Bun: use built-in crypto
+  const { createHmac } = await import('crypto');
+  const hmac = createHmac('sha256', Buffer.from(masterSeed));
+  hmac.update(signerId);
+  return new Uint8Array(hmac.digest());
 }
 
 /**

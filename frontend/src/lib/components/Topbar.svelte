@@ -2,6 +2,7 @@
   import { page } from '$app/stores';
   import { locale, LOCALES, type Locale } from '$lib/i18n';
   import DeltaVisualizer from './Tools/DeltaVisualizer.svelte';
+  import Dropdown from '$lib/components/UI/Dropdown.svelte';
 
   interface Props {
     variant?: 'default' | 'transparent';
@@ -13,13 +14,13 @@
   let currentPath = $derived($page.url.pathname);
 
   // Dropdown states
-  let aiDropdownOpen = $state(false);
+  let langDropdownOpen = $state(false);
   let toolsDropdownOpen = $state(false);
   let showDeltaVisualizer = $state(false);
 
   function selectLocale(loc: Locale) {
     locale.set(loc);
-    aiDropdownOpen = false;
+    langDropdownOpen = false;
   }
 
   function openTool(tool: string) {
@@ -28,19 +29,7 @@
       showDeltaVisualizer = true;
     }
   }
-
-  function handleClickOutside(event: MouseEvent) {
-    const target = event.target as HTMLElement;
-    if (!target.closest('.lang-dropdown')) {
-      aiDropdownOpen = false;
-    }
-    if (!target.closest('.tools-dropdown')) {
-      toolsDropdownOpen = false;
-    }
-  }
 </script>
-
-<svelte:window onclick={handleClickOutside} />
 
 <nav class="topbar" class:transparent={variant === 'transparent'}>
   <div class="topbar-left">
@@ -60,36 +49,30 @@
     <a href="https://t.me/xlnomist" target="_blank" rel="noopener noreferrer" class="topbar-link">Telegram</a>
     <a href="mailto:h@xln.finance" class="topbar-link">Contact</a>
     <a href="/llms.txt" target="_blank" class="topbar-link llms-link">llms.txt</a>
-    <div class="tools-dropdown" class:open={toolsDropdownOpen}>
-      <button
-        class="tools-trigger"
-        onclick={(e) => { e.stopPropagation(); toolsDropdownOpen = !toolsDropdownOpen; }}
-      >
-        <span>Tools</span>
-        <span class="tools-chevron">▼</span>
-      </button>
-      {#if toolsDropdownOpen}
-        <div class="tools-menu">
-          <button class="tools-menu-item" onclick={() => openTool('delta')}>
+    <div class="topbar-dropdown">
+      <Dropdown bind:open={toolsDropdownOpen} minWidth={160} maxWidth={220}>
+        <span slot="trigger" class="topbar-trigger">
+          <span>Tools</span>
+          <span class="topbar-chevron" class:open={toolsDropdownOpen}>▼</span>
+        </span>
+        <div slot="menu" class="topbar-menu">
+          <button class="topbar-menu-item" onclick={() => openTool('delta')}>
             <span class="tool-icon">⚖️</span>
             <span class="tool-label">deriveDelta</span>
           </button>
         </div>
-      {/if}
+      </Dropdown>
     </div>
-    <div class="lang-dropdown" class:open={aiDropdownOpen}>
-      <button
-        class="lang-trigger"
-        onclick={(e) => { e.stopPropagation(); aiDropdownOpen = !aiDropdownOpen; }}
-      >
-        <span class="lang-flag">{LOCALES[$locale].flag}</span>
-        <span class="lang-chevron">▼</span>
-      </button>
-      {#if aiDropdownOpen}
-        <div class="lang-menu">
+    <div class="topbar-dropdown">
+      <Dropdown bind:open={langDropdownOpen} minWidth={160} maxWidth={220}>
+        <span slot="trigger" class="topbar-trigger">
+          <span class="lang-flag">{LOCALES[$locale].flag}</span>
+          <span class="topbar-chevron" class:open={langDropdownOpen}>▼</span>
+        </span>
+        <div slot="menu" class="topbar-menu">
           {#each Object.entries(LOCALES) as [code, info]}
             <button
-              class="lang-menu-item"
+              class="topbar-menu-item"
               class:active={code === $locale}
               onclick={() => selectLocale(code as Locale)}
             >
@@ -98,7 +81,7 @@
             </button>
           {/each}
         </div>
-      {/if}
+      </Dropdown>
     </div>
   </div>
 </nav>
@@ -185,63 +168,47 @@
     text-underline-offset: 3px;
   }
 
-  /* Language Dropdown */
-  .lang-dropdown {
-    position: relative;
-  }
-
-  .lang-trigger {
+  .topbar-dropdown {
     display: flex;
     align-items: center;
-    gap: 0.3rem;
-    padding: 0.3rem 0.5rem;
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 6px;
-    color: white;
+  }
+
+  .topbar-dropdown :global(.dropdown-wrapper) {
+    width: auto;
+  }
+
+  .topbar-dropdown :global(.dropdown-trigger) {
+    padding: 6px 10px;
+    border-radius: 8px;
+  }
+
+  .topbar-trigger {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
     font-size: 0.85rem;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .lang-trigger:hover {
-    border-color: rgba(255, 255, 255, 0.3);
-    background: rgba(255, 255, 255, 0.05);
-  }
-
-  .lang-dropdown.open .lang-trigger {
-    border-color: rgba(79, 209, 139, 0.5);
+    color: rgba(255, 255, 255, 0.85);
   }
 
   .lang-flag {
-    font-size: 1.1rem;
+    font-size: 1.05rem;
   }
 
-  .lang-chevron {
-    font-size: 0.5rem;
-    opacity: 0.5;
+  .topbar-chevron {
+    font-size: 0.55rem;
+    opacity: 0.6;
     transition: transform 0.2s;
   }
 
-  .lang-dropdown.open .lang-chevron {
+  .topbar-chevron.open {
     transform: rotate(180deg);
   }
 
-  .lang-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
-    min-width: 150px;
-    background: rgba(10, 10, 15, 0.98);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
+  .topbar-menu {
     padding: 4px;
-    z-index: 200;
-    backdrop-filter: blur(20px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   }
 
-  .lang-menu-item {
+  .topbar-menu-item {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -250,20 +217,20 @@
     background: transparent;
     border: none;
     border-radius: 6px;
-    color: rgba(255, 255, 255, 0.8);
+    color: rgba(255, 255, 255, 0.85);
     font-size: 13px;
     cursor: pointer;
     transition: all 0.15s ease;
     text-align: left;
   }
 
-  .lang-menu-item:hover {
-    background: rgba(255, 255, 255, 0.06);
+  .topbar-menu-item:hover {
+    background: var(--dropdown-item-hover, rgba(255, 255, 255, 0.06));
     color: white;
   }
 
-  .lang-menu-item.active {
-    background: rgba(79, 209, 139, 0.15);
+  .topbar-menu-item.active {
+    background: var(--dropdown-selected, rgba(79, 209, 139, 0.15));
     color: #4fd18b;
   }
 
@@ -273,80 +240,6 @@
 
   .menu-label {
     flex: 1;
-  }
-
-  /* Tools Dropdown */
-  .tools-dropdown {
-    position: relative;
-  }
-
-  .tools-trigger {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.3rem 0.6rem;
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 6px;
-    color: rgba(255, 255, 255, 0.8);
-    font-size: 0.85rem;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .tools-trigger:hover {
-    border-color: rgba(255, 255, 255, 0.3);
-    background: rgba(255, 255, 255, 0.05);
-  }
-
-  .tools-dropdown.open .tools-trigger {
-    border-color: rgba(79, 209, 139, 0.5);
-    color: #4fd18b;
-  }
-
-  .tools-chevron {
-    font-size: 0.5rem;
-    opacity: 0.5;
-    transition: transform 0.2s;
-  }
-
-  .tools-dropdown.open .tools-chevron {
-    transform: rotate(180deg);
-  }
-
-  .tools-menu {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
-    min-width: 160px;
-    background: rgba(10, 10, 15, 0.98);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-    padding: 4px;
-    z-index: 200;
-    backdrop-filter: blur(20px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-  }
-
-  .tools-menu-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 8px 12px;
-    background: transparent;
-    border: none;
-    border-radius: 6px;
-    color: rgba(255, 255, 255, 0.8);
-    font-size: 13px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    text-align: left;
-  }
-
-  .tools-menu-item:hover {
-    background: rgba(255, 255, 255, 0.06);
-    color: white;
   }
 
   .tool-icon {
@@ -379,9 +272,8 @@
       display: none;
     }
 
-    .ai-trigger {
-      padding: 0.3rem 0.6rem;
-      font-size: 0.75rem;
+    .topbar-dropdown :global(.dropdown-trigger) {
+      padding: 5px 8px;
     }
   }
 </style>

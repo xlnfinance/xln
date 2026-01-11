@@ -3,7 +3,7 @@
  *
  * Responsibilities:
  * - Create/destroy entity meshes
- * - Create/update entity labels (billboarded sprites)
+ * - Create entity labels (auto-billboarded THREE.Sprite)
  * - Calculate entity sizes based on token balances
  * - Format entity display names
  * - Track entity metadata (isHub, pulsePhase, etc.)
@@ -104,20 +104,6 @@ export class EntityManager {
     sprite.userData['entityId'] = entityId;
 
     return sprite;
-  }
-
-  /**
-   * Update all entity labels to face camera (billboard effect)
-   */
-  updateLabels(camera: THREE.Camera) {
-    this.entities.forEach(entity => {
-      if (entity.label) {
-        entity.label.quaternion.copy(camera.quaternion);
-        // Keep label above entity
-        entity.label.position.copy(entity.mesh.position);
-        entity.label.position.y += 3;
-      }
-    });
   }
 
   /**

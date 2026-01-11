@@ -4,7 +4,7 @@
   import ComparativeChart from './ComparativeChart.svelte';
   import InvariantTicker from '../Home/InvariantTicker.svelte';
   import Collapsible from './Collapsible.svelte';
-  import NetworkAnimation from './NetworkAnimation.svelte';
+  import LanguageSwitcher from '../LanguageSwitcher.svelte';
   import { content, type Content, type ContentLang } from './content';
   import { locale } from '$lib/i18n';
 
@@ -224,7 +224,12 @@
   }
 </script>
 
-<NetworkAnimation {darkMode} onToggleDarkMode={() => darkMode = !darkMode} />
+<div class="landing-controls">
+  <LanguageSwitcher />
+  <button on:click={() => darkMode = !darkMode} class="theme-toggle">
+    {darkMode ? '☀️ Light' : '🌙 Dark'}
+  </button>
+</div>
 
 <div class="landing" class:light-mode={!darkMode}>
   <div class="content">
@@ -836,6 +841,43 @@
   :global(.light-mode) ::-moz-selection {
     background: rgba(79, 209, 139, 0.25);
     color: #000;
+  }
+
+  /* Landing Controls (top-right) */
+  .landing-controls {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    display: flex;
+    gap: 8px;
+    z-index: 100;
+  }
+
+  .theme-toggle {
+    background: rgba(0, 0, 0, 0.7);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+  }
+
+  .theme-toggle:hover {
+    background: rgba(0, 0, 0, 0.9);
+    border-color: #007acc;
+  }
+
+  :global(.light-mode) .theme-toggle {
+    background: rgba(255, 255, 255, 0.9);
+    color: #000;
+    border-color: rgba(0, 0, 0, 0.2);
+  }
+
+  :global(.light-mode) .theme-toggle:hover {
+    background: rgba(255, 255, 255, 1);
+    border-color: #007acc;
   }
 
   .landing {

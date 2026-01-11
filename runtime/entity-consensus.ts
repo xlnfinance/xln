@@ -138,26 +138,6 @@ const detectByzantineFault = (signatures: Map<string, string>, signerId: string,
 };
 
 /**
- * Validates timestamp to prevent temporal attacks
- */
-const validateTimestamp = (proposedTime: number, currentTime: number): boolean => {
-  try {
-    const maxDrift = 30000; // 30 seconds
-    const drift = Math.abs(proposedTime - currentTime);
-    if (drift > maxDrift) {
-      log.error(`❌ Timestamp drift too large: ${drift}ms > ${maxDrift}ms`);
-      log.error(`❌ Proposed: ${new Date(proposedTime).toISOString()}`);
-      log.error(`❌ Current: ${new Date(currentTime).toISOString()}`);
-      return false;
-    }
-    return true;
-  } catch (error) {
-    log.error(`❌ Timestamp validation error: ${error}`);
-    return false;
-  }
-};
-
-/**
  * Validates voting power to prevent overflow attacks
  */
 const validateVotingPower = (power: bigint): boolean => {
@@ -192,9 +172,9 @@ export const applyEntityInput = async (
   // Prevents state mutations from escaping function scope
   const workingReplica = cloneEntityReplica(entityReplica);
 
-  // Debug: Log every input being processed with timestamp and unique identifier
+  // Debug: Log every input being processed with deterministic timestamp
   const entityDisplay = formatEntityDisplay(entityInput.entityId);
-  const timestamp = Date.now();
+  const timestamp = env.timestamp; // Use deterministic env.timestamp, not Date.now()
   const currentProposalHash = workingReplica.proposal?.hash?.slice(0, 10) || 'none';
   const frameHash = entityInput.proposedFrame?.hash?.slice(0, 10) || 'none';
 
@@ -582,11 +562,8 @@ export const applyEntityInput = async (
     // Proposer creates new timestamp for this frame (DETERMINISTIC: use runtime timestamp)
     const newTimestamp = env.timestamp;
 
-    // SECURITY: Validate timestamp
-    if (!validateTimestamp(newTimestamp, env.timestamp)) {
-      log.error(`❌ Invalid proposal timestamp: ${newTimestamp}`);
-      return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
-    }
+    // NOTE: Timestamp validation removed - comparing env.timestamp to itself was meaningless
+    // For peer proposals, validation happens during signature verification
 
     // TODO(bft-hardening): Replace weak placeholder hash with cryptographic commitment
     // Current: height + timestamp only - validators don't sign actual state content

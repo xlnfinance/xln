@@ -6,7 +6,7 @@
 import { ethers } from 'ethers';
 
 import { safeStringify } from './serialization-utils';
-import { ConsensusConfig, EntityType, JurisdictionConfig } from './types';
+import type { ConsensusConfig, EntityType, JurisdictionConfig } from './types';
 import { DEBUG } from './utils';
 
 // Extend globalThis to include our entity counter

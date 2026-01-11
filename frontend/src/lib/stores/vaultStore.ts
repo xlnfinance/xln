@@ -1,5 +1,6 @@
 import { writable, get, derived } from 'svelte/store';
 import { HDNodeWallet, Mnemonic } from 'ethers';
+import { runtimeOperations } from './runtimeStore';
 
 // Types
 export interface Signer {
@@ -65,8 +66,16 @@ function derivePrivateKey(seed: string, index: number): string {
   return hdNode.privateKey;
 }
 
-// Vault operations
-export const vaultOperations = {
+  // Vault operations
+  export const vaultOperations = {
+    syncRuntime(vault: Vault | null) {
+    const meta: { label?: string; seed?: string; vaultId?: string } = {};
+    meta.label = vault?.id || 'Runtime';
+    if (vault?.seed) meta.seed = vault.seed;
+    if (vault?.id) meta.vaultId = vault.id;
+    runtimeOperations.setLocalRuntimeMetadata(meta);
+    },
+
   // Load from localStorage
   loadFromStorage() {
     try {
@@ -126,6 +135,20 @@ export const vaultOperations = {
     }));
 
     this.saveToStorage();
+    this.syncRuntime(vault);
+
+    // Auto-create ephemeral entity for signer 0 (async, non-blocking)
+    import('../utils/entityFactory').then(({ autoCreateEntityForSigner }) => {
+      autoCreateEntityForSigner(firstAddress).then(entityId => {
+        if (entityId) {
+          this.setSignerEntity(0, entityId);
+          console.log(`[VaultStore] Auto-created entity ${entityId.slice(0, 10)} for signer ${firstAddress.slice(0, 10)}`);
+        }
+      }).catch(err => {
+        console.warn('[VaultStore] Failed to auto-create entity:', err);
+      });
+    });
+
     return vault;
   },
 
@@ -136,6 +159,8 @@ export const vaultOperations = {
       activeVaultId: vaultId
     }));
     this.saveToStorage();
+    const current = get(vaultState);
+    this.syncRuntime(current.vaults[current.activeVaultId || ''] || null);
   },
 
   // Add signer to active vault
@@ -268,6 +293,8 @@ export const vaultOperations = {
     });
 
     this.saveToStorage();
+    const current = get(vaultState);
+    this.syncRuntime(current.activeVaultId ? current.vaults[current.activeVaultId] || null : null);
   },
 
   // Get private key for active signer
@@ -301,6 +328,8 @@ export const vaultOperations = {
   // Initialize
   initialize() {
     this.loadFromStorage();
+    const current = get(vaultState);
+    this.syncRuntime(current.activeVaultId ? current.vaults[current.activeVaultId] || null : null);
   },
 
   // Clear all vaults
@@ -309,5 +338,6 @@ export const vaultOperations = {
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(VAULT_STORAGE_KEY);
     }
+    this.syncRuntime(null);
   }
 };

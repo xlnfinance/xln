@@ -6,6 +6,8 @@ export interface Runtime {
   type: 'local' | 'remote';
   label: string;                 // Display name: "Local" or "CEX Production"
   env: Env | null;               // Local: full state, Remote: synced subset
+  seed?: string;                 // BrainVault seed backing this runtime (if any)
+  vaultId?: string;              // Vault name bound to this runtime (if any)
   connection?: WebSocket;        // For remote runtimes
   apiKey?: string;               // HMAC(seed, "read"|"write")
   permissions: 'read' | 'write';
@@ -19,7 +21,7 @@ export const runtimes = writable<Map<string, Runtime>>(new Map([
   ['local', {
     id: 'local',
     type: 'local',
-    label: 'Local',
+    label: 'Runtime',
     env: null,  // Will be initialized on mount
     permissions: 'write',
     status: 'connected'
@@ -155,6 +157,19 @@ export const runtimeOperations = {
       if (local) {
         local.env = env;
         local.lastSynced = Date.now();
+      }
+      return r;
+    });
+  },
+
+  // Update local runtime metadata (vault name + seed)
+  setLocalRuntimeMetadata(meta: { label?: string; seed?: string; vaultId?: string }) {
+    runtimes.update(r => {
+      const local = r.get('local');
+      if (local) {
+        if (meta.label !== undefined) local.label = meta.label;
+        if (meta.seed !== undefined) local.seed = meta.seed;
+        if (meta.vaultId !== undefined) local.vaultId = meta.vaultId;
       }
       return r;
     });

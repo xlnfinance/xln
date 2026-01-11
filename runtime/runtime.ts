@@ -493,8 +493,8 @@ const applyRuntimeInput = async (
             lastBlockTimestamp: env.timestamp,  // Use env.timestamp for determinism
             position: xlnomy.jMachine.position,
             contracts: xlnomy.contracts ? {
-              depository: xlnomy.contracts.depository,
-              entityProvider: xlnomy.contracts.entityProvider,
+              depository: xlnomy.contracts.depositoryAddress || (xlnomy.contracts as any).depository,
+              entityProvider: xlnomy.contracts.entityProviderAddress || (xlnomy.contracts as any).entityProvider,
             } : undefined,
           };
           env.jReplicas.set(xlnomy.name, jReplica);

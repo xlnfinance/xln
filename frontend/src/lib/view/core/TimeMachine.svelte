@@ -3,7 +3,7 @@
   import { type Writable, type Readable } from 'svelte/store';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
   import { panelBridge } from '../utils/panelBridge';
-  import { runtimes, activeRuntimeId, runtimeOperations } from '$lib/stores/runtimeStore';
+  import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
   // BrowserVM accessed via window.__xlnBrowserVM (set by View.svelte)
 
   // Props: Accept both Writable and Readable stores (for global vs isolated usage)
@@ -11,6 +11,7 @@
   export let timeIndex: Writable<number> | Readable<number>;
   export let isLive: Writable<boolean> | Readable<boolean>;
   export let env: Writable<any> | Readable<any>; // For state export
+  export let showRuntimeSelector = false;
 
   // Type guard to check if store is writable
   function isWritable<T>(store: Writable<T> | Readable<T>): store is Writable<T> {
@@ -115,7 +116,6 @@
   let showSpeedMenu = false;
   let showLoopMenu = false;
   let showExportMenu = false;
-  let showRuntimeMenu = false;
 
   const speedOptions = [
     { value: 0.1, label: '0.1x' },
@@ -349,37 +349,11 @@
 </script>
 
 <div class="time-machine">
-  <!-- Runtime Selector (LEFTMOST) -->
-  <div class="runtime-selector dropdown-trigger">
-    <button
-      class="runtime-btn"
-      on:click={() => { showRuntimeMenu = !showRuntimeMenu; showSpeedMenu = false; showLoopMenu = false; showExportMenu = false; }}
-      title="Switch runtime"
-    >
-      {$runtimes.get($activeRuntimeId)?.label || 'Local'}
-      <span class="frame-count">({$history.length}f)</span>
-    </button>
-    {#if showRuntimeMenu}
-      <div class="menu runtime-menu">
-        {#each Array.from($runtimes.entries()) as [id, runtime]}
-          <button
-            on:click={() => { runtimeOperations.selectRuntime(id); showRuntimeMenu = false; }}
-            class:selected={$activeRuntimeId === id}
-          >
-            {runtime.label}
-            <span class="count">({runtime.env?.history?.length || 0}f)</span>
-            {#if runtime.status !== 'connected'}
-              <span class="status-icon">⚠️</span>
-            {/if}
-          </button>
-        {/each}
-        <div class="menu-divider"></div>
-        <button on:click={() => { /* TODO: add new runtime */ showRuntimeMenu = false; }}>
-          + Add Runtime
-        </button>
-      </div>
-    {/if}
-  </div>
+  {#if showRuntimeSelector}
+    <div class="runtime-selector">
+      <RuntimeDropdown />
+    </div>
+  {/if}
 
   <!-- Frame Navigation (LEFT - most used) -->
   <div class="frame-nav">
@@ -560,47 +534,6 @@
     flex-shrink: 0;
   }
 
-  .runtime-btn {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-family: 'SF Mono', monospace;
-    font-size: 0.75rem;
-    padding: 4px 8px;
-    background: rgba(168, 85, 247, 0.1);
-    border: 1px solid rgba(168, 85, 247, 0.2);
-    border-radius: 4px;
-    color: rgba(168, 85, 247, 0.9);
-    cursor: pointer;
-    transition: all 0.15s ease;
-    white-space: nowrap;
-  }
-
-  .runtime-btn:hover {
-    background: rgba(168, 85, 247, 0.2);
-    border-color: rgba(168, 85, 247, 0.4);
-  }
-
-  .runtime-btn .frame-count {
-    opacity: 0.6;
-    font-size: 0.65rem;
-  }
-
-  .runtime-menu {
-    min-width: 160px;
-  }
-
-  .runtime-menu .count {
-    margin-left: auto;
-    opacity: 0.6;
-    font-size: 0.7rem;
-  }
-
-  .runtime-menu .status-icon {
-    margin-left: 4px;
-    font-size: 0.75rem;
-  }
-
   .frame-badge {
     font-family: 'SF Mono', monospace;
     font-size: 0.625rem;
@@ -768,13 +701,13 @@
     left: 50%;
     transform: translateX(-50%);
     margin-bottom: 6px;
-    background: rgba(20, 20, 20, 0.98);
-    backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--dropdown-menu-bg, rgba(20, 20, 20, 0.98));
+    backdrop-filter: blur(var(--blur-sm, 12px));
+    border: 1px solid var(--dropdown-border, rgba(255, 255, 255, 0.1));
     border-radius: 6px;
     padding: 4px;
     min-width: 100px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-lg, 0 4px 16px rgba(0, 0, 0, 0.5));
     z-index: 1000;
   }
 
@@ -814,11 +747,11 @@
   }
 
   .menu button:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--dropdown-item-hover, rgba(255, 255, 255, 0.1));
   }
 
   .menu button.selected {
-    background: rgba(0, 122, 255, 0.2);
+    background: var(--dropdown-selected, rgba(0, 122, 255, 0.2));
     color: white;
   }
 

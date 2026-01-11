@@ -219,9 +219,9 @@
     </div>
   </div>
 
-  <!-- Jurisdiction Select -->
+  <!-- J-Machine Select -->
   <div class="field">
-    <label>Jurisdiction</label>
+    <label>J-Machine</label>
     <select bind:value={selectedJurisdiction} on:change={onJurisdictionChange}>
       {#each jurisdictions as j}
         <option value={j}>{j.name} ({j.currency})</option>

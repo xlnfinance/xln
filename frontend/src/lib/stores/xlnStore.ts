@@ -5,6 +5,8 @@ import type { XLNModule, Env, EnvSnapshot, EntityId, ReplicaKey } from '@xln/run
 
 // Direct import of XLN runtime module (no wrapper boilerplate needed)
 let XLN: XLNModule | null = null;
+export const xlnInstance = writable<XLNModule | null>(null);
+let warnedMissingXLN = false;
 
 async function getXLN(): Promise<XLNModule> {
   if (XLN) return XLN;
@@ -12,6 +14,7 @@ async function getXLN(): Promise<XLNModule> {
   // Add timestamp to bust cache
   const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
   XLN = await import(/* @vite-ignore */ runtimeUrl) as XLNModule;
+  xlnInstance.set(XLN);
 
   // Expose globally for console debugging
   exposeGlobalDebugObjects();
@@ -53,9 +56,6 @@ if (typeof window !== 'undefined') {
 export const xlnEnvironment = writable<Env | null>(null);
 export const isLoading = writable<boolean>(true);
 export const error = writable<string | null>(null);
-
-// Store XLN instance separately for function access
-export const xlnInstance = writable<XLNModule | null>(null);
 
 // xlnFunctions is now defined at the end of the file
 
@@ -229,48 +229,109 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
 
   // If xlnInstance is missing, return empty functions that throw clear errors
   if (!$xlnInstance) {
-    console.error('❌ CRITICAL: xlnInstance is null - XLN not initialized');
-    const notReady = () => { throw new Error('XLN not initialized'); };
+    const warnMissingXLN = () => {
+      if (warnedMissingXLN) return;
+      warnedMissingXLN = true;
+      console.warn('XLN not initialized yet - showing safe fallbacks until runtime loads');
+    };
+
+    const safe = <T>(fn: (...args: any[]) => T) => (...args: any[]) => {
+      warnMissingXLN();
+      return fn(...args);
+    };
+
+    const fallbackShortId = (id: string | undefined) => (id ? id.slice(-4) : '----');
+    const fallbackFormatEntityId = (id: string | undefined) =>
+      id && id.length > 10 ? `${id.slice(0, 6)}...${id.slice(-4)}` : (id || 'N/A');
+    const fallbackTokenInfo = (tokenId: number) => ({ symbol: `T${tokenId}`, decimals: 18 });
+    const fallbackDerived = {
+      delta: 0,
+      totalCapacity: 0,
+      ownCreditLimit: 0,
+      peerCreditLimit: 0,
+      inCapacity: 0,
+      outCapacity: 0,
+      collateral: 0,
+      outOwnCredit: 0,
+      inCollateral: 0,
+      outPeerCredit: 0,
+      inOwnCredit: 0,
+      outCollateral: 0,
+      inPeerCredit: 0,
+    };
+
     return {
       // Account utilities
-      deriveDelta: notReady as any,
-      formatTokenAmount: notReady as any,
-      getTokenInfo: notReady as any,
-      isLeft: notReady as any,
-      createDemoDelta: notReady as any,
-      getDefaultCreditLimit: notReady as any,
-      safeStringify: notReady as any,
+      deriveDelta: safe(() => fallbackDerived) as any,
+      formatTokenAmount: safe((amount: bigint, decimals: number = 18) => {
+        const divisor = 10n ** BigInt(decimals);
+        const whole = amount / divisor;
+        return `${whole}`;
+      }) as any,
+      getTokenInfo: safe((tokenId: number) => fallbackTokenInfo(tokenId)) as any,
+      isLeft: safe((entityId: string, counterpartyId: string) => entityId < counterpartyId) as any,
+      createDemoDelta: safe(() => ({})) as any,
+      getDefaultCreditLimit: safe(() => 0n) as any,
+      safeStringify: safe((value: any) => {
+        try {
+          return JSON.stringify(value);
+        } catch {
+          return '';
+        }
+      }) as any,
 
       // Financial utilities
-      formatTokenAmountEthers: notReady as any,
-      parseTokenAmount: notReady as any,
-      convertTokenPrecision: notReady as any,
-      calculatePercentageEthers: notReady as any,
-      formatAssetAmountEthers: notReady as any,
-      BigIntMath: notReady as any,
+      formatTokenAmountEthers: safe((amount: bigint) => amount.toString()) as any,
+      parseTokenAmount: safe((amount: string) => {
+        const parsed = Number(amount);
+        return Number.isFinite(parsed) ? BigInt(Math.floor(parsed)) : 0n;
+      }) as any,
+      convertTokenPrecision: safe((amount: bigint) => amount) as any,
+      calculatePercentageEthers: safe(() => '0') as any,
+      formatAssetAmountEthers: safe((amount: bigint) => amount.toString()) as any,
+      BigIntMath: {} as any,
       FINANCIAL_CONSTANTS: {} as any,
 
       // Entity utilities
-      getEntity: notReady as any,
-      getEntityShortId: notReady as any,
-      formatEntityId: notReady as any,
-      getEntityNumber: notReady as any,
-      formatEntityDisplay: notReady as any,
-      formatShortEntityId: notReady as any,
+      getEntity: safe(() => null) as any,
+      getEntityShortId: safe((entityId: string) => fallbackShortId(entityId)) as any,
+      formatEntityId: safe((entityId: string) => fallbackFormatEntityId(entityId)) as any,
+      getEntityNumber: safe((entityId: string) => fallbackShortId(entityId)) as any,
+      formatEntityDisplay: safe((entityId: string) => `Entity #${fallbackShortId(entityId)}`) as any,
+      formatShortEntityId: safe((entityId: string) => fallbackShortId(entityId)) as any,
 
       // Avatar generation
-      generateEntityAvatar: notReady as any,
-      generateSignerAvatar: notReady as any,
-      getEntityDisplayInfo: notReady as any,
+      generateEntityAvatar: safe(() => '') as any,
+      generateSignerAvatar: safe(() => '') as any,
+      getEntityDisplayInfo: safe((entityId: string) => ({
+        id: entityId,
+        shortId: fallbackShortId(entityId),
+        label: `Entity #${fallbackShortId(entityId)}`,
+      })) as any,
 
       // Identity system (from ids.ts)
-      extractEntityId: notReady as any,
-      extractSignerId: notReady as any,
-      parseReplicaKey: notReady as any,
-      formatReplicaKey: notReady as any,
-      createReplicaKey: notReady as any,
-      classifyBilateralState: notReady as any,
-      getAccountBarVisual: notReady as any,
+      extractEntityId: safe((key: string) => key.split(':')[0] || '') as any,
+      extractSignerId: safe((key: string) => key.split(':')[1] || '') as any,
+      parseReplicaKey: safe((key: string) => {
+        const [entityId = '', signerId = ''] = key.split(':');
+        return { entityId, signerId };
+      }) as any,
+      formatReplicaKey: safe((entityId: string, signerId: string) => `${entityId}:${signerId}`) as any,
+      createReplicaKey: safe((entityId: string, signerId: string) => `${entityId}:${signerId}`) as any,
+      classifyBilateralState: safe((_account: any, _peerHeight: number | undefined, isLeftEntity: boolean) => ({
+        state: 'unknown',
+        isLeftEntity,
+        shouldRollback: false,
+        pendingHeight: null,
+        mempoolCount: 0,
+      })) as any,
+      getAccountBarVisual: safe(() => ({
+        glowColor: null,
+        glowSide: null,
+        glowIntensity: 0,
+        isDashed: false,
+        pulseSpeed: 1,
+      })) as any,
 
       isReady: false
     };

@@ -69,7 +69,7 @@ export async function rapidFire(env: Env): Promise<void> {
 
   const browserVM = await ensureBrowserVM();
   const depositoryAddress = browserVM.getDepositoryAddress();
-  createJReplica(env, 'RapidFire', depositoryAddress, { x: 0, y: 0, z: 0 });
+  createJReplica(env, 'RapidFire', depositoryAddress, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
 
   const entities = [
     { name: 'Alice', id: '0x' + '1'.padStart(64, '0'), signer: 's1' },

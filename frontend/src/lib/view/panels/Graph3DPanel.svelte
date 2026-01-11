@@ -271,6 +271,7 @@
     to: string;
     line: THREE.Line;
     progressBars?: THREE.Group | undefined;
+    mempoolBoxes?: { leftBox: THREE.Group; rightBox: THREE.Group } | null | undefined;
   }
 
   interface DerivedAccountData {
@@ -2675,6 +2676,24 @@ let vrHammer: VRHammer | null = null;
           }
         }
         if (connection.progressBars) scene.remove(connection.progressBars);
+        if (connection.mempoolBoxes) {
+          const { leftBox, rightBox } = connection.mempoolBoxes;
+          [leftBox, rightBox].forEach(box => {
+            if (!box) return;
+            scene.remove(box);
+            box.traverse((child: any) => {
+              if (child.geometry) child.geometry.dispose();
+              if (child.material) {
+                const mat = child.material;
+                if (Array.isArray(mat)) {
+                  mat.forEach(m => m.dispose());
+                } else {
+                  mat.dispose();
+                }
+              }
+            });
+          });
+        }
       });
       connections = connections.filter(c => !removedIds.has(c.from) && !removedIds.has(c.to));
     }
@@ -2765,6 +2784,24 @@ let vrHammer: VRHammer | null = null;
             }
           });
         }
+        if (connection.mempoolBoxes) {
+          const { leftBox, rightBox } = connection.mempoolBoxes;
+          [leftBox, rightBox].forEach(box => {
+            if (!box) return;
+            scene.remove(box);
+            box.traverse((child: any) => {
+              if (child.geometry) child.geometry.dispose();
+              if (child.material) {
+                const mat = child.material;
+                if (Array.isArray(mat)) {
+                  mat.forEach(m => m.dispose());
+                } else {
+                  mat.dispose();
+                }
+              }
+            });
+          });
+        }
       });
       connections = [];
     }
@@ -2815,6 +2852,25 @@ let vrHammer: VRHammer | null = null;
       }
       if (connection.progressBars) {
         scene.remove(connection.progressBars);
+      }
+      // Remove mempool boxes - dispose geometry and materials
+      if (connection.mempoolBoxes) {
+        const { leftBox, rightBox } = connection.mempoolBoxes;
+        [leftBox, rightBox].forEach(box => {
+          if (!box) return;
+          scene.remove(box);
+          box.traverse((child: any) => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+              const mat = child.material;
+              if (Array.isArray(mat)) {
+                mat.forEach(m => m.dispose());
+              } else {
+                mat.dispose();
+              }
+            }
+          });
+        });
       }
     });
     connections = [];
@@ -3625,13 +3681,41 @@ let vrHammer: VRHammer | null = null;
           // Recreate progress bars (positions changed, need full rebuild)
           if (conn.progressBars) {
             scene.remove(conn.progressBars);
+
+            // Remove old mempool boxes
+            if (conn.mempoolBoxes) {
+              scene.remove(conn.mempoolBoxes.leftBox);
+              scene.remove(conn.mempoolBoxes.rightBox);
+              // Dispose geometry and materials
+              [conn.mempoolBoxes.leftBox, conn.mempoolBoxes.rightBox].forEach(box => {
+                box.traverse((child: any) => {
+                  if (child.geometry) child.geometry.dispose();
+                  if (child.material) {
+                    const mat = child.material;
+                    if (Array.isArray(mat)) {
+                      mat.forEach(m => m.dispose());
+                    } else {
+                      mat.dispose();
+                    }
+                  }
+                });
+              });
+            }
+
             // Get time-aware replica data
             const currentReplicas = getTimeAwareReplicas();
             const replicaKey = Array.from(currentReplicas.keys() as IterableIterator<string>).find(k => k.startsWith(conn.from + ':') || k.startsWith(conn.to + ':'));
             const replica = replicaKey ? currentReplicas.get(replicaKey) : null;
 
             if (replica) {
-              conn.progressBars = createAccountBarsForConnection(fromEntity, toEntity, conn.from, conn.to, replica);
+              const { bars, mempoolBoxes } = createAccountBarsForConnection(fromEntity, toEntity, conn.from, conn.to, replica);
+              conn.progressBars = bars;
+              conn.mempoolBoxes = mempoolBoxes;
+              // Add new mempool boxes to scene
+              if (mempoolBoxes) {
+                scene.add(mempoolBoxes.leftBox);
+                scene.add(mempoolBoxes.rightBox);
+              }
             }
           }
         }
@@ -3687,14 +3771,15 @@ let vrHammer: VRHammer | null = null;
     line.computeLineDistances(); // Required for dashed lines
     scene.add(line);
 
-    // Create account capacity bars
-    const accountBars = createAccountBarsForConnection(fromEntity, toEntity, fromId, toId, replica);
+    // Create account capacity bars and mempool boxes
+    const { bars: accountBars, mempoolBoxes } = createAccountBarsForConnection(fromEntity, toEntity, fromId, toId, replica);
 
     connections.push({
       from: fromId,
       to: toId,
       line,
-      progressBars: accountBars
+      progressBars: accountBars,
+      mempoolBoxes
     });
   }
 
@@ -3758,14 +3843,14 @@ let vrHammer: VRHammer | null = null;
     if (!accountData) {
       const group = new THREE.Group();
       scene.add(group);
-      return group;
+      return { bars: group, mempoolBoxes: null };
     }
 
     // FINTECH-SAFETY: Get available tokens for THIS specific connection
     if (!accountData.deltas) {
       const group = new THREE.Group();
       scene.add(group);
-      return group;
+      return { bars: group, mempoolBoxes: null };
     }
 
     const availableTokens = Array.from(accountData.deltas.keys() as IterableIterator<number>).sort((a, b) => a - b);
@@ -3773,28 +3858,8 @@ let vrHammer: VRHammer | null = null;
     if (availableTokens.length === 0) {
       const group = new THREE.Group();
       scene.add(group);
-      return group;
+      return { bars: group, mempoolBoxes: null };
     }
-
-    // Use single source of truth for delta access
-    let tokenDelta = getAccountTokenDelta(accountData, selectedTokenId);
-    let displayTokenId = selectedTokenId;
-
-    // FINTECH-GRADE: If selected token doesn't exist, use first available (same logic as tooltip)
-    if (!tokenDelta && availableTokens.length > 0) {
-      displayTokenId = availableTokens[0]!;
-      tokenDelta = getAccountTokenDelta(accountData, displayTokenId);
-    }
-
-    if (!tokenDelta) {
-      // This should never happen after fallback, but fail-fast
-      throw new Error(`FINTECH-SAFETY: Token ${displayTokenId} not found despite being in availableTokens: ${availableTokens}`);
-    }
-
-    // Derive from BOTH perspectives - each entity sees their own values on their side
-    // Use fromIsLeftEntity computed above for single source of truth
-    const fromDerived = deriveEntry(tokenDelta, fromIsLeftEntity);
-    const toDerived = deriveEntry(tokenDelta, !fromIsLeftEntity);
 
     // Bilateral consensus state classification
     const leftEntityAccount = fromIsLeftEntity ? confirmedAccount : pendingAccount;
@@ -3812,22 +3877,39 @@ let vrHammer: VRHammer | null = null;
       ? XLN?.getAccountBarVisual?.(leftConsensusState, rightConsensusState)
       : null;
 
-    return createAccountBars(
+    const bars = createAccountBars(
       scene,
       fromEntity,
       toEntity,
-      fromDerived,
-      toDerived,
+      accountData.deltas,  // Pass full deltas map for multi-token rendering
       fromIsLeftEntity,
       {
         barsMode,
         portfolioScale: settings.portfolioScale || 5000,
-        selectedTokenId: displayTokenId,
         desyncDetected: (leftConsensusState?.state !== 'committed' || rightConsensusState?.state !== 'committed'),
         bilateralState: barVisual // NEW: Pass consensus state for visual effects
       },
+      getEntitySizeForToken,
+      XLN  // Pass XLN runtime functions for deriveDelta
+    );
+
+    // Create mempool boxes (one per entity side)
+    const mempoolBoxes = createAccountMempoolBoxes(
+      scene,
+      fromEntity,
+      toEntity,
+      accountData,
+      fromIsLeftEntity,
       getEntitySizeForToken
     );
+
+    // Add boxes to scene for rendering
+    if (mempoolBoxes) {
+      scene.add(mempoolBoxes.leftBox);
+      scene.add(mempoolBoxes.rightBox);
+    }
+
+    return { bars, mempoolBoxes };
   }
 
   /**
@@ -3881,6 +3963,145 @@ let vrHammer: VRHammer | null = null;
   }
 
   // Deleted: createChannelBars and createDeltaSeparator moved to AccountBarRenderer.ts
+
+  /**
+   * Create account mempool visualization boxes (one per entity side)
+   * Small boxes aligned with account bar direction
+   */
+  function createAccountMempoolBoxes(
+    scene: THREE.Scene,
+    fromEntity: any,
+    toEntity: any,
+    account: any,
+    fromIsLeft: boolean,
+    getEntitySizeForToken: (entityId: string, tokenId: number) => number
+  ): { leftBox: THREE.Group; rightBox: THREE.Group } | null {
+    if (!account) return null;
+
+    const direction = new THREE.Vector3().subVectors(toEntity.position, fromEntity.position);
+    const normalizedDirection = direction.normalize();
+
+    // Get sync states for colors (GREEN = synced, RED = desynced)
+    const leftState = XLN?.classifyBilateralState?.(account, 0, fromIsLeft);
+    const rightState = XLN?.classifyBilateralState?.(account, 0, !fromIsLeft);
+
+    // Split mempool by index (simple approach: odd=left, even=right)
+    const mempool = account.mempool || [];
+    const leftTxs = mempool.filter((_: any, i: number) => i % 2 === 0);
+    const rightTxs = mempool.filter((_: any, i: number) => i % 2 === 1);
+
+    // Create boxes with sync state colors
+    const leftBoxColor = leftState?.state === 'committed' ? 0x00ff88 : 0xff4444;
+    const rightBoxColor = rightState?.state === 'committed' ? 0x00ff88 : 0xff4444;
+
+    const leftBox = createMempoolBox(leftBoxColor, leftTxs, normalizedDirection);
+    const rightBox = createMempoolBox(rightBoxColor, rightTxs, normalizedDirection);
+
+    // Position boxes EXACTLY where bars start (matches AccountBarRenderer positioning)
+    const fromEntitySize = getEntitySizeForToken(fromEntity.id, 1);
+    const toEntitySize = getEntitySizeForToken(toEntity.id, 1);
+    const barRadius = 0.08 * 2.5; // 0.2
+    const safeGap = 0.2;
+    const boxDepth = 0.3;
+
+    // Calculate bar start positions (EXACT same formula as AccountBarRenderer:338-339)
+    const fromBarStartPos = fromEntity.position.clone().add(
+      normalizedDirection.clone().multiplyScalar(fromEntitySize + barRadius + safeGap)
+    );
+    const toBarStartPos = toEntity.position.clone().sub(
+      normalizedDirection.clone().multiplyScalar(toEntitySize + barRadius + safeGap)
+    );
+
+    // Position box front face AT bar start, extending backward (toward entity)
+    leftBox.position.copy(fromBarStartPos).sub(
+      normalizedDirection.clone().multiplyScalar(boxDepth/2)
+    );
+
+    rightBox.position.copy(toBarStartPos).add(
+      normalizedDirection.clone().multiplyScalar(boxDepth/2)
+    );
+
+    // Don't add to scene here - caller will handle it for proper tracking
+    return { leftBox, rightBox };
+  }
+
+  /**
+   * Create single mempool box with TX cubes inside
+   * Aligned with account bar direction (rotated to face connection)
+   */
+  function createMempoolBox(color: number, txs: any[], direction: THREE.Vector3): THREE.Group {
+    const group = new THREE.Group();
+
+    // Minimal box dimensions - fit in gap between entity and bars
+    const width = 1.2;   // Perpendicular to connection
+    const height = 1.2;  // Vertical
+    const depth = 0.3;   // Very thin along connection (fits in gap)
+
+    // Container box (subtle, integrated)
+    const geometry = new THREE.BoxGeometry(width, height, depth);
+    const material = new THREE.MeshPhongMaterial({
+      color,
+      emissive: new THREE.Color(color).multiplyScalar(0.3),
+      transparent: true,
+      opacity: 0.2, // More transparent for subtlety
+      side: THREE.DoubleSide,
+      shininess: 60,
+      depthWrite: false
+    });
+    const cube = new THREE.Mesh(geometry, material);
+    group.add(cube);
+
+    // Wireframe edges (thinner, more subtle)
+    const edgesGeometry = new THREE.EdgesGeometry(geometry);
+    const edgesMaterial = new THREE.LineBasicMaterial({
+      color: color,
+      linewidth: 1,
+      transparent: true,
+      opacity: 0.6
+    });
+    const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+    group.add(edges);
+
+    // TX cubes (minimal indicators, 2x2 grid on front face)
+    const txSize = 0.25;  // Tiny dots
+    const spacing = 0.5;  // Tight grid (fits in 1.2 width)
+    const gridSize = 2;
+
+    txs.slice(0, 4).forEach((tx, i) => {
+      const txGeometry = new THREE.BoxGeometry(txSize, txSize, txSize);
+      const txMaterial = new THREE.MeshLambertMaterial({
+        color: 0x00ccff,
+        transparent: true,
+        opacity: 0.95,
+        emissive: 0x0088cc,
+        emissiveIntensity: 0.7
+      });
+      const txCube = new THREE.Mesh(txGeometry, txMaterial);
+
+      // Position in 2x2 grid on XY plane (front of box)
+      const xIndex = i % gridSize;
+      const yIndex = Math.floor(i / gridSize);
+      const halfGrid = (gridSize - 1) * spacing / 2;
+
+      txCube.position.set(
+        -halfGrid + xIndex * spacing,
+        -halfGrid + yIndex * spacing,
+        depth/2 + 0.2  // Just slightly in front
+      );
+
+      group.add(txCube);
+    });
+
+    // Rotate box to align with account bar direction
+    // Box depth (Z-axis) should point along connection line
+    const up = new THREE.Vector3(0, 1, 0);
+    const forward = new THREE.Vector3(0, 0, 1);
+    const quaternion = new THREE.Quaternion();
+    quaternion.setFromUnitVectors(forward, direction);
+    group.quaternion.copy(quaternion);
+
+    return group;
+  }
 
   // Bar labels removed per user request - shown only on hover tooltips
   // function createBarLabel(group: THREE.Group, position: THREE.Vector3, value: number, _barType: string) {
@@ -4556,6 +4777,36 @@ let vrHammer: VRHammer | null = null;
         if (connection.progressBars) {
           scene.remove(connection.progressBars);
         }
+        if (connection.mempoolBoxes) {
+          if (connection.mempoolBoxes.leftBox) {
+            scene.remove(connection.mempoolBoxes.leftBox);
+            connection.mempoolBoxes.leftBox.traverse((child: any) => {
+              if (child.geometry) child.geometry.dispose();
+              if (child.material) {
+                const mat = child.material;
+                if (Array.isArray(mat)) {
+                  mat.forEach(m => m.dispose());
+                } else {
+                  mat.dispose();
+                }
+              }
+            });
+          }
+          if (connection.mempoolBoxes.rightBox) {
+            scene.remove(connection.mempoolBoxes.rightBox);
+            connection.mempoolBoxes.rightBox.traverse((child: any) => {
+              if (child.geometry) child.geometry.dispose();
+              if (child.material) {
+                const mat = child.material;
+                if (Array.isArray(mat)) {
+                  mat.forEach(m => m.dispose());
+                } else {
+                  mat.dispose();
+                }
+              }
+            });
+          }
+        }
       });
       connections = [];
       createConnections();
@@ -4881,6 +5132,36 @@ let vrHammer: VRHammer | null = null;
       scene.remove(connection.line);
       if (connection.progressBars) {
         scene.remove(connection.progressBars);
+      }
+      if (connection.mempoolBoxes) {
+        if (connection.mempoolBoxes.leftBox) {
+          scene.remove(connection.mempoolBoxes.leftBox);
+          connection.mempoolBoxes.leftBox.traverse((child: any) => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+              const mat = child.material;
+              if (Array.isArray(mat)) {
+                mat.forEach(m => m.dispose());
+              } else {
+                mat.dispose();
+              }
+            }
+          });
+        }
+        if (connection.mempoolBoxes.rightBox) {
+          scene.remove(connection.mempoolBoxes.rightBox);
+          connection.mempoolBoxes.rightBox.traverse((child: any) => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+              const mat = child.material;
+              if (Array.isArray(mat)) {
+                mat.forEach(m => m.dispose());
+              } else {
+                mat.dispose();
+              }
+            }
+          });
+        }
       }
     });
     connections = [];

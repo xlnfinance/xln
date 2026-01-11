@@ -619,7 +619,8 @@ export async function ahb(env: Env): Promise<void> {
 
     // Check snapshot captured it
     const lastSnap = env.history[env.history.length - 1];
-    const snapMempool = lastSnap?.jReplicas?.[0]?.mempool?.length || 0;
+    const snapJReplica = lastSnap?.jReplicas?.find(jr => jr.name === AHB_JURISDICTION);
+    const snapMempool = snapJReplica?.mempool?.length || 0;
     console.log(`[SNAPSHOT ASSERT #1] Last snapshot mempool=${snapMempool}`);
     if (snapMempool === 0) {
       throw new Error('SNAPSHOT FAIL: Mempool not visible! Executed in same tick?');
