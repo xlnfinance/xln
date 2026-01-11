@@ -8,6 +8,8 @@
   import type { Writable } from 'svelte/store';
   import { get } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
+  import { activeVault, allVaults } from '$lib/stores/vaultStore';
+  import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
 
   // Props
   interface Props {
@@ -29,6 +31,28 @@
   // Tab state
   let activeTab = $state<'overview' | 'balances'>('balances'); // Start with Balances
 
+  type TokenOption = {
+    tokenId: number;
+    symbol: string;
+    decimals: number;
+    address?: string;
+    name?: string;
+  };
+
+  type SignerRef = {
+    address: string;
+    label: string;
+    vaultId: string;
+    signerName: string;
+  };
+
+  let selectedTokenIdText = $state('');
+  let browserVmTokens = $state<TokenOption[]>([]);
+  let externalBalances = $state<Array<{ address: string; label: string; balance: bigint }>>([]);
+  let externalBalancesLoading = $state(false);
+  let externalBalancesError = $state<string | null>(null);
+  let balanceRequestId = 0;
+
   // ═══════════════════════════════════════════════════════════════════════════
   //          TIME-TRAVEL AWARE DATA DERIVATION
   // ═══════════════════════════════════════════════════════════════════════════
@@ -45,6 +69,11 @@
     }
     return env; // Live mode - return env directly
   }
+
+  let isLive = $derived.by(() => {
+    const timeIndex = isolatedTimeIndex ? ($isolatedTimeIndex ?? -1) : -1;
+    return timeIndex < 0;
+  });
 
   // Get jurisdictions from current frame
   let jurisdictions = $derived.by(() => {
@@ -178,6 +207,165 @@
     return selectedJurisdictionData.mempool;
   });
 
+  $effect(() => {
+    const xln = $xlnInstance;
+    if (!xln?.getBrowserVMInstance) {
+      browserVmTokens = [];
+      return;
+    }
+    const browserVM = xln.getBrowserVMInstance();
+    if (!browserVM?.getTokenRegistry) {
+      browserVmTokens = [];
+      return;
+    }
+    const registry = browserVM.getTokenRegistry();
+    browserVmTokens = Array.isArray(registry) ? registry : [];
+  });
+
+  let tokenOptions = $derived.by(() => {
+    const options = new Map<number, TokenOption>();
+
+    for (const token of browserVmTokens) {
+      if (options.has(token.tokenId)) continue;
+      options.set(token.tokenId, {
+        tokenId: token.tokenId,
+        symbol: token.symbol,
+        decimals: token.decimals ?? 18,
+        address: token.address,
+        name: token.name
+      });
+    }
+
+    const addTokenId = (tokenId: number) => {
+      if (options.has(tokenId)) return;
+      const info = $xlnFunctions.getTokenInfo(tokenId);
+      options.set(tokenId, {
+        tokenId,
+        symbol: info?.symbol || `T${tokenId}`,
+        decimals: info?.decimals ?? 18
+      });
+    };
+
+    for (const entry of reserves) addTokenId(entry.tokenId);
+    for (const entry of collaterals) addTokenId(entry.tokenId);
+
+    return Array.from(options.values()).sort((a, b) => a.tokenId - b.tokenId);
+  });
+
+  $effect(() => {
+    const ids = tokenOptions.map(option => String(option.tokenId));
+    if (ids.length === 0) {
+      if (selectedTokenIdText !== '') {
+        selectedTokenIdText = '';
+      }
+      return;
+    }
+    if (!ids.includes(selectedTokenIdText)) {
+      selectedTokenIdText = ids.includes('1') ? '1' : ids[0];
+    }
+  });
+
+  let selectedTokenId = $derived.by(() => {
+    if (!selectedTokenIdText) return null;
+    const parsed = Number(selectedTokenIdText);
+    return Number.isNaN(parsed) ? null : parsed;
+  });
+
+  let selectedTokenMeta = $derived.by(() => {
+    if (selectedTokenId === null) return null;
+    const option = tokenOptions.find(opt => opt.tokenId === selectedTokenId);
+    if (option) return option;
+    const info = $xlnFunctions.getTokenInfo(selectedTokenId);
+    return {
+      tokenId: selectedTokenId,
+      symbol: info?.symbol || `T${selectedTokenId}`,
+      decimals: info?.decimals ?? 18
+    };
+  });
+
+  let filteredReserves = $derived.by(() => {
+    if (selectedTokenId === null) return reserves;
+    return reserves.filter(entry => entry.tokenId === selectedTokenId);
+  });
+
+  let filteredCollaterals = $derived.by(() => {
+    if (selectedTokenId === null) return collaterals;
+    return collaterals.filter(entry => entry.tokenId === selectedTokenId);
+  });
+
+  let signerRefs = $derived.by(() => {
+    const vault = $activeVault;
+    const vaults = $allVaults;
+    const scope = vault ? [vault] : vaults;
+    const seen = new Map<string, SignerRef>();
+
+    for (const currentVault of scope) {
+      for (const signer of currentVault.signers || []) {
+        if (!signer.address) continue;
+        if (seen.has(signer.address)) continue;
+        const label = vault ? signer.name : `${currentVault.id} · ${signer.name}`;
+        seen.set(signer.address, {
+          address: signer.address,
+          label,
+          vaultId: currentVault.id,
+          signerName: signer.name
+        });
+      }
+    }
+
+    return Array.from(seen.values());
+  });
+
+  $effect(() => {
+    const tokenMeta = selectedTokenMeta;
+    const signers = signerRefs;
+    const xln = $xlnInstance;
+
+    if (!isLive || !tokenMeta?.address || signers.length === 0 || !xln?.getBrowserVMInstance) {
+      externalBalances = [];
+      externalBalancesLoading = false;
+      externalBalancesError = null;
+      return;
+    }
+
+    const browserVM = xln.getBrowserVMInstance();
+    if (!browserVM?.getErc20Balance) {
+      externalBalances = [];
+      externalBalancesLoading = false;
+      externalBalancesError = null;
+      return;
+    }
+
+    const requestId = ++balanceRequestId;
+    externalBalancesLoading = true;
+    externalBalancesError = null;
+
+    (async () => {
+      try {
+        const nextBalances: Array<{ address: string; label: string; balance: bigint }> = [];
+        for (const signer of signers) {
+          const balance = await browserVM.getErc20Balance(tokenMeta.address, signer.address);
+          if (balance > 0n) {
+            nextBalances.push({
+              address: signer.address,
+              label: signer.label,
+              balance
+            });
+          }
+        }
+        if (requestId !== balanceRequestId) return;
+        externalBalances = nextBalances;
+      } catch (err) {
+        if (requestId !== balanceRequestId) return;
+        externalBalancesError = err instanceof Error ? err.message : String(err);
+      } finally {
+        if (requestId === balanceRequestId) {
+          externalBalancesLoading = false;
+        }
+      }
+    })();
+  });
+
   // ═══════════════════════════════════════════════════════════════════════════
   //                              HELPERS
   // ═══════════════════════════════════════════════════════════════════════════
@@ -201,6 +389,25 @@
     if (num >= 1_000_000) return `$${(num / 1_000_000).toFixed(1)}M`;
     if (num >= 1_000) return `$${(num / 1_000).toFixed(0)}K`;
     return `$${num.toFixed(0)}`;
+  }
+
+  function getTokenInfoFor(tokenId: number): { symbol: string; decimals: number } {
+    const info = $xlnFunctions.getTokenInfo(tokenId);
+    return {
+      symbol: info?.symbol || `T${tokenId}`,
+      decimals: info?.decimals ?? 18
+    };
+  }
+
+  function getTokenSymbol(tokenId: number): string {
+    return getTokenInfoFor(tokenId).symbol;
+  }
+
+  function formatTokenAmountFor(amount: bigint, tokenId: number): string {
+    const info = getTokenInfoFor(tokenId);
+    const absAmount = amount < 0n ? -amount : amount;
+    const formatted = $xlnFunctions.formatTokenAmount(absAmount, info.decimals);
+    return `${amount < 0n ? '-' : ''}${formatted} ${info.symbol}`;
   }
 
   function formatChannelKey(key: string): string {

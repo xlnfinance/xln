@@ -819,11 +819,35 @@ let vrHammer: VRHammer | null = null;
         const blockNumber = BigInt(activeJurisdiction.jMachine.jHeight || 0);
         console.log(`[Graph3D] 📦 J-Block #${blockNumber} committed: ${jMachineTxBoxes.length} txs → blockchain`);
 
-        // Create committed block container
+        // Create committed block container (clone J-mempool style)
         const blockContainer = new THREE.Group();
         blockContainer.userData['blockNumber'] = blockNumber;
 
-        // Move current TX cubes from J-machine to block container
+        // Add J-mempool style box (same blue translucent)
+        const blockSize = 12;
+        const blockCubeGeo = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
+        const blockCubeMat = new THREE.MeshPhongMaterial({
+          color: 0x4488aa,     // Same teal-blue
+          emissive: 0x224455,
+          transparent: true,
+          opacity: 0.15,       // Same translucency
+          side: THREE.DoubleSide,
+          shininess: 100,
+          depthWrite: false
+        });
+        const blockCube = new THREE.Mesh(blockCubeGeo, blockCubeMat);
+        blockContainer.add(blockCube);
+
+        // Cyan wireframe edges
+        const blockEdgesGeo = new THREE.EdgesGeometry(blockCubeGeo);
+        const blockEdgesMat = new THREE.LineBasicMaterial({
+          color: 0x66ccff,   // Bright cyan edges
+          linewidth: 2
+        });
+        const blockEdges = new THREE.LineSegments(blockEdgesGeo, blockEdgesMat);
+        blockContainer.add(blockEdges);
+
+        // Move current TX cubes from J-machine to block container (yellow cubes go inside)
         const committedCubes = [...jMachineTxBoxes];
         committedCubes.forEach(cube => {
           activeJMachine.remove(cube);
@@ -849,22 +873,7 @@ let vrHammer: VRHammer | null = null;
             }
           }
 
-          // Opacity tiers: First 3 solid, next 2 transparent
-          const age = Number(BigInt(blockNumber) - BigInt(block.blockNumber));
-          const opacity = age <= 3
-            ? 1.0 - (age - 1) * 0.05  // age 1→1.0, 2→0.95, 3→0.9 (solid)
-            : 0.5 - (age - 3) * 0.15; // age 4→0.35, 5→0.2 (transparent)
-
-          block.container.traverse((child: any) => {
-            if (child.material) {
-              child.material.opacity = opacity;
-              child.material.transparent = true;
-            }
-          });
-          // Fade prevHash line too
-          if (block.prevHashLine && block.prevHashLine.material) {
-            (block.prevHashLine.material as THREE.LineBasicMaterial).opacity = opacity * 0.6;
-          }
+          // No opacity changes - uniform J-mempool style for all blocks
         });
 
         // Position new block right above J-machine
@@ -989,23 +998,33 @@ let vrHammer: VRHammer | null = null;
             blockContainer.position.copy(activeJMachine.position);
             blockContainer.position.y += yOffset;
 
-            // Add cube to represent block (with proper opacity tiers)
-            const blockCubeGeo = new THREE.BoxGeometry(8, 8, 8);
-            // Opacity tiers: First 3 solid, next 2 transparent
-            const opacity = age <= 3
-              ? 1.0 - (age - 1) * 0.05  // age 1→1.0, 2→0.95, 3→0.9 (solid)
-              : 0.5 - (age - 3) * 0.15; // age 4→0.35, 5→0.2 (transparent)
-
+            // Clone J-mempool style: same blue translucent box + cyan edges
+            const blockSize = 12;
+            const blockCubeGeo = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
             const blockCubeMat = new THREE.MeshPhongMaterial({
-              color: 0x4488aa,
-              transparent: true,
-              opacity: opacity * 0.15, // Subtle background box (not full opacity)
+              color: 0x4488aa,     // Same teal-blue as J-mempool
               emissive: 0x224455,
-              emissiveIntensity: age <= 3 ? 0.5 : 0.2,
-              wireframe: age > 3 // Solid for recent, wireframe for old
+              transparent: true,
+              opacity: 0.15,       // Same translucency as J-mempool
+              side: THREE.DoubleSide,
+              shininess: 100,
+              depthWrite: false
             });
             const blockCube = new THREE.Mesh(blockCubeGeo, blockCubeMat);
             blockContainer.add(blockCube);
+
+            // Cyan wireframe edges (same as J-mempool)
+            const blockEdgesGeo = new THREE.EdgesGeometry(blockCubeGeo);
+            const blockEdgesMat = new THREE.LineBasicMaterial({
+              color: 0x66ccff,   // Bright cyan edges
+              linewidth: 2
+            });
+            const blockEdges = new THREE.LineSegments(blockEdgesGeo, blockEdgesMat);
+            blockContainer.add(blockEdges);
+
+            // TODO: Add yellow TX cubes inside (from history - TXs that were in this block)
+            // For now just empty boxes showing blockchain structure
+
             scene.add(blockContainer);
 
             // Draw prevHash line to previous block
