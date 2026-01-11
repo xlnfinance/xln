@@ -10,12 +10,22 @@
  */
 
 import { createVM, runTx } from '@ethereumjs/vm';
-import { createLegacyTx } from '@ethereumjs/tx';
-import { createAddressFromPrivateKey, hexToBytes, createAccount, bytesToHex } from '@ethereumjs/util';
+import { createLegacyTx, createTxFromRLP } from '@ethereumjs/tx';
+import { createAddressFromPrivateKey, createAddressFromString, hexToBytes, createAccount, bytesToHex } from '@ethereumjs/util';
 import type { Address } from '@ethereumjs/util';
 import { Common, Hardfork, Chain } from '@ethereumjs/common';
 import { ethers } from 'ethers';
 import { safeStringify } from './serialization-utils.js';
+
+const DEFAULT_TOKEN_DECIMALS = 18;
+const DEFAULT_TOKEN_SUPPLY = 1_000_000_000_000n * 10n ** 18n; // 1T tokens
+const DEFAULT_SIGNER_FAUCET = 1_000_000_000n * 10n ** 18n; // 1B tokens
+const TOKEN_REGISTRATION_AMOUNT = 1n;
+const DEFAULT_TOKENS = [
+  { symbol: 'USDC', name: 'USD Coin', decimals: DEFAULT_TOKEN_DECIMALS },
+  { symbol: 'WETH', name: 'Wrapped Ether', decimals: DEFAULT_TOKEN_DECIMALS },
+  { symbol: 'USDT', name: 'Tether USD', decimals: DEFAULT_TOKEN_DECIMALS },
+];
 
 /** EVM event emitted from the BrowserVM */
 export interface EVMEvent {
@@ -40,10 +50,14 @@ export class BrowserVMProvider {
   private depositoryArtifact: any = null;
   private entityProviderArtifact: any = null;
   private deltaTransformerArtifact: any = null;
+  private erc20Artifact: any = null;
   private depositoryInterface: ethers.Interface | null = null;
   private entityProviderInterface: ethers.Interface | null = null;
   private accountInterface: ethers.Interface | null = null;
   private deltaTransformerInterface: ethers.Interface | null = null;
+  private erc20Interface: ethers.Interface | null = null;
+  private tokenRegistry: Map<string, { address: string; name: string; symbol: string; decimals: number; tokenId: number }> = new Map();
+  private fundedAddresses: Set<string> = new Set();
   private initialized = false;
   private blockHeight = 0; // Track J-Machine block height
   private blockHash = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Current block hash
@@ -70,22 +84,25 @@ export class BrowserVMProvider {
     // Load artifacts - browser uses fetch, CLI uses file read
     if (typeof window !== 'undefined') {
       // Browser: fetch from static/
-      const [accountResp, depositoryResp, entityProviderResp, deltaTransformerResp] = await Promise.all([
+      const [accountResp, depositoryResp, entityProviderResp, deltaTransformerResp, erc20Resp] = await Promise.all([
         fetch('/contracts/Account.json'),
         fetch('/contracts/Depository.json'),
         fetch('/contracts/EntityProvider.json'),
         fetch('/contracts/DeltaTransformer.json'),
+        fetch('/contracts/ERC20Mock.json'),
       ]);
 
       if (!accountResp.ok) throw new Error(`Failed to load Account artifact: ${accountResp.status}`);
       if (!depositoryResp.ok) throw new Error(`Failed to load Depository artifact: ${depositoryResp.status}`);
       if (!entityProviderResp.ok) throw new Error(`Failed to load EntityProvider artifact: ${entityProviderResp.status}`);
       if (!deltaTransformerResp.ok) throw new Error(`Failed to load DeltaTransformer artifact: ${deltaTransformerResp.status}`);
+      if (!erc20Resp.ok) throw new Error(`Failed to load ERC20Mock artifact: ${erc20Resp.status}`);
 
       this.accountArtifact = await accountResp.json();
       this.depositoryArtifact = await depositoryResp.json();
       this.entityProviderArtifact = await entityProviderResp.json();
       this.deltaTransformerArtifact = await deltaTransformerResp.json();
+      this.erc20Artifact = await erc20Resp.json();
     } else {
       // CLI: read from jurisdictions/artifacts/
       const fs = await import('fs');
@@ -96,6 +113,7 @@ export class BrowserVMProvider {
       this.depositoryArtifact = JSON.parse(fs.readFileSync(path.join(basePath, 'Depository.sol/Depository.json'), 'utf-8'));
       this.entityProviderArtifact = JSON.parse(fs.readFileSync(path.join(basePath, 'EntityProvider.sol/EntityProvider.json'), 'utf-8'));
       this.deltaTransformerArtifact = JSON.parse(fs.readFileSync(path.join(basePath, 'DeltaTransformer.sol/DeltaTransformer.json'), 'utf-8'));
+      this.erc20Artifact = JSON.parse(fs.readFileSync(path.join(basePath, 'ERC20Mock.sol/ERC20Mock.json'), 'utf-8'));
       console.log('[BrowserVM] Loaded artifacts from filesystem (CLI mode)');
     }
 
@@ -104,6 +122,7 @@ export class BrowserVMProvider {
     this.entityProviderInterface = new ethers.Interface(this.entityProviderArtifact.abi);
     this.accountInterface = new ethers.Interface(this.accountArtifact.abi);
     this.deltaTransformerInterface = new ethers.Interface(this.deltaTransformerArtifact.abi);
+    this.erc20Interface = new ethers.Interface(this.erc20Artifact.abi);
     console.log('[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)');
 
     // Create VM with evmOpts to disable contract size limit
@@ -128,6 +147,7 @@ export class BrowserVMProvider {
     await this.deployDepository();
     await this.deployEntityProvider();
     await this.deployDeltaTransformer();
+    await this.deployDefaultTokens();
 
     this.initialized = true;
     console.log('[BrowserVM] All contracts deployed successfully');
@@ -144,6 +164,8 @@ export class BrowserVMProvider {
     this.entityProviderAddress = null;
     this.deltaTransformerAddress = null;
     this.nonce = 0n;
+    this.tokenRegistry.clear();
+    this.fundedAddresses.clear();
     await this.init();
     console.log('[BrowserVM] Reset complete - fresh contracts deployed');
   }
@@ -282,6 +304,279 @@ export class BrowserVMProvider {
       throw new Error('DeltaTransformer not deployed');
     }
     return this.deltaTransformerAddress.toString();
+  }
+
+  /** Token registry (symbol → metadata) */
+  getTokenRegistry(): Array<{ symbol: string; name: string; address: string; decimals: number; tokenId: number }> {
+    return Array.from(this.tokenRegistry.values());
+  }
+
+  getTokenAddress(symbol: string): string | null {
+    return this.tokenRegistry.get(symbol)?.address || null;
+  }
+
+  getTokenId(symbol: string): number | null {
+    const tokenId = this.tokenRegistry.get(symbol)?.tokenId;
+    return typeof tokenId === 'number' ? tokenId : null;
+  }
+
+  /** Faucet: fund a signer address with ETH + default tokens */
+  async fundSignerWallet(address: string, amount: bigint = DEFAULT_SIGNER_FAUCET): Promise<void> {
+    if (!address) return;
+    if (!this.tokenRegistry.size) {
+      await this.deployDefaultTokens();
+    }
+    const normalized = address.toLowerCase();
+    if (this.fundedAddresses.has(normalized)) return;
+
+    await this.ensureEthBalance(address, 1000n * 10n ** 18n);
+
+    for (const token of this.tokenRegistry.values()) {
+      const balance = await this.getErc20Balance(token.address, address);
+      if (balance >= amount) continue;
+      const delta = amount - balance;
+      await this.transferErc20(this.deployerPrivKey, token.address, address, delta);
+    }
+
+    this.fundedAddresses.add(normalized);
+    console.log(`[BrowserVM] Faucet funded ${address.slice(0, 10)}... with ${amount} of ${this.tokenRegistry.size} tokens`);
+  }
+
+  private async deployDefaultTokens(): Promise<void> {
+    if (this.tokenRegistry.size > 0) return;
+    if (!this.erc20Artifact || !this.erc20Interface) {
+      throw new Error('ERC20 artifact not loaded');
+    }
+    if (!this.depositoryAddress || !this.depositoryInterface) {
+      throw new Error('Depository not deployed');
+    }
+
+    for (const token of DEFAULT_TOKENS) {
+      const address = await this.deployErc20Token(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
+      const tokenId = await this.registerErc20Token(address);
+      this.tokenRegistry.set(token.symbol, {
+        address,
+        name: token.name,
+        symbol: token.symbol,
+        decimals: token.decimals,
+        tokenId,
+      });
+      console.log(`[BrowserVM] Token registered: ${token.symbol} id=${tokenId} addr=${address.slice(0, 10)}...`);
+    }
+  }
+
+  private async deployErc20Token(name: string, symbol: string, supply: bigint): Promise<string> {
+    const currentNonce = await this.getCurrentNonce();
+    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+    const constructorData = abiCoder.encode(['string', 'string', 'uint256'], [name, symbol, supply]);
+    const bytecode = `${this.erc20Artifact.bytecode}${constructorData.slice(2)}`;
+
+    const tx = createLegacyTx({
+      gasLimit: 5_000_000n,
+      gasPrice: 10n,
+      data: bytecode,
+      nonce: currentNonce,
+    }, { common: this.common }).sign(this.deployerPrivKey);
+
+    const result = await runTx(this.vm, { tx });
+    this.incrementBlock();
+
+    if (result.execResult.exceptionError) {
+      throw new Error(`ERC20 deployment failed: ${result.execResult.exceptionError}`);
+    }
+
+    return result.createdAddress!.toString();
+  }
+
+  private async registerErc20Token(tokenAddress: string): Promise<number> {
+    const packedToken = await this.packTokenReference(0, tokenAddress, 0);
+    await this.approveErc20(this.deployerPrivKey, tokenAddress, this.depositoryAddress!.toString(), TOKEN_REGISTRATION_AMOUNT);
+
+    const callData = this.depositoryInterface!.encodeFunctionData('externalTokenToReserve', [{
+      entity: ethers.ZeroHash,
+      packedToken,
+      internalTokenId: 0,
+      amount: TOKEN_REGISTRATION_AMOUNT,
+    }]);
+
+    const currentNonce = await this.getCurrentNonce();
+    const tx = createLegacyTx({
+      to: this.depositoryAddress!,
+      gasLimit: 1_000_000n,
+      gasPrice: 10n,
+      data: hexToBytes(callData as `0x${string}`),
+      nonce: currentNonce,
+    }, { common: this.common }).sign(this.deployerPrivKey);
+
+    const result = await runTx(this.vm, { tx });
+    this.incrementBlock();
+
+    if (result.execResult.exceptionError) {
+      throw new Error(`externalTokenToReserve failed: ${result.execResult.exceptionError}`);
+    }
+
+    const tokenId = await this.lookupTokenId(packedToken);
+    return tokenId;
+  }
+
+  private async packTokenReference(tokenType: number, contractAddress: string, externalTokenId: number): Promise<string> {
+    const callData = this.depositoryInterface!.encodeFunctionData('packTokenReference', [
+      tokenType,
+      contractAddress,
+      externalTokenId,
+    ]);
+
+    const result = await this.vm.evm.runCall({
+      to: this.depositoryAddress!,
+      caller: this.deployerAddress,
+      data: hexToBytes(callData as `0x${string}`),
+      gasLimit: 100000n,
+    });
+
+    if (result.execResult.exceptionError) {
+      throw new Error(`packTokenReference failed: ${result.execResult.exceptionError}`);
+    }
+
+    const decoded = this.depositoryInterface!.decodeFunctionResult('packTokenReference', result.execResult.returnValue);
+    return decoded[0] as string;
+  }
+
+  private async lookupTokenId(packedToken: string): Promise<number> {
+    const callData = this.depositoryInterface!.encodeFunctionData('tokenToId', [packedToken]);
+    const result = await this.vm.evm.runCall({
+      to: this.depositoryAddress!,
+      caller: this.deployerAddress,
+      data: hexToBytes(callData as `0x${string}`),
+      gasLimit: 100000n,
+    });
+    if (result.execResult.exceptionError) {
+      throw new Error(`tokenToId failed: ${result.execResult.exceptionError}`);
+    }
+    const decoded = this.depositoryInterface!.decodeFunctionResult('tokenToId', result.execResult.returnValue);
+    return Number(decoded[0]);
+  }
+
+  async getErc20Balance(tokenAddress: string, owner: string): Promise<bigint> {
+    const callData = this.erc20Interface!.encodeFunctionData('balanceOf', [owner]);
+    const result = await this.vm.evm.runCall({
+      to: createAddressFromString(tokenAddress),
+      caller: this.deployerAddress,
+      data: hexToBytes(callData as `0x${string}`),
+      gasLimit: 100000n,
+    });
+    if (result.execResult.exceptionError) return 0n;
+    const decoded = this.erc20Interface!.decodeFunctionResult('balanceOf', result.execResult.returnValue);
+    return decoded[0];
+  }
+
+  async getErc20Allowance(tokenAddress: string, owner: string, spender: string): Promise<bigint> {
+    const callData = this.erc20Interface!.encodeFunctionData('allowance', [owner, spender]);
+    const result = await this.vm.evm.runCall({
+      to: createAddressFromString(tokenAddress),
+      caller: this.deployerAddress,
+      data: hexToBytes(callData as `0x${string}`),
+      gasLimit: 100000n,
+    });
+    if (result.execResult.exceptionError) return 0n;
+    const decoded = this.erc20Interface!.decodeFunctionResult('allowance', result.execResult.returnValue);
+    return decoded[0];
+  }
+
+  async approveErc20(privKey: Uint8Array, tokenAddress: string, spender: string, amount: bigint): Promise<string> {
+    const callData = this.erc20Interface!.encodeFunctionData('approve', [spender, amount]);
+    const result = await this.executeTx({
+      to: tokenAddress,
+      data: callData,
+      gasLimit: 200000n,
+    }, privKey);
+    return result.txHash;
+  }
+
+  async transferErc20(privKey: Uint8Array, tokenAddress: string, to: string, amount: bigint): Promise<string> {
+    const callData = this.erc20Interface!.encodeFunctionData('transfer', [to, amount]);
+    const result = await this.executeTx({
+      to: tokenAddress,
+      data: callData,
+      gasLimit: 200000n,
+    }, privKey);
+    return result.txHash;
+  }
+
+  async externalTokenToReserve(privKey: Uint8Array, entityId: string, tokenAddress: string, amount: bigint): Promise<EVMEvent[]> {
+    const packedToken = await this.packTokenReference(0, tokenAddress, 0);
+    const callData = this.depositoryInterface!.encodeFunctionData('externalTokenToReserve', [{
+      entity: entityId,
+      packedToken,
+      internalTokenId: 0,
+      amount,
+    }]);
+
+    const result = await this.executeTx({
+      to: this.depositoryAddress!.toString(),
+      data: callData,
+      gasLimit: 1_000_000n,
+    }, privKey, { emitEvents: true });
+
+    return result.events || [];
+  }
+
+  async executeTx(
+    txData: { to?: string; data?: string; gasLimit?: bigint; value?: bigint },
+    privKey: Uint8Array = this.deployerPrivKey,
+    options?: { emitEvents?: boolean }
+  ): Promise<{ txHash: string; events?: EVMEvent[] }> {
+    const fromAddress = createAddressFromPrivateKey(privKey);
+    const currentNonce = await this.getNonceForAddress(fromAddress);
+    const tx = createLegacyTx({
+      to: txData.to ? createAddressFromString(txData.to) : undefined,
+      gasLimit: txData.gasLimit ?? 1000000n,
+      gasPrice: 10n,
+      data: hexToBytes((txData.data || '0x') as `0x${string}`),
+      nonce: currentNonce,
+      value: txData.value ?? 0n,
+    }, { common: this.common }).sign(privKey);
+
+    const result = await runTx(this.vm, { tx });
+    this.incrementBlock();
+
+    if (result.execResult.exceptionError) {
+      throw new Error(`executeTx failed: ${result.execResult.exceptionError}`);
+    }
+
+    const txHash = bytesToHex(tx.hash());
+    if (options?.emitEvents) {
+      const events = this.emitEvents(result.execResult.logs || []);
+      return { txHash, events };
+    }
+    return { txHash };
+  }
+
+  async executeSignedTx(serializedTx: string): Promise<string> {
+    const raw = hexToBytes(serializedTx as `0x${string}`);
+    const tx = createTxFromRLP(raw, { common: this.common });
+    const result = await runTx(this.vm, { tx });
+    this.incrementBlock();
+
+    if (result.execResult.exceptionError) {
+      throw new Error(`executeSignedTx failed: ${result.execResult.exceptionError}`);
+    }
+
+    return bytesToHex(tx.hash());
+  }
+
+  private async getNonceForAddress(address: Address): Promise<bigint> {
+    const account = await this.vm.stateManager.getAccount(address);
+    return account?.nonce || 0n;
+  }
+
+  private async ensureEthBalance(address: string, minBalance: bigint): Promise<void> {
+    const addr = createAddressFromString(address);
+    const account = await this.vm.stateManager.getAccount(addr);
+    const balance = account?.balance || 0n;
+    if (balance >= minBalance) return;
+    const updated = account || createAccount({ nonce: 0n, balance: minBalance });
+    updated.balance = minBalance;
+    await this.vm.stateManager.putAccount(addr, updated);
   }
 
   /** Get entity reserves for a token */
