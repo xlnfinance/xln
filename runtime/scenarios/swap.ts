@@ -145,6 +145,21 @@ export async function swap(env: Env): Promise<void> {
   // ============================================================================
   console.log('🏛️ Setting up BrowserVM J-Machine...');
 
+  // Clear old state if switching scenarios (prevents accumulation from AHB/other scenarios)
+  if (env.jReplicas && env.jReplicas.size > 0) {
+    console.log(`[SWAP] Clearing ${env.jReplicas.size} old jurisdictions from previous scenario`);
+    env.jReplicas.clear();
+  }
+  if (env.eReplicas && env.eReplicas.size > 0) {
+    console.log(`[SWAP] Clearing ${env.eReplicas.size} old entities from previous scenario`);
+    env.eReplicas.clear();
+  }
+  if (env.history && env.history.length > 0) {
+    console.log(`[SWAP] Clearing ${env.history.length} old snapshots from previous scenario`);
+    env.history = [];
+  }
+  env.height = 0; // Reset to frame 0
+
   const browserVM = await ensureBrowserVM();
   const depositoryAddress = browserVM.getDepositoryAddress();
   createJReplica(env, 'Swap Demo', depositoryAddress, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
