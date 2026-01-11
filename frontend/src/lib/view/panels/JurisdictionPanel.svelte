@@ -431,19 +431,32 @@
   <!-- Header with dropdown -->
   <div class="header">
     <h3>J-Machine</h3>
-    {#if !hideSelector}
-      <div class="j-selector">
-        <select bind:value={selectedJurisdiction} disabled={jurisdictions.length === 0}>
-          {#if jurisdictions.length === 0}
-            <option value="">No jurisdictions</option>
+    <div class="selectors">
+      {#if !hideSelector}
+        <div class="j-selector">
+          <select bind:value={selectedJurisdiction} disabled={jurisdictions.length === 0}>
+            {#if jurisdictions.length === 0}
+              <option value="">No jurisdictions</option>
+            {:else}
+              {#each jurisdictions as j}
+                <option value={j.name}>{j.name}</option>
+              {/each}
+            {/if}
+          </select>
+        </div>
+      {/if}
+      <div class="token-selector">
+        <select bind:value={selectedTokenIdText} disabled={tokenOptions.length === 0}>
+          {#if tokenOptions.length === 0}
+            <option value="">No tokens</option>
           {:else}
-            {#each jurisdictions as j}
-              <option value={j.name}>{j.name}</option>
+            {#each tokenOptions as token}
+              <option value={token.tokenId}>{token.symbol} · {token.tokenId}</option>
             {/each}
           {/if}
         </select>
       </div>
-    {/if}
+    </div>
     <div class="meta">
       {#if selectedJurisdictionData}
         <span class="block-badge" title="Block Height">
@@ -456,7 +469,7 @@
   <!-- Tabs -->
   <div class="tabs">
     <button class="tab" class:active={activeTab === 'balances'} onclick={() => activeTab = 'balances'}>
-      💰 Balances ({reserves.length + collaterals.length + mempool.length})
+      💰 Balances ({filteredReserves.length + filteredCollaterals.length + mempool.length})
     </button>
     <button class="tab" class:active={activeTab === 'overview'} onclick={() => activeTab = 'overview'}>
       Overview
@@ -578,14 +591,14 @@
       <!-- Reserves Section (R2C: Reserve-to-Collateral) -->
       <div class="section">
         <div class="section-header">
-          <span class="section-title">Reserves (R2C source)</span>
-          <span class="count">{reserves.length}</span>
+          <span class="section-title">Reserves (R2C source){selectedTokenMeta ? ` · ${selectedTokenMeta.symbol}` : ''}</span>
+          <span class="count">{filteredReserves.length}</span>
         </div>
-        {#if reserves.length === 0}
+        {#if filteredReserves.length === 0}
           <div class="empty">No reserves</div>
         {:else}
           <div class="storage-table">
-            {#each reserves as r}
+            {#each filteredReserves as r}
               <div
                 class="storage-row clickable"
                 onclick={() => handleEntityClick(r.entityId)}
@@ -594,8 +607,8 @@
                 tabindex="0"
               >
                 <span class="entity-label">{r.name}</span>
-                <span class="key">[{formatEntityId(r.entityId)}][{r.tokenId}]</span>
-                <span class="value">{formatBalance(r.amount)}</span>
+                <span class="key">[{formatEntityId(r.entityId)}][{getTokenSymbol(r.tokenId)}]</span>
+                <span class="value">{formatTokenAmountFor(r.amount, r.tokenId)}</span>
               </div>
             {/each}
           </div>
@@ -605,10 +618,10 @@
       <!-- Collaterals Section (C2R: Collateral-to-Reserve) -->
       <div class="section">
         <div class="section-header">
-          <span class="section-title">Collaterals (C2R source)</span>
-          <span class="count">{collaterals.length}</span>
+          <span class="section-title">Collaterals (C2R source){selectedTokenMeta ? ` · ${selectedTokenMeta.symbol}` : ''}</span>
+          <span class="count">{filteredCollaterals.length}</span>
         </div>
-        {#if collaterals.length === 0}
+        {#if filteredCollaterals.length === 0}
           <div class="empty">No collaterals</div>
         {:else}
           <table class="accounts-table">
@@ -621,7 +634,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each collaterals as c}
+              {#each filteredCollaterals as c}
                 {@const parts = c.channelKey.split('-')}
                 {@const leftId = parts[0] || '??'}
                 {@const rightId = parts[1] || '??'}
@@ -635,11 +648,54 @@
                     <span class="sep">↔</span>
                     <span class="entity-right">{rightName}</span>
                   </td>
-                  <td class="token-cell">USDC</td>
-                  <td class="value-cell right">{formatBalance(c.collateral)}</td>
+                  <td class="token-cell">{getTokenSymbol(c.tokenId)}</td>
+                  <td class="value-cell right">{formatTokenAmountFor(c.collateral, c.tokenId)}</td>
                   <td class="value-cell right" class:positive={c.ondelta > 0n} class:negative={c.ondelta < 0n}>
-                    {c.ondelta >= 0n ? '+' : ''}{formatBalance(c.ondelta)}
+                    {c.ondelta > 0n ? '+' : ''}{formatTokenAmountFor(c.ondelta, c.tokenId)}
                   </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      </div>
+
+      <!-- External balances (BrowserVM ERC20) -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">External Balances{selectedTokenMeta ? ` · ${selectedTokenMeta.symbol}` : ''}</span>
+          <span class="count">{externalBalances.length}</span>
+        </div>
+        {#if !isLive}
+          <div class="empty">External balances are available in live mode only</div>
+        {:else if !selectedTokenMeta}
+          <div class="empty">Select a token to view external balances</div>
+        {:else if !selectedTokenMeta.address}
+          <div class="empty">No external token mapping for this token</div>
+        {:else if signerRefs.length === 0}
+          <div class="empty">No signers available</div>
+        {:else if externalBalancesLoading}
+          <div class="empty">Loading external balances…</div>
+        {:else if externalBalancesError}
+          <div class="empty error">{externalBalancesError}</div>
+        {:else if externalBalances.length === 0}
+          <div class="empty">No external balances</div>
+        {:else}
+          <table class="accounts-table external-balances-table">
+            <thead>
+              <tr>
+                <th>Signer</th>
+                <th>Address</th>
+                <th class="right">Balance</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each externalBalances as entry}
+                {@const tokenId = selectedTokenMeta?.tokenId ?? 0}
+                <tr>
+                  <td class="signer-cell">{entry.label}</td>
+                  <td class="mono" title={entry.address}>{formatEntityId(entry.address)}</td>
+                  <td class="value-cell right">{formatTokenAmountFor(entry.balance, tokenId)}</td>
                 </tr>
               {/each}
             </tbody>
@@ -688,11 +744,22 @@
     color: #7ee787;
   }
 
+  .selectors {
+    flex: 1;
+    display: flex;
+    gap: 8px;
+  }
+
   .j-selector {
     flex: 1;
   }
 
-  .j-selector select {
+  .token-selector {
+    flex: 0 0 140px;
+  }
+
+  .j-selector select,
+  .token-selector select {
     width: 100%;
     padding: 4px 8px;
     background: #21262d;
@@ -703,11 +770,13 @@
     cursor: pointer;
   }
 
-  .j-selector select:hover {
+  .j-selector select:hover,
+  .token-selector select:hover {
     border-color: #58a6ff;
   }
 
-  .j-selector select:focus {
+  .j-selector select:focus,
+  .token-selector select:focus {
     outline: none;
     border-color: #58a6ff;
     box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.2);
@@ -794,6 +863,11 @@
     color: #484f58;
     font-size: 10px;
     font-style: italic;
+  }
+
+  .empty.error {
+    color: #f85149;
+    font-style: normal;
   }
 
   .info-grid {
@@ -1044,6 +1118,11 @@
   .token-cell {
     color: #7ee787;
     font-size: 9px;
+  }
+
+  .signer-cell {
+    color: #c9d1d9;
+    font-weight: 600;
   }
 
   .value-cell {
