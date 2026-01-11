@@ -71,7 +71,7 @@ RCPAN (xln) superset invariant:
 
 xln can mimic both: ignore collateral functionality and it works like banking with enforceable proofs; ignore credit lines and it works like Lightning/full-reserve payment-channel networks. 
 
-Using both is where the real synergy emerges.
+Using both is where the real synergy emerges. RCPAN is literally how banks already think about credit, just formalized.
 
 Practical consequences: no inbound liquidity wall and no unbounded hub risk—losses are link-capped; throughput scales with links, not global broadcasts.
 
