@@ -514,14 +514,8 @@ function createBarCylinder(
 
   const mesh = new THREE.Mesh(geometry, material);
 
-  // Add pulsing animation if needed
-  if (shouldGlow && bilateralState && bilateralState.pulseSpeed > 0) {
-    mesh.userData['pulse'] = {
-      speed: bilateralState.pulseSpeed,
-      baseIntensity: bilateralState.glowIntensity,
-      startTime: Date.now()
-    };
-  }
+  // Pulsing animation removed - static glow conveys state, no animation needed
+  // bilateralState glow colors still used (yellow/blue/red = consensus state)
 
   return mesh;
 }
