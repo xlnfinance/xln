@@ -332,7 +332,14 @@ let vrHammer: VRHammer | null = null;
   // Active J-Machine - derived from activeJurisdictionName (handles time-travel)
   $: jMachine = activeJurisdictionName ? jMachines.get(activeJurisdictionName) || null : null;
 
-  let jMachineTxBoxes: (THREE.Group | THREE.Mesh)[] = []; // Yellow tx cubes inside J-Machine
+  let jMachineTxBoxes: (THREE.Group | THREE.Mesh)[] = []; // Yellow tx cubes inside J-Machine (current mempool)
+  let jBlockHistory: Array<{
+    blockNumber: bigint;
+    container: THREE.Group;
+    txCubes: THREE.Object3D[];
+    prevHashLine: THREE.Line | null;
+    yOffset: number;
+  }> = []; // Last 5 committed blocks stacked above J-machine
   let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) problem)
   let broadcastEnabled = true;
   let broadcastStyle: 'raycast' | 'wave' | 'particles' = 'raycast';
@@ -809,38 +816,221 @@ let vrHammer: VRHammer | null = null;
         jMachineTxBoxes.push(txCube);
       }
 
-      // Remove cubes if mempool shrunk (broadcast happened)
-      const broadcastCount = jMachineTxBoxes.length - mempoolSize;
-      while (jMachineTxBoxes.length > mempoolSize) {
-        const txGroup = jMachineTxBoxes.pop();
-        if (txGroup && activeJMachine) {
-          activeJMachine.remove(txGroup);
-          // Dispose all children (cube mesh and label sprite)
-          txGroup.traverse((child) => {
-            if ((child as THREE.Mesh).geometry) {
-              (child as THREE.Mesh).geometry.dispose();
-            }
-            if ((child as THREE.Mesh).material) {
-              const mat = (child as THREE.Mesh).material;
-              if (Array.isArray(mat)) {
-                mat.forEach(m => m.dispose());
-              } else {
-                (mat as THREE.Material).dispose();
+      // Blockchain visualization: When mempool clears (broadcast), convert to committed block
+      if (prevMempoolSize > 0 && mempoolSize === 0 && jMachineTxBoxes.length > 0) {
+        const blockNumber = BigInt(activeJurisdiction.jMachine.jHeight || 0);
+        console.log(`[Graph3D] 📦 J-Block #${blockNumber} committed: ${jMachineTxBoxes.length} txs → blockchain`);
+
+        // Create committed block container
+        const blockContainer = new THREE.Group();
+        blockContainer.userData['blockNumber'] = blockNumber;
+
+        // Move current TX cubes from J-machine to block container
+        const committedCubes = [...jMachineTxBoxes];
+        committedCubes.forEach(cube => {
+          activeJMachine.remove(cube);
+          blockContainer.add(cube);
+        });
+
+        // Stack blocks: Move all previous blocks upward
+        const blockSpacing = 15; // Vertical spacing between blocks
+        jBlockHistory.forEach((block, idx) => {
+          block.yOffset += blockSpacing;
+          block.container.position.y = activeJMachine.position.y + block.yOffset;
+
+          // Update prevHash line endpoints (line must follow block positions)
+          if (block.prevHashLine && idx > 0) {
+            const prevBlock = jBlockHistory[idx - 1];
+            if (prevBlock) {
+              const positions = (block.prevHashLine.geometry as THREE.BufferGeometry).attributes['position'];
+              if (positions) {
+                positions.setXYZ(0, block.container.position.x, block.container.position.y, block.container.position.z);
+                positions.setXYZ(1, prevBlock.container.position.x, prevBlock.container.position.y, prevBlock.container.position.z);
+                positions.needsUpdate = true;
               }
             }
-          });
-        }
-      }
+          }
 
-      // Broadcast ripple effect when mempool cleared (prev > 0 AND current === 0)
-      // Works in ANY frame (live or time-travel) - shows J-Block finalization
-      if (prevMempoolSize > 0 && mempoolSize === 0) {
+          // Fade older blocks (opacity decreases after 5 blocks)
+          const age = Number(BigInt(blockNumber) - BigInt(block.blockNumber));
+          const opacity = Math.max(0.2, 1.0 - (age - 5) * 0.15); // Fade after block 5
+          block.container.traverse((child: any) => {
+            if (child.material) {
+              child.material.opacity = opacity;
+              child.material.transparent = true;
+            }
+          });
+          // Fade prevHash line too
+          if (block.prevHashLine && block.prevHashLine.material) {
+            (block.prevHashLine.material as THREE.LineBasicMaterial).opacity = opacity * 0.6;
+          }
+        });
+
+        // Position new block right above J-machine
+        const newYOffset = blockSpacing;
+        blockContainer.position.copy(activeJMachine.position);
+        blockContainer.position.y += newYOffset;
+        scene.add(blockContainer);
+
+        // Draw prevHash line to previous block (cyan line)
+        let prevHashLine: THREE.Line | null = null;
+        if (jBlockHistory.length > 0) {
+          const prevBlock = jBlockHistory[jBlockHistory.length - 1];
+          if (prevBlock) {
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+              blockContainer.position.clone(),
+              prevBlock.container.position.clone()
+            ]);
+            const lineMaterial = new THREE.LineBasicMaterial({
+              color: 0x00ffff, // Cyan prevHash reference
+              transparent: true,
+              opacity: 0.6,
+              linewidth: 1
+            });
+            prevHashLine = new THREE.Line(lineGeometry, lineMaterial);
+            scene.add(prevHashLine);
+          }
+        }
+
+        // Add to history
+        jBlockHistory.push({
+          blockNumber,
+          container: blockContainer,
+          txCubes: committedCubes,
+          prevHashLine,
+          yOffset: newYOffset
+        });
+
+        // Keep only last 5 blocks, dispose older ones
+        while (jBlockHistory.length > 5) {
+          const oldBlock = jBlockHistory.shift();
+          if (oldBlock) {
+            scene.remove(oldBlock.container);
+            if (oldBlock.prevHashLine) scene.remove(oldBlock.prevHashLine);
+            oldBlock.container.traverse((child: any) => {
+              if (child.geometry) child.geometry.dispose();
+              if (child.material) {
+                const mat = child.material;
+                if (Array.isArray(mat)) {
+                  mat.forEach(m => m.dispose());
+                } else {
+                  mat.dispose();
+                }
+              }
+            });
+            if (oldBlock.prevHashLine) {
+              oldBlock.prevHashLine.geometry.dispose();
+              (oldBlock.prevHashLine.material as THREE.Material).dispose();
+            }
+          }
+        }
+
+        // Clear current mempool array (cubes moved to block)
+        jMachineTxBoxes = [];
+
+        // Broadcast ripple effect
         createJBlockBroadcastRipple(activeJMachine.position);
-        console.log(`[Graph3D] 📡 J-Block broadcast: ${prevMempoolSize} txs finalized (frame ${$isolatedTimeIndex})`);
+      } else {
+        // Normal mempool shrink (not full broadcast) - dispose removed cubes
+        while (jMachineTxBoxes.length > mempoolSize) {
+          const txGroup = jMachineTxBoxes.pop();
+          if (txGroup && activeJMachine) {
+            activeJMachine.remove(txGroup);
+            txGroup.traverse((child) => {
+              if ((child as THREE.Mesh).geometry) {
+                (child as THREE.Mesh).geometry.dispose();
+              }
+              if ((child as THREE.Mesh).material) {
+                const mat = (child as THREE.Mesh).material;
+                if (Array.isArray(mat)) {
+                  mat.forEach(m => m.dispose());
+                } else {
+                  (mat as THREE.Material).dispose();
+                }
+              }
+            });
+          }
+        }
       }
 
       if (currentVisualCount !== mempoolSize) {
         console.log(`[Graph3D] 📦 J-Mempool synced: ${mempoolSize} pending txs (frame ${$isolatedTimeIndex})`);
+      }
+
+      // TIME-TRAVEL: Render historical blocks from current frame backward
+      // Show last 5 committed blocks stacked above J-machine
+      const currentJHeight = activeJurisdiction.jMachine.jHeight || 0;
+      if (typeof currentJHeight === 'bigint' || typeof currentJHeight === 'number') {
+        const currentHeight = Number(currentJHeight);
+        const startBlock = Math.max(0, currentHeight - 5);
+
+        // Only rebuild block history if j-height changed
+        const expectedHistoryBlocks = currentHeight - startBlock;
+        if (jBlockHistory.length !== expectedHistoryBlocks ||
+            (jBlockHistory[0]?.blockNumber && Number(jBlockHistory[0].blockNumber) !== startBlock)) {
+
+          // Clear old block history
+          jBlockHistory.forEach(block => {
+            scene.remove(block.container);
+            if (block.prevHashLine) scene.remove(block.prevHashLine);
+          });
+          jBlockHistory = [];
+
+          // Render blocks from startBlock to currentHeight-1 (current mempool is at currentHeight)
+          for (let i = startBlock; i < currentHeight; i++) {
+            const blockNum = BigInt(i);
+            const age = currentHeight - i;
+            const yOffset = (currentHeight - i) * 15; // Stack upward
+
+            // Create empty block container (no TX cubes in time-travel mode)
+            const blockContainer = new THREE.Group();
+            blockContainer.userData['blockNumber'] = blockNum;
+            blockContainer.position.copy(activeJMachine.position);
+            blockContainer.position.y += yOffset;
+
+            // Add small cube to represent block
+            const blockCubeGeo = new THREE.BoxGeometry(8, 8, 8);
+            const opacity = Math.max(0.2, 1.0 - (age - 1) * 0.15);
+            const blockCubeMat = new THREE.MeshPhongMaterial({
+              color: 0x4488aa,
+              transparent: true,
+              opacity: opacity * 0.1,
+              emissive: 0x224455,
+              emissiveIntensity: 0.3,
+              wireframe: true
+            });
+            const blockCube = new THREE.Mesh(blockCubeGeo, blockCubeMat);
+            blockContainer.add(blockCube);
+            scene.add(blockContainer);
+
+            // Draw prevHash line to previous block
+            let prevHashLine: THREE.Line | null = null;
+            if (i > startBlock) {
+              const prevBlock = jBlockHistory[jBlockHistory.length - 1];
+              if (prevBlock) {
+                const lineGeo = new THREE.BufferGeometry().setFromPoints([
+                  blockContainer.position.clone(),
+                  prevBlock.container.position.clone()
+                ]);
+                const lineMat = new THREE.LineBasicMaterial({
+                  color: 0x00ffff,
+                  transparent: true,
+                  opacity: opacity * 0.4
+                });
+                prevHashLine = new THREE.Line(lineGeo, lineMat);
+                scene.add(prevHashLine);
+              }
+            }
+
+            jBlockHistory.push({
+              blockNumber: blockNum,
+              container: blockContainer,
+              txCubes: [],
+              prevHashLine,
+              yOffset
+            });
+          }
+        }
       }
     }
   }
@@ -2875,6 +3065,28 @@ let vrHammer: VRHammer | null = null;
     });
     connections = [];
 
+    // Remove J-block history (blockchain visualization)
+    jBlockHistory.forEach(block => {
+      scene.remove(block.container);
+      if (block.prevHashLine) scene.remove(block.prevHashLine);
+      block.container.traverse((child: any) => {
+        if (child.geometry) child.geometry.dispose();
+        if (child.material) {
+          const mat = child.material;
+          if (Array.isArray(mat)) {
+            mat.forEach(m => m.dispose());
+          } else {
+            mat.dispose();
+          }
+        }
+      });
+      if (block.prevHashLine) {
+        block.prevHashLine.geometry.dispose();
+        (block.prevHashLine.material as THREE.Material).dispose();
+      }
+    });
+    jBlockHistory = [];
+
     // Remove particles - dispose materials
     particles.forEach(particle => {
       scene.remove(particle.mesh);
@@ -3985,24 +4197,29 @@ let vrHammer: VRHammer | null = null;
     const leftState = XLN?.classifyBilateralState?.(account, 0, fromIsLeft);
     const rightState = XLN?.classifyBilateralState?.(account, 0, !fromIsLeft);
 
-    // Split mempool by index (simple approach: odd=left, even=right)
+    // Get mempool (waiting) and pendingFrame (sent) transactions
     const mempool = account.mempool || [];
-    const leftTxs = mempool.filter((_: any, i: number) => i % 2 === 0);
-    const rightTxs = mempool.filter((_: any, i: number) => i % 2 === 1);
+    const pendingTxs = account.pendingFrame?.accountTxs || [];
 
-    // Create boxes with sync state colors
+    // Box border color based on sync state
     const leftBoxColor = leftState?.state === 'committed' ? 0x00ff88 : 0xff4444;
     const rightBoxColor = rightState?.state === 'committed' ? 0x00ff88 : 0xff4444;
 
-    const leftBox = createMempoolBox(leftBoxColor, leftTxs, normalizedDirection);
-    const rightBox = createMempoolBox(rightBoxColor, rightTxs, normalizedDirection);
+    // Split by side (simple: odd=left, even=right)
+    const leftMempoolTxs = mempool.filter((_: any, i: number) => i % 2 === 0);
+    const rightMempoolTxs = mempool.filter((_: any, i: number) => i % 2 === 1);
+    const leftPendingTxs = pendingTxs.filter((_: any, i: number) => i % 2 === 0);
+    const rightPendingTxs = pendingTxs.filter((_: any, i: number) => i % 2 === 1);
+
+    const leftBox = createMempoolBox(leftBoxColor, leftMempoolTxs, leftPendingTxs, normalizedDirection);
+    const rightBox = createMempoolBox(rightBoxColor, rightMempoolTxs, rightPendingTxs, normalizedDirection);
 
     // Position boxes EXACTLY where bars start (matches AccountBarRenderer positioning)
     const fromEntitySize = getEntitySizeForToken(fromEntity.id, 1);
     const toEntitySize = getEntitySizeForToken(toEntity.id, 1);
     const barRadius = 0.08 * 2.5; // 0.2
     const safeGap = 0.2;
-    const boxDepth = 0.3;
+    const boxDepth = 0.25; // Match reduced box depth above
 
     // Calculate bar start positions (EXACT same formula as AccountBarRenderer:338-339)
     const fromBarStartPos = fromEntity.position.clone().add(
@@ -4027,23 +4244,28 @@ let vrHammer: VRHammer | null = null;
 
   /**
    * Create single mempool box with TX cubes inside
-   * Aligned with account bar direction (rotated to face connection)
+   * Shows bilateral consensus flow: GRAY (mempool waiting) → BLUE (sent/pending) → Bars (committed)
    */
-  function createMempoolBox(color: number, txs: any[], direction: THREE.Vector3): THREE.Group {
+  function createMempoolBox(
+    borderColor: number,
+    mempoolTxs: any[],
+    pendingTxs: any[],
+    direction: THREE.Vector3
+  ): THREE.Group {
     const group = new THREE.Group();
 
     // Minimal box dimensions - fit in gap between entity and bars
-    const width = 1.2;   // Perpendicular to connection
-    const height = 1.2;  // Vertical
-    const depth = 0.3;   // Very thin along connection (fits in gap)
+    const width = 0.8;   // Smaller to avoid overlap
+    const height = 0.8;
+    const depth = 0.25;  // Very thin
 
-    // Container box (subtle, integrated)
+    // Container box (border shows sync state: green=synced, red=desynced)
     const geometry = new THREE.BoxGeometry(width, height, depth);
     const material = new THREE.MeshPhongMaterial({
-      color,
-      emissive: new THREE.Color(color).multiplyScalar(0.3),
+      color: borderColor,
+      emissive: new THREE.Color(borderColor).multiplyScalar(0.3),
       transparent: true,
-      opacity: 0.2, // More transparent for subtlety
+      opacity: 0.2,
       side: THREE.DoubleSide,
       shininess: 60,
       depthWrite: false
@@ -4051,10 +4273,10 @@ let vrHammer: VRHammer | null = null;
     const cube = new THREE.Mesh(geometry, material);
     group.add(cube);
 
-    // Wireframe edges (thinner, more subtle)
+    // Wireframe edges
     const edgesGeometry = new THREE.EdgesGeometry(geometry);
     const edgesMaterial = new THREE.LineBasicMaterial({
-      color: color,
+      color: borderColor,
       linewidth: 1,
       transparent: true,
       opacity: 0.6
@@ -4062,15 +4284,36 @@ let vrHammer: VRHammer | null = null;
     const edges = new THREE.LineSegments(edgesGeometry, edgesMaterial);
     group.add(edges);
 
-    // TX cubes (minimal indicators, 2x2 grid on front face)
-    const txSize = 0.25;  // Tiny dots
-    const spacing = 0.5;  // Tight grid (fits in 1.2 width)
-    const gridSize = 2;
+    // TX cubes layout: show both mempool (gray) and pending (blue)
+    const txSize = 0.18;  // Tiny to fit in 0.8 width box
+    const spacing = 0.35; // Tight spacing
 
-    txs.slice(0, 4).forEach((tx, i) => {
+    // GRAY cubes (mempool - waiting to be sent)
+    // Position toward back (toward entity)
+    mempoolTxs.slice(0, 2).forEach((tx, i) => {
       const txGeometry = new THREE.BoxGeometry(txSize, txSize, txSize);
       const txMaterial = new THREE.MeshLambertMaterial({
-        color: 0x00ccff,
+        color: 0x888888,  // Gray - waiting
+        transparent: true,
+        opacity: 0.7,
+        emissive: 0x444444,
+        emissiveIntensity: 0.3
+      });
+      const txCube = new THREE.Mesh(txGeometry, txMaterial);
+
+      // Position in back row (Z = -depth/4)
+      const xOffset = i === 0 ? -spacing/2 : spacing/2;
+      txCube.position.set(xOffset, 0, -depth/4);
+
+      group.add(txCube);
+    });
+
+    // BLUE cubes (pendingFrame - sent, waiting for ACK)
+    // Position toward front (toward bars/committed state)
+    pendingTxs.slice(0, 2).forEach((tx, i) => {
+      const txGeometry = new THREE.BoxGeometry(txSize, txSize, txSize);
+      const txMaterial = new THREE.MeshLambertMaterial({
+        color: 0x00ccff,  // Blue - sent
         transparent: true,
         opacity: 0.95,
         emissive: 0x0088cc,
@@ -4078,16 +4321,9 @@ let vrHammer: VRHammer | null = null;
       });
       const txCube = new THREE.Mesh(txGeometry, txMaterial);
 
-      // Position in 2x2 grid on XY plane (front of box)
-      const xIndex = i % gridSize;
-      const yIndex = Math.floor(i / gridSize);
-      const halfGrid = (gridSize - 1) * spacing / 2;
-
-      txCube.position.set(
-        -halfGrid + xIndex * spacing,
-        -halfGrid + yIndex * spacing,
-        depth/2 + 0.2  // Just slightly in front
-      );
+      // Position in front row (Z = +depth/4, closer to bars)
+      const xOffset = i === 0 ? -spacing/2 : spacing/2;
+      txCube.position.set(xOffset, 0, depth/4);
 
       group.add(txCube);
     });
@@ -4929,10 +5165,14 @@ let vrHammer: VRHammer | null = null;
         const hasIncoming = currentFrameActivity.incomingFlows.has(entityId);
         const hasOutgoing = currentFrameActivity.outgoingFlows.has(entityId);
 
-        // NO BOUNCING - just use base size from reserves (stable, deterministic)
-        // Gentle glow indicates activity, not size oscillation
+        // Smooth size transitions - lerp toward target for visceral money flow
+        const targetScale = baseSize;
+        const currentScale = entity.mesh.scale.x;
+        const lerpSpeed = 0.1; // Smooth but responsive
+        const newScale = currentScale + (targetScale - currentScale) * lerpSpeed;
+        entity.mesh.scale.setScalar(newScale);
+
         const pulseIntensity = Math.max(0, 1 - timeSinceActivity / 2000);
-        entity.mesh.scale.setScalar(baseSize);
 
         // Color-coded glow based on direction
         let glowR = 0, glowG = 0, glowB = 0;
@@ -4993,8 +5233,12 @@ let vrHammer: VRHammer | null = null;
         entity.activityRing.scale.setScalar(1);
         ringMaterial.opacity = 0.6 * pulseIntensity;
       } else {
-        // Inactive: use base size from reserves (no pulse)
-        entity.mesh.scale.setScalar(baseSize);
+        // Inactive: smooth transition to base size (visceral money flow)
+        const targetScale = baseSize;
+        const currentScale = entity.mesh.scale.x;
+        const lerpSpeed = 0.1;
+        const newScale = currentScale + (targetScale - currentScale) * lerpSpeed;
+        entity.mesh.scale.setScalar(newScale);
 
         // Color based on reserves: WHITE/LIGHT if $0, GREEN if has funds
         // Query actual reserves instead of relying on size threshold
@@ -6547,10 +6791,11 @@ let vrHammer: VRHammer | null = null;
   ]);
 
   // AHB Demo entity names (entity IDs 1, 2, 3)
+  // AHB entity names: EntityProvider reserves #1 for Foundation, so AHB uses #2, #3, #4
   const AHB_NAMES: Map<string, string> = new Map([
-    ['1', 'Alice'],
-    ['2', 'Hub'],
-    ['3', 'Bob'],
+    ['2', 'Alice'],
+    ['3', 'Hub'],
+    ['4', 'Bob'],
   ]);
 
   /**

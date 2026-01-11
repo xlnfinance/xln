@@ -319,7 +319,7 @@ export async function deriveEthereumAddress(
   passphrase: string = ''
 ): Promise<string> {
   const { HDNodeWallet } = await import('ethers');
-  const wallet = HDNodeWallet.fromPhrase(mnemonic, passphrase).derivePath("m/44'/60'/0'/0/0");
+  const wallet = HDNodeWallet.fromPhrase(mnemonic, passphrase, "m/44'/60'/0'/0/0");
   return wallet.address;
 }
 
