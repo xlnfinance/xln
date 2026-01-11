@@ -1,5 +1,5 @@
 # XLN Context - Core System Files (~182k tokens)
-# Generated: 2026-01-11 21:56:47 | Git: 38fa7ee
+# Generated: 2026-01-11 22:01:57 | Git: c1b21df
 
 ## THE CORE INNOVATION: RCPAN Invariant
 
