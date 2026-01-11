@@ -17,33 +17,45 @@ const CORE_FILES = {
   ],
   runtime: [
     // Core data structures and implementation
-    'types.ts',              // All TypeScript interfaces
+    'types.ts',              // All TypeScript interfaces (CRITICAL: AccountMachine, EntityState, Delta)
     'ids.ts',                // Identity system: EntityId, SignerId, JId, ReplicaKey
 
     // Main coordinators (how the system works)
     'runtime.ts',            // Main coordinator, 100ms ticks, R→E→A routing
     'entity-consensus.ts',   // BFT consensus (ADD_TX → PROPOSE → SIGN → COMMIT)
     'account-consensus.ts',  // Bilateral account consensus between entities
+    'account-consensus-state.ts', // Bilateral state machine (classifyBilateralState)
     'j-batch.ts',            // J-batch system: E-machine accumulates → jBroadcast → J-machine
+
+    // Financial accounting (CRITICAL for bug analysis)
+    'account-utils.ts',      // deriveDelta() RCPAN calculation, TOKEN_REGISTRY
+    'serialization-utils.ts', // BigInt serialization (common bug source)
 
     // Transaction processing (how txs are applied)
     'entity-tx/index.ts',    // Entity transaction types
     'entity-tx/apply.ts',    // Entity transaction dispatcher
     'entity-tx/validation.ts', // Transaction validation
-    'entity-tx/financial.ts', // Financial accounting (addToReserves, etc)
+    'entity-tx/financial.ts', // Financial accounting (addToReserves, subtractFromReserves)
     'entity-tx/proposals.ts', // Proposal logic
     'entity-tx/j-events.ts',  // Jurisdiction event handling
+    'entity-tx/handlers/account.ts',   // Account operations (openAccount, extendCredit)
+    'entity-tx/handlers/financial.ts', // Financial operations (deposit, withdraw)
+    'entity-tx/handlers/payments.ts',  // Payment routing (directPayment)
 
     'account-tx/index.ts',   // Account transaction types
     'account-tx/apply.ts',   // Account transaction dispatcher
+    'account-tx/handlers/add-delta.ts', // Delta addition (payment processing)
 
     // Routing (multi-hop payments)
     'routing/graph.ts',      // Network graph representation
     'routing/pathfinding.ts', // Dijkstra routing algorithm
 
+    // Cryptography (signature verification bugs)
+    'account-crypto.ts',     // Account frame signing/verification (CRITICAL)
+
     // Utilities (support functions)
     'state-helpers.ts',      // Pure state management functions
-    'snapshot-coder.ts',     // Deterministic state serialization
+    'snapshot-coder.ts',     // Deterministic state serialization (RLP encoding)
     'evm.ts',                // Blockchain integration layer
   ],
   docs: [
@@ -227,7 +239,11 @@ xln/
     runtime.ts                   ${fileSizes['runtime/runtime.ts'] || '?'} lines - Main coordinator, 100ms ticks, R->E->A routing
     entity-consensus.ts          ${fileSizes['runtime/entity-consensus.ts'] || '?'} lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
     account-consensus.ts         ${fileSizes['runtime/account-consensus.ts'] || '?'} lines - Bilateral consensus, left/right perspective
+    account-consensus-state.ts   ${fileSizes['runtime/account-consensus-state.ts'] || '?'} lines - Bilateral state machine
     j-batch.ts                   ${fileSizes['runtime/j-batch.ts'] || '?'} lines - J-batch: E-machine accumulates → jBroadcast → J-machine
+    account-utils.ts             ${fileSizes['runtime/account-utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
+    serialization-utils.ts       ${fileSizes['runtime/serialization-utils.ts'] || '?'} lines - BigInt serialization
+    account-crypto.ts            ${fileSizes['runtime/account-crypto.ts'] || '?'} lines - Signature verification
 
     entity-tx/
       index.ts                   ${fileSizes['runtime/entity-tx/index.ts'] || '?'} lines - Entity transaction types
@@ -236,10 +252,14 @@ xln/
       financial.ts               ${fileSizes['runtime/entity-tx/financial.ts'] || '?'} lines - Financial accounting
       proposals.ts               ${fileSizes['runtime/entity-tx/proposals.ts'] || '?'} lines - Proposal logic
       j-events.ts                ${fileSizes['runtime/entity-tx/j-events.ts'] || '?'} lines - Jurisdiction events
+      handlers/account.ts        ${fileSizes['runtime/entity-tx/handlers/account.ts'] || '?'} lines - Account operations
+      handlers/financial.ts      ${fileSizes['runtime/entity-tx/handlers/financial.ts'] || '?'} lines - Financial operations
+      handlers/payments.ts       ${fileSizes['runtime/entity-tx/handlers/payments.ts'] || '?'} lines - Payment routing
 
     account-tx/
       index.ts                   ${fileSizes['runtime/account-tx/index.ts'] || '?'} lines - Account transaction types
       apply.ts                   ${fileSizes['runtime/account-tx/apply.ts'] || '?'} lines - Account tx dispatcher
+      handlers/add-delta.ts      ${fileSizes['runtime/account-tx/handlers/add-delta.ts'] || '?'} lines - Delta addition
 
     routing/
       graph.ts                   ${fileSizes['runtime/routing/graph.ts'] || '?'} lines - Network graph

@@ -190,7 +190,7 @@
     box-shadow: var(--shadow-lg, 0 8px 32px rgba(0, 0, 0, 0.4));
     max-height: 60vh;
     overflow-y: auto;
-    animation: dropdown-fade 0.15s ease-out;
+    animation: dropdown-fade 0.05s ease-out;
     backdrop-filter: blur(var(--blur-sm, 16px));
   }
 
