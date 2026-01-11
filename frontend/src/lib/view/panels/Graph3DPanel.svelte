@@ -1039,7 +1039,7 @@ let vrHammer: VRHammer | null = null;
                 const lineMat = new THREE.LineBasicMaterial({
                   color: 0x00ffff,
                   transparent: true,
-                  opacity: opacity * 0.4
+                  opacity: 0.6
                 });
                 prevHashLine = new THREE.Line(lineGeo, lineMat);
                 scene.add(prevHashLine);
