@@ -75,6 +75,22 @@ export {
 import type { EntityId, SignerId, ReplicaKey } from './ids';
 import type { Env, Delta, DerivedDelta, EntityProfile, JurisdictionConfig, ConsensusConfig, RuntimeInput, EntityInput } from './types';
 
+export type BrowserVMTokenInfo = {
+  symbol: string;
+  name: string;
+  address: string;
+  decimals: number;
+  tokenId: number;
+};
+
+export type BrowserVMInstance = {
+  getTokenRegistry: () => BrowserVMTokenInfo[];
+  getTokenAddress: (symbol: string) => string | null;
+  getTokenId: (symbol: string) => number | null;
+  getErc20Balance: (tokenAddress: string, owner: string) => Promise<bigint>;
+  fundSignerWallet: (address: string, amount?: bigint) => Promise<void>;
+};
+
 /**
  * Entity display info returned by getEntityDisplayInfo
  */
@@ -192,7 +208,6 @@ export interface XLNModule {
   // Jurisdiction management
   getAvailableJurisdictions: () => Promise<JurisdictionConfig[]>;
   getJurisdictionByAddress: (address: string) => JurisdictionConfig | undefined;
-  getBrowserVMInstance: () => unknown;
 
   // Entity creation
   generateLazyEntityId: (validators: string[] | { name: string; weight: number }[], threshold: bigint) => string;
@@ -258,7 +273,7 @@ export interface XLNModule {
   registerNumberedEntityOnChain: (env: Env, entityId: string) => Promise<Env>;
   connectToEthereum: () => Promise<void>;
   setBrowserVMJurisdiction: (jId: string) => Promise<void>;
-  getBrowserVMInstance: () => unknown;
+  getBrowserVMInstance: () => BrowserVMInstance | null;
 
   // Demo utilities
   demoCompleteHanko: (env: Env) => Promise<Env>;

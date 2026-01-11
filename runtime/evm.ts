@@ -13,6 +13,7 @@ import type { ConsensusConfig, JurisdictionConfig } from './types';
 import { DEBUG, isBrowser } from './utils';
 import { logError } from './logger';
 import { BrowserVMEthersProvider } from './browservm-ethers-provider';
+import type { BrowserVMInstance } from './xln-api';
 
 // Global logger for UI-accessible error logging (set by frontend)
 declare global {
@@ -931,7 +932,7 @@ export const getJurisdictionByAddress = async (address: string): Promise<Jurisdi
 };
 
 /** Get BrowserVM instance (for demos that need direct BrowserVM access) */
-export const getBrowserVMInstance = (): any => {
+export const getBrowserVMInstance = (): BrowserVMInstance | null => {
   return BROWSER_VM_INSTANCE;
 };
 
