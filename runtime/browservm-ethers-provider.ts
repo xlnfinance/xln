@@ -7,6 +7,7 @@
  */
 
 import { ethers } from 'ethers';
+import { createAddressFromString } from '@ethereumjs/util';
 
 export class BrowserVMEthersProvider extends ethers.AbstractProvider {
   private browserVM: any;
@@ -24,33 +25,39 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
       case 'getBlockNumber':
         return 0; // BrowserVM doesn't track blocks
 
+      case 'getGasPrice':
+        return 1n;
+
+      case 'getPriorityFee':
+        return 1n;
+
       case 'getTransactionCount':
         // Get nonce for address
         const txCountAccount = await this.browserVM.vm.stateManager.getAccount(
-          ethers.getAddress(req.address)
+          createAddressFromString(ethers.getAddress(req.address))
         );
         return Number(txCountAccount?.nonce || 0n);
 
       case 'getBalance':
         // Return balance from VM state
         const account = await this.browserVM.vm.stateManager.getAccount(
-          ethers.getAddress(req.address)
+          createAddressFromString(ethers.getAddress(req.address))
         );
         return account?.balance || 0n;
 
       case 'getCode':
         // Get contract code from VM state
         const code = await this.browserVM.vm.stateManager.getCode(
-          ethers.getAddress(req.address)
+          createAddressFromString(ethers.getAddress(req.address))
         );
         return ethers.hexlify(code);
 
       case 'call':
         // Execute read-only call
         const result = await this.browserVM.vm.evm.runCall({
-          to: ethers.getAddress(req.transaction.to!),
+          to: createAddressFromString(ethers.getAddress(req.transaction.to!)),
           caller: req.transaction.from
-            ? ethers.getAddress(req.transaction.from)
+            ? createAddressFromString(ethers.getAddress(req.transaction.from))
             : this.browserVM.deployerAddress,
           data: ethers.getBytes(req.transaction.data || '0x'),
           gasLimit: req.transaction.gasLimit || 100000n,
@@ -64,12 +71,7 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
 
       case 'broadcastTransaction':
         // Execute state-changing transaction via browserVM
-        const tx = ethers.Transaction.from(req.signedTransaction);
-        return await this.browserVM.executeTx({
-          to: tx.to ?? undefined,
-          data: tx.data,
-          gasLimit: tx.gasLimit ? BigInt(tx.gasLimit) : undefined,
-        });
+        return await this.browserVM.executeSignedTx(req.signedTransaction);
 
       case 'getTransaction':
       case 'getTransactionReceipt':

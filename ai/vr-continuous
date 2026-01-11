@@ -83,16 +83,8 @@ if [ "$VERIFIED" = false ]; then
     exit 8
 fi
 
-ACTIVE_APP=$(osascript -e 'tell application "System Events" to get name of first process whose frontmost is true' 2>/dev/null)
-echo "Active app: $ACTIVE_APP" >> "$LOG"
-
-if [[ "$ACTIVE_APP" =~ (ghostty|iTerm|Terminal|Warp|Alacritty|kitty) ]]; then
-    osascript -e 'tell application "System Events" to keystroke "v" using command down' 2>/dev/null
-    echo "SUCCESS: ${MS}ms (terminal)" >> "$LOG"
-else
-    ESCAPED=$(printf "%s" "$TEXT" | sed 's/\\/\\\\/g; s/"/\\"/g')
-    osascript -e "tell application \"System Events\" to keystroke \"$ESCAPED\"" 2>> "$LOG"
-    echo "SUCCESS: ${MS}ms (GUI)" >> "$LOG"
-fi
+# Cmd+V paste - works everywhere, respects clipboard
+osascript -e 'tell application "System Events" to keystroke "v" using command down' 2>/dev/null
+echo "SUCCESS: ${MS}ms (Cmd+V)" >> "$LOG"
 
 echo "$MS"
