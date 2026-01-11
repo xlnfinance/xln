@@ -849,9 +849,12 @@ let vrHammer: VRHammer | null = null;
             }
           }
 
-          // Fade older blocks (opacity decreases after 5 blocks)
+          // Opacity tiers: First 3 solid, next 2 transparent
           const age = Number(BigInt(blockNumber) - BigInt(block.blockNumber));
-          const opacity = Math.max(0.2, 1.0 - (age - 5) * 0.15); // Fade after block 5
+          const opacity = age <= 3
+            ? 1.0 - (age - 1) * 0.05  // age 1→1.0, 2→0.95, 3→0.9 (solid)
+            : 0.5 - (age - 3) * 0.15; // age 4→0.35, 5→0.2 (transparent)
+
           block.container.traverse((child: any) => {
             if (child.material) {
               child.material.opacity = opacity;
@@ -986,16 +989,20 @@ let vrHammer: VRHammer | null = null;
             blockContainer.position.copy(activeJMachine.position);
             blockContainer.position.y += yOffset;
 
-            // Add small cube to represent block
+            // Add cube to represent block (with proper opacity tiers)
             const blockCubeGeo = new THREE.BoxGeometry(8, 8, 8);
-            const opacity = Math.max(0.2, 1.0 - (age - 1) * 0.15);
+            // Opacity tiers: First 3 solid, next 2 transparent
+            const opacity = age <= 3
+              ? 1.0 - (age - 1) * 0.05  // age 1→1.0, 2→0.95, 3→0.9 (solid)
+              : 0.5 - (age - 3) * 0.15; // age 4→0.35, 5→0.2 (transparent)
+
             const blockCubeMat = new THREE.MeshPhongMaterial({
               color: 0x4488aa,
               transparent: true,
-              opacity: opacity * 0.1,
+              opacity: opacity * 0.15, // Subtle background box (not full opacity)
               emissive: 0x224455,
-              emissiveIntensity: 0.3,
-              wireframe: true
+              emissiveIntensity: age <= 3 ? 0.5 : 0.2,
+              wireframe: age > 3 // Solid for recent, wireframe for old
             });
             const blockCube = new THREE.Mesh(blockCubeGeo, blockCubeMat);
             blockContainer.add(blockCube);
