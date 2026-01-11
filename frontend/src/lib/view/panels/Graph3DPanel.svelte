@@ -938,8 +938,7 @@ let vrHammer: VRHammer | null = null;
         // Clear current mempool array (cubes moved to block)
         jMachineTxBoxes = [];
 
-        // Broadcast ripple effect
-        createJBlockBroadcastRipple(activeJMachine.position);
+        // Broadcast ripple removed - instant state change instead
       } else {
         // Normal mempool shrink (not full broadcast) - dispose removed cubes
         while (jMachineTxBoxes.length > mempoolSize) {
@@ -1220,44 +1219,7 @@ let vrHammer: VRHammer | null = null;
 
   // Create J-block broadcast effect when mempool clears
   // Expanding wireframe sphere from J-Machine - radio wave to entire universe
-  function createJBlockBroadcastRipple(jMachinePos: THREE.Vector3) {
-    if (!scene) return;
-
-    const sphereGeometry = new THREE.SphereGeometry(1, 16, 16);
-    const sphereMaterial = new THREE.MeshBasicMaterial({
-      color: 0x44ffaa, // Cyan-green (J-Machine theme)
-      transparent: true,
-      opacity: 0.4,
-      wireframe: true
-    });
-    const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-    sphere.position.copy(jMachinePos);
-    scene.add(sphere);
-
-    // Speed-aware duration
-    const duration = 1500 / animationSpeed;
-    const startTime = performance.now();
-
-    function animateWave() {
-      const elapsed = performance.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-
-      // Expand sphere to cover universe
-      const scale = 1 + progress * 150;
-      sphere.scale.set(scale, scale, scale);
-      sphereMaterial.opacity = 0.4 * (1 - progress);
-
-      if (progress < 1) {
-        requestAnimationFrame(animateWave);
-      } else {
-        scene.remove(sphere);
-        sphereGeometry.dispose();
-        sphereMaterial.dispose();
-      }
-    }
-
-    animateWave();
-  }
+  // Broadcast ripple animation deleted - instant state change instead
 
   // ===== ADD TXS TO J-MACHINE (broadcast simulation) + R2R ANIMATION =====
   // CRITICAL: Watch HISTORY frames, not env.runtimeInput (which is cleared after processing)
