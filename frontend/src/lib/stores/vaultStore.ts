@@ -70,7 +70,7 @@ async function fundSignerWalletInBrowserVM(address: string): Promise<void> {
   try {
     const { getXLN } = await import('$lib/stores/xlnStore');
     const xln = await getXLN();
-    const browserVM = xln.getBrowserVMInstance?.();
+    const browserVM = xln.getBrowserVMInstance?.() as any;
     if (!browserVM?.fundSignerWallet) return;
     await browserVM.fundSignerWallet(address);
   } catch (err) {

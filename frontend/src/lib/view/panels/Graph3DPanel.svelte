@@ -966,45 +966,81 @@ let vrHammer: VRHammer | null = null;
         console.log(`[Graph3D] 📦 J-Mempool synced: ${mempoolSize} pending txs (frame ${$isolatedTimeIndex})`);
       }
 
-      // TIME-TRAVEL: Render historical blocks from current frame backward
-      // Show last 5 committed blocks stacked above J-machine
+      // TIME-TRAVEL: Reconstruct blockchain from runtime history (dumb pipe - just read state)
+      // Iterate backward to find block boundaries (jHeight changes)
       const currentJHeight = activeJurisdiction.jMachine.jHeight || 0;
-      if (typeof currentJHeight === 'bigint' || typeof currentJHeight === 'number') {
-        const currentHeight = Number(currentJHeight);
-        const startBlock = Math.max(0, currentHeight - 5);
+      const currentHeightNum = Number(currentJHeight);
+      const runtimeHistory = $isolatedHistory || [];
 
-        // Only rebuild block history if j-height changed
-        const expectedHistoryBlocks = currentHeight - startBlock;
-        if (jBlockHistory.length !== expectedHistoryBlocks ||
-            (jBlockHistory[0]?.blockNumber && Number(jBlockHistory[0].blockNumber) !== startBlock)) {
+      if (runtimeHistory.length > 0 && currentHeightNum > 0) {
+        // Find last 5 block boundaries by walking backward through history
+        const blockBoundaries: Array<{ blockNum: number; frameIdx: number; txs: any[] }> = [];
+        let lastSeenHeight = currentHeightNum;
 
-          // Clear old block history
+        for (let frameIdx = runtimeHistory.length - 1; frameIdx >= 0 && blockBoundaries.length < 5; frameIdx--) {
+          const frame = runtimeHistory[frameIdx];
+          const frameJReplica = frame?.jReplicas?.find((jr: any) => jr.name === activeJurisdiction.name);
+          const frameJHeight = Number(frameJReplica?.jHeight || 0);
+
+          // jHeight decreased = we found a block boundary
+          if (frameJHeight < lastSeenHeight) {
+            // TXs for block lastSeenHeight are in the frame RIGHT BEFORE jHeight++
+            // That frame is frameIdx (current frame where jHeight is lower)
+            const txs = frameJReplica?.mempool || [];
+
+            blockBoundaries.push({
+              blockNum: lastSeenHeight,
+              frameIdx,
+              txs: txs.slice(0, 9) // Max 9 TXs fit in 3x3 grid
+            });
+
+            lastSeenHeight = frameJHeight;
+          }
+        }
+
+        // Only rebuild if block boundaries changed
+        const expectedBlocks = blockBoundaries.length;
+        if (jBlockHistory.length !== expectedBlocks ||
+            (jBlockHistory[0] && Number(jBlockHistory[0].blockNumber) !== blockBoundaries[0]?.blockNum)) {
+
+          // Clear old blocks
           jBlockHistory.forEach(block => {
             scene.remove(block.container);
             if (block.prevHashLine) scene.remove(block.prevHashLine);
+            block.container.traverse((child: any) => {
+              if (child.geometry) child.geometry.dispose();
+              if (child.material) {
+                const mat = child.material;
+                if (Array.isArray(mat)) mat.forEach(m => m.dispose());
+                else mat.dispose();
+              }
+            });
+            if (block.prevHashLine) {
+              block.prevHashLine.geometry.dispose();
+              (block.prevHashLine.material as THREE.Material).dispose();
+            }
           });
           jBlockHistory = [];
 
-          // Render blocks from startBlock to currentHeight-1 (current mempool is at currentHeight)
-          for (let i = startBlock; i < currentHeight; i++) {
-            const blockNum = BigInt(i);
-            const age = currentHeight - i;
-            const yOffset = (currentHeight - i) * 15; // Stack upward
+          // Render blocks (oldest first for proper stacking)
+          blockBoundaries.reverse().forEach((boundary, idx) => {
+            const blockNum = BigInt(boundary.blockNum);
+            const yOffset = (blockBoundaries.length - idx) * 15; // Stack upward
 
-            // Create empty block container (no TX cubes in time-travel mode)
+            // Create block container (clone J-mempool style)
             const blockContainer = new THREE.Group();
             blockContainer.userData['blockNumber'] = blockNum;
             blockContainer.position.copy(activeJMachine.position);
             blockContainer.position.y += yOffset;
 
-            // Clone J-mempool style: same blue translucent box + cyan edges
+            // J-mempool style box
             const blockSize = 12;
             const blockCubeGeo = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
             const blockCubeMat = new THREE.MeshPhongMaterial({
-              color: 0x4488aa,     // Same teal-blue as J-mempool
+              color: 0x4488aa,
               emissive: 0x224455,
               transparent: true,
-              opacity: 0.15,       // Same translucency as J-mempool
+              opacity: 0.15,
               side: THREE.DoubleSide,
               shininess: 100,
               depthWrite: false
@@ -1012,24 +1048,26 @@ let vrHammer: VRHammer | null = null;
             const blockCube = new THREE.Mesh(blockCubeGeo, blockCubeMat);
             blockContainer.add(blockCube);
 
-            // Cyan wireframe edges (same as J-mempool)
+            // Cyan edges
             const blockEdgesGeo = new THREE.EdgesGeometry(blockCubeGeo);
-            const blockEdgesMat = new THREE.LineBasicMaterial({
-              color: 0x66ccff,   // Bright cyan edges
-              linewidth: 2
-            });
+            const blockEdgesMat = new THREE.LineBasicMaterial({ color: 0x66ccff, linewidth: 2 });
             const blockEdges = new THREE.LineSegments(blockEdgesGeo, blockEdgesMat);
             blockContainer.add(blockEdges);
 
-            // TODO: Add yellow TX cubes inside (from history - TXs that were in this block)
-            // For now just empty boxes showing blockchain structure
+            // Add yellow TX cubes inside (from runtime history)
+            const txCubes: THREE.Object3D[] = [];
+            boundary.txs.forEach((tx, txIdx) => {
+              const txCube = createMempoolTxCube(txIdx, tx, Number(blockNum));
+              blockContainer.add(txCube);
+              txCubes.push(txCube);
+            });
 
             scene.add(blockContainer);
 
-            // Draw prevHash line to previous block
+            // prevHash line to previous block
             let prevHashLine: THREE.Line | null = null;
-            if (i > startBlock) {
-              const prevBlock = jBlockHistory[jBlockHistory.length - 1];
+            if (idx > 0) {
+              const prevBlock = jBlockHistory[idx - 1];
               if (prevBlock) {
                 const lineGeo = new THREE.BufferGeometry().setFromPoints([
                   blockContainer.position.clone(),
@@ -1048,11 +1086,11 @@ let vrHammer: VRHammer | null = null;
             jBlockHistory.push({
               blockNumber: blockNum,
               container: blockContainer,
-              txCubes: [],
+              txCubes,
               prevHashLine,
               yOffset
             });
-          }
+          });
         }
       }
     }

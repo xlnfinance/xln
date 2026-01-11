@@ -35,8 +35,8 @@
     tokenId: number;
     symbol: string;
     decimals: number;
-    address?: string;
-    name?: string;
+    address: string | undefined;
+    name: string | undefined;
   };
 
   type SignerRef = {
@@ -242,7 +242,9 @@
       options.set(tokenId, {
         tokenId,
         symbol: info?.symbol || `T${tokenId}`,
-        decimals: info?.decimals ?? 18
+        decimals: info?.decimals ?? 18,
+        address: undefined,
+        name: info?.name
       });
     };
 
@@ -279,7 +281,9 @@
     return {
       tokenId: selectedTokenId,
       symbol: info?.symbol || `T${selectedTokenId}`,
-      decimals: info?.decimals ?? 18
+      decimals: info?.decimals ?? 18,
+      address: undefined,
+      name: info?.name
     };
   });
 
