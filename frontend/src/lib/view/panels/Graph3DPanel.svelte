@@ -14,7 +14,6 @@
 
   // Network3D managers
   import { EntityManager } from '$lib/network3d/EntityManager';
-  import { AccountActivityVisualizer } from '$lib/network3d/AccountActivityVisualizer';
   import { createAccountBars } from '$lib/network3d/AccountBarRenderer';
 
   // Panel communication
@@ -317,7 +316,6 @@
 
   // Network3D managers
   let entityManager: EntityManager;
-  let activityVisualizer: AccountActivityVisualizer;
 
   // Visual effects system
 let spatialHash: SpatialHash;
@@ -1235,12 +1233,6 @@ let vrHammer: VRHammer | null = null;
     animateWave();
   }
 
-  // ===== PROCESS ACCOUNT ACTIVITY LIGHTNING (on new frame) =====
-  // Only animate in LIVE mode ($isolatedTimeIndex === -1), not historical playback
-  $: if (activityVisualizer && env?.runtimeInput && entityMeshMap && $isolatedTimeIndex === -1) {
-    activityVisualizer.processFrame(env.runtimeInput, entityMeshMap);
-  }
-
   // ===== ADD TXS TO J-MACHINE (broadcast simulation) + R2R ANIMATION =====
   // CRITICAL: Watch HISTORY frames, not env.runtimeInput (which is cleared after processing)
   // Only animate in LIVE mode - historical playback should show static state
@@ -1650,9 +1642,6 @@ let vrHammer: VRHammer | null = null;
     // Clean up managers
     if (entityManager) {
       entityManager.clear();
-    }
-    if (activityVisualizer) {
-      activityVisualizer.clearAll();
     }
   });
 
@@ -2265,7 +2254,6 @@ let vrHammer: VRHammer | null = null;
 
     // ===== INITIALIZE MANAGERS =====
     entityManager = new EntityManager(scene);
-    activityVisualizer = new AccountActivityVisualizer(scene);
     spatialHash = new SpatialHash(100);
     gestureManager = new GestureManager();
     vrHammer = new VRHammer();
@@ -4658,9 +4646,6 @@ let vrHammer: VRHammer | null = null;
     if (scene && spatialHash && entityMeshMap) {
       const deltaTime = clock.getDelta() * 1000; // to milliseconds
       effectOperations.process(scene, entityMeshMap, deltaTime, 10);
-
-      // ===== UPDATE ACCOUNT ACTIVITY LIGHTNING =====
-      activityVisualizer?.update(deltaTime);
     }
 
     // Update VR grabbed entity position
