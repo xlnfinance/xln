@@ -1,5 +1,6 @@
 <script lang="ts">
   import { JsonRpcProvider, Wallet, Contract, parseUnits, formatUnits, isAddress, type InterfaceAbi } from 'ethers';
+  import { BrowserVMEthersProvider } from '@xln/runtime/browservm-ethers-provider';
   import { EVM_NETWORKS, ERC20_ABI, getNetworkByChainId, type EVMNetwork, type TokenInfo } from '$lib/config/evmNetworks';
   import { getAvailableJurisdictions } from '$lib/stores/jurisdictionStore';
   import { onMount } from 'svelte';
@@ -19,6 +20,11 @@
   let selectedToken: TokenInfo | null = null;
   let customTokenAddress = '';
   let useCustomToken = false;
+  let availableTokens: TokenInfo[] = [];
+  let browserVmTokens: TokenInfo[] = [];
+  let browserVM: any = null;
+  let browserProvider: BrowserVMEthersProvider | null = null;
+  let isBrowserVM = false;
 
   // Form
   let amount = '';
@@ -44,6 +50,36 @@
     await loadJurisdictions();
   });
 
+  async function ensureBrowserVM(): Promise<any> {
+    if (browserVM) return browserVM;
+    const { getXLN } = await import('$lib/stores/xlnStore');
+    const xln = await getXLN();
+    browserVM = xln.getBrowserVMInstance?.();
+    if (browserVM && !browserProvider) {
+      browserProvider = new BrowserVMEthersProvider(browserVM);
+    }
+    return browserVM;
+  }
+
+  async function loadBrowserVMTokens() {
+    const vm = await ensureBrowserVM();
+    if (!vm?.getTokenRegistry) {
+      browserVmTokens = [];
+      return;
+    }
+    const registry = vm.getTokenRegistry();
+    browserVmTokens = registry.map((token: any) => ({
+      symbol: token.symbol,
+      name: token.name,
+      address: token.address,
+      decimals: token.decimals ?? 18,
+    }));
+    if (!selectedToken && browserVmTokens.length > 0) {
+      selectedToken = browserVmTokens[0]!;
+      useCustomToken = false;
+    }
+  }
+
   async function loadJurisdictions() {
     try {
       jurisdictions = await getAvailableJurisdictions();
@@ -56,21 +92,32 @@
 
       if (selectedJurisdiction) {
         depositoryAddress = selectedJurisdiction.contracts.depository;
-        // Match network to jurisdiction
-        const network = getNetworkByChainId(selectedJurisdiction.chainId);
-        if (network) selectedNetwork = network;
+        isBrowserVM = selectedJurisdiction.rpc?.startsWith('browservm://') || selectedJurisdiction.chainId === 1337;
+        if (isBrowserVM) {
+          await loadBrowserVMTokens();
+        } else {
+          browserVmTokens = [];
+          const network = getNetworkByChainId(selectedJurisdiction.chainId);
+          if (network) selectedNetwork = network;
+        }
       }
     } catch (e) {
       console.error('Failed to load jurisdictions:', e);
     }
   }
 
-  function getProvider(): JsonRpcProvider {
+  function getProvider() {
+    if (isBrowserVM) {
+      return browserProvider;
+    }
     return new JsonRpcProvider(selectedNetwork.rpcUrl);
   }
 
   function getWallet(): Wallet {
     const provider = getProvider();
+    if (!provider) {
+      throw new Error('Provider not ready');
+    }
     const pk = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
     return new Wallet(pk, provider);
   }
@@ -93,6 +140,7 @@
 
     try {
       const provider = getProvider();
+      if (!provider) return;
       const contract = new Contract(tokenAddr, ERC20_INTERFACE, provider);
       const allowanceFn = contract.getFunction('allowance');
       allowance = await allowanceFn(walletAddress, depositoryAddress);
@@ -188,11 +236,17 @@
     checkAllowance();
   }
 
-  function onJurisdictionChange() {
+  async function onJurisdictionChange() {
     if (selectedJurisdiction) {
       depositoryAddress = selectedJurisdiction.contracts.depository;
-      const network = getNetworkByChainId(selectedJurisdiction.chainId);
-      if (network) selectedNetwork = network;
+      isBrowserVM = selectedJurisdiction.rpc?.startsWith('browservm://') || selectedJurisdiction.chainId === 1337;
+      if (isBrowserVM) {
+        await loadBrowserVMTokens();
+      } else {
+        browserVmTokens = [];
+        const network = getNetworkByChainId(selectedJurisdiction.chainId);
+        if (network) selectedNetwork = network;
+      }
     }
     checkAllowance();
   }
@@ -200,6 +254,8 @@
   $: if (amount && (selectedToken || customTokenAddress)) {
     checkAllowance();
   }
+
+  $: availableTokens = isBrowserVM ? browserVmTokens : selectedNetwork.tokens;
 </script>
 
 <div class="deposit-container">
@@ -233,7 +289,7 @@
   <div class="field">
     <label>Token</label>
     <div class="token-buttons">
-      {#each selectedNetwork.tokens as token}
+      {#each availableTokens as token}
         <button
           class="token-btn"
           class:selected={selectedToken?.address === token.address && !useCustomToken}

@@ -13,7 +13,7 @@ import { createVM, runTx } from '@ethereumjs/vm';
 import { createLegacyTx, createTxFromRLP } from '@ethereumjs/tx';
 import { createAddressFromPrivateKey, createAddressFromString, hexToBytes, createAccount, bytesToHex } from '@ethereumjs/util';
 import type { Address } from '@ethereumjs/util';
-import { Common, Hardfork, Chain } from '@ethereumjs/common';
+import { createCustomCommon, Mainnet } from '@ethereumjs/common';
 import { ethers } from 'ethers';
 import { safeStringify } from './serialization-utils.js';
 
@@ -126,12 +126,14 @@ export class BrowserVMProvider {
     console.log('[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)');
 
     // Create VM with evmOpts to disable contract size limit
+    const common = createCustomCommon({ chainId: 1337 }, Mainnet);
     this.vm = await createVM({
+      common,
       evmOpts: {
         allowUnlimitedContractSize: true, // Disable EIP-170 24KB limit for simnet
       },
     });
-    this.common = this.vm.common;
+    this.common = common;
     console.log('[BrowserVM] Unlimited contract size enabled for simnet');
 
     // Fund deployer
@@ -327,7 +329,6 @@ export class BrowserVMProvider {
       await this.deployDefaultTokens();
     }
     const normalized = address.toLowerCase();
-    if (this.fundedAddresses.has(normalized)) return;
 
     await this.ensureEthBalance(address, 1000n * 10n ** 18n);
 

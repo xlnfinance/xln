@@ -276,7 +276,8 @@
     <label for="settlement-token">Token</label>
     <select id="settlement-token" bind:value={tokenId} disabled={sending}>
       <option value={1}>USDC</option>
-      <option value={2}>ETH</option>
+      <option value={2}>WETH</option>
+      <option value={3}>USDT</option>
     </select>
   </div>
 

@@ -66,6 +66,25 @@ function derivePrivateKey(seed: string, index: number): string {
   return hdNode.privateKey;
 }
 
+async function fundSignerWalletInBrowserVM(address: string): Promise<void> {
+  try {
+    const { getXLN } = await import('$lib/stores/xlnStore');
+    const xln = await getXLN();
+    const browserVM = xln.getBrowserVMInstance?.();
+    if (!browserVM?.fundSignerWallet) return;
+    await browserVM.fundSignerWallet(address);
+  } catch (err) {
+    console.warn('[VaultStore] Failed to fund signer wallet:', err);
+  }
+}
+
+async function fundVaultSignersInBrowserVM(vault: Vault | null): Promise<void> {
+  if (!vault) return;
+  for (const signer of vault.signers) {
+    await fundSignerWalletInBrowserVM(signer.address);
+  }
+}
+
   // Vault operations
   export const vaultOperations = {
     syncRuntime(vault: Vault | null) {
@@ -74,6 +93,7 @@ function derivePrivateKey(seed: string, index: number): string {
     if (vault?.seed) meta.seed = vault.seed;
     if (vault?.id) meta.vaultId = vault.id;
     runtimeOperations.setLocalRuntimeMetadata(meta);
+    void fundVaultSignersInBrowserVM(vault);
     },
 
   // Load from localStorage
@@ -148,6 +168,7 @@ function derivePrivateKey(seed: string, index: number): string {
         console.warn('[VaultStore] Failed to auto-create entity:', err);
       });
     });
+    void fundSignerWalletInBrowserVM(firstAddress);
 
     return vault;
   },
@@ -204,6 +225,7 @@ function derivePrivateKey(seed: string, index: number): string {
         console.warn('[VaultStore] Failed to auto-create entity:', err);
       });
     });
+    void fundSignerWalletInBrowserVM(address);
 
     return newSigner;
   },

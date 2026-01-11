@@ -38,9 +38,11 @@ const CORE_FILES = {
     'entity-tx/financial.ts', // Financial accounting (addToReserves, subtractFromReserves)
     'entity-tx/proposals.ts', // Proposal logic
     'entity-tx/j-events.ts',  // Jurisdiction event handling
-    'entity-tx/handlers/account.ts',   // Account operations (openAccount, extendCredit)
-    'entity-tx/handlers/financial.ts', // Financial operations (deposit, withdraw)
-    'entity-tx/handlers/payments.ts',  // Payment routing (directPayment)
+    'entity-tx/handlers/account.ts',         // Account operations (openAccount, extendCredit)
+    'entity-tx/handlers/deposit-collateral.ts', // Deposit collateral (R2C)
+    'entity-tx/handlers/htlc-payment.ts',    // HTLC payment routing
+    'entity-tx/handlers/create-settlement.ts', // Settlement creation
+    'entity-tx/handlers/mint-reserves.ts',   // Reserve minting (J-events)
 
     'account-tx/index.ts',   // Account transaction types
     'account-tx/apply.ts',   // Account transaction dispatcher
@@ -60,14 +62,11 @@ const CORE_FILES = {
   ],
   docs: [
     // Ordered by dependency - read in this order
-    'emc2.md',               // ⚡ Core philosophy: E=mc² → Energy-Mass-Credit (5min)
-    'docs/12_invariant.md',  // ⚡ RCPAN vs FCUAN vs FRPAP (THE core innovation) (10min)
-    'docs/JEA.md',           // ⚡ Jurisdiction-Entity-Account 3-layer model (8min)
-    'docs/11_Jurisdiction_Machine.md', // Architecture deep-dive
-    'PriorArt.md',           // Why Lightning/rollups don't work
-  ],
-  worlds: [
-    'architecture.md'        // Scenario architecture, EntityInput primitives
+    'emc2.md',                  // ⚡ Core philosophy: E=mc² → Energy-Mass-Credit (5min)
+    '12_invariant.md',          // ⚡ RCPAN vs FCUAN vs FRPAP (THE core innovation) (10min)
+    'jea.md',                   // ⚡ Jurisdiction-Entity-Account 3-layer model (8min)
+    '11_Jurisdiction_Machine.md', // Architecture deep-dive
+    'PriorArt.md',              // Why Lightning/rollups don't work
   ]
 };
 
@@ -75,7 +74,7 @@ function countLines(content) {
   return content.split('\n').length;
 }
 
-function generateSemanticOverview(contractsDir, runtimeDir, docsDir, worldsDir, totalTokens) {
+function generateSemanticOverview(contractsDir, runtimeDir, docsDir, totalTokens) {
   // Count lines for each file
   const fileSizes = {};
 
@@ -92,11 +91,6 @@ function generateSemanticOverview(contractsDir, runtimeDir, docsDir, worldsDir, 
   CORE_FILES.docs.forEach(file => {
     const content = readFileContent(docsDir, file);
     if (content) fileSizes[`docs/${file}`] = countLines(content);
-  });
-
-  CORE_FILES.worlds.forEach(file => {
-    const content = readFileContent(worldsDir, file);
-    if (content) fileSizes[`worlds/${file}`] = countLines(content);
   });
 
   // Get git commit and timestamp
@@ -252,9 +246,11 @@ xln/
       financial.ts               ${fileSizes['runtime/entity-tx/financial.ts'] || '?'} lines - Financial accounting
       proposals.ts               ${fileSizes['runtime/entity-tx/proposals.ts'] || '?'} lines - Proposal logic
       j-events.ts                ${fileSizes['runtime/entity-tx/j-events.ts'] || '?'} lines - Jurisdiction events
-      handlers/account.ts        ${fileSizes['runtime/entity-tx/handlers/account.ts'] || '?'} lines - Account operations
-      handlers/financial.ts      ${fileSizes['runtime/entity-tx/handlers/financial.ts'] || '?'} lines - Financial operations
-      handlers/payments.ts       ${fileSizes['runtime/entity-tx/handlers/payments.ts'] || '?'} lines - Payment routing
+      handlers/account.ts              ${fileSizes['runtime/entity-tx/handlers/account.ts'] || '?'} lines - Account operations
+      handlers/deposit-collateral.ts   ${fileSizes['runtime/entity-tx/handlers/deposit-collateral.ts'] || '?'} lines - R2C deposits
+      handlers/htlc-payment.ts         ${fileSizes['runtime/entity-tx/handlers/htlc-payment.ts'] || '?'} lines - HTLC routing
+      handlers/create-settlement.ts    ${fileSizes['runtime/entity-tx/handlers/create-settlement.ts'] || '?'} lines - Settlement creation
+      handlers/mint-reserves.ts        ${fileSizes['runtime/entity-tx/handlers/mint-reserves.ts'] || '?'} lines - Reserve minting
 
     account-tx/
       index.ts                   ${fileSizes['runtime/account-tx/index.ts'] || '?'} lines - Account transaction types
@@ -271,13 +267,10 @@ xln/
 
   docs/
     emc2.md                      ${fileSizes['docs/emc2.md'] || '?'} lines - ⚡ Energy-Mass-Credit equivalence (CRITICAL PATH)
-    docs/12_invariant.md         ${fileSizes['docs/docs/12_invariant.md'] || '?'} lines - ⚡ RCPAN innovation (CRITICAL PATH)
-    docs/JEA.md                  ${fileSizes['docs/docs/JEA.md'] || '?'} lines - ⚡ Jurisdiction-Entity-Account model (CRITICAL PATH)
-    docs/11_Jurisdiction_Machine.md  ${fileSizes['docs/docs/11_Jurisdiction_Machine.md'] || '?'} lines - Architecture deep-dive
+    12_invariant.md              ${fileSizes['docs/12_invariant.md'] || '?'} lines - ⚡ RCPAN innovation (CRITICAL PATH)
+    jea.md                       ${fileSizes['docs/jea.md'] || '?'} lines - ⚡ Jurisdiction-Entity-Account model (CRITICAL PATH)
+    11_Jurisdiction_Machine.md   ${fileSizes['docs/11_Jurisdiction_Machine.md'] || '?'} lines - Architecture deep-dive
     PriorArt.md                  ${fileSizes['docs/PriorArt.md'] || '?'} lines - Why Lightning/rollups don't work
-
-  worlds/
-    architecture.md              ${fileSizes['worlds/architecture.md'] || '?'} lines - Scenario architecture, EntityInput primitives
 
 Reading Guide:
 1. Start with header sections (RCPAN invariant, competitive landscape, impossibilities)
@@ -309,7 +302,6 @@ function generateContext() {
   const contractsDir = path.join(projectRoot, 'jurisdictions/contracts');
   const runtimeDir = path.join(projectRoot, 'runtime');
   const docsDir = path.join(projectRoot, 'docs');
-  const worldsDir = path.join(projectRoot, 'worlds');
 
   // Check for --sol flag
   const solOnly = process.argv.includes('--sol');
@@ -351,16 +343,6 @@ function generateContext() {
         allFiles.push({ path: `docs/${file}`, content, lines });
       }
     });
-
-    CORE_FILES.worlds.forEach(file => {
-      const content = readFileContent(worldsDir, file);
-      if (content) {
-        const lines = countLines(content);
-        const bytes = Buffer.byteLength(content, 'utf8');
-        fileStats.push({ file: `worlds/${file}`, lines, bytes });
-        allFiles.push({ path: `worlds/${file}`, content, lines });
-      }
-    });
   }
 
   // Calculate total bytes for all content
@@ -368,7 +350,7 @@ function generateContext() {
   const totalTokens = Math.round(totalBytes / 3.5);
 
   // Generate overview with token count
-  let output = generateSemanticOverview(contractsDir, runtimeDir, docsDir, worldsDir, totalTokens);
+  let output = generateSemanticOverview(contractsDir, runtimeDir, docsDir, totalTokens);
 
   // Append all file contents
   allFiles.forEach(({ path, content, lines }) => {
@@ -404,7 +386,7 @@ const tokensTotal = Math.round(bytes / 3.5);
 console.log(`✅ ${outputFilename} generated`);
 console.log(`📊 ${lines.toLocaleString()} lines, ${kb} KB, ~${tokensTotal.toLocaleString()} tokens`);
 console.log(`🌐 xln.finance/${outputFilename}`);
-console.log(`📁 Contracts: ${CORE_FILES.contracts.length} | Runtime: ${CORE_FILES.runtime.length} | Docs: ${CORE_FILES.docs.length} | Worlds: ${CORE_FILES.worlds.length}`);
+console.log(`📁 Contracts: ${CORE_FILES.contracts.length} | Runtime: ${CORE_FILES.runtime.length} | Docs: ${CORE_FILES.docs.length}`);
 
 // Token breakdown by file (top 15)
 console.log('\n📈 Token Breakdown (top 15):');

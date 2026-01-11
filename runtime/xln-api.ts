@@ -162,9 +162,9 @@ export interface XLNModule {
   deriveDelta: (delta: Delta, isLeft: boolean) => DerivedDelta;
   isLeft: (entityId: string, counterpartyId: string) => boolean;
   formatTokenAmount: (amount: bigint, decimals?: number) => string;
-  getTokenInfo: (tokenAddress: string) => { symbol: string; decimals: number };
+  getTokenInfo: (tokenId: number) => { symbol: string; name: string; decimals: number; color: string };
   createDemoDelta: () => Delta;
-  getDefaultCreditLimit: () => bigint;
+  getDefaultCreditLimit: (tokenId: number) => bigint;
 
   // Financial utilities (ethers.js-based)
   formatTokenAmountEthers: (amount: bigint, decimals: number) => string;
@@ -192,6 +192,7 @@ export interface XLNModule {
   // Jurisdiction management
   getAvailableJurisdictions: () => Promise<JurisdictionConfig[]>;
   getJurisdictionByAddress: (address: string) => JurisdictionConfig | undefined;
+  getBrowserVMInstance: () => unknown;
 
   // Entity creation
   generateLazyEntityId: (validators: string[] | { name: string; weight: number }[], threshold: bigint) => string;
