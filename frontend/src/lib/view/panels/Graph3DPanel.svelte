@@ -804,9 +804,7 @@ let vrHammer: VRHammer | null = null;
         // Trigger visual animation: yellow cube flies from entity to J-Machine
         if (tx && (tx.from || tx.entityId)) {
           const sourceEntityId = tx.from || tx.entityId;
-          // Animate flying cube from entity to J-Machine (100ms flight)
-          animateR2RTransfer(sourceEntityId, '', 0n);
-          console.log(`[Graph3D] 📤 TX flying from entity ${sourceEntityId.slice(-4)} to J-Machine`);
+          // Flying cube animation deleted - TX appears directly in J-mempool
         }
 
         const txCube = createMempoolTxCube(txIndex, tx, nextBlockHeight);
@@ -936,9 +934,11 @@ let vrHammer: VRHammer | null = null;
         }
 
         // Clear current mempool array (cubes moved to block)
+        const txCount = jMachineTxBoxes.length;
         jMachineTxBoxes = [];
 
-        // Broadcast ripple removed - instant state change instead
+        // Broadcast effect proportional to TX count
+        createProportionalBroadcast(activeJMachine.position, txCount);
       } else {
         // Normal mempool shrink (not full broadcast) - dispose removed cubes
         while (jMachineTxBoxes.length > mempoolSize) {
@@ -1219,7 +1219,53 @@ let vrHammer: VRHammer | null = null;
 
   // Create J-block broadcast effect when mempool clears
   // Expanding wireframe sphere from J-Machine - radio wave to entire universe
-  // Broadcast ripple animation deleted - instant state change instead
+  /**
+   * Proportional broadcast effect: sphere intensity based on TX count
+   * More TXs = bigger, brighter, longer duration effect
+   */
+  function createProportionalBroadcast(jMachinePos: THREE.Vector3, txCount: number) {
+    if (!scene || txCount === 0) return;
+
+    // Intensity based on TX count (1 TX = minimal, 5+ TXs = max effect)
+    const intensity = Math.min(txCount / 5, 1.0);
+    const maxScale = 30 + intensity * 70; // 30-100 scale based on TX count
+    const duration = 800 + intensity * 700; // 800-1500ms based on TX count
+
+    const sphereGeometry = new THREE.SphereGeometry(1, 32, 32);
+    const sphereMaterial = new THREE.MeshBasicMaterial({
+      color: 0x44ffaa,
+      transparent: true,
+      opacity: 0.3 + intensity * 0.3, // 0.3-0.6 opacity
+      side: THREE.DoubleSide
+    });
+    const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+    sphere.position.copy(jMachinePos);
+    scene.add(sphere);
+
+    const startTime = performance.now();
+
+    function animateExpand() {
+      const elapsed = performance.now() - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+
+      // Ease-out quad
+      const eased = 1 - Math.pow(1 - progress, 2);
+
+      const scale = 1 + eased * maxScale;
+      sphere.scale.set(scale, scale, scale);
+      sphereMaterial.opacity = (0.3 + intensity * 0.3) * (1 - progress);
+
+      if (progress < 1) {
+        requestAnimationFrame(animateExpand);
+      } else {
+        scene.remove(sphere);
+        sphereGeometry.dispose();
+        sphereMaterial.dispose();
+      }
+    }
+
+    animateExpand();
+  }
 
   // ===== ADD TXS TO J-MACHINE (broadcast simulation) + R2R ANIMATION =====
   // CRITICAL: Watch HISTORY frames, not env.runtimeInput (which is cleared after processing)
@@ -1252,7 +1298,7 @@ let vrHammer: VRHammer | null = null;
               const targetId = tx.targetEntityId || tx.data?.targetEntityId;
               const amount = tx.amount || tx.data?.amount;
               if (txKind === 'payFromReserve' && targetId) {
-                animateR2RTransfer(entityInput.entityId, targetId, amount);
+                // animateR2RTransfer deleted - instant state change
               }
             }
           });
@@ -1948,60 +1994,7 @@ let vrHammer: VRHammer | null = null;
    * Animate R2R transfer: No-op - J-Machine is the core
    * R2R transfers are J-layer operations, visualized by J-Machine mempool filling
    */
-  function animateR2RTransfer(fromEntityId: string, _toEntityId: string, _amount: bigint) {
-    // Animate yellow cube flying from sender entity to J-Machine
-    if (!scene || !jMachine) return;
-
-    // Get sender entity position
-    const fromEntity = entities.find(e => e.id === fromEntityId);
-    if (!fromEntity) return;
-
-    // Create flying cube
-    const cubeSize = 4;
-    const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
-    const material = new THREE.MeshLambertMaterial({
-      color: 0xffaa00,
-      transparent: true,
-      opacity: 0.9,
-      emissive: 0xffaa00,
-      emissiveIntensity: 0.8
-    });
-    const flyingCube = new THREE.Mesh(geometry, material);
-
-    // Start at entity position
-    flyingCube.position.copy(fromEntity.position);
-    scene.add(flyingCube);
-
-    // Animate to J-Machine center over 100ms
-    const jPos = jMachine.position.clone();
-    const startPos = fromEntity.position.clone();
-    const startTime = performance.now();
-    const duration = 100; // 100ms flight
-
-    function animateFlight() {
-      const elapsed = performance.now() - startTime;
-      const t = Math.min(elapsed / duration, 1);
-
-      // Ease-out cubic
-      const eased = 1 - Math.pow(1 - t, 3);
-
-      flyingCube.position.lerpVectors(startPos, jPos, eased);
-
-      // Scale down as it approaches (entering the cube)
-      flyingCube.scale.setScalar(1 - eased * 0.5);
-
-      if (t < 1) {
-        requestAnimationFrame(animateFlight);
-      } else {
-        // Remove flying cube (the mempool cube inside J will show it)
-        scene.remove(flyingCube);
-        geometry.dispose();
-        material.dispose();
-      }
-    }
-
-    animateFlight();
-  }
+  // animateR2RTransfer deleted - TX appears directly in J-mempool, no flying cube
 
   /**
    * J-Machine Auto-Proposer: Single-signer consensus simulation
@@ -3614,8 +3607,7 @@ let vrHammer: VRHammer | null = null;
                   shootRayToJMachine(fromEntityId);
                   // Add tx cube to J-Machine mempool
                   addTxToJMachine(fromEntityId);
-                  // Animate R2R particle between entities
-                  animateR2RTransfer(fromEntityId, toEntityId, amount);
+                  // R2R animation deleted - instant state change
                   // Trigger activity visuals
                   triggerEntityActivity(fromEntityId);
                   triggerEntityActivity(toEntityId);
@@ -3665,8 +3657,7 @@ let vrHammer: VRHammer | null = null;
                 shootRayToJMachine(fromEntityId);
                 // Add tx cube to J-Machine mempool
                 addTxToJMachine(fromEntityId);
-                // Animate R2R particle between entities
-                animateR2RTransfer(fromEntityId, toEntityId, tx.amount || 0n);
+                // R2R animation deleted - instant state change
                 // Trigger activity visuals
                 triggerEntityActivity(fromEntityId);
                 triggerEntityActivity(toEntityId);
