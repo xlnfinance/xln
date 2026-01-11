@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import Dropdown from '$lib/components/UI/Dropdown.svelte';
 
   export let label: string;
   export let items: Array<{id: string, label: string, count?: number}>;
@@ -9,7 +9,7 @@
   export let disabled: boolean = false;
 
   let showMenu = false;
-  let dropdownElement: HTMLDivElement;
+  $: if (disabled && showMenu) showMenu = false;
 
   function handleSelect(id: string) {
     onSelect(id);
@@ -23,63 +23,39 @@
     }
   }
 
-  // Click outside handler to close dropdown
-  function handleClickOutside(event: MouseEvent) {
-    if (showMenu && dropdownElement && !dropdownElement.contains(event.target as Node)) {
-      showMenu = false;
-    }
-  }
-
-  onMount(() => {
-    document.addEventListener('click', handleClickOutside);
-  });
-
-  onDestroy(() => {
-    document.removeEventListener('click', handleClickOutside);
-  });
 </script>
 
-<div class="breadcrumb-dropdown" class:disabled bind:this={dropdownElement}>
-  <button
-    class="breadcrumb-trigger"
-    disabled={disabled}
-    on:click={() => !disabled && (showMenu = !showMenu)}
-  >
-    {label}: {items.find(i => i.id === selected)?.label || 'None'} ▼
-  </button>
-
-  {#if showMenu && !disabled}
-    <div class="breadcrumb-menu">
+<div class="breadcrumb-dropdown" class:disabled>
+  <Dropdown bind:open={showMenu} disabled={disabled} minWidth={160} maxWidth={260}>
+    <span slot="trigger" class="breadcrumb-trigger">
+      {label}: {items.find(i => i.id === selected)?.label || 'None'}
+      <span class="breadcrumb-chevron" class:open={showMenu}>▼</span>
+    </span>
+    <div slot="menu" class="breadcrumb-menu">
       {#each items as item}
-        <div
+        <button
           class="breadcrumb-item"
           class:selected={item.id === selected}
           on:click={() => handleSelect(item.id)}
-          on:keydown={(e) => e.key === 'Enter' && handleSelect(item.id)}
-          role="button"
-          tabindex="0"
         >
           {item.label}
           {#if item.count !== undefined}
             <span class="count">({item.count})</span>
           {/if}
-        </div>
+        </button>
       {/each}
 
       {#if onNew}
         <div class="breadcrumb-divider"></div>
-        <div
+        <button
           class="breadcrumb-item new"
           on:click={handleNew}
-          on:keydown={(e) => e.key === 'Enter' && handleNew()}
-          role="button"
-          tabindex="0"
         >
           + New {label}
-        </div>
+        </button>
       {/if}
     </div>
-  {/if}
+  </Dropdown>
 </div>
 
 <style>
@@ -90,67 +66,67 @@
     align-items: center;
   }
 
+  .breadcrumb-dropdown :global(.dropdown-wrapper) {
+    width: auto;
+  }
+
   .breadcrumb-dropdown.disabled {
     opacity: 0.5;
   }
 
+  .breadcrumb-dropdown :global(.dropdown-trigger) {
+    padding: 6px 10px;
+    border-radius: 6px;
+  }
+
   .breadcrumb-trigger {
-    height: 32px;
-    padding: 0 12px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
     color: rgba(255, 255, 255, 0.9);
     font-size: 13px;
     font-family: 'SF Mono', monospace;
-    cursor: pointer;
-    transition: all 0.15s ease;
     white-space: nowrap;
   }
 
-  .breadcrumb-trigger:not(:disabled):hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(168, 85, 247, 0.3);
+  .breadcrumb-chevron {
+    font-size: 0.55rem;
+    opacity: 0.6;
+    transition: transform 0.2s;
   }
 
-  .breadcrumb-trigger:disabled {
-    cursor: not-allowed;
+  .breadcrumb-chevron.open {
+    transform: rotate(180deg);
   }
 
   .breadcrumb-menu {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    margin-top: 4px;
-    min-width: 160px;
-    background: rgba(20, 20, 20, 0.95);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
     padding: 4px;
-    z-index: 1000;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   }
 
   .breadcrumb-item {
     display: flex;
     align-items: center;
     gap: 8px;
+    width: 100%;
     padding: 6px 10px;
+    background: transparent;
+    border: none;
     color: rgba(255, 255, 255, 0.8);
     font-size: 13px;
     font-family: 'SF Mono', monospace;
     border-radius: 4px;
     cursor: pointer;
     transition: all 0.15s ease;
+    text-align: left;
   }
 
   .breadcrumb-item:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: var(--dropdown-item-hover, rgba(255, 255, 255, 0.08));
     color: rgba(255, 255, 255, 1);
   }
 
   .breadcrumb-item.selected {
-    background: rgba(168, 85, 247, 0.15);
+    background: var(--dropdown-selected, rgba(168, 85, 247, 0.15));
     color: rgba(168, 85, 247, 1);
   }
 
@@ -180,12 +156,6 @@
 
   /* Mobile responsive */
   @media (max-width: 768px) {
-    .breadcrumb-trigger {
-      font-size: 11px;
-      padding: 0 8px;
-      height: 28px;
-    }
-
     .breadcrumb-dropdown {
       height: 28px;
     }

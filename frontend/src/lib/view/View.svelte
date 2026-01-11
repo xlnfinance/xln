@@ -8,7 +8,7 @@
    */
 
   import { onMount, onDestroy, mount } from 'svelte';
-  import { writable } from 'svelte/store';
+  import { writable, get } from 'svelte/store';
   import { DockviewComponent } from 'dockview';
   import './utils/frontendLogger'; // Initialize global log control
   import Graph3DPanel from './panels/Graph3DPanel.svelte';
@@ -29,6 +29,7 @@
   import TimeMachine from './core/TimeMachine.svelte';
   import Tutorial from './components/Tutorial.svelte';
   import { panelBridge } from './utils/panelBridge';
+  import { runtimeOperations } from '$lib/stores/runtimeStore';
   import 'dockview/dist/styles/dockview.css';
 
   // Props for layout/mode switching
@@ -67,6 +68,9 @@
 
   // Expose env to window for E2E testing (Playwright tests need access to history)
   localEnvStore.subscribe((env) => {
+    if (env) {
+      runtimeOperations.updateLocalEnv(env);
+    }
     if (typeof window !== 'undefined' && env) {
       (window as any).isolatedEnv = env;
     }
@@ -74,6 +78,22 @@
 
   // Pending entity data - bypasses Dockview params timing
   const pendingEntityData = new Map<string, {entityId: string, entityName: string, signerId: string}>();
+
+  const resolveEntityPanelData = (panelId: string) => {
+    if (!panelId.startsWith('entity-')) return null;
+    const entityId = panelId.slice('entity-'.length);
+    const env = get(localEnvStore);
+    const entries = env?.eReplicas ? Array.from(env.eReplicas.entries()) : [];
+    const entry = entries.find((e: any) => e[0].startsWith(`${entityId}:`));
+    if (!entry) return null;
+    const [replicaKey, replica] = entry as [string, any];
+    const signerId = replicaKey.split(':')[1] || entityId;
+    return {
+      entityId,
+      entityName: replica?.name || entityId.slice(0, 10),
+      signerId
+    };
+  };
 
   // Build version tracking (injected by vite.config.ts)
   // @ts-ignore - __BUILD_HASH__ and __BUILD_TIME__ are injected by vite define
@@ -356,11 +376,17 @@
             // ENTITY PANEL: Mount in init() with data from Map
             if (options.name === 'entity-panel') {
               const panelId = parameters.api.id;
-              const data = pendingEntityData.get(panelId);
+              let data = pendingEntityData.get(panelId);
 
               if (!data) {
-                console.warn('[View] ⚠️ No data for panel (entity no longer exists):', panelId);
-                // Can't close during init - just skip mounting, dockview will clean up
+                data = resolveEntityPanelData(panelId) || undefined;
+                if (data) {
+                  pendingEntityData.set(panelId, data);
+                }
+              }
+
+              if (!data) {
+                queueMicrotask(() => parameters.api?.close?.());
                 return;
               }
 
@@ -412,7 +438,13 @@
     }
 
     // Dev mode: Full layout (user mode already returned early)
-    const graph3d = dockview.addPanel({
+    const ensurePanel = (config: any) => {
+      const existing = dockview.getPanel(config.id);
+      if (existing) return existing;
+      return dockview.addPanel(config);
+    };
+
+    ensurePanel({
       id: 'graph3d',
       component: 'graph3d',
       title: '🌐 Graph3D',
@@ -421,7 +453,7 @@
       },
     });
 
-    const architect = dockview.addPanel({
+    ensurePanel({
       id: 'architect',
       component: 'architect',
       title: '🎬 Architect',
@@ -433,7 +465,7 @@
 
     // ALL panels after Architect get inactive:true to prevent stealing focus
 
-    dockview.addPanel({
+    ensurePanel({
       id: 'jurisdiction',
       component: 'jurisdiction',
       title: '🏛️ Jurisdiction',
@@ -444,7 +476,7 @@
       },
     });
 
-    dockview.addPanel({
+    ensurePanel({
       id: 'runtime-io',
       component: 'runtime-io',
       title: '🔄 Runtime I/O',
@@ -455,7 +487,7 @@
       },
     });
 
-    dockview.addPanel({
+    ensurePanel({
       id: 'settings',
       component: 'settings',
       title: '⚙️ Settings',
@@ -622,99 +654,19 @@
 
     console.log(`[View] 🔄 Updating panels for ${isUserMode ? 'user' : 'dev'} mode...`);
 
-    if (isUserMode) {
-      // User mode: Show only BrainVault, remove dev panels (Dockview doesn't support hiding)
-      const devPanels = ['graph3d', 'architect', 'jurisdiction', 'runtime-io', 'settings'];
-      devPanels.forEach(id => {
-        const panel = dockview.getPanel(id);
-        if (panel) {
-          // Remove panel by calling close on the panel itself
-          panel.api.close();
-        }
-      });
-
-      // Show BrainVault (create if doesn't exist)
-      const bvPanel = dockview.getPanel('brainvault');
-      if (!bvPanel) {
-        try {
-          dockview.addPanel({
-            id: 'brainvault',
-            component: 'brainvault',
-            title: '🔐 Wallet',
-            params: { closeable: false },
-          });
-          console.log('[View] ✅ Created BrainVault panel');
-        } catch (e) {
-          console.warn('[View] BrainVault panel already exists (race condition)', e);
-        }
-      } else {
-        console.log('[View] ✅ BrainVault panel already exists, reusing');
-      }
-      console.log('[View] ✅ User mode active - dev panels removed');
-    } else {
-      // Dev mode: Remove BrainVault, recreate dev panels
-      const bvPanel = dockview.getPanel('brainvault');
-      if (bvPanel) bvPanel.api.close();
-
-      // Recreate dev panels (check each individually)
-      if (!dockview.getPanel('graph3d')) {
-        dockview.addPanel({
-          id: 'graph3d',
-          component: 'graph3d',
-          title: '🌐 Graph3D',
-          params: { closeable: false },
-        });
-      }
-
-      if (!dockview.getPanel('architect')) {
-        dockview.addPanel({
-          id: 'architect',
-          component: 'architect',
-          title: '🎬 Architect',
-          position: { direction: 'right', referencePanel: 'graph3d' },
-          params: { closeable: false },
-        });
-      }
-
-      if (!dockview.getPanel('jurisdiction')) {
-        dockview.addPanel({
-          id: 'jurisdiction',
-          component: 'jurisdiction',
-          title: '🏛️ Jurisdiction',
-          position: { direction: 'within', referencePanel: 'architect' },
-          inactive: true,
-          params: { closeable: false },
-        });
-      }
-
-      if (!dockview.getPanel('runtime-io')) {
-        dockview.addPanel({
-          id: 'runtime-io',
-          component: 'runtime-io',
-          title: '🔄 Runtime I/O',
-          position: { direction: 'within', referencePanel: 'architect' },
-          inactive: true,
-          params: { closeable: false },
-        });
-      }
-
-      if (!dockview.getPanel('settings')) {
-        dockview.addPanel({
-          id: 'settings',
-          component: 'settings',
-          title: '⚙️ Settings',
-          position: { direction: 'within', referencePanel: 'architect' },
-          inactive: true,
-          params: { closeable: false },
-        });
-
+    // Keep dockview panels alive across mode switches to avoid duplicate IDs/races.
+    // User mode hides the dockview container; dev mode shows it again.
+    if (!isUserMode) {
+      requestAnimationFrame(() => {
+        const width = container?.clientWidth || window.innerWidth;
+        const height = container?.clientHeight || window.innerHeight;
+        dockview.layout(width, height);
         const graph3dApi = dockview.getPanel('graph3d');
         if (graph3dApi) {
-          setTimeout(() => graph3dApi.api.setSize({ width: window.innerWidth * 0.70 }), 100);
+          const widthPercent = embedMode ? 1.0 : 0.70;
+          graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
         }
-      }
-
-      console.log('[View] ✅ Dev mode - Dev panels visible, BrainVault removed');
+      });
     }
   }
 
@@ -797,7 +749,7 @@
     flex: 1;
     width: 100%;
     height: 100%;
-    overflow: auto;
+    overflow: visible; /* Dropdowns must overlay - scroll is in panel-content */
     padding-bottom: 52px; /* Space for TimeMachine bar */
   }
 

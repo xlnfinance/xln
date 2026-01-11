@@ -1,21 +1,25 @@
 <script lang="ts">
-  import BrainVaultView from '$lib/components/Views/BrainVaultView.svelte';
+  // Redirect to /app - vault functionality is integrated there
+  import { goto } from '$app/navigation';
+  import { onMount } from 'svelte';
+  import { appStateOperations } from '$lib/stores/appStateStore';
+
+  onMount(() => {
+    // Ensure user mode (shows wallet UI)
+    appStateOperations.setMode('user');
+    goto('/app');
+  });
 </script>
 
-<svelte:head>
-  <title>BrainVault - Memory-Hard Wallet Derivation | xln</title>
-  <meta name="description" content="Generate a cryptocurrency wallet from your memory. Sharded argon2id key derivation - secure, deterministic, no seed phrase backup needed." />
-</svelte:head>
-
-<!-- BrainVaultView handles its own full-page layout -->
-<BrainVaultView />
+<div class="redirect">Redirecting to app...</div>
 
 <style>
-  :global(html),
-  :global(body) {
-    margin: 0;
-    padding: 0;
-    background: #0a0a0f;
-    overflow-x: hidden;
+  .redirect {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    color: #666;
+    font-family: system-ui;
   }
 </style>

@@ -147,7 +147,7 @@ export async function swap(env: Env): Promise<void> {
 
   const browserVM = await ensureBrowserVM();
   const depositoryAddress = browserVM.getDepositoryAddress();
-  createJReplica(env, 'Swap Demo', depositoryAddress, { x: 0, y: 100, z: 0 });
+  createJReplica(env, 'Swap Demo', depositoryAddress, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
   const jurisdiction = createJurisdictionConfig('Swap Demo', depositoryAddress);
   console.log('✅ BrowserVM J-Machine created\n');
 

@@ -38,10 +38,11 @@
 <!-- Mode Toggle Button (bottom-right) -->
 <button
   class="mode-toggle"
+  class:active={$appState.mode === 'dev'}
   on:click={() => toggleMode()}
-  title="Switch to {$appState.mode === 'user' ? 'developer' : 'user'} mode"
+  title="Toggle Dock mode"
 >
-  {$appState.mode === 'user' ? 'Dev' : 'User'}
+  Dock
 </button>
 
 <style>
@@ -52,7 +53,7 @@
 
   .mode-toggle {
     position: fixed;
-    bottom: 16px;
+    bottom: 80px;
     right: 16px;
     background: rgba(168, 85, 247, 0.1);
     border: 1px solid rgba(168, 85, 247, 0.3);
@@ -70,5 +71,11 @@
   .mode-toggle:hover {
     background: rgba(168, 85, 247, 0.2);
     border-color: rgba(168, 85, 247, 0.5);
+  }
+
+  .mode-toggle.active {
+    background: rgba(168, 85, 247, 0.25);
+    border-color: rgba(168, 85, 247, 0.7);
+    color: rgba(255, 255, 255, 0.95);
   }
 </style>

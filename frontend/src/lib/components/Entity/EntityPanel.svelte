@@ -23,16 +23,22 @@
   import SwapPanel from './SwapPanel.svelte';
   import UserOrdersPanel from '../Trading/UserOrdersPanel.svelte';
   import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
-  import { xlnFunctions } from '../../stores/xlnStore';
+  import { xlnFunctions, entityPositions } from '../../stores/xlnStore';
+  import JurisdictionDropdown from '$lib/components/Jurisdiction/JurisdictionDropdown.svelte';
 
   export let tab: Tab;
 
   // Safety guard for XLN functions
   export let isLast: boolean = false;
 
+  // Hide header when embedded in UserModePanel (avoids duplicate dropdowns)
+  export let hideHeader: boolean = false;
+  export let showJurisdiction: boolean = true;
+
   let replica: EntityReplica | null = null;
   let showCloseButton = true;
   let selectedAccountId: string | null = null;
+  let selectedJurisdictionName: string | null = null;
 
   // Get environment from context (for /view route) or fall back to global stores (for / route)
   // This allows EntityPanel to work in both isolated and global contexts
@@ -44,12 +50,15 @@
   const contextXlnFunctions = entityEnv?.xlnFunctions;
   const contextHistory = entityEnv?.history;
   const contextTimeIndex = entityEnv?.timeIndex;
+  const contextEnv = entityEnv?.env;
 
   // Use context stores if available, otherwise fall back to global stores
   $: activeReplicas = contextReplicas ? $contextReplicas : $visibleReplicas;
   $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
   $: activeHistory = contextHistory ? $contextHistory : $history;
   $: activeTimeIndex = contextTimeIndex !== undefined ? $contextTimeIndex : $currentTimeIndex;
+  $: activeEnv = contextEnv ? $contextEnv : null;
+  $: positionsMap = $entityPositions;
 
   // Reactive statement to get replica data
   $: {
@@ -73,6 +82,32 @@
   $: isAccountFocused = selectedAccountId !== null;
   $: selectedAccount = isAccountFocused && replica?.state?.accounts && selectedAccountId
     ? replica.state.accounts.get(selectedAccountId) : null;
+
+  // Jurisdictions (time-aware)
+  let availableJurisdictions: Array<{ name?: string }> = [];
+  $: availableJurisdictions = (() => {
+    const env = activeEnv;
+    if (!env?.jReplicas) return [];
+    if (env.jReplicas instanceof Map) {
+      return Array.from(env.jReplicas.values());
+    }
+    if (Array.isArray(env.jReplicas)) {
+      return env.jReplicas;
+    }
+    return Object.values(env.jReplicas || {});
+  })() as Array<{ name?: string }>;
+
+  // Auto-select jurisdiction when available
+  $: {
+    if (showJurisdiction && availableJurisdictions.length > 0) {
+      if (!selectedJurisdictionName) {
+        const active = (activeEnv as any)?.activeJurisdiction || availableJurisdictions[0]?.name;
+        if (active) selectedJurisdictionName = active;
+      } else if (!availableJurisdictions.find((j: any) => j.name === selectedJurisdictionName)) {
+        selectedJurisdictionName = availableJurisdictions[0]?.name || null;
+      }
+    }
+  }
 
   // Reactive component states
   $: consensusExpanded = $settings.componentStates[`consensus-${tab.id}`] ?? true;
@@ -158,6 +193,24 @@
     }
   }
 
+  function handleJurisdictionSelect(event: CustomEvent<{ selected: string | null }>) {
+    const nextJurisdiction = event.detail?.selected ?? null;
+    if (!showJurisdiction || !nextJurisdiction || !tab.entityId || !tab.signerId) return;
+
+    const replicaKey = `${tab.entityId}:${tab.signerId}`;
+    const candidate = activeReplicas?.get?.(replicaKey);
+    const replicaJurisdiction =
+      candidate?.position?.jurisdiction ||
+      candidate?.position?.xlnomy ||
+      candidate?.state?.config?.jurisdiction?.name ||
+      positionsMap?.get?.(tab.entityId)?.jurisdiction;
+
+    if (replicaJurisdiction && replicaJurisdiction !== nextJurisdiction) {
+      selectedAccountId = null;
+      tab = { ...tab, entityId: '', signerId: '' };
+    }
+  }
+
   // Handle account selection from preview click - same as dropdown
   function handleAccountPreviewSelect(event: CustomEvent) {
     // Route to the same handler as dropdown for consistent behavior
@@ -230,11 +283,21 @@
 </script>
 
 <div class="entity-panel" data-panel-id={tab.id}>
+  {#if !hideHeader}
   <div class="panel-header">
     <div class="panel-header-dropdowns">
+      {#if showJurisdiction}
+        <div class="dropdown-group">
+          <JurisdictionDropdown
+            bind:selected={selectedJurisdictionName}
+            on:select={handleJurisdictionSelect}
+          />
+        </div>
+      {/if}
       <div class="dropdown-group">
         <EntityDropdown
           {tab}
+          jurisdictionFilter={selectedJurisdictionName}
           on:entitySelect={handleEntitySelect}
         />
       </div>
@@ -262,6 +325,7 @@
       {/if}
     </div>
   </div>
+  {/if}
 
   {#if isAccountFocused && selectedAccount}
     <!-- Focused Account View -->

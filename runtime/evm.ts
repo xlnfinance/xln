@@ -9,7 +9,7 @@ import type { JBatch } from './j-batch';
 
 import { detectEntityType, encodeBoard, extractNumberFromEntityId, hashBoard } from './entity-factory';
 import { safeStringify } from './serialization-utils';
-import { ConsensusConfig, JurisdictionConfig } from './types';
+import type { ConsensusConfig, JurisdictionConfig } from './types';
 import { DEBUG, isBrowser } from './utils';
 import { logError } from './logger';
 import { BrowserVMEthersProvider } from './browservm-ethers-provider';
@@ -892,15 +892,25 @@ let BROWSER_VM_INSTANCE: any = null;
  * This overrides DEFAULT_JURISDICTIONS with a single BrowserVM-backed jurisdiction
  */
 export const setBrowserVMJurisdiction = (depositoryAddress: string, browserVMInstance?: any) => {
-  // EntityProvider removed from BrowserVM - use placeholder address
-  const entityProviderAddress = '0x0000000000000000000000000000000000000000';
-
   console.log('[BrowserVM] Setting jurisdiction override:', { depositoryAddress, hasBrowserVM: !!browserVMInstance });
 
+  const resolvedBrowserVM = browserVMInstance?.getProvider ? browserVMInstance.getProvider() : browserVMInstance;
+
   // Store browserVM instance if provided
-  if (browserVMInstance) {
-    BROWSER_VM_INSTANCE = browserVMInstance;
+  if (resolvedBrowserVM) {
+    BROWSER_VM_INSTANCE = resolvedBrowserVM;
     console.log('[BrowserVM] Stored browserVM instance for runtime access');
+  }
+
+  const resolveEntityProvider = () => {
+    if (resolvedBrowserVM?.getEntityProviderAddress) return resolvedBrowserVM.getEntityProviderAddress();
+    if (BROWSER_VM_INSTANCE?.getEntityProviderAddress) return BROWSER_VM_INSTANCE.getEntityProviderAddress();
+    return '0x0000000000000000000000000000000000000000';
+  };
+
+  const entityProviderAddress = resolveEntityProvider();
+  if (!entityProviderAddress || entityProviderAddress === '0x0000000000000000000000000000000000000000') {
+    console.warn('[BrowserVM] EntityProvider address missing - numbered entities will fail until EP is deployed.');
   }
 
   DEFAULT_JURISDICTIONS = new Map();
@@ -908,7 +918,7 @@ export const setBrowserVMJurisdiction = (depositoryAddress: string, browserVMIns
     name: 'Arrakis',
     chainId: 1337,
     address: 'browservm://', // BrowserVM uses in-memory EVM, no real RPC
-    entityProviderAddress, // Placeholder - EntityProvider removed from BrowserVM
+    entityProviderAddress,
     depositoryAddress,
   });
 

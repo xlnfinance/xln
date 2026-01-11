@@ -109,6 +109,8 @@ export function createEmptyBatch(): JBatch {
     reserveToReserve: [],
     reserveToCollateral: [],
     settlements: [],
+    cooperativeUpdate: [],
+    cooperativeDisputeProof: [],
     disputeStarts: [], // Match Solidity: InitialDisputeProof[]
     disputeFinalizations: [], // Match Solidity: FinalDisputeProof[]
     externalTokenToReserve: [],
@@ -289,8 +291,15 @@ export function batchAddInsurance(
       forgiveDebtsInTokenIds: [],
       insuranceRegs: [],
       sig: '0x',
+      entityProvider: '0x0000000000000000000000000000000000000000',
+      hankoData: '0x',
+      nonce: 0,
     };
     jBatchState.batch.settlements.push(existing);
+  }
+
+  if (!existing) {
+    throw new Error('Failed to create settlement for insurance registration');
   }
 
   existing.insuranceRegs.push(insuranceReg);
@@ -337,8 +346,8 @@ export function getBatchSize(batch: JBatch): number {
  */
 export interface BrowserVMBatchProcessor {
   processBatch(entityId: string, batch: {
-    reserveToReserve?: Array<{toEntity: string, tokenId: number, amount: bigint}>,
-    reserveToCollateral?: Array<{counterparty: string, tokenId: number, amount: bigint}>,
+    reserveToReserve?: Array<{receivingEntity: string, tokenId: number, amount: bigint}>,
+    reserveToCollateral?: Array<{receivingEntity: string, tokenId: number, pairs: Array<{ entity: string; amount: bigint }>}>,
     settlements?: Array<{leftEntity: string, rightEntity: string, diffs: any[]}>,
   }): Promise<any[]>;
 }

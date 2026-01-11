@@ -11,8 +11,10 @@
 	// Landing page gets transparent topbar
 	let isLandingPage = $derived($page.url.pathname === '/');
 
-	// Show topbar on ALL pages except embed mode
-	let showTopbar = $derived(!isEmbed);
+	const isAppRoute = $derived($page.url.pathname.startsWith('/app'));
+
+	// Show topbar on ALL pages except embed mode and app workspace
+	let showTopbar = $derived(!isEmbed && !isAppRoute);
 </script>
 
 {#if showTopbar}

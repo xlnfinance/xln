@@ -10,7 +10,7 @@ let argon2id = null;
 let blake3 = null;
 
 const BRAINVAULT_V2 = {
-  ALG_ID: 'brainvault/argon2id-sharded/v2.0',
+  ALG_ID: 'brainvault/argon2id-sharded/v2.1',
   SHARD_MEMORY_KB: 256 * 1024,    // 256MB per shard
   ARGON_TIME_COST: 1,
   ARGON_PARALLELISM: 1,
@@ -41,19 +41,22 @@ function bytesToHex(bytes) {
 /**
  * Create salt for a specific shard
  */
-async function createShardSalt(nameHashHex, shardIndex) {
+async function createShardSalt(nameHashHex, shardIndex, shardCount) {
   const nameHash = hexToBytes(nameHashHex);
 
-  // salt = BLAKE3(nameHash || ALG_ID || shardIndex as uint32 BE)
+  // salt = BLAKE3(nameHash || ALG_ID || shardCount || shardIndex as uint32 BE)
+  const countBytes = new Uint8Array(4);
+  new DataView(countBytes.buffer).setUint32(0, shardCount, false);
   const indexBytes = new Uint8Array(4);
   new DataView(indexBytes.buffer).setUint32(0, shardIndex, false);
 
   const algIdBytes = new TextEncoder().encode(BRAINVAULT_V2.ALG_ID);
 
-  const combined = new Uint8Array(nameHash.length + algIdBytes.length + 4);
+  const combined = new Uint8Array(nameHash.length + algIdBytes.length + 4 + 4);
   combined.set(nameHash, 0);
   combined.set(algIdBytes, nameHash.length);
-  combined.set(indexBytes, nameHash.length + algIdBytes.length);
+  combined.set(countBytes, nameHash.length + algIdBytes.length);
+  combined.set(indexBytes, nameHash.length + algIdBytes.length + 4);
 
   const hash = await blake3(combined);
   return hexToBytes(hash);
@@ -140,10 +143,10 @@ self.onmessage = async function(e) {
 
       case 'derive_shard':
         await initCrypto();
-        const { nameHashHex, passphrase, shardIndex } = data;
+        const { nameHashHex, passphrase, shardIndex, shardCount } = data;
 
         const startTime = performance.now();
-        const salt = await createShardSalt(nameHashHex, shardIndex);
+        const salt = await createShardSalt(nameHashHex, shardIndex, shardCount);
         const result = await deriveShard(passphrase, salt);
         const elapsed = performance.now() - startTime;
 
@@ -155,40 +158,6 @@ self.onmessage = async function(e) {
             resultHex: bytesToHex(result),
             elapsedMs: elapsed,
           }
-        });
-        break;
-
-      case 'derive_batch':
-        // Batch mode: process multiple shards sequentially in this worker
-        // Reduces round-trip overhead (main ↔ worker messaging)
-        await initCrypto();
-        const { nameHashHex: nameHash, passphrase: pass, shardIndices } = data;
-        const batchResults = [];
-
-        for (const idx of shardIndices) {
-          const batchStart = performance.now();
-          const shardSalt = await createShardSalt(nameHash, idx);
-          const shardResult = await deriveShard(pass, shardSalt);
-
-          batchResults.push({
-            shardIndex: idx,
-            resultHex: bytesToHex(shardResult),
-            elapsedMs: performance.now() - batchStart
-          });
-
-          // Send progress for each shard in batch
-          self.postMessage({
-            type: 'shard_complete',
-            id,
-            data: batchResults[batchResults.length - 1]
-          });
-        }
-
-        // Signal batch completion
-        self.postMessage({
-          type: 'batch_complete',
-          id,
-          data: { count: batchResults.length }
         });
         break;
 

@@ -182,7 +182,7 @@ Manage cryptographic identity (keys, addresses, entities)
 │                                                              │
 │  🔐 BrainVault Settings:                                     │
 │  • Factor: 5 (64GB memory-hard)                              │
-│  • Derivation: argon2id-sharded/v2.0                         │
+│  • Derivation: argon2id-sharded/v2.1                         │
 │  • Mnemonic: ••••••••••• (24 words) [Reveal]                │
 │  • Derive more signers: [+ Signer 1] [+ Signer 2]          │
 └─────────────────────────────────────────────────────────────┘

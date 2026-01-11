@@ -14,12 +14,17 @@
     isolatedEnv: Writable<any>;
     isolatedHistory?: Writable<any[]> | undefined;
     isolatedTimeIndex?: Writable<number> | undefined;
+    selectedJurisdiction?: string | null;
+    hideSelector?: boolean;
   }
 
-  let { isolatedEnv, isolatedHistory = undefined, isolatedTimeIndex = undefined }: Props = $props();
-
-  // Selected jurisdiction
-  let selectedJurisdictionName = $state<string | null>(null);
+  let {
+    isolatedEnv,
+    isolatedHistory = undefined,
+    isolatedTimeIndex = undefined,
+    selectedJurisdiction = $bindable<string | null>(null),
+    hideSelector = false,
+  }: Props = $props();
 
   // Tab state
   let activeTab = $state<'overview' | 'balances'>('balances'); // Start with Balances
@@ -68,20 +73,20 @@
 
   // Auto-select first jurisdiction when available
   $effect(() => {
-    if (jurisdictions.length > 0 && !selectedJurisdictionName) {
-      selectedJurisdictionName = jurisdictions[0].name;
-      console.log(`[J-Panel] Auto-selected jurisdiction: ${selectedJurisdictionName}`);
+    if (jurisdictions.length > 0 && !selectedJurisdiction) {
+      selectedJurisdiction = jurisdictions[0].name;
+      console.log(`[J-Panel] Auto-selected jurisdiction: ${selectedJurisdiction}`);
     }
     // Reset selection if current selection no longer exists
-    if (selectedJurisdictionName && !jurisdictions.find((j: any) => j.name === selectedJurisdictionName)) {
-      selectedJurisdictionName = jurisdictions.length > 0 ? jurisdictions[0].name : null;
+    if (selectedJurisdiction && !jurisdictions.find((j: any) => j.name === selectedJurisdiction)) {
+      selectedJurisdiction = jurisdictions.length > 0 ? jurisdictions[0].name : null;
     }
   });
 
   // Get selected jurisdiction data
-  let selectedJurisdiction = $derived.by(() => {
-    if (!selectedJurisdictionName) return null;
-    return jurisdictions.find((j: any) => j.name === selectedJurisdictionName) || null;
+  let selectedJurisdictionData = $derived.by(() => {
+    if (!selectedJurisdiction) return null;
+    return jurisdictions.find((j: any) => j.name === selectedJurisdiction) || null;
   });
 
   // Get entity names from current frame
@@ -117,12 +122,12 @@
 
   // Get reserves from selected jurisdiction
   let reserves = $derived.by(() => {
-    if (!selectedJurisdiction?.reserves) return [];
+    if (!selectedJurisdictionData?.reserves) return [];
     const result: Array<{ entityId: string; name: string; tokenId: number; amount: bigint }> = [];
 
-    const reservesMap = selectedJurisdiction.reserves instanceof Map
-      ? selectedJurisdiction.reserves
-      : new Map(Object.entries(selectedJurisdiction.reserves || {}));
+    const reservesMap = selectedJurisdictionData.reserves instanceof Map
+      ? selectedJurisdictionData.reserves
+      : new Map(Object.entries(selectedJurisdictionData.reserves || {}));
 
     for (const [entityId, tokenMap] of reservesMap.entries()) {
       const tokens = tokenMap instanceof Map ? tokenMap : new Map(Object.entries(tokenMap || {}));
@@ -143,12 +148,12 @@
 
   // Get collaterals from selected jurisdiction
   let collaterals = $derived.by(() => {
-    if (!selectedJurisdiction?.collaterals) return [];
+    if (!selectedJurisdictionData?.collaterals) return [];
     const result: Array<{ channelKey: string; tokenId: number; collateral: bigint; ondelta: bigint }> = [];
 
-    const collMap = selectedJurisdiction.collaterals instanceof Map
-      ? selectedJurisdiction.collaterals
-      : new Map(Object.entries(selectedJurisdiction.collaterals || {}));
+    const collMap = selectedJurisdictionData.collaterals instanceof Map
+      ? selectedJurisdictionData.collaterals
+      : new Map(Object.entries(selectedJurisdictionData.collaterals || {}));
 
     for (const [channelKey, tokenMap] of collMap.entries()) {
       const tokens = tokenMap instanceof Map ? tokenMap : new Map(Object.entries(tokenMap || {}));
@@ -169,8 +174,8 @@
 
   // Get mempool from selected jurisdiction
   let mempool = $derived.by(() => {
-    if (!selectedJurisdiction?.mempool) return [];
-    return selectedJurisdiction.mempool;
+    if (!selectedJurisdictionData?.mempool) return [];
+    return selectedJurisdictionData.mempool;
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -219,21 +224,23 @@
   <!-- Header with dropdown -->
   <div class="header">
     <h3>J-Machine</h3>
-    <div class="j-selector">
-      <select bind:value={selectedJurisdictionName} disabled={jurisdictions.length === 0}>
-        {#if jurisdictions.length === 0}
-          <option value="">No jurisdictions</option>
-        {:else}
-          {#each jurisdictions as j}
-            <option value={j.name}>{j.name}</option>
-          {/each}
-        {/if}
-      </select>
-    </div>
+    {#if !hideSelector}
+      <div class="j-selector">
+        <select bind:value={selectedJurisdiction} disabled={jurisdictions.length === 0}>
+          {#if jurisdictions.length === 0}
+            <option value="">No jurisdictions</option>
+          {:else}
+            {#each jurisdictions as j}
+              <option value={j.name}>{j.name}</option>
+            {/each}
+          {/if}
+        </select>
+      </div>
+    {/if}
     <div class="meta">
-      {#if selectedJurisdiction}
+      {#if selectedJurisdictionData}
         <span class="block-badge" title="Block Height">
-          #{selectedJurisdiction.blockNumber?.toString() || '0'}
+          #{selectedJurisdictionData.blockNumber?.toString() || '0'}
         </span>
       {/if}
     </div>
@@ -251,7 +258,7 @@
 
   <!-- Content -->
   <div class="content">
-    {#if !selectedJurisdiction}
+    {#if !selectedJurisdictionData}
       <div class="empty">No jurisdiction selected</div>
     {:else if activeTab === 'overview'}
       <!-- Overview tab -->
@@ -262,32 +269,32 @@
         <div class="info-grid">
           <div class="info-row">
             <span class="info-label">Name</span>
-            <span class="info-value">{selectedJurisdiction.name}</span>
+            <span class="info-value">{selectedJurisdictionData?.name}</span>
           </div>
           <div class="info-row">
             <span class="info-label">Block</span>
-            <span class="info-value">#{selectedJurisdiction.blockNumber?.toString() || '0'}</span>
+            <span class="info-value">#{selectedJurisdictionData?.blockNumber?.toString() || '0'}</span>
           </div>
           <div class="info-row">
             <span class="info-label">State Root</span>
-            <span class="info-value mono state-root" title={formatStateRoot(selectedJurisdiction.stateRoot)}>
-              {formatStateRoot(selectedJurisdiction.stateRoot)}
+            <span class="info-value mono state-root" title={formatStateRoot(selectedJurisdictionData?.stateRoot)}>
+              {formatStateRoot(selectedJurisdictionData?.stateRoot)}
             </span>
           </div>
           <div class="info-row">
             <span class="info-label">Block Delay</span>
-            <span class="info-value">{selectedJurisdiction.blockDelayMs || 300}ms</span>
+            <span class="info-value">{selectedJurisdictionData?.blockDelayMs || 300}ms</span>
           </div>
-          {#if selectedJurisdiction.contracts?.depository}
+          {#if selectedJurisdictionData?.contracts?.depository}
             <div class="info-row">
               <span class="info-label">Depository</span>
-              <span class="info-value mono">{selectedJurisdiction.contracts.depository}</span>
+              <span class="info-value mono">{selectedJurisdictionData.contracts.depository}</span>
             </div>
           {/if}
-          {#if selectedJurisdiction.contracts?.entityProvider}
+          {#if selectedJurisdictionData?.contracts?.entityProvider}
             <div class="info-row">
               <span class="info-label">EntityProvider</span>
-              <span class="info-value mono">{selectedJurisdiction.contracts.entityProvider}</span>
+              <span class="info-value mono">{selectedJurisdictionData.contracts.entityProvider}</span>
             </div>
           {/if}
           <div class="info-row mempool-section">
@@ -318,7 +325,7 @@
           <div class="info-row">
             <span class="info-label">Position</span>
             <span class="info-value mono">
-              ({selectedJurisdiction.position?.x || 0}, {selectedJurisdiction.position?.y || 0}, {selectedJurisdiction.position?.z || 0})
+              ({selectedJurisdictionData?.position?.x || 0}, {selectedJurisdictionData?.position?.y || 0}, {selectedJurisdictionData?.position?.z || 0})
             </span>
           </div>
         </div>

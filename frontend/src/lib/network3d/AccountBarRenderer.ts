@@ -23,7 +23,6 @@ export interface AccountBarVisual {
 export interface AccountBarSettings {
   barsMode: 'close' | 'spread';
   portfolioScale: number;
-  selectedTokenId: number;
   desyncDetected?: boolean | undefined; // Bilateral consensus in progress
   bilateralState?: AccountBarVisual | null | undefined; // Visual state from consensus
 }
@@ -44,27 +43,140 @@ const BAR_COLORS = {
 } as const;
 
 /**
- * Create account capacity bars for a bilateral account
- * @param fromDerived - deriveDelta result from fromEntity's perspective
- * @param toDerived - deriveDelta result from toEntity's perspective
+ * Create account capacity bars for a bilateral account (multi-token parallel bars)
+ * @param deltas - Map of all token deltas for this account
  * @param fromIsLeft - whether fromEntity is the LEFT entity (smaller entityId)
+ * @param xlnFunctions - XLN runtime functions (needed for deriveDelta)
  */
 export function createAccountBars(
   scene: THREE.Scene,
   fromEntity: EntityData,
   toEntity: EntityData,
-  fromDerived: DerivedAccountData,
-  toDerived: DerivedAccountData,
+  deltas: Map<number, any>,  // Map<tokenId, Delta>
   fromIsLeft: boolean,
   settings: AccountBarSettings,
-  getEntitySize: (entityId: string, tokenId: number) => number
+  getEntitySize: (entityId: string, tokenId: number) => number,
+  xlnFunctions: any  // XLNRuntime interface
 ): THREE.Group {
   const group = new THREE.Group();
+
+  // Sort tokens for consistent ordering across all accounts
+  const sortedTokenIds = Array.from(deltas.keys()).sort((a, b) => a - b);
+  if (sortedTokenIds.length === 0) {
+    console.warn('[AccountBars] No tokens in account deltas');
+    return group; // Empty group
+  }
 
   // Calculate bar dimensions
   const barHeight = 0.08;
   const direction = new THREE.Vector3().subVectors(toEntity.position, fromEntity.position);
   const normalizedDirection = direction.clone().normalize();
+
+  // Calculate perpendicular vector for parallel bar layout
+  const perpendicular = calculatePerpendicularVector(normalizedDirection);
+
+  // Auto-scale bar radius for many tokens
+  const tokenCount = sortedTokenIds.length;
+  const baseRadius = barHeight * 2.5;  // Original barRadius = 0.2
+  const adjustedRadius = tokenCount > 4 ? baseRadius * Math.min(1.0, 4 / tokenCount) : baseRadius;
+  const adjustedDiameter = adjustedRadius * 2;
+
+  // Calculate total width and start offset for centering
+  const totalWidth = tokenCount * adjustedDiameter;
+  const startOffset = -(totalWidth / 2) + (adjustedDiameter / 2);
+
+  // Create bars for each token with perpendicular offset
+  for (let i = 0; i < tokenCount; i++) {
+    const tokenId = sortedTokenIds[i]!;  // Safe: i < tokenCount guarantees element exists
+    const delta = deltas.get(tokenId);
+
+    if (!delta || !xlnFunctions?.deriveDelta) {
+      console.warn(`[AccountBars] Missing delta or deriveDelta for token ${tokenId}`);
+      continue;
+    }
+
+    // Derive capacity data for this token and convert BigInt to number
+    const fromDerivedRaw = xlnFunctions.deriveDelta(delta, fromIsLeft);
+    const toDerivedRaw = xlnFunctions.deriveDelta(delta, !fromIsLeft);
+
+    // Convert BigInt values to numbers for 3D visualization
+    const fromDerived: DerivedAccountData = {
+      delta: Number(fromDerivedRaw.delta),
+      totalCapacity: Number(fromDerivedRaw.totalCapacity || 0n),
+      ownCreditLimit: Number(fromDerivedRaw.ownCreditLimit || 0n),
+      peerCreditLimit: Number(fromDerivedRaw.peerCreditLimit || 0n),
+      inCapacity: Number(fromDerivedRaw.inCapacity || 0n),
+      outCapacity: Number(fromDerivedRaw.outCapacity || 0n),
+      collateral: Number(fromDerivedRaw.collateral || 0n),
+      outOwnCredit: Number(fromDerivedRaw.outOwnCredit || 0n),
+      inCollateral: Number(fromDerivedRaw.inCollateral || 0n),
+      outPeerCredit: Number(fromDerivedRaw.outPeerCredit || 0n),
+      inOwnCredit: Number(fromDerivedRaw.inOwnCredit || 0n),
+      outCollateral: Number(fromDerivedRaw.outCollateral || 0n),
+      inPeerCredit: Number(fromDerivedRaw.inPeerCredit || 0n)
+    };
+
+    const toDerived: DerivedAccountData = {
+      delta: Number(toDerivedRaw.delta),
+      totalCapacity: Number(toDerivedRaw.totalCapacity || 0n),
+      ownCreditLimit: Number(toDerivedRaw.ownCreditLimit || 0n),
+      peerCreditLimit: Number(toDerivedRaw.peerCreditLimit || 0n),
+      inCapacity: Number(toDerivedRaw.inCapacity || 0n),
+      outCapacity: Number(toDerivedRaw.outCapacity || 0n),
+      collateral: Number(toDerivedRaw.collateral || 0n),
+      outOwnCredit: Number(toDerivedRaw.outOwnCredit || 0n),
+      inCollateral: Number(toDerivedRaw.inCollateral || 0n),
+      outPeerCredit: Number(toDerivedRaw.outPeerCredit || 0n),
+      inOwnCredit: Number(toDerivedRaw.inOwnCredit || 0n),
+      outCollateral: Number(toDerivedRaw.outCollateral || 0n),
+      inPeerCredit: Number(toDerivedRaw.inPeerCredit || 0n)
+    };
+
+    // Calculate perpendicular offset for this token's bars
+    const offset = startOffset + (i * adjustedDiameter);
+    const perpendicularOffset = perpendicular.clone().multiplyScalar(offset);
+
+    // Create token-specific bar group
+    const tokenBarGroup = createTokenBars(
+      fromEntity,
+      toEntity,
+      normalizedDirection,
+      fromDerived,
+      toDerived,
+      fromIsLeft,
+      settings,
+      getEntitySize,
+      tokenId,
+      adjustedRadius,
+      barHeight
+    );
+
+    // Apply perpendicular offset to position this token's bars
+    tokenBarGroup.position.copy(perpendicularOffset);
+    group.add(tokenBarGroup);
+  }
+
+  scene.add(group);
+  return group;
+}
+
+/**
+ * Create bars for a single token (extracted from original createAccountBars logic)
+ */
+function createTokenBars(
+  fromEntity: EntityData,
+  toEntity: EntityData,
+  normalizedDirection: THREE.Vector3,
+  fromDerived: DerivedAccountData,
+  toDerived: DerivedAccountData,
+  fromIsLeft: boolean,
+  settings: AccountBarSettings,
+  getEntitySize: (entityId: string, tokenId: number) => number,
+  tokenId: number,
+  barRadius: number,
+  barHeight: number
+): THREE.Group {
+  const tokenGroup = new THREE.Group();
 
   // Scale bars based on token value (1px = $1 invariant)
   const decimals = 18;
@@ -162,12 +274,12 @@ export function createAccountBars(
   };
 
   // Get entity sizes to avoid collision
-  const fromEntitySize = getEntitySize(fromEntity.id, settings.selectedTokenId);
-  const toEntitySize = getEntitySize(toEntity.id, settings.selectedTokenId);
+  const fromEntitySize = getEntitySize(fromEntity.id, tokenId);
+  const toEntitySize = getEntitySize(toEntity.id, tokenId);
 
   if (settings.barsMode === 'spread') {
     renderSpreadMode(
-      group,
+      tokenGroup,
       fromEntity,
       toEntity,
       normalizedDirection,
@@ -178,11 +290,12 @@ export function createAccountBars(
       toEntitySize,
       fromCreditUsed,
       toCreditUsed,
-      settings
+      settings,
+      barRadius  // Pass adjusted radius for this token count
     );
   } else {
     renderCloseMode(
-      group,
+      tokenGroup,
       fromEntity,
       toEntity,
       normalizedDirection,
@@ -191,12 +304,12 @@ export function createAccountBars(
       barHeight,
       fromCreditUsed,
       toCreditUsed,
-      settings
+      settings,
+      barRadius  // Pass adjusted radius for this token count
     );
   }
 
-  scene.add(group);
-  return group;
+  return tokenGroup;
 }
 
 /**
@@ -215,9 +328,9 @@ function renderSpreadMode(
   toEntitySize: number,
   fromCreditUsed: number,
   toCreditUsed: number,
-  settings: AccountBarSettings
+  settings: AccountBarSettings,
+  barRadius: number  // Adjusted radius passed from parent
 ): void {
-  const barRadius = barHeight * 2.5;
   const safeGap = 0.2;
 
   // FROM entity bars - extend from fromEntity toward toEntity
@@ -298,9 +411,9 @@ function renderCloseMode(
   barHeight: number,
   fromCreditUsed: number,
   toCreditUsed: number,
-  settings: AccountBarSettings
+  settings: AccountBarSettings,
+  barRadius: number  // Adjusted radius passed from parent
 ): void {
-  const barRadius = barHeight * 2.5;
 
   // Same pattern as spread mode: outOwnCredit → outCollateral → outPeerCredit
   const fromBarSegments = [
@@ -437,4 +550,21 @@ function createDeltaSeparator(barHeight: number, direction: THREE.Vector3): THRE
   separator.quaternion.setFromUnitVectors(axis, targetAxis);
 
   return separator;
+}
+
+/**
+ * Calculate perpendicular vector to entity connection line
+ * Used for positioning parallel token bars
+ */
+function calculatePerpendicularVector(direction: THREE.Vector3): THREE.Vector3 {
+  const up = new THREE.Vector3(0, 1, 0);
+  let perpendicular = new THREE.Vector3().crossVectors(direction, up).normalize();
+
+  // Edge case: If direction is vertical (parallel to UP), cross product fails
+  if (perpendicular.length() < 0.01) {
+    const forward = new THREE.Vector3(0, 0, 1);
+    perpendicular = new THREE.Vector3().crossVectors(direction, forward).normalize();
+  }
+
+  return perpendicular;
 }

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { locale, LOCALES, type Locale } from '$lib/i18n';
+  import Dropdown from '$lib/components/UI/Dropdown.svelte';
 
   let isOpen = false;
 
@@ -7,25 +8,15 @@
     locale.set(loc);
     isOpen = false;
   }
-
-  function handleKeydown(e: KeyboardEvent) {
-    if (e.key === 'Escape') isOpen = false;
-  }
 </script>
-
-<svelte:window on:keydown={handleKeydown} />
-
 <div class="language-switcher">
-  <button class="current" on:click={() => isOpen = !isOpen}>
-    <span class="flag">{LOCALES[$locale].flag}</span>
-    <span class="code">{$locale.toUpperCase()}</span>
-    <svg class="chevron" class:open={isOpen} viewBox="0 0 24 24" fill="none" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-    </svg>
-  </button>
-
-  {#if isOpen}
-    <div class="dropdown">
+  <Dropdown bind:open={isOpen} minWidth={180} maxWidth={240}>
+    <span slot="trigger" class="trigger-content">
+      <span class="flag">{LOCALES[$locale].flag}</span>
+      <span class="code">{$locale.toUpperCase()}</span>
+      <span class="chevron" class:open={isOpen}>▼</span>
+    </span>
+    <div slot="menu" class="menu-content">
       {#each Object.entries(LOCALES) as [code, info]}
         <button
           class="option"
@@ -38,13 +29,8 @@
         </button>
       {/each}
     </div>
-  {/if}
+  </Dropdown>
 </div>
-
-<!-- Click outside to close -->
-{#if isOpen}
-  <div class="backdrop" on:click={() => isOpen = false} on:keydown={() => {}} role="presentation"></div>
-{/if}
 
 <style>
   .language-switcher {
@@ -52,23 +38,16 @@
     z-index: 100;
   }
 
-  .current {
+  .language-switcher :global(.dropdown-wrapper) {
+    width: auto;
+  }
+
+  .trigger-content {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 8px 12px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
     color: rgba(255, 255, 255, 0.8);
     font-size: 13px;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .current:hover {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.2);
   }
 
   .flag {
@@ -81,8 +60,7 @@
   }
 
   .chevron {
-    width: 14px;
-    height: 14px;
+    font-size: 10px;
     transition: transform 0.2s;
   }
 
@@ -90,17 +68,8 @@
     transform: rotate(180deg);
   }
 
-  .dropdown {
-    position: absolute;
-    top: calc(100% + 4px);
-    right: 0;
-    min-width: 180px;
-    background: rgba(20, 20, 30, 0.98);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
+  .menu-content {
     padding: 4px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-    backdrop-filter: blur(20px);
   }
 
   .option {
@@ -120,12 +89,12 @@
   }
 
   .option:hover {
-    background: rgba(255, 255, 255, 0.1);
+    background: var(--dropdown-item-hover, rgba(255, 255, 255, 0.1));
     color: white;
   }
 
   .option.active {
-    background: rgba(139, 92, 246, 0.2);
+    background: var(--dropdown-selected, rgba(139, 92, 246, 0.2));
     color: white;
   }
 
@@ -144,9 +113,4 @@
     font-weight: 500;
   }
 
-  .backdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 99;
-  }
 </style>

@@ -16,7 +16,7 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
     this.browserVM = browserVM;
   }
 
-  async _perform(req: ethers.PerformActionRequest): Promise<any> {
+  override async _perform(req: ethers.PerformActionRequest): Promise<any> {
     switch (req.method) {
       case 'chainId':
         return 1337; // BrowserVM chainId
@@ -62,12 +62,13 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
 
         return ethers.hexlify(result.execResult.returnValue);
 
-      case 'sendTransaction':
+      case 'broadcastTransaction':
         // Execute state-changing transaction via browserVM
+        const tx = ethers.Transaction.from(req.signedTransaction);
         return await this.browserVM.executeTx({
-          to: req.signedTransaction.to as string | undefined,
-          data: req.signedTransaction.data as string,
-          gasLimit: req.signedTransaction.gasLimit ? BigInt(req.signedTransaction.gasLimit) : undefined,
+          to: tx.to ?? undefined,
+          data: tx.data,
+          gasLimit: tx.gasLimit ? BigInt(tx.gasLimit) : undefined,
         });
 
       case 'getTransaction':

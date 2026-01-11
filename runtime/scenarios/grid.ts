@@ -24,6 +24,7 @@ import {
   createGridEntities,
   createNumberedEntity,
 } from './boot';
+import { getProcess } from './helpers';
 
 // Simple snapshot helper for this scenario
 function pushSnapshot(env: Env, tag: string, description: string, metadata: Record<string, any> = {}) {
@@ -48,6 +49,17 @@ const USDC_TOKEN_ID = 1;
 
 function usd(amount: number): bigint {
   return BigInt(amount) * 10n ** 18n;
+}
+
+// Process any pending j_events queued by j-watcher
+async function processJEvents(env: Env): Promise<void> {
+  const process = await getProcess();
+  const pendingInputs = env.runtimeInput?.entityInputs || [];
+  if (pendingInputs.length > 0) {
+    const toProcess = [...pendingInputs];
+    env.runtimeInput.entityInputs = [];
+    await process(env, toProcess);
+  }
 }
 
 export async function grid(env: Env): Promise<void> {
@@ -116,7 +128,6 @@ export async function grid(env: Env): Promise<void> {
   }
 
   // Process j_events from BrowserVM
-  const { processJEvents } = await import('../j-event-watcher');
   await processJEvents(env);
 
   console.log(`✅ Funded ${gridEntities.length} nodes with $100K each`);
@@ -275,12 +286,12 @@ export async function grid(env: Env): Promise<void> {
   console.log('\n\n📊 SCALING COMPARISON\n');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('BROADCAST MODEL (Traditional Blockchain):');
-  console.log(`  • Nodes: ${fundedNodes.length}`);
-  console.log(`  • Connections: ${fundedNodes.length} (all → J-Machine)`);
+  console.log(`  • Nodes: ${gridEntities.length}`);
+  console.log(`  • Connections: ${gridEntities.length} (all → J-Machine)`);
   console.log('  • Bottleneck: J-Machine mempool capacity');
   console.log('  • Complexity: O(n) txs to single validator');
   console.log('  • Block capacity: ~10-20 txs/block');
-  console.log(`  • Queue buildup: ${fundedNodes.length - 20} pending txs`);
+  console.log(`  • Queue buildup: ${gridEntities.length - 20} pending txs`);
   console.log('');
   console.log('HUB-SPOKE MODEL (Payment Channel Network):');
   console.log(`  • Nodes: ${gridEntities.length}`);
@@ -298,12 +309,12 @@ export async function grid(env: Env): Promise<void> {
   await pushSnapshot(env, 'COMPARISON', 'Broadcast vs Hub-Spoke scaling metrics', {
     broadcast: {
       model: 'Traditional Blockchain',
-      nodes: fundedNodes.length,
-      connections: fundedNodes.length,
+      nodes: gridEntities.length,
+      connections: gridEntities.length,
       bottleneck: 'J-Machine mempool',
       complexity: 'O(n)',
       blockCapacity: 20,
-      queueBuildup: fundedNodes.length - 20
+      queueBuildup: gridEntities.length - 20
     },
     hubSpoke: {
       model: 'Payment Channel Network',
