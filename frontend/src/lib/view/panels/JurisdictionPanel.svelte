@@ -50,9 +50,14 @@
   let selectedTokenIdText = $state('');
   let browserVmTokens = $state<BrowserVMTokenInfo[]>([]);
   let externalBalances = $state<Array<{ address: string; label: string; balance: bigint }>>([]);
+  let externalEthBalances = $state<Array<{ address: string; label: string; balance: bigint }>>([]);
   let externalBalancesLoading = $state(false);
+  let externalEthBalancesLoading = $state(false);
   let externalBalancesError = $state<string | null>(null);
+  let externalEthBalancesError = $state<string | null>(null);
+  let externalBalanceMode = $state<'token' | 'eth'>('token');
   let balanceRequestId = 0;
+  let ethBalanceRequestId = 0;
 
   // ═══════════════════════════════════════════════════════════════════════════
   //          TIME-TRAVEL AWARE DATA DERIVATION
@@ -288,6 +293,11 @@
     };
   });
 
+  let externalBalanceCount = $derived.by(() => {
+    if (externalBalanceMode === 'eth') return externalEthBalances.length;
+    return externalBalances.length;
+  });
+
   let filteredReserves = $derived.by(() => {
     if (selectedTokenId === null) return reserves;
     return reserves.filter(entry => entry.tokenId === selectedTokenId);
@@ -372,6 +382,55 @@
     })();
   });
 
+  $effect(() => {
+    const signers = signerRefs;
+    const xln = $xlnInstance;
+
+    if (!isLive || signers.length === 0 || !xln?.getBrowserVMInstance) {
+      externalEthBalances = [];
+      externalEthBalancesLoading = false;
+      externalEthBalancesError = null;
+      return;
+    }
+
+    const browserVM = xln.getBrowserVMInstance();
+    if (!browserVM?.getEthBalance) {
+      externalEthBalances = [];
+      externalEthBalancesLoading = false;
+      externalEthBalancesError = null;
+      return;
+    }
+
+    const requestId = ++ethBalanceRequestId;
+    externalEthBalancesLoading = true;
+    externalEthBalancesError = null;
+
+    (async () => {
+      try {
+        const nextBalances: Array<{ address: string; label: string; balance: bigint }> = [];
+        for (const signer of signers) {
+          const balance = await browserVM.getEthBalance(signer.address);
+          if (balance > 0n) {
+            nextBalances.push({
+              address: signer.address,
+              label: signer.label,
+              balance
+            });
+          }
+        }
+        if (requestId !== ethBalanceRequestId) return;
+        externalEthBalances = nextBalances;
+      } catch (err) {
+        if (requestId !== ethBalanceRequestId) return;
+        externalEthBalancesError = err instanceof Error ? err.message : String(err);
+      } finally {
+        if (requestId === ethBalanceRequestId) {
+          externalEthBalancesLoading = false;
+        }
+      }
+    })();
+  });
+
   // ═══════════════════════════════════════════════════════════════════════════
   //                              HELPERS
   // ═══════════════════════════════════════════════════════════════════════════
@@ -414,6 +473,12 @@
     const absAmount = amount < 0n ? -amount : amount;
     const formatted = $xlnFunctions.formatTokenAmount(absAmount, info.decimals);
     return `${amount < 0n ? '-' : ''}${formatted} ${info.symbol}`;
+  }
+
+  function formatEthAmount(amount: bigint): string {
+    const absAmount = amount < 0n ? -amount : amount;
+    const formatted = $xlnFunctions.formatTokenAmount(absAmount, 18);
+    return `${amount < 0n ? '-' : ''}${formatted} ETH`;
   }
 
   function formatChannelKey(key: string): string {
@@ -605,17 +670,16 @@
         {:else}
           <div class="storage-table">
             {#each filteredReserves as r}
-              <div
+              <button
+                type="button"
                 class="storage-row clickable"
                 onclick={() => handleEntityClick(r.entityId)}
                 ondblclick={() => handleEntityExpand(r.entityId, r.name)}
-                role="button"
-                tabindex="0"
               >
                 <span class="entity-label">{r.name}</span>
                 <span class="key">[{formatEntityId(r.entityId)}][{getTokenSymbol(r.tokenId)}]</span>
                 <span class="value">{formatTokenAmountFor(r.amount, r.tokenId)}</span>
-              </div>
+              </button>
             {/each}
           </div>
         {/if}
@@ -669,43 +733,94 @@
       <!-- External balances (BrowserVM ERC20) -->
       <div class="section">
         <div class="section-header">
-          <span class="section-title">External Balances{selectedTokenMeta ? ` · ${selectedTokenMeta.symbol}` : ''}</span>
-          <span class="count">{externalBalances.length}</span>
+          <span class="section-title">External Balances</span>
+          <div class="balance-tabs">
+            <button
+              type="button"
+              class="balance-tab"
+              class:active={externalBalanceMode === 'token'}
+              onclick={() => externalBalanceMode = 'token'}
+            >
+              Token
+            </button>
+            <button
+              type="button"
+              class="balance-tab"
+              class:active={externalBalanceMode === 'eth'}
+              onclick={() => externalBalanceMode = 'eth'}
+            >
+              ETH
+            </button>
+          </div>
+          <span class="count">{externalBalanceCount}</span>
         </div>
-        {#if !isLive}
-          <div class="empty">External balances are available in live mode only</div>
-        {:else if !selectedTokenMeta}
-          <div class="empty">Select a token to view external balances</div>
-        {:else if !selectedTokenMeta.address}
-          <div class="empty">No external token mapping for this token</div>
-        {:else if signerRefs.length === 0}
-          <div class="empty">No signers available</div>
-        {:else if externalBalancesLoading}
-          <div class="empty">Loading external balances…</div>
-        {:else if externalBalancesError}
-          <div class="empty error">{externalBalancesError}</div>
-        {:else if externalBalances.length === 0}
-          <div class="empty">No external balances</div>
-        {:else}
-          <table class="accounts-table external-balances-table">
-            <thead>
-              <tr>
-                <th>Signer</th>
-                <th>Address</th>
-                <th class="right">Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each externalBalances as entry}
-                {@const tokenId = selectedTokenMeta?.tokenId ?? 0}
+        {#if externalBalanceMode === 'token'}
+          {#if !isLive}
+            <div class="empty">External balances are available in live mode only</div>
+          {:else if !selectedTokenMeta}
+            <div class="empty">Select a token to view external balances</div>
+          {:else if !selectedTokenMeta.address}
+            <div class="empty">No external token mapping for this token</div>
+          {:else if signerRefs.length === 0}
+            <div class="empty">No signers available</div>
+          {:else if externalBalancesLoading}
+            <div class="empty">Loading external balances…</div>
+          {:else if externalBalancesError}
+            <div class="empty error">{externalBalancesError}</div>
+          {:else if externalBalances.length === 0}
+            <div class="empty">No external balances</div>
+          {:else}
+            <table class="accounts-table external-balances-table">
+              <thead>
                 <tr>
-                  <td class="signer-cell">{entry.label}</td>
-                  <td class="mono" title={entry.address}>{formatEntityId(entry.address)}</td>
-                  <td class="value-cell right">{formatTokenAmountFor(entry.balance, tokenId)}</td>
+                  <th>Signer</th>
+                  <th>Address</th>
+                  <th class="right">Balance</th>
                 </tr>
-              {/each}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {#each externalBalances as entry}
+                  {@const tokenId = selectedTokenMeta?.tokenId ?? 0}
+                  <tr>
+                    <td class="signer-cell">{entry.label}</td>
+                    <td class="mono" title={entry.address}>{formatEntityId(entry.address)}</td>
+                    <td class="value-cell right">{formatTokenAmountFor(entry.balance, tokenId)}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          {/if}
+        {:else}
+          {#if !isLive}
+            <div class="empty">External balances are available in live mode only</div>
+          {:else if signerRefs.length === 0}
+            <div class="empty">No signers available</div>
+          {:else if externalEthBalancesLoading}
+            <div class="empty">Loading ETH balances…</div>
+          {:else if externalEthBalancesError}
+            <div class="empty error">{externalEthBalancesError}</div>
+          {:else if externalEthBalances.length === 0}
+            <div class="empty">No ETH balances</div>
+          {:else}
+            <table class="accounts-table external-balances-table">
+              <thead>
+                <tr>
+                  <th>Signer</th>
+                  <th>Address</th>
+                  <th class="right">ETH</th>
+                </tr>
+              </thead>
+              <tbody>
+                {#each externalEthBalances as entry}
+                  <tr>
+                    <td class="signer-cell">{entry.label}</td>
+                    <td class="mono" title={entry.address}>{formatEntityId(entry.address)}</td>
+                    <td class="value-cell right">{formatEthAmount(entry.balance)}</td>
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          {/if}
         {/if}
       </div>
 
@@ -848,11 +963,34 @@
     padding: 6px 8px;
     background: #0d1117;
     border-bottom: 1px solid #21262d;
+    gap: 8px;
   }
 
   .section-title {
     font-size: 9px;
     color: #d29922;
+  }
+
+  .balance-tabs {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+  }
+
+  .balance-tab {
+    border: 1px solid #30363d;
+    background: #0d1117;
+    color: #8b949e;
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .balance-tab.active {
+    color: #c9d1d9;
+    border-color: #58a6ff;
+    box-shadow: 0 0 0 1px rgba(88, 166, 255, 0.2);
   }
 
   .count {
@@ -1003,8 +1141,14 @@
     justify-content: space-between;
     align-items: center;
     padding: 4px 8px;
+    border: 0;
     border-bottom: 1px solid #21262d;
     gap: 8px;
+    width: 100%;
+    background: transparent;
+    text-align: left;
+    color: inherit;
+    font: inherit;
   }
 
   .storage-row:last-child {

@@ -470,6 +470,11 @@ export class BrowserVMProvider {
     return decoded[0];
   }
 
+  async getEthBalance(owner: string): Promise<bigint> {
+    const account = await this.vm.stateManager.getAccount(createAddressFromString(owner));
+    return account?.balance || 0n;
+  }
+
   async getErc20Allowance(tokenAddress: string, owner: string, spender: string): Promise<bigint> {
     const callData = this.erc20Interface!.encodeFunctionData('allowance', [owner, spender]);
     const result = await this.vm.evm.runCall({

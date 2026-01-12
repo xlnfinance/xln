@@ -88,6 +88,7 @@ export type BrowserVMInstance = {
   getTokenAddress: (symbol: string) => string | null;
   getTokenId: (symbol: string) => number | null;
   getErc20Balance: (tokenAddress: string, owner: string) => Promise<bigint>;
+  getEthBalance: (owner: string) => Promise<bigint>;
   fundSignerWallet: (address: string, amount?: bigint) => Promise<void>;
 };
 
