@@ -365,18 +365,6 @@ let vrHammer: VRHammer | null = null;
   }> = [];
 
   // Active animations tracking
-  let flyingTxAnimations: Array<{
-    mesh: THREE.Mesh;
-    startPos: THREE.Vector3;
-    endPos: THREE.Vector3;
-    progress: number;
-    duration: number;
-    startTime: number;
-    txIndex: number;
-    tx: any;
-    blockHeight: number;
-  }> = [];
-
   let entityInputStrikes: Array<{
     line: THREE.Line;
     startTime: number;
@@ -818,42 +806,10 @@ let vrHammer: VRHammer | null = null;
         const txIndex = jMachineTxBoxes.length;
         const tx = mempool[txIndex];
 
-        // Trigger visual animation: yellow cube flies from entity to J-Machine
-        if (tx && (tx.from || tx.entityId)) {
-          const sourceEntityId = tx.from || tx.entityId;
-          const sourceEntity = entities.find(e => e.id === sourceEntityId);
-
-          if (sourceEntity && activeJMachine) {
-            // Create flying TX cube animation
-            const finalPos = activeJMachine.position.clone();
-            // Add the cube's final position offset (same logic as createMempoolTxCube)
-            const gridSize = 3;
-            const spacing = 2.5;
-            const xIndex = txIndex % gridSize;
-            const zIndex = Math.floor(txIndex / gridSize) % gridSize;
-            const yIndex = Math.floor(txIndex / (gridSize * gridSize));
-            const halfGrid = (gridSize - 1) * spacing / 2;
-            finalPos.add(new THREE.Vector3(
-              -halfGrid + xIndex * spacing,
-              -4 + yIndex * spacing,
-              -halfGrid + zIndex * spacing
-            ));
-
-            createFlyingTxCube(sourceEntity.position, finalPos, txIndex, tx, nextBlockHeight);
-            // Placeholder to advance loop (actual cube added when animation completes)
-            jMachineTxBoxes.push(null as any);
-          } else {
-            // No animation, create cube directly
-            const txCube = createMempoolTxCube(txIndex, tx, nextBlockHeight);
-            activeJMachine.add(txCube);
-            jMachineTxBoxes.push(txCube);
-          }
-        } else {
-          // No source entity, create cube directly
-          const txCube = createMempoolTxCube(txIndex, tx, nextBlockHeight);
-          activeJMachine.add(txCube);
-          jMachineTxBoxes.push(txCube);
-        }
+        // Create TX cube directly in J-mempool (instant, no flying animation)
+        const txCube = createMempoolTxCube(txIndex, tx, nextBlockHeight);
+        activeJMachine.add(txCube);
+        jMachineTxBoxes.push(txCube);
       }
 
       // Blockchain visualization: When mempool clears (broadcast), convert to committed block
@@ -1123,47 +1079,6 @@ let vrHammer: VRHammer | null = null;
     }
 
     return group;
-  }
-
-  // Create flying TX cube animation (entity → J-mempool)
-  function createFlyingTxCube(
-    startPos: THREE.Vector3,
-    endPos: THREE.Vector3,
-    txIndex: number,
-    tx: any,
-    blockHeight: number
-  ) {
-    if (!scene) return;
-
-    // Create yellow cube
-    const cubeSize = 1.5;
-    const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
-    const material = new THREE.MeshLambertMaterial({
-      color: 0xffcc00,
-      transparent: true,
-      opacity: 0.95,
-      emissive: 0xffaa00,
-      emissiveIntensity: 0.8
-    });
-    const cube = new THREE.Mesh(geometry, material);
-    cube.position.copy(startPos);
-    scene.add(cube);
-
-    // Duration: 200ms / animationSpeed
-    const duration = 200 / animationSpeed;
-    const startTime = performance.now();
-
-    flyingTxAnimations.push({
-      mesh: cube,
-      startPos: startPos.clone(),
-      endPos: endPos.clone(),
-      progress: 0,
-      duration,
-      startTime,
-      txIndex,
-      tx,
-      blockHeight
-    });
   }
 
   // Format mempool tx into detailed label with batch contents
@@ -1728,15 +1643,6 @@ let vrHammer: VRHammer | null = null;
     entityMeshMap.clear();
 
     // Clean up active animations (prevent memory leak)
-    flyingTxAnimations.forEach(anim => {
-      if (anim.mesh && scene) {
-        scene.remove(anim.mesh);
-        anim.mesh.geometry.dispose();
-        (anim.mesh.material as THREE.Material).dispose();
-      }
-    });
-    flyingTxAnimations = [];
-
     entityInputStrikes.forEach(strike => {
       if (strike.line && scene) {
         scene.remove(strike.line);
@@ -4548,9 +4454,6 @@ let vrHammer: VRHammer | null = null;
       effectOperations.process(scene, entityMeshMap, deltaTime, 10);
     }
 
-    // ===== ANIMATE FLYING TX CUBES =====
-    animateFlyingTxCubes();
-
     // ===== ANIMATE ENTITY INPUT STRIKES =====
     animateEntityInputStrikes();
 
@@ -5157,43 +5060,6 @@ let vrHammer: VRHammer | null = null;
     const entity = entities.find(e => e.id === entityId);
     if (entity) {
       entity.lastActivity = Date.now();
-    }
-  }
-
-  // Animate flying TX cubes (entity → J-mempool)
-  function animateFlyingTxCubes() {
-    if (!scene) return;
-
-    const now = performance.now();
-
-    for (let i = flyingTxAnimations.length - 1; i >= 0; i--) {
-      const anim = flyingTxAnimations[i];
-      if (!anim) continue;
-
-      const elapsed = now - anim.startTime;
-      anim.progress = Math.min(elapsed / anim.duration, 1.0);
-
-      // Linear interpolation
-      anim.mesh.position.lerpVectors(anim.startPos, anim.endPos, anim.progress);
-
-      // Animation complete
-      if (anim.progress >= 1.0) {
-        // Remove flying cube
-        scene.remove(anim.mesh);
-        anim.mesh.geometry.dispose();
-        (anim.mesh.material as THREE.Material).dispose();
-
-        // Create static mempool cube at final position
-        const activeJMachine = jMachine;
-        if (activeJMachine) {
-          const txCube = createMempoolTxCube(anim.txIndex, anim.tx, anim.blockHeight);
-          activeJMachine.add(txCube);
-          jMachineTxBoxes[anim.txIndex] = txCube; // Replace placeholder at correct index
-        }
-
-        // Remove from array
-        flyingTxAnimations.splice(i, 1);
-      }
     }
   }
 
