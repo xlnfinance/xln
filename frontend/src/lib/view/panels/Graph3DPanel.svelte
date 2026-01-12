@@ -335,7 +335,6 @@ let vrHammer: VRHammer | null = null;
     blockNumber: bigint;
     container: THREE.Group;
     txCubes: THREE.Object3D[];
-    prevHashLine: THREE.Line | null;
     yOffset: number;
   }> = []; // Last 3 committed blocks stacked above J-machine
   let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) problem)
@@ -857,19 +856,6 @@ let vrHammer: VRHammer | null = null;
           block.yOffset += blockSpacing;
           block.container.position.y = activeJMachine.position.y + block.yOffset;
 
-          // Update prevHash line endpoints (line must follow block positions)
-          if (block.prevHashLine && idx > 0) {
-            const prevBlock = jBlockHistory[idx - 1];
-            if (prevBlock) {
-              const positions = (block.prevHashLine.geometry as THREE.BufferGeometry).attributes['position'];
-              if (positions) {
-                positions.setXYZ(0, block.container.position.x, block.container.position.y, block.container.position.z);
-                positions.setXYZ(1, prevBlock.container.position.x, prevBlock.container.position.y, prevBlock.container.position.z);
-                positions.needsUpdate = true;
-              }
-            }
-          }
-
           // No opacity changes - uniform J-mempool style for all blocks
         });
 
@@ -879,32 +865,11 @@ let vrHammer: VRHammer | null = null;
         blockContainer.position.y += newYOffset;
         scene.add(blockContainer);
 
-        // Draw prevHash line to previous block (cyan line)
-        let prevHashLine: THREE.Line | null = null;
-        if (jBlockHistory.length > 0) {
-          const prevBlock = jBlockHistory[jBlockHistory.length - 1];
-          if (prevBlock) {
-            const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-              blockContainer.position.clone(),
-              prevBlock.container.position.clone()
-            ]);
-            const lineMaterial = new THREE.LineBasicMaterial({
-              color: 0x00ffff, // Cyan prevHash reference
-              transparent: true,
-              opacity: 0.6,
-              linewidth: 1
-            });
-            prevHashLine = new THREE.Line(lineGeometry, lineMaterial);
-            scene.add(prevHashLine);
-          }
-        }
-
         // Add to history
         jBlockHistory.push({
           blockNumber,
           container: blockContainer,
           txCubes: committedCubes,
-          prevHashLine,
           yOffset: newYOffset
         });
 
@@ -913,7 +878,6 @@ let vrHammer: VRHammer | null = null;
           const oldBlock = jBlockHistory.shift();
           if (oldBlock) {
             scene.remove(oldBlock.container);
-            if (oldBlock.prevHashLine) scene.remove(oldBlock.prevHashLine);
             oldBlock.container.traverse((child: any) => {
               if (child.geometry) child.geometry.dispose();
               if (child.material) {
@@ -925,10 +889,6 @@ let vrHammer: VRHammer | null = null;
                 }
               }
             });
-            if (oldBlock.prevHashLine) {
-              oldBlock.prevHashLine.geometry.dispose();
-              (oldBlock.prevHashLine.material as THREE.Material).dispose();
-            }
           }
         }
 
@@ -1005,7 +965,6 @@ let vrHammer: VRHammer | null = null;
           // Clear old blocks
           jBlockHistory.forEach(block => {
             scene.remove(block.container);
-            if (block.prevHashLine) scene.remove(block.prevHashLine);
             block.container.traverse((child: any) => {
               if (child.geometry) child.geometry.dispose();
               if (child.material) {
@@ -1014,10 +973,6 @@ let vrHammer: VRHammer | null = null;
                 else mat.dispose();
               }
             });
-            if (block.prevHashLine) {
-              block.prevHashLine.geometry.dispose();
-              (block.prevHashLine.material as THREE.Material).dispose();
-            }
           });
           jBlockHistory = [];
 
@@ -1063,30 +1018,10 @@ let vrHammer: VRHammer | null = null;
 
             scene.add(blockContainer);
 
-            // prevHash line to previous block
-            let prevHashLine: THREE.Line | null = null;
-            if (idx > 0) {
-              const prevBlock = jBlockHistory[idx - 1];
-              if (prevBlock) {
-                const lineGeo = new THREE.BufferGeometry().setFromPoints([
-                  blockContainer.position.clone(),
-                  prevBlock.container.position.clone()
-                ]);
-                const lineMat = new THREE.LineBasicMaterial({
-                  color: 0x00ffff,
-                  transparent: true,
-                  opacity: 0.6
-                });
-                prevHashLine = new THREE.Line(lineGeo, lineMat);
-                scene.add(prevHashLine);
-              }
-            }
-
             jBlockHistory.push({
               blockNumber: blockNum,
               container: blockContainer,
               txCubes,
-              prevHashLine,
               yOffset
             });
           });
@@ -2920,7 +2855,6 @@ let vrHammer: VRHammer | null = null;
     // Remove J-block history (blockchain visualization)
     jBlockHistory.forEach(block => {
       scene.remove(block.container);
-      if (block.prevHashLine) scene.remove(block.prevHashLine);
       block.container.traverse((child: any) => {
         if (child.geometry) child.geometry.dispose();
         if (child.material) {
@@ -2932,10 +2866,6 @@ let vrHammer: VRHammer | null = null;
           }
         }
       });
-      if (block.prevHashLine) {
-        block.prevHashLine.geometry.dispose();
-        (block.prevHashLine.material as THREE.Material).dispose();
-      }
     });
     jBlockHistory = [];
 
