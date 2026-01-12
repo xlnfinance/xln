@@ -91,6 +91,8 @@ export type BrowserVMInstance = {
   getEthBalance: (owner: string) => Promise<bigint>;
   fundSignerWallet: (address: string, amount?: bigint) => Promise<void>;
   setBlockTimestamp?: (timestamp: number) => void;
+  beginJurisdictionBlock?: (timestamp: number) => void;
+  endJurisdictionBlock?: () => void;
 };
 
 /**

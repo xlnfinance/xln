@@ -10,6 +10,8 @@
  */
 
 import { createVM, runTx } from '@ethereumjs/vm';
+import { createBlock } from '@ethereumjs/block';
+import type { Block } from '@ethereumjs/block';
 import { createLegacyTx, createTxFromRLP } from '@ethereumjs/tx';
 import { createAddressFromPrivateKey, createAddressFromString, hexToBytes, createAccount, bytesToHex } from '@ethereumjs/util';
 import type { Address } from '@ethereumjs/util';
@@ -63,6 +65,7 @@ export class BrowserVMProvider {
   private blockHash = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Current block hash
   private prevBlockHash = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Previous block hash
   private blockTimestamp = 0; // Deterministic block timestamp (set by runtime)
+  private activeBlock: Block | null = null;
   // ─────────────────────────────────────────────────────────────────────────────
   // Event callbacks receive BATCHES of events (all events from one tx/block)
   // This matches real blockchain behavior where events are grouped by block
@@ -185,8 +188,7 @@ export class BrowserVMProvider {
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
-    const result = await runTx(this.vm, { tx });
-    this.incrementBlock(); // Transaction mined successfully
+    const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
       console.error('[BrowserVM] Account deployment failed:', result.execResult.exceptionError);
@@ -230,8 +232,7 @@ export class BrowserVMProvider {
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
-    const result = await runTx(this.vm, { tx });
-    this.incrementBlock(); // Transaction mined successfully
+    const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
       console.error('[BrowserVM] Depository deployment failed:', result.execResult.exceptionError);
@@ -261,8 +262,7 @@ export class BrowserVMProvider {
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
-    const result = await runTx(this.vm, { tx });
-    this.incrementBlock(); // Transaction mined successfully
+    const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
       console.error('[BrowserVM] EntityProvider deployment failed:', result.execResult.exceptionError);
@@ -285,8 +285,7 @@ export class BrowserVMProvider {
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
-    const result = await runTx(this.vm, { tx });
-    this.incrementBlock(); // Transaction mined successfully
+    const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
       console.error('[BrowserVM] DeltaTransformer deployment failed:', result.execResult.exceptionError);
@@ -380,8 +379,7 @@ export class BrowserVMProvider {
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
-    const result = await runTx(this.vm, { tx });
-    this.incrementBlock();
+    const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
       throw new Error(`ERC20 deployment failed: ${result.execResult.exceptionError}`);
@@ -410,8 +408,7 @@ export class BrowserVMProvider {
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
-    const result = await runTx(this.vm, { tx });
-    this.incrementBlock();
+    const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
       throw new Error(`externalTokenToReserve failed: ${result.execResult.exceptionError}`);
@@ -543,8 +540,7 @@ export class BrowserVMProvider {
       value: txData.value ?? 0n,
     }, { common: this.common }).sign(privKey);
 
-    const result = await runTx(this.vm, { tx });
-    this.incrementBlock();
+    const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
       throw new Error(`executeTx failed: ${result.execResult.exceptionError}`);
@@ -561,8 +557,7 @@ export class BrowserVMProvider {
   async executeSignedTx(serializedTx: string): Promise<string> {
     const raw = hexToBytes(serializedTx as `0x${string}`);
     const tx = createTxFromRLP(raw, { common: this.common });
-    const result = await runTx(this.vm, { tx });
-    this.incrementBlock();
+    const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
       throw new Error(`executeSignedTx failed: ${result.execResult.exceptionError}`);
@@ -670,8 +665,7 @@ export class BrowserVMProvider {
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
-    const result = await runTx(this.vm, { tx });
-    this.incrementBlock(); // Transaction mined successfully
+    const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
       throw new Error(`mintToReserve failed: ${result.execResult.exceptionError}`);
@@ -704,8 +698,7 @@ export class BrowserVMProvider {
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
-    const result = await runTx(this.vm, { tx });
-    this.incrementBlock(); // Transaction mined successfully
+    const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
       throw new Error(`reserveToReserve failed: ${result.execResult.exceptionError}`);
@@ -782,11 +775,10 @@ export class BrowserVMProvider {
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
-    const result = await runTx(this.vm, { tx });
+    const result = await this.runTxInBlock(tx);
     if (result.execResult.exceptionError) {
       throw new Error(`R2C failed: ${result.execResult.exceptionError}`);
     }
-    this.incrementBlock();
     console.log(`[BrowserVM] R2C: ${amount} from ${entityId.slice(0, 10)}... → account with ${counterpartyId.slice(0, 10)}...`);
     console.log(`[BrowserVM] R2C: logs=${result.execResult.logs?.length || 0}`);
 
@@ -869,14 +861,12 @@ export class BrowserVMProvider {
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
-    const result = await runTx(this.vm, { tx });
+    const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
       console.error(`[BrowserVM] enforceDebts failed:`, result.execResult.exceptionError);
       return 0n;
     }
-
-    this.incrementBlock(); // Transaction mined successfully
 
     try {
       const decoded = this.depositoryInterface.decodeFunctionResult('enforceDebts', result.execResult.returnValue);
@@ -908,15 +898,13 @@ export class BrowserVMProvider {
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
-    const result = await runTx(this.vm, { tx });
+    const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
       console.error('[BrowserVM] processBatch revert:', safeStringify(result.execResult.exceptionError));
       console.error('  returnData:', bytesToHex(result.execResult.returnValue));
       throw new Error(`Batch processing failed: ${result.execResult.exceptionError.error || 'revert'}`);
     }
-
-    this.incrementBlock();
 
     // Log raw events before parsing
     const rawLogs = result.execResult.logs || [];
@@ -949,7 +937,7 @@ export class BrowserVMProvider {
 
   /** Get current block number */
   getBlockNumber(): bigint {
-    return this.vm.blockchain?.currentBlock?.header?.number || 0n;
+    return BigInt(this.blockHeight);
   }
 
   /** Check if initialized */
@@ -985,8 +973,6 @@ export class BrowserVMProvider {
       console.error('[BrowserVM] getInsuranceLines failed:', result.execResult.exceptionError);
       return [];
     }
-    this.incrementBlock();
-
     try {
       const decoded = this.depositoryInterface.decodeFunctionResult('getInsuranceLines', result.execResult.returnValue);
       return decoded[0].map((line: any) => ({
@@ -1071,8 +1057,7 @@ export class BrowserVMProvider {
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
-    const result = await runTx(this.vm, { tx });
-    this.incrementBlock(); // Transaction mined successfully
+    const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
       console.error('[BrowserVM] settle failed:', result.execResult.exceptionError);
@@ -1360,25 +1345,39 @@ export class BrowserVMProvider {
     return collaterals;
   }
 
-  /** Get current block height (incremented with each successful transaction) */
+  /** Get current block height (incremented per J-block) */
   getBlockHeight(): number {
     return this.blockHeight;
   }
 
   /**
-   * Increment block height and compute new block hash.
-   * Block hash = keccak256(prevBlockHash + blockHeight + timestamp)
-   * This mimics ETH block structure for JBlock consensus.
+   * Build a new block header for the current J-block.
+   * Used to give EVM contracts correct block.number/timestamp.
    */
-  private incrementBlock(): void {
+  private createBlock(timestampMs: number): Block {
+    const nextHeight = this.blockHeight + 1;
+    const headerData = {
+      parentHash: hexToBytes(this.blockHash),
+      number: BigInt(nextHeight),
+      timestamp: BigInt(Math.floor(timestampMs / 1000)),
+      gasLimit: 30_000_000n,
+    };
+    const block = createBlock({ header: headerData }, { common: this.common });
     this.prevBlockHash = this.blockHash;
-    this.blockHeight++;
-    // Compute deterministic block hash using ethers.js keccak256
-    const packed = ethers.solidityPacked(
-      ['bytes32', 'uint256', 'uint256'],
-      [this.prevBlockHash, this.blockHeight, this.blockTimestamp]
-    );
-    this.blockHash = ethers.keccak256(packed);
+    this.blockHeight = nextHeight;
+    this.blockHash = bytesToHex(block.header.hash());
+    this.blockTimestamp = timestampMs;
+    return block;
+  }
+
+  /** Begin a J-block (all txs share the same block header). */
+  beginJurisdictionBlock(timestampMs: number): void {
+    this.activeBlock = this.createBlock(timestampMs);
+  }
+
+  /** End a J-block. */
+  endJurisdictionBlock(): void {
+    this.activeBlock = null;
   }
 
   /** Get current block hash */
@@ -1388,7 +1387,14 @@ export class BrowserVMProvider {
 
   /** Set deterministic block timestamp for next tx/block */
   setBlockTimestamp(timestamp: number): void {
-    this.blockTimestamp = timestamp;
+    if (!this.activeBlock) {
+      this.blockTimestamp = timestamp;
+    }
+  }
+
+  private async runTxInBlock(tx: any): Promise<any> {
+    const block = this.activeBlock ?? this.createBlock(this.blockTimestamp);
+    return runTx(this.vm, { tx, block });
   }
 
   /** Check if saved state exists */
@@ -1414,8 +1420,7 @@ export class BrowserVMProvider {
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
-    const result = await runTx(this.vm, { tx });
-    this.incrementBlock();
+    const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
       throw new Error(`registerNumberedEntitiesBatch failed: ${result.execResult.exceptionError}`);
