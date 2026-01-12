@@ -337,7 +337,7 @@ let vrHammer: VRHammer | null = null;
     txCubes: THREE.Object3D[];
     prevHashLine: THREE.Line | null;
     yOffset: number;
-  }> = []; // Last 5 committed blocks stacked above J-machine
+  }> = []; // Last 3 committed blocks stacked above J-machine
   let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) problem)
   let broadcastEnabled = true;
   let broadcastAnimations: THREE.Object3D[] = []; // Active broadcast visuals
@@ -908,8 +908,8 @@ let vrHammer: VRHammer | null = null;
           yOffset: newYOffset
         });
 
-        // Keep only last 5 blocks, dispose older ones
-        while (jBlockHistory.length > 5) {
+        // Keep only last 3 blocks, dispose older ones
+        while (jBlockHistory.length > 3) {
           const oldBlock = jBlockHistory.shift();
           if (oldBlock) {
             scene.remove(oldBlock.container);
@@ -972,11 +972,11 @@ let vrHammer: VRHammer | null = null;
       const runtimeHistory = $isolatedHistory || [];
 
       if (runtimeHistory.length > 0 && currentHeightNum > 0) {
-        // Find last 5 block boundaries by walking backward through history
+        // Find last 3 block boundaries by walking backward through history
         const blockBoundaries: Array<{ blockNum: number; frameIdx: number; txs: any[] }> = [];
         let lastSeenHeight = currentHeightNum;
 
-        for (let frameIdx = runtimeHistory.length - 1; frameIdx >= 0 && blockBoundaries.length < 5; frameIdx--) {
+        for (let frameIdx = runtimeHistory.length - 1; frameIdx >= 0 && blockBoundaries.length < 3; frameIdx--) {
           const frame = runtimeHistory[frameIdx];
           const frameJReplica = frame?.jReplicas?.find((jr: any) => jr.name === activeJurisdiction.name);
           const frameJHeight = Number(frameJReplica?.jHeight || 0);
