@@ -1560,6 +1560,7 @@ export const process = async (
     } else {
       env.timestamp = getWallClockMs();
     }
+    getBrowserVMInstance()?.setBlockTimestamp?.(env.timestamp);
 
     if (allInputs.length > 0) {
       console.log(`📥 TICK: Processing ${allInputs.length} inputs for [${allInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
@@ -1619,6 +1620,10 @@ export const process = async (
           const { getBrowserVMInstance } = await import('./evm');
           const browserVM = getBrowserVMInstance();
 
+          if (browserVM?.beginJurisdictionBlock) {
+            browserVM.beginJurisdictionBlock(env.timestamp);
+          }
+
           for (const jTx of mempool) {
             if (jTx.type === 'batch' && jTx.data?.batch) {
               console.log(`🔨 [J-Machine] Executing batch from ${jTx.entityId.slice(-4)}`);
@@ -1650,6 +1655,10 @@ export const process = async (
                 console.error(`   ❌ Batch execution failed: ${result.error}`);
               }
             }
+          }
+
+          if (browserVM?.endJurisdictionBlock) {
+            browserVM.endJurisdictionBlock();
           }
 
           // Clear mempool immediately after processing (all txs executed)

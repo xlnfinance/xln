@@ -339,7 +339,6 @@ let vrHammer: VRHammer | null = null;
   }> = []; // Last 3 committed blocks stacked above J-machine
   let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) problem)
   let broadcastEnabled = true;
-  let broadcastAnimations: THREE.Object3D[] = []; // Active broadcast visuals
 
   // J-Machine Auto-Proposer: Single-signer consensus simulation
   // J acts as super-entity that auto-proposes every N seconds
@@ -942,24 +941,36 @@ let vrHammer: VRHammer | null = null;
         const blockBoundaries: Array<{ blockNum: number; txs: any[] }> = [];
 
         for (let targetHeight = currentHeightNum - 1; targetHeight >= Math.max(0, currentHeightNum - 3); targetHeight--) {
-          // Walk backward to find LAST frame at targetHeight (RELATIVE to current frame position)
+          // Walk backward to find LAST frame at or below targetHeight (handles jHeight jumps)
           const maxFrameIdx = $isolatedTimeIndex >= 0 ? Math.min($isolatedTimeIndex, runtimeHistory.length - 1) : runtimeHistory.length - 1;
+          let foundFrame = null;
+          let foundIdx = -1;
+          let foundHeight = -1;
+
           for (let frameIdx = maxFrameIdx; frameIdx >= 0; frameIdx--) {
             const frame = runtimeHistory[frameIdx];
             const frameJReplica = frame?.jReplicas?.find((jr: any) => jr.name === activeJurisdiction.name);
             const frameJHeight = Number(frameJReplica?.jHeight || frameJReplica?.blockNumber || 0);
 
-            if (frameJHeight === targetHeight) {
-              // Found last frame at this height - read mempool (TXs that will go into next block)
-              const txs = frameJReplica?.mempool || [];
-              console.log(`[Blockchain] Block #${targetHeight + 1}: ${txs.length} TXs from frame ${frameIdx}`);
-
-              blockBoundaries.push({
-                blockNum: targetHeight + 1, // Block N+1 contains TXs from height N
-                txs: txs.slice(0, 9)
-              });
-              break; // Found this height, move to next
+            // Find closest frame <= targetHeight (handles skipped heights)
+            if (frameJHeight <= targetHeight && frameJHeight > 0) {
+              foundFrame = frameJReplica;
+              foundIdx = frameIdx;
+              foundHeight = frameJHeight;
+              break;
             }
+          }
+
+          if (foundFrame) {
+            const txs = foundFrame.mempool || [];
+            console.log(`[Blockchain] Block #${foundHeight + 1}: ${txs.length} TXs from frame ${foundIdx} (jHeight ${foundHeight})`);
+
+            blockBoundaries.push({
+              blockNum: foundHeight + 1,
+              txs: txs.slice(0, 9)
+            });
+          } else {
+            console.warn(`[Blockchain] No frame found for target height ${targetHeight}`);
           }
         }
 
@@ -5095,12 +5106,22 @@ let vrHammer: VRHammer | null = null;
 
   // Trigger entity input strike (called when bilateral message received)
   function triggerEntityInputStrike(fromEntityId: string, toEntityId: string) {
-    if (!scene || fromEntityId === toEntityId) return; // Skip intra-entity messages
+    if (!scene || fromEntityId === toEntityId) {
+      if (fromEntityId === toEntityId) {
+        console.log(`[Strike] Skipped intra-entity: ${fromEntityId.slice(-4)}`);
+      }
+      return;
+    }
 
     const fromEntity = entities.find(e => e.id === fromEntityId);
     const toEntity = entities.find(e => e.id === toEntityId);
 
-    if (!fromEntity || !toEntity) return;
+    if (!fromEntity || !toEntity) {
+      console.warn(`[Strike] Entity not found: from=${fromEntityId.slice(-4)}, to=${toEntityId.slice(-4)}`);
+      return;
+    }
+
+    console.log(`[Strike] ⚡ ${fromEntityId.slice(-4)} → ${toEntityId.slice(-4)} (cyan flash 100ms)`);
 
     // Create thin cyan line
     const geometry = new THREE.BufferGeometry().setFromPoints([
