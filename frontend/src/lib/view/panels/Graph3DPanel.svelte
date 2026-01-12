@@ -3897,15 +3897,13 @@ let vrHammer: VRHammer | null = null;
     // TODO: Future enhancement - render both confirmed (solid) and pending (translucent) bars
     // when pendingAccount !== null for visual desync indication
 
-    // NO BARS if no real account data
+    // Always show current state - use confirmedAccount as fallback (last committed proof)
     if (!accountData) {
-      const group = new THREE.Group();
-      scene.add(group);
-      return { bars: group, mempoolBoxes: null };
+      accountData = confirmedAccount; // Use last committed state
     }
 
-    // FINTECH-SAFETY: Get available tokens for THIS specific connection
-    if (!accountData.deltas) {
+    // NO BARS if account doesn't exist at all (not opened yet)
+    if (!accountData || !accountData.deltas) {
       const group = new THREE.Group();
       scene.add(group);
       return { bars: group, mempoolBoxes: null };
