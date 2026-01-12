@@ -90,7 +90,7 @@ export async function createXlnomy(options: {
     contracts,
     evm,
     entities: [],
-    created: Date.now(),
+    created: env?.timestamp ?? 0,
     version: '1.0.0',
   };
 

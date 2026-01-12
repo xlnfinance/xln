@@ -33,7 +33,7 @@ export async function processAccountTx(
   accountMachine: AccountMachine,
   accountTx: AccountTx,
   isOurFrame: boolean = true,
-  currentTimestamp: number = Date.now(),
+  currentTimestamp: number = 0,
   currentHeight: number = 0,
   isValidation: boolean = false
 ): Promise<{

@@ -10,6 +10,7 @@
  */
 
 import type { Env } from '../types';
+import { getPerfMs } from '../time';
 import { scenarioRegistry, type ScenarioEntry } from './index';
 
 type ScenarioResult = {
@@ -67,7 +68,7 @@ async function runScenario(
   const env = createEmptyEnv();
   env.scenarioMode = true;
 
-  const start = Date.now();
+  const start = getPerfMs();
   try {
     const run = await scenario.load();
     await run(env);
@@ -75,7 +76,7 @@ async function runScenario(
       name: scenario.name,
       iteration,
       frames: env.history?.length || 0,
-      duration: Date.now() - start,
+      duration: getPerfMs() - start,
       status: 'pass',
     });
   } catch (err: any) {
@@ -83,7 +84,7 @@ async function runScenario(
       name: scenario.name,
       iteration,
       frames: env.history?.length || 0,
-      duration: Date.now() - start,
+      duration: getPerfMs() - start,
       status: 'fail',
       error: err?.message || String(err),
     });
@@ -96,7 +97,7 @@ async function runAllScenarios() {
   console.log('═══════════════════════════════════════════════════════════════\n');
   console.log(`Iterations: ${iterations} | Stress: ${includeStress ? 'enabled' : 'off'}\n`);
 
-  const startTime = Date.now();
+  const startTime = getPerfMs();
   const results: ScenarioResult[] = [];
 
   for (const scenario of scenariosToRun) {
@@ -126,7 +127,7 @@ async function runAllScenarios() {
     }
   }
 
-  const totalDuration = Date.now() - startTime;
+  const totalDuration = getPerfMs() - startTime;
   const totalFrames = results.reduce((sum, r) => sum + r.frames, 0);
   const coreRuns = results.filter(r => r.status !== 'skip');
   const passed = coreRuns.filter(r => r.status === 'pass').length;

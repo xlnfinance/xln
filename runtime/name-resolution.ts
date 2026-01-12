@@ -156,7 +156,7 @@ export const processProfileUpdate = async (
       profile = {
         entityId,
         name: formatEntityDisplay(entityId), // Default to formatted entity ID
-        lastUpdated: Date.now(),
+        lastUpdated: env?.timestamp ?? 0,
         hankoSignature,
       };
     }
@@ -168,7 +168,7 @@ export const processProfileUpdate = async (
     if (updates.website !== undefined) profile.website = updates.website;
 
     // Update metadata
-    profile.lastUpdated = Date.now();
+    profile.lastUpdated = env?.timestamp ?? 0;
     profile.hankoSignature = hankoSignature;
 
     // Sync to gossip layer FIRST (before storing) to ensure it's captured in snapshots

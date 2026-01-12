@@ -77,7 +77,7 @@ export async function insuranceCascadeScenario(
   await process(env, []);
   setFrameNarrative(env, "6. Insurance", "H2 (Insurer) provides a 3,000 USDC insurance line to H1.");
   if (browserVM) {
-    const oneYear = BigInt(Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60);
+    const oneYear = BigInt(Math.floor(env.timestamp / 1000) + 365 * 24 * 60 * 60);
     await browserVM.settleWithInsurance(
       H1 < H2 ? H1 : H2, H1 < H2 ? H2 : H1, [], [],
       [{ insured: H1, insurer: H2, tokenId: USDC_TOKEN_ID, limit: usd(3000), expiresAt: oneYear }], '0x'

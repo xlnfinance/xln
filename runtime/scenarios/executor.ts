@@ -615,7 +615,7 @@ async function handleLazyGrid(
         const gridCoord = `${x}_${y}_${z}`;
 
         // Generate hash-based entity ID (like real entities but deterministic)
-        const entityId = await cryptoHash(`lazy-grid-${gridCoord}-${Date.now()}`);
+        const entityId = await cryptoHash(`lazy-grid-${gridCoord}`);
         const signerId = `lazy_${gridCoord}`;
 
         context.entityMapping.set(gridCoord, entityId);

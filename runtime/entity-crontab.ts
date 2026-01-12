@@ -339,7 +339,13 @@ async function broadcastBatchHandler(replica: EntityReplica): Promise<EntityInpu
 
   // Broadcast batch to Depository contract (or BrowserVM in browser mode)
   const { broadcastBatch } = await import('./j-batch');
-  const result = await broadcastBatch(replica.entityId, replica.state.jBatchState, jurisdiction, browserVM);
+  const result = await broadcastBatch(
+    replica.entityId,
+    replica.state.jBatchState,
+    jurisdiction,
+    browserVM,
+    replica.state.timestamp
+  );
 
   if (result.success) {
     console.log(`✅ jBatch broadcasted successfully: ${result.txHash}`);

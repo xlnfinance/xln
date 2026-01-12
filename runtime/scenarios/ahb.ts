@@ -150,7 +150,7 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
   // Build JSON-serializable state object
   const state: Record<string, any> = {
     label,
-    timestamp: Date.now(),
+    timestamp: env.timestamp,
     height: env.height,
     entities: {} as Record<string, any>,
   };

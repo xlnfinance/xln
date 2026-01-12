@@ -58,7 +58,7 @@ const log = (
 ): void => {
   const entry: FrameLogEntry = {
     id: globalLogId++,
-    timestamp: Date.now(),
+    timestamp: currentEnv?.timestamp ?? 0,
     level,
     category,
     message,

@@ -350,6 +350,7 @@ export interface BrowserVMBatchProcessor {
     reserveToCollateral?: Array<{receivingEntity: string, tokenId: number, pairs: Array<{ entity: string; amount: bigint }>}>,
     settlements?: Array<{leftEntity: string, rightEntity: string, diffs: any[]}>,
   }): Promise<any[]>;
+  setBlockTimestamp?: (timestamp: number) => void;
 }
 
 /**
@@ -360,7 +361,8 @@ export async function broadcastBatch(
   entityId: string,
   jBatchState: JBatchState,
   jurisdiction: any, // JurisdictionConfig
-  browserVM?: BrowserVMBatchProcessor // Optional BrowserVM for simnet mode
+  browserVM: BrowserVMBatchProcessor | undefined,
+  timestamp: number
 ): Promise<{ success: boolean; txHash?: string; events?: any[]; error?: string }> {
   if (isBatchEmpty(jBatchState.batch)) {
     console.log('📦 jBatch: Empty batch, skipping broadcast');
@@ -374,6 +376,7 @@ export async function broadcastBatch(
   try {
     // BrowserVM path - direct in-browser execution
     if (browserVM) {
+      browserVM.setBlockTimestamp?.(timestamp);
 
       // Pass batch directly to contract (no transformation - Solidity handles everything)
       console.log(`📦 Calling Depository.processBatch() with full batch (${getBatchSize(jBatchState.batch)} ops)...`);
@@ -385,7 +388,7 @@ export async function broadcastBatch(
 
       // Clear batch after successful broadcast
       jBatchState.batch = createEmptyBatch();
-      jBatchState.lastBroadcast = Date.now();
+      jBatchState.lastBroadcast = timestamp;
       jBatchState.broadcastCount++;
       jBatchState.failedAttempts = 0;
 
@@ -406,7 +409,7 @@ export async function broadcastBatch(
 
     // Clear batch after successful broadcast
     jBatchState.batch = createEmptyBatch();
-    jBatchState.lastBroadcast = receipt.blockNumber; // Use block number instead of Date.now() for determinism
+    jBatchState.lastBroadcast = timestamp;
     jBatchState.broadcastCount++;
     jBatchState.failedAttempts = 0;
 

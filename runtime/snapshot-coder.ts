@@ -302,7 +302,7 @@ export const decodeAsync = async (buffer: Buffer): Promise<any> => {
       serverInput: reconstructMaps(serverInput),
       replicas,
       // Add timestamp for compatibility
-      timestamp: Date.now(),
+      timestamp: 0,
       // Note: gossip layer will be re-created by runtime on restore
     };
   } else {
