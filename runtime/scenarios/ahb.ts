@@ -22,6 +22,7 @@ import { snap, checkSolvency } from './helpers';
 import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta } from '../account-utils';
+import { ethers } from 'ethers';
 
 // Lazy-loaded runtime functions to avoid circular dependency (runtime.ts imports this file)
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -61,6 +62,9 @@ const AHB_STRESS_DRAIN_EVERY = Number.parseInt(getEnv('AHB_STRESS_DRAIN_EVERY', 
 
 // Jurisdiction name for AHB demo
 const AHB_JURISDICTION = 'AHB Demo';
+
+const ENTITY_NAME_MAP = new Map<string, string>();
+const getEntityName = (entityId: string): string => ENTITY_NAME_MAP.get(entityId) || entityId.slice(-4);
 
 // NOTE: Manual J-Machine queuing functions REMOVED
 // Entities now output jOutputs via process() which auto-queue to J-Machine
@@ -137,16 +141,6 @@ async function processUntil(
 function dumpSystemState(env: Env, label: string, enabled: boolean = true): void {
   if (!enabled && !process.env.AHB_DEBUG) return;
 
-  // Named entities for easier reading
-  // Entity IDs are #2, #3, #4 (EntityProvider reserves #1 for Foundation)
-  const ENTITY_NAMES: Record<string, string> = {
-    '0x0000000000000000000000000000000000000000000000000000000000000002': 'Alice',
-    '0x0000000000000000000000000000000000000000000000000000000000000003': 'Hub',
-    '0x0000000000000000000000000000000000000000000000000000000000000004': 'Bob',
-  };
-
-  const getName = (id: string): string => ENTITY_NAMES[id] || id.slice(-4);
-
   // Build JSON-serializable state object
   const state: Record<string, any> = {
     label,
@@ -157,7 +151,7 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
 
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     const entityId = replicaKey.split(':')[0];
-    const entityName = getName(entityId);
+    const entityName = getEntityName(entityId);
 
     const entityState: Record<string, any> = {
       name: entityName,
@@ -177,7 +171,7 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
     // Accounts
     if (replica.state.accounts) {
       for (const [counterpartyId, account] of replica.state.accounts.entries()) {
-        const counterpartyName = getName(counterpartyId);
+        const counterpartyName = getEntityName(counterpartyId);
         const isLeft = entityId < counterpartyId;
 
         const accountState: Record<string, any> = {
@@ -310,8 +304,39 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
 
 export async function ahb(env: Env): Promise<void> {
   // Register test keys for real signatures (deterministic for scenarios)
-  const { registerTestKeys } = await import('../account-crypto');
+  const { registerTestKeys, deriveSignerKey } = await import('../account-crypto');
   await registerTestKeys(['s1', 's2', 's3', 's4', 'hub', 'alice', 'bob', 'bank']);
+
+  const testSeed = new Uint8Array(32);
+  testSeed.fill(42);
+  const derivedKeys = await Promise.all([
+    deriveSignerKey(testSeed, 'alice'),
+    deriveSignerKey(testSeed, 'hub'),
+    deriveSignerKey(testSeed, 'bob'),
+  ]);
+  const walletEntries = [
+    { label: 'alice', wallet: new ethers.Wallet(ethers.hexlify(derivedKeys[0])) },
+    { label: 'hub', wallet: new ethers.Wallet(ethers.hexlify(derivedKeys[1])) },
+    { label: 'bob', wallet: new ethers.Wallet(ethers.hexlify(derivedKeys[2])) },
+  ].sort((a, b) => a.wallet.address.toLowerCase().localeCompare(b.wallet.address.toLowerCase()));
+
+  const [aliceEntry, hubEntry, bobEntry] = walletEntries;
+  const aliceWallet = aliceEntry?.wallet || walletEntries[0]!.wallet;
+  const hubWallet = hubEntry?.wallet || walletEntries[1]!.wallet;
+  const bobWallet = bobEntry?.wallet || walletEntries[2]!.wallet;
+
+  console.log(`[AHB] Wallet ordering: Alice=${aliceEntry?.label}, Hub=${hubEntry?.label}, Bob=${bobEntry?.label}`);
+
+  const entityIds = {
+    Alice: ethers.zeroPadValue(aliceWallet.address, 32).toLowerCase(),
+    Hub: ethers.zeroPadValue(hubWallet.address, 32).toLowerCase(),
+    Bob: ethers.zeroPadValue(bobWallet.address, 32).toLowerCase(),
+  };
+
+  ENTITY_NAME_MAP.clear();
+  ENTITY_NAME_MAP.set(entityIds.Alice, 'Alice');
+  ENTITY_NAME_MAP.set(entityIds.Hub, 'Hub');
+  ENTITY_NAME_MAP.set(entityIds.Bob, 'Bob');
 
   const process = await getProcess();
   env.scenarioMode = true; // Deterministic time control (scenarios set env.timestamp manually)
@@ -343,9 +368,7 @@ export async function ahb(env: Env): Promise<void> {
       console.log('[AHB] Calling browserVM.reset()...');
       await browserVM.reset();
       // Verify reset worked by checking Hub's reserves (should be 0)
-      // Hub entityId = 0x0002 (entity #2)
-      const HUB_ENTITY_ID = '0x' + '2'.padStart(64, '0');
-      const hubReservesAfterReset = await browserVM.getReserves(HUB_ENTITY_ID, USDC_TOKEN_ID);
+      const hubReservesAfterReset = await browserVM.getReserves(entityIds.Hub, USDC_TOKEN_ID);
       console.log(`[AHB] ✅ BrowserVM reset complete. Hub reserves after reset: ${hubReservesAfterReset}`);
       if (hubReservesAfterReset !== 0n) {
         throw new Error(`BrowserVM reset FAILED: Hub still has ${hubReservesAfterReset} reserves`);
@@ -414,9 +437,9 @@ export async function ahb(env: Env): Promise<void> {
     });
     await process(env);
 
-    // ============================================================================
-    // STEP 0b: Create entities
-    // ============================================================================
+// ============================================================================
+// STEP 0b: Create entities
+// ============================================================================
     console.log('\n📦 Creating entities: Alice, Hub, Bob...');
 
     // AHB Triangle Layout - entities positioned relative to J-Machine
@@ -439,11 +462,7 @@ export async function ahb(env: Env): Promise<void> {
       const name = entityNames[i];
       const signer = `s${i + 1}`;
       const position = AHB_POSITIONS[name];
-
-      // Create placeholder entity ID (will be corrected after registration)
-      // Use i+2 because EntityProvider reserves #1 for Foundation
-      const entityNumber = i + 2; // [2,3,4] to match on-chain registration
-      const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
+      const entityId = entityIds[name];
 
       // Compute boardHash for on-chain registration
       const config = {
@@ -474,7 +493,7 @@ export async function ahb(env: Env): Promise<void> {
           }
         }
       });
-      console.log(`${name}: Entity #${entityNumber} @ (${position.x}, ${position.y}, ${position.z})`);
+      console.log(`${name}: Entity ${entityId.slice(0, 10)}... @ (${position.x}, ${position.y}, ${position.z})`);
     }
 
     const applyRuntimeInput = await getApplyRuntimeInput();
@@ -490,22 +509,7 @@ export async function ahb(env: Env): Promise<void> {
 
     console.log(`\n  ✅ Created: ${alice.name}, ${hub.name}, ${bob.name}`);
 
-    // CRITICAL: Register entities on-chain in EntityProvider
-    // Without this, Depository.settle() reverts with E7 (InvalidParty)
-    console.log('\n📋 Registering entities on-chain in EntityProvider...');
-    const boardHashes = entities.map(e => e.boardHash);
-    const entityNumbers = await browserVM.registerNumberedEntitiesBatch(boardHashes);
-    console.log(`✅ Registered on-chain: ${entityNumbers.map((n, i) => `${entities[i]?.name}=#${n}`).join(', ')}`);
-
-    // Verify entity IDs match registration (should be [2,3,4])
-    entities.forEach((entity, i) => {
-      const expectedNumber = entityNumbers[i];
-      const actualNumber = parseInt(entity.id, 16);
-      if (expectedNumber !== actualNumber) {
-        throw new Error(`Entity ID mismatch: ${entity.name} expected #${expectedNumber}, got #${actualNumber}`);
-      }
-      console.log(`   ✓ ${entity.name}: Entity #${expectedNumber}`);
-    });
+    console.log('\n📋 Skipping EntityProvider registration (address-based entities, testMode)');
 
     // ============================================================================
     // Set up j-watcher subscription to BrowserVM for proper R→E→A event flow
@@ -965,8 +969,7 @@ export async function ahb(env: Env): Promise<void> {
     const aliceOnChainReserves = await browserVM.getReserves(alice.id, USDC_TOKEN_ID);
     console.log(`[Frame 9 DEBUG] Alice on-chain reserves: ${aliceOnChainReserves / 10n**18n}M`);
 
-    // Entities were registered earlier, trust the registration
-    console.log(`[Frame 9 DEBUG] Alice entity #2, Hub entity #3 (registered on-chain)`);
+    console.log(`[Frame 9 DEBUG] Alice entityId=${alice.id.slice(0, 10)}..., Hub entityId=${hub.id.slice(0, 10)}...`);
 
     // J-Machine processes mempool automatically (batch already queued in STEP 8)
     // process() triggers J-Machine mempool execution → BrowserVM.processBatch → events
@@ -1847,26 +1850,198 @@ export async function ahb(env: Env): Promise<void> {
   // ============================================================================
   // PHASE 7: DISPUTE GAME (On-Chain Enforcement)
   // ============================================================================
-  // TODO: Test dispute resolution with 5 J-frame delay
-  // 1. Alice creates fraudulent state (inflates her balance)
-  // 2. Hub submits initialDisputeProof to Depository.sol
-  // 3. Wait 5 J-frames (dispute window)
-  // 4. Hub submits finalDisputeProof with correct account state
-  // 5. Verify: Hub wins dispute, Alice loses collateral
-  // 6. Verify: Account state enforced on-chain matches bilateral consensus
-  //
-  // This proves:
-  // - Account proof hashes are correctly generated
-  // - Depository.sol validates proofs correctly
-  // - Dispute mechanism enforces bilateral consensus on-chain
-  // - 5 J-frame window sufficient for counterparty response
-  //
-  // Implementation needs:
-  // - buildDisputeProof() from proof-builder.ts
-  // - Submit via processBatch with initialDisputeProof/finalDisputeProof
-  // - Advance J-machine by 5 blocks
-  // - Verify collateral seizure via enforceDebts()
-  console.log('⚠️  PHASE 7 (DISPUTE GAME): Not yet implemented - see TODO above\n');
+  console.log('\n⚖️ PHASE 7: Dispute enforcement (Bob vs Hub)');
+
+  const disputeCollateralTarget = usd(100_000);
+  const hubIsLeft = hub.id < bob.id;
+  const disputeOffdeltaTarget = hubIsLeft ? -usd(50_000) : usd(50_000);
+  const disputeOndeltaTarget = 0n;
+  assert(hubIsLeft, 'PHASE 7 requires Hub to be LEFT of Bob for collateral payout');
+
+  const leftEntity = hub.id < bob.id ? hub.id : bob.id;
+  const rightEntity = hub.id < bob.id ? bob.id : hub.id;
+  const leftActor = hubIsLeft ? hub : bob;
+  const rightActor = hubIsLeft ? bob : hub;
+
+  const [, bobRepDisputeSetup] = findReplica(env, bob.id);
+  const bobHubAccount7 = bobRepDisputeSetup.state.accounts.get(hub.id);
+  if (!bobHubAccount7) {
+    throw new Error('PHASE 7: Bob-Hub account missing');
+  }
+  const bobDelta7 = bobHubAccount7.deltas.get(USDC_TOKEN_ID);
+  if (!bobDelta7) {
+    throw new Error('PHASE 7: Bob-Hub delta missing');
+  }
+
+  const collateralDiff = disputeCollateralTarget - bobDelta7.collateral;
+  const ondeltaDiff = disputeOndeltaTarget - bobDelta7.ondelta;
+
+  if (collateralDiff !== 0n || ondeltaDiff !== 0n) {
+    console.log('⚙️  Adjusting on-chain collateral/ondelta for dispute setup...');
+    const settleResult = await browserVM.settleWithInsurance(
+      leftEntity,
+      rightEntity,
+      [{
+        tokenId: USDC_TOKEN_ID,
+        leftDiff: hubIsLeft ? -collateralDiff : 0n,
+        rightDiff: hubIsLeft ? 0n : -collateralDiff,
+        collateralDiff,
+        ondeltaDiff,
+      }]
+    );
+    if (!settleResult.success) {
+      throw new Error('PHASE 7: Failed to adjust collateral/ondelta via settlement');
+    }
+    await processJEvents(env);
+    await process(env);
+    await process(env);
+  }
+
+  const [, bobRepAfterSettle] = findReplica(env, bob.id);
+  const bobHubAfterSettle = bobRepAfterSettle.state.accounts.get(hub.id);
+  const bobDeltaAfterSettle = bobHubAfterSettle?.deltas.get(USDC_TOKEN_ID);
+  if (!bobDeltaAfterSettle) {
+    throw new Error('PHASE 7: Bob-Hub delta missing after settlement');
+  }
+
+  const offdeltaDiff = disputeOffdeltaTarget - bobDeltaAfterSettle.offdelta;
+  if (offdeltaDiff !== 0n) {
+    const payAmount = offdeltaDiff > 0n ? offdeltaDiff : -offdeltaDiff;
+    const payer = offdeltaDiff > 0n ? rightActor : leftActor;
+    const recipient = offdeltaDiff > 0n ? leftActor : rightActor;
+    console.log(`⚙️  Adjusting offdelta via payment: ${payer.name} → ${recipient.name} (${payAmount})`);
+    await process(env, [{
+      entityId: payer.id,
+      signerId: payer.signer,
+      entityTxs: [{
+        type: 'directPayment',
+        data: {
+          targetEntityId: recipient.id,
+          tokenId: USDC_TOKEN_ID,
+          amount: payAmount,
+          route: [payer.id, recipient.id],
+          description: 'Dispute setup: adjust offdelta'
+        }
+      }]
+    }]);
+    await processUntil(env, () => {
+      const [, bobCheck] = findReplica(env, bob.id);
+      const bobAcc = bobCheck.state.accounts.get(hub.id);
+      const delta = bobAcc?.deltas.get(USDC_TOKEN_ID);
+      const offdeltaOk = delta?.offdelta === disputeOffdeltaTarget;
+      const noPendingFrames =
+        !bobAcc?.pendingFrame &&
+        !findReplica(env, hub.id)[1].state.accounts.get(bob.id)?.pendingFrame;
+      return Boolean(offdeltaOk && noPendingFrames);
+    }, 12, 'Dispute offdelta adjustment');
+  }
+
+  const [, bobRepTarget] = findReplica(env, bob.id);
+  const bobHubTarget = bobRepTarget.state.accounts.get(hub.id);
+  const bobDeltaTarget = bobHubTarget?.deltas.get(USDC_TOKEN_ID);
+  if (!bobDeltaTarget) {
+    throw new Error('PHASE 7: Bob-Hub delta missing at target');
+  }
+
+  console.log('✅ Dispute setup state:');
+  console.log(`   collateral=${bobDeltaTarget.collateral}, ondelta=${bobDeltaTarget.ondelta}, offdelta=${bobDeltaTarget.offdelta}`);
+
+  assert(bobDeltaTarget.collateral === disputeCollateralTarget, 'PHASE 7: collateral mismatch');
+  assert(bobDeltaTarget.ondelta === disputeOndeltaTarget, 'PHASE 7: ondelta mismatch');
+  assert(bobDeltaTarget.offdelta === disputeOffdeltaTarget, 'PHASE 7: offdelta mismatch');
+
+  const hubReserveBeforeDrain = await browserVM.getReserves(hub.id, USDC_TOKEN_ID);
+  if (hubReserveBeforeDrain > 0n) {
+    console.log(`🧹 Draining Hub reserves to force debt: ${hubReserveBeforeDrain}`);
+    await browserVM.reserveToReserve(hub.id, alice.id, USDC_TOKEN_ID, hubReserveBeforeDrain);
+    await processJEvents(env);
+    await process(env);
+    const hubReserveAfterDrain = await browserVM.getReserves(hub.id, USDC_TOKEN_ID);
+    assert(hubReserveAfterDrain === 0n, `PHASE 7: Hub reserve not fully drained (${hubReserveAfterDrain})`);
+  }
+
+  if (browserVM.setDefaultDisputeDelay) {
+    await browserVM.setDefaultDisputeDelay(3);
+  }
+
+  const [, bobRepDispute] = findReplica(env, bob.id);
+  const bobHubDispute = bobRepDispute.state.accounts.get(hub.id);
+  if (!bobHubDispute) {
+    throw new Error('PHASE 7: Bob-Hub account missing before dispute');
+  }
+
+  const { buildAccountProofBody, createDisputeProofHash, buildInitialDisputeProof } = await import('../proof-builder');
+  const { createEmptyBatch } = await import('../j-batch');
+
+  const onChainAccount = await browserVM.getAccountInfo(bob.id, hub.id);
+  const disputeAccount = {
+    ...bobHubDispute,
+    proofHeader: {
+      ...bobHubDispute.proofHeader,
+      cooperativeNonce: Number(onChainAccount.cooperativeNonce),
+    },
+  };
+  if (disputeAccount.proofHeader.cooperativeNonce !== bobHubDispute.proofHeader.cooperativeNonce) {
+    console.log(`⚠️ Using on-chain cooperativeNonce=${disputeAccount.proofHeader.cooperativeNonce} for dispute (runtime=${bobHubDispute.proofHeader.cooperativeNonce})`);
+  }
+
+  const proofResult = buildAccountProofBody(disputeAccount);
+  const disputeHash = createDisputeProofHash(disputeAccount, proofResult.proofBodyHash);
+  const hubSig = await hubWallet.signMessage(ethers.getBytes(disputeHash));
+  const initialProof = buildInitialDisputeProof(disputeAccount, hubSig, '0x');
+
+  const startBatch = createEmptyBatch() as any;
+  startBatch.disputeStarts = [initialProof];
+  await browserVM.processBatch(bob.id, startBatch);
+
+  console.log('⏳ Waiting 3 runtime frames for dispute timeout...');
+  const emptyBatch = createEmptyBatch() as any;
+  for (let i = 0; i < 3; i++) {
+    await browserVM.processBatch(bob.id, emptyBatch);
+    await process(env);
+  }
+
+  const startedByLeft = bob.id < hub.id;
+  const finalProof = {
+    counterentity: hub.id,
+    finalCooperativeNonce: disputeAccount.proofHeader.cooperativeNonce,
+    initialDisputeNonce: disputeAccount.proofHeader.disputeNonce,
+    finalDisputeNonce: disputeAccount.proofHeader.disputeNonce,
+    initialProofbodyHash: proofResult.proofBodyHash,
+    finalProofbody: proofResult.proofBodyStruct,
+    finalArguments: '0x',
+    initialArguments: '0x',
+    sig: '0x',
+    startedByLeft,
+    disputeUntilBlock: 0,
+    cooperative: false,
+  };
+
+  const bobReserveBeforeDispute = await browserVM.getReserves(bob.id, USDC_TOKEN_ID);
+  const finalizeBatch = createEmptyBatch() as any;
+  finalizeBatch.disputeFinalizations = [finalProof];
+  const finalizeEvents = await browserVM.processBatch(bob.id, finalizeBatch);
+
+  await processJEvents(env);
+
+  const bobReserveAfterDispute = await browserVM.getReserves(bob.id, USDC_TOKEN_ID);
+  assert(
+    bobReserveAfterDispute === bobReserveBeforeDispute + disputeCollateralTarget,
+    `PHASE 7: Bob reserve did not increase by collateral (${disputeCollateralTarget})`
+  );
+
+  const debtEvents = finalizeEvents.filter((event: any) => {
+    if (event.name !== 'DebtCreated') return false;
+    const debtor = typeof event.args?.debtor === 'string' ? event.args.debtor.toLowerCase() : '';
+    const creditor = typeof event.args?.creditor === 'string' ? event.args.creditor.toLowerCase() : '';
+    return debtor === hub.id && creditor === bob.id;
+  });
+  assert(debtEvents.length > 0, 'PHASE 7: Expected DebtCreated event for Hub → Bob');
+
+  const debtAmount = debtEvents[0]?.args?.amount as bigint | undefined;
+  assert(debtAmount === usd(50_000), `PHASE 7: Debt amount ${debtAmount} != $50K`);
+
+  console.log('✅ PHASE 7 COMPLETE: Bob enforced collateral + debt created for $50K\n');
 
   if (AHB_STRESS) {
     const stressIters = Number.isFinite(AHB_STRESS_ITERS) && AHB_STRESS_ITERS > 0 ? AHB_STRESS_ITERS : 100;

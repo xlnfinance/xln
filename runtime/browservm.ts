@@ -679,6 +679,29 @@ export class BrowserVMProvider {
     return this.emitEvents(result.execResult.logs || []);
   }
 
+  /** Admin: Set default dispute delay (blocks) */
+  async setDefaultDisputeDelay(delayBlocks: number): Promise<void> {
+    if (!this.depositoryAddress || !this.depositoryInterface) {
+      throw new Error('Depository not deployed');
+    }
+
+    const callData = this.depositoryInterface.encodeFunctionData('setDefaultDisputeDelay', [delayBlocks]);
+    const currentNonce = await this.getCurrentNonce();
+    const tx = createLegacyTx({
+      to: this.depositoryAddress,
+      gasLimit: 500000n,
+      gasPrice: 10n,
+      data: hexToBytes(callData as `0x${string}`),
+      nonce: currentNonce,
+    }, { common: this.common }).sign(this.deployerPrivKey);
+
+    const result = await this.runTxInBlock(tx);
+    if (result.execResult.exceptionError) {
+      throw new Error(`setDefaultDisputeDelay failed: ${result.execResult.exceptionError}`);
+    }
+    console.log(`[BrowserVM] Default dispute delay set to ${delayBlocks} blocks`);
+  }
+
   /** Execute R2R transfer - emits ReserveUpdated events */
   async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<EVMEvent[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) {
@@ -801,7 +824,11 @@ export class BrowserVMProvider {
       gasLimit: 100000n,
     });
     if (channelKeyResult.execResult.exceptionError) return { collateral: 0n, ondelta: 0n };
-    const channelKey = channelKeyResult.execResult.returnValue;
+    const channelKeyDecoded = this.depositoryInterface.decodeFunctionResult(
+      'accountKey',
+      channelKeyResult.execResult.returnValue
+    );
+    const channelKey = channelKeyDecoded[0];
 
     const callData = this.depositoryInterface.encodeFunctionData('_collaterals', [channelKey, tokenId]);
 
@@ -819,6 +846,45 @@ export class BrowserVMProvider {
     // _collaterals returns AccountCollateral struct: { collateral: uint256, ondelta: int256 }
     const decoded = this.depositoryInterface.decodeFunctionResult('_collaterals', returnData);
     return { collateral: BigInt(decoded[0]), ondelta: BigInt(decoded[1]) };
+  }
+
+  /** Get on-chain account info (cooperativeNonce, disputeHash, disputeTimeout) */
+  async getAccountInfo(entityId: string, counterpartyId: string): Promise<{ cooperativeNonce: bigint; disputeHash: string; disputeTimeout: bigint }> {
+    if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
+
+    const channelKeyData = this.depositoryInterface.encodeFunctionData('accountKey', [entityId, counterpartyId]);
+    const channelKeyResult = await this.vm.evm.runCall({
+      to: this.depositoryAddress,
+      caller: this.deployerAddress,
+      data: hexToBytes(channelKeyData as `0x${string}`),
+      gasLimit: 100000n,
+    });
+    if (channelKeyResult.execResult.exceptionError) {
+      return { cooperativeNonce: 0n, disputeHash: '0x', disputeTimeout: 0n };
+    }
+    const channelKeyDecoded = this.depositoryInterface.decodeFunctionResult(
+      'accountKey',
+      channelKeyResult.execResult.returnValue
+    );
+    const channelKey = channelKeyDecoded[0];
+
+    const callData = this.depositoryInterface.encodeFunctionData('_accounts', [channelKey]);
+    const result = await this.vm.evm.runCall({
+      to: this.depositoryAddress,
+      caller: this.deployerAddress,
+      data: hexToBytes(callData as `0x${string}`),
+      gasLimit: 100000n,
+    });
+    if (result.execResult.exceptionError) {
+      return { cooperativeNonce: 0n, disputeHash: '0x', disputeTimeout: 0n };
+    }
+
+    const decoded = this.depositoryInterface.decodeFunctionResult('_accounts', result.execResult.returnValue);
+    return {
+      cooperativeNonce: BigInt(decoded[0]),
+      disputeHash: decoded[1],
+      disputeTimeout: BigInt(decoded[2]),
+    };
   }
 
   /** Get debts for an entity */

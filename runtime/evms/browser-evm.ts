@@ -39,9 +39,21 @@ export class BrowserEVM implements JurisdictionEVM {
   async captureStateRoot() { return this.provider.captureStateRoot(); }
   async timeTravel(stateRoot: Uint8Array) { return this.provider.timeTravel(stateRoot); }
   async debugFundReserves(entityId: string, tokenId: number, amount: bigint) { return this.provider.debugFundReserves(entityId, tokenId, amount); }
+  async setDefaultDisputeDelay(delayBlocks: number) { return this.provider.setDefaultDisputeDelay(delayBlocks); }
   async getReserves(entityId: string, tokenId: number) { return this.provider.getReserves(entityId, tokenId); }
   async getCollateral(entity1: string, entity2: string, tokenId: number) { return this.provider.getCollateral(entity1, entity2, tokenId); }
+  async getAccountInfo(entityId: string, counterpartyId: string) { return this.provider.getAccountInfo(entityId, counterpartyId); }
   async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint) { return this.provider.reserveToReserve(from, to, tokenId, amount); }
+  async settleWithInsurance(
+    leftEntity: string,
+    rightEntity: string,
+    diffs: Array<{ tokenId: number; leftDiff: bigint; rightDiff: bigint; collateralDiff: bigint; ondeltaDiff: bigint; }>,
+    forgiveDebtsInTokenIds: number[] = [],
+    insuranceRegs: Array<{ insured: string; insurer: string; tokenId: number; limit: bigint; expiresAt: bigint; }> = [],
+    sig: string = '0x'
+  ) {
+    return this.provider.settleWithInsurance(leftEntity, rightEntity, diffs, forgiveDebtsInTokenIds, insuranceRegs, sig);
+  }
   async processBatch(entityId: string, batch: any) { return this.provider.processBatch(entityId, batch); }
   getProvider() { return this.provider; }
   getTokenRegistry() { return this.provider.getTokenRegistry(); }
