@@ -19,8 +19,8 @@ let globalLogId = 0;
  * Called once during env creation (createEmptyEnv).
  */
 export function attachEventEmitters(env: Env): void {
-  // Helper: Get deterministic timestamp (scenario mode uses env.timestamp, live uses Date.now())
-  const getTimestamp = () => env.scenarioMode ? env.timestamp : Date.now();
+  // Helper: Use env.timestamp for deterministic logs
+  const getTimestamp = () => env.timestamp;
 
   // Simple log (like console.log but captured)
   env.log = (message: string) => {

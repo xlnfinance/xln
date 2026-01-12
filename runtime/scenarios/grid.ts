@@ -33,7 +33,7 @@ function pushSnapshot(env: Env, tag: string, description: string, metadata: Reco
     tag,
     description,
     metadata,
-    timestamp: Date.now(),
+    timestamp: env.timestamp,
     eReplicas: new Map(env.eReplicas),
     jReplicas: env.jReplicas ? new Map(env.jReplicas) : undefined
   };

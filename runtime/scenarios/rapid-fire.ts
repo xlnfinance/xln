@@ -18,6 +18,7 @@
  */
 
 import type { Env, EntityInput } from '../types';
+import { getPerfMs } from '../time';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
 import { findReplica, getOffdelta, converge, assert } from './helpers';
 
@@ -155,12 +156,12 @@ export async function rapidFire(env: Env): Promise<void> {
 
   let forwardCount = 0;
   let reverseCount = 0;
-  const startTime = Date.now();
+  const startTime = getPerfMs();
 
   console.log(`🚀 Sending ${paymentCount} payments each direction ($1 every ~100ms)...\n`);
 
   for (let batch = 0; batch < paymentCount / batchSize; batch++) {
-    const batchStart = Date.now();
+    const batchStart = getPerfMs();
 
     // Send batch of 10 forward + 10 reverse
     const batchInputs: EntityInput[] = [];
@@ -205,13 +206,13 @@ export async function rapidFire(env: Env): Promise<void> {
     // Allow bilateral consensus to settle (more rounds for multi-hop)
     await converge(env, 50); // Each payment is 2 hops (A→H, H→B), needs ~8 rounds each
 
-    const elapsed = Date.now() - batchStart;
+    const elapsed = getPerfMs() - batchStart;
     if (batch % 2 === 0) {
       console.log(`   Batch ${batch + 1}/10: ${batchSize * 2} payments in ${elapsed}ms (${forwardCount} fwd, ${reverseCount} rev)`);
     }
   }
 
-  const totalTime = Date.now() - startTime;
+  const totalTime = getPerfMs() - startTime;
   console.log(`\n✅ Stress test complete: ${forwardCount + reverseCount} payments in ${totalTime}ms`);
   console.log(`   Throughput: ${((forwardCount + reverseCount) / (totalTime / 1000)).toFixed(1)} payments/sec`);
 

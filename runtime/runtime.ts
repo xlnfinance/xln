@@ -7,6 +7,7 @@
 // High-level database using Level polyfill (works in both Node.js and browser)
 import { Level } from 'level';
 
+import { getPerfMs, getWallClockMs } from './time';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import {
   createLazyEntity,
@@ -368,7 +369,7 @@ const applyRuntimeInput = async (
   env: Env,
   runtimeInput: RuntimeInput,
 ): Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }> => {
-  const startTime = Date.now();
+  const startTime = getPerfMs();
 
   try {
     // SECURITY: Validate runtime input
@@ -584,7 +585,7 @@ const applyRuntimeInput = async (
             capabilities: [],
             hubs: [],
             metadata: {
-              lastUpdated: env.scenarioMode ? env.timestamp : Date.now(),
+              lastUpdated: env.timestamp,
               routingFeePPM: 100, // Default 100 PPM (0.01%)
               baseFee: 0n,
             },
@@ -741,7 +742,7 @@ const applyRuntimeInput = async (
       env.height++;
       // Don't overwrite timestamp in scenario mode (deterministic time control)
       if (!env.scenarioMode) {
-        env.timestamp = Date.now();
+        env.timestamp = getWallClockMs();
       }
 
       // Capture snapshot BEFORE clearing (to show what was actually processed)
@@ -859,7 +860,7 @@ const applyRuntimeInput = async (
     notifyEnvChange(env);
 
     // Performance logging
-    const endTime = Date.now();
+    const endTime = getPerfMs();
     if (DEBUG) {
       console.log(`⏱️  Tick ${env.height - 1} completed in ${endTime - startTime}ms`);
     }
@@ -1183,7 +1184,7 @@ const clearDatabaseAndHistory = async () => {
     eReplicas: new Map(),
     jReplicas: new Map(),
     height: 0,
-    timestamp: Date.now(),
+    timestamp: 0,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
     gossip: createGossipLayer(),
@@ -1208,7 +1209,7 @@ export const getJWatcherStatus = () => {
           lastFinalizedJHeight: replica.state.lastFinalizedJHeight,
         };
       }),
-    nextSyncIn: Math.floor((1000 - (Date.now() % 1000)) / 100) / 10, // Seconds until next 1s sync
+    nextSyncIn: Math.floor((1000 - ((env.timestamp || 0) % 1000)) / 100) / 10, // Seconds until next 1s sync
   };
 };
 
@@ -1401,7 +1402,7 @@ export const createEmptyEnv = (): Env => {
     eReplicas: new Map(),
     jReplicas: new Map(),
     height: 0,
-    timestamp: Date.now(),
+    timestamp: 0,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
     gossip: createGossipLayer(),
@@ -1443,7 +1444,7 @@ if (false && isBrowser) {
           level: 'info',
           category: detectLogCategory(msg),
           message: msg,
-          timestamp: Date.now(),
+          timestamp: currentEnvForLogs?.timestamp ?? 0,
         });
       } catch (e) {
         // Silently fail log capture - don't break runtime
@@ -1464,7 +1465,7 @@ if (false && isBrowser) {
           level: 'warn',
           category: detectLogCategory(msg),
           message: msg,
-          timestamp: Date.now(),
+          timestamp: currentEnvForLogs?.timestamp ?? 0,
         });
       } catch (e) {
         // Silently fail
@@ -1485,7 +1486,7 @@ if (false && isBrowser) {
           level: 'error',
           category: detectLogCategory(msg),
           message: msg,
-          timestamp: Date.now(),
+          timestamp: currentEnvForLogs?.timestamp ?? 0,
         });
       } catch (e) {
         // Silently fail
@@ -1555,9 +1556,9 @@ export const process = async (
     // In scenario mode, advance by 100ms per tick (deterministic)
     // In live mode, use real time
     if (env.scenarioMode) {
-      env.timestamp = (env.timestamp || Date.now()) + 100; // Advance 100ms per frame
+      env.timestamp = (env.timestamp ?? 0) + 100; // Advance 100ms per frame
     } else {
-      env.timestamp = Date.now();
+      env.timestamp = getWallClockMs();
     }
 
     if (allInputs.length > 0) {
@@ -1638,7 +1639,8 @@ export const process = async (
                 jTx.entityId,
                 tempJBatchState,
                 null, // jurisdiction not needed for BrowserVM
-                browserVM || undefined
+                browserVM || undefined,
+                jTx.timestamp ?? env.timestamp
               );
 
               if (result.success) {

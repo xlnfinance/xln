@@ -4,6 +4,7 @@
  */
 
 import type { JurisdictionEVM, XlnomySnapshot } from '../types.js';
+import { getWallClockMs } from '../time.js';
 import { BrowserVMProvider } from '../browservm.js';
 
 // Singleton across bundles via window global
@@ -69,7 +70,7 @@ export class BrowserEVM implements JurisdictionEVM {
     return {
       name: 'unknown',
       version: '1.0.0',
-      created: Date.now(),
+      created: getWallClockMs(),
       evmType: 'browservm',
       blockTimeMs: 1000,
       jMachine: { position: { x: 0, y: 600, z: 0 }, capacity: 3, jHeight: 0 },

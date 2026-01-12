@@ -9,6 +9,7 @@
  */
 
 import type { Env, EntityState, AccountMachine, Delta } from './types';
+import { getWallClockMs } from './time';
 
 export interface FormatOptions {
   maxAccounts?: number;
@@ -90,7 +91,7 @@ function formatDuration(ms: number): string {
 
 function formatTimestamp(ts: number, relative: boolean = true): string {
   if (relative) {
-    const delta = Date.now() - ts;
+    const delta = getWallClockMs() - ts;
     if (Math.abs(delta) < 1000) return 'now';
     return delta > 0 ? `${formatDuration(delta)} ago` : `in ${formatDuration(-delta)}`;
   }
@@ -283,7 +284,7 @@ export function formatEntity(entity: EntityState, options?: FormatOptions): stri
       for (const lock of locks) {
         const status = getLockStatus(lock, entity);
         const dir = lock.direction === 'outgoing' ? '→' : '←';
-        const timeLeft = formatDuration(Number(lock.timelock) - Date.now());
+        const timeLeft = formatDuration(Number(lock.timelock) - getWallClockMs());
         output.push(' '.repeat(indent) + `      ${dir} ${formatBigInt(lock.amount)} | hash=${lock.hashlock.slice(0, 12)}... | ${status} | ${timeLeft}`);
       }
 
@@ -410,7 +411,7 @@ export function formatAccount(account: AccountMachine, myEntityId: string, optio
 
     const locks = Array.from(account.locks.values()).slice(0, opts.maxLocks);
     for (const lock of locks) {
-      const timeLeft = formatDuration(Number(lock.timelock) - Date.now());
+      const timeLeft = formatDuration(Number(lock.timelock) - getWallClockMs());
       const direction = lock.senderIsLeft ? 'L→R' : 'R→L';
       output.push(' '.repeat(indent) + `    Lock: ${lock.lockId.slice(0, 12)}... | ${formatBigInt(lock.amount)}`);
       output.push(' '.repeat(indent) + `      Hash: ${lock.hashlock.slice(0, 16)}... | ${direction} | Expires: ${timeLeft}`);
@@ -564,7 +565,7 @@ export function formatSummary(env: Env): string {
 
 // Helper: Get lock status
 function getLockStatus(lock: any, entity: EntityState): string {
-  const now = Date.now();
+  const now = getWallClockMs();
   const jHeight = entity.lastFinalizedJHeight || 0;
 
   if (now > Number(lock.timelock)) {

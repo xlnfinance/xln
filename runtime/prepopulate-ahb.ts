@@ -57,7 +57,7 @@ function cloneProfilesForSnapshot(env: Env): { profiles: Profile[] } | undefined
     let clonedMetadata: Profile['metadata'] = undefined;
     if (profile.metadata) {
       clonedMetadata = { ...profile.metadata };
-      clonedMetadata.lastUpdated = clonedMetadata.lastUpdated ?? Date.now();
+      clonedMetadata.lastUpdated = clonedMetadata.lastUpdated ?? env.timestamp;
       if (clonedMetadata.baseFee !== undefined) {
         clonedMetadata.baseFee = BigInt(clonedMetadata.baseFee.toString());
       }
@@ -143,7 +143,7 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
   // Build JSON-serializable state object
   const state: Record<string, any> = {
     label,
-    timestamp: Date.now(),
+    timestamp: env.timestamp,
     height: env.height,
     entities: {} as Record<string, any>,
   };
@@ -436,7 +436,7 @@ async function pushSnapshot(
 
   const snapshot: EnvSnapshot = {
     height: env.height,
-    timestamp: Date.now(),
+    timestamp: env.timestamp,
     eReplicas: new Map(
       Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica)]),
     ),
@@ -935,7 +935,7 @@ export async function prepopulateAHB(env: Env): Promise<void> {
     if (aliceReplicaForBatch.state.jBatchState) {
       console.log(`[Frame 8] Broadcasting jBatch...`);
       const { broadcastBatch } = await import('./j-batch');
-      await broadcastBatch(alice.id, aliceReplicaForBatch.state.jBatchState, null, browserVM);
+      await broadcastBatch(alice.id, aliceReplicaForBatch.state.jBatchState, null, browserVM, env.timestamp);
       console.log(`[Frame 8] broadcastBatch completed`);
     } else {
       console.error(`[Frame 8] ❌ NO jBatchState! deposit_collateral didn't create batch`);
@@ -1226,7 +1226,7 @@ export async function prepopulateAHB(env: Env): Promise<void> {
 
     // Broadcast settlement to BrowserVM
     console.log('🏦 Broadcasting Alice-Hub settlement jBatch to BrowserVM...');
-    await broadcastBatch(alice.id, aliceReplicaRebal.state.jBatchState, null, browserVM);
+      await broadcastBatch(alice.id, aliceReplicaRebal.state.jBatchState, null, browserVM, env.timestamp);
     console.log('✅ Alice-Hub settlement broadcast');
 
     // Process j_events from BrowserVM (SettlementProcessed events)
@@ -1296,7 +1296,7 @@ export async function prepopulateAHB(env: Env): Promise<void> {
 
     // Broadcast settlement to BrowserVM
     console.log('🏦 Broadcasting Hub-Bob settlement jBatch to BrowserVM...');
-    await broadcastBatch(hub.id, hubReplicaRebal.state.jBatchState, null, browserVM);
+    await broadcastBatch(hub.id, hubReplicaRebal.state.jBatchState, null, browserVM, env.timestamp);
     console.log('✅ Hub-Bob settlement broadcast');
 
     // Process j_events from BrowserVM (SettlementProcessed events)

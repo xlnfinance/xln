@@ -341,9 +341,6 @@ let vrHammer: VRHammer | null = null;
   let broadcastEnabled = true;
   let broadcastAnimations: THREE.Object3D[] = []; // Active broadcast visuals
 
-  // Bar morphing state persistence (survives bar recreation during entity movement)
-  const barLerpState = new Map<string, number>(); // key: `${fromId}-${toId}-${tokenId}-${segmentIdx}` → currentLength
-
   // J-Machine Auto-Proposer: Single-signer consensus simulation
   // J acts as super-entity that auto-proposes every N seconds
   let jAutoProposerInterval: ReturnType<typeof setInterval> | null = null;
@@ -4554,9 +4551,6 @@ let vrHammer: VRHammer | null = null;
     // ===== ANIMATE ENTITY INPUT STRIKES =====
     animateEntityInputStrikes();
 
-    // ===== ANIMATE BAR MORPHING (VOLUME CONSERVATION) =====
-    animateBarMorphing();
-
     // Update VR grabbed entity position
     if (vrGrabbedEntity && vrGrabController) {
       const controllerPos = new THREE.Vector3();
@@ -5259,38 +5253,6 @@ let vrHammer: VRHammer | null = null;
       line,
       startTime: performance.now(),
       duration: 100 // 100ms flash
-    });
-  }
-
-  // Animate bar morphing with smooth lerp (volume conservation)
-  function animateBarMorphing() {
-    const lerpSpeed = 0.15;
-
-    connections.forEach(connection => {
-      if (!connection.progressBars) return;
-
-      // Traverse all bar meshes in the progress bars group
-      connection.progressBars.traverse((child: any) => {
-        if (child instanceof THREE.Mesh && child.userData['targetLength'] !== undefined) {
-          const targetLength = child.userData['targetLength'];
-          let currentLength = child.userData['currentLength'];
-
-          if (currentLength === undefined) {
-            currentLength = targetLength;
-            child.userData['currentLength'] = currentLength;
-          }
-
-          // Lerp current → target
-          const newLength = currentLength + (targetLength - currentLength) * lerpSpeed;
-          child.userData['currentLength'] = newLength;
-
-          // Update cylinder geometry scale (Y-axis is length for cylinders)
-          const lengthRatio = newLength / targetLength;
-          if (lengthRatio > 0.001) { // Avoid divide by zero
-            child.scale.y = lengthRatio;
-          }
-        }
-      });
     });
   }
 

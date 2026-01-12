@@ -11,7 +11,7 @@ import { deriveDelta, isLeft } from './account-utils';
  * Build gossip profile from entity state
  * Includes all account capacities for routing
  */
-export function buildEntityProfile(entityState: EntityState, name?: string, timestamp?: number): Profile {
+export function buildEntityProfile(entityState: EntityState, name?: string, timestamp: number = 0): Profile {
   const accounts: Profile['accounts'] = [];
 
   // Build account capacities from all accounts
@@ -43,7 +43,7 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
     capabilities: [], // Future: Add routing, swap capabilities based on entity config
     hubs: [], // Future: Track hub connections from network topology
     metadata: {
-      lastUpdated: typeof timestamp === 'number' ? timestamp : Date.now(),
+      lastUpdated: timestamp,
       isHub: false, // Future: Determine from entity capabilities or manual config
       routingFeePPM: 100, // Default 100 PPM (0.01%)
       baseFee: 0n,
@@ -58,14 +58,14 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
 /**
  * Create a RuntimeTx to broadcast profile update
  */
-export function createProfileBroadcastTx(entityState: EntityState, timestamp?: number): any {
+export function createProfileBroadcastTx(entityState: EntityState, timestamp: number): any {
   const profile = buildEntityProfile(entityState, undefined, timestamp);
 
   return {
     type: 'gossipBroadcast',
     data: {
       profile,
-      timestamp: typeof timestamp === 'number' ? timestamp : Date.now(),
+      timestamp,
     },
   };
 }

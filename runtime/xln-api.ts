@@ -90,6 +90,7 @@ export type BrowserVMInstance = {
   getErc20Balance: (tokenAddress: string, owner: string) => Promise<bigint>;
   getEthBalance: (owner: string) => Promise<bigint>;
   fundSignerWallet: (address: string, amount?: bigint) => Promise<void>;
+  setBlockTimestamp?: (timestamp: number) => void;
 };
 
 /**

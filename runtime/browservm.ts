@@ -62,6 +62,7 @@ export class BrowserVMProvider {
   private blockHeight = 0; // Track J-Machine block height
   private blockHash = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Current block hash
   private prevBlockHash = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Previous block hash
+  private blockTimestamp = 0; // Deterministic block timestamp (set by runtime)
   // ─────────────────────────────────────────────────────────────────────────────
   // Event callbacks receive BATCHES of events (all events from one tx/block)
   // This matches real blockchain behavior where events are grouped by block
@@ -1117,7 +1118,7 @@ export class BrowserVMProvider {
               ),
               blockNumber: this.blockHeight,
               blockHash: this.blockHash,
-              timestamp: Date.now(),
+              timestamp: this.blockTimestamp,
             });
             break; // Found a match, move to next log
           }
@@ -1375,7 +1376,7 @@ export class BrowserVMProvider {
     // Compute deterministic block hash using ethers.js keccak256
     const packed = ethers.solidityPacked(
       ['bytes32', 'uint256', 'uint256'],
-      [this.prevBlockHash, this.blockHeight, Date.now()]
+      [this.prevBlockHash, this.blockHeight, this.blockTimestamp]
     );
     this.blockHash = ethers.keccak256(packed);
   }
@@ -1383,6 +1384,11 @@ export class BrowserVMProvider {
   /** Get current block hash */
   getBlockHash(): string {
     return this.blockHash;
+  }
+
+  /** Set deterministic block timestamp for next tx/block */
+  setBlockTimestamp(timestamp: number): void {
+    this.blockTimestamp = timestamp;
   }
 
   /** Check if saved state exists */

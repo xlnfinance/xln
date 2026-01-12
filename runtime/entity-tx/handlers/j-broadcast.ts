@@ -59,7 +59,7 @@ export async function handleJBroadcast(
       hankoSignature: hankoSignature || undefined,
       batchSize,
     },
-    timestamp: env.scenarioMode ? env.timestamp : Date.now(),
+    timestamp: env.timestamp,
   };
 
   // PROPER ROUTING: Return jInput to be queued via runtime (like E→E uses entityInput)
@@ -77,7 +77,7 @@ export async function handleJBroadcast(
   // Clear entity's jBatch after creating output (ready for next batch)
   newState.jBatchState.batch = createEmptyBatch();
   newState.jBatchState.broadcastCount++;
-  newState.jBatchState.lastBroadcast = env.scenarioMode ? env.timestamp : Date.now();
+  newState.jBatchState.lastBroadcast = env.timestamp;
 
   addMessage(newState, `📤 Created J-output (${batchSize} ops) - will queue via runtime`);
 

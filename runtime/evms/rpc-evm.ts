@@ -7,6 +7,7 @@
  */
 
 import type { JurisdictionEVM, XlnomySnapshot } from '../types.js';
+import { getWallClockMs } from '../time.js';
 
 export class RPCEVM implements JurisdictionEVM {
   type: 'rpc' = 'rpc';
@@ -46,7 +47,7 @@ export class RPCEVM implements JurisdictionEVM {
     return {
       name: 'unknown',
       version: '1.0.0',
-      created: Date.now(),
+      created: getWallClockMs(),
       evmType: 'reth', // TODO: Support erigon/monad too
       blockTimeMs: 1000,
       jMachine: { position: { x: 0, y: 600, z: 0 }, capacity: 3, jHeight: 0 },
