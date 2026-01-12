@@ -38,10 +38,10 @@
   // Time-travel aware: Read from history[timeIndex] when scrubbing, else live state
   $: env = (() => {
     const timeIdx = $isolatedTimeIndex;
-    const hist = $isolatedHistory;
-    if (timeIdx >= 0 && hist && hist.length > 0) {
-      const idx = Math.min(timeIdx, hist.length - 1);
-      return hist[idx];  // Historical frame
+    const historyFrames = $isolatedHistory;
+    if (timeIdx >= 0 && historyFrames && historyFrames.length > 0) {
+      const idx = Math.min(timeIdx, historyFrames.length - 1);
+      return historyFrames[idx];  // Historical frame
     }
     return $isolatedEnv;  // Live state
   })();
@@ -775,12 +775,12 @@ let vrHammer: VRHammer | null = null;
 
       // Get PREVIOUS frame's mempool size for broadcast detection
       const timeIdx = $isolatedTimeIndex;
-      const hist = $isolatedHistory;
+      const historyFrames = $isolatedHistory;
       let prevMempoolSize = 0;
-      if (hist && hist.length > 0) {
-        const prevFrameIdx = timeIdx === -1 ? hist.length - 2 : timeIdx - 1;
-        if (prevFrameIdx >= 0 && prevFrameIdx < hist.length) {
-          const prevFrame = hist[prevFrameIdx];
+      if (historyFrames && historyFrames.length > 0) {
+        const prevFrameIdx = timeIdx === -1 ? historyFrames.length - 2 : timeIdx - 1;
+        if (prevFrameIdx >= 0 && prevFrameIdx < historyFrames.length) {
+          const prevFrame = historyFrames[prevFrameIdx];
           const prevJReplicas = prevFrame?.jReplicas;
           if (prevJReplicas) {
             const prevJReplicaArr = Array.isArray(prevJReplicas) ? prevJReplicas : Array.from(prevJReplicas.values());
@@ -1309,13 +1309,13 @@ let vrHammer: VRHammer | null = null;
   // CRITICAL: Watch HISTORY frames, not env.runtimeInput (which is cleared after processing)
   // Only animate in LIVE mode - historical playback should show static state
   $: if (jMachine && $isolatedTimeIndex === -1) {
-    const hist = $isolatedHistory;
-    const currentLen = hist?.length || 0;
+    const historyFrames = $isolatedHistory;
+    const currentLen = historyFrames?.length || 0;
 
     // Animate any NEW frames we haven't processed yet
     if (currentLen > lastAnimatedFrameIndex + 1) {
       for (let i = lastAnimatedFrameIndex + 1; i < currentLen; i++) {
-        const frame = hist[i];
+        const frame = historyFrames[i];
         const entityInputs = frame?.runtimeInput?.entityInputs || [];
 
         entityInputs.forEach((entityInput: any) => {
@@ -4110,12 +4110,13 @@ let vrHammer: VRHammer | null = null;
       XLN  // Pass XLN runtime functions for deriveDelta
     );
 
-    // Create mempool boxes (one per entity side)
+    // Create mempool boxes (one per entity side) - pass BOTH accounts
     const mempoolBoxes = createAccountMempoolBoxes(
       scene,
       fromEntity,
       toEntity,
-      accountData,
+      leftAccount,
+      rightAccount,
       fromIsLeftEntity,
       getEntitySizeForToken
     );
@@ -4189,32 +4190,29 @@ let vrHammer: VRHammer | null = null;
     scene: THREE.Scene,
     fromEntity: any,
     toEntity: any,
-    account: any,
+    leftAccount: any,
+    rightAccount: any,
     fromIsLeft: boolean,
     getEntitySizeForToken: (entityId: string, tokenId: number) => number
   ): { leftBox: THREE.Group; rightBox: THREE.Group } | null {
-    if (!account) return null;
+    if (!leftAccount && !rightAccount) return null;
 
     const direction = new THREE.Vector3().subVectors(toEntity.position, fromEntity.position);
     const normalizedDirection = direction.normalize();
 
     // Get sync states for colors (GREEN = synced, RED = desynced)
-    const leftState = XLN?.classifyBilateralState?.(account, 0, fromIsLeft);
-    const rightState = XLN?.classifyBilateralState?.(account, 0, !fromIsLeft);
+    const leftState = leftAccount ? XLN?.classifyBilateralState?.(leftAccount, 0, true) : null;
+    const rightState = rightAccount ? XLN?.classifyBilateralState?.(rightAccount, 0, false) : null;
 
-    // Get mempool (waiting) and pendingFrame (sent) transactions
-    const mempool = account.mempool || [];
-    const pendingTxs = account.pendingFrame?.accountTxs || [];
+    // Each entity has its OWN mempool and pendingFrame (bilateral, not shared)
+    const leftMempoolTxs = leftAccount?.mempool || [];
+    const leftPendingTxs = leftAccount?.pendingFrame?.accountTxs || [];
+    const rightMempoolTxs = rightAccount?.mempool || [];
+    const rightPendingTxs = rightAccount?.pendingFrame?.accountTxs || [];
 
     // Box border color based on sync state
     const leftBoxColor = leftState?.state === 'committed' ? 0x00ff88 : 0xff4444;
     const rightBoxColor = rightState?.state === 'committed' ? 0x00ff88 : 0xff4444;
-
-    // Split by side (simple: odd=left, even=right)
-    const leftMempoolTxs = mempool.filter((_: any, i: number) => i % 2 === 0);
-    const rightMempoolTxs = mempool.filter((_: any, i: number) => i % 2 === 1);
-    const leftPendingTxs = pendingTxs.filter((_: any, i: number) => i % 2 === 0);
-    const rightPendingTxs = pendingTxs.filter((_: any, i: number) => i % 2 === 1);
 
     const leftBox = createMempoolBox(leftBoxColor, leftMempoolTxs, leftPendingTxs, normalizedDirection);
     const rightBox = createMempoolBox(rightBoxColor, rightMempoolTxs, rightPendingTxs, normalizedDirection);
@@ -4224,7 +4222,7 @@ let vrHammer: VRHammer | null = null;
     const toEntitySize = getEntitySizeForToken(toEntity.id, 1);
     const barRadius = 0.08 * 2.5; // 0.2
     const safeGap = 0.2;
-    const boxDepth = 0.25; // Match reduced box depth above
+    const boxDepth = 0.4; // Match box depth above (wider box for gray+blue)
 
     // Calculate bar start positions (EXACT same formula as AccountBarRenderer:338-339)
     const fromBarStartPos = fromEntity.position.clone().add(
@@ -4259,10 +4257,10 @@ let vrHammer: VRHammer | null = null;
   ): THREE.Group {
     const group = new THREE.Group();
 
-    // Minimal box dimensions - fit in gap between entity and bars
-    const width = 0.8;   // Smaller to avoid overlap
+    // Box dimensions - wider to fit GRAY + BLUE cubes inside
+    const width = 1.6;   // Wide enough for 2 rows of cubes
     const height = 0.8;
-    const depth = 0.25;  // Very thin
+    const depth = 0.4;   // Thicker to clearly separate gray/blue zones
 
     // Container box (border shows sync state: green=synced, red=desynced)
     const geometry = new THREE.BoxGeometry(width, height, depth);
@@ -4294,7 +4292,7 @@ let vrHammer: VRHammer | null = null;
     const spacing = 0.35; // Tight spacing
 
     // GRAY cubes (mempool - waiting to be sent)
-    // Position toward back (toward entity)
+    // Position toward back (toward entity, Z negative)
     mempoolTxs.slice(0, 2).forEach((tx, i) => {
       const txGeometry = new THREE.BoxGeometry(txSize, txSize, txSize);
       const txMaterial = new THREE.MeshLambertMaterial({
@@ -4306,15 +4304,15 @@ let vrHammer: VRHammer | null = null;
       });
       const txCube = new THREE.Mesh(txGeometry, txMaterial);
 
-      // Position in back row (Z = -depth/4)
+      // Position in back half of box (closer to entity)
       const xOffset = i === 0 ? -spacing/2 : spacing/2;
-      txCube.position.set(xOffset, 0, -depth/4);
+      txCube.position.set(xOffset, 0, -depth/3);
 
       group.add(txCube);
     });
 
     // BLUE cubes (pendingFrame - sent, waiting for ACK)
-    // Position toward front (toward bars/committed state)
+    // Position toward front (toward bars, Z positive)
     pendingTxs.slice(0, 2).forEach((tx, i) => {
       const txGeometry = new THREE.BoxGeometry(txSize, txSize, txSize);
       const txMaterial = new THREE.MeshLambertMaterial({
@@ -4326,9 +4324,9 @@ let vrHammer: VRHammer | null = null;
       });
       const txCube = new THREE.Mesh(txGeometry, txMaterial);
 
-      // Position in front row (Z = +depth/4, closer to bars)
+      // Position in front half of box (closer to bars, but INSIDE box)
       const xOffset = i === 0 ? -spacing/2 : spacing/2;
-      txCube.position.set(xOffset, 0, depth/4);
+      txCube.position.set(xOffset, 0, depth/6);  // depth/6 keeps it inside
 
       group.add(txCube);
     });
