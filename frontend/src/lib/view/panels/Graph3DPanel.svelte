@@ -772,7 +772,6 @@ let vrHammer: VRHammer | null = null;
     // Sync J mempool visual: show tx cubes based on actual mempool contents from snapshot
     const activeJurisdiction = jurisdictionsArray.find(x => x.name === activeJurisdictionName);
     const activeJMachine = activeJurisdiction ? jMachines.get(activeJurisdiction.name) : undefined;
-    console.log(`[J-Mempool] activeJurisdiction=${activeJurisdiction?.name}, jMachine=${!!activeJMachine}, jurisdictionsArray.length=${jurisdictionsArray.length}`);
     if (activeJurisdiction && activeJMachine) {
       // Read mempool size directly from jReplica snapshot (canonical source of truth)
       const mempoolSize = activeJurisdiction.jMachine.mempool?.length || 0;
@@ -826,50 +825,23 @@ let vrHammer: VRHammer | null = null;
         jMachineTxBoxes.push(txCube);
       });
 
-      console.log(`[J-Mempool] Rendered ${mempool.length} cubes at jHeight ${currentJHeight}`);
-
-      // BROADCAST DETECTION: jHeight increased (new block created in this frame)
-      if (prevMempoolSize > 0 && mempoolSize === 0 && prevFrame) {
+      // BROADCAST DETECTION: jHeight increased (canonical signal for block finalization)
+      if (prevFrame) {
         const prevJReplica = prevFrame.jReplicas?.find((jr: any) => jr.name === activeJurisdiction.name);
-        const prevJHeight = prevJReplica?.jHeight || 0;
+        const prevJHeight = Number(prevJReplica?.jHeight || 0);
+        const currJHeightNum = Number(currentJHeight);
 
-        if (Number(currentJHeight) > Number(prevJHeight)) {
-          const blockNumber = BigInt(currentJHeight);
-          console.log(`[Broadcast] 📡 Block #${blockNumber} finalized: jHeight ${prevJHeight} → ${currentJHeight} (${prevMempoolSize} TXs)`);
-
-          // Create block container for finalized TXs
-          const blockContainer = new THREE.Group();
-          blockContainer.userData['blockNumber'] = blockNumber;
-
-          // J-mempool style box
-          const blockSize = 12;
-          const blockCubeGeo = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
-          const blockCubeMat = new THREE.MeshPhongMaterial({
-            color: 0x4488aa,
-            emissive: 0x224455,
-            transparent: true,
-            opacity: 0.15,
-            side: THREE.DoubleSide,
-            shininess: 100,
-            depthWrite: false
-          });
-          const blockCube = new THREE.Mesh(blockCubeGeo, blockCubeMat);
-          blockContainer.add(blockCube);
-
-          // Cyan edges
-          const blockEdgesGeo = new THREE.EdgesGeometry(blockCubeGeo);
-          const blockEdgesMat = new THREE.LineBasicMaterial({ color: 0x66ccff, linewidth: 2 });
-          const blockEdges = new THREE.LineSegments(blockEdgesGeo, blockEdgesMat);
-          blockContainer.add(blockEdges);
-
-          // Create TX cubes from prevFrame mempool (NOT from jMachineTxBoxes - already cleared!)
+        if (currJHeightNum > prevJHeight && prevMempoolSize > 0) {
+          const blockNumber = BigInt(currJHeightNum);
           const prevMempool = prevJReplica?.mempool || [];
-          const txCubes: THREE.Object3D[] = [];
-          prevMempool.slice(0, 9).forEach((tx: any, txIdx: number) => {
-            const txCube = createMempoolTxCube(txIdx, tx, Number(blockNumber));
-            blockContainer.add(txCube);
-            txCubes.push(txCube);
-          });
+
+          // Create block using shared function (DRY)
+          const { container: blockContainer, txCubes } = createBlockContainer(
+            blockNumber,
+            prevMempool,
+            activeJMachine.position,
+            15 // Initial yOffset for new block
+          );
 
           // Stack existing blocks upward
           const blockSpacing = 15;
@@ -979,40 +951,13 @@ let vrHammer: VRHammer | null = null;
             const blockNum = BigInt(boundary.blockNum);
             const yOffset = (blockBoundaries.length - idx) * 15; // Stack upward
 
-            // Create block container (clone J-mempool style)
-            const blockContainer = new THREE.Group();
-            blockContainer.userData['blockNumber'] = blockNum;
-            blockContainer.position.copy(activeJMachine.position);
-            blockContainer.position.y += yOffset;
-
-            // J-mempool style box
-            const blockSize = 12;
-            const blockCubeGeo = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
-            const blockCubeMat = new THREE.MeshPhongMaterial({
-              color: 0x4488aa,
-              emissive: 0x224455,
-              transparent: true,
-              opacity: 0.15,
-              side: THREE.DoubleSide,
-              shininess: 100,
-              depthWrite: false
-            });
-            const blockCube = new THREE.Mesh(blockCubeGeo, blockCubeMat);
-            blockContainer.add(blockCube);
-
-            // Cyan edges
-            const blockEdgesGeo = new THREE.EdgesGeometry(blockCubeGeo);
-            const blockEdgesMat = new THREE.LineBasicMaterial({ color: 0x66ccff, linewidth: 2 });
-            const blockEdges = new THREE.LineSegments(blockEdgesGeo, blockEdgesMat);
-            blockContainer.add(blockEdges);
-
-            // Add yellow TX cubes inside (from runtime history)
-            const txCubes: THREE.Object3D[] = [];
-            boundary.txs.forEach((tx, txIdx) => {
-              const txCube = createMempoolTxCube(txIdx, tx, Number(blockNum));
-              blockContainer.add(txCube);
-              txCubes.push(txCube);
-            });
+            // Create block using shared function (DRY)
+            const { container: blockContainer, txCubes } = createBlockContainer(
+              blockNum,
+              boundary.txs,
+              activeJMachine.position,
+              yOffset
+            );
 
             scene.add(blockContainer);
 
@@ -1189,6 +1134,52 @@ let vrHammer: VRHammer | null = null;
 
   // Create J-block broadcast effect when mempool clears
   // Expanding wireframe sphere from J-Machine - radio wave to entire universe
+  /**
+   * Create blockchain block container (DRY - used in live + time-travel)
+   */
+  function createBlockContainer(
+    blockNum: bigint,
+    txs: any[],
+    jMachinePos: THREE.Vector3,
+    yOffset: number
+  ): { container: THREE.Group; txCubes: THREE.Object3D[] } {
+    const blockContainer = new THREE.Group();
+    blockContainer.userData['blockNumber'] = blockNum;
+    blockContainer.position.copy(jMachinePos);
+    blockContainer.position.y += yOffset;
+
+    // J-mempool style box
+    const blockSize = 12;
+    const blockCubeGeo = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
+    const blockCubeMat = new THREE.MeshPhongMaterial({
+      color: 0x4488aa,
+      emissive: 0x224455,
+      transparent: true,
+      opacity: 0.15,
+      side: THREE.DoubleSide,
+      shininess: 100,
+      depthWrite: false
+    });
+    const blockCube = new THREE.Mesh(blockCubeGeo, blockCubeMat);
+    blockContainer.add(blockCube);
+
+    // Cyan edges
+    const blockEdgesGeo = new THREE.EdgesGeometry(blockCubeGeo);
+    const blockEdgesMat = new THREE.LineBasicMaterial({ color: 0x66ccff, linewidth: 2 });
+    const blockEdges = new THREE.LineSegments(blockEdgesGeo, blockEdgesMat);
+    blockContainer.add(blockEdges);
+
+    // Create TX cubes
+    const txCubes: THREE.Object3D[] = [];
+    txs.slice(0, 9).forEach((tx: any, txIdx: number) => {
+      const txCube = createMempoolTxCube(txIdx, tx, Number(blockNum));
+      blockContainer.add(txCube);
+      txCubes.push(txCube);
+    });
+
+    return { container: blockContainer, txCubes };
+  }
+
   /**
    * Proportional broadcast effect: sphere intensity based on TX count
    * More TXs = bigger, brighter, longer duration effect
