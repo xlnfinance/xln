@@ -364,6 +364,25 @@ let vrHammer: VRHammer | null = null;
     direction?: 'incoming' | 'outgoing';
   }> = [];
 
+  // Active animations tracking
+  let flyingTxAnimations: Array<{
+    mesh: THREE.Mesh;
+    startPos: THREE.Vector3;
+    endPos: THREE.Vector3;
+    progress: number;
+    duration: number;
+    startTime: number;
+    txIndex: number;
+    tx: any;
+    blockHeight: number;
+  }> = [];
+
+  let entityInputStrikes: Array<{
+    line: THREE.Line;
+    startTime: number;
+    duration: number;
+  }> = [];
+
   // Frame activity tracking
   let currentFrameActivity: FrameActivity = {
     activeEntities: new Set(),
@@ -802,12 +821,32 @@ let vrHammer: VRHammer | null = null;
         // Trigger visual animation: yellow cube flies from entity to J-Machine
         if (tx && (tx.from || tx.entityId)) {
           const sourceEntityId = tx.from || tx.entityId;
-          // Flying cube animation deleted - TX appears directly in J-mempool
-        }
+          const sourceEntity = entities.find(e => e.id === sourceEntityId);
 
-        const txCube = createMempoolTxCube(txIndex, tx, nextBlockHeight);
-        activeJMachine.add(txCube);
-        jMachineTxBoxes.push(txCube);
+          if (sourceEntity && activeJMachine) {
+            // Create flying TX cube animation
+            const finalPos = activeJMachine.position.clone();
+            // Add the cube's final position offset (same logic as createMempoolTxCube)
+            const gridSize = 3;
+            const spacing = 2.5;
+            const xIndex = txIndex % gridSize;
+            const zIndex = Math.floor(txIndex / gridSize) % gridSize;
+            const yIndex = Math.floor(txIndex / (gridSize * gridSize));
+            const halfGrid = (gridSize - 1) * spacing / 2;
+            finalPos.add(new THREE.Vector3(
+              -halfGrid + xIndex * spacing,
+              -4 + yIndex * spacing,
+              -halfGrid + zIndex * spacing
+            ));
+
+            createFlyingTxCube(sourceEntity.position, finalPos, txIndex, tx, nextBlockHeight);
+          }
+        } else {
+          // No source entity, create cube directly
+          const txCube = createMempoolTxCube(txIndex, tx, nextBlockHeight);
+          activeJMachine.add(txCube);
+          jMachineTxBoxes.push(txCube);
+        }
       }
 
       // Blockchain visualization: When mempool clears (broadcast), convert to committed block
@@ -1073,6 +1112,47 @@ let vrHammer: VRHammer | null = null;
     }
 
     return group;
+  }
+
+  // Create flying TX cube animation (entity → J-mempool)
+  function createFlyingTxCube(
+    startPos: THREE.Vector3,
+    endPos: THREE.Vector3,
+    txIndex: number,
+    tx: any,
+    blockHeight: number
+  ) {
+    if (!scene) return;
+
+    // Create yellow cube
+    const cubeSize = 1.5;
+    const geometry = new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize);
+    const material = new THREE.MeshLambertMaterial({
+      color: 0xffcc00,
+      transparent: true,
+      opacity: 0.95,
+      emissive: 0xffaa00,
+      emissiveIntensity: 0.8
+    });
+    const cube = new THREE.Mesh(geometry, material);
+    cube.position.copy(startPos);
+    scene.add(cube);
+
+    // Duration: 200ms / animationSpeed
+    const duration = 200 / animationSpeed;
+    const startTime = performance.now();
+
+    flyingTxAnimations.push({
+      mesh: cube,
+      startPos: startPos.clone(),
+      endPos: endPos.clone(),
+      progress: 0,
+      duration,
+      startTime,
+      txIndex,
+      tx,
+      blockHeight
+    });
   }
 
   // Format mempool tx into detailed label with batch contents
@@ -3389,6 +3469,9 @@ let vrHammer: VRHammer | null = null;
                 const fromEntityId = tx.data.fromEntityId;
                 const toEntityId = tx.data.toEntityId;
 
+                // Entity input strike animation (bilateral messaging)
+                triggerEntityInputStrike(fromEntityId, toEntityId);
+
                 // Create BOTH incoming and outgoing particles for bilateral visibility
                 // Outgoing: from sender's perspective
                 if (!currentFrameActivity.outgoingFlows.has(fromEntityId)) {
@@ -3439,6 +3522,9 @@ let vrHammer: VRHammer | null = null;
             if (tx.type === 'accountInput' && tx.data) {
               const fromEntityId = tx.data.fromEntityId;
               const toEntityId = tx.data.toEntityId;
+
+              // Entity input strike animation (bilateral messaging)
+              triggerEntityInputStrike(fromEntityId, toEntityId);
 
               // Create BOTH incoming and outgoing particles for bilateral visibility
               // Outgoing: from sender's perspective
@@ -4432,6 +4518,15 @@ let vrHammer: VRHammer | null = null;
       effectOperations.process(scene, entityMeshMap, deltaTime, 10);
     }
 
+    // ===== ANIMATE FLYING TX CUBES =====
+    animateFlyingTxCubes();
+
+    // ===== ANIMATE ENTITY INPUT STRIKES =====
+    animateEntityInputStrikes();
+
+    // ===== ANIMATE BAR MORPHING (VOLUME CONSERVATION) =====
+    animateBarMorphing();
+
     // Update VR grabbed entity position
     if (vrGrabbedEntity && vrGrabController) {
       const controllerPos = new THREE.Vector3();
@@ -5038,6 +5133,136 @@ let vrHammer: VRHammer | null = null;
     }
   }
 
+  // Animate flying TX cubes (entity → J-mempool)
+  function animateFlyingTxCubes() {
+    if (!scene) return;
+
+    const now = performance.now();
+
+    for (let i = flyingTxAnimations.length - 1; i >= 0; i--) {
+      const anim = flyingTxAnimations[i];
+      if (!anim) continue;
+
+      const elapsed = now - anim.startTime;
+      anim.progress = Math.min(elapsed / anim.duration, 1.0);
+
+      // Linear interpolation
+      anim.mesh.position.lerpVectors(anim.startPos, anim.endPos, anim.progress);
+
+      // Animation complete
+      if (anim.progress >= 1.0) {
+        // Remove flying cube
+        scene.remove(anim.mesh);
+        anim.mesh.geometry.dispose();
+        (anim.mesh.material as THREE.Material).dispose();
+
+        // Create static mempool cube at final position
+        const activeJMachine = jMachine;
+        if (activeJMachine) {
+          const txCube = createMempoolTxCube(anim.txIndex, anim.tx, anim.blockHeight);
+          activeJMachine.add(txCube);
+          jMachineTxBoxes.push(txCube);
+        }
+
+        // Remove from array
+        flyingTxAnimations.splice(i, 1);
+      }
+    }
+  }
+
+  // Animate entity input strikes (bilateral messaging)
+  function animateEntityInputStrikes() {
+    if (!scene) return;
+
+    const now = performance.now();
+
+    for (let i = entityInputStrikes.length - 1; i >= 0; i--) {
+      const strike = entityInputStrikes[i];
+      if (!strike) continue;
+
+      const elapsed = now - strike.startTime;
+      const progress = Math.min(elapsed / strike.duration, 1.0);
+
+      // Fade out opacity
+      const material = strike.line.material as THREE.LineBasicMaterial;
+      material.opacity = 1.0 - progress;
+
+      // Animation complete
+      if (progress >= 1.0) {
+        // Clean up
+        scene.remove(strike.line);
+        strike.line.geometry.dispose();
+        material.dispose();
+
+        // Remove from array
+        entityInputStrikes.splice(i, 1);
+      }
+    }
+  }
+
+  // Trigger entity input strike (called when bilateral message received)
+  function triggerEntityInputStrike(fromEntityId: string, toEntityId: string) {
+    if (!scene || fromEntityId === toEntityId) return; // Skip intra-entity messages
+
+    const fromEntity = entities.find(e => e.id === fromEntityId);
+    const toEntity = entities.find(e => e.id === toEntityId);
+
+    if (!fromEntity || !toEntity) return;
+
+    // Create thin cyan line
+    const geometry = new THREE.BufferGeometry().setFromPoints([
+      fromEntity.position.clone(),
+      toEntity.position.clone()
+    ]);
+
+    const material = new THREE.LineBasicMaterial({
+      color: 0x00ffff, // Cyan
+      transparent: true,
+      opacity: 1.0,
+      linewidth: 2
+    });
+
+    const line = new THREE.Line(geometry, material);
+    scene.add(line);
+
+    entityInputStrikes.push({
+      line,
+      startTime: performance.now(),
+      duration: 100 // 100ms flash
+    });
+  }
+
+  // Animate bar morphing with smooth lerp (volume conservation)
+  function animateBarMorphing() {
+    const lerpSpeed = 0.15;
+
+    connections.forEach(connection => {
+      if (!connection.progressBars) return;
+
+      // Traverse all bar meshes in the progress bars group
+      connection.progressBars.traverse((child: any) => {
+        if (child instanceof THREE.Mesh && child.userData['targetLength'] !== undefined) {
+          const targetLength = child.userData['targetLength'];
+          let currentLength = child.userData['currentLength'];
+
+          if (currentLength === undefined) {
+            currentLength = targetLength;
+            child.userData['currentLength'] = currentLength;
+          }
+
+          // Lerp current → target
+          const newLength = currentLength + (targetLength - currentLength) * lerpSpeed;
+          child.userData['currentLength'] = newLength;
+
+          // Update cylinder geometry scale (Y-axis is length for cylinders)
+          const lengthRatio = newLength / targetLength;
+          if (lengthRatio > 0.001) { // Avoid divide by zero
+            child.scale.y = lengthRatio;
+          }
+        }
+      });
+    });
+  }
 
   function enforceSpacingConstraints() {
     // Check all entity pairs and push them apart if bars would pierce or entities intersect

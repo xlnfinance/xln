@@ -359,6 +359,12 @@ function renderSpreadMode(
       const axis = new THREE.Vector3(0, 1, 0);
       bar.quaternion.setFromUnitVectors(axis, direction.clone().normalize());
 
+      // Store target length for smooth morphing
+      bar.userData['targetLength'] = segment.length;
+      if (bar.userData['currentLength'] === undefined) {
+        bar.userData['currentLength'] = segment.length; // Initial value
+      }
+
       group.add(bar);
     }
     fromOffset += segment.length;
@@ -390,6 +396,12 @@ function renderSpreadMode(
 
       const axis = new THREE.Vector3(0, 1, 0);
       bar.quaternion.setFromUnitVectors(axis, direction.clone().normalize());
+
+      // Store target length for smooth morphing
+      bar.userData['targetLength'] = segment.length;
+      if (bar.userData['currentLength'] === undefined) {
+        bar.userData['currentLength'] = segment.length; // Initial value
+      }
 
       group.add(bar);
     }
@@ -449,6 +461,13 @@ function renderCloseMode(
 
       const axis = new THREE.Vector3(0, 1, 0);
       bar.quaternion.setFromUnitVectors(axis, direction.clone().normalize());
+
+      // Store target length for smooth morphing
+      bar.userData['targetLength'] = segment.length;
+      if (bar.userData['currentLength'] === undefined) {
+        bar.userData['currentLength'] = segment.length;
+      }
+
       group.add(bar);
     }
     currentOffset += segment.length;
@@ -469,6 +488,13 @@ function renderCloseMode(
 
       const axis = new THREE.Vector3(0, 1, 0);
       bar.quaternion.setFromUnitVectors(axis, direction.clone().normalize());
+
+      // Store target length for smooth morphing
+      bar.userData['targetLength'] = segment.length;
+      if (bar.userData['currentLength'] === undefined) {
+        bar.userData['currentLength'] = segment.length;
+      }
+
       group.add(bar);
     }
     currentOffset += segment.length;
