@@ -994,6 +994,64 @@ export const sortSignatures = (signatures: Map<string, string>, config: Consensu
 /**
  * Merges duplicate entity inputs to reduce processing overhead
  */
+const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
+  const merged: EntityTx[] = [];
+
+  for (const tx of txs) {
+    if (tx.type !== 'j_event' || !tx.data) {
+      merged.push(tx);
+      continue;
+    }
+
+    const data = tx.data as any;
+    const blockNumber = data.blockNumber;
+    const blockHash = data.blockHash;
+
+    const existing = merged.find(
+      candidate =>
+        candidate.type === 'j_event' &&
+        candidate.data &&
+        (candidate.data as any).blockNumber === blockNumber &&
+        (candidate.data as any).blockHash === blockHash,
+    );
+
+    if (!existing || !existing.data) {
+      merged.push(tx);
+      continue;
+    }
+
+    const existingData = existing.data as any;
+    const existingEvents = existingData.events || (existingData.event ? [existingData.event] : []);
+    const incomingEvents = data.events || (data.event ? [data.event] : []);
+
+    const seen = new Set<string>();
+    const mergedEvents: any[] = [];
+    for (const event of [...existingEvents, ...incomingEvents]) {
+      const key = `${event?.type ?? 'unknown'}:${safeStringify(event?.data ?? event)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      mergedEvents.push(event);
+    }
+
+    existingData.events = mergedEvents;
+    existingData.event = mergedEvents[0];
+
+    if (typeof data.observedAt === 'number') {
+      if (typeof existingData.observedAt !== 'number' || data.observedAt < existingData.observedAt) {
+        existingData.observedAt = data.observedAt;
+      }
+    }
+
+    if (HEAVY_LOGS) {
+      console.log(
+        `🔍 MERGE-J-EVENTS: block ${blockNumber} ${blockHash?.slice(0, 10)}... now ${mergedEvents.length} events`,
+      );
+    }
+  }
+
+  return merged;
+};
+
 export const mergeEntityInputs = (inputs: EntityInput[]): EntityInput[] => {
   const merged = new Map<string, EntityInput>();
   let duplicateCount = 0;
@@ -1022,6 +1080,9 @@ export const mergeEntityInputs = (inputs: EntityInput[]): EntityInput[] => {
       // Merge entity transactions
       if (input.entityTxs) {
         existing.entityTxs = [...(existing.entityTxs || []), ...input.entityTxs];
+        if (existing.entityTxs) {
+          existing.entityTxs = mergeJEventTxs(existing.entityTxs);
+        }
         if (HEAVY_LOGS) console.log(`🔍 MERGE-TXS: Added ${input.entityTxs.length} transactions`);
       }
 
@@ -1054,7 +1115,12 @@ export const mergeEntityInputs = (inputs: EntityInput[]): EntityInput[] => {
     console.log(`    ⚠️  CORNER CASE: Merged ${duplicateCount} duplicate inputs (${inputs.length} → ${merged.size})`);
   }
 
-  return Array.from(merged.values());
+  return Array.from(merged.values()).map(input => {
+    if (input.entityTxs && input.entityTxs.length > 1) {
+      return { ...input, entityTxs: mergeJEventTxs(input.entityTxs) };
+    }
+    return input;
+  });
 };
 
 /**

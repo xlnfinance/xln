@@ -829,10 +829,84 @@ let vrHammer: VRHammer | null = null;
       console.log(`[J-Mempool] Rendered ${mempool.length} cubes at jHeight ${currentJHeight}`);
 
       // BROADCAST DETECTION: jHeight increased (new block created in this frame)
-      if (prevMempoolSize > 0 && mempoolSize === 0) {
-        const prevJHeight = prevFrame?.jReplicas?.find((jr: any) => jr.name === activeJurisdiction.name)?.jHeight || 0;
+      if (prevMempoolSize > 0 && mempoolSize === 0 && prevFrame) {
+        const prevJReplica = prevFrame.jReplicas?.find((jr: any) => jr.name === activeJurisdiction.name);
+        const prevJHeight = prevJReplica?.jHeight || 0;
+
         if (Number(currentJHeight) > Number(prevJHeight)) {
-          console.log(`[Broadcast] 📡 Block finalized: jHeight ${prevJHeight} → ${currentJHeight} (${prevMempoolSize} TXs)`);
+          const blockNumber = BigInt(currentJHeight);
+          console.log(`[Broadcast] 📡 Block #${blockNumber} finalized: jHeight ${prevJHeight} → ${currentJHeight} (${prevMempoolSize} TXs)`);
+
+          // Create block container for finalized TXs
+          const blockContainer = new THREE.Group();
+          blockContainer.userData['blockNumber'] = blockNumber;
+
+          // J-mempool style box
+          const blockSize = 12;
+          const blockCubeGeo = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
+          const blockCubeMat = new THREE.MeshPhongMaterial({
+            color: 0x4488aa,
+            emissive: 0x224455,
+            transparent: true,
+            opacity: 0.15,
+            side: THREE.DoubleSide,
+            shininess: 100,
+            depthWrite: false
+          });
+          const blockCube = new THREE.Mesh(blockCubeGeo, blockCubeMat);
+          blockContainer.add(blockCube);
+
+          // Cyan edges
+          const blockEdgesGeo = new THREE.EdgesGeometry(blockCubeGeo);
+          const blockEdgesMat = new THREE.LineBasicMaterial({ color: 0x66ccff, linewidth: 2 });
+          const blockEdges = new THREE.LineSegments(blockEdgesGeo, blockEdgesMat);
+          blockContainer.add(blockEdges);
+
+          // Create TX cubes from prevFrame mempool (NOT from jMachineTxBoxes - already cleared!)
+          const prevMempool = prevJReplica?.mempool || [];
+          const txCubes: THREE.Object3D[] = [];
+          prevMempool.slice(0, 9).forEach((tx: any, txIdx: number) => {
+            const txCube = createMempoolTxCube(txIdx, tx, Number(blockNumber));
+            blockContainer.add(txCube);
+            txCubes.push(txCube);
+          });
+
+          // Stack existing blocks upward
+          const blockSpacing = 15;
+          jBlockHistory.forEach(block => {
+            block.yOffset += blockSpacing;
+            block.container.position.y = activeJMachine.position.y + block.yOffset;
+          });
+
+          // Position new block above J-machine
+          blockContainer.position.copy(activeJMachine.position);
+          blockContainer.position.y += blockSpacing;
+          scene.add(blockContainer);
+
+          jBlockHistory.push({
+            blockNumber,
+            container: blockContainer,
+            txCubes,
+            yOffset: blockSpacing
+          });
+
+          // Keep only last 3 blocks
+          while (jBlockHistory.length > 3) {
+            const oldBlock = jBlockHistory.shift();
+            if (oldBlock) {
+              scene.remove(oldBlock.container);
+              oldBlock.container.traverse((child: any) => {
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) {
+                  const mat = child.material;
+                  if (Array.isArray(mat)) mat.forEach(m => m.dispose());
+                  else mat.dispose();
+                }
+              });
+            }
+          }
+
+          // Broadcast effect
           createProportionalBroadcast(activeJMachine.position, prevMempoolSize);
         }
       }
