@@ -983,8 +983,9 @@ let vrHammer: VRHammer | null = null;
         const blockBoundaries: Array<{ blockNum: number; txs: any[] }> = [];
 
         for (let targetHeight = currentHeightNum - 1; targetHeight >= Math.max(0, currentHeightNum - 3); targetHeight--) {
-          // Walk backward to find LAST frame at targetHeight
-          for (let frameIdx = runtimeHistory.length - 1; frameIdx >= 0; frameIdx--) {
+          // Walk backward to find LAST frame at targetHeight (RELATIVE to current frame position)
+          const maxFrameIdx = $isolatedTimeIndex >= 0 ? Math.min($isolatedTimeIndex, runtimeHistory.length - 1) : runtimeHistory.length - 1;
+          for (let frameIdx = maxFrameIdx; frameIdx >= 0; frameIdx--) {
             const frame = runtimeHistory[frameIdx];
             const frameJReplica = frame?.jReplicas?.find((jr: any) => jr.name === activeJurisdiction.name);
             const frameJHeight = Number(frameJReplica?.jHeight || frameJReplica?.blockNumber || 0);
@@ -5168,7 +5169,7 @@ let vrHammer: VRHammer | null = null;
         if (activeJMachine) {
           const txCube = createMempoolTxCube(anim.txIndex, anim.tx, anim.blockHeight);
           activeJMachine.add(txCube);
-          jMachineTxBoxes.push(txCube);
+          jMachineTxBoxes[anim.txIndex] = txCube; // Replace placeholder at correct index
         }
 
         // Remove from array
