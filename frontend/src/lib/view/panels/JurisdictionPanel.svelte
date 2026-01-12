@@ -8,6 +8,7 @@
   import type { Writable } from 'svelte/store';
   import { get } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
+  import type { BrowserVMTokenInfo } from '@xln/runtime/xln-api';
   import { activeVault, allVaults } from '$lib/stores/vaultStore';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
 
@@ -47,7 +48,7 @@
   };
 
   let selectedTokenIdText = $state('');
-  let browserVmTokens = $state<TokenOption[]>([]);
+  let browserVmTokens = $state<BrowserVMTokenInfo[]>([]);
   let externalBalances = $state<Array<{ address: string; label: string; balance: bigint }>>([]);
   let externalBalancesLoading = $state(false);
   let externalBalancesError = $state<string | null>(null);
@@ -263,7 +264,7 @@
       return;
     }
     if (!ids.includes(selectedTokenIdText)) {
-      selectedTokenIdText = ids.includes('1') ? '1' : ids[0];
+      selectedTokenIdText = ids.includes('1') ? '1' : (ids[0] ?? '');
     }
   });
 
@@ -324,8 +325,9 @@
     const tokenMeta = selectedTokenMeta;
     const signers = signerRefs;
     const xln = $xlnInstance;
+    const tokenAddress = tokenMeta?.address;
 
-    if (!isLive || !tokenMeta?.address || signers.length === 0 || !xln?.getBrowserVMInstance) {
+    if (!isLive || !tokenAddress || signers.length === 0 || !xln?.getBrowserVMInstance) {
       externalBalances = [];
       externalBalancesLoading = false;
       externalBalancesError = null;
@@ -348,7 +350,7 @@
       try {
         const nextBalances: Array<{ address: string; label: string; balance: bigint }> = [];
         for (const signer of signers) {
-          const balance = await browserVM.getErc20Balance(tokenMeta.address, signer.address);
+          const balance = await browserVM.getErc20Balance(tokenAddress, signer.address);
           if (balance > 0n) {
             nextBalances.push({
               address: signer.address,
