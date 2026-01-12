@@ -840,6 +840,13 @@ let vrHammer: VRHammer | null = null;
             ));
 
             createFlyingTxCube(sourceEntity.position, finalPos, txIndex, tx, nextBlockHeight);
+            // Placeholder to advance loop (actual cube added when animation completes)
+            jMachineTxBoxes.push(null as any);
+          } else {
+            // No animation, create cube directly
+            const txCube = createMempoolTxCube(txIndex, tx, nextBlockHeight);
+            activeJMachine.add(txCube);
+            jMachineTxBoxes.push(txCube);
           }
         } else {
           // No source entity, create cube directly
