@@ -421,10 +421,11 @@ export async function ahb(env: Env): Promise<void> {
 
     // AHB Triangle Layout - entities positioned relative to J-Machine
     // Horizontal line layout: Alice—Hub—Bob (clearer visualization than triangle)
+    // Lower entities for more vertical separation from J-machine
     const AHB_POSITIONS = {
-      Alice: { x: -40, y: 0, z: 0 },  // Left
-      Hub:   { x: 0, y: 0, z: 0 },    // Center
-      Bob:   { x: 40, y: 0, z: 0 },   // Right
+      Alice: { x: -40, y: -100, z: 0 },  // Left, well below J-machine
+      Hub:   { x: 0, y: -100, z: 0 },    // Center
+      Bob:   { x: 40, y: -100, z: 0 },   // Right
     };
 
     const entityNames = ['Alice', 'Hub', 'Bob'] as const;

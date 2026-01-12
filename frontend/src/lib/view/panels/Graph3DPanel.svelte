@@ -972,28 +972,28 @@ let vrHammer: VRHammer | null = null;
       const runtimeHistory = $isolatedHistory || [];
 
       if (runtimeHistory.length > 0 && currentHeightNum > 0) {
-        // Find last 3 block boundaries by walking backward through history
-        const blockBoundaries: Array<{ blockNum: number; frameIdx: number; txs: any[] }> = [];
-        let lastSeenHeight = currentHeightNum;
+        // Find last 3 committed blocks (heights N-1, N-2, N-3 where N = current)
+        // For each height, find LAST frame at that height and read its mempool
+        const blockBoundaries: Array<{ blockNum: number; txs: any[] }> = [];
 
-        for (let frameIdx = runtimeHistory.length - 1; frameIdx >= 0 && blockBoundaries.length < 3; frameIdx--) {
-          const frame = runtimeHistory[frameIdx];
-          const frameJReplica = frame?.jReplicas?.find((jr: any) => jr.name === activeJurisdiction.name);
-          const frameJHeight = Number(frameJReplica?.jHeight || 0);
+        for (let targetHeight = currentHeightNum - 1; targetHeight >= Math.max(0, currentHeightNum - 3); targetHeight--) {
+          // Walk backward to find LAST frame at targetHeight
+          for (let frameIdx = runtimeHistory.length - 1; frameIdx >= 0; frameIdx--) {
+            const frame = runtimeHistory[frameIdx];
+            const frameJReplica = frame?.jReplicas?.find((jr: any) => jr.name === activeJurisdiction.name);
+            const frameJHeight = Number(frameJReplica?.jHeight || frameJReplica?.blockNumber || 0);
 
-          // jHeight decreased = we found a block boundary
-          if (frameJHeight < lastSeenHeight) {
-            // TXs for block lastSeenHeight are in the frame RIGHT BEFORE jHeight++
-            // That frame is frameIdx (current frame where jHeight is lower)
-            const txs = frameJReplica?.mempool || [];
+            if (frameJHeight === targetHeight) {
+              // Found last frame at this height - read mempool (TXs that will go into next block)
+              const txs = frameJReplica?.mempool || [];
+              console.log(`[Blockchain] Block #${targetHeight + 1}: ${txs.length} TXs from frame ${frameIdx}`);
 
-            blockBoundaries.push({
-              blockNum: lastSeenHeight,
-              frameIdx,
-              txs: txs.slice(0, 9) // Max 9 TXs fit in 3x3 grid
-            });
-
-            lastSeenHeight = frameJHeight;
+              blockBoundaries.push({
+                blockNum: targetHeight + 1, // Block N+1 contains TXs from height N
+                txs: txs.slice(0, 9)
+              });
+              break; // Found this height, move to next
+            }
           }
         }
 
@@ -1813,7 +1813,7 @@ let vrHammer: VRHammer | null = null;
     const labelMaterial = new THREE.SpriteMaterial({ map: texture });
     const label = new THREE.Sprite(labelMaterial);
     label.scale.set(25, 6, 1);
-    label.position.set(0, size / 2 + 10, 0); // Above cube
+    label.position.set(0, -size / 2 - 8, 0); // Below cube (avoids overlap with blocks above)
     group.add(label);
 
     return group;
