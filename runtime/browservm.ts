@@ -23,6 +23,7 @@ const DEFAULT_TOKEN_DECIMALS = 18;
 const DEFAULT_TOKEN_SUPPLY = 1_000_000_000_000n * 10n ** 18n; // 1T tokens
 const DEFAULT_SIGNER_FAUCET = 1_000_000_000n * 10n ** 18n; // 1B tokens
 const TOKEN_REGISTRATION_AMOUNT = 1n;
+const BLOCK_GAS_LIMIT = 200_000_000n; // Simnet headroom for large deploys/batches
 const DEFAULT_TOKENS = [
   { symbol: 'USDC', name: 'USD Coin', decimals: DEFAULT_TOKEN_DECIMALS },
   { symbol: 'WETH', name: 'Wrapped Ether', decimals: DEFAULT_TOKEN_DECIMALS },
@@ -1360,7 +1361,7 @@ export class BrowserVMProvider {
       parentHash: hexToBytes(this.blockHash),
       number: BigInt(nextHeight),
       timestamp: BigInt(Math.floor(timestampMs / 1000)),
-      gasLimit: 30_000_000n,
+      gasLimit: BLOCK_GAS_LIMIT,
     };
     const block = createBlock({ header: headerData }, { common: this.common });
     this.prevBlockHash = this.blockHash;
