@@ -340,7 +340,6 @@ let vrHammer: VRHammer | null = null;
   }> = []; // Last 5 committed blocks stacked above J-machine
   let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) problem)
   let broadcastEnabled = true;
-  let broadcastStyle: 'raycast' | 'wave' | 'particles' = 'raycast';
   let broadcastAnimations: THREE.Object3D[] = []; // Active broadcast visuals
 
   // J-Machine Auto-Proposer: Single-signer consensus simulation
@@ -1327,9 +1326,6 @@ let vrHammer: VRHammer | null = null;
             if (txKind === 'payFromReserve' || txKind === 'payToReserve' || txKind === 'settleToReserve') {
               console.log(`[J-Machine] 🚀 TX ${txKind} from ${entityInput.entityId?.slice(0, 8)} → J-Machine (frame ${i})`);
 
-              // Shoot ray from entity → J-Machine (incoming tx)
-              shootRayToJMachine(entityInput.entityId);
-
               addTxToJMachine(entityInput.entityId);
 
               // R2R animation: particle flies from source to target
@@ -1542,12 +1538,7 @@ let vrHammer: VRHammer | null = null;
       broadcastEnabled = event.enabled;
       console.log('[Broadcast] Enabled:', broadcastEnabled);
     };
-    const handleBroadcastStyle = (event: any) => {
-      broadcastStyle = event.style;
-      console.log('[Broadcast] Style changed to:', broadcastStyle);
-    };
     panelBridge.on('broadcast:toggle', handleBroadcastToggle);
-    panelBridge.on('broadcast:style', handleBroadcastStyle);
 
     // Settings updates from SettingsPanel
     const handleSettingsUpdate = (event: any) => {
@@ -1653,7 +1644,6 @@ let vrHammer: VRHammer | null = null;
       panelBridge.off('scenario:loaded', handleScenarioLoaded);
       panelBridge.off('vr:toggle', handleVRToggle);
       panelBridge.off('broadcast:toggle', handleBroadcastToggle);
-      panelBridge.off('broadcast:style', handleBroadcastStyle);
       panelBridge.off('settings:update', handleSettingsUpdate);
       panelBridge.off('settings:reset', handleSettingsReset);
       panelBridge.off('camera:focus', handleCameraFocus);
@@ -1868,164 +1858,19 @@ let vrHammer: VRHammer | null = null;
   }
 
   /**
-   * Shoot green ray + flying orb from entity → J-Machine (incoming transaction)
-   * Shows TX visually traveling up to the J-Machine mempool
-   */
-  function shootRayToJMachine(entityId: string) {
-    if (!jMachine || !scene) {
-      // Silently skip - scene not ready yet (normal during initialization)
-      return;
-    }
-
-    // Find entity position
-    const entity = entities.find(e => e.id === entityId);
-    if (!entity) {
-      // Entity not yet created - silently skip
-      return;
-    }
-    console.debug(`[shootRayToJMachine] ✅ Shooting from ${entityId.slice(0,8)} to J-Machine`);
-
-    // Get J-Machine position from active jurisdiction or use jMachine.position
-    const jPos = jMachine.position.clone();
-
-    // Create flying orb (TX traveling to J-Machine)
-    const orbGeometry = new THREE.SphereGeometry(1.5, 16, 16);
-    const orbMaterial = new THREE.MeshBasicMaterial({
-      color: 0x00ff88, // Bright green
-      transparent: true,
-      opacity: 0.9
-    });
-    const orb = new THREE.Mesh(orbGeometry, orbMaterial);
-    orb.position.copy(entity.position);
-    scene.add(orb);
-
-    // Create trail effect (fading line)
-    const trailMaterial = new THREE.LineBasicMaterial({
-      color: 0x00ff88,
-      transparent: true,
-      opacity: 0.6
-    });
-
-    // Animate orb flying to J-Machine with arc
-    const startPos = entity.position.clone();
-    const endPos = jPos.clone();
-    const midPoint = new THREE.Vector3(
-      (startPos.x + endPos.x) / 2,
-      Math.max(startPos.y, endPos.y) + 30, // Arc above midpoint
-      (startPos.z + endPos.z) / 2
-    );
-
-    const startTime = Date.now();
-    const duration = 600; // 600ms flight time
-
-    const animateOrb = () => {
-      const elapsed = Date.now() - startTime;
-      const t = Math.min(elapsed / duration, 1);
-
-      // Quadratic Bezier curve: B(t) = (1-t)²P0 + 2(1-t)tP1 + t²P2
-      const oneMinusT = 1 - t;
-      orb.position.set(
-        oneMinusT * oneMinusT * startPos.x + 2 * oneMinusT * t * midPoint.x + t * t * endPos.x,
-        oneMinusT * oneMinusT * startPos.y + 2 * oneMinusT * t * midPoint.y + t * t * endPos.y,
-        oneMinusT * oneMinusT * startPos.z + 2 * oneMinusT * t * midPoint.z + t * t * endPos.z
-      );
-
-      // Pulsing glow
-      const pulse = 1 + 0.3 * Math.sin(t * Math.PI * 6);
-      orb.scale.setScalar(pulse);
-
-      // Fade out near end
-      orbMaterial.opacity = 0.9 * (1 - t * 0.5);
-
-      if (t < 1) {
-        requestAnimationFrame(animateOrb);
-      } else {
-        // Reached J-Machine - remove orb with flash
-        scene.remove(orb);
-        orbGeometry.dispose();
-        orbMaterial.dispose();
-      }
-    };
-    animateOrb();
-  }
-
-  /**
    * Trigger broadcast animation when J-Machine is full
-   * Clears txs and sends rays/waves to all entities
+   * Clears txs from visual mempool
    */
   function triggerBroadcast() {
     if (!broadcastEnabled || !jMachine || !scene) return;
 
-    console.log(`[Broadcast] J-Machine full, broadcasting (${broadcastStyle}) to ${entities.length} entities...`);
+    console.log(`[Broadcast] J-Machine full, clearing ${jMachineTxBoxes.length} txs...`);
 
     // Clear all tx cubes
     jMachineTxBoxes.forEach(txCube => {
       if (jMachine) jMachine.remove(txCube);
     });
     jMachineTxBoxes = [];
-
-    // Trigger broadcast animation based on style
-    if (broadcastStyle === 'raycast') {
-      broadcastRaycast();
-    } else if (broadcastStyle === 'wave') {
-      broadcastWave();
-    } else if (broadcastStyle === 'particles') {
-      broadcastParticles();
-    }
-  }
-
-  /**
-   * Ray-cast broadcast: Redirects to wave (J-Machine pulsation)
-   * Blockchain is self-contained core - no rays shooting to entities
-   */
-  function broadcastRaycast() {
-    broadcastWave();
-  }
-
-  /**
-   * Wave broadcast: Expanding sphere from J-Machine
-   */
-  function broadcastWave() {
-    if (!jMachine || !scene) return;
-
-    const sphereGeometry = new THREE.SphereGeometry(1, 16, 16);
-    const sphereMaterial = new THREE.MeshBasicMaterial({
-      color: 0xb8a4d9, // Purple to match EVM theme
-      transparent: true,
-      opacity: 0.3,
-      wireframe: true
-    });
-    const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-    sphere.position.set(0, 200, 0); // Settlement layer high above entity grid
-    scene.add(sphere);
-    broadcastAnimations.push(sphere);
-
-    // Animate expansion
-    let startTime = Date.now();
-    const animateWave = () => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / 2000, 1);
-
-      const scale = 1 + progress * 100;
-      sphere.scale.set(scale, scale, scale);
-      sphereMaterial.opacity = 0.3 * (1 - progress);
-
-      if (progress < 1) {
-        requestAnimationFrame(animateWave);
-      } else {
-        scene.remove(sphere);
-        broadcastAnimations = broadcastAnimations.filter(a => a !== sphere);
-      }
-    };
-    animateWave();
-  }
-
-  /**
-   * Particle broadcast: Redirects to wave (J-Machine pulsation)
-   * Blockchain doesn't "send" to entities - entities observe state
-   */
-  function broadcastParticles() {
-    broadcastWave();
   }
 
   /**
@@ -3641,8 +3486,6 @@ let vrHammer: VRHammer | null = null;
                 console.log(`[Time-Machine] 🔍 R2R tx detected: from=${fromEntityId?.slice(0,8)}, to=${toEntityId?.slice(0,8)}, type=${tx.type}`);
                 if (toEntityId) {
                   console.log(`[Time-Machine] 💸 R2R animation: ${fromEntityId.slice(0,8)} → ${toEntityId.slice(0,8)}`);
-                  // Shoot ray from entity → J-Machine
-                  shootRayToJMachine(fromEntityId);
                   // Add tx cube to J-Machine mempool
                   addTxToJMachine(fromEntityId);
                   // R2R animation deleted - instant state change
@@ -3691,8 +3534,6 @@ let vrHammer: VRHammer | null = null;
               const toEntityId = tx.targetEntityId;
               if (toEntityId) {
                 console.log(`[Live] 💸 R2R: ${fromEntityId.slice(0,8)} → ${toEntityId.slice(0,8)}`);
-                // Shoot ray from entity → J-Machine
-                shootRayToJMachine(fromEntityId);
                 // Add tx cube to J-Machine mempool
                 addTxToJMachine(fromEntityId);
                 // R2R animation deleted - instant state change
