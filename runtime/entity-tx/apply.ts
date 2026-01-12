@@ -317,28 +317,31 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         });
       }
 
-      // STEP 2: Add transactions to LOCAL mempool only (Channel.ts pattern)
-      // Frame proposal happens automatically on next tick via AUTO-PROPOSE
-      console.log(`💳 Adding account setup transactions to local mempool for ${formatEntityId(entityTx.data.targetEntityId)}`);
+      // STEP 2: Add setup txs ONLY on LEFT side (Channel.ts pattern)
+      // Right side waits for left's frame; otherwise it will re-propose add_delta and stall.
+      console.log(`💳 Preparing account setup for ${formatEntityId(entityTx.data.targetEntityId)} (left=${isLeft})`);
 
-      // Get the account machine we just created
       const localAccount = newState.accounts.get(counterpartyId);
       if (!localAccount) {
         throw new Error(`CRITICAL: Account machine not found after creation`);
       }
 
-      // Token 1 = USDC
-      const usdcTokenId = 1;
-      // Add transactions to mempool - will be batched into frame #1 on next tick
-      // NOTE: Only add_delta is queued. Credit limits are 0 by default - must be explicitly set
-      localAccount.mempool.push({
-        type: 'add_delta',
-        data: { tokenId: usdcTokenId }
-      });
+      if (isLeft) {
+        // Token 1 = USDC
+        const usdcTokenId = 1;
+        // Add transactions to mempool - will be batched into frame #1 on next tick
+        // NOTE: Only add_delta is queued. Credit limits are 0 by default - must be explicitly set
+        localAccount.mempool.push({
+          type: 'add_delta',
+          data: { tokenId: usdcTokenId }
+        });
 
-      console.log(`📝 Queued add_delta to mempool (total: ${localAccount.mempool.length})`);
-      console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms) via AUTO-PROPOSE`);
-      console.log(`   Transactions: [add_delta] - credit limits start at 0, must be explicitly set`);
+        console.log(`📝 Queued add_delta to mempool (total: ${localAccount.mempool.length})`);
+        console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms) via AUTO-PROPOSE`);
+        console.log(`   Transactions: [add_delta] - credit limits start at 0, must be explicitly set`);
+      } else {
+        console.log(`🧭 Right side: waiting for left's frame (mempool stays empty)`);
+      }
 
       // Add success message to chat
       addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
