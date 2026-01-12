@@ -171,6 +171,12 @@ export async function swap(env: Env): Promise<void> {
   // ============================================================================
   console.log('📦 Creating entities: Alice, Hub...');
 
+  // Horizontal line layout: Alice—Hub (like AHB but 2 entities)
+  const SWAP_POSITIONS: Record<string, { x: number; y: number; z: number }> = {
+    Alice: { x: -20, y: -30, z: 0 },  // Left
+    Hub:   { x: 20, y: -30, z: 0 },   // Right
+  };
+
   const entities = [
     { name: 'Alice', id: '0x' + '1'.padStart(64, '0'), signer: 's1' },
     { name: 'Hub', id: '0x' + '2'.padStart(64, '0'), signer: 's2' },
@@ -182,7 +188,7 @@ export async function swap(env: Env): Promise<void> {
     signerId: e.signer,
     data: {
       isProposer: true,
-      position: { x: 0, y: 0, z: 0 },
+      position: SWAP_POSITIONS[e.name],
       config: {
         mode: 'proposer-based' as const,
         threshold: 1n,
@@ -808,10 +814,15 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
 
   const hub = { id: '0x' + '2'.padStart(64, '0'), signer: 's2' };
 
-  // Add Carol and Dave
+  // Add Carol and Dave with horizontal layout
   console.log('📦 Adding Carol and Dave...');
-  const carol = { id: '0x' + '4'.padStart(64, '0'), signer: 's4' };
-  const dave = { id: '0x' + '5'.padStart(64, '0'), signer: 's5' };
+  const carol = { id: '0x' + '4'.padStart(64, '0'), signer: 's4', name: 'Carol' };
+  const dave = { id: '0x' + '5'.padStart(64, '0'), signer: 's5', name: 'Dave' };
+
+  const MULTI_PARTY_POSITIONS: Record<string, { x: number; y: number; z: number }> = {
+    Carol: { x: 50, y: -30, z: 0 },   // Center-right
+    Dave:  { x: 80, y: -30, z: 0 },   // Right
+  };
 
   for (const entity of [carol, dave]) {
     await applyRuntimeInput(env, { runtimeTxs: [{
@@ -820,7 +831,7 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
       signerId: entity.signer,
       data: {
         isProposer: true,
-        position: { x: 0, y: 0, z: 0 },
+        position: MULTI_PARTY_POSITIONS[entity.name],
         config: {
           mode: 'proposer-based' as const,
           threshold: 1n,
