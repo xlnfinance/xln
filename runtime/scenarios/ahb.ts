@@ -420,11 +420,11 @@ export async function ahb(env: Env): Promise<void> {
     console.log('\n📦 Creating entities: Alice, Hub, Bob...');
 
     // AHB Triangle Layout - entities positioned relative to J-Machine
-    // Layout: J-machine at y=0, entities in compact triangle below
+    // Horizontal line layout: Alice—Hub—Bob (clearer visualization than triangle)
     const AHB_POSITIONS = {
-      Alice: { x: -20, y: -40, z: 0 },  // Bottom-left (closer to hub)
-      Hub:   { x: 0, y: -20, z: 0 },     // Middle layer
-      Bob:   { x: 20, y: -40, z: 0 },   // Bottom-right (closer to hub)
+      Alice: { x: -40, y: 0, z: 0 },  // Left
+      Hub:   { x: 0, y: 0, z: 0 },    // Center
+      Bob:   { x: 40, y: 0, z: 0 },   // Right
     };
 
     const entityNames = ['Alice', 'Hub', 'Bob'] as const;
