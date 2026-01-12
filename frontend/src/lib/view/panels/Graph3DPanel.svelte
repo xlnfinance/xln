@@ -150,6 +150,14 @@
     return 0n;
   }
 
+  // J-block history entry interface
+  interface JBlockHistoryEntry {
+    blockNumber: bigint;
+    container: THREE.Group;
+    txCubes: THREE.Object3D[];
+    yOffset: number;
+  }
+
   // XLN runtime interface
   interface XLNRuntime {
     deriveDelta: (delta: { [tokenId: number]: bigint }, isLeft: boolean) => DerivedAccountData;
@@ -192,16 +200,32 @@
         const { default: WebGPURenderer } = await import('three/src/renderers/webgpu/WebGPURenderer.js');
         const renderer = new WebGPURenderer({ antialias: options.antialias });
         await renderer.init();
-        console.log('[Graph3D] ✅ WebGPU renderer initialized');
         return renderer;
       } catch (err) {
-        const error = err as Error;
-        console.warn('[Graph3D] ⚠️ WebGPU failed, falling back to WebGL:', error.message);
+        // WebGPU fallback to WebGL (silent)
       }
     }
     return new THREE.WebGLRenderer(options);
   };
   type RendererMode = 'webgl' | 'webgpu';
+
+  /**
+   * Dispose Three.js Object3D and all its children, geometry, and materials
+   * Prevents GPU memory leaks by properly releasing all resources
+   */
+  function disposeObject3D(obj: THREE.Object3D): void {
+    obj.traverse((child: any) => {
+      if (child.geometry) child.geometry.dispose();
+      if (child.material) {
+        const mat = child.material;
+        if (Array.isArray(mat)) {
+          mat.forEach(m => m.dispose());
+        } else {
+          mat.dispose();
+        }
+      }
+    });
+  }
 
   // VR/Effects stubs (not used in /view isolated mode)
   class RippleEffect {
@@ -331,12 +355,7 @@ let vrHammer: VRHammer | null = null;
   $: jMachine = activeJurisdictionName ? jMachines.get(activeJurisdictionName) || null : null;
 
   let jMachineTxBoxes: (THREE.Group | THREE.Mesh)[] = []; // Yellow tx cubes inside J-Machine (current mempool)
-  let jBlockHistory: Array<{
-    blockNumber: bigint;
-    container: THREE.Group;
-    txCubes: THREE.Object3D[];
-    yOffset: number;
-  }> = []; // Last 3 committed blocks stacked above J-machine
+  let jBlockHistory: JBlockHistoryEntry[] = []; // Last 3 committed blocks stacked above J-machine
   let jMachineCapacity = 3; // Max txs before broadcast (lowered to show O(n) problem)
   let broadcastEnabled = true;
 
@@ -383,6 +402,7 @@ let vrHammer: VRHammer | null = null;
   // Animation frame and hover state
   let animationId: number | null;
   let clock = new THREE.Clock();
+  let activeBroadcastSpheres: Array<{ sphere: THREE.Mesh; animationId: number }> = [];
   let hoveredObject: any = null;
   // NOTE: hoveredEntity removed - reserve labels were removed
   let tooltip = { visible: false, x: 0, y: 0, content: '' };
@@ -726,18 +746,15 @@ let vrHammer: VRHammer | null = null;
       if (!currentJurisdictionNames.has(name)) {
         scene.remove(mesh);
         jMachines.delete(name);
-        console.log(`[Graph3D] Removed J-Machine: ${name}`);
       }
     }
 
     // Create new J-Machines
     jurisdictionsArray.forEach((jurisdiction) => {
       if (!jMachines.has(jurisdiction.name)) {
-        console.log(`[Graph3D] Creating J-Machine for jurisdiction: ${jurisdiction.name} at position`, jurisdiction.jMachine.position);
         const jMachineGroup = createJMachine(12, jurisdiction.jMachine.position, jurisdiction.name, jurisdiction.jMachine.jHeight); // 2x smaller for Fed Chair UX
         scene.add(jMachineGroup);
         jMachines.set(jurisdiction.name, jMachineGroup);
-        console.log(`[Graph3D] ✅ J-Machine created, scene now has ${scene.children.length} objects`);
       }
     });
 
@@ -799,17 +816,7 @@ let vrHammer: VRHammer | null = null;
       jMachineTxBoxes.forEach(cube => {
         if (cube && activeJMachine) {
           activeJMachine.remove(cube);
-          cube.traverse((child: any) => {
-            if (child.geometry) child.geometry.dispose();
-            if (child.material) {
-              const mat = child.material;
-              if (Array.isArray(mat)) {
-                mat.forEach((m: any) => m.dispose());
-              } else {
-                mat.dispose();
-              }
-            }
-          });
+          disposeObject3D(cube);
         }
       });
       jMachineTxBoxes = [];
@@ -867,14 +874,7 @@ let vrHammer: VRHammer | null = null;
             const oldBlock = jBlockHistory.shift();
             if (oldBlock) {
               scene.remove(oldBlock.container);
-              oldBlock.container.traverse((child: any) => {
-                if (child.geometry) child.geometry.dispose();
-                if (child.material) {
-                  const mat = child.material;
-                  if (Array.isArray(mat)) mat.forEach(m => m.dispose());
-                  else mat.dispose();
-                }
-              });
+              disposeObject3D(oldBlock.container);
             }
           }
 
@@ -916,14 +916,12 @@ let vrHammer: VRHammer | null = null;
 
           if (foundFrame) {
             const txs = foundFrame.mempool || [];
-            console.log(`[Blockchain] Block #${foundHeight + 1}: ${txs.length} TXs from frame ${foundIdx} (jHeight ${foundHeight})`);
 
             blockBoundaries.push({
               blockNum: foundHeight + 1,
               txs: txs.slice(0, 9)
             });
           } else {
-            console.warn(`[Blockchain] No frame found for target height ${targetHeight}`);
           }
         }
 
@@ -935,14 +933,7 @@ let vrHammer: VRHammer | null = null;
           // Clear old blocks
           jBlockHistory.forEach(block => {
             scene.remove(block.container);
-            block.container.traverse((child: any) => {
-              if (child.geometry) child.geometry.dispose();
-              if (child.material) {
-                const mat = child.material;
-                if (Array.isArray(mat)) mat.forEach(m => m.dispose());
-                else mat.dispose();
-              }
-            });
+            disposeObject3D(block.container);
           });
           jBlockHistory = [];
 
@@ -1204,6 +1195,7 @@ let vrHammer: VRHammer | null = null;
     scene.add(sphere);
 
     const startTime = performance.now();
+    let rafId: number;
 
     function animateExpand() {
       const elapsed = performance.now() - startTime;
@@ -1217,15 +1209,20 @@ let vrHammer: VRHammer | null = null;
       sphereMaterial.opacity = (0.3 + intensity * 0.3) * (1 - progress);
 
       if (progress < 1) {
-        requestAnimationFrame(animateExpand);
+        rafId = requestAnimationFrame(animateExpand);
       } else {
+        // Animation complete - cleanup
         scene.remove(sphere);
         sphereGeometry.dispose();
         sphereMaterial.dispose();
+        // Remove from tracking
+        activeBroadcastSpheres = activeBroadcastSpheres.filter(s => s.sphere !== sphere);
       }
     }
 
-    animateExpand();
+    rafId = requestAnimationFrame(animateExpand);
+    // Track sphere for cleanup on destroy
+    activeBroadcastSpheres.push({ sphere, animationId: rafId });
   }
 
   // ===== ADD TXS TO J-MACHINE (broadcast simulation) + R2R ANIMATION =====
@@ -1248,7 +1245,6 @@ let vrHammer: VRHammer | null = null;
             // Check if it's a reserve-related transaction (R2R)
             const txKind = tx.kind || tx.type;
             if (txKind === 'payFromReserve' || txKind === 'payToReserve' || txKind === 'settleToReserve') {
-              console.log(`[J-Machine] 🚀 TX ${txKind} from ${entityInput.entityId?.slice(0, 8)} → J-Machine (frame ${i})`);
 
               addTxToJMachine(entityInput.entityId);
 
@@ -1306,7 +1302,6 @@ let vrHammer: VRHammer | null = null;
       }
 
       scenarioSteps = parsed;
-      console.log(`📜 Loaded ${parsed.length} scenario steps`);
     } catch (error) {
       console.error('Failed to load scenario steps:', error);
       scenarioSteps = [];
@@ -1398,7 +1393,6 @@ let vrHammer: VRHammer | null = null;
       try {
         const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
         XLN = await import(/* @vite-ignore */ runtimeUrl);
-        console.log('[Graph3D] XLN runtime loaded');
       } catch (err) {
         console.error('[Graph3D] Failed to load XLN runtime:', err);
       }
@@ -1411,27 +1405,10 @@ let vrHammer: VRHammer | null = null;
           // Oculus Quest browsers support 'immersive-vr'
           const vrSupported = await (navigator as any).xr.isSessionSupported('immersive-vr');
           isVRSupported = vrSupported === true;
-          console.log(' WebXR Detection:', {
-            hasNavigatorXR: true,
-            isSessionSupported: isVRSupported,
-            isSecureContext: window.isSecureContext,
-            protocol: window.location.protocol,
-            userAgent: navigator.userAgent.slice(0, 100)
-          });
-
-          if (!isVRSupported && !window.isSecureContext) {
-            console.warn('⚠️ WebXR requires HTTPS in production. Use self-signed cert or ngrok for testing.');
-          }
         } catch (err) {
-          console.log(' VR Support check failed:', err);
           isVRSupported = false;
         }
       } else {
-        console.log(' WebXR not available:', {
-          hasNavigatorXR: 'xr' in navigator,
-          navigatorXRValue: (navigator as any).xr,
-          isSecureContext: window.isSecureContext
-        });
         isVRSupported = false;
       }
 
@@ -1444,7 +1421,6 @@ let vrHammer: VRHammer | null = null;
     };
 
     initAndSetup().catch(error => {
-      console.warn(`⚠️ Graph3D init: ${error.message}`);
     });
 
     // Listen for VR toggle events from ArchitectPanel
@@ -1460,14 +1436,12 @@ let vrHammer: VRHammer | null = null;
     // Broadcast controls from Architect panel
     const handleBroadcastToggle = (event: any) => {
       broadcastEnabled = event.enabled;
-      console.log('[Broadcast] Enabled:', broadcastEnabled);
     };
     panelBridge.on('broadcast:toggle', handleBroadcastToggle);
 
     // Settings updates from SettingsPanel
     const handleSettingsUpdate = (event: any) => {
       const { key, value } = event;
-      console.log(`[Graph3D] Settings update: ${key} =`, value);
 
       if (key === 'gridSize') gridSize = value;
       else if (key === 'gridDivisions') gridDivisions = value;
@@ -1496,7 +1470,6 @@ let vrHammer: VRHammer | null = null;
     };
 
     const handleSettingsReset = () => {
-      console.log('[Graph3D] Resetting to default settings');
       gridSize = 300;
       gridDivisions = 60;
       gridOpacity = 0.4;
@@ -1521,7 +1494,6 @@ let vrHammer: VRHammer | null = null;
         cameraTarget = target;
         controls.target.set(target.x, target.y, target.z);
         controls.update();
-        console.log('[Graph3D] Camera focused on:', target);
       }
     };
 
@@ -1549,14 +1521,12 @@ let vrHammer: VRHammer | null = null;
 
     // CRITICAL: Listen for scenario loaded event (from View.svelte after prepopulate)
     const handleScenarioLoaded = () => {
-      console.log('[Graph3D] Scenario loaded - triggering updateNetworkData');
       if (scene) updateNetworkData();
     };
     panelBridge.on('scenario:loaded', handleScenarioLoaded);
 
     // CRITICAL: Initial render after scene ready (subscriptions fire but scene may not exist yet)
     if (scene) {
-      console.log('[Graph3D] Triggering initial updateNetworkData after mount');
       updateNetworkData();
     }
 
@@ -1593,6 +1563,14 @@ let vrHammer: VRHammer | null = null;
       resizeObserver.disconnect();
       resizeObserver = null;
     }
+
+    // Cancel active broadcast animations
+    activeBroadcastSpheres.forEach(({ sphere, animationId: rafId }) => {
+      cancelAnimationFrame(rafId);
+      if (scene) scene.remove(sphere);
+      disposeObject3D(sphere);
+    });
+    activeBroadcastSpheres = [];
 
     if (animationId) {
       cancelAnimationFrame(animationId);
@@ -1660,7 +1638,6 @@ let vrHammer: VRHammer | null = null;
     gridHelper.position.set(0, -50, 0); // Centered at origin, below entities
     scene.add(gridHelper);
 
-    console.log(`[Graph3D] Grid created: ±1000px, ${divisions} divisions, opacity ${gridOpacity}`);
   }
 
   /**
@@ -1798,7 +1775,6 @@ let vrHammer: VRHammer | null = null;
   function triggerBroadcast() {
     if (!broadcastEnabled || !jMachine || !scene) return;
 
-    console.log(`[Broadcast] J-Machine full, clearing ${jMachineTxBoxes.length} txs...`);
 
     // Clear all tx cubes
     jMachineTxBoxes.forEach(txCube => {
@@ -1829,7 +1805,6 @@ let vrHammer: VRHammer | null = null;
       clearInterval(jAutoProposerInterval);
     }
 
-    console.log(`[J-AutoProposer] Started with ${jProposalIntervalMs}ms interval`);
     jLastProposalTime = Date.now();
 
     jAutoProposerInterval = setInterval(() => {
@@ -1839,7 +1814,6 @@ let vrHammer: VRHammer | null = null;
       if (jMachineTxBoxes.length === 0) return;
 
       const now = Date.now();
-      console.log(`[J-AutoProposer] 🎯 Proposing ${jMachineTxBoxes.length} txs (elapsed: ${now - jLastProposalTime}ms)`);
       jLastProposalTime = now;
 
       // Trigger broadcast animation with rays
@@ -1860,14 +1834,12 @@ let vrHammer: VRHammer | null = null;
     if (jAutoProposerInterval) {
       clearInterval(jAutoProposerInterval);
       jAutoProposerInterval = null;
-      console.log('[J-AutoProposer] Stopped');
     }
   }
 
   async function initThreeJS() {
     // Guard against multiple initializations
     if (renderer || scene) {
-      console.warn('[Graph3D] Already initialized, skipping');
       return;
     }
 
@@ -1898,15 +1870,6 @@ let vrHammer: VRHammer | null = null;
     // Camera setup - use container dimensions
     const containerWidth = container.clientWidth || window.innerWidth;
     const containerHeight = container.clientHeight || window.innerHeight;
-
-    console.log('[Graph3D] Container dimensions:', {
-      clientWidth: container.clientWidth,
-      clientHeight: container.clientHeight,
-      offsetWidth: container.offsetWidth,
-      offsetHeight: container.offsetHeight,
-      finalWidth: containerWidth,
-      finalHeight: containerHeight
-    });
 
     camera = new THREE.PerspectiveCamera(
       75,
@@ -1965,10 +1928,8 @@ let vrHammer: VRHammer | null = null;
         });
       });
       controls.addEventListener('start', () => {
-        //console.log('[Graph3D] OrbitControls: User started interacting');
       });
       controls.addEventListener('end', () => {
-        //console.log('[Graph3D] OrbitControls: User stopped interacting');
       });
 
       // Set default target from settings (grid center)
@@ -2059,12 +2020,10 @@ let vrHammer: VRHammer | null = null;
     // Register shake-to-rebalance callback
     gestureManager.on((event: { type: string; entityId: string }) => {
       if (event.type === 'shake-rebalance') {
-        console.log('🤝 SHAKE REBALANCE TRIGGERED:', event.entityId);
         handleRebalanceGesture(event.entityId);
       }
     });
 
-    console.log('✅ Network3D managers initialized');
   }
 
   /**
@@ -2083,7 +2042,6 @@ let vrHammer: VRHammer | null = null;
     if (vrHammer) {
       vrHammer.attachToController(controller1);
       vrHammer.onAccountHit((event) => {
-        console.log(`⚖️ DISPUTE: ${event.fromEntityId} ↔ ${event.toEntityId}`);
         // Find and break the connection visually
         const conn = connections.find(c =>
           (c.from === event.fromEntityId && c.to === event.toEntityId) ||
@@ -2122,7 +2080,6 @@ let vrHammer: VRHammer | null = null;
     controller1.add(ray1);
     controller2.add(ray2);
 
-    console.log(' VR Controllers initialized');
   }
 
   /**
@@ -2157,7 +2114,6 @@ let vrHammer: VRHammer | null = null;
             mat.emissiveIntensity = (mat.emissiveIntensity || 0) + 0.5;
           }
 
-          console.log(`🖐️ Grab (${handedness}): ${entityId.slice(-8)}`);
         },
 
         onRelease: (entityId, targetEntityId, handedness) => {
@@ -2177,14 +2133,12 @@ let vrHammer: VRHammer | null = null;
 
           // Trigger payment if released on another entity
           if (targetEntityId) {
-            console.log(`💸 Hand payment: ${entityId.slice(-8)} → ${targetEntityId.slice(-8)}`);
             panelBridge.emit('vr:hand-payment', {
               from: entityId,
               to: targetEntityId
             });
           }
 
-          console.log(`🖐️ Release (${handedness}): ${entityId.slice(-8)}`);
         },
 
         onHover: (entityId, handedness) => {
@@ -2222,14 +2176,12 @@ let vrHammer: VRHammer | null = null;
         vrGrabbedEntity = entity;
         vrGrabController = controller;
         entity.isPinned = true; // Pin while dragging
-        console.log(' Grabbed entity:', entity.id);
       }
     }
   }
 
   function onVRSelectEnd() {
     if (vrGrabbedEntity) {
-      console.log(' Released entity:', vrGrabbedEntity.id);
       vrGrabbedEntity = null;
       vrGrabController = null;
     }
@@ -2355,14 +2307,12 @@ let vrHammer: VRHammer | null = null;
 
       // Auto-start payment demo after 3 seconds in VR
       setTimeout(() => {
-        console.log(' Auto-starting VR demo...');
         panelBridge.emit('auto-demo:start', {});
       }, 3000);
 
       // Switch to VR animation loop
       renderer.setAnimationLoop(animate);
 
-      console.log(' Entered VR mode (Vision Pro optimized)');
 
       // Listen for session end
       session.addEventListener('end', () => {
@@ -2388,7 +2338,6 @@ let vrHammer: VRHammer | null = null;
         // Return to regular animation loop
         renderer.setAnimationLoop(null);
         animate();
-        console.log(' Exited VR mode - scene restored');
       });
 
     } catch (error) {
@@ -2416,10 +2365,8 @@ let vrHammer: VRHammer | null = null;
    */
   async function handleRebalanceGesture(entityId: string) {
     try {
-      console.log(` Initiating automatic rebalance for entity: ${entityId}`);
 
       // TODO: Implement hub rebalance coordination (Phase 3 of docs/next.md)
-      console.log('⚠️ Rebalance coordination not yet implemented');
 
       // Visual feedback ripple
       if (spatialHash) {
@@ -2494,14 +2441,6 @@ let vrHammer: VRHammer | null = null;
     // Read replicas from computed env, not reactive variable
     let currentReplicas = computedEnv?.eReplicas || new Map();
 
-    // FIXED: Removed excessive console.log - only log on significant changes
-    // Uncomment for debugging:
-    // console.log('[Graph3D] Replicas check:', {
-    //   timeIndex,
-    //   replicasSize: currentReplicas?.size || 0,
-    //   historyLength: get(isolatedHistory)?.length || 0,
-    //   source: timeIndex >= 0 ? 'history[' + timeIndex + ']' : 'live'
-    // });
 
     // Always use replicas (ground truth)
     if (currentReplicas && currentReplicas.size > 0) {
@@ -2657,17 +2596,7 @@ let vrHammer: VRHammer | null = null;
           [leftBox, rightBox].forEach(box => {
             if (!box) return;
             scene.remove(box);
-            box.traverse((child: any) => {
-              if (child.geometry) child.geometry.dispose();
-              if (child.material) {
-                const mat = child.material;
-                if (Array.isArray(mat)) {
-                  mat.forEach(m => m.dispose());
-                } else {
-                  mat.dispose();
-                }
-              }
-            });
+            disposeObject3D(box);
           });
         }
       });
@@ -2719,7 +2648,6 @@ let vrHammer: VRHammer | null = null;
     });
 
     // Create ONLY NEW entity nodes (reconciliation - skip existing)
-    console.log('[Graph3D] Reconciliation: adding', toAdd.length, 'new entities, keeping', entities.length, 'existing');
     toAdd.forEach((profile, index) => {
       const isHub = top3Hubs.has(profile.entityId);
       // Pass currentReplicas to avoid stale reactive variable during time-travel
@@ -2748,34 +2676,14 @@ let vrHammer: VRHammer | null = null;
         }
         if (connection.progressBars) {
           scene.remove(connection.progressBars);
-          // Dispose progress bar group children
-          connection.progressBars.traverse((child: any) => {
-            if (child.geometry) child.geometry.dispose();
-            if (child.material) {
-              if (Array.isArray(child.material)) {
-                child.material.forEach((m: any) => m.dispose());
-              } else {
-                child.material.dispose();
-              }
-            }
-          });
+          disposeObject3D(connection.progressBars);
         }
         if (connection.mempoolBoxes) {
           const { leftBox, rightBox } = connection.mempoolBoxes;
           [leftBox, rightBox].forEach(box => {
             if (!box) return;
             scene.remove(box);
-            box.traverse((child: any) => {
-              if (child.geometry) child.geometry.dispose();
-              if (child.material) {
-                const mat = child.material;
-                if (Array.isArray(mat)) {
-                  mat.forEach(m => m.dispose());
-                } else {
-                  mat.dispose();
-                }
-              }
-            });
+            disposeObject3D(box);
           });
         }
       });
@@ -2835,17 +2743,7 @@ let vrHammer: VRHammer | null = null;
         [leftBox, rightBox].forEach(box => {
           if (!box) return;
           scene.remove(box);
-          box.traverse((child: any) => {
-            if (child.geometry) child.geometry.dispose();
-            if (child.material) {
-              const mat = child.material;
-              if (Array.isArray(mat)) {
-                mat.forEach(m => m.dispose());
-              } else {
-                mat.dispose();
-              }
-            }
-          });
+          disposeObject3D(box);
         });
       }
     });
@@ -2854,17 +2752,7 @@ let vrHammer: VRHammer | null = null;
     // Remove J-block history (blockchain visualization)
     jBlockHistory.forEach(block => {
       scene.remove(block.container);
-      block.container.traverse((child: any) => {
-        if (child.geometry) child.geometry.dispose();
-        if (child.material) {
-          const mat = child.material;
-          if (Array.isArray(mat)) {
-            mat.forEach(m => m.dispose());
-          } else {
-            mat.dispose();
-          }
-        }
-      });
+      disposeObject3D(block.container);
     });
     jBlockHistory = [];
 
@@ -3111,15 +2999,6 @@ let vrHammer: VRHammer | null = null;
       return null;
     };
 
-    // DEBUG: Log replica lookup details
-    console.log('[Graph3D] 🔍 Position lookup for', profile.entityId.slice(0,10), ':', {
-      persistedPosition,
-      replicaKey,
-      hasReplica: !!replica,
-      hasReplicaPosition: !!replica?.position,
-      replicaPosition: replica?.position,
-    });
-
     if (persistedPosition) {
       // PRIORITY 0: Use persisted position from entityPositions store (survives time-travel)
       // Position is RELATIVE to j-machine - compute world position
@@ -3129,19 +3008,11 @@ let vrHammer: VRHammer | null = null;
         x = jMachinePos.x + persistedPosition.x;
         y = jMachinePos.y + persistedPosition.y;
         z = jMachinePos.z + persistedPosition.z;
-        console.log('[Graph3D] ✅ World position from relative:', {
-          entityId: profile.entityId.slice(0,10),
-          jurisdiction: persistedPosition.jurisdiction,
-          jMachinePos,
-          relative: { x: persistedPosition.x, y: persistedPosition.y, z: persistedPosition.z },
-          world: { x, y, z }
-        });
       } else {
         // Fallback: use relative position as absolute (j-machine not found)
         x = persistedPosition.x;
         y = persistedPosition.y;
         z = persistedPosition.z;
-        console.warn('[Graph3D] ⚠️ J-machine not found for jurisdiction:', persistedPosition.jurisdiction, '- using relative as absolute');
       }
       if (!loggedGridPositions.has(profile.entityId)) {
         loggedGridPositions.add(profile.entityId);
@@ -3155,19 +3026,11 @@ let vrHammer: VRHammer | null = null;
         x = jMachinePos.x + replica.position.x;
         y = jMachinePos.y + replica.position.y;
         z = jMachinePos.z + replica.position.z;
-        console.log('[Graph3D] ✅ World position from replica:', {
-          entityId: profile.entityId.slice(0,10),
-          jurisdiction: replicaJurisdiction,
-          jMachinePos,
-          relative: { x: replica.position.x, y: replica.position.y, z: replica.position.z },
-          world: { x, y, z }
-        });
       } else {
         // Fallback: use as absolute
         x = replica.position.x;
         y = replica.position.y;
         z = replica.position.z;
-        console.log('[Graph3D] ✅ Position from replica (absolute fallback):', { entityId: profile.entityId.slice(0,10), x, y, z });
       }
       // Only log ONCE on first draw
       if (!loggedGridPositions.has(profile.entityId)) {
@@ -3415,9 +3278,7 @@ let vrHammer: VRHammer | null = null;
                 // Support both tx.targetEntityId (old) and tx.data.targetEntityId (new format)
                 const toEntityId = tx.targetEntityId || tx.data?.targetEntityId;
                 const amount = tx.amount || tx.data?.amount || 0n;
-                console.log(`[Time-Machine] 🔍 R2R tx detected: from=${fromEntityId?.slice(0,8)}, to=${toEntityId?.slice(0,8)}, type=${tx.type}`);
                 if (toEntityId) {
-                  console.log(`[Time-Machine] 💸 R2R animation: ${fromEntityId.slice(0,8)} → ${toEntityId.slice(0,8)}`);
                   // Add tx cube to J-Machine mempool
                   addTxToJMachine(fromEntityId);
                   // R2R animation deleted - instant state change
@@ -3468,7 +3329,6 @@ let vrHammer: VRHammer | null = null;
               const fromEntityId = processingEntityId;
               const toEntityId = tx.targetEntityId;
               if (toEntityId) {
-                console.log(`[Live] 💸 R2R: ${fromEntityId.slice(0,8)} → ${toEntityId.slice(0,8)}`);
                 // Add tx cube to J-Machine mempool
                 addTxToJMachine(fromEntityId);
                 // R2R animation deleted - instant state change
@@ -3681,17 +3541,7 @@ let vrHammer: VRHammer | null = null;
               scene.remove(conn.mempoolBoxes.rightBox);
               // Dispose geometry and materials
               [conn.mempoolBoxes.leftBox, conn.mempoolBoxes.rightBox].forEach(box => {
-                box.traverse((child: any) => {
-                  if (child.geometry) child.geometry.dispose();
-                  if (child.material) {
-                    const mat = child.material;
-                    if (Array.isArray(mat)) {
-                      mat.forEach(m => m.dispose());
-                    } else {
-                      mat.dispose();
-                    }
-                  }
-                });
+                disposeObject3D(box);
               });
             }
 
@@ -3859,7 +3709,6 @@ let vrHammer: VRHammer | null = null;
     const rightEntityHeight = rightEntityAccount?.currentFrame?.height ?? 0;
 
     if (!XLN?.classifyBilateralState) {
-      console.warn('⚠️ XLN.classifyBilateralState not available - using fallback');
     }
 
     const leftConsensusState = XLN?.classifyBilateralState?.(leftEntityAccount, rightEntityHeight, true);
@@ -4793,31 +4642,11 @@ let vrHammer: VRHammer | null = null;
         if (connection.mempoolBoxes) {
           if (connection.mempoolBoxes.leftBox) {
             scene.remove(connection.mempoolBoxes.leftBox);
-            connection.mempoolBoxes.leftBox.traverse((child: any) => {
-              if (child.geometry) child.geometry.dispose();
-              if (child.material) {
-                const mat = child.material;
-                if (Array.isArray(mat)) {
-                  mat.forEach(m => m.dispose());
-                } else {
-                  mat.dispose();
-                }
-              }
-            });
+            disposeObject3D(connection.mempoolBoxes.leftBox);
           }
           if (connection.mempoolBoxes.rightBox) {
             scene.remove(connection.mempoolBoxes.rightBox);
-            connection.mempoolBoxes.rightBox.traverse((child: any) => {
-              if (child.geometry) child.geometry.dispose();
-              if (child.material) {
-                const mat = child.material;
-                if (Array.isArray(mat)) {
-                  mat.forEach(m => m.dispose());
-                } else {
-                  mat.dispose();
-                }
-              }
-            });
+            disposeObject3D(connection.mempoolBoxes.rightBox);
           }
         }
       });
@@ -5080,7 +4909,6 @@ let vrHammer: VRHammer | null = null;
   function triggerEntityInputStrike(fromEntityId: string, toEntityId: string) {
     if (!scene || fromEntityId === toEntityId) {
       if (fromEntityId === toEntityId) {
-        console.log(`[Strike] Skipped intra-entity: ${fromEntityId.slice(-4)}`);
       }
       return;
     }
@@ -5089,11 +4917,9 @@ let vrHammer: VRHammer | null = null;
     const toEntity = entities.find(e => e.id === toEntityId);
 
     if (!fromEntity || !toEntity) {
-      console.warn(`[Strike] Entity not found: from=${fromEntityId.slice(-4)}, to=${toEntityId.slice(-4)}`);
       return;
     }
 
-    console.log(`[Strike] ⚡ ${fromEntityId.slice(-4)} → ${toEntityId.slice(-4)} (cyan flash 100ms)`);
 
     // Create thin cyan line
     const geometry = new THREE.BufferGeometry().setFromPoints([
@@ -5228,31 +5054,11 @@ let vrHammer: VRHammer | null = null;
       if (connection.mempoolBoxes) {
         if (connection.mempoolBoxes.leftBox) {
           scene.remove(connection.mempoolBoxes.leftBox);
-          connection.mempoolBoxes.leftBox.traverse((child: any) => {
-            if (child.geometry) child.geometry.dispose();
-            if (child.material) {
-              const mat = child.material;
-              if (Array.isArray(mat)) {
-                mat.forEach(m => m.dispose());
-              } else {
-                mat.dispose();
-              }
-            }
-          });
+          disposeObject3D(connection.mempoolBoxes.leftBox);
         }
         if (connection.mempoolBoxes.rightBox) {
           scene.remove(connection.mempoolBoxes.rightBox);
-          connection.mempoolBoxes.rightBox.traverse((child: any) => {
-            if (child.geometry) child.geometry.dispose();
-            if (child.material) {
-              const mat = child.material;
-              if (Array.isArray(mat)) {
-                mat.forEach(m => m.dispose());
-              } else {
-                mat.dispose();
-              }
-            }
-          });
+          disposeObject3D(connection.mempoolBoxes.rightBox);
         }
       }
     });
@@ -5494,11 +5300,9 @@ let vrHammer: VRHammer | null = null;
   }
 
   function onMouseClick(event: MouseEvent) {
-    console.log(`[Graph3D] Click detected, entities count: ${entities.length}, justDragged: ${justDragged}`);
 
     // Don't trigger click actions if user just finished dragging
     if (justDragged) {
-      console.log(`[Graph3D] Ignoring click - just dragged`);
       return;
     }
 
@@ -5531,14 +5335,12 @@ let vrHammer: VRHammer | null = null;
       if (clickedJMachine && (clickedJMachine as any).userData && (clickedJMachine as any).userData.type === 'jMachine') {
         const pos = (clickedJMachine as any).userData.position as { x: number; y: number; z: number };
         const name = (clickedJMachine as any).userData.jurisdictionName as string;
-        console.log(`[Graph3D] J-Machine clicked: ${name} at`, pos);
 
         // Focus camera on this J-Machine
         if (controls && pos) {
           cameraTarget = pos;
           controls.target.set(pos.x, pos.y, pos.z);
           controls.update();
-          console.log(`[Graph3D] ✅ Camera now rotates around ${name}`);
         }
 
         // Open Jurisdiction panel
@@ -5550,9 +5352,7 @@ let vrHammer: VRHammer | null = null;
 
     // Check for entity intersections
     const entityMeshes = entities.map(e => e.mesh);
-    console.log(`[Graph3D] Raycasting against ${entityMeshes.length} entity meshes`);
     const intersects = raycaster.intersectObjects(entityMeshes);
-    console.log(`[Graph3D] Intersections found: ${intersects.length}`);
 
     if (intersects.length > 0) {
       const intersectedObject = intersects[0]?.object;
@@ -5560,14 +5360,9 @@ let vrHammer: VRHammer | null = null;
         throw new Error('FINTECH-SAFETY: No intersected object in click');
       }
       const entity = entities.find(e => e.mesh === intersectedObject);
-      console.log(`[Graph3D] Entity found for mesh:`, entity);
-      console.log(`[Graph3D] Entity.id:`, entity?.id, 'type:', typeof entity?.id);
 
       if (!entity || !entity.id) {
         // Clicked on lightning or other non-entity - ignore
-        console.log(`[Graph3D] No entity found for clicked mesh (or entity has no id)`);
-        console.log(`[Graph3D] Entities array length:`, entities.length);
-        console.log(`[Graph3D] First entity sample:`, entities[0]);
         return;
       }
 
@@ -5575,8 +5370,6 @@ let vrHammer: VRHammer | null = null;
       triggerEntityActivity(entity.id);
 
       // Get entity name and signerId for the clicked entity
-      console.log(`[Graph3D] Entity clicked - entity object:`, entity);
-      console.log(`[Graph3D] entity.id:`, entity.id, 'type:', typeof entity.id);
 
       if (!entity.id) {
         console.error('[Graph3D] ❌ Entity has no ID!', entity);
@@ -5585,7 +5378,6 @@ let vrHammer: VRHammer | null = null;
 
       const entityName = getEntityName(entity.id);
       const signerId = getSignerIdForEntity(entity.id);
-      console.log(`[Graph3D] Entity clicked: ${entity.id.slice(0, 10)}, name: ${entityName}, signerId: ${signerId?.slice(0, 10)}`);
 
       // Emit selection for other panels to react
       panelBridge.emit('entity:selected', { entityId: entity.id });
@@ -5632,14 +5424,12 @@ let vrHammer: VRHammer | null = null;
   // Handle mini panel actions
   function handleMiniPanelAction(event: CustomEvent) {
     const { type, entityId } = event.detail;
-    console.log(`[Graph3D] Mini panel action: ${type} for ${entityId}`);
     // TODO: Open full operations panel or execute quick action
   }
 
   // Handle open full panel
   function handleOpenFullPanel(event: CustomEvent) {
     const { entityId, entityName, signerId } = event.detail;
-    console.log(`[Graph3D] Open full panel for: ${entityName || entityId}`);
     // Emit event to parent to open EntityOperationsPanel in Dockview
     // @ts-ignore - emit exists on panelBridge
     panelBridge.emit('openEntityOperations', { entityId, entityName, signerId: signerId || entityId });
@@ -6108,7 +5898,6 @@ let vrHammer: VRHammer | null = null;
       // Multi-hop routing: Backend will find route if no direct account exists
       const hasDirectAccount = ourReplica?.state?.accounts?.has(job.to);
       if (!hasDirectAccount) {
-        console.log(`🔀 No direct account from ${getEntityShortName(job.from)} to ${getEntityShortName(job.to)} - backend will find multi-hop route`);
       }
 
       // Convert amount to BigInt with decimals (copy from PaymentPanel)
@@ -6298,7 +6087,6 @@ let vrHammer: VRHammer | null = null;
       }
 
       const scenarioText = await response.text();
-      console.log(`Loaded scenario: ${selectedScenarioFile}`);
 
       // Import XLN server module
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
@@ -6313,13 +6101,11 @@ let vrHammer: VRHammer | null = null;
         return;
       }
 
-      console.log(`Executing scenario with ${parsed.scenario.events.length} events`);
 
       // Execute scenario
       const result = await XLN?.executeScenario($isolatedEnv, parsed.scenario);
 
       if (result.success) {
-        console.log(`Scenario executed: ${result.framesGenerated} frames generated`);
 
         // Go to start of new frames to watch scenario unfold
         // timeOperations removed 0);
@@ -6347,7 +6133,6 @@ let vrHammer: VRHammer | null = null;
         isolatedTimeIndex.set(-1)  // Go to live;
       }
 
-      console.log(` Executing live command: ${commandText}`);
 
       // Clear logged positions if this is a grid command (for fresh logs)
       if (commandText.trim().startsWith('grid')) {
@@ -6372,7 +6157,6 @@ let vrHammer: VRHammer | null = null;
       const result = await XLN?.executeScenario($isolatedEnv, parsed.scenario);
 
       if (result.success) {
-        console.log(`✅ Live command executed`);
         commandText = ''; // Clear input
       } else {
         debug.error('Command execution failed');
@@ -6424,7 +6208,6 @@ let vrHammer: VRHammer | null = null;
     const baseUrl = window.location.origin;
     exportUrl = `${baseUrl}/?s=${base64Scenario}&loop=${start}:${end}`;
 
-    console.log(` Generated slice URL: frames ${start}-${end}, scenario ${scenarioText.length} chars`);
   }
 
   function generateASCIIScenario() {
@@ -6509,7 +6292,6 @@ let vrHammer: VRHammer | null = null;
 
     asciiScenario = scenarioLines.join('\n');
 
-    console.log(`🎨 Generated ASCII scenario: ${entityPositions.length} entities, ${connections.length} connections`);
   }
 
   async function executeASCIIScenario() {
@@ -6533,7 +6315,6 @@ let vrHammer: VRHammer | null = null;
       const result = await XLN?.executeScenario($isolatedEnv, parsed.scenario);
 
       if (result.success) {
-        console.log(`✅ ASCII formation executed: ${result.framesGenerated} frames`);
         // timeOperations removed 0);
         asciiText = ''; // Clear input
         asciiScenario = ''; // Clear output
@@ -6866,7 +6647,6 @@ let vrHammer: VRHammer | null = null;
         const from = entities[Math.floor(Math.random() * entities.length)];
         const to = entities[Math.floor(Math.random() * entities.length)];
         if (from && to && from.id !== to.id) {
-          console.log('[VR] Payment gesture:', from.id.slice(-4), '→', to.id.slice(-4));
           panelBridge.emit('vr:payment', { from: from.id, to: to.id });
         }
       }
@@ -6874,7 +6654,6 @@ let vrHammer: VRHammer | null = null;
     onAutoRotateClick={() => {
       autoRotate = !autoRotate;
       panelBridge.emit('settings:update', { key: 'autoRotate', value: autoRotate });
-      console.log('[VR] Auto-rotate:', autoRotate);
     }}
     onExitVR={exitVR}
   />

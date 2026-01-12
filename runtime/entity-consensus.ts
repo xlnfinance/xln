@@ -335,16 +335,17 @@ export const applyEntityInput = async (
         height: workingReplica.state.height + 1,
       };
 
-      // CHANNEL.TS PATTERN: Only clear sent transactions that were committed
-      // Like Channel.ts line 217: mempool.splice(0, this.data.sentTransitions)
-      if (workingReplica.sentTransitions && workingReplica.sentTransitions > 0) {
-        console.log(`📊 Clearing ${workingReplica.sentTransitions} committed txs from mempool (${workingReplica.mempool.length} total)`);
-        workingReplica.mempool.splice(0, workingReplica.sentTransitions);
+      // CHANNEL.TS PATTERN: Clear only the committed txs, keep any new txs
+      // This avoids dropping fresh inputs merged into the same tick (e.g., accountInput ACKs).
+      const committedTxCount = entityInput.proposedFrame.txs.length;
+      if (committedTxCount > 0) {
+        console.log(`📊 Clearing ${committedTxCount} committed txs from mempool (${workingReplica.mempool.length} total)`);
+        workingReplica.mempool.splice(0, committedTxCount);
         workingReplica.sentTransitions = 0;
         console.log(`📊 Mempool after commit: ${workingReplica.mempool.length} txs remaining`);
       } else {
-        // Fallback: clear entire mempool (old behavior)
-        workingReplica.mempool.length = 0;
+        // No txs committed - leave mempool as-is
+        workingReplica.sentTransitions = 0;
       }
 
       delete workingReplica.lockedFrame; // Release lock after commit
@@ -454,8 +455,11 @@ export const applyEntityInput = async (
       const sortedSignatures = sortSignatures(workingReplica.proposal.signatures, workingReplica.state.config);
       const committedFrame = workingReplica.proposal;
 
-      // Clear state (mutable)
-      workingReplica.mempool.length = 0;
+      // Clear only committed txs; keep any new txs merged into this tick
+      const committedTxCount = committedFrame.txs.length;
+      if (committedTxCount > 0) {
+        workingReplica.mempool.splice(0, committedTxCount);
+      }
       delete workingReplica.proposal;
       delete workingReplica.lockedFrame; // Release lock after commit
 
@@ -1054,6 +1058,7 @@ const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
 
 export const mergeEntityInputs = (inputs: EntityInput[]): EntityInput[] => {
   const merged = new Map<string, EntityInput>();
+  const conflicts: EntityInput[] = [];
   let duplicateCount = 0;
 
   // Look for potential Carol duplicates specifically
@@ -1074,6 +1079,23 @@ export const mergeEntityInputs = (inputs: EntityInput[]): EntityInput[] => {
     if (merged.has(key)) {
       const existing = merged.get(key)!;
       duplicateCount++;
+
+      const existingFrameHash = existing.proposedFrame?.hash;
+      const incomingFrameHash = input.proposedFrame?.hash;
+      if (existingFrameHash && incomingFrameHash && existingFrameHash !== incomingFrameHash) {
+        const existingHasPrecommits = !!existing.precommits && existing.precommits.size > 0;
+        const incomingHasPrecommits = !!input.precommits && input.precommits.size > 0;
+        console.warn(
+          `⚠️  MERGE-CONFLICT: ${key} has different proposedFrame hashes (${existingFrameHash.slice(0, 10)} vs ${incomingFrameHash.slice(0, 10)}) - keeping both inputs`,
+        );
+        if (incomingHasPrecommits && !existingHasPrecommits) {
+          merged.set(key, { ...input });
+          conflicts.push(existing);
+        } else {
+          conflicts.push(input);
+        }
+        continue;
+      }
 
       if (HEAVY_LOGS) console.log(`🔍 DUPLICATE-FOUND: Merging duplicate input ${duplicateCount} for ${entityShort}:${input.signerId}`);
 
@@ -1115,7 +1137,8 @@ export const mergeEntityInputs = (inputs: EntityInput[]): EntityInput[] => {
     console.log(`    ⚠️  CORNER CASE: Merged ${duplicateCount} duplicate inputs (${inputs.length} → ${merged.size})`);
   }
 
-  return Array.from(merged.values()).map(input => {
+  const mergedInputs = Array.from(merged.values());
+  return [...mergedInputs, ...conflicts].map(input => {
     if (input.entityTxs && input.entityTxs.length > 1) {
       return { ...input, entityTxs: mergeJEventTxs(input.entityTxs) };
     }
