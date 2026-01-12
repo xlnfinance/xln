@@ -777,14 +777,15 @@ let vrHammer: VRHammer | null = null;
       // Read mempool size directly from jReplica snapshot (canonical source of truth)
       const mempoolSize = activeJurisdiction.jMachine.mempool?.length || 0;
 
-      // Get PREVIOUS frame's mempool size for broadcast detection
+      // Get PREVIOUS frame for broadcast detection
       const timeIdx = $isolatedTimeIndex;
       const historyFrames = $isolatedHistory;
       let prevMempoolSize = 0;
+      let prevFrame = null;
       if (historyFrames && historyFrames.length > 0) {
         const prevFrameIdx = timeIdx === -1 ? historyFrames.length - 2 : timeIdx - 1;
         if (prevFrameIdx >= 0 && prevFrameIdx < historyFrames.length) {
-          const prevFrame = historyFrames[prevFrameIdx];
+          prevFrame = historyFrames[prevFrameIdx];
           const prevJReplicas = prevFrame?.jReplicas;
           if (prevJReplicas) {
             const prevJReplicaArr = Array.isArray(prevJReplicas) ? prevJReplicas : Array.from(prevJReplicas.values());
@@ -794,144 +795,50 @@ let vrHammer: VRHammer | null = null;
         }
       }
 
-      console.log(`[J-Mempool] mempool.length=${mempoolSize}, prev=${prevMempoolSize}, cubes=${jMachineTxBoxes.length}`);
+      // DUMB PIPE: Always clear and recreate mempool cubes from current jReplica state
+      // Clear old cubes
+      jMachineTxBoxes.forEach(cube => {
+        if (cube && activeJMachine) {
+          activeJMachine.remove(cube);
+          cube.traverse((child: any) => {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+              const mat = child.material;
+              if (Array.isArray(mat)) {
+                mat.forEach((m: any) => m.dispose());
+              } else {
+                mat.dispose();
+              }
+            }
+          });
+        }
+      });
+      jMachineTxBoxes = [];
 
-      const currentVisualCount = jMachineTxBoxes.length;
-
-      // Add cubes if mempool grew
+      // Render current mempool (dumb pipe - just show state)
       const mempool = activeJurisdiction.jMachine.mempool || [];
-      const nextBlockHeight = (activeJurisdiction.jMachine.jHeight || 0) + 1; // Pending txs go in NEXT block
-      while (jMachineTxBoxes.length < mempoolSize) {
-        const txIndex = jMachineTxBoxes.length;
-        const tx = mempool[txIndex];
+      const currentJHeight = activeJurisdiction.jMachine.jHeight || 0;
+      const nextBlockHeight = Number(currentJHeight) + 1;
 
-        // Create TX cube directly in J-mempool (instant, no flying animation)
+      mempool.forEach((tx: any, txIndex: number) => {
         const txCube = createMempoolTxCube(txIndex, tx, nextBlockHeight);
         activeJMachine.add(txCube);
         jMachineTxBoxes.push(txCube);
-      }
+      });
 
-      // Blockchain visualization: When mempool clears (broadcast), convert to committed block
-      if (prevMempoolSize > 0 && mempoolSize === 0 && jMachineTxBoxes.length > 0) {
-        const blockNumber = BigInt(activeJurisdiction.jMachine.jHeight || 0);
-        console.log(`[Graph3D] 📦 J-Block #${blockNumber} committed: ${jMachineTxBoxes.length} txs → blockchain`);
+      console.log(`[J-Mempool] Rendered ${mempool.length} cubes at jHeight ${currentJHeight}`);
 
-        // Create committed block container (clone J-mempool style)
-        const blockContainer = new THREE.Group();
-        blockContainer.userData['blockNumber'] = blockNumber;
-
-        // Add J-mempool style box (same blue translucent)
-        const blockSize = 12;
-        const blockCubeGeo = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
-        const blockCubeMat = new THREE.MeshPhongMaterial({
-          color: 0x4488aa,     // Same teal-blue
-          emissive: 0x224455,
-          transparent: true,
-          opacity: 0.15,       // Same translucency
-          side: THREE.DoubleSide,
-          shininess: 100,
-          depthWrite: false
-        });
-        const blockCube = new THREE.Mesh(blockCubeGeo, blockCubeMat);
-        blockContainer.add(blockCube);
-
-        // Cyan wireframe edges
-        const blockEdgesGeo = new THREE.EdgesGeometry(blockCubeGeo);
-        const blockEdgesMat = new THREE.LineBasicMaterial({
-          color: 0x66ccff,   // Bright cyan edges
-          linewidth: 2
-        });
-        const blockEdges = new THREE.LineSegments(blockEdgesGeo, blockEdgesMat);
-        blockContainer.add(blockEdges);
-
-        // Move current TX cubes from J-machine to block container (yellow cubes go inside)
-        // Filter out null placeholders from flying TX animations
-        const committedCubes = jMachineTxBoxes.filter(cube => cube !== null);
-        committedCubes.forEach(cube => {
-          if (activeJMachine && cube) {
-            activeJMachine.remove(cube);
-            blockContainer.add(cube);
-          }
-        });
-
-        // Stack blocks: Move all previous blocks upward
-        const blockSpacing = 15; // Vertical spacing between blocks
-        jBlockHistory.forEach((block, idx) => {
-          block.yOffset += blockSpacing;
-          block.container.position.y = activeJMachine.position.y + block.yOffset;
-
-          // No opacity changes - uniform J-mempool style for all blocks
-        });
-
-        // Position new block right above J-machine
-        const newYOffset = blockSpacing;
-        blockContainer.position.copy(activeJMachine.position);
-        blockContainer.position.y += newYOffset;
-        scene.add(blockContainer);
-
-        // Add to history
-        jBlockHistory.push({
-          blockNumber,
-          container: blockContainer,
-          txCubes: committedCubes,
-          yOffset: newYOffset
-        });
-
-        // Keep only last 3 blocks, dispose older ones
-        while (jBlockHistory.length > 3) {
-          const oldBlock = jBlockHistory.shift();
-          if (oldBlock) {
-            scene.remove(oldBlock.container);
-            oldBlock.container.traverse((child: any) => {
-              if (child.geometry) child.geometry.dispose();
-              if (child.material) {
-                const mat = child.material;
-                if (Array.isArray(mat)) {
-                  mat.forEach(m => m.dispose());
-                } else {
-                  mat.dispose();
-                }
-              }
-            });
-          }
+      // BROADCAST DETECTION: jHeight increased (new block created in this frame)
+      if (prevMempoolSize > 0 && mempoolSize === 0) {
+        const prevJHeight = prevFrame?.jReplicas?.find((jr: any) => jr.name === activeJurisdiction.name)?.jHeight || 0;
+        if (Number(currentJHeight) > Number(prevJHeight)) {
+          console.log(`[Broadcast] 📡 Block finalized: jHeight ${prevJHeight} → ${currentJHeight} (${prevMempoolSize} TXs)`);
+          createProportionalBroadcast(activeJMachine.position, prevMempoolSize);
         }
-
-        // Clear current mempool array (cubes moved to block)
-        const txCount = jMachineTxBoxes.length;
-        jMachineTxBoxes = [];
-
-        // Broadcast effect proportional to TX count
-        createProportionalBroadcast(activeJMachine.position, txCount);
-      } else {
-        // Normal mempool shrink (not full broadcast) - dispose removed cubes
-        while (jMachineTxBoxes.length > mempoolSize) {
-          const txGroup = jMachineTxBoxes.pop();
-          if (txGroup && activeJMachine) {
-            activeJMachine.remove(txGroup);
-            txGroup.traverse((child) => {
-              if ((child as THREE.Mesh).geometry) {
-                (child as THREE.Mesh).geometry.dispose();
-              }
-              if ((child as THREE.Mesh).material) {
-                const mat = (child as THREE.Mesh).material;
-                if (Array.isArray(mat)) {
-                  mat.forEach(m => m.dispose());
-                } else {
-                  (mat as THREE.Material).dispose();
-                }
-              }
-            });
-          }
-        }
-      }
-
-      if (currentVisualCount !== mempoolSize) {
-        console.log(`[Graph3D] 📦 J-Mempool synced: ${mempoolSize} pending txs (frame ${$isolatedTimeIndex})`);
       }
 
       // TIME-TRAVEL: Reconstruct blockchain from runtime history (dumb pipe - just read state)
       // Iterate backward to find block boundaries (jHeight changes)
-      const currentJHeight = activeJurisdiction.jMachine.jHeight || 0;
       const currentHeightNum = Number(currentJHeight);
       const runtimeHistory = $isolatedHistory || [];
 
