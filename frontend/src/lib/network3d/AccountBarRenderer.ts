@@ -515,27 +515,14 @@ function createBarCylinder(
   const geometry = new THREE.CylinderGeometry(radius, radius, length, 16);
   const isUnusedCredit = colorType === 'availableCredit';
 
-  // Determine if THIS bar should glow based on bilateral state
-  const shouldGlow = bilateralState?.glowColor &&
-    (bilateralState.glowSide === barSide || bilateralState.glowSide === 'both');
-
-  const glowColorMap: Record<string, number> = {
-    yellow: 0xffff00,
-    blue: 0x00aaff,
-    red: 0xff0000
-  };
-
-  const glowColor = shouldGlow && bilateralState?.glowColor
-    ? (glowColorMap[bilateralState.glowColor] ?? color)
-    : color;
-
+  // Bar glow disabled - just show base color (no orange/gold/yellow glow nonsense)
   const material = new THREE.MeshLambertMaterial({
     color,
     transparent: true,
-    opacity: isUnusedCredit ? 0.2 : 1.0, // Solid for committed state
-    emissive: shouldGlow ? glowColor : new THREE.Color(color).multiplyScalar(0.15),
-    emissiveIntensity: shouldGlow ? (bilateralState?.glowIntensity ?? 0.6) : (isUnusedCredit ? 0.3 : 0.15),
-    wireframe: isUnusedCredit // Only wireframe for unused credit, NOT for glow
+    opacity: isUnusedCredit ? 0.2 : 1.0,
+    emissive: new THREE.Color(color).multiplyScalar(0.1), // Subtle emissive, same color
+    emissiveIntensity: isUnusedCredit ? 0.2 : 0.1,
+    wireframe: isUnusedCredit
   });
 
   const mesh = new THREE.Mesh(geometry, material);
