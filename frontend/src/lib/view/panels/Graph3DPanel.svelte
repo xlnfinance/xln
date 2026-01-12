@@ -341,6 +341,9 @@ let vrHammer: VRHammer | null = null;
   let broadcastEnabled = true;
   let broadcastAnimations: THREE.Object3D[] = []; // Active broadcast visuals
 
+  // Bar morphing state persistence (survives bar recreation during entity movement)
+  const barLerpState = new Map<string, number>(); // key: `${fromId}-${toId}-${tokenId}-${segmentIdx}` → currentLength
+
   // J-Machine Auto-Proposer: Single-signer consensus simulation
   // J acts as super-entity that auto-proposes every N seconds
   let jAutoProposerInterval: ReturnType<typeof setInterval> | null = null;
@@ -1723,6 +1726,25 @@ let vrHammer: VRHammer | null = null;
     }
     effectOperations.clear();
     entityMeshMap.clear();
+
+    // Clean up active animations (prevent memory leak)
+    flyingTxAnimations.forEach(anim => {
+      if (anim.mesh && scene) {
+        scene.remove(anim.mesh);
+        anim.mesh.geometry.dispose();
+        (anim.mesh.material as THREE.Material).dispose();
+      }
+    });
+    flyingTxAnimations = [];
+
+    entityInputStrikes.forEach(strike => {
+      if (strike.line && scene) {
+        scene.remove(strike.line);
+        strike.line.geometry.dispose();
+        (strike.line.material as THREE.Material).dispose();
+      }
+    });
+    entityInputStrikes = [];
 
     // Clean up managers
     if (entityManager) {
