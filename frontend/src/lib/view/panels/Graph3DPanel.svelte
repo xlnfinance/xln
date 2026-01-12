@@ -890,10 +890,13 @@ let vrHammer: VRHammer | null = null;
         blockContainer.add(blockEdges);
 
         // Move current TX cubes from J-machine to block container (yellow cubes go inside)
-        const committedCubes = [...jMachineTxBoxes];
+        // Filter out null placeholders from flying TX animations
+        const committedCubes = jMachineTxBoxes.filter(cube => cube !== null);
         committedCubes.forEach(cube => {
-          activeJMachine.remove(cube);
-          blockContainer.add(cube);
+          if (activeJMachine && cube) {
+            activeJMachine.remove(cube);
+            blockContainer.add(cube);
+          }
         });
 
         // Stack blocks: Move all previous blocks upward
