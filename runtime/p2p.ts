@@ -211,6 +211,7 @@ export class RuntimeP2P {
     if (this.seedRuntimeIds.length === 0) return;
     for (const seedId of this.seedRuntimeIds) {
       this.announceProfilesTo(seedId, profiles);
+      console.log(`P2P_PROFILE_SENT from=${this.runtimeId.slice(0, 10)} to=${seedId.slice(0, 10)} profiles=${profiles.length}`);
     }
   }
 
@@ -290,6 +291,7 @@ export class RuntimeP2P {
         registerSignerPublicKey(profile.entityId, publicKey);
       }
     }
+    console.log(`P2P_PROFILE_RECEIVED from=${from.slice(0, 10)} profiles=${profiles.length}`);
     this.onGossipProfiles(from, profiles);
   }
 

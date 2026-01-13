@@ -306,8 +306,9 @@ export { ahb as lockAhb };
 
 export async function lockAhb(env: Env): Promise<void> {
   // Register test keys for real signatures
-  const { registerTestKeys } = await import('../account-crypto');
+  const { registerTestKeys, lockRuntimeSeedUpdates } = await import('../account-crypto');
   await registerTestKeys(['s1', 's2', 's3', 'hub', 'alice', 'bob', 'carol', 'dave', 'frank']);
+  lockRuntimeSeedUpdates(true);
   const process = await getProcess();
   env.scenarioMode = true; // Deterministic time control
 
@@ -1810,6 +1811,7 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`[AHB] History frames: ${env.history?.length}`);
   } finally {
     env.scenarioMode = false; // ALWAYS re-enable live mode, even on error
+    lockRuntimeSeedUpdates(false);
   }
 }
 

@@ -5,6 +5,8 @@
 
 import { spawn } from 'child_process';
 import net from 'net';
+import fs from 'fs';
+import path from 'path';
 import { deriveSignerAddressSync } from '../account-crypto';
 
 const hubSeed = 'hub-seed';
@@ -93,6 +95,26 @@ const waitForLineOrError = (
   });
 };
 
+const smokeConnect = async (relayUrl: string, timeoutMs = 3000) => {
+  const { WebSocket } = await import('ws');
+  return new Promise<void>((resolve, reject) => {
+    const ws = new WebSocket(relayUrl);
+    const timer = setTimeout(() => {
+      ws.close();
+      reject(new Error(`WS_SMOKE_TIMEOUT: ${relayUrl}`));
+    }, timeoutMs);
+    ws.on('open', () => {
+      clearTimeout(timer);
+      ws.close();
+      resolve();
+    });
+    ws.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+};
+
 const spawnNode = (
   role: string,
   seed: string,
@@ -100,6 +122,9 @@ const spawnNode = (
   seedRuntimeId?: string,
   extraArgs: string[] = []
 ): ProcInfo => {
+  const dbRoot = path.join(process.cwd(), 'db-tmp');
+  fs.mkdirSync(dbRoot, { recursive: true });
+  const dbPath = path.join(dbRoot, `${role}-${Date.now()}`);
   const args = [
     'run',
     'runtime/scenarios/p2p-node.ts',
@@ -119,7 +144,7 @@ const spawnNode = (
   const proc = spawn('bun', args, {
     env: {
       ...process.env,
-      XLN_DB_PATH: `db-${role}-${Date.now()}`,
+      XLN_DB_PATH: dbPath,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -167,10 +192,12 @@ const getFreePort = (): Promise<number> => {
   });
 };
 
+const pickRandomPort = (): number => 10000 + Math.floor(Math.random() * 20000);
+
 const run = async () => {
   const envPort = process.env.P2P_RELAY_PORT;
-  const basePort = Number(envPort || 8890);
-  let relayPort = basePort;
+  const basePort = envPort ? Number(envPort) : null;
+  let relayPort = basePort ?? 8890;
   let hub: ProcInfo | null = null;
 
   if (!envPort) {
@@ -180,13 +207,15 @@ const run = async () => {
     } catch (error) {
       const err = error as Error;
       console.warn(`[P2P] Failed to allocate port automatically: ${err.message}`);
-      relayPort = basePort;
+      relayPort = pickRandomPort();
     }
   }
 
-  const initialPort = relayPort;
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    relayPort = envPort ? basePort : initialPort + attempt;
+  const maxAttempts = envPort ? 1 : 10;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (!envPort && attempt > 0) {
+      relayPort = pickRandomPort();
+    }
     const relayUrl = `ws://127.0.0.1:${relayPort}`;
     console.log(`[P2P] Trying relay port ${relayPort}`);
 
@@ -202,15 +231,28 @@ const run = async () => {
     try {
       await waitForLineOrError(
         hub,
-        /P2P_NODE_READY role=hub/,
+        /P2P_RELAY_READY/,
+        [/Runtime relay "hub" failed/i, /Failed to start server/i, /RELAY_PORT_MISSING/i]
+      );
+      await waitForLineOrError(
+        hub,
+        /Runtime relay "hub" listening/i,
         [/Runtime relay "hub" failed/i, /Failed to start server/i]
+      );
+      await smokeConnect(relayUrl);
+      console.log('[P2P] WS smoke test passed');
+      await waitForLineOrError(
+        hub,
+        /P2P_NODE_READY role=hub/,
+        [/PROFILE_TIMEOUT/i, /PROFILE_MISSING_RUNTIME_ID/i, /PROFILE_MISSING_PUBLIC_KEY/i]
       );
       break;
     } catch (error) {
       killAll([hub]);
       procs.splice(procs.indexOf(hub), 1);
       hub = null;
-      if (attempt === 4) throw error;
+      if (envPort) throw error;
+      if (attempt === maxAttempts - 1) throw error;
     }
   }
 
@@ -219,12 +261,42 @@ const run = async () => {
   }
 
   const relayUrl = `ws://127.0.0.1:${relayPort}`;
+  console.log(`[P2P] Relay URL ${relayUrl}`);
 
-  const alice = spawnNode('alice', aliceSeed, relayUrl, hubRuntimeId);
   const bob = spawnNode('bob', bobSeed, relayUrl, hubRuntimeId);
-  procs.push(alice, bob);
+  procs.push(bob);
+  const alice = spawnNode('alice', aliceSeed, relayUrl, hubRuntimeId);
+  procs.push(alice);
 
-  await waitForLine(bob, /P2P_PAYMENT_RECEIVED/);
+  const errorMatchers = [
+    /PROFILE_TIMEOUT/i,
+    /PROFILE_MISSING_RUNTIME_ID/i,
+    /PROFILE_MISSING_PUBLIC_KEY/i,
+    /ACCOUNT_PENDING_FRAME/i,
+    /ACCOUNT_NOT_ACKED/i,
+    /SIGNER_KEY_MISSING/i,
+    /Invalid frame signature/i,
+    /WS_CLIENT_ERROR/i,
+    /RELAY_PORT_MISSING/i,
+  ];
+
+  await waitForLineOrError(bob, /P2P_NODE_READY role=bob/, errorMatchers);
+  await waitForLineOrError(alice, /P2P_NODE_READY role=alice/, errorMatchers);
+  console.log('[P2P] Nodes ready');
+
+  await waitForLineOrError(bob, /P2P_PROFILE_SENT/, errorMatchers);
+  await waitForLineOrError(alice, /P2P_PROFILE_SENT/, errorMatchers);
+
+  await waitForLineOrError(hub, /P2P_GOSSIP_READY/, errorMatchers);
+  await waitForLineOrError(bob, /P2P_HUB_PROFILE_READY/, errorMatchers);
+  await waitForLineOrError(alice, /P2P_HUB_PROFILE_READY/, errorMatchers);
+  console.log('[P2P] Gossip ready');
+
+  await waitForLineOrError(bob, /P2P_BOB_READY/, errorMatchers);
+  console.log('[P2P] Bob credit ready');
+  await waitForLineOrError(alice, /P2P_PAYMENT_SENT/, errorMatchers);
+  console.log('[P2P] Alice payment sent');
+  await waitForLineOrError(bob, /P2P_PAYMENT_RECEIVED/, errorMatchers);
   console.log('✅ P2P relay test passed');
 
   killAll(procs);

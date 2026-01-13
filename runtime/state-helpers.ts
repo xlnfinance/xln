@@ -79,6 +79,35 @@ export function emitScopedEvents(
   }
 }
 
+/**
+ * Resolve the proposer signerId for a given entity.
+ * Prefers local proposer replica, then local config validators[0], then gossip board[0].
+ * Throws if no signer can be resolved (fail early).
+ */
+export function resolveEntityProposerId(env: Env, entityId: string, context: string): string {
+  let fallback: string | null = null;
+
+  for (const replica of env.eReplicas.values()) {
+    if (replica.entityId !== entityId) continue;
+    if (replica.isProposer) return replica.signerId;
+    if (!fallback) {
+      fallback = replica.state.config.validators[0] || replica.signerId;
+    }
+  }
+
+  if (env.gossip?.getProfiles) {
+    const profile = (env.gossip.getProfiles() as Profile[]).find(p => p.entityId === entityId);
+    const board = profile?.metadata?.board;
+    if (board && board.length > 0) {
+      return board[0];
+    }
+  }
+
+  if (fallback) return fallback;
+
+  throw new Error(`SIGNER_RESOLUTION_FAILED: ${context} entityId=${entityId}`);
+}
+
 // === CLONING UTILITIES ===
 export const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
 export const cloneArray = <T>(arr: T[]) => [...arr];
