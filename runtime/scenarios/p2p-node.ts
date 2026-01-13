@@ -343,8 +343,12 @@ const run = async () => {
   console.log(`P2P_NODE_READY role=${role} runtimeId=${env.runtimeId} entityId=${entityId}`);
 
   if (role === 'hub') {
-    const aliceProfile = await waitForProfile(env, 'alice', 30, undefined, true, true, true);
-    const bobProfile = await waitForProfile(env, 'bob', 30, undefined, true, true, true);
+    // CRITICAL: Give time for alice/bob to spawn and connect before waiting
+    console.log('P2P_HUB_WAITING_FOR_CLIENTS');
+    await sleep(2000); // 2 second grace period for alice/bob to start
+
+    const aliceProfile = await waitForProfile(env, 'alice', 60, undefined, true, true, true);
+    const bobProfile = await waitForProfile(env, 'bob', 60, undefined, true, true, true);
     logProfile('hub sees alice', aliceProfile);
     logProfile('hub sees bob', bobProfile);
     console.log('P2P_GOSSIP_READY');
