@@ -184,9 +184,15 @@ export async function verifyHankoForHash(
       if (replica) {
         const validators = replica.state.config.validators; // ['s1', 's2', 's3']
 
-        // Convert signerId validators to addresses
+        // Convert validators to addresses
+        // Validators can be: signerId ('1','2','3') OR direct address ('0xabc...')
         const { getSignerAddress } = await import('./account-crypto');
-        const expectedAddresses = validators.map(v => getSignerAddress(v)?.toLowerCase()).filter(Boolean);
+        const expectedAddresses = validators.map(v => {
+          if (v.startsWith('0x')) {
+            return v.toLowerCase(); // Direct address
+          }
+          return getSignerAddress(v)?.toLowerCase(); // SignerId → derive address
+        }).filter(Boolean);
 
         // Check that ALL recovered addresses are in expected validators
         for (const addr of recoveredAddresses) {
