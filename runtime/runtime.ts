@@ -42,7 +42,8 @@ import {
 } from './evm';
 import { createGossipLayer } from './gossip';
 import { attachEventEmitters } from './env-events';
-import { deriveSignerAddressSync, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, getSignerPublicKey, registerSignerKey, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
+import { RuntimeP2P, type P2PConfig } from './p2p';
 import {
   parseReplicaKey,
   extractEntityId,
@@ -201,7 +202,13 @@ export const copyCleanLogs = async (): Promise<string> => {
 
 // --- Database Setup ---
 // Level polyfill: Node.js uses filesystem, Browser uses IndexedDB
-export const db: Level<Buffer, Buffer> = new Level('db', {
+const nodeProcess =
+  !isBrowser && typeof globalThis.process !== 'undefined'
+    ? globalThis.process
+    : undefined;
+const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
+const dbPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
+export const db: Level<Buffer, Buffer> = new Level(dbPath, {
   valueEncoding: 'buffer',
   keyEncoding: 'binary',
 });
@@ -257,6 +264,10 @@ let envChangeCallback: ((env: Env) => void) | null = null;
 let env: Env;
 let runtimeSeed: string | null = null;
 let runtimeId: string | null = null;
+let p2pOverlay: RuntimeP2P | null = null;
+let pendingP2PConfig: { env: Env; config: P2PConfig } | null = null;
+let networkProcessScheduled = false;
+let lastP2PConfig: P2PConfig | null = null;
 
 // Module-level j-watcher instance - prevent multiple instances
 let jWatcher: JEventWatcher | null = null;
@@ -276,6 +287,10 @@ export const getEnv = (): Env | null => {
 };
 
 export const setRuntimeSeed = (seed: string | null): void => {
+  if (env?.lockRuntimeSeed) {
+    console.warn('⚠️ Runtime seed update blocked (scenario lock enabled)');
+    return;
+  }
   const normalized = seed && seed.length > 0 ? seed : null;
   runtimeSeed = normalized;
   setCryptoRuntimeSeed(normalized);
@@ -293,6 +308,14 @@ export const setRuntimeSeed = (seed: string | null): void => {
     env.runtimeSeed = normalized || undefined;
     env.runtimeId = runtimeId || undefined;
   }
+  if (pendingP2PConfig && runtimeId) {
+    const { env: pendingEnv, config } = pendingP2PConfig;
+    pendingP2PConfig = null;
+    startP2P(pendingEnv, config);
+  }
+  if (env && p2pOverlay && lastP2PConfig && runtimeId) {
+    startP2P(env, lastP2PConfig);
+  }
 };
 
 export const setRuntimeId = (id: string | null): void => {
@@ -301,6 +324,133 @@ export const setRuntimeId = (id: string | null): void => {
     env.runtimeId = runtimeId || undefined;
   }
 };
+
+const scheduleNetworkProcess = (env: Env) => {
+  if (networkProcessScheduled) return;
+  networkProcessScheduled = true;
+  const defer =
+    typeof setImmediate === 'function'
+      ? setImmediate
+      : (cb: () => void) => {
+          if (typeof queueMicrotask === 'function') {
+            queueMicrotask(cb);
+          } else {
+            setTimeout(cb, 0);
+          }
+        };
+  defer(async () => {
+    networkProcessScheduled = false;
+    if (!env.networkInbox || env.networkInbox.length === 0) return;
+    if (processing) {
+      scheduleNetworkProcess(env);
+      return;
+    }
+    try {
+      await process(env);
+    } catch (error) {
+      logError('NETWORK', 'Failed to process network inbox', error);
+    }
+  });
+};
+
+const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null => {
+  if (!env.gossip?.getProfiles) return null;
+  const profiles = env.gossip.getProfiles();
+  const profile = profiles.find((p: Profile) => p.entityId === entityId);
+  return profile?.runtimeId || null;
+};
+
+const routeEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] => {
+  if (!p2pOverlay) return outputs;
+  const localEntityIds = new Set<string>();
+  for (const replicaKey of env.eReplicas.keys()) {
+    try {
+      localEntityIds.add(extractEntityId(replicaKey));
+    } catch {
+      // Skip malformed replica keys
+    }
+  }
+
+  const localOutputs: EntityInput[] = [];
+  const pendingOutputs = env.pendingNetworkOutputs ? [...env.pendingNetworkOutputs] : [];
+  env.pendingNetworkOutputs = [];
+  const allOutputs = [...pendingOutputs, ...outputs];
+  const deferredOutputs: EntityInput[] = [];
+
+  for (const output of allOutputs) {
+    if (localEntityIds.has(output.entityId)) {
+      localOutputs.push(output);
+      continue;
+    }
+    const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
+    if (!targetRuntimeId) {
+      env.warn('network', 'Missing runtimeId for entity output (queued)', { entityId: output.entityId });
+      deferredOutputs.push(output);
+      continue;
+    }
+    p2pOverlay.enqueueEntityInput(targetRuntimeId, output);
+  }
+
+  if (deferredOutputs.length > 0) {
+    env.pendingNetworkOutputs = deferredOutputs;
+  }
+
+  return localOutputs;
+};
+
+export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null => {
+  lastP2PConfig = config;
+  const resolvedRuntimeId = config.runtimeId || env.runtimeId;
+  if (!resolvedRuntimeId) {
+    pendingP2PConfig = { env, config };
+    return null;
+  }
+
+  if (p2pOverlay) {
+    if (p2pOverlay.matchesIdentity(resolvedRuntimeId, config.signerId)) {
+      p2pOverlay.updateConfig(config);
+      return p2pOverlay;
+    }
+    p2pOverlay.close();
+  }
+
+  p2pOverlay = new RuntimeP2P({
+    env,
+    runtimeId: resolvedRuntimeId,
+    signerId: config.signerId,
+    relayUrls: config.relayUrls,
+    seedRuntimeIds: config.seedRuntimeIds,
+    advertiseEntityIds: config.advertiseEntityIds,
+    isHub: config.isHub,
+    profileName: config.profileName,
+    onEntityInput: (from, input) => {
+      env.networkInbox = env.networkInbox || [];
+      env.networkInbox.push(input);
+      env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
+      scheduleNetworkProcess(env);
+    },
+    onGossipProfiles: (from, profiles) => {
+      if (!env.gossip?.announce) return;
+      for (const profile of profiles) {
+        env.gossip.announce(profile);
+      }
+      env.info('network', 'GOSSIP_SYNC', { fromRuntimeId: from, profiles: profiles.length });
+    },
+  });
+
+  p2pOverlay.connect();
+  return p2pOverlay;
+};
+
+export const stopP2P = (): void => {
+  if (p2pOverlay) {
+    p2pOverlay.close();
+    p2pOverlay = null;
+  }
+  lastP2PConfig = null;
+};
+
+export const getP2P = (): RuntimeP2P | null => p2pOverlay;
 
 /**
  * Initialize module-level env if not already set
@@ -606,6 +756,18 @@ const applyRuntimeInput = async (
         }
 
         env.eReplicas.set(replicaKey, replica);
+
+        // Ensure entity-level signing key exists for this runtime (needed for gossip public key)
+        if (runtimeSeed) {
+          try {
+            const seedBytes = new TextEncoder().encode(runtimeSeed);
+            const entityKey = deriveSignerKeySync(seedBytes, runtimeTx.entityId);
+            registerSignerKey(runtimeTx.entityId, entityKey);
+          } catch (error) {
+            console.warn(`⚠️ Failed to derive entity key for ${runtimeTx.entityId.slice(0, 10)}:`, error);
+          }
+        }
+
         // Validate jBlock immediately after creation
         const createdReplica = env.eReplicas.get(replicaKey);
         const actualJBlock = createdReplica?.state.lastFinalizedJHeight;
@@ -613,6 +775,8 @@ const applyRuntimeInput = async (
 
         // Broadcast initial profile to gossip layer
         if (env.gossip && createdReplica) {
+          const entityPublicKey = getSignerPublicKey(runtimeTx.entityId);
+          const publicKeyHex = entityPublicKey ? `0x${Buffer.from(entityPublicKey).toString('hex')}` : undefined;
           const profile = {
             entityId: runtimeTx.entityId,
             runtimeId: env.runtimeId,
@@ -625,6 +789,7 @@ const applyRuntimeInput = async (
               baseFee: 0n,
               board: [...createdReplica.state.config.validators],
               threshold: createdReplica.state.config.threshold,
+              ...(publicKeyHex ? { entityPublicKey: publicKeyHex } : {}),
             },
             accounts: [], // No accounts yet
           };
@@ -1464,6 +1629,8 @@ export const createEmptyEnv = (): Env => {
     history: [],
     gossip: createGossipLayer(),
     frameLogs: [],
+    networkInbox: [],
+    pendingNetworkOutputs: [],
     // Event emitters will be attached below
     log: () => {},
     info: () => {},
@@ -1591,8 +1758,13 @@ export const process = async (
   processing = true;
 
   // Merge pending outputs from previous tick with new inputs
-  const allInputs = [...(env.pendingOutputs || []), ...(inputs || [])];
+  const allInputs = [
+    ...(env.pendingOutputs || []),
+    ...(env.networkInbox || []),
+    ...(inputs || []),
+  ];
   env.pendingOutputs = [];
+  env.networkInbox = [];
 
   // Validate inputs
   allInputs.forEach(o => {
@@ -1628,14 +1800,24 @@ export const process = async (
       if (HEAVY_LOGS) console.log(`🔍 PROCESS-DEBUG: applyRuntimeInput returned entityOutbox.length=${result.entityOutbox.length}`);
 
       // Store outputs for NEXT tick
-      env.pendingOutputs = result.entityOutbox;
+      const routedOutputs = routeEntityOutputs(env, result.entityOutbox);
+      env.pendingOutputs = routedOutputs;
 
-      if (result.entityOutbox.length > 0) {
-        console.log(`📤 TICK: ${result.entityOutbox.length} outputs queued for next tick → [${result.entityOutbox.map(o => o.entityId.slice(-4)).join(',')}]`);
+      if (routedOutputs.length > 0) {
+        console.log(`📤 TICK: ${routedOutputs.length} outputs queued for next tick → [${routedOutputs.map(o => o.entityId.slice(-4)).join(',')}]`);
       }
     } else {
-      // No inputs to process - clear env.extra to prevent stale solvency expectations
-      env.extra = undefined;
+      // No inputs to process - retry routing any pending network outputs
+      if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
+        const routedOutputs = routeEntityOutputs(env, []);
+        if (routedOutputs.length > 0) {
+          env.pendingOutputs = [...(env.pendingOutputs || []), ...routedOutputs];
+          console.log(`📤 TICK: ${routedOutputs.length} local outputs queued from pending network outputs`);
+        }
+      } else {
+        // No inputs to process - clear env.extra to prevent stale solvency expectations
+        env.extra = undefined;
+      }
     }
 
     // === J-MACHINE BLOCK PROCESSING ===
@@ -1947,7 +2129,7 @@ export { loadScenarioFromFile, loadScenarioFromText } from './scenarios/loader.j
 export { SCENARIOS, getScenario, getScenariosByTag, type ScenarioMetadata } from './scenarios/index.js';
 
 // === CRYPTOGRAPHIC SIGNATURES ===
-export { deriveSignerKey, deriveSignerKeySync, registerSignerKey, registerTestKeys, clearSignerKeys, signAccountFrame, verifyAccountSignature, getSignerPublicKey } from './account-crypto.js';
+export { deriveSignerKey, deriveSignerKeySync, registerSignerKey, registerSignerPublicKey, registerTestKeys, clearSignerKeys, signAccountFrame, verifyAccountSignature, getSignerPublicKey } from './account-crypto.js';
 
 // === NAME RESOLUTION WRAPPERS (override imports) ===
 const searchEntityNames = (query: string, limit?: number) => searchEntityNamesOriginal(db, query, limit);

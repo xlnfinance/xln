@@ -10,6 +10,10 @@ export type RuntimeWsClientOptions = {
   signerId?: string;
   onRuntimeInput?: (from: string, input: RuntimeInput) => Promise<void> | void;
   onEntityInput?: (from: string, input: EntityInput) => Promise<void> | void;
+  onGossipRequest?: (from: string, payload: unknown) => Promise<void> | void;
+  onGossipResponse?: (from: string, payload: unknown) => Promise<void> | void;
+  onGossipAnnounce?: (from: string, payload: unknown) => Promise<void> | void;
+  onOpen?: () => void;
   onError?: (error: Error) => void;
   reconnectMs?: number;
 };
@@ -31,6 +35,7 @@ export class RuntimeWsClient {
   private closed = false;
   private reconnectMs: number;
   private options: RuntimeWsClientOptions;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: RuntimeWsClientOptions) {
     this.options = options;
@@ -39,10 +44,17 @@ export class RuntimeWsClient {
 
   async connect(): Promise<void> {
     this.closed = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.ws = await createWs(this.options.url);
 
     if ('on' in this.ws) {
-      this.ws.on('open', () => this.sendHello());
+      this.ws.on('open', () => {
+        this.sendHello();
+        this.options.onOpen?.();
+      });
       this.ws.on('message', (data: Buffer) => this.handleMessage(data));
       this.ws.on('close', () => this.scheduleReconnect());
       this.ws.on('error', (err: Error) => {
@@ -50,7 +62,10 @@ export class RuntimeWsClient {
         this.scheduleReconnect();
       });
     } else {
-      this.ws.onopen = () => this.sendHello();
+      this.ws.onopen = () => {
+        this.sendHello();
+        this.options.onOpen?.();
+      };
       this.ws.onmessage = (event: MessageEvent) => this.handleMessage(event.data);
       this.ws.onclose = () => this.scheduleReconnect();
       this.ws.onerror = (event: Event) => {
@@ -83,7 +98,9 @@ export class RuntimeWsClient {
 
   private scheduleReconnect() {
     if (this.closed) return;
-    setTimeout(() => {
+    if (this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       if (!this.closed) {
         this.connect().catch(err => this.options.onError?.(err));
       }
@@ -107,10 +124,22 @@ export class RuntimeWsClient {
       await this.options.onEntityInput?.(msg.from, msg.payload as EntityInput);
       return;
     }
+    if (msg.type === 'gossip_request' && msg.payload && msg.from) {
+      await this.options.onGossipRequest?.(msg.from, msg.payload);
+      return;
+    }
+    if (msg.type === 'gossip_response' && msg.payload && msg.from) {
+      await this.options.onGossipResponse?.(msg.from, msg.payload);
+      return;
+    }
+    if (msg.type === 'gossip_announce' && msg.payload && msg.from) {
+      await this.options.onGossipAnnounce?.(msg.from, msg.payload);
+      return;
+    }
   }
 
-  sendRuntimeInput(to: string, input: RuntimeInput) {
-    this.sendRaw({
+  sendRuntimeInput(to: string, input: RuntimeInput): boolean {
+    return this.sendRaw({
       type: 'runtime_input',
       id: makeMessageId(),
       from: this.options.runtimeId,
@@ -120,8 +149,8 @@ export class RuntimeWsClient {
     });
   }
 
-  sendEntityInput(to: string, input: EntityInput) {
-    this.sendRaw({
+  sendEntityInput(to: string, input: EntityInput): boolean {
+    return this.sendRaw({
       type: 'entity_input',
       id: makeMessageId(),
       from: this.options.runtimeId,
@@ -131,15 +160,62 @@ export class RuntimeWsClient {
     });
   }
 
-  private sendRaw(msg: RuntimeWsMessage) {
-    if (!this.ws) return;
-    if ('readyState' in this.ws && this.ws.readyState !== 1) return;
+  sendGossipRequest(to: string, payload: unknown): boolean {
+    return this.sendRaw({
+      type: 'gossip_request',
+      id: makeMessageId(),
+      from: this.options.runtimeId,
+      to,
+      timestamp: Date.now(),
+      payload,
+    });
+  }
+
+  sendGossipResponse(to: string, payload: unknown): boolean {
+    return this.sendRaw({
+      type: 'gossip_response',
+      id: makeMessageId(),
+      from: this.options.runtimeId,
+      to,
+      timestamp: Date.now(),
+      payload,
+    });
+  }
+
+  sendGossipAnnounce(to: string, payload: unknown): boolean {
+    return this.sendRaw({
+      type: 'gossip_announce',
+      id: makeMessageId(),
+      from: this.options.runtimeId,
+      to,
+      timestamp: Date.now(),
+      payload,
+    });
+  }
+
+  private sendRaw(msg: RuntimeWsMessage): boolean {
+    if (!this.ws) return false;
+    if ('readyState' in this.ws && this.ws.readyState !== 1) return false;
     const payload = serializeWsMessage(msg);
-    this.ws.send(payload);
+    try {
+      this.ws.send(payload);
+      return true;
+    } catch (error) {
+      this.options.onError?.(error as Error);
+      return false;
+    }
+  }
+
+  isOpen(): boolean {
+    return !!this.ws && 'readyState' in this.ws && this.ws.readyState === 1;
   }
 
   close() {
     this.closed = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.ws?.close();
   }
 }

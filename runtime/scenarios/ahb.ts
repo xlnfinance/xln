@@ -304,8 +304,9 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
 
 export async function ahb(env: Env): Promise<void> {
   // Register test keys for real signatures (deterministic for scenarios)
-  const { registerTestKeys, deriveSignerKey } = await import('../account-crypto');
+  const { registerTestKeys, deriveSignerKey, lockRuntimeSeedUpdates } = await import('../account-crypto');
   await registerTestKeys(['s1', 's2', 's3', 's4', 'hub', 'alice', 'bob', 'bank']);
+  lockRuntimeSeedUpdates(true);
 
   const testSeed = new Uint8Array(32);
   testSeed.fill(42);
@@ -340,6 +341,7 @@ export async function ahb(env: Env): Promise<void> {
 
   const process = await getProcess();
   env.scenarioMode = true; // Deterministic time control (scenarios set env.timestamp manually)
+  env.lockRuntimeSeed = true; // Prevent vault seed overrides during scenario
 
   try {
     console.log('[AHB] ========================================');
@@ -505,6 +507,19 @@ export async function ahb(env: Env): Promise<void> {
     const [alice, hub, bob] = entities;
     if (!alice || !hub || !bob) {
       throw new Error('Failed to create all entities');
+    }
+
+    // CRITICAL: Register public keys for signature validation
+    // Without this, verifyAccountSignature will fail in browser
+    const { getSignerPublicKey, registerSignerPublicKey } = await import('../account-crypto');
+    for (const entity of entities) {
+      const publicKey = getSignerPublicKey(entity.signer);
+      if (publicKey) {
+        registerSignerPublicKey(entity.id, publicKey);
+        console.log(`✅ Registered public key for ${entity.name} (${entity.signer})`);
+      } else {
+        console.warn(`⚠️ No public key found for signer ${entity.signer}`);
+      }
     }
 
     console.log(`\n  ✅ Created: ${alice.name}, ${hub.name}, ${bob.name}`);
@@ -976,13 +991,22 @@ export async function ahb(env: Env): Promise<void> {
     await process(env);
 
     // Process j-events from BrowserVM execution (AccountSettled updates delta.collateral)
+    console.log('[Frame 9 DEBUG] BEFORE processJEvents');
     await processJEvents(env);
+    console.log('[Frame 9 DEBUG] AFTER processJEvents - checking accounts...');
+    const [, aliceAfterJ] = findReplica(env, alice.id);
+    const [, hubAfterJ] = findReplica(env, hub.id);
+    console.log(`  Alice-Hub account: ${!!aliceAfterJ.state.accounts.get(hub.id)}`);
+    console.log(`  Hub-Alice account: ${!!hubAfterJ.state.accounts.get(alice.id)}`);
 
     // CRITICAL: Process bilateral j_event_claim frame ACKs
     // After processJEvents, j_event_claim frames are PROPOSED but not yet COMMITTED
     // Need additional process() rounds to complete bilateral consensus
+    console.log('[Frame 9 DEBUG] Round 1 - process j_event_claim proposals');
     await process(env); // Process j_event_claim frame proposals
+    console.log('[Frame 9 DEBUG] Round 2 - process ACKs and commit');
     await process(env); // Process ACK responses and commit frames
+    console.log('[Frame 9 DEBUG] Bilateral consensus rounds complete');
 
     // ✅ ASSERT: R2C delivered - Alice delta.collateral = $500K
     const [, aliceRep9] = findReplica(env, alice.id);
@@ -1072,15 +1096,17 @@ export async function ahb(env: Env): Promise<void> {
     // Tick 4: Extra tick to ensure all ACKs delivered (left-wins resend adds traffic)
     await process(env);
 
-    // ✅ ASSERT: Credit extension delivered - Bob-Hub has leftCreditLimit = $500K
-    // Bob (0x0003) > Hub (0x0002) → Bob is RIGHT, Hub is LEFT
-    // Bob extending credit sets leftCreditLimit (credit available TO Hub/LEFT)
+    // ✅ ASSERT: Credit extension delivered - Bob-Hub has correct credit limit = $500K
+    // leftCreditLimit = credit extended by LEFT to RIGHT
+    // rightCreditLimit = credit extended by RIGHT to LEFT
     const [, bobRep9] = findReplica(env, bob.id);
     const bobHubAccount9 = bobRep9.state.accounts.get(hub.id); // Account keyed by counterparty
     const bobDelta9 = bobHubAccount9?.deltas.get(USDC_TOKEN_ID);
-    if (!bobDelta9 || bobDelta9.leftCreditLimit !== bobCreditAmount) {
-      const actual = bobDelta9?.leftCreditLimit || 0n;
-      throw new Error(`ASSERT FAIL Frame 9: Bob-Hub leftCreditLimit = ${actual}, expected ${bobCreditAmount}. Credit extension NOT applied!`);
+    const counterpartyIsLeft = hub.id < bob.id;
+    const expectedField = counterpartyIsLeft ? 'leftCreditLimit' : 'rightCreditLimit';
+    const actualLimit = bobDelta9 ? bobDelta9[expectedField] : 0n;
+    if (!bobDelta9 || actualLimit !== bobCreditAmount) {
+      throw new Error(`ASSERT FAIL Frame 9: Bob-Hub ${expectedField} = ${actualLimit}, expected ${bobCreditAmount}. Credit extension NOT applied!`);
     }
 
     // Verify bilateral sync
@@ -2145,6 +2171,8 @@ export async function ahb(env: Env): Promise<void> {
     console.log(`[AHB] History frames: ${env.history?.length}`);
   } finally {
     env.scenarioMode = false; // ALWAYS re-enable live mode, even on error
+    env.lockRuntimeSeed = false;
+    lockRuntimeSeedUpdates(false);
   }
 }
 

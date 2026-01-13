@@ -6,23 +6,40 @@
 import * as secp256k1 from '@noble/secp256k1';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { concatBytes } from '@noble/hashes/utils.js';
 import { keccak256 } from 'ethers';
 
 // Configure @noble/secp256k1 HMAC (required for signing)
-// Node/Bun environment: use crypto module synchronously
-const isBrowser = typeof window !== 'undefined';
-if (!isBrowser && typeof require !== 'undefined') {
+// Always install a sync HMAC implementation (Node/Bun fast path, browser fallback).
+const installHmacSync = () => {
+  if (secp256k1.utils.hmacSha256Sync) return;
+  const isBrowser =
+    typeof window !== 'undefined' &&
+    typeof window.document !== 'undefined';
+  const isNodeLike =
+    !isBrowser &&
+    (typeof (globalThis as any).Bun !== 'undefined' ||
+      (typeof process !== 'undefined' && !!process.versions?.node));
   try {
-    const crypto = require('crypto');
-    secp256k1.utils.hmacSha256Sync = (key: Uint8Array, ...messages: Uint8Array[]) => {
-      const hmac = crypto.createHmac('sha256', Buffer.from(key));
-      for (const msg of messages) hmac.update(Buffer.from(msg));
-      return new Uint8Array(hmac.digest());
-    };
+    if (isNodeLike && typeof require !== 'undefined') {
+      const crypto = require('crypto');
+      if (crypto && typeof crypto.createHmac === 'function') {
+        secp256k1.utils.hmacSha256Sync = (key: Uint8Array, ...messages: Uint8Array[]) => {
+          const hmac = crypto.createHmac('sha256', Buffer.from(key));
+          for (const msg of messages) hmac.update(Buffer.from(msg));
+          return new Uint8Array(hmac.digest());
+        };
+        return;
+      }
+    }
   } catch (e) {
-    console.warn('Failed to configure secp256k1 HMAC:', e);
+    console.warn('Failed to configure secp256k1 HMAC via crypto:', e);
   }
-}
+  secp256k1.utils.hmacSha256Sync = (key: Uint8Array, ...messages: Uint8Array[]) => {
+    return hmac(sha256, key, concatBytes(...messages));
+  };
+};
+installHmacSync();
 // Browser: deriveSignerKeySync uses noble hashes (no async required)
 
 // Global key cache (signerId → private/public key)
@@ -30,7 +47,9 @@ if (!isBrowser && typeof require !== 'undefined') {
 const signerKeys = new Map<string, Uint8Array>();
 const signerPublicKeys = new Map<string, Uint8Array>();
 const signerAddresses = new Map<string, string>();
+const externalPublicKeys = new Map<string, Uint8Array>();
 let runtimeSeedBytes: Uint8Array | null = null;
+let runtimeSeedLocked = false;
 const textEncoder = new TextEncoder();
 
 const toSeedBytes = (seed: Uint8Array | string): Uint8Array =>
@@ -51,25 +70,46 @@ export function deriveSignerKeySync(masterSeed: Uint8Array, signerId: string): U
 }
 
 export function setRuntimeSeed(seed: Uint8Array | string | null): void {
+  if (runtimeSeedLocked) {
+    console.warn('⚠️ Runtime seed update ignored (crypto lock enabled)');
+    return;
+  }
   runtimeSeedBytes = seed ? toSeedBytes(seed) : null;
   signerKeys.clear();
   signerPublicKeys.clear();
   signerAddresses.clear();
+  externalPublicKeys.clear();
+}
+
+export function lockRuntimeSeedUpdates(locked: boolean): void {
+  runtimeSeedLocked = locked;
 }
 
 const getOrDeriveKey = (signerId: string): Uint8Array | null => {
+  console.log(`🔍 getOrDeriveKey: signerId=${signerId.slice(-4)}`);
   const cached = signerKeys.get(signerId);
-  if (cached) return cached;
-  if (!runtimeSeedBytes) return null;
+  if (cached) {
+    console.log(`✅ Found cached key for ${signerId.slice(-4)}`);
+    return cached;
+  }
+  console.log(`⚠️ No cached key for ${signerId.slice(-4)}, trying to derive...`);
+  if (!runtimeSeedBytes) {
+    console.log(`❌ Cannot derive - runtimeSeedBytes is null`);
+    return null;
+  }
+  console.log(`✅ Deriving key from runtimeSeedBytes (${runtimeSeedBytes.length} bytes)`);
   const derived = deriveSignerKeySync(runtimeSeedBytes, signerId);
   registerSignerKey(signerId, derived);
+  console.log(`✅ Derived and registered key for ${signerId.slice(-4)}`);
   return derived;
 };
 
 export function getSignerPublicKey(signerId: string): Uint8Array | null {
+  const external = externalPublicKeys.get(signerId);
+  if (external) return external;
   const cached = signerPublicKeys.get(signerId);
   if (cached) return cached;
-  const privateKey = getOrDeriveKey(signerId);
+  const privateKey = signerKeys.get(signerId) || getOrDeriveKey(signerId);
   if (!privateKey) return null;
   const publicKey = secp256k1.getPublicKey(privateKey);
   signerPublicKeys.set(signerId, publicKey);
@@ -126,6 +166,22 @@ export function registerSignerKey(signerId: string, privateKey: Uint8Array): voi
   signerAddresses.set(signerId, privateKeyToAddress(privateKey));
 }
 
+export function registerSignerPublicKey(signerId: string, publicKey: Uint8Array | string): void {
+  console.log(`📝 registerSignerPublicKey: signerId=${signerId.slice(-4)}, publicKey type=${typeof publicKey}`);
+  if (signerKeys.has(signerId)) {
+    console.log(`⚠️ signerId ${signerId.slice(-4)} already has private key, skipping public key registration`);
+    return;
+  }
+  const bytes =
+    typeof publicKey === 'string'
+      ? Uint8Array.from(Buffer.from(publicKey.replace(/^0x/, ''), 'hex'))
+      : publicKey;
+  console.log(`📝 Public key bytes: ${bytes.length}`);
+  externalPublicKeys.set(signerId, bytes);
+  signerPublicKeys.delete(signerId);
+  console.log(`✅ Registered external public key for ${signerId.slice(-4)}, total: ${externalPublicKeys.size}`);
+}
+
 /**
  * Register test keys for scenarios (deterministic test keys from signerId)
  * Used in CLI scenarios when BrainVault not available
@@ -150,6 +206,7 @@ export async function registerTestKeys(signerIds: string[]): Promise<void> {
 export function clearSignerKeys(): void {
   signerKeys.clear();
   signerPublicKeys.clear();
+  externalPublicKeys.clear();
 }
 
 /**
@@ -161,6 +218,11 @@ export function signAccountFrame(
   frameHash: string,
   _privateData?: string // Deprecated, kept for backwards compat
 ): string {
+  console.log(`🔑 signAccountFrame CALLED: signerId=${signerId.slice(-4)}, frameHash=${frameHash.slice(0, 10)}`);
+  console.log(`🔑 Available signerKeys:`, Array.from(signerKeys.keys()).map(k => k.slice(-4)));
+  console.log(`🔑 Available signerPublicKeys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
+  console.log(`🔑 runtimeSeedBytes available: ${!!runtimeSeedBytes} (${runtimeSeedBytes?.length || 0} bytes)`);
+
   const messageHash = keccak256(Buffer.from(frameHash.replace('0x', ''), 'hex'));
   const signature = signDigest(signerId, messageHash);
   console.log(`✍️ Signed frame ${frameHash.slice(0, 10)} by ${signerId.slice(-4)}: ${signature.slice(0, 20)}...`);
@@ -168,6 +230,7 @@ export function signAccountFrame(
 }
 
 export function signDigest(signerId: string, digestHex: string): string {
+  installHmacSync();
   const privateKey = getOrDeriveKey(signerId);
   if (!privateKey) {
     throw new Error(`SIGNER_KEY_MISSING: No key or runtime seed for signer ${signerId}`);
@@ -189,11 +252,15 @@ export function verifyAccountSignature(
   _privateData?: string // Deprecated
 ): boolean {
   // Real signature verification
+  console.log(`🔍 VERIFY: signerId=${signerId.slice(-4)}, frameHash=${frameHash.slice(0, 10)}, sig=${signature.slice(0, 20)}...`);
   const publicKey = getSignerPublicKey(signerId);
   if (!publicKey) {
-    console.warn(`⚠️ Cannot verify - no key for ${signerId.slice(-4)}`);
+    console.warn(`⚠️ Cannot verify - no public key for signerId=${signerId.slice(-4)}`);
+    console.warn(`⚠️ Available keys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
+    console.warn(`⚠️ Available external keys:`, Array.from(externalPublicKeys.keys()).map(k => k.slice(-4)));
     return false;
   }
+  console.log(`✅ Found public key for ${signerId.slice(-4)} (${publicKey.length} bytes)`);
 
   try {
     // Extract compact signature (64 bytes) from hex

@@ -97,6 +97,16 @@ export type BrowserVMInstance = {
   endJurisdictionBlock?: () => void;
 };
 
+export type P2PConfig = {
+  relayUrls?: string[];
+  seedRuntimeIds?: string[];
+  runtimeId?: string;
+  signerId?: string;
+  advertiseEntityIds?: string[];
+  isHub?: boolean;
+  profileName?: string;
+};
+
 /**
  * Entity display info returned by getEntityDisplayInfo
  */
@@ -225,6 +235,9 @@ export interface XLNModule {
 
   // Runtime operations
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>;
+  startP2P: (env: Env, config?: P2PConfig) => unknown;
+  stopP2P: () => void;
+  getP2P: () => unknown;
   // runDemo: REMOVED - use scenarios.ahb(env) or scenarios.grid(env) instead
 
   // Environment creation

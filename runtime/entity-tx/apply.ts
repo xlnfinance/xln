@@ -349,12 +349,22 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // CRITICAL: Notify counterparty to create mirror account
       // Without this, Hub won't know about Alice-Hub account when j-events arrive!
       // Look up actual signer from env.eReplicas (key format: entityId:signerId)
-      let counterpartySigner = 's1'; // Fallback
+      let counterpartySigner = 's1'; // Fallback if we cannot resolve signer
       for (const [replicaKey] of env.eReplicas.entries()) {
         if (replicaKey.startsWith(targetEntityId + ':')) {
           counterpartySigner = replicaKey.split(':')[1] || 's1';
           break;
         }
+      }
+      if (counterpartySigner === 's1' && env.gossip?.getProfiles) {
+        const profile = env.gossip.getProfiles().find(p => p.entityId === targetEntityId);
+        const board = profile?.metadata?.board;
+        if (board && board.length > 0) {
+          counterpartySigner = board[0];
+        }
+      }
+      if (counterpartySigner === 's1') {
+        console.warn(`⚠️ Using fallback signerId for ${formatEntityId(targetEntityId)}; gossip profile missing board?`);
       }
       outputs.push({
         entityId: targetEntityId,
@@ -631,10 +641,10 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       // Determine canonical side - credit limit I'm setting for my COUNTERPARTY to use
-      // If I'm LEFT and extend credit → set rightCreditLimit (credit available TO right/counterparty)
-      // If I'm RIGHT and extend credit → set leftCreditLimit (credit available TO left/counterparty)
+      // leftCreditLimit = credit extended by LEFT entity to RIGHT entity
+      // rightCreditLimit = credit extended by RIGHT entity to LEFT entity
       const isLeftEntity = entityState.entityId < counterpartyEntityId;
-      const side = isLeftEntity ? 'right' : 'left';
+      const side = isLeftEntity ? 'left' : 'right';
 
       // Create set_credit_limit account transaction
       const accountTx: AccountTx = {

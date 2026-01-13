@@ -35,6 +35,7 @@ export type Profile = {
     // 3D visualization position (for scenarios)
     position?: { x: number; y: number; z: number };
     // Additional fields
+    entityPublicKey?: string; // hex public key for signature verification
     [key: string]: unknown;
   };
   // Account capacities for routing
@@ -73,7 +74,16 @@ export function createGossipLayer(): GossipLayer {
     const newTimestamp = normalizedProfile.metadata?.lastUpdated || 0;
     const existingTimestamp = existing?.metadata?.lastUpdated || 0;
 
-    if (!existing || newTimestamp > existingTimestamp) {
+    const shouldUpdate =
+      !existing ||
+      newTimestamp > existingTimestamp ||
+      (newTimestamp === existingTimestamp && (
+        (!existing.runtimeId && !!normalizedProfile.runtimeId) ||
+        (existing.runtimeId !== normalizedProfile.runtimeId) ||
+        (!!normalizedProfile.metadata?.entityPublicKey && existing.metadata?.entityPublicKey !== normalizedProfile.metadata?.entityPublicKey)
+      ));
+
+    if (shouldUpdate) {
       profiles.set(profile.entityId, normalizedProfile);
       console.log(`📡 Gossip updated for ${profile.entityId} (timestamp: ${newTimestamp})`);
     } else {
@@ -88,7 +98,7 @@ export function createGossipLayer(): GossipLayer {
   const getProfileBundle = (entityId: string): { profile?: Profile; peers: Profile[] } => {
     const profile = profiles.get(entityId);
     if (!profile) {
-      return { profile: undefined, peers: [] };
+      return { peers: [] };
     }
     const peerIds = profile.publicAccounts || profile.hubs || [];
     const peers = peerIds.map(id => profiles.get(id)).filter(Boolean) as Profile[];
@@ -197,6 +207,7 @@ export async function loadPersistedProfiles(db: any, gossip: { announce: (p: Pro
             website: profile.website,
             lastUpdated: profile.lastUpdated,
             hankoSignature: profile.hankoSignature,
+            entityPublicKey: profile.entityPublicKey,
           },
         });
         profileCount++;

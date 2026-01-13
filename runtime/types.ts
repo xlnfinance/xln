@@ -1196,6 +1196,8 @@ export interface Env {
   // E→E message queue (always spans ticks - no same-tick cascade)
   pendingOutputs?: EntityInput[]; // Outputs queued for next tick
   skipPendingForward?: boolean;   // Temp flag to defer forwarding to next frame
+  networkInbox?: EntityInput[];   // Inbound network messages queued for next tick
+  pendingNetworkOutputs?: EntityInput[]; // Outputs waiting for runtimeId gossip before routing
 
   // Frame-scoped structured logs (captured into snapshot, then reset)
   frameLogs: FrameLogEntry[];

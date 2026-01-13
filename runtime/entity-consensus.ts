@@ -8,7 +8,7 @@ import { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
-import { addMessages, cloneEntityReplica, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from './state-helpers';
+import { addMessages, cloneEntityReplica, canonicalAccountKey, getAccountPerspective, emitScopedEvents, resolveEntityProposerId } from './state-helpers';
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
 
@@ -923,15 +923,11 @@ export const applyEntityFrame = async (
           // Get the proposer of the target entity from env
           // IMPORTANT: AccountInput sent only to PROPOSER (bilateral consensus between entity proposers)
           // Multi-validator entities share account state via entity-level consensus
-          let targetProposerId = 'alice'; // Default fallback
-          const targetReplicaKeys = Array.from(env.eReplicas.keys()).filter(key => key.startsWith(proposal.accountInput!.toEntityId + ':'));
-          if (targetReplicaKeys.length > 0) {
-            const firstTargetReplica = env.eReplicas.get(targetReplicaKeys[0]!);
-            const firstValidator = firstTargetReplica?.state.config.validators[0];
-            if (firstValidator) {
-              targetProposerId = firstValidator;
-            }
-          }
+          const targetProposerId = resolveEntityProposerId(
+            env,
+            proposal.accountInput!.toEntityId,
+            'accountInput.propose'
+          );
 
           // Convert AccountInput to EntityInput for routing
           const outputEntityInput: EntityInput = {

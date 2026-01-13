@@ -1874,8 +1874,8 @@ let vrHammer: VRHammer | null = null;
     camera = new THREE.PerspectiveCamera(
       75,
       containerWidth / containerHeight,
-      0.1,
-      20000 // Far plane: large enough to see full grid at any zoom
+      0.01, // Near plane: zoom extremely close
+      100000 // Far plane: see objects at extreme distances
     );
     camera.position.set(0.41, 572.94, 38.32); // AHB top-down view
     // NOTE: controls.target set later after OrbitControls is created
@@ -1907,9 +1907,9 @@ let vrHammer: VRHammer | null = null;
       // Default is false which makes panning move along camera's local axes
       controls.screenSpacePanning = true;
 
-      // Allow zooming close to entities without clipping
-      controls.minDistance = 5; // Don't allow getting too close
-      controls.maxDistance = 5000; // Allow zooming out far
+      // FREE CAMERA - no zoom limits (game-like movement)
+      controls.minDistance = 0; // No minimum - zoom into anything
+      controls.maxDistance = Infinity; // No maximum - zoom out as far as you want
 
       // CRITICAL: Disable keyboard events so arrow keys work for TimeMachine
       // OrbitControls uses arrow keys for panning by default
@@ -2417,6 +2417,42 @@ let vrHammer: VRHammer | null = null;
     ));
   }
 
+  /**
+   * Auto-fit camera to show all entities (fixes zooming issues for spread-out scenarios)
+   */
+  function fitCameraToEntities() {
+    if (!camera || !controls || entities.length === 0) return;
+
+    // Calculate bounding box of all entities
+    const box = new THREE.Box3();
+    entities.forEach(entity => {
+      box.expandByPoint(entity.position);
+    });
+
+    // Get center and size
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+
+    // Calculate max dimension
+    const maxDim = Math.max(size.x, size.y, size.z);
+
+    // Camera distance = 1.5x max dimension (gives nice view with padding)
+    const distance = Math.max(maxDim * 1.5, 50); // Min 50 units away
+
+    // Position camera above and behind center
+    camera.position.set(
+      center.x,
+      center.y + distance * 0.7,  // Above
+      center.z + distance * 0.7   // Behind
+    );
+
+    // Look at center
+    controls.target.copy(center);
+    controls.update();
+  }
+
   function updateNetworkData() {
     if (!scene) return;
 
@@ -2658,6 +2694,9 @@ let vrHammer: VRHammer | null = null;
     if (!allEntitiesHaveSavedPositions) {
       saveEntityPositions();
     }
+
+    // Auto-fit camera disabled - user controls camera position
+    // fitCameraToEntities() can be called manually if needed
 
     // CRITICAL: Clear ALL connections and rebuild from current frame's accounts
     // This ensures time-travel shows correct account bars for each frame
@@ -4242,19 +4281,28 @@ let vrHammer: VRHammer | null = null;
       // Get reserves using helper that handles Map/Object serialization
       const reserveAmount = getReserveValue(replica?.state?.reserves, String(selectedTokenId));
 
-      // UPDATE ENTITY COLOR: Grey if 0 reserves, BLUE otherwise (not green - easier to distinguish)
-      const material = entity.mesh.material as THREE.MeshLambertMaterial;
-      if (material && !entity.mesh.userData['isFed']) { // Don't change Fed color
-        if (reserveAmount <= 0n) {
-          // Grey for zero reserves
-          material.color.setHex(0x666666);
-          material.emissive.setHex(0x333333);
-          material.emissiveIntensity = 0.1;
-        } else {
-          // Blue for entities with reserves (distinct from green J-Machine)
-          material.color.setHex(0x0077cc);  // Blue
-          material.emissive.setHex(0x003366);  // Dark blue glow
-          material.emissiveIntensity = entity.isHub ? 1.5 : 0.3;
+      // UPDATE ENTITY COLOR only when time changes (not every frame!)
+      if (forceRecreateLabels) {
+        const material = entity.mesh.material as THREE.MeshLambertMaterial;
+        if (material && !entity.mesh.userData['isFed']) { // Don't change Fed color
+          // Force solid, no transparency
+          material.transparent = false;
+          material.opacity = 1.0;
+          material.depthWrite = true;
+
+          if (reserveAmount <= 0n) {
+            // Grey for zero reserves
+            material.color.setHex(0x666666);
+            material.emissive.setHex(0x333333);
+            material.emissiveIntensity = 0.1;
+          } else {
+            // GREEN - match collateral color EXACTLY (same as AccountBarRenderer.ts line 499)
+            material.color.setHex(0x5cb85c);  // Collateral green
+            // Emissive = color * 0.1 to match bar material
+            const baseColor = new THREE.Color(0x5cb85c);
+            material.emissive.copy(baseColor.multiplyScalar(0.1));
+            material.emissiveIntensity = entity.isHub ? 0.2 : 0.1;  // Subtle glow
+          }
         }
       }
     });
