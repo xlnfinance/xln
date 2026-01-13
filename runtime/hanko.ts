@@ -113,9 +113,18 @@ export async function createRealSignature(hash: Buffer, privateKey: Buffer): Pro
  */
 export const createDirectHashSignature = async (hash: Buffer, privateKey: Buffer): Promise<Buffer> => {
   try {
+    // Ensure hash is exactly 32 bytes
+    if (hash.length !== 32) {
+      throw new Error(`Invalid hash length: ${hash.length} bytes (expected 32)`);
+    }
 
     // Sign the raw hash directly (no message prefix)
     const hashHex = ethers.hexlify(hash);
+
+    // Verify hex is correct length (0x + 64 chars = 32 bytes)
+    if (hashHex.length !== 66) {
+      throw new Error(`Invalid hash hex length: ${hashHex.length} (expected 66 with 0x prefix)`);
+    }
 
     // For direct hash signing, we need to use the signing key directly
     const signingKey = new ethers.SigningKey(ethers.hexlify(privateKey));
@@ -335,7 +344,7 @@ export const buildRealHanko = async (
       entityIndexes: number[];
       weights: number[];
       threshold: number;
-      expectedQuorumHash: Buffer;
+      // NO expectedQuorumHash - EP.sol reconstructs from recovered signers
     }[];
   },
 ): Promise<HankoBytes> => {
@@ -368,13 +377,13 @@ export const buildRealHanko = async (
   // Pack signatures
   const packedSignatures = packRealSignatures(signatures);
 
-  // Build claims
+  // Build claims (match EP.sol struct - 4 fields only)
   const claims: HankoClaim[] = config.claims.map(claim => ({
     entityId: claim.entityId,
     entityIndexes: claim.entityIndexes,
     weights: claim.weights,
     threshold: claim.threshold,
-    expectedQuorumHash: claim.expectedQuorumHash,
+    // NO expectedQuorumHash field
   }));
 
   const hanko: HankoBytes = {
@@ -553,7 +562,6 @@ export const testFullCycle = async (): Promise<{ hanko: HankoBytes; abiEncoded: 
         entityIndexes: [0, 1], // Both signatures
         weights: [1, 1],
         threshold: 2,
-        expectedQuorumHash: randomBytes(32),
       },
     ],
   });
@@ -568,9 +576,9 @@ export const testFullCycle = async (): Promise<{ hanko: HankoBytes; abiEncoded: 
     console.log(`   Signature ${i + 1}: ${verified ? '✅' : '❌'} ${expectedAddr.slice(0, 10)}...`);
   }
 
-  // Create ABI-encoded data for Solidity (flashloan governance format)
+  // Create ABI-encoded data for Solidity (match EP.sol struct - 4 fields only)
   const abiEncoded = ethers.AbiCoder.defaultAbiCoder().encode(
-    ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256,bytes32)[])'],
+    ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
     [
       [
         hanko.placeholders.map(p => '0x' + Buffer.from(p).toString('hex')),
@@ -580,7 +588,6 @@ export const testFullCycle = async (): Promise<{ hanko: HankoBytes; abiEncoded: 
           c.entityIndexes,
           c.weights,
           c.threshold,
-          '0x' + Buffer.from(c.expectedQuorumHash).toString('hex'),
         ]),
       ],
     ],
@@ -609,7 +616,7 @@ export const testGasOptimization = async (): Promise<void> => {
 
   // Encode optimized data (yesEntities + noEntities + claims)
   const optimizedEncoded = ethers.AbiCoder.defaultAbiCoder().encode(
-    ['bytes32[]', 'bytes32[]', 'tuple(bytes32,uint256[],uint256[],uint256,bytes32)[]'],
+    ['bytes32[]', 'bytes32[]', 'tuple(bytes32,uint256[],uint256[],uint256)[]'],
     [
       recovered.yesEntities.map(entity => '0x' + Buffer.from(entity).toString('hex')),
       recovered.noEntities.map(entity => '0x' + Buffer.from(entity).toString('hex')),
@@ -618,7 +625,6 @@ export const testGasOptimization = async (): Promise<void> => {
         c.entityIndexes,
         c.weights,
         c.threshold,
-        '0x' + Buffer.from(c.expectedQuorumHash).toString('hex'),
       ]),
     ],
   );

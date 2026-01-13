@@ -369,8 +369,8 @@ export async function proposeAccountFrame(
   }
   console.log(`✅ Frame size: ${frameSize} bytes (${(frameSize / MAX_FRAME_SIZE_BYTES * 100).toFixed(2)}% of 1MB limit)`);
 
-  // Generate signature - CRITICAL: Use signerId, not entityId
-  // For single-signer entities, find signerId from entity config
+  // Generate HANKO signature - CRITICAL: Use signerId, not entityId
+  // For single-signer entities, build hanko with single EOA signature
   const signingEntityId = accountMachine.proofHeader.fromEntity;
   const signingReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === signingEntityId);
   if (!signingReplica) {
@@ -380,8 +380,19 @@ export async function proposeAccountFrame(
   if (!signingSignerId) {
     return { success: false, error: `Entity ${signingEntityId.slice(-4)} has no validators`, events, accountInput: null };
   }
-  console.log(`🔐 SIGN: entityId=${signingEntityId.slice(-4)} → signerId=${signingSignerId.slice(-4)}`);
-  const signature = signAccountFrame(signingSignerId, newFrame.stateHash);
+
+  console.log(`🔐 HANKO-SIGN: entityId=${signingEntityId.slice(-4)} → signerId=${signingSignerId.slice(-4)}`);
+
+  // Build hanko for account frame
+  const { signHashesAsSingleEntity } = await import('./hanko-signing');
+  const hankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [newFrame.stateHash]);
+  const hanko = hankos[0];
+  if (!hanko) {
+    return { success: false, error: 'Failed to build hanko', events, accountInput: null };
+  }
+
+  // Store hanko as current account proof (for disputes)
+  accountMachine.currentAccountProofHanko = hanko;
 
   // Set pending state (no longer storing clone - re-execution on commit)
   accountMachine.pendingFrame = newFrame;
@@ -398,7 +409,8 @@ export async function proposeAccountFrame(
     toEntityId: accountMachine.proofHeader.toEntity,
     height: newFrame.height,
     newAccountFrame: newFrame,
-    newSignatures: [signature],
+    newHanko: hanko,  // NEW: Hanko instead of single signature
+    newSignatures: [hanko], // LEGACY fallback (will be removed)
     counter: skipCounterIncrement ? accountMachine.proofHeader.cooperativeNonce : ++accountMachine.proofHeader.cooperativeNonce,
   };
 
@@ -478,19 +490,31 @@ export async function handleAccountInput(
     console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}, counter=${input.counter}`);
 
     const frameHash = accountMachine.pendingFrame.stateHash;
-    const expectedSignerEntityId = accountMachine.proofHeader.toEntity;
 
-    // CRITICAL: Find signerId for ACK verification
-    const counterpartyReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === expectedSignerEntityId);
-    const counterpartySignerId = counterpartyReplica?.state.config.validators[0];
-    if (!counterpartySignerId) {
-      console.warn(`⚠️ Cannot verify ACK - no signerId for entity ${expectedSignerEntityId.slice(-4)}`);
-      // Continue without verification for now (legacy compatibility)
+    // HANKO ACK VERIFICATION: Verify hanko instead of single signature
+    const ackHanko = input.prevHanko || (input.prevSignatures && input.prevSignatures[0]);
+    if (!ackHanko) {
+      return { success: false, error: 'Missing ACK hanko', events };
     }
-    const signerToVerify = counterpartySignerId || expectedSignerEntityId;
 
-    const signature = input.prevSignatures[0];
-    if (input.prevSignatures.length > 0 && signature && verifyAccountSignature(signerToVerify, frameHash, signature)) {
+    console.log(`🔐 HANKO-ACK-VERIFY: Verifying ACK hanko for our pending frame`);
+
+    const { verifyHankoForHash } = await import('./hanko-signing');
+    const expectedAckEntity = accountMachine.proofHeader.toEntity;
+    const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(ackHanko, frameHash, expectedAckEntity);
+
+    if (!valid) {
+      return { success: false, error: 'Invalid ACK hanko signature', events };
+    }
+
+    if (!recoveredEntityId || recoveredEntityId.toLowerCase() !== expectedAckEntity.toLowerCase()) {
+      return { success: false, error: `ACK hanko entityId mismatch: got ${recoveredEntityId?.slice(-4)}, expected ${expectedAckEntity.slice(-4)}`, events };
+    }
+
+    console.log(`✅ HANKO-ACK-VERIFIED: ACK from ${recoveredEntityId.slice(-4)}`);
+
+    // ACK is valid - proceed
+    if (true) {
       // DoS FIX: Update counter AFTER signature verified (prevents counter desync attacks)
       if (input.counter !== undefined) {
         accountMachine.ackedTransitions = input.counter;
@@ -714,32 +738,26 @@ export async function handleAccountInput(
 
     // SECURITY: Verify signatures (REQUIRED for all frames)
     if (HEAVY_LOGS) console.log(`🔍 SIG-CHECK: hasSignatures=${!!(input.newSignatures && input.newSignatures.length > 0)}`);
-    if (!input.newSignatures || input.newSignatures.length === 0) {
-      return { success: false, error: 'SECURITY: Frame must have signatures', events };
+    // HANKO VERIFICATION: Use hanko instead of single signature
+    const hankoToVerify = input.newHanko || (input.newSignatures && input.newSignatures[0]); // Try hanko first, fallback to legacy
+    if (!hankoToVerify) {
+      return { success: false, error: 'SECURITY: Frame must have hanko signature', events };
     }
 
-    const signature = input.newSignatures[0];
-    if (!signature) {
-      return { success: false, error: 'Missing signature in newSignatures array', events };
+    console.log(`🔐 HANKO-VERIFY: Verifying hanko for frame ${receivedFrame.height} from ${input.fromEntityId.slice(-4)}`);
+
+    // Verify hanko - CRITICAL: Must verify fromEntityId is the signer
+    const { verifyHankoForHash } = await import('./hanko-signing');
+    const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(hankoToVerify, receivedFrame.stateHash, input.fromEntityId);
+
+    if (!valid || !recoveredEntityId) {
+      return { success: false, error: `Invalid hanko signature from ${input.fromEntityId.slice(-4)}`, events };
     }
 
-    // CRITICAL: For single-signer entities, find signerId from entity config
-    // verifyAccountSignature needs signerId (like 's1'), not entityId
-    const senderReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === input.fromEntityId);
-    if (!senderReplica) {
-      return { success: false, error: `Cannot find replica for sender ${input.fromEntityId.slice(-4)}`, events };
-    }
-    const senderSignerId = senderReplica.state.config.validators[0]; // Single-signer: use first validator
-    if (!senderSignerId) {
-      return { success: false, error: `Sender ${input.fromEntityId.slice(-4)} has no validators`, events };
-    }
-    console.log(`🔐 SIG-VERIFY: entityId=${input.fromEntityId.slice(-4)} → signerId=${senderSignerId.slice(-4)}`);
+    console.log(`✅ HANKO-VERIFIED: Frame from ${recoveredEntityId.slice(-4)}`);
 
-    const isValid = verifyAccountSignature(senderSignerId, receivedFrame.stateHash, signature);
-    if (!isValid) {
-      return { success: false, error: 'Invalid frame signature', events };
-    }
-    console.log(`✅ SIG-VERIFIED`);
+    // Store counterparty's hanko for dispute proof
+    accountMachine.counterpartyAccountProofHanko = hankoToVerify;
 
     // Get entity's synced J-height for deterministic HTLC validation
     const ourEntityId = accountMachine.proofHeader.fromEntity;
@@ -948,15 +966,23 @@ export async function handleAccountInput(
     events.push(...processEvents);
     events.push(`🤝 Accepted frame ${receivedFrame.height} from Entity ${input.fromEntityId.slice(-4)}`);
 
-    // Send confirmation (ACK) - CRITICAL: Use signerId, not entityId
+    // Send confirmation (ACK) using HANKO
     const ackEntityId = accountMachine.proofHeader.fromEntity;
     const ackReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ackEntityId);
     const ackSignerId = ackReplica?.state.config.validators[0];
     if (!ackSignerId) {
       return { success: false, error: `Cannot find signerId for ACK from ${ackEntityId.slice(-4)}`, events };
     }
-    console.log(`🔐 ACK-SIGN: entityId=${ackEntityId.slice(-4)} → signerId=${ackSignerId.slice(-4)}`);
-    const confirmationSig = signAccountFrame(ackSignerId, receivedFrame.stateHash);
+
+    console.log(`🔐 HANKO-ACK: entityId=${ackEntityId.slice(-4)} → signerId=${ackSignerId.slice(-4)}`);
+
+    // Build ACK hanko
+    const { signHashesAsSingleEntity } = await import('./hanko-signing');
+    const ackHankos = await signHashesAsSingleEntity(env, ackEntityId, ackSignerId, [receivedFrame.stateHash]);
+    const confirmationHanko = ackHankos[0];
+    if (!confirmationHanko) {
+      return { success: false, error: 'Failed to build ACK hanko', events };
+    }
 
     console.log(`📤 ACK-SEND: Preparing ACK for frame ${receivedFrame.height} from ${accountMachine.proofHeader.fromEntity.slice(-4)} to ${input.fromEntityId.slice(-4)}`);
 
@@ -968,7 +994,8 @@ export async function handleAccountInput(
       fromEntityId: accountMachine.proofHeader.fromEntity,
       toEntityId: input.fromEntityId,
       height: receivedFrame.height,
-      prevSignatures: [confirmationSig],
+      prevHanko: confirmationHanko,  // NEW: Hanko ACK
+      prevSignatures: [confirmationHanko], // LEGACY fallback
       counter: 0, // Will be set below after batching decision
     };
 
@@ -985,7 +1012,10 @@ export async function handleAccountInput(
         if (proposeResult.accountInput.newAccountFrame) {
           response.newAccountFrame = proposeResult.accountInput.newAccountFrame;
         }
-        if (proposeResult.accountInput.newSignatures) {
+        if (proposeResult.accountInput.newHanko) {
+          response.newHanko = proposeResult.accountInput.newHanko;
+          response.newSignatures = [proposeResult.accountInput.newHanko]; // LEGACY fallback
+        } else if (proposeResult.accountInput.newSignatures) {
           response.newSignatures = proposeResult.accountInput.newSignatures;
         }
 
