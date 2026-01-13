@@ -1198,6 +1198,7 @@ export interface Env {
   skipPendingForward?: boolean;   // Temp flag to defer forwarding to next frame
   networkInbox?: EntityInput[];   // Inbound network messages queued for next tick
   pendingNetworkOutputs?: EntityInput[]; // Outputs waiting for runtimeId gossip before routing
+  lockRuntimeSeed?: boolean;      // Prevent runtime seed updates during scenarios
 
   // Frame-scoped structured logs (captured into snapshot, then reset)
   frameLogs: FrameLogEntry[];

@@ -1,6 +1,6 @@
 import { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
-import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
+import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents, resolveEntityProposerId } from '../../state-helpers';
 import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
 import { HTLC } from '../../constants';
 import { formatEntityId, HEAVY_LOGS } from '../../utils';
@@ -602,17 +602,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         // Get target proposer
         // IMPORTANT: Send only to PROPOSER - bilateral consensus between entity proposers
         // Multi-validator entities sync account state via entity-level consensus (not bilateral broadcast)
-        let targetProposerId = 'alice';
-        const targetReplicaKeys = Array.from(env.eReplicas.keys()).filter(key =>
-          key.startsWith(result.response!.toEntityId + ':')
+        const targetProposerId = resolveEntityProposerId(
+          env,
+          result.response!.toEntityId,
+          'accountInput.response'
         );
-
-        if (targetReplicaKeys.length > 0) {
-          const firstTargetReplica = env.eReplicas.get(targetReplicaKeys[0]!);
-          if (firstTargetReplica?.state.config.validators[0]) {
-            targetProposerId = firstTargetReplica.state.config.validators[0];
-          }
-        }
 
         outputs.push({
           entityId: result.response.toEntityId,

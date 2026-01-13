@@ -23,7 +23,7 @@ export interface ApplyEntityTxResult {
 }
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
-import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
+import { cloneEntityState, addMessage, canonicalAccountKey, resolveEntityProposerId } from '../state-helpers';
 import { submitSettle } from '../evm';
 import { logError } from '../logger';
 
@@ -348,24 +348,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // CRITICAL: Notify counterparty to create mirror account
       // Without this, Hub won't know about Alice-Hub account when j-events arrive!
-      // Look up actual signer from env.eReplicas (key format: entityId:signerId)
-      let counterpartySigner = 's1'; // Fallback if we cannot resolve signer
-      for (const [replicaKey] of env.eReplicas.entries()) {
-        if (replicaKey.startsWith(targetEntityId + ':')) {
-          counterpartySigner = replicaKey.split(':')[1] || 's1';
-          break;
-        }
-      }
-      if (counterpartySigner === 's1' && env.gossip?.getProfiles) {
-        const profile = env.gossip.getProfiles().find(p => p.entityId === targetEntityId);
-        const board = profile?.metadata?.board;
-        if (board && board.length > 0) {
-          counterpartySigner = board[0];
-        }
-      }
-      if (counterpartySigner === 's1') {
-        console.warn(`⚠️ Using fallback signerId for ${formatEntityId(targetEntityId)}; gossip profile missing board?`);
-      }
+      const counterpartySigner = resolveEntityProposerId(env, targetEntityId, 'openAccount');
       outputs.push({
         entityId: targetEntityId,
         signerId: counterpartySigner,
@@ -641,10 +624,10 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       // Determine canonical side - credit limit I'm setting for my COUNTERPARTY to use
-      // leftCreditLimit = credit extended by LEFT entity to RIGHT entity
-      // rightCreditLimit = credit extended by RIGHT entity to LEFT entity
-      const isLeftEntity = entityState.entityId < counterpartyEntityId;
-      const side = isLeftEntity ? 'left' : 'right';
+      // leftCreditLimit = credit extended by RIGHT entity to LEFT entity
+      // rightCreditLimit = credit extended by LEFT entity to RIGHT entity
+      const counterpartyIsLeft = counterpartyEntityId < entityState.entityId;
+      const side = counterpartyIsLeft ? 'left' : 'right';
 
       // Create set_credit_limit account transaction
       const accountTx: AccountTx = {
