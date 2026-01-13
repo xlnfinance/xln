@@ -104,6 +104,11 @@ const getOrDeriveKey = (signerId: string): Uint8Array | null => {
   return derived;
 };
 
+// Export for hanko-signing.ts
+export function getSignerPrivateKey(signerId: string): Uint8Array | null {
+  return getOrDeriveKey(signerId);
+}
+
 export function getSignerPublicKey(signerId: string): Uint8Array | null {
   const external = externalPublicKeys.get(signerId);
   if (external) return external;

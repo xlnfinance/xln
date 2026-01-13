@@ -749,7 +749,11 @@ export interface AccountMachine {
     leftDisputeDelay: number;   // uint16 - value * 10 = blocks
     rightDisputeDelay: number;  // uint16 - value * 10 = blocks
   };
-  hankoSignature?: string; // Last signed proof by counterparty
+  // HANKO SYSTEM: Bilateral hanko storage for disputes
+  currentAccountProofHanko?: HankoString; // Most recent account proof hanko (for disputes)
+  counterpartyAccountProofHanko?: HankoString; // Counterparty's most recent hanko (for disputes)
+  hankoSignature?: string; // LEGACY - will be replaced by currentAccountProofHanko
+
   // Historical frame log - grows until manually pruned by entity
   frameHistory: AccountFrame[]; // All confirmed bilateral frames in chronological order
 
@@ -797,9 +801,16 @@ export interface AccountInput {
 
   // Frame-level consensus (matches Channel.ts FlushMessage structure)
   height?: number;                   // Which frame we're ACKing or referencing (renamed from frameId)
-  prevSignatures?: string[];         // ACK for their frame (like pendingSignatures in Channel.ts)
+
+  // HANKO SYSTEM:
+  prevHanko?: HankoString;           // ACK hanko for their frame
   newAccountFrame?: AccountFrame;    // Our new proposed frame (like block in Channel.ts)
-  newSignatures?: string[];          // Signatures on new frame (like newSignatures in Channel.ts)
+  newHanko?: HankoString;            // Hanko on newAccountFrame
+
+  // LEGACY (will be removed):
+  prevSignatures?: string[];         // ACK for their frame (LEGACY)
+  newSignatures?: string[];          // Signatures on new frame (LEGACY)
+
   counter?: number;                  // Message counter for replay protection (like Channel.ts line 620)
 }
 
@@ -1106,7 +1117,14 @@ export interface ProposedEntityFrame {
   txs: EntityTx[];
   hash: string;
   newState: EntityState;
-  signatures: Map<string, string>; // signerId -> signature
+
+  // NEW HANKO SYSTEM:
+  hashes?: string[];         // Sorted lexicographically - all objects signed in this frame
+  signatures?: string[][];   // [validator_i][hash_j] - partial sigs during collection
+  hankos?: HankoString[];    // After merge: one HankoBytes per hash (hex-encoded ABI)
+
+  // LEGACY (will be removed after hanko migration):
+  signatures_legacy?: Map<string, string>; // signerId -> signature (old system)
 }
 
 export interface EntityReplica {
@@ -1202,6 +1220,10 @@ export interface Env {
 
   // Frame-scoped structured logs (captured into snapshot, then reset)
   frameLogs: FrameLogEntry[];
+
+  // HANKO SYSTEM: Hash collection during frame creation
+  currentFrameHashes?: string[]; // Hashes accumulated during applyEntityFrame (cleared after)
+  currentFrameEntityId?: string; // EntityId for current frame being built (for signAsEntity)
 
   // Event emission methods (EVM-style - like Ethereum block logs)
   log: (message: string) => void;
@@ -1331,8 +1353,11 @@ export interface HankoClaim {
   entityIndexes: number[];
   weights: number[];
   threshold: number;
-  expectedQuorumHash: Buffer;
+  // NOTE: NO expectedQuorumHash - EP.sol reconstructs board hash from recovered signers
 }
+
+// Hanko in string format (hex-encoded ABI bytes)
+export type HankoString = string;
 
 export interface HankoVerificationResult {
   valid: boolean;
