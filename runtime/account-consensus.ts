@@ -501,7 +501,7 @@ export async function handleAccountInput(
 
     const { verifyHankoForHash } = await import('./hanko-signing');
     const expectedAckEntity = accountMachine.proofHeader.toEntity;
-    const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(ackHanko, frameHash, expectedAckEntity);
+    const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(ackHanko, frameHash, expectedAckEntity, env);
 
     if (!valid) {
       return { success: false, error: 'Invalid ACK hanko signature', events };
@@ -746,9 +746,9 @@ export async function handleAccountInput(
 
     console.log(`🔐 HANKO-VERIFY: Verifying hanko for frame ${receivedFrame.height} from ${input.fromEntityId.slice(-4)}`);
 
-    // Verify hanko - CRITICAL: Must verify fromEntityId is the signer
+    // Verify hanko - CRITICAL: Must verify fromEntityId is the signer with board validation
     const { verifyHankoForHash } = await import('./hanko-signing');
-    const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(hankoToVerify, receivedFrame.stateHash, input.fromEntityId);
+    const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(hankoToVerify, receivedFrame.stateHash, input.fromEntityId, env);
 
     if (!valid || !recoveredEntityId) {
       return { success: false, error: `Invalid hanko signature from ${input.fromEntityId.slice(-4)}`, events };

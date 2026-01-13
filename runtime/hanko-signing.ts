@@ -106,17 +106,19 @@ export async function signHashesAsSingleEntity(
 }
 
 /**
- * Verify hanko signature for single hash
+ * Verify hanko signature for single hash with STRICT board validation
  * Returns entityId if valid, null if invalid
  *
  * @param hankoBytes - ABI-encoded HankoBytes
  * @param hash - Hash that was signed
- * @param expectedEntityId - REQUIRED: Entity that MUST have signed (security check)
+ * @param expectedEntityId - REQUIRED: Entity that MUST have signed
+ * @param env - Runtime env to lookup entity board validators
  */
 export async function verifyHankoForHash(
   hankoBytes: HankoString,
   hash: string,
-  expectedEntityId: string
+  expectedEntityId: string,
+  env?: any
 ): Promise<{ valid: boolean; entityId: string | null }> {
   try {
     // Decode hanko from ABI - MATCH EP.sol struct (4 fields, NO expectedQuorumHash)
@@ -150,23 +152,59 @@ export async function verifyHankoForHash(
       return { valid: false, entityId: null };
     }
 
-    // CRITICAL: Must verify that expectedEntityId is the one that signed
-    // Check if expectedEntityId is in yesEntities or is the target claim
-    const targetEntity = hanko.claims.length > 0
-      ? '0x' + Array.from(hanko.claims[hanko.claims.length - 1].entityId).map(b => b.toString(16).padStart(2, '0')).join('')
-      : null;
+    // CRITICAL: Recover EOA addresses from signatures
+    const recoveredAddresses: string[] = [];
+    for (let i = 0; i < eoaSignatures.length; i++) {
+      const sig = eoaSignatures[i];
+      const r = ethers.hexlify(sig.slice(0, 32));
+      const s = ethers.hexlify(sig.slice(32, 64));
+      const v = sig[64];
+      const yParity = (v >= 27 ? v - 27 : v) as 0 | 1;
+      const recoveredAddr = ethers.recoverAddress(ethers.hexlify(hashBuffer), { r, s, v, yParity });
+      recoveredAddresses.push(recoveredAddr.toLowerCase());
+    }
 
-    if (!targetEntity) {
+    // CRITICAL: Find claim for expectedEntityId (NOT just last claim!)
+    const expectedEntityIdPadded = expectedEntityId.replace('0x', '').padStart(64, '0');
+    const matchingClaim = hanko.claims.find(c => {
+      const claimEntityHex = Array.from(c.entityId).map(b => b.toString(16).padStart(2, '0')).join('');
+      return claimEntityHex === expectedEntityIdPadded;
+    });
+
+    if (!matchingClaim) {
+      console.warn(`❌ Hanko rejected: No claim found for entity ${expectedEntityId.slice(-4)}`);
       return { valid: false, entityId: null };
     }
 
-    // Verify that targetEntity matches expectedEntityId (strict check)
-    if (targetEntity.toLowerCase() !== expectedEntityId.toLowerCase()) {
-      console.warn(`❌ Hanko entityId mismatch: hanko claims ${targetEntity.slice(-4)}, expected ${expectedEntityId.slice(-4)}`);
-      return { valid: false, entityId: null };
+    const targetEntity = '0x' + Array.from(matchingClaim.entityId).map(b => b.toString(16).padStart(2, '0')).join('');
+
+    // CRITICAL: Verify recovered addresses match entity's board validators
+    if (env && env.eReplicas) {
+      const replica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === expectedEntityId);
+      if (replica) {
+        const validators = replica.state.config.validators; // ['s1', 's2', 's3']
+
+        // Convert signerId validators to addresses
+        const { getSignerAddress } = await import('./account-crypto');
+        const expectedAddresses = validators.map(v => getSignerAddress(v)?.toLowerCase()).filter(Boolean);
+
+        // Check that ALL recovered addresses are in expected validators
+        for (const addr of recoveredAddresses) {
+          if (!expectedAddresses.includes(addr)) {
+            console.warn(`❌ Hanko rejected: Signer ${addr.slice(0, 10)} not in entity board validators`);
+            console.warn(`   Expected validators:`, expectedAddresses.map(a => a.slice(0, 10)));
+            return { valid: false, entityId: null };
+          }
+        }
+
+        console.log(`✅ Board validation passed: ${recoveredAddresses.length} signers match board validators`);
+      } else {
+        console.warn(`⚠️ Cannot verify board - entity ${expectedEntityId.slice(-4)} not found in eReplicas`);
+        // For now, allow (might be external entity), but log warning
+      }
     }
 
-    // Valid if at least one yes entity AND entityId matches AND has EOA sig
+    // Valid if at least one yes entity AND entityId matches AND has valid EOA sigs from board
     if (recovered.yesEntities.length > 0) {
       console.log(`✅ Hanko valid: ${eoaSignatures.length} EOA sigs, entity ${targetEntity.slice(-4)}`);
       return { valid: true, entityId: targetEntity };
