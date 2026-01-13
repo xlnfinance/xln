@@ -84,8 +84,12 @@ function cloneProfilesForSnapshot(env: Env): { profiles: Profile[] } | undefined
 
     const profileClone: Profile = {
       entityId: profile.entityId,
+      runtimeId: profile.runtimeId,
       capabilities: [...profile.capabilities],
-      hubs: [...profile.hubs],
+      publicAccounts: profile.publicAccounts ? [...profile.publicAccounts] : [],
+      hubs: profile.hubs ? [...profile.hubs] : [],
+      endpoints: profile.endpoints ? [...profile.endpoints] : [],
+      relays: profile.relays ? [...profile.relays] : [],
       accounts: clonedAccounts,
     };
 

@@ -93,6 +93,15 @@ async function fundVaultSignersInBrowserVM(vault: Vault | null): Promise<void> {
     if (vault?.seed) meta.seed = vault.seed;
     if (vault?.id) meta.vaultId = vault.id;
     runtimeOperations.setLocalRuntimeMetadata(meta);
+    void (async () => {
+      try {
+        const { getXLN } = await import('./xlnStore');
+        const xln = await getXLN();
+        xln.setRuntimeSeed?.(vault?.seed || null);
+      } catch (err) {
+        console.warn('[VaultStore] Failed to sync runtime seed:', err);
+      }
+    })();
     void fundVaultSignersInBrowserVM(vault);
     },
 

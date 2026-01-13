@@ -14,6 +14,7 @@
 
 import * as runtime from './runtime/runtime';
 import { ensureBrowserVM } from './runtime/scenarios/boot';
+import { startRuntimeWsServer } from './runtime/ws-server';
 
 const { main, startJEventWatcher } = runtime;
 
@@ -33,6 +34,19 @@ const { main, startJEventWatcher } = runtime;
 
       // Start j-watcher (will detect BrowserVM and skip external RPC)
       await startJEventWatcher(env);
+
+      const wsPort = process.env['WS_PORT'];
+      if (wsPort) {
+        const runtimeId = env.runtimeId || process.env['WS_RUNTIME_ID'] || 'hub';
+        const host = process.env['WS_HOST'] || '0.0.0.0';
+        const requireAuth = process.env['WS_REQUIRE_AUTH'] === '1';
+        startRuntimeWsServer({
+          host,
+          port: Number(wsPort),
+          serverId: runtimeId,
+          requireAuth,
+        });
+      }
 
       if (!noDemoFlag) {
         console.log('✅ Node.js environment initialized.');

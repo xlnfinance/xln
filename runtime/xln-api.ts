@@ -229,6 +229,8 @@ export interface XLNModule {
 
   // Environment creation
   createEmptyEnv: () => Env;
+  setRuntimeSeed: (seed: string | null) => void;
+  setRuntimeId: (id: string | null) => void;
 
   // Scenarios namespace (replaces legacy prepopulate functions)
   scenarios: {

@@ -369,6 +369,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // Broadcast updated profile to gossip layer
       if (env.gossip) {
         const profile = buildEntityProfile(newState, undefined, env.timestamp);
+        if (env.runtimeId) {
+          profile.runtimeId = env.runtimeId;
+        }
         env.gossip.announce(profile);
         console.log(`📡 Broadcast profile for ${entityState.entityId} with ${newState.accounts.size} accounts`);
       }

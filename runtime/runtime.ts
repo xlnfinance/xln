@@ -42,6 +42,7 @@ import {
 } from './evm';
 import { createGossipLayer } from './gossip';
 import { attachEventEmitters } from './env-events';
+import { deriveSignerAddressSync, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
 import {
   parseReplicaKey,
   extractEntityId,
@@ -254,6 +255,8 @@ let envChangeCallback: ((env: Env) => void) | null = null;
 
 // Module-level environment variable
 let env: Env;
+let runtimeSeed: string | null = null;
+let runtimeId: string | null = null;
 
 // Module-level j-watcher instance - prevent multiple instances
 let jWatcher: JEventWatcher | null = null;
@@ -272,6 +275,33 @@ export const getEnv = (): Env | null => {
   return env || null;
 };
 
+export const setRuntimeSeed = (seed: string | null): void => {
+  const normalized = seed && seed.length > 0 ? seed : null;
+  runtimeSeed = normalized;
+  setCryptoRuntimeSeed(normalized);
+  if (normalized) {
+    try {
+      runtimeId = deriveSignerAddressSync(normalized, '1');
+    } catch (error) {
+      console.warn('⚠️ Failed to derive runtimeId from seed:', error);
+      runtimeId = null;
+    }
+  } else {
+    runtimeId = null;
+  }
+  if (env) {
+    env.runtimeSeed = normalized || undefined;
+    env.runtimeId = runtimeId || undefined;
+  }
+};
+
+export const setRuntimeId = (id: string | null): void => {
+  runtimeId = id && id.length > 0 ? id : null;
+  if (env) {
+    env.runtimeId = runtimeId || undefined;
+  }
+};
+
 /**
  * Initialize module-level env if not already set
  * Call this early in frontend initialization before prepopulate
@@ -279,6 +309,9 @@ export const getEnv = (): Env | null => {
 export const initEnv = (): Env => {
   if (!env) {
     env = createEmptyEnv();
+    if (env.runtimeSeed) {
+      setCryptoRuntimeSeed(env.runtimeSeed);
+    }
     console.log('🌍 Runtime env initialized (module-level)');
   }
   return env;
@@ -582,12 +615,16 @@ const applyRuntimeInput = async (
         if (env.gossip && createdReplica) {
           const profile = {
             entityId: runtimeTx.entityId,
+            runtimeId: env.runtimeId,
             capabilities: [],
+            publicAccounts: [],
             hubs: [],
             metadata: {
               lastUpdated: env.timestamp,
               routingFeePPM: 100, // Default 100 PPM (0.01%)
               baseFee: 0n,
+              board: [...createdReplica.state.config.validators],
+              threshold: createdReplica.state.config.threshold,
             },
             accounts: [], // No accounts yet
           };
@@ -997,6 +1034,22 @@ const main = async (): Promise<Env> => {
 
       // Create env with proper event emitters, then populate from snapshot
       env = createEmptyEnv();
+      if (latestSnapshot.runtimeSeed) {
+        runtimeSeed = latestSnapshot.runtimeSeed;
+        setCryptoRuntimeSeed(runtimeSeed);
+        env.runtimeSeed = runtimeSeed;
+      }
+      if (latestSnapshot.runtimeId) {
+        runtimeId = latestSnapshot.runtimeId;
+        env.runtimeId = runtimeId;
+      } else if (runtimeSeed) {
+        try {
+          runtimeId = deriveSignerAddressSync(runtimeSeed, '1');
+          env.runtimeId = runtimeId;
+        } catch (error) {
+          console.warn('⚠️ Failed to derive runtimeId on restore:', error);
+        }
+      }
       // CRITICAL: Clone the eReplicas Map to avoid mutating snapshot data!
       env.eReplicas = new Map(Array.from(eReplicasMap).map(([key, replica]): [string, EntityReplica] => {
         return [key, cloneEntityReplica(replica)];
@@ -1185,6 +1238,8 @@ const clearDatabaseAndHistory = async () => {
     jReplicas: new Map(),
     height: 0,
     timestamp: 0,
+    ...(runtimeSeed ? { runtimeSeed } : {}),
+    ...(runtimeId ? { runtimeId } : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
     gossip: createGossipLayer(),
@@ -1403,6 +1458,8 @@ export const createEmptyEnv = (): Env => {
     jReplicas: new Map(),
     height: 0,
     timestamp: 0,
+    ...(runtimeSeed ? { runtimeSeed } : {}),
+    ...(runtimeId ? { runtimeId } : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
     gossip: createGossipLayer(),
@@ -1701,6 +1758,8 @@ export const process = async (
     const snapshot: any = {
       height: env.height,
       timestamp: env.timestamp,
+      ...(env.runtimeSeed ? { runtimeSeed: env.runtimeSeed } : {}),
+      ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
       eReplicas: new Map(env.eReplicas),
       jReplicas: env.jReplicas ? Array.from(env.jReplicas.values()).map(jr => ({
         ...jr,
@@ -1782,6 +1841,19 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
       const env = createEmptyEnv();
       env.height = BigInt(data.height || 0);
       env.timestamp = BigInt(data.timestamp || 0);
+      if (data.runtimeSeed) {
+        env.runtimeSeed = data.runtimeSeed;
+        setCryptoRuntimeSeed(data.runtimeSeed);
+      }
+      if (data.runtimeId) {
+        env.runtimeId = data.runtimeId;
+      } else if (data.runtimeSeed) {
+        try {
+          env.runtimeId = deriveSignerAddressSync(data.runtimeSeed, '1');
+        } catch (error) {
+          console.warn('⚠️ Failed to derive runtimeId from DB snapshot:', error);
+        }
+      }
       // Support both old (replicas) and new (eReplicas) format
       env.eReplicas = new Map(data.eReplicas || data.replicas || []);
       // Load jReplicas if present
@@ -1875,7 +1947,7 @@ export { loadScenarioFromFile, loadScenarioFromText } from './scenarios/loader.j
 export { SCENARIOS, getScenario, getScenariosByTag, type ScenarioMetadata } from './scenarios/index.js';
 
 // === CRYPTOGRAPHIC SIGNATURES ===
-export { deriveSignerKey, registerSignerKey, registerTestKeys, clearSignerKeys, signAccountFrame, verifyAccountSignature } from './account-crypto.js';
+export { deriveSignerKey, deriveSignerKeySync, registerSignerKey, registerTestKeys, clearSignerKeys, signAccountFrame, verifyAccountSignature, getSignerPublicKey } from './account-crypto.js';
 
 // === NAME RESOLUTION WRAPPERS (override imports) ===
 const searchEntityNames = (query: string, limit?: number) => searchEntityNamesOriginal(db, query, limit);
