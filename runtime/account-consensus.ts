@@ -369,8 +369,19 @@ export async function proposeAccountFrame(
   }
   console.log(`✅ Frame size: ${frameSize} bytes (${(frameSize / MAX_FRAME_SIZE_BYTES * 100).toFixed(2)}% of 1MB limit)`);
 
-  // Generate signature
-  const signature = signAccountFrame(accountMachine.proofHeader.fromEntity, newFrame.stateHash);
+  // Generate signature - CRITICAL: Use signerId, not entityId
+  // For single-signer entities, find signerId from entity config
+  const signingEntityId = accountMachine.proofHeader.fromEntity;
+  const signingReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === signingEntityId);
+  if (!signingReplica) {
+    return { success: false, error: `Cannot find replica for entity ${signingEntityId.slice(-4)}`, events, accountInput: null };
+  }
+  const signingSignerId = signingReplica.state.config.validators[0]; // Single-signer: use first validator
+  if (!signingSignerId) {
+    return { success: false, error: `Entity ${signingEntityId.slice(-4)} has no validators`, events, accountInput: null };
+  }
+  console.log(`🔐 SIGN: entityId=${signingEntityId.slice(-4)} → signerId=${signingSignerId.slice(-4)}`);
+  const signature = signAccountFrame(signingSignerId, newFrame.stateHash);
 
   // Set pending state (no longer storing clone - re-execution on commit)
   accountMachine.pendingFrame = newFrame;
@@ -467,10 +478,19 @@ export async function handleAccountInput(
     console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}, counter=${input.counter}`);
 
     const frameHash = accountMachine.pendingFrame.stateHash;
-    const expectedSigner = accountMachine.proofHeader.toEntity;
+    const expectedSignerEntityId = accountMachine.proofHeader.toEntity;
+
+    // CRITICAL: Find signerId for ACK verification
+    const counterpartyReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === expectedSignerEntityId);
+    const counterpartySignerId = counterpartyReplica?.state.config.validators[0];
+    if (!counterpartySignerId) {
+      console.warn(`⚠️ Cannot verify ACK - no signerId for entity ${expectedSignerEntityId.slice(-4)}`);
+      // Continue without verification for now (legacy compatibility)
+    }
+    const signerToVerify = counterpartySignerId || expectedSignerEntityId;
 
     const signature = input.prevSignatures[0];
-    if (input.prevSignatures.length > 0 && signature && verifyAccountSignature(expectedSigner, frameHash, signature)) {
+    if (input.prevSignatures.length > 0 && signature && verifyAccountSignature(signerToVerify, frameHash, signature)) {
       // DoS FIX: Update counter AFTER signature verified (prevents counter desync attacks)
       if (input.counter !== undefined) {
         accountMachine.ackedTransitions = input.counter;
@@ -702,7 +722,20 @@ export async function handleAccountInput(
     if (!signature) {
       return { success: false, error: 'Missing signature in newSignatures array', events };
     }
-    const isValid = verifyAccountSignature(input.fromEntityId, receivedFrame.stateHash, signature);
+
+    // CRITICAL: For single-signer entities, find signerId from entity config
+    // verifyAccountSignature needs signerId (like 's1'), not entityId
+    const senderReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === input.fromEntityId);
+    if (!senderReplica) {
+      return { success: false, error: `Cannot find replica for sender ${input.fromEntityId.slice(-4)}`, events };
+    }
+    const senderSignerId = senderReplica.state.config.validators[0]; // Single-signer: use first validator
+    if (!senderSignerId) {
+      return { success: false, error: `Sender ${input.fromEntityId.slice(-4)} has no validators`, events };
+    }
+    console.log(`🔐 SIG-VERIFY: entityId=${input.fromEntityId.slice(-4)} → signerId=${senderSignerId.slice(-4)}`);
+
+    const isValid = verifyAccountSignature(senderSignerId, receivedFrame.stateHash, signature);
     if (!isValid) {
       return { success: false, error: 'Invalid frame signature', events };
     }
@@ -915,8 +948,15 @@ export async function handleAccountInput(
     events.push(...processEvents);
     events.push(`🤝 Accepted frame ${receivedFrame.height} from Entity ${input.fromEntityId.slice(-4)}`);
 
-    // Send confirmation (ACK)
-    const confirmationSig = signAccountFrame(accountMachine.proofHeader.fromEntity, receivedFrame.stateHash);
+    // Send confirmation (ACK) - CRITICAL: Use signerId, not entityId
+    const ackEntityId = accountMachine.proofHeader.fromEntity;
+    const ackReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ackEntityId);
+    const ackSignerId = ackReplica?.state.config.validators[0];
+    if (!ackSignerId) {
+      return { success: false, error: `Cannot find signerId for ACK from ${ackEntityId.slice(-4)}`, events };
+    }
+    console.log(`🔐 ACK-SIGN: entityId=${ackEntityId.slice(-4)} → signerId=${ackSignerId.slice(-4)}`);
+    const confirmationSig = signAccountFrame(ackSignerId, receivedFrame.stateHash);
 
     console.log(`📤 ACK-SEND: Preparing ACK for frame ${receivedFrame.height} from ${accountMachine.proofHeader.fromEntity.slice(-4)} to ${input.fromEntityId.slice(-4)}`);
 
@@ -1090,8 +1130,15 @@ export async function generateAccountProof(accountMachine: AccountMachine): Prom
   const fullHash = await hash(proofContent);
   const proofHash = fullHash.slice(2); // Remove 0x prefix for compatibility
 
-  // Generate hanko signature (like old_src does)
-  const signature = signAccountFrame(accountMachine.proofHeader.fromEntity, `0x${proofHash}`);
+  // Generate hanko signature - CRITICAL: Use signerId, not entityId
+  const proofEntityId = accountMachine.proofHeader.fromEntity;
+  const proofReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === proofEntityId);
+  const proofSignerId = proofReplica?.state.config.validators[0];
+  if (!proofSignerId) {
+    throw new Error(`Cannot find signerId for proof from ${proofEntityId.slice(-4)}`);
+  }
+  console.log(`🔐 PROOF-SIGN: entityId=${proofEntityId.slice(-4)} → signerId=${proofSignerId.slice(-4)}`);
+  const signature = signAccountFrame(proofSignerId, `0x${proofHash}`);
 
   // Store signature for later use
   accountMachine.hankoSignature = signature;

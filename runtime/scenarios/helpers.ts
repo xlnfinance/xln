@@ -152,14 +152,46 @@ export async function processUntil(
   env: Env,
   predicate: () => boolean,
   maxRounds: number = 10,
-  label: string = 'condition'
+  label: string = 'condition',
+  onTick?: (round: number) => void,
+  onFail?: () => void
 ): Promise<void> {
   const process = await getProcess();
+  const waitNetworkTick = async () => {
+    if (typeof setImmediate === 'function') {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      return;
+    }
+    if (typeof queueMicrotask === 'function') {
+      await new Promise<void>(resolve => queueMicrotask(resolve));
+      return;
+    }
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+  };
+  const waitNetworkPropagation = async () => {
+    if (env.scenarioMode) {
+      await new Promise<void>(resolve => setTimeout(resolve, 25));
+    }
+  };
   for (let round = 0; round < maxRounds; round++) {
+    // Check first
     if (predicate()) return;
+
+    // Process local state
     await process(env);
+    onTick?.(round + 1);
+
+    // Wait for network messages to arrive (coordination with runtime.ts)
+    await waitNetworkTick();
+
+    // Check again after network processing
+    if (predicate()) return;
+
+    // Small delay for network propagation (real sockets)
+    await waitNetworkPropagation();
   }
   if (!predicate()) {
+    onFail?.();
     throw new Error(`processUntil: ${label} not satisfied after ${maxRounds} rounds`);
   }
 }

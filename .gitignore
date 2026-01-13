@@ -69,6 +69,8 @@ nul
 
 # Development database
 db/
+db-*/
+db-tmp/
 
 # Lock files (use bun.lock only)
 package-lock.json

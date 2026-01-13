@@ -34,16 +34,20 @@ export class EntityManager {
     // Create sphere geometry
     const geometry = new THREE.SphereGeometry(2, 32, 32);
 
-    // Hub entities get glowing material
+    // Hub entities get glowing material (SOLID - no transparency)
     const material = new THREE.MeshLambertMaterial({
       color: isHub ? 0x00ff88 : 0x007acc,
       emissive: isHub ? 0x00ff88 : 0x000000,
-      emissiveIntensity: isHub ? 2.0 : 0
+      emissiveIntensity: isHub ? 2.0 : 0,
+      // Solid spheres - no transparency, write to depth buffer
+      transparent: false,
+      depthWrite: true
     });
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.position.set(position.x, position.y, position.z);
     mesh.userData['entityId'] = entityId;
+    mesh.renderOrder = 10; // Render entities AFTER boxes/lines
     this.scene.add(mesh);
 
     // Create label sprite

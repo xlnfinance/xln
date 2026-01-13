@@ -181,6 +181,11 @@ export async function initializeXLN(): Promise<Env> {
 
     isLoading.set(false);
 
+    // Start P2P overlay (idempotent, waits for runtimeId if needed)
+    if (xln.startP2P) {
+      xln.startP2P(env, { relayUrls: ['wss://xln.finance/relay'] });
+    }
+
     // Expose to window for e2e testing
     if (typeof window !== 'undefined') {
       (window as any).xlnEnv = env;

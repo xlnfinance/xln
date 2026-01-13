@@ -1,0 +1,302 @@
+import type { Env, EntityInput } from './types';
+import type { Profile } from './gossip';
+import { RuntimeWsClient } from './ws-client';
+import { buildEntityProfile } from './gossip-helper';
+import { extractEntityId } from './ids';
+import { getSignerPublicKey, registerSignerPublicKey } from './account-crypto';
+
+const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
+
+export type P2PConfig = {
+  relayUrls?: string[];
+  seedRuntimeIds?: string[];
+  runtimeId?: string;
+  signerId?: string;
+  advertiseEntityIds?: string[];
+  isHub?: boolean;
+  profileName?: string;
+};
+
+type RuntimeP2POptions = {
+  env: Env;
+  runtimeId: string;
+  signerId?: string;
+  relayUrls?: string[];
+  seedRuntimeIds?: string[];
+  advertiseEntityIds?: string[];
+  isHub?: boolean;
+  profileName?: string;
+  onEntityInput: (from: string, input: EntityInput) => void;
+  onGossipProfiles: (from: string, profiles: Profile[]) => void;
+};
+
+type GossipRequestPayload = {
+  scope?: 'all' | 'bundle';
+  entityId?: string;
+};
+
+type GossipResponsePayload = {
+  profiles: Profile[];
+};
+
+const toHex = (bytes: Uint8Array): string =>
+  Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+
+const unique = (items: string[]): string[] => Array.from(new Set(items.filter(Boolean)));
+
+const isSameList = (a: string[], b: string[]): boolean => {
+  if (a.length !== b.length) return false;
+  const aSorted = [...a].sort();
+  const bSorted = [...b].sort();
+  return aSorted.every((value, index) => value === bSorted[index]);
+};
+
+const isHexPublicKey = (value: string): boolean => {
+  if (!value.startsWith('0x')) return false;
+  const hex = value.slice(2);
+  if (!/^[0-9a-fA-F]+$/.test(hex)) return false;
+  return hex.length === 66 || hex.length === 130;
+};
+
+export class RuntimeP2P {
+  private env: Env;
+  private runtimeId: string;
+  private signerId: string;
+  private relayUrls: string[];
+  private seedRuntimeIds: string[];
+  private advertiseEntityIds: string[] | null;
+  private isHub: boolean;
+  private profileName?: string;
+  private onEntityInput: (from: string, input: EntityInput) => void;
+  private onGossipProfiles: (from: string, profiles: Profile[]) => void;
+  private clients: RuntimeWsClient[] = [];
+  private pendingByRuntime = new Map<string, EntityInput[]>();
+
+  constructor(options: RuntimeP2POptions) {
+    this.env = options.env;
+    this.runtimeId = options.runtimeId;
+    this.signerId = options.signerId || '1';
+    this.relayUrls = unique(options.relayUrls || [DEFAULT_RELAY_URL]);
+    this.seedRuntimeIds = unique(options.seedRuntimeIds || []);
+    this.advertiseEntityIds = options.advertiseEntityIds || null;
+    this.isHub = options.isHub ?? false;
+    this.profileName = options.profileName;
+    this.onEntityInput = options.onEntityInput;
+    this.onGossipProfiles = options.onGossipProfiles;
+  }
+
+  matchesIdentity(runtimeId: string, signerId?: string): boolean {
+    return this.runtimeId === runtimeId && (!signerId || this.signerId === signerId);
+  }
+
+  updateConfig(config: P2PConfig) {
+    if (config.seedRuntimeIds) {
+      this.seedRuntimeIds = unique(config.seedRuntimeIds);
+    }
+    if (config.advertiseEntityIds) {
+      this.advertiseEntityIds = config.advertiseEntityIds;
+    }
+    if (config.isHub !== undefined) {
+      this.isHub = config.isHub;
+    }
+    if (config.profileName !== undefined) {
+      this.profileName = config.profileName;
+    }
+    if (config.relayUrls) {
+      const nextUrls = unique(config.relayUrls);
+      if (!isSameList(nextUrls, this.relayUrls)) {
+        this.relayUrls = nextUrls;
+        this.reconnect();
+        return;
+      }
+    }
+    this.announceLocalProfiles();
+  }
+
+  connect() {
+    this.closeClients();
+    for (const url of this.relayUrls) {
+      const client = new RuntimeWsClient({
+        url,
+        runtimeId: this.runtimeId,
+        signerId: this.signerId,
+        onOpen: () => {
+          this.flushPending();
+          this.requestSeedGossip();
+          this.announceLocalProfiles();
+        },
+        onEntityInput: (from, input) => this.onEntityInput(from, input),
+        onGossipRequest: (from, payload) => this.handleGossipRequest(from, payload),
+        onGossipResponse: (from, payload) => this.handleGossipResponse(from, payload),
+        onGossipAnnounce: (from, payload) => this.handleGossipAnnounce(from, payload),
+        onError: (error) => {
+          this.env.warn('network', 'WS_CLIENT_ERROR', { relay: url, error: error.message });
+        },
+      });
+      this.clients.push(client);
+      client.connect().catch(error => {
+        this.env.warn('network', 'WS_CONNECT_FAILED', { relay: url, error: error.message });
+      });
+    }
+  }
+
+  close() {
+    this.closeClients();
+    this.pendingByRuntime.clear();
+  }
+
+  reconnect() {
+    this.connect();
+  }
+
+  enqueueEntityInput(targetRuntimeId: string, input: EntityInput) {
+    const client = this.getActiveClient();
+    if (client && client.isOpen()) {
+      const sent = client.sendEntityInput(targetRuntimeId, input);
+      if (sent) return;
+    }
+    const queue = this.pendingByRuntime.get(targetRuntimeId) || [];
+    queue.push(input);
+    this.pendingByRuntime.set(targetRuntimeId, queue);
+  }
+
+  requestGossip(runtimeId: string) {
+    const client = this.getActiveClient();
+    if (!client) return;
+    client.sendGossipRequest(runtimeId, { scope: 'all' } satisfies GossipRequestPayload);
+  }
+
+  announceProfilesTo(runtimeId: string, profiles: Profile[]) {
+    const client = this.getActiveClient();
+    if (!client) return;
+    client.sendGossipAnnounce(runtimeId, { profiles } satisfies GossipResponsePayload);
+  }
+
+  private getActiveClient(): RuntimeWsClient | null {
+    return this.clients.find(client => client.isOpen()) || null;
+  }
+
+  private flushPending() {
+    const client = this.getActiveClient();
+    if (!client || !client.isOpen()) return;
+    for (const [targetRuntimeId, queue] of this.pendingByRuntime.entries()) {
+      const remaining: EntityInput[] = [];
+      for (const input of queue) {
+        const sent = client.sendEntityInput(targetRuntimeId, input);
+        if (!sent) remaining.push(input);
+      }
+      if (remaining.length > 0) {
+        this.pendingByRuntime.set(targetRuntimeId, remaining);
+      } else {
+        this.pendingByRuntime.delete(targetRuntimeId);
+      }
+    }
+  }
+
+  private requestSeedGossip() {
+    if (this.seedRuntimeIds.length === 0) return;
+    const client = this.getActiveClient();
+    if (!client) return;
+    for (const seedId of this.seedRuntimeIds) {
+      client.sendGossipRequest(seedId, { scope: 'all' } satisfies GossipRequestPayload);
+    }
+  }
+
+  private announceLocalProfiles() {
+    const profiles = this.getLocalProfiles();
+    if (profiles.length === 0) return;
+    for (const profile of profiles) {
+      this.env.gossip?.announce?.(profile);
+    }
+    if (this.seedRuntimeIds.length === 0) return;
+    for (const seedId of this.seedRuntimeIds) {
+      this.announceProfilesTo(seedId, profiles);
+    }
+  }
+
+  private getLocalProfiles(): Profile[] {
+    if (!this.env.eReplicas || this.env.eReplicas.size === 0) return [];
+    const profiles: Profile[] = [];
+    const seen = new Set<string>();
+    for (const [replicaKey, replica] of this.env.eReplicas.entries()) {
+      let entityId: string;
+      try {
+        entityId = extractEntityId(replicaKey);
+      } catch {
+        continue;
+      }
+      if (seen.has(entityId)) continue;
+      if (this.advertiseEntityIds && !this.advertiseEntityIds.includes(entityId)) continue;
+      seen.add(entityId);
+      const profile = buildEntityProfile(replica.state, this.profileName, this.env.timestamp);
+      profile.runtimeId = this.runtimeId;
+      if (this.isHub) {
+        profile.capabilities = Array.from(new Set([...(profile.capabilities || []), 'hub', 'relay']));
+        profile.metadata = { ...(profile.metadata || {}), isHub: true };
+        if (this.relayUrls.length > 0) {
+          profile.endpoints = this.relayUrls;
+        }
+      }
+      if (this.profileName) {
+        profile.metadata = { ...(profile.metadata || {}), name: this.profileName };
+      }
+
+      const publicKey = getSignerPublicKey(entityId);
+      if (publicKey) {
+        profile.metadata = {
+          ...(profile.metadata || {}),
+          entityPublicKey: `0x${toHex(publicKey)}`,
+        };
+      }
+      profiles.push(profile);
+    }
+    return profiles;
+  }
+
+  private handleGossipRequest(from: string, payload: unknown) {
+    if (!this.env.gossip?.getProfiles) return;
+    const request = payload as GossipRequestPayload;
+    let profiles: Profile[] = [];
+
+    if (request?.scope === 'bundle' && request.entityId && this.env.gossip.getProfileBundle) {
+      const bundle = this.env.gossip.getProfileBundle(request.entityId);
+      profiles = [...(bundle.profile ? [bundle.profile] : []), ...bundle.peers];
+    } else {
+      profiles = this.env.gossip.getProfiles();
+    }
+
+    const client = this.getActiveClient();
+    if (!client) return;
+    client.sendGossipResponse(from, { profiles } satisfies GossipResponsePayload);
+  }
+
+  private handleGossipResponse(from: string, payload: unknown) {
+    const response = payload as GossipResponsePayload;
+    const profiles = Array.isArray(response?.profiles) ? response.profiles : [];
+    this.applyIncomingProfiles(from, profiles);
+  }
+
+  private handleGossipAnnounce(from: string, payload: unknown) {
+    const response = payload as GossipResponsePayload;
+    const profiles = Array.isArray(response?.profiles) ? response.profiles : [];
+    this.applyIncomingProfiles(from, profiles);
+  }
+
+  private applyIncomingProfiles(from: string, profiles: Profile[]) {
+    if (profiles.length === 0) return;
+    for (const profile of profiles) {
+      const publicKey = profile.metadata?.entityPublicKey;
+      if (publicKey && typeof publicKey === 'string' && isHexPublicKey(publicKey)) {
+        registerSignerPublicKey(profile.entityId, publicKey);
+      }
+    }
+    this.onGossipProfiles(from, profiles);
+  }
+
+  private closeClients() {
+    for (const client of this.clients) {
+      client.close();
+    }
+    this.clients = [];
+  }
+}

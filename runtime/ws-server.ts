@@ -1,4 +1,5 @@
 import WebSocket, { WebSocketServer } from 'ws';
+import type { AddressInfo } from 'net';
 import * as secp256k1 from '@noble/secp256k1';
 import { keccak256 } from 'ethers';
 
@@ -61,8 +62,8 @@ const recoverAddressFromSignature = (digestHex: string, signatureHex: string): s
   const compact = sig.slice(0, 128);
   const recovery = Number.parseInt(sig.slice(128, 130), 16);
   const messageBytes = Buffer.from(digestHex.replace('0x', ''), 'hex');
-  const signature = secp256k1.Signature.fromCompact(compact);
-  const publicKey = signature.recoverPublicKey(messageBytes, recovery).toRawBytes(false);
+  const signatureBytes = Buffer.from(compact, 'hex');
+  const publicKey = secp256k1.recoverPublicKey(messageBytes, signatureBytes, recovery, false);
   const hash = keccak256(publicKey.slice(1));
   return `0x${hash.slice(-40)}`.toLowerCase();
 };
@@ -76,7 +77,12 @@ const verifyHelloAuth = (runtimeId: string, auth: RuntimeWsAuth, maxSkewMs: numb
     return `Hello timestamp skew too large (${nowTs - auth.timestamp}ms)`;
   }
   const digest = hashHelloMessage(runtimeId, auth.timestamp, auth.nonce);
-  const recovered = recoverAddressFromSignature(digest, auth.signature);
+  let recovered: string;
+  try {
+    recovered = recoverAddressFromSignature(digest, auth.signature);
+  } catch (error) {
+    return `Hello signature invalid: ${(error as Error).message}`;
+  }
   if (recovered.toLowerCase() !== runtimeId.toLowerCase()) {
     return 'Hello signature does not match runtimeId';
   }
@@ -251,7 +257,13 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
         return;
       }
 
-      if (msg.type === 'runtime_input' || msg.type === 'entity_input') {
+      if (
+        msg.type === 'runtime_input' ||
+        msg.type === 'entity_input' ||
+        msg.type === 'gossip_request' ||
+        msg.type === 'gossip_response' ||
+        msg.type === 'gossip_announce'
+      ) {
         await routeMessage(msg, ws);
         return;
       }
@@ -270,9 +282,10 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       }
     });
 
-    ws.on('error', () => {
+    ws.on('error', (error) => {
       closed = true;
       clearInterval(heartbeat);
+      console.error(`[WS] Client error for ${runtimeId ?? 'unknown'}: ${(error as Error).message}`);
     });
 
     if (runtimeId) {
@@ -280,7 +293,17 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     }
   });
 
-  console.log(`[WS] Runtime relay "${serverId}" listening on ${options.host || '0.0.0.0'}:${options.port}`);
+  wss.on('listening', () => {
+    const address = wss.address() as AddressInfo | string | null;
+    const port = typeof address === 'string' || !address ? options.port : address.port;
+    console.log(`[WS] Runtime relay "${serverId}" listening on ${options.host || '0.0.0.0'}:${port}`);
+  });
+
+  wss.on('error', (error) => {
+    const err = error as Error & { code?: string };
+    const code = err.code ? ` (${err.code})` : '';
+    console.error(`[WS] Runtime relay "${serverId}" failed: ${err.message}${code}`);
+  });
 
   return {
     server: wss,
