@@ -4,6 +4,8 @@
  */
 
 import * as secp256k1 from '@noble/secp256k1';
+import { hmac } from '@noble/hashes/hmac.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { keccak256 } from 'ethers';
 
 // Configure @noble/secp256k1 HMAC (required for signing)
@@ -21,42 +23,79 @@ if (!isBrowser && typeof require !== 'undefined') {
     console.warn('Failed to configure secp256k1 HMAC:', e);
   }
 }
-// Browser: HMAC will be configured when needed (async)
+// Browser: deriveSignerKeySync uses noble hashes (no async required)
 
-// Global key cache (signerId → private key)
-// Populated by runtime when BrainVault unlocked
+// Global key cache (signerId → private/public key)
+// Populated by runtime when BrainVault seed is provided
 const signerKeys = new Map<string, Uint8Array>();
+const signerPublicKeys = new Map<string, Uint8Array>();
+const signerAddresses = new Map<string, string>();
+let runtimeSeedBytes: Uint8Array | null = null;
+const textEncoder = new TextEncoder();
+
+const toSeedBytes = (seed: Uint8Array | string): Uint8Array =>
+  typeof seed === 'string' ? textEncoder.encode(seed) : seed;
 
 /**
  * Derive signer private key from BrainVault master seed
  * Formula: privateKey = HMAC-SHA256(masterSeed, signerId)
- * Browser-compatible (uses hash-wasm) and Node-compatible (uses crypto)
+ * Browser-compatible (pure JS HMAC) and Node-compatible
  */
 export async function deriveSignerKey(masterSeed: Uint8Array, signerId: string): Promise<Uint8Array> {
-  const isBrowser = typeof window !== 'undefined';
+  return deriveSignerKeySync(masterSeed, signerId);
+}
 
-  if (isBrowser) {
-    if (!globalThis.crypto?.subtle) {
-      throw new Error('WebCrypto is required for browser HMAC');
-    }
+export function deriveSignerKeySync(masterSeed: Uint8Array, signerId: string): Uint8Array {
+  const message = textEncoder.encode(signerId);
+  return hmac(sha256, masterSeed, message);
+}
 
-    const key = await globalThis.crypto.subtle.importKey(
-      'raw',
-      masterSeed,
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
-    );
-    const message = new TextEncoder().encode(signerId);
-    const signature = await globalThis.crypto.subtle.sign('HMAC', key, message);
-    return new Uint8Array(signature);
-  }
+export function setRuntimeSeed(seed: Uint8Array | string | null): void {
+  runtimeSeedBytes = seed ? toSeedBytes(seed) : null;
+  signerKeys.clear();
+  signerPublicKeys.clear();
+  signerAddresses.clear();
+}
 
-  // Node/Bun: use built-in crypto
-  const { createHmac } = await import('crypto');
-  const hmac = createHmac('sha256', Buffer.from(masterSeed));
-  hmac.update(signerId);
-  return new Uint8Array(hmac.digest());
+const getOrDeriveKey = (signerId: string): Uint8Array | null => {
+  const cached = signerKeys.get(signerId);
+  if (cached) return cached;
+  if (!runtimeSeedBytes) return null;
+  const derived = deriveSignerKeySync(runtimeSeedBytes, signerId);
+  registerSignerKey(signerId, derived);
+  return derived;
+};
+
+export function getSignerPublicKey(signerId: string): Uint8Array | null {
+  const cached = signerPublicKeys.get(signerId);
+  if (cached) return cached;
+  const privateKey = getOrDeriveKey(signerId);
+  if (!privateKey) return null;
+  const publicKey = secp256k1.getPublicKey(privateKey);
+  signerPublicKeys.set(signerId, publicKey);
+  return publicKey;
+}
+
+const privateKeyToAddress = (privateKey: Uint8Array): string => {
+  const publicKey = secp256k1.getPublicKey(privateKey, false); // uncompressed 65 bytes
+  const hash = keccak256(publicKey.slice(1));
+  return `0x${hash.slice(-40)}`.toLowerCase();
+};
+
+export function deriveSignerAddressSync(seed: Uint8Array | string, signerId: string): string {
+  const seedBytes = toSeedBytes(seed);
+  const privateKey = deriveSignerKeySync(seedBytes, signerId);
+  return privateKeyToAddress(privateKey);
+}
+
+export function getSignerAddress(signerId: string): string | null {
+  const cached = signerAddresses.get(signerId);
+  if (cached) return cached;
+  const privateKey = getOrDeriveKey(signerId);
+  if (!privateKey) return null;
+  const address = privateKeyToAddress(privateKey);
+  signerAddresses.set(signerId, address);
+  return address;
 }
 
 /**
@@ -67,7 +106,8 @@ export async function registerSeededKeys(
   seed: Uint8Array | string,
   signerIds: string[]
 ): Promise<void> {
-  const seedBytes = typeof seed === 'string' ? new TextEncoder().encode(seed) : seed;
+  const seedBytes = toSeedBytes(seed);
+  setRuntimeSeed(seedBytes);
 
   for (const signerId of signerIds) {
     const privateKey = await deriveSignerKey(seedBytes, signerId);
@@ -82,6 +122,8 @@ export async function registerSeededKeys(
  */
 export function registerSignerKey(signerId: string, privateKey: Uint8Array): void {
   signerKeys.set(signerId, privateKey);
+  signerPublicKeys.set(signerId, secp256k1.getPublicKey(privateKey));
+  signerAddresses.set(signerId, privateKeyToAddress(privateKey));
 }
 
 /**
@@ -91,6 +133,7 @@ export function registerSignerKey(signerId: string, privateKey: Uint8Array): voi
 export async function registerTestKeys(signerIds: string[]): Promise<void> {
   const testMasterSeed = new Uint8Array(32);
   testMasterSeed.fill(42); // Deterministic test seed
+  setRuntimeSeed(testMasterSeed);
 
   // Use registerSeededKeys but suppress its log (we log our own below)
   const seedBytes = testMasterSeed;
@@ -106,6 +149,7 @@ export async function registerTestKeys(signerIds: string[]): Promise<void> {
  */
 export function clearSignerKeys(): void {
   signerKeys.clear();
+  signerPublicKeys.clear();
 }
 
 /**
@@ -113,31 +157,25 @@ export function clearSignerKeys(): void {
  * Returns: 65-byte signature (r + s + recovery)
  */
 export function signAccountFrame(
-  entityId: string,
+  signerId: string,
   frameHash: string,
   _privateData?: string // Deprecated, kept for backwards compat
 ): string {
-  const privateKey = signerKeys.get(entityId);
+  const messageHash = keccak256(Buffer.from(frameHash.replace('0x', ''), 'hex'));
+  const signature = signDigest(signerId, messageHash);
+  console.log(`✍️ Signed frame ${frameHash.slice(0, 10)} by ${signerId.slice(-4)}: ${signature.slice(0, 20)}...`);
+  return signature;
+}
 
+export function signDigest(signerId: string, digestHex: string): string {
+  const privateKey = getOrDeriveKey(signerId);
   if (!privateKey) {
-    // Fallback to mock for testing (when BrainVault not unlocked)
-    const mockContent = `${entityId}-${frameHash}`;
-    const mockSig = `sig_${Buffer.from(mockContent).toString('base64').slice(0, 32)}`;
-    console.warn(`⚠️ Using MOCK signature for ${entityId.slice(-4)} (BrainVault not unlocked)`);
-    return mockSig;
+    throw new Error(`SIGNER_KEY_MISSING: No key or runtime seed for signer ${signerId}`);
   }
 
-  // Hash the frame hash (secp256k1 signs 32-byte messages)
-  const messageHash = keccak256(Buffer.from(frameHash.replace('0x', ''), 'hex'));
-  const messageBytes = Buffer.from(messageHash.replace('0x', ''), 'hex');
-
-  // Sign with recovery using @noble/secp256k1
+  const messageBytes = Buffer.from(digestHex.replace('0x', ''), 'hex');
   const [signature, recovery] = secp256k1.signSync(messageBytes, privateKey, { recovered: true, der: false });
-
-  // Encode as hex: signature (64 bytes compact) + recovery (1 byte) = 65 bytes total
   const sigHex = Buffer.from(signature).toString('hex') + recovery.toString(16).padStart(2, '0');
-
-  console.log(`✍️ Signed frame ${frameHash.slice(0, 10)} by ${entityId.slice(-4)}: ${sigHex.slice(0, 20)}...`);
   return `0x${sigHex}`;
 }
 
@@ -145,21 +183,15 @@ export function signAccountFrame(
  * Verify account signature using secp256k1
  */
 export function verifyAccountSignature(
-  entityId: string,
+  signerId: string,
   frameHash: string,
   signature: string,
   _privateData?: string // Deprecated
 ): boolean {
-  // Handle legacy mock signatures
-  if (signature.startsWith('sig_')) {
-    const mockExpected = signAccountFrame(entityId, frameHash);
-    return signature === mockExpected;
-  }
-
   // Real signature verification
-  const privateKey = signerKeys.get(entityId);
-  if (!privateKey) {
-    console.warn(`⚠️ Cannot verify - no key for ${entityId.slice(-4)}`);
+  const publicKey = getSignerPublicKey(signerId);
+  if (!publicKey) {
+    console.warn(`⚠️ Cannot verify - no key for ${signerId.slice(-4)}`);
     return false;
   }
 
@@ -172,21 +204,18 @@ export function verifyAccountSignature(
     const messageHash = keccak256(Buffer.from(frameHash.replace('0x', ''), 'hex'));
     const messageBytes = Buffer.from(messageHash.replace('0x', ''), 'hex');
 
-    // Get public key from private key
-    const publicKey = secp256k1.getPublicKey(privateKey);
-
     // Verify signature using @noble/secp256k1
     const isValid = secp256k1.verify(sigBytes, messageBytes, publicKey);
 
     if (isValid) {
-      console.log(`✅ Valid signature from ${entityId.slice(-4)} for frame ${frameHash.slice(0, 10)}`);
+      console.log(`✅ Valid signature from ${signerId.slice(-4)} for frame ${frameHash.slice(0, 10)}`);
     } else {
-      console.log(`❌ Invalid signature from ${entityId.slice(-4)} for frame ${frameHash.slice(0, 10)}`);
+      console.log(`❌ Invalid signature from ${signerId.slice(-4)} for frame ${frameHash.slice(0, 10)}`);
     }
 
     return isValid;
   } catch (error) {
-    console.error(`❌ Signature verification error for ${entityId.slice(-4)}:`, error);
+    console.error(`❌ Signature verification error for ${signerId.slice(-4)}:`, error);
     return false;
   }
 }
@@ -194,30 +223,6 @@ export function verifyAccountSignature(
 /**
  * Easy signer function that returns the entity ID from a signature
  */
-export function getSignerFromSignature(signature: string, frameHash: string): string | null {
-  // Parse signature to extract signer (mock implementation)
-  // Real implementation would use cryptographic signature recovery
-
-  if (!signature.startsWith('sig_')) {
-    return null;
-  }
-
-  // For mock: signature format is sig_BASE64(entityId-frameHash-privateKey)
-  try {
-    const encoded = signature.slice(4); // Remove 'sig_' prefix
-    const decoded = Buffer.from(encoded, 'base64').toString();
-    const parts = decoded.split('-');
-
-    if (parts.length >= 2 && parts[1] === frameHash) {
-      return parts[0] || null; // Return entityId or null if empty
-    }
-  } catch (error) {
-    console.log(`⚠️ Failed to parse signature: ${error}`);
-  }
-
-  return null;
-}
-
 /**
  * Validate multiple signatures for account frame
  */
@@ -227,13 +232,14 @@ export function validateAccountSignatures(
   expectedSigners: string[]
 ): { valid: boolean; validSigners: string[] } {
   const validSigners: string[] = [];
+  const remaining = new Set(expectedSigners);
 
   for (const signature of signatures) {
-    const signer = getSignerFromSignature(signature, frameHash);
-
-    if (signer && expectedSigners.includes(signer)) {
+    for (const signer of Array.from(remaining)) {
       if (verifyAccountSignature(signer, frameHash, signature)) {
         validSigners.push(signer);
+        remaining.delete(signer);
+        break;
       }
     }
   }

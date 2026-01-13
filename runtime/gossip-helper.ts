@@ -13,6 +13,7 @@ import { deriveDelta, isLeft } from './account-utils';
  */
 export function buildEntityProfile(entityState: EntityState, name?: string, timestamp: number = 0): Profile {
   const accounts: Profile['accounts'] = [];
+  const publicAccounts: string[] = [];
 
   // Build account capacities from all accounts
   for (const [counterpartyId, accountMachine] of entityState.accounts.entries()) {
@@ -20,6 +21,7 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
       inCapacity: bigint;
       outCapacity: bigint;
     }>();
+    let hasInboundCapacity = false;
 
     // Calculate capacities for each token
     for (const [tokenId, delta] of accountMachine.deltas.entries()) {
@@ -29,24 +31,34 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
         inCapacity: derived.inCapacity,
         outCapacity: derived.outCapacity,
       });
+      if (derived.inCapacity > 0n) {
+        hasInboundCapacity = true;
+      }
     }
 
     accounts.push({
       counterpartyId,
       tokenCapacities,
     });
+
+    if (hasInboundCapacity) {
+      publicAccounts.push(counterpartyId);
+    }
   }
 
   // Build profile
   const profile: Profile = {
     entityId: entityState.entityId,
     capabilities: [], // Future: Add routing, swap capabilities based on entity config
-    hubs: [], // Future: Track hub connections from network topology
+    publicAccounts,
+    hubs: [...publicAccounts], // Legacy alias for compatibility
     metadata: {
       lastUpdated: timestamp,
       isHub: false, // Future: Determine from entity capabilities or manual config
       routingFeePPM: 100, // Default 100 PPM (0.01%)
       baseFee: 0n,
+      board: [...entityState.config.validators],
+      threshold: entityState.config.threshold,
       ...(name ? { name } : {}), // Include name if provided
     },
     accounts,

@@ -1162,6 +1162,8 @@ export interface Env {
   jReplicas: Map<string, JReplica>;       // Jurisdiction replicas (J-layer EVM state)
   height: number;
   timestamp: number;
+  runtimeSeed?: string; // BrainVault seed backing this runtime (plaintext, dev mode)
+  runtimeId?: string; // Runtime identity (usually signer1 address)
   runtimeInput: RuntimeInput; // Persistent storage for merged inputs
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: any; // Gossip layer for network profiles
@@ -1271,6 +1273,8 @@ export interface RuntimeSnapshot {
 export interface EnvSnapshot {
   height: number;
   timestamp: number;
+  runtimeSeed?: string;
+  runtimeId?: string;
   eReplicas: Map<string, EntityReplica>;  // E-layer state
   jReplicas: JReplica[];                   // J-layer state (with stateRoot for time travel)
   runtimeInput: RuntimeInput;

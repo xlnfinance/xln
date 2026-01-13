@@ -7,8 +7,12 @@
 
 export type Profile = {
   entityId: string;
+  runtimeId?: string; // Runtime identity (usually signer1 address)
   capabilities: string[]; // e.g. ["router", "swap:memecoins"]
-  hubs: string[]; // entityIds of hubs this entity is connected to
+  publicAccounts?: string[]; // direct peers with inbound capacity
+  hubs?: string[]; // legacy alias for publicAccounts
+  endpoints?: string[]; // websocket endpoints for this runtime
+  relays?: string[]; // preferred relay runtimes
   metadata?: {
     // Consensus profile fields (from name-resolution.ts)
     name?: string;
@@ -26,6 +30,8 @@ export type Profile = {
     // Fee configuration (PPM = parts per million)
     routingFeePPM?: number; // 0-10000 (0% - 1%)
     baseFee?: bigint; // Base fee in smallest unit (e.g., wei for ETH)
+    board?: string[]; // multisig board members
+    threshold?: bigint; // multisig threshold
     // 3D visualization position (for scenarios)
     position?: { x: number; y: number; z: number };
     // Additional fields
@@ -45,6 +51,7 @@ export interface GossipLayer {
   profiles: Map<string, Profile>;
   announce: (profile: Profile) => void;
   getProfiles: () => Profile[];
+  getProfileBundle?: (entityId: string) => { profile?: Profile; peers: Profile[] };
   getNetworkGraph: () => {
     findPaths: (source: string, target: string, amount?: bigint, tokenId?: number) => Promise<any[]>;
   };
@@ -54,13 +61,20 @@ export function createGossipLayer(): GossipLayer {
   const profiles = new Map<string, Profile>();
 
   const announce = (profile: Profile): void => {
+    const normalizedProfile: Profile = {
+      ...profile,
+      publicAccounts: profile.publicAccounts || profile.hubs || [],
+      hubs: profile.hubs || profile.publicAccounts || [],
+      endpoints: profile.endpoints || [],
+      relays: profile.relays || [],
+    };
     // Only update if newer timestamp or no existing profile
     const existing = profiles.get(profile.entityId);
-    const newTimestamp = profile.metadata?.lastUpdated || 0;
+    const newTimestamp = normalizedProfile.metadata?.lastUpdated || 0;
     const existingTimestamp = existing?.metadata?.lastUpdated || 0;
 
     if (!existing || newTimestamp > existingTimestamp) {
-      profiles.set(profile.entityId, profile);
+      profiles.set(profile.entityId, normalizedProfile);
       console.log(`📡 Gossip updated for ${profile.entityId} (timestamp: ${newTimestamp})`);
     } else {
       console.log(`📡 Gossip ignored older update for ${profile.entityId} (${newTimestamp} <= ${existingTimestamp})`);
@@ -69,6 +83,16 @@ export function createGossipLayer(): GossipLayer {
 
   const getProfiles = (): Profile[] => {
     return Array.from(profiles.values());
+  };
+
+  const getProfileBundle = (entityId: string): { profile?: Profile; peers: Profile[] } => {
+    const profile = profiles.get(entityId);
+    if (!profile) {
+      return { profile: undefined, peers: [] };
+    }
+    const peerIds = profile.publicAccounts || profile.hubs || [];
+    const peers = peerIds.map(id => profiles.get(id)).filter(Boolean) as Profile[];
+    return { profile, peers };
   };
 
   /**
@@ -137,6 +161,7 @@ export function createGossipLayer(): GossipLayer {
     profiles,
     announce,
     getProfiles,
+    getProfileBundle,
     getNetworkGraph,
   };
 }
@@ -159,8 +184,12 @@ export async function loadPersistedProfiles(db: any, gossip: { announce: (p: Pro
         const profile = JSON.parse(value);
         gossip.announce({
           entityId: profile.entityId,
+          runtimeId: profile.runtimeId,
           capabilities: profile.capabilities || [],
-          hubs: profile.hubs || [],
+          publicAccounts: profile.publicAccounts || profile.hubs || [],
+          hubs: profile.hubs || profile.publicAccounts || [],
+          endpoints: profile.endpoints || [],
+          relays: profile.relays || [],
           metadata: {
             name: profile.name,
             avatar: profile.avatar,

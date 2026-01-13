@@ -416,6 +416,8 @@ export const captureSnapshot = async (
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: env.timestamp,
+    ...(env.runtimeSeed ? { runtimeSeed: env.runtimeSeed } : {}),
+    ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
     eReplicas: new Map(Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica, true)])), // forSnapshot=true excludes clonedForValidation
     jReplicas,
     runtimeInput: {

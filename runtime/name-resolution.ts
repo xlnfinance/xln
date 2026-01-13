@@ -176,8 +176,10 @@ export const processProfileUpdate = async (
       try {
         env.gossip.announce({
           entityId,
+          runtimeId: env.runtimeId,
           capabilities: [], // ProfileUpdateTx doesn't include capabilities - use empty default
-          hubs: [], // ProfileUpdateTx doesn't include hubs - use empty default
+          publicAccounts: [],
+          hubs: [], // Legacy alias for publicAccounts
           metadata: {
             name: profile.name,
             avatar: profile.avatar,
