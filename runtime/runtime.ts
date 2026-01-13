@@ -999,10 +999,10 @@ const applyRuntimeInput = async (
         }
       }
 
-      // Capture snapshot with the actual processed input and outputs
-      await captureSnapshot(env, env.history, db, processedInput, entityOutbox, inputDescription);
+      // NOTE: Snapshot creation moved to process() - single entry point
+      // applyRuntimeInput just processes inputs, process() handles snapshotting
     } else {
-      console.log(`⚪ SKIP-FRAME: No runtimeTxs, entityInputs, or outputs - not creating empty frame`);
+      console.log(`⚪ SKIP-FRAME: No runtimeTxs, entityInputs, or outputs`);
       // Clear env.extra even when skipping frame to prevent stale solvency expectations
       env.extra = undefined;
     }
