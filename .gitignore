@@ -90,3 +90,4 @@ ai/*.txt
 *.m4a
 ai/mlx_models/
 ai/.venv/
+db-*/
