@@ -308,19 +308,35 @@ const waitForCreditLimit = async (
 };
 
 const run = async () => {
+  console.log(`P2P_NODE_CONFIG role=${role} relayUrl=${relayUrl} relayPort=${relayPort} isHub=${isHub}`);
+
+  setRuntimeSeed(seed);
+  const env = await main();
+
+  // CRITICAL: Start relay AFTER env created so we can pass callbacks
   if (isHub && relayPort > 0) {
-    const relay = startRuntimeWsServer({ host: relayHost, port: relayPort, serverId: role, requireAuth: false });
+    const relay = startRuntimeWsServer({
+      host: relayHost,
+      port: relayPort,
+      serverId: role,
+      requireAuth: false,
+      // CRITICAL: Pass callback to feed messages into Hub's runtime
+      onEntityInput: (from: string, input: any) => {
+        console.log(`[HUB-RELAY] Received entity_input from=${from.slice(0,10)} entity=${input.entityId.slice(-4)}`);
+        if (!env.networkInbox) env.networkInbox = [];
+        env.networkInbox.push(input);
+        console.log(`[HUB-RELAY] Added to networkInbox, size=${env.networkInbox.length}`);
+        // Trigger processing via same mechanism as P2P client
+        const { scheduleNetworkProcess } = require('../runtime');
+        if (scheduleNetworkProcess) scheduleNetworkProcess(env);
+      },
+    });
     relay.server.on('listening', () => {
       console.log(`P2P_RELAY_READY host=${relayHost} port=${relayPort}`);
     });
   } else if (isHub) {
     throw new Error(`RELAY_PORT_MISSING: ${relayPort}`);
   }
-
-  console.log(`P2P_NODE_CONFIG role=${role} relayUrl=${relayUrl} relayPort=${relayPort} isHub=${isHub}`);
-
-  setRuntimeSeed(seed);
-  const env = await main();
   env.scenarioMode = true;
   if (!env.runtimeId) {
     throw new Error(`RUNTIME_ID_MISSING: ${role}`);
@@ -415,8 +431,13 @@ const run = async () => {
   await waitForAccount(env, entityId, signerId, hubProfile.entityId);
   await waitForAccountReady(env, entityId, signerId, hubProfile.entityId);
 
-  // CLIENT extends credit to HUB (so hub can owe us)
-  console.log(`${role.toUpperCase()}: Extending credit to hub...`);
+  // STEP 1: Wait for HUB to extend credit to us (hub gives first)
+  console.log(`${role.toUpperCase()}: Waiting for hub to extend credit...`);
+  await waitForCreditLimit(env, entityId, signerId, hubProfile.entityId, usd(500_000), 60);
+  console.log(`${role.toUpperCase()}: ✅ Hub extended credit to us`);
+
+  // STEP 2: CLIENT extends credit to HUB (mutual credit)
+  console.log(`${role.toUpperCase()}: Extending credit back to hub...`);
   await runtimeProcess(env, [
     {
       entityId,
@@ -428,8 +449,26 @@ const run = async () => {
   ]);
 
   await converge(env, 30);
-  logAccountState(env, entityId, signerId, hubProfile.entityId, `${role} account after mutual credit`);
-  console.log(`${role.toUpperCase()}: Credit extended to hub`);
+
+  // ASSERT: Verify bidirectional capacity exists
+  const accountAfterCredit = getAccount(env, entityId, signerId, hubProfile.entityId);
+  if (!accountAfterCredit) throw new Error(`${role}: Account with hub missing after credit`);
+  const deltaAfterCredit = accountAfterCredit.deltas?.get(USDC);
+  if (!deltaAfterCredit) throw new Error(`${role}: No USDC delta after credit`);
+
+  const isLeftEntity = entityId < hubProfile.entityId;
+  const ourCreditLimit = isLeftEntity ? deltaAfterCredit.leftCreditLimit : deltaAfterCredit.rightCreditLimit;
+  const hubCreditLimit = isLeftEntity ? deltaAfterCredit.rightCreditLimit : deltaAfterCredit.leftCreditLimit;
+
+  console.log(`${role.toUpperCase()} CAPACITY CHECK:`);
+  console.log(`  ${role}→Hub credit: ${ourCreditLimit} (we can owe hub)`);
+  console.log(`  Hub→${role} credit: ${hubCreditLimit} (hub can owe us)`);
+
+  if (ourCreditLimit === 0n && hubCreditLimit === 0n) {
+    throw new Error(`${role}: NO CAPACITY - both credits are 0!`);
+  }
+
+  console.log(`✅ ${role.toUpperCase()}: Bilateral capacity verified`);
 
   if (role === 'alice') {
     await waitForProfile(env, 'bob', 40, refreshGossip, true, true, true);

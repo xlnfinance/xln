@@ -170,11 +170,32 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
 
     const targetClient = clients.get(target);
     if (targetClient) {
+      console.log(`[RELAY] Target ONLINE - delivering to ${target.slice(0,10)}`);
       send(targetClient.ws, msg);
       send(ws, { type: 'ack', inReplyTo: msg.id, status: 'delivered' });
       return;
     }
 
+    // Check if target is the relay server itself (local delivery)
+    if (target === serverId || clients.size === 0) {
+      console.log(`[RELAY] Local delivery - message for relay server itself`);
+      // Call appropriate callback for local message
+      if (msg.type === 'entity_input' && options.onEntityInput && msg.from) {
+        const payload = msg.payload as EntityInput;
+        console.log(`[RELAY] Calling onEntityInput for local delivery`);
+        await options.onEntityInput(msg.from, payload);
+        send(ws, { type: 'ack', inReplyTo: msg.id, status: 'delivered' });
+        return;
+      }
+      if (msg.type === 'runtime_input' && options.onRuntimeInput && msg.from) {
+        const payload = msg.payload as RuntimeInput;
+        await options.onRuntimeInput(msg.from, payload);
+        send(ws, { type: 'ack', inReplyTo: msg.id, status: 'delivered' });
+        return;
+      }
+    }
+
+    console.log(`[RELAY] Target OFFLINE - queueing for ${target.slice(0,10)}`);
     enqueue(target, msg);
     send(ws, { type: 'ack', inReplyTo: msg.id, status: 'queued' });
   };
