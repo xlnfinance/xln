@@ -217,9 +217,9 @@
             env.history = [];
             console.log('[View] AFTER clear: eReplicas =', env.eReplicas?.size || 0);
 
-            console.log(`[View] 📦 Calling XLN.prepopulateAHB...`);
-            await XLN.prepopulateAHB(env);
-            console.log(`[View] 📦 prepopulateAHB completed, history: ${env.history?.length || 0} frames`);
+            console.log(`[View] 📦 Running XLN.scenarios.ahb...`);
+            await XLN.scenarios.ahb(env);
+            console.log(`[View] 📦 scenarios.ahb completed, history: ${env.history?.length || 0} frames`);
 
             // Update stores AFTER prepopulate completes (EXACT Architect panel pattern)
             const frames = env.history || [];

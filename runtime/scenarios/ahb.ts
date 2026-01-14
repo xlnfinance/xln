@@ -974,6 +974,7 @@ export async function ahb(env: Env): Promise<void> {
       expectedSolvency: TOTAL_SOLVENCY,
     });
     await process(env);
+    
 
     // ============================================================================
     // STEP 9: Alice R2C - J-Machine Block Execution

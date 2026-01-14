@@ -764,7 +764,7 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
         } else {
           console.log('⚠️ jurisdictions.json not found - using BrowserVM mode (no external blockchain)');
         }
-        // Return empty map for BrowserVM mode - prepopulate-ahb.ts has its own fallback
+        // Return empty map for BrowserVM mode - scenarios handle their own fallback
         return jurisdictions;
       }
     }

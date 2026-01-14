@@ -361,12 +361,17 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Broadcast updated profile to gossip layer
       if (env.gossip) {
-        const profile = buildEntityProfile(newState, undefined, env.timestamp);
+        // MONOTONIC TIMESTAMP: Ensure timestamp grows
+        const existingProfile = env.gossip?.getProfiles?.().find((p: any) => p.entityId === newState.entityId);
+        const lastTimestamp = existingProfile?.metadata?.lastUpdated || 0;
+        const monotonicTimestamp = Math.max(lastTimestamp + 1, env.timestamp);
+
+        const profile = buildEntityProfile(newState, undefined, monotonicTimestamp);
         if (env.runtimeId) {
           profile.runtimeId = env.runtimeId;
         }
+        console.log(`📡 Broadcast profile for ${newState.entityId.slice(-4)} with ${newState.accounts.size} accounts (ts: ${lastTimestamp} → ${monotonicTimestamp})`);
         env.gossip.announce(profile);
-        console.log(`📡 Broadcast profile for ${entityState.entityId} with ${newState.accounts.size} accounts`);
       }
 
       return { newState, outputs };

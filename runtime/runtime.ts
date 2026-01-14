@@ -383,11 +383,16 @@ const routeEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] => 
       continue;
     }
     const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
+    console.log(`🔀 ROUTE: Output for entity ${output.entityId.slice(-4)} → runtimeId=${targetRuntimeId?.slice(0,10) || 'UNKNOWN'}`);
+
     if (!targetRuntimeId) {
+      console.warn(`⚠️ ROUTE-DEFER: No runtimeId for entity ${output.entityId.slice(-4)} - deferring output`);
       env.warn('network', 'Missing runtimeId for entity output (queued)', { entityId: output.entityId });
       deferredOutputs.push(output);
       continue;
     }
+
+    console.log(`📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId.slice(0, 10)} for entity ${output.entityId.slice(-4)}`);
     p2pOverlay.enqueueEntityInput(targetRuntimeId, output);
   }
 
@@ -424,8 +429,11 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     isHub: config.isHub,
     profileName: config.profileName,
     onEntityInput: (from, input) => {
+      const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
+      console.log(`📨 P2P-RECEIVE: from=${from.slice(0,10)} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
       env.networkInbox = env.networkInbox || [];
       env.networkInbox.push(input);
+      console.log(`📥 NETWORK-INBOX: Added, size=${env.networkInbox.length}`);
       env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
       scheduleNetworkProcess(env);
     },
@@ -1815,8 +1823,7 @@ export const process = async (
           console.log(`📤 TICK: ${routedOutputs.length} local outputs queued from pending network outputs`);
         }
       } else {
-        // No inputs to process - clear env.extra to prevent stale solvency expectations
-        env.extra = undefined;
+        // No inputs to process - keep env.extra so narrative-only frames still render
       }
     }
 

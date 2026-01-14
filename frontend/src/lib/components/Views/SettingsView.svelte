@@ -242,7 +242,7 @@
       const xln = await getXLN();
       const env = $xlnEnvironment || await xln.main();
       // runDemo removed - use scenarios.ahb instead
-      await xln.prepopulateAHB(env);
+      await xln.scenarios.ahb(env);
       xlnEnvironment.set(env);
     } catch (error) {
       console.error('❌ Demo failed:', error);
@@ -260,7 +260,7 @@
 
       // Choose prepopulate function based on selected preset
       if (selectedPreset === 'ahb') {
-        await xln.prepopulateAHB(env);
+        await xln.scenarios.ahb(env);
       } else {
         await xln.prepopulateFullMechanics(env);
       }

@@ -150,14 +150,25 @@ export class RuntimeP2P {
   }
 
   enqueueEntityInput(targetRuntimeId: string, input: EntityInput) {
+    console.log(`📨 P2P-ENQUEUE: to=${targetRuntimeId.slice(0,10)} entity=${input.entityId.slice(-4)} txs=${input.entityTxs?.length || 0}`);
+
     const client = this.getActiveClient();
     if (client && client.isOpen()) {
+      console.log(`📡 P2P-SEND-NOW: Client is open, sending immediately`);
       const sent = client.sendEntityInput(targetRuntimeId, input);
-      if (sent) return;
+      if (sent) {
+        console.log(`✅ P2P-SENT: Message sent successfully`);
+        return;
+      }
+      console.warn(`⚠️ P2P-SEND-FAILED: Client.send returned false`);
+    } else {
+      console.warn(`⚠️ P2P-NO-CLIENT: No active client, queueing message`);
     }
+
     const queue = this.pendingByRuntime.get(targetRuntimeId) || [];
     queue.push(input);
     this.pendingByRuntime.set(targetRuntimeId, queue);
+    console.log(`📥 P2P-QUEUED: Message queued for ${targetRuntimeId.slice(0,10)}, queue size: ${queue.length}`);
   }
 
   requestGossip(runtimeId: string) {
@@ -235,6 +246,7 @@ export class RuntimeP2P {
       const existingProfile = this.env.gossip?.getProfiles?.().find((p: any) => p.entityId === entityId);
       const lastTimestamp = existingProfile?.metadata?.lastUpdated || 0;
       const monotonicTimestamp = Math.max(lastTimestamp + 1, this.env.timestamp);
+      console.log(`🕐 MONOTONIC: entity=${entityId.slice(-4)} lastTs=${lastTimestamp} envTs=${this.env.timestamp} → ${monotonicTimestamp}`);
 
       const profile = buildEntityProfile(replica.state, this.profileName, monotonicTimestamp);
       profile.runtimeId = this.runtimeId;
