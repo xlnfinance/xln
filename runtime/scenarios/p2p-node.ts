@@ -243,15 +243,20 @@ const waitForHubAccount = async (
   for (let i = 0; i < maxRounds; i++) {
     const profile = getProfileByName(env, 'hub');
     const accounts = profile?.accounts || [];
-    if (profile?.runtimeId && accounts.some((account: any) => account.counterpartyId === counterpartyId)) {
-      return;
-    }
+    const accountIds = accounts.map((a: any) => a.counterpartyId?.slice(-4) || '????');
+
     if (i % 5 === 0) {
-      logProfile(`wait-hub-account round=${i}`, profile);
+      console.log(`[HUB-ACCOUNT-WAIT] round=${i} hubProfile=${!!profile} accounts=[${accountIds.join(',')}] looking for=${counterpartyId.slice(-4)}`);
+    }
+
+    if (profile?.runtimeId && accounts.some((account: any) => account.counterpartyId === counterpartyId)) {
+      console.log(`✅ Found hub account with ${counterpartyId.slice(-4)}`);
+      return;
     }
     refresh?.();
     await sleep(200);
   }
+  console.error(`❌ HUB_ACCOUNT_MISSING: Looking for ${counterpartyId.slice(-4)}, hub has accounts: [${accountIds.join(',')}]`);
   logProfile('wait-hub-account timeout', getProfileByName(env, 'hub'));
   throw new Error(`HUB_ACCOUNT_MISSING: ${counterpartyId}`);
 };
@@ -400,6 +405,15 @@ const run = async () => {
     logProfile('alice sees bob', bobProfile);
     await waitForHubAccount(env, bobProfile.entityId, refreshGossip);
 
+    console.log('='.repeat(80));
+    console.log('ALICE SENDING PAYMENT TO BOB');
+    console.log(`  Alice entityId: ${entityId}`);
+    console.log(`  Hub entityId: ${hubProfile.entityId}`);
+    console.log(`  Bob entityId: ${bobProfile.entityId}`);
+    console.log(`  Route: Alice -> Hub -> Bob`);
+    console.log(`  Amount: $1,000 USDC`);
+    console.log('='.repeat(80));
+
     await runtimeProcess(env, [
       {
         entityId,
@@ -418,6 +432,10 @@ const run = async () => {
         ],
       },
     ]);
+
+    console.log('ALICE: directPayment tx submitted to runtime');
+    logEntityState(env, entityId, signerId, 'alice after payment submit');
+    logAccountState(env, entityId, signerId, hubProfile.entityId, 'alice-hub account after payment');
 
     await converge(env, 30);
     console.log('P2P_PAYMENT_SENT');

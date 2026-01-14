@@ -121,7 +121,9 @@ export class RuntimeWsClient {
       return;
     }
     if (msg.type === 'entity_input' && msg.payload && msg.from) {
-      await this.options.onEntityInput?.(msg.from, msg.payload as EntityInput);
+      const input = msg.payload as EntityInput;
+      console.log(`[WS-CLIENT] RECEIVED entity_input: from=${msg.from.slice(0,10)} entity=${input.entityId.slice(-4)} txs=${input.entityTxs?.length || 0}`);
+      await this.options.onEntityInput?.(msg.from, input);
       return;
     }
     if (msg.type === 'gossip_request' && msg.payload && msg.from) {
@@ -150,7 +152,8 @@ export class RuntimeWsClient {
   }
 
   sendEntityInput(to: string, input: EntityInput): boolean {
-    return this.sendRaw({
+    console.log(`[WS-CLIENT] sendEntityInput: to=${to.slice(0,10)} entity=${input.entityId.slice(-4)}`);
+    const sent = this.sendRaw({
       type: 'entity_input',
       id: makeMessageId(),
       from: this.options.runtimeId,
@@ -158,6 +161,8 @@ export class RuntimeWsClient {
       timestamp: Date.now(),
       payload: input,
     });
+    console.log(`[WS-CLIENT] send result: ${sent ? 'SUCCESS' : 'FAILED'}`);
+    return sent;
   }
 
   sendGossipRequest(to: string, payload: unknown): boolean {

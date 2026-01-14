@@ -282,11 +282,11 @@
   let tutorialPaused = false;
   let currentTutorialFrame = 0;
 
-  // Scenario Code - shows actual prepopulate-ahb.ts from /runtime (via Vite raw import)
+  // Scenario Code - shows actual scenarios/ahb.ts from /runtime (via Vite raw import)
   let scenarioCodeTextarea: HTMLTextAreaElement;
   const scenarioCode = prepopulateAHBCode;
 
-  // Find line number for current frame in prepopulate-ahb.ts
+  // Find line number for current frame in scenarios/ahb.ts
   function getFrameLineNumber(frameIndex: number): number {
     const lines = scenarioCode.split('\n');
     // Match patterns like "FRAME 12:", "Frame 12:", "FRAME 12 ", etc.
