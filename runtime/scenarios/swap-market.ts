@@ -4,7 +4,7 @@
  * Tests realistic orderbook behavior with:
  * - 1 reference asset (USDC - token 1)
  * - 3 pairwise books: USDC/ETH, USDC/BTC, USDC/DAI
- * - 8 participants: Hub + 7 traders (Alice, Bob, Carol, Dave, Eve, Frank, Grace)
+ * - 10 participants: 3 hubs + 7 traders (Alice, Bob, Carol, Dave, Eve, Frank, Grace)
  * - Realistic market dynamics: makers, takers, partial fills, spread
  *
  * Market scenario:
@@ -66,7 +66,7 @@ const FILL_60 = 39321;
 export async function swapMarket(env: Env): Promise<void> {
   // Register test keys for real signatures
   const { registerTestKeys } = await import('../account-crypto');
-  await registerTestKeys(['s1', 's2', 's3', 'hub', 'alice', 'bob', 'carol', 'dave', 'frank']);
+  await registerTestKeys(['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's10']);
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
 
@@ -85,37 +85,63 @@ export async function swapMarket(env: Env): Promise<void> {
 
   const browserVM = await ensureBrowserVM();
   const depositoryAddress = browserVM.getDepositoryAddress();
-  createJReplica(env, 'Market', depositoryAddress, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
+  const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
+  createJReplica(env, 'Market', depositoryAddress, J_MACHINE_POSITION); // Match ahb.ts positioning
   const jurisdiction = createJurisdictionConfig('Market', depositoryAddress);
   console.log('✅ BrowserVM J-Machine created\n');
 
   // ============================================================================
-  // SETUP: Create 8 entities (Hub + 7 traders)
+  // SETUP: Create 10 entities (3 hubs + 7 traders)
   // ============================================================================
-  console.log('📦 Creating 8 market participants...');
+  console.log('📦 Creating 10 market participants (3 hubs + 7 traders)...');
 
-  const entities = [
-    { name: 'Hub', id: '0x' + '1'.padStart(64, '0'), signer: 's1', role: 'market-maker' },
-    { name: 'Alice', id: '0x' + '2'.padStart(64, '0'), signer: 's2', role: 'maker' },
-    { name: 'Bob', id: '0x' + '3'.padStart(64, '0'), signer: 's3', role: 'maker' },
-    { name: 'Carol', id: '0x' + '4'.padStart(64, '0'), signer: 's4', role: 'taker' },
-    { name: 'Dave', id: '0x' + '5'.padStart(64, '0'), signer: 's5', role: 'taker' },
-    { name: 'Eve', id: '0x' + '6'.padStart(64, '0'), signer: 's6', role: 'maker' },
-    { name: 'Frank', id: '0x' + '7'.padStart(64, '0'), signer: 's7', role: 'taker' },
-    { name: 'Grace', id: '0x' + '8'.padStart(64, '0'), signer: 's8', role: 'maker' },
+  const hubs = [
+    { name: 'HubETH', id: '0x' + '1'.padStart(64, '0'), signer: 's1', role: 'hub', pairs: ['1/2'] },
+    { name: 'HubBTC', id: '0x' + '2'.padStart(64, '0'), signer: 's2', role: 'hub', pairs: ['1/3'] },
+    { name: 'HubDAI', id: '0x' + '3'.padStart(64, '0'), signer: 's3', role: 'hub', pairs: ['1/4'] },
   ];
 
-  // Deterministic layout: Hub on top, traders in a row below (matches ahb.ts style)
-  const MARKET_POSITIONS: Record<string, { x: number; y: number; z: number }> = {
-    Hub: { x: 0, y: -30, z: 0 },
-    Alice: { x: -180, y: -80, z: 0 },
-    Bob: { x: -120, y: -80, z: 0 },
-    Carol: { x: -60, y: -80, z: 0 },
-    Dave: { x: 0, y: -80, z: 0 },
-    Eve: { x: 60, y: -80, z: 0 },
-    Frank: { x: 120, y: -80, z: 0 },
-    Grace: { x: 180, y: -80, z: 0 },
+  const traders = [
+    { name: 'Alice', id: '0x' + '4'.padStart(64, '0'), signer: 's4', role: 'maker' },
+    { name: 'Bob', id: '0x' + '5'.padStart(64, '0'), signer: 's5', role: 'maker' },
+    { name: 'Carol', id: '0x' + '6'.padStart(64, '0'), signer: 's6', role: 'taker' },
+    { name: 'Dave', id: '0x' + '7'.padStart(64, '0'), signer: 's7', role: 'taker' },
+    { name: 'Eve', id: '0x' + '8'.padStart(64, '0'), signer: 's8', role: 'maker' },
+    { name: 'Frank', id: '0x' + '9'.padStart(64, '0'), signer: 's9', role: 'taker' },
+    { name: 'Grace', id: '0x' + 'a'.padStart(64, '0'), signer: 's10', role: 'maker' },
+  ];
+
+  const entities = [...hubs, ...traders];
+
+  const HUB_SPACING = 160;
+  const HUB_Y = -80;
+  const TRADER_Y = -140;
+  const TRADER_Z = 70;
+  const TRADER_X = 40;
+
+  const MARKET_OFFSETS: Record<string, { x: number; y: number; z: number }> = {
+    HubETH: { x: -HUB_SPACING, y: HUB_Y, z: 0 },
+    HubBTC: { x: 0, y: HUB_Y, z: 0 },
+    HubDAI: { x: HUB_SPACING, y: HUB_Y, z: 0 },
+    Alice: { x: -HUB_SPACING - TRADER_X, y: TRADER_Y, z: -TRADER_Z },
+    Bob: { x: -HUB_SPACING + TRADER_X, y: TRADER_Y, z: TRADER_Z },
+    Carol: { x: -HUB_SPACING, y: TRADER_Y, z: 0 },
+    Dave: { x: -TRADER_X, y: TRADER_Y, z: -TRADER_Z },
+    Grace: { x: TRADER_X, y: TRADER_Y, z: TRADER_Z },
+    Eve: { x: HUB_SPACING - TRADER_X, y: TRADER_Y, z: -TRADER_Z },
+    Frank: { x: HUB_SPACING + TRADER_X, y: TRADER_Y, z: TRADER_Z },
   };
+
+  const MARKET_POSITIONS: Record<string, { x: number; y: number; z: number }> = Object.fromEntries(
+    Object.entries(MARKET_OFFSETS).map(([name, offset]) => [
+      name,
+      {
+        x: J_MACHINE_POSITION.x + offset.x,
+        y: J_MACHINE_POSITION.y + offset.y,
+        z: J_MACHINE_POSITION.z + offset.z,
+      },
+    ]),
+  );
 
   const createEntityTxs = entities.map(e => ({
     type: 'importReplica' as const,
@@ -136,54 +162,118 @@ export async function swapMarket(env: Env): Promise<void> {
   await applyRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
   console.log(`  ✅ Created: ${entities.map(e => e.name).join(', ')}\n`);
 
-  const [hub, alice, bob, carol, dave, eve, frank, grace] = entities;
+  const [hubEth, hubBtc, hubDai] = hubs;
+  const [alice, bob, carol, dave, eve, frank, grace] = traders;
 
-  // ============================================================================
-  // SETUP: Open bilateral accounts (all traders ↔ Hub)
-  // ============================================================================
-  console.log('🔗 Opening bilateral accounts (traders ↔ Hub)...');
-
-  const traders = [alice, bob, carol, dave, eve, frank, grace];
-
-  await process(env, traders.map(trader => ({
-    entityId: trader.id,
-    signerId: trader.signer,
-    entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }],
+  // Initialize orderbookExt for each hub
+  const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../orderbook');
+  await process(env, hubs.map(hub => ({
+    entityId: hub.id,
+    signerId: hub.signer,
+    entityTxs: [{
+      type: 'initOrderbookExt',
+      data: {
+        name: hub.name,
+        spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
+        referenceTokenId: USDC,
+        minTradeSize: 0n,
+        supportedPairs: hub.pairs,
+      },
+    }],
   })));
+  await converge(env);
+  console.log('  ✅ Orderbook extensions initialized\n');
+
+  // ============================================================================
+  // SETUP: Open bilateral accounts per hub
+  // ============================================================================
+  console.log('🔗 Opening bilateral accounts (traders ↔ hubs)...');
+
+  const hubEthTraders = [alice, bob, eve, carol];
+  const hubBtcTraders = [alice, grace, dave];
+  const hubDaiTraders = [bob, eve, frank];
+
+  await process(env, [
+    ...hubEthTraders.map(trader => ({
+      entityId: trader.id,
+      signerId: trader.signer,
+      entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubEth.id } }],
+    })),
+    ...hubBtcTraders.map(trader => ({
+      entityId: trader.id,
+      signerId: trader.signer,
+      entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubBtc.id } }],
+    })),
+    ...hubDaiTraders.map(trader => ({
+      entityId: trader.id,
+      signerId: trader.signer,
+      entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubDai.id } }],
+    })),
+  ]);
 
   await converge(env);
-  console.log('  ✅ All bilateral accounts created\n');
+  console.log('  ✅ Bilateral accounts created\n');
 
   // ============================================================================
   // SETUP: Credit limits (4 tokens: USDC, ETH, BTC, DAI)
   // ============================================================================
   console.log('💳 Setting up credit limits for all traders...');
 
-  const creditLimit = usdc(10_000_000); // 10M capacity per token per side
+  const creditLimitUnits = 10_000_000n / 3n;
 
-  // Hub extends credit to all traders (4 tokens each)
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: traders.flatMap(trader => [
-      { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: USDC, amount: creditLimit } },
-      { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: ETH, amount: creditLimit } },
-      { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: BTC, amount: creditLimit } },
-      { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: DAI, amount: creditLimit } },
-    ]),
-  }]);
+  await process(env, [
+    {
+      entityId: hubEth.id,
+      signerId: hubEth.signer,
+      entityTxs: hubEthTraders.flatMap(trader => [
+        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: USDC, amount: usdc(creditLimitUnits) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: ETH, amount: eth(creditLimitUnits) } },
+      ]),
+    },
+    {
+      entityId: hubBtc.id,
+      signerId: hubBtc.signer,
+      entityTxs: hubBtcTraders.flatMap(trader => [
+        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: USDC, amount: usdc(creditLimitUnits) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: BTC, amount: btc(creditLimitUnits) } },
+      ]),
+    },
+    {
+      entityId: hubDai.id,
+      signerId: hubDai.signer,
+      entityTxs: hubDaiTraders.flatMap(trader => [
+        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: USDC, amount: usdc(creditLimitUnits) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: DAI, amount: dai(creditLimitUnits) } },
+      ]),
+    },
+  ]);
 
-  // Traders extend credit back to Hub
-  await process(env, traders.map(trader => ({
-    entityId: trader.id,
-    signerId: trader.signer,
-    entityTxs: [
-      { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC, amount: creditLimit } },
-      { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: ETH, amount: creditLimit } },
-      { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: BTC, amount: creditLimit } },
-      { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: DAI, amount: creditLimit } },
-    ],
-  })));
+  await process(env, [
+    ...hubEthTraders.map(trader => ({
+      entityId: trader.id,
+      signerId: trader.signer,
+      entityTxs: [
+        { type: 'extendCredit', data: { counterpartyEntityId: hubEth.id, tokenId: USDC, amount: usdc(creditLimitUnits) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: hubEth.id, tokenId: ETH, amount: eth(creditLimitUnits) } },
+      ],
+    })),
+    ...hubBtcTraders.map(trader => ({
+      entityId: trader.id,
+      signerId: trader.signer,
+      entityTxs: [
+        { type: 'extendCredit', data: { counterpartyEntityId: hubBtc.id, tokenId: USDC, amount: usdc(creditLimitUnits) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: hubBtc.id, tokenId: BTC, amount: btc(creditLimitUnits) } },
+      ],
+    })),
+    ...hubDaiTraders.map(trader => ({
+      entityId: trader.id,
+      signerId: trader.signer,
+      entityTxs: [
+        { type: 'extendCredit', data: { counterpartyEntityId: hubDai.id, tokenId: USDC, amount: usdc(creditLimitUnits) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: hubDai.id, tokenId: DAI, amount: dai(creditLimitUnits) } },
+      ],
+    })),
+  ]);
 
   await converge(env);
   console.log('  ✅ Bidirectional credit established for all tokens\n');
@@ -198,7 +288,7 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('📊 Building orderbook depth across 3 pairs...\n');
 
   // USDC/ETH book (ETH @ $3000)
-  console.log('💱 USDC/ETH Orderbook:');
+  console.log('💱 USDC/ETH Orderbook (HubETH):');
   await process(env, [
     // Alice: Sell 10 ETH @ $3100 (ask above market)
     {
@@ -208,7 +298,7 @@ export async function swapMarket(env: Env): Promise<void> {
         type: 'placeSwapOffer',
         data: {
           offerId: 'alice-eth-ask',
-          counterpartyId: hub.id,
+          counterpartyId: hubEth.id,
           giveTokenId: ETH,
           giveAmount: eth(10),
           wantTokenId: USDC,
@@ -225,7 +315,7 @@ export async function swapMarket(env: Env): Promise<void> {
         type: 'placeSwapOffer',
         data: {
           offerId: 'bob-eth-ask',
-          counterpartyId: hub.id,
+          counterpartyId: hubEth.id,
           giveTokenId: ETH,
           giveAmount: eth(5),
           wantTokenId: USDC,
@@ -242,7 +332,7 @@ export async function swapMarket(env: Env): Promise<void> {
         type: 'placeSwapOffer',
         data: {
           offerId: 'eve-eth-bid',
-          counterpartyId: hub.id,
+          counterpartyId: hubEth.id,
           giveTokenId: USDC,
           giveAmount: usdc(23600), // $2950/ETH * 8
           wantTokenId: ETH,
@@ -258,7 +348,7 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('  ✅ Eve: BUY 8 ETH @ $2950 (bid)\n');
 
   // USDC/BTC book (BTC @ $60000)
-  console.log('💱 USDC/BTC Orderbook:');
+  console.log('💱 USDC/BTC Orderbook (HubBTC):');
   await process(env, [
     // Grace: Sell 2 BTC @ $61000 (ask)
     {
@@ -268,7 +358,7 @@ export async function swapMarket(env: Env): Promise<void> {
         type: 'placeSwapOffer',
         data: {
           offerId: 'grace-btc-ask',
-          counterpartyId: hub.id,
+          counterpartyId: hubBtc.id,
           giveTokenId: BTC,
           giveAmount: btc(2),
           wantTokenId: USDC,
@@ -285,7 +375,7 @@ export async function swapMarket(env: Env): Promise<void> {
         type: 'placeSwapOffer',
         data: {
           offerId: 'alice-btc-bid',
-          counterpartyId: hub.id,
+          counterpartyId: hubBtc.id,
           giveTokenId: USDC,
           giveAmount: usdc(59000), // $59000/BTC
           wantTokenId: BTC,
@@ -300,7 +390,7 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('  ✅ Alice: BUY 1 BTC @ $59000 (bid)\n');
 
   // USDC/DAI book (DAI @ $1)
-  console.log('💱 USDC/DAI Orderbook:');
+  console.log('💱 USDC/DAI Orderbook (HubDAI):');
   await process(env, [
     // Bob: Sell 50000 DAI @ $1.001 (tight spread, stablecoin pair)
     {
@@ -310,7 +400,7 @@ export async function swapMarket(env: Env): Promise<void> {
         type: 'placeSwapOffer',
         data: {
           offerId: 'bob-dai-ask',
-          counterpartyId: hub.id,
+          counterpartyId: hubDai.id,
           giveTokenId: DAI,
           giveAmount: dai(50000),
           wantTokenId: USDC,
@@ -327,7 +417,7 @@ export async function swapMarket(env: Env): Promise<void> {
         type: 'placeSwapOffer',
         data: {
           offerId: 'eve-dai-bid',
-          counterpartyId: hub.id,
+          counterpartyId: hubDai.id,
           giveTokenId: USDC,
           giveAmount: usdc(29970), // $0.999/DAI * 30000
           wantTokenId: DAI,
@@ -362,7 +452,7 @@ export async function swapMarket(env: Env): Promise<void> {
       type: 'fillSwapOffer',
       data: {
         offerId: 'bob-eth-ask',
-        counterpartyId: hub.id, // Carol's account is with Hub
+        counterpartyId: hubEth.id, // Carol's account is with HubETH
         fillRatio: FILL_60, // 60% fill = 3 ETH
       },
     }],
@@ -378,7 +468,7 @@ export async function swapMarket(env: Env): Promise<void> {
       type: 'fillSwapOffer',
       data: {
         offerId: 'alice-btc-bid',
-        counterpartyId: hub.id, // Dave's account is with Hub
+        counterpartyId: hubBtc.id, // Dave's account is with HubBTC
         fillRatio: MAX_FILL_RATIO, // 100% fill = 1 BTC
       },
     }],
@@ -394,7 +484,7 @@ export async function swapMarket(env: Env): Promise<void> {
       type: 'fillSwapOffer',
       data: {
         offerId: 'bob-dai-ask',
-        counterpartyId: hub.id, // Frank's account is with Hub
+        counterpartyId: hubDai.id, // Frank's account is with HubDAI
         fillRatio: FILL_20, // 20% fill = 10000 DAI
       },
     }],
@@ -420,7 +510,7 @@ export async function swapMarket(env: Env): Promise<void> {
       type: 'cancelSwapOffer',
       data: {
         offerId: 'alice-eth-ask',
-        counterpartyId: hub.id,
+        counterpartyId: hubEth.id,
       },
     }],
   }]);
@@ -435,7 +525,7 @@ export async function swapMarket(env: Env): Promise<void> {
       type: 'placeSwapOffer',
       data: {
         offerId: 'alice-eth-ask-v2',
-        counterpartyId: hub.id,
+        counterpartyId: hubEth.id,
         giveTokenId: ETH,
         giveAmount: eth(10),
         wantTokenId: USDC,
@@ -456,15 +546,13 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('                   MARKET SUMMARY                              ');
   console.log('═══════════════════════════════════════════════════════════════\n');
 
-  const [, hubRep] = findReplica(env, hub.id);
-  const hubBooks = hubRep.state.orderbookExt;
-
-  if (hubBooks) {
-    console.log('📈 Hub Orderbook State:');
-    console.log(`  - Total pairs: ${hubBooks.size}`);
-
-    // Count orders per book
-    for (const [pairId, book] of hubBooks) {
+  for (const hub of hubs) {
+    const [, hubRep] = findReplica(env, hub.id);
+    const hubExt = hubRep.state.orderbookExt;
+    if (!hubExt?.books) continue;
+    console.log(`📈 ${hub.name} Orderbook State:`);
+    console.log(`  - Total pairs: ${hubExt.books.size}`);
+    for (const [pairId, book] of hubExt.books) {
       const askCount = book.asks.length;
       const bidCount = book.bids.length;
       console.log(`  - Pair ${pairId}: ${bidCount} bids, ${askCount} asks`);
@@ -476,7 +564,7 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('👥 Trader Positions:');
   for (const trader of [carol, dave, frank]) {
     const [, rep] = findReplica(env, trader.id);
-    const account = rep.state.accounts.get(hub.id);
+    const account = rep.state.accounts.get(hubEth.id) || rep.state.accounts.get(hubBtc.id) || rep.state.accounts.get(hubDai.id);
     if (account) {
       const deltas = Array.from(account.deltas.values());
       console.log(`  ${trader.name}:`);
@@ -495,7 +583,7 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('✅ MULTI-PARTY MARKET SIMULATION COMPLETE!');
   console.log('═══════════════════════════════════════════════════════════════');
   console.log(`📊 Total frames: ${env.history?.length || 0}`);
-  console.log(`👥 Participants: 8 (${entities.map(e => e.name).join(', ')})`);
+  console.log(`👥 Participants: 10 (${entities.map(e => e.name).join(', ')})`);
   console.log(`💱 Orderbooks: 3 (USDC/ETH, USDC/BTC, USDC/DAI)`);
   console.log(`📈 Orders placed: 9`);
   console.log(`🎯 Market fills: 3`);

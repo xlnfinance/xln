@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import type { Readable } from 'svelte/store';
   import { xlnEnvironment } from '$lib/stores/xlnStore';
   import { formatEntityId } from '$lib/utils/format';
 
@@ -16,6 +17,7 @@
   export let pairId: string = '1/2';  // e.g., "1/2" for ETH/USDC
   export let depth: number = 10;
   export let showOwners: boolean = false;
+  export let envStore: Readable<any> = xlnEnvironment;
 
   // Derived state
   interface OrderLevel {
@@ -35,7 +37,7 @@
   const POLL_MS = 200;  // 5 updates/sec
 
   function extractOrderbook() {
-    const env = $xlnEnvironment;
+    const env = $envStore;
     if (!env || !hubId) return;
 
     // Find hub replica

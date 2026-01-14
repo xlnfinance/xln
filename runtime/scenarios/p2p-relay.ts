@@ -17,6 +17,7 @@ const hubRuntimeId = deriveSignerAddressSync(hubSeed, '1');
 type ProcInfo = {
   role: string;
   proc: ReturnType<typeof spawn>;
+  stdoutBuffer: string[];  // Buffer all stdout for retrospective matching
 };
 
 const waitForLine = (procInfo: ProcInfo, matcher: RegExp, timeoutMs = 15000) => {
@@ -58,11 +59,29 @@ const waitForLineOrError = (
   timeoutMs = 15000
 ) => {
   return new Promise<void>((resolve, reject) => {
+    // FIRST: Check already-buffered output (solves race condition)
+    for (const line of procInfo.stdoutBuffer) {
+      if (matcher.test(line)) {
+        resolve();
+        return;
+      }
+      for (const err of errorMatchers) {
+        if (err.test(line)) {
+          reject(new Error(`${procInfo.role} reported error: ${line.trim()}`));
+          return;
+        }
+      }
+    }
+
     const maxTicks = Math.max(1, Math.ceil(timeoutMs / 200));
     let ticks = 0;
+    let resolved = false;
     const handler = (chunk: Buffer) => {
+      if (resolved) return;
       const text = chunk.toString();
+      // Note: Buffer is already populated by spawnNode's handlers
       if (matcher.test(text)) {
+        resolved = true;
         cleanup();
         resolve();
         return;
@@ -79,16 +98,27 @@ const waitForLineOrError = (
       procInfo.proc.stdout?.off('data', handler);
       procInfo.proc.stderr?.off('data', handler);
       procInfo.proc.off('exit', onExit);
+      clearInterval(timer);
     };
     const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (resolved) return;
       cleanup();
-      reject(new Error(`${procInfo.role} exited early (code=${code ?? 'null'} signal=${signal ?? 'null'})`));
+      // Exit code 0 is success - process may have buffered output
+      // Give a small delay for any buffered stdout to arrive
+      if (code === 0 && signal === null) {
+        setTimeout(() => {
+          if (!resolved) {
+            reject(new Error(`${procInfo.role} exited successfully but expected line '${matcher}' not found`));
+          }
+        }, 200);
+      } else {
+        reject(new Error(`${procInfo.role} exited early (code=${code ?? 'null'} signal=${signal ?? 'null'})`));
+      }
     };
     const timer = setInterval(() => {
       ticks += 1;
       if (ticks > maxTicks) {
         cleanup();
-        clearInterval(timer);
         reject(new Error(`Timeout waiting for ${matcher} from ${procInfo.role}`));
       }
     }, 200);
@@ -161,14 +191,20 @@ const spawnNode = (
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  const stdoutBuffer: string[] = [];
+
   proc.stdout?.on('data', chunk => {
-    process.stdout.write(`[${role}] ${chunk.toString()}`);
+    const text = chunk.toString();
+    stdoutBuffer.push(text);  // Buffer all output
+    process.stdout.write(`[${role}] ${text}`);
   });
   proc.stderr?.on('data', chunk => {
-    process.stderr.write(`[${role}] ${chunk.toString()}`);
+    const text = chunk.toString();
+    stdoutBuffer.push(text);  // Also buffer stderr
+    process.stderr.write(`[${role}] ${text}`);
   });
 
-  return { role, proc };
+  return { role, proc, stdoutBuffer };
 };
 
 const killAll = (procs: ProcInfo[]) => {
