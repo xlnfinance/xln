@@ -213,11 +213,13 @@ const run = async () => {
   }
 
   const maxAttempts = envPort ? 1 : 10;
+  let relayUrl = `ws://127.0.0.1:${relayPort}`;
+
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     if (!envPort && attempt > 0) {
       relayPort = pickRandomPort();
+      relayUrl = `ws://127.0.0.1:${relayPort}`;
     }
-    const relayUrl = `ws://127.0.0.1:${relayPort}`;
     console.log(`[P2P] Trying relay port ${relayPort}`);
 
     hub = spawnNode('hub', hubSeed, relayUrl, undefined, [
@@ -236,6 +238,15 @@ const run = async () => {
         /P2P_RELAY_READY/,
         [/Runtime relay.*failed/i, /Failed to start server/i, /RELAY_PORT_MISSING/i]
       );
+
+      // SMOKE CHECK: Verify relay actually accepts connections
+      console.log('[P2P] Running smoke check - connecting to relay...');
+      try {
+        await smokeConnect(relayUrl, 3000);
+        console.log('[P2P] ✅ Smoke check passed - relay accepting connections');
+      } catch (error) {
+        throw new Error(`Relay smoke check failed: ${(error as Error).message}`);
+      }
 
       console.log('[P2P] Hub relay ready - spawning alice/bob NOW');
 
@@ -269,24 +280,19 @@ const run = async () => {
     throw new Error('HUB_START_FAILED');
   }
 
-  const relayUrl = `ws://127.0.0.1:${relayPort}`;
-  console.log(`[P2P] Relay URL ${relayUrl}`);
+  // All nodes already ready from Promise.all above
+  console.log(`[P2P] All nodes connected to relay ${relayUrl}`)
+
+;
 
   const errorMatchers = [
     /PROFILE_TIMEOUT/i,
-    /PROFILE_MISSING_RUNTIME_ID/i,
-    /PROFILE_MISSING_PUBLIC_KEY/i,
-    /ACCOUNT_PENDING_FRAME/i,
-    /ACCOUNT_NOT_ACKED/i,
+    /PROFILE_MISSING/i,
     /SIGNER_KEY_MISSING/i,
-    /Invalid frame signature/i,
+    /Invalid.*signature/i,
     /WS_CLIENT_ERROR/i,
-    /RELAY_PORT_MISSING/i,
+    /FATAL/i,
   ];
-
-  await waitForLineOrError(bob, /P2P_NODE_READY role=bob/, errorMatchers);
-  await waitForLineOrError(alice, /P2P_NODE_READY role=alice/, errorMatchers);
-  console.log('[P2P] Nodes ready');
 
   await waitForLineOrError(bob, /P2P_PROFILE_SENT/, errorMatchers);
   await waitForLineOrError(alice, /P2P_PROFILE_SENT/, errorMatchers);

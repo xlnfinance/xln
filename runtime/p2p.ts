@@ -229,7 +229,14 @@ export class RuntimeP2P {
       if (seen.has(entityId)) continue;
       if (this.advertiseEntityIds && !this.advertiseEntityIds.includes(entityId)) continue;
       seen.add(entityId);
-      const profile = buildEntityProfile(replica.state, this.profileName, this.env.timestamp);
+
+      // MONOTONIC TIMESTAMP: Ensure timestamp grows even if env.timestamp doesn't change
+      // Get last announced timestamp for this entity from gossip
+      const existingProfile = this.env.gossip?.getProfiles?.().find((p: any) => p.entityId === entityId);
+      const lastTimestamp = existingProfile?.metadata?.lastUpdated || 0;
+      const monotonicTimestamp = Math.max(lastTimestamp + 1, this.env.timestamp);
+
+      const profile = buildEntityProfile(replica.state, this.profileName, monotonicTimestamp);
       profile.runtimeId = this.runtimeId;
       if (this.isHub) {
         profile.capabilities = Array.from(new Set([...(profile.capabilities || []), 'hub', 'relay']));
