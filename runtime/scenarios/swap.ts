@@ -86,6 +86,21 @@ const ONE = 10n ** DECIMALS;
 const eth = (amount: number | bigint) => BigInt(amount) * ONE;
 const usdc = (amount: number | bigint) => BigInt(amount) * ONE;
 
+const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
+
+// Cross layout in depth (positions are RELATIVE to J-machine)
+const SWAP_RADIUS = 66; // 200 / 3 ≈ 66
+const SWAP_CENTER_Y = -40; // halfway to J-machine from previous center
+const SWAP_OUTER_Y = -80;
+
+const SWAP_POSITIONS: Record<string, { x: number; y: number; z: number }> = {
+  Hub: { x: 0, y: SWAP_CENTER_Y, z: 0 },
+  Alice: { x: -SWAP_RADIUS, y: SWAP_OUTER_Y, z: 0 },
+  Bob: { x: SWAP_RADIUS, y: SWAP_OUTER_Y, z: 0 },
+  Carol: { x: 0, y: SWAP_OUTER_Y, z: -SWAP_RADIUS },
+  Dave: { x: 0, y: SWAP_OUTER_Y, z: SWAP_RADIUS },
+};
+
 // Fill ratio constants (uint16)
 const MAX_FILL_RATIO = 65535;
 const FILL_10 = 6553;
@@ -165,7 +180,7 @@ export async function swap(env: Env): Promise<void> {
 
   const browserVM = await ensureBrowserVM();
   const depositoryAddress = browserVM.getDepositoryAddress();
-  createJReplica(env, 'Swap Demo', depositoryAddress, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
+  createJReplica(env, 'Swap Demo', depositoryAddress, J_MACHINE_POSITION);
   const jurisdiction = createJurisdictionConfig('Swap Demo', depositoryAddress);
   console.log('✅ BrowserVM J-Machine created\n');
 
@@ -173,12 +188,6 @@ export async function swap(env: Env): Promise<void> {
   // SETUP: Create Alice and Hub entities
   // ============================================================================
   console.log('📦 Creating entities: Alice, Hub...');
-
-  // Horizontal line layout: Alice—Hub (like AHB but 2 entities)
-  const SWAP_POSITIONS: Record<string, { x: number; y: number; z: number }> = {
-    Alice: { x: -20, y: -30, z: 0 },  // Left
-    Hub:   { x: 20, y: -30, z: 0 },   // Right
-  };
 
   const entities = [
     { name: 'Alice', id: '0x' + '1'.padStart(64, '0'), signer: 's1' },
@@ -611,7 +620,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
     signerId: bob.signer,
     data: {
       isProposer: true,
-      position: { x: 0, y: 0, z: 0 },
+      position: SWAP_POSITIONS.Bob,
       config: {
         mode: 'proposer-based' as const,
         threshold: 1n,
@@ -822,11 +831,6 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   const carol = { id: '0x' + '4'.padStart(64, '0'), signer: 's4', name: 'Carol' };
   const dave = { id: '0x' + '5'.padStart(64, '0'), signer: 's5', name: 'Dave' };
 
-  const MULTI_PARTY_POSITIONS: Record<string, { x: number; y: number; z: number }> = {
-    Carol: { x: 50, y: -30, z: 0 },   // Center-right
-    Dave:  { x: 80, y: -30, z: 0 },   // Right
-  };
-
   for (const entity of [carol, dave]) {
     await applyRuntimeInput(env, { runtimeTxs: [{
       type: 'importReplica' as const,
@@ -834,7 +838,7 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
       signerId: entity.signer,
       data: {
         isProposer: true,
-        position: MULTI_PARTY_POSITIONS[entity.name],
+        position: SWAP_POSITIONS[entity.name],
         config: {
           mode: 'proposer-based' as const,
           threshold: 1n,
