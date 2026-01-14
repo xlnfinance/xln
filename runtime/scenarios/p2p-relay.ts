@@ -230,51 +230,31 @@ const run = async () => {
     procs.push(hub);
 
     try {
+      // Wait for hub relay to be ready (guarantees WS server listening)
       await waitForLineOrError(
         hub,
         /P2P_RELAY_READY/,
-        [/Runtime relay "hub" failed/i, /Failed to start server/i, /RELAY_PORT_MISSING/i]
-      );
-      console.log('[P2P] Waiting for WS server listening...');
-      await waitForLineOrError(
-        hub,
-        /listening on/i,  // Simple match - just "listening on"
-        [/Runtime relay.*failed/i, /Failed to start server/i]
+        [/Runtime relay.*failed/i, /Failed to start server/i, /RELAY_PORT_MISSING/i]
       );
 
-      console.log('[P2P] WS server listening confirmed!');
+      console.log('[P2P] Hub relay ready - spawning alice/bob NOW');
 
-      console.log('[P2P] Running smoke connect test...');
-      await smokeConnect(relayUrl);
-      console.log('[P2P] Smoke connect SUCCESS');
-
-      console.log('[P2P] NOW spawning alice and bob...');
-
-      // CRITICAL: Spawn alice/bob IMMEDIATELY after WS server ready
-      // Hub will start waiting for them, so they need to exist first
-      const relayUrlForSpawn = `ws://127.0.0.1:${relayPort}`;
-      console.log(`[P2P] Spawning bob with relayUrl=${relayUrlForSpawn}, seedRuntimeId=${hubRuntimeId}`);
-      bob = spawnNode('bob', bobSeed, relayUrlForSpawn, hubRuntimeId);
+      // Spawn alice/bob IMMEDIATELY (before hub starts waiting for them)
+      bob = spawnNode('bob', bobSeed, relayUrl, hubRuntimeId);
       procs.push(bob);
-      console.log(`[P2P] Bob spawned, PID=${bob.proc.pid}`);
-
-      console.log(`[P2P] Spawning alice with relayUrl=${relayUrlForSpawn}, seedRuntimeId=${hubRuntimeId}`);
-      alice = spawnNode('alice', aliceSeed, relayUrlForSpawn, hubRuntimeId);
+      alice = spawnNode('alice', aliceSeed, relayUrl, hubRuntimeId);
       procs.push(alice);
-      console.log(`[P2P] Alice spawned, PID=${alice.proc.pid}`);
 
-      // Give them time to start connecting
-      await new Promise(resolve => setTimeout(resolve, 500));
+      console.log('[P2P] Waiting for all nodes ready...');
 
-      await smokeConnect(relayUrlForSpawn);
-      console.log('[P2P] WS smoke test passed');
+      // Wait for all nodes to reach P2P_NODE_READY state
+      await Promise.all([
+        waitForLineOrError(hub, /P2P_NODE_READY role=hub/, [/PROFILE_TIMEOUT/i, /P2P_NODE_FATAL/i]),
+        waitForLineOrError(alice, /P2P_NODE_READY role=alice/, [/PROFILE_TIMEOUT/i, /P2P_NODE_FATAL/i]),
+        waitForLineOrError(bob, /P2P_NODE_READY role=bob/, [/PROFILE_TIMEOUT/i, /P2P_NODE_FATAL/i]),
+      ]);
 
-      // NOW wait for hub to finish (it will see alice/bob profiles)
-      await waitForLineOrError(
-        hub,
-        /P2P_NODE_READY role=hub/,
-        [/PROFILE_TIMEOUT/i, /PROFILE_MISSING_RUNTIME_ID/i, /PROFILE_MISSING_PUBLIC_KEY/i]
-      );
+      console.log('[P2P] All nodes ready');
       break;
     } catch (error) {
       killAll([hub]);
