@@ -55,6 +55,11 @@ const dai = (amount: number | bigint) => BigInt(amount) * ONE;
 
 // Fill ratios
 const MAX_FILL_RATIO = 65535;
+const FILL_10 = 6553;
+const FILL_20 = 13107;
+const FILL_25 = 16384;
+const FILL_50 = 32768;
+const FILL_60 = 39321;
 
 // Using helpers from helpers.ts (no duplication)
 
@@ -100,13 +105,25 @@ export async function swapMarket(env: Env): Promise<void> {
     { name: 'Grace', id: '0x' + '8'.padStart(64, '0'), signer: 's8', role: 'maker' },
   ];
 
+  // Deterministic layout: Hub on top, traders in a row below (matches ahb.ts style)
+  const MARKET_POSITIONS: Record<string, { x: number; y: number; z: number }> = {
+    Hub: { x: 0, y: -30, z: 0 },
+    Alice: { x: -180, y: -80, z: 0 },
+    Bob: { x: -120, y: -80, z: 0 },
+    Carol: { x: -60, y: -80, z: 0 },
+    Dave: { x: 0, y: -80, z: 0 },
+    Eve: { x: 60, y: -80, z: 0 },
+    Frank: { x: 120, y: -80, z: 0 },
+    Grace: { x: 180, y: -80, z: 0 },
+  };
+
   const createEntityTxs = entities.map(e => ({
     type: 'importReplica' as const,
     entityId: e.id,
     signerId: e.signer,
     data: {
       isProposer: true,
-      position: { x: Math.random() * 1000, y: Math.random() * 1000, z: Math.random() * 1000 },
+      position: MARKET_POSITIONS[e.name] || { x: 0, y: -80, z: 0 },
       config: {
         mode: 'proposer-based' as const,
         threshold: 1n,
@@ -196,7 +213,7 @@ export async function swapMarket(env: Env): Promise<void> {
           giveAmount: eth(10),
           wantTokenId: USDC,
           wantAmount: usdc(31000), // $3100/ETH
-          minFillRatio: MAX_FILL_RATIO / 4, // 25% min fill
+          minFillRatio: FILL_25, // 25% min fill
         },
       }],
     },
@@ -213,7 +230,7 @@ export async function swapMarket(env: Env): Promise<void> {
           giveAmount: eth(5),
           wantTokenId: USDC,
           wantAmount: usdc(15250), // $3050/ETH
-          minFillRatio: MAX_FILL_RATIO / 2, // 50% min fill
+          minFillRatio: FILL_50, // 50% min fill
         },
       }],
     },
@@ -230,7 +247,7 @@ export async function swapMarket(env: Env): Promise<void> {
           giveAmount: usdc(23600), // $2950/ETH * 8
           wantTokenId: ETH,
           wantAmount: eth(8),
-          minFillRatio: MAX_FILL_RATIO / 4, // 25% min fill
+          minFillRatio: FILL_25, // 25% min fill
         },
       }],
     },
@@ -256,7 +273,7 @@ export async function swapMarket(env: Env): Promise<void> {
           giveAmount: btc(2),
           wantTokenId: USDC,
           wantAmount: usdc(122000), // $61000/BTC
-          minFillRatio: MAX_FILL_RATIO / 2, // 50% min fill
+          minFillRatio: FILL_50, // 50% min fill
         },
       }],
     },
@@ -273,7 +290,7 @@ export async function swapMarket(env: Env): Promise<void> {
           giveAmount: usdc(59000), // $59000/BTC
           wantTokenId: BTC,
           wantAmount: btc(1),
-          minFillRatio: MAX_FILL_RATIO / 4, // 25% min fill
+          minFillRatio: FILL_25, // 25% min fill
         },
       }],
     },
@@ -298,7 +315,7 @@ export async function swapMarket(env: Env): Promise<void> {
           giveAmount: dai(50000),
           wantTokenId: USDC,
           wantAmount: usdc(50050), // $1.001/DAI
-          minFillRatio: MAX_FILL_RATIO / 10, // 10% min fill
+          minFillRatio: FILL_10, // 10% min fill
         },
       }],
     },
@@ -315,7 +332,7 @@ export async function swapMarket(env: Env): Promise<void> {
           giveAmount: usdc(29970), // $0.999/DAI * 30000
           wantTokenId: DAI,
           wantAmount: dai(30000),
-          minFillRatio: MAX_FILL_RATIO / 10, // 10% min fill
+          minFillRatio: FILL_10, // 10% min fill
         },
       }],
     },
@@ -346,7 +363,7 @@ export async function swapMarket(env: Env): Promise<void> {
       data: {
         offerId: 'bob-eth-ask',
         counterpartyId: hub.id, // Carol's account is with Hub
-        fillRatio: Math.floor(MAX_FILL_RATIO * 0.6), // 60% fill = 3 ETH
+        fillRatio: FILL_60, // 60% fill = 3 ETH
       },
     }],
   }]);
@@ -378,7 +395,7 @@ export async function swapMarket(env: Env): Promise<void> {
       data: {
         offerId: 'bob-dai-ask',
         counterpartyId: hub.id, // Frank's account is with Hub
-        fillRatio: Math.floor(MAX_FILL_RATIO * 0.2), // 20% fill = 10000 DAI
+        fillRatio: FILL_20, // 20% fill = 10000 DAI
       },
     }],
   }]);
@@ -423,7 +440,7 @@ export async function swapMarket(env: Env): Promise<void> {
         giveAmount: eth(10),
         wantTokenId: USDC,
         wantAmount: usdc(30200), // $3020/ETH (better price)
-        minFillRatio: MAX_FILL_RATIO / 4,
+        minFillRatio: FILL_25,
       },
     }],
   }]);

@@ -86,9 +86,12 @@ const ONE = 10n ** DECIMALS;
 const eth = (amount: number | bigint) => BigInt(amount) * ONE;
 const usdc = (amount: number | bigint) => BigInt(amount) * ONE;
 
-// Fill ratio constants
+// Fill ratio constants (uint16)
 const MAX_FILL_RATIO = 65535;
-const HALF_FILL = Math.floor(MAX_FILL_RATIO / 2); // ~50%
+const FILL_10 = 6553;
+const FILL_50 = 32768;
+const FILL_75 = 49152;
+const FILL_80 = 52428;
 const FULL_FILL = MAX_FILL_RATIO;
 
 function assert(condition: boolean, message: string, env?: Env): void {
@@ -277,7 +280,7 @@ export async function swap(env: Env): Promise<void> {
         giveAmount: eth(2),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdc(6000),
-        minFillRatio: HALF_FILL, // 50% minimum
+        minFillRatio: FILL_50, // 50% minimum
       },
     }],
   }]);
@@ -322,7 +325,7 @@ export async function swap(env: Env): Promise<void> {
       data: {
         counterpartyEntityId: alice.id,
         offerId: offerId1,
-        fillRatio: HALF_FILL,
+        fillRatio: FILL_50,
         cancelRemainder: false, // Keep remainder open
       },
     }],
@@ -335,7 +338,7 @@ export async function swap(env: Env): Promise<void> {
   const offer2 = aliceHubAccount2?.swapOffers?.get(offerId1);
 
   // After 50% fill: ~1 ETH remaining
-  const expectedRemaining = eth(2) - (eth(2) * BigInt(HALF_FILL)) / BigInt(MAX_FILL_RATIO);
+  const expectedRemaining = eth(2) - (eth(2) * BigInt(FILL_50)) / BigInt(MAX_FILL_RATIO);
   assert(offer2?.giveAmount === expectedRemaining, `Remaining amount ~1 ETH (got ${offer2?.giveAmount})`);
 
   // Check offdelta changes
@@ -347,7 +350,7 @@ export async function swap(env: Env): Promise<void> {
   // filledWant is derived from filledGive to preserve exact price ratio
   const giveAmount = eth(2);
   const wantAmount = usdc(6000);
-  const filledEth = (giveAmount * BigInt(HALF_FILL)) / BigInt(MAX_FILL_RATIO);
+  const filledEth = (giveAmount * BigInt(FILL_50)) / BigInt(MAX_FILL_RATIO);
   const filledUsdc = (filledEth * wantAmount) / giveAmount; // Derived from filledEth
 
   assert(ethDelta2?.offdelta === -filledEth, `ETH offdelta = -${filledEth} (Alice gave)`);
@@ -470,7 +473,7 @@ export async function swap(env: Env): Promise<void> {
   const offerId3 = 'order-003';
 
   // Alice places offer with 75% minimum
-  const MIN_75_PERCENT = Math.floor(MAX_FILL_RATIO * 0.75);
+  const MIN_75_PERCENT = FILL_75;
   console.log('📊 Alice: swap_offer (1 ETH, min 75% fill)');
   await process(env, [{
     entityId: alice.id,
@@ -501,7 +504,7 @@ export async function swap(env: Env): Promise<void> {
       data: {
         counterpartyEntityId: alice.id,
         offerId: offerId3,
-        fillRatio: HALF_FILL, // 50% < 75% min
+        fillRatio: FILL_50, // 50% < 75% min
         cancelRemainder: false,
       },
     }],
@@ -515,7 +518,7 @@ export async function swap(env: Env): Promise<void> {
   assert(account6?.swapOffers?.has(offerId3), 'Order 3 still exists (50% fill rejected)');
 
   // Hub fills 80% - should succeed
-  const FILL_80_PERCENT = Math.floor(MAX_FILL_RATIO * 0.80);
+  const FILL_80_PERCENT = FILL_80;
   console.log('💱 Hub: swap_resolve (80% fill - should succeed)');
   await process(env, [{
     entityId: hub.id,
@@ -664,7 +667,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
         giveAmount: eth(2),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdc(6000),
-        minFillRatio: Math.floor(MAX_FILL_RATIO * 0.1), // 10% min
+        minFillRatio: FILL_10, // 10% min
       },
     }],
   }]);

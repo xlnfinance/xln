@@ -19,6 +19,12 @@ export type RuntimeWsClientOptions = {
 };
 
 const isBrowser = typeof window !== 'undefined' && typeof WebSocket !== 'undefined';
+let wsTimestampCounter = 0;
+
+const nextTimestamp = () => {
+  wsTimestampCounter += 1;
+  return wsTimestampCounter;
+};
 
 const createWs = async (url: string): Promise<WebSocketLike> => {
   if (isBrowser) {
@@ -78,7 +84,7 @@ export class RuntimeWsClient {
   private sendHello() {
     if (this.options.signerId) {
       try {
-        const timestamp = Date.now();
+        const timestamp = nextTimestamp();
         const nonce = makeHelloNonce();
         const digest = hashHelloMessage(this.options.runtimeId, timestamp, nonce);
         const signature = signDigest(this.options.signerId, digest);
@@ -93,7 +99,7 @@ export class RuntimeWsClient {
         this.options.onError?.(error as Error);
       }
     }
-    this.sendRaw({ type: 'hello', from: this.options.runtimeId, timestamp: Date.now() });
+    this.sendRaw({ type: 'hello', from: this.options.runtimeId, timestamp: nextTimestamp() });
   }
 
   private scheduleReconnect() {
@@ -146,7 +152,7 @@ export class RuntimeWsClient {
       id: makeMessageId(),
       from: this.options.runtimeId,
       to,
-      timestamp: Date.now(),
+      timestamp: nextTimestamp(),
       payload: input,
     });
   }
@@ -158,7 +164,7 @@ export class RuntimeWsClient {
       id: makeMessageId(),
       from: this.options.runtimeId,
       to,
-      timestamp: Date.now(),
+      timestamp: nextTimestamp(),
       payload: input,
     });
     console.log(`[WS-CLIENT] send result: ${sent ? 'SUCCESS' : 'FAILED'}`);
@@ -171,7 +177,7 @@ export class RuntimeWsClient {
       id: makeMessageId(),
       from: this.options.runtimeId,
       to,
-      timestamp: Date.now(),
+      timestamp: nextTimestamp(),
       payload,
     });
   }
@@ -182,7 +188,7 @@ export class RuntimeWsClient {
       id: makeMessageId(),
       from: this.options.runtimeId,
       to,
-      timestamp: Date.now(),
+      timestamp: nextTimestamp(),
       payload,
     });
   }
@@ -193,7 +199,7 @@ export class RuntimeWsClient {
       id: makeMessageId(),
       from: this.options.runtimeId,
       to,
-      timestamp: Date.now(),
+      timestamp: nextTimestamp(),
       payload,
     });
   }
