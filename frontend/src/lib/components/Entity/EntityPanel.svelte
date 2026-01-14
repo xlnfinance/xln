@@ -118,7 +118,7 @@
   $: htlcExpanded = $settings.componentStates[`htlc-${tab.id}`] ?? false;
   $: swapOrdersExpanded = $settings.componentStates[`swaporders-${tab.id}`] ?? false;
   $: swapExpanded = $settings.componentStates[`swap-${tab.id}`] ?? false;
-  $: orderbookExpanded = $settings.componentStates[`orderbook-${tab.id}`] ?? false;
+  $: orderbookExpanded = $settings.componentStates[`orderbook-${tab.id}`] ?? true;
 
   function toggleComponent(componentId: string) {
     settingsOperations.toggleComponentState(componentId);
@@ -448,6 +448,7 @@
               hubId={replica.state.entityId}
               pairId="1/2"
               depth={10}
+              {...(contextEnv ? { envStore: contextEnv } : {})}
             />
           {/if}
         </div>

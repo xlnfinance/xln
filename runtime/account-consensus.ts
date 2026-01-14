@@ -317,17 +317,19 @@ export async function proposeAccountFrame(
   // Determine if we're left entity (for byLeft field)
   const weAreLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
 
-  // Validate timestamp before creating frame (HTLC safety - prevent time manipulation)
-  const previousTimestamp = accountMachine.currentFrame?.timestamp;
-  if (previousTimestamp !== undefined && env.timestamp < previousTimestamp) {
-    console.log(`❌ E-MACHINE: Cannot propose - timestamp regression: ${env.timestamp} < ${previousTimestamp}`);
-    return { success: false, error: 'Timestamp went backwards', events };
+  // Ensure monotonic timestamps within account (HTLC safety + multi-runtime compatibility)
+  // In multi-runtime P2P scenarios, different runtimes may have different clock rates
+  // We ensure frames always have increasing timestamps within an account chain
+  const previousTimestamp = accountMachine.currentFrame?.timestamp ?? 0;
+  const frameTimestamp = Math.max(env.timestamp, previousTimestamp + 1);
+  if (frameTimestamp > env.timestamp) {
+    console.log(`⚡ TIMESTAMP-SYNC: Using monotonic timestamp ${frameTimestamp} (prev=${previousTimestamp}, env=${env.timestamp})`);
   }
 
   // Create account frame matching the real AccountFrame interface
   const frameData = {
     height: accountMachine.currentHeight + 1,
-    timestamp: env.timestamp, // DETERMINISTIC: Copy from runtime machine
+    timestamp: frameTimestamp, // MONOTONIC: max(env.timestamp, prev+1) for multi-runtime safety
     jHeight: frameJHeight, // CRITICAL: J-height for HTLC consensus
     accountTxs: [...accountMachine.mempool],
     // CRITICAL: Use stored stateHash from currentFrame (set during commit)

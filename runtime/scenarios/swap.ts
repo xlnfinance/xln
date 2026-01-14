@@ -7,8 +7,8 @@
  *
  * Test flow:
  * 1. Setup: Alice-Hub account with ETH (token 1) and USDC (token 2)
- * 2. Alice places limit order: Sell 2 ETH for 6000 USDC
- * 3. Hub fills 50%: Alice gets 3000 USDC, Hub gets 1 ETH
+ * 2. Alice places limit order: Sell 20% capacity ETH for USDC
+ * 3. Hub fills 50%: Partial fill
  * 4. Hub fills remaining 50%: Swap complete
  * 5. Verify final balances
  * 6. Test partial fill with minFillRatio
@@ -85,6 +85,29 @@ const ONE = 10n ** DECIMALS;
 
 const eth = (amount: number | bigint) => BigInt(amount) * ONE;
 const usdc = (amount: number | bigint) => BigInt(amount) * ONE;
+
+const ETH_PRICE_MAIN = 3000n;
+const ETH_PRICE_LOW = 2900n;
+const ETH_PRICE_HIGH = 3100n;
+const ETH_PRICE_SWEEP = 3200n;
+
+const USDC_CAPACITY_UNITS = 300_000n;
+const ETH_CAPACITY_UNITS = USDC_CAPACITY_UNITS / ETH_PRICE_MAIN;
+
+const TRADE_ETH = ETH_CAPACITY_UNITS / 5n; // 20% of capacity
+const TRADE_ETH_HALF = TRADE_ETH / 2n;
+const TRADE_ETH_DOUBLE = TRADE_ETH * 2n;
+const TRADE_ETH_TRIPLE = TRADE_ETH * 3n;
+
+const TRADE_USDC_MAIN_UNITS = TRADE_ETH * ETH_PRICE_MAIN;
+const TRADE_USDC_HALF_UNITS = TRADE_ETH_HALF * ETH_PRICE_MAIN;
+
+const usdcForEth = (ethUnits: bigint, price: bigint) => usdc(ethUnits * price);
+
+const CAROL_SELL_ETH = TRADE_ETH_DOUBLE;
+const CAROL_SELL_2_ETH = TRADE_ETH;
+const DAVE_BUY_ETH = TRADE_ETH_HALF;
+const DAVE_SWEEP_ETH = CAROL_SELL_ETH + CAROL_SELL_2_ETH;
 
 const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
 
@@ -247,16 +270,16 @@ export async function swap(env: Env): Promise<void> {
       entityId: hub.id,
       signerId: hub.signer,
       entityTxs: [
-        { type: 'extendCredit', data: { counterpartyEntityId: alice.id, tokenId: ETH_TOKEN_ID, amount: eth(1_000_000) } },
-        { type: 'extendCredit', data: { counterpartyEntityId: alice.id, tokenId: USDC_TOKEN_ID, amount: usdc(1_000_000) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: alice.id, tokenId: ETH_TOKEN_ID, amount: eth(ETH_CAPACITY_UNITS) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: alice.id, tokenId: USDC_TOKEN_ID, amount: usdc(USDC_CAPACITY_UNITS) } },
       ],
     },
     {
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [
-        { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: ETH_TOKEN_ID, amount: eth(1_000_000) } },
-        { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC_TOKEN_ID, amount: usdc(1_000_000) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: ETH_TOKEN_ID, amount: eth(ETH_CAPACITY_UNITS) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC_TOKEN_ID, amount: usdc(USDC_CAPACITY_UNITS) } },
       ],
     },
   ]);
@@ -267,16 +290,16 @@ export async function swap(env: Env): Promise<void> {
   console.log('  ✅ Bidirectional credit established\n');
 
   // ============================================================================
-  // TEST 1: Simple swap - Alice sells 2 ETH for 6000 USDC
+  // TEST 1: Simple swap - Alice sells 20% of capacity
   // ============================================================================
   console.log('═══════════════════════════════════════════════════════════════');
-  console.log('TEST 1: Alice places limit order - Sell 2 ETH for 6000 USDC');
+  console.log(`TEST 1: Alice places limit order - Sell ${TRADE_ETH} ETH for ${TRADE_USDC_MAIN_UNITS} USDC`);
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   const offerId1 = 'order-001';
 
   // Alice places swap offer
-  console.log('📊 Alice: swap_offer (2 ETH → 6000 USDC, min 50%)');
+  console.log(`📊 Alice: swap_offer (${TRADE_ETH} ETH → ${TRADE_USDC_MAIN_UNITS} USDC, min 50%)`);
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
@@ -286,9 +309,9 @@ export async function swap(env: Env): Promise<void> {
         counterpartyEntityId: hub.id,
         offerId: offerId1,
         giveTokenId: ETH_TOKEN_ID,
-        giveAmount: eth(2),
+        giveAmount: eth(TRADE_ETH),
         wantTokenId: USDC_TOKEN_ID,
-        wantAmount: usdc(6000),
+        wantAmount: usdc(TRADE_USDC_MAIN_UNITS),
         minFillRatio: FILL_50, // 50% minimum
       },
     }],
@@ -301,22 +324,22 @@ export async function swap(env: Env): Promise<void> {
   assert(aliceHubAccount1?.swapOffers?.has(offerId1), 'Offer created in A-Machine account');
 
   const offer1 = aliceHubAccount1?.swapOffers?.get(offerId1);
-  assert(offer1?.giveAmount === eth(2), 'Offer giveAmount = 2 ETH');
-  assert(offer1?.wantAmount === usdc(6000), 'Offer wantAmount = 6000 USDC');
+  assert(offer1?.giveAmount === eth(TRADE_ETH), `Offer giveAmount = ${TRADE_ETH} ETH`);
+  assert(offer1?.wantAmount === usdc(TRADE_USDC_MAIN_UNITS), `Offer wantAmount = ${TRADE_USDC_MAIN_UNITS} USDC`);
 
   // Verify offer was added to E-Machine swapBook (using namespaced key)
   const swapBookKey1 = `${hub.id}:${offerId1}`;
   assert(aliceRep1.state.swapBook.has(swapBookKey1), 'Offer added to E-Machine swapBook');
   const swapBookEntry1 = aliceRep1.state.swapBook.get(swapBookKey1);
   assert(swapBookEntry1?.accountId === hub.id, 'swapBook entry accountId = canonical(alice, hub)');
-  assert(swapBookEntry1?.giveAmount === eth(2), 'swapBook giveAmount = 2 ETH');
-  assert(swapBookEntry1?.wantAmount === usdc(6000), 'swapBook wantAmount = 6000 USDC');
+  assert(swapBookEntry1?.giveAmount === eth(TRADE_ETH), `swapBook giveAmount = ${TRADE_ETH} ETH`);
+  assert(swapBookEntry1?.wantAmount === usdc(TRADE_USDC_MAIN_UNITS), `swapBook wantAmount = ${TRADE_USDC_MAIN_UNITS} USDC`);
   console.log('  ✅ E-Machine swapBook updated');
 
   // Check hold was applied
   const ethDelta1 = aliceHubAccount1?.deltas.get(ETH_TOKEN_ID);
-  assert(ethDelta1?.leftSwapHold === eth(2), 'ETH hold = 2 (Alice is LEFT)');
-  console.log('  ✅ Swap offer created, 2 ETH locked\n');
+  assert(ethDelta1?.leftSwapHold === eth(TRADE_ETH), `ETH hold = ${TRADE_ETH} (Alice is LEFT)`);
+  console.log(`  ✅ Swap offer created, ${TRADE_ETH} ETH locked\n`);
 
   // ============================================================================
   // TEST 2: Hub fills 50%
@@ -346,9 +369,9 @@ export async function swap(env: Env): Promise<void> {
   const aliceHubAccount2 = aliceRep2.state.accounts.get(hub.id);
   const offer2 = aliceHubAccount2?.swapOffers?.get(offerId1);
 
-  // After 50% fill: ~1 ETH remaining
-  const expectedRemaining = eth(2) - (eth(2) * BigInt(FILL_50)) / BigInt(MAX_FILL_RATIO);
-  assert(offer2?.giveAmount === expectedRemaining, `Remaining amount ~1 ETH (got ${offer2?.giveAmount})`);
+  // After 50% fill: ~half remaining
+  const expectedRemaining = eth(TRADE_ETH) - (eth(TRADE_ETH) * BigInt(FILL_50)) / BigInt(MAX_FILL_RATIO);
+  assert(offer2?.giveAmount === expectedRemaining, `Remaining amount ~${TRADE_ETH_HALF} ETH (got ${offer2?.giveAmount})`);
 
   // Check offdelta changes
   const ethDelta2 = aliceHubAccount2?.deltas.get(ETH_TOKEN_ID);
@@ -357,8 +380,8 @@ export async function swap(env: Env): Promise<void> {
   // Alice (LEFT) gave ETH → offdelta decreased (more negative)
   // Alice (LEFT) received USDC → offdelta increased (more positive)
   // filledWant is derived from filledGive to preserve exact price ratio
-  const giveAmount = eth(2);
-  const wantAmount = usdc(6000);
+  const giveAmount = eth(TRADE_ETH);
+  const wantAmount = usdc(TRADE_USDC_MAIN_UNITS);
   const filledEth = (giveAmount * BigInt(FILL_50)) / BigInt(MAX_FILL_RATIO);
   const filledUsdc = (filledEth * wantAmount) / giveAmount; // Derived from filledEth
 
@@ -401,11 +424,11 @@ export async function swap(env: Env): Promise<void> {
   assert(ethDelta3?.leftSwapHold === 0n, 'ETH hold released');
 
   // Verify final deltas (approximate due to rounding)
-  assert(ethDelta3?.offdelta === -eth(2), 'Final ETH delta = -2 (Alice gave 2 ETH total)');
+  assert(ethDelta3?.offdelta === -eth(TRADE_ETH), `Final ETH delta = -${TRADE_ETH} (Alice gave ${TRADE_ETH} ETH total)`);
   const usdcDelta3 = aliceHubAccount3?.deltas.get(USDC_TOKEN_ID);
-  assert(usdcDelta3?.offdelta === usdc(6000), 'Final USDC delta = +6000 (Alice received 6000 USDC)');
+  assert(usdcDelta3?.offdelta === usdc(TRADE_USDC_MAIN_UNITS), `Final USDC delta = +${TRADE_USDC_MAIN_UNITS} (Alice received ${TRADE_USDC_MAIN_UNITS} USDC)`);
 
-  console.log('  ✅ Swap complete: Alice traded 2 ETH for 6000 USDC\n');
+  console.log(`  ✅ Swap complete: Alice traded ${TRADE_ETH} ETH for ${TRADE_USDC_MAIN_UNITS} USDC\n`);
 
   // ============================================================================
   // TEST 4: Cancel order
@@ -417,7 +440,7 @@ export async function swap(env: Env): Promise<void> {
   const offerId2 = 'order-002';
 
   // Alice places new offer
-  console.log('📊 Alice: swap_offer (1 ETH → 3000 USDC)');
+  console.log(`📊 Alice: swap_offer (${TRADE_ETH_HALF} ETH → ${TRADE_USDC_HALF_UNITS} USDC)`);
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
@@ -427,9 +450,9 @@ export async function swap(env: Env): Promise<void> {
         counterpartyEntityId: hub.id,
         offerId: offerId2,
         giveTokenId: ETH_TOKEN_ID,
-        giveAmount: eth(1),
+        giveAmount: eth(TRADE_ETH_HALF),
         wantTokenId: USDC_TOKEN_ID,
-        wantAmount: usdc(3000),
+        wantAmount: usdc(TRADE_USDC_HALF_UNITS),
         minFillRatio: 0, // No minimum
       },
     }],
@@ -483,7 +506,7 @@ export async function swap(env: Env): Promise<void> {
 
   // Alice places offer with 75% minimum
   const MIN_75_PERCENT = FILL_75;
-  console.log('📊 Alice: swap_offer (1 ETH, min 75% fill)');
+  console.log(`📊 Alice: swap_offer (${TRADE_ETH_HALF} ETH, min 75% fill)`);
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
@@ -493,9 +516,9 @@ export async function swap(env: Env): Promise<void> {
         counterpartyEntityId: hub.id,
         offerId: offerId3,
         giveTokenId: ETH_TOKEN_ID,
-        giveAmount: eth(1),
+        giveAmount: eth(TRADE_ETH_HALF),
         wantTokenId: USDC_TOKEN_ID,
-        wantAmount: usdc(3000),
+        wantAmount: usdc(TRADE_USDC_HALF_UNITS),
         minFillRatio: MIN_75_PERCENT,
       },
     }],
@@ -644,26 +667,26 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   console.log('💳 Extending credit for Bob↔Hub...');
   await process(env, [
     { entityId: hub.id, signerId: hub.signer, entityTxs: [
-      { type: 'extendCredit', data: { counterpartyEntityId: bob.id, tokenId: ETH_TOKEN_ID, amount: eth(1_000_000) } },
-      { type: 'extendCredit', data: { counterpartyEntityId: bob.id, tokenId: USDC_TOKEN_ID, amount: usdc(1_000_000) } },
+      { type: 'extendCredit', data: { counterpartyEntityId: bob.id, tokenId: ETH_TOKEN_ID, amount: eth(ETH_CAPACITY_UNITS) } },
+      { type: 'extendCredit', data: { counterpartyEntityId: bob.id, tokenId: USDC_TOKEN_ID, amount: usdc(USDC_CAPACITY_UNITS) } },
     ]},
     { entityId: bob.id, signerId: bob.signer, entityTxs: [
-      { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: ETH_TOKEN_ID, amount: eth(1_000_000) } },
-      { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC_TOKEN_ID, amount: usdc(1_000_000) } },
+      { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: ETH_TOKEN_ID, amount: eth(ETH_CAPACITY_UNITS) } },
+      { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC_TOKEN_ID, amount: usdc(USDC_CAPACITY_UNITS) } },
     ]},
   ]);
   await converge(env);
   console.log('  ✅ Credit extended\n');
 
   // ============================================================================
-  // TEST: Alice sells 2 ETH, Bob buys 1 ETH - should match via orderbook
+  // TEST: Alice sells 20% capacity, Bob buys 10% - should match via orderbook
   // ============================================================================
   console.log('═══════════════════════════════════════════════════════════════');
-  console.log('TEST: Alice SELL 2 ETH @ 3000, Bob BUY 1 ETH @ 3100');
+  console.log(`TEST: Alice SELL ${TRADE_ETH} ETH @ ${ETH_PRICE_MAIN}, Bob BUY ${TRADE_ETH_HALF} ETH @ ${ETH_PRICE_HIGH}`);
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   // Step 1: Alice places swap_offer on Alice↔Hub account
-  console.log('📊 Step 1: Alice places swap_offer (2 ETH → 6000 USDC)...');
+  console.log(`📊 Step 1: Alice places swap_offer (${TRADE_ETH} ETH → ${TRADE_USDC_MAIN_UNITS} USDC)...`);
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
@@ -673,9 +696,9 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
         counterpartyEntityId: hub.id,
         offerId: 'alice-sell-001',
         giveTokenId: ETH_TOKEN_ID,
-        giveAmount: eth(2),
+        giveAmount: eth(TRADE_ETH),
         wantTokenId: USDC_TOKEN_ID,
-        wantAmount: usdc(6000),
+        wantAmount: usdc(TRADE_USDC_MAIN_UNITS),
         minFillRatio: FILL_10, // 10% min
       },
     }],
@@ -695,7 +718,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   console.log(`  📊 Hub orderbook state: ${ext?.books?.size || 0} books\n`);
 
   // Step 2: Bob places swap_offer - should trigger matching!
-  console.log('📊 Step 2: Bob places swap_offer (3100 USDC → 1 ETH)...');
+  console.log(`📊 Step 2: Bob places swap_offer (${TRADE_ETH_HALF} ETH @ ${ETH_PRICE_HIGH})...`);
   await process(env, [{
     entityId: bob.id,
     signerId: bob.signer,
@@ -705,9 +728,9 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
         counterpartyEntityId: hub.id,
         offerId: 'bob-buy-001',
         giveTokenId: USDC_TOKEN_ID,
-        giveAmount: usdc(3100),
+        giveAmount: usdcForEth(TRADE_ETH_HALF, ETH_PRICE_HIGH),
         wantTokenId: ETH_TOKEN_ID,
-        wantAmount: eth(1),
+        wantAmount: eth(TRADE_ETH_HALF),
         minFillRatio: 0,
       },
     }],
@@ -720,7 +743,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   await converge(env);
 
   // Verify the trades occurred via RJEA flow by checking bilateral accounts
-  // After matching: Alice should have traded 1 ETH (Bob's buy qty), Bob should have filled
+  // After matching: Alice should have traded Bob's buy qty, Bob should have filled
   console.log('📊 Step 3: Checking trade results...');
 
   // Check hub's orderbook extension for trade records
@@ -747,7 +770,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   console.log(`  Bob offer exists: ${bobAccount?.swapOffers?.has('bob-buy-001')}`);
 
   // After full RJEA flow, Bob's offer should be fully resolved
-  // and Alice's offer should be partially filled (1 ETH remaining of 2)
+  // and Alice's offer should be partially filled (half remaining)
   const aliceOffer2 = aliceAccount?.swapOffers?.get('alice-sell-001');
   if (aliceOffer2) {
     console.log(`  Alice remaining: ${aliceOffer2.giveAmount} wei (${Number(aliceOffer2.giveAmount) / 1e18} ETH)`);
@@ -786,7 +809,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   const bobTraded = (bobEth?.offdelta ?? 0n) !== 0n || (bobUsdc?.offdelta ?? 0n) !== 0n;
   assert(bobTraded, 'Bob should have traded via RJEA flow');
 
-  // Bob wanted 1 ETH @ 3100 USDC - should have received ETH, given USDC
+  // Bob wanted TRADE_ETH_HALF @ ETH_PRICE_HIGH - should have received ETH, given USDC
   // Bob is Right relative to Hub (Hub = 0x0002..., Bob = 0x0003...)
   // CANONICAL semantics: Right pays → offdelta INCREASES, Right receives → offdelta DECREASES
   // Bob gives USDC → offdelta increases (positive)
@@ -794,13 +817,14 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   assert((bobEth?.offdelta ?? 0n) < 0n, `Bob should have received ETH (Right receives = negative), got ${bobEth?.offdelta ?? 0n}`);
   assert((bobUsdc?.offdelta ?? 0n) > 0n, `Bob should have given USDC (Right pays = positive), got ${bobUsdc?.offdelta ?? 0n}`);
 
-  // Alice's offer should be partially filled (started with 2 ETH, Bob took ~1)
+  // Alice's offer should be partially filled (Bob took half of the order)
   // Note: exact amount may vary slightly due to uint16 fillRatio granularity
   const aliceOfferRemaining = aliceAccount?.swapOffers?.get('alice-sell-001');
   if (aliceOfferRemaining) {
     const remainingEth = Number(aliceOfferRemaining.giveAmount) / 1e18;
-    assert(remainingEth >= 0.99 && remainingEth <= 1.01,
-      `Alice should have ~1 ETH remaining, got ${remainingEth}`);
+    const expectedRemaining = Number(TRADE_ETH_HALF);
+    assert(remainingEth >= expectedRemaining * 0.99 && remainingEth <= expectedRemaining * 1.01,
+      `Alice should have ~${expectedRemaining} ETH remaining, got ${remainingEth}`);
   }
 
   console.log('  ✅ Phase 2 assertions passed');
@@ -869,23 +893,23 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   console.log('💳 Extending credit...');
   for (const entity of [carol, dave]) {
     await process(env, [
-      { entityId: hub.id, signerId: hub.signer, entityTxs: [
-        { type: 'extendCredit', data: { counterpartyEntityId: entity.id, tokenId: ETH_TOKEN_ID, amount: eth(1_000_000) } },
-        { type: 'extendCredit', data: { counterpartyEntityId: entity.id, tokenId: USDC_TOKEN_ID, amount: usdc(1_000_000) } },
-      ]},
-      { entityId: entity.id, signerId: entity.signer, entityTxs: [
-        { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: ETH_TOKEN_ID, amount: eth(1_000_000) } },
-        { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC_TOKEN_ID, amount: usdc(1_000_000) } },
-      ]},
+    { entityId: hub.id, signerId: hub.signer, entityTxs: [
+      { type: 'extendCredit', data: { counterpartyEntityId: entity.id, tokenId: ETH_TOKEN_ID, amount: eth(ETH_CAPACITY_UNITS) } },
+      { type: 'extendCredit', data: { counterpartyEntityId: entity.id, tokenId: USDC_TOKEN_ID, amount: usdc(USDC_CAPACITY_UNITS) } },
+    ]},
+    { entityId: entity.id, signerId: entity.signer, entityTxs: [
+      { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: ETH_TOKEN_ID, amount: eth(ETH_CAPACITY_UNITS) } },
+      { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC_TOKEN_ID, amount: usdc(USDC_CAPACITY_UNITS) } },
+    ]},
     ]);
     await converge(env);
   }
   console.log('  ✅ Credit extended\n');
 
   // ============================================================================
-  // Carol places large SELL order: 10 ETH @ 2900 USDC
+  // Carol places large SELL order
   // ============================================================================
-  console.log('📊 Carol places LARGE SELL: 10 ETH @ 2900 USDC...');
+  console.log(`📊 Carol places LARGE SELL: ${CAROL_SELL_ETH} ETH @ ${ETH_PRICE_LOW} USDC...`);
   await process(env, [{
     entityId: carol.id,
     signerId: carol.signer,
@@ -895,9 +919,9 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
         counterpartyEntityId: hub.id,
         offerId: 'carol-sell-10',
         giveTokenId: ETH_TOKEN_ID,
-        giveAmount: eth(10),
+        giveAmount: eth(CAROL_SELL_ETH),
         wantTokenId: USDC_TOKEN_ID,
-        wantAmount: usdc(29000), // 10 ETH @ 2900 each
+        wantAmount: usdcForEth(CAROL_SELL_ETH, ETH_PRICE_LOW),
         minFillRatio: 0,
       },
     }],
@@ -914,9 +938,9 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   }
 
   // ============================================================================
-  // Dave BUYS 3 ETH @ 3000 - should partially fill Carol's order
+  // Dave buys into Carol's sell
   // ============================================================================
-  console.log('\n📊 Dave BUYs 3 ETH @ 3000 (eats into Carol\'s sell)...');
+  console.log(`\n📊 Dave BUYs ${DAVE_BUY_ETH} ETH @ ${ETH_PRICE_MAIN} (eats into Carol's sell)...`);
   await process(env, [{
     entityId: dave.id,
     signerId: dave.signer,
@@ -926,9 +950,9 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
         counterpartyEntityId: hub.id,
         offerId: 'dave-buy-3',
         giveTokenId: USDC_TOKEN_ID,
-        giveAmount: usdc(9000), // 3 ETH @ 3000 each
+        giveAmount: usdcForEth(DAVE_BUY_ETH, ETH_PRICE_MAIN),
         wantTokenId: ETH_TOKEN_ID,
-        wantAmount: eth(3),
+        wantAmount: eth(DAVE_BUY_ETH),
         minFillRatio: 0,
       },
     }],
@@ -944,9 +968,9 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   }
 
   // ============================================================================
-  // Carol places another SELL: 5 ETH @ 3100 (above current best ask)
+  // Carol places another SELL
   // ============================================================================
-  console.log('\n📊 Carol places another SELL: 5 ETH @ 3100...');
+  console.log(`\n📊 Carol places another SELL: ${CAROL_SELL_2_ETH} ETH @ ${ETH_PRICE_HIGH}...`);
   await process(env, [{
     entityId: carol.id,
     signerId: carol.signer,
@@ -956,9 +980,9 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
         counterpartyEntityId: hub.id,
         offerId: 'carol-sell-5',
         giveTokenId: ETH_TOKEN_ID,
-        giveAmount: eth(5),
+        giveAmount: eth(CAROL_SELL_2_ETH),
         wantTokenId: USDC_TOKEN_ID,
-        wantAmount: usdc(15500), // 5 ETH @ 3100 each
+        wantAmount: usdcForEth(CAROL_SELL_2_ETH, ETH_PRICE_HIGH),
         minFillRatio: 0,
       },
     }],
@@ -974,9 +998,9 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   }
 
   // ============================================================================
-  // Dave sweeps the book: BUY 15 ETH @ 3200 (eats both levels)
+  // Dave sweeps the book (eats both levels)
   // ============================================================================
-  console.log('\n📊 Dave SWEEPS BOOK: BUY 15 ETH @ 3200 (eats all asks)...');
+  console.log(`\n📊 Dave SWEEPS BOOK: BUY ${DAVE_SWEEP_ETH} ETH @ ${ETH_PRICE_SWEEP} (eats all asks)...`);
   await process(env, [{
     entityId: dave.id,
     signerId: dave.signer,
@@ -986,9 +1010,9 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
         counterpartyEntityId: hub.id,
         offerId: 'dave-sweep',
         giveTokenId: USDC_TOKEN_ID,
-        giveAmount: usdc(48000), // 15 ETH @ 3200 each (overpaying to sweep)
+        giveAmount: usdcForEth(DAVE_SWEEP_ETH, ETH_PRICE_SWEEP),
         wantTokenId: ETH_TOKEN_ID,
-        wantAmount: eth(15),
+        wantAmount: eth(DAVE_SWEEP_ETH),
         minFillRatio: 0,
       },
     }],
@@ -1021,7 +1045,7 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   // ASSERTIONS: Verify multi-party trading worked correctly
   // ═══════════════════════════════════════════════════════════════
 
-  // Carol sold ETH (total 15 ETH across two orders: 10 @ 2900, 5 @ 3100)
+  // Carol sold ETH across two orders (low + high price levels)
   // Carol is Right relative to Hub (Hub = 0x0002..., Carol = 0x0004...)
   // CANONICAL: Right pays → offdelta INCREASES, Right receives → offdelta DECREASES
   // Carol gives ETH → offdelta increases (positive)
@@ -1030,7 +1054,7 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   // Carol receives USDC → offdelta decreases (negative)
   assert(carolUsdc < 0n, `Carol should have received USDC (Right receives = negative), got ${carolUsdc}`);
 
-  // Dave bought ETH (total 18 ETH: 3 @ 3000 + 15 @ 3200 sweep, but only 15 available)
+  // Dave bought ETH across multiple levels (partial + sweep)
   // Dave is Right relative to Hub (Hub = 0x0002..., Dave = 0x0005...)
   // Dave gives USDC → offdelta increases (positive)
   assert(daveUsdc > 0n, `Dave should have given USDC (Right pays = positive), got ${daveUsdc}`);
@@ -1038,10 +1062,10 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   // Dave receives ETH → offdelta decreases (negative)
   assert(daveEth < 0n, `Dave should have received ETH (Right receives = negative), got ${daveEth}`);
 
-  // Verify Carol sold at least 15 ETH (her total orders)
+  // Verify Carol sold at least her total offer size
   // Note: Dave may receive more due to Alice's remaining order from Phase 2
-  assert(carolEth >= eth(15),
-    `Carol should have sold at least 15 ETH, got ${Number(carolEth) / 1e18}`);
+  assert(carolEth >= eth(CAROL_SELL_ETH + CAROL_SELL_2_ETH),
+    `Carol should have sold at least ${CAROL_SELL_ETH + CAROL_SELL_2_ETH} ETH, got ${Number(carolEth) / 1e18}`);
 
   // Orderbook ask side should be empty after Dave's sweep
   // (Dave's remaining unfilled bid may still be there)

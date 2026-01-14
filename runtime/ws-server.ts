@@ -176,22 +176,30 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       return;
     }
 
-    // Check if target is the relay server itself (local delivery)
-    if (target === serverId || clients.size === 0) {
-      console.log(`[RELAY] Local delivery - message for relay server itself`);
-      // Call appropriate callback for local message
-      if (msg.type === 'entity_input' && options.onEntityInput && msg.from) {
-        const payload = msg.payload as EntityInput;
-        console.log(`[RELAY] Calling onEntityInput for local delivery`);
+    // Check if target is NOT in connected clients (could be server itself or offline)
+    // If we have onEntityInput callback, try local delivery first
+    if (msg.type === 'entity_input' && options.onEntityInput && msg.from && !targetClient) {
+      const payload = msg.payload as EntityInput;
+      console.log(`[RELAY] Target not in clients - trying local delivery for entity ${payload.entityId.slice(-4)}`);
+      try {
         await options.onEntityInput(msg.from, payload);
+        console.log(`[RELAY] ✅ Local delivery successful`);
         send(ws, { type: 'ack', inReplyTo: msg.id, status: 'delivered' });
         return;
+      } catch (error) {
+        console.log(`[RELAY] Local delivery failed, will queue: ${(error as Error).message}`);
+        // Fall through to queueing
       }
-      if (msg.type === 'runtime_input' && options.onRuntimeInput && msg.from) {
-        const payload = msg.payload as RuntimeInput;
+    }
+
+    if (msg.type === 'runtime_input' && options.onRuntimeInput && msg.from && !targetClient) {
+      const payload = msg.payload as RuntimeInput;
+      try {
         await options.onRuntimeInput(msg.from, payload);
         send(ws, { type: 'ack', inReplyTo: msg.id, status: 'delivered' });
         return;
+      } catch (error) {
+        // Fall through to queueing
       }
     }
 

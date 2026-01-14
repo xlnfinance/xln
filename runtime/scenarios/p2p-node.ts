@@ -288,8 +288,11 @@ const waitForCreditLimit = async (
       const account = getAccount(env, entityId, signerId, counterpartyId);
       const delta = account?.deltas?.get(USDC);
       if (!delta) return false;
-      const counterpartyIsLeft = counterpartyId < entityId;
-      const expectedField = counterpartyIsLeft ? 'leftCreditLimit' : 'rightCreditLimit';
+      // FIXED: We're waiting for the COUNTERPARTY to extend credit TO US
+      // If we (entityId) are left, counterparty sets leftCreditLimit (our limit)
+      // If we (entityId) are right, counterparty sets rightCreditLimit (our limit)
+      const weAreLeft = entityId < counterpartyId;
+      const expectedField = weAreLeft ? 'leftCreditLimit' : 'rightCreditLimit';
       return delta[expectedField] === amount;
     },
     maxRounds,
@@ -408,12 +411,50 @@ const run = async () => {
       },
     ]);
 
-    await converge(env, 30);
-    logAccountState(env, entityId, signerId, aliceProfile.entityId, 'hub-alice after hub credit');
-    logAccountState(env, entityId, signerId, bobProfile.entityId, 'hub-bob after hub credit');
+    // CRITICAL: Wait for Alice/Bob to ACK our credit extension frames
+    // Hub's extendCredit creates pendingFrames that need bilateral consensus completion
+    console.log('HUB: Waiting for Alice/Bob to acknowledge credit extension...');
+
+    // Helper to wait for specific account to have no pending frames
+    const waitForHubAccountReady = async (counterpartyId: string, label: string, maxRounds = 60) => {
+      await processUntil(
+        env,
+        () => {
+          const account = getAccount(env, entityId, signerId, counterpartyId);
+          // Account should exist, have no pending frame, and height > 1 (frame 2 committed)
+          return !!account && !account.pendingFrame && account.currentHeight >= 2;
+        },
+        maxRounds,
+        `hub-${label}-ack`,
+        round => {
+          if (round % 10 === 0) {
+            logAccountState(env, entityId, signerId, counterpartyId, `hub wait ${label} round=${round}`);
+            logQueues(env, `hub wait ${label} round=${round}`);
+          }
+        },
+        () => {
+          logAccountState(env, entityId, signerId, counterpartyId, `hub wait ${label} timeout`);
+          logQueues(env, `hub wait ${label} timeout`);
+        }
+      );
+    };
+
+    // Wait for both accounts to have credit frames acknowledged
+    await Promise.all([
+      waitForHubAccountReady(aliceProfile.entityId, 'alice'),
+      waitForHubAccountReady(bobProfile.entityId, 'bob'),
+    ]);
+
+    logAccountState(env, entityId, signerId, aliceProfile.entityId, 'hub-alice after hub credit ACK');
+    logAccountState(env, entityId, signerId, bobProfile.entityId, 'hub-bob after hub credit ACK');
 
     console.log('P2P_HUB_READY');
-    await new Promise(() => {});
+
+    // Hub stays alive processing messages (don't exit, keep processing networkInbox)
+    while (true) {
+      await runtimeProcess(env);
+      await new Promise(resolve => setTimeout(resolve, 100));  // Process every 100ms
+    }
   }
 
   const refreshGossip = seedRuntimeId
@@ -509,7 +550,30 @@ const run = async () => {
     logEntityState(env, entityId, signerId, 'alice after payment submit');
     logAccountState(env, entityId, signerId, hubProfile.entityId, 'alice-hub account after payment');
 
-    await converge(env, 30);
+    // Wait for Hub to ACK our payment frame (bilateral consensus complete)
+    // This ensures Hub has processed the payment and forwarded to Bob
+    await processUntil(
+      env,
+      () => {
+        const account = getAccount(env, entityId, signerId, hubProfile.entityId);
+        // Payment is done when our account shows the offdelta change and no pending frame
+        const delta = account?.deltas?.get(USDC);
+        return !!account && !account.pendingFrame && delta && delta.offdelta < 0n;
+      },
+      60,
+      'alice-payment-ack',
+      round => {
+        if (round % 10 === 0) {
+          logAccountState(env, entityId, signerId, hubProfile.entityId, `alice wait payment-ack round=${round}`);
+          logQueues(env, `alice wait payment-ack round=${round}`);
+        }
+      },
+      () => {
+        logAccountState(env, entityId, signerId, hubProfile.entityId, 'alice wait payment-ack timeout');
+        logQueues(env, 'alice wait payment-ack timeout');
+      }
+    );
+
     console.log('P2P_PAYMENT_SENT');
     globalThis.process.exit(0);
   }
