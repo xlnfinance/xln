@@ -367,10 +367,12 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         const monotonicTimestamp = Math.max(lastTimestamp + 1, env.timestamp);
 
         const profile = buildEntityProfile(newState, undefined, monotonicTimestamp);
+        console.log(`🏗️ Built profile for ${newState.entityId.slice(-4)}: accounts=${profile.accounts?.length || 0} (state has ${newState.accounts.size})`);
+
         if (env.runtimeId) {
           profile.runtimeId = env.runtimeId;
         }
-        console.log(`📡 Broadcast profile for ${newState.entityId.slice(-4)} with ${newState.accounts.size} accounts (ts: ${lastTimestamp} → ${monotonicTimestamp})`);
+        console.log(`📡 Announcing profile ${newState.entityId.slice(-4)} ts=${monotonicTimestamp} accounts=${profile.accounts?.length || 0}`);
         env.gossip.announce(profile);
       }
 

@@ -36,9 +36,18 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
       }
     }
 
+    // Convert tokenCapacities Map to plain object for JSON serialization
+    const tokenCapacitiesObj: Record<number, { inCapacity: string; outCapacity: string }> = {};
+    for (const [tokenId, cap] of tokenCapacities.entries()) {
+      tokenCapacitiesObj[tokenId] = {
+        inCapacity: cap.inCapacity.toString(),
+        outCapacity: cap.outCapacity.toString(),
+      };
+    }
+
     accounts.push({
       counterpartyId,
-      tokenCapacities,
+      tokenCapacities: tokenCapacitiesObj as any,  // Plain object for JSON
     });
 
     if (hasInboundCapacity) {

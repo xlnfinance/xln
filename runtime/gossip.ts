@@ -62,6 +62,8 @@ export function createGossipLayer(): GossipLayer {
   const profiles = new Map<string, Profile>();
 
   const announce = (profile: Profile): void => {
+    console.log(`📢 gossip.announce INPUT: ${profile.entityId.slice(-4)} accounts=${profile.accounts?.length || 0}`);
+
     const normalizedProfile: Profile = {
       ...profile,
       publicAccounts: profile.publicAccounts || profile.hubs || [],
@@ -69,6 +71,8 @@ export function createGossipLayer(): GossipLayer {
       endpoints: profile.endpoints || [],
       relays: profile.relays || [],
     };
+
+    console.log(`📢 After normalize: ${profile.entityId.slice(-4)} accounts=${normalizedProfile.accounts?.length || 0}`);
     // Only update if newer timestamp or no existing profile
     const existing = profiles.get(profile.entityId);
     const newTimestamp = normalizedProfile.metadata?.lastUpdated || 0;
@@ -80,14 +84,19 @@ export function createGossipLayer(): GossipLayer {
       (newTimestamp === existingTimestamp && (
         (!existing.runtimeId && !!normalizedProfile.runtimeId) ||
         (existing.runtimeId !== normalizedProfile.runtimeId) ||
-        (!!normalizedProfile.metadata?.entityPublicKey && existing.metadata?.entityPublicKey !== normalizedProfile.metadata?.entityPublicKey)
+        (!!normalizedProfile.metadata?.entityPublicKey && existing.metadata?.entityPublicKey !== normalizedProfile.metadata?.entityPublicKey) ||
+        ((existing.accounts?.length || 0) !== (normalizedProfile.accounts?.length || 0))  // Accept if accounts changed
       ));
 
     if (shouldUpdate) {
       profiles.set(profile.entityId, normalizedProfile);
-      console.log(`📡 Gossip updated for ${profile.entityId} (timestamp: ${newTimestamp})`);
+      console.log(`📡 Gossip SAVED: ${profile.entityId.slice(-4)} ts=${newTimestamp} accounts=${normalizedProfile.accounts?.length || 0}`);
+
+      // VERIFY: Check что profile действительно сохранился
+      const verify = profiles.get(profile.entityId);
+      console.log(`✅ VERIFY after SET: ${profile.entityId.slice(-4)} accounts=${verify?.accounts?.length || 0} (should be ${normalizedProfile.accounts?.length})`);
     } else {
-      console.log(`📡 Gossip ignored older update for ${profile.entityId} (${newTimestamp} <= ${existingTimestamp})`);
+      console.log(`📡 Gossip REJECTED: ${profile.entityId.slice(-4)} ts=${newTimestamp}<=${existingTimestamp}`);
     }
   };
 

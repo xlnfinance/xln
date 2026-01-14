@@ -438,10 +438,21 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
       scheduleNetworkProcess(env);
     },
     onGossipProfiles: (from, profiles) => {
-      if (!env.gossip?.announce) return;
-      for (const profile of profiles) {
+      console.log(`📥 onGossipProfiles: Received ${profiles.length} profiles from ${from.slice(0,10)}`);
+      console.log(`📥 Profile details:`, profiles.map(p => `${p.entityId?.slice(-4) || '????'}:${p.accounts?.length || 0}acc`).join(', '));
+
+      if (!env.gossip?.announce) {
+        console.warn(`⚠️ No env.gossip.announce!`);
+        return;
+      }
+
+      console.log(`📥 Starting announce loop for ${profiles.length} profiles...`);
+      for (let i = 0; i < profiles.length; i++) {
+        const profile = profiles[i];
+        console.log(`  [${i}] Announcing ${profile.entityId.slice(-4)} accounts=${profile.accounts?.length || 0} ts=${profile.metadata?.lastUpdated}`);
         env.gossip.announce(profile);
       }
+      console.log(`📥 Announce loop complete`);
       env.info('network', 'GOSSIP_SYNC', { fromRuntimeId: from, profiles: profiles.length });
     },
   });

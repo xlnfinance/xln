@@ -33,7 +33,15 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const getProfileByName = (env: any, name: string) => {
   const profiles = env.gossip?.getProfiles?.() || [];
-  return profiles.find((profile: any) => (profile.metadata?.name || '').toLowerCase() === name.toLowerCase());
+  console.log(`🔍 getProfileByName('${name}'): Searching in ${profiles.length} profiles`);
+
+  const profile = profiles.find((p: any) => (p.metadata?.name || '').toLowerCase() === name.toLowerCase());
+  if (profile) {
+    console.log(`🔍 FOUND '${name}': ${profile.entityId.slice(-4)} accounts=${profile.accounts?.length || 0} ts=${profile.metadata?.lastUpdated}`);
+  } else {
+    console.log(`🔍 NOT FOUND '${name}' (names: ${profiles.map((p: any) => p.metadata?.name).join(',')})`);
+  }
+  return profile;
 };
 
 const getAccount = (env: any, entityId: string, signerId: string, counterpartyId: string) => {
@@ -256,8 +264,13 @@ const waitForHubAccount = async (
     refresh?.();
     await sleep(200);
   }
-  console.error(`❌ HUB_ACCOUNT_MISSING: Looking for ${counterpartyId.slice(-4)}, hub has accounts: [${accountIds.join(',')}]`);
-  logProfile('wait-hub-account timeout', getProfileByName(env, 'hub'));
+
+  // Scope fix for error message
+  const finalProfile = getProfileByName(env, 'hub');
+  const finalAccounts = finalProfile?.accounts || [];
+  const finalAccountIds = finalAccounts.map((a: any) => a.counterpartyId?.slice(-4) || '????');
+  console.error(`❌ HUB_ACCOUNT_MISSING: Looking for ${counterpartyId.slice(-4)}, hub has accounts: [${finalAccountIds.join(',')}]`);
+  logProfile('wait-hub-account timeout', finalProfile);
   throw new Error(`HUB_ACCOUNT_MISSING: ${counterpartyId}`);
 };
 
