@@ -75,11 +75,13 @@ export const deserializeWsMessage = (raw: string | Buffer | ArrayBuffer): Runtim
   return JSON.parse(text, jsonReviver) as RuntimeWsMessage;
 };
 
+let messageCounter = 0;
+let helloNonceCounter = 0;
+
 export const makeMessageId = (): string => {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID();
-  }
-  return `msg_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const id = messageCounter;
+  messageCounter += 1;
+  return `msg_${id}`;
 };
 
 const HELLO_DOMAIN = 'xln-ws-hello';
@@ -93,8 +95,7 @@ export const hashHelloMessage = (runtimeId: string, timestamp: number, nonce: st
 };
 
 export const makeHelloNonce = (): string => {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID();
-  }
-  return `nonce_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const id = helloNonceCounter;
+  helloNonceCounter += 1;
+  return `nonce_${id}`;
 };

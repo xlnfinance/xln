@@ -346,12 +346,14 @@ const run = async () => {
     entityInputs: [],
   });
 
+  console.log(`🔧 P2P_CONFIG: role=${role} profileName=${role} entityId=${entityId.slice(-4)}`);
+
   const p2p = startP2P(env, {
     relayUrls: [relayUrl],
     seedRuntimeIds: seedRuntimeId ? [seedRuntimeId] : [],
     advertiseEntityIds: [entityId],
     isHub,
-    profileName: role,
+    profileName: role,  // 'hub', 'alice', 'bob'
   });
 
   if (!p2p) {
@@ -378,18 +380,21 @@ const run = async () => {
     logAccountState(env, entityId, signerId, aliceProfile.entityId, 'hub account after open');
     logAccountState(env, entityId, signerId, bobProfile.entityId, 'hub account after open');
 
+    // Mutual credit: Hub extends to Alice, Alice extends to Hub
     await runtimeProcess(env, [
       {
         entityId,
         signerId,
         entityTxs: [
           { type: 'extendCredit', data: { counterpartyEntityId: aliceProfile.entityId, tokenId: USDC, amount: usd(500_000) } },
+          { type: 'extendCredit', data: { counterpartyEntityId: bobProfile.entityId, tokenId: USDC, amount: usd(500_000) } },
         ],
       },
     ]);
 
-    await converge(env, 20);
-    logAccountState(env, entityId, signerId, aliceProfile.entityId, 'hub account after credit');
+    await converge(env, 30);
+    logAccountState(env, entityId, signerId, aliceProfile.entityId, 'hub-alice after hub credit');
+    logAccountState(env, entityId, signerId, bobProfile.entityId, 'hub-bob after hub credit');
 
     console.log('P2P_HUB_READY');
     await new Promise(() => {});
@@ -409,7 +414,22 @@ const run = async () => {
   await converge(env, 20);
   await waitForAccount(env, entityId, signerId, hubProfile.entityId);
   await waitForAccountReady(env, entityId, signerId, hubProfile.entityId);
-  logAccountState(env, entityId, signerId, hubProfile.entityId, `${role} account ready`);
+
+  // CLIENT extends credit to HUB (so hub can owe us)
+  console.log(`${role.toUpperCase()}: Extending credit to hub...`);
+  await runtimeProcess(env, [
+    {
+      entityId,
+      signerId,
+      entityTxs: [
+        { type: 'extendCredit', data: { counterpartyEntityId: hubProfile.entityId, tokenId: USDC, amount: usd(500_000) } },
+      ],
+    },
+  ]);
+
+  await converge(env, 30);
+  logAccountState(env, entityId, signerId, hubProfile.entityId, `${role} account after mutual credit`);
+  console.log(`${role.toUpperCase()}: Credit extended to hub`);
 
   if (role === 'alice') {
     await waitForProfile(env, 'bob', 40, refreshGossip, true, true, true);

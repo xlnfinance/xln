@@ -19,6 +19,8 @@ import { createNumberedEntity } from '../entity-factory.js';
 import { getAvailableJurisdictions } from '../evm.js';
 import { safeStringify } from '../serialization-utils.js';
 
+let payRandomCounter = 0;
+
 /**
  * Execute a scenario and generate runtime frames
  */
@@ -787,14 +789,12 @@ async function handlePayRandom(
 
   // Send payments one at a time with 1 second delay
   for (let i = 0; i < count; i++) {
-    // Random source and destination
-    const sourceIdx = Math.floor(Math.random() * allEntityIds.length);
-    let destIdx = Math.floor(Math.random() * allEntityIds.length);
+    const sequence = payRandomCounter;
+    payRandomCounter += 1;
 
-    // Ensure source !== dest
-    while (destIdx === sourceIdx && allEntityIds.length > 1) {
-      destIdx = Math.floor(Math.random() * allEntityIds.length);
-    }
+    // Deterministic source and destination
+    const sourceIdx = sequence % allEntityIds.length;
+    const destIdx = (sequence + 1) % allEntityIds.length;
 
     const sourceEntityId = allEntityIds[sourceIdx];
     const destEntityId = allEntityIds[destIdx];
@@ -809,10 +809,10 @@ async function handlePayRandom(
     }
     const signerId = replica.signerId;
 
-    // Random amount
+    // Deterministic amount
     const amountRange = maxAmount - minAmount;
-    const randomOffset = BigInt(Math.floor(Math.random() * Number(amountRange)));
-    const amount = minAmount + randomOffset;
+    const offset = amountRange > 0n ? BigInt(sequence) % amountRange : 0n;
+    const amount = minAmount + offset;
 
     console.log(`  💸 Payment ${i + 1}/${count}: ${sourceEntityId.slice(0,8)} → ${destEntityId.slice(0,8)} (${amount} tokens)`);
 

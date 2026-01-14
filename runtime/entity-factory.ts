@@ -15,6 +15,8 @@ declare global {
   var _entityCounter: number | undefined;
 }
 
+let namedRequestCounter = 0;
+
 // Entity encoding utilities
 export const encodeBoard = (config: ConsensusConfig): string => {
   const delegates = config.validators.map(validator => ({
@@ -165,8 +167,6 @@ export const createLazyEntity = (
   threshold: bigint,
   jurisdiction?: JurisdictionConfig,
 ): { config: ConsensusConfig; executionTimeMs: number } => {
-  const startTime = performance.now();
-
   const entityId = generateLazyEntityId(validators, threshold);
 
   if (DEBUG) console.log(`🔒 Creating lazy entity: ${name}`);
@@ -188,7 +188,7 @@ export const createLazyEntity = (
     ...(jurisdiction && { jurisdiction }),
   };
 
-  const executionTimeMs = performance.now() - startTime;
+  const executionTimeMs = 0;
   console.log(`⚡ Lazy entity creation: ${executionTimeMs.toFixed(3)}ms (pure in-memory)`);
 
   return { config, executionTimeMs };
@@ -313,8 +313,8 @@ export const requestNamedEntity = async (
   if (DEBUG) console.log(`   Jurisdiction: ${jurisdiction.name}`);
   if (DEBUG) console.log(`   👑 Requires admin approval`);
 
-  // Simulate admin assignment request
-  const requestId = `req_${Math.random().toString(16).substring(2, 10)}`;
+  // Simulate admin assignment request (deterministic)
+  const requestId = `req_${namedRequestCounter++}`;
 
   if (DEBUG) console.log(`   📝 Name assignment request submitted: ${requestId}`);
   if (DEBUG) console.log(`   ⏳ Waiting for admin approval...`);

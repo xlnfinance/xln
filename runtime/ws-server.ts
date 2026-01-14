@@ -35,7 +35,11 @@ const HEARTBEAT_MS = 15000;
 const MAX_MESSAGE_BYTES = 2 * 1024 * 1024;
 const DEFAULT_HELLO_SKEW_MS = 5 * 60 * 1000;
 
-const now = () => Date.now();
+let wsClock = 0;
+const now = () => {
+  wsClock += 1;
+  return wsClock;
+};
 
 const parseRuntimeIdFromReq = (req: { headers?: Record<string, string | string[] | undefined>; url?: string }) => {
   const headers = req.headers || {};

@@ -366,8 +366,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         const lastTimestamp = existingProfile?.metadata?.lastUpdated || 0;
         const monotonicTimestamp = Math.max(lastTimestamp + 1, env.timestamp);
 
-        const profile = buildEntityProfile(newState, undefined, monotonicTimestamp);
-        console.log(`🏗️ Built profile for ${newState.entityId.slice(-4)}: accounts=${profile.accounts?.length || 0} (state has ${newState.accounts.size})`);
+        // Preserve existing name if any (don't overwrite with undefined)
+        const existingName = existingProfile?.metadata?.name;
+        const profile = buildEntityProfile(newState, existingName, monotonicTimestamp);
+
+        console.log(`🏗️ Built profile for ${newState.entityId.slice(-4)}: accounts=${profile.accounts?.length || 0} name=${profile.metadata?.name || 'none'}`);
 
         if (env.runtimeId) {
           profile.runtimeId = env.runtimeId;

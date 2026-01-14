@@ -101,7 +101,12 @@ export function createGossipLayer(): GossipLayer {
   };
 
   const getProfiles = (): Profile[] => {
-    return Array.from(profiles.values());
+    const result = Array.from(profiles.values());
+    console.log(`🔍 getProfiles(): Returning ${result.length} profiles`);
+    for (const p of result) {
+      console.log(`  - ${p.entityId.slice(-4)}: accounts=${p.accounts?.length || 0} ts=${p.metadata?.lastUpdated}`);
+    }
+    return result;
   };
 
   const getProfileBundle = (entityId: string): { profile?: Profile; peers: Profile[] } => {
