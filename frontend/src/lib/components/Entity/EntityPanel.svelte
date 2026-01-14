@@ -438,6 +438,7 @@
 
       <!-- Orderbook Section (Hubs only) -->
       {#if replica && replica.state.orderbookExt}
+        {@const defaultPairId = replica.state.orderbookExt.hubProfile?.supportedPairs?.[0] || '1/2'}
         <div class="orderbook-wrapper">
           <div class="section-header" role="button" tabindex="0" on:click={() => toggleComponent(`orderbook-${tab.id}`)} on:keydown={(e) => e.key === 'Enter' && toggleComponent(`orderbook-${tab.id}`)}>
             <h3>📈 Orderbook</h3>
@@ -446,7 +447,7 @@
           {#if orderbookExpanded}
             <OrderbookPanel
               hubId={replica.state.entityId}
-              pairId="1/2"
+              pairId={defaultPairId}
               depth={10}
               {...(contextEnv ? { envStore: contextEnv } : {})}
             />
