@@ -261,7 +261,9 @@ export class RuntimeP2P {
         profile.metadata = { ...(profile.metadata || {}), name: this.profileName };
       }
 
-      const publicKey = getSignerPublicKey(entityId);
+      // Get public key from first validator (superset approach - works for single/multi-signer)
+      const firstValidator = replica.state.config.validators[0];
+      const publicKey = firstValidator ? getSignerPublicKey(firstValidator) : null;
       if (publicKey) {
         profile.metadata = {
           ...(profile.metadata || {}),
