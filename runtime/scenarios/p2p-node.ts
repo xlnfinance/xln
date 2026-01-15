@@ -324,14 +324,16 @@ const run = async () => {
       serverId: role,
       requireAuth: false,
       // CRITICAL: Pass callback to feed messages into Hub's runtime
-      onEntityInput: (from: string, input: any) => {
+      onEntityInput: async (from: string, input: any) => {
         console.log(`[HUB-RELAY] Received entity_input from=${from.slice(0,10)} entity=${input.entityId.slice(-4)}`);
         if (!env.networkInbox) env.networkInbox = [];
         env.networkInbox.push(input);
         console.log(`[HUB-RELAY] Added to networkInbox, size=${env.networkInbox.length}`);
-        // Trigger processing via same mechanism as P2P client
-        const { scheduleNetworkProcess } = require('../runtime');
-        if (scheduleNetworkProcess) scheduleNetworkProcess(env);
+        // Trigger processing via async import (ESM-safe)
+        const runtime = await import('../runtime');
+        if (runtime.scheduleNetworkProcess) {
+          (runtime.scheduleNetworkProcess as any)(env);
+        }
       },
     });
     relay.server.on('listening', () => {
