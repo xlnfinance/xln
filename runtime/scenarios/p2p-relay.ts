@@ -5,6 +5,7 @@
 
 import { spawn } from 'child_process';
 import fs from 'fs';
+import net from 'net';
 import path from 'path';
 import { deriveSignerAddressSync } from '../account-crypto';
 
@@ -155,7 +156,7 @@ const spawnNode = (
   seedRuntimeId?: string,
   extraArgs: string[] = []
 ): ProcInfo => {
-  const dbRoot = path.join(process.cwd(), 'runtime', '.db-tmp');
+  const dbRoot = path.join(process.cwd(), 'db-tmp');
   const relayPort = (() => {
     try {
       const url = new URL(relayUrl);
@@ -215,11 +216,29 @@ const killAll = (procs: ProcInfo[]) => {
   }
 };
 
+const getFreePort = async () => {
+  return new Promise<number>((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      server.close(() => {
+        if (address && typeof address === 'object') {
+          resolve(address.port);
+        } else {
+          reject(new Error('FREE_PORT_UNAVAILABLE'));
+        }
+      });
+    });
+  });
+};
+
 const procs: ProcInfo[] = [];
 
 const run = async () => {
   const envPort = process.env.P2P_RELAY_PORT;
-  const relayPort = envPort ? Number(envPort) : 8890;
+  const relayPort = envPort ? Number(envPort) : await getFreePort();
   let hub: ProcInfo | null = null;
   let alice: ProcInfo | null = null;
   let bob: ProcInfo | null = null;

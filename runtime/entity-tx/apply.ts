@@ -890,6 +890,17 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       return { newState, outputs: [] };
     }
 
+    // === DISPUTES ===
+    if (entityTx.type === 'disputeStart') {
+      const { handleDisputeStart } = await import('./handlers/dispute');
+      return await handleDisputeStart(entityState, entityTx, env);
+    }
+
+    if (entityTx.type === 'disputeFinalize') {
+      const { handleDisputeFinalize } = await import('./handlers/dispute');
+      return await handleDisputeFinalize(entityState, entityTx, env);
+    }
+
     console.warn(`⚠️ Unhandled EntityTx type: ${entityTx.type}`);
     return { newState: entityState, outputs: [], jOutputs: [] };
   } catch (error) {

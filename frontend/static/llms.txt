@@ -1,5 +1,5 @@
-# XLN Context - Core System Files (~182k tokens)
-# Generated: 2026-01-11 22:01:57 | Git: c1b21df
+# XLN Context - Core System Files (~189k tokens)
+# Generated: 2026-01-15 18:26:19 | Git: c315919
 
 ## THE CORE INNOVATION: RCPAN Invariant
 
@@ -40,7 +40,7 @@ This single invariant:
 4. **Multi-hop payments that NET positions** - Ripple batches, Lightning routes, only XLN nets bilaterally
 5. **Entity-owned subcontracts (HTLCs, limit orders) without separate channels** - One bilateral account, many subcontracts
 
-## Token Budget Guide (~182k tokens total)
+## Token Budget Guide (~189k tokens total)
 
 **Critical path (read first, ~30min):**
 - ⚡ emc2.md (5min) - Why credit = stored energy
@@ -129,25 +129,25 @@ xln/
     DeltaTransformer.sol       155 lines - Delta transformations: HTLCs, swaps, limit orders
 
   runtime/
-    types.ts                     1553 lines - All TypeScript interfaces (START HERE)
+    types.ts                     1585 lines - All TypeScript interfaces (START HERE)
     ids.ts                       519 lines - Identity system: EntityId, SignerId, JId, ReplicaKey
-    runtime.ts                   1879 lines - Main coordinator, 100ms ticks, R->E->A routing
-    entity-consensus.ts          1108 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
-    account-consensus.ts         1111 lines - Bilateral consensus, left/right perspective
+    runtime.ts                   2151 lines - Main coordinator, 100ms ticks, R->E->A routing
+    entity-consensus.ts          1193 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
+    account-consensus.ts         1190 lines - Bilateral consensus, left/right perspective
     account-consensus-state.ts   171 lines - Bilateral state machine
-    j-batch.ts                   460 lines - J-batch: E-machine accumulates → jBroadcast → J-machine
+    j-batch.ts                   463 lines - J-batch: E-machine accumulates → jBroadcast → J-machine
     account-utils.ts             220 lines - deriveDelta() RCPAN calculation
     serialization-utils.ts       116 lines - BigInt serialization
-    account-crypto.ts            247 lines - Signature verification
+    account-crypto.ts            325 lines - Signature verification
 
     entity-tx/
       index.ts                   7 lines - Entity transaction types
-      apply.ts                   891 lines - Entity tx dispatcher
+      apply.ts                   900 lines - Entity tx dispatcher
       validation.ts              37 lines - Transaction validation
       financial.ts               33 lines - Financial accounting
       proposals.ts               35 lines - Proposal logic
       j-events.ts                610 lines - Jurisdiction events
-      handlers/account.ts              854 lines - Account operations
+      handlers/account.ts              848 lines - Account operations
       handlers/deposit-collateral.ts   74 lines - R2C deposits
       handlers/htlc-payment.ts         212 lines - HTLC routing
       handlers/create-settlement.ts    54 lines - Settlement creation
@@ -162,9 +162,9 @@ xln/
       graph.ts                   117 lines - Network graph
       pathfinding.ts             227 lines - Dijkstra routing
 
-    state-helpers.ts             606 lines - Pure state management
+    state-helpers.ts             642 lines - Pure state management
     snapshot-coder.ts            316 lines - Deterministic RLP serialization
-    evm.ts                       1022 lines - Blockchain integration
+    evm.ts                       1023 lines - Blockchain integration
 
   docs/
     emc2.md                      33 lines - ⚡ Energy-Mass-Credit equivalence (CRITICAL PATH)
@@ -3070,7 +3070,7 @@ contract DeltaTransformer is Console {
 
 }
 
-//runtime/types.ts (1553 lines)
+//runtime/types.ts (1585 lines)
 /**
  * XLN Type Definitions
  * All interfaces and type definitions used across the XLN system
@@ -3822,7 +3822,11 @@ export interface AccountMachine {
     leftDisputeDelay: number;   // uint16 - value * 10 = blocks
     rightDisputeDelay: number;  // uint16 - value * 10 = blocks
   };
-  hankoSignature?: string; // Last signed proof by counterparty
+  // HANKO SYSTEM: Bilateral hanko storage for disputes
+  currentAccountProofHanko?: HankoString; // Most recent account proof hanko (for disputes)
+  counterpartyAccountProofHanko?: HankoString; // Counterparty's most recent hanko (for disputes)
+  hankoSignature?: string; // LEGACY - will be replaced by currentAccountProofHanko
+
   // Historical frame log - grows until manually pruned by entity
   frameHistory: AccountFrame[]; // All confirmed bilateral frames in chronological order
 
@@ -3870,9 +3874,16 @@ export interface AccountInput {
 
   // Frame-level consensus (matches Channel.ts FlushMessage structure)
   height?: number;                   // Which frame we're ACKing or referencing (renamed from frameId)
-  prevSignatures?: string[];         // ACK for their frame (like pendingSignatures in Channel.ts)
+
+  // HANKO SYSTEM:
+  prevHanko?: HankoString;           // ACK hanko for their frame
   newAccountFrame?: AccountFrame;    // Our new proposed frame (like block in Channel.ts)
-  newSignatures?: string[];          // Signatures on new frame (like newSignatures in Channel.ts)
+  newHanko?: HankoString;            // Hanko on newAccountFrame
+
+  // LEGACY (will be removed):
+  prevSignatures?: string[];         // ACK for their frame (LEGACY)
+  newSignatures?: string[];          // Signatures on new frame (LEGACY)
+
   counter?: number;                  // Message counter for replay protection (like Channel.ts line 620)
 }
 
@@ -4179,7 +4190,14 @@ export interface ProposedEntityFrame {
   txs: EntityTx[];
   hash: string;
   newState: EntityState;
-  signatures: Map<string, string>; // signerId -> signature
+
+  // NEW HANKO SYSTEM:
+  hashes?: string[];         // Sorted lexicographically - all objects signed in this frame
+  signatures?: string[][];   // [validator_i][hash_j] - partial sigs during collection
+  hankos?: HankoString[];    // After merge: one HankoBytes per hash (hex-encoded ABI)
+
+  // LEGACY (will be removed after hanko migration):
+  signatures_legacy?: Map<string, string>; // signerId -> signature (old system)
 }
 
 export interface EntityReplica {
@@ -4235,6 +4253,8 @@ export interface Env {
   jReplicas: Map<string, JReplica>;       // Jurisdiction replicas (J-layer EVM state)
   height: number;
   timestamp: number;
+  runtimeSeed?: string; // BrainVault seed backing this runtime (plaintext, dev mode)
+  runtimeId?: string; // Runtime identity (usually signer1 address)
   runtimeInput: RuntimeInput; // Persistent storage for merged inputs
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: any; // Gossip layer for network profiles
@@ -4267,9 +4287,16 @@ export interface Env {
   // E→E message queue (always spans ticks - no same-tick cascade)
   pendingOutputs?: EntityInput[]; // Outputs queued for next tick
   skipPendingForward?: boolean;   // Temp flag to defer forwarding to next frame
+  networkInbox?: EntityInput[];   // Inbound network messages queued for next tick
+  pendingNetworkOutputs?: EntityInput[]; // Outputs waiting for runtimeId gossip before routing
+  lockRuntimeSeed?: boolean;      // Prevent runtime seed updates during scenarios
 
   // Frame-scoped structured logs (captured into snapshot, then reset)
   frameLogs: FrameLogEntry[];
+
+  // HANKO SYSTEM: Hash collection during frame creation
+  currentFrameHashes?: string[]; // Hashes accumulated during applyEntityFrame (cleared after)
+  currentFrameEntityId?: string; // EntityId for current frame being built (for signAsEntity)
 
   // Event emission methods (EVM-style - like Ethereum block logs)
   log: (message: string) => void;
@@ -4344,6 +4371,8 @@ export interface RuntimeSnapshot {
 export interface EnvSnapshot {
   height: number;
   timestamp: number;
+  runtimeSeed?: string;
+  runtimeId?: string;
   eReplicas: Map<string, EntityReplica>;  // E-layer state
   jReplicas: JReplica[];                   // J-layer state (with stateRoot for time travel)
   runtimeInput: RuntimeInput;
@@ -4397,8 +4426,11 @@ export interface HankoClaim {
   entityIndexes: number[];
   weights: number[];
   threshold: number;
-  expectedQuorumHash: Buffer;
+  // NOTE: NO expectedQuorumHash - EP.sol reconstructs board hash from recovered signers
 }
+
+// Hanko in string format (hex-encoded ABI bytes)
+export type HankoString = string;
 
 export interface HankoVerificationResult {
   valid: boolean;
@@ -5146,7 +5178,7 @@ export const safeExtractEntityId = (keyString: string): EntityId | null => {
 };
 
 
-//runtime/runtime.ts (1879 lines)
+//runtime/runtime.ts (2151 lines)
 // for regular use > bun run runtime/runtime.ts
 // for debugging > bun repl
 // await import('./debug.js');
@@ -5156,6 +5188,7 @@ export const safeExtractEntityId = (keyString: string): EntityId | null => {
 // High-level database using Level polyfill (works in both Node.js and browser)
 import { Level } from 'level';
 
+import { getPerfMs, getWallClockMs } from './time';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import {
   createLazyEntity,
@@ -5190,6 +5223,9 @@ import {
 } from './evm';
 import { createGossipLayer } from './gossip';
 import { attachEventEmitters } from './env-events';
+import { deriveSignerAddressSync, deriveSignerKeySync, getSignerPublicKey, registerSignerKey, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
+import { buildEntityProfile } from './gossip-helper';
+import { RuntimeP2P, type P2PConfig } from './p2p';
 import {
   parseReplicaKey,
   extractEntityId,
@@ -5348,7 +5384,13 @@ export const copyCleanLogs = async (): Promise<string> => {
 
 // --- Database Setup ---
 // Level polyfill: Node.js uses filesystem, Browser uses IndexedDB
-export const db: Level<Buffer, Buffer> = new Level('db', {
+const nodeProcess =
+  !isBrowser && typeof globalThis.process !== 'undefined'
+    ? globalThis.process
+    : undefined;
+const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
+const dbPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
+export const db: Level<Buffer, Buffer> = new Level(dbPath, {
   valueEncoding: 'buffer',
   keyEncoding: 'binary',
 });
@@ -5402,6 +5444,12 @@ let envChangeCallback: ((env: Env) => void) | null = null;
 
 // Module-level environment variable
 let env: Env;
+let runtimeSeed: string | null = null;
+let runtimeId: string | null = null;
+let p2pOverlay: RuntimeP2P | null = null;
+let pendingP2PConfig: { env: Env; config: P2PConfig } | null = null;
+let networkProcessScheduled = false;
+let lastP2PConfig: P2PConfig | null = null;
 
 // Module-level j-watcher instance - prevent multiple instances
 let jWatcher: JEventWatcher | null = null;
@@ -5420,6 +5468,191 @@ export const getEnv = (): Env | null => {
   return env || null;
 };
 
+export const setRuntimeSeed = (seed: string | null): void => {
+  if (env?.lockRuntimeSeed) {
+    console.warn('⚠️ Runtime seed update blocked (scenario lock enabled)');
+    return;
+  }
+  const normalized = seed && seed.length > 0 ? seed : null;
+  runtimeSeed = normalized;
+  setCryptoRuntimeSeed(normalized);
+  if (normalized) {
+    try {
+      runtimeId = deriveSignerAddressSync(normalized, '1');
+    } catch (error) {
+      console.warn('⚠️ Failed to derive runtimeId from seed:', error);
+      runtimeId = null;
+    }
+  } else {
+    runtimeId = null;
+  }
+  if (env) {
+    env.runtimeSeed = normalized || undefined;
+    env.runtimeId = runtimeId || undefined;
+  }
+  if (pendingP2PConfig && runtimeId) {
+    const { env: pendingEnv, config } = pendingP2PConfig;
+    pendingP2PConfig = null;
+    startP2P(pendingEnv, config);
+  }
+  if (env && p2pOverlay && lastP2PConfig && runtimeId) {
+    startP2P(env, lastP2PConfig);
+  }
+};
+
+export const setRuntimeId = (id: string | null): void => {
+  runtimeId = id && id.length > 0 ? id : null;
+  if (env) {
+    env.runtimeId = runtimeId || undefined;
+  }
+};
+
+const scheduleNetworkProcess = (env: Env) => {
+  if (networkProcessScheduled) return;
+  networkProcessScheduled = true;
+  const defer =
+    typeof setImmediate === 'function'
+      ? setImmediate
+      : (cb: () => void) => {
+          if (typeof queueMicrotask === 'function') {
+            queueMicrotask(cb);
+          } else {
+            setTimeout(cb, 0);
+          }
+        };
+  defer(async () => {
+    networkProcessScheduled = false;
+    if (!env.networkInbox || env.networkInbox.length === 0) return;
+    if (processing) {
+      scheduleNetworkProcess(env);
+      return;
+    }
+    try {
+      await process(env);
+    } catch (error) {
+      logError('NETWORK', 'Failed to process network inbox', error);
+    }
+  });
+};
+
+const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null => {
+  if (!env.gossip?.getProfiles) return null;
+  const profiles = env.gossip.getProfiles();
+  const profile = profiles.find((p: Profile) => p.entityId === entityId);
+  return profile?.runtimeId || null;
+};
+
+const routeEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] => {
+  if (!p2pOverlay) return outputs;
+  const localEntityIds = new Set<string>();
+  for (const replicaKey of env.eReplicas.keys()) {
+    try {
+      localEntityIds.add(extractEntityId(replicaKey));
+    } catch {
+      // Skip malformed replica keys
+    }
+  }
+
+  const localOutputs: EntityInput[] = [];
+  const pendingOutputs = env.pendingNetworkOutputs ? [...env.pendingNetworkOutputs] : [];
+  env.pendingNetworkOutputs = [];
+  const allOutputs = [...pendingOutputs, ...outputs];
+  const deferredOutputs: EntityInput[] = [];
+
+  for (const output of allOutputs) {
+    if (localEntityIds.has(output.entityId)) {
+      localOutputs.push(output);
+      continue;
+    }
+    const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
+    console.log(`🔀 ROUTE: Output for entity ${output.entityId.slice(-4)} → runtimeId=${targetRuntimeId?.slice(0,10) || 'UNKNOWN'}`);
+
+    if (!targetRuntimeId) {
+      console.warn(`⚠️ ROUTE-DEFER: No runtimeId for entity ${output.entityId.slice(-4)} - deferring output`);
+      env.warn('network', 'Missing runtimeId for entity output (queued)', { entityId: output.entityId });
+      deferredOutputs.push(output);
+      continue;
+    }
+
+    console.log(`📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId.slice(0, 10)} for entity ${output.entityId.slice(-4)}`);
+    p2pOverlay.enqueueEntityInput(targetRuntimeId, output);
+  }
+
+  if (deferredOutputs.length > 0) {
+    env.pendingNetworkOutputs = deferredOutputs;
+  }
+
+  return localOutputs;
+};
+
+export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null => {
+  lastP2PConfig = config;
+  const resolvedRuntimeId = config.runtimeId || env.runtimeId;
+  if (!resolvedRuntimeId) {
+    pendingP2PConfig = { env, config };
+    return null;
+  }
+
+  if (p2pOverlay) {
+    if (p2pOverlay.matchesIdentity(resolvedRuntimeId, config.signerId)) {
+      p2pOverlay.updateConfig(config);
+      return p2pOverlay;
+    }
+    p2pOverlay.close();
+  }
+
+  p2pOverlay = new RuntimeP2P({
+    env,
+    runtimeId: resolvedRuntimeId,
+    signerId: config.signerId,
+    relayUrls: config.relayUrls,
+    seedRuntimeIds: config.seedRuntimeIds,
+    advertiseEntityIds: config.advertiseEntityIds,
+    isHub: config.isHub,
+    profileName: config.profileName,
+    onEntityInput: (from, input) => {
+      const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
+      console.log(`📨 P2P-RECEIVE: from=${from.slice(0,10)} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
+      env.networkInbox = env.networkInbox || [];
+      env.networkInbox.push(input);
+      console.log(`📥 NETWORK-INBOX: Added, size=${env.networkInbox.length}`);
+      env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
+      scheduleNetworkProcess(env);
+    },
+    onGossipProfiles: (from, profiles) => {
+      console.log(`📥 onGossipProfiles: Received ${profiles.length} profiles from ${from.slice(0,10)}`);
+      console.log(`📥 Profile details:`, profiles.map(p => `${p.entityId?.slice(-4) || '????'}:${p.accounts?.length || 0}acc`).join(', '));
+
+      if (!env.gossip?.announce) {
+        console.warn(`⚠️ No env.gossip.announce!`);
+        return;
+      }
+
+      console.log(`📥 Starting announce loop for ${profiles.length} profiles...`);
+      for (let i = 0; i < profiles.length; i++) {
+        const profile = profiles[i];
+        console.log(`  [${i}] Announcing ${profile.entityId.slice(-4)} accounts=${profile.accounts?.length || 0} ts=${profile.metadata?.lastUpdated}`);
+        env.gossip.announce(profile);
+      }
+      console.log(`📥 Announce loop complete`);
+      env.info('network', 'GOSSIP_SYNC', { fromRuntimeId: from, profiles: profiles.length });
+    },
+  });
+
+  p2pOverlay.connect();
+  return p2pOverlay;
+};
+
+export const stopP2P = (): void => {
+  if (p2pOverlay) {
+    p2pOverlay.close();
+    p2pOverlay = null;
+  }
+  lastP2PConfig = null;
+};
+
+export const getP2P = (): RuntimeP2P | null => p2pOverlay;
+
 /**
  * Initialize module-level env if not already set
  * Call this early in frontend initialization before prepopulate
@@ -5427,6 +5660,9 @@ export const getEnv = (): Env | null => {
 export const initEnv = (): Env => {
   if (!env) {
     env = createEmptyEnv();
+    if (env.runtimeSeed) {
+      setCryptoRuntimeSeed(env.runtimeSeed);
+    }
     console.log('🌍 Runtime env initialized (module-level)');
   }
   return env;
@@ -5517,7 +5753,7 @@ const applyRuntimeInput = async (
   env: Env,
   runtimeInput: RuntimeInput,
 ): Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }> => {
-  const startTime = Date.now();
+  const startTime = getPerfMs();
 
   try {
     // SECURITY: Validate runtime input
@@ -5721,6 +5957,18 @@ const applyRuntimeInput = async (
         }
 
         env.eReplicas.set(replicaKey, replica);
+
+        // Ensure entity-level signing key exists for this runtime (needed for gossip public key)
+        if (runtimeSeed) {
+          try {
+            const seedBytes = new TextEncoder().encode(runtimeSeed);
+            const entityKey = deriveSignerKeySync(seedBytes, runtimeTx.entityId);
+            registerSignerKey(runtimeTx.entityId, entityKey);
+          } catch (error) {
+            console.warn(`⚠️ Failed to derive entity key for ${runtimeTx.entityId.slice(0, 10)}:`, error);
+          }
+        }
+
         // Validate jBlock immediately after creation
         const createdReplica = env.eReplicas.get(replicaKey);
         const actualJBlock = createdReplica?.state.lastFinalizedJHeight;
@@ -5728,19 +5976,14 @@ const applyRuntimeInput = async (
 
         // Broadcast initial profile to gossip layer
         if (env.gossip && createdReplica) {
-          const profile = {
-            entityId: runtimeTx.entityId,
-            capabilities: [],
-            hubs: [],
-            metadata: {
-              lastUpdated: env.scenarioMode ? env.timestamp : Date.now(),
-              routingFeePPM: 100, // Default 100 PPM (0.01%)
-              baseFee: 0n,
-            },
-            accounts: [], // No accounts yet
-          };
+          const entityPublicKey = getSignerPublicKey(runtimeTx.entityId);
+          const publicKeyHex = entityPublicKey ? `0x${Buffer.from(entityPublicKey).toString('hex')}` : undefined;
+          const profile = buildEntityProfile(createdReplica.state, undefined, env.timestamp);
+          profile.runtimeId = env.runtimeId;
+          if (publicKeyHex) {
+            profile.metadata = { ...(profile.metadata || {}), entityPublicKey: publicKeyHex };
+          }
           env.gossip.announce(profile);
-          // Broadcast log removed
         }
 
         if (typeof actualJBlock !== 'number') {
@@ -5890,7 +6133,7 @@ const applyRuntimeInput = async (
       env.height++;
       // Don't overwrite timestamp in scenario mode (deterministic time control)
       if (!env.scenarioMode) {
-        env.timestamp = Date.now();
+        env.timestamp = getWallClockMs();
       }
 
       // Capture snapshot BEFORE clearing (to show what was actually processed)
@@ -5945,10 +6188,10 @@ const applyRuntimeInput = async (
         }
       }
 
-      // Capture snapshot with the actual processed input and outputs
-      await captureSnapshot(env, env.history, db, processedInput, entityOutbox, inputDescription);
+      // NOTE: Snapshot creation moved to process() - single entry point
+      // applyRuntimeInput just processes inputs, process() handles snapshotting
     } else {
-      console.log(`⚪ SKIP-FRAME: No runtimeTxs, entityInputs, or outputs - not creating empty frame`);
+      console.log(`⚪ SKIP-FRAME: No runtimeTxs, entityInputs, or outputs`);
       // Clear env.extra even when skipping frame to prevent stale solvency expectations
       env.extra = undefined;
     }
@@ -6008,7 +6251,7 @@ const applyRuntimeInput = async (
     notifyEnvChange(env);
 
     // Performance logging
-    const endTime = Date.now();
+    const endTime = getPerfMs();
     if (DEBUG) {
       console.log(`⏱️  Tick ${env.height - 1} completed in ${endTime - startTime}ms`);
     }
@@ -6145,6 +6388,22 @@ const main = async (): Promise<Env> => {
 
       // Create env with proper event emitters, then populate from snapshot
       env = createEmptyEnv();
+      if (latestSnapshot.runtimeSeed) {
+        runtimeSeed = latestSnapshot.runtimeSeed;
+        setCryptoRuntimeSeed(runtimeSeed);
+        env.runtimeSeed = runtimeSeed;
+      }
+      if (latestSnapshot.runtimeId) {
+        runtimeId = latestSnapshot.runtimeId;
+        env.runtimeId = runtimeId;
+      } else if (runtimeSeed) {
+        try {
+          runtimeId = deriveSignerAddressSync(runtimeSeed, '1');
+          env.runtimeId = runtimeId;
+        } catch (error) {
+          console.warn('⚠️ Failed to derive runtimeId on restore:', error);
+        }
+      }
       // CRITICAL: Clone the eReplicas Map to avoid mutating snapshot data!
       env.eReplicas = new Map(Array.from(eReplicasMap).map(([key, replica]): [string, EntityReplica] => {
         return [key, cloneEntityReplica(replica)];
@@ -6332,7 +6591,9 @@ const clearDatabaseAndHistory = async () => {
     eReplicas: new Map(),
     jReplicas: new Map(),
     height: 0,
-    timestamp: Date.now(),
+    timestamp: 0,
+    ...(runtimeSeed ? { runtimeSeed } : {}),
+    ...(runtimeId ? { runtimeId } : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
     gossip: createGossipLayer(),
@@ -6357,7 +6618,7 @@ export const getJWatcherStatus = () => {
           lastFinalizedJHeight: replica.state.lastFinalizedJHeight,
         };
       }),
-    nextSyncIn: Math.floor((1000 - (Date.now() % 1000)) / 100) / 10, // Seconds until next 1s sync
+    nextSyncIn: Math.floor((1000 - ((env.timestamp || 0) % 1000)) / 100) / 10, // Seconds until next 1s sync
   };
 };
 
@@ -6550,11 +6811,15 @@ export const createEmptyEnv = (): Env => {
     eReplicas: new Map(),
     jReplicas: new Map(),
     height: 0,
-    timestamp: Date.now(),
+    timestamp: 0,
+    ...(runtimeSeed ? { runtimeSeed } : {}),
+    ...(runtimeId ? { runtimeId } : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
     gossip: createGossipLayer(),
     frameLogs: [],
+    networkInbox: [],
+    pendingNetworkOutputs: [],
     // Event emitters will be attached below
     log: () => {},
     info: () => {},
@@ -6592,7 +6857,7 @@ if (false && isBrowser) {
           level: 'info',
           category: detectLogCategory(msg),
           message: msg,
-          timestamp: Date.now(),
+          timestamp: currentEnvForLogs?.timestamp ?? 0,
         });
       } catch (e) {
         // Silently fail log capture - don't break runtime
@@ -6613,7 +6878,7 @@ if (false && isBrowser) {
           level: 'warn',
           category: detectLogCategory(msg),
           message: msg,
-          timestamp: Date.now(),
+          timestamp: currentEnvForLogs?.timestamp ?? 0,
         });
       } catch (e) {
         // Silently fail
@@ -6634,7 +6899,7 @@ if (false && isBrowser) {
           level: 'error',
           category: detectLogCategory(msg),
           message: msg,
-          timestamp: Date.now(),
+          timestamp: currentEnvForLogs?.timestamp ?? 0,
         });
       } catch (e) {
         // Silently fail
@@ -6682,8 +6947,13 @@ export const process = async (
   processing = true;
 
   // Merge pending outputs from previous tick with new inputs
-  const allInputs = [...(env.pendingOutputs || []), ...(inputs || [])];
+  const allInputs = [
+    ...(env.pendingOutputs || []),
+    ...(env.networkInbox || []),
+    ...(inputs || []),
+  ];
   env.pendingOutputs = [];
+  env.networkInbox = [];
 
   // Validate inputs
   allInputs.forEach(o => {
@@ -6704,10 +6974,11 @@ export const process = async (
     // In scenario mode, advance by 100ms per tick (deterministic)
     // In live mode, use real time
     if (env.scenarioMode) {
-      env.timestamp = (env.timestamp || Date.now()) + 100; // Advance 100ms per frame
+      env.timestamp = (env.timestamp ?? 0) + 100; // Advance 100ms per frame
     } else {
-      env.timestamp = Date.now();
+      env.timestamp = getWallClockMs();
     }
+    getBrowserVMInstance()?.setBlockTimestamp?.(env.timestamp);
 
     if (allInputs.length > 0) {
       console.log(`📥 TICK: Processing ${allInputs.length} inputs for [${allInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
@@ -6718,14 +6989,23 @@ export const process = async (
       if (HEAVY_LOGS) console.log(`🔍 PROCESS-DEBUG: applyRuntimeInput returned entityOutbox.length=${result.entityOutbox.length}`);
 
       // Store outputs for NEXT tick
-      env.pendingOutputs = result.entityOutbox;
+      const routedOutputs = routeEntityOutputs(env, result.entityOutbox);
+      env.pendingOutputs = routedOutputs;
 
-      if (result.entityOutbox.length > 0) {
-        console.log(`📤 TICK: ${result.entityOutbox.length} outputs queued for next tick → [${result.entityOutbox.map(o => o.entityId.slice(-4)).join(',')}]`);
+      if (routedOutputs.length > 0) {
+        console.log(`📤 TICK: ${routedOutputs.length} outputs queued for next tick → [${routedOutputs.map(o => o.entityId.slice(-4)).join(',')}]`);
       }
     } else {
-      // No inputs to process - clear env.extra to prevent stale solvency expectations
-      env.extra = undefined;
+      // No inputs to process - retry routing any pending network outputs
+      if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
+        const routedOutputs = routeEntityOutputs(env, []);
+        if (routedOutputs.length > 0) {
+          env.pendingOutputs = [...(env.pendingOutputs || []), ...routedOutputs];
+          console.log(`📤 TICK: ${routedOutputs.length} local outputs queued from pending network outputs`);
+        }
+      } else {
+        // No inputs to process - keep env.extra so narrative-only frames still render
+      }
     }
 
     // === J-MACHINE BLOCK PROCESSING ===
@@ -6767,6 +7047,10 @@ export const process = async (
           const { getBrowserVMInstance } = await import('./evm');
           const browserVM = getBrowserVMInstance();
 
+          if (browserVM?.beginJurisdictionBlock) {
+            browserVM.beginJurisdictionBlock(env.timestamp);
+          }
+
           for (const jTx of mempool) {
             if (jTx.type === 'batch' && jTx.data?.batch) {
               console.log(`🔨 [J-Machine] Executing batch from ${jTx.entityId.slice(-4)}`);
@@ -6787,7 +7071,8 @@ export const process = async (
                 jTx.entityId,
                 tempJBatchState,
                 null, // jurisdiction not needed for BrowserVM
-                browserVM || undefined
+                browserVM || undefined,
+                jTx.timestamp ?? env.timestamp
               );
 
               if (result.success) {
@@ -6797,6 +7082,10 @@ export const process = async (
                 console.error(`   ❌ Batch execution failed: ${result.error}`);
               }
             }
+          }
+
+          if (browserVM?.endJurisdictionBlock) {
+            browserVM.endJurisdictionBlock();
           }
 
           // Clear mempool immediately after processing (all txs executed)
@@ -6839,6 +7128,8 @@ export const process = async (
     const snapshot: any = {
       height: env.height,
       timestamp: env.timestamp,
+      ...(env.runtimeSeed ? { runtimeSeed: env.runtimeSeed } : {}),
+      ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
       eReplicas: new Map(env.eReplicas),
       jReplicas: env.jReplicas ? Array.from(env.jReplicas.values()).map(jr => ({
         ...jr,
@@ -6920,6 +7211,19 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
       const env = createEmptyEnv();
       env.height = BigInt(data.height || 0);
       env.timestamp = BigInt(data.timestamp || 0);
+      if (data.runtimeSeed) {
+        env.runtimeSeed = data.runtimeSeed;
+        setCryptoRuntimeSeed(data.runtimeSeed);
+      }
+      if (data.runtimeId) {
+        env.runtimeId = data.runtimeId;
+      } else if (data.runtimeSeed) {
+        try {
+          env.runtimeId = deriveSignerAddressSync(data.runtimeSeed, '1');
+        } catch (error) {
+          console.warn('⚠️ Failed to derive runtimeId from DB snapshot:', error);
+        }
+      }
       // Support both old (replicas) and new (eReplicas) format
       env.eReplicas = new Map(data.eReplicas || data.replicas || []);
       // Load jReplicas if present
@@ -7013,7 +7317,7 @@ export { loadScenarioFromFile, loadScenarioFromText } from './scenarios/loader.j
 export { SCENARIOS, getScenario, getScenariosByTag, type ScenarioMetadata } from './scenarios/index.js';
 
 // === CRYPTOGRAPHIC SIGNATURES ===
-export { deriveSignerKey, registerSignerKey, registerTestKeys, clearSignerKeys, signAccountFrame, verifyAccountSignature } from './account-crypto.js';
+export { deriveSignerKey, deriveSignerKeySync, registerSignerKey, registerSignerPublicKey, registerTestKeys, clearSignerKeys, signAccountFrame, verifyAccountSignature, getSignerPublicKey } from './account-crypto.js';
 
 // === NAME RESOLUTION WRAPPERS (override imports) ===
 const searchEntityNames = (query: string, limit?: number) => searchEntityNamesOriginal(db, query, limit);
@@ -7027,7 +7331,7 @@ export { BrowserEVM } from './evms/browser-evm.js';
 export { formatRuntime, formatEntity, formatAccount, formatOrderbook, formatSummary } from './runtime-ascii';
 
 
-//runtime/entity-consensus.ts (1108 lines)
+//runtime/entity-consensus.ts (1193 lines)
 /**
  * XLN Entity Consensus and State Management
  * Core entity processing logic, consensus, proposals, and state transitions
@@ -7038,7 +7342,7 @@ import { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
-import { addMessages, cloneEntityReplica, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from './state-helpers';
+import { addMessages, cloneEntityReplica, canonicalAccountKey, getAccountPerspective, emitScopedEvents, resolveEntityProposerId } from './state-helpers';
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
 
@@ -7365,16 +7669,17 @@ export const applyEntityInput = async (
         height: workingReplica.state.height + 1,
       };
 
-      // CHANNEL.TS PATTERN: Only clear sent transactions that were committed
-      // Like Channel.ts line 217: mempool.splice(0, this.data.sentTransitions)
-      if (workingReplica.sentTransitions && workingReplica.sentTransitions > 0) {
-        console.log(`📊 Clearing ${workingReplica.sentTransitions} committed txs from mempool (${workingReplica.mempool.length} total)`);
-        workingReplica.mempool.splice(0, workingReplica.sentTransitions);
+      // CHANNEL.TS PATTERN: Clear only the committed txs, keep any new txs
+      // This avoids dropping fresh inputs merged into the same tick (e.g., accountInput ACKs).
+      const committedTxCount = entityInput.proposedFrame.txs.length;
+      if (committedTxCount > 0) {
+        console.log(`📊 Clearing ${committedTxCount} committed txs from mempool (${workingReplica.mempool.length} total)`);
+        workingReplica.mempool.splice(0, committedTxCount);
         workingReplica.sentTransitions = 0;
         console.log(`📊 Mempool after commit: ${workingReplica.mempool.length} txs remaining`);
       } else {
-        // Fallback: clear entire mempool (old behavior)
-        workingReplica.mempool.length = 0;
+        // No txs committed - leave mempool as-is
+        workingReplica.sentTransitions = 0;
       }
 
       delete workingReplica.lockedFrame; // Release lock after commit
@@ -7484,8 +7789,11 @@ export const applyEntityInput = async (
       const sortedSignatures = sortSignatures(workingReplica.proposal.signatures, workingReplica.state.config);
       const committedFrame = workingReplica.proposal;
 
-      // Clear state (mutable)
-      workingReplica.mempool.length = 0;
+      // Clear only committed txs; keep any new txs merged into this tick
+      const committedTxCount = committedFrame.txs.length;
+      if (committedTxCount > 0) {
+        workingReplica.mempool.splice(0, committedTxCount);
+      }
       delete workingReplica.proposal;
       delete workingReplica.lockedFrame; // Release lock after commit
 
@@ -7949,15 +8257,11 @@ export const applyEntityFrame = async (
           // Get the proposer of the target entity from env
           // IMPORTANT: AccountInput sent only to PROPOSER (bilateral consensus between entity proposers)
           // Multi-validator entities share account state via entity-level consensus
-          let targetProposerId = 'alice'; // Default fallback
-          const targetReplicaKeys = Array.from(env.eReplicas.keys()).filter(key => key.startsWith(proposal.accountInput!.toEntityId + ':'));
-          if (targetReplicaKeys.length > 0) {
-            const firstTargetReplica = env.eReplicas.get(targetReplicaKeys[0]!);
-            const firstValidator = firstTargetReplica?.state.config.validators[0];
-            if (firstValidator) {
-              targetProposerId = firstValidator;
-            }
-          }
+          const targetProposerId = resolveEntityProposerId(
+            env,
+            proposal.accountInput!.toEntityId,
+            'accountInput.propose'
+          );
 
           // Convert AccountInput to EntityInput for routing
           const outputEntityInput: EntityInput = {
@@ -8024,8 +8328,67 @@ export const sortSignatures = (signatures: Map<string, string>, config: Consensu
 /**
  * Merges duplicate entity inputs to reduce processing overhead
  */
+const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
+  const merged: EntityTx[] = [];
+
+  for (const tx of txs) {
+    if (tx.type !== 'j_event' || !tx.data) {
+      merged.push(tx);
+      continue;
+    }
+
+    const data = tx.data as any;
+    const blockNumber = data.blockNumber;
+    const blockHash = data.blockHash;
+
+    const existing = merged.find(
+      candidate =>
+        candidate.type === 'j_event' &&
+        candidate.data &&
+        (candidate.data as any).blockNumber === blockNumber &&
+        (candidate.data as any).blockHash === blockHash,
+    );
+
+    if (!existing || !existing.data) {
+      merged.push(tx);
+      continue;
+    }
+
+    const existingData = existing.data as any;
+    const existingEvents = existingData.events || (existingData.event ? [existingData.event] : []);
+    const incomingEvents = data.events || (data.event ? [data.event] : []);
+
+    const seen = new Set<string>();
+    const mergedEvents: any[] = [];
+    for (const event of [...existingEvents, ...incomingEvents]) {
+      const key = `${event?.type ?? 'unknown'}:${safeStringify(event?.data ?? event)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      mergedEvents.push(event);
+    }
+
+    existingData.events = mergedEvents;
+    existingData.event = mergedEvents[0];
+
+    if (typeof data.observedAt === 'number') {
+      if (typeof existingData.observedAt !== 'number' || data.observedAt < existingData.observedAt) {
+        existingData.observedAt = data.observedAt;
+      }
+    }
+
+    if (HEAVY_LOGS) {
+      console.log(
+        `🔍 MERGE-J-EVENTS: block ${blockNumber} ${blockHash?.slice(0, 10)}... now ${mergedEvents.length} events`,
+      );
+    }
+  }
+
+  return merged;
+};
+
 export const mergeEntityInputs = (inputs: EntityInput[]): EntityInput[] => {
   const merged = new Map<string, EntityInput>();
+  const conflicts: EntityInput[] = [];
   let duplicateCount = 0;
 
   // Look for potential Carol duplicates specifically
@@ -8047,11 +8410,31 @@ export const mergeEntityInputs = (inputs: EntityInput[]): EntityInput[] => {
       const existing = merged.get(key)!;
       duplicateCount++;
 
+      const existingFrameHash = existing.proposedFrame?.hash;
+      const incomingFrameHash = input.proposedFrame?.hash;
+      if (existingFrameHash && incomingFrameHash && existingFrameHash !== incomingFrameHash) {
+        const existingHasPrecommits = !!existing.precommits && existing.precommits.size > 0;
+        const incomingHasPrecommits = !!input.precommits && input.precommits.size > 0;
+        console.warn(
+          `⚠️  MERGE-CONFLICT: ${key} has different proposedFrame hashes (${existingFrameHash.slice(0, 10)} vs ${incomingFrameHash.slice(0, 10)}) - keeping both inputs`,
+        );
+        if (incomingHasPrecommits && !existingHasPrecommits) {
+          merged.set(key, { ...input });
+          conflicts.push(existing);
+        } else {
+          conflicts.push(input);
+        }
+        continue;
+      }
+
       if (HEAVY_LOGS) console.log(`🔍 DUPLICATE-FOUND: Merging duplicate input ${duplicateCount} for ${entityShort}:${input.signerId}`);
 
       // Merge entity transactions
       if (input.entityTxs) {
         existing.entityTxs = [...(existing.entityTxs || []), ...input.entityTxs];
+        if (existing.entityTxs) {
+          existing.entityTxs = mergeJEventTxs(existing.entityTxs);
+        }
         if (HEAVY_LOGS) console.log(`🔍 MERGE-TXS: Added ${input.entityTxs.length} transactions`);
       }
 
@@ -8084,7 +8467,13 @@ export const mergeEntityInputs = (inputs: EntityInput[]): EntityInput[] => {
     console.log(`    ⚠️  CORNER CASE: Merged ${duplicateCount} duplicate inputs (${inputs.length} → ${merged.size})`);
   }
 
-  return Array.from(merged.values());
+  const mergedInputs = Array.from(merged.values());
+  return [...mergedInputs, ...conflicts].map(input => {
+    if (input.entityTxs && input.entityTxs.length > 1) {
+      return { ...input, entityTxs: mergeJEventTxs(input.entityTxs) };
+    }
+    return input;
+  });
 };
 
 /**
@@ -8137,7 +8526,7 @@ export const handleEmptyMempoolProposer = (): void => {
 };
 
 
-//runtime/account-consensus.ts (1111 lines)
+//runtime/account-consensus.ts (1190 lines)
 /**
  * XLN Account Consensus System
  *
@@ -8457,17 +8846,19 @@ export async function proposeAccountFrame(
   // Determine if we're left entity (for byLeft field)
   const weAreLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
 
-  // Validate timestamp before creating frame (HTLC safety - prevent time manipulation)
-  const previousTimestamp = accountMachine.currentFrame?.timestamp;
-  if (previousTimestamp !== undefined && env.timestamp < previousTimestamp) {
-    console.log(`❌ E-MACHINE: Cannot propose - timestamp regression: ${env.timestamp} < ${previousTimestamp}`);
-    return { success: false, error: 'Timestamp went backwards', events };
+  // Ensure monotonic timestamps within account (HTLC safety + multi-runtime compatibility)
+  // In multi-runtime P2P scenarios, different runtimes may have different clock rates
+  // We ensure frames always have increasing timestamps within an account chain
+  const previousTimestamp = accountMachine.currentFrame?.timestamp ?? 0;
+  const frameTimestamp = Math.max(env.timestamp, previousTimestamp + 1);
+  if (frameTimestamp > env.timestamp) {
+    console.log(`⚡ TIMESTAMP-SYNC: Using monotonic timestamp ${frameTimestamp} (prev=${previousTimestamp}, env=${env.timestamp})`);
   }
 
   // Create account frame matching the real AccountFrame interface
   const frameData = {
     height: accountMachine.currentHeight + 1,
-    timestamp: env.timestamp, // DETERMINISTIC: Copy from runtime machine
+    timestamp: frameTimestamp, // MONOTONIC: max(env.timestamp, prev+1) for multi-runtime safety
     jHeight: frameJHeight, // CRITICAL: J-height for HTLC consensus
     accountTxs: [...accountMachine.mempool],
     // CRITICAL: Use stored stateHash from currentFrame (set during commit)
@@ -8509,8 +8900,30 @@ export async function proposeAccountFrame(
   }
   console.log(`✅ Frame size: ${frameSize} bytes (${(frameSize / MAX_FRAME_SIZE_BYTES * 100).toFixed(2)}% of 1MB limit)`);
 
-  // Generate signature
-  const signature = signAccountFrame(accountMachine.proofHeader.fromEntity, newFrame.stateHash);
+  // Generate HANKO signature - CRITICAL: Use signerId, not entityId
+  // For single-signer entities, build hanko with single EOA signature
+  const signingEntityId = accountMachine.proofHeader.fromEntity;
+  const signingReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === signingEntityId);
+  if (!signingReplica) {
+    return { success: false, error: `Cannot find replica for entity ${signingEntityId.slice(-4)}`, events, accountInput: null };
+  }
+  const signingSignerId = signingReplica.state.config.validators[0]; // Single-signer: use first validator
+  if (!signingSignerId) {
+    return { success: false, error: `Entity ${signingEntityId.slice(-4)} has no validators`, events, accountInput: null };
+  }
+
+  console.log(`🔐 HANKO-SIGN: entityId=${signingEntityId.slice(-4)} → signerId=${signingSignerId.slice(-4)}`);
+
+  // Build hanko for account frame
+  const { signHashesAsSingleEntity } = await import('./hanko-signing');
+  const hankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [newFrame.stateHash]);
+  const hanko = hankos[0];
+  if (!hanko) {
+    return { success: false, error: 'Failed to build hanko', events, accountInput: null };
+  }
+
+  // Store hanko as current account proof (for disputes)
+  accountMachine.currentAccountProofHanko = hanko;
 
   // Set pending state (no longer storing clone - re-execution on commit)
   accountMachine.pendingFrame = newFrame;
@@ -8527,7 +8940,8 @@ export async function proposeAccountFrame(
     toEntityId: accountMachine.proofHeader.toEntity,
     height: newFrame.height,
     newAccountFrame: newFrame,
-    newSignatures: [signature],
+    newHanko: hanko,  // NEW: Hanko instead of single signature
+    newSignatures: [hanko], // LEGACY fallback (will be removed)
     counter: skipCounterIncrement ? accountMachine.proofHeader.cooperativeNonce : ++accountMachine.proofHeader.cooperativeNonce,
   };
 
@@ -8607,10 +9021,31 @@ export async function handleAccountInput(
     console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}, counter=${input.counter}`);
 
     const frameHash = accountMachine.pendingFrame.stateHash;
-    const expectedSigner = accountMachine.proofHeader.toEntity;
 
-    const signature = input.prevSignatures[0];
-    if (input.prevSignatures.length > 0 && signature && verifyAccountSignature(expectedSigner, frameHash, signature)) {
+    // HANKO ACK VERIFICATION: Verify hanko instead of single signature
+    const ackHanko = input.prevHanko || (input.prevSignatures && input.prevSignatures[0]);
+    if (!ackHanko) {
+      return { success: false, error: 'Missing ACK hanko', events };
+    }
+
+    console.log(`🔐 HANKO-ACK-VERIFY: Verifying ACK hanko for our pending frame`);
+
+    const { verifyHankoForHash } = await import('./hanko-signing');
+    const expectedAckEntity = accountMachine.proofHeader.toEntity;
+    const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(ackHanko, frameHash, expectedAckEntity, env);
+
+    if (!valid) {
+      return { success: false, error: 'Invalid ACK hanko signature', events };
+    }
+
+    if (!recoveredEntityId || recoveredEntityId.toLowerCase() !== expectedAckEntity.toLowerCase()) {
+      return { success: false, error: `ACK hanko entityId mismatch: got ${recoveredEntityId?.slice(-4)}, expected ${expectedAckEntity.slice(-4)}`, events };
+    }
+
+    console.log(`✅ HANKO-ACK-VERIFIED: ACK from ${recoveredEntityId.slice(-4)}`);
+
+    // ACK is valid - proceed
+    if (true) {
       // DoS FIX: Update counter AFTER signature verified (prevents counter desync attacks)
       if (input.counter !== undefined) {
         accountMachine.ackedTransitions = input.counter;
@@ -8834,19 +9269,26 @@ export async function handleAccountInput(
 
     // SECURITY: Verify signatures (REQUIRED for all frames)
     if (HEAVY_LOGS) console.log(`🔍 SIG-CHECK: hasSignatures=${!!(input.newSignatures && input.newSignatures.length > 0)}`);
-    if (!input.newSignatures || input.newSignatures.length === 0) {
-      return { success: false, error: 'SECURITY: Frame must have signatures', events };
+    // HANKO VERIFICATION: Use hanko instead of single signature
+    const hankoToVerify = input.newHanko || (input.newSignatures && input.newSignatures[0]); // Try hanko first, fallback to legacy
+    if (!hankoToVerify) {
+      return { success: false, error: 'SECURITY: Frame must have hanko signature', events };
     }
 
-    const signature = input.newSignatures[0];
-    if (!signature) {
-      return { success: false, error: 'Missing signature in newSignatures array', events };
+    console.log(`🔐 HANKO-VERIFY: Verifying hanko for frame ${receivedFrame.height} from ${input.fromEntityId.slice(-4)}`);
+
+    // Verify hanko - CRITICAL: Must verify fromEntityId is the signer with board validation
+    const { verifyHankoForHash } = await import('./hanko-signing');
+    const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(hankoToVerify, receivedFrame.stateHash, input.fromEntityId, env);
+
+    if (!valid || !recoveredEntityId) {
+      return { success: false, error: `Invalid hanko signature from ${input.fromEntityId.slice(-4)}`, events };
     }
-    const isValid = verifyAccountSignature(input.fromEntityId, receivedFrame.stateHash, signature);
-    if (!isValid) {
-      return { success: false, error: 'Invalid frame signature', events };
-    }
-    console.log(`✅ SIG-VERIFIED`);
+
+    console.log(`✅ HANKO-VERIFIED: Frame from ${recoveredEntityId.slice(-4)}`);
+
+    // Store counterparty's hanko for dispute proof
+    accountMachine.counterpartyAccountProofHanko = hankoToVerify;
 
     // Get entity's synced J-height for deterministic HTLC validation
     const ourEntityId = accountMachine.proofHeader.fromEntity;
@@ -9055,8 +9497,23 @@ export async function handleAccountInput(
     events.push(...processEvents);
     events.push(`🤝 Accepted frame ${receivedFrame.height} from Entity ${input.fromEntityId.slice(-4)}`);
 
-    // Send confirmation (ACK)
-    const confirmationSig = signAccountFrame(accountMachine.proofHeader.fromEntity, receivedFrame.stateHash);
+    // Send confirmation (ACK) using HANKO
+    const ackEntityId = accountMachine.proofHeader.fromEntity;
+    const ackReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ackEntityId);
+    const ackSignerId = ackReplica?.state.config.validators[0];
+    if (!ackSignerId) {
+      return { success: false, error: `Cannot find signerId for ACK from ${ackEntityId.slice(-4)}`, events };
+    }
+
+    console.log(`🔐 HANKO-ACK: entityId=${ackEntityId.slice(-4)} → signerId=${ackSignerId.slice(-4)}`);
+
+    // Build ACK hanko
+    const { signHashesAsSingleEntity } = await import('./hanko-signing');
+    const ackHankos = await signHashesAsSingleEntity(env, ackEntityId, ackSignerId, [receivedFrame.stateHash]);
+    const confirmationHanko = ackHankos[0];
+    if (!confirmationHanko) {
+      return { success: false, error: 'Failed to build ACK hanko', events };
+    }
 
     console.log(`📤 ACK-SEND: Preparing ACK for frame ${receivedFrame.height} from ${accountMachine.proofHeader.fromEntity.slice(-4)} to ${input.fromEntityId.slice(-4)}`);
 
@@ -9068,7 +9525,8 @@ export async function handleAccountInput(
       fromEntityId: accountMachine.proofHeader.fromEntity,
       toEntityId: input.fromEntityId,
       height: receivedFrame.height,
-      prevSignatures: [confirmationSig],
+      prevHanko: confirmationHanko,  // NEW: Hanko ACK
+      prevSignatures: [confirmationHanko], // LEGACY fallback
       counter: 0, // Will be set below after batching decision
     };
 
@@ -9085,7 +9543,10 @@ export async function handleAccountInput(
         if (proposeResult.accountInput.newAccountFrame) {
           response.newAccountFrame = proposeResult.accountInput.newAccountFrame;
         }
-        if (proposeResult.accountInput.newSignatures) {
+        if (proposeResult.accountInput.newHanko) {
+          response.newHanko = proposeResult.accountInput.newHanko;
+          response.newSignatures = [proposeResult.accountInput.newHanko]; // LEGACY fallback
+        } else if (proposeResult.accountInput.newSignatures) {
           response.newSignatures = proposeResult.accountInput.newSignatures;
         }
 
@@ -9230,8 +9691,15 @@ export async function generateAccountProof(accountMachine: AccountMachine): Prom
   const fullHash = await hash(proofContent);
   const proofHash = fullHash.slice(2); // Remove 0x prefix for compatibility
 
-  // Generate hanko signature (like old_src does)
-  const signature = signAccountFrame(accountMachine.proofHeader.fromEntity, `0x${proofHash}`);
+  // Generate hanko signature - CRITICAL: Use signerId, not entityId
+  const proofEntityId = accountMachine.proofHeader.fromEntity;
+  const proofReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === proofEntityId);
+  const proofSignerId = proofReplica?.state.config.validators[0];
+  if (!proofSignerId) {
+    throw new Error(`Cannot find signerId for proof from ${proofEntityId.slice(-4)}`);
+  }
+  console.log(`🔐 PROOF-SIGN: entityId=${proofEntityId.slice(-4)} → signerId=${proofSignerId.slice(-4)}`);
+  const signature = signAccountFrame(proofSignerId, `0x${proofHash}`);
 
   // Store signature for later use
   accountMachine.hankoSignature = signature;
@@ -9423,7 +9891,7 @@ export function getAccountBarVisual(
 }
 
 
-//runtime/j-batch.ts (460 lines)
+//runtime/j-batch.ts (463 lines)
 /**
  * J-Batch Aggregator System
  *
@@ -9776,6 +10244,7 @@ export interface BrowserVMBatchProcessor {
     reserveToCollateral?: Array<{receivingEntity: string, tokenId: number, pairs: Array<{ entity: string; amount: bigint }>}>,
     settlements?: Array<{leftEntity: string, rightEntity: string, diffs: any[]}>,
   }): Promise<any[]>;
+  setBlockTimestamp?: (timestamp: number) => void;
 }
 
 /**
@@ -9786,7 +10255,8 @@ export async function broadcastBatch(
   entityId: string,
   jBatchState: JBatchState,
   jurisdiction: any, // JurisdictionConfig
-  browserVM?: BrowserVMBatchProcessor // Optional BrowserVM for simnet mode
+  browserVM: BrowserVMBatchProcessor | undefined,
+  timestamp: number
 ): Promise<{ success: boolean; txHash?: string; events?: any[]; error?: string }> {
   if (isBatchEmpty(jBatchState.batch)) {
     console.log('📦 jBatch: Empty batch, skipping broadcast');
@@ -9800,6 +10270,7 @@ export async function broadcastBatch(
   try {
     // BrowserVM path - direct in-browser execution
     if (browserVM) {
+      browserVM.setBlockTimestamp?.(timestamp);
 
       // Pass batch directly to contract (no transformation - Solidity handles everything)
       console.log(`📦 Calling Depository.processBatch() with full batch (${getBatchSize(jBatchState.batch)} ops)...`);
@@ -9811,7 +10282,7 @@ export async function broadcastBatch(
 
       // Clear batch after successful broadcast
       jBatchState.batch = createEmptyBatch();
-      jBatchState.lastBroadcast = Date.now();
+      jBatchState.lastBroadcast = timestamp;
       jBatchState.broadcastCount++;
       jBatchState.failedAttempts = 0;
 
@@ -9832,7 +10303,7 @@ export async function broadcastBatch(
 
     // Clear batch after successful broadcast
     jBatchState.batch = createEmptyBatch();
-    jBatchState.lastBroadcast = receipt.blockNumber; // Use block number instead of Date.now() for determinism
+    jBatchState.lastBroadcast = timestamp;
     jBatchState.broadcastCount++;
     jBatchState.failedAttempts = 0;
 
@@ -10234,7 +10705,7 @@ export * from './proposals';
 export * from './validation';
 
 
-//runtime/entity-tx/apply.ts (891 lines)
+//runtime/entity-tx/apply.ts (900 lines)
 import { calculateQuorumPower } from '../entity-consensus';
 import { formatEntityId } from '../utils';
 import { processProfileUpdate } from '../name-resolution';
@@ -10260,7 +10731,7 @@ export interface ApplyEntityTxResult {
 }
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
-import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
+import { cloneEntityState, addMessage, canonicalAccountKey, resolveEntityProposerId } from '../state-helpers';
 import { submitSettle } from '../evm';
 import { logError } from '../logger';
 
@@ -10554,42 +11025,38 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         });
       }
 
-      // STEP 2: Add transactions to LOCAL mempool only (Channel.ts pattern)
-      // Frame proposal happens automatically on next tick via AUTO-PROPOSE
-      console.log(`💳 Adding account setup transactions to local mempool for ${formatEntityId(entityTx.data.targetEntityId)}`);
+      // STEP 2: Add setup txs ONLY on LEFT side (Channel.ts pattern)
+      // Right side waits for left's frame; otherwise it will re-propose add_delta and stall.
+      console.log(`💳 Preparing account setup for ${formatEntityId(entityTx.data.targetEntityId)} (left=${isLeft})`);
 
-      // Get the account machine we just created
       const localAccount = newState.accounts.get(counterpartyId);
       if (!localAccount) {
         throw new Error(`CRITICAL: Account machine not found after creation`);
       }
 
-      // Token 1 = USDC
-      const usdcTokenId = 1;
-      // Add transactions to mempool - will be batched into frame #1 on next tick
-      // NOTE: Only add_delta is queued. Credit limits are 0 by default - must be explicitly set
-      localAccount.mempool.push({
-        type: 'add_delta',
-        data: { tokenId: usdcTokenId }
-      });
+      if (isLeft) {
+        // Token 1 = USDC
+        const usdcTokenId = 1;
+        // Add transactions to mempool - will be batched into frame #1 on next tick
+        // NOTE: Only add_delta is queued. Credit limits are 0 by default - must be explicitly set
+        localAccount.mempool.push({
+          type: 'add_delta',
+          data: { tokenId: usdcTokenId }
+        });
 
-      console.log(`📝 Queued add_delta to mempool (total: ${localAccount.mempool.length})`);
-      console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms) via AUTO-PROPOSE`);
-      console.log(`   Transactions: [add_delta] - credit limits start at 0, must be explicitly set`);
+        console.log(`📝 Queued add_delta to mempool (total: ${localAccount.mempool.length})`);
+        console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms) via AUTO-PROPOSE`);
+        console.log(`   Transactions: [add_delta] - credit limits start at 0, must be explicitly set`);
+      } else {
+        console.log(`🧭 Right side: waiting for left's frame (mempool stays empty)`);
+      }
 
       // Add success message to chat
       addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
 
       // CRITICAL: Notify counterparty to create mirror account
       // Without this, Hub won't know about Alice-Hub account when j-events arrive!
-      // Look up actual signer from env.eReplicas (key format: entityId:signerId)
-      let counterpartySigner = 's1'; // Fallback
-      for (const [replicaKey] of env.eReplicas.entries()) {
-        if (replicaKey.startsWith(targetEntityId + ':')) {
-          counterpartySigner = replicaKey.split(':')[1] || 's1';
-          break;
-        }
-      }
+      const counterpartySigner = resolveEntityProposerId(env, targetEntityId, 'openAccount');
       outputs.push({
         entityId: targetEntityId,
         signerId: counterpartySigner,
@@ -10602,9 +11069,22 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Broadcast updated profile to gossip layer
       if (env.gossip) {
-        const profile = buildEntityProfile(newState, undefined, env.scenarioMode ? env.timestamp : undefined);
+        // MONOTONIC TIMESTAMP: Ensure timestamp grows
+        const existingProfile = env.gossip?.getProfiles?.().find((p: any) => p.entityId === newState.entityId);
+        const lastTimestamp = existingProfile?.metadata?.lastUpdated || 0;
+        const monotonicTimestamp = Math.max(lastTimestamp + 1, env.timestamp);
+
+        // Preserve existing name if any (don't overwrite with undefined)
+        const existingName = existingProfile?.metadata?.name;
+        const profile = buildEntityProfile(newState, existingName, monotonicTimestamp);
+
+        console.log(`🏗️ Built profile for ${newState.entityId.slice(-4)}: accounts=${profile.accounts?.length || 0} name=${profile.metadata?.name || 'none'}`);
+
+        if (env.runtimeId) {
+          profile.runtimeId = env.runtimeId;
+        }
+        console.log(`📡 Announcing profile ${newState.entityId.slice(-4)} ts=${monotonicTimestamp} accounts=${profile.accounts?.length || 0}`);
         env.gossip.announce(profile);
-        console.log(`📡 Broadcast profile for ${entityState.entityId} with ${newState.accounts.size} accounts`);
       }
 
       return { newState, outputs };
@@ -10862,10 +11342,10 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       // Determine canonical side - credit limit I'm setting for my COUNTERPARTY to use
-      // If I'm LEFT and extend credit → set rightCreditLimit (credit available TO right/counterparty)
-      // If I'm RIGHT and extend credit → set leftCreditLimit (credit available TO left/counterparty)
-      const isLeftEntity = entityState.entityId < counterpartyEntityId;
-      const side = isLeftEntity ? 'right' : 'left';
+      // leftCreditLimit = credit extended by RIGHT entity to LEFT entity
+      // rightCreditLimit = credit extended by LEFT entity to RIGHT entity
+      const counterpartyIsLeft = counterpartyEntityId < entityState.entityId;
+      const side = counterpartyIsLeft ? 'left' : 'right';
 
       // Create set_credit_limit account transaction
       const accountTx: AccountTx = {
@@ -11850,10 +12330,10 @@ function applyFinalizedJEvent(
 }
 
 
-//runtime/entity-tx/handlers/account.ts (854 lines)
+//runtime/entity-tx/handlers/account.ts (848 lines)
 import { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
-import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
+import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents, resolveEntityProposerId } from '../../state-helpers';
 import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
 import { HTLC } from '../../constants';
 import { formatEntityId, HEAVY_LOGS } from '../../utils';
@@ -12455,17 +12935,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         // Get target proposer
         // IMPORTANT: Send only to PROPOSER - bilateral consensus between entity proposers
         // Multi-validator entities sync account state via entity-level consensus (not bilateral broadcast)
-        let targetProposerId = 'alice';
-        const targetReplicaKeys = Array.from(env.eReplicas.keys()).filter(key =>
-          key.startsWith(result.response!.toEntityId + ':')
+        const targetProposerId = resolveEntityProposerId(
+          env,
+          result.response!.toEntityId,
+          'accountInput.response'
         );
-
-        if (targetReplicaKeys.length > 0) {
-          const firstTargetReplica = env.eReplicas.get(targetReplicaKeys[0]!);
-          if (firstTargetReplica?.state.config.validators[0]) {
-            targetProposerId = firstTargetReplica.state.config.validators[0];
-          }
-        }
 
         outputs.push({
           entityId: result.response.toEntityId,
@@ -13157,7 +13631,7 @@ export async function processAccountTx(
   accountMachine: AccountMachine,
   accountTx: AccountTx,
   isOurFrame: boolean = true,
-  currentTimestamp: number = Date.now(),
+  currentTimestamp: number = 0,
   currentHeight: number = 0,
   isValidation: boolean = false
 ): Promise<{
@@ -13730,66 +14204,150 @@ export class PathFinder {
   }
 }
 
-//runtime/account-crypto.ts (247 lines)
+//runtime/account-crypto.ts (325 lines)
 /**
  * Real cryptographic signatures for account consensus
  * Uses secp256k1 (Ethereum standard) with HMAC-derived keys from BrainVault seed
  */
 
 import * as secp256k1 from '@noble/secp256k1';
+import { hmac } from '@noble/hashes/hmac.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { concatBytes } from '@noble/hashes/utils.js';
 import { keccak256 } from 'ethers';
 
 // Configure @noble/secp256k1 HMAC (required for signing)
-// Node/Bun environment: use crypto module synchronously
-const isBrowser = typeof window !== 'undefined';
-if (!isBrowser && typeof require !== 'undefined') {
+// Always install a sync HMAC implementation (Node/Bun fast path, browser fallback).
+const installHmacSync = () => {
+  if (secp256k1.utils.hmacSha256Sync) return;
+  const isBrowser =
+    typeof window !== 'undefined' &&
+    typeof window.document !== 'undefined';
+  const isNodeLike =
+    !isBrowser &&
+    (typeof (globalThis as any).Bun !== 'undefined' ||
+      (typeof process !== 'undefined' && !!process.versions?.node));
   try {
-    const crypto = require('crypto');
-    secp256k1.utils.hmacSha256Sync = (key: Uint8Array, ...messages: Uint8Array[]) => {
-      const hmac = crypto.createHmac('sha256', Buffer.from(key));
-      for (const msg of messages) hmac.update(Buffer.from(msg));
-      return new Uint8Array(hmac.digest());
-    };
+    if (isNodeLike && typeof require !== 'undefined') {
+      const crypto = require('crypto');
+      if (crypto && typeof crypto.createHmac === 'function') {
+        secp256k1.utils.hmacSha256Sync = (key: Uint8Array, ...messages: Uint8Array[]) => {
+          const hmac = crypto.createHmac('sha256', Buffer.from(key));
+          for (const msg of messages) hmac.update(Buffer.from(msg));
+          return new Uint8Array(hmac.digest());
+        };
+        return;
+      }
+    }
   } catch (e) {
-    console.warn('Failed to configure secp256k1 HMAC:', e);
+    console.warn('Failed to configure secp256k1 HMAC via crypto:', e);
   }
-}
-// Browser: HMAC will be configured when needed (async)
+  secp256k1.utils.hmacSha256Sync = (key: Uint8Array, ...messages: Uint8Array[]) => {
+    return hmac(sha256, key, concatBytes(...messages));
+  };
+};
+installHmacSync();
+// Browser: deriveSignerKeySync uses noble hashes (no async required)
 
-// Global key cache (signerId → private key)
-// Populated by runtime when BrainVault unlocked
+// Global key cache (signerId → private/public key)
+// Populated by runtime when BrainVault seed is provided
 const signerKeys = new Map<string, Uint8Array>();
+const signerPublicKeys = new Map<string, Uint8Array>();
+const signerAddresses = new Map<string, string>();
+const externalPublicKeys = new Map<string, Uint8Array>();
+let runtimeSeedBytes: Uint8Array | null = null;
+let runtimeSeedLocked = false;
+const textEncoder = new TextEncoder();
+
+const toSeedBytes = (seed: Uint8Array | string): Uint8Array =>
+  typeof seed === 'string' ? textEncoder.encode(seed) : seed;
 
 /**
  * Derive signer private key from BrainVault master seed
  * Formula: privateKey = HMAC-SHA256(masterSeed, signerId)
- * Browser-compatible (uses hash-wasm) and Node-compatible (uses crypto)
+ * Browser-compatible (pure JS HMAC) and Node-compatible
  */
 export async function deriveSignerKey(masterSeed: Uint8Array, signerId: string): Promise<Uint8Array> {
-  const isBrowser = typeof window !== 'undefined';
+  return deriveSignerKeySync(masterSeed, signerId);
+}
 
-  if (isBrowser) {
-    if (!globalThis.crypto?.subtle) {
-      throw new Error('WebCrypto is required for browser HMAC');
-    }
+export function deriveSignerKeySync(masterSeed: Uint8Array, signerId: string): Uint8Array {
+  const message = textEncoder.encode(signerId);
+  return hmac(sha256, masterSeed, message);
+}
 
-    const key = await globalThis.crypto.subtle.importKey(
-      'raw',
-      masterSeed,
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign']
-    );
-    const message = new TextEncoder().encode(signerId);
-    const signature = await globalThis.crypto.subtle.sign('HMAC', key, message);
-    return new Uint8Array(signature);
+export function setRuntimeSeed(seed: Uint8Array | string | null): void {
+  if (runtimeSeedLocked) {
+    console.warn('⚠️ Runtime seed update ignored (crypto lock enabled)');
+    return;
   }
+  runtimeSeedBytes = seed ? toSeedBytes(seed) : null;
+  signerKeys.clear();
+  signerPublicKeys.clear();
+  signerAddresses.clear();
+  externalPublicKeys.clear();
+}
 
-  // Node/Bun: use built-in crypto
-  const { createHmac } = await import('crypto');
-  const hmac = createHmac('sha256', Buffer.from(masterSeed));
-  hmac.update(signerId);
-  return new Uint8Array(hmac.digest());
+export function lockRuntimeSeedUpdates(locked: boolean): void {
+  runtimeSeedLocked = locked;
+}
+
+const getOrDeriveKey = (signerId: string): Uint8Array | null => {
+  console.log(`🔍 getOrDeriveKey: signerId=${signerId.slice(-4)}`);
+  const cached = signerKeys.get(signerId);
+  if (cached) {
+    console.log(`✅ Found cached key for ${signerId.slice(-4)}`);
+    return cached;
+  }
+  console.log(`⚠️ No cached key for ${signerId.slice(-4)}, trying to derive...`);
+  if (!runtimeSeedBytes) {
+    console.log(`❌ Cannot derive - runtimeSeedBytes is null`);
+    return null;
+  }
+  console.log(`✅ Deriving key from runtimeSeedBytes (${runtimeSeedBytes.length} bytes)`);
+  const derived = deriveSignerKeySync(runtimeSeedBytes, signerId);
+  registerSignerKey(signerId, derived);
+  console.log(`✅ Derived and registered key for ${signerId.slice(-4)}`);
+  return derived;
+};
+
+// Export for hanko-signing.ts
+export function getSignerPrivateKey(signerId: string): Uint8Array | null {
+  return getOrDeriveKey(signerId);
+}
+
+export function getSignerPublicKey(signerId: string): Uint8Array | null {
+  const external = externalPublicKeys.get(signerId);
+  if (external) return external;
+  const cached = signerPublicKeys.get(signerId);
+  if (cached) return cached;
+  const privateKey = signerKeys.get(signerId) || getOrDeriveKey(signerId);
+  if (!privateKey) return null;
+  const publicKey = secp256k1.getPublicKey(privateKey);
+  signerPublicKeys.set(signerId, publicKey);
+  return publicKey;
+}
+
+const privateKeyToAddress = (privateKey: Uint8Array): string => {
+  const publicKey = secp256k1.getPublicKey(privateKey, false); // uncompressed 65 bytes
+  const hash = keccak256(publicKey.slice(1));
+  return `0x${hash.slice(-40)}`.toLowerCase();
+};
+
+export function deriveSignerAddressSync(seed: Uint8Array | string, signerId: string): string {
+  const seedBytes = toSeedBytes(seed);
+  const privateKey = deriveSignerKeySync(seedBytes, signerId);
+  return privateKeyToAddress(privateKey);
+}
+
+export function getSignerAddress(signerId: string): string | null {
+  const cached = signerAddresses.get(signerId);
+  if (cached) return cached;
+  const privateKey = getOrDeriveKey(signerId);
+  if (!privateKey) return null;
+  const address = privateKeyToAddress(privateKey);
+  signerAddresses.set(signerId, address);
+  return address;
 }
 
 /**
@@ -13800,7 +14358,8 @@ export async function registerSeededKeys(
   seed: Uint8Array | string,
   signerIds: string[]
 ): Promise<void> {
-  const seedBytes = typeof seed === 'string' ? new TextEncoder().encode(seed) : seed;
+  const seedBytes = toSeedBytes(seed);
+  setRuntimeSeed(seedBytes);
 
   for (const signerId of signerIds) {
     const privateKey = await deriveSignerKey(seedBytes, signerId);
@@ -13815,6 +14374,24 @@ export async function registerSeededKeys(
  */
 export function registerSignerKey(signerId: string, privateKey: Uint8Array): void {
   signerKeys.set(signerId, privateKey);
+  signerPublicKeys.set(signerId, secp256k1.getPublicKey(privateKey));
+  signerAddresses.set(signerId, privateKeyToAddress(privateKey));
+}
+
+export function registerSignerPublicKey(signerId: string, publicKey: Uint8Array | string): void {
+  console.log(`📝 registerSignerPublicKey: signerId=${signerId.slice(-4)}, publicKey type=${typeof publicKey}`);
+  if (signerKeys.has(signerId)) {
+    console.log(`⚠️ signerId ${signerId.slice(-4)} already has private key, skipping public key registration`);
+    return;
+  }
+  const bytes =
+    typeof publicKey === 'string'
+      ? Uint8Array.from(Buffer.from(publicKey.replace(/^0x/, ''), 'hex'))
+      : publicKey;
+  console.log(`📝 Public key bytes: ${bytes.length}`);
+  externalPublicKeys.set(signerId, bytes);
+  signerPublicKeys.delete(signerId);
+  console.log(`✅ Registered external public key for ${signerId.slice(-4)}, total: ${externalPublicKeys.size}`);
 }
 
 /**
@@ -13824,6 +14401,7 @@ export function registerSignerKey(signerId: string, privateKey: Uint8Array): voi
 export async function registerTestKeys(signerIds: string[]): Promise<void> {
   const testMasterSeed = new Uint8Array(32);
   testMasterSeed.fill(42); // Deterministic test seed
+  setRuntimeSeed(testMasterSeed);
 
   // Use registerSeededKeys but suppress its log (we log our own below)
   const seedBytes = testMasterSeed;
@@ -13839,6 +14417,8 @@ export async function registerTestKeys(signerIds: string[]): Promise<void> {
  */
 export function clearSignerKeys(): void {
   signerKeys.clear();
+  signerPublicKeys.clear();
+  externalPublicKeys.clear();
 }
 
 /**
@@ -13846,31 +14426,31 @@ export function clearSignerKeys(): void {
  * Returns: 65-byte signature (r + s + recovery)
  */
 export function signAccountFrame(
-  entityId: string,
+  signerId: string,
   frameHash: string,
   _privateData?: string // Deprecated, kept for backwards compat
 ): string {
-  const privateKey = signerKeys.get(entityId);
+  console.log(`🔑 signAccountFrame CALLED: signerId=${signerId.slice(-4)}, frameHash=${frameHash.slice(0, 10)}`);
+  console.log(`🔑 Available signerKeys:`, Array.from(signerKeys.keys()).map(k => k.slice(-4)));
+  console.log(`🔑 Available signerPublicKeys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
+  console.log(`🔑 runtimeSeedBytes available: ${!!runtimeSeedBytes} (${runtimeSeedBytes?.length || 0} bytes)`);
 
+  const messageHash = keccak256(Buffer.from(frameHash.replace('0x', ''), 'hex'));
+  const signature = signDigest(signerId, messageHash);
+  console.log(`✍️ Signed frame ${frameHash.slice(0, 10)} by ${signerId.slice(-4)}: ${signature.slice(0, 20)}...`);
+  return signature;
+}
+
+export function signDigest(signerId: string, digestHex: string): string {
+  installHmacSync();
+  const privateKey = getOrDeriveKey(signerId);
   if (!privateKey) {
-    // Fallback to mock for testing (when BrainVault not unlocked)
-    const mockContent = `${entityId}-${frameHash}`;
-    const mockSig = `sig_${Buffer.from(mockContent).toString('base64').slice(0, 32)}`;
-    console.warn(`⚠️ Using MOCK signature for ${entityId.slice(-4)} (BrainVault not unlocked)`);
-    return mockSig;
+    throw new Error(`SIGNER_KEY_MISSING: No key or runtime seed for signer ${signerId}`);
   }
 
-  // Hash the frame hash (secp256k1 signs 32-byte messages)
-  const messageHash = keccak256(Buffer.from(frameHash.replace('0x', ''), 'hex'));
-  const messageBytes = Buffer.from(messageHash.replace('0x', ''), 'hex');
-
-  // Sign with recovery using @noble/secp256k1
+  const messageBytes = Buffer.from(digestHex.replace('0x', ''), 'hex');
   const [signature, recovery] = secp256k1.signSync(messageBytes, privateKey, { recovered: true, der: false });
-
-  // Encode as hex: signature (64 bytes compact) + recovery (1 byte) = 65 bytes total
   const sigHex = Buffer.from(signature).toString('hex') + recovery.toString(16).padStart(2, '0');
-
-  console.log(`✍️ Signed frame ${frameHash.slice(0, 10)} by ${entityId.slice(-4)}: ${sigHex.slice(0, 20)}...`);
   return `0x${sigHex}`;
 }
 
@@ -13878,23 +14458,21 @@ export function signAccountFrame(
  * Verify account signature using secp256k1
  */
 export function verifyAccountSignature(
-  entityId: string,
+  signerId: string,
   frameHash: string,
   signature: string,
   _privateData?: string // Deprecated
 ): boolean {
-  // Handle legacy mock signatures
-  if (signature.startsWith('sig_')) {
-    const mockExpected = signAccountFrame(entityId, frameHash);
-    return signature === mockExpected;
-  }
-
   // Real signature verification
-  const privateKey = signerKeys.get(entityId);
-  if (!privateKey) {
-    console.warn(`⚠️ Cannot verify - no key for ${entityId.slice(-4)}`);
+  console.log(`🔍 VERIFY: signerId=${signerId.slice(-4)}, frameHash=${frameHash.slice(0, 10)}, sig=${signature.slice(0, 20)}...`);
+  const publicKey = getSignerPublicKey(signerId);
+  if (!publicKey) {
+    console.warn(`⚠️ Cannot verify - no public key for signerId=${signerId.slice(-4)}`);
+    console.warn(`⚠️ Available keys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
+    console.warn(`⚠️ Available external keys:`, Array.from(externalPublicKeys.keys()).map(k => k.slice(-4)));
     return false;
   }
+  console.log(`✅ Found public key for ${signerId.slice(-4)} (${publicKey.length} bytes)`);
 
   try {
     // Extract compact signature (64 bytes) from hex
@@ -13905,21 +14483,18 @@ export function verifyAccountSignature(
     const messageHash = keccak256(Buffer.from(frameHash.replace('0x', ''), 'hex'));
     const messageBytes = Buffer.from(messageHash.replace('0x', ''), 'hex');
 
-    // Get public key from private key
-    const publicKey = secp256k1.getPublicKey(privateKey);
-
     // Verify signature using @noble/secp256k1
     const isValid = secp256k1.verify(sigBytes, messageBytes, publicKey);
 
     if (isValid) {
-      console.log(`✅ Valid signature from ${entityId.slice(-4)} for frame ${frameHash.slice(0, 10)}`);
+      console.log(`✅ Valid signature from ${signerId.slice(-4)} for frame ${frameHash.slice(0, 10)}`);
     } else {
-      console.log(`❌ Invalid signature from ${entityId.slice(-4)} for frame ${frameHash.slice(0, 10)}`);
+      console.log(`❌ Invalid signature from ${signerId.slice(-4)} for frame ${frameHash.slice(0, 10)}`);
     }
 
     return isValid;
   } catch (error) {
-    console.error(`❌ Signature verification error for ${entityId.slice(-4)}:`, error);
+    console.error(`❌ Signature verification error for ${signerId.slice(-4)}:`, error);
     return false;
   }
 }
@@ -13927,30 +14502,6 @@ export function verifyAccountSignature(
 /**
  * Easy signer function that returns the entity ID from a signature
  */
-export function getSignerFromSignature(signature: string, frameHash: string): string | null {
-  // Parse signature to extract signer (mock implementation)
-  // Real implementation would use cryptographic signature recovery
-
-  if (!signature.startsWith('sig_')) {
-    return null;
-  }
-
-  // For mock: signature format is sig_BASE64(entityId-frameHash-privateKey)
-  try {
-    const encoded = signature.slice(4); // Remove 'sig_' prefix
-    const decoded = Buffer.from(encoded, 'base64').toString();
-    const parts = decoded.split('-');
-
-    if (parts.length >= 2 && parts[1] === frameHash) {
-      return parts[0] || null; // Return entityId or null if empty
-    }
-  } catch (error) {
-    console.log(`⚠️ Failed to parse signature: ${error}`);
-  }
-
-  return null;
-}
-
 /**
  * Validate multiple signatures for account frame
  */
@@ -13960,13 +14511,14 @@ export function validateAccountSignatures(
   expectedSigners: string[]
 ): { valid: boolean; validSigners: string[] } {
   const validSigners: string[] = [];
+  const remaining = new Set(expectedSigners);
 
   for (const signature of signatures) {
-    const signer = getSignerFromSignature(signature, frameHash);
-
-    if (signer && expectedSigners.includes(signer)) {
+    for (const signer of Array.from(remaining)) {
       if (verifyAccountSignature(signer, frameHash, signature)) {
         validSigners.push(signer);
+        remaining.delete(signer);
+        break;
       }
     }
   }
@@ -13979,7 +14531,7 @@ export function validateAccountSignatures(
 }
 
 
-//runtime/state-helpers.ts (606 lines)
+//runtime/state-helpers.ts (642 lines)
 /**
  * XLN State Management Helpers
  * Utilities for entity replica cloning, snapshots, and state persistence
@@ -14059,6 +14611,40 @@ export function emitScopedEvents(
   for (const message of messages) {
     env.info(category, message, payload, entityId);
   }
+}
+
+/**
+ * Resolve the proposer signerId for a given entity.
+ * Prefers local proposer replica, then local config validators[0], then gossip board[0].
+ * Throws if no signer can be resolved (fail early).
+ */
+export function resolveEntityProposerId(env: Env, entityId: string, context: string): string {
+  let fallback: string | null = null;
+
+  for (const replica of env.eReplicas.values()) {
+    if (replica.entityId !== entityId) continue;
+    if (replica.isProposer) return replica.signerId;
+    if (!fallback) {
+      fallback = replica.state.config.validators[0] || replica.signerId;
+    }
+  }
+
+  if (env.gossip?.getProfiles) {
+    const profile = (env.gossip.getProfiles() as Profile[]).find(p => p.entityId === entityId);
+    const board = profile?.metadata?.board;
+    if (Array.isArray(board) && board.length > 0) {
+      return board[0];
+    }
+    if (board && !Array.isArray(board) && Array.isArray(board.validators) && board.validators.length > 0) {
+      const first = board.validators[0];
+      if (first?.signerId) return first.signerId;
+      if (first?.signer) return first.signer;
+    }
+  }
+
+  if (fallback) return fallback;
+
+  throw new Error(`SIGNER_RESOLUTION_FAILED: ${context} entityId=${entityId}`);
 }
 
 // === CLONING UTILITIES ===
@@ -14398,6 +14984,8 @@ export const captureSnapshot = async (
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: env.timestamp,
+    ...(env.runtimeSeed ? { runtimeSeed: env.runtimeSeed } : {}),
+    ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
     eReplicas: new Map(Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica, true)])), // forSnapshot=true excludes clonedForValidation
     jReplicas,
     runtimeInput: {
@@ -14892,7 +15480,7 @@ export const decodeAsync = async (buffer: Buffer): Promise<any> => {
       serverInput: reconstructMaps(serverInput),
       replicas,
       // Add timestamp for compatibility
-      timestamp: Date.now(),
+      timestamp: 0,
       // Note: gossip layer will be re-created by runtime on restore
     };
   } else {
@@ -14905,7 +15493,7 @@ export const decodeAsync = async (buffer: Buffer): Promise<any> => {
 export { USE_MSGPACK };
 
 
-//runtime/evm.ts (1022 lines)
+//runtime/evm.ts (1023 lines)
 /**
  * XLN EVM Integration
  * Handles blockchain interactions, jurisdictions, and smart contract operations
@@ -14921,6 +15509,7 @@ import type { ConsensusConfig, JurisdictionConfig } from './types';
 import { DEBUG, isBrowser } from './utils';
 import { logError } from './logger';
 import { BrowserVMEthersProvider } from './browservm-ethers-provider';
+import type { BrowserVMInstance } from './xln-api';
 
 // Global logger for UI-accessible error logging (set by frontend)
 declare global {
@@ -15671,7 +16260,7 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
         } else {
           console.log('⚠️ jurisdictions.json not found - using BrowserVM mode (no external blockchain)');
         }
-        // Return empty map for BrowserVM mode - prepopulate-ahb.ts has its own fallback
+        // Return empty map for BrowserVM mode - scenarios handle their own fallback
         return jurisdictions;
       }
     }
@@ -15839,7 +16428,7 @@ export const getJurisdictionByAddress = async (address: string): Promise<Jurisdi
 };
 
 /** Get BrowserVM instance (for demos that need direct BrowserVM access) */
-export const getBrowserVMInstance = (): any => {
+export const getBrowserVMInstance = (): BrowserVMInstance | null => {
   return BROWSER_VM_INSTANCE;
 };
 
@@ -16038,7 +16627,7 @@ RCPAN (xln) superset invariant:
 
 xln can mimic both: ignore collateral functionality and it works like banking with enforceable proofs; ignore credit lines and it works like Lightning/full-reserve payment-channel networks. 
 
-Using both is where the real synergy emerges.
+Using both is where the real synergy emerges. RCPAN is literally how banks already think about credit, just formalized.
 
 Practical consequences: no inbound liquidity wall and no unbounded hub risk—losses are link-capped; throughput scales with links, not global broadcasts.
 

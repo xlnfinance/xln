@@ -43,6 +43,7 @@ import {
 import { createGossipLayer } from './gossip';
 import { attachEventEmitters } from './env-events';
 import { deriveSignerAddressSync, deriveSignerKeySync, getSignerPublicKey, registerSignerKey, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
+import { buildEntityProfile } from './gossip-helper';
 import { RuntimeP2P, type P2PConfig } from './p2p';
 import {
   parseReplicaKey,
@@ -796,24 +797,12 @@ const applyRuntimeInput = async (
         if (env.gossip && createdReplica) {
           const entityPublicKey = getSignerPublicKey(runtimeTx.entityId);
           const publicKeyHex = entityPublicKey ? `0x${Buffer.from(entityPublicKey).toString('hex')}` : undefined;
-          const profile = {
-            entityId: runtimeTx.entityId,
-            runtimeId: env.runtimeId,
-            capabilities: [],
-            publicAccounts: [],
-            hubs: [],
-            metadata: {
-              lastUpdated: env.timestamp,
-              routingFeePPM: 100, // Default 100 PPM (0.01%)
-              baseFee: 0n,
-              board: [...createdReplica.state.config.validators],
-              threshold: createdReplica.state.config.threshold,
-              ...(publicKeyHex ? { entityPublicKey: publicKeyHex } : {}),
-            },
-            accounts: [], // No accounts yet
-          };
+          const profile = buildEntityProfile(createdReplica.state, undefined, env.timestamp);
+          profile.runtimeId = env.runtimeId;
+          if (publicKeyHex) {
+            profile.metadata = { ...(profile.metadata || {}), entityPublicKey: publicKeyHex };
+          }
           env.gossip.announce(profile);
-          // Broadcast log removed
         }
 
         if (typeof actualJBlock !== 'number') {

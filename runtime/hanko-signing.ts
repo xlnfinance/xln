@@ -41,6 +41,29 @@ const bufferAlloc = (size: number, fill?: number): Buffer => {
   return result as Buffer;
 };
 
+const normalizeAddress = (value: string): string | null => {
+  try {
+    return ethers.getAddress(value).toLowerCase();
+  } catch {
+    return null;
+  }
+};
+
+const publicKeyToAddress = (value: string): string | null => {
+  const hex = value.startsWith('0x') ? value : `0x${value}`;
+  if (hex.length === 42) {
+    return normalizeAddress(hex);
+  }
+  if (hex.length === 130 || hex.length === 132) {
+    try {
+      return ethers.computeAddress(hex).toLowerCase();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
 /**
  * Sign multiple hashes as a single-signer entity
  * For single-signer entities (threshold=1, validators=[signerId])
@@ -179,35 +202,76 @@ export async function verifyHankoForHash(
     const targetEntity = '0x' + Array.from(matchingClaim.entityId).map(b => b.toString(16).padStart(2, '0')).join('');
 
     // CRITICAL: Verify recovered addresses match entity's board validators
+    let expectedAddresses: string[] = [];
+    let boardVerified = false;
+
     if (env && env.eReplicas) {
       const replica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === expectedEntityId);
       if (replica) {
         const validators = replica.state.config.validators; // ['s1', 's2', 's3']
 
-        // Convert validators to addresses
-        // Validators can be: signerId ('1','2','3') OR direct address ('0xabc...')
+        // Convert validators to addresses (local entity: signerId derivation is allowed)
         const { getSignerAddress } = await import('./account-crypto');
-        const expectedAddresses = validators.map(v => {
+        expectedAddresses = validators.map(v => {
           if (v.startsWith('0x')) {
-            return v.toLowerCase(); // Direct address
+            return publicKeyToAddress(v);
           }
-          return getSignerAddress(v)?.toLowerCase(); // SignerId → derive address
-        }).filter(Boolean);
+          return getSignerAddress(v)?.toLowerCase();
+        }).filter(Boolean) as string[];
+      }
+    }
 
-        // Check that ALL recovered addresses are in expected validators
-        for (const addr of recoveredAddresses) {
-          if (!expectedAddresses.includes(addr)) {
-            console.warn(`❌ Hanko rejected: Signer ${addr.slice(0, 10)} not in entity board validators`);
-            console.warn(`   Expected validators:`, expectedAddresses.map(a => a.slice(0, 10)));
-            return { valid: false, entityId: null };
+    // Fallback: use gossip profile metadata (remote entity) if no local replica
+    if (expectedAddresses.length === 0 && env?.gossip?.getProfiles) {
+      const profile = env.gossip.getProfiles().find((p: any) => p.entityId === expectedEntityId);
+      if (profile) {
+        const boardMeta = profile.metadata?.board;
+        const publicKey = profile.metadata?.entityPublicKey;
+        if (typeof publicKey === 'string') {
+          const derived = publicKeyToAddress(publicKey);
+          if (derived) expectedAddresses.push(derived);
+        }
+
+        const boardEntries = Array.isArray(boardMeta)
+          ? boardMeta.map(entry => ({ signer: entry }))
+          : (boardMeta?.validators || []);
+
+        for (const entry of boardEntries) {
+          if (!entry) continue;
+          if (typeof entry === 'string') {
+            const derived = publicKeyToAddress(entry);
+            if (derived) expectedAddresses.push(derived);
+            continue;
+          }
+          if (entry.publicKey) {
+            const derived = publicKeyToAddress(entry.publicKey);
+            if (derived) expectedAddresses.push(derived);
+          }
+          if (entry.signer) {
+            const derived = publicKeyToAddress(entry.signer);
+            if (derived) expectedAddresses.push(derived);
           }
         }
 
-        console.log(`✅ Board validation passed: ${recoveredAddresses.length} signers match board validators`);
-      } else {
-        console.warn(`⚠️ Cannot verify board - entity ${expectedEntityId.slice(-4)} not found in eReplicas`);
-        // For now, allow (might be external entity), but log warning
+        expectedAddresses = Array.from(new Set(expectedAddresses));
       }
+    }
+
+    if (expectedAddresses.length > 0) {
+      for (const addr of recoveredAddresses) {
+        if (!expectedAddresses.includes(addr)) {
+          console.warn(`❌ Hanko rejected: Signer ${addr.slice(0, 10)} not in entity board validators`);
+          console.warn(`   Expected validators:`, expectedAddresses.map(a => a.slice(0, 10)));
+          return { valid: false, entityId: null };
+        }
+      }
+      console.log(`✅ Board validation passed: ${recoveredAddresses.length} signers match board validators`);
+      boardVerified = true;
+    }
+
+    if (!boardVerified) {
+      console.warn(`⚠️ Cannot verify board - entity ${expectedEntityId.slice(-4)} missing board/publicKey in replicas or gossip`);
+      // For now, allow (might be external entity), but log warning
     }
 
     // Valid if at least one yes entity AND entityId matches AND has valid EOA sigs from board

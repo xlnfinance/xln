@@ -5,6 +5,18 @@
  * It manages entity profiles and their capabilities in a distributed network.
  */
 
+export type BoardValidator = {
+  signer: string; // canonical signer address (0x...) or signerId fallback
+  weight: number; // uint16 voting power
+  signerId?: string; // optional runtime signerId for routing/debug
+  publicKey?: string; // optional hex public key
+};
+
+export type BoardMetadata = {
+  threshold: number; // uint16 voting threshold
+  validators: BoardValidator[];
+};
+
 export type Profile = {
   entityId: string;
   runtimeId?: string; // Runtime identity (usually signer1 address)
@@ -30,8 +42,8 @@ export type Profile = {
     // Fee configuration (PPM = parts per million)
     routingFeePPM?: number; // 0-10000 (0% - 1%)
     baseFee?: bigint; // Base fee in smallest unit (e.g., wei for ETH)
-    board?: string[]; // multisig board members
-    threshold?: bigint; // multisig threshold
+    board?: BoardMetadata | string[]; // board metadata (legacy string[] supported)
+    threshold?: number; // legacy threshold mirror (uint16)
     // 3D visualization position (for scenarios)
     position?: { x: number; y: number; z: number };
     // Additional fields

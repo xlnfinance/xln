@@ -6,6 +6,7 @@
 import { startRuntimeWsServer } from '../ws-server';
 import { main, setRuntimeSeed, startP2P, process as runtimeProcess, applyRuntimeInput, createLazyEntity, generateLazyEntityId } from '../runtime';
 import { processUntil, converge } from './helpers';
+import { isLeft, deriveDelta } from '../account-utils';
 
 const args = globalThis.process.argv.slice(2);
 
@@ -47,6 +48,28 @@ const getProfileByName = (env: any, name: string) => {
 const getAccount = (env: any, entityId: string, signerId: string, counterpartyId: string) => {
   const replica = env.eReplicas.get(`${entityId}:${signerId}`);
   return replica?.state.accounts?.get(counterpartyId);
+};
+
+const getLeftEntity = (account: any): string | null => {
+  const from = account?.proofHeader?.fromEntity;
+  const to = account?.proofHeader?.toEntity;
+  if (!from || !to) return null;
+  return from < to ? from : to;
+};
+
+const resolveSides = (account: any, entityId: string, counterpartyId: string) => {
+  const leftEntity = getLeftEntity(account);
+  if (leftEntity) {
+    return {
+      weAreLeft: entityId === leftEntity,
+      counterpartyIsLeft: counterpartyId === leftEntity,
+    };
+  }
+  const weAreLeft = isLeft(entityId, counterpartyId);
+  return {
+    weAreLeft,
+    counterpartyIsLeft: !weAreLeft,
+  };
 };
 
 const formatBig = (value: bigint | undefined) => (value === undefined ? undefined : value.toString());
@@ -130,12 +153,16 @@ const logProfile = (label: string, profile: any) => {
     console.log(`[P2P_DEBUG] ${label}`, { profile: 'missing' });
     return;
   }
+  const board = profile.metadata?.board;
+  const boardSize = Array.isArray(board)
+    ? board.length
+    : (board?.validators ? board.validators.length : 0);
   console.log(`[P2P_DEBUG] ${label}`, {
     entityId: profile.entityId,
     runtimeId: profile.runtimeId,
     endpoints: profile.endpoints || [],
     accounts: (profile.accounts || []).map((acct: any) => acct.counterpartyId?.slice(-4)).filter(Boolean),
-    boardSize: Array.isArray(profile.metadata?.board) ? profile.metadata.board.length : 0,
+    boardSize,
     hasPublicKey: typeof profile.metadata?.entityPublicKey === 'string',
   });
 };
@@ -155,7 +182,11 @@ const waitForProfile = async (
     if (profile) {
       lastProfile = profile;
       const hasRuntime = !requireRuntimeId || !!profile.runtimeId;
-      const hasBoard = !requireBoard || (Array.isArray(profile.metadata?.board) && profile.metadata.board.length > 0);
+      const board = profile.metadata?.board;
+      const boardSize = Array.isArray(board)
+        ? board.length
+        : (board?.validators ? board.validators.length : 0);
+      const hasBoard = !requireBoard || boardSize > 0;
       const hasPublicKey = !requirePublicKey || typeof profile.metadata?.entityPublicKey === 'string';
       if (hasRuntime && hasBoard && hasPublicKey) return profile;
     }
@@ -165,8 +196,14 @@ const waitForProfile = async (
   if (lastProfile && requireRuntimeId && !lastProfile.runtimeId) {
     throw new Error(`PROFILE_MISSING_RUNTIME_ID: ${name}`);
   }
-  if (lastProfile && requireBoard && !(Array.isArray(lastProfile.metadata?.board) && lastProfile.metadata.board.length > 0)) {
-    throw new Error(`PROFILE_MISSING_BOARD: ${name}`);
+  if (lastProfile && requireBoard) {
+    const board = lastProfile.metadata?.board;
+    const boardSize = Array.isArray(board)
+      ? board.length
+      : (board?.validators ? board.validators.length : 0);
+    if (boardSize === 0) {
+      throw new Error(`PROFILE_MISSING_BOARD: ${name}`);
+    }
   }
   if (lastProfile && requirePublicKey && typeof lastProfile.metadata?.entityPublicKey !== 'string') {
     throw new Error(`PROFILE_MISSING_PUBLIC_KEY: ${name}`);
@@ -288,10 +325,9 @@ const waitForCreditLimit = async (
       const account = getAccount(env, entityId, signerId, counterpartyId);
       const delta = account?.deltas?.get(USDC);
       if (!delta) return false;
-      // FIXED: We're waiting for the COUNTERPARTY to extend credit TO US
-      // If we (entityId) are left, counterparty sets leftCreditLimit (our limit)
-      // If we (entityId) are right, counterparty sets rightCreditLimit (our limit)
-      const weAreLeft = entityId < counterpartyId;
+      // We are waiting for the COUNTERPARTY to extend credit to us.
+      // Credit is stored on OUR side of the account (leftCreditLimit if we are left).
+      const { weAreLeft } = resolveSides(account, entityId, counterpartyId);
       const expectedField = weAreLeft ? 'leftCreditLimit' : 'rightCreditLimit';
       return delta[expectedField] === amount;
     },
@@ -306,6 +342,41 @@ const waitForCreditLimit = async (
     () => {
       logAccountState(env, entityId, signerId, counterpartyId, 'wait-credit-limit timeout');
       logQueues(env, 'wait-credit-limit timeout');
+    }
+  );
+};
+
+const waitForOwnCreditLimit = async (
+  env: any,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+  amount: bigint,
+  maxRounds = 40
+) => {
+  await processUntil(
+    env,
+    () => {
+      const account = getAccount(env, entityId, signerId, counterpartyId);
+      const delta = account?.deltas?.get(USDC);
+      if (!delta) return false;
+      // We are waiting for OUR credit extension to be acknowledged.
+      // Our extension is stored on the counterparty's side of the account.
+      const { weAreLeft } = resolveSides(account, entityId, counterpartyId);
+      const expectedField = weAreLeft ? 'rightCreditLimit' : 'leftCreditLimit';
+      return delta[expectedField] === amount;
+    },
+    maxRounds,
+    `own-credit ${counterpartyId.slice(-4)}`,
+    round => {
+      if (round % 5 === 0) {
+        logAccountState(env, entityId, signerId, counterpartyId, `wait-own-credit round=${round}`);
+        logQueues(env, `wait-own-credit round=${round}`);
+      }
+    },
+    () => {
+      logAccountState(env, entityId, signerId, counterpartyId, 'wait-own-credit timeout');
+      logQueues(env, 'wait-own-credit timeout');
     }
   );
 };
@@ -492,6 +563,7 @@ const run = async () => {
   ]);
 
   await converge(env, 30);
+  await waitForOwnCreditLimit(env, entityId, signerId, hubProfile.entityId, usd(500_000), 60);
 
   // ASSERT: Verify bidirectional capacity exists
   const accountAfterCredit = getAccount(env, entityId, signerId, hubProfile.entityId);
@@ -499,16 +571,17 @@ const run = async () => {
   const deltaAfterCredit = accountAfterCredit.deltas?.get(USDC);
   if (!deltaAfterCredit) throw new Error(`${role}: No USDC delta after credit`);
 
-  const isLeftEntity = entityId < hubProfile.entityId;
-  const ourCreditLimit = isLeftEntity ? deltaAfterCredit.leftCreditLimit : deltaAfterCredit.rightCreditLimit;
-  const hubCreditLimit = isLeftEntity ? deltaAfterCredit.rightCreditLimit : deltaAfterCredit.leftCreditLimit;
+  const { weAreLeft } = resolveSides(accountAfterCredit, entityId, hubProfile.entityId);
+  const derived = deriveDelta(deltaAfterCredit, weAreLeft);
+  const ourCreditLimit = derived.ownCreditLimit;
+  const hubCreditLimit = derived.peerCreditLimit;
 
   console.log(`${role.toUpperCase()} CAPACITY CHECK:`);
   console.log(`  ${role}→Hub credit: ${ourCreditLimit} (we can owe hub)`);
   console.log(`  Hub→${role} credit: ${hubCreditLimit} (hub can owe us)`);
 
-  if (ourCreditLimit === 0n && hubCreditLimit === 0n) {
-    throw new Error(`${role}: NO CAPACITY - both credits are 0!`);
+  if (ourCreditLimit <= 0n || hubCreditLimit <= 0n) {
+    throw new Error(`${role}: NO CAPACITY - expected both credits > 0 (our=${ourCreditLimit}, hub=${hubCreditLimit})`);
   }
 
   console.log(`✅ ${role.toUpperCase()}: Bilateral capacity verified`);
@@ -610,7 +683,7 @@ const run = async () => {
       },
     ]);
     await converge(env, 20);
-    await waitForCreditLimit(env, entityId, signerId, hubProfile.entityId, creditAmount, 60);
+    await waitForOwnCreditLimit(env, entityId, signerId, hubProfile.entityId, creditAmount, 60);
     console.log('P2P_BOB_READY');
     await waitForPayment(env, entityId, signerId, hubProfile.entityId);
     console.log('P2P_PAYMENT_RECEIVED');

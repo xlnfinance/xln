@@ -50,17 +50,17 @@
     "@tsconfig/node20": "^20.1.8",
     "@types/minimatch": "^6.0.0",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^20.19.27",
+    "@types/node": "^20.19.30",
     "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
     "chai-as-promised": "^8.0.2",
     "eslint": "^8.57.1",
     "eslint-config-prettier": "^9.1.2",
-    "eslint-plugin-prettier": "^5.5.4",
-    "hardhat": "^2.28.2",
+    "eslint-plugin-prettier": "^5.5.5",
+    "hardhat": "^2.28.3",
     "mocha": "^10.8.2",
-    "prettier": "^3.7.4",
+    "prettier": "^3.8.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   },
@@ -85,7 +85,7 @@
     "merkletreejs": "^0.4.1",
     "msgpackr": "^1.11.8",
     "tevm": "^1.0.0-next.149",
-    "ws": "^8.18.3"
+    "ws": "^8.19.0"
   },
   "type": "module"
 }
