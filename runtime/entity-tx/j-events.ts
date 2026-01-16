@@ -606,11 +606,10 @@ async function applyFinalizedJEvent(
     addMessage(newState, `✅ DEBT PAID: ${paidDisplay} ${tokenSymbol} to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
 
   } else if (event.type === 'DisputeStarted') {
-    console.log(`🔍 DISPUTE-EVENT HANDLER CALLED: entityId=${newState.entityId.slice(-4)}`);
-    console.log(`   Event data:`, event.data);
+    console.log(`🔍 DISPUTE-EVENT HANDLER: entityId=${newState.entityId.slice(-4)}`);
 
-    // Dispute started on-chain - query full state and store in account
-    const { sender, counterentity, disputeNonce } = event.data;
+    // Dispute started on-chain - store dispute state from event
+    const { sender, counterentity, disputeNonce, proofbodyHash } = event.data;
     const senderStr = String(sender).toLowerCase();
     const counterentityStr = String(counterentity).toLowerCase();
 
@@ -619,30 +618,40 @@ async function applyFinalizedJEvent(
     const account = newState.accounts.get(counterpartyId);
 
     if (account) {
-      // Query on-chain state for accurate dispute info
+      // Query on-chain for timeout
       const browserVM = env.browserVM || (await import('../evm')).getBrowserVMInstance();
       if (!browserVM) {
-        console.warn(`⚠️ DisputeStarted: No browserVM available to query disputeTimeout`);
-        addMessage(newState, `⚔️ DISPUTE STARTED with ${counterpartyId.slice(-4)} (no timeout info) | Block ${blockNumber}`);
+        console.warn(`⚠️ DisputeStarted: No browserVM to query timeout`);
         return { newState, mempoolOps };
       }
 
       const accountInfo = await browserVM.getAccountInfo(newState.entityId, counterpartyId);
-      const { buildAccountProofBody } = await import('../proof-builder');
-      const proofResult = buildAccountProofBody(account);
 
-      // Store dispute state from on-chain (source of truth)
+      // Store dispute state from event + on-chain (source of truth)
       account.activeDispute = {
         startedByLeft: senderStr < counterentityStr,
-        initialProofbodyHash: proofResult.proofBodyHash,
+        initialProofbodyHash: String(proofbodyHash),  // From event (committed on-chain)
         initialDisputeNonce: Number(disputeNonce),
         disputeTimeout: Number(accountInfo.disputeTimeout),  // From on-chain
         onChainCooperativeNonce: Number(accountInfo.cooperativeNonce),  // From on-chain
       };
 
+      // ASSERTION: Our local proof hash should match on-chain committed hash
+      const { buildAccountProofBody } = await import('../proof-builder');
+      const localProof = buildAccountProofBody(account);
+      if (localProof.proofBodyHash !== account.activeDispute.initialProofbodyHash) {
+        console.error(`❌ CONSENSUS DIVERGENCE: Local proofBodyHash != on-chain`);
+        console.error(`   Local: ${localProof.proofBodyHash}`);
+        console.error(`   On-chain: ${account.activeDispute.initialProofbodyHash}`);
+        console.error(`   This means bilateral state diverged - CRITICAL BUG!`);
+        // Continue but log for audit
+      } else {
+        console.log(`✅ Proof hash verified: local matches on-chain`);
+      }
+
       const weAreStarter = senderStr === newState.entityId;
-      addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout} | Block ${blockNumber}`);
-      console.log(`⚔️ Stored activeDispute for ${counterpartyId.slice(-4)}: timeout=${account.activeDispute.disputeTimeout}, nonce=${account.activeDispute.initialDisputeNonce}`);
+      addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout}`);
+      console.log(`⚔️ activeDispute stored: hash=${account.activeDispute.initialProofbodyHash.slice(0,10)}..., timeout=${account.activeDispute.disputeTimeout}`);
     }
 
   } else {

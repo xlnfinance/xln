@@ -776,10 +776,13 @@ export async function handleAccountInput(
     // Store counterparty's frame hanko
     accountMachine.counterpartyFrameHanko = hankoToVerify;
 
-    // Store counterparty's dispute proof hanko (CRITICAL for disputes)
+    // Store counterparty's dispute proof hanko ONLY if verified and frame will commit
+    // Don't update yet - will update when frame COMMITS (not just received)
+    // This prevents storing dispute hanko for pending/rolled-back frames
     if (input.newDisputeHanko) {
-      accountMachine.counterpartyDisputeProofHanko = input.newDisputeHanko;
-      console.log(`✅ Stored counterparty dispute hanko (ready for enforcement)`);
+      // Store temporarily - will be moved to counterpartyDisputeProofHanko on commit
+      (accountMachine as any).pendingCounterpartyDisputeHanko = input.newDisputeHanko;
+      console.log(`📝 Stored pending counterparty dispute hanko (will commit with frame)`);
     }
 
     // Get entity's synced J-height for deterministic HTLC validation
@@ -971,6 +974,13 @@ export async function handleAccountInput(
       byLeft: receivedFrame.byLeft, // Copy proposer info
     };
     accountMachine.currentHeight = receivedFrame.height;
+
+    // COMMIT counterparty dispute hanko (frame accepted and committed)
+    if ((accountMachine as any).pendingCounterpartyDisputeHanko) {
+      accountMachine.counterpartyDisputeProofHanko = (accountMachine as any).pendingCounterpartyDisputeHanko;
+      delete (accountMachine as any).pendingCounterpartyDisputeHanko;
+      console.log(`✅ Committed counterparty dispute hanko (frame ${receivedFrame.height} accepted)`);
+    }
 
     // Add accepted frame to history
     accountMachine.frameHistory.push({...receivedFrame});
