@@ -34,7 +34,7 @@ const HEAVY_LOGS = false;
  * Canonical J-Event types that j-watcher processes.
  * MUST match Depository.sol and Account.sol event definitions.
  */
-export const CANONICAL_J_EVENTS = ['ReserveUpdated', 'AccountSettled'] as const;
+export const CANONICAL_J_EVENTS = ['ReserveUpdated', 'AccountSettled', 'DisputeStarted', 'DebtCreated'] as const;
 export type CanonicalJEvent = (typeof CANONICAL_J_EVENTS)[number];
 
 /**
@@ -111,6 +111,8 @@ export class JEventWatcher {
     // Canonical j-events (update entity state)
     'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
     'event AccountSettled(tuple(bytes32 left, bytes32 right, uint256 tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)[])',
+    'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed disputeNonce, bytes initialArguments)',
+    'event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex)',
   ];
 
   /**
@@ -380,6 +382,29 @@ export class JEventWatcher {
         return results;
       }
 
+      case 'DisputeStarted':
+        return [{
+          type: 'DisputeStarted',
+          data: {
+            sender: event.args.sender,
+            counterentity: event.args.counterentity,
+            disputeNonce: event.args.disputeNonce,
+            initialArguments: event.args.initialArguments || '0x',
+          },
+        }];
+
+      case 'DebtCreated':
+        return [{
+          type: 'DebtCreated',
+          data: {
+            debtor: event.args.debtor,
+            creditor: event.args.creditor,
+            tokenId: Number(event.args.tokenId),
+            amount: event.args.amount?.toString() || '0',
+            debtIndex: Number(event.args.debtIndex || 0),
+          },
+        }];
+
       default:
         return [];
     }
@@ -404,6 +429,14 @@ export class JEventWatcher {
         }
         return false;
       }
+
+      case 'DisputeStarted':
+        // Entity is relevant if they are sender OR counterentity (both need to know)
+        return event.args.sender === entityId || event.args.counterentity === entityId;
+
+      case 'DebtCreated':
+        // Entity is relevant if they are debtor OR creditor
+        return event.args.debtor === entityId || event.args.creditor === entityId;
 
       default:
         return false;

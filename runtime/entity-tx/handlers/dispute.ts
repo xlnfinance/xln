@@ -61,7 +61,10 @@ export async function handleDisputeStart(
     addMessage(newState, `⚠️ No counterparty dispute hanko - dispute may fail on-chain`);
     console.warn(`⚠️ Account ${counterpartyEntityId.slice(-4)} missing counterpartyDisputeProofHanko`);
   } else {
-    console.log(`✅ Using stored counterparty dispute hanko: ${counterpartyDisputeHanko.slice(0, 20)}...`);
+    console.log(`✅ Using stored counterparty dispute hanko:`);
+    console.log(`   Length: ${counterpartyDisputeHanko.length} bytes`);
+    console.log(`   First 66 chars: ${counterpartyDisputeHanko.slice(0, 66)}`);
+    console.log(`   Is 65-byte ECDSA: ${counterpartyDisputeHanko.length === 132}`); // 0x + 65*2
   }
 
   // Add to jBatch (sig = hanko for entity signing)
@@ -119,29 +122,35 @@ export async function handleDisputeFinalize(
     return { newState, outputs };
   }
 
-  // Build current proof (for counter-dispute, this might be newer state)
+  // Build current proof (for finalization reveal)
   const currentProofResult = buildAccountProofBody(account);
 
-  // For unilateral finalization: use stored values from disputeStart
-  // For counter-dispute: finalDisputeNonce > initialDisputeNonce with newer proof
-  const isCounterDispute = cooperative || account.proofHeader.disputeNonce > account.activeDispute.initialDisputeNonce;
+  // Determine finalization mode
+  const isCounterDispute = account.proofHeader.disputeNonce > account.activeDispute.initialDisputeNonce;
+
+  // Counter-dispute: use counterparty's DisputeProof hanko (same as start, proves they signed newer state)
+  // Unilateral: no signature (timeout enforces)
+  // Cooperative: use cooperative settlement sig (not implemented yet)
+  const finalizeSig = isCounterDispute && account.counterpartyDisputeProofHanko
+    ? account.counterpartyDisputeProofHanko
+    : '0x';
 
   const finalProof = {
     counterentity: counterpartyEntityId,
     finalCooperativeNonce: account.activeDispute.onChainCooperativeNonce,
     initialDisputeNonce: account.activeDispute.initialDisputeNonce,
     finalDisputeNonce: isCounterDispute ? account.proofHeader.disputeNonce : account.activeDispute.initialDisputeNonce,
-    initialProofbodyHash: account.activeDispute.initialProofbodyHash,  // From disputeStart
-    finalProofbody: currentProofResult.proofBodyStruct,
+    initialProofbodyHash: account.activeDispute.initialProofbodyHash,  // From disputeStart (commit)
+    finalProofbody: currentProofResult.proofBodyStruct,  // REVEAL
     finalArguments: '0x',
     initialArguments: '0x',
-    sig: isCounterDispute && account.counterpartyDisputeProofHanko ? account.counterpartyDisputeProofHanko : '0x',
-    startedByLeft: account.activeDispute.startedByLeft,  // From on-chain state
-    disputeUntilBlock: account.activeDispute.disputeTimeout,  // From on-chain state
+    sig: finalizeSig,  // Empty for unilateral, counterparty DisputeProof hanko for counter
+    startedByLeft: account.activeDispute.startedByLeft,  // From on-chain
+    disputeUntilBlock: account.activeDispute.disputeTimeout,  // From on-chain
     cooperative: cooperative || false,
   };
 
-  console.log(`   Using stored dispute state: startedByLeft=${account.activeDispute.startedByLeft}, timeout=${account.activeDispute.disputeTimeout}`);
+  console.log(`   Mode: ${isCounterDispute ? 'counter-dispute' : 'unilateral'}, timeout=${account.activeDispute.disputeTimeout}`);
 
   // Add to jBatch
   newState.jBatchState.batch.disputeFinalizations.push(finalProof);
