@@ -77,6 +77,10 @@ export async function handleDisputeStart(
   console.log(`✅ disputeStart: Added to jBatch for ${entityState.entityId.slice(-4)}`);
   console.log(`   Proof hash: ${proofResult.proofBodyHash.slice(0, 10)}...`);
 
+  // NOTE: activeDispute will be set when DisputeStarted event arrives from J-machine
+  // Event handler will query on-chain state and populate:
+  // - startedByLeft, disputeTimeout, onChainCooperativeNonce
+
   addMessage(newState, `⚔️ Dispute started vs ${counterpartyEntityId.slice(-4)} ${description ? `(${description})` : ''} - use jBroadcast to commit`);
 
   return { newState, outputs };
@@ -109,26 +113,35 @@ export async function handleDisputeFinalize(
     return { newState, outputs };
   }
 
-  // Build proof
-  const proofResult = buildAccountProofBody(account);
+  // Verify activeDispute exists (set by DisputeStarted j-event)
+  if (!account.activeDispute) {
+    addMessage(newState, `❌ No active dispute with ${counterpartyEntityId.slice(-4)} - must call disputeStart first`);
+    return { newState, outputs };
+  }
 
-  // Determine who started (needed for contract logic)
-  const startedByLeft = entityState.entityId < counterpartyEntityId;
+  // Build current proof (for counter-dispute, this might be newer state)
+  const currentProofResult = buildAccountProofBody(account);
+
+  // For unilateral finalization: use stored values from disputeStart
+  // For counter-dispute: finalDisputeNonce > initialDisputeNonce with newer proof
+  const isCounterDispute = cooperative || account.proofHeader.disputeNonce > account.activeDispute.initialDisputeNonce;
 
   const finalProof = {
     counterentity: counterpartyEntityId,
-    finalCooperativeNonce: account.proofHeader.cooperativeNonce,
-    initialDisputeNonce: account.proofHeader.disputeNonce,
-    finalDisputeNonce: account.proofHeader.disputeNonce,
-    initialProofbodyHash: proofResult.proofBodyHash,
-    finalProofbody: proofResult.proofBodyStruct,
+    finalCooperativeNonce: account.activeDispute.onChainCooperativeNonce,
+    initialDisputeNonce: account.activeDispute.initialDisputeNonce,
+    finalDisputeNonce: isCounterDispute ? account.proofHeader.disputeNonce : account.activeDispute.initialDisputeNonce,
+    initialProofbodyHash: account.activeDispute.initialProofbodyHash,  // From disputeStart
+    finalProofbody: currentProofResult.proofBodyStruct,
     finalArguments: '0x',
     initialArguments: '0x',
-    sig: cooperative ? '0x' : '0x',  // TODO: Get real signature if cooperative
-    startedByLeft,
-    disputeUntilBlock: 0,
+    sig: isCounterDispute && account.counterpartyDisputeProofHanko ? account.counterpartyDisputeProofHanko : '0x',
+    startedByLeft: account.activeDispute.startedByLeft,  // From on-chain state
+    disputeUntilBlock: account.activeDispute.disputeTimeout,  // From on-chain state
     cooperative: cooperative || false,
   };
+
+  console.log(`   Using stored dispute state: startedByLeft=${account.activeDispute.startedByLeft}, timeout=${account.activeDispute.disputeTimeout}`);
 
   // Add to jBatch
   newState.jBatchState.batch.disputeFinalizations.push(finalProof);

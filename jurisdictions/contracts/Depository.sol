@@ -42,7 +42,10 @@ contract Depository is ReentrancyGuardLite {
   error E8(); // LengthMismatch
   error E9(); // HashMismatch
 
-  // Multi-provider support
+  // Immutable EntityProvider (set in constructor, gas-efficient static calls)
+  address public immutable entityProvider;
+
+  // Multi-provider support (legacy - will be removed)
   mapping(address => bool) public approvedEntityProviders;
   address[] public entityProvidersList;
   
@@ -187,10 +190,11 @@ contract Depository is ReentrancyGuardLite {
     return entityProvidersList;
   }
 
-  constructor() {
+  constructor(address _entityProvider) {
+    require(_entityProvider != address(0), "EntityProvider cannot be zero address");
+    entityProvider = _entityProvider;
     admin = msg.sender;
     _tokens.push(bytes32(0));
-
   }
 
   function setEmergencyPause(bool isPaused) external onlyAdmin {
@@ -469,8 +473,7 @@ contract Depository is ReentrancyGuardLite {
     }
 
     if (batch.disputeStarts.length > 0) {
-      address ep = entityProvidersList.length > 0 ? entityProvidersList[0] : address(0);
-      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay, ep)) {
+      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay, entityProvider)) {
         completeSuccess = false;
       }
     }
@@ -963,9 +966,7 @@ contract Depository is ReentrancyGuardLite {
     bytes32 caller = bytes32(uint256(uint160(msg.sender)));
     InitialDisputeProof[] memory starts = new InitialDisputeProof[](1);
     starts[0] = params;
-    // Use first approved EP for verification (multi-provider support later)
-    address ep = entityProvidersList.length > 0 ? entityProvidersList[0] : address(0);
-    return Account.processDisputeStarts(_accounts, caller, starts, defaultDisputeDelay, ep);
+    return Account.processDisputeStarts(_accounts, caller, starts, defaultDisputeDelay, entityProvider);
   }
 
   /// @notice Finalize dispute - stays in Depository due to storage complexity
@@ -977,9 +978,6 @@ contract Depository is ReentrancyGuardLite {
   /// @notice Internal dispute finalize with full storage access
   function _disputeFinalizeInternal(bytes32 entityId, FinalDisputeProof memory params) internal returns (bool) {
     bytes memory ch_key = accountKey(entityId, params.counterentity);
-
-    // Get EntityProvider for hanko verification
-    address ep = entityProvidersList.length > 0 ? entityProvidersList[0] : address(0);
 
     if (params.cooperative) {
       // SECURITY: Prevent cooperative finalize on virgin accounts
@@ -993,7 +991,7 @@ contract Depository is ReentrancyGuardLite {
         if (!Account.verifyCooperativeProofSig(ch_key, _accounts[ch_key].cooperativeNonce, keccak256(abi.encode(params.finalProofbody)), keccak256(params.initialArguments), params.sig, params.counterentity)) revert E4();
       } else {
         // Full hanko
-        if (!Account.verifyCooperativeProofHanko(ep, ch_key, _accounts[ch_key].cooperativeNonce, keccak256(abi.encode(params.finalProofbody)), keccak256(params.initialArguments), params.sig, params.counterentity)) revert E4();
+        if (!Account.verifyCooperativeProofHanko(entityProvider, ch_key, _accounts[ch_key].cooperativeNonce, keccak256(abi.encode(params.finalProofbody)), keccak256(params.initialArguments), params.sig, params.counterentity)) revert E4();
       }
     } else {
       bytes32 storedHash = _accounts[ch_key].disputeHash;
@@ -1013,7 +1011,7 @@ contract Depository is ReentrancyGuardLite {
           if (!Account.verifyFinalDisputeProofSig(ch_key, params.finalCooperativeNonce, params.initialDisputeNonce, params.finalDisputeNonce, params.sig, params.counterentity)) revert E4();
         } else {
           // Full hanko
-          if (!Account.verifyFinalDisputeProofHanko(ep, ch_key, params.finalCooperativeNonce, params.initialDisputeNonce, params.finalDisputeNonce, params.sig, params.counterentity)) revert E4();
+          if (!Account.verifyFinalDisputeProofHanko(entityProvider, ch_key, params.finalCooperativeNonce, params.initialDisputeNonce, params.finalDisputeNonce, params.sig, params.counterentity)) revert E4();
         }
         if (params.initialDisputeNonce >= params.finalDisputeNonce) revert E2();
       } else {

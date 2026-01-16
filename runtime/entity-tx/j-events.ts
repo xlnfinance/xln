@@ -599,6 +599,33 @@ function applyFinalizedJEvent(
 
     addMessage(newState, `✅ DEBT PAID: ${paidDisplay} ${tokenSymbol} to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
 
+  } else if (event.type === 'DisputeStarted') {
+    // Dispute started on-chain - store dispute state in account
+    const { sender, counterparty, disputeNonce } = event.data;
+    const senderStr = String(sender).toLowerCase();
+    const counterpartyStr = String(counterparty).toLowerCase();
+
+    // Find which account this affects (we are either sender or counterparty)
+    const counterpartyId = senderStr === newState.entityId ? counterpartyStr : senderStr;
+    const account = newState.accounts.get(counterpartyId);
+
+    if (account) {
+      const { buildAccountProofBody } = await import('../proof-builder');
+      const proofResult = buildAccountProofBody(account);
+
+      // Store dispute state for later finalization
+      account.activeDispute = {
+        startedByLeft: senderStr < counterpartyStr,
+        initialProofbodyHash: proofResult.proofBodyHash,
+        initialDisputeNonce: Number(disputeNonce),
+        disputeTimeout: 0,  // TODO: Query from browserVM.getAccountInfo()
+        onChainCooperativeNonce: account.proofHeader.cooperativeNonce,
+      };
+
+      addMessage(newState, `⚔️ DISPUTE STARTED with ${counterpartyId.slice(-4)} | Block ${blockNumber}`);
+      console.log(`⚔️ Stored activeDispute for account ${counterpartyId.slice(-4)}`);
+    }
+
   } else {
     // Unknown event - log but don't fail
     addMessage(newState, `⚠️ Unknown j-event: ${event.type} | Block ${blockNumber}`);

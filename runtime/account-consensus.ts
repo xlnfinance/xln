@@ -396,9 +396,10 @@ export async function proposeAccountFrame(
   accountMachine.currentFrameHanko = frameHanko;
 
   // Build dispute proof and sign it (CRITICAL: always sign dispute proof with every frame)
+  // BUG FIX: Use clonedMachine (has NEW state after txs) NOT accountMachine (old state)
   const { buildAccountProofBody, createDisputeProofHash } = await import('./proof-builder');
-  const proofResult = buildAccountProofBody(accountMachine);
-  const disputeHash = createDisputeProofHash(accountMachine, proofResult.proofBodyHash);
+  const proofResult = buildAccountProofBody(clonedMachine);
+  const disputeHash = createDisputeProofHash(clonedMachine, proofResult.proofBodyHash);
 
   const disputeHankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [disputeHash]);
   const disputeHanko = disputeHankos[0];
@@ -1012,11 +1013,19 @@ export async function handleAccountInput(
     // Check if we should batch BEFORE incrementing counter
     let batchedWithNewFrame = false;
     let proposeResult: Awaited<ReturnType<typeof proposeAccountFrame>> | undefined;
+    // Build dispute proof hanko for ACK response (always include current state's dispute proof)
+    const { buildAccountProofBody: buildProof, createDisputeProofHash: createHash } = await import('./proof-builder');
+    const ackProofResult = buildProof(accountMachine);
+    const ackDisputeHash = createHash(accountMachine, ackProofResult.proofBodyHash);
+    const ackDisputeHankos = await signHashesAsSingleEntity(env, ackEntityId, ackSignerId, [ackDisputeHash]);
+    const ackDisputeHanko = ackDisputeHankos[0];
+
     const response: AccountInput = {
       fromEntityId: accountMachine.proofHeader.fromEntity,
       toEntityId: input.fromEntityId,
       height: receivedFrame.height,
-      prevHanko: confirmationHanko,  // NEW: Hanko ACK
+      prevHanko: confirmationHanko,       // Hanko ACK on their frame
+      newDisputeHanko: ackDisputeHanko,   // My dispute proof hanko (current state)
       prevSignatures: [confirmationHanko], // LEGACY fallback
       counter: 0, // Will be set below after batching decision
     };
@@ -1039,6 +1048,10 @@ export async function handleAccountInput(
           response.newSignatures = [proposeResult.accountInput.newHanko]; // LEGACY fallback
         } else if (proposeResult.accountInput.newSignatures) {
           response.newSignatures = proposeResult.accountInput.newSignatures;
+        }
+        // BUG FIX: Include newDisputeHanko from proposal (otherwise it's lost in batch)
+        if (proposeResult.accountInput.newDisputeHanko) {
+          response.newDisputeHanko = proposeResult.accountInput.newDisputeHanko;
         }
 
         const newFrameId = proposeResult.accountInput.newAccountFrame?.height || 0;
