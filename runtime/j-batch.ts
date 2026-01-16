@@ -73,11 +73,31 @@ export interface JBatch {
     nonce: number; // Settlement nonce
   }>;
 
-  // Dispute/Cooperative proofs (DEPRECATED in current Depository.sol - empty arrays for now)
-  cooperativeUpdate: never[];
-  cooperativeDisputeProof: never[];
-  disputeStarts: never[];
-  disputeFinalizations: never[];
+  // Dispute proofs (active in Depository.sol)
+  cooperativeUpdate: never[];  // Legacy - not used
+  cooperativeDisputeProof: never[];  // Legacy - not used
+  disputeStarts: Array<{
+    counterentity: string;
+    cooperativeNonce: number;
+    disputeNonce: number;
+    proofbodyHash: string;
+    sig: string;
+    initialArguments: string;
+  }>;
+  disputeFinalizations: Array<{
+    counterentity: string;
+    finalCooperativeNonce: number;
+    initialDisputeNonce: number;
+    finalDisputeNonce: number;
+    initialProofbodyHash: string;
+    finalProofbody: any;  // ProofBody struct
+    finalArguments: string;
+    initialArguments: string;
+    sig: string;
+    startedByLeft: boolean;
+    disputeUntilBlock: number;
+    cooperative: boolean;
+  }>;
 
   // Flashloans (for atomic batch execution)
   flashloans: Array<{

@@ -4,8 +4,41 @@
  */
 
 import type { EntityState } from './types';
-import type { Profile } from './gossip';
+import type { BoardMetadata, Profile } from './gossip';
 import { deriveDelta, isLeft } from './account-utils';
+import { getSignerAddress, getSignerPublicKey } from './account-crypto';
+
+const toUint16 = (value: bigint | number | undefined, fallback = 0): number => {
+  const raw = typeof value === 'bigint' ? Number(value) : Number(value ?? fallback);
+  if (!Number.isFinite(raw)) return fallback;
+  if (raw <= 0) return 0;
+  return Math.min(65535, Math.floor(raw));
+};
+
+const bytesToHex = (bytes: Uint8Array): string =>
+  `0x${Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')}`;
+
+const buildBoardMetadata = (entityState: EntityState): BoardMetadata => {
+  const validators = entityState.config.validators.map(validatorId => {
+    const weight = toUint16(entityState.config.shares[validatorId] ?? 1n, 1);
+    const publicKey = getSignerPublicKey(validatorId);
+    const publicKeyHex = publicKey ? bytesToHex(publicKey) : undefined;
+    const address = getSignerAddress(validatorId);
+    const signer = address || validatorId;
+
+    return {
+      signer,
+      weight,
+      signerId: validatorId,
+      ...(publicKeyHex ? { publicKey: publicKeyHex } : {}),
+    };
+  });
+
+  return {
+    threshold: toUint16(entityState.config.threshold, 1),
+    validators,
+  };
+};
 
 /**
  * Build gossip profile from entity state
@@ -66,8 +99,8 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
       isHub: false, // Future: Determine from entity capabilities or manual config
       routingFeePPM: 100, // Default 100 PPM (0.01%)
       baseFee: 0n,
-      board: [...entityState.config.validators],
-      threshold: entityState.config.threshold,
+      board: buildBoardMetadata(entityState),
+      threshold: toUint16(entityState.config.threshold, 1),
       ...(name ? { name } : {}), // Include name if provided
     },
     accounts,

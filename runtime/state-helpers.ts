@@ -98,8 +98,13 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
   if (env.gossip?.getProfiles) {
     const profile = (env.gossip.getProfiles() as Profile[]).find(p => p.entityId === entityId);
     const board = profile?.metadata?.board;
-    if (board && board.length > 0) {
+    if (Array.isArray(board) && board.length > 0) {
       return board[0];
+    }
+    if (board && !Array.isArray(board) && Array.isArray(board.validators) && board.validators.length > 0) {
+      const first = board.validators[0];
+      if (first?.signerId) return first.signerId;
+      if (first?.signer) return first.signer;
     }
   }
 

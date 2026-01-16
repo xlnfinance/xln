@@ -488,6 +488,21 @@ export type EntityTx =
       };
     }
   | {
+      type: 'disputeStart';
+      data: {
+        counterpartyEntityId: string;
+        description?: string;
+      };
+    }
+  | {
+      type: 'disputeFinalize';
+      data: {
+        counterpartyEntityId: string;
+        cooperative?: boolean;  // If true, use cooperative finalization
+        description?: string;
+      };
+    }
+  | {
       type: 'deposit_collateral';
       data: {
         counterpartyId: string; // Which account to add collateral to
