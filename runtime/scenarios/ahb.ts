@@ -328,16 +328,7 @@ export async function ahb(env: Env): Promise<void> {
 
   console.log(`[AHB] Wallet ordering: Alice=${aliceEntry?.label}, Hub=${hubEntry?.label}, Bob=${bobEntry?.label}`);
 
-  const entityIds = {
-    Alice: ethers.zeroPadValue(aliceWallet.address, 32).toLowerCase(),
-    Hub: ethers.zeroPadValue(hubWallet.address, 32).toLowerCase(),
-    Bob: ethers.zeroPadValue(bobWallet.address, 32).toLowerCase(),
-  };
-
   ENTITY_NAME_MAP.clear();
-  ENTITY_NAME_MAP.set(entityIds.Alice, 'Alice');
-  ENTITY_NAME_MAP.set(entityIds.Hub, 'Hub');
-  ENTITY_NAME_MAP.set(entityIds.Bob, 'Bob');
 
   const process = await getProcess();
   env.scenarioMode = true; // Deterministic time control (scenarios set env.timestamp manually)
@@ -369,12 +360,7 @@ export async function ahb(env: Env): Promise<void> {
     if (browserVM.reset) {
       console.log('[AHB] Calling browserVM.reset()...');
       await browserVM.reset();
-      // Verify reset worked by checking Hub's reserves (should be 0)
-      const hubReservesAfterReset = await browserVM.getReserves(entityIds.Hub, USDC_TOKEN_ID);
-      console.log(`[AHB] ✅ BrowserVM reset complete. Hub reserves after reset: ${hubReservesAfterReset}`);
-      if (hubReservesAfterReset !== 0n) {
-        throw new Error(`BrowserVM reset FAILED: Hub still has ${hubReservesAfterReset} reserves`);
-      }
+      console.log(`[AHB] ✅ BrowserVM reset complete`);
     }
 
     const jurisdictions = await getAvailableJurisdictions();
@@ -464,9 +450,8 @@ export async function ahb(env: Env): Promise<void> {
       const name = entityNames[i];
       const signer = `s${i + 1}`;
       const position = AHB_POSITIONS[name];
-      const entityId = entityIds[name];
 
-      // Compute boardHash for on-chain registration
+      // Compute boardHash for lazy entity (entityId MUST equal boardHash)
       const config = {
         mode: 'proposer-based' as const,
         threshold: 1n,
@@ -477,7 +462,13 @@ export async function ahb(env: Env): Promise<void> {
       const encodedBoard = encodeBoard(config);
       const boardHash = hashBoard(encodedBoard);
 
+      // LAZY ENTITY: entityId = boardHash (not wallet address!)
+      const entityId = boardHash;
+
       entities.push({ id: entityId, signer, name, boardHash });
+
+      // Update name map
+      ENTITY_NAME_MAP.set(entityId, name);
 
       createEntityTxs.push({
         type: 'importReplica' as const,
@@ -508,6 +499,13 @@ export async function ahb(env: Env): Promise<void> {
     if (!alice || !hub || !bob) {
       throw new Error('Failed to create all entities');
     }
+
+    // Build entityIds map from created entities (entityId = boardHash for lazy entities)
+    const entityIds = {
+      Alice: alice.id,
+      Hub: hub.id,
+      Bob: bob.id,
+    };
 
     // CRITICAL: Register public keys for signature validation
     // Without this, verifyAccountSignature will fail in browser
