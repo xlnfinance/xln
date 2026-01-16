@@ -413,31 +413,35 @@ export class JEventWatcher {
 
   /**
    * Check if a BrowserVM event is relevant to an entity
-   * Only handles CANONICAL_J_EVENTS - ReserveUpdated, AccountSettled
+   * Only handles CANONICAL_J_EVENTS - ReserveUpdated, AccountSettled, DisputeStarted, DebtCreated
    */
   private isEventRelevantToEntity(event: BrowserVMEvent, entityId: string): boolean {
+    // Normalize entity IDs for comparison (bytes32 from contract vs string in runtime)
+    const normalizeId = (id: any): string => String(id).toLowerCase();
+    const normalizedEntityId = normalizeId(entityId);
+
     switch (event.name) {
       case 'ReserveUpdated':
-        return event.args.entity === entityId;
+        return normalizeId(event.args.entity) === normalizedEntityId;
       case 'AccountSettled': {
         // AccountSettled has array of Settled structs - check if entity is left or right in any
         // Can be event.args.settled (named param) or event.args[0] (unnamed) or event.args['']
         const settledArray = event.args.settled || event.args[''] || event.args[0] || [];
         for (const settled of settledArray) {
-          const left = settled[0] || settled.left;
-          const right = settled[1] || settled.right;
-          if (left === entityId || right === entityId) return true;
+          const left = normalizeId(settled[0] || settled.left);
+          const right = normalizeId(settled[1] || settled.right);
+          if (left === normalizedEntityId || right === normalizedEntityId) return true;
         }
         return false;
       }
 
       case 'DisputeStarted':
         // Entity is relevant if they are sender OR counterentity (both need to know)
-        return event.args.sender === entityId || event.args.counterentity === entityId;
+        return normalizeId(event.args.sender) === normalizedEntityId || normalizeId(event.args.counterentity) === normalizedEntityId;
 
       case 'DebtCreated':
         // Entity is relevant if they are debtor OR creditor
-        return event.args.debtor === entityId || event.args.creditor === entityId;
+        return normalizeId(event.args.debtor) === normalizedEntityId || normalizeId(event.args.creditor) === normalizedEntityId;
 
       default:
         return false;
