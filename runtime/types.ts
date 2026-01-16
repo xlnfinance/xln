@@ -764,10 +764,14 @@ export interface AccountMachine {
     leftDisputeDelay: number;   // uint16 - value * 10 = blocks
     rightDisputeDelay: number;  // uint16 - value * 10 = blocks
   };
-  // HANKO SYSTEM: Bilateral hanko storage for disputes
-  currentAccountProofHanko?: HankoString; // Most recent account proof hanko (for disputes)
-  counterpartyAccountProofHanko?: HankoString; // Counterparty's most recent hanko (for disputes)
-  hankoSignature?: string; // LEGACY - will be replaced by currentAccountProofHanko
+  // HANKO SYSTEM: Frame consensus + Dispute proofs
+  currentFrameHanko?: HankoString;           // My hanko on current frame (bilateral consensus)
+  counterpartyFrameHanko?: HankoString;      // Their hanko on current frame (bilateral consensus)
+
+  currentDisputeProofHanko?: HankoString;         // My hanko on dispute proof (for J-machine enforcement)
+  counterpartyDisputeProofHanko?: HankoString;    // Their hanko on dispute proof (ready for disputes)
+
+  hankoSignature?: string; // LEGACY - will be removed
 
   // Historical frame log - grows until manually pruned by entity
   frameHistory: AccountFrame[]; // All confirmed bilateral frames in chronological order
@@ -818,9 +822,10 @@ export interface AccountInput {
   height?: number;                   // Which frame we're ACKing or referencing (renamed from frameId)
 
   // HANKO SYSTEM:
-  prevHanko?: HankoString;           // ACK hanko for their frame
-  newAccountFrame?: AccountFrame;    // Our new proposed frame (like block in Channel.ts)
-  newHanko?: HankoString;            // Hanko on newAccountFrame
+  prevHanko?: HankoString;                // ACK hanko for their frame
+  newAccountFrame?: AccountFrame;         // Our new proposed frame (like block in Channel.ts)
+  newHanko?: HankoString;                 // Hanko on newAccountFrame
+  newDisputeHanko?: HankoString;          // Hanko on dispute proof (for J-machine enforcement)
 
   // LEGACY (will be removed):
   prevSignatures?: string[];         // ACK for their frame (LEGACY)
