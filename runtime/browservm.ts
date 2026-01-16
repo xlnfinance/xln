@@ -149,10 +149,10 @@ export class BrowserVMProvider {
     await this.vm.stateManager.putAccount(this.deployerAddress, deployerAccount);
     console.log(`[BrowserVM] Deployer funded: ${this.deployerAddress.toString()}`);
 
-    // Deploy contracts in order: Account (library) → Depository (with linking) → EntityProvider → DeltaTransformer
+    // Deploy contracts in order: Account (library) → EntityProvider → Depository(EP) → DeltaTransformer
     await this.deployAccount();
-    await this.deployDepository();
     await this.deployEntityProvider();
+    await this.deployDepository();  // Now requires EntityProvider address
     await this.deployDeltaTransformer();
     await this.deployDefaultTokens();
 
@@ -200,12 +200,15 @@ export class BrowserVMProvider {
     console.log(`[BrowserVM] Account library deployed at: ${this.accountAddress.toString()}`);
   }
 
-  /** Deploy Depository contract with Account library linking */
+  /** Deploy Depository contract with Account library linking and EntityProvider */
   private async deployDepository(): Promise<void> {
-    console.log('[BrowserVM] Deploying Depository with Account library linking...');
+    console.log('[BrowserVM] Deploying Depository with Account library linking + EntityProvider...');
 
     if (!this.accountAddress) {
       throw new Error('Account library must be deployed first');
+    }
+    if (!this.entityProviderAddress) {
+      throw new Error('EntityProvider must be deployed before Depository');
     }
 
     // Link Account library address into Depository bytecode
@@ -224,12 +227,20 @@ export class BrowserVMProvider {
       console.warn('[BrowserVM] No library placeholders found in Depository bytecode');
     }
 
+    // Encode constructor args: constructor(address _entityProvider)
+    const { ethers } = await import('ethers');
+    const constructorArgs = ethers.AbiCoder.defaultAbiCoder().encode(
+      ['address'],
+      [this.entityProviderAddress.toString()]
+    );
+    const deployData = linkedBytecode + constructorArgs.slice(2); // Remove 0x from args
+
     const currentNonce = await this.getCurrentNonce();
 
     const tx = createLegacyTx({
       gasLimit: 100000000n,
       gasPrice: 10n,
-      data: linkedBytecode,
+      data: deployData,
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
