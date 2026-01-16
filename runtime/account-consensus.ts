@@ -1059,10 +1059,9 @@ export async function handleAccountInput(
         } else if (proposeResult.accountInput.newSignatures) {
           response.newSignatures = proposeResult.accountInput.newSignatures;
         }
-        // BUG FIX: Include newDisputeHanko from proposal (otherwise it's lost in batch)
-        if (proposeResult.accountInput.newDisputeHanko) {
-          response.newDisputeHanko = proposeResult.accountInput.newDisputeHanko;
-        }
+        // DON'T overwrite response.newDisputeHanko (it's ACK's dispute hanko for current committed state)
+        // Proposal's newDisputeHanko will be delivered when proposal commits, not now
+        // This preserves ACK's dispute hanko for last agreed state
 
         const newFrameId = proposeResult.accountInput.newAccountFrame?.height || 0;
         console.log(`✅ Batched ACK for frame ${receivedFrame.height} + proposal for frame ${newFrameId}`);

@@ -310,7 +310,6 @@ async function tryFinalizeJBlocks(
       // 2. A previous iteration of this loop already finalized this height
       // 3. Block was finalized in a previous call (caught at handleJEvent entry)
       console.log(`   🔍 CHECK-FINALIZE: jHeight=${jHeight}, jBlockChain.length=${state.jBlockChain.length}, heights=[${state.jBlockChain.map(b => b.jHeight).join(',')}]`);
-      console.log(`   🔍 Signers: ${Object.keys(group.signers).length}/${threshold}, ready=${agreementCount >= Number(threshold)}`);
       const alreadyInChain = state.jBlockChain.some(b => b.jHeight === jHeight);
       if (alreadyInChain) {
         console.log(`   ⏭️ SKIP-FINALIZE: block ${jHeight} already in jBlockChain`);
