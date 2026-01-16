@@ -54,47 +54,23 @@ export async function handleDisputeStart(
 
   // Build account proof
   const proofResult = buildAccountProofBody(account);
-  const disputeHash = createDisputeProofHash(account, proofResult.proofBodyHash);
 
-  // Extract counterparty's ECDSA signature from hanko
-  let counterpartySig = '0x';
-  if (account.counterpartyAccountProofHanko) {
-    try {
-      const { ethers } = await import('ethers');
-      // Decode hanko ABI structure
-      const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
-        ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
-        account.counterpartyAccountProofHanko
-      );
-      const packedSigs = decoded[0][1]; // packedSignatures field
-
-      // Unpack to get first EOA signature
-      const { unpackRealSignatures } = await import('../../hanko');
-      const sigs = unpackRealSignatures(Buffer.from(packedSigs.slice(2), 'hex'));
-      if (sigs.length > 0) {
-        counterpartySig = '0x' + sigs[0]!.toString('hex');
-        console.log(`   ✅ Extracted counterparty signature: ${counterpartySig.slice(0, 10)}...`);
-      } else {
-        addMessage(newState, `⚠️ No EOA signatures in counterparty hanko - using empty sig`);
-      }
-    } catch (error) {
-      console.warn(`⚠️ Failed to extract signature from hanko: ${error}`);
-      addMessage(newState, `⚠️ Failed to extract counterparty signature - dispute may fail`);
-    }
+  // Use stored counterparty dispute hanko (exchanged during bilateral consensus)
+  const counterpartyDisputeHanko = account.counterpartyDisputeProofHanko || '0x';
+  if (!account.counterpartyDisputeProofHanko) {
+    addMessage(newState, `⚠️ No counterparty dispute hanko - dispute may fail on-chain`);
+    console.warn(`⚠️ Account ${counterpartyEntityId.slice(-4)} missing counterpartyDisputeProofHanko`);
   } else {
-    console.warn(`⚠️ No counterpartyAccountProofHanko found - using empty signature`);
-    addMessage(newState, `⚠️ No counterparty signature available - dispute may fail on-chain`);
+    console.log(`✅ Using stored counterparty dispute hanko: ${counterpartyDisputeHanko.slice(0, 20)}...`);
   }
 
-  const initialProof = buildInitialDisputeProof(account, counterpartySig, '0x');
-
-  // Add to jBatch
+  // Add to jBatch (sig = hanko for entity signing)
   newState.jBatchState.batch.disputeStarts.push({
     counterentity: counterpartyEntityId,
     cooperativeNonce,
     disputeNonce,
     proofbodyHash: proofResult.proofBodyHash,
-    sig: counterpartySig,
+    sig: counterpartyDisputeHanko,  // Hanko (or 65-byte ECDSA for backwards compat)
     initialArguments: '0x',
   });
 

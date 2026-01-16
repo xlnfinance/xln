@@ -387,14 +387,27 @@ export async function proposeAccountFrame(
 
   // Build hanko for account frame
   const { signHashesAsSingleEntity } = await import('./hanko-signing');
+  // Sign frame hash for bilateral consensus
   const hankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [newFrame.stateHash]);
-  const hanko = hankos[0];
-  if (!hanko) {
-    return { success: false, error: 'Failed to build hanko', events, accountInput: null };
+  const frameHanko = hankos[0];
+  if (!frameHanko) {
+    return { success: false, error: 'Failed to build frame hanko', events, accountInput: null };
   }
+  accountMachine.currentFrameHanko = frameHanko;
 
-  // Store hanko as current account proof (for disputes)
-  accountMachine.currentAccountProofHanko = hanko;
+  // Build dispute proof and sign it (CRITICAL: always sign dispute proof with every frame)
+  const { buildAccountProofBody, createDisputeProofHash } = await import('./proof-builder');
+  const proofResult = buildAccountProofBody(accountMachine);
+  const disputeHash = createDisputeProofHash(accountMachine, proofResult.proofBodyHash);
+
+  const disputeHankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [disputeHash]);
+  const disputeHanko = disputeHankos[0];
+  if (!disputeHanko) {
+    return { success: false, error: 'Failed to build dispute hanko', events, accountInput: null };
+  }
+  accountMachine.currentDisputeProofHanko = disputeHanko;
+
+  console.log(`✅ Signed frame + dispute proof for account ${accountMachine.proofHeader.toEntity.slice(-4)}`);
 
   // Set pending state (no longer storing clone - re-execution on commit)
   accountMachine.pendingFrame = newFrame;
@@ -411,8 +424,9 @@ export async function proposeAccountFrame(
     toEntityId: accountMachine.proofHeader.toEntity,
     height: newFrame.height,
     newAccountFrame: newFrame,
-    newHanko: hanko,  // NEW: Hanko instead of single signature
-    newSignatures: [hanko], // LEGACY fallback (will be removed)
+    newHanko: frameHanko,         // Hanko on frame stateHash
+    newDisputeHanko: disputeHanko, // Hanko on dispute proof hash
+    newSignatures: [frameHanko], // LEGACY fallback (will be removed)
     counter: skipCounterIncrement ? accountMachine.proofHeader.cooperativeNonce : ++accountMachine.proofHeader.cooperativeNonce,
   };
 
@@ -758,8 +772,14 @@ export async function handleAccountInput(
 
     console.log(`✅ HANKO-VERIFIED: Frame from ${recoveredEntityId.slice(-4)}`);
 
-    // Store counterparty's hanko for dispute proof
-    accountMachine.counterpartyAccountProofHanko = hankoToVerify;
+    // Store counterparty's frame hanko
+    accountMachine.counterpartyFrameHanko = hankoToVerify;
+
+    // Store counterparty's dispute proof hanko (CRITICAL for disputes)
+    if (input.newDisputeHanko) {
+      accountMachine.counterpartyDisputeProofHanko = input.newDisputeHanko;
+      console.log(`✅ Stored counterparty dispute hanko (ready for enforcement)`);
+    }
 
     // Get entity's synced J-height for deterministic HTLC validation
     const ourEntityId = accountMachine.proofHeader.fromEntity;
