@@ -215,14 +215,22 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
   console.log('='.repeat(80) + '\n');
 }
 
-// Get offdelta for a bilateral account (uses LEFT entity's view - canonical)
+// Get offdelta for a bilateral account from canonical LEFT entity's perspective
+// Returns: positive = RIGHT owes LEFT, negative = LEFT owes RIGHT
 function getOffdelta(env: Env, entityA: string, entityB: string, tokenId: number): bigint {
-  // Use entityA's perspective: lookup account by counterparty (entityB)
-  const [, replicaA] = findReplica(env, entityA);
-  const account = replicaA?.state?.accounts?.get(entityB); // counterparty ID is key
-  const delta = account?.deltas?.get(tokenId);
+  // CANONICAL: always read from LEFT entity (lower ID)
+  const leftEntity = entityA < entityB ? entityA : entityB;
+  const rightEntity = entityA < entityB ? entityB : entityA;
 
-  return delta?.offdelta ?? 0n;
+  const [, leftReplica] = findReplica(env, leftEntity);
+  const account = leftReplica.state.accounts.get(rightEntity);
+  if (!account) return 0n;
+
+  const delta = account.deltas.get(tokenId);
+  if (!delta) return 0n;
+
+  // offdelta from LEFT's perspective (canonical)
+  return delta.offdelta;
 }
 
 // Verify bilateral account sync - CRITICAL for consensus correctness
@@ -1194,19 +1202,27 @@ export async function ahb(env: Env): Promise<void> {
     await process(env);
     logPending();
 
-    // Verify payment 1 landed with capacity assertions
+    // Verify payment 1 landed (canonical LEFT perspective)
     const ahDelta1 = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const hbDelta1 = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
 
-    // After payment 1: A-H and H-B should both be -$125K
-    const expectedShift1 = -payment1; // -$125K
-    if (ahDelta1 !== expectedShift1) {
-      throw new Error(`❌ ASSERTION FAILED: After payment 1, A-H offdelta=${ahDelta1}, expected ${expectedShift1}`);
+    // Calculate expected from canonical LEFT perspective
+    // Payment: Alice → Hub → Bob ($125K)
+    // A-H: Alice pays Hub → LEFT (Alice or Hub?) owes
+    const ahLeftIsAlice = alice.id < hub.id;
+    const expectedAH1 = ahLeftIsAlice ? -payment1 : payment1;  // If Alice=LEFT: negative (Alice owes)
+
+    // H-B: Hub pays Bob → LEFT (Hub or Bob?) owes
+    const hbLeftIsHub = hub.id < bob.id;
+    const expectedHB1 = hbLeftIsHub ? -payment1 : payment1;  // If Hub=LEFT: negative (Hub owes)
+
+    if (ahDelta1 !== expectedAH1) {
+      throw new Error(`❌ After payment 1, A-H offdelta=${ahDelta1}, expected ${expectedAH1}`);
     }
-    if (hbDelta1 !== expectedShift1) {
-      throw new Error(`❌ ASSERTION FAILED: After payment 1, H-B offdelta=${hbDelta1}, expected ${expectedShift1}`);
+    if (hbDelta1 !== expectedHB1) {
+      throw new Error(`❌ After payment 1, H-B offdelta=${hbDelta1}, expected ${expectedHB1}`);
     }
-    console.log(`   ✅ After payment 1: A-H=${ahDelta1}, H-B=${hbDelta1} (both -$125K as expected)`);
+    console.log(`   ✅ Payment 1: A-H=${ahDelta1}, H-B=${hbDelta1} (canonical LEFT perspective)`);
 
     snap(env, 'Payment 1/2 Complete', {
       description: 'Frame 13: Payment 1 complete',
@@ -1266,16 +1282,21 @@ export async function ahb(env: Env): Promise<void> {
     await process(env);
     logPending();
 
-    // Verify total shift = $250K
+    // Verify total shift = $250K (canonical LEFT perspective)
     const ahDeltaFinal = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const hbDeltaFinal = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
-    const expectedShift = -(payment1 + payment2); // -$250K
 
-    if (ahDeltaFinal !== expectedShift) {
-      throw new Error(`❌ ASSERTION FAILED: A-H shift=${ahDeltaFinal}, expected ${expectedShift}`);
+    // Calculate expected (same logic as payment 1)
+    const ahLeftIsAlice = alice.id < hub.id;
+    const hbLeftIsHub = hub.id < bob.id;
+    const expectedAH = ahLeftIsAlice ? -(payment1 + payment2) : (payment1 + payment2);
+    const expectedHB = hbLeftIsHub ? -(payment1 + payment2) : (payment1 + payment2);
+
+    if (ahDeltaFinal !== expectedAH) {
+      throw new Error(`❌ A-H shift=${ahDeltaFinal}, expected ${expectedAH}`);
     }
-    if (hbDeltaFinal !== expectedShift) {
-      throw new Error(`❌ ASSERTION FAILED: H-B shift=${hbDeltaFinal}, expected ${expectedShift}`);
+    if (hbDeltaFinal !== expectedHB) {
+      throw new Error(`❌ H-B shift=${hbDeltaFinal}, expected ${expectedHB}`);
     }
     console.log(`✅ Total shift verified: A-H=${ahDeltaFinal}, H-B=${hbDeltaFinal} (both -$250K as expected)`);
 
