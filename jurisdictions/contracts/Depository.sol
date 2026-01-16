@@ -469,7 +469,8 @@ contract Depository is ReentrancyGuardLite {
     }
 
     if (batch.disputeStarts.length > 0) {
-      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay)) {
+      address ep = entityProvidersList.length > 0 ? entityProvidersList[0] : address(0);
+      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay, ep)) {
         completeSuccess = false;
       }
     }
@@ -962,7 +963,9 @@ contract Depository is ReentrancyGuardLite {
     bytes32 caller = bytes32(uint256(uint160(msg.sender)));
     InitialDisputeProof[] memory starts = new InitialDisputeProof[](1);
     starts[0] = params;
-    return Account.processDisputeStarts(_accounts, caller, starts, defaultDisputeDelay);
+    // Use first approved EP for verification (multi-provider support later)
+    address ep = entityProvidersList.length > 0 ? entityProvidersList[0] : address(0);
+    return Account.processDisputeStarts(_accounts, caller, starts, defaultDisputeDelay, ep);
   }
 
   /// @notice Finalize dispute - stays in Depository due to storage complexity
@@ -975,12 +978,23 @@ contract Depository is ReentrancyGuardLite {
   function _disputeFinalizeInternal(bytes32 entityId, FinalDisputeProof memory params) internal returns (bool) {
     bytes memory ch_key = accountKey(entityId, params.counterentity);
 
+    // Get EntityProvider for hanko verification
+    address ep = entityProvidersList.length > 0 ? entityProvidersList[0] : address(0);
+
     if (params.cooperative) {
       // SECURITY: Prevent cooperative finalize on virgin accounts
       // This prevents social engineering attacks where victim signs over empty account
       // Accounts must have at least one prior settlement (cooperativeNonce > 0)
       if (_accounts[ch_key].cooperativeNonce == 0) revert E5();
-      if (!Account.verifyCooperativeProofSig(ch_key, _accounts[ch_key].cooperativeNonce, keccak256(abi.encode(params.finalProofbody)), keccak256(params.initialArguments), params.sig, params.counterentity)) revert E4();
+
+      // Hanko verification for cooperative finalization
+      if (params.sig.length == 65) {
+        // Backwards compat: ECDSA
+        if (!Account.verifyCooperativeProofSig(ch_key, _accounts[ch_key].cooperativeNonce, keccak256(abi.encode(params.finalProofbody)), keccak256(params.initialArguments), params.sig, params.counterentity)) revert E4();
+      } else {
+        // Full hanko
+        if (!Account.verifyCooperativeProofHanko(ep, ch_key, _accounts[ch_key].cooperativeNonce, keccak256(abi.encode(params.finalProofbody)), keccak256(params.initialArguments), params.sig, params.counterentity)) revert E4();
+      }
     } else {
       bytes32 storedHash = _accounts[ch_key].disputeHash;
       if (storedHash == bytes32(0)) revert E5();
@@ -991,10 +1005,19 @@ contract Depository is ReentrancyGuardLite {
       );
       if (storedHash != expectedHash) revert E9();
 
+      // Counter-dispute or unilateral finalization
       if (params.sig.length > 0) {
-        if (!Account.verifyFinalDisputeProofSig(ch_key, params.finalCooperativeNonce, params.initialDisputeNonce, params.finalDisputeNonce, params.sig, params.counterentity)) revert E4();
+        // Hanko verification for counter-dispute
+        if (params.sig.length == 65) {
+          // Backwards compat: ECDSA
+          if (!Account.verifyFinalDisputeProofSig(ch_key, params.finalCooperativeNonce, params.initialDisputeNonce, params.finalDisputeNonce, params.sig, params.counterentity)) revert E4();
+        } else {
+          // Full hanko
+          if (!Account.verifyFinalDisputeProofHanko(ep, ch_key, params.finalCooperativeNonce, params.initialDisputeNonce, params.finalDisputeNonce, params.sig, params.counterentity)) revert E4();
+        }
         if (params.initialDisputeNonce >= params.finalDisputeNonce) revert E2();
       } else {
+        // Unilateral finalization after timeout (no signature needed)
         bool senderIsCounterparty = params.startedByLeft != (entityId < params.counterentity);
         if (!senderIsCounterparty && block.number < _accounts[ch_key].disputeTimeout) revert E2();
         if (params.initialProofbodyHash != keccak256(abi.encode(params.finalProofbody))) revert E2();
