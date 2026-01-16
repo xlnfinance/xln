@@ -97,7 +97,7 @@ contract Depository is ReentrancyGuardLite {
   // Hub tracking removed for size reduction
 
   // Events related to disputes and cooperative closures
-  event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes initialArguments);
+  event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments);
   event CooperativeClose(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed cooperativeNonce);
 
   // ═══════════════════════════════════════════════════════════════════════════

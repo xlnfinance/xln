@@ -111,7 +111,7 @@ export class JEventWatcher {
     // Canonical j-events (update entity state)
     'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
     'event AccountSettled(tuple(bytes32 left, bytes32 right, uint256 tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)[])',
-    'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed disputeNonce, bytes initialArguments)',
+    'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments)',
     'event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex)',
   ];
 
@@ -389,6 +389,7 @@ export class JEventWatcher {
             sender: event.args.sender,
             counterentity: event.args.counterentity,
             disputeNonce: event.args.disputeNonce,
+            proofbodyHash: event.args.proofbodyHash,  // From on-chain
             initialArguments: event.args.initialArguments || '0x',
           },
         }];

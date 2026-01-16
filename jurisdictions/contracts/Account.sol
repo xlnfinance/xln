@@ -37,7 +37,7 @@ library Account {
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
 
   // ========== OTHER EVENTS ==========
-  event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes initialArguments);
+  event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments);
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
   event InsuranceRegistered(bytes32 indexed insured, bytes32 indexed insurer, uint256 indexed tokenId, uint256 limit, uint256 expiresAt);
@@ -350,8 +350,21 @@ library Account {
 
     if (_accounts[ch_key].cooperativeNonce > params.cooperativeNonce) revert E2();
 
-    // Verify counterparty signature (skip in testMode)
-    if (!testMode && params.sig.length > 0) {
+    // Verify counterparty signature
+    if (testMode) {
+      // testMode: signature optional (for demos without entity registration)
+      if (params.sig.length > 0) {
+        if (params.sig.length == 65) {
+          bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
+          bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+          if (ECDSA.recover(hash, params.sig) != address(uint160(uint256(params.counterentity)))) revert E4();
+        }
+        // Skip hanko verification in testMode (entities may not be registered)
+      }
+    } else {
+      // Production: signature REQUIRED
+      require(params.sig.length > 0, "Signature required in production");
+
       // Backwards compat: 65 bytes = ECDSA, otherwise full hanko
       if (params.sig.length == 65) {
         bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
@@ -374,7 +387,7 @@ library Account {
     );
     _accounts[ch_key].disputeTimeout = timeout;
 
-    emit DisputeStarted(entityId, params.counterentity, params.disputeNonce, params.initialArguments);
+    emit DisputeStarted(entityId, params.counterentity, params.disputeNonce, params.proofbodyHash, params.initialArguments);
     return true;
   }
 
