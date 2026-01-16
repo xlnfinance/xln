@@ -77,7 +77,7 @@ const getTokenDecimals = (tokenId: number): number => {
  * @param env - Runtime environment
  * @returns Updated state (may include finalized events if threshold met)
  */
-export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): { newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> } => {
+export const handleJEvent = async (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> }> => {
   const { from: signerId, observedAt, blockNumber, blockHash } = entityTxData;
   // j-watcher now sends batched events - use 'events' array, fallback to single 'event'
   const rawEvents = (entityTxData as any).events || [entityTxData.event];
@@ -129,7 +129,7 @@ export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntit
 
   // Try to finalize - with batching, single-signer entities finalize immediately
   // with ALL events from the block (no more race condition)
-  const { newState, mempoolOps } = tryFinalizeJBlocks(newEntityState, entityState.config.threshold, env);
+  const { newState, mempoolOps } = await tryFinalizeJBlocks(newEntityState, entityState.config.threshold, env);
   newEntityState = newState;
 
   // DEBUG: Dump account mempools after j-event processing
@@ -264,11 +264,11 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
  * @param env - Runtime environment for deterministic timestamps
  * @returns Updated state with finalized events applied
  */
-function tryFinalizeJBlocks(
+async function tryFinalizeJBlocks(
   state: EntityState,
   threshold: bigint,
   env: Env
-): { newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> } {
+): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> }> {
   const allMempoolOps: Array<{ accountId: string; tx: any }> = [];
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -345,7 +345,7 @@ function tryFinalizeJBlocks(
       // Step 5: Apply all events from this finalized block
       // ─────────────────────────────────────────────────────────────────────────
       for (const event of events) {
-        const { newState, mempoolOps } = applyFinalizedJEvent(state, event);
+        const { newState, mempoolOps } = await applyFinalizedJEvent(state, event);
         state = newState;
         allMempoolOps.push(...mempoolOps);
         // applyFinalizedJEvent clones state - ensure jBlockChain preserved
@@ -429,10 +429,10 @@ function mergeSignerObservations(observations: JBlockObservation[]): Jurisdictio
  * @param event - Finalized j-event to apply
  * @returns New state with event applied
  */
-function applyFinalizedJEvent(
+async function applyFinalizedJEvent(
   entityState: EntityState,
   event: JurisdictionEvent
-): { newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> } {
+): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> }> {
   const entityShort = entityState.entityId.slice(-4);
   const blockNumber = event.blockNumber ?? 0;
   const transactionHash = event.transactionHash || 'unknown';

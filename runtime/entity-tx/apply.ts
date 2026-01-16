@@ -210,7 +210,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         txHash: entityTx.data.transactionHash,
       });
 
-      const { newState, mempoolOps } = handleJEvent(entityState, entityTx.data, env);
+      const { newState, mempoolOps } = await handleJEvent(entityState, entityTx.data, env);
       return { newState, outputs: [], mempoolOps: mempoolOps || [] };
     }
 
