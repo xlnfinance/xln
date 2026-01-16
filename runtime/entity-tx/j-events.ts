@@ -310,6 +310,7 @@ async function tryFinalizeJBlocks(
       // 2. A previous iteration of this loop already finalized this height
       // 3. Block was finalized in a previous call (caught at handleJEvent entry)
       console.log(`   🔍 CHECK-FINALIZE: jHeight=${jHeight}, jBlockChain.length=${state.jBlockChain.length}, heights=[${state.jBlockChain.map(b => b.jHeight).join(',')}]`);
+      console.log(`   🔍 Signers: ${Object.keys(group.signers).length}/${threshold}, ready=${agreementCount >= Number(threshold)}`);
       const alreadyInChain = state.jBlockChain.some(b => b.jHeight === jHeight);
       if (alreadyInChain) {
         console.log(`   ⏭️ SKIP-FINALIZE: block ${jHeight} already in jBlockChain`);
@@ -344,7 +345,10 @@ async function tryFinalizeJBlocks(
       // ─────────────────────────────────────────────────────────────────────────
       // Step 5: Apply all events from this finalized block
       // ─────────────────────────────────────────────────────────────────────────
+      console.log(`   📦 Applying ${events.length} events from block ${jHeight}`);
+      console.log(`      Event types:`, events.map(e => e.type));
       for (const event of events) {
+        console.log(`      🔧 Applying event: ${event.type}`);
         const { newState, mempoolOps } = await applyFinalizedJEvent(state, event);
         state = newState;
         allMempoolOps.push(...mempoolOps);
@@ -433,6 +437,8 @@ async function applyFinalizedJEvent(
   entityState: EntityState,
   event: JurisdictionEvent
 ): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> }> {
+  console.log(`🔧🔧 applyFinalizedJEvent: entityId=${entityState.entityId.slice(-4)}, event.type=${event.type}`);
+
   const entityShort = entityState.entityId.slice(-4);
   const blockNumber = event.blockNumber ?? 0;
   const transactionHash = event.transactionHash || 'unknown';
@@ -600,30 +606,43 @@ async function applyFinalizedJEvent(
     addMessage(newState, `✅ DEBT PAID: ${paidDisplay} ${tokenSymbol} to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
 
   } else if (event.type === 'DisputeStarted') {
-    // Dispute started on-chain - store dispute state in account
-    const { sender, counterparty, disputeNonce } = event.data;
-    const senderStr = String(sender).toLowerCase();
-    const counterpartyStr = String(counterparty).toLowerCase();
+    console.log(`🔍 DISPUTE-EVENT HANDLER CALLED: entityId=${newState.entityId.slice(-4)}`);
+    console.log(`   Event data:`, event.data);
 
-    // Find which account this affects (we are either sender or counterparty)
-    const counterpartyId = senderStr === newState.entityId ? counterpartyStr : senderStr;
+    // Dispute started on-chain - query full state and store in account
+    const { sender, counterentity, disputeNonce } = event.data;
+    const senderStr = String(sender).toLowerCase();
+    const counterentityStr = String(counterentity).toLowerCase();
+
+    // Find which account this affects (we are either sender or counterentity)
+    const counterpartyId = senderStr === newState.entityId ? counterentityStr : senderStr;
     const account = newState.accounts.get(counterpartyId);
 
     if (account) {
+      // Query on-chain state for accurate dispute info
+      const browserVM = env.browserVM || (await import('../evm')).getBrowserVMInstance();
+      if (!browserVM) {
+        console.warn(`⚠️ DisputeStarted: No browserVM available to query disputeTimeout`);
+        addMessage(newState, `⚔️ DISPUTE STARTED with ${counterpartyId.slice(-4)} (no timeout info) | Block ${blockNumber}`);
+        return { newState, mempoolOps };
+      }
+
+      const accountInfo = await browserVM.getAccountInfo(newState.entityId, counterpartyId);
       const { buildAccountProofBody } = await import('../proof-builder');
       const proofResult = buildAccountProofBody(account);
 
-      // Store dispute state for later finalization
+      // Store dispute state from on-chain (source of truth)
       account.activeDispute = {
-        startedByLeft: senderStr < counterpartyStr,
+        startedByLeft: senderStr < counterentityStr,
         initialProofbodyHash: proofResult.proofBodyHash,
         initialDisputeNonce: Number(disputeNonce),
-        disputeTimeout: 0,  // TODO: Query from browserVM.getAccountInfo()
-        onChainCooperativeNonce: account.proofHeader.cooperativeNonce,
+        disputeTimeout: Number(accountInfo.disputeTimeout),  // From on-chain
+        onChainCooperativeNonce: Number(accountInfo.cooperativeNonce),  // From on-chain
       };
 
-      addMessage(newState, `⚔️ DISPUTE STARTED with ${counterpartyId.slice(-4)} | Block ${blockNumber}`);
-      console.log(`⚔️ Stored activeDispute for account ${counterpartyId.slice(-4)}`);
+      const weAreStarter = senderStr === newState.entityId;
+      addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout} | Block ${blockNumber}`);
+      console.log(`⚔️ Stored activeDispute for ${counterpartyId.slice(-4)}: timeout=${account.activeDispute.disputeTimeout}, nonce=${account.activeDispute.initialDisputeNonce}`);
     }
 
   } else {

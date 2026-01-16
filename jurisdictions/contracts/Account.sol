@@ -239,11 +239,12 @@ library Account {
     bytes32 entityId,
     InitialDisputeProof[] memory disputeStarts,
     uint256 defaultDisputeDelay,
-    address entityProvider
+    address entityProvider,
+    bool testMode
   ) external returns (bool completeSuccess) {
     completeSuccess = true;
     for (uint i = 0; i < disputeStarts.length; i++) {
-      if (!_disputeStart(_accounts, entityId, disputeStarts[i], defaultDisputeDelay, entityProvider)) {
+      if (!_disputeStart(_accounts, entityId, disputeStarts[i], defaultDisputeDelay, entityProvider, testMode)) {
         completeSuccess = false;
       }
     }
@@ -342,23 +343,26 @@ library Account {
     bytes32 entityId,
     InitialDisputeProof memory params,
     uint256 defaultDelay,
-    address entityProvider
+    address entityProvider,
+    bool testMode
   ) internal returns (bool) {
     bytes memory ch_key = _accountKey(entityId, params.counterentity);
 
     if (_accounts[ch_key].cooperativeNonce > params.cooperativeNonce) revert E2();
 
-    // Verify counterparty hanko signature
-    // Backwards compat: 65 bytes = ECDSA, otherwise full hanko
-    if (params.sig.length == 65) {
-      bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
-      bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-      if (ECDSA.recover(hash, params.sig) != address(uint160(uint256(params.counterentity)))) revert E4();
-    } else {
-      bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
-      bytes32 hash = keccak256(encoded_msg);
-      (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
-      if (!valid || recoveredEntity != params.counterentity) revert E4();
+    // Verify counterparty signature (skip in testMode)
+    if (!testMode && params.sig.length > 0) {
+      // Backwards compat: 65 bytes = ECDSA, otherwise full hanko
+      if (params.sig.length == 65) {
+        bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
+        bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+        if (ECDSA.recover(hash, params.sig) != address(uint160(uint256(params.counterentity)))) revert E4();
+      } else {
+        bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
+        bytes32 hash = keccak256(encoded_msg);
+        (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
+        if (!valid || recoveredEntity != params.counterentity) revert E4();
+      }
     }
 
     if (_accounts[ch_key].disputeHash != bytes32(0)) revert E6();

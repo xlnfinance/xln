@@ -473,7 +473,7 @@ contract Depository is ReentrancyGuardLite {
     }
 
     if (batch.disputeStarts.length > 0) {
-      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay, entityProvider)) {
+      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay, entityProvider, testMode)) {
         completeSuccess = false;
       }
     }
@@ -966,7 +966,7 @@ contract Depository is ReentrancyGuardLite {
     bytes32 caller = bytes32(uint256(uint160(msg.sender)));
     InitialDisputeProof[] memory starts = new InitialDisputeProof[](1);
     starts[0] = params;
-    return Account.processDisputeStarts(_accounts, caller, starts, defaultDisputeDelay, entityProvider);
+    return Account.processDisputeStarts(_accounts, caller, starts, defaultDisputeDelay, entityProvider, testMode);
   }
 
   /// @notice Finalize dispute - stays in Depository due to storage complexity
@@ -1005,13 +1005,19 @@ contract Depository is ReentrancyGuardLite {
 
       // Counter-dispute or unilateral finalization
       if (params.sig.length > 0) {
-        // Hanko verification for counter-dispute
+        // Counter-dispute: verify counterparty signed the NEWER dispute proof
+        // Uses SAME DisputeProof message type (not FinalDisputeProof)
+        // Signature is on: DisputeProof(ch_key, finalCooperativeNonce, finalDisputeNonce, finalProofbodyHash)
+        bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
+
         if (params.sig.length == 65) {
           // Backwards compat: ECDSA
-          if (!Account.verifyFinalDisputeProofSig(ch_key, params.finalCooperativeNonce, params.initialDisputeNonce, params.finalDisputeNonce, params.sig, params.counterentity)) revert E4();
+          bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.finalCooperativeNonce, params.finalDisputeNonce, finalProofbodyHash);
+          bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+          if (ECDSA.recover(hash, params.sig) != address(uint160(uint256(params.counterentity)))) revert E4();
         } else {
-          // Full hanko
-          if (!Account.verifyFinalDisputeProofHanko(entityProvider, ch_key, params.finalCooperativeNonce, params.initialDisputeNonce, params.finalDisputeNonce, params.sig, params.counterentity)) revert E4();
+          // Full hanko - verify DisputeProof hanko (not FinalDisputeProof)
+          if (!Account.verifyDisputeProofHanko(entityProvider, ch_key, params.finalCooperativeNonce, params.finalDisputeNonce, finalProofbodyHash, params.sig, params.counterentity)) revert E4();
         }
         if (params.initialDisputeNonce >= params.finalDisputeNonce) revert E2();
       } else {
