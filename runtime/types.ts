@@ -771,6 +771,15 @@ export interface AccountMachine {
   currentDisputeProofHanko?: HankoString;         // My hanko on dispute proof (for J-machine enforcement)
   counterpartyDisputeProofHanko?: HankoString;    // Their hanko on dispute proof (ready for disputes)
 
+  // Active dispute state (set after disputeStart, needed for disputeFinalize)
+  activeDispute?: {
+    startedByLeft: boolean;           // Who initiated dispute (from on-chain)
+    initialProofbodyHash: string;     // Hash committed in disputeStart
+    initialDisputeNonce: number;      // Dispute nonce from disputeStart
+    disputeTimeout: number;           // Block number when timeout expires
+    onChainCooperativeNonce: number;  // On-chain nonce at disputeStart time
+  };
+
   hankoSignature?: string; // LEGACY - will be removed
 
   // Historical frame log - grows until manually pruned by entity

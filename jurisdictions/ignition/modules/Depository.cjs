@@ -1,27 +1,30 @@
 const { buildModule } = require("@nomicfoundation/hardhat-ignition/modules");
 
 const DepositoryModule = buildModule("DepositoryModule", (m) => {
-  console.log("🔍 IGNITION: Starting Depository deployment...");
-  console.log("🔍 IGNITION: About to deploy Depository contract...");
+  console.log("🔍 IGNITION: Starting deployment...");
 
-  // Deploy Account library first
+  // 1. Deploy EntityProvider FIRST
+  const entityProvider = m.contract('EntityProvider');
+  console.log("🔍 IGNITION: EntityProvider deployed");
+
+  // 2. Deploy Account library
   const accountLibrary = m.library('Account');
 
-  const depository = m.contract('Depository', [], {
+  // 3. Deploy Depository with immutable EP address
+  const depository = m.contract('Depository', [entityProvider], {
     id: 'Depository',
     libraries: {
       Account: accountLibrary
     }
-  })
+  });
+  console.log("🔍 IGNITION: Depository deployed with immutable EP");
 
-  console.log("🔍 IGNITION: Depository contract deployed, address will be available after execution");
-  const entityProvider = m.contract('EntityProvider')
+  // 4. Deploy test tokens
+  const erc20Mock = m.contract('ERC20Mock', ["ERC20Mock", "ERC20", 1000000]);
+  const erc721Mock = m.contract('ERC721Mock', ["ERC721Mock", "ERC721"]);
+  const erc1155Mock = m.contract('ERC1155Mock');
 
-  const erc20Mock = m.contract('ERC20Mock', ["ERC20Mock", "ERC20", 1000000])
-  const erc721Mock = m.contract('ERC721Mock', ["ERC721Mock", "ERC721"])
-  const erc1155Mock = m.contract('ERC1155Mock')
-
-  // Approve EntityProvider in Depository
+  // Approve EntityProvider in Depository (legacy support)
   m.call(depository, "addEntityProvider", [entityProvider]);
 
   return { depository, entityProvider, erc20Mock, erc721Mock, erc1155Mock  };
