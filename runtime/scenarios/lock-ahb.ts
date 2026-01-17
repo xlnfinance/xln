@@ -306,8 +306,9 @@ export { ahb as lockAhb };
 
 export async function lockAhb(env: Env): Promise<void> {
   // Register test keys for real signatures
+  // s2-s5 for entities (s1 reserved for foundation)
   const { registerTestKeys, lockRuntimeSeedUpdates } = await import('../account-crypto');
-  await registerTestKeys(['s1', 's2', 's3', 'hub', 'alice', 'bob', 'carol', 'dave', 'frank']);
+  await registerTestKeys(['s1', 's2', 's3', 's4', 's5', 'hub', 'alice', 'bob', 'carol', 'dave', 'frank']);
   lockRuntimeSeedUpdates(true);
   const process = await getProcess();
   env.scenarioMode = true; // Deterministic time control
@@ -339,13 +340,22 @@ export async function lockAhb(env: Env): Promise<void> {
       console.log('[AHB] Calling browserVM.reset()...');
       await browserVM.reset();
       // Verify reset worked by checking Hub's reserves (should be 0)
-      // Hub entityId = 0x0002 (entity #2)
-      const HUB_ENTITY_ID = '0x' + '2'.padStart(64, '0');
+      // Hub entityId = 0x0003 (entity #3, since #1 is foundation)
+      const HUB_ENTITY_ID = '0x' + '3'.padStart(64, '0');
       const hubReservesAfterReset = await browserVM.getReserves(HUB_ENTITY_ID, USDC_TOKEN_ID);
       console.log(`[AHB] ✅ BrowserVM reset complete. Hub reserves after reset: ${hubReservesAfterReset}`);
       if (hubReservesAfterReset !== 0n) {
         throw new Error(`BrowserVM reset FAILED: Hub still has ${hubReservesAfterReset} reserves`);
       }
+    }
+
+    // Register entities with EntityProvider for Hanko signature verification
+    // This creates boards with each signer as sole validator
+    // s2, s3, s4 → entity numbers 2, 3, 4 (entity 1 is foundation)
+    if (browserVM.registerEntitiesWithSigners) {
+      console.log('[AHB] Registering entities with EntityProvider...');
+      const entityNumbers = await browserVM.registerEntitiesWithSigners(['s2', 's3', 's4']);
+      console.log(`[AHB] ✅ Registered entities: [${entityNumbers.join(', ')}]`);
     }
 
     const jurisdictions = await getAvailableJurisdictions();
@@ -425,11 +435,12 @@ export async function lockAhb(env: Env): Promise<void> {
 
     for (let i = 0; i < 3; i++) {
       const name = entityNames[i];
-      const signer = `s${i + 1}`;
+      const signer = `s${i + 2}`; // s2, s3, s4 (skip s1 for foundation)
       const position = AHB_POSITIONS[name];
 
       // SIMPLE FALLBACK ONLY (no blockchain calls in demos)
-      const entityNumber = i + 1;
+      // Entity numbers start at 2 (1 is foundation in EntityProvider)
+      const entityNumber = i + 2;
       const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
       entities.push({ id: entityId, signer, name });
 
@@ -524,7 +535,7 @@ export async function lockAhb(env: Env): Promise<void> {
     });
     await process(env, [{
       entityId: hub.id,
-      signerId: 's2',
+      signerId: 's3',
       entityTxs: [
         // R2R #1: Hub → Alice $3M
         {
@@ -566,7 +577,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     await process(env, [{
       entityId: hub.id,
-      signerId: 's2',
+      signerId: 's3',
       entityTxs: [{
         type: 'j_broadcast',
         data: {}
@@ -638,7 +649,7 @@ export async function lockAhb(env: Env): Promise<void> {
     // Alice sends R2R to Bob (demonstrates peer-to-peer, not just hub distribution)
     await process(env, [{
       entityId: alice.id,
-      signerId: 's1',
+      signerId: 's2',
       entityTxs: [{
         type: 'reserve_to_reserve',
         data: {
@@ -652,7 +663,7 @@ export async function lockAhb(env: Env): Promise<void> {
     // Broadcast
     await process(env, [{
       entityId: alice.id,
-      signerId: 's1',
+      signerId: 's2',
       entityTxs: [{
         type: 'j_broadcast',
         data: {}
@@ -816,7 +827,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     await process(env, [{
       entityId: alice.id,
-      signerId: 's1',
+      signerId: 's2',
       entityTxs: [{
         type: 'j_broadcast',
         data: {}
@@ -1299,7 +1310,7 @@ export async function lockAhb(env: Env): Promise<void> {
     // Hub creates BOTH settlements via createSettlement EntityTxs (proper E-layer flow)
     await process(env, [{
       entityId: hub.id,
-      signerId: 's2',
+      signerId: 's3',
       entityTxs: [
         // Settlement 1: Alice(LEFT) ↔ Hub(RIGHT) - Hub pulls $200K from Alice
         {
@@ -1351,7 +1362,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     await process(env, [{
       entityId: hub.id,
-      signerId: 's2',
+      signerId: 's3',
       entityTxs: [{
         type: 'j_broadcast',
         data: {}

@@ -18,6 +18,7 @@ import type { Address } from '@ethereumjs/util';
 import { createCustomCommon, Mainnet } from '@ethereumjs/common';
 import { ethers } from 'ethers';
 import { safeStringify } from './serialization-utils.js';
+import { deriveSignerKeySync, getSignerPrivateKey } from './account-crypto.js';
 
 const DEFAULT_TOKEN_DECIMALS = 18;
 const DEFAULT_TOKEN_SUPPLY = 1_000_000_000_000n * 10n ** 18n; // 1T tokens
@@ -555,7 +556,17 @@ export class BrowserVMProvider {
     const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
-      throw new Error(`executeTx failed: ${result.execResult.exceptionError}`);
+      const errObj = result.execResult.exceptionError;
+      const errStr = errObj?.error || JSON.stringify(errObj);
+      // Log any events that were emitted before revert (won't persist but shows debug info)
+      if (result.execResult.logs && result.execResult.logs.length > 0) {
+        console.log('[BrowserVM] Events before revert:', result.execResult.logs.length);
+        const events = this.parseLogs(result.execResult.logs);
+        for (const ev of events) {
+          console.log(`   Event: ${ev.type}`, ev.data);
+        }
+      }
+      throw new Error(`executeTx failed: ${errStr}`);
     }
 
     const txHash = bytesToHex(tx.hash());
@@ -656,7 +667,7 @@ export class BrowserVMProvider {
     return account?.nonce || 0n;
   }
 
-  /** Debug: Fund entity reserves (uses mintToReserve in testMode) - emits ReserveUpdated event */
+  /** Debug: Fund entity reserves (uses admin mintToReserve) - emits ReserveUpdated event */
   async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<EVMEvent[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
@@ -771,19 +782,19 @@ export class BrowserVMProvider {
    * R2C (Reserve to Collateral) - Move funds from reserve to bilateral account collateral
    * Emits AccountSettled event for j-watcher
    * Note: Solidity prefundAccount() was deleted - this is BrowserVM-only implementation
+   *
+   * @param entityId - Entity depositing collateral (must be created via createEntityId for ECDSA signing)
+   * @param counterpartyId - The counterparty entity (must sign the settlement)
    */
   async reserveToCollateralDirect(entityId: string, counterpartyId: string, tokenId: number, amount: bigint): Promise<EVMEvent[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
     // Use settle() with appropriate diffs to achieve R2C effect
-    // settleDiffs: { tokenId, leftDiff, rightDiff, collateralDiff, ondeltaDiff }
     const isLeft = BigInt(entityId) < BigInt(counterpartyId);
     const leftEntity = isLeft ? entityId : counterpartyId;
     const rightEntity = isLeft ? counterpartyId : entityId;
 
     // R2C: Reduce entity's reserve, increase collateral + ondelta
-    // If entity is LEFT: leftDiff = -amount, collateralDiff = +amount, ondeltaDiff = +amount
-    // If entity is RIGHT: rightDiff = -amount, collateralDiff = +amount, ondeltaDiff = -amount
     const diffs = [{
       tokenId,
       leftDiff: isLeft ? -BigInt(amount) : 0n,
@@ -792,13 +803,16 @@ export class BrowserVMProvider {
       ondeltaDiff: isLeft ? BigInt(amount) : -BigInt(amount),
     }];
 
+    // Generate counterparty signature (REQUIRED)
+    const sig = await this.signSettlement(entityId, counterpartyId, diffs, [], []);
+
     const callData = this.depositoryInterface.encodeFunctionData('settle', [
       leftEntity,
       rightEntity,
       diffs,
       [], // forgiveDebtsInTokenIds
       [], // insuranceRegs
-      '0x', // sig (testMode skips verification)
+      sig,
     ]);
 
     const currentNonce = await this.getCurrentNonce();
@@ -858,6 +872,257 @@ export class BrowserVMProvider {
     const decoded = this.depositoryInterface.decodeFunctionResult('_collaterals', returnData);
     return { collateral: BigInt(decoded[0]), ondelta: BigInt(decoded[1]) };
   }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // SIGNATURE GENERATION FOR HANKO-COMPATIBLE OPERATIONS
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /** MessageType enum values (must match Types.sol) */
+  private static readonly MessageType = {
+    CooperativeUpdate: 0,
+    DisputeProof: 1,
+    FinalDisputeProof: 2,
+    CooperativeDisputeProof: 3,
+  };
+
+  // Cache of entity wallets (entityId -> wallet)
+  private entityWallets: Map<string, ethers.Wallet> = new Map();
+
+  /**
+   * Create a deterministic entityId from a seed (name/number).
+   * Returns a padded wallet address that can be used for ECDSA signing.
+   *
+   * IMPORTANT: Use this for creating entities if you need ECDSA signatures.
+   * The returned entityId is address(wallet) padded to bytes32.
+   */
+  createEntityId(seed: string | number): string {
+    const seedStr = typeof seed === 'number' ? `entity_${seed}` : seed;
+    const privateKey = ethers.keccak256(ethers.toUtf8Bytes(seedStr));
+    const wallet = new ethers.Wallet(privateKey);
+
+    // Pad address to bytes32 (left-pad with zeros)
+    const entityId = '0x' + wallet.address.slice(2).toLowerCase().padStart(64, '0');
+
+    // Cache the wallet for later signing
+    this.entityWallets.set(entityId.toLowerCase(), wallet);
+
+    return entityId;
+  }
+
+  /**
+   * Get the wallet for an entity (for signing).
+   * First checks cache, then tries to derive from entityId.
+   */
+  getEntityWallet(entityId: string): ethers.Wallet {
+    const normalized = entityId.toLowerCase();
+
+    // Check cache first
+    const cached = this.entityWallets.get(normalized);
+    if (cached) return cached;
+
+    // Try to extract address from entityId and find matching wallet
+    // entityId format: 0x000...000<address>
+    const addressPart = '0x' + normalized.slice(-40);
+
+    // Check if we have a wallet for this address
+    for (const [id, wallet] of this.entityWallets) {
+      if (wallet.address.toLowerCase() === addressPart.toLowerCase()) {
+        this.entityWallets.set(normalized, wallet);
+        return wallet;
+      }
+    }
+
+    // Try to derive key using account-crypto (same derivation as scenarios)
+    // For numbered entities (0x000...XXXX), signerId = 'sXXXX'
+    const entityNum = parseInt(normalized.slice(-8), 16); // Last 8 hex chars = number
+    if (entityNum > 0 && entityNum < 10000) {
+      const signerId = `s${entityNum}`;
+      const privateKey = getSignerPrivateKey(signerId);
+      if (privateKey) {
+        const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
+        this.entityWallets.set(normalized, wallet);
+        console.log(`[BrowserVM] Derived wallet for entity ${entityNum} (signerId=${signerId})`);
+        return wallet;
+      }
+    }
+
+    // Last resort: derive from entityId itself (won't match address!)
+    console.warn(`[BrowserVM] No wallet found for entity ${entityId.slice(0, 20)}..., deriving from hash (ECDSA will fail!)`);
+    const privateKey = ethers.keccak256(entityId);
+    const wallet = new ethers.Wallet(privateKey);
+    this.entityWallets.set(normalized, wallet);
+    return wallet;
+  }
+
+  /**
+   * Register an existing wallet for an entityId.
+   * Use when entityId was created externally but you have the key.
+   */
+  registerEntityWallet(entityId: string, privateKey: string): void {
+    const wallet = new ethers.Wallet(privateKey);
+    this.entityWallets.set(entityId.toLowerCase(), wallet);
+  }
+
+  /**
+   * Get the channel key for two entities (canonical order: left < right)
+   */
+  private getChannelKey(leftEntity: string, rightEntity: string): string {
+    const left = BigInt(leftEntity) < BigInt(rightEntity) ? leftEntity : rightEntity;
+    const right = BigInt(leftEntity) < BigInt(rightEntity) ? rightEntity : leftEntity;
+    return ethers.solidityPacked(['bytes32', 'bytes32'], [left, right]);
+  }
+
+  /**
+   * Sign a settlement message (CooperativeUpdate).
+   * The COUNTERPARTY must sign, not the initiator.
+   *
+   * For numbered entities (0x000...XXXX), uses Hanko signature format.
+   * For address-based entities, uses 65-byte ECDSA signature.
+   */
+  async signSettlement(
+    initiatorEntityId: string,
+    counterpartyEntityId: string,
+    diffs: Array<{
+      tokenId: number;
+      leftDiff: bigint;
+      rightDiff: bigint;
+      collateralDiff: bigint;
+      ondeltaDiff: bigint;
+    }>,
+    forgiveDebtsInTokenIds: number[] = [],
+    insuranceRegs: Array<{
+      insured: string;
+      insurer: string;
+      tokenId: number;
+      limit: bigint;
+      expiresAt: bigint;
+    }> = []
+  ): Promise<string> {
+    // Get current cooperativeNonce from chain
+    const accountInfo = await this.getAccountInfo(initiatorEntityId, counterpartyEntityId);
+    const cooperativeNonce = accountInfo.cooperativeNonce;
+
+    // Determine canonical left/right order
+    const leftEntity = BigInt(initiatorEntityId) < BigInt(counterpartyEntityId) ? initiatorEntityId : counterpartyEntityId;
+    const rightEntity = BigInt(initiatorEntityId) < BigInt(counterpartyEntityId) ? counterpartyEntityId : initiatorEntityId;
+    const channelKey = this.getChannelKey(leftEntity, rightEntity);
+
+    // Encode the message (must match Account.sol encoding)
+    // IMPORTANT: Solidity enums are encoded as uint256, not uint8!
+    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+    const encodedMsg = abiCoder.encode(
+      ['uint256', 'bytes', 'uint256', 'tuple(uint256,int256,int256,int256,int256)[]', 'uint256[]', 'tuple(bytes32,bytes32,uint256,uint256,uint256)[]'],
+      [
+        BrowserVMProvider.MessageType.CooperativeUpdate,
+        channelKey,
+        cooperativeNonce,
+        diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]),
+        forgiveDebtsInTokenIds,
+        insuranceRegs.map(r => [r.insured, r.insurer, r.tokenId, r.limit, r.expiresAt]),
+      ]
+    );
+
+    const hash = ethers.keccak256(encodedMsg);
+    console.log(`[BrowserVM] signSettlement:`);
+    console.log(`  hash: ${hash}`);
+    console.log(`  channelKey: ${channelKey} (${(channelKey.length - 2) / 2} bytes)`);
+    console.log(`  cooperativeNonce: ${cooperativeNonce}`);
+    console.log(`  diffs: ${JSON.stringify(diffs.map(d => ({ tokenId: d.tokenId, leftDiff: d.leftDiff.toString(), rightDiff: d.rightDiff.toString(), collateralDiff: d.collateralDiff.toString(), ondeltaDiff: d.ondeltaDiff.toString() })))}`);
+    console.log(`  encodedMsg length: ${(encodedMsg.length - 2) / 2} bytes`);
+    console.log(`  encodedMsg first 200: ${encodedMsg.slice(0, 200)}`);
+    console.log(`  MessageType value: ${BrowserVMProvider.MessageType.CooperativeUpdate}`);
+
+    // Check if counterparty is a numbered entity (needs Hanko signature)
+    const normalized = counterpartyEntityId.toLowerCase();
+    const entityNum = parseInt(normalized.slice(-8), 16);
+    const isNumberedEntity = entityNum > 0 && entityNum < 10000 &&
+      normalized.startsWith('0x0000000000000000000000000000000000000000000000000000');
+
+    if (isNumberedEntity) {
+      // For numbered entities, build Hanko signature (validator signs, claim references signature)
+      const signerId = `s${entityNum}`;
+      const privateKey = getSignerPrivateKey(signerId);
+      if (!privateKey) {
+        throw new Error(`Cannot sign settlement: no private key for entity ${entityNum} (signerId=${signerId})`);
+      }
+
+      // Create ECDSA signature from validator's key (sign the raw hash, NOT ethSignedMessage)
+      const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
+      const hashBytes = ethers.getBytes(hash);
+      const signingKey = wallet.signingKey;
+      const signature = signingKey.sign(hashBytes);
+      // Pack signature in Hanko format: RS bytes + V bits
+      // For N signatures: first N*64 bytes are R+S, then ceil(N/8) bytes hold V bits
+      // V bit = 0 for v=27, 1 for v=28
+      const vBit = signature.v === 28 ? 1 : 0;
+      const packedSig = ethers.concat([signature.r, signature.s, ethers.toBeHex(vBit, 1)]);
+
+      // Verify signature recovery matches expected address
+      const recoveredAddress = ethers.recoverAddress(hashBytes, signature);
+
+      // Compute the bytes32 entityId that verification would use
+      // This should match what we registered
+      const expectedEntityIdInBoard = ethers.zeroPadValue(recoveredAddress, 32);
+      console.log(`[BrowserVM] Hanko: recovered=${recoveredAddress.slice(0, 12)}..., expectedBoardEntityId=${expectedEntityIdInBoard.slice(0, 24)}...`);
+
+      // Build Hanko: 1 signature, 1 claim referencing it
+      // Index 0 = the signature we just created
+      // Solidity abi.decode(data, (HankoBytes)) expects an outer tuple wrapper
+      const entityIdHex = counterpartyEntityId.startsWith('0x') ? counterpartyEntityId : '0x' + counterpartyEntityId;
+      const hankoEncoded = abiCoder.encode(
+        ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
+        [[
+          [], // placeholders (no failed entities)
+          packedSig, // packed signatures (just one 65-byte sig)
+          [
+            [
+              entityIdHex, // entityId
+              [0], // entityIndexes - references signature at index 0
+              [1], // weights
+              1, // threshold
+            ],
+          ],
+        ]]
+      );
+
+      console.log(`[BrowserVM] Built Hanko signature for entity ${entityNum} (signerId=${signerId}, signer=${wallet.address.slice(0, 10)}...)`);
+      return hankoEncoded;
+    }
+
+    // For address-based entities, use ECDSA (65 bytes)
+    const counterpartyWallet = this.getEntityWallet(counterpartyEntityId);
+    const signature = await counterpartyWallet.signMessage(ethers.getBytes(hash));
+    return signature;
+  }
+
+  /**
+   * Sign a dispute proof message.
+   * The COUNTERPARTY must sign to prove they agreed to this state.
+   */
+  async signDisputeProof(
+    entityId: string,
+    counterpartyEntityId: string,
+    cooperativeNonce: bigint,
+    disputeNonce: bigint,
+    proofbodyHash: string
+  ): Promise<string> {
+    const channelKey = this.getChannelKey(entityId, counterpartyEntityId);
+
+    // IMPORTANT: Solidity enums are encoded as uint256, not uint8!
+    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+    const encodedMsg = abiCoder.encode(
+      ['uint256', 'bytes', 'uint256', 'uint256', 'bytes32'],
+      [BrowserVMProvider.MessageType.DisputeProof, channelKey, cooperativeNonce, disputeNonce, proofbodyHash]
+    );
+
+    const hash = ethers.keccak256(encodedMsg);
+    const counterpartyWallet = this.getEntityWallet(counterpartyEntityId);
+    const signature = await counterpartyWallet.signMessage(ethers.getBytes(hash));
+
+    return signature;
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
 
   /** Get on-chain account info (cooperativeNonce, disputeHash, disputeTimeout) */
   async getAccountInfo(entityId: string, counterpartyId: string): Promise<{ cooperativeNonce: bigint; disputeHash: string; disputeTimeout: bigint }> {
@@ -1092,7 +1357,14 @@ export class BrowserVMProvider {
     }
   }
 
-  /** Execute settle with insurance registration */
+  /**
+   * Execute settle with insurance registration.
+   * Signature is auto-generated if not provided (requires entities created via createEntityId).
+   *
+   * @param leftEntity - The left entity (smaller entityId)
+   * @param rightEntity - The right entity (larger entityId)
+   * @param sig - Optional signature. If not provided or '0x', auto-generates from counterparty wallet.
+   */
   async settleWithInsurance(
     leftEntity: string,
     rightEntity: string,
@@ -1111,11 +1383,25 @@ export class BrowserVMProvider {
       limit: bigint;
       expiresAt: bigint;
     }> = [],
-    sig: string = '0x'
+    sig?: string
   ): Promise<{ success: boolean; logs: any[] }> {
     if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
+
+    // Auto-generate signature if not provided and there are changes
+    let finalSig = sig || '0x';
+    console.log(`[BrowserVM] settleWithInsurance: input sig length=${sig?.length || 0}, diffs=${diffs.length}`);
+    if ((!sig || sig === '0x') && (diffs.length > 0 || forgiveDebtsInTokenIds.length > 0 || insuranceRegs.length > 0)) {
+      // leftEntity is the initiator, rightEntity is the counterparty (must sign)
+      finalSig = await this.signSettlement(leftEntity, rightEntity, diffs, forgiveDebtsInTokenIds, insuranceRegs);
+    }
+
+    console.log(`[BrowserVM] settle call params:`);
+    console.log(`  leftEntity: ${leftEntity}`);
+    console.log(`  rightEntity: ${rightEntity}`);
+    console.log(`  diffs: ${JSON.stringify(diffs.map(d => ({ tokenId: d.tokenId, leftDiff: d.leftDiff.toString(), rightDiff: d.rightDiff.toString(), collateralDiff: d.collateralDiff.toString(), ondeltaDiff: d.ondeltaDiff.toString() })))}`);
+    console.log(`  finalSig length: ${finalSig.length}`);
 
     const callData = this.depositoryInterface.encodeFunctionData('settle', [
       leftEntity,
@@ -1123,13 +1409,37 @@ export class BrowserVMProvider {
       diffs,
       forgiveDebtsInTokenIds,
       insuranceRegs,
-      sig,
+      finalSig,
     ]);
+    console.log(`[BrowserVM] settle calldata length: ${(callData.length - 2) / 2} bytes`);
+    console.log(`[BrowserVM] settle calldata selector: ${callData.slice(0, 10)}`);
 
+    // Debug: verify calldata can be decoded back
+    try {
+      const decoded = this.depositoryInterface.decodeFunctionData('settle', callData);
+      console.log(`[BrowserVM] Calldata decode check: decoded ${decoded.length} params`);
+      console.log(`  [0] leftEntity: ${decoded[0]}`);
+      console.log(`  [1] rightEntity: ${decoded[1]}`);
+      console.log(`  [2] diffs count: ${decoded[2].length}`);
+      console.log(`  [5] sig length: ${decoded[5].length} bytes`);
+      if (decoded[2].length > 0) {
+        const d = decoded[2][0];
+        console.log(`  [2][0] diff: tokenId=${d[0]}, leftDiff=${d[1]}, rightDiff=${d[2]}, collateralDiff=${d[3]}, ondeltaDiff=${d[4]}`);
+      }
+      // Debug: Dump first 200 bytes of sig
+      const sigHex = decoded[5] as string;
+      console.log(`  [5] sig first 200 chars: ${sigHex.slice(0, 200)}`);
+    } catch (e: any) {
+      console.error(`[BrowserVM] Calldata decode ERROR: ${e.message}`);
+    }
+
+    // Try with different gas limits to isolate the gas hog
+    const gasLimit = finalSig.length > 100 ? 30000000n : 2000000n;  // More gas for Hanko
+    console.log(`[BrowserVM] Using gas limit: ${gasLimit}`);
     const currentNonce = await this.getCurrentNonce();
     const tx = createLegacyTx({
       to: this.depositoryAddress,
-      gasLimit: 2000000n,
+      gasLimit,
       gasPrice: 10n,
       data: hexToBytes(callData as `0x${string}`),
       nonce: currentNonce,
@@ -1139,6 +1449,52 @@ export class BrowserVMProvider {
 
     if (result.execResult.exceptionError) {
       console.error('[BrowserVM] settle failed:', result.execResult.exceptionError);
+      console.error('[BrowserVM] returnValue length:', result.execResult.returnValue?.length || 0);
+      console.error('[BrowserVM] gasUsed:', result.execResult.executionGasUsed?.toString());
+      console.error('[BrowserVM] exceptionError type:', typeof result.execResult.exceptionError);
+      if (result.execResult.exceptionError.error) {
+        console.error('[BrowserVM] exceptionError.error:', result.execResult.exceptionError.error);
+      }
+
+      // Log any events that were emitted before revert (helps debugging)
+      const logsBeforeRevert = result.execResult.logs || [];
+      if (logsBeforeRevert.length > 0) {
+        console.log('[BrowserVM] Events before revert:', logsBeforeRevert.length);
+        const events = this.parseLogs(logsBeforeRevert);
+        for (const ev of events) {
+          console.log(`   Event: ${ev.type}`, JSON.stringify(ev.data, (k, v) => typeof v === 'bigint' ? v.toString() : v));
+        }
+      } else {
+        console.log('[BrowserVM] No events emitted before revert');
+      }
+
+      // Try to decode revert reason
+      if (result.execResult.returnValue && result.execResult.returnValue.length > 0) {
+        const returnData = bytesToHex(result.execResult.returnValue);
+        console.error('[BrowserVM] Revert data:', returnData);
+
+        // Try to decode as Error(string) or custom error
+        try {
+          if (returnData.startsWith('0x08c379a0')) {
+            // Error(string) selector
+            const errorMsg = ethers.AbiCoder.defaultAbiCoder().decode(['string'], '0x' + returnData.slice(10))[0];
+            console.error('[BrowserVM] Revert reason:', errorMsg);
+          } else if (returnData.startsWith('0x')) {
+            // Could be custom error
+            const selectors: Record<string, string> = {
+              '0xb2f59f24': 'E1 - Invalid operation',
+              '0xf7d3f792': 'E2 - Nonce mismatch',
+              '0x735e8e8e': 'E3 - Overflow',
+              '0xa3f72b95': 'E4 - Invalid signature',
+            };
+            const errorSel = returnData.slice(0, 10);
+            if (selectors[errorSel]) {
+              console.error('[BrowserVM] Custom error:', selectors[errorSel]);
+            }
+          }
+        } catch { /* ignore decode errors */ }
+      }
+
       return { success: false, logs: [] };
     }
 
@@ -1509,6 +1865,68 @@ export class BrowserVMProvider {
     const entityNumbers = (decoded[0] as bigint[]).map((n: bigint) => Number(n));
 
     console.log(`[BrowserVM] registerNumberedEntitiesBatch: ${boardHashes.length} entities → [${entityNumbers.join(',')}]`);
+    return entityNumbers;
+  }
+
+  /**
+   * Register numbered entities with their validator signerIds.
+   * Creates boards with signer addresses as sole validators.
+   * @param signerIds Array of signerIds (e.g., ['s1', 's2', 's3'])
+   * @returns Array of assigned entity numbers
+   */
+  async registerEntitiesWithSigners(signerIds: string[]): Promise<number[]> {
+    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+    const boardHashes: string[] = [];
+
+    for (const signerId of signerIds) {
+      const privateKey = getSignerPrivateKey(signerId);
+      if (!privateKey) {
+        throw new Error(`No private key for signerId ${signerId} - call registerTestKeys first`);
+      }
+
+      // Get validator address from private key
+      const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
+      const validatorAddress = wallet.address;
+      // Match Solidity: bytes32(uint256(uint160(address))) - zero-pad address to 32 bytes
+      const validatorEntityId = ethers.zeroPadValue(validatorAddress, 32);
+
+      // Create board with single validator
+      // Board struct: { votingThreshold, entityIds[], votingPowers[], boardChangeDelay, controlChangeDelay, dividendChangeDelay }
+      // NOTE: Must match Solidity's abi.encode(Board) exactly
+      // Solidity memory layout: https://docs.soliditylang.org/en/latest/abi-spec.html
+      const encodedBoard = abiCoder.encode(
+        ['tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)'],
+        [[
+          1n, // votingThreshold (uint16)
+          [validatorEntityId], // entityIds (bytes32[])
+          [1n], // votingPowers (uint16[])
+          0n, // boardChangeDelay (uint32)
+          0n, // controlChangeDelay (uint32)
+          0n, // dividendChangeDelay (uint32)
+        ]]
+      );
+
+      const boardHash = ethers.keccak256(encodedBoard);
+      boardHashes.push(boardHash);
+
+      console.log(`[BrowserVM] Entity ${signerId}: validator=${validatorAddress}, entityId=${validatorEntityId.slice(0, 20)}...`);
+      console.log(`[BrowserVM]   boardHash=${boardHash}`);
+    }
+
+    // Register all entities in batch
+    const entityNumbers = await this.registerNumberedEntitiesBatch(boardHashes);
+
+    // Verify registration by checking stored boardHashes
+    for (let i = 0; i < entityNumbers.length; i++) {
+      const entityNum = entityNumbers[i];
+      const entityId = '0x' + entityNum.toString(16).padStart(64, '0');
+      const info = await this.getEntityInfo(entityId);
+      console.log(`[BrowserVM]   Verified entity ${entityNum}: stored boardHash=${info.currentBoardHash?.slice(0, 18)}...`);
+      if (info.currentBoardHash !== boardHashes[i]) {
+        console.error(`[BrowserVM] ⚠️ Hash mismatch! Expected ${boardHashes[i]}, got ${info.currentBoardHash}`);
+      }
+    }
+
     return entityNumbers;
   }
 

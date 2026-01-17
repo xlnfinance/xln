@@ -82,7 +82,7 @@ interface IEntityProvider {
    * @return entityId Recovered entity ID
    * @return success Whether verification succeeded
    */
-  function verifyHankoSignature(bytes calldata hankoData, bytes32 hash) external view returns (bytes32, bool);
+  function verifyHankoSignature(bytes calldata hankoData, bytes32 hash) external returns (bytes32, bool);
 
   /**
    * @notice Recover entity from encoded board and signature

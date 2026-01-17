@@ -67,7 +67,7 @@ export interface JBatch {
       limit: bigint;
       expiresAt: bigint;
     }>;
-    sig: string; // Signature (0x for testMode)
+    sig: string; // ECDSA or Hanko signature (REQUIRED when there are changes)
     entityProvider: string; // EntityProvider address
     hankoData: string; // Hanko signature data
     nonce: number; // Settlement nonce
@@ -232,9 +232,9 @@ export function batchAddSettlement(
   forgiveDebtsInTokenIds: number[] = [],
   insuranceRegs: InsuranceReg[] = [],
   sig: string = '0x',
-  entityProvider: string = '0x0000000000000000000000000000000000000000', // Default for testMode
-  hankoData: string = '0x', // Default for testMode
-  nonce: number = 0 // Default for testMode
+  entityProvider: string = '0x0000000000000000000000000000000000000000',
+  hankoData: string = '0x',
+  nonce: number = 0
 ): void {
   // Validate entities are in canonical order
   if (leftEntity >= rightEntity) {
@@ -275,9 +275,9 @@ export function batchAddSettlement(
       forgiveDebtsInTokenIds,
       insuranceRegs,
       sig,
-      entityProvider, // testMode default
-      hankoData, // testMode default
-      nonce, // testMode default
+      entityProvider,
+      hankoData,
+      nonce,
     });
   }
 
@@ -371,6 +371,26 @@ export interface BrowserVMBatchProcessor {
     settlements?: Array<{leftEntity: string, rightEntity: string, diffs: any[]}>,
   }): Promise<any[]>;
   setBlockTimestamp?: (timestamp: number) => void;
+  signSettlement?: (
+    initiatorEntityId: string,
+    counterpartyEntityId: string,
+    diffs: Array<{
+      tokenId: number;
+      leftDiff: bigint;
+      rightDiff: bigint;
+      collateralDiff: bigint;
+      ondeltaDiff: bigint;
+    }>,
+    forgiveDebtsInTokenIds?: number[],
+    insuranceRegs?: Array<{
+      insured: string;
+      insurer: string;
+      tokenId: number;
+      limit: bigint;
+      expiresAt: bigint;
+    }>
+  ) => Promise<string>;
+  getEntityProviderAddress?: () => string;
 }
 
 /**
@@ -397,6 +417,35 @@ export async function broadcastBatch(
     // BrowserVM path - direct in-browser execution
     if (browserVM) {
       browserVM.setBlockTimestamp?.(timestamp);
+
+      // Auto-sign settlements that need signatures (cooperative proof)
+      if (browserVM.signSettlement) {
+        // Get EntityProvider address for Hanko verification
+        const entityProviderAddress = (browserVM as any).getEntityProviderAddress?.() || '0x0000000000000000000000000000000000000000';
+
+        for (const settlement of jBatchState.batch.settlements) {
+          const hasChanges = settlement.diffs.length > 0 ||
+            settlement.forgiveDebtsInTokenIds.length > 0 ||
+            settlement.insuranceRegs.length > 0;
+
+          if (hasChanges && (!settlement.sig || settlement.sig === '0x')) {
+            console.log(`🔏 Auto-signing settlement ${settlement.leftEntity.slice(-4)}↔${settlement.rightEntity.slice(-4)}`);
+            // leftEntity is initiator, rightEntity is counterparty (must sign)
+            settlement.sig = await browserVM.signSettlement(
+              settlement.leftEntity,
+              settlement.rightEntity,
+              settlement.diffs,
+              settlement.forgiveDebtsInTokenIds,
+              settlement.insuranceRegs
+            );
+
+            // If signature is not 65 bytes (ECDSA), it's a Hanko - set entityProvider
+            if (settlement.sig.length !== 132) { // 0x + 130 hex chars = 65 bytes
+              settlement.entityProvider = entityProviderAddress;
+            }
+          }
+        }
+      }
 
       // Pass batch directly to contract (no transformation - Solidity handles everything)
       console.log(`📦 Calling Depository.processBatch() with full batch (${getBatchSize(jBatchState.batch)} ops)...`);

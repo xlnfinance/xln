@@ -65,7 +65,17 @@ export class BrowserEVM implements JurisdictionEVM {
   onAny(callback: (event: any) => void): () => void { return this.provider.onAny(callback); }
   getBlockHash(): string { return this.provider.getBlockHash(); }
   async registerNumberedEntitiesBatch(boardHashes: string[]): Promise<number[]> { return this.provider.registerNumberedEntitiesBatch(boardHashes); }
+  async registerEntitiesWithSigners(signerIds: string[]): Promise<number[]> { return this.provider.registerEntitiesWithSigners(signerIds); }
   async getEntityInfo(entityId: string) { return this.provider.getEntityInfo(entityId); }
+  async signSettlement(
+    initiatorEntityId: string,
+    counterpartyEntityId: string,
+    diffs: Array<{ tokenId: number; leftDiff: bigint; rightDiff: bigint; collateralDiff: bigint; ondeltaDiff: bigint; }>,
+    forgiveDebtsInTokenIds: number[] = [],
+    insuranceRegs: Array<{ insured: string; insurer: string; tokenId: number; limit: bigint; expiresAt: bigint; }> = []
+  ): Promise<string> {
+    return this.provider.signSettlement(initiatorEntityId, counterpartyEntityId, diffs, forgiveDebtsInTokenIds, insuranceRegs);
+  }
 
   // JurisdictionEVM interface
   async deployContract(bytecode: string, args?: any[]): Promise<string> { throw new Error('Not implemented'); }
