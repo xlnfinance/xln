@@ -530,7 +530,7 @@ export async function ahb(env: Env): Promise<void> {
 
     console.log(`\n  ✅ Created: ${alice.name}, ${hub.name}, ${bob.name}`);
 
-    console.log('\n📋 Skipping EntityProvider registration (address-based entities, testMode)');
+    console.log('\n📋 Skipping EntityProvider registration (address-based entities)');
 
     // ============================================================================
     // Set up j-watcher subscription to BrowserVM for proper R→E→A event flow
@@ -1286,9 +1286,7 @@ export async function ahb(env: Env): Promise<void> {
     const ahDeltaFinal = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const hbDeltaFinal = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
 
-    // Calculate expected (same logic as payment 1)
-    const ahLeftIsAlice = alice.id < hub.id;
-    const hbLeftIsHub = hub.id < bob.id;
+    // Calculate expected (same logic as payment 1, reusing ahLeftIsAlice/hbLeftIsHub from above)
     const expectedAH = ahLeftIsAlice ? -(payment1 + payment2) : (payment1 + payment2);
     const expectedHB = hbLeftIsHub ? -(payment1 + payment2) : (payment1 + payment2);
 
@@ -1405,19 +1403,19 @@ export async function ahb(env: Env): Promise<void> {
     const ahDeltaRev = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const bhDeltaRev = getOffdelta(env, bob.id, hub.id, USDC_TOKEN_ID);
 
-    // After $250K A→B and $50K B→A:
-    // A-H: -$250K + $50K = -$200K (Alice's debt reduced)
-    // B-H: -$250K + $50K = -$200K (Hub's debt to Bob reduced)
-    const expectedAH = -(payment1 + payment2) + reversePayment; // -$200K
-    const expectedBH = -(payment1 + payment2) + reversePayment; // -$200K
+    // After $250K A→B and $50K B→A (net $200K A→B):
+    // Same sign convention as forward payments: negative = LEFT owes RIGHT
+    const netAHPayment = payment1 + payment2 - reversePayment; // $200K net A→B
+    const expectedAHRev = ahLeftIsAlice ? -netAHPayment : netAHPayment;  // Alice (LEFT) owes Hub
+    const expectedBHRev = hbLeftIsHub ? -netAHPayment : netAHPayment;    // Hub (LEFT) owes Bob
 
-    if (ahDeltaRev !== expectedAH) {
-      throw new Error(`❌ REVERSE PAYMENT FAIL: A-H offdelta=${ahDeltaRev}, expected ${expectedAH}`);
+    if (ahDeltaRev !== expectedAHRev) {
+      throw new Error(`❌ REVERSE PAYMENT FAIL: A-H offdelta=${ahDeltaRev}, expected ${expectedAHRev}`);
     }
-    if (bhDeltaRev !== expectedBH) {
-      throw new Error(`❌ REVERSE PAYMENT FAIL: B-H offdelta=${bhDeltaRev}, expected ${expectedBH}`);
+    if (bhDeltaRev !== expectedBHRev) {
+      throw new Error(`❌ REVERSE PAYMENT FAIL: B-H offdelta=${bhDeltaRev}, expected ${expectedBHRev}`);
     }
-    console.log(`✅ Reverse payment B→H→A verified: A-H=${ahDeltaRev}, B-H=${bhDeltaRev} (both -$200K)`);
+    console.log(`✅ Reverse payment verified: A-H=${ahDeltaRev}, B-H=${bhDeltaRev} (net $200K from A→B)`);
 
     snap(env, 'Reverse Payment: $50K B→A', {
       description: 'Frame 21: Reverse payment complete',

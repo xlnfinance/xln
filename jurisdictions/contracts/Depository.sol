@@ -69,10 +69,6 @@ contract Depository is ReentrancyGuardLite {
   address public immutable admin;
   bool public emergencyPause;
 
-  // === TEST MODE FOR HANKO BYPASS ===
-  // WARNING: Must call disableTestModeForever() before mainnet deployment
-  bool public testMode = true;
-
   // Insurance cursor - tracks iteration position per insured entity
   mapping(bytes32 => uint256) public insuranceCursor;
 
@@ -80,7 +76,6 @@ contract Depository is ReentrancyGuardLite {
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
   event EmergencyPauseToggled(bool isPaused);
-  event TestModeDisabled();
 
   modifier onlyAdmin() {
     if (msg.sender != admin) revert E2();
@@ -125,6 +120,9 @@ contract Depository is ReentrancyGuardLite {
    * @param newBalance The absolute new balance of the token for the entity.
    */
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
+
+  // Debug events (remove in production)
+  event DebugSettleStart(bytes32 leftEntity, bytes32 rightEntity, uint256 sigLen, address entityProvider);
 
   //event ChannelUpdated(address indexed receiver, address indexed addr, uint tokenId);
 
@@ -203,16 +201,6 @@ contract Depository is ReentrancyGuardLite {
     }
     emergencyPause = isPaused;
     emit EmergencyPauseToggled(isPaused);
-  }
-
-  /**
-   * @notice Permanently disable test mode (one-way door)
-   * @dev MUST be called before mainnet deployment to enable Hanko verification
-   */
-  function disableTestModeForever() external onlyAdmin {
-    if (!testMode) revert E2();
-    testMode = false;
-    emit TestModeDisabled();
   }
 
   /// @notice Set dispute delay for an entity (0 = use default)
@@ -295,68 +283,50 @@ contract Depository is ReentrancyGuardLite {
   }
 
 
-  // TODO: make private - currently public for testing convenience
+  /// @notice Direct batch processing - entity or admin can call
+  /// @dev For multi-sig/Hanko auth, use processBatchWithHanko() instead
+  /// @dev Settlements still require counterparty signatures (cooperative proof)
   function processBatch(bytes32 entity, Batch calldata batch) public whenNotPaused nonReentrant returns (bool completeSuccess) {
-    // In production mode, require Hanko authorization via processBatchWithHanko()
-    if (!testMode) revert E2();
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-    if (batch.reserveToReserve.length > 0) {
-      
-      
-      
-      
-      
-      
-      
-
-      
-      
-    }
-
-    
+    // Entity itself OR admin can call (admin for J-machine execution)
+    require(
+      msg.sender == address(uint160(uint256(entity))) || msg.sender == admin,
+      "E2: caller must be entity or admin"
+    );
     return _processBatch(entity, batch);
   }
 
 
   // ========== DIRECT R2R FUNCTION ==========
-  // Simple reserve-to-reserve transfer (simpler than batch)
-  // TODO: make private - currently public for testing convenience
+  /// @notice Simple reserve-to-reserve transfer - fromEntity or admin can call
+  /// @dev For multi-sig/Hanko auth, use processBatchWithHanko() instead
   function reserveToReserve(
     bytes32 fromEntity,
     bytes32 toEntity,
     uint tokenId,
     uint amount
   ) public whenNotPaused nonReentrant returns (bool) {
-    if (!testMode) revert E2(); // Production: use processBatchWithHanko
+    // fromEntity itself OR admin can call
+    require(
+      msg.sender == address(uint160(uint256(fromEntity))) || msg.sender == admin,
+      "E2: caller must be fromEntity or admin"
+    );
     if (fromEntity == toEntity) revert E2();
     if (amount == 0) revert E1();
     enforceDebts(fromEntity, tokenId);
     if (_reserves[fromEntity][tokenId] < amount) revert E3();
 
-    // Simple transfer: subtract from sender, add to receiver
     _reserves[fromEntity][tokenId] -= amount;
     _reserves[toEntity][tokenId] += amount;
 
-    // Single canonical event per entity whose reserve changed
     emit ReserveUpdated(fromEntity, tokenId, _reserves[fromEntity][tokenId]);
     emit ReserveUpdated(toEntity, tokenId, _reserves[toEntity][tokenId]);
 
-    
     return true;
   }
 
   // ========== SETTLE FUNCTION ==========
-  /// @notice External settle - only works in testMode (uses Account library)
+  /// @notice External settle with signature verification
+  /// @dev Counterparty signature REQUIRED when there are changes
   function settle(
     bytes32 leftEntity,
     bytes32 rightEntity,
@@ -365,8 +335,8 @@ contract Depository is ReentrancyGuardLite {
     InsuranceRegistration[] memory insuranceRegs,
     bytes memory sig
   ) public whenNotPaused nonReentrant returns (bool) {
-    if (!testMode) revert E2();
-    // testMode: skip all auth - assume caller authorized
+    emit DebugSettleStart(leftEntity, rightEntity, sig.length, entityProvider);
+    // Caller is assumed to be leftEntity for signature verification
     bytes32 caller = leftEntity;
 
     Settlement[] memory settlements = new Settlement[](1);
@@ -377,7 +347,7 @@ contract Depository is ReentrancyGuardLite {
       forgiveDebtsInTokenIds: forgiveDebtsInTokenIds,
       insuranceRegs: insuranceRegs,
       sig: sig,
-      entityProvider: address(0),
+      entityProvider: entityProvider,  // Use Depository's entityProvider for Hanko verification
       hankoData: "",
       nonce: 0
     });
@@ -473,7 +443,7 @@ contract Depository is ReentrancyGuardLite {
     }
 
     if (batch.disputeStarts.length > 0) {
-      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay, entityProvider, testMode)) {
+      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay, entityProvider)) {
         completeSuccess = false;
       }
     }
@@ -826,6 +796,21 @@ contract Depository is ReentrancyGuardLite {
     return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);
   }
 
+  // DEBUG: Compute settlement hash for comparison with TypeScript
+  function computeSettlementHash(
+    bytes32 leftEntity,
+    bytes32 rightEntity,
+    SettlementDiff[] memory diffs,
+    uint[] memory forgiveDebtsInTokenIds,
+    InsuranceRegistration[] memory insuranceRegs
+  ) public view returns (bytes32 hash, uint256 nonce, uint256 encodedMsgLength) {
+    bytes memory ch_key = accountKey(leftEntity, rightEntity);
+    nonce = _accounts[ch_key].cooperativeNonce;
+    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, ch_key, nonce, diffs, forgiveDebtsInTokenIds, insuranceRegs);
+    hash = keccak256(encoded_msg);
+    encodedMsgLength = encoded_msg.length;
+  }
+
   function reserveToCollateral(bytes32 entity, ReserveToCollateral memory params) internal returns (bool completeSuccess) {
     uint tokenId = params.tokenId;
     bytes32 receivingEntity = params.receivingEntity;
@@ -966,7 +951,7 @@ contract Depository is ReentrancyGuardLite {
     bytes32 caller = bytes32(uint256(uint160(msg.sender)));
     InitialDisputeProof[] memory starts = new InitialDisputeProof[](1);
     starts[0] = params;
-    return Account.processDisputeStarts(_accounts, caller, starts, defaultDisputeDelay, entityProvider, testMode);
+    return Account.processDisputeStarts(_accounts, caller, starts, defaultDisputeDelay, entityProvider);
   }
 
   /// @notice Finalize dispute - stays in Depository due to storage complexity

@@ -364,7 +364,6 @@ export interface DepositoryInterface extends Interface {
       | "admin"
       | "approvedEntityProviders"
       | "defaultDisputeDelay"
-      | "disableTestModeForever"
       | "disputeFinalize"
       | "disputeStart"
       | "emergencyPause"
@@ -390,7 +389,6 @@ export interface DepositoryInterface extends Interface {
       | "setEmergencyPause"
       | "setEntityDisputeDelay"
       | "settle"
-      | "testMode"
       | "tokenToId"
       | "unpackTokenReference"
   ): FunctionFragment;
@@ -460,10 +458,6 @@ export interface DepositoryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "defaultDisputeDelay",
-    values?: undefined
-  ): string;
-  encodeFunctionData(
-    functionFragment: "disableTestModeForever",
     values?: undefined
   ): string;
   encodeFunctionData(
@@ -579,7 +573,6 @@ export interface DepositoryInterface extends Interface {
       BytesLike
     ]
   ): string;
-  encodeFunctionData(functionFragment: "testMode", values?: undefined): string;
   encodeFunctionData(
     functionFragment: "tokenToId",
     values: [BytesLike]
@@ -618,10 +611,6 @@ export interface DepositoryInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "defaultDisputeDelay",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "disableTestModeForever",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -721,7 +710,6 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "settle", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "testMode", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "tokenToId", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "unpackTokenReference",
@@ -1131,8 +1119,6 @@ export interface Depository extends BaseContract {
 
   defaultDisputeDelay: TypedContractMethod<[], [bigint], "view">;
 
-  disableTestModeForever: TypedContractMethod<[], [void], "nonpayable">;
-
   disputeFinalize: TypedContractMethod<
     [params: FinalDisputeProofStruct],
     [boolean],
@@ -1305,8 +1291,6 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
 
-  testMode: TypedContractMethod<[], [boolean], "view">;
-
   tokenToId: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
   unpackTokenReference: TypedContractMethod<
@@ -1390,9 +1374,6 @@ export interface Depository extends BaseContract {
   getFunction(
     nameOrSignature: "defaultDisputeDelay"
   ): TypedContractMethod<[], [bigint], "view">;
-  getFunction(
-    nameOrSignature: "disableTestModeForever"
-  ): TypedContractMethod<[], [void], "nonpayable">;
   getFunction(
     nameOrSignature: "disputeFinalize"
   ): TypedContractMethod<
@@ -1574,9 +1555,6 @@ export interface Depository extends BaseContract {
     [boolean],
     "nonpayable"
   >;
-  getFunction(
-    nameOrSignature: "testMode"
-  ): TypedContractMethod<[], [boolean], "view">;
   getFunction(
     nameOrSignature: "tokenToId"
   ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;

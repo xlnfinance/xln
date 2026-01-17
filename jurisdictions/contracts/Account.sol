@@ -42,6 +42,12 @@ library Account {
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
   event InsuranceRegistered(bytes32 indexed insured, bytes32 indexed insurer, uint256 indexed tokenId, uint256 limit, uint256 expiresAt);
 
+  // Debug events (remove in production)
+  event DebugSettleEntry(bytes32 leftEntity, bytes32 rightEntity, bytes32 initiator, uint256 sigLen);
+  event DebugSettlementHash(bytes32 computedHash, bytes32 counterparty, uint256 cooperativeNonce, uint256 diffsLength, uint256 encodedMsgLength);
+  event DebugHankoResult(bytes32 recoveredEntity, bool valid);
+  event DebugHankoStep(uint256 step, bytes32 val1, bytes32 val2, bool boolVal);  // step=100 sigcheck, 200 try success, 201 try mismatch, 300-399 catch
+
   // ========== ERRORS ==========
   error E2(); // Unauthorized
   error E3(); // InsufficientBalance
@@ -124,7 +130,7 @@ library Account {
     bytes32 proofbodyHash,
     bytes memory hanko,
     bytes32 expectedEntity
-  ) external view returns (bool success) {
+  ) external returns (bool success) {
     // Backwards compatibility: 65 bytes = single ECDSA signature
     // Treat as entity with 1 validator where entityId == signer address
     if (hanko.length == 65) {
@@ -160,7 +166,7 @@ library Account {
     uint finalDisputeNonce,
     bytes memory hanko,
     bytes32 expectedEntity
-  ) external view returns (bool success) {
+  ) external returns (bool success) {
     // Backwards compatibility: 65 bytes = single ECDSA
     if (hanko.length == 65) {
       bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, ch_key, finalCooperativeNonce, initialDisputeNonce, finalDisputeNonce);
@@ -195,7 +201,7 @@ library Account {
     bytes32 initialArgumentsHash,
     bytes memory hanko,
     bytes32 expectedEntity
-  ) external view returns (bool success) {
+  ) external returns (bool success) {
     // Backwards compatibility: 65 bytes = single ECDSA
     if (hanko.length == 65) {
       bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, ch_key, cooperativeNonce, proofbodyHash, initialArgumentsHash);
@@ -234,17 +240,17 @@ library Account {
   }
 
   /// @notice Process dispute starts only
+  /// @dev Counterparty signature is REQUIRED for all dispute starts
   function processDisputeStarts(
     mapping(bytes => AccountInfo) storage _accounts,
     bytes32 entityId,
     InitialDisputeProof[] memory disputeStarts,
     uint256 defaultDisputeDelay,
-    address entityProvider,
-    bool testMode
+    address entityProvider
   ) external returns (bool completeSuccess) {
     completeSuccess = true;
     for (uint i = 0; i < disputeStarts.length; i++) {
-      if (!_disputeStart(_accounts, entityId, disputeStarts[i], defaultDisputeDelay, entityProvider, testMode)) {
+      if (!_disputeStart(_accounts, entityId, disputeStarts[i], defaultDisputeDelay, entityProvider)) {
         completeSuccess = false;
       }
     }
@@ -261,6 +267,7 @@ library Account {
     bytes32 initiator,
     Settlement memory s
   ) internal returns (bool) {
+    emit DebugSettleEntry(s.leftEntity, s.rightEntity, initiator, s.sig.length);
     bytes32 leftEntity = s.leftEntity;
     bytes32 rightEntity = s.rightEntity;
     if (leftEntity == rightEntity || leftEntity >= rightEntity) revert E2();
@@ -269,9 +276,13 @@ library Account {
     bytes memory ch_key = _accountKey(leftEntity, rightEntity);
     bytes32 counterparty = (initiator == leftEntity) ? rightEntity : leftEntity;
 
-    // Counterparty MUST sign when there are changes (skip if no signature - test mode)
-    if (s.sig.length > 0 && (s.diffs.length > 0 || s.forgiveDebtsInTokenIds.length > 0 || s.insuranceRegs.length > 0)) {
+    // Counterparty signature REQUIRED for any state changes (cooperative proof)
+    if (s.diffs.length > 0 || s.forgiveDebtsInTokenIds.length > 0 || s.insuranceRegs.length > 0) {
+      require(s.sig.length > 0, "Signature required for settlement");
       bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, ch_key, _accounts[ch_key].cooperativeNonce, s.diffs, s.forgiveDebtsInTokenIds, s.insuranceRegs);
+
+      // Debug: emit hash details
+      emit DebugSettlementHash(keccak256(encoded_msg), counterparty, _accounts[ch_key].cooperativeNonce, s.diffs.length, encoded_msg.length);
 
       // Hanko verification with backwards compatibility
       if (s.sig.length == 65) {
@@ -279,10 +290,47 @@ library Account {
         bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
         if (ECDSA.recover(hash, s.sig) != address(uint160(uint256(counterparty)))) revert E4();
       } else {
+        // DEBUG: Emit BEFORE any computation to verify we reach this point
+        emit DebugSettleEntry(s.leftEntity, s.rightEntity, bytes32(uint256(uint160(s.entityProvider))), s.sig.length);
+
         // Full hanko verification via settlement's EP address
         bytes32 hash = keccak256(encoded_msg);
-        (bytes32 recoveredEntity, bool valid) = IEntityProvider(s.entityProvider).verifyHankoSignature(s.sig, hash);
-        if (!valid || recoveredEntity != counterparty) revert E4();
+        // DEBUG: Log all params before external call
+        emit DebugSettlementHash(hash, bytes32(uint256(uint160(s.entityProvider))), s.sig.length, uint256(uint160(s.entityProvider)), gasleft());
+
+        // Try the external call with a low-level check first
+        address ep = s.entityProvider;
+        require(ep != address(0), "EP_ZERO");
+        require(s.sig.length > 0, "SIG_EMPTY");
+
+        // DEBUG: Log first 32 bytes of sig (step 100)
+        bytes memory sigBytes = s.sig;
+        bytes32 sigFirst32;
+        assembly { sigFirst32 := mload(add(sigBytes, 32)) }
+        emit DebugHankoStep(100, sigFirst32, bytes32(sigBytes.length), sigBytes.length == 608);
+
+        // Wrap in try-catch to prevent revert from abi.decode
+        try IEntityProvider(ep).verifyHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
+          emit DebugHankoStep(200, recoveredEntity, counterparty, valid);  // step 200: try returned
+          if (!valid || recoveredEntity != counterparty) {
+            emit DebugHankoStep(201, recoveredEntity, counterparty, false);  // step 201: mismatch
+            return false;  // Verification failed
+          }
+          emit DebugHankoStep(202, recoveredEntity, counterparty, true);  // step 202: success
+        } catch Error(string memory reason) {
+          emit DebugHankoStep(300, bytes32(bytes(reason)), bytes32(0), false);  // step 300: Error(string)
+          return false;
+        } catch Panic(uint errorCode) {
+          emit DebugHankoStep(310, bytes32(errorCode), bytes32(0), false);  // step 310: Panic
+          return false;
+        } catch (bytes memory lowLevelData) {
+          bytes32 errData;
+          if (lowLevelData.length >= 32) {
+            assembly { errData := mload(add(lowLevelData, 32)) }
+          }
+          emit DebugHankoStep(320, errData, bytes32(lowLevelData.length), false);  // step 320: low-level
+          return false;
+        }
       }
     }
 
@@ -343,39 +391,25 @@ library Account {
     bytes32 entityId,
     InitialDisputeProof memory params,
     uint256 defaultDelay,
-    address entityProvider,
-    bool testMode
+    address entityProvider
   ) internal returns (bool) {
     bytes memory ch_key = _accountKey(entityId, params.counterentity);
 
     if (_accounts[ch_key].cooperativeNonce > params.cooperativeNonce) revert E2();
 
-    // Verify counterparty signature
-    if (testMode) {
-      // testMode: signature optional (for demos without entity registration)
-      if (params.sig.length > 0) {
-        if (params.sig.length == 65) {
-          bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
-          bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-          if (ECDSA.recover(hash, params.sig) != address(uint160(uint256(params.counterentity)))) revert E4();
-        }
-        // Skip hanko verification in testMode (entities may not be registered)
-      }
-    } else {
-      // Production: signature REQUIRED
-      require(params.sig.length > 0, "Signature required in production");
+    // Counterparty signature REQUIRED
+    require(params.sig.length > 0, "Signature required for dispute");
 
-      // Backwards compat: 65 bytes = ECDSA, otherwise full hanko
-      if (params.sig.length == 65) {
-        bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
-        bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-        if (ECDSA.recover(hash, params.sig) != address(uint160(uint256(params.counterentity)))) revert E4();
-      } else {
-        bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
-        bytes32 hash = keccak256(encoded_msg);
-        (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
-        if (!valid || recoveredEntity != params.counterentity) revert E4();
-      }
+    // Backwards compat: 65 bytes = ECDSA, otherwise full hanko
+    if (params.sig.length == 65) {
+      bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
+      bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
+      if (ECDSA.recover(hash, params.sig) != address(uint160(uint256(params.counterentity)))) revert E4();
+    } else {
+      bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
+      bytes32 hash = keccak256(encoded_msg);
+      (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
+      if (!valid || recoveredEntity != params.counterentity) revert E4();
     }
 
     if (_accounts[ch_key].disputeHash != bytes32(0)) revert E6();
