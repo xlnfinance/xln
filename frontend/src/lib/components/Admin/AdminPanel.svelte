@@ -36,7 +36,7 @@
       if (!env) throw new Error('Environment not ready');
 
       // Find signer ID for the selected entity
-      let signerId = 's1';
+      let signerId = '1';
       for (const key of env.eReplicas.keys()) {
         if (key.startsWith(selectedEntityId + ':')) {
           signerId = key.split(':')[1]!;

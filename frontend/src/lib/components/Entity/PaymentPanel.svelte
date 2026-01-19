@@ -35,7 +35,7 @@
 
   // Auto-select first available token from entity's reserves
   $: {
-    const replica = currentReplicas?.get(`${entityId}:s1`) || currentReplicas?.get(`${entityId}:s2`);
+    const replica = currentReplicas?.get(`${entityId}:1`) || currentReplicas?.get(`${entityId}:2`);
     if (replica?.state?.reserves) {
       const availableTokens = Array.from(replica.state.reserves.keys());
       if (availableTokens.length > 0 && !availableTokens.includes(tokenId)) {
@@ -224,7 +224,7 @@
 
       // Find the correct signer ID for this entity
       // Use time-aware replicas from context/props (currentReplicas already handles priority)
-      let signerId = 's1'; // default
+      let signerId = '1'; // default
       if (!currentReplicas) throw new Error('Replicas not available');
       for (const key of currentReplicas.keys()) {
         if (key.startsWith(entityId + ':')) {

@@ -64,6 +64,7 @@ export class BrowserVMProvider {
   private tokenRegistry: Map<string, { address: string; name: string; symbol: string; decimals: number; tokenId: number }> = new Map();
   private fundedAddresses: Set<string> = new Set();
   private initialized = false;
+  private quietLogs = false;
   private blockHeight = 0; // Track J-Machine block height
   private blockHash = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Current block hash
   private prevBlockHash = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Previous block hash
@@ -79,6 +80,22 @@ export class BrowserVMProvider {
     // Hardhat default account #0
     this.deployerPrivKey = hexToBytes('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80');
     this.deployerAddress = createAddressFromPrivateKey(this.deployerPrivKey);
+  }
+
+  setQuietLogs(quiet: boolean): void {
+    this.quietLogs = quiet;
+  }
+
+  private log(...args: unknown[]): void {
+    if (!this.quietLogs) {
+      console.log(...args);
+    }
+  }
+
+  private warn(...args: unknown[]): void {
+    if (!this.quietLogs) {
+      console.warn(...args);
+    }
   }
 
   /** Initialize VM and deploy contracts */
@@ -937,10 +954,10 @@ export class BrowserVMProvider {
     }
 
     // Try to derive key using account-crypto (same derivation as scenarios)
-    // For numbered entities (0x000...XXXX), signerId = 'sXXXX'
+    // For numbered entities (0x000...XXXX), signerId = '<number>' (MetaMask index)
     const entityNum = parseInt(normalized.slice(-8), 16); // Last 8 hex chars = number
     if (entityNum > 0 && entityNum < 10000) {
-      const signerId = `s${entityNum}`;
+      const signerId = String(entityNum);
       const privateKey = getCachedSignerPrivateKey(signerId);
       if (privateKey) {
         const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
@@ -950,12 +967,10 @@ export class BrowserVMProvider {
       }
     }
 
-    // Last resort: derive from entityId itself (won't match address!)
-    console.warn(`[BrowserVM] No wallet found for entity ${entityId.slice(0, 20)}..., deriving from hash (Hanko will fail!)`);
-    const privateKey = ethers.keccak256(entityId);
-    const wallet = new ethers.Wallet(privateKey);
-    this.entityWallets.set(normalized, wallet);
-    return wallet;
+    throw new Error(
+      `BrowserVM missing wallet for entity ${entityId.slice(0, 20)}... ` +
+      `(registerEntityWallet or importReplica with runtimeSeed-derived signer)`
+    );
   }
 
   private getSigningWallet(entityId: string): ethers.Wallet {
@@ -965,7 +980,7 @@ export class BrowserVMProvider {
 
     if (this.isNumberedEntity(entityId)) {
       const entityNum = parseInt(normalized.slice(-8), 16);
-      const signerId = `s${entityNum}`;
+      const signerId = String(entityNum);
       const privateKey = getCachedSignerPrivateKey(signerId);
       if (!privateKey) {
         throw new Error(`Cannot sign: no private key for entity ${entityNum} (signerId=${signerId})`);
@@ -1300,7 +1315,7 @@ export class BrowserVMProvider {
   /** Time travel to historical state root */
   async timeTravel(stateRoot: Uint8Array): Promise<void> {
     await this.vm.stateManager.setStateRoot(stateRoot);
-    console.log(`[BrowserVM] Time traveled to state root: ${Buffer.from(stateRoot).toString('hex').slice(0, 16)}...`);
+    this.log(`[BrowserVM] Time traveled to state root: ${Buffer.from(stateRoot).toString('hex').slice(0, 16)}...`);
   }
 
   /** Get current block number */
@@ -1617,10 +1632,10 @@ export class BrowserVMProvider {
    */
   onAny(callback: (events: EVMEvent[]) => void): () => void {
     this.eventCallbacks.add(callback);
-    console.log(`[BrowserVM] onAny registered (${this.eventCallbacks.size} callbacks)`);
+    this.log(`[BrowserVM] onAny registered (${this.eventCallbacks.size} callbacks)`);
     return () => {
       this.eventCallbacks.delete(callback);
-      console.log(`[BrowserVM] onAny unsubscribed (${this.eventCallbacks.size} callbacks)`);
+      this.log(`[BrowserVM] onAny unsubscribed (${this.eventCallbacks.size} callbacks)`);
     };
   }
 
@@ -1629,13 +1644,13 @@ export class BrowserVMProvider {
    * All events from one transaction are sent together, matching blockchain behavior.
    */
   private emitEvents(logs: any[]): EVMEvent[] {
-    console.log(`🔊 [BrowserVM] emitEvents ENTRY: raw logs=${logs.length}, callbacks=${this.eventCallbacks.size}`);
+    this.log(`🔊 [BrowserVM] emitEvents ENTRY: raw logs=${logs.length}, callbacks=${this.eventCallbacks.size}`);
     const events = this.parseLogs(logs);
-    console.log(`🔊 [BrowserVM] emitEvents: parsed ${events.length} events`);
+    this.log(`🔊 [BrowserVM] emitEvents: parsed ${events.length} events`);
 
     // Log individual events for debugging
     for (const event of events) {
-      console.log(`   📣 EVENT: ${event.name} | ${safeStringify(event.args).slice(0, 80)}`);
+      this.log(`   📣 EVENT: ${event.name} | ${safeStringify(event.args).slice(0, 80)}`);
     }
 
     // Emit BATCH to each callback (not one-by-one)
@@ -1643,7 +1658,7 @@ export class BrowserVMProvider {
       for (const cb of this.eventCallbacks) {
         try {
           cb(events);
-          console.log(`   ✓ batch of ${events.length} events fired to callback`);
+          this.log(`   ✓ batch of ${events.length} events fired to callback`);
         } catch (err) {
           console.error(`   ❌ cb error:`, err);
         }
@@ -1724,18 +1739,36 @@ export class BrowserVMProvider {
     const trie = (this.vm.stateManager as any)._trie;
     const db = trie.database().db;
 
+    const getTrieMap = (store: any): Map<any, any> | null => {
+      if (store instanceof Map) return store;
+      if (store && store._database instanceof Map) return store._database;
+      if (store && store.db instanceof Map) return store.db;
+      return null;
+    };
+
     // Serialize all key-value pairs from the trie database
     const trieData: Array<[string, string]> = [];
-    if (db instanceof Map) {
-      for (const [key, value] of db.entries()) {
-        trieData.push([
-          Buffer.from(key).toString('hex'),
-          Buffer.from(value).toString('hex'),
-        ]);
-      }
+    const trieMap = getTrieMap(db);
+    if (!trieMap) {
+      throw new Error('BrowserVM serializeState: unsupported trie db');
+    }
+    const normalizeHex = (hex: string): string => {
+      const raw = hex.startsWith('0x') || hex.startsWith('0X') ? hex.slice(2) : hex;
+      return raw.length % 2 === 1 ? `0${raw}` : raw;
+    };
+    for (const [key, value] of trieMap.entries()) {
+      const keyHexRaw = typeof key === 'string'
+        ? key
+        : Buffer.from(key).toString('hex');
+      const valueHexRaw = typeof value === 'string'
+        ? value
+        : Buffer.from(value).toString('hex');
+      const keyHex = normalizeHex(keyHexRaw);
+      const valueHex = normalizeHex(valueHexRaw);
+      trieData.push([keyHex, valueHex]);
     }
 
-    console.log(`[BrowserVM] Serialized state: ${trieData.length} trie nodes`);
+    this.log(`[BrowserVM] Serialized state: ${trieData.length} trie nodes`);
 
     return {
       stateRoot: Buffer.from(stateRoot).toString('hex'),
@@ -1763,6 +1796,9 @@ export class BrowserVMProvider {
         const normalized = raw.length % 2 === 1 ? `0${raw}` : raw;
         return /^[0-9a-fA-F]+$/.test(normalized) ? normalized : null;
       }
+      if (value instanceof ArrayBuffer) {
+        return Buffer.from(new Uint8Array(value)).toString('hex');
+      }
       if (value instanceof Uint8Array) {
         return Buffer.from(value).toString('hex');
       }
@@ -1773,23 +1809,55 @@ export class BrowserVMProvider {
           return null;
         }
       }
+      if (typeof value === 'object') {
+        const maybeBuffer = value as { type?: string; data?: unknown };
+        if (maybeBuffer.type === 'Buffer' && Array.isArray(maybeBuffer.data)) {
+          try {
+            return Buffer.from(maybeBuffer.data).toString('hex');
+          } catch {
+            return null;
+          }
+        }
+      }
       return null;
+    };
+
+    const normalizeAddress = (value: unknown): string | null => {
+      const hex = normalizeHex(value);
+      if (hex === null) return null;
+      const trimmed = hex.length > 40 ? hex.slice(-40) : hex.padStart(40, '0');
+      if (trimmed.length !== 40) return null;
+      return trimmed;
+    };
+
+    const hexToBytesSafe = (hex: string): Uint8Array => {
+      if (hex.length === 0) return new Uint8Array();
+      return hexToBytes(`0x${hex}`);
     };
 
     // Restore trie database entries
     const trie = (this.vm.stateManager as any)._trie;
     const db = trie.database().db;
+    const getTrieMap = (store: any): Map<any, any> | null => {
+      if (store instanceof Map) return store;
+      if (store && store._database instanceof Map) return store._database;
+      if (store && store.db instanceof Map) return store.db;
+      return null;
+    };
 
-    if (db instanceof Map) {
-      db.clear();
-      for (const entry of data.trieData || []) {
-        const keyHex = normalizeHex(entry?.[0]);
-        const valueHex = normalizeHex(entry?.[1]);
-        if (!keyHex || !valueHex) {
-          throw new Error('BrowserVM restoreState: invalid trie entry');
-        }
-        db.set(hexToBytes(`0x${keyHex}`), hexToBytes(`0x${valueHex}`));
+    const trieMap = getTrieMap(db);
+    if (!trieMap) {
+      throw new Error('BrowserVM restoreState: unsupported trie db');
+    }
+    trieMap.clear();
+    for (const entry of data.trieData || []) {
+      const keyHex = normalizeHex(entry?.[0]);
+      const valueHex = normalizeHex(entry?.[1]);
+      if (keyHex === null || valueHex === null) {
+        throw new Error('BrowserVM restoreState: invalid trie entry');
       }
+      // MapDB for MPT uses hex-string keys; keep key as string, values as bytes.
+      trieMap.set(keyHex, hexToBytesSafe(valueHex));
     }
 
     // Restore state root
@@ -1797,20 +1865,28 @@ export class BrowserVMProvider {
     if (!stateRootHex) {
       throw new Error('BrowserVM restoreState: invalid stateRoot');
     }
-    const stateRoot = hexToBytes(`0x${stateRootHex}`);
+    const paddedStateRoot = stateRootHex.padStart(64, '0');
+    const stateRoot = hexToBytes(`0x${paddedStateRoot}`);
     await this.vm.stateManager.setStateRoot(stateRoot);
 
     // Restore nonce
-    this.nonce = BigInt(data.nonce);
-
-    if (data.addresses?.depository) {
-      this.depositoryAddress = createAddressFromString(data.addresses.depository);
-    }
-    if (data.addresses?.entityProvider) {
-      this.entityProviderAddress = createAddressFromString(data.addresses.entityProvider);
+    try {
+      const nonceValue = typeof data.nonce === 'string' ? data.nonce : String(data.nonce ?? '0');
+      this.nonce = BigInt(nonceValue);
+    } catch {
+      this.nonce = 0n;
     }
 
-    console.log(`[BrowserVM] Restored state: ${data.trieData.length} trie nodes, root ${data.stateRoot.slice(0, 16)}...`);
+    const depositoryHex = normalizeAddress(data.addresses?.depository);
+    if (depositoryHex) {
+      this.depositoryAddress = createAddressFromString(`0x${depositoryHex}`);
+    }
+    const entityProviderHex = normalizeAddress(data.addresses?.entityProvider);
+    if (entityProviderHex) {
+      this.entityProviderAddress = createAddressFromString(`0x${entityProviderHex}`);
+    }
+
+    this.log(`[BrowserVM] Restored state: ${data.trieData.length} trie nodes, root ${data.stateRoot.slice(0, 16)}...`);
   }
 
   /** Save full EVM state to localStorage */
@@ -1819,7 +1895,7 @@ export class BrowserVMProvider {
       const state = await this.serializeState();
       const json = JSON.stringify(state);
       localStorage.setItem(key, json);
-      console.log(`[BrowserVM] Saved state to localStorage: ${key} (${(json.length / 1024).toFixed(1)}KB)`);
+      this.log(`[BrowserVM] Saved state to localStorage: ${key} (${(json.length / 1024).toFixed(1)}KB)`);
     } catch (err) {
       console.error('[BrowserVM] Failed to save state:', err);
       throw err;
@@ -1831,16 +1907,17 @@ export class BrowserVMProvider {
     try {
       const json = localStorage.getItem(key);
       if (!json) {
-        console.log('[BrowserVM] No saved state found');
+        this.log('[BrowserVM] No saved state found');
         return false;
       }
 
       const data = JSON.parse(json);
       await this.restoreState(data);
-      console.log(`[BrowserVM] Loaded state from localStorage: ${key}`);
+      this.log(`[BrowserVM] Loaded state from localStorage: ${key}`);
       return true;
     } catch (err) {
       console.error('[BrowserVM] Failed to load state:', err);
+      this.clearLocalStorage(key);
       return false;
     }
   }
@@ -1848,7 +1925,7 @@ export class BrowserVMProvider {
   /** Clear saved state from localStorage */
   clearLocalStorage(key: string = 'xln-evm-state'): void {
     localStorage.removeItem(key);
-    console.log(`[BrowserVM] Cleared saved state: ${key}`);
+    this.log(`[BrowserVM] Cleared saved state: ${key}`);
   }
 
   /** Sync all collaterals from BrowserVM for given account pairs */
@@ -1870,7 +1947,7 @@ export class BrowserVMProvider {
       }
     }
 
-    console.log(`[BrowserVM] Synced collaterals for ${accountPairs.length} accounts`);
+    this.log(`[BrowserVM] Synced collaterals for ${accountPairs.length} accounts`);
     return collaterals;
   }
 
@@ -1966,7 +2043,7 @@ export class BrowserVMProvider {
   /**
    * Register numbered entities with their validator signerIds.
    * Creates boards with signer addresses as sole validators.
-   * @param signerIds Array of signerIds (e.g., ['s1', 's2', 's3'])
+   * @param signerIds Array of signerIds (e.g., ['1', '2', '3'])
    * @returns Array of assigned entity numbers
    */
   async registerEntitiesWithSigners(signerIds: string[]): Promise<number[]> {
@@ -1976,7 +2053,7 @@ export class BrowserVMProvider {
     for (const signerId of signerIds) {
       const privateKey = getCachedSignerPrivateKey(signerId);
       if (!privateKey) {
-        throw new Error(`No private key for signerId ${signerId} - call registerTestKeys first`);
+        throw new Error(`No private key for signerId ${signerId} - register signer keys (vault seed or registerSignerKey) before entity registration`);
       }
 
       // Get validator address from private key

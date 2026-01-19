@@ -20,7 +20,7 @@
 import type { Env, EntityInput } from '../types';
 import { getPerfMs } from '../time';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
-import { findReplica, getOffdelta, converge, assert, enableStrictScenario } from './helpers';
+import { findReplica, getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
@@ -50,11 +50,11 @@ const usd = (amount: number | bigint) => BigInt(amount) * ONE;
 
 export async function rapidFire(env: Env): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'Rapid Fire');
+  const prevScenarioMode = env.scenarioMode;
   try {
-  // Register test keys for real signatures
-  const { registerTestKeys } = await import('../account-crypto');
-  await registerTestKeys(['s1', 's2', 's3', 'hub', 'alice', 'bob', 'carol', 'dave', 'frank']);
-  env.runtimeSeed = 'test-seed-deterministic-42';
+  env.scenarioMode = true; // Deterministic time control
+  requireRuntimeSeed(env, 'Rapid Fire');
+  ensureSignerKeysFromSeed(env, ['1', '2', '3'], 'Rapid Fire');
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
 
@@ -76,9 +76,9 @@ export async function rapidFire(env: Env): Promise<void> {
   createJReplica(env, 'RapidFire', depositoryAddress, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
 
   const entities = [
-    { name: 'Alice', id: '0x' + '1'.padStart(64, '0'), signer: 's1' },
-    { name: 'Hub', id: '0x' + '2'.padStart(64, '0'), signer: 's2' },
-    { name: 'Bob', id: '0x' + '3'.padStart(64, '0'), signer: 's3' },
+    { name: 'Alice', id: '0x' + '1'.padStart(64, '0'), signer: '1' },
+    { name: 'Hub', id: '0x' + '2'.padStart(64, '0'), signer: '2' },
+    { name: 'Bob', id: '0x' + '3'.padStart(64, '0'), signer: '3' },
   ];
 
   await applyRuntimeInput(env, {
@@ -279,6 +279,7 @@ export async function rapidFire(env: Env): Promise<void> {
   console.log(`   Frames: ${env.history?.length || 0}`);
   console.log('═══════════════════════════════════════════════════════════════\n');
   } finally {
+    env.scenarioMode = prevScenarioMode ?? false;
     restoreStrict();
   }
 }

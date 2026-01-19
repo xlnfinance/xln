@@ -1031,6 +1031,28 @@ const applyRuntimeInput = async (
             jReplica.collaterals = collaterals;
             jReplica.blockNumber = BigInt(blockHeight);
           }
+
+          // Sync on-chain collateral/ondelta into account deltas (authoritative for on-chain state)
+          for (const [replicaKey, replica] of env.eReplicas.entries()) {
+            const entityId = replicaKey.split(':')[0];
+            for (const [counterpartyId, account] of replica.state.accounts) {
+              // Avoid mutating live consensus state mid-flight.
+              if (account.pendingFrame || account.mempool.length > 0 || account.sentTransitions > account.ackedTransitions) {
+                continue;
+              }
+              const key = `${entityId}:${counterpartyId}`;
+              const tokenMap = collaterals.get(key);
+              for (const [tokenId, delta] of account.deltas) {
+                const chain = tokenMap?.get(tokenId);
+                const chainCollateral = chain?.collateral ?? 0n;
+                const chainOndelta = chain?.ondelta ?? 0n;
+                if (delta.collateral !== chainCollateral || delta.ondelta !== chainOndelta) {
+                  delta.collateral = chainCollateral;
+                  delta.ondelta = chainOndelta;
+                }
+              }
+            }
+          }
         } catch (e) {
           // Silent fail - collaterals sync is optional for debugging
           console.warn('[Runtime] Failed to sync BrowserVM state:', e);
@@ -1670,20 +1692,58 @@ const normalizeReplicaMap = (raw: unknown): Map<string, EntityReplica> => {
   throw new Error('Invalid eReplicas format in snapshot');
 };
 
+const normalizeContractAddress = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') {
+    const maybeAddress = (value as { address?: unknown }).address;
+    if (typeof maybeAddress === 'string') return maybeAddress;
+    if (typeof (value as { toString?: () => string }).toString === 'function') {
+      return (value as { toString: () => string }).toString();
+    }
+  }
+  return undefined;
+};
+
+const normalizeJReplica = (jr: JReplica): JReplica => {
+  if (!jr?.contracts) return jr;
+  const depository = normalizeContractAddress(
+    jr.contracts.depository || (jr.contracts as { depositoryAddress?: unknown }).depositoryAddress
+  );
+  const entityProvider = normalizeContractAddress(
+    jr.contracts.entityProvider || (jr.contracts as { entityProviderAddress?: unknown }).entityProviderAddress
+  );
+  return {
+    ...jr,
+    contracts: {
+      ...jr.contracts,
+      ...(depository ? { depository } : {}),
+      ...(entityProvider ? { entityProvider } : {}),
+    },
+  };
+};
+
 const normalizeJReplicaMap = (raw: unknown): Map<string, JReplica> => {
   if (raw instanceof Map) return raw as Map<string, JReplica>;
   if (Array.isArray(raw)) {
     if (raw.length === 0) return new Map();
     if (isEntryArray(raw)) {
-      return new Map(raw as Array<[string, JReplica]>);
+      const map = new Map(raw as Array<[string, JReplica]>);
+      for (const [name, jr] of map.entries()) {
+        map.set(name, normalizeJReplica(jr));
+      }
+      return map;
     }
     const first = raw[0] as any;
     if (first && typeof first === 'object' && typeof first.name === 'string') {
-      return new Map((raw as JReplica[]).map(jr => [jr.name, jr]));
+      return new Map((raw as JReplica[]).map(jr => [jr.name, normalizeJReplica(jr)]));
     }
   }
   if (raw && typeof raw === 'object') {
-    return new Map(Object.entries(raw as Record<string, JReplica>));
+    const map = new Map(Object.entries(raw as Record<string, JReplica>));
+    for (const [name, jr] of map.entries()) {
+      map.set(name, normalizeJReplica(jr));
+    }
+    return map;
   }
   return new Map();
 };
@@ -1703,9 +1763,9 @@ const normalizeSnapshotInPlace = (snapshot: any): void => {
 };
 
 export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
-  // Convert seed to proper format
-  const seedBytes = seed !== undefined && seed !== null
-    ? (typeof seed === 'string' ? new TextEncoder().encode(seed) : seed)
+  const normalizedSeed = Array.isArray(seed) ? new Uint8Array(seed) : seed;
+  const seedText = normalizedSeed !== undefined && normalizedSeed !== null
+    ? (typeof normalizedSeed === 'string' ? normalizedSeed : new TextDecoder().decode(normalizedSeed))
     : null;
 
   const env: Env = {
@@ -1713,7 +1773,7 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
     jReplicas: new Map(),
     height: 0,
     timestamp: 0,
-    ...(seedBytes ? { runtimeSeed: seedBytes } : {}),
+    ...(seedText ? { runtimeSeed: seedText } : {}),
     ...(runtimeId ? { runtimeId } : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
@@ -1873,6 +1933,8 @@ export const process = async (
   });
 
   try {
+    const quietRuntimeLogs = env.quietRuntimeLogs === true;
+    getBrowserVMInstance(env)?.setQuietLogs?.(quietRuntimeLogs);
     // Update timestamp
     // In scenario mode, advance by 100ms per tick (deterministic)
     // In live mode, use real time
@@ -1884,7 +1946,9 @@ export const process = async (
     getBrowserVMInstance(env)?.setBlockTimestamp?.(env.timestamp);
 
     if (allInputs.length > 0) {
-      console.log(`📥 TICK: Processing ${allInputs.length} inputs for [${allInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
+      if (!quietRuntimeLogs) {
+        console.log(`📥 TICK: Processing ${allInputs.length} inputs for [${allInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
+      }
 
       const result = await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: allInputs });
 
@@ -1895,7 +1959,7 @@ export const process = async (
       const routedOutputs = routeEntityOutputs(env, result.entityOutbox);
       env.pendingOutputs = routedOutputs;
 
-      if (routedOutputs.length > 0) {
+      if (routedOutputs.length > 0 && !quietRuntimeLogs) {
         console.log(`📤 TICK: ${routedOutputs.length} outputs queued for next tick → [${routedOutputs.map(o => o.entityId.slice(-4)).join(',')}]`);
       }
     } else {
@@ -1904,7 +1968,9 @@ export const process = async (
         const routedOutputs = routeEntityOutputs(env, []);
         if (routedOutputs.length > 0) {
           env.pendingOutputs = [...(env.pendingOutputs || []), ...routedOutputs];
-          console.log(`📤 TICK: ${routedOutputs.length} local outputs queued from pending network outputs`);
+          if (!quietRuntimeLogs) {
+            console.log(`📤 TICK: ${routedOutputs.length} local outputs queued from pending network outputs`);
+          }
         }
       } else {
         // No inputs to process - keep env.extra so narrative-only frames still render
@@ -1929,14 +1995,16 @@ export const process = async (
         const oldestTxAge = mempool.length > 0 && mempool[0].queuedAt ? env.timestamp - mempool[0].queuedAt : 999999;
         const mempoolReady = mempool.length > 0 && oldestTxAge >= blockDelayMs;
 
-        if (mempool.length > 0 && !mempoolReady) {
+        if (mempool.length > 0 && !mempoolReady && !quietRuntimeLogs) {
           console.log(`⏳ [J-Machine] ${mempool.length} pending (age: ${oldestTxAge}ms < ${blockDelayMs}ms) - waiting...`);
         }
 
         // If mempool ready AND block delay passed → PROCESS
         if (mempoolReady) {
-          console.log(`⚡ [5/6] J-Machine ${jReplica.name}: Processing ${mempool.length} txs (oldest: ${oldestTxAge}ms >= ${blockDelayMs}ms)`);
-          console.log(`   Mempool BEFORE execution:`, mempool.map(tx => `${tx.entityId.slice(-4)}:${tx.data.batchSize || '?'}`));
+          if (!quietRuntimeLogs) {
+            console.log(`⚡ [5/6] J-Machine ${jReplica.name}: Processing ${mempool.length} txs (oldest: ${oldestTxAge}ms >= ${blockDelayMs}ms)`);
+            console.log(`   Mempool BEFORE execution:`, mempool.map(tx => `${tx.entityId.slice(-4)}:${tx.data.batchSize || '?'}`));
+          }
 
           // Emit J-block event
           env.emit('JBlockProcessing', {
@@ -1956,14 +2024,18 @@ export const process = async (
 
           for (const jTx of mempool) {
             if (jTx.type === 'batch' && jTx.data?.batch) {
-              console.log(`🔨 [J-Machine] Executing batch from ${jTx.entityId.slice(-4)}`);
-              console.log(`   Batch size: ${jTx.data.batchSize || 'unknown'}`);
-              console.log(`   Batch.reserveToReserve:`, jTx.data.batch.reserveToReserve);
+              if (!quietRuntimeLogs) {
+                console.log(`🔨 [J-Machine] Executing batch from ${jTx.entityId.slice(-4)}`);
+                console.log(`   Batch size: ${jTx.data.batchSize || 'unknown'}`);
+                console.log(`   Batch.reserveToReserve:`, jTx.data.batch.reserveToReserve);
+              }
               let batchSummary: string | undefined;
               try {
                 const { summarizeBatch } = await import('./j-batch');
                 batchSummary = safeStringify(summarizeBatch(jTx.data.batch));
-                console.log(`   Batch.summary: ${batchSummary}`);
+                if (!quietRuntimeLogs) {
+                  console.log(`   Batch.summary: ${batchSummary}`);
+                }
               } catch {
                 // best-effort debug only
               }
@@ -1989,8 +2061,10 @@ export const process = async (
               );
 
               if (result.success) {
-                console.log(`   ✅ Batch executed successfully`);
-                console.log(`   📡 ${result.events?.length || 0} events will route back to entities`);
+                if (!quietRuntimeLogs) {
+                  console.log(`   ✅ Batch executed successfully`);
+                  console.log(`   📡 ${result.events?.length || 0} events will route back to entities`);
+                }
               } else {
                 console.error(`   ❌ Batch execution failed: ${result.error}`);
                 if (!batchSummary) {
@@ -2021,19 +2095,27 @@ export const process = async (
           const failCount = 0;
 
           // CRITICAL: Clear mempool immediately (txs already executed)
-          console.log(`🧹 [J-Machine] Clearing mempool (before: ${jReplica.mempool.length} items)...`);
+          if (!quietRuntimeLogs) {
+            console.log(`🧹 [J-Machine] Clearing mempool (before: ${jReplica.mempool.length} items)...`);
+          }
           jReplica.mempool = [];
-          console.log(`🧹 [J-Machine] Mempool AFTER clear: ${jReplica.mempool.length} items (should be 0)`);
+          if (!quietRuntimeLogs) {
+            console.log(`🧹 [J-Machine] Mempool AFTER clear: ${jReplica.mempool.length} items (should be 0)`);
+          }
 
           jReplica.lastBlockTimestamp = env.timestamp; // Reset timer for next block
           jReplica.blockNumber = jReplica.blockNumber + 1n; // Increment ONLY when block processed
           jReplica.blockReady = false; // Block created, mempool empty
 
-          console.log(`✅ [J-Machine ${jReplica.name}] Block #${jReplica.blockNumber} finalized (${successCount}/${processedCount} batches)`);
+          if (!quietRuntimeLogs) {
+            console.log(`✅ [J-Machine ${jReplica.name}] Block #${jReplica.blockNumber} finalized (${successCount}/${processedCount} batches)`);
+          }
           if (failCount > 0) {
             console.warn(`   ⚠️ ${failCount} batches failed, queued for retry`);
           }
-          console.log(`   Next block in ${blockDelayMs}ms`);
+          if (!quietRuntimeLogs) {
+            console.log(`   Next block in ${blockDelayMs}ms`);
+          }
 
           // Emit J-block finalized event
           env.emit('JBlockFinalized', {
@@ -2098,7 +2180,9 @@ export const process = async (
     if (!env.history) env.history = [];
     env.history.push(snapshot);
 
-    console.log(`📸 Snapshot: ${snapshot.title} (${env.history.length} total)`);
+    if (!quietRuntimeLogs) {
+      console.log(`📸 Snapshot: ${snapshot.title} (${env.history.length} total)`);
+    }
 
     // Auto-persist
     await saveEnvToDB(env);
@@ -2173,20 +2257,23 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
       const data = JSON.parse(buffer.toString());
 
       // Hydrate Maps/BigInts
-      const env = createEmptyEnv(data.runtimeSeed || null);
+      const runtimeSeedRaw = Array.isArray(data.runtimeSeed)
+        ? new TextDecoder().decode(new Uint8Array(data.runtimeSeed))
+        : data.runtimeSeed;
+      const env = createEmptyEnv(runtimeSeedRaw || null);
       env.height = Number(data.height || 0);
       env.timestamp = Number(data.timestamp || 0);
       if (data.browserVMState) {
         env.browserVMState = data.browserVMState;
       }
-      if (data.runtimeSeed) {
-        setCryptoRuntimeSeed(data.runtimeSeed);
+      if (runtimeSeedRaw) {
+        setCryptoRuntimeSeed(runtimeSeedRaw);
       }
       if (data.runtimeId) {
         env.runtimeId = data.runtimeId;
-      } else if (data.runtimeSeed) {
+      } else if (runtimeSeedRaw) {
         try {
-          env.runtimeId = deriveSignerAddressSync(data.runtimeSeed, '1');
+          env.runtimeId = deriveSignerAddressSync(runtimeSeedRaw, '1');
         } catch (error) {
           console.warn('⚠️ Failed to derive runtimeId from DB snapshot:', error);
         }

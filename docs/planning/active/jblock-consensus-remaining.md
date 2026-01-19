@@ -65,7 +65,7 @@ Implemented in `runtime/entity-tx/j-events.ts` with generous comments:
 
 Tested with ahb.ts - 28 frames, logs show:
 ```
-📝 Added observation from s1 for block 12 (0xc5618686...)
+📝 Added observation from 1 for block 12 (0xc5618686...)
 ✅ J-BLOCK FINALIZED: height=12 (1/1 signers)
 🧹 Pruned observations (0 pending)
 ```

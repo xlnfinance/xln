@@ -57,18 +57,18 @@ const main = async () => {
     return result;
   };
 
-  const s1 = 's1';
-  const s2 = 's2';
+  const signer1 = '1';
+  const signer2 = '2';
   const e1 = generateNumberedEntityId(1);
   const e2 = generateNumberedEntityId(2);
 
-  const e1Config = { mode: 'proposer-based', threshold: 1n, validators: [s1], shares: { [s1]: 1n } };
-  const e2Config = { mode: 'proposer-based', threshold: 1n, validators: [s2], shares: { [s2]: 1n } };
+  const e1Config = { mode: 'proposer-based', threshold: 1n, validators: [signer1], shares: { [signer1]: 1n } };
+  const e2Config = { mode: 'proposer-based', threshold: 1n, validators: [signer2], shares: { [signer2]: 1n } };
 
   await applyAndCascade({
     serverTxs: [
-      { type: 'importReplica', entityId: e1, signerId: s1, data: { config: e1Config, isProposer: true } },
-      { type: 'importReplica', entityId: e2, signerId: s2, data: { config: e2Config, isProposer: true } },
+      { type: 'importReplica', entityId: e1, signerId: signer1, data: { config: e1Config, isProposer: true } },
+      { type: 'importReplica', entityId: e2, signerId: signer2, data: { config: e2Config, isProposer: true } },
     ],
     entityInputs: [],
   });
@@ -76,10 +76,10 @@ const main = async () => {
   let block = 1;
   await applyAndCascade({
     serverTxs: [],
-    entityInputs: [makeReserveEvent(e1, s1, 1, 100000000000000000000n, 18, block++, 'ETH')],
+    entityInputs: [makeReserveEvent(e1, signer1, 1, 100000000000000000000n, 18, block++, 'ETH')],
   });
 
-  const e1Before = env.replicas.get(`${e1}:${s1}`);
+  const e1Before = env.replicas.get(`${e1}:${signer1}`);
   if (!e1Before?.state.reserves.get('1')) {
     throw new Error('Funding failed');
   }
@@ -87,13 +87,13 @@ const main = async () => {
   await applyAndCascade({
     serverTxs: [],
     entityInputs: [
-      makeReserveEvent(e1, s1, 1, 99000000000000000000n, 18, block++, 'ETH_OUT'),
-      makeReserveEvent(e2, s2, 1, 1000000000000000000n, 18, block++, 'ETH_IN'),
+      makeReserveEvent(e1, signer1, 1, 99000000000000000000n, 18, block++, 'ETH_OUT'),
+      makeReserveEvent(e2, signer2, 1, 1000000000000000000n, 18, block++, 'ETH_IN'),
     ],
   });
 
-  const e1AfterTransfer = env.replicas.get(`${e1}:${s1}`);
-  const e2AfterTransfer = env.replicas.get(`${e2}:${s2}`);
+  const e1AfterTransfer = env.replicas.get(`${e1}:${signer1}`);
+  const e2AfterTransfer = env.replicas.get(`${e2}:${signer2}`);
   if (e1AfterTransfer?.state.reserves.get('1') !== 99000000000000000000n) {
     throw new Error('Reserve mismatch on sender after transfer');
   }
@@ -103,14 +103,14 @@ const main = async () => {
 
   await applyAndCascade({
     serverTxs: [],
-    entityInputs: [{ entityId: e1, signerId: s1, entityTxs: [{ type: 'openAccount', data: { targetEntityId: e2 } }] }],
+    entityInputs: [{ entityId: e1, signerId: signer1, entityTxs: [{ type: 'openAccount', data: { targetEntityId: e2 } }] }],
   });
 
   await applyAndCascade({
     serverTxs: [],
     entityInputs: [{
       entityId: e1,
-      signerId: s1,
+      signerId: signer1,
       entityTxs: [{
         type: 'directPayment',
         data: {
@@ -127,8 +127,8 @@ const main = async () => {
   // Process any remaining cascades (auto-propose may queue additional outputs)
   await processUntilEmpty(env, []);
 
-  const e1Final = env.replicas.get(`${e1}:${s1}`);
-  const e2Final = env.replicas.get(`${e2}:${s2}`);
+  const e1Final = env.replicas.get(`${e1}:${signer1}`);
+  const e2Final = env.replicas.get(`${e2}:${signer2}`);
   const e1Account = e1Final?.state.accounts.get(e2);
   const e2Account = e2Final?.state.accounts.get(e1);
 

@@ -17,7 +17,8 @@
 
 import type { Env, EntityInput } from '../types';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
-import { findReplica, converge, assert, enableStrictScenario } from './helpers';
+import { findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
+import { createGossipLayer } from '../gossip';
 
 // Lazy-loaded runtime functions
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -78,17 +79,67 @@ const computeFilledAmounts = (giveAmount: bigint, wantAmount: bigint, fillRatio:
 
 export async function swapMarket(env: Env): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'Swap Market');
+  const prevScenarioMode = env.scenarioMode;
   try {
-  // Register test keys for real signatures
-  const { registerTestKeys } = await import('../account-crypto');
-  await registerTestKeys(['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's10']);
-  env.runtimeSeed = 'test-seed-deterministic-42';
+  env.scenarioMode = true; // Deterministic time control
+  requireRuntimeSeed(env, 'Swap Market');
+  ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'], 'Swap Market');
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
 
   if (env.scenarioMode && env.height === 0) {
     env.timestamp = 1;
   }
+
+  if (env.jReplicas && env.jReplicas.size > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.jReplicas.size} old jurisdictions from previous scenario`);
+    env.jReplicas.clear();
+  }
+  if (env.eReplicas && env.eReplicas.size > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.eReplicas.size} old entities from previous scenario`);
+    env.eReplicas.clear();
+  }
+  if (env.history && env.history.length > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.history.length} old snapshots from previous scenario`);
+    env.history = [];
+  }
+  env.height = 0;
+  if (env.runtimeInput) {
+    env.runtimeInput.runtimeTxs = [];
+    env.runtimeInput.entityInputs = [];
+  } else {
+    env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
+  }
+  env.pendingOutputs = [];
+  env.pendingNetworkOutputs = [];
+  env.networkInbox = [];
+  env.frameLogs = [];
+  env.gossip = createGossipLayer();
+
+  if (env.jReplicas && env.jReplicas.size > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.jReplicas.size} old jurisdictions from previous scenario`);
+    env.jReplicas.clear();
+  }
+  if (env.eReplicas && env.eReplicas.size > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.eReplicas.size} old entities from previous scenario`);
+    env.eReplicas.clear();
+  }
+  if (env.history && env.history.length > 0) {
+    console.log(`[SWAP-MARKET] Clearing ${env.history.length} old snapshots from previous scenario`);
+    env.history = [];
+  }
+  env.height = 0;
+  if (env.runtimeInput) {
+    env.runtimeInput.runtimeTxs = [];
+    env.runtimeInput.entityInputs = [];
+  } else {
+    env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
+  }
+  env.pendingOutputs = [];
+  env.pendingNetworkOutputs = [];
+  env.networkInbox = [];
+  env.frameLogs = [];
+  env.gossip = createGossipLayer();
 
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('      SWAP MARKET: Multi-Party Orderbook Simulation            ');
@@ -112,19 +163,19 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('📦 Creating 10 market participants (3 hubs + 7 traders)...');
 
   const hubs = [
-    { name: 'HubETH', id: '0x' + '1'.padStart(64, '0'), signer: 's1', role: 'hub', pairs: ['1/4'] }, // ETH/USDC
-    { name: 'HubBTC', id: '0x' + '2'.padStart(64, '0'), signer: 's2', role: 'hub', pairs: ['2/4'] }, // BTC/USDC
-    { name: 'HubDAI', id: '0x' + '3'.padStart(64, '0'), signer: 's3', role: 'hub', pairs: ['3/4'] }, // DAI/USDC
+    { name: 'HubETH', id: '0x' + '1'.padStart(64, '0'), signer: '1', role: 'hub', pairs: ['1/4'] }, // ETH/USDC
+    { name: 'HubBTC', id: '0x' + '2'.padStart(64, '0'), signer: '2', role: 'hub', pairs: ['2/4'] }, // BTC/USDC
+    { name: 'HubDAI', id: '0x' + '3'.padStart(64, '0'), signer: '3', role: 'hub', pairs: ['3/4'] }, // DAI/USDC
   ];
 
   const traders = [
-    { name: 'Alice', id: '0x' + '4'.padStart(64, '0'), signer: 's4', role: 'maker' },
-    { name: 'Bob', id: '0x' + '5'.padStart(64, '0'), signer: 's5', role: 'maker' },
-    { name: 'Carol', id: '0x' + '6'.padStart(64, '0'), signer: 's6', role: 'taker' },
-    { name: 'Dave', id: '0x' + '7'.padStart(64, '0'), signer: 's7', role: 'taker' },
-    { name: 'Eve', id: '0x' + '8'.padStart(64, '0'), signer: 's8', role: 'maker' },
-    { name: 'Frank', id: '0x' + '9'.padStart(64, '0'), signer: 's9', role: 'taker' },
-    { name: 'Grace', id: '0x' + 'a'.padStart(64, '0'), signer: 's10', role: 'maker' },
+    { name: 'Alice', id: '0x' + '4'.padStart(64, '0'), signer: '4', role: 'maker' },
+    { name: 'Bob', id: '0x' + '5'.padStart(64, '0'), signer: '5', role: 'maker' },
+    { name: 'Carol', id: '0x' + '6'.padStart(64, '0'), signer: '6', role: 'taker' },
+    { name: 'Dave', id: '0x' + '7'.padStart(64, '0'), signer: '7', role: 'taker' },
+    { name: 'Eve', id: '0x' + '8'.padStart(64, '0'), signer: '8', role: 'maker' },
+    { name: 'Frank', id: '0x' + '9'.padStart(64, '0'), signer: '9', role: 'taker' },
+    { name: 'Grace', id: '0x' + 'a'.padStart(64, '0'), signer: '10', role: 'maker' },
   ];
 
   const entities = [...hubs, ...traders];
@@ -634,6 +685,53 @@ export async function swapMarket(env: Env): Promise<void> {
   // ============================================================================
   console.log('🔄 Final convergence (flush pending frames)...');
   await converge(env, 200);
+  const dumpAccountState = (label: string, entityId: string, counterpartyId: string) => {
+    const [, rep] = findReplica(env, entityId);
+    if (!rep) {
+      console.warn(`[SWAP-MARKET] ${label}: missing replica ${entityId.slice(-4)}`);
+      return;
+    }
+    const account = rep.state.accounts.get(counterpartyId);
+    if (!account) {
+      console.warn(`[SWAP-MARKET] ${label}: no account ${entityId.slice(-4)}↔${counterpartyId.slice(-4)}`);
+      return;
+    }
+    const mempoolTypes = account.mempool.map(tx => tx.type);
+    const pendingTypes = account.pendingFrame?.accountTxs.map(tx => tx.type) ?? [];
+    console.warn(
+      `[SWAP-MARKET] ${label}: ${entityId.slice(-4)}↔${counterpartyId.slice(-4)} ` +
+        `height=${account.currentHeight} pending=${account.pendingFrame ? 'yes' : 'no'} ` +
+        `sent=${account.sentTransitions} acked=${account.ackedTransitions} ` +
+        `sendCounter=${account.sendCounter} recvCounter=${account.receiveCounter} ` +
+        `mempool=[${mempoolTypes.join(',')}] pendingTxs=[${pendingTypes.join(',')}]`,
+    );
+  };
+  await processUntil(
+    env,
+    () => {
+      try {
+        assertRuntimeIdle(env, 'Swap Market');
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    400,
+    'Swap Market idle',
+    undefined,
+    () => {
+      try {
+        assertRuntimeIdle(env, 'Swap Market');
+      } catch (error) {
+        console.warn(error instanceof Error ? error.message : error);
+        const hubDaiId = hubDai.id;
+        dumpAccountState('idle-debug hubDai→bob', hubDaiId, bob.id);
+        dumpAccountState('idle-debug bob→hubDai', bob.id, hubDaiId);
+        dumpAccountState('idle-debug hubDai→eve', hubDaiId, eve.id);
+        dumpAccountState('idle-debug eve→hubDai', eve.id, hubDaiId);
+      }
+    }
+  );
   console.log('✅ Final convergence complete\n');
 
   console.log('═══════════════════════════════════════════════════════════════');
@@ -690,6 +788,7 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log(`🚫 Cancellations: 1`);
   console.log('═══════════════════════════════════════════════════════════════\n');
   } finally {
+    env.scenarioMode = prevScenarioMode ?? false;
     restoreStrict();
   }
 }
@@ -700,11 +799,11 @@ export async function swapMarket(env: Env): Promise<void> {
 
 export async function swapMarketStress(env: Env): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'Swap Market Stress');
+  const prevScenarioMode = env.scenarioMode;
   try {
-  // Register test keys for real signatures
-  const { registerTestKeys } = await import('../account-crypto');
-  await registerTestKeys(['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's10', 's11', 's12', 's13', 's14', 's15']);
-  env.runtimeSeed = 'stress-test-seed-42';
+  env.scenarioMode = true; // Deterministic time control
+  requireRuntimeSeed(env, 'Swap Market Stress');
+  ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'], 'Swap Market Stress');
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
 
@@ -729,13 +828,13 @@ export async function swapMarketStress(env: Env): Promise<void> {
   console.log('✅ BrowserVM J-Machine created\n');
 
   // Create 1 hub + 10 traders
-  const hub = { name: 'Hub', id: '0x' + '1'.padStart(64, '0'), signer: 's1' };
+  const hub = { name: 'Hub', id: '0x' + '1'.padStart(64, '0'), signer: '1' };
   const traders: Array<{ name: string; id: string; signer: string }> = [];
   for (let i = 0; i < 10; i++) {
     traders.push({
       name: `Trader${i}`,
       id: '0x' + (i + 2).toString(16).padStart(64, '0'),
-      signer: `s${i + 2}`,
+      signer: String(i + 2),
     });
   }
 
@@ -921,7 +1020,12 @@ export async function swapMarketStress(env: Env): Promise<void> {
   console.log(`👥 Traders: ${traders.length}`);
   console.log('═══════════════════════════════════════════════════════════════\n');
 
+    // Drain any trailing mempool/pending frames before returning.
+    await converge(env, 200);
+    assertRuntimeIdle(env, 'Swap Market');
+
   } finally {
+    env.scenarioMode = prevScenarioMode ?? false;
     restoreStrict();
   }
 }
@@ -931,6 +1035,7 @@ if (import.meta.main) {
   const { createEmptyEnv } = await import('../runtime');
   const env = createEmptyEnv();
   env.scenarioMode = true;
+  env.runtimeSeed = 'swap-market-cli-seed-42'; // Set before require check
 
   const args = process.argv.slice(2);
   if (args.includes('--stress')) {

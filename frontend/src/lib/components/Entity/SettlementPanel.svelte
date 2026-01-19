@@ -123,7 +123,7 @@
       if (!env || !('history' in env)) throw new Error('Environment not ready or in historical mode');
 
       // Find signer ID
-      let signerId = 's1';
+      let signerId = '1';
       for (const key of env.eReplicas.keys()) {
         if (key.startsWith(entityId + ':')) {
           signerId = key.split(':')[1]!;

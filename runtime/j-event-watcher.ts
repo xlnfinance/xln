@@ -824,10 +824,7 @@ export async function setupJEventWatcher(
     startBlock: 0,
   });
 
-  // Add example signers (legacy compatibility - not used in first-principles design)
-  watcher.addSigner('s1', 's1-private-key', ['1', '2', '3', '4', '5']);
-  watcher.addSigner('s2', 's2-private-key', ['1', '2', '3', '4', '5']);
-  watcher.addSigner('s3', 's3-private-key', ['1', '2', '3', '4', '5']);
+  // Legacy signer registry intentionally omitted (first-principles design).
 
   await watcher.startWatching(env);
 
