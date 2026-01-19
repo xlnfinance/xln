@@ -19,6 +19,7 @@
   import InsurancePanel from './panels/InsurancePanel.svelte';
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
   import SolvencyPanel from './panels/SolvencyPanel.svelte';
+  import GossipPanel from './panels/GossipPanel.svelte';
   import BrainVaultView from '$lib/components/Views/BrainVaultView.svelte';
   import UserModePanel from './UserModePanel.svelte';
   // REMOVED PANELS:
@@ -364,6 +365,15 @@
               isolatedTimeIndex: localTimeIndex
             }
           });
+        } else if (options.name === 'gossip') {
+          component = mount(GossipPanel, {
+            target: div,
+            props: {
+              isolatedEnv: localEnvStore,
+              isolatedHistory: localHistoryStore,
+              isolatedTimeIndex: localTimeIndex
+            }
+          });
         } else if (options.name === 'entity-panel') {
           // ENTITY PANEL: Don't mount here - wait for init() to get panel ID
           // Component will be mounted in init() callback with data from Map
@@ -495,6 +505,17 @@
       inactive: true,
       params: {
         closeable: false, // Core panel - cannot close
+      },
+    });
+
+    ensurePanel({
+      id: 'gossip',
+      component: 'gossip',
+      title: '📡 Gossip',
+      position: { direction: 'within', referencePanel: 'architect' },
+      inactive: true,
+      params: {
+        closeable: false, // Core panel - debugging
       },
     });
 

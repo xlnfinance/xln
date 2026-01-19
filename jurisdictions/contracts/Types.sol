@@ -94,6 +94,7 @@ struct InitialDisputeProof {
 
 struct FinalDisputeProof {
   bytes32 counterentity;
+  uint initialCooperativeNonce;  // Nonce from when dispute was started
   uint finalCooperativeNonce;
   uint initialDisputeNonce;
   uint finalDisputeNonce;
@@ -156,6 +157,11 @@ struct ReserveToExternalToken {
   uint amount;
 }
 
+struct SecretReveal {
+  address transformer;
+  bytes32 secret;
+}
+
 struct Batch {
   Flashloan[] flashloans;
   ReserveToReserve[] reserveToReserve;
@@ -165,6 +171,7 @@ struct Batch {
   FinalDisputeProof[] disputeFinalizations;
   ExternalTokenToReserve[] externalTokenToReserve;
   ReserveToExternalToken[] reserveToExternalToken;
+  SecretReveal[] revealSecrets;
   uint hub_id;
 }
 

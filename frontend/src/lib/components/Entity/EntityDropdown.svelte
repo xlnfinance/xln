@@ -6,6 +6,7 @@
   import { createEventDispatcher } from 'svelte';
   import { replicas, xlnFunctions, entityPositions, xlnInstance } from '../../stores/xlnStore';
   import { visibleReplicas } from '../../stores/timeStore';
+  import { activeVault } from '../../stores/vaultStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
   import type { Tab } from '$lib/types/ui';
@@ -34,20 +35,20 @@
   $: activeEnv = contextEnv ? $contextEnv : null;
   $: positionsMap = $entityPositions;
 
-  // Build tree structure reactively
+  // Build tree structure reactively (grouped by signer, not entity)
+  interface SignerNode {
+    signerId: string;
+    address: string;
+    avatarUrl: string;
+    entities: EntityNode[];
+  }
+
   interface EntityNode {
     entityId: string;
     name: string;
     shortId: string;
     avatarUrl: string;
-    signers: SignerNode[];
-  }
-
-  interface SignerNode {
     signerId: string;
-    shortId: string;
-    avatarUrl: string;
-    entityId: string;
   }
 
   interface JMachineNode {
@@ -55,7 +56,7 @@
   }
 
   $: jMachines = buildJMachines(activeEnv);
-  $: entityTree = buildEntityTree(
+  $: signerTree = buildSignerTree(
     activeReplicas,
     activeXlnFunctions,
     searchTerm,
@@ -78,67 +79,71 @@
       .filter((jr: JMachineNode) => jr.name);
   }
 
-  function buildEntityTree(
+  function buildSignerTree(
     replicas: Map<string, any> | null | undefined,
     xlnFuncs: any,
     search: string,
     jurisdiction: string | null,
     positions: Map<string, any>
-  ): EntityNode[] {
+  ): SignerNode[] {
     if (!replicas || !xlnFuncs) return [];
 
-    const entityGroups = new Map<string, any[]>();
+    const signerGroups = new Map<string, any[]>();
 
-    // Group by entity
+    // Group by signerId
     for (const replica of replicas.values()) {
-      const entityId = replica.entityId;
-      if (!entityGroups.has(entityId)) {
-        entityGroups.set(entityId, []);
+      const signerId = replica.signerId;
+      if (!signerGroups.has(signerId)) {
+        signerGroups.set(signerId, []);
       }
-      entityGroups.get(entityId)!.push(replica);
+      signerGroups.get(signerId)!.push(replica);
     }
 
-    const nodes: EntityNode[] = [];
+    const nodes: SignerNode[] = [];
     const searchLower = search.toLowerCase();
 
-    for (const [entityId, signerReplicas] of entityGroups) {
-      const firstReplica = signerReplicas[0];
-      const entityJurisdiction = getReplicaJurisdiction(firstReplica, positions, entityId);
-      const filter = (jurisdiction || '').toLowerCase();
+    for (const [signerId, entityReplicas] of signerGroups) {
+      const entities: EntityNode[] = [];
 
-      if (filter && filter !== 'all' && entityJurisdiction && entityJurisdiction.toLowerCase() !== filter) {
-        continue;
-      }
-      if (filter && filter !== 'all' && !entityJurisdiction) {
-        continue;
-      }
-      const name = getEntityName(firstReplica);
-      const shortId = xlnFuncs.getEntityShortId(entityId);
-      const displayName = name || `Entity #${shortId}`;
+      for (const replica of entityReplicas) {
+        const entityId = replica.entityId;
+        const entityJurisdiction = getReplicaJurisdiction(replica, positions, entityId);
+        const filter = (jurisdiction || '').toLowerCase();
 
-      // Filter by search
-      if (search && !displayName.toLowerCase().includes(searchLower) &&
-          !entityId.toLowerCase().includes(searchLower)) {
-        // Check if any signer matches
-        const signerMatch = signerReplicas.some((r: any) =>
-          r.signerId.toLowerCase().includes(searchLower)
-        );
-        if (!signerMatch) continue;
+        if (filter && filter !== 'all' && entityJurisdiction && entityJurisdiction.toLowerCase() !== filter) {
+          continue;
+        }
+        if (filter && filter !== 'all' && !entityJurisdiction) {
+          continue;
+        }
+
+        const name = getEntityName(replica);
+        const shortId = xlnFuncs.getEntityShortId(entityId);
+        const displayName = name || `Entity #${shortId}`;
+
+        // Filter by search
+        if (search && !displayName.toLowerCase().includes(searchLower) &&
+            !entityId.toLowerCase().includes(searchLower) &&
+            !signerId.toLowerCase().includes(searchLower)) {
+          continue;
+        }
+
+        entities.push({
+          entityId,
+          name: displayName,
+          shortId,
+          avatarUrl: xlnFuncs.generateEntityAvatar?.(entityId) || '',
+          signerId
+        });
       }
 
-      const signers: SignerNode[] = signerReplicas.map((replica: any) => ({
-        signerId: replica.signerId,
-        shortId: replica.signerId.slice(0, 8) + '...' + replica.signerId.slice(-4),
-        avatarUrl: xlnFuncs.generateSignerAvatar?.(replica.signerId) || '',
-        entityId: replica.entityId
-      }));
+      if (entities.length === 0) continue;
 
       nodes.push({
-        entityId,
-        name: displayName,
-        shortId,
-        avatarUrl: xlnFuncs.generateEntityAvatar?.(entityId) || '',
-        signers
+        signerId,
+        address: signerId, // signerId IS the EOA address now
+        avatarUrl: xlnFuncs.generateSignerAvatar?.(signerId) || '',
+        entities
       });
     }
 
@@ -187,6 +192,12 @@
     return `Entity #${entityNum}`;
   }
 
+  function selectSigner(signerId: string) {
+    dispatch('signerSelect', { signerId });
+    isOpen = false;
+    searchTerm = '';
+  }
+
   function selectEntity(signerId: string, entityId: string) {
     dispatch('entitySelect', {
       jurisdiction: 'browservm',
@@ -217,11 +228,17 @@
     searchTerm = '';
   }
 
+  function handleAddSigner() {
+    dispatch('addSigner', {});
+    isOpen = false;
+    searchTerm = '';
+  }
+
   $: canAddEntity = allowAdd && !!(jurisdictionFilter || selectedJurisdiction);
   $: canAddJurisdiction = allowAddJurisdiction && !!activeEnv;
 </script>
 
-<Dropdown bind:open={isOpen} minWidth={280} maxWidth={400}>
+<Dropdown bind:open={isOpen} minWidth={320} maxWidth={500}>
   <span slot="trigger" class="trigger-content">
     <span class="trigger-icon">🏛️</span>
     <span class="trigger-text">{displayText}</span>
@@ -233,81 +250,100 @@
     <div class="search-box">
       <input
         type="text"
-        placeholder="Search entities..."
+        placeholder="Search..."
         bind:value={searchTerm}
         on:click|stopPropagation
       />
     </div>
 
-    <!-- J-Machines -->
-    {#if jMachines.length > 0}
-      <div class="menu-section-label">J-Machines</div>
-      <div class="jmachine-list">
-        {#each jMachines as jm (jm.name)}
-          <button
-            class="menu-item jmachine-item"
-            class:active={selectedJurisdiction === jm.name}
-            on:click={() => selectJurisdiction(jm.name)}
-          >
-            <span class="menu-icon">🧭</span>
-            <span class="menu-label">{jm.name}</span>
-          </button>
-        {/each}
-      </div>
+    <!-- EOA Wallet (always first) -->
+    {@const firstSignerAddress = $activeVault?.signers?.[0]?.address}
+    {#if firstSignerAddress}
+      <button
+        class="menu-item jmachine-item"
+        on:click={() => selectSigner(firstSignerAddress)}
+      >
+        <span class="menu-icon">💼</span>
+        <span class="menu-label">EOA Wallet</span>
+      </button>
       <div class="menu-divider"></div>
     {/if}
 
-    <!-- Entity Tree -->
+    <!-- Signer Tree (entities as children) -->
     <div class="entity-list">
-      {#if entityTree.length === 0}
+      {#if signerTree.length === 0}
         <div class="empty-state">
           {#if searchTerm}
-            No matches for "{searchTerm}"
+            <div class="empty-text">No matches for "{searchTerm}"</div>
           {:else}
-            No entities available
+            <div class="empty-icon">🏢</div>
+            <div class="empty-text">No accounts yet</div>
+            {#if canAddEntity}
+              <div class="empty-hint">Click "+ Add Entity" below to create one</div>
+            {/if}
           {/if}
         </div>
       {:else}
-        <div class="menu-section-label">Entities</div>
-        {#each entityTree as entity (entity.entityId)}
+        {#each signerTree as signer (signer.signerId)}
           <div class="entity-group">
-            <!-- Entity header -->
+            <!-- Signer header (with identicon, truncated address) -->
             <div class="entity-header">
-              {#if entity.avatarUrl}
-                <img src={entity.avatarUrl} alt="" class="avatar" />
+              {#if signer.avatarUrl}
+                <img src={signer.avatarUrl} alt="" class="avatar" />
               {/if}
-              <span class="entity-name">{entity.name}</span>
+              <span class="entity-name" title={signer.address}>
+                {signer.address.slice(0, 6)}...{signer.address.slice(-4)}
+              </span>
             </div>
 
-            <!-- Signers -->
-            {#each entity.signers as signer, i (signer.signerId)}
+            <!-- Entities under this signer -->
+            {#each signer.entities as entity, i (entity.entityId)}
               <button
                 class="signer-item"
-                class:last={i === entity.signers.length - 1}
-                on:click={() => selectEntity(signer.signerId, signer.entityId)}
+                class:last={i === signer.entities.length - 1}
+                on:click={() => selectEntity(entity.signerId, entity.entityId)}
               >
-                <span class="tree-branch">{i === entity.signers.length - 1 ? '└─' : '├─'}</span>
-                {#if signer.avatarUrl}
-                  <img src={signer.avatarUrl} alt="" class="avatar-sm" />
+                <span class="tree-branch">{i === signer.entities.length - 1 ? '└─' : '├─'}</span>
+                {#if entity.avatarUrl}
+                  <img src={entity.avatarUrl} alt="" class="avatar-sm" />
                 {/if}
-                <span class="signer-addr">{signer.shortId}</span>
+                <span class="signer-addr">{entity.name}</span>
               </button>
             {/each}
           </div>
         {/each}
       {/if}
-    </div>
 
-    {#if canAddJurisdiction || canAddEntity}
-      <div class="menu-divider"></div>
-      {#if canAddJurisdiction}
-        <button class="menu-item add-item" on:click={handleAddJurisdiction}>
-          <span class="menu-label">+ Add J-Machine</span>
-        </button>
-      {/if}
       {#if canAddEntity}
         <button class="menu-item add-item" on:click={handleAddEntity}>
           <span class="menu-label">+ Add Entity</span>
+        </button>
+      {/if}
+    </div>
+
+    <!-- Add Signer (at bottom of entities) -->
+    {#if firstSignerAddress}
+      <button class="menu-item add-item" on:click={handleAddSigner}>
+        <span class="menu-label">+ Add Signer</span>
+      </button>
+    {/if}
+
+    <!-- J-Machines section -->
+    {#if jMachines.length > 0}
+      <div class="menu-divider"></div>
+      {#each jMachines as jm (jm.name)}
+        <button
+          class="menu-item jmachine-item"
+          class:active={selectedJurisdiction === jm.name}
+          on:click={() => selectJurisdiction(jm.name)}
+        >
+          <span class="menu-icon">🏛️</span>
+          <span class="menu-label">{jm.name}</span>
+        </button>
+      {/each}
+      {#if canAddJurisdiction}
+        <button class="menu-item add-item" on:click={handleAddJurisdiction}>
+          <span class="menu-label">+ Add J-Machine</span>
         </button>
       {/if}
     {/if}
@@ -407,10 +443,30 @@
   }
 
   .empty-state {
-    padding: 24px;
+    padding: 32px 24px;
     text-align: center;
-    color: #666;
-    font-size: 13px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .empty-icon {
+    font-size: 40px;
+    opacity: 0.2;
+  }
+
+  .empty-text {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .empty-hint {
+    color: rgba(255, 255, 255, 0.35);
+    font-size: 12px;
+    max-width: 200px;
+    line-height: 1.4;
   }
 
   .entity-group {
@@ -441,6 +497,9 @@
 
   .entity-name {
     flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .signer-item {
@@ -479,15 +538,27 @@
     margin: 4px 8px;
   }
 
+  .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+    color: #e1e1e1;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .menu-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+
   .add-item {
     color: #7aa8ff;
-    padding: 8px 12px;
-    text-align: left;
-    width: 100%;
-    border: none;
-    background: transparent;
-    border-radius: 6px;
-    cursor: pointer;
   }
 
   .add-item:hover {

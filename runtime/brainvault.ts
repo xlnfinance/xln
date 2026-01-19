@@ -370,7 +370,7 @@ export function createResumeToken(
   nameHash: Uint8Array,
   factor: number,
   shardResults: Map<number, Uint8Array>,
-  name?: string,
+  name?: string, // DEPRECATED - not used in token (prevents btoa Unicode errors)
 ): string {
   const token: ResumeToken = {
     version: 'bv2.1',
@@ -380,9 +380,17 @@ export function createResumeToken(
     shardResults: Object.fromEntries(
       Array.from(shardResults.entries()).map(([k, v]) => [k, bytesToHex(v)])
     ),
-    ...(name ? { name } : {}),
+    // name removed - prevents btoa() errors with Unicode (cyrillic, emoji, etc.)
   };
-  return btoa(JSON.stringify(token));
+  // Unicode-safe base64 encoding: JSON -> UTF-8 bytes -> base64
+  const json = JSON.stringify(token);
+  const bytes = new TextEncoder().encode(json);
+  // Convert Uint8Array to base64 (works in both browser and Bun)
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(bytes).toString('base64');
+  }
+  // Browser fallback: convert bytes to Latin1 string, then btoa
+  return btoa(String.fromCharCode(...bytes));
 }
 
 /**
@@ -390,7 +398,19 @@ export function createResumeToken(
  */
 export function parseResumeToken(tokenStr: string): ResumeToken | null {
   try {
-    const json = atob(tokenStr);
+    // Unicode-safe base64 decoding: base64 -> UTF-8 bytes -> JSON
+    let bytes: Uint8Array;
+    if (typeof Buffer !== 'undefined') {
+      bytes = Buffer.from(tokenStr, 'base64');
+    } else {
+      // Browser: atob to Latin1 string, then to bytes
+      const binaryString = atob(tokenStr);
+      bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+    }
+    const json = new TextDecoder().decode(bytes);
     const token = JSON.parse(json) as ResumeToken;
     if (token.version !== 'bv2.1') return null;
     return token;

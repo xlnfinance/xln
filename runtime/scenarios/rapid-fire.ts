@@ -20,7 +20,7 @@
 import type { Env, EntityInput } from '../types';
 import { getPerfMs } from '../time';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
-import { findReplica, getOffdelta, converge, assert } from './helpers';
+import { findReplica, getOffdelta, converge, assert, enableStrictScenario } from './helpers';
 
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
@@ -49,9 +49,12 @@ const usd = (amount: number | bigint) => BigInt(amount) * ONE;
 // Using helpers from helpers.ts (no duplication)
 
 export async function rapidFire(env: Env): Promise<void> {
+  const restoreStrict = enableStrictScenario(env, 'Rapid Fire');
+  try {
   // Register test keys for real signatures
   const { registerTestKeys } = await import('../account-crypto');
   await registerTestKeys(['s1', 's2', 's3', 'hub', 'alice', 'bob', 'carol', 'dave', 'frank']);
+  env.runtimeSeed = 'test-seed-deterministic-42';
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
 
@@ -68,7 +71,7 @@ export async function rapidFire(env: Env): Promise<void> {
   // ============================================================================
   console.log('🏛️  Setting up test environment...');
 
-  const browserVM = await ensureBrowserVM();
+  const browserVM = await ensureBrowserVM(env);
   const depositoryAddress = browserVM.getDepositoryAddress();
   createJReplica(env, 'RapidFire', depositoryAddress, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
 
@@ -275,6 +278,9 @@ export async function rapidFire(env: Env): Promise<void> {
   console.log(`   Throughput: ${((forwardCount + reverseCount) / (totalTime / 1000)).toFixed(1)} tx/s`);
   console.log(`   Frames: ${env.history?.length || 0}`);
   console.log('═══════════════════════════════════════════════════════════════\n');
+  } finally {
+    restoreStrict();
+  }
 }
 
 // Self-executing

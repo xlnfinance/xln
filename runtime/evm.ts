@@ -5,9 +5,10 @@
 
 import { ethers } from 'ethers';
 import { loadJurisdictions } from './jurisdiction-loader';
-import type { JBatch } from './j-batch';
+import { encodeJBatch, computeBatchHankoHash, type JBatch } from './j-batch';
 
 import { detectEntityType, encodeBoard, extractNumberFromEntityId, hashBoard } from './entity-factory';
+import { normalizeEntityId } from './entity-id-utils';
 import { safeStringify } from './serialization-utils';
 import type { ConsensusConfig, JurisdictionConfig } from './types';
 import { DEBUG, isBrowser } from './utils';
@@ -65,7 +66,9 @@ export const DEPOSITORY_ABI = [
   'function debugFundReserves(bytes32 entity, uint256 tokenId, uint256 amount) external',
   'function debugBulkFundEntities() external',
   'function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint256 tokenId, uint256 amount) external returns (bool)',
-  'function processBatch(bytes32 entity, tuple(tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(bytes32 entity, bytes32 packedToken, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig)[] settlements, tuple(bytes32 counterentity, tuple(uint256 tokenId, int256 peerReserveDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig)[] cooperativeUpdate, tuple(bytes32 counterentity, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] subcontracts) proofbody, bytes initialArguments, bytes finalArguments, bytes sig)[] cooperativeDisputeProof, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] initialDisputeProof, tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 initialDisputeNonce, uint256 disputeUntilBlock, bytes32 initialProofbodyHash, bytes initialArguments, bool startedByLeft, uint256 finalCooperativeNonce, uint256 finalDisputeNonce, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] subcontracts) finalProofbody, bytes finalArguments, bytes sig)[] finalDisputeProof, tuple(uint256 tokenId, uint256 amount)[] flashloans, uint256 hub_id) batch) external returns (bool)',
+  'function processBatch(bytes encodedBatch, address entityProvider, bytes hankoData, uint256 nonce) external returns (bool)',
+  'function unsafeProcessBatch(bytes32 entity, tuple(tuple(uint256 tokenId, uint256 amount)[] flashloans, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts, tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 finalCooperativeNonce, uint256 initialDisputeNonce, uint256 finalDisputeNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations, tuple(bytes32 entity, bytes32 packedToken, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(address transformer, bytes32 secret)[] revealSecrets, uint256 hub_id) batch) external returns (bool)',
+  'function entityNonces(address) view returns (uint256)',
   'function prefundAccount(bytes32 fundingEntity, bytes32 counterpartyEntity, uint256 tokenId, uint256 amount) external returns (bool)',
   'function settle(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig) external returns (bool)',
   'function _reserves(bytes32 entity, uint256 tokenId) external view returns (uint256)',
@@ -75,6 +78,9 @@ export const DEPOSITORY_ABI = [
   'function getAvailableInsurance(bytes32 insured, uint256 tokenId) external view returns (uint256)',
   // Canonical J-Events (must match CANONICAL_J_EVENTS in j-event-watcher.ts)
   'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
+  'event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret)',
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments)',
+  'event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed initialDisputeNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash)',
   // Note: AccountSettled is emitted via DELEGATECALL from Account.sol - parsed directly from logs
   // Insurance events
   'event InsuranceRegistered(bytes32 indexed insured, bytes32 indexed insurer, uint256 indexed tokenId, uint256 limit, uint64 expiresAt)',
@@ -88,8 +94,8 @@ export const DEPOSITORY_ABI = [
 export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
   // Declare outside try block for error logging
   let rpcUrl = jurisdiction.address;
-  const entityProviderAddress = jurisdiction.entityProviderAddress;
-  const depositoryAddress = jurisdiction.depositoryAddress;
+  let entityProviderAddress = jurisdiction.entityProviderAddress;
+  let depositoryAddress = jurisdiction.depositoryAddress;
 
   try {
     // FINTECH-SAFETY: Validate jurisdiction structure before using
@@ -136,9 +142,35 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
     const isBrowserVM = resolvedRpcUrl.startsWith('browservm://');
 
     if (isBrowserVM) {
-      // Use BrowserVM provider
+      // Use BrowserVM provider (lazy-init if needed)
+      // NOTE: This path is for legacy code. New code should use env.browserVM
       if (!BROWSER_VM_INSTANCE) {
-        throw new Error('BrowserVM instance not set - call setBrowserVMJurisdiction with browserVM instance first');
+        const { BrowserEVM } = await import('./evms/browser-evm');
+        const evm = new BrowserEVM();
+        await evm.init();
+        // Store in global singleton (backward compat - no env available here)
+        BROWSER_VM_INSTANCE = evm.getProvider();
+        // Update jurisdictions with this VM's addresses
+        const depositoryAddress = evm.getDepositoryAddress();
+        const entityProviderAddress = evm.getEntityProviderAddress();
+        DEFAULT_JURISDICTIONS = new Map();
+        DEFAULT_JURISDICTIONS.set('arrakis', {
+          name: 'Arrakis',
+          chainId: 1337,
+          address: 'browservm://',
+          entityProviderAddress,
+          depositoryAddress,
+        });
+        console.log('✅ Legacy BrowserVM jurisdiction active (global singleton)');
+      }
+      if (!BROWSER_VM_INSTANCE) {
+        throw new Error('BrowserVM instance not set - failed to initialize BrowserVM');
+      }
+      if (BROWSER_VM_INSTANCE?.getEntityProviderAddress && (!entityProviderAddress || entityProviderAddress === '0x0000000000000000000000000000000000000000')) {
+        entityProviderAddress = BROWSER_VM_INSTANCE.getEntityProviderAddress();
+      }
+      if (BROWSER_VM_INSTANCE?.getDepositoryAddress && (!depositoryAddress || depositoryAddress === '0x0000000000000000000000000000000000000000')) {
+        depositoryAddress = BROWSER_VM_INSTANCE.getDepositoryAddress();
       }
       uiLog(`🧪 Using BrowserVM ethers provider`);
       provider = new BrowserVMEthersProvider(BROWSER_VM_INSTANCE);
@@ -277,178 +309,47 @@ export const submitPrefundAccount = async (jurisdiction: JurisdictionConfig, ent
   }
 };
 
-export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entityId: string, batch: JBatch | any) => {
+export const submitProcessBatch = async (
+  env: any,
+  jurisdiction: JurisdictionConfig,
+  entityId: string,
+  batch: JBatch | any,
+  signerId?: string
+) => {
   try {
-    console.log(`💸 Submitting processBatch to ${jurisdiction.name} as entity ${entityId.slice(0, 10)}...`);
-    console.log(`🔍 BATCH DEBUG:`, safeStringify(batch));
-    console.log(`🔍 ENTITY DEBUG: ${entityId}`);
-    console.log(`🔍 JURISDICTION DEBUG:`, jurisdiction);
-    console.log(`🔍 JURISDICTION SOURCE: Reading from jurisdictions.json file`);
-    console.log(`🔍 DEPOSITORY ADDRESS FROM JURISDICTION: ${jurisdiction.depositoryAddress}`);
-    console.log(`🔍 ENTITY PROVIDER ADDRESS FROM JURISDICTION: ${jurisdiction.entityProviderAddress}`);
-    
-    // Fix batch amounts - convert any JS numbers to wei strings
-    if (batch.reserveToReserve) {
-      for (let i = 0; i < batch.reserveToReserve.length; i++) {
-        const transfer = batch.reserveToReserve[i];
-        if (typeof transfer.amount === 'number') {
-          // Convert number to wei string
-          const weiAmount = (BigInt(Math.floor(transfer.amount * 1e18))).toString();
-          console.log(`🔧 Converting amount ${transfer.amount} → ${weiAmount} wei`);
-          transfer.amount = weiAmount;
-        }
-      }
+    if (!signerId) {
+      throw new Error(`submitProcessBatch требует signerId для ${entityId.slice(0, 10)}`);
     }
-    console.log(`🔍 FIXED BATCH:`, safeStringify(batch));
 
+    console.log(`💸 Submitting processBatch (Hanko) to ${jurisdiction.name} as entity ${entityId.slice(0, 10)}...`);
     const { depository, provider } = await connectToEthereum(jurisdiction);
-    console.log(`🔍 CONTRACT ADDRESS: ${depository.target}`);
-    
-    // Check if contract exists
-    const code = await provider.getCode(depository.target);
-    console.log(`🔍 CONTRACT CODE LENGTH: ${code.length} characters`);
-    
-    if (code === '0x') {
-      throw new Error('Contract not deployed at this address');
-    }
-    
-    // Test if this is our new contract
-    try {
-      console.log(`🔍 Testing if contract has debugBulkFundEntities...`);
-      await depository['debugBulkFundEntities']?.staticCall?.();
-      console.log(`✅ This is our NEW contract with debug functions!`);
-    } catch (debugError) {
-      console.log(`❌ This is OLD contract - no debug functions:`, (debugError as Error).message);
-    }
-    
-    // Check current balance (entities should be pre-funded in constructor)
-    console.log(`🔍 Checking balance for entity ${entityId} token ${batch.reserveToReserve[0]?.tokenId || 1}...`);
-    try {
-      const currentBalance = await depository['_reserves']!(entityId, batch.reserveToReserve[0]?.tokenId || 1);
-      console.log(`🔍 Current balance: ${currentBalance.toString()}`);
-      
-      if (currentBalance.toString() === '0') {
-        console.log(`⚠️ Entity has no reserves - this suggests old contract without pre-funding`);
-        throw new Error(`Entity ${entityId.slice(0, 10)} has no reserves! Contract should be pre-funded.`);
-      }
-    } catch (balanceError) {
-      console.log(`❌ Failed to check balance:`, (balanceError as Error).message);
-      throw balanceError;
-    }
-    
-    // Debug the exact function call being made
-    console.log(`🔍 Function signature: processBatch(bytes32,tuple)`);
-    console.log(`🔍 Entity ID: ${entityId}`);
-    console.log(`🔍 Batch structure:`, Object.keys(batch));
-    console.log(`🔍 reserveToReserve array:`, batch.reserveToReserve);
-    
-    // Check if function exists in contract interface
-    const functionFragments = depository.interface.fragments.filter(f => f.type === 'function');
-    const functions = functionFragments.map(f => {
-      // Proper typing: FunctionFragment has name property
-      return 'name' in f ? (f as { name: string }).name : 'unknown';
-    });
-    const hasProcessBatch = functions.includes('processBatch');
-    console.log(`🔍 Contract has processBatch function: ${hasProcessBatch}`);
-    console.log(`🔍 Available functions:`, functions.slice(0, 10), '...');
-    
-    // DEEP DEBUGGING: Check ABI vs deployed bytecode
-    console.log(`🔍 DEEP DEBUG: Contract interface analysis`);
-    console.log(`🔍 Contract target address: ${depository.target}`);
-    
-    // Get function selector for processBatch
-    const processBatchFunc = depository.interface.getFunction('processBatch');
-    const processBatchSelector = processBatchFunc?.selector || 'NOT_FOUND';
-    console.log(`🔍 Function selector: ${processBatchSelector}`);
-    
-    // Check deployed bytecode contains this selector
-    const bytecode = await provider.getCode(depository.target);
-    const hasSelector = bytecode.includes(processBatchSelector.slice(2)); // Remove 0x
-    console.log(`🔍 Deployed bytecode contains processBatch selector: ${hasSelector}`);
-    console.log(`🔍 Bytecode length: ${bytecode.length} chars`);
-    
-    // Check ABI hash vs expected
-    const abiHash = ethers.keccak256(ethers.toUtf8Bytes(safeStringify(depository.interface.fragments.map(f => {
-      // Proper typing: Fragment has format method
-      return 'format' in f && typeof f.format === 'function' ? f.format() : f.toString();
-    }))));
-    console.log(`🔍 ABI hash: ${abiHash.slice(0, 10)}...`);
-    
-    // Log exact call data being generated
-    const callData = depository.interface.encodeFunctionData('processBatch', [entityId, batch]);
-    console.log(`🔍 Call data length: ${callData.length} chars`);
-    console.log(`🔍 Call data start: ${callData.slice(0, 20)}...`);
-    
-    // Try different entity addresses to see if it's entity-specific
-    console.log(`🔍 Testing with different entity addresses...`);
-    
-    // Test entity 0 (should exist from token 0)
-    try {
-      const balance0 = await depository['_reserves']!("0x0000000000000000000000000000000000000000000000000000000000000000", 0);
-      console.log(`🔍 Entity 0 Token 0 balance: ${balance0.toString()}`);
-    } catch (e) {
-      console.log(`❌ Entity 0 balance check failed: ${(e as Error).message}`);
-    }
-    
-    // Try simpler batch with just empty arrays
-    const emptyBatch = {
-      reserveToExternalToken: [],
-      externalTokenToReserve: [],
-      reserveToReserve: [],
-      reserveToCollateral: [],
-      cooperativeUpdate: [],
-      cooperativeDisputeProof: [],
-      initialDisputeProof: [],
-      finalDisputeProof: [],
-      flashloans: [],
-      hub_id: 0
-    };
-    
-    console.log(`🔍 Testing empty batch first...`);
-    try {
-      const emptyResult = await depository['processBatch']?.staticCall(entityId, emptyBatch);
-      console.log(`✅ Empty batch works: ${emptyResult}`);
-      
-      // If empty batch works, try our batch
-      console.log(`🔍 Now testing our batch...`);
-      const result = await depository['processBatch']?.staticCall(entityId, batch);
-      console.log(`✅ Static call successful: ${result}`);
-    } catch (staticError) {
-      logError("BLOCKCHAIN", `❌ Static call failed:`, staticError);
 
-      // Type-safe error handling for ethers.js errors
-      const errorDetails: Record<string, unknown> = {};
-      if (staticError && typeof staticError === 'object') {
-        const errorObj = staticError as Record<string, unknown>;
-        const code = errorObj['code'];
-        const data = errorObj['data'];
-        const reason = errorObj['reason'];
-        if (code !== undefined) errorDetails['code'] = code;
-        if (data !== undefined) errorDetails['data'] = data;
-        if (reason !== undefined) errorDetails['reason'] = reason;
-      }
-      console.log(`🔍 Error details:`, errorDetails);
-      throw staticError;
+    const entityProviderAddress = jurisdiction.entityProviderAddress;
+    if (!entityProviderAddress || entityProviderAddress === '0x0000000000000000000000000000000000000000') {
+      throw new Error('Jurisdiction missing entityProviderAddress');
     }
-    
-    // First try to estimate gas to get better error info
-    console.log(`🔍 Estimating gas for processBatch...`);
-    try {
-      const gasEstimate = await depository['processBatch']?.estimateGas(entityId, batch);
-      console.log(`🔍 Gas estimate: ${gasEstimate?.toString() || 'N/A'}`);
-    } catch (gasError) {
-      logError("BLOCKCHAIN", `❌ Gas estimation failed:`, gasError);
-      throw gasError;
+
+    const encodedBatch = encodeJBatch(batch);
+    const net = await provider.getNetwork();
+    const chainId = BigInt(net.chainId);
+    const normalizedEntityId = normalizeEntityId(entityId);
+    const entityAddress = ethers.getAddress(`0x${normalizedEntityId.slice(-40)}`);
+    const currentNonce = await depository['entityNonces']?.(entityAddress);
+    const nextNonce = BigInt(currentNonce ?? 0) + 1n;
+    const batchHash = computeBatchHankoHash(chainId, String(depository.target), encodedBatch, nextNonce);
+
+    const { signHashesAsSingleEntity } = await import('./hanko-signing');
+    const hankos = await signHashesAsSingleEntity(env, entityId, signerId, [batchHash]);
+    const hankoData = hankos[0];
+    if (!hankoData) {
+      throw new Error('Failed to build batch hanko signature');
     }
-    
-    // Submit the batch transaction to the real blockchain (entity can sign as any entity for now)
-    const tx = await depository['processBatch']!(entityId, batch);
+
+    const tx = await depository['processBatch']!(encodedBatch, entityProviderAddress, hankoData, nextNonce);
     console.log(`📡 Transaction submitted: ${tx.hash}`);
-    
-    // Wait for confirmation
     const receipt = await tx.wait();
     console.log(`✅ Transaction confirmed in block ${receipt.blockNumber}`);
-    
+
     return { transaction: tx, receipt };
   } catch (error) {
     logError("BLOCKCHAIN", `❌ Failed to submit processBatch to ${jurisdiction.name}:`, error);
@@ -885,26 +786,35 @@ export const getAvailableJurisdictions = async (): Promise<JurisdictionConfig[]>
   return Array.from(jurisdictions.values());
 };
 
-// Store BrowserVM instance globally for runtime access
+// DEPRECATED: Use env.browserVM instead of global singleton
 let BROWSER_VM_INSTANCE: any = null;
 
 /**
  * Set BrowserVM jurisdiction (for isolated /view environments)
- * This overrides DEFAULT_JURISDICTIONS with a single BrowserVM-backed jurisdiction
+ * @param env - Runtime environment to store BrowserVM instance
+ * @param depositoryAddress - Depository contract address
+ * @param browserVMInstance - Optional pre-initialized BrowserVM instance
  */
-export const setBrowserVMJurisdiction = (depositoryAddress: string, browserVMInstance?: any) => {
+export const setBrowserVMJurisdiction = (env: any, depositoryAddress: string, browserVMInstance?: any) => {
   console.log('[BrowserVM] Setting jurisdiction override:', { depositoryAddress, hasBrowserVM: !!browserVMInstance });
 
-  const resolvedBrowserVM = browserVMInstance?.getProvider ? browserVMInstance.getProvider() : browserVMInstance;
+  const rawBrowserVM = browserVMInstance?.browserVM ?? browserVMInstance;
+  const resolvedBrowserVM = rawBrowserVM?.getProvider ? rawBrowserVM.getProvider() : rawBrowserVM;
 
-  // Store browserVM instance if provided
+  // Store browserVM instance in env (isolated per-runtime)
+  if (resolvedBrowserVM && env) {
+    env.browserVM = resolvedBrowserVM;
+    console.log('[BrowserVM] Stored browserVM instance in env (isolated)');
+  }
+
+  // BACKWARD COMPAT: Also store in global for legacy code
   if (resolvedBrowserVM) {
     BROWSER_VM_INSTANCE = resolvedBrowserVM;
-    console.log('[BrowserVM] Stored browserVM instance for runtime access');
   }
 
   const resolveEntityProvider = () => {
     if (resolvedBrowserVM?.getEntityProviderAddress) return resolvedBrowserVM.getEntityProviderAddress();
+    if (env?.browserVM?.getEntityProviderAddress) return env.browserVM.getEntityProviderAddress();
     if (BROWSER_VM_INSTANCE?.getEntityProviderAddress) return BROWSER_VM_INSTANCE.getEntityProviderAddress();
     return '0x0000000000000000000000000000000000000000';
   };
@@ -931,8 +841,15 @@ export const getJurisdictionByAddress = async (address: string): Promise<Jurisdi
   return jurisdictions.get(address);
 };
 
-/** Get BrowserVM instance (for demos that need direct BrowserVM access) */
-export const getBrowserVMInstance = (): BrowserVMInstance | null => {
+/**
+ * Get BrowserVM instance (for demos that need direct BrowserVM access)
+ * Prefers env.browserVM (isolated), falls back to global singleton (legacy)
+ */
+export const getBrowserVMInstance = (env?: any): BrowserVMInstance | null => {
+  if (env?.browserVM) {
+    return env.browserVM;
+  }
+  // BACKWARD COMPAT: Fall back to global singleton
   return BROWSER_VM_INSTANCE;
 };
 
@@ -945,7 +862,15 @@ export interface SettlementDiff {
   ondeltaDiff?: bigint; // Optional in some contexts
 }
 
-export const submitSettle = async (jurisdiction: JurisdictionConfig, leftEntity: string, rightEntity: string, diffs: SettlementDiff[]) => {
+export const submitSettle = async (
+  jurisdiction: JurisdictionConfig,
+  leftEntity: string,
+  rightEntity: string,
+  diffs: SettlementDiff[],
+  forgiveDebtsInTokenIds: number[] = [],
+  insuranceRegs: Array<{ insured: string; insurer: string; tokenId: number; limit: bigint; expiresAt: bigint }> = [],
+  sig?: string
+) => {
   try {
     console.log(`⚖️ Submitting settle transaction between ${leftEntity.slice(0, 10)}... and ${rightEntity.slice(0, 10)}...`);
     console.log(`🔍 DIFFS:`, diffs.map(d => ({
@@ -954,6 +879,12 @@ export const submitSettle = async (jurisdiction: JurisdictionConfig, leftEntity:
       rightDiff: d.rightDiff.toString(),
       collateralDiff: d.collateralDiff.toString()
     })));
+
+    const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0 || insuranceRegs.length > 0;
+    if (hasChanges && (!sig || sig === '0x')) {
+      throw new Error('Settlement signature required for settle');
+    }
+    const finalSig = sig || '0x';
 
     const { depository, provider } = await connectToEthereum(jurisdiction);
     console.log(`🔍 CONTRACT ADDRESS: ${depository.target}`);
@@ -966,7 +897,14 @@ export const submitSettle = async (jurisdiction: JurisdictionConfig, leftEntity:
 
     // Call settle function
     console.log(`📤 Calling settle function...`);
-    const tx = await depository['settle']!(leftEntity, rightEntity, diffs);
+    const tx = await depository['settle']!(
+      leftEntity,
+      rightEntity,
+      diffs,
+      forgiveDebtsInTokenIds,
+      insuranceRegs,
+      finalSig
+    );
     console.log(`💫 Transaction sent: ${tx.hash}`);
 
     // Wait for confirmation

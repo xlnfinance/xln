@@ -3,7 +3,7 @@
   import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
   import WalletView from '$lib/components/Wallet/WalletView.svelte';
   import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
-  import { vaultOperations, activeVault, activeSigner, allVaults, type Vault, type Signer } from '$lib/stores/vaultStore';
+  import { vaultOperations, activeVault, activeSigner, allVaults, type Runtime as Vault, type Signer } from '$lib/stores/vaultStore';
   import { deriveRequestSignal, showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { Copy, Check, Settings } from 'lucide-svelte';
   import {
@@ -179,6 +179,14 @@
       }
     }
     passphrase = words.join('-');
+    showPassphrase = true; // Auto-show since it's random/public anyway
+  }
+
+  async function generateRandomMnemonic(): Promise<void> {
+    // Generate 256 bits of entropy for 24-word mnemonic
+    const entropy = new Uint8Array(32);
+    crypto.getRandomValues(entropy);
+    mnemonicInput = await entropyToMnemonic(entropy);
   }
 
   // ============================================================================
@@ -186,8 +194,12 @@
   // ============================================================================
 
   type Phase = 'input' | 'deriving' | 'complete';
+  type InputMode = 'brainvault' | 'mnemonic';
+  type SoundMode = 'none' | 'minimal' | 'full';
 
+  let inputMode: InputMode = 'brainvault';
   let phase: Phase = 'input';
+  let soundMode: SoundMode = 'none';
   let showSuccessHeader = true;
   let successHeaderTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -201,6 +213,7 @@
   // Input state
   let name = '';
   let passphrase = '';
+  let mnemonicInput = ''; // For mnemonic mode
   let showPassphrase = false;
   let factor = 5;
 
@@ -396,17 +409,20 @@
     }
   }
 
-  // Helper to save current derivation as vault (uses mnemonic24 for valid BIP39)
-  function saveCurrentAsVault() {
-    if (!vaultNameInput.trim() || !mnemonic24) return;
+  // Helper to save current derivation as runtime (uses mnemonic24 for valid BIP39)
+  async function saveCurrentAsVault() {
+    if (!mnemonic24 || !ethereumAddress) return;
 
-    // Check if vault exists
-    if (vaultOperations.vaultExists(vaultNameInput.trim())) {
-      alert('A vault with this name already exists');
+    const runtimeId = ethereumAddress; // RuntimeID = signer EOA
+    const label = vaultNameInput.trim() || `Runtime ${ethereumAddress.slice(0, 6)}`;
+
+    // Check if runtime exists (by EOA, not name)
+    if (vaultOperations.runtimeExists(runtimeId)) {
+      alert('A runtime with this address already exists');
       return;
     }
 
-    vaultOperations.createVault(vaultNameInput.trim(), mnemonic24);
+    await vaultOperations.createRuntime(label, mnemonic24);
     showSaveVaultModal = false;
     vaultNameInput = '';
   }
@@ -438,9 +454,14 @@
   }
 
   function playVaultClick(intensity: number = 1) {
+    if (soundMode === 'none') return;
     try {
       const ctx = initAudio();
-      playVaultTumbler(ctx, intensity);
+      if (soundMode === 'full') {
+        playVaultTumbler(ctx, intensity);
+      } else if (soundMode === 'minimal') {
+        playVaultTumbler(ctx, intensity * 0.3);
+      }
     } catch {
       // Audio not available
     }
@@ -543,6 +564,7 @@
   }
 
   function playVaultOpen() {
+    if (soundMode === 'none') return;
     try {
       const ctx = initAudio();
       // Heavy vault door opening sequence
@@ -599,8 +621,9 @@
     };
   })();
   $: factorInfo = FACTOR_INFO[factor - 1]!;
-  $: canDerive = name.length >= BRAINVAULT_V2.MIN_NAME_LENGTH &&
-                 passphrase.length >= BRAINVAULT_V2.MIN_PASSPHRASE_LENGTH;
+  $: canDerive = inputMode === 'brainvault'
+    ? (name.length >= BRAINVAULT_V2.MIN_NAME_LENGTH && passphrase.length >= BRAINVAULT_V2.MIN_PASSPHRASE_LENGTH)
+    : mnemonicInput.trim().split(/\s+/).filter(w => w).length >= 12;
   $: progress = shardCount > 0 ? (shardsCompleted / shardCount) * 100 : 0;
   // Remaining time based on ACTUAL worker count (for live display during derivation)
   $: remainingMs = shardCount > 0
@@ -897,17 +920,20 @@
 
     phase = 'complete';
 
-    // Auto-save vault using the input name (not a manual modal)
-    if (name.trim() && mnemonic24) {
-      if (!vaultOperations.vaultExists(name.trim())) {
-        vaultOperations.createVault(name.trim(), mnemonic24);
+    // Auto-save runtime using derived EOA as ID
+    if (mnemonic24 && ethereumAddress) {
+      const runtimeId = ethereumAddress; // RuntimeID = signer EOA
+      const label = name.trim() || `Runtime ${ethereumAddress.slice(0, 6)}`;
+
+      if (!vaultOperations.runtimeExists(runtimeId)) {
+        await vaultOperations.createRuntime(label, mnemonic24);
         // Auto-create entity for first signer
         vaultOperations.setSignerEntity(0, entityId);
-        console.log('🔐 Vault auto-saved with entity:', name.trim(), entityId.slice(0, 10) + '...');
+        console.log('🔐 Runtime auto-saved:', runtimeId.slice(0, 10) + '...', `(${label})`);
       } else {
-        // Vault exists, just select it
-        vaultOperations.selectVault(name.trim());
-        console.log('🔐 Existing vault selected:', name.trim());
+        // Runtime exists, just select it
+        vaultOperations.selectRuntime(runtimeId);
+        console.log('🔐 Existing runtime selected:', runtimeId.slice(0, 10) + '...');
       }
     }
   }
@@ -1178,8 +1204,53 @@
     <!-- INPUT SECTION - Always visible at top -->
     {#if phase === 'input' || phase === 'deriving'}
       <div class="glass-card input-section" class:deriving={phase === 'deriving'}>
+        <!-- Input Mode Tabs -->
+        <div class="input-mode-tabs">
+          <button
+            class="tab-btn"
+            class:active={inputMode === 'brainvault'}
+            on:click={() => inputMode = 'brainvault'}
+          >
+            BrainVault
+          </button>
+          <button
+            class="tab-btn"
+            class:active={inputMode === 'mnemonic'}
+            on:click={() => inputMode = 'mnemonic'}
+          >
+            Mnemonic
+          </button>
+        </div>
+
+        <!-- Pros/Cons for current mode -->
+        <div class="mode-info">
+          {#if inputMode === 'brainvault'}
+            <div class="pros-cons">
+              <div class="pros">
+                <span class="label">Pros:</span>
+                <span class="text">Easy to remember, no backup needed</span>
+              </div>
+              <div class="cons">
+                <span class="label">Cons:</span>
+                <span class="text">Long derivation time (minutes)</span>
+              </div>
+            </div>
+          {:else}
+            <div class="pros-cons">
+              <div class="pros">
+                <span class="label">Pros:</span>
+                <span class="text">Instant derivation, industry standard</span>
+              </div>
+              <div class="cons">
+                <span class="label">Cons:</span>
+                <span class="text">Must backup securely, harder to remember</span>
+              </div>
+            </div>
+          {/if}
+        </div>
+
         <!-- Resume Banner -->
-        {#if showResumeInput}
+        {#if showResumeInput && inputMode === 'brainvault'}
           <div class="resume-banner">
             <span class="resume-icon">⏸️</span>
             <span>Incomplete derivation found ({shardsCompleted}/{getShardCount(factor)} shards)</span>
@@ -1190,6 +1261,7 @@
           </div>
         {/if}
 
+        {#if inputMode === 'brainvault'}
         <!-- Name Input -->
         <div class="input-group">
           <label for="name">{t('vault.name.label')}</label>
@@ -1293,10 +1365,52 @@
           </div>
         </div>
 
+        <!-- Sound Settings -->
+        <div class="input-group">
+          <label for="sound-mode">Sound</label>
+          <div class="sound-dropdown">
+            <select id="sound-mode" bind:value={soundMode}>
+              <option value="none">No Sound</option>
+              <option value="minimal">Minimal</option>
+              <option value="full">Full</option>
+            </select>
+          </div>
+        </div>
+
         <!-- Warning -->
         <div class="warning-box">
           <p><strong>This is permanent.</strong> Name + passphrase + factor = your vault forever. No recovery possible.</p>
         </div>
+        {:else}
+        <!-- Mnemonic Input Mode -->
+        <div class="input-group">
+          <label for="mnemonic">Mnemonic (12 or 24 words)</label>
+          <span class="input-hint">Enter your BIP39 mnemonic phrase</span>
+          <div class="input-wrapper">
+            <textarea
+              id="mnemonic"
+              bind:value={mnemonicInput}
+              placeholder="word1 word2 word3..."
+              rows="3"
+              autocomplete="off"
+              spellcheck="false"
+            ></textarea>
+          </div>
+        </div>
+
+        <!-- Generate Random Mnemonic Button -->
+        <button
+          class="generate-mnemonic-btn"
+          on:click={generateRandomMnemonic}
+          type="button"
+        >
+          Generate Random Mnemonic
+        </button>
+
+        <div class="warning-box">
+          <p><strong>Backup required.</strong> Write down these words on paper and store securely. Anyone with this mnemonic controls your funds.</p>
+        </div>
+        {/if}
 
         <!-- Derive Button - only visible in input phase -->
         {#if phase === 'input'}
@@ -1375,10 +1489,6 @@
                     class:complete={cellProgress === 1}
                   ></div>
                 {/each}
-              </div>
-
-              <div class="vault-info">
-                <div class="vault-time">{formatDuration(remainingMs)} remaining</div>
               </div>
 
               <div class="anim-controls">
@@ -2157,6 +2267,171 @@
 
   .input-section.deriving {
     padding-bottom: 18px;
+  }
+
+  /* Input Mode Tabs */
+  .input-mode-tabs {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+
+  .tab-btn {
+    flex: 1;
+    padding: 14px 24px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 200, 100, 0.15);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+  }
+
+  .tab-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 200, 100, 0.25);
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  .tab-btn.active {
+    background: rgba(255, 200, 100, 0.1);
+    border-color: rgba(255, 200, 100, 0.4);
+    color: rgba(255, 200, 100, 1);
+    box-shadow: 0 0 20px rgba(255, 200, 100, 0.15);
+  }
+
+  /* Mode Info (Pros/Cons) */
+  .mode-info {
+    margin-bottom: 24px;
+  }
+
+  .pros-cons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 200, 100, 0.08);
+  }
+
+  .pros-cons .pros,
+  .pros-cons .cons {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .pros-cons .label {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    min-width: 50px;
+  }
+
+  .pros-cons .pros .label {
+    color: rgba(100, 200, 100, 0.9);
+  }
+
+  .pros-cons .cons .label {
+    color: rgba(255, 150, 100, 0.9);
+  }
+
+  .pros-cons .text {
+    color: rgba(255, 255, 255, 0.7);
+  }
+
+  /* Mnemonic Textarea */
+  .input-wrapper textarea {
+    width: 100%;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 200, 100, 0.15);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 14px;
+    font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
+    line-height: 1.6;
+    resize: vertical;
+    transition: all 0.2s ease;
+  }
+
+  .input-wrapper textarea:focus {
+    outline: none;
+    border-color: rgba(255, 200, 100, 0.4);
+    background: rgba(255, 255, 255, 0.04);
+    box-shadow: 0 0 0 3px rgba(255, 200, 100, 0.08);
+  }
+
+  .input-wrapper textarea::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+  }
+
+  /* Generate Mnemonic Button */
+  .generate-mnemonic-btn {
+    width: 100%;
+    padding: 14px 24px;
+    margin-bottom: 20px;
+    background: rgba(100, 150, 255, 0.12);
+    border: 1px solid rgba(100, 150, 255, 0.25);
+    border-radius: 8px;
+    color: rgba(100, 150, 255, 1);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-transform: uppercase;
+  }
+
+  .generate-mnemonic-btn:hover {
+    background: rgba(100, 150, 255, 0.18);
+    border-color: rgba(100, 150, 255, 0.35);
+    box-shadow: 0 0 20px rgba(100, 150, 255, 0.15);
+  }
+
+  /* Sound Dropdown */
+  .sound-dropdown {
+    position: relative;
+  }
+
+  .sound-dropdown select {
+    width: 100%;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 200, 100, 0.15);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 6L11 1' stroke='rgba(255,200,100,0.5)' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 40px;
+  }
+
+  .sound-dropdown select:hover {
+    border-color: rgba(255, 200, 100, 0.25);
+    background-color: rgba(255, 255, 255, 0.04);
+  }
+
+  .sound-dropdown select:focus {
+    outline: none;
+    border-color: rgba(255, 200, 100, 0.4);
+    box-shadow: 0 0 0 3px rgba(255, 200, 100, 0.08);
+  }
+
+  .sound-dropdown option {
+    background: #1a1a1a;
+    color: rgba(255, 255, 255, 0.9);
   }
 
   .input-progress {

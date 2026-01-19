@@ -2,6 +2,7 @@ import { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEve
 import { DEBUG } from '../utils';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
 import { getTokenInfo, getDefaultCreditLimit } from '../account-utils';
+import { isLeftEntity } from '../entity-id-utils';
 import { safeStringify } from '../serialization-utils';
 import { CANONICAL_J_EVENTS } from '../j-event-watcher';
 
@@ -348,7 +349,7 @@ async function tryFinalizeJBlocks(
       console.log(`      Event types:`, events.map(e => e.type));
       for (const event of events) {
         console.log(`      🔧 Applying event: ${event.type}`);
-        const { newState, mempoolOps } = await applyFinalizedJEvent(state, event);
+        const { newState, mempoolOps } = await applyFinalizedJEvent(state, event, env);
         state = newState;
         allMempoolOps.push(...mempoolOps);
         // applyFinalizedJEvent clones state - ensure jBlockChain preserved
@@ -398,7 +399,7 @@ function mergeSignerObservations(observations: JBlockObservation[]): Jurisdictio
   for (const obs of observations) {
     for (const event of obs.events) {
       // Create unique key from event type and data
-      const key = `${event.type}:${JSON.stringify(event.data)}`;
+    const key = `${event.type}:${safeStringify(event.data)}`;
       if (!eventMap.has(key)) {
         eventMap.set(key, event);
       }
@@ -434,7 +435,8 @@ function mergeSignerObservations(observations: JBlockObservation[]): Jurisdictio
  */
 async function applyFinalizedJEvent(
   entityState: EntityState,
-  event: JurisdictionEvent
+  event: JurisdictionEvent,
+  env: Env
 ): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> }> {
   console.log(`🔧🔧 applyFinalizedJEvent: entityId=${entityState.entityId.slice(-4)}, event.type=${event.type}`);
 
@@ -464,6 +466,55 @@ async function applyFinalizedJEvent(
 
     addMessage(newState, `📊 RESERVE: ${tokenSymbol} = ${balanceDisplay} | Block ${blockNumber} | Tx ${txHashShort}`);
 
+  } else if (event.type === 'SecretRevealed') {
+    const { hashlock, secret } = event.data;
+    const hashlockKey = String(hashlock).toLowerCase();
+    const route = newState.htlcRoutes.get(hashlockKey);
+
+    if (!route) {
+      console.log(`⚠️ HTLC: Secret reveal for unknown hashlock ${hashlockKey.slice(0, 16)}...`);
+      return { newState, mempoolOps };
+    }
+
+    if (route.secret) {
+      console.log(`✅ HTLC: Secret already stored for hashlock ${hashlockKey.slice(0, 16)}...`);
+      addMessage(newState, `🔓 HTLC reveal observed: ${hashlockKey.slice(0, 10)}... | Block ${blockNumber}`);
+      return { newState, mempoolOps };
+    }
+
+    route.secret = String(secret);
+
+    if (route.pendingFee) {
+      newState.htlcFeesEarned = (newState.htlcFeesEarned || 0n) + route.pendingFee;
+      console.log(`💰 HTLC: Fee earned on on-chain reveal: ${route.pendingFee} (total: ${newState.htlcFeesEarned})`);
+      route.pendingFee = undefined;
+    }
+
+    if (route.outboundLockId) {
+      newState.lockBook.delete(route.outboundLockId);
+    }
+    if (route.inboundLockId) {
+      newState.lockBook.delete(route.inboundLockId);
+    }
+
+    if (route.inboundEntity && route.inboundLockId) {
+      mempoolOps.push({
+        accountId: route.inboundEntity,
+        tx: {
+          type: 'htlc_reveal',
+          data: {
+            lockId: route.inboundLockId,
+            secret: String(secret),
+          }
+        }
+      });
+      console.log(`⬅️ HTLC: On-chain secret propagated to ${route.inboundEntity.slice(-4)}`);
+    } else {
+      console.log(`✅ HTLC: On-chain reveal complete (no inbound hop)`);
+    }
+
+    addMessage(newState, `🔓 HTLC reveal observed: ${hashlockKey.slice(0, 10)}... | Block ${blockNumber}`);
+
   } else if (event.type === 'AccountSettled') {
     // Universal settlement event (covers R2C, C2R, settle, rebalance)
     const { counterpartyEntityId, tokenId, ownReserve, collateral, ondelta } = event.data;
@@ -492,7 +543,7 @@ async function applyFinalizedJEvent(
     if (!account.jEventChain) account.jEventChain = [];
     if (account.lastFinalizedJHeight === undefined) account.lastFinalizedJHeight = 0;
 
-    const isLeft = entityState.entityId < (counterpartyEntityId as string);
+    const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId as string);
     const jHeight = event.blockNumber ?? blockNumber;
     const jBlockHash = event.blockHash || '';
 
@@ -508,9 +559,11 @@ async function applyFinalizedJEvent(
 
     // Add j_event_claim via mempoolOps (auto-triggers proposableAccounts + account frame)
     // Account keyed by counterparty ID
+    // CRITICAL: Deep-copy event to prevent mutation issues (frame fullDeltaStates added later)
+    const eventCopy = JSON.parse(safeStringify(event));
     mempoolOps.push({
       accountId: counterpartyEntityId as string,
-      tx: { type: 'j_event_claim', data: { jHeight, jBlockHash, events: [event], observedAt: obs.observedAt } },
+      tx: { type: 'j_event_claim', data: { jHeight, jBlockHash, events: [eventCopy], observedAt: obs.observedAt } },
     });
     console.log(`   📮 j_event_claim → mempoolOps[${mempoolOps.length}] (will auto-propose frame)`);
 
@@ -584,7 +637,7 @@ async function applyFinalizedJEvent(
       });
     }
 
-    addMessage(newState, `🔴 DEBT: ${amountDisplay} ${tokenSymbol} owed to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
+    addMessage(newState, `🔴 DEBT: ${(debtor as string).slice(-8)} owes ${amountDisplay} ${tokenSymbol} to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
 
   } else if (event.type === 'DebtEnforced') {
     const { debtor, creditor, tokenId, amountPaid, remainingAmount, newDebtIndex } = event.data;
@@ -609,12 +662,24 @@ async function applyFinalizedJEvent(
 
     // Dispute started on-chain - store dispute state from event
     const { sender, counterentity, disputeNonce, proofbodyHash } = event.data;
-    const senderStr = String(sender).toLowerCase();
-    const counterentityStr = String(counterentity).toLowerCase();
+    const normalizeId = (id: string) => String(id).toLowerCase();
+    const senderStr = normalizeId(sender as string);
+    const counterentityStr = normalizeId(counterentity as string);
+    const entityIdNorm = normalizeId(newState.entityId);
 
     // Find which account this affects (we are either sender or counterentity)
-    const counterpartyId = senderStr === newState.entityId ? counterentityStr : senderStr;
-    const account = newState.accounts.get(counterpartyId);
+    const candidateCounterpartyId = senderStr === entityIdNorm ? counterentityStr : senderStr;
+    let counterpartyId = candidateCounterpartyId;
+    let account = newState.accounts.get(counterpartyId);
+    if (!account) {
+      for (const [key, value] of newState.accounts.entries()) {
+        if (normalizeId(key) === candidateCounterpartyId) {
+          counterpartyId = key;
+          account = value;
+          break;
+        }
+      }
+    }
 
     if (account) {
       // Query on-chain for timeout
@@ -626,13 +691,42 @@ async function applyFinalizedJEvent(
 
       const accountInfo = await browserVM.getAccountInfo(newState.entityId, counterpartyId);
 
+      const weAreStarter = senderStr === entityIdNorm;
+      const hasCounterpartySig = Boolean(account.counterpartyDisputeProofHanko);
+      let initialCooperativeNonce = account.proofHeader.cooperativeNonce;
+      let nonceSource = 'proofHeader';
+      const mappedNonce = account.disputeProofNoncesByHash?.[String(proofbodyHash)];
+      if (mappedNonce !== undefined) {
+        initialCooperativeNonce = mappedNonce;
+        nonceSource = 'hashMap';
+      } else if (weAreStarter) {
+        if (account.counterpartyDisputeProofCooperativeNonce !== undefined) {
+          initialCooperativeNonce = account.counterpartyDisputeProofCooperativeNonce;
+          nonceSource = 'counterpartySig';
+        } else if (hasCounterpartySig && account.ackedTransitions > 0) {
+          initialCooperativeNonce = account.ackedTransitions - 1;
+          nonceSource = 'ackedTransitions-1';
+        }
+      } else {
+        if (account.currentDisputeProofCooperativeNonce !== undefined) {
+          initialCooperativeNonce = account.currentDisputeProofCooperativeNonce;
+          nonceSource = 'currentSig';
+        } else if (account.ackedTransitions > 0) {
+          initialCooperativeNonce = account.ackedTransitions - 1;
+          nonceSource = 'ackedTransitions-1';
+        }
+      }
+      console.log(`   DEBUG DisputeStarted: starter=${weAreStarter}, source=${nonceSource}, ackedTransitions=${account.ackedTransitions}, proofHeader.cooperativeNonce=${account.proofHeader.cooperativeNonce}, initialCooperativeNonce=${initialCooperativeNonce}`);
+
       // Store dispute state from event + on-chain (source of truth)
       account.activeDispute = {
         startedByLeft: senderStr < counterentityStr,
         initialProofbodyHash: String(proofbodyHash),  // From event (committed on-chain)
         initialDisputeNonce: Number(disputeNonce),
         disputeTimeout: Number(accountInfo.disputeTimeout),  // From on-chain
-        onChainCooperativeNonce: Number(accountInfo.cooperativeNonce),  // From on-chain
+        initialCooperativeNonce,  // Nonce PASSED to disputeStart (for hash match)
+        onChainCooperativeNonce: Number(accountInfo.cooperativeNonce),  // May differ
+        initialArguments: event.data.initialArguments || '0x',
       };
 
       // ASSERTION: Our local proof hash should match on-chain committed hash
@@ -648,9 +742,44 @@ async function applyFinalizedJEvent(
         console.log(`✅ Proof hash verified: local matches on-chain`);
       }
 
-      const weAreStarter = senderStr === newState.entityId;
       addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout}`);
       console.log(`⚔️ activeDispute stored: hash=${account.activeDispute.initialProofbodyHash.slice(0,10)}..., timeout=${account.activeDispute.disputeTimeout}`);
+    } else {
+      console.warn(`⚠️ DisputeStarted: account ${candidateCounterpartyId.slice(-4)} not found for entity ${entityIdNorm.slice(-4)}`);
+    }
+
+  } else if (event.type === 'DisputeFinalized') {
+    console.log(`🔍 DISPUTE-FINALIZED HANDLER: entityId=${newState.entityId.slice(-4)}`);
+
+    const { sender, counterentity, initialDisputeNonce, initialProofbodyHash } = event.data;
+    const normalizeId = (id: string) => String(id).toLowerCase();
+    const senderStr = normalizeId(sender as string);
+    const counterentityStr = normalizeId(counterentity as string);
+    const entityIdNorm = normalizeId(newState.entityId);
+
+    const candidateCounterpartyId = senderStr === entityIdNorm ? counterentityStr : senderStr;
+    let counterpartyId = candidateCounterpartyId;
+    let account = newState.accounts.get(counterpartyId);
+    if (!account) {
+      for (const [key, value] of newState.accounts.entries()) {
+        if (normalizeId(key) === candidateCounterpartyId) {
+          counterpartyId = key;
+          account = value;
+          break;
+        }
+      }
+    }
+
+    if (account) {
+      if (account.activeDispute) {
+        account.activeDispute = undefined;
+        addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialDisputeNonce)})`);
+        console.log(`✅ activeDispute cleared for ${counterpartyId.slice(-4)} (proof=${String(initialProofbodyHash).slice(0, 10)}...)`);
+      } else {
+        console.warn(`⚠️ DisputeFinalized: No activeDispute for ${counterpartyId.slice(-4)}`);
+      }
+    } else {
+      console.warn(`⚠️ DisputeFinalized: account ${candidateCounterpartyId.slice(-4)} not found for entity ${entityIdNorm.slice(-4)}`);
     }
 
   } else {

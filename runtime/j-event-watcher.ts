@@ -34,7 +34,7 @@ const HEAVY_LOGS = false;
  * Canonical J-Event types that j-watcher processes.
  * MUST match Depository.sol and Account.sol event definitions.
  */
-export const CANONICAL_J_EVENTS = ['ReserveUpdated', 'AccountSettled', 'DisputeStarted', 'DebtCreated'] as const;
+export const CANONICAL_J_EVENTS = ['ReserveUpdated', 'SecretRevealed', 'AccountSettled', 'DisputeStarted', 'DisputeFinalized', 'DebtCreated'] as const;
 export type CanonicalJEvent = (typeof CANONICAL_J_EVENTS)[number];
 
 /**
@@ -110,8 +110,10 @@ export class JEventWatcher {
   private depositoryABI = [
     // Canonical j-events (update entity state)
     'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
+    'event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret)',
     'event AccountSettled(tuple(bytes32 left, bytes32 right, uint256 tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)[])',
     'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments)',
+    'event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed initialDisputeNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash)',
     'event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex)',
   ];
 
@@ -382,6 +384,16 @@ export class JEventWatcher {
         return results;
       }
 
+      case 'SecretRevealed':
+        return [{
+          type: 'SecretRevealed',
+          data: {
+            hashlock: event.args.hashlock,
+            revealer: event.args.revealer,
+            secret: event.args.secret,
+          },
+        }];
+
       case 'DisputeStarted':
         return [{
           type: 'DisputeStarted',
@@ -391,6 +403,18 @@ export class JEventWatcher {
             disputeNonce: event.args.disputeNonce,
             proofbodyHash: event.args.proofbodyHash,  // From on-chain
             initialArguments: event.args.initialArguments || '0x',
+          },
+        }];
+
+      case 'DisputeFinalized':
+        return [{
+          type: 'DisputeFinalized',
+          data: {
+            sender: event.args.sender,
+            counterentity: event.args.counterentity,
+            initialDisputeNonce: event.args.initialDisputeNonce,
+            initialProofbodyHash: event.args.initialProofbodyHash,
+            finalProofbodyHash: event.args.finalProofbodyHash,
           },
         }];
 
@@ -423,6 +447,9 @@ export class JEventWatcher {
     switch (event.name) {
       case 'ReserveUpdated':
         return normalizeId(event.args.entity) === normalizedEntityId;
+      case 'SecretRevealed':
+        // Global relevance: any entity with a matching hashlock should observe
+        return true;
       case 'AccountSettled': {
         // AccountSettled has array of Settled structs - check if entity is left or right in any
         // Can be event.args.settled (named param) or event.args[0] (unnamed) or event.args['']
@@ -436,6 +463,10 @@ export class JEventWatcher {
       }
 
       case 'DisputeStarted':
+        // Entity is relevant if they are sender OR counterentity (both need to know)
+        return normalizeId(event.args.sender) === normalizedEntityId || normalizeId(event.args.counterentity) === normalizedEntityId;
+
+      case 'DisputeFinalized':
         // Entity is relevant if they are sender OR counterentity (both need to know)
         return normalizeId(event.args.sender) === normalizedEntityId || normalizeId(event.args.counterentity) === normalizedEntityId;
 

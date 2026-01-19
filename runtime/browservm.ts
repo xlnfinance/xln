@@ -18,7 +18,8 @@ import type { Address } from '@ethereumjs/util';
 import { createCustomCommon, Mainnet } from '@ethereumjs/common';
 import { ethers } from 'ethers';
 import { safeStringify } from './serialization-utils.js';
-import { deriveSignerKeySync, getSignerPrivateKey } from './account-crypto.js';
+import { deriveSignerKeySync, getCachedSignerPrivateKey } from './account-crypto.js';
+import { isLeftEntity, normalizeEntityId } from './entity-id-utils';
 
 const DEFAULT_TOKEN_DECIMALS = 18;
 const DEFAULT_TOKEN_SUPPLY = 1_000_000_000_000n * 10n ** 18n; // 1T tokens
@@ -198,7 +199,7 @@ export class BrowserVMProvider {
     }
 
     this.accountAddress = result.createdAddress!;
-    console.log(`[BrowserVM] Account library deployed at: ${this.accountAddress.toString()}`);
+    console.log(`[BrowserVM] Account library deployed at: ${this.accountAddress?.toString() ?? 'null'}`);
   }
 
   /** Deploy Depository contract with Account library linking and EntityProvider */
@@ -241,7 +242,7 @@ export class BrowserVMProvider {
     const tx = createLegacyTx({
       gasLimit: 100000000n,
       gasPrice: 10n,
-      data: deployData,
+      data: deployData as `0x${string}`,
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
@@ -253,7 +254,7 @@ export class BrowserVMProvider {
     }
 
     this.depositoryAddress = result.createdAddress!;
-    console.log(`[BrowserVM] Depository deployed at: ${this.depositoryAddress.toString()}`);
+    console.log(`[BrowserVM] Depository deployed at: ${this.depositoryAddress?.toString() ?? 'null'}`);
     console.log(`[BrowserVM] Gas used: ${result.totalGasSpent}`);
 
     // Verify code exists
@@ -283,7 +284,7 @@ export class BrowserVMProvider {
     }
 
     this.entityProviderAddress = result.createdAddress!;
-    console.log(`[BrowserVM] EntityProvider deployed at: ${this.entityProviderAddress.toString()}`);
+    console.log(`[BrowserVM] EntityProvider deployed at: ${this.entityProviderAddress?.toString() ?? 'null'}`);
   }
 
   /** Deploy DeltaTransformer contract (HTLC + Swap transformer) */
@@ -306,11 +307,11 @@ export class BrowserVMProvider {
     }
 
     this.deltaTransformerAddress = result.createdAddress!;
-    console.log(`[BrowserVM] DeltaTransformer deployed at: ${this.deltaTransformerAddress.toString()}`);
+    console.log(`[BrowserVM] DeltaTransformer deployed at: ${this.deltaTransformerAddress?.toString() ?? 'null'}`);
 
     // Update proof-builder with deployed address
     const { setDeltaTransformerAddress } = await import('./proof-builder.js');
-    setDeltaTransformerAddress(this.deltaTransformerAddress.toString());
+    setDeltaTransformerAddress(this.deltaTransformerAddress?.toString() ?? '');
   }
 
   /** Get DeltaTransformer contract address */
@@ -388,7 +389,7 @@ export class BrowserVMProvider {
     const tx = createLegacyTx({
       gasLimit: 5_000_000n,
       gasPrice: 10n,
-      data: bytecode,
+      data: bytecode as `0x${string}`,
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
@@ -544,14 +545,18 @@ export class BrowserVMProvider {
   ): Promise<{ txHash: string; events?: EVMEvent[] }> {
     const fromAddress = createAddressFromPrivateKey(privKey);
     const currentNonce = await this.getNonceForAddress(fromAddress);
-    const tx = createLegacyTx({
-      to: txData.to ? createAddressFromString(txData.to) : undefined,
+    const toAddress = txData.to ? createAddressFromString(txData.to) : undefined;
+    const txDataObj: any = {
       gasLimit: txData.gasLimit ?? 1000000n,
       gasPrice: 10n,
       data: hexToBytes((txData.data || '0x') as `0x${string}`),
       nonce: currentNonce,
       value: txData.value ?? 0n,
-    }, { common: this.common }).sign(privKey);
+    };
+    if (toAddress) {
+      txDataObj.to = toAddress;
+    }
+    const tx = createLegacyTx(txDataObj, { common: this.common }).sign(privKey);
 
     const result = await this.runTxInBlock(tx);
 
@@ -563,7 +568,7 @@ export class BrowserVMProvider {
         console.log('[BrowserVM] Events before revert:', result.execResult.logs.length);
         const events = this.parseLogs(result.execResult.logs);
         for (const ev of events) {
-          console.log(`   Event: ${ev.type}`, ev.data);
+          console.log(`   Event: ${ev.name}`, ev.args);
         }
       }
       throw new Error(`executeTx failed: ${errStr}`);
@@ -783,14 +788,14 @@ export class BrowserVMProvider {
    * Emits AccountSettled event for j-watcher
    * Note: Solidity prefundAccount() was deleted - this is BrowserVM-only implementation
    *
-   * @param entityId - Entity depositing collateral (must be created via createEntityId for ECDSA signing)
+   * @param entityId - Entity depositing collateral (must be a valid entityId for Hanko signing)
    * @param counterpartyId - The counterparty entity (must sign the settlement)
    */
   async reserveToCollateralDirect(entityId: string, counterpartyId: string, tokenId: number, amount: bigint): Promise<EVMEvent[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
     // Use settle() with appropriate diffs to achieve R2C effect
-    const isLeft = BigInt(entityId) < BigInt(counterpartyId);
+    const isLeft = isLeftEntity(entityId, counterpartyId);
     const leftEntity = isLeft ? entityId : counterpartyId;
     const rightEntity = isLeft ? counterpartyId : entityId;
 
@@ -890,10 +895,9 @@ export class BrowserVMProvider {
 
   /**
    * Create a deterministic entityId from a seed (name/number).
-   * Returns a padded wallet address that can be used for ECDSA signing.
+   * Returns a padded wallet address for local testing.
    *
-   * IMPORTANT: Use this for creating entities if you need ECDSA signatures.
-   * The returned entityId is address(wallet) padded to bytes32.
+   * NOTE: Hanko verification expects entityId to be a board hash or a numbered entity ID.
    */
   createEntityId(seed: string | number): string {
     const seedStr = typeof seed === 'number' ? `entity_${seed}` : seed;
@@ -937,7 +941,7 @@ export class BrowserVMProvider {
     const entityNum = parseInt(normalized.slice(-8), 16); // Last 8 hex chars = number
     if (entityNum > 0 && entityNum < 10000) {
       const signerId = `s${entityNum}`;
-      const privateKey = getSignerPrivateKey(signerId);
+      const privateKey = getCachedSignerPrivateKey(signerId);
       if (privateKey) {
         const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
         this.entityWallets.set(normalized, wallet);
@@ -947,11 +951,65 @@ export class BrowserVMProvider {
     }
 
     // Last resort: derive from entityId itself (won't match address!)
-    console.warn(`[BrowserVM] No wallet found for entity ${entityId.slice(0, 20)}..., deriving from hash (ECDSA will fail!)`);
+    console.warn(`[BrowserVM] No wallet found for entity ${entityId.slice(0, 20)}..., deriving from hash (Hanko will fail!)`);
     const privateKey = ethers.keccak256(entityId);
     const wallet = new ethers.Wallet(privateKey);
     this.entityWallets.set(normalized, wallet);
     return wallet;
+  }
+
+  private getSigningWallet(entityId: string): ethers.Wallet {
+    const normalized = entityId.toLowerCase();
+    const cached = this.entityWallets.get(normalized);
+    if (cached) return cached;
+
+    if (this.isNumberedEntity(entityId)) {
+      const entityNum = parseInt(normalized.slice(-8), 16);
+      const signerId = `s${entityNum}`;
+      const privateKey = getCachedSignerPrivateKey(signerId);
+      if (!privateKey) {
+        throw new Error(`Cannot sign: no private key for entity ${entityNum} (signerId=${signerId})`);
+      }
+      const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
+      this.entityWallets.set(normalized, wallet);
+      return wallet;
+    }
+
+    throw new Error(`Cannot sign: no wallet registered for entity ${entityId.slice(0, 20)}...`);
+  }
+
+  private isNumberedEntity(entityId: string): boolean {
+    const normalized = entityId.toLowerCase();
+    const entityNum = parseInt(normalized.slice(-8), 16);
+    return entityNum > 0 && entityNum < 10000 &&
+      normalized.startsWith('0x0000000000000000000000000000000000000000000000000000');
+  }
+
+  private buildSingleSignerHanko(entityId: string, hash: string, wallet: ethers.Wallet): string {
+    const hashBytes = ethers.getBytes(hash);
+    const signature = wallet.signingKey.sign(hashBytes);
+    const vBit = signature.v === 28 ? 1 : 0;
+    const packedSig = ethers.concat([signature.r, signature.s, ethers.toBeHex(vBit, 1)]);
+
+    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+    const entityIdHex = entityId.startsWith('0x') ? entityId : `0x${entityId}`;
+    const paddedEntityId = ethers.zeroPadValue(entityIdHex, 32);
+
+    return abiCoder.encode(
+      ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
+      [[
+        [], // placeholders
+        packedSig, // packed signatures (single signer)
+        [
+          [
+            paddedEntityId, // entityId
+            [0], // entityIndexes
+            [1], // weights
+            1, // threshold
+          ],
+        ],
+      ]]
+    );
   }
 
   /**
@@ -967,8 +1025,9 @@ export class BrowserVMProvider {
    * Get the channel key for two entities (canonical order: left < right)
    */
   private getChannelKey(leftEntity: string, rightEntity: string): string {
-    const left = BigInt(leftEntity) < BigInt(rightEntity) ? leftEntity : rightEntity;
-    const right = BigInt(leftEntity) < BigInt(rightEntity) ? rightEntity : leftEntity;
+    const isLeft = isLeftEntity(leftEntity, rightEntity);
+    const left = isLeft ? leftEntity : rightEntity;
+    const right = isLeft ? rightEntity : leftEntity;
     return ethers.solidityPacked(['bytes32', 'bytes32'], [left, right]);
   }
 
@@ -976,8 +1035,7 @@ export class BrowserVMProvider {
    * Sign a settlement message (CooperativeUpdate).
    * The COUNTERPARTY must sign, not the initiator.
    *
-   * For numbered entities (0x000...XXXX), uses Hanko signature format.
-   * For address-based entities, uses 65-byte ECDSA signature.
+   * Uses Hanko signature format for entity-level verification.
    */
   async signSettlement(
     initiatorEntityId: string,
@@ -1003,8 +1061,9 @@ export class BrowserVMProvider {
     const cooperativeNonce = accountInfo.cooperativeNonce;
 
     // Determine canonical left/right order
-    const leftEntity = BigInt(initiatorEntityId) < BigInt(counterpartyEntityId) ? initiatorEntityId : counterpartyEntityId;
-    const rightEntity = BigInt(initiatorEntityId) < BigInt(counterpartyEntityId) ? counterpartyEntityId : initiatorEntityId;
+    const isLeft = isLeftEntity(initiatorEntityId, counterpartyEntityId);
+    const leftEntity = isLeft ? initiatorEntityId : counterpartyEntityId;
+    const rightEntity = isLeft ? counterpartyEntityId : initiatorEntityId;
     const channelKey = this.getChannelKey(leftEntity, rightEntity);
 
     // Encode the message (must match Account.sol encoding)
@@ -1032,67 +1091,10 @@ export class BrowserVMProvider {
     console.log(`  encodedMsg first 200: ${encodedMsg.slice(0, 200)}`);
     console.log(`  MessageType value: ${BrowserVMProvider.MessageType.CooperativeUpdate}`);
 
-    // Check if counterparty is a numbered entity (needs Hanko signature)
-    const normalized = counterpartyEntityId.toLowerCase();
-    const entityNum = parseInt(normalized.slice(-8), 16);
-    const isNumberedEntity = entityNum > 0 && entityNum < 10000 &&
-      normalized.startsWith('0x0000000000000000000000000000000000000000000000000000');
-
-    if (isNumberedEntity) {
-      // For numbered entities, build Hanko signature (validator signs, claim references signature)
-      const signerId = `s${entityNum}`;
-      const privateKey = getSignerPrivateKey(signerId);
-      if (!privateKey) {
-        throw new Error(`Cannot sign settlement: no private key for entity ${entityNum} (signerId=${signerId})`);
-      }
-
-      // Create ECDSA signature from validator's key (sign the raw hash, NOT ethSignedMessage)
-      const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
-      const hashBytes = ethers.getBytes(hash);
-      const signingKey = wallet.signingKey;
-      const signature = signingKey.sign(hashBytes);
-      // Pack signature in Hanko format: RS bytes + V bits
-      // For N signatures: first N*64 bytes are R+S, then ceil(N/8) bytes hold V bits
-      // V bit = 0 for v=27, 1 for v=28
-      const vBit = signature.v === 28 ? 1 : 0;
-      const packedSig = ethers.concat([signature.r, signature.s, ethers.toBeHex(vBit, 1)]);
-
-      // Verify signature recovery matches expected address
-      const recoveredAddress = ethers.recoverAddress(hashBytes, signature);
-
-      // Compute the bytes32 entityId that verification would use
-      // This should match what we registered
-      const expectedEntityIdInBoard = ethers.zeroPadValue(recoveredAddress, 32);
-      console.log(`[BrowserVM] Hanko: recovered=${recoveredAddress.slice(0, 12)}..., expectedBoardEntityId=${expectedEntityIdInBoard.slice(0, 24)}...`);
-
-      // Build Hanko: 1 signature, 1 claim referencing it
-      // Index 0 = the signature we just created
-      // Solidity abi.decode(data, (HankoBytes)) expects an outer tuple wrapper
-      const entityIdHex = counterpartyEntityId.startsWith('0x') ? counterpartyEntityId : '0x' + counterpartyEntityId;
-      const hankoEncoded = abiCoder.encode(
-        ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
-        [[
-          [], // placeholders (no failed entities)
-          packedSig, // packed signatures (just one 65-byte sig)
-          [
-            [
-              entityIdHex, // entityId
-              [0], // entityIndexes - references signature at index 0
-              [1], // weights
-              1, // threshold
-            ],
-          ],
-        ]]
-      );
-
-      console.log(`[BrowserVM] Built Hanko signature for entity ${entityNum} (signerId=${signerId}, signer=${wallet.address.slice(0, 10)}...)`);
-      return hankoEncoded;
-    }
-
-    // For address-based entities, use ECDSA (65 bytes)
-    const counterpartyWallet = this.getEntityWallet(counterpartyEntityId);
-    const signature = await counterpartyWallet.signMessage(ethers.getBytes(hash));
-    return signature;
+    const counterpartyWallet = this.getSigningWallet(counterpartyEntityId);
+    const hankoEncoded = this.buildSingleSignerHanko(counterpartyEntityId, hash, counterpartyWallet);
+    console.log(`[BrowserVM] Built Hanko signature for entity ${counterpartyEntityId.slice(0, 10)}... (signer=${counterpartyWallet.address.slice(0, 10)}...)`);
+    return hankoEncoded;
   }
 
   /**
@@ -1116,10 +1118,8 @@ export class BrowserVMProvider {
     );
 
     const hash = ethers.keccak256(encodedMsg);
-    const counterpartyWallet = this.getEntityWallet(counterpartyEntityId);
-    const signature = await counterpartyWallet.signMessage(ethers.getBytes(hash));
-
-    return signature;
+    const counterpartyWallet = this.getSigningWallet(counterpartyEntityId);
+    return this.buildSingleSignerHanko(counterpartyEntityId, hash, counterpartyWallet);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1220,17 +1220,17 @@ export class BrowserVMProvider {
     }
   }
 
-  /** Process a full batch - executes R2R, R2C, and settlements */
-  /** Process batch - calls Depository.processBatch() directly (no TS logic duplication) */
-  async processBatch(entityId: string, batch: any): Promise<EVMEvent[]> {
+  /** Process batch (Hanko) - calls Depository.processBatch() directly (no TS logic duplication) */
+  async processBatch(encodedBatch: string, entityProvider: string, hankoData: string, nonce: bigint): Promise<EVMEvent[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
 
-    console.log(`[BrowserVM] processBatch: entity ${entityId.slice(0,10)}, calling contract...`);
+    console.log(`[BrowserVM] processBatch: calling contract with hanko (nonce=${nonce})...`);
 
+    // BrowserVM submits as admin to mirror J-machine execution (Hanko still enforced on-chain).
     // Call Depository.processBatch() - ALL logic in Solidity (single source of truth)
-    const callData = this.depositoryInterface.encodeFunctionData('processBatch', [entityId, batch]);
+    const callData = this.depositoryInterface.encodeFunctionData('processBatch', [encodedBatch, entityProvider, hankoData, nonce]);
 
     const currentNonce = await this.getCurrentNonce();
     const tx = createLegacyTx({
@@ -1244,8 +1244,33 @@ export class BrowserVMProvider {
     const result = await this.runTxInBlock(tx);
 
     if (result.execResult.exceptionError) {
+      let claimedEntityId: string | null = null;
+      let expectedNextNonce: bigint | null = null;
+      let batchSummary: string | null = null;
+      try {
+        const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
+          ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
+          hankoData
+        );
+        const claims = decoded[0][2];
+        if (claims.length > 0) {
+          claimedEntityId = ethers.hexlify(claims[claims.length - 1][0]);
+          expectedNextNonce = (await this.getEntityNonce(claimedEntityId)) + 1n;
+        }
+        const { decodeJBatch, summarizeBatch } = await import('./j-batch');
+        const batch = decodeJBatch(encodedBatch);
+        batchSummary = safeStringify(summarizeBatch(batch));
+      } catch {
+        // best-effort debug only
+      }
       console.error('[BrowserVM] processBatch revert:', safeStringify(result.execResult.exceptionError));
       console.error('  returnData:', bytesToHex(result.execResult.returnValue));
+      if (claimedEntityId) {
+        console.error(`[BrowserVM] Hanko entity=${claimedEntityId.slice(0, 10)}..., nonce=${nonce} expectedNext=${expectedNextNonce}`);
+      }
+      if (batchSummary) {
+        console.error(`[BrowserVM] Batch summary: ${batchSummary}`);
+      }
       throw new Error(`Batch processing failed: ${result.execResult.exceptionError.error || 'revert'}`);
     }
 
@@ -1281,6 +1306,36 @@ export class BrowserVMProvider {
   /** Get current block number */
   getBlockNumber(): bigint {
     return BigInt(this.blockHeight);
+  }
+
+  /** Get chainId for batch hanko hashing */
+  getChainId(): bigint {
+    if (!this.common) return 1337n;
+    const id = (this.common as any).chainId?.();
+    if (typeof id === 'bigint') return id;
+    if (typeof id === 'number') return BigInt(id);
+    return 1337n;
+  }
+
+  /** Get current entity batch nonce (Depository.entityNonces) */
+  async getEntityNonce(entityId: string): Promise<bigint> {
+    if (!this.depositoryAddress || !this.depositoryInterface) {
+      throw new Error('Depository not deployed');
+    }
+    const normalizedEntityId = normalizeEntityId(entityId);
+    const entityAddress = ethers.getAddress(`0x${normalizedEntityId.slice(-40)}`);
+    const callData = this.depositoryInterface.encodeFunctionData('entityNonces', [entityAddress]);
+    const result = await this.vm.evm.runCall({
+      to: this.depositoryAddress,
+      caller: this.deployerAddress,
+      data: hexToBytes(callData as `0x${string}`),
+      gasLimit: 100000n,
+    });
+    if (result.execResult.exceptionError) {
+      return 0n;
+    }
+    const decoded = this.depositoryInterface.decodeFunctionResult('entityNonces', result.execResult.returnValue);
+    return BigInt(decoded[0]);
   }
 
   /** Check if initialized */
@@ -1359,11 +1414,11 @@ export class BrowserVMProvider {
 
   /**
    * Execute settle with insurance registration.
-   * Signature is auto-generated if not provided (requires entities created via createEntityId).
+   * Signature is required for any state changes.
    *
    * @param leftEntity - The left entity (smaller entityId)
    * @param rightEntity - The right entity (larger entityId)
-   * @param sig - Optional signature. If not provided or '0x', auto-generates from counterparty wallet.
+   * @param sig - Hanko signature from counterparty (required if there are changes).
    */
   async settleWithInsurance(
     leftEntity: string,
@@ -1389,12 +1444,14 @@ export class BrowserVMProvider {
       throw new Error('Depository not deployed');
     }
 
-    // Auto-generate signature if not provided and there are changes
-    let finalSig = sig || '0x';
+    const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0 || insuranceRegs.length > 0;
+    let finalSig = sig || '';
     console.log(`[BrowserVM] settleWithInsurance: input sig length=${sig?.length || 0}, diffs=${diffs.length}`);
-    if ((!sig || sig === '0x') && (diffs.length > 0 || forgiveDebtsInTokenIds.length > 0 || insuranceRegs.length > 0)) {
-      // leftEntity is the initiator, rightEntity is the counterparty (must sign)
-      finalSig = await this.signSettlement(leftEntity, rightEntity, diffs, forgiveDebtsInTokenIds, insuranceRegs);
+    if (hasChanges && (!finalSig || finalSig === '0x')) {
+      throw new Error('Settlement signature required for settleWithInsurance');
+    }
+    if (!finalSig) {
+      finalSig = '0x';
     }
 
     console.log(`[BrowserVM] settle call params:`);
@@ -1462,7 +1519,7 @@ export class BrowserVMProvider {
         console.log('[BrowserVM] Events before revert:', logsBeforeRevert.length);
         const events = this.parseLogs(logsBeforeRevert);
         for (const ev of events) {
-          console.log(`   Event: ${ev.type}`, JSON.stringify(ev.data, (k, v) => typeof v === 'bigint' ? v.toString() : v));
+          console.log(`   Event: ${ev.name}`, JSON.stringify(ev.args, (k, v) => typeof v === 'bigint' ? v.toString() : v));
         }
       } else {
         console.log('[BrowserVM] No events emitted before revert');
@@ -1641,12 +1698,16 @@ export class BrowserVMProvider {
     // Decode: (bool exists, bytes32 currentBoardHash, bytes32 proposedBoardHash, uint256 registrationBlock, string name)
     const decoded = this.entityProviderInterface.decodeFunctionResult('getEntityInfo', result.execResult.returnValue);
 
-    return {
+    const nameValue = decoded[4] as string;
+    const result_obj: { exists: boolean; name?: string; currentBoardHash?: string; registrationBlock?: number } = {
       exists: decoded[0] as boolean,
       currentBoardHash: decoded[1] as string,
-      name: decoded[4] as string || undefined,
       registrationBlock: Number(decoded[3]),
     };
+    if (nameValue) {
+      result_obj.name = nameValue;
+    }
+    return result_obj;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -1694,26 +1755,60 @@ export class BrowserVMProvider {
       await this.init();
     }
 
+    const normalizeHex = (value: unknown): string | null => {
+      if (value === null || value === undefined) return null;
+      if (typeof value === 'string') {
+        const raw = value.startsWith('0x') ? value.slice(2) : value;
+        if (raw.length === 0) return '';
+        const normalized = raw.length % 2 === 1 ? `0${raw}` : raw;
+        return /^[0-9a-fA-F]+$/.test(normalized) ? normalized : null;
+      }
+      if (value instanceof Uint8Array) {
+        return Buffer.from(value).toString('hex');
+      }
+      if (Array.isArray(value)) {
+        try {
+          return Buffer.from(value).toString('hex');
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    };
+
     // Restore trie database entries
     const trie = (this.vm.stateManager as any)._trie;
     const db = trie.database().db;
 
     if (db instanceof Map) {
       db.clear();
-      for (const [keyHex, valueHex] of data.trieData) {
-        db.set(
-          hexToBytes(`0x${keyHex}`),
-          hexToBytes(`0x${valueHex}`),
-        );
+      for (const entry of data.trieData || []) {
+        const keyHex = normalizeHex(entry?.[0]);
+        const valueHex = normalizeHex(entry?.[1]);
+        if (!keyHex || !valueHex) {
+          throw new Error('BrowserVM restoreState: invalid trie entry');
+        }
+        db.set(hexToBytes(`0x${keyHex}`), hexToBytes(`0x${valueHex}`));
       }
     }
 
     // Restore state root
-    const stateRoot = hexToBytes(`0x${data.stateRoot}`);
+    const stateRootHex = normalizeHex(data.stateRoot);
+    if (!stateRootHex) {
+      throw new Error('BrowserVM restoreState: invalid stateRoot');
+    }
+    const stateRoot = hexToBytes(`0x${stateRootHex}`);
     await this.vm.stateManager.setStateRoot(stateRoot);
 
     // Restore nonce
     this.nonce = BigInt(data.nonce);
+
+    if (data.addresses?.depository) {
+      this.depositoryAddress = createAddressFromString(data.addresses.depository);
+    }
+    if (data.addresses?.entityProvider) {
+      this.entityProviderAddress = createAddressFromString(data.addresses.entityProvider);
+    }
 
     console.log(`[BrowserVM] Restored state: ${data.trieData.length} trie nodes, root ${data.stateRoot.slice(0, 16)}...`);
   }
@@ -1791,7 +1886,7 @@ export class BrowserVMProvider {
   private createBlock(timestampMs: number): Block {
     const nextHeight = this.blockHeight + 1;
     const headerData = {
-      parentHash: hexToBytes(this.blockHash),
+      parentHash: hexToBytes(this.blockHash as `0x${string}`),
       number: BigInt(nextHeight),
       timestamp: BigInt(Math.floor(timestampMs / 1000)),
       gasLimit: BLOCK_GAS_LIMIT,
@@ -1879,7 +1974,7 @@ export class BrowserVMProvider {
     const boardHashes: string[] = [];
 
     for (const signerId of signerIds) {
-      const privateKey = getSignerPrivateKey(signerId);
+      const privateKey = getCachedSignerPrivateKey(signerId);
       if (!privateKey) {
         throw new Error(`No private key for signerId ${signerId} - call registerTestKeys first`);
       }
@@ -1919,6 +2014,7 @@ export class BrowserVMProvider {
     // Verify registration by checking stored boardHashes
     for (let i = 0; i < entityNumbers.length; i++) {
       const entityNum = entityNumbers[i];
+      if (entityNum === undefined) continue;
       const entityId = '0x' + entityNum.toString(16).padStart(64, '0');
       const info = await this.getEntityInfo(entityId);
       console.log(`[BrowserVM]   Verified entity ${entityNum}: stored boardHash=${info.currentBoardHash?.slice(0, 18)}...`);

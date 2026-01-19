@@ -85,37 +85,95 @@ export function lockRuntimeSeedUpdates(locked: boolean): void {
   runtimeSeedLocked = locked;
 }
 
-const getOrDeriveKey = (signerId: string): Uint8Array | null => {
+const getOrDeriveKey = (envSeed: Uint8Array, signerId: string): Uint8Array => {
   console.log(`🔍 getOrDeriveKey: signerId=${signerId.slice(-4)}`);
   const cached = signerKeys.get(signerId);
   if (cached) {
     console.log(`✅ Found cached key for ${signerId.slice(-4)}`);
     return cached;
   }
-  console.log(`⚠️ No cached key for ${signerId.slice(-4)}, trying to derive...`);
-  if (!runtimeSeedBytes) {
-    console.log(`❌ Cannot derive - runtimeSeedBytes is null`);
-    return null;
+  console.log(`⚠️ No cached key for ${signerId.slice(-4)}, deriving from env.runtimeSeed...`);
+
+  // PURE: ONLY use env seed, NEVER fall back to global
+  if (!envSeed) {
+    throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getOrDeriveKey called without env.runtimeSeed for signer ${signerId}`);
   }
-  console.log(`✅ Deriving key from runtimeSeedBytes (${runtimeSeedBytes.length} bytes)`);
-  const derived = deriveSignerKeySync(runtimeSeedBytes, signerId);
+  console.log(`✅ Deriving key from env seed (${envSeed.length} bytes)`);
+  const derived = deriveSignerKeySync(envSeed, signerId);
   registerSignerKey(signerId, derived);
   console.log(`✅ Derived and registered key for ${signerId.slice(-4)}`);
   return derived;
 };
 
-// Export for hanko-signing.ts
-export function getSignerPrivateKey(signerId: string): Uint8Array | null {
-  return getOrDeriveKey(signerId);
+/**
+ * Get cached signer private key (no derivation, cache-only)
+ * Used by components like BrowserVM that don't have env access
+ */
+export function getCachedSignerPrivateKey(signerId: string): Uint8Array | null {
+  return signerKeys.get(signerId) || null;
 }
 
-export function getSignerPublicKey(signerId: string): Uint8Array | null {
+/**
+ * Get cached signer public key (no derivation, cache-only)
+ * Used by components that don't have env access
+ */
+export function getCachedSignerPublicKey(signerId: string): Uint8Array | null {
   const external = externalPublicKeys.get(signerId);
   if (external) return external;
   const cached = signerPublicKeys.get(signerId);
   if (cached) return cached;
-  const privateKey = signerKeys.get(signerId) || getOrDeriveKey(signerId);
+  // Try deriving from cached private key
+  const privateKey = signerKeys.get(signerId);
   if (!privateKey) return null;
+  const publicKey = secp256k1.getPublicKey(privateKey);
+  signerPublicKeys.set(signerId, publicKey);
+  return publicKey;
+}
+
+/**
+ * Get cached signer address (no derivation, cache-only)
+ * Used by components that don't have env access
+ */
+export function getCachedSignerAddress(signerId: string): string | null {
+  const cached = signerAddresses.get(signerId);
+  if (cached) return cached;
+  // Try deriving from cached private key
+  const privateKey = signerKeys.get(signerId);
+  if (!privateKey) return null;
+  const address = privateKeyToAddress(privateKey);
+  signerAddresses.set(signerId, address);
+  return address;
+}
+
+// Export for hanko-signing.ts
+export function getSignerPrivateKey(env: any, signerId: string): Uint8Array {
+  if (!env?.runtimeSeed) {
+    throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getSignerPrivateKey called without env.runtimeSeed for signer ${signerId}`);
+  }
+  const seed = textEncoder.encode(env.runtimeSeed);
+  return getOrDeriveKey(seed, signerId);
+}
+
+export function getSignerPublicKey(env: any, signerId: string): Uint8Array | null {
+  const external = externalPublicKeys.get(signerId);
+  if (external) return external;
+  const cached = signerPublicKeys.get(signerId);
+  if (cached) return cached;
+
+  // Try cached private key first
+  const cachedPrivateKey = signerKeys.get(signerId);
+  if (cachedPrivateKey) {
+    const publicKey = secp256k1.getPublicKey(cachedPrivateKey);
+    signerPublicKeys.set(signerId, publicKey);
+    return publicKey;
+  }
+
+  // Derive from env if available
+  if (!env?.runtimeSeed) {
+    return null;
+  }
+  const seed = textEncoder.encode(env.runtimeSeed);
+  const privateKey = getOrDeriveKey(seed, signerId);
   const publicKey = secp256k1.getPublicKey(privateKey);
   signerPublicKeys.set(signerId, publicKey);
   return publicKey;
@@ -133,11 +191,24 @@ export function deriveSignerAddressSync(seed: Uint8Array | string, signerId: str
   return privateKeyToAddress(privateKey);
 }
 
-export function getSignerAddress(signerId: string): string | null {
+export function getSignerAddress(env: any, signerId: string): string | null {
   const cached = signerAddresses.get(signerId);
   if (cached) return cached;
-  const privateKey = getOrDeriveKey(signerId);
-  if (!privateKey) return null;
+
+  // Try cached private key first
+  const cachedPrivateKey = signerKeys.get(signerId);
+  if (cachedPrivateKey) {
+    const address = privateKeyToAddress(cachedPrivateKey);
+    signerAddresses.set(signerId, address);
+    return address;
+  }
+
+  // Derive from env if available
+  if (!env?.runtimeSeed) {
+    return null;
+  }
+  const seed = textEncoder.encode(env.runtimeSeed);
+  const privateKey = getOrDeriveKey(seed, signerId);
   const address = privateKeyToAddress(privateKey);
   signerAddresses.set(signerId, address);
   return address;
@@ -219,27 +290,29 @@ export function clearSignerKeys(): void {
  * Returns: 65-byte signature (r + s + recovery)
  */
 export function signAccountFrame(
+  env: any,
   signerId: string,
-  frameHash: string,
-  _privateData?: string // Deprecated, kept for backwards compat
+  frameHash: string
 ): string {
-  console.log(`🔑 signAccountFrame CALLED: signerId=${signerId.slice(-4)}, frameHash=${frameHash.slice(0, 10)}`);
+  if (!env?.runtimeSeed) {
+    throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signAccountFrame called without env.runtimeSeed for signer ${signerId}`);
+  }
+  const seed = textEncoder.encode(env.runtimeSeed);
+
+  console.log(`🔑 signAccountFrame CALLED: signerId=${signerId.slice(-4)}, frameHash=${frameHash.slice(0, 10)}, source=env`);
   console.log(`🔑 Available signerKeys:`, Array.from(signerKeys.keys()).map(k => k.slice(-4)));
   console.log(`🔑 Available signerPublicKeys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
-  console.log(`🔑 runtimeSeedBytes available: ${!!runtimeSeedBytes} (${runtimeSeedBytes?.length || 0} bytes)`);
 
   const messageHash = keccak256(Buffer.from(frameHash.replace('0x', ''), 'hex'));
-  const signature = signDigest(signerId, messageHash);
+  const signature = signDigest(seed, signerId, messageHash);
   console.log(`✍️ Signed frame ${frameHash.slice(0, 10)} by ${signerId.slice(-4)}: ${signature.slice(0, 20)}...`);
   return signature;
 }
 
-export function signDigest(signerId: string, digestHex: string): string {
+export function signDigest(seed: Uint8Array, signerId: string, digestHex: string): string {
   installHmacSync();
-  const privateKey = getOrDeriveKey(signerId);
-  if (!privateKey) {
-    throw new Error(`SIGNER_KEY_MISSING: No key or runtime seed for signer ${signerId}`);
-  }
+
+  const privateKey = getOrDeriveKey(seed, signerId);
 
   const messageBytes = Buffer.from(digestHex.replace('0x', ''), 'hex');
   const [signature, recovery] = secp256k1.signSync(messageBytes, privateKey, { recovered: true, der: false });
@@ -251,14 +324,14 @@ export function signDigest(signerId: string, digestHex: string): string {
  * Verify account signature using secp256k1
  */
 export function verifyAccountSignature(
+  env: any,
   signerId: string,
   frameHash: string,
-  signature: string,
-  _privateData?: string // Deprecated
+  signature: string
 ): boolean {
   // Real signature verification
   console.log(`🔍 VERIFY: signerId=${signerId.slice(-4)}, frameHash=${frameHash.slice(0, 10)}, sig=${signature.slice(0, 20)}...`);
-  const publicKey = getSignerPublicKey(signerId);
+  const publicKey = getSignerPublicKey(env, signerId);
   if (!publicKey) {
     console.warn(`⚠️ Cannot verify - no public key for signerId=${signerId.slice(-4)}`);
     console.warn(`⚠️ Available keys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
@@ -293,12 +366,10 @@ export function verifyAccountSignature(
 }
 
 /**
- * Easy signer function that returns the entity ID from a signature
- */
-/**
  * Validate multiple signatures for account frame
  */
 export function validateAccountSignatures(
+  env: any,
   frameHash: string,
   signatures: string[],
   expectedSigners: string[]
@@ -308,7 +379,8 @@ export function validateAccountSignatures(
 
   for (const signature of signatures) {
     for (const signer of Array.from(remaining)) {
-      if (verifyAccountSignature(signer, frameHash, signature)) {
+      const isValid = verifyAccountSignature(env, signer, frameHash, signature);
+      if (isValid) {
         validSigners.push(signer);
         remaining.delete(signer);
         break;

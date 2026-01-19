@@ -21,12 +21,55 @@ import { logError } from './logger';
 import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
 import { processAccountTx } from './account-tx/apply';
+import { buildSettlementDiffs, createSettlementHash } from './proof-builder.js';
 
 // Removed createValidAccountSnapshot - using simplified AccountSnapshot interface
 
 // === CONSTANTS ===
 const MEMPOOL_LIMIT = 1000;
 const MAX_MESSAGE_COUNTER = 1000000;
+
+/**
+ * Get depositoryAddress from environment (BrowserVM or active J-replica)
+ * CRITICAL for replay protection - domain separator for signatures
+ */
+function getDepositoryAddress(env: Env): string {
+  // Try BrowserVM first (most common)
+  if (env.browserVM) {
+    const browserVM = env.browserVM;
+    const getAddress = browserVM.getDepositoryAddress?.() || browserVM.browserVM?.getDepositoryAddress?.();
+    if (getAddress && getAddress !== '0x0000000000000000000000000000000000000000') {
+      return getAddress;
+    }
+  }
+
+  // Try active jurisdiction
+  if (env.activeJurisdiction) {
+    const jReplica = env.jReplicas.get(env.activeJurisdiction);
+    if (jReplica?.depositoryAddress) {
+      return jReplica.depositoryAddress;
+    }
+    // Fallback to legacy contracts.depository
+    if (jReplica?.contracts?.depository) {
+      return jReplica.contracts.depository;
+    }
+  }
+
+  // Fallback: first J-replica with depositoryAddress
+  for (const jReplica of env.jReplicas.values()) {
+    if (jReplica.depositoryAddress) {
+      return jReplica.depositoryAddress;
+    }
+    // Fallback to legacy contracts.depository
+    if (jReplica.contracts?.depository) {
+      return jReplica.contracts.depository;
+    }
+  }
+
+  // Last resort: return zero address (will fail verification but won't crash)
+  console.warn('[account-consensus] ⚠️ No depositoryAddress found in env - using zero address (signatures will fail!)');
+  return '0x0000000000000000000000000000000000000000';
+}
 const MAX_FRAME_TIMESTAMP_DRIFT_MS = 300000; // 5 minutes
 const MAX_FRAME_SIZE_BYTES = 1048576; // 1MB frame size limit (Bitcoin block size standard)
 
@@ -137,6 +180,10 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
   return ethers.keccak256(ethers.toUtf8Bytes(encoded));
 }
 
+export async function computeFrameHash(frame: AccountFrame): Promise<string> {
+  return createFrameHash(frame);
+}
+
 // === TRANSACTION PROCESSING ===
 
 // Transaction processing now delegated to account-tx/apply.ts (modular handlers)
@@ -203,6 +250,8 @@ export async function proposeAccountFrame(
 
   // Clone account machine for validation
   const clonedMachine = cloneAccountMachine(accountMachine);
+  // Dispute nonce tracks committed frame height for counter-dispute support
+  clonedMachine.proofHeader.disputeNonce = accountMachine.currentHeight + 1;
 
   // Get entity's synced J-height for deterministic HTLC validation
   const ourEntityId = accountMachine.proofHeader.fromEntity;
@@ -315,7 +364,7 @@ export async function proposeAccountFrame(
   })));
 
   // Determine if we're left entity (for byLeft field)
-  const weAreLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
+  const weAreLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
   // Ensure monotonic timestamps within account (HTLC safety + multi-runtime compatibility)
   // In multi-runtime P2P scenarios, different runtimes may have different clock rates
@@ -327,11 +376,14 @@ export async function proposeAccountFrame(
   }
 
   // Create account frame matching the real AccountFrame interface
+  // CRITICAL: Deep-copy accountTxs to prevent mutation issues (j_event_claim data can be modified later)
+  // Use structuredClone to preserve BigInt values
+  const accountTxsCopy = structuredClone([...accountMachine.mempool]);
   const frameData = {
     height: accountMachine.currentHeight + 1,
     timestamp: frameTimestamp, // MONOTONIC: max(env.timestamp, prev+1) for multi-runtime safety
     jHeight: frameJHeight, // CRITICAL: J-height for HTLC consensus
-    accountTxs: [...accountMachine.mempool],
+    accountTxs: accountTxsCopy,
     // CRITICAL: Use stored stateHash from currentFrame (set during commit)
     prevFrameHash: accountMachine.currentHeight === 0
       ? 'genesis'
@@ -345,6 +397,22 @@ export async function proposeAccountFrame(
 
   // Calculate state hash (frameData is properly typed AccountFrame)
   frameData.stateHash = await createFrameHash(frameData as AccountFrame);
+
+  // Debug: log what's being hashed at creation time
+  if (HEAVY_LOGS) {
+    console.log(`[HASH-DEBUG] Frame creation for ${accountMachine.proofHeader.toEntity.slice(-4)}:`);
+    console.log(`  height: ${frameData.height}`);
+    console.log(`  timestamp: ${frameData.timestamp}`);
+    console.log(`  jHeight: ${frameData.jHeight}`);
+    console.log(`  prevFrameHash: ${frameData.prevFrameHash?.slice(0,20)}...`);
+    console.log(`  accountTxs count: ${frameData.accountTxs.length}`);
+    console.log(`  accountTxs types: [${frameData.accountTxs.map(tx => tx.type).join(', ')}]`);
+    console.log(`  tokenIds: [${frameData.tokenIds.join(', ')}]`);
+    console.log(`  deltas: [${frameData.deltas.map(d => d.toString()).join(', ')}]`);
+    console.log(`  fullDeltaStates count: ${fullDeltaStates.length}`);
+    console.log(`  byLeft: ${frameData.byLeft}`);
+    console.log(`  stateHash: ${frameData.stateHash}`);
+  }
 
   // VALIDATE AT SOURCE: Guaranteed type safety from this point forward
   let newFrame: AccountFrame;
@@ -398,8 +466,9 @@ export async function proposeAccountFrame(
   // Build dispute proof and sign it (CRITICAL: always sign dispute proof with every frame)
   // BUG FIX: Use clonedMachine (has NEW state after txs) NOT accountMachine (old state)
   const { buildAccountProofBody, createDisputeProofHash } = await import('./proof-builder');
+  const depositoryAddress = getDepositoryAddress(env);
   const proofResult = buildAccountProofBody(clonedMachine);
-  const disputeHash = createDisputeProofHash(clonedMachine, proofResult.proofBodyHash);
+  const disputeHash = createDisputeProofHash(clonedMachine, proofResult.proofBodyHash, depositoryAddress);
 
   const disputeHankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [disputeHash]);
   const disputeHanko = disputeHankos[0];
@@ -407,8 +476,26 @@ export async function proposeAccountFrame(
     return { success: false, error: 'Failed to build dispute hanko', events, accountInput: null };
   }
   accountMachine.currentDisputeProofHanko = disputeHanko;
+  accountMachine.currentDisputeProofCooperativeNonce = clonedMachine.proofHeader.cooperativeNonce;
+  accountMachine.currentDisputeProofBodyHash = proofResult.proofBodyHash;
+  if (!accountMachine.disputeProofNoncesByHash) {
+    accountMachine.disputeProofNoncesByHash = {};
+  }
+  accountMachine.disputeProofNoncesByHash[proofResult.proofBodyHash] = clonedMachine.proofHeader.cooperativeNonce;
+  if (!accountMachine.disputeProofBodiesByHash) {
+    accountMachine.disputeProofBodiesByHash = {};
+  }
+  accountMachine.disputeProofBodiesByHash[proofResult.proofBodyHash] = proofResult.proofBodyStruct;
 
-  console.log(`✅ Signed frame + dispute proof for account ${accountMachine.proofHeader.toEntity.slice(-4)}`);
+  // Sign settlement for current state (bilateral signature exchange)
+  const settlementDiffs = buildSettlementDiffs(clonedMachine);
+  const settlementHash = createSettlementHash(clonedMachine, settlementDiffs, depositoryAddress);
+  const settlementHankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [settlementHash]);
+  const settlementHanko = settlementHankos[0];
+  accountMachine.currentSettlementHanko = settlementHanko;
+  accountMachine.currentSettlementDiffs = settlementDiffs;
+
+  console.log(`✅ Signed frame + dispute proof + settlement for account ${accountMachine.proofHeader.toEntity.slice(-4)}`);
 
   // Set pending state (no longer storing clone - re-execution on commit)
   accountMachine.pendingFrame = newFrame;
@@ -427,7 +514,9 @@ export async function proposeAccountFrame(
     newAccountFrame: newFrame,
     newHanko: frameHanko,         // Hanko on frame stateHash
     newDisputeHanko: disputeHanko, // Hanko on dispute proof hash
-    newSignatures: [frameHanko], // LEGACY fallback (will be removed)
+    newDisputeProofBodyHash: proofResult.proofBodyHash, // ProofBodyHash that disputeHanko signs
+    newSettlementHanko: settlementHanko,
+    newSettlementDiffs: settlementDiffs,
     counter: skipCounterIncrement ? accountMachine.proofHeader.cooperativeNonce : ++accountMachine.proofHeader.cooperativeNonce,
   };
 
@@ -464,10 +553,11 @@ export async function handleAccountInput(
   timedOutHashlocks?: string[];
 }> {
   console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`);
-  console.log(`📨 A-MACHINE INPUT: height=${input.height || 'none'}, hasACK=${!!input.prevSignatures}, hasNewFrame=${!!input.newAccountFrame}, counter=${input.counter}`);
+  console.log(`📨 A-MACHINE INPUT: height=${input.height || 'none'}, hasACK=${!!input.prevHanko}, hasNewFrame=${!!input.newAccountFrame}, counter=${input.counter}`);
 
   const events: string[] = [];
   const timedOutHashlocks: string[] = [];
+  let ackProcessed = false;
 
   // CRITICAL: Counter validation (replay protection) - ALWAYS enforce, no frame 0 exemption
   if (input.counter !== undefined) {
@@ -476,8 +566,7 @@ export async function handleAccountInput(
     // hasn't been updated yet (only updated when ACK arrives). So ACK counter can be > ackedTransitions+1.
     const isACKForPendingFrame = accountMachine.pendingFrame
       && input.height === accountMachine.pendingFrame.height
-      && input.prevSignatures
-      && input.prevSignatures.length > 0;
+      && !!input.prevHanko;
 
     let counterValid: boolean;
     if (isACKForPendingFrame) {
@@ -502,14 +591,14 @@ export async function handleAccountInput(
   }
 
   // Handle pending frame confirmation
-  if (accountMachine.pendingFrame && input.height === accountMachine.pendingFrame.height && input.prevSignatures) {
+  if (accountMachine.pendingFrame && input.height === accountMachine.pendingFrame.height && input.prevHanko) {
     console.log(`✅ Received confirmation for pending frame ${input.height}`);
     console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}, counter=${input.counter}`);
 
     const frameHash = accountMachine.pendingFrame.stateHash;
 
     // HANKO ACK VERIFICATION: Verify hanko instead of single signature
-    const ackHanko = input.prevHanko || (input.prevSignatures && input.prevSignatures[0]);
+    const ackHanko = input.prevHanko;
     if (!ackHanko) {
       return { success: false, error: 'Missing ACK hanko', events };
     }
@@ -532,6 +621,7 @@ export async function handleAccountInput(
 
     // ACK is valid - proceed
     if (true) {
+      ackProcessed = true;
       // DoS FIX: Update counter AFTER signature verified (prevents counter desync attacks)
       if (input.counter !== undefined) {
         accountMachine.ackedTransitions = input.counter;
@@ -579,18 +669,35 @@ export async function handleAccountInput(
         // Clean up clone (no longer needed with re-execution)
         delete accountMachine.clonedForValidation;
 
-        accountMachine.currentFrame = {
-          height: accountMachine.pendingFrame.height,
-          timestamp: accountMachine.pendingFrame.timestamp,
-          jHeight: accountMachine.pendingFrame.jHeight,
-          accountTxs: accountMachine.pendingFrame.accountTxs,
-          prevFrameHash: accountMachine.pendingFrame.prevFrameHash,
-          tokenIds: accountMachine.pendingFrame.tokenIds,
-          deltas: accountMachine.pendingFrame.deltas,
-          stateHash: accountMachine.pendingFrame.stateHash,
-          byLeft: accountMachine.pendingFrame.byLeft,
-        };
+        // CRITICAL: Deep-copy entire pendingFrame to prevent mutation issues
+        accountMachine.currentFrame = structuredClone(accountMachine.pendingFrame);
         accountMachine.currentHeight = accountMachine.pendingFrame.height;
+        accountMachine.proofHeader.disputeNonce = accountMachine.currentHeight;
+
+        if (input.newDisputeHanko) {
+          accountMachine.counterpartyDisputeProofHanko = input.newDisputeHanko;
+          const signedCooperativeNonce = input.counter !== undefined
+            ? input.counter - 1
+            : accountMachine.proofHeader.cooperativeNonce;
+          accountMachine.counterpartyDisputeProofCooperativeNonce = signedCooperativeNonce;
+          if (input.newDisputeProofBodyHash) {
+            accountMachine.counterpartyDisputeProofBodyHash = input.newDisputeProofBodyHash;
+            if (!accountMachine.disputeProofNoncesByHash) {
+              accountMachine.disputeProofNoncesByHash = {};
+            }
+            accountMachine.disputeProofNoncesByHash[input.newDisputeProofBodyHash] = signedCooperativeNonce;
+          }
+          console.log(`✅ Stored counterparty dispute hanko from ACK`);
+        }
+
+        // Store counterparty settlement signature
+        if (input.newSettlementHanko) {
+          accountMachine.counterpartySettlementHanko = input.newSettlementHanko;
+          if (input.newSettlementDiffs) {
+            accountMachine.counterpartySettlementDiffs = input.newSettlementDiffs;
+          }
+          console.log(`✅ Stored counterparty settlement hanko from ACK`);
+        }
 
         // Add confirmed frame to history
         accountMachine.frameHistory.push({...accountMachine.pendingFrame});
@@ -754,9 +861,8 @@ export async function handleAccountInput(
     }
 
     // SECURITY: Verify signatures (REQUIRED for all frames)
-    if (HEAVY_LOGS) console.log(`🔍 SIG-CHECK: hasSignatures=${!!(input.newSignatures && input.newSignatures.length > 0)}`);
-    // HANKO VERIFICATION: Use hanko instead of single signature
-    const hankoToVerify = input.newHanko || (input.newSignatures && input.newSignatures[0]); // Try hanko first, fallback to legacy
+    // HANKO VERIFICATION: Require hanko for all frames
+    const hankoToVerify = input.newHanko;
     if (!hankoToVerify) {
       return { success: false, error: 'SECURITY: Frame must have hanko signature', events };
     }
@@ -779,9 +885,16 @@ export async function handleAccountInput(
     // Store counterparty's dispute proof hanko ONLY if verified and frame will commit
     // Don't update yet - will update when frame COMMITS (not just received)
     // This prevents storing dispute hanko for pending/rolled-back frames
-    if (input.newDisputeHanko) {
+    if (input.newDisputeHanko && !ackProcessed) {
       // Store temporarily - will be moved to counterpartyDisputeProofHanko on commit
       (accountMachine as any).pendingCounterpartyDisputeHanko = input.newDisputeHanko;
+      const signedCooperativeNonce = input.counter !== undefined
+        ? input.counter - 1
+        : accountMachine.proofHeader.cooperativeNonce;
+      (accountMachine as any).pendingCounterpartyDisputeProofCooperativeNonce = signedCooperativeNonce;
+      if (input.newDisputeProofBodyHash) {
+        (accountMachine as any).pendingCounterpartyDisputeProofBodyHash = input.newDisputeProofBodyHash;
+      }
       console.log(`📝 Stored pending counterparty dispute hanko (will commit with frame)`);
     }
 
@@ -962,7 +1075,10 @@ export async function handleAccountInput(
       console.log(`🔀 Copied pendingForward for multi-hop: route=[${clonedMachine.pendingForward.route.map(r => r.slice(-4)).join(',')}]`);
     }
 
-    accountMachine.currentFrame = {
+    // CRITICAL: Use receivedFrame.fullDeltaStates from proposer to maintain hash consistency
+    // The proposer's fullDeltaStates was used to compute the stateHash
+    // CRITICAL: Deep-copy to prevent mutation issues
+    accountMachine.currentFrame = structuredClone({
       height: receivedFrame.height,
       timestamp: receivedFrame.timestamp,
       jHeight: receivedFrame.jHeight,
@@ -972,13 +1088,29 @@ export async function handleAccountInput(
       deltas: receivedFrame.deltas,
       stateHash: receivedFrame.stateHash,
       byLeft: receivedFrame.byLeft, // Copy proposer info
-    };
+      fullDeltaStates: receivedFrame.fullDeltaStates || [], // Use proposer's fullDeltaStates for hash consistency
+    });
     accountMachine.currentHeight = receivedFrame.height;
+    accountMachine.proofHeader.disputeNonce = accountMachine.currentHeight;
 
     // COMMIT counterparty dispute hanko (frame accepted and committed)
     if ((accountMachine as any).pendingCounterpartyDisputeHanko) {
       accountMachine.counterpartyDisputeProofHanko = (accountMachine as any).pendingCounterpartyDisputeHanko;
       delete (accountMachine as any).pendingCounterpartyDisputeHanko;
+      if ((accountMachine as any).pendingCounterpartyDisputeProofCooperativeNonce !== undefined) {
+        accountMachine.counterpartyDisputeProofCooperativeNonce = (accountMachine as any).pendingCounterpartyDisputeProofCooperativeNonce;
+        delete (accountMachine as any).pendingCounterpartyDisputeProofCooperativeNonce;
+      }
+      if ((accountMachine as any).pendingCounterpartyDisputeProofBodyHash) {
+        accountMachine.counterpartyDisputeProofBodyHash = (accountMachine as any).pendingCounterpartyDisputeProofBodyHash;
+        if (!accountMachine.disputeProofNoncesByHash) {
+          accountMachine.disputeProofNoncesByHash = {};
+        }
+        if (accountMachine.counterpartyDisputeProofCooperativeNonce !== undefined) {
+          accountMachine.disputeProofNoncesByHash[accountMachine.counterpartyDisputeProofBodyHash] = accountMachine.counterpartyDisputeProofCooperativeNonce;
+        }
+        delete (accountMachine as any).pendingCounterpartyDisputeProofBodyHash;
+      }
       console.log(`✅ Committed counterparty dispute hanko (frame ${receivedFrame.height} accepted)`);
     }
 
@@ -1025,10 +1157,20 @@ export async function handleAccountInput(
     let proposeResult: Awaited<ReturnType<typeof proposeAccountFrame>> | undefined;
     // Build dispute proof hanko for ACK response (always include current state's dispute proof)
     const { buildAccountProofBody: buildProof, createDisputeProofHash: createHash } = await import('./proof-builder');
+    const ackDepositoryAddress = getDepositoryAddress(env);
     const ackProofResult = buildProof(accountMachine);
-    const ackDisputeHash = createHash(accountMachine, ackProofResult.proofBodyHash);
+    const ackDisputeHash = createHash(accountMachine, ackProofResult.proofBodyHash, ackDepositoryAddress);
     const ackDisputeHankos = await signHashesAsSingleEntity(env, ackEntityId, ackSignerId, [ackDisputeHash]);
     const ackDisputeHanko = ackDisputeHankos[0];
+    const ackSignedCooperativeNonce = accountMachine.proofHeader.cooperativeNonce;
+    if (!accountMachine.disputeProofNoncesByHash) {
+      accountMachine.disputeProofNoncesByHash = {};
+    }
+    accountMachine.disputeProofNoncesByHash[ackProofResult.proofBodyHash] = ackSignedCooperativeNonce;
+    if (!accountMachine.disputeProofBodiesByHash) {
+      accountMachine.disputeProofBodiesByHash = {};
+    }
+    accountMachine.disputeProofBodiesByHash[ackProofResult.proofBodyHash] = ackProofResult.proofBodyStruct;
 
     const response: AccountInput = {
       fromEntityId: accountMachine.proofHeader.fromEntity,
@@ -1036,7 +1178,7 @@ export async function handleAccountInput(
       height: receivedFrame.height,
       prevHanko: confirmationHanko,       // Hanko ACK on their frame
       newDisputeHanko: ackDisputeHanko,   // My dispute proof hanko (current state)
-      prevSignatures: [confirmationHanko], // LEGACY fallback
+      newDisputeProofBodyHash: ackProofResult.proofBodyHash, // ProofBodyHash that ackDisputeHanko signs
       counter: 0, // Will be set below after batching decision
     };
 
@@ -1055,9 +1197,6 @@ export async function handleAccountInput(
         }
         if (proposeResult.accountInput.newHanko) {
           response.newHanko = proposeResult.accountInput.newHanko;
-          response.newSignatures = [proposeResult.accountInput.newHanko]; // LEGACY fallback
-        } else if (proposeResult.accountInput.newSignatures) {
-          response.newSignatures = proposeResult.accountInput.newSignatures;
         }
         // DON'T overwrite response.newDisputeHanko (it's ACK's dispute hanko for current committed state)
         // Proposal's newDisputeHanko will be delivered when proposal commits, not now
@@ -1067,6 +1206,12 @@ export async function handleAccountInput(
         console.log(`✅ Batched ACK for frame ${receivedFrame.height} + proposal for frame ${newFrameId}`);
         events.push(`📤 Batched ACK + frame ${newFrameId}`);
       }
+    }
+
+    if (!batchedWithNewFrame) {
+      accountMachine.currentDisputeProofHanko = ackDisputeHanko;
+      accountMachine.currentDisputeProofCooperativeNonce = ackSignedCooperativeNonce;
+      accountMachine.currentDisputeProofBodyHash = ackProofResult.proofBodyHash;
     }
 
     // Increment counter ONCE per message (whether batched or not)
@@ -1089,7 +1234,7 @@ export async function handleAccountInput(
       ...(proposeResult?.swapOffersCancelled || [])
     ];
 
-    if (HEAVY_LOGS) console.log(`🔍 RETURN-RESPONSE: h=${response.height} prevSigs=${!!response.prevSignatures} newFrame=${!!response.newAccountFrame}`);
+    if (HEAVY_LOGS) console.log(`🔍 RETURN-RESPONSE: h=${response.height} prevHanko=${!!response.prevHanko} newFrame=${!!response.newAccountFrame}`);
     return { success: true, response, events, revealedSecrets: allRevealedSecrets, swapOffersCreated: allSwapOffersCreated, swapOffersCancelled: allSwapOffersCancelled, timedOutHashlocks };
   }
 
@@ -1212,7 +1357,7 @@ export async function generateAccountProof(accountMachine: AccountMachine): Prom
     throw new Error(`Cannot find signerId for proof from ${proofEntityId.slice(-4)}`);
   }
   console.log(`🔐 PROOF-SIGN: entityId=${proofEntityId.slice(-4)} → signerId=${proofSignerId.slice(-4)}`);
-  const signature = signAccountFrame(proofSignerId, `0x${proofHash}`);
+  const signature = signAccountFrame(env, proofSignerId, `0x${proofHash}`);
 
   // Store signature for later use
   accountMachine.hankoSignature = signature;

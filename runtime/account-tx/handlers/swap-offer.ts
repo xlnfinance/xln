@@ -15,6 +15,7 @@ import { deriveDelta, isLeft } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { formatEntityId } from '../../utils';
 import { canonicalAccountKey } from '../../state-helpers';
+import { FINANCIAL } from '../../constants';
 
 export async function handleSwapOffer(
   accountMachine: AccountMachine,
@@ -40,12 +41,20 @@ export async function handleSwapOffer(
     return { success: false, error: `Offer ${offerId} already exists`, events };
   }
 
-  // 2. Validate amounts
-  if (giveAmount <= 0n) {
-    return { success: false, error: `Invalid giveAmount: ${giveAmount}`, events };
+  // 2. Validate amounts (network-wide bounds)
+  if (giveAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || giveAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
+    return {
+      success: false,
+      error: `Invalid giveAmount: ${giveAmount} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
+      events,
+    };
   }
-  if (wantAmount <= 0n) {
-    return { success: false, error: `Invalid wantAmount: ${wantAmount}`, events };
+  if (wantAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || wantAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
+    return {
+      success: false,
+      error: `Invalid wantAmount: ${wantAmount} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
+      events,
+    };
   }
   if (giveTokenId === wantTokenId) {
     return { success: false, error: `Cannot swap same token: ${giveTokenId}`, events };
@@ -107,12 +116,12 @@ export async function handleSwapOffer(
     delta.rightSwapHold += giveAmount;
   }
 
-  // 8. Store offer (only during commit - metadata, not in state hash)
-  if (!isValidation) {
-    accountMachine.swapOffers.set(offerId, offer);
-    console.log(`📊 COMMIT: Swap offer stored (holds already applied in validation)`);
+  // 8. Store offer (proofBody includes swapOffers, so keep validation+commit aligned)
+  accountMachine.swapOffers.set(offerId, offer);
+  if (isValidation) {
+    console.log(`📊 VALIDATION: Swap offer stored (for dispute proof)`);
   } else {
-    console.log(`⏭️ VALIDATION: Holds applied, swapOffers storage deferred`);
+    console.log(`📊 COMMIT: Swap offer stored`);
   }
 
   events.push(`📊 Swap offer created: ${offerId.slice(0,8)}... give ${giveAmount} token${giveTokenId} for ${wantAmount} token${wantTokenId}`);

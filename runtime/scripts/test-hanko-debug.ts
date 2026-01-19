@@ -6,6 +6,7 @@
 import { BrowserVMProvider } from '../browservm.js';
 import { ethers } from 'ethers';
 import { getSignerPrivateKey, registerTestKeys } from '../account-crypto.js';
+import { isLeftEntity } from '../entity-id-utils';
 
 async function main() {
   console.log('🔍 Testing Hanko Board Hash Computation\n');
@@ -105,8 +106,9 @@ async function main() {
       // Let's use my getChannelKey and compare
 
       // My TypeScript channelKey
-      const tsLeft = BigInt(leftEntity) < BigInt(rightEntity) ? leftEntity : rightEntity;
-      const tsRight = BigInt(leftEntity) < BigInt(rightEntity) ? rightEntity : leftEntity;
+      const isLeft = isLeftEntity(leftEntity, rightEntity);
+      const tsLeft = isLeft ? leftEntity : rightEntity;
+      const tsRight = isLeft ? rightEntity : leftEntity;
       const tsChannelKey = ethers.solidityPacked(['bytes32', 'bytes32'], [tsLeft, tsRight]);
 
       console.log(`   leftEntity:  ${leftEntity}`);
@@ -118,8 +120,8 @@ async function main() {
     console.log('\n🔍 Board hash verification...');
     {
       // What was registered (from browserVM.registerEntitiesWithSigners)
-      const { getSignerPrivateKey } = await import('../account-crypto.js');
-      const privKey = getSignerPrivateKey('s3')!;
+      const { getCachedSignerPrivateKey } = await import('../account-crypto.js');
+      const privKey = getCachedSignerPrivateKey('s3')!;
       const wallet = new ethers.Wallet(ethers.hexlify(privKey));
       const validatorAddress = wallet.address;
       const validatorEntityId = ethers.zeroPadValue(validatorAddress, 32);
@@ -154,7 +156,7 @@ async function main() {
     const testHash = ethers.keccak256(ethers.toUtf8Bytes('test'));
     try {
       // We need to sign this hash with the same signer
-      const privateKey = (await import('../account-crypto.js')).getSignerPrivateKey('s3');
+      const privateKey = (await import('../account-crypto.js')).getCachedSignerPrivateKey('s3');
       const wallet = new ethers.Wallet(ethers.hexlify(privateKey!));
       const hashBytes = ethers.getBytes(testHash);
       const signature = wallet.signingKey.sign(hashBytes);

@@ -5,11 +5,11 @@
 
   let isOpen = false;
 
-  $: currentVault = $activeVault;
+  $: currentRuntime = $activeVault;
   $: currentSigner = $activeSigner;
-  $: savedVaults = $allVaults;
+  $: savedRuntimes = $allVaults;
 
-  $: displayVault = currentVault?.id || 'Vault';
+  $: displayRuntime = currentRuntime?.label || 'Runtime';
   $: displaySigner = currentSigner?.name || 'Signer';
   $: displayAddress = currentSigner?.address ? `${currentSigner.address.slice(0, 6)}...${currentSigner.address.slice(-4)}` : '';
 
@@ -26,12 +26,12 @@
     isOpen = false;
   }
 
-  function switchToVault(vaultId: string) {
-    vaultOperations.selectVault(vaultId);
+  function switchToRuntime(runtimeId: string) {
+    vaultOperations.selectRuntime(runtimeId);
     isOpen = false;
   }
 
-  function deriveNewVault() {
+  function deriveNewRuntime() {
     vaultUiOperations.requestDeriveNewVault();
     isOpen = false;
   }
@@ -39,7 +39,7 @@
 
 <Dropdown bind:open={isOpen} minWidth={220} maxWidth={340}>
   <span slot="trigger" class="trigger-content">
-    <span class="trigger-label">{displayVault}</span>
+    <span class="trigger-label">{displayRuntime}</span>
     <span class="trigger-sep">·</span>
     <span class="trigger-meta">{displaySigner}</span>
     {#if displayAddress}
@@ -49,9 +49,9 @@
   </span>
 
   <div slot="menu" class="menu-content">
-    {#if currentVault}
+    {#if currentRuntime}
       <div class="menu-section">Signers</div>
-      {#each currentVault.signers as signer (signer.index)}
+      {#each currentRuntime.signers as signer (signer.index)}
         <button
           class="menu-item"
           class:selected={signer.index === currentSigner?.index}
@@ -66,20 +66,20 @@
       </button>
     {/if}
 
-    {#if savedVaults.some(v => v.id !== currentVault?.id)}
+    {#if savedRuntimes.some(r => r.id !== currentRuntime?.id)}
       <div class="menu-divider"></div>
-      <div class="menu-section">Other Vaults</div>
-      {#each savedVaults.filter(v => v.id !== currentVault?.id) as vault}
-        <button class="menu-item" on:click={() => switchToVault(vault.id)}>
-          <span class="menu-label">{vault.id}</span>
-          <span class="menu-meta">{vault.signers.length} signers</span>
+      <div class="menu-section">Other Runtimes</div>
+      {#each savedRuntimes.filter(r => r.id !== currentRuntime?.id) as runtime}
+        <button class="menu-item" on:click={() => switchToRuntime(runtime.id)}>
+          <span class="menu-label">{runtime.label}</span>
+          <span class="menu-meta">{runtime.signers.length} signers</span>
         </button>
       {/each}
     {/if}
 
     <div class="menu-divider"></div>
-    <button class="menu-item add-item" on:click={deriveNewVault}>
-      <span class="menu-label">+ Derive New Vault</span>
+    <button class="menu-item add-item" on:click={deriveNewRuntime}>
+      <span class="menu-label">+ Derive New Runtime</span>
     </button>
   </div>
 </Dropdown>

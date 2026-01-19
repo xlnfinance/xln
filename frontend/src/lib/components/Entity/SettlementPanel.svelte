@@ -31,6 +31,7 @@
   let rightDiff = '0';
   let collateralDiff = '0';
   let ondeltaDiff = '0';
+  let settlementSig = '';
 
   let description = '';
   let sending = false;
@@ -166,6 +167,13 @@
           sending = false;
           return;
         }
+        if (!settlementSig || settlementSig === '0x') {
+          const error = 'Hanko signature required for settleDiffs';
+          console.error('❌ Settlement signature missing:', error);
+          alert(error);
+          sending = false;
+          return;
+        }
 
         entityTx = {
           type: 'settleDiffs' as const,
@@ -178,6 +186,7 @@
               collateralDiff: BigInt(collateralDiff),
               ondeltaDiff: BigInt(ondeltaDiff),
             }],
+            sig: settlementSig,
             description: description || undefined,
           },
         };
@@ -372,6 +381,17 @@
           <label for="settlement-ondelta-diff">Ondelta Diff</label>
           <input type="text" id="settlement-ondelta-diff" bind:value={ondeltaDiff} disabled={sending} />
         </div>
+      </div>
+
+      <div class="form-group">
+        <label for="settlement-sig">Hanko Signature</label>
+        <input
+          type="text"
+          id="settlement-sig"
+          bind:value={settlementSig}
+          placeholder="0x..."
+          disabled={sending}
+        />
       </div>
     </div>
   {/if}

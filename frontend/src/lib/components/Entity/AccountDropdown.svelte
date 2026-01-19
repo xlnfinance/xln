@@ -87,7 +87,13 @@
 
     <!-- Account list -->
     {#if accounts.length === 0}
-      <div class="empty-state">No accounts</div>
+      <div class="empty-state">
+        <div class="empty-icon">🤝</div>
+        <div class="empty-text">No connections yet</div>
+        {#if allowAdd}
+          <div class="empty-hint">Click "+ Add Account" below to connect</div>
+        {/if}
+      </div>
     {:else}
       {#each accounts as account (account.id)}
         <button
@@ -193,10 +199,28 @@
   }
 
   .empty-state {
-    padding: 16px;
+    padding: 20px 16px;
     text-align: center;
-    color: #666;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .empty-icon {
+    font-size: 32px;
+    opacity: 0.3;
+  }
+
+  .empty-text {
+    color: rgba(255, 255, 255, 0.6);
     font-size: 13px;
+    font-weight: 500;
+  }
+
+  .empty-hint {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 11px;
   }
 
   .account-avatar {

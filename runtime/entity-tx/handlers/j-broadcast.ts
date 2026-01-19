@@ -29,6 +29,12 @@ export async function handleJBroadcast(
 
   // Validate: jBatch exists and is non-empty
   if (!newState.jBatchState || isBatchEmpty(newState.jBatchState.batch)) {
+    const batch = newState.jBatchState?.batch;
+    if (batch) {
+      console.warn(`⚠️ j_broadcast: empty batch for ${entityState.entityId.slice(-4)} (r2r=${batch.reserveToReserve.length}, r2c=${batch.reserveToCollateral.length}, settlements=${batch.settlements.length}, starts=${batch.disputeStarts.length}, finals=${batch.disputeFinalizations.length})`);
+    } else {
+      console.warn(`⚠️ j_broadcast: missing jBatchState for ${entityState.entityId.slice(-4)}`);
+    }
     addMessage(newState, `❌ No operations to broadcast - jBatch is empty`);
     return { newState, outputs, jOutputs };
   }
@@ -43,6 +49,11 @@ export async function handleJBroadcast(
   const batchSize = getBatchSize(newState.jBatchState.batch);
   console.log(`📤 j_broadcast: Queuing batch to J-mempool (${batchSize} operations)`);
   console.log(`   Hanko: ${hankoSignature ? 'provided' : 'none'}`);
+  const signerId = entityState.config.validators[0];
+  if (!signerId) {
+    addMessage(newState, `❌ No signerId available - cannot sign batch for broadcast`);
+    return { newState, outputs, jOutputs };
+  }
 
   // Find the J-machine for this entity's jurisdiction
   const jurisdictionName = env.activeJurisdiction || 'default';
@@ -58,6 +69,7 @@ export async function handleJBroadcast(
       batch: newState.jBatchState.batch,
       hankoSignature: hankoSignature || undefined,
       batchSize,
+      signerId,
     },
     timestamp: env.timestamp,
   };

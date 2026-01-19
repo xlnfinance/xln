@@ -17,7 +17,7 @@
 
 import type { Env, EntityInput } from '../types';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
-import { findReplica, converge, assert } from './helpers';
+import { findReplica, converge, assert, enableStrictScenario } from './helpers';
 
 // Lazy-loaded runtime functions
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -61,12 +61,26 @@ const FILL_25 = 16384;
 const FILL_50 = 32768;
 const FILL_60 = 39321;
 
+const ceilDiv = (numerator: bigint, denominator: bigint): bigint => {
+  if (denominator === 0n) return 0n;
+  return (numerator + denominator - 1n) / denominator;
+};
+
+const computeFilledAmounts = (giveAmount: bigint, wantAmount: bigint, fillRatio: number) => {
+  const filledGive = (giveAmount * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
+  const filledWant = giveAmount > 0n ? ceilDiv(filledGive * wantAmount, giveAmount) : 0n;
+  return { filledGive, filledWant };
+};
+
 // Using helpers from helpers.ts (no duplication)
 
 export async function swapMarket(env: Env): Promise<void> {
+  const restoreStrict = enableStrictScenario(env, 'Swap Market');
+  try {
   // Register test keys for real signatures
   const { registerTestKeys } = await import('../account-crypto');
   await registerTestKeys(['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's10']);
+  env.runtimeSeed = 'test-seed-deterministic-42';
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
 
@@ -83,7 +97,7 @@ export async function swapMarket(env: Env): Promise<void> {
   // ============================================================================
   console.log('🏛️  Setting up BrowserVM J-Machine...');
 
-  const browserVM = await ensureBrowserVM();
+  const browserVM = await ensureBrowserVM(env);
   const depositoryAddress = browserVM.getDepositoryAddress();
   const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
   createJReplica(env, 'Market', depositoryAddress, J_MACHINE_POSITION); // Match ahb.ts positioning
@@ -193,25 +207,20 @@ export async function swapMarket(env: Env): Promise<void> {
   const hubBtcTraders = [alice, grace, dave];
   const hubDaiTraders = [bob, eve, frank];
 
-  await process(env, [
-    ...hubEthTraders.map(trader => ({
-      entityId: trader.id,
-      signerId: trader.signer,
-      entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubEth.id } }],
-    })),
-    ...hubBtcTraders.map(trader => ({
-      entityId: trader.id,
-      signerId: trader.signer,
-      entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubBtc.id } }],
-    })),
-    ...hubDaiTraders.map(trader => ({
-      entityId: trader.id,
-      signerId: trader.signer,
-      entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubDai.id } }],
-    })),
-  ]);
+  const openPairs: Array<{ trader: typeof traders[number]; hub: typeof hubs[number] }> = [
+    ...hubEthTraders.map(trader => ({ trader, hub: hubEth })),
+    ...hubBtcTraders.map(trader => ({ trader, hub: hubBtc })),
+    ...hubDaiTraders.map(trader => ({ trader, hub: hubDai })),
+  ];
 
-  await converge(env);
+  for (const { trader, hub } of openPairs) {
+    await process(env, [{
+      entityId: trader.id,
+      signerId: trader.signer,
+      entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }],
+    }]);
+    await converge(env, 30);
+  }
   console.log('  ✅ Bilateral accounts created\n');
 
   // ============================================================================
@@ -221,61 +230,59 @@ export async function swapMarket(env: Env): Promise<void> {
 
   const creditLimitUnits = 10_000_000n / 3n;
 
-  await process(env, [
-    {
-      entityId: hubEth.id,
-      signerId: hubEth.signer,
-      entityTxs: hubEthTraders.flatMap(trader => [
-        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: USDC, amount: usdc(creditLimitUnits) } },
-        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: ETH, amount: eth(creditLimitUnits) } },
-      ]),
-    },
-    {
-      entityId: hubBtc.id,
-      signerId: hubBtc.signer,
-      entityTxs: hubBtcTraders.flatMap(trader => [
-        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: USDC, amount: usdc(creditLimitUnits) } },
-        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: BTC, amount: btc(creditLimitUnits) } },
-      ]),
-    },
-    {
-      entityId: hubDai.id,
-      signerId: hubDai.signer,
-      entityTxs: hubDaiTraders.flatMap(trader => [
-        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: USDC, amount: usdc(creditLimitUnits) } },
-        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: DAI, amount: dai(creditLimitUnits) } },
-      ]),
-    },
-  ]);
-
-  await process(env, [
+  const creditPairs: Array<{
+    trader: typeof traders[number];
+    hub: typeof hubs[number];
+    tokenA: number;
+    tokenB: number;
+    amountA: bigint;
+    amountB: bigint;
+  }> = [
     ...hubEthTraders.map(trader => ({
-      entityId: trader.id,
-      signerId: trader.signer,
-      entityTxs: [
-        { type: 'extendCredit', data: { counterpartyEntityId: hubEth.id, tokenId: USDC, amount: usdc(creditLimitUnits) } },
-        { type: 'extendCredit', data: { counterpartyEntityId: hubEth.id, tokenId: ETH, amount: eth(creditLimitUnits) } },
-      ],
+      trader,
+      hub: hubEth,
+      tokenA: USDC,
+      tokenB: ETH,
+      amountA: usdc(creditLimitUnits),
+      amountB: eth(creditLimitUnits),
     })),
     ...hubBtcTraders.map(trader => ({
-      entityId: trader.id,
-      signerId: trader.signer,
-      entityTxs: [
-        { type: 'extendCredit', data: { counterpartyEntityId: hubBtc.id, tokenId: USDC, amount: usdc(creditLimitUnits) } },
-        { type: 'extendCredit', data: { counterpartyEntityId: hubBtc.id, tokenId: BTC, amount: btc(creditLimitUnits) } },
-      ],
+      trader,
+      hub: hubBtc,
+      tokenA: USDC,
+      tokenB: BTC,
+      amountA: usdc(creditLimitUnits),
+      amountB: btc(creditLimitUnits),
     })),
     ...hubDaiTraders.map(trader => ({
+      trader,
+      hub: hubDai,
+      tokenA: USDC,
+      tokenB: DAI,
+      amountA: usdc(creditLimitUnits),
+      amountB: dai(creditLimitUnits),
+    })),
+  ];
+
+  for (const { trader, hub, tokenA, tokenB, amountA, amountB } of creditPairs) {
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [
+        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: tokenA, amount: amountA } },
+        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: tokenB, amount: amountB } },
+      ],
+    }]);
+    await process(env, [{
       entityId: trader.id,
       signerId: trader.signer,
       entityTxs: [
-        { type: 'extendCredit', data: { counterpartyEntityId: hubDai.id, tokenId: USDC, amount: usdc(creditLimitUnits) } },
-        { type: 'extendCredit', data: { counterpartyEntityId: hubDai.id, tokenId: DAI, amount: dai(creditLimitUnits) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: tokenA, amount: amountA } },
+        { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: tokenB, amount: amountB } },
       ],
-    })),
-  ]);
-
-  await converge(env);
+    }]);
+    await converge(env, 30);
+  }
   console.log('  ✅ Bidirectional credit established for all tokens\n');
 
   // ============================================================================
@@ -434,6 +441,25 @@ export async function swapMarket(env: Env): Promise<void> {
   await converge(env);
   console.log('✅ PHASE 1 COMPLETE: Orderbook depth established\n');
 
+  const [, bobEthRepBefore] = findReplica(env, bob.id);
+  const bobEthAccountBefore = bobEthRepBefore.state.accounts.get(hubEth.id);
+  const bobEthOfferBefore = bobEthAccountBefore?.swapOffers?.get('bob-eth-ask');
+  assert(!!bobEthOfferBefore, 'Bob ETH ask exists after Phase 1');
+  const bobEthGive = bobEthOfferBefore.quantizedGive ?? bobEthOfferBefore.giveAmount;
+  const bobEthWant = bobEthOfferBefore.quantizedWant ?? bobEthOfferBefore.wantAmount;
+
+  const [, aliceBtcRepBefore] = findReplica(env, alice.id);
+  const aliceBtcAccountBefore = aliceBtcRepBefore.state.accounts.get(hubBtc.id);
+  const aliceBtcOfferBefore = aliceBtcAccountBefore?.swapOffers?.get('alice-btc-bid');
+  assert(!!aliceBtcOfferBefore, 'Alice BTC bid exists after Phase 1');
+
+  const [, bobDaiRepBefore] = findReplica(env, bob.id);
+  const bobDaiAccountBefore = bobDaiRepBefore.state.accounts.get(hubDai.id);
+  const bobDaiOfferBefore = bobDaiAccountBefore?.swapOffers?.get('bob-dai-ask');
+  assert(!!bobDaiOfferBefore, 'Bob DAI ask exists after Phase 1');
+  const bobDaiGive = bobDaiOfferBefore.quantizedGive ?? bobDaiOfferBefore.giveAmount;
+  const bobDaiWant = bobDaiOfferBefore.quantizedWant ?? bobDaiOfferBefore.wantAmount;
+
   // ============================================================================
   // PHASE 2: Takers sweep orderbook
   // ============================================================================
@@ -494,6 +520,36 @@ export async function swapMarket(env: Env): Promise<void> {
   await converge(env);
   console.log('✅ PHASE 2 COMPLETE: Market orders executed\n');
 
+  const bobEthFilled = computeFilledAmounts(bobEthGive, bobEthWant, FILL_60);
+  const expectedBobEthGiveRemaining = bobEthGive - bobEthFilled.filledGive;
+  const expectedBobEthWantRemaining = bobEthWant - bobEthFilled.filledWant;
+
+  const [, bobEthRepAfter] = findReplica(env, bob.id);
+  const bobEthAccountAfter = bobEthRepAfter.state.accounts.get(hubEth.id);
+  const bobEthOfferAfter = bobEthAccountAfter?.swapOffers?.get('bob-eth-ask');
+  assert(!!bobEthOfferAfter, 'Bob ETH ask remains after partial fill');
+  assert(bobEthOfferAfter.giveAmount === expectedBobEthGiveRemaining,
+    `Bob ETH ask remaining give = ${expectedBobEthGiveRemaining} (got ${bobEthOfferAfter.giveAmount})`);
+  assert(bobEthOfferAfter.wantAmount === expectedBobEthWantRemaining,
+    `Bob ETH ask remaining want = ${expectedBobEthWantRemaining} (got ${bobEthOfferAfter.wantAmount})`);
+
+  const [, aliceBtcRepAfter] = findReplica(env, alice.id);
+  const aliceBtcAccountAfter = aliceBtcRepAfter.state.accounts.get(hubBtc.id);
+  assert(!aliceBtcAccountAfter?.swapOffers?.has('alice-btc-bid'), 'Alice BTC bid fully filled');
+
+  const bobDaiFilled = computeFilledAmounts(bobDaiGive, bobDaiWant, FILL_20);
+  const expectedBobDaiGiveRemaining = bobDaiGive - bobDaiFilled.filledGive;
+  const expectedBobDaiWantRemaining = bobDaiWant - bobDaiFilled.filledWant;
+
+  const [, bobDaiRepAfter] = findReplica(env, bob.id);
+  const bobDaiAccountAfter = bobDaiRepAfter.state.accounts.get(hubDai.id);
+  const bobDaiOfferAfter = bobDaiAccountAfter?.swapOffers?.get('bob-dai-ask');
+  assert(!!bobDaiOfferAfter, 'Bob DAI ask remains after partial fill');
+  assert(bobDaiOfferAfter.giveAmount === expectedBobDaiGiveRemaining,
+    `Bob DAI ask remaining give = ${expectedBobDaiGiveRemaining} (got ${bobDaiOfferAfter.giveAmount})`);
+  assert(bobDaiOfferAfter.wantAmount === expectedBobDaiWantRemaining,
+    `Bob DAI ask remaining want = ${expectedBobDaiWantRemaining} (got ${bobDaiOfferAfter.wantAmount})`);
+
   // ============================================================================
   // PHASE 3: Market volatility (cancel + replace)
   // ============================================================================
@@ -539,9 +595,21 @@ export async function swapMarket(env: Env): Promise<void> {
   await converge(env);
   console.log('✅ PHASE 3 COMPLETE: Market volatility simulated\n');
 
+  const [, aliceEthRepAfter] = findReplica(env, alice.id);
+  const aliceEthAccountAfter = aliceEthRepAfter.state.accounts.get(hubEth.id);
+  assert(!aliceEthAccountAfter?.swapOffers?.has('alice-eth-ask'), 'Alice ETH ask cancelled');
+  const aliceEthOfferV2 = aliceEthAccountAfter?.swapOffers?.get('alice-eth-ask-v2');
+  assert(!!aliceEthOfferV2, 'Alice ETH ask v2 created');
+  assert(aliceEthOfferV2.giveAmount === eth(10), `Alice ETH ask v2 giveAmount = ${eth(10)} (got ${aliceEthOfferV2.giveAmount})`);
+  assert(aliceEthOfferV2.wantAmount === usdc(30200), `Alice ETH ask v2 wantAmount = ${usdc(30200)} (got ${aliceEthOfferV2.wantAmount})`);
+
   // ============================================================================
   // VERIFICATION & SUMMARY
   // ============================================================================
+  console.log('🔄 Final convergence (flush pending frames)...');
+  await converge(env, 200);
+  console.log('✅ Final convergence complete\n');
+
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('                   MARKET SUMMARY                              ');
   console.log('═══════════════════════════════════════════════════════════════\n');
@@ -589,6 +657,9 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log(`🎯 Market fills: 3`);
   console.log(`🚫 Cancellations: 1`);
   console.log('═══════════════════════════════════════════════════════════════\n');
+  } finally {
+    restoreStrict();
+  }
 }
 
 // Self-executing scenario

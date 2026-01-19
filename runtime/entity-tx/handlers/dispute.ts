@@ -13,10 +13,49 @@
  * 6. Events flow back to entities via j_event handlers
  */
 
-import type { EntityState, EntityTx, EntityInput, Env } from '../../types';
+import type { EntityState, EntityTx, EntityInput, Env, AccountMachine } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { initJBatch } from '../../j-batch';
+import { initJBatch, batchAddRevealSecret } from '../../j-batch';
+import { getDeltaTransformerAddress } from '../../proof-builder';
+import { buildDeltaTransformerArguments } from '../../transformer-args';
 import { buildAccountProofBody, createDisputeProofHash, buildInitialDisputeProof } from '../../proof-builder';
+
+function buildPendingSwapFillRatios(
+  entityState: EntityState,
+  counterpartyEntityId: string,
+  account: AccountMachine
+): Map<string, number> {
+  const pending = entityState.pendingSwapFillRatios;
+  if (!pending || pending.size === 0) return new Map();
+
+  const ratios = new Map<string, number>();
+  for (const offerId of account.swapOffers.keys()) {
+    const key = `${counterpartyEntityId}:${offerId}`;
+    const ratio = pending.get(key);
+    if (ratio !== undefined) {
+      ratios.set(offerId, ratio);
+    }
+  }
+  return ratios;
+}
+
+function collectHtlcSecrets(entityState: EntityState, counterpartyEntityId: string): string[] {
+  const secrets: string[] = [];
+  if (!entityState.htlcRoutes?.size) return secrets;
+  const seen = new Set<string>();
+
+  for (const route of entityState.htlcRoutes.values()) {
+    if (!route.secret) continue;
+    const involvesCounterparty =
+      route.inboundEntity === counterpartyEntityId ||
+      route.outboundEntity === counterpartyEntityId;
+    if (!involvesCounterparty) continue;
+    if (seen.has(route.secret)) continue;
+    seen.add(route.secret);
+    secrets.push(route.secret);
+  }
+  return secrets;
+}
 
 /**
  * Handle disputeStart - Entity initiates dispute with signed proof
@@ -44,41 +83,74 @@ export async function handleDisputeStart(
     return { newState, outputs };
   }
 
-  // Get on-chain cooperativeNonce (must match jurisdiction state)
-  // In production, this would come from querying J-machine state
-  // For now, use account's proofHeader.cooperativeNonce
-  const cooperativeNonce = account.proofHeader.cooperativeNonce;
   const disputeNonce = account.proofHeader.disputeNonce;
+  const counterpartyIsLeft = account.leftEntity === counterpartyEntityId;
 
-  console.log(`   Using cooperativeNonce=${cooperativeNonce}, disputeNonce=${disputeNonce}`);
+  const fillRatiosByOfferId = buildPendingSwapFillRatios(newState, counterpartyEntityId, account);
+  const { leftArguments, rightArguments } = buildDeltaTransformerArguments(account, {
+    fillRatiosByOfferId,
+  });
 
-  // Build account proof
-  const proofResult = buildAccountProofBody(account);
+  const initialArguments = counterpartyIsLeft ? leftArguments : rightArguments;
 
-  // Use stored counterparty dispute hanko (exchanged during bilateral consensus)
-  const counterpartyDisputeHanko = account.counterpartyDisputeProofHanko || '0x';
-  if (!account.counterpartyDisputeProofHanko) {
-    addMessage(newState, `⚠️ No counterparty dispute hanko - dispute may fail on-chain`);
-    console.warn(`⚠️ Account ${counterpartyEntityId.slice(-4)} missing counterpartyDisputeProofHanko`);
-  } else {
-    console.log(`✅ Using stored counterparty dispute hanko:`);
-    console.log(`   Length: ${counterpartyDisputeHanko.length} bytes`);
-    console.log(`   First 66 chars: ${counterpartyDisputeHanko.slice(0, 66)}`);
-    console.log(`   Is 65-byte ECDSA: ${counterpartyDisputeHanko.length === 132}`); // 0x + 65*2
+  // Use stored counterparty dispute hanko AND proofBodyHash (exchanged during bilateral consensus)
+  // CRITICAL: Must use the SAME proofBodyHash that the hanko signed, not a fresh one!
+  const counterpartyDisputeHanko = account.counterpartyDisputeProofHanko;
+  const storedProofBodyHash = account.counterpartyDisputeProofBodyHash;
+
+  if (!counterpartyDisputeHanko) {
+    addMessage(newState, `❌ Missing counterparty dispute hanko - cannot start dispute`);
+    console.warn(`❌ Account ${counterpartyEntityId.slice(-4)} missing counterpartyDisputeProofHanko`);
+    return { newState, outputs };
   }
+
+  console.log(`✅ Using stored counterparty dispute hanko:`);
+  console.log(`   Length: ${counterpartyDisputeHanko.length} bytes`);
+  console.log(`   First 66 chars: ${counterpartyDisputeHanko.slice(0, 66)}`);
+  console.log(`   Sig bytes: ${(counterpartyDisputeHanko.length - 2) / 2}`);
+
+  // Use stored proofBodyHash if available, otherwise build fresh (fallback for legacy)
+  let proofBodyHashToUse: string;
+  if (storedProofBodyHash) {
+    proofBodyHashToUse = storedProofBodyHash;
+    console.log(`✅ Using stored counterparty proofBodyHash: ${storedProofBodyHash.slice(0, 10)}...`);
+  } else {
+    // Fallback: build fresh (may not match hanko if state changed!)
+    const proofResult = buildAccountProofBody(account);
+    proofBodyHashToUse = proofResult.proofBodyHash;
+    console.warn(`⚠️ No stored proofBodyHash - using fresh (may mismatch hanko!)`);
+  }
+
+  // Use cooperativeNonce that matches the stored counterparty dispute signature.
+  // Prefer exact hash mapping, then cached nonce, then ackedTransitions fallback.
+  const hasCounterpartySig = Boolean(account.counterpartyDisputeProofHanko);
+  let cooperativeNonce = account.proofHeader.cooperativeNonce;
+  let nonceSource = 'proofHeader';
+  const mappedNonce = account.disputeProofNoncesByHash?.[proofBodyHashToUse];
+  if (mappedNonce !== undefined) {
+    cooperativeNonce = mappedNonce;
+    nonceSource = 'hashMap';
+  } else if (account.counterpartyDisputeProofCooperativeNonce !== undefined) {
+    cooperativeNonce = account.counterpartyDisputeProofCooperativeNonce;
+    nonceSource = 'counterpartySig';
+  } else if (hasCounterpartySig && account.ackedTransitions > 0) {
+    cooperativeNonce = account.ackedTransitions - 1;
+    nonceSource = 'ackedTransitions-1';
+  }
+  console.log(`   Using cooperativeNonce=${cooperativeNonce} (${nonceSource}), disputeNonce=${disputeNonce}`);
 
   // Add to jBatch (sig = hanko for entity signing)
   newState.jBatchState.batch.disputeStarts.push({
     counterentity: counterpartyEntityId,
     cooperativeNonce,
     disputeNonce,
-    proofbodyHash: proofResult.proofBodyHash,
-    sig: counterpartyDisputeHanko,  // Hanko (or 65-byte ECDSA for backwards compat)
-    initialArguments: '0x',
+    proofbodyHash: proofBodyHashToUse,
+    sig: counterpartyDisputeHanko,  // Hanko signature
+    initialArguments,
   });
 
   console.log(`✅ disputeStart: Added to jBatch for ${entityState.entityId.slice(-4)}`);
-  console.log(`   Proof hash: ${proofResult.proofBodyHash.slice(0, 10)}...`);
+  console.log(`   Proof hash: ${proofBodyHashToUse.slice(0, 10)}...`);
 
   // NOTE: activeDispute will be set when DisputeStarted event arrives from J-machine
   // Event handler will query on-chain state and populate:
@@ -135,22 +207,66 @@ export async function handleDisputeFinalize(
     ? account.counterpartyDisputeProofHanko
     : '0x';
 
+  const mappedFinalNonce = account.counterpartyDisputeProofBodyHash
+    ? account.disputeProofNoncesByHash?.[account.counterpartyDisputeProofBodyHash]
+    : undefined;
+  const finalCooperativeNonce = isCounterDispute
+    ? (mappedFinalNonce ?? account.counterpartyDisputeProofCooperativeNonce ?? account.proofHeader.cooperativeNonce)
+    : account.activeDispute.onChainCooperativeNonce;
+
+  const callerIsLeft = account.leftEntity === newState.entityId;
+  const fillRatiosByOfferId = buildPendingSwapFillRatios(newState, counterpartyEntityId, account);
+  const htlcSecrets = collectHtlcSecrets(newState, counterpartyEntityId);
+  const { leftArguments, rightArguments } = buildDeltaTransformerArguments(account, {
+    fillRatiosByOfferId,
+    leftSecrets: callerIsLeft ? htlcSecrets : [],
+    rightSecrets: callerIsLeft ? [] : htlcSecrets,
+  });
+
+  const finalArguments = callerIsLeft ? leftArguments : rightArguments;
+  const initialArguments = account.activeDispute.initialArguments || (callerIsLeft ? rightArguments : leftArguments);
+
+  const storedProofBody = account.activeDispute.initialProofbodyHash
+    ? account.disputeProofBodiesByHash?.[account.activeDispute.initialProofbodyHash]
+    : undefined;
+  const shouldUseStoredProof = !isCounterDispute && !cooperative && storedProofBody;
+  if (!isCounterDispute && !cooperative && currentProofResult.proofBodyHash !== account.activeDispute.initialProofbodyHash) {
+    console.warn(`⚠️ disputeFinalize: current proofBodyHash != initial (current=${currentProofResult.proofBodyHash.slice(0, 10)}..., initial=${account.activeDispute.initialProofbodyHash.slice(0, 10)}...)`);
+    if (!storedProofBody) {
+      throw new Error('disputeFinalize: missing stored proofBody for unilateral finalize');
+    }
+  }
+
   const finalProof = {
     counterentity: counterpartyEntityId,
-    finalCooperativeNonce: account.activeDispute.onChainCooperativeNonce,
+    initialCooperativeNonce: account.activeDispute.initialCooperativeNonce,  // From disputeStart
+    finalCooperativeNonce,
     initialDisputeNonce: account.activeDispute.initialDisputeNonce,
     finalDisputeNonce: isCounterDispute ? account.proofHeader.disputeNonce : account.activeDispute.initialDisputeNonce,
     initialProofbodyHash: account.activeDispute.initialProofbodyHash,  // From disputeStart (commit)
-    finalProofbody: currentProofResult.proofBodyStruct,  // REVEAL
-    finalArguments: '0x',
-    initialArguments: '0x',
+    finalProofbody: shouldUseStoredProof ? storedProofBody : currentProofResult.proofBodyStruct,  // REVEAL
+    finalArguments,
+    initialArguments,
     sig: finalizeSig,  // Empty for unilateral, counterparty DisputeProof hanko for counter
     startedByLeft: account.activeDispute.startedByLeft,  // From on-chain
     disputeUntilBlock: account.activeDispute.disputeTimeout,  // From on-chain
     cooperative: cooperative || false,
   };
 
+  // Optional fallback: on-chain HTLC registry (Sprites-style)
+  if (entityTx.data.useOnchainRegistry) {
+    const transformerAddress = getDeltaTransformerAddress();
+    if (transformerAddress !== '0x0000000000000000000000000000000000000000') {
+      for (const secret of htlcSecrets) {
+        batchAddRevealSecret(newState.jBatchState, transformerAddress, secret);
+      }
+    } else {
+      console.warn('⚠️ disputeFinalize: DeltaTransformer address not set - skipping on-chain HTLC reveals');
+    }
+  }
+
   console.log(`   Mode: ${isCounterDispute ? 'counter-dispute' : 'unilateral'}, timeout=${account.activeDispute.disputeTimeout}`);
+  console.log(`   DEBUG: initialCooperativeNonce=${finalProof.initialCooperativeNonce}, onChainNonce=${finalProof.finalCooperativeNonce}`);
 
   // Add to jBatch
   newState.jBatchState.batch.disputeFinalizations.push(finalProof);

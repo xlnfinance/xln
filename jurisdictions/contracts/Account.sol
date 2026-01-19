@@ -2,7 +2,6 @@
 pragma solidity ^0.8.24;
 
 import "./Types.sol";
-import "./ECDSA.sol";
 import "./DeltaTransformer.sol";
 import "./IEntityProvider.sol";
 
@@ -96,30 +95,11 @@ library Account {
     return keccak256(abi.encodePacked(domainSep, chainId, depository, encodedBatch, nonce));
   }
 
-  // ========== SIGNATURE VERIFICATION (pure, for external callers) ==========
-
-  function verifySettlementSig(
-    bytes memory ch_key, uint cooperativeNonce, SettlementDiff[] memory diffs,
-    uint[] memory forgiveDebtsInTokenIds, InsuranceRegistration[] memory insuranceRegs,
-    bytes memory sig, bytes32 expectedSigner
-  ) external pure returns (bool) {
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, ch_key, cooperativeNonce, diffs, forgiveDebtsInTokenIds, insuranceRegs);
-    bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-    return ECDSA.recover(hash, sig) == address(uint160(uint256(expectedSigner)));
-  }
-
-  function verifyDisputeProofSig(
-    bytes memory ch_key, uint cooperativeNonce, uint disputeNonce,
-    bytes32 proofbodyHash, bytes memory sig, bytes32 expectedSigner
-  ) external pure returns (bool) {
-    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, cooperativeNonce, disputeNonce, proofbodyHash);
-    bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-    return ECDSA.recover(hash, sig) == address(uint160(uint256(expectedSigner)));
-  }
+  // ========== HANKO VERIFICATION ==========
 
   /// @notice Verify dispute proof with hanko (entity-level signature)
   /// @param entityProvider EP contract for hanko verification
-  /// @param hanko Hanko signature bytes (or 65-byte ECDSA for backwards compat)
+  /// @param hanko Hanko signature bytes
   /// @param expectedEntity Expected entity that should have signed
   /// @return success Whether hanko is valid for this entity
   function verifyDisputeProofHanko(
@@ -131,30 +111,11 @@ library Account {
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    // Backwards compatibility: 65 bytes = single ECDSA signature
-    // Treat as entity with 1 validator where entityId == signer address
-    if (hanko.length == 65) {
-      bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, cooperativeNonce, disputeNonce, proofbodyHash);
-      bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-      address recovered = ECDSA.recover(hash, hanko);
-      return bytes32(uint256(uint160(recovered))) == expectedEntity;
-    }
-
-    // Full hanko verification via EntityProvider
     bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, cooperativeNonce, disputeNonce, proofbodyHash);
     bytes32 hash = keccak256(encoded_msg);  // NO toEthSignedMessageHash for hanko
 
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
     return valid && recoveredEntity == expectedEntity;
-  }
-
-  function verifyFinalDisputeProofSig(
-    bytes memory ch_key, uint finalCooperativeNonce, uint initialDisputeNonce,
-    uint finalDisputeNonce, bytes memory sig, bytes32 expectedSigner
-  ) external pure returns (bool) {
-    bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, ch_key, finalCooperativeNonce, initialDisputeNonce, finalDisputeNonce);
-    bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-    return ECDSA.recover(hash, sig) == address(uint160(uint256(expectedSigner)));
   }
 
   /// @notice Verify final dispute proof with hanko
@@ -167,29 +128,11 @@ library Account {
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    // Backwards compatibility: 65 bytes = single ECDSA
-    if (hanko.length == 65) {
-      bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, ch_key, finalCooperativeNonce, initialDisputeNonce, finalDisputeNonce);
-      bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-      address recovered = ECDSA.recover(hash, hanko);
-      return bytes32(uint256(uint160(recovered))) == expectedEntity;
-    }
-
-    // Full hanko verification
     bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, ch_key, finalCooperativeNonce, initialDisputeNonce, finalDisputeNonce);
     bytes32 hash = keccak256(encoded_msg);
 
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
     return valid && recoveredEntity == expectedEntity;
-  }
-
-  function verifyCooperativeProofSig(
-    bytes memory ch_key, uint cooperativeNonce, bytes32 proofbodyHash,
-    bytes32 initialArgumentsHash, bytes memory sig, bytes32 expectedSigner
-  ) external pure returns (bool) {
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, ch_key, cooperativeNonce, proofbodyHash, initialArgumentsHash);
-    bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-    return ECDSA.recover(hash, sig) == address(uint160(uint256(expectedSigner)));
   }
 
   /// @notice Verify cooperative proof with hanko
@@ -202,15 +145,6 @@ library Account {
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    // Backwards compatibility: 65 bytes = single ECDSA
-    if (hanko.length == 65) {
-      bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, ch_key, cooperativeNonce, proofbodyHash, initialArgumentsHash);
-      bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-      address recovered = ECDSA.recover(hash, hanko);
-      return bytes32(uint256(uint160(recovered))) == expectedEntity;
-    }
-
-    // Full hanko verification
     bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, ch_key, cooperativeNonce, proofbodyHash, initialArgumentsHash);
     bytes32 hash = keccak256(encoded_msg);
 
@@ -284,53 +218,47 @@ library Account {
       // Debug: emit hash details
       emit DebugSettlementHash(keccak256(encoded_msg), counterparty, _accounts[ch_key].cooperativeNonce, s.diffs.length, encoded_msg.length);
 
-      // Hanko verification with backwards compatibility
-      if (s.sig.length == 65) {
-        // Backwards compat: single ECDSA signature
-        bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-        if (ECDSA.recover(hash, s.sig) != address(uint160(uint256(counterparty)))) revert E4();
-      } else {
-        // DEBUG: Emit BEFORE any computation to verify we reach this point
-        emit DebugSettleEntry(s.leftEntity, s.rightEntity, bytes32(uint256(uint160(s.entityProvider))), s.sig.length);
+      // Hanko verification
+      // DEBUG: Emit BEFORE any computation to verify we reach this point
+      emit DebugSettleEntry(s.leftEntity, s.rightEntity, bytes32(uint256(uint160(s.entityProvider))), s.sig.length);
 
-        // Full hanko verification via settlement's EP address
-        bytes32 hash = keccak256(encoded_msg);
-        // DEBUG: Log all params before external call
-        emit DebugSettlementHash(hash, bytes32(uint256(uint160(s.entityProvider))), s.sig.length, uint256(uint160(s.entityProvider)), gasleft());
+      // Full hanko verification via settlement's EP address
+      bytes32 hash = keccak256(encoded_msg);
+      // DEBUG: Log all params before external call
+      emit DebugSettlementHash(hash, bytes32(uint256(uint160(s.entityProvider))), s.sig.length, uint256(uint160(s.entityProvider)), gasleft());
 
-        // Try the external call with a low-level check first
-        address ep = s.entityProvider;
-        require(ep != address(0), "EP_ZERO");
-        require(s.sig.length > 0, "SIG_EMPTY");
+      // Try the external call with a low-level check first
+      address ep = s.entityProvider;
+      require(ep != address(0), "EP_ZERO");
+      require(s.sig.length > 0, "SIG_EMPTY");
 
-        // DEBUG: Log first 32 bytes of sig (step 100)
-        bytes memory sigBytes = s.sig;
-        bytes32 sigFirst32;
-        assembly { sigFirst32 := mload(add(sigBytes, 32)) }
-        emit DebugHankoStep(100, sigFirst32, bytes32(sigBytes.length), sigBytes.length == 608);
+      // DEBUG: Log first 32 bytes of sig (step 100)
+      bytes memory sigBytes = s.sig;
+      bytes32 sigFirst32;
+      assembly { sigFirst32 := mload(add(sigBytes, 32)) }
+      emit DebugHankoStep(100, sigFirst32, bytes32(sigBytes.length), sigBytes.length == 608);
 
-        // Wrap in try-catch to prevent revert from abi.decode
-        try IEntityProvider(ep).verifyHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
-          emit DebugHankoStep(200, recoveredEntity, counterparty, valid);  // step 200: try returned
-          if (!valid || recoveredEntity != counterparty) {
-            emit DebugHankoStep(201, recoveredEntity, counterparty, false);  // step 201: mismatch
-            return false;  // Verification failed
-          }
-          emit DebugHankoStep(202, recoveredEntity, counterparty, true);  // step 202: success
-        } catch Error(string memory reason) {
-          emit DebugHankoStep(300, bytes32(bytes(reason)), bytes32(0), false);  // step 300: Error(string)
-          return false;
-        } catch Panic(uint errorCode) {
-          emit DebugHankoStep(310, bytes32(errorCode), bytes32(0), false);  // step 310: Panic
-          return false;
-        } catch (bytes memory lowLevelData) {
-          bytes32 errData;
-          if (lowLevelData.length >= 32) {
-            assembly { errData := mload(add(lowLevelData, 32)) }
-          }
-          emit DebugHankoStep(320, errData, bytes32(lowLevelData.length), false);  // step 320: low-level
-          return false;
+      // Wrap in try-catch to prevent revert from abi.decode
+      try IEntityProvider(ep).verifyHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
+        emit DebugHankoStep(200, recoveredEntity, counterparty, valid);  // step 200: try returned
+        if (!valid || recoveredEntity != counterparty) {
+          emit DebugHankoStep(201, recoveredEntity, counterparty, false);  // step 201: mismatch
+          return false;  // Verification failed
         }
+        emit DebugHankoStep(202, recoveredEntity, counterparty, true);  // step 202: success
+      } catch Error(string memory reason) {
+        emit DebugHankoStep(300, bytes32(bytes(reason)), bytes32(0), false);  // step 300: Error(string)
+        return false;
+      } catch Panic(uint errorCode) {
+        emit DebugHankoStep(310, bytes32(errorCode), bytes32(0), false);  // step 310: Panic
+        return false;
+      } catch (bytes memory lowLevelData) {
+        bytes32 errData;
+        if (lowLevelData.length >= 32) {
+          assembly { errData := mload(add(lowLevelData, 32)) }
+        }
+        emit DebugHankoStep(320, errData, bytes32(lowLevelData.length), false);  // step 320: low-level
+        return false;
       }
     }
 
@@ -400,17 +328,10 @@ library Account {
     // Counterparty signature REQUIRED
     require(params.sig.length > 0, "Signature required for dispute");
 
-    // Backwards compat: 65 bytes = ECDSA, otherwise full hanko
-    if (params.sig.length == 65) {
-      bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
-      bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-      if (ECDSA.recover(hash, params.sig) != address(uint160(uint256(params.counterentity)))) revert E4();
-    } else {
-      bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
-      bytes32 hash = keccak256(encoded_msg);
-      (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
-      if (!valid || recoveredEntity != params.counterentity) revert E4();
-    }
+    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
+    bytes32 hash = keccak256(encoded_msg);
+    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
+    if (!valid || recoveredEntity != params.counterentity) revert E4();
 
     if (_accounts[ch_key].disputeHash != bytes32(0)) revert E6();
 

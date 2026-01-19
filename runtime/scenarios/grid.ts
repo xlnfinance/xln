@@ -24,7 +24,7 @@ import {
   createGridEntities,
   createNumberedEntity,
 } from './boot';
-import { getProcess } from './helpers';
+import { getProcess, enableStrictScenario } from './helpers';
 
 // Simple snapshot helper for this scenario
 function pushSnapshot(env: Env, tag: string, description: string, metadata: Record<string, any> = {}) {
@@ -63,6 +63,8 @@ async function processJEvents(env: Env): Promise<void> {
 }
 
 export async function grid(env: Env): Promise<void> {
+  const restoreStrict = enableStrictScenario(env, 'Grid');
+  try {
   console.log('🔲 GRID SCALABILITY SCENARIO (2×2×2 = 8 nodes)\n');
   console.log('Demonstrating: Broadcast bottleneck → Hub-spoke scaling\n');
 
@@ -72,7 +74,7 @@ export async function grid(env: Env): Promise<void> {
   // SETUP: BrowserVM + J-Machine + Jurisdiction
   // ============================================================================
 
-  const browserVM = await ensureBrowserVM();
+  const browserVM = await ensureBrowserVM(env);
   const depositoryAddress = browserVM.getDepositoryAddress();
 
   // J-Machine at center (0, 600, 0) - elevated above grid
@@ -333,7 +335,10 @@ export async function grid(env: Env): Promise<void> {
   console.log('🎯 Key insight: Hubs aren\'t centralization - they\'re MATH');
   console.log('   O(n²) mesh → O(n) broadcast → O(1) hub-spoke\n');
 
-  env.scenarioMode = false;
+  } finally {
+    env.scenarioMode = false;
+    restoreStrict();
+  }
 }
 
 // ===== CLI ENTRY POINT =====

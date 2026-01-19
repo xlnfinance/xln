@@ -41,7 +41,7 @@ export const FINANCIAL = {
   MAX_PAYMENT_AMOUNT: 2n ** 128n - 1n, // U128 max
 
   /** Minimum payment amount (prevents dust spam) */
-  MIN_PAYMENT_AMOUNT: 1n,
+  MIN_PAYMENT_AMOUNT: 10n ** 18n, // 1 token unit (18 decimals) - avoid dust
 
   /** Maximum credit limit in USDC (prevents unbounded credit) */
   MAX_CREDIT_LIMIT: 1_000_000_000n * 10n ** 6n, // 1 billion USDC

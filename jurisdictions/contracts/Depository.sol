@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
-import "./ECDSA.sol";
 import "./EntityProvider.sol";
 import "./DeltaTransformer.sol";
 import "./Types.sol";
@@ -93,6 +92,7 @@ contract Depository is ReentrancyGuardLite {
 
   // Events related to disputes and cooperative closures
   event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments);
+  event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed initialDisputeNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash);
   event CooperativeClose(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed cooperativeNonce);
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -120,6 +120,7 @@ contract Depository is ReentrancyGuardLite {
    * @param newBalance The absolute new balance of the token for the entity.
    */
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
+  event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret);
 
   // Debug events (remove in production)
   event DebugSettleStart(bytes32 leftEntity, bytes32 rightEntity, uint256 sigLen, address entityProvider);
@@ -191,6 +192,8 @@ contract Depository is ReentrancyGuardLite {
   constructor(address _entityProvider) {
     require(_entityProvider != address(0), "EntityProvider cannot be zero address");
     entityProvider = _entityProvider;
+    approvedEntityProviders[_entityProvider] = true;
+    entityProvidersList.push(_entityProvider);
     admin = msg.sender;
     _tokens.push(bytes32(0));
   }
@@ -240,7 +243,9 @@ contract Depository is ReentrancyGuardLite {
 
   event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed hankoHash, uint256 nonce, bool success);
 
-  function processBatchWithHanko(
+  /// @notice Process a batch authorized by entity Hanko.
+  /// @dev Hanko is required; use unsafeProcessBatch only for admin/test flows.
+  function processBatch(
     bytes calldata encodedBatch,
     address entityProvider,
     bytes calldata hankoData,
@@ -283,11 +288,13 @@ contract Depository is ReentrancyGuardLite {
   }
 
 
-  /// @notice Direct batch processing - entity or admin can call
-  /// @dev For multi-sig/Hanko auth, use processBatchWithHanko() instead
+  /// @notice UNSAFE batch processing - entity or admin can call
+  /// @dev Use processBatch() (Hanko) in production. This is for explicit unsafe/admin flows.
   /// @dev Settlements still require counterparty signatures (cooperative proof)
-  function processBatch(bytes32 entity, Batch calldata batch) public whenNotPaused nonReentrant returns (bool completeSuccess) {
+  function unsafeProcessBatch(bytes32 entity, Batch calldata batch) public whenNotPaused nonReentrant returns (bool completeSuccess) {
     // Entity itself OR admin can call (admin for J-machine execution)
+    // Executes full batch deterministically via _processBatch.
+    // NOTE: Admin path bypasses Hanko authorization; prefer processBatch in production.
     require(
       msg.sender == address(uint160(uint256(entity))) || msg.sender == admin,
       "E2: caller must be entity or admin"
@@ -298,7 +305,7 @@ contract Depository is ReentrancyGuardLite {
 
   // ========== DIRECT R2R FUNCTION ==========
   /// @notice Simple reserve-to-reserve transfer - fromEntity or admin can call
-  /// @dev For multi-sig/Hanko auth, use processBatchWithHanko() instead
+  /// @dev For multi-sig/Hanko auth, use processBatch() instead
   function reserveToReserve(
     bytes32 fromEntity,
     bytes32 toEntity,
@@ -401,7 +408,7 @@ contract Depository is ReentrancyGuardLite {
     completeSuccess = true;
 
     // Process external token deposits (increases reserves)
-    // msg.sender must have approved tokens before calling processBatchWithHanko
+    // msg.sender must have approved tokens before calling processBatch
     for (uint i = 0; i < batch.externalTokenToReserve.length; i++) {
       ExternalTokenToReserve memory params = batch.externalTokenToReserve[i];
       // If entity is not specified, default to batch initiator
@@ -446,6 +453,14 @@ contract Depository is ReentrancyGuardLite {
       if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay, entityProvider)) {
         completeSuccess = false;
       }
+    }
+
+    // HTLC secret reveals (must run before dispute finalizations)
+    for (uint i = 0; i < batch.revealSecrets.length; i++) {
+      SecretReveal memory reveal = batch.revealSecrets[i];
+      if (reveal.transformer == address(0)) revert E2();
+      DeltaTransformer(reveal.transformer).revealSecret(reveal.secret);
+      emit SecretRevealed(keccak256(abi.encode(reveal.secret)), entityId, reveal.secret);
     }
 
     // Dispute finalizations stay in Depository (too many storage refs for Account)
@@ -970,20 +985,14 @@ contract Depository is ReentrancyGuardLite {
       // Accounts must have at least one prior settlement (cooperativeNonce > 0)
       if (_accounts[ch_key].cooperativeNonce == 0) revert E5();
 
-      // Hanko verification for cooperative finalization
-      if (params.sig.length == 65) {
-        // Backwards compat: ECDSA
-        if (!Account.verifyCooperativeProofSig(ch_key, _accounts[ch_key].cooperativeNonce, keccak256(abi.encode(params.finalProofbody)), keccak256(params.initialArguments), params.sig, params.counterentity)) revert E4();
-      } else {
-        // Full hanko
-        if (!Account.verifyCooperativeProofHanko(entityProvider, ch_key, _accounts[ch_key].cooperativeNonce, keccak256(abi.encode(params.finalProofbody)), keccak256(params.initialArguments), params.sig, params.counterentity)) revert E4();
-      }
+      require(params.sig.length > 0, "Signature required for cooperative finalize");
+      if (!Account.verifyCooperativeProofHanko(entityProvider, ch_key, _accounts[ch_key].cooperativeNonce, keccak256(abi.encode(params.finalProofbody)), keccak256(params.initialArguments), params.sig, params.counterentity)) revert E4();
     } else {
       bytes32 storedHash = _accounts[ch_key].disputeHash;
       if (storedHash == bytes32(0)) revert E5();
 
       bytes32 expectedHash = Account.encodeDisputeHash(
-        _accounts[ch_key].cooperativeNonce, params.initialDisputeNonce, params.startedByLeft,
+        params.initialCooperativeNonce, params.initialDisputeNonce, params.startedByLeft,
         _accounts[ch_key].disputeTimeout, params.initialProofbodyHash, params.initialArguments
       );
       if (storedHash != expectedHash) revert E9();
@@ -995,15 +1004,8 @@ contract Depository is ReentrancyGuardLite {
         // Signature is on: DisputeProof(ch_key, finalCooperativeNonce, finalDisputeNonce, finalProofbodyHash)
         bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
 
-        if (params.sig.length == 65) {
-          // Backwards compat: ECDSA
-          bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.finalCooperativeNonce, params.finalDisputeNonce, finalProofbodyHash);
-          bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-          if (ECDSA.recover(hash, params.sig) != address(uint160(uint256(params.counterentity)))) revert E4();
-        } else {
-          // Full hanko - verify DisputeProof hanko (not FinalDisputeProof)
-          if (!Account.verifyDisputeProofHanko(entityProvider, ch_key, params.finalCooperativeNonce, params.finalDisputeNonce, finalProofbodyHash, params.sig, params.counterentity)) revert E4();
-        }
+        // Full hanko - verify DisputeProof hanko (not FinalDisputeProof)
+        if (!Account.verifyDisputeProofHanko(entityProvider, ch_key, params.finalCooperativeNonce, params.finalDisputeNonce, finalProofbodyHash, params.sig, params.counterentity)) revert E4();
         if (params.initialDisputeNonce >= params.finalDisputeNonce) revert E2();
       } else {
         // Unilateral finalization after timeout (no signature needed)
@@ -1016,7 +1018,17 @@ contract Depository is ReentrancyGuardLite {
     _accounts[ch_key].disputeHash = bytes32(0);
     _accounts[ch_key].disputeTimeout = 0;
 
-    return _finalizeAccount(entityId, params.counterentity, params.finalProofbody, params.finalArguments, params.initialArguments);
+    bool ok = _finalizeAccount(entityId, params.counterentity, params.finalProofbody, params.finalArguments, params.initialArguments);
+    if (ok) {
+      emit DisputeFinalized(
+        entityId,
+        params.counterentity,
+        params.initialDisputeNonce,
+        params.initialProofbodyHash,
+        keccak256(abi.encode(params.finalProofbody))
+      );
+    }
+    return ok;
   }
 
   /// @notice Finalize account - applies deltas and clears collateral

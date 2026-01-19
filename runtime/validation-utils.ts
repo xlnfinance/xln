@@ -9,6 +9,7 @@
  */
 
 import { safeStringify } from './serialization-utils';
+import { isLeftEntity } from './entity-id-utils';
 import type {
   Delta,
   EntityInput,
@@ -333,7 +334,10 @@ export function validateAccountFrame(value: unknown, context = 'AccountFrame'): 
     prevFrameHash: validateString(obj['prevFrameHash'], `${context}.prevFrameHash`),
     stateHash: validateString(obj['stateHash'], `${context}.stateHash`),
     tokenIds: validateArray<number>(obj['tokenIds'] || [], `${context}.tokenIds`),
-    deltas: validateArray<bigint>(obj['deltas'] || [], `${context}.deltas`)
+    deltas: validateArray<bigint>(obj['deltas'] || [], `${context}.deltas`),
+    // Optional fields - preserve if present (deep copy to prevent mutation issues)
+    ...(typeof obj['byLeft'] === 'boolean' ? { byLeft: obj['byLeft'] } : {}),
+    ...(Array.isArray(obj['fullDeltaStates']) ? { fullDeltaStates: obj['fullDeltaStates'].map((d: any) => ({ ...d })) } : {}),
   };
 
   // Additional integrity checks
@@ -363,7 +367,7 @@ export function validateAccountMachine(value: unknown, context = 'AccountMachine
     throw new FinancialDataCorruptionError(`${context}.rightEntity must be a string`);
   }
   // Validate canonical ordering: leftEntity < rightEntity
-  if (obj['leftEntity'] >= obj['rightEntity']) {
+  if (!isLeftEntity(obj['leftEntity'], obj['rightEntity'])) {
     throw new FinancialDataCorruptionError(`${context} canonical order violated: leftEntity must be < rightEntity`);
   }
 

@@ -33,6 +33,7 @@
 import { AccountMachine, AccountTx } from '../../types';
 import { isLeft, deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
+import { FINANCIAL } from '../../constants';
 
 const MAX_FILL_RATIO = 65535;
 
@@ -87,6 +88,23 @@ export async function handleSwapResolve(
   const filledWant = effectiveGive > 0n
     ? (filledGive * effectiveWant + effectiveGive - 1n) / effectiveGive
     : 0n;
+
+  if (fillRatio > 0) {
+    if (filledGive < FINANCIAL.MIN_PAYMENT_AMOUNT || filledGive > FINANCIAL.MAX_PAYMENT_AMOUNT) {
+      return {
+        success: false,
+        error: `Filled give amount out of bounds: ${filledGive} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
+        events,
+      };
+    }
+    if (filledWant < FINANCIAL.MIN_PAYMENT_AMOUNT || filledWant > FINANCIAL.MAX_PAYMENT_AMOUNT) {
+      return {
+        success: false,
+        error: `Filled want amount out of bounds: ${filledWant} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
+        events,
+      };
+    }
+  }
 
   // 5. Get or create deltas for both tokens
   let giveDelta = accountMachine.deltas.get(offer.giveTokenId);

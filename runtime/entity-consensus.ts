@@ -4,6 +4,7 @@
  */
 
 import { applyEntityTx } from './entity-tx';
+import { isLeftEntity } from './entity-id-utils';
 import { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env } from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
@@ -217,6 +218,15 @@ export const applyEntityInput = async (
     workingReplica.state.crontabState = initCrontab();
   }
 
+  const hasManualBroadcast = Boolean(entityInput.entityTxs?.some(tx => tx.type === 'j_broadcast'));
+  if (hasManualBroadcast) {
+    const broadcastTask = workingReplica.state.crontabState.tasks.get('broadcastBatch');
+    if (broadcastTask) {
+      // Avoid auto-broadcast clobbering explicit j_broadcast in this tick.
+      broadcastTask.lastRun = workingReplica.state.timestamp;
+    }
+  }
+
   const crontabOutputs = await executeCrontab(workingReplica, workingReplica.state.crontabState);
   if (crontabOutputs.length > 0) {
     console.log(`⏰ CRONTAB: Generated ${crontabOutputs.length} outputs from periodic tasks`);
@@ -309,7 +319,7 @@ export const applyEntityInput = async (
 
       // SECURITY: Verify signatures are for the correct frame hash
       for (const [signerId, signature] of entityInput.precommits) {
-        if (!verifyFrame(signerId, entityInput.proposedFrame.hash, signature)) {
+        if (!verifyFrame(env, signerId, entityInput.proposedFrame.hash, signature)) {
           logError("FRAME_CONSENSUS", `❌ BYZANTINE: Invalid signature from ${signerId}`);
           logError("FRAME_CONSENSUS", `   Frame hash: ${entityInput.proposedFrame.hash.slice(0,30)}...`);
           logError("FRAME_CONSENSUS", `   Signature: ${signature.slice(0,30)}...`);
@@ -364,7 +374,7 @@ export const applyEntityInput = async (
     entityInput.proposedFrame &&
     (!workingReplica.proposal || (workingReplica.state.config.mode === 'gossip-based' && workingReplica.isProposer))
   ) {
-    const frameSignature = signFrame(workingReplica.signerId, entityInput.proposedFrame.hash);
+    const frameSignature = signFrame(env, workingReplica.signerId, entityInput.proposedFrame.hash);
     const config = workingReplica.state.config;
 
     // Lock to this frame (CometBFT style)
@@ -575,7 +585,7 @@ export const applyEntityInput = async (
     // Impact: Without this, equivocation attacks possible in multi-validator setup
     // See: docs/htlc-hardening.md for full security audit
     const frameHash = `frame_${workingReplica.state.height + 1}_${newTimestamp}`;
-    const selfSignature = signFrame(workingReplica.signerId, frameHash);
+    const selfSignature = signFrame(env, workingReplica.signerId, frameHash);
 
     workingReplica.proposal = {
       height: workingReplica.state.height + 1,
@@ -756,7 +766,7 @@ export const applyEntityFrame = async (
       if (accountMachine) {
         // Add to proposable if:
         // - We have pending mempool items and no pending frame
-        const isAck = entityTx.data.height && entityTx.data.prevSignatures;
+        const isAck = entityTx.data.height && entityTx.data.prevHanko;
         const hasPendingTxs = accountMachine.mempool.length > 0;
 
         // Only propose if we have something to send:
@@ -784,7 +794,7 @@ export const applyEntityFrame = async (
       // Note: accountKey is counterparty ID (e.g., "alice", "bob")
       if (HEAVY_LOGS) console.log(`🔍 DIRECT-PAYMENT-SCAN: Entity ${currentEntityState.entityId.slice(-4)} has ${currentEntityState.accounts.size} accounts`);
       for (const [counterpartyId, accountMachine] of currentEntityState.accounts) {
-        const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
+        const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
         if (HEAVY_LOGS) console.log(`🔍 Checking account ${counterpartyId.slice(-10)}: mempool=${accountMachine.mempool.length}, isLeft=${isLeft}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map((t: any) => t.type).join(',')}]`);
         if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
           proposableAccounts.add(counterpartyId);
@@ -799,7 +809,7 @@ export const applyEntityFrame = async (
       // Account keyed by counterparty ID
       const accountMachine = currentEntityState.accounts.get(targetEntity);
       if (accountMachine) {
-        const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
+        const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
         if (isLeft && accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
           proposableAccounts.add(targetEntity);
           console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (new account opened)`);
@@ -857,6 +867,12 @@ export const applyEntityFrame = async (
         account.mempool.push(tx);
         proposableAccounts.add(accountId);
         console.log(`📊   → ${accountId.slice(-8)}: ${tx.type}`);
+      }
+
+      if (tx.type === 'swap_resolve') {
+        currentEntityState.pendingSwapFillRatios ||= new Map();
+        const key = `${accountId}:${tx.data.offerId}`;
+        currentEntityState.pendingSwapFillRatios.set(key, tx.data.fillRatio);
       }
     }
 

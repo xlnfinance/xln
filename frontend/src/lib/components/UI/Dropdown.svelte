@@ -19,6 +19,7 @@
   export let minWidth = 200;
   export let maxWidth = 420;
   export let disabled = false;
+  export let allowMultiple = false; // Allow multiple dropdowns open simultaneously
 
   const dispatch = createEventDispatcher();
 
@@ -30,8 +31,8 @@
   let left = 0;
   let width = minWidth;
 
-  // Subscribe to global active dropdown - close if another opens
-  $: if ($activeDropdownId && $activeDropdownId !== id && open) {
+  // Subscribe to global active dropdown - close if another opens (unless allowMultiple)
+  $: if (!allowMultiple && $activeDropdownId && $activeDropdownId !== id && open) {
     open = false;
   }
 

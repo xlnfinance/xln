@@ -13,6 +13,8 @@
 
 import { AccountMachine, AccountTx, HtlcLock, Delta } from '../../types';
 import { deriveDelta, getDefaultCreditLimit } from '../../account-utils';
+import { FINANCIAL } from '../../constants';
+import { isLeftEntity } from '../../entity-id-utils';
 import { HTLC } from '../../constants';
 
 export async function handleHtlcLock(
@@ -51,9 +53,13 @@ export async function handleHtlcLock(
     };
   }
 
-  // 3. Validate amount > 0
-  if (amount <= 0n) {
-    return { success: false, error: `Invalid amount: ${amount}`, events };
+  // 3. Validate amount bounds (network-wide payment limits)
+  if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
+    return {
+      success: false,
+      error: `Invalid amount: ${amount} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT})`,
+      events,
+    };
   }
 
   // 4. Get or create delta
@@ -80,7 +86,7 @@ export async function handleHtlcLock(
   if (delta.rightHtlcHold === undefined) delta.rightHtlcHold = 0n;
 
   // 5. Determine sender perspective (canonical direction)
-  const leftEntity = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity
+  const leftEntity = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity)
     ? accountMachine.proofHeader.fromEntity
     : accountMachine.proofHeader.toEntity;
 

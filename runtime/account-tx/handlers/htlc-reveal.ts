@@ -10,8 +10,8 @@
  * - secret + hashlock for entity layer to propagate backward
  */
 
-import { ethers } from 'ethers';
 import { AccountMachine, AccountTx } from '../../types';
+import { hashHtlcSecret } from '../../htlc-utils';
 
 export async function handleHtlcReveal(
   accountMachine: AccountMachine,
@@ -59,7 +59,16 @@ export async function handleHtlcReveal(
   }
 
   // 3. Verify secret hashes to hashlock (CRITICAL)
-  const computedHash = ethers.keccak256(ethers.toUtf8Bytes(secret));
+  let computedHash: string;
+  try {
+    computedHash = hashHtlcSecret(secret);
+  } catch (error) {
+    return {
+      success: false,
+      error: `Invalid secret: ${error instanceof Error ? error.message : String(error)}`,
+      events
+    };
+  }
   if (computedHash !== lock.hashlock) {
     return {
       success: false,

@@ -333,6 +333,14 @@ export type JurisdictionEvent =
       };
     })
   | (JEventMetadata & {
+      type: 'SecretRevealed';
+      data: {
+        hashlock: string;
+        revealer: string;
+        secret: string;
+      };
+    })
+  | (JEventMetadata & {
       type: 'AccountSettled';
       data: {
         leftEntity: string;
@@ -484,6 +492,7 @@ export type EntityTx =
           collateralDiff: bigint;
           ondeltaDiff: bigint;
         }>;
+        sig: string; // Hanko signature from counterparty
         description?: string; // e.g., "Fund collateral from reserve"
       };
     }
@@ -499,6 +508,7 @@ export type EntityTx =
       data: {
         counterpartyEntityId: string;
         cooperative?: boolean;  // If true, use cooperative finalization
+        useOnchainRegistry?: boolean; // Optional HTLC reveal via on-chain registry
         description?: string;
       };
     }
@@ -603,6 +613,7 @@ export type EntityTx =
           collateralDiff: bigint;
           ondeltaDiff: bigint;
         }>;
+        sig: string; // Hanko signature from counterparty (required for cooperative settlement)
       };
     };
 
@@ -636,7 +647,7 @@ export interface AccountSnapshot {
  */
 export interface HtlcLock {
   lockId: string;              // keccak256(hash + height + nonce)
-  hashlock: string;            // keccak256(secret) - 32 bytes hex
+  hashlock: string;            // keccak256(abi.encode(secret)) - 32 bytes hex
   timelock: bigint;            // Expiry timestamp (unix-ms)
   revealBeforeHeight: number;  // J-block height deadline (enforced on-chain)
   amount: bigint;              // Locked amount
@@ -768,8 +779,32 @@ export interface AccountMachine {
   currentFrameHanko?: HankoString;           // My hanko on current frame (bilateral consensus)
   counterpartyFrameHanko?: HankoString;      // Their hanko on current frame (bilateral consensus)
 
-  currentDisputeProofHanko?: HankoString;         // My hanko on dispute proof (for J-machine enforcement)
-  counterpartyDisputeProofHanko?: HankoString;    // Their hanko on dispute proof (ready for disputes)
+  currentDisputeProofHanko?: HankoString;              // My hanko on dispute proof (for J-machine enforcement)
+  currentDisputeProofCooperativeNonce?: number;        // Cooperative nonce used in currentDisputeProofHanko
+  currentDisputeProofBodyHash?: string;                // ProofBodyHash used in currentDisputeProofHanko
+  counterpartyDisputeProofHanko?: HankoString;         // Their hanko on dispute proof (ready for disputes)
+  counterpartyDisputeProofCooperativeNonce?: number;   // Cooperative nonce used in counterpartyDisputeProofHanko
+  counterpartyDisputeProofBodyHash?: string;           // ProofBodyHash that counterparty signed (MUST match dispute)
+  disputeProofNoncesByHash?: Record<string, number>;   // ProofBodyHash → cooperative nonce (local + counterparty)
+  disputeProofBodiesByHash?: Record<string, any>;      // ProofBodyHash → ProofBodyStruct (for dispute finalize)
+
+  // SETTLEMENT HANKO: Cooperative state updates (for j-batch settlements)
+  currentSettlementHanko?: HankoString;
+  currentSettlementDiffs?: Array<{
+    tokenId: number;
+    leftDiff: bigint;
+    rightDiff: bigint;
+    collateralDiff: bigint;
+    ondeltaDiff: bigint;
+  }>;
+  counterpartySettlementHanko?: HankoString;
+  counterpartySettlementDiffs?: Array<{
+    tokenId: number;
+    leftDiff: bigint;
+    rightDiff: bigint;
+    collateralDiff: bigint;
+    ondeltaDiff: bigint;
+  }>;
 
   // Active dispute state (set after disputeStart, needed for disputeFinalize)
   activeDispute?: {
@@ -777,7 +812,9 @@ export interface AccountMachine {
     initialProofbodyHash: string;     // Hash committed in disputeStart
     initialDisputeNonce: number;      // Dispute nonce from disputeStart
     disputeTimeout: number;           // Block number when timeout expires
-    onChainCooperativeNonce: number;  // On-chain nonce at disputeStart time
+    initialCooperativeNonce: number;  // Cooperative nonce PASSED to disputeStart (for hash match)
+    onChainCooperativeNonce: number;  // On-chain nonce (may differ from initial)
+    initialArguments?: string;        // On-chain initialArguments from disputeStart
   };
 
   hankoSignature?: string; // LEGACY - will be removed
@@ -835,6 +872,15 @@ export interface AccountInput {
   newAccountFrame?: AccountFrame;         // Our new proposed frame (like block in Channel.ts)
   newHanko?: HankoString;                 // Hanko on newAccountFrame
   newDisputeHanko?: HankoString;          // Hanko on dispute proof (for J-machine enforcement)
+  newDisputeProofBodyHash?: string;       // ProofBodyHash that newDisputeHanko signs
+  newSettlementHanko?: HankoString;
+  newSettlementDiffs?: Array<{
+    tokenId: number;
+    leftDiff: bigint;
+    rightDiff: bigint;
+    collateralDiff: bigint;
+    ondeltaDiff: bigint;
+  }>;
 
   // LEGACY (will be removed):
   prevSignatures?: string[];         // ACK for their frame (LEGACY)
@@ -1115,6 +1161,9 @@ export interface EntityState {
   // Mirrors A-Machine state for easy UI access, updated on frame commits
   swapBook: Map<string, SwapBookEntry>;  // offerId → entry
   lockBook: Map<string, LockBookEntry>;  // lockId → entry
+
+  // 📈 Pending swap fill ratios (orderbook → dispute arguments)
+  pendingSwapFillRatios?: Map<string, number>; // key = "accountId:offerId"
 }
 
 /** Aggregated swap order entry at E-Machine level */
@@ -1204,6 +1253,13 @@ export interface FrameLogEntry {
   data?: Record<string, unknown>; // Structured data
 }
 
+export interface BrowserVMState {
+  stateRoot: string;
+  trieData: Array<[string, string]>;
+  nonce: string;
+  addresses: { depository: string; entityProvider: string };
+}
+
 export interface Env {
   eReplicas: Map<string, EntityReplica>;  // Entity replicas (E-layer state machines)
   jReplicas: Map<string, JReplica>;       // Jurisdiction replicas (J-layer EVM state)
@@ -1215,11 +1271,17 @@ export interface Env {
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: any; // Gossip layer for network profiles
 
+  // Isolated BrowserVM instance per runtime (prevents cross-runtime state leakage)
+  browserVM?: any; // BrowserVMProvider instance for this runtime
+  browserVMState?: BrowserVMState; // Serialized BrowserVM state for time travel
+
   // Active jurisdiction
   activeJurisdiction?: string; // Currently active J-replica name
 
   // Scenario mode: deterministic time control (scenarios set env.timestamp manually)
   scenarioMode?: boolean; // When true, runtime doesn't auto-update timestamp
+  strictScenario?: boolean; // When true, runtime asserts invariants per frame
+  strictScenarioLabel?: string; // Optional label for strict scenario errors
 
   // Frame stepping: stop at specific frame for debugging
   stopAtFrame?: number; // When set, process() stops at this frame and dumps state
@@ -1281,7 +1343,11 @@ export interface JReplica {
   // Visual position (for 3D rendering)
   position: { x: number; y: number; z: number };
 
-  // Decoded contract addresses for UI
+  // Contract addresses (primary)
+  depositoryAddress?: string; // Primary depository address (for replay protection)
+  entityProviderAddress?: string; // Primary entity provider address
+
+  // Decoded contract addresses for UI (deprecated - use depositoryAddress/entityProviderAddress)
   contracts?: {
     depository?: string;
     entityProvider?: string;
@@ -1311,6 +1377,7 @@ export interface JTx {
     batch: any; // JBatch structure from j-batch.ts
     hankoSignature?: string;
     batchSize: number;
+    signerId?: string;
   };
   timestamp: number;
   expectedJBlock?: number; // Expected j-block height (for replay protection)
@@ -1331,6 +1398,7 @@ export interface EnvSnapshot {
   runtimeId?: string;
   eReplicas: Map<string, EntityReplica>;  // E-layer state
   jReplicas: JReplica[];                   // J-layer state (with stateRoot for time travel)
+  browserVMState?: BrowserVMState;
   runtimeInput: RuntimeInput;
   runtimeOutputs: EntityInput[];
   description: string;
@@ -1528,6 +1596,7 @@ export interface Xlnomy {
   contracts: {
     entityProviderAddress: string;
     depositoryAddress: string;
+    deltaTransformerAddress?: string;
   };
 
   // EVM instance (BrowserVM in-browser, or Reth/Erigon RPC)
@@ -1594,6 +1663,7 @@ export interface XlnomySnapshot {
   contracts: {
     entityProviderAddress: string;
     depositoryAddress: string;
+    deltaTransformerAddress?: string;
   };
 
   // EVM-specific state

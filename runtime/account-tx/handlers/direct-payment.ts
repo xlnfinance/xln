@@ -6,6 +6,8 @@
 
 import { AccountMachine, AccountTx } from '../../types';
 import { deriveDelta, getDefaultCreditLimit } from '../../account-utils';
+import { FINANCIAL } from '../../constants';
+import { isLeftEntity } from '../../entity-id-utils';
 import { safeStringify } from '../../serialization-utils';
 import { getAccountPerspective } from '../../state-helpers';
 
@@ -16,6 +18,12 @@ export function handleDirectPayment(
 ): { success: boolean; events: string[]; error?: string } {
   const { tokenId, amount, route, description } = accountTx.data;
   const events: string[] = [];
+
+  if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
+    const error = `Invalid payment amount: ${amount.toString()} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT.toString()}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT.toString()})`;
+    console.error(`❌ DIRECT-PAYMENT: ${error}`);
+    return { success: false, error, events };
+  }
 
   // Get or create delta
   let delta = accountMachine.deltas.get(tokenId);
@@ -40,7 +48,7 @@ export function handleDirectPayment(
   }
 
   // Determine canonical direction relative to left/right entities
-  const leftEntity = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity
+  const leftEntity = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity)
     ? accountMachine.proofHeader.fromEntity
     : accountMachine.proofHeader.toEntity;
   const rightEntity = leftEntity === accountMachine.proofHeader.fromEntity

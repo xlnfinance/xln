@@ -4,11 +4,12 @@
  */
 
 import { encode } from './snapshot-coder';
-import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, RuntimeInput, AccountMachine, JReplica, LogCategory } from './types';
+import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, RuntimeInput, AccountMachine, JReplica, LogCategory, BrowserVMState } from './types';
 import type { Profile } from './gossip';
 import { DEBUG } from './utils';
 import { validateEntityState } from './validation-utils';
 import { safeStringify, safeParse } from './serialization-utils';
+import { isLeftEntity } from './entity-id-utils';
 
 // Message size limit for snapshot efficiency
 const MESSAGE_LIMIT = 10;
@@ -18,7 +19,7 @@ const MESSAGE_LIMIT = 10;
  * Pattern from Channel.ts - ensures both entities reference SAME account object
  */
 export function canonicalAccountKey(entity1: string, entity2: string): string {
-  return entity1 < entity2 ? `${entity1}:${entity2}` : `${entity2}:${entity1}`;
+  return isLeftEntity(entity1, entity2) ? `${entity1}:${entity2}` : `${entity2}:${entity1}`;
 }
 
 /**
@@ -210,6 +211,9 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
         { ...entry }
       ])
     ),
+    pendingSwapFillRatios: new Map(
+      Array.from((entityState.pendingSwapFillRatios || new Map()).entries())
+    ),
   };
 }
 
@@ -342,16 +346,20 @@ export const captureSnapshot = async (
 
   // Capture fresh stateRoot from BrowserVM for time-travel (if available)
   let freshStateRoot: Uint8Array | null = null;
+  let browserVMState: BrowserVMState | null = null;
   if (env.jReplicas) {
     try {
       const { getBrowserVMInstance } = await import('./evm');
-      const browserVM = getBrowserVMInstance();
+      const browserVM = getBrowserVMInstance(env);
       if (browserVM?.captureStateRoot) {
         freshStateRoot = await browserVM.captureStateRoot();
         // Update live jReplicas so next snapshot has correct base
         for (const [, jReplica] of env.jReplicas.entries()) {
           jReplica.stateRoot = freshStateRoot;
         }
+      }
+      if (browserVM?.serializeState) {
+        browserVMState = await browserVM.serializeState();
       }
     } catch {
       // Silent fail - stateRoot capture is optional
@@ -391,7 +399,7 @@ export const captureSnapshot = async (
           if (replica.state?.accounts) {
             for (const [counterpartyId, account] of replica.state.accounts.entries()) {
               // Only capture from LEFT entity (smaller ID) to avoid duplicates
-              if (entityId < counterpartyId && account.deltas) {
+              if (isLeftEntity(entityId, counterpartyId) && account.deltas) {
                 // Create channel key: LEFT-RIGHT (canonical ordering)
                 const channelKey = `${entityId.slice(-4)}-${counterpartyId.slice(-4)}`;
                 const tokenMap = new Map<number, { collateral: bigint; ondelta: bigint }>();
@@ -454,6 +462,7 @@ export const captureSnapshot = async (
     ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
     eReplicas: new Map(Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica, true)])), // forSnapshot=true excludes clonedForValidation
     jReplicas,
+    ...(browserVMState ? { browserVMState } : {}),
     runtimeInput: {
       runtimeTxs: [...runtimeInput.runtimeTxs],
       entityInputs: runtimeInput.entityInputs.map(input => ({
@@ -614,6 +623,30 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
 
   if (account.hankoSignature) {
     result.hankoSignature = account.hankoSignature;
+  }
+  if (account.currentDisputeProofHanko) {
+    result.currentDisputeProofHanko = account.currentDisputeProofHanko;
+  }
+  if (account.currentDisputeProofCooperativeNonce !== undefined) {
+    result.currentDisputeProofCooperativeNonce = account.currentDisputeProofCooperativeNonce;
+  }
+  if (account.currentDisputeProofBodyHash) {
+    result.currentDisputeProofBodyHash = account.currentDisputeProofBodyHash;
+  }
+  if (account.counterpartyDisputeProofHanko) {
+    result.counterpartyDisputeProofHanko = account.counterpartyDisputeProofHanko;
+  }
+  if (account.counterpartyDisputeProofCooperativeNonce !== undefined) {
+    result.counterpartyDisputeProofCooperativeNonce = account.counterpartyDisputeProofCooperativeNonce;
+  }
+  if (account.counterpartyDisputeProofBodyHash) {
+    result.counterpartyDisputeProofBodyHash = account.counterpartyDisputeProofBodyHash;
+  }
+  if (account.disputeProofNoncesByHash) {
+    result.disputeProofNoncesByHash = { ...account.disputeProofNoncesByHash };
+  }
+  if (account.disputeProofBodiesByHash) {
+    result.disputeProofBodiesByHash = { ...account.disputeProofBodiesByHash };
   }
 
   // ABI-encoded proofBody for on-chain disputes

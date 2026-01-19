@@ -30,18 +30,43 @@
 
   // BrowserVM time-travel: restore EVM state when timeIndex changes
   let lastTimeTravelIndex = -1;
+  let timeTravelNonce = 0;
   $: if ($timeIndex !== lastTimeTravelIndex && $history.length > 0) {
     const targetIndex = $timeIndex === -1 ? $history.length - 1 : $timeIndex;
     const frame = $history[targetIndex];
     if (frame?.jReplicas) {
-      // Get stateRoot from jReplicas (array or map)
       const jReplicas = Array.isArray(frame.jReplicas)
         ? frame.jReplicas
         : Object.values(frame.jReplicas);
       const stateRoot = jReplicas[0]?.stateRoot;
-      if (stateRoot && stateRoot.length === 32) {
-        (window as any).__xlnBrowserVM?.timeTravel(new Uint8Array(stateRoot))
+      const browserVMState = frame?.browserVMState;
+      const browserVM = (window as any).__xlnBrowserVM;
+      const nonce = ++timeTravelNonce;
+
+      if (browserVMState && browserVM?.restoreState) {
+        (async () => {
+          try {
+            await browserVM.restoreState(browserVMState);
+            if (nonce !== timeTravelNonce) return;
+            console.log(`[TimeMachine] EVM restored (full state) to frame ${targetIndex}`);
+            panelBridge.emit('time:changed', { frame: targetIndex, block: Number(jReplicas[0]?.blockNumber || 0) });
+          } catch (e: any) {
+            console.warn('[TimeMachine] restoreState failed:', e);
+            if (stateRoot && stateRoot.length === 32 && browserVM?.timeTravel) {
+              browserVM.timeTravel(new Uint8Array(stateRoot))
+                .then(() => {
+                  if (nonce !== timeTravelNonce) return;
+                  console.log(`[TimeMachine] EVM restored (stateRoot) to frame ${targetIndex}`);
+                  panelBridge.emit('time:changed', { frame: targetIndex, block: Number(jReplicas[0]?.blockNumber || 0) });
+                })
+                .catch((err: any) => console.warn('[TimeMachine] timeTravel failed:', err));
+            }
+          }
+        })();
+      } else if (stateRoot && stateRoot.length === 32 && browserVM?.timeTravel) {
+        browserVM.timeTravel(new Uint8Array(stateRoot))
           .then(() => {
+            if (nonce !== timeTravelNonce) return;
             console.log(`[TimeMachine] EVM restored to frame ${targetIndex}`);
             panelBridge.emit('time:changed', { frame: targetIndex, block: Number(jReplicas[0]?.blockNumber || 0) });
           })
@@ -447,6 +472,9 @@
       disabled={$history.length === 0}
     />
     <span class="time-label end">{totalTime}</span>
+    <button class="dock-toggle-btn" on:click={() => import('$lib/stores/appStateStore').then(m => m.toggleMode())}>
+      Dock
+    </button>
   </div>
 
   <!-- Fed Chair Subtitle (inline, above controls) -->
@@ -569,6 +597,25 @@
 
   .time-label.end {
     flex-shrink: 0;
+  }
+
+  .dock-toggle-btn {
+    margin-left: 8px;
+    padding: 4px 10px;
+    background: rgba(168, 85, 247, 0.1);
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: 'SF Mono', monospace;
+    color: rgba(255, 255, 255, 0.8);
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+
+  .dock-toggle-btn:hover {
+    background: rgba(168, 85, 247, 0.2);
+    border-color: rgba(168, 85, 247, 0.5);
   }
 
   /* Frame Navigation */
