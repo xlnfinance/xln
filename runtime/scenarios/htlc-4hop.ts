@@ -6,7 +6,7 @@
 
 import type { Env } from '../types';
 import { createEconomy, connectEconomy, testHtlcRoute, type EconomyEntity } from './test-economy';
-import { usd } from './helpers';
+import { usd, enableStrictScenario } from './helpers';
 import { ensureBrowserVM, createJReplica } from './boot';
 
 const USDC_TOKEN_ID = 1;
@@ -25,15 +25,18 @@ function findReplica(env: Env, entityId: string) {
 }
 
 export async function htlc4hop(env: Env): Promise<void> {
+  const restoreStrict = enableStrictScenario(env, 'HTLC 4-Hop');
+  try {
   // Register test keys for real signatures
   const { registerTestKeys } = await import('../account-crypto');
   await registerTestKeys(['s1', 's2', 's3', 'hub', 'alice', 'bob', 'carol', 'dave', 'frank']);
+  env.runtimeSeed = 'test-seed-deterministic-42';
   console.log('═══════════════════════════════════════════════════════════');
   console.log('          HTLC 4-HOP ONION ROUTING TEST                    ');
   console.log('═══════════════════════════════════════════════════════════\n');
 
   // Setup BrowserVM
-  const browserVM = await ensureBrowserVM();
+  const browserVM = await ensureBrowserVM(env);
   const depositoryAddress = browserVM.getDepositoryAddress();
   createJReplica(env, '4-Hop Demo', depositoryAddress);
 
@@ -161,6 +164,9 @@ export async function htlc4hop(env: Env): Promise<void> {
   console.log(`   Settlement: All ${paymentAmounts.length} payments atomic via secret revelation`);
   console.log(`   Total volume: $${Number(totalPaymentAmount) / 1e18}`);
   console.log('═══════════════════════════════════════\n');
+  } finally {
+    restoreStrict();
+  }
 }
 
 // CLI entry point

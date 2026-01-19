@@ -5,19 +5,20 @@
    */
   import { createEventDispatcher } from 'svelte';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
-  import { activeVault, allVaults, vaultOperations } from '$lib/stores/vaultStore';
+  import { activeRuntime, allRuntimes, vaultOperations } from '$lib/stores/vaultStore';
 
   export let allowAdd = false;
+  export let allowDelete = false;
   export let addLabel = '+ Add Runtime';
 
   let isOpen = false;
   const dispatch = createEventDispatcher();
 
-  $: vaultEntries = $allVaults;
-  $: currentVault = $activeVault;
+  $: runtimeEntries = $allRuntimes;
+  $: currentRuntime = $activeRuntime;
 
   function selectRuntime(id: string) {
-    vaultOperations.selectVault(id);
+    vaultOperations.selectRuntime(id);
     isOpen = false;
   }
 
@@ -27,31 +28,55 @@
     isOpen = false;
   }
 
-  function runtimeLabel(vault: any): string {
-    if (!vault) return allowAdd ? 'Add Runtime' : 'Select Runtime';
-    return vault.id || 'Runtime';
+  function handleDeleteRuntime(event: MouseEvent, runtimeId: string) {
+    event.stopPropagation(); // Don't trigger select
+    dispatch('deleteRuntime', { runtimeId });
+    isOpen = false;
+  }
+
+  function runtimeLabel(runtime: any): string {
+    if (!runtime) return allowAdd ? 'Add Runtime' : 'Select Runtime';
+    const signerAddress = runtime.signers?.[0]?.address;
+    if (!signerAddress) return runtime.label || 'Runtime';
+
+    // Format: 0xABCD...1234 (Label)
+    const truncated = signerAddress.slice(0, 6) + '...' + signerAddress.slice(-4);
+    return `${truncated} (${runtime.label})`;
   }
 </script>
 
 <Dropdown bind:open={isOpen} minWidth={180} maxWidth={260}>
   <span slot="trigger" class="trigger-content">
     <span class="trigger-icon">🧭</span>
-    <span class="trigger-text">{runtimeLabel(currentVault)}</span>
+    <span class="trigger-text">{runtimeLabel(currentRuntime)}</span>
     <span class="trigger-arrow" class:open={isOpen}>▼</span>
   </span>
 
   <div slot="menu" class="menu-content">
-    {#if vaultEntries.length === 0}
+    {#if runtimeEntries.length === 0}
       <div class="empty-state">No runtimes yet</div>
     {:else}
-      {#each vaultEntries as vault (vault.id)}
+      {#each runtimeEntries as runtime (runtime.id)}
+        {@const signerAddr = runtime.signers?.[0]?.address}
+        {@const displayName = signerAddr
+          ? `${signerAddr.slice(0, 6)}...${signerAddr.slice(-4)} (${runtime.label})`
+          : runtime.label}
         <button
           class="menu-item"
-          class:selected={vault.id === currentVault?.id}
-          on:click={() => selectRuntime(vault.id)}
+          class:selected={runtime.id === currentRuntime?.id}
+          on:click={() => selectRuntime(runtime.id)}
         >
-          <span class="menu-label">{vault.id}</span>
-          <span class="menu-meta">{vault.signers.length} signers</span>
+          <span class="menu-label" title={signerAddr}>{displayName}</span>
+          <span class="menu-meta">{runtime.signers.length} signers</span>
+          {#if allowDelete && runtimeEntries.length > 1}
+            <button
+              class="delete-btn"
+              on:click={(e) => handleDeleteRuntime(e, runtime.id)}
+              title="Delete runtime"
+            >
+              ×
+            </button>
+          {/if}
         </button>
       {/each}
     {/if}
@@ -120,6 +145,7 @@
     cursor: pointer;
     transition: background 0.12s;
     text-align: left;
+    position: relative;
   }
 
   .menu-item:hover {
@@ -132,11 +158,44 @@
 
   .menu-label {
     flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .menu-meta {
     font-size: 11px;
     color: #7aa8ff;
+    margin-right: 4px;
+  }
+
+  .delete-btn {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    background: rgba(255, 59, 48, 0.1);
+    border: 1px solid rgba(255, 59, 48, 0.3);
+    border-radius: 3px;
+    color: rgba(255, 59, 48, 0.8);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .menu-item:hover .delete-btn {
+    opacity: 1;
+  }
+
+  .delete-btn:hover {
+    background: rgba(255, 59, 48, 0.25);
+    border-color: rgba(255, 59, 48, 0.6);
+    color: rgba(255, 59, 48, 1);
   }
 
 

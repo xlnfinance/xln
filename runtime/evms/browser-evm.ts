@@ -3,32 +3,17 @@
  * Proxies all BrowserVMProvider methods automatically
  */
 
-import type { JurisdictionEVM, XlnomySnapshot } from '../types.js';
+import type { JurisdictionEVM, XlnomySnapshot, BrowserVMState } from '../types.js';
 import { getWallClockMs } from '../time.js';
 import { BrowserVMProvider } from '../browservm.js';
 
-// Singleton across bundles via window global
-declare global {
-  interface Window {
-    __xlnBrowserVM?: BrowserVMProvider;
-  }
-}
-
-function getOrCreateBrowserVM(): BrowserVMProvider {
-  if (typeof window !== 'undefined') {
-    if (!window.__xlnBrowserVM) {
-      window.__xlnBrowserVM = new BrowserVMProvider();
-    }
-    return window.__xlnBrowserVM;
-  }
-  // Fallback for non-browser (shouldn't happen)
-  return new BrowserVMProvider();
-}
+// REMOVED: window.__xlnBrowserVM singleton (replaced with env.browserVM per-runtime isolation)
+// Each BrowserEVM instance now creates its own isolated BrowserVMProvider
 
 export class BrowserEVM implements JurisdictionEVM {
   type: 'browservm' = 'browservm';
-  // Use window global singleton - works across bundles
-  private provider = getOrCreateBrowserVM();
+  // Create NEW isolated provider instance per BrowserEVM (no shared state)
+  private provider = new BrowserVMProvider();
 
   // Proxy all provider methods
   async init() { return this.provider.init(); }
@@ -38,6 +23,8 @@ export class BrowserEVM implements JurisdictionEVM {
   getBlockNumber() { return this.provider.getBlockNumber(); }
   async captureStateRoot() { return this.provider.captureStateRoot(); }
   async timeTravel(stateRoot: Uint8Array) { return this.provider.timeTravel(stateRoot); }
+  async serializeState(): Promise<BrowserVMState> { return this.provider.serializeState(); }
+  async restoreState(data: BrowserVMState): Promise<void> { return this.provider.restoreState(data); }
   async debugFundReserves(entityId: string, tokenId: number, amount: bigint) { return this.provider.debugFundReserves(entityId, tokenId, amount); }
   async setDefaultDisputeDelay(delayBlocks: number) { return this.provider.setDefaultDisputeDelay(delayBlocks); }
   async getReserves(entityId: string, tokenId: number) { return this.provider.getReserves(entityId, tokenId); }
@@ -50,16 +37,34 @@ export class BrowserEVM implements JurisdictionEVM {
     diffs: Array<{ tokenId: number; leftDiff: bigint; rightDiff: bigint; collateralDiff: bigint; ondeltaDiff: bigint; }>,
     forgiveDebtsInTokenIds: number[] = [],
     insuranceRegs: Array<{ insured: string; insurer: string; tokenId: number; limit: bigint; expiresAt: bigint; }> = [],
-    sig: string = '0x'
+    sig?: string
   ) {
     return this.provider.settleWithInsurance(leftEntity, rightEntity, diffs, forgiveDebtsInTokenIds, insuranceRegs, sig);
   }
-  async processBatch(entityId: string, batch: any) { return this.provider.processBatch(entityId, batch); }
+  async processBatch(encodedBatch: string, entityProvider: string, hankoData: string, nonce: bigint) {
+    return this.provider.processBatch(encodedBatch, entityProvider, hankoData, nonce);
+  }
   getProvider() { return this.provider; }
+  getChainId() { return this.provider.getChainId(); }
+  async getEntityNonce(entityId: string) { return this.provider.getEntityNonce(entityId); }
   getTokenRegistry() { return this.provider.getTokenRegistry(); }
   getTokenAddress(symbol: string) { return this.provider.getTokenAddress(symbol); }
   getTokenId(symbol: string) { return this.provider.getTokenId(symbol); }
+  async getErc20Balance(tokenAddress: string, owner: string) { return this.provider.getErc20Balance(tokenAddress, owner); }
+  async getEthBalance(owner: string) { return this.provider.getEthBalance(owner); }
+  async getErc20Allowance(tokenAddress: string, owner: string, spender: string) {
+    return this.provider.getErc20Allowance(tokenAddress, owner, spender);
+  }
   async fundSignerWallet(address: string, amount?: bigint) { return this.provider.fundSignerWallet(address, amount); }
+  async approveErc20(privKey: Uint8Array, tokenAddress: string, spender: string, amount: bigint) {
+    return this.provider.approveErc20(privKey, tokenAddress, spender, amount);
+  }
+  async transferErc20(privKey: Uint8Array, tokenAddress: string, to: string, amount: bigint) {
+    return this.provider.transferErc20(privKey, tokenAddress, to, amount);
+  }
+  async externalTokenToReserve(privKey: Uint8Array, entityId: string, tokenAddress: string, amount: bigint) {
+    return this.provider.externalTokenToReserve(privKey, entityId, tokenAddress, amount);
+  }
 
   // Event subscription for j-watcher (proxied from BrowserVMProvider)
   onAny(callback: (event: any) => void): () => void { return this.provider.onAny(callback); }
@@ -76,12 +81,15 @@ export class BrowserEVM implements JurisdictionEVM {
   ): Promise<string> {
     return this.provider.signSettlement(initiatorEntityId, counterpartyEntityId, diffs, forgiveDebtsInTokenIds, insuranceRegs);
   }
+  registerEntityWallet(entityId: string, privateKey: string): void {
+    this.provider.registerEntityWallet(entityId, privateKey);
+  }
 
   // JurisdictionEVM interface
   async deployContract(bytecode: string, args?: any[]): Promise<string> { throw new Error('Not implemented'); }
   async call(to: string, data: string, from?: string): Promise<string> { throw new Error('Not implemented'); }
   async send(to: string, data: string, value?: bigint): Promise<string> {
-    const result = await this.provider.executeTx({ to, data, gasLimit: 1000000n, value });
+    const result = await this.provider.executeTx({ to, data, gasLimit: 1000000n, value: value ?? 0n });
     return result.txHash;
   }
   async getBlock(): Promise<number> { return 0; }

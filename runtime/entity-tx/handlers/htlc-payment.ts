@@ -8,7 +8,7 @@
 
 import { EntityState, EntityInput, AccountTx, Env } from '../../types';
 import { cloneEntityState, canonicalAccountKey } from '../../state-helpers';
-import { generateHashlock, generateLockId, calculateHopTimelock, calculateHopRevealHeight } from '../../htlc-utils';
+import { generateHashlock, generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../htlc-utils';
 import { HTLC } from '../../constants';
 
 const formatEntityId = (id: string) => id.slice(-4);
@@ -39,12 +39,38 @@ export async function handleHtlcPayment(
   // Extract payment details
   let { targetEntityId, tokenId, amount, route, description, secret, hashlock } = entityTx.data;
 
-  // Generate secret/hashlock if not provided
-  if (!secret || !hashlock) {
+  // Generate or validate secret/hashlock
+  if (!secret && !hashlock) {
     const generated = generateHashlock();
     secret = generated.secret;
     hashlock = generated.hashlock;
     console.log(`🔒 Generated secret: ${secret.slice(0,16)}..., hash: ${hashlock.slice(0,16)}...`);
+  } else if (secret && !hashlock) {
+    try {
+      hashlock = hashHtlcSecret(secret);
+      console.log(`🔒 Derived hashlock from provided secret: ${hashlock.slice(0,16)}...`);
+    } catch (error) {
+      logError("HTLC_PAYMENT", `❌ Invalid secret format: ${error instanceof Error ? error.message : String(error)}`);
+      addMessage(newState, `❌ HTLC payment failed: invalid secret`);
+      return { newState, outputs: [], mempoolOps: [] };
+    }
+  } else if (!secret && hashlock) {
+    logError("HTLC_PAYMENT", `❌ Provided hashlock without secret`);
+    addMessage(newState, `❌ HTLC payment failed: missing secret`);
+    return { newState, outputs: [], mempoolOps: [] };
+  } else if (secret && hashlock) {
+    try {
+      const computed = hashHtlcSecret(secret);
+      if (computed !== hashlock) {
+        logError("HTLC_PAYMENT", `❌ Secret/hashlock mismatch: computed ${computed.slice(0,16)}..., expected ${hashlock.slice(0,16)}...`);
+        addMessage(newState, `❌ HTLC payment failed: secret/hash mismatch`);
+        return { newState, outputs: [], mempoolOps: [] };
+      }
+    } catch (error) {
+      logError("HTLC_PAYMENT", `❌ Invalid secret format: ${error instanceof Error ? error.message : String(error)}`);
+      addMessage(newState, `❌ HTLC payment failed: invalid secret`);
+      return { newState, outputs: [], mempoolOps: [] };
+    }
   }
 
   // If no route provided, check for direct account or calculate route

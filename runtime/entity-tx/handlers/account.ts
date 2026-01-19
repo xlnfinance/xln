@@ -4,6 +4,9 @@ import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAcco
 import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
 import { HTLC } from '../../constants';
 import { formatEntityId, HEAVY_LOGS } from '../../utils';
+import { isLeftEntity } from '../../entity-id-utils';
+import { batchAddRevealSecret, initJBatch } from '../../j-batch';
+import { getDeltaTransformerAddress } from '../../proof-builder';
 
 // === PURE EVENT TYPES ===
 // Events returned by handlers, applied by entity orchestrator
@@ -50,7 +53,7 @@ export interface AccountHandlerResult {
 
 export async function handleAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<AccountHandlerResult> {
   console.log(`🚀 APPLY accountInput: ${input.fromEntityId.slice(-4)} → ${input.toEntityId.slice(-4)}`);
-  console.log(`🚀 APPLY accountInput details: height=${input.height}, hasNewFrame=${!!input.newAccountFrame}, hasPrevSigs=${!!input.prevSignatures}, counter=${input.counter}`);
+  console.log(`🚀 APPLY accountInput details: height=${input.height}, hasNewFrame=${!!input.newAccountFrame}, hasPrevHanko=${!!input.prevHanko}, counter=${input.counter}`);
 
   // CRITICAL: Don't clone here - state already cloned at entity level (applyEntityTx)
   // Cloning here causes ackedTransitions updates to be lost between sequential messages
@@ -76,8 +79,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     const initialDeltas = new Map();
 
     // CANONICAL: Sort entities (left < right) for AccountMachine internals (like Channel.ts)
-    const leftEntity = state.entityId < counterpartyId ? state.entityId : counterpartyId;
-    const rightEntity = state.entityId < counterpartyId ? counterpartyId : state.entityId;
+    const leftEntity = isLeftEntity(state.entityId, counterpartyId) ? state.entityId : counterpartyId;
+    const rightEntity = isLeftEntity(state.entityId, counterpartyId) ? counterpartyId : state.entityId;
 
     accountMachine = {
       leftEntity,
@@ -202,6 +205,13 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             tryFinalizeAccountJEvents(accountMachine, counterparty, env);
 
             continue; // Move to next tx
+          }
+
+          if (accountTx.type === 'swap_resolve' || accountTx.type === 'swap_cancel') {
+            const key = `${counterpartyId}:${accountTx.data.offerId}`;
+            if (newState.pendingSwapFillRatios?.delete(key)) {
+              console.log(`📉 Cleared pending fillRatio for ${key.slice(-12)}`);
+            }
           }
 
           if (accountTx.type === 'htlc_lock') {
@@ -533,6 +543,20 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       const revealedSecrets = result.revealedSecrets || [];
       if (HEAVY_LOGS) console.log(`🔍 HTLC-SECRET-CHECK: ${revealedSecrets.length} secrets revealed in frame`);
 
+      if (revealedSecrets.length > 0) {
+        if (!newState.jBatchState) {
+          newState.jBatchState = initJBatch();
+        }
+        const transformerAddress = getDeltaTransformerAddress();
+        if (transformerAddress === '0x0000000000000000000000000000000000000000') {
+          console.warn('⚠️ HTLC: DeltaTransformer address not set - skipping on-chain reveal');
+        } else {
+          for (const { secret } of revealedSecrets) {
+            batchAddRevealSecret(newState.jBatchState, transformerAddress, secret);
+          }
+        }
+      }
+
       for (const { secret, hashlock } of revealedSecrets) {
         if (HEAVY_LOGS) console.log(`🔍 HTLC-SECRET: Processing revealed secret for hash ${hashlock.slice(0,16)}...`);
         const route = newState.htlcRoutes.get(hashlock);
@@ -617,7 +641,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           }]
         });
 
-        console.log(`✅ ACK-RESPONSE queued: ${state.entityId.slice(-4)} → ${result.response.toEntityId.slice(-4)}, height=${result.response.height}, hasPrevSigs=${!!result.response.prevSignatures}, counter=${result.response.counter}`);
+        console.log(`✅ ACK-RESPONSE queued: ${state.entityId.slice(-4)} → ${result.response.toEntityId.slice(-4)}, height=${result.response.height}, hasPrevHanko=${!!result.response.prevHanko}, counter=${result.response.counter}`);
       }
     } else {
       console.error(`❌ Frame consensus failed: ${result.error}`);
@@ -674,18 +698,38 @@ export function processOrderbookSwaps(
 
     let priceTicks: bigint;
     let qtyLots: bigint;
+    let quantizedGive: bigint;
+    let quantizedWant: bigint;
 
     if (side === 1) {
+      const baseAmount = offer.giveAmount;
+      if (baseAmount % LOT_SCALE !== 0n) {
+        throw new Error(`ORDERBOOK: giveAmount not aligned to LOT_SCALE (offer=${offer.offerId}, amount=${baseAmount})`);
+      }
       priceTicks = (offer.wantAmount * 100n) / offer.giveAmount;
-      qtyLots = offer.giveAmount / LOT_SCALE;
+      qtyLots = baseAmount / LOT_SCALE;
+      quantizedGive = baseAmount;
+      quantizedWant = (quantizedGive * priceTicks) / 100n;
     } else {
+      const baseAmount = offer.wantAmount;
+      if (baseAmount % LOT_SCALE !== 0n) {
+        throw new Error(`ORDERBOOK: wantAmount not aligned to LOT_SCALE (offer=${offer.offerId}, amount=${baseAmount})`);
+      }
       priceTicks = (offer.giveAmount * 100n) / offer.wantAmount;
-      qtyLots = offer.wantAmount / LOT_SCALE;
+      qtyLots = baseAmount / LOT_SCALE;
+      quantizedWant = baseAmount;
+      quantizedGive = (quantizedWant * priceTicks) / 100n;
     }
 
     if (qtyLots === 0n || qtyLots > MAX_LOTS || priceTicks <= 0n || priceTicks > MAX_LOTS) {
-      console.warn(`📊 ORDERBOOK REJECT: Invalid order (qty=${qtyLots}, price=${priceTicks}), offerId=${offer.offerId}`);
-      continue;
+      throw new Error(`ORDERBOOK: Invalid order (offer=${offer.offerId}, qty=${qtyLots}, price=${priceTicks})`);
+    }
+
+    const account = hubState.accounts.get(accountId);
+    const accountOffer = account?.swapOffers?.get(offer.offerId);
+    if (accountOffer) {
+      accountOffer.quantizedGive = quantizedGive;
+      accountOffer.quantizedWant = quantizedWant;
     }
 
     // AUDIT FIX (CRITICAL-5): Use cached book if available, otherwise load from ext.books

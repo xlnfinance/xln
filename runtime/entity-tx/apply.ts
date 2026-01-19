@@ -1,4 +1,5 @@
 import { calculateQuorumPower } from '../entity-consensus';
+import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
 import { processProfileUpdate } from '../name-resolution';
 import { createOrderbookExtState } from '../orderbook';
@@ -26,6 +27,7 @@ import { validateMessage } from './validation';
 import { cloneEntityState, addMessage, canonicalAccountKey, resolveEntityProposerId } from '../state-helpers';
 import { submitSettle } from '../evm';
 import { logError } from '../logger';
+import { FINANCIAL } from '../constants';
 
 export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<ApplyEntityTxResult> => {
   if (!entityTx) {
@@ -229,7 +231,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const targetEntityId = entityTx.data.targetEntityId;
       // Account keyed by counterparty ID (simpler than canonical)
       const counterpartyId = targetEntityId;
-      const isLeft = entityState.entityId < targetEntityId;
+      const isLeft = isLeftEntity(entityState.entityId, targetEntityId);
 
       if (entityState.accounts.has(counterpartyId)) {
         console.log(`💳 OPEN-ACCOUNT: Account with ${formatEntityId(counterpartyId)} already exists, skipping duplicate request`);
@@ -462,6 +464,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Extract payment details
       let { targetEntityId, tokenId, amount, route, description } = entityTx.data;
+      if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
+        logError("ENTITY_TX", `❌ Payment amount out of bounds: ${amount.toString()} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT.toString()}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT.toString()})`);
+        addMessage(newState, `❌ Payment failed: amount out of bounds`);
+        return { newState, outputs: [] };
+      }
 
       // If no route provided, check for direct account or calculate route
       if (!route || route.length === 0) {
@@ -559,7 +566,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         console.log(`💸   Route after slice: [${accountTx.data.route.map(r => r.slice(-4)).join(',')}]`);
         console.log(`💸 mempoolOps.length: ${mempoolOps.length}`);
 
-        const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
+        const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
         console.log(`💸 Account state: isLeft=${isLeft}, hasPendingFrame=${!!accountMachine.pendingFrame}`);
 
         // Message about payment initiation
@@ -602,6 +609,12 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
     if (entityTx.type === 'j_broadcast') {
       const { handleJBroadcast } = await import('./handlers/j-broadcast');
+      const batch = entityState.jBatchState?.batch;
+      if (batch) {
+        console.log(`🔍 APPLY j_broadcast: ${entityState.entityId.slice(-4)} batch r2r=${batch.reserveToReserve.length}, r2c=${batch.reserveToCollateral.length}, settlements=${batch.settlements.length}, starts=${batch.disputeStarts.length}, finals=${batch.disputeFinalizations.length}`);
+      } else {
+        console.log(`🔍 APPLY j_broadcast: ${entityState.entityId.slice(-4)} has no jBatchState`);
+      }
       const result = await handleJBroadcast(entityState, entityTx, env);
       // j_broadcast returns jOutputs to queue to J-mempool
       return result;
@@ -829,7 +842,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`🏦 SETTLE-DIFFS: Processing settlement with ${entityTx.data.counterpartyEntityId}`);
 
       const newState = cloneEntityState(entityState);
-      const { counterpartyEntityId, diffs, description } = entityTx.data;
+      const { counterpartyEntityId, diffs, description, sig } = entityTx.data;
 
       // Step 1: Validate invariant for all diffs
       for (const diff of diffs) {
@@ -848,7 +861,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       // Step 3: Determine canonical left/right order
-      const isLeft = entityState.entityId < counterpartyEntityId;
+      const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId);
       const leftEntity = isLeft ? entityState.entityId : counterpartyEntityId;
       const rightEntity = isLeft ? counterpartyEntityId : entityState.entityId;
 
@@ -873,8 +886,12 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`🏦 Calling submitSettle with diffs:`, safeStringify(contractDiffs, 2));
 
       // Step 6: Call Depository.settle() - fire and forget (j-watcher handles result)
+      if (!sig || sig === '0x') {
+        throw new Error(`Settlement ${entityState.entityId.slice(-4)}↔${counterpartyEntityId.slice(-4)} missing hanko signature`);
+      }
+
       try {
-        const result = await submitSettle(jurisdiction, leftEntity, rightEntity, contractDiffs);
+        const result = await submitSettle(jurisdiction, leftEntity, rightEntity, contractDiffs, [], [], sig);
         console.log(`✅ Settlement transaction sent: ${result.txHash}`);
 
         // Add message to chat

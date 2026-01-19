@@ -49,13 +49,24 @@ export function generateLockId(
 }
 
 /**
+ * Hash HTLC secret using the on-chain convention (keccak256(abi.encode(secret))).
+ */
+export function hashHtlcSecret(secret: string): string {
+  if (!ethers.isHexString(secret, 32)) {
+    throw new Error(`HTLC secret must be 32-byte hex (got ${secret.length} chars)`);
+  }
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  return ethers.keccak256(abiCoder.encode(['bytes32'], [secret]));
+}
+
+/**
  * Generate secret and hashlock for HTLC
- * Returns 32-byte random secret as hex string
+ * Returns 32-byte random secret as 0x-prefixed hex
  */
 export function generateHashlock(): { secret: string; hashlock: string } {
   const secretBytes = crypto.getRandomValues(new Uint8Array(32));
-  const secret = Buffer.from(secretBytes).toString('hex');
-  const hashlock = ethers.keccak256(ethers.toUtf8Bytes(secret));
+  const secret = `0x${Buffer.from(secretBytes).toString('hex')}`;
+  const hashlock = hashHtlcSecret(secret);
   return { secret, hashlock };
 }
 

@@ -5,7 +5,7 @@
 
 import { ethers } from 'ethers';
 
-import { safeStringify } from './serialization-utils';
+import { getCachedSignerAddress } from './account-crypto';
 import type { ConsensusConfig, EntityType, JurisdictionConfig } from './types';
 import { DEBUG } from './utils';
 
@@ -18,23 +18,48 @@ declare global {
 let namedRequestCounter = 0;
 
 // Entity encoding utilities
+const resolveValidatorAddress = (validator: string): string => {
+  if (validator.startsWith('0x') && validator.length === 42) {
+    return ethers.getAddress(validator);
+  }
+  if (validator.startsWith('0x') && validator.length === 66) {
+    return ethers.getAddress(`0x${validator.slice(-40)}`);
+  }
+  const derived = getCachedSignerAddress(validator);
+  if (!derived) {
+    throw new Error(`Cannot derive address for validator ${validator}`);
+  }
+  return ethers.getAddress(derived);
+};
+
+const toBoardEntityId = (validator: string): string => {
+  const address = resolveValidatorAddress(validator);
+  return ethers.zeroPadValue(address, 32);
+};
+
+const toUint16 = (value: bigint, label: string): number => {
+  if (value < 0n || value > 0xffffn) {
+    throw new Error(`Board ${label} out of range: ${value.toString()}`);
+  }
+  return Number(value);
+};
+
 export const encodeBoard = (config: ConsensusConfig): string => {
-  const delegates = config.validators.map(validator => ({
-    entityId: validator, // For EOA addresses (20 bytes)
-    votingPower: Number(config.shares[validator] || 1n),
-  }));
+  const entityIds = config.validators.map(toBoardEntityId);
+  const votingPowers = config.validators.map((validator) => toUint16(config.shares[validator] || 1n, `weight(${validator})`));
+  const threshold = toUint16(config.threshold, 'threshold');
 
-  const board = {
-    votingThreshold: Number(config.threshold),
-    delegates: delegates,
-  };
-
-  // Return JSON representation that can be hashed consistently
-  return safeStringify(board);
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  return abiCoder.encode(
+    ['tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)'],
+    [[threshold, entityIds, votingPowers, 0, 0, 0]]
+  );
 };
 
 export const hashBoard = (encodedBoard: string): string => {
-  // Use real keccak256 hash like Ethereum
+  if (encodedBoard.startsWith('0x')) {
+    return ethers.keccak256(encodedBoard);
+  }
   return ethers.keccak256(ethers.toUtf8Bytes(encodedBoard));
 };
 
@@ -43,25 +68,38 @@ export const generateLazyEntityId = (
   threshold: bigint,
 ): string => {
   // Create deterministic entity ID from quorum composition
-  let validatorData: { name: string; weight: number }[];
+  let validatorData: { name: string; weight: bigint }[];
 
   // Handle both formats: array of objects or array of strings (assume weight=1)
   if (typeof validators[0] === 'string') {
-    validatorData = (validators as string[]).map(name => ({ name, weight: 1 }));
+    validatorData = (validators as string[]).map(name => ({ name, weight: 1n }));
   } else {
-    validatorData = validators as { name: string; weight: number }[];
+    validatorData = (validators as { name: string; weight: number }[]).map(v => ({
+      name: v.name,
+      weight: BigInt(v.weight),
+    }));
   }
 
-  // Sort by name for canonical ordering
-  const sortedValidators = validatorData.slice().sort((a, b) => a.name.localeCompare(b.name));
+  // Sort by resolved address for canonical ordering
+  const sortedValidators = validatorData.slice().sort((a, b) => {
+    const aAddr = resolveValidatorAddress(a.name);
+    const bAddr = resolveValidatorAddress(b.name);
+    return aAddr.localeCompare(bAddr);
+  });
 
-  const quorumData = {
-    validators: sortedValidators,
-    threshold: threshold.toString(),
-  };
+  const shares: { [validatorId: string]: bigint } = {};
+  const validatorIds = sortedValidators.map(v => v.name);
+  for (const validator of sortedValidators) {
+    shares[validator.name] = validator.weight;
+  }
 
-  const serialized = safeStringify(quorumData);
-  return hashBoard(serialized);
+  const encodedBoard = encodeBoard({
+    mode: 'proposer-based',
+    threshold,
+    validators: validatorIds,
+    shares,
+  });
+  return hashBoard(encodedBoard);
 };
 
 export const generateNumberedEntityId = (entityNumber: number): string => {

@@ -12,6 +12,7 @@
  */
 
 import type { EntityReplica, EntityInput, AccountMachine } from './types';
+import { isLeftEntity } from './entity-id-utils';
 
 export interface CrontabTask {
   name: string;
@@ -329,10 +330,15 @@ async function broadcastBatchHandler(replica: EntityReplica): Promise<EntityInpu
     console.warn(`⚠️ No jurisdiction configured for entity ${replica.entityId.slice(-4)} - skipping batch broadcast`);
     return outputs;
   }
+  const signerId = replica.state.config.validators[0];
+  if (!signerId) {
+    console.warn(`⚠️ No signerId for entity ${replica.entityId.slice(-4)} - cannot sign batch`);
+    return outputs;
+  }
 
   // Get BrowserVM instance from runtime (proper architecture - not window global)
   const { getBrowserVMInstance } = await import('./evm');
-  const browserVM = getBrowserVMInstance();
+  const browserVM = getBrowserVMInstance(env);
   if (browserVM) {
     console.log(`📤 CRONTAB: Using BrowserVM for batch broadcast`);
   }
@@ -340,11 +346,13 @@ async function broadcastBatchHandler(replica: EntityReplica): Promise<EntityInpu
   // Broadcast batch to Depository contract (or BrowserVM in browser mode)
   const { broadcastBatch } = await import('./j-batch');
   const result = await broadcastBatch(
+    env,
     replica.entityId,
     replica.state.jBatchState,
     jurisdiction,
     browserVM,
-    replica.state.timestamp
+    replica.state.timestamp,
+    signerId
   );
 
   if (result.success) {
@@ -391,7 +399,7 @@ async function hubRebalanceHandler(replica: EntityReplica): Promise<EntityInput[
 
   for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
     for (const [tokenId, delta] of accountMachine.deltas.entries()) {
-      const weAreLeft = replica.entityId < counterpartyId;
+      const weAreLeft = isLeftEntity(replica.entityId, counterpartyId);
       const derived = deriveDelta(delta, weAreLeft);
 
       if (derived.delta < 0n) {

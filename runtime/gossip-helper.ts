@@ -6,7 +6,7 @@
 import type { EntityState } from './types';
 import type { BoardMetadata, Profile } from './gossip';
 import { deriveDelta, isLeft } from './account-utils';
-import { getSignerAddress, getSignerPublicKey } from './account-crypto';
+import { getCachedSignerAddress, getCachedSignerPublicKey } from './account-crypto';
 
 const toUint16 = (value: bigint | number | undefined, fallback = 0): number => {
   const raw = typeof value === 'bigint' ? Number(value) : Number(value ?? fallback);
@@ -21,9 +21,9 @@ const bytesToHex = (bytes: Uint8Array): string =>
 const buildBoardMetadata = (entityState: EntityState): BoardMetadata => {
   const validators = entityState.config.validators.map(validatorId => {
     const weight = toUint16(entityState.config.shares[validatorId] ?? 1n, 1);
-    const publicKey = getSignerPublicKey(validatorId);
+    const publicKey = getCachedSignerPublicKey(validatorId);
     const publicKeyHex = publicKey ? bytesToHex(publicKey) : undefined;
-    const address = getSignerAddress(validatorId);
+    const address = getCachedSignerAddress(validatorId);
     const signer = address || validatorId;
 
     return {

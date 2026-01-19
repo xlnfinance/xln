@@ -5,6 +5,7 @@
  * It manages entity profiles and their capabilities in a distributed network.
  */
 
+import { FINANCIAL } from './constants';
 export type BoardValidator = {
   signer: string; // canonical signer address (0x...) or signerId fallback
   weight: number; // uint16 voting power
@@ -146,7 +147,7 @@ export function createGossipLayer(): GossipLayer {
         const adjacency = new Map<string, Set<string>>();
 
         // Build adjacency from profiles (capacity-aware)
-        const minAmount = amount || 1n; // Use specified amount or 1 as minimum
+        const minAmount = amount ?? FINANCIAL.MIN_PAYMENT_AMOUNT;
 
         for (const profile of profiles.values()) {
           if (profile.accounts) {

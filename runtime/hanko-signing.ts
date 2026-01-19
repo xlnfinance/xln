@@ -5,7 +5,6 @@
 
 import type { Env, HankoString } from './types';
 import { buildRealHanko } from './hanko';
-import { getSignerPublicKey } from './account-crypto';
 import { ethers } from 'ethers';
 
 // Browser-compatible Buffer helpers - ALWAYS use manual hex parsing (Node Buffer.from can be broken in some envs)
@@ -74,14 +73,15 @@ export async function signHashesAsSingleEntity(
   signerId: string,
   hashes: string[]
 ): Promise<HankoString[]> {
+  if (!env?.runtimeSeed) {
+    throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signHashesAsSingleEntity called without env.runtimeSeed for entity ${entityId.slice(-4)}`);
+  }
+
   const hankos: HankoString[] = [];
 
-  // Get private key for this signer
+  // Get private key for this signer (pass env for pure function)
   const { getSignerPrivateKey } = await import('./account-crypto');
-  const privateKey = getSignerPrivateKey(signerId);
-  if (!privateKey) {
-    throw new Error(`Cannot sign - no private key for signerId ${signerId.slice(-4)}`);
-  }
+  const privateKey = getSignerPrivateKey(env, signerId);
 
   // Sign each hash independently (single-signer = simple case)
   for (const hash of hashes) {
@@ -90,7 +90,7 @@ export async function signHashesAsSingleEntity(
     // Build hanko with single EOA signature
     const hanko = await buildRealHanko(hashBuffer, {
       noEntities: [],
-      privateKeys: [privateKey],
+      privateKeys: [privateKey as Buffer],
       claims: [
         {
           entityId: bufferFrom(entityId.replace('0x', '').padStart(64, '0'), 'hex'),
@@ -179,9 +179,17 @@ export async function verifyHankoForHash(
     const recoveredAddresses: string[] = [];
     for (let i = 0; i < eoaSignatures.length; i++) {
       const sig = eoaSignatures[i];
+      if (!sig || sig.length < 65) {
+        console.warn(`❌ Hanko signature ${i} is invalid or too short`);
+        continue;
+      }
       const r = ethers.hexlify(sig.slice(0, 32));
       const s = ethers.hexlify(sig.slice(32, 64));
       const v = sig[64];
+      if (v === undefined) {
+        console.warn(`❌ Hanko signature ${i} missing recovery byte`);
+        continue;
+      }
       const yParity = (v >= 27 ? v - 27 : v) as 0 | 1;
       const recoveredAddr = ethers.recoverAddress(ethers.hexlify(hashBuffer), { r, s, v, yParity });
       recoveredAddresses.push(recoveredAddr.toLowerCase());
@@ -189,8 +197,8 @@ export async function verifyHankoForHash(
 
     // CRITICAL: Find claim for expectedEntityId (NOT just last claim!)
     const expectedEntityIdPadded = expectedEntityId.replace('0x', '').padStart(64, '0');
-    const matchingClaim = hanko.claims.find(c => {
-      const claimEntityHex = Array.from(c.entityId).map(b => b.toString(16).padStart(2, '0')).join('');
+    const matchingClaim = hanko.claims.find((c: { entityId: Uint8Array }) => {
+      const claimEntityHex = Array.from(c.entityId).map((b: number) => b.toString(16).padStart(2, '0')).join('');
       return claimEntityHex === expectedEntityIdPadded;
     });
 
@@ -199,24 +207,24 @@ export async function verifyHankoForHash(
       return { valid: false, entityId: null };
     }
 
-    const targetEntity = '0x' + Array.from(matchingClaim.entityId).map(b => b.toString(16).padStart(2, '0')).join('');
+    const targetEntity = '0x' + Array.from(matchingClaim.entityId).map((b) => (b as number).toString(16).padStart(2, '0')).join('');
 
     // CRITICAL: Verify recovered addresses match entity's board validators
     let expectedAddresses: string[] = [];
     let boardVerified = false;
 
     if (env && env.eReplicas) {
-      const replica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === expectedEntityId);
+      const replica: any = Array.from(env.eReplicas.values()).find((r: any) => r.state?.entityId === expectedEntityId);
       if (replica) {
-        const validators = replica.state.config.validators; // ['s1', 's2', 's3']
+        const validators: string[] = replica.state?.config?.validators || [];
 
         // Convert validators to addresses (local entity: signerId derivation is allowed)
         const { getSignerAddress } = await import('./account-crypto');
-        expectedAddresses = validators.map(v => {
+        expectedAddresses = validators.map((v: string) => {
           if (v.startsWith('0x')) {
             return publicKeyToAddress(v);
           }
-          return getSignerAddress(v)?.toLowerCase();
+          return getSignerAddress(env, v)?.toLowerCase();
         }).filter(Boolean) as string[];
       }
     }
@@ -269,12 +277,15 @@ export async function verifyHankoForHash(
       boardVerified = true;
     }
 
+    // SECURITY: Board verification is MANDATORY in production
+    // External entities MUST have board metadata in gossip profiles before signatures are accepted
     if (!boardVerified) {
-      console.warn(`⚠️ Cannot verify board - entity ${expectedEntityId.slice(-4)} missing board/publicKey in replicas or gossip`);
-      // For now, allow (might be external entity), but log warning
+      console.error(`❌ SECURITY: Cannot verify board for entity ${expectedEntityId.slice(-4)} - board/publicKey missing in replicas or gossip`);
+      console.error(`   Rejecting Hanko signature - board verification is mandatory for production`);
+      return { valid: false, entityId: null };
     }
 
-    // Valid if at least one yes entity AND entityId matches AND has valid EOA sigs from board
+    // Valid if at least one yes entity AND entityId matches AND has valid EOA sigs from board (already verified)
     if (recovered.yesEntities.length > 0) {
       console.log(`✅ Hanko valid: ${eoaSignatures.length} EOA sigs, entity ${targetEntity.slice(-4)}`);
       return { valid: true, entityId: targetEntity };

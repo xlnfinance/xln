@@ -3,7 +3,7 @@ import type { Profile } from './gossip';
 import { RuntimeWsClient } from './ws-client';
 import { buildEntityProfile } from './gossip-helper';
 import { extractEntityId } from './ids';
-import { getSignerPublicKey, registerSignerPublicKey } from './account-crypto';
+import { getCachedSignerPublicKey, registerSignerPublicKey } from './account-crypto';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 
@@ -263,7 +263,7 @@ export class RuntimeP2P {
 
       // Get public key from first validator (superset approach - works for single/multi-signer)
       const firstValidator = replica.state.config.validators[0];
-      const publicKey = firstValidator ? getSignerPublicKey(firstValidator) : null;
+      const publicKey = firstValidator ? getCachedSignerPublicKey(firstValidator) : null;
       if (publicKey) {
         profile.metadata = {
           ...(profile.metadata || {}),

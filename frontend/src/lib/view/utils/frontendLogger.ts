@@ -48,26 +48,27 @@ declare global {
 }
 
 // Global verbose logging toggle (controlled by Settings panel)
-let VERBOSE_ENABLED = false;
+let VERBOSE_ENABLED = true; // DEFAULT ON for development
 
 // Monkey-patch console for performance-aware logging
 const originalLog = console.log;
 const originalInfo = console.info;
 const originalDebug = console.debug;
 
-console.log = (...args: unknown[]) => {
-  if (VERBOSE_ENABLED || args[0]?.toString().includes('ERROR') || args[0]?.toString().includes('❌')) {
-    originalLog(...args);
-  }
-};
+// DISABLED monkey-patching for debugging - all logs show
+// console.log = (...args: unknown[]) => {
+//   if (VERBOSE_ENABLED || args[0]?.toString().includes('ERROR') || args[0]?.toString().includes('❌')) {
+//     originalLog(...args);
+//   }
+// };
 
-console.info = (...args: unknown[]) => {
-  if (VERBOSE_ENABLED) originalInfo(...args);
-};
+// console.info = (...args: unknown[]) => {
+//   if (VERBOSE_ENABLED) originalInfo(...args);
+// };
 
-console.debug = (...args: unknown[]) => {
-  if (VERBOSE_ENABLED) originalDebug(...args);
-};
+// console.debug = (...args: unknown[]) => {
+//   if (VERBOSE_ENABLED) originalDebug(...args);
+// };
 
 // console.error and console.warn ALWAYS show (never silenced)
 

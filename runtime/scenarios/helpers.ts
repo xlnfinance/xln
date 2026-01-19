@@ -4,6 +4,7 @@
 
 import type { Env, EntityInput, EntityReplica, Delta } from '../types';
 import { formatRuntime } from '../runtime-ascii';
+import { setFailFastErrors } from '../logger';
 
 // Lazy-loaded process to avoid circular deps
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -26,6 +27,67 @@ export const getApplyRuntimeInput = async () => {
 };
 
 export { checkSolvency } from './solvency-check';
+
+let strictScenarioDepth = 0;
+let strictScenarioOriginalError: typeof console.error | null = null;
+
+const getScenarioTickMs = (env: Env): number => {
+  if (!env.jReplicas || env.jReplicas.size === 0) return 1;
+  let maxDelay = 0;
+  for (const replica of env.jReplicas.values()) {
+    const delay = typeof replica.blockDelayMs === 'number' ? replica.blockDelayMs : 0;
+    if (delay > maxDelay) maxDelay = delay;
+  }
+  return Math.max(1, maxDelay);
+};
+
+export const advanceScenarioTime = (env: Env, stepMs?: number, force: boolean = false): void => {
+  if (!force && !env.scenarioMode) return;
+  const step = Math.max(1, stepMs ?? getScenarioTickMs(env));
+  if (typeof env.timestamp === 'bigint') {
+    env.timestamp = env.timestamp + BigInt(step);
+    return;
+  }
+  env.timestamp = (env.timestamp || 0) + step;
+};
+
+export function enableStrictScenario(env: Env, label: string): () => void {
+  env.strictScenario = true;
+  env.strictScenarioLabel = label;
+  setFailFastErrors(true);
+
+  if (strictScenarioDepth === 0) {
+    strictScenarioOriginalError = console.error;
+    const formatConsoleArg = (arg: unknown): string => {
+      if (typeof arg === 'string') return arg;
+      if (typeof arg === 'bigint') return `${arg.toString()}n`;
+      try {
+        return JSON.stringify(arg);
+      } catch {
+        return String(arg);
+      }
+    };
+    console.error = (...args: unknown[]) => {
+      strictScenarioOriginalError?.(...args);
+      throw new Error(`[${label}] console.error: ${args.map(formatConsoleArg).join(' ')}`);
+    };
+  }
+
+  strictScenarioDepth += 1;
+
+  return () => {
+    strictScenarioDepth = Math.max(0, strictScenarioDepth - 1);
+    if (strictScenarioDepth === 0) {
+      env.strictScenario = false;
+      env.strictScenarioLabel = undefined;
+      if (strictScenarioOriginalError) {
+        console.error = strictScenarioOriginalError;
+        strictScenarioOriginalError = null;
+      }
+      setFailFastErrors(false);
+    }
+  };
+}
 
 // ============================================================================
 // ENTITY LOOKUP HELPERS
@@ -124,7 +186,15 @@ export async function converge(env: Env, maxCycles = 10): Promise<void> {
   const process = await getProcess();
   for (let i = 0; i < maxCycles; i++) {
     await process(env);
+    advanceScenarioTime(env);
     let hasWork = false;
+    const pendingOutputs = env.pendingOutputs?.length || 0;
+    const pendingNetwork = env.pendingNetworkOutputs?.length || 0;
+    const pendingInbox = env.networkInbox?.length || 0;
+    const pendingInputs = env.runtimeInput?.entityInputs?.length || 0;
+    if (pendingOutputs > 0 || pendingNetwork > 0 || pendingInbox > 0 || pendingInputs > 0) {
+      hasWork = true;
+    }
     for (const [, replica] of env.eReplicas) {
       // Check entity-level work (multi-signer consensus)
       if (replica.mempool.length > 0 || replica.proposal || replica.lockedFrame) {
@@ -133,7 +203,7 @@ export async function converge(env: Env, maxCycles = 10): Promise<void> {
       }
       // Check account-level work (bilateral consensus)
       for (const [, account] of replica.state.accounts) {
-        if (account.mempool.length > 0 || account.pendingFrame) {
+        if (account.mempool.length > 0 || account.pendingFrame || account.sentTransitions > account.ackedTransitions) {
           hasWork = true;
           break;
         }
@@ -157,22 +227,6 @@ export async function processUntil(
   onFail?: () => void
 ): Promise<void> {
   const process = await getProcess();
-  const waitNetworkTick = async () => {
-    if (typeof setImmediate === 'function') {
-      await new Promise<void>(resolve => setImmediate(resolve));
-      return;
-    }
-    if (typeof queueMicrotask === 'function') {
-      await new Promise<void>(resolve => queueMicrotask(resolve));
-      return;
-    }
-    await new Promise<void>(resolve => setTimeout(resolve, 0));
-  };
-  const waitNetworkPropagation = async () => {
-    if (env.scenarioMode) {
-      await new Promise<void>(resolve => setTimeout(resolve, 25));
-    }
-  };
   for (let round = 0; round < maxRounds; round++) {
     // Check first
     if (predicate()) return;
@@ -180,15 +234,10 @@ export async function processUntil(
     // Process local state
     await process(env);
     onTick?.(round + 1);
+    advanceScenarioTime(env, undefined, true);
 
-    // Wait for network messages to arrive (coordination with runtime.ts)
-    await waitNetworkTick();
-
-    // Check again after network processing
+    // Check again after processing
     if (predicate()) return;
-
-    // Small delay for network propagation (real sockets)
-    await waitNetworkPropagation();
   }
   if (!predicate()) {
     onFail?.();
@@ -208,7 +257,15 @@ export async function convergeWithOffline(
 ): Promise<void> {
   for (let i = 0; i < maxCycles; i++) {
     await processWithOffline(env, undefined, offlineSigners, reason);
+    advanceScenarioTime(env);
     let hasWork = false;
+    const pendingOutputs = env.pendingOutputs?.length || 0;
+    const pendingNetwork = env.pendingNetworkOutputs?.length || 0;
+    const pendingInbox = env.networkInbox?.length || 0;
+    const pendingInputs = env.runtimeInput?.entityInputs?.length || 0;
+    if (pendingOutputs > 0 || pendingNetwork > 0 || pendingInbox > 0 || pendingInputs > 0) {
+      hasWork = true;
+    }
     for (const [, replica] of env.eReplicas) {
       // Check entity-level work (multi-signer consensus) - CRITICAL for multi-sig
       if (replica.mempool.length > 0 || replica.proposal || replica.lockedFrame) {
@@ -217,7 +274,7 @@ export async function convergeWithOffline(
       }
       // Check account-level work (bilateral consensus)
       for (const [, account] of replica.state.accounts) {
-        if (account.mempool.length > 0 || account.pendingFrame) {
+        if (account.mempool.length > 0 || account.pendingFrame || account.sentTransitions > account.ackedTransitions) {
           hasWork = true;
           break;
         }
@@ -319,6 +376,44 @@ export const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 export const eth = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 export const btc = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 export const dai = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
+
+export function assertRuntimeIdle(env: Env, label: string = 'runtime'): void {
+  const errors: string[] = [];
+
+  const pendingOutputs = env.pendingOutputs?.length || 0;
+  const pendingInputs = env.runtimeInput?.entityInputs?.length || 0;
+  const pendingInbox = env.networkInbox?.length || 0;
+  const pendingNetwork = env.pendingNetworkOutputs?.length || 0;
+
+  if (pendingOutputs > 0) errors.push(`pendingOutputs=${pendingOutputs}`);
+  if (pendingInputs > 0) errors.push(`runtimeInput.entityInputs=${pendingInputs}`);
+  if (pendingInbox > 0) errors.push(`networkInbox=${pendingInbox}`);
+  if (pendingNetwork > 0) errors.push(`pendingNetworkOutputs=${pendingNetwork}`);
+
+  for (const jReplica of env.jReplicas?.values() || []) {
+    if (jReplica.mempool.length > 0) {
+      errors.push(`jReplica:${jReplica.name} mempool=${jReplica.mempool.length}`);
+    }
+  }
+
+  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    for (const [counterpartyId, account] of replica.state.accounts.entries()) {
+      if (account.pendingFrame) {
+        errors.push(`pendingFrame ${replicaKey}↔${counterpartyId.slice(-4)}`);
+      }
+      if (account.mempool.length > 0) {
+        errors.push(`accountMempool ${replicaKey}↔${counterpartyId.slice(-4)}=${account.mempool.length}`);
+      }
+      if (account.sentTransitions > account.ackedTransitions) {
+        errors.push(`unackedTransitions ${replicaKey}↔${counterpartyId.slice(-4)}=${account.sentTransitions - account.ackedTransitions}`);
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(`RUNTIME NOT IDLE (${label}): ${errors.join('; ')}`);
+  }
+}
 
 // Set snapshot extras before process() - call this, then call process()
 export function snap(

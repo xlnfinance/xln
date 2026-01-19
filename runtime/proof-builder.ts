@@ -67,8 +67,9 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
 
   for (const [tokenId, delta] of sortedDeltas) {
     tokenIds.push(tokenId);
-    // offdeltas = ondelta + offdelta (total bilateral delta)
-    offdeltas.push(delta.ondelta + delta.offdelta);
+    // proofbody.offdeltas = ONLY the off-chain component
+    // Contract adds on-chain ondelta separately from storage
+    offdeltas.push(delta.offdelta);
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -256,14 +257,15 @@ export function buildInitialDisputeProof(
 }
 
 /**
- * Encode dispute message for signing (matches Account.sol verifyDisputeProofSig)
+ * Encode dispute message for signing (matches Account.sol verifyDisputeProofHanko)
  *
  * MessageType.DisputeProof = 1
  * Format: abi.encode(MessageType.DisputeProof, ch_key, cooperativeNonce, disputeNonce, proofbodyHash)
  */
 export function encodeDisputeMessage(
   accountMachine: AccountMachine,
-  proofBodyHash: string
+  proofBodyHash: string,
+  _depositoryAddress: string
 ): string {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
 
@@ -279,7 +281,7 @@ export function encodeDisputeMessage(
   const MESSAGE_TYPE_DISPUTE_PROOF = 1;
 
   return abiCoder.encode(
-    ['uint8', 'bytes', 'uint256', 'uint256', 'bytes32'],
+    ['uint256', 'bytes', 'uint256', 'uint256', 'bytes32'],
     [
       MESSAGE_TYPE_DISPUTE_PROOF,
       chKey,
@@ -296,9 +298,10 @@ export function encodeDisputeMessage(
  */
 export function createDisputeProofHash(
   accountMachine: AccountMachine,
-  proofBodyHash: string
+  proofBodyHash: string,
+  depositoryAddress: string
 ): string {
-  const encodedMessage = encodeDisputeMessage(accountMachine, proofBodyHash);
+  const encodedMessage = encodeDisputeMessage(accountMachine, proofBodyHash, depositoryAddress);
   return ethers.keccak256(encodedMessage);
 }
 
@@ -317,4 +320,78 @@ export const DEFAULT_DISPUTE_CONFIG: DisputeConfig = {
  */
 export function getDisputeDelayBlocks(configValue: number): number {
   return configValue * 10;
+}
+
+/**
+ * Build settlement diffs for current account state
+ */
+export function buildSettlementDiffs(accountMachine: AccountMachine): Array<{
+  tokenId: number;
+  leftDiff: bigint;
+  rightDiff: bigint;
+  collateralDiff: bigint;
+  ondeltaDiff: bigint;
+}> {
+  const diffs: Array<{
+    tokenId: number;
+    leftDiff: bigint;
+    rightDiff: bigint;
+    collateralDiff: bigint;
+    ondeltaDiff: bigint;
+  }> = [];
+
+  for (const [tokenId, delta] of accountMachine.deltas) {
+    // Only include tokens with non-zero collateral or holds
+    if (delta.collateral !== 0n || delta.leftHtlcHold || delta.rightHtlcHold) {
+      diffs.push({
+        tokenId: Number(tokenId),
+        leftDiff: delta.offdelta < 0n ? delta.offdelta : 0n,
+        rightDiff: delta.offdelta > 0n ? delta.offdelta : 0n,
+        collateralDiff: delta.collateral,
+        ondeltaDiff: delta.ondelta
+      });
+    }
+  }
+
+  return diffs;
+}
+
+/**
+ * Create settlement hash for bilateral signature
+ * Matches Account.sol CooperativeUpdate encoding
+ */
+export function createSettlementHash(
+  accountMachine: AccountMachine,
+  diffs: Array<{
+    tokenId: number;
+    leftDiff: bigint;
+    rightDiff: bigint;
+    collateralDiff: bigint;
+    ondeltaDiff: bigint;
+  }>,
+  _depositoryAddress: string
+): string {
+  // Channel key is canonical (left:right)
+  const channelKey = ethers.solidityPacked(
+    ['bytes32', 'bytes32'],
+    [accountMachine.leftEntity, accountMachine.rightEntity]
+  );
+  const cooperativeNonce = accountMachine.proofHeader.cooperativeNonce;
+
+  // Match Account.sol CooperativeUpdate encoding
+  const MESSAGE_TYPE_COOPERATIVE_UPDATE = 0;
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  const encodedMsg = abiCoder.encode(
+    ['uint256', 'bytes', 'uint256', 'tuple(uint256,int256,int256,int256,int256)[]', 'uint256[]', 'tuple(bytes32,bytes32,uint256,uint256,uint256)[]'],
+    [
+      MESSAGE_TYPE_COOPERATIVE_UPDATE,
+      channelKey,
+      cooperativeNonce,
+      diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]),
+      [], // forgiveDebtsInTokenIds (empty for now)
+      []  // insuranceRegs (empty for now)
+    ]
+  );
+
+  return ethers.keccak256(encodedMsg);
 }

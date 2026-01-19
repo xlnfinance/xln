@@ -4,6 +4,7 @@
  */
 
 import { safeStringify } from './serialization-utils';
+import { isLeftEntity } from './entity-id-utils';
 
 async function verifyScenario(jsonPath: string, scenarioName: string) {
   console.log(`\n🔍 DEEP VERIFICATION: ${scenarioName}`);
@@ -40,7 +41,7 @@ async function verifyScenario(jsonPath: string, scenarioName: string) {
     // Sum collateral (only count once per bilateral account - left entity only)
     if (state.accounts) {
       for (const [counterpartyId, account] of Object.entries(state.accounts as any)) {
-        if (state.entityId < counterpartyId) { // Only count from left side
+        if (isLeftEntity(state.entityId, counterpartyId)) { // Only count from left side
           if (account.deltas) {
             for (const [, delta] of Object.entries(account.deltas as any)) {
               totalCollateral += parseBigInt((delta as any).collateral);

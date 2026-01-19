@@ -17,19 +17,22 @@
 
 import type { Env } from '../types';
 import { ensureBrowserVM, createJReplica } from './boot';
-import { findReplica, assert, processWithOffline, convergeWithOffline } from './helpers';
+import { findReplica, assert, processWithOffline, convergeWithOffline, enableStrictScenario } from './helpers';
 
 const USDC = 1;
 const ONE = 10n ** 18n;
 const usd = (amount: number | bigint) => BigInt(amount) * ONE;
 
 export async function multiSig(env: Env): Promise<void> {
+  const restoreStrict = enableStrictScenario(env, 'Multi-Sig');
+  try {
   const { clearSignerKeys, registerSeededKeys } = await import('../account-crypto');
   const runtimeSeed = process.env.RUNTIME_SEED || 'xln-runtime-seed';
   const offlineSigners = new Set<string>();
 
   clearSignerKeys();
   await registerSeededKeys(runtimeSeed, ['s1', 's2', 's3', 'hub', 't1', 't2', 't3']);
+  env.runtimeSeed = runtimeSeed; // CRITICAL: Store seed in env for pure crypto functions
 
   const { applyRuntimeInput } = await import('../runtime');
 
@@ -45,7 +48,7 @@ export async function multiSig(env: Env): Promise<void> {
   // SETUP: BrowserVM
   // ============================================================================
   console.log('🏛️  Setting up BrowserVM...');
-  const browserVM = await ensureBrowserVM();
+  const browserVM = await ensureBrowserVM(env);
   const depositoryAddress = browserVM.getDepositoryAddress();
   createJReplica(env, 'MultiSig', depositoryAddress, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
   console.log('✅ BrowserVM ready\n');
@@ -217,6 +220,30 @@ export async function multiSig(env: Env): Promise<void> {
   console.log('   ✅ Proposer alone cannot commit (1/2 threshold not met)');
   console.log('   ✅ Threshold enforcement verified\\n');
 
+  // Cleanup negative-test entity to avoid dangling proposals/pending work.
+  for (const key of Array.from(env.eReplicas.keys())) {
+    if (key.startsWith(testEntity.id + ':')) {
+      env.eReplicas.delete(key);
+    }
+  }
+  if (env.pendingOutputs) {
+    env.pendingOutputs = env.pendingOutputs.filter(output => output.entityId !== testEntity.id);
+  }
+  if (env.pendingNetworkOutputs) {
+    env.pendingNetworkOutputs = env.pendingNetworkOutputs.filter(output => output.entityId !== testEntity.id);
+  }
+  if (env.networkInbox) {
+    env.networkInbox = env.networkInbox.filter(output => output.entityId !== testEntity.id);
+  }
+  if (env.runtimeInput?.entityInputs) {
+    env.runtimeInput.entityInputs = env.runtimeInput.entityInputs.filter(input => input.entityId !== testEntity.id);
+  }
+  for (const [, replica] of env.eReplicas) {
+    if (replica.state.accounts.has(testEntity.id)) {
+      replica.state.accounts.delete(testEntity.id);
+    }
+  }
+
   // ============================================================================
   // TEST 1: Byzantine tolerance (s3 offline, s1+s2 reach threshold on Alice entity)
   // ============================================================================
@@ -229,13 +256,13 @@ export async function multiSig(env: Env): Promise<void> {
   env.info('network', 'OFFLINE_SIGNER', { signerId: 's3', reason: 'byzantine test' }, alice.id);
   console.log('   s3 input delivery disabled\\n');
 
-  console.log('💼 s1 proposes: openAccount with testEntity (2-of-3, s3 offline)');
+  console.log('💼 s1 proposes: extendCredit to Hub (2-of-3, s3 offline)');
   const heightBeforeOffline = (await findReplica(env, alice.id))[1].state.height;
 
   await processWithOffline(env, [{
     entityId: alice.id,
     signerId: 's1',
-    entityTxs: [{ type: 'openAccount', data: { targetEntityId: testEntity.id }}],
+    entityTxs: [{ type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC, amount: usd(10_000) } }],
   }], offlineSigners);
 
   // Converge - only s1 and s2 available
@@ -421,6 +448,9 @@ export async function multiSig(env: Env): Promise<void> {
   console.log('   Byzantine tolerance (s3 offline): ✅');
   console.log('   Bilateral consensus with multi-sig: ✅');
   console.log('═══════════════════════════════════════════════════════════════\n');
+  } finally {
+    restoreStrict();
+  }
 }
 
 if (import.meta.main) {

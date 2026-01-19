@@ -7,8 +7,13 @@
 // High-level database using Level polyfill (works in both Node.js and browser)
 import { Level } from 'level';
 
+// Bump this when you need to confirm the browser picked up a new runtime bundle.
+const RUNTIME_BUILD_ID = '2025-02-16-22:50Z';
+console.log(`🚀 RUNTIME.JS BUILD: ${RUNTIME_BUILD_ID}`);
+
 import { getPerfMs, getWallClockMs } from './time';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
+import { isLeftEntity } from './entity-id-utils';
 import {
   createLazyEntity,
   createNumberedEntity,
@@ -42,7 +47,7 @@ import {
 } from './evm';
 import { createGossipLayer } from './gossip';
 import { attachEventEmitters } from './env-events';
-import { deriveSignerAddressSync, deriveSignerKeySync, getSignerPublicKey, registerSignerKey, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, getSignerPrivateKey, getSignerPublicKey, registerSignerKey, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
 import { buildEntityProfile } from './gossip-helper';
 import { RuntimeP2P, type P2PConfig } from './p2p';
 import {
@@ -478,7 +483,7 @@ export const getP2P = (): RuntimeP2P | null => p2pOverlay;
  */
 export const initEnv = (): Env => {
   if (!env) {
-    env = createEmptyEnv();
+    env = createEmptyEnv(runtimeSeed);
     if (env.runtimeSeed) {
       setCryptoRuntimeSeed(env.runtimeSeed);
     }
@@ -522,7 +527,7 @@ export const processJBlockEvents = async (): Promise<void> => {
 const startJEventWatcher = async (env: Env): Promise<void> => {
   // BrowserVM is the default - it handles events synchronously via processJBlockEvents()
   // External RPC watcher is disabled until we support remote jurisdictions
-  const browserVM = getBrowserVMInstance();
+  const browserVM = getBrowserVMInstance(env);
   if (browserVM) {
     console.log('🔭 J-WATCHER: Using BrowserVM (external RPC not needed)');
     return;
@@ -671,6 +676,10 @@ const applyRuntimeInput = async (
             env, // Pass env so grid entities get added to runtime
           });
 
+          if (xlnomy.evmType === 'browservm' && xlnomy.contracts?.depositoryAddress) {
+            setBrowserVMJurisdiction(xlnomy.contracts.depositoryAddress, xlnomy.evm);
+          }
+
           // Initialize jReplicas Map if it doesn't exist
           if (!env.jReplicas) {
             env.jReplicas = new Map();
@@ -757,6 +766,7 @@ const applyRuntimeInput = async (
             // 📖 Aggregated books (E-Machine view of A-Machine positions)
             swapBook: new Map(),
             lockBook: new Map(),
+            pendingSwapFillRatios: new Map(),
           },
         };
 
@@ -777,6 +787,26 @@ const applyRuntimeInput = async (
 
         env.eReplicas.set(replicaKey, replica);
 
+        const browserVM = getBrowserVMInstance(env);
+        if (browserVM) {
+          const validators = runtimeTx.data.config.validators;
+          const threshold = runtimeTx.data.config.threshold;
+          if (validators.length === 1 && threshold === 1n) {
+            const signerId = validators[0];
+            try {
+              const privateKey = getSignerPrivateKey(env, signerId);
+              const privateKeyHex = `0x${Array.from(privateKey).map(b => b.toString(16).padStart(2, '0')).join('')}`;
+              if (typeof browserVM.registerEntityWallet === 'function') {
+                browserVM.registerEntityWallet(runtimeTx.entityId, privateKeyHex);
+              } else {
+                console.warn(`⚠️ BrowserVM missing registerEntityWallet - skipping wallet registration for ${runtimeTx.entityId.slice(0, 10)}...`);
+              }
+            } catch (error) {
+              console.warn(`⚠️ Cannot derive private key for signer ${signerId} (no env.runtimeSeed), skipping BrowserVM wallet registration`);
+            }
+          }
+        }
+
         // Ensure entity-level signing key exists for this runtime (needed for gossip public key)
         if (runtimeSeed) {
           try {
@@ -795,7 +825,7 @@ const applyRuntimeInput = async (
 
         // Broadcast initial profile to gossip layer
         if (env.gossip && createdReplica) {
-          const entityPublicKey = getSignerPublicKey(runtimeTx.entityId);
+          const entityPublicKey = getSignerPublicKey(env, runtimeTx.entityId);
           const publicKeyHex = entityPublicKey ? `0x${Buffer.from(entityPublicKey).toString('hex')}` : undefined;
           const profile = buildEntityProfile(createdReplica.state, undefined, env.timestamp);
           profile.runtimeId = env.runtimeId;
@@ -964,7 +994,7 @@ const applyRuntimeInput = async (
 
       // CRITICAL: Update JReplica stateRoots from BrowserVM BEFORE snapshot
       // Without this, time-travel shows stale EVM state from xlnomy creation
-      const browserVM = getBrowserVMInstance();
+      const browserVM = getBrowserVMInstance(env);
       if (browserVM?.captureStateRoot && env.jReplicas) {
         try {
           const freshStateRoot = await browserVM.captureStateRoot();
@@ -1085,7 +1115,7 @@ const applyRuntimeInput = async (
 
 // This is the new, robust main function that replaces the old one.
 const main = async (): Promise<Env> => {
-  console.log('🚀 RUNTIME.JS VERSION: 2025-10-05-16:45 - GRID POSITIONS + ACTIVITY HIGHLIGHTS');
+  console.log(`🚀 RUNTIME.JS VERSION: ${RUNTIME_BUILD_ID}`);
 
   // Open database before any operations
   const dbReady = await tryOpenDb();
@@ -1115,7 +1145,7 @@ const main = async (): Promise<Env> => {
   await loadPersistedProfiles(db, gossipLayer);
 
   // First, create default environment with gossip layer and event emitters
-  env = createEmptyEnv();
+  env = createEmptyEnv(runtimeSeed);
   env.gossip = gossipLayer; // Override default gossip with persisted profiles
 
   // Try to load saved state from database
@@ -1142,6 +1172,7 @@ const main = async (): Promise<Env> => {
       try {
         const buffer = await db.get(Buffer.from(`snapshot:${i}`));
         const snapshot = decode(buffer);
+        normalizeSnapshotInPlace(snapshot);
         snapshots.push(snapshot);
         console.log(`📦 Snapshot ${i}: loaded ${buffer.length} bytes`);
       } catch (error) {
@@ -1179,38 +1210,21 @@ const main = async (): Promise<Env> => {
       // CRITICAL: Convert eReplicas to proper Map if needed (handle deserialization from DB)
       let eReplicasMap: Map<string, EntityReplica>;
       try {
-        if (latestSnapshot.eReplicas instanceof Map) {
-          eReplicasMap = latestSnapshot.eReplicas;
-        } else if (latestSnapshot.eReplicas && typeof latestSnapshot.eReplicas === 'object') {
-          // Deserialized from DB - convert object to Map
-          eReplicasMap = new Map(Object.entries(latestSnapshot.eReplicas));
-        } else {
-          console.warn('⚠️ Invalid eReplicas format in snapshot, using fresh environment');
-          throw new Error('LEVEL_NOT_FOUND');
-        }
+        eReplicasMap = normalizeReplicaMap(latestSnapshot.eReplicas);
       } catch (conversionError) {
         logError("RUNTIME_TICK", '❌ Failed to convert eReplicas to Map:', conversionError);
         console.warn('⚠️ Falling back to fresh environment');
         throw new Error('LEVEL_NOT_FOUND');
       }
 
-      // Convert jReplicas array to Map
-      const jReplicasMap = new Map<string, JReplica>();
-      if (latestSnapshot.jReplicas) {
-        for (const jr of latestSnapshot.jReplicas) {
-          jReplicasMap.set(jr.name, {
-            ...jr,
-            stateRoot: new Uint8Array(jr.stateRoot), // Ensure proper Uint8Array
-          });
-        }
-      }
+      const jReplicasMap = normalizeJReplicaMap(latestSnapshot.jReplicas);
 
       // Create env with proper event emitters, then populate from snapshot
-      env = createEmptyEnv();
-      if (latestSnapshot.runtimeSeed) {
-        runtimeSeed = latestSnapshot.runtimeSeed;
+      const snapshotSeed = latestSnapshot.runtimeSeed || null;
+      env = createEmptyEnv(snapshotSeed);
+      if (snapshotSeed) {
+        runtimeSeed = snapshotSeed;
         setCryptoRuntimeSeed(runtimeSeed);
-        env.runtimeSeed = runtimeSeed;
       }
       if (latestSnapshot.runtimeId) {
         runtimeId = latestSnapshot.runtimeId;
@@ -1239,6 +1253,22 @@ const main = async (): Promise<Env> => {
       env.history = snapshots; // Include the loaded history
       env.gossip = gossipLayer; // Use restored gossip layer
       env.frameLogs = [];
+      if (latestSnapshot.browserVMState && isBrowser) {
+        try {
+          const { BrowserEVM } = await import('./evms/browser-evm');
+          const browserEvm = new BrowserEVM();
+          await browserEvm.init();
+          await browserEvm.restoreState(latestSnapshot.browserVMState);
+          env.browserVM = browserEvm.getProvider();
+          setBrowserVMJurisdiction(env, browserEvm.getDepositoryAddress(), browserEvm);
+          if (typeof window !== 'undefined') {
+            (window as any).__xlnBrowserVM = browserEvm;
+          }
+          console.log('✅ BrowserVM restored from persisted state');
+        } catch (error) {
+          console.warn('⚠️ Failed to restore BrowserVM state:', error);
+        }
+      }
       console.log(`✅ History restored. Runtime is at height ${env.height} with ${env.history.length} snapshots.`);
       console.log(`📈 Snapshot details:`, {
         height: env.height,
@@ -1369,7 +1399,7 @@ const calculateSolvency = (snapshot?: Env): Solvency => {
 
     // Sum collateral (left entity only to avoid double-counting)
     for (const [counterpartyId, account] of replica.state.accounts) {
-      if (replica.state.entityId < counterpartyId) {
+      if (isLeftEntity(replica.state.entityId, counterpartyId)) {
         for (const [tokenId, delta] of account.deltas) {
           collateral += delta.collateral;
           const existing = byToken.get(tokenId) || { reserves: 0n, collateral: 0n, total: 0n };
@@ -1625,13 +1655,65 @@ const demoCompleteHanko = async (): Promise<void> => {
 // Global reference to current env for log capturing
 let currentEnvForLogs: Env | null = null;
 
-export const createEmptyEnv = (): Env => {
+const isEntryArray = (value: unknown): value is Array<[unknown, unknown]> =>
+  Array.isArray(value) && value.length > 0 && Array.isArray(value[0]) && value[0].length === 2;
+
+const normalizeReplicaMap = (raw: unknown): Map<string, EntityReplica> => {
+  if (raw instanceof Map) return raw as Map<string, EntityReplica>;
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) return new Map();
+    if (isEntryArray(raw)) return new Map(raw as Array<[string, EntityReplica]>);
+  }
+  if (raw && typeof raw === 'object') {
+    return new Map(Object.entries(raw as Record<string, EntityReplica>));
+  }
+  throw new Error('Invalid eReplicas format in snapshot');
+};
+
+const normalizeJReplicaMap = (raw: unknown): Map<string, JReplica> => {
+  if (raw instanceof Map) return raw as Map<string, JReplica>;
+  if (Array.isArray(raw)) {
+    if (raw.length === 0) return new Map();
+    if (isEntryArray(raw)) {
+      return new Map(raw as Array<[string, JReplica]>);
+    }
+    const first = raw[0] as any;
+    if (first && typeof first === 'object' && typeof first.name === 'string') {
+      return new Map((raw as JReplica[]).map(jr => [jr.name, jr]));
+    }
+  }
+  if (raw && typeof raw === 'object') {
+    return new Map(Object.entries(raw as Record<string, JReplica>));
+  }
+  return new Map();
+};
+
+const normalizeSnapshotInPlace = (snapshot: any): void => {
+  if (!snapshot || typeof snapshot !== 'object') return;
+  if (snapshot.eReplicas) {
+    snapshot.eReplicas = normalizeReplicaMap(snapshot.eReplicas);
+  }
+  if (snapshot.jReplicas) {
+    const jMap = normalizeJReplicaMap(snapshot.jReplicas);
+    snapshot.jReplicas = Array.from(jMap.values()).map(jr => ({
+      ...jr,
+      stateRoot: jr.stateRoot ? new Uint8Array(jr.stateRoot as any) : jr.stateRoot,
+    }));
+  }
+};
+
+export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
+  // Convert seed to proper format
+  const seedBytes = seed !== undefined && seed !== null
+    ? (typeof seed === 'string' ? new TextEncoder().encode(seed) : seed)
+    : null;
+
   const env: Env = {
     eReplicas: new Map(),
     jReplicas: new Map(),
     height: 0,
     timestamp: 0,
-    ...(runtimeSeed ? { runtimeSeed } : {}),
+    ...(seedBytes ? { runtimeSeed: seedBytes } : {}),
     ...(runtimeId ? { runtimeId } : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
@@ -1645,6 +1727,8 @@ export const createEmptyEnv = (): Env => {
     warn: () => {},
     error: () => {},
     emit: () => {},
+    // BrowserVM will be lazily initialized on first use (see evm.ts)
+    browserVM: null,
   };
 
   // Attach event emission methods (EVM-style)
@@ -1797,7 +1881,7 @@ export const process = async (
     } else {
       env.timestamp = getWallClockMs();
     }
-    getBrowserVMInstance()?.setBlockTimestamp?.(env.timestamp);
+    getBrowserVMInstance(env)?.setBlockTimestamp?.(env.timestamp);
 
     if (allInputs.length > 0) {
       console.log(`📥 TICK: Processing ${allInputs.length} inputs for [${allInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
@@ -1864,7 +1948,7 @@ export const process = async (
           // Process each JTx in mempool
           const { broadcastBatch } = await import('./j-batch');
           const { getBrowserVMInstance } = await import('./evm');
-          const browserVM = getBrowserVMInstance();
+          const browserVM = getBrowserVMInstance(env);
 
           if (browserVM?.beginJurisdictionBlock) {
             browserVM.beginJurisdictionBlock(env.timestamp);
@@ -1875,6 +1959,14 @@ export const process = async (
               console.log(`🔨 [J-Machine] Executing batch from ${jTx.entityId.slice(-4)}`);
               console.log(`   Batch size: ${jTx.data.batchSize || 'unknown'}`);
               console.log(`   Batch.reserveToReserve:`, jTx.data.batch.reserveToReserve);
+              let batchSummary: string | undefined;
+              try {
+                const { summarizeBatch } = await import('./j-batch');
+                batchSummary = safeStringify(summarizeBatch(jTx.data.batch));
+                console.log(`   Batch.summary: ${batchSummary}`);
+              } catch {
+                // best-effort debug only
+              }
 
               // Create temporary jBatchState for broadcastBatch call
               const tempJBatchState = {
@@ -1887,11 +1979,13 @@ export const process = async (
 
               // Execute batch on BrowserVM
               const result = await broadcastBatch(
+                env,
                 jTx.entityId,
                 tempJBatchState,
                 null, // jurisdiction not needed for BrowserVM
                 browserVM || undefined,
-                jTx.timestamp ?? env.timestamp
+                jTx.timestamp ?? env.timestamp,
+                jTx.data?.signerId
               );
 
               if (result.success) {
@@ -1899,6 +1993,20 @@ export const process = async (
                 console.log(`   📡 ${result.events?.length || 0} events will route back to entities`);
               } else {
                 console.error(`   ❌ Batch execution failed: ${result.error}`);
+                if (!batchSummary) {
+                  try {
+                    const { summarizeBatch } = await import('./j-batch');
+                    batchSummary = safeStringify(summarizeBatch(jTx.data.batch));
+                    console.error(`   ❌ Failed batch summary: ${batchSummary}`);
+                  } catch {
+                    // best-effort debug only
+                  }
+                } else {
+                  console.error(`   ❌ Failed batch summary: ${batchSummary}`);
+                }
+                if (env.scenarioMode) {
+                  throw new Error(`J-BATCH FAILED: ${result.error || 'unknown error'}`);
+                }
               }
             }
           }
@@ -1909,7 +2017,7 @@ export const process = async (
 
           // Clear mempool immediately after processing (all txs executed)
           const processedCount = mempool.length;
-          const successCount = processedCount; // All succeeded (failures would throw above)
+          const successCount = processedCount; // Failures would throw in scenario mode
           const failCount = 0;
 
           // CRITICAL: Clear mempool immediately (txs already executed)
@@ -1944,6 +2052,20 @@ export const process = async (
 
     // ALWAYS snapshot after tick (full frame chain)
     // env.extra only adds metadata (subtitle, description) - optional
+    let browserVMState: any = undefined;
+    const browserVMStateSource = getBrowserVMInstance(env);
+    if (browserVMStateSource?.serializeState) {
+      try {
+        browserVMState = await browserVMStateSource.serializeState();
+        env.browserVMState = browserVMState;
+      } catch (error) {
+        console.warn('[Runtime] Failed to serialize BrowserVM state:', error);
+        if (env.scenarioMode) {
+          throw error;
+        }
+      }
+    }
+
     const snapshot: any = {
       height: env.height,
       timestamp: env.timestamp,
@@ -1959,6 +2081,7 @@ export const process = async (
       runtimeOutputs: env.pendingOutputs || [],
       frameLogs: env.frameLogs || [],
       title: `Frame ${env.history?.length || 0}`, // Default title
+      ...(browserVMState ? { browserVMState } : {}),
     };
 
     // Add metadata if provided via snap()
@@ -1979,6 +2102,11 @@ export const process = async (
 
     // Auto-persist
     await saveEnvToDB(env);
+
+    if (env.strictScenario) {
+      const { assertRuntimeStateStrict } = await import('./strict-assertions');
+      await assertRuntimeStateStrict(env);
+    }
     return env;
   } finally {
     processing = false;
@@ -1998,15 +2126,33 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
 
     // Save environment snapshot (jReplicas with stateRoot are serializable)
     // CRITICAL: Exclude 'history' to prevent exponential growth (history contains all previous snapshots)
+    const seen = new WeakSet();
     const snapshot = JSON.stringify(env, (k, v) => {
       if (k === 'history') return undefined; // Skip history - it's rebuilt from individual snapshots
-      return typeof v === 'bigint' ? String(v) :
-        v instanceof Uint8Array ? Array.from(v) :
-        v instanceof Map ? Array.from(v.entries()) : v;
+      if (k === 'browserVM') return undefined; // BrowserVM is non-serializable (circular refs)
+      if (k === 'log' || k === 'info' || k === 'warn' || k === 'error' || k === 'emit') return undefined;
+      if (k === 'gossip' && v && typeof v === 'object') {
+        return {
+          profiles: v.profiles instanceof Map ? Array.from(v.profiles.entries()) : v.profiles,
+        };
+      }
+      if (typeof v === 'bigint') return String(v);
+      if (v instanceof Uint8Array) return Array.from(v);
+      if (v instanceof Map) return Array.from(v.entries());
+      if (v instanceof Set) return Array.from(v);
+      if (typeof v === 'function') return undefined;
+      if (v && typeof v === 'object') {
+        if (seen.has(v)) return '[Circular]';
+        seen.add(v);
+      }
+      return v;
     });
     await db.put(Buffer.from(`snapshot:${env.height}`), Buffer.from(snapshot));
   } catch (err) {
     console.error('❌ Failed to save to LevelDB:', err);
+    if (env.scenarioMode) {
+      throw err;
+    }
   }
 };
 
@@ -2027,11 +2173,13 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
       const data = JSON.parse(buffer.toString());
 
       // Hydrate Maps/BigInts
-      const env = createEmptyEnv();
-      env.height = BigInt(data.height || 0);
-      env.timestamp = BigInt(data.timestamp || 0);
+      const env = createEmptyEnv(data.runtimeSeed || null);
+      env.height = Number(data.height || 0);
+      env.timestamp = Number(data.timestamp || 0);
+      if (data.browserVMState) {
+        env.browserVMState = data.browserVMState;
+      }
       if (data.runtimeSeed) {
-        env.runtimeSeed = data.runtimeSeed;
         setCryptoRuntimeSeed(data.runtimeSeed);
       }
       if (data.runtimeId) {
@@ -2044,10 +2192,17 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
         }
       }
       // Support both old (replicas) and new (eReplicas) format
-      env.eReplicas = new Map(data.eReplicas || data.replicas || []);
-      // Load jReplicas if present
-      if (data.jReplicas) {
-        env.jReplicas = new Map(data.jReplicas.map((jr: JReplica) => [jr.name, jr]));
+      env.eReplicas = normalizeReplicaMap(data.eReplicas || data.replicas || []);
+      env.jReplicas = normalizeJReplicaMap(data.jReplicas || []);
+      if (env.jReplicas.size > 0) {
+        for (const [name, jr] of env.jReplicas.entries()) {
+          if ((jr as any).stateRoot) {
+            env.jReplicas.set(name, {
+              ...jr,
+              stateRoot: new Uint8Array((jr as any).stateRoot),
+            });
+          }
+        }
       }
       if (data.gossip?.profiles) {
         env.gossip.profiles = new Map(data.gossip.profiles);
@@ -2058,6 +2213,22 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
     const latestEnv = history[history.length - 1];
     if (latestEnv) {
       latestEnv.history = history;
+      if (latestEnv.browserVMState && isBrowser) {
+        try {
+          const { BrowserEVM } = await import('./evms/browser-evm');
+          const browserEvm = new BrowserEVM();
+          await browserEvm.init();
+          await browserEvm.restoreState(latestEnv.browserVMState);
+          latestEnv.browserVM = browserEvm.getProvider();
+          setBrowserVMJurisdiction(latestEnv, browserEvm.getDepositoryAddress(), browserEvm);
+          if (typeof window !== 'undefined') {
+            (window as any).__xlnBrowserVM = browserEvm;
+          }
+          console.log('✅ BrowserVM restored from loadEnvFromDB');
+        } catch (error) {
+          console.warn('⚠️ Failed to restore BrowserVM state (loadEnvFromDB):', error);
+        }
+      }
     }
 
     return latestEnv;

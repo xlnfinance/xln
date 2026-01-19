@@ -12,7 +12,7 @@
   import { onMount } from 'svelte';
   import type { Writable } from 'svelte/store';
   import { writable, get } from 'svelte/store';
-  import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
+  import { activeVault, vaultOperations, allVaults } from '$lib/stores/vaultStore';
   import { entityPositions, xlnFunctions, xlnInstance, getXLN } from '$lib/stores/xlnStore';
   import { runtimes, activeRuntimeId } from '$lib/stores/runtimeStore';
   import { appStateOperations } from '$lib/stores/appStateStore';
@@ -29,6 +29,8 @@
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
   import BrainVaultView from '$lib/components/Views/BrainVaultView.svelte';
   import WalletView from '$lib/components/Wallet/WalletView.svelte';
+  import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
+  import EntityFormation from '$lib/components/Formation/EntityFormation.svelte';
 
   interface Props {
     isolatedEnv: Writable<any>;
@@ -44,6 +46,8 @@
     isolatedIsLive = writable(true)
   }: Props = $props();
 
+
+
   // Set context for EntityPanel/AccountPanel
   setEntityEnvContext({
     isolatedEnv,
@@ -52,16 +56,19 @@
     isolatedIsLive,
   });
 
-  onMount(() => {
-    vaultOperations.initialize();
+  onMount(async () => {
+    await vaultOperations.initialize();
   });
 
   // Selection state
+  type ViewMode = 'signer' | 'entity' | 'jurisdiction';
+  let viewMode = $state<ViewMode>('signer');
   let selectedEntityId = $state<string | null>(null);
   let selectedSignerId = $state<string | null>(null);
   let selectedAccountId = $state<string | null>(null);
   let selectedJurisdictionName = $state<string | null>(null);
   let isCreatingJMachine = false;
+  let showEntityFormation = $state(false);
   const selfEntityChecked = new Set<string>();
   const selfEntityInFlight = new Set<string>();
 
@@ -215,6 +222,7 @@
 
   async function createJMachineInEnv(env: any): Promise<string | null> {
     if (!env || isCreatingJMachine) return null;
+
     isCreatingJMachine = true;
     try {
       const names = listJMachineNames(env);
@@ -242,7 +250,8 @@
       isolatedEnv.set(env);
       return name;
     } catch (err) {
-      console.warn('[UserModePanel] Failed to create J-Machine:', err);
+      console.error('[createJMachineInEnv] ❌ FULL ERROR:', err);
+      console.error('[createJMachineInEnv] Stack:', (err as Error).stack);
       return null;
     } finally {
       isCreatingJMachine = false;
@@ -252,9 +261,22 @@
   async function ensureSelfEntities() {
     const env = get(isolatedEnv);
     const vault = get(activeVault);
+
     if (!env || !vault?.signers?.length) return;
 
     const names = listJMachineNames(env);
+
+    // Create J-machine if missing
+    if (names.length === 0) {
+      const created = await createJMachineInEnv(env);
+      if (created) {
+        names.push(created);
+      } else {
+        console.error('[ensureSelfEntities] ❌ Failed to create J-machine');
+        return;
+      }
+    }
+
     let jurisdiction = selectedJurisdictionName && names.includes(selectedJurisdictionName)
       ? selectedJurisdictionName
       : env.activeJurisdiction;
@@ -264,6 +286,7 @@
 
     for (const signerEntry of vault.signers) {
       const signerAddress = signerEntry.address;
+
       if (!signerAddress) continue;
       if (selfEntityChecked.has(signerAddress) || selfEntityInFlight.has(signerAddress)) continue;
 
@@ -280,18 +303,26 @@
       try {
         const entityId = await createNumberedSelfEntity(env, signerAddress, jurisdiction || undefined);
         if (entityId) {
+          console.log(`[ensureSelfEntities] ✅ Entity created: ${entityId.slice(0, 10)} for signer ${signerAddress.slice(0, 10)}`);
           vaultOperations.setSignerEntity(signerEntry.index, entityId);
           isolatedEnv.set(env);
           selfEntityChecked.add(signerAddress);
+        } else {
+          console.error('[ensureSelfEntities] ❌ NULL entityId for signer:', signerAddress.slice(0, 10));
         }
+      } catch (err) {
+        console.error('[ensureSelfEntities] ❌ ERROR:', err);
       } finally {
         selfEntityInFlight.delete(signerAddress);
       }
     }
   }
 
+  // Trigger entity creation when env becomes available OR vault changes
   $effect(() => {
-    void ensureSelfEntities();
+    if (!!$isolatedEnv && !!$activeVault) {
+      void ensureSelfEntities();
+    }
   });
 
   const signerNetworkEnabled = $derived.by(() => {
@@ -314,28 +345,63 @@
     isActive: true,
   });
 
+  function handleSignerSelect(event: CustomEvent<{ signerId: string }>) {
+    viewMode = 'signer';
+    selectedEntityId = null;
+    selectedSignerId = null;
+    selectedAccountId = null;
+  }
+
   // Handle entity selection from dropdown
   function handleEntitySelect(event: CustomEvent<{ jurisdiction: string; signerId: string; entityId: string }>) {
     const { signerId, entityId } = event.detail;
+    viewMode = 'entity';
     selectedEntityId = entityId;
     selectedSignerId = signerId;
     selectedAccountId = null; // Reset account when entity changes
-    console.log('[UserModePanel] Entity selected:', entityId.slice(0, 10), signerId.slice(0, 10));
   }
 
   // Handle account selection from dropdown
   function handleAccountSelect(event: CustomEvent<{ accountId: string | null }>) {
     selectedAccountId = event.detail.accountId;
-    console.log('[UserModePanel] Account selected:', selectedAccountId?.slice(0, 10));
   }
 
   function handleJurisdictionSelect(event: CustomEvent<{ name: string }>) {
+    viewMode = 'jurisdiction';
     selectedJurisdictionName = event.detail.name;
     selectedAccountId = null;
   }
 
   async function handleAddRuntime() {
     vaultUiOperations.requestDeriveNewVault();
+  }
+
+  async function handleAddSigner() {
+    const newSigner = vaultOperations.addSigner();
+    if (!newSigner) {
+      console.error('[UserModePanel] ❌ Failed to add signer (no active vault)');
+    }
+  }
+
+  async function handleRemoveRuntime(event: CustomEvent<{ runtimeId: string }>) {
+    const runtimeId = event.detail.runtimeId;
+    const runtime = get(allVaults).find(v => v.id === runtimeId);
+    const runtimeLabel = runtime?.label || runtimeId;
+
+    if (!confirm(`Delete "${runtimeLabel}"? This will remove all entities and data.`)) {
+      return;
+    }
+
+    // Delete runtime
+    vaultOperations.deleteRuntime(runtimeId);
+
+    // Delete runtime from runtimeStore
+    runtimes.update(r => {
+      r.delete(runtimeId);
+      return r;
+    });
+
+    console.log('[UserModePanel] ✅ Runtime deleted:', runtimeId);
   }
 
   function focusDockPanel(panelId: string) {
@@ -353,7 +419,11 @@
   }
 
   function handleAddEntity() {
-    focusDockPanel('architect');
+    showEntityFormation = true;
+  }
+
+  function handleEntityFormationClose() {
+    showEntityFormation = false;
   }
 
   function handleAddAccount() {
@@ -383,7 +453,9 @@
         <RuntimeDropdown
           allowAdd={true}
           addLabel="+ Add Runtime"
+          allowDelete={$runtimes.size > 1}
           on:addRuntime={handleAddRuntime}
+          on:deleteRuntime={handleRemoveRuntime}
         />
       </div>
       <div class="rjea-slot entity-slot">
@@ -391,6 +463,8 @@
           tab={entityTab}
           jurisdictionFilter={selectedJurisdictionName}
           selectedJurisdiction={selectedJurisdictionName}
+          on:signerSelect={handleSignerSelect}
+          on:addSigner={handleAddSigner}
           on:entitySelect={handleEntitySelect}
           on:jurisdictionSelect={handleJurisdictionSelect}
           allowAddJurisdiction={true}
@@ -399,15 +473,17 @@
           on:addEntity={handleAddEntity}
         />
       </div>
-      <div class="rjea-slot account-slot">
-        <AccountDropdown
-          replica={selectedReplica}
-          {selectedAccountId}
-          on:accountSelect={handleAccountSelect}
-          allowAdd={true}
-          on:addAccount={handleAddAccount}
-        />
-      </div>
+      {#if viewMode === 'entity'}
+        <div class="rjea-slot account-slot">
+          <AccountDropdown
+            replica={selectedReplica}
+            {selectedAccountId}
+            on:accountSelect={handleAccountSelect}
+            allowAdd={true}
+            on:addAccount={handleAddAccount}
+          />
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -415,43 +491,41 @@
   <main class="panel-content">
     {#if showVaultPanelVisible}
       <BrainVaultView embedded={true} />
-    {:else}
-      <section class="wallet-section signer-wallet">
-        <div class="section-header">
-          <div class="section-title">Signer Wallet</div>
-          <code class="section-address">
-            {signerWalletAddress ? signerWalletAddress : 'No signer'}
-          </code>
-        </div>
-        <WalletView
-          privateKey={signerWalletPrivateKey || ''}
-          walletAddress={signerWalletAddress}
-          entityId={selectedEntityId || ''}
-          identiconSrc={signerWalletIdenticon}
-          networkEnabled={signerNetworkEnabled}
+    {:else if viewMode === 'signer'}
+      <WalletView
+        privateKey={signerWalletPrivateKey || ''}
+        walletAddress={signerWalletAddress}
+        entityId={selectedEntityId || ''}
+        identiconSrc={signerWalletIdenticon}
+        networkEnabled={signerNetworkEnabled}
+      />
+    {:else if viewMode === 'entity' && selectedEntityId && selectedReplica}
+      {#if selectedAccountId && selectedAccount}
+        <AccountPanel
+          account={selectedAccount}
+          entityId={selectedEntityId}
+          counterpartyId={selectedAccountId}
         />
-      </section>
-      {#if selectedEntityId && selectedReplica}
-        <section class="wallet-section entity-wallet">
-          <div class="section-header">
-            <div class="section-title">Entity Wallet</div>
-            <code class="section-address">
-              {selectedEntityId}
-            </code>
-          </div>
-          {#if selectedAccountId && selectedAccount}
-            <AccountPanel
-              account={selectedAccount}
-              entityId={selectedEntityId}
-              counterpartyId={selectedAccountId}
-            />
-          {:else}
-            <EntityPanel tab={entityTab} isLast={true} hideHeader={true} />
-          {/if}
-        </section>
+      {:else}
+        <EntityPanel tab={entityTab} isLast={true} hideHeader={true} />
       {/if}
+    {:else if viewMode === 'jurisdiction'}
+      <JurisdictionPanel
+        {isolatedEnv}
+        {isolatedHistory}
+        {isolatedTimeIndex}
+      />
     {/if}
   </main>
+
+  <!-- EntityFormation Modal -->
+  {#if showEntityFormation}
+    <div class="modal-overlay" on:click={handleEntityFormationClose}>
+      <div class="modal-container" on:click|stopPropagation>
+        <EntityFormation on:close={handleEntityFormationClose} />
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -473,7 +547,7 @@
     position: relative;
     z-index: 100;
     flex-wrap: nowrap;
-    overflow-x: auto;
+    overflow: hidden;
   }
 
   .rjea-primary {
@@ -581,6 +655,31 @@
 
   .action-btn:hover {
     background: #388bfd;
+  }
+
+  /* EntityFormation Modal */
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+  }
+
+  .modal-container {
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow: auto;
+    background: #1e1e1e;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
   }
 
   /* Mobile responsive */

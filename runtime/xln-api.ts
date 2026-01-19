@@ -89,12 +89,21 @@ export type BrowserVMInstance = {
   getTokenId: (symbol: string) => number | null;
   getErc20Balance: (tokenAddress: string, owner: string) => Promise<bigint>;
   getEthBalance: (owner: string) => Promise<bigint>;
+  getErc20Allowance?: (tokenAddress: string, owner: string, spender: string) => Promise<bigint>;
   fundSignerWallet: (address: string, amount?: bigint) => Promise<void>;
+  approveErc20?: (privKey: Uint8Array, tokenAddress: string, spender: string, amount: bigint) => Promise<string>;
+  transferErc20?: (privKey: Uint8Array, tokenAddress: string, to: string, amount: bigint) => Promise<string>;
+  externalTokenToReserve?: (privKey: Uint8Array, entityId: string, tokenAddress: string, amount: bigint) => Promise<any>;
+  registerEntityWallet?: (entityId: string, privateKey: string) => void;
   getAccountInfo?: (entityId: string, counterpartyId: string) => Promise<{ cooperativeNonce: bigint; disputeHash: string; disputeTimeout: bigint }>;
   setDefaultDisputeDelay?: (delayBlocks: number) => Promise<void>;
   setBlockTimestamp?: (timestamp: number) => void;
   beginJurisdictionBlock?: (timestamp: number) => void;
   endJurisdictionBlock?: () => void;
+  getChainId?: () => bigint;
+  getEntityNonce?: (entityId: string) => Promise<bigint>;
+  getDepositoryAddress?: () => string;
+  getEntityProviderAddress?: () => string;
 };
 
 export type P2PConfig = {
@@ -241,7 +250,7 @@ export interface XLNModule {
   // runDemo: REMOVED - use scenarios.ahb(env) or scenarios.grid(env) instead
 
   // Environment creation
-  createEmptyEnv: () => Env;
+  createEmptyEnv: (seed?: Uint8Array | string | null) => Env;
   setRuntimeSeed: (seed: string | null) => void;
   setRuntimeId: (id: string | null) => void;
 
@@ -265,9 +274,17 @@ export interface XLNModule {
   loadEnvFromDB: () => Promise<Env | null>;
 
   // Blockchain operations
-  submitSettle: (jurisdiction: JurisdictionConfig, leftEntity: string, rightEntity: string, diffs: SettlementDiff[]) => Promise<{ txHash: string }>;
+  submitSettle: (
+    jurisdiction: JurisdictionConfig,
+    leftEntity: string,
+    rightEntity: string,
+    diffs: SettlementDiff[],
+    forgiveDebtsInTokenIds?: number[],
+    insuranceRegs?: Array<{ insured: string; insurer: string; tokenId: number; limit: bigint; expiresAt: bigint }>,
+    sig?: string
+  ) => Promise<{ txHash: string }>;
   submitReserveToReserve: (jurisdiction: JurisdictionConfig, fromEntity: string, toEntity: string, tokenId: number, amount: string) => Promise<{ txHash: string }>;
-  submitProcessBatch: (env: Env, jId: string) => Promise<Env>;
+  submitProcessBatch: (jurisdiction: JurisdictionConfig, entityId: string, batch: unknown, signerId?: string) => Promise<{ transaction: unknown; receipt: unknown }>;
   submitPrefundAccount: (env: Env, entityId: string, tokenAddress: string, amount: bigint) => Promise<Env>;
   debugFundReserves: (env: Env, entityId: string, tokenAddress: string, amount: bigint) => Promise<Env>;
 
@@ -293,8 +310,8 @@ export interface XLNModule {
   // Blockchain registration
   registerNumberedEntityOnChain: (env: Env, entityId: string) => Promise<Env>;
   connectToEthereum: () => Promise<void>;
-  setBrowserVMJurisdiction: (jId: string) => Promise<void>;
-  getBrowserVMInstance: () => BrowserVMInstance | null;
+  setBrowserVMJurisdiction: (env: Env, depositoryAddress: string, browserVMInstance?: any) => void;
+  getBrowserVMInstance: (env?: Env) => BrowserVMInstance | null;
 
   // Demo utilities
   demoCompleteHanko: (env: Env) => Promise<Env>;

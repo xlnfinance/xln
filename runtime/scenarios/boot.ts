@@ -8,16 +8,18 @@ import type { Env, JurisdictionConfig } from '../types';
 /**
  * Create or get BrowserVM instance
  */
-export async function ensureBrowserVM() {
+export async function ensureBrowserVM(env: any) {
   const { getBrowserVMInstance, setBrowserVMJurisdiction } = await import('../evm');
-  let browserVM = getBrowserVMInstance();
+  let browserVM = getBrowserVMInstance(env);
 
   if (!browserVM) {
     const { BrowserEVM } = await import('../evms/browser-evm');
-    browserVM = new BrowserEVM();
-    await browserVM.init();
-    const depositoryAddress = browserVM.getDepositoryAddress();
-    setBrowserVMJurisdiction(depositoryAddress, browserVM);
+    const evm = new BrowserEVM();
+    await evm.init();
+    env.browserVM = evm.getProvider(); // Store in env for isolation
+    const depositoryAddress = evm.getDepositoryAddress();
+    setBrowserVMJurisdiction(env, depositoryAddress, evm);
+    browserVM = evm.getProvider();
   }
 
   return browserVM;

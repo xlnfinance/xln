@@ -344,14 +344,14 @@ describe("Depository", function () {
         ]
       })
 
-      const encodeArgs = (args: any) => coder.encode(["bytes[]"], [
-        [coder.encode(["uint[]"], args)]
+      const encodeArgs = (fillRatios: any, secrets: any = []) => coder.encode(["bytes[]"], [
+        [coder.encode(["uint32[]", "bytes32[]"], [fillRatios, secrets])]
       ]);
 
-      const maxUint32: bigint = 0xFFFFFFFFn;
+      const maxUint16: bigint = 0xFFFFn;
 
-      const initialArguments = encodeArgs([ [maxUint32/5n] ]);
-      const finalArguments = encodeArgs([ [maxUint32/2n+1n] ]);
+      const initialArguments = encodeArgs([ maxUint16/5n ]);
+      const finalArguments = encodeArgs([ maxUint16/2n+1n ]);
 
       const proofABI = Depository__factory.abi
       .find(entry => entry.name === "processBatch").inputs[0].components

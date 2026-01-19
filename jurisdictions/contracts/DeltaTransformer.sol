@@ -25,7 +25,7 @@ Subcontracts - Programmable Delta Transformers
   */
 contract DeltaTransformer is Console {
   mapping(bytes32 => uint) public hashToBlock;
-  uint MAXUINT32 = type(uint32).max;
+  uint MAX_FILL_RATIO = type(uint16).max;
 
   constructor() {
     revealSecret(bytes32(0));
@@ -79,48 +79,83 @@ contract DeltaTransformer is Console {
 
     Batch memory decodedBatch = abi.decode(encodedBatch, (Batch));
 
-    uint[] memory lArgs = abi.decode(leftArguments, (uint[]));
-    uint[] memory rArgs = abi.decode(rightArguments, (uint[]));
+    uint32[] memory lFillRatios;
+    uint32[] memory rFillRatios;
+    bytes32[] memory lSecrets;
+    bytes32[] memory rSecrets;
+    if (leftArguments.length > 0) {
+      (lFillRatios, lSecrets) = abi.decode(leftArguments, (uint32[], bytes32[]));
+    } else {
+      lFillRatios = new uint32[](0);
+      lSecrets = new bytes32[](0);
+    }
+    if (rightArguments.length > 0) {
+      (rFillRatios, rSecrets) = abi.decode(rightArguments, (uint32[], bytes32[]));
+    } else {
+      rFillRatios = new uint32[](0);
+      rSecrets = new bytes32[](0);
+    }
     
     for (uint i = 0; i < decodedBatch.payment.length; i++) {
-      applyPayment(deltas, decodedBatch.payment[i]);
+      applyPayment(deltas, decodedBatch.payment[i], lSecrets, rSecrets);
     }
 
     uint leftSwaps = 0;
+    uint rightSwaps = 0;
     for (uint i = 0; i < decodedBatch.swap.length; i++) {
       Swap memory swap = decodedBatch.swap[i];
 
-      uint32 fillRatio = uint32(swap.ownerIsLeft ? lArgs[leftSwaps] : rArgs[i  - leftSwaps]);
+      // Counterparty chooses fill ratio (maker doesn't).
+      // Left-owned swap -> use right arguments; Right-owned swap -> use left arguments.
+      uint32 fillRatio = 0;
+      if (swap.ownerIsLeft) {
+        if (rightSwaps < rFillRatios.length) fillRatio = rFillRatios[rightSwaps];
+        rightSwaps++;
+      } else {
+        if (leftSwaps < lFillRatios.length) fillRatio = lFillRatios[leftSwaps];
+        leftSwaps++;
+      }
 
       applySwap(deltas, swap, fillRatio);
       //logDeltas("Deltas after swap", deltas);
-
-      if (swap.ownerIsLeft) {
-        leftSwaps++;
-      }
     }
 
     return deltas;
   }
 
-  function applyPayment(int[] memory deltas, Payment memory payment) private {
-    // apply amount to delta if revealed on time
-    // this is "sprites" approach (https://arxiv.org/pdf/1702.05812) 
-    // the opposite is "blitz" (https://www.usenix.org/system/files/sec21fall-aumayr.pdf)
+  function applyPayment(int[] memory deltas, Payment memory payment, bytes32[] memory lSecrets, bytes32[] memory rSecrets) private {
+    // Apply amount to delta if revealed on time.
+    // Primary: calldata secrets (no storage). Fallback: on-chain registry (hashToBlock).
     uint revealedAt = hashToBlock[payment.hash];
-    if (revealedAt == 0 || revealedAt > payment.revealedUntilBlock) {
-      return;
+    bool revealed = false;
+    if (revealedAt != 0 && revealedAt <= payment.revealedUntilBlock) {
+      revealed = true;
     }
+    if (!revealed && block.number <= payment.revealedUntilBlock) {
+      if (matchesSecret(payment.hash, lSecrets) || matchesSecret(payment.hash, rSecrets)) {
+        revealed = true;
+      }
+    }
+    if (!revealed) return;
 
     logDeltas("Before payment", deltas);
     deltas[payment.deltaIndex] += payment.amount;
     logDeltas("After payment", deltas);
   }
 
+  function matchesSecret(bytes32 hashlock, bytes32[] memory secrets) private pure returns (bool) {
+    for (uint i = 0; i < secrets.length; i++) {
+      if (keccak256(abi.encode(secrets[i])) == hashlock) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   function applySwap(int[] memory deltas, Swap memory swap, uint32 fillRatio) private {
     logDeltas("Before swap", deltas);
-    deltas[swap.addDeltaIndex] += int(swap.addAmount * fillRatio / MAXUINT32);
-    deltas[swap.subDeltaIndex] -= int(swap.subAmount * fillRatio / MAXUINT32);
+    deltas[swap.addDeltaIndex] += int(swap.addAmount * fillRatio / MAX_FILL_RATIO);
+    deltas[swap.subDeltaIndex] -= int(swap.subAmount * fillRatio / MAX_FILL_RATIO);
     logDeltas("After swap", deltas);
   }
 

@@ -45,6 +45,24 @@ export const LOG_CONFIG: LogConfig = {
   ACCOUNT_STATE: PERFORMANCE.DEBUG_ACCOUNTS,     // Account state changes
 };
 
+let FAIL_FAST_ERRORS = false;
+
+export function setFailFastErrors(enabled: boolean): void {
+  FAIL_FAST_ERRORS = enabled;
+}
+
+function formatLogArgs(args: unknown[]): string {
+  return args.map(arg => {
+    if (typeof arg === 'string') return arg;
+    if (typeof arg === 'bigint') return `${arg.toString()}n`;
+    try {
+      return JSON.stringify(arg);
+    } catch {
+      return String(arg);
+    }
+  }).join(' ');
+}
+
 // Helper to check if logging is enabled for a category
 export function shouldLog(category: keyof LogConfig): boolean {
   return LOG_CONFIG[category] ?? false;
@@ -90,6 +108,9 @@ export function logWarn(category: keyof LogConfig, ...args: unknown[]): void {
 
 export function logError(category: keyof LogConfig, ...args: unknown[]): void {
   log(category, 'error', ...args);
+  if (FAIL_FAST_ERRORS) {
+    throw new Error(`[FAIL_FAST] ${String(category)}: ${formatLogArgs(args)}`);
+  }
 }
 
 // Debug helper to show current config

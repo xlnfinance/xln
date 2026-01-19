@@ -77,6 +77,27 @@ function formatAddress(addr: string): string {
   return addr.slice(-8);
 }
 
+function formatMaybeAddress(value: unknown): string {
+  if (value === null || value === undefined) return 'N/A';
+  if (typeof value === 'string') {
+    return value.length >= 8 ? value.slice(-8) : value;
+  }
+  if (typeof value === 'bigint') {
+    const hex = value.toString(16);
+    return hex.length >= 8 ? hex.slice(-8) : hex;
+  }
+  if (value instanceof Uint8Array) {
+    const hex = Array.from(value).map((b) => b.toString(16).padStart(2, '0')).join('');
+    return hex.length >= 8 ? hex.slice(-8) : hex;
+  }
+  try {
+    const str = String(value);
+    return str.length >= 8 ? str.slice(-8) : str;
+  } catch {
+    return 'N/A';
+  }
+}
+
 function formatDuration(ms: number): string {
   const abs = Math.abs(ms);
   const seconds = Math.floor(abs / 1000);
@@ -204,11 +225,12 @@ export function formatRuntime(env: Env, options?: FormatOptions): string {
   if (env.jReplicas && env.jReplicas.size > 0) {
     output.push('  J-REPLICAS (Jurisdictions):');
     for (const [jName, jReplica] of env.jReplicas) {
+      const jDepository = jReplica.depositoryAddress || jReplica.contracts?.depository;
       const jInfo = [
         `Name: ${jName}`,
         `Block: ${jReplica.blockNumber} | State Root: ${(jReplica.stateRoot as any).slice?.(0, 16) || 'N/A'}`,
         `Mempool: ${jReplica.mempool?.length || 0} txs | Delay: ${jReplica.blockDelayMs}ms`,
-        `Contracts: Depository=${jReplica.contracts?.depository?.slice(-8) || 'N/A'}`
+        `Contracts: Depository=${formatMaybeAddress(jDepository)}`
       ];
       output.push(drawBox(`J-Replica: ${jName}`, jInfo, 2));
     }

@@ -12,6 +12,7 @@
 import type { Env } from '../types';
 import { getPerfMs } from '../time';
 import { scenarioRegistry, type ScenarioEntry } from './index';
+import { assertRuntimeIdle } from './helpers';
 
 type ScenarioResult = {
   name: string;
@@ -72,6 +73,7 @@ async function runScenario(
   try {
     const run = await scenario.load();
     await run(env);
+    assertRuntimeIdle(env, scenario.name);
     results.push({
       name: scenario.name,
       iteration,

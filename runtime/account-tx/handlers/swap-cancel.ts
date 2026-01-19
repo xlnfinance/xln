@@ -62,12 +62,12 @@ export async function handleSwapCancel(
     console.log(`📊 ${isValidation ? 'VALIDATION' : 'COMMIT'}: Released hold ${offer.giveAmount} for token${offer.giveTokenId}`);
   }
 
-  // 4. Remove offer (only during commit, not validation)
-  if (!isValidation) {
-    accountMachine.swapOffers.delete(offerId);
-    console.log(`📊 COMMIT: Swap offer removed, offerId=${offerId.slice(0,8)}`);
+  // 4. Remove offer (proofBody includes swapOffers, so keep validation+commit aligned)
+  accountMachine.swapOffers.delete(offerId);
+  if (isValidation) {
+    console.log(`📊 VALIDATION: Swap offer removed, offerId=${offerId.slice(0,8)}`);
   } else {
-    console.log(`⏭️ VALIDATION: Skipping swapOffers removal (will commit later)`);
+    console.log(`📊 COMMIT: Swap offer removed, offerId=${offerId.slice(0,8)}`);
   }
 
   // AUDIT FIX (CRITICAL-3): Use counterparty ID format, not canonical pair format

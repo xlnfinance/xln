@@ -18,17 +18,26 @@
  */
 
 import type { Env, EntityInput, JurisdictionConfig } from '../types';
+import { ethers } from 'ethers';
 import { getBestAsk } from '../orderbook/core';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
 import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime, formatEntity } from '../runtime-ascii';
-import { formatRuntime } from '../runtime-ascii';
+import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
+import { enableStrictScenario, processUntil } from './helpers';
 
 // Lazy-loaded runtime functions
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
 
 let _processWithStep: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
+let jWatcherInstance: JEventWatcher | null = null;
+
+const ensureJWatcher = async (env: Env, browserVM: any): Promise<void> => {
+  if (!jWatcherInstance) {
+    jWatcherInstance = await setupBrowserVMWatcher(env, browserVM);
+  }
+};
 
 const getProcess = async () => {
   if (!_process) {
@@ -75,6 +84,15 @@ async function converge(env: Env, maxCycles = 10): Promise<void> {
   }
 }
 
+async function processJEvents(env: Env): Promise<void> {
+  const pending = env.runtimeInput.entityInputs.length;
+  if (pending === 0) return;
+  const inputs = [...env.runtimeInput.entityInputs];
+  env.runtimeInput.entityInputs = [];
+  const applyRuntimeInput = await getApplyRuntimeInput();
+  await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: inputs });
+}
+
 // Token IDs
 const ETH_TOKEN_ID = 1;
 const USDC_TOKEN_ID = 2;
@@ -107,7 +125,7 @@ const usdcForEth = (ethUnits: bigint, price: bigint) => usdc(ethUnits * price);
 const CAROL_SELL_ETH = TRADE_ETH_DOUBLE;
 const CAROL_SELL_2_ETH = TRADE_ETH;
 const DAVE_BUY_ETH = TRADE_ETH_HALF;
-const DAVE_SWEEP_ETH = CAROL_SELL_ETH + CAROL_SELL_2_ETH;
+const DAVE_SWEEP_ETH = CAROL_SELL_ETH + CAROL_SELL_2_ETH - DAVE_BUY_ETH;
 
 const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
 
@@ -132,6 +150,22 @@ const FILL_75 = 49152;
 const FILL_80 = 52428;
 const FULL_FILL = MAX_FILL_RATIO;
 
+const ceilDiv = (numerator: bigint, denominator: bigint): bigint => {
+  if (denominator === 0n) return 0n;
+  return (numerator + denominator - 1n) / denominator;
+};
+
+const computeFilledAmounts = (giveAmount: bigint, wantAmount: bigint, fillRatio: number) => {
+  const filledGive = (giveAmount * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
+  const filledWant = giveAmount > 0n ? ceilDiv(filledGive * wantAmount, giveAmount) : 0n;
+  return { filledGive, filledWant };
+};
+
+const computeFillRatio = (filledLots: bigint, originalLots: bigint): number => {
+  if (originalLots <= 0n) return 0;
+  return Number((filledLots * BigInt(MAX_FILL_RATIO)) / originalLots);
+};
+
 function assert(condition: boolean, message: string, env?: Env): void {
   if (!condition) {
     if (env) {
@@ -144,6 +178,16 @@ function assert(condition: boolean, message: string, env?: Env): void {
     throw new Error(`ASSERTION FAILED: ${message}`);
   }
   console.log(`[OK] ${message}`);
+}
+
+const registeredEntityIds: Record<string, string> = {};
+
+function getRegisteredEntityId(signerId: string): string {
+  const entityId = registeredEntityIds[signerId];
+  if (!entityId) {
+    throw new Error(`Missing registered entityId for signer ${signerId} - run swap() first`);
+  }
+  return entityId;
 }
 
 function assertSnapshotCounts(env: Env, expectedJ: number, expectedE: number, label: string): void {
@@ -167,9 +211,12 @@ function findReplica(env: Env, entityId: string) {
 }
 
 export async function swap(env: Env): Promise<void> {
+  const restoreFailFast = enableStrictScenario(env, 'SWAP');
+  try {
   // Register test keys for real signatures
   const { registerTestKeys } = await import('../account-crypto');
-  await registerTestKeys(['s1', 's2', 's3', 'hub', 'alice', 'bob', 'carol', 'dave', 'frank']);
+  await registerTestKeys(['s1', 's2', 's3', 's4', 's5', 'hub', 'alice', 'bob', 'carol', 'dave', 'frank']);
+  env.runtimeSeed = 'test-seed-deterministic-42';
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
 
@@ -201,20 +248,32 @@ export async function swap(env: Env): Promise<void> {
   }
   env.height = 0; // Reset to frame 0
 
-  const browserVM = await ensureBrowserVM();
+  const browserVM = await ensureBrowserVM(env);
   const depositoryAddress = browserVM.getDepositoryAddress();
   createJReplica(env, 'Swap Demo', depositoryAddress, J_MACHINE_POSITION);
   const jurisdiction = createJurisdictionConfig('Swap Demo', depositoryAddress);
   console.log('✅ BrowserVM J-Machine created\n');
+  await ensureJWatcher(env, browserVM);
 
   // ============================================================================
   // SETUP: Create Alice and Hub entities
   // ============================================================================
   console.log('📦 Creating entities: Alice, Hub...');
 
+  const entityNumbers = await browserVM.registerEntitiesWithSigners(['s1', 's2', 's3', 's4', 's5']);
+  assert(entityNumbers.length >= 5, 'Registered 5 numbered entities');
+  const toEntityId = (num: number) => '0x' + num.toString(16).padStart(64, '0');
+  const signerIds = ['s1', 's2', 's3', 's4', 's5'];
+  signerIds.forEach((signerId, index) => {
+    const num = entityNumbers[index];
+    if (num !== undefined) {
+      registeredEntityIds[signerId] = toEntityId(num);
+    }
+  });
+
   const entities = [
-    { name: 'Alice', id: '0x' + '1'.padStart(64, '0'), signer: 's1' },
-    { name: 'Hub', id: '0x' + '2'.padStart(64, '0'), signer: 's2' },
+    { name: 'Alice', id: getRegisteredEntityId('s1'), signer: 's1' },
+    { name: 'Hub', id: getRegisteredEntityId('s2'), signer: 's2' },
   ];
 
   const createEntityTxs = entities.map(e => ({
@@ -229,6 +288,7 @@ export async function swap(env: Env): Promise<void> {
         threshold: 1n,
         validators: [e.signer],
         shares: { [e.signer]: 1n },
+        jurisdiction,
       },
     },
   }));
@@ -369,9 +429,9 @@ export async function swap(env: Env): Promise<void> {
   const aliceHubAccount2 = aliceRep2.state.accounts.get(hub.id);
   const offer2 = aliceHubAccount2?.swapOffers?.get(offerId1);
 
-  // After 50% fill: ~half remaining
+  // After 50% fill: deterministic remaining based on fillRatio
   const expectedRemaining = eth(TRADE_ETH) - (eth(TRADE_ETH) * BigInt(FILL_50)) / BigInt(MAX_FILL_RATIO);
-  assert(offer2?.giveAmount === expectedRemaining, `Remaining amount ~${TRADE_ETH_HALF} ETH (got ${offer2?.giveAmount})`);
+  assert(offer2?.giveAmount === expectedRemaining, `Remaining amount = ${expectedRemaining} (got ${offer2?.giveAmount})`);
 
   // Check offdelta changes
   const ethDelta2 = aliceHubAccount2?.deltas.get(ETH_TOKEN_ID);
@@ -382,8 +442,9 @@ export async function swap(env: Env): Promise<void> {
   // filledWant is derived from filledGive to preserve exact price ratio
   const giveAmount = eth(TRADE_ETH);
   const wantAmount = usdc(TRADE_USDC_MAIN_UNITS);
-  const filledEth = (giveAmount * BigInt(FILL_50)) / BigInt(MAX_FILL_RATIO);
-  const filledUsdc = (filledEth * wantAmount) / giveAmount; // Derived from filledEth
+  const filled = computeFilledAmounts(giveAmount, wantAmount, FILL_50);
+  const filledEth = filled.filledGive;
+  const filledUsdc = filled.filledWant;
 
   assert(ethDelta2?.offdelta === -filledEth, `ETH offdelta = -${filledEth} (Alice gave)`);
   assert(usdcDelta2?.offdelta === filledUsdc, `USDC offdelta = +${filledUsdc} (Alice received)`);
@@ -423,7 +484,7 @@ export async function swap(env: Env): Promise<void> {
   const ethDelta3 = aliceHubAccount3?.deltas.get(ETH_TOKEN_ID);
   assert(ethDelta3?.leftSwapHold === 0n, 'ETH hold released');
 
-  // Verify final deltas (approximate due to rounding)
+  // Verify final deltas (deterministic)
   assert(ethDelta3?.offdelta === -eth(TRADE_ETH), `Final ETH delta = -${TRADE_ETH} (Alice gave ${TRADE_ETH} ETH total)`);
   const usdcDelta3 = aliceHubAccount3?.deltas.get(USDC_TOKEN_ID);
   assert(usdcDelta3?.offdelta === usdc(TRADE_USDC_MAIN_UNITS), `Final USDC delta = +${TRADE_USDC_MAIN_UNITS} (Alice received ${TRADE_USDC_MAIN_UNITS} USDC)`);
@@ -589,6 +650,9 @@ export async function swap(env: Env): Promise<void> {
   console.log('  4. ✅ swap_cancel removes offer, releases hold');
   console.log('  5. ✅ minFillRatio rejects underfills');
   console.log('\n');
+  } finally {
+    restoreFailFast();
+  }
 }
 
 // ============================================================================
@@ -596,16 +660,20 @@ export async function swap(env: Env): Promise<void> {
 // ============================================================================
 
 export async function swapWithOrderbook(env: Env): Promise<Env> {
+  const restoreFailFast = enableStrictScenario(env, 'SWAP');
+  try {
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
+  const browserVM = env.browserVM || await ensureBrowserVM(env);
+  await ensureJWatcher(env, browserVM);
 
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('             PHASE 2: ORDERBOOK MATCHING (RJEA FLOW)            ');
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   // Reuse Alice & Hub from Phase 1
-  const alice = { id: '0x' + '1'.padStart(64, '0'), signer: 's1' };
-  const hub = { id: '0x' + '2'.padStart(64, '0'), signer: 's2' };
+  const alice = { id: getRegisteredEntityId('s1'), signer: 's1' };
+  const hub = { id: getRegisteredEntityId('s2'), signer: 's2' };
 
   // Initialize hub's orderbook extension (required for RJEA flow)
   const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../orderbook');
@@ -624,6 +692,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
     }],
   }]);
   const [, hubRep] = findReplica(env, hub.id);
+  const jurisdiction = hubRep.state.config.jurisdiction;
   console.log('✅ Hub orderbook extension initialized');
   assert(!!hubRep.state.orderbookExt, 'orderbookExt initialized on hub state');
 
@@ -635,7 +704,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
 
   // Add Bob
   console.log('📦 Adding Bob...');
-  const bob = { id: '0x' + '3'.padStart(64, '0'), signer: 's3' };
+  const bob = { id: getRegisteredEntityId('s3'), signer: 's3' };
 
   await applyRuntimeInput(env, { runtimeTxs: [{
     type: 'importReplica' as const,
@@ -649,6 +718,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
         threshold: 1n,
         validators: [bob.signer],
         shares: { [bob.signer]: 1n },
+        jurisdiction,
       },
     },
   }], entityInputs: [] });
@@ -713,6 +783,16 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   assert(!!aliceOffer, 'Alice offer should exist in Hub bilateral account');
   console.log('  ✅ Alice offer created in bilateral account\n');
 
+  const [, aliceRepBaseline] = findReplica(env, alice.id);
+  const aliceBaselineAccount = aliceRepBaseline.state.accounts.get(hub.id);
+  const aliceBaselineEth = aliceBaselineAccount?.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
+  const aliceBaselineUsdc = aliceBaselineAccount?.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
+
+  const [, bobRepBaseline] = findReplica(env, bob.id);
+  const bobBaselineAccount = bobRepBaseline.state.accounts.get(hub.id);
+  const bobBaselineEth = bobBaselineAccount?.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
+  const bobBaselineUsdc = bobBaselineAccount?.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
+
   // Check hub's orderbook extension state
   const ext = hubRepCheck.state.orderbookExt;
   console.log(`  📊 Hub orderbook state: ${ext?.books?.size || 0} books\n`);
@@ -740,6 +820,15 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   // Hub's entity layer sees swapOffersCreated events, runs processOrderbookSwaps,
   // which adds matching orders to the book, detects trades, and queues swap_resolve txs
   console.log('🔄 Step 3: Waiting for RJEA matching and settlement...');
+  let aliceFillRatio = 0;
+  let bobFillRatio = 0;
+  await processUntil(env, () => {
+    const [, hubRepMatch] = findReplica(env, hub.id);
+    const pending = hubRepMatch.state.pendingSwapFillRatios;
+    aliceFillRatio = pending?.get(`${alice.id}:alice-sell-001`) || 0;
+    bobFillRatio = pending?.get(`${bob.id}:bob-buy-001`) || 0;
+    return aliceFillRatio > 0 && bobFillRatio > 0;
+  }, 20, 'RJEA fill ratios recorded');
   await converge(env);
 
   // Verify the trades occurred via RJEA flow by checking bilateral accounts
@@ -808,32 +897,251 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   // Bob should have traded via RJEA (has non-zero deltas)
   const bobTraded = (bobEth?.offdelta ?? 0n) !== 0n || (bobUsdc?.offdelta ?? 0n) !== 0n;
   assert(bobTraded, 'Bob should have traded via RJEA flow');
+  assert(bobFillRatio === MAX_FILL_RATIO, `Bob fillRatio = ${MAX_FILL_RATIO} (got ${bobFillRatio})`);
+
+  const aliceFilled = computeFilledAmounts(eth(TRADE_ETH), usdc(TRADE_USDC_MAIN_UNITS), aliceFillRatio);
+  const bobFilled = computeFilledAmounts(
+    usdcForEth(TRADE_ETH_HALF, ETH_PRICE_HIGH),
+    eth(TRADE_ETH_HALF),
+    bobFillRatio
+  );
+
+  const aliceEthDelta = (aliceEth?.offdelta ?? 0n) - aliceBaselineEth;
+  const aliceUsdcDelta = (aliceUsdc?.offdelta ?? 0n) - aliceBaselineUsdc;
+  const bobEthDelta = (bobEth?.offdelta ?? 0n) - bobBaselineEth;
+  const bobUsdcDelta = (bobUsdc?.offdelta ?? 0n) - bobBaselineUsdc;
 
   // Bob wanted TRADE_ETH_HALF @ ETH_PRICE_HIGH - should have received ETH, given USDC
   // Bob is Right relative to Hub (Hub = 0x0002..., Bob = 0x0003...)
   // CANONICAL semantics: Right pays → offdelta INCREASES, Right receives → offdelta DECREASES
   // Bob gives USDC → offdelta increases (positive)
   // Bob receives ETH → offdelta decreases (negative)
-  assert((bobEth?.offdelta ?? 0n) < 0n, `Bob should have received ETH (Right receives = negative), got ${bobEth?.offdelta ?? 0n}`);
-  assert((bobUsdc?.offdelta ?? 0n) > 0n, `Bob should have given USDC (Right pays = positive), got ${bobUsdc?.offdelta ?? 0n}`);
+  assert(bobEthDelta === -bobFilled.filledWant, `Bob ETH delta = -${bobFilled.filledWant} (got ${bobEthDelta})`);
+  assert(bobUsdcDelta === bobFilled.filledGive, `Bob USDC delta = +${bobFilled.filledGive} (got ${bobUsdcDelta})`);
+  assert(aliceEthDelta === -aliceFilled.filledGive, `Alice ETH delta = -${aliceFilled.filledGive} (got ${aliceEthDelta})`);
+  assert(aliceUsdcDelta === aliceFilled.filledWant, `Alice USDC delta = +${aliceFilled.filledWant} (got ${aliceUsdcDelta})`);
 
   // Alice's offer should be partially filled (Bob took half of the order)
   // Note: exact amount may vary slightly due to uint16 fillRatio granularity
   const aliceOfferRemaining = aliceAccount?.swapOffers?.get('alice-sell-001');
   if (aliceOfferRemaining) {
-    const remainingEth = Number(aliceOfferRemaining.giveAmount) / 1e18;
-    const expectedRemaining = Number(TRADE_ETH_HALF);
-    assert(remainingEth >= expectedRemaining * 0.99 && remainingEth <= expectedRemaining * 1.01,
-      `Alice should have ~${expectedRemaining} ETH remaining, got ${remainingEth}`);
+    const expectedRemaining = eth(TRADE_ETH) - aliceFilled.filledGive;
+    assert(aliceOfferRemaining.giveAmount === expectedRemaining,
+      `Alice remaining ETH = ${expectedRemaining} (got ${aliceOfferRemaining.giveAmount})`);
   }
 
   console.log('  ✅ Phase 2 assertions passed');
+
+  // Clear residual open orders to isolate dispute test
+  const [, aliceBeforeDispute] = findReplica(env, alice.id);
+  const aliceHubAccountPreDispute = aliceBeforeDispute.state.accounts.get(hub.id);
+  if (aliceHubAccountPreDispute?.swapOffers?.has('alice-sell-001')) {
+    console.log('🧹 Cancelling leftover alice-sell-001 before dispute test...');
+    await process(env, [{
+      entityId: alice.id,
+      signerId: alice.signer,
+      entityTxs: [{
+        type: 'cancelSwapOffer',
+        data: { counterpartyEntityId: hub.id, offerId: 'alice-sell-001' },
+      }],
+    }]);
+    await converge(env);
+  }
+
+  // ============================================================================
+  // PHASE 2B: Dispute swap fillRatio (pending orderbook fill)
+  // ============================================================================
+  console.log('\n═══════════════════════════════════════════════════════════════');
+  console.log('        PHASE 2B: DISPUTE SWAP (FILL RATIO ENFORCED)           ');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+
+  const disputeOfferId = 'alice-dispute-001';
+  const disputeCounterId = 'bob-dispute-001';
+  const disputeEth = TRADE_ETH;
+  const disputeUsdc = TRADE_USDC_MAIN_UNITS;
+  const disputeFillEth = (disputeEth * 2n) / 5n; // 40%
+
+  console.log(`📊 Alice: swap_offer (${disputeEth} ETH → ${disputeUsdc} USDC)`);
+  await process(env, [{
+    entityId: alice.id,
+    signerId: alice.signer,
+    entityTxs: [{
+      type: 'placeSwapOffer',
+      data: {
+        counterpartyEntityId: hub.id,
+        offerId: disputeOfferId,
+        giveTokenId: ETH_TOKEN_ID,
+        giveAmount: eth(disputeEth),
+        wantTokenId: USDC_TOKEN_ID,
+        wantAmount: usdc(disputeUsdc),
+        minFillRatio: 0,
+      },
+    }],
+  }]);
+  await converge(env);
+
+  console.log(`📊 Bob: swap_offer (40% fill target)`);
+  await process(env, [{
+    entityId: bob.id,
+    signerId: bob.signer,
+    entityTxs: [{
+      type: 'placeSwapOffer',
+      data: {
+        counterpartyEntityId: hub.id,
+        offerId: disputeCounterId,
+        giveTokenId: USDC_TOKEN_ID,
+        giveAmount: usdcForEth(disputeFillEth, ETH_PRICE_MAIN),
+        wantTokenId: ETH_TOKEN_ID,
+        wantAmount: eth(disputeFillEth),
+        minFillRatio: 0,
+      },
+    }],
+  }]);
+
+  // Process until orderbook match produces pending fill ratio (but before swap_resolve commits)
+  const pendingKey = `${alice.id}:${disputeOfferId}`;
+  let pendingRatio = 0;
+  for (let i = 0; i < 8; i++) {
+    await process(env);
+    const [, hubAfterMatch] = findReplica(env, hub.id);
+    pendingRatio = hubAfterMatch.state.pendingSwapFillRatios?.get(pendingKey) || 0;
+    if (pendingRatio > 0) break;
+  }
+  assert(pendingRatio > 0, `Pending fillRatio recorded for ${disputeOfferId}`);
+
+  // Simulate offline counterparty: drop pending swap_resolve proposal before commit
+  env.pendingOutputs = [];
+  env.networkInbox = [];
+  console.log('🚫 Dropped pending outputs to keep swap_resolve uncommitted (dispute path)');
+
+  console.log('⚔️ Hub starts dispute (will enforce fillRatio via calldata)');
+  await process(env, [{
+    entityId: hub.id,
+    signerId: hub.signer,
+    entityTxs: [{
+      type: 'disputeStart',
+      data: {
+        counterpartyEntityId: alice.id,
+        description: 'Swap dispute (fillRatio enforced)',
+      },
+    }],
+  }]);
+
+  const [, hubBeforeBroadcastStart] = findReplica(env, hub.id);
+  const startCount = hubBeforeBroadcastStart.state.jBatchState?.batch.disputeStarts.length || 0;
+  console.log(`🧾 jBatch disputeStarts=${startCount} before broadcast`);
+  assert(startCount > 0, 'jBatch has disputeStart before broadcast');
+
+  await process(env, [{
+    entityId: hub.id,
+    signerId: hub.signer,
+    entityTxs: [{ type: 'j_broadcast', data: {} }],
+  }]);
+
+  // Wait for DisputeStarted to propagate
+  for (let i = 0; i < 20; i++) {
+    await process(env);
+    const jRep = env.jReplicas.get('Swap Demo');
+    if (jRep && jRep.mempool.length === 0) break;
+  }
+  await processJEvents(env);
+
+  const [, hubAfterStart] = findReplica(env, hub.id);
+  const hubAccountAfterStart = hubAfterStart.state.accounts.get(alice.id);
+  assert(!!hubAccountAfterStart?.activeDispute, 'Dispute started for swap');
+  const { buildAccountProofBody } = await import('../proof-builder');
+  const hubProofAfterStart = buildAccountProofBody(hubAccountAfterStart);
+  assert(
+    hubProofAfterStart.proofBodyHash === hubAccountAfterStart.activeDispute.initialProofbodyHash,
+    'Hub dispute proofBodyHash matches on-chain start hash'
+  );
+  const [, aliceAfterStart] = findReplica(env, alice.id);
+  const aliceAccountAfterStart = aliceAfterStart.state.accounts.get(hub.id);
+  assert(!!aliceAccountAfterStart?.activeDispute, 'Dispute visible on counterparty');
+  const aliceProofAfterStart = buildAccountProofBody(aliceAccountAfterStart);
+  assert(
+    aliceProofAfterStart.proofBodyHash === aliceAccountAfterStart.activeDispute.initialProofbodyHash,
+    'Counterparty dispute proofBodyHash matches on-chain start hash'
+  );
+
+  const targetBlock = hubAccountAfterStart.activeDispute!.disputeTimeout;
+  console.log(`⏳ Waiting for dispute timeout (block ${targetBlock})...`);
+  const { createEmptyBatch, encodeJBatch, computeBatchHankoHash } = await import('../j-batch');
+  const { signHashesAsSingleEntity } = await import('../hanko-signing');
+
+  while (browserVM.getBlockNumber() < targetBlock) {
+    const emptyBatch = createEmptyBatch();
+    const encodedBatch = encodeJBatch(emptyBatch);
+    const chainId = browserVM.getChainId();
+    const depositoryAddress = browserVM.getDepositoryAddress();
+    const entityProviderAddress = browserVM.getEntityProviderAddress();
+    const currentNonce = await browserVM.getEntityNonce(hub.id);
+    const nextNonce = currentNonce + 1n;
+    const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
+    const hankos = await signHashesAsSingleEntity(env, hub.id, hub.signer, [batchHash]);
+    const hankoData = hankos[0];
+    if (!hankoData) {
+      throw new Error('Failed to build empty batch hanko (swap dispute)');
+    }
+    await browserVM.processBatch(encodedBatch, entityProviderAddress, hankoData, nextNonce);
+    await process(env);
+  }
+  console.log(`✅ Timeout reached at block ${browserVM.getBlockNumber()}`);
+
+  console.log('⚖️ Hub disputeFinalize (unilateral)');
+  await process(env, [{
+    entityId: hub.id,
+    signerId: hub.signer,
+    entityTxs: [{
+      type: 'disputeFinalize',
+      data: {
+        counterpartyEntityId: alice.id,
+        cooperative: false,
+        description: 'Finalize swap dispute',
+      },
+    }],
+  }]);
+
+  const [, hubBeforeBroadcast] = findReplica(env, hub.id);
+  const finalProof = hubBeforeBroadcast.state.jBatchState?.batch.disputeFinalizations?.[0];
+  const finalArgs = finalProof?.finalArguments || '0x';
+  assert(finalArgs !== '0x', 'Dispute finalArguments encoded');
+
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  const [argArray] = abiCoder.decode(['bytes[]'], finalArgs) as [string[]];
+  const [ratios] = abiCoder.decode(['uint32[]', 'bytes32[]'], argArray[0]) as [Array<bigint>, Array<string>];
+  const ratioValue = Number(ratios[0] || 0n);
+  assert(ratioValue === pendingRatio, `fillRatio matches pending (${pendingRatio})`);
+
+  await process(env, [{
+    entityId: hub.id,
+    signerId: hub.signer,
+    entityTxs: [{ type: 'j_broadcast', data: {} }],
+  }]);
+
+  for (let i = 0; i < 20; i++) {
+    await process(env);
+    const jRep = env.jReplicas.get('Swap Demo');
+    if (jRep && jRep.mempool.length === 0) break;
+  }
+  await processJEvents(env);
+
+  console.log('✅ Dispute swap finalize broadcast complete');
+  const [, hubAfterFinalize] = findReplica(env, hub.id);
+  const hubAccountAfterFinalize = hubAfterFinalize.state.accounts.get(alice.id);
+  assert(!hubAccountAfterFinalize?.activeDispute, 'Dispute cleared on hub after finalize');
+  const [, aliceAfterFinalize] = findReplica(env, alice.id);
+  const aliceAccountAfterFinalize = aliceAfterFinalize.state.accounts.get(hub.id);
+  assert(!aliceAccountAfterFinalize?.activeDispute, 'Dispute cleared on counterparty after finalize');
 
   console.log('\n═══════════════════════════════════════════════════════════════');
   console.log('              PHASE 2: ORDERBOOK TEST COMPLETE                  ');
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   return env;
+  } finally {
+    restoreFailFast();
+  }
 }
 
 // ============================================================================
@@ -841,19 +1149,25 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
 // ============================================================================
 
 export async function multiPartyTrading(env: Env): Promise<Env> {
+  const restoreFailFast = enableStrictScenario(env, 'SWAP');
+  try {
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
+  const browserVM = env.browserVM || await ensureBrowserVM(env);
+  await ensureJWatcher(env, browserVM);
 
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('         PHASE 3: MULTI-PARTY TRADING (Carol & Dave)           ');
   console.log('═══════════════════════════════════════════════════════════════\n');
 
-  const hub = { id: '0x' + '2'.padStart(64, '0'), signer: 's2' };
+  const hub = { id: getRegisteredEntityId('s2'), signer: 's2' };
+  const [, hubRep] = findReplica(env, hub.id);
+  const jurisdiction = hubRep.state.config.jurisdiction;
 
   // Add Carol and Dave with horizontal layout
   console.log('📦 Adding Carol and Dave...');
-  const carol = { id: '0x' + '4'.padStart(64, '0'), signer: 's4', name: 'Carol' };
-  const dave = { id: '0x' + '5'.padStart(64, '0'), signer: 's5', name: 'Dave' };
+  const carol = { id: getRegisteredEntityId('s4'), signer: 's4', name: 'Carol' };
+  const dave = { id: getRegisteredEntityId('s5'), signer: 's5', name: 'Dave' };
 
   for (const entity of [carol, dave]) {
     await applyRuntimeInput(env, { runtimeTxs: [{
@@ -868,6 +1182,7 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
           threshold: 1n,
           validators: [entity.signer],
           shares: { [entity.signer]: 1n },
+          jurisdiction,
         },
       },
     }], entityInputs: [] });
@@ -1048,30 +1363,36 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   // Carol sold ETH across two orders (low + high price levels)
   // Carol is Right relative to Hub (Hub = 0x0002..., Carol = 0x0004...)
   // CANONICAL: Right pays → offdelta INCREASES, Right receives → offdelta DECREASES
-  // Carol gives ETH → offdelta increases (positive)
-  assert(carolEth > 0n, `Carol should have given ETH (Right pays = positive), got ${carolEth}`);
+  const expectedCarolEth = eth(CAROL_SELL_ETH + CAROL_SELL_2_ETH);
+  const expectedCarolUsdc = usdcForEth(CAROL_SELL_ETH, ETH_PRICE_LOW) +
+    usdcForEth(CAROL_SELL_2_ETH, ETH_PRICE_HIGH);
 
-  // Carol receives USDC → offdelta decreases (negative)
-  assert(carolUsdc < 0n, `Carol should have received USDC (Right receives = negative), got ${carolUsdc}`);
+  assert(carolEth === expectedCarolEth, `Carol ETH delta = ${expectedCarolEth} (got ${carolEth})`);
+  assert(carolUsdc === -expectedCarolUsdc, `Carol USDC delta = -${expectedCarolUsdc} (got ${carolUsdc})`);
 
   // Dave bought ETH across multiple levels (partial + sweep)
   // Dave is Right relative to Hub (Hub = 0x0002..., Dave = 0x0005...)
-  // Dave gives USDC → offdelta increases (positive)
-  assert(daveUsdc > 0n, `Dave should have given USDC (Right pays = positive), got ${daveUsdc}`);
+  const daveBuy1 = computeFilledAmounts(
+    usdcForEth(DAVE_BUY_ETH, ETH_PRICE_MAIN),
+    eth(DAVE_BUY_ETH),
+    MAX_FILL_RATIO
+  );
+  const sweepFillRatio = computeFillRatio(DAVE_SWEEP_ETH - DAVE_BUY_ETH, DAVE_SWEEP_ETH);
+  const daveSweep = computeFilledAmounts(
+    usdcForEth(DAVE_SWEEP_ETH, ETH_PRICE_SWEEP),
+    eth(DAVE_SWEEP_ETH),
+    sweepFillRatio
+  );
+  const expectedDaveEth = daveBuy1.filledWant + daveSweep.filledWant;
+  const expectedDaveUsdc = daveBuy1.filledGive + daveSweep.filledGive;
 
-  // Dave receives ETH → offdelta decreases (negative)
-  assert(daveEth < 0n, `Dave should have received ETH (Right receives = negative), got ${daveEth}`);
-
-  // Verify Carol sold at least her total offer size
-  // Note: Dave may receive more due to Alice's remaining order from Phase 2
-  assert(carolEth >= eth(CAROL_SELL_ETH + CAROL_SELL_2_ETH),
-    `Carol should have sold at least ${CAROL_SELL_ETH + CAROL_SELL_2_ETH} ETH, got ${Number(carolEth) / 1e18}`);
+  assert(daveEth === -expectedDaveEth, `Dave ETH delta = -${expectedDaveEth} (got ${daveEth})`);
+  assert(daveUsdc === expectedDaveUsdc, `Dave USDC delta = +${expectedDaveUsdc} (got ${daveUsdc})`);
 
   // Orderbook ask side should be empty after Dave's sweep
   // (Dave's remaining unfilled bid may still be there)
-  // Use getBestAsk which returns null when no asks exist
   const hasAsks = bookFinal ? getBestAsk(bookFinal) !== null : false;
-  assert(!hasAsks, 'Orderbook asks should be empty after sweep');
+  assert(!hasAsks, 'Orderbook ask side empty after sweep');
 
   console.log('  ✅ Phase 3 assertions passed');
 
@@ -1080,6 +1401,9 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   return env;
+  } finally {
+    restoreFailFast();
+  }
 }
 
 // ===== CLI ENTRY POINT =====

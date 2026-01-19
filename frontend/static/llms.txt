@@ -1,5 +1,5 @@
-# XLN Context - Core System Files (~189k tokens)
-# Generated: 2026-01-15 18:26:19 | Git: c315919
+# XLN Context - Core System Files (~205k tokens)
+# Generated: 2026-01-19 17:17:58 | Git: 940a4f3
 
 ## THE CORE INNOVATION: RCPAN Invariant
 
@@ -40,7 +40,7 @@ This single invariant:
 4. **Multi-hop payments that NET positions** - Ripple batches, Lightning routes, only XLN nets bilaterally
 5. **Entity-owned subcontracts (HTLCs, limit orders) without separate channels** - One bilateral account, many subcontracts
 
-## Token Budget Guide (~189k tokens total)
+## Token Budget Guide (~205k tokens total)
 
 **Critical path (read first, ~30min):**
 - ⚡ emc2.md (5min) - Why credit = stored energy
@@ -122,35 +122,35 @@ bun run src/server.ts  # Starts server
 
 xln/
   jurisdictions/contracts/
-    Types.sol                  179 lines - Shared types: Diff, BatchArgs, InsuranceReg
-    Depository.sol             1136 lines - enforceDebts() FIFO, collateral + credit (INVARIANT: L+R+C=0)
-    EntityProvider.sol         1119 lines - Hanko sigs, Control/Dividend, governance
-    Account.sol                286 lines - A-machine on-chain: bilateral accounts, settlements
-    DeltaTransformer.sol       155 lines - Delta transformations: HTLCs, swaps, limit orders
+    Types.sol                  186 lines - Shared types: Diff, BatchArgs, InsuranceReg
+    Depository.sol             1160 lines - enforceDebts() FIFO, collateral + credit (INVARIANT: L+R+C=0)
+    EntityProvider.sol         1137 lines - Hanko sigs, Control/Dividend, governance
+    Account.sol                362 lines - A-machine on-chain: bilateral accounts, settlements
+    DeltaTransformer.sol       191 lines - Delta transformations: HTLCs, swaps, limit orders
 
   runtime/
-    types.ts                     1585 lines - All TypeScript interfaces (START HERE)
+    types.ts                     1684 lines - All TypeScript interfaces (START HERE)
     ids.ts                       519 lines - Identity system: EntityId, SignerId, JId, ReplicaKey
-    runtime.ts                   2151 lines - Main coordinator, 100ms ticks, R->E->A routing
-    entity-consensus.ts          1193 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
-    account-consensus.ts         1190 lines - Bilateral consensus, left/right perspective
+    runtime.ts                   2252 lines - Main coordinator, 100ms ticks, R->E->A routing
+    entity-consensus.ts          1209 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
+    account-consensus.ts         1377 lines - Bilateral consensus, left/right perspective
     account-consensus-state.ts   171 lines - Bilateral state machine
-    j-batch.ts                   463 lines - J-batch: E-machine accumulates → jBroadcast → J-machine
-    account-utils.ts             220 lines - deriveDelta() RCPAN calculation
+    j-batch.ts                   807 lines - J-batch: E-machine accumulates → jBroadcast → J-machine
+    account-utils.ts             221 lines - deriveDelta() RCPAN calculation
     serialization-utils.ts       116 lines - BigInt serialization
-    account-crypto.ts            325 lines - Signature verification
+    account-crypto.ts            397 lines - Signature verification
 
     entity-tx/
       index.ts                   7 lines - Entity transaction types
-      apply.ts                   900 lines - Entity tx dispatcher
+      apply.ts                   928 lines - Entity tx dispatcher
       validation.ts              37 lines - Transaction validation
       financial.ts               33 lines - Financial accounting
       proposals.ts               35 lines - Proposal logic
-      j-events.ts                610 lines - Jurisdiction events
-      handlers/account.ts              848 lines - Account operations
+      j-events.ts                793 lines - Jurisdiction events
+      handlers/account.ts              872 lines - Account operations
       handlers/deposit-collateral.ts   74 lines - R2C deposits
-      handlers/htlc-payment.ts         212 lines - HTLC routing
-      handlers/create-settlement.ts    54 lines - Settlement creation
+      handlers/htlc-payment.ts         238 lines - HTLC routing
+      handlers/create-settlement.ts    62 lines - Settlement creation
       handlers/mint-reserves.ts        55 lines - Reserve minting
 
     account-tx/
@@ -162,9 +162,9 @@ xln/
       graph.ts                   117 lines - Network graph
       pathfinding.ts             227 lines - Dijkstra routing
 
-    state-helpers.ts             642 lines - Pure state management
+    state-helpers.ts             675 lines - Pure state management
     snapshot-coder.ts            316 lines - Deterministic RLP serialization
-    evm.ts                       1023 lines - Blockchain integration
+    evm.ts                       961 lines - Blockchain integration
 
   docs/
     emc2.md                      33 lines - ⚡ Energy-Mass-Credit equivalence (CRITICAL PATH)
@@ -185,7 +185,7 @@ Reading Guide:
 Suggested LLM prompt: "Read the critical path docs (30min budget), then explain how RCPAN enables instant settlement with partial collateral. Compare to Lightning and rollups."
 
 
-//jurisdictions/contracts/Types.sol (179 lines)
+//jurisdictions/contracts/Types.sol (186 lines)
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
@@ -282,6 +282,7 @@ struct InitialDisputeProof {
 
 struct FinalDisputeProof {
   bytes32 counterentity;
+  uint initialCooperativeNonce;  // Nonce from when dispute was started
   uint finalCooperativeNonce;
   uint initialDisputeNonce;
   uint finalDisputeNonce;
@@ -344,6 +345,11 @@ struct ReserveToExternalToken {
   uint amount;
 }
 
+struct SecretReveal {
+  address transformer;
+  bytes32 secret;
+}
+
 struct Batch {
   Flashloan[] flashloans;
   ReserveToReserve[] reserveToReserve;
@@ -353,6 +359,7 @@ struct Batch {
   FinalDisputeProof[] disputeFinalizations;
   ExternalTokenToReserve[] externalTokenToReserve;
   ReserveToExternalToken[] reserveToExternalToken;
+  SecretReveal[] revealSecrets;
   uint hub_id;
 }
 
@@ -366,11 +373,10 @@ enum MessageType {
 }
 
 
-//jurisdictions/contracts/Depository.sol (1136 lines)
+//jurisdictions/contracts/Depository.sol (1160 lines)
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
-import "./ECDSA.sol";
 import "./EntityProvider.sol";
 import "./DeltaTransformer.sol";
 import "./Types.sol";
@@ -411,7 +417,10 @@ contract Depository is ReentrancyGuardLite {
   error E8(); // LengthMismatch
   error E9(); // HashMismatch
 
-  // Multi-provider support
+  // Immutable EntityProvider (set in constructor, gas-efficient static calls)
+  address public immutable entityProvider;
+
+  // Multi-provider support (legacy - will be removed)
   mapping(address => bool) public approvedEntityProviders;
   address[] public entityProvidersList;
   
@@ -435,10 +444,6 @@ contract Depository is ReentrancyGuardLite {
   address public immutable admin;
   bool public emergencyPause;
 
-  // === TEST MODE FOR HANKO BYPASS ===
-  // WARNING: Must call disableTestModeForever() before mainnet deployment
-  bool public testMode = true;
-
   // Insurance cursor - tracks iteration position per insured entity
   mapping(bytes32 => uint256) public insuranceCursor;
 
@@ -446,7 +451,6 @@ contract Depository is ReentrancyGuardLite {
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
   event EmergencyPauseToggled(bool isPaused);
-  event TestModeDisabled();
 
   modifier onlyAdmin() {
     if (msg.sender != admin) revert E2();
@@ -463,7 +467,8 @@ contract Depository is ReentrancyGuardLite {
   // Hub tracking removed for size reduction
 
   // Events related to disputes and cooperative closures
-  event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes initialArguments);
+  event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments);
+  event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed initialDisputeNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash);
   event CooperativeClose(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed cooperativeNonce);
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -491,6 +496,10 @@ contract Depository is ReentrancyGuardLite {
    * @param newBalance The absolute new balance of the token for the entity.
    */
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
+  event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret);
+
+  // Debug events (remove in production)
+  event DebugSettleStart(bytes32 leftEntity, bytes32 rightEntity, uint256 sigLen, address entityProvider);
 
   //event ChannelUpdated(address indexed receiver, address indexed addr, uint tokenId);
 
@@ -556,10 +565,13 @@ contract Depository is ReentrancyGuardLite {
     return entityProvidersList;
   }
 
-  constructor() {
+  constructor(address _entityProvider) {
+    require(_entityProvider != address(0), "EntityProvider cannot be zero address");
+    entityProvider = _entityProvider;
+    approvedEntityProviders[_entityProvider] = true;
+    entityProvidersList.push(_entityProvider);
     admin = msg.sender;
     _tokens.push(bytes32(0));
-
   }
 
   function setEmergencyPause(bool isPaused) external onlyAdmin {
@@ -568,16 +580,6 @@ contract Depository is ReentrancyGuardLite {
     }
     emergencyPause = isPaused;
     emit EmergencyPauseToggled(isPaused);
-  }
-
-  /**
-   * @notice Permanently disable test mode (one-way door)
-   * @dev MUST be called before mainnet deployment to enable Hanko verification
-   */
-  function disableTestModeForever() external onlyAdmin {
-    if (!testMode) revert E2();
-    testMode = false;
-    emit TestModeDisabled();
   }
 
   /// @notice Set dispute delay for an entity (0 = use default)
@@ -617,7 +619,9 @@ contract Depository is ReentrancyGuardLite {
 
   event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed hankoHash, uint256 nonce, bool success);
 
-  function processBatchWithHanko(
+  /// @notice Process a batch authorized by entity Hanko.
+  /// @dev Hanko is required; use unsafeProcessBatch only for admin/test flows.
+  function processBatch(
     bytes calldata encodedBatch,
     address entityProvider,
     bytes calldata hankoData,
@@ -660,68 +664,52 @@ contract Depository is ReentrancyGuardLite {
   }
 
 
-  // TODO: make private - currently public for testing convenience
-  function processBatch(bytes32 entity, Batch calldata batch) public whenNotPaused nonReentrant returns (bool completeSuccess) {
-    // In production mode, require Hanko authorization via processBatchWithHanko()
-    if (!testMode) revert E2();
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-    if (batch.reserveToReserve.length > 0) {
-      
-      
-      
-      
-      
-      
-      
-
-      
-      
-    }
-
-    
+  /// @notice UNSAFE batch processing - entity or admin can call
+  /// @dev Use processBatch() (Hanko) in production. This is for explicit unsafe/admin flows.
+  /// @dev Settlements still require counterparty signatures (cooperative proof)
+  function unsafeProcessBatch(bytes32 entity, Batch calldata batch) public whenNotPaused nonReentrant returns (bool completeSuccess) {
+    // Entity itself OR admin can call (admin for J-machine execution)
+    // Executes full batch deterministically via _processBatch.
+    // NOTE: Admin path bypasses Hanko authorization; prefer processBatch in production.
+    require(
+      msg.sender == address(uint160(uint256(entity))) || msg.sender == admin,
+      "E2: caller must be entity or admin"
+    );
     return _processBatch(entity, batch);
   }
 
 
   // ========== DIRECT R2R FUNCTION ==========
-  // Simple reserve-to-reserve transfer (simpler than batch)
-  // TODO: make private - currently public for testing convenience
+  /// @notice Simple reserve-to-reserve transfer - fromEntity or admin can call
+  /// @dev For multi-sig/Hanko auth, use processBatch() instead
   function reserveToReserve(
     bytes32 fromEntity,
     bytes32 toEntity,
     uint tokenId,
     uint amount
   ) public whenNotPaused nonReentrant returns (bool) {
-    if (!testMode) revert E2(); // Production: use processBatchWithHanko
+    // fromEntity itself OR admin can call
+    require(
+      msg.sender == address(uint160(uint256(fromEntity))) || msg.sender == admin,
+      "E2: caller must be fromEntity or admin"
+    );
     if (fromEntity == toEntity) revert E2();
     if (amount == 0) revert E1();
     enforceDebts(fromEntity, tokenId);
     if (_reserves[fromEntity][tokenId] < amount) revert E3();
 
-    // Simple transfer: subtract from sender, add to receiver
     _reserves[fromEntity][tokenId] -= amount;
     _reserves[toEntity][tokenId] += amount;
 
-    // Single canonical event per entity whose reserve changed
     emit ReserveUpdated(fromEntity, tokenId, _reserves[fromEntity][tokenId]);
     emit ReserveUpdated(toEntity, tokenId, _reserves[toEntity][tokenId]);
 
-    
     return true;
   }
 
   // ========== SETTLE FUNCTION ==========
-  /// @notice External settle - only works in testMode (uses Account library)
+  /// @notice External settle with signature verification
+  /// @dev Counterparty signature REQUIRED when there are changes
   function settle(
     bytes32 leftEntity,
     bytes32 rightEntity,
@@ -730,8 +718,8 @@ contract Depository is ReentrancyGuardLite {
     InsuranceRegistration[] memory insuranceRegs,
     bytes memory sig
   ) public whenNotPaused nonReentrant returns (bool) {
-    if (!testMode) revert E2();
-    // testMode: skip all auth - assume caller authorized
+    emit DebugSettleStart(leftEntity, rightEntity, sig.length, entityProvider);
+    // Caller is assumed to be leftEntity for signature verification
     bytes32 caller = leftEntity;
 
     Settlement[] memory settlements = new Settlement[](1);
@@ -742,7 +730,7 @@ contract Depository is ReentrancyGuardLite {
       forgiveDebtsInTokenIds: forgiveDebtsInTokenIds,
       insuranceRegs: insuranceRegs,
       sig: sig,
-      entityProvider: address(0),
+      entityProvider: entityProvider,  // Use Depository's entityProvider for Hanko verification
       hankoData: "",
       nonce: 0
     });
@@ -796,7 +784,7 @@ contract Depository is ReentrancyGuardLite {
     completeSuccess = true;
 
     // Process external token deposits (increases reserves)
-    // msg.sender must have approved tokens before calling processBatchWithHanko
+    // msg.sender must have approved tokens before calling processBatch
     for (uint i = 0; i < batch.externalTokenToReserve.length; i++) {
       ExternalTokenToReserve memory params = batch.externalTokenToReserve[i];
       // If entity is not specified, default to batch initiator
@@ -838,9 +826,17 @@ contract Depository is ReentrancyGuardLite {
     }
 
     if (batch.disputeStarts.length > 0) {
-      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay)) {
+      if (!Account.processDisputeStarts(_accounts, entityId, batch.disputeStarts, defaultDisputeDelay, entityProvider)) {
         completeSuccess = false;
       }
+    }
+
+    // HTLC secret reveals (must run before dispute finalizations)
+    for (uint i = 0; i < batch.revealSecrets.length; i++) {
+      SecretReveal memory reveal = batch.revealSecrets[i];
+      if (reveal.transformer == address(0)) revert E2();
+      DeltaTransformer(reveal.transformer).revealSecret(reveal.secret);
+      emit SecretRevealed(keccak256(abi.encode(reveal.secret)), entityId, reveal.secret);
     }
 
     // Dispute finalizations stay in Depository (too many storage refs for Account)
@@ -1191,6 +1187,21 @@ contract Depository is ReentrancyGuardLite {
     return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);
   }
 
+  // DEBUG: Compute settlement hash for comparison with TypeScript
+  function computeSettlementHash(
+    bytes32 leftEntity,
+    bytes32 rightEntity,
+    SettlementDiff[] memory diffs,
+    uint[] memory forgiveDebtsInTokenIds,
+    InsuranceRegistration[] memory insuranceRegs
+  ) public view returns (bytes32 hash, uint256 nonce, uint256 encodedMsgLength) {
+    bytes memory ch_key = accountKey(leftEntity, rightEntity);
+    nonce = _accounts[ch_key].cooperativeNonce;
+    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, ch_key, nonce, diffs, forgiveDebtsInTokenIds, insuranceRegs);
+    hash = keccak256(encoded_msg);
+    encodedMsgLength = encoded_msg.length;
+  }
+
   function reserveToCollateral(bytes32 entity, ReserveToCollateral memory params) internal returns (bool completeSuccess) {
     uint tokenId = params.tokenId;
     bytes32 receivingEntity = params.receivingEntity;
@@ -1331,7 +1342,7 @@ contract Depository is ReentrancyGuardLite {
     bytes32 caller = bytes32(uint256(uint160(msg.sender)));
     InitialDisputeProof[] memory starts = new InitialDisputeProof[](1);
     starts[0] = params;
-    return Account.processDisputeStarts(_accounts, caller, starts, defaultDisputeDelay);
+    return Account.processDisputeStarts(_accounts, caller, starts, defaultDisputeDelay, entityProvider);
   }
 
   /// @notice Finalize dispute - stays in Depository due to storage complexity
@@ -1349,21 +1360,31 @@ contract Depository is ReentrancyGuardLite {
       // This prevents social engineering attacks where victim signs over empty account
       // Accounts must have at least one prior settlement (cooperativeNonce > 0)
       if (_accounts[ch_key].cooperativeNonce == 0) revert E5();
-      if (!Account.verifyCooperativeProofSig(ch_key, _accounts[ch_key].cooperativeNonce, keccak256(abi.encode(params.finalProofbody)), keccak256(params.initialArguments), params.sig, params.counterentity)) revert E4();
+
+      require(params.sig.length > 0, "Signature required for cooperative finalize");
+      if (!Account.verifyCooperativeProofHanko(entityProvider, ch_key, _accounts[ch_key].cooperativeNonce, keccak256(abi.encode(params.finalProofbody)), keccak256(params.initialArguments), params.sig, params.counterentity)) revert E4();
     } else {
       bytes32 storedHash = _accounts[ch_key].disputeHash;
       if (storedHash == bytes32(0)) revert E5();
 
       bytes32 expectedHash = Account.encodeDisputeHash(
-        _accounts[ch_key].cooperativeNonce, params.initialDisputeNonce, params.startedByLeft,
+        params.initialCooperativeNonce, params.initialDisputeNonce, params.startedByLeft,
         _accounts[ch_key].disputeTimeout, params.initialProofbodyHash, params.initialArguments
       );
       if (storedHash != expectedHash) revert E9();
 
+      // Counter-dispute or unilateral finalization
       if (params.sig.length > 0) {
-        if (!Account.verifyFinalDisputeProofSig(ch_key, params.finalCooperativeNonce, params.initialDisputeNonce, params.finalDisputeNonce, params.sig, params.counterentity)) revert E4();
+        // Counter-dispute: verify counterparty signed the NEWER dispute proof
+        // Uses SAME DisputeProof message type (not FinalDisputeProof)
+        // Signature is on: DisputeProof(ch_key, finalCooperativeNonce, finalDisputeNonce, finalProofbodyHash)
+        bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
+
+        // Full hanko - verify DisputeProof hanko (not FinalDisputeProof)
+        if (!Account.verifyDisputeProofHanko(entityProvider, ch_key, params.finalCooperativeNonce, params.finalDisputeNonce, finalProofbodyHash, params.sig, params.counterentity)) revert E4();
         if (params.initialDisputeNonce >= params.finalDisputeNonce) revert E2();
       } else {
+        // Unilateral finalization after timeout (no signature needed)
         bool senderIsCounterparty = params.startedByLeft != (entityId < params.counterentity);
         if (!senderIsCounterparty && block.number < _accounts[ch_key].disputeTimeout) revert E2();
         if (params.initialProofbodyHash != keccak256(abi.encode(params.finalProofbody))) revert E2();
@@ -1373,7 +1394,17 @@ contract Depository is ReentrancyGuardLite {
     _accounts[ch_key].disputeHash = bytes32(0);
     _accounts[ch_key].disputeTimeout = 0;
 
-    return _finalizeAccount(entityId, params.counterentity, params.finalProofbody, params.finalArguments, params.initialArguments);
+    bool ok = _finalizeAccount(entityId, params.counterentity, params.finalProofbody, params.finalArguments, params.initialArguments);
+    if (ok) {
+      emit DisputeFinalized(
+        entityId,
+        params.counterentity,
+        params.initialDisputeNonce,
+        params.initialProofbodyHash,
+        keccak256(abi.encode(params.finalProofbody))
+      );
+    }
+    return ok;
   }
 
   /// @notice Finalize account - applies deltas and clears collateral
@@ -1504,7 +1535,7 @@ contract Depository is ReentrancyGuardLite {
 }
 
 
-//jurisdictions/contracts/EntityProvider.sol (1119 lines)
+//jurisdictions/contracts/EntityProvider.sol (1137 lines)
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
@@ -1584,6 +1615,10 @@ contract EntityProvider is ERC1155 {
   event BoardProposed(bytes32 indexed entityId, bytes32 proposedBoardHash);
   event BoardActivated(bytes32 indexed entityId, bytes32 newBoardHash);
   event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId);
+
+  // DEBUG events (remove after debugging)
+  event DebugValidateEntity(bytes32 entityId, bytes32 computedHash, bytes32 storedHash, bool isLazy);
+  event DebugComputeBoard(uint256 threshold, bytes32 entityId0, bytes32 computedHash);
   event ProposalCancelled(bytes32 indexed entityId, ProposerType cancelledBy);
 
   constructor() ERC1155("https://xln.com/entity/{id}.json") {
@@ -1961,8 +1996,11 @@ contract EntityProvider is ERC1155 {
    * @param boardHash The board hash for validation
    * @return isLazy Whether this is a lazy entity
    */
-  function _validateEntity(bytes32 entityId, bytes32 boardHash) internal view returns (bool isLazy) {
-    if (entities[entityId].currentBoardHash == bytes32(0)) {
+  function _validateEntity(bytes32 entityId, bytes32 boardHash) internal returns (bool isLazy) {
+    bool isLazyEntity = entities[entityId].currentBoardHash == bytes32(0);
+    emit DebugValidateEntity(entityId, boardHash, entities[entityId].currentBoardHash, isLazyEntity);
+
+    if (isLazyEntity) {
       // Lazy entity: entityId must equal boardHash
       require(entityId == boardHash, "Lazy entity: ID must equal board hash");
       return true;
@@ -2136,7 +2174,7 @@ contract EntityProvider is ERC1155 {
   function _buildBoardHash(
     address[] memory actualSigners,
     HankoClaim memory claim
-  ) internal pure returns (bytes32 boardHash) {
+  ) internal returns (bytes32 boardHash) {
     require(actualSigners.length == claim.weights.length, "Signers/weights length mismatch");
     
     // Build parallel arrays for Board struct
@@ -2158,9 +2196,12 @@ contract EntityProvider is ERC1155 {
       controlChangeDelay: 0,
       dividendChangeDelay: 0
     });
-    
+
     // Hash the reconstructed board (same as entity registration)
     boardHash = keccak256(abi.encode(reconstructedBoard));
+
+    // DEBUG: emit computed board hash
+    emit DebugComputeBoard(claim.threshold, entityIds.length > 0 ? entityIds[0] : bytes32(0), boardHash);
   }
 
   /* Hanko Signatures - Ephemeral Entity Registration
@@ -2186,9 +2227,14 @@ contract EntityProvider is ERC1155 {
    matches. Unregistered entities can still sign via claims.
    */
 
+  // DEBUG events for tracing verifyHankoSignature
+  event DebugHankoEntry(uint256 dataLen, bytes32 hash, uint256 gasLeft);
+  event DebugHankoDecode(uint256 placeholders, uint256 packedLen, uint256 claims);
+  event DebugRecoverSigner(bytes32 hash, address recovered, uint256 sigLength);
+
   /**
    * @notice Verify hanko signature with flashloan governance (optimistic verification)
-   * @param hankoData ABI-encoded hanko bytes  
+   * @param hankoData ABI-encoded hanko bytes
    * @param hash The hash that was signed
    * @return entityId The verified entity (0 if invalid)
    * @return success Whether verification succeeded
@@ -2196,8 +2242,10 @@ contract EntityProvider is ERC1155 {
   function verifyHankoSignature(
     bytes calldata hankoData,
     bytes32 hash
-  ) external view returns (bytes32 entityId, bool success) {
+  ) external returns (bytes32 entityId, bool success) {
+    emit DebugHankoEntry(hankoData.length, hash, gasleft());
     HankoBytes memory hanko = abi.decode(hankoData, (HankoBytes));
+    emit DebugHankoDecode(hanko.placeholders.length, hanko.packedSignatures.length, hanko.claims.length);
     
     // Unpack signatures (with automatic count detection)
     bytes[] memory signatures = _unpackSignatures(hanko.packedSignatures);
@@ -2213,6 +2261,7 @@ contract EntityProvider is ERC1155 {
     for (uint256 i = 0; i < signatures.length; i++) {
       if (signatures[i].length == 65) {
         address signer = _recoverSigner(hash, signatures[i]);
+        emit DebugRecoverSigner(hash, signer, signatures[i].length);
         if (signer != address(0)) {
           actualSigners[validSignerCount] = signer;
           validSignerCount++;
@@ -2313,7 +2362,7 @@ contract EntityProvider is ERC1155 {
   function batchVerifyHankoSignatures(
     bytes[] calldata hankoDataArray,
     bytes32[] calldata hashes
-  ) external view returns (bytes32[] memory entityIds, bool[] memory results) {
+  ) external returns (bytes32[] memory entityIds, bool[] memory results) {
     require(hankoDataArray.length == hashes.length, "Array length mismatch");
     
     entityIds = new bytes32[](hankoDataArray.length);
@@ -2625,13 +2674,13 @@ contract EntityProvider is ERC1155 {
 
 }
 
-//jurisdictions/contracts/Account.sol (286 lines)
+//jurisdictions/contracts/Account.sol (362 lines)
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
 import "./Types.sol";
-import "./ECDSA.sol";
 import "./DeltaTransformer.sol";
+import "./IEntityProvider.sol";
 
 /**
  * Account.sol - Library for bilateral account operations
@@ -2664,10 +2713,16 @@ library Account {
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
 
   // ========== OTHER EVENTS ==========
-  event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes initialArguments);
+  event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments);
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
   event InsuranceRegistered(bytes32 indexed insured, bytes32 indexed insurer, uint256 indexed tokenId, uint256 limit, uint256 expiresAt);
+
+  // Debug events (remove in production)
+  event DebugSettleEntry(bytes32 leftEntity, bytes32 rightEntity, bytes32 initiator, uint256 sigLen);
+  event DebugSettlementHash(bytes32 computedHash, bytes32 counterparty, uint256 cooperativeNonce, uint256 diffsLength, uint256 encodedMsgLength);
+  event DebugHankoResult(bytes32 recoveredEntity, bool valid);
+  event DebugHankoStep(uint256 step, bytes32 val1, bytes32 val2, bool boolVal);  // step=100 sigcheck, 200 try success, 201 try mismatch, 300-399 catch
 
   // ========== ERRORS ==========
   error E2(); // Unauthorized
@@ -2717,43 +2772,61 @@ library Account {
     return keccak256(abi.encodePacked(domainSep, chainId, depository, encodedBatch, nonce));
   }
 
-  // ========== SIGNATURE VERIFICATION (pure, for external callers) ==========
+  // ========== HANKO VERIFICATION ==========
 
-  function verifySettlementSig(
-    bytes memory ch_key, uint cooperativeNonce, SettlementDiff[] memory diffs,
-    uint[] memory forgiveDebtsInTokenIds, InsuranceRegistration[] memory insuranceRegs,
-    bytes memory sig, bytes32 expectedSigner
-  ) external pure returns (bool) {
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, ch_key, cooperativeNonce, diffs, forgiveDebtsInTokenIds, insuranceRegs);
-    bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-    return ECDSA.recover(hash, sig) == address(uint160(uint256(expectedSigner)));
-  }
-
-  function verifyDisputeProofSig(
-    bytes memory ch_key, uint cooperativeNonce, uint disputeNonce,
-    bytes32 proofbodyHash, bytes memory sig, bytes32 expectedSigner
-  ) external pure returns (bool) {
+  /// @notice Verify dispute proof with hanko (entity-level signature)
+  /// @param entityProvider EP contract for hanko verification
+  /// @param hanko Hanko signature bytes
+  /// @param expectedEntity Expected entity that should have signed
+  /// @return success Whether hanko is valid for this entity
+  function verifyDisputeProofHanko(
+    address entityProvider,
+    bytes memory ch_key,
+    uint cooperativeNonce,
+    uint disputeNonce,
+    bytes32 proofbodyHash,
+    bytes memory hanko,
+    bytes32 expectedEntity
+  ) external returns (bool success) {
     bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, cooperativeNonce, disputeNonce, proofbodyHash);
-    bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-    return ECDSA.recover(hash, sig) == address(uint160(uint256(expectedSigner)));
+    bytes32 hash = keccak256(encoded_msg);  // NO toEthSignedMessageHash for hanko
+
+    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
+    return valid && recoveredEntity == expectedEntity;
   }
 
-  function verifyFinalDisputeProofSig(
-    bytes memory ch_key, uint finalCooperativeNonce, uint initialDisputeNonce,
-    uint finalDisputeNonce, bytes memory sig, bytes32 expectedSigner
-  ) external pure returns (bool) {
+  /// @notice Verify final dispute proof with hanko
+  function verifyFinalDisputeProofHanko(
+    address entityProvider,
+    bytes memory ch_key,
+    uint finalCooperativeNonce,
+    uint initialDisputeNonce,
+    uint finalDisputeNonce,
+    bytes memory hanko,
+    bytes32 expectedEntity
+  ) external returns (bool success) {
     bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, ch_key, finalCooperativeNonce, initialDisputeNonce, finalDisputeNonce);
-    bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-    return ECDSA.recover(hash, sig) == address(uint160(uint256(expectedSigner)));
+    bytes32 hash = keccak256(encoded_msg);
+
+    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
+    return valid && recoveredEntity == expectedEntity;
   }
 
-  function verifyCooperativeProofSig(
-    bytes memory ch_key, uint cooperativeNonce, bytes32 proofbodyHash,
-    bytes32 initialArgumentsHash, bytes memory sig, bytes32 expectedSigner
-  ) external pure returns (bool) {
+  /// @notice Verify cooperative proof with hanko
+  function verifyCooperativeProofHanko(
+    address entityProvider,
+    bytes memory ch_key,
+    uint cooperativeNonce,
+    bytes32 proofbodyHash,
+    bytes32 initialArgumentsHash,
+    bytes memory hanko,
+    bytes32 expectedEntity
+  ) external returns (bool success) {
     bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, ch_key, cooperativeNonce, proofbodyHash, initialArgumentsHash);
-    bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-    return ECDSA.recover(hash, sig) == address(uint160(uint256(expectedSigner)));
+    bytes32 hash = keccak256(encoded_msg);
+
+    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
+    return valid && recoveredEntity == expectedEntity;
   }
 
   // ========== STORAGE STRUCT (groups mappings to reduce param count) ==========
@@ -2778,15 +2851,17 @@ library Account {
   }
 
   /// @notice Process dispute starts only
+  /// @dev Counterparty signature is REQUIRED for all dispute starts
   function processDisputeStarts(
     mapping(bytes => AccountInfo) storage _accounts,
     bytes32 entityId,
     InitialDisputeProof[] memory disputeStarts,
-    uint256 defaultDisputeDelay
+    uint256 defaultDisputeDelay,
+    address entityProvider
   ) external returns (bool completeSuccess) {
     completeSuccess = true;
     for (uint i = 0; i < disputeStarts.length; i++) {
-      if (!_disputeStart(_accounts, entityId, disputeStarts[i], defaultDisputeDelay)) {
+      if (!_disputeStart(_accounts, entityId, disputeStarts[i], defaultDisputeDelay, entityProvider)) {
         completeSuccess = false;
       }
     }
@@ -2803,6 +2878,7 @@ library Account {
     bytes32 initiator,
     Settlement memory s
   ) internal returns (bool) {
+    emit DebugSettleEntry(s.leftEntity, s.rightEntity, initiator, s.sig.length);
     bytes32 leftEntity = s.leftEntity;
     bytes32 rightEntity = s.rightEntity;
     if (leftEntity == rightEntity || leftEntity >= rightEntity) revert E2();
@@ -2811,11 +2887,56 @@ library Account {
     bytes memory ch_key = _accountKey(leftEntity, rightEntity);
     bytes32 counterparty = (initiator == leftEntity) ? rightEntity : leftEntity;
 
-    // Counterparty MUST sign when there are changes (skip if no signature - test mode)
-    if (s.sig.length > 0 && (s.diffs.length > 0 || s.forgiveDebtsInTokenIds.length > 0 || s.insuranceRegs.length > 0)) {
+    // Counterparty signature REQUIRED for any state changes (cooperative proof)
+    if (s.diffs.length > 0 || s.forgiveDebtsInTokenIds.length > 0 || s.insuranceRegs.length > 0) {
+      require(s.sig.length > 0, "Signature required for settlement");
       bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, ch_key, _accounts[ch_key].cooperativeNonce, s.diffs, s.forgiveDebtsInTokenIds, s.insuranceRegs);
-      bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-      if (ECDSA.recover(hash, s.sig) != address(uint160(uint256(counterparty)))) revert E4();
+
+      // Debug: emit hash details
+      emit DebugSettlementHash(keccak256(encoded_msg), counterparty, _accounts[ch_key].cooperativeNonce, s.diffs.length, encoded_msg.length);
+
+      // Hanko verification
+      // DEBUG: Emit BEFORE any computation to verify we reach this point
+      emit DebugSettleEntry(s.leftEntity, s.rightEntity, bytes32(uint256(uint160(s.entityProvider))), s.sig.length);
+
+      // Full hanko verification via settlement's EP address
+      bytes32 hash = keccak256(encoded_msg);
+      // DEBUG: Log all params before external call
+      emit DebugSettlementHash(hash, bytes32(uint256(uint160(s.entityProvider))), s.sig.length, uint256(uint160(s.entityProvider)), gasleft());
+
+      // Try the external call with a low-level check first
+      address ep = s.entityProvider;
+      require(ep != address(0), "EP_ZERO");
+      require(s.sig.length > 0, "SIG_EMPTY");
+
+      // DEBUG: Log first 32 bytes of sig (step 100)
+      bytes memory sigBytes = s.sig;
+      bytes32 sigFirst32;
+      assembly { sigFirst32 := mload(add(sigBytes, 32)) }
+      emit DebugHankoStep(100, sigFirst32, bytes32(sigBytes.length), sigBytes.length == 608);
+
+      // Wrap in try-catch to prevent revert from abi.decode
+      try IEntityProvider(ep).verifyHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
+        emit DebugHankoStep(200, recoveredEntity, counterparty, valid);  // step 200: try returned
+        if (!valid || recoveredEntity != counterparty) {
+          emit DebugHankoStep(201, recoveredEntity, counterparty, false);  // step 201: mismatch
+          return false;  // Verification failed
+        }
+        emit DebugHankoStep(202, recoveredEntity, counterparty, true);  // step 202: success
+      } catch Error(string memory reason) {
+        emit DebugHankoStep(300, bytes32(bytes(reason)), bytes32(0), false);  // step 300: Error(string)
+        return false;
+      } catch Panic(uint errorCode) {
+        emit DebugHankoStep(310, bytes32(errorCode), bytes32(0), false);  // step 310: Panic
+        return false;
+      } catch (bytes memory lowLevelData) {
+        bytes32 errData;
+        if (lowLevelData.length >= 32) {
+          assembly { errData := mload(add(lowLevelData, 32)) }
+        }
+        emit DebugHankoStep(320, errData, bytes32(lowLevelData.length), false);  // step 320: low-level
+        return false;
+      }
     }
 
     // Apply diffs
@@ -2874,16 +2995,20 @@ library Account {
     mapping(bytes => AccountInfo) storage _accounts,
     bytes32 entityId,
     InitialDisputeProof memory params,
-    uint256 defaultDelay
+    uint256 defaultDelay,
+    address entityProvider
   ) internal returns (bool) {
     bytes memory ch_key = _accountKey(entityId, params.counterentity);
 
     if (_accounts[ch_key].cooperativeNonce > params.cooperativeNonce) revert E2();
 
-    // Verify counterparty signature
+    // Counterparty signature REQUIRED
+    require(params.sig.length > 0, "Signature required for dispute");
+
     bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
-    bytes32 hash = ECDSA.toEthSignedMessageHash(keccak256(encoded_msg));
-    if (ECDSA.recover(hash, params.sig) != address(uint160(uint256(params.counterentity)))) revert E4();
+    bytes32 hash = keccak256(encoded_msg);
+    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
+    if (!valid || recoveredEntity != params.counterentity) revert E4();
 
     if (_accounts[ch_key].disputeHash != bytes32(0)) revert E6();
 
@@ -2894,7 +3019,7 @@ library Account {
     );
     _accounts[ch_key].disputeTimeout = timeout;
 
-    emit DisputeStarted(entityId, params.counterentity, params.disputeNonce, params.initialArguments);
+    emit DisputeStarted(entityId, params.counterentity, params.disputeNonce, params.proofbodyHash, params.initialArguments);
     return true;
   }
 
@@ -2913,7 +3038,7 @@ library Account {
 }
 
 
-//jurisdictions/contracts/DeltaTransformer.sol (155 lines)
+//jurisdictions/contracts/DeltaTransformer.sol (191 lines)
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 pragma experimental ABIEncoderV2;
@@ -2941,7 +3066,7 @@ Subcontracts - Programmable Delta Transformers
   */
 contract DeltaTransformer is Console {
   mapping(bytes32 => uint) public hashToBlock;
-  uint MAXUINT32 = type(uint32).max;
+  uint MAX_FILL_RATIO = type(uint16).max;
 
   constructor() {
     revealSecret(bytes32(0));
@@ -2995,48 +3120,83 @@ contract DeltaTransformer is Console {
 
     Batch memory decodedBatch = abi.decode(encodedBatch, (Batch));
 
-    uint[] memory lArgs = abi.decode(leftArguments, (uint[]));
-    uint[] memory rArgs = abi.decode(rightArguments, (uint[]));
+    uint32[] memory lFillRatios;
+    uint32[] memory rFillRatios;
+    bytes32[] memory lSecrets;
+    bytes32[] memory rSecrets;
+    if (leftArguments.length > 0) {
+      (lFillRatios, lSecrets) = abi.decode(leftArguments, (uint32[], bytes32[]));
+    } else {
+      lFillRatios = new uint32[](0);
+      lSecrets = new bytes32[](0);
+    }
+    if (rightArguments.length > 0) {
+      (rFillRatios, rSecrets) = abi.decode(rightArguments, (uint32[], bytes32[]));
+    } else {
+      rFillRatios = new uint32[](0);
+      rSecrets = new bytes32[](0);
+    }
     
     for (uint i = 0; i < decodedBatch.payment.length; i++) {
-      applyPayment(deltas, decodedBatch.payment[i]);
+      applyPayment(deltas, decodedBatch.payment[i], lSecrets, rSecrets);
     }
 
     uint leftSwaps = 0;
+    uint rightSwaps = 0;
     for (uint i = 0; i < decodedBatch.swap.length; i++) {
       Swap memory swap = decodedBatch.swap[i];
 
-      uint32 fillRatio = uint32(swap.ownerIsLeft ? lArgs[leftSwaps] : rArgs[i  - leftSwaps]);
+      // Counterparty chooses fill ratio (maker doesn't).
+      // Left-owned swap -> use right arguments; Right-owned swap -> use left arguments.
+      uint32 fillRatio = 0;
+      if (swap.ownerIsLeft) {
+        if (rightSwaps < rFillRatios.length) fillRatio = rFillRatios[rightSwaps];
+        rightSwaps++;
+      } else {
+        if (leftSwaps < lFillRatios.length) fillRatio = lFillRatios[leftSwaps];
+        leftSwaps++;
+      }
 
       applySwap(deltas, swap, fillRatio);
       //logDeltas("Deltas after swap", deltas);
-
-      if (swap.ownerIsLeft) {
-        leftSwaps++;
-      }
     }
 
     return deltas;
   }
 
-  function applyPayment(int[] memory deltas, Payment memory payment) private {
-    // apply amount to delta if revealed on time
-    // this is "sprites" approach (https://arxiv.org/pdf/1702.05812) 
-    // the opposite is "blitz" (https://www.usenix.org/system/files/sec21fall-aumayr.pdf)
+  function applyPayment(int[] memory deltas, Payment memory payment, bytes32[] memory lSecrets, bytes32[] memory rSecrets) private {
+    // Apply amount to delta if revealed on time.
+    // Primary: calldata secrets (no storage). Fallback: on-chain registry (hashToBlock).
     uint revealedAt = hashToBlock[payment.hash];
-    if (revealedAt == 0 || revealedAt > payment.revealedUntilBlock) {
-      return;
+    bool revealed = false;
+    if (revealedAt != 0 && revealedAt <= payment.revealedUntilBlock) {
+      revealed = true;
     }
+    if (!revealed && block.number <= payment.revealedUntilBlock) {
+      if (matchesSecret(payment.hash, lSecrets) || matchesSecret(payment.hash, rSecrets)) {
+        revealed = true;
+      }
+    }
+    if (!revealed) return;
 
     logDeltas("Before payment", deltas);
     deltas[payment.deltaIndex] += payment.amount;
     logDeltas("After payment", deltas);
   }
 
+  function matchesSecret(bytes32 hashlock, bytes32[] memory secrets) private pure returns (bool) {
+    for (uint i = 0; i < secrets.length; i++) {
+      if (keccak256(abi.encode(secrets[i])) == hashlock) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   function applySwap(int[] memory deltas, Swap memory swap, uint32 fillRatio) private {
     logDeltas("Before swap", deltas);
-    deltas[swap.addDeltaIndex] += int(swap.addAmount * fillRatio / MAXUINT32);
-    deltas[swap.subDeltaIndex] -= int(swap.subAmount * fillRatio / MAXUINT32);
+    deltas[swap.addDeltaIndex] += int(swap.addAmount * fillRatio / MAX_FILL_RATIO);
+    deltas[swap.subDeltaIndex] -= int(swap.subAmount * fillRatio / MAX_FILL_RATIO);
     logDeltas("After swap", deltas);
   }
 
@@ -3070,7 +3230,8 @@ contract DeltaTransformer is Console {
 
 }
 
-//runtime/types.ts (1585 lines)
+
+//runtime/types.ts (1684 lines)
 /**
  * XLN Type Definitions
  * All interfaces and type definitions used across the XLN system
@@ -3406,6 +3567,14 @@ export type JurisdictionEvent =
       };
     })
   | (JEventMetadata & {
+      type: 'SecretRevealed';
+      data: {
+        hashlock: string;
+        revealer: string;
+        secret: string;
+      };
+    })
+  | (JEventMetadata & {
       type: 'AccountSettled';
       data: {
         leftEntity: string;
@@ -3557,7 +3726,24 @@ export type EntityTx =
           collateralDiff: bigint;
           ondeltaDiff: bigint;
         }>;
+        sig: string; // Hanko signature from counterparty
         description?: string; // e.g., "Fund collateral from reserve"
+      };
+    }
+  | {
+      type: 'disputeStart';
+      data: {
+        counterpartyEntityId: string;
+        description?: string;
+      };
+    }
+  | {
+      type: 'disputeFinalize';
+      data: {
+        counterpartyEntityId: string;
+        cooperative?: boolean;  // If true, use cooperative finalization
+        useOnchainRegistry?: boolean; // Optional HTLC reveal via on-chain registry
+        description?: string;
       };
     }
   | {
@@ -3661,6 +3847,7 @@ export type EntityTx =
           collateralDiff: bigint;
           ondeltaDiff: bigint;
         }>;
+        sig: string; // Hanko signature from counterparty (required for cooperative settlement)
       };
     };
 
@@ -3694,7 +3881,7 @@ export interface AccountSnapshot {
  */
 export interface HtlcLock {
   lockId: string;              // keccak256(hash + height + nonce)
-  hashlock: string;            // keccak256(secret) - 32 bytes hex
+  hashlock: string;            // keccak256(abi.encode(secret)) - 32 bytes hex
   timelock: bigint;            // Expiry timestamp (unix-ms)
   revealBeforeHeight: number;  // J-block height deadline (enforced on-chain)
   amount: bigint;              // Locked amount
@@ -3822,10 +4009,49 @@ export interface AccountMachine {
     leftDisputeDelay: number;   // uint16 - value * 10 = blocks
     rightDisputeDelay: number;  // uint16 - value * 10 = blocks
   };
-  // HANKO SYSTEM: Bilateral hanko storage for disputes
-  currentAccountProofHanko?: HankoString; // Most recent account proof hanko (for disputes)
-  counterpartyAccountProofHanko?: HankoString; // Counterparty's most recent hanko (for disputes)
-  hankoSignature?: string; // LEGACY - will be replaced by currentAccountProofHanko
+  // HANKO SYSTEM: Frame consensus + Dispute proofs
+  currentFrameHanko?: HankoString;           // My hanko on current frame (bilateral consensus)
+  counterpartyFrameHanko?: HankoString;      // Their hanko on current frame (bilateral consensus)
+
+  currentDisputeProofHanko?: HankoString;              // My hanko on dispute proof (for J-machine enforcement)
+  currentDisputeProofCooperativeNonce?: number;        // Cooperative nonce used in currentDisputeProofHanko
+  currentDisputeProofBodyHash?: string;                // ProofBodyHash used in currentDisputeProofHanko
+  counterpartyDisputeProofHanko?: HankoString;         // Their hanko on dispute proof (ready for disputes)
+  counterpartyDisputeProofCooperativeNonce?: number;   // Cooperative nonce used in counterpartyDisputeProofHanko
+  counterpartyDisputeProofBodyHash?: string;           // ProofBodyHash that counterparty signed (MUST match dispute)
+  disputeProofNoncesByHash?: Record<string, number>;   // ProofBodyHash → cooperative nonce (local + counterparty)
+  disputeProofBodiesByHash?: Record<string, any>;      // ProofBodyHash → ProofBodyStruct (for dispute finalize)
+
+  // SETTLEMENT HANKO: Cooperative state updates (for j-batch settlements)
+  currentSettlementHanko?: HankoString;
+  currentSettlementDiffs?: Array<{
+    tokenId: number;
+    leftDiff: bigint;
+    rightDiff: bigint;
+    collateralDiff: bigint;
+    ondeltaDiff: bigint;
+  }>;
+  counterpartySettlementHanko?: HankoString;
+  counterpartySettlementDiffs?: Array<{
+    tokenId: number;
+    leftDiff: bigint;
+    rightDiff: bigint;
+    collateralDiff: bigint;
+    ondeltaDiff: bigint;
+  }>;
+
+  // Active dispute state (set after disputeStart, needed for disputeFinalize)
+  activeDispute?: {
+    startedByLeft: boolean;           // Who initiated dispute (from on-chain)
+    initialProofbodyHash: string;     // Hash committed in disputeStart
+    initialDisputeNonce: number;      // Dispute nonce from disputeStart
+    disputeTimeout: number;           // Block number when timeout expires
+    initialCooperativeNonce: number;  // Cooperative nonce PASSED to disputeStart (for hash match)
+    onChainCooperativeNonce: number;  // On-chain nonce (may differ from initial)
+    initialArguments?: string;        // On-chain initialArguments from disputeStart
+  };
+
+  hankoSignature?: string; // LEGACY - will be removed
 
   // Historical frame log - grows until manually pruned by entity
   frameHistory: AccountFrame[]; // All confirmed bilateral frames in chronological order
@@ -3876,9 +4102,19 @@ export interface AccountInput {
   height?: number;                   // Which frame we're ACKing or referencing (renamed from frameId)
 
   // HANKO SYSTEM:
-  prevHanko?: HankoString;           // ACK hanko for their frame
-  newAccountFrame?: AccountFrame;    // Our new proposed frame (like block in Channel.ts)
-  newHanko?: HankoString;            // Hanko on newAccountFrame
+  prevHanko?: HankoString;                // ACK hanko for their frame
+  newAccountFrame?: AccountFrame;         // Our new proposed frame (like block in Channel.ts)
+  newHanko?: HankoString;                 // Hanko on newAccountFrame
+  newDisputeHanko?: HankoString;          // Hanko on dispute proof (for J-machine enforcement)
+  newDisputeProofBodyHash?: string;       // ProofBodyHash that newDisputeHanko signs
+  newSettlementHanko?: HankoString;
+  newSettlementDiffs?: Array<{
+    tokenId: number;
+    leftDiff: bigint;
+    rightDiff: bigint;
+    collateralDiff: bigint;
+    ondeltaDiff: bigint;
+  }>;
 
   // LEGACY (will be removed):
   prevSignatures?: string[];         // ACK for their frame (LEGACY)
@@ -4159,6 +4395,9 @@ export interface EntityState {
   // Mirrors A-Machine state for easy UI access, updated on frame commits
   swapBook: Map<string, SwapBookEntry>;  // offerId → entry
   lockBook: Map<string, LockBookEntry>;  // lockId → entry
+
+  // 📈 Pending swap fill ratios (orderbook → dispute arguments)
+  pendingSwapFillRatios?: Map<string, number>; // key = "accountId:offerId"
 }
 
 /** Aggregated swap order entry at E-Machine level */
@@ -4248,6 +4487,13 @@ export interface FrameLogEntry {
   data?: Record<string, unknown>; // Structured data
 }
 
+export interface BrowserVMState {
+  stateRoot: string;
+  trieData: Array<[string, string]>;
+  nonce: string;
+  addresses: { depository: string; entityProvider: string };
+}
+
 export interface Env {
   eReplicas: Map<string, EntityReplica>;  // Entity replicas (E-layer state machines)
   jReplicas: Map<string, JReplica>;       // Jurisdiction replicas (J-layer EVM state)
@@ -4259,11 +4505,17 @@ export interface Env {
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: any; // Gossip layer for network profiles
 
+  // Isolated BrowserVM instance per runtime (prevents cross-runtime state leakage)
+  browserVM?: any; // BrowserVMProvider instance for this runtime
+  browserVMState?: BrowserVMState; // Serialized BrowserVM state for time travel
+
   // Active jurisdiction
   activeJurisdiction?: string; // Currently active J-replica name
 
   // Scenario mode: deterministic time control (scenarios set env.timestamp manually)
   scenarioMode?: boolean; // When true, runtime doesn't auto-update timestamp
+  strictScenario?: boolean; // When true, runtime asserts invariants per frame
+  strictScenarioLabel?: string; // Optional label for strict scenario errors
 
   // Frame stepping: stop at specific frame for debugging
   stopAtFrame?: number; // When set, process() stops at this frame and dumps state
@@ -4325,7 +4577,11 @@ export interface JReplica {
   // Visual position (for 3D rendering)
   position: { x: number; y: number; z: number };
 
-  // Decoded contract addresses for UI
+  // Contract addresses (primary)
+  depositoryAddress?: string; // Primary depository address (for replay protection)
+  entityProviderAddress?: string; // Primary entity provider address
+
+  // Decoded contract addresses for UI (deprecated - use depositoryAddress/entityProviderAddress)
   contracts?: {
     depository?: string;
     entityProvider?: string;
@@ -4355,6 +4611,7 @@ export interface JTx {
     batch: any; // JBatch structure from j-batch.ts
     hankoSignature?: string;
     batchSize: number;
+    signerId?: string;
   };
   timestamp: number;
   expectedJBlock?: number; // Expected j-block height (for replay protection)
@@ -4375,6 +4632,7 @@ export interface EnvSnapshot {
   runtimeId?: string;
   eReplicas: Map<string, EntityReplica>;  // E-layer state
   jReplicas: JReplica[];                   // J-layer state (with stateRoot for time travel)
+  browserVMState?: BrowserVMState;
   runtimeInput: RuntimeInput;
   runtimeOutputs: EntityInput[];
   description: string;
@@ -4572,6 +4830,7 @@ export interface Xlnomy {
   contracts: {
     entityProviderAddress: string;
     depositoryAddress: string;
+    deltaTransformerAddress?: string;
   };
 
   // EVM instance (BrowserVM in-browser, or Reth/Erigon RPC)
@@ -4638,6 +4897,7 @@ export interface XlnomySnapshot {
   contracts: {
     entityProviderAddress: string;
     depositoryAddress: string;
+    deltaTransformerAddress?: string;
   };
 
   // EVM-specific state
@@ -5178,7 +5438,7 @@ export const safeExtractEntityId = (keyString: string): EntityId | null => {
 };
 
 
-//runtime/runtime.ts (2151 lines)
+//runtime/runtime.ts (2252 lines)
 // for regular use > bun run runtime/runtime.ts
 // for debugging > bun repl
 // await import('./debug.js');
@@ -5188,8 +5448,13 @@ export const safeExtractEntityId = (keyString: string): EntityId | null => {
 // High-level database using Level polyfill (works in both Node.js and browser)
 import { Level } from 'level';
 
+// Bump this when you need to confirm the browser picked up a new runtime bundle.
+const RUNTIME_BUILD_ID = '2025-02-16-22:50Z';
+console.log(`🚀 RUNTIME.JS BUILD: ${RUNTIME_BUILD_ID}`);
+
 import { getPerfMs, getWallClockMs } from './time';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
+import { isLeftEntity } from './entity-id-utils';
 import {
   createLazyEntity,
   createNumberedEntity,
@@ -5223,7 +5488,7 @@ import {
 } from './evm';
 import { createGossipLayer } from './gossip';
 import { attachEventEmitters } from './env-events';
-import { deriveSignerAddressSync, deriveSignerKeySync, getSignerPublicKey, registerSignerKey, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, getSignerPrivateKey, getSignerPublicKey, registerSignerKey, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
 import { buildEntityProfile } from './gossip-helper';
 import { RuntimeP2P, type P2PConfig } from './p2p';
 import {
@@ -5659,7 +5924,7 @@ export const getP2P = (): RuntimeP2P | null => p2pOverlay;
  */
 export const initEnv = (): Env => {
   if (!env) {
-    env = createEmptyEnv();
+    env = createEmptyEnv(runtimeSeed);
     if (env.runtimeSeed) {
       setCryptoRuntimeSeed(env.runtimeSeed);
     }
@@ -5703,7 +5968,7 @@ export const processJBlockEvents = async (): Promise<void> => {
 const startJEventWatcher = async (env: Env): Promise<void> => {
   // BrowserVM is the default - it handles events synchronously via processJBlockEvents()
   // External RPC watcher is disabled until we support remote jurisdictions
-  const browserVM = getBrowserVMInstance();
+  const browserVM = getBrowserVMInstance(env);
   if (browserVM) {
     console.log('🔭 J-WATCHER: Using BrowserVM (external RPC not needed)');
     return;
@@ -5852,6 +6117,10 @@ const applyRuntimeInput = async (
             env, // Pass env so grid entities get added to runtime
           });
 
+          if (xlnomy.evmType === 'browservm' && xlnomy.contracts?.depositoryAddress) {
+            setBrowserVMJurisdiction(xlnomy.contracts.depositoryAddress, xlnomy.evm);
+          }
+
           // Initialize jReplicas Map if it doesn't exist
           if (!env.jReplicas) {
             env.jReplicas = new Map();
@@ -5938,6 +6207,7 @@ const applyRuntimeInput = async (
             // 📖 Aggregated books (E-Machine view of A-Machine positions)
             swapBook: new Map(),
             lockBook: new Map(),
+            pendingSwapFillRatios: new Map(),
           },
         };
 
@@ -5958,6 +6228,26 @@ const applyRuntimeInput = async (
 
         env.eReplicas.set(replicaKey, replica);
 
+        const browserVM = getBrowserVMInstance(env);
+        if (browserVM) {
+          const validators = runtimeTx.data.config.validators;
+          const threshold = runtimeTx.data.config.threshold;
+          if (validators.length === 1 && threshold === 1n) {
+            const signerId = validators[0];
+            try {
+              const privateKey = getSignerPrivateKey(env, signerId);
+              const privateKeyHex = `0x${Array.from(privateKey).map(b => b.toString(16).padStart(2, '0')).join('')}`;
+              if (typeof browserVM.registerEntityWallet === 'function') {
+                browserVM.registerEntityWallet(runtimeTx.entityId, privateKeyHex);
+              } else {
+                console.warn(`⚠️ BrowserVM missing registerEntityWallet - skipping wallet registration for ${runtimeTx.entityId.slice(0, 10)}...`);
+              }
+            } catch (error) {
+              console.warn(`⚠️ Cannot derive private key for signer ${signerId} (no env.runtimeSeed), skipping BrowserVM wallet registration`);
+            }
+          }
+        }
+
         // Ensure entity-level signing key exists for this runtime (needed for gossip public key)
         if (runtimeSeed) {
           try {
@@ -5976,7 +6266,7 @@ const applyRuntimeInput = async (
 
         // Broadcast initial profile to gossip layer
         if (env.gossip && createdReplica) {
-          const entityPublicKey = getSignerPublicKey(runtimeTx.entityId);
+          const entityPublicKey = getSignerPublicKey(env, runtimeTx.entityId);
           const publicKeyHex = entityPublicKey ? `0x${Buffer.from(entityPublicKey).toString('hex')}` : undefined;
           const profile = buildEntityProfile(createdReplica.state, undefined, env.timestamp);
           profile.runtimeId = env.runtimeId;
@@ -6145,7 +6435,7 @@ const applyRuntimeInput = async (
 
       // CRITICAL: Update JReplica stateRoots from BrowserVM BEFORE snapshot
       // Without this, time-travel shows stale EVM state from xlnomy creation
-      const browserVM = getBrowserVMInstance();
+      const browserVM = getBrowserVMInstance(env);
       if (browserVM?.captureStateRoot && env.jReplicas) {
         try {
           const freshStateRoot = await browserVM.captureStateRoot();
@@ -6266,7 +6556,7 @@ const applyRuntimeInput = async (
 
 // This is the new, robust main function that replaces the old one.
 const main = async (): Promise<Env> => {
-  console.log('🚀 RUNTIME.JS VERSION: 2025-10-05-16:45 - GRID POSITIONS + ACTIVITY HIGHLIGHTS');
+  console.log(`🚀 RUNTIME.JS VERSION: ${RUNTIME_BUILD_ID}`);
 
   // Open database before any operations
   const dbReady = await tryOpenDb();
@@ -6296,7 +6586,7 @@ const main = async (): Promise<Env> => {
   await loadPersistedProfiles(db, gossipLayer);
 
   // First, create default environment with gossip layer and event emitters
-  env = createEmptyEnv();
+  env = createEmptyEnv(runtimeSeed);
   env.gossip = gossipLayer; // Override default gossip with persisted profiles
 
   // Try to load saved state from database
@@ -6387,11 +6677,11 @@ const main = async (): Promise<Env> => {
       }
 
       // Create env with proper event emitters, then populate from snapshot
-      env = createEmptyEnv();
-      if (latestSnapshot.runtimeSeed) {
-        runtimeSeed = latestSnapshot.runtimeSeed;
+      const snapshotSeed = latestSnapshot.runtimeSeed || null;
+      env = createEmptyEnv(snapshotSeed);
+      if (snapshotSeed) {
+        runtimeSeed = snapshotSeed;
         setCryptoRuntimeSeed(runtimeSeed);
-        env.runtimeSeed = runtimeSeed;
       }
       if (latestSnapshot.runtimeId) {
         runtimeId = latestSnapshot.runtimeId;
@@ -6550,7 +6840,7 @@ const calculateSolvency = (snapshot?: Env): Solvency => {
 
     // Sum collateral (left entity only to avoid double-counting)
     for (const [counterpartyId, account] of replica.state.accounts) {
-      if (replica.state.entityId < counterpartyId) {
+      if (isLeftEntity(replica.state.entityId, counterpartyId)) {
         for (const [tokenId, delta] of account.deltas) {
           collateral += delta.collateral;
           const existing = byToken.get(tokenId) || { reserves: 0n, collateral: 0n, total: 0n };
@@ -6806,13 +7096,18 @@ const demoCompleteHanko = async (): Promise<void> => {
 // Global reference to current env for log capturing
 let currentEnvForLogs: Env | null = null;
 
-export const createEmptyEnv = (): Env => {
+export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
+  // Convert seed to proper format
+  const seedBytes = seed !== undefined && seed !== null
+    ? (typeof seed === 'string' ? new TextEncoder().encode(seed) : seed)
+    : null;
+
   const env: Env = {
     eReplicas: new Map(),
     jReplicas: new Map(),
     height: 0,
     timestamp: 0,
-    ...(runtimeSeed ? { runtimeSeed } : {}),
+    ...(seedBytes ? { runtimeSeed: seedBytes } : {}),
     ...(runtimeId ? { runtimeId } : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
@@ -6826,6 +7121,8 @@ export const createEmptyEnv = (): Env => {
     warn: () => {},
     error: () => {},
     emit: () => {},
+    // BrowserVM will be lazily initialized on first use (see evm.ts)
+    browserVM: null,
   };
 
   // Attach event emission methods (EVM-style)
@@ -6978,7 +7275,7 @@ export const process = async (
     } else {
       env.timestamp = getWallClockMs();
     }
-    getBrowserVMInstance()?.setBlockTimestamp?.(env.timestamp);
+    getBrowserVMInstance(env)?.setBlockTimestamp?.(env.timestamp);
 
     if (allInputs.length > 0) {
       console.log(`📥 TICK: Processing ${allInputs.length} inputs for [${allInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
@@ -7045,7 +7342,7 @@ export const process = async (
           // Process each JTx in mempool
           const { broadcastBatch } = await import('./j-batch');
           const { getBrowserVMInstance } = await import('./evm');
-          const browserVM = getBrowserVMInstance();
+          const browserVM = getBrowserVMInstance(env);
 
           if (browserVM?.beginJurisdictionBlock) {
             browserVM.beginJurisdictionBlock(env.timestamp);
@@ -7056,6 +7353,14 @@ export const process = async (
               console.log(`🔨 [J-Machine] Executing batch from ${jTx.entityId.slice(-4)}`);
               console.log(`   Batch size: ${jTx.data.batchSize || 'unknown'}`);
               console.log(`   Batch.reserveToReserve:`, jTx.data.batch.reserveToReserve);
+              let batchSummary: string | undefined;
+              try {
+                const { summarizeBatch } = await import('./j-batch');
+                batchSummary = safeStringify(summarizeBatch(jTx.data.batch));
+                console.log(`   Batch.summary: ${batchSummary}`);
+              } catch {
+                // best-effort debug only
+              }
 
               // Create temporary jBatchState for broadcastBatch call
               const tempJBatchState = {
@@ -7068,11 +7373,13 @@ export const process = async (
 
               // Execute batch on BrowserVM
               const result = await broadcastBatch(
+                env,
                 jTx.entityId,
                 tempJBatchState,
                 null, // jurisdiction not needed for BrowserVM
                 browserVM || undefined,
-                jTx.timestamp ?? env.timestamp
+                jTx.timestamp ?? env.timestamp,
+                jTx.data?.signerId
               );
 
               if (result.success) {
@@ -7080,6 +7387,20 @@ export const process = async (
                 console.log(`   📡 ${result.events?.length || 0} events will route back to entities`);
               } else {
                 console.error(`   ❌ Batch execution failed: ${result.error}`);
+                if (!batchSummary) {
+                  try {
+                    const { summarizeBatch } = await import('./j-batch');
+                    batchSummary = safeStringify(summarizeBatch(jTx.data.batch));
+                    console.error(`   ❌ Failed batch summary: ${batchSummary}`);
+                  } catch {
+                    // best-effort debug only
+                  }
+                } else {
+                  console.error(`   ❌ Failed batch summary: ${batchSummary}`);
+                }
+                if (env.scenarioMode) {
+                  throw new Error(`J-BATCH FAILED: ${result.error || 'unknown error'}`);
+                }
               }
             }
           }
@@ -7090,7 +7411,7 @@ export const process = async (
 
           // Clear mempool immediately after processing (all txs executed)
           const processedCount = mempool.length;
-          const successCount = processedCount; // All succeeded (failures would throw above)
+          const successCount = processedCount; // Failures would throw in scenario mode
           const failCount = 0;
 
           // CRITICAL: Clear mempool immediately (txs already executed)
@@ -7125,6 +7446,20 @@ export const process = async (
 
     // ALWAYS snapshot after tick (full frame chain)
     // env.extra only adds metadata (subtitle, description) - optional
+    let browserVMState: any = undefined;
+    const browserVMStateSource = getBrowserVMInstance(env);
+    if (browserVMStateSource?.serializeState) {
+      try {
+        browserVMState = await browserVMStateSource.serializeState();
+        env.browserVMState = browserVMState;
+      } catch (error) {
+        console.warn('[Runtime] Failed to serialize BrowserVM state:', error);
+        if (env.scenarioMode) {
+          throw error;
+        }
+      }
+    }
+
     const snapshot: any = {
       height: env.height,
       timestamp: env.timestamp,
@@ -7140,6 +7475,7 @@ export const process = async (
       runtimeOutputs: env.pendingOutputs || [],
       frameLogs: env.frameLogs || [],
       title: `Frame ${env.history?.length || 0}`, // Default title
+      ...(browserVMState ? { browserVMState } : {}),
     };
 
     // Add metadata if provided via snap()
@@ -7160,6 +7496,11 @@ export const process = async (
 
     // Auto-persist
     await saveEnvToDB(env);
+
+    if (env.strictScenario) {
+      const { assertRuntimeStateStrict } = await import('./strict-assertions');
+      await assertRuntimeStateStrict(env);
+    }
     return env;
   } finally {
     processing = false;
@@ -7179,15 +7520,33 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
 
     // Save environment snapshot (jReplicas with stateRoot are serializable)
     // CRITICAL: Exclude 'history' to prevent exponential growth (history contains all previous snapshots)
+    const seen = new WeakSet();
     const snapshot = JSON.stringify(env, (k, v) => {
       if (k === 'history') return undefined; // Skip history - it's rebuilt from individual snapshots
-      return typeof v === 'bigint' ? String(v) :
-        v instanceof Uint8Array ? Array.from(v) :
-        v instanceof Map ? Array.from(v.entries()) : v;
+      if (k === 'browserVM') return undefined; // BrowserVM is non-serializable (circular refs)
+      if (k === 'log' || k === 'info' || k === 'warn' || k === 'error' || k === 'emit') return undefined;
+      if (k === 'gossip' && v && typeof v === 'object') {
+        return {
+          profiles: v.profiles instanceof Map ? Array.from(v.profiles.entries()) : v.profiles,
+        };
+      }
+      if (typeof v === 'bigint') return String(v);
+      if (v instanceof Uint8Array) return Array.from(v);
+      if (v instanceof Map) return Array.from(v.entries());
+      if (v instanceof Set) return Array.from(v);
+      if (typeof v === 'function') return undefined;
+      if (v && typeof v === 'object') {
+        if (seen.has(v)) return '[Circular]';
+        seen.add(v);
+      }
+      return v;
     });
     await db.put(Buffer.from(`snapshot:${env.height}`), Buffer.from(snapshot));
   } catch (err) {
     console.error('❌ Failed to save to LevelDB:', err);
+    if (env.scenarioMode) {
+      throw err;
+    }
   }
 };
 
@@ -7208,11 +7567,13 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
       const data = JSON.parse(buffer.toString());
 
       // Hydrate Maps/BigInts
-      const env = createEmptyEnv();
+      const env = createEmptyEnv(data.runtimeSeed || null);
       env.height = BigInt(data.height || 0);
       env.timestamp = BigInt(data.timestamp || 0);
+      if (data.browserVMState) {
+        env.browserVMState = data.browserVMState;
+      }
       if (data.runtimeSeed) {
-        env.runtimeSeed = data.runtimeSeed;
         setCryptoRuntimeSeed(data.runtimeSeed);
       }
       if (data.runtimeId) {
@@ -7331,13 +7692,14 @@ export { BrowserEVM } from './evms/browser-evm.js';
 export { formatRuntime, formatEntity, formatAccount, formatOrderbook, formatSummary } from './runtime-ascii';
 
 
-//runtime/entity-consensus.ts (1193 lines)
+//runtime/entity-consensus.ts (1209 lines)
 /**
  * XLN Entity Consensus and State Management
  * Core entity processing logic, consensus, proposals, and state transitions
  */
 
 import { applyEntityTx } from './entity-tx';
+import { isLeftEntity } from './entity-id-utils';
 import { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env } from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
@@ -7551,6 +7913,15 @@ export const applyEntityInput = async (
     workingReplica.state.crontabState = initCrontab();
   }
 
+  const hasManualBroadcast = Boolean(entityInput.entityTxs?.some(tx => tx.type === 'j_broadcast'));
+  if (hasManualBroadcast) {
+    const broadcastTask = workingReplica.state.crontabState.tasks.get('broadcastBatch');
+    if (broadcastTask) {
+      // Avoid auto-broadcast clobbering explicit j_broadcast in this tick.
+      broadcastTask.lastRun = workingReplica.state.timestamp;
+    }
+  }
+
   const crontabOutputs = await executeCrontab(workingReplica, workingReplica.state.crontabState);
   if (crontabOutputs.length > 0) {
     console.log(`⏰ CRONTAB: Generated ${crontabOutputs.length} outputs from periodic tasks`);
@@ -7643,7 +8014,7 @@ export const applyEntityInput = async (
 
       // SECURITY: Verify signatures are for the correct frame hash
       for (const [signerId, signature] of entityInput.precommits) {
-        if (!verifyFrame(signerId, entityInput.proposedFrame.hash, signature)) {
+        if (!verifyFrame(env, signerId, entityInput.proposedFrame.hash, signature)) {
           logError("FRAME_CONSENSUS", `❌ BYZANTINE: Invalid signature from ${signerId}`);
           logError("FRAME_CONSENSUS", `   Frame hash: ${entityInput.proposedFrame.hash.slice(0,30)}...`);
           logError("FRAME_CONSENSUS", `   Signature: ${signature.slice(0,30)}...`);
@@ -7698,7 +8069,7 @@ export const applyEntityInput = async (
     entityInput.proposedFrame &&
     (!workingReplica.proposal || (workingReplica.state.config.mode === 'gossip-based' && workingReplica.isProposer))
   ) {
-    const frameSignature = signFrame(workingReplica.signerId, entityInput.proposedFrame.hash);
+    const frameSignature = signFrame(env, workingReplica.signerId, entityInput.proposedFrame.hash);
     const config = workingReplica.state.config;
 
     // Lock to this frame (CometBFT style)
@@ -7909,7 +8280,7 @@ export const applyEntityInput = async (
     // Impact: Without this, equivocation attacks possible in multi-validator setup
     // See: docs/htlc-hardening.md for full security audit
     const frameHash = `frame_${workingReplica.state.height + 1}_${newTimestamp}`;
-    const selfSignature = signFrame(workingReplica.signerId, frameHash);
+    const selfSignature = signFrame(env, workingReplica.signerId, frameHash);
 
     workingReplica.proposal = {
       height: workingReplica.state.height + 1,
@@ -8090,7 +8461,7 @@ export const applyEntityFrame = async (
       if (accountMachine) {
         // Add to proposable if:
         // - We have pending mempool items and no pending frame
-        const isAck = entityTx.data.height && entityTx.data.prevSignatures;
+        const isAck = entityTx.data.height && entityTx.data.prevHanko;
         const hasPendingTxs = accountMachine.mempool.length > 0;
 
         // Only propose if we have something to send:
@@ -8118,7 +8489,7 @@ export const applyEntityFrame = async (
       // Note: accountKey is counterparty ID (e.g., "alice", "bob")
       if (HEAVY_LOGS) console.log(`🔍 DIRECT-PAYMENT-SCAN: Entity ${currentEntityState.entityId.slice(-4)} has ${currentEntityState.accounts.size} accounts`);
       for (const [counterpartyId, accountMachine] of currentEntityState.accounts) {
-        const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
+        const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
         if (HEAVY_LOGS) console.log(`🔍 Checking account ${counterpartyId.slice(-10)}: mempool=${accountMachine.mempool.length}, isLeft=${isLeft}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map((t: any) => t.type).join(',')}]`);
         if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
           proposableAccounts.add(counterpartyId);
@@ -8133,7 +8504,7 @@ export const applyEntityFrame = async (
       // Account keyed by counterparty ID
       const accountMachine = currentEntityState.accounts.get(targetEntity);
       if (accountMachine) {
-        const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
+        const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
         if (isLeft && accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
           proposableAccounts.add(targetEntity);
           console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (new account opened)`);
@@ -8191,6 +8562,12 @@ export const applyEntityFrame = async (
         account.mempool.push(tx);
         proposableAccounts.add(accountId);
         console.log(`📊   → ${accountId.slice(-8)}: ${tx.type}`);
+      }
+
+      if (tx.type === 'swap_resolve') {
+        currentEntityState.pendingSwapFillRatios ||= new Map();
+        const key = `${accountId}:${tx.data.offerId}`;
+        currentEntityState.pendingSwapFillRatios.set(key, tx.data.fillRatio);
       }
     }
 
@@ -8526,7 +8903,7 @@ export const handleEmptyMempoolProposer = (): void => {
 };
 
 
-//runtime/account-consensus.ts (1190 lines)
+//runtime/account-consensus.ts (1377 lines)
 /**
  * XLN Account Consensus System
  *
@@ -8550,12 +8927,55 @@ import { logError } from './logger';
 import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
 import { processAccountTx } from './account-tx/apply';
+import { buildSettlementDiffs, createSettlementHash } from './proof-builder.js';
 
 // Removed createValidAccountSnapshot - using simplified AccountSnapshot interface
 
 // === CONSTANTS ===
 const MEMPOOL_LIMIT = 1000;
 const MAX_MESSAGE_COUNTER = 1000000;
+
+/**
+ * Get depositoryAddress from environment (BrowserVM or active J-replica)
+ * CRITICAL for replay protection - domain separator for signatures
+ */
+function getDepositoryAddress(env: Env): string {
+  // Try BrowserVM first (most common)
+  if (env.browserVM) {
+    const browserVM = env.browserVM;
+    const getAddress = browserVM.getDepositoryAddress?.() || browserVM.browserVM?.getDepositoryAddress?.();
+    if (getAddress && getAddress !== '0x0000000000000000000000000000000000000000') {
+      return getAddress;
+    }
+  }
+
+  // Try active jurisdiction
+  if (env.activeJurisdiction) {
+    const jReplica = env.jReplicas.get(env.activeJurisdiction);
+    if (jReplica?.depositoryAddress) {
+      return jReplica.depositoryAddress;
+    }
+    // Fallback to legacy contracts.depository
+    if (jReplica?.contracts?.depository) {
+      return jReplica.contracts.depository;
+    }
+  }
+
+  // Fallback: first J-replica with depositoryAddress
+  for (const jReplica of env.jReplicas.values()) {
+    if (jReplica.depositoryAddress) {
+      return jReplica.depositoryAddress;
+    }
+    // Fallback to legacy contracts.depository
+    if (jReplica.contracts?.depository) {
+      return jReplica.contracts.depository;
+    }
+  }
+
+  // Last resort: return zero address (will fail verification but won't crash)
+  console.warn('[account-consensus] ⚠️ No depositoryAddress found in env - using zero address (signatures will fail!)');
+  return '0x0000000000000000000000000000000000000000';
+}
 const MAX_FRAME_TIMESTAMP_DRIFT_MS = 300000; // 5 minutes
 const MAX_FRAME_SIZE_BYTES = 1048576; // 1MB frame size limit (Bitcoin block size standard)
 
@@ -8666,6 +9086,10 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
   return ethers.keccak256(ethers.toUtf8Bytes(encoded));
 }
 
+export async function computeFrameHash(frame: AccountFrame): Promise<string> {
+  return createFrameHash(frame);
+}
+
 // === TRANSACTION PROCESSING ===
 
 // Transaction processing now delegated to account-tx/apply.ts (modular handlers)
@@ -8732,6 +9156,8 @@ export async function proposeAccountFrame(
 
   // Clone account machine for validation
   const clonedMachine = cloneAccountMachine(accountMachine);
+  // Dispute nonce tracks committed frame height for counter-dispute support
+  clonedMachine.proofHeader.disputeNonce = accountMachine.currentHeight + 1;
 
   // Get entity's synced J-height for deterministic HTLC validation
   const ourEntityId = accountMachine.proofHeader.fromEntity;
@@ -8844,7 +9270,7 @@ export async function proposeAccountFrame(
   })));
 
   // Determine if we're left entity (for byLeft field)
-  const weAreLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
+  const weAreLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
   // Ensure monotonic timestamps within account (HTLC safety + multi-runtime compatibility)
   // In multi-runtime P2P scenarios, different runtimes may have different clock rates
@@ -8856,11 +9282,14 @@ export async function proposeAccountFrame(
   }
 
   // Create account frame matching the real AccountFrame interface
+  // CRITICAL: Deep-copy accountTxs to prevent mutation issues (j_event_claim data can be modified later)
+  // Use structuredClone to preserve BigInt values
+  const accountTxsCopy = structuredClone([...accountMachine.mempool]);
   const frameData = {
     height: accountMachine.currentHeight + 1,
     timestamp: frameTimestamp, // MONOTONIC: max(env.timestamp, prev+1) for multi-runtime safety
     jHeight: frameJHeight, // CRITICAL: J-height for HTLC consensus
-    accountTxs: [...accountMachine.mempool],
+    accountTxs: accountTxsCopy,
     // CRITICAL: Use stored stateHash from currentFrame (set during commit)
     prevFrameHash: accountMachine.currentHeight === 0
       ? 'genesis'
@@ -8874,6 +9303,22 @@ export async function proposeAccountFrame(
 
   // Calculate state hash (frameData is properly typed AccountFrame)
   frameData.stateHash = await createFrameHash(frameData as AccountFrame);
+
+  // Debug: log what's being hashed at creation time
+  if (HEAVY_LOGS) {
+    console.log(`[HASH-DEBUG] Frame creation for ${accountMachine.proofHeader.toEntity.slice(-4)}:`);
+    console.log(`  height: ${frameData.height}`);
+    console.log(`  timestamp: ${frameData.timestamp}`);
+    console.log(`  jHeight: ${frameData.jHeight}`);
+    console.log(`  prevFrameHash: ${frameData.prevFrameHash?.slice(0,20)}...`);
+    console.log(`  accountTxs count: ${frameData.accountTxs.length}`);
+    console.log(`  accountTxs types: [${frameData.accountTxs.map(tx => tx.type).join(', ')}]`);
+    console.log(`  tokenIds: [${frameData.tokenIds.join(', ')}]`);
+    console.log(`  deltas: [${frameData.deltas.map(d => d.toString()).join(', ')}]`);
+    console.log(`  fullDeltaStates count: ${fullDeltaStates.length}`);
+    console.log(`  byLeft: ${frameData.byLeft}`);
+    console.log(`  stateHash: ${frameData.stateHash}`);
+  }
 
   // VALIDATE AT SOURCE: Guaranteed type safety from this point forward
   let newFrame: AccountFrame;
@@ -8916,14 +9361,47 @@ export async function proposeAccountFrame(
 
   // Build hanko for account frame
   const { signHashesAsSingleEntity } = await import('./hanko-signing');
+  // Sign frame hash for bilateral consensus
   const hankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [newFrame.stateHash]);
-  const hanko = hankos[0];
-  if (!hanko) {
-    return { success: false, error: 'Failed to build hanko', events, accountInput: null };
+  const frameHanko = hankos[0];
+  if (!frameHanko) {
+    return { success: false, error: 'Failed to build frame hanko', events, accountInput: null };
   }
+  accountMachine.currentFrameHanko = frameHanko;
 
-  // Store hanko as current account proof (for disputes)
-  accountMachine.currentAccountProofHanko = hanko;
+  // Build dispute proof and sign it (CRITICAL: always sign dispute proof with every frame)
+  // BUG FIX: Use clonedMachine (has NEW state after txs) NOT accountMachine (old state)
+  const { buildAccountProofBody, createDisputeProofHash } = await import('./proof-builder');
+  const depositoryAddress = getDepositoryAddress(env);
+  const proofResult = buildAccountProofBody(clonedMachine);
+  const disputeHash = createDisputeProofHash(clonedMachine, proofResult.proofBodyHash, depositoryAddress);
+
+  const disputeHankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [disputeHash]);
+  const disputeHanko = disputeHankos[0];
+  if (!disputeHanko) {
+    return { success: false, error: 'Failed to build dispute hanko', events, accountInput: null };
+  }
+  accountMachine.currentDisputeProofHanko = disputeHanko;
+  accountMachine.currentDisputeProofCooperativeNonce = clonedMachine.proofHeader.cooperativeNonce;
+  accountMachine.currentDisputeProofBodyHash = proofResult.proofBodyHash;
+  if (!accountMachine.disputeProofNoncesByHash) {
+    accountMachine.disputeProofNoncesByHash = {};
+  }
+  accountMachine.disputeProofNoncesByHash[proofResult.proofBodyHash] = clonedMachine.proofHeader.cooperativeNonce;
+  if (!accountMachine.disputeProofBodiesByHash) {
+    accountMachine.disputeProofBodiesByHash = {};
+  }
+  accountMachine.disputeProofBodiesByHash[proofResult.proofBodyHash] = proofResult.proofBodyStruct;
+
+  // Sign settlement for current state (bilateral signature exchange)
+  const settlementDiffs = buildSettlementDiffs(clonedMachine);
+  const settlementHash = createSettlementHash(clonedMachine, settlementDiffs, depositoryAddress);
+  const settlementHankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [settlementHash]);
+  const settlementHanko = settlementHankos[0];
+  accountMachine.currentSettlementHanko = settlementHanko;
+  accountMachine.currentSettlementDiffs = settlementDiffs;
+
+  console.log(`✅ Signed frame + dispute proof + settlement for account ${accountMachine.proofHeader.toEntity.slice(-4)}`);
 
   // Set pending state (no longer storing clone - re-execution on commit)
   accountMachine.pendingFrame = newFrame;
@@ -8940,8 +9418,11 @@ export async function proposeAccountFrame(
     toEntityId: accountMachine.proofHeader.toEntity,
     height: newFrame.height,
     newAccountFrame: newFrame,
-    newHanko: hanko,  // NEW: Hanko instead of single signature
-    newSignatures: [hanko], // LEGACY fallback (will be removed)
+    newHanko: frameHanko,         // Hanko on frame stateHash
+    newDisputeHanko: disputeHanko, // Hanko on dispute proof hash
+    newDisputeProofBodyHash: proofResult.proofBodyHash, // ProofBodyHash that disputeHanko signs
+    newSettlementHanko: settlementHanko,
+    newSettlementDiffs: settlementDiffs,
     counter: skipCounterIncrement ? accountMachine.proofHeader.cooperativeNonce : ++accountMachine.proofHeader.cooperativeNonce,
   };
 
@@ -8978,10 +9459,11 @@ export async function handleAccountInput(
   timedOutHashlocks?: string[];
 }> {
   console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`);
-  console.log(`📨 A-MACHINE INPUT: height=${input.height || 'none'}, hasACK=${!!input.prevSignatures}, hasNewFrame=${!!input.newAccountFrame}, counter=${input.counter}`);
+  console.log(`📨 A-MACHINE INPUT: height=${input.height || 'none'}, hasACK=${!!input.prevHanko}, hasNewFrame=${!!input.newAccountFrame}, counter=${input.counter}`);
 
   const events: string[] = [];
   const timedOutHashlocks: string[] = [];
+  let ackProcessed = false;
 
   // CRITICAL: Counter validation (replay protection) - ALWAYS enforce, no frame 0 exemption
   if (input.counter !== undefined) {
@@ -8990,8 +9472,7 @@ export async function handleAccountInput(
     // hasn't been updated yet (only updated when ACK arrives). So ACK counter can be > ackedTransitions+1.
     const isACKForPendingFrame = accountMachine.pendingFrame
       && input.height === accountMachine.pendingFrame.height
-      && input.prevSignatures
-      && input.prevSignatures.length > 0;
+      && !!input.prevHanko;
 
     let counterValid: boolean;
     if (isACKForPendingFrame) {
@@ -9016,14 +9497,14 @@ export async function handleAccountInput(
   }
 
   // Handle pending frame confirmation
-  if (accountMachine.pendingFrame && input.height === accountMachine.pendingFrame.height && input.prevSignatures) {
+  if (accountMachine.pendingFrame && input.height === accountMachine.pendingFrame.height && input.prevHanko) {
     console.log(`✅ Received confirmation for pending frame ${input.height}`);
     console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}, counter=${input.counter}`);
 
     const frameHash = accountMachine.pendingFrame.stateHash;
 
     // HANKO ACK VERIFICATION: Verify hanko instead of single signature
-    const ackHanko = input.prevHanko || (input.prevSignatures && input.prevSignatures[0]);
+    const ackHanko = input.prevHanko;
     if (!ackHanko) {
       return { success: false, error: 'Missing ACK hanko', events };
     }
@@ -9046,6 +9527,7 @@ export async function handleAccountInput(
 
     // ACK is valid - proceed
     if (true) {
+      ackProcessed = true;
       // DoS FIX: Update counter AFTER signature verified (prevents counter desync attacks)
       if (input.counter !== undefined) {
         accountMachine.ackedTransitions = input.counter;
@@ -9093,18 +9575,35 @@ export async function handleAccountInput(
         // Clean up clone (no longer needed with re-execution)
         delete accountMachine.clonedForValidation;
 
-        accountMachine.currentFrame = {
-          height: accountMachine.pendingFrame.height,
-          timestamp: accountMachine.pendingFrame.timestamp,
-          jHeight: accountMachine.pendingFrame.jHeight,
-          accountTxs: accountMachine.pendingFrame.accountTxs,
-          prevFrameHash: accountMachine.pendingFrame.prevFrameHash,
-          tokenIds: accountMachine.pendingFrame.tokenIds,
-          deltas: accountMachine.pendingFrame.deltas,
-          stateHash: accountMachine.pendingFrame.stateHash,
-          byLeft: accountMachine.pendingFrame.byLeft,
-        };
+        // CRITICAL: Deep-copy entire pendingFrame to prevent mutation issues
+        accountMachine.currentFrame = structuredClone(accountMachine.pendingFrame);
         accountMachine.currentHeight = accountMachine.pendingFrame.height;
+        accountMachine.proofHeader.disputeNonce = accountMachine.currentHeight;
+
+        if (input.newDisputeHanko) {
+          accountMachine.counterpartyDisputeProofHanko = input.newDisputeHanko;
+          const signedCooperativeNonce = input.counter !== undefined
+            ? input.counter - 1
+            : accountMachine.proofHeader.cooperativeNonce;
+          accountMachine.counterpartyDisputeProofCooperativeNonce = signedCooperativeNonce;
+          if (input.newDisputeProofBodyHash) {
+            accountMachine.counterpartyDisputeProofBodyHash = input.newDisputeProofBodyHash;
+            if (!accountMachine.disputeProofNoncesByHash) {
+              accountMachine.disputeProofNoncesByHash = {};
+            }
+            accountMachine.disputeProofNoncesByHash[input.newDisputeProofBodyHash] = signedCooperativeNonce;
+          }
+          console.log(`✅ Stored counterparty dispute hanko from ACK`);
+        }
+
+        // Store counterparty settlement signature
+        if (input.newSettlementHanko) {
+          accountMachine.counterpartySettlementHanko = input.newSettlementHanko;
+          if (input.newSettlementDiffs) {
+            accountMachine.counterpartySettlementDiffs = input.newSettlementDiffs;
+          }
+          console.log(`✅ Stored counterparty settlement hanko from ACK`);
+        }
 
         // Add confirmed frame to history
         accountMachine.frameHistory.push({...accountMachine.pendingFrame});
@@ -9268,9 +9767,8 @@ export async function handleAccountInput(
     }
 
     // SECURITY: Verify signatures (REQUIRED for all frames)
-    if (HEAVY_LOGS) console.log(`🔍 SIG-CHECK: hasSignatures=${!!(input.newSignatures && input.newSignatures.length > 0)}`);
-    // HANKO VERIFICATION: Use hanko instead of single signature
-    const hankoToVerify = input.newHanko || (input.newSignatures && input.newSignatures[0]); // Try hanko first, fallback to legacy
+    // HANKO VERIFICATION: Require hanko for all frames
+    const hankoToVerify = input.newHanko;
     if (!hankoToVerify) {
       return { success: false, error: 'SECURITY: Frame must have hanko signature', events };
     }
@@ -9287,8 +9785,24 @@ export async function handleAccountInput(
 
     console.log(`✅ HANKO-VERIFIED: Frame from ${recoveredEntityId.slice(-4)}`);
 
-    // Store counterparty's hanko for dispute proof
-    accountMachine.counterpartyAccountProofHanko = hankoToVerify;
+    // Store counterparty's frame hanko
+    accountMachine.counterpartyFrameHanko = hankoToVerify;
+
+    // Store counterparty's dispute proof hanko ONLY if verified and frame will commit
+    // Don't update yet - will update when frame COMMITS (not just received)
+    // This prevents storing dispute hanko for pending/rolled-back frames
+    if (input.newDisputeHanko && !ackProcessed) {
+      // Store temporarily - will be moved to counterpartyDisputeProofHanko on commit
+      (accountMachine as any).pendingCounterpartyDisputeHanko = input.newDisputeHanko;
+      const signedCooperativeNonce = input.counter !== undefined
+        ? input.counter - 1
+        : accountMachine.proofHeader.cooperativeNonce;
+      (accountMachine as any).pendingCounterpartyDisputeProofCooperativeNonce = signedCooperativeNonce;
+      if (input.newDisputeProofBodyHash) {
+        (accountMachine as any).pendingCounterpartyDisputeProofBodyHash = input.newDisputeProofBodyHash;
+      }
+      console.log(`📝 Stored pending counterparty dispute hanko (will commit with frame)`);
+    }
 
     // Get entity's synced J-height for deterministic HTLC validation
     const ourEntityId = accountMachine.proofHeader.fromEntity;
@@ -9467,7 +9981,10 @@ export async function handleAccountInput(
       console.log(`🔀 Copied pendingForward for multi-hop: route=[${clonedMachine.pendingForward.route.map(r => r.slice(-4)).join(',')}]`);
     }
 
-    accountMachine.currentFrame = {
+    // CRITICAL: Use receivedFrame.fullDeltaStates from proposer to maintain hash consistency
+    // The proposer's fullDeltaStates was used to compute the stateHash
+    // CRITICAL: Deep-copy to prevent mutation issues
+    accountMachine.currentFrame = structuredClone({
       height: receivedFrame.height,
       timestamp: receivedFrame.timestamp,
       jHeight: receivedFrame.jHeight,
@@ -9477,8 +9994,31 @@ export async function handleAccountInput(
       deltas: receivedFrame.deltas,
       stateHash: receivedFrame.stateHash,
       byLeft: receivedFrame.byLeft, // Copy proposer info
-    };
+      fullDeltaStates: receivedFrame.fullDeltaStates || [], // Use proposer's fullDeltaStates for hash consistency
+    });
     accountMachine.currentHeight = receivedFrame.height;
+    accountMachine.proofHeader.disputeNonce = accountMachine.currentHeight;
+
+    // COMMIT counterparty dispute hanko (frame accepted and committed)
+    if ((accountMachine as any).pendingCounterpartyDisputeHanko) {
+      accountMachine.counterpartyDisputeProofHanko = (accountMachine as any).pendingCounterpartyDisputeHanko;
+      delete (accountMachine as any).pendingCounterpartyDisputeHanko;
+      if ((accountMachine as any).pendingCounterpartyDisputeProofCooperativeNonce !== undefined) {
+        accountMachine.counterpartyDisputeProofCooperativeNonce = (accountMachine as any).pendingCounterpartyDisputeProofCooperativeNonce;
+        delete (accountMachine as any).pendingCounterpartyDisputeProofCooperativeNonce;
+      }
+      if ((accountMachine as any).pendingCounterpartyDisputeProofBodyHash) {
+        accountMachine.counterpartyDisputeProofBodyHash = (accountMachine as any).pendingCounterpartyDisputeProofBodyHash;
+        if (!accountMachine.disputeProofNoncesByHash) {
+          accountMachine.disputeProofNoncesByHash = {};
+        }
+        if (accountMachine.counterpartyDisputeProofCooperativeNonce !== undefined) {
+          accountMachine.disputeProofNoncesByHash[accountMachine.counterpartyDisputeProofBodyHash] = accountMachine.counterpartyDisputeProofCooperativeNonce;
+        }
+        delete (accountMachine as any).pendingCounterpartyDisputeProofBodyHash;
+      }
+      console.log(`✅ Committed counterparty dispute hanko (frame ${receivedFrame.height} accepted)`);
+    }
 
     // Add accepted frame to history
     accountMachine.frameHistory.push({...receivedFrame});
@@ -9521,12 +10061,30 @@ export async function handleAccountInput(
     // Check if we should batch BEFORE incrementing counter
     let batchedWithNewFrame = false;
     let proposeResult: Awaited<ReturnType<typeof proposeAccountFrame>> | undefined;
+    // Build dispute proof hanko for ACK response (always include current state's dispute proof)
+    const { buildAccountProofBody: buildProof, createDisputeProofHash: createHash } = await import('./proof-builder');
+    const ackDepositoryAddress = getDepositoryAddress(env);
+    const ackProofResult = buildProof(accountMachine);
+    const ackDisputeHash = createHash(accountMachine, ackProofResult.proofBodyHash, ackDepositoryAddress);
+    const ackDisputeHankos = await signHashesAsSingleEntity(env, ackEntityId, ackSignerId, [ackDisputeHash]);
+    const ackDisputeHanko = ackDisputeHankos[0];
+    const ackSignedCooperativeNonce = accountMachine.proofHeader.cooperativeNonce;
+    if (!accountMachine.disputeProofNoncesByHash) {
+      accountMachine.disputeProofNoncesByHash = {};
+    }
+    accountMachine.disputeProofNoncesByHash[ackProofResult.proofBodyHash] = ackSignedCooperativeNonce;
+    if (!accountMachine.disputeProofBodiesByHash) {
+      accountMachine.disputeProofBodiesByHash = {};
+    }
+    accountMachine.disputeProofBodiesByHash[ackProofResult.proofBodyHash] = ackProofResult.proofBodyStruct;
+
     const response: AccountInput = {
       fromEntityId: accountMachine.proofHeader.fromEntity,
       toEntityId: input.fromEntityId,
       height: receivedFrame.height,
-      prevHanko: confirmationHanko,  // NEW: Hanko ACK
-      prevSignatures: [confirmationHanko], // LEGACY fallback
+      prevHanko: confirmationHanko,       // Hanko ACK on their frame
+      newDisputeHanko: ackDisputeHanko,   // My dispute proof hanko (current state)
+      newDisputeProofBodyHash: ackProofResult.proofBodyHash, // ProofBodyHash that ackDisputeHanko signs
       counter: 0, // Will be set below after batching decision
     };
 
@@ -9545,15 +10103,21 @@ export async function handleAccountInput(
         }
         if (proposeResult.accountInput.newHanko) {
           response.newHanko = proposeResult.accountInput.newHanko;
-          response.newSignatures = [proposeResult.accountInput.newHanko]; // LEGACY fallback
-        } else if (proposeResult.accountInput.newSignatures) {
-          response.newSignatures = proposeResult.accountInput.newSignatures;
         }
+        // DON'T overwrite response.newDisputeHanko (it's ACK's dispute hanko for current committed state)
+        // Proposal's newDisputeHanko will be delivered when proposal commits, not now
+        // This preserves ACK's dispute hanko for last agreed state
 
         const newFrameId = proposeResult.accountInput.newAccountFrame?.height || 0;
         console.log(`✅ Batched ACK for frame ${receivedFrame.height} + proposal for frame ${newFrameId}`);
         events.push(`📤 Batched ACK + frame ${newFrameId}`);
       }
+    }
+
+    if (!batchedWithNewFrame) {
+      accountMachine.currentDisputeProofHanko = ackDisputeHanko;
+      accountMachine.currentDisputeProofCooperativeNonce = ackSignedCooperativeNonce;
+      accountMachine.currentDisputeProofBodyHash = ackProofResult.proofBodyHash;
     }
 
     // Increment counter ONCE per message (whether batched or not)
@@ -9576,7 +10140,7 @@ export async function handleAccountInput(
       ...(proposeResult?.swapOffersCancelled || [])
     ];
 
-    if (HEAVY_LOGS) console.log(`🔍 RETURN-RESPONSE: h=${response.height} prevSigs=${!!response.prevSignatures} newFrame=${!!response.newAccountFrame}`);
+    if (HEAVY_LOGS) console.log(`🔍 RETURN-RESPONSE: h=${response.height} prevHanko=${!!response.prevHanko} newFrame=${!!response.newAccountFrame}`);
     return { success: true, response, events, revealedSecrets: allRevealedSecrets, swapOffersCreated: allSwapOffersCreated, swapOffersCancelled: allSwapOffersCancelled, timedOutHashlocks };
   }
 
@@ -9699,7 +10263,7 @@ export async function generateAccountProof(accountMachine: AccountMachine): Prom
     throw new Error(`Cannot find signerId for proof from ${proofEntityId.slice(-4)}`);
   }
   console.log(`🔐 PROOF-SIGN: entityId=${proofEntityId.slice(-4)} → signerId=${proofSignerId.slice(-4)}`);
-  const signature = signAccountFrame(proofSignerId, `0x${proofHash}`);
+  const signature = signAccountFrame(env, proofSignerId, `0x${proofHash}`);
 
   // Store signature for later use
   accountMachine.hankoSignature = signature;
@@ -9891,7 +10455,7 @@ export function getAccountBarVisual(
 }
 
 
-//runtime/j-batch.ts (463 lines)
+//runtime/j-batch.ts (807 lines)
 /**
  * J-Batch Aggregator System
  *
@@ -9905,8 +10469,10 @@ export function getAccountBarVisual(
  * - Failed batches are retried (with exponential backoff)
  */
 
-import { safeStringify } from './serialization-utils';
+import { ethers } from 'ethers';
+import { isLeftEntity, normalizeEntityId, compareEntityIds } from './entity-id-utils';
 import type { JurisdictionConfig } from './types';
+import { safeStringify } from './serialization-utils';
 
 /**
  * Batch structure matching Depository.sol (lines 203-231)
@@ -9961,22 +10527,49 @@ export interface JBatch {
       limit: bigint;
       expiresAt: bigint;
     }>;
-    sig: string; // Signature (0x for testMode)
+    sig: string; // Hanko signature (required when there are changes)
     entityProvider: string; // EntityProvider address
     hankoData: string; // Hanko signature data
     nonce: number; // Settlement nonce
   }>;
 
-  // Dispute/Cooperative proofs (DEPRECATED in current Depository.sol - empty arrays for now)
-  cooperativeUpdate: never[];
-  cooperativeDisputeProof: never[];
-  disputeStarts: never[];
-  disputeFinalizations: never[];
+  // Dispute proofs (active in Depository.sol)
+  cooperativeUpdate: never[];  // Legacy - not used
+  cooperativeDisputeProof: never[];  // Legacy - not used
+  disputeStarts: Array<{
+    counterentity: string;
+    cooperativeNonce: number;
+    disputeNonce: number;
+    proofbodyHash: string;
+    sig: string;
+    initialArguments: string;
+  }>;
+  disputeFinalizations: Array<{
+    counterentity: string;
+    initialCooperativeNonce: number;
+    finalCooperativeNonce: number;
+    initialDisputeNonce: number;
+    finalDisputeNonce: number;
+    initialProofbodyHash: string;
+    finalProofbody: any;  // ProofBody struct
+    finalArguments: string;
+    initialArguments: string;
+    sig: string;
+    startedByLeft: boolean;
+    disputeUntilBlock: number;
+    cooperative: boolean;
+  }>;
 
   // Flashloans (for atomic batch execution)
   flashloans: Array<{
     tokenId: number;
     amount: bigint;
+  }>;
+
+  // HTLC secret reveals (on-chain hashlock unlocks)
+  revealSecrets: Array<{
+    transformer: string;
+    secret: string;
   }>;
 
   // Hub ID (for gas tracking)
@@ -10009,8 +10602,143 @@ export function createEmptyBatch(): JBatch {
     disputeFinalizations: [], // Match Solidity: FinalDisputeProof[]
     externalTokenToReserve: [],
     reserveToExternalToken: [],
+    revealSecrets: [],
     hub_id: 0,
   };
+}
+
+const DEPOSITORY_BATCH_ABI =
+  'tuple(' +
+    'tuple(uint256 tokenId, uint256 amount)[] flashloans,' +
+    'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve,' +
+    'tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral,' +
+    'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements,' +
+    'tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts,' +
+    'tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 finalCooperativeNonce, uint256 initialDisputeNonce, uint256 finalDisputeNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations,' +
+    'tuple(bytes32 entity, bytes32 packedToken, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve,' +
+    'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken,' +
+    'tuple(address transformer, bytes32 secret)[] revealSecrets,' +
+    'uint256 hub_id' +
+  ')';
+
+const BATCH_DOMAIN_SEPARATOR = ethers.keccak256(ethers.toUtf8Bytes('XLN_DEPOSITORY_HANKO_V1'));
+
+export function encodeJBatch(batch: JBatch): string {
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  return abiCoder.encode([DEPOSITORY_BATCH_ABI as any], [batch]);
+}
+
+export function decodeJBatch(encodedBatch: string): JBatch {
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  const decoded = abiCoder.decode([DEPOSITORY_BATCH_ABI as any], encodedBatch);
+  return decoded[0] as JBatch;
+}
+
+export function summarizeBatch(batch: JBatch): Record<string, unknown> {
+  const sample = <T>(arr: T[]) => (arr.length > 0 ? arr[0] : null);
+  return {
+    flashloans: { count: batch.flashloans.length, sample: sample(batch.flashloans) },
+    reserveToReserve: { count: batch.reserveToReserve.length, sample: sample(batch.reserveToReserve) },
+    reserveToCollateral: { count: batch.reserveToCollateral.length, sample: sample(batch.reserveToCollateral) },
+    settlements: {
+      count: batch.settlements.length,
+      sample: batch.settlements.length
+        ? {
+            left: batch.settlements[0]?.leftEntity,
+            right: batch.settlements[0]?.rightEntity,
+            diffs: batch.settlements[0]?.diffs.length ?? 0,
+            forgive: batch.settlements[0]?.forgiveDebtsInTokenIds.length ?? 0,
+            insurance: batch.settlements[0]?.insuranceRegs.length ?? 0,
+            sigLen: batch.settlements[0]?.sig?.length ?? 0,
+          }
+        : null,
+    },
+    disputeStarts: { count: batch.disputeStarts.length, sample: sample(batch.disputeStarts) },
+    disputeFinalizations: { count: batch.disputeFinalizations.length, sample: sample(batch.disputeFinalizations) },
+    externalTokenToReserve: { count: batch.externalTokenToReserve.length, sample: sample(batch.externalTokenToReserve) },
+    reserveToExternalToken: { count: batch.reserveToExternalToken.length, sample: sample(batch.reserveToExternalToken) },
+    revealSecrets: { count: batch.revealSecrets.length, sample: sample(batch.revealSecrets) },
+    hub_id: batch.hub_id,
+  };
+}
+
+export function preflightBatchForE2(
+  entityId: string,
+  batch: JBatch,
+  blockTimestampSec?: number
+): string[] {
+  const issues: string[] = [];
+  const normalizedEntityId = normalizeEntityId(entityId);
+  const nowSec = blockTimestampSec ?? 0;
+
+  const zeroEntity = '0x0000000000000000000000000000000000000000000000000000000000000000';
+  for (const op of batch.externalTokenToReserve) {
+    const target = op.entity ? normalizeEntityId(op.entity) : zeroEntity;
+    if (target !== zeroEntity && target !== normalizedEntityId) {
+      issues.push(`externalTokenToReserve entity mismatch: ${target.slice(-4)} != ${normalizedEntityId.slice(-4)}`);
+    }
+  }
+
+  for (const op of batch.revealSecrets) {
+    if (!op.transformer || op.transformer === '0x0000000000000000000000000000000000000000') {
+      issues.push(`revealSecrets transformer=0`);
+    }
+  }
+
+  for (const op of batch.reserveToReserve) {
+    const receiving = normalizeEntityId(op.receivingEntity);
+    if (receiving === normalizedEntityId) {
+      issues.push(`reserveToReserve to self (${op.receivingEntity.slice(-4)})`);
+    }
+  }
+
+  for (const s of batch.settlements) {
+    if (compareEntityIds(s.leftEntity, s.rightEntity) >= 0) {
+      issues.push(`settlement left>=right: ${s.leftEntity.slice(-4)} >= ${s.rightEntity.slice(-4)}`);
+    }
+    const hasChanges = s.diffs.length > 0 || s.forgiveDebtsInTokenIds.length > 0 || s.insuranceRegs.length > 0;
+    if (hasChanges && (!s.sig || s.sig === '0x')) {
+      issues.push(`settlement missing sig: ${s.leftEntity.slice(-4)}↔${s.rightEntity.slice(-4)}`);
+    }
+    for (const reg of s.insuranceRegs) {
+      if (normalizeEntityId(reg.insured) === normalizeEntityId(reg.insurer)) {
+        issues.push(`insuranceReg insured==insurer (${reg.insured.slice(-4)})`);
+      }
+      if (reg.limit <= 0n) {
+        issues.push(`insuranceReg limit=0 (${reg.insured.slice(-4)})`);
+      }
+      if (nowSec > 0 && reg.expiresAt <= BigInt(nowSec)) {
+        issues.push(`insuranceReg expired (${reg.insured.slice(-4)})`);
+      }
+    }
+  }
+
+  for (const f of batch.disputeFinalizations) {
+    if (f.cooperative && (!f.sig || f.sig === '0x')) {
+      issues.push(`cooperative dispute finalize missing sig (${f.counterentity.slice(-4)})`);
+    }
+    if (!f.cooperative && f.sig && f.sig !== '0x') {
+      const initialNonce = typeof f.initialDisputeNonce === 'bigint' ? f.initialDisputeNonce : BigInt(f.initialDisputeNonce);
+      const finalNonce = typeof f.finalDisputeNonce === 'bigint' ? f.finalDisputeNonce : BigInt(f.finalDisputeNonce);
+      if (initialNonce >= finalNonce) {
+        issues.push(`counterdispute nonce order (${f.counterentity.slice(-4)})`);
+      }
+    }
+  }
+
+  return issues;
+}
+
+export function computeBatchHankoHash(
+  chainId: bigint,
+  depositoryAddress: string,
+  encodedBatch: string,
+  nonce: bigint
+): string {
+  return ethers.keccak256(ethers.solidityPacked(
+    ['bytes32', 'uint256', 'address', 'bytes', 'uint256'],
+    [BATCH_DOMAIN_SEPARATOR, chainId, depositoryAddress, encodedBatch, nonce]
+  ));
 }
 
 /**
@@ -10038,7 +10766,8 @@ export function isBatchEmpty(batch: JBatch): boolean {
     batch.disputeStarts.length === 0 &&
     batch.disputeFinalizations.length === 0 &&
     batch.externalTokenToReserve.length === 0 &&
-    batch.reserveToExternalToken.length === 0
+    batch.reserveToExternalToken.length === 0 &&
+    batch.revealSecrets.length === 0
   );
 }
 
@@ -10105,14 +10834,22 @@ export function batchAddSettlement(
   }>,
   forgiveDebtsInTokenIds: number[] = [],
   insuranceRegs: InsuranceReg[] = [],
-  sig: string = '0x',
-  entityProvider: string = '0x0000000000000000000000000000000000000000', // Default for testMode
-  hankoData: string = '0x', // Default for testMode
-  nonce: number = 0 // Default for testMode
+  sig?: string,
+  entityProvider: string = '0x0000000000000000000000000000000000000000',
+  hankoData: string = '0x',
+  nonce: number = 0
 ): void {
   // Validate entities are in canonical order
   if (leftEntity >= rightEntity) {
     throw new Error(`Settlement entities must be ordered: ${leftEntity} >= ${rightEntity}`);
+  }
+
+  const hasChanges = diffs.length > 0 ||
+    forgiveDebtsInTokenIds.length > 0 ||
+    insuranceRegs.length > 0;
+
+  if (hasChanges && (!sig || sig === '0x')) {
+    throw new Error(`Settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)} missing hanko signature`);
   }
 
   // Check if we already have a settlement for this pair
@@ -10121,6 +10858,9 @@ export function batchAddSettlement(
   );
 
   if (existing) {
+    if (existing.diffs.length > 0 && hasChanges) {
+      throw new Error(`Settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)} already queued - refuse to merge diffs without a fresh signature`);
+    }
     // Aggregate diffs by token
     for (const newDiff of diffs) {
       const existingDiff = existing.diffs.find(d => d.tokenId === newDiff.tokenId);
@@ -10141,6 +10881,12 @@ export function batchAddSettlement(
         existing.forgiveDebtsInTokenIds.push(tokenId);
       }
     }
+    if (hasChanges) {
+      existing.sig = sig || existing.sig;
+      existing.entityProvider = entityProvider;
+      existing.hankoData = hankoData;
+      existing.nonce = nonce;
+    }
   } else {
     jBatchState.batch.settlements.push({
       leftEntity,
@@ -10148,10 +10894,10 @@ export function batchAddSettlement(
       diffs,
       forgiveDebtsInTokenIds,
       insuranceRegs,
-      sig,
-      entityProvider, // testMode default
-      hankoData, // testMode default
-      nonce, // testMode default
+      sig: sig || '',
+      entityProvider,
+      hankoData,
+      nonce,
     });
   }
 
@@ -10169,7 +10915,7 @@ export function batchAddInsurance(
   insuranceReg: InsuranceReg
 ): void {
   // Validate entities are in canonical order
-  const [left, right] = leftEntity < rightEntity ? [leftEntity, rightEntity] : [rightEntity, leftEntity];
+  const [left, right] = isLeftEntity(leftEntity, rightEntity) ? [leftEntity, rightEntity] : [rightEntity, leftEntity];
 
   // Find or create settlement
   let existing = jBatchState.batch.settlements.find(
@@ -10184,7 +10930,7 @@ export function batchAddInsurance(
       diffs: [],
       forgiveDebtsInTokenIds: [],
       insuranceRegs: [],
-      sig: '0x',
+      sig: '',
       entityProvider: '0x0000000000000000000000000000000000000000',
       hankoData: '0x',
       nonce: 0,
@@ -10219,6 +10965,24 @@ export function batchAddReserveToReserve(
 }
 
 /**
+ * Add HTLC secret reveal to batch (idempotent per transformer+secret)
+ */
+export function batchAddRevealSecret(
+  jBatchState: JBatchState,
+  transformer: string,
+  secret: string
+): void {
+  const exists = jBatchState.batch.revealSecrets.find(
+    r => r.transformer === transformer && r.secret === secret
+  );
+  if (exists) {
+    return;
+  }
+  jBatchState.batch.revealSecrets.push({ transformer, secret });
+  console.log(`📦 jBatch: Added secret reveal ${secret.slice(0, 10)}... via ${transformer.slice(0, 10)}...`);
+}
+
+/**
  * Get batch size (total operations)
  */
 export function getBatchSize(batch: JBatch): number {
@@ -10230,7 +10994,8 @@ export function getBatchSize(batch: JBatch): number {
     batch.disputeStarts.length +
     batch.disputeFinalizations.length +
     batch.externalTokenToReserve.length +
-    batch.reserveToExternalToken.length
+    batch.reserveToExternalToken.length +
+    batch.revealSecrets.length
   );
 }
 
@@ -10239,12 +11004,31 @@ export function getBatchSize(batch: JBatch): number {
  * Matches frontend/src/lib/view/utils/browserVMProvider.ts
  */
 export interface BrowserVMBatchProcessor {
-  processBatch(entityId: string, batch: {
-    reserveToReserve?: Array<{receivingEntity: string, tokenId: number, amount: bigint}>,
-    reserveToCollateral?: Array<{receivingEntity: string, tokenId: number, pairs: Array<{ entity: string; amount: bigint }>}>,
-    settlements?: Array<{leftEntity: string, rightEntity: string, diffs: any[]}>,
-  }): Promise<any[]>;
+  processBatch(encodedBatch: string, entityProvider: string, hankoData: string, nonce: bigint): Promise<any[]>;
   setBlockTimestamp?: (timestamp: number) => void;
+  signSettlement?: (
+    initiatorEntityId: string,
+    counterpartyEntityId: string,
+    diffs: Array<{
+      tokenId: number;
+      leftDiff: bigint;
+      rightDiff: bigint;
+      collateralDiff: bigint;
+      ondeltaDiff: bigint;
+    }>,
+    forgiveDebtsInTokenIds?: number[],
+    insuranceRegs?: Array<{
+      insured: string;
+      insurer: string;
+      tokenId: number;
+      limit: bigint;
+      expiresAt: bigint;
+    }>
+  ) => Promise<string>;
+  getEntityProviderAddress?: () => string;
+  getDepositoryAddress?: () => string;
+  getEntityNonce?: (entityId: string) => Promise<bigint>;
+  getChainId?: () => bigint;
 }
 
 /**
@@ -10252,11 +11036,13 @@ export interface BrowserVMBatchProcessor {
  * Reference: 2019src.txt lines 3384-3399
  */
 export async function broadcastBatch(
+  env: any,
   entityId: string,
   jBatchState: JBatchState,
   jurisdiction: any, // JurisdictionConfig
   browserVM: BrowserVMBatchProcessor | undefined,
-  timestamp: number
+  timestamp: number,
+  signerId?: string
 ): Promise<{ success: boolean; txHash?: string; events?: any[]; error?: string }> {
   if (isBatchEmpty(jBatchState.batch)) {
     console.log('📦 jBatch: Empty batch, skipping broadcast');
@@ -10266,15 +11052,95 @@ export async function broadcastBatch(
   const batchSize = getBatchSize(jBatchState.batch);
   const b = jBatchState.batch;
   console.log(`📤 BATCH: ${entityId.slice(-4)} | ${batchSize} ops | R→C=${b.reserveToCollateral.length} S=${b.settlements.length} R→R=${b.reserveToReserve.length}`);
+  const entityProviderAddress =
+    (browserVM as any)?.getEntityProviderAddress?.() ||
+    jurisdiction?.entityProviderAddress ||
+    '0x0000000000000000000000000000000000000000';
+  const depositoryAddress =
+    (browserVM as any)?.getDepositoryAddress?.() ||
+    jurisdiction?.depositoryAddress ||
+    '0x0000000000000000000000000000000000000000';
+  const chainId =
+    (browserVM as any)?.getChainId?.() ??
+    (jurisdiction?.chainId !== undefined ? BigInt(jurisdiction.chainId) : 0n);
 
   try {
+    if (!signerId) {
+      throw new Error(`Missing signerId for batch broadcast from ${entityId.slice(-4)}`);
+    }
+
     // BrowserVM path - direct in-browser execution
     if (browserVM) {
       browserVM.setBlockTimestamp?.(timestamp);
 
-      // Pass batch directly to contract (no transformation - Solidity handles everything)
+      for (const settlement of jBatchState.batch.settlements) {
+        const hasChanges = settlement.diffs.length > 0 ||
+          settlement.forgiveDebtsInTokenIds.length > 0 ||
+          settlement.insuranceRegs.length > 0;
+
+        if (hasChanges) {
+          if (entityProviderAddress === '0x0000000000000000000000000000000000000000') {
+            console.warn(`⚠️ Settlement missing EntityProvider address (required for Hanko verification)`);
+          }
+          settlement.entityProvider = entityProviderAddress;
+          if (!settlement.sig || settlement.sig === '0x') {
+            throw new Error(`Settlement ${settlement.leftEntity.slice(-4)}↔${settlement.rightEntity.slice(-4)} missing hanko signature`);
+          }
+        } else if (!settlement.sig) {
+          settlement.sig = '0x';
+        }
+      }
+
+      if (depositoryAddress === '0x0000000000000000000000000000000000000000') {
+        throw new Error('Missing depository address for batch broadcast');
+      }
+      if (entityProviderAddress === '0x0000000000000000000000000000000000000000') {
+        throw new Error('Missing entity provider address for batch broadcast');
+      }
+      if (!browserVM.getEntityNonce) {
+        throw new Error('BrowserVM missing getEntityNonce for hanko batch signing');
+      }
+      if (!chainId) {
+        throw new Error('Missing chainId for batch hanko signing');
+      }
+
+      const encodedBatch = encodeJBatch(jBatchState.batch);
+      const normalizedEntityId = normalizeEntityId(entityId);
+      const currentNonce = await browserVM.getEntityNonce(normalizedEntityId);
+      const nextNonce = currentNonce + 1n;
+      const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
+
+      const { signHashesAsSingleEntity } = await import('./hanko-signing');
+      const hankos = await signHashesAsSingleEntity(env, normalizedEntityId, signerId, [batchHash]);
+      const hankoData = hankos[0];
+      if (!hankoData) {
+        throw new Error('Failed to build batch hanko signature');
+      }
+
+      const debugSummary = {
+        entityId: normalizedEntityId,
+        currentNonce: currentNonce.toString(),
+        nextNonce: nextNonce.toString(),
+        chainId: chainId.toString(),
+        depository: depositoryAddress,
+        entityProvider: entityProviderAddress,
+        hankoBytes: Math.max(hankoData.length - 2, 0) / 2,
+        batchSize: getBatchSize(jBatchState.batch),
+        r2r: jBatchState.batch.reserveToReserve.length,
+        r2c: jBatchState.batch.reserveToCollateral.length,
+        settlements: jBatchState.batch.settlements.length,
+        disputes: jBatchState.batch.disputeStarts.length,
+        finals: jBatchState.batch.disputeFinalizations.length,
+      };
+      console.log(`🔐 BATCH-HANKO: ${safeStringify(debugSummary)}`);
+      const preflightIssues = preflightBatchForE2(normalizedEntityId, jBatchState.batch, Math.floor(timestamp / 1000));
+      if (preflightIssues.length > 0) {
+        throw new Error(`Batch preflight failed: ${preflightIssues.join('; ')}`);
+      }
+
+      // Pass batch to contract with hanko authorization
       console.log(`📦 Calling Depository.processBatch() with full batch (${getBatchSize(jBatchState.batch)} ops)...`);
-      const events = await browserVM.processBatch(entityId, jBatchState.batch);
+      const events = await browserVM.processBatch(encodedBatch, entityProviderAddress, hankoData, nextNonce);
       console.log(`   ✅ BrowserVM: ${events.length} events`);
 
       // NOTE: j-events are queued in env.runtimeInput.entityInputs by j-watcher
@@ -10291,10 +11157,49 @@ export async function broadcastBatch(
 
     // Ethers path - real blockchain RPC
     const { connectToEthereum } = await import('./evm');
-    const { depository } = await connectToEthereum(jurisdiction);
+    const { depository, provider } = await connectToEthereum(jurisdiction);
 
-    // Submit to Depository.processBatch (same pattern as evm.ts:338)
-    const tx = await depository['processBatch']!(entityId, jBatchState.batch, {
+    for (const settlement of jBatchState.batch.settlements) {
+      const hasChanges = settlement.diffs.length > 0 ||
+        settlement.forgiveDebtsInTokenIds.length > 0 ||
+        settlement.insuranceRegs.length > 0;
+      if (hasChanges) {
+        if (entityProviderAddress === '0x0000000000000000000000000000000000000000') {
+          console.warn(`⚠️ Settlement missing EntityProvider address (required for Hanko verification)`);
+        }
+        settlement.entityProvider = entityProviderAddress;
+        if (!settlement.sig || settlement.sig === '0x') {
+          throw new Error(`Settlement ${settlement.leftEntity.slice(-4)}↔${settlement.rightEntity.slice(-4)} missing hanko signature`);
+        }
+      } else if (!settlement.sig) {
+        settlement.sig = '0x';
+      }
+    }
+
+    if (!chainId) {
+      const net = await provider.getNetwork();
+      if (!net.chainId) {
+        throw new Error('Missing chainId for batch hanko signing');
+      }
+    }
+    const resolvedChainId = chainId || BigInt((await provider.getNetwork()).chainId);
+
+    const encodedBatch = encodeJBatch(jBatchState.batch);
+    const normalizedEntityId = normalizeEntityId(entityId);
+    const entityAddress = ethers.getAddress(`0x${normalizedEntityId.slice(-40)}`);
+    const currentNonce = await depository['entityNonces']?.(entityAddress);
+    const nextNonce = BigInt(currentNonce ?? 0) + 1n;
+    const batchHash = computeBatchHankoHash(resolvedChainId, depositoryAddress, encodedBatch, nextNonce);
+
+    const { signHashesAsSingleEntity } = await import('./hanko-signing');
+    const hankos = await signHashesAsSingleEntity(env, entityId, signerId, [batchHash]);
+    const hankoData = hankos[0];
+    if (!hankoData) {
+      throw new Error('Failed to build batch hanko signature');
+    }
+
+    // Submit to Depository.processBatch (Hanko)
+    const tx = await depository['processBatch']!(encodedBatch, entityProviderAddress, hankoData, nextNonce, {
       gasLimit: 5000000, // High limit for complex batches
     });
 
@@ -10314,6 +11219,9 @@ export async function broadcastBatch(
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`   ❌ BATCH FAIL: ${entityId.slice(-4)} | ${errorMessage}`);
+    if (error instanceof Error && error.stack) {
+      console.error(`   ❌ BATCH FAIL STACK: ${error.stack}`);
+    }
     jBatchState.failedAttempts++;
 
     return {
@@ -10356,7 +11264,7 @@ export function shouldBroadcastBatch(
 }
 
 
-//runtime/account-utils.ts (220 lines)
+//runtime/account-utils.ts (221 lines)
 /**
  * Account utilities for calculating balances and derived states
  * Based on old_src/app/Channel.ts deriveDelta logic
@@ -10364,6 +11272,7 @@ export function shouldBroadcastBatch(
 
 import type { Delta, DerivedDelta } from './types';
 import { validateDelta } from './validation-utils';
+import { isLeftEntity } from './entity-id-utils';
 
 /**
  * Determine if an entity is the "left" party in a bilateral account (like old_src Channel.ts)
@@ -10372,7 +11281,7 @@ import { validateDelta } from './validation-utils';
  * @returns true if current entity is left (lexicographically smaller)
  */
 export function isLeft(myEntityId: string, counterpartyEntityId: string): boolean {
-  return myEntityId < counterpartyEntityId;
+  return isLeftEntity(myEntityId, counterpartyEntityId);
 }
 
 // CRITICAL: Default credit is 0 - credit must be explicitly extended via set_credit_limit
@@ -10705,8 +11614,9 @@ export * from './proposals';
 export * from './validation';
 
 
-//runtime/entity-tx/apply.ts (900 lines)
+//runtime/entity-tx/apply.ts (928 lines)
 import { calculateQuorumPower } from '../entity-consensus';
+import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
 import { processProfileUpdate } from '../name-resolution';
 import { createOrderbookExtState } from '../orderbook';
@@ -10734,6 +11644,7 @@ import { validateMessage } from './validation';
 import { cloneEntityState, addMessage, canonicalAccountKey, resolveEntityProposerId } from '../state-helpers';
 import { submitSettle } from '../evm';
 import { logError } from '../logger';
+import { FINANCIAL } from '../constants';
 
 export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<ApplyEntityTxResult> => {
   if (!entityTx) {
@@ -10918,7 +11829,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         txHash: entityTx.data.transactionHash,
       });
 
-      const { newState, mempoolOps } = handleJEvent(entityState, entityTx.data, env);
+      const { newState, mempoolOps } = await handleJEvent(entityState, entityTx.data, env);
       return { newState, outputs: [], mempoolOps: mempoolOps || [] };
     }
 
@@ -10937,7 +11848,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const targetEntityId = entityTx.data.targetEntityId;
       // Account keyed by counterparty ID (simpler than canonical)
       const counterpartyId = targetEntityId;
-      const isLeft = entityState.entityId < targetEntityId;
+      const isLeft = isLeftEntity(entityState.entityId, targetEntityId);
 
       if (entityState.accounts.has(counterpartyId)) {
         console.log(`💳 OPEN-ACCOUNT: Account with ${formatEntityId(counterpartyId)} already exists, skipping duplicate request`);
@@ -11170,6 +12081,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Extract payment details
       let { targetEntityId, tokenId, amount, route, description } = entityTx.data;
+      if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
+        logError("ENTITY_TX", `❌ Payment amount out of bounds: ${amount.toString()} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT.toString()}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT.toString()})`);
+        addMessage(newState, `❌ Payment failed: amount out of bounds`);
+        return { newState, outputs: [] };
+      }
 
       // If no route provided, check for direct account or calculate route
       if (!route || route.length === 0) {
@@ -11267,7 +12183,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         console.log(`💸   Route after slice: [${accountTx.data.route.map(r => r.slice(-4)).join(',')}]`);
         console.log(`💸 mempoolOps.length: ${mempoolOps.length}`);
 
-        const isLeft = accountMachine.proofHeader.fromEntity < accountMachine.proofHeader.toEntity;
+        const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
         console.log(`💸 Account state: isLeft=${isLeft}, hasPendingFrame=${!!accountMachine.pendingFrame}`);
 
         // Message about payment initiation
@@ -11310,6 +12226,12 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
     if (entityTx.type === 'j_broadcast') {
       const { handleJBroadcast } = await import('./handlers/j-broadcast');
+      const batch = entityState.jBatchState?.batch;
+      if (batch) {
+        console.log(`🔍 APPLY j_broadcast: ${entityState.entityId.slice(-4)} batch r2r=${batch.reserveToReserve.length}, r2c=${batch.reserveToCollateral.length}, settlements=${batch.settlements.length}, starts=${batch.disputeStarts.length}, finals=${batch.disputeFinalizations.length}`);
+      } else {
+        console.log(`🔍 APPLY j_broadcast: ${entityState.entityId.slice(-4)} has no jBatchState`);
+      }
       const result = await handleJBroadcast(entityState, entityTx, env);
       // j_broadcast returns jOutputs to queue to J-mempool
       return result;
@@ -11537,7 +12459,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`🏦 SETTLE-DIFFS: Processing settlement with ${entityTx.data.counterpartyEntityId}`);
 
       const newState = cloneEntityState(entityState);
-      const { counterpartyEntityId, diffs, description } = entityTx.data;
+      const { counterpartyEntityId, diffs, description, sig } = entityTx.data;
 
       // Step 1: Validate invariant for all diffs
       for (const diff of diffs) {
@@ -11556,7 +12478,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       // Step 3: Determine canonical left/right order
-      const isLeft = entityState.entityId < counterpartyEntityId;
+      const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId);
       const leftEntity = isLeft ? entityState.entityId : counterpartyEntityId;
       const rightEntity = isLeft ? counterpartyEntityId : entityState.entityId;
 
@@ -11581,8 +12503,12 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`🏦 Calling submitSettle with diffs:`, safeStringify(contractDiffs, 2));
 
       // Step 6: Call Depository.settle() - fire and forget (j-watcher handles result)
+      if (!sig || sig === '0x') {
+        throw new Error(`Settlement ${entityState.entityId.slice(-4)}↔${counterpartyEntityId.slice(-4)} missing hanko signature`);
+      }
+
       try {
-        const result = await submitSettle(jurisdiction, leftEntity, rightEntity, contractDiffs);
+        const result = await submitSettle(jurisdiction, leftEntity, rightEntity, contractDiffs, [], [], sig);
         console.log(`✅ Settlement transaction sent: ${result.txHash}`);
 
         // Add message to chat
@@ -11596,6 +12522,17 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       return { newState, outputs: [] };
+    }
+
+    // === DISPUTES ===
+    if (entityTx.type === 'disputeStart') {
+      const { handleDisputeStart } = await import('./handlers/dispute');
+      return await handleDisputeStart(entityState, entityTx, env);
+    }
+
+    if (entityTx.type === 'disputeFinalize') {
+      const { handleDisputeFinalize } = await import('./handlers/dispute');
+      return await handleDisputeFinalize(entityState, entityTx, env);
     }
 
     console.warn(`⚠️ Unhandled EntityTx type: ${entityTx.type}`);
@@ -11718,11 +12655,12 @@ export const executeProposal = (entityState: EntityState, proposal: Proposal): E
 };
 
 
-//runtime/entity-tx/j-events.ts (610 lines)
+//runtime/entity-tx/j-events.ts (793 lines)
 import { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env } from '../types';
 import { DEBUG } from '../utils';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
 import { getTokenInfo, getDefaultCreditLimit } from '../account-utils';
+import { isLeftEntity } from '../entity-id-utils';
 import { safeStringify } from '../serialization-utils';
 import { CANONICAL_J_EVENTS } from '../j-event-watcher';
 
@@ -11798,7 +12736,7 @@ const getTokenDecimals = (tokenId: number): number => {
  * @param env - Runtime environment
  * @returns Updated state (may include finalized events if threshold met)
  */
-export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): { newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> } => {
+export const handleJEvent = async (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> }> => {
   const { from: signerId, observedAt, blockNumber, blockHash } = entityTxData;
   // j-watcher now sends batched events - use 'events' array, fallback to single 'event'
   const rawEvents = (entityTxData as any).events || [entityTxData.event];
@@ -11850,7 +12788,7 @@ export const handleJEvent = (entityState: EntityState, entityTxData: JEventEntit
 
   // Try to finalize - with batching, single-signer entities finalize immediately
   // with ALL events from the block (no more race condition)
-  const { newState, mempoolOps } = tryFinalizeJBlocks(newEntityState, entityState.config.threshold, env);
+  const { newState, mempoolOps } = await tryFinalizeJBlocks(newEntityState, entityState.config.threshold, env);
   newEntityState = newState;
 
   // DEBUG: Dump account mempools after j-event processing
@@ -11985,11 +12923,11 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
  * @param env - Runtime environment for deterministic timestamps
  * @returns Updated state with finalized events applied
  */
-function tryFinalizeJBlocks(
+async function tryFinalizeJBlocks(
   state: EntityState,
   threshold: bigint,
   env: Env
-): { newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> } {
+): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> }> {
   const allMempoolOps: Array<{ accountId: string; tx: any }> = [];
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -12065,8 +13003,11 @@ function tryFinalizeJBlocks(
       // ─────────────────────────────────────────────────────────────────────────
       // Step 5: Apply all events from this finalized block
       // ─────────────────────────────────────────────────────────────────────────
+      console.log(`   📦 Applying ${events.length} events from block ${jHeight}`);
+      console.log(`      Event types:`, events.map(e => e.type));
       for (const event of events) {
-        const { newState, mempoolOps } = applyFinalizedJEvent(state, event);
+        console.log(`      🔧 Applying event: ${event.type}`);
+        const { newState, mempoolOps } = await applyFinalizedJEvent(state, event, env);
         state = newState;
         allMempoolOps.push(...mempoolOps);
         // applyFinalizedJEvent clones state - ensure jBlockChain preserved
@@ -12116,7 +13057,7 @@ function mergeSignerObservations(observations: JBlockObservation[]): Jurisdictio
   for (const obs of observations) {
     for (const event of obs.events) {
       // Create unique key from event type and data
-      const key = `${event.type}:${JSON.stringify(event.data)}`;
+    const key = `${event.type}:${safeStringify(event.data)}`;
       if (!eventMap.has(key)) {
         eventMap.set(key, event);
       }
@@ -12150,10 +13091,13 @@ function mergeSignerObservations(observations: JBlockObservation[]): Jurisdictio
  * @param event - Finalized j-event to apply
  * @returns New state with event applied
  */
-function applyFinalizedJEvent(
+async function applyFinalizedJEvent(
   entityState: EntityState,
-  event: JurisdictionEvent
-): { newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> } {
+  event: JurisdictionEvent,
+  env: Env
+): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> }> {
+  console.log(`🔧🔧 applyFinalizedJEvent: entityId=${entityState.entityId.slice(-4)}, event.type=${event.type}`);
+
   const entityShort = entityState.entityId.slice(-4);
   const blockNumber = event.blockNumber ?? 0;
   const transactionHash = event.transactionHash || 'unknown';
@@ -12179,6 +13123,55 @@ function applyFinalizedJEvent(
     }
 
     addMessage(newState, `📊 RESERVE: ${tokenSymbol} = ${balanceDisplay} | Block ${blockNumber} | Tx ${txHashShort}`);
+
+  } else if (event.type === 'SecretRevealed') {
+    const { hashlock, secret } = event.data;
+    const hashlockKey = String(hashlock).toLowerCase();
+    const route = newState.htlcRoutes.get(hashlockKey);
+
+    if (!route) {
+      console.log(`⚠️ HTLC: Secret reveal for unknown hashlock ${hashlockKey.slice(0, 16)}...`);
+      return { newState, mempoolOps };
+    }
+
+    if (route.secret) {
+      console.log(`✅ HTLC: Secret already stored for hashlock ${hashlockKey.slice(0, 16)}...`);
+      addMessage(newState, `🔓 HTLC reveal observed: ${hashlockKey.slice(0, 10)}... | Block ${blockNumber}`);
+      return { newState, mempoolOps };
+    }
+
+    route.secret = String(secret);
+
+    if (route.pendingFee) {
+      newState.htlcFeesEarned = (newState.htlcFeesEarned || 0n) + route.pendingFee;
+      console.log(`💰 HTLC: Fee earned on on-chain reveal: ${route.pendingFee} (total: ${newState.htlcFeesEarned})`);
+      route.pendingFee = undefined;
+    }
+
+    if (route.outboundLockId) {
+      newState.lockBook.delete(route.outboundLockId);
+    }
+    if (route.inboundLockId) {
+      newState.lockBook.delete(route.inboundLockId);
+    }
+
+    if (route.inboundEntity && route.inboundLockId) {
+      mempoolOps.push({
+        accountId: route.inboundEntity,
+        tx: {
+          type: 'htlc_reveal',
+          data: {
+            lockId: route.inboundLockId,
+            secret: String(secret),
+          }
+        }
+      });
+      console.log(`⬅️ HTLC: On-chain secret propagated to ${route.inboundEntity.slice(-4)}`);
+    } else {
+      console.log(`✅ HTLC: On-chain reveal complete (no inbound hop)`);
+    }
+
+    addMessage(newState, `🔓 HTLC reveal observed: ${hashlockKey.slice(0, 10)}... | Block ${blockNumber}`);
 
   } else if (event.type === 'AccountSettled') {
     // Universal settlement event (covers R2C, C2R, settle, rebalance)
@@ -12208,7 +13201,7 @@ function applyFinalizedJEvent(
     if (!account.jEventChain) account.jEventChain = [];
     if (account.lastFinalizedJHeight === undefined) account.lastFinalizedJHeight = 0;
 
-    const isLeft = entityState.entityId < (counterpartyEntityId as string);
+    const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId as string);
     const jHeight = event.blockNumber ?? blockNumber;
     const jBlockHash = event.blockHash || '';
 
@@ -12224,9 +13217,11 @@ function applyFinalizedJEvent(
 
     // Add j_event_claim via mempoolOps (auto-triggers proposableAccounts + account frame)
     // Account keyed by counterparty ID
+    // CRITICAL: Deep-copy event to prevent mutation issues (frame fullDeltaStates added later)
+    const eventCopy = JSON.parse(safeStringify(event));
     mempoolOps.push({
       accountId: counterpartyEntityId as string,
-      tx: { type: 'j_event_claim', data: { jHeight, jBlockHash, events: [event], observedAt: obs.observedAt } },
+      tx: { type: 'j_event_claim', data: { jHeight, jBlockHash, events: [eventCopy], observedAt: obs.observedAt } },
     });
     console.log(`   📮 j_event_claim → mempoolOps[${mempoolOps.length}] (will auto-propose frame)`);
 
@@ -12300,7 +13295,7 @@ function applyFinalizedJEvent(
       });
     }
 
-    addMessage(newState, `🔴 DEBT: ${amountDisplay} ${tokenSymbol} owed to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
+    addMessage(newState, `🔴 DEBT: ${(debtor as string).slice(-8)} owes ${amountDisplay} ${tokenSymbol} to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
 
   } else if (event.type === 'DebtEnforced') {
     const { debtor, creditor, tokenId, amountPaid, remainingAmount, newDebtIndex } = event.data;
@@ -12320,6 +13315,131 @@ function applyFinalizedJEvent(
 
     addMessage(newState, `✅ DEBT PAID: ${paidDisplay} ${tokenSymbol} to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
 
+  } else if (event.type === 'DisputeStarted') {
+    console.log(`🔍 DISPUTE-EVENT HANDLER: entityId=${newState.entityId.slice(-4)}`);
+
+    // Dispute started on-chain - store dispute state from event
+    const { sender, counterentity, disputeNonce, proofbodyHash } = event.data;
+    const normalizeId = (id: string) => String(id).toLowerCase();
+    const senderStr = normalizeId(sender as string);
+    const counterentityStr = normalizeId(counterentity as string);
+    const entityIdNorm = normalizeId(newState.entityId);
+
+    // Find which account this affects (we are either sender or counterentity)
+    const candidateCounterpartyId = senderStr === entityIdNorm ? counterentityStr : senderStr;
+    let counterpartyId = candidateCounterpartyId;
+    let account = newState.accounts.get(counterpartyId);
+    if (!account) {
+      for (const [key, value] of newState.accounts.entries()) {
+        if (normalizeId(key) === candidateCounterpartyId) {
+          counterpartyId = key;
+          account = value;
+          break;
+        }
+      }
+    }
+
+    if (account) {
+      // Query on-chain for timeout
+      const browserVM = env.browserVM || (await import('../evm')).getBrowserVMInstance();
+      if (!browserVM) {
+        console.warn(`⚠️ DisputeStarted: No browserVM to query timeout`);
+        return { newState, mempoolOps };
+      }
+
+      const accountInfo = await browserVM.getAccountInfo(newState.entityId, counterpartyId);
+
+      const weAreStarter = senderStr === entityIdNorm;
+      const hasCounterpartySig = Boolean(account.counterpartyDisputeProofHanko);
+      let initialCooperativeNonce = account.proofHeader.cooperativeNonce;
+      let nonceSource = 'proofHeader';
+      const mappedNonce = account.disputeProofNoncesByHash?.[String(proofbodyHash)];
+      if (mappedNonce !== undefined) {
+        initialCooperativeNonce = mappedNonce;
+        nonceSource = 'hashMap';
+      } else if (weAreStarter) {
+        if (account.counterpartyDisputeProofCooperativeNonce !== undefined) {
+          initialCooperativeNonce = account.counterpartyDisputeProofCooperativeNonce;
+          nonceSource = 'counterpartySig';
+        } else if (hasCounterpartySig && account.ackedTransitions > 0) {
+          initialCooperativeNonce = account.ackedTransitions - 1;
+          nonceSource = 'ackedTransitions-1';
+        }
+      } else {
+        if (account.currentDisputeProofCooperativeNonce !== undefined) {
+          initialCooperativeNonce = account.currentDisputeProofCooperativeNonce;
+          nonceSource = 'currentSig';
+        } else if (account.ackedTransitions > 0) {
+          initialCooperativeNonce = account.ackedTransitions - 1;
+          nonceSource = 'ackedTransitions-1';
+        }
+      }
+      console.log(`   DEBUG DisputeStarted: starter=${weAreStarter}, source=${nonceSource}, ackedTransitions=${account.ackedTransitions}, proofHeader.cooperativeNonce=${account.proofHeader.cooperativeNonce}, initialCooperativeNonce=${initialCooperativeNonce}`);
+
+      // Store dispute state from event + on-chain (source of truth)
+      account.activeDispute = {
+        startedByLeft: senderStr < counterentityStr,
+        initialProofbodyHash: String(proofbodyHash),  // From event (committed on-chain)
+        initialDisputeNonce: Number(disputeNonce),
+        disputeTimeout: Number(accountInfo.disputeTimeout),  // From on-chain
+        initialCooperativeNonce,  // Nonce PASSED to disputeStart (for hash match)
+        onChainCooperativeNonce: Number(accountInfo.cooperativeNonce),  // May differ
+        initialArguments: event.data.initialArguments || '0x',
+      };
+
+      // ASSERTION: Our local proof hash should match on-chain committed hash
+      const { buildAccountProofBody } = await import('../proof-builder');
+      const localProof = buildAccountProofBody(account);
+      if (localProof.proofBodyHash !== account.activeDispute.initialProofbodyHash) {
+        console.error(`❌ CONSENSUS DIVERGENCE: Local proofBodyHash != on-chain`);
+        console.error(`   Local: ${localProof.proofBodyHash}`);
+        console.error(`   On-chain: ${account.activeDispute.initialProofbodyHash}`);
+        console.error(`   This means bilateral state diverged - CRITICAL BUG!`);
+        // Continue but log for audit
+      } else {
+        console.log(`✅ Proof hash verified: local matches on-chain`);
+      }
+
+      addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout}`);
+      console.log(`⚔️ activeDispute stored: hash=${account.activeDispute.initialProofbodyHash.slice(0,10)}..., timeout=${account.activeDispute.disputeTimeout}`);
+    } else {
+      console.warn(`⚠️ DisputeStarted: account ${candidateCounterpartyId.slice(-4)} not found for entity ${entityIdNorm.slice(-4)}`);
+    }
+
+  } else if (event.type === 'DisputeFinalized') {
+    console.log(`🔍 DISPUTE-FINALIZED HANDLER: entityId=${newState.entityId.slice(-4)}`);
+
+    const { sender, counterentity, initialDisputeNonce, initialProofbodyHash } = event.data;
+    const normalizeId = (id: string) => String(id).toLowerCase();
+    const senderStr = normalizeId(sender as string);
+    const counterentityStr = normalizeId(counterentity as string);
+    const entityIdNorm = normalizeId(newState.entityId);
+
+    const candidateCounterpartyId = senderStr === entityIdNorm ? counterentityStr : senderStr;
+    let counterpartyId = candidateCounterpartyId;
+    let account = newState.accounts.get(counterpartyId);
+    if (!account) {
+      for (const [key, value] of newState.accounts.entries()) {
+        if (normalizeId(key) === candidateCounterpartyId) {
+          counterpartyId = key;
+          account = value;
+          break;
+        }
+      }
+    }
+
+    if (account) {
+      if (account.activeDispute) {
+        account.activeDispute = undefined;
+        addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialDisputeNonce)})`);
+        console.log(`✅ activeDispute cleared for ${counterpartyId.slice(-4)} (proof=${String(initialProofbodyHash).slice(0, 10)}...)`);
+      } else {
+        console.warn(`⚠️ DisputeFinalized: No activeDispute for ${counterpartyId.slice(-4)}`);
+      }
+    } else {
+      console.warn(`⚠️ DisputeFinalized: account ${candidateCounterpartyId.slice(-4)} not found for entity ${entityIdNorm.slice(-4)}`);
+    }
+
   } else {
     // Unknown event - log but don't fail
     addMessage(newState, `⚠️ Unknown j-event: ${event.type} | Block ${blockNumber}`);
@@ -12330,13 +13450,16 @@ function applyFinalizedJEvent(
 }
 
 
-//runtime/entity-tx/handlers/account.ts (848 lines)
+//runtime/entity-tx/handlers/account.ts (872 lines)
 import { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents, resolveEntityProposerId } from '../../state-helpers';
 import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
 import { HTLC } from '../../constants';
 import { formatEntityId, HEAVY_LOGS } from '../../utils';
+import { isLeftEntity } from '../../entity-id-utils';
+import { batchAddRevealSecret, initJBatch } from '../../j-batch';
+import { getDeltaTransformerAddress } from '../../proof-builder';
 
 // === PURE EVENT TYPES ===
 // Events returned by handlers, applied by entity orchestrator
@@ -12383,7 +13506,7 @@ export interface AccountHandlerResult {
 
 export async function handleAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<AccountHandlerResult> {
   console.log(`🚀 APPLY accountInput: ${input.fromEntityId.slice(-4)} → ${input.toEntityId.slice(-4)}`);
-  console.log(`🚀 APPLY accountInput details: height=${input.height}, hasNewFrame=${!!input.newAccountFrame}, hasPrevSigs=${!!input.prevSignatures}, counter=${input.counter}`);
+  console.log(`🚀 APPLY accountInput details: height=${input.height}, hasNewFrame=${!!input.newAccountFrame}, hasPrevHanko=${!!input.prevHanko}, counter=${input.counter}`);
 
   // CRITICAL: Don't clone here - state already cloned at entity level (applyEntityTx)
   // Cloning here causes ackedTransitions updates to be lost between sequential messages
@@ -12409,8 +13532,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     const initialDeltas = new Map();
 
     // CANONICAL: Sort entities (left < right) for AccountMachine internals (like Channel.ts)
-    const leftEntity = state.entityId < counterpartyId ? state.entityId : counterpartyId;
-    const rightEntity = state.entityId < counterpartyId ? counterpartyId : state.entityId;
+    const leftEntity = isLeftEntity(state.entityId, counterpartyId) ? state.entityId : counterpartyId;
+    const rightEntity = isLeftEntity(state.entityId, counterpartyId) ? counterpartyId : state.entityId;
 
     accountMachine = {
       leftEntity,
@@ -12535,6 +13658,13 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             tryFinalizeAccountJEvents(accountMachine, counterparty, env);
 
             continue; // Move to next tx
+          }
+
+          if (accountTx.type === 'swap_resolve' || accountTx.type === 'swap_cancel') {
+            const key = `${counterpartyId}:${accountTx.data.offerId}`;
+            if (newState.pendingSwapFillRatios?.delete(key)) {
+              console.log(`📉 Cleared pending fillRatio for ${key.slice(-12)}`);
+            }
           }
 
           if (accountTx.type === 'htlc_lock') {
@@ -12866,6 +13996,20 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       const revealedSecrets = result.revealedSecrets || [];
       if (HEAVY_LOGS) console.log(`🔍 HTLC-SECRET-CHECK: ${revealedSecrets.length} secrets revealed in frame`);
 
+      if (revealedSecrets.length > 0) {
+        if (!newState.jBatchState) {
+          newState.jBatchState = initJBatch();
+        }
+        const transformerAddress = getDeltaTransformerAddress();
+        if (transformerAddress === '0x0000000000000000000000000000000000000000') {
+          console.warn('⚠️ HTLC: DeltaTransformer address not set - skipping on-chain reveal');
+        } else {
+          for (const { secret } of revealedSecrets) {
+            batchAddRevealSecret(newState.jBatchState, transformerAddress, secret);
+          }
+        }
+      }
+
       for (const { secret, hashlock } of revealedSecrets) {
         if (HEAVY_LOGS) console.log(`🔍 HTLC-SECRET: Processing revealed secret for hash ${hashlock.slice(0,16)}...`);
         const route = newState.htlcRoutes.get(hashlock);
@@ -12950,7 +14094,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           }]
         });
 
-        console.log(`✅ ACK-RESPONSE queued: ${state.entityId.slice(-4)} → ${result.response.toEntityId.slice(-4)}, height=${result.response.height}, hasPrevSigs=${!!result.response.prevSignatures}, counter=${result.response.counter}`);
+        console.log(`✅ ACK-RESPONSE queued: ${state.entityId.slice(-4)} → ${result.response.toEntityId.slice(-4)}, height=${result.response.height}, hasPrevHanko=${!!result.response.prevHanko}, counter=${result.response.counter}`);
       }
     } else {
       console.error(`❌ Frame consensus failed: ${result.error}`);
@@ -13256,7 +14400,7 @@ export async function handleDepositCollateral(
 }
 
 
-//runtime/entity-tx/handlers/htlc-payment.ts (212 lines)
+//runtime/entity-tx/handlers/htlc-payment.ts (238 lines)
 /**
  * HTLC Payment Handler (Entity-level)
  * Creates conditional payment with hashlock, routes through network
@@ -13267,7 +14411,7 @@ export async function handleDepositCollateral(
 
 import { EntityState, EntityInput, AccountTx, Env } from '../../types';
 import { cloneEntityState, canonicalAccountKey } from '../../state-helpers';
-import { generateHashlock, generateLockId, calculateHopTimelock, calculateHopRevealHeight } from '../../htlc-utils';
+import { generateHashlock, generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../htlc-utils';
 import { HTLC } from '../../constants';
 
 const formatEntityId = (id: string) => id.slice(-4);
@@ -13298,12 +14442,38 @@ export async function handleHtlcPayment(
   // Extract payment details
   let { targetEntityId, tokenId, amount, route, description, secret, hashlock } = entityTx.data;
 
-  // Generate secret/hashlock if not provided
-  if (!secret || !hashlock) {
+  // Generate or validate secret/hashlock
+  if (!secret && !hashlock) {
     const generated = generateHashlock();
     secret = generated.secret;
     hashlock = generated.hashlock;
     console.log(`🔒 Generated secret: ${secret.slice(0,16)}..., hash: ${hashlock.slice(0,16)}...`);
+  } else if (secret && !hashlock) {
+    try {
+      hashlock = hashHtlcSecret(secret);
+      console.log(`🔒 Derived hashlock from provided secret: ${hashlock.slice(0,16)}...`);
+    } catch (error) {
+      logError("HTLC_PAYMENT", `❌ Invalid secret format: ${error instanceof Error ? error.message : String(error)}`);
+      addMessage(newState, `❌ HTLC payment failed: invalid secret`);
+      return { newState, outputs: [], mempoolOps: [] };
+    }
+  } else if (!secret && hashlock) {
+    logError("HTLC_PAYMENT", `❌ Provided hashlock without secret`);
+    addMessage(newState, `❌ HTLC payment failed: missing secret`);
+    return { newState, outputs: [], mempoolOps: [] };
+  } else if (secret && hashlock) {
+    try {
+      const computed = hashHtlcSecret(secret);
+      if (computed !== hashlock) {
+        logError("HTLC_PAYMENT", `❌ Secret/hashlock mismatch: computed ${computed.slice(0,16)}..., expected ${hashlock.slice(0,16)}...`);
+        addMessage(newState, `❌ HTLC payment failed: secret/hash mismatch`);
+        return { newState, outputs: [], mempoolOps: [] };
+      }
+    } catch (error) {
+      logError("HTLC_PAYMENT", `❌ Invalid secret format: ${error instanceof Error ? error.message : String(error)}`);
+      addMessage(newState, `❌ HTLC payment failed: invalid secret`);
+      return { newState, outputs: [], mempoolOps: [] };
+    }
   }
 
   // If no route provided, check for direct account or calculate route
@@ -13470,7 +14640,7 @@ export async function handleHtlcPayment(
 }
 
 
-//runtime/entity-tx/handlers/create-settlement.ts (54 lines)
+//runtime/entity-tx/handlers/create-settlement.ts (62 lines)
 /**
  * Create Settlement Handler
  *
@@ -13487,12 +14657,13 @@ export async function handleHtlcPayment(
 import type { EntityState, EntityTx, EntityInput } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddSettlement } from '../../j-batch';
+import { isLeftEntity } from '../../entity-id-utils';
 
 export async function handleCreateSettlement(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'createSettlement' }>
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: any[] }> {
-  const { counterpartyEntityId, diffs } = entityTx.data;
+  const { counterpartyEntityId, diffs, sig } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
@@ -13505,16 +14676,23 @@ export async function handleCreateSettlement(
   }
 
   // Determine canonical left/right order
-  const isLeft = entityState.entityId < counterpartyEntityId;
+  const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId);
   const leftEntity = isLeft ? entityState.entityId : counterpartyEntityId;
   const rightEntity = isLeft ? counterpartyEntityId : entityState.entityId;
+
+  if (!sig || sig === '0x') {
+    throw new Error(`Settlement ${entityState.entityId.slice(-4)}↔${counterpartyEntityId.slice(-4)} missing hanko signature`);
+  }
 
   // Add settlement to jBatch
   batchAddSettlement(
     newState.jBatchState,
     leftEntity,
     rightEntity,
-    diffs
+    diffs,
+    [],
+    [],
+    sig
   );
 
   console.log(`✅ createSettlement: Added to jBatch for ${entityState.entityId.slice(-4)}`);
@@ -14204,7 +15382,7 @@ export class PathFinder {
   }
 }
 
-//runtime/account-crypto.ts (325 lines)
+//runtime/account-crypto.ts (397 lines)
 /**
  * Real cryptographic signatures for account consensus
  * Uses secp256k1 (Ethereum standard) with HMAC-derived keys from BrainVault seed
@@ -14292,37 +15470,95 @@ export function lockRuntimeSeedUpdates(locked: boolean): void {
   runtimeSeedLocked = locked;
 }
 
-const getOrDeriveKey = (signerId: string): Uint8Array | null => {
+const getOrDeriveKey = (envSeed: Uint8Array, signerId: string): Uint8Array => {
   console.log(`🔍 getOrDeriveKey: signerId=${signerId.slice(-4)}`);
   const cached = signerKeys.get(signerId);
   if (cached) {
     console.log(`✅ Found cached key for ${signerId.slice(-4)}`);
     return cached;
   }
-  console.log(`⚠️ No cached key for ${signerId.slice(-4)}, trying to derive...`);
-  if (!runtimeSeedBytes) {
-    console.log(`❌ Cannot derive - runtimeSeedBytes is null`);
-    return null;
+  console.log(`⚠️ No cached key for ${signerId.slice(-4)}, deriving from env.runtimeSeed...`);
+
+  // PURE: ONLY use env seed, NEVER fall back to global
+  if (!envSeed) {
+    throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getOrDeriveKey called without env.runtimeSeed for signer ${signerId}`);
   }
-  console.log(`✅ Deriving key from runtimeSeedBytes (${runtimeSeedBytes.length} bytes)`);
-  const derived = deriveSignerKeySync(runtimeSeedBytes, signerId);
+  console.log(`✅ Deriving key from env seed (${envSeed.length} bytes)`);
+  const derived = deriveSignerKeySync(envSeed, signerId);
   registerSignerKey(signerId, derived);
   console.log(`✅ Derived and registered key for ${signerId.slice(-4)}`);
   return derived;
 };
 
-// Export for hanko-signing.ts
-export function getSignerPrivateKey(signerId: string): Uint8Array | null {
-  return getOrDeriveKey(signerId);
+/**
+ * Get cached signer private key (no derivation, cache-only)
+ * Used by components like BrowserVM that don't have env access
+ */
+export function getCachedSignerPrivateKey(signerId: string): Uint8Array | null {
+  return signerKeys.get(signerId) || null;
 }
 
-export function getSignerPublicKey(signerId: string): Uint8Array | null {
+/**
+ * Get cached signer public key (no derivation, cache-only)
+ * Used by components that don't have env access
+ */
+export function getCachedSignerPublicKey(signerId: string): Uint8Array | null {
   const external = externalPublicKeys.get(signerId);
   if (external) return external;
   const cached = signerPublicKeys.get(signerId);
   if (cached) return cached;
-  const privateKey = signerKeys.get(signerId) || getOrDeriveKey(signerId);
+  // Try deriving from cached private key
+  const privateKey = signerKeys.get(signerId);
   if (!privateKey) return null;
+  const publicKey = secp256k1.getPublicKey(privateKey);
+  signerPublicKeys.set(signerId, publicKey);
+  return publicKey;
+}
+
+/**
+ * Get cached signer address (no derivation, cache-only)
+ * Used by components that don't have env access
+ */
+export function getCachedSignerAddress(signerId: string): string | null {
+  const cached = signerAddresses.get(signerId);
+  if (cached) return cached;
+  // Try deriving from cached private key
+  const privateKey = signerKeys.get(signerId);
+  if (!privateKey) return null;
+  const address = privateKeyToAddress(privateKey);
+  signerAddresses.set(signerId, address);
+  return address;
+}
+
+// Export for hanko-signing.ts
+export function getSignerPrivateKey(env: any, signerId: string): Uint8Array {
+  if (!env?.runtimeSeed) {
+    throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getSignerPrivateKey called without env.runtimeSeed for signer ${signerId}`);
+  }
+  const seed = textEncoder.encode(env.runtimeSeed);
+  return getOrDeriveKey(seed, signerId);
+}
+
+export function getSignerPublicKey(env: any, signerId: string): Uint8Array | null {
+  const external = externalPublicKeys.get(signerId);
+  if (external) return external;
+  const cached = signerPublicKeys.get(signerId);
+  if (cached) return cached;
+
+  // Try cached private key first
+  const cachedPrivateKey = signerKeys.get(signerId);
+  if (cachedPrivateKey) {
+    const publicKey = secp256k1.getPublicKey(cachedPrivateKey);
+    signerPublicKeys.set(signerId, publicKey);
+    return publicKey;
+  }
+
+  // Derive from env if available
+  if (!env?.runtimeSeed) {
+    return null;
+  }
+  const seed = textEncoder.encode(env.runtimeSeed);
+  const privateKey = getOrDeriveKey(seed, signerId);
   const publicKey = secp256k1.getPublicKey(privateKey);
   signerPublicKeys.set(signerId, publicKey);
   return publicKey;
@@ -14340,11 +15576,24 @@ export function deriveSignerAddressSync(seed: Uint8Array | string, signerId: str
   return privateKeyToAddress(privateKey);
 }
 
-export function getSignerAddress(signerId: string): string | null {
+export function getSignerAddress(env: any, signerId: string): string | null {
   const cached = signerAddresses.get(signerId);
   if (cached) return cached;
-  const privateKey = getOrDeriveKey(signerId);
-  if (!privateKey) return null;
+
+  // Try cached private key first
+  const cachedPrivateKey = signerKeys.get(signerId);
+  if (cachedPrivateKey) {
+    const address = privateKeyToAddress(cachedPrivateKey);
+    signerAddresses.set(signerId, address);
+    return address;
+  }
+
+  // Derive from env if available
+  if (!env?.runtimeSeed) {
+    return null;
+  }
+  const seed = textEncoder.encode(env.runtimeSeed);
+  const privateKey = getOrDeriveKey(seed, signerId);
   const address = privateKeyToAddress(privateKey);
   signerAddresses.set(signerId, address);
   return address;
@@ -14426,27 +15675,29 @@ export function clearSignerKeys(): void {
  * Returns: 65-byte signature (r + s + recovery)
  */
 export function signAccountFrame(
+  env: any,
   signerId: string,
-  frameHash: string,
-  _privateData?: string // Deprecated, kept for backwards compat
+  frameHash: string
 ): string {
-  console.log(`🔑 signAccountFrame CALLED: signerId=${signerId.slice(-4)}, frameHash=${frameHash.slice(0, 10)}`);
+  if (!env?.runtimeSeed) {
+    throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signAccountFrame called without env.runtimeSeed for signer ${signerId}`);
+  }
+  const seed = textEncoder.encode(env.runtimeSeed);
+
+  console.log(`🔑 signAccountFrame CALLED: signerId=${signerId.slice(-4)}, frameHash=${frameHash.slice(0, 10)}, source=env`);
   console.log(`🔑 Available signerKeys:`, Array.from(signerKeys.keys()).map(k => k.slice(-4)));
   console.log(`🔑 Available signerPublicKeys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
-  console.log(`🔑 runtimeSeedBytes available: ${!!runtimeSeedBytes} (${runtimeSeedBytes?.length || 0} bytes)`);
 
   const messageHash = keccak256(Buffer.from(frameHash.replace('0x', ''), 'hex'));
-  const signature = signDigest(signerId, messageHash);
+  const signature = signDigest(seed, signerId, messageHash);
   console.log(`✍️ Signed frame ${frameHash.slice(0, 10)} by ${signerId.slice(-4)}: ${signature.slice(0, 20)}...`);
   return signature;
 }
 
-export function signDigest(signerId: string, digestHex: string): string {
+export function signDigest(seed: Uint8Array, signerId: string, digestHex: string): string {
   installHmacSync();
-  const privateKey = getOrDeriveKey(signerId);
-  if (!privateKey) {
-    throw new Error(`SIGNER_KEY_MISSING: No key or runtime seed for signer ${signerId}`);
-  }
+
+  const privateKey = getOrDeriveKey(seed, signerId);
 
   const messageBytes = Buffer.from(digestHex.replace('0x', ''), 'hex');
   const [signature, recovery] = secp256k1.signSync(messageBytes, privateKey, { recovered: true, der: false });
@@ -14458,14 +15709,14 @@ export function signDigest(signerId: string, digestHex: string): string {
  * Verify account signature using secp256k1
  */
 export function verifyAccountSignature(
+  env: any,
   signerId: string,
   frameHash: string,
-  signature: string,
-  _privateData?: string // Deprecated
+  signature: string
 ): boolean {
   // Real signature verification
   console.log(`🔍 VERIFY: signerId=${signerId.slice(-4)}, frameHash=${frameHash.slice(0, 10)}, sig=${signature.slice(0, 20)}...`);
-  const publicKey = getSignerPublicKey(signerId);
+  const publicKey = getSignerPublicKey(env, signerId);
   if (!publicKey) {
     console.warn(`⚠️ Cannot verify - no public key for signerId=${signerId.slice(-4)}`);
     console.warn(`⚠️ Available keys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
@@ -14500,12 +15751,10 @@ export function verifyAccountSignature(
 }
 
 /**
- * Easy signer function that returns the entity ID from a signature
- */
-/**
  * Validate multiple signatures for account frame
  */
 export function validateAccountSignatures(
+  env: any,
   frameHash: string,
   signatures: string[],
   expectedSigners: string[]
@@ -14515,7 +15764,8 @@ export function validateAccountSignatures(
 
   for (const signature of signatures) {
     for (const signer of Array.from(remaining)) {
-      if (verifyAccountSignature(signer, frameHash, signature)) {
+      const isValid = verifyAccountSignature(env, signer, frameHash, signature);
+      if (isValid) {
         validSigners.push(signer);
         remaining.delete(signer);
         break;
@@ -14531,18 +15781,19 @@ export function validateAccountSignatures(
 }
 
 
-//runtime/state-helpers.ts (642 lines)
+//runtime/state-helpers.ts (675 lines)
 /**
  * XLN State Management Helpers
  * Utilities for entity replica cloning, snapshots, and state persistence
  */
 
 import { encode } from './snapshot-coder';
-import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, RuntimeInput, AccountMachine, JReplica, LogCategory } from './types';
+import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, RuntimeInput, AccountMachine, JReplica, LogCategory, BrowserVMState } from './types';
 import type { Profile } from './gossip';
 import { DEBUG } from './utils';
 import { validateEntityState } from './validation-utils';
 import { safeStringify, safeParse } from './serialization-utils';
+import { isLeftEntity } from './entity-id-utils';
 
 // Message size limit for snapshot efficiency
 const MESSAGE_LIMIT = 10;
@@ -14552,7 +15803,7 @@ const MESSAGE_LIMIT = 10;
  * Pattern from Channel.ts - ensures both entities reference SAME account object
  */
 export function canonicalAccountKey(entity1: string, entity2: string): string {
-  return entity1 < entity2 ? `${entity1}:${entity2}` : `${entity2}:${entity1}`;
+  return isLeftEntity(entity1, entity2) ? `${entity1}:${entity2}` : `${entity2}:${entity1}`;
 }
 
 /**
@@ -14744,6 +15995,9 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
         { ...entry }
       ])
     ),
+    pendingSwapFillRatios: new Map(
+      Array.from((entityState.pendingSwapFillRatios || new Map()).entries())
+    ),
   };
 }
 
@@ -14876,16 +16130,20 @@ export const captureSnapshot = async (
 
   // Capture fresh stateRoot from BrowserVM for time-travel (if available)
   let freshStateRoot: Uint8Array | null = null;
+  let browserVMState: BrowserVMState | null = null;
   if (env.jReplicas) {
     try {
       const { getBrowserVMInstance } = await import('./evm');
-      const browserVM = getBrowserVMInstance();
+      const browserVM = getBrowserVMInstance(env);
       if (browserVM?.captureStateRoot) {
         freshStateRoot = await browserVM.captureStateRoot();
         // Update live jReplicas so next snapshot has correct base
         for (const [, jReplica] of env.jReplicas.entries()) {
           jReplica.stateRoot = freshStateRoot;
         }
+      }
+      if (browserVM?.serializeState) {
+        browserVMState = await browserVM.serializeState();
       }
     } catch {
       // Silent fail - stateRoot capture is optional
@@ -14925,7 +16183,7 @@ export const captureSnapshot = async (
           if (replica.state?.accounts) {
             for (const [counterpartyId, account] of replica.state.accounts.entries()) {
               // Only capture from LEFT entity (smaller ID) to avoid duplicates
-              if (entityId < counterpartyId && account.deltas) {
+              if (isLeftEntity(entityId, counterpartyId) && account.deltas) {
                 // Create channel key: LEFT-RIGHT (canonical ordering)
                 const channelKey = `${entityId.slice(-4)}-${counterpartyId.slice(-4)}`;
                 const tokenMap = new Map<number, { collateral: bigint; ondelta: bigint }>();
@@ -14988,6 +16246,7 @@ export const captureSnapshot = async (
     ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
     eReplicas: new Map(Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica, true)])), // forSnapshot=true excludes clonedForValidation
     jReplicas,
+    ...(browserVMState ? { browserVMState } : {}),
     runtimeInput: {
       runtimeTxs: [...runtimeInput.runtimeTxs],
       entityInputs: runtimeInput.entityInputs.map(input => ({
@@ -15148,6 +16407,30 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
 
   if (account.hankoSignature) {
     result.hankoSignature = account.hankoSignature;
+  }
+  if (account.currentDisputeProofHanko) {
+    result.currentDisputeProofHanko = account.currentDisputeProofHanko;
+  }
+  if (account.currentDisputeProofCooperativeNonce !== undefined) {
+    result.currentDisputeProofCooperativeNonce = account.currentDisputeProofCooperativeNonce;
+  }
+  if (account.currentDisputeProofBodyHash) {
+    result.currentDisputeProofBodyHash = account.currentDisputeProofBodyHash;
+  }
+  if (account.counterpartyDisputeProofHanko) {
+    result.counterpartyDisputeProofHanko = account.counterpartyDisputeProofHanko;
+  }
+  if (account.counterpartyDisputeProofCooperativeNonce !== undefined) {
+    result.counterpartyDisputeProofCooperativeNonce = account.counterpartyDisputeProofCooperativeNonce;
+  }
+  if (account.counterpartyDisputeProofBodyHash) {
+    result.counterpartyDisputeProofBodyHash = account.counterpartyDisputeProofBodyHash;
+  }
+  if (account.disputeProofNoncesByHash) {
+    result.disputeProofNoncesByHash = { ...account.disputeProofNoncesByHash };
+  }
+  if (account.disputeProofBodiesByHash) {
+    result.disputeProofBodiesByHash = { ...account.disputeProofBodiesByHash };
   }
 
   // ABI-encoded proofBody for on-chain disputes
@@ -15493,7 +16776,7 @@ export const decodeAsync = async (buffer: Buffer): Promise<any> => {
 export { USE_MSGPACK };
 
 
-//runtime/evm.ts (1023 lines)
+//runtime/evm.ts (961 lines)
 /**
  * XLN EVM Integration
  * Handles blockchain interactions, jurisdictions, and smart contract operations
@@ -15501,9 +16784,10 @@ export { USE_MSGPACK };
 
 import { ethers } from 'ethers';
 import { loadJurisdictions } from './jurisdiction-loader';
-import type { JBatch } from './j-batch';
+import { encodeJBatch, computeBatchHankoHash, type JBatch } from './j-batch';
 
 import { detectEntityType, encodeBoard, extractNumberFromEntityId, hashBoard } from './entity-factory';
+import { normalizeEntityId } from './entity-id-utils';
 import { safeStringify } from './serialization-utils';
 import type { ConsensusConfig, JurisdictionConfig } from './types';
 import { DEBUG, isBrowser } from './utils';
@@ -15561,7 +16845,9 @@ export const DEPOSITORY_ABI = [
   'function debugFundReserves(bytes32 entity, uint256 tokenId, uint256 amount) external',
   'function debugBulkFundEntities() external',
   'function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint256 tokenId, uint256 amount) external returns (bool)',
-  'function processBatch(bytes32 entity, tuple(tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(bytes32 entity, bytes32 packedToken, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig)[] settlements, tuple(bytes32 counterentity, tuple(uint256 tokenId, int256 peerReserveDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig)[] cooperativeUpdate, tuple(bytes32 counterentity, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] subcontracts) proofbody, bytes initialArguments, bytes finalArguments, bytes sig)[] cooperativeDisputeProof, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] initialDisputeProof, tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 initialDisputeNonce, uint256 disputeUntilBlock, bytes32 initialProofbodyHash, bytes initialArguments, bool startedByLeft, uint256 finalCooperativeNonce, uint256 finalDisputeNonce, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address subcontractProviderAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] subcontracts) finalProofbody, bytes finalArguments, bytes sig)[] finalDisputeProof, tuple(uint256 tokenId, uint256 amount)[] flashloans, uint256 hub_id) batch) external returns (bool)',
+  'function processBatch(bytes encodedBatch, address entityProvider, bytes hankoData, uint256 nonce) external returns (bool)',
+  'function unsafeProcessBatch(bytes32 entity, tuple(tuple(uint256 tokenId, uint256 amount)[] flashloans, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts, tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 finalCooperativeNonce, uint256 initialDisputeNonce, uint256 finalDisputeNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations, tuple(bytes32 entity, bytes32 packedToken, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(address transformer, bytes32 secret)[] revealSecrets, uint256 hub_id) batch) external returns (bool)',
+  'function entityNonces(address) view returns (uint256)',
   'function prefundAccount(bytes32 fundingEntity, bytes32 counterpartyEntity, uint256 tokenId, uint256 amount) external returns (bool)',
   'function settle(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig) external returns (bool)',
   'function _reserves(bytes32 entity, uint256 tokenId) external view returns (uint256)',
@@ -15571,6 +16857,9 @@ export const DEPOSITORY_ABI = [
   'function getAvailableInsurance(bytes32 insured, uint256 tokenId) external view returns (uint256)',
   // Canonical J-Events (must match CANONICAL_J_EVENTS in j-event-watcher.ts)
   'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
+  'event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret)',
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments)',
+  'event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed initialDisputeNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash)',
   // Note: AccountSettled is emitted via DELEGATECALL from Account.sol - parsed directly from logs
   // Insurance events
   'event InsuranceRegistered(bytes32 indexed insured, bytes32 indexed insurer, uint256 indexed tokenId, uint256 limit, uint64 expiresAt)',
@@ -15584,8 +16873,8 @@ export const DEPOSITORY_ABI = [
 export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
   // Declare outside try block for error logging
   let rpcUrl = jurisdiction.address;
-  const entityProviderAddress = jurisdiction.entityProviderAddress;
-  const depositoryAddress = jurisdiction.depositoryAddress;
+  let entityProviderAddress = jurisdiction.entityProviderAddress;
+  let depositoryAddress = jurisdiction.depositoryAddress;
 
   try {
     // FINTECH-SAFETY: Validate jurisdiction structure before using
@@ -15632,9 +16921,35 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
     const isBrowserVM = resolvedRpcUrl.startsWith('browservm://');
 
     if (isBrowserVM) {
-      // Use BrowserVM provider
+      // Use BrowserVM provider (lazy-init if needed)
+      // NOTE: This path is for legacy code. New code should use env.browserVM
       if (!BROWSER_VM_INSTANCE) {
-        throw new Error('BrowserVM instance not set - call setBrowserVMJurisdiction with browserVM instance first');
+        const { BrowserEVM } = await import('./evms/browser-evm');
+        const evm = new BrowserEVM();
+        await evm.init();
+        // Store in global singleton (backward compat - no env available here)
+        BROWSER_VM_INSTANCE = evm.getProvider();
+        // Update jurisdictions with this VM's addresses
+        const depositoryAddress = evm.getDepositoryAddress();
+        const entityProviderAddress = evm.getEntityProviderAddress();
+        DEFAULT_JURISDICTIONS = new Map();
+        DEFAULT_JURISDICTIONS.set('arrakis', {
+          name: 'Arrakis',
+          chainId: 1337,
+          address: 'browservm://',
+          entityProviderAddress,
+          depositoryAddress,
+        });
+        console.log('✅ Legacy BrowserVM jurisdiction active (global singleton)');
+      }
+      if (!BROWSER_VM_INSTANCE) {
+        throw new Error('BrowserVM instance not set - failed to initialize BrowserVM');
+      }
+      if (BROWSER_VM_INSTANCE?.getEntityProviderAddress && (!entityProviderAddress || entityProviderAddress === '0x0000000000000000000000000000000000000000')) {
+        entityProviderAddress = BROWSER_VM_INSTANCE.getEntityProviderAddress();
+      }
+      if (BROWSER_VM_INSTANCE?.getDepositoryAddress && (!depositoryAddress || depositoryAddress === '0x0000000000000000000000000000000000000000')) {
+        depositoryAddress = BROWSER_VM_INSTANCE.getDepositoryAddress();
       }
       uiLog(`🧪 Using BrowserVM ethers provider`);
       provider = new BrowserVMEthersProvider(BROWSER_VM_INSTANCE);
@@ -15773,178 +17088,47 @@ export const submitPrefundAccount = async (jurisdiction: JurisdictionConfig, ent
   }
 };
 
-export const submitProcessBatch = async (jurisdiction: JurisdictionConfig, entityId: string, batch: JBatch | any) => {
+export const submitProcessBatch = async (
+  env: any,
+  jurisdiction: JurisdictionConfig,
+  entityId: string,
+  batch: JBatch | any,
+  signerId?: string
+) => {
   try {
-    console.log(`💸 Submitting processBatch to ${jurisdiction.name} as entity ${entityId.slice(0, 10)}...`);
-    console.log(`🔍 BATCH DEBUG:`, safeStringify(batch));
-    console.log(`🔍 ENTITY DEBUG: ${entityId}`);
-    console.log(`🔍 JURISDICTION DEBUG:`, jurisdiction);
-    console.log(`🔍 JURISDICTION SOURCE: Reading from jurisdictions.json file`);
-    console.log(`🔍 DEPOSITORY ADDRESS FROM JURISDICTION: ${jurisdiction.depositoryAddress}`);
-    console.log(`🔍 ENTITY PROVIDER ADDRESS FROM JURISDICTION: ${jurisdiction.entityProviderAddress}`);
-    
-    // Fix batch amounts - convert any JS numbers to wei strings
-    if (batch.reserveToReserve) {
-      for (let i = 0; i < batch.reserveToReserve.length; i++) {
-        const transfer = batch.reserveToReserve[i];
-        if (typeof transfer.amount === 'number') {
-          // Convert number to wei string
-          const weiAmount = (BigInt(Math.floor(transfer.amount * 1e18))).toString();
-          console.log(`🔧 Converting amount ${transfer.amount} → ${weiAmount} wei`);
-          transfer.amount = weiAmount;
-        }
-      }
+    if (!signerId) {
+      throw new Error(`submitProcessBatch требует signerId для ${entityId.slice(0, 10)}`);
     }
-    console.log(`🔍 FIXED BATCH:`, safeStringify(batch));
 
+    console.log(`💸 Submitting processBatch (Hanko) to ${jurisdiction.name} as entity ${entityId.slice(0, 10)}...`);
     const { depository, provider } = await connectToEthereum(jurisdiction);
-    console.log(`🔍 CONTRACT ADDRESS: ${depository.target}`);
-    
-    // Check if contract exists
-    const code = await provider.getCode(depository.target);
-    console.log(`🔍 CONTRACT CODE LENGTH: ${code.length} characters`);
-    
-    if (code === '0x') {
-      throw new Error('Contract not deployed at this address');
-    }
-    
-    // Test if this is our new contract
-    try {
-      console.log(`🔍 Testing if contract has debugBulkFundEntities...`);
-      await depository['debugBulkFundEntities']?.staticCall?.();
-      console.log(`✅ This is our NEW contract with debug functions!`);
-    } catch (debugError) {
-      console.log(`❌ This is OLD contract - no debug functions:`, (debugError as Error).message);
-    }
-    
-    // Check current balance (entities should be pre-funded in constructor)
-    console.log(`🔍 Checking balance for entity ${entityId} token ${batch.reserveToReserve[0]?.tokenId || 1}...`);
-    try {
-      const currentBalance = await depository['_reserves']!(entityId, batch.reserveToReserve[0]?.tokenId || 1);
-      console.log(`🔍 Current balance: ${currentBalance.toString()}`);
-      
-      if (currentBalance.toString() === '0') {
-        console.log(`⚠️ Entity has no reserves - this suggests old contract without pre-funding`);
-        throw new Error(`Entity ${entityId.slice(0, 10)} has no reserves! Contract should be pre-funded.`);
-      }
-    } catch (balanceError) {
-      console.log(`❌ Failed to check balance:`, (balanceError as Error).message);
-      throw balanceError;
-    }
-    
-    // Debug the exact function call being made
-    console.log(`🔍 Function signature: processBatch(bytes32,tuple)`);
-    console.log(`🔍 Entity ID: ${entityId}`);
-    console.log(`🔍 Batch structure:`, Object.keys(batch));
-    console.log(`🔍 reserveToReserve array:`, batch.reserveToReserve);
-    
-    // Check if function exists in contract interface
-    const functionFragments = depository.interface.fragments.filter(f => f.type === 'function');
-    const functions = functionFragments.map(f => {
-      // Proper typing: FunctionFragment has name property
-      return 'name' in f ? (f as { name: string }).name : 'unknown';
-    });
-    const hasProcessBatch = functions.includes('processBatch');
-    console.log(`🔍 Contract has processBatch function: ${hasProcessBatch}`);
-    console.log(`🔍 Available functions:`, functions.slice(0, 10), '...');
-    
-    // DEEP DEBUGGING: Check ABI vs deployed bytecode
-    console.log(`🔍 DEEP DEBUG: Contract interface analysis`);
-    console.log(`🔍 Contract target address: ${depository.target}`);
-    
-    // Get function selector for processBatch
-    const processBatchFunc = depository.interface.getFunction('processBatch');
-    const processBatchSelector = processBatchFunc?.selector || 'NOT_FOUND';
-    console.log(`🔍 Function selector: ${processBatchSelector}`);
-    
-    // Check deployed bytecode contains this selector
-    const bytecode = await provider.getCode(depository.target);
-    const hasSelector = bytecode.includes(processBatchSelector.slice(2)); // Remove 0x
-    console.log(`🔍 Deployed bytecode contains processBatch selector: ${hasSelector}`);
-    console.log(`🔍 Bytecode length: ${bytecode.length} chars`);
-    
-    // Check ABI hash vs expected
-    const abiHash = ethers.keccak256(ethers.toUtf8Bytes(safeStringify(depository.interface.fragments.map(f => {
-      // Proper typing: Fragment has format method
-      return 'format' in f && typeof f.format === 'function' ? f.format() : f.toString();
-    }))));
-    console.log(`🔍 ABI hash: ${abiHash.slice(0, 10)}...`);
-    
-    // Log exact call data being generated
-    const callData = depository.interface.encodeFunctionData('processBatch', [entityId, batch]);
-    console.log(`🔍 Call data length: ${callData.length} chars`);
-    console.log(`🔍 Call data start: ${callData.slice(0, 20)}...`);
-    
-    // Try different entity addresses to see if it's entity-specific
-    console.log(`🔍 Testing with different entity addresses...`);
-    
-    // Test entity 0 (should exist from token 0)
-    try {
-      const balance0 = await depository['_reserves']!("0x0000000000000000000000000000000000000000000000000000000000000000", 0);
-      console.log(`🔍 Entity 0 Token 0 balance: ${balance0.toString()}`);
-    } catch (e) {
-      console.log(`❌ Entity 0 balance check failed: ${(e as Error).message}`);
-    }
-    
-    // Try simpler batch with just empty arrays
-    const emptyBatch = {
-      reserveToExternalToken: [],
-      externalTokenToReserve: [],
-      reserveToReserve: [],
-      reserveToCollateral: [],
-      cooperativeUpdate: [],
-      cooperativeDisputeProof: [],
-      initialDisputeProof: [],
-      finalDisputeProof: [],
-      flashloans: [],
-      hub_id: 0
-    };
-    
-    console.log(`🔍 Testing empty batch first...`);
-    try {
-      const emptyResult = await depository['processBatch']?.staticCall(entityId, emptyBatch);
-      console.log(`✅ Empty batch works: ${emptyResult}`);
-      
-      // If empty batch works, try our batch
-      console.log(`🔍 Now testing our batch...`);
-      const result = await depository['processBatch']?.staticCall(entityId, batch);
-      console.log(`✅ Static call successful: ${result}`);
-    } catch (staticError) {
-      logError("BLOCKCHAIN", `❌ Static call failed:`, staticError);
 
-      // Type-safe error handling for ethers.js errors
-      const errorDetails: Record<string, unknown> = {};
-      if (staticError && typeof staticError === 'object') {
-        const errorObj = staticError as Record<string, unknown>;
-        const code = errorObj['code'];
-        const data = errorObj['data'];
-        const reason = errorObj['reason'];
-        if (code !== undefined) errorDetails['code'] = code;
-        if (data !== undefined) errorDetails['data'] = data;
-        if (reason !== undefined) errorDetails['reason'] = reason;
-      }
-      console.log(`🔍 Error details:`, errorDetails);
-      throw staticError;
+    const entityProviderAddress = jurisdiction.entityProviderAddress;
+    if (!entityProviderAddress || entityProviderAddress === '0x0000000000000000000000000000000000000000') {
+      throw new Error('Jurisdiction missing entityProviderAddress');
     }
-    
-    // First try to estimate gas to get better error info
-    console.log(`🔍 Estimating gas for processBatch...`);
-    try {
-      const gasEstimate = await depository['processBatch']?.estimateGas(entityId, batch);
-      console.log(`🔍 Gas estimate: ${gasEstimate?.toString() || 'N/A'}`);
-    } catch (gasError) {
-      logError("BLOCKCHAIN", `❌ Gas estimation failed:`, gasError);
-      throw gasError;
+
+    const encodedBatch = encodeJBatch(batch);
+    const net = await provider.getNetwork();
+    const chainId = BigInt(net.chainId);
+    const normalizedEntityId = normalizeEntityId(entityId);
+    const entityAddress = ethers.getAddress(`0x${normalizedEntityId.slice(-40)}`);
+    const currentNonce = await depository['entityNonces']?.(entityAddress);
+    const nextNonce = BigInt(currentNonce ?? 0) + 1n;
+    const batchHash = computeBatchHankoHash(chainId, String(depository.target), encodedBatch, nextNonce);
+
+    const { signHashesAsSingleEntity } = await import('./hanko-signing');
+    const hankos = await signHashesAsSingleEntity(env, entityId, signerId, [batchHash]);
+    const hankoData = hankos[0];
+    if (!hankoData) {
+      throw new Error('Failed to build batch hanko signature');
     }
-    
-    // Submit the batch transaction to the real blockchain (entity can sign as any entity for now)
-    const tx = await depository['processBatch']!(entityId, batch);
+
+    const tx = await depository['processBatch']!(encodedBatch, entityProviderAddress, hankoData, nextNonce);
     console.log(`📡 Transaction submitted: ${tx.hash}`);
-    
-    // Wait for confirmation
     const receipt = await tx.wait();
     console.log(`✅ Transaction confirmed in block ${receipt.blockNumber}`);
-    
+
     return { transaction: tx, receipt };
   } catch (error) {
     logError("BLOCKCHAIN", `❌ Failed to submit processBatch to ${jurisdiction.name}:`, error);
@@ -16381,26 +17565,35 @@ export const getAvailableJurisdictions = async (): Promise<JurisdictionConfig[]>
   return Array.from(jurisdictions.values());
 };
 
-// Store BrowserVM instance globally for runtime access
+// DEPRECATED: Use env.browserVM instead of global singleton
 let BROWSER_VM_INSTANCE: any = null;
 
 /**
  * Set BrowserVM jurisdiction (for isolated /view environments)
- * This overrides DEFAULT_JURISDICTIONS with a single BrowserVM-backed jurisdiction
+ * @param env - Runtime environment to store BrowserVM instance
+ * @param depositoryAddress - Depository contract address
+ * @param browserVMInstance - Optional pre-initialized BrowserVM instance
  */
-export const setBrowserVMJurisdiction = (depositoryAddress: string, browserVMInstance?: any) => {
+export const setBrowserVMJurisdiction = (env: any, depositoryAddress: string, browserVMInstance?: any) => {
   console.log('[BrowserVM] Setting jurisdiction override:', { depositoryAddress, hasBrowserVM: !!browserVMInstance });
 
-  const resolvedBrowserVM = browserVMInstance?.getProvider ? browserVMInstance.getProvider() : browserVMInstance;
+  const rawBrowserVM = browserVMInstance?.browserVM ?? browserVMInstance;
+  const resolvedBrowserVM = rawBrowserVM?.getProvider ? rawBrowserVM.getProvider() : rawBrowserVM;
 
-  // Store browserVM instance if provided
+  // Store browserVM instance in env (isolated per-runtime)
+  if (resolvedBrowserVM && env) {
+    env.browserVM = resolvedBrowserVM;
+    console.log('[BrowserVM] Stored browserVM instance in env (isolated)');
+  }
+
+  // BACKWARD COMPAT: Also store in global for legacy code
   if (resolvedBrowserVM) {
     BROWSER_VM_INSTANCE = resolvedBrowserVM;
-    console.log('[BrowserVM] Stored browserVM instance for runtime access');
   }
 
   const resolveEntityProvider = () => {
     if (resolvedBrowserVM?.getEntityProviderAddress) return resolvedBrowserVM.getEntityProviderAddress();
+    if (env?.browserVM?.getEntityProviderAddress) return env.browserVM.getEntityProviderAddress();
     if (BROWSER_VM_INSTANCE?.getEntityProviderAddress) return BROWSER_VM_INSTANCE.getEntityProviderAddress();
     return '0x0000000000000000000000000000000000000000';
   };
@@ -16427,8 +17620,15 @@ export const getJurisdictionByAddress = async (address: string): Promise<Jurisdi
   return jurisdictions.get(address);
 };
 
-/** Get BrowserVM instance (for demos that need direct BrowserVM access) */
-export const getBrowserVMInstance = (): BrowserVMInstance | null => {
+/**
+ * Get BrowserVM instance (for demos that need direct BrowserVM access)
+ * Prefers env.browserVM (isolated), falls back to global singleton (legacy)
+ */
+export const getBrowserVMInstance = (env?: any): BrowserVMInstance | null => {
+  if (env?.browserVM) {
+    return env.browserVM;
+  }
+  // BACKWARD COMPAT: Fall back to global singleton
   return BROWSER_VM_INSTANCE;
 };
 
@@ -16441,7 +17641,15 @@ export interface SettlementDiff {
   ondeltaDiff?: bigint; // Optional in some contexts
 }
 
-export const submitSettle = async (jurisdiction: JurisdictionConfig, leftEntity: string, rightEntity: string, diffs: SettlementDiff[]) => {
+export const submitSettle = async (
+  jurisdiction: JurisdictionConfig,
+  leftEntity: string,
+  rightEntity: string,
+  diffs: SettlementDiff[],
+  forgiveDebtsInTokenIds: number[] = [],
+  insuranceRegs: Array<{ insured: string; insurer: string; tokenId: number; limit: bigint; expiresAt: bigint }> = [],
+  sig?: string
+) => {
   try {
     console.log(`⚖️ Submitting settle transaction between ${leftEntity.slice(0, 10)}... and ${rightEntity.slice(0, 10)}...`);
     console.log(`🔍 DIFFS:`, diffs.map(d => ({
@@ -16450,6 +17658,12 @@ export const submitSettle = async (jurisdiction: JurisdictionConfig, leftEntity:
       rightDiff: d.rightDiff.toString(),
       collateralDiff: d.collateralDiff.toString()
     })));
+
+    const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0 || insuranceRegs.length > 0;
+    if (hasChanges && (!sig || sig === '0x')) {
+      throw new Error('Settlement signature required for settle');
+    }
+    const finalSig = sig || '0x';
 
     const { depository, provider } = await connectToEthereum(jurisdiction);
     console.log(`🔍 CONTRACT ADDRESS: ${depository.target}`);
@@ -16462,7 +17676,14 @@ export const submitSettle = async (jurisdiction: JurisdictionConfig, leftEntity:
 
     // Call settle function
     console.log(`📤 Calling settle function...`);
-    const tx = await depository['settle']!(leftEntity, rightEntity, diffs);
+    const tx = await depository['settle']!(
+      leftEntity,
+      rightEntity,
+      diffs,
+      forgiveDebtsInTokenIds,
+      insuranceRegs,
+      finalSig
+    );
     console.log(`💫 Transaction sent: ${tx.hash}`);
 
     // Wait for confirmation

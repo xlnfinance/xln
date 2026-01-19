@@ -14,12 +14,13 @@
 import type { EntityState, EntityTx, EntityInput } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddSettlement } from '../../j-batch';
+import { isLeftEntity } from '../../entity-id-utils';
 
 export async function handleCreateSettlement(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'createSettlement' }>
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: any[] }> {
-  const { counterpartyEntityId, diffs } = entityTx.data;
+  const { counterpartyEntityId, diffs, sig } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
@@ -32,16 +33,23 @@ export async function handleCreateSettlement(
   }
 
   // Determine canonical left/right order
-  const isLeft = entityState.entityId < counterpartyEntityId;
+  const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId);
   const leftEntity = isLeft ? entityState.entityId : counterpartyEntityId;
   const rightEntity = isLeft ? counterpartyEntityId : entityState.entityId;
+
+  if (!sig || sig === '0x') {
+    throw new Error(`Settlement ${entityState.entityId.slice(-4)}↔${counterpartyEntityId.slice(-4)} missing hanko signature`);
+  }
 
   // Add settlement to jBatch
   batchAddSettlement(
     newState.jBatchState,
     leftEntity,
     rightEntity,
-    diffs
+    diffs,
+    [],
+    [],
+    sig
   );
 
   console.log(`✅ createSettlement: Added to jBatch for ${entityState.entityId.slice(-4)}`);

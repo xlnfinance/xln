@@ -38,7 +38,7 @@
 
 import { ethers } from 'ethers';
 
-import { HankoBytes, HankoClaim } from './types';
+import type { HankoBytes, HankoClaim } from './types';
 import { createHash, randomBytes } from './utils';
 
 // Browser-compatible Buffer.concat replacement

@@ -36,17 +36,32 @@ export function generateEphemeralEntityId(signerId: string): string {
 
 /**
  * Create ephemeral entity for a signer in a jurisdiction
- * Returns the entity ID
+ * Uses lazy entity ID (deterministic from validators)
+ * References deployed contracts (not null addresses)
  */
 export async function createEphemeralEntity(
   signerId: string,
-  jurisdiction: string,
+  jurisdictionName: string,
   env: Env
 ): Promise<string> {
+  const jurisdiction = buildJurisdictionConfig(env, jurisdictionName);
+  if (!jurisdiction) {
+    throw new Error(`No jurisdiction config for ${jurisdictionName}`);
+  }
+
   const { getXLN } = await import('$lib/stores/xlnStore');
   const xln = await getXLN();
 
-  const entityId = generateEphemeralEntityId(signerId);
+  // Use LAZY entity ID (deterministic, no blockchain registration)
+  const entityId = xln.generateLazyEntityId([signerId], 1n);
+
+  // Use createLazyEntity from runtime for proper config structure
+  const { config } = xln.createLazyEntity(
+    `self-${signerId.slice(2, 8)}`,
+    [signerId],
+    1n,
+    jurisdiction
+  );
 
   // Create RuntimeInput to import entity replica
   const runtimeInput = {
@@ -56,18 +71,7 @@ export async function createEphemeralEntity(
       signerId,
       data: {
         isProposer: true,
-        config: {
-          mode: 'proposer-based' as const,
-          threshold: 1n,
-          validators: [signerId],
-          shares: { [signerId]: 1n },
-          jurisdiction: {
-            name: jurisdiction,
-            address: '0x0000000000000000000000000000000000000000', // Will be set by runtime
-            entityProviderAddress: '0x0000000000000000000000000000000000000000',
-            depositoryAddress: '0x0000000000000000000000000000000000000000'
-          }
-        }
+        config
       }
     }],
     entityInputs: []
@@ -75,8 +79,6 @@ export async function createEphemeralEntity(
 
   // Apply runtime input
   await xln.applyRuntimeInput(env, runtimeInput);
-
-  console.log(`[EntityFactory] Created ephemeral entity ${entityId.slice(0, 10)} for signer ${signerId.slice(0, 10)}`);
 
   return entityId;
 }
@@ -123,11 +125,21 @@ function getJReplica(env: Env, name?: string): any | null {
 
 function buildJurisdictionConfig(env: Env, name?: string): JurisdictionConfig | null {
   const jReplica = getJReplica(env, name);
-  if (!jReplica) return null;
+  if (!jReplica) {
+    console.error(`[buildJurisdictionConfig] ❌ ASSERT FAILED: No J-replica found for "${name}"`);
+    console.error(`   Available J-machines:`, listJMachineNames(env));
+    throw new Error(`J-machine "${name}" not found in runtime`);
+  }
 
   const depositoryAddress = jReplica?.contracts?.depository || jReplica?.contracts?.depositoryAddress;
   const entityProviderAddress = jReplica?.contracts?.entityProvider || jReplica?.contracts?.entityProviderAddress;
-  if (!depositoryAddress || !entityProviderAddress) return null;
+
+  if (!depositoryAddress || !entityProviderAddress) {
+    console.error(`[buildJurisdictionConfig] ❌ Contracts not deployed for J-machine "${name}"`);
+    console.error(`   Depository:`, depositoryAddress || 'MISSING');
+    console.error(`   EntityProvider:`, entityProviderAddress || 'MISSING');
+    throw new Error(`J-machine "${name}" contracts not deployed`);
+  }
 
   return {
     name: jReplica?.name || name || 'browservm',
@@ -139,14 +151,18 @@ function buildJurisdictionConfig(env: Env, name?: string): JurisdictionConfig | 
 
 async function ensureJMachine(env: Env): Promise<string | null> {
   if (isCreatingJMachine) return null;
+
   const names = listJMachineNames(env);
-  if (names.length > 0) return (env as any)?.activeJurisdiction || names[0];
+  if (names.length > 0) {
+    return (env as any)?.activeJurisdiction || names[0];
+  }
 
   isCreatingJMachine = true;
   try {
     const { getXLN } = await import('$lib/stores/xlnStore');
     const xln = await getXLN();
     const name = 'xlnomy1';
+
     await xln.applyRuntimeInput(env, {
       runtimeTxs: [{
         type: 'createXlnomy',
@@ -159,12 +175,37 @@ async function ensureJMachine(env: Env): Promise<string | null> {
       }],
       entityInputs: []
     });
+
+    // ASSERT: J-machine created successfully
+    const jReplica = getJReplica(env, name);
+    if (!jReplica) {
+      throw new Error('Failed to create J-machine - not found in env.jReplicas');
+    }
+
+    // ASSERT: Contracts deployed
+    const depository = jReplica?.contracts?.depository || jReplica?.contracts?.depositoryAddress;
+    const entityProvider = jReplica?.contracts?.entityProvider || jReplica?.contracts?.entityProviderAddress;
+
+    if (!depository || !entityProvider) {
+      console.error('[ensureJMachine] ❌ Contracts not deployed');
+      console.error('   Depository:', depository || 'MISSING');
+      console.error('   EntityProvider:', entityProvider || 'MISSING');
+      throw new Error(`J-machine "${name}" contracts not deployed`);
+    }
+
     return name;
+  } catch (err) {
+    console.error('[ensureJMachine] ❌ Failed:', err);
+    throw err;
   } finally {
     isCreatingJMachine = false;
   }
 }
 
+/**
+ * Create self-entity for signer (lazy, no blockchain registration)
+ * Wrapper for backward compatibility
+ */
 export async function createNumberedSelfEntity(
   env: Env,
   signerAddress: string,
@@ -173,39 +214,7 @@ export async function createNumberedSelfEntity(
   const jName = jurisdictionName || (env as any)?.activeJurisdiction || await ensureJMachine(env);
   if (!jName) return null;
 
-  const jurisdiction = buildJurisdictionConfig(env, jName);
-  if (!jurisdiction) return null;
-
-  const { getXLN } = await import('$lib/stores/xlnStore');
-  const xln = await getXLN();
-  const creation = await xln.createNumberedEntity(
-    `self-${signerAddress.slice(0, 6)}`,
-    [signerAddress],
-    1n,
-    jurisdiction
-  );
-
-  const runtimeTx = {
-    type: 'importReplica' as const,
-    entityId: creation.entityId,
-    signerId: signerAddress,
-    data: {
-      config: creation.config,
-      isProposer: true
-    }
-  };
-
-  const result = await xln.applyRuntimeInput(env, {
-    runtimeTxs: [runtimeTx],
-    entityInputs: []
-  });
-
-  const maybeProcess = (xln as any).process;
-  if (result?.entityOutbox?.length && typeof maybeProcess === 'function') {
-    await maybeProcess(env, result.entityOutbox);
-  }
-
-  return creation.entityId;
+  return await createEphemeralEntity(signerAddress, jName, env);
 }
 
 /**

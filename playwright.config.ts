@@ -30,6 +30,11 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
+    {
+      name: 'brainvault',
+      testDir: './frontend/tests',
+      use: { ...devices['Desktop Chrome'] },
+    },
   ],
 
   // Run dev server before tests
