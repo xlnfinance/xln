@@ -345,6 +345,9 @@ export async function ahb(env: Env): Promise<void> {
 
   const process = await getProcess();
   env.scenarioMode = true; // Deterministic time control (scenarios set env.timestamp manually)
+  if (env.quietRuntimeLogs === undefined) {
+    env.quietRuntimeLogs = true;
+  }
   env.lockRuntimeSeed = true; // Prevent vault seed overrides during scenario
 
   try {
@@ -2415,10 +2418,19 @@ export async function ahb(env: Env): Promise<void> {
   const [, bobAfterBump] = findReplica(env, bob.id);
   const bobAccountAfterBump = bobAfterBump.state.accounts.get(hub.id);
   assert(bobAccountAfterBump?.activeDispute, 'PHASE 8: activeDispute missing after bump');
+
+  // H13 AUDIT FIX: Counter-dispute requires STRICTLY HIGHER nonce than initial dispute
+  // Edge cases handled by contract:
+  // - Same nonce: REJECTED (no advancement)
+  // - Lower nonce: REJECTED (regression attack)
+  // - Higher nonce: ACCEPTED (valid counter-dispute)
+  const initialNonce = bobAccountAfterBump.activeDispute.initialDisputeNonce;
+  const currentNonce = bobAccountAfterBump.proofHeader.disputeNonce;
   assert(
-    bobAccountAfterBump.proofHeader.disputeNonce > bobAccountAfterBump.activeDispute.initialDisputeNonce,
-    'PHASE 8: disputeNonce did not advance for counter-dispute'
+    currentNonce > initialNonce,
+    `H13: disputeNonce must advance for counter-dispute (initial=${initialNonce}, current=${currentNonce})`
   );
+  console.log(`   H13: Counter-dispute nonce check: ${initialNonce} → ${currentNonce} (strictly higher ✅)`);
   assert(bobAccountAfterBump.counterpartyDisputeProofHanko, 'PHASE 8: missing counterparty dispute hanko for counter-dispute');
 
   // H10 AUDIT FIX: Verify solvency after counter-dispute bump (state changed during dispute)
