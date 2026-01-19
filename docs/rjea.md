@@ -158,7 +158,7 @@ Runtime (R)
 Step 1: User action → Runtime
   process(env, [{
     entityId: alice,
-    signerId: 's1',
+    signerId: '1',
     entityTxs: [{
       type: 'directPayment',
       data: { targetEntityId: bob, amount: 100n }

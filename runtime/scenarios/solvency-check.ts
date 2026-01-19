@@ -33,13 +33,13 @@ export function checkSolvency(env: Env, expected: bigint, label: string, optiona
   console.log(`[SOLVENCY ${label}] Total: reserves=${reserves / 10n**18n}M, collateral=${collateral / 10n**18n}M, sum=${total / 10n**18n}M`);
 
   if (total !== expected) {
-    if (!optional) {
+    if (!optional || env.strictScenario) {
       console.error(`❌ [${label}] SOLVENCY FAIL: ${total} !== ${expected}`);
       throw new Error(`SOLVENCY VIOLATION at "${label}": got ${total}, expected ${expected}`);
-    } else {
-      console.warn(`⚠️  [${label}] SOLVENCY MISMATCH (optional): ${total} !== ${expected} - continuing`);
     }
-  } else {
-    console.log(`✅ [${label}] Solvency OK`);
+    console.warn(`⚠️  [${label}] SOLVENCY MISMATCH (optional): ${total} !== ${expected} - continuing`);
+    return;
   }
+
+  console.log(`✅ [${label}] Solvency OK`);
 }

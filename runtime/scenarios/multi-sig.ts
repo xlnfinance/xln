@@ -17,7 +17,7 @@
 
 import type { Env } from '../types';
 import { ensureBrowserVM, createJReplica } from './boot';
-import { findReplica, assert, processWithOffline, convergeWithOffline, enableStrictScenario } from './helpers';
+import { findReplica, assert, processWithOffline, convergeWithOffline, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 
 const USDC = 1;
 const ONE = 10n ** 18n;
@@ -25,14 +25,15 @@ const usd = (amount: number | bigint) => BigInt(amount) * ONE;
 
 export async function multiSig(env: Env): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'Multi-Sig');
+  const prevScenarioMode = env.scenarioMode;
   try {
-  const { clearSignerKeys, registerSeededKeys } = await import('../account-crypto');
-  const runtimeSeed = process.env.RUNTIME_SEED || 'xln-runtime-seed';
+  env.scenarioMode = true; // Deterministic time control
+  const { clearSignerKeys } = await import('../account-crypto');
+  const runtimeSeed = requireRuntimeSeed(env, 'Multi-Sig');
   const offlineSigners = new Set<string>();
 
   clearSignerKeys();
-  await registerSeededKeys(runtimeSeed, ['s1', 's2', 's3', 'hub', 't1', 't2', 't3']);
-  env.runtimeSeed = runtimeSeed; // CRITICAL: Store seed in env for pure crypto functions
+  ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6', '7'], 'Multi-Sig');
 
   const { applyRuntimeInput } = await import('../runtime');
 
@@ -58,14 +59,14 @@ export async function multiSig(env: Env): Promise<void> {
   // ============================================================================
   console.log('📦 Creating entities...');
 
-  const alice = { id: '0x' + '1'.padStart(64, '0'), validators: ['s1', 's2', 's3'] }; // 2-of-3
-  const hub = { id: '0x' + '2'.padStart(64, '0'), validators: ['hub'] }; // Single
+  const alice = { id: '0x' + '1'.padStart(64, '0'), validators: ['1', '2', '3'] }; // 2-of-3
+  const hub = { id: '0x' + '2'.padStart(64, '0'), validators: ['4'], signer: '4' }; // Single
 
   const aliceConfig = {
     mode: 'proposer-based' as const,
     threshold: 2n, // CRITICAL: 2-of-3 threshold
-    validators: ['s1', 's2', 's3'],
-    shares: { s1: 1n, s2: 1n, s3: 1n },
+    validators: ['1', '2', '3'],
+    shares: { '1': 1n, '2': 1n, '3': 1n },
   };
 
   // CRITICAL: Multi-signer requires separate replica for EACH validator
@@ -75,7 +76,7 @@ export async function multiSig(env: Env): Promise<void> {
       {
         type: 'importReplica',
         entityId: alice.id,
-        signerId: 's1',
+        signerId: '1',
         data: {
           isProposer: true,
           position: { x: 0, y: 0, z: 0 },
@@ -86,7 +87,7 @@ export async function multiSig(env: Env): Promise<void> {
       {
         type: 'importReplica',
         entityId: alice.id,
-        signerId: 's2',
+        signerId: '2',
         data: {
           isProposer: false, // Not proposer
           position: { x: 0, y: 0, z: 0 },
@@ -97,7 +98,7 @@ export async function multiSig(env: Env): Promise<void> {
       {
         type: 'importReplica',
         entityId: alice.id,
-        signerId: 's3',
+        signerId: '3',
         data: {
           isProposer: false,
           position: { x: 0, y: 0, z: 0 },
@@ -108,15 +109,15 @@ export async function multiSig(env: Env): Promise<void> {
       {
         type: 'importReplica',
         entityId: hub.id,
-        signerId: 'hub',
+        signerId: hub.signer,
         data: {
           isProposer: true,
           position: { x: 100, y: 0, z: 0 },
           config: {
             mode: 'proposer-based',
             threshold: 1n,
-            validators: ['hub'],
-            shares: { hub: 1n },
+            validators: [hub.signer],
+            shares: { [hub.signer]: 1n },
           },
         },
       },
@@ -124,7 +125,7 @@ export async function multiSig(env: Env): Promise<void> {
     entityInputs: [],
   });
 
-  console.log('  ✅ Alice: 2-of-3 validators (s1, s2, s3)');
+  console.log('  ✅ Alice: 2-of-3 validators (1, 2, 3)');
   console.log('  ✅ Hub: single validator\n');
 
   // ============================================================================
@@ -132,14 +133,14 @@ export async function multiSig(env: Env): Promise<void> {
   // ============================================================================
   console.log('🔗 Opening Alice-Hub account (multi-sig)...');
 
-  // s1 proposes openAccount
+  // 1 proposes openAccount
   await processWithOffline(env, [{
     entityId: alice.id,
-    signerId: 's1',
+    signerId: '1',
     entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }],
   }], offlineSigners);
 
-  // Multi-sig: wait for s2, s3 to sign, then commit
+  // Multi-sig: wait for 2, 3 to sign, then commit
   await convergeWithOffline(env, offlineSigners, 20);
 
   // Verify account exists (check all validators)
@@ -177,18 +178,18 @@ export async function multiSig(env: Env): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════\\n');
 
   console.log('🔒 Creating isolated 2-of-3 entity for negative test...');
-  const testEntity = { id: '0x' + 'F'.padStart(64, '0'), validators: ['t1', 't2', 't3'] };
+  const testEntity = { id: '0x' + 'F'.padStart(64, '0'), validators: ['5', '6', '7'] };
   const testConfig = {
     mode: 'proposer-based' as const,
     threshold: 2n,
-    validators: ['t1', 't2', 't3'],
-    shares: { t1: 1n, t2: 1n, t3: 1n },
+    validators: ['5', '6', '7'],
+    shares: { '5': 1n, '6': 1n, '7': 1n },
   };
 
-  // Only create proposer replica (t2, t3 don't exist in network)
+  // Only create proposer replica (validators 6, 7 don't exist in network)
   await applyRuntimeInput(env, {
     runtimeTxs: [
-      { type: 'importReplica', entityId: testEntity.id, signerId: 't1', data: { isProposer: true, position: { x: 200, y: 0, z: 0 }, config: testConfig }},
+      { type: 'importReplica', entityId: testEntity.id, signerId: '5', data: { isProposer: true, position: { x: 200, y: 0, z: 0 }, config: testConfig }},
     ],
     entityInputs: [],
   });
@@ -196,7 +197,7 @@ export async function multiSig(env: Env): Promise<void> {
   // Proposer creates a proposal (dummy operation)
   await processWithOffline(env, [{
     entityId: testEntity.id,
-    signerId: 't1',
+    signerId: '5',
     entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id }}],
   }], offlineSigners);
 
@@ -245,40 +246,40 @@ export async function multiSig(env: Env): Promise<void> {
   }
 
   // ============================================================================
-  // TEST 1: Byzantine tolerance (s3 offline, s1+s2 reach threshold on Alice entity)
+  // TEST 1: Byzantine tolerance (3 offline, 1+2 reach threshold on Alice entity)
   // ============================================================================
   console.log('═══════════════════════════════════════════════════════════════');
-  console.log('  TEST 1: Byzantine Tolerance (s3 offline)                     ');
+  console.log('  TEST 1: Byzantine Tolerance (3 offline)                      ');
   console.log('═══════════════════════════════════════════════════════════════\\n');
 
-  console.log('📴 Simulating s3 offline (drop inputs to signer)...');
-  offlineSigners.add('s3');
-  env.info('network', 'OFFLINE_SIGNER', { signerId: 's3', reason: 'byzantine test' }, alice.id);
-  console.log('   s3 input delivery disabled\\n');
+  console.log('📴 Simulating 3 offline (drop inputs to signer)...');
+  offlineSigners.add('3');
+  env.info('network', 'OFFLINE_SIGNER', { signerId: '3', reason: 'byzantine test' }, alice.id);
+  console.log('   3 input delivery disabled\\n');
 
-  console.log('💼 s1 proposes: extendCredit to Hub (2-of-3, s3 offline)');
+  console.log('💼 1 proposes: extendCredit to Hub (2-of-3, 3 offline)');
   const heightBeforeOffline = (await findReplica(env, alice.id))[1].state.height;
 
   await processWithOffline(env, [{
     entityId: alice.id,
-    signerId: 's1',
+    signerId: '1',
     entityTxs: [{ type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC, amount: usd(10_000) } }],
   }], offlineSigners);
 
-  // Converge - only s1 and s2 available
-  await convergeWithOffline(env, offlineSigners, 10, 's3-offline');
+  // Converge - only 1 and 2 available
+  await convergeWithOffline(env, offlineSigners, 10, '3-offline');
 
   const [, s1AfterOffline] = findReplica(env, alice.id);
-  assert(s1AfterOffline.state.height > heightBeforeOffline, `Frame should commit with 2/3 (s1+s2): ${s1AfterOffline.state.height} > ${heightBeforeOffline}`);
+  assert(s1AfterOffline.state.height > heightBeforeOffline, `Frame should commit with 2/3 (1+2): ${s1AfterOffline.state.height} > ${heightBeforeOffline}`);
   assert(!s1AfterOffline.proposal, 'Proposal should be cleared after commit');
-  console.log(`   ✅ Frame committed with s3 offline (height ${heightBeforeOffline} → ${s1AfterOffline.state.height})`);
+  console.log(`   ✅ Frame committed with 3 offline (height ${heightBeforeOffline} → ${s1AfterOffline.state.height})`);
 
-  // Restore s3 input delivery
-  offlineSigners.delete('s3');
+  // Restore 3 input delivery
+  offlineSigners.delete('3');
 
   console.log('\\n✅ TEST 1 COMPLETE: Byzantine tolerance proven!\\n');
-  console.log('   s1 + s2 = 2/3 threshold ✅');
-  console.log('   Commit succeeded without s3 ✅');
+  console.log('   1 + 2 = 2/3 threshold ✅');
+  console.log('   Commit succeeded without 3 ✅');
 
   // ============================================================================
   // SETUP: Credit
@@ -288,12 +289,12 @@ export async function multiSig(env: Env): Promise<void> {
   await processWithOffline(env, [
     {
       entityId: alice.id,
-      signerId: 's1',
+      signerId: '1',
       entityTxs: [{ type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC, amount: usd(1_000_000) } }],
     },
     {
       entityId: hub.id,
-      signerId: 'hub',
+      signerId: hub.signer,
       entityTxs: [{ type: 'extendCredit', data: { counterpartyEntityId: alice.id, tokenId: USDC, amount: usd(1_000_000) } }],
     },
   ], offlineSigners);
@@ -332,18 +333,7 @@ export async function multiSig(env: Env): Promise<void> {
   console.log(`   PendingFrame: ${hubAccount?.pendingFrame ? 'yes' : 'no'}\\n`);
 
   if (!deltaAfterCredit || deltaAfterCredit.rightCreditLimit === 0n) {
-    console.warn('⚠️ Skipping bilateral payment tests - credit not applied (known issue: multi-sig + bilateral consensus)');
-    console.log('\\n═══════════════════════════════════════════════════════════════');
-    console.log('✅ MULTI-SIGNER ENTITY CONSENSUS: ALL CORE TESTS PASS');
-    console.log('═══════════════════════════════════════════════════════════════');
-    console.log(`📊 Total frames: ${env.history?.length || 0}`);
-    console.log('   Entity-level 2-of-3 threshold: ✅');
-    console.log('   Account opening (all validators): ✅');
-    console.log('   Multi-validator proposal/commit flow: ✅');
-    console.log('   Proposer alone cannot commit: ✅');
-    console.log('   Byzantine tolerance (s3 offline): ✅');
-    console.log('═══════════════════════════════════════════════════════════════\\n');
-    return;
+    throw new Error('Multi-sig credit not applied - bilateral consensus is broken');
   }
 
   // If credit works, we'll test bilateral consensus with multi-signer
@@ -356,10 +346,10 @@ export async function multiSig(env: Env): Promise<void> {
 
   const paymentAmount = usd(1000);
 
-  console.log('💸 s1 proposes: Alice→Hub $1000');
+  console.log('💸 1 proposes: Alice→Hub $1000');
   await processWithOffline(env, [{
     entityId: alice.id,
-    signerId: 's1', // Proposer
+    signerId: '1', // Proposer
     entityTxs: [{
       type: 'directPayment',
       data: {
@@ -372,7 +362,7 @@ export async function multiSig(env: Env): Promise<void> {
     }],
   }], offlineSigners);
 
-  // ASSERTION 1: After proposal, s1 should have proposal with 1 signature (self)
+  // ASSERTION 1: After proposal, 1 should have proposal with 1 signature (self)
   await processWithOffline(env, undefined, offlineSigners); // Let proposal propagate to other validators
 
   const [, s1AfterPropose] = findReplica(env, alice.id);
@@ -380,12 +370,12 @@ export async function multiSig(env: Env): Promise<void> {
   assert(s1AfterPropose.proposal!.signatures.size === 1, `Proposal should have 1 sig (self), got ${s1AfterPropose.proposal!.signatures.size}`);
   console.log(`   ✅ Proposal created with 1 signature (proposer self-sign)`);
 
-  // ASSERTION 2: s2 and s3 should have lockedFrame (not proposal)
-  const s2Replica = env.eReplicas.get(`${alice.id}:s2`);
-  const s3Replica = env.eReplicas.get(`${alice.id}:s3`);
-  assert(s2Replica?.lockedFrame, 's2 should have lockedFrame after receiving proposal');
-  assert(s3Replica?.lockedFrame, 's3 should have lockedFrame after receiving proposal');
-  console.log(`   ✅ Validators s2, s3 locked proposal`);
+  // ASSERTION 2: 2 and 3 should have lockedFrame (not proposal)
+  const s2Replica = env.eReplicas.get(`${alice.id}:2`);
+  const s3Replica = env.eReplicas.get(`${alice.id}:3`);
+  assert(s2Replica?.lockedFrame, '2 should have lockedFrame after receiving proposal');
+  assert(s3Replica?.lockedFrame, '3 should have lockedFrame after receiving proposal');
+  console.log(`   ✅ Validators 2, 3 locked proposal`);
 
   // ASSERTION 3: Collect precommits (allow a few rounds for commit/proposal ordering)
   const heightBeforeProposalCommit = s1AfterPropose.state.height;
@@ -445,10 +435,11 @@ export async function multiSig(env: Env): Promise<void> {
   console.log(`📊 Total frames: ${env.history?.length || 0}`);
   console.log('   Entity-level 2-of-3 threshold: ✅');
   console.log('   Proposer alone cannot commit: ✅');
-  console.log('   Byzantine tolerance (s3 offline): ✅');
+  console.log('   Byzantine tolerance (3 offline): ✅');
   console.log('   Bilateral consensus with multi-sig: ✅');
   console.log('═══════════════════════════════════════════════════════════════\n');
   } finally {
+    env.scenarioMode = prevScenarioMode ?? false;
     restoreStrict();
   }
 }

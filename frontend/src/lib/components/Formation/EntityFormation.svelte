@@ -10,7 +10,7 @@
     jurisdiction: '',
     entityType: 'numbered',
     entityName: 'ACME',
-    validators: [{ name: 's1', weight: 1 }],
+    validators: [{ name: '1', weight: 1 }],
     threshold: 1 // Will be updated to match total weight on load
   };
 
@@ -202,7 +202,7 @@
       jurisdiction: '',
       entityType: 'numbered',
       entityName: 'ACME',
-      validators: [{ name: 's1', weight: 1 }],
+      validators: [{ name: '1', weight: 1 }],
       threshold: 1
     };
     error = '';
@@ -349,11 +349,11 @@
           <div class="validator-row">
             <select bind:value={validator.name} class="validator-name">
               <option value="">Select signer...</option>
-              <option value="s1">s1 (Default)</option>
-              <option value="s2">s2</option>
-              <option value="s3">s3</option>
-              <option value="s4">s4</option>
-              <option value="s5">s5</option>
+              <option value="1">1 (Default)</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
             </select>
             <input 
               type="number" 

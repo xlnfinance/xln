@@ -5,6 +5,7 @@
 import type { Env, EntityInput, EntityReplica, Delta } from '../types';
 import { formatRuntime } from '../runtime-ascii';
 import { setFailFastErrors } from '../logger';
+import { getCachedSignerPrivateKey, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 
 // Lazy-loaded process to avoid circular deps
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -28,6 +29,28 @@ export const getApplyRuntimeInput = async () => {
 
 export { checkSolvency } from './solvency-check';
 
+export function requireRuntimeSeed(env: Env, label: string): string {
+  const seed = env.runtimeSeed || process.env.XLN_RUNTIME_SEED || process.env.RUNTIME_SEED || null;
+  if (!seed) {
+    throw new Error(`${label}: runtimeSeed missing - unlock vault or set XLN_RUNTIME_SEED`);
+  }
+  if (!env.runtimeSeed) {
+    env.runtimeSeed = seed;
+  }
+  return seed;
+}
+
+export function ensureSignerKeysFromSeed(env: Env, signerIds: string[], label: string): void {
+  const seed = requireRuntimeSeed(env, label);
+  for (const signerId of signerIds) {
+    if (getCachedSignerPrivateKey(signerId)) {
+      continue;
+    }
+    const privateKey = deriveSignerKeySync(seed, signerId);
+    registerSignerKey(signerId, privateKey);
+  }
+}
+
 let strictScenarioDepth = 0;
 let strictScenarioOriginalError: typeof console.error | null = null;
 
@@ -50,6 +73,12 @@ export const advanceScenarioTime = (env: Env, stepMs?: number, force: boolean = 
   }
   env.timestamp = (env.timestamp || 0) + step;
 };
+
+export async function waitScenario(env: Env, ms: number): Promise<void> {
+  if (ms <= 0) return;
+  // Always simulate time for scenarios; avoid real sleeps.
+  advanceScenarioTime(env, ms, true);
+}
 
 export function enableStrictScenario(env: Env, label: string): () => void {
   env.strictScenario = true;

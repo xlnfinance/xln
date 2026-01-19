@@ -98,6 +98,7 @@ export type BrowserVMInstance = {
   getAccountInfo?: (entityId: string, counterpartyId: string) => Promise<{ cooperativeNonce: bigint; disputeHash: string; disputeTimeout: bigint }>;
   setDefaultDisputeDelay?: (delayBlocks: number) => Promise<void>;
   setBlockTimestamp?: (timestamp: number) => void;
+  setQuietLogs?: (quiet: boolean) => void;
   beginJurisdictionBlock?: (timestamp: number) => void;
   endJurisdictionBlock?: () => void;
   getChainId?: () => bigint;

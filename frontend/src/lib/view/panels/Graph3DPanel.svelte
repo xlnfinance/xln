@@ -5975,10 +5975,10 @@ let vrHammer: VRHammer | null = null;
       }
 
       // Step 2: Find signerId (copy from PaymentPanel)
-      let signerId = 's1'; // default
+      let signerId = '1'; // default
       for (const key of env.eReplicas.keys()) {
         if (key.startsWith(job.from + ':')) {
-          signerId = key.split(':')[1] || 's1';
+          signerId = key.split(':')[1] || '1';
           break;
         }
       }

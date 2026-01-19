@@ -5,15 +5,20 @@
 
 import { BrowserVMProvider } from '../browservm.js';
 import { ethers } from 'ethers';
-import { getSignerPrivateKey, registerTestKeys } from '../account-crypto.js';
+import { getSignerPrivateKey, registerSeededKeys } from '../account-crypto.js';
 import { isLeftEntity } from '../entity-id-utils';
 
 async function main() {
   console.log('🔍 Testing Hanko Board Hash Computation\n');
 
-  // Register test keys first
-  await registerTestKeys(['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8']);
-  console.log('✅ Registered test keys\n');
+  const runtimeSeed = process.env.XLN_RUNTIME_SEED || process.env.RUNTIME_SEED;
+  if (!runtimeSeed) {
+    throw new Error('XLN_RUNTIME_SEED missing - unlock vault or set XLN_RUNTIME_SEED');
+  }
+
+  // Register signer keys from runtime seed
+  await registerSeededKeys(runtimeSeed, ['1', '2', '3', '4', '5', '6', '7', '8']);
+  console.log('✅ Registered signer keys\n');
 
   // Create BrowserVM
   const browserVM = new BrowserVMProvider();
@@ -23,9 +28,9 @@ async function main() {
   console.log(`   EntityProvider: ${browserVM.getEntityProviderAddress()}`);
   console.log(`   Depository: ${browserVM.getDepositoryAddress()}\n`);
 
-  // Register entities with signers s2, s3, s4
+  // Register entities with signers 2, 3, 4
   console.log('📝 Registering entities...\n');
-  const signerIds = ['s2', 's3', 's4'];
+  const signerIds = ['2', '3', '4'];
   const entityNumbers = await browserVM.registerEntitiesWithSigners(signerIds);
   console.log(`   Registered entities: ${JSON.stringify(entityNumbers)}\n`);
 
@@ -121,7 +126,7 @@ async function main() {
     {
       // What was registered (from browserVM.registerEntitiesWithSigners)
       const { getCachedSignerPrivateKey } = await import('../account-crypto.js');
-      const privKey = getCachedSignerPrivateKey('s3')!;
+      const privKey = getCachedSignerPrivateKey('3')!;
       const wallet = new ethers.Wallet(ethers.hexlify(privKey));
       const validatorAddress = wallet.address;
       const validatorEntityId = ethers.zeroPadValue(validatorAddress, 32);
@@ -156,7 +161,7 @@ async function main() {
     const testHash = ethers.keccak256(ethers.toUtf8Bytes('test'));
     try {
       // We need to sign this hash with the same signer
-      const privateKey = (await import('../account-crypto.js')).getCachedSignerPrivateKey('s3');
+      const privateKey = (await import('../account-crypto.js')).getCachedSignerPrivateKey('3');
       const wallet = new ethers.Wallet(ethers.hexlify(privateKey!));
       const hashBytes = ethers.getBytes(testHash);
       const signature = wallet.signingKey.sign(hashBytes);

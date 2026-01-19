@@ -4,6 +4,7 @@
  */
 
 import type { Delta, DerivedDelta } from './types';
+import { PERFORMANCE } from './constants';
 import { validateDelta } from './validation-utils';
 import { isLeftEntity } from './entity-id-utils';
 
@@ -128,7 +129,9 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
     fullBar.substring(clampedPosition) +
     ']';
 
-  console.log(`✅ deriveDelta RETURN: isLeft=${isLeft}, inCap=${inCapacity}, outCap=${outCapacity}, SUM=${inCapacity + outCapacity}`);
+  if (PERFORMANCE.DEBUG_ACCOUNTS) {
+    console.log(`✅ deriveDelta RETURN: isLeft=${isLeft}, inCap=${inCapacity}, outCap=${outCapacity}, SUM=${inCapacity + outCapacity}`);
+  }
 
   return {
     delta: totalDelta,

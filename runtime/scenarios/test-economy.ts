@@ -45,7 +45,7 @@ export async function createEconomy(
   for (let h = 0; h < config.numHubs; h++) {
     const hub: EconomyEntity = {
       id: '0x' + entityNumber.toString(16).padStart(64, '0'),
-      signer: `s${entityNumber}`,
+      signer: String(entityNumber),
       name: `Hub${h + 1}`,
       type: 'hub'
     };
@@ -60,7 +60,7 @@ export async function createEconomy(
     for (let u = 0; u < config.usersPerHub; u++) {
       const user: EconomyEntity = {
         id: '0x' + entityNumber.toString(16).padStart(64, '0'),
-        signer: `s${entityNumber}`,
+        signer: String(entityNumber),
         name: `User${h + 1}.${u + 1}`,
         type: 'user'
       };
@@ -239,7 +239,8 @@ export async function testHtlcRoute(
   route: EconomyEntity[],
   amount: bigint,
   tokenId: number,
-  description: string
+  description: string,
+  opts?: { secret?: string; hashlock?: string }
 ): Promise<void> {
   const { getProcess } = await import('./helpers');
   const process = await getProcess();
@@ -257,7 +258,9 @@ export async function testHtlcRoute(
         route: [from.id, ...route.map(e => e.id), to.id],
         tokenId,
         amount,
-        description
+        description,
+        ...(opts?.secret && { secret: opts.secret }),
+        ...(opts?.hashlock && { hashlock: opts.hashlock }),
       }
     }]
   }]);

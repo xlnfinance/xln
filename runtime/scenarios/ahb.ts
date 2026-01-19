@@ -18,10 +18,11 @@ import type { Env, EntityInput, EntityReplica, Delta } from '../types';
 import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from '../evm';
 import { BrowserEVM } from '../evms/browser-evm';
 import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
-import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime } from './helpers';
+import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta, isLeft } from '../account-utils';
+import { createGossipLayer } from '../gossip';
 import { ethers } from 'ethers';
 
 // Lazy-loaded runtime functions to avoid circular dependency (runtime.ts imports this file)
@@ -104,15 +105,23 @@ async function processJEvents(env: Env): Promise<void> {
   const process = await getProcess();
   // Check if j-watcher queued any events
   const pendingInputs = env.runtimeInput?.entityInputs || [];
-  console.log(`🔄 processJEvents CALLED: ${pendingInputs.length} pending in queue`);
+  if (!env.quietRuntimeLogs) {
+    console.log(`🔄 processJEvents CALLED: ${pendingInputs.length} pending in queue`);
+  }
   if (pendingInputs.length > 0) {
-    console.log(`   routing ${pendingInputs.length} to entities...`);
+    if (!env.quietRuntimeLogs) {
+      console.log(`   routing ${pendingInputs.length} to entities...`);
+    }
     const toProcess = [...pendingInputs];
     env.runtimeInput.entityInputs = [];
     await process(env, toProcess);
-    console.log(`   ✓ ${toProcess.length} j-events processed`);
+    if (!env.quietRuntimeLogs) {
+      console.log(`   ✓ ${toProcess.length} j-events processed`);
+    }
   } else {
-    console.log(`   ⚠️ EMPTY queue - no j-events to process`);
+    if (!env.quietRuntimeLogs) {
+      console.log(`   ⚠️ EMPTY queue - no j-events to process`);
+    }
   }
 }
 
@@ -314,31 +323,25 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
 export async function ahb(env: Env): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'AHB');
 
-  // Register test keys for real signatures (deterministic for scenarios)
-  const { registerTestKeys, deriveSignerKey, lockRuntimeSeedUpdates } = await import('../account-crypto');
-  await registerTestKeys(['s1', 's2', 's3', 's4', 'hub', 'alice', 'bob', 'bank']);
+  // Require real runtime seed and derive signer keys (no test keys)
+  const { lockRuntimeSeedUpdates, getCachedSignerPrivateKey } = await import('../account-crypto');
+  requireRuntimeSeed(env, 'AHB');
+  ensureSignerKeysFromSeed(env, ['1', '2', '3', '4'], 'AHB');
   lockRuntimeSeedUpdates(true);
 
-  // CRITICAL: Set env.runtimeSeed for deterministic crypto (pure functions need env)
-  const testSeed = new Uint8Array(32);
-  testSeed.fill(42);
-  env.runtimeSeed = 'test-seed-deterministic-42';
-  const derivedKeys = await Promise.all([
-    deriveSignerKey(testSeed, 'alice'),
-    deriveSignerKey(testSeed, 'hub'),
-    deriveSignerKey(testSeed, 'bob'),
-  ]);
   const walletEntries = [
-    { label: 'alice', wallet: new ethers.Wallet(ethers.hexlify(derivedKeys[0])) },
-    { label: 'hub', wallet: new ethers.Wallet(ethers.hexlify(derivedKeys[1])) },
-    { label: 'bob', wallet: new ethers.Wallet(ethers.hexlify(derivedKeys[2])) },
-  ].sort((a, b) => a.wallet.address.toLowerCase().localeCompare(b.wallet.address.toLowerCase()));
+    { label: 'alice', signerId: '1' },
+    { label: 'hub', signerId: '2' },
+    { label: 'bob', signerId: '3' },
+  ].map(entry => {
+    const privateKey = getCachedSignerPrivateKey(entry.signerId);
+    if (!privateKey) {
+      throw new Error(`AHB: Missing private key for signer ${entry.signerId}`);
+    }
+    return { label: entry.label, wallet: new ethers.Wallet(ethers.hexlify(privateKey)) };
+  }).sort((a, b) => a.wallet.address.toLowerCase().localeCompare(b.wallet.address.toLowerCase()));
 
   const [aliceEntry, hubEntry, bobEntry] = walletEntries;
-  const aliceWallet = aliceEntry?.wallet || walletEntries[0]!.wallet;
-  const hubWallet = hubEntry?.wallet || walletEntries[1]!.wallet;
-  const bobWallet = bobEntry?.wallet || walletEntries[2]!.wallet;
-
   console.log(`[AHB] Wallet ordering: Alice=${aliceEntry?.label}, Hub=${hubEntry?.label}, Bob=${bobEntry?.label}`);
 
   ENTITY_NAME_MAP.clear();
@@ -374,6 +377,7 @@ export async function ahb(env: Env): Promise<void> {
     env.pendingOutputs = [];
     env.pendingNetworkOutputs = [];
     env.frameLogs = [];
+    env.gossip = createGossipLayer();
     env.activeJurisdiction = undefined;
     if (env.scenarioMode) {
       env.timestamp = 1;
@@ -496,7 +500,7 @@ export async function ahb(env: Env): Promise<void> {
 
     for (let i = 0; i < 3; i++) {
       const name = entityNames[i];
-      const signer = `s${i + 1}`;
+      const signer = String(i + 1);
       const position = AHB_POSITIONS[name];
 
       // Compute boardHash for lazy entity (entityId MUST equal boardHash)
@@ -578,7 +582,7 @@ export async function ahb(env: Env): Promise<void> {
         registerSignerPublicKey(entity.id, publicKey);
         console.log(`✅ Registered public key for ${entity.name} (${entity.signer})`);
       } else {
-        console.warn(`⚠️ No public key found for signer ${entity.signer}`);
+        throw new Error(`Missing public key for signer ${entity.signer}`);
       }
     }
 
@@ -1112,9 +1116,12 @@ export async function ahb(env: Env): Promise<void> {
       const actual = aliceDelta9?.collateral || 0n;
       throw new Error(`ASSERT FAIL Frame 9: Alice-Hub collateral = ${actual}, expected ${aliceCollateralAmount}. R2C j-event NOT delivered!`);
     }
-    // ✅ ASSERT: ondelta equals collateral after R2C (settlement sets ondelta = collateral deposited)
-    if (aliceDelta9.ondelta !== aliceCollateralAmount) {
-      throw new Error(`ASSERT FAIL Frame 9: Alice-Hub ondelta = ${aliceDelta9.ondelta}, expected ${aliceCollateralAmount}. R2C ondelta mismatch!`);
+    // ✅ ASSERT: ondelta follows contract rule (left-side ondelta only)
+    // Depository.reserveToCollateral only updates ondelta when receivingEntity is LEFT.
+    const aliceIsLeftAH9 = isLeft(alice.id, hub.id);
+    const expectedOndelta9 = aliceIsLeftAH9 ? aliceCollateralAmount : 0n;
+    if (aliceDelta9.ondelta !== expectedOndelta9) {
+      throw new Error(`ASSERT FAIL Frame 9: Alice-Hub ondelta = ${aliceDelta9.ondelta}, expected ${expectedOndelta9}. R2C ondelta mismatch!`);
     }
     // ✅ ASSERT: Alice reserve decreased by $500K (was $2.5M after R2R #3, now $2M)
     const aliceReserve9 = aliceRep9.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
@@ -1122,7 +1129,8 @@ export async function ahb(env: Env): Promise<void> {
     if (aliceReserve9 !== expectedAliceReserve9) {
       throw new Error(`ASSERT FAIL Frame 9: Alice reserve = ${aliceReserve9 / 10n**18n}M, expected $2M. R2C reserve deduction failed!`);
     }
-    console.log(`✅ ASSERT Frame 9: R2C complete - collateral=$500K, ondelta=$500K, Alice reserve=$2M ✓`);
+    const ondeltaLabel9 = expectedOndelta9 / 10n ** 18n;
+    console.log(`✅ ASSERT Frame 9: R2C complete - collateral=$500K, ondelta=$${ondeltaLabel9}M, Alice reserve=$2M ✓`);
 
     // CRITICAL: Verify bilateral sync after R2C collateral deposit
     const [, aliceRepSync] = findReplica(env, alice.id);
@@ -1384,7 +1392,8 @@ export async function ahb(env: Env): Promise<void> {
     const bobHubAcc = bobRep.state.accounts.get(bob.id);
     const bobDelta = bobHubAcc?.deltas.get(USDC_TOKEN_ID);
     if (bobDelta) {
-      const bobDerived = deriveDelta(bobDelta, false); // Bob is RIGHT
+    const bobIsLeftHB = isLeft(bob.id, hub.id);
+    const bobDerived = deriveDelta(bobDelta, bobIsLeftHB);
       console.log(`   Bob outCapacity: ${bobDerived.outCapacity} (received $250K)`);
       if (bobDerived.outCapacity !== payment1 + payment2) {
         throw new Error(`❌ ASSERTION FAILED: Bob outCapacity=${bobDerived.outCapacity}, expected ${payment1 + payment2}`);
@@ -1462,7 +1471,7 @@ export async function ahb(env: Env): Promise<void> {
       ? -(payment1 + payment2) + reversePayment  // Hub is LEFT: -$250K + $50K = -$200K
       : (payment1 + payment2) - reversePayment;  // Hub is RIGHT: +$250K - $50K = +$200K
     if (bhDelta19 !== expectedBH19) {
-      console.warn(`⚠️ B-H shift unexpected: got ${bhDelta19}, expected ${expectedBH19}`);
+      throw new Error(`B-H shift unexpected: got ${bhDelta19}, expected ${expectedBH19}`);
     }
 
     snap(env, 'Reverse Payment: Hub → Alice', {
@@ -1826,7 +1835,9 @@ export async function ahb(env: Env): Promise<void> {
     if (!aliceAccount || !hubAccount) return false;
     const aliceDelta = aliceAccount.deltas.get(USDC_TOKEN_ID);
     const hubDelta = hubAccount.deltas.get(USDC_TOKEN_ID);
-    const creditApplied = aliceDelta?.rightCreditLimit === phase6Credit && hubDelta?.rightCreditLimit === phase6Credit;
+    const aliceIsLeftAH6 = isLeft(alice.id, hub.id);
+    const creditField = aliceIsLeftAH6 ? 'rightCreditLimit' : 'leftCreditLimit';
+    const creditApplied = aliceDelta?.[creditField] === phase6Credit && hubDelta?.[creditField] === phase6Credit;
     const noPending = !aliceAccount.pendingFrame && !hubAccount.pendingFrame;
     const mempoolClear = (aliceAccount.mempool.length === 0) && (hubAccount.mempool.length === 0);
     return Boolean(creditApplied && noPending && mempoolClear);
@@ -1835,8 +1846,10 @@ export async function ahb(env: Env): Promise<void> {
   // Preflight: Verify both have capacity (fail-fast with clear error)
   const [, aliceCheck] = findReplica(env, alice.id);
   const [, hubCheck] = findReplica(env, hub.id);
-  const aliceCap = deriveDelta(aliceCheck.state.accounts.get(hub.id)!.deltas.get(USDC_TOKEN_ID)!, true).outCapacity;
-  const hubCap = deriveDelta(hubCheck.state.accounts.get(alice.id)!.deltas.get(USDC_TOKEN_ID)!, false).outCapacity;
+  const aliceIsLeftAH6 = isLeft(alice.id, hub.id);
+  const hubIsLeftHA6 = isLeft(hub.id, alice.id);
+  const aliceCap = deriveDelta(aliceCheck.state.accounts.get(hub.id)!.deltas.get(USDC_TOKEN_ID)!, aliceIsLeftAH6).outCapacity;
+  const hubCap = deriveDelta(hubCheck.state.accounts.get(alice.id)!.deltas.get(USDC_TOKEN_ID)!, hubIsLeftHA6).outCapacity;
 
   console.log(`   Alice capacity: ${aliceCap} (need ${aliceToHub})`);
   console.log(`   Hub capacity: ${hubCap} (need ${hubToAlice})`);
@@ -1941,7 +1954,7 @@ export async function ahb(env: Env): Promise<void> {
     // Check if both payments committed (delta should reflect net change)
     const currentDelta = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const currentNet = currentDelta - ahDeltaBefore;
-    const targetNet = -(aliceToHub - hubToAlice);
+    const targetNet = aliceIsLeftAH6 ? -(aliceToHub - hubToAlice) : (aliceToHub - hubToAlice);
 
     console.log(`   Round ${rounds}: delta=${currentDelta}, net=${currentNet}, target=${targetNet}`);
 
@@ -1967,13 +1980,13 @@ export async function ahb(env: Env): Promise<void> {
   console.log(`   - Total consensus events: ${consensusEvents.length}`);
 
   if (rounds >= maxRounds) {
-    console.warn(`   ⚠️ Hit max rounds (${maxRounds}), payments may still be pending`);
+    throw new Error(`Hit max rounds (${maxRounds}) - payments still pending`);
   }
 
   // Verify BOTH payments succeeded
   const ahDeltaAfter = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
   const netChange = ahDeltaAfter - ahDeltaBefore;
-  const expected = -(aliceToHub - hubToAlice); // Alice pays $10K, receives $5K = net -$5K
+  const expected = aliceIsLeftAH6 ? -(aliceToHub - hubToAlice) : (aliceToHub - hubToAlice); // Left-perspective net
 
   console.log(`\n✅ VERIFICATION:`);
   console.log(`   Before: A-H offdelta = ${ahDeltaBefore}`);
@@ -2419,18 +2432,18 @@ export async function ahb(env: Env): Promise<void> {
   const bobAccountAfterBump = bobAfterBump.state.accounts.get(hub.id);
   assert(bobAccountAfterBump?.activeDispute, 'PHASE 8: activeDispute missing after bump');
 
-  // H13 AUDIT FIX: Counter-dispute requires STRICTLY HIGHER nonce than initial dispute
+  // H13 AUDIT FIX: Counter-dispute requires SAME OR HIGHER nonce than initial dispute
   // Edge cases handled by contract:
-  // - Same nonce: REJECTED (no advancement)
+  // - Same nonce: ACCEPTED (cooperative approval - you agree with disputed state)
+  // - Higher nonce: ACCEPTED (counter-dispute with newer state)
   // - Lower nonce: REJECTED (regression attack)
-  // - Higher nonce: ACCEPTED (valid counter-dispute)
   const initialNonce = bobAccountAfterBump.activeDispute.initialDisputeNonce;
   const currentNonce = bobAccountAfterBump.proofHeader.disputeNonce;
   assert(
-    currentNonce > initialNonce,
-    `H13: disputeNonce must advance for counter-dispute (initial=${initialNonce}, current=${currentNonce})`
+    currentNonce >= initialNonce,
+    `H13: disputeNonce must be >= initial for counter-dispute (initial=${initialNonce}, current=${currentNonce})`
   );
-  console.log(`   H13: Counter-dispute nonce check: ${initialNonce} → ${currentNonce} (strictly higher ✅)`);
+  console.log(`   H13: Counter-dispute nonce check: ${initialNonce} → ${currentNonce} (same or higher ✅)`);
   assert(bobAccountAfterBump.counterpartyDisputeProofHanko, 'PHASE 8: missing counterparty dispute hanko for counter-dispute');
 
   // H10 AUDIT FIX: Verify solvency after counter-dispute bump (state changed during dispute)
@@ -2684,7 +2697,7 @@ export async function ahb(env: Env): Promise<void> {
     // ============================================================================
     console.log('\n🤝 PHASE 9: Carol cooperative close (post-scenario)');
 
-    const carolSigner = 's4';
+    const carolSigner = '4';
     const carolPosition = { x: 80, y: -30, z: 0 };
     const carolConfig = {
       mode: 'proposer-based' as const,
@@ -2717,7 +2730,7 @@ export async function ahb(env: Env): Promise<void> {
       registerSignerPublicKey(carol.id, carolPublicKey);
       console.log(`✅ Registered public key for ${carol.name} (${carol.signer})`);
     } else {
-      console.warn(`⚠️ No public key found for signer ${carol.signer}`);
+      throw new Error(`Missing public key for signer ${carol.signer}`);
     }
 
     const { wallet: carolWallet } = ensureSignerWallet(carol.signer);
@@ -2897,6 +2910,7 @@ if (import.meta.main) {
   // Dynamic import to avoid bundler issues
   const runtime = await import('../runtime');
   const env = runtime.createEmptyEnv();
+  env.runtimeSeed = 'ahb-cli-seed-42'; // Must set before require check
 
   await ahb(env);
 

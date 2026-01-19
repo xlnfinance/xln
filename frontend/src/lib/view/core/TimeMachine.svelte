@@ -40,10 +40,13 @@
         : Object.values(frame.jReplicas);
       const stateRoot = jReplicas[0]?.stateRoot;
       const browserVMState = frame?.browserVMState;
+      const hasBrowserVMState = !!browserVMState &&
+        typeof browserVMState.stateRoot === 'string' &&
+        Array.isArray(browserVMState.trieData);
       const browserVM = (window as any).__xlnBrowserVM;
       const nonce = ++timeTravelNonce;
 
-      if (browserVMState && browserVM?.restoreState) {
+      if (hasBrowserVMState && browserVM?.restoreState) {
         (async () => {
           try {
             await browserVM.restoreState(browserVMState);

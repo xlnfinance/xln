@@ -25,6 +25,7 @@ export class BrowserEVM implements JurisdictionEVM {
   async timeTravel(stateRoot: Uint8Array) { return this.provider.timeTravel(stateRoot); }
   async serializeState(): Promise<BrowserVMState> { return this.provider.serializeState(); }
   async restoreState(data: BrowserVMState): Promise<void> { return this.provider.restoreState(data); }
+  setQuietLogs(quiet: boolean): void { this.provider.setQuietLogs(quiet); }
   async debugFundReserves(entityId: string, tokenId: number, amount: bigint) { return this.provider.debugFundReserves(entityId, tokenId, amount); }
   async setDefaultDisputeDelay(delayBlocks: number) { return this.provider.setDefaultDisputeDelay(delayBlocks); }
   async getReserves(entityId: string, tokenId: number) { return this.provider.getReserves(entityId, tokenId); }

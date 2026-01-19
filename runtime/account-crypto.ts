@@ -1,13 +1,15 @@
 /**
  * Real cryptographic signatures for account consensus
- * Uses secp256k1 (Ethereum standard) with HMAC-derived keys from BrainVault seed
+ * Uses secp256k1 (Ethereum standard) with BIP-39 derivation for numeric signer IDs
+ * and HMAC-derived keys for named signers.
  */
 
 import * as secp256k1 from '@noble/secp256k1';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { concatBytes } from '@noble/hashes/utils.js';
-import { keccak256 } from 'ethers';
+import { HDNodeWallet, getIndexedAccountPath, getBytes, keccak256 } from 'ethers';
+import * as bip39 from 'bip39';
 
 // Configure @noble/secp256k1 HMAC (required for signing)
 // Always install a sync HMAC implementation (Node/Bun fast path, browser fallback).
@@ -48,25 +50,74 @@ const signerKeys = new Map<string, Uint8Array>();
 const signerPublicKeys = new Map<string, Uint8Array>();
 const signerAddresses = new Map<string, string>();
 const externalPublicKeys = new Map<string, Uint8Array>();
-let runtimeSeedBytes: Uint8Array | null = null;
 let runtimeSeedLocked = false;
 const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+const mnemonicCache = new Map<string, string>();
+const bytesToHex = (bytes: Uint8Array): string =>
+  Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
 
 const toSeedBytes = (seed: Uint8Array | string): Uint8Array =>
   typeof seed === 'string' ? textEncoder.encode(seed) : seed;
+const toSeedText = (seed: Uint8Array | string): string =>
+  typeof seed === 'string' ? seed : textDecoder.decode(seed);
+
+const parseSignerIndex = (signerId: string): number | null => {
+  const trimmed = signerId.trim();
+  if (/^s\d+$/.test(trimmed)) {
+    throw new Error(`DEPRECATED_SIGNER_PREFIX: signerId "${signerId}" must be numeric (e.g. "1")`);
+  }
+  const match = trimmed.match(/^(\d+)$/);
+  if (!match) return null;
+  const raw = Number(match[1]);
+  if (!Number.isFinite(raw)) return null;
+  const index = raw > 0 ? raw - 1 : 0;
+  return index;
+};
+
+const resolveMnemonic = (seed: Uint8Array | string): string => {
+  const seedText = toSeedText(seed).trim();
+  if (seedText.length === 0) {
+    throw new Error('CRYPTO_DETERMINISM_VIOLATION: runtimeSeed is empty');
+  }
+  const cached = mnemonicCache.get(seedText);
+  if (cached) return cached;
+
+  const normalized = seedText.toLowerCase().replace(/\s+/g, ' ');
+  if (bip39.validateMnemonic(normalized)) {
+    mnemonicCache.set(seedText, normalized);
+    return normalized;
+  }
+
+  const entropy = sha256(toSeedBytes(seedText));
+  const mnemonic = bip39.entropyToMnemonic(bytesToHex(entropy));
+  mnemonicCache.set(seedText, mnemonic);
+  return mnemonic;
+};
+
+const deriveBip39Key = (seed: Uint8Array | string, index: number): Uint8Array => {
+  const mnemonic = resolveMnemonic(seed);
+  const path = getIndexedAccountPath(index);
+  const wallet = HDNodeWallet.fromPhrase(mnemonic, undefined, path);
+  return getBytes(wallet.privateKey);
+};
 
 /**
- * Derive signer private key from BrainVault master seed
- * Formula: privateKey = HMAC-SHA256(masterSeed, signerId)
- * Browser-compatible (pure JS HMAC) and Node-compatible
+ * Derive signer private key from BrainVault master seed.
+ * For numeric signerIds (e.g., "1"), use BIP-39 + MetaMask path derivation.
+ * For non-numeric signerIds, use HMAC-SHA256(masterSeed, signerId).
  */
-export async function deriveSignerKey(masterSeed: Uint8Array, signerId: string): Promise<Uint8Array> {
+export async function deriveSignerKey(masterSeed: Uint8Array | string, signerId: string): Promise<Uint8Array> {
   return deriveSignerKeySync(masterSeed, signerId);
 }
 
-export function deriveSignerKeySync(masterSeed: Uint8Array, signerId: string): Uint8Array {
+export function deriveSignerKeySync(masterSeed: Uint8Array | string, signerId: string): Uint8Array {
+  const signerIndex = parseSignerIndex(signerId);
+  if (signerIndex !== null) {
+    return deriveBip39Key(masterSeed, signerIndex);
+  }
   const message = textEncoder.encode(signerId);
-  return hmac(sha256, masterSeed, message);
+  return hmac(sha256, toSeedBytes(masterSeed), message);
 }
 
 export function setRuntimeSeed(seed: Uint8Array | string | null): void {
@@ -74,18 +125,18 @@ export function setRuntimeSeed(seed: Uint8Array | string | null): void {
     console.warn('⚠️ Runtime seed update ignored (crypto lock enabled)');
     return;
   }
-  runtimeSeedBytes = seed ? toSeedBytes(seed) : null;
   signerKeys.clear();
   signerPublicKeys.clear();
   signerAddresses.clear();
   externalPublicKeys.clear();
+  mnemonicCache.clear();
 }
 
 export function lockRuntimeSeedUpdates(locked: boolean): void {
   runtimeSeedLocked = locked;
 }
 
-const getOrDeriveKey = (envSeed: Uint8Array, signerId: string): Uint8Array => {
+const getOrDeriveKey = (envSeed: Uint8Array | string, signerId: string): Uint8Array => {
   console.log(`🔍 getOrDeriveKey: signerId=${signerId.slice(-4)}`);
   const cached = signerKeys.get(signerId);
   if (cached) {
@@ -98,7 +149,8 @@ const getOrDeriveKey = (envSeed: Uint8Array, signerId: string): Uint8Array => {
   if (!envSeed) {
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getOrDeriveKey called without env.runtimeSeed for signer ${signerId}`);
   }
-  console.log(`✅ Deriving key from env seed (${envSeed.length} bytes)`);
+  const seedLen = typeof envSeed === 'string' ? envSeed.length : envSeed.length;
+  console.log(`✅ Deriving key from env seed (${seedLen} bytes)`);
   const derived = deriveSignerKeySync(envSeed, signerId);
   registerSignerKey(signerId, derived);
   console.log(`✅ Derived and registered key for ${signerId.slice(-4)}`);
@@ -150,8 +202,7 @@ export function getSignerPrivateKey(env: any, signerId: string): Uint8Array {
   if (!env?.runtimeSeed) {
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getSignerPrivateKey called without env.runtimeSeed for signer ${signerId}`);
   }
-  const seed = textEncoder.encode(env.runtimeSeed);
-  return getOrDeriveKey(seed, signerId);
+  return getOrDeriveKey(env.runtimeSeed, signerId);
 }
 
 export function getSignerPublicKey(env: any, signerId: string): Uint8Array | null {
@@ -172,8 +223,7 @@ export function getSignerPublicKey(env: any, signerId: string): Uint8Array | nul
   if (!env?.runtimeSeed) {
     return null;
   }
-  const seed = textEncoder.encode(env.runtimeSeed);
-  const privateKey = getOrDeriveKey(seed, signerId);
+  const privateKey = getOrDeriveKey(env.runtimeSeed, signerId);
   const publicKey = secp256k1.getPublicKey(privateKey);
   signerPublicKeys.set(signerId, publicKey);
   return publicKey;
@@ -186,8 +236,7 @@ const privateKeyToAddress = (privateKey: Uint8Array): string => {
 };
 
 export function deriveSignerAddressSync(seed: Uint8Array | string, signerId: string): string {
-  const seedBytes = toSeedBytes(seed);
-  const privateKey = deriveSignerKeySync(seedBytes, signerId);
+  const privateKey = deriveSignerKeySync(seed, signerId);
   return privateKeyToAddress(privateKey);
 }
 
@@ -207,8 +256,7 @@ export function getSignerAddress(env: any, signerId: string): string | null {
   if (!env?.runtimeSeed) {
     return null;
   }
-  const seed = textEncoder.encode(env.runtimeSeed);
-  const privateKey = getOrDeriveKey(seed, signerId);
+  const privateKey = getOrDeriveKey(env.runtimeSeed, signerId);
   const address = privateKeyToAddress(privateKey);
   signerAddresses.set(signerId, address);
   return address;
@@ -222,11 +270,10 @@ export async function registerSeededKeys(
   seed: Uint8Array | string,
   signerIds: string[]
 ): Promise<void> {
-  const seedBytes = toSeedBytes(seed);
-  setRuntimeSeed(seedBytes);
+  setRuntimeSeed(seed);
 
   for (const signerId of signerIds) {
-    const privateKey = await deriveSignerKey(seedBytes, signerId);
+    const privateKey = await deriveSignerKey(seed, signerId);
     registerSignerKey(signerId, privateKey);
   }
 
@@ -268,9 +315,8 @@ export async function registerTestKeys(signerIds: string[]): Promise<void> {
   setRuntimeSeed(testMasterSeed);
 
   // Use registerSeededKeys but suppress its log (we log our own below)
-  const seedBytes = testMasterSeed;
   for (const signerId of signerIds) {
-    const privateKey = await deriveSignerKey(seedBytes, signerId);
+    const privateKey = await deriveSignerKey(testMasterSeed, signerId);
     registerSignerKey(signerId, privateKey);
   }
   console.log(`🔑 Registered ${signerIds.length} test keys (deterministic from signerId)`);
@@ -297,19 +343,18 @@ export function signAccountFrame(
   if (!env?.runtimeSeed) {
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signAccountFrame called without env.runtimeSeed for signer ${signerId}`);
   }
-  const seed = textEncoder.encode(env.runtimeSeed);
 
   console.log(`🔑 signAccountFrame CALLED: signerId=${signerId.slice(-4)}, frameHash=${frameHash.slice(0, 10)}, source=env`);
   console.log(`🔑 Available signerKeys:`, Array.from(signerKeys.keys()).map(k => k.slice(-4)));
   console.log(`🔑 Available signerPublicKeys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
 
   const messageHash = keccak256(Buffer.from(frameHash.replace('0x', ''), 'hex'));
-  const signature = signDigest(seed, signerId, messageHash);
+  const signature = signDigest(env.runtimeSeed, signerId, messageHash);
   console.log(`✍️ Signed frame ${frameHash.slice(0, 10)} by ${signerId.slice(-4)}: ${signature.slice(0, 20)}...`);
   return signature;
 }
 
-export function signDigest(seed: Uint8Array, signerId: string, digestHex: string): string {
+export function signDigest(seed: Uint8Array | string, signerId: string, digestHex: string): string {
   installHmacSync();
 
   const privateKey = getOrDeriveKey(seed, signerId);

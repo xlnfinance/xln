@@ -19,11 +19,12 @@ import type { Env, EntityInput, EntityReplica, Delta } from '../types';
 import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from '../evm';
 import { BrowserEVM } from '../evms/browser-evm';
 import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
-import { getProcess, getApplyRuntimeInput, usd, snap, checkSolvency, assertRuntimeIdle, enableStrictScenario } from './helpers';
+import { getProcess, getApplyRuntimeInput, usd, snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { isLeft } from '../account-utils';
 import { ethers } from 'ethers';
+import { createRngFromEnv } from './seeded-rng';
 
 const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(10_000_000);
@@ -308,14 +309,15 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
 // Alias for runtime.ts compatibility
 export async function lockAhb(env: Env): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'HTLC AHB');
-  // Register test keys for real signatures
-  // s2-s5 for entities (s1 reserved for foundation)
-  const { registerTestKeys, lockRuntimeSeedUpdates } = await import('../account-crypto');
-  await registerTestKeys(['s1', 's2', 's3', 's4', 's5', 's6', 'hub', 'alice', 'bob', 'carol', 'dave', 'frank']);
+  // Register signer keys for real signatures
+  // 2-6 for entities (1 reserved for foundation)
+  const { lockRuntimeSeedUpdates } = await import('../account-crypto');
+  requireRuntimeSeed(env, 'HTLC AHB');
+  ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6'], 'HTLC AHB');
   lockRuntimeSeedUpdates(true);
-  env.runtimeSeed = 'test-seed-deterministic-42';
   const process = await getProcess();
   env.scenarioMode = true; // Deterministic time control
+  const rng = createRngFromEnv(env); // Deterministic RNG for HTLC secrets
 
   try {
     console.log('[AHB] ========================================');
@@ -356,10 +358,10 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // Register entities with EntityProvider for Hanko signature verification
     // This creates boards with each signer as sole validator
-    // s2..s6 → entity numbers 2..6 (entity 1 is foundation)
+    // 2..6 → entity numbers 2..6 (entity 1 is foundation)
     if (browserVM.registerEntitiesWithSigners) {
       console.log('[AHB] Registering entities with EntityProvider...');
-      const entityNumbers = await browserVM.registerEntitiesWithSigners(['s2', 's3', 's4', 's5', 's6']);
+      const entityNumbers = await browserVM.registerEntitiesWithSigners(['2', '3', '4', '5', '6']);
       console.log(`[AHB] ✅ Registered entities: [${entityNumbers.join(', ')}]`);
     }
 
@@ -440,7 +442,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     for (let i = 0; i < 3; i++) {
       const name = entityNames[i];
-      const signer = `s${i + 2}`; // s2, s3, s4 (skip s1 for foundation)
+      const signer = String(i + 2); // 2, 3, 4 (skip 1 for foundation)
       const position = AHB_POSITIONS[name];
 
       // SIMPLE FALLBACK ONLY (no blockchain calls in demos)
@@ -582,7 +584,7 @@ export async function lockAhb(env: Env): Promise<void> {
     });
     await process(env, [{
       entityId: hub.id,
-      signerId: 's3',
+      signerId: hub.signer,
       entityTxs: [
         // R2R #1: Hub → Alice $3M
         {
@@ -624,7 +626,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     await process(env, [{
       entityId: hub.id,
-      signerId: 's3',
+      signerId: hub.signer,
       entityTxs: [{
         type: 'j_broadcast',
         data: {}
@@ -696,7 +698,7 @@ export async function lockAhb(env: Env): Promise<void> {
     // Alice sends R2R to Bob (demonstrates peer-to-peer, not just hub distribution)
     await process(env, [{
       entityId: alice.id,
-      signerId: 's2',
+      signerId: alice.signer,
       entityTxs: [{
         type: 'reserve_to_reserve',
         data: {
@@ -710,7 +712,7 @@ export async function lockAhb(env: Env): Promise<void> {
     // Broadcast
     await process(env, [{
       entityId: alice.id,
-      signerId: 's2',
+      signerId: alice.signer,
       entityTxs: [{
         type: 'j_broadcast',
         data: {}
@@ -874,7 +876,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     await process(env, [{
       entityId: alice.id,
-      signerId: 's2',
+      signerId: alice.signer,
       entityTxs: [{
         type: 'j_broadcast',
         data: {}
@@ -915,9 +917,12 @@ export async function lockAhb(env: Env): Promise<void> {
       const actual = aliceDelta9?.collateral || 0n;
       throw new Error(`ASSERT FAIL Frame 9: Alice-Hub collateral = ${actual}, expected ${aliceCollateralAmount}. R2C j-event NOT delivered!`);
     }
-    // ✅ ASSERT: ondelta equals collateral after R2C (settlement sets ondelta = collateral deposited)
-    if (aliceDelta9.ondelta !== aliceCollateralAmount) {
-      throw new Error(`ASSERT FAIL Frame 9: Alice-Hub ondelta = ${aliceDelta9.ondelta}, expected ${aliceCollateralAmount}. R2C ondelta mismatch!`);
+    // ✅ ASSERT: ondelta follows contract rule (left-side ondelta only)
+    // Depository.reserveToCollateral only updates ondelta when receivingEntity is LEFT.
+    const aliceIsLeftAH9 = isLeft(alice.id, hub.id);
+    const expectedOndelta9 = aliceIsLeftAH9 ? aliceCollateralAmount : 0n;
+    if (aliceDelta9.ondelta !== expectedOndelta9) {
+      throw new Error(`ASSERT FAIL Frame 9: Alice-Hub ondelta = ${aliceDelta9.ondelta}, expected ${expectedOndelta9}. R2C ondelta mismatch!`);
     }
     // ✅ ASSERT: Alice reserve after R2C
     // Alice: $3M (from Hub) - $500K (to Bob) - $500K (R2C) = $2M
@@ -926,7 +931,8 @@ export async function lockAhb(env: Env): Promise<void> {
     if (aliceReserve9 !== expectedAliceReserve9) {
       throw new Error(`ASSERT FAIL Frame 9: Alice reserve = ${aliceReserve9 / 10n**18n}M, expected $2M. R2C reserve deduction failed!`);
     }
-    console.log(`✅ ASSERT Frame 9: R2C complete - collateral=$500K, ondelta=$500K, Alice reserve=$2M ✓`);
+    const ondeltaLabel9 = expectedOndelta9 / 10n ** 18n;
+    console.log(`✅ ASSERT Frame 9: R2C complete - collateral=$500K, ondelta=$${ondeltaLabel9}M, Alice reserve=$2M ✓`);
 
     // CRITICAL: Verify bilateral sync after R2C collateral deposit
     assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'Frame 9 - Alice R2C Collateral');
@@ -973,15 +979,17 @@ export async function lockAhb(env: Env): Promise<void> {
     // Tick 4: Extra tick to ensure all ACKs delivered (left-wins resend adds traffic)
     await process(env);
 
-    // ✅ ASSERT: Credit extension delivered - Bob-Hub has leftCreditLimit = $500K
-    // Bob (0x0003) > Hub (0x0002) → Bob is RIGHT, Hub is LEFT
-    // Bob extending credit sets leftCreditLimit (credit available TO Hub/LEFT)
+    // ✅ ASSERT: Credit extension delivered - Bob-Hub has correct credit limit = $500K
+    // leftCreditLimit = credit extended by LEFT to RIGHT
+    // rightCreditLimit = credit extended by RIGHT to LEFT
     const [, bobRep9] = findReplica(env, bob.id);
     const bobHubAccount9 = bobRep9.state.accounts.get(hub.id); // Account keyed by counterparty
     const bobDelta9 = bobHubAccount9?.deltas.get(USDC_TOKEN_ID);
-    if (!bobDelta9 || bobDelta9.leftCreditLimit !== bobCreditAmount) {
-      const actual = bobDelta9?.leftCreditLimit || 0n;
-      throw new Error(`ASSERT FAIL Frame 9: Bob-Hub leftCreditLimit = ${actual}, expected ${bobCreditAmount}. Credit extension NOT applied!`);
+    const counterpartyIsLeft = isLeft(hub.id, bob.id);
+    const expectedField = counterpartyIsLeft ? 'leftCreditLimit' : 'rightCreditLimit';
+    const actualLimit = bobDelta9 ? bobDelta9[expectedField] : 0n;
+    if (!bobDelta9 || actualLimit !== bobCreditAmount) {
+      throw new Error(`ASSERT FAIL Frame 9: Bob-Hub ${expectedField} = ${actualLimit}, expected ${bobCreditAmount}. Credit extension NOT applied!`);
     }
 
     // Verify bilateral sync
@@ -1023,6 +1031,7 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log('🏃 FRAME 10: Alice initiates HTLC A→H→B $125K');
 
     // Frame 10: Alice creates HTLC lock
+    const htlc1 = rng.nextHashlock(); // Deterministic secret/hashlock
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -1033,7 +1042,9 @@ export async function lockAhb(env: Env): Promise<void> {
           tokenId: USDC_TOKEN_ID,
           amount: payment1,
           route: [alice.id, hub.id, bob.id],
-          description: 'HTLC Payment 1 of 2'
+          description: 'HTLC Payment 1 of 2',
+          secret: htlc1.secret,
+          hashlock: htlc1.hashlock,
         }
       }]
     }]);
@@ -1226,7 +1237,8 @@ export async function lockAhb(env: Env): Promise<void> {
     const bobHubAcc = bobRep.state.accounts.get(bob.id);
     const bobDelta = bobHubAcc?.deltas.get(USDC_TOKEN_ID);
     if (bobDelta) {
-      const bobDerived = deriveDelta(bobDelta, false); // Bob is RIGHT
+      const bobIsLeftHB = isLeft(bob.id, hub.id);
+      const bobDerived = deriveDelta(bobDelta, bobIsLeftHB);
       console.log(`   Bob outCapacity: ${bobDerived.outCapacity} (received $${Number(expectedBobReceived) / 1e18})`);
       if (bobDerived.outCapacity !== expectedBobReceived) {
         throw new Error(`❌ ASSERTION FAILED: Bob outCapacity=${bobDerived.outCapacity}, expected ${expectedBobReceived}`);
@@ -1295,10 +1307,11 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`   After Hub forwards: B-H offdelta=${bhDelta19}, A-H offdelta=${ahDelta19}`);
 
     // B-H should have shifted +$50K (Bob paid Hub, reducing Hub's debt)
+    // Account for the HTLC fee already retained on payment1.
     // A-H should NOT have changed yet (Hub forwarding is in next frame)
-    const expectedBH19 = -(payment1 + payment2) + reversePayment; // -$250K + $50K = -$200K
+    const expectedBH19 = -(payment1 - htlcFee + payment2) + reversePayment; // -$200K + fee kept
     if (bhDelta19 !== expectedBH19) {
-      console.warn(`⚠️ B-H shift unexpected: got ${bhDelta19}, expected ${expectedBH19}`);
+      throw new Error(`B-H shift unexpected: got ${bhDelta19}, expected ${expectedBH19}`);
     }
 
     await pushSnapshot(env, 'Frame 19: Hub forwards to Alice', {
@@ -1410,7 +1423,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     await process(env, [{
       entityId: hub.id,
-      signerId: 's3',
+      signerId: hub.signer,
       entityTxs: [
         // Settlement 1: Alice ↔ Hub (canonical ordering) - Hub pulls $200K from Alice
         {
@@ -1452,7 +1465,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     await process(env, [{
       entityId: hub.id,
-      signerId: 's3',
+      signerId: hub.signer,
       entityTxs: [{
         type: 'j_broadcast',
         data: {}
@@ -1549,22 +1562,22 @@ export async function lockAhb(env: Env): Promise<void> {
       runtimeTxs: [{
         type: 'importReplica' as const,
         entityId: '0x' + '6'.padStart(64, '0'),
-        signerId: 's6',
+        signerId: '6',
         data: {
           isProposer: true,
           position: { x: 400, y: 0, z: 0 },
           config: {
             mode: 'proposer-based' as const,
             threshold: 1n,
-            validators: ['s6'],
-            shares: { s6: 1n },
+            validators: ['6'],
+            shares: { '6': 1n },
           },
         },
       }],
       entityInputs: []
     });
 
-    const charlie = { id: '0x' + '6'.padStart(64, '0'), signer: 's6' };
+    const charlie = { id: '0x' + '6'.padStart(64, '0'), signer: '6' };
     console.log(`✅ Created Charlie ${charlie.id.slice(-4)}\n`);
 
     // Deposit collateral for Charlie
@@ -1638,8 +1651,8 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`📋 Hub creates HTLC to Charlie (no secret), expires at height ${shortExpiry}\n`);
 
     // Generate hashlock without sharing secret with Charlie (timeout test)
-    const { generateHashlock, generateLockId } = await import('../htlc-utils');
-    const { secret: testSecret, hashlock: testHashlock } = generateHashlock();
+    const { generateLockId } = await import('../htlc-utils');
+    const { secret: testSecret, hashlock: testHashlock } = rng.nextHashlock(); // Deterministic
     const testLockId = generateLockId(testHashlock, shortExpiry, 0, env.timestamp);
 
     console.log(`   Lock ID: ${testLockId.slice(0,16)}...`);
@@ -1750,22 +1763,22 @@ export async function lockAhb(env: Env): Promise<void> {
       runtimeTxs: [{
         type: 'importReplica' as const,
         entityId: '0x' + '5'.padStart(64, '0'),
-        signerId: 's5',
+        signerId: '5',
         data: {
           isProposer: true,
           position: { x: 200, y: 0, z: 0 },
           config: {
             mode: 'proposer-based' as const,
             threshold: 1n,
-            validators: ['s5'],
-            shares: { s5: 1n },
+            validators: ['5'],
+            shares: { '5': 1n },
           },
         },
       }],
       entityInputs: []
     });
 
-    const hub2 = { id: '0x' + '5'.padStart(64, '0'), signer: 's5' };
+    const hub2 = { id: '0x' + '5'.padStart(64, '0'), signer: '5' };
     console.log(`✅ Created Hub2 ${hub2.id.slice(-4)}\n`);
 
     // Fund Hub2
@@ -1858,6 +1871,7 @@ export async function lockAhb(env: Env): Promise<void> {
     const payment4Hop = usd(25_000);
     console.log(`🔒 Alice initiates 4-hop HTLC: Alice → Hub → Hub2 → Bob ($25k)\n`);
 
+    const htlc4 = rng.nextHashlock(); // Deterministic secret/hashlock for 4-hop
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
@@ -1868,7 +1882,9 @@ export async function lockAhb(env: Env): Promise<void> {
           route: [alice.id, hub.id, hub2.id, bob.id], // Explicit 4-hop route
           tokenId: USDC_TOKEN_ID,
           amount: payment4Hop,
-          description: '4-hop onion routing test'
+          description: '4-hop onion routing test',
+          secret: htlc4.secret,
+          hashlock: htlc4.hashlock,
         }
       }]
     }]);
@@ -1917,8 +1933,8 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log('═══════════════════════════════════════\n');
 
     // Create a new HTLC that Bob will have to reveal on-chain
-    // Note: generateHashlock, generateLockId already imported above for 4-hop test
-    const hostageSecret = generateHashlock();
+    // Deterministic secret from seeded RNG (generateLockId already imported above)
+    const hostageSecret = rng.nextHashlock();
     const currentJHeightHostage = env.jReplicas.get('AHB Demo')?.blockNumber || 0n;
     const hostageExpiry = Number(currentJHeightHostage) + 100; // Long expiry
     const hostageLockId = generateLockId(hostageSecret.hashlock, hostageExpiry, 0, env.timestamp);
@@ -2204,6 +2220,7 @@ if (import.meta.main) {
   // Dynamic import to avoid bundler issues
   const runtime = await import('../runtime');
   const env = runtime.createEmptyEnv();
+  requireRuntimeSeed(env, 'HTLC AHB CLI');
 
   if (stopAtFrame !== undefined) {
     env.stopAtFrame = stopAtFrame;

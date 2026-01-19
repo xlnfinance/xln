@@ -1280,6 +1280,7 @@ export interface Env {
 
   // Scenario mode: deterministic time control (scenarios set env.timestamp manually)
   scenarioMode?: boolean; // When true, runtime doesn't auto-update timestamp
+  quietRuntimeLogs?: boolean; // When true, suppress noisy runtime console logs
   strictScenario?: boolean; // When true, runtime asserts invariants per frame
   strictScenarioLabel?: string; // Optional label for strict scenario errors
 

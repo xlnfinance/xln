@@ -6,6 +6,7 @@
  */
 
 import { FINANCIAL } from './constants';
+import { logDebug } from './logger';
 export type BoardValidator = {
   signer: string; // canonical signer address (0x...) or signerId fallback
   weight: number; // uint16 voting power
@@ -75,7 +76,7 @@ export function createGossipLayer(): GossipLayer {
   const profiles = new Map<string, Profile>();
 
   const announce = (profile: Profile): void => {
-    console.log(`📢 gossip.announce INPUT: ${profile.entityId.slice(-4)} accounts=${profile.accounts?.length || 0}`);
+    logDebug('GOSSIP', `📢 gossip.announce INPUT: ${profile.entityId.slice(-4)} accounts=${profile.accounts?.length || 0}`);
 
     const normalizedProfile: Profile = {
       ...profile,
@@ -85,7 +86,7 @@ export function createGossipLayer(): GossipLayer {
       relays: profile.relays || [],
     };
 
-    console.log(`📢 After normalize: ${profile.entityId.slice(-4)} accounts=${normalizedProfile.accounts?.length || 0}`);
+    logDebug('GOSSIP', `📢 After normalize: ${profile.entityId.slice(-4)} accounts=${normalizedProfile.accounts?.length || 0}`);
     // Only update if newer timestamp or no existing profile
     const existing = profiles.get(profile.entityId);
     const newTimestamp = normalizedProfile.metadata?.lastUpdated || 0;
@@ -103,21 +104,21 @@ export function createGossipLayer(): GossipLayer {
 
     if (shouldUpdate) {
       profiles.set(profile.entityId, normalizedProfile);
-      console.log(`📡 Gossip SAVED: ${profile.entityId.slice(-4)} ts=${newTimestamp} accounts=${normalizedProfile.accounts?.length || 0}`);
+      logDebug('GOSSIP', `📡 Gossip SAVED: ${profile.entityId.slice(-4)} ts=${newTimestamp} accounts=${normalizedProfile.accounts?.length || 0}`);
 
       // VERIFY: Check что profile действительно сохранился
       const verify = profiles.get(profile.entityId);
-      console.log(`✅ VERIFY after SET: ${profile.entityId.slice(-4)} accounts=${verify?.accounts?.length || 0} (should be ${normalizedProfile.accounts?.length})`);
+      logDebug('GOSSIP', `✅ VERIFY after SET: ${profile.entityId.slice(-4)} accounts=${verify?.accounts?.length || 0} (should be ${normalizedProfile.accounts?.length})`);
     } else {
-      console.log(`📡 Gossip REJECTED: ${profile.entityId.slice(-4)} ts=${newTimestamp}<=${existingTimestamp}`);
+      logDebug('GOSSIP', `📡 Gossip REJECTED: ${profile.entityId.slice(-4)} ts=${newTimestamp}<=${existingTimestamp}`);
     }
   };
 
   const getProfiles = (): Profile[] => {
     const result = Array.from(profiles.values());
-    console.log(`🔍 getProfiles(): Returning ${result.length} profiles`);
+    logDebug('GOSSIP', `🔍 getProfiles(): Returning ${result.length} profiles`);
     for (const p of result) {
-      console.log(`  - ${p.entityId.slice(-4)}: accounts=${p.accounts?.length || 0} ts=${p.metadata?.lastUpdated}`);
+      logDebug('GOSSIP', `  - ${p.entityId.slice(-4)}: accounts=${p.accounts?.length || 0} ts=${p.metadata?.lastUpdated}`);
     }
     return result;
   };
@@ -243,7 +244,7 @@ export async function loadPersistedProfiles(db: any, gossip: { announce: (p: Pro
       }
     }
 
-    console.log(`📡 Restored ${profileCount} profiles from DB into gossip`);
+    logDebug('GOSSIP', `📡 Restored ${profileCount} profiles from DB into gossip`);
     return profileCount;
   } catch (error) {
     console.error('❌ Failed to load persisted profiles:', error);

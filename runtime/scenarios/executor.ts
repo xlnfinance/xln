@@ -18,6 +18,7 @@ import { namedParamsToObject, getPositionalParams } from './types.js';
 import { createNumberedEntity } from '../entity-factory.js';
 import { getAvailableJurisdictions } from '../evm.js';
 import { safeStringify } from '../serialization-utils.js';
+import { waitScenario } from './helpers';
 
 let payRandomCounter = 0;
 
@@ -263,11 +264,14 @@ async function handleImport(
 
     const { createNumberedEntitiesBatch } = await import('../entity-factory.js');
     results = await createNumberedEntitiesBatch(
-      entitiesToRegister.map(scenarioId => ({
-        name: `Entity-${scenarioId}`,
-        validators: [`s${scenarioId}`],
-        threshold: 1n,
-      })),
+      entitiesToRegister.map(scenarioId => {
+        const signerId = String(scenarioId);
+        return {
+          name: `Entity-${scenarioId}`,
+          validators: [signerId],
+          threshold: 1n,
+        };
+      }),
       arrakis
     );
 
@@ -276,14 +280,15 @@ async function handleImport(
     console.log(`  🚀 Registering ${entitiesToRegister.length} entities (parallel)...`);
 
     // For small batches, use parallel individual registration
-    const registrationPromises = entitiesToRegister.map(scenarioId =>
-      createNumberedEntity(
+    const registrationPromises = entitiesToRegister.map(scenarioId => {
+      const signerId = String(scenarioId);
+      return createNumberedEntity(
         `Entity-${scenarioId}`,
-        [`s${scenarioId}`],
+        [signerId],
         1n,
         arrakis
-      )
-    );
+      );
+    });
 
     results = await Promise.all(registrationPromises);
     console.log(`  ✅ All ${results.length} entities registered`);
@@ -325,7 +330,7 @@ async function handleImport(
     runtimeTxs.push({
       type: 'importReplica',
       entityId: result.entityId,
-      signerId: `s${scenarioId}`,
+      signerId: String(scenarioId),
       data: {
         config: result.config,
         isProposer: true,
@@ -833,7 +838,7 @@ async function handlePayRandom(
 
     // Wait before next payment (skip if tickInterval=0 for fast embed mode)
     if (i < count - 1 && context.tickInterval > 0) {
-      await new Promise(resolve => setTimeout(resolve, context.tickInterval));
+      await waitScenario(env, context.tickInterval);
     }
   }
 
@@ -965,7 +970,7 @@ async function handleOpenAccount(
   await process(env, [
     {
       entityId: fromAddress,
-      signerId: `s${entityId}`,
+      signerId: String(entityId),
       entityTxs: [
         {
           type: 'openAccount',

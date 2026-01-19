@@ -13,6 +13,7 @@
 
 import type { Env, EntityState } from '../types';
 import { createHash } from 'crypto';
+import { safeStringify } from '../serialization-utils';
 
 const RUNS = 3; // Number of times to run each scenario
 const SEED = 'determinism-test-seed-42';
@@ -47,7 +48,7 @@ function hashEntityState(state: EntityState): string {
       })),
   };
 
-  const json = JSON.stringify(canonical);
+  const json = safeStringify(canonical);
   return createHash('sha256').update(json).digest('hex').slice(0, 16);
 }
 

@@ -15,6 +15,7 @@ import { deriveDelta, isLeft } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { formatEntityId } from '../../utils';
 import { canonicalAccountKey } from '../../state-helpers';
+import { deriveSide } from '../../orderbook';
 import { FINANCIAL } from '../../constants';
 
 export async function handleSwapOffer(
@@ -95,7 +96,29 @@ export async function handleSwapOffer(
     };
   }
 
-  // 6. Create offer
+  // 6. Create offer (also compute quantized amounts for orderbook determinism)
+  const LOT_SCALE = 10n ** 12n;
+  let quantizedGive: bigint | undefined;
+  let quantizedWant: bigint | undefined;
+  const side = deriveSide(giveTokenId, wantTokenId);
+  if (side === 1) {
+    if (giveAmount % LOT_SCALE === 0n) {
+      const priceTicks = (wantAmount * 100n) / giveAmount;
+      if (priceTicks > 0n) {
+        quantizedGive = giveAmount;
+        quantizedWant = (quantizedGive * priceTicks) / 100n;
+      }
+    }
+  } else {
+    if (wantAmount % LOT_SCALE === 0n) {
+      const priceTicks = (giveAmount * 100n) / wantAmount;
+      if (priceTicks > 0n) {
+        quantizedWant = wantAmount;
+        quantizedGive = (quantizedWant * priceTicks) / 100n;
+      }
+    }
+  }
+
   const offer: SwapOffer = {
     offerId,
     giveTokenId,
@@ -105,6 +128,8 @@ export async function handleSwapOffer(
     minFillRatio,
     makerIsLeft,
     createdHeight: currentHeight,
+    ...(quantizedGive !== undefined ? { quantizedGive } : {}),
+    ...(quantizedWant !== undefined ? { quantizedWant } : {}),
   };
 
   // 7. Lock capacity (CRITICAL PER CODEX: Apply during BOTH validation and commit!)

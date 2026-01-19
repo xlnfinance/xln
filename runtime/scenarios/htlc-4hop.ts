@@ -6,8 +6,9 @@
 
 import type { Env } from '../types';
 import { createEconomy, connectEconomy, testHtlcRoute, type EconomyEntity } from './test-economy';
-import { usd, enableStrictScenario } from './helpers';
+import { usd, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { ensureBrowserVM, createJReplica } from './boot';
+import { createRngFromEnv } from './seeded-rng';
 
 const USDC_TOKEN_ID = 1;
 
@@ -26,11 +27,12 @@ function findReplica(env: Env, entityId: string) {
 
 export async function htlc4hop(env: Env): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'HTLC 4-Hop');
+  const prevScenarioMode = env.scenarioMode;
   try {
-  // Register test keys for real signatures
-  const { registerTestKeys } = await import('../account-crypto');
-  await registerTestKeys(['s1', 's2', 's3', 'hub', 'alice', 'bob', 'carol', 'dave', 'frank']);
-  env.runtimeSeed = 'test-seed-deterministic-42';
+  env.scenarioMode = true; // Deterministic time control
+  requireRuntimeSeed(env, 'HTLC 4-Hop');
+  ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6'], 'HTLC 4-Hop');
+  const rng = createRngFromEnv(env); // Deterministic RNG for HTLC secrets
   console.log('═══════════════════════════════════════════════════════════');
   console.log('          HTLC 4-HOP ONION ROUTING TEST                    ');
   console.log('═══════════════════════════════════════════════════════════\n');
@@ -83,7 +85,8 @@ export async function htlc4hop(env: Env): Promise<void> {
 
   // Send payments sequentially (concurrent HTLCs have capacity hold conflicts)
   for (let i = 0; i < paymentAmounts.length; i++) {
-    await testHtlcRoute(env, alice, bob, route, paymentAmounts[i]!, USDC_TOKEN_ID, `Payment ${i + 1}/${paymentAmounts.length}`);
+    const htlc = rng.nextHashlock(); // Deterministic secret for each payment
+    await testHtlcRoute(env, alice, bob, route, paymentAmounts[i]!, USDC_TOKEN_ID, `Payment ${i + 1}/${paymentAmounts.length}`, htlc);
   }
 
   console.log(`\n✅ All ${paymentAmounts.length} concurrent payments processed!\n`);
@@ -170,6 +173,7 @@ export async function htlc4hop(env: Env): Promise<void> {
   console.log(`   Total volume: $${Number(totalPaymentAmount) / 1e18}`);
   console.log('═══════════════════════════════════════\n');
   } finally {
+    env.scenarioMode = prevScenarioMode ?? false;
     restoreStrict();
   }
 }
@@ -180,6 +184,7 @@ if (import.meta.main) {
   const env = runtime.createEmptyEnv();
   env.scenarioMode = true;
   env.timestamp = 1000;
+  env.runtimeSeed = 'htlc-4hop-cli-seed-42';
 
   await htlc4hop(env);
 

@@ -85,7 +85,7 @@ export async function createNumberedEntity(
   position: { x: number; y: number; z: number }
 ): Promise<string> {
   const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
-  const signer = `s${entityNumber}`;
+  const signer = `${entityNumber}`;
 
   const { applyRuntimeInput } = await import('../runtime');
 
