@@ -615,6 +615,63 @@ export type EntityTx =
         }>;
         sig: string; // Hanko signature from counterparty (required for cooperative settlement)
       };
+    }
+  // ═══════════════════════════════════════════════════════════════
+  // SETTLEMENT WORKSPACE OPERATIONS
+  // ═══════════════════════════════════════════════════════════════
+  | {
+      // Propose new settlement (creates workspace)
+      type: 'settle_propose';
+      data: {
+        counterpartyEntityId: string;
+        diffs: Array<{
+          tokenId: number;
+          leftDiff: bigint;
+          rightDiff: bigint;
+          collateralDiff: bigint;
+          ondeltaDiff: bigint;
+        }>;
+        forgiveTokenIds?: number[];
+        memo?: string;
+      };
+    }
+  | {
+      // Update existing settlement workspace (replaces diffs)
+      type: 'settle_update';
+      data: {
+        counterpartyEntityId: string;
+        diffs: Array<{
+          tokenId: number;
+          leftDiff: bigint;
+          rightDiff: bigint;
+          collateralDiff: bigint;
+          ondeltaDiff: bigint;
+        }>;
+        forgiveTokenIds?: number[];
+        memo?: string;
+      };
+    }
+  | {
+      // Approve settlement (sign + bump coopNonce)
+      type: 'settle_approve';
+      data: {
+        counterpartyEntityId: string;
+      };
+    }
+  | {
+      // Execute approved settlement (adds to jBatch)
+      type: 'settle_execute';
+      data: {
+        counterpartyEntityId: string;
+      };
+    }
+  | {
+      // Reject/cancel settlement workspace
+      type: 'settle_reject';
+      data: {
+        counterpartyEntityId: string;
+        reason?: string;
+      };
     };
 
 export interface AssetBalance {
@@ -788,23 +845,8 @@ export interface AccountMachine {
   disputeProofNoncesByHash?: Record<string, number>;   // ProofBodyHash → cooperative nonce (local + counterparty)
   disputeProofBodiesByHash?: Record<string, any>;      // ProofBodyHash → ProofBodyStruct (for dispute finalize)
 
-  // SETTLEMENT HANKO: Cooperative state updates (for j-batch settlements)
-  currentSettlementHanko?: HankoString;
-  currentSettlementDiffs?: Array<{
-    tokenId: number;
-    leftDiff: bigint;
-    rightDiff: bigint;
-    collateralDiff: bigint;
-    ondeltaDiff: bigint;
-  }>;
-  counterpartySettlementHanko?: HankoString;
-  counterpartySettlementDiffs?: Array<{
-    tokenId: number;
-    leftDiff: bigint;
-    rightDiff: bigint;
-    collateralDiff: bigint;
-    ondeltaDiff: bigint;
-  }>;
+  // SETTLEMENT WORKSPACE: Structured negotiation area (replaces legacy fields)
+  settlementWorkspace?: SettlementWorkspace;
 
   // Active dispute state (set after disputeStart, needed for disputeFinalize)
   activeDispute?: {
@@ -873,14 +915,16 @@ export interface AccountInput {
   newHanko?: HankoString;                 // Hanko on newAccountFrame
   newDisputeHanko?: HankoString;          // Hanko on dispute proof (for J-machine enforcement)
   newDisputeProofBodyHash?: string;       // ProofBodyHash that newDisputeHanko signs
-  newSettlementHanko?: HankoString;
-  newSettlementDiffs?: Array<{
-    tokenId: number;
-    leftDiff: bigint;
-    rightDiff: bigint;
-    collateralDiff: bigint;
-    ondeltaDiff: bigint;
-  }>;
+
+  // SETTLEMENT WORKSPACE ACTIONS (bilateral negotiation)
+  settleAction?: {
+    type: 'propose' | 'update' | 'approve' | 'execute' | 'reject';
+    diffs?: SettlementDiff[];            // For propose/update
+    forgiveTokenIds?: number[];          // For propose/update
+    hanko?: HankoString;                 // For approve (signer's hanko)
+    memo?: string;                       // For propose/update/reject
+    version?: number;                    // Version being approved/executed
+  };
 
   // LEGACY (will be removed):
   prevSignatures?: string[];         // ACK for their frame (LEGACY)
@@ -907,6 +951,59 @@ export interface Delta {
   // Swap holds (capacity locked in pending swap offers)
   leftSwapHold?: bigint;  // Left's locked swap offer amounts
   rightSwapHold?: bigint; // Right's locked swap offer amounts
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SETTLEMENT WORKSPACE (Bilateral Negotiation Area)
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Settlement diff - single token operation in a settlement
+ * CONSERVATION LAW: leftDiff + rightDiff + collateralDiff = 0
+ */
+export interface SettlementDiff {
+  tokenId: number;
+  leftDiff: bigint;       // Change to left's reserve (+ = credit, - = debit)
+  rightDiff: bigint;      // Change to right's reserve
+  collateralDiff: bigint; // Change to account collateral
+  ondeltaDiff: bigint;    // Change to ondelta (tracks left's share)
+}
+
+/**
+ * Settlement workspace - shared editing area per bilateral account
+ *
+ * Flow:
+ * 1. Either party creates workspace via settle_propose
+ * 2. Both parties can update via settle_update (replaces diffs)
+ * 3. Either party can approve via settle_approve (signs + bumps coopNonce)
+ * 4. Initiator or counterparty executes via settle_execute (adds to jBatch)
+ * 5. Execute or reject clears workspace
+ */
+export interface SettlementWorkspace {
+  diffs: SettlementDiff[];                    // The settlement operations
+  forgiveTokenIds: number[];                  // Debts to forgive (optional)
+  insuranceRegs: Array<{                      // Insurance registrations (optional)
+    insured: string;
+    insurer: string;
+    tokenId: number;
+    limit: bigint;
+    expiresAt: bigint;
+  }>;
+
+  // Hanko signatures
+  leftHanko?: HankoString;                    // Left's signature on settlement
+  rightHanko?: HankoString;                   // Right's signature on settlement
+
+  // Metadata
+  initiatedBy: 'left' | 'right';              // Who created the workspace
+  status: 'draft' | 'awaiting_counterparty' | 'ready_to_submit';
+  memo?: string;                              // Human-readable description
+  version: number;                            // Increments on each update
+  createdAt: number;                          // Timestamp when created
+  lastUpdatedAt: number;                      // Timestamp of last update
+
+  // Nonce tracking (for invalidating old dispute proofs)
+  cooperativeNonceAtSign?: number;            // coopNonce when signing
 }
 
 // Derived account balance information per token
