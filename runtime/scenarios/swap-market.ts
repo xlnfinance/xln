@@ -694,10 +694,248 @@ export async function swapMarket(env: Env): Promise<void> {
   }
 }
 
+// ============================================================================
+// HIGH-LOAD STRESS TEST: Rapid Order Placement & Matching
+// ============================================================================
+
+export async function swapMarketStress(env: Env): Promise<void> {
+  const restoreStrict = enableStrictScenario(env, 'Swap Market Stress');
+  try {
+  // Register test keys for real signatures
+  const { registerTestKeys } = await import('../account-crypto');
+  await registerTestKeys(['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's10', 's11', 's12', 's13', 's14', 's15']);
+  env.runtimeSeed = 'stress-test-seed-42';
+  const process = await getProcess();
+  const applyRuntimeInput = await getApplyRuntimeInput();
+
+  if (env.scenarioMode && env.height === 0) {
+    env.timestamp = 1;
+  }
+
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('      SWAP MARKET STRESS TEST: High-Load Order Processing      ');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+
+  // ============================================================================
+  // SETUP: BrowserVM + J-Machine + Hub
+  // ============================================================================
+  console.log('🏛️  Setting up stress test environment...');
+
+  const browserVM = await ensureBrowserVM(env);
+  const depositoryAddress = browserVM.getDepositoryAddress();
+  const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
+  createJReplica(env, 'StressTest', depositoryAddress, J_MACHINE_POSITION);
+  const jurisdiction = createJurisdictionConfig('StressTest', depositoryAddress);
+  console.log('✅ BrowserVM J-Machine created\n');
+
+  // Create 1 hub + 10 traders
+  const hub = { name: 'Hub', id: '0x' + '1'.padStart(64, '0'), signer: 's1' };
+  const traders: Array<{ name: string; id: string; signer: string }> = [];
+  for (let i = 0; i < 10; i++) {
+    traders.push({
+      name: `Trader${i}`,
+      id: '0x' + (i + 2).toString(16).padStart(64, '0'),
+      signer: `s${i + 2}`,
+    });
+  }
+
+  // Create entities
+  const allEntities = [hub, ...traders];
+  const createEntityTxs = allEntities.map((e, idx) => ({
+    type: 'importReplica' as const,
+    entityId: e.id,
+    signerId: e.signer,
+    data: {
+      isProposer: true,
+      position: { x: (idx - 5) * 30, y: -80, z: 0 },
+      config: {
+        mode: 'proposer-based' as const,
+        threshold: 1n,
+        validators: [e.signer],
+        shares: { [e.signer]: 1n },
+      },
+    },
+  }));
+
+  await applyRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
+  console.log(`✅ Created ${allEntities.length} entities\n`);
+
+  // Initialize hub orderbook
+  const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../orderbook');
+  await process(env, [{
+    entityId: hub.id,
+    signerId: hub.signer,
+    entityTxs: [{
+      type: 'initOrderbookExt',
+      data: {
+        name: 'StressHub',
+        spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
+        referenceTokenId: USDC,
+        minTradeSize: 0n,
+        supportedPairs: ['1/4'], // ETH/USDC only for simplicity
+      },
+    }],
+  }]);
+  await converge(env);
+  console.log('✅ Hub orderbook initialized\n');
+
+  // Open accounts and extend credit for all traders
+  console.log('🔗 Opening accounts and extending credit...');
+  for (const trader of traders) {
+    await process(env, [{
+      entityId: trader.id,
+      signerId: trader.signer,
+      entityTxs: [{ type: 'openAccount', data: { targetEntityId: hub.id } }],
+    }]);
+    await converge(env, 20);
+
+    await process(env, [
+      { entityId: hub.id, signerId: hub.signer, entityTxs: [
+        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: ETH, amount: eth(1000) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: trader.id, tokenId: USDC, amount: usdc(3_000_000) } },
+      ]},
+      { entityId: trader.id, signerId: trader.signer, entityTxs: [
+        { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: ETH, amount: eth(1000) } },
+        { type: 'extendCredit', data: { counterpartyEntityId: hub.id, tokenId: USDC, amount: usdc(3_000_000) } },
+      ]},
+    ]);
+    await converge(env, 20);
+  }
+  console.log('✅ All accounts and credit established\n');
+
+  // ============================================================================
+  // STRESS TEST: Place many orders rapidly
+  // ============================================================================
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('         STRESS PHASE 1: Rapid Order Placement                 ');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+
+  const ORDERS_PER_TRADER = 5;
+  const BASE_PRICE = 3000n;
+  let ordersPlaced = 0;
+  const startTime = Date.now();
+
+  // Each trader places ORDERS_PER_TRADER orders alternating buy/sell
+  for (let round = 0; round < ORDERS_PER_TRADER; round++) {
+    const orderBatch: Array<{ entityId: string; signerId: string; entityTxs: any[] }> = [];
+
+    for (let t = 0; t < traders.length; t++) {
+      const trader = traders[t]!;
+      const isBuy = (t + round) % 2 === 0;
+      const priceOffset = BigInt((t - 5) * 10 + round * 2); // Spread prices around base
+      const price = BASE_PRICE + priceOffset;
+      const qty = 1n + BigInt(round % 3); // 1-3 ETH per order
+
+      if (isBuy) {
+        // BUY order: give USDC, want ETH
+        orderBatch.push({
+          entityId: trader.id,
+          signerId: trader.signer,
+          entityTxs: [{
+            type: 'placeSwapOffer',
+            data: {
+              offerId: `${trader.name}-buy-${round}`,
+              counterpartyEntityId: hub.id,
+              giveTokenId: USDC,
+              giveAmount: usdc(qty * price),
+              wantTokenId: ETH,
+              wantAmount: eth(qty),
+              minFillRatio: 0,
+            },
+          }],
+        });
+      } else {
+        // SELL order: give ETH, want USDC
+        orderBatch.push({
+          entityId: trader.id,
+          signerId: trader.signer,
+          entityTxs: [{
+            type: 'placeSwapOffer',
+            data: {
+              offerId: `${trader.name}-sell-${round}`,
+              counterpartyEntityId: hub.id,
+              giveTokenId: ETH,
+              giveAmount: eth(qty),
+              wantTokenId: USDC,
+              wantAmount: usdc(qty * price),
+              minFillRatio: 0,
+            },
+          }],
+        });
+      }
+      ordersPlaced++;
+    }
+
+    // Process entire batch in parallel
+    await process(env, orderBatch);
+    await converge(env, 50);
+    console.log(`  Round ${round + 1}/${ORDERS_PER_TRADER}: ${orderBatch.length} orders placed`);
+  }
+
+  const orderTime = Date.now() - startTime;
+  console.log(`\n✅ Placed ${ordersPlaced} orders in ${orderTime}ms (${(ordersPlaced / (orderTime / 1000)).toFixed(1)} orders/sec)\n`);
+
+  // ============================================================================
+  // STRESS TEST: Check orderbook state
+  // ============================================================================
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('         STRESS PHASE 2: Orderbook State Verification          ');
+  console.log('═══════════════════════════════════════════════════════════════\n');
+
+  const [, hubRep] = findReplica(env, hub.id);
+  const ext = hubRep.state.orderbookExt;
+  const book = ext?.books?.get('1/4');
+
+  if (book) {
+    let bidCount = 0, askCount = 0, totalQty = 0n;
+    for (let i = 0; i < book.orderActive.length; i++) {
+      if (book.orderActive[i]) {
+        const qty = BigInt(book.orderQtyLots[i]!);
+        totalQty += qty;
+        if (book.orderSide[i] === 0) bidCount++;
+        else askCount++;
+      }
+    }
+    console.log(`📊 Orderbook ETH/USDC:`);
+    console.log(`   - Active bids: ${bidCount}`);
+    console.log(`   - Active asks: ${askCount}`);
+    console.log(`   - Total lots: ${totalQty}`);
+
+    // Some orders should have matched (crossing prices)
+    const expectedOrders = ordersPlaced;
+    const actualOrders = bidCount + askCount;
+    const matchedOrders = expectedOrders - actualOrders;
+    console.log(`   - Matched (crossed): ~${matchedOrders} orders\n`);
+  }
+
+  // ============================================================================
+  // STRESS TEST: Final statistics
+  // ============================================================================
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log('                 STRESS TEST RESULTS                           ');
+  console.log('═══════════════════════════════════════════════════════════════');
+  console.log(`📊 Total frames: ${env.history?.length || 0}`);
+  console.log(`📈 Orders placed: ${ordersPlaced}`);
+  console.log(`⏱️  Order time: ${orderTime}ms`);
+  console.log(`🚀 Throughput: ${(ordersPlaced / (orderTime / 1000)).toFixed(1)} orders/sec`);
+  console.log(`👥 Traders: ${traders.length}`);
+  console.log('═══════════════════════════════════════════════════════════════\n');
+
+  } finally {
+    restoreStrict();
+  }
+}
+
 // Self-executing scenario
 if (import.meta.main) {
   const { createEmptyEnv } = await import('../runtime');
   const env = createEmptyEnv();
   env.scenarioMode = true;
-  await swapMarket(env);
+
+  const args = process.argv.slice(2);
+  if (args.includes('--stress')) {
+    await swapMarketStress(env);
+  } else {
+    await swapMarket(env);
+  }
 }
