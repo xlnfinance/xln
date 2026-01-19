@@ -323,37 +323,23 @@ export function getDisputeDelayBlocks(configValue: number): number {
 }
 
 /**
- * Build settlement diffs for current account state
+ * @deprecated BROKEN - DO NOT USE
+ * This function was fundamentally broken: it used current VALUES instead of DIFFS.
+ * Use SettlementWorkspace handlers instead.
+ * See: entity-tx/handlers/settle.ts for the proper settlement negotiation flow.
+ *
+ * Kept as stub to catch any accidental uses at runtime.
  */
-export function buildSettlementDiffs(accountMachine: AccountMachine): Array<{
+export function buildSettlementDiffs(_accountMachine: AccountMachine): Array<{
   tokenId: number;
   leftDiff: bigint;
   rightDiff: bigint;
   collateralDiff: bigint;
   ondeltaDiff: bigint;
 }> {
-  const diffs: Array<{
-    tokenId: number;
-    leftDiff: bigint;
-    rightDiff: bigint;
-    collateralDiff: bigint;
-    ondeltaDiff: bigint;
-  }> = [];
-
-  for (const [tokenId, delta] of accountMachine.deltas) {
-    // Only include tokens with non-zero collateral or holds
-    if (delta.collateral !== 0n || delta.leftHtlcHold || delta.rightHtlcHold) {
-      diffs.push({
-        tokenId: Number(tokenId),
-        leftDiff: delta.offdelta < 0n ? delta.offdelta : 0n,
-        rightDiff: delta.offdelta > 0n ? delta.offdelta : 0n,
-        collateralDiff: delta.collateral,
-        ondeltaDiff: delta.ondelta
-      });
-    }
-  }
-
-  return diffs;
+  // Return empty array to avoid breaking existing code, but log deprecation warning
+  console.warn('⚠️ DEPRECATED: buildSettlementDiffs is broken. Use SettlementWorkspace handlers instead.');
+  return [];
 }
 
 /**

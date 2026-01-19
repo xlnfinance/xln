@@ -630,6 +630,32 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       return await handleCreateSettlement(entityState, entityTx);
     }
 
+    // === SETTLEMENT WORKSPACE HANDLERS ===
+    if (entityTx.type === 'settle_propose') {
+      const { handleSettlePropose } = await import('./handlers/settle');
+      return await handleSettlePropose(entityState, entityTx, env);
+    }
+
+    if (entityTx.type === 'settle_update') {
+      const { handleSettleUpdate } = await import('./handlers/settle');
+      return await handleSettleUpdate(entityState, entityTx, env);
+    }
+
+    if (entityTx.type === 'settle_approve') {
+      const { handleSettleApprove } = await import('./handlers/settle');
+      return await handleSettleApprove(entityState, entityTx, env);
+    }
+
+    if (entityTx.type === 'settle_execute') {
+      const { handleSettleExecute } = await import('./handlers/settle');
+      return await handleSettleExecute(entityState, entityTx, env);
+    }
+
+    if (entityTx.type === 'settle_reject') {
+      const { handleSettleReject } = await import('./handlers/settle');
+      return await handleSettleReject(entityState, entityTx, env);
+    }
+
     if (entityTx.type === 'extendCredit') {
       console.log(`💳 EXTEND-CREDIT: ${entityState.entityId.slice(-4)} extending credit to ${entityTx.data.counterpartyEntityId.slice(-4)}`);
 

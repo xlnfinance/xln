@@ -144,6 +144,26 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   // NOTE: Credit limits start at 0 - no auto-credit on account opening
   // Credit must be explicitly extended via set_credit_limit transaction
 
+  // === SETTLEMENT WORKSPACE ACTIONS ===
+  // Process settleAction before frame consensus (bilateral negotiation)
+  if (input.settleAction) {
+    const { processSettleAction } = await import('./settle');
+    const result = processSettleAction(
+      accountMachine,
+      input.settleAction,
+      input.fromEntityId,
+      newState.entityId,
+      env
+    );
+
+    if (result.success) {
+      addMessage(newState, `⚖️ ${result.message}`);
+    } else {
+      console.warn(`⚠️ settleAction failed: ${result.message}`);
+      addMessage(newState, `⚠️ Settlement: ${result.message}`);
+    }
+  }
+
   // CHANNEL.TS PATTERN: Process frame-level consensus ONLY
   if (input.height || input.newAccountFrame) {
     console.log(`🤝 Processing frame from ${input.fromEntityId.slice(-4)}, accountMachine.pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}`);
