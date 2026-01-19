@@ -70,8 +70,13 @@ export async function htlc4hop(env: Env): Promise<void> {
   console.log('═══════════════════════════════════════\n');
 
   const route = [hub1, hub2, hub3];
+  // H9 AUDIT FIX: Test multiple concurrent HTLCs to stress the routing
+  // Sequential (same hashlock) due to capacity hold conflicts
   const paymentAmounts = [
-    usd(50_000),
+    usd(10_000),  // Payment 1
+    usd(15_000),  // Payment 2
+    usd(20_000),  // Payment 3
+    usd(5_000),   // Payment 4 (small)
   ];
 
   console.log(`🔥 Sending ${paymentAmounts.length} payment(s) through 4-hop route...\n`);
