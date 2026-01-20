@@ -2864,7 +2864,7 @@ export async function ahb(env: Env): Promise<void> {
     console.log('\n🤝 PHASE 9: Carol cooperative close (post-scenario)');
 
     const carolSigner = '4';
-    const carolPosition = { x: 80, y: -30, z: 0 };
+    const carolPosition = { x: 0, y: -60, z: 0 };  // Below Hub
     const carolConfig = {
       mode: 'proposer-based' as const,
       threshold: 1n,
@@ -2972,19 +2972,71 @@ export async function ahb(env: Env): Promise<void> {
     await process(env);
 
     const [, carolAfterR2C] = findReplica(env, carol.id);
-    const carolAccount = carolAfterR2C.state.accounts.get(hub.id);
-    const carolDelta = carolAccount?.deltas.get(USDC_TOKEN_ID);
-    assert(carolDelta, 'PHASE 9: Carol-Hub delta missing after R2C');
-    assert(carolDelta.collateral === carolCollateral, 'PHASE 9: Carol collateral mismatch after R2C');
+    const carolAccountInit = carolAfterR2C.state.accounts.get(hub.id);
+    const carolDeltaInit = carolAccountInit?.deltas.get(USDC_TOKEN_ID);
+    assert(carolDeltaInit, 'PHASE 9: Carol-Hub delta missing after R2C');
+    assert(carolDeltaInit.collateral === carolCollateral, 'PHASE 9: Carol collateral mismatch after R2C');
 
-    // Cooperative close: withdraw all collateral + zero ondelta via SettlementWorkspace
-    const closeAmount = carolDelta.collateral;
+    // Hub extends credit to Carol (makes the account meaningful)
+    const hubCreditToCarol = usd(25_000);
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'extendCredit',
+        data: { counterpartyEntityId: carol.id, tokenId: USDC_TOKEN_ID, amount: hubCreditToCarol }
+      }]
+    }]);
+    await process(env);
+
+    // Hub sends a payment to Carol (creates ondelta debt that must be settled)
+    const hubPaymentToCarol = usd(15_000);
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'payment',
+        data: {
+          tokenId: USDC_TOKEN_ID,
+          amount: hubPaymentToCarol,
+          routeHint: [carol.id]
+        }
+      }]
+    }]);
+    await process(env);
+    await process(env);
+
+    snap(env, 'Carol Has Position with Hub', {
+      description: 'Hub extended credit and made a $15K payment to Carol, creating a real position to settle.',
+      what: 'Carol now has $15K owed to her by Hub (ondelta).',
+      why: 'Cooperative close must handle real positions, not just empty accounts.',
+      tradfiParallel: 'Closing a credit card with an outstanding balance that must be paid off.',
+      keyMetrics: [
+        `Carol collateral: ${formatUSD(carolCollateral)}`,
+        `Hub credit to Carol: ${formatUSD(hubCreditToCarol)}`,
+        `Hub payment to Carol: ${formatUSD(hubPaymentToCarol)}`,
+      ],
+      expectedSolvency: TOTAL_SOLVENCY,
+    });
+    await process(env);
+
+    // Re-fetch Carol's delta after payment
+    const [, carolAfterPayment] = findReplica(env, carol.id);
+    const carolAccount = carolAfterPayment.state.accounts.get(hub.id);
+    const carolDelta = carolAccount?.deltas.get(USDC_TOKEN_ID);
+    assert(carolDelta, 'PHASE 9: Carol-Hub delta missing after Hub payment');
+    console.log(`  Carol position: collateral=${formatUSD(carolDelta.collateral)}, ondelta=${formatUSD(carolDelta.ondelta)}`);
+
+    // Cooperative close: settle the ACTUAL position (Carol receives her collateral + ondelta)
     const carolIsLeft = isLeft(carol.id, hub.id);
+    // Carol gets her collateral back + the ondelta Hub owes her
+    const carolReceives = carolDelta.collateral + (carolDelta.ondelta > 0n ? carolDelta.ondelta : 0n);
+    const hubReceives = carolDelta.ondelta < 0n ? -carolDelta.ondelta : 0n;
     const carolCloseDiffs = [{
       tokenId: USDC_TOKEN_ID,
-      leftDiff: carolIsLeft ? closeAmount : 0n,
-      rightDiff: carolIsLeft ? 0n : closeAmount,
-      collateralDiff: -closeAmount,
+      leftDiff: carolIsLeft ? carolReceives : hubReceives,
+      rightDiff: carolIsLeft ? hubReceives : carolReceives,
+      collateralDiff: -carolDelta.collateral,
       ondeltaDiff: -carolDelta.ondelta,
     }];
 

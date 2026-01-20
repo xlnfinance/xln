@@ -228,9 +228,11 @@ export async function proposeAccountFrame(
   // Derive counterparty from canonical left/right
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
-  console.log(`🚀 E-MACHINE: Proposing account frame for ${counterparty.slice(-4)}`);
-  console.log(`🚀 E-MACHINE: Account state - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, currentHeight=${accountMachine.currentHeight}`);
-  console.log(`🚀 E-MACHINE: Mempool contents:`, accountMachine.mempool.map(tx => tx.type));
+  const quiet = env.quietRuntimeLogs === true;
+  if (!quiet) {
+    console.log(`🚀 E-MACHINE: Proposing account frame for ${counterparty.slice(-4)}`);
+    console.log(`🚀 E-MACHINE: Account state - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, currentHeight=${accountMachine.currentHeight}`);
+  }
 
   const events: string[] = [];
 
@@ -247,11 +249,11 @@ export async function proposeAccountFrame(
 
   // Check if we have a pending frame waiting for ACK
   if (accountMachine.pendingFrame) {
-    console.log(`⏳ E-MACHINE: Still waiting for ACK on pending frame #${accountMachine.pendingFrame.height}`);
+    if (!quiet) console.log(`⏳ E-MACHINE: Still waiting for ACK on pending frame #${accountMachine.pendingFrame.height}`);
     return { success: false, error: 'Waiting for ACK on pending frame', events };
   }
 
-  console.log(`✅ E-MACHINE: Creating frame with ${accountMachine.mempool.length} transactions...`);
+  if (!quiet) console.log(`✅ E-MACHINE: Creating frame with ${accountMachine.mempool.length} transactions...`);
   if (HEAVY_LOGS) console.log(`🔍 PROOF-HEADER: from=${formatEntityId(accountMachine.proofHeader.fromEntity)}, to=${formatEntityId(accountMachine.proofHeader.toEntity)}`);
 
   // Clone account machine for validation
@@ -287,7 +289,7 @@ export async function proposeAccountFrame(
   if (HEAVY_LOGS) console.log(`🔍 MEMPOOL-BEFORE-PROCESS: ${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
 
   for (const accountTx of accountMachine.mempool) {
-    console.log(`   🔍 Processing accountTx type=${accountTx.type}`);
+    if (HEAVY_LOGS) console.log(`   🔍 Processing accountTx type=${accountTx.type}`);
     const result = await processAccountTx(
       clonedMachine,
       accountTx,
@@ -312,19 +314,19 @@ export async function proposeAccountFrame(
     // Collect revealed secrets for backward propagation
     if (HEAVY_LOGS) console.log(`🔍 TX-RESULT: type=${accountTx.type}, hasSecret=${!!result.secret}, hasHashlock=${!!result.hashlock}`);
     if (result.secret && result.hashlock) {
-      console.log(`✅ Collected secret from ${accountTx.type}`);
+      if (!quiet) console.log(`✅ Collected secret from ${accountTx.type}`);
       revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
     }
 
     // Collect swap offers for orderbook integration
     if (result.swapOfferCreated) {
-      console.log(`📊 Collected swap offer: ${result.swapOfferCreated.offerId}`);
+      if (!quiet) console.log(`📊 Collected swap offer: ${result.swapOfferCreated.offerId}`);
       swapOffersCreated.push(result.swapOfferCreated);
     }
 
     // Collect cancelled offers for orderbook cleanup
     if (result.swapOfferCancelled) {
-      console.log(`📊 Collected swap cancel: ${result.swapOfferCancelled.offerId}`);
+      if (!quiet) console.log(`📊 Collected swap cancel: ${result.swapOfferCancelled.offerId}`);
       swapOffersCancelled.push(result.swapOfferCancelled);
     }
   }
@@ -352,7 +354,7 @@ export async function proposeAccountFrame(
     // Only skip if delta, limits, AND holds are all zero
     // Collateral is omitted here because j_events can set it during frame processing
     if (!shouldIncludeToken(delta, totalDelta)) {
-      console.log(`⏭️  Skipping unused token ${tokenId} from frame (zero delta/limits/holds)`);
+      if (HEAVY_LOGS) console.log(`⏭️  Skipping unused token ${tokenId} from frame (zero delta/limits/holds)`);
       continue;
     }
 
@@ -362,15 +364,19 @@ export async function proposeAccountFrame(
     fullDeltaStates.push({ ...delta });
   }
 
-  console.log(`📊 Frame state after processing: ${finalTokenIds.length} tokens`);
-  console.log(`📊 TokenIds: [${finalTokenIds.join(', ')}]`);
-  console.log(`📊 Deltas: [${finalDeltas.map(d => d.toString()).join(', ')}]`);
-  console.log(`📊 FullDeltaStates:`, fullDeltaStates.map(d => ({
-    tokenId: d.tokenId,
-    collateral: d.collateral?.toString(),
-    leftCreditLimit: d.leftCreditLimit?.toString(),
-    rightCreditLimit: d.rightCreditLimit?.toString(),
-  })));
+  if (!quiet) {
+    console.log(`📊 Frame state after processing: ${finalTokenIds.length} tokens`);
+    if (HEAVY_LOGS) {
+      console.log(`📊 TokenIds: [${finalTokenIds.join(', ')}]`);
+      console.log(`📊 Deltas: [${finalDeltas.map(d => d.toString()).join(', ')}]`);
+      console.log(`📊 FullDeltaStates:`, fullDeltaStates.map(d => ({
+        tokenId: d.tokenId,
+        collateral: d.collateral?.toString(),
+        leftCreditLimit: d.leftCreditLimit?.toString(),
+        rightCreditLimit: d.rightCreditLimit?.toString(),
+      })));
+    }
+  }
 
   // Determine if we're left entity (for byLeft field)
   const weAreLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
@@ -380,7 +386,7 @@ export async function proposeAccountFrame(
   // We ensure frames always have increasing timestamps within an account chain
   const previousTimestamp = accountMachine.currentFrame?.timestamp ?? 0;
   const frameTimestamp = Math.max(env.timestamp, previousTimestamp + 1);
-  if (frameTimestamp > env.timestamp) {
+  if (frameTimestamp > env.timestamp && HEAVY_LOGS) {
     console.log(`⚡ TIMESTAMP-SYNC: Using monotonic timestamp ${frameTimestamp} (prev=${previousTimestamp}, env=${env.timestamp})`);
   }
 
