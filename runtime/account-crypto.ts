@@ -371,16 +371,17 @@ export function verifyAccountSignature(
   frameHash: string,
   signature: string
 ): boolean {
-  // Real signature verification
-  console.log(`🔍 VERIFY: signerId=${signerId.slice(-4)}, frameHash=${frameHash.slice(0, 10)}, sig=${signature.slice(0, 20)}...`);
+  const quiet = env?.quietRuntimeLogs === true;
   const publicKey = getSignerPublicKey(env, signerId);
   if (!publicKey) {
+    // Always warn on missing keys - this is a real error
     console.warn(`⚠️ Cannot verify - no public key for signerId=${signerId.slice(-4)}`);
-    console.warn(`⚠️ Available keys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
-    console.warn(`⚠️ Available external keys:`, Array.from(externalPublicKeys.keys()).map(k => k.slice(-4)));
+    if (!quiet) {
+      console.warn(`⚠️ Available keys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
+      console.warn(`⚠️ Available external keys:`, Array.from(externalPublicKeys.keys()).map(k => k.slice(-4)));
+    }
     return false;
   }
-  console.log(`✅ Found public key for ${signerId.slice(-4)} (${publicKey.length} bytes)`);
 
   try {
     // Extract compact signature (64 bytes) from hex
@@ -393,13 +394,6 @@ export function verifyAccountSignature(
 
     // Verify signature using @noble/secp256k1
     const isValid = secp256k1.verify(sigBytes, messageBytes, publicKey);
-
-    if (isValid) {
-      console.log(`✅ Valid signature from ${signerId.slice(-4)} for frame ${frameHash.slice(0, 10)}`);
-    } else {
-      console.log(`❌ Invalid signature from ${signerId.slice(-4)} for frame ${frameHash.slice(0, 10)}`);
-    }
-
     return isValid;
   } catch (error) {
     console.error(`❌ Signature verification error for ${signerId.slice(-4)}:`, error);
@@ -431,8 +425,5 @@ export function validateAccountSignatures(
   }
 
   const allValid = validSigners.length === expectedSigners.length;
-
-  console.log(`🔍 Signature validation: ${validSigners.length}/${expectedSigners.length} valid (${allValid ? 'PASS' : 'FAIL'})`);
-
   return { valid: allValid, validSigners };
 }
