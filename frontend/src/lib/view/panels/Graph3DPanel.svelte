@@ -3756,6 +3756,10 @@ let vrHammer: VRHammer | null = null;
       ? XLN?.getAccountBarVisual?.(leftConsensusState, rightConsensusState)
       : null;
 
+    // Check for active dispute on this account
+    const activeDispute = accountData.activeDispute;
+    const hasDispute = !!activeDispute;
+
     const bars = createAccountBars(
       scene,
       fromEntity,
@@ -3766,7 +3770,12 @@ let vrHammer: VRHammer | null = null;
         barsMode,
         portfolioScale: settings.portfolioScale || 5000,
         desyncDetected: (leftConsensusState?.state !== 'committed' || rightConsensusState?.state !== 'committed'),
-        bilateralState: barVisual // NEW: Pass consensus state for visual effects
+        bilateralState: barVisual, // NEW: Pass consensus state for visual effects
+        dispute: hasDispute ? {
+          startedByLeft: activeDispute.startedByLeft,
+          disputeTimeout: activeDispute.disputeTimeout,
+          initialDisputeNonce: activeDispute.initialDisputeNonce,
+        } : null
       },
       getEntitySizeForToken,
       XLN  // Pass XLN runtime functions for deriveDelta
