@@ -846,7 +846,10 @@
         </div>
         {#if externalBalanceMode === 'token'}
           {#if !isLive}
-            <div class="empty">External balances are available in live mode only</div>
+            <div class="empty history-notice">
+              <span>⏳ Viewing historical frame</span>
+              <span class="subtext">External ERC20 balances show current EVM state only</span>
+            </div>
           {:else if !selectedTokenMeta}
             <div class="empty">Select a token to view external balances</div>
           {:else if !selectedTokenMeta.address}
@@ -882,7 +885,10 @@
           {/if}
         {:else}
           {#if !isLive}
-            <div class="empty">External balances are available in live mode only</div>
+            <div class="empty history-notice">
+              <span>⏳ Viewing historical frame</span>
+              <span class="subtext">External ETH balances show current EVM state only</span>
+            </div>
           {:else if signerRefs.length === 0}
             <div class="empty">No signers available</div>
           {:else if externalEthBalancesLoading}
@@ -1129,6 +1135,19 @@
   .empty.error {
     color: #f85149;
     font-style: normal;
+  }
+
+  .empty.history-notice {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: #8b949e;
+    font-style: normal;
+  }
+
+  .empty.history-notice .subtext {
+    font-size: 9px;
+    color: #6e7681;
   }
 
   .info-grid {

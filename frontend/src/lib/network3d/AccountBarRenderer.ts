@@ -20,11 +20,18 @@ export interface AccountBarVisual {
   pulseSpeed: number;
 }
 
+export interface DisputeInfo {
+  startedByLeft: boolean;
+  disputeTimeout: number;
+  initialDisputeNonce: number;
+}
+
 export interface AccountBarSettings {
   barsMode: 'close' | 'spread';
   portfolioScale: number;
   desyncDetected?: boolean | undefined; // Bilateral consensus in progress
   bilateralState?: AccountBarVisual | null | undefined; // Visual state from consensus
+  dispute?: DisputeInfo | null | undefined; // Active dispute info
 }
 
 export interface AccountSegments {
@@ -309,6 +316,18 @@ function createTokenBars(
     );
   }
 
+  // Add dispute indicator if active dispute exists
+  if (settings.dispute) {
+    const disputeIndicator = createDisputeIndicator(
+      fromEntity,
+      toEntity,
+      settings.dispute.startedByLeft,
+      fromIsLeft,
+      barRadius
+    );
+    tokenGroup.add(disputeIndicator);
+  }
+
   return tokenGroup;
 }
 
@@ -550,4 +569,109 @@ function calculatePerpendicularVector(direction: THREE.Vector3): THREE.Vector3 {
   }
 
   return perpendicular;
+}
+
+/**
+ * Create dispute indicator - pulsing red glow around the connection
+ * Shows ⚔️ icon near the entity that started the dispute
+ */
+function createDisputeIndicator(
+  fromEntity: EntityData,
+  toEntity: EntityData,
+  startedByLeft: boolean,
+  fromIsLeft: boolean,
+  barRadius: number
+): THREE.Group {
+  const group = new THREE.Group();
+
+  // Calculate midpoint and direction
+  const midpoint = new THREE.Vector3().addVectors(fromEntity.position, toEntity.position).multiplyScalar(0.5);
+  const direction = new THREE.Vector3().subVectors(toEntity.position, fromEntity.position);
+  const length = direction.length();
+
+  // Create pulsing red cylinder around the connection
+  const glowGeometry = new THREE.CylinderGeometry(
+    barRadius * 3,  // Outer glow radius
+    barRadius * 3,
+    length * 0.8,   // Slightly shorter than full connection
+    16,
+    1,
+    true  // Open-ended for better visibility
+  );
+
+  const glowMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff3333,
+    transparent: true,
+    opacity: 0.3,
+    side: THREE.DoubleSide
+  });
+
+  const glowCylinder = new THREE.Mesh(glowGeometry, glowMaterial);
+  glowCylinder.position.copy(midpoint);
+
+  // Align cylinder with connection direction
+  const axis = new THREE.Vector3(0, 1, 0);
+  const targetAxis = direction.clone().normalize();
+  glowCylinder.quaternion.setFromUnitVectors(axis, targetAxis);
+
+  // Add pulsing animation data
+  (glowCylinder as any).userData = {
+    isDisputeGlow: true,
+    pulsePhase: 0
+  };
+
+  group.add(glowCylinder);
+
+  // Create sword icon ⚔️ near the entity that started the dispute
+  const startedByFrom = (startedByLeft && fromIsLeft) || (!startedByLeft && !fromIsLeft);
+  const initiatorPos = startedByFrom ? fromEntity.position : toEntity.position;
+  const defenderPos = startedByFrom ? toEntity.position : fromEntity.position;
+
+  // Position sword 20% from initiator toward defender, slightly above
+  const swordPos = initiatorPos.clone().lerp(defenderPos, 0.2);
+  swordPos.y += barRadius * 4;
+
+  // Create sword sprite (red triangle pointing at defender)
+  const swordGeometry = new THREE.ConeGeometry(barRadius * 1.5, barRadius * 4, 4);
+  const swordMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff0000,
+    transparent: true,
+    opacity: 0.9
+  });
+  const sword = new THREE.Mesh(swordGeometry, swordMaterial);
+  sword.position.copy(swordPos);
+
+  // Point sword toward defender
+  const swordDirection = new THREE.Vector3().subVectors(defenderPos, initiatorPos).normalize();
+  sword.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), swordDirection);
+
+  // Add sword marker
+  (sword as any).userData = {
+    isDisputeSword: true,
+    initiator: startedByFrom ? 'from' : 'to'
+  };
+
+  group.add(sword);
+
+  // Create shield near defender (optional - shows who is defending)
+  const shieldPos = defenderPos.clone().lerp(initiatorPos, 0.2);
+  shieldPos.y += barRadius * 4;
+
+  const shieldGeometry = new THREE.SphereGeometry(barRadius * 1.5, 8, 8);
+  const shieldMaterial = new THREE.MeshBasicMaterial({
+    color: 0x4488ff,
+    transparent: true,
+    opacity: 0.7
+  });
+  const shield = new THREE.Mesh(shieldGeometry, shieldMaterial);
+  shield.position.copy(shieldPos);
+
+  (shield as any).userData = {
+    isDisputeShield: true,
+    defender: startedByFrom ? 'to' : 'from'
+  };
+
+  group.add(shield);
+
+  return group;
 }
