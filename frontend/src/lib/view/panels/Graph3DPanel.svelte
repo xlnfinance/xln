@@ -580,6 +580,8 @@ let vrHammer: VRHammer | null = null;
       if (parsed.rotationX === undefined) parsed.rotationX = 0;
       if (parsed.rotationY === undefined) parsed.rotationY = 0;
       if (parsed.rotationZ === undefined) parsed.rotationZ = 0;
+      // Migration: 'close' is now the default (was 'spread')
+      if (parsed.barsMode === undefined) parsed.barsMode = 'close';
       return parsed;
     } catch {
       return {

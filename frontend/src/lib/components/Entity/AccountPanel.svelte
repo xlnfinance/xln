@@ -695,7 +695,7 @@
                   </div>
                   <div class="frame-detail">
                     <span class="detail-label">Proposer:</span>
-                    <span class="detail-value">Bilateral</span>
+                    <span class="detail-value">{frame.byLeft === true ? 'Left' : frame.byLeft === false ? 'Right' : '—'}</span>
                   </div>
                   <div class="frame-detail">
                     <span class="detail-label">Tokens:</span>
