@@ -59,6 +59,25 @@
   let balanceRequestId = 0;
   let ethBalanceRequestId = 0;
 
+  // Helper to safely convert serialized BigInt objects from snapshots
+  function toBigInt(value: any): bigint {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number') return BigInt(value);
+    if (typeof value === 'string') return BigInt(value);
+    if (value && typeof value === 'object') {
+      // Handle serialized format: { _dataType: 'BigInt', value: '...' }
+      if (value._dataType === 'BigInt' && value.value !== undefined) {
+        return BigInt(value.value);
+      }
+      // Handle BigInt(n) string format
+      if (value.toString().startsWith('BigInt(')) {
+        const match = value.toString().match(/BigInt\((-?\d+)\)/);
+        if (match) return BigInt(match[1]);
+      }
+    }
+    return 0n;
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   //          TIME-TRAVEL AWARE DATA DERIVATION
   // ═══════════════════════════════════════════════════════════════════════════
@@ -124,15 +143,23 @@
     return jurisdictions.find((j: any) => j.name === selectedJurisdiction) || null;
   });
 
-  // Get entity names from current frame
+  // Get entity names from gossip profiles (time-aware)
   function getEntityNames(): Map<string, string> {
     const names = new Map<string, string>();
     const timeIndex = isolatedTimeIndex ? ($isolatedTimeIndex ?? -1) : -1;
     const history = isolatedHistory ? $isolatedHistory : [];
     const env = $isolatedEnv;
 
-    let eReplicas: Map<string, any> | null = null;
+    // Get gossip profiles for name resolution
+    const gossipProfiles = env?.gossip?.getProfiles?.() || env?.gossip?.profiles || [];
+    for (const profile of gossipProfiles) {
+      if (profile?.entityId && profile?.metadata?.name) {
+        names.set(profile.entityId, profile.metadata.name);
+      }
+    }
 
+    // Also extract entity IDs from eReplicas for entities without gossip profiles
+    let eReplicas: Map<string, any> | null = null;
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex as number, history.length - 1);
       eReplicas = history[idx]?.eReplicas;
@@ -142,10 +169,11 @@
 
     if (eReplicas) {
       const entries = eReplicas instanceof Map ? Array.from(eReplicas.entries()) : Object.entries(eReplicas);
-      for (const [key, replica] of entries) {
+      for (const [key] of entries) {
         const entityId = key.split(':')[0];
         if (entityId && !names.has(entityId)) {
-          names.set(entityId, (replica as any)?.name || `E${entityId.slice(-4)}`);
+          // Fallback: use short ID format
+          names.set(entityId, `E${entityId.slice(-4)}`);
         }
       }
     }
@@ -166,13 +194,14 @@
 
     for (const [entityId, tokenMap] of reservesMap.entries()) {
       const tokens = tokenMap instanceof Map ? tokenMap : new Map(Object.entries(tokenMap || {}));
-      for (const [tokenId, amount] of tokens.entries()) {
+      for (const [tokenId, rawAmount] of tokens.entries()) {
+        const amount = toBigInt(rawAmount);
         if (amount > 0n) {
           result.push({
             entityId,
             name: entityNames.get(entityId) || `E${entityId.slice(-4)}`,
             tokenId: Number(tokenId),
-            amount: BigInt(amount),
+            amount,
           });
         }
       }
@@ -193,12 +222,14 @@
     for (const [channelKey, tokenMap] of collMap.entries()) {
       const tokens = tokenMap instanceof Map ? tokenMap : new Map(Object.entries(tokenMap || {}));
       for (const [tokenId, data] of tokens.entries()) {
-        if (data && (data.collateral > 0n || data.ondelta !== 0n)) {
+        const collateral = toBigInt(data?.collateral);
+        const ondelta = toBigInt(data?.ondelta);
+        if (collateral > 0n || ondelta !== 0n) {
           result.push({
             channelKey,
             tokenId: Number(tokenId),
-            collateral: BigInt(data.collateral || 0),
-            ondelta: BigInt(data.ondelta || 0),
+            collateral,
+            ondelta,
           });
         }
       }
@@ -211,6 +242,67 @@
   let mempool = $derived.by(() => {
     if (!selectedJurisdictionData?.mempool) return [];
     return selectedJurisdictionData.mempool;
+  });
+
+  // Get active disputes from entity replicas (time-aware)
+  let activeDisputes = $derived.by(() => {
+    const disputes: Array<{
+      entityId: string;
+      entityName: string;
+      counterpartyId: string;
+      counterpartyName: string;
+      startedByLeft: boolean;
+      disputeTimeout: number;
+      initialDisputeNonce: number;
+    }> = [];
+
+    const timeIndex = isolatedTimeIndex ? ($isolatedTimeIndex ?? -1) : -1;
+    const history = isolatedHistory ? $isolatedHistory : [];
+    const env = $isolatedEnv;
+
+    let eReplicas: Map<string, any> | null = null;
+    if (timeIndex >= 0 && history && history.length > 0) {
+      const idx = Math.min(timeIndex as number, history.length - 1);
+      eReplicas = history[idx]?.eReplicas;
+    } else {
+      eReplicas = env?.eReplicas;
+    }
+
+    if (!eReplicas) return disputes;
+
+    const entries = eReplicas instanceof Map ? Array.from(eReplicas.entries()) : Object.entries(eReplicas);
+    const seen = new Set<string>(); // Avoid duplicates (A vs B = B vs A)
+
+    for (const [key, replica] of entries) {
+      const entityId = key.split(':')[0] || '';
+      if (!entityId) continue;
+
+      const accounts = replica?.state?.accounts;
+      if (!accounts) continue;
+
+      const accountEntries = accounts instanceof Map ? Array.from(accounts.entries()) : Object.entries(accounts || {});
+      for (const [cpId, account] of accountEntries) {
+        const counterpartyId = String(cpId);
+        if (!account?.activeDispute) continue;
+
+        // Create canonical key to avoid duplicates
+        const canonicalKey = [entityId, counterpartyId].sort().join(':');
+        if (seen.has(canonicalKey)) continue;
+        seen.add(canonicalKey);
+
+        disputes.push({
+          entityId,
+          entityName: entityNames.get(entityId) || `E${entityId.slice(-4)}`,
+          counterpartyId,
+          counterpartyName: entityNames.get(counterpartyId) || `E${counterpartyId.slice(-4)}`,
+          startedByLeft: account.activeDispute.startedByLeft,
+          disputeTimeout: account.activeDispute.disputeTimeout,
+          initialDisputeNonce: account.activeDispute.initialDisputeNonce,
+        });
+      }
+    }
+
+    return disputes;
   });
 
   $effect(() => {
@@ -705,13 +797,11 @@
             </thead>
             <tbody>
               {#each filteredCollaterals as c}
-                {@const parts = c.channelKey.split('-')}
+                {@const parts = c.channelKey.includes(':') ? c.channelKey.split(':') : c.channelKey.split('-')}
                 {@const leftId = parts[0] || '??'}
                 {@const rightId = parts[1] || '??'}
-                {@const leftKey = Array.from(entityNames.keys()).find(k => k.endsWith(leftId))}
-                {@const rightKey = Array.from(entityNames.keys()).find(k => k.endsWith(rightId))}
-                {@const leftName = (leftKey ? entityNames.get(leftKey) : null) || leftId}
-                {@const rightName = (rightKey ? entityNames.get(rightKey) : null) || rightId}
+                {@const leftName = entityNames.get(leftId) || `E${leftId.slice(-4)}`}
+                {@const rightName = entityNames.get(rightId) || `E${rightId.slice(-4)}`}
                 <tr>
                   <td class="account-cell">
                     <span class="entity-left">{leftName}</span>
@@ -828,9 +918,36 @@
       <div class="section">
         <div class="section-header">
           <span class="section-title">Active Disputes</span>
-          <span class="count">0</span>
+          <span class="count">{activeDisputes.length}</span>
         </div>
-        <div class="empty">No active disputes</div>
+        {#if activeDisputes.length === 0}
+          <div class="empty">No active disputes</div>
+        {:else}
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>PARTIES</th>
+                <th>STARTED BY</th>
+                <th>TIMEOUT</th>
+                <th>NONCE</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each activeDisputes as dispute}
+                <tr>
+                  <td class="entity-cell">
+                    <span class="entity-name">{dispute.entityName}</span>
+                    <span class="vs">⚔️</span>
+                    <span class="entity-name">{dispute.counterpartyName}</span>
+                  </td>
+                  <td>{dispute.startedByLeft ? 'Left' : 'Right'}</td>
+                  <td>Block {dispute.disputeTimeout}</td>
+                  <td>{dispute.initialDisputeNonce}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
       </div>
     {/if}
   </div>
