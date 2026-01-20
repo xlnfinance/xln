@@ -437,6 +437,45 @@ contract Depository is ReentrancyGuardLite {
       reserveToReserve(entityId, batch.reserveToReserve[i]);
     }
 
+    // C2R shortcut: expand to full Settlement and process inline
+    // Pure C2R = withdraw `amount` from my share of collateral to my reserve
+    for (uint i = 0; i < batch.collateralToReserve.length; i++) {
+      CollateralToReserve memory c2r = batch.collateralToReserve[i];
+
+      // Determine canonical left/right
+      bool isLeft = entityId < c2r.counterparty;
+      bytes32 leftEntity = isLeft ? entityId : c2r.counterparty;
+      bytes32 rightEntity = isLeft ? c2r.counterparty : entityId;
+
+      // Expand 1 number → 4 numbers (conservation: left + right + collateral = 0)
+      SettlementDiff[] memory diffs = new SettlementDiff[](1);
+      diffs[0] = SettlementDiff({
+        tokenId: c2r.tokenId,
+        leftDiff: isLeft ? int(c2r.amount) : int(0),
+        rightDiff: isLeft ? int(0) : int(c2r.amount),
+        collateralDiff: -int(c2r.amount),
+        ondeltaDiff: isLeft ? -int(c2r.amount) : int(0)  // only left affects ondelta
+      });
+
+      // Create expanded Settlement and process via Account library
+      Settlement[] memory expandedSettlements = new Settlement[](1);
+      expandedSettlements[0] = Settlement({
+        leftEntity: leftEntity,
+        rightEntity: rightEntity,
+        diffs: diffs,
+        forgiveDebtsInTokenIds: new uint[](0),
+        insuranceRegs: new InsuranceRegistration[](0),
+        sig: c2r.sig,
+        entityProvider: entityProvider,
+        hankoData: bytes(""),
+        nonce: 0
+      });
+
+      if (!Account.processSettlements(_reserves, _accounts, _collaterals, entityId, expandedSettlements)) {
+        completeSuccess = false;
+      }
+    }
+
     // Delegate settlement diffs to Account library, handle debt/insurance in Depository
     if (batch.settlements.length > 0) {
       if (!Account.processSettlements(_reserves, _accounts, _collaterals, entityId, batch.settlements)) {

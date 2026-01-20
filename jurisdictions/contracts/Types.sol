@@ -162,10 +162,20 @@ struct SecretReveal {
   bytes32 secret;
 }
 
+// C2R shortcut - expands to Settlement on-chain (saves calldata)
+// Pure C2R: withdraw `amount` from my share of collateral to my reserve
+struct CollateralToReserve {
+  bytes32 counterparty;
+  uint tokenId;
+  uint amount;
+  bytes sig;  // counterparty hanko (still bilateral)
+}
+
 struct Batch {
   Flashloan[] flashloans;
   ReserveToReserve[] reserveToReserve;
   ReserveToCollateral[] reserveToCollateral;
+  CollateralToReserve[] collateralToReserve;  // C2R shortcut (expands to Settlement)
   Settlement[] settlements;
   InitialDisputeProof[] disputeStarts;
   FinalDisputeProof[] disputeFinalizations;

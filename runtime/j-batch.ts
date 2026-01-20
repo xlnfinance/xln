@@ -50,6 +50,14 @@ export interface JBatch {
     }>;
   }>;
 
+  // Collateral → Reserve (C2R shortcut - expands to Settlement on-chain)
+  collateralToReserve: Array<{
+    counterparty: string;
+    tokenId: number;
+    amount: bigint;
+    sig: string; // counterparty hanko (still bilateral)
+  }>;
+
   // Settlements - MUST match Solidity Settlement struct exactly
   settlements: Array<{
     leftEntity: string;
@@ -137,6 +145,7 @@ export function createEmptyBatch(): JBatch {
     flashloans: [],
     reserveToReserve: [],
     reserveToCollateral: [],
+    collateralToReserve: [],
     settlements: [],
     cooperativeUpdate: [],
     cooperativeDisputeProof: [],
@@ -149,11 +158,14 @@ export function createEmptyBatch(): JBatch {
   };
 }
 
+// NOTE: collateralToReserve added to Types.sol but not yet deployed
+// When C2R_SHORTCUT_ENABLED=1, use DEPOSITORY_BATCH_ABI_WITH_C2R instead
 const DEPOSITORY_BATCH_ABI =
   'tuple(' +
     'tuple(uint256 tokenId, uint256 amount)[] flashloans,' +
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve,' +
     'tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral,' +
+    // 'tuple(bytes32 counterparty, uint256 tokenId, uint256 amount, bytes sig)[] collateralToReserve,' + // Uncomment after contract redeploy
     'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements,' +
     'tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts,' +
     'tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 finalCooperativeNonce, uint256 initialDisputeNonce, uint256 finalDisputeNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations,' +
@@ -361,7 +373,58 @@ export interface InsuranceReg {
 }
 
 /**
+ * Detect if a settlement is a pure C2R (collateral-to-reserve) operation
+ * Pure C2R: one side withdraws `amount` from their share of collateral to their reserve
+ *
+ * Pattern:
+ * - Only 1 diff
+ * - No forgiveDebtsInTokenIds or insuranceRegs
+ * - One of: leftDiff > 0 XOR rightDiff > 0
+ * - collateralDiff = -amount (negative)
+ * - ondeltaDiff follows the rule: only left affects ondelta
+ *
+ * Returns: { isPureC2R: true, withdrawer: 'left'|'right', tokenId, amount } or { isPureC2R: false }
+ */
+function detectPureC2R(
+  diffs: Array<{
+    tokenId: number;
+    leftDiff: bigint;
+    rightDiff: bigint;
+    collateralDiff: bigint;
+    ondeltaDiff: bigint;
+  }>,
+  forgiveDebtsInTokenIds: number[],
+  insuranceRegs: InsuranceReg[]
+): { isPureC2R: true; withdrawer: 'left' | 'right'; tokenId: number; amount: bigint } | { isPureC2R: false } {
+  // Must have exactly 1 diff
+  if (diffs.length !== 1) return { isPureC2R: false };
+
+  // Must have no debt forgiveness or insurance
+  if (forgiveDebtsInTokenIds.length > 0 || insuranceRegs.length > 0) return { isPureC2R: false };
+
+  const diff = diffs[0]!; // Safe: we checked length === 1
+
+  // collateralDiff must be negative (withdrawing from collateral)
+  if (diff.collateralDiff >= 0n) return { isPureC2R: false };
+
+  const amount = -diff.collateralDiff; // Convert to positive
+
+  // Check LEFT withdraws pattern: leftDiff = +amount, rightDiff = 0, ondeltaDiff = -amount
+  if (diff.leftDiff === amount && diff.rightDiff === 0n && diff.ondeltaDiff === -amount) {
+    return { isPureC2R: true, withdrawer: 'left', tokenId: diff.tokenId, amount };
+  }
+
+  // Check RIGHT withdraws pattern: leftDiff = 0, rightDiff = +amount, ondeltaDiff = 0
+  if (diff.leftDiff === 0n && diff.rightDiff === amount && diff.ondeltaDiff === 0n) {
+    return { isPureC2R: true, withdrawer: 'right', tokenId: diff.tokenId, amount };
+  }
+
+  return { isPureC2R: false };
+}
+
+/**
  * Add settlement operation to batch
+ * Automatically compresses pure C2R settlements into collateralToReserve for calldata savings
  */
 export function batchAddSettlement(
   jBatchState: JBatchState,
@@ -392,6 +455,27 @@ export function batchAddSettlement(
 
   if (hasChanges && (!sig || sig === '0x')) {
     throw new Error(`Settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)} missing hanko signature`);
+  }
+
+  // Try to compress pure C2R settlements into collateralToReserve for calldata savings
+  // NOTE: Disabled until contracts are recompiled with CollateralToReserve struct
+  // Set C2R_SHORTCUT_ENABLED=1 to enable after contract deploy
+  const C2R_ENABLED = typeof process !== 'undefined' && process.env?.C2R_SHORTCUT_ENABLED === '1';
+
+  const c2rResult = detectPureC2R(diffs, forgiveDebtsInTokenIds, insuranceRegs);
+  if (c2rResult.isPureC2R && sig && C2R_ENABLED) {
+    // Determine counterparty based on who is withdrawing
+    const counterparty = c2rResult.withdrawer === 'left' ? rightEntity : leftEntity;
+
+    jBatchState.batch.collateralToReserve.push({
+      counterparty,
+      tokenId: c2rResult.tokenId,
+      amount: c2rResult.amount,
+      sig,
+    });
+
+    console.log(`📦 jBatch: Added C2R shortcut ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)}, ${c2rResult.withdrawer} withdraws ${c2rResult.amount} token ${c2rResult.tokenId}`);
+    return; // Skip full settlement
   }
 
   // Check if we already have a settlement for this pair
