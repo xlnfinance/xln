@@ -15,7 +15,7 @@
 
 import type { EntityState, EntityTx, EntityInput, Env, AccountMachine } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { initJBatch, batchAddRevealSecret } from '../../j-batch';
+import { initJBatch, batchAddRevealSecret, assertBatchNotPending } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
 import { buildDeltaTransformerArguments } from '../../transformer-args';
 import { buildAccountProofBody, createDisputeProofHash, buildInitialDisputeProof } from '../../proof-builder';
@@ -76,6 +76,9 @@ export async function handleDisputeStart(
     newState.jBatchState = initJBatch();
   }
 
+  // Block if batch has pending broadcast
+  assertBatchNotPending(newState.jBatchState, 'disputeStart');
+
   // Get bilateral account
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) {
@@ -98,9 +101,9 @@ export async function handleDisputeStart(
   const counterpartyDisputeHanko = account.counterpartyDisputeProofHanko;
   const storedProofBodyHash = account.counterpartyDisputeProofBodyHash;
 
-  if (!counterpartyDisputeHanko) {
+  if (!counterpartyDisputeHanko || counterpartyDisputeHanko === '0x' || counterpartyDisputeHanko.length <= 2) {
     addMessage(newState, `❌ Missing counterparty dispute hanko - cannot start dispute`);
-    console.warn(`❌ Account ${counterpartyEntityId.slice(-4)} missing counterpartyDisputeProofHanko`);
+    console.error(`❌ Account ${counterpartyEntityId.slice(-4)} has empty counterpartyDisputeProofHanko`);
     return { newState, outputs };
   }
 
@@ -151,6 +154,8 @@ export async function handleDisputeStart(
 
   console.log(`✅ disputeStart: Added to jBatch for ${entityState.entityId.slice(-4)}`);
   console.log(`   Proof hash: ${proofBodyHashToUse.slice(0, 10)}...`);
+  console.log(`   Hanko sig length: ${counterpartyDisputeHanko?.length || 0}, first 40: ${counterpartyDisputeHanko?.slice(0, 40) || 'EMPTY'}`);
+  console.log(`   cooperativeNonce: ${cooperativeNonce}, disputeNonce: ${disputeNonce}`);
 
   // NOTE: activeDispute will be set when DisputeStarted event arrives from J-machine
   // Event handler will query on-chain state and populate:
@@ -181,6 +186,9 @@ export async function handleDisputeFinalize(
     newState.jBatchState = initJBatch();
   }
 
+  // Block if batch has pending broadcast
+  assertBatchNotPending(newState.jBatchState, 'disputeFinalize');
+
   // Get bilateral account
   const account = newState.accounts.get(counterpartyEntityId);
   if (!account) {
@@ -196,6 +204,10 @@ export async function handleDisputeFinalize(
 
   // Build current proof (for finalization reveal)
   const currentProofResult = buildAccountProofBody(account);
+  const counterpartyProofBodyHash = account.counterpartyDisputeProofBodyHash;
+  const counterpartyProofBody = counterpartyProofBodyHash
+    ? account.disputeProofBodiesByHash?.[counterpartyProofBodyHash]
+    : undefined;
 
   // Determine finalization mode
   const isCounterDispute = account.proofHeader.disputeNonce > account.activeDispute.initialDisputeNonce;
@@ -229,6 +241,9 @@ export async function handleDisputeFinalize(
   const storedProofBody = account.activeDispute.initialProofbodyHash
     ? account.disputeProofBodiesByHash?.[account.activeDispute.initialProofbodyHash]
     : undefined;
+  if (isCounterDispute && !counterpartyProofBody) {
+    throw new Error('disputeFinalize: missing counterparty proof body for counter-dispute');
+  }
   const shouldUseStoredProof = !isCounterDispute && !cooperative && storedProofBody;
   if (!isCounterDispute && !cooperative && currentProofResult.proofBodyHash !== account.activeDispute.initialProofbodyHash) {
     console.warn(`⚠️ disputeFinalize: current proofBodyHash != initial (current=${currentProofResult.proofBodyHash.slice(0, 10)}..., initial=${account.activeDispute.initialProofbodyHash.slice(0, 10)}...)`);
@@ -237,6 +252,10 @@ export async function handleDisputeFinalize(
     }
   }
 
+  const finalProofbody = isCounterDispute
+    ? (counterpartyProofBody || currentProofResult.proofBodyStruct)
+    : (shouldUseStoredProof ? storedProofBody : currentProofResult.proofBodyStruct);
+
   const finalProof = {
     counterentity: counterpartyEntityId,
     initialCooperativeNonce: account.activeDispute.initialCooperativeNonce,  // From disputeStart
@@ -244,7 +263,7 @@ export async function handleDisputeFinalize(
     initialDisputeNonce: account.activeDispute.initialDisputeNonce,
     finalDisputeNonce: isCounterDispute ? account.proofHeader.disputeNonce : account.activeDispute.initialDisputeNonce,
     initialProofbodyHash: account.activeDispute.initialProofbodyHash,  // From disputeStart (commit)
-    finalProofbody: shouldUseStoredProof ? storedProofBody : currentProofResult.proofBodyStruct,  // REVEAL
+    finalProofbody,  // REVEAL
     finalArguments,
     initialArguments,
     sig: finalizeSig,  // Empty for unilateral, counterparty DisputeProof hanko for counter

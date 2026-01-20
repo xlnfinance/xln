@@ -4,6 +4,7 @@
  */
 
 import { toSvg } from 'jdenticon';
+import { Buffer as BufferPolyfill } from 'buffer';
 
 import { extractNumberFromEntityId } from './entity-factory';
 
@@ -75,20 +76,13 @@ export const randomBytes = isBrowser
   : // eslint-disable-next-line @typescript-eslint/no-require-imports
     require('crypto').randomBytes;
 
-// Simplified Buffer polyfill for browser
+// Robust Buffer polyfill (bip39 requires Buffer.isBuffer; avoid minimal polyfills here)
 const getBuffer = () => {
-  if (isBrowser) {
-    return {
-      from: (data: any, _encoding: string = 'utf8') => {
-        if (typeof data === 'string') {
-          return new TextEncoder().encode(data);
-        }
-        return new Uint8Array(data);
-      },
-    };
+  const globalBuffer = (globalThis as any).Buffer;
+  if (globalBuffer && typeof globalBuffer.isBuffer === 'function') {
+    return globalBuffer;
   }
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  return require('buffer').Buffer;
+  return BufferPolyfill;
 };
 
 export const Buffer = getBuffer();
@@ -98,6 +92,9 @@ if (isBrowser) {
   Uint8Array.prototype.toString = function (_encoding: string = 'utf8') {
     return new TextDecoder().decode(this);
   };
+  if ((globalThis as any).Buffer !== Buffer) {
+    (globalThis as any).Buffer = Buffer;
+  }
   window.Buffer = Buffer;
 }
 

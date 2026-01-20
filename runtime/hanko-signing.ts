@@ -73,7 +73,7 @@ export async function signHashesAsSingleEntity(
   signerId: string,
   hashes: string[]
 ): Promise<HankoString[]> {
-  if (!env?.runtimeSeed) {
+  if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signHashesAsSingleEntity called without env.runtimeSeed for entity ${entityId.slice(-4)}`);
   }
 

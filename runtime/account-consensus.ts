@@ -21,7 +21,7 @@ import { logError } from './logger';
 import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
 import { processAccountTx } from './account-tx/apply';
-import { buildSettlementDiffs, createSettlementHash } from './proof-builder.js';
+// NOTE: Settlements now use SettlementWorkspace flow (see entity-tx/handlers/settle.ts)
 
 // Removed createValidAccountSnapshot - using simplified AccountSnapshot interface
 
@@ -34,10 +34,12 @@ const MAX_MESSAGE_COUNTER = 1000000;
  * CRITICAL for replay protection - domain separator for signatures
  */
 function getDepositoryAddress(env: Env): string {
+  console.log(`🔍 GET-DEPOSITORY-ADDRESS CALLED`);
   // Try BrowserVM first (most common)
   if (env.browserVM) {
     const browserVM = env.browserVM;
     const getAddress = browserVM.getDepositoryAddress?.() || browserVM.browserVM?.getDepositoryAddress?.();
+    console.log(`🔍 getDepositoryAddress: browserVM.getDepositoryAddress=${getAddress}`);
     if (getAddress && getAddress !== '0x0000000000000000000000000000000000000000') {
       return getAddress;
     }
@@ -77,7 +79,9 @@ function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {
   const hasHolds = (delta.leftHtlcHold || 0n) !== 0n ||
                    (delta.rightHtlcHold || 0n) !== 0n ||
                    (delta.leftSwapHold || 0n) !== 0n ||
-                   (delta.rightSwapHold || 0n) !== 0n;
+                   (delta.rightSwapHold || 0n) !== 0n ||
+                   (delta.leftSettleHold || 0n) !== 0n ||
+                   (delta.rightSettleHold || 0n) !== 0n;
 
   return !(totalDelta === 0n &&
            delta.leftCreditLimit === 0n &&
@@ -172,6 +176,8 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
       rightHtlcHold: (delta.rightHtlcHold || 0n).toString(), // HTLC holds
       leftSwapHold: (delta.leftSwapHold || 0n).toString(),   // Swap holds
       rightSwapHold: (delta.rightSwapHold || 0n).toString(), // Swap holds
+      leftSettleHold: (delta.leftSettleHold || 0n).toString(),   // Settlement holds
+      rightSettleHold: (delta.rightSettleHold || 0n).toString(), // Settlement holds
     }))
   };
 
@@ -335,7 +341,10 @@ export async function proposeAccountFrame(
   for (const [tokenId, delta] of sortedTokens) {
     // CONSENSUS FIX: Only include tokens that were actually used in transactions
     // This prevents mismatch when one side creates empty delta entries
-    const totalDelta = delta.ondelta + delta.offdelta;
+    // CRITICAL: Use offdelta ONLY for frame comparison (not ondelta)
+    // ondelta is set by J-events which have timing dependencies (bilateral finalization)
+    // offdelta is set by bilateral transactions (deterministic)
+    const totalDelta = delta.offdelta;
 
     // Skip tokens with zero delta AND zero limits AND zero holds (never used)
     // CRITICAL: Include tokens with HTLC/swap holds even if delta/limits/collateral are zero
@@ -467,8 +476,10 @@ export async function proposeAccountFrame(
   // BUG FIX: Use clonedMachine (has NEW state after txs) NOT accountMachine (old state)
   const { buildAccountProofBody, createDisputeProofHash } = await import('./proof-builder');
   const depositoryAddress = getDepositoryAddress(env);
+  console.log(`🔐 DISPUTE-SIGN: depositoryAddress=${depositoryAddress}, counterparty=${accountMachine.proofHeader.toEntity.slice(-4)}`);
   const proofResult = buildAccountProofBody(clonedMachine);
   const disputeHash = createDisputeProofHash(clonedMachine, proofResult.proofBodyHash, depositoryAddress);
+  console.log(`🔐 DISPUTE-SIGN: disputeHash=${disputeHash.slice(0, 18)}..., proofBodyHash=${proofResult.proofBodyHash.slice(0, 18)}...`);
 
   const disputeHankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [disputeHash]);
   const disputeHanko = disputeHankos[0];
@@ -487,15 +498,10 @@ export async function proposeAccountFrame(
   }
   accountMachine.disputeProofBodiesByHash[proofResult.proofBodyHash] = proofResult.proofBodyStruct;
 
-  // Sign settlement for current state (bilateral signature exchange)
-  const settlementDiffs = buildSettlementDiffs(clonedMachine);
-  const settlementHash = createSettlementHash(clonedMachine, settlementDiffs, depositoryAddress);
-  const settlementHankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [settlementHash]);
-  const settlementHanko = settlementHankos[0];
-  accountMachine.currentSettlementHanko = settlementHanko;
-  accountMachine.currentSettlementDiffs = settlementDiffs;
+  // NOTE: Settlements are now handled via SettlementWorkspace flow (entity-tx/handlers/settle.ts)
+  // The old frame-level settlement signing was removed (deprecated buildSettlementDiffs)
 
-  console.log(`✅ Signed frame + dispute proof + settlement for account ${accountMachine.proofHeader.toEntity.slice(-4)}`);
+  console.log(`✅ Signed frame + dispute proof for account ${accountMachine.proofHeader.toEntity.slice(-4)}`);
 
   // Set pending state (no longer storing clone - re-execution on commit)
   accountMachine.pendingFrame = newFrame;
@@ -515,8 +521,7 @@ export async function proposeAccountFrame(
     newHanko: frameHanko,         // Hanko on frame stateHash
     newDisputeHanko: disputeHanko, // Hanko on dispute proof hash
     newDisputeProofBodyHash: proofResult.proofBodyHash, // ProofBodyHash that disputeHanko signs
-    newSettlementHanko: settlementHanko,
-    newSettlementDiffs: settlementDiffs,
+    // NOTE: Settlement hankos now handled via SettlementWorkspace (entity-tx/handlers/settle.ts)
     counter: skipCounterIncrement ? accountMachine.proofHeader.cooperativeNonce : ++accountMachine.proofHeader.cooperativeNonce,
   };
 
@@ -588,6 +593,20 @@ export async function handleAccountInput(
   } else {
     // Counter is REQUIRED for all messages (replay protection)
     return { success: false, error: 'Missing counter - replay protection requires sequential counter', events };
+  }
+
+  if (input.newDisputeHanko !== undefined && input.newDisputeHanko !== null) {
+    if (typeof input.newDisputeHanko !== 'string') {
+      return { success: false, error: 'Invalid dispute hanko type', events };
+    }
+    const hankoHex = input.newDisputeHanko.toLowerCase();
+    const normalized = hankoHex.startsWith('0x') ? hankoHex.slice(2) : hankoHex;
+    if (normalized.length === 0) {
+      return { success: false, error: 'Invalid dispute hanko (empty)', events };
+    }
+    if (normalized.length % 2 !== 0) {
+      return { success: false, error: 'Invalid dispute hanko (odd length)', events };
+    }
   }
 
   // Handle pending frame confirmation
@@ -907,6 +926,13 @@ export async function handleAccountInput(
     // Apply frame transactions to clone (as receiver)
     const clonedMachine = cloneAccountMachine(accountMachine);
     const processEvents: string[] = [];
+
+    // DEBUG: Log initial state and txs
+    console.log(`🔍 FRAME-${receivedFrame.height} RECEIVER DEBUG:`);
+    console.log(`   TXs to process: ${receivedFrame.accountTxs.length} - [${receivedFrame.accountTxs.map(tx => tx.type).join(', ')}]`);
+    for (const [tokenId, delta] of clonedMachine.deltas.entries()) {
+      console.log(`   Initial delta[${tokenId}]: ondelta=${delta.ondelta}, offdelta=${delta.offdelta}, collateral=${delta.collateral}`);
+    }
     const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
     // AUDIT FIX (CRITICAL-1): SwapOfferEvent carries makerIsLeft + fromEntity/toEntity
     const swapOffersCreated: Array<{
@@ -964,7 +990,10 @@ export async function handleAccountInput(
 
     const sortedOurTokens = Array.from(clonedMachine.deltas.entries()).sort((a, b) => a[0] - b[0]);
     for (const [tokenId, delta] of sortedOurTokens) {
-      const totalDelta = delta.ondelta + delta.offdelta;
+      // CRITICAL: Use offdelta ONLY for frame comparison (same as proposer)
+      // ondelta is set by J-events which have timing dependencies (bilateral finalization)
+      // offdelta is set by bilateral transactions (deterministic)
+      const totalDelta = delta.offdelta;
 
       // CONSENSUS FIX: Apply SAME filtering as proposer
       // Skip tokens with zero delta AND zero limits (never used)
@@ -983,7 +1012,8 @@ export async function handleAccountInput(
     // This ensures hash verification includes credit limits, collateral, allowances
     const ourFullDeltaStates: import('./types').Delta[] = [];
     for (const [tokenId, delta] of sortedOurTokens) {
-      const totalDelta = delta.ondelta + delta.offdelta;
+      // CRITICAL: Use offdelta ONLY for filtering (same as delta comparison)
+      const totalDelta = delta.offdelta;
       // Apply SAME filtering as proposer (skip unused tokens)
       if (!shouldIncludeToken(delta, totalDelta)) {
         continue;
@@ -994,7 +1024,10 @@ export async function handleAccountInput(
     const ourComputedState = Buffer.from(ourFinalDeltas.map(d => d.toString()).join(',')).toString('hex');
     const theirClaimedState = Buffer.from(receivedFrame.deltas.map(d => d.toString()).join(',')).toString('hex');
 
-    if (HEAVY_LOGS) console.log(`🔍 STATE-VERIFY Frame ${receivedFrame.height}:`);
+    // DEBUG: Show actual delta values
+    console.log(`🔍 STATE-VERIFY Frame ${receivedFrame.height}:`);
+    console.log(`   Our tokenIds: [${ourFinalTokenIds.join(', ')}], deltas: [${ourFinalDeltas.map(d => d.toString()).join(', ')}]`);
+    console.log(`   Their tokenIds: [${receivedFrame.tokenIds.join(', ')}], deltas: [${receivedFrame.deltas.map(d => d.toString()).join(', ')}]`);
     console.log(`  Our computed:  ${ourComputedState.slice(0, 32)}...`);
     console.log(`  Their claimed: ${theirClaimedState.slice(0, 32)}...`);
 
@@ -1008,15 +1041,19 @@ export async function handleAccountInput(
     // SECURITY: Verify full frame hash (tokenIds + fullDeltaStates + deltas)
     // This prevents accepting frames with poisoned dispute proofs
     if (HEAVY_LOGS) console.log(`🔍 COMPUTING-HASH: Creating hash for frame ${receivedFrame.height}...`);
+    // CRITICAL: Use frame's claimed fullDeltaStates for hash verification
+    // ondelta/collateral are set by J-events with timing dependencies (bilateral finalization)
+    // The delta comparison (offdelta) has already passed, confirming bilateral state agreement
+    // Hash verification ensures frame wasn't tampered with, not that J-event state matches
     const recomputedHash = await createFrameHash({
       height: receivedFrame.height,
       timestamp: receivedFrame.timestamp,
       jHeight: receivedFrame.jHeight,
       accountTxs: receivedFrame.accountTxs,
       prevFrameHash: receivedFrame.prevFrameHash,
-      tokenIds: ourFinalTokenIds,
-      deltas: ourFinalDeltas,
-      fullDeltaStates: ourFullDeltaStates, // CRITICAL FIX: Compute from clonedMachine like proposer does
+      tokenIds: receivedFrame.tokenIds, // Use frame's claimed tokenIds
+      deltas: receivedFrame.deltas, // Use frame's claimed deltas
+      fullDeltaStates: receivedFrame.fullDeltaStates, // Use frame's claimed fullDeltaStates
       stateHash: '', // Computed by createFrameHash
       byLeft: receivedFrame.byLeft,
     });

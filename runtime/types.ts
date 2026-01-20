@@ -370,6 +370,15 @@ export type JurisdictionEvent =
         entityId: string;
         proposalThreshold: number;
       };
+    })
+  | (JEventMetadata & {
+      type: 'HankoBatchProcessed';
+      data: {
+        entityId: string;      // Entity that submitted the batch
+        hankoHash: string;     // Hash of hanko data for verification
+        nonce: number;         // Batch nonce (incrementing per entity)
+        success: boolean;      // Whether batch processing succeeded
+      };
     });
 
 /**
@@ -534,6 +543,14 @@ export type EntityTx =
       type: 'j_broadcast';
       data: {
         hankoSignature?: string; // Optional hanko seal for the batch
+      };
+    }
+  | {
+      // J-Clear-Batch: Manually clear pending jBatch (abort stuck batch)
+      // Use when: batch rejected by J-machine, want to build fresh batch
+      type: 'j_clear_batch';
+      data: {
+        reason?: string; // Optional reason for clearing (audit trail)
       };
     }
   | {
@@ -845,6 +862,12 @@ export interface AccountMachine {
   disputeProofNoncesByHash?: Record<string, number>;   // ProofBodyHash → cooperative nonce (local + counterparty)
   disputeProofBodiesByHash?: Record<string, any>;      // ProofBodyHash → ProofBodyStruct (for dispute finalize)
 
+  // ON-CHAIN SETTLEMENT NONCE: Tracks the cooperativeNonce stored on-chain
+  // Starts at 0, incremented when settlement succeeds (NOT on R2C)
+  // DISTINCT from proofHeader.cooperativeNonce (which is local-only frame consensus)
+  // SYMMETRIC: Both sides increment via workspace status check in j-events.ts
+  onChainSettlementNonce: number;
+
   // SETTLEMENT WORKSPACE: Structured negotiation area (replaces legacy fields)
   settlementWorkspace?: SettlementWorkspace;
 
@@ -951,6 +974,12 @@ export interface Delta {
   // Swap holds (capacity locked in pending swap offers)
   leftSwapHold?: bigint;  // Left's locked swap offer amounts
   rightSwapHold?: bigint; // Right's locked swap offer amounts
+
+  // Settlement holds (ring-fenced during settlement negotiation)
+  // Set on workspace propose, cleared on finalize or reject
+  // Prevents double-spend: entity can't withdraw what's promised in settlement
+  leftSettleHold?: bigint;   // Left's pending settlement withdrawal
+  rightSettleHold?: bigint;  // Right's pending settlement withdrawal
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1001,6 +1030,11 @@ export interface SettlementWorkspace {
   version: number;                            // Increments on each update
   createdAt: number;                          // Timestamp when created
   lastUpdatedAt: number;                      // Timestamp of last update
+
+  // Broadcast responsibility: true = left broadcasts, false = right broadcasts
+  // When cross-signed, this determines whose responsibility it is to submit on-chain.
+  // Generally hub (larger batches = cheaper gas) should broadcast.
+  broadcastByLeft: boolean;
 
   // Nonce tracking (for invalidating old dispute proofs)
   cooperativeNonceAtSign?: number;            // coopNonce when signing
@@ -1141,6 +1175,29 @@ export type AccountTx =
         offerId: string;
         fillRatio: number;        // 0-65535 (uint16)
         cancelRemainder: boolean; // true = fill + cancel, false = fill + keep open
+      };
+    }
+  // === SETTLEMENT HOLD TYPES (ring-fencing via bilateral consensus) ===
+  | {
+      type: 'settle_hold';
+      data: {
+        workspaceVersion: number;  // Which workspace version this hold is for
+        diffs: Array<{
+          tokenId: number;
+          leftWithdrawing: bigint;   // Amount left is withdrawing (from leftDiff < 0)
+          rightWithdrawing: bigint;  // Amount right is withdrawing (from rightDiff < 0)
+        }>;
+      };
+    }
+  | {
+      type: 'settle_release';
+      data: {
+        workspaceVersion: number;  // Which workspace version to release holds for
+        diffs: Array<{
+          tokenId: number;
+          leftWithdrawing: bigint;
+          rightWithdrawing: bigint;
+        }>;
       };
     }
   | {
@@ -1378,6 +1435,7 @@ export interface Env {
   // Scenario mode: deterministic time control (scenarios set env.timestamp manually)
   scenarioMode?: boolean; // When true, runtime doesn't auto-update timestamp
   quietRuntimeLogs?: boolean; // When true, suppress noisy runtime console logs
+  scenarioLogLevel?: 'debug' | 'info' | 'warn' | 'error'; // Scenario log verbosity
   strictScenario?: boolean; // When true, runtime asserts invariants per frame
   strictScenarioLabel?: string; // Optional label for strict scenario errors
 

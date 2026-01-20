@@ -54,10 +54,23 @@ export async function handleSwapCancel(
     if (giveDelta.leftSwapHold === undefined) giveDelta.leftSwapHold = 0n;
     if (giveDelta.rightSwapHold === undefined) giveDelta.rightSwapHold = 0n;
 
+    // Release with underflow guard
     if (offer.makerIsLeft) {
-      giveDelta.leftSwapHold -= offer.giveAmount;
+      const currentHold = giveDelta.leftSwapHold || 0n;
+      if (currentHold < offer.giveAmount) {
+        console.error(`⚠️ Swap cancel hold underflow! leftSwapHold=${currentHold} < giveAmount=${offer.giveAmount}`);
+        giveDelta.leftSwapHold = 0n;
+      } else {
+        giveDelta.leftSwapHold = currentHold - offer.giveAmount;
+      }
     } else {
-      giveDelta.rightSwapHold -= offer.giveAmount;
+      const currentHold = giveDelta.rightSwapHold || 0n;
+      if (currentHold < offer.giveAmount) {
+        console.error(`⚠️ Swap cancel hold underflow! rightSwapHold=${currentHold} < giveAmount=${offer.giveAmount}`);
+        giveDelta.rightSwapHold = 0n;
+      } else {
+        giveDelta.rightSwapHold = currentHold - offer.giveAmount;
+      }
     }
     console.log(`📊 ${isValidation ? 'VALIDATION' : 'COMMIT'}: Released hold ${offer.giveAmount} for token${offer.giveTokenId}`);
   }

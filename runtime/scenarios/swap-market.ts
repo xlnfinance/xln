@@ -3,7 +3,7 @@
  *
  * Tests realistic orderbook behavior with:
  * - 1 reference asset (USDC - token 1)
- * - 3 pairwise books: USDC/ETH, USDC/BTC, USDC/DAI
+ * - 3 pairwise books: USDC/ETH, USDC/WBTC, USDC/DAI
  * - 10 participants: 3 hubs + 7 traders (Alice, Bob, Carol, Dave, Eve, Frank, Grace)
  * - Realistic market dynamics: makers, takers, partial fills, spread
  *
@@ -44,7 +44,7 @@ const getApplyRuntimeInput = async () => {
 // Orderbook uses canonicalPair: base=min(a,b), quote=max(a,b)
 // So base tokens must have lower IDs than quote (USDC)
 const ETH = 1;   // Base for ETH/USDC - price ~3000 USDC per ETH
-const BTC = 2;   // Base for BTC/USDC - price ~60000 USDC per BTC
+const WBTC = 2;   // Base for WBTC/USDC - price ~60000 USDC per WBTC
 const DAI = 3;   // Base for DAI/USDC - price ~1 USDC per DAI
 const USDC = 4;  // Quote for all pairs (highest ID)
 
@@ -53,7 +53,7 @@ const ONE = 10n ** DECIMALS;
 
 const usdc = (amount: number | bigint) => BigInt(amount) * ONE;
 const eth = (amount: number | bigint) => BigInt(amount) * ONE;
-const btc = (amount: number | bigint) => BigInt(amount) * ONE;
+const wbtc = (amount: number | bigint) => BigInt(amount) * ONE;
 const dai = (amount: number | bigint) => BigInt(amount) * ONE;
 
 // Fill ratios
@@ -164,7 +164,7 @@ export async function swapMarket(env: Env): Promise<void> {
 
   const hubs = [
     { name: 'HubETH', id: '0x' + '1'.padStart(64, '0'), signer: '1', role: 'hub', pairs: ['1/4'] }, // ETH/USDC
-    { name: 'HubBTC', id: '0x' + '2'.padStart(64, '0'), signer: '2', role: 'hub', pairs: ['2/4'] }, // BTC/USDC
+    { name: 'HubWBTC', id: '0x' + '2'.padStart(64, '0'), signer: '2', role: 'hub', pairs: ['2/4'] }, // WBTC/USDC
     { name: 'HubDAI', id: '0x' + '3'.padStart(64, '0'), signer: '3', role: 'hub', pairs: ['3/4'] }, // DAI/USDC
   ];
 
@@ -188,7 +188,7 @@ export async function swapMarket(env: Env): Promise<void> {
 
   const MARKET_OFFSETS: Record<string, { x: number; y: number; z: number }> = {
     HubETH: { x: -HUB_SPACING, y: HUB_Y, z: 0 },
-    HubBTC: { x: 0, y: HUB_Y, z: 0 },
+    HubWBTC: { x: 0, y: HUB_Y, z: 0 },
     HubDAI: { x: HUB_SPACING, y: HUB_Y, z: 0 },
     Alice: { x: -HUB_SPACING - TRADER_X, y: TRADER_Y, z: -TRADER_Z },
     Bob: { x: -HUB_SPACING + TRADER_X, y: TRADER_Y, z: TRADER_Z },
@@ -229,7 +229,7 @@ export async function swapMarket(env: Env): Promise<void> {
   await applyRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
   console.log(`  ✅ Created: ${entities.map(e => e.name).join(', ')}\n`);
 
-  const [hubEth, hubBtc, hubDai] = hubs;
+  const [hubEth, hubWbtc, hubDai] = hubs;
   const [alice, bob, carol, dave, eve, frank, grace] = traders;
 
   // Initialize orderbookExt for each hub
@@ -257,12 +257,12 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('🔗 Opening bilateral accounts (traders ↔ hubs)...');
 
   const hubEthTraders = [alice, bob, eve, carol];
-  const hubBtcTraders = [alice, grace, dave];
+  const hubWbtcTraders = [alice, grace, dave];
   const hubDaiTraders = [bob, eve, frank];
 
   const openPairs: Array<{ trader: typeof traders[number]; hub: typeof hubs[number] }> = [
     ...hubEthTraders.map(trader => ({ trader, hub: hubEth })),
-    ...hubBtcTraders.map(trader => ({ trader, hub: hubBtc })),
+    ...hubWbtcTraders.map(trader => ({ trader, hub: hubWbtc })),
     ...hubDaiTraders.map(trader => ({ trader, hub: hubDai })),
   ];
 
@@ -277,7 +277,7 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('  ✅ Bilateral accounts created\n');
 
   // ============================================================================
-  // SETUP: Credit limits (4 tokens: USDC, ETH, BTC, DAI)
+  // SETUP: Credit limits (4 tokens: USDC, ETH, WBTC, DAI)
   // ============================================================================
   console.log('💳 Setting up credit limits for all traders...');
 
@@ -299,13 +299,13 @@ export async function swapMarket(env: Env): Promise<void> {
       amountA: usdc(creditLimitUnits),
       amountB: eth(creditLimitUnits),
     })),
-    ...hubBtcTraders.map(trader => ({
+    ...hubWbtcTraders.map(trader => ({
       trader,
-      hub: hubBtc,
+      hub: hubWbtc,
       tokenA: USDC,
-      tokenB: BTC,
+      tokenB: WBTC,
       amountA: usdc(creditLimitUnits),
-      amountB: btc(creditLimitUnits),
+      amountB: wbtc(creditLimitUnits),
     })),
     ...hubDaiTraders.map(trader => ({
       trader,
@@ -407,47 +407,47 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('  ✅ Bob: SELL 5 ETH @ $3050 (ask)');
   console.log('  ✅ Eve: BUY 8 ETH @ $2950 (bid)\n');
 
-  // USDC/BTC book (BTC @ $60000)
-  console.log('💱 USDC/BTC Orderbook (HubBTC):');
+  // USDC/WBTC book (WBTC @ $60000)
+  console.log('💱 USDC/WBTC Orderbook (HubWBTC):');
   await process(env, [
-    // Grace: Sell 2 BTC @ $61000 (ask)
+    // Grace: Sell 2 WBTC @ $61000 (ask)
     {
       entityId: grace.id,
       signerId: grace.signer,
       entityTxs: [{
         type: 'placeSwapOffer',
         data: {
-          offerId: 'grace-btc-ask',
-          counterpartyEntityId: hubBtc.id,
-          giveTokenId: BTC,
-          giveAmount: btc(2),
+          offerId: 'grace-wbtc-ask',
+          counterpartyEntityId: hubWbtc.id,
+          giveTokenId: WBTC,
+          giveAmount: wbtc(2),
           wantTokenId: USDC,
-          wantAmount: usdc(122000), // $61000/BTC
+          wantAmount: usdc(122000), // $61000/WBTC
           minFillRatio: FILL_50, // 50% min fill
         },
       }],
     },
-    // Alice: Buy 1 BTC @ $59000 (bid)
+    // Alice: Buy 1 WBTC @ $59000 (bid)
     {
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [{
         type: 'placeSwapOffer',
         data: {
-          offerId: 'alice-btc-bid',
-          counterpartyEntityId: hubBtc.id,
+          offerId: 'alice-wbtc-bid',
+          counterpartyEntityId: hubWbtc.id,
           giveTokenId: USDC,
-          giveAmount: usdc(59000), // $59000/BTC
-          wantTokenId: BTC,
-          wantAmount: btc(1),
+          giveAmount: usdc(59000), // $59000/WBTC
+          wantTokenId: WBTC,
+          wantAmount: wbtc(1),
           minFillRatio: FILL_25, // 25% min fill
         },
       }],
     },
   ]);
 
-  console.log('  ✅ Grace: SELL 2 BTC @ $61000 (ask)');
-  console.log('  ✅ Alice: BUY 1 BTC @ $59000 (bid)\n');
+  console.log('  ✅ Grace: SELL 2 WBTC @ $61000 (ask)');
+  console.log('  ✅ Alice: BUY 1 WBTC @ $59000 (bid)\n');
 
   // USDC/DAI book (DAI @ $1) - scaled to fit MAX_LOTS (4.2B)
   // Note: With LOT_SCALE=10^12, max order ~4000 tokens per lot math
@@ -502,10 +502,10 @@ export async function swapMarket(env: Env): Promise<void> {
   const bobEthGive = bobEthOfferBefore.quantizedGive ?? bobEthOfferBefore.giveAmount;
   const bobEthWant = bobEthOfferBefore.quantizedWant ?? bobEthOfferBefore.wantAmount;
 
-  const [, aliceBtcRepBefore] = findReplica(env, alice.id);
-  const aliceBtcAccountBefore = aliceBtcRepBefore.state.accounts.get(hubBtc.id);
-  const aliceBtcOfferBefore = aliceBtcAccountBefore?.swapOffers?.get('alice-btc-bid');
-  assert(!!aliceBtcOfferBefore, 'Alice BTC bid exists after Phase 1');
+  const [, aliceWbtcRepBefore] = findReplica(env, alice.id);
+  const aliceWbtcAccountBefore = aliceWbtcRepBefore.state.accounts.get(hubWbtc.id);
+  const aliceWbtcOfferBefore = aliceWbtcAccountBefore?.swapOffers?.get('alice-wbtc-bid');
+  assert(!!aliceWbtcOfferBefore, 'Alice WBTC bid exists after Phase 1');
 
   const [, bobDaiRepBefore] = findReplica(env, bob.id);
   const bobDaiAccountBefore = bobDaiRepBefore.state.accounts.get(hubDai.id);
@@ -545,18 +545,18 @@ export async function swapMarket(env: Env): Promise<void> {
   await converge(env, 30);
   console.log('  ✅ Carol\'s bid placed - orderbook should match with Bob\'s ask\n');
 
-  // Dave sells BTC - place crossing ask that hits Alice's bid @ $59000
-  console.log('💱 Dave: SELL 1 BTC @ $58000 (crosses Alice\'s bid @ $59000)');
+  // Dave sells WBTC - place crossing ask that hits Alice's bid @ $59000
+  console.log('💱 Dave: SELL 1 WBTC @ $58000 (crosses Alice\'s bid @ $59000)');
   await process(env, [{
     entityId: dave.id,
     signerId: dave.signer,
     entityTxs: [{
       type: 'placeSwapOffer',
       data: {
-        offerId: 'dave-btc-ask',
-        counterpartyEntityId: hubBtc.id,
-        giveTokenId: BTC,
-        giveAmount: btc(1),
+        offerId: 'dave-wbtc-ask',
+        counterpartyEntityId: hubWbtc.id,
+        giveTokenId: WBTC,
+        giveAmount: wbtc(1),
         wantTokenId: USDC,
         wantAmount: usdc(58000), // Lower than Alice's bid
         minFillRatio: 0,
@@ -606,14 +606,14 @@ export async function swapMarket(env: Env): Promise<void> {
     console.log('  Bob ETH ask fully filled (offer removed)');
   }
 
-  // Alice's BTC bid should match Dave's ask
-  const [, aliceBtcRepAfter] = findReplica(env, alice.id);
-  const aliceBtcAccountAfter = aliceBtcRepAfter.state.accounts.get(hubBtc.id);
-  const aliceBtcBidAfter = aliceBtcAccountAfter?.swapOffers?.get('alice-btc-bid');
-  if (aliceBtcBidAfter) {
-    console.log(`  Alice BTC bid remaining: ${Number(aliceBtcBidAfter.giveAmount) / 1e18} USDC`);
+  // Alice's WBTC bid should match Dave's ask
+  const [, aliceWbtcRepAfter] = findReplica(env, alice.id);
+  const aliceWbtcAccountAfter = aliceWbtcRepAfter.state.accounts.get(hubWbtc.id);
+  const aliceWbtcBidAfter = aliceWbtcAccountAfter?.swapOffers?.get('alice-wbtc-bid');
+  if (aliceWbtcBidAfter) {
+    console.log(`  Alice WBTC bid remaining: ${Number(aliceWbtcBidAfter.giveAmount) / 1e18} USDC`);
   } else {
-    console.log('  Alice BTC bid fully filled (offer removed)');
+    console.log('  Alice WBTC bid fully filled (offer removed)');
   }
 
   // Bob's DAI ask should partially fill
@@ -762,7 +762,7 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('👥 Trader Positions:');
   for (const trader of [carol, dave, frank]) {
     const [, rep] = findReplica(env, trader.id);
-    const account = rep.state.accounts.get(hubEth.id) || rep.state.accounts.get(hubBtc.id) || rep.state.accounts.get(hubDai.id);
+    const account = rep.state.accounts.get(hubEth.id) || rep.state.accounts.get(hubWbtc.id) || rep.state.accounts.get(hubDai.id);
     if (account) {
       const deltas = Array.from(account.deltas.values());
       console.log(`  ${trader.name}:`);
@@ -770,7 +770,7 @@ export async function swapMarket(env: Env): Promise<void> {
         const tokenId = delta.tokenId;
         const netPosition = delta.ondelta - delta.offdelta;
         if (netPosition !== 0n) {
-          const tokenName = tokenId === USDC ? 'USDC' : tokenId === ETH ? 'ETH' : tokenId === BTC ? 'BTC' : 'DAI';
+          const tokenName = tokenId === USDC ? 'USDC' : tokenId === ETH ? 'ETH' : tokenId === WBTC ? 'WBTC' : 'DAI';
           console.log(`    - ${tokenName}: ${netPosition > 0n ? '+' : ''}${netPosition.toString()}`);
         }
       }
@@ -782,7 +782,7 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════');
   console.log(`📊 Total frames: ${env.history?.length || 0}`);
   console.log(`👥 Participants: 10 (${entities.map(e => e.name).join(', ')})`);
-  console.log(`💱 Orderbooks: 3 (USDC/ETH, USDC/BTC, USDC/DAI)`);
+  console.log(`💱 Orderbooks: 3 (USDC/ETH, USDC/WBTC, USDC/DAI)`);
   console.log(`📈 Orders placed: 9`);
   console.log(`🎯 Market fills: 3`);
   console.log(`🚫 Cancellations: 1`);

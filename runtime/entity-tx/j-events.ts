@@ -212,6 +212,10 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
         const oldColl = delta.collateral;
         delta.collateral = BigInt(collateral);
         delta.ondelta = BigInt(ondelta);
+
+        // NOTE: Do NOT increment nonce here!
+        // R2C also emits AccountSettled but doesn't increment on-chain nonce.
+        // Nonce is incremented in tryFinalizeAccountJEvents when workspace status is 'ready_to_submit'.
         console.log(`   💰 BILATERAL-APPLIED for ${counterpartyId.slice(-4)}: coll ${oldColl}→${delta.collateral}, ondelta=${delta.ondelta}`);
       }
     }
@@ -219,6 +223,17 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
     // Add to jEventChain (replay prevention) - DETERMINISTIC timestamp
     account.jEventChain.push({ jHeight, jBlockHash: leftObs.jBlockHash, events: leftObs.events, finalizedAt: env.timestamp });
     account.lastFinalizedJHeight = Math.max(account.lastFinalizedJHeight, jHeight);
+
+    // SYMMETRIC NONCE TRACKING: Both sides increment when workspace was 'ready_to_submit'
+    // This ensures both entities maintain identical onChainSettlementNonce.
+    // R2C events don't affect nonce - only settlements (workspace-based).
+    if (account.settlementWorkspace?.status === 'ready_to_submit') {
+      account.onChainSettlementNonce = (account.onChainSettlementNonce || 0) + 1;
+      console.log(`   💰 NONCE-INC: Settlement finalized → onChainNonce=${account.onChainSettlementNonce}`);
+      // Clear workspace after nonce increment
+      delete account.settlementWorkspace;
+      console.log(`   🧹 WORKSPACE-CLEAR: Settlement completed`);
+    }
   }
 
   // Prune finalized
@@ -524,8 +539,14 @@ async function applyFinalizedJEvent(
     const decimals = getTokenDecimals(tokenIdNum);
 
     // Update own reserves (entity-level, unilateral OK)
+    const oldReserve = newState.reserves.get(String(tokenId)) || 0n;
+    console.log(`   💰 RESERVE-UPDATE: ownReserve=${ownReserve}, old=${oldReserve}, tokenId=${tokenId}`);
     if (ownReserve) {
-      newState.reserves.set(String(tokenId), BigInt(ownReserve as string | number | bigint));
+      const newReserve = BigInt(ownReserve as string | number | bigint);
+      newState.reserves.set(String(tokenId), newReserve);
+      console.log(`   💰 RESERVE-SET: ${oldReserve} → ${newReserve}`);
+    } else {
+      console.log(`   ⚠️ RESERVE-SKIP: ownReserve is falsy`);
     }
 
     // BILATERAL J-EVENT CONSENSUS: Need 2-of-2 agreement before applying to account
@@ -780,6 +801,34 @@ async function applyFinalizedJEvent(
       }
     } else {
       console.warn(`⚠️ DisputeFinalized: account ${candidateCounterpartyId.slice(-4)} not found for entity ${entityIdNorm.slice(-4)}`);
+    }
+
+  } else if (event.type === 'HankoBatchProcessed') {
+    // jBatch finalization event - confirms our batch was processed on-chain
+    const { entityId: batchEntityId, hankoHash, nonce, success } = event.data;
+
+    // Only process if this is our batch
+    if (batchEntityId !== newState.entityId) {
+      console.log(`   ⏭️ HankoBatchProcessed: Not our batch (${String(batchEntityId).slice(-4)} != ${entityShort})`);
+      return { newState, mempoolOps };
+    }
+
+    console.log(`📦 HankoBatchProcessed: nonce=${nonce}, success=${success}, hanko=${String(hankoHash).slice(0, 10)}...`);
+
+    if (success) {
+      // Clear jBatch now that it's finalized on-chain
+      if (newState.jBatchState) {
+        const { createEmptyBatch } = await import('../j-batch');
+        newState.jBatchState.batch = createEmptyBatch();
+        newState.jBatchState.pendingBroadcast = false; // Unlock for new operations
+        console.log(`   ✅ jBatch cleared on successful finalization`);
+      }
+      addMessage(newState, `✅ jBatch finalized (nonce ${nonce}) | Block ${blockNumber}`);
+    } else {
+      // Batch failed - keep it for potential rebroadcast or manual clear
+      // pendingBroadcast stays true - user must j_clear_batch or rebroadcast
+      console.warn(`   ⚠️ jBatch FAILED on-chain (nonce ${nonce}) - not clearing`);
+      addMessage(newState, `⚠️ jBatch failed (nonce ${nonce}) - use j_clear_batch to abort | Block ${blockNumber}`);
     }
 
   } else {

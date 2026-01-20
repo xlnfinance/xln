@@ -128,8 +128,7 @@
 
       const depositoryAddress = browserVM.getDepositoryAddress();
 
-      // Register with runtime
-      XLN.setBrowserVMJurisdiction(depositoryAddress, browserVM);
+      // NOTE: setBrowserVMJurisdiction needs env - will call after env is created below
 
       // Expose for panels that need direct access (time-travel, insurance queries)
       (window as any).__xlnBrowserVM = browserVM;
@@ -192,6 +191,11 @@
       // Set to isolated stores
       localEnvStore.set(env);
       localHistoryStore.set(env.history || []);
+
+      // CRITICAL: Register BrowserVM with env NOW (after env is created)
+      // This sets env.browserVM which is needed for getDepositoryAddress() in consensus
+      XLN.setBrowserVMJurisdiction(env, depositoryAddress, browserVM);
+      console.log('[View] 🔗 BrowserVM registered with env, env.browserVM exists?', !!env.browserVM);
       // CRITICAL: Default to -1 (LIVE mode), not 0 (historical frame 0)
       // Only use saved timeIndex when explicitly importing from URL
       localTimeIndex.set(urlImport?.state.ui?.ti ?? -1);

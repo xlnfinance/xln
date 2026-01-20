@@ -667,8 +667,9 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       console.error(`❌ Frame consensus failed: ${result.error}`);
       addMessage(newState, `❌ ${result.error}`);
     }
-  } else {
-    // NO individual accountTx handling! Channel.ts sends frames ONLY
+  } else if (!input.settleAction) {
+    // Only error if there was no settleAction either
+    // Settlement workspace actions (propose/update/approve/reject) don't require frames
     console.error(`❌ Received AccountInput without frames - invalid!`);
     addMessage(newState, `❌ Invalid AccountInput from ${input.fromEntityId.slice(-4)}`);
   }

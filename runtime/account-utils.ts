@@ -77,9 +77,13 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   const leftSwapHold = delta.leftSwapHold || 0n;
   const rightSwapHold = delta.rightSwapHold || 0n;
 
-  // Total holds = HTLC + Swap
-  const leftHold = leftHtlcHold + leftSwapHold;
-  const rightHold = rightHtlcHold + rightSwapHold;
+  // Settlement holds (ring-fenced during settlement negotiation)
+  const leftSettleHold = delta.leftSettleHold || 0n;
+  const rightSettleHold = delta.rightSettleHold || 0n;
+
+  // Total holds = HTLC + Swap + Settlement
+  const leftHold = leftHtlcHold + leftSwapHold + leftSettleHold;
+  const rightHold = rightHtlcHold + rightSwapHold + rightSettleHold;
 
   // Original formula: in* components for inCapacity, out* components for outCapacity
   let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowance);

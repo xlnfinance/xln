@@ -86,7 +86,7 @@ export function createScenarioRng(seed: string, initialCounter: bigint = 0n): Sc
  * Create RNG from Env (uses env.runtimeSeed)
  */
 export function createRngFromEnv(env: { runtimeSeed?: string }): ScenarioRng {
-  if (!env.runtimeSeed) {
+  if (env.runtimeSeed === undefined || env.runtimeSeed === null) {
     throw new Error('Scenario RNG requires runtimeSeed (unlock vault or set XLN_RUNTIME_SEED)');
   }
   return createScenarioRng(env.runtimeSeed);

@@ -8,12 +8,17 @@
    */
 
   import type { Writable } from 'svelte/store';
+  import { get } from 'svelte/store';
   import { onDestroy, onMount } from 'svelte';
   import { panelBridge } from '../utils/panelBridge';
   // @ts-ignore - Vite raw import
   import prepopulateAHBCode from '../../../../../runtime/scenarios/ahb.ts?raw';
+  // @ts-ignore - Vite raw import
+  import settleScenarioCode from '../../../../../runtime/scenarios/settle.ts?raw';
   import { shortAddress } from '$lib/utils/format';
   import { getXLN } from '$lib/stores/xlnStore';
+  import { activeRuntime as activeRuntimeStore } from '$lib/stores/runtimeStore';
+  import { activeRuntime as activeVaultRuntime } from '$lib/stores/vaultStore';
   import SolvencyPanel from './SolvencyPanel.svelte';
 
   // Receive isolated env as props (passed from View.svelte) - REQUIRED
@@ -67,7 +72,7 @@
   // Check if env is ready
   $: envReady = $isolatedEnv !== null && $isolatedEnv !== undefined;
   $: if (envReady) {
-    console.log('[ArchitectPanel] Env ready with', $isolatedEnv.entities?.length || 0, 'entities');
+    console.log('[ArchitectPanel] Env ready with', $isolatedEnv.eReplicas?.size || 0, 'entities');
   }
 
   // CRITICAL: Check if viewing history (timeIndex >= 0 means historical frame, -1 means LIVE)
@@ -81,6 +86,52 @@
       return false;
     }
     return true;
+  }
+
+  const DEMO_RUNTIME_SEED = '';
+
+  function resolveRuntimeSeed(): string | null {
+    const vaultRuntime = get(activeVaultRuntime);
+    if (vaultRuntime?.seed !== undefined && vaultRuntime?.seed !== null) {
+      return vaultRuntime.seed;
+    }
+
+    const runtimeMeta = get(activeRuntimeStore);
+    if (runtimeMeta?.seed !== undefined && runtimeMeta?.seed !== null) {
+      return runtimeMeta.seed;
+    }
+
+    if ($isolatedEnv?.runtimeSeed !== undefined && $isolatedEnv?.runtimeSeed !== null) {
+      return $isolatedEnv.runtimeSeed;
+    }
+
+    return null;
+  }
+
+  function ensureScenarioEnv(XLN: any, label: string): void {
+    let seed = resolveRuntimeSeed();
+    if (seed === null || seed === undefined) {
+      seed = DEMO_RUNTIME_SEED;
+      console.warn(`[${label}] No runtime seed found; using demo seed.`);
+    }
+    if (!$isolatedEnv) {
+      $isolatedEnv = XLN.createEmptyEnv(seed ?? null);
+      isolatedEnv.set($isolatedEnv);
+    }
+
+    if (seed !== null && seed !== undefined && $isolatedEnv.runtimeSeed !== seed) {
+      $isolatedEnv.runtimeSeed = seed;
+    }
+
+    if ($isolatedEnv.runtimeSeed === undefined || $isolatedEnv.runtimeSeed === null) {
+      throw new Error(`${label}: runtimeSeed missing - unlock vault or set XLN_RUNTIME_SEED`);
+    }
+
+    if (!$isolatedEnv.eReplicas) {
+      $isolatedEnv.eReplicas = new Map();
+    }
+
+    isolatedEnv.set($isolatedEnv);
   }
 
   // Get entity IDs for dropdowns (extract entityId from replica keys)
@@ -343,14 +394,9 @@
       const XLN = await getXLN();
       console.log('[AHB] Runtime loaded, keys:', Object.keys(XLN).slice(0, 10));
 
-      // Ensure env exists with eReplicas
-      if (!$isolatedEnv) {
-        $isolatedEnv = XLN.createEmptyEnv();
-        isolatedEnv.set($isolatedEnv);
-      }
-      if (!$isolatedEnv.eReplicas) {
-        $isolatedEnv.eReplicas = new Map();
-      }
+      // Ensure env exists with seed + eReplicas
+      ensureScenarioEnv(XLN, 'AHB');
+      console.log('[AHB] env.browserVM exists after ensureScenarioEnv?', !!$isolatedEnv.browserVM);
 
       // CRITICAL: Clear old state BEFORE running demo
       console.log('[Architect] BEFORE clear: eReplicas =', $isolatedEnv.eReplicas.size);
@@ -420,13 +466,7 @@
     loading = true;
     try {
       const XLN = await getXLN();
-      if (!$isolatedEnv) {
-        $isolatedEnv = XLN.createEmptyEnv();
-        isolatedEnv.set($isolatedEnv);
-      }
-      if (!$isolatedEnv.eReplicas) {
-        $isolatedEnv.eReplicas = new Map();
-      }
+      ensureScenarioEnv(XLN, 'HTLC');
       $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
 
@@ -470,13 +510,7 @@
     loading = true;
     try {
       const XLN = await getXLN();
-      if (!$isolatedEnv) {
-        $isolatedEnv = XLN.createEmptyEnv();
-        isolatedEnv.set($isolatedEnv);
-      }
-      if (!$isolatedEnv.eReplicas) {
-        $isolatedEnv.eReplicas = new Map();
-      }
+      ensureScenarioEnv(XLN, 'Swap');
       $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
 
@@ -516,6 +550,7 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
+      ensureScenarioEnv(XLN, 'Swap Market');
       $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
 
@@ -544,6 +579,7 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
+      ensureScenarioEnv(XLN, 'Rapid Fire');
       $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
 
@@ -571,8 +607,8 @@
     try {
       const XLN = await getXLN();
 
-      // Create FRESH env instead of clearing old one
-      const freshEnv = XLN.createEmptyEnv();
+      const seed = resolveRuntimeSeed() ?? DEMO_RUNTIME_SEED;
+      const freshEnv = XLN.createEmptyEnv(seed);
       isolatedEnv.set(freshEnv);
 
       // Reset UI state
@@ -606,14 +642,7 @@
       console.log('[Grid] Loading runtime via getXLN()...');
       const XLN = await getXLN();
 
-      // Ensure env exists
-      if (!$isolatedEnv) {
-        $isolatedEnv = XLN.createEmptyEnv();
-        isolatedEnv.set($isolatedEnv);
-      }
-      if (!$isolatedEnv.eReplicas) {
-        $isolatedEnv.eReplicas = new Map();
-      }
+      ensureScenarioEnv(XLN, 'Grid');
 
       // Clear old state BEFORE running demo
       console.log('[Grid] BEFORE clear: eReplicas =', $isolatedEnv.eReplicas.size);
@@ -657,6 +686,65 @@
     }
   }
 
+  /** Start Settlement Workspace Scenario */
+  let settleRunning = false;
+  async function startSettleScenario() {
+    console.log('[Settle] ========== STARTING SETTLEMENT WORKSPACE ==========');
+    if (settleRunning) {
+      console.log('[Settle] Already running, skip');
+      return;
+    }
+    settleRunning = true;
+    loading = true;
+    tutorialActive = true;
+    try {
+      console.log('[Settle] Loading runtime via getXLN()...');
+      const XLN = await getXLN();
+
+      ensureScenarioEnv(XLN, 'Settle');
+
+      // Clear old state BEFORE running demo
+      console.log('[Settle] BEFORE clear: eReplicas =', $isolatedEnv.eReplicas.size);
+      $isolatedEnv.eReplicas.clear();
+      $isolatedEnv.jReplicas?.clear();
+      $isolatedEnv.history = [];
+      console.log('[Settle] AFTER clear: eReplicas =', $isolatedEnv.eReplicas.size);
+
+      // Run the settle scenario
+      console.log('[Settle] Running scenarios/settle.ts...');
+      await (XLN.scenarios as any).settle($isolatedEnv);
+      console.log('[Settle] ✅ Scenario complete!');
+
+      console.log('[Settle] AFTER setup: eReplicas =', $isolatedEnv.eReplicas.size, 'history =', $isolatedEnv.history?.length);
+
+      // Update isolated stores
+      const frames = $isolatedEnv.history || [];
+      console.log('[Settle] Setting isolatedHistory with frames:', frames.length);
+
+      // Exit live mode and set timeIndex FIRST
+      isolatedIsLive.set(false);
+      isolatedTimeIndex.set(Math.max(0, frames.length - 1));
+
+      // THEN set history and env
+      isolatedHistory.set(frames);
+      isolatedEnv.set($isolatedEnv);
+
+      console.log('[Settle] ✅ Isolated stores updated');
+      lastAction = 'Settlement Workspace scenario loaded';
+    } catch (err: any) {
+      if (err && typeof err === 'object' && 'message' in err) {
+        lastAction = `❌ ${err.message}`;
+      } else {
+        lastAction = `❌ ${err}`;
+      }
+      console.error('[Settle] Error:', err);
+      tutorialActive = false;
+    } finally {
+      loading = false;
+      settleRunning = false;
+    }
+  }
+
   /** Start H-Topology Tutorial */
   async function startHTopologyTutorial() {
     loading = true;
@@ -666,6 +754,7 @@
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // CRITICAL: Clear old state BEFORE running demo
+      ensureScenarioEnv(XLN, 'H-Topology');
       $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
       console.log('[H-Topology] Cleared old state');
@@ -704,6 +793,7 @@
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // CRITICAL: Clear old state BEFORE running demo
+      ensureScenarioEnv(XLN, 'Full Mechanics');
       $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
       console.log('[Full Mechanics] Cleared old state');
@@ -2687,6 +2777,14 @@
               <div class="info">
                 <strong>Grid Scalability</strong>
                 <p>8 nodes (2×2×2) · Broadcast vs Hubs</p>
+              </div>
+            </button>
+
+            <button class="preset-item" on:click={startSettleScenario} disabled={loading}>
+              <span class="icon">⚖️</span>
+              <div class="info">
+                <strong>Settlement</strong>
+                <p>Bilateral · Holds · On-chain commit</p>
               </div>
             </button>
 

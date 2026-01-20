@@ -25,6 +25,13 @@ export function handleDirectPayment(
     return { success: false, error, events };
   }
 
+  // H18 FIX: Validate route length to prevent DOS via excessive hops
+  if (route && route.length > FINANCIAL.MAX_ROUTE_HOPS) {
+    const error = `Route too long: ${route.length} hops (max ${FINANCIAL.MAX_ROUTE_HOPS})`;
+    console.error(`❌ DIRECT-PAYMENT: ${error}`);
+    return { success: false, error, events };
+  }
+
   // Get or create delta
   let delta = accountMachine.deltas.get(tokenId);
   console.log(`🔍 DIRECT-PAYMENT: accountMachine.deltas.has(${tokenId})=${accountMachine.deltas.has(tokenId)}`);

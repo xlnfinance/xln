@@ -165,12 +165,24 @@ export async function handleSwapResolve(
     events.push(`💱 Swap filled: ${filledGive} token${offer.giveTokenId} for ${filledWant} token${offer.wantTokenId}`);
   }
 
-  // 7. Release hold proportionally
+  // 7. Release hold proportionally (with underflow guard)
   const holdRelease = filledGive;
   if (offer.makerIsLeft) {
-    giveDelta.leftSwapHold -= holdRelease;
+    const currentHold = giveDelta.leftSwapHold || 0n;
+    if (currentHold < holdRelease) {
+      console.error(`⚠️ Swap resolve hold underflow! leftSwapHold=${currentHold} < holdRelease=${holdRelease}`);
+      giveDelta.leftSwapHold = 0n;
+    } else {
+      giveDelta.leftSwapHold = currentHold - holdRelease;
+    }
   } else {
-    giveDelta.rightSwapHold -= holdRelease;
+    const currentHold = giveDelta.rightSwapHold || 0n;
+    if (currentHold < holdRelease) {
+      console.error(`⚠️ Swap resolve hold underflow! rightSwapHold=${currentHold} < holdRelease=${holdRelease}`);
+      giveDelta.rightSwapHold = 0n;
+    } else {
+      giveDelta.rightSwapHold = currentHold - holdRelease;
+    }
   }
 
   // 8. Handle remainder
@@ -184,11 +196,23 @@ export async function handleSwapResolve(
     // Cancel or fully filled - remove offer and notify orderbook
     const remainingHold = effectiveGive - filledGive;
     if (remainingHold > 0n) {
-      // Release remaining hold
+      // Release remaining hold (with underflow guard)
       if (offer.makerIsLeft) {
-        giveDelta.leftSwapHold -= remainingHold;
+        const currentHold = giveDelta.leftSwapHold || 0n;
+        if (currentHold < remainingHold) {
+          console.error(`⚠️ Swap remainder hold underflow! leftSwapHold=${currentHold} < remainingHold=${remainingHold}`);
+          giveDelta.leftSwapHold = 0n;
+        } else {
+          giveDelta.leftSwapHold = currentHold - remainingHold;
+        }
       } else {
-        giveDelta.rightSwapHold -= remainingHold;
+        const currentHold = giveDelta.rightSwapHold || 0n;
+        if (currentHold < remainingHold) {
+          console.error(`⚠️ Swap remainder hold underflow! rightSwapHold=${currentHold} < remainingHold=${remainingHold}`);
+          giveDelta.rightSwapHold = 0n;
+        } else {
+          giveDelta.rightSwapHold = currentHold - remainingHold;
+        }
       }
     }
     accountMachine.swapOffers.delete(offerId);

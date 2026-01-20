@@ -316,6 +316,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           rightJObservations: [],
           jEventChain: [],
           lastFinalizedJHeight: 0,
+          // On-chain settlement nonce (starts at 0, incremented on settlement success)
+          // SYMMETRIC: Both sides increment via workspace status check in j-events.ts
+          onChainSettlementNonce: 0,
         });
       }
 
@@ -611,13 +614,18 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const { handleJBroadcast } = await import('./handlers/j-broadcast');
       const batch = entityState.jBatchState?.batch;
       if (batch) {
-        console.log(`🔍 APPLY j_broadcast: ${entityState.entityId.slice(-4)} batch r2r=${batch.reserveToReserve.length}, r2c=${batch.reserveToCollateral.length}, settlements=${batch.settlements.length}, starts=${batch.disputeStarts.length}, finals=${batch.disputeFinalizations.length}`);
+        console.log(`🔍 APPLY j_broadcast: ${entityState.entityId.slice(-4)} batch r2r=${batch.reserveToReserve.length}, r2c=${batch.reserveToCollateral.length}, c2r=${batch.collateralToReserve.length}, settlements=${batch.settlements.length}, starts=${batch.disputeStarts.length}, finals=${batch.disputeFinalizations.length}`);
       } else {
         console.log(`🔍 APPLY j_broadcast: ${entityState.entityId.slice(-4)} has no jBatchState`);
       }
       const result = await handleJBroadcast(entityState, entityTx, env);
       // j_broadcast returns jOutputs to queue to J-mempool
       return result;
+    }
+
+    if (entityTx.type === 'j_clear_batch') {
+      const { handleJClearBatch } = await import('./handlers/j-clear-batch');
+      return await handleJClearBatch(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'mintReserves') {

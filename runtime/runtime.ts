@@ -8,7 +8,7 @@
 import { Level } from 'level';
 
 // Bump this when you need to confirm the browser picked up a new runtime bundle.
-const RUNTIME_BUILD_ID = '2025-02-16-22:50Z';
+const RUNTIME_BUILD_ID = '2026-01-21-00:40Z';
 console.log(`🚀 RUNTIME.JS BUILD: ${RUNTIME_BUILD_ID}`);
 
 import { getPerfMs, getWallClockMs } from './time';
@@ -142,6 +142,41 @@ import {
   log,
 } from './utils';
 import { logError } from './logger';
+
+if (isBrowser && typeof globalThis.process === 'undefined') {
+  const nowMs = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
+  const hrtime = (prev?: [number, number]) => {
+    const ms = nowMs();
+    const sec = Math.floor(ms / 1000);
+    const ns = Math.floor((ms - sec * 1000) * 1e6);
+    if (prev) {
+      let secDiff = sec - prev[0];
+      let nsDiff = ns - prev[1];
+      if (nsDiff < 0) {
+        secDiff -= 1;
+        nsDiff += 1e9;
+      }
+      return [secDiff, nsDiff] as [number, number];
+    }
+    return [sec, ns] as [number, number];
+  };
+  globalThis.process = {
+    env: {},
+    browser: true,
+    version: '0',
+    versions: { node: '0' },
+    nextTick: (cb: (...args: any[]) => void, ...args: any[]) => {
+      if (typeof queueMicrotask === 'function') {
+        queueMicrotask(() => cb(...args));
+      } else {
+        Promise.resolve().then(() => cb(...args));
+      }
+    },
+    hrtime,
+    uptime: () => nowMs() / 1000,
+    cwd: () => '/',
+  } as any;
+}
 
 // --- Clean Log Capture (for debugging without file:line noise) ---
 const cleanLogs: string[] = [];
@@ -297,10 +332,10 @@ export const setRuntimeSeed = (seed: string | null): void => {
     console.warn('⚠️ Runtime seed update blocked (scenario lock enabled)');
     return;
   }
-  const normalized = seed && seed.length > 0 ? seed : null;
+  const normalized = seed === null || seed === undefined ? '' : seed;
   runtimeSeed = normalized;
   setCryptoRuntimeSeed(normalized);
-  if (normalized) {
+  if (normalized !== null && normalized !== undefined) {
     try {
       runtimeId = deriveSignerAddressSync(normalized, '1');
     } catch (error) {
@@ -311,7 +346,7 @@ export const setRuntimeSeed = (seed: string | null): void => {
     runtimeId = null;
   }
   if (env) {
-    env.runtimeSeed = normalized || undefined;
+    env.runtimeSeed = normalized;
     env.runtimeId = runtimeId || undefined;
   }
   if (pendingP2PConfig && runtimeId) {
@@ -484,7 +519,7 @@ export const getP2P = (): RuntimeP2P | null => p2pOverlay;
 export const initEnv = (): Env => {
   if (!env) {
     env = createEmptyEnv(runtimeSeed);
-    if (env.runtimeSeed) {
+    if (env.runtimeSeed !== undefined && env.runtimeSeed !== null) {
       setCryptoRuntimeSeed(env.runtimeSeed);
     }
     console.log('🌍 Runtime env initialized (module-level)');
@@ -677,7 +712,7 @@ const applyRuntimeInput = async (
           });
 
           if (xlnomy.evmType === 'browservm' && xlnomy.contracts?.depositoryAddress) {
-            setBrowserVMJurisdiction(xlnomy.contracts.depositoryAddress, xlnomy.evm);
+            setBrowserVMJurisdiction(env, xlnomy.contracts.depositoryAddress, xlnomy.evm);
           }
 
           // Initialize jReplicas Map if it doesn't exist
@@ -808,7 +843,7 @@ const applyRuntimeInput = async (
         }
 
         // Ensure entity-level signing key exists for this runtime (needed for gossip public key)
-        if (runtimeSeed) {
+        if (runtimeSeed !== undefined && runtimeSeed !== null) {
           try {
             const seedBytes = new TextEncoder().encode(runtimeSeed);
             const entityKey = deriveSignerKeySync(seedBytes, runtimeTx.entityId);
@@ -1242,16 +1277,16 @@ const main = async (): Promise<Env> => {
       const jReplicasMap = normalizeJReplicaMap(latestSnapshot.jReplicas);
 
       // Create env with proper event emitters, then populate from snapshot
-      const snapshotSeed = latestSnapshot.runtimeSeed || null;
+      const snapshotSeed = latestSnapshot.runtimeSeed ?? null;
       env = createEmptyEnv(snapshotSeed);
-      if (snapshotSeed) {
+      if (snapshotSeed !== undefined && snapshotSeed !== null) {
         runtimeSeed = snapshotSeed;
         setCryptoRuntimeSeed(runtimeSeed);
       }
       if (latestSnapshot.runtimeId) {
         runtimeId = latestSnapshot.runtimeId;
         env.runtimeId = runtimeId;
-      } else if (runtimeSeed) {
+      } else if (runtimeSeed !== undefined && runtimeSeed !== null) {
         try {
           runtimeId = deriveSignerAddressSync(runtimeSeed, '1');
           env.runtimeId = runtimeId;
@@ -1463,7 +1498,7 @@ const clearDatabaseAndHistory = async () => {
     jReplicas: new Map(),
     height: 0,
     timestamp: 0,
-    ...(runtimeSeed ? { runtimeSeed } : {}),
+    ...(runtimeSeed !== undefined && runtimeSeed !== null ? { runtimeSeed } : {}),
     ...(runtimeId ? { runtimeId } : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
@@ -1766,14 +1801,14 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   const normalizedSeed = Array.isArray(seed) ? new Uint8Array(seed) : seed;
   const seedText = normalizedSeed !== undefined && normalizedSeed !== null
     ? (typeof normalizedSeed === 'string' ? normalizedSeed : new TextDecoder().decode(normalizedSeed))
-    : null;
+    : '';
 
   const env: Env = {
     eReplicas: new Map(),
     jReplicas: new Map(),
     height: 0,
     timestamp: 0,
-    ...(seedText ? { runtimeSeed: seedText } : {}),
+    ...(seedText !== undefined && seedText !== null ? { runtimeSeed: seedText } : {}),
     ...(runtimeId ? { runtimeId } : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
@@ -2151,7 +2186,7 @@ export const process = async (
     const snapshot: any = {
       height: env.height,
       timestamp: env.timestamp,
-      ...(env.runtimeSeed ? { runtimeSeed: env.runtimeSeed } : {}),
+      ...(env.runtimeSeed !== undefined && env.runtimeSeed !== null ? { runtimeSeed: env.runtimeSeed } : {}),
       ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
       eReplicas: new Map(env.eReplicas),
       jReplicas: env.jReplicas ? Array.from(env.jReplicas.values()).map(jr => ({
@@ -2260,18 +2295,18 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
       const runtimeSeedRaw = Array.isArray(data.runtimeSeed)
         ? new TextDecoder().decode(new Uint8Array(data.runtimeSeed))
         : data.runtimeSeed;
-      const env = createEmptyEnv(runtimeSeedRaw || null);
+      const env = createEmptyEnv(runtimeSeedRaw ?? null);
       env.height = Number(data.height || 0);
       env.timestamp = Number(data.timestamp || 0);
       if (data.browserVMState) {
         env.browserVMState = data.browserVMState;
       }
-      if (runtimeSeedRaw) {
+      if (runtimeSeedRaw !== undefined && runtimeSeedRaw !== null) {
         setCryptoRuntimeSeed(runtimeSeedRaw);
       }
       if (data.runtimeId) {
         env.runtimeId = data.runtimeId;
-      } else if (runtimeSeedRaw) {
+      } else if (runtimeSeedRaw !== undefined && runtimeSeedRaw !== null) {
         try {
           env.runtimeId = deriveSignerAddressSync(runtimeSeedRaw, '1');
         } catch (error) {
@@ -2375,6 +2410,11 @@ export const scenarios = {
   grid: async (env: Env): Promise<Env> => {
     const { grid } = await import('./scenarios/grid');
     await grid(env);
+    return env;
+  },
+  settle: async (env: Env): Promise<Env> => {
+    const { runSettleScenario } = await import('./scenarios/settle');
+    await runSettleScenario(env);
     return env;
   },
   fullMechanics: async (env: Env): Promise<Env> => {

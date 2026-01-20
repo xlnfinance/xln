@@ -137,7 +137,8 @@ async function processJEvents(env: Env): Promise<void> {
  * Enable/disable via AHB_DEBUG=1 environment variable or pass enabled=true
  */
 function dumpSystemState(env: Env, label: string, enabled: boolean = true): void {
-  if (!enabled && !process.env.AHB_DEBUG) return;
+  const debugEnabled = typeof process !== 'undefined' && process.env && process.env.AHB_DEBUG;
+  if (!enabled && !debugEnabled) return;
 
   // Named entities for easier reading
   const ENTITY_NAMES: Record<string, string> = {

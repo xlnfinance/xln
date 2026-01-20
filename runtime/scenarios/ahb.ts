@@ -23,6 +23,7 @@ import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta, isLeft } from '../account-utils';
 import { createGossipLayer } from '../gossip';
+import { safeStringify } from '../serialization-utils';
 import { ethers } from 'ethers';
 
 // Lazy-loaded runtime functions to avoid circular dependency (runtime.ts imports this file)
@@ -60,6 +61,7 @@ const AHB_STRESS = getEnv('AHB_STRESS', '0') === '1';
 const AHB_STRESS_ITERS = Number.parseInt(getEnv('AHB_STRESS_ITERS', '100'), 10);
 const AHB_STRESS_AMOUNT_USD = Number.parseInt(getEnv('AHB_STRESS_AMOUNT', '1'), 10);
 const AHB_STRESS_DRAIN_EVERY = Number.parseInt(getEnv('AHB_STRESS_DRAIN_EVERY', '0'), 10);
+const AHB_DEBUG = getEnv('AHB_DEBUG', '0') === '1';
 
 // Jurisdiction name for AHB demo
 const AHB_JURISDICTION = 'AHB Demo';
@@ -149,7 +151,8 @@ async function processUntil(
  * Enable/disable via AHB_DEBUG=1 environment variable or pass enabled=true
  */
 function dumpSystemState(env: Env, label: string, enabled: boolean = true): void {
-  if (!enabled && !process.env.AHB_DEBUG) return;
+  const debugEnabled = typeof process !== 'undefined' && process.env && process.env.AHB_DEBUG;
+  if (!enabled && !debugEnabled) return;
 
   // Build JSON-serializable state object
   const state: Record<string, any> = {
@@ -321,6 +324,13 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
 
 
 export async function ahb(env: Env): Promise<void> {
+  if (env.quietRuntimeLogs === undefined) {
+    env.quietRuntimeLogs = true;
+  }
+  if (AHB_DEBUG) {
+    env.quietRuntimeLogs = false;
+    env.scenarioLogLevel = 'info';
+  }
   const restoreStrict = enableStrictScenario(env, 'AHB');
 
   // Require real runtime seed and derive signer keys (no test keys)
@@ -348,9 +358,6 @@ export async function ahb(env: Env): Promise<void> {
 
   const process = await getProcess();
   env.scenarioMode = true; // Deterministic time control (scenarios set env.timestamp manually)
-  if (env.quietRuntimeLogs === undefined) {
-    env.quietRuntimeLogs = true;
-  }
   env.lockRuntimeSeed = true; // Prevent vault seed overrides during scenario
 
   try {
@@ -389,9 +396,10 @@ export async function ahb(env: Env): Promise<void> {
     console.log('[AHB] ========================================');
 
     // Get or create BrowserVM instance for real transactions
+    console.log('[AHB] env.browserVM exists?', !!env.browserVM, 'type:', typeof env.browserVM);
     let browserVM = getBrowserVMInstance(env);
     if (!browserVM) {
-      console.log('[AHB] No BrowserVM found - creating one...');
+      console.log('[AHB] No BrowserVM found (getBrowserVMInstance returned null) - creating one...');
       const evm = new BrowserEVM();
       await evm.init();
       env.browserVM = evm.getProvider(); // Store in env for isolation
@@ -681,12 +689,11 @@ export async function ahb(env: Env): Promise<void> {
     await process(env);
 
     // ============================================================================
-    // STEP 2: Hub R2R → Alice ($3M USDC) - REAL TX goes to J-Machine mempool
+    // STEP 2: Hub R2R → Alice ($3M USDC) - queued in jBatch (not broadcast yet)
     // ============================================================================
-    console.log('\n🔄 FRAME 2: Hub → Alice R2R - TX ENTERS MEMPOOL (PENDING)');
+    console.log('\n🔄 FRAME 2: Hub → Alice R2R - QUEUED IN BATCH (PENDING)');
 
-    // Step 1: Hub creates reserve_to_reserve tx (adds to jBatch)
-    // Step 2: Hub broadcasts batch via j_broadcast (generates jOutput)
+    // Hub creates reserve_to_reserve tx (adds to jBatch)
     const r2rTx1: EntityInput = {
       entityId: hub.id,
       signerId: hub.signer,
@@ -698,21 +705,17 @@ export async function ahb(env: Env): Promise<void> {
             tokenId: USDC_TOKEN_ID,
             amount: usd(3_000_000),
           }
-        },
-        {
-          type: 'j_broadcast',
-          data: {}
         }
       ]
     };
 
-    snap(env, 'R2R #1: TX Enters J-Machine Mempool', {
-      description: 'Hub → Alice: R2R Pending in Mempool',
-      what: 'Hub submits reserveToReserve(Alice, $3M). TX is PENDING in J-Machine mempool (yellow cube). Not yet finalized.',
-      why: 'J-Machine batches transactions. TX waits in mempool until block creation.',
-      tradfiParallel: 'Like submitting a Fedwire - queued for batch settlement',
+    snap(env, 'R2R #1: TX Queued in Batch', {
+      description: 'Hub → Alice: R2R Pending in Batch',
+      what: 'Hub queues reserveToReserve(Alice, $3M). Operation is pending in the entity batch.',
+      why: 'Operations accumulate in the batch before a single broadcast to the J-Machine.',
+      tradfiParallel: 'Like staging a Fedwire before batch submission',
       keyMetrics: [
-        'J-Machine mempool: 1 pending tx',
+        'J-Batch: 1 pending op',
         'Hub Reserve: $10M (unchanged)',
         'Alice Reserve: $0 (unchanged)',
       ],
@@ -720,31 +723,20 @@ export async function ahb(env: Env): Promise<void> {
     });
     await process(env, [r2rTx1]);
 
-    // ASSERT: J-Machine mempool should have Hub→Alice R2R batch
-    const jReplicaAfterR2R1 = env.jReplicas.get('AHB Demo');
-    if (!jReplicaAfterR2R1) throw new Error('J-Machine not found');
-    console.log(`\n[MEMPOOL ASSERT #1] After Hub→Alice R2R: mempool=${jReplicaAfterR2R1.mempool.length}`);
-    if (jReplicaAfterR2R1.mempool.length === 0) {
-      throw new Error('MEMPOOL FAIL: Expected Hub→Alice batch in mempool, got 0! payFromReserve not generating jOutput?');
+    // ASSERT: jBatch should have 1 pending R2R op
+    const [, hubAfterR2R1] = findReplica(env, hub.id);
+    const pendingR2R1 = hubAfterR2R1.state.jBatchState?.batch.reserveToReserve.length || 0;
+    if (pendingR2R1 !== 1) {
+      throw new Error(`BATCH FAIL: Expected 1 R2R op queued, got ${pendingR2R1}`);
     }
-    console.log(`✅ MEMPOOL: ${jReplicaAfterR2R1.mempool.length} batches pending`);
-
-    // Check snapshot captured it
-    const lastSnap = env.history[env.history.length - 1];
-    const snapJReplica = lastSnap?.jReplicas?.find(jr => jr.name === AHB_JURISDICTION);
-    const snapMempool = snapJReplica?.mempool?.length || 0;
-    console.log(`[SNAPSHOT ASSERT #1] Last snapshot mempool=${snapMempool}`);
-    if (snapMempool === 0) {
-      throw new Error('SNAPSHOT FAIL: Mempool not visible! Executed in same tick?');
-    }
-    console.log(`✅ SNAPSHOT: Mempool visible with ${snapMempool} batches\n`);
+    console.log(`✅ BATCH: ${pendingR2R1} R2R op queued\n`);
 
     // ============================================================================
-    // STEP 3: Hub R2R → Bob ($2M USDC) - Second TX to mempool (PENDING)
+    // STEP 3: Hub R2R → Bob ($2M USDC) - broadcast batch to J-mempool
     // ============================================================================
-    console.log('\n🔄 FRAME 3: Hub → Bob R2R - TX ENTERS MEMPOOL (PENDING)');
+    console.log('\n🔄 FRAME 3: Hub → Bob R2R - BATCH BROADCASTED (PENDING)');
 
-    // Hub creates reserve_to_reserve tx → generates jOutput → process() auto-queues to J-Machine
+    // Hub adds second R2R op, then broadcasts the batch to J-mempool
     const r2rTx2: EntityInput = {
       entityId: hub.id,
       signerId: hub.signer,
@@ -764,13 +756,13 @@ export async function ahb(env: Env): Promise<void> {
       ]
     };
 
-    snap(env, 'R2R #2: TX Enters J-Machine Mempool', {
-      description: 'Hub → Bob: R2R Pending in Mempool',
-      what: 'Hub submits reserveToReserve(Bob, $2M). Second TX is PENDING in mempool.',
-      why: 'Multiple R2R txs accumulate in mempool before batch processing.',
-      tradfiParallel: 'Like queuing multiple Fedwires - batched for efficiency',
+    snap(env, 'R2R #2: Batch Broadcasted', {
+      description: 'Hub → Bob: Batch Pending in Mempool',
+      what: 'Hub adds reserveToReserve(Bob, $2M) and broadcasts the batch to the J-Machine.',
+      why: 'Multiple R2R ops are combined into a single batch for efficiency.',
+      tradfiParallel: 'Like sending a multi‑payment batch to Fedwire',
       keyMetrics: [
-        'J-Machine mempool: 2 pending txs',
+        'J-Machine mempool: 1 pending batch (2 ops)',
         'Hub Reserve: $10M (unchanged)',
         'Bob Reserve: $0 (unchanged)',
       ],
@@ -778,14 +770,20 @@ export async function ahb(env: Env): Promise<void> {
     });
     await process(env, [r2rTx2]);
 
+    const jReplicaAfterR2R2 = env.jReplicas.get(AHB_JURISDICTION);
+    if (!jReplicaAfterR2R2) throw new Error('J-Machine not found');
+    const pendingBatches = jReplicaAfterR2R2.mempool.length;
+    if (pendingBatches !== 1) {
+      throw new Error(`MEMPOOL FAIL: Expected 1 pending batch, got ${pendingBatches}`);
+    }
+    console.log(`✅ MEMPOOL: ${pendingBatches} pending batch (2 ops)`);
+
     // ============================================================================
     // STEP 4: J-BLOCK #1 - Execute Hub's funding R2Rs (Alice & Bob get funded)
     // ============================================================================
     console.log('\n⚡ FRAME 4: J-Block #1 - Execute Hub Fundings');
 
-    // J-Machine processes mempool (Hub's 2 R2R batches)
-    // IMPORTANT: Frame 2 broadcast one batch, Frame 3 broadcast another - mempool has 2 batches BUT
-    // j_broadcast CLEARS jBatch after creating jOutput, so we have 2 SEPARATE batches each with 1 R2R
+    // J-Machine processes mempool (single batch with 2 R2R ops)
     await process(env);
 
     // Process j-events from BrowserVM execution
@@ -1549,7 +1547,7 @@ export async function ahb(env: Env): Promise<void> {
     // Invariant: leftDiff + rightDiff + collateralDiff = 0
     //   +$250K + 0 + (-$250K) = 0 ✓
 
-    // Alice creates settlement via EntityTx (PROPER RJEA FLOW)
+    // Alice creates settlement via SettlementWorkspace (PROPER BILATERAL FLOW)
     const aliceIsLeftAH = isLeft(alice.id, hub.id);
     const ahLeftDiff = aliceIsLeftAH ? 0n : rebalanceAmount; // Hub receives reserve
     const ahRightDiff = aliceIsLeftAH ? rebalanceAmount : 0n;
@@ -1562,21 +1560,47 @@ export async function ahb(env: Env): Promise<void> {
       collateralDiff: -rebalanceAmount,  // Account collateral -$200K
       ondeltaDiff: ahOndeltaDiff,        // ondelta toward zero (settles off-chain debt)
     }];
-    const ahSettlementSig = await browserVM.signSettlement(alice.id, hub.id, ahSettlementDiffs, [], []);
 
+    // Step 1: Alice proposes settlement
     await process(env, [{
       entityId: alice.id,
       signerId: alice.signer,
-      entityTxs: [
-        {
-          type: 'createSettlement',
-          data: {
-            counterpartyEntityId: hub.id,
-            diffs: ahSettlementDiffs,
-            sig: ahSettlementSig,
-          }
-        }
-      ]
+      entityTxs: [{
+        type: 'settle_propose',
+        data: { counterpartyEntityId: hub.id, diffs: ahSettlementDiffs }
+      }]
+    }]);
+
+    // Step 2: Alice approves (signs with entity hanko)
+    await process(env, [{
+      entityId: alice.id,
+      signerId: alice.signer,
+      entityTxs: [{
+        type: 'settle_approve',
+        data: { counterpartyEntityId: hub.id }
+      }]
+    }]);
+
+    // Step 3: Hub receives proposal + approval, then approves
+    await process(env); // Hub processes Alice's messages
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'settle_approve',
+        data: { counterpartyEntityId: alice.id }
+      }]
+    }]);
+
+    // Step 4: Alice executes (both signed now)
+    await process(env); // Alice receives Hub's approval
+    await process(env, [{
+      entityId: alice.id,
+      signerId: alice.signer,
+      entityTxs: [{
+        type: 'settle_execute',
+        data: { counterpartyEntityId: hub.id }
+      }]
     }]);
 
     snap(env, 'Rebalancing 1/2: Pull from Net-Sender', {
@@ -1591,7 +1615,6 @@ export async function ahb(env: Env): Promise<void> {
       ],
       expectedSolvency: TOTAL_SOLVENCY,
     });
-    await process(env);
 
     // ✅ Store pre-settlement state for assertions
     const [, alicePreSettle] = findReplica(env, alice.id);
@@ -1669,7 +1692,7 @@ export async function ahb(env: Env): Promise<void> {
     // Invariant: leftDiff + rightDiff + collateralDiff = 0
     //   (-$200K) + 0 + (+$200K) = 0 ✓
 
-    // Hub creates settlement via EntityTx (PROPER RJEA FLOW)
+    // Hub creates settlement via SettlementWorkspace (PROPER BILATERAL FLOW)
     const hubIsLeftHB = isLeft(hub.id, bob.id);
     const hbLeftDiff = hubIsLeftHB ? -rebalanceAmount : 0n; // Hub pays reserve
     const hbRightDiff = hubIsLeftHB ? 0n : -rebalanceAmount;
@@ -1682,21 +1705,47 @@ export async function ahb(env: Env): Promise<void> {
       collateralDiff: rebalanceAmount,   // Account collateral +$200K
       ondeltaDiff: hbOndeltaDiff,         // ondelta toward zero (insures Bob's position)
     }];
-    const hbSettlementSig = await browserVM.signSettlement(hub.id, bob.id, hbSettlementDiffs, [], []);
 
+    // Step 1: Hub proposes settlement
     await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,
-      entityTxs: [
-        {
-          type: 'createSettlement',
-          data: {
-            counterpartyEntityId: bob.id,
-            diffs: hbSettlementDiffs,
-            sig: hbSettlementSig,
-          }
-        }
-      ]
+      entityTxs: [{
+        type: 'settle_propose',
+        data: { counterpartyEntityId: bob.id, diffs: hbSettlementDiffs }
+      }]
+    }]);
+
+    // Step 2: Hub approves (signs with entity hanko)
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'settle_approve',
+        data: { counterpartyEntityId: bob.id }
+      }]
+    }]);
+
+    // Step 3: Bob receives proposal + approval, then approves
+    await process(env); // Bob processes Hub's messages
+    await process(env, [{
+      entityId: bob.id,
+      signerId: bob.signer,
+      entityTxs: [{
+        type: 'settle_approve',
+        data: { counterpartyEntityId: hub.id }
+      }]
+    }]);
+
+    // Step 4: Hub executes (both signed now)
+    await process(env); // Hub receives Bob's approval
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'settle_execute',
+        data: { counterpartyEntityId: bob.id }
+      }]
     }]);
 
     // ✅ Store pre-settlement state for H-B assertions
@@ -2036,7 +2085,7 @@ export async function ahb(env: Env): Promise<void> {
   const ondeltaDiff = disputeOndeltaTarget - bobDelta7.ondelta;
 
   if (collateralDiff !== 0n || ondeltaDiff !== 0n) {
-    console.log('⚙️  Adjusting on-chain collateral/ondelta for dispute setup...');
+    console.log('⚙️  Adjusting on-chain collateral/ondelta for dispute setup via SettlementWorkspace...');
     const disputeSettlementDiffs = [{
       tokenId: USDC_TOKEN_ID,
       leftDiff: hubIsLeft ? -collateralDiff : 0n,
@@ -2044,21 +2093,107 @@ export async function ahb(env: Env): Promise<void> {
       collateralDiff,
       ondeltaDiff,
     }];
-    const disputeSettlementSig = await browserVM.signSettlement(leftEntity, rightEntity, disputeSettlementDiffs, [], []);
-    const settleResult = await browserVM.settleWithInsurance(
-      leftEntity,
-      rightEntity,
-      disputeSettlementDiffs,
-      [],
-      [],
-      disputeSettlementSig
-    );
-    if (!settleResult.success) {
-      throw new Error('PHASE 7: Failed to adjust collateral/ondelta via settlement');
+
+    // Step 1: Hub proposes settlement for dispute setup
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'settle_propose',
+        data: { counterpartyEntityId: bob.id, diffs: disputeSettlementDiffs }
+      }]
+    }]);
+
+    // Step 2: Hub approves
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'settle_approve',
+        data: { counterpartyEntityId: bob.id }
+      }]
+    }]);
+
+    // Step 3: Bob receives and approves
+    await process(env);
+    await process(env, [{
+      entityId: bob.id,
+      signerId: bob.signer,
+      entityTxs: [{
+        type: 'settle_approve',
+        data: { counterpartyEntityId: hub.id }
+      }]
+    }]);
+
+    // Step 4: Hub executes
+    await process(env);
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'settle_execute',
+        data: { counterpartyEntityId: bob.id }
+      }]
+    }]);
+
+    // Step 5: Broadcast to J-machine
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'j_broadcast',
+        data: {}
+      }]
+    }]);
+
+    // Process J-events and entity updates
+    // CRITICAL: First advance time + process to trigger J-Machine execution (100ms delay)
+    advanceScenarioTime(env); // Advance past blockDelayMs
+    await process(env); // J-Machine executes → emits events
+    await processJEvents(env); // Now events are in queue → route to entities
+    await process(env); // Process j_event observations
+    await process(env); // Process j_event_claim frames
+
+    // Ensure BOTH sides have applied the settlement before adjusting offdelta.
+    const settlementApplied = (): boolean => {
+      const [, bobRep] = findReplica(env, bob.id);
+      const [, hubRep] = findReplica(env, hub.id);
+      const bobAcc = bobRep.state.accounts.get(hub.id);
+      const hubAcc = hubRep.state.accounts.get(bob.id);
+      const bobDelta = bobAcc?.deltas.get(USDC_TOKEN_ID);
+      const hubDelta = hubAcc?.deltas.get(USDC_TOKEN_ID);
+      if (!bobDelta || !hubDelta) return false;
+      const deltasOk =
+        bobDelta.collateral === disputeCollateralTarget &&
+        bobDelta.ondelta === disputeOndeltaTarget &&
+        hubDelta.collateral === disputeCollateralTarget &&
+        hubDelta.ondelta === disputeOndeltaTarget;
+      const noPending =
+        !bobAcc?.pendingFrame &&
+        !hubAcc?.pendingFrame &&
+        (bobAcc?.mempool.length || 0) === 0 &&
+        (hubAcc?.mempool.length || 0) === 0;
+      return deltasOk && noPending;
+    };
+
+    let settleRounds = 0;
+    while (settleRounds < 12 && !settlementApplied()) {
+      settleRounds += 1;
+      await processJEvents(env);
+      await process(env);
+      await process(env);
     }
-    await processJEvents(env);
-    await process(env);
-    await process(env);
+
+    if (!settlementApplied()) {
+      const [, bobRep] = findReplica(env, bob.id);
+      const [, hubRep] = findReplica(env, hub.id);
+      const bobDelta = bobRep.state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID);
+      const hubDelta = hubRep.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID);
+      console.error('❌ Settlement apply check failed');
+      console.error(`   Bob delta: ${safeStringify(bobDelta)}`);
+      console.error(`   Hub delta: ${safeStringify(hubDelta)}`);
+      throw new Error('processUntil: Dispute settlement apply not satisfied after 12 rounds');
+    }
   }
 
   const [, bobRepAfterSettle] = findReplica(env, bob.id);
@@ -2164,12 +2299,43 @@ export async function ahb(env: Env): Promise<void> {
 
   // 3) Wait for J-machine processing + event propagation
   console.log('⏳ STEP 3: Waiting for J-machine to process batch + events...');
-  await processUntil(env, () => {
-    const jRep = env.jReplicas?.get('AHB Demo');
-    return jRep ? jRep.mempool.length === 0 : false;
-  }, 40, 'J-machine process disputeStart');
-
-  await processJEvents(env);
+  {
+    const process = await getProcess();
+    const findBobDisputeAccount = () => {
+      const [, bobRep] = findReplica(env, bob.id);
+      return bobRep.state.accounts.get(hub.id);
+    };
+    let disputeStarted = false;
+    for (let round = 0; round < 40; round++) {
+      const bobAccountBefore = findBobDisputeAccount();
+      if (bobAccountBefore?.activeDispute) {
+        disputeStarted = true;
+        break;
+      }
+      await process(env);
+      await processJEvents(env);
+      const bobAccountAfter = findBobDisputeAccount();
+      if (bobAccountAfter?.activeDispute) {
+        disputeStarted = true;
+        break;
+      }
+      advanceScenarioTime(env);
+    }
+    if (!disputeStarted) {
+      if (AHB_DEBUG) {
+        const [, bobRep] = findReplica(env, bob.id);
+        const accountDebug = Array.from(bobRep.state.accounts.entries()).map(([key, account]) => ({
+          key,
+          hasActiveDispute: Boolean(account.activeDispute),
+          counterparty: key.slice(-4),
+        }));
+        console.log('❌ DEBUG: DisputeStarted not detected');
+        console.log('   Bob accounts:', accountDebug);
+        console.log('   Hub id:', hub.id);
+      }
+      throw new Error('PHASE 7: DisputeStarted event not applied after 40 rounds');
+    }
+  }
 
   // 4) Verify DisputeStarted event processed by both Bob and Hub
   console.log('✅ STEP 4: Verify DisputeStarted event processed...');
@@ -2811,7 +2977,7 @@ export async function ahb(env: Env): Promise<void> {
     assert(carolDelta, 'PHASE 9: Carol-Hub delta missing after R2C');
     assert(carolDelta.collateral === carolCollateral, 'PHASE 9: Carol collateral mismatch after R2C');
 
-    // Cooperative close: withdraw all collateral + zero ondelta
+    // Cooperative close: withdraw all collateral + zero ondelta via SettlementWorkspace
     const closeAmount = carolDelta.collateral;
     const carolIsLeft = isLeft(carol.id, hub.id);
     const carolCloseDiffs = [{
@@ -2822,20 +2988,49 @@ export async function ahb(env: Env): Promise<void> {
       ondeltaDiff: -carolDelta.ondelta,
     }];
 
-    const carolCloseSig = await browserVM.signSettlement(carol.id, hub.id, carolCloseDiffs, [], []);
+    // Step 1: Carol proposes cooperative close
     await process(env, [{
       entityId: carol.id,
       signerId: carol.signer,
       entityTxs: [{
-        type: 'createSettlement',
-        data: {
-          counterpartyEntityId: hub.id,
-          diffs: carolCloseDiffs,
-          sig: carolCloseSig,
-        }
+        type: 'settle_propose',
+        data: { counterpartyEntityId: hub.id, diffs: carolCloseDiffs }
       }]
     }]);
 
+    // Step 2: Carol approves (signs)
+    await process(env, [{
+      entityId: carol.id,
+      signerId: carol.signer,
+      entityTxs: [{
+        type: 'settle_approve',
+        data: { counterpartyEntityId: hub.id }
+      }]
+    }]);
+
+    // Step 3: Hub receives and approves
+    await process(env);
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'settle_approve',
+        data: { counterpartyEntityId: carol.id }
+      }]
+    }]);
+
+    // Step 4: Carol executes
+    await process(env);
+    await process(env, [{
+      entityId: carol.id,
+      signerId: carol.signer,
+      entityTxs: [{
+        type: 'settle_execute',
+        data: { counterpartyEntityId: hub.id }
+      }]
+    }]);
+
+    // Step 5: Broadcast
     await process(env, [{
       entityId: carol.id,
       signerId: carol.signer,
@@ -2910,7 +3105,8 @@ if (import.meta.main) {
   // Dynamic import to avoid bundler issues
   const runtime = await import('../runtime');
   const env = runtime.createEmptyEnv();
-  env.runtimeSeed = 'ahb-cli-seed-42'; // Must set before require check
+  env.runtimeSeed = '';
+  env.quietRuntimeLogs = false;  // CLI runs are verbose by default
 
   await ahb(env);
 

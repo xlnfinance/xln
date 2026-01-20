@@ -796,15 +796,18 @@ let BROWSER_VM_INSTANCE: any = null;
  * @param browserVMInstance - Optional pre-initialized BrowserVM instance
  */
 export const setBrowserVMJurisdiction = (env: any, depositoryAddress: string, browserVMInstance?: any) => {
-  console.log('[BrowserVM] Setting jurisdiction override:', { depositoryAddress, hasBrowserVM: !!browserVMInstance });
+  console.log('[BrowserVM] Setting jurisdiction override:', { depositoryAddress, hasBrowserVM: !!browserVMInstance, hasEnv: !!env });
 
   const rawBrowserVM = browserVMInstance?.browserVM ?? browserVMInstance;
   const resolvedBrowserVM = rawBrowserVM?.getProvider ? rawBrowserVM.getProvider() : rawBrowserVM;
+  console.log('[BrowserVM] rawBrowserVM:', !!rawBrowserVM, 'resolvedBrowserVM:', !!resolvedBrowserVM, 'hasGetProvider:', !!rawBrowserVM?.getProvider);
 
   // Store browserVM instance in env (isolated per-runtime)
   if (resolvedBrowserVM && env) {
     env.browserVM = resolvedBrowserVM;
-    console.log('[BrowserVM] Stored browserVM instance in env (isolated)');
+    console.log('[BrowserVM] Stored browserVM instance in env (isolated), env.browserVM now:', !!env.browserVM);
+  } else {
+    console.warn('[BrowserVM] FAILED to store: resolvedBrowserVM=', !!resolvedBrowserVM, 'env=', !!env);
   }
 
   // BACKWARD COMPAT: Also store in global for legacy code
