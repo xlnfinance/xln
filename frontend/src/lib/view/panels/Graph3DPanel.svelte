@@ -552,7 +552,7 @@ let vrHammer: VRHammer | null = null;
     try {
       const saved = localStorage.getItem('xln-bird-view-settings');
       const parsed = saved ? JSON.parse(saved) : {
-        barsMode: 'spread',
+        barsMode: 'close',  // Center mode by default
         selectedTokenId: 1, // Default to USDC
         viewMode: '3d',
         entityMode: 'sphere',
@@ -583,7 +583,7 @@ let vrHammer: VRHammer | null = null;
       return parsed;
     } catch {
       return {
-        barsMode: 'spread',
+        barsMode: 'close',  // Center mode by default
         selectedTokenId: 1, // Default to USDC
         viewMode: '3d',
         entityMode: 'sphere',

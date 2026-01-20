@@ -589,21 +589,22 @@ function createDisputeIndicator(
   const direction = new THREE.Vector3().subVectors(toEntity.position, fromEntity.position);
   const length = direction.length();
 
-  // Create pulsing red cylinder around the connection
+  // Create subtle red outline around the connection (not a fat glow)
   const glowGeometry = new THREE.CylinderGeometry(
-    barRadius * 3,  // Outer glow radius
-    barRadius * 3,
-    length * 0.8,   // Slightly shorter than full connection
-    16,
+    barRadius * 1.3,  // Subtle outer glow, just slightly larger than bar
+    barRadius * 1.3,
+    length * 0.9,     // Most of connection
+    8,
     1,
-    true  // Open-ended for better visibility
+    true  // Open-ended wireframe look
   );
 
   const glowMaterial = new THREE.MeshBasicMaterial({
-    color: 0xff3333,
+    color: 0xff2222,
     transparent: true,
-    opacity: 0.3,
-    side: THREE.DoubleSide
+    opacity: 0.15,
+    side: THREE.DoubleSide,
+    wireframe: true  // Wireframe for subtle danger zone look
   });
 
   const glowCylinder = new THREE.Mesh(glowGeometry, glowMaterial);
@@ -631,12 +632,12 @@ function createDisputeIndicator(
   const swordPos = initiatorPos.clone().lerp(defenderPos, 0.2);
   swordPos.y += barRadius * 4;
 
-  // Create sword sprite (red triangle pointing at defender)
-  const swordGeometry = new THREE.ConeGeometry(barRadius * 1.5, barRadius * 4, 4);
+  // Create sword sprite (small red triangle pointing at defender)
+  const swordGeometry = new THREE.ConeGeometry(barRadius * 0.8, barRadius * 2, 4);
   const swordMaterial = new THREE.MeshBasicMaterial({
-    color: 0xff0000,
+    color: 0xff3333,
     transparent: true,
-    opacity: 0.9
+    opacity: 0.8
   });
   const sword = new THREE.Mesh(swordGeometry, swordMaterial);
   sword.position.copy(swordPos);
