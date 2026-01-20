@@ -59,6 +59,11 @@
   let balanceRequestId = 0;
   let ethBalanceRequestId = 0;
 
+  // Debts state (on-chain _debts from Depository)
+  let entityDebts = $state<Array<{ entityId: string; entityName: string; tokenId: number; debts: Array<{ amount: bigint; creditor: string; creditorName: string }> }>>([]);
+  let debtsLoading = $state(false);
+  let debtsRequestId = 0;
+
   // Helper to safely convert serialized BigInt objects from snapshots
   function toBigInt(value: any): bigint {
     if (typeof value === 'bigint') return value;
@@ -423,13 +428,15 @@
     return Array.from(seen.values());
   });
 
+  // Query ERC20 balances (works in both live and history mode via time travel)
   $effect(() => {
     const tokenMeta = selectedTokenMeta;
     const signers = signerRefs;
     const xln = $xlnInstance;
     const tokenAddress = tokenMeta?.address;
+    const jData = selectedJurisdictionData;
 
-    if (!isLive || !tokenAddress || signers.length === 0 || !xln?.getBrowserVMInstance) {
+    if (!tokenAddress || signers.length === 0 || !xln?.getBrowserVMInstance) {
       externalBalances = [];
       externalBalancesLoading = false;
       externalBalancesError = null;
@@ -450,6 +457,12 @@
 
     (async () => {
       try {
+        // Time travel to historical state if not live
+        const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
+        if (stateRoot && browserVM.timeTravel) {
+          await browserVM.timeTravel(stateRoot);
+        }
+
         const nextBalances: Array<{ address: string; label: string; balance: bigint }> = [];
         for (const signer of signers) {
           const balance = await browserVM.getErc20Balance(tokenAddress, signer.address);
@@ -474,11 +487,13 @@
     })();
   });
 
+  // Query ETH balances (works in both live and history mode via time travel)
   $effect(() => {
     const signers = signerRefs;
     const xln = $xlnInstance;
+    const jData = selectedJurisdictionData;
 
-    if (!isLive || signers.length === 0 || !xln?.getBrowserVMInstance) {
+    if (signers.length === 0 || !xln?.getBrowserVMInstance) {
       externalEthBalances = [];
       externalEthBalancesLoading = false;
       externalEthBalancesError = null;
@@ -499,6 +514,12 @@
 
     (async () => {
       try {
+        // Time travel to historical state if not live
+        const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
+        if (stateRoot && browserVM.timeTravel) {
+          await browserVM.timeTravel(stateRoot);
+        }
+
         const nextBalances: Array<{ address: string; label: string; balance: bigint }> = [];
         for (const signer of signers) {
           const balance = await browserVM.getEthBalance(signer.address);
@@ -518,6 +539,98 @@
       } finally {
         if (requestId === ethBalanceRequestId) {
           externalEthBalancesLoading = false;
+        }
+      }
+    })();
+  });
+
+  // Query on-chain debts from Depository (works in both live and history mode)
+  $effect(() => {
+    const xln = $xlnInstance;
+    const jData = selectedJurisdictionData;
+    const names = entityNames;
+    const tokenId = selectedTokenId;
+
+    if (!xln?.getBrowserVMInstance) {
+      entityDebts = [];
+      debtsLoading = false;
+      return;
+    }
+
+    const browserVM = xln.getBrowserVMInstance();
+    const getDebtsFn = browserVM?.getDebts;
+    if (!browserVM || !getDebtsFn || tokenId === null) {
+      entityDebts = [];
+      debtsLoading = false;
+      return;
+    }
+
+    // Get entity IDs from eReplicas
+    const env = $isolatedEnv;
+    const timeIndex = isolatedTimeIndex ? (get(isolatedTimeIndex) ?? -1) : -1;
+    const history = isolatedHistory ? get(isolatedHistory) : [];
+
+    let eReplicas: Map<string, any> | null = null;
+    if (timeIndex >= 0 && history && history.length > 0) {
+      const idx = Math.min(timeIndex, history.length - 1);
+      eReplicas = history[idx]?.eReplicas;
+    } else {
+      eReplicas = env?.eReplicas;
+    }
+
+    if (!eReplicas || eReplicas.size === 0) {
+      entityDebts = [];
+      debtsLoading = false;
+      return;
+    }
+
+    const requestId = ++debtsRequestId;
+    debtsLoading = true;
+
+    (async () => {
+      try {
+        // Time travel to historical state if not live
+        const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
+        if (stateRoot && browserVM.timeTravel) {
+          await browserVM.timeTravel(stateRoot);
+        }
+
+        const results: typeof entityDebts = [];
+        const entityIds = new Set<string>();
+
+        // Extract unique entity IDs
+        const entries = eReplicas instanceof Map ? Array.from(eReplicas.entries()) : Object.entries(eReplicas);
+        for (const [key] of entries) {
+          const entityId = key.split(':')[0];
+          if (entityId) entityIds.add(entityId);
+        }
+
+        // Query debts for each entity
+        for (const entityId of entityIds) {
+          const debts = await getDebtsFn(entityId, tokenId!);
+          if (debts && debts.length > 0) {
+            results.push({
+              entityId,
+              entityName: names.get(entityId) || `E${entityId.slice(-4)}`,
+              tokenId,
+              debts: debts.map((d: any) => ({
+                amount: d.amount,
+                creditor: d.creditor,
+                creditorName: names.get(d.creditor) || `E${d.creditor.slice(-4)}`
+              }))
+            });
+          }
+        }
+
+        if (requestId !== debtsRequestId) return;
+        entityDebts = results;
+      } catch (err) {
+        if (requestId !== debtsRequestId) return;
+        console.error('[J-Panel] Failed to query debts:', err);
+        entityDebts = [];
+      } finally {
+        if (requestId === debtsRequestId) {
+          debtsLoading = false;
         }
       }
     })();
@@ -845,12 +958,7 @@
           <span class="count">{externalBalanceCount}</span>
         </div>
         {#if externalBalanceMode === 'token'}
-          {#if !isLive}
-            <div class="empty history-notice">
-              <span>⏳ Viewing historical frame</span>
-              <span class="subtext">External ERC20 balances show current EVM state only</span>
-            </div>
-          {:else if !selectedTokenMeta}
+          {#if !selectedTokenMeta}
             <div class="empty">Select a token to view external balances</div>
           {:else if !selectedTokenMeta.address}
             <div class="empty">No external token mapping for this token</div>
@@ -884,12 +992,7 @@
             </table>
           {/if}
         {:else}
-          {#if !isLive}
-            <div class="empty history-notice">
-              <span>⏳ Viewing historical frame</span>
-              <span class="subtext">External ETH balances show current EVM state only</span>
-            </div>
-          {:else if signerRefs.length === 0}
+          {#if signerRefs.length === 0}
             <div class="empty">No signers available</div>
           {:else if externalEthBalancesLoading}
             <div class="empty">Loading ETH balances…</div>
@@ -917,6 +1020,46 @@
               </tbody>
             </table>
           {/if}
+        {/if}
+      </div>
+
+      <!-- Debts Section (on-chain _debts from Depository) -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">On-Chain Debts</span>
+          <span class="count" class:warning={entityDebts.length > 0}>{entityDebts.reduce((acc, e) => acc + e.debts.length, 0)}</span>
+        </div>
+        {#if debtsLoading}
+          <div class="empty">Loading debts…</div>
+        {:else if entityDebts.length === 0}
+          <div class="empty">No outstanding debts ✓</div>
+        {:else}
+          <table class="data-table debts-table">
+            <thead>
+              <tr>
+                <th>DEBTOR</th>
+                <th>CREDITOR</th>
+                <th class="right">AMOUNT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each entityDebts as entityDebt}
+                {#each entityDebt.debts as debt}
+                  <tr class="debt-row">
+                    <td class="entity-cell">
+                      <span class="entity-name debtor">{entityDebt.entityName}</span>
+                    </td>
+                    <td class="entity-cell">
+                      <span class="entity-name creditor">{debt.creditorName}</span>
+                    </td>
+                    <td class="value-cell right negative">
+                      -{formatTokenAmountFor(debt.amount, entityDebt.tokenId)}
+                    </td>
+                  </tr>
+                {/each}
+              {/each}
+            </tbody>
+          </table>
         {/if}
       </div>
 
@@ -1201,6 +1344,24 @@
   .count.pending {
     background: rgba(255, 193, 7, 0.3);
     color: #ffd700;
+  }
+
+  .count.warning {
+    background: rgba(248, 81, 73, 0.3);
+    color: #f85149;
+  }
+
+  /* Debts table styles */
+  .debts-table .debt-row {
+    background: rgba(248, 81, 73, 0.05);
+  }
+
+  .debts-table .debtor {
+    color: #f85149;
+  }
+
+  .debts-table .creditor {
+    color: #58a6ff;
   }
 
   .mempool-tx {

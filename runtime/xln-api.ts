@@ -105,6 +105,11 @@ export type BrowserVMInstance = {
   getEntityNonce?: (entityId: string) => Promise<bigint>;
   getDepositoryAddress?: () => string;
   getEntityProviderAddress?: () => string;
+  // Time travel and historical queries
+  timeTravel?: (stateRoot: Uint8Array) => Promise<void>;
+  getReserves?: (entityId: string, tokenId: number) => Promise<bigint>;
+  getCollateral?: (entityId: string, counterpartyId: string, tokenId: number) => Promise<{ collateral: bigint; ondelta: bigint }>;
+  getDebts?: (entityId: string, tokenId: number) => Promise<Array<{ amount: bigint; creditor: string }>>;
 };
 
 export type P2PConfig = {
