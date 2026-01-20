@@ -135,6 +135,9 @@ export interface JBatchState {
   lastBroadcast: number; // Timestamp of last broadcast
   broadcastCount: number; // Total broadcasts
   failedAttempts: number; // Failed broadcast attempts (for exponential backoff)
+  // PENDING BROADCAST: Set true on j_broadcast, cleared on HankoBatchProcessed or j_clear_batch
+  // When true, new operations CANNOT be added to the batch (must wait for finalization or clear)
+  pendingBroadcast: boolean;
 }
 
 /**
@@ -158,14 +161,57 @@ export function createEmptyBatch(): JBatch {
   };
 }
 
-// NOTE: collateralToReserve added to Types.sol but not yet deployed
-// When C2R_SHORTCUT_ENABLED=1, use DEPOSITORY_BATCH_ABI_WITH_C2R instead
+const cloneProofbody = (proofbody: any): any => {
+  if (!proofbody) return proofbody;
+  try {
+    return structuredClone(proofbody);
+  } catch {
+    return proofbody;
+  }
+};
+
+export function cloneJBatch(batch: JBatch): JBatch {
+  try {
+    return structuredClone(batch);
+  } catch {
+    return {
+      flashloans: batch.flashloans.map(op => ({ ...op })),
+      reserveToReserve: batch.reserveToReserve.map(op => ({ ...op })),
+      reserveToCollateral: batch.reserveToCollateral.map(op => ({
+        tokenId: op.tokenId,
+        receivingEntity: op.receivingEntity,
+        pairs: op.pairs.map(pair => ({ ...pair })),
+      })),
+      collateralToReserve: batch.collateralToReserve.map(op => ({ ...op })),
+      settlements: batch.settlements.map(settlement => ({
+        ...settlement,
+        diffs: settlement.diffs.map(diff => ({ ...diff })),
+        forgiveDebtsInTokenIds: [...settlement.forgiveDebtsInTokenIds],
+        insuranceRegs: settlement.insuranceRegs.map(reg => ({ ...reg })),
+      })),
+      disputeStarts: batch.disputeStarts.map(op => ({ ...op })),
+      disputeFinalizations: batch.disputeFinalizations.map(op => ({
+        ...op,
+        finalProofbody: cloneProofbody(op.finalProofbody),
+      })),
+      externalTokenToReserve: batch.externalTokenToReserve.map(op => ({ ...op })),
+      reserveToExternalToken: batch.reserveToExternalToken.map(op => ({ ...op })),
+      revealSecrets: batch.revealSecrets.map(op => ({ ...op })),
+      hub_id: batch.hub_id,
+      cooperativeUpdate: [],  // Legacy - not used
+      cooperativeDisputeProof: [],  // Legacy - not used
+    };
+  }
+}
+
+// ABI with C2R shortcut - matches Types.sol Batch struct
+// NOTE: Always use this ABI now that contracts have been recompiled with collateralToReserve
 const DEPOSITORY_BATCH_ABI =
   'tuple(' +
     'tuple(uint256 tokenId, uint256 amount)[] flashloans,' +
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve,' +
     'tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral,' +
-    // 'tuple(bytes32 counterparty, uint256 tokenId, uint256 amount, bytes sig)[] collateralToReserve,' + // Uncomment after contract redeploy
+    'tuple(bytes32 counterparty, uint256 tokenId, uint256 amount, bytes sig)[] collateralToReserve,' +
     'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements,' +
     'tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts,' +
     'tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 finalCooperativeNonce, uint256 initialDisputeNonce, uint256 finalDisputeNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations,' +
@@ -179,6 +225,7 @@ const BATCH_DOMAIN_SEPARATOR = ethers.keccak256(ethers.toUtf8Bytes('XLN_DEPOSITO
 
 export function encodeJBatch(batch: JBatch): string {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  // Always encode with full ABI (includes collateralToReserve, even if empty)
   return abiCoder.encode([DEPOSITORY_BATCH_ABI as any], [batch]);
 }
 
@@ -305,7 +352,21 @@ export function initJBatch(): JBatchState {
     lastBroadcast: 0,
     broadcastCount: 0,
     failedAttempts: 0,
+    pendingBroadcast: false,
   };
+}
+
+/**
+ * Check if batch has pending broadcast (block new operations until finalized)
+ * @throws Error if batch is pending broadcast
+ */
+export function assertBatchNotPending(jBatchState: JBatchState, operation: string): void {
+  if (jBatchState.pendingBroadcast) {
+    throw new Error(
+      `❌ Cannot add ${operation}: jBatch has pending broadcast. ` +
+      `Wait for HankoBatchProcessed or use j_clear_batch to abort.`
+    );
+  }
 }
 
 /**
@@ -316,6 +377,7 @@ export function isBatchEmpty(batch: JBatch): boolean {
     batch.flashloans.length === 0 &&
     batch.reserveToReserve.length === 0 &&
     batch.reserveToCollateral.length === 0 &&
+    batch.collateralToReserve.length === 0 &&
     batch.settlements.length === 0 &&
     batch.disputeStarts.length === 0 &&
     batch.disputeFinalizations.length === 0 &&
@@ -335,6 +397,9 @@ export function batchAddReserveToCollateral(
   tokenId: number,
   amount: bigint
 ): void {
+  // Block if batch has pending broadcast
+  assertBatchNotPending(jBatchState, 'R2C');
+
   // Check if we already have an R→C entry for this entity+counterparty+token
   // If yes, aggregate amounts
   const existing = jBatchState.batch.reserveToCollateral.find(
@@ -372,6 +437,7 @@ export interface InsuranceReg {
   expiresAt: bigint;
 }
 
+
 /**
  * Detect if a settlement is a pure C2R (collateral-to-reserve) operation
  * Pure C2R: one side withdraws `amount` from their share of collateral to their reserve
@@ -385,7 +451,7 @@ export interface InsuranceReg {
  *
  * Returns: { isPureC2R: true, withdrawer: 'left'|'right', tokenId, amount } or { isPureC2R: false }
  */
-function detectPureC2R(
+export function detectPureC2R(
   diffs: Array<{
     tokenId: number;
     leftDiff: bigint;
@@ -442,8 +508,12 @@ export function batchAddSettlement(
   sig?: string,
   entityProvider: string = '0x0000000000000000000000000000000000000000',
   hankoData: string = '0x',
-  nonce: number = 0
+  nonce: number = 0,
+  initiatorEntity?: string
 ): void {
+  // Block if batch has pending broadcast
+  assertBatchNotPending(jBatchState, 'settlement');
+
   // Validate entities are in canonical order
   if (leftEntity >= rightEntity) {
     throw new Error(`Settlement entities must be ordered: ${leftEntity} >= ${rightEntity}`);
@@ -457,25 +527,25 @@ export function batchAddSettlement(
     throw new Error(`Settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)} missing hanko signature`);
   }
 
-  // Try to compress pure C2R settlements into collateralToReserve for calldata savings
-  // NOTE: Disabled until contracts are recompiled with CollateralToReserve struct
-  // Set C2R_SHORTCUT_ENABLED=1 to enable after contract deploy
-  const C2R_ENABLED = typeof process !== 'undefined' && process.env?.C2R_SHORTCUT_ENABLED === '1';
-
+  // Compress pure C2R settlements into collateralToReserve (saves calldata)
   const c2rResult = detectPureC2R(diffs, forgiveDebtsInTokenIds, insuranceRegs);
-  if (c2rResult.isPureC2R && sig && C2R_ENABLED) {
+  if (c2rResult.isPureC2R && sig) {
     // Determine counterparty based on who is withdrawing
     const counterparty = c2rResult.withdrawer === 'left' ? rightEntity : leftEntity;
+    const withdrawerEntity = c2rResult.withdrawer === 'left' ? leftEntity : rightEntity;
+    if (initiatorEntity && normalizeEntityId(initiatorEntity) !== normalizeEntityId(withdrawerEntity)) {
+      // Initiator isn't the withdrawer; keep full settlement to avoid C2R signature mismatch.
+    } else {
+      jBatchState.batch.collateralToReserve.push({
+        counterparty,
+        tokenId: c2rResult.tokenId,
+        amount: c2rResult.amount,
+        sig,
+      });
 
-    jBatchState.batch.collateralToReserve.push({
-      counterparty,
-      tokenId: c2rResult.tokenId,
-      amount: c2rResult.amount,
-      sig,
-    });
-
-    console.log(`📦 jBatch: Added C2R shortcut ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)}, ${c2rResult.withdrawer} withdraws ${c2rResult.amount} token ${c2rResult.tokenId}`);
-    return; // Skip full settlement
+      console.log(`📦 jBatch: Added C2R shortcut ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)}, ${c2rResult.withdrawer} withdraws ${c2rResult.amount} token ${c2rResult.tokenId}`);
+      return; // Skip full settlement
+    }
   }
 
   // Check if we already have a settlement for this pair
@@ -540,6 +610,9 @@ export function batchAddInsurance(
   rightEntity: string,
   insuranceReg: InsuranceReg
 ): void {
+  // Block if batch has pending broadcast
+  assertBatchNotPending(jBatchState, 'insurance');
+
   // Validate entities are in canonical order
   const [left, right] = isLeftEntity(leftEntity, rightEntity) ? [leftEntity, rightEntity] : [rightEntity, leftEntity];
 
@@ -581,6 +654,9 @@ export function batchAddReserveToReserve(
   tokenId: number,
   amount: bigint
 ): void {
+  // Block if batch has pending broadcast
+  assertBatchNotPending(jBatchState, 'R2R');
+
   jBatchState.batch.reserveToReserve.push({
     receivingEntity,
     tokenId,
@@ -598,6 +674,9 @@ export function batchAddRevealSecret(
   transformer: string,
   secret: string
 ): void {
+  // Block if batch has pending broadcast
+  assertBatchNotPending(jBatchState, 'secret reveal');
+
   const exists = jBatchState.batch.revealSecrets.find(
     r => r.transformer === transformer && r.secret === secret
   );
@@ -616,6 +695,7 @@ export function getBatchSize(batch: JBatch): number {
     batch.flashloans.length +
     batch.reserveToReserve.length +
     batch.reserveToCollateral.length +
+    batch.collateralToReserve.length +
     batch.settlements.length +
     batch.disputeStarts.length +
     batch.disputeFinalizations.length +
@@ -677,7 +757,7 @@ export async function broadcastBatch(
 
   const batchSize = getBatchSize(jBatchState.batch);
   const b = jBatchState.batch;
-  console.log(`📤 BATCH: ${entityId.slice(-4)} | ${batchSize} ops | R→C=${b.reserveToCollateral.length} S=${b.settlements.length} R→R=${b.reserveToReserve.length}`);
+  console.log(`📤 BATCH: ${entityId.slice(-4)} | ${batchSize} ops | R→C=${b.reserveToCollateral.length} C→R=${b.collateralToReserve.length} S=${b.settlements.length} R→R=${b.reserveToReserve.length}`);
   const entityProviderAddress =
     (browserVM as any)?.getEntityProviderAddress?.() ||
     jurisdiction?.entityProviderAddress ||
@@ -772,8 +852,9 @@ export async function broadcastBatch(
       // NOTE: j-events are queued in env.runtimeInput.entityInputs by j-watcher
       // Caller must process them (prepopulate calls processJEvents, browser needs interval)
 
-      // Clear batch after successful broadcast
-      jBatchState.batch = createEmptyBatch();
+      // DO NOT clear batch - wait for HankoBatchProcessed event to confirm
+      // Set pendingBroadcast to block new operations until finalized
+      jBatchState.pendingBroadcast = true;
       jBatchState.lastBroadcast = timestamp;
       jBatchState.broadcastCount++;
       jBatchState.failedAttempts = 0;
@@ -832,8 +913,9 @@ export async function broadcastBatch(
     const receipt = await tx.wait();
     console.log(`   ✅ Ethers: block=${receipt.blockNumber} gas=${receipt.gasUsed}`);
 
-    // Clear batch after successful broadcast
-    jBatchState.batch = createEmptyBatch();
+    // DO NOT clear batch - wait for HankoBatchProcessed event to confirm
+    // Set pendingBroadcast to block new operations until finalized
+    jBatchState.pendingBroadcast = true;
     jBatchState.lastBroadcast = timestamp;
     jBatchState.broadcastCount++;
     jBatchState.failedAttempts = 0;

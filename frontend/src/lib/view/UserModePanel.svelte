@@ -268,12 +268,18 @@
 
     // Create J-machine if missing
     if (names.length === 0) {
+      if (isCreatingJMachine) {
+        return;
+      }
       const created = await createJMachineInEnv(env);
+      const refreshedNames = listJMachineNames(env);
       if (created) {
         names.push(created);
-      } else {
+      } else if (refreshedNames.length === 0) {
         console.error('[ensureSelfEntities] ❌ Failed to create J-machine');
         return;
+      } else {
+        names.splice(0, names.length, ...refreshedNames);
       }
     }
 

@@ -5,6 +5,10 @@
 
 import { AccountMachine, AccountTx } from '../../types';
 import { getAccountPerspective } from '../../state-helpers';
+import { FINANCIAL } from '../../constants';
+
+// Maximum credit limit (prevents overflow attacks)
+const MAX_CREDIT_LIMIT = FINANCIAL.MAX_PAYMENT_AMOUNT * 1000n; // 1000x max payment
 
 export function handleSetCreditLimit(
   accountMachine: AccountMachine,
@@ -13,6 +17,14 @@ export function handleSetCreditLimit(
 ): { success: boolean; events: string[]; error?: string } {
   const { tokenId, amount, side } = accountTx.data;
   const events: string[] = [];
+
+  // H15 FIX: Validate credit limit bounds
+  if (amount < 0n) {
+    return { success: false, error: `Credit limit cannot be negative: ${amount}`, events };
+  }
+  if (amount > MAX_CREDIT_LIMIT) {
+    return { success: false, error: `Credit limit exceeds maximum: ${amount} > ${MAX_CREDIT_LIMIT}`, events };
+  }
 
   const { counterparty } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
   console.log(`💳 SET-CREDIT-LIMIT HANDLER: tokenId=${tokenId}, amount=${amount.toString()}, side=${side}, counterparty=${counterparty.slice(-4)}`);

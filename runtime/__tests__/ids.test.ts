@@ -43,7 +43,7 @@ import {
   XLN_URI_SCHEME,
   DEFAULT_RUNTIME_HOST,
   MAX_NUMBERED_ENTITY,
-} from './ids';
+} from '../ids.js';
 
 describe('Identity System - Type Constructors', () => {
   test('toEntityId creates branded EntityId', () => {

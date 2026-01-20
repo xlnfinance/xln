@@ -9,6 +9,7 @@ import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { concatBytes } from '@noble/hashes/utils.js';
 import { HDNodeWallet, getIndexedAccountPath, getBytes, keccak256 } from 'ethers';
+import { Buffer as BufferPolyfill } from 'buffer';
 import * as bip39 from 'bip39';
 
 // Configure @noble/secp256k1 HMAC (required for signing)
@@ -56,6 +57,13 @@ const textDecoder = new TextDecoder();
 const mnemonicCache = new Map<string, string>();
 const bytesToHex = (bytes: Uint8Array): string =>
   Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+// Ensure a full Buffer implementation exists before bip39 (Buffer.isBuffer is required).
+const ensureGlobalBuffer = () => {
+  const globalBuffer = (globalThis as any).Buffer;
+  if (!globalBuffer || typeof globalBuffer.isBuffer !== 'function') {
+    (globalThis as any).Buffer = BufferPolyfill;
+  }
+};
 
 const toSeedBytes = (seed: Uint8Array | string): Uint8Array =>
   typeof seed === 'string' ? textEncoder.encode(seed) : seed;
@@ -76,10 +84,8 @@ const parseSignerIndex = (signerId: string): number | null => {
 };
 
 const resolveMnemonic = (seed: Uint8Array | string): string => {
+  ensureGlobalBuffer();
   const seedText = toSeedText(seed).trim();
-  if (seedText.length === 0) {
-    throw new Error('CRYPTO_DETERMINISM_VIOLATION: runtimeSeed is empty');
-  }
   const cached = mnemonicCache.get(seedText);
   if (cached) return cached;
 
@@ -146,7 +152,7 @@ const getOrDeriveKey = (envSeed: Uint8Array | string, signerId: string): Uint8Ar
   console.log(`⚠️ No cached key for ${signerId.slice(-4)}, deriving from env.runtimeSeed...`);
 
   // PURE: ONLY use env seed, NEVER fall back to global
-  if (!envSeed) {
+  if (envSeed === undefined || envSeed === null) {
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getOrDeriveKey called without env.runtimeSeed for signer ${signerId}`);
   }
   const seedLen = typeof envSeed === 'string' ? envSeed.length : envSeed.length;
@@ -199,7 +205,7 @@ export function getCachedSignerAddress(signerId: string): string | null {
 
 // Export for hanko-signing.ts
 export function getSignerPrivateKey(env: any, signerId: string): Uint8Array {
-  if (!env?.runtimeSeed) {
+  if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getSignerPrivateKey called without env.runtimeSeed for signer ${signerId}`);
   }
   return getOrDeriveKey(env.runtimeSeed, signerId);
@@ -220,7 +226,7 @@ export function getSignerPublicKey(env: any, signerId: string): Uint8Array | nul
   }
 
   // Derive from env if available
-  if (!env?.runtimeSeed) {
+  if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
     return null;
   }
   const privateKey = getOrDeriveKey(env.runtimeSeed, signerId);
@@ -253,7 +259,7 @@ export function getSignerAddress(env: any, signerId: string): string | null {
   }
 
   // Derive from env if available
-  if (!env?.runtimeSeed) {
+  if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
     return null;
   }
   const privateKey = getOrDeriveKey(env.runtimeSeed, signerId);
@@ -306,20 +312,11 @@ export function registerSignerPublicKey(signerId: string, publicKey: Uint8Array 
 }
 
 /**
- * Register test keys for scenarios (deterministic test keys from signerId)
- * Used in CLI scenarios when BrainVault not available
+ * Register test keys for scenarios.
+ * Deprecated: use real runtime seeds and numeric signer IDs instead.
  */
-export async function registerTestKeys(signerIds: string[]): Promise<void> {
-  const testMasterSeed = new Uint8Array(32);
-  testMasterSeed.fill(42); // Deterministic test seed
-  setRuntimeSeed(testMasterSeed);
-
-  // Use registerSeededKeys but suppress its log (we log our own below)
-  for (const signerId of signerIds) {
-    const privateKey = await deriveSignerKey(testMasterSeed, signerId);
-    registerSignerKey(signerId, privateKey);
-  }
-  console.log(`🔑 Registered ${signerIds.length} test keys (deterministic from signerId)`);
+export async function registerTestKeys(_signerIds: string[]): Promise<void> {
+  throw new Error('registerTestKeys is disabled. Use runtimeSeed + numeric signerIds (1,2,3...)');
 }
 
 /**
@@ -340,7 +337,7 @@ export function signAccountFrame(
   signerId: string,
   frameHash: string
 ): string {
-  if (!env?.runtimeSeed) {
+  if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signAccountFrame called without env.runtimeSeed for signer ${signerId}`);
   }
 

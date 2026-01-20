@@ -32,6 +32,10 @@ const DEFAULT_TOKENS = [
   { symbol: 'USDT', name: 'Tether USD', decimals: DEFAULT_TOKEN_DECIMALS },
 ];
 
+// CONTRACT_VERSION - increment when contract ABI/encoding changes to invalidate cached EVM state
+// 2025-01-21: v2 - Added depositoryAddress to dispute/settlement hash encodings
+const CONTRACT_VERSION = 2;
+
 /** EVM event emitted from the BrowserVM */
 export interface EVMEvent {
   name: string;
@@ -1083,11 +1087,13 @@ export class BrowserVMProvider {
 
     // Encode the message (must match Account.sol encoding)
     // IMPORTANT: Solidity enums are encoded as uint256, not uint8!
+    // Include depositoryAddress for chain+depository binding (replay protection)
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
     const encodedMsg = abiCoder.encode(
-      ['uint256', 'bytes', 'uint256', 'tuple(uint256,int256,int256,int256,int256)[]', 'uint256[]', 'tuple(bytes32,bytes32,uint256,uint256,uint256)[]'],
+      ['uint256', 'address', 'bytes', 'uint256', 'tuple(uint256,int256,int256,int256,int256)[]', 'uint256[]', 'tuple(bytes32,bytes32,uint256,uint256,uint256)[]'],
       [
         BrowserVMProvider.MessageType.CooperativeUpdate,
+        this.depositoryAddress?.toString() || '0x0000000000000000000000000000000000000000',
         channelKey,
         cooperativeNonce,
         diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]),
@@ -1126,10 +1132,11 @@ export class BrowserVMProvider {
     const channelKey = this.getChannelKey(entityId, counterpartyEntityId);
 
     // IMPORTANT: Solidity enums are encoded as uint256, not uint8!
+    // Include depositoryAddress for chain+depository binding (replay protection)
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
     const encodedMsg = abiCoder.encode(
-      ['uint256', 'bytes', 'uint256', 'uint256', 'bytes32'],
-      [BrowserVMProvider.MessageType.DisputeProof, channelKey, cooperativeNonce, disputeNonce, proofbodyHash]
+      ['uint256', 'address', 'bytes', 'uint256', 'uint256', 'bytes32'],
+      [BrowserVMProvider.MessageType.DisputeProof, this.depositoryAddress?.toString() || '0x0000000000000000000000000000000000000000', channelKey, cooperativeNonce, disputeNonce, proofbodyHash]
     );
 
     const hash = ethers.keccak256(encodedMsg);
@@ -1262,6 +1269,8 @@ export class BrowserVMProvider {
       let claimedEntityId: string | null = null;
       let expectedNextNonce: bigint | null = null;
       let batchSummary: string | null = null;
+      let revertReason: string | null = null;
+      const returnData = bytesToHex(result.execResult.returnValue || new Uint8Array());
       try {
         const decoded = ethers.AbiCoder.defaultAbiCoder().decode(
           ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
@@ -1275,18 +1284,46 @@ export class BrowserVMProvider {
         const { decodeJBatch, summarizeBatch } = await import('./j-batch');
         const batch = decodeJBatch(encodedBatch);
         batchSummary = safeStringify(summarizeBatch(batch));
+        if (returnData !== '0x') {
+          try {
+            const parsed = this.depositoryInterface?.parseError(returnData);
+            if (parsed) {
+              revertReason = `${parsed.name}(${parsed.args?.map((arg: any) => String(arg)).join(', ')})`;
+            }
+          } catch {
+            // fall through
+          }
+          if (!revertReason && returnData.startsWith('0x08c379a0')) {
+            try {
+              const decodedReason = ethers.AbiCoder.defaultAbiCoder().decode(
+                ['string'],
+                `0x${returnData.slice(10)}`
+              );
+              revertReason = String(decodedReason[0]);
+            } catch {
+              // best-effort only
+            }
+          }
+        }
       } catch {
         // best-effort debug only
       }
-      console.error('[BrowserVM] processBatch revert:', safeStringify(result.execResult.exceptionError));
-      console.error('  returnData:', bytesToHex(result.execResult.returnValue));
+      console.log('[BrowserVM] processBatch revert:', safeStringify(result.execResult.exceptionError));
+      if (returnData !== '0x') {
+        console.log('  returnData:', returnData);
+      }
+      if (revertReason) {
+        console.log('  revertReason:', revertReason);
+      }
       if (claimedEntityId) {
-        console.error(`[BrowserVM] Hanko entity=${claimedEntityId.slice(0, 10)}..., nonce=${nonce} expectedNext=${expectedNextNonce}`);
+        console.log(`[BrowserVM] Hanko entity=${claimedEntityId.slice(0, 10)}..., nonce=${nonce} expectedNext=${expectedNextNonce}`);
       }
       if (batchSummary) {
-        console.error(`[BrowserVM] Batch summary: ${batchSummary}`);
+        console.log(`[BrowserVM] Batch summary: ${batchSummary}`);
       }
-      throw new Error(`Batch processing failed: ${result.execResult.exceptionError.error || 'revert'}`);
+      const errorLabel = result.execResult.exceptionError.error || 'revert';
+      const reasonSuffix = revertReason ? ` (${revertReason})` : '';
+      throw new Error(`Batch processing failed: ${errorLabel}${reasonSuffix}`);
     }
 
     // Log raw events before parsing
@@ -1730,7 +1767,7 @@ export class BrowserVMProvider {
   // ═══════════════════════════════════════════════════════════════════════════
 
   /** Serialize full EVM state (all trie nodes) for persistence */
-  async serializeState(): Promise<{ stateRoot: string; trieData: Array<[string, string]>; nonce: string; addresses: { depository: string; entityProvider: string } }> {
+  async serializeState(): Promise<{ version: number; stateRoot: string; trieData: Array<[string, string]>; nonce: string; addresses: { depository: string; entityProvider: string } }> {
     if (!this.initialized) throw new Error('BrowserVM not initialized');
 
     const stateRoot = await this.vm.stateManager.getStateRoot();
@@ -1768,9 +1805,10 @@ export class BrowserVMProvider {
       trieData.push([keyHex, valueHex]);
     }
 
-    this.log(`[BrowserVM] Serialized state: ${trieData.length} trie nodes`);
+    this.log(`[BrowserVM] Serialized state: ${trieData.length} trie nodes, version=${CONTRACT_VERSION}`);
 
     return {
+      version: CONTRACT_VERSION,
       stateRoot: Buffer.from(stateRoot).toString('hex'),
       trieData,
       nonce: this.nonce.toString(),
@@ -1912,8 +1950,17 @@ export class BrowserVMProvider {
       }
 
       const data = JSON.parse(json);
+
+      // Check version - invalidate stale cache if contract ABI changed
+      const cachedVersion = data.version || 1; // Pre-version data is v1
+      if (cachedVersion !== CONTRACT_VERSION) {
+        this.log(`[BrowserVM] ⚠️ Version mismatch: cached=${cachedVersion}, current=${CONTRACT_VERSION} - clearing stale cache`);
+        this.clearLocalStorage(key);
+        return false;
+      }
+
       await this.restoreState(data);
-      this.log(`[BrowserVM] Loaded state from localStorage: ${key}`);
+      this.log(`[BrowserVM] Loaded state from localStorage: ${key} (v${cachedVersion})`);
       return true;
     } catch (err) {
       console.error('[BrowserVM] Failed to load state:', err);

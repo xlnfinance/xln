@@ -34,7 +34,7 @@ const HEAVY_LOGS = false;
  * Canonical J-Event types that j-watcher processes.
  * MUST match Depository.sol and Account.sol event definitions.
  */
-export const CANONICAL_J_EVENTS = ['ReserveUpdated', 'SecretRevealed', 'AccountSettled', 'DisputeStarted', 'DisputeFinalized', 'DebtCreated'] as const;
+export const CANONICAL_J_EVENTS = ['ReserveUpdated', 'SecretRevealed', 'AccountSettled', 'DisputeStarted', 'DisputeFinalized', 'DebtCreated', 'HankoBatchProcessed'] as const;
 export type CanonicalJEvent = (typeof CANONICAL_J_EVENTS)[number];
 
 /**
@@ -115,6 +115,7 @@ export class JEventWatcher {
     'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments)',
     'event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed initialDisputeNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash)',
     'event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex)',
+    'event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed hankoHash, uint256 nonce, bool success)',
   ];
 
   /**
@@ -430,6 +431,17 @@ export class JEventWatcher {
           },
         }];
 
+      case 'HankoBatchProcessed':
+        return [{
+          type: 'HankoBatchProcessed',
+          data: {
+            entityId: event.args.entityId,
+            hankoHash: event.args.hankoHash,
+            nonce: Number(event.args.nonce),
+            success: Boolean(event.args.success),
+          },
+        }];
+
       default:
         return [];
     }
@@ -473,6 +485,10 @@ export class JEventWatcher {
       case 'DebtCreated':
         // Entity is relevant if they are debtor OR creditor
         return normalizeId(event.args.debtor) === normalizedEntityId || normalizeId(event.args.creditor) === normalizedEntityId;
+
+      case 'HankoBatchProcessed':
+        // Entity is relevant if they submitted the batch
+        return normalizeId(event.args.entityId) === normalizedEntityId;
 
       default:
         return false;

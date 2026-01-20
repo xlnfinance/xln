@@ -260,12 +260,14 @@ export function buildInitialDisputeProof(
  * Encode dispute message for signing (matches Account.sol verifyDisputeProofHanko)
  *
  * MessageType.DisputeProof = 1
- * Format: abi.encode(MessageType.DisputeProof, ch_key, cooperativeNonce, disputeNonce, proofbodyHash)
+ * Format: abi.encode(MessageType.DisputeProof, depository, ch_key, cooperativeNonce, disputeNonce, proofbodyHash)
+ *
+ * The depository address binds the proof to a specific chain+depository for replay protection.
  */
 export function encodeDisputeMessage(
   accountMachine: AccountMachine,
   proofBodyHash: string,
-  _depositoryAddress: string
+  depositoryAddress: string
 ): string {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
 
@@ -281,9 +283,10 @@ export function encodeDisputeMessage(
   const MESSAGE_TYPE_DISPUTE_PROOF = 1;
 
   return abiCoder.encode(
-    ['uint256', 'bytes', 'uint256', 'uint256', 'bytes32'],
+    ['uint256', 'address', 'bytes', 'uint256', 'uint256', 'bytes32'],
     [
       MESSAGE_TYPE_DISPUTE_PROOF,
+      depositoryAddress,
       chKey,
       accountMachine.proofHeader.cooperativeNonce,
       accountMachine.proofHeader.disputeNonce,
@@ -323,30 +326,13 @@ export function getDisputeDelayBlocks(configValue: number): number {
 }
 
 /**
- * @deprecated BROKEN - DO NOT USE
- * This function was fundamentally broken: it used current VALUES instead of DIFFS.
- * Use SettlementWorkspace handlers instead.
- * See: entity-tx/handlers/settle.ts for the proper settlement negotiation flow.
- *
- * Kept as stub to catch any accidental uses at runtime.
- */
-export function buildSettlementDiffs(_accountMachine: AccountMachine): Array<{
-  tokenId: number;
-  leftDiff: bigint;
-  rightDiff: bigint;
-  collateralDiff: bigint;
-  ondeltaDiff: bigint;
-}> {
-  // Return empty array to avoid breaking existing code, but log deprecation warning
-  console.warn('⚠️ DEPRECATED: buildSettlementDiffs is broken. Use SettlementWorkspace handlers instead.');
-  return [];
-}
-
-/**
- * Create settlement hash for bilateral signature
+ * Create settlement hash for bilateral signature with explicit nonce
  * Matches Account.sol CooperativeUpdate encoding
+ * @param nonce The on-chain cooperativeNonce (NOT proofHeader.cooperativeNonce)
+ *
+ * The depository address binds the settlement to a specific chain+depository for replay protection.
  */
-export function createSettlementHash(
+export function createSettlementHashWithNonce(
   accountMachine: AccountMachine,
   diffs: Array<{
     tokenId: number;
@@ -355,24 +341,25 @@ export function createSettlementHash(
     collateralDiff: bigint;
     ondeltaDiff: bigint;
   }>,
-  _depositoryAddress: string
+  depositoryAddress: string,
+  nonce: number
 ): string {
   // Channel key is canonical (left:right)
   const channelKey = ethers.solidityPacked(
     ['bytes32', 'bytes32'],
     [accountMachine.leftEntity, accountMachine.rightEntity]
   );
-  const cooperativeNonce = accountMachine.proofHeader.cooperativeNonce;
 
   // Match Account.sol CooperativeUpdate encoding
   const MESSAGE_TYPE_COOPERATIVE_UPDATE = 0;
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   const encodedMsg = abiCoder.encode(
-    ['uint256', 'bytes', 'uint256', 'tuple(uint256,int256,int256,int256,int256)[]', 'uint256[]', 'tuple(bytes32,bytes32,uint256,uint256,uint256)[]'],
+    ['uint256', 'address', 'bytes', 'uint256', 'tuple(uint256,int256,int256,int256,int256)[]', 'uint256[]', 'tuple(bytes32,bytes32,uint256,uint256,uint256)[]'],
     [
       MESSAGE_TYPE_COOPERATIVE_UPDATE,
+      depositoryAddress,
       channelKey,
-      cooperativeNonce,
+      nonce,
       diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]),
       [], // forgiveDebtsInTokenIds (empty for now)
       []  // insuranceRegs (empty for now)

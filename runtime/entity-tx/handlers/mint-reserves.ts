@@ -14,7 +14,7 @@
 
 import type { EntityState, EntityTx, EntityInput } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { initJBatch } from '../../j-batch';
+import { initJBatch, assertBatchNotPending } from '../../j-batch';
 
 export async function handleMintReserves(
   entityState: EntityState,
@@ -30,6 +30,9 @@ export async function handleMintReserves(
   if (!newState.jBatchState) {
     newState.jBatchState = initJBatch();
   }
+
+  // Block if batch has pending broadcast
+  assertBatchNotPending(newState.jBatchState, 'mint');
 
   // Add mint to jBatch (same pattern as R2R)
   // Note: JBatch.reserveToReserve uses "receivingEntity" field name

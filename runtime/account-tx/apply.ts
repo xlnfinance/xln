@@ -19,6 +19,7 @@ import { handleHtlcTimeout } from './handlers/htlc-timeout';
 import { handleSwapOffer } from './handlers/swap-offer';
 import { handleSwapResolve } from './handlers/swap-resolve';
 import { handleSwapCancel } from './handlers/swap-cancel';
+import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
 
 /**
  * Process single AccountTx through bilateral consensus
@@ -108,6 +109,23 @@ export async function processAccountTx(
       if (!accountMachine.jEventChain) accountMachine.jEventChain = [];
       if (accountMachine.lastFinalizedJHeight === undefined) accountMachine.lastFinalizedJHeight = 0;
 
+      // H17 FIX: Validate jHeight bounds (soft validation - warn but don't reject)
+      // j_event_claim can be idempotent (same height re-claimed during consensus)
+      // Only reject unreasonably large forward jumps
+      const MAX_J_HEIGHT_JUMP = 10000;
+      if (jHeight > accountMachine.lastFinalizedJHeight + MAX_J_HEIGHT_JUMP) {
+        return {
+          success: false,
+          events: [`❌ j_event_claim: jHeight ${jHeight} too far ahead`],
+          error: `Invalid jHeight: jump too large (max ${MAX_J_HEIGHT_JUMP})`
+        };
+      }
+      // Skip duplicate claims (already finalized this height)
+      if (jHeight <= accountMachine.lastFinalizedJHeight) {
+        console.log(`   ℹ️ j_event_claim: jHeight ${jHeight} already finalized (lastFinalized=${accountMachine.lastFinalizedJHeight}) - skipping`);
+        return { success: true, events: [`ℹ️ j_event_claim skipped (already finalized)`] };
+      }
+
       // AUTH: Determine whose observation this is (2024 Transition.ts pattern)
       // isOurFrame = are WE the frame proposer? (like block.isLeft === channel.isLeft in 2024)
       const { iAmLeft, counterparty: cpId } = getAccountPerspective(accountMachine, myEntityId);
@@ -131,6 +149,7 @@ export async function processAccountTx(
 
       // CRITICAL: Only finalize during COMMIT (on real accountMachine), not VALIDATION (on clone)
       // Validation happens on clonedMachine which gets discarded - finalization would be lost!
+      // Frame delta comparison now uses offdelta only, which isn't affected by bilateral finalization.
       if (!isValidation) {
         const { tryFinalizeAccountJEvents } = await import('../entity-tx/j-events');
         tryFinalizeAccountJEvents(accountMachine, cpId, { timestamp: currentTimestamp });
@@ -200,6 +219,21 @@ export async function processAccountTx(
         isOurFrame,
         currentHeight,
         isValidation
+      );
+
+    // === SETTLEMENT HOLD HANDLERS ===
+    case 'settle_hold':
+      return await handleSettleHold(
+        accountMachine,
+        accountTx as Extract<AccountTx, { type: 'settle_hold' }>,
+        isOurFrame
+      );
+
+    case 'settle_release':
+      return await handleSettleRelease(
+        accountMachine,
+        accountTx as Extract<AccountTx, { type: 'settle_release' }>,
+        isOurFrame
       );
 
     case 'account_frame':

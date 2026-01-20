@@ -48,11 +48,23 @@ export async function handleHtlcTimeout(
     return { success: false, error: `Delta ${lock.tokenId} not found`, events };
   }
 
-  // 4. Release hold (NO delta change - funds return to sender)
+  // 4. Release hold (NO delta change - funds return to sender, with underflow guard)
   if (lock.senderIsLeft) {
-    delta.leftHtlcHold = (delta.leftHtlcHold || 0n) - lock.amount;
+    const currentHold = delta.leftHtlcHold || 0n;
+    if (currentHold < lock.amount) {
+      console.error(`⚠️ HTLC timeout hold underflow! leftHtlcHold=${currentHold} < amount=${lock.amount}`);
+      delta.leftHtlcHold = 0n;
+    } else {
+      delta.leftHtlcHold = currentHold - lock.amount;
+    }
   } else {
-    delta.rightHtlcHold = (delta.rightHtlcHold || 0n) - lock.amount;
+    const currentHold = delta.rightHtlcHold || 0n;
+    if (currentHold < lock.amount) {
+      console.error(`⚠️ HTLC timeout hold underflow! rightHtlcHold=${currentHold} < amount=${lock.amount}`);
+      delta.rightHtlcHold = 0n;
+    } else {
+      delta.rightHtlcHold = currentHold - lock.amount;
+    }
   }
 
   // 5. Remove lock

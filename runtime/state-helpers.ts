@@ -10,6 +10,7 @@ import { DEBUG } from './utils';
 import { validateEntityState } from './validation-utils';
 import { safeStringify, safeParse } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
+import { cloneJBatch } from './j-batch';
 
 // Message size limit for snapshot efficiency
 const MESSAGE_LIMIT = 10;
@@ -147,6 +148,13 @@ export function cloneEntityState(entityState: EntityState, forSnapshot: boolean 
       }
     }
 
+    if (entityState.jBatchState && !cloned.jBatchState) {
+      cloned.jBatchState = {
+        ...entityState.jBatchState,
+        batch: cloneJBatch(entityState.jBatchState.batch),
+      };
+    }
+
     // VALIDATE AT SOURCE: Guarantee type safety from this point forward
     return validateEntityState(cloned, 'cloneEntityState.structuredClone');
   } catch (error) {
@@ -183,6 +191,10 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     ),
     deferredAccountProposals: cloneMap(entityState.deferredAccountProposals || new Map()),
     accountInputQueue: cloneArray(entityState.accountInputQueue || []),
+    jBatchState: entityState.jBatchState ? {
+      ...entityState.jBatchState,
+      batch: cloneJBatch(entityState.jBatchState.batch),
+    } : undefined,
     // JBlock consensus state
     lastFinalizedJHeight: entityState.lastFinalizedJHeight ?? 0,
     jBlockObservations: cloneArray(entityState.jBlockObservations || []),
@@ -458,7 +470,7 @@ export const captureSnapshot = async (
   const snapshot: EnvSnapshot = {
     height: env.height,
     timestamp: env.timestamp,
-    ...(env.runtimeSeed ? { runtimeSeed: env.runtimeSeed } : {}),
+    ...(env.runtimeSeed !== undefined && env.runtimeSeed !== null ? { runtimeSeed: env.runtimeSeed } : {}),
     ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
     eReplicas: new Map(Array.from(env.eReplicas.entries()).map(([key, replica]) => [key, cloneEntityReplica(replica, true)])), // forSnapshot=true excludes clonedForValidation
     jReplicas,
@@ -593,6 +605,7 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     currentHeight: account.currentHeight,
     pendingSignatures: [...account.pendingSignatures],
     rollbackCount: account.rollbackCount,
+    lastRollbackFrameHash: account.lastRollbackFrameHash,
     sendCounter: account.sendCounter,
     receiveCounter: account.receiveCounter,
     frameHistory: [...account.frameHistory], // Clone frame history array
@@ -603,6 +616,20 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
       deltas: [...account.proofBody.deltas],
     },
     disputeConfig: { ...account.disputeConfig }, // Dispute delay configuration
+    leftJObservations: account.leftJObservations.map(obs => ({
+      ...obs,
+      events: Array.isArray(obs.events) ? [...obs.events] : [],
+    })),
+    rightJObservations: account.rightJObservations.map(obs => ({
+      ...obs,
+      events: Array.isArray(obs.events) ? [...obs.events] : [],
+    })),
+    jEventChain: account.jEventChain.map(entry => ({
+      ...entry,
+      events: Array.isArray(entry.events) ? [...entry.events] : [],
+    })),
+    lastFinalizedJHeight: account.lastFinalizedJHeight,
+    onChainSettlementNonce: account.onChainSettlementNonce,
     pendingWithdrawals: new Map(account.pendingWithdrawals), // Phase 2: Clone withdrawal tracking
     requestedRebalance: new Map(account.requestedRebalance), // Phase 3: Clone rebalance hints
   };
@@ -647,6 +674,29 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   }
   if (account.disputeProofBodiesByHash) {
     result.disputeProofBodiesByHash = { ...account.disputeProofBodiesByHash };
+  }
+  if (account.currentFrameHanko) {
+    result.currentFrameHanko = account.currentFrameHanko;
+  }
+  if (account.counterpartyFrameHanko) {
+    result.counterpartyFrameHanko = account.counterpartyFrameHanko;
+  }
+  if (account.activeDispute) {
+    result.activeDispute = { ...account.activeDispute };
+  }
+  if (account.settlementWorkspace) {
+    result.settlementWorkspace = {
+      ...account.settlementWorkspace,
+      diffs: account.settlementWorkspace.diffs.map(diff => ({ ...diff })),
+      forgiveTokenIds: [...account.settlementWorkspace.forgiveTokenIds],
+      insuranceRegs: account.settlementWorkspace.insuranceRegs.map(reg => ({ ...reg })),
+    };
+  }
+  if (account.pendingForward) {
+    result.pendingForward = {
+      ...account.pendingForward,
+      route: [...account.pendingForward.route],
+    };
   }
 
   // ABI-encoded proofBody for on-chain disputes

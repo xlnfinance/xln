@@ -15,7 +15,7 @@
 
 import type { EntityState, EntityTx, EntityInput, Env, JTx, JInput } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { isBatchEmpty, getBatchSize, createEmptyBatch } from '../../j-batch';
+import { isBatchEmpty, getBatchSize, createEmptyBatch, cloneJBatch } from '../../j-batch';
 
 export async function handleJBroadcast(
   entityState: EntityState,
@@ -31,7 +31,7 @@ export async function handleJBroadcast(
   if (!newState.jBatchState || isBatchEmpty(newState.jBatchState.batch)) {
     const batch = newState.jBatchState?.batch;
     if (batch) {
-      console.warn(`⚠️ j_broadcast: empty batch for ${entityState.entityId.slice(-4)} (r2r=${batch.reserveToReserve.length}, r2c=${batch.reserveToCollateral.length}, settlements=${batch.settlements.length}, starts=${batch.disputeStarts.length}, finals=${batch.disputeFinalizations.length})`);
+      console.warn(`⚠️ j_broadcast: empty batch for ${entityState.entityId.slice(-4)} (r2r=${batch.reserveToReserve.length}, r2c=${batch.reserveToCollateral.length}, c2r=${batch.collateralToReserve.length}, settlements=${batch.settlements.length}, starts=${batch.disputeStarts.length}, finals=${batch.disputeFinalizations.length})`);
     } else {
       console.warn(`⚠️ j_broadcast: missing jBatchState for ${entityState.entityId.slice(-4)}`);
     }
@@ -66,7 +66,7 @@ export async function handleJBroadcast(
     type: 'batch',
     entityId: entityState.entityId,
     data: {
-      batch: newState.jBatchState.batch,
+      batch: cloneJBatch(newState.jBatchState.batch),
       hankoSignature: hankoSignature || undefined,
       batchSize,
       signerId,
@@ -86,10 +86,13 @@ export async function handleJBroadcast(
   console.log(`   📦 Will queue to J-mempool via runtime`);
   console.log(`   Batch size: ${batchSize} operations`);
 
-  // Clear entity's jBatch after creating output (ready for next batch)
-  newState.jBatchState.batch = createEmptyBatch();
+  // NOTE: jBatch is NOT cleared on broadcast!
+  // It stays populated until finalized (HankoBatchProcessed event) or manually cleared.
+  // This allows rebroadcast if tx fails and prevents premature batch clearing.
+  // Settlement nonce tracking: Both sides use workspace status (symmetric).
   newState.jBatchState.broadcastCount++;
   newState.jBatchState.lastBroadcast = env.timestamp;
+  newState.jBatchState.pendingBroadcast = true; // Block new operations until finalized
 
   addMessage(newState, `📤 Created J-output (${batchSize} ops) - will queue via runtime`);
 

@@ -4,10 +4,10 @@
   "main": "index.js",
   "scripts": {
     "dev": "./dev-full.sh",
-    "build": "bun build runtime/runtime.ts --target=browser --outfile=frontend/static/runtime.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util",
+    "build": "bun build runtime/runtime.ts --target=browser --outfile=frontend/static/runtime.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external url --external net --external tls --external os --external util",
     "dev:ci": "./dev-ci.sh",
     "serve": "bun run serve.ts",
-    "serve:dev": "bun build runtime/runtime.ts --target=browser --outfile=frontend/static/runtime.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external buffer --external url --external net --external tls --external os --external util && bun run serve.ts",
+    "serve:dev": "bun build runtime/runtime.ts --target=browser --outfile=frontend/static/runtime.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external url --external net --external tls --external os --external util && bun run serve.ts",
     "notify:done": "bash ./scripts/notify.sh 'Task complete' 'XLN Agent' 'All done'",
     "notify:fail": "bash ./scripts/notify.sh 'Task failed' 'XLN Agent' 'Check logs' 'Basso'",
     "test:e2e:notify": "bunx playwright test && bash ./scripts/notify.sh 'E2E passed' 'XLN Agent' || bash ./scripts/notify.sh 'E2E failed' 'XLN Agent' 'See report' 'Basso'",

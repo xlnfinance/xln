@@ -92,11 +92,23 @@ export async function handleHtlcReveal(
   delta.offdelta += canonicalDelta;
   console.log(`🔓 REVEAL-DELTA: offdelta AFTER=${delta.offdelta}`);
 
-  // 6. Release hold
+  // 6. Release hold (with underflow guard)
   if (lock.senderIsLeft) {
-    delta.leftHtlcHold = (delta.leftHtlcHold || 0n) - lock.amount;
+    const currentHold = delta.leftHtlcHold || 0n;
+    if (currentHold < lock.amount) {
+      console.error(`⚠️ HTLC hold underflow! leftHtlcHold=${currentHold} < amount=${lock.amount}`);
+      delta.leftHtlcHold = 0n;
+    } else {
+      delta.leftHtlcHold = currentHold - lock.amount;
+    }
   } else {
-    delta.rightHtlcHold = (delta.rightHtlcHold || 0n) - lock.amount;
+    const currentHold = delta.rightHtlcHold || 0n;
+    if (currentHold < lock.amount) {
+      console.error(`⚠️ HTLC hold underflow! rightHtlcHold=${currentHold} < amount=${lock.amount}`);
+      delta.rightHtlcHold = 0n;
+    } else {
+      delta.rightHtlcHold = currentHold - lock.amount;
+    }
   }
 
   // 7. Remove lock

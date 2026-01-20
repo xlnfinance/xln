@@ -99,11 +99,13 @@ library Account {
 
   /// @notice Verify dispute proof with hanko (entity-level signature)
   /// @param entityProvider EP contract for hanko verification
+  /// @param depository Depository address for replay protection binding
   /// @param hanko Hanko signature bytes
   /// @param expectedEntity Expected entity that should have signed
   /// @return success Whether hanko is valid for this entity
   function verifyDisputeProofHanko(
     address entityProvider,
+    address depository,
     bytes memory ch_key,
     uint cooperativeNonce,
     uint disputeNonce,
@@ -111,7 +113,8 @@ library Account {
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, cooperativeNonce, disputeNonce, proofbodyHash);
+    // Include depository address in hash for chain+depository binding (replay protection)
+    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, depository, ch_key, cooperativeNonce, disputeNonce, proofbodyHash);
     bytes32 hash = keccak256(encoded_msg);  // NO toEthSignedMessageHash for hanko
 
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
@@ -121,6 +124,7 @@ library Account {
   /// @notice Verify final dispute proof with hanko
   function verifyFinalDisputeProofHanko(
     address entityProvider,
+    address depository,
     bytes memory ch_key,
     uint finalCooperativeNonce,
     uint initialDisputeNonce,
@@ -128,7 +132,8 @@ library Account {
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, ch_key, finalCooperativeNonce, initialDisputeNonce, finalDisputeNonce);
+    // Include depository address for chain+depository binding (replay protection)
+    bytes memory encoded_msg = abi.encode(MessageType.FinalDisputeProof, depository, ch_key, finalCooperativeNonce, initialDisputeNonce, finalDisputeNonce);
     bytes32 hash = keccak256(encoded_msg);
 
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
@@ -138,6 +143,7 @@ library Account {
   /// @notice Verify cooperative proof with hanko
   function verifyCooperativeProofHanko(
     address entityProvider,
+    address depository,
     bytes memory ch_key,
     uint cooperativeNonce,
     bytes32 proofbodyHash,
@@ -145,7 +151,8 @@ library Account {
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, ch_key, cooperativeNonce, proofbodyHash, initialArgumentsHash);
+    // Include depository address for chain+depository binding (replay protection)
+    bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, depository, ch_key, cooperativeNonce, proofbodyHash, initialArgumentsHash);
     bytes32 hash = keccak256(encoded_msg);
 
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
@@ -171,6 +178,87 @@ library Account {
         completeSuccess = false;
       }
     }
+  }
+
+  /// @notice Process C2R shortcut directly (skip Settlement[] allocation)
+  /// @dev More gas efficient than creating Settlement[1] and calling processSettlements
+  ///      Uses SAME signature format as settlement (reconstructs diffs for verification)
+  function processC2R(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage _reserves,
+    mapping(bytes => AccountInfo) storage _accounts,
+    mapping(bytes => mapping(uint256 => AccountCollateral)) storage _collaterals,
+    bytes32 entityId,
+    CollateralToReserve memory c2r,
+    address entityProvider
+  ) external returns (bool) {
+    // Determine canonical left/right
+    bool isLeft = entityId < c2r.counterparty;
+    bytes32 leftEntity = isLeft ? entityId : c2r.counterparty;
+    bytes32 rightEntity = isLeft ? c2r.counterparty : entityId;
+    bytes memory ch_key = _accountKey(leftEntity, rightEntity);
+
+    // Reconstruct the expected diffs for signature verification
+    // C2R is just a calldata shortcut - signature is over the same format as settlement
+    SettlementDiff[] memory diffs = new SettlementDiff[](1);
+    diffs[0] = SettlementDiff({
+      tokenId: c2r.tokenId,
+      leftDiff: isLeft ? int(c2r.amount) : int(0),
+      rightDiff: isLeft ? int(0) : int(c2r.amount),
+      collateralDiff: -int(c2r.amount),
+      ondeltaDiff: isLeft ? -int(c2r.amount) : int(0)  // only left affects ondelta
+    });
+
+    // Verify counterparty signature using SAME format as settlement
+    // Include address(this) (depository via DELEGATECALL) for chain+depository binding (replay protection)
+    bytes memory encoded_msg = abi.encode(
+      MessageType.CooperativeUpdate,
+      address(this),
+      ch_key,
+      _accounts[ch_key].cooperativeNonce,
+      diffs,
+      new uint[](0),  // forgiveDebtsInTokenIds
+      new InsuranceRegistration[](0)  // insuranceRegs
+    );
+    bytes32 hash = keccak256(encoded_msg);
+
+    // Verify counterparty hanko
+    (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(c2r.sig, hash);
+    if (!valid || recoveredEntity != c2r.counterparty) {
+      return false;
+    }
+
+    // Apply diffs directly (no need to loop - single diff)
+    uint tokenId = c2r.tokenId;
+    uint amount = c2r.amount;
+    AccountCollateral storage col = _collaterals[ch_key][tokenId];
+
+    // Check collateral sufficient
+    if (col.collateral < amount) revert E3();
+
+    // Apply diffs
+    _reserves[entityId][tokenId] += amount;
+    col.collateral -= amount;
+
+    // ondelta: only left withdrawals affect ondelta
+    if (isLeft) {
+      col.ondelta -= int(amount);
+    }
+
+    // Emit settled event
+    Settled[] memory settledEvents = new Settled[](1);
+    settledEvents[0] = Settled({
+      left: leftEntity,
+      right: rightEntity,
+      tokenId: tokenId,
+      leftReserve: _reserves[leftEntity][tokenId],
+      rightReserve: _reserves[rightEntity][tokenId],
+      collateral: col.collateral,
+      ondelta: col.ondelta
+    });
+    emit AccountSettled(settledEvents);
+
+    _accounts[ch_key].cooperativeNonce++;
+    return true;
   }
 
   /// @notice Process dispute starts only
@@ -213,7 +301,8 @@ library Account {
     // Counterparty signature REQUIRED for any state changes (cooperative proof)
     if (s.diffs.length > 0 || s.forgiveDebtsInTokenIds.length > 0 || s.insuranceRegs.length > 0) {
       require(s.sig.length > 0, "Signature required for settlement");
-      bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, ch_key, _accounts[ch_key].cooperativeNonce, s.diffs, s.forgiveDebtsInTokenIds, s.insuranceRegs);
+      // Include address(this) (depository via DELEGATECALL) for chain+depository binding (replay protection)
+      bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), ch_key, _accounts[ch_key].cooperativeNonce, s.diffs, s.forgiveDebtsInTokenIds, s.insuranceRegs);
 
       // Debug: emit hash details
       emit DebugSettlementHash(keccak256(encoded_msg), counterparty, _accounts[ch_key].cooperativeNonce, s.diffs.length, encoded_msg.length);
@@ -328,7 +417,8 @@ library Account {
     // Counterparty signature REQUIRED
     require(params.sig.length > 0, "Signature required for dispute");
 
-    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
+    // Include address(this) (depository via DELEGATECALL) for chain+depository binding (replay protection)
+    bytes memory encoded_msg = abi.encode(MessageType.DisputeProof, address(this), ch_key, params.cooperativeNonce, params.disputeNonce, params.proofbodyHash);
     bytes32 hash = keccak256(encoded_msg);
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(params.sig, hash);
     if (!valid || recoveredEntity != params.counterentity) revert E4();

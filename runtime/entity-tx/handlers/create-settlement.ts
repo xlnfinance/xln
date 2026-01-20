@@ -49,7 +49,11 @@ export async function handleCreateSettlement(
     diffs,
     [],
     [],
-    sig
+    sig,
+    undefined,
+    '0x',
+    0,
+    entityState.entityId
   );
 
   console.log(`✅ createSettlement: Added to jBatch for ${entityState.entityId.slice(-4)}`);

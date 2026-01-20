@@ -30,11 +30,15 @@ export const getApplyRuntimeInput = async () => {
 export { checkSolvency } from './solvency-check';
 
 export function requireRuntimeSeed(env: Env, label: string): string {
-  const seed = env.runtimeSeed || process.env.XLN_RUNTIME_SEED || process.env.RUNTIME_SEED || null;
-  if (!seed) {
+  const envSeed = env.runtimeSeed ?? null;
+  const processSeed = (typeof process !== 'undefined' && process.env)
+    ? (process.env.XLN_RUNTIME_SEED || process.env.RUNTIME_SEED || null)
+    : null;
+  const seed = envSeed ?? processSeed;
+  if (seed === null || seed === undefined) {
     throw new Error(`${label}: runtimeSeed missing - unlock vault or set XLN_RUNTIME_SEED`);
   }
-  if (!env.runtimeSeed) {
+  if (env.runtimeSeed === undefined || env.runtimeSeed === null) {
     env.runtimeSeed = seed;
   }
   return seed;
@@ -51,7 +55,21 @@ export function ensureSignerKeysFromSeed(env: Env, signerIds: string[], label: s
   }
 }
 
+type ScenarioLogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+const LOG_LEVEL_PRIORITY: Record<ScenarioLogLevel, number> = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3,
+};
+
 let strictScenarioDepth = 0;
+let strictScenarioLogLevel: ScenarioLogLevel = 'info';
+let strictScenarioOriginalLog: typeof console.log | null = null;
+let strictScenarioOriginalInfo: typeof console.info | null = null;
+let strictScenarioOriginalWarn: typeof console.warn | null = null;
+let strictScenarioOriginalDebug: typeof console.debug | null = null;
 let strictScenarioOriginalError: typeof console.error | null = null;
 
 const getScenarioTickMs = (env: Env): number => {
@@ -80,12 +98,24 @@ export async function waitScenario(env: Env, ms: number): Promise<void> {
   advanceScenarioTime(env, ms, true);
 }
 
+function shouldEmitScenarioLog(level: ScenarioLogLevel): boolean {
+  return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[strictScenarioLogLevel];
+}
+
 export function enableStrictScenario(env: Env, label: string): () => void {
   env.strictScenario = true;
   env.strictScenarioLabel = label;
+  if (!env.scenarioLogLevel) {
+    env.scenarioLogLevel = env.quietRuntimeLogs ? 'warn' : 'info';
+  }
+  strictScenarioLogLevel = env.scenarioLogLevel;
   setFailFastErrors(true);
 
   if (strictScenarioDepth === 0) {
+    strictScenarioOriginalLog = console.log;
+    strictScenarioOriginalInfo = console.info;
+    strictScenarioOriginalWarn = console.warn;
+    strictScenarioOriginalDebug = console.debug;
     strictScenarioOriginalError = console.error;
     const formatConsoleArg = (arg: unknown): string => {
       if (typeof arg === 'string') return arg;
@@ -94,6 +124,26 @@ export function enableStrictScenario(env: Env, label: string): () => void {
         return JSON.stringify(arg);
       } catch {
         return String(arg);
+      }
+    };
+    console.log = (...args: unknown[]) => {
+      if (shouldEmitScenarioLog('info')) {
+        strictScenarioOriginalLog?.(...args);
+      }
+    };
+    console.info = (...args: unknown[]) => {
+      if (shouldEmitScenarioLog('info')) {
+        strictScenarioOriginalInfo?.(...args);
+      }
+    };
+    console.warn = (...args: unknown[]) => {
+      if (shouldEmitScenarioLog('warn')) {
+        strictScenarioOriginalWarn?.(...args);
+      }
+    };
+    console.debug = (...args: unknown[]) => {
+      if (shouldEmitScenarioLog('debug')) {
+        strictScenarioOriginalDebug?.(...args);
       }
     };
     console.error = (...args: unknown[]) => {
@@ -109,6 +159,22 @@ export function enableStrictScenario(env: Env, label: string): () => void {
     if (strictScenarioDepth === 0) {
       env.strictScenario = false;
       env.strictScenarioLabel = undefined;
+      if (strictScenarioOriginalLog) {
+        console.log = strictScenarioOriginalLog;
+        strictScenarioOriginalLog = null;
+      }
+      if (strictScenarioOriginalInfo) {
+        console.info = strictScenarioOriginalInfo;
+        strictScenarioOriginalInfo = null;
+      }
+      if (strictScenarioOriginalWarn) {
+        console.warn = strictScenarioOriginalWarn;
+        strictScenarioOriginalWarn = null;
+      }
+      if (strictScenarioOriginalDebug) {
+        console.debug = strictScenarioOriginalDebug;
+        strictScenarioOriginalDebug = null;
+      }
       if (strictScenarioOriginalError) {
         console.error = strictScenarioOriginalError;
         strictScenarioOriginalError = null;

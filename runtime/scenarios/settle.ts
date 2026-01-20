@@ -112,6 +112,9 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
 
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
+  if (env.runtimeSeed === undefined || env.runtimeSeed === null) {
+    env.runtimeSeed = '';
+  }
 
   // Suppress console.log for cleaner output
   const originalLog = console.log;
@@ -120,11 +123,12 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     // Only show key events
     if (msg.includes('ASSERT') || msg.includes('✅') || msg.includes('❌') ||
         msg.includes('PHASE') || msg.includes('TEST') || msg.includes('settle_') ||
-        msg.includes('═══')) {
+        msg.includes('═══') || msg.includes('HOLD CHECK')) {
       originalLog(...args);
     }
   };
   console.log = quietLog;
+  env.scenarioLogLevel = 'info'; // Allow info-level logs through strict scenario filter
   const cleanupStrictMode = enableStrictScenario(env, 'settle');
 
   // Initialize BrowserVM
@@ -170,7 +174,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // Ensure signer keys
   ensureSignerKeysFromSeed(env, ['1', '2'], 'settle');
 
-  // Create Alice
+  // Create Alice (left of jurisdiction)
   await applyRuntimeInput(env, {
     runtimeTxs: [{
       type: 'importReplica' as const,
@@ -178,7 +182,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
       signerId: '1',
       data: {
         isProposer: true,
-        position: { x: -50, y: 0, z: 0 },
+        position: { x: -30, y: -30, z: 0 },
         config: {
           mode: 'proposer-based' as const,
           threshold: 1n,
@@ -191,7 +195,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     entityInputs: []
   });
 
-  // Create Hub
+  // Create Hub (right of jurisdiction)
   await applyRuntimeInput(env, {
     runtimeTxs: [{
       type: 'importReplica' as const,
@@ -199,7 +203,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
       signerId: '2',
       data: {
         isProposer: true,
-        position: { x: 50, y: 0, z: 0 },
+        position: { x: 30, y: -30, z: 0 },
         config: {
           mode: 'proposer-based' as const,
           threshold: 1n,
@@ -213,6 +217,11 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   });
 
   console.log(`✅ Created Alice (${ALICE_ID.slice(-4)}) and Hub (${HUB_ID.slice(-4)})`);
+
+  snap(env, 'Entities Created', {
+    description: 'Alice and Hub entities initialized',
+    phase: 'setup'
+  });
 
   // Setup j-watcher
   jWatcherInstance = setupBrowserVMWatcher(env, evm);
@@ -250,6 +259,11 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   }
 
   console.log(`✅ Account opened between Alice and Hub`);
+
+  snap(env, 'Account Opened', {
+    description: 'Bilateral account between Alice and Hub',
+    phase: 'setup'
+  });
 
   // ══════════════════════════════════════════════════════════════════════════════
   // TEST 1: CONSERVATION LAW VALIDATION
@@ -376,9 +390,23 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   assert(aliceAccount.settlementWorkspace.version === 1, 'Workspace should be version 1');
   assert(aliceAccount.settlementWorkspace.initiatedBy === 'left', 'Alice (left) initiated');
 
+  // TEST: Verify settlement holds are set via frame consensus
+  // depositDiff has leftDiff: -usd(100), so leftSettleHold should be usd(100)
+  const usdcDelta = aliceAccount.deltas.get(USDC_TOKEN_ID);
+  assert(usdcDelta, 'USDC delta should exist', env);
+  const expectedHold = usd(100);
+  console.log(`   HOLD CHECK: leftSettleHold=${usdcDelta.leftSettleHold || 0n}, expected=${expectedHold}`);
+  assert(usdcDelta.leftSettleHold === expectedHold, `Settlement hold not set: expected ${expectedHold}, got ${usdcDelta.leftSettleHold || 0n}`, env);
+
   console.log(`✅ Settlement proposed: Alice → Hub`);
   console.log(`   Workspace version: ${aliceAccount.settlementWorkspace.version}`);
   console.log(`   Status: ${aliceAccount.settlementWorkspace.status}`);
+
+  snap(env, 'Settlement Proposed', {
+    description: 'Alice proposes $100 deposit to collateral',
+    phase: 'propose',
+    holdAmount: expectedHold.toString()
+  });
 
   // ══════════════════════════════════════════════════════════════════════════════
   // TEST 4: SETTLEMENT WORKSPACE UPDATE
@@ -420,6 +448,11 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
 
   console.log(`✅ Settlement updated by Hub`);
   console.log(`   New version: ${aliceAccount2.settlementWorkspace.version}`);
+
+  snap(env, 'Settlement Updated', {
+    description: 'Hub counter-proposes $50 instead of $100',
+    phase: 'update'
+  });
 
   // ══════════════════════════════════════════════════════════════════════════════
   // TEST 5: SETTLEMENT APPROVE
@@ -472,6 +505,11 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   console.log(`   rightHanko: ${aliceAccount4.settlementWorkspace.rightHanko?.slice(0, 20)}...`);
   console.log(`   Status: ${aliceAccount4.settlementWorkspace.status}`);
 
+  snap(env, 'Settlement Approved', {
+    description: 'Both parties signed - ready to submit',
+    phase: 'approve'
+  });
+
   // ══════════════════════════════════════════════════════════════════════════════
   // TEST 6: SETTLEMENT EXECUTE
   // ══════════════════════════════════════════════════════════════════════════════
@@ -498,6 +536,11 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
 
   console.log(`✅ Settlement executed - added to jBatch`);
   console.log(`   jBatch settlements: ${aliceState.jBatchState?.batch?.settlements?.length}`);
+
+  snap(env, 'Settlement Executed', {
+    description: 'Settlement added to jBatch for on-chain commit',
+    phase: 'execute'
+  });
 
   // ══════════════════════════════════════════════════════════════════════════════
   // TEST 7: SETTLEMENT REJECT
@@ -545,6 +588,16 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   assert(!aliceAccount5?.settlementWorkspace, 'Workspace should be cleared after reject', env);
 
   console.log(`✅ Settlement rejected - workspace cleared`);
+
+  snap(env, 'Settlement Rejected', {
+    description: 'Hub rejected - workspace cleared, holds released',
+    phase: 'reject'
+  });
+
+  snap(env, 'Scenario Complete', {
+    description: 'All settlement tests passed',
+    phase: 'complete'
+  });
 
   // ══════════════════════════════════════════════════════════════════════════════
   // CLEANUP
