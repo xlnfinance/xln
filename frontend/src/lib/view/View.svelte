@@ -149,6 +149,7 @@
       if (urlImport) {
         console.log('[View] 🔗 Importing state from URL hash...');
         env = XLN.createEmptyEnv();
+        env.quietRuntimeLogs = true; // Quiet by default (toggle in Settings)
 
         // Restore jurisdictions
         env.jReplicas = urlImport.state.x;
@@ -172,6 +173,7 @@
       } else {
         // No URL import: Create empty environment
         env = XLN.createEmptyEnv();
+        env.quietRuntimeLogs = true; // Quiet by default (toggle in Settings)
 
         // Initialize with empty frame 0
         env.history = [{

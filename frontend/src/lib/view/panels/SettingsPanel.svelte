@@ -690,8 +690,19 @@
             bind:checked={settings.verboseLogging}
             on:change={() => {
               updateSetting('verboseLogging', settings.verboseLogging);
-              if (typeof window !== 'undefined' && window.frontendLogs) {
-                settings.verboseLogging ? window.frontendLogs.enableAll() : window.frontendLogs.disableAll();
+              if (typeof window !== 'undefined') {
+                // Toggle frontend logs
+                if (window.frontendLogs) {
+                  settings.verboseLogging ? window.frontendLogs.enableAll() : window.frontendLogs.disableAll();
+                }
+                // Toggle runtime logs (quietRuntimeLogs is the inverse)
+                const xlnEnv = (window as any).xlnEnv;
+                if (xlnEnv) {
+                  xlnEnv.update((env: any) => {
+                    if (env) env.quietRuntimeLogs = !settings.verboseLogging;
+                    return env;
+                  });
+                }
               }
             }}
           />
