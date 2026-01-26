@@ -1,6 +1,14 @@
-# bilaterality: the killer feature
+# bilaterality: not a feature, a necessity
 
-the killer feature is bilaterality. state isn't a giant shared ledger—it's a duplex mesh where each relationship processes independently in parallel. that's where the scalability comes from.
+**bilaterality is not a design choice. it is the only topology that satisfies the scalability constraint.**
+
+broadcast O(n) has physical ceiling: validators cannot process infinite transactions. even with parallelization, sharding, compression - the bottleneck remains. every validator processes every transaction costs O(n).
+
+unicast O(1) has no ceiling: each bilateral relationship processes independently. 1 billion users = 500 billion bilateral accounts, all parallel, no coordination overhead.
+
+**internet achieved billion-user scale through unicast (TCP connections). finance must follow same path.**
+
+**inbound capacity solution:** bilateral credit is directional. when you extend credit to a hub (allowing hub to owe you), the hub can go negative on their side, which means you go positive = you received value without pre-funding. this solves lightning's inbound capacity wall, which requires counterparty to lock funds on your side before you can receive.
 
 ---
 

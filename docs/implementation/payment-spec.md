@@ -1,5 +1,7 @@
 # XLN Payment System Specification
-## Version 1.0 - December 2024
+## Version 1.1 - January 2026
+
+**Status:** Phase 1 (Direct Payments) complete. Phases 2-5 (HTLCs, onion routing, pathfinding) in design/partial implementation.
 
 ## Architecture Overview
 
@@ -71,7 +73,7 @@ function applyDirectPaymentTx(
         direction: 'outgoing'
       }
     }],
-    timestamp: Date.now()
+    timestamp: env.timestamp  // CRITICAL: Use controlled timestamp for determinism
   };
 
   events.push(`💸 Initiating payment of ${tx.data.amount} token ${tx.data.tokenId} to ${tx.data.recipientEntityId}`);
@@ -325,7 +327,7 @@ async function applyHashlockPaymentTx(
   env.paymentSecrets.set(hash, {
     secret,
     entityId: entityState.entityId,
-    created: Date.now()
+    created: env.timestamp  // CRITICAL: Deterministic timestamp
   });
 
   // Get routing information
@@ -349,7 +351,7 @@ async function applyHashlockPaymentTx(
         hash,
         tokenId: tx.data.tokenId,
         amount: tx.data.amount,
-        timelock: Date.now() + (route.length * 60 * 60 * 1000), // 1hr per hop
+        timelock: env.timestamp + (route.length * 60 * 60 * 1000), // 1hr per hop (deterministic)
         routingPacket: onionPacket
       }
     }]
@@ -848,35 +850,37 @@ function buildNetworkGraph(env: Env, tokenId: number): NetworkGraph {
 3. Route finding with 10,000 nodes
 4. Onion encryption/decryption overhead
 
-## Implementation Priority
+## Implementation Status (2026-01-24)
 
-### Phase 1: Direct Payments (Week 1)
+### Phase 1: Direct Payments ✅ COMPLETE
 - [x] DirectPaymentEntityTx type
 - [x] E-Machine handler
 - [x] A-Machine processor
 - [x] Basic testing
 
-### Phase 2: Hashlocks (Week 2)
-- [ ] Hashlock data structures
-- [ ] Add/Settle/Cancel handlers
-- [ ] Secret management
-- [ ] Timeout monitoring
+### Phase 2: HTLCs 🟡 PARTIAL
+- [x] Hashlock data structures (see runtime/types.ts)
+- [x] Add/Settle/Cancel handlers (account-tx/htlc.ts)
+- [x] Secret management
+- [x] Timeout monitoring (crontab)
+- [ ] Envelope encryption (BLOCKING for mainnet)
 
-### Phase 3: Onion Routing (Week 3)
-- [ ] Encryption utilities
-- [ ] Packet creation/peeling
-- [ ] Forwarding logic
+### Phase 3: Onion Routing 🟡 PARTIAL
+- [ ] Encryption utilities (ECIES or HMAC)
+- [x] Packet structure (cleartext in Phase 2)
+- [x] Forwarding logic (entity-tx/htlc.ts)
 - [ ] Privacy testing
 
-### Phase 4: Path Finding (Week 4)
-- [ ] Network graph builder
+### Phase 4: Path Finding 🟡 PARTIAL
+- [x] Network graph builder (conceptual)
+- [x] BFS pathfinding (gossip-based)
 - [ ] Dijkstra implementation
 - [ ] Fee calculation
 - [ ] Route selection
 
-### Phase 5: Integration (Week 5)
-- [ ] End-to-end payment flow
-- [ ] Error handling
+### Phase 5: Integration 🟡 PARTIAL
+- [x] Multi-hop payments (4-hop tested)
+- [x] Error handling (basic)
 - [ ] Performance optimization
 - [ ] Comprehensive testing
 

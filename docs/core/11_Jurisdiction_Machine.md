@@ -1,5 +1,7 @@
 # 1.1 Jurisdiction Machine / J-machine
 
+**Note:** This chapter describes J-machines as a *conceptual model* for understanding financial systems. XLN implementation requires EVM-compatible J-machines (Ethereum, L2s, future CBDCs). TradFi J-machines (Fedwire, ECB TARGET2) are analyzed here as mental model, not integration targets until they deploy programmable settlement layers.
+
 ## 1.1.1 TradFi J-machine
 
 Imagine, the year is 2008. Blockchains/cryptocurrencies/DLT never existed. Forget about DAOs, BFT and payment channels, lets focus exclusively on the traditional financial world (TradFi). We are going to apply Occam's Razor and Duck Typing principle to each component of TradFi, to remove the legacy fluff and extract the essence.

@@ -25,6 +25,12 @@ Either party can extend a credit limit to the other:
 - unused, uncollateralized credit line (credit)
 * used credit
 
+**Critical: Credit direction determines flow capability**
+- **rightCreditLimit** (R extends to L): Allows L to go NEGATIVE = L can SEND beyond reserves
+- **leftCreditLimit** (L extends to R): Allows R to go NEGATIVE = R can SEND, **L can RECEIVE**
+
+**Inbound capacity solution:** To receive payments routed through a hub, YOU extend credit TO the hub (leftCreditLimit if you are left, rightCreditLimit if you are right). This allows the hub to go into debt to you = you receive value even with zero reserves.
+
 Example (leftCreditLimit = 3, rightCreditLimit = 3):
 
 [---.Δ---]
@@ -73,7 +79,11 @@ xln can mimic both: ignore collateral functionality and it works like banking wi
 
 Using both is where the real synergy emerges. RCPAN is literally how banks already think about credit, just formalized.
 
-Practical consequences: no inbound liquidity wall and no unbounded hub risk—losses are link-capped; throughput scales with links, not global broadcasts.
+Practical consequences:
+- **No inbound liquidity wall:** Spokes extend credit to hubs, enabling receiving without pre-funding (solves Lightning's fatal flaw)
+- **Bounded hub risk:** Hub can owe you up to creditLimit (your choice), collateral beyond that is escrowed on-chain (hub can't steal)
+- **Losses are link-capped:** Hub bankruptcy costs you creditLimit max, not your entire deposit
+- **Throughput scales with links:** Each bilateral account processes independently, not global broadcasts
 
 Follow for news, analysis, and a verification-first roadmap (proof sketch, benchmarks, economic spec, security playbook). xln is layer-2 done right.
 

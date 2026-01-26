@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>xln Documentation</title>
+    <style>
+        :root {
+            --bg: #0a0a0a;
+            --fg: #e0e0e0;
+            --accent: #8b5cf6;
+            --border: #333;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--fg);
+            line-height: 1.6;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            border-bottom: 2px solid var(--accent);
+            padding-bottom: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, var(--accent), #ec4899);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            color: #999;
+            font-size: 1.1rem;
+        }
+
+        .section {
+            margin-bottom: 3rem;
+        }
+
+        .section h2 {
+            color: var(--accent);
+            margin-bottom: 1rem;
+            font-size: 1.5rem;
+        }
+
+        .doc-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .doc-card {
+            background: #1a1a1a;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.5rem;
+            transition: all 0.2s;
+        }
+
+        .doc-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
+        }
+
+        .doc-card h3 {
+            margin-bottom: 0.5rem;
+            font-size: 1.1rem;
+        }
+
+        .doc-card a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .doc-card a:hover {
+            text-decoration: underline;
+        }
+
+        .doc-card p {
+            color: #999;
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-top: 0.5rem;
+        }
+
+        .badge.production { background: #10b981; color: #000; }
+        .badge.wip { background: #f59e0b; color: #000; }
+        .badge.design { background: #6366f1; color: #fff; }
+
+        .quick-start {
+            background: linear-gradient(135deg, #1a1a1a, #2a1a2a);
+            border: 2px solid var(--accent);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        .quick-start h2 {
+            margin-top: 0;
+        }
+
+        .quick-start ol {
+            margin-left: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .quick-start li {
+            margin-bottom: 0.5rem;
+        }
+
+        .stats {
+            display: flex;
+            gap: 2rem;
+            margin-top: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--accent);
+        }
+
+        .stat-label {
+            color: #999;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>xln Documentation</h1>
+            <p class="subtitle">Reserve-Credit Provable Account Network</p>
+            <div class="stats">
+                <div class="stat">
+                    <div class="stat-value">18</div>
+                    <div class="stat-label">Critical Docs</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">5</div>
+                    <div class="stat-label">Core Specs</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">81%</div>
+                    <div class="stat-label">Noise Removed</div>
+                </div>
+            </div>
+        </header>
+
+        <div class="quick-start">
+            <h2>🚀 Quick Start</h2>
+            <p><strong>New to xln?</strong> Start here:</p>
+            <ol>
+                <li><a href="core/00_QA.md">00_QA.md</a> - Homakov's intro: who, why, what</li>
+                <li><a href="core/10_UFT.md">10_UFT.md</a> - Unified Financial Theory</li>
+                <li><a href="roadmap.md">roadmap.md</a> - Simnet → Testnet → Mainnet</li>
+            </ol>
+        </div>
+
+        <div class="section">
+            <h2>📚 Core Protocol</h2>
+            <div class="doc-grid">
+                <div class="doc-card">
+                    <h3><a href="core/00_QA.md">00_QA.md</a></h3>
+                    <p>Egor Homakov intro + motivation</p>
+                    <span class="badge production">Start Here</span>
+                </div>
+                <div class="doc-card">
+                    <h3><a href="core/10_UFT.md">10_UFT.md</a></h3>
+                    <p>UFT - FCUAN/FRPAP/RCPAN</p>
+                    <span class="badge production">Flagship</span>
+                </div>
+                <div class="doc-card">
+                    <h3><a href="core/12_invariant.md">12_invariant.md</a></h3>
+                    <p>RCPAN invariant: −Lₗ ≤ Δ ≤ C + Lᵣ</p>
+                    <span class="badge production">Core Math</span>
+                </div>
+                <div class="doc-card">
+                    <h3><a href="core/rjea-architecture.md">RJEA Architecture</a></h3>
+                    <p>Runtime→Entity→Account→Jurisdiction (merged JEA+naming+tx-flow)</p>
+                    <span class="badge production">Dev Bible</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🛠️ Implementation</h2>
+            <div class="doc-grid">
+                <div class="doc-card">
+                    <h3><a href="implementation/payment-spec.md">Payment Spec</a></h3>
+                    <p>Direct + HTLC payments, onion routing (940 lines)</p>
+                    <span class="badge production">Production</span>
+                </div>
+                <div class="doc-card">
+                    <h3><a href="implementation/scenarios.md">Scenarios</a></h3>
+                    <p>Scenario DSL reference</p>
+                    <span class="badge production">Testing</span>
+                </div>
+                <div class="doc-card">
+                    <h3><a href="implementation/ux.md">UX Architecture</a></h3>
+                    <p>User mode vs Dev mode UI</p>
+                    <span class="badge design">Design</span>
+                </div>
+                <div class="doc-card">
+                    <h3><a href="implementation/TODO-bilateral-j-event-consensus.md">TODO: Bilateral J-Events</a></h3>
+                    <p>Active consensus work</p>
+                    <span class="badge wip">WIP</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🏗️ Architecture</h2>
+            <div class="doc-grid">
+                <div class="doc-card">
+                    <h3><a href="architecture/bilaterality.md">Bilaterality</a></h3>
+                    <p>Why bilateral consensus is the killer feature</p>
+                </div>
+                <div class="doc-card">
+                    <h3><a href="architecture/hanko.md">Hanko Signatures</a></h3>
+                    <p>Hierarchical signature system</p>
+                </div>
+                <div class="doc-card">
+                    <h3><a href="architecture/why-evm.md">Why EVM</a></h3>
+                    <p>EVM vs UTXO/Solana + jurisdiction requirement</p>
+                </div>
+                <div class="doc-card">
+                    <h3><a href="architecture/contracts.md">Smart Contracts</a></h3>
+                    <p>Contract architecture overview</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🗺️ Status</h2>
+            <div class="doc-grid">
+                <div class="doc-card">
+                    <h3><a href="roadmap.md">Roadmap</a></h3>
+                    <p>Simnet (Q1 2026) → Testnet (Q2) → Mainnet (Q4)</p>
+                </div>
+                <div class="doc-card">
+                    <h3><a href="mainnet.md">Mainnet Readiness</a></h3>
+                    <p>Readiness: 600/1000</p>
+                    <span class="badge wip">Phase 2</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>🔧 Operations</h2>
+            <div class="doc-grid">
+                <div class="doc-card">
+                    <h3><a href="debugging/consensus-debugging-guide.md">Consensus Debugging</a></h3>
+                    <p>How to debug consensus failures</p>
+                </div>
+                <div class="doc-card">
+                    <h3><a href="deployment/server-setup.md">Server Setup</a></h3>
+                    <p>Production nginx config</p>
+                </div>
+                <div class="doc-card">
+                    <h3><a href="readme.md">Full Index</a></h3>
+                    <p>Detailed navigation</p>
+                </div>
+            </div>
+        </div>
+
+        <footer style="margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--border); color: #666; text-align: center;">
+            <p>95 → 18 files (81% noise removed) | <a href="https://github.com/xlnfinance/xln" style="color: var(--accent);">GitHub</a> | <a href="https://xln.finance" style="color: var(--accent);">xln.finance</a></p>
+        </footer>
+    </div>
+</body>
+</html>
