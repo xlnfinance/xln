@@ -725,8 +725,19 @@ contract Depository is ReentrancyGuardLite {
   // getDebts moved to DepositoryView.sol
 
   // FIFO debt enforcement - enforces chronological payment order
+  // SECURITY: Fixed iteration limit prevents DoS via debt spam
+  // If entity has >100 debts, call multiple times or use enforceDebtsLarge()
   function enforceDebts(bytes32 entity, uint tokenId) public returns (uint256) {
-    return _enforceDebts(entity, tokenId, type(uint256).max);
+    return _enforceDebts(entity, tokenId, 100); // Max 100 iterations per call
+  }
+
+  // For entities with large debt queues (admin or entity itself can call)
+  function enforceDebtsLarge(bytes32 entity, uint tokenId) public returns (uint256) {
+    require(
+      msg.sender == address(uint160(uint256(entity))) || msg.sender == admin,
+      "Only entity or admin can use large batch"
+    );
+    return _enforceDebts(entity, tokenId, 1000); // Max 1000 for authorized callers
   }
 
   function _enforceDebts(bytes32 entity, uint256 tokenId, uint256 maxIterations) internal returns (uint256 totalDebts) {
@@ -949,7 +960,13 @@ contract Depository is ReentrancyGuardLite {
     uint256 cursor = insuranceCursor[debtor];
     for (uint256 i = cursor; i < length && remaining > 0; i++) {
       InsuranceLine storage line = lines[i];
-      if (line.tokenId != tokenId || block.timestamp > line.expiresAt || line.remaining == 0) continue;
+
+      // SECURITY FIX: Only advance cursor when line is actually used
+      // Skip expired/wrong-token lines WITHOUT advancing cursor
+      if (line.tokenId != tokenId || block.timestamp > line.expiresAt || line.remaining == 0) {
+        // Don't update cursor for skipped lines
+        continue;
+      }
 
       uint256 insurerReserves = _reserves[line.insurer][tokenId];
       uint256 claimAmount = line.remaining < insurerReserves ? line.remaining : insurerReserves;
@@ -963,9 +980,15 @@ contract Depository is ReentrancyGuardLite {
       remaining -= claimAmount;
       _addDebt(debtor, tokenId, line.insurer, claimAmount);
       emit InsuranceClaimed(debtor, line.insurer, creditor, tokenId, claimAmount);
+
+      // ONLY update cursor when insurance actually claimed
       cursor = i + 1;
     }
-    insuranceCursor[debtor] = cursor;
+
+    // Only save cursor if it actually advanced (found valid insurance)
+    if (cursor > insuranceCursor[debtor]) {
+      insuranceCursor[debtor] = cursor;
+    }
   }
 
   // ========== DISPUTE FUNCTIONS ==========

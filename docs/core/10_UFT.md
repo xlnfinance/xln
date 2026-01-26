@@ -1,4 +1,7 @@
-# 1.0 Unified Financial Theory: Reserve-Credit Programmable Account Network
+# 1.0 Unified Financial Theory: Reserve-Credit Provable Account Network
+
+**[← Index](../readme.md)** | **[Prev: Q&A](00_QA.md)** | **[Next: J-Machine →](11_Jurisdiction_Machine.md)**
+
 ### Egor Homakov / h@xln.finance
 
 ### [Optional Q&A](00_QA.md)
@@ -105,17 +108,16 @@ Last, but not least, we claim that the most important inter-human network, the f
 
 The goal is to make finance visceral. Visual. Tangible, like water or sand. 
 
-Additional whitepapers that further complement UFT are published separately:
+Additional whitepapers that further complement UFT *(planned - not yet written)*:
 
-* **2.0 Cascade Security Model**: we extend the credit+collateral RCPAN invariant with "on-jurisdiction reserves" and opt-in Deposit Insurance Schemes forming a waterfall-like security cascade for all fungible value any entity in Xln holds: reserve->collateral->credit->insurance->reinsurance. 
+* **2.0 Cascade Security Model**: Extend credit+collateral RCPAN with on-jurisdiction reserves and opt-in insurance schemes (reserve→collateral→credit→insurance→reinsurance waterfall).
 
-* **3.0 Delta Transformers**: generalized way to Bilateral Unicast DeFi: programmable cascade of hooks `int[] deltas -> Transformer.apply(data, leftArguments, rightArguments) -> int[] deltas` that entities simulate off-J but can routinely enforce with Depository.sol during on-J dispute. Transformers allow Lego-DeFi logic of any complexity but in bilateral 2-party fashion (same as how TradFi worked for centuries).
+* **3.0 Delta Transformers**: Bilateral DeFi primitives - programmable hooks `deltas → Transformer.apply() → deltas` enforceable via Depository.sol.
 
-* **4.0 Entity machine, Hanko signatures & Cascade Control Model**: a deeper dive into Board/Control/Dividend cascade, a novel hierarchical aggregated Hanko-signature for Entity-machines and Merge&Acquisition, index funds and institutional mechanics of Xln. 
+* **4.0 Entity Machine & Hanko**: Board/Control/Dividend governance, hierarchical signatures, M&A mechanics. *(Partially documented in architecture/hanko.md)*
 
-* **5.0 BrainVault**: argon2id(username, password, complexityFactor ~5sec...5hours) - in addition to cumbersome randomly generated 16-word seeds users may prefer the longer but easier to handle option. Just like RCPAN accounts are "payment channels done right" we propose a secure evolution of BrainWallet/WarpWallet idea.
+* **5.0 BrainVault**: argon2id-based key derivation as alternative to seed phrases. *(Prototype exists, not documented)*
 
-
-* **6.0 Hierarchical Replicated State Machines & Cascade Execution Model**: in this paper we do a deep dive into how Xln is actually built as a tri-layer cascade of Server->Entity->Account machines, which provides unprecedented introspection into the system, ease of debug and reasoning about.  
+* **6.0 RJEA Deep-Dive**: Runtime→Entity→Account→Jurisdiction implementation guide. *(See core/rjea-architecture.md)*  
 
 [1.1 Jurisdiction Machine](11_Jurisdiction_Machine.md)
