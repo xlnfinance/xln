@@ -154,8 +154,8 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
         const depositoryAddress = evm.getDepositoryAddress();
         const entityProviderAddress = evm.getEntityProviderAddress();
         DEFAULT_JURISDICTIONS = new Map();
-        DEFAULT_JURISDICTIONS.set('arrakis', {
-          name: 'Arrakis',
+        DEFAULT_JURISDICTIONS.set('simnet', {
+          name: 'Simnet',
           chainId: 1337,
           address: 'browservm://',
           entityProviderAddress,
@@ -723,7 +723,7 @@ export const generateJurisdictions = async (): Promise<Map<string, JurisdictionC
           uiLog(`🔧 RPC URL (override): ${jData['rpc']} → ${rpcUrl} (full URL)`);
         }
       } else if (isBrowser && rpcUrl.startsWith('/')) {
-        // Path-based proxy (e.g., /rpc/arrakis) - use same origin
+        // Path-based proxy (e.g., /rpc/simnet) - use same origin
         rpcUrl = `${window.location.origin}${rpcUrl}`;
         uiLog(`🔧 RPC-TRANSFORM-PROXY: ${jData['rpc']} → ${rpcUrl}`, {
           origin: window.location.origin,
@@ -828,8 +828,8 @@ export const setBrowserVMJurisdiction = (env: any, depositoryAddress: string, br
   }
 
   DEFAULT_JURISDICTIONS = new Map();
-  DEFAULT_JURISDICTIONS.set('arrakis', {
-    name: 'Arrakis',
+  DEFAULT_JURISDICTIONS.set('simnet', {
+    name: 'Simnet',
     chainId: 1337,
     address: 'browservm://', // BrowserVM uses in-memory EVM, no real RPC
     entityProviderAddress,

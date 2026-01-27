@@ -1,26 +1,26 @@
 /**
- * BrainVault v2.1 - Sharded Memory-Hard Key Derivation
+ * BrainVault v1.0 - Memory-Hard Brain Wallet
  *
- * Core algorithm: argon2id sharded + BLAKE3 final hash
+ * Problem: Traditional mnemonics require secure storage (paper/hardware wallet).
+ * Solution: Derive wallet from memorable (name + passphrase + shard count).
  *
- * Design principles:
- * - Parallelism helps users, not attackers (shards can run in parallel)
- * - 256MB per shard = maximum memory-hardness while staying phone-compatible
- * - Factor 1-9 with 4^(factor-1) shards = exponential security scaling
- * - Same name + passphrase + factor = same wallet on any device
+ * Algorithm: Argon2id (memory-hard) + BLAKE3 (fast hash)
+ * - Each shard: 256MB argon2id (forces attacker to use RAM, not just CPU)
+ * - Parallelizable: phone sequential, workstation parallel
+ * - Deterministic: same inputs = same wallet on any device
  *
- * Security analysis:
- * - Botnet with 10k machines, 4GB each: can only run 16 shards parallel per machine
- * - Memory bandwidth is the bottleneck, not CPU cycles
- * - BLAKE3 for final hash: faster than SHA256, equally secure, streaming-friendly
+ * Security: Attacker must compute shards one-by-one (256MB RAM minimum).
+ * User with powerful hardware can parallelize (time advantage, not RAM advantage).
+ *
+ * FROZEN SPEC - DO NOT CHANGE PARAMETERS (breaks all existing wallets)
  */
 
 import { blake3 } from '@noble/hashes/blake3.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 
 // Constants - NEVER CHANGE THESE (changing = different wallet)
-export const BRAINVAULT_V2 = {
-  ALG_ID: 'brainvault/argon2id-sharded/v2.1',
+export const BRAINVAULT_V1 = {
+  ALG_ID: 'brainvault/argon2id-sharded/v1.0',
   SHARD_MEMORY_KB: 256 * 1024,    // 256MB per shard
   ARGON_TIME_COST: 1,              // Single iteration per shard
   ARGON_PARALLELISM: 1,            // No internal parallelism (shards provide it)
@@ -33,23 +33,19 @@ export const BRAINVAULT_V2 = {
 
 /**
  * Calculate number of shards for a given factor
- * Formula: 4^(factor-1)
+ * Formula: 10^(factor-1)
  *
- * Factor 1: 1 shard (256MB) - demo
- * Factor 2: 4 shards (1GB)
- * Factor 3: 16 shards (4GB)
- * Factor 4: 64 shards (16GB)
- * Factor 5: 256 shards (64GB) - balanced
- * Factor 6: 1024 shards (256GB)
- * Factor 7: 4096 shards (1TB)
- * Factor 8: 16384 shards (4TB)
- * Factor 9: 65536 shards (16TB) - paranoid
+ * Factor 1: 1 shard (256MB)
+ * Factor 2: 10 shards (2.5GB)
+ * Factor 3: 100 shards (25GB)
+ * Factor 4: 1000 shards (256GB)
+ * Factor 5: 10000 shards (2.5TB)
  */
 export function getShardCount(factor: number): number {
-  if (factor < BRAINVAULT_V2.MIN_FACTOR || factor > BRAINVAULT_V2.MAX_FACTOR) {
-    throw new Error(`Factor must be ${BRAINVAULT_V2.MIN_FACTOR}-${BRAINVAULT_V2.MAX_FACTOR}`);
+  if (factor < BRAINVAULT_V1.MIN_FACTOR || factor > BRAINVAULT_V1.MAX_FACTOR) {
+    throw new Error(`Factor must be ${BRAINVAULT_V1.MIN_FACTOR}-${BRAINVAULT_V1.MAX_FACTOR}`);
   }
-  return Math.pow(4, factor - 1);
+  return Math.pow(10, factor - 1);
 }
 
 /**
@@ -57,7 +53,7 @@ export function getShardCount(factor: number): number {
  */
 export function getTotalMemoryGB(factor: number): number {
   const shards = getShardCount(factor);
-  return (shards * BRAINVAULT_V2.SHARD_MEMORY_KB) / (1024 * 1024); // KB to GB
+  return (shards * BRAINVAULT_V1.SHARD_MEMORY_KB) / (1024 * 1024); // KB to GB
 }
 
 /**
@@ -139,16 +135,16 @@ export function validateInputs(name: string, passphrase: string, factor: number)
 } {
   const errors: string[] = [];
 
-  if (name.length < BRAINVAULT_V2.MIN_NAME_LENGTH) {
-    errors.push(`Name must be at least ${BRAINVAULT_V2.MIN_NAME_LENGTH} characters`);
+  if (name.length < BRAINVAULT_V1.MIN_NAME_LENGTH) {
+    errors.push(`Name must be at least ${BRAINVAULT_V1.MIN_NAME_LENGTH} characters`);
   }
 
-  if (passphrase.length < BRAINVAULT_V2.MIN_PASSPHRASE_LENGTH) {
-    errors.push(`Passphrase must be at least ${BRAINVAULT_V2.MIN_PASSPHRASE_LENGTH} characters`);
+  if (passphrase.length < BRAINVAULT_V1.MIN_PASSPHRASE_LENGTH) {
+    errors.push(`Passphrase must be at least ${BRAINVAULT_V1.MIN_PASSPHRASE_LENGTH} characters`);
   }
 
-  if (factor < BRAINVAULT_V2.MIN_FACTOR || factor > BRAINVAULT_V2.MAX_FACTOR) {
-    errors.push(`Factor must be between ${BRAINVAULT_V2.MIN_FACTOR} and ${BRAINVAULT_V2.MAX_FACTOR}`);
+  if (factor < BRAINVAULT_V1.MIN_FACTOR || factor > BRAINVAULT_V1.MAX_FACTOR) {
+    errors.push(`Factor must be between ${BRAINVAULT_V1.MIN_FACTOR} and ${BRAINVAULT_V1.MAX_FACTOR}`);
   }
 
   return { valid: errors.length === 0, errors };
@@ -179,42 +175,29 @@ export interface DerivationResult {
   masterKeyHex: string;      // For password manager derivation
 }
 
-export interface ResumeToken {
-  version: 'bv2.1';
-  nameHash: string;
-  factor: number;
-  completedShards: number[];
-  shardResults: Record<number, string>;  // hex encoded
-  name?: string;
-}
-
-/**
- * Hash a vault name (BLAKE3 over UTF-8)
- */
-export async function hashName(name: string): Promise<string> {
-  return bytesToHex(blake3(new TextEncoder().encode(name)));
-}
 
 /**
  * Create salt for a specific shard
+ * salt = BLAKE3(name_NFKD || ALG_ID || shardCount || shardIndex)
  */
 export async function createShardSalt(
-  nameHash: Uint8Array,
+  name: string,
   shardIndex: number,
   shardCount: number
 ): Promise<Uint8Array> {
-  // salt = BLAKE3(nameHash || ALG_ID || shardCount || shardIndex as uint32 BE)
-  const algIdBytes = new TextEncoder().encode(BRAINVAULT_V2.ALG_ID);
+  const normalized = name.normalize('NFKD');
+  const nameBytes = new TextEncoder().encode(normalized);
+  const algIdBytes = new TextEncoder().encode(BRAINVAULT_V1.ALG_ID);
   const countBytes = new Uint8Array(4);
   new DataView(countBytes.buffer).setUint32(0, shardCount, false);
   const indexBytes = new Uint8Array(4);
   new DataView(indexBytes.buffer).setUint32(0, shardIndex, false);
 
-  const combined = new Uint8Array(nameHash.length + algIdBytes.length + 4 + 4);
-  combined.set(nameHash, 0);
-  combined.set(algIdBytes, nameHash.length);
-  combined.set(countBytes, nameHash.length + algIdBytes.length);
-  combined.set(indexBytes, nameHash.length + algIdBytes.length + 4);
+  const combined = new Uint8Array(nameBytes.length + algIdBytes.length + 4 + 4);
+  combined.set(nameBytes, 0);
+  combined.set(algIdBytes, nameBytes.length);
+  combined.set(countBytes, nameBytes.length + algIdBytes.length);
+  combined.set(indexBytes, nameBytes.length + algIdBytes.length + 4);
 
   return blake3(combined);
 }
@@ -227,14 +210,15 @@ export async function deriveShard(
   shardSalt: Uint8Array
 ): Promise<Uint8Array> {
   const { argon2id } = await import('hash-wasm');
+  const normalized = passphrase.normalize('NFKD');
 
   const result = await argon2id({
-    password: passphrase,
+    password: normalized,
     salt: shardSalt,
-    parallelism: BRAINVAULT_V2.ARGON_PARALLELISM,
-    iterations: BRAINVAULT_V2.ARGON_TIME_COST,
-    memorySize: BRAINVAULT_V2.SHARD_MEMORY_KB,
-    hashLength: BRAINVAULT_V2.SHARD_OUTPUT_BYTES,
+    parallelism: BRAINVAULT_V1.ARGON_PARALLELISM,
+    iterations: BRAINVAULT_V1.ARGON_TIME_COST,
+    memorySize: BRAINVAULT_V1.SHARD_MEMORY_KB,
+    hashLength: BRAINVAULT_V1.SHARD_OUTPUT_BYTES,
     outputType: 'binary',
   });
 
@@ -259,7 +243,7 @@ export async function combineShards(
 
   // Domain-separated final hash (binds factor and KDF params)
   const shardCount = shardResults.length;
-  const domainTag = `${BRAINVAULT_V2.ALG_ID}|mem=${BRAINVAULT_V2.SHARD_MEMORY_KB}|t=${BRAINVAULT_V2.ARGON_TIME_COST}|p=${BRAINVAULT_V2.ARGON_PARALLELISM}|out=${BRAINVAULT_V2.SHARD_OUTPUT_BYTES}|shards=${shardCount}|factor=${factor}`;
+  const domainTag = `${BRAINVAULT_V1.ALG_ID}|mem=${BRAINVAULT_V1.SHARD_MEMORY_KB}|t=${BRAINVAULT_V1.ARGON_TIME_COST}|p=${BRAINVAULT_V1.ARGON_PARALLELISM}|out=${BRAINVAULT_V1.SHARD_OUTPUT_BYTES}|shards=${shardCount}|factor=${factor}`;
   const domainBytes = new TextEncoder().encode(domainTag);
   const withDomain = new Uint8Array(combined.length + domainBytes.length);
   withDomain.set(combined, 0);
@@ -363,61 +347,6 @@ export async function deriveSitePassword(
   return password.join('');
 }
 
-/**
- * Create resume token from progress
- */
-export function createResumeToken(
-  nameHash: Uint8Array,
-  factor: number,
-  shardResults: Map<number, Uint8Array>,
-  name?: string, // DEPRECATED - not used in token (prevents btoa Unicode errors)
-): string {
-  const token: ResumeToken = {
-    version: 'bv2.1',
-    nameHash: bytesToHex(nameHash),
-    factor,
-    completedShards: Array.from(shardResults.keys()).sort((a, b) => a - b),
-    shardResults: Object.fromEntries(
-      Array.from(shardResults.entries()).map(([k, v]) => [k, bytesToHex(v)])
-    ),
-    // name removed - prevents btoa() errors with Unicode (cyrillic, emoji, etc.)
-  };
-  // Unicode-safe base64 encoding: JSON -> UTF-8 bytes -> base64
-  const json = JSON.stringify(token);
-  const bytes = new TextEncoder().encode(json);
-  // Convert Uint8Array to base64 (works in both browser and Bun)
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(bytes).toString('base64');
-  }
-  // Browser fallback: convert bytes to Latin1 string, then btoa
-  return btoa(String.fromCharCode(...bytes));
-}
-
-/**
- * Parse resume token
- */
-export function parseResumeToken(tokenStr: string): ResumeToken | null {
-  try {
-    // Unicode-safe base64 decoding: base64 -> UTF-8 bytes -> JSON
-    let bytes: Uint8Array;
-    if (typeof Buffer !== 'undefined') {
-      bytes = Buffer.from(tokenStr, 'base64');
-    } else {
-      // Browser: atob to Latin1 string, then to bytes
-      const binaryString = atob(tokenStr);
-      bytes = new Uint8Array(binaryString.length);
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-    }
-    const json = new TextDecoder().decode(bytes);
-    const token = JSON.parse(json) as ResumeToken;
-    if (token.version !== 'bv2.1') return null;
-    return token;
-  } catch {
-    return null;
-  }
-}
 
 // ============================================================================
 // UTILITY FUNCTIONS

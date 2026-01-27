@@ -18,7 +18,7 @@ import type { Env, EntityInput, EntityReplica, Delta } from '../types';
 import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from '../evm';
 import { BrowserEVM } from '../evms/browser-evm';
 import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
-import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
+import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD } from './helpers';
 import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta, isLeft } from '../account-utils';
@@ -2995,11 +2995,12 @@ export async function ahb(env: Env): Promise<void> {
       entityId: hub.id,
       signerId: hub.signer,
       entityTxs: [{
-        type: 'payment',
+        type: 'directPayment',
         data: {
+          targetEntityId: carol.id,
           tokenId: USDC_TOKEN_ID,
           amount: hubPaymentToCarol,
-          routeHint: [carol.id]
+          route: [hub.id, carol.id]
         }
       }]
     }]);
@@ -3027,17 +3028,49 @@ export async function ahb(env: Env): Promise<void> {
     assert(carolDelta, 'PHASE 9: Carol-Hub delta missing after Hub payment');
     console.log(`  Carol position: collateral=${formatUSD(carolDelta.collateral)}, ondelta=${formatUSD(carolDelta.ondelta)}`);
 
+    // Hub needs reserves to pay Carol's ondelta - replenish from Alice
+    // (Hub's reserves were drained in Phase 8 dispute demo)
+    const hubReplenish = carolDelta.ondelta > 0n ? carolDelta.ondelta : 0n;
+    if (hubReplenish > 0n) {
+      console.log(`  Replenishing Hub reserves: ${formatUSD(hubReplenish)} (from Alice)`);
+      await process(env, [{
+        entityId: alice.id,
+        signerId: alice.signer,
+        entityTxs: [
+          { type: 'reserve_to_reserve', data: { toEntityId: hub.id, tokenId: USDC_TOKEN_ID, amount: hubReplenish } },
+          { type: 'j_broadcast', data: {} }
+        ]
+      }]);
+      await processUntil(env, () => {
+        const jRep = env.jReplicas?.get('AHB Demo');
+        return jRep ? jRep.mempool.length === 0 : false;
+      }, 20, 'Hub reserve replenish');
+      await processJEvents(env);
+    }
+
     // Cooperative close: settle the ACTUAL position (Carol receives her collateral + ondelta)
     const carolIsLeft = isLeft(carol.id, hub.id);
+    // Conservation law: leftDiff + rightDiff + collateralDiff = 0
     // Carol gets her collateral back + the ondelta Hub owes her
-    const carolReceives = carolDelta.collateral + (carolDelta.ondelta > 0n ? carolDelta.ondelta : 0n);
-    const hubReceives = carolDelta.ondelta < 0n ? -carolDelta.ondelta : 0n;
+    // Hub pays the ondelta from their reserve
+    const carolGetsFromCollateral = carolDelta.collateral;
+    const carolGetsFromOndelta = carolDelta.ondelta > 0n ? carolDelta.ondelta : 0n;
+    const hubPaysOndelta = carolDelta.ondelta > 0n ? carolDelta.ondelta : 0n;
+
+    // leftDiff = what left entity's reserve changes by
+    // rightDiff = what right entity's reserve changes by
+    // collateralDiff = what collateral pool changes by
+    // Conservation: leftDiff + rightDiff + collateralDiff = 0
     const carolCloseDiffs = [{
       tokenId: USDC_TOKEN_ID,
-      leftDiff: carolIsLeft ? carolReceives : hubReceives,
-      rightDiff: carolIsLeft ? hubReceives : carolReceives,
-      collateralDiff: -carolDelta.collateral,
-      ondeltaDiff: -carolDelta.ondelta,
+      leftDiff: carolIsLeft
+        ? (carolGetsFromCollateral + carolGetsFromOndelta)  // Carol receives collateral + ondelta
+        : -hubPaysOndelta,  // Hub pays ondelta
+      rightDiff: carolIsLeft
+        ? -hubPaysOndelta  // Hub pays ondelta from reserve
+        : (carolGetsFromCollateral + carolGetsFromOndelta),  // Carol receives
+      collateralDiff: -carolDelta.collateral,  // Release collateral
+      ondeltaDiff: -carolDelta.ondelta,  // Clear ondelta
     }];
 
     // Step 1: Carol proposes cooperative close

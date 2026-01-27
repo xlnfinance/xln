@@ -31,6 +31,8 @@
   import WalletView from '$lib/components/Wallet/WalletView.svelte';
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
   import EntityFormation from '$lib/components/Formation/EntityFormation.svelte';
+  import WalletSettings from '$lib/components/Settings/WalletSettings.svelte';
+  import { Settings } from 'lucide-svelte';
 
   interface Props {
     isolatedEnv: Writable<any>;
@@ -69,6 +71,7 @@
   let selectedJurisdictionName = $state<string | null>(null);
   let isCreatingJMachine = false;
   let showEntityFormation = $state(false);
+  let showSettings = $state(false);
   const selfEntityChecked = new Set<string>();
   const selfEntityInFlight = new Set<string>();
 
@@ -236,12 +239,12 @@
       const xln = await getXLN();
       await xln.applyRuntimeInput(env, {
         runtimeTxs: [{
-          type: 'createXlnomy',
+          type: 'importJ',
           data: {
             name,
-            evmType: 'browservm',
-            blockTimeMs: 1000,
-            autoGrid: false
+            chainId: 1337, // Must match View.svelte's BrowserVM chainId
+            ticker: 'SIM',
+            rpcs: [],
           }
         }],
         entityInputs: []
@@ -491,6 +494,9 @@
         </div>
       {/if}
     </div>
+    <button class="settings-btn" on:click={() => showSettings = true} title="Settings">
+      <Settings size={18} />
+    </button>
   </div>
 
   <!-- Content -->
@@ -529,6 +535,15 @@
     <div class="modal-overlay" on:click={handleEntityFormationClose}>
       <div class="modal-container" on:click|stopPropagation>
         <EntityFormation on:close={handleEntityFormationClose} />
+      </div>
+    </div>
+  {/if}
+
+  <!-- Settings Modal -->
+  {#if showSettings}
+    <div class="modal-overlay" on:click={() => showSettings = false}>
+      <div class="modal-container settings-modal" on:click|stopPropagation>
+        <WalletSettings on:close={() => showSettings = false} />
       </div>
     </div>
   {/if}
@@ -686,6 +701,34 @@
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 12px;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  }
+
+  .modal-container.settings-modal {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .settings-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+
+  .settings-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 200, 100, 0.3);
+    color: rgba(255, 200, 100, 0.9);
   }
 
   /* Mobile responsive */

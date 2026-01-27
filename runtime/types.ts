@@ -259,13 +259,22 @@ export type RuntimeTx =
       };
     }
   | {
-      type: 'createXlnomy';
+      type: 'importJ';
       data: {
-        name: string;
-        evmType: 'browservm' | 'reth' | 'erigon' | 'monad';
-        rpcUrl?: string; // If evmType === RPC-based
-        blockTimeMs?: number; // Default: 1000ms
-        autoGrid?: boolean; // Auto-create 2x2x2 grid with $1M reserves
+        name: string;           // Unique J-machine name (key in jReplicas Map)
+        chainId: number;        // 1=ETH, 8453=Base, 1001+=BrowserVM
+        ticker: string;         // "ETH", "MATIC", "SIM"
+        rpcs: string[];         // [] = BrowserVM, [...urls] = RPC
+        rpcPolicy?: 'single' | 'failover' | { mode: 'quorum'; min: number };
+        contracts?: {
+          depository?: string;
+          entityProvider?: string;
+        };
+        tokens?: Array<{      // Auto-deploy for BrowserVM only
+          symbol: string;
+          decimals: number;
+          initialSupply?: bigint;
+        }>;
       };
     };
 
@@ -1426,8 +1435,12 @@ export interface Env {
   gossip: any; // Gossip layer for network profiles
 
   // Isolated BrowserVM instance per runtime (prevents cross-runtime state leakage)
-  browserVM?: any; // BrowserVMProvider instance for this runtime
+  browserVM?: any; // BrowserVMProvider instance for this runtime (DEPRECATED: use evms)
   browserVMState?: BrowserVMState; // Serialized BrowserVM state for time travel
+
+  // EVM instances (unified interface for browser/RPC)
+  // Usage: env.evms.get('simnet').depository._reserves(entityId, tokenId)
+  evms: Map<string, import('./evm-interface').EVM>;
 
   // Active jurisdiction
   activeJurisdiction?: string; // Currently active J-replica name

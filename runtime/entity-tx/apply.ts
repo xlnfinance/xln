@@ -955,6 +955,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     console.warn(`⚠️ Unhandled EntityTx type: ${entityTx.type}`);
     return { newState: entityState, outputs: [], jOutputs: [] };
   } catch (error) {
+    console.error(`❌ Transaction execution error:`, error);
     log.error(`❌ Transaction execution error: ${error}`);
     return { newState: entityState, outputs: [], jOutputs: [] }; // Return unchanged state on error
   }

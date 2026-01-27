@@ -72,7 +72,7 @@ export function getRuntimeFrames(history: Snapshot[], replica: EntityReplica | n
       if (tx.type === 'importReplica') {
         return tx.entityId === replica.entityId || tx.signerId === replica.signerId;
       }
-      // For other types (createXlnomy), they're not specific to any replica
+      // For other types (importJ), they're not specific to any replica
       return false;
     });
 

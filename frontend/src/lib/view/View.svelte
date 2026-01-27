@@ -120,20 +120,20 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-      // Create BrowserVM from runtime (not frontend)
-      const { BrowserEVM } = XLN;
-      const browserVM = new BrowserEVM();
-      await browserVM.init();
-      console.log('[View] BrowserVM initialized from runtime');
+      // Get SINGLETON jurisdiction (shared with vaultStore and other components)
+      const { getJurisdiction } = XLN;
+      const jurisdiction = await getJurisdiction({ type: 'browser', chainId: 1337 });
+      console.log('[View] Jurisdiction singleton ready');
 
-      const depositoryAddress = browserVM.getDepositoryAddress();
-
-      // NOTE: setBrowserVMJurisdiction needs env - will call after env is created below
+      // For legacy compatibility, get underlying BrowserEVM
+      const browserVM = (jurisdiction as any).getEVM();
+      const depositoryAddress = jurisdiction.depositoryAddress;
 
       // Expose for panels that need direct access (time-travel, insurance queries)
       (window as any).__xlnBrowserVM = browserVM;
+      (window as any).__xlnJurisdiction = jurisdiction;
 
-      console.log('[View] ✅ BrowserVM ready:', depositoryAddress);
+      console.log('[View] ✅ Jurisdiction ready:', depositoryAddress.slice(0, 10) + '...');
 
       // CRITICAL: Initialize global xlnInstance for utility functions (deriveDelta, etc)
       // Graph3DPanel needs xlnFunctions even when using isolated stores

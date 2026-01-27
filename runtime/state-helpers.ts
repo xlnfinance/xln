@@ -541,9 +541,15 @@ export const captureSnapshot = async (
     if (runtimeInput.runtimeTxs.length > 0) {
       console.log(`    🖥️  RuntimeTxs: ${runtimeInput.runtimeTxs.length}`);
       runtimeInput.runtimeTxs.forEach((tx, i) => {
-        console.log(
-          `      ${i + 1}. ${tx.type} ${tx.entityId}:${tx.signerId} (${tx.data.isProposer ? 'proposer' : 'validator'})`,
-        );
+        if (tx.type === 'importReplica') {
+          console.log(
+            `      ${i + 1}. ${tx.type} ${tx.entityId}:${tx.signerId} (${tx.data.isProposer ? 'proposer' : 'validator'})`,
+          );
+        } else if (tx.type === 'importJ') {
+          console.log(
+            `      ${i + 1}. ${tx.type} ${tx.data.name} (chain ${tx.data.chainId})`,
+          );
+        }
       });
     }
     if (runtimeInput.entityInputs.length > 0) {

@@ -6,10 +6,10 @@
 
 // Re-export core types
 export type { Side, TIF, OrderCmd, BookEvent, BookParams, BookState } from './core';
-export { createBook, applyCommand, getBestBid, getBestAsk, getSpread, computeBookHash } from './core';
+export { createBook, applyCommand, getBestBid, getBestAsk, getSpread, computeBookHash, MAX_FILL_RATIO } from './core';
 
-/** Fill ratio uses full uint16 range (0-65535) for maximum granularity */
-export const MAX_FILL_RATIO = 65535;
+// Import for local use
+import { MAX_FILL_RATIO } from './core';
 
 /** Canonical pair normalization */
 export function canonicalPair(tokenA: number, tokenB: number): { base: number; quote: number; pairId: string } {
