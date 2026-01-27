@@ -374,7 +374,7 @@ export const setRuntimeId = (id: string | null): void => {
   }
 };
 
-const scheduleNetworkProcess = (env: Env) => {
+export const scheduleNetworkProcess = (env: Env) => {
   if (networkProcessScheduled) return;
   networkProcessScheduled = true;
   const defer =

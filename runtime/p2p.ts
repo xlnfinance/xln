@@ -120,6 +120,7 @@ export class RuntimeP2P {
         url,
         runtimeId: this.runtimeId,
         signerId: this.signerId,
+        seed: this.env.runtimeSeed,  // Pass seed for hello auth signing
         onOpen: () => {
           this.flushPending();
           this.requestSeedGossip();
@@ -151,6 +152,7 @@ export class RuntimeP2P {
 
   enqueueEntityInput(targetRuntimeId: string, input: EntityInput) {
     console.log(`📨 P2P-ENQUEUE: to=${targetRuntimeId.slice(0,10)} entity=${input.entityId.slice(-4)} txs=${input.entityTxs?.length || 0}`);
+    console.log(`📨 P2P-DEBUG: clients=${this.clients.length} open=${this.clients.map(c => c.isOpen())}`);
 
     const client = this.getActiveClient();
     if (client && client.isOpen()) {

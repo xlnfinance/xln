@@ -8,6 +8,7 @@ export type RuntimeWsClientOptions = {
   url: string;
   runtimeId: string;
   signerId?: string;
+  seed?: Uint8Array | string;  // Required if signerId is provided for hello auth
   onRuntimeInput?: (from: string, input: RuntimeInput) => Promise<void> | void;
   onEntityInput?: (from: string, input: EntityInput) => Promise<void> | void;
   onGossipRequest?: (from: string, payload: unknown) => Promise<void> | void;
@@ -82,12 +83,12 @@ export class RuntimeWsClient {
   }
 
   private sendHello() {
-    if (this.options.signerId) {
+    if (this.options.signerId && this.options.seed) {
       try {
         const timestamp = nextTimestamp();
         const nonce = makeHelloNonce();
         const digest = hashHelloMessage(this.options.runtimeId, timestamp, nonce);
-        const signature = signDigest(this.options.signerId, digest);
+        const signature = signDigest(this.options.seed, this.options.signerId, digest);
         this.sendRaw({
           type: 'hello',
           from: this.options.runtimeId,
@@ -121,15 +122,16 @@ export class RuntimeWsClient {
       this.options.onError?.(error as Error);
       return;
     }
+    if (msg.type === 'error') {
+      this.options.onError?.(new Error(msg.error || 'Unknown error'));
+    }
 
     if (msg.type === 'runtime_input' && msg.payload && msg.from) {
       await this.options.onRuntimeInput?.(msg.from, msg.payload as RuntimeInput);
       return;
     }
     if (msg.type === 'entity_input' && msg.payload && msg.from) {
-      const input = msg.payload as EntityInput;
-      console.log(`[WS-CLIENT] RECEIVED entity_input: from=${msg.from.slice(0,10)} entity=${input.entityId.slice(-4)} txs=${input.entityTxs?.length || 0}`);
-      await this.options.onEntityInput?.(msg.from, input);
+      await this.options.onEntityInput?.(msg.from, msg.payload as EntityInput);
       return;
     }
     if (msg.type === 'gossip_request' && msg.payload && msg.from) {
@@ -158,8 +160,7 @@ export class RuntimeWsClient {
   }
 
   sendEntityInput(to: string, input: EntityInput): boolean {
-    console.log(`[WS-CLIENT] sendEntityInput: to=${to.slice(0,10)} entity=${input.entityId.slice(-4)}`);
-    const sent = this.sendRaw({
+    return this.sendRaw({
       type: 'entity_input',
       id: makeMessageId(),
       from: this.options.runtimeId,
@@ -167,8 +168,6 @@ export class RuntimeWsClient {
       timestamp: nextTimestamp(),
       payload: input,
     });
-    console.log(`[WS-CLIENT] send result: ${sent ? 'SUCCESS' : 'FAILED'}`);
-    return sent;
   }
 
   sendGossipRequest(to: string, payload: unknown): boolean {

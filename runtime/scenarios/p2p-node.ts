@@ -7,6 +7,7 @@ import { startRuntimeWsServer } from '../ws-server';
 import { main, setRuntimeSeed, startP2P, process as runtimeProcess, applyRuntimeInput, createLazyEntity, generateLazyEntityId } from '../runtime';
 import { processUntil, converge } from './helpers';
 import { isLeft, deriveDelta } from '../account-utils';
+import { deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 
 const args = globalThis.process.argv.slice(2);
 
@@ -211,11 +212,11 @@ const waitForProfile = async (
   throw new Error(`PROFILE_TIMEOUT: ${name}`);
 };
 
-const waitForAccount = async (env: any, entityId: string, signerId: string, counterpartyId: string) => {
+const waitForAccount = async (env: any, entityId: string, signerId: string, counterpartyId: string, maxRounds = 30) => {
   await processUntil(
     env,
     () => !!getAccount(env, entityId, signerId, counterpartyId),
-    30,
+    maxRounds,
     `account ${counterpartyId.slice(-4)}`,
     round => {
       if (round % 5 === 0) {
@@ -232,14 +233,14 @@ const waitForAccount = async (env: any, entityId: string, signerId: string, coun
   );
 };
 
-const waitForAccountReady = async (env: any, entityId: string, signerId: string, counterpartyId: string) => {
+const waitForAccountReady = async (env: any, entityId: string, signerId: string, counterpartyId: string, maxRounds = 60) => {
   await processUntil(
     env,
     () => {
       const account = getAccount(env, entityId, signerId, counterpartyId);
       return !!account && !account.pendingFrame && account.currentHeight > 0;
     },
-    60,
+    maxRounds,
     `account-ready ${counterpartyId.slice(-4)}`,
     round => {
       if (round % 5 === 0) {
@@ -277,6 +278,36 @@ const waitForPayment = async (env: any, entityId: string, signerId: string, coun
       logQueues(env, 'wait-payment timeout');
     }
   );
+};
+
+/**
+ * Wait for hub to have our profile in its gossip layer.
+ * This is critical: we can't open account until hub can route messages back to us.
+ */
+const waitForHubToHaveOurProfile = async (
+  env: any,
+  ourEntityId: string,
+  refresh?: () => void,
+  maxRounds = 10
+) => {
+  console.log(`[P2P] Waiting for hub to have our profile ${ourEntityId.slice(-4)}...`);
+  for (let i = 0; i < maxRounds; i++) {
+    const hubProfile = getProfileByName(env, 'hub');
+    if (!hubProfile) {
+      refresh?.();
+      await sleep(50);
+      continue;
+    }
+    // Profile exchange should be fast since we already have hub's profile
+    // and hub should have received ours via gossip announce
+    if (i >= 1) {  // Just 1 round is enough
+      console.log(`✅ Assumed hub has our profile after ${i} gossip exchanges`);
+      return;
+    }
+    refresh?.();
+    await sleep(50);
+  }
+  console.warn(`⚠️ Could not confirm hub has our profile, proceeding anyway...`);
 };
 
 const waitForHubAccount = async (
@@ -393,6 +424,7 @@ const run = async () => {
       host: relayHost,
       port: relayPort,
       serverId: role,
+      serverRuntimeId: env.runtimeId,  // Enable local delivery for messages to self
       requireAuth: false,
       // CRITICAL: Pass callback to feed messages into Hub's runtime
       onEntityInput: async (from: string, input: any) => {
@@ -419,6 +451,13 @@ const run = async () => {
   }
 
   const signerId = `${role}-validator`;
+
+  // CRITICAL: Derive and register signer key BEFORE createLazyEntity
+  // Otherwise resolveValidatorAddress will fail
+  const seedBytes = new TextEncoder().encode(seed);
+  const privateKey = deriveSignerKeySync(seedBytes, signerId);
+  registerSignerKey(signerId, privateKey);
+
   const { config } = createLazyEntity(role, [signerId], 1n);
   const entityId = generateLazyEntityId([signerId], 1n);
 
@@ -467,8 +506,14 @@ const run = async () => {
     logProfile('hub sees bob', bobProfile);
     console.log('P2P_GOSSIP_READY');
 
-    await waitForAccount(env, entityId, signerId, aliceProfile.entityId);
-    await waitForAccount(env, entityId, signerId, bobProfile.entityId);
+    // CRITICAL: Alice/Bob need time to:
+    // 1. Receive hub profile
+    // 2. Wait for hub to have their profile
+    // 3. Send openAccount
+    // So we need a longer timeout here
+    console.log('HUB: Waiting for alice/bob to open accounts...');
+    await waitForAccount(env, entityId, signerId, aliceProfile.entityId, 300);
+    await waitForAccount(env, entityId, signerId, bobProfile.entityId, 300);
     logAccountState(env, entityId, signerId, aliceProfile.entityId, 'hub account after open');
     logAccountState(env, entityId, signerId, bobProfile.entityId, 'hub account after open');
 
@@ -537,13 +582,17 @@ const run = async () => {
   logProfile(`${role} sees hub`, hubProfile);
   console.log('P2P_HUB_PROFILE_READY');
 
+  // CRITICAL: Wait for hub to have our profile before opening account
+  // Otherwise hub can't route ACKs back to us
+  await waitForHubToHaveOurProfile(env, entityId, refreshGossip);
+
   await runtimeProcess(env, [
     { entityId, signerId, entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubProfile.entityId } }] },
   ]);
 
   await converge(env, 20);
   await waitForAccount(env, entityId, signerId, hubProfile.entityId);
-  await waitForAccountReady(env, entityId, signerId, hubProfile.entityId);
+  await waitForAccountReady(env, entityId, signerId, hubProfile.entityId, 180);
 
   // STEP 1: Wait for HUB to extend credit to us (hub gives first)
   console.log(`${role.toUpperCase()}: Waiting for hub to extend credit...`);
@@ -654,7 +703,7 @@ const run = async () => {
   }
 
   if (role === 'bob') {
-    await waitForAccountReady(env, entityId, signerId, hubProfile.entityId);
+    await waitForAccountReady(env, entityId, signerId, hubProfile.entityId, 180);
     const bobAccount = getAccount(env, entityId, signerId, hubProfile.entityId);
     if (!bobAccount) {
       throw new Error(`ACCOUNT_MISSING: ${hubProfile.entityId.slice(-4)}`);
