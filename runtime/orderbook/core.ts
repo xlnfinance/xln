@@ -256,7 +256,7 @@ export function applyCommand(
   function allocOrder(): number {
     const i = m.freeHead;
     if (i === EMPTY) throw new Error('Out of order slots');
-    m.freeHead = m.orderNext[i];
+    m.freeHead = m.orderNext[i]!;
     return i;
   }
 
@@ -274,14 +274,14 @@ export function applyCommand(
     const bm = side === 0 ? m.bitmapBid : m.bitmapAsk;
     const w = (levelIdx / BITWORD) | 0;
     const b = levelIdx & 31;
-    bm[w] |= (1 << b) >>> 0;
+    bm[w] = (bm[w]! | (1 << b)) >>> 0;
   }
 
   function clearBit(side: Side, levelIdx: number): void {
     const bm = side === 0 ? m.bitmapBid : m.bitmapAsk;
     const w = (levelIdx / BITWORD) | 0;
     const b = levelIdx & 31;
-    bm[w] &= ~(1 << b) >>> 0;
+    bm[w] = (bm[w]! & ~(1 << b)) >>> 0;
   }
 
   // Level queue operations
@@ -302,7 +302,7 @@ export function applyCommand(
         if (m.bestAskIdx === EMPTY || levelIdx < m.bestAskIdx) m.bestAskIdx = levelIdx;
       }
     } else {
-      const t = tail[levelIdx];
+      const t = tail[levelIdx]!;
       m.orderNext[t] = idx;
       m.orderPrev[idx] = t;
       m.orderNext[idx] = EMPTY;
@@ -314,8 +314,8 @@ export function applyCommand(
     const head = side === 0 ? m.levelHeadBid : m.levelHeadAsk;
     const tail = side === 0 ? m.levelTailBid : m.levelTailAsk;
 
-    const p = m.orderPrev[idx];
-    const n = m.orderNext[idx];
+    const p = m.orderPrev[idx]!;
+    const n = m.orderNext[idx]!;
 
     if (p !== EMPTY) m.orderNext[p] = n;
     else head[levelIdx] = n;
@@ -355,7 +355,7 @@ export function applyCommand(
     const oppSide: Side = side === 0 ? 1 : 0;
 
     while (remaining > 0) {
-      const headIdx = head[levelIdx];
+      const headIdx = head[levelIdx]!;
       if (headIdx === EMPTY) return remaining;
 
       if (!m.orderActive[headIdx]) {
@@ -364,10 +364,10 @@ export function applyCommand(
         continue;
       }
 
-      const makerOwnerIdx = m.orderOwnerIdx[headIdx];
-      const makerOwnerId = m.owners[makerOwnerIdx];
-      const takerOwnerId = m.owners[takerOwnerIdx];
-      const makerOrderId = m.orderIds[headIdx];
+      const makerOwnerIdx = m.orderOwnerIdx[headIdx]!;
+      const makerOwnerId = m.owners[makerOwnerIdx]!;
+      const takerOwnerId = m.owners[takerOwnerIdx]!;
+      const makerOrderId = m.orderIds[headIdx]!;
 
       // Self-trade prevention
       if (makerOwnerIdx === takerOwnerIdx) {
@@ -379,11 +379,11 @@ export function applyCommand(
         }
         if (stpPolicy === 2) {
           // Reduce maker and skip the self-cross qty
-          const dec = Math.min(m.orderQtyLots[headIdx], remaining);
-          m.orderQtyLots[headIdx] -= dec;
+          const dec = Math.min(m.orderQtyLots[headIdx]!, remaining);
+          m.orderQtyLots[headIdx] = m.orderQtyLots[headIdx]! - dec;
           remaining -= dec; // Also skip the qty that would have self-traded
-          events.push({ type: 'REDUCED', orderId: makerOrderId, ownerId: makerOwnerId, delta: -dec, remain: m.orderQtyLots[headIdx] });
-          if (m.orderQtyLots[headIdx] === 0) {
+          events.push({ type: 'REDUCED', orderId: makerOrderId, ownerId: makerOwnerId, delta: -dec, remain: m.orderQtyLots[headIdx]! });
+          if (m.orderQtyLots[headIdx]! === 0) {
             removeFromLevel(oppSide, levelIdx, headIdx);
             freeOrder(headIdx);
           }
@@ -391,11 +391,11 @@ export function applyCommand(
         }
       }
 
-      const makerQty = m.orderQtyLots[headIdx];
+      const makerQty = m.orderQtyLots[headIdx]!;
       const tradeQty = Math.min(makerQty, remaining);
       const pxTicks = pmin + levelIdx * tick;
 
-      m.orderQtyLots[headIdx] -= tradeQty;
+      m.orderQtyLots[headIdx] = m.orderQtyLots[headIdx]! - tradeQty;
       remaining -= tradeQty;
 
       m.tradeCount++;
@@ -419,7 +419,7 @@ export function applyCommand(
         freeOrder(headIdx);
         m.orderIdToIdx.delete(makerOrderId);
       } else {
-        events.push({ type: 'REDUCED', orderId: makerOrderId, ownerId: makerOwnerId, delta: -tradeQty, remain: m.orderQtyLots[headIdx] });
+        events.push({ type: 'REDUCED', orderId: makerOrderId, ownerId: makerOwnerId, delta: -tradeQty, remain: m.orderQtyLots[headIdx]! });
       }
     }
     return remaining;
@@ -473,16 +473,16 @@ export function applyCommand(
     if (side === 0) {
       let simBestAsk = m.bestAskIdx;
       while (simRemaining > 0 && simBestAsk !== EMPTY && simBestAsk <= levelIdx) {
-        let headIdx = m.levelHeadAsk[simBestAsk];
+        let headIdx = m.levelHeadAsk[simBestAsk]!;
         while (headIdx !== EMPTY && simRemaining > 0) {
           // Skip self-trades in simulation (STP would prevent them)
-          if (stpPolicy > 0 && m.orderOwnerIdx[headIdx] === ownerIdx) {
-            headIdx = m.orderNext[headIdx];
+          if (stpPolicy > 0 && m.orderOwnerIdx[headIdx]! === ownerIdx) {
+            headIdx = m.orderNext[headIdx]!;
             continue;
           }
-          const makerQty = m.orderQtyLots[headIdx];
+          const makerQty = m.orderQtyLots[headIdx]!;
           simRemaining -= Math.min(makerQty, simRemaining);
-          headIdx = m.orderNext[headIdx];
+          headIdx = m.orderNext[headIdx]!;
         }
         if (simRemaining > 0) {
           simBestAsk = findNextNonEmpty(m.bitmapAsk, levels, simBestAsk + 1);
@@ -491,16 +491,16 @@ export function applyCommand(
     } else {
       let simBestBid = m.bestBidIdx;
       while (simRemaining > 0 && simBestBid !== EMPTY && simBestBid >= levelIdx) {
-        let headIdx = m.levelHeadBid[simBestBid];
+        let headIdx = m.levelHeadBid[simBestBid]!;
         while (headIdx !== EMPTY && simRemaining > 0) {
           // Skip self-trades in simulation (STP would prevent them)
-          if (stpPolicy > 0 && m.orderOwnerIdx[headIdx] === ownerIdx) {
-            headIdx = m.orderNext[headIdx];
+          if (stpPolicy > 0 && m.orderOwnerIdx[headIdx]! === ownerIdx) {
+            headIdx = m.orderNext[headIdx]!;
             continue;
           }
-          const makerQty = m.orderQtyLots[headIdx];
+          const makerQty = m.orderQtyLots[headIdx]!;
           simRemaining -= Math.min(makerQty, simRemaining);
-          headIdx = m.orderNext[headIdx];
+          headIdx = m.orderNext[headIdx]!;
         }
         if (simRemaining > 0) {
           simBestBid = findPrevNonEmpty(m.bitmapBid, simBestBid - 1);
@@ -585,18 +585,18 @@ export function applyCommand(
     }
 
     // Check ownership
-    if (m.owners[m.orderOwnerIdx[idx]] !== ownerId) {
+    if (m.owners[m.orderOwnerIdx[idx]!]! !== ownerId) {
       events.push({ type: 'REJECT', orderId, ownerId, reason: 'not owner' });
       return { state, events };
     }
 
-    const levelIdx = m.orderPriceIdx[idx];
-    const side = m.orderSide[idx] as Side;
+    const levelIdx = m.orderPriceIdx[idx]!;
+    const side = m.orderSide[idx]! as Side;
     removeFromLevel(side, levelIdx, idx);
     freeOrder(idx);
     m.orderIdToIdx.delete(orderId);
     events.push({ type: 'CANCELED', orderId, ownerId });
-    bumpHash(5, m.orderOwnerIdx[idx], 0);
+    bumpHash(5, m.orderOwnerIdx[idx]!, 0);
 
   } else if (cmd.kind === 2) {
     // REPLACE (cancel + new)
@@ -608,14 +608,14 @@ export function applyCommand(
       return { state, events };
     }
 
-    if (m.owners[m.orderOwnerIdx[idx]] !== ownerId) {
+    if (m.owners[m.orderOwnerIdx[idx]!]! !== ownerId) {
       events.push({ type: 'REJECT', orderId, ownerId, reason: 'not owner' });
       return { state, events };
     }
 
-    const side = m.orderSide[idx] as Side;
-    const oldLevelIdx = m.orderPriceIdx[idx];
-    const oldQty = m.orderQtyLots[idx];
+    const side = m.orderSide[idx]! as Side;
+    const oldLevelIdx = m.orderPriceIdx[idx]!;
+    const oldQty = m.orderQtyLots[idx]!;
     const newQty = oldQty + qtyDeltaLots;
 
     if (newQty <= 0) {
@@ -639,7 +639,7 @@ export function applyCommand(
       events.push({ type: 'CANCELED', orderId, ownerId });
 
       // Now attempt to match and post new order with crossing
-      const ownerIdx = m.orderOwnerIdx[idx];
+      const ownerIdx = m.orderOwnerIdx[idx]!;
       let remaining = newQty;
 
       // Match against opposite side
@@ -647,7 +647,7 @@ export function applyCommand(
         // BUY - match against asks
         while (remaining > 0 && m.bestAskIdx !== EMPTY && m.bestAskIdx <= newLevelIdx) {
           remaining = fillAgainst(0, m.bestAskIdx, remaining, ownerIdx, orderId, newQty);
-          if (m.bestAskIdx !== EMPTY && m.levelHeadAsk[m.bestAskIdx] === EMPTY) {
+          if (m.bestAskIdx !== EMPTY && m.levelHeadAsk[m.bestAskIdx]! === EMPTY) {
             m.bestAskIdx = findNextNonEmpty(m.bitmapAsk, levels, m.bestAskIdx + 1);
           }
         }
@@ -655,7 +655,7 @@ export function applyCommand(
         // SELL - match against bids
         while (remaining > 0 && m.bestBidIdx !== EMPTY && m.bestBidIdx >= newLevelIdx) {
           remaining = fillAgainst(1, m.bestBidIdx, remaining, ownerIdx, orderId, newQty);
-          if (m.bestBidIdx !== EMPTY && m.levelHeadBid[m.bestBidIdx] === EMPTY) {
+          if (m.bestBidIdx !== EMPTY && m.levelHeadBid[m.bestBidIdx]! === EMPTY) {
             m.bestBidIdx = findPrevNonEmpty(m.bitmapBid, m.bestBidIdx - 1);
           }
         }
@@ -772,7 +772,7 @@ export function renderAscii(state: BookState, depth = 10, perLevelOrders = 10, l
   // Find next non-empty ask level
   const findNextAsk = (from: number): number => {
     for (let i = from; i < state.levels; i++) {
-      if (levelHeadAsk[i] !== EMPTY) return i;
+      if (levelHeadAsk[i]! !== EMPTY) return i;
     }
     return EMPTY;
   };
@@ -781,16 +781,16 @@ export function renderAscii(state: BookState, depth = 10, perLevelOrders = 10, l
   const bids: { px: number; orders: string }[] = [];
   let bidIdx = bestBidIdx;
   while (bidIdx !== EMPTY && bids.length < depth) {
-    let cur = levelHeadBid[bidIdx];
+    let cur = levelHeadBid[bidIdx]!;
     const parts: string[] = [];
     let count = 0;
     while (cur !== EMPTY && count < perLevelOrders) {
-      if (orderActive[cur]) {
-        const owner = owners[orderOwnerIdx[cur]]?.slice(-4) || '?';
-        parts.push(`${orderQtyLots[cur]}@${owner}`);
+      if (orderActive[cur]!) {
+        const owner = owners[orderOwnerIdx[cur]!]?.slice(-4) || '?';
+        parts.push(`${orderQtyLots[cur]!}@${owner}`);
         count++;
       }
-      cur = orderNext[cur];
+      cur = orderNext[cur]!;
     }
     if (parts.length) bids.push({ px: pmin + bidIdx * tick, orders: parts.join(',') });
     bidIdx = findPrevBid(bidIdx - 1);
@@ -800,16 +800,16 @@ export function renderAscii(state: BookState, depth = 10, perLevelOrders = 10, l
   const asks: { px: number; orders: string }[] = [];
   let askIdx = bestAskIdx;
   while (askIdx !== EMPTY && asks.length < depth) {
-    let cur = levelHeadAsk[askIdx];
+    let cur = levelHeadAsk[askIdx]!;
     const parts: string[] = [];
     let count = 0;
     while (cur !== EMPTY && count < perLevelOrders) {
-      if (orderActive[cur]) {
-        const owner = owners[orderOwnerIdx[cur]]?.slice(-4) || '?';
-        parts.push(`${orderQtyLots[cur]}@${owner}`);
+      if (orderActive[cur]!) {
+        const owner = owners[orderOwnerIdx[cur]!]?.slice(-4) || '?';
+        parts.push(`${orderQtyLots[cur]!}@${owner}`);
         count++;
       }
-      cur = orderNext[cur];
+      cur = orderNext[cur]!;
     }
     if (parts.length) asks.push({ px: pmin + askIdx * tick, orders: parts.join(',') });
     askIdx = findNextAsk(askIdx + 1);

@@ -6,7 +6,7 @@
  */
 
 import { decode, encode } from './snapshot-coder';
-import { EntityProfile, EntityTx, Env, NameIndex, NameSearchResult, ProfileUpdateTx } from './types';
+import type { EntityProfile, EntityTx, Env, NameIndex, NameSearchResult, ProfileUpdateTx } from './types';
 import { formatEntityDisplay, generateEntityAvatar } from './utils';
 
 // === PROFILE STORAGE ===

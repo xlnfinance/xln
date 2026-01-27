@@ -13,6 +13,7 @@
   import { createEventDispatcher } from 'svelte';
   import TokenList from './TokenList.svelte';
   import ERC20Send from './ERC20Send.svelte';
+  import XLNSend from './XLNSend.svelte';
   import DepositToEntity from './DepositToEntity.svelte';
   import { ArrowUpRight, ArrowDownLeft, Repeat, ExternalLink, Copy, Check } from 'lucide-svelte';
 
@@ -111,6 +112,15 @@
   <div class="tab-content">
     {#if activeTab === 'send'}
       <div class="send-tab">
+        <!-- XLN Send (simnet/instant) -->
+        <XLNSend {entityId} />
+
+        <!-- Divider -->
+        <div class="send-divider">
+          <span>Or send on-chain</span>
+        </div>
+
+        <!-- ERC20 Send (on-chain) -->
         <ERC20Send {privateKey} {walletAddress} />
       </div>
     {:else if activeTab === 'receive'}
@@ -525,5 +535,25 @@
     color: rgba(255, 255, 255, 0.3);
     background: rgba(255, 255, 255, 0.02);
     border-radius: 8px;
+  }
+
+  /* Send Divider */
+  .send-divider {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin: 20px 0;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .send-divider::before,
+  .send-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.08);
   }
 </style>

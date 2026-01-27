@@ -558,8 +558,7 @@
     }
 
     const browserVM = xln.getBrowserVMInstance();
-    const getDebtsFn = browserVM?.getDebts;
-    if (!browserVM || !getDebtsFn || tokenId === null) {
+    if (!browserVM || !browserVM.getDebts || tokenId === null) {
       entityDebts = [];
       debtsLoading = false;
       return;
@@ -607,7 +606,7 @@
 
         // Query debts for each entity
         for (const entityId of entityIds) {
-          const debts = await getDebtsFn(entityId, tokenId!);
+          const debts = await browserVM.getDebts(entityId, tokenId!);
           if (debts && debts.length > 0) {
             results.push({
               entityId,
@@ -781,16 +780,16 @@
             <span class="info-label">Block Delay</span>
             <span class="info-value">{selectedJurisdictionData?.blockDelayMs || 300}ms</span>
           </div>
-          {#if selectedJurisdictionData?.contracts?.depository}
+          {#if selectedJurisdictionData?.depositoryAddress || selectedJurisdictionData?.contracts?.depository}
             <div class="info-row">
               <span class="info-label">Depository</span>
-              <span class="info-value mono">{selectedJurisdictionData.contracts.depository}</span>
+              <span class="info-value mono">{selectedJurisdictionData.depositoryAddress || selectedJurisdictionData.contracts?.depository}</span>
             </div>
           {/if}
-          {#if selectedJurisdictionData?.contracts?.entityProvider}
+          {#if selectedJurisdictionData?.entityProviderAddress || selectedJurisdictionData?.contracts?.entityProvider}
             <div class="info-row">
               <span class="info-label">EntityProvider</span>
-              <span class="info-value mono">{selectedJurisdictionData.contracts.entityProvider}</span>
+              <span class="info-value mono">{selectedJurisdictionData.entityProviderAddress || selectedJurisdictionData.contracts?.entityProvider}</span>
             </div>
           {/if}
           <div class="info-row mempool-section">

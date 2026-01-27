@@ -11,6 +11,13 @@ import { Level } from 'level';
 const RUNTIME_BUILD_ID = '2026-01-21-00:40Z';
 console.log(`🚀 RUNTIME.JS BUILD: ${RUNTIME_BUILD_ID}`);
 
+// Helper: Convert signer address to entity ID (pad to bytes32)
+function signerToEntityId(address: string): string {
+  // 0x1234...ABCD (20 bytes) → 0x000000000000000000000000 + address.slice(2) (32 bytes)
+  const addr = address.toLowerCase().startsWith('0x') ? address.slice(2) : address;
+  return '0x' + '0'.repeat(24) + addr;
+}
+
 import { getPerfMs, getWallClockMs } from './time';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { isLeftEntity } from './entity-id-utils';
@@ -128,7 +135,8 @@ import { captureSnapshot, cloneEntityReplica } from './state-helpers';
 import { getEntityShortId, getEntityNumber, formatEntityId, HEAVY_LOGS } from './utils';
 import { safeStringify } from './serialization-utils';
 import { validateDelta, validateAccountDeltas, createDefaultDelta, isDelta, validateEntityInput, validateEntityOutput } from './validation-utils';
-import { EntityInput, EntityReplica, Env, RuntimeInput, JReplica } from './types';
+import { EntityInput, EntityReplica, Env, RuntimeInput } from './types';
+import type { JReplica } from './types';
 import {
   clearDatabase,
   DEBUG,
@@ -697,66 +705,122 @@ const applyRuntimeInput = async (
 
     // Process runtime transactions (handle async operations properly)
     for (const runtimeTx of mergedRuntimeTxs) {
-      if (runtimeTx.type === 'createXlnomy') {
-        console.log(`[Runtime] Creating Xlnomy "${runtimeTx.data.name}"...`);
+      if (runtimeTx.type === 'importJ') {
+        console.log(`[Runtime] Importing J-machine "${runtimeTx.data.name}" (chain ${runtimeTx.data.chainId})...`);
 
         try {
-          const { createXlnomy } = await import('./jurisdiction-factory.js');
-          const xlnomy = await createXlnomy({
-            name: runtimeTx.data.name,
-            evmType: runtimeTx.data.evmType,
-            rpcUrl: runtimeTx.data.rpcUrl,
-            blockTimeMs: runtimeTx.data.blockTimeMs,
-            autoGrid: runtimeTx.data.autoGrid,
-            env, // Pass env so grid entities get added to runtime
+          const { getJurisdiction } = await import('./jurisdiction/index.js');
+          const isBrowserVM = runtimeTx.data.rpcs.length === 0;
+
+          // Create jurisdiction via unified interface
+          const jurisdiction = await getJurisdiction({
+            type: isBrowserVM ? 'browser' : 'rpc',
+            chainId: runtimeTx.data.chainId,
+            rpcUrl: isBrowserVM ? undefined : runtimeTx.data.rpcs[0],
+            depositoryAddress: runtimeTx.data.contracts?.depository,
+            entityProviderAddress: runtimeTx.data.contracts?.entityProvider,
           });
 
-          if (xlnomy.evmType === 'browservm' && xlnomy.contracts?.depositoryAddress) {
-            setBrowserVMJurisdiction(env, xlnomy.contracts.depositoryAddress, xlnomy.evm);
+          // For BrowserVM, set as default jurisdiction in env
+          if (isBrowserVM) {
+            const browserVM = (jurisdiction as any).getEVM?.();
+            if (browserVM) {
+              setBrowserVMJurisdiction(env, jurisdiction.depositoryAddress, browserVM);
+            }
           }
 
-          // Initialize jReplicas Map if it doesn't exist
+          // Initialize jReplicas Map if needed
           if (!env.jReplicas) {
             env.jReplicas = new Map();
           }
 
-          // Capture initial stateRoot from EVM (for time travel)
-          let stateRoot = new Uint8Array(32);
-          if (xlnomy.evm?.captureStateRoot) {
-            try {
-              stateRoot = await xlnomy.evm.captureStateRoot();
-              console.log(`[Runtime] Captured initial stateRoot: ${Buffer.from(stateRoot).toString('hex').slice(0, 16)}...`);
-            } catch (e) {
-              console.warn(`[Runtime] Could not capture stateRoot: ${e}`);
+          // Create JReplica
+          const jReplica: JReplica = {
+            name: runtimeTx.data.name,
+            blockNumber: 0n,
+            stateRoot: new Uint8Array(32),
+            mempool: [],
+            blockDelayMs: 300,
+            lastBlockTimestamp: env.timestamp,
+            position: { x: 0, y: 50, z: 0 }, // Default position for J-machine
+            depositoryAddress: jurisdiction.depositoryAddress,
+            entityProviderAddress: jurisdiction.entityProviderAddress,
+          };
+          env.jReplicas.set(runtimeTx.data.name, jReplica);
+
+          // Set as active if first
+          if (!env.activeJurisdiction) {
+            env.activeJurisdiction = runtimeTx.data.name;
+          }
+
+          // Auto-create self-entity for signer (if not exists)
+          const signer = env.signers?.[0];
+          if (signer) {
+            const selfEntityId = signerToEntityId(signer.address);
+            const replicaKey = `${selfEntityId}:${signer.address}`;
+
+            if (!env.eReplicas.has(replicaKey)) {
+              console.log(`[Runtime] Auto-creating self-entity for signer ${signer.address.slice(0, 10)}...`);
+
+              // Register on-chain
+              await jurisdiction.registerEntity(
+                signer.privateKey || '',
+                selfEntityId,
+                [signer.address],
+                1n
+              );
+
+              // Create local replica
+              const entityConfig: ConsensusConfig = {
+                mode: 'proposer-based',
+                threshold: 1n,
+                validators: [signer.address],
+                shares: { [signer.address]: 1n },
+                jurisdiction: {
+                  address: jurisdiction.depositoryAddress,
+                  name: runtimeTx.data.name,
+                  chainId: runtimeTx.data.chainId,
+                  entityProviderAddress: jurisdiction.entityProviderAddress,
+                  depositoryAddress: jurisdiction.depositoryAddress,
+                },
+              };
+
+              const replica: EntityReplica = {
+                entityId: selfEntityId,
+                signerId: signer.address,
+                mempool: [],
+                isProposer: true,
+                state: {
+                  entityId: selfEntityId,
+                  height: 0,
+                  timestamp: env.timestamp,
+                  nonces: new Map(),
+                  accounts: new Map(),
+                  reserves: new Map(),
+                  lockBook: new Map(),
+                  config: entityConfig,
+                  messages: [],
+                  proposals: new Map(),
+                  lastFinalizedJHeight: 0,
+                  htlcFeesEarned: 0n,
+                },
+              };
+
+              env.eReplicas.set(replicaKey, replica);
+
+              // Fund with test tokens (BrowserVM only)
+              if (isBrowserVM) {
+                await jurisdiction.debugFundReserves(selfEntityId, 1, 1000n * 10n**18n);
+                console.log(`[Runtime] Funded self-entity with 1000 tokens`);
+              }
+
+              console.log(`[Runtime] ✅ Self-entity created: ${selfEntityId.slice(0, 18)}`);
             }
           }
 
-          // Create JReplica from Xlnomy
-          const jReplica: JReplica = {
-            name: xlnomy.name,
-            blockNumber: BigInt(xlnomy.jMachine.jHeight),
-            stateRoot,
-            mempool: xlnomy.jMachine.mempool || [],
-            blockDelayMs: 300,             // 300ms delay before processing mempool
-            lastBlockTimestamp: env.timestamp,  // Use env.timestamp for determinism
-            position: xlnomy.jMachine.position,
-            contracts: xlnomy.contracts ? {
-              depository: xlnomy.contracts.depositoryAddress || (xlnomy.contracts as any).depository,
-              entityProvider: xlnomy.contracts.entityProviderAddress || (xlnomy.contracts as any).entityProvider,
-            } : undefined,
-          };
-          env.jReplicas.set(xlnomy.name, jReplica);
-
-          // Set as active if it's the first one
-          if (!env.activeJurisdiction) {
-            env.activeJurisdiction = xlnomy.name;
-          }
-
-          console.log(`[Runtime] ✅ JReplica "${xlnomy.name}" created`);
-          console.log(`[Runtime] Grid entities queued in runtimeInput: ${mergedRuntimeTxs.length} txs`);
-          console.log(`[Runtime] Active Jurisdiction: ${env.activeJurisdiction}`);
+          console.log(`[Runtime] ✅ JReplica "${runtimeTx.data.name}" ready`);
         } catch (error) {
-          console.error(`[Runtime] ❌ Failed to create Xlnomy:`, error);
+          console.error(`[Runtime] ❌ Failed to import J-machine:`, error);
         }
       } else if (runtimeTx.type === 'importReplica') {
         if (DEBUG)
@@ -1824,6 +1888,8 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
     emit: () => {},
     // BrowserVM will be lazily initialized on first use (see evm.ts)
     browserVM: null,
+    // EVM instances (unified interface) - use createEVM() to add
+    evms: new Map(),
   };
 
   // Attach event emission methods (EVM-style)
@@ -2430,7 +2496,7 @@ export const prepopulateFullMechanics = scenarios.fullMechanics;
 // === SCENARIO SYSTEM ===
 export { parseScenario, mergeAndSortEvents } from './scenarios/parser.js';
 export { executeScenario } from './scenarios/executor.js';
-export { loadScenarioFromFile, loadScenarioFromText } from './scenarios/loader.js';
+// NOTE: loadScenarioFromFile uses fs/promises - import directly from './scenarios/loader.js' in CLI only
 export { SCENARIOS, getScenario, getScenariosByTag, type ScenarioMetadata } from './scenarios/index.js';
 
 // === CRYPTOGRAPHIC SIGNATURES ===
@@ -2443,6 +2509,10 @@ const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayIn
 
 // Avatar functions are already imported and exported above
 export { BrowserEVM } from './evms/browser-evm.js';
+
+// Jurisdiction abstraction (unified interface for browser/rpc)
+export { getJurisdiction, getCachedJurisdiction, clearJurisdictions, listJurisdictions } from './jurisdiction/index.js';
+export type { IJurisdiction, JurisdictionConfig, Token, EntityInfo, TxReceipt } from './jurisdiction/index.js';
 
 // ASCII visualization exports
 export { formatRuntime, formatEntity, formatAccount, formatOrderbook, formatSummary } from './runtime-ascii';

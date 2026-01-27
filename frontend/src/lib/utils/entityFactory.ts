@@ -131,8 +131,9 @@ function buildJurisdictionConfig(env: Env, name?: string): JurisdictionConfig | 
     throw new Error(`J-machine "${name}" not found in runtime`);
   }
 
-  const depositoryAddress = jReplica?.contracts?.depository || jReplica?.contracts?.depositoryAddress;
-  const entityProviderAddress = jReplica?.contracts?.entityProvider || jReplica?.contracts?.entityProviderAddress;
+  // Support both top-level (new) and nested (legacy) contract addresses
+  const depositoryAddress = jReplica?.depositoryAddress || jReplica?.contracts?.depository || jReplica?.contracts?.depositoryAddress;
+  const entityProviderAddress = jReplica?.entityProviderAddress || jReplica?.contracts?.entityProvider || jReplica?.contracts?.entityProviderAddress;
 
   if (!depositoryAddress || !entityProviderAddress) {
     console.error(`[buildJurisdictionConfig] ❌ Contracts not deployed for J-machine "${name}"`);
@@ -165,12 +166,12 @@ async function ensureJMachine(env: Env): Promise<string | null> {
 
     await xln.applyRuntimeInput(env, {
       runtimeTxs: [{
-        type: 'createXlnomy',
+        type: 'importJ',
         data: {
           name,
-          evmType: 'browservm',
-          blockTimeMs: 1000,
-          autoGrid: false
+          chainId: 1337, // Must match View.svelte's BrowserVM chainId
+          ticker: 'SIM',
+          rpcs: [],
         }
       }],
       entityInputs: []
@@ -182,9 +183,9 @@ async function ensureJMachine(env: Env): Promise<string | null> {
       throw new Error('Failed to create J-machine - not found in env.jReplicas');
     }
 
-    // ASSERT: Contracts deployed
-    const depository = jReplica?.contracts?.depository || jReplica?.contracts?.depositoryAddress;
-    const entityProvider = jReplica?.contracts?.entityProvider || jReplica?.contracts?.entityProviderAddress;
+    // ASSERT: Contracts deployed (support both top-level and legacy nested)
+    const depository = jReplica?.depositoryAddress || jReplica?.contracts?.depository || jReplica?.contracts?.depositoryAddress;
+    const entityProvider = jReplica?.entityProviderAddress || jReplica?.contracts?.entityProvider || jReplica?.contracts?.entityProviderAddress;
 
     if (!depository || !entityProvider) {
       console.error('[ensureJMachine] ❌ Contracts not deployed');

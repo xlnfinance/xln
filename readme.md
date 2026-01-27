@@ -239,15 +239,15 @@ Root:
 - **Use:** Scenario rehearsals, VR demos, tutorials
 
 ### Testnet (Q1 2026)
-**Shared PoA network. Multi-user coordination.**
-- **Network:** Arrakis (custom PoA chain)
-- **Contracts:** Full suite (EntityProvider, Depository, SubcontractProvider)
-- **Validators:** 5 trusted nodes
+**Base Sepolia. Multi-user coordination.**
+- **Network:** Base L2 Sepolia (chainId: 84532)
+- **Contracts:** Full suite (EntityProvider, Depository, DeltaTransformer)
+- **RPC:** https://sepolia.base.org
 - **Use:** Integration testing, onboarding flows, load testing
 
 ### Mainnet (Q4 2026)
 **Production deployment. Real value.**
-- **Chains:** Ethereum (L1), Polygon/Arbitrum (L2s)
+- **Chains:** Base L2 (primary), Ethereum L1 (bridge)
 - **Governance:** Multi-sig + timelock
 - **Audits:** Trail of Bits + OpenZeppelin
 - **Use:** Live settlement network

@@ -1,230 +1,143 @@
-🧠 XLN Architecture: The Superset of Traditional and Decentralized Finance
+# xln Documentation
 
-**"TradFi + DeFi = XLN"** — We're not choosing sides. We're building the infrastructure that makes both obsolete.
+**Reserve-Credit Provable Account Network** — The only architecture satisfying all unavoidable constraints for internet-scale finance.
 
-Imagine Goldman Sachs' risk management systems with Ethereum's permissionless innovation. Picture JPMorgan's hierarchical approvals with Uniswap's atomic execution. That's XLN — the **organizational layer** that brings institutional sophistication to crypto while maintaining crypto's revolutionary properties.
+**Not "better than alternatives." The only possibility given:**
+1. Unicast (broadcast cannot scale - O(n) ceiling)
+2. Credit (receiving impossible without it - Lightning proved)
+3. Proofs (unprovable custody dies after crises - FTX proved)
+4. Programmable entities (organizations need logic - obvious)
+5. EVM enforcement (FIFO debt needs Turing-completeness - UTXO cannot)
 
-Welcome to XLN — where every organization, from a solo trader to a nation-state, operates as a **sovereign computational entity**. No compromises. No choosing between "enterprise-grade" and "crypto-native." Just pure organizational infrastructure that works for everyone.
+**Read [constraints.md](constraints.md) first** - understand why alternatives are impossible, not inferior.
 
-⸻
+---
 
-## JEA: Jurisdiction → Entity → Account (J/E/A machines)
+## 🚀 Quick Start
 
-XLN models the world as layered, composable machines:
+**New to xln?** Start here:
 
-- **J-machine (Jurisdiction)**: public truth, reserves, dispute resolution; validates external claims and provides registry semantics.
-- **E-machine (Entity)**: corporations, DAOs, banks, and states; programmable governance and policy encoded as proposals and quorums.
-- **A-machine (Account)**: user-level channels, identities, and subcontracts executing local logic and producing proofs.
+1. **[constraints.md](constraints.md)** - Why XLN is inevitable (prove no alternative exists)
+2. [essay.md](essay.md) - The Inevitability of Provable Credit (deep-dive)
+3. [00_QA.md](core/00_QA.md) - Homakov's intro: who, why, what is xln
+4. [10_UFT.md](core/10_UFT.md) - Unified Financial Theory (flagship whitepaper)
+5. [roadmap.md](roadmap.md) - Simnet → Testnet → Mainnet timeline
 
-“The machine is the law.” Sovereignty is cryptographic, not geographic.
+**Developers:**
+- [Payment Spec](implementation/payment-spec.md) - Direct payments, HTLCs, onion routing
+- [Scenarios](implementation/scenarios.md) - Scenario DSL reference
+- [RJEA Architecture](core/rjea-architecture.md) - Runtime→Entity→Account→Jurisdiction
 
-⸻
+---
 
-🧱 1. Server: The Simulated Ground Layer
+## 📚 Core Protocol (5 files)
 
-Think of the Server as the simulation matrix. It’s not a coordinator. It’s not a validator. It’s your own personal universe where Entities evolve over time.
+| Document | Description |
+|----------|-------------|
+| [00_QA.md](core/00_QA.md) | Egor Homakov intro + motivation |
+| [10_UFT.md](core/10_UFT.md) | UFT: FCUAN/FRPAP/RCPAN invariants |
+| [11_Jurisdiction_Machine.md](core/11_Jurisdiction_Machine.md) | J-machine (TradFi vs DeFi) |
+| [12_invariant.md](core/12_invariant.md) | RCPAN: `−Lₗ ≤ Δ ≤ C + Lᵣ` |
+| [rjea-architecture.md](core/rjea-architecture.md) | Full RJEA implementation (merges JEA, naming, tx-flow) |
 
-Role
-	•	Hosts and executes Entity Machines
-	•	Records every tick of state change in its block loop
-	•	Stores the entire machine tree in LevelDB with Merkle-style integrity
+---
 
-Key Components
+## 🛠️ Implementation (3 files)
 
-Component	Description
-Mempool	Holds Entity block proposals pending signatures
-Outbox	Emits signed blocks or requests (e.g., to gossip, jurisdiction)
-Inbox	Accepts messages (gossiped updates, signatures)
-Snapshots	Every 100ms, the current state is committed to disk via RLP+Merkle hash
-Signers	Deterministically derived from HMAC(secret, index)
+| Document | Description | Status |
+|----------|-------------|--------|
+| [payment-spec.md](implementation/payment-spec.md) | Direct + HTLC payments, onion routing | Production |
+| [scenarios.md](implementation/scenarios.md) | Scenario DSL reference | Production |
+| [TODO-bilateral-j-event-consensus.md](implementation/TODO-bilateral-j-event-consensus.md) | Active work: bilateral j-events | WIP |
 
-Analogy
+---
 
-Like a hypervisor running isolated VMs (Entities), the Server executes without global coordination. You can fork it, replay it, or rewind it. It’s the ultimate sovereign simulation host.
+## 🏗️ Architecture (4 files)
 
-⸻
+| Document | Description |
+|----------|-------------|
+| [bilaterality.md](architecture/bilaterality.md) | Why bilateral consensus is the killer feature |
+| [contracts.md](architecture/contracts.md) | Smart contract architecture |
+| [hanko.md](architecture/hanko.md) | Hierarchical signature system |
+| [why-evm.md](architecture/why-evm.md) | EVM vs UTXO/Solana + jurisdiction requirement |
 
-🏛️ 2. Entity: The Sovereign Machine
+---
 
-The Entity is the real heart of XLN. It’s like a DAO, but it has memory, makes commitments, and progresses in blocks. Think of it as a programmable company, state, or institution.
+## 🐛 Debugging (1 file)
 
-Anatomy
-	•	Storage: Key-value RLP tree (state, proposals, votes, parameters)
-	•	Quorum: Fixed-weight signer set (can be updated via proposal)
-	•	Actions: Triggered and signed, each action proposes a state change
-	•	Block Loop: Aggregates signed actions and finalizes when quorum is reached
-	•	Submachines: Channels or Account machines exist as nested submachines
+- [consensus-debugging-guide.md](debugging/consensus-debugging-guide.md) - How to debug consensus failures
 
-Execution Flow
+---
 
-1. Propose → 2. Collect Signatures → 3. Execute → 4. Finalize in Block
+## 🚢 Deployment (1 file)
 
-Programmability
+- [server-setup.md](deployment/server-setup.md) - Production nginx config
 
-Entities can:
-	•	Trigger on-chain interactions (reserves, collaterals via jurisdiction)
-	•	Enforce logic for DeFi actions (minting, vesting, AMM pools, oracles)
-	•	Vote and evolve: Replace quorum, update policies, pause machines
-	•	Issue tokens: Represent shares, votes, or programmable assets
+---
 
-XLN decouples the ability to own tokens from the ability to act. Quorum = control, token = ownership. You can fork an Entity without airdrops — it’s just a different simulation.
+## 🗺️ Status
 
-Analogy
+| Document | Description |
+|----------|-------------|
+| [roadmap.md](roadmap.md) | Simnet (Q1 2026) → Testnet (Q2) → Mainnet (Q4) |
+| [mainnet.md](mainnet.md) | Mainnet readiness (600/1000) |
 
-If Ethereum smart contracts are calculators, Entities are living spreadsheets with a board of directors.
+---
 
-⸻
+## 📦 Archive
 
-👥 3. Signer: The Flesh and Blood Layer
+Historical documents preserved for context:
 
-Signers are the human or device actors powering the system. They:
-	•	Hold keys
-	•	Propose actions
-	•	Approve blocks
-	•	Sync state from their server or others
+- [archive/](archive/) - Research papers, session transcripts, historical analysis
 
-Signers don’t broadcast intents. They sign proposals or actions, and they do so only when state matches expected values. This allows cold, hard determinism.
+---
 
-“No intents, no mempool spam, no MEV. Just machines progressing when quorum agrees.”
+## 📊 Stats
 
-⸻
+- **Core docs:** 5 files (start here)
+- **Implementation:** 3 files (build with xln)
+- **Architecture:** 4 files (design decisions)
+- **Operations:** 2 files (debugging + deployment)
+- **Total critical:** 16 files
+- **Reduction:** 95 → 16 files (83% deleted)
+- **Bloat removed:** 1,303 lines cut from remaining docs
 
-🔄 4. Channels (Coming Later)
+---
 
-While omitted from MVP, Channels are submachines that manage trust-based contracts. They:
-	•	Track balances, deltas, subcontracts
-	•	Are added via addSubcontract() to an Account
-	•	Emit proofs which the Entity signs and commits
+## 🌐 Web Navigation
 
-Channels allow:
-	•	Programmable credit
-	•	Netting
-	•	Time-locked guarantees
-	•	Dispute resolution
+This documentation is available at:
+- **GitHub:** https://github.com/xlnfinance/xln/tree/main/docs
+- **Web:** https://xln.finance/docs (with index.html)
 
-⸻
-
-🪙 5. DeFi & Economic Logic
-
-XLN Entities can implement advanced DeFi behaviors natively. Examples:
-
-🔐 Credit & Trust
-	•	Credit lines are user-initiated
-	•	No reserve required to receive payments
-	•	Channels become asymmetric credit contracts
-
-💰 AMMs & Token Swaps
-	•	Entities can host internal AMM machines
-	•	Token swaps settle instantly via internal state updates
-
-🏦 Reserve & Collateral
-	•	Reserve deposits tracked via Jurisdiction
-	•	Entities interact with Depository.sol contracts for collateralization
-
-📈 Oracles & Price Feeds
-	•	Entity can define setOracle(address)
-	•	Price updates come via signed messages from trusted oracle entities
-
-⚖️ DAO Governance
-	•	Proposals are actions
-	•	Signers are the quorum
-	•	Emergency votes via override tokens (e.g., EmergencyShare)
-
-“In XLN, a DAO is not just a voting app — it’s a full machine with a chain of custody, audit logs, and block-by-block state transitions.”
-
-⸻
-
-🔐 Security & Integrity
-	•	All actions are signed via Hanko hierarchical signature system
-	•	All blocks are replayable and deterministic
-	•	State is stored as RLP + Merkle trees
-	•	Signature threshold must be met for progression
-	•	Real-time Board validation via EntityProvider (BCD governance)
-	•	Hanko Bytes enable unlimited organizational complexity with gas efficiency
-	•	Lazy entities: No registration required for self-validating boards
-
-⸻
-
-🛰️ Jurisdiction (External Observer)
-
-Entities can publish:
-	•	Reserve movements
-	•	On-chain collateral updates
-	•	External registry claims
-
-But they never depend on these events for internal logic unless explicitly coded. This preserves state sufficiency.
-
-⸻
-
-## Real-World Applications: TradFi Meets DeFi
-
-### **Corporate Treasury Management**
-**Traditional**: Multiple approval layers, manual processes, audit nightmares  
-**XLN**: Cryptographic proof of every approval, atomic multi-protocol operations
+**Structure:**
 ```
-Example: Tesla treasury rebalances $1B across 10 DeFi protocols
-- Risk committee approves parameters
-- CFO signs strategic allocation  
-- Treasury team executes
-- All in ONE atomic Hanko signature
+/docs/
+├── readme.md          - this file
+├── roadmap.md         - timeline
+├── mainnet.md         - readiness
+├── index.html         - web interface
+│
+├── core/              - 5 files: protocol fundamentals
+├── implementation/    - 4 files: how to build
+├── architecture/      - 4 files: design decisions
+├── debugging/         - 1 file: troubleshooting
+├── deployment/        - 1 file: production setup
+│
+└── archive/           - historical docs
 ```
 
-### **Investment Fund Operations**
-**Traditional**: GP/LP agreements in PDFs, manual capital calls  
-**XLN**: Programmable fund governance with automated workflows
-```
-Example: $100M crypto fund with institutional LPs
-- Dual-token structure (GP control, LP economics)
-- Automated capital calls and distributions
-- Real-time NAV calculations
-- Cryptographic audit trail for regulators
-```
+---
 
-### **Cross-Border Subsidiaries**
-**Traditional**: Weeks to set up entities, massive legal costs  
-**XLN**: Spawn subsidiaries in seconds, zero marginal cost
-```
-Example: Multinational with 50 country operations
-- Parent entity controls all subsidiaries
-- Local entities comply with local rules
-- Instant fund transfers between entities
-- Complete visibility for headquarters
-```
+## 🎯 Navigation by Audience
 
-## Implications and Success Criteria
+**Newcomers:** index.html → 00_QA.md → 10_UFT.md
+**Developers:** payment-spec.md, rjea-architecture.md
+**Investors:** roadmap.md, mainnet.md
+**Architects:** architecture/
 
-**The Paradigm Shift**
-- **From Permission to Programmable**: No asking banks, just cryptographic execution
-- **From Trust to Truth**: Every decision cryptographically verifiable
-- **From Expensive to Free**: Infinite organizational complexity at zero cost
-- **From Slow to Instant**: Corporate actions execute in seconds, not weeks
+---
 
-**When XLN succeeds**
-- Fortune 500 companies run operations through XLN entities
-- Governments issue digital corporate registrations
-- Every DeFi protocol integrates Hanko for institutional access
-- "Opening a subsidiary" becomes as easy as "creating a folder"
-
-⸻
-
-🌍 Final Thoughts
-
-XLN is not a smart contract platform.
-It’s not a rollup.
-It’s not a channel network.
-
-It’s a machine language for sovereign economic agents, where:
-	•	Every Entity is a VM
-	•	Every VM has quorum
-	•	Every state change is a block
-
-“Blockchains made consensus global. XLN makes consensus personal.”
-
-⸻
-
-For further details, see:
-	•	server.ts - reference implementation
-	•	EntityProvider.sol - quorum hash & jurisdiction interface
-	•	Depository.sol - reserve/collateral tracking
-	•	CLI tools (DevTree, BlockValidator, SignatureVerifier)
-	•	Memo: docs/memo-to-model.md (tone, positioning, and summary guide)
+**Last updated:** 2026-01-24
+**Maintainer:** xln core team
+**License:** See LICENSE in repo root

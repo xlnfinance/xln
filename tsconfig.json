@@ -32,7 +32,11 @@
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "typeRoots": ["./node_modules/@types", "./types"],
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "@xln/runtime/*": ["./runtime/*"],
+      "@xln/brainvault/*": ["./brainvault/*"]
+    }
   },
   "include": ["src/**/*", "playwright.config.ts"],
   "exclude": [

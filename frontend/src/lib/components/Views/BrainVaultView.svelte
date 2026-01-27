@@ -7,10 +7,9 @@
   import { deriveRequestSignal, showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { Copy, Check, Settings } from 'lucide-svelte';
   import {
-    BRAINVAULT_V2,
+    BRAINVAULT_V1,
     bytesToHex,
     combineShards,
-    createResumeToken,
     deriveEthereumAddress,
     deriveKey,
     deriveSitePassword as deriveSitePasswordFromRuntime,
@@ -18,10 +17,8 @@
     estimatePasswordStrength,
     formatDuration,
     getShardCount,
-    hashName,
     hexToBytes,
-    parseResumeToken,
-  } from '@xln/runtime/brainvault';
+  } from '@xln/brainvault/core';
   import { generateLazyEntityId } from '@xln/runtime/entity-factory';
 
   // Props
@@ -35,18 +32,13 @@
   // CONSTANTS
   // ============================================================================
 
-  // Attack cost assumes: $0.05/GB-hour on AWS, 1M password guesses
-  // Time to crack = shards × 256MB × $0.05/GB-hr × 1M guesses
+  // Security tiers - clean labels for fintech UX
   const FACTOR_INFO = [
-    { factor: 1, shards: 1, memory: '256MB', time: '3s', description: 'Demo only', attackCost: '$13K', attackTime: '1 hour' },
-    { factor: 2, shards: 4, memory: '1GB', time: '12s', description: 'Testing', attackCost: '$50K', attackTime: '4 hours' },
-    { factor: 3, shards: 16, memory: '4GB', time: '50s', description: 'Coffee money', attackCost: '$200K', attackTime: '1 day' },
-    { factor: 4, shards: 64, memory: '16GB', time: '3min', description: 'Pocket change', attackCost: '$800K', attackTime: '5 days' },
-    { factor: 5, shards: 256, memory: '64GB', time: '13min', description: 'Savings', attackCost: '$3.2M', attackTime: '3 weeks' },
-    { factor: 6, shards: 1024, memory: '256GB', time: '50min', description: 'Serious money', attackCost: '$13M', attackTime: '3 months' },
-    { factor: 7, shards: 4096, memory: '1TB', time: '3.5hr', description: 'Life savings', attackCost: '$51M', attackTime: '1 year' },
-    { factor: 8, shards: 16384, memory: '4TB', time: '14hr', description: 'Generational', attackCost: '$200M', attackTime: '4 years' },
-    { factor: 9, shards: 65536, memory: '16TB', time: '55hr', description: 'Nation-state', attackCost: '$800M', attackTime: '16 years' },
+    { factor: 1, shards: 1, time: '3s', tier: 'Test', attackCost: '$13K' },
+    { factor: 2, shards: 10, time: '30s', tier: 'Basic', attackCost: '$130K' },
+    { factor: 3, shards: 100, time: '5min', tier: 'Standard', attackCost: '$1.3M' },
+    { factor: 4, shards: 1000, time: '50min', tier: 'Strong', attackCost: '$13M' },
+    { factor: 5, shards: 10000, time: '8hr', tier: 'Maximum', attackCost: '$130M' },
   ];
 
   // ============================================================================
@@ -195,11 +187,9 @@
 
   type Phase = 'input' | 'deriving' | 'complete';
   type InputMode = 'brainvault' | 'mnemonic';
-  type SoundMode = 'none' | 'minimal' | 'full';
 
   let inputMode: InputMode = 'brainvault';
   let phase: Phase = 'input';
-  let soundMode: SoundMode = 'none';
   let showSuccessHeader = true;
   let successHeaderTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -215,11 +205,17 @@
   let passphrase = '';
   let mnemonicInput = ''; // For mnemonic mode
   let showPassphrase = false;
-  let factor = 5;
+  let shardInput = 3; // Can be 1-5 (factor) or 6+ (custom shards)
+  let factor = 3; // Computed from shardInput
 
-  // Dynamic color for factor number: red(1) → yellow(5) → green(9)
+  // Compute actual shard count from input
+  $: isPreset = shardInput >= 1 && shardInput <= 5;
+  $: actualShardCount = isPreset ? getShardCount(shardInput) : shardInput;
+
+  // Dynamic color: red(1) → yellow(3) → green(5+)
   $: factorColor = (() => {
-    const t = (factor - 1) / 8; // 0 to 1
+    const effective = isPreset ? shardInput : Math.min(5, Math.ceil(Math.log10(shardInput)) + 1);
+    const t = (effective - 1) / 4;
     if (t < 0.5) {
       // red to yellow
       const r = 239;
@@ -236,7 +232,13 @@
   })();
 
   // Device memory detection (navigator.deviceMemory gives GB, default 8GB if unavailable)
+  // NOTE: Browser privacy limits cap at 8GB - power users can override below
   let deviceMemoryGB = typeof navigator !== 'undefined' ? ((navigator as any).deviceMemory || 8) : 8;
+
+  // POWER USER OVERRIDE: Uncomment to set actual RAM (bypasses browser 8GB cap)
+  // For M3 Ultra 512GB or similar high-RAM machines
+  // deviceMemoryGB = 512;
+
   let deviceMemoryMB = deviceMemoryGB * 1024;
 
   // Derivation state
@@ -246,14 +248,15 @@
   let activeWorkerCount = 1;
   // Allow user to configure beyond hardwareConcurrency (they'll find sweet spot)
   const hardwareCores = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4;
-  // Generous limits - user can experiment (512GB machine can handle 100+ workers)
-  const memoryBasedMax = Math.floor(deviceMemoryGB * 1024 / 256); // 1 worker per 256MB
 
-  // M3 Ultra optimization: 32 cores → 128 workers (Argon2id is memory-bound)
+  // Ultra-permissive worker limits (browser WASM will be the real bottleneck)
   const computeMaxWorkers = () => {
-    const coreBased = hardwareCores * 4; // 4x for memory-bound (32 cores → 128)
-    const memBased = Math.min(memoryBasedMax, 256); // Cap at 256 (diminishing returns)
-    return Math.min(coreBased, memBased);
+    // For memory-bound ops like argon2id, 8x CPU cores is reasonable ceiling
+    const coreBased = hardwareCores * 8; // 32 cores → 256 workers
+    // Allow 4 workers per GB of RAM (conservative estimate)
+    const memBased = Math.floor(deviceMemoryGB * 4);
+    // Hard cap at 512 (browser will OOM before this on most machines)
+    return Math.min(coreBased, memBased, 512);
   };
 
   let maxWorkers = computeMaxWorkers();
@@ -281,8 +284,6 @@
   let elapsedMs = 0;
   let elapsedInterval: ReturnType<typeof setInterval> | null = null;
 
-  // Resume state
-  let showResumeInput = false;
 
   // Result state
   let mnemonic24 = '';
@@ -440,166 +441,6 @@
   }
 
   // ============================================================================
-  // AUDIO & HAPTICS - Mechanical vault clicks and mobile feedback
-  // ============================================================================
-
-  let audioCtx: AudioContext | null = null;
-  let lastActiveTick = 0;
-
-  function initAudio(): AudioContext {
-    if (!audioCtx) {
-      audioCtx = new AudioContext();
-    }
-    return audioCtx;
-  }
-
-  function playVaultClick(intensity: number = 1) {
-    if (soundMode === 'none') return;
-    try {
-      const ctx = initAudio();
-      if (soundMode === 'full') {
-        playVaultTumbler(ctx, intensity);
-      } else if (soundMode === 'minimal') {
-        playVaultTumbler(ctx, intensity * 0.3);
-      }
-    } catch {
-      // Audio not available
-    }
-  }
-
-  function playVaultTumbler(ctx: AudioContext, intensity: number) {
-    // Heavy mechanical vault tumbler click
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(150 + Math.random() * 50, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(40, ctx.currentTime + 0.1);
-
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(800, ctx.currentTime);
-    filter.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.08);
-    filter.Q.value = 5;
-
-    gain.gain.setValueAtTime(0.2 * intensity, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
-
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.12);
-  }
-
-  function playDigitalBlip(ctx: AudioContext, intensity: number) {
-    // Sci-fi digital blip
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(1200, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(800, ctx.currentTime + 0.05);
-
-    gain.gain.setValueAtTime(0.12 * intensity, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.06);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.06);
-  }
-
-  function playWaterDrop(ctx: AudioContext, intensity: number) {
-    // Soft water drop
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(600 + Math.random() * 200, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(200, ctx.currentTime + 0.15);
-
-    gain.gain.setValueAtTime(0.08 * intensity, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.2);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.2);
-  }
-
-  function playMinimalTick(ctx: AudioContext, intensity: number) {
-    // Subtle minimal tick
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(2000, ctx.currentTime);
-
-    gain.gain.setValueAtTime(0.06 * intensity, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.02);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.02);
-  }
-
-  function playRetroCoin(ctx: AudioContext, intensity: number) {
-    // 8-bit coin collect sound
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.type = 'square';
-    osc.frequency.setValueAtTime(987, ctx.currentTime);
-    osc.frequency.setValueAtTime(1319, ctx.currentTime + 0.05);
-
-    gain.gain.setValueAtTime(0.1 * intensity, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.1);
-  }
-
-  function playVaultOpen() {
-    if (soundMode === 'none') return;
-    try {
-      const ctx = initAudio();
-      // Heavy vault door opening sequence
-      for (let i = 0; i < 3; i++) {
-        setTimeout(() => playVaultTumbler(ctx, 1.2 - i * 0.2), i * 100);
-      }
-    } catch {
-      // Audio not available
-    }
-  }
-
-  function hapticFeedback(pattern: 'tick' | 'complete') {
-    if ('vibrate' in navigator) {
-      if (pattern === 'tick') {
-        navigator.vibrate(10);
-      } else if (pattern === 'complete') {
-        navigator.vibrate([100, 50, 100]);
-      }
-    }
-  }
-
-  // Track tick activation for sound - play every ~16 chunks (not every tick)
-  // 100% / ~6 sounds = ~16.67% intervals
-  $: if (phase === 'deriving') {
-    const currentActiveTick = Math.floor(progress / 16.67);
-    if (currentActiveTick > lastActiveTick && currentActiveTick > 0) {
-      // Play click for approximately every 16 chunks of progress
-      playVaultClick(0.8 + Math.random() * 0.4);
-      hapticFeedback('tick');
-      lastActiveTick = currentActiveTick;
-    }
-  } else {
-    lastActiveTick = 0;
-  }
-
   // ============================================================================
   // COMPUTED
   // ============================================================================
@@ -620,9 +461,18 @@
       color: STRENGTH_COLORS[strength.rating] ?? '#666',
     };
   })();
-  $: factorInfo = FACTOR_INFO[factor - 1]!;
+  // Compute factorInfo from shardInput
+  $: factorInfo = isPreset
+    ? FACTOR_INFO[shardInput - 1]!
+    : {
+        factor: 0,
+        shards: shardInput,
+        time: `~${Math.round(shardInput * 3 / 60)}min`,
+        tier: 'Custom',
+        attackCost: `$${(shardInput * 13000).toLocaleString()}`
+      };
   $: canDerive = inputMode === 'brainvault'
-    ? (name.length >= BRAINVAULT_V2.MIN_NAME_LENGTH && passphrase.length >= BRAINVAULT_V2.MIN_PASSPHRASE_LENGTH)
+    ? (name.length >= BRAINVAULT_V1.MIN_NAME_LENGTH && passphrase.length >= BRAINVAULT_V1.MIN_PASSPHRASE_LENGTH)
     : mnemonicInput.trim().split(/\s+/).filter(w => w).length >= 12;
   $: progress = shardCount > 0 ? (shardsCompleted / shardCount) * 100 : 0;
   // Remaining time based on ACTUAL worker count (for live display during derivation)
@@ -709,8 +559,39 @@
   }
 
   async function startDerivation() {
-    shardCount = getShardCount(factor);
-    let initialWorkers = Math.min(targetWorkerCount, shardCount);
+    // === MNEMONIC MODE: Skip argon2, use mnemonic directly ===
+    if (inputMode === 'mnemonic') {
+      phase = 'deriving'; // Brief transition
+      const cleanMnemonic = mnemonicInput.trim().split(/\s+/).join(' ');
+      mnemonic24 = cleanMnemonic;
+      // mnemonic12 left empty - only 24-word is canonical for imported mnemonics
+      mnemonic12 = '';
+
+      // Derive Ethereum address (for display)
+      ethereumAddress = await deriveEthereumAddress(mnemonic24);
+
+      // Auto-save runtime - createRuntime handles entity creation + funding
+      const runtimeId = ethereumAddress;
+      const label = `Mnemonic ${ethereumAddress.slice(0, 6)}`;
+
+      if (!vaultOperations.runtimeExists(runtimeId)) {
+        await vaultOperations.createRuntime(label, mnemonic24);
+        // entityId is set by createRuntime internally
+        console.log('🔐 Mnemonic runtime created:', runtimeId.slice(0, 10));
+      } else {
+        await vaultOperations.selectRuntime(runtimeId);
+        console.log('🔐 Mnemonic runtime selected:', runtimeId.slice(0, 10));
+      }
+
+      phase = 'complete';
+      return;
+    }
+
+    // === BRAINVAULT MODE: Full argon2 derivation ===
+    shardCount = isPreset ? getShardCount(shardInput) : shardInput;
+    // Cap workers to 3GB total WASM memory (Chrome limit ~4GB, leave headroom)
+    const WASM_SAFE_LIMIT = Math.floor(3000 / 256); // 3GB / 256MB per worker = 11 workers max
+    let initialWorkers = Math.min(targetWorkerCount, shardCount, WASM_SAFE_LIMIT);
     workerCount = initialWorkers;
     activeWorkerCount = initialWorkers;
     finalizeInProgress = false;
@@ -730,9 +611,6 @@
     const cpuCores = navigator.hardwareConcurrency || 4;
     console.log(`[BrainVault] Using ${initialWorkers} workers (${cpuCores} cores, max ${maxWorkers}, starting at ${targetWorkerCount})`);
 
-    // Hash the name first using the worker
-    const nameHashHex = await hashName(name);
-
     try {
       let attempts = 0;
       while (true) {
@@ -742,7 +620,7 @@
         const workerPromises: Promise<void>[] = [];
 
         for (let i = 0; i < initialWorkers; i++) {
-          const worker = new Worker('/brainvault-worker.js', { type: 'module' });
+          const worker = new Worker('/brainvault-worker.js');
           workers.push(worker);
 
           const initPromise = new Promise<void>((resolve, reject) => {
@@ -794,7 +672,7 @@
       await new Promise(r => setTimeout(r, 500));
 
       // Dispatch initial shards
-      dispatchShards(nameHashHex);
+      dispatchShards(name);
     } catch (err) {
       console.error('Failed to initialize workers:', err);
       terminateWorkers();
@@ -802,12 +680,10 @@
     }
   }
 
-  let nameHashHexGlobal = '';
   let nextShardToDispatch = 0;
   let finalizeInProgress = false;
 
-  function dispatchShards(nameHashHex: string) {
-    nameHashHexGlobal = nameHashHex;
+  function dispatchShards(name: string) {
     nextShardToDispatch = 0;
 
     // Dispatch initial shard to each worker
@@ -831,7 +707,7 @@
       type: 'derive_shard',
       id: shardIndex,
       data: {
-        nameHashHex: nameHashHexGlobal,
+        name: name,
         passphrase,
         shardIndex,
         shardCount,
@@ -849,15 +725,8 @@
     shardStatus = shardStatus;
     shardsCompleted = shardResults.size;
 
-    // Play sound for completed shard
-    const intensity = 0.5 + (shardsCompleted / shardCount) * 0.5; // Gets louder as we progress
-    playVaultClick(intensity);
-
     // Update time estimate (exponential moving average)
     estimatedShardTimeMs = estimatedShardTimeMs * 0.7 + elapsedMs * 0.3;
-
-    // Save resume token to localStorage
-    saveResumeToken();
 
     if (isWorkerDraining(worker)) {
       shutdownWorker(worker);
@@ -897,26 +766,19 @@
     const masterKey = await combineShards(orderedResults, factor);
     masterKeyHex = bytesToHex(masterKey);
 
-    // Derive BIP39 entropy + mnemonic
-    const entropy = await deriveKey(masterKey, 'bip39/entropy/v2.0', 32);
+    // Derive BIP39 mnemonic (24 words)
+    const entropy = await deriveKey(masterKey, 'bip39/entropy/v1.0', 32);
     mnemonic24 = await entropyToMnemonic(entropy);
-    mnemonic12 = mnemonic24.split(' ').slice(0, 12).join(' ');
+    mnemonic12 = ''; // Not used - only 24-word is canonical
 
     // Derive device passphrase
-    const deviceKey = await deriveKey(masterKey, 'bip39/passphrase/v2.0', 32);
+    const deviceKey = await deriveKey(masterKey, 'bip39/passphrase/v1.0', 32);
     devicePassphrase = bytesToHex(deviceKey);
 
     // Derive Ethereum address using the standard path (m/44'/60'/0'/0/0)
     ethereumAddress = await deriveEthereumAddress(mnemonic24);
     // Entity ID is a lazy entity ID for a single-signer quorum (matches runtime algorithm)
     entityId = generateLazyEntityId([ethereumAddress], 1n);
-
-    // Clear localStorage resume token
-    localStorage.removeItem('brainvault_resume');
-
-    // Play vault open sound and haptic
-    playVaultOpen();
-    hapticFeedback('complete');
 
     phase = 'complete';
 
@@ -968,7 +830,7 @@
       const currentTotal = workers.length;
 
       for (let i = 0; i < workersToAdd && nextShardToDispatch < shardCount; i++) {
-        const worker = new Worker('/brainvault-worker.js', { type: 'module' });
+        const worker = new Worker('/brainvault-worker.js');
         workers.push(worker);
 
         attachWorkerHandlers(worker, {
@@ -983,115 +845,7 @@
     syncWorkerCounts();
   }
 
-  function saveResumeToken() {
-    if (!nameHashHexGlobal) return;
-    const token = createResumeToken(hexToBytes(nameHashHexGlobal), factor, shardResults, name);
-    localStorage.setItem('brainvault_resume', token);
-  }
 
-  async function loadResumeToken() {
-    const saved = localStorage.getItem('brainvault_resume');
-    if (!saved) {
-      alert('No resume token found');
-      return;
-    }
-
-    try {
-      const token = parseResumeToken(saved);
-      if (!token) {
-        alert('Invalid resume token');
-        return;
-      }
-
-      // Restore state
-      name = token.name || '';
-      factor = token.factor;
-      shardCount = getShardCount(factor);
-      shardResults = new Map(
-        Object.entries(token.shardResults).map(([k, v]) => [parseInt(k, 10), hexToBytes(v as string)])
-      );
-      shardsCompleted = shardResults.size;
-      shardStatus = Array(shardCount).fill('pending');
-      for (const idx of shardResults.keys()) {
-        shardStatus[idx] = 'complete';
-      }
-      nameHashHexGlobal = token.nameHash;
-
-      showResumeInput = false;
-
-      // Need passphrase to continue
-      if (!passphrase) {
-        alert('Enter your passphrase to continue');
-        return;
-      }
-
-      // Continue derivation
-      phase = 'deriving';
-      startTime = Date.now();
-      elapsedMs = 0;
-      finalizeInProgress = false;
-
-      elapsedInterval = setInterval(() => {
-        elapsedMs = Date.now() - startTime;
-      }, 100);
-
-      // Create workers - use targetWorkerCount (user-adjustable)
-      workerCount = Math.min(
-        targetWorkerCount,
-        shardCount - shardsCompleted
-      );
-
-      workers = [];
-      const workerPromises: Promise<void>[] = [];
-
-      for (let i = 0; i < workerCount; i++) {
-        const worker = new Worker('/brainvault-worker.js', { type: 'module' });
-        workers.push(worker);
-
-        const initPromise = new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new Error('Worker init timeout')), 30000);
-
-          worker.onmessage = (e) => {
-            const { type, data } = e.data;
-
-            if (type === 'ready') {
-              clearTimeout(timeout);
-              resolve();
-            } else if (type === 'shard_complete') {
-              handleShardComplete(worker, data.shardIndex, data.resultHex, data.elapsedMs);
-            } else if (type === 'error') {
-              console.error('Worker error:', data.message);
-            }
-          };
-
-          worker.onerror = (e) => {
-            clearTimeout(timeout);
-            reject(e);
-          };
-        });
-
-        worker.postMessage({ type: 'init', id: i });
-        workerPromises.push(initPromise);
-      }
-
-      await Promise.all(workerPromises);
-
-      // Find next shard to dispatch
-      nextShardToDispatch = 0;
-      while (nextShardToDispatch < shardCount && shardResults.has(nextShardToDispatch)) {
-        nextShardToDispatch++;
-      }
-
-      // Dispatch remaining shards
-      for (let i = 0; i < workers.length && nextShardToDispatch < shardCount; i++) {
-        dispatchNextShard(workers[i]!);
-      }
-
-    } catch (err) {
-      console.error('Failed to load resume token:', err);
-      alert('Failed to load resume token');
-    }
-  }
 
   // Password manager - auto-derive on domain change
   $: if (siteDomain.trim() && masterKeyHex && phase === 'complete') {
@@ -1161,18 +915,6 @@
       unsubscribe = locale.subscribe(async (loc) => {
         await loadTranslations(loc);
       });
-
-      const saved = localStorage.getItem('brainvault_resume');
-      if (saved) {
-        try {
-          const token = parseResumeToken(saved);
-          if (token?.completedShards?.length) {
-            showResumeInput = true;
-            name = token.name || '';
-            factor = token.factor;
-          }
-        } catch {}
-      }
     })();
 
     return () => {
@@ -1222,44 +964,6 @@
           </button>
         </div>
 
-        <!-- Pros/Cons for current mode -->
-        <div class="mode-info">
-          {#if inputMode === 'brainvault'}
-            <div class="pros-cons">
-              <div class="pros">
-                <span class="label">Pros:</span>
-                <span class="text">Easy to remember, no backup needed</span>
-              </div>
-              <div class="cons">
-                <span class="label">Cons:</span>
-                <span class="text">Long derivation time (minutes)</span>
-              </div>
-            </div>
-          {:else}
-            <div class="pros-cons">
-              <div class="pros">
-                <span class="label">Pros:</span>
-                <span class="text">Instant derivation, industry standard</span>
-              </div>
-              <div class="cons">
-                <span class="label">Cons:</span>
-                <span class="text">Must backup securely, harder to remember</span>
-              </div>
-            </div>
-          {/if}
-        </div>
-
-        <!-- Resume Banner -->
-        {#if showResumeInput && inputMode === 'brainvault'}
-          <div class="resume-banner">
-            <span class="resume-icon">⏸️</span>
-            <span>Incomplete derivation found ({shardsCompleted}/{getShardCount(factor)} shards)</span>
-            <div class="resume-actions">
-              <button class="resume-btn" on:click={loadResumeToken}>Resume</button>
-              <button class="dismiss-btn" on:click={() => { showResumeInput = false; localStorage.removeItem('brainvault_resume'); }}>Dismiss</button>
-            </div>
-          </div>
-        {/if}
 
         {#if inputMode === 'brainvault'}
         <!-- Name Input -->
@@ -1332,55 +1036,58 @@
           {/if}
         </div>
 
-        <!-- Factor Slider -->
-        <div class="input-group">
-          <label for="factor">{t('vault.factor.label')}</label>
-          <span class="input-hint">{t('vault.factor.memory')} · {t('vault.factor.time')} · {t('vault.factor.threads')}</span>
-          <div class="factor-slider-wrapper">
-            <input
-              type="range"
-              id="factor"
-              min="1"
-              max="9"
-              bind:value={factor}
-              aria-label="Security Factor"
-            />
-            <div class="factor-labels">
-              <span class="factor-label-min">1</span>
-              <span class="factor-label-max">9</span>
-            </div>
-            <!-- Current factor value prominently displayed -->
-            <div class="factor-current-value" style="color: {factorColor}; text-shadow: 0 0 20px {factorColor}40, 0 0 40px {factorColor}20">{factor}</div>
+        <!-- Security Factor -->
+        <div class="input-group factor-group">
+          <label for="shards">{t('vault.factor.label')}</label>
+
+          <div class="factor-buttons">
+            {#each FACTOR_INFO as info, i}
+              <button
+                type="button"
+                class="factor-btn"
+                class:selected={shardInput === info.factor}
+                on:click={() => shardInput = info.factor}
+              >
+                <span class="factor-num">{info.factor}</span>
+                <span class="factor-tier">{info.tier}</span>
+              </button>
+            {/each}
+            <button
+              type="button"
+              class="factor-btn custom-btn"
+              class:selected={!isPreset}
+              on:click={() => { if (isPreset) shardInput = 6; }}
+            >
+              <span class="factor-num">⚙</span>
+              <span class="factor-tier">Custom</span>
+            </button>
           </div>
-          <div class="factor-info-row">
-            <div class="factor-info">
-              <span class="factor-level">{factorInfo.description}</span>
-              <span class="factor-stats">{factorInfo.shards} shards · {factorInfo.memory} · {factorInfo.time}</span>
+
+          {#if !isPreset}
+            <div class="custom-shard-input">
+              <input
+                type="number"
+                id="shards"
+                min="6"
+                max="100000"
+                bind:value={shardInput}
+                placeholder="6"
+              />
+              <span class="custom-label">shards</span>
             </div>
-          </div>
-          <div class="attack-cost">
-            <span class="attack-label">Attacker cost (1M guesses):</span>
-            <span class="attack-value">{factorInfo.attackCost}</span>
-            <span class="attack-time">· {factorInfo.attackTime}</span>
+          {/if}
+
+          <div class="factor-summary">
+            <span class="factor-detail">{factorInfo.shards.toLocaleString()} shards</span>
+            <span class="factor-separator">·</span>
+            <span class="factor-detail">{factorInfo.time}</span>
+            <span class="factor-separator">·</span>
+            <span class="factor-detail attack-cost">{factorInfo.attackCost} to crack</span>
           </div>
         </div>
 
-        <!-- Sound Settings -->
-        <div class="input-group">
-          <label for="sound-mode">Sound</label>
-          <div class="sound-dropdown">
-            <select id="sound-mode" bind:value={soundMode}>
-              <option value="none">No Sound</option>
-              <option value="minimal">Minimal</option>
-              <option value="full">Full</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- Warning -->
-        <div class="warning-box">
-          <p><strong>This is permanent.</strong> Name + passphrase + factor = your vault forever. No recovery possible.</p>
-        </div>
+        <!-- Warning (subtle) -->
+        <p class="warning-text">Your inputs generate a unique wallet. No recovery if forgotten.</p>
         {:else}
         <!-- Mnemonic Input Mode -->
         <div class="input-group">
@@ -2269,82 +1976,37 @@
     padding-bottom: 18px;
   }
 
-  /* Input Mode Tabs */
+  /* Input Mode Tabs - Minimal */
   .input-mode-tabs {
     display: flex;
-    gap: 12px;
-    margin-bottom: 20px;
+    gap: 4px;
+    margin-bottom: 16px;
+    background: rgba(255, 255, 255, 0.02);
+    padding: 3px;
+    border-radius: 6px;
   }
 
   .tab-btn {
     flex: 1;
-    padding: 14px 24px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 200, 100, 0.15);
-    border-radius: 8px;
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 14px;
+    padding: 8px 16px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 12px;
     font-weight: 500;
-    letter-spacing: 0.5px;
     cursor: pointer;
-    transition: all 0.2s ease;
-    text-transform: uppercase;
+    transition: all 0.15s ease;
   }
 
   .tab-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 200, 100, 0.25);
-    color: rgba(255, 255, 255, 0.7);
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.03);
   }
 
   .tab-btn.active {
-    background: rgba(255, 200, 100, 0.1);
-    border-color: rgba(255, 200, 100, 0.4);
-    color: rgba(255, 200, 100, 1);
-    box-shadow: 0 0 20px rgba(255, 200, 100, 0.15);
-  }
-
-  /* Mode Info (Pros/Cons) */
-  .mode-info {
-    margin-bottom: 24px;
-  }
-
-  .pros-cons {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 12px 16px;
-    background: rgba(255, 255, 255, 0.02);
-    border-radius: 6px;
-    border: 1px solid rgba(255, 200, 100, 0.08);
-  }
-
-  .pros-cons .pros,
-  .pros-cons .cons {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    font-size: 13px;
-    line-height: 1.5;
-  }
-
-  .pros-cons .label {
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    min-width: 50px;
-  }
-
-  .pros-cons .pros .label {
-    color: rgba(100, 200, 100, 0.9);
-  }
-
-  .pros-cons .cons .label {
-    color: rgba(255, 150, 100, 0.9);
-  }
-
-  .pros-cons .text {
-    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 200, 100, 0.12);
+    color: rgba(255, 200, 100, 0.9);
   }
 
   /* Mnemonic Textarea */
@@ -2394,44 +2056,6 @@
     background: rgba(100, 150, 255, 0.18);
     border-color: rgba(100, 150, 255, 0.35);
     box-shadow: 0 0 20px rgba(100, 150, 255, 0.15);
-  }
-
-  /* Sound Dropdown */
-  .sound-dropdown {
-    position: relative;
-  }
-
-  .sound-dropdown select {
-    width: 100%;
-    padding: 12px 16px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 200, 100, 0.15);
-    border-radius: 8px;
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 14px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 6L11 1' stroke='rgba(255,200,100,0.5)' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: right 12px center;
-    padding-right: 40px;
-  }
-
-  .sound-dropdown select:hover {
-    border-color: rgba(255, 200, 100, 0.25);
-    background-color: rgba(255, 255, 255, 0.04);
-  }
-
-  .sound-dropdown select:focus {
-    outline: none;
-    border-color: rgba(255, 200, 100, 0.4);
-    box-shadow: 0 0 0 3px rgba(255, 200, 100, 0.08);
-  }
-
-  .sound-dropdown option {
-    background: #1a1a1a;
-    color: rgba(255, 255, 255, 0.9);
   }
 
   .input-progress {
@@ -2500,86 +2124,6 @@
 
   .glass-card.complete::before {
     display: none;
-  }
-
-  /* Resume Banner - Pharaoh Gold Monumental Style */
-  .resume-banner {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 16px;
-    background:
-      linear-gradient(135deg, rgba(180, 140, 80, 0.15) 0%, rgba(120, 90, 50, 0.1) 100%),
-      radial-gradient(ellipse at 50% 0%, rgba(255, 200, 100, 0.1) 0%, transparent 60%);
-    border: 1px solid rgba(180, 140, 80, 0.3);
-    border-radius: 16px;
-    padding: 24px 32px;
-    margin-bottom: 32px;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .resume-banner::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(180deg, rgba(255, 200, 100, 0.05) 0%, transparent 100%);
-    pointer-events: none;
-  }
-
-  .resume-icon {
-    font-size: 40px;
-    filter: drop-shadow(0 0 20px rgba(255, 200, 100, 0.4));
-  }
-
-  .resume-banner > span:nth-child(2) {
-    font-size: 18px;
-    font-weight: 600;
-    color: #fbbf24;
-    text-shadow: 0 0 10px rgba(251, 191, 36, 0.3);
-    letter-spacing: 0.02em;
-    text-align: center;
-  }
-
-  .resume-actions {
-    display: flex;
-    gap: 12px;
-    margin-top: 8px;
-  }
-
-  .resume-btn, .dismiss-btn {
-    padding: 12px 24px;
-    border-radius: 12px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease-out;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .resume-btn {
-    background: linear-gradient(135deg, rgba(255, 200, 100, 0.3) 0%, rgba(180, 140, 80, 0.2) 100%);
-    border: 1px solid rgba(255, 200, 100, 0.4);
-    color: #fbbf24;
-    box-shadow: 0 4px 20px rgba(255, 200, 100, 0.2);
-  }
-
-  .resume-btn:hover {
-    background: linear-gradient(135deg, rgba(255, 200, 100, 0.5) 0%, rgba(180, 140, 80, 0.4) 100%);
-    box-shadow: 0 6px 30px rgba(255, 200, 100, 0.3);
-    transform: translateY(-2px);
-  }
-
-  .dismiss-btn {
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    color: rgba(255, 255, 255, 0.5);
-  }
-
-  .dismiss-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(255, 255, 255, 0.25);
   }
 
   /* Input Groups - Sacred inscriptions */
@@ -2701,79 +2245,114 @@
     letter-spacing: 0.05em;
   }
 
-  /* Factor Slider */
-  .factor-slider-wrapper {
-    position: relative;
-    padding: 8px 0;
-    padding-top: 56px; /* Make room for the big factor number */
+  /* Factor Buttons - Clean Grid */
+  .factor-group {
+    margin-bottom: 16px;
   }
 
-  .factor-slider-wrapper input[type="range"] {
-    width: 100%;
-    height: 8px;
-    background: linear-gradient(90deg, #ef4444 0%, #eab308 50%, #22c55e 100%);
-    border-radius: 4px;
-    -webkit-appearance: none;
-    cursor: pointer;
-  }
-
-  .factor-slider-wrapper input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 24px;
-    height: 24px;
-    background: white;
-    border-radius: 50%;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    cursor: pointer;
-  }
-
-  .factor-labels {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 4px;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.4);
-  }
-
-  .factor-current-value {
-    position: absolute;
-    top: -48px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 48px;
-    font-weight: 700;
-    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
-    letter-spacing: -0.02em;
-    pointer-events: none;
-    transition: all 0.15s ease-out;
-  }
-
-  .factor-info-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+  .factor-buttons {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 8px;
     margin-top: 12px;
-    gap: 16px;
   }
 
-  .factor-info {
+  .factor-btn {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    align-items: center;
+    gap: 4px;
+    padding: 12px 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
   }
 
-  .factor-level {
-    font-size: 14px;
+  .factor-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 200, 100, 0.2);
+  }
+
+  .factor-btn.selected {
+    background: rgba(255, 200, 100, 0.1);
+    border-color: rgba(255, 200, 100, 0.4);
+  }
+
+  .factor-num {
+    font-size: 18px;
     font-weight: 600;
-    color: rgba(255, 255, 255, 0.95);
-    letter-spacing: 0.02em;
+    color: rgba(255, 200, 100, 0.9);
   }
 
-  .factor-stats {
+  .factor-tier {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.5);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .factor-btn.selected .factor-tier {
+    color: rgba(255, 200, 100, 0.8);
+  }
+
+  .custom-btn .factor-num {
+    font-size: 16px;
+  }
+
+  .custom-shard-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .custom-shard-input input {
+    flex: 1;
+    padding: 10px 14px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 200, 100, 0.2);
+    border-radius: 6px;
+    color: white;
+    font-size: 16px;
+    text-align: center;
+  }
+
+  .custom-shard-input input:focus {
+    outline: none;
+    border-color: rgba(255, 200, 100, 0.4);
+  }
+
+  .custom-label {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .factor-summary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 12px;
     font-size: 12px;
     color: rgba(255, 255, 255, 0.5);
-    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
-    letter-spacing: 0.01em;
+    font-family: 'SF Mono', monospace;
+  }
+
+  .factor-separator {
+    color: rgba(255, 255, 255, 0.2);
+  }
+
+  .factor-detail.attack-cost {
+    color: rgba(100, 200, 100, 0.7);
+  }
+
+  .warning-text {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.4);
+    text-align: center;
+    margin: 16px 0 24px;
   }
 
   .toggle-buttons {
@@ -2884,56 +2463,6 @@
   .sound-select option {
     background: #1a1a2e;
     color: white;
-  }
-
-  /* Attack Cost Display */
-  .attack-cost {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 14px;
-    margin-top: 12px;
-    background: linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(220, 38, 38, 0.04) 100%);
-    border: 1px solid rgba(239, 68, 68, 0.15);
-    border-radius: 8px;
-    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
-  }
-
-  .attack-label {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.5);
-    letter-spacing: 0.02em;
-  }
-
-  .attack-value {
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(239, 68, 68, 0.9);
-    letter-spacing: 0.03em;
-  }
-
-  .attack-time {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.4);
-  }
-
-  /* Warning Box */
-  .warning-box {
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 12px;
-    padding: 16px;
-    margin-bottom: 28px;
-  }
-
-  .warning-box p {
-    margin: 0;
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.6);
-    line-height: 1.5;
-  }
-
-  .warning-box strong {
-    color: rgba(255, 255, 255, 0.9);
   }
 
   /* Derive Button - Sacred Gate */
@@ -5584,10 +5113,6 @@
       gap: 14px;
     }
 
-    .factor-stats {
-      gap: 32px;
-    }
-
     .seed-input-wrapper {
       gap: 16px;
     }
@@ -5613,13 +5138,24 @@
       padding: 20px;
     }
 
-    .mnemonic-words {
+    .factor-buttons {
       grid-template-columns: repeat(3, 1fr);
     }
 
-    .factor-stats {
-      flex-direction: column;
-      gap: 4px;
+    .factor-btn {
+      padding: 10px 6px;
+    }
+
+    .factor-num {
+      font-size: 16px;
+    }
+
+    .factor-tier {
+      font-size: 9px;
+    }
+
+    .mnemonic-words {
+      grid-template-columns: repeat(3, 1fr);
     }
 
     .logo h1 {

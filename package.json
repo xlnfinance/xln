@@ -72,6 +72,8 @@
     "@ethereumjs/vm": "^10.1.0",
     "@noble/ciphers": "^2.1.1",
     "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^2.0.1",
+    "@node-rs/argon2": "^2.0.2",
     "argon2": "^0.43.1",
     "bip39": "^3.1.0",
     "buffer": "^6.0.3",

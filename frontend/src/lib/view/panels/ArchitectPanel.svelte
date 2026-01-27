@@ -950,12 +950,12 @@
 
         await XLN.applyRuntimeInput($isolatedEnv, {
           runtimeTxs: [{
-            type: 'createXlnomy',
+            type: 'importJ',
             data: {
               name: 'demo',
-              evmType: 'browservm',
-              blockTimeMs: 100,
-              autoGrid: true
+              chainId: 1337, // Must match View.svelte's BrowserVM
+              ticker: 'SIM',
+              rpcs: [],
             }
           }],
           entityInputs: []
@@ -1474,12 +1474,12 @@
 
         await XLN.applyRuntimeInput($isolatedEnv, {
           runtimeTxs: [{
-            type: 'createXlnomy',
+            type: 'importJ',
             data: {
               name: 'demo',
-              evmType: 'browservm',
-              blockTimeMs: 100,
-              autoGrid: true
+              chainId: 1337, // Must match View.svelte's BrowserVM
+              ticker: 'SIM',
+              rpcs: [],
             }
           }],
           entityInputs: []
@@ -2528,16 +2528,16 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-      // Step 1: Create Xlnomy (queues grid entity RuntimeTxs)
+      // Step 1: Import J-machine
+      const isBrowserVM = newXlnomyEvmType === 'browservm';
       await XLN.applyRuntimeInput($isolatedEnv, {
         runtimeTxs: [{
-          type: 'createXlnomy',
+          type: 'importJ',
           data: {
             name: newXlnomyName,
-            evmType: newXlnomyEvmType,
-            rpcUrl: newXlnomyEvmType !== 'browservm' ? newXlnomyRpcUrl : undefined,
-            blockTimeMs: parseInt(newXlnomyBlockTime),
-            autoGrid: newXlnomyAutoGrid
+            chainId: isBrowserVM ? 1337 : 1, // BrowserVM uses 1337 to match View.svelte
+            ticker: 'ETH',
+            rpcs: isBrowserVM ? [] : [newXlnomyRpcUrl],
           }
         }],
         entityInputs: []

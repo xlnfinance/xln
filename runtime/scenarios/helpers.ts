@@ -472,6 +472,13 @@ export const eth = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 export const btc = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 export const dai = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 
+/** Format bigint as USD string (e.g. "$1,234.56") */
+export const formatUSD = (amount: bigint): string => {
+  const whole = amount / ONE_TOKEN;
+  const frac = (amount % ONE_TOKEN) * 100n / ONE_TOKEN;
+  return `$${whole.toLocaleString()}.${frac.toString().padStart(2, '0')}`;
+};
+
 export function assertRuntimeIdle(env: Env, label: string = 'runtime'): void {
   const errors: string[] = [];
 
