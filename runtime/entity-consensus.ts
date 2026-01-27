@@ -12,6 +12,104 @@ import { logError } from './logger';
 import { addMessages, cloneEntityReplica, canonicalAccountKey, getAccountPerspective, emitScopedEvents, resolveEntityProposerId } from './state-helpers';
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
+import { ethers } from 'ethers';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ENTITY FRAME HASH - Cryptographic commitment to entity state
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Unlike A-machine frames (bilateral), E-machine frames need BFT consensus among
+// entity signers. The hash must include:
+// - prevFrameHash (chain linkage, replay protection)
+// - height, timestamp (ordering)
+// - txs (what changed)
+// - key state fields (resulting state)
+//
+// Validators MUST recompute this hash locally and only sign if it matches.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Create cryptographic hash for entity frame.
+ * Both proposer and validators must compute identical hashes from identical state.
+ */
+export async function createEntityFrameHash(
+  prevFrameHash: string,
+  height: number,
+  timestamp: number,
+  txs: EntityTx[],
+  newState: EntityState
+): Promise<string> {
+  // Build hashable state object
+  const frameData = {
+    prevFrameHash,
+    height,
+    timestamp,
+    // Deterministic tx serialization
+    txs: txs.map(tx => ({
+      type: tx.type,
+      data: tx.data
+    })),
+    // ═══════════════════════════════════════════════════════════════════════════
+    // KEY STATE FIELDS (catch bugs early by including in hash)
+    // ═══════════════════════════════════════════════════════════════════════════
+    entityId: newState.entityId,
+    // Reserves: sorted by tokenId for determinism
+    reserves: Array.from(newState.reserves.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([k, v]) => [k, v.toString()]),
+    // J-machine tracking
+    lastFinalizedJHeight: newState.lastFinalizedJHeight,
+    // Account state: use A-machine frame hashes (not full state - too large)
+    // Sorted by counterparty ID for determinism
+    accountHashes: Array.from(newState.accounts.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([cpId, acct]) => ({
+        cpId,
+        height: acct.currentHeight,
+        stateHash: acct.currentFrame?.stateHash || 'genesis',
+        ackedTransitions: acct.ackedTransitions,
+      })),
+    // HTLC routing state hash
+    htlcRoutesHash: newState.htlcRoutes.size > 0
+      ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
+          Array.from(newState.htlcRoutes.entries())
+            .sort((a, b) => a[0].localeCompare(b[0]))
+        )))
+      : null,
+    htlcFeesEarned: newState.htlcFeesEarned.toString(),
+    // Lock/swap book hashes
+    lockBookHash: newState.lockBook.size > 0
+      ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
+          Array.from(newState.lockBook.entries())
+            .sort((a, b) => a[0].localeCompare(b[0]))
+        )))
+      : null,
+    swapBookHash: newState.swapBook.size > 0
+      ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
+          Array.from(newState.swapBook.entries())
+            .sort((a, b) => a[0].localeCompare(b[0]))
+        )))
+      : null,
+    // Orderbook extension hash (if hub)
+    orderbookHash: newState.orderbookExt
+      ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(newState.orderbookExt)))
+      : null,
+  };
+
+  // keccak256 for EVM compatibility
+  const encoded = safeStringify(frameData);
+  return ethers.keccak256(ethers.toUtf8Bytes(encoded));
+}
+
+/**
+ * Get previous frame hash from entity state.
+ * Genesis if height=0, otherwise hash from last committed frame.
+ */
+function getPrevFrameHash(state: EntityState): string {
+  if (state.height === 0) return 'genesis';
+  // Store prevFrameHash in EntityState on commit (added below)
+  return (state as any).prevFrameHash || 'genesis';
+}
 
 // === SECURITY VALIDATION ===
 
@@ -339,11 +437,13 @@ export const applyEntityInput = async (
       });
 
       // Apply the committed frame with incremented height
+      // Store committed frame hash for chain linkage in next frame
       workingReplica.state = {
         ...entityInput.proposedFrame.newState,
         entityId: workingReplica.state.entityId, // PRESERVE: Never lose entityId
         height: workingReplica.state.height + 1,
-      };
+        prevFrameHash: entityInput.proposedFrame.hash, // Chain linkage for BFT
+      } as EntityState;
 
       // CHANNEL.TS PATTERN: Clear only the committed txs, keep any new txs
       // This avoids dropping fresh inputs merged into the same tick (e.g., accountInput ACKs).
@@ -374,12 +474,45 @@ export const applyEntityInput = async (
     entityInput.proposedFrame &&
     (!workingReplica.proposal || (workingReplica.state.config.mode === 'gossip-based' && workingReplica.isProposer))
   ) {
-    const frameSignature = signFrame(env, workingReplica.signerId, entityInput.proposedFrame.hash);
     const config = workingReplica.state.config;
+    const proposedFrame = entityInput.proposedFrame;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // VALIDATOR HASH VERIFICATION (BFT hardening)
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Apply txs locally, compute expected hash, reject if mismatch
+    const { newState: validatorComputedState } = await applyEntityFrame(env, workingReplica.state, proposedFrame.txs);
+    const validatorNewState = {
+      ...validatorComputedState,
+      entityId: workingReplica.state.entityId,
+      height: proposedFrame.height,
+      timestamp: proposedFrame.newState.timestamp,
+    };
+
+    const prevFrameHash = getPrevFrameHash(workingReplica.state);
+    const validatorComputedHash = await createEntityFrameHash(
+      prevFrameHash,
+      proposedFrame.height,
+      proposedFrame.newState.timestamp,
+      proposedFrame.txs,
+      validatorNewState
+    );
+
+    // SECURITY: Reject if hash mismatch (proposer sent different state than txs produce)
+    if (validatorComputedHash !== proposedFrame.hash) {
+      logError("FRAME_CONSENSUS", `❌ HASH MISMATCH: Proposer sent invalid frame hash!`);
+      logError("FRAME_CONSENSUS", `   Expected: ${validatorComputedHash.slice(0, 30)}...`);
+      logError("FRAME_CONSENSUS", `   Received: ${proposedFrame.hash.slice(0, 30)}...`);
+      logError("FRAME_CONSENSUS", `   This could indicate equivocation attack or state divergence bug.`);
+      // Don't sign, don't lock - reject the proposal
+      return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
+    }
+
+    console.log(`✅ Validator hash verified: ${proposedFrame.hash.slice(0, 20)}...`);
+    const frameSignature = signFrame(env, workingReplica.signerId, proposedFrame.hash);
 
     // Lock to this frame (CometBFT style)
-    workingReplica.lockedFrame = entityInput.proposedFrame;
-    // DEBUG removed: → Validator locked to frame ${entityInput.proposedFrame.hash.slice(0, 10)}...`);
+    workingReplica.lockedFrame = proposedFrame;
 
     if (config.mode === 'gossip-based') {
       // Send precommit to all validators
@@ -393,7 +526,6 @@ export const applyEntityInput = async (
           precommits: new Map([[workingReplica.signerId, frameSignature]]),
         });
       });
-      // DEBUG removed: → Signed proposal, gossiping precommit to ${config.validators.length} validators`);
     } else {
       // Send precommit to proposer only
       const proposerId = config.validators[0];
@@ -412,7 +544,6 @@ export const applyEntityInput = async (
         signerId: proposerId,
         precommits: new Map([[workingReplica.signerId, frameSignature]]),
       });
-      // DEBUG removed: → Signed proposal, sending precommit to ${proposerId}`);
     }
   }
 
@@ -541,10 +672,28 @@ export const applyEntityInput = async (
       console.log(`🚀 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
       // For single signer entities, directly apply transactions without consensus
       const { newState: newEntityState, outputs: frameOutputs, jOutputs: frameJOutputs } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool);
-      workingReplica.state = {
+      const newHeight = workingReplica.state.height + 1;
+      const newTimestamp = env.timestamp;
+
+      // Compute frame hash for chain linkage (even single-signer needs deterministic state tracking)
+      const prevFrameHash = getPrevFrameHash(workingReplica.state);
+      const singleSignerNewState = {
         ...newEntityState,
         entityId: workingReplica.state.entityId, // PRESERVE: Never lose entityId
-        height: workingReplica.state.height + 1,
+        height: newHeight,
+        timestamp: newTimestamp,
+      };
+      const singleSignerFrameHash = await createEntityFrameHash(
+        prevFrameHash,
+        newHeight,
+        newTimestamp,
+        workingReplica.mempool,
+        singleSignerNewState
+      );
+
+      workingReplica.state = {
+        ...singleSignerNewState,
+        prevFrameHash: singleSignerFrameHash, // Chain linkage
       };
 
       // Add any outputs generated by entity transactions to the outbox
@@ -558,8 +707,7 @@ export const applyEntityInput = async (
         console.log(
           `    ⚡ Single signer entity: transactions applied directly, height: ${workingReplica.state.height}`,
         );
-      // SINGLE-SIGNER-RETURN removed - too noisy
-      console.log(`🔥 SINGLE-SIGNER RETURN: entityOutbox=${entityOutbox.length}, jOutbox=${jOutbox.length}`);
+      console.log(`🔥 SINGLE-SIGNER RETURN: entityOutbox=${entityOutbox.length}, jOutbox=${jOutbox.length}, frameHash=${singleSignerFrameHash.slice(0, 20)}...`);
       return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica }; // Skip the full consensus process
     }
 
@@ -575,28 +723,36 @@ export const applyEntityInput = async (
 
     // Proposer creates new timestamp for this frame (DETERMINISTIC: use runtime timestamp)
     const newTimestamp = env.timestamp;
+    const newHeight = workingReplica.state.height + 1;
 
-    // NOTE: Timestamp validation removed - comparing env.timestamp to itself was meaningless
-    // For peer proposals, validation happens during signature verification
+    // Build proposed new state
+    const proposedNewState = {
+      ...newEntityState,
+      entityId: workingReplica.state.entityId, // PRESERVE: Never lose entityId in proposal
+      height: newHeight,
+      timestamp: newTimestamp,
+    };
 
-    // TODO(bft-hardening): Replace weak placeholder hash with cryptographic commitment
-    // Current: height + timestamp only - validators don't sign actual state content
-    // Required: Merkle root over transactions + keccak256(orderbookExt + accountStates)
-    // Impact: Without this, equivocation attacks possible in multi-validator setup
-    // See: docs/htlc-hardening.md for full security audit
-    const frameHash = `frame_${workingReplica.state.height + 1}_${newTimestamp}`;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CRYPTOGRAPHIC FRAME HASH (replaces weak placeholder)
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Hash includes: prevFrameHash, height, timestamp, txs, key state fields
+    // Validators MUST recompute and verify before signing
+    const prevFrameHash = getPrevFrameHash(workingReplica.state);
+    const frameHash = await createEntityFrameHash(
+      prevFrameHash,
+      newHeight,
+      newTimestamp,
+      workingReplica.mempool,
+      proposedNewState
+    );
     const selfSignature = signFrame(env, workingReplica.signerId, frameHash);
 
     workingReplica.proposal = {
-      height: workingReplica.state.height + 1,
+      height: newHeight,
       txs: [...workingReplica.mempool],
       hash: frameHash,
-      newState: {
-        ...newEntityState,
-        entityId: workingReplica.state.entityId, // PRESERVE: Never lose entityId in proposal
-        height: workingReplica.state.height + 1,
-        timestamp: newTimestamp, // Set new deterministic timestamp in proposed state
-      },
+      newState: proposedNewState,
       signatures: new Map<string, string>([[workingReplica.signerId, selfSignature]]), // Proposer signs immediately
     };
 

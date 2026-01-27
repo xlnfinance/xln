@@ -21,6 +21,7 @@ export type RuntimeWsServerOptions = {
   host?: string;
   port: number;
   serverId: string;
+  serverRuntimeId?: string;  // If set, messages to this runtimeId use local delivery
   onRuntimeInput?: (from: string, input: RuntimeInput) => Promise<void> | void;
   onEntityInput?: (from: string, input: EntityInput) => Promise<void> | void;
   maxQueuePerRuntime?: number;
@@ -168,31 +169,30 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       }
     }
 
+    // Check if target is the server itself - use local delivery for entity_input/runtime_input
+    const isLocalTarget = options.serverRuntimeId && target === options.serverRuntimeId;
+    const useLocalDelivery = isLocalTarget && (msg.type === 'entity_input' || msg.type === 'runtime_input');
+
     const targetClient = clients.get(target);
-    if (targetClient) {
-      console.log(`[RELAY] Target ONLINE - delivering to ${target.slice(0,10)}`);
+    if (targetClient && !useLocalDelivery) {
       send(targetClient.ws, msg);
       send(ws, { type: 'ack', inReplyTo: msg.id, status: 'delivered' });
       return;
     }
 
-    // Check if target is NOT in connected clients (could be server itself or offline)
-    // If we have onEntityInput callback, try local delivery first
-    if (msg.type === 'entity_input' && options.onEntityInput && msg.from && !targetClient) {
+    // Local delivery for entity_input ONLY when target IS the server itself
+    if (msg.type === 'entity_input' && options.onEntityInput && msg.from && useLocalDelivery) {
       const payload = msg.payload as EntityInput;
-      console.log(`[RELAY] Target not in clients - trying local delivery for entity ${payload.entityId.slice(-4)}`);
       try {
         await options.onEntityInput(msg.from, payload);
-        console.log(`[RELAY] ✅ Local delivery successful`);
         send(ws, { type: 'ack', inReplyTo: msg.id, status: 'delivered' });
         return;
       } catch (error) {
-        console.log(`[RELAY] Local delivery failed, will queue: ${(error as Error).message}`);
         // Fall through to queueing
       }
     }
 
-    if (msg.type === 'runtime_input' && options.onRuntimeInput && msg.from && !targetClient) {
+    if (msg.type === 'runtime_input' && options.onRuntimeInput && msg.from && useLocalDelivery) {
       const payload = msg.payload as RuntimeInput;
       try {
         await options.onRuntimeInput(msg.from, payload);
@@ -203,7 +203,6 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       }
     }
 
-    console.log(`[RELAY] Target OFFLINE - queueing for ${target.slice(0,10)}`);
     enqueue(target, msg);
     send(ws, { type: 'ack', inReplyTo: msg.id, status: 'queued' });
   };

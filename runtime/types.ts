@@ -1273,6 +1273,7 @@ export interface EntityState {
   messages: string[];
   proposals: Map<string, Proposal>;
   config: ConsensusConfig;
+  prevFrameHash?: string; // Chain linkage for BFT consensus (keccak256 of previous frame)
 
   // 💰 Financial state
   reserves: Map<string, bigint>; // tokenId -> amount only, metadata from TOKEN_REGISTRY

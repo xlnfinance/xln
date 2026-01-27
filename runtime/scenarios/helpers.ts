@@ -331,6 +331,9 @@ export async function processUntil(
     onTick?.(round + 1);
     advanceScenarioTime(env, undefined, true);
 
+    // Yield to event loop to allow WS messages to be received
+    await new Promise(resolve => setTimeout(resolve, 10));
+
     // Check again after processing
     if (predicate()) return;
   }
