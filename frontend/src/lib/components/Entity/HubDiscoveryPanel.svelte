@@ -69,24 +69,50 @@
       const currentEnv = env;
       if (!currentEnv) throw new Error('Environment not ready');
 
-      // Get all entities that have announced as hubs
-      // In real implementation, this would query the gossip network
       const discovered: Hub[] = [];
 
-      // Check eReplicas for entities with hub metadata
-      if (currentEnv.eReplicas instanceof Map) {
+      // Primary source: gossip layer getHubs()
+      if (currentEnv.gossip?.getHubs) {
+        const gossipHubs = currentEnv.gossip.getHubs();
+
+        for (const profile of gossipHubs) {
+          if (profile.entityId === entityId) continue; // Skip self
+
+          // Check if we're already connected
+          let isConnected = false;
+          if (currentEnv.eReplicas instanceof Map) {
+            const myReplica = (currentEnv.eReplicas as Map<string, any>).get(`${entityId}:1`);
+            isConnected = myReplica?.state?.accounts?.has(profile.entityId) || false;
+          }
+
+          discovered.push({
+            entityId: profile.entityId,
+            name: profile.metadata?.name || `Hub ${formatShortId(profile.entityId)}`,
+            metadata: {
+              description: profile.metadata?.bio || 'Payment hub',
+              website: profile.metadata?.website,
+              fee: profile.metadata?.routingFeePPM || 100, // Default 0.01%
+              capacity: profile.metadata?.capacity ? BigInt(profile.metadata.capacity) : 0n,
+              uptime: profile.metadata?.uptime ? parseFloat(profile.metadata.uptime) : 99.9,
+            },
+            jurisdiction: profile.metadata?.region || 'global',
+            isConnected,
+            lastSeen: profile.metadata?.lastUpdated || Date.now(),
+          });
+        }
+      }
+
+      // Fallback: scan eReplicas for entities with hub metadata (legacy)
+      if (discovered.length === 0 && currentEnv.eReplicas instanceof Map) {
         for (const [key, replica] of currentEnv.eReplicas.entries()) {
           const [hubEntityId] = key.split(':');
           if (!hubEntityId || hubEntityId === entityId) continue;
 
-          // Check if entity has hub profile/announcement
           const state = replica?.state as any;
           if (!state) continue;
 
-          // Look for hub metadata in state (dynamic properties)
           const hubMeta = state.hubAnnouncement || state.profile?.hub;
           if (hubMeta || state.accounts?.size > 2) {
-            // Check if we're already connected
             const myReplica = (currentEnv.eReplicas as Map<string, any>).get(`${entityId}:1`);
             const isConnected = myReplica?.state?.accounts?.has(hubEntityId) || false;
 
@@ -96,7 +122,7 @@
               metadata: {
                 description: hubMeta?.description || 'Payment hub',
                 website: hubMeta?.website,
-                fee: hubMeta?.feePPM || 100, // Default 0.01%
+                fee: hubMeta?.feePPM || 100,
                 capacity: state.reserves?.get?.('1') || 0n,
                 uptime: hubMeta?.uptime || 99.9,
               },
@@ -106,23 +132,6 @@
             });
           }
         }
-      }
-
-      // Add some example hubs if none found (for demo)
-      if (discovered.length === 0) {
-        discovered.push({
-          entityId: '0x' + '1'.repeat(40),
-          name: 'XLN Main Hub',
-          metadata: {
-            description: 'Official XLN liquidity hub',
-            fee: 50,
-            capacity: BigInt(1_000_000) * BigInt(1e18),
-            uptime: 99.99,
-          },
-          jurisdiction: 'xlnomy1',
-          isConnected: false,
-          lastSeen: Date.now(),
-        });
       }
 
       hubs = discovered;

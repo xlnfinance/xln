@@ -67,6 +67,7 @@ export interface GossipLayer {
   profiles: Map<string, Profile>;
   announce: (profile: Profile) => void;
   getProfiles: () => Profile[];
+  getHubs: () => Profile[];  // Get all profiles with isHub=true
   getProfileBundle?: (entityId: string) => { profile?: Profile; peers: Profile[] };
   getNetworkGraph: () => {
     findPaths: (source: string, target: string, amount?: bigint, tokenId?: number) => Promise<any[]>;
@@ -122,6 +123,16 @@ export function createGossipLayer(): GossipLayer {
       logDebug('GOSSIP', `  - ${p.entityId.slice(-4)}: accounts=${p.accounts?.length || 0} ts=${p.metadata?.lastUpdated}`);
     }
     return result;
+  };
+
+  // Get all hubs (profiles with isHub=true)
+  const getHubs = (): Profile[] => {
+    const hubs = Array.from(profiles.values()).filter(p => p.metadata?.isHub === true);
+    logDebug('GOSSIP', `🏠 getHubs(): Found ${hubs.length} hubs`);
+    for (const h of hubs) {
+      logDebug('GOSSIP', `  - ${h.entityId.slice(-4)}: ${h.metadata?.name || 'unnamed'} region=${h.metadata?.region || 'unknown'}`);
+    }
+    return hubs;
   };
 
   const getProfileBundle = (entityId: string): { profile?: Profile; peers: Profile[] } => {
@@ -200,6 +211,7 @@ export function createGossipLayer(): GossipLayer {
     profiles,
     announce,
     getProfiles,
+    getHubs,
     getProfileBundle,
     getNetworkGraph,
   };
