@@ -6,6 +6,7 @@
 import type { Env, HankoString } from './types';
 import { buildRealHanko } from './hanko';
 import { ethers } from 'ethers';
+import { getCachedSignerPublicKey } from './account-crypto';
 
 // Browser-compatible Buffer helpers - ALWAYS use manual hex parsing (Node Buffer.from can be broken in some envs)
 const bufferFrom = (data: string | Uint8Array | number[], encoding?: BufferEncoding): Buffer => {
@@ -64,17 +65,22 @@ const publicKeyToAddress = (value: string): string | null => {
 };
 
 /**
- * Sign multiple hashes as a single-signer entity
- * For single-signer entities (threshold=1, validators=[signerId])
+ * Sign hashes on behalf of an entity using one validator's key
+ *
+ * Works for any entity (single or multi-signer). The signer must be
+ * a member of entity's board.validators[]. Verification checks this.
+ *
+ * For multi-signer quorum, call multiple times with different signers
+ * and combine the hankos, or use buildRealHanko directly.
  */
-export async function signHashesAsSingleEntity(
+export async function signEntityHashes(
   env: Env,
   entityId: string,
   signerId: string,
   hashes: string[]
 ): Promise<HankoString[]> {
   if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
-    throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signHashesAsSingleEntity called without env.runtimeSeed for entity ${entityId.slice(-4)}`);
+    throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signEntityHashes called without env.runtimeSeed for entity ${entityId.slice(-4)}`);
   }
 
   const hankos: HankoString[] = [];
@@ -127,6 +133,9 @@ export async function signHashesAsSingleEntity(
 
   return hankos;
 }
+
+/** @deprecated Use signEntityHashes instead */
+export const signHashesAsSingleEntity = signEntityHashes;
 
 /**
  * Verify hanko signature for single hash with STRICT board validation
@@ -262,6 +271,19 @@ export async function verifyHankoForHash(
         }
 
         expectedAddresses = Array.from(new Set(expectedAddresses));
+      }
+    }
+
+    // Fallback: check registered public keys (from P2P gossip applyIncomingProfiles)
+    if (expectedAddresses.length === 0) {
+      const registeredPubKey = getCachedSignerPublicKey(expectedEntityId);
+      if (registeredPubKey) {
+        const pubKeyHex = '0x' + Array.from(registeredPubKey).map(b => b.toString(16).padStart(2, '0')).join('');
+        const derived = publicKeyToAddress(pubKeyHex);
+        if (derived) {
+          expectedAddresses.push(derived);
+          console.log(`✅ Using registered public key for ${expectedEntityId.slice(-4)}`);
+        }
       }
     }
 
