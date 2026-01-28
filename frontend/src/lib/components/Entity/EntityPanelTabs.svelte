@@ -237,10 +237,10 @@
   })();
 
   const tabs: Array<{ id: ViewTab; icon: any; label: string; showBadge?: boolean; badgeType?: 'activity' | 'pending' }> = [
+    { id: 'accounts', icon: Users, label: 'Accounts' },
     { id: 'send', icon: ArrowUpRight, label: 'Send' },
     { id: 'swap', icon: Repeat, label: 'Swap' },
     { id: 'onj', icon: Landmark, label: 'On-Chain', showBadge: true, badgeType: 'pending' },
-    { id: 'accounts', icon: Users, label: 'Accounts' },
     { id: 'activity', icon: Activity, label: 'Activity', showBadge: true, badgeType: 'activity' },
     { id: 'chat', icon: MessageCircle, label: 'Chat' },
     { id: 'contacts', icon: BookUser, label: 'Contacts' },

@@ -176,10 +176,18 @@ export async function createBrowserVMAdapter(
       sig?: string
     ): Promise<JTxReceipt> {
       // BrowserVM has settleWithInsurance which handles both cases
+      // Ensure ondeltaDiff is set (default to 0n if not provided)
+      const normalizedDiffs = diffs.map(d => ({
+        tokenId: d.tokenId,
+        leftDiff: d.leftDiff,
+        rightDiff: d.rightDiff,
+        collateralDiff: d.collateralDiff,
+        ondeltaDiff: d.ondeltaDiff ?? 0n,
+      }));
       const events = await browserVM.settleWithInsurance(
         leftEntity,
         rightEntity,
-        diffs,
+        normalizedDiffs,
         forgiveDebtsInTokenIds,
         insuranceRegs,
         sig

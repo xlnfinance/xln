@@ -470,11 +470,19 @@
       <div class="section">
         <h3>Data</h3>
 
-        <button class="btn danger" on:click={() => {
+        <button class="btn danger" on:click={async () => {
           if (confirm('Clear all data? This cannot be undone.')) {
             localStorage.clear();
             sessionStorage.clear();
-            window.location.reload();
+            // Clear IndexedDB
+            const dbs = await indexedDB.databases?.() || [];
+            for (const db of dbs) {
+              if (db.name) indexedDB.deleteDatabase(db.name);
+            }
+            // Reset stores instead of reload
+            vaultOperations.logout();
+            dispatch('close');
+            alert('All data cleared. Please create a new wallet.');
           }
         }}>
           Clear All Data

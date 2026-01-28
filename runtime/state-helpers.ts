@@ -382,7 +382,7 @@ export const captureSnapshot = async (
         }
       }
       if (browserVM?.serializeState) {
-        browserVMState = await browserVM.serializeState();
+        browserVMState = await browserVM.serializeState() as unknown as BrowserVMState;
       }
     } catch {
       // Silent fail - stateRoot capture is optional
@@ -400,7 +400,7 @@ export const captureSnapshot = async (
 
         // Aggregate reserves and collaterals from all entity replicas
         for (const [key, replica] of env.eReplicas.entries()) {
-          const entityId = key.split(':')[0];
+          const entityId = key.split(':')[0] || key; // fallback to full key if no separator
           if (replica.state?.reserves) {
             const tokenMap = new Map<number, bigint>();
             // Handle both Map and plain object
@@ -461,7 +461,7 @@ export const captureSnapshot = async (
           blockDelayMs: jr.blockDelayMs || 300,
           lastBlockTimestamp: jr.lastBlockTimestamp || 0,
           position: { ...jr.position },
-          contracts: jr.contracts ? { ...jr.contracts } : undefined,
+          ...(jr.contracts && { contracts: { ...jr.contracts } }),
           reserves,
           collaterals,  // Collateral state from bilateral accounts
           registeredEntities,
