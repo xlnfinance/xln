@@ -19,7 +19,7 @@
 import { keccak256 } from 'ethers';
 import type { Profile } from './gossip';
 import type { Env, HankoString } from '../types';
-import { signHashesAsSingleEntity, verifyHankoForHash } from '../hanko-signing';
+import { signEntityHashes, verifyHankoForHash } from '../hanko-signing';
 
 const PROFILE_SIGN_DOMAIN = 'xln-profile-v1';
 
