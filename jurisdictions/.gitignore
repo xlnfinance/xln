@@ -7,7 +7,7 @@ node_modules
 
 # TypeChain files
 /typechain
-/typechain-types
+# Note: typechain-types IS committed for browser build compatibility
 
 # solidity-coverage files
 /coverage
