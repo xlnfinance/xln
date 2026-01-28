@@ -11,14 +11,14 @@
  * - Tasks are idempotent (safe to run multiple times)
  */
 
-import type { EntityReplica, EntityInput, AccountMachine } from './types';
+import type { Env, EntityReplica, EntityInput, AccountMachine } from './types';
 import { isLeftEntity } from './entity-id-utils';
 
 export interface CrontabTask {
   name: string;
   intervalMs: number; // How often to run (in milliseconds)
   lastRun: number; // Timestamp of last execution
-  handler: (replica: EntityReplica) => Promise<EntityInput[]>; // Returns messages to send
+  handler: (env: Env, replica: EntityReplica) => Promise<EntityInput[]>; // Returns messages to send
 }
 
 export interface CrontabState {
@@ -73,6 +73,7 @@ export function initCrontab(): CrontabState {
  * Uses entity-specific timestamp for determinism (each entity has own clock from frames)
  */
 export async function executeCrontab(
+  env: Env,
   replica: EntityReplica,
   crontabState: CrontabState
 ): Promise<EntityInput[]> {
@@ -86,7 +87,7 @@ export async function executeCrontab(
       // Removed verbose crontab logging (only log task completion)
 
       try {
-        const outputs = await task.handler(replica);
+        const outputs = await task.handler(env, replica);
         allOutputs.push(...outputs);
 
         // Update last run time
@@ -112,7 +113,7 @@ export async function executeCrontab(
  * - Check missed_ack time
  * - If > threshold, suggest dispute to entity members
  */
-async function checkAccountTimeoutsHandler(replica: EntityReplica): Promise<EntityInput[]> {
+async function checkAccountTimeoutsHandler(_env: Env, replica: EntityReplica): Promise<EntityInput[]> {
   const outputs: EntityInput[] = [];
   const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
 
@@ -196,7 +197,7 @@ function createDisputeSuggestionEvent(
  * - Generate htlc_timeout mempoolOps for expired locks
  * - Prevents locks from being stuck forever
  */
-async function checkHtlcTimeoutsHandler(replica: EntityReplica): Promise<EntityInput[]> {
+async function checkHtlcTimeoutsHandler(_env: Env, replica: EntityReplica): Promise<EntityInput[]> {
   const outputs: EntityInput[] = [];
   const currentHeight = replica.state.lastFinalizedJHeight || 0;
   const currentTimestamp = replica.state.timestamp; // Entity's deterministic clock
@@ -302,7 +303,7 @@ export function getAccountTimeoutStats(replica: EntityReplica): {
  * Broadcast jBatch to Depository contract
  * Reference: 2019src.txt lines 3384-3399
  */
-async function broadcastBatchHandler(replica: EntityReplica): Promise<EntityInput[]> {
+async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<EntityInput[]> {
   const outputs: EntityInput[] = [];
 
   // Initialize jBatch on first use
@@ -386,7 +387,7 @@ async function broadcastBatchHandler(replica: EntityReplica): Promise<EntityInpu
  * Scans all accounts, matches net-spenders with net-receivers
  * Reference: 2019src.txt lines 2973-3114
  */
-async function hubRebalanceHandler(replica: EntityReplica): Promise<EntityInput[]> {
+async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<EntityInput[]> {
   const outputs: EntityInput[] = [];
   // Removed verbose scan start log
 

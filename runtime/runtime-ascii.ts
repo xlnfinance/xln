@@ -9,7 +9,7 @@
  */
 
 import type { Env, EntityState, AccountMachine, Delta } from './types';
-import { getWallClockMs } from './time';
+import { getWallClockMs } from './utils';
 
 export interface FormatOptions {
   maxAccounts?: number;

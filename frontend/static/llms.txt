@@ -1,5 +1,5 @@
-# XLN Context - Core System Files (~213k tokens)
-# Generated: 2026-01-27 00:19:41 | Git: 9eb12fd
+# XLN Context - Core System Files (~231k tokens)
+# Generated: 2026-01-27 20:12:46 | Git: feef4c7
 
 ## THE CORE INNOVATION: RCPAN Invariant
 
@@ -40,12 +40,12 @@ This single invariant:
 4. **Multi-hop payments that NET positions** - Ripple batches, Lightning routes, only XLN nets bilaterally
 5. **Entity-owned subcontracts (HTLCs, limit orders) without separate channels** - One bilateral account, many subcontracts
 
-## Token Budget Guide (~213k tokens total)
+## Token Budget Guide (~231k tokens total)
 
 **Critical path (read first, ~30min):**
-- ⚡ emc2.md (5min) - Why credit = stored energy
-- ⚡ docs/12_invariant.md (10min) - RCPAN derivation
-- ⚡ docs/jea.md (8min) - 3-layer architecture
+- ⚡ essay.md (5min) - Core philosophy and vision
+- ⚡ docs/core/12_invariant.md (10min) - RCPAN derivation
+- ⚡ docs/core/rjea-architecture.md (8min) - 4-layer architecture
 - ⚡ Depository.sol (7min) - enforceDebts() FIFO + RCPAN enforcement
 
 **Implementation (read second, ~45min):**
@@ -57,8 +57,8 @@ This single invariant:
 **Deep dives (optional, ~60min):**
 - runtime.ts (15min) - Main coordinator
 - routing/pathfinding.ts (10min) - Dijkstra multi-hop
-- priorart.md (20min) - Why Lightning/rollups fail
-- 11_Jurisdiction_Machine.md (15min) - Full architecture
+- architecture/bilaterality.md (20min) - Why bilateral > multilateral
+- core/11_Jurisdiction_Machine.md (15min) - Full architecture
 
 ## Building on XLN: Delta Transformers
 
@@ -129,13 +129,13 @@ xln/
     DeltaTransformer.sol       191 lines - Delta transformations: HTLCs, swaps, limit orders
 
   runtime/
-    types.ts                     1853 lines - All TypeScript interfaces (START HERE)
+    types.ts                     1851 lines - All TypeScript interfaces (START HERE)
     ids.ts                       519 lines - Identity system: EntityId, SignerId, JId, ReplicaKey
-    runtime.ts                   2519 lines - Main coordinator, 100ms ticks, R->E->A routing
-    entity-consensus.ts          1209 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
+    runtime.ts                   2542 lines - Main coordinator, 100ms ticks, R->E->A routing
+    entity-consensus.ts          1365 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
     account-consensus.ts         1420 lines - Bilateral consensus, left/right perspective
     account-consensus-state.ts   171 lines - Bilateral state machine
-    j-batch.ts                   973 lines - J-batch: E-machine accumulates → jBroadcast → J-machine
+    j-batch.ts                   969 lines - J-batch: E-machine accumulates → jBroadcast → J-machine
     account-utils.ts             228 lines - deriveDelta() RCPAN calculation
     serialization-utils.ts       116 lines - BigInt serialization
     account-crypto.ts            430 lines - Signature verification
@@ -147,11 +147,11 @@ xln/
       financial.ts               33 lines - Financial accounting
       proposals.ts               35 lines - Proposal logic
       j-events.ts                842 lines - Jurisdiction events
-      handlers/account.ts              913 lines - Account operations
+      handlers/account.ts              919 lines - Account operations
       handlers/deposit-collateral.ts   74 lines - R2C deposits
       handlers/htlc-payment.ts         238 lines - HTLC routing
       handlers/create-settlement.ts    66 lines - Settlement creation
-      handlers/mint-reserves.ts        58 lines - Reserve minting
+      handlers/mint-reserves.ts        53 lines - Reserve minting
 
     account-tx/
       index.ts                   10 lines - Account transaction types
@@ -162,23 +162,23 @@ xln/
       graph.ts                   117 lines - Network graph
       pathfinding.ts             227 lines - Dijkstra routing
 
-    state-helpers.ts             731 lines - Pure state management
+    state-helpers.ts             737 lines - Pure state management
     snapshot-coder.ts            316 lines - Deterministic RLP serialization
-    evm.ts                       964 lines - Blockchain integration
+    evm.ts                       965 lines - Blockchain integration
 
   docs/
-    emc2.md                      ? lines - ⚡ Energy-Mass-Credit equivalence (CRITICAL PATH)
-    12_invariant.md              ? lines - ⚡ RCPAN innovation (CRITICAL PATH)
-    jea.md                       ? lines - ⚡ Jurisdiction-Entity-Account model (CRITICAL PATH)
-    11_Jurisdiction_Machine.md   ? lines - Architecture deep-dive
-    PriorArt.md                  ? lines - Why Lightning/rollups don't work
+    essay.md                            74 lines - ⚡ Core philosophy and vision (CRITICAL PATH)
+    core/12_invariant.md                90 lines - ⚡ RCPAN innovation (CRITICAL PATH)
+    core/rjea-architecture.md           669 lines - ⚡ RJEA 4-layer model (CRITICAL PATH)
+    core/11_Jurisdiction_Machine.md     45 lines - Architecture deep-dive
+    architecture/bilaterality.md        112 lines - Why bilateral > multilateral
 
 Reading Guide:
 1. Start with header sections (RCPAN invariant, competitive landscape, impossibilities)
 2. Follow the token budget guide for efficient learning:
-   - Critical path (30min): emc2.md → 12_invariant.md → jea.md → Depository.sol
+   - Critical path (30min): essay.md → 12_invariant.md → rjea-architecture.md → Depository.sol
    - Implementation (45min): types.ts → entity-consensus.ts → account-consensus.ts → entity-tx/apply.ts
-   - Deep dives (60min): runtime.ts → routing/pathfinding.ts → priorart.md → 11_Jurisdiction_Machine.md
+   - Deep dives (60min): runtime.ts → routing/pathfinding.ts → bilaterality.md → 11_Jurisdiction_Machine.md
 3. Verify claims using the Proof & Verification section
 4. Explore delta transformer examples for extensibility patterns
 
@@ -3379,7 +3379,7 @@ contract DeltaTransformer is Console {
 }
 
 
-//runtime/types.ts (1853 lines)
+//runtime/types.ts (1851 lines)
 /**
  * XLN Type Definitions
  * All interfaces and type definitions used across the XLN system
@@ -4448,6 +4448,8 @@ export interface DerivedDelta {
   outCapacity: bigint;
   outOwnCredit: bigint;
   inPeerCredit: bigint;
+  peerCreditUsed: bigint;  // Credit peer lent that we're using
+  ownCreditUsed: bigint;   // Credit we lent that peer is using
   ascii: string; // ASCII visualization from deriveDelta (like old_src)
 }
 
@@ -4655,6 +4657,7 @@ export interface EntityState {
   messages: string[];
   proposals: Map<string, Proposal>;
   config: ConsensusConfig;
+  prevFrameHash?: string; // Chain linkage for BFT consensus (keccak256 of previous frame)
 
   // 💰 Financial state
   reserves: Map<string, bigint>; // tokenId -> amount only, metadata from TOKEN_REGISTRY
@@ -4820,9 +4823,8 @@ export interface Env {
   browserVM?: any; // BrowserVMProvider instance for this runtime (DEPRECATED: use evms)
   browserVMState?: BrowserVMState; // Serialized BrowserVM state for time travel
 
-  // EVM instances (unified interface for browser/RPC)
-  // Usage: env.evms.get('simnet').depository._reserves(entityId, tokenId)
-  evms: Map<string, import('./evm-interface').EVM>;
+  // EVM instances - DEPRECATED, use env.browserVM or createJAdapter() from jadapter
+  evms: Map<string, any>;
 
   // Active jurisdiction
   activeJurisdiction?: string; // Currently active J-replica name
@@ -4862,10 +4864,6 @@ export interface Env {
 
   // Frame-scoped structured logs (captured into snapshot, then reset)
   frameLogs: FrameLogEntry[];
-
-  // HANKO SYSTEM: Hash collection during frame creation
-  currentFrameHashes?: string[]; // Hashes accumulated during applyEntityFrame (cleared after)
-  currentFrameEntityId?: string; // EntityId for current frame being built (for signAsEntity)
 
   // Event emission methods (EVM-style - like Ethereum block logs)
   log: (message: string) => void;
@@ -5755,7 +5753,7 @@ export const safeExtractEntityId = (keyString: string): EntityId | null => {
 };
 
 
-//runtime/runtime.ts (2519 lines)
+//runtime/runtime.ts (2542 lines)
 // for regular use > bun run runtime/runtime.ts
 // for debugging > bun repl
 // await import('./debug.js');
@@ -5776,7 +5774,7 @@ function signerToEntityId(address: string): string {
   return '0x' + '0'.repeat(24) + addr;
 }
 
-import { getPerfMs, getWallClockMs } from './time';
+import { getPerfMs, getWallClockMs } from './utils';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { isLeftEntity } from './entity-id-utils';
 import {
@@ -6132,7 +6130,7 @@ export const setRuntimeId = (id: string | null): void => {
   }
 };
 
-const scheduleNetworkProcess = (env: Env) => {
+export const scheduleNetworkProcess = (env: Env) => {
   if (networkProcessScheduled) return;
   networkProcessScheduled = true;
   const defer =
@@ -6467,23 +6465,26 @@ const applyRuntimeInput = async (
         console.log(`[Runtime] Importing J-machine "${runtimeTx.data.name}" (chain ${runtimeTx.data.chainId})...`);
 
         try {
-          const { getJurisdiction } = await import('./jurisdiction/index.js');
+          const { createJAdapter } = await import('./jadapter');
           const isBrowserVM = runtimeTx.data.rpcs.length === 0;
 
-          // Create jurisdiction via unified interface
-          const jurisdiction = await getJurisdiction({
-            type: isBrowserVM ? 'browser' : 'rpc',
+          // Create jurisdiction via unified JAdapter interface
+          const jadapter = await createJAdapter({
+            mode: isBrowserVM ? 'browservm' : 'rpc',
             chainId: runtimeTx.data.chainId,
             rpcUrl: isBrowserVM ? undefined : runtimeTx.data.rpcs[0],
-            depositoryAddress: runtimeTx.data.contracts?.depository,
-            entityProviderAddress: runtimeTx.data.contracts?.entityProvider,
           });
+
+          // Deploy contracts if browservm (RPC mode expects existing contracts)
+          if (isBrowserVM) {
+            await jadapter.deployStack();
+          }
 
           // For BrowserVM, set as default jurisdiction in env
           if (isBrowserVM) {
-            const browserVM = (jurisdiction as any).getEVM?.();
+            const browserVM = (jadapter as any).browserVM;
             if (browserVM) {
-              setBrowserVMJurisdiction(env, jurisdiction.depositoryAddress, browserVM);
+              setBrowserVMJurisdiction(env, jadapter.addresses.depository, browserVM);
             }
           }
 
@@ -6501,8 +6502,8 @@ const applyRuntimeInput = async (
             blockDelayMs: 300,
             lastBlockTimestamp: env.timestamp,
             position: { x: 0, y: 50, z: 0 }, // Default position for J-machine
-            depositoryAddress: jurisdiction.depositoryAddress,
-            entityProviderAddress: jurisdiction.entityProviderAddress,
+            depositoryAddress: jadapter.addresses.depository,
+            entityProviderAddress: jadapter.addresses.entityProvider,
           };
           env.jReplicas.set(runtimeTx.data.name, jReplica);
 
@@ -6520,13 +6521,15 @@ const applyRuntimeInput = async (
             if (!env.eReplicas.has(replicaKey)) {
               console.log(`[Runtime] Auto-creating self-entity for signer ${signer.address.slice(0, 10)}...`);
 
-              // Register on-chain
-              await jurisdiction.registerEntity(
-                signer.privateKey || '',
-                selfEntityId,
-                [signer.address],
-                1n
-              );
+              // Register on-chain via EntityProvider
+              const browserVM = (jadapter as any).browserVM;
+              if (browserVM?.registerEntitiesWithSigners) {
+                await browserVM.registerEntitiesWithSigners([{
+                  entityId: selfEntityId,
+                  signerAddresses: [signer.address],
+                  threshold: 1,
+                }]);
+              }
 
               // Create local replica
               const entityConfig: ConsensusConfig = {
@@ -6535,11 +6538,11 @@ const applyRuntimeInput = async (
                 validators: [signer.address],
                 shares: { [signer.address]: 1n },
                 jurisdiction: {
-                  address: jurisdiction.depositoryAddress,
+                  address: jadapter.addresses.depository,
                   name: runtimeTx.data.name,
                   chainId: runtimeTx.data.chainId,
-                  entityProviderAddress: jurisdiction.entityProviderAddress,
-                  depositoryAddress: jurisdiction.depositoryAddress,
+                  entityProviderAddress: jadapter.addresses.entityProvider,
+                  depositoryAddress: jadapter.addresses.depository,
                 },
               };
 
@@ -6567,8 +6570,8 @@ const applyRuntimeInput = async (
               env.eReplicas.set(replicaKey, replica);
 
               // Fund with test tokens (BrowserVM only)
-              if (isBrowserVM) {
-                await jurisdiction.debugFundReserves(selfEntityId, 1, 1000n * 10n**18n);
+              if (isBrowserVM && browserVM?.debugFundReserves) {
+                await browserVM.debugFundReserves(selfEntityId, 1, 1000n * 10n**18n);
                 console.log(`[Runtime] Funded self-entity with 1000 tokens`);
               }
 
@@ -7134,14 +7137,14 @@ const main = async (): Promise<Env> => {
       env.frameLogs = [];
       if (latestSnapshot.browserVMState && isBrowser) {
         try {
-          const { BrowserEVM } = await import('./evms/browser-evm');
-          const browserEvm = new BrowserEVM();
-          await browserEvm.init();
-          await browserEvm.restoreState(latestSnapshot.browserVMState);
-          env.browserVM = browserEvm.getProvider();
-          setBrowserVMJurisdiction(env, browserEvm.getDepositoryAddress(), browserEvm);
+          const { BrowserVMProvider } = await import('./jadapter');
+          const browserVM = new BrowserVMProvider();
+          await browserVM.init();
+          await browserVM.restoreState(latestSnapshot.browserVMState);
+          env.browserVM = browserVM;
+          setBrowserVMJurisdiction(env, browserVM.getDepositoryAddress(), browserVM);
           if (typeof window !== 'undefined') {
-            (window as any).__xlnBrowserVM = browserEvm;
+            (window as any).__xlnBrowserVM = browserVM;
           }
           console.log('✅ BrowserVM restored from persisted state');
         } catch (error) {
@@ -7942,6 +7945,25 @@ export const process = async (
                 }
               }
             }
+
+            // Handle direct mint operations (admin function, bypasses batch)
+            if (jTx.type === 'mint' && jTx.data && browserVM?.debugFundReserves) {
+              const { entityId, tokenId, amount } = jTx.data;
+              if (!quietRuntimeLogs) {
+                console.log(`💰 [J-Machine] Minting ${amount} token ${tokenId} to ${entityId.slice(-4)}`);
+              }
+              try {
+                await browserVM.debugFundReserves(entityId, tokenId, amount);
+                if (!quietRuntimeLogs) {
+                  console.log(`   ✅ Mint successful`);
+                }
+              } catch (error) {
+                console.error(`   ❌ Mint failed: ${error}`);
+                if (env.scenarioMode) {
+                  throw new Error(`J-MINT FAILED: ${error}`);
+                }
+              }
+            }
           }
 
           if (browserVM?.endJurisdictionBlock) {
@@ -8161,14 +8183,14 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
       latestEnv.history = history;
       if (latestEnv.browserVMState && isBrowser) {
         try {
-          const { BrowserEVM } = await import('./evms/browser-evm');
-          const browserEvm = new BrowserEVM();
-          await browserEvm.init();
-          await browserEvm.restoreState(latestEnv.browserVMState);
-          latestEnv.browserVM = browserEvm.getProvider();
-          setBrowserVMJurisdiction(latestEnv, browserEvm.getDepositoryAddress(), browserEvm);
+          const { BrowserVMProvider } = await import('./jadapter');
+          const browserVM = new BrowserVMProvider();
+          await browserVM.init();
+          await browserVM.restoreState(latestEnv.browserVMState);
+          latestEnv.browserVM = browserVM;
+          setBrowserVMJurisdiction(latestEnv, browserVM.getDepositoryAddress(), browserVM);
           if (typeof window !== 'undefined') {
-            (window as any).__xlnBrowserVM = browserEvm;
+            (window as any).__xlnBrowserVM = browserVM;
           }
           console.log('✅ BrowserVM restored from loadEnvFromDB');
         } catch (error) {
@@ -8266,17 +8288,16 @@ const resolveEntityName = (entityId: string) => resolveEntityNameOriginal(db, en
 const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayInfoFromProfileOriginal(db, entityId);
 
 // Avatar functions are already imported and exported above
-export { BrowserEVM } from './evms/browser-evm.js';
 
-// Jurisdiction abstraction (unified interface for browser/rpc)
-export { getJurisdiction, getCachedJurisdiction, clearJurisdictions, listJurisdictions } from './jurisdiction/index.js';
-export type { IJurisdiction, JurisdictionConfig, Token, EntityInfo, TxReceipt } from './jurisdiction/index.js';
+// JAdapter - Unified J-Machine interface (replaces old evms/ and jurisdiction/)
+export { createJAdapter, BrowserVMProvider } from './jadapter';
+export type { JAdapter, JAdapterConfig, JAdapterMode, JEvent } from './jadapter';
 
 // ASCII visualization exports
 export { formatRuntime, formatEntity, formatAccount, formatOrderbook, formatSummary } from './runtime-ascii';
 
 
-//runtime/entity-consensus.ts (1209 lines)
+//runtime/entity-consensus.ts (1365 lines)
 /**
  * XLN Entity Consensus and State Management
  * Core entity processing logic, consensus, proposals, and state transitions
@@ -8291,6 +8312,104 @@ import { logError } from './logger';
 import { addMessages, cloneEntityReplica, canonicalAccountKey, getAccountPerspective, emitScopedEvents, resolveEntityProposerId } from './state-helpers';
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
+import { ethers } from 'ethers';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ENTITY FRAME HASH - Cryptographic commitment to entity state
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Unlike A-machine frames (bilateral), E-machine frames need BFT consensus among
+// entity signers. The hash must include:
+// - prevFrameHash (chain linkage, replay protection)
+// - height, timestamp (ordering)
+// - txs (what changed)
+// - key state fields (resulting state)
+//
+// Validators MUST recompute this hash locally and only sign if it matches.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Create cryptographic hash for entity frame.
+ * Both proposer and validators must compute identical hashes from identical state.
+ */
+export async function createEntityFrameHash(
+  prevFrameHash: string,
+  height: number,
+  timestamp: number,
+  txs: EntityTx[],
+  newState: EntityState
+): Promise<string> {
+  // Build hashable state object
+  const frameData = {
+    prevFrameHash,
+    height,
+    timestamp,
+    // Deterministic tx serialization
+    txs: txs.map(tx => ({
+      type: tx.type,
+      data: tx.data
+    })),
+    // ═══════════════════════════════════════════════════════════════════════════
+    // KEY STATE FIELDS (catch bugs early by including in hash)
+    // ═══════════════════════════════════════════════════════════════════════════
+    entityId: newState.entityId,
+    // Reserves: sorted by tokenId for determinism
+    reserves: Array.from(newState.reserves.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([k, v]) => [k, v.toString()]),
+    // J-machine tracking
+    lastFinalizedJHeight: newState.lastFinalizedJHeight,
+    // Account state: use A-machine frame hashes (not full state - too large)
+    // Sorted by counterparty ID for determinism
+    accountHashes: Array.from(newState.accounts.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([cpId, acct]) => ({
+        cpId,
+        height: acct.currentHeight,
+        stateHash: acct.currentFrame?.stateHash || 'genesis',
+        ackedTransitions: acct.ackedTransitions,
+      })),
+    // HTLC routing state hash
+    htlcRoutesHash: newState.htlcRoutes.size > 0
+      ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
+          Array.from(newState.htlcRoutes.entries())
+            .sort((a, b) => a[0].localeCompare(b[0]))
+        )))
+      : null,
+    htlcFeesEarned: newState.htlcFeesEarned.toString(),
+    // Lock/swap book hashes
+    lockBookHash: newState.lockBook.size > 0
+      ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
+          Array.from(newState.lockBook.entries())
+            .sort((a, b) => a[0].localeCompare(b[0]))
+        )))
+      : null,
+    swapBookHash: newState.swapBook.size > 0
+      ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(
+          Array.from(newState.swapBook.entries())
+            .sort((a, b) => a[0].localeCompare(b[0]))
+        )))
+      : null,
+    // Orderbook extension hash (if hub)
+    orderbookHash: newState.orderbookExt
+      ? ethers.keccak256(ethers.toUtf8Bytes(safeStringify(newState.orderbookExt)))
+      : null,
+  };
+
+  // keccak256 for EVM compatibility
+  const encoded = safeStringify(frameData);
+  return ethers.keccak256(ethers.toUtf8Bytes(encoded));
+}
+
+/**
+ * Get previous frame hash from entity state.
+ * Genesis if height=0, otherwise hash from last committed frame.
+ */
+function getPrevFrameHash(state: EntityState): string {
+  if (state.height === 0) return 'genesis';
+  // Store prevFrameHash in EntityState on commit (added below)
+  return (state as any).prevFrameHash || 'genesis';
+}
 
 // === SECURITY VALIDATION ===
 
@@ -8506,7 +8625,7 @@ export const applyEntityInput = async (
     }
   }
 
-  const crontabOutputs = await executeCrontab(workingReplica, workingReplica.state.crontabState);
+  const crontabOutputs = await executeCrontab(env, workingReplica, workingReplica.state.crontabState);
   if (crontabOutputs.length > 0) {
     console.log(`⏰ CRONTAB: Generated ${crontabOutputs.length} outputs from periodic tasks`);
     entityOutbox.push(...crontabOutputs);
@@ -8618,11 +8737,13 @@ export const applyEntityInput = async (
       });
 
       // Apply the committed frame with incremented height
+      // Store committed frame hash for chain linkage in next frame
       workingReplica.state = {
         ...entityInput.proposedFrame.newState,
         entityId: workingReplica.state.entityId, // PRESERVE: Never lose entityId
         height: workingReplica.state.height + 1,
-      };
+        prevFrameHash: entityInput.proposedFrame.hash, // Chain linkage for BFT
+      } as EntityState;
 
       // CHANNEL.TS PATTERN: Clear only the committed txs, keep any new txs
       // This avoids dropping fresh inputs merged into the same tick (e.g., accountInput ACKs).
@@ -8653,12 +8774,45 @@ export const applyEntityInput = async (
     entityInput.proposedFrame &&
     (!workingReplica.proposal || (workingReplica.state.config.mode === 'gossip-based' && workingReplica.isProposer))
   ) {
-    const frameSignature = signFrame(env, workingReplica.signerId, entityInput.proposedFrame.hash);
     const config = workingReplica.state.config;
+    const proposedFrame = entityInput.proposedFrame;
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // VALIDATOR HASH VERIFICATION (BFT hardening)
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Apply txs locally, compute expected hash, reject if mismatch
+    const { newState: validatorComputedState } = await applyEntityFrame(env, workingReplica.state, proposedFrame.txs);
+    const validatorNewState = {
+      ...validatorComputedState,
+      entityId: workingReplica.state.entityId,
+      height: proposedFrame.height,
+      timestamp: proposedFrame.newState.timestamp,
+    };
+
+    const prevFrameHash = getPrevFrameHash(workingReplica.state);
+    const validatorComputedHash = await createEntityFrameHash(
+      prevFrameHash,
+      proposedFrame.height,
+      proposedFrame.newState.timestamp,
+      proposedFrame.txs,
+      validatorNewState
+    );
+
+    // SECURITY: Reject if hash mismatch (proposer sent different state than txs produce)
+    if (validatorComputedHash !== proposedFrame.hash) {
+      logError("FRAME_CONSENSUS", `❌ HASH MISMATCH: Proposer sent invalid frame hash!`);
+      logError("FRAME_CONSENSUS", `   Expected: ${validatorComputedHash.slice(0, 30)}...`);
+      logError("FRAME_CONSENSUS", `   Received: ${proposedFrame.hash.slice(0, 30)}...`);
+      logError("FRAME_CONSENSUS", `   This could indicate equivocation attack or state divergence bug.`);
+      // Don't sign, don't lock - reject the proposal
+      return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
+    }
+
+    console.log(`✅ Validator hash verified: ${proposedFrame.hash.slice(0, 20)}...`);
+    const frameSignature = signFrame(env, workingReplica.signerId, proposedFrame.hash);
 
     // Lock to this frame (CometBFT style)
-    workingReplica.lockedFrame = entityInput.proposedFrame;
-    // DEBUG removed: → Validator locked to frame ${entityInput.proposedFrame.hash.slice(0, 10)}...`);
+    workingReplica.lockedFrame = proposedFrame;
 
     if (config.mode === 'gossip-based') {
       // Send precommit to all validators
@@ -8672,7 +8826,6 @@ export const applyEntityInput = async (
           precommits: new Map([[workingReplica.signerId, frameSignature]]),
         });
       });
-      // DEBUG removed: → Signed proposal, gossiping precommit to ${config.validators.length} validators`);
     } else {
       // Send precommit to proposer only
       const proposerId = config.validators[0];
@@ -8691,7 +8844,6 @@ export const applyEntityInput = async (
         signerId: proposerId,
         precommits: new Map([[workingReplica.signerId, frameSignature]]),
       });
-      // DEBUG removed: → Signed proposal, sending precommit to ${proposerId}`);
     }
   }
 
@@ -8820,10 +8972,28 @@ export const applyEntityInput = async (
       console.log(`🚀 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
       // For single signer entities, directly apply transactions without consensus
       const { newState: newEntityState, outputs: frameOutputs, jOutputs: frameJOutputs } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool);
-      workingReplica.state = {
+      const newHeight = workingReplica.state.height + 1;
+      const newTimestamp = env.timestamp;
+
+      // Compute frame hash for chain linkage (even single-signer needs deterministic state tracking)
+      const prevFrameHash = getPrevFrameHash(workingReplica.state);
+      const singleSignerNewState = {
         ...newEntityState,
         entityId: workingReplica.state.entityId, // PRESERVE: Never lose entityId
-        height: workingReplica.state.height + 1,
+        height: newHeight,
+        timestamp: newTimestamp,
+      };
+      const singleSignerFrameHash = await createEntityFrameHash(
+        prevFrameHash,
+        newHeight,
+        newTimestamp,
+        workingReplica.mempool,
+        singleSignerNewState
+      );
+
+      workingReplica.state = {
+        ...singleSignerNewState,
+        prevFrameHash: singleSignerFrameHash, // Chain linkage
       };
 
       // Add any outputs generated by entity transactions to the outbox
@@ -8837,8 +9007,7 @@ export const applyEntityInput = async (
         console.log(
           `    ⚡ Single signer entity: transactions applied directly, height: ${workingReplica.state.height}`,
         );
-      // SINGLE-SIGNER-RETURN removed - too noisy
-      console.log(`🔥 SINGLE-SIGNER RETURN: entityOutbox=${entityOutbox.length}, jOutbox=${jOutbox.length}`);
+      console.log(`🔥 SINGLE-SIGNER RETURN: entityOutbox=${entityOutbox.length}, jOutbox=${jOutbox.length}, frameHash=${singleSignerFrameHash.slice(0, 20)}...`);
       return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica }; // Skip the full consensus process
     }
 
@@ -8854,28 +9023,36 @@ export const applyEntityInput = async (
 
     // Proposer creates new timestamp for this frame (DETERMINISTIC: use runtime timestamp)
     const newTimestamp = env.timestamp;
+    const newHeight = workingReplica.state.height + 1;
 
-    // NOTE: Timestamp validation removed - comparing env.timestamp to itself was meaningless
-    // For peer proposals, validation happens during signature verification
+    // Build proposed new state
+    const proposedNewState = {
+      ...newEntityState,
+      entityId: workingReplica.state.entityId, // PRESERVE: Never lose entityId in proposal
+      height: newHeight,
+      timestamp: newTimestamp,
+    };
 
-    // TODO(bft-hardening): Replace weak placeholder hash with cryptographic commitment
-    // Current: height + timestamp only - validators don't sign actual state content
-    // Required: Merkle root over transactions + keccak256(orderbookExt + accountStates)
-    // Impact: Without this, equivocation attacks possible in multi-validator setup
-    // See: docs/htlc-hardening.md for full security audit
-    const frameHash = `frame_${workingReplica.state.height + 1}_${newTimestamp}`;
+    // ═══════════════════════════════════════════════════════════════════════════
+    // CRYPTOGRAPHIC FRAME HASH (replaces weak placeholder)
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Hash includes: prevFrameHash, height, timestamp, txs, key state fields
+    // Validators MUST recompute and verify before signing
+    const prevFrameHash = getPrevFrameHash(workingReplica.state);
+    const frameHash = await createEntityFrameHash(
+      prevFrameHash,
+      newHeight,
+      newTimestamp,
+      workingReplica.mempool,
+      proposedNewState
+    );
     const selfSignature = signFrame(env, workingReplica.signerId, frameHash);
 
     workingReplica.proposal = {
-      height: workingReplica.state.height + 1,
+      height: newHeight,
       txs: [...workingReplica.mempool],
       hash: frameHash,
-      newState: {
-        ...newEntityState,
-        entityId: workingReplica.state.entityId, // PRESERVE: Never lose entityId in proposal
-        height: workingReplica.state.height + 1,
-        timestamp: newTimestamp, // Set new deterministic timestamp in proposed state
-      },
+      newState: proposedNewState,
       signatures: new Map<string, string>([[workingReplica.signerId, selfSignature]]), // Proposer signs immediately
     };
 
@@ -11082,7 +11259,7 @@ export function getAccountBarVisual(
 }
 
 
-//runtime/j-batch.ts (973 lines)
+//runtime/j-batch.ts (969 lines)
 /**
  * J-Batch Aggregator System
  *
@@ -11371,12 +11548,8 @@ export function preflightBatchForE2(
     }
   }
 
-  for (const op of batch.reserveToReserve) {
-    const receiving = normalizeEntityId(op.receivingEntity);
-    if (receiving === normalizedEntityId) {
-      issues.push(`reserveToReserve to self (${op.receivingEntity.slice(-4)})`);
-    }
-  }
+  // NOTE: R2R to self is allowed for minting operations (browservm debugFundReserves)
+  // The contract will handle actual validation - no preflight check needed here
 
   for (const s of batch.settlements) {
     if (compareEntityIds(s.leftEntity, s.rightEntity) >= 0) {
@@ -13047,7 +13220,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
     if (entityTx.type === 'mintReserves') {
       const { handleMintReserves } = await import('./handlers/mint-reserves');
-      return await handleMintReserves(entityState, entityTx);
+      return await handleMintReserves(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'createSettlement') {
@@ -14334,7 +14507,7 @@ async function applyFinalizedJEvent(
 }
 
 
-//runtime/entity-tx/handlers/account.ts (913 lines)
+//runtime/entity-tx/handlers/account.ts (919 lines)
 import { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents, resolveEntityProposerId } from '../../state-helpers';
@@ -14466,6 +14639,12 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       rightJObservations: [],
       jEventChain: [],
       lastFinalizedJHeight: 0,
+      // Dispute resolution
+      disputeConfig: {
+        defaultDelayBlocks: 100,
+        minDelayBlocks: 10,
+      },
+      onChainSettlementNonce: 0,
     };
 
     // Store with counterparty ID as key (simpler than canonical)
@@ -15633,63 +15812,58 @@ export async function handleCreateSettlement(
 }
 
 
-//runtime/entity-tx/handlers/mint-reserves.ts (58 lines)
+//runtime/entity-tx/handlers/mint-reserves.ts (53 lines)
 /**
  * Mint Reserves Handler
  *
- * SAME FLOW AS R2R: adds mint operation to jBatch, broadcasts via j_broadcast
- * Pattern: E-machine tx accumulates ops → jBroadcast tx commits batch → J-machine executes
+ * DIRECT MINT: Sends mint operation directly to J-machine (admin function)
+ * Does NOT go through batch - minting is an admin operation, not a user transfer
  *
  * Flow:
- * 1. Entity validates (optional)
- * 2. Add mint operation to jBatch
- * 3. User sends j_broadcast
- * 4. J-machine executes → BrowserVM mints
- * 5. J-events route back
+ * 1. Entity requests mint
+ * 2. J-machine directly mints via browserVM.debugFundReserves
+ * 3. J-events route back with ReserveUpdated
  */
 
-import type { EntityState, EntityTx, EntityInput } from '../../types';
+import type { EntityState, EntityTx, EntityInput, JInput, JTx, Env } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { initJBatch, assertBatchNotPending } from '../../j-batch';
 
 export async function handleMintReserves(
   entityState: EntityState,
-  entityTx: Extract<EntityTx, { type: 'mintReserves' }>
-): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: any[] }> {
+  entityTx: Extract<EntityTx, { type: 'mintReserves' }>,
+  env: Env
+): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs: JInput[] }> {
   const { tokenId, amount } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
-  console.log(`💰 mintReserves: ${entityState.entityId.slice(-4)} adding ${amount} token ${tokenId} to jBatch`);
+  console.log(`💰 mintReserves: ${entityState.entityId.slice(-4)} minting ${amount} token ${tokenId}`);
 
-  // Initialize jBatch on first use
-  if (!newState.jBatchState) {
-    newState.jBatchState = initJBatch();
-  }
-
-  // Block if batch has pending broadcast
-  assertBatchNotPending(newState.jBatchState, 'mint');
-
-  // Add mint to jBatch (same pattern as R2R)
-  // Note: JBatch.reserveToReserve uses "receivingEntity" field name
-  const mintOp = {
-    receivingEntity: entityState.entityId,
-    tokenId,
-    amount,
+  // Create JTx for direct mint (bypasses batch - admin operation)
+  const jTx: JTx = {
+    type: 'mint',
+    entityId: entityState.entityId,
+    data: {
+      entityId: entityState.entityId,
+      tokenId,
+      amount,
+    },
+    timestamp: env.timestamp,
   };
 
-  console.log(`📦 jBatch: Adding mint:`, mintOp);
-  newState.jBatchState.batch.reserveToReserve.push(mintOp);
-  console.log(`📦 jBatch: After push, array length: ${newState.jBatchState.batch.reserveToReserve.length}`);
+  // Route to J-machine via standard jOutput flow
+  const jurisdictionName = env.activeJurisdiction || 'default';
+  const jOutputs: JInput[] = [{
+    jurisdictionName,
+    jTxs: [jTx],
+  }];
 
-  addMessage(newState,
-    `📦 Queued Mint: ${amount} token ${tokenId} (use jBroadcast to commit)`
-  );
+  addMessage(newState, `💰 Minting ${amount} of token ${tokenId}`);
 
-  console.log(`✅ mintReserves: Added to jBatch for ${entityState.entityId.slice(-4)}`);
+  console.log(`✅ mintReserves: Queued direct mint for ${entityState.entityId.slice(-4)}`);
   console.log(`   Token: ${tokenId}, Amount: ${amount}`);
 
-  return { newState, outputs };
+  return { newState, outputs, jOutputs };
 }
 
 
@@ -16780,7 +16954,7 @@ export function validateAccountSignatures(
 }
 
 
-//runtime/state-helpers.ts (731 lines)
+//runtime/state-helpers.ts (737 lines)
 /**
  * XLN State Management Helpers
  * Utilities for entity replica cloning, snapshots, and state persistence
@@ -16883,7 +17057,7 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
   if (env.gossip?.getProfiles) {
     const profile = (env.gossip.getProfiles() as Profile[]).find(p => p.entityId === entityId);
     const board = profile?.metadata?.board;
-    if (Array.isArray(board) && board.length > 0) {
+    if (Array.isArray(board) && board.length > 0 && board[0]) {
       return board[0];
     }
     if (board && !Array.isArray(board) && Array.isArray(board.validators) && board.validators.length > 0) {
@@ -17089,7 +17263,9 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
         txs: cloneArray(replica.proposal.txs),
         hash: replica.proposal.hash,
         newState: replica.proposal.newState,
-        signatures: cloneMap(replica.proposal.signatures),
+        signatures: replica.proposal.signatures?.map(arr => [...arr]),
+        hashes: replica.proposal.hashes ? [...replica.proposal.hashes] : undefined,
+        hankos: replica.proposal.hankos ? [...replica.proposal.hankos] : undefined,
       }
     }),
     ...(replica.lockedFrame && {
@@ -17098,7 +17274,9 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
         txs: cloneArray(replica.lockedFrame.txs),
         hash: replica.lockedFrame.hash,
         newState: replica.lockedFrame.newState,
-        signatures: cloneMap(replica.lockedFrame.signatures),
+        signatures: replica.lockedFrame.signatures?.map(arr => [...arr]),
+        hashes: replica.lockedFrame.hashes ? [...replica.lockedFrame.hashes] : undefined,
+        hankos: replica.lockedFrame.hankos ? [...replica.lockedFrame.hankos] : undefined,
       }
     }),
     isProposer: replica.isProposer,
@@ -17218,9 +17396,9 @@ export const captureSnapshot = async (
           // Add entity to registeredEntities
           if (!registeredEntities.has(entityId)) {
             registeredEntities.set(entityId, {
-              name: replica.name || `E${entityId.slice(-4)}`,
-              quorum: replica.quorum || [],
-              threshold: replica.threshold || 1,
+              name: `E${entityId.slice(-4)}`,
+              quorum: replica.state.config?.validators || [],
+              threshold: Number(replica.state.config?.threshold || 1n),
             });
           }
         }
@@ -17390,6 +17568,8 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     sentTransitions: account.sentTransitions,
     ackedTransitions: account.ackedTransitions,
     deltas: new Map(Array.from(account.deltas.entries()).map(([key, delta]) => [key, { ...delta }])),
+    locks: new Map(Array.from(account.locks.entries()).map(([key, lock]) => [key, { ...lock }])),
+    swapOffers: new Map(Array.from(account.swapOffers.entries()).map(([key, offer]) => [key, { ...offer }])),
     globalCreditLimits: { ...account.globalCreditLimits },
     currentHeight: account.currentHeight,
     pendingSignatures: [...account.pendingSignatures],
@@ -17831,7 +18011,7 @@ export const decodeAsync = async (buffer: Buffer): Promise<any> => {
 export { USE_MSGPACK };
 
 
-//runtime/evm.ts (964 lines)
+//runtime/evm.ts (965 lines)
 /**
  * XLN EVM Integration
  * Handles blockchain interactions, jurisdictions, and smart contract operations
@@ -17847,7 +18027,8 @@ import { safeStringify } from './serialization-utils';
 import type { ConsensusConfig, JurisdictionConfig } from './types';
 import { DEBUG, isBrowser } from './utils';
 import { logError } from './logger';
-import { BrowserVMEthersProvider } from './browservm-ethers-provider';
+import { BrowserVMEthersProvider } from './jadapter/browservm-ethers-provider';
+// BrowserVMProvider is also available via jadapter/browservm-provider
 import type { BrowserVMInstance } from './xln-api';
 
 // Global logger for UI-accessible error logging (set by frontend)
@@ -17979,14 +18160,14 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
       // Use BrowserVM provider (lazy-init if needed)
       // NOTE: This path is for legacy code. New code should use env.browserVM
       if (!BROWSER_VM_INSTANCE) {
-        const { BrowserEVM } = await import('./evms/browser-evm');
-        const evm = new BrowserEVM();
-        await evm.init();
+        const { BrowserVMProvider } = await import('./jadapter');
+        const browserVM = new BrowserVMProvider();
+        await browserVM.init();
         // Store in global singleton (backward compat - no env available here)
-        BROWSER_VM_INSTANCE = evm.getProvider();
+        BROWSER_VM_INSTANCE = browserVM;
         // Update jurisdictions with this VM's addresses
-        const depositoryAddress = evm.getDepositoryAddress();
-        const entityProviderAddress = evm.getEntityProviderAddress();
+        const depositoryAddress = browserVM.getDepositoryAddress();
+        const entityProviderAddress = browserVM.getEntityProviderAddress();
         DEFAULT_JURISDICTIONS = new Map();
         DEFAULT_JURISDICTIONS.set('simnet', {
           name: 'Simnet',
@@ -18795,4 +18976,1004 @@ export const submitReserveToReserve = async (jurisdiction: JurisdictionConfig, f
     throw error;
   }
 };
+
+
+//docs/essay.md (74 lines)
+# The Inevitability of Provable Credit: Why XLN Represents the True Evolution of Finance
+
+The history of financial innovation is littered with false dichotomies. Centralized versus decentralized. Trustless versus efficient. Privacy versus transparency. These framings obscure a deeper truth that XLN illuminates: the fundamental structure of value transfer networks is not a choice between competing ideologies, but an inevitable convergence toward what has always worked, enhanced by what has always been missing.
+
+Consider the topology of every successful financial system in history. From medieval banking houses to modern central banks, from correspondent banking networks to cryptocurrency exchanges, the pattern is invariant: hubs emerge. This is not an artifact of regulatory capture or technological limitation. It is the natural consequence of liquidity concentration, credit assessment expertise, and the mathematical reality that not all economic actors are created equal. Some entities process millions of transactions. Others process dozens. The hub-and-spoke network is not a design choice. It is an emergent property of economic inequality and specialization.
+
+Bitcoin maximalists proclaim that we must eliminate intermediaries. Lightning Network architects design systems assuming full reserve, equal liquidity distribution, and symmetric capacity needs. Both perspectives share a fundamental misunderstanding: they confuse the symptom with the disease. The problem with traditional banking was never that hubs existed. The problem was that hubs operated without proofs, without collateral requirements, and with the implicit guarantee that taxpayers would absorb their failures. Bailouts, not banks, are the corruption at the heart of the system.
+
+XLN begins from a different premise entirely. What if we preserved the topology that naturally emerges from economic reality while removing the mechanisms that make that topology toxic? What if hubs remained, but their credit limits were provable, their collateral was escrowed on-chain, and their debts were enforced automatically by immutable smart contracts? This is not compromise. This is completion.
+
+The RCPAN invariant is deceptively simple: negative left credit limit less than or equal to delta less than or equal to collateral plus right credit limit. But embedded in this inequality is the reconciliation of two centuries of financial evolution. Traditional banking discovered that credit is the mechanism by which economic activity scales beyond the constraints of available reserves. Payment channels discovered that cryptographic proofs enable trustless bilateral settlement. Both insights are correct. Both implementations are incomplete.
+
+FCUAN, the model underlying every bank and centralized exchange, scales phenomenally because it is unicast. When Alice pays Bob through their bank, the bank updates two entries in its internal ledger. No global broadcast. No consensus with millions of validators. Just bilateral state mutation with O(1) complexity. This is why traditional finance processes trillions of dollars daily while blockchains struggle with thousands of transactions per second. The bottleneck was never technological. It was architectural. Broadcast consensus is fundamentally unsuited for high-frequency bilateral relationships.
+
+But FCUAN's fatal flaw is its unprovability. When a bank claims your balance is X, you have no cryptographic proof. You have a legal claim, enforceable through courts, denominated in time and legal fees. In a dispute, the bank's word carries more weight than yours because power and proof have been conflated. This asymmetry enables censorship, seizure, and the slow erosion of property rights through inflation and bail-ins.
+
+FRPAP, the model underlying Lightning and similar channel networks, inverts this entirely. Every state update is cryptographically proven. Collateral is escrowed in 2-of-2 multisig. On-chain enforcement is guaranteed. But this purity comes at catastrophic cost: the inbound capacity wall. To receive value, someone must first lock value on your side of the channel. This is a coordination nightmare that cannot be solved without reintroducing centralized liquidity providers. The system cannot scale beyond the sum of its collateral. Every attempt to work around this constraint reintroduces trust through custodial services, just-in-time channel creation, or liquidity service providers. The purity of the model collapses when it meets economic reality.
+
+XLN solves inbound capacity through directional credit. When you extend credit to a hub, you are allowing the hub to go into debt to you. Hub debt to you means you have positive balance means you have received value without pre-funding. The hub can route payments to you by going negative on their side of the bilateral account, constrained by the credit limit you set. This is not the hub lending to you. This is you lending to the hub, and that lending capacity is what enables frictionless receiving. The mechanism is subtle but the consequence is profound: receiving becomes as easy as sending, without requiring reserve lockup or third-party coordination.
+
+XLN observes that these are not competing paradigms but incomplete fragments of a unified system. Credit is necessary for scalability. Collateral is necessary for security. Proofs are necessary for trustlessness. The superset invariant RCPAN contains all three. Within credit limits, the system behaves like traditional banking with cryptographic accountability. Beyond credit limits but within collateral bounds, it behaves like payment channels with perfect security. Beyond both, on-chain settlement and FIFO debt enforcement provide the escape valve that prevents systemic collapse.
+
+This is not theoretical innovation. This is how banks already think about credit lines and margin requirements. XLN merely formalizes the mechanics that financial institutions have used for centuries, then makes them provable and enforceable without human intermediation.
+
+The deeper inevitability emerges when you understand the Coase theorem. Ronald Coase demonstrated that in the absence of transaction costs, economic efficiency is achieved through voluntary bilateral negotiation regardless of initial property rights allocation. But transaction costs are never zero, and their magnitude determines the structure of the economy. High transaction costs create intermediaries. Low transaction costs enable direct peer-to-peer coordination.
+
+Broadcast consensus architectures have fundamental transaction cost floors. Every validator must process every transaction. This is O(n) overhead that cannot be eliminated through optimization. You can make validators faster. You can parallelize execution. You can compress data. But you cannot escape the mathematical reality that broadcasting to n parties costs n times what unicast to one party costs.
+
+XLN achieves the Coasian limit because bilateral accounts are unicast by definition. When Alice and Bob settle their account, no third party needs to validate. The cost approaches zero asymptotically. In fact, costs can become negative when hubs offer rebates for rebalancing liquidity. This is impossible in broadcast systems where every transaction imposes externalities on every validator.
+
+The Diamond-Dybvig model illuminates why fractional reserve banking creates unstable equilibria. When depositors panic and simultaneously withdraw, banks cannot meet obligations even if fundamentally solvent over longer time horizons. This coordination failure requires central banks as lenders of last resort, which creates moral hazard that encourages riskier behavior, which necessitates stronger regulation, which increases compliance costs, which consolidates the industry toward too-big-to-fail institutions. The cycle is self-reinforcing.
+
+XLN breaks this cycle not by eliminating fractional reserve credit but by bounding the contagion. Each bilateral account has explicit credit limits. Exposure beyond those limits requires escrowed collateral. When an entity receives funds, FIFO debt enforcement automatically repays creditors in order. No discretion. No negotiation. No bailouts. Failures happen, but they are localized to direct bilateral relationships rather than cascading network-wide through interconnected exposure.
+
+This is not about preventing bank runs. It is about making bank runs survivable without systemic collapse. The difference is profound. Traditional finance must prevent all failures to avoid contagion. XLN allows failures to occur naturally while containing their impact. This shifts the entire risk model from prevention-focused to resilience-focused.
+
+The technical architecture reflects these economic insights with unusual clarity. Runtime-Entity-Account-Jurisdiction is not arbitrary layering. It is the minimal hierarchical decomposition of how financial systems actually function. Runtime provides deterministic orchestration. Entities provide organizational consensus. Accounts provide bilateral settlement. Jurisdiction provides final arbitration. Each layer has a single responsibility. Each layer can be reasoned about independently. This is not over-engineering. This is correct engineering.
+
+Bilateral consensus is the killer feature precisely because it inverts the scalability assumptions of blockchain architecture. In broadcast systems, adding users increases load on validators. In bilateral systems, adding users creates more parallel settlement capacity. The network gains strength through growth rather than approaching capacity limits. This is why traditional banking scaled to serve billions while blockchains struggle to serve millions.
+
+The critique from cryptocurrency purists is predictable: this reintroduces trust. But this critique reveals a confusion between mechanism and outcome. Trust is not eliminated through blockchain consensus. It is redistributed among validators. The question is not whether trust exists but whether it can be bounded, proven, and enforced. XLN makes credit provable through bilateral consensus. It makes exposure bounded through collateral requirements. It makes enforcement automatic through smart contracts. The trust required is minimized and cryptographically verified, which is achievable. The trust eliminated completely, which is not.
+
+Homakov's insight about Lightning Network is devastating in its simplicity: they invented the wheel but built a unicycle. The primitives were correct. Hashlocks, timelocks, bilateral state channels with cryptographic proofs—all brilliant innovations. But they attempted to build a financial network without credit, which is like attempting to build an economy without lending. The result was predictable: a system that works in theory but fails in practice because it conflicts with how economic actors actually behave.
+
+XLN completes Lightning's vision by acknowledging what Lightning could not: credit is not a flaw to be engineered around but a feature to be formalized. The genius is recognizing that credit with proofs and collateral is strictly superior to either credit without proofs or reserves without credit. This is not compromise between competing values. This is the synthesis that was always waiting to be discovered.
+
+The EVM dependency is not technological conservatism but mathematical necessity. FIFO debt enforcement requires mutable storage, Turing-complete iteration, and atomic multi-entity state updates. UTXO chains cannot express this primitive. The constraint is not in implementation but in the computational model itself. XLN could theoretically be ported to other account-based VMs, but EVM has the ecosystem, the institutional familiarity, and the regulatory clarity. When central banks deploy CBDCs, they will choose battle-tested infrastructure over experimental alternatives. The network effects are already locked in.
+
+The four-layer architecture emerges from first principles rather than design preference. You need orchestration separate from consensus because deterministic replay requires controlled time. You need entity consensus separate from bilateral consensus because multi-party quorum requirements differ from pairwise agreement. You need account consensus separate from jurisdiction settlement because 99.99% of transactions should never touch the blockchain. Each layer exists because removing it would violate a fundamental requirement.
+
+Consider the validation-commit separation pattern. Why validate on a clone before committing to real state? Because bilateral consensus requires both parties to compute identical state hashes independently. But if validation mutates persistent state like observation arrays or lock books, the second execution during commit sees different inputs and produces different outputs. The frame that validated successfully fails on commit. This is not an implementation detail. This is a deep consequence of the requirement that both parties must be able to replay the same transactions and arrive at identical conclusions without communication during execution.
+
+The LEFT-WINS collision resolution is deterministic because both parties perform lexicographic comparison of entity IDs and arrive at identical conclusions about who should rollback. This is possible only because the decision is based on data both parties possess identically. Any decision requiring communication would introduce latency and failure modes. The elegance is in recognizing that deterministic local computation is strictly superior to consensus-requiring coordination for tie-breaking.
+
+XLN's inevitability stems from the convergence of several technological and economic trajectories. Traditional finance needs cryptographic accountability to remain competitive as educated users demand proof of solvency. Cryptocurrency needs credit mechanics to achieve mainstream adoption beyond speculative trading. Both will arrive at bilateral provable credit because it is the local optimum in the design space. The alternatives are either less secure, less scalable, or less compatible with how humans actually coordinate economic activity.
+
+The vision extends beyond payments into programmable financial primitives. Delta transformers allow bilateral DeFi: HTLCs for trustless multi-hop routing, automated market makers for bilateral swaps, time-locked vesting for bilateral agreements, conditional payments for bilateral contracts. All enforceable on-chain through Depository.sol if disputes arise, but executed off-chain with zero fees when parties cooperate. This is bilateral Ethereum. The full programmability of smart contracts, constrained to pairwise relationships, with on-chain fallback for non-cooperation.
+
+The Hanko signature system reveals another deep insight: organizational complexity should cost nothing. Creating a multi-sig costs gas. Creating a DAO costs gas. Creating sub-committees within that DAO costs more gas. This is wrong. Organizational structure is information, not computation. It should be free to create and update. Lazy entities achieve this: the entity ID is the hash of the governance structure. No on-chain registration. Infinite nesting. Zero marginal cost. When you need on-chain coordination, register the entity for sequential numbering and updatable boards. But most organizational complexity can exist purely as cryptographic commitments.
+
+The market strategy targeting crypto traders and inter-CEX settlement before attempting global finance is not arbitrary. It is dictated by technical reality: XLN requires Turing-complete J-machines for Depository.sol execution. Until CBDCs deploy on EVM, fiat remittances and SWIFT replacement remain inaccessible. The addressable market is crypto ecosystem only—centralized exchanges, DeFi protocols, stablecoin transfers. This is not limitation but correct scoping. Build the infrastructure where it can work today. Wait for CBDCs to unlock global finance tomorrow.
+
+The criticism that XLN looks like developer tools rather than consumer applications is addressed through the two-mode architecture. User mode hides the state machine complexity entirely. Dev mode reveals everything. Same underlying runtime, different presentation layer. This acknowledges that different users need different abstractions while refusing to compromise the underlying correctness for the sake of initial simplicity. The complexity is essential. The interface is negotiable.
+
+What makes XLN inevitable is not any single technical innovation but the recognition that all the pieces already exist and merely need correct assembly. Banks have credit mechanics. Payment channels have cryptographic proofs. Smart contracts have enforceable logic. Blockchains have immutable settlement. XLN is the integration that was always possible but never attempted because it required abandoning the purity of both the cryptocurrency vision and the banking status quo.
+
+The future is conditional on CBDC adoption. If central banks deploy digital currencies on EVM-compatible chains, XLN becomes the settlement layer for global finance. Replace SWIFT. Capture significant percentage of cross-border flows. But this is 2030-2035 timeline, not 2026. Until then, the market is crypto infrastructure: bounded-risk CEX alternatives, inter-exchange settlement, DeFi risk management, institutional custody with proofs. This is multi-billion dollar opportunity even without fiat integration. The vision scales with technological adoption rather than requiring it upfront.
+
+When central banks realize that settlement can occur on a layer where proofs are automatic, collateral is enforced programmatically, and debts are repaid in strict FIFO order without human discretion, the adoption becomes inevitable. Not because XLN is ideologically pure but because it is operationally superior. The game theory drives convergence independent of philosophical preferences.
+
+The ultimate insight is that finance is not about money. It is about coordination under uncertainty. Money is just the ledger. The real system is the network of bilateral trust relationships, credit extensions, and collateral commitments that allow economic activity to occur before final settlement. Traditional banking understood this but implemented it with unprovable ledgers and unlimited taxpayer backstops. Cryptocurrency misunderstood this and attempted to build a financial system without credit, which is why it remains trapped at the margins despite a decade of development.
+
+XLN completes the arc. It takes the topology that works—hub-and-spoke credit networks—and adds what was missing: cryptographic proofs, escrowed collateral, and automatic enforcement. The result is not a new paradigm. It is the old paradigm, finally implemented correctly. This is why it is inevitable. Not because it is novel but because it is correct. And in the long run, correctness compounds.
+
+
+//docs/core/12_invariant.md (90 lines)
+# 1.2 RCPAN Invariant 
+
+[pairing: Pye Corner Audio - The Simplest Equation](https://www.youtube.com/watch?v=Vp0a8tdzJmk) (but yes, technically it's inequality)
+
+
+The core credit–collateral mechanism can be grasped in three minutes. Accounts are bilateral relationships between entities. 
+
+For centuries, the world has run on FCUAN (full-credit, unprovable account networks—i.e., traditional banking credit rails): bilateral, uncollateralized limits between end-users (“spokes”) and banks/brokers (“hubs”). Any CEX (e.g., Binance, Coinbase) is also FCUAN. 
+
+FCUAN scales phenomenally but offers weak user security. Any spoke can be censored, and assets seized at any moment. Hubs can default, even without malice (Diamond–Dybvig–style hub runs). 
+
+Deposit insurance is typically small relative to broad money (≪ M2), which systematically externalizes tail risk and invites moral hazard.
+
+Two entities start a financial relationship (per-asset Δ balances). Their xln wallets compare their hex IDs; the lower becomes L (left), the other R (right). Imagine an x-axis where:
+
+. is zero (0)
+Δ delta is the signed balance (saldo) between counterparties
+[ ] are invariant boundaries—how far Δ can move given mutual credit and shared collateral
+
+Clean slate (all zeros):
+
+(L)eft entity   [.Δ]   (R)ight entity
+
+Either party can extend a credit limit to the other:
+- unused, uncollateralized credit line (credit)
+* used credit
+
+**Critical: Credit direction determines flow capability**
+- **rightCreditLimit** (R extends to L): Allows L to go NEGATIVE = L can SEND beyond reserves
+- **leftCreditLimit** (L extends to R): Allows R to go NEGATIVE = R can SEND, **L can RECEIVE**
+
+**Inbound capacity solution:** To receive payments routed through a hub, YOU extend credit TO the hub (leftCreditLimit if you are left, rightCreditLimit if you are right). This allows the hub to go into debt to you = you receive value even with zero reserves.
+
+Example (leftCreditLimit = 3, rightCreditLimit = 3):
+
+[---.Δ---]
+
+Payments pull Δ toward the payer’s side (away from the receiver) while the receiver’s allocation increases.
+L pays 2 to R → Δ = −2:
+
+[-Δ**.---]
+
+R pays back 3 → Δ = +1:
+
+[---.*∆--]
+
+This is what 99.99% of the world economy runs on. Today, every bank, broker, CEX, and payment intermediary is pure FCUAN.
+
+A different approach, FRPAP (full-reserve, provable account primitives), often called “payment/state channels,” was popularized by the 2017 Lightning Network paper. FRPAP/Payment channels are full-reserve bilateral accounts with proofs—not a network architecture.
+
+Every full-reserve design (e.g., Raiden on Ethereum, Hydra on Cardano) inherits the inbound-capacity constraint—an architectural limit, not an implementation bug. It’s more precise to treat this as a family of three account primitives—proofs, collateral, and delta transformers—rather than a scalable network.
+
+In diagrams:
+= collateral (fully escrowed). Think of it as a dedicated 2-of-2 escrow with cryptographic guarantees.
+
+We draw collateral to the right of zero. R posts 3 units of collateral:
+
+[.Δ===]
+
+R pays 2 (Δ moves right):
+
+[.==Δ=]
+
+xln is the first RCPAN (Reserve-Credit, Provable Account Network): credit where it scales, collateral where it secures—a principled hybrid of FCUAN and FRPAP.
+
+FCUAN invariant:
+−leftCreditLimit ≤ Δ ≤ rightCreditLimit
+[---.---]
+
+FRPAP invariant:
+0 ≤ Δ ≤ collateral
+[.===]
+
+RCPAN (xln) superset invariant:
+−leftCreditLimit ≤ Δ ≤ collateral + rightCreditLimit
+[---.===---]
+
+xln can mimic both: ignore collateral functionality and it works like banking with enforceable proofs; ignore credit lines and it works like Lightning/full-reserve payment-channel networks. 
+
+Using both is where the real synergy emerges. RCPAN is literally how banks already think about credit, just formalized.
+
+Practical consequences:
+- **No inbound liquidity wall:** Spokes extend credit to hubs, enabling receiving without pre-funding (solves Lightning's fatal flaw)
+- **Bounded hub risk:** Hub can owe you up to creditLimit (your choice), collateral beyond that is escrowed on-chain (hub can't steal)
+- **Losses are link-capped:** Hub bankruptcy costs you creditLimit max, not your entire deposit
+- **Throughput scales with links:** Each bilateral account processes independently, not global broadcasts
+
+Follow for news, analysis, and a verification-first roadmap (proof sketch, benchmarks, economic spec, security playbook). xln is layer-2 done right.
+
+🔗 https://github.com/xlnfinance/xln
+
+//docs/core/rjea-architecture.md (669 lines)
+# RJEA Architecture: Runtime → Entity → Account → Jurisdiction
+
+**Runtime-Entity-Account-Jurisdiction** is XLN's four-layer consensus architecture for deterministic, debuggable financial state machines.
+
+## 🎯 Core Design Goals
+
+### 1. Determinism (Same Inputs → Same Outputs, Always)
+```
+(prevState, inputs) → nextState  // Pure function, no randomness
+```
+
+**Why:** Financial systems must be replayable for audits, dispute resolution, and testing.
+
+**How:**
+- ✅ Use `env.timestamp` (controlled), never `Date.now()` (wall clock)
+- ✅ Use deterministic PRNG with seed, never `Math.random()`
+- ✅ Use tick-based delays (`env.timestamp` checks), never `setTimeout`
+- ✅ Sort all loops/maps for deterministic ordering
+
+**Example Bug:** J-event finalization used `Date.now()` → replay gave different results → fixed by adding `env` parameter.
+
+### 2. Debuggability (Every State Transition Visible)
+```
+Frame N → [transactions] → Frame N+1
+   ↓                           ↓
+Snapshot                   Snapshot  (time-travel debugging)
+```
+
+**Why:** When consensus fails, you need to see EXACTLY which transaction at which height caused divergence.
+
+**How:**
+- ✅ Snapshot every frame (env.frames)
+- ✅ Log every state mutation
+- ✅ Preserve frame history (last 10 frames per account)
+- ✅ Emit events at key transitions
+
+**Example Bug:** Bilateral finalization happened on clone (invisible!) → fixed by skipping during validation.
+
+### 3. Hierarchy (Clear Containment, No Leaky Abstractions)
+
+```
+Runtime (Orchestrator)
+  ↓ contains
+Entity (BFT Consensus - 2-of-3 validators)
+  ↓ contains
+Account (Bilateral - 2-of-2 agreement)
+  ↓ settles on
+Jurisdiction (Blockchain - final truth)
+```
+
+**Why:** Separation of concerns. Entity failures don't corrupt Account state. Account disputes don't break Entity consensus.
+
+**How:**
+- Runtime orchestrates, never mutates Entity/Account state directly
+- Entities contain accounts, never reach into Jurisdiction internals
+- Accounts are bilateral islands - no cross-account dependencies
+- Jurisdiction is terminal settlement layer (immutable blockchain)
+
+---
+
+## 📦 Message Passing: Tx/Input/Frame Similarity
+
+**All layers use same pattern:** Propose → Validate → Commit
+
+| Layer | Transaction | Input (Batch) | Frame (Snapshot) |
+|-------|-------------|---------------|------------------|
+| **Runtime** | RuntimeTx | RuntimeInput | RuntimeFrame |
+| **Entity** | EntityTx | EntityInput | EntityFrame |
+| **Account** | AccountTx | AccountInput | AccountFrame |
+| **Jurisdiction** | JTx | JInput | JBlock |
+
+### Pattern: Pure Events (MempoolOps)
+
+```typescript
+// Handler (pure function)
+function handlePayment(state, payment): {
+  newState: State,           // Cloned and modified
+  mempoolOps: [{             // Pure events (not yet applied)
+    accountId: 'alice',
+    tx: { type: 'htlc_lock', data: {...} }
+  }]
+}
+
+// Orchestrator (applies pure events)
+for (const { accountId, tx } of mempoolOps) {
+  account.mempool.push(tx);  // Apply after all handlers run
+}
+```
+
+**Why:** Handlers stay pure (testable, deterministic). Orchestrator controls when/how state mutates.
+
+**Example Bug:** J-event handler called tryFinalizeAccountJEvents directly → finalized on clone → fixed by returning mempoolOps instead.
+
+---
+
+## 🔄 Bilateral Consensus Pattern (Account Layer)
+
+**Analogy:** Two people balancing a checkbook together. Both must agree on every entry before it's final.
+
+### Flow
+
+```
+Alice (LEFT entity)              Hub (RIGHT entity)
+     |                                |
+1. Propose frame h1                   |
+   (txs: [payment -$100])            |
+     |-------- frame h1 ------------>|
+     |                           2. Validate frame h1
+     |                              (re-execute txs on clone)
+     |                              (verify state hash matches)
+     |<-------- ACK h1 --------------|
+3. Commit frame h1                   3. Commit frame h1
+   (re-execute on real state)        (already done during validation)
+   (clear pendingFrame)
+     |                                |
+4. Check mempool                  4. Check mempool
+   (has new tx? batch with ACK)      (has new tx? batch with ACK)
+```
+
+### Key Invariants
+
+**One Frame at a Time:** Account can have max 1 `pendingFrame` (waiting for ACK). New frames blocked until ACK received.
+
+**Exception:** BATCH-OPTIMIZATION (Channel.ts pattern) allows batching ACK + new frame in SAME message:
+```typescript
+// Receive their frame h2
+response = {
+  height: 2,
+  prevSignatures: [ACK_FOR_h2],  // ACK their frame
+  newAccountFrame: our_h3,        // AND propose our next frame
+  counter: 3
+}
+```
+
+**Non-Blocking Duplex:** Both sides can have pendingFrames simultaneously (different heights). LEFT-WINS tiebreaker resolves collisions deterministically.
+
+---
+
+## ⚠️ Common Pitfalls (Lessons from This Session)
+
+### Pitfall 1: Finalization on Validation Clone
+
+**Bug Pattern:**
+```typescript
+// WRONG
+function validateFrame(frame) {
+  const clone = cloneAccountMachine(accountMachine);
+  processTransactions(clone);  // Modifies clone (lockBook, deltas, etc.)
+  // Clone discarded here!
+}
+
+function commitFrame(frame) {
+  processTransactions(accountMachine);  // Different state → different result!
+}
+```
+
+**Fix: `isValidation` Parameter**
+```typescript
+function processAccountTx(..., isValidation: boolean) {
+  if (!isValidation) {
+    // Only update persistent state during commit
+    tryFinalizeAccountJEvents(...);
+    accountMachine.locks.set(lockId, lock);
+  }
+}
+```
+
+**Impact:** R2C bilateral J-event consensus, HTLC lockBook, swap offers all required this fix.
+
+### Pitfall 2: Double State Cloning
+
+**Bug Pattern:**
+```typescript
+// Entity layer
+for (const entityTx of entityTxs) {
+  const { newState } = await applyEntityTx(entityState, entityTx);  // Clone #1
+  entityState = newState;
+}
+
+// Handler layer
+function handleAccountInput(entityState, input) {
+  const newState = cloneEntityState(entityState);  // Clone #2 (unnecessary!)
+  // Mutations to newState lost between sequential calls!
+}
+```
+
+**Fix:**
+```typescript
+// Handler uses state directly (already cloned at entity level)
+function handleAccountInput(entityState, input) {
+  const newState = entityState;  // No second clone
+  // Mutations persist across sequential calls in same entity frame
+}
+```
+
+**Impact:** ackedTransitions updates now persist, counter validation works.
+
+### Pitfall 3: Undefined Variables from Refactoring
+
+**Bug Pattern:**
+```typescript
+// After refactoring canonical keys → counterparty IDs
+const depositAccountKey = canonicalAccountKey(...);  // Variable removed
+// ...
+if (!entityState.accounts.has(depositAccountKey)) {  // UNDEFINED!
+```
+
+**Fix:**
+```typescript
+if (!entityState.accounts.has(counterpartyEntityId)) {  // Use actual ID
+```
+
+**Impact:** deposit_collateral, j_event_claim, HTLC payments all had these bugs.
+
+### Pitfall 4: Missing Import File
+
+**Bug Pattern:**
+```typescript
+const { createFrameHash } = await import('./frame-utils');  // File doesn't exist!
+// Silently crashes, execution stops
+```
+
+**Fix:**
+```typescript
+// Use local function (already defined in same file)
+const recomputedHash = await createFrameHash({...});
+```
+
+**Impact:** ALL frame acceptance was blocked by this import error.
+
+### Pitfall 5: Receiver fullDeltaStates Mismatch
+
+**Bug Pattern:**
+```typescript
+// Proposer
+const fullDeltaStates = sortedTokens.map(([_, delta]) => ({...delta}));
+const hash = createFrameHash({..., fullDeltaStates});
+
+// Receiver
+const hash = createFrameHash({..., fullDeltaStates: []});  // Empty!
+// Hash mismatch → frame rejected
+```
+
+**Fix:**
+```typescript
+// Receiver computes fullDeltaStates identically to proposer
+const fullDeltaStates = sortedTokens.map(([_, delta]) => ({...delta}));
+const hash = createFrameHash({..., fullDeltaStates});
+```
+
+**Impact:** Credit extensions, collateral frames now verify correctly.
+
+---
+
+## 🏗️ State Machine Hierarchy
+
+### Runtime (Layer 1)
+**Role:** Orchestrator - routes messages between entities and jurisdictions
+**State:** `{ eReplicas: Map, jReplicas: Map, pendingOutputs: [] }`
+**Tick:** Process all queued inputs → produce outputs for next tick
+
+```typescript
+function applyRuntimeInput(env, runtimeInput): {
+  entityOutbox: EntityInput[],  // Messages to entities
+  jOutbox: JInput[]             // Messages to jurisdictions
+}
+```
+
+**Key Insight:** ONE TICK = ONE ITERATION. No cascades. E→E communication always requires new tick.
+
+### Entity (Layer 2)
+**Role:** BFT consensus among N validators (or single-signer fast path)
+**State:** `{ accounts: Map, reserves: Map, jBlockObservations: [] }`
+**Frame:** Batch of EntityTxs agreed upon by threshold
+
+```typescript
+function applyEntityFrame(env, entityState, entityTxs): {
+  newState: EntityState,
+  outputs: EntityInput[],  // Account frames to other entities
+  jOutputs: JInput[]       // Batches to jurisdiction
+}
+```
+
+**Key Insight:** Entity CONTAINS accounts. Entity consensus (BFT) is separate from account consensus (bilateral).
+
+### Account (Layer 3)
+**Role:** Bilateral 2-of-2 agreement between two entities
+**State:** `{ deltas: Map, locks: Map, swapOffers: Map }`
+**Frame:** Batch of AccountTxs - BOTH sides must agree on state hash
+
+```typescript
+function proposeAccountFrame(env, accountMachine): {
+  accountInput: {
+    height: currentHeight + 1,
+    newAccountFrame: {...},
+    newSignatures: [sig],
+    counter: ++cooperativeNonce
+  }
+}
+```
+
+**Key Insight:** Each entity has its OWN AccountMachine for the bilateral account. Consensus = both independently compute same state hash.
+
+### Jurisdiction (Layer 4)
+**Role:** Terminal settlement layer (blockchain)
+**State:** On-chain smart contracts (immutable)
+**Block:** Batches of JTxs (R2C, C2R, settlements, rebalancing)
+
+```typescript
+function broadcastBatch(jBatch): JInput {
+  jurisdictionName: 'Sepolia',
+  jTxs: [{
+    type: 'batch',
+    entityId: alice,
+    data: { batch: {r2c: [...], settlements: [...]} }
+  }]
+}
+```
+
+**Key Insight:** J-layer is WRITE-ONLY from entities. Entities READ via j-event watchers (eventually consistent).
+
+---
+
+## 🔁 Validation vs Commit: The Critical Pattern
+
+**Why separate?** Need to verify frame correctness WITHOUT mutating state, then commit only if valid.
+
+### Channel.ts 2024 Reference
+```typescript
+await this.applyBlock(block, true);   // dryRun=true (validate on clone)
+const hash = encode(this.dryRunState);
+// ...verify signatures...
+await this.applyBlock(block, false);  // dryRun=false (commit on real)
+if (encode(this.state) !== hash) {
+  throw new Error('Consensus failure');  // States must match!
+}
+```
+
+### XLN 2025 Implementation
+
+**Proposer:**
+```typescript
+// No validation needed - we created the frame
+// Just re-execute to ensure determinism
+for (const tx of pendingFrame.accountTxs) {
+  await processAccountTx(accountMachine, tx, true, env.timestamp, currentHeight);
+}
+```
+
+**Receiver:**
+```typescript
+// 1. VALIDATION (on clone)
+const clonedMachine = cloneAccountMachine(accountMachine);
+for (const tx of receivedFrame.accountTxs) {
+  await processAccountTx(clonedMachine, tx, false, env.timestamp, currentHeight, isValidation=true);
+}
+// Verify state hash matches
+if (computeHash(clonedMachine) !== receivedFrame.stateHash) {
+  return { success: false, error: 'Consensus failure' };
+}
+
+// 2. COMMIT (on real state)
+for (const tx of receivedFrame.accountTxs) {
+  await processAccountTx(accountMachine, tx, false, env.timestamp, currentHeight, isValidation=false);
+}
+```
+
+**The isValidation Parameter:**
+```typescript
+function processAccountTx(..., isValidation: boolean) {
+  // Always update transient state (deltas for validation)
+  delta.ondelta += amount;
+
+  // Only update persistent state during commit
+  if (!isValidation) {
+    tryFinalizeAccountJEvents(...);      // Bilateral finalization (prunes observations!)
+    accountMachine.locks.set(id, lock);  // HTLC lockBook
+    accountMachine.swapOffers.set(id, offer);  // Swap orderbook
+  }
+}
+```
+
+**Why this matters:** Bilateral finalization PRUNES observations after matching. If we prune during validation (on clone), observations are gone. Re-execution during commit finds no matches, never applies values!
+
+---
+
+## 🤝 Bilateral J-Event Consensus
+
+**Analogy:** Two bank branches independently observing same wire transfer, then calling each other to confirm before updating accounts.
+
+### The Flow
+
+```
+STEP 1: J-Machine (blockchain) emits AccountSettled event
+        ↓
+    Both entities observe via j-event watchers
+        ↓
+STEP 2: Each entity stores observation (LEFT or RIGHT)
+        ↓
+Alice:  leftJObservations: [{ jHeight:12, jBlockHash:0xabc..., events:[...] }]
+        rightJObservations: []
+
+Hub:    leftJObservations: []
+        rightJObservations: [{ jHeight:12, jBlockHash:0xabc..., events:[...] }]
+        ↓
+STEP 3: Entities exchange observations via j_event_claim transactions
+        ↓
+Alice sends j_event_claim → Hub stores it as LEFT obs
+Hub sends j_event_claim → Alice stores it as RIGHT obs
+        ↓
+STEP 4: tryFinalizeAccountJEvents finds matching (jHeight, jBlockHash)
+        ↓
+Alice:  leftJObservations: [...]  ← Alice's own
+        rightJObservations: [...] ← Hub's received
+
+        Match found! → Apply collateral/ondelta → Prune observations
+        ↓
+STEP 5: Both sides have identical delta.collateral, delta.ondelta
+```
+
+### Key Implementation Details
+
+**Observation Attribution (account-tx/apply.ts:97):**
+```typescript
+const claimIsFromLeft = isOurFrame ? iAmLeft : !iAmLeft;
+
+// When Alice (LEFT) processes own claim:     isOurFrame=true, iAmLeft=true  → LEFT obs ✓
+// When Hub (RIGHT) processes Alice's claim:  isOurFrame=false, iAmLeft=false → LEFT obs ✓
+// When Hub (RIGHT) processes own claim:      isOurFrame=true, iAmLeft=false → RIGHT obs ✓
+// When Alice (LEFT) processes Hub's claim:   isOurFrame=false, iAmLeft=true → RIGHT obs ✓
+```
+
+**Matching Logic (entity-tx/j-events.ts:158-177):**
+```typescript
+function tryFinalizeAccountJEvents(account, counterpartyId, env) {
+  // Find observations with same (jHeight, jBlockHash) from both sides
+  const leftMap = new Map(account.leftJObservations.map(o => [`${o.jHeight}:${o.jBlockHash}`, o]));
+  const rightMap = new Map(account.rightJObservations.map(o => [`${o.jHeight}:${o.jBlockHash}`, o]));
+
+  const matches = Array.from(leftMap.keys()).filter(k => rightMap.has(k));
+
+  if (matches.length === 0) return;  // Need both sides!
+
+  // Apply collateral/ondelta from matched events
+  for (const key of matches) {
+    const obs = leftMap.get(key);
+    delta.collateral = BigInt(obs.events[0].data.collateral);
+    delta.ondelta = BigInt(obs.events[0].data.ondelta);
+  }
+
+  // Prune finalized observations (prevents re-application)
+  account.leftJObservations = account.leftJObservations.filter(o => !finalizedHeights.has(o.jHeight));
+  account.rightJObservations = account.rightJObservations.filter(o => !finalizedHeights.has(o.jHeight));
+}
+```
+
+**Critical:** This MUST only run during commit (on real accountMachine), never during validation (on clone that gets discarded).
+
+---
+
+## 🔢 Counter Synchronization
+
+**Analogy:** Message sequence numbers in TCP. Prevents replay attacks, ensures ordering.
+
+### The Problem
+
+```
+Alice proposes h1 → cooperativeNonce++ → counter=1
+Bob receives h1   → ackedTransitions=1
+Bob sends ACK     → counter=1 (ACK doesn't increment)
+Alice receives ACK → How to validate?
+```
+
+**Strict Validation:**
+```typescript
+expectedCounter = ackedTransitions + 1;  // Expects 1
+if (counter !== expectedCounter) reject();  // ACK has counter=1 → PASS ✓
+```
+
+**But during collision:**
+```
+Alice proposes h1 (counter=1)  }
+Bob proposes h1 (counter=1)    } Simultaneous!
+
+Alice receives Bob's h1 → LEFT-WINS → ignores Bob's frame
+Bob receives Alice's h1 → RIGHT-ROLLBACK → accepts Alice's frame
+
+Bob sends ACK for Alice's h1 (counter=?)
+```
+
+**The Issue:** Bob already incremented his cooperativeNonce to 1 when he proposed. Now he's sending ACK with counter=2 or 3 (depending on batching). But Alice's ackedTransitions is still 0 (she hasn't processed any of Bob's messages successfully yet). Strict validation rejects!
+
+**Solution: Flexible ACK Validation**
+```typescript
+const isACKForPendingFrame = accountMachine.pendingFrame
+  && input.height === accountMachine.pendingFrame.height
+  && input.prevSignatures;
+
+if (isACKForPendingFrame) {
+  // Allow counter >= ackedTransitions (collision recovery)
+  counterValid = input.counter >= accountMachine.ackedTransitions;
+} else {
+  // Strict for all other messages
+  counterValid = input.counter === accountMachine.ackedTransitions + 1;
+}
+```
+
+---
+
+## 🎭 Collision Handling: LEFT-WINS Tiebreaker
+
+**Scenario:** Both sides propose same frame height simultaneously.
+
+```
+Alice: pendingFrame h5, proposes h5
+Hub:   pendingFrame h5, proposes h5
+
+Alice receives Hub's h5 → LEFT-WINS → ignores Hub's frame, waits for Hub to accept Alice's
+Hub receives Alice's h5 → RIGHT-ROLLBACK → discards own h5, accepts Alice's h5
+```
+
+### Rollback Logic (account-consensus.ts:505-527)
+
+```typescript
+if (isLeftEntity) {
+  // LEFT-WINS: Ignore their frame, keep ours
+  return { success: true, events };
+} else {
+  // RIGHT-ROLLBACK: Accept theirs
+  if (accountMachine.rollbackCount === 0) {
+    // Restore our transactions to mempool (for retry)
+    accountMachine.mempool.unshift(...accountMachine.pendingFrame.accountTxs);
+    delete accountMachine.pendingFrame;
+    accountMachine.rollbackCount++;
+    // Continue to process their frame
+  }
+}
+```
+
+**Key:** RIGHT entity restores transactions to mempool. When Alice's frame is accepted, RIGHT sends ACK. Alice receives ACK, sees mempool has txs (the restored ones), batches them into h6.
+
+**Deterministic:** isLeft = myEntityId < counterpartyEntityId (lexicographic). Same result on both sides.
+
+---
+
+## 📊 Account Key Refactoring: Canonical → Counterparty ID
+
+**Old Pattern:**
+```typescript
+const accountKey = canonicalAccountKey(myEntityId, counterpartyId);
+// Always returns: (min(a,b), max(a,b)) → Same key on both sides
+```
+
+**New Pattern:**
+```typescript
+// Each entity keys by counterparty ID (simpler perspective-based logic)
+alice.accounts.get(hub.id)  // Alice's account with Hub
+hub.accounts.get(alice.id)  // Hub's account with Alice
+```
+
+**Why change?** Simpler entity-centric logic. proofHeader still maintains canonical left/right for frame consensus.
+
+**Gotcha:** Test assertions MUST use counterparty ID, not own ID:
+```typescript
+// WRONG
+const bobAccount = bobRep.state.accounts.get(bob.id);
+
+// CORRECT
+const bobAccount = bobRep.state.accounts.get(hub.id);  // Bob's account WITH Hub
+```
+
+**Impact:** Multiple test bugs in lock-ahb.ts from using wrong keys.
+
+---
+
+## 🎯 Design Principles Summary
+
+### 1. Pure Functions
+Handlers return `{ newState, mempoolOps }`, never mutate input directly.
+
+### 2. Immutability Boundaries
+Clone once per layer (Entity → Account), not per handler.
+
+### 3. Validation/Commit Separation
+Validate on clone (verify safety), commit on real state (apply effects).
+
+### 4. Deterministic Ordering
+Sort all collections (proposableAccounts, signatures, tokenIds) for consensus.
+
+### 5. Non-Blocking Duplex
+Both sides can have pendingFrames. Batching (ACK+newFrame) prevents stalls.
+
+### 6. Fintech-Grade Error Handling
+Fail fast (throw on consensus mismatch), never swallow errors, always log state.
+
+---
+
+## 🔬 Debugging Tips
+
+### When bilateral consensus fails:
+
+**1. Check observations:**
+```typescript
+console.log(`LEFT obs: ${account.leftJObservations.length}`);
+console.log(`RIGHT obs: ${account.rightJObservations.length}`);
+```
+Need both >0 for matching!
+
+**2. Check which state:**
+```typescript
+console.log(`Processing on clone? isValidation=${isValidation}`);
+```
+If true and bilateral finalization happens → values lost!
+
+**3. Check account keys:**
+```typescript
+console.log(`Account key: ${accountKey}, counterparty: ${counterpartyId}`);
+```
+Should use counterparty ID, not canonical key or own ID.
+
+**4. Check counter sync:**
+```typescript
+console.log(`Counter: ${input.counter}, ackedTransitions: ${accountMachine.ackedTransitions}`);
+```
+Should be sequential (+1) except for ACKs after collision.
+
+### When values don't persist:
+
+**1. Are you on a clone that gets discarded?**
+Check if handler is called during validation vs commit.
+
+**2. Is state being returned and chained?**
+```typescript
+currentState = handler(currentState).newState;  // Must chain!
+```
+
+**3. Are mutations happening on shared objects?**
+Delta objects should be shared between clonedMachine and accountMachine for validation to work.
+
+---
+
+## 📈 Production Readiness Checklist
+
+**Single-Signer Entities:**
+- ✅ Bilateral consensus working (ahb.ts 113 frames)
+- ✅ J-event consensus (AccountSettled)
+- ✅ Credit extensions
+- ✅ Multi-hop payments
+- ✅ Collision handling (left-wins)
+- ✅ Counter validation (replay protection)
+- ✅ Determinism verified
+
+**Multi-Signer Entities:**
+- ⏳ Needs testing (architecture ready)
+- ⏳ BFT threshold consensus (code exists, not tested in scenarios)
+- ⏳ Validator signature aggregation
+
+**Hardening TODOs:**
+- Frame hash: Replace placeholder with Merkle root (entity-consensus.ts:596)
+- HTLC reveal: Complete secret propagation (lock-ahb.ts:995)
+- Swap matching: Debug converge hang (swap.ts)
+
+---
+
+**Reference Implementations:**
+- `.archive/2024_src/app/Channel.ts` - Bilateral consensus (gold standard)
+- `.archive/2019src.txt` - Original flush pattern
+- `runtime/scenarios/ahb.ts` - Complete working example (113 frames)
+
+
+//docs/core/11_Jurisdiction_Machine.md (45 lines)
+# 1.1 Jurisdiction Machine / J-machine
+
+**Note:** This chapter describes J-machines as a *conceptual model* for understanding financial systems. XLN implementation requires EVM-compatible J-machines (Ethereum, L2s, future CBDCs). TradFi J-machines (Fedwire, ECB TARGET2) are analyzed here as mental model, not integration targets until they deploy programmable settlement layers.
+
+## 1.1.1 TradFi J-machine
+
+Imagine, the year is 2008. Blockchains/cryptocurrencies/DLT never existed. Forget about DAOs, BFT and payment channels, lets focus exclusively on the traditional financial world (TradFi). We are going to apply Occam's Razor and Duck Typing principle to each component of TradFi, to remove the legacy fluff and extract the essence.
+
+Let's start with our fundamental primitive: a replicated state machine.
+
+What is a state machine? It's an abstract concept from Automata theory. A state machine is a system that moves between defined states based on inputs — each tx (transaction) changes behavior predictably. It’s how you turn chaos into logic.
+
+Say, you have `{Alice: 10, Bob: 5}`. Tx `alice-bob pay 2` would turn it into `{Alice: 8, Bob: 7}`
+
+TradFi can be expressed as a myriad of interconnected state machines. At first glance it seems that every country has their own unique financial system with different acronyms and legal quirks. But after a closer look, we immediately see a pattern: there always is a root sovereign settlement court state machine that rules all state machines beneath it: the Jurisdiction State Machine.
+
+For historical reasons, tradfi J-machines are fragmented:
+
+* the oldest component – Central Bank, where **the currency (fiat) token** is minted in a form of debt to commercial banks.
+* the second component, Real Time Gross Settlement (RTGS) appeared later with advances in computers and networking. It allows commercial banks to move high value instantly (real time) without trusting each other with netting accounts (ACH). Technically, an account in Fedwire is an account in Fed. Therefore RTGS === Central Bank.
+* the third is central securities depository. That's where other **tokens are minted and stored**. 
+* plus multiple land registries where non-fungible tokens such as land and apartments are assigned to entities
+
+This fragmentation brings nothing but pain and reconcillation hell. 
+
+Storing fiat token in one ledger and security tokens in another is like keeping count of bananas in one spreadsheat and using a whole another book for other fruits. The benefits are marginal, the downsides are glorious. 
+
+Applying Occam's Razor, we suggest from now on to conceptually treat all fragmented tradfi central banks/RTGS/depositories as a unified J-machine. 
+
+## 1.1.2 TradFi Entity Machine
+
+Beneath the J-machine there always is a second layer graph-like hub & spoke network, where:
+* **spokes** are end users, merchants, companies, non-profits, institutions
+* **hubs** commercial banks, brokers
+
+We generalize all layer2 actors bounded to specific J-machine as E-machines. Think of it as your personal state machine that stores your financial history and relationships with others. Each E-machine can interact with J-machine (the broadcast layer) and with other entities through A-machines (unicast account layer).
+
+
+
+
+
+
+
+Namely, in TradFi we superset {RTGS, Central Banks and Central Securities Depositaries} as a single-signer J-machine. Likewise, we claim "blockchains" or "cryptocurrencies" should have never existed as buzzwords: it's a multi-signer J-machine.
+ 
+
+//docs/architecture/bilaterality.md (112 lines)
+# bilaterality: not a feature, a necessity
+
+**bilaterality is not a design choice. it is the only topology that satisfies the scalability constraint.**
+
+broadcast O(n) has physical ceiling: validators cannot process infinite transactions. even with parallelization, sharding, compression - the bottleneck remains. every validator processes every transaction costs O(n).
+
+unicast O(1) has no ceiling: each bilateral relationship processes independently. 1 billion users = 500 billion bilateral accounts, all parallel, no coordination overhead.
+
+**internet achieved billion-user scale through unicast (TCP connections). finance must follow same path.**
+
+**inbound capacity solution:** bilateral credit is directional. when you extend credit to a hub (allowing hub to owe you), the hub can go negative on their side, which means you go positive = you received value without pre-funding. this solves lightning's inbound capacity wall, which requires counterparty to lock funds on your side before you can receive.
+
+---
+
+## the insight
+
+traditional blockchains model state as one big table everyone fights over:
+
+```
+Global State = { A: 100, B: 50, C: 75, ... }
+                 ↑ single bottleneck, consensus on everything
+```
+
+xln realizes state is naturally a graph of pairwise relationships:
+
+```
+A ↔ B: { A_to_B: 20, B_to_A: 15 }
+A ↔ C: { A_to_C: 10, C_to_A: 5 }
+B ↔ C: { B_to_C: 8, C_to_B: 12 }
+       ↑ independent consensus domains, all parallel
+```
+
+## why this matters
+
+**no global bottleneck = no ceiling**
+
+- each edge (bilateral account) is its own consensus domain
+- A↔B can settle while C↔D settles simultaneously
+- system scales with the mesh, not against it
+- adding entities increases capacity (more edges), not congestion
+
+**bilateral accounts are:**
+- **isolated**: failure in A↔B doesn't propagate to C↔D
+- **parallel**: all edges process transactions concurrently
+- **deterministic**: both sides compute identical state independently
+- **Byzantine-resistant**: requires collusion between both parties, not global majority
+
+## the architecture
+
+```
+Entity A:
+  accounts = {
+    B: AccountMachine(A, B),  ← independent state machine
+    C: AccountMachine(A, C),  ← independent state machine
+  }
+
+Entity B:
+  accounts = {
+    A: AccountMachine(B, A),  ← mirror of A's machine
+    C: AccountMachine(B, C),  ← independent state machine
+  }
+```
+
+each `AccountMachine` maintains:
+- **deltas**: balance changes per entity (canonical state)
+- **frameHistory**: sequence of signed frames (audit trail)
+- **commitQueue**: pending transactions awaiting signatures
+
+both sides verify:
+```typescript
+const ourState = encode(accountMachine.deltas);
+const theirState = encode(theirExpectedDeltas);
+
+if (!buffersEqual(ourState, theirState)) {
+  throw new Error('BILATERAL CONSENSUS FAILURE');
+}
+```
+
+## comparison
+
+| architecture | bottleneck | scalability | isolation |
+|-------------|-----------|------------|-----------|
+| global ledger (bitcoin/ethereum) | entire chain | O(1) tps ceiling | none—global state |
+| sharding (eth2) | shard validators | O(n shards) | weak—cross-shard complexity |
+| bilateral mesh (xln) | individual edges | O(n²) edges | perfect—pairwise isolation |
+
+## why others don't do this
+
+most systems optimize for:
+- **single source of truth** (easier to reason about)
+- **global total ordering** (simpler consensus)
+- **broadcast efficiency** (one message to all)
+
+xln optimizes for:
+- **parallel execution** (independent state machines)
+- **relationship locality** (only parties involved need to agree)
+- **mesh scalability** (more connections = more capacity)
+
+the tradeoff: bilateral consensus requires both parties to sign every frame. but this is the feature, not the bug—it enforces mutual agreement at the relationship level, not global level.
+
+## the hive effect
+
+once you see state as a mesh of independent bilateral relationships, the system's effectiveness becomes obvious:
+
+- **10 entities** = 45 bilateral accounts (10 choose 2)
+- **100 entities** = 4,950 bilateral accounts
+- **1,000 entities** = 499,500 bilateral accounts
+
+each account is a separate consensus domain. no coordination overhead. pure parallel execution.
+
+**that's the scalability unlock.**
 

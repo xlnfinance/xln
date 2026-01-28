@@ -308,8 +308,8 @@ const run = async () => {
     /FATAL/i,
   ];
 
-  await waitForLineOrError(bob, /P2P_PROFILE_SENT/, errorMatchers);
-  await waitForLineOrError(alice, /P2P_PROFILE_SENT/, errorMatchers);
+  await waitForLineOrError(bob, /P2P_PROFILE_ANNOUNCE/, errorMatchers);
+  await waitForLineOrError(alice, /P2P_PROFILE_ANNOUNCE/, errorMatchers);
 
   await waitForLineOrError(hub, /P2P_GOSSIP_READY/, errorMatchers);
   await waitForLineOrError(bob, /P2P_HUB_PROFILE_READY/, errorMatchers);

@@ -10,7 +10,7 @@
  */
 
 import type { Env } from '../types';
-import { getPerfMs } from '../time';
+import { getPerfMs } from '../utils';
 import { scenarioRegistry, type ScenarioEntry } from './index';
 import { assertRuntimeIdle } from './helpers';
 

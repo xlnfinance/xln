@@ -75,39 +75,6 @@ const bufferAlloc = (size: number, fill?: number): Buffer => {
 // === REAL ETHEREUM SIGNATURES ===
 
 /**
- * Create REAL Ethereum signature using secp256k1
- */
-export async function createRealSignature(hash: Buffer, privateKey: Buffer): Promise<Buffer> {
-  try {
-    // Create wallet from private key
-    const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
-
-    // Sign the hash (ethers automatically prefixes with \x19Ethereum Signed Message)
-    // For raw hash signing without prefix, we need to use wallet._signingKey
-    const signature = await wallet.signMessage(ethers.getBytes(hash));
-
-    // Parse signature components
-    const sig = ethers.Signature.from(signature);
-
-    // Convert to 65-byte format (r + s + v)
-    const r = ethers.getBytes(sig.r);
-    const s = ethers.getBytes(sig.s);
-    const v = sig.v;
-
-    // Ensure r and s are 32 bytes each
-    const rPadded = new Uint8Array(32);
-    const sPadded = new Uint8Array(32);
-    rPadded.set(r, 32 - r.length);
-    sPadded.set(s, 32 - s.length);
-
-    return bufferConcat([Buffer.from(rPadded), Buffer.from(sPadded), Buffer.from([v])]);
-  } catch (error) {
-    console.error(`❌ Failed to create signature: ${error}`);
-    throw error;
-  }
-};
-
-/**
  * Create DIRECT hash signature (no message prefix)
  * This matches what Solidity ecrecover expects
  */

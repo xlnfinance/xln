@@ -5480,10 +5480,23 @@ let vrHammer: VRHammer | null = null;
     showMiniPanel = false;
   }
 
-  // Handle mini panel actions
+  // Handle mini panel actions (R2R, R2C quick buttons)
   function handleMiniPanelAction(event: CustomEvent) {
     const { type, entityId } = event.detail;
-    // TODO: Open full operations panel or execute quick action
+    console.log(`[Graph3D] Mini panel action: ${type} for entity ${entityId}`);
+
+    // Get entity name for display
+    const entityName = getEntityName(entityId);
+
+    // Open full operations panel with the action type
+    // @ts-ignore - emit exists on panelBridge
+    panelBridge.emit('openEntityOperations', {
+      entityId,
+      entityName,
+      signerId: findSignerForEntity(entityId),
+      action: type // 'r2r' or 'r2c'
+    });
+    showMiniPanel = false;
   }
 
   // Handle open full panel

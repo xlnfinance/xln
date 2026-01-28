@@ -100,8 +100,16 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
 
     runtimeOperations.setLocalRuntimeMetadata(meta);
 
-    // REMOVED: setRuntimeSeed() - now passed via env to pure functions
-    // All crypto functions read seed from env.runtimeSeed, not global state
+    // Sync runtime seed to enable P2P (P2P needs runtimeId derived from seed)
+    if (runtime?.seed) {
+      import('$lib/stores/xlnStore').then(async ({ getXLN }) => {
+        const xln = await getXLN();
+        if (xln.setRuntimeSeed) {
+          xln.setRuntimeSeed(runtime.seed);
+          console.log('[VaultStore] P2P: Runtime seed synced, P2P should connect');
+        }
+      }).catch(err => console.warn('[VaultStore] Failed to sync P2P seed:', err));
+    }
 
     void fundRuntimeSignersInBrowserVM(runtime);
     },
@@ -182,17 +190,17 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
     console.log('[VaultStore.createRuntime] Runtime seed stored in env.runtimeSeed (pure)');
     // All crypto functions now read from env.runtimeSeed, not global state
 
-    // Get SINGLETON jurisdiction (shared across all components)
-    console.log('[VaultStore.createRuntime] Getting jurisdiction singleton...');
-    const { getJurisdiction } = await import('@xln/runtime/jurisdiction');
-    const jurisdiction = await getJurisdiction({ type: 'browser', chainId: 1337 });
-    // For legacy compatibility, store underlying EVM provider in env
-    const browserVM = (jurisdiction as any).getEVM();
-    newEnv.browserVM = browserVM.getProvider();
-    console.log('[VaultStore.createRuntime] ✅ Jurisdiction ready:', jurisdiction.depositoryAddress.slice(0, 10));
+    // Get SINGLETON jurisdiction via BrowserVMProvider (shared across all components)
+    console.log('[VaultStore.createRuntime] Initializing BrowserVMProvider...');
+    const { BrowserVMProvider } = await import('@xln/runtime/jadapter');
+    const browserVM = new BrowserVMProvider();
+    await browserVM.init();
+    newEnv.browserVM = browserVM;
+    const depositoryAddress = browserVM.getDepositoryAddress();
+    console.log('[VaultStore.createRuntime] ✅ BrowserVM ready:', depositoryAddress.slice(0, 10));
 
     // Set BrowserVM jurisdiction (updates DEFAULT_JURISDICTIONS for this env)
-    await xln.setBrowserVMJurisdiction(newEnv, jurisdiction.depositoryAddress, browserVM.getProvider());
+    await xln.setBrowserVMJurisdiction(newEnv, depositoryAddress, browserVM);
 
     // === MVP: Create entity and fund with $1000 USDC ===
     console.log('[VaultStore.createRuntime] Creating user entity...');
@@ -201,17 +209,18 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
 
     // Create entity config (single-signer, threshold 1)
     const signerAddress = firstAddress;
+    const entityProviderAddress = browserVM.getEntityProviderAddress();
     const entityConfig = {
       mode: 'proposer-based' as const,
       threshold: 1n,
       validators: [signerAddress],
       shares: { [signerAddress]: 1n },
       jurisdiction: {
-        address: jurisdiction.depositoryAddress,
+        address: depositoryAddress,
         name: 'Simnet',
         chainId: 1337,
-        entityProviderAddress: jurisdiction.entityProviderAddress,
-        depositoryAddress: jurisdiction.depositoryAddress,
+        entityProviderAddress: entityProviderAddress,
+        depositoryAddress: depositoryAddress,
       }
     };
 
@@ -234,15 +243,15 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
       entityInputs: []
     });
 
-    // Fund entity with 3 tokens for demo (uses jurisdiction abstraction)
+    // Fund entity with 3 tokens for demo (uses browserVM directly)
     const ONE_TOKEN = 1000000000000000000n; // 10^18
 
     // USDC: $1000
-    await jurisdiction.debugFundReserves(entityId, 1, 1000n * ONE_TOKEN);
+    await browserVM.debugFundReserves(entityId, 1, 1000n * ONE_TOKEN);
     // WETH: 0.5 ETH (~$1500)
-    await jurisdiction.debugFundReserves(entityId, 2, ONE_TOKEN / 2n);
+    await browserVM.debugFundReserves(entityId, 2, ONE_TOKEN / 2n);
     // USDT: $500
-    await jurisdiction.debugFundReserves(entityId, 3, 500n * ONE_TOKEN);
+    await browserVM.debugFundReserves(entityId, 3, 500n * ONE_TOKEN);
     console.log('[VaultStore.createRuntime] ✅ Funded entity with USDC/WETH/USDT');
 
     // Store entityId in signer
@@ -504,16 +513,17 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         // REMOVED: setRuntimeSeed() - seed stored in env.runtimeSeed (pure)
         // All crypto functions now read from env.runtimeSeed, not global state
 
-        // Get SINGLETON jurisdiction (shared across all components)
-        console.log('[VaultStore.initialize] Getting jurisdiction singleton...');
-        const { getJurisdiction } = await import('@xln/runtime/jurisdiction');
-        const jurisdiction = await getJurisdiction({ type: 'browser', chainId: 1337 });
-        const browserVM = (jurisdiction as any).getEVM();
-        newEnv.browserVM = browserVM.getProvider();
-        console.log('[VaultStore.initialize] ✅ Jurisdiction ready:', jurisdiction.depositoryAddress.slice(0, 10));
+        // Get SINGLETON jurisdiction via BrowserVMProvider (shared across all components)
+        console.log('[VaultStore.initialize] Initializing BrowserVMProvider...');
+        const { BrowserVMProvider } = await import('@xln/runtime/jadapter');
+        const browserVM = new BrowserVMProvider();
+        await browserVM.init();
+        newEnv.browserVM = browserVM;
+        const depositoryAddress = browserVM.getDepositoryAddress();
+        console.log('[VaultStore.initialize] ✅ BrowserVM ready:', depositoryAddress.slice(0, 10));
 
         // Set BrowserVM jurisdiction
-        await xln.setBrowserVMJurisdiction(newEnv, jurisdiction.depositoryAddress, browserVM.getProvider());
+        await xln.setBrowserVMJurisdiction(newEnv, depositoryAddress, browserVM);
 
         runtimes.update(r => {
           r.set(runtimeId, {

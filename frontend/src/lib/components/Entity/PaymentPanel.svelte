@@ -3,97 +3,66 @@
   import { getXLN, xlnEnvironment, replicas, xlnFunctions, processWithDelay } from '../../stores/xlnStore';
   import { routePreview } from '../../stores/routePreviewStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
+  import EntityInput from '../shared/EntityInput.svelte';
+  import TokenSelect from '../shared/TokenSelect.svelte';
 
   export let entityId: string;
+  export let contacts: Array<{ name: string; entityId: string }> = [];
 
-  // Optional isolated mode props (legacy - for backward compatibility)
+  // Optional isolated mode props (legacy)
   export let isolatedEnv: Writable<any> | undefined = undefined;
   export let isolatedReplicas: Writable<Map<string, any>> | undefined = undefined;
 
-  // Get environment from context (for /view route) or use global stores (for / route)
+  // Context
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
-
-  // Extract the stores from entityEnv (or use props/global stores as fallback)
   const contextReplicas = entityEnv?.eReplicas;
   const contextXlnFunctions = entityEnv?.xlnFunctions;
   const contextEnv = entityEnv?.env;
 
-  // Payment form state
+  // Form state
   let targetEntityId = '';
   let amount = '';
-  let tokenId = 1; // Default to first token (ETH)
+  let tokenId = 1;
   let description = '';
   let findingRoutes = false;
   let sendingPayment = false;
   let routes: any[] = [];
   let selectedRouteIndex = -1;
 
-  // Reactive: Use context stores first, then props, then global stores
+  // Reactive stores
   $: currentReplicas = contextReplicas ? $contextReplicas : (isolatedReplicas ? $isolatedReplicas : $replicas);
   $: currentEnv = contextEnv ? $contextEnv : (isolatedEnv ? $isolatedEnv : $xlnEnvironment);
   $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
 
-  // Auto-select first available token from entity's reserves
-  $: {
-    const replica = currentReplicas?.get(`${entityId}:1`) || currentReplicas?.get(`${entityId}:2`);
-    if (replica?.state?.reserves) {
-      const availableTokens = Array.from(replica.state.reserves.keys());
-      if (availableTokens.length > 0 && !availableTokens.includes(tokenId)) {
-        const firstToken = availableTokens[0];
-        if (firstToken !== undefined) {
-          tokenId = firstToken as number; // Use first available
-        }
-      }
-    }
-  }
-
-  // Auto-calculate routes when target and amount change
-  $: if (targetEntityId && amount && !findingRoutes) {
-    findRoutes();
-  }
-
-  // Show route preview when route selected
-  $: if (selectedRouteIndex >= 0 && routes[selectedRouteIndex]) {
-    routePreview.showRoute(routes[selectedRouteIndex].path);
-  } else {
-    routePreview.clear();
-  }
-
-  // Get all entities for dropdown - guaranteed non-null entity IDs
+  // All entities for dropdown
   $: allEntities = currentReplicas ? Array.from(currentReplicas.keys() as IterableIterator<string>)
-    .map((key: string) => {
-      const entityId = key.split(':')[0];
-      if (!entityId) throw new Error(`Invalid replica key format: ${key}`);
-      return entityId;
-    })
-    .filter((id: string, index: number, self: string[]) =>
-      self.indexOf(id) === index && id !== entityId
-    )
+    .map((key: string) => key.split(':')[0]!)
+    .filter((id: string, index: number, self: string[]) => self.indexOf(id) === index)
     .sort() : [];
 
-  /**
-   * Find paths through the network using actual account connections (BFS)
-   * Replaces gossip-based pathfinding with ground truth from entity states
-   */
+  // Format short ID
+  function formatShortId(id: string): string {
+    if (!id) return '';
+    if (activeXlnFunctions?.getEntityShortId) {
+      return '#' + activeXlnFunctions.getEntityShortId(id);
+    }
+    return '#' + id.slice(-4).toUpperCase();
+  }
+
+  // Find paths through accounts (BFS)
   function findPathsThroughAccounts(replicas: Map<string, any>, startId: string, targetId: string): Array<{ path: string[], probability: number }> {
-    // Build adjacency map from actual accounts
     const adjacency = new Map<string, Set<string>>();
 
     for (const [replicaKey, replica] of replicas.entries()) {
-      const [entityId] = replicaKey.split(':');
-      if (!entityId || !replica.state?.accounts) continue;
+      const [entId] = replicaKey.split(':');
+      if (!entId || !replica.state?.accounts) continue;
 
-      if (!adjacency.has(entityId)) {
-        adjacency.set(entityId, new Set());
-      }
-
-      // Add all counterparties this entity has accounts with
+      if (!adjacency.has(entId)) adjacency.set(entId, new Set());
       for (const counterpartyId of replica.state.accounts.keys()) {
-        adjacency.get(entityId)!.add(String(counterpartyId));
+        adjacency.get(entId)!.add(String(counterpartyId));
       }
     }
 
-    // BFS to find all paths (up to max depth 5)
     const maxDepth = 5;
     const foundPaths: Array<{ path: string[], probability: number }> = [];
     const queue: Array<{ current: string, path: string[], depth: number }> = [
@@ -103,13 +72,9 @@
 
     while (queue.length > 0 && foundPaths.length < 5) {
       const { current, path, depth } = queue.shift()!;
-
       if (depth > maxDepth) continue;
       if (current === targetId) {
-        foundPaths.push({
-          path: path,
-          probability: 1.0 / (path.length - 1), // Shorter path = higher probability
-        });
+        foundPaths.push({ path, probability: 1.0 / (path.length - 1) });
         continue;
       }
 
@@ -122,16 +87,11 @@
 
       for (const neighbor of neighbors) {
         if (!path.includes(neighbor)) {
-          queue.push({
-            current: neighbor,
-            path: [...path, neighbor],
-            depth: depth + 1,
-          });
+          queue.push({ current: neighbor, path: [...path, neighbor], depth: depth + 1 });
         }
       }
     }
 
-    // Sort by path length (shortest first)
     return foundPaths.sort((a, b) => a.path.length - b.path.length);
   }
 
@@ -147,65 +107,41 @@
       const env = currentEnv;
       if (!env) throw new Error('Environment not ready');
 
-      // Convert decimal amount to smallest unit (wei/cents)
-      // Assuming 18 decimals for most tokens
+      // Parse amount
       const decimals = 18;
-      const amountStr = String(amount); // Ensure it's a string
-      const amountParts = amountStr.split('.');
+      const amountParts = String(amount).split('.');
       const wholePart = BigInt(amountParts[0] || 0);
-      const decimalPart = amountParts[1] || '';
-      const paddedDecimal = decimalPart.padEnd(decimals, '0').slice(0, decimals);
-      const amountInSmallestUnit = wholePart * BigInt(10 ** decimals) + BigInt(paddedDecimal || 0);
+      const decimalPart = (amountParts[1] || '').padEnd(decimals, '0').slice(0, decimals);
+      const amountInSmallestUnit = wholePart * BigInt(10 ** decimals) + BigInt(decimalPart || 0);
 
-      // Use account-based pathfinding (replaces gossip)
-      // Use time-aware replicas from context/props (currentReplicas already handles priority)
       if (!currentReplicas) throw new Error('Replicas not available');
       const foundPaths = findPathsThroughAccounts(currentReplicas, entityId, targetEntityId);
 
       if (foundPaths.length === 0) {
-        throw new Error(`No route found from ${entityId.slice(0, 10)}... to ${targetEntityId.slice(0, 10)}...`);
+        throw new Error(`No route found to ${formatShortId(targetEntityId)}`);
       }
 
-      // Convert found paths to route objects
       routes = foundPaths.map((pathInfo) => {
-        const hops = [];
-        let totalFeePPM = 0;
-
-        for (let i = 0; i < pathInfo.path.length - 1; i++) {
-          const from = pathInfo.path[i]!;
-          const to = pathInfo.path[i + 1]!;
-          const feePPM = 0; // No fees for now (can be added later from account settings)
-
-          hops.push({
-            from,
-            to,
-            fee: 0n,
-            feePPM,
-          });
-
-          totalFeePPM += feePPM;
-        }
-
-        // Estimate total fee (zero for now)
-        const estimatedTotalFee = 0n;
+        const hops = pathInfo.path.slice(0, -1).map((from, i) => ({
+          from,
+          to: pathInfo.path[i + 1]!,
+          fee: 0n,
+          feePPM: 0,
+        }));
 
         return {
           path: pathInfo.path,
           hops,
-          totalFee: estimatedTotalFee,
-          totalAmount: amountInSmallestUnit + estimatedTotalFee,
+          totalFee: 0n,
+          totalAmount: amountInSmallestUnit,
           probability: pathInfo.probability,
         };
       });
 
-      if (routes.length > 0) {
-        selectedRouteIndex = 0; // Auto-select first route
-      }
+      if (routes.length > 0) selectedRouteIndex = 0;
     } catch (error) {
-      console.error('❌ Failed to find routes - Full error:', error);
-      console.error('❌ Error message:', (error as Error)?.message || 'Unknown error');
-      console.error('❌ Stack:', (error as Error)?.stack);
-      alert(`Failed to find routes: ${(error as Error)?.message || 'Unknown error'}`);
+      console.error('[Send] Route finding failed:', error);
+      alert(`Failed: ${(error as Error)?.message}`);
     } finally {
       findingRoutes = false;
     }
@@ -216,24 +152,22 @@
 
     sendingPayment = true;
     try {
-      await getXLN(); // Ensure initialized
+      await getXLN();
       const env = currentEnv;
       if (!env) throw new Error('Environment not ready');
 
       const route = routes[selectedRouteIndex];
 
-      // Find the correct signer ID for this entity
-      // Use time-aware replicas from context/props (currentReplicas already handles priority)
-      let signerId = '1'; // default
+      // Find signer
+      let signerId = '1';
       if (!currentReplicas) throw new Error('Replicas not available');
       for (const key of currentReplicas.keys()) {
         if (key.startsWith(entityId + ':')) {
-          signerId = key.split(':')[1];
+          signerId = key.split(':')[1]!;
           break;
         }
       }
 
-      // Create DirectPayment EntityTx
       const paymentInput = {
         entityId,
         signerId,
@@ -242,7 +176,7 @@
           data: {
             targetEntityId,
             tokenId,
-            amount: route.totalAmount, // Use the converted amount from route
+            amount: route.totalAmount,
             route: route.path,
             description: description || undefined,
           },
@@ -250,95 +184,60 @@
       };
 
       await processWithDelay(env, [paymentInput]);
-      console.log(`✅ Payment sent via route: ${route.path.join(' → ')}`);
+      console.log('[Send] Payment sent via:', route.path.map(formatShortId).join(' -> '));
 
-      // Don't reset form - allow easy repeat payments
-      // User can manually clear if needed
       routes = [];
       selectedRouteIndex = -1;
     } catch (error) {
-      console.error('❌ Failed to send payment - Full error:', error);
-      console.error('❌ Error message:', (error as Error)?.message || 'Unknown error');
-      console.error('❌ Stack:', (error as Error)?.stack);
-      alert(`Failed to send payment: ${(error as Error)?.message || 'Unknown error'}`);
+      console.error('[Send] Payment failed:', error);
+      alert(`Failed: ${(error as Error)?.message}`);
     } finally {
       sendingPayment = false;
     }
   }
 
-  function formatRoute(route: any): string {
-    return route.path.map((id: string) => `E${activeXlnFunctions!.getEntityShortId(id)}`).join(' → ');
+  function handleTargetChange(e: CustomEvent) {
+    targetEntityId = e.detail.value;
   }
 
-  function formatFee(feePPM: number): string {
-    return `${(feePPM / 10000).toFixed(2)}%`;
+  function handleTokenChange(e: CustomEvent) {
+    tokenId = e.detail.value;
   }
 </script>
 
 <div class="payment-panel">
-  <h3>Send Payment</h3>
+  <EntityInput
+    label="Recipient"
+    value={targetEntityId}
+    entities={allEntities}
+    {contacts}
+    excludeId={entityId}
+    placeholder="Select recipient..."
+    disabled={findingRoutes || sendingPayment}
+    on:change={handleTargetChange}
+  />
 
-  <div class="form-group">
-    <label for="target">Target Entity</label>
-    <div class="entity-select-row">
-      <select
-        id="target"
-        bind:value={targetEntityId}
-        disabled={findingRoutes || sendingPayment}
-      >
-        <option value="">Select entity...</option>
-        {#each allEntities as id}
-          <option value={id}>Entity {activeXlnFunctions?.formatEntityId(id)}</option>
-        {/each}
-      </select>
-      <button
-        class="btn-reverse"
-        on:click={() => {
-          // Show target entity info (for reverse payment, user clicks target entity in graph)
-          if (targetEntityId && activeXlnFunctions) {
-            const targetDisplay = activeXlnFunctions.formatEntityId(targetEntityId);
-            alert(`To send reverse payment: Click Entity ${targetDisplay} in the graph`);
-          }
-        }}
-        disabled={!targetEntityId || findingRoutes || sendingPayment}
-        title="Reverse payment direction"
-      >
-        ⇄
-      </button>
-    </div>
-  </div>
-
-  <div class="form-row">
-    <div class="form-group">
-      <label for="amount">Amount</label>
+  <div class="row">
+    <div class="amount-field">
+      <label>Amount</label>
       <input
-        id="amount"
-        type="number"
+        type="text"
         bind:value={amount}
         placeholder="0.00"
-        min="0"
-        step="0.01"
         disabled={findingRoutes || sendingPayment}
       />
     </div>
-
-    <div class="form-group">
-      <label for="token">Token</label>
-      <select
-        id="token"
-        bind:value={tokenId}
-        disabled={findingRoutes || sendingPayment}
-      >
-        <option value={1}>ETH</option>
-        <option value={2}>USDC</option>
-      </select>
-    </div>
+    <TokenSelect
+      label="Token"
+      value={tokenId}
+      disabled={findingRoutes || sendingPayment}
+      on:change={handleTokenChange}
+    />
   </div>
 
-  <div class="form-group">
-    <label for="description">Description (optional)</label>
+  <div class="field">
+    <label>Description (optional)</label>
     <input
-      id="description"
       type="text"
       bind:value={description}
       placeholder="Payment for..."
@@ -347,54 +246,41 @@
   </div>
 
   <button
-    class="btn-primary"
+    class="btn-find"
     on:click={findRoutes}
     disabled={!targetEntityId || !amount || findingRoutes || sendingPayment}
   >
-    {#if findingRoutes}
-      Finding Routes...
-    {:else}
-      Find Routes
-    {/if}
+    {findingRoutes ? 'Finding Routes...' : 'Find Routes'}
   </button>
 
   {#if routes.length > 0}
-    <div class="routes-section">
-      <h4>Available Routes ({routes.length})</h4>
-      <div class="routes-list">
-        {#each routes as route, index}
-          <label class="route-option">
-            <input
-              type="radio"
-              bind:group={selectedRouteIndex}
-              value={index}
-              disabled={sendingPayment}
-            />
-            <div class="route-details">
-              <div class="route-path">{formatRoute(route)}</div>
-              <div class="route-info">
-                <span class="hops">{route.hops.length} hop{route.hops.length !== 1 ? 's' : ''}</span>
-                <span class="fee">Fee: {formatFee(route.hops[0]?.feePPM || 0)}</span>
-                <span class="probability">Success: {(route.probability * 100).toFixed(0)}%</span>
-              </div>
-              {#if route.warning}
-                <div class="route-warning">⚠️ {route.warning}</div>
-              {/if}
-            </div>
-          </label>
-        {/each}
-      </div>
+    <div class="routes">
+      <h4>Routes ({routes.length})</h4>
+      {#each routes as route, index}
+        <label class="route-option" class:selected={selectedRouteIndex === index}>
+          <input
+            type="radio"
+            bind:group={selectedRouteIndex}
+            value={index}
+            disabled={sendingPayment}
+          />
+          <div class="route-info">
+            <span class="route-path">
+              {route.path.map(formatShortId).join(' -> ')}
+            </span>
+            <span class="route-meta">
+              {route.hops.length} hop{route.hops.length !== 1 ? 's' : ''} | {(route.probability * 100).toFixed(0)}% success
+            </span>
+          </div>
+        </label>
+      {/each}
 
       <button
         class="btn-send"
         on:click={sendPayment}
         disabled={selectedRouteIndex < 0 || sendingPayment}
       >
-        {#if sendingPayment}
-          Sending Payment...
-        {:else}
-          Send Payment
-        {/if}
+        {sendingPayment ? 'Sending...' : 'Send Payment'}
       </button>
     </div>
   {/if}
@@ -402,193 +288,152 @@
 
 <style>
   .payment-panel {
-    padding: 16px;
-    background: #1e1e1e;
-    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
   }
 
-  h3 {
-    margin: 0 0 16px 0;
-    color: #007acc;
-    font-size: 1.1em;
-  }
-
-  h4 {
-    margin: 16px 0 8px 0;
-    color: #007acc;
-    font-size: 0.95em;
-  }
-
-  .form-group {
-    margin-bottom: 12px;
-  }
-
-  .form-row {
+  .row {
     display: grid;
-    grid-template-columns: 2fr 1fr;
+    grid-template-columns: 1fr auto;
     gap: 12px;
+    align-items: end;
+  }
+
+  .field, .amount-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
 
   label {
-    display: block;
-    margin-bottom: 4px;
-    color: #9d9d9d;
-    font-size: 0.85em;
+    font-size: 11px;
+    font-weight: 500;
+    color: #78716c;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
   }
 
-  input, select {
+  input {
+    padding: 12px 14px;
+    background: #1c1917;
+    border: 1px solid #292524;
+    border-radius: 8px;
+    color: #e7e5e4;
+    font-size: 14px;
+    font-family: inherit;
     width: 100%;
-    padding: 6px;
-    background: #2d2d2d;
-    border: 1px solid #3e3e3e;
-    border-radius: 4px;
-    color: #d4d4d4;
-    font-size: 0.9em;
+    box-sizing: border-box;
   }
 
-  input:focus, select:focus {
+  input:focus {
     outline: none;
-    border-color: #007acc;
+    border-color: #fbbf24;
   }
 
-  input:disabled, select:disabled {
+  input::placeholder {
+    color: #57534e;
+  }
+
+  input:disabled {
     opacity: 0.5;
-    cursor: not-allowed;
   }
 
-  .btn-primary, .btn-send {
-    width: 100%;
-    padding: 8px;
-    background: #007acc;
+  .btn-find, .btn-send {
+    padding: 14px;
     border: none;
-    border-radius: 4px;
-    color: white;
-    font-size: 0.9em;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
     cursor: pointer;
-    transition: background 0.2s;
+    transition: all 0.15s;
   }
 
-  .btn-primary:hover:not(:disabled), .btn-send:hover:not(:disabled) {
-    background: #0086e6;
+  .btn-find {
+    background: #1c1917;
+    border: 1px solid #292524;
+    color: #a8a29e;
   }
 
-  .btn-primary:disabled, .btn-send:disabled {
+  .btn-find:hover:not(:disabled) {
+    border-color: #fbbf24;
+    color: #fbbf24;
+  }
+
+  .btn-find:disabled {
     opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .entity-select-row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .entity-select-row select {
-    flex: 1;
-  }
-
-  .btn-reverse {
-    padding: 8px 12px;
-    background: rgba(100, 100, 110, 0.3);
-    border: 1px solid rgba(150, 150, 160, 0.4);
-    border-radius: 4px;
-    color: #e0e0e0;
-    font-size: 18px;
-    cursor: pointer;
-    transition: all 0.2s;
-    min-width: 40px;
-  }
-
-  .btn-reverse:hover:not(:disabled) {
-    background: rgba(150, 150, 160, 0.5);
-    transform: scale(1.1);
-  }
-
-  .btn-reverse:disabled {
-    opacity: 0.3;
     cursor: not-allowed;
   }
 
   .btn-send {
-    background: #10b981;
+    background: linear-gradient(135deg, #15803d, #166534);
+    color: #dcfce7;
     margin-top: 12px;
   }
 
   .btn-send:hover:not(:disabled) {
-    background: #059669;
+    background: linear-gradient(135deg, #16a34a, #15803d);
   }
 
-  .routes-section {
-    margin-top: 16px;
+  .btn-send:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .routes {
     padding-top: 16px;
-    border-top: 1px solid #3e3e3e;
+    border-top: 1px solid #292524;
   }
 
-  .routes-list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-bottom: 12px;
+  .routes h4 {
+    font-size: 12px;
+    font-weight: 500;
+    color: #78716c;
+    margin: 0 0 12px 0;
   }
 
   .route-option {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
-    padding: 8px;
-    background: #2d2d2d;
-    border: 1px solid #3e3e3e;
-    border-radius: 4px;
+    gap: 10px;
+    padding: 12px;
+    background: #1c1917;
+    border: 1px solid #292524;
+    border-radius: 8px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: all 0.15s;
+    margin-bottom: 8px;
   }
 
   .route-option:hover {
-    background: #333;
-    border-color: #007acc;
+    border-color: #44403c;
   }
 
-  input[type="radio"] {
+  .route-option.selected {
+    border-color: #fbbf24;
+    background: #422006;
+  }
+
+  .route-option input[type="radio"] {
     width: auto;
     margin-top: 2px;
   }
 
-  .route-details {
+  .route-info {
     flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .route-path {
-    font-family: monospace;
-    color: #d4d4d4;
-    margin-bottom: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: #e7e5e4;
   }
 
-  .route-info {
-    display: flex;
-    gap: 12px;
-    font-size: 0.8em;
-    color: #9d9d9d;
-  }
-
-  .hops {
-    color: #007acc;
-  }
-
-  .fee {
-    color: #fbbf24;
-  }
-
-  .probability {
-    color: #10b981;
-  }
-
-  .route-warning {
-    margin-top: 4px;
-    padding: 4px;
-    background: rgba(251, 191, 36, 0.1);
-    border: 1px solid rgba(251, 191, 36, 0.3);
-    border-radius: 2px;
-    color: #fbbf24;
-    font-size: 0.8em;
+  .route-meta {
+    font-size: 11px;
+    color: #78716c;
   }
 </style>

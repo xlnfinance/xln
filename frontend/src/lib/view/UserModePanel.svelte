@@ -14,6 +14,7 @@
   import { writable, get } from 'svelte/store';
   import { activeVault, vaultOperations, allVaults } from '$lib/stores/vaultStore';
   import { entityPositions, xlnFunctions, xlnInstance, getXLN } from '$lib/stores/xlnStore';
+  import { jmachineOperations } from '$lib/stores/jmachineStore';
   import { runtimes, activeRuntimeId } from '$lib/stores/runtimeStore';
   import { appStateOperations } from '$lib/stores/appStateStore';
   import { panelBridge } from '$lib/view/utils/panelBridge';
@@ -24,14 +25,15 @@
 
   import EntityDropdown from '$lib/components/Entity/EntityDropdown.svelte';
   import AccountDropdown from '$lib/components/Entity/AccountDropdown.svelte';
-  import EntityPanel from '$lib/components/Entity/EntityPanel.svelte';
+  import EntityPanelTabs from '$lib/components/Entity/EntityPanelTabs.svelte';
   import AccountPanel from '$lib/components/Entity/AccountPanel.svelte';
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
-  import BrainVaultView from '$lib/components/Views/BrainVaultView.svelte';
+  import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
   import WalletView from '$lib/components/Wallet/WalletView.svelte';
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
-  import EntityFormation from '$lib/components/Formation/EntityFormation.svelte';
+  import FormationPanel from '$lib/components/Entity/FormationPanel.svelte';
   import WalletSettings from '$lib/components/Settings/WalletSettings.svelte';
+  import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
   import { Settings } from 'lucide-svelte';
 
   interface Props {
@@ -69,9 +71,10 @@
   let selectedSignerId = $state<string | null>(null);
   let selectedAccountId = $state<string | null>(null);
   let selectedJurisdictionName = $state<string | null>(null);
-  let isCreatingJMachine = false;
-  let showEntityFormation = $state(false);
-  let showSettings = $state(false);
+  let isCreatingJMachine = false; // Stays true on failure to prevent retry
+  // Inline panels - NO POPUPS! All panels are inline for desktop/mobile
+  type InlinePanel = 'none' | 'formation' | 'add-jmachine' | 'settings';
+  let activeInlinePanel = $state<InlinePanel>('none');
   const selfEntityChecked = new Set<string>();
   const selfEntityInFlight = new Set<string>();
 
@@ -115,6 +118,7 @@
       selectedJurisdictionName = null;
       selfEntityChecked.clear();
       selfEntityInFlight.clear();
+      isCreatingJMachine = false; // Allow attempt for new runtime
     }
     lastRuntimeId = activeRuntime.id;
   });
@@ -129,6 +133,7 @@
       selectedJurisdictionName = null;
       selfEntityChecked.clear();
       selfEntityInFlight.clear();
+      isCreatingJMachine = false; // Allow attempt for new vault
     }
     lastVaultId = currentVaultId;
   });
@@ -226,7 +231,7 @@
   async function createJMachineInEnv(env: any): Promise<string | null> {
     if (!env || isCreatingJMachine) return null;
 
-    isCreatingJMachine = true;
+    isCreatingJMachine = true; // Never reset on failure - no retries
     try {
       const names = listJMachineNames(env);
       let index = names.length + 1;
@@ -242,7 +247,7 @@
           type: 'importJ',
           data: {
             name,
-            chainId: 1337, // Must match View.svelte's BrowserVM chainId
+            chainId: 1337,
             ticker: 'SIM',
             rpcs: [],
           }
@@ -251,13 +256,12 @@
       });
 
       isolatedEnv.set(env);
+      isCreatingJMachine = false; // Only reset on success
       return name;
     } catch (err) {
-      console.error('[createJMachineInEnv] ❌ FULL ERROR:', err);
-      console.error('[createJMachineInEnv] Stack:', (err as Error).stack);
+      console.error('[createJMachineInEnv] ❌ ERROR:', err);
+      // isCreatingJMachine stays true - no retry
       return null;
-    } finally {
-      isCreatingJMachine = false;
     }
   }
 
@@ -269,21 +273,12 @@
 
     const names = listJMachineNames(env);
 
-    // Create J-machine if missing
+    // Create J-machine if missing (one attempt only)
     if (names.length === 0) {
-      if (isCreatingJMachine) {
-        return;
-      }
+      if (isCreatingJMachine) return;
       const created = await createJMachineInEnv(env);
-      const refreshedNames = listJMachineNames(env);
-      if (created) {
-        names.push(created);
-      } else if (refreshedNames.length === 0) {
-        console.error('[ensureSelfEntities] ❌ Failed to create J-machine');
-        return;
-      } else {
-        names.splice(0, names.length, ...refreshedNames);
-      }
+      if (!created) return;
+      names.push(created);
     }
 
     let jurisdiction = selectedJurisdictionName && names.includes(selectedJurisdictionName)
@@ -420,19 +415,53 @@
     }, 150);
   }
 
-  async function handleAddJurisdiction() {
+  function handleAddJurisdiction() {
+    activeInlinePanel = 'add-jmachine';
+  }
+
+  async function handleJMachineCreate(event: CustomEvent<{ name: string; mode: 'browservm' | 'rpc'; chainId: number; rpcs: string[]; ticker: string }>) {
+    const { name, mode, chainId, rpcs, ticker } = event.detail;
     const env = get(isolatedEnv);
     if (!env) return;
-    const name = await createJMachineInEnv(env);
-    if (name) selectedJurisdictionName = name;
+
+    isCreatingJMachine = true;
+    try {
+      const xln = await getXLN();
+      await xln.applyRuntimeInput(env, {
+        runtimeTxs: [{
+          type: 'importJ',
+          data: { name, chainId, ticker, rpcs }
+        }],
+        entityInputs: []
+      });
+
+      // Persist config for reconnection on reload
+      jmachineOperations.upsert({
+        name,
+        mode,
+        chainId,
+        ticker,
+        rpcs,
+        createdAt: Date.now(),
+      });
+
+      isolatedEnv.set(env);
+      selectedJurisdictionName = name;
+      activeInlinePanel = 'none';
+      isCreatingJMachine = false;
+    } catch (err) {
+      console.error('[handleJMachineCreate] ERROR:', err);
+      isCreatingJMachine = false;
+      // Don't close form on error - let user retry
+    }
   }
 
   function handleAddEntity() {
-    showEntityFormation = true;
+    activeInlinePanel = 'formation';
   }
 
   function handleEntityFormationClose() {
-    showEntityFormation = false;
+    activeInlinePanel = 'none';
   }
 
   function handleAddAccount() {
@@ -494,15 +523,45 @@
         </div>
       {/if}
     </div>
-    <button class="settings-btn" on:click={() => showSettings = true} title="Settings">
+    <button class="settings-btn" on:click={() => activeInlinePanel = 'settings'} title="Settings">
       <Settings size={18} />
     </button>
   </div>
 
-  <!-- Content -->
+  <!-- Content - NO POPUPS! All panels are inline -->
   <main class="panel-content">
-    {#if showVaultPanelVisible}
-      <BrainVaultView embedded={true} />
+    {#if activeInlinePanel === 'formation'}
+      <!-- Inline: Entity Formation -->
+      <div class="inline-panel">
+        <div class="inline-panel-header">
+          <button class="back-btn" on:click={handleEntityFormationClose}>← Back</button>
+          <h3>Create Entity</h3>
+        </div>
+        <FormationPanel onCreated={() => { activeInlinePanel = 'none'; }} />
+      </div>
+    {:else if activeInlinePanel === 'add-jmachine'}
+      <!-- Inline: Add Jurisdiction -->
+      <div class="inline-panel">
+        <div class="inline-panel-header">
+          <button class="back-btn" on:click={() => activeInlinePanel = 'none'}>← Back</button>
+          <h3>Add Jurisdiction</h3>
+        </div>
+        <AddJMachine
+          on:create={handleJMachineCreate}
+          on:cancel={() => activeInlinePanel = 'none'}
+        />
+      </div>
+    {:else if activeInlinePanel === 'settings'}
+      <!-- Inline: Settings -->
+      <div class="inline-panel">
+        <div class="inline-panel-header">
+          <button class="back-btn" on:click={() => activeInlinePanel = 'none'}>← Back</button>
+          <h3>Settings</h3>
+        </div>
+        <WalletSettings on:close={() => activeInlinePanel = 'none'} />
+      </div>
+    {:else if showVaultPanelVisible}
+      <RuntimeCreation embedded={true} />
     {:else if viewMode === 'signer'}
       <WalletView
         privateKey={signerWalletPrivateKey || ''}
@@ -519,7 +578,7 @@
           counterpartyId={selectedAccountId}
         />
       {:else}
-        <EntityPanel tab={entityTab} isLast={true} hideHeader={true} />
+        <EntityPanelTabs tab={entityTab} isLast={true} hideHeader={true} />
       {/if}
     {:else if viewMode === 'jurisdiction'}
       <JurisdictionPanel
@@ -529,24 +588,6 @@
       />
     {/if}
   </main>
-
-  <!-- EntityFormation Modal -->
-  {#if showEntityFormation}
-    <div class="modal-overlay" on:click={handleEntityFormationClose}>
-      <div class="modal-container" on:click|stopPropagation>
-        <EntityFormation on:close={handleEntityFormationClose} />
-      </div>
-    </div>
-  {/if}
-
-  <!-- Settings Modal -->
-  {#if showSettings}
-    <div class="modal-overlay" on:click={() => showSettings = false}>
-      <div class="modal-container settings-modal" on:click|stopPropagation>
-        <WalletSettings on:close={() => showSettings = false} />
-      </div>
-    </div>
-  {/if}
 </div>
 
 <style>
@@ -678,36 +719,51 @@
     background: #388bfd;
   }
 
-  /* EntityFormation Modal */
-  .modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.8);
-    backdrop-filter: blur(4px);
+  /* Inline Panels - NO POPUPS! */
+  .inline-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow-y: auto;
+  }
+
+  .inline-panel-header {
     display: flex;
     align-items: center;
-    justify-content: center;
-    z-index: 10000;
+    gap: 12px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    position: sticky;
+    top: 0;
+    z-index: 10;
   }
 
-  .modal-container {
-    max-width: 90vw;
-    max-height: 90vh;
-    overflow: auto;
-    background: #1e1e1e;
+  .inline-panel-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary, #e6edf3);
+  }
+
+  .back-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 12px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+    border-radius: 6px;
+    color: var(--text-secondary, #8b949e);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
   }
 
-  .modal-container.settings-modal {
-    background: transparent;
-    border: none;
-    box-shadow: none;
-    overflow: visible;
+  .back-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #e6edf3);
+    border-color: rgba(255, 255, 255, 0.2);
   }
 
   .settings-btn {

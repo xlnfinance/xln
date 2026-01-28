@@ -1,12 +1,44 @@
 /**
  * XLN Utility Functions
- * Platform detection, crypto polyfills, logging, and helper functions
+ * Platform detection, crypto polyfills, logging, time helpers, and helper functions
  */
 
 import { toSvg } from 'jdenticon';
 import { Buffer as BufferPolyfill } from 'buffer';
 
 import { extractNumberFromEntityId } from './entity-factory';
+
+// === Time Helpers (merged from time.ts) ===
+
+/**
+ * Wall-clock timestamp without Date.now() (determinism-safe)
+ */
+export const getWallClockMs = (): number => {
+  const perf = typeof globalThis !== 'undefined' ? (globalThis as any).performance : undefined;
+  if (perf && typeof perf.timeOrigin === 'number' && typeof perf.now === 'function') {
+    return Math.round(perf.timeOrigin + perf.now());
+  }
+  if (typeof process !== 'undefined' && typeof process.hrtime === 'function') {
+    const [sec, ns] = process.hrtime();
+    return sec * 1000 + Math.floor(ns / 1e6);
+  }
+  return 0;
+};
+
+/**
+ * Monotonic clock for durations
+ */
+export const getPerfMs = (): number => {
+  const perf = typeof globalThis !== 'undefined' ? (globalThis as any).performance : undefined;
+  if (perf && typeof perf.now === 'function') {
+    return perf.now();
+  }
+  if (typeof process !== 'undefined' && typeof process.hrtime === 'function') {
+    const [sec, ns] = process.hrtime();
+    return sec * 1000 + Math.floor(ns / 1e6);
+  }
+  return 0;
+};
 
 // Global polyfills for browser compatibility
 if (typeof global === 'undefined') {

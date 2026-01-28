@@ -110,6 +110,13 @@ export type BrowserVMInstance = {
   getReserves?: (entityId: string, tokenId: number) => Promise<bigint>;
   getCollateral?: (entityId: string, counterpartyId: string, tokenId: number) => Promise<{ collateral: bigint; ondelta: bigint }>;
   getDebts?: (entityId: string, tokenId: number) => Promise<Array<{ amount: bigint; creditor: string }>>;
+  // State capture and sync
+  captureStateRoot?: () => Promise<Uint8Array>;
+  serializeState?: () => Promise<Uint8Array>;
+  syncAllCollaterals?: (entityId: string) => Promise<Map<string, bigint>>;
+  getBlockHeight?: () => bigint;
+  // Debug helpers
+  debugFundReserves?: (entityId: string, tokenId: number, amount: bigint) => Promise<void>;
 };
 
 export type P2PConfig = {

@@ -183,3 +183,20 @@ xln.formatEntity(xln.getEnv().eReplicas.values().next().value.state)
 - lowercase .md filenames (next.md, readme.md)
 - "xln" lowercase always, never "XLN"
 - Debug with ASCII (quick scan) + JSON (deep analysis) - both auto-dumped on scenario completion
+## 🔍 EXTERNAL AUDIT RULE
+
+**Never blindly trust subagent or external audit findings.**
+
+Before accepting any finding:
+1. Verify the claim against actual code paths
+2. Check if "vulnerability" is actually intentional design
+3. Verify exploit is possible given XLN's specific nonce/state model
+4. Ask: does this finding understand XLN's bilateral consensus model?
+
+Example bullshit patterns:
+- "Signature malleability → double spend" (ignores nonces)
+- "State transfer without verification" (ignores hash = state binding)
+- "Single-signer bypasses X" (that's the design for threshold=1)
+- Generic ECDSA/BFT concerns that don't apply to XLN's specific flow
+
+**Rule: 80% of audit findings are noise. Find the 20% that matter.**

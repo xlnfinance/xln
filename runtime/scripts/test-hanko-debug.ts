@@ -3,7 +3,7 @@
  * Runs directly without full scenario infrastructure
  */
 
-import { BrowserVMProvider } from '../browservm.js';
+import { BrowserVMProvider } from '../jadapter/browservm-provider.js';
 import { ethers } from 'ethers';
 import { getSignerPrivateKey, registerSeededKeys } from '../account-crypto.js';
 import { isLeftEntity } from '../entity-id-utils';

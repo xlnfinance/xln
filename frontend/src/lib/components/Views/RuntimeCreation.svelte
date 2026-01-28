@@ -34,11 +34,11 @@
 
   // Security tiers - clean labels for fintech UX
   const FACTOR_INFO = [
-    { factor: 1, shards: 1, time: '3s', tier: 'Test', attackCost: '$13K' },
-    { factor: 2, shards: 10, time: '30s', tier: 'Basic', attackCost: '$130K' },
-    { factor: 3, shards: 100, time: '5min', tier: 'Standard', attackCost: '$1.3M' },
-    { factor: 4, shards: 1000, time: '50min', tier: 'Strong', attackCost: '$13M' },
-    { factor: 5, shards: 10000, time: '8hr', tier: 'Maximum', attackCost: '$130M' },
+    { factor: 1, shards: 1, time: '3s', tier: 'Test' },
+    { factor: 2, shards: 10, time: '30s', tier: 'Basic' },
+    { factor: 3, shards: 100, time: '5min', tier: 'Standard' },
+    { factor: 4, shards: 1000, time: '50min', tier: 'Strong' },
+    { factor: 5, shards: 10000, time: '8hr', tier: 'Maximum' },
   ];
 
   // ============================================================================
@@ -158,19 +158,16 @@
     'king', 'sage', 'bard', 'monk', 'lord', 'duke', 'earl', 'chef', 'smith', 'mage',
   ];
 
+  // Base58 alphabet (no 0, O, I, l to avoid confusion)
+  const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+
   function suggestPassphrase(): void {
-    // Pick 3 random words = ~17.8 bits each × 3 = ~53 bits
-    // Combined with factor 5+ this is very strong
-    const words: string[] = [];
-    const used = new Set<number>();
-    while (words.length < 3) {
-      const idx = Math.floor(Math.random() * WORDS.length);
-      if (!used.has(idx)) {
-        used.add(idx);
-        words.push(WORDS[idx]!);
-      }
+    // Generate 10 Base58 chars = ~58.5 bits of entropy (log2(58^10))
+    const chars: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      chars.push(BASE58[Math.floor(Math.random() * BASE58.length)]!);
     }
-    passphrase = words.join('-');
+    passphrase = chars.join('');
     showPassphrase = true; // Auto-show since it's random/public anyway
   }
 
@@ -1081,8 +1078,6 @@
             <span class="factor-detail">{factorInfo.shards.toLocaleString()} shards</span>
             <span class="factor-separator">·</span>
             <span class="factor-detail">{factorInfo.time}</span>
-            <span class="factor-separator">·</span>
-            <span class="factor-detail attack-cost">{factorInfo.attackCost} to crack</span>
           </div>
         </div>
 

@@ -1,57 +1,52 @@
 /**
  * Mint Reserves Handler
  *
- * SAME FLOW AS R2R: adds mint operation to jBatch, broadcasts via j_broadcast
- * Pattern: E-machine tx accumulates ops → jBroadcast tx commits batch → J-machine executes
+ * DIRECT MINT: Sends mint operation directly to J-machine (admin function)
+ * Does NOT go through batch - minting is an admin operation, not a user transfer
  *
  * Flow:
- * 1. Entity validates (optional)
- * 2. Add mint operation to jBatch
- * 3. User sends j_broadcast
- * 4. J-machine executes → BrowserVM mints
- * 5. J-events route back
+ * 1. Entity requests mint
+ * 2. J-machine directly mints via browserVM.debugFundReserves
+ * 3. J-events route back with ReserveUpdated
  */
 
-import type { EntityState, EntityTx, EntityInput } from '../../types';
+import type { EntityState, EntityTx, EntityInput, JInput, JTx, Env } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { initJBatch, assertBatchNotPending } from '../../j-batch';
 
 export async function handleMintReserves(
   entityState: EntityState,
-  entityTx: Extract<EntityTx, { type: 'mintReserves' }>
-): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: any[] }> {
+  entityTx: Extract<EntityTx, { type: 'mintReserves' }>,
+  env: Env
+): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs: JInput[] }> {
   const { tokenId, amount } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
-  console.log(`💰 mintReserves: ${entityState.entityId.slice(-4)} adding ${amount} token ${tokenId} to jBatch`);
+  console.log(`💰 mintReserves: ${entityState.entityId.slice(-4)} minting ${amount} token ${tokenId}`);
 
-  // Initialize jBatch on first use
-  if (!newState.jBatchState) {
-    newState.jBatchState = initJBatch();
-  }
-
-  // Block if batch has pending broadcast
-  assertBatchNotPending(newState.jBatchState, 'mint');
-
-  // Add mint to jBatch (same pattern as R2R)
-  // Note: JBatch.reserveToReserve uses "receivingEntity" field name
-  const mintOp = {
-    receivingEntity: entityState.entityId,
-    tokenId,
-    amount,
+  // Create JTx for direct mint (bypasses batch - admin operation)
+  const jTx: JTx = {
+    type: 'mint',
+    entityId: entityState.entityId,
+    data: {
+      entityId: entityState.entityId,
+      tokenId,
+      amount,
+    },
+    timestamp: env.timestamp,
   };
 
-  console.log(`📦 jBatch: Adding mint:`, mintOp);
-  newState.jBatchState.batch.reserveToReserve.push(mintOp);
-  console.log(`📦 jBatch: After push, array length: ${newState.jBatchState.batch.reserveToReserve.length}`);
+  // Route to J-machine via standard jOutput flow
+  const jurisdictionName = env.activeJurisdiction || 'default';
+  const jOutputs: JInput[] = [{
+    jurisdictionName,
+    jTxs: [jTx],
+  }];
 
-  addMessage(newState,
-    `📦 Queued Mint: ${amount} token ${tokenId} (use jBroadcast to commit)`
-  );
+  addMessage(newState, `💰 Minting ${amount} of token ${tokenId}`);
 
-  console.log(`✅ mintReserves: Added to jBatch for ${entityState.entityId.slice(-4)}`);
+  console.log(`✅ mintReserves: Queued direct mint for ${entityState.entityId.slice(-4)}`);
   console.log(`   Token: ${tokenId}, Amount: ${amount}`);
 
-  return { newState, outputs };
+  return { newState, outputs, jOutputs };
 }

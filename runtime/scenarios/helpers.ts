@@ -482,6 +482,30 @@ export const formatUSD = (amount: bigint): string => {
   return `$${whole.toLocaleString()}.${frac.toString().padStart(2, '0')}`;
 };
 
+/**
+ * Drain runtime - keep processing until all pending work is done
+ * Used before assertRuntimeIdle to ensure everything is flushed
+ */
+export async function drainRuntime(env: Env, maxIterations: number = 20): Promise<Env> {
+  const process = await getProcess();
+  let iterations = 0;
+
+  while (iterations < maxIterations) {
+    const pendingOutputs = env.pendingOutputs?.length || 0;
+    const pendingInputs = env.runtimeInput?.entityInputs?.length || 0;
+    const pendingInbox = env.networkInbox?.length || 0;
+    const pendingNetwork = env.pendingNetworkOutputs?.length || 0;
+
+    const totalPending = pendingOutputs + pendingInputs + pendingInbox + pendingNetwork;
+    if (totalPending === 0) break;
+
+    env = await process(env);
+    iterations++;
+  }
+
+  return env;
+}
+
 export function assertRuntimeIdle(env: Env, label: string = 'runtime'): void {
   const errors: string[] = [];
 

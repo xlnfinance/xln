@@ -18,7 +18,7 @@
  */
 
 import type { Env, EntityInput } from '../types';
-import { getPerfMs } from '../time';
+import { getPerfMs } from '../utils';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
 import { findReplica, getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 

@@ -205,7 +205,7 @@ export async function multiSig(env: Env): Promise<void> {
 
   const [, t1Rep] = findReplica(env, testEntity.id);
   assert(t1Rep.proposal, 'Proposer should have proposal');
-  assert(t1Rep.proposal!.signatures.size === 1, `Only proposer signature, got ${t1Rep.proposal!.signatures.size}`);
+  assert(t1Rep.proposal!.collectedSigs?.size === 1, `Only proposer signature, got ${t1Rep.proposal!.collectedSigs?.size || 0}`);
 
   const heightBefore = t1Rep.state.height;
 
@@ -216,7 +216,7 @@ export async function multiSig(env: Env): Promise<void> {
   const [, t1AfterWait] = findReplica(env, testEntity.id);
   assert(t1AfterWait.state.height === heightBefore, `Height should NOT change with only 1/3 signatures: ${t1AfterWait.state.height} === ${heightBefore}`);
   assert(t1AfterWait.proposal, 'Proposal should still exist (not committed)');
-  assert(t1AfterWait.proposal!.signatures.size === 1, 'Should still have only 1 signature');
+  assert(t1AfterWait.proposal!.collectedSigs?.size === 1, 'Should still have only 1 signature');
 
   console.log('   ✅ Proposer alone cannot commit (1/2 threshold not met)');
   console.log('   ✅ Threshold enforcement verified\\n');
@@ -367,7 +367,7 @@ export async function multiSig(env: Env): Promise<void> {
 
   const [, s1AfterPropose] = findReplica(env, alice.id);
   assert(s1AfterPropose.proposal, 'Proposer should have proposal after mempool tx');
-  assert(s1AfterPropose.proposal!.signatures.size === 1, `Proposal should have 1 sig (self), got ${s1AfterPropose.proposal!.signatures.size}`);
+  assert(s1AfterPropose.proposal!.collectedSigs?.size === 1, `Proposal should have 1 sig (self), got ${s1AfterPropose.proposal!.collectedSigs?.size || 0}`);
   console.log(`   ✅ Proposal created with 1 signature (proposer self-sign)`);
 
   // ASSERTION 2: 2 and 3 should have lockedFrame (not proposal)
@@ -380,11 +380,11 @@ export async function multiSig(env: Env): Promise<void> {
   // ASSERTION 3: Collect precommits (allow a few rounds for commit/proposal ordering)
   const heightBeforeProposalCommit = s1AfterPropose.state.height;
   let s1AfterPrecommits = findReplica(env, alice.id)[1];
-  let sigCount = s1AfterPrecommits.proposal?.signatures.size || 0;
+  let sigCount = s1AfterPrecommits.proposal?.collectedSigs?.size || 0;
   for (let i = 0; i < 5 && sigCount < 3; i++) {
     await processWithOffline(env, undefined, offlineSigners);
     s1AfterPrecommits = findReplica(env, alice.id)[1];
-    sigCount = s1AfterPrecommits.proposal?.signatures.size || 0;
+    sigCount = s1AfterPrecommits.proposal?.collectedSigs?.size || 0;
   }
   console.log(`   Signatures collected: ${sigCount}/3`);
 
