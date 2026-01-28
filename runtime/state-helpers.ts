@@ -306,7 +306,7 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
         txs: cloneArray(replica.proposal.txs),
         hash: replica.proposal.hash,
         newState: replica.proposal.newState,
-        signatures: replica.proposal.signatures?.map(arr => [...arr]),
+        signatures: replica.proposal.signatures ? new Map(replica.proposal.signatures) : undefined,
         hashes: replica.proposal.hashes ? [...replica.proposal.hashes] : undefined,
         hankos: replica.proposal.hankos ? [...replica.proposal.hankos] : undefined,
       }
@@ -317,7 +317,7 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
         txs: cloneArray(replica.lockedFrame.txs),
         hash: replica.lockedFrame.hash,
         newState: replica.lockedFrame.newState,
-        signatures: replica.lockedFrame.signatures?.map(arr => [...arr]),
+        signatures: replica.lockedFrame.signatures ? new Map(replica.lockedFrame.signatures) : undefined,
         hashes: replica.lockedFrame.hashes ? [...replica.lockedFrame.hashes] : undefined,
         hankos: replica.lockedFrame.hankos ? [...replica.lockedFrame.hankos] : undefined,
       }
