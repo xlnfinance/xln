@@ -49,5 +49,5 @@ export {
 } from './p2p-crypto';
 export type { P2PKeyPair } from './p2p-crypto';
 
-// Profile signing (anti-spoofing)
-export { signProfile, verifyProfileSignature, hasValidProfileSignature } from './profile-signing';
+// Profile signing (uses same Hanko mechanism as accountFrames)
+export { signProfile, signProfileSync, verifyProfileSignature, hasValidProfileSignature, computeProfileHash } from './profile-signing';

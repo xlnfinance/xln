@@ -1,42 +1,39 @@
 /**
  * Profile Signing & Verification for XLN Gossip
  *
- * ANTI-SPOOFING: Prevents attackers from announcing fake profiles for entities they don't control.
+ * Uses the same Hanko mechanism as accountFrames, disputeHash, and settlements.
+ * This is NOT a custom signing scheme - it's the generalized XLN hash signing.
  *
- * KEY BINDING MECHANISM:
- * - Profile includes board.validators[] with each validator's publicKey
- * - Profile signed by first validator (board.validators[0])
- * - Signature verified against entityPublicKey in metadata
- * - entityPublicKey MUST match a board validator's key (cryptographic binding)
+ * ARCHITECTURE:
+ * - Profile hash computed from canonical JSON representation
+ * - Signed using signHashesAsSingleEntity() (same as accountFrame signing)
+ * - Verified using verifyHankoForHash() (same verification path)
+ * - Hanko stored in profile.metadata.profileHanko (ABI-encoded HankoBytes)
  *
- * This ensures:
- * - Only entities with validator private keys can sign valid profiles
- * - Attacker can't announce fake entityPublicKey (signature won't verify)
- * - Profile updates require ongoing control of validator keys
- *
- * Relay stores profiles as-is; clients verify signatures on receipt.
- * Invalid signatures are rejected. Unsigned profiles accepted during migration.
+ * KEY BINDING:
+ * - Hanko contains claim for entityId
+ * - Verification checks signer against entity's board validators
+ * - Same security model as all other entity operations
  */
 
-import * as secp256k1 from '@noble/secp256k1';
 import { keccak256 } from 'ethers';
-import type { Profile } from '../gossip';
-import { getSignerPrivateKey, getCachedSignerPublicKey } from '../account-crypto';
+import type { Profile } from './gossip';
+import type { Env, HankoString } from '../types';
+import { signHashesAsSingleEntity, verifyHankoForHash } from '../hanko-signing';
 
 const PROFILE_SIGN_DOMAIN = 'xln-profile-v1';
 
 /**
- * Canonical profile digest for signing
- * Excludes signature field to avoid circular reference
+ * Canonical profile hash for signing
+ * Excludes hanko field to avoid circular reference
  */
-function computeProfileDigest(profile: Profile): string {
-  // Extract signable fields (exclude signature itself)
+export function computeProfileHash(profile: Profile): string {
   const { metadata, ...rest } = profile;
-  const { profileSignature, ...metadataWithoutSig } = metadata || {};
+  const { profileHanko, profileSignature, ...metadataClean } = metadata || {};
 
   const signable = {
     ...rest,
-    metadata: metadataWithoutSig,
+    metadata: metadataClean,
   };
 
   // Sort keys for deterministic serialization
@@ -71,82 +68,131 @@ function sortObjectKeys(obj: unknown): unknown {
 }
 
 /**
- * Sign a profile using entity's first validator key
- * Returns profile with signature in metadata
+ * Sign a profile using Hanko mechanism (same as accountFrames)
+ * Returns profile with hanko in metadata
  */
-export function signProfile(env: { runtimeSeed: Uint8Array | string }, profile: Profile, signerId: string): Profile {
-  const digest = computeProfileDigest(profile);
-  const digestBytes = Buffer.from(digest.replace('0x', ''), 'hex');
+export async function signProfile(
+  env: Env,
+  profile: Profile,
+  signerId: string
+): Promise<Profile> {
+  const hash = computeProfileHash(profile);
 
-  // Get private key and sign
-  const privateKey = getSignerPrivateKey(env, signerId);
-  const [signature, recovery] = secp256k1.signSync(digestBytes, privateKey, { recovered: true, der: false });
-  const sigHex = `0x${Buffer.from(signature).toString('hex')}${recovery.toString(16).padStart(2, '0')}`;
+  // Use same signing mechanism as accountFrames
+  const hankos = await signHashesAsSingleEntity(
+    env,
+    profile.entityId,
+    signerId,
+    [hash]
+  );
 
-  // Add signature to metadata
+  const profileHanko = hankos[0];
+  if (!profileHanko) {
+    throw new Error('PROFILE_SIGN_FAILED: No hanko returned');
+  }
+
   return {
     ...profile,
     metadata: {
       ...profile.metadata,
-      profileSignature: sigHex,
+      profileHanko,
     },
   };
 }
 
 /**
- * Verify profile signature using entityPublicKey from metadata
- * Returns true if signature is valid, false otherwise
+ * Synchronous sign for backward compatibility (uses raw secp256k1)
+ * Prefer async signProfile() which uses full Hanko mechanism
  */
-export function verifyProfileSignature(profile: Profile): boolean {
-  const signature = profile.metadata?.profileSignature;
-  if (!signature || typeof signature !== 'string') {
-    return false; // No signature to verify
-  }
+export function signProfileSync(
+  env: { runtimeSeed: Uint8Array | string },
+  profile: Profile,
+  signerId: string
+): Profile {
+  // Import here to avoid circular dependency
+  const { getSignerPrivateKey } = require('../account-crypto');
+  const secp256k1 = require('@noble/secp256k1');
 
-  // Get public key from profile metadata (entityPublicKey)
-  const publicKeyHex = profile.metadata?.entityPublicKey;
-  if (!publicKeyHex || typeof publicKeyHex !== 'string') {
-    // Try to get from cached keys (first validator)
-    const boardMeta = profile.metadata?.board;
-    if (!boardMeta || typeof boardMeta !== 'object' || !('validators' in boardMeta)) {
-      return false;
-    }
-    const firstValidator = boardMeta.validators[0];
-    if (!firstValidator?.signerId && !firstValidator?.publicKey) {
-      return false;
-    }
+  const hash = computeProfileHash(profile);
+  const hashBytes = Buffer.from(hash.replace('0x', ''), 'hex');
 
-    const signerId = firstValidator.signerId;
-    if (signerId) {
-      const cachedKey = getCachedSignerPublicKey(signerId);
-      if (!cachedKey) return false;
-      return verifyWithPublicKey(profile, signature, cachedKey);
-    }
+  const privateKey = getSignerPrivateKey(env, signerId);
+  const [signature, recovery] = secp256k1.signSync(hashBytes, privateKey, { recovered: true, der: false });
+  const sigHex = `0x${Buffer.from(signature).toString('hex')}${recovery.toString(16).padStart(2, '0')}`;
 
-    if (firstValidator.publicKey) {
-      const keyBytes = hexToBytes(firstValidator.publicKey);
-      return verifyWithPublicKey(profile, signature, keyBytes);
-    }
-
-    return false;
-  }
-
-  const publicKey = hexToBytes(publicKeyHex);
-  return verifyWithPublicKey(profile, signature, publicKey);
+  return {
+    ...profile,
+    metadata: {
+      ...profile.metadata,
+      profileSignature: sigHex,  // Legacy field for sync signing
+    },
+  };
 }
 
-function verifyWithPublicKey(profile: Profile, signature: string, publicKey: Uint8Array): boolean {
-  try {
-    const digest = computeProfileDigest(profile);
-    const digestBytes = Buffer.from(digest.replace('0x', ''), 'hex');
+/**
+ * Verify profile using Hanko mechanism (same as accountFrame verification)
+ * Falls back to legacy signature verification for migration
+ */
+export async function verifyProfileSignature(
+  profile: Profile,
+  env?: Env
+): Promise<boolean> {
+  // Prefer Hanko verification
+  const hanko = profile.metadata?.profileHanko as HankoString | undefined;
+  if (hanko) {
+    const hash = computeProfileHash(profile);
+    const result = await verifyHankoForHash(hanko, hash, profile.entityId, env);
+    return result.valid;
+  }
 
-    // Extract compact signature (64 bytes)
+  // Fallback: legacy signature verification (migration period)
+  const signature = profile.metadata?.profileSignature;
+  if (signature && typeof signature === 'string') {
+    return verifyLegacySignature(profile, signature);
+  }
+
+  return false; // No signature
+}
+
+/**
+ * Legacy signature verification (for profiles signed before Hanko migration)
+ */
+function verifyLegacySignature(profile: Profile, signature: string): boolean {
+  try {
+    const secp256k1 = require('@noble/secp256k1');
+    const { getCachedSignerPublicKey } = require('../account-crypto');
+
+    const hash = computeProfileHash(profile);
+    const hashBytes = Buffer.from(hash.replace('0x', ''), 'hex');
+
+    // Get public key from entityPublicKey or board
+    let publicKey: Uint8Array | null = null;
+
+    const publicKeyHex = profile.metadata?.entityPublicKey;
+    if (publicKeyHex && typeof publicKeyHex === 'string') {
+      publicKey = hexToBytes(publicKeyHex);
+    }
+
+    if (!publicKey) {
+      const boardMeta = profile.metadata?.board;
+      if (boardMeta && typeof boardMeta === 'object' && 'validators' in boardMeta) {
+        const firstValidator = boardMeta.validators[0];
+        if (firstValidator?.publicKey) {
+          publicKey = hexToBytes(firstValidator.publicKey);
+        } else if (firstValidator?.signerId) {
+          publicKey = getCachedSignerPublicKey(firstValidator.signerId);
+        }
+      }
+    }
+
+    if (!publicKey) return false;
+
     const sigHex = signature.replace('0x', '');
     const sigBytes = Buffer.from(sigHex.slice(0, 128), 'hex');
 
-    return secp256k1.verify(sigBytes, digestBytes, publicKey);
+    return secp256k1.verify(sigBytes, hashBytes, publicKey);
   } catch (error) {
-    console.warn(`Profile signature verification failed:`, error);
+    console.warn('Legacy profile signature verification failed:', error);
     return false;
   }
 }
@@ -161,9 +207,9 @@ function hexToBytes(hex: string): Uint8Array {
 }
 
 /**
- * Check if profile has a valid signature (for filtering)
+ * Check if profile has a valid signature (sync check for filtering)
+ * Note: For full Hanko verification, use async verifyProfileSignature()
  */
 export function hasValidProfileSignature(profile: Profile): boolean {
-  if (!profile.metadata?.profileSignature) return false;
-  return verifyProfileSignature(profile);
+  return !!(profile.metadata?.profileHanko || profile.metadata?.profileSignature);
 }

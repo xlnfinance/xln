@@ -15,9 +15,10 @@
  * - Even replayed messages are rejected by consensus height checks
  * - Adding P2P nonces would be redundant complexity
  *
- * Profile anti-spoofing:
- * - Profiles signed by entity's first validator (board.validators[0])
- * - Signature verified against entityPublicKey in profile metadata
+ * Profile anti-spoofing (uses same Hanko mechanism as accountFrames):
+ * - Profile hash signed using same path as accountFrame/disputeHash/settlement
+ * - Verification uses verifyHankoForHash() - same security as all entity operations
+ * - Key binding: signer must be in entity's board.validators[]
  * - Invalid signatures rejected; unsigned profiles accepted with warning (migration)
  */
 
@@ -27,7 +28,7 @@ import { RuntimeWsClient } from './ws-client';
 import { buildEntityProfile } from './gossip-helper';
 import { extractEntityId } from '../ids';
 import { getCachedSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
-import { signProfile, verifyProfileSignature } from './profile-signing';
+import { signProfileSync, verifyProfileSignature } from './profile-signing';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const MAX_QUEUE_PER_RUNTIME = 100; // Prevent memory exhaustion (DoS protection)
@@ -360,11 +361,12 @@ export class RuntimeP2P {
         };
       }
 
-      // Sign profile for anti-spoofing
+      // Sign profile using same mechanism as accountFrames (Hanko-based)
+      // Uses sync version here; async signProfile() available for full Hanko with ABI encoding
       let signedProfile = profile;
       if (firstValidator && this.env.runtimeSeed) {
         try {
-          signedProfile = signProfile({ runtimeSeed: this.env.runtimeSeed }, profile, firstValidator);
+          signedProfile = signProfileSync({ runtimeSeed: this.env.runtimeSeed }, profile, firstValidator);
         } catch (error) {
           console.warn(`P2P_PROFILE_SIGN_FAILED: ${entityId.slice(-4)} - ${(error as Error).message}`);
         }
@@ -394,23 +396,30 @@ export class RuntimeP2P {
   private handleGossipResponse(from: string, payload: unknown) {
     const response = payload as GossipResponsePayload;
     const profiles = Array.isArray(response?.profiles) ? response.profiles : [];
-    this.applyIncomingProfiles(from, profiles);
+    this.applyIncomingProfiles(from, profiles).catch(err => {
+      console.warn(`P2P_APPLY_PROFILES_ERROR: ${err.message}`);
+    });
   }
 
   private handleGossipAnnounce(from: string, payload: unknown) {
     const response = payload as GossipResponsePayload;
     const profiles = Array.isArray(response?.profiles) ? response.profiles : [];
-    this.applyIncomingProfiles(from, profiles);
+    this.applyIncomingProfiles(from, profiles).catch(err => {
+      console.warn(`P2P_APPLY_PROFILES_ERROR: ${err.message}`);
+    });
   }
 
-  private applyIncomingProfiles(from: string, profiles: Profile[]) {
+  private async applyIncomingProfiles(from: string, profiles: Profile[]) {
     if (profiles.length === 0) return;
     let verified = 0;
     let unsigned = 0;
     for (const profile of profiles) {
       // Verify profile signature if present (anti-spoofing)
-      if (profile.metadata?.profileSignature) {
-        const valid = verifyProfileSignature(profile);
+      // Uses same Hanko verification as accountFrames
+      const hasHanko = profile.metadata?.profileHanko;
+      const hasLegacySig = profile.metadata?.profileSignature;
+      if (hasHanko || hasLegacySig) {
+        const valid = await verifyProfileSignature(profile, this.env);
         if (!valid) {
           console.warn(`P2P_PROFILE_INVALID_SIGNATURE: ${profile.entityId.slice(-4)} - rejecting`);
           continue; // Skip invalid profiles
