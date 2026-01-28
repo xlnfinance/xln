@@ -74,9 +74,11 @@
     return BigInt(Math.floor(num * 1e18));
   }
 
-  // Validate inputs
+  // Validate inputs - block self-transfer
+  $: isSelfTransfer = recipientAddress.toLowerCase() === entityId.toLowerCase();
   $: canSend = recipientAddress.length === 66 &&
                recipientAddress.startsWith('0x') &&
+               !isSelfTransfer &&
                parseAmount(amount) > 0n &&
                parseAmount(amount) <= balance &&
                status !== 'sending';
@@ -202,6 +204,8 @@
     />
     {#if recipientAddress && (recipientAddress.length !== 66 || !recipientAddress.startsWith('0x'))}
       <span class="field-error">Invalid entity ID (must be 66 chars starting with 0x)</span>
+    {:else if isSelfTransfer}
+      <span class="field-error">Cannot transfer to yourself</span>
     {/if}
   </div>
 
