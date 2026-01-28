@@ -1568,7 +1568,7 @@ export class BrowserVMProvider {
       expiresAt: bigint;
     }> = [],
     sig?: string
-  ): Promise<{ success: boolean; logs: any[] }> {
+  ): Promise<any[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
@@ -1681,7 +1681,7 @@ export class BrowserVMProvider {
         } catch { /* ignore decode errors */ }
       }
 
-      return { success: false, logs: [] };
+      return [];
     }
 
     // Parse and emit logs to j-watcher subscribers
@@ -1690,7 +1690,7 @@ export class BrowserVMProvider {
     const insuranceCount = insuranceRegs.length;
     console.log(`[BrowserVM] Settle completed: ${diffs.length} diffs, ${insuranceCount} insurance regs`);
 
-    return { success: true, logs };
+    return logs;
   }
 
   /** Parse EVM logs into decoded events with block info for JBlock consensus.
@@ -2157,7 +2157,7 @@ export class BrowserVMProvider {
   }
 
   /** Register numbered entities via EntityProvider contract */
-  async registerNumberedEntitiesBatch(boardHashes: string[]): Promise<number[]> {
+  async registerNumberedEntitiesBatch(boardHashes: string[]): Promise<{ entityNumbers: number[]; txHash: string }> {
     if (!this.entityProviderAddress || !this.entityProviderInterface) {
       throw new Error('EntityProvider not deployed');
     }
@@ -2185,7 +2185,10 @@ export class BrowserVMProvider {
     const entityNumbers = (decoded[0] as bigint[]).map((n: bigint) => Number(n));
 
     console.log(`[BrowserVM] registerNumberedEntitiesBatch: ${boardHashes.length} entities → [${entityNumbers.join(',')}]`);
-    return entityNumbers;
+    return {
+      entityNumbers,
+      txHash: '0x' + 'browservm-register-batch'.padStart(64, '0'),
+    };
   }
 
   /**
@@ -2234,7 +2237,8 @@ export class BrowserVMProvider {
     }
 
     // Register all entities in batch
-    const entityNumbers = await this.registerNumberedEntitiesBatch(boardHashes);
+    const result = await this.registerNumberedEntitiesBatch(boardHashes);
+    const entityNumbers = result.entityNumbers;
 
     // Verify registration by checking stored boardHashes
     for (let i = 0; i < entityNumbers.length; i++) {

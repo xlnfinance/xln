@@ -299,10 +299,19 @@ export async function createRpcAdapter(
       }
       const finalSig = sig || '0x';
 
+      // Ensure ondeltaDiff is set (default to 0n if not provided)
+      const normalizedDiffs = diffs.map(d => ({
+        tokenId: d.tokenId,
+        leftDiff: d.leftDiff,
+        rightDiff: d.rightDiff,
+        collateralDiff: d.collateralDiff,
+        ondeltaDiff: d.ondeltaDiff ?? 0n,
+      }));
+
       const tx = await depository.settle(
         leftEntity,
         rightEntity,
-        diffs,
+        normalizedDiffs,
         forgiveDebtsInTokenIds,
         insuranceRegs,
         finalSig,
@@ -367,7 +376,11 @@ export async function createRpcAdapter(
       return Number(await entityProvider.nextNumber());
     },
 
-    async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
+    async debugFundReserves(_entityId: string, _tokenId: number, _amount: bigint): Promise<JEvent[]> {
+      // debugFundReserves is only available in BrowserVM mode for testing.
+      // On RPC mode (real networks), funds must be deposited via real token transfers.
+      throw new Error('debugFundReserves is not available on RPC mode - use real token deposits');
+      /* Original implementation for reference (requires Depository extension):
       const tx = await depository.debugFundReserves(entityId, tokenId, amount);
       const receipt = await tx.wait();
       if (!receipt) throw new Error('Fund reserves failed');
@@ -387,11 +400,10 @@ export async function createRpcAdapter(
               transactionHash: receipt.hash,
             });
           }
-        } catch {
-          // Skip
-        }
+        } catch { }
       }
       return events;
+      */
     },
 
     async reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<JEvent[]> {

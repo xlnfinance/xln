@@ -1596,6 +1596,26 @@ export const getJWatcherStatus = () => {
   };
 };
 
+/**
+ * Queue an entity transaction for processing (helper for UI components)
+ * Wraps applyRuntimeInput with a single entity tx
+ */
+export const queueEntityInput = async (
+  entityId: string,
+  signerId: string,
+  txData: { type: string; [key: string]: any }
+): Promise<void> => {
+  if (!env) throw new Error('Runtime not initialized');
+  await applyRuntimeInput(env, {
+    runtimeTxs: [],
+    entityInputs: [{
+      entityId,
+      signerId,
+      entityTxs: [{ type: txData.type, data: txData }]
+    }]
+  });
+};
+
 export {
   applyRuntimeInput,
   assignNameOnChain,

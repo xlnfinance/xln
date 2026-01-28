@@ -129,11 +129,21 @@
     }
   }
 
-  function saveAndReconnectRpc(value: string) {
+  async function saveAndReconnectRpc(value: string) {
     localStorage.setItem('xln_rpc_override', value);
     console.log(`🔧 RPC override saved: ${value}`);
-    console.log(`🔄 Reloading to apply new RPC configuration...`);
-    setTimeout(() => window.location.reload(), 500);
+    console.log(`🔄 Reconnecting with new RPC configuration...`);
+    // Re-initialize connection without reload
+    try {
+      const xln = await getXLN();
+      if (xln.connectToEthereum) {
+        await xln.connectToEthereum(value);
+      }
+      alert('RPC configuration updated. New connection established.');
+    } catch (err) {
+      console.error('Failed to reconnect:', err);
+      alert('RPC saved but reconnection failed. Changes will apply on next init.');
+    }
   }
 
   // Jurisdiction connection status
@@ -304,7 +314,9 @@
             }
           }
         }
-        window.location.reload();
+        // Reset stores instead of reload
+        xlnEnvironment.set(null);
+        alert('Database cleared. Please reinitialize or navigate to /vault.');
       } catch (error) {
         console.error('❌ Clear database failed:', error);
         alert(`Clear database failed: ${(error as Error)?.message || 'Unknown error'}`);

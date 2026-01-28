@@ -56,7 +56,10 @@
     isActive: true,
   });
 
-  onMount(async () => {
+  // Extracted init function for retry capability
+  async function initializeUserMode() {
+    loading = true;
+    error = null;
     try {
       // Initialize isolated XLN runtime (same as View.svelte)
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
@@ -133,6 +136,10 @@
       error = 'Failed to initialize runtime: ' + (err as Error).message;
       loading = false;
     }
+  }
+
+  onMount(() => {
+    initializeUserMode();
   });
 </script>
 
@@ -148,7 +155,7 @@
       <p>{error}</p>
       <div class="error-actions">
         <a href="/vault" class="btn">Create Wallet</a>
-        <button class="btn btn-secondary" onclick={() => window.location.reload()}>
+        <button class="btn btn-secondary" onclick={() => initializeUserMode()}>
           Retry
         </button>
       </div>
