@@ -993,7 +993,7 @@ const applyRuntimeInput = async (
           console.log(`Processing input for ${replicaKey}:`);
           if (entityInput.entityTxs?.length) console.log(`  → ${entityInput.entityTxs.length} transactions`);
           if (entityInput.proposedFrame) console.log(`  → Proposed frame: ${entityInput.proposedFrame.hash}`);
-          if (entityInput.precommits?.size) console.log(`  → ${entityInput.precommits.size} precommits`);
+          if (entityInput.hashPrecommits?.size) console.log(`  → ${entityInput.hashPrecommits.size} precommits`);
         }
 
         const { newState, outputs, jOutputs, workingReplica } = await applyEntityInput(env, entityReplica, entityInput);
@@ -1212,7 +1212,7 @@ const applyRuntimeInput = async (
       console.log(`📤 Outputs: ${entityOutbox.length} messages`);
       entityOutbox.forEach((output, i) => {
         console.log(
-          `  ${i + 1}. → ${output.signerId} (${output.entityTxs ? `${output.entityTxs.length} txs` : ''}${output.proposedFrame ? ` proposal: ${output.proposedFrame.hash.slice(0, 10)}...` : ''}${output.precommits ? ` ${output.precommits.size} precommits` : ''})`,
+          `  ${i + 1}. → ${output.signerId} (${output.entityTxs ? `${output.entityTxs.length} txs` : ''}${output.proposedFrame ? ` proposal: ${output.proposedFrame.hash.slice(0, 10)}...` : ''}${output.hashPrecommits ? ` ${output.hashPrecommits.size} precommits` : ''})`,
         );
       });
     } else if (DEBUG && entityOutbox.length === 0) {

@@ -50,6 +50,7 @@ export type Profile = {
     position?: { x: number; y: number; z: number };
     // Additional fields
     entityPublicKey?: string; // hex public key for signature verification
+    encryptionPubKey?: string; // X25519 public key for E2E encryption (hex)
     [key: string]: unknown;
   };
   // Account capacities for routing

@@ -5,9 +5,9 @@
   import LandingPage from '../lib/components/Landing/LandingPage.svelte';
   import AdminTopBar from '../lib/components/Layout/AdminTopBar.svelte';
   import TimeMachine from '../lib/view/core/TimeMachine.svelte';
-  import EntityPanel from '../lib/components/Entity/EntityPanel.svelte';
+  import EntityPanelTabs from '../lib/components/Entity/EntityPanelTabs.svelte';
   import TransactionHistoryIO from '../lib/components/IO/TransactionHistoryIO.svelte';
-  import EntityFormation from '../lib/components/Formation/EntityFormation.svelte';
+  import FormationPanel from '../lib/components/Entity/FormationPanel.svelte';
   import JurisdictionStatus from '../lib/components/Jurisdiction/JurisdictionStatus.svelte';
   import NetworkDirectory from '../lib/components/Network/NetworkDirectory.svelte';
   import Graph3DPanel from '../lib/view/panels/Graph3DPanel.svelte';
@@ -15,7 +15,7 @@
   import ErrorPopup from '../lib/components/Common/ErrorPopup.svelte';
   import ScenarioPanel from '../lib/components/Scenario/ScenarioPanel.svelte';
   import AdminPanel from '../lib/components/Admin/AdminPanel.svelte';
-  import BrainVaultView from '../lib/components/Views/BrainVaultView.svelte';
+  import RuntimeCreation from '../lib/components/Views/RuntimeCreation.svelte';
   import SettingsView from '../lib/components/Views/SettingsView.svelte';
   import DocsView from '../lib/components/Views/DocsView.svelte';
   import TerminalView from '../lib/components/Views/TerminalView.svelte';
@@ -343,7 +343,7 @@
       <DocsView />
     {:else if $appState.viewMode === 'brainvault'}
       <!-- BrainVault View: Wallet Generator -->
-      <BrainVaultView />
+      <RuntimeCreation />
     {:else if $appState.viewMode === 'graph3d'}
       <!-- Graph View Mode: DISABLED - Use /app route instead -->
       <div class="disabled-message">
@@ -361,7 +361,7 @@
         {#if $tabs.length > 0}
           <div class="entity-panels-container" id="entityPanelsContainer" data-panel-count={$tabs.length}>
             {#each $tabs as tab, index (tab.id)}
-              <EntityPanel {tab} isLast={index === $tabs.length - 1} />
+              <EntityPanelTabs {tab} isLast={index === $tabs.length - 1} />
             {/each}
           </div>
         {/if}
@@ -414,7 +414,9 @@
         </div>
 
         <div id="formationTabContent" class="tab-content" class:active={activeTab === 'formation'}>
-          <EntityFormation />
+          <div class="formation-wrapper">
+            <FormationPanel />
+          </div>
         </div>
 
         <div id="jurisdictionsTabContent" class="tab-content" class:active={activeTab === 'jurisdictions'}>
@@ -693,6 +695,13 @@
 
   .tab-content.active {
     display: block;
+  }
+
+  .formation-wrapper {
+    max-width: 500px;
+    padding: 20px;
+    background: #0c0a09;
+    border-radius: 12px;
   }
 
   @keyframes fadeIn {

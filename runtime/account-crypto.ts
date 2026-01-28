@@ -345,8 +345,10 @@ export function signAccountFrame(
   console.log(`🔑 Available signerKeys:`, Array.from(signerKeys.keys()).map(k => k.slice(-4)));
   console.log(`🔑 Available signerPublicKeys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
 
-  const messageHash = keccak256(Buffer.from(frameHash.replace('0x', ''), 'hex'));
-  const signature = signDigest(env.runtimeSeed, signerId, messageHash);
+  // CRITICAL: Sign raw hash - NO double hashing
+  // On-chain _recoverSigner expects ecrecover(hash, sig) where hash is the raw 32-byte message
+  // frameHash is already keccak256 output, sign it directly
+  const signature = signDigest(env.runtimeSeed, signerId, frameHash);
   console.log(`✍️ Signed frame ${frameHash.slice(0, 10)} by ${signerId.slice(-4)}: ${signature.slice(0, 20)}...`);
   return signature;
 }
@@ -388,9 +390,9 @@ export function verifyAccountSignature(
     const sigHex = signature.replace('0x', '');
     const sigBytes = Buffer.from(sigHex.slice(0, 128), 'hex'); // First 64 bytes (r + s)
 
-    // Hash the frame hash
-    const messageHash = keccak256(Buffer.from(frameHash.replace('0x', ''), 'hex'));
-    const messageBytes = Buffer.from(messageHash.replace('0x', ''), 'hex');
+    // CRITICAL: Verify against raw hash - NO double hashing
+    // Must match signAccountFrame and on-chain _recoverSigner behavior
+    const messageBytes = Buffer.from(frameHash.replace('0x', ''), 'hex');
 
     // Verify signature using @noble/secp256k1
     const isValid = secp256k1.verify(sigBytes, messageBytes, publicKey);

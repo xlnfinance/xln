@@ -21,6 +21,8 @@ export interface ApplyEntityTxResult {
   mempoolOps?: MempoolOp[];
   swapOffersCreated?: SwapOfferEvent[];
   swapOffersCancelled?: SwapCancelEvent[];
+  // Multi-signer: Hashes that need entity-quorum signing
+  hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute' | 'settlement'; context: string }>;
 }
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
@@ -224,6 +226,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         mempoolOps: result.mempoolOps,
         swapOffersCreated: result.swapOffersCreated,
         swapOffersCancelled: result.swapOffersCancelled,
+        ...(result.hashesToSign && result.hashesToSign.length > 0 && { hashesToSign: result.hashesToSign }),
       };
     }
 
@@ -651,7 +654,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
     if (entityTx.type === 'settle_approve') {
       const { handleSettleApprove } = await import('./handlers/settle');
-      return await handleSettleApprove(entityState, entityTx, env);
+      const result = await handleSettleApprove(entityState, entityTx, env);
+      return {
+        ...result,
+        ...(result.hashesToSign && result.hashesToSign.length > 0 && { hashesToSign: result.hashesToSign }),
+      };
     }
 
     if (entityTx.type === 'settle_execute') {

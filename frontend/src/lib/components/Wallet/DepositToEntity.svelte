@@ -1,6 +1,7 @@
 <script lang="ts">
   import { JsonRpcProvider, Wallet, Contract, parseUnits, formatUnits, isAddress, type InterfaceAbi } from 'ethers';
-  import { BrowserVMEthersProvider } from '@xln/runtime/browservm-ethers-provider';
+  import { BrowserVMEthersProvider } from '@xln/runtime/jadapter/browservm-ethers-provider';
+// Note: BrowserVMProvider is at @xln/runtime/jadapter/browservm-provider
   import { EVM_NETWORKS, ERC20_ABI, getNetworkByChainId, type EVMNetwork, type TokenInfo } from '$lib/config/evmNetworks';
   import { getAvailableJurisdictions } from '$lib/stores/jurisdictionStore';
   import { onMount } from 'svelte';

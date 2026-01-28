@@ -49,6 +49,8 @@ export interface AccountHandlerResult {
   mempoolOps: MempoolOp[];
   swapOffersCreated: SwapOfferEvent[];
   swapOffersCancelled: SwapCancelEvent[];
+  // Multi-signer: Hashes that need entity-quorum signing
+  hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute' | 'settlement'; context: string }>;
 }
 
 export async function handleAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<AccountHandlerResult> {
@@ -64,6 +66,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   const mempoolOps: MempoolOp[] = [];
   const allSwapOffersCreated: SwapOfferEvent[] = [];
   const allSwapOffersCancelled: SwapCancelEvent[] = [];
+  // Multi-signer: Collect hashes during processing (not scanning)
+  const allHashesToSign: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }> = [];
 
   // Get or create account machine (KEY: counterparty ID for simpler lookups)
   // AccountMachine still uses canonical left/right internally
@@ -129,6 +133,12 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       rightJObservations: [],
       jEventChain: [],
       lastFinalizedJHeight: 0,
+      // Dispute resolution
+      disputeConfig: {
+        defaultDelayBlocks: 100,
+        minDelayBlocks: 10,
+      },
+      onChainSettlementNonce: 0,
     };
 
     // Store with counterparty ID as key (simpler than canonical)
@@ -186,6 +196,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         },
         newState.entityId,
       );
+
+      // Multi-signer: Collect hashes from result during processing
+      if (result.hashesToSign) {
+        allHashesToSign.push(...result.hashesToSign);
+      }
 
       // === HTLC LOCK PROCESSING: Check if we need to forward ===
       // CRITICAL: Only process NEW locks (prevent replay on re-processing same frame)
@@ -679,7 +694,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     outputs,
     mempoolOps,
     swapOffersCreated: allSwapOffersCreated,
-    swapOffersCancelled: allSwapOffersCancelled
+    swapOffersCancelled: allSwapOffersCancelled,
+    ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
   };
 }
 

@@ -631,27 +631,57 @@ contract EntityProvider is ERC1155 {
   }
 
   /**
-   * @notice Build and hash a board from actual signers and claim data
+   * @notice Build and hash a board from placeholders + signers using claim indexes
+   * @dev Supports M-of-N: reconstructs full board from placeholders (non-signers) + signers
+   * @param hanko The full hanko bytes (for placeholders access)
    * @param actualSigners Array of recovered signer addresses
-   * @param claim The hanko claim with weights and threshold
+   * @param claim The hanko claim with entityIndexes, weights and threshold
    * @return boardHash The keccak256 hash of the reconstructed board
    */
   function _buildBoardHash(
+    HankoBytes memory hanko,
     address[] memory actualSigners,
     HankoClaim memory claim
   ) internal returns (bytes32 boardHash) {
-    require(actualSigners.length == claim.weights.length, "Signers/weights length mismatch");
-    
+    // entityIndexes and weights must match (one entry per board member)
+    require(claim.entityIndexes.length == claim.weights.length, "Claim indexes/weights length mismatch");
+
+    uint256 boardSize = claim.entityIndexes.length;
+    uint256 placeholderCount = hanko.placeholders.length;
+    uint256 signerCount = actualSigners.length;
+
     // Build parallel arrays for Board struct
-    bytes32[] memory entityIds = new bytes32[](actualSigners.length);
-    uint16[] memory votingPowers = new uint16[](actualSigners.length);
-    
-    // Populate arrays with actual signers and their weights
-    for (uint256 i = 0; i < actualSigners.length; i++) {
-      entityIds[i] = bytes32(uint256(uint160(actualSigners[i]))); // Convert address to bytes32
+    bytes32[] memory entityIds = new bytes32[](boardSize);
+    uint16[] memory votingPowers = new uint16[](boardSize);
+
+    // HIERARCHICAL BOARD RECONSTRUCTION using entityIndexes mapping:
+    // Index zones:
+    //   0..placeholderCount-1 → placeholder (board member who didn't authorize)
+    //   placeholderCount..placeholderCount+signerCount-1 → EOA signer (authorized)
+    //   >= placeholderCount+signerCount → entity claim (authorized via nested hanko)
+    for (uint256 i = 0; i < boardSize; i++) {
+      uint256 idx = claim.entityIndexes[i];
+
+      if (idx < placeholderCount) {
+        // Zone 1: Placeholder - board member who didn't authorize (EOA or entity)
+        // Stored directly as bytes32 (address left-padded or entityId)
+        entityIds[i] = hanko.placeholders[idx];
+      } else if (idx < placeholderCount + signerCount) {
+        // Zone 2: EOA signer - board member who signed with their private key
+        // Convert recovered address to bytes32 (left-pad with zeros)
+        uint256 signerIdx = idx - placeholderCount;
+        entityIds[i] = bytes32(uint256(uint160(actualSigners[signerIdx])));
+      } else {
+        // Zone 3: Entity claim - board member who authorized via their own quorum
+        // Use the entity's ID from their claim (nested hierarchical authorization)
+        uint256 claimIdx = idx - placeholderCount - signerCount;
+        require(claimIdx < hanko.claims.length, "Claim index out of bounds");
+        entityIds[i] = hanko.claims[claimIdx].entityId;
+      }
+
       votingPowers[i] = uint16(claim.weights[i]);
     }
-    
+
     // Build Board struct with parallel arrays (transition delays set to 0 for compatibility)
     Board memory reconstructedBoard = Board({
       votingThreshold: uint16(claim.threshold),
@@ -746,8 +776,7 @@ contract EntityProvider is ERC1155 {
       validSigners[i] = actualSigners[i];
     }
     
-    // 🔥 FLASHLOAN GOVERNANCE: The Heart of "Assume YES" Philosophy 🔥
-    //
+    // 🔥 FLASHLOAN GOVERNANCE: in rare 0.001% of self-harmed entities
     // KEY INSIGHT: When processing claim X that references claim Y:
     // - We DON'T wait for Y to be verified first
     // - We OPTIMISTICALLY assume Y will say "YES" 
@@ -765,22 +794,20 @@ contract EntityProvider is ERC1155 {
     // ⚡ OPTIMIZATION: Fail immediately on threshold failure - no need to store results!
     //
     // This is INTENDED BEHAVIOR enabling flexible governance!
+    // There is NO alternative. 1) EVM fundamentally cannot prohibit recurisve boards
+    // 2) once recursive board happens you either choose assume=YES/NO, equally bad strategies
+    // 3) assume NO may lock treasuries behind such entity forever. So we choose YES. It's unavoidable.
     
     for (uint256 claimIndex = 0; claimIndex < hanko.claims.length; claimIndex++) {
       HankoClaim memory claim = hanko.claims[claimIndex];
-      
-      // Build board hash from actual signers
-      bytes32 reconstructedBoardHash = _buildBoardHash(validSigners, claim);
-      
+
+      // Build board hash from placeholders + signers using entityIndexes mapping
+      // Supports M-of-N: reconstructs full board even when not all members sign
+      bytes32 reconstructedBoardHash = _buildBoardHash(hanko, validSigners, claim);
+
       // Validate entity exists (registered or lazy) and verify board hash
       _validateEntity(claim.entityId, reconstructedBoardHash);
-      
-      // Validate structure
-      require(
-        claim.entityIndexes.length == claim.weights.length,
-        "Claim indexes/weights length mismatch"
-      );
-      
+
       uint256 totalVotingPower = 0;
       
       // Calculate voting power with flashloan assumptions

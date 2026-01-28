@@ -14,7 +14,7 @@
 
   import type { Writable } from 'svelte/store';
   import { setEntityEnvContext, type HistoryFrame } from '../../components/entity/shared/EntityEnvContext';
-  import EntityPanel from '$lib/components/Entity/EntityPanel.svelte';
+  import EntityPanelTabs from '$lib/components/Entity/EntityPanelTabs.svelte';
   import type { Tab } from '$lib/types/ui';
 
   // Props from Dockview panel params (Svelte 5 runes syntax)
@@ -26,6 +26,7 @@
     isolatedHistory = undefined,
     isolatedTimeIndex = undefined,
     isolatedIsLive = undefined,
+    initialAction = undefined,
   }: {
     entityId?: string;
     entityName?: string;
@@ -34,6 +35,7 @@
     isolatedHistory?: Writable<HistoryFrame[]>;
     isolatedTimeIndex?: Writable<number>;
     isolatedIsLive?: Writable<boolean>;
+    initialAction?: 'r2r' | 'r2c';
   } = $props();
 
   // CRITICAL: Set context during initialization (not in onMount)
@@ -64,7 +66,7 @@
 
 <div class="entity-panel-wrapper">
   <!-- Entity panel content only - time machine is in global TimeMachine bar -->
-  <EntityPanel tab={localTab} isLast={false} />
+  <EntityPanelTabs tab={localTab} isLast={false} {initialAction} />
 </div>
 
 <style>
@@ -84,12 +86,14 @@
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
 
-  /* Override EntityPanel styles for Dockview context */
-  .entity-panel-wrapper :global(.entity-panel) {
+  /* Override EntityPanelTabs styles for Dockview context */
+  .entity-panel-wrapper :global(.entity-panel-tabs) {
     flex: 1;
-    border-right: none;
+    border: none;
+    border-radius: 0;
     min-width: unset;
-    height: unset;
+    max-width: unset;
+    height: 100%;
     overflow: auto;
   }
 </style>

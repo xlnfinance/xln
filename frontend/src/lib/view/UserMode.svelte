@@ -12,7 +12,7 @@
   import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
   import { activeSigner } from '$lib/stores/vaultStore';
-  import EntityPanel from '$lib/components/Entity/EntityPanel.svelte';
+  import EntityPanelTabs from '$lib/components/Entity/EntityPanelTabs.svelte';
   import { setEntityEnvContext, type HistoryFrame } from './components/entity/shared/EntityEnvContext';
   import type { Tab } from '$lib/types/ui';
   import './utils/frontendLogger'; // Initialize global log control
@@ -154,9 +154,9 @@
       </div>
     </div>
   {:else if myEntityId}
-    <!-- Show EntityPanel for user's entity -->
+    <!-- Show EntityPanelTabs for user's entity -->
     <div class="entity-container">
-      <EntityPanel tab={localTab} isLast={true} />
+      <EntityPanelTabs tab={localTab} isLast={true} />
     </div>
   {:else}
     <div class="empty">

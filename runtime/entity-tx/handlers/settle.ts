@@ -268,7 +268,7 @@ export async function handleSettleApprove(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_approve' }>,
   env: Env
-): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
+): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[]; hashesToSign?: Array<{ hash: string; type: 'settlement'; context: string }> }> {
   const { counterpartyEntityId } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
@@ -367,7 +367,13 @@ export async function handleSettleApprove(
     }]
   });
 
-  return { newState, outputs, mempoolOps };
+  // Multi-signer: Return settlement hash for entity-quorum signing
+  // At commit time, quorum hanko replaces single-signer hanko in workspace
+  const hashesToSign: Array<{ hash: string; type: 'settlement'; context: string }> = [
+    { hash: settlementHash, type: 'settlement', context: `settlement:${counterpartyEntityId.slice(-8)}:nonce:${onChainNonce}` },
+  ];
+
+  return { newState, outputs, mempoolOps, hashesToSign };
 }
 
 /**

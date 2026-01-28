@@ -8,7 +8,9 @@ const defaultSettings: Settings = {
   dropdownMode: 'signer-first',
   runtimeDelay: 250, // 250ms = 4 frames/second (visible lightning effects)
   portfolioScale: 5000, // Default scale: $5000 max for portfolio bars
-  componentStates: {}
+  componentStates: {},
+  compactNumbers: true, // Display 1.2K instead of 1,234
+  verboseLogging: false // Quiet by default
 };
 
 // Settings store
@@ -94,6 +96,18 @@ const settingsOperations = {
   // Update portfolio scale
   setPortfolioScale(scale: number) {
     settings.update(current => ({ ...current, portfolioScale: scale }));
+    this.saveToStorage();
+  },
+
+  // Update compact numbers display
+  setCompactNumbers(compact: boolean) {
+    settings.update(current => ({ ...current, compactNumbers: compact }));
+    this.saveToStorage();
+  },
+
+  // Update verbose logging
+  setVerboseLogging(verbose: boolean) {
+    settings.update(current => ({ ...current, verboseLogging: verbose }));
     this.saveToStorage();
   },
 

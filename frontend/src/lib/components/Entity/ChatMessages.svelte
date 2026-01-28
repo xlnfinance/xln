@@ -1,15 +1,46 @@
 <script lang="ts">
   import { onMount, afterUpdate } from 'svelte';
   import type { EntityReplica, Tab } from '$lib/types/ui';
+  import { getXLN } from '../../stores/xlnStore';
+  import { Send } from 'lucide-svelte';
 
   export let replica: EntityReplica | null;
   export let tab: Tab;
   export let currentTimeIndex: number = -1; // Time machine index
-  
+
   let chatContainer: HTMLDivElement;
   let shouldAutoScroll = true;
   let lastMessageCount = 0;
   let isAtCurrentTime = true;
+  let newMessage = '';
+  let sending = false;
+
+  async function sendMessage() {
+    if (!tab.entityId || !tab.signerId || !newMessage.trim() || sending) return;
+
+    sending = true;
+    try {
+      const xln = getXLN();
+      if (!xln) throw new Error('XLN not initialized');
+
+      await xln.queueEntityInput(tab.entityId, tab.signerId, {
+        type: 'chat',
+        message: newMessage.trim()
+      });
+      newMessage = '';
+    } catch (err) {
+      console.error('Failed to send message:', err);
+    } finally {
+      sending = false;
+    }
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }
 
   // Track if we're viewing current time or historical state
   $: isAtCurrentTime = currentTimeIndex === -1;
@@ -126,8 +157,22 @@
       </div>
     {/each}
   {:else}
-    <div class="empty-state">- no messages</div>
+    <div class="empty-state">No messages yet</div>
   {/if}
+</div>
+
+<!-- Send Message Input -->
+<div class="chat-input">
+  <input
+    type="text"
+    bind:value={newMessage}
+    on:keydown={handleKeydown}
+    placeholder="Type a message..."
+    disabled={sending || !isAtCurrentTime}
+  />
+  <button on:click={sendMessage} disabled={sending || !newMessage.trim() || !isAtCurrentTime}>
+    <Send size={16} />
+  </button>
 </div>
 
 <style>
@@ -249,5 +294,48 @@
     padding: 2px 6px;
     border-radius: 3px;
     white-space: nowrap;
+  }
+
+  /* Chat Input */
+  .chat-input {
+    display: flex;
+    gap: 8px;
+    padding: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(0, 0, 0, 0.2);
+  }
+
+  .chat-input input {
+    flex: 1;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 13px;
+  }
+
+  .chat-input input:disabled {
+    opacity: 0.5;
+  }
+
+  .chat-input button {
+    padding: 8px 12px;
+    background: rgba(255, 200, 100, 0.15);
+    border: 1px solid rgba(255, 200, 100, 0.3);
+    border-radius: 6px;
+    color: rgba(255, 200, 100, 1);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+  }
+
+  .chat-input button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .chat-input button:hover:not(:disabled) {
+    background: rgba(255, 200, 100, 0.25);
   }
 </style>

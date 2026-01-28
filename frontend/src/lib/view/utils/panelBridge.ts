@@ -22,7 +22,7 @@ type EventMap = {
   'renderFps': number; // Real-time rendering FPS from Graph3DPanel
   'auto-demo:start': {}; // Auto-start demo in VR mode
   'tutorial:action': { action: string; data?: any }; // Tutorial actions
-  'openEntityOperations': { entityId: string; entityName: string; signerId?: string }; // Open entity panel
+  'openEntityOperations': { entityId: string; entityName: string; signerId?: string; action?: 'r2r' | 'r2c' }; // Open entity panel with optional action
   'openJurisdiction': { jurisdictionName: string }; // Open jurisdiction panel (J-Machine click)
   'focusPanel': { panelId: string }; // Focus any panel by ID
   'scenario:loaded': { name: string; frames: number }; // Scenario loaded successfully

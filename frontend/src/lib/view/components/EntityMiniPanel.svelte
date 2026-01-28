@@ -173,135 +173,148 @@
   .mini-panel {
     position: fixed;
     z-index: 10000;
-    background: #1e1e1e;
-    border: 1px solid #007acc;
-    border-radius: 8px;
-    padding: 12px;
-    min-width: 200px;
-    max-width: 280px;
-    box-shadow: 0 4px 20px rgba(0, 122, 204, 0.3);
-    font-family: 'Segoe UI', sans-serif;
+    background: #0c0a09;
+    border: 1px solid #fbbf24;
+    border-radius: 10px;
+    padding: 14px;
+    min-width: 220px;
+    max-width: 300px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(251, 191, 36, 0.15);
+    font-family: 'Inter', -apple-system, sans-serif;
   }
 
   .header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 8px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #333;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #292524;
   }
 
   .name {
     font-weight: 600;
-    color: #fff;
+    color: #e7e5e4;
     font-size: 14px;
   }
 
   .close-btn {
-    background: none;
-    border: none;
-    color: #888;
-    font-size: 18px;
+    background: #1c1917;
+    border: 1px solid #292524;
+    border-radius: 4px;
+    color: #78716c;
+    font-size: 16px;
     cursor: pointer;
-    padding: 0 4px;
+    padding: 2px 8px;
+    transition: all 0.15s;
   }
 
   .close-btn:hover {
-    color: #ff5555;
+    color: #ef4444;
+    border-color: #ef4444;
   }
 
   .stats {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 8px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
   }
 
   .stat {
     text-align: center;
+    padding: 8px 4px;
+    background: #1c1917;
+    border-radius: 6px;
   }
 
   .label {
     display: block;
-    font-size: 10px;
-    color: #888;
+    font-size: 9px;
+    color: #57534e;
     text-transform: uppercase;
+    margin-bottom: 2px;
   }
 
   .value {
     display: block;
-    font-size: 12px;
-    color: #4ec9b0;
-    font-weight: 500;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #fbbf24;
+    font-weight: 600;
   }
 
   .quick-actions {
     display: flex;
     gap: 6px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
   }
 
   .action-btn {
     flex: 1;
-    padding: 6px 8px;
-    border: 1px solid #444;
-    border-radius: 4px;
-    background: #2d2d30;
-    color: #ccc;
+    padding: 8px;
+    border: 1px solid #292524;
+    border-radius: 6px;
+    background: #1c1917;
+    color: #a8a29e;
     font-size: 11px;
+    font-weight: 500;
     cursor: pointer;
     transition: all 0.15s;
   }
 
   .action-btn:hover {
-    background: #3e3e42;
-    border-color: #007acc;
+    background: #292524;
   }
 
-  .action-btn.r2r:hover { border-color: #4ec9b0; }
-  .action-btn.r2c:hover { border-color: #dcdcaa; }
-  .action-btn.expand:hover { border-color: #c586c0; }
+  .action-btn.r2r:hover { border-color: #22c55e; color: #22c55e; }
+  .action-btn.r2c:hover { border-color: #fbbf24; color: #fbbf24; }
+  .action-btn.expand:hover { border-color: #8b5cf6; color: #8b5cf6; }
 
   .accounts-preview {
-    border-top: 1px solid #333;
-    padding-top: 8px;
+    border-top: 1px solid #292524;
+    padding-top: 10px;
   }
 
   .section-title {
-    font-size: 10px;
-    color: #888;
+    font-size: 9px;
+    color: #57534e;
     text-transform: uppercase;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
   }
 
   .account-row {
     display: flex;
     justify-content: space-between;
     font-size: 11px;
-    padding: 2px 0;
+    padding: 4px 8px;
+    background: #1c1917;
+    border-radius: 4px;
+    margin-bottom: 4px;
   }
 
   .peer {
-    color: #9cdcfe;
+    font-family: 'JetBrains Mono', monospace;
+    color: #a8a29e;
   }
 
   .ondelta {
-    color: #888;
+    font-family: 'JetBrains Mono', monospace;
+    color: #57534e;
   }
 
   .ondelta.positive {
-    color: #4ec9b0;
+    color: #22c55e;
   }
 
   .ondelta.negative {
-    color: #f14c4c;
+    color: #ef4444;
   }
 
   .more {
     font-size: 10px;
-    color: #666;
+    color: #57534e;
     text-align: center;
-    margin-top: 4px;
+    margin-top: 6px;
   }
 </style>

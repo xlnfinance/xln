@@ -13,12 +13,77 @@
  * 6. Events flow back to entities via j_event handlers
  */
 
+import { ethers } from 'ethers';
 import type { EntityState, EntityTx, EntityInput, Env, AccountMachine } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddRevealSecret, assertBatchNotPending } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
-import { buildDeltaTransformerArguments } from '../../transformer-args';
 import { buildAccountProofBody, createDisputeProofHash, buildInitialDisputeProof } from '../../proof-builder';
+
+// === Delta Transformer Arguments (inlined from transformer-args.ts) ===
+const MAX_FILL_RATIO = 0xffff;
+
+type BuildArgsOptions = {
+  fillRatiosByOfferId?: Map<string, number>;
+  leftSecrets?: string[];
+  rightSecrets?: string[];
+};
+
+function clampFillRatio(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  if (value >= MAX_FILL_RATIO) return MAX_FILL_RATIO;
+  return Math.floor(value);
+}
+
+function encodeDeltaTransformerArgs(fillRatios: number[], secrets: string[]): string {
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  const ratios = fillRatios.map(r => BigInt(clampFillRatio(r)));
+  return abiCoder.encode(['uint32[]', 'bytes32[]'], [ratios, secrets]);
+}
+
+function wrapTransformerArgs(args: string): string {
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  return abiCoder.encode(['bytes[]'], [[args]]);
+}
+
+function buildDeltaTransformerArguments(
+  accountMachine: AccountMachine,
+  options: BuildArgsOptions = {}
+): { leftArguments: string; rightArguments: string } {
+  const hasLocks = accountMachine.locks?.size ? accountMachine.locks.size > 0 : false;
+  const hasSwaps = accountMachine.swapOffers?.size ? accountMachine.swapOffers.size > 0 : false;
+  if (!hasLocks && !hasSwaps) {
+    return { leftArguments: '0x', rightArguments: '0x' };
+  }
+
+  const leftFillRatios: number[] = [];
+  const rightFillRatios: number[] = [];
+  const sortedSwaps = Array.from(accountMachine.swapOffers.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]));
+
+  for (const [offerId, offer] of sortedSwaps) {
+    const ratio = options.fillRatiosByOfferId?.get(offerId) ?? 0;
+    if (offer.makerIsLeft) {
+      rightFillRatios.push(ratio);
+    } else {
+      leftFillRatios.push(ratio);
+    }
+  }
+
+  const leftSecrets = options.leftSecrets ?? [];
+  const rightSecrets = options.rightSecrets ?? [];
+
+  const leftArgs = encodeDeltaTransformerArgs(leftFillRatios, leftSecrets);
+  const rightArgs = encodeDeltaTransformerArgs(rightFillRatios, rightSecrets);
+
+  const hasLeftData = leftSecrets.length > 0 || leftFillRatios.some(r => r > 0);
+  const hasRightData = rightSecrets.length > 0 || rightFillRatios.some(r => r > 0);
+
+  return {
+    leftArguments: hasLeftData ? wrapTransformerArgs(leftArgs) : '0x',
+    rightArguments: hasRightData ? wrapTransformerArgs(rightArgs) : '0x',
+  };
+}
 
 function buildPendingSwapFillRatios(
   entityState: EntityState,

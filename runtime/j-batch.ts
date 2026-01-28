@@ -286,12 +286,8 @@ export function preflightBatchForE2(
     }
   }
 
-  for (const op of batch.reserveToReserve) {
-    const receiving = normalizeEntityId(op.receivingEntity);
-    if (receiving === normalizedEntityId) {
-      issues.push(`reserveToReserve to self (${op.receivingEntity.slice(-4)})`);
-    }
-  }
+  // NOTE: R2R to self is allowed for minting operations (browservm debugFundReserves)
+  // The contract will handle actual validation - no preflight check needed here
 
   for (const s of batch.settlements) {
     if (compareEntityIds(s.leftEntity, s.rightEntity) >= 0) {

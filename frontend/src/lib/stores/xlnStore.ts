@@ -245,7 +245,19 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
       return fn(...args);
     };
 
-    const fallbackShortId = (id: string | undefined) => (id ? id.slice(-4) : '----');
+    // Match runtime getEntityShortId: numbered entities = decimal, hash entities = first 4 chars
+    const fallbackShortId = (id: string | undefined) => {
+      if (!id || id === '0x' || id === '0x0') return '0';
+      const hex = id.startsWith('0x') ? id.slice(2) : id;
+      try {
+        const value = BigInt('0x' + hex);
+        const NUMERIC_THRESHOLD = BigInt(256 ** 6); // 281474976710656
+        if (value >= 0n && value < NUMERIC_THRESHOLD) {
+          return value.toString();
+        }
+      } catch { /* Fall through to hash mode */ }
+      return hex.slice(0, 4).toUpperCase();
+    };
     const fallbackFormatEntityId = (id: string | undefined) =>
       id && id.length > 10 ? `${id.slice(0, 6)}...${id.slice(-4)}` : (id || 'N/A');
     const fallbackTokenInfo = (tokenId: number) => ({ symbol: `T${tokenId}`, decimals: 18 });

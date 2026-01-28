@@ -13,13 +13,12 @@ export async function ensureBrowserVM(env: any) {
   let browserVM = getBrowserVMInstance(env);
 
   if (!browserVM) {
-    const { BrowserEVM } = await import('../evms/browser-evm');
-    const evm = new BrowserEVM();
-    await evm.init();
-    env.browserVM = evm.getProvider(); // Store in env for isolation
-    const depositoryAddress = evm.getDepositoryAddress();
-    setBrowserVMJurisdiction(env, depositoryAddress, evm);
-    browserVM = evm.getProvider();
+    const { BrowserVMProvider } = await import('../jadapter');
+    browserVM = new BrowserVMProvider();
+    await browserVM.init();
+    env.browserVM = browserVM; // Store in env for isolation
+    const depositoryAddress = browserVM.getDepositoryAddress();
+    setBrowserVMJurisdiction(env, depositoryAddress, browserVM);
   }
 
   return browserVM;

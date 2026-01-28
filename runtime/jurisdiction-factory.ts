@@ -112,14 +112,14 @@ async function createEVM(
   rpcUrl?: string
 ): Promise<JurisdictionEVM> {
   if (type === 'browservm') {
-    const { BrowserEVM } = await import('./evms/browser-evm.js');
-    const evm = new BrowserEVM();
+    const { BrowserVMProvider } = await import('./jadapter/browservm-provider.js');
+    const evm = new BrowserVMProvider();
     await evm.init();
-    return evm;
+    // BrowserVMProvider implements JurisdictionEVM interface
+    return evm as unknown as JurisdictionEVM;
   } else {
-    const { RPCEVM } = await import('./evms/rpc-evm.js');
-    if (!rpcUrl) throw new Error('RPC EVM requires rpcUrl');
-    return new RPCEVM(rpcUrl);
+    // RPC mode not implemented - use JAdapter for real chains
+    throw new Error('RPC EVM not implemented in jurisdiction-factory. Use createJAdapter() from jadapter for real chains.');
   }
 }
 

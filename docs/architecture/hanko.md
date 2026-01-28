@@ -1,260 +1,471 @@
-# Hanko: The Bridge Between Traditional and Decentralized Governance
+# hanko: xln's universal signature system
 
-## 🌉 **TradFi + DeFi = XLN's Hanko**
+## overview
 
-**The Universal Problem**: Both traditional and decentralized organizations struggle with complexity
+hanko is a hierarchical multi-signature authorization system. entities (organizations) sign hashes via weighted quorum of EOA signers. one hanko proves an entity authorized an action - works on-chain (EP.sol ecrecover) and off-chain (secp256k1 verification).
 
-**Traditional Finance Says:**
-- "We need hierarchical approvals" ✅ Hanko delivers
-- "We need audit trails" ✅ Every signature recorded  
-- "We need dual-class shares" ✅ Native support
-- "We need compliance" ✅ Built-in hooks
+**three-part structure:**
+```
+HankoBytes {
+  placeholders: bytes32[]     // failed entities (index 0..N-1)
+  packedSignatures: bytes     // EOA sigs packed R,S,V (index N..M-1)
+  claims: HankoClaim[]        // entity verification claims (index M..inf)
+}
 
-**DeFi Says:**
-- "We need low costs" ✅ Zero gas for entities
-- "We need composability" ✅ Universal standard
-- "We need permissionless" ✅ Anyone can create
-- "We need on-chain" ✅ Cryptographically verified
+HankoClaim {
+  entityId: bytes32           // entity being verified
+  entityIndexes: uint256[]    // indexes into placeholders/sigs/claims
+  weights: uint256[]          // voting power per index
+  threshold: uint256          // required total power
+}
+```
 
-**The Revolutionary Insight**: Organizations are signatures, not contracts. One innovation solves both worlds' problems.
+## file map
 
-## 🎯 **Hanko vs Traditional DAO Frameworks**
+| file | role |
+|------|------|
+| `runtime/hanko.ts` | core primitives: sign, pack, unpack, recover, flashloan governance |
+| `runtime/hanko-signing.ts` | consensus integration: signEntityHashes, buildQuorumHanko, verifyHankoForHash |
+| `runtime/account-crypto.ts` | key derivation: BIP-39 + HMAC-SHA256, signDigest, verifyAccountSignature |
+| `runtime/entity-consensus.ts` | entity frame consensus: proposal, hashesToSign, commit with hanko attachment |
+| `jurisdictions/contracts/EntityProvider.sol` | on-chain verification: verifyHankoSignature, ecrecover, board hash |
+| `jurisdictions/contracts/Types.sol` | solidity struct definitions |
 
-| Framework | Cost per Entity | Hierarchy | Your Protocol Integration |
-|-----------|----------------|-----------|--------------------------|
-| **Hanko (Lazy)** | **$0** | ✅ Unlimited | `EntityProvider.verifyHanko(entityId, hash, hanko)` |
-| **Hanko (Registered)** | **$1.50** | ✅ Unlimited | `EntityProvider.verifyHanko(entityId, hash, hanko)` |
-| Compound Governor | $50+ | ❌ Flat | Complete protocol rewrite required |
-| Gnosis Safe | $12+ | ❌ Flat | Complete protocol rewrite required |
-| Aragon | $24+ | ⚠️ Limited | Aragon framework lock-in |
+## signing flow (end to end)
 
-### **1. Entity Address Formation & Contract Integration**
+### 1. proposer creates entity frame
 
-**Entity Address**: `keccak256(jurisdiction_id + entity_provider_address + entity_id)`
+```
+entity-consensus.ts:828
+applyEntityFrame(env, state, mempool)
+  -> returns { newState, deterministicState, outputs, collectedHashes }
 
-**Protocol Integration** (add one line to any DeFi contract):
+deterministicState = state BEFORE account proposals (matches validator verification)
+collectedHashes = account frame stateHashes + dispute hashes needing entity signing
+```
+
+### 2. proposer computes frame hash
+
+```
+entity-consensus.ts:862-868
+createEntityFrameHash(prevFrameHash, height, timestamp, txs, deterministicForHash)
+  -> keccak256(JSON.stringify({
+       prevFrameHash, height, timestamp, txs,
+       entityId, reserves, lastFinalizedJHeight,
+       accountHashes (sorted by cpId: height + stateHash + ackedTransitions),
+       htlcRoutesHash, htlcFeesEarned, lockBookHash, swapBookHash, orderbookHash
+     }))
+```
+
+**determinism guarantee:** proposer hashes from `deterministicState` (before account proposals). validators apply txs with `verifyOnly=true` which returns before account proposals. both get identical state -> identical hash.
+
+### 3. proposer builds hashesToSign array
+
+```
+entity-consensus.ts:873-897
+hashesToSign = [
+  { hash: frameHash, type: 'entityFrame', context: 'entity:XXXX:frame:N' },
+  ...collectedHashes.sort(by hash)  // accountFrame, dispute, profile, settlement
+]
+```
+
+entity frame hash is always index 0 (signatures[0] used for frame verification).
+
+### 4. proposer self-signs all hashes
+
+```
+entity-consensus.ts:900-902
+selfSigs = hashesToSign.map(h => signFrame(env, signerId, h.hash))
+
+account-crypto.ts:356-364 (signDigest)
+  secp256k1.signSync(messageBytes, privateKey, { recovered: true, der: false })
+  -> 0x{r}{s}{recovery} (65 bytes hex)
+```
+
+**no double-hash:** signs raw keccak256 output directly. on-chain `ecrecover(hash, sig)` expects this.
+
+### 5. proposer sends proposal to validators
+
+```
+entity-consensus.ts:921-930
+proposedFrame = {
+  height, txs, hash: frameHash, newState, outputs, jOutputs,
+  hashesToSign, collectedSigs: Map([[selfId, selfSigs]])
+}
+-> broadcast to all config.validators except self
+```
+
+### 6. validator verifies and signs
+
+```
+entity-consensus.ts:496-578
+1. check canVerify: state.height >= proposedFrame.height - 1
+   - if behind (missed frames while offline): skip verification, wait for commit
+   - BFT: up-to-date validators provide quorum
+
+2. apply txs with verifyOnly=true:
+   applyEntityFrame(env, state, txs, true)
+   -> returns deterministicState (no account proposals)
+
+3. compute hash locally:
+   createEntityFrameHash(prevHash, height, timestamp, txs, validatorNewState)
+
+4. compare: validatorComputedHash === proposedFrame.hash
+   - mismatch -> reject (equivocation attack or state bug)
+   - match -> sign ALL hashesToSign
+
+5. send hashPrecommits to proposer:
+   Map([[validatorSignerId, allSignatures]])
+```
+
+### 7. proposer collects quorum
+
+```
+entity-consensus.ts:620-648
+calculateQuorumPower(config, signers) >= config.threshold
+
+for each hash in hashesToSign:
+  collect signatures from all validators
+  buildQuorumHanko(env, entityId, hash, sigsForHash, config)
+```
+
+### 8. buildQuorumHanko assembles final hanko
+
+```
+hanko-signing.ts:152-227
+1. parse each validator's signature (65 bytes: r[32] + s[32] + v[1])
+2. normalize v (< 27 -> + 27)
+3. pack all signatures: packRealSignatures(sigBuffers)
+   - R,S concatenated (64 bytes each)
+   - V bits packed 8-per-byte
+4. build claim:
+   entityIndexes = [0, 1, 2, ...] (index in packedSignatures)
+   weights = [share_of_validator_0, share_of_validator_1, ...]
+   threshold = config.threshold
+5. ABI encode: tuple(bytes32[], bytes, tuple(bytes32, uint256[], uint256[], uint256)[])
+```
+
+### 9. hanko attached to account outputs
+
+```
+entity-consensus.ts:679-695
+for each output with accountInput.newAccountFrame.stateHash:
+  lookup hankoWitness[stateHash]
+  attach as accountInput.newHanko
+```
+
+### 10. commit notification to validators
+
+```
+entity-consensus.ts:722-742
+proposer sends committedFrame (with collectedSigs + hankos) to all validators
+validators verify signatures and apply committed state
+```
+
+## on-chain verification (EP.sol)
+
+### verifyHankoSignature(hankoData, hash)
+
 ```solidity
-// Your existing function
-function executeProposal(uint256 proposalId) external {
-    require(msg.sender == timelock, "Unauthorized");
-    // execute...
-}
-
-// Add Hanko support
-function executeProposalWithHanko(uint256 proposalId, bytes calldata hanko) external {
-    require(
-        ENTITY_PROVIDER.verifyHankoSignature(
-            keccak256("uniswap_governance"), 
-            keccak256(abi.encode(proposalId)), 
-            hanko
-        ), 
-        "Invalid signature"
-    );
-    // same execution logic
-}
+1. decode HankoBytes from ABI
+2. unpack signatures (_unpackSignatures)
+3. REQUIRE signatureCount > 0 (no pure circular refs)
+4. recover EOA addresses via ecrecover(hash, sig)
+5. for each claim:
+   a. build HIERARCHICAL board hash via _buildBoardHash (see below)
+   b. validate entity (lazy: entityId == boardHash, registered: stored boardHash match)
+   c. sum voting power:
+      - placeholders: 0 (board member who didn't authorize)
+      - EOA signatures: weights[i] (signed directly)
+      - entity claims: weights[i] (ASSUME YES - flashloan governance)
+   d. REQUIRE eoaVotingPower >= threshold (EOA alone must suffice)
+   e. REQUIRE totalVotingPower >= threshold
+6. return last claim's entityId if all pass
 ```
 
-### **2. Cost Comparison: Lazy vs Registered Entities**
+### _buildBoardHash(hanko, actualSigners, claim)
 
-**Lazy Entities (0 gas)**:
-- `entityId = keccak256(boardStructure)` 
-- Instant creation, no on-chain transaction
-- Perfect for: sub-committees, working groups, experimental governance
-
-**Registered Entities (~50k gas / $1.50)**:
-- Sequential numeric IDs (1, 2, 3...)
-- Stored `currentBoardHash` enables board transitions
-- Perfect for: permanent DAOs, corporate entities, token-governed organizations
-
-**Real Cost Example**:
-```
-Traditional Approach: MegaCorp DAO with 5 committees
-- Main DAO: 400k gas ($12)  
-- 5 committees: 5 × 400k = 2M gas ($60)
-- Total: $72
-
-Hanko Approach:
-- Main DAO (registered): 50k gas ($1.50)
-- 5 committees (lazy): 0 gas ($0)  
-- Total: $1.50
-- Savings: 98%
-```
-
-### **3. Unlimited Nesting Examples**
-
-**Corporate Structure**:
-```
-🏢 Tesla DAO (registered)
-├── 🏛️ Board of Directors (lazy)
-│   ├── 👤 Elon (CEO)
-│   ├── 👤 Robyn (Chairperson)  
-│   └── 👤 Drew (Independent Director)
-├── 🏛️ Finance Committee (lazy)
-│   ├── 👤 Zachary (CFO)
-│   └── 🏛️ Treasury Subcommittee (lazy)
-│       ├── 👤 Treasury Manager
-│       └── 🤖 Auto-rebalancing Bot
-└── 🏛️ Engineering (lazy)
-    ├── 👤 Head of AI
-    └── 🏛️ Autopilot Team (lazy)
-```
-
-**DeFi Protocol Governance**:
-```
-🏛️ Aave DAO (registered)
-├── 🏛️ Risk Committee (lazy) → Sets lending parameters
-├── 🏛️ Treasury Committee (lazy) → Manages protocol fees  
-├── 🏛️ Emergency Committee (lazy) → Pause functions
-└── 🏛️ Community (lazy) → General governance token holders
-```
-
-### **4. BCD Governance & Tradeable Shares**
-
-**Board-Control-Dividend Separation**:
-- **Board (B)**: Executive control, day-to-day operations, shortest delays
-- **Control (C)**: Veto power, can override board decisions, medium delays  
-- **Dividend (D)**: Economic rights only, longest delays, tradeable tokens
-
-**Example: Investment DAO**:
+**hierarchical board reconstruction using entityIndexes:**
 ```solidity
-struct InvestmentDAOBoard {
-    // Board: Active managers (non-tradeable)
-    bytes32[] boardEntityIds: [fund_manager_1, fund_manager_2];
-    uint16[] boardVotingPowers: [60, 40];
-    
-    // Control: Limited partners (restricted trading)
-    bytes32[] controlEntityIds: [lp_1, lp_2, lp_3];
-    uint16[] controlVotingPowers: [50, 30, 20];
-    
-    // Dividend: Profit-sharing tokens (freely tradeable)
-    address dividendToken: 0x...; // ERC20 token representing profit rights
-}
+for each entityIndexes[i]:
+  idx < placeholderCount?
+    → entityIds[i] = placeholders[idx]              // board member who didn't authorize
+  idx < placeholderCount + signerCount?
+    → entityIds[i] = bytes32(actualSigners[idx-N])  // EOA who signed
+  else?
+    → entityIds[i] = claims[idx-N-M].entityId       // nested entity who authorized
+
+boardHash = keccak256(abi.encode(Board{threshold, entityIds, weights, delays...}))
 ```
 
-**Why This Matters**: Board manages investments, Control holders can fire the board, Dividend holders just receive profits. Each class can have different liquidity, voting rights, and trading restrictions.
+**three index zones:**
+- `0..N-1` → placeholders (EOAs or entities who didn't authorize - stored as bytes32)
+- `N..M-1` → EOA signatures (recovered addresses converted to bytes32)
+- `M..∞` → entity claims (entityId from nested HankoClaim)
 
-### **5. Payment Channel Integration**
+this enables:
+- M-of-N: only M board members need to authorize
+- hierarchical: board can include other entities (Corp A → Corp B → Corp C)
+- mixed: board with both EOAs and entity members
 
-**External Verification**: Protocols validate entity authorization by calling `EntityProvider.verifyHankoSignature()` without direct interaction. Perfect for payment channels where entities provide cold-storage signatures proving organizational consent.
+### _recoverSigner(hash, signature)
 
-**Internal Invocation**: Entities directly interact with contracts using Hanko for authorization. Standard pattern for treasury management and protocol governance.
-
-**Strategic Advantage**: Same entity works in both modes - direct DeFi governance AND cryptographic proofs for channels, derivatives, cross-chain bridges.
-
----
-
-## 📈 **Market Opportunity**
-
-**Current Market**: ~$10B TVL across 4,000+ DAOs, all using expensive, flat governance structures.
-
-**Our Advantage**: Enable real organizational complexity at 1-2% of current costs, unlocking institutional adoption and complex corporate DeFi strategies.
-
-**Network Effects**: As more protocols integrate `EntityProvider.verifyHankoSignature()`, entities become more valuable and portable across the entire DeFi ecosystem.
-
----
-
-## 💡 **Ready to Integrate?**
-
-**For Protocol Developers**: Add one line to enable Hanko governance in your protocol.
-**For Organizations**: Start with lazy entities (0 cost) to experiment with hierarchical governance.
-**For Institutions**: Use registered entities with BCD structures for sophisticated treasury management.
-
----
-
-## 📚 **Appendix: Technical Implementation Details**
-
-### **Data Structures**
 ```solidity
-struct Hanko {
-  bytes32[] placeholders;    // Entity IDs that failed to sign
-  bytes packedSignatures;    // EOA signatures (packed R,S,V format)
-  HankoClaim[] claims;       // Entity claims to verify
-}
-
-struct HankoClaim {
-  bytes32 entityId;          // Entity being verified
-  uint256[] entityIndexes;   // Indexes into placeholders/signatures/claims
-  uint256[] weights;         // Voting power distribution
-  uint256 threshold;         // Required voting power
-}
+assembly { r, s, v from signature bytes }
+if (v < 27) v += 27
+return ecrecover(hash, v, r, s)
 ```
 
-### **Signature Packing Optimization**
-Instead of 65 bytes per signature, we pack:
-- R,S values: Concatenated 64-byte chunks
-- V values: Bit-packed (8 values per byte)
-- 100 signatures: 6413 bytes vs 6500 bytes (1.4% savings)
+raw hash, no ethereum signed message prefix. matches `signDigest` in account-crypto.ts.
 
-### **Board Hash Storage**
-Store `bytes32 boardHash = keccak256(abi.encode(entityIds, votingPowers, threshold))` instead of full structures:
-- 100-member board: 32 bytes storage vs 3,200+ bytes
-- 3x gas savings that compound with complexity
+### _unpackSignatures(packedSignatures)
 
-### **Optimistic Verification & Circular Dependencies**
-The system handles hierarchical dependencies by assuming referenced entities will validate successfully, then atomically reverting if any assumption fails. Circular dependencies are rare (UIs prevent them) and fail safely when they occur. Every signature still undergoes full `ecrecover` validation.
+```
+detect count from byte length: length = count * 64 + ceil(count / 8)
+for each sig:
+  R,S = packed[i*64..(i+1)*64]
+  V bit = packed[rsBytes + i/8] >> (i%8) & 1
+  V = bit ? 28 : 27
+```
 
-### **1. Next-Gen Protocol Governance**
+### _validateEntity(entityId, boardHash)
+
+```
+lazy entity (no stored board): entityId MUST == boardHash
+registered entity: boardHash MUST == entities[entityId].currentBoardHash
+```
+
+### _buildBoardHash(actualSigners, claim)
+
 ```solidity
-// Example: Aave V4 with Hierarchical Risk Management
-struct AaveGovernance {
-    RiskCommittee risk_committee;      // 3-of-5 risk experts
-    LiquidityCommittee liquidity_team; // 2-of-3 liquidity managers  
-    CommunityDAO community;            // Token-weighted voting
-    EmergencyMultisig emergency;       // 2-of-3 for critical fixes
+Board {
+  votingThreshold: claim.threshold,
+  entityIds: signers as bytes32[],
+  votingPowers: claim.weights as uint16[],
+  boardChangeDelay: 0,
+  controlChangeDelay: 0,
+  dividendChangeDelay: 0
 }
-
-// Risk Committee can instantly adjust parameters within bounds
-// Community DAO can override with 7-day delay
-// Emergency multisig can pause with 1-hour delay
+boardHash = keccak256(abi.encode(Board))
 ```
 
-### **2. Corporate DeFi Treasury Management**
-- **Tesla DAO**: Board → CFO → Treasury Committee → Individual approvers
-- **Automatic approval chains**: Small amounts (<$10k) → Committee approval, Large amounts (>$100k) → Board approval
-- **Multi-jurisdiction compliance**: US entity → EU subsidiary → Asian operations
-- **Real-time audit trails**: Every signature cryptographically linked to corporate hierarchy
+## off-chain verification (verifyHankoForHash)
 
-### **3. Breakthrough: Zero-Deployment DAO Proliferation** 
-**The Killer App - Infinite Sub-DAOs:**
 ```
-YieldFarmingGuild (Main DAO)
-├── ConvexStrategy (Sub-DAO, 0 gas to create)
-├── CurveStrategy (Sub-DAO, 0 gas to create)  
-├── UniswapV3Strategy (Sub-DAO, 0 gas to create)
-└── RiskManagement (Sub-DAO, 0 gas to create)
-    ├── MonitoringBot (Automated entity)
-    ├── EmergencyCommittee (Human oversight)
-    └── InsuranceFund (Multi-sig controlled)
-```
-
-**Traditional Cost**: 7 contracts × 400k gas = 2.8M gas (~$80-120)  
-**Hanko Cost**: 0 gas (all entities are lazy, computed addresses)
-
-### **4. XLN Ecosystem Integration: Hanko-Powered DeFi Governance**
-
-**Depository.sol: The Reference Implementation**
-Our `Depository.sol` contract showcases Hanko's power through `processBatchWithHanko()`, enabling XLN entities to authorize complex financial operations with hierarchical signatures. Instead of requiring individual approvals for each reserve operation, treasury committee, board of directors, and individual signers can all be represented in a single Hanko signature that atomically authorizes entire batches of operations.
-
-**Example: Corporate Treasury Management via XLN**
-```solidity
-// Tesla DAO entity manages $100M treasury across protocols
-bytes32 teslaEntityId = keccak256("tesla_treasury_dao");
-
-// Single Hanko authorizes multi-protocol treasury rebalancing:
-// 1. Withdraw $20M from Aave lending
-// 2. Deposit $15M into Compound  
-// 3. Swap $5M through Uniswap V3
-// 4. Purchase $10M BTC via institutional exchange
-// All operations verified against Tesla's hierarchical governance
+hanko-signing.ts:238-410
+1. ABI decode hanko
+2. recoverHankoEntities (flashloan governance simulation)
+3. unpack EOA signatures, require count > 0
+4. recover addresses via ethers.recoverAddress(hash, {r, s, v, yParity})
+5. find claim matching expectedEntityId
+6. board validation (MANDATORY):
+   a. lookup entity replica -> config.validators
+   b. derive expected addresses from validator signerIds
+   c. fallback: gossip profile metadata
+   d. fallback: cached public key registry
+   e. ALL recovered addresses MUST be in expected board
+   f. if no board found -> REJECT (production safety)
+7. valid if yesEntities.length > 0 AND entityId matches AND board verified
 ```
 
-**Cross-Protocol DeFi Integration Examples:**
+## key derivation
 
-**Uniswap V3 Position Management**: XLN entities can provide liquidity across multiple pools with single Hanko authorization. The entity's board can set parameters for acceptable slippage, price ranges, and rebalancing triggers, then delegate execution to portfolio managers while maintaining cryptographic oversight.
+```
+account-crypto.ts
+numeric signerId (e.g., "1", "2", "3"):
+  BIP-39 mnemonic from seed -> HDNodeWallet.fromPhrase(mnemonic, path)
+  path = getIndexedAccountPath(index)  // MetaMask-style derivation
 
-**Compound/Aave Lending Strategy**: Corporate treasuries can implement sophisticated lending strategies where the board sets risk parameters (maximum exposure, acceptable APY ranges, collateral ratios) and operational teams execute daily rebalancing operations. Each transaction references the entity's current governance state through Hanko verification.
+non-numeric signerId:
+  HMAC-SHA256(masterSeed, signerId)
 
-**Multi-Chain Treasury Operations**: The same XLN entity can govern assets across Ethereum mainnet, Arbitrum, Polygon, and other EVM chains. Hanko signatures provide consistent identity verification regardless of which chain the treasury operation occurs on, enabling seamless multi-chain institutional workflows.
+all keys derived from env.runtimeSeed (PURE - no global state)
+determinism enforced: getOrDeriveKey throws if env.runtimeSeed missing
+```
 
-**Institutional DeFi Strategies**: Investment DAOs can implement complex strategies where different committees handle different aspects - risk committee sets parameters, investment committee selects protocols, operations committee executes trades, all coordinated through hierarchical Hanko signatures that maintain institutional governance standards while enabling rapid DeFi execution.
+## entity consensus config
 
+```typescript
+ConsensusConfig {
+  mode: 'proposer-based' | 'gossip-based'
+  validators: string[]         // ordered list, validators[0] = proposer
+  threshold: bigint             // minimum voting power for quorum
+  shares: Record<string, bigint>  // signerId -> voting power
+}
+```
+
+proposer is static: `validators[0]`. accepted design - no rotation.
+
+## BFT properties
+
+### liveness
+- requires proposer online (static proposer design)
+- if proposer offline, no new frames proposed
+- accepted limitation (not pursuing rotation)
+
+### safety
+- validators independently verify frame hash before signing
+- hash mismatch -> reject proposal (equivocation detection)
+- double-sign detection: `detectByzantineFault()` checks for conflicting signatures
+- locked frame: validator locks to first proposal (CometBFT style), rejects conflicting ones
+- commit verification: all signatures verified before applying committed frame
+
+### catch-up (offline validator)
+- validator missed frames -> `canVerify = false`
+- skips verification, waits for commit notification
+- commit transfers full proposer state (including account state)
+- up-to-date validators provide quorum
+
+### byzantine tolerance
+- threshold-based: need `>= threshold` voting power from honest validators
+- behind validators don't sign -> don't count toward quorum
+- prevents corrupted state from propagating
+
+## signature format
+
+```
+off-chain (account-crypto.ts):
+  secp256k1.signSync(hash, privateKey) -> r[32] + s[32] + recovery[1]
+  recovery = 0 or 1 (not 27/28)
+  hex: 0x{r}{s}{recovery_hex}
+
+hanko packing (hanko.ts):
+  packRealSignatures: r[32]+s[32] concatenated, v bits packed 8/byte
+  v MUST be 27 or 28 (normalized before packing)
+
+on-chain (EP.sol):
+  ecrecover(hash, v, r, s) where v = 27 or 28
+  raw hash, NO ethereum signed message prefix
+```
+
+**v normalization chain:**
+1. `signDigest` returns recovery byte (0 or 1)
+2. `buildQuorumHanko` normalizes: `v < 27 ? v + 27 : v`
+3. `packRealSignatures` validates: v must be 27 or 28
+4. `_unpackSignatures` (solidity): bit 0 -> 27, bit 1 -> 28
+5. `_recoverSigner` (solidity): `if (v < 27) v += 27`
+
+## audit findings
+
+### CORRECT
+
+1. **no double-hash**: `signDigest` signs raw keccak256 output. `_recoverSigner` uses raw `ecrecover(hash, v, r, s)`. no ethereum signed message prefix on either side. match confirmed.
+
+2. **deterministic frame hashing**: proposer uses `deterministicState` (before account proposals). validators use `verifyOnly=true` which returns before proposals. both produce identical state -> identical hash.
+
+3. **signature ordering**: `hashesToSign[0]` is always entityFrame hash. commit verification checks `sigs[0]` against frame hash. additional hashes sorted by value for determinism.
+
+4. **quorum power calculation**: `calculateQuorumPower` sums `config.shares[signerId]` for all signers. throws on unknown validator (prevents ghost votes).
+
+5. **flashloan governance**: on-chain assumes referenced entities = YES. off-chain `recoverHankoEntities` mirrors this. both require >= 1 EOA signature.
+
+6. **board verification mandatory**: `verifyHankoForHash` rejects if board cannot be verified (no fallback to trust). production-safe.
+
+7. **behind-validator safety**: behind validators skip verification and don't sign. they can't corrupt quorum. up-to-date validators provide honest threshold.
+
+8. **immutability**: `applyEntityInput` clones replica at start. `applyEntityFrame` clones entity state. no mutation leaks.
+
+### KNOWN LIMITATIONS (accepted design)
+
+1. **static proposer**: `validators[0]` is proposer. if offline, entity stops making progress. no rotation protocol. user confirmed: accepted design.
+
+2. **single-signer fast path**: entities with 1 validator and threshold=1 skip consensus entirely (direct apply). no hash chain linkage in this mode beyond `prevFrameHash`.
+
+3. **j-batch quorum**: j-batch signing (`broadcastBatch` in j-batch.ts) uses `signHashesAsSingleEntity` directly. for multi-signer entities, batch hash should go through entity consensus quorum. requires deferring on-chain submission to post-commit. separate refactor.
+
+### FIXED ISSUES (this session)
+
+1. **~~signature count mismatch~~**: FIXED. `buildQuorumHanko` now validates signerId is in `config.validators` BEFORE pushing to sigBuffers. unknown validators are skipped entirely.
+
+2. **~~precommit signature verification gap~~**: FIXED. proposer now verifies `sigs[0]` (frame hash signature) via `verifyAccountSignature` before accepting precommit. byzantine validator with garbage signatures rejected immediately.
+
+3. **~~dispute hanko single-signer only~~**: FIXED. commit phase now attaches quorum hanko to `accountInput.newDisputeHanko` via exact `newDisputeHash` lookup in hankoWitness.
+
+4. **~~settlement hanko single-signer only~~**: FIXED. `handleSettleApprove` now returns `hashesToSign` with settlement hash. quorum hanko replaces single-signer hanko at commit via hankoWitness.
+
+5. **~~stale createRealSignature~~**: FIXED. deleted from hanko.ts (used `wallet.signMessage` with ethereum prefix — wrong for raw hash signing).
+
+6. **~~N-of-N on-chain requirement~~**: FIXED. EP.sol `_buildBoardHash` now uses `claim.entityIndexes` to reconstruct full HIERARCHICAL board from:
+   - placeholders (board members who didn't authorize - EOA or entity)
+   - recovered EOA signers (addresses converted to bytes32)
+   - nested entity claims (entityId from HankoClaim)
+
+   `buildQuorumHanko` in TypeScript populates `placeholders[]` with non-signing board members as bytes32. This enables true M-of-N AND hierarchical governance (Corp A → Corp B → Corp C chains).
+
+### REMAINING MONITORS
+
+1. **gossip-based mode precommit broadcast**: in gossip mode, precommits go to ALL validators. two validators reaching threshold simultaneously produce different hankos for same frame. safe (same state transition) but hanko witness diverges.
+
+   **impact**: low.
+
+2. **safeStringify in frame hash**: `createEntityFrameHash` uses `safeStringify` (handles BigInt). if `safeStringify` changes format, all frame hash chains break.
+
+   **impact**: high if changed. currently stable. should be frozen/pinned.
+
+## entity types
+
+### lazy entity (0 gas)
+```
+entityId = keccak256(abi.encode(Board))
+no on-chain registration needed
+board changes = new entityId (different hash)
+```
+
+### registered entity (~50k gas)
+```
+entityId = sequential (1, 2, 3...)
+stored currentBoardHash in EP.sol
+board transitions via updateBoard() with time delays
+BCD separation: Board, Control, Dividend governance layers
+```
+
+## cost model
+
+```
+traditional multisig: ~400k gas per org ($12+)
+hanko lazy entity: 0 gas
+hanko registered entity: ~50k gas ($1.50)
+hanko verification: ~50-100k gas (ecrecover + board hash)
+```
+
+## signature packing math
+
+```
+count signatures -> packed bytes
+1 sig:   64 + 1 = 65 bytes
+2 sigs:  128 + 1 = 129 bytes
+8 sigs:  512 + 1 = 513 bytes
+9 sigs:  576 + 2 = 578 bytes
+100 sigs: 6400 + 13 = 6413 bytes (vs 6500 naive = 1.4% savings)
+```
+
+## integration points
+
+### account frame proposal -> hanko
+```
+entity-consensus.ts:1270
+proposeAccountFrame(env, accountMachine, false, lastFinalizedJHeight)
+  -> returns hashesToSign: [{ hash: stateHash, type: 'accountFrame', context }]
+  -> collected during applyEntityFrame
+  -> included in entity proposal hashesToSign
+  -> validators sign all hashes
+  -> buildQuorumHanko at commit
+  -> attached to accountInput.newHanko
+  -> sent to counterparty entity
+```
+
+### dispute -> hanko
+```
+dispute hashes collected same way as accountFrame hashes
+included in hashesToSign array
+signed by all validators
+quorum hanko built at commit
+attached to dispute output for on-chain submission
+```
+
+### settlement -> hanko
+```
+settlement proof requires entity authorization
+hanko proves entity's board approved the settlement
+on-chain Depository.sol calls EP.verifyHankoSignature
+```

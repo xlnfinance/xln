@@ -70,6 +70,8 @@ export interface Settings {
   runtimeDelay: number;
   portfolioScale: number;
   componentStates: ComponentState;
+  compactNumbers: boolean;
+  verboseLogging: boolean;
 }
 
 // Time machine

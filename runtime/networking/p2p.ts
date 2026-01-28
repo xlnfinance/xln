@@ -29,6 +29,7 @@ import { buildEntityProfile } from './gossip-helper';
 import { extractEntityId } from '../ids';
 import { getCachedSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
 import { signProfileSync, verifyProfileSignature } from './profile-signing';
+import { deriveEncryptionKeyPair, pubKeyToHex, type P2PKeyPair } from './p2p-crypto';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const MAX_QUEUE_PER_RUNTIME = 100; // Prevent memory exhaustion (DoS protection)
@@ -100,6 +101,7 @@ export class RuntimeP2P {
   private clients: RuntimeWsClient[] = [];
   private pendingByRuntime = new Map<string, EntityInput[]>();
   private pollInterval: ReturnType<typeof setInterval> | null = null;
+  private encryptionKeyPair: P2PKeyPair;
 
   constructor(options: RuntimeP2POptions) {
     this.env = options.env;
@@ -112,6 +114,13 @@ export class RuntimeP2P {
     this.profileName = options.profileName;
     this.onEntityInput = options.onEntityInput;
     this.onGossipProfiles = options.onGossipProfiles;
+    // Derive X25519 encryption keypair from seed (mandatory, no fallback)
+    this.encryptionKeyPair = deriveEncryptionKeyPair(this.env.runtimeSeed);
+  }
+
+  /** Get encryption public key as hex for profile sharing */
+  getEncryptionPubKeyHex(): string {
+    return pubKeyToHex(this.encryptionKeyPair.publicKey);
   }
 
   matchesIdentity(runtimeId: string, signerId?: string): boolean {
@@ -360,6 +369,12 @@ export class RuntimeP2P {
           entityPublicKey: `0x${toHex(publicKey)}`,
         };
       }
+
+      // Add X25519 encryption public key for E2E messaging
+      profile.metadata = {
+        ...(profile.metadata || {}),
+        encryptionPubKey: this.getEncryptionPubKeyHex(),
+      };
 
       // Sign profile using same mechanism as accountFrames (Hanko-based)
       // Uses sync version here; async signProfile() available for full Hanko with ABI encoding

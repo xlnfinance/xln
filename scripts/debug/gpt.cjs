@@ -62,11 +62,11 @@ const CORE_FILES = {
   ],
   docs: [
     // Ordered by dependency - read in this order
-    'emc2.md',                  // ⚡ Core philosophy: E=mc² → Energy-Mass-Credit (5min)
-    '12_invariant.md',          // ⚡ RCPAN vs FCUAN vs FRPAP (THE core innovation) (10min)
-    'jea.md',                   // ⚡ Jurisdiction-Entity-Account 3-layer model (8min)
-    '11_Jurisdiction_Machine.md', // Architecture deep-dive
-    'PriorArt.md',              // Why Lightning/rollups don't work
+    'essay.md',                      // ⚡ Core philosophy and vision (5min)
+    'core/12_invariant.md',          // ⚡ RCPAN vs FCUAN vs FRPAP (THE core innovation) (10min)
+    'core/rjea-architecture.md',     // ⚡ Runtime-Jurisdiction-Entity-Account 4-layer model (8min)
+    'core/11_Jurisdiction_Machine.md', // Architecture deep-dive
+    'architecture/bilaterality.md',  // Why bilateral > multilateral
   ]
 };
 
@@ -142,9 +142,9 @@ This single invariant:
 ## Token Budget Guide (~${Math.round(totalTokens / 1000)}k tokens total)
 
 **Critical path (read first, ~30min):**
-- ⚡ emc2.md (5min) - Why credit = stored energy
-- ⚡ docs/12_invariant.md (10min) - RCPAN derivation
-- ⚡ docs/jea.md (8min) - 3-layer architecture
+- ⚡ essay.md (5min) - Core philosophy and vision
+- ⚡ docs/core/12_invariant.md (10min) - RCPAN derivation
+- ⚡ docs/core/rjea-architecture.md (8min) - 4-layer architecture
 - ⚡ Depository.sol (7min) - enforceDebts() FIFO + RCPAN enforcement
 
 **Implementation (read second, ~45min):**
@@ -156,8 +156,8 @@ This single invariant:
 **Deep dives (optional, ~60min):**
 - runtime.ts (15min) - Main coordinator
 - routing/pathfinding.ts (10min) - Dijkstra multi-hop
-- priorart.md (20min) - Why Lightning/rollups fail
-- 11_Jurisdiction_Machine.md (15min) - Full architecture
+- architecture/bilaterality.md (20min) - Why bilateral > multilateral
+- core/11_Jurisdiction_Machine.md (15min) - Full architecture
 
 ## Building on XLN: Delta Transformers
 
@@ -266,18 +266,18 @@ xln/
     evm.ts                       ${fileSizes['runtime/evm.ts'] || '?'} lines - Blockchain integration
 
   docs/
-    emc2.md                      ${fileSizes['docs/emc2.md'] || '?'} lines - ⚡ Energy-Mass-Credit equivalence (CRITICAL PATH)
-    12_invariant.md              ${fileSizes['docs/12_invariant.md'] || '?'} lines - ⚡ RCPAN innovation (CRITICAL PATH)
-    jea.md                       ${fileSizes['docs/jea.md'] || '?'} lines - ⚡ Jurisdiction-Entity-Account model (CRITICAL PATH)
-    11_Jurisdiction_Machine.md   ${fileSizes['docs/11_Jurisdiction_Machine.md'] || '?'} lines - Architecture deep-dive
-    PriorArt.md                  ${fileSizes['docs/PriorArt.md'] || '?'} lines - Why Lightning/rollups don't work
+    essay.md                            ${fileSizes['docs/essay.md'] || '?'} lines - ⚡ Core philosophy and vision (CRITICAL PATH)
+    core/12_invariant.md                ${fileSizes['docs/core/12_invariant.md'] || '?'} lines - ⚡ RCPAN innovation (CRITICAL PATH)
+    core/rjea-architecture.md           ${fileSizes['docs/core/rjea-architecture.md'] || '?'} lines - ⚡ RJEA 4-layer model (CRITICAL PATH)
+    core/11_Jurisdiction_Machine.md     ${fileSizes['docs/core/11_Jurisdiction_Machine.md'] || '?'} lines - Architecture deep-dive
+    architecture/bilaterality.md        ${fileSizes['docs/architecture/bilaterality.md'] || '?'} lines - Why bilateral > multilateral
 
 Reading Guide:
 1. Start with header sections (RCPAN invariant, competitive landscape, impossibilities)
 2. Follow the token budget guide for efficient learning:
-   - Critical path (30min): emc2.md → 12_invariant.md → jea.md → Depository.sol
+   - Critical path (30min): essay.md → 12_invariant.md → rjea-architecture.md → Depository.sol
    - Implementation (45min): types.ts → entity-consensus.ts → account-consensus.ts → entity-tx/apply.ts
-   - Deep dives (60min): runtime.ts → routing/pathfinding.ts → priorart.md → 11_Jurisdiction_Machine.md
+   - Deep dives (60min): runtime.ts → routing/pathfinding.ts → bilaterality.md → 11_Jurisdiction_Machine.md
 3. Verify claims using the Proof & Verification section
 4. Explore delta transformer examples for extensibility patterns
 

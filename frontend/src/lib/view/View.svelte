@@ -20,7 +20,7 @@
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
   import SolvencyPanel from './panels/SolvencyPanel.svelte';
   import GossipPanel from './panels/GossipPanel.svelte';
-  import BrainVaultView from '$lib/components/Views/BrainVaultView.svelte';
+  import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
   import UserModePanel from './UserModePanel.svelte';
   // REMOVED PANELS:
   // - EntitiesPanel: Graph3D entity cards provide better UX
@@ -78,7 +78,7 @@
   });
 
   // Pending entity data - bypasses Dockview params timing
-  const pendingEntityData = new Map<string, {entityId: string, entityName: string, signerId: string}>();
+  const pendingEntityData = new Map<string, {entityId: string, entityName: string, signerId: string, action?: 'r2r' | 'r2c'}>();
 
   const resolveEntityPanelData = (panelId: string) => {
     if (!panelId.startsWith('entity-')) return null;
@@ -120,18 +120,19 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-      // Get SINGLETON jurisdiction (shared with vaultStore and other components)
-      const { getJurisdiction } = XLN;
-      const jurisdiction = await getJurisdiction({ type: 'browser', chainId: 1337 });
-      console.log('[View] Jurisdiction singleton ready');
+      // Create BrowserVM jurisdiction via unified JAdapter
+      const { createJAdapter } = XLN;
+      const jadapter = await createJAdapter({ mode: 'browservm', chainId: 1337 });
+      await jadapter.deployStack();
+      console.log('[View] JAdapter ready');
 
-      // For legacy compatibility, get underlying BrowserEVM
-      const browserVM = (jurisdiction as any).getEVM();
-      const depositoryAddress = jurisdiction.depositoryAddress;
+      // Get underlying BrowserVM for legacy compatibility
+      const browserVM = (jadapter as any).browserVM;
+      const depositoryAddress = jadapter.addresses.depository;
 
-      // Expose for panels that need direct access (time-travel, insurance queries)
+      // Expose for panels that need direct access
       (window as any).__xlnBrowserVM = browserVM;
-      (window as any).__xlnJurisdiction = jurisdiction;
+      (window as any).__xlnJurisdiction = jadapter;
 
       console.log('[View] ✅ Jurisdiction ready:', depositoryAddress.slice(0, 10) + '...');
 
@@ -307,7 +308,7 @@
             }
           });
         } else if (options.name === 'brainvault') {
-          component = mount(BrainVaultView, {
+          component = mount(RuntimeCreation, {
             target: div,
             props: {}  // BrainVault manages its own state
           });
@@ -418,7 +419,8 @@
                   isolatedEnv: localEnvStore,
                   isolatedHistory: localHistoryStore,
                   isolatedTimeIndex: localTimeIndex,
-                  isolatedIsLive: localIsLive
+                  isolatedIsLive: localIsLive,
+                  ...(data.action && { initialAction: data.action })
                 }
               });
             }
@@ -596,7 +598,7 @@
     });
 
     // Listen for entity panel requests from Graph3D (click on entity node)
-    unsubOpenEntity = panelBridge.on('openEntityOperations', ({ entityId, entityName, signerId }) => {
+    unsubOpenEntity = panelBridge.on('openEntityOperations', ({ entityId, entityName, signerId, action }) => {
       // Use full entityId to avoid collisions
       const panelId = `entity-${entityId}`;
 
@@ -607,6 +609,7 @@
       if (existingPanel) {
         console.log('[View] Focusing existing entity panel:', entityId.slice(0, 10));
         existingPanel.api.setActive();
+        // TODO: If action passed, switch tab in existing panel
         return;
       }
 
@@ -614,7 +617,8 @@
       pendingEntityData.set(panelId, {
         entityId,
         entityName: entityName || entityId.slice(0, 10),
-        signerId: signerId || entityId
+        signerId: signerId || entityId,
+        ...(action && { action }) // 'r2r' or 'r2c' if quick action requested
       });
 
       // Create new panel using EntityPanelWrapper (reuses full EntityPanel)
