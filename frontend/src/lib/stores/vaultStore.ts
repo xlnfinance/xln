@@ -599,6 +599,11 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
       // Execute reserve_to_reserve transfer
       await browserVM.reserveToReserve(signer.entityId, toEntityId, tokenId, amount);
 
+      // Process queued J-events to update runtime state
+      if (xln.processJBlockEvents) {
+        await xln.processJBlockEvents();
+      }
+
       console.log(`[VaultStore] ✅ Sent ${amount} to ${toEntityId.slice(0, 12)}...`);
       return { success: true };
     } catch (err) {
