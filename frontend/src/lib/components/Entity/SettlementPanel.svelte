@@ -155,8 +155,10 @@
         const jurisdictionConfig = jurisdictions[0];
         if (!jurisdictionConfig) throw new Error('No jurisdiction available');
 
-        console.log('[On-J] Transfer:', amount, 'to', formatShortId(recipient));
-        const result = await xln.submitReserveToReserve(jurisdictionConfig, entityId, recipient, tokenId, amount);
+        // Convert amount to wei (18 decimals)
+        const amountWei = BigInt(Math.floor(parseFloat(amount) * 1e18)).toString();
+        console.log('[On-J] Transfer:', amount, '(', amountWei, 'wei) to', formatShortId(recipient));
+        const result = await xln.submitReserveToReserve(jurisdictionConfig, entityId, recipient, tokenId, amountWei);
         console.log('[On-J] Confirmed:', result.txHash);
 
         amount = '';
