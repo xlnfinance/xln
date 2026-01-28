@@ -827,6 +827,51 @@ export const setBrowserVMJurisdiction = (env: any, depositoryAddress: string, br
   if (resolvedBrowserVM && env) {
     env.browserVM = resolvedBrowserVM;
     console.log('[BrowserVM] Stored browserVM instance in env (isolated), env.browserVM now:', !!env.browserVM);
+
+    // Set up J-event forwarding: BrowserVM events → env.runtimeInput.entityInputs
+    if (resolvedBrowserVM.onAny && !env._browserVMEventSubscribed) {
+      env._browserVMEventSubscribed = true;
+      resolvedBrowserVM.onAny((events: any[]) => {
+        if (!env.runtimeInput) env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
+
+        // Group events by entity
+        const eventsByEntity = new Map<string, any[]>();
+        for (const event of events) {
+          // Only process canonical J-events
+          if (!['ReserveUpdated', 'SecretRevealed', 'AccountSettled', 'DisputeStarted', 'DebtCreated'].includes(event.name)) continue;
+
+          // Extract entityId from event args
+          const entityId = event.args?.entity || event.args?.entityId || event.args?.leftEntity;
+          if (!entityId) continue;
+
+          const key = String(entityId).toLowerCase();
+          if (!eventsByEntity.has(key)) eventsByEntity.set(key, []);
+          eventsByEntity.get(key)!.push({
+            type: event.name,
+            data: event.args,
+            blockNumber: event.blockNumber || 0,
+            transactionHash: event.transactionHash || '0x',
+          });
+        }
+
+        // Queue entityInputs for each affected entity
+        for (const [entityId, entityEvents] of eventsByEntity) {
+          env.runtimeInput.entityInputs.push({
+            entityId,
+            signerId: 'j-event',
+            entityTxs: [{
+              type: 'j_event',
+              data: { events: entityEvents }
+            }]
+          });
+        }
+
+        if (eventsByEntity.size > 0) {
+          console.log(`🔗 BrowserVM → ${eventsByEntity.size} entities queued for J-event processing`);
+        }
+      });
+      console.log('[BrowserVM] J-event forwarding enabled (events → env.runtimeInput.entityInputs)');
+    }
   } else {
     console.warn('[BrowserVM] FAILED to store: resolvedBrowserVM=', !!resolvedBrowserVM, 'env=', !!env);
   }

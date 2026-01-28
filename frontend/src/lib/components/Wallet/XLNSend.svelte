@@ -100,6 +100,11 @@
       const amountBigint = parseAmount(amount);
       await browserVM.reserveToReserve(entityId, recipientAddress, USDC_TOKEN_ID, amountBigint);
 
+      // Process queued J-events to update runtime state
+      if (xln.processJBlockEvents) {
+        await xln.processJBlockEvents();
+      }
+
       status = 'success';
       await fetchBalance();
       // Reset after success
