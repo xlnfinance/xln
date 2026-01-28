@@ -16,6 +16,20 @@
 import { main, getEnv, process as runtimeProcess, applyRuntimeInput } from './runtime';
 import { safeStringify } from './serialization-utils';
 import type { Env, EntityInput, RuntimeInput } from './types';
+import { encodeBoard, hashBoard } from './entity-factory';
+import { registerSignerKey, deriveSignerKeySync } from './account-crypto';
+
+// ============================================================================
+// MAIN HUB CONFIGURATION
+// ============================================================================
+
+const MAIN_HUB_CONFIG = {
+  name: 'Main',
+  signerId: '1', // Fixed signer ID for Main hub
+  seed: 'xln-main-hub-2026', // Fixed seed for deterministic key derivation
+  faucetAmount: 100n * 10n ** 18n, // $100 in wei (18 decimals)
+  faucetTokenId: 1, // USDC
+};
 
 // ============================================================================
 // SERVER OPTIONS
@@ -258,12 +272,76 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 // MAIN SERVER
 // ============================================================================
 
+// Create Main hub entity and register in environment
+async function createMainHub(env: Env): Promise<string> {
+  console.log('[XLN] Creating Main hub entity...');
+
+  // Register signer key with fixed seed
+  const privateKey = deriveSignerKeySync(MAIN_HUB_CONFIG.seed, MAIN_HUB_CONFIG.signerId);
+  registerSignerKey(MAIN_HUB_CONFIG.signerId, privateKey);
+
+  // Create board config for Main hub
+  const config = {
+    mode: 'proposer-based' as const,
+    threshold: 1n,
+    validators: [MAIN_HUB_CONFIG.signerId],
+    shares: { [MAIN_HUB_CONFIG.signerId]: 1n },
+    jurisdiction: 'arrakis' // Bound to arrakis J-machine
+  };
+
+  const encodedBoard = encodeBoard(config);
+  const boardHash = hashBoard(encodedBoard);
+  const entityId = boardHash; // Lazy entity: entityId = boardHash
+
+  // Create the hub entity
+  await applyRuntimeInput(env, {
+    runtimeTxs: [{
+      type: 'importReplica',
+      entityId,
+      signerId: MAIN_HUB_CONFIG.signerId,
+      data: {
+        isProposer: true,
+        position: { x: 0, y: 0, z: 0 }, // Center position
+        config
+      }
+    }],
+    entityInputs: []
+  });
+
+  // Announce in gossip as hub
+  if (env.gossip) {
+    env.gossip.announce({
+      entityId,
+      runtimeId: MAIN_HUB_CONFIG.signerId,
+      capabilities: ['router', 'hub', 'faucet'],
+      metadata: {
+        name: MAIN_HUB_CONFIG.name,
+        isHub: true,
+        region: 'global',
+        version: '1.0.0',
+      }
+    });
+  }
+
+  console.log(`[XLN] ✅ Main hub created: ${entityId.slice(0, 16)}...`);
+  console.log(`[XLN]    SignerId: ${MAIN_HUB_CONFIG.signerId}`);
+  console.log(`[XLN]    Faucet: $${Number(MAIN_HUB_CONFIG.faucetAmount / 10n ** 18n)} USDC on account open`);
+
+  // Store Main hub entityId for faucet logic
+  (env as any).mainHubEntityId = entityId;
+
+  return entityId;
+}
+
 export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Promise<void> {
   const options = { ...DEFAULT_OPTIONS, ...opts };
 
   // Always initialize runtime - every node needs it
   console.log('[XLN] Initializing runtime...');
   const env = await main();
+
+  // Create Main hub entity (relay hub)
+  const mainHubEntityId = await createMainHub(env);
 
   const server = Bun.serve({
     port: options.port,
