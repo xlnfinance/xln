@@ -3,7 +3,7 @@
  * Usage (internal): bun run runtime/scenarios/p2p-node.ts --role hub|alice|bob ...
  */
 
-import { startRuntimeWsServer } from '../ws-server';
+import { startRuntimeWsServer } from '../networking/ws-server';
 import { main, setRuntimeSeed, startP2P, process as runtimeProcess, applyRuntimeInput, createLazyEntity, generateLazyEntityId } from '../runtime';
 import { processUntil, converge } from './helpers';
 import { isLeft, deriveDelta } from '../account-utils';
@@ -429,6 +429,18 @@ const run = async () => {
       // CRITICAL: Pass callback to feed messages into Hub's runtime
       onEntityInput: async (from: string, input: any) => {
         console.log(`[HUB-RELAY] Received entity_input from=${from.slice(0,10)} entity=${input.entityId.slice(-4)}`);
+
+        // CRITICAL: Ensure we have profiles before processing
+        // Only refresh if we haven't recently (to avoid slowdown)
+        const now = Date.now();
+        const lastRefresh = (env as any)._lastGossipRefresh || 0;
+        if (p2p && (now - lastRefresh > 1000)) {  // Refresh max once per second
+          console.log(`[HUB-RELAY] Refreshing gossip before processing...`);
+          p2p.refreshGossip();
+          (env as any)._lastGossipRefresh = now;
+          await sleep(100);  // Brief wait for response
+        }
+
         if (!env.networkInbox) env.networkInbox = [];
         env.networkInbox.push(input);
         console.log(`[HUB-RELAY] Added to networkInbox, size=${env.networkInbox.length}`);
@@ -494,14 +506,17 @@ const run = async () => {
   console.log(`P2P_NODE_READY role=${role} runtimeId=${env.runtimeId} entityId=${entityId}`);
 
   if (role === 'hub') {
-    // Hub is relay server - just wait for client profiles to arrive via gossip
+    // Hub is relay server - wait for client profiles to arrive via gossip
     console.log('P2P_HUB_WAITING_FOR_PROFILES');
+
+    // Hub's refresh function: poll relay (itself) for updated profiles
+    const hubRefreshGossip = () => p2p.refreshGossip();
 
     // Give clients time to connect and send profiles
     await sleep(1000);
 
-    const aliceProfile = await waitForProfile(env, 'alice', 60, undefined, true, true, true);
-    const bobProfile = await waitForProfile(env, 'bob', 60, undefined, true, true, true);
+    const aliceProfile = await waitForProfile(env, 'alice', 60, hubRefreshGossip, true, true, true);
+    const bobProfile = await waitForProfile(env, 'bob', 60, hubRefreshGossip, true, true, true);
     logProfile('hub sees alice', aliceProfile);
     logProfile('hub sees bob', bobProfile);
     console.log('P2P_GOSSIP_READY');
@@ -565,6 +580,10 @@ const run = async () => {
 
     logAccountState(env, entityId, signerId, aliceProfile.entityId, 'hub-alice after hub credit ACK');
     logAccountState(env, entityId, signerId, bobProfile.entityId, 'hub-bob after hub credit ACK');
+
+    // RE-ANNOUNCE: Profile now includes accounts with alice/bob
+    console.log('HUB: Re-announcing profile with updated accounts...');
+    p2p.updateConfig({});  // Triggers announceLocalProfiles()
 
     console.log('P2P_HUB_READY');
 

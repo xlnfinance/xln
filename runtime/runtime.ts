@@ -18,7 +18,7 @@ function signerToEntityId(address: string): string {
   return '0x' + '0'.repeat(24) + addr;
 }
 
-import { getPerfMs, getWallClockMs } from './time';
+import { getPerfMs, getWallClockMs } from './utils';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { isLeftEntity } from './entity-id-utils';
 import {
@@ -52,11 +52,11 @@ import {
   submitReserveToReserve,
   transferNameBetweenEntities,
 } from './evm';
-import { createGossipLayer } from './gossip';
+import { createGossipLayer } from './networking/gossip';
 import { attachEventEmitters } from './env-events';
 import { deriveSignerAddressSync, deriveSignerKeySync, getSignerPrivateKey, getSignerPublicKey, registerSignerKey, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
-import { buildEntityProfile } from './gossip-helper';
-import { RuntimeP2P, type P2PConfig } from './p2p';
+import { buildEntityProfile } from './networking/gossip-helper';
+import { RuntimeP2P, type P2PConfig } from './networking/p2p';
 import {
   parseReplicaKey,
   extractEntityId,
@@ -110,7 +110,7 @@ import {
   safeParseReplicaKey,
   safeExtractEntityId,
 } from './ids';
-import { type Profile, loadPersistedProfiles } from './gossip.js';
+import { type Profile, loadPersistedProfiles } from './networking/gossip';
 import { setupJEventWatcher, JEventWatcher } from './j-event-watcher';
 import {
   createProfileUpdateTx,
@@ -709,23 +709,25 @@ const applyRuntimeInput = async (
         console.log(`[Runtime] Importing J-machine "${runtimeTx.data.name}" (chain ${runtimeTx.data.chainId})...`);
 
         try {
-          const { getJurisdiction } = await import('./jurisdiction/index.js');
+          const { createJAdapter } = await import('./jadapter');
           const isBrowserVM = runtimeTx.data.rpcs.length === 0;
 
-          // Create jurisdiction via unified interface
-          const jurisdiction = await getJurisdiction({
-            type: isBrowserVM ? 'browser' : 'rpc',
+          // Create jurisdiction via unified JAdapter interface
+          const jadapter = await createJAdapter({
+            mode: isBrowserVM ? 'browservm' : 'rpc',
             chainId: runtimeTx.data.chainId,
             rpcUrl: isBrowserVM ? undefined : runtimeTx.data.rpcs[0],
-            depositoryAddress: runtimeTx.data.contracts?.depository,
-            entityProviderAddress: runtimeTx.data.contracts?.entityProvider,
+            // TODO: Pass all rpcs for failover: rpcs: runtimeTx.data.rpcs
           });
+
+          // Deploy contracts (handles "already deployed" case internally)
+          await jadapter.deployStack();
 
           // For BrowserVM, set as default jurisdiction in env
           if (isBrowserVM) {
-            const browserVM = (jurisdiction as any).getEVM?.();
+            const browserVM = (jadapter as any).browserVM;
             if (browserVM) {
-              setBrowserVMJurisdiction(env, jurisdiction.depositoryAddress, browserVM);
+              setBrowserVMJurisdiction(env, jadapter.addresses.depository, browserVM);
             }
           }
 
@@ -743,8 +745,8 @@ const applyRuntimeInput = async (
             blockDelayMs: 300,
             lastBlockTimestamp: env.timestamp,
             position: { x: 0, y: 50, z: 0 }, // Default position for J-machine
-            depositoryAddress: jurisdiction.depositoryAddress,
-            entityProviderAddress: jurisdiction.entityProviderAddress,
+            depositoryAddress: jadapter.addresses.depository,
+            entityProviderAddress: jadapter.addresses.entityProvider,
           };
           env.jReplicas.set(runtimeTx.data.name, jReplica);
 
@@ -762,13 +764,15 @@ const applyRuntimeInput = async (
             if (!env.eReplicas.has(replicaKey)) {
               console.log(`[Runtime] Auto-creating self-entity for signer ${signer.address.slice(0, 10)}...`);
 
-              // Register on-chain
-              await jurisdiction.registerEntity(
-                signer.privateKey || '',
-                selfEntityId,
-                [signer.address],
-                1n
-              );
+              // Register on-chain via EntityProvider
+              const browserVM = (jadapter as any).browserVM;
+              if (browserVM?.registerEntitiesWithSigners) {
+                await browserVM.registerEntitiesWithSigners([{
+                  entityId: selfEntityId,
+                  signerAddresses: [signer.address],
+                  threshold: 1,
+                }]);
+              }
 
               // Create local replica
               const entityConfig: ConsensusConfig = {
@@ -777,11 +781,11 @@ const applyRuntimeInput = async (
                 validators: [signer.address],
                 shares: { [signer.address]: 1n },
                 jurisdiction: {
-                  address: jurisdiction.depositoryAddress,
+                  address: jadapter.addresses.depository,
                   name: runtimeTx.data.name,
                   chainId: runtimeTx.data.chainId,
-                  entityProviderAddress: jurisdiction.entityProviderAddress,
-                  depositoryAddress: jurisdiction.depositoryAddress,
+                  entityProviderAddress: jadapter.addresses.entityProvider,
+                  depositoryAddress: jadapter.addresses.depository,
                 },
               };
 
@@ -809,8 +813,8 @@ const applyRuntimeInput = async (
               env.eReplicas.set(replicaKey, replica);
 
               // Fund with test tokens (BrowserVM only)
-              if (isBrowserVM) {
-                await jurisdiction.debugFundReserves(selfEntityId, 1, 1000n * 10n**18n);
+              if (isBrowserVM && browserVM?.debugFundReserves) {
+                await browserVM.debugFundReserves(selfEntityId, 1, 1000n * 10n**18n);
                 console.log(`[Runtime] Funded self-entity with 1000 tokens`);
               }
 
@@ -1376,14 +1380,14 @@ const main = async (): Promise<Env> => {
       env.frameLogs = [];
       if (latestSnapshot.browserVMState && isBrowser) {
         try {
-          const { BrowserEVM } = await import('./evms/browser-evm');
-          const browserEvm = new BrowserEVM();
-          await browserEvm.init();
-          await browserEvm.restoreState(latestSnapshot.browserVMState);
-          env.browserVM = browserEvm.getProvider();
-          setBrowserVMJurisdiction(env, browserEvm.getDepositoryAddress(), browserEvm);
+          const { BrowserVMProvider } = await import('./jadapter');
+          const browserVM = new BrowserVMProvider();
+          await browserVM.init();
+          await browserVM.restoreState(latestSnapshot.browserVMState);
+          env.browserVM = browserVM;
+          setBrowserVMJurisdiction(env, browserVM.getDepositoryAddress(), browserVM);
           if (typeof window !== 'undefined') {
-            (window as any).__xlnBrowserVM = browserEvm;
+            (window as any).__xlnBrowserVM = browserVM;
           }
           console.log('✅ BrowserVM restored from persisted state');
         } catch (error) {
@@ -2184,6 +2188,25 @@ export const process = async (
                 }
               }
             }
+
+            // Handle direct mint operations (admin function, bypasses batch)
+            if (jTx.type === 'mint' && jTx.data && browserVM?.debugFundReserves) {
+              const { entityId, tokenId, amount } = jTx.data;
+              if (!quietRuntimeLogs) {
+                console.log(`💰 [J-Machine] Minting ${amount} token ${tokenId} to ${entityId.slice(-4)}`);
+              }
+              try {
+                await browserVM.debugFundReserves(entityId, tokenId, amount);
+                if (!quietRuntimeLogs) {
+                  console.log(`   ✅ Mint successful`);
+                }
+              } catch (error) {
+                console.error(`   ❌ Mint failed: ${error}`);
+                if (env.scenarioMode) {
+                  throw new Error(`J-MINT FAILED: ${error}`);
+                }
+              }
+            }
           }
 
           if (browserVM?.endJurisdictionBlock) {
@@ -2403,14 +2426,14 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
       latestEnv.history = history;
       if (latestEnv.browserVMState && isBrowser) {
         try {
-          const { BrowserEVM } = await import('./evms/browser-evm');
-          const browserEvm = new BrowserEVM();
-          await browserEvm.init();
-          await browserEvm.restoreState(latestEnv.browserVMState);
-          latestEnv.browserVM = browserEvm.getProvider();
-          setBrowserVMJurisdiction(latestEnv, browserEvm.getDepositoryAddress(), browserEvm);
+          const { BrowserVMProvider } = await import('./jadapter');
+          const browserVM = new BrowserVMProvider();
+          await browserVM.init();
+          await browserVM.restoreState(latestEnv.browserVMState);
+          latestEnv.browserVM = browserVM;
+          setBrowserVMJurisdiction(latestEnv, browserVM.getDepositoryAddress(), browserVM);
           if (typeof window !== 'undefined') {
-            (window as any).__xlnBrowserVM = browserEvm;
+            (window as any).__xlnBrowserVM = browserVM;
           }
           console.log('✅ BrowserVM restored from loadEnvFromDB');
         } catch (error) {
@@ -2508,11 +2531,24 @@ const resolveEntityName = (entityId: string) => resolveEntityNameOriginal(db, en
 const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayInfoFromProfileOriginal(db, entityId);
 
 // Avatar functions are already imported and exported above
-export { BrowserEVM } from './evms/browser-evm.js';
 
-// Jurisdiction abstraction (unified interface for browser/rpc)
-export { getJurisdiction, getCachedJurisdiction, clearJurisdictions, listJurisdictions } from './jurisdiction/index.js';
-export type { IJurisdiction, JurisdictionConfig, Token, EntityInfo, TxReceipt } from './jurisdiction/index.js';
+// JAdapter - Unified J-Machine interface (replaces old evms/ and jurisdiction/)
+export { createJAdapter, BrowserVMProvider } from './jadapter';
+export type { JAdapter, JAdapterConfig, JAdapterMode, JEvent } from './jadapter';
+
+// Entity ID utilities - universal parsing, provider-scoping, comparison
+export {
+  normalizeEntityId,
+  compareEntityIds,
+  isLeftEntity,
+  parseUniversalEntityId,
+  createProviderScopedEntityId,
+  getShortId,
+  formatEntityIdDisplay,
+  entityIdsEqual,
+  extractProvider,
+} from './entity-id-utils';
+export type { ParsedEntityId } from './entity-id-utils';
 
 // ASCII visualization exports
 export { formatRuntime, formatEntity, formatAccount, formatOrderbook, formatSummary } from './runtime-ascii';

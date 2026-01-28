@@ -1,4 +1,4 @@
-import { safeStringify } from './serialization-utils';
+import { safeStringify } from '../serialization-utils';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
 export type RuntimeWsMessageType =
@@ -27,7 +27,8 @@ export type RuntimeWsMessage = {
   timestamp?: number;
   payload?: unknown;
   auth?: RuntimeWsAuth;
-  status?: 'delivered' | 'queued' | 'failed';
+  status?: 'delivered' | 'queued' | 'failed' | 'stored';
+  count?: number;
   inReplyTo?: string;
   error?: string;
 };

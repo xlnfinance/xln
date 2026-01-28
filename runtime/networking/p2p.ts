@@ -1,9 +1,9 @@
-import type { Env, EntityInput } from './types';
+import type { Env, EntityInput } from '../types';
 import type { Profile } from './gossip';
 import { RuntimeWsClient } from './ws-client';
 import { buildEntityProfile } from './gossip-helper';
-import { extractEntityId } from './ids';
-import { getCachedSignerPublicKey, registerSignerPublicKey } from './account-crypto';
+import { extractEntityId } from '../ids';
+import { getCachedSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 
@@ -58,6 +58,8 @@ const isHexPublicKey = (value: string): boolean => {
   return hex.length === 66 || hex.length === 130;
 };
 
+const GOSSIP_POLL_MS = 1000; // Poll relay every second
+
 export class RuntimeP2P {
   private env: Env;
   private runtimeId: string;
@@ -71,6 +73,7 @@ export class RuntimeP2P {
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
   private clients: RuntimeWsClient[] = [];
   private pendingByRuntime = new Map<string, EntityInput[]>();
+  private pollInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: RuntimeP2POptions) {
     this.env = options.env;
@@ -115,6 +118,7 @@ export class RuntimeP2P {
 
   connect() {
     this.closeClients();
+    this.startPolling();
     for (const url of this.relayUrls) {
       const client = new RuntimeWsClient({
         url,
@@ -126,7 +130,15 @@ export class RuntimeP2P {
           this.requestSeedGossip();
           this.announceLocalProfiles();
         },
-        onEntityInput: (from, input) => this.onEntityInput(from, input),
+        onEntityInput: async (from, input) => {
+          // Ensure we have sender's profile before processing
+          const senderEntity = input.entityId;
+          if (senderEntity && !this.hasProfileForEntity(senderEntity)) {
+            console.log(`P2P_FETCH_PROFILE: ${senderEntity.slice(-4)} (not in cache)`);
+            await this.fetchProfilesWithRetry();
+          }
+          this.onEntityInput(from, input);
+        },
         onGossipRequest: (from, payload) => this.handleGossipRequest(from, payload),
         onGossipResponse: (from, payload) => this.handleGossipResponse(from, payload),
         onGossipAnnounce: (from, payload) => this.handleGossipAnnounce(from, payload),
@@ -142,8 +154,25 @@ export class RuntimeP2P {
   }
 
   close() {
+    this.stopPolling();
     this.closeClients();
     this.pendingByRuntime.clear();
+  }
+
+  private startPolling() {
+    if (this.pollInterval) return;
+    // Request immediately, then periodically
+    setTimeout(() => this.requestSeedGossip(), 100);
+    this.pollInterval = setInterval(() => {
+      this.requestSeedGossip();
+    }, GOSSIP_POLL_MS);
+  }
+
+  private stopPolling() {
+    if (this.pollInterval) {
+      clearInterval(this.pollInterval);
+      this.pollInterval = null;
+    }
   }
 
   reconnect() {
@@ -207,11 +236,34 @@ export class RuntimeP2P {
   }
 
   private requestSeedGossip() {
-    if (this.seedRuntimeIds.length === 0) return;
     const client = this.getActiveClient();
     if (!client) return;
-    for (const seedId of this.seedRuntimeIds) {
-      client.sendGossipRequest(seedId, { scope: 'all' } satisfies GossipRequestPayload);
+
+    // Request all profiles from relay (simple polling)
+    client.sendGossipRequest(this.runtimeId, { scope: 'all' } satisfies GossipRequestPayload);
+    console.log(`P2P_GOSSIP_REQUEST scope=all`);
+  }
+
+  // Call this to refresh profiles from relay
+  refreshGossip() {
+    this.requestSeedGossip();
+  }
+
+  // Check if we have a profile for an entity in local gossip cache
+  private hasProfileForEntity(entityId: string): boolean {
+    const profiles = this.env.gossip?.getProfiles?.() || [];
+    return profiles.some((p: any) => p.entityId === entityId);
+  }
+
+  // Fetch profiles from relay with retry
+  private async fetchProfilesWithRetry(): Promise<void> {
+    // Request profiles multiple times with delays
+    for (let i = 0; i < 3; i++) {
+      this.requestSeedGossip();
+      await new Promise(resolve => setTimeout(resolve, 500));
+      // Check if profiles arrived
+      const profiles = this.env.gossip?.getProfiles?.() || [];
+      console.log(`P2P_FETCH_RETRY: attempt ${i + 1}, got ${profiles.length} profiles`);
     }
   }
 
@@ -221,7 +273,15 @@ export class RuntimeP2P {
     for (const profile of profiles) {
       this.env.gossip?.announce?.(profile);
     }
-    if (this.seedRuntimeIds.length === 0) return;
+
+    // ALWAYS announce to relay for storage (relay stores regardless of 'to' field)
+    const client = this.getActiveClient();
+    if (client) {
+      client.sendGossipAnnounce(this.runtimeId, { profiles });
+      console.log(`P2P_PROFILE_ANNOUNCE n=${profiles.length}`);
+    }
+
+    // Also send to specific seeds if configured (for direct peer notification)
     for (const seedId of this.seedRuntimeIds) {
       this.announceProfilesTo(seedId, profiles);
       console.log(`P2P_PROFILE_SENT from=${this.runtimeId.slice(0, 10)} to=${seedId.slice(0, 10)} profiles=${profiles.length}`);
@@ -309,6 +369,10 @@ export class RuntimeP2P {
   private applyIncomingProfiles(from: string, profiles: Profile[]) {
     if (profiles.length === 0) return;
     for (const profile of profiles) {
+      // Store in local gossip cache
+      this.env.gossip?.announce?.(profile);
+
+      // Register public key for signature verification
       const publicKey = profile.metadata?.entityPublicKey;
       if (publicKey && typeof publicKey === 'string' && isHexPublicKey(publicKey)) {
         registerSignerPublicKey(profile.entityId, publicKey);

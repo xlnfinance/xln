@@ -16,13 +16,13 @@
 
 import type { Env, EntityInput, EntityReplica, Delta } from '../types';
 import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from '../evm';
-import { BrowserEVM } from '../evms/browser-evm';
+import { BrowserVMProvider } from '../jadapter';
 import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD } from './helpers';
 import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta, isLeft } from '../account-utils';
-import { createGossipLayer } from '../gossip';
+import { createGossipLayer } from '../networking/gossip';
 import { safeStringify } from '../serialization-utils';
 import { ethers } from 'ethers';
 
@@ -400,13 +400,12 @@ export async function ahb(env: Env): Promise<void> {
     let browserVM = getBrowserVMInstance(env);
     if (!browserVM) {
       console.log('[AHB] No BrowserVM found (getBrowserVMInstance returned null) - creating one...');
-      const evm = new BrowserEVM();
-      await evm.init();
-      env.browserVM = evm.getProvider(); // Store in env for isolation
-      const depositoryAddress = evm.getDepositoryAddress();
+      browserVM = new BrowserVMProvider();
+      await browserVM.init();
+      env.browserVM = browserVM; // Store in env for isolation
+      const depositoryAddress = browserVM.getDepositoryAddress();
       // Register with runtime so other code can access it
-      setBrowserVMJurisdiction(env, depositoryAddress, evm);
-      browserVM = evm.getProvider();
+      setBrowserVMJurisdiction(env, depositoryAddress, browserVM);
       console.log('[AHB] ✅ BrowserVM created, depository:', depositoryAddress);
     } else {
       console.log('[AHB] ✅ BrowserVM instance available');

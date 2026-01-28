@@ -3,7 +3,7 @@
  * Builds from gossip profiles to create routing graph
  */
 
-import type { Profile } from '../gossip';
+import type { Profile } from '../networking/gossip';
 
 export interface ChannelEdge {
   from: string;

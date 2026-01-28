@@ -1,6 +1,6 @@
-import type { RuntimeInput, EntityInput } from './types';
+import type { RuntimeInput, EntityInput } from '../types';
 import { deserializeWsMessage, makeHelloNonce, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
-import { signDigest } from './account-crypto';
+import { signDigest } from '../account-crypto';
 
 type WebSocketLike = WebSocket & { on: (event: string, cb: (...args: any[]) => void) => void };
 
@@ -138,11 +138,11 @@ export class RuntimeWsClient {
       await this.options.onGossipRequest?.(msg.from, msg.payload);
       return;
     }
-    if (msg.type === 'gossip_response' && msg.payload && msg.from) {
+    if ((msg.type === 'gossip_response' || msg.type === 'gossip_subscribed') && msg.payload && msg.from) {
       await this.options.onGossipResponse?.(msg.from, msg.payload);
       return;
     }
-    if (msg.type === 'gossip_announce' && msg.payload && msg.from) {
+    if ((msg.type === 'gossip_announce' || msg.type === 'gossip_update') && msg.payload && msg.from) {
       await this.options.onGossipAnnounce?.(msg.from, msg.payload);
       return;
     }
@@ -198,6 +198,17 @@ export class RuntimeWsClient {
       id: makeMessageId(),
       from: this.options.runtimeId,
       to,
+      timestamp: nextTimestamp(),
+      payload,
+    });
+  }
+
+  sendGossipSubscribe(payload: { scope?: 'all'; entityIds?: string[] }): boolean {
+    return this.sendRaw({
+      type: 'gossip_subscribe',
+      id: makeMessageId(),
+      from: this.options.runtimeId,
+      to: this.options.runtimeId, // To relay (self)
       timestamp: nextTimestamp(),
       payload,
     });

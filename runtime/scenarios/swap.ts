@@ -25,7 +25,7 @@ import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime, formatEntity } from '../runtime-ascii';
 import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
 import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
-import { createGossipLayer } from '../gossip';
+import { createGossipLayer } from '../networking/gossip';
 
 // Lazy-loaded runtime functions
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
