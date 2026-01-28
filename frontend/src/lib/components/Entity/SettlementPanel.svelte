@@ -27,6 +27,9 @@
   let disputeReason = '';
   let sending = false;
 
+  // Self-transfer check
+  $: isSelfTransfer = recipientEntityId && recipientEntityId.toLowerCase() === entityId.toLowerCase();
+
   // All entities
   $: allEntities = activeReplicas ? Array.from(activeReplicas.keys() as IterableIterator<string>)
     .map(key => key.split(':')[0]!)
@@ -143,6 +146,7 @@
       } else if (action === 'transfer') {
         const recipient = recipientEntityId || counterpartyEntityId;
         if (!recipient) throw new Error('Select a recipient');
+        if (recipient.toLowerCase() === entityId.toLowerCase()) throw new Error('Cannot transfer to yourself');
 
         const xln = await getXLN();
         if (!xln) throw new Error('XLN not initialized');
@@ -290,11 +294,14 @@
       value={recipientEntityId}
       entities={allEntities}
       {contacts}
-      excludeId=""
+      excludeId={entityId}
       placeholder="Select recipient..."
       disabled={sending}
       on:change={handleRecipientChange}
     />
+    {#if isSelfTransfer}
+      <p class="error-hint">Cannot transfer to yourself</p>
+    {/if}
   {:else}
     <EntityInput
       label={action === 'dispute' ? 'Counterparty' : 'Account'}
@@ -345,7 +352,7 @@
     class="btn-submit"
     class:dispute={action === 'dispute'}
     on:click={submit}
-    disabled={sending || (action === 'dispute' ? !counterpartyEntityId : (!amount || (action === 'transfer' ? !recipientEntityId : !counterpartyEntityId)))}
+    disabled={sending || (action === 'dispute' ? !counterpartyEntityId : (!amount || (action === 'transfer' ? (!recipientEntityId || isSelfTransfer) : !counterpartyEntityId)))}
   >
     {#if sending}
       Processing...
@@ -601,6 +608,12 @@
 
   .btn-submit.dispute:hover:not(:disabled) {
     background: linear-gradient(135deg, #b91c1c, #991b1b);
+  }
+
+  .error-hint {
+    margin: 4px 0 0;
+    font-size: 11px;
+    color: #ef4444;
   }
 
 </style>
