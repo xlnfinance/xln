@@ -5522,14 +5522,20 @@ let vrHammer: VRHammer | null = null;
     const intersects = raycaster.intersectObjects(entityMeshes);
 
     if (intersects.length > 0) {
-      const intersectedObject = intersects[0]?.object;
+      let intersectedObject = intersects[0]?.object;
       if (!intersectedObject) {
         throw new Error('FINTECH-SAFETY: No intersected object in double-click');
       }
-      const entity = entities.find(e => e.mesh === intersectedObject);
+      // Walk up parent chain to find entity mesh (raycaster may hit child mesh like label/glow)
+      let entity = entities.find(e => e.mesh === intersectedObject);
+      while (!entity && intersectedObject.parent && intersectedObject.parent !== scene) {
+        intersectedObject = intersectedObject.parent;
+        entity = entities.find(e => e.mesh === intersectedObject);
+      }
 
       if (!entity) {
-        throw new Error('FINTECH-SAFETY: Entity not found for double-clicked object');
+        console.warn('Double-click: Could not find entity for object', intersectedObject);
+        return; // Gracefully ignore instead of throwing
       }
 
       // Switch to normal panel view and focus this entity
