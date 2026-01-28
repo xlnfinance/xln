@@ -1,7 +1,21 @@
 /**
  * XLN Networking Layer
  *
- * Peer-to-peer communication, gossip protocol, and relay infrastructure.
+ * ARCHITECTURE: "Dumb pipe" transport - all security at consensus layer.
+ *
+ * This layer provides:
+ * - WebSocket relay for message routing between runtimes
+ * - Gossip protocol for entity profile discovery
+ * - X25519 encryption for private peer-to-peer messages
+ * - Profile signing for anti-spoofing
+ *
+ * SECURITY MODEL:
+ * - NO replay protection here (handled by accountFrame heights in consensus)
+ * - NO transaction validation here (handled by entity/account validators)
+ * - Profile signatures prevent identity spoofing
+ * - Even malicious relay can't forge transactions (needs validator keys)
+ *
+ * See individual module headers for detailed security documentation.
  */
 
 // Gossip protocol
