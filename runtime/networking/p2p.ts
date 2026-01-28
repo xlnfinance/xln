@@ -4,8 +4,10 @@ import { RuntimeWsClient } from './ws-client';
 import { buildEntityProfile } from './gossip-helper';
 import { extractEntityId } from '../ids';
 import { getCachedSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
+import { signProfile, verifyProfileSignature } from './profile-signing';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
+const MAX_QUEUE_PER_RUNTIME = 100; // Prevent memory exhaustion
 
 export type P2PConfig = {
   relayUrls?: string[];
@@ -198,6 +200,8 @@ export class RuntimeP2P {
 
     const queue = this.pendingByRuntime.get(targetRuntimeId) || [];
     queue.push(input);
+    // Enforce queue size limit to prevent memory exhaustion
+    while (queue.length > MAX_QUEUE_PER_RUNTIME) queue.shift();
     this.pendingByRuntime.set(targetRuntimeId, queue);
     console.log(`📥 P2P-QUEUED: Message queued for ${targetRuntimeId.slice(0,10)}, queue size: ${queue.length}`);
   }
@@ -332,7 +336,17 @@ export class RuntimeP2P {
           entityPublicKey: `0x${toHex(publicKey)}`,
         };
       }
-      profiles.push(profile);
+
+      // Sign profile for anti-spoofing
+      let signedProfile = profile;
+      if (firstValidator && this.env.runtimeSeed) {
+        try {
+          signedProfile = signProfile({ runtimeSeed: this.env.runtimeSeed }, profile, firstValidator);
+        } catch (error) {
+          console.warn(`P2P_PROFILE_SIGN_FAILED: ${entityId.slice(-4)} - ${(error as Error).message}`);
+        }
+      }
+      profiles.push(signedProfile);
     }
     return profiles;
   }
@@ -368,7 +382,22 @@ export class RuntimeP2P {
 
   private applyIncomingProfiles(from: string, profiles: Profile[]) {
     if (profiles.length === 0) return;
+    let verified = 0;
+    let unsigned = 0;
     for (const profile of profiles) {
+      // Verify profile signature if present (anti-spoofing)
+      if (profile.metadata?.profileSignature) {
+        const valid = verifyProfileSignature(profile);
+        if (!valid) {
+          console.warn(`P2P_PROFILE_INVALID_SIGNATURE: ${profile.entityId.slice(-4)} - rejecting`);
+          continue; // Skip invalid profiles
+        }
+        verified++;
+      } else {
+        // Warn but accept unsigned profiles for migration
+        unsigned++;
+      }
+
       // Store in local gossip cache
       this.env.gossip?.announce?.(profile);
 
@@ -378,7 +407,7 @@ export class RuntimeP2P {
         registerSignerPublicKey(profile.entityId, publicKey);
       }
     }
-    console.log(`P2P_PROFILE_RECEIVED from=${from.slice(0, 10)} profiles=${profiles.length}`);
+    console.log(`P2P_PROFILE_RECEIVED from=${from.slice(0, 10)} total=${profiles.length} verified=${verified} unsigned=${unsigned}`);
     this.onGossipProfiles(from, profiles);
   }
 
