@@ -205,12 +205,35 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
 
     // === MVP: Create entity and fund with $1000 USDC ===
     console.log('[VaultStore.createRuntime] Creating user entity...');
-    const { generateLazyEntityId, encodeBoard, hashBoard } = await import('@xln/runtime/entity-factory');
+    const { generateLazyEntityId } = await import('@xln/runtime/entity-factory');
     const { applyRuntimeInput } = await import('@xln/runtime/runtime');
 
     // Create entity config (single-signer, threshold 1)
     const signerAddress = firstAddress;
     const entityProviderAddress = browserVM.getEntityProviderAddress();
+
+    // Generate entityId using canonical lazy entity ID (sorted validators, consistent encoding)
+    // This ensures same signer → same entityId regardless of where it's generated
+    // For lazy entities: entityId == boardHash (as per EntityProvider contract)
+    //
+    // TODO(provider-scoped-entities): Current format is entityId = boardHash (local to EP)
+    // Future format: entityAddress = hash(providerAddress + entityId)
+    // Why: Same boardHash on different EntityProviders should be different global addresses
+    //      (like user@google vs user@github in OAuth)
+    // When: Needed for multi-jurisdiction routing and cross-EP entity references
+    // Impact on Hanko:
+    //   - Current: 65-byte short hanko (signature only) - sufficient for self-entities
+    //   - Future: Extended hanko = sig(65) + entityId(32) + providerAddress(20) = 117 bytes
+    //   - Verifier reconstructs entityAddress from hanko fields
+    // EP Generalization:
+    //   - Current: Single EP per Depository (rigid but simple)
+    //   - Future: Multiple EPs can authenticate/dispute in same Depository
+    //   - Cross-EP entity references for federated trust
+    const entityId = generateLazyEntityId([signerAddress], 1n);
+    console.log('[VaultStore.createRuntime] Entity ID:', entityId.slice(0, 18) + '...');
+    console.log('[VaultStore.createRuntime]   signer:', signerAddress);
+    console.log('[VaultStore.createRuntime]   provider:', entityProviderAddress);
+
     const entityConfig = {
       mode: 'proposer-based' as const,
       threshold: 1n,
@@ -224,11 +247,6 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         depositoryAddress: depositoryAddress,
       }
     };
-
-    // Generate entityId from board hash
-    const encodedBoard = encodeBoard(entityConfig);
-    const entityId = hashBoard(encodedBoard);
-    console.log('[VaultStore.createRuntime] Entity ID:', entityId.slice(0, 18) + '...');
 
     // Import entity replica into runtime
     await applyRuntimeInput(newEnv, {
