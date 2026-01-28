@@ -3,7 +3,7 @@
  * Sets credit limit for a specific token (Channel.ts SetCreditLimit pattern)
  */
 
-import { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx } from '../../types';
 import { getAccountPerspective } from '../../state-helpers';
 import { FINANCIAL } from '../../constants';
 

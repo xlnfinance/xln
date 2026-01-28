@@ -369,11 +369,11 @@ export type JurisdictionEvent =
   | (JEventMetadata & {
       type: 'InsuranceClaimed';
       data: {
-        entityId: string;
-        counterpartyId: string;
+        insured: string;
+        insurer: string;
+        creditor: string;
         tokenId: number;
         amount: string;
-        claimReason: string;
       };
     })
   | (JEventMetadata & {
@@ -390,6 +390,65 @@ export type JurisdictionEvent =
         hankoHash: string;     // Hash of hanko data for verification
         nonce: number;         // Batch nonce (incrementing per entity)
         success: boolean;      // Whether batch processing succeeded
+      };
+    })
+  | (JEventMetadata & {
+      type: 'InsuranceRegistered';
+      data: {
+        insured: string;
+        insurer: string;
+        tokenId: number;
+        limit: string;
+        expiresAt: string;
+      };
+    })
+  | (JEventMetadata & {
+      type: 'InsuranceExpired';
+      data: {
+        insured: string;
+        insurer: string;
+        tokenId: number;
+      };
+    })
+  | (JEventMetadata & {
+      type: 'DebtCreated';
+      data: {
+        debtor: string;
+        creditor: string;
+        tokenId: number;
+        amount: string;
+        debtIndex: number;
+      };
+    })
+  | (JEventMetadata & {
+      type: 'DisputeStarted';
+      data: {
+        sender: string;
+        counterentity: string;
+        disputeNonce: string;
+        proofbodyHash: string;
+        initialArguments: string;
+      };
+    })
+  | (JEventMetadata & {
+      type: 'DisputeFinalized';
+      data: {
+        sender: string;
+        counterentity: string;
+        initialDisputeNonce: string;
+        initialProofbodyHash: string;
+        finalProofbodyHash: string;
+      };
+    })
+  | (JEventMetadata & {
+      type: 'DebtEnforced';
+      data: {
+        debtor: string;
+        creditor: string;
+        tokenId: number;
+        amountPaid: string;
+        remainingAmount: string;
+        newDebtIndex: number;
       };
     });
 
@@ -1225,6 +1284,15 @@ export type AccountTx =
         collateral: bigint;    // Absolute collateral from j-event
         ondelta: bigint;       // Absolute ondelta from j-event
       };
+    }
+  | {
+      type: 'j_event_claim';
+      data: {
+        jHeight: number;
+        jBlockHash: string;
+        events: JurisdictionEvent[];
+        observedAt: number;
+      };
     };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1620,9 +1688,9 @@ export interface EnvSnapshot {
   // Fed Chair educational subtitles (AHB demo)
   subtitle?: {
     title: string;           // Technical summary (e.g., "Reserve-to-Reserve Transfer")
-    what: string;            // What's happening
-    why: string;             // Why it matters
-    tradfiParallel: string;  // Traditional finance equivalent
+    what?: string;           // What's happening (optional)
+    why?: string;            // Why it matters (optional)
+    tradfiParallel?: string; // Traditional finance equivalent (optional)
     keyMetrics?: string[];   // Bullet points of key numbers
   };
   // Cinematic view state for scenario playback

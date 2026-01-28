@@ -11,7 +11,7 @@
  * This prevents drift from multiple R→C operations.
  */
 
-import { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx } from '../../types';
 import { getDefaultCreditLimit } from '../../account-utils';
 
 export function handleReserveToCollateral(

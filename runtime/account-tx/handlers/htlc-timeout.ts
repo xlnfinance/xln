@@ -8,7 +8,7 @@
  * Note: NO delta change - funds stay with sender (hold just releases)
  */
 
-import { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx } from '../../types';
 
 export async function handleHtlcTimeout(
   accountMachine: AccountMachine,

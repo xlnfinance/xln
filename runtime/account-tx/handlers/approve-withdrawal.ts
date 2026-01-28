@@ -4,7 +4,7 @@
  * Reference: 2019src.txt lines 855-978 (giveWithdrawal)
  */
 
-import { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx } from '../../types';
 import { getAccountPerspective } from '../../state-helpers';
 
 export function handleApproveWithdrawal(

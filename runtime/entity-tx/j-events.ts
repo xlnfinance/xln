@@ -1,4 +1,4 @@
-import { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env } from '../types';
+import type { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env } from '../types';
 import { DEBUG } from '../utils';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
 import { getTokenInfo, getDefaultCreditLimit } from '../account-utils';
@@ -315,8 +315,8 @@ async function tryFinalizeJBlocks(
 
     // Does this group meet the threshold?
     if (BigInt(signerCount) >= threshold) {
-      const jHeight = observations[0].jHeight;
-      const jBlockHash = observations[0].jBlockHash;
+      const jHeight = observations[0]!.jHeight;
+      const jBlockHash = observations[0]!.jBlockHash;
 
       // ─────────────────────────────────────────────────────────────────────────
       // IDEMPOTENCY CHECK: Skip if this block height was already finalized
@@ -502,7 +502,7 @@ async function applyFinalizedJEvent(
     if (route.pendingFee) {
       newState.htlcFeesEarned = (newState.htlcFeesEarned || 0n) + route.pendingFee;
       console.log(`💰 HTLC: Fee earned on on-chain reveal: ${route.pendingFee} (total: ${newState.htlcFeesEarned})`);
-      route.pendingFee = undefined;
+      delete route.pendingFee;
     }
 
     if (route.outboundLockId) {
@@ -555,7 +555,7 @@ async function applyFinalizedJEvent(
     const account = newState.accounts.get(counterpartyEntityId as string);
     if (!account) {
       console.warn(`   ⚠️ No account for ${cpShort}`);
-      return newState;
+      return { newState, mempoolOps };
     }
 
     // Initialize consensus fields
@@ -793,7 +793,7 @@ async function applyFinalizedJEvent(
 
     if (account) {
       if (account.activeDispute) {
-        account.activeDispute = undefined;
+        delete account.activeDispute;
         addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialDisputeNonce)})`);
         console.log(`✅ activeDispute cleared for ${counterpartyId.slice(-4)} (proof=${String(initialProofbodyHash).slice(0, 10)}...)`);
       } else {

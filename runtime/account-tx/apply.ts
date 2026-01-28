@@ -3,7 +3,7 @@
  * Routes AccountTx to appropriate handlers (like entity-tx/apply.ts pattern)
  */
 
-import { AccountMachine, AccountTx } from '../types';
+import type { AccountMachine, AccountTx } from '../types';
 import { getAccountPerspective } from '../state-helpers';
 import { handleAddDelta } from './handlers/add-delta';
 import { handleSetCreditLimit } from './handlers/set-credit-limit';

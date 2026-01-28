@@ -4,7 +4,7 @@
  * Reference: Channel.ts DirectPayment transition (2024_src/app/Transition.ts:321-344)
  */
 
-import { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx } from '../../types';
 import { deriveDelta, getDefaultCreditLimit } from '../../account-utils';
 import { FINANCIAL } from '../../constants';
 import { isLeftEntity } from '../../entity-id-utils';

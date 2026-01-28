@@ -11,7 +11,7 @@
  * - Enforces revealBeforeHeight for griefing protection
  */
 
-import { AccountMachine, AccountTx, HtlcLock, Delta } from '../../types';
+import type { AccountMachine, AccountTx, HtlcLock, Delta } from '../../types';
 import { deriveDelta, getDefaultCreditLimit } from '../../account-utils';
 import { FINANCIAL } from '../../constants';
 import { isLeftEntity } from '../../entity-id-utils';
@@ -117,7 +117,7 @@ export async function handleHtlcLock(
     senderIsLeft,
     createdHeight: accountMachine.currentHeight,
     createdTimestamp: currentTimestamp,
-    envelope
+    ...(envelope !== undefined && { envelope }),
   };
 
   // 8. Update capacity hold (prevents double-spend)

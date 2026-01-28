@@ -273,7 +273,7 @@ export class JEventWatcher {
     }
 
     // All events in batch share same block info (they're from same tx)
-    const firstEvent = canonicalEvents[0];
+    const firstEvent = canonicalEvents[0]!;  // Safe: length check above guarantees element exists
     const blockNumber = firstEvent.blockNumber ?? Number(this.browserVM!.getBlockNumber());
     const blockHash = firstEvent.blockHash ?? this.browserVM!.getBlockHash();
 
@@ -345,16 +345,16 @@ export class JEventWatcher {
         return [{
           type: 'ReserveUpdated',
           data: {
-            entity: event.args.entity,
-            tokenId: Number(event.args.tokenId),
-            newBalance: event.args.newBalance?.toString() || '0',
+            entity: event.args['entity'],
+            tokenId: Number(event.args['tokenId']),
+            newBalance: event.args['newBalance']?.toString() || '0',
           },
         }];
 
       case 'AccountSettled': {
         // Return ALL settlements relevant to this entity (not just first)
         const results: any[] = [];
-        const settledArray = event.args.settled || event.args[''] || event.args[0] || [];
+        const settledArray = event.args['settled'] || event.args[''] || event.args[0] || [];
         for (const settled of settledArray) {
           const left = settled[0] || settled.left;
           const right = settled[1] || settled.right;
@@ -389,9 +389,9 @@ export class JEventWatcher {
         return [{
           type: 'SecretRevealed',
           data: {
-            hashlock: event.args.hashlock,
-            revealer: event.args.revealer,
-            secret: event.args.secret,
+            hashlock: event.args['hashlock'],
+            revealer: event.args['revealer'],
+            secret: event.args['secret'],
           },
         }];
 
@@ -399,11 +399,11 @@ export class JEventWatcher {
         return [{
           type: 'DisputeStarted',
           data: {
-            sender: event.args.sender,
-            counterentity: event.args.counterentity,
-            disputeNonce: event.args.disputeNonce,
-            proofbodyHash: event.args.proofbodyHash,  // From on-chain
-            initialArguments: event.args.initialArguments || '0x',
+            sender: event.args['sender'],
+            counterentity: event.args['counterentity'],
+            disputeNonce: event.args['disputeNonce'],
+            proofbodyHash: event.args['proofbodyHash'],  // From on-chain
+            initialArguments: event.args['initialArguments'] || '0x',
           },
         }];
 
@@ -411,11 +411,11 @@ export class JEventWatcher {
         return [{
           type: 'DisputeFinalized',
           data: {
-            sender: event.args.sender,
-            counterentity: event.args.counterentity,
-            initialDisputeNonce: event.args.initialDisputeNonce,
-            initialProofbodyHash: event.args.initialProofbodyHash,
-            finalProofbodyHash: event.args.finalProofbodyHash,
+            sender: event.args['sender'],
+            counterentity: event.args['counterentity'],
+            initialDisputeNonce: event.args['initialDisputeNonce'],
+            initialProofbodyHash: event.args['initialProofbodyHash'],
+            finalProofbodyHash: event.args['finalProofbodyHash'],
           },
         }];
 
@@ -423,11 +423,11 @@ export class JEventWatcher {
         return [{
           type: 'DebtCreated',
           data: {
-            debtor: event.args.debtor,
-            creditor: event.args.creditor,
-            tokenId: Number(event.args.tokenId),
-            amount: event.args.amount?.toString() || '0',
-            debtIndex: Number(event.args.debtIndex || 0),
+            debtor: event.args['debtor'],
+            creditor: event.args['creditor'],
+            tokenId: Number(event.args['tokenId']),
+            amount: event.args['amount']?.toString() || '0',
+            debtIndex: Number(event.args['debtIndex'] || 0),
           },
         }];
 
@@ -435,10 +435,10 @@ export class JEventWatcher {
         return [{
           type: 'HankoBatchProcessed',
           data: {
-            entityId: event.args.entityId,
-            hankoHash: event.args.hankoHash,
-            nonce: Number(event.args.nonce),
-            success: Boolean(event.args.success),
+            entityId: event.args['entityId'],
+            hankoHash: event.args['hankoHash'],
+            nonce: Number(event.args['nonce']),
+            success: Boolean(event.args['success']),
           },
         }];
 
@@ -458,14 +458,14 @@ export class JEventWatcher {
 
     switch (event.name) {
       case 'ReserveUpdated':
-        return normalizeId(event.args.entity) === normalizedEntityId;
+        return normalizeId(event.args['entity']) === normalizedEntityId;
       case 'SecretRevealed':
         // Global relevance: any entity with a matching hashlock should observe
         return true;
       case 'AccountSettled': {
         // AccountSettled has array of Settled structs - check if entity is left or right in any
-        // Can be event.args.settled (named param) or event.args[0] (unnamed) or event.args['']
-        const settledArray = event.args.settled || event.args[''] || event.args[0] || [];
+        // Can be event.args['settled'] (named param) or event.args[0] (unnamed) or event.args['']
+        const settledArray = event.args['settled'] || event.args[''] || event.args[0] || [];
         for (const settled of settledArray) {
           const left = normalizeId(settled[0] || settled.left);
           const right = normalizeId(settled[1] || settled.right);
@@ -476,19 +476,19 @@ export class JEventWatcher {
 
       case 'DisputeStarted':
         // Entity is relevant if they are sender OR counterentity (both need to know)
-        return normalizeId(event.args.sender) === normalizedEntityId || normalizeId(event.args.counterentity) === normalizedEntityId;
+        return normalizeId(event.args['sender']) === normalizedEntityId || normalizeId(event.args['counterentity']) === normalizedEntityId;
 
       case 'DisputeFinalized':
         // Entity is relevant if they are sender OR counterentity (both need to know)
-        return normalizeId(event.args.sender) === normalizedEntityId || normalizeId(event.args.counterentity) === normalizedEntityId;
+        return normalizeId(event.args['sender']) === normalizedEntityId || normalizeId(event.args['counterentity']) === normalizedEntityId;
 
       case 'DebtCreated':
         // Entity is relevant if they are debtor OR creditor
-        return normalizeId(event.args.debtor) === normalizedEntityId || normalizeId(event.args.creditor) === normalizedEntityId;
+        return normalizeId(event.args['debtor']) === normalizedEntityId || normalizeId(event.args['creditor']) === normalizedEntityId;
 
       case 'HankoBatchProcessed':
         // Entity is relevant if they submitted the batch
-        return normalizeId(event.args.entityId) === normalizedEntityId;
+        return normalizeId(event.args['entityId']) === normalizedEntityId;
 
       default:
         return false;
@@ -525,7 +525,7 @@ export class JEventWatcher {
    */
   private async syncAllProposerReplicas(env: Env): Promise<void> {
     try {
-      const currentBlock = await this.provider.getBlockNumber();
+      const currentBlock = await this.provider!.getBlockNumber();
 
       if (DEBUG) {
         console.log(`🔭🔍 SYNC-START: Current blockchain block=${currentBlock}, total eReplicas=${env.eReplicas.size}`);
@@ -651,7 +651,7 @@ export class JEventWatcher {
     }
 
     // Get all relevant events for this entity
-    const reserveFilter = this.depositoryContract.filters['ReserveUpdated'];
+    const reserveFilter = this.depositoryContract!.filters['ReserveUpdated'];
 
     if (!reserveFilter) {
       throw new Error('Contract filters not available');
@@ -660,7 +660,7 @@ export class JEventWatcher {
     // Note: AccountSettled event support for ethers RPC mode can be added here when needed
     // Currently only supporting ReserveUpdated for RPC mode (BrowserVM has full AccountSettled support)
     const [reserveEvents] = await Promise.all([
-      this.depositoryContract.queryFilter(
+      this.depositoryContract!.queryFilter(
         reserveFilter(entityId),
         fromBlock,
         toBlock
@@ -792,7 +792,7 @@ export class JEventWatcher {
    */
   async getCurrentBlockNumber(): Promise<number> {
     try {
-      return await this.provider.getBlockNumber();
+      return await this.provider!.getBlockNumber();
     } catch (error) {
       if (DEBUG) {
         console.log(`🔭⚠️  J-WATCHER: Could not get current block, using 0:`, error instanceof Error ? error.message : String(error));

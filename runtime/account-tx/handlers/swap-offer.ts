@@ -10,7 +10,7 @@
  * 5. Store in swapOffers Map
  */
 
-import { AccountMachine, AccountTx, SwapOffer } from '../../types';
+import type { AccountMachine, AccountTx, SwapOffer } from '../../types';
 import { deriveDelta, isLeft } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { formatEntityId } from '../../utils';
@@ -24,7 +24,7 @@ export async function handleSwapOffer(
   isOurFrame: boolean,
   currentHeight: number,
   isValidation: boolean = false
-): Promise<{ success: boolean; events: string[]; error?: string }> {
+): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: { offerId: string; makerIsLeft: boolean; fromEntity: string; toEntity: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; minFillRatio: number } }> {
   const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, minFillRatio } = accountTx.data;
   const events: string[] = [];
 
