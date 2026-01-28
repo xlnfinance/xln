@@ -212,6 +212,9 @@ export interface XLNModule {
   getEntityDisplayInfo: (entityId: string) => EntityDisplayInfo;
   getSignerDisplayInfo: (signerId: string) => SignerDisplayInfo;
 
+  // Crypto key management (for HD wallet integration)
+  registerSignerKey: (signerId: string, privateKey: Uint8Array) => void;
+
   // Account utilities
   deriveDelta: (delta: Delta, isLeft: boolean) => DerivedDelta;
   isLeft: (entityId: string, counterpartyId: string) => boolean;
