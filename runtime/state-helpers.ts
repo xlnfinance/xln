@@ -306,9 +306,13 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
         txs: cloneArray(replica.proposal.txs),
         hash: replica.proposal.hash,
         newState: replica.proposal.newState,
-        signatures: replica.proposal.signatures ? new Map(replica.proposal.signatures) : undefined,
-        hashes: replica.proposal.hashes ? [...replica.proposal.hashes] : undefined,
-        hankos: replica.proposal.hankos ? [...replica.proposal.hankos] : undefined,
+        // Stored outputs from proposal time (used at commit, NOT re-applied)
+        ...(replica.proposal.outputs && { outputs: [...replica.proposal.outputs] }),
+        ...(replica.proposal.jOutputs && { jOutputs: [...replica.proposal.jOutputs] }),
+        // Deep clone HashToSign objects (hash, type, context)
+        ...(replica.proposal.hashesToSign && { hashesToSign: replica.proposal.hashesToSign.map(h => ({ ...h })) }),
+        ...(replica.proposal.collectedSigs && { collectedSigs: new Map(Array.from(replica.proposal.collectedSigs.entries()).map(([k, v]) => [k, [...v]])) }),
+        ...(replica.proposal.hankos && { hankos: [...replica.proposal.hankos] }),
       }
     }),
     ...(replica.lockedFrame && {
@@ -317,14 +321,17 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
         txs: cloneArray(replica.lockedFrame.txs),
         hash: replica.lockedFrame.hash,
         newState: replica.lockedFrame.newState,
-        signatures: replica.lockedFrame.signatures ? new Map(replica.lockedFrame.signatures) : undefined,
-        hashes: replica.lockedFrame.hashes ? [...replica.lockedFrame.hashes] : undefined,
-        hankos: replica.lockedFrame.hankos ? [...replica.lockedFrame.hankos] : undefined,
+        // Deep clone HashToSign objects (hash, type, context)
+        ...(replica.lockedFrame.hashesToSign && { hashesToSign: replica.lockedFrame.hashesToSign.map(h => ({ ...h })) }),
+        ...(replica.lockedFrame.collectedSigs && { collectedSigs: new Map(Array.from(replica.lockedFrame.collectedSigs.entries()).map(([k, v]) => [k, [...v]])) }),
+        ...(replica.lockedFrame.hankos && { hankos: [...replica.lockedFrame.hankos] }),
       }
     }),
     isProposer: replica.isProposer,
     ...(replica.sentTransitions !== undefined && { sentTransitions: replica.sentTransitions }),
     ...(replica.position && { position: { ...replica.position } }),
+    // SECURITY: Clone validator's computed state for state injection prevention
+    ...(replica.validatorComputedState && { validatorComputedState: cloneEntityState(replica.validatorComputedState) }),
   };
 };
 
@@ -485,7 +492,7 @@ export const captureSnapshot = async (
         entityId: input.entityId,
         signerId: input.signerId,
         ...(input.entityTxs && { entityTxs: [...input.entityTxs] }),
-        ...(input.precommits && { precommits: new Map(input.precommits) }),
+        ...(input.hashPrecommits && { hashPrecommits: new Map(Array.from(input.hashPrecommits.entries()).map(([k, v]) => [k, [...v]])) }),
         ...(input.proposedFrame && { proposedFrame: input.proposedFrame }),
       })),
     },
@@ -493,7 +500,7 @@ export const captureSnapshot = async (
       entityId: output.entityId,
       signerId: output.signerId,
       ...(output.entityTxs && { entityTxs: [...output.entityTxs] }),
-      ...(output.precommits && { precommits: new Map(output.precommits) }),
+      ...(output.hashPrecommits && { hashPrecommits: new Map(Array.from(output.hashPrecommits.entries()).map(([k, v]) => [k, [...v]])) }),
       ...(output.proposedFrame && { proposedFrame: output.proposedFrame }),
     })),
     description: env.extra?.description || description,
@@ -561,7 +568,7 @@ export const captureSnapshot = async (
       runtimeInput.entityInputs.forEach((input, i) => {
         const parts = [];
         if (input.entityTxs?.length) parts.push(`${input.entityTxs.length} txs`);
-        if (input.precommits?.size) parts.push(`${input.precommits.size} precommits`);
+        if (input.hashPrecommits?.size) parts.push(`${input.hashPrecommits.size} precommits`);
         if (input.proposedFrame) parts.push(`frame: ${input.proposedFrame.hash.slice(0, 10)}...`);
         console.log(`      ${i + 1}. ${input.entityId}:${input.signerId} (${parts.join(', ') || 'empty'})`);
       });

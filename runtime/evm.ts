@@ -1,6 +1,26 @@
 /**
  * XLN EVM Integration
  * Handles blockchain interactions, jurisdictions, and smart contract operations
+ *
+ * ⚠️ DEPRECATION NOTICE:
+ * Contract interaction functions are being migrated to JAdapter (runtime/jadapter/).
+ * Use JAdapter for new code:
+ *
+ *   import { createJAdapter } from './jadapter';
+ *   const jAdapter = await createJAdapter({ mode: 'browservm', chainId: 1337 });
+ *   await jAdapter.deployStack();
+ *
+ * Deprecated functions → JAdapter equivalents:
+ *   - submitSettle → jAdapter.settle()
+ *   - submitProcessBatch → use j-batch.ts broadcastBatch()
+ *   - debugFundReserves → jAdapter.debugFundReserves()
+ *   - registerNumberedEntityOnChain → jAdapter.registerNumberedEntity()
+ *   - registerNumberedEntitiesBatchOnChain → jAdapter.registerNumberedEntitiesBatch()
+ *   - submitReserveToReserve → jAdapter.reserveToReserve()
+ *   - getNextEntityNumber → jAdapter.getNextEntityNumber()
+ *
+ * Jurisdiction management functions (getAvailableJurisdictions, setBrowserVMJurisdiction)
+ * remain in this file as they handle multi-jurisdiction orchestration.
  */
 
 import { ethers } from 'ethers';
@@ -13,7 +33,8 @@ import { safeStringify } from './serialization-utils';
 import type { ConsensusConfig, JurisdictionConfig } from './types';
 import { DEBUG, isBrowser } from './utils';
 import { logError } from './logger';
-import { BrowserVMEthersProvider } from './browservm-ethers-provider';
+import { BrowserVMEthersProvider } from './jadapter/browservm-ethers-provider';
+// BrowserVMProvider is also available via jadapter/browservm-provider
 import type { BrowserVMInstance } from './xln-api';
 
 // Global logger for UI-accessible error logging (set by frontend)
@@ -145,14 +166,14 @@ export const connectToEthereum = async (jurisdiction: JurisdictionConfig) => {
       // Use BrowserVM provider (lazy-init if needed)
       // NOTE: This path is for legacy code. New code should use env.browserVM
       if (!BROWSER_VM_INSTANCE) {
-        const { BrowserEVM } = await import('./evms/browser-evm');
-        const evm = new BrowserEVM();
-        await evm.init();
+        const { BrowserVMProvider } = await import('./jadapter');
+        const browserVM = new BrowserVMProvider();
+        await browserVM.init();
         // Store in global singleton (backward compat - no env available here)
-        BROWSER_VM_INSTANCE = evm.getProvider();
+        BROWSER_VM_INSTANCE = browserVM;
         // Update jurisdictions with this VM's addresses
-        const depositoryAddress = evm.getDepositoryAddress();
-        const entityProviderAddress = evm.getEntityProviderAddress();
+        const depositoryAddress = browserVM.getDepositoryAddress();
+        const entityProviderAddress = browserVM.getEntityProviderAddress();
         DEFAULT_JURISDICTIONS = new Map();
         DEFAULT_JURISDICTIONS.set('simnet', {
           name: 'Simnet',

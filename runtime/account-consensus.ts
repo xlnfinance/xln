@@ -224,6 +224,8 @@ export async function proposeAccountFrame(
     minFillRatio: number;
   }>;
   swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
+  // MULTI-SIGNER: Hashes that need entity-quorum signing
+  hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
 }> {
   // Derive counterparty from canonical left/right
   const myEntityId = accountMachine.proofHeader.fromEntity;
@@ -526,12 +528,19 @@ export async function proposeAccountFrame(
     newAccountFrame: newFrame,
     newHanko: frameHanko,         // Hanko on frame stateHash
     newDisputeHanko: disputeHanko, // Hanko on dispute proof hash
+    newDisputeHash: disputeHash,   // Full dispute hash (key in hankoWitness for quorum lookup)
     newDisputeProofBodyHash: proofResult.proofBodyHash, // ProofBodyHash that disputeHanko signs
     // NOTE: Settlement hankos now handled via SettlementWorkspace (entity-tx/handlers/settle.ts)
     counter: skipCounterIncrement ? accountMachine.proofHeader.cooperativeNonce : ++accountMachine.proofHeader.cooperativeNonce,
   };
 
-  return { success: true, accountInput, events, revealedSecrets, swapOffersCreated, swapOffersCancelled };
+  // Collect hashes for entity-quorum signing (multi-signer support)
+  const hashesToSign: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }> = [
+    { hash: newFrame.stateHash, type: 'accountFrame', context: `account:${counterparty.slice(-8)}:frame:${newFrame.height}` },
+    { hash: disputeHash, type: 'dispute', context: `account:${counterparty.slice(-8)}:dispute` },
+  ];
+
+  return { success: true, accountInput, events, revealedSecrets, swapOffersCreated, swapOffersCancelled, hashesToSign };
 }
 
 /**
@@ -562,6 +571,8 @@ export async function handleAccountInput(
   }>;
   swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
   timedOutHashlocks?: string[];
+  // MULTI-SIGNER: Hashes that need entity-quorum signing
+  hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
 }> {
   console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`);
   console.log(`📨 A-MACHINE INPUT: height=${input.height || 'none'}, hasACK=${!!input.prevHanko}, hasNewFrame=${!!input.newAccountFrame}, counter=${input.counter}`);
@@ -755,10 +766,11 @@ export async function handleAccountInput(
               success: true,
               response: proposeResult.accountInput,
               events: [...events, ...proposeResult.events],
-              revealedSecrets: proposeResult.revealedSecrets,
-              swapOffersCreated: proposeResult.swapOffersCreated,
-              swapOffersCancelled: proposeResult.swapOffersCancelled,
-              timedOutHashlocks
+              timedOutHashlocks,
+              ...(proposeResult.revealedSecrets && { revealedSecrets: proposeResult.revealedSecrets }),
+              ...(proposeResult.swapOffersCreated && { swapOffersCreated: proposeResult.swapOffersCreated }),
+              ...(proposeResult.swapOffersCancelled && { swapOffersCancelled: proposeResult.swapOffersCancelled }),
+              ...(proposeResult.hashesToSign && proposeResult.hashesToSign.length > 0 && { hashesToSign: proposeResult.hashesToSign }),
             };
           }
         }
@@ -1043,23 +1055,53 @@ export async function handleAccountInput(
       return { success: false, error: `Bilateral consensus failure - states don't match`, events };
     }
 
+    // SECURITY FIX: Verify BILATERAL fields in fullDeltaStates (prevents state injection attack)
+    // ondelta/collateral may differ due to J-event timing, but bilateral fields MUST match:
+    // - offdelta: Set by bilateral payments
+    // - creditLimit: Set by bilateral set_credit_limit tx
+    // - allowance: Set by bilateral transactions
+    const theirFullDeltaStates = receivedFrame.fullDeltaStates || [];
+    if (ourFullDeltaStates.length !== theirFullDeltaStates.length) {
+      console.warn(`⚠️ SECURITY: fullDeltaStates count mismatch (our: ${ourFullDeltaStates.length}, their: ${theirFullDeltaStates.length})`);
+      return { success: false, error: `Bilateral state injection detected - delta count mismatch`, events };
+    }
+
+    for (let i = 0; i < ourFullDeltaStates.length; i++) {
+      const ours = ourFullDeltaStates[i]!;
+      const theirs = theirFullDeltaStates[i]!;
+
+      // Compare BILATERAL fields only (ondelta/collateral may differ due to J-event timing)
+      const bilateralMismatch =
+        ours.offdelta !== theirs.offdelta ||
+        ours.leftCreditLimit !== theirs.leftCreditLimit ||
+        ours.rightCreditLimit !== theirs.rightCreditLimit ||
+        ours.leftAllowance !== theirs.leftAllowance ||
+        ours.rightAllowance !== theirs.rightAllowance;
+
+      if (bilateralMismatch) {
+        console.warn(`⚠️ SECURITY: Bilateral field mismatch at token ${ours.tokenId}:`);
+        console.warn(`   offdelta: our=${ours.offdelta}, their=${theirs.offdelta}`);
+        console.warn(`   leftCreditLimit: our=${ours.leftCreditLimit}, their=${theirs.leftCreditLimit}`);
+        console.warn(`   rightCreditLimit: our=${ours.rightCreditLimit}, their=${theirs.rightCreditLimit}`);
+        return { success: false, error: `Bilateral state injection detected - credit/allowance mismatch`, events };
+      }
+    }
+
     if (HEAVY_LOGS) console.log(`🔍 ABOUT-TO-VERIFY-HASH: Computing frame hash...`);
     // SECURITY: Verify full frame hash (tokenIds + fullDeltaStates + deltas)
     // This prevents accepting frames with poisoned dispute proofs
     if (HEAVY_LOGS) console.log(`🔍 COMPUTING-HASH: Creating hash for frame ${receivedFrame.height}...`);
-    // CRITICAL: Use frame's claimed fullDeltaStates for hash verification
-    // ondelta/collateral are set by J-events with timing dependencies (bilateral finalization)
-    // The delta comparison (offdelta) has already passed, confirming bilateral state agreement
-    // Hash verification ensures frame wasn't tampered with, not that J-event state matches
+    // After bilateral field verification above, use OUR computed fullDeltaStates for hash
+    // This ensures the stored frame has correct bilateral state
     const recomputedHash = await createFrameHash({
       height: receivedFrame.height,
       timestamp: receivedFrame.timestamp,
       jHeight: receivedFrame.jHeight,
       accountTxs: receivedFrame.accountTxs,
       prevFrameHash: receivedFrame.prevFrameHash,
-      tokenIds: receivedFrame.tokenIds, // Use frame's claimed tokenIds
-      deltas: receivedFrame.deltas, // Use frame's claimed deltas
-      fullDeltaStates: receivedFrame.fullDeltaStates, // Use frame's claimed fullDeltaStates
+      tokenIds: ourFinalTokenIds, // Use OUR computed tokenIds
+      deltas: ourFinalDeltas, // Use OUR computed deltas
+      fullDeltaStates: ourFullDeltaStates, // Use OUR computed fullDeltaStates
       stateHash: '', // Computed by createFrameHash
       byLeft: receivedFrame.byLeft,
     });
@@ -1073,14 +1115,30 @@ export async function handleAccountInput(
 
     console.log(`✅ CONSENSUS-SUCCESS: Both sides computed identical state for frame ${receivedFrame.height}`);
 
-    // Emit bilateral consensus event
+    // ═══════════════════════════════════════════════════════════════════════════
+    // SECURITY PRINCIPLE: NEVER USE COUNTERPARTY-SUPPLIED STATE
+    // ═══════════════════════════════════════════════════════════════════════════
+    // We ALWAYS compute our own state from transaction execution and use THAT.
+    // Counterparty's claimed state (receivedFrame.tokenIds/deltas/fullDeltaStates)
+    // is ONLY used for comparison/debugging, NEVER stored or trusted.
+    //
+    // Why: An attacker could inject poisoned state (e.g., inflated creditLimit)
+    // that passes transaction verification but corrupts our stored state.
+    //
+    // Safe to use from receivedFrame (inputs/metadata):
+    //   - height, timestamp, jHeight, accountTxs, prevFrameHash, byLeft
+    // NEVER use (computed state - could be poisoned):
+    //   - tokenIds, deltas, fullDeltaStates, stateHash (except for comparison)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Emit bilateral consensus event - use OUR computed values
     env.emit('BilateralFrameCommitted', {
       fromEntity: input.fromEntityId,
       toEntity: accountMachine.proofHeader.fromEntity,
       height: receivedFrame.height,
       txCount: receivedFrame.accountTxs.length,
-      tokenIds: receivedFrame.tokenIds,
-      stateHash: receivedFrame.stateHash,
+      tokenIds: ourFinalTokenIds,  // OUR computed tokenIds
+      stateHash: recomputedHash,   // OUR computed hash
     });
 
     // RECEIVER COMMIT: Re-execute txs on REAL state (Channel.ts pattern)
@@ -1118,8 +1176,9 @@ export async function handleAccountInput(
       console.log(`🔀 Copied pendingForward for multi-hop: route=[${clonedMachine.pendingForward.route.map(r => r.slice(-4)).join(',')}]`);
     }
 
-    // CRITICAL: Use receivedFrame.fullDeltaStates from proposer to maintain hash consistency
-    // The proposer's fullDeltaStates was used to compute the stateHash
+    // SECURITY FIX: Use OUR computed state (verified to match bilateral fields)
+    // This prevents storing attacker-injected creditLimit/allowance values
+    // The recomputedHash was computed from OUR values, so stateHash must match
     // CRITICAL: Deep-copy to prevent mutation issues
     accountMachine.currentFrame = structuredClone({
       height: receivedFrame.height,
@@ -1127,11 +1186,11 @@ export async function handleAccountInput(
       jHeight: receivedFrame.jHeight,
       accountTxs: receivedFrame.accountTxs,
       prevFrameHash: receivedFrame.prevFrameHash,
-      tokenIds: receivedFrame.tokenIds,
-      deltas: receivedFrame.deltas,
-      stateHash: receivedFrame.stateHash,
+      tokenIds: ourFinalTokenIds, // Use OUR computed tokenIds
+      deltas: ourFinalDeltas, // Use OUR computed deltas
+      stateHash: recomputedHash, // Use hash computed from OUR values
       byLeft: receivedFrame.byLeft, // Copy proposer info
-      fullDeltaStates: receivedFrame.fullDeltaStates || [], // Use proposer's fullDeltaStates for hash consistency
+      fullDeltaStates: ourFullDeltaStates, // Use OUR verified fullDeltaStates
     });
     accountMachine.currentHeight = receivedFrame.height;
     accountMachine.proofHeader.disputeNonce = accountMachine.currentHeight;
@@ -1221,6 +1280,7 @@ export async function handleAccountInput(
       height: receivedFrame.height,
       prevHanko: confirmationHanko,       // Hanko ACK on their frame
       newDisputeHanko: ackDisputeHanko,   // My dispute proof hanko (current state)
+      newDisputeHash: ackDisputeHash,     // Full dispute hash (key in hankoWitness for quorum lookup)
       newDisputeProofBodyHash: ackProofResult.proofBodyHash, // ProofBodyHash that ackDisputeHanko signs
       counter: 0, // Will be set below after batching decision
     };
@@ -1277,8 +1337,22 @@ export async function handleAccountInput(
       ...(proposeResult?.swapOffersCancelled || [])
     ];
 
+    // Collect hashes that need entity-quorum signing (multi-signer support)
+    const hashesToSign: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }> = [
+      { hash: receivedFrame.stateHash, type: 'accountFrame', context: `account:${input.fromEntityId.slice(-8)}:ack:${receivedFrame.height}` },
+      { hash: ackDisputeHash, type: 'dispute', context: `account:${input.fromEntityId.slice(-8)}:ack-dispute` },
+      ...(proposeResult?.hashesToSign || []) // From batched proposal
+    ];
+
     if (HEAVY_LOGS) console.log(`🔍 RETURN-RESPONSE: h=${response.height} prevHanko=${!!response.prevHanko} newFrame=${!!response.newAccountFrame}`);
-    return { success: true, response, events, revealedSecrets: allRevealedSecrets, swapOffersCreated: allSwapOffersCreated, swapOffersCancelled: allSwapOffersCancelled, timedOutHashlocks };
+    return {
+      success: true, response, events,
+      revealedSecrets: allRevealedSecrets,
+      swapOffersCreated: allSwapOffersCreated,
+      swapOffersCancelled: allSwapOffersCancelled,
+      timedOutHashlocks,
+      ...(hashesToSign.length > 0 && { hashesToSign }),
+    };
   }
 
   if (HEAVY_LOGS) console.log(`🔍 RETURN-NO-RESPONSE: No response object`);

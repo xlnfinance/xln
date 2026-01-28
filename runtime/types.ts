@@ -282,8 +282,11 @@ export interface EntityInput {
   entityId: string;
   signerId: string;
   entityTxs?: EntityTx[];
-  precommits?: Map<string, string>; // signerId -> signature
   proposedFrame?: ProposedEntityFrame;
+
+  // HANKO PRECOMMITS: signerId -> array of EOA sigs (one per proposedFrame.hashesToSign[])
+  // Validators sign ALL hashes, proposer collects and merges into hankos after threshold
+  hashPrecommits?: Map<string, string[]>;
 }
 
 /** Entity output - can include both E→E messages AND J-layer outputs */
@@ -868,6 +871,7 @@ export interface AccountMachine {
   counterpartyDisputeProofHanko?: HankoString;         // Their hanko on dispute proof (ready for disputes)
   counterpartyDisputeProofCooperativeNonce?: number;   // Cooperative nonce used in counterpartyDisputeProofHanko
   counterpartyDisputeProofBodyHash?: string;           // ProofBodyHash that counterparty signed (MUST match dispute)
+  counterpartySettlementHanko?: HankoString;           // Their hanko on settlement operations
   disputeProofNoncesByHash?: Record<string, number>;   // ProofBodyHash → cooperative nonce (local + counterparty)
   disputeProofBodiesByHash?: Record<string, any>;      // ProofBodyHash → ProofBodyStruct (for dispute finalize)
 
@@ -946,7 +950,9 @@ export interface AccountInput {
   newAccountFrame?: AccountFrame;         // Our new proposed frame (like block in Channel.ts)
   newHanko?: HankoString;                 // Hanko on newAccountFrame
   newDisputeHanko?: HankoString;          // Hanko on dispute proof (for J-machine enforcement)
+  newDisputeHash?: string;               // Full dispute hash (key in hankoWitness, wraps proofBodyHash)
   newDisputeProofBodyHash?: string;       // ProofBodyHash that newDisputeHanko signs
+  newSettlementHanko?: HankoString;       // Hanko for settlement operations
 
   // SETTLEMENT WORKSPACE ACTIONS (bilateral negotiation)
   settleAction?: {
@@ -1356,19 +1362,39 @@ export interface LockBookEntry {
   createdAt: bigint;
 }
 
+/** Hash type for entity-level signing */
+export type HashType = 'entityFrame' | 'accountFrame' | 'dispute' | 'settlement' | 'profile';
+
+/** Hash with type info for entity-level signing */
+export interface HashToSign {
+  hash: string;
+  type: HashType;
+  context: string;  // e.g., "account:0002:frame:1" or "account:0002:dispute"
+}
+
 export interface ProposedEntityFrame {
   height: number;
   txs: EntityTx[];
   hash: string;
   newState: EntityState;
 
-  // NEW HANKO SYSTEM:
-  hashes?: string[];         // Sorted lexicographically - all objects signed in this frame
-  signatures?: string[][];   // [validator_i][hash_j] - partial sigs during collection
-  hankos?: HankoString[];    // After merge: one HankoBytes per hash (hex-encoded ABI)
+  // DETERMINISTIC OUTPUTS: Stored at proposal time, used at commit time
+  // CRITICAL: Cannot re-apply frame at commit because proposal.newState already
+  // has mutations applied (e.g., openAccount creates account). Idempotent handlers
+  // would return empty outputs on re-application. Store once, attach hankos at commit.
+  outputs?: EntityInput[];
+  jOutputs?: JInput[];
 
-  // LEGACY (will be removed after hanko migration):
-  signatures_legacy?: Map<string, string>; // signerId -> signature (old system)
+  // HANKO SYSTEM:
+  // 1. During frame creation: proposer collects hashes that need signing
+  hashesToSign?: HashToSign[];  // Entity frame hash + account-level hashes with types
+
+  // 2. During precommit: validators send EOA signatures (one per hash)
+  // signerId -> array of EOA signatures (indexes match hashesToSign[])
+  collectedSigs?: Map<string, string[]>;
+
+  // 3. After threshold: merged quorum hankos (one per hash, indexes match hashesToSign[])
+  hankos?: HankoString[];
 }
 
 export interface EntityReplica {
@@ -1378,6 +1404,9 @@ export interface EntityReplica {
   mempool: EntityTx[];
   proposal?: ProposedEntityFrame;
   lockedFrame?: ProposedEntityFrame; // Frame this validator is locked/precommitted to
+  // SECURITY: Validator's own computed state from applying proposer's txs
+  // Used at commit time instead of proposer's newState to prevent state injection
+  validatorComputedState?: EntityState;
   isProposer: boolean;
   sentTransitions?: number; // Number of txs sent to proposer but not yet committed (Channel.ts pattern)
   // Position is RELATIVE to j-machine (jurisdiction)
@@ -1389,6 +1418,15 @@ export interface EntityReplica {
     jurisdiction?: string; // Which j-machine this entity belongs to (defaults to activeJurisdiction)
     xlnomy?: string; // DEPRECATED: Use jurisdiction instead
   };
+
+  // HANKO WITNESS STORAGE (NOT part of state hash - stored alongside, not inside)
+  // Persists finalized hankos for on-chain disputes, settlements, batch submissions
+  hankoWitness?: Map<string, {
+    hanko: HankoString;
+    type: 'accountFrame' | 'dispute' | 'profile' | 'settlement' | 'jBatch';
+    entityHeight: number;  // Height when created
+    createdAt: number;     // Timestamp
+  }>;
 }
 
 // =============================================================================
@@ -1438,10 +1476,14 @@ export interface Env {
   gossip: any; // Gossip layer for network profiles
 
   // Isolated BrowserVM instance per runtime (prevents cross-runtime state leakage)
-  browserVM?: any; // BrowserVMProvider instance for this runtime (DEPRECATED: use evms)
+  browserVM?: any; // BrowserVMProvider instance for this runtime (DEPRECATED: use jAdapter)
   browserVMState?: BrowserVMState; // Serialized BrowserVM state for time travel
 
-  // EVM instances - DEPRECATED, use env.browserVM or createJAdapter() from jadapter
+  // Unified J-Machine adapter (preferred over browserVM or evms)
+  // Use: const jAdapter = env.jAdapter ?? await createJAdapter({ mode: 'browservm', chainId: 1337 })
+  jAdapter?: import('./jadapter/types').JAdapter;
+
+  // EVM instances - DEPRECATED, use env.jAdapter or createJAdapter() from jadapter
   evms: Map<string, any>;
 
   // Active jurisdiction
