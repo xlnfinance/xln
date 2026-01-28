@@ -6538,11 +6538,12 @@ let vrHammer: VRHammer | null = null;
       // Bank: use hash-based index to get consistent name
       const hash = entityId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
       const bankIndex = hash % BANK_NAMES.length;
-      return BANK_NAMES[bankIndex] || entityId.slice(-4);
+      // Fallback: first 4 hex chars after 0x (matches getEntityShortId format)
+      return BANK_NAMES[bankIndex] || (entityId.startsWith('0x') ? entityId.slice(2, 6).toUpperCase() : entityId.slice(0, 4).toUpperCase());
     }
 
-    // Fallback to short ID
-    return shortId || entityId.slice(-4);
+    // Fallback to short ID (first 4 hex chars, matching getEntityShortId)
+    return shortId || (entityId.startsWith('0x') ? entityId.slice(2, 6).toUpperCase() : entityId.slice(0, 4).toUpperCase());
   }
 
   /**

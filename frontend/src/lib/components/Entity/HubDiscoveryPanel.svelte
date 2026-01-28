@@ -49,7 +49,7 @@
     if (activeFunctions?.getEntityShortId) {
       return '#' + activeFunctions.getEntityShortId(id);
     }
-    return '#' + id.slice(-4).toUpperCase();
+    return '#' + (id.startsWith('0x') ? id.slice(2, 6) : id.slice(0, 4)).toUpperCase();
   }
 
   function formatCapacity(cap?: bigint): string {

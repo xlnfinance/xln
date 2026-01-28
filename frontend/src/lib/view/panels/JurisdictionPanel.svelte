@@ -178,7 +178,7 @@
         const entityId = key.split(':')[0];
         if (entityId && !names.has(entityId)) {
           // Fallback: use short ID format
-          names.set(entityId, `E${entityId.slice(-4)}`);
+          names.set(entityId, `E${entityId.slice(2, 6).toUpperCase()}`);
         }
       }
     }
@@ -204,7 +204,7 @@
         if (amount > 0n) {
           result.push({
             entityId,
-            name: entityNames.get(entityId) || `E${entityId.slice(-4)}`,
+            name: entityNames.get(entityId) || `E${entityId.slice(2, 6).toUpperCase()}`,
             tokenId: Number(tokenId),
             amount,
           });
@@ -297,7 +297,7 @@
 
         disputes.push({
           entityId,
-          entityName: entityNames.get(entityId) || `E${entityId.slice(-4)}`,
+          entityName: entityNames.get(entityId) || `E${entityId.slice(2, 6).toUpperCase()}`,
           counterpartyId,
           counterpartyName: entityNames.get(counterpartyId) || `E${counterpartyId.slice(-4)}`,
           startedByLeft: account.activeDispute.startedByLeft,
@@ -610,7 +610,7 @@
           if (debts && debts.length > 0) {
             results.push({
               entityId,
-              entityName: names.get(entityId) || `E${entityId.slice(-4)}`,
+              entityName: names.get(entityId) || `E${entityId.slice(2, 6).toUpperCase()}`,
               tokenId,
               debts: debts.map((d: any) => ({
                 amount: d.amount,
@@ -642,7 +642,7 @@
   function formatEntityId(entityId: string): string {
     if (!entityId) return 'N/A';
     if (entityId.startsWith('0x') && entityId.length > 10) {
-      return entityId.slice(0, 6) + '...' + entityId.slice(-4);
+      return entityId.slice(0, 6) + '...' + entityId.slice(2, 6).toUpperCase();
     }
     return entityId;
   }
