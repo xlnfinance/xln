@@ -132,7 +132,8 @@ export const jmachineOperations = {
         console.log('⚖️ J-Machine configs loaded from localStorage');
       }
     } catch (error) {
-      console.error('❌ Failed to load J-Machine configs:', error);
+      console.error('❌ Failed to load J-Machine configs (clearing corrupted storage):', error);
+      localStorage.removeItem(STORAGE_KEY);
       jmachineState.set(defaultState);
     }
   },

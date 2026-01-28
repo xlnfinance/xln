@@ -151,7 +151,8 @@ export function loadFromLocalStorage(key: string): XLNPersistedState | null {
 
     return importState(encoded);
   } catch (err) {
-    console.error(`[StateCodec] Failed to load ${key}:`, err);
+    console.error(`[StateCodec] Failed to load ${key} (clearing corrupted storage):`, err);
+    localStorage.removeItem(key);
     return null;
   }
 }

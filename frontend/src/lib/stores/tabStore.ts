@@ -25,8 +25,8 @@ const tabOperations = {
         console.log('📁 Tabs loaded from localStorage:', tabData);
       }
     } catch (error) {
-      console.error('❌ Failed to load tabs:', error);
-      // Initialize with empty tab system on error
+      console.error('❌ Failed to load tabs (clearing corrupted storage):', error);
+      localStorage.removeItem(STORAGE_KEY);
       tabs.set([]);
       activeTabId.set(null);
       nextTabId.set(1);
