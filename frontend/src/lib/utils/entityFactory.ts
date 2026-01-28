@@ -53,7 +53,15 @@ export async function createEphemeralEntity(
   const xln = await getXLN();
 
   // Use LAZY entity ID (deterministic, no blockchain registration)
+  // For lazy entities: entityId == boardHash (as per EntityProvider contract)
+  //
+  // TODO(provider-scoped-entities): See vaultStore.ts for full design notes
+  // Current: entityId = boardHash (works for single EP per Depository)
+  // Future: entityAddress = hash(providerAddress + entityId) for multi-EP support
   const entityId = xln.generateLazyEntityId([signerId], 1n);
+  console.log(`[EntityFactory] Entity ID: ${entityId.slice(0, 18)}...`);
+  console.log(`[EntityFactory]   signer: ${signerId}`);
+  console.log(`[EntityFactory]   provider: ${jurisdiction.entityProviderAddress}`);
 
   // Use createLazyEntity from runtime for proper config structure
   const { config } = xln.createLazyEntity(
