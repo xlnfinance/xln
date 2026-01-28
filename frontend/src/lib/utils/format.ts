@@ -32,8 +32,8 @@ export function formatEntityId(entityId: string): string {
     return `#${num}`;
   }
 
-  // Regular entity - show last 4 chars
-  return `${entityId.slice(-4)}`;
+  // Regular entity - show first 4 hex chars after 0x (matches runtime getEntityShortId)
+  return entityId.startsWith('0x') ? entityId.slice(2, 6).toUpperCase() : entityId.slice(0, 4).toUpperCase();
 }
 
 /**
