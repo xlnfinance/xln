@@ -43,7 +43,9 @@ const settingsOperations = {
       
       console.log('⚙️ Settings loaded from localStorage');
     } catch (error) {
-      console.error('❌ Failed to load settings:', error);
+      console.error('❌ Failed to load settings (clearing corrupted storage):', error);
+      localStorage.removeItem(SETTINGS_KEY);
+      localStorage.removeItem(COMPONENT_STATES_KEY);
       settings.set(defaultSettings);
     }
   },

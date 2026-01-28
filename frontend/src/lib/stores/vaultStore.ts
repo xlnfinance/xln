@@ -126,7 +126,8 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         console.log('🔐 Runtimes loaded from localStorage');
       }
     } catch (error) {
-      console.error('❌ Failed to load runtimes:', error);
+      console.error('❌ Failed to load runtimes (clearing corrupted storage):', error);
+      localStorage.removeItem(VAULT_STORAGE_KEY);
       runtimesState.set(defaultState);
     }
   },

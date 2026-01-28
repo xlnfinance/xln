@@ -18,7 +18,8 @@ const loadTimeState = (): TimeState => {
         return loadedState;
       }
     } catch (err) {
-      console.warn('Failed to load time state from localStorage:', err);
+      console.warn('Failed to load time state (clearing corrupted storage):', err);
+      localStorage.removeItem('xln-time-state');
     }
   }
 
