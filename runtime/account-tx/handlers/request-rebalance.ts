@@ -4,7 +4,7 @@
  * Reference: 2019src.txt line 2976 (they_requested_deposit)
  */
 
-import { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx } from '../../types';
 
 export function handleRequestRebalance(
   accountMachine: AccountMachine,

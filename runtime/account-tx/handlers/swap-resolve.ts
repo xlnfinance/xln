@@ -30,7 +30,7 @@
  * - Fee accrues to hub's delta, incentivizes market making
  */
 
-import { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx } from '../../types';
 import { isLeft, deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL } from '../../constants';
@@ -230,5 +230,5 @@ export async function handleSwapResolve(
     events.push(`📊 Swap offer ${offerId.slice(0,8)}... partially filled, ${offer.giveAmount} remaining`);
   }
 
-  return { success: true, events, swapOfferCancelled };
+  return { success: true, events, ...(swapOfferCancelled !== undefined && { swapOfferCancelled }) };
 }

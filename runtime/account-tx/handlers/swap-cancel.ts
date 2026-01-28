@@ -16,7 +16,7 @@
  * 4. Remove offer
  */
 
-import { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx } from '../../types';
 import { isLeft } from '../../account-utils';
 
 export async function handleSwapCancel(

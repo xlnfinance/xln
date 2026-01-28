@@ -12,7 +12,7 @@
  * - Event Bubbling: Account events bubble up to E-Machine for entity messages
  */
 
-import { AccountMachine, AccountFrame, AccountTx, AccountInput, Env, EntityState, Delta } from './types';
+import type { AccountMachine, AccountFrame, AccountTx, AccountInput, Env, EntityState, Delta } from './types';
 import { cloneAccountMachine, getAccountPerspective } from './state-helpers';
 import { isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-crypto';
@@ -461,11 +461,11 @@ export async function proposeAccountFrame(
   const signingEntityId = accountMachine.proofHeader.fromEntity;
   const signingReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === signingEntityId);
   if (!signingReplica) {
-    return { success: false, error: `Cannot find replica for entity ${signingEntityId.slice(-4)}`, events, accountInput: null };
+    return { success: false, error: `Cannot find replica for entity ${signingEntityId.slice(-4)}`, events, accountInput: undefined };
   }
   const signingSignerId = signingReplica.state.config.validators[0]; // Single-signer: use first validator
   if (!signingSignerId) {
-    return { success: false, error: `Entity ${signingEntityId.slice(-4)} has no validators`, events, accountInput: null };
+    return { success: false, error: `Entity ${signingEntityId.slice(-4)} has no validators`, events, accountInput: undefined };
   }
 
   console.log(`🔐 HANKO-SIGN: entityId=${signingEntityId.slice(-4)} → signerId=${signingSignerId.slice(-4)}`);
@@ -476,7 +476,7 @@ export async function proposeAccountFrame(
   const hankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [newFrame.stateHash]);
   const frameHanko = hankos[0];
   if (!frameHanko) {
-    return { success: false, error: 'Failed to build frame hanko', events, accountInput: null };
+    return { success: false, error: 'Failed to build frame hanko', events, accountInput: undefined };
   }
   accountMachine.currentFrameHanko = frameHanko;
 
@@ -492,7 +492,7 @@ export async function proposeAccountFrame(
   const disputeHankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [disputeHash]);
   const disputeHanko = disputeHankos[0];
   if (!disputeHanko) {
-    return { success: false, error: 'Failed to build dispute hanko', events, accountInput: null };
+    return { success: false, error: 'Failed to build dispute hanko', events, accountInput: undefined };
   }
   accountMachine.currentDisputeProofHanko = disputeHanko;
   accountMachine.currentDisputeProofCooperativeNonce = clonedMachine.proofHeader.cooperativeNonce;

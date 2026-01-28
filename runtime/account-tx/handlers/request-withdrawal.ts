@@ -4,7 +4,7 @@
  * Reference: 2019src.txt lines 904-978 (requestWithdrawal + giveWithdrawal)
  */
 
-import { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx } from '../../types';
 // deriveDelta used for withdrawable calculation
 
 export function handleRequestWithdrawal(

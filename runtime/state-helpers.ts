@@ -511,8 +511,8 @@ export const captureSnapshot = async (
   };
 
   // Clear consumed extras
-  env.frameDisplayMs = undefined;
-  env.extra = undefined;
+  delete env.frameDisplayMs;
+  delete env.extra;
 
   envHistory.push(snapshot);
 
@@ -624,7 +624,7 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     currentHeight: account.currentHeight,
     pendingSignatures: [...account.pendingSignatures],
     rollbackCount: account.rollbackCount,
-    lastRollbackFrameHash: account.lastRollbackFrameHash,
+    ...(account.lastRollbackFrameHash !== undefined && { lastRollbackFrameHash: account.lastRollbackFrameHash }),
     sendCounter: account.sendCounter,
     receiveCounter: account.receiveCounter,
     frameHistory: [...account.frameHistory], // Clone frame history array

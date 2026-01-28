@@ -10,7 +10,7 @@
  * 5. Apply absolute values from j-machine (authoritative source)
  */
 
-import { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx } from '../../types';
 import { getDefaultCreditLimit } from '../../account-utils';
 import { getAccountPerspective } from '../../state-helpers';
 

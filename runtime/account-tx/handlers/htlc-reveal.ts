@@ -10,7 +10,7 @@
  * - secret + hashlock for entity layer to propagate backward
  */
 
-import { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx } from '../../types';
 import { hashHtlcSecret } from '../../htlc-utils';
 
 export async function handleHtlcReveal(
