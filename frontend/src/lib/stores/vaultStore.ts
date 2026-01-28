@@ -248,6 +248,17 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
       }
     };
 
+    // CRITICAL: Register HD-derived private key with runtime BEFORE importing entity
+    // Why: Runtime's deriveSignerKeySync uses different derivation than BIP44 HD
+    // The vault uses BIP44 (m/44'/60'/0'/0/index), runtime uses keccak256(seed+signerId)
+    // Without this, hanko verification fails (signature from wrong key)
+    const signerPrivateKey = derivePrivateKey(seed, 0);
+    const privateKeyBytes = new Uint8Array(
+      signerPrivateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
+    );
+    xln.registerSignerKey(signerAddress, privateKeyBytes);
+    console.log('[VaultStore.createRuntime] ✅ Registered HD-derived private key for signer');
+
     // Import entity replica into runtime
     await applyRuntimeInput(newEnv, {
       runtimeTxs: [{
@@ -324,8 +335,20 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
     const runtime = current.runtimes[runtimeId];
 
     if (runtime) {
-      // REMOVED: setRuntimeSeed() - seed stored in env.runtimeSeed (pure)
-      console.log('[VaultStore.selectRuntime] Switched to runtime (seed in env):', runtimeId.slice(0, 10));
+      // CRITICAL: Re-register ALL signer private keys when switching runtimes
+      // Keys are stored in memory (signerKeys Map), lost on page refresh
+      // Must re-register from HD derivation to enable signing
+      const { getXLN } = await import('./xlnStore');
+      const xln = await getXLN();
+
+      for (const signer of runtime.signers) {
+        const privateKey = derivePrivateKey(runtime.seed, signer.index);
+        const privateKeyBytes = new Uint8Array(
+          privateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
+        );
+        xln.registerSignerKey(signer.address, privateKeyBytes);
+      }
+      console.log(`[VaultStore.selectRuntime] ✅ Registered ${runtime.signers.length} signer keys`);
     }
 
     activeRuntimeId.set(runtimeId);
@@ -367,17 +390,29 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
 
     this.saveToStorage();
 
-    // Auto-create ephemeral entity for this signer (async, non-blocking)
-    import('../utils/entityFactory').then(({ autoCreateEntityForSigner }) => {
-      autoCreateEntityForSigner(address).then(entityId => {
-        if (entityId) {
-          this.setSignerEntity(nextIndex, entityId);
-          console.log(`[VaultStore] ✅ Entity created for signer ${address.slice(0, 10)}`);
-        }
-      }).catch(err => {
-        console.warn('[VaultStore] Failed to auto-create entity:', err);
-      });
+    // CRITICAL: Register HD-derived private key with runtime BEFORE creating entity
+    // Why: Runtime's deriveSignerKeySync uses different derivation than BIP44 HD
+    // Without this, hanko verification fails (signature from wrong key)
+    import('./xlnStore').then(async ({ getXLN }) => {
+      const xln = await getXLN();
+      const privateKey = derivePrivateKey(runtime.seed, nextIndex);
+      const privateKeyBytes = new Uint8Array(
+        privateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
+      );
+      xln.registerSignerKey(address, privateKeyBytes);
+      console.log(`[VaultStore] ✅ Registered HD key for signer ${address.slice(0, 10)}`);
+
+      // Now create entity (key is registered, signing will work)
+      const { autoCreateEntityForSigner } = await import('../utils/entityFactory');
+      const entityId = await autoCreateEntityForSigner(address);
+      if (entityId) {
+        this.setSignerEntity(nextIndex, entityId);
+        console.log(`[VaultStore] ✅ Entity created for signer ${address.slice(0, 10)}`);
+      }
+    }).catch(err => {
+      console.warn('[VaultStore] Failed to register key/create entity:', err);
     });
+
     void fundSignerWalletInBrowserVM(address);
 
     return newSigner;
@@ -529,8 +564,17 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         const xln = await getXLN();
         const newEnv = xln.createEmptyEnv(runtime.seed);
 
-        // REMOVED: setRuntimeSeed() - seed stored in env.runtimeSeed (pure)
-        // All crypto functions now read from env.runtimeSeed, not global state
+        // CRITICAL: Register ALL signer private keys from HD derivation BEFORE any entity ops
+        // Why: Runtime's deriveSignerKeySync uses different derivation than BIP44 HD
+        // Without this, hanko verification fails (signature from wrong key)
+        for (const signer of runtime.signers) {
+          const privateKey = derivePrivateKey(runtime.seed, signer.index);
+          const privateKeyBytes = new Uint8Array(
+            privateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
+          );
+          xln.registerSignerKey(signer.address, privateKeyBytes);
+        }
+        console.log(`[VaultStore.initialize] ✅ Registered ${runtime.signers.length} HD-derived keys`);
 
         // Get SINGLETON jurisdiction via BrowserVMProvider (shared across all components)
         console.log('[VaultStore.initialize] Initializing BrowserVMProvider...');
