@@ -1,3 +1,20 @@
+/**
+ * XLN WebSocket Relay Server
+ *
+ * ARCHITECTURE: Dumb pipe relay - routes messages between runtimes.
+ *
+ * SECURITY MODEL:
+ * - Relay does NOT validate transaction content - that's account consensus layer's job
+ * - Relay stores gossip profiles with signature verification (anti-spoofing)
+ * - Hello auth proves runtimeId ownership for connection routing
+ * - NO replay protection at this layer - handled by accountFrame heights in consensus
+ *
+ * The relay is intentionally simple:
+ * - Accept connections, route messages, store profiles
+ * - All cryptographic validation happens at entity/account layer
+ * - Even a malicious relay can't forge transactions (needs validator keys)
+ */
+
 import WebSocket, { WebSocketServer } from 'ws';
 import type { AddressInfo } from 'net';
 import * as secp256k1 from '@noble/secp256k1';

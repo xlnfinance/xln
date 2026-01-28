@@ -1,3 +1,26 @@
+/**
+ * XLN P2P Overlay Network
+ *
+ * ARCHITECTURE: Transport layer for entity communication via relay servers.
+ *
+ * SECURITY MODEL - P2P is a "dumb pipe":
+ * - NO replay protection here - accountFrame heights handle that in consensus layer
+ * - Profile signatures prevent spoofing (entityPublicKey bound to board validators)
+ * - Queue limits prevent memory exhaustion from disconnected peers
+ * - Actual transaction validation happens at entity/account consensus layer
+ *
+ * Why no nonces/replay protection at P2P level?
+ * - Each accountFrame has monotonic height (can't replay frame 5 after frame 6)
+ * - Entity transactions require validator signatures (can't forge)
+ * - Even replayed messages are rejected by consensus height checks
+ * - Adding P2P nonces would be redundant complexity
+ *
+ * Profile anti-spoofing:
+ * - Profiles signed by entity's first validator (board.validators[0])
+ * - Signature verified against entityPublicKey in profile metadata
+ * - Invalid signatures rejected; unsigned profiles accepted with warning (migration)
+ */
+
 import type { Env, EntityInput } from '../types';
 import type { Profile } from './gossip';
 import { RuntimeWsClient } from './ws-client';
@@ -7,7 +30,7 @@ import { getCachedSignerPublicKey, registerSignerPublicKey } from '../account-cr
 import { signProfile, verifyProfileSignature } from './profile-signing';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
-const MAX_QUEUE_PER_RUNTIME = 100; // Prevent memory exhaustion
+const MAX_QUEUE_PER_RUNTIME = 100; // Prevent memory exhaustion (DoS protection)
 
 export type P2PConfig = {
   relayUrls?: string[];

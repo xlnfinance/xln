@@ -1,8 +1,21 @@
 /**
  * Profile Signing & Verification for XLN Gossip
  *
- * Signs profiles with entity's secp256k1 key to prevent spoofing.
+ * ANTI-SPOOFING: Prevents attackers from announcing fake profiles for entities they don't control.
+ *
+ * KEY BINDING MECHANISM:
+ * - Profile includes board.validators[] with each validator's publicKey
+ * - Profile signed by first validator (board.validators[0])
+ * - Signature verified against entityPublicKey in metadata
+ * - entityPublicKey MUST match a board validator's key (cryptographic binding)
+ *
+ * This ensures:
+ * - Only entities with validator private keys can sign valid profiles
+ * - Attacker can't announce fake entityPublicKey (signature won't verify)
+ * - Profile updates require ongoing control of validator keys
+ *
  * Relay stores profiles as-is; clients verify signatures on receipt.
+ * Invalid signatures are rejected. Unsigned profiles accepted during migration.
  */
 
 import * as secp256k1 from '@noble/secp256k1';
