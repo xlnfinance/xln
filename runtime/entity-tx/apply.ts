@@ -7,7 +7,7 @@ import { db } from '../runtime';
 import { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput } from '../types';
 import { DEBUG, HEAVY_LOGS, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
-import { buildEntityProfile } from '../gossip-helper';
+import { buildEntityProfile } from '../networking/gossip-helper';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import { handleAccountInput, type MempoolOp, type SwapOfferEvent, type SwapCancelEvent } from './handlers/account';
 import { handleJEvent } from './j-events';
@@ -630,7 +630,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
     if (entityTx.type === 'mintReserves') {
       const { handleMintReserves } = await import('./handlers/mint-reserves');
-      return await handleMintReserves(entityState, entityTx);
+      return await handleMintReserves(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'createSettlement') {

@@ -217,7 +217,7 @@
  * ═══════════════════════════════════════════════════════════════════════
  */
 
-import type { Profile } from './gossip.js';
+import type { Profile } from './networking/gossip';
 
 export interface JurisdictionConfig {
   address: string;
@@ -1066,6 +1066,8 @@ export interface DerivedDelta {
   outCapacity: bigint;
   outOwnCredit: bigint;
   inPeerCredit: bigint;
+  peerCreditUsed: bigint;  // Credit peer lent that we're using
+  ownCreditUsed: bigint;   // Credit we lent that peer is using
   ascii: string; // ASCII visualization from deriveDelta (like old_src)
 }
 
@@ -1439,9 +1441,8 @@ export interface Env {
   browserVM?: any; // BrowserVMProvider instance for this runtime (DEPRECATED: use evms)
   browserVMState?: BrowserVMState; // Serialized BrowserVM state for time travel
 
-  // EVM instances (unified interface for browser/RPC)
-  // Usage: env.evms.get('simnet').depository._reserves(entityId, tokenId)
-  evms: Map<string, import('./evm-interface').EVM>;
+  // EVM instances - DEPRECATED, use env.browserVM or createJAdapter() from jadapter
+  evms: Map<string, any>;
 
   // Active jurisdiction
   activeJurisdiction?: string; // Currently active J-replica name
@@ -1481,10 +1482,6 @@ export interface Env {
 
   // Frame-scoped structured logs (captured into snapshot, then reset)
   frameLogs: FrameLogEntry[];
-
-  // HANKO SYSTEM: Hash collection during frame creation
-  currentFrameHashes?: string[]; // Hashes accumulated during applyEntityFrame (cleared after)
-  currentFrameEntityId?: string; // EntityId for current frame being built (for signAsEntity)
 
   // Event emission methods (EVM-style - like Ethereum block logs)
   log: (message: string) => void;

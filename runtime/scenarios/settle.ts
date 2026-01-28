@@ -12,11 +12,11 @@
 
 import type { Env, EntityInput, EntityReplica, SettlementDiff } from '../types';
 import { getAvailableJurisdictions, setBrowserVMJurisdiction } from '../evm';
-import { BrowserEVM } from '../evms/browser-evm';
+import { BrowserVMProvider } from '../jadapter';
 import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, getProcess, getApplyRuntimeInput } from './helpers';
 import { formatRuntime } from '../runtime-ascii';
-import { createGossipLayer } from '../gossip';
+import { createGossipLayer } from '../networking/gossip';
 import { userAutoApprove, canAutoApproveWorkspace } from '../entity-tx/handlers/settle';
 
 const USDC_TOKEN_ID = 1;
@@ -94,11 +94,13 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // ══════════════════════════════════════════════════════════════════════════════
   console.log('\n📋 PHASE 0: SETUP');
 
+  // DETERMINISTIC: Use fixed timestamp for scenario init (scenarioMode advances it manually)
+  const SCENARIO_START_TIMESTAMP = 1700000000000; // Fixed epoch for reproducibility
   let env: Env = existingEnv || {
     eReplicas: new Map(),
     jReplicas: new Map(),
     height: 0,
-    timestamp: Date.now(),
+    timestamp: SCENARIO_START_TIMESTAMP,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
     gossip: null,
@@ -131,13 +133,24 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   env.scenarioLogLevel = 'info'; // Allow info-level logs through strict scenario filter
   const cleanupStrictMode = enableStrictScenario(env, 'settle');
 
+  // Ensure signer keys BEFORE entity registration (needed to compute board hash)
+  ensureSignerKeysFromSeed(env, ['2', '3'], 'settle');
+
   // Initialize BrowserVM
-  const evm = new BrowserEVM();
-  await evm.init();
-  env.browserVM = evm.getProvider();
-  const depositoryAddress = evm.getDepositoryAddress();
-  const entityProviderAddress = evm.getEntityProviderAddress();
-  setBrowserVMJurisdiction(env, depositoryAddress, evm);
+  const browserVM = new BrowserVMProvider();
+  await browserVM.init();
+  env.browserVM = browserVM;
+  const depositoryAddress = browserVM.getDepositoryAddress();
+  const entityProviderAddress = browserVM.getEntityProviderAddress();
+  setBrowserVMJurisdiction(env, depositoryAddress, browserVM);
+
+  // Register entities with EntityProvider for Hanko signature verification
+  // Use signers 2 and 3 (entity 1 is reserved for foundation in EntityProvider)
+  if (browserVM.registerEntitiesWithSigners) {
+    console.log('[SETTLE] Registering entities with EntityProvider...');
+    const entityNumbers = await browserVM.registerEntitiesWithSigners(['2', '3']);
+    console.log(`[SETTLE] ✅ Registered entities: [${entityNumbers.join(', ')}]`);
+  }
 
   // Create J-Replica
   env.jReplicas.set(JURISDICTION, {
@@ -158,8 +171,9 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   env.gossip = createGossipLayer();
 
   // Create entities: Alice and Hub
-  const ALICE_ID = '0x' + '1'.padStart(64, '0');
-  const HUB_ID = '0x' + '2'.padStart(64, '0');
+  // Use entity numbers 2 and 3 (entity 1 is reserved for foundation in EntityProvider)
+  const ALICE_ID = '0x' + '2'.padStart(64, '0');
+  const HUB_ID = '0x' + '3'.padStart(64, '0');
 
   ENTITY_NAME_MAP.set(ALICE_ID, 'Alice');
   ENTITY_NAME_MAP.set(HUB_ID, 'Hub');
@@ -171,23 +185,20 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     depositoryAddress,
   };
 
-  // Ensure signer keys
-  ensureSignerKeysFromSeed(env, ['1', '2'], 'settle');
-
-  // Create Alice (left of jurisdiction)
+  // Create Alice (left of jurisdiction) - entity #2, signer '2'
   await applyRuntimeInput(env, {
     runtimeTxs: [{
       type: 'importReplica' as const,
       entityId: ALICE_ID,
-      signerId: '1',
+      signerId: '2',
       data: {
         isProposer: true,
         position: { x: -30, y: -30, z: 0 },
         config: {
           mode: 'proposer-based' as const,
           threshold: 1n,
-          validators: ['1'],
-          shares: { '1': 1n },
+          validators: ['2'],
+          shares: { '2': 1n },
           jurisdiction
         }
       }
@@ -195,20 +206,20 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     entityInputs: []
   });
 
-  // Create Hub (right of jurisdiction)
+  // Create Hub (right of jurisdiction) - entity #3, signer '3'
   await applyRuntimeInput(env, {
     runtimeTxs: [{
       type: 'importReplica' as const,
       entityId: HUB_ID,
-      signerId: '2',
+      signerId: '3',
       data: {
         isProposer: true,
         position: { x: 30, y: -30, z: 0 },
         config: {
           mode: 'proposer-based' as const,
           threshold: 1n,
-          validators: ['2'],
-          shares: { '2': 1n },
+          validators: ['3'],
+          shares: { '3': 1n },
           jurisdiction
         }
       }
@@ -224,18 +235,18 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   });
 
   // Setup j-watcher
-  jWatcherInstance = setupBrowserVMWatcher(env, evm);
+  jWatcherInstance = setupBrowserVMWatcher(env, browserVM);
 
   // Mint reserves
   await process(env, [{
     entityId: ALICE_ID,
-    signerId: '1',
+    signerId: '2',
     entityTxs: [{ type: 'mintReserves', data: { tokenId: USDC_TOKEN_ID, amount: usd(1000) } }]
   }]);
 
   await process(env, [{
     entityId: HUB_ID,
-    signerId: '2',
+    signerId: '3',
     entityTxs: [{ type: 'mintReserves', data: { tokenId: USDC_TOKEN_ID, amount: usd(1000) } }]
   }]);
 
@@ -248,7 +259,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // Open account between Alice and Hub
   await process(env, [{
     entityId: ALICE_ID,
-    signerId: '1',
+    signerId: '2',
     entityTxs: [{ type: 'openAccount', data: { targetEntityId: HUB_ID } }]
   }]);
 
@@ -361,7 +372,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
 
   await process(env, [{
     entityId: ALICE_ID,
-    signerId: '1',
+    signerId: '2',
     entityTxs: [{
       type: 'settle_propose',
       data: {
@@ -424,7 +435,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
 
   await process(env, [{
     entityId: HUB_ID,
-    signerId: '2',
+    signerId: '3',
     entityTxs: [{
       type: 'settle_update',
       data: {
@@ -462,7 +473,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // Alice approves first
   await process(env, [{
     entityId: ALICE_ID,
-    signerId: '1',
+    signerId: '2',
     entityTxs: [{
       type: 'settle_approve',
       data: { counterpartyEntityId: HUB_ID }
@@ -484,7 +495,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // Hub approves
   await process(env, [{
     entityId: HUB_ID,
-    signerId: '2',
+    signerId: '3',
     entityTxs: [{
       type: 'settle_approve',
       data: { counterpartyEntityId: ALICE_ID }
@@ -518,7 +529,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // Alice executes (adds to jBatch)
   await process(env, [{
     entityId: ALICE_ID,
-    signerId: '1',
+    signerId: '2',
     entityTxs: [{
       type: 'settle_execute',
       data: { counterpartyEntityId: HUB_ID }
@@ -550,7 +561,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // Create another proposal
   await process(env, [{
     entityId: ALICE_ID,
-    signerId: '1',
+    signerId: '2',
     entityTxs: [{
       type: 'settle_propose',
       data: {
@@ -569,7 +580,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // Hub rejects
   await process(env, [{
     entityId: HUB_ID,
-    signerId: '2',
+    signerId: '3',
     entityTxs: [{
       type: 'settle_reject',
       data: {

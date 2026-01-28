@@ -3,7 +3,7 @@ import type { AddressInfo } from 'net';
 import * as secp256k1 from '@noble/secp256k1';
 import { keccak256 } from 'ethers';
 
-import type { RuntimeInput, EntityInput } from './types';
+import type { RuntimeInput, EntityInput } from '../types';
 import { deserializeWsMessage, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage, type RuntimeWsAuth } from './ws-protocol';
 
 type ClientEntry = {
@@ -146,7 +146,63 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     }
   };
 
+  // Gossip profile storage - relay is central source of truth
+  // Key: entityId, Value: profile with timestamp (newer replaces older)
+  const gossipProfiles = new Map<string, { profile: any; timestamp: number; fromRuntimeId: string }>();
+
+  const storeGossipProfile = (profile: any, fromRuntimeId: string) => {
+    const entityId = profile?.entityId;
+    if (!entityId) return false;
+    const newTs = profile?.metadata?.lastUpdated || 0;
+    const name = profile?.metadata?.name || '(no name)';
+    const existing = gossipProfiles.get(entityId);
+    if (existing && existing.timestamp >= newTs) {
+      return false; // Existing is newer or same
+    }
+    gossipProfiles.set(entityId, { profile, timestamp: newTs, fromRuntimeId });
+    // Debug: show board structure
+    const board = profile?.metadata?.board;
+    const validators = board?.validators || [];
+    const hasPublicKeys = validators.filter((v: any) => v?.publicKey).length;
+    const entityPubKey = profile?.metadata?.entityPublicKey ? 'yes' : 'no';
+    console.log(`[WS] Gossip stored: ${entityId.slice(-4)} name="${name}" ts=${newTs} board=${validators.length}v/${hasPublicKeys}pk entityPubKey=${entityPubKey}`);
+    return true;
+  };
+
+  const getAllGossipProfiles = (): any[] => {
+    return Array.from(gossipProfiles.values()).map(v => v.profile);
+  };
+
   const routeMessage = async (msg: RuntimeWsMessage, ws: WebSocket) => {
+    // GOSSIP ANNOUNCE: Store profiles in relay (clients pull when needed)
+    if (msg.type === 'gossip_announce') {
+      const payload = msg.payload as { profiles?: any[] } | undefined;
+      const profiles = payload?.profiles || [];
+      let stored = 0;
+      for (const profile of profiles) {
+        if (storeGossipProfile(profile, msg.from || 'unknown')) stored++;
+      }
+      send(ws, { type: 'ack', inReplyTo: msg.id, status: 'stored', count: stored });
+      return;
+    }
+
+    // GOSSIP REQUEST: Return all stored profiles
+    if (msg.type === 'gossip_request') {
+      const allProfiles = getAllGossipProfiles();
+      const profileNames = allProfiles.map((p: any) => p.metadata?.name || '?').join(',');
+      console.log(`[WS] Gossip request from ${msg.from?.slice(0,10)}: sending ${allProfiles.length} profiles (${profileNames})`);
+      send(ws, {
+        type: 'gossip_response',
+        id: makeMessageId(),
+        from: serverId,
+        to: msg.from,
+        timestamp: now(),
+        payload: { profiles: allProfiles },
+        inReplyTo: msg.id,
+      });
+      return;
+    }
+
     const target = msg.to;
     if (!target) {
       send(ws, { type: 'error', error: 'Missing target runtimeId' });
@@ -294,7 +350,8 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
         msg.type === 'entity_input' ||
         msg.type === 'gossip_request' ||
         msg.type === 'gossip_response' ||
-        msg.type === 'gossip_announce'
+        msg.type === 'gossip_announce' ||
+        msg.type === 'gossip_subscribe'
       ) {
         await routeMessage(msg, ws);
         return;

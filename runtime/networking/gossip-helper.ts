@@ -3,10 +3,10 @@
  * Builds and broadcasts entity profiles with account information
  */
 
-import type { EntityState } from './types';
+import type { EntityState } from '../types';
 import type { BoardMetadata, Profile } from './gossip';
-import { deriveDelta, isLeft } from './account-utils';
-import { getCachedSignerAddress, getCachedSignerPublicKey } from './account-crypto';
+import { deriveDelta, isLeft } from '../account-utils';
+import { getCachedSignerAddress, getCachedSignerPublicKey } from '../account-crypto';
 
 const toUint16 = (value: bigint | number | undefined, fallback = 0): number => {
   const raw = typeof value === 'bigint' ? Number(value) : Number(value ?? fallback);

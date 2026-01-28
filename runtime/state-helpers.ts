@@ -5,7 +5,7 @@
 
 import { encode } from './snapshot-coder';
 import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, RuntimeInput, AccountMachine, JReplica, LogCategory, BrowserVMState } from './types';
-import type { Profile } from './gossip';
+import type { Profile } from './networking/gossip';
 import { DEBUG } from './utils';
 import { validateEntityState } from './validation-utils';
 import { safeStringify, safeParse } from './serialization-utils';
@@ -100,7 +100,7 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
   if (env.gossip?.getProfiles) {
     const profile = (env.gossip.getProfiles() as Profile[]).find(p => p.entityId === entityId);
     const board = profile?.metadata?.board;
-    if (Array.isArray(board) && board.length > 0) {
+    if (Array.isArray(board) && board.length > 0 && board[0]) {
       return board[0];
     }
     if (board && !Array.isArray(board) && Array.isArray(board.validators) && board.validators.length > 0) {
@@ -306,7 +306,9 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
         txs: cloneArray(replica.proposal.txs),
         hash: replica.proposal.hash,
         newState: replica.proposal.newState,
-        signatures: cloneMap(replica.proposal.signatures),
+        signatures: replica.proposal.signatures?.map(arr => [...arr]),
+        hashes: replica.proposal.hashes ? [...replica.proposal.hashes] : undefined,
+        hankos: replica.proposal.hankos ? [...replica.proposal.hankos] : undefined,
       }
     }),
     ...(replica.lockedFrame && {
@@ -315,7 +317,9 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
         txs: cloneArray(replica.lockedFrame.txs),
         hash: replica.lockedFrame.hash,
         newState: replica.lockedFrame.newState,
-        signatures: cloneMap(replica.lockedFrame.signatures),
+        signatures: replica.lockedFrame.signatures?.map(arr => [...arr]),
+        hashes: replica.lockedFrame.hashes ? [...replica.lockedFrame.hashes] : undefined,
+        hankos: replica.lockedFrame.hankos ? [...replica.lockedFrame.hankos] : undefined,
       }
     }),
     isProposer: replica.isProposer,
@@ -435,9 +439,9 @@ export const captureSnapshot = async (
           // Add entity to registeredEntities
           if (!registeredEntities.has(entityId)) {
             registeredEntities.set(entityId, {
-              name: replica.name || `E${entityId.slice(-4)}`,
-              quorum: replica.quorum || [],
-              threshold: replica.threshold || 1,
+              name: `E${entityId.slice(-4)}`,
+              quorum: replica.state.config?.validators || [],
+              threshold: Number(replica.state.config?.threshold || 1n),
             });
           }
         }
@@ -607,6 +611,8 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     sentTransitions: account.sentTransitions,
     ackedTransitions: account.ackedTransitions,
     deltas: new Map(Array.from(account.deltas.entries()).map(([key, delta]) => [key, { ...delta }])),
+    locks: new Map(Array.from(account.locks.entries()).map(([key, lock]) => [key, { ...lock }])),
+    swapOffers: new Map(Array.from(account.swapOffers.entries()).map(([key, offer]) => [key, { ...offer }])),
     globalCreditLimits: { ...account.globalCreditLimits },
     currentHeight: account.currentHeight,
     pendingSignatures: [...account.pendingSignatures],

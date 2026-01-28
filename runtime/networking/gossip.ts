@@ -5,8 +5,8 @@
  * It manages entity profiles and their capabilities in a distributed network.
  */
 
-import { FINANCIAL } from './constants';
-import { logDebug } from './logger';
+import { FINANCIAL } from '../constants';
+import { logDebug } from '../logger';
 export type BoardValidator = {
   signer: string; // canonical signer address (0x...) or signerId fallback
   weight: number; // uint16 voting power
