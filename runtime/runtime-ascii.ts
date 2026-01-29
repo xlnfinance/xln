@@ -177,20 +177,20 @@ export function formatRuntime(env: Env, options?: FormatOptions): string {
 
       if (event.category === 'jurisdiction') {
         indent = 4;
-        const jName = event.data?.jurisdictionName || env.activeJurisdiction || 'J';
-        const block = event.data?.blockNumber || '?';
+        const jName = event.data?.['jurisdictionName'] || env.activeJurisdiction || 'J';
+        const block = event.data?.['blockNumber'] || '?';
         tag = `  J:${jName}:${block}`;
       } else if (event.entityId) {
         // Entity-level
         const entityShort = formatAddress(event.entityId);
-        const entityHeight = event.data?.height || '?';
+        const entityHeight = event.data?.['height'] || '?';
 
         // Check if account-level event
-        if (event.message.includes('bilateral') || event.message.includes('Account') || event.data?.accountId) {
+        if (event.message.includes('bilateral') || event.message.includes('Account') || event.data?.['accountId']) {
           indent = 8;
-          const accountId = event.data?.accountId || event.data?.toEntity || event.data?.fromEntity;
-          const accountShort = accountId ? formatAddress(accountId) : '?';
-          const frameHeight = event.data?.frameHeight || event.data?.height || '?';
+          const accountIdValue = event.data?.['accountId'] || event.data?.['toEntity'] || event.data?.['fromEntity'];
+          const accountShort = typeof accountIdValue === 'string' ? formatAddress(accountIdValue) : '?';
+          const frameHeight = event.data?.['frameHeight'] || event.data?.['height'] || '?';
           tag = `      A:${entityShort}:${accountShort}:${frameHeight}`;
         } else {
           indent = 6;
@@ -438,8 +438,13 @@ export function formatAccount(account: AccountMachine, myEntityId: string, optio
       output.push(' '.repeat(indent) + `    Lock: ${lock.lockId.slice(0, 12)}... | ${formatBigInt(lock.amount)}`);
       output.push(' '.repeat(indent) + `      Hash: ${lock.hashlock.slice(0, 16)}... | ${direction} | Expires: ${timeLeft}`);
       if (lock.envelope) {
-        const envInfo = lock.envelope.finalRecipient ? 'Final recipient' :
-                       lock.envelope.nextHop ? `→ ${formatAddress(lock.envelope.nextHop)}` : 'Unknown';
+        let envInfo = 'Unknown';
+        if (typeof lock.envelope === 'object') {
+          envInfo = lock.envelope.finalRecipient ? 'Final recipient' :
+                   lock.envelope.nextHop ? `→ ${formatAddress(lock.envelope.nextHop)}` : 'Unknown';
+        } else {
+          envInfo = `Encrypted: ${lock.envelope.slice(0, 20)}...`;
+        }
         output.push(' '.repeat(indent) + `      Envelope: ${envInfo}`);
       }
     }
@@ -518,6 +523,7 @@ export function formatOrderbook(bookState: any, pairId: string, depth: number = 
   const asksToShow = asks.slice(0, depth).reverse();
   for (let i = 0; i < asksToShow.length; i++) {
     const ask = asksToShow[i];
+    if (!ask) continue;
     const priceStr = formatBigInt(ask.price, 18);
     const amountStr = formatBigInt(ask.amount, 18, baseSymbol);
     const bar = drawProgressBar(ask.amount, maxVolume, 8);
@@ -526,9 +532,11 @@ export function formatOrderbook(bookState: any, pairId: string, depth: number = 
   }
 
   // Spread
-  if (bids.length > 0 && asks.length > 0) {
-    const bestBid = bids[0].price;
-    const bestAsk = asks[0].price;
+  const firstBid = bids[0];
+  const firstAsk = asks[0];
+  if (firstBid && firstAsk) {
+    const bestBid = firstBid.price;
+    const bestAsk = firstAsk.price;
     const spread = bestAsk - bestBid;
     const spreadPct = bestBid > 0n ? Number(spread * 10000n / bestBid) / 100 : 0;
     content.push(`${'─'.repeat(width - 2)}`);
@@ -540,6 +548,7 @@ export function formatOrderbook(bookState: any, pairId: string, depth: number = 
   const bidsToShow = bids.slice(0, depth);
   for (let i = 0; i < bidsToShow.length; i++) {
     const bid = bidsToShow[i];
+    if (!bid) continue;
     const priceStr = formatBigInt(bid.price, 18);
     const amountStr = formatBigInt(bid.amount, 18, baseSymbol);
     const bar = drawProgressBar(bid.amount, maxVolume, 8);

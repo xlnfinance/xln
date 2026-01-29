@@ -189,42 +189,22 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-      // Get the replica to find the signerId
-      const replicaKeys = Array.from($isolatedEnv.eReplicas.keys()) as string[];
-      const replicaKey = replicaKeys.find(k => k.startsWith(selectedEntityForMint + ':'));
-      const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
-
-      if (!replica) {
-        throw new Error(`No replica found for entity ${shortAddress(selectedEntityForMint)}`);
+      // Get BrowserVM for real on-chain minting
+      const browserVM = $isolatedEnv.browserVM;
+      if (!browserVM) {
+        throw new Error('BrowserVM not available');
       }
 
-      // Mint via j_event (ReserveUpdated - simulates on-chain deposit)
-      await XLN.process($isolatedEnv, [{
-        entityId: selectedEntityForMint,
-        signerId: replica.signerId,
-        entityTxs: [{
-          type: 'j_event',
-          data: {
-            from: replica.signerId,
-            event: {
-              type: 'ReserveUpdated',
-              data: {
-                entity: selectedEntityForMint,
-                tokenId: 0,
-                newBalance: BigInt(mintAmount).toString(),
-                name: 'USDC',
-                symbol: 'USDC',
-                decimals: 6
-              }
-            },
-            observedAt: Date.now(),
-            blockNumber: 1,
-            transactionHash: '0x' + Array(64).fill('0').join('')
-          }
-        }]
-      }]);
+      // Mint via REAL BrowserVM call (emits ReserveUpdated event)
+      const amount = BigInt(mintAmount);
+      console.log(`[Architect] Calling debugFundReserves: entity=${selectedEntityForMint}, tokenId=1, amount=${amount}`);
+      const events = await browserVM.debugFundReserves(selectedEntityForMint, 1, amount);
+      console.log(`[Architect] Mint emitted ${events.length} events`);
 
-      lastAction = ` Minted ${mintAmount} to entity`;
+      // Process to capture the J-events and create a new frame
+      await XLN.process($isolatedEnv, []);
+
+      lastAction = `✅ Minted ${mintAmount} to entity (on-chain)`;
 
       // Update stores to trigger reactivity (set timeIndex FIRST to avoid race condition)
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
@@ -240,16 +220,23 @@
     }
   }
 
-  /** Send R2R (Reserve-to-Reserve) transaction */
+  /** Send R2R (Reserve-to-Reserve) transaction via J-Machine (Depository.sol) */
   async function sendR2RTransaction() {
     if (!requireLiveMode('send R2R transaction')) return;
     if (!r2rFromEntity || !r2rToEntity || r2rFromEntity === r2rToEntity) {
-      lastAction = ' Select different FROM and TO entities';
+      lastAction = '⚠️ Select different FROM and TO entities';
       return;
     }
 
     if (!$isolatedEnv) {
-      lastAction = ' Environment not ready';
+      lastAction = '⚠️ Environment not ready';
+      return;
+    }
+
+    // Get BrowserVM from env
+    const browserVM = $isolatedEnv.browserVM;
+    if (!browserVM) {
+      lastAction = '⚠️ BrowserVM not available';
       return;
     }
 
@@ -260,65 +247,34 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-      // Get the replica to find the signerId
-      const replicaKeys = Array.from($isolatedEnv.eReplicas.keys()) as string[];
-      const replicaKey = replicaKeys.find(k => k.startsWith(r2rFromEntity + ':'));
-      const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
+      // Debug: check reserves before R2R
+      const amount = BigInt(r2rAmount);
+      const fromReserve = await browserVM.getReserves(r2rFromEntity, 1);
+      console.log(`[Architect] DEBUG: fromEntity=${r2rFromEntity}, reserves=${fromReserve}, amount=${amount}`);
 
-      if (!replica) {
-        throw new Error(`No replica found for entity ${shortAddress(r2rFromEntity)}`);
+      if (fromReserve < amount) {
+        throw new Error(`Insufficient reserves: have ${fromReserve}, need ${amount}`);
       }
 
-      // Check if account exists
-      const hasAccount = replica.state?.accounts?.has(r2rToEntity);
+      // Call Depository.sol reserveToReserve() directly via BrowserVM
+      console.log(`[Architect] Calling reserveToReserve: ${r2rFromEntity} → ${r2rToEntity}, amount=${amount}`);
 
-      // Step 1: Open account if it doesn't exist
-      if (!hasAccount) {
-        console.log('[Architect] No account exists, opening account first...');
-        lastAction = `Opening account: ${shortAddress(r2rFromEntity)} ↔ ${shortAddress(r2rToEntity)}...`;
+      const events = await browserVM.reserveToReserve(r2rFromEntity, r2rToEntity, 1, amount);
+      console.log(`[Architect] R2R emitted ${events.length} events`);
 
-        await XLN.process($isolatedEnv, [{
-          entityId: r2rFromEntity,
-          signerId: replica.signerId,
-          entityTxs: [{
-            type: 'openAccount',
-            data: {
-              targetEntityId: r2rToEntity
-            }
-          }]
-        }]);
+      // Process the environment to create a new frame with the J-events
+      await XLN.process($isolatedEnv, []);
 
-        console.log('[Architect] Account opened');
-      }
+      lastAction = `✅ R2R sent: ${r2rAmount} units (on-chain)`;
 
-      // Step 2: Send payment via directPayment
-      lastAction = `Sending payment: ${r2rAmount} units...`;
-
-      await XLN.process($isolatedEnv, [{
-        entityId: r2rFromEntity,
-        signerId: replica.signerId,
-        entityTxs: [{
-          type: 'directPayment',
-          data: {
-            targetEntityId: r2rToEntity,
-            tokenId: 0,
-            amount: BigInt(r2rAmount),
-            route: [r2rFromEntity, r2rToEntity],
-            description: 'Manual R2R payment'
-          }
-        }]
-      }]);
-
-      lastAction = ` R2R sent: ${r2rAmount} units`;
-
-      // Update stores to trigger reactivity (set timeIndex FIRST to avoid race condition)
+      // Update stores to trigger reactivity
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedEnv.set($isolatedEnv);
 
       console.log('[Architect] R2R complete, new frame created');
     } catch (err: any) {
-      lastAction = ` ${err.message}`;
+      lastAction = `❌ ${err.message}`;
       console.error('[Architect] R2R error:', err);
     } finally {
       loading = false;
@@ -1070,7 +1026,7 @@
                   type: 'ReserveUpdated',
                   data: {
                     entity: entityId,
-                    tokenId: 0,
+                    tokenId: 1,
                     newBalance: '1000000',
                     name: 'USDC',
                     symbol: 'USDC',
@@ -1155,7 +1111,7 @@
           type: 'directPayment',
           data: {
             targetEntityId: to,
-            tokenId: 0,
+            tokenId: 1,
             amount: BigInt(amount),
             route: [from, to],
             description: 'Random banker demo payment'
@@ -1253,7 +1209,7 @@
           type: 'directPayment',
           data: {
             targetEntityId: to,
-            tokenId: 0,
+            tokenId: 1,
             amount,
             route: [from, to],
             description: '20% balance transfer'
@@ -1647,7 +1603,7 @@
                   type: 'ReserveUpdated',
                   data: {
                     entity: entityId,
-                    tokenId: 0,
+                    tokenId: 1,
                     newBalance: layer.initialReserves.toString(),
                     name: 'USD',
                     symbol: 'USD',
@@ -1903,7 +1859,7 @@
                 type: 'ReserveUpdated',
                 data: {
                   entity: fedEntityId,
-                  tokenId: 0,
+                  tokenId: 1,
                   newBalance: '100000000', // $100M base money
                   name: 'USD',
                   symbol: 'USD',
@@ -1935,7 +1891,7 @@
                   type: 'ReserveUpdated',
                   data: {
                     entity: bankData.entityId,
-                    tokenId: 0,
+                    tokenId: 1,
                     newBalance: '1000000', // $1M
                     name: 'USD',
                     symbol: 'USD',
@@ -1970,7 +1926,7 @@
                   type: 'ReserveUpdated',
                   data: {
                     entity: entity.entityId,
-                    tokenId: 0,
+                    tokenId: 1,
                     newBalance: '10000', // $10K
                     name: 'USD',
                     symbol: 'USD',
@@ -2141,7 +2097,7 @@
                 type: 'ReserveUpdated',
                 data: {
                   entity: fedId,
-                  tokenId: 0,
+                  tokenId: 1,
                   newBalance: newBalance.toString(),
                   name: 'USD',
                   symbol: 'USD',
@@ -2215,7 +2171,7 @@
           type: 'directPayment',
           data: {
             targetEntityId: toId,
-            tokenId: 0,
+            tokenId: 1,
             amount: amount,
             route: [fromId, toId],
             description: `20% circular payment`
@@ -2310,7 +2266,7 @@
                 type: 'directPayment',
                 data: {
                   targetEntityId: bank,
-                  tokenId: 0,
+                  tokenId: 1,
                   amount: BigInt(amount),
                   route: [fedId, bank],
                   description: `Fed discount window lending`
@@ -2336,7 +2292,7 @@
                 type: 'directPayment',
                 data: {
                   targetEntityId: fedId,
-                  tokenId: 0,
+                  tokenId: 1,
                   amount: BigInt(amount),
                   route: [bank, fedId],
                   description: `Bank repaying Fed loan`
@@ -2383,7 +2339,7 @@
                 type: 'directPayment',
                 data: {
                   targetEntityId: to,
-                  tokenId: 0,
+                  tokenId: 1,
                   amount: BigInt(amount),
                   route: [from, to],
                   description: `Interbank settlement`

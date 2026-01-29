@@ -83,8 +83,8 @@
     replicas: Map<string, any> | null | undefined,
     xlnFuncs: any,
     search: string,
-    jurisdiction: string | null,
-    positions: Map<string, any>
+    _jurisdiction: string | null, // Unused - show all entities
+    _positions: Map<string, any>  // Unused
   ): SignerNode[] {
     if (!replicas || !xlnFuncs) return [];
 
@@ -107,24 +107,15 @@
 
       for (const replica of entityReplicas) {
         const entityId = replica.entityId;
-        const entityJurisdiction = getReplicaJurisdiction(replica, positions, entityId);
-        const filter = (jurisdiction || '').toLowerCase();
-
-        if (filter && filter !== 'all' && entityJurisdiction && entityJurisdiction.toLowerCase() !== filter) {
-          continue;
-        }
-        if (filter && filter !== 'all' && !entityJurisdiction) {
-          continue;
-        }
-
         const name = getEntityName(replica);
         const shortId = xlnFuncs.getEntityShortId(entityId);
         const displayName = name || `Entity #${shortId}`;
 
-        // Filter by search
-        if (search && !displayName.toLowerCase().includes(searchLower) &&
+        // Filter by search - match against entityId, signerId, or shortId
+        if (search &&
             !entityId.toLowerCase().includes(searchLower) &&
-            !signerId.toLowerCase().includes(searchLower)) {
+            !signerId.toLowerCase().includes(searchLower) &&
+            !shortId.toLowerCase().includes(searchLower)) {
           continue;
         }
 
@@ -256,18 +247,7 @@
       />
     </div>
 
-    <!-- EOA Wallet (always first) -->
-    {@const firstSignerAddress = $activeVault?.signers?.[0]?.address}
-    {#if firstSignerAddress}
-      <button
-        class="menu-item jmachine-item"
-        on:click={() => selectSigner(firstSignerAddress)}
-      >
-        <span class="menu-icon">💼</span>
-        <span class="menu-label">EOA Wallet</span>
-      </button>
-      <div class="menu-divider"></div>
-    {/if}
+    <!-- EOA Wallet removed - External tokens now shown inside Entity panel -->
 
     <!-- Signer Tree (entities as children) -->
     <div class="entity-list">
@@ -322,7 +302,7 @@
     </div>
 
     <!-- Add Signer (at bottom of entities) -->
-    {#if firstSignerAddress}
+    {#if signerTree.length > 0}
       <button class="menu-item add-item" on:click={handleAddSigner}>
         <span class="menu-label">+ Add Signer</span>
       </button>

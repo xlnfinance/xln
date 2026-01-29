@@ -141,9 +141,218 @@
   let newContactName = '';
   let newContactId = '';
 
+  // BrowserVM reserves (fetched directly from on-chain state)
+  let browserVMReserves: Map<number, bigint> = new Map();
+  let reservesLoading = true;
+  let faucetFunding = false;
+
+  // External tokens (ERC20 balances held by signer EOA)
+  interface ExternalToken {
+    symbol: string;
+    address: string;
+    balance: bigint;
+    decimals: number;
+    tokenId: number;
+  }
+  let externalTokens: ExternalToken[] = [];
+  let externalTokensLoading = true;
+  let depositingToken: string | null = null; // symbol of token being deposited
+
+  // Faucet: fund entity reserves with test tokens
+  async function faucetReserves() {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    if (!entityId) return;
+
+    faucetFunding = true;
+    try {
+      const { getXLN } = await import('$lib/stores/xlnStore');
+      const xln = await getXLN();
+      const browserVM = xln.getBrowserVMInstance?.();
+      if (!browserVM?.debugFundReserves) {
+        throw new Error('BrowserVM faucet not available');
+      }
+
+      // Fund 1000 USDC (token 1), 0.5 WETH (token 2), 500 USDT (token 3)
+      const fundAmounts = [
+        { tokenId: 1, amount: 1000n * 10n**18n },  // 1000 USDC
+        { tokenId: 2, amount: 5n * 10n**17n },     // 0.5 WETH
+        { tokenId: 3, amount: 500n * 10n**18n },   // 500 USDT
+      ];
+
+      for (const { tokenId, amount } of fundAmounts) {
+        await browserVM.debugFundReserves(entityId, tokenId, amount);
+      }
+
+      console.log('[EntityPanel] Faucet funded reserves for', entityId.slice(0, 10));
+
+      // Refresh reserves display
+      await fetchBrowserVMReserves();
+    } catch (err) {
+      console.error('[EntityPanel] Faucet failed:', err);
+      alert(`Faucet failed: ${(err as Error).message}`);
+    } finally {
+      faucetFunding = false;
+    }
+  }
+
+  async function fetchBrowserVMReserves() {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    if (!entityId) return;
+
+    try {
+      const { getXLN } = await import('$lib/stores/xlnStore');
+      const xln = await getXLN();
+      const browserVM = xln.getBrowserVMInstance?.();
+      if (!browserVM?.getReserves) {
+        reservesLoading = false;
+        return;
+      }
+
+      const newReserves = new Map<number, bigint>();
+      // Fetch USDC, WETH, USDT (tokens 1, 2, 3)
+      for (const tokenId of [1, 2, 3]) {
+        const balance = await browserVM.getReserves(entityId, tokenId);
+        if (balance > 0n) {
+          newReserves.set(tokenId, balance);
+        }
+      }
+      browserVMReserves = newReserves;
+      reservesLoading = false;
+    } catch (err) {
+      console.error('[EntityPanel] Failed to fetch reserves:', err);
+      reservesLoading = false;
+    }
+  }
+
+  // Fetch external tokens (ERC20 balances for signer)
+  async function fetchExternalTokens() {
+    const signerId = tab.signerId;
+    if (!signerId) {
+      externalTokensLoading = false;
+      return;
+    }
+
+    try {
+      const { getXLN } = await import('$lib/stores/xlnStore');
+      const xln = await getXLN();
+      const browserVM = xln.getBrowserVMInstance?.();
+      if (!browserVM?.getRegisteredTokens || !browserVM?.getErc20Balance) {
+        externalTokensLoading = false;
+        return;
+      }
+
+      const registeredTokens = browserVM.getRegisteredTokens();
+      const tokens: ExternalToken[] = [];
+
+      for (const token of registeredTokens) {
+        const balance = await browserVM.getErc20Balance(token.address, signerId);
+        tokens.push({
+          symbol: token.symbol,
+          address: token.address,
+          balance,
+          decimals: token.decimals,
+          tokenId: token.tokenId,
+        });
+      }
+
+      externalTokens = tokens;
+      externalTokensLoading = false;
+    } catch (err) {
+      console.error('[EntityPanel] Failed to fetch external tokens:', err);
+      externalTokensLoading = false;
+    }
+  }
+
+  // Deposit ERC20 token to entity reserve
+  async function depositToReserve(token: ExternalToken) {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    const signerId = tab.signerId;
+    if (!entityId || !signerId || token.balance <= 0n) return;
+
+    depositingToken = token.symbol;
+    try {
+      const { getXLN } = await import('$lib/stores/xlnStore');
+      const xln = await getXLN();
+      const browserVM = xln.getBrowserVMInstance?.();
+      if (!browserVM?.externalTokenToReserve) {
+        throw new Error('BrowserVM deposit not available');
+      }
+
+      // Get signer's private key from runtime
+      const runtime = xln.getRuntime?.();
+      const seed = runtime?.seed;
+      if (!seed) {
+        throw new Error('No runtime seed available');
+      }
+
+      // Use the XLN runtime's exposed crypto function
+      const privKey = xln.getCachedSignerPrivateKey?.(seed, signerId);
+      if (!privKey) {
+        throw new Error('Cannot derive signer private key');
+      }
+
+      // Deposit all available balance
+      await browserVM.externalTokenToReserve(privKey, entityId, token.address, token.balance);
+
+      console.log(`[EntityPanel] Deposited ${token.symbol} to entity reserves`);
+
+      // Refresh both balances
+      await Promise.all([fetchBrowserVMReserves(), fetchExternalTokens()]);
+    } catch (err) {
+      console.error('[EntityPanel] Deposit failed:', err);
+      alert(`Deposit failed: ${(err as Error).message}`);
+    } finally {
+      depositingToken = null;
+    }
+  }
+
+  // Faucet external tokens (ERC20 to signer EOA)
+  async function faucetExternalTokens() {
+    const signerId = tab.signerId;
+    if (!signerId) return;
+
+    faucetFunding = true;
+    try {
+      const { getXLN } = await import('$lib/stores/xlnStore');
+      const xln = await getXLN();
+      const browserVM = xln.getBrowserVMInstance?.();
+      if (!browserVM?.fundSignerWallet) {
+        throw new Error('BrowserVM faucet not available');
+      }
+
+      await browserVM.fundSignerWallet(signerId);
+      console.log('[EntityPanel] Faucet funded signer wallet', signerId.slice(0, 10));
+
+      // Refresh external tokens display
+      await fetchExternalTokens();
+    } catch (err) {
+      console.error('[EntityPanel] External faucet failed:', err);
+      alert(`Faucet failed: ${(err as Error).message}`);
+    } finally {
+      faucetFunding = false;
+    }
+  }
+
+  // Refetch balances when entity/signer changes
+  $: if (tab.entityId) {
+    fetchBrowserVMReserves();
+  }
+  $: if (tab.signerId) {
+    fetchExternalTokens();
+  }
+
   onMount(() => {
     const saved = localStorage.getItem('xln-contacts');
     if (saved) contacts = JSON.parse(saved);
+
+    // Fetch reserves and external tokens on mount and periodically
+    fetchBrowserVMReserves();
+    fetchExternalTokens();
+    const interval = setInterval(() => {
+      fetchBrowserVMReserves();
+      fetchExternalTokens();
+    }, 5000);
+    return () => clearInterval(interval);
   });
 
   function saveContact() {
@@ -263,7 +472,6 @@
       {/if}
       <EntityDropdown
         {tab}
-        jurisdictionFilter={selectedJurisdictionName}
         on:entitySelect={handleEntitySelect}
       />
       {#if replica}
@@ -338,12 +546,12 @@
 
       <!-- Portfolio Summary -->
       <section class="portfolio">
-        {#if replica.state?.reserves && replica.state.reserves.size > 0}
-          {@const portfolioValue = calculatePortfolioValue(replica.state.reserves)}
+        {#if browserVMReserves.size > 0}
+          {@const portfolioValue = calculatePortfolioValue(browserVMReserves)}
           <div class="total-value">{formatCompact(portfolioValue)}</div>
           <div class="total-label">Total Reserves</div>
           <div class="token-list">
-            {#each Array.from(replica.state.reserves.entries()) as [tokenId, amount]}
+            {#each Array.from(browserVMReserves.entries()) as [tokenId, amount]}
               {@const info = getTokenInfo(Number(tokenId))}
               {@const value = getAssetValue(Number(tokenId), amount)}
               {@const pct = portfolioValue > 0 ? (value / portfolioValue) * 100 : 0}
@@ -357,9 +565,55 @@
               </div>
             {/each}
           </div>
+        {:else if reservesLoading}
+          <div class="total-value dim">Loading...</div>
+          <div class="total-label">Fetching reserves</div>
         {:else}
           <div class="total-value dim">$0.00</div>
           <div class="total-label">No reserves</div>
+          <button class="btn-faucet" on:click={faucetReserves} disabled={faucetFunding}>
+            {faucetFunding ? 'Funding...' : '💧 Get Test Funds'}
+          </button>
+        {/if}
+      </section>
+
+      <!-- External Tokens (ERC20 held by signer) -->
+      <section class="external-tokens">
+        <div class="section-header">
+          <h4>External Tokens (ERC20)</h4>
+          <span class="signer-label" title={tab.signerId}>
+            Signer: {tab.signerId?.slice(0, 6)}...{tab.signerId?.slice(-4)}
+          </span>
+        </div>
+
+        {#if externalTokensLoading}
+          <div class="ext-loading">Loading...</div>
+        {:else if externalTokens.filter(t => t.balance > 0n).length > 0}
+          <div class="ext-list">
+            {#each externalTokens.filter(t => t.balance > 0n) as token}
+              {@const info = getTokenInfo(token.tokenId)}
+              <div class="ext-row">
+                <span class="ext-symbol" class:eth={token.symbol === 'WETH'} class:usd={token.symbol !== 'WETH'}>
+                  {token.symbol}
+                </span>
+                <span class="ext-amount">{formatAmount(token.balance, token.decimals)}</span>
+                <button
+                  class="btn-deposit"
+                  on:click={() => depositToReserve(token)}
+                  disabled={depositingToken === token.symbol}
+                >
+                  {depositingToken === token.symbol ? '...' : 'Deposit'}
+                </button>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="ext-empty">
+            <span>No external tokens</span>
+            <button class="btn-faucet-small" on:click={faucetExternalTokens} disabled={faucetFunding}>
+              {faucetFunding ? '...' : '💧 Faucet'}
+            </button>
+          </div>
         {/if}
       </section>
 
@@ -706,6 +960,148 @@
     color: #78716c;
     margin-top: 2px;
     margin-bottom: 16px;
+  }
+
+  .btn-faucet {
+    margin-top: 8px;
+    padding: 12px 24px;
+    background: linear-gradient(135deg, #0ea5e9, #0284c7);
+    border: none;
+    border-radius: 8px;
+    color: #f0f9ff;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-faucet:hover:not(:disabled) {
+    background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+    transform: translateY(-1px);
+  }
+
+  .btn-faucet:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  /* External Tokens */
+  .external-tokens {
+    padding: 12px 16px;
+    border-bottom: 1px solid #1c1917;
+  }
+
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  .section-header h4 {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: #78716c;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .signer-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: #57534e;
+  }
+
+  .ext-loading {
+    font-size: 12px;
+    color: #57534e;
+    text-align: center;
+    padding: 12px;
+  }
+
+  .ext-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .ext-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: #1c1917;
+    border-radius: 6px;
+  }
+
+  .ext-symbol {
+    font-weight: 600;
+    font-size: 12px;
+    width: 50px;
+  }
+
+  .ext-symbol.eth { color: #627eea; }
+  .ext-symbol.usd { color: #2775ca; }
+
+  .ext-amount {
+    flex: 1;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #a8a29e;
+  }
+
+  .btn-deposit {
+    padding: 4px 10px;
+    background: linear-gradient(135deg, #16a34a, #15803d);
+    border: none;
+    border-radius: 4px;
+    color: #f0fdf4;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-deposit:hover:not(:disabled) {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+  }
+
+  .btn-deposit:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .ext-empty {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: #1c1917;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #57534e;
+  }
+
+  .btn-faucet-small {
+    padding: 4px 10px;
+    background: linear-gradient(135deg, #0ea5e9, #0284c7);
+    border: none;
+    border-radius: 4px;
+    color: #f0f9ff;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-faucet-small:hover:not(:disabled) {
+    background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+  }
+
+  .btn-faucet-small:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
   }
 
   .token-list {

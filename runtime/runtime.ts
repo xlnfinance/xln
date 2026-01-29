@@ -358,6 +358,7 @@ export const setRuntimeSeed = (seed: string | null): void => {
     env.runtimeId = runtimeId || undefined;
   }
   if (pendingP2PConfig && runtimeId) {
+    console.log(`[P2P] pendingP2PConfig triggered, relayUrls=${pendingP2PConfig.config.relayUrls?.join(',')}`);
     const { env: pendingEnv, config } = pendingP2PConfig;
     pendingP2PConfig = null;
     startP2P(pendingEnv, config);
@@ -453,9 +454,11 @@ const routeEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] => 
 };
 
 export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null => {
+  console.log(`[P2P] startP2P called, relayUrls=${config.relayUrls?.join(',')}, env.runtimeId=${env.runtimeId?.slice(0,10) || 'NONE'}`);
   lastP2PConfig = config;
   const resolvedRuntimeId = config.runtimeId || env.runtimeId;
   if (!resolvedRuntimeId) {
+    console.log(`[P2P] No runtimeId, storing as pendingP2PConfig`);
     pendingP2PConfig = { env, config };
     return null;
   }
@@ -621,6 +624,11 @@ const applyRuntimeInput = async (
   runtimeInput: RuntimeInput,
 ): Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }> => {
   const startTime = getPerfMs();
+
+  // Ensure event emitters are attached (may be lost after store serialization)
+  if (!env.emit) {
+    attachEventEmitters(env);
+  }
 
   try {
     // SECURITY: Validate runtime input
@@ -2015,6 +2023,11 @@ export const process = async (
   inputs?: EntityInput[],
   runtimeDelay = 0
 ) => {
+  // Ensure event emitters are attached (may be lost after store serialization)
+  if (!env.emit) {
+    attachEventEmitters(env);
+  }
+
   // Frame stepping: check if we should stop and dump state
   if (env.stopAtFrame !== undefined && env.height >= env.stopAtFrame) {
     console.log(`\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);

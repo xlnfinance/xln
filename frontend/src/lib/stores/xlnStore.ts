@@ -183,7 +183,13 @@ export async function initializeXLN(): Promise<Env> {
 
     // Start P2P overlay (idempotent, waits for runtimeId if needed)
     if (xln.startP2P) {
-      xln.startP2P(env, { relayUrls: ['wss://xln.finance/relay'] });
+      // Use local relay for dev (localhost), production relay for deployed
+      const isLocalDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+      const relayUrls = isLocalDev
+        ? ['ws://localhost:9000/relay']
+        : ['wss://xln.finance/relay'];
+      console.log(`[P2P] Connecting to relay: ${relayUrls[0]}`);
+      xln.startP2P(env, { relayUrls });
     }
 
     // Expose to window for e2e testing

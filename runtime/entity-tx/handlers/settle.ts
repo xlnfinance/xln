@@ -136,10 +136,11 @@ export async function handleSettlePropose(
     insuranceRegs: [],
     initiatedBy: isLeft ? 'left' : 'right',
     status: 'awaiting_counterparty',
-    memo,
+    ...(memo && { memo }),
     version: 1,
     createdAt: env.timestamp,
     lastUpdatedAt: env.timestamp,
+    broadcastByLeft: !isLeft, // Counterparty (hub) broadcasts by default
   };
 
   account.settlementWorkspace = workspace;
@@ -158,7 +159,7 @@ export async function handleSettlePropose(
     type: 'propose',
     diffs,
     forgiveTokenIds: forgiveTokenIds || [],
-    memo,
+    ...(memo && { memo }),
     version: 1,
   };
 
@@ -218,7 +219,7 @@ export async function handleSettleUpdate(
   // Update workspace (replaces diffs entirely)
   account.settlementWorkspace.diffs = diffs;
   account.settlementWorkspace.forgiveTokenIds = forgiveTokenIds || account.settlementWorkspace.forgiveTokenIds;
-  account.settlementWorkspace.memo = memo ?? account.settlementWorkspace.memo;
+  if (memo) account.settlementWorkspace.memo = memo;
   account.settlementWorkspace.version = newVersion;
 
   // Ring-fence: Release old holds, set new holds
@@ -239,7 +240,7 @@ export async function handleSettleUpdate(
     type: 'update',
     diffs,
     forgiveTokenIds: account.settlementWorkspace.forgiveTokenIds,
-    memo: account.settlementWorkspace.memo,
+    ...(account.settlementWorkspace.memo && { memo: account.settlementWorkspace.memo }),
     version: account.settlementWorkspace.version,
   };
 
@@ -325,6 +326,9 @@ export async function handleSettleApprove(
     [settlementHash]
   );
   const hanko = hankos[0];
+  if (!hanko) {
+    throw new Error(`Failed to generate settlement hanko for ${signerId.slice(-4)}`);
+  }
 
   // Store our hanko
   if (iAmLeft) {
@@ -350,7 +354,7 @@ export async function handleSettleApprove(
 
   const settleAction: AccountInput['settleAction'] = {
     type: 'approve',
-    hanko,
+    ...(hanko && { hanko }),
     version: workspace.version,
   };
 
@@ -502,7 +506,7 @@ export async function handleSettleReject(
 
   const settleAction: AccountInput['settleAction'] = {
     type: 'reject',
-    memo: reason,
+    ...(reason && { memo: reason }),
   };
 
   outputs.push({
@@ -548,10 +552,11 @@ export function processSettleAction(
         insuranceRegs: [],
         initiatedBy: theyAreLeft ? 'left' : 'right',
         status: 'awaiting_counterparty',
-        memo: settleAction.memo,
+        ...(settleAction.memo && { memo: settleAction.memo }),
         version: settleAction.version || 1,
         createdAt: env.timestamp,
         lastUpdatedAt: env.timestamp,
+        broadcastByLeft: theyAreLeft, // Initiator broadcasts
       };
 
       account.settlementWorkspace = workspace;
@@ -578,7 +583,7 @@ export function processSettleAction(
 
       account.settlementWorkspace.diffs = settleAction.diffs || account.settlementWorkspace.diffs;
       account.settlementWorkspace.forgiveTokenIds = settleAction.forgiveTokenIds || account.settlementWorkspace.forgiveTokenIds;
-      account.settlementWorkspace.memo = settleAction.memo ?? account.settlementWorkspace.memo;
+      if (settleAction.memo) account.settlementWorkspace.memo = settleAction.memo;
       account.settlementWorkspace.version = settleAction.version || account.settlementWorkspace.version + 1;
       account.settlementWorkspace.lastUpdatedAt = env.timestamp;
 

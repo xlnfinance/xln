@@ -2,14 +2,14 @@
  * Shared scenario helpers
  */
 
-import type { Env, EntityInput, EntityReplica, Delta } from '../types';
+import type { Env, EntityInput, EntityReplica, Delta, RuntimeInput } from '../types';
 import { formatRuntime } from '../runtime-ascii';
 import { setFailFastErrors } from '../logger';
 import { getCachedSignerPrivateKey, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 
 // Lazy-loaded process to avoid circular deps
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
-let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
+let _applyRuntimeInput: ((env: Env, runtimeInput: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>) | null = null;
 
 export const getProcess = async () => {
   if (!_process) {
@@ -32,7 +32,7 @@ export { checkSolvency } from './solvency-check';
 export function requireRuntimeSeed(env: Env, label: string): string {
   const envSeed = env.runtimeSeed ?? null;
   const processSeed = (typeof process !== 'undefined' && process.env)
-    ? (process.env.XLN_RUNTIME_SEED || process.env.RUNTIME_SEED || null)
+    ? (process.env['XLN_RUNTIME_SEED'] || process.env['RUNTIME_SEED'] || null)
     : null;
   const seed = envSeed ?? processSeed;
   if (seed === null || seed === undefined) {
@@ -85,10 +85,7 @@ const getScenarioTickMs = (env: Env): number => {
 export const advanceScenarioTime = (env: Env, stepMs?: number, force: boolean = false): void => {
   if (!force && !env.scenarioMode) return;
   const step = Math.max(1, stepMs ?? getScenarioTickMs(env));
-  if (typeof env.timestamp === 'bigint') {
-    env.timestamp = env.timestamp + BigInt(step);
-    return;
-  }
+  // env.timestamp is typed as number - add step directly
   env.timestamp = (env.timestamp || 0) + step;
 };
 
@@ -158,7 +155,7 @@ export function enableStrictScenario(env: Env, label: string): () => void {
     strictScenarioDepth = Math.max(0, strictScenarioDepth - 1);
     if (strictScenarioDepth === 0) {
       env.strictScenario = false;
-      env.strictScenarioLabel = undefined;
+      delete env.strictScenarioLabel;
       if (strictScenarioOriginalLog) {
         console.log = strictScenarioOriginalLog;
         strictScenarioOriginalLog = null;
@@ -558,8 +555,14 @@ export function snap(
   } = {}
 ) {
   env.extra = {
-    subtitle: { title, what: opts.what, why: opts.why, tradfiParallel: opts.tradfiParallel, keyMetrics: opts.keyMetrics },
-    expectedSolvency: opts.expectedSolvency,
-    description: opts.description,
+    subtitle: {
+      title,
+      ...(opts.what ? { what: opts.what } : {}),
+      ...(opts.why ? { why: opts.why } : {}),
+      ...(opts.tradfiParallel ? { tradfiParallel: opts.tradfiParallel } : {}),
+      ...(opts.keyMetrics ? { keyMetrics: opts.keyMetrics } : {}),
+    },
+    ...(opts.expectedSolvency !== undefined ? { expectedSolvency: opts.expectedSolvency } : {}),
+    ...(opts.description ? { description: opts.description } : {}),
   };
 }

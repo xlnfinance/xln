@@ -83,25 +83,40 @@ export type BrowserVMTokenInfo = {
   tokenId: number;
 };
 
+/** EVM event from BrowserVM (matches jadapter/browservm-provider.ts EVMEvent) */
+export interface BrowserVMEvent {
+  name: string;
+  args: Record<string, unknown>;
+  blockNumber?: number;
+  blockHash?: string;
+  timestamp?: number;
+}
+
 export type BrowserVMInstance = {
+  // Token registry
   getTokenRegistry: () => BrowserVMTokenInfo[];
   getTokenAddress: (symbol: string) => string | null;
   getTokenId: (symbol: string) => number | null;
   getErc20Balance: (tokenAddress: string, owner: string) => Promise<bigint>;
   getEthBalance: (owner: string) => Promise<bigint>;
   getErc20Allowance?: (tokenAddress: string, owner: string, spender: string) => Promise<bigint>;
+  // Wallet operations
   fundSignerWallet: (address: string, amount?: bigint) => Promise<void>;
   approveErc20?: (privKey: Uint8Array, tokenAddress: string, spender: string, amount: bigint) => Promise<string>;
   transferErc20?: (privKey: Uint8Array, tokenAddress: string, to: string, amount: bigint) => Promise<string>;
-  externalTokenToReserve?: (privKey: Uint8Array, entityId: string, tokenAddress: string, amount: bigint) => Promise<any>;
+  externalTokenToReserve?: (privKey: Uint8Array, entityId: string, tokenAddress: string, amount: bigint) => Promise<BrowserVMEvent[]>;
   registerEntityWallet?: (entityId: string, privateKey: string) => void;
+  // Account queries
   getAccountInfo?: (entityId: string, counterpartyId: string) => Promise<{ cooperativeNonce: bigint; disputeHash: string; disputeTimeout: bigint }>;
   setDefaultDisputeDelay?: (delayBlocks: number) => Promise<void>;
+  // Block management
   setBlockTimestamp?: (timestamp: number) => void;
   setQuietLogs?: (quiet: boolean) => void;
   beginJurisdictionBlock?: (timestamp: number) => void;
   endJurisdictionBlock?: () => void;
   getChainId?: () => bigint;
+  getBlockNumber?: () => bigint;
+  getBlockHash?: () => string;
   getEntityNonce?: (entityId: string) => Promise<bigint>;
   getDepositoryAddress?: () => string;
   getEntityProviderAddress?: () => string;
@@ -112,11 +127,28 @@ export type BrowserVMInstance = {
   getDebts?: (entityId: string, tokenId: number) => Promise<Array<{ amount: bigint; creditor: string }>>;
   // State capture and sync
   captureStateRoot?: () => Promise<Uint8Array>;
-  serializeState?: () => Promise<Uint8Array>;
-  syncAllCollaterals?: (entityId: string) => Promise<Map<string, bigint>>;
+  serializeState?: () => Promise<{
+    version: number;
+    stateRoot: string;
+    trieData: Array<[string, string]>;
+    nonce: string;
+    addresses: { depository: string; entityProvider: string };
+  }>;
+  syncAllCollaterals?: (
+    accountPairs: Array<{ entityId: string; counterpartyId: string }>,
+    tokenId: number
+  ) => Promise<Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>>;
   getBlockHeight?: () => bigint;
   // Debug helpers
-  debugFundReserves?: (entityId: string, tokenId: number, amount: bigint) => Promise<void>;
+  debugFundReserves?: (entityId: string, tokenId: number, amount: bigint) => Promise<BrowserVMEvent[]>;
+  reserveToReserve?: (from: string, to: string, tokenId: number, amount: bigint) => Promise<BrowserVMEvent[]>;
+  // Batch processing
+  processBatch?: (encodedBatch: string, entityProvider: string, hankoData: string, nonce: bigint) => Promise<BrowserVMEvent[]>;
+  // Event subscription (implements BrowserVMEventSource)
+  onAny?: (callback: (events: BrowserVMEvent[]) => void) => () => void;
+  // Lifecycle
+  init?: () => Promise<void>;
+  reset?: () => Promise<void>;
 };
 
 export type P2PConfig = {

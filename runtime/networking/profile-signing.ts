@@ -19,7 +19,7 @@
 import { keccak256 } from 'ethers';
 import type { Profile } from './gossip';
 import type { Env, HankoString } from '../types';
-import { signEntityHashes, verifyHankoForHash } from '../hanko-signing';
+import { signEntityHashes, verifyHankoForHash, signHashesAsSingleEntity } from '../hanko-signing';
 
 const PROFILE_SIGN_DOMAIN = 'xln-profile-v1';
 
@@ -138,7 +138,7 @@ export async function verifyProfileSignature(
   env?: Env
 ): Promise<boolean> {
   // Prefer Hanko verification
-  const hanko = profile.metadata?.profileHanko as HankoString | undefined;
+  const hanko = profile.metadata?.['profileHanko'] as HankoString | undefined;
   if (hanko) {
     const hash = computeProfileHash(profile);
     const result = await verifyHankoForHash(hanko, hash, profile.entityId, env);
@@ -146,7 +146,7 @@ export async function verifyProfileSignature(
   }
 
   // Fallback: legacy signature verification (migration period)
-  const signature = profile.metadata?.profileSignature;
+  const signature = profile.metadata?.['profileSignature'];
   if (signature && typeof signature === 'string') {
     return verifyLegacySignature(profile, signature);
   }
@@ -211,5 +211,5 @@ function hexToBytes(hex: string): Uint8Array {
  * Note: For full Hanko verification, use async verifyProfileSignature()
  */
 export function hasValidProfileSignature(profile: Profile): boolean {
-  return !!(profile.metadata?.profileHanko || profile.metadata?.profileSignature);
+  return !!(profile.metadata?.['profileHanko'] || profile.metadata?.['profileSignature']);
 }

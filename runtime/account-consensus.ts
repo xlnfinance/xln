@@ -12,7 +12,7 @@
  * - Event Bubbling: Account events bubble up to E-Machine for entity messages
  */
 
-import type { AccountMachine, AccountFrame, AccountTx, AccountInput, Env, EntityState, Delta } from './types';
+import type { AccountMachine, AccountFrame, AccountTx, AccountInput, Env, EntityState, Delta, EntityReplica } from './types';
 import { cloneAccountMachine, getAccountPerspective } from './state-helpers';
 import { isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-crypto';
@@ -461,11 +461,11 @@ export async function proposeAccountFrame(
   const signingEntityId = accountMachine.proofHeader.fromEntity;
   const signingReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === signingEntityId);
   if (!signingReplica) {
-    return { success: false, error: `Cannot find replica for entity ${signingEntityId.slice(-4)}`, events, accountInput: undefined };
+    return { success: false, error: `Cannot find replica for entity ${signingEntityId.slice(-4)}`, events };
   }
   const signingSignerId = signingReplica.state.config.validators[0]; // Single-signer: use first validator
   if (!signingSignerId) {
-    return { success: false, error: `Entity ${signingEntityId.slice(-4)} has no validators`, events, accountInput: undefined };
+    return { success: false, error: `Entity ${signingEntityId.slice(-4)} has no validators`, events };
   }
 
   console.log(`🔐 HANKO-SIGN: entityId=${signingEntityId.slice(-4)} → signerId=${signingSignerId.slice(-4)}`);
@@ -476,7 +476,7 @@ export async function proposeAccountFrame(
   const hankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [newFrame.stateHash]);
   const frameHanko = hankos[0];
   if (!frameHanko) {
-    return { success: false, error: 'Failed to build frame hanko', events, accountInput: undefined };
+    return { success: false, error: 'Failed to build frame hanko', events };
   }
   accountMachine.currentFrameHanko = frameHanko;
 
@@ -492,7 +492,7 @@ export async function proposeAccountFrame(
   const disputeHankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [disputeHash]);
   const disputeHanko = disputeHankos[0];
   if (!disputeHanko) {
-    return { success: false, error: 'Failed to build dispute hanko', events, accountInput: undefined };
+    return { success: false, error: 'Failed to build dispute hanko', events };
   }
   accountMachine.currentDisputeProofHanko = disputeHanko;
   accountMachine.currentDisputeProofCooperativeNonce = clonedMachine.proofHeader.cooperativeNonce;
@@ -656,8 +656,8 @@ export async function handleAccountInput(
     console.log(`✅ HANKO-ACK-VERIFIED: ACK from ${recoveredEntityId.slice(-4)}`);
 
     // ACK is valid - proceed
-    if (true) {
-      ackProcessed = true;
+    ackProcessed = true;
+    {
       // DoS FIX: Update counter AFTER signature verified (prevents counter desync attacks)
       if (input.counter !== undefined) {
         accountMachine.ackedTransitions = input.counter;
@@ -729,9 +729,6 @@ export async function handleAccountInput(
         // Store counterparty settlement signature
         if (input.newSettlementHanko) {
           accountMachine.counterpartySettlementHanko = input.newSettlementHanko;
-          if (input.newSettlementDiffs) {
-            accountMachine.counterpartySettlementDiffs = input.newSettlementDiffs;
-          }
           console.log(`✅ Stored counterparty settlement hanko from ACK`);
         }
 
@@ -779,8 +776,6 @@ export async function handleAccountInput(
       }
       // Fall through to process newAccountFrame below
       console.log(`📦 BATCHED-MESSAGE: ACK processed, now processing bundled new frame...`);
-    } else {
-      return { success: false, error: 'Invalid confirmation signature', events };
     }
   }
 
@@ -1103,7 +1098,7 @@ export async function handleAccountInput(
       deltas: ourFinalDeltas, // Use OUR computed deltas
       fullDeltaStates: ourFullDeltaStates, // Use OUR computed fullDeltaStates
       stateHash: '', // Computed by createFrameHash
-      byLeft: receivedFrame.byLeft,
+      byLeft: receivedFrame.byLeft ?? true,
     });
 
     if (recomputedHash !== receivedFrame.stateHash) {
@@ -1189,7 +1184,7 @@ export async function handleAccountInput(
       tokenIds: ourFinalTokenIds, // Use OUR computed tokenIds
       deltas: ourFinalDeltas, // Use OUR computed deltas
       stateHash: recomputedHash, // Use hash computed from OUR values
-      byLeft: receivedFrame.byLeft, // Copy proposer info
+      byLeft: receivedFrame.byLeft ?? true, // Copy proposer info
       fullDeltaStates: ourFullDeltaStates, // Use OUR verified fullDeltaStates
     });
     accountMachine.currentHeight = receivedFrame.height;
@@ -1208,7 +1203,7 @@ export async function handleAccountInput(
         if (!accountMachine.disputeProofNoncesByHash) {
           accountMachine.disputeProofNoncesByHash = {};
         }
-        if (accountMachine.counterpartyDisputeProofCooperativeNonce !== undefined) {
+        if (accountMachine.counterpartyDisputeProofCooperativeNonce !== undefined && accountMachine.counterpartyDisputeProofBodyHash) {
           accountMachine.disputeProofNoncesByHash[accountMachine.counterpartyDisputeProofBodyHash] = accountMachine.counterpartyDisputeProofCooperativeNonce;
         }
         delete (accountMachine as any).pendingCounterpartyDisputeProofBodyHash;
@@ -1279,7 +1274,7 @@ export async function handleAccountInput(
       toEntityId: input.fromEntityId,
       height: receivedFrame.height,
       prevHanko: confirmationHanko,       // Hanko ACK on their frame
-      newDisputeHanko: ackDisputeHanko,   // My dispute proof hanko (current state)
+      ...(ackDisputeHanko && { newDisputeHanko: ackDisputeHanko }),   // My dispute proof hanko (current state)
       newDisputeHash: ackDisputeHash,     // Full dispute hash (key in hankoWitness for quorum lookup)
       newDisputeProofBodyHash: ackProofResult.proofBodyHash, // ProofBodyHash that ackDisputeHanko signs
       counter: 0, // Will be set below after batching decision
@@ -1311,7 +1306,7 @@ export async function handleAccountInput(
       }
     }
 
-    if (!batchedWithNewFrame) {
+    if (!batchedWithNewFrame && ackDisputeHanko) {
       accountMachine.currentDisputeProofHanko = ackDisputeHanko;
       accountMachine.currentDisputeProofCooperativeNonce = ackSignedCooperativeNonce;
       accountMachine.currentDisputeProofBodyHash = ackProofResult.proofBodyHash;
@@ -1419,7 +1414,7 @@ export function getAccountsToProposeFrames(entityState: EntityState): string[] {
  * - proofBody: Simple internal representation (tokenIds + deltas)
  * - abiProofBody: ABI-encoded for on-chain disputes (includes transformers)
  */
-export async function generateAccountProof(accountMachine: AccountMachine): Promise<{
+export async function generateAccountProof(env: Env, accountMachine: AccountMachine): Promise<{
   proofHash: string;
   signature: string;
   abiEncodedProofBody?: string;
@@ -1468,7 +1463,7 @@ export async function generateAccountProof(accountMachine: AccountMachine): Prom
 
   // Generate hanko signature - CRITICAL: Use signerId, not entityId
   const proofEntityId = accountMachine.proofHeader.fromEntity;
-  const proofReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === proofEntityId);
+  const proofReplica = Array.from(env.eReplicas.values()).find((r: EntityReplica) => r.state.entityId === proofEntityId);
   const proofSignerId = proofReplica?.state.config.validators[0];
   if (!proofSignerId) {
     throw new Error(`Cannot find signerId for proof from ${proofEntityId.slice(-4)}`);

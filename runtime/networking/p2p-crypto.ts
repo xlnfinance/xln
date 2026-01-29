@@ -36,12 +36,19 @@ export function deriveEncryptionKeyPair(seed: Uint8Array | string): P2PKeyPair {
   combined.set(domain, 0);
   combined.set(seedBytes, domain.length);
 
-  const privateKey = sha256(combined);
+  const hashResult = sha256(combined);
+  // SHA256 always returns 32-byte Uint8Array - create mutable copy for clamping
+  const privateKey = new Uint8Array(hashResult);
 
   // Clamp private key for X25519 (standard practice)
-  privateKey[0] &= 248;
-  privateKey[31] &= 127;
-  privateKey[31] |= 64;
+  // SHA256 guarantees 32 bytes, so indices 0 and 31 are always valid
+  const byte0 = privateKey[0];
+  const byte31 = privateKey[31];
+  if (byte0 === undefined || byte31 === undefined) {
+    throw new Error('P2P_DERIVE_ERROR: SHA256 returned invalid length');
+  }
+  privateKey[0] = byte0 & 248;
+  privateKey[31] = (byte31 & 127) | 64;
 
   // Derive public key
   const publicKey = x25519.getPublicKey(privateKey);
@@ -59,7 +66,7 @@ export function encryptMessage(
   recipientPubKey: Uint8Array
 ): Uint8Array {
   // Generate ephemeral keypair (forward secrecy)
-  const ephemeralPriv = x25519.utils.randomPrivateKey();
+  const ephemeralPriv = x25519.utils.randomSecretKey();
   const ephemeralPub = x25519.getPublicKey(ephemeralPriv);
 
   // ECDH: derive shared secret
@@ -165,7 +172,10 @@ export function hexToPubKey(hex: string): Uint8Array {
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
+    const byte = bytes[i];
+    if (byte !== undefined) {
+      binary += String.fromCharCode(byte);
+    }
   }
   return btoa(binary);
 }

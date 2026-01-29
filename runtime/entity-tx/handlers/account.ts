@@ -1,4 +1,4 @@
-import { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx } from '../../types';
+import type { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents, resolveEntityProposerId } from '../../state-helpers';
 import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
@@ -133,16 +133,17 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       rightJObservations: [],
       jEventChain: [],
       lastFinalizedJHeight: 0,
-      // Dispute resolution
+      // Dispute resolution (delay values * 10 = blocks)
       disputeConfig: {
-        defaultDelayBlocks: 100,
-        minDelayBlocks: 10,
+        leftDisputeDelay: 10,   // 100 blocks
+        rightDisputeDelay: 10,  // 100 blocks
       },
       onChainSettlementNonce: 0,
     };
 
     // Store with counterparty ID as key (simpler than canonical)
-    newState.accounts.set(counterpartyId, accountMachine);
+    // Type assertion safe: accountMachine was just created above in this block
+    newState.accounts.set(counterpartyId, accountMachine as AccountMachine);
     console.log(`✅ Account created with counterparty key: ${counterpartyId.slice(-4)}`);
   }
 
@@ -271,7 +272,9 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             console.log(`🧅 Hashlock: ${lock.hashlock.slice(0,16)}...`);
             console.log(`🧅 Amount: ${lock.amount}`);
             console.log(`🧅 Envelope type: ${typeof envelope}`);
-            console.log(`🧅 OUTER envelope: finalRecipient=${envelope.finalRecipient}, nextHop=${envelope.nextHop?.slice(-4)}`);
+            if (typeof envelope !== 'string') {
+              console.log(`🧅 OUTER envelope: finalRecipient=${envelope.finalRecipient}, nextHop=${envelope.nextHop?.slice(-4)}`);
+            }
             console.log(`🧅 OUTER envelope structure: ${JSON.stringify(envelope, null, 2).slice(0, 300)}...`);
 
             // CRITICAL: For onion routing, envelope can be:
@@ -282,13 +285,13 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             if (typeof envelope === 'string') {
               console.log(`🔓 Envelope is encrypted string - decrypting for us...`);
               try {
-                let envelopeData = envelope;
+                let envelopeData: string = envelope;
 
                 // Decrypt if crypto keys are configured
                 if (newState.cryptoPrivateKey) {
                   const { NobleCryptoProvider } = await import('../../crypto-noble');
                   const crypto = new NobleCryptoProvider();
-                  envelopeData = await crypto.decrypt(envelope, newState.cryptoPrivateKey);
+                  envelopeData = await crypto.decrypt(envelope as string, newState.cryptoPrivateKey);
                   console.log(`🔓 Decryption successful`);
                 }
 
@@ -407,8 +410,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
               console.log(`➡️ Registering route: ${inboundEntity.slice(-4)} → ${newState.entityId.slice(-4)} → ${nextHop.slice(-4)}`);
 
-              // Create route object (will add pendingFee later)
-              const htlcRoute = {
+              // Create route object (typed as HtlcRoute for pendingFee)
+              const htlcRoute: HtlcRoute = {
                 hashlock: lock.hashlock,
                 inboundEntity,
                 inboundLockId: lock.lockId,
@@ -603,7 +606,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           if (route.pendingFee) {
             newState.htlcFeesEarned = (newState.htlcFeesEarned || 0n) + route.pendingFee;
             console.log(`💰 HTLC: Fee earned on reveal: ${route.pendingFee} (total: ${newState.htlcFeesEarned})`);
-            route.pendingFee = undefined; // Clear pending
+            delete route.pendingFee; // Clear pending (use delete for optional property)
           }
 
           // Remove from lockBook (E-Machine aggregated view) - payment settled
@@ -902,25 +905,23 @@ export function processOrderbookCancels(
     const namespacedOrderId = `${accountId}:${offerId}`;
 
     for (const [bookKey, book] of ext.books) {
-      const orderIdx = book.orderIdToIdx.get(namespacedOrderId);
-      if (orderIdx !== undefined && book.orderActive[orderIdx]) {
-        const ownerId = book.owners[book.orderOwnerIdx[orderIdx]];
+      const maybeOrderIdx = book.orderIdToIdx.get(namespacedOrderId);
+      if (maybeOrderIdx === undefined) continue;
+      const orderIdx: number = maybeOrderIdx;
+      if (!book.orderActive[orderIdx]) continue;
+      const ownerIdx = book.orderOwnerIdx[orderIdx] as number;
+      const ownerId = book.owners[ownerIdx];
+      if (!ownerId) continue; // Skip if owner not found
 
-        const result = applyCommand(book, {
-          kind: 1,
-          ownerId,
-          orderId: namespacedOrderId,
-          side: 0,
-          tif: 0,
-          postOnly: false,
-          priceTicks: 0,
-          qtyLots: 0,
-        });
+      const result = applyCommand(book, {
+        kind: 1,  // CANCEL command - only needs ownerId and orderId
+        ownerId,
+        orderId: namespacedOrderId,
+      });
 
-        bookUpdates.push({ pairId: bookKey, book: result.state });
-        console.log(`📊 ORDERBOOK: Cancelled order ${offerId.slice(-8)}`);
-        break;
-      }
+      bookUpdates.push({ pairId: bookKey, book: result.state });
+      console.log(`📊 ORDERBOOK: Cancelled order ${offerId.slice(-8)}`);
+      break;
     }
   }
 

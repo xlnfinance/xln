@@ -6,7 +6,7 @@
  * Reference: entity-tx/apply.ts:302-437 (directPayment handler)
  */
 
-import { EntityState, EntityInput, AccountTx, Env } from '../../types';
+import type { EntityState, EntityInput, AccountTx, Env } from '../../types';
 import { cloneEntityState, canonicalAccountKey } from '../../state-helpers';
 import { generateHashlock, generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../htlc-utils';
 import { HTLC } from '../../constants';
@@ -173,7 +173,7 @@ export async function handleHtlcPayment(
     envelope = await createOnionEnvelopes(route, secret, entityPubKeys, crypto);
     console.log(`🧅 ═════════════════════════════════════════════════════════════`);
     console.log(`🧅 ENVELOPE CREATED at ${formatEntityId(entityState.entityId)}`);
-    console.log(`🧅 Route: ${route.map(r => formatEntityId(r)).join(' → ')}`);
+    console.log(`🧅 Route: ${route.map((r: string) => formatEntityId(r)).join(' → ')}`);
     console.log(`🧅 Encryption: ${crypto ? 'ENCRYPTED' : 'CLEARTEXT'}`);
     console.log(`🧅 Secret: ${secret.slice(0,16)}...`);
     console.log(`🧅 Hashlock: ${hashlock.slice(0,16)}...`);

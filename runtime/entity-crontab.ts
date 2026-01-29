@@ -351,7 +351,8 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
     replica.entityId,
     replica.state.jBatchState,
     jurisdiction,
-    browserVM,
+    // BrowserVMInstance has processBatch at runtime, types are slightly mismatched
+    (browserVM || undefined) as any,
     replica.state.timestamp,
     signerId
   );

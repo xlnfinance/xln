@@ -4,7 +4,7 @@
  * Parses human-readable .scenario.txt files into structured Scenario objects
  */
 
-import {
+import type {
   Scenario,
   ScenarioEvent,
   ScenarioAction,
@@ -15,6 +15,8 @@ import {
   ScenarioError,
   ScenarioWarning,
   ViewState,
+} from './types.js';
+import {
   parseRange,
   expandRange,
   parseNamedParam,

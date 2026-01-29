@@ -4,7 +4,7 @@ import { formatEntityId } from '../utils';
 import { processProfileUpdate } from '../name-resolution';
 import { createOrderbookExtState } from '../orderbook';
 import { db } from '../runtime';
-import { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput } from '../types';
+import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput } from '../types';
 import { DEBUG, HEAVY_LOGS, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { buildEntityProfile } from '../networking/gossip-helper';
@@ -366,12 +366,14 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         const localAccount = newState.accounts.get(counterpartyId);
         if (localAccount) {
           localAccount.mempool.push({
-            type: 'transfer',
+            type: 'direct_payment',
             data: {
               amount: faucetAmount,
               tokenId: faucetTokenId,
-              direction: 'out', // Hub pays user
-              isHubFaucet: true, // Mark as faucet for logging
+              // Hub pays user - direction determined by sender position in account
+              fromEntityId: newState.entityId,
+              toEntityId: counterpartyId,
+              description: 'Welcome faucet bonus',
             }
           });
 
@@ -596,9 +598,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         console.log(`💸 QUEUED TO MEMPOOL: account=${formatEntityId(nextHop)}`);
         console.log(`💸   AccountTx type: ${accountTx.type}`);
         console.log(`💸   Amount: ${accountTx.data.amount}`);
-        console.log(`💸   From: ${accountTx.data.fromEntityId.slice(-4)}`);
-        console.log(`💸   To: ${accountTx.data.toEntityId.slice(-4)}`);
-        console.log(`💸   Route after slice: [${accountTx.data.route.map(r => r.slice(-4)).join(',')}]`);
+        console.log(`💸   From: ${accountTx.data.fromEntityId?.slice(-4)}`);
+        console.log(`💸   To: ${accountTx.data.toEntityId?.slice(-4)}`);
+        console.log(`💸   Route after slice: [${accountTx.data.route?.map((r: string) => r.slice(-4)).join(',') || 'none'}]`);
         console.log(`💸 mempoolOps.length: ${mempoolOps.length}`);
 
         const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
@@ -923,9 +925,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         }
       }
 
-      // Step 2: Validate account exists (use canonical key)
-      // Account keyed by counterparty ID
-      if (!newState.accounts.has(settleAccountKey)) {
+      // Step 2: Validate account exists (keyed by counterparty ID)
+      if (!newState.accounts.has(counterpartyEntityId)) {
         logError("ENTITY_TX", `❌ No account exists with ${formatEntityId(counterpartyEntityId)}`);
         throw new Error(`No account with ${counterpartyEntityId}`);
       }
