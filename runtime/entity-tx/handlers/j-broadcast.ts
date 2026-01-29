@@ -67,9 +67,9 @@ export async function handleJBroadcast(
     entityId: entityState.entityId,
     data: {
       batch: cloneJBatch(newState.jBatchState.batch),
-      hankoSignature: hankoSignature || undefined,
+      ...(hankoSignature ? { hankoSignature } : {}),
       batchSize,
-      signerId,
+      ...(signerId ? { signerId } : {}),
     },
     timestamp: env.timestamp,
   };

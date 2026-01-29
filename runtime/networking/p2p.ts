@@ -95,7 +95,7 @@ export class RuntimeP2P {
   private seedRuntimeIds: string[];
   private advertiseEntityIds: string[] | null;
   private isHub: boolean;
-  private profileName?: string;
+  private profileName: string | undefined;
   private onEntityInput: (from: string, input: EntityInput) => void;
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
   private clients: RuntimeWsClient[] = [];
@@ -115,7 +115,11 @@ export class RuntimeP2P {
     this.onEntityInput = options.onEntityInput;
     this.onGossipProfiles = options.onGossipProfiles;
     // Derive X25519 encryption keypair from seed (mandatory, no fallback)
-    this.encryptionKeyPair = deriveEncryptionKeyPair(this.env.runtimeSeed);
+    const seed = this.env.runtimeSeed;
+    if (!seed) {
+      throw new Error('P2P_INIT_ERROR: runtimeSeed is required for encryption keypair');
+    }
+    this.encryptionKeyPair = deriveEncryptionKeyPair(seed);
   }
 
   /** Get encryption public key as hex for profile sharing */
@@ -152,14 +156,16 @@ export class RuntimeP2P {
   }
 
   connect() {
+    console.log(`[P2P] RuntimeP2P.connect() called, connecting to ${this.relayUrls.length} relays: ${this.relayUrls.join(', ')}`);
     this.closeClients();
     this.startPolling();
     for (const url of this.relayUrls) {
+      const runtimeSeed = this.env.runtimeSeed;
       const client = new RuntimeWsClient({
         url,
         runtimeId: this.runtimeId,
         signerId: this.signerId,
-        seed: this.env.runtimeSeed,  // Pass seed for hello auth signing
+        ...(runtimeSeed ? { seed: runtimeSeed } : {}),  // Pass seed for hello auth signing if available
         onOpen: () => {
           this.flushPending();
           this.requestSeedGossip();
@@ -431,8 +437,8 @@ export class RuntimeP2P {
     for (const profile of profiles) {
       // Verify profile signature if present (anti-spoofing)
       // Uses same Hanko verification as accountFrames
-      const hasHanko = profile.metadata?.profileHanko;
-      const hasLegacySig = profile.metadata?.profileSignature;
+      const hasHanko = profile.metadata?.['profileHanko'];
+      const hasLegacySig = profile.metadata?.['profileSignature'];
       if (hasHanko || hasLegacySig) {
         const valid = await verifyProfileSignature(profile, this.env);
         if (!valid) {

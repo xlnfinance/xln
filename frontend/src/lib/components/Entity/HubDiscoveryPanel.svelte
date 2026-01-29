@@ -176,8 +176,7 @@
         entityTxs: [{
           type: 'openAccount' as const,
           data: {
-            counterpartyId: hub.entityId,
-            tokenIds: [1], // USDC
+            targetEntityId: hub.entityId,
           }
         }]
       }]);

@@ -58,6 +58,7 @@
       if (!entId || !replica.state?.accounts) continue;
 
       if (!adjacency.has(entId)) adjacency.set(entId, new Set());
+
       for (const counterpartyId of replica.state.accounts.keys()) {
         adjacency.get(entId)!.add(String(counterpartyId));
       }

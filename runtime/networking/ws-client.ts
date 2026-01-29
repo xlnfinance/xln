@@ -2,7 +2,34 @@ import type { RuntimeInput, EntityInput } from '../types';
 import { deserializeWsMessage, makeHelloNonce, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { signDigest } from '../account-crypto';
 
-type WebSocketLike = WebSocket & { on: (event: string, cb: (...args: any[]) => void) => void };
+// Separate interfaces for browser and Node.js WebSocket implementations
+interface BrowserWebSocket {
+  binaryType: string;
+  readyState: number;
+  send(data: string | ArrayBuffer | Blob): void;
+  close(): void;
+  onopen: ((this: WebSocket, ev: Event) => any) | null;
+  onmessage: ((this: WebSocket, ev: MessageEvent) => any) | null;
+  onclose: ((this: WebSocket, ev: CloseEvent) => any) | null;
+  onerror: ((this: WebSocket, ev: Event) => any) | null;
+}
+
+interface NodeWebSocket {
+  binaryType?: string;
+  readyState?: number;
+  send(data: string | Buffer): void;
+  close(): void;
+  on(event: 'open', cb: () => void): void;
+  on(event: 'message', cb: (data: Buffer) => void): void;
+  on(event: 'close', cb: () => void): void;
+  on(event: 'error', cb: (err: Error) => void): void;
+}
+
+type WebSocketLike = BrowserWebSocket | NodeWebSocket;
+
+function isNodeWebSocket(ws: WebSocketLike): ws is NodeWebSocket {
+  return 'on' in ws && typeof (ws as NodeWebSocket).on === 'function';
+}
 
 export type RuntimeWsClientOptions = {
   url: string;
@@ -29,12 +56,13 @@ const nextTimestamp = () => {
 
 const createWs = async (url: string): Promise<WebSocketLike> => {
   if (isBrowser) {
-    const ws = new WebSocket(url) as WebSocketLike;
+    const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';
-    return ws;
+    return ws as BrowserWebSocket;
   }
-  const { WebSocket: NodeWebSocket } = await import('ws');
-  return new NodeWebSocket(url) as WebSocketLike;
+  const ws = await import('ws');
+  const instance = new ws.default(url);
+  return instance as NodeWebSocket;
 };
 
 export class RuntimeWsClient {
@@ -59,6 +87,7 @@ export class RuntimeWsClient {
 
     if ('on' in this.ws) {
       this.ws.on('open', () => {
+        console.log(`[WS] Connected to ${this.options.url}`);
         this.sendHello();
         this.options.onOpen?.();
       });
@@ -70,6 +99,7 @@ export class RuntimeWsClient {
       });
     } else {
       this.ws.onopen = () => {
+        console.log(`[WS] Connected to ${this.options.url}`);
         this.sendHello();
         this.options.onOpen?.();
       };

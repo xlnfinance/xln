@@ -1,4 +1,4 @@
-import { EntityState, Proposal, ProposalAction } from '../types';
+import type { EntityState, Proposal, ProposalAction } from '../types';
 import { createHash, DEBUG } from '../utils';
 import { safeStringify } from '../serialization-utils';
 

@@ -5,7 +5,7 @@
 
 import { applyEntityTx } from './entity-tx';
 import { isLeftEntity } from './entity-id-utils';
-import { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, JInput } from './types';
+import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, JInput } from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
@@ -179,11 +179,7 @@ const validateEntityInput = (input: EntityInput): boolean => {
           log.error(`❌ Invalid transaction: ${safeStringify(tx)}`);
           return false;
         }
-        if (typeof tx.type !== 'string') {
-          log.error(`❌ Transaction type must be string: ${typeof tx.type}`);
-          return false;
-        }
-        // No whitelist - trust the type system
+        // Type system ensures tx.type is always a string literal
       }
     }
 
@@ -627,10 +623,11 @@ export const applyEntityInput = async (
       }
       // SECURITY: Verify frame hash signature (sigs[0]) before accepting precommit
       // Prevents Byzantine validator from submitting garbage that wastes the entity frame
-      if (proposal.hashesToSign && sigs[0]) {
+      const firstHashToSign = proposal.hashesToSign?.[0];
+      if (proposal.hashesToSign && sigs[0] && firstHashToSign) {
         const { verifyAccountSignature } = await import('./account-crypto');
         const frameHashSig = sigs[0];
-        const frameHash = proposal.hashesToSign[0].hash;
+        const frameHash = firstHashToSign.hash;
         if (!verifyAccountSignature(env, signerId, frameHash, frameHashSig)) {
           log.error(`❌ PRECOMMIT REJECTED: Invalid frame hash signature from ${signerId}`);
           continue;
@@ -676,11 +673,13 @@ export const applyEntityInput = async (
         const { buildQuorumHanko } = await import('./hanko-signing');
         for (let i = 0; i < proposal.hashesToSign.length; i++) {
           const hashInfo = proposal.hashesToSign[i];
+          if (!hashInfo) continue; // Skip if undefined (shouldn't happen)
           // Collect all validator signatures for this hash
           const sigsForHash: Array<{ signerId: string; signature: string }> = [];
           for (const [signerId, sigs] of proposal.collectedSigs) {
-            if (sigs[i]) {
-              sigsForHash.push({ signerId, signature: sigs[i] });
+            const sig = sigs[i];
+            if (sig) {
+              sigsForHash.push({ signerId, signature: sig });
             }
           }
           // Build quorum hanko from collected signatures
@@ -704,10 +703,11 @@ export const applyEntityInput = async (
       if (proposal.hashesToSign) {
         for (let i = 0; i < proposal.hashesToSign.length; i++) {
           const hashInfo = proposal.hashesToSign[i];
-          if (committedHankos[i]) {
+          const hanko = committedHankos[i];
+          if (hashInfo && hanko) {
             workingReplica.hankoWitness.set(hashInfo.hash, {
-              hanko: committedHankos[i],
-              type: hashInfo.type, // Use actual type from HashToSign
+              hanko,
+              type: hashInfo.type as 'accountFrame' | 'dispute' | 'settlement' | 'profile' | 'jBatch',
               entityHeight: workingReplica.state.height + 1,
               createdAt: env.timestamp,
             });

@@ -1,4 +1,4 @@
-import { AssetBalance } from '../types';
+import type { AssetBalance } from '../types';
 
 // Financial helpers: formatAssetAmount, addToReserves, subtractFromReserves
 // Use unified financial utilities with ethers.js

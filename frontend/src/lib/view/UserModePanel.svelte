@@ -164,9 +164,11 @@
     return Object.values(frame.jReplicas || {});
   });
 
-  // Auto-select jurisdiction when available
+  // Auto-select jurisdiction when available (but NOT when entity is selected)
   $effect(() => {
     if (!availableJurisdictions.length) return;
+    // Don't auto-set jurisdiction if user has selected an entity
+    if (selectedEntityId) return;
     if (!selectedJurisdictionName) {
       const active = (currentFrame as any)?.activeJurisdiction || availableJurisdictions[0]?.name;
       if (active) selectedJurisdictionName = active;
@@ -179,7 +181,9 @@
 
   // Get replica for selected entity
   const selectedReplica = $derived.by(() => {
-    if (!selectedEntityId || !selectedSignerId || !currentFrame?.eReplicas) return null;
+    if (!selectedEntityId || !selectedSignerId || !currentFrame?.eReplicas) {
+      return null;
+    }
     const key = `${selectedEntityId}:${selectedSignerId}`;
     const replicas = currentFrame.eReplicas instanceof Map
       ? currentFrame.eReplicas
@@ -362,7 +366,8 @@
     viewMode = 'entity';
     selectedEntityId = entityId;
     selectedSignerId = signerId;
-    selectedAccountId = null; // Reset account when entity changes
+    selectedAccountId = null;
+    selectedJurisdictionName = null; // Clear filter to allow any entity
   }
 
   // Handle account selection from dropdown

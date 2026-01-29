@@ -760,6 +760,69 @@ export type EntityTx =
         counterpartyEntityId: string;
         reason?: string;
       };
+    }
+  // ═══════════════════════════════════════════════════════════════
+  // DEBUG/TEST OPERATIONS
+  // ═══════════════════════════════════════════════════════════════
+  | {
+      // Process expired HTLC locks (timeout test)
+      type: 'processHtlcTimeouts';
+      data: {
+        expiredLocks?: Array<{ accountId: string; lockId: string }>;
+      };
+    }
+  | {
+      // Manual HTLC lock creation without envelope (timeout test)
+      type: 'manualHtlcLock';
+      data: {
+        counterpartyId: string;
+        lockId: string;
+        hashlock: string;
+        timelock: bigint;
+        revealBeforeHeight: number;
+        amount: bigint;
+        tokenId: number;
+      };
+    }
+  // ═══════════════════════════════════════════════════════════════
+  // SWAP OPERATIONS (ALIASES)
+  // ═══════════════════════════════════════════════════════════════
+  | {
+      // Fill swap offer (alias for resolveSwap)
+      type: 'fillSwapOffer';
+      data: {
+        counterpartyId: string;
+        offerId: string;
+        fillRatio: number;
+      };
+    }
+  | {
+      // Cancel swap offer (alias for cancelSwap)
+      type: 'cancelSwapOffer';
+      data: {
+        counterpartyEntityId: string;
+        offerId: string;
+      };
+    }
+  // ═══════════════════════════════════════════════════════════════
+  // RESERVE OPERATIONS
+  // ═══════════════════════════════════════════════════════════════
+  | {
+      // Direct R2R transfer: from entity reserve to target entity's reserve
+      type: 'payFromReserve';
+      data: {
+        targetEntityId: string;
+        tokenId: number;
+        amount: bigint;
+      };
+    }
+  | {
+      // Fund entity: add tokens to reserve (mint-like operation)
+      type: 'payToReserve';
+      data: {
+        tokenId: number;
+        amount: bigint;
+      };
     };
 
 export interface AssetBalance {
@@ -802,7 +865,7 @@ export interface HtlcLock {
   createdTimestamp: number;    // When lock was added (for logging)
 
   // Onion routing envelope (cleartext JSON in Phase 2, encrypted in Phase 3)
-  envelope?: import('./htlc-envelope-types').HtlcEnvelope;
+  envelope?: import('./htlc-envelope-types').HtlcEnvelope | string;
 }
 
 // Swap offer (limit order) in bilateral account
@@ -1211,7 +1274,7 @@ export type AccountTx =
         revealBeforeHeight: number;
         amount: bigint;
         tokenId: number;
-        envelope?: import('./htlc-envelope-types').HtlcEnvelope; // Onion routing envelope
+        envelope?: import('./htlc-envelope-types').HtlcEnvelope | string | undefined; // Onion routing envelope (string when encrypted)
       };
     }
   | {
@@ -1647,18 +1710,29 @@ export interface JReplica {
 }
 
 /** J-Machine transaction (settlement layer) */
-export interface JTx {
-  type: 'batch'; // ALL J-operations go through batch (matches Depository.processBatch)
-  entityId: string;
-  data: {
-    batch: any; // JBatch structure from j-batch.ts
-    hankoSignature?: string;
-    batchSize: number;
-    signerId?: string;
-  };
-  timestamp: number;
-  expectedJBlock?: number; // Expected j-block height (for replay protection)
-}
+export type JTx =
+  | {
+      type: 'batch'; // ALL J-operations go through batch (matches Depository.processBatch)
+      entityId: string;
+      data: {
+        batch: any; // JBatch structure from j-batch.ts
+        hankoSignature?: string;
+        batchSize: number;
+        signerId?: string;
+      };
+      timestamp: number;
+      expectedJBlock?: number; // Expected j-block height (for replay protection)
+    }
+  | {
+      type: 'mint'; // Admin/debug function for minting reserves
+      entityId: string;
+      data: {
+        entityId: string;
+        tokenId: number;
+        amount: bigint;
+      };
+      timestamp: number;
+    };
 
 export interface RuntimeSnapshot {
   height: number;
