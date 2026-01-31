@@ -23,5 +23,12 @@ bun build runtime/runtime.ts --target=browser --outfile=frontend/static/runtime.
 cd frontend
 npm run build
 cp -r build/* /var/www/html/
+
+# Deploy/restart relay server (P2P)
+cd ..
+pm2 restart xln-relay || pm2 start runtime/networking/ws-server.ts --name xln-relay --interpreter bun -- --port 9000 --host 127.0.0.1
+pm2 save
+
 echo "✅ Deployed at $(date)"
+echo "✅ Relay server: pm2 status xln-relay"
 ENDSSH
