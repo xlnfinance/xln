@@ -110,7 +110,6 @@ export function getAccountBarVisual(
   leftState: BilateralVisualizationState,
   rightState: BilateralVisualizationState
 ): AccountBarVisual {
-  console.log(`🎨 BAR-VISUAL: left=${leftState.state}, right=${rightState.state}`);
 
   // CONFLICT: Both proposed simultaneously
   if (leftState.state === 'conflict' || rightState.state === 'conflict') {
