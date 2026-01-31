@@ -29,7 +29,7 @@ jurisdictions.json
 # Contract artifacts (jurisdictions/)
 jurisdictions/artifacts/
 jurisdictions/cache/
-jurisdictions/typechain-types/
+# typechain-types now tracked for consistency across commits
 jurisdictions/ignition/deployments/chain-1337/
 
 # Process management
