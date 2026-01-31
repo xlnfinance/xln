@@ -41,13 +41,6 @@
 
   <div class="topbar-links">
     <a href="/app" class="topbar-link" class:active={currentPath === '/app'}>App</a>
-    <a href="/vault" class="topbar-link" class:active={currentPath === '/vault'}>Vault</a>
-    <a href="/scenarios" class="topbar-link" class:active={currentPath === '/scenarios'}>Scenarios</a>
-    <a href="/docs" class="topbar-link">Docs</a>
-    <a href="https://github.com/xlnfinance/xln" target="_blank" rel="noopener noreferrer" class="topbar-link">GitHub</a>
-    <a href="https://x.com/xlnfinance" target="_blank" rel="noopener noreferrer" class="topbar-link">X</a>
-    <a href="https://t.me/xlnomist" target="_blank" rel="noopener noreferrer" class="topbar-link">Telegram</a>
-    <a href="mailto:h@xln.finance" class="topbar-link">Contact</a>
     <a href="/llms.txt" target="_blank" class="topbar-link llms-link">llms.txt</a>
     <div class="topbar-dropdown">
       <Dropdown bind:open={toolsDropdownOpen} minWidth={160} maxWidth={220}>
