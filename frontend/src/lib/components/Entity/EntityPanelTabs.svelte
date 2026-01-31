@@ -43,7 +43,7 @@
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
 
   // Tab types
-  type ViewTab = 'send' | 'swap' | 'onj' | 'accounts' | 'activity' | 'chat' | 'contacts' | 'receive' | 'hubs' | 'create' | 'settings';
+  type ViewTab = 'external' | 'reserves' | 'accounts' | 'send' | 'swap' | 'onj' | 'activity' | 'chat' | 'contacts' | 'receive' | 'hubs' | 'create' | 'settings';
 
   // Set initial tab based on action
   function getInitialTab(): ViewTab {
@@ -446,6 +446,8 @@
   })();
 
   const tabs: Array<{ id: ViewTab; icon: any; label: string; showBadge?: boolean; badgeType?: 'activity' | 'pending' }> = [
+    { id: 'external', icon: Wallet, label: 'External' },
+    { id: 'reserves', icon: Landmark, label: 'Reserves' },
     { id: 'accounts', icon: Users, label: 'Accounts' },
     { id: 'send', icon: ArrowUpRight, label: 'Send' },
     { id: 'swap', icon: Repeat, label: 'Swap' },
@@ -577,46 +579,6 @@
         {/if}
       </section>
 
-      <!-- External Tokens (ERC20 held by signer) -->
-      <section class="external-tokens">
-        <div class="section-header">
-          <h4>External Tokens (ERC20)</h4>
-          <span class="signer-label" title={tab.signerId}>
-            Signer: {tab.signerId?.slice(0, 6)}...{tab.signerId?.slice(-4)}
-          </span>
-        </div>
-
-        {#if externalTokensLoading}
-          <div class="ext-loading">Loading...</div>
-        {:else if externalTokens.filter(t => t.balance > 0n).length > 0}
-          <div class="ext-list">
-            {#each externalTokens.filter(t => t.balance > 0n) as token}
-              {@const info = getTokenInfo(token.tokenId)}
-              <div class="ext-row">
-                <span class="ext-symbol" class:eth={token.symbol === 'WETH'} class:usd={token.symbol !== 'WETH'}>
-                  {token.symbol}
-                </span>
-                <span class="ext-amount">{formatAmount(token.balance, token.decimals)}</span>
-                <button
-                  class="btn-deposit"
-                  on:click={() => depositToReserve(token)}
-                  disabled={depositingToken === token.symbol}
-                >
-                  {depositingToken === token.symbol ? '...' : 'Deposit'}
-                </button>
-              </div>
-            {/each}
-          </div>
-        {:else}
-          <div class="ext-empty">
-            <span>No external tokens</span>
-            <button class="btn-faucet-small" on:click={faucetExternalTokens} disabled={faucetFunding}>
-              {faucetFunding ? '...' : '💧 Faucet'}
-            </button>
-          </div>
-        {/if}
-      </section>
-
       <!-- Tab Bar -->
       <nav class="tabs">
         {#each tabs as t}
@@ -638,7 +600,57 @@
 
       <!-- Tab Content -->
       <section class="content">
-        {#if activeTab === 'send'}
+        {#if activeTab === 'external'}
+          <!-- External Tokens (moved from main section) -->
+          <h4 class="section-head">External Tokens (ERC20)</h4>
+          <p class="muted">Wallet: {tab.signerId?.slice(0, 8)}...{tab.signerId?.slice(-4)}</p>
+
+          {#if externalTokensLoading}
+            <p class="muted">Loading...</p>
+          {:else if externalTokens.filter(t => t.balance > 0n).length > 0}
+            {#each externalTokens.filter(t => t.balance > 0n) as token}
+              {@const info = getTokenInfo(token.tokenId)}
+              <div class="ext-row">
+                <span class="ext-symbol" class:eth={token.symbol === 'WETH'} class:usd={token.symbol !== 'WETH'}>
+                  {token.symbol}
+                </span>
+                <span class="ext-amount">{formatAmount(token.balance, token.decimals)}</span>
+                <button class="btn-deposit" on:click={() => depositToReserve(token)} disabled={depositingToken === token.symbol}>
+                  {depositingToken === token.symbol ? '...' : 'Deposit'}
+                </button>
+              </div>
+            {/each}
+          {:else}
+            <p class="muted">No external tokens</p>
+            <button class="btn-faucet-small" on:click={faucetExternalTokens} disabled={faucetFunding}>
+              {faucetFunding ? '...' : '💧 Faucet'}
+            </button>
+          {/if}
+
+        {:else if activeTab === 'reserves'}
+          <!-- Reserves Detail (Depository.sol balances) -->
+          <h4 class="section-head">On-Chain Reserves</h4>
+
+          {#if browserVMReserves.size > 0}
+            {#each Array.from(browserVMReserves.entries()) as [tokenId, amount]}
+              {@const info = getTokenInfo(Number(tokenId))}
+              {@const value = getAssetValue(Number(tokenId), amount)}
+              <div class="token-row">
+                <span class="t-symbol" class:eth={info.symbol === 'WETH'} class:usd={info.symbol !== 'WETH'}>{info.symbol}</span>
+                <span class="t-amount">{formatAmount(amount, info.decimals)}</span>
+                <span class="t-value">{formatCompact(value)}</span>
+              </div>
+            {/each}
+          {:else if reservesLoading}
+            <p class="muted">Loading reserves...</p>
+          {:else}
+            <p class="muted">No reserves in Depository</p>
+            <button class="btn-faucet" on:click={faucetReserves} disabled={faucetFunding}>
+              {faucetFunding ? 'Funding...' : '💧 Get Test Funds'}
+            </button>
+          {/if}
+
+        {:else if activeTab === 'send'}
           <PaymentPanel entityId={replica.state?.entityId || tab.entityId} {contacts} />
 
         {:else if activeTab === 'swap'}
