@@ -48,8 +48,6 @@ export function classifyBilateralState(
   const peerHeight = peerCurrentHeight ?? 0;
   const mempoolCount = myAccount.mempool?.length ?? 0;
 
-  console.log(`🔍 BILATERAL-STATE: isLeft=${isLeft}, myHeight=${myHeight}, myPending=${myPendingHeight}, peerHeight=${peerHeight}, mempool=${mempoolCount}`);
-
   // CONFLICT: Both sides have pendingFrame at same height
   // RIGHT wins, LEFT must rollback (deterministic tie-breaker)
   const hasPendingFrame = myPendingHeight !== null;
