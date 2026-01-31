@@ -6,8 +6,7 @@ node_modules
 /artifacts
 
 # TypeChain files
-/typechain
-# Note: typechain-types IS committed for browser build compatibility
+# typechain-types now tracked in git for consistency
 
 # solidity-coverage files
 /coverage
