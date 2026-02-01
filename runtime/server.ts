@@ -278,8 +278,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
       const amountWei = ethers.parseUnits(amount, 18);
 
-      // Get hub's private key (convert Uint8Array to hex string for ethers)
-      const hubPrivateKeyBytes = deriveSignerKeySync(MAIN_HUB_CONFIG.seed, MAIN_HUB_CONFIG.signerId);
+      // Get hub's private key from default seed
+      const hubSeed = 'xln-main-hub-2026';
+      const hubSignerId = 'hub-validator';
+      const hubPrivateKeyBytes = deriveSignerKeySync(hubSeed, hubSignerId);
       const hubPrivateKeyHex = '0x' + Buffer.from(hubPrivateKeyBytes).toString('hex');
       const hubWallet = new ethers.Wallet(hubPrivateKeyHex, globalJAdapter.provider);
 
@@ -460,10 +462,14 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
   // Bootstrap hub entity (idempotent - normal entity + gossip tag)
   const { bootstrapHub } = await import('../scripts/bootstrap-hub');
-  await bootstrapHub();
+  await bootstrapHub(env);
+
+  // Wait for gossip to update (gossip.announce() might be async)
+  await new Promise(resolve => setTimeout(resolve, 100));
 
   // Get hub from gossip for funding
   const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true) || [];
+  console.log(`[XLN] Found ${hubs.length} hubs in gossip`);
 
   if (hubs.length > 0 && globalJAdapter) {
     const hubEntityId = hubs[0].entityId;
