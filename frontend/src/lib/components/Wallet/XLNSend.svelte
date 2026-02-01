@@ -34,9 +34,10 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const browserVM = xln.getBrowserVMInstance?.() as any;
-      if (browserVM?.getReserves) {
-        balance = await browserVM.getReserves(entityId, USDC_TOKEN_ID);
+      const env = xln.getEnv();
+      const jadapter = xln.getActiveJAdapter?.(env);
+      if (jadapter?.getReserves) {
+        balance = await jadapter.getReserves(entityId, USDC_TOKEN_ID);
       }
       loading = false;
     } catch (err) {
@@ -92,15 +93,16 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const browserVM = xln.getBrowserVMInstance?.() as any;
-      if (!browserVM?.reserveToReserve) {
+      const env = xln.getEnv();
+      const jadapter = xln.getActiveJAdapter?.(env);
+      if (!jadapter?.reserveToReserve) {
         status = 'error';
-        errorMessage = 'BrowserVM not available';
+        errorMessage = 'J-adapter not available';
         return;
       }
 
       const amountBigint = parseAmount(amount);
-      await browserVM.reserveToReserve(entityId, recipientAddress, USDC_TOKEN_ID, amountBigint);
+      await jadapter.reserveToReserve(entityId, recipientAddress, USDC_TOKEN_ID, amountBigint);
 
       // Process queued J-events to update runtime state
       if (xln.processJBlockEvents) {
@@ -135,14 +137,15 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const browserVM = xln.getBrowserVMInstance?.() as any;
-      if (!browserVM?.debugFundReserves) {
+      const env = xln.getEnv();
+      const jadapter = xln.getActiveJAdapter?.(env);
+      if (!jadapter?.debugFundReserves) {
         console.error('debugFundReserves not available');
         faucetStatus = 'idle';
         return;
       }
 
-      await browserVM.debugFundReserves(entityId, USDC_TOKEN_ID, FAUCET_AMOUNT);
+      await jadapter.debugFundReserves(entityId, USDC_TOKEN_ID, FAUCET_AMOUNT);
       console.log(`💰 Faucet: Minted $100 to ${entityId.slice(0, 12)}...`);
 
       faucetStatus = 'success';

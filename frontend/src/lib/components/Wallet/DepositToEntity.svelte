@@ -55,7 +55,8 @@
     if (browserVM) return browserVM;
     const { getXLN } = await import('$lib/stores/xlnStore');
     const xln = await getXLN();
-    browserVM = xln.getBrowserVMInstance?.();
+    const env = xln.getEnv();
+    browserVM = xln.getActiveJAdapter?.(env);
     if (browserVM && !browserProvider) {
       browserProvider = new BrowserVMEthersProvider(browserVM);
     }
