@@ -30,13 +30,16 @@ const HUB_CONFIG = {
   relayUrl: getArg('--relay', 'wss://xln.finance/relay'),
 };
 
-async function bootstrapHub() {
+async function bootstrapHub(env?: any) {
   console.log('[BOOTSTRAP] Starting hub bootstrap...');
   console.log(`[BOOTSTRAP] Name: ${HUB_CONFIG.name}`);
   console.log(`[BOOTSTRAP] Region: ${HUB_CONFIG.region}`);
 
-  // Initialize runtime
-  const env = await main();
+  // Initialize runtime if not provided
+  if (!env) {
+    const { main } = await import('../runtime/runtime');
+    env = await main();
+  }
 
   // Check if hub already exists in gossip
   const existingHubs = env.gossip?.getProfiles()?.filter(p =>
@@ -94,15 +97,21 @@ async function bootstrapHub() {
       entityId,
       runtimeId: env.runtimeId,
       capabilities: ['hub', 'routing', 'faucet'],
+      accounts: [], // Required field
       metadata: {
         name: HUB_CONFIG.name,
         isHub: true,
         region: HUB_CONFIG.region,
         relayUrl: HUB_CONFIG.relayUrl,
         routingFeePPM: HUB_CONFIG.routingFeePPM,
+        lastUpdated: Date.now(), // Add timestamp
       },
     });
     console.log('[BOOTSTRAP] ✅ Announced in gossip as hub');
+
+    // Verify it was stored
+    const verify = env.gossip.getHubs?.();
+    console.log(`[BOOTSTRAP] Gossip verification: ${verify?.length || 0} hubs found`);
   }
 
   console.log('[BOOTSTRAP] ✅ Hub bootstrap complete');
