@@ -1,6 +1,7 @@
 import type { RuntimeInput, EntityInput } from '../types';
 import { deserializeWsMessage, makeHelloNonce, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { signDigest } from '../account-crypto';
+import { encryptJSON, decryptJSON } from './p2p-crypto';
 
 // Separate interfaces for browser and Node.js WebSocket implementations
 interface BrowserWebSocket {
@@ -36,6 +37,8 @@ export type RuntimeWsClientOptions = {
   runtimeId: string;
   signerId?: string;
   seed?: Uint8Array | string;  // Required if signerId is provided for hello auth
+  encryptionKeyPair?: { publicKey: Uint8Array; privateKey: Uint8Array }; // For E2E encryption
+  getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null; // Lookup target's pubkey
   onRuntimeInput?: (from: string, input: RuntimeInput) => Promise<void> | void;
   onEntityInput?: (from: string, input: EntityInput) => Promise<void> | void;
   onGossipRequest?: (from: string, payload: unknown) => Promise<void> | void;
@@ -161,7 +164,22 @@ export class RuntimeWsClient {
       return;
     }
     if (msg.type === 'entity_input' && msg.payload && msg.from) {
-      await this.options.onEntityInput?.(msg.from, msg.payload as EntityInput);
+      let entityInput: EntityInput;
+
+      // Decrypt if message is encrypted
+      if (msg.encrypted && this.options.encryptionKeyPair) {
+        try {
+          entityInput = decryptJSON<EntityInput>(msg.payload as string, this.options.encryptionKeyPair.privateKey);
+        } catch (error) {
+          console.error(`P2P_DECRYPT_ERROR: ${(error as Error).message}`);
+          this.options.onError?.(new Error(`Failed to decrypt message from ${msg.from}`));
+          return;
+        }
+      } else {
+        entityInput = msg.payload as EntityInput;
+      }
+
+      await this.options.onEntityInput?.(msg.from, entityInput);
       return;
     }
     if (msg.type === 'gossip_request' && msg.payload && msg.from) {
@@ -190,13 +208,31 @@ export class RuntimeWsClient {
   }
 
   sendEntityInput(to: string, input: EntityInput): boolean {
+    // Encrypt payload if we have encryption capability
+    let payload: unknown = input;
+    let encrypted = false;
+
+    if (this.options.getTargetEncryptionKey && this.options.encryptionKeyPair) {
+      const targetPubKey = this.options.getTargetEncryptionKey(to);
+      if (targetPubKey) {
+        try {
+          payload = encryptJSON(input, targetPubKey); // Base64 encrypted blob
+          encrypted = true;
+        } catch (error) {
+          console.error(`P2P_ENCRYPT_ERROR: ${(error as Error).message}`);
+          // Fall back to unencrypted
+        }
+      }
+    }
+
     return this.sendRaw({
       type: 'entity_input',
       id: makeMessageId(),
       from: this.options.runtimeId,
       to,
       timestamp: nextTimestamp(),
-      payload: input,
+      payload,
+      encrypted,
     });
   }
 
