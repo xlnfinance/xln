@@ -105,9 +105,6 @@ async function bootstrapHub() {
     console.log('[BOOTSTRAP] ✅ Announced in gossip as hub');
   }
 
-  // Store hub entity ID for easy reference
-  (env as any).hubEntityId = entityId;
-
   console.log('[BOOTSTRAP] ✅ Hub bootstrap complete');
   console.log(`[BOOTSTRAP]    Name: ${HUB_CONFIG.name}`);
   console.log(`[BOOTSTRAP]    EntityId: ${entityId.slice(0, 16)}...`);
