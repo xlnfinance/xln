@@ -957,6 +957,31 @@
     <!-- INPUT SECTION - Always visible at top -->
     {#if phase === 'input' || phase === 'deriving'}
       <div class="glass-card input-section" class:deriving={phase === 'deriving'}>
+
+        <!-- Quick Login (Demo Accounts) -->
+        {#await import('$lib/config/demo-accounts') then { DEMO_ACCOUNTS }}
+          <div class="quick-login-section">
+            <div class="quick-login-header">Quick Login (Testnet)</div>
+            <div class="quick-login-grid">
+              {#each DEMO_ACCOUNTS as account}
+                <button
+                  class="quick-login-btn"
+                  type="button"
+                  on:click={() => {
+                    name = account.name;
+                    passphrase = account.password;
+                    shardInput = account.factor;
+                    inputMode = 'brainvault';
+                    setTimeout(() => startDerivation(), 100);
+                  }}
+                >
+                  {account.name}
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/await}
+
         <!-- Input Mode Tabs -->
         <div class="input-mode-tabs">
           <button
@@ -1487,6 +1512,44 @@
 <!-- Close brainvault-wrapper -->
 
 <style>
+  /* Quick Login */
+  .quick-login-section {
+    margin-bottom: 20px;
+    padding: 16px;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+    border: 1px solid rgba(102, 126, 234, 0.3);
+    border-radius: 12px;
+  }
+  .quick-login-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+  }
+  .quick-login-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+  }
+  .quick-login-btn {
+    padding: 10px 12px;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    border: none;
+    border-radius: 8px;
+    color: white;
+    font-weight: 600;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-transform: capitalize;
+  }
+  .quick-login-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
+  }
+
   .brainvault-wrapper {
     width: 100%;
     height: 100%;
