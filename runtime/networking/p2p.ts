@@ -29,7 +29,7 @@ import { buildEntityProfile } from './gossip-helper';
 import { extractEntityId } from '../ids';
 import { getCachedSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
 import { signProfileSync, verifyProfileSignature } from './profile-signing';
-import { deriveEncryptionKeyPair, pubKeyToHex, type P2PKeyPair } from './p2p-crypto';
+import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const MAX_QUEUE_PER_RUNTIME = 100; // Prevent memory exhaustion (DoS protection)
@@ -166,6 +166,19 @@ export class RuntimeP2P {
         runtimeId: this.runtimeId,
         signerId: this.signerId,
         ...(runtimeSeed ? { seed: runtimeSeed } : {}),  // Pass seed for hello auth signing if available
+        encryptionKeyPair: this.encryptionKeyPair, // Pass our keypair for encryption/decryption
+        getTargetEncryptionKey: (targetRuntimeId: string) => {
+          // Lookup target's public key from gossip
+          const profiles = this.env.gossip?.getProfiles?.() || [];
+          const targetProfile = profiles.find((p: any) => p.runtimeId === targetRuntimeId);
+          if (!targetProfile?.metadata?.encryptionPubKey) return null;
+          try {
+            const hexToPubKey = require('./p2p-crypto').hexToPubKey;
+            return hexToPubKey(targetProfile.metadata.encryptionPubKey);
+          } catch {
+            return null;
+          }
+        },
         onOpen: () => {
           this.flushPending();
           this.requestSeedGossip();
