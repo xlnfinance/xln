@@ -285,11 +285,11 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const hubPrivateKeyHex = '0x' + Buffer.from(hubPrivateKeyBytes).toString('hex');
       const hubWallet = new ethers.Wallet(hubPrivateKeyHex, globalJAdapter.provider);
 
-      // Get token contract (updated addresses from latest deployment)
+      // Get token contract (latest deployment block 18)
       const ANVIL_TOKENS: Record<string, string> = {
-        USDC: '0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9',
-        WETH: '0x0165878A594ca255338adfa4d48449f69242Eb8F',
-        USDT: '0x2279B7A0a67DB372996a5FaB50D91eAA73d2eBe6',
+        USDC: '0x68B1D87F95878fE05B998F19b66F4baba5De1aed',
+        WETH: '0xc6e7DF5E7b4f2A278906862b61205850344D4e7d',
+        USDT: '0x4ed7c70F96B99c776995fB64377f0d4aB3B0e1C1',
       };
 
       const tokenAddress = globalJAdapter.mode === 'rpc'
