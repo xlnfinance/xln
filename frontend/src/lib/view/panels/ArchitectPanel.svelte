@@ -902,16 +902,17 @@
 
       // Auto-create default jurisdiction if none exists
       if (!$isolatedEnv?.activeJurisdiction) {
-        lastAction = 'Creating default jurisdiction for demo...';
+        lastAction = 'Connecting to testnet...';
 
+        // Auto-import testnet (prod anvil) - shared J-machine
         await XLN.applyRuntimeInput($isolatedEnv, {
           runtimeTxs: [{
             type: 'importJ',
             data: {
-              name: 'demo',
-              chainId: 1337, // Must match View.svelte's BrowserVM
-              ticker: 'SIM',
-              rpcs: [],
+              name: 'Testnet',
+              chainId: 31337,
+              ticker: 'USDC',
+              rpcs: ['https://xln.finance/rpc'], // Prod anvil
             }
           }],
           entityInputs: []
@@ -1426,16 +1427,17 @@
 
       // Auto-create default jurisdiction if none exists
       if (!$isolatedEnv?.activeJurisdiction) {
-        lastAction = 'Creating default jurisdiction for demo...';
+        lastAction = 'Connecting to testnet...';
 
+        // Auto-import testnet (prod anvil) - shared J-machine
         await XLN.applyRuntimeInput($isolatedEnv, {
           runtimeTxs: [{
             type: 'importJ',
             data: {
-              name: 'demo',
-              chainId: 1337, // Must match View.svelte's BrowserVM
-              ticker: 'SIM',
-              rpcs: [],
+              name: 'Testnet',
+              chainId: 31337,
+              ticker: 'USDC',
+              rpcs: ['https://xln.finance/rpc'], // Prod anvil
             }
           }],
           entityInputs: []
