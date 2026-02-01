@@ -148,24 +148,9 @@
           entities: env.eReplicas.size,
         });
       } else {
-        // Create environment + auto-import testnet
+        // Use env from VaultStore (testnet already imported there)
         env = await XLN.main();
-
-        // Auto-import testnet anvil (shared J-machine)
-        console.log('[View] Importing testnet anvil...');
-        await XLN.applyRuntimeInput(env, {
-          runtimeTxs: [{
-            type: 'importJ',
-            data: {
-              name: 'Testnet',
-              chainId: 31337,
-              ticker: 'USDC',
-              rpcs: ['https://xln.finance/rpc'],
-            }
-          }],
-          entityInputs: []
-        });
-        console.log('[View] ✅ Testnet anvil imported');
+        console.log('[View] ✅ Environment ready - testnet imported by VaultStore');
       }
 
       // Set to isolated stores

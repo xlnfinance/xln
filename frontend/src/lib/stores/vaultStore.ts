@@ -590,21 +590,8 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         }
         console.log(`[VaultStore.initialize] ✅ Registered ${runtime.signers.length} HD-derived keys`);
 
-        // Import testnet J-machine (NO BrowserVM)
-        console.log('[VaultStore.initialize] Importing testnet...');
-        await xln.applyRuntimeInput(newEnv, {
-          runtimeTxs: [{
-            type: 'importJ',
-            data: {
-              name: 'Testnet',
-              chainId: 31337,
-              ticker: 'USDC',
-              rpcs: ['https://xln.finance/rpc'],
-            }
-          }],
-          entityInputs: []
-        });
-        console.log('[VaultStore.initialize] ✅ Testnet imported');
+        // Testnet already imported in createRuntime - skip duplicate
+        console.log('[VaultStore.initialize] Using existing testnet from createRuntime');
 
         runtimes.update(r => {
           r.set(runtimeId, {
