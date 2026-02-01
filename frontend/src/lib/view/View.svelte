@@ -148,9 +148,24 @@
           entities: env.eReplicas.size,
         });
       } else {
-        // Create empty environment - ArchitectPanel will import testnet
+        // Create environment + auto-import testnet
         env = await XLN.main();
-        console.log('[View] ✅ Environment ready - ArchitectPanel will import testnet');
+
+        // Auto-import testnet anvil (shared J-machine)
+        console.log('[View] Importing testnet anvil...');
+        await XLN.applyRuntimeInput(env, {
+          runtimeTxs: [{
+            type: 'importJ',
+            data: {
+              name: 'Testnet',
+              chainId: 31337,
+              ticker: 'USDC',
+              rpcs: ['https://xln.finance/rpc'],
+            }
+          }],
+          entityInputs: []
+        });
+        console.log('[View] ✅ Testnet anvil imported');
       }
 
       // Set to isolated stores
