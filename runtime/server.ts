@@ -290,9 +290,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
       const amountWei = ethers.parseUnits(amount, 18);
 
-      // Get hub's private key
-      const hubPrivateKey = deriveSignerKeySync(MAIN_HUB_CONFIG.seed, MAIN_HUB_CONFIG.signerId);
-      const hubWallet = new ethers.Wallet(hubPrivateKey, globalJAdapter.provider);
+      // Get hub's private key (convert Uint8Array to hex string for ethers)
+      const hubPrivateKeyBytes = deriveSignerKeySync(MAIN_HUB_CONFIG.seed, MAIN_HUB_CONFIG.signerId);
+      const hubPrivateKeyHex = '0x' + Buffer.from(hubPrivateKeyBytes).toString('hex');
+      const hubWallet = new ethers.Wallet(hubPrivateKeyHex, globalJAdapter.provider);
 
       // Get token contract
       const tokenRegistry = (globalJAdapter as any).getBrowserVM?.()?.getTokenRegistry() || [];
@@ -523,6 +524,25 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   // Fund hub reserves if using J-adapter
   if (globalJAdapter) {
     console.log('[XLN] Funding hub reserves...');
+
+    // Fund hub wallet address with ETH (for gas) and ERC20 tokens
+    const hubPrivateKeyBytes = deriveSignerKeySync(MAIN_HUB_CONFIG.seed, MAIN_HUB_CONFIG.signerId);
+    const hubPrivateKeyHex = '0x' + Buffer.from(hubPrivateKeyBytes).toString('hex');
+    const hubWallet = new ethers.Wallet(hubPrivateKeyHex, globalJAdapter.provider);
+    const hubWalletAddress = await hubWallet.getAddress();
+
+    console.log(`[XLN] Hub wallet address: ${hubWalletAddress}`);
+
+    // Fund hub wallet if using BrowserVM
+    if (globalJAdapter.mode === 'browservm') {
+      const browserVM = globalJAdapter.getBrowserVM();
+      if (browserVM) {
+        await (browserVM as any).fundSignerWallet(hubWalletAddress, 1_000_000n * 10n ** 18n); // 1M tokens
+        console.log('[XLN] Hub wallet funded with ERC20 + ETH');
+      }
+    }
+
+    // Fund hub entity reserves in Depository
     await globalJAdapter.debugFundReserves(mainHubEntityId, MAIN_HUB_CONFIG.faucetTokenId, 1_000_000_000n * 10n ** 18n); // $1B
     console.log('[XLN] Hub reserves funded');
   }
