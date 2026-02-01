@@ -921,7 +921,7 @@
         name = DEFAULT_DEMO_ACCOUNT.name;
         passphrase = DEFAULT_DEMO_ACCOUNT.password;
         shardInput = DEFAULT_DEMO_ACCOUNT.factor;
-        mode = 'brainvault';
+        inputMode = 'brainvault';
 
         // Auto-derive after UI renders
         setTimeout(() => startDerivation(), 500);
