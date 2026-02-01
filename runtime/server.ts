@@ -17,7 +17,9 @@ import { main, getEnv, process as runtimeProcess, applyRuntimeInput } from './ru
 import { safeStringify } from './serialization-utils';
 import type { Env, EntityInput, RuntimeInput } from './types';
 import { encodeBoard, hashBoard } from './entity-factory';
-import { registerSignerKey, deriveSignerKeySync } from './account-crypto';
+import { registerSignerKey, deriveSignerKeySync, getCachedSignerAddress } from './account-crypto';
+import { createJAdapter, type JAdapter } from './jadapter';
+import { ethers } from 'ethers';
 
 // ============================================================================
 // MAIN HUB CONFIGURATION
@@ -30,6 +32,9 @@ const MAIN_HUB_CONFIG = {
   faucetAmount: 100n * 10n ** 18n, // $100 in wei (18 decimals)
   faucetTokenId: 1, // USDC
 };
+
+// Global J-adapter instance (set during startup)
+let globalJAdapter: JAdapter | null = null;
 
 // ============================================================================
 // SERVER OPTIONS
@@ -265,6 +270,142 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     }), { headers });
   }
 
+  // ============================================================================
+  // FAUCET ENDPOINTS
+  // ============================================================================
+
+  // Faucet A: External ERC20 → user wallet
+  if (pathname === '/api/faucet/erc20' && req.method === 'POST') {
+    try {
+      if (!globalJAdapter) {
+        return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
+      }
+
+      const body = await req.json();
+      const { userAddress, tokenSymbol = 'USDC', amount = '100' } = body;
+
+      if (!userAddress || !ethers.isAddress(userAddress)) {
+        return new Response(JSON.stringify({ error: 'Invalid userAddress' }), { status: 400, headers });
+      }
+
+      const amountWei = ethers.parseUnits(amount, 18);
+
+      // Get hub's private key
+      const hubPrivateKey = deriveSignerKeySync(MAIN_HUB_CONFIG.seed, MAIN_HUB_CONFIG.signerId);
+      const hubWallet = new ethers.Wallet(hubPrivateKey, globalJAdapter.provider);
+
+      // Get token contract
+      const tokenRegistry = (globalJAdapter as any).getBrowserVM?.()?.getTokenRegistry() || [];
+      const token = tokenRegistry.find((t: any) => t.symbol === tokenSymbol);
+
+      if (!token) {
+        return new Response(JSON.stringify({ error: `Token ${tokenSymbol} not found` }), { status: 404, headers });
+      }
+
+      // Transfer ERC20 from hub to user
+      const ERC20_ABI = ['function transfer(address to, uint256 amount) returns (bool)'];
+      const erc20 = new ethers.Contract(token.address, ERC20_ABI, hubWallet);
+      const tx = await erc20.transfer(userAddress, amountWei);
+      await tx.wait();
+
+      return new Response(JSON.stringify({
+        success: true,
+        type: 'erc20',
+        amount,
+        tokenSymbol,
+        userAddress,
+        txHash: tx.hash,
+      }), { headers });
+    } catch (error: any) {
+      console.error('[FAUCET/ERC20] Error:', error);
+      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
+    }
+  }
+
+  // Faucet B: Hub reserve → user reserve via processBatch
+  if (pathname === '/api/faucet/reserve' && req.method === 'POST') {
+    try {
+      if (!globalJAdapter) {
+        return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
+      }
+      if (!env || !(env as any).mainHubEntityId) {
+        return new Response(JSON.stringify({ error: 'Hub entity not initialized' }), { status: 503, headers });
+      }
+
+      const body = await req.json();
+      const { userEntityId, tokenId = 1, amount = '100' } = body;
+
+      if (!userEntityId) {
+        return new Response(JSON.stringify({ error: 'Missing userEntityId' }), { status: 400, headers });
+      }
+
+      const amountWei = ethers.parseUnits(amount, 18);
+      const hubEntityId = (env as any).mainHubEntityId;
+
+      // Use reserveToReserve via jadapter
+      await globalJAdapter.reserveToReserve(hubEntityId, userEntityId, tokenId, amountWei);
+
+      return new Response(JSON.stringify({
+        success: true,
+        type: 'reserve',
+        amount,
+        tokenId,
+        from: hubEntityId.slice(0, 16) + '...',
+        to: userEntityId.slice(0, 16) + '...',
+      }), { headers });
+    } catch (error: any) {
+      console.error('[FAUCET/RESERVE] Error:', error);
+      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
+    }
+  }
+
+  // Faucet C: Offchain payment via bilateral account
+  if (pathname === '/api/faucet/offchain' && req.method === 'POST') {
+    try {
+      if (!env || !(env as any).mainHubEntityId) {
+        return new Response(JSON.stringify({ error: 'Hub entity not initialized' }), { status: 503, headers });
+      }
+
+      const body = await req.json();
+      const { userEntityId, tokenId = 1, amount = '100' } = body;
+
+      if (!userEntityId) {
+        return new Response(JSON.stringify({ error: 'Missing userEntityId' }), { status: 400, headers });
+      }
+
+      const amountWei = ethers.parseUnits(amount, 18);
+      const hubEntityId = (env as any).mainHubEntityId;
+
+      // Send payment from hub to user via account
+      await runtimeProcess(env, [{
+        entityId: hubEntityId,
+        signerId: MAIN_HUB_CONFIG.signerId,
+        entityTxs: [{
+          type: 'directPayment',
+          data: {
+            targetEntityId: userEntityId,
+            tokenId,
+            amount: amountWei,
+            route: [hubEntityId, userEntityId], // Direct route
+            description: 'faucet-offchain',
+          },
+        }],
+      }]);
+
+      return new Response(JSON.stringify({
+        success: true,
+        type: 'offchain',
+        amount,
+        tokenId,
+        from: hubEntityId.slice(0, 16) + '...',
+        to: userEntityId.slice(0, 16) + '...',
+      }), { headers });
+    } catch (error: any) {
+      console.error('[FAUCET/OFFCHAIN] Error:', error);
+      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
+    }
+  }
+
   return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers });
 };
 
@@ -340,8 +481,51 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   console.log('[XLN] Initializing runtime...');
   const env = await main();
 
+  // Initialize J-adapter (anvil for testnet, browserVM for local)
+  const anvilRpc = process.env.ANVIL_RPC || 'http://localhost:8545';
+  const useAnvil = process.env.USE_ANVIL === 'true';
+
+  if (useAnvil) {
+    console.log('[XLN] Connecting to Anvil testnet...');
+    try {
+      globalJAdapter = await createJAdapter({
+        mode: 'rpc',
+        chainId: 31337,
+        rpcUrl: anvilRpc,
+      });
+
+      // Check if contracts deployed
+      const block = await globalJAdapter.provider.getBlockNumber();
+      console.log(`[XLN] Anvil connected (block: ${block})`);
+
+      // Deploy contracts if block 0 (fresh anvil)
+      if (block === 0) {
+        console.log('[XLN] Deploying contracts to anvil...');
+        await globalJAdapter.deployStack();
+        console.log('[XLN] Contracts deployed');
+      }
+    } catch (error) {
+      console.warn('[XLN] Anvil connection failed, falling back to BrowserVM:', error);
+      globalJAdapter = null;
+    }
+  } else {
+    console.log('[XLN] Using BrowserVM (local mode)');
+    globalJAdapter = await createJAdapter({
+      mode: 'browservm',
+      chainId: 1337,
+    });
+    await globalJAdapter.deployStack();
+  }
+
   // Create Main hub entity (relay hub)
   const mainHubEntityId = await createMainHub(env);
+
+  // Fund hub reserves if using J-adapter
+  if (globalJAdapter) {
+    console.log('[XLN] Funding hub reserves...');
+    await globalJAdapter.debugFundReserves(mainHubEntityId, MAIN_HUB_CONFIG.faucetTokenId, 1_000_000_000n * 10n ** 18n); // $1B
+    console.log('[XLN] Hub reserves funded');
+  }
 
   const server = Bun.serve({
     port: options.port,
@@ -425,14 +609,18 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Port: ${String(options.port).padEnd(10)}                                       ║
 ║  Host: ${(options.host || '0.0.0.0').padEnd(10)}                                       ║
+║  Mode: ${(globalJAdapter ? globalJAdapter.mode : 'no-jadapter').padEnd(10)}                                       ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Endpoints:                                                      ║
-║    GET  /              → SPA                                     ║
-║    WS   /relay         → P2P relay                               ║
-║    WS   /rpc           → Remote UI                               ║
-║    GET  /api/health    → Health check                            ║
-║    GET  /api/state     → Runtime state                           ║
-║    GET  /api/clients   → Connected clients                       ║
+║    GET  /                     → SPA                              ║
+║    WS   /relay                → P2P relay                        ║
+║    WS   /rpc                  → Remote UI                        ║
+║    GET  /api/health           → Health check                     ║
+║    GET  /api/state            → Runtime state                    ║
+║    GET  /api/clients          → Connected clients                ║
+║    POST /api/faucet/erc20     → Faucet A (wallet ERC20)          ║
+║    POST /api/faucet/reserve   → Faucet B (reserve transfer)      ║
+║    POST /api/faucet/offchain  → Faucet C (account payment)       ║
 ╚══════════════════════════════════════════════════════════════════╝
   `);
 
