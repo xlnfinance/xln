@@ -744,7 +744,7 @@ const applyRuntimeInput = async (
             env.jReplicas = new Map();
           }
 
-          // Create JReplica
+          // Create JReplica (store jadapter for later use)
           const jReplica: JReplica = {
             name: runtimeTx.data.name,
             blockNumber: 0n,
@@ -755,6 +755,7 @@ const applyRuntimeInput = async (
             position: { x: 0, y: 50, z: 0 }, // Default position for J-machine
             depositoryAddress: jadapter.addresses.depository,
             entityProviderAddress: jadapter.addresses.entityProvider,
+            jadapter, // Store for balance queries, faucets, etc
           };
           env.jReplicas.set(runtimeTx.data.name, jReplica);
 
@@ -2568,6 +2569,13 @@ const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayIn
 // JAdapter - Unified J-Machine interface (replaces old evms/ and jurisdiction/)
 export { createJAdapter, BrowserVMProvider } from './jadapter';
 export type { JAdapter, JAdapterConfig, JAdapterMode, JEvent } from './jadapter';
+
+// Get active J-adapter from environment
+export function getActiveJAdapter(env: Env): JAdapter | null {
+  if (!env.activeJurisdiction) return null;
+  const jReplica = env.jReplicas?.get(env.activeJurisdiction);
+  return jReplica?.jadapter || null;
+}
 
 // Entity ID utilities - universal parsing, provider-scoping, comparison
 export {
