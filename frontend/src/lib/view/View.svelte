@@ -127,7 +127,7 @@
       const { xlnInstance } = await import('$lib/stores/xlnStore');
       xlnInstance.set(XLN);
 
-      // Step 4: Check for URL hash import (shareable state)
+      // Check for URL hash import (shareable state)
       const { parseURLHash } = await import('./utils/stateCodec');
       const urlImport = parseURLHash();
 
@@ -136,52 +136,26 @@
       if (urlImport) {
         console.log('[View] 🔗 Importing state from URL hash...');
         env = XLN.createEmptyEnv();
-        env.quietRuntimeLogs = true; // Quiet by default (toggle in Settings)
+        env.quietRuntimeLogs = true;
 
-        // Restore jurisdictions
+        // Restore jurisdictions + entities
         env.jReplicas = urlImport.state.x;
         env.activeJurisdiction = urlImport.state.a;
-
-        // Restore entities (replicas)
         env.eReplicas = urlImport.state.e;
-
-        // Restore UI settings if included
-        if (urlImport.includeUI && urlImport.state.ui) {
-          // Settings will be loaded by SettingsPanel from its own localStorage
-          // Just log that UI was included
-          console.log('[View] 📋 URL included UI settings');
-        }
 
         console.log('[View] ✅ Imported:', {
           jReplicas: env.jReplicas.size,
           entities: env.eReplicas.size,
-          active: env.activeJurisdiction
         });
       } else {
-        // No URL import: Create empty environment
-        env = XLN.createEmptyEnv();
-        env.quietRuntimeLogs = true; // Quiet by default (toggle in Settings)
-
-        // Initialize with empty frame 0
-        env.history = [{
-          height: 0,
-          timestamp: Date.now(),
-          eReplicas: new Map(),
-          runtimeInput: { runtimeTxs: [], entityInputs: [] },
-          runtimeOutputs: [],
-          description: 'Frame 0: Empty slate',
-          title: 'Initial State'
-        }];
-
-        console.log('[View] ✅ Empty environment ready (frame 0)');
-        console.log('[View] 💡 Use Architect panel to create jurisdictions + entities');
+        // Create empty environment - ArchitectPanel will import testnet
+        env = await XLN.main();
+        console.log('[View] ✅ Environment ready - ArchitectPanel will import testnet');
       }
 
       // Set to isolated stores
       localEnvStore.set(env);
       localHistoryStore.set(env.history || []);
-
-      console.log('[View] ✅ Environment ready - ArchitectPanel will import J-machine');
       // CRITICAL: Default to -1 (LIVE mode), not 0 (historical frame 0)
       // Only use saved timeIndex when explicitly importing from URL
       localTimeIndex.set(urlImport?.state.ui?.ti ?? -1);
