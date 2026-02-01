@@ -170,39 +170,27 @@ async function ensureJMachine(env: Env): Promise<string | null> {
   try {
     const { getXLN } = await import('$lib/stores/xlnStore');
     const xln = await getXLN();
-    const name = 'xlnomy1';
 
-    await xln.applyRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importJ',
-        data: {
-          name,
-          chainId: 1337, // Must match View.svelte's BrowserVM chainId
-          ticker: 'SIM',
-          rpcs: [],
-        }
-      }],
-      entityInputs: []
-    });
+    // Use Testnet from VaultStore (no xlnomy1)
+    const testnetName = 'Testnet';
+    const jReplica = getJReplica(env, testnetName);
 
-    // ASSERT: J-machine created successfully
-    const jReplica = getJReplica(env, name);
     if (!jReplica) {
-      throw new Error('Failed to create J-machine - not found in env.jReplicas');
+      throw new Error('Testnet J-machine not found - VaultStore should have imported it');
     }
 
-    // ASSERT: Contracts deployed (support both top-level and legacy nested)
-    const depository = jReplica?.depositoryAddress || jReplica?.contracts?.depository || jReplica?.contracts?.depositoryAddress;
-    const entityProvider = jReplica?.entityProviderAddress || jReplica?.contracts?.entityProvider || jReplica?.contracts?.entityProviderAddress;
+    // Verify contracts exist
+    const depository = jReplica?.depositoryAddress;
+    const entityProvider = jReplica?.entityProviderAddress;
 
     if (!depository || !entityProvider) {
-      console.error('[ensureJMachine] ❌ Contracts not deployed');
+      console.error('[ensureJMachine] ❌ Testnet contracts missing');
       console.error('   Depository:', depository || 'MISSING');
       console.error('   EntityProvider:', entityProvider || 'MISSING');
-      throw new Error(`J-machine "${name}" contracts not deployed`);
+      throw new Error('Testnet contracts not deployed');
     }
 
-    return name;
+    return testnetName;
   } catch (err) {
     console.error('[ensureJMachine] ❌ Failed:', err);
     throw err;
