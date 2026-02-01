@@ -496,8 +496,15 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     }
 
     // Fund hub entity reserves in Depository
-    await globalJAdapter.debugFundReserves(hubEntityId, 1, 1_000_000_000n * 10n ** 18n); // $1B USDC
-    console.log('[XLN] Hub reserves funded');
+    if (globalJAdapter.mode === 'browservm') {
+      // BrowserVM has debugFundReserves
+      await globalJAdapter.debugFundReserves(hubEntityId, 1, 1_000_000_000n * 10n ** 18n); // $1B USDC
+      console.log('[XLN] Hub reserves funded (BrowserVM debug)');
+    } else {
+      // Anvil: Fund via real transfers (deployer → hub reserve)
+      // TODO: Implement reserve funding for anvil
+      console.log('[XLN] Hub reserve funding skipped (anvil - use manual funding)');
+    }
   }
 
   const server = Bun.serve({
