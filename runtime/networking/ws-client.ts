@@ -164,20 +164,19 @@ export class RuntimeWsClient {
       return;
     }
     if (msg.type === 'entity_input' && msg.payload && msg.from) {
-      let entityInput: EntityInput;
-
-      // Decrypt if message is encrypted
-      if (msg.encrypted && this.options.encryptionKeyPair) {
-        try {
-          entityInput = decryptJSON<EntityInput>(msg.payload as string, this.options.encryptionKeyPair.privateKey);
-        } catch (error) {
-          console.error(`P2P_DECRYPT_ERROR: ${(error as Error).message}`);
-          this.options.onError?.(new Error(`Failed to decrypt message from ${msg.from}`));
-          return;
-        }
-      } else {
-        entityInput = msg.payload as EntityInput;
+      // Reject unencrypted entity_input messages
+      if (!msg.encrypted) {
+        this.options.onError?.(new Error(`P2P_UNENCRYPTED: Received unencrypted entity_input from ${msg.from}`));
+        return;
       }
+
+      if (!this.options.encryptionKeyPair) {
+        this.options.onError?.(new Error('P2P_NO_DECRYPTION: Cannot decrypt without keypair'));
+        return;
+      }
+
+      // Decrypt - throws on error (fail-fast)
+      const entityInput = decryptJSON<EntityInput>(msg.payload as string, this.options.encryptionKeyPair.privateKey);
 
       await this.options.onEntityInput?.(msg.from, entityInput);
       return;
@@ -208,22 +207,18 @@ export class RuntimeWsClient {
   }
 
   sendEntityInput(to: string, input: EntityInput): boolean {
-    // Encrypt payload if we have encryption capability
-    let payload: unknown = input;
-    let encrypted = false;
-
-    if (this.options.getTargetEncryptionKey && this.options.encryptionKeyPair) {
-      const targetPubKey = this.options.getTargetEncryptionKey(to);
-      if (targetPubKey) {
-        try {
-          payload = encryptJSON(input, targetPubKey); // Base64 encrypted blob
-          encrypted = true;
-        } catch (error) {
-          console.error(`P2P_ENCRYPT_ERROR: ${(error as Error).message}`);
-          // Fall back to unencrypted
-        }
-      }
+    // Encryption is MANDATORY for entity_input messages
+    if (!this.options.getTargetEncryptionKey || !this.options.encryptionKeyPair) {
+      throw new Error('P2P_NO_ENCRYPTION: Encryption not configured');
     }
+
+    const targetPubKey = this.options.getTargetEncryptionKey(to);
+    if (!targetPubKey) {
+      throw new Error(`P2P_NO_PUBKEY: No encryption key for ${to}`);
+    }
+
+    // Encrypt - throws on error (fail-fast, never send plaintext)
+    const payload = encryptJSON(input, targetPubKey);
 
     return this.sendRaw({
       type: 'entity_input',
@@ -232,7 +227,7 @@ export class RuntimeWsClient {
       to,
       timestamp: nextTimestamp(),
       payload,
-      encrypted,
+      encrypted: true,
     });
   }
 
