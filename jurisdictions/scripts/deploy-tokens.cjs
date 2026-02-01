@@ -15,7 +15,9 @@ async function main() {
 
   const deployed = [];
 
-  const initialSupply = hre.ethers.parseUnits("1000000000", 18); // 1B tokens
+  // Deploy with 10B supply (enough for all faucets)
+  const initialSupply = hre.ethers.parseUnits("10000000000", 18); // 10B tokens
+  const hubWallet = "0x500dc3002D0B860d8C8Eb3426D0504D16E86b29C";
 
   for (const token of tokens) {
     console.log(`📝 Deploying ${token.symbol}...`);
@@ -23,8 +25,13 @@ async function main() {
     const erc20 = await ERC20Mock.deploy(token.name, token.symbol, initialSupply);
     await erc20.waitForDeployment();
     const addr = await erc20.getAddress();
-    console.log(`   ${token.symbol}: ${addr}`);
 
+    // Transfer 1B to hub wallet
+    const hubAmount = hre.ethers.parseUnits("1000000000", 18);
+    const tx = await erc20.transfer(hubWallet, hubAmount);
+    await tx.wait();
+
+    console.log(`   ${token.symbol}: ${addr} (1B → hub)`);
     deployed.push({ ...token, address: addr });
   }
 
