@@ -114,27 +114,13 @@
     console.log('[View] onMount started - initializing isolated XLN');
     console.log('[View] 🎬 scenarioId prop:', scenarioId || '(empty)');
 
-    // Initialize isolated XLN runtime (runtime handles BrowserVM internally)
+    // Initialize isolated XLN runtime
     try {
-      // Load XLN runtime - it includes BrowserEVM
+      // Load XLN runtime module
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-      // Create BrowserVM jurisdiction via unified JAdapter
-      const { createJAdapter } = XLN;
-      const jadapter = await createJAdapter({ mode: 'browservm', chainId: 1337 });
-      await jadapter.deployStack();
-      console.log('[View] JAdapter ready');
-
-      // Get underlying BrowserVM for legacy compatibility
-      const browserVM = (jadapter as any).browserVM;
-      const depositoryAddress = jadapter.addresses.depository;
-
-      // Expose for panels that need direct access
-      (window as any).__xlnBrowserVM = browserVM;
-      (window as any).__xlnJurisdiction = jadapter;
-
-      console.log('[View] ✅ Jurisdiction ready:', depositoryAddress.slice(0, 10) + '...');
+      console.log('[View] Runtime module loaded, creating env...');
 
       // CRITICAL: Initialize global xlnInstance for utility functions (deriveDelta, etc)
       // Graph3DPanel needs xlnFunctions even when using isolated stores
@@ -195,10 +181,7 @@
       localEnvStore.set(env);
       localHistoryStore.set(env.history || []);
 
-      // CRITICAL: Register BrowserVM with env NOW (after env is created)
-      // This sets env.browserVM which is needed for getDepositoryAddress() in consensus
-      XLN.setBrowserVMJurisdiction(env, depositoryAddress, browserVM);
-      console.log('[View] 🔗 BrowserVM registered with env, env.browserVM exists?', !!env.browserVM);
+      console.log('[View] ✅ Environment ready - ArchitectPanel will import J-machine');
       // CRITICAL: Default to -1 (LIVE mode), not 0 (historical frame 0)
       // Only use saved timeIndex when explicitly importing from URL
       localTimeIndex.set(urlImport?.state.ui?.ti ?? -1);
