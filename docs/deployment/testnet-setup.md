@@ -113,6 +113,43 @@ du -h /root/xln/data/anvil-state.json
 
 ## Next Steps
 
-After anvil is running, deploy the hub daemon:
-- See `runtime/prod-hub.ts`
-- PM2 service: `pm2 start runtime/prod-hub.ts --name xln-hub --interpreter bun`
+After anvil is running, start the unified server with faucet endpoints:
+
+```bash
+cd /root/xln
+
+# Set environment for anvil mode
+export ANVIL_RPC=http://localhost:8545
+export USE_ANVIL=true
+
+# Start server via PM2
+pm2 start runtime/server.ts --name xln-server --interpreter bun -- --port 8080
+pm2 save
+```
+
+**Server provides:**
+- WebSocket relay (`/relay`) for P2P communication
+- REST API endpoints:
+  - `GET /api/health` - Health check
+  - `POST /api/faucet/erc20` - Fund user wallet with ERC20
+  - `POST /api/faucet/reserve` - Fund user entity reserve
+  - `POST /api/faucet/offchain` - Send offchain payment to user
+- Static file serving for frontend (if `./frontend/build` exists)
+
+**Test faucets:**
+```bash
+# Faucet A: ERC20 to wallet
+curl -X POST https://xln.finance/api/faucet/erc20 \
+  -H "Content-Type: application/json" \
+  -d '{"userAddress":"0x...", "tokenSymbol":"USDC","amount":"100"}'
+
+# Faucet B: Reserve transfer
+curl -X POST https://xln.finance/api/faucet/reserve \
+  -H "Content-Type: application/json" \
+  -d '{"userEntityId":"0x...", "tokenId":1,"amount":"100"}'
+
+# Faucet C: Offchain payment
+curl -X POST https://xln.finance/api/faucet/offchain \
+  -H "Content-Type: application/json" \
+  -d '{"userEntityId":"0x...", "tokenId":1,"amount":"100"}'
+```
