@@ -21,18 +21,6 @@ import { registerSignerKey, deriveSignerKeySync, getCachedSignerAddress } from '
 import { createJAdapter, type JAdapter } from './jadapter';
 import { ethers } from 'ethers';
 
-// ============================================================================
-// MAIN HUB CONFIGURATION
-// ============================================================================
-
-const MAIN_HUB_CONFIG = {
-  name: 'Main',
-  signerId: '1', // Fixed signer ID for Main hub
-  seed: 'xln-main-hub-2026', // Fixed seed for deterministic key derivation
-  faucetAmount: 100n * 10n ** 18n, // $100 in wei (18 decimals)
-  faucetTokenId: 1, // USDC
-};
-
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
 
@@ -329,8 +317,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       if (!globalJAdapter) {
         return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
       }
-      if (!env || !(env as any).mainHubEntityId) {
-        return new Response(JSON.stringify({ error: 'Hub entity not initialized' }), { status: 503, headers });
+      if (!env) {
+        return new Response(JSON.stringify({ error: 'Runtime not initialized' }), { status: 503, headers });
       }
 
       const body = await req.json();
@@ -340,8 +328,14 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         return new Response(JSON.stringify({ error: 'Missing userEntityId' }), { status: 400, headers });
       }
 
+      // Get hub from gossip (no hardcoded hub!)
+      const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true && p.capabilities?.includes('faucet')) || [];
+      if (hubs.length === 0) {
+        return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
+      }
+      const hubEntityId = hubs[0].entityId;
+
       const amountWei = ethers.parseUnits(amount, 18);
-      const hubEntityId = (env as any).mainHubEntityId;
 
       // Use reserveToReserve via jadapter
       await globalJAdapter.reserveToReserve(hubEntityId, userEntityId, tokenId, amountWei);
@@ -363,8 +357,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   // Faucet C: Offchain payment via bilateral account
   if (pathname === '/api/faucet/offchain' && req.method === 'POST') {
     try {
-      if (!env || !(env as any).mainHubEntityId) {
-        return new Response(JSON.stringify({ error: 'Hub entity not initialized' }), { status: 503, headers });
+      if (!env) {
+        return new Response(JSON.stringify({ error: 'Runtime not initialized' }), { status: 503, headers });
       }
 
       const body = await req.json();
@@ -374,13 +368,20 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         return new Response(JSON.stringify({ error: 'Missing userEntityId' }), { status: 400, headers });
       }
 
+      // Get hub from gossip (no hardcoded hub!)
+      const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true && p.capabilities?.includes('faucet')) || [];
+      if (hubs.length === 0) {
+        return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
+      }
+      const hubEntityId = hubs[0].entityId;
+      const hubSignerId = hubs[0].runtimeId || '1';
+
       const amountWei = ethers.parseUnits(amount, 18);
-      const hubEntityId = (env as any).mainHubEntityId;
 
       // Send payment from hub to user via account
       await runtimeProcess(env, [{
         entityId: hubEntityId,
-        signerId: MAIN_HUB_CONFIG.signerId,
+        signerId: hubSignerId,
         entityTxs: [{
           type: 'directPayment',
           data: {
@@ -413,67 +414,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 // ============================================================================
 // MAIN SERVER
 // ============================================================================
-
-// Create Main hub entity and register in environment
-async function createMainHub(env: Env): Promise<string> {
-  console.log('[XLN] Creating Main hub entity...');
-
-  // Register signer key with fixed seed
-  const privateKey = deriveSignerKeySync(MAIN_HUB_CONFIG.seed, MAIN_HUB_CONFIG.signerId);
-  registerSignerKey(MAIN_HUB_CONFIG.signerId, privateKey);
-
-  // Create board config for Main hub
-  const config = {
-    mode: 'proposer-based' as const,
-    threshold: 1n,
-    validators: [MAIN_HUB_CONFIG.signerId],
-    shares: { [MAIN_HUB_CONFIG.signerId]: 1n },
-    jurisdiction: 'arrakis' // Bound to arrakis J-machine
-  };
-
-  const encodedBoard = encodeBoard(config);
-  const boardHash = hashBoard(encodedBoard);
-  const entityId = boardHash; // Lazy entity: entityId = boardHash
-
-  // Create the hub entity
-  await applyRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica',
-      entityId,
-      signerId: MAIN_HUB_CONFIG.signerId,
-      data: {
-        isProposer: true,
-        position: { x: 0, y: 0, z: 0 }, // Center position
-        config
-      }
-    }],
-    entityInputs: []
-  });
-
-  // Announce in gossip as hub
-  if (env.gossip) {
-    env.gossip.announce({
-      entityId,
-      runtimeId: MAIN_HUB_CONFIG.signerId,
-      capabilities: ['router', 'hub', 'faucet'],
-      metadata: {
-        name: MAIN_HUB_CONFIG.name,
-        isHub: true,
-        region: 'global',
-        version: '1.0.0',
-      }
-    });
-  }
-
-  console.log(`[XLN] ✅ Main hub created: ${entityId.slice(0, 16)}...`);
-  console.log(`[XLN]    SignerId: ${MAIN_HUB_CONFIG.signerId}`);
-  console.log(`[XLN]    Faucet: $${Number(MAIN_HUB_CONFIG.faucetAmount / 10n ** 18n)} USDC on account open`);
-
-  // Store Main hub entityId for faucet logic
-  (env as any).mainHubEntityId = entityId;
-
-  return entityId;
-}
 
 export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Promise<void> {
   const options = { ...DEFAULT_OPTIONS, ...opts };
@@ -518,15 +458,22 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     await globalJAdapter.deployStack();
   }
 
-  // Create Main hub entity (relay hub)
-  const mainHubEntityId = await createMainHub(env);
+  // Bootstrap hub entity (idempotent - normal entity + gossip tag)
+  const { bootstrapHub } = await import('../scripts/bootstrap-hub');
+  await bootstrapHub();
 
-  // Fund hub reserves if using J-adapter
-  if (globalJAdapter) {
+  // Get hub from gossip for funding
+  const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true) || [];
+
+  if (hubs.length > 0 && globalJAdapter) {
+    const hubEntityId = hubs[0].entityId;
+    const hubSignerId = hubs[0].runtimeId || 'hub-validator';
+
     console.log('[XLN] Funding hub reserves...');
 
     // Fund hub wallet address with ETH (for gas) and ERC20 tokens
-    const hubPrivateKeyBytes = deriveSignerKeySync(MAIN_HUB_CONFIG.seed, MAIN_HUB_CONFIG.signerId);
+    const hubSeed = 'xln-main-hub-2026'; // TODO: Get from env or config
+    const hubPrivateKeyBytes = deriveSignerKeySync(hubSeed, hubSignerId);
     const hubPrivateKeyHex = '0x' + Buffer.from(hubPrivateKeyBytes).toString('hex');
     const hubWallet = new ethers.Wallet(hubPrivateKeyHex, globalJAdapter.provider);
     const hubWalletAddress = await hubWallet.getAddress();
@@ -543,7 +490,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     }
 
     // Fund hub entity reserves in Depository
-    await globalJAdapter.debugFundReserves(mainHubEntityId, MAIN_HUB_CONFIG.faucetTokenId, 1_000_000_000n * 10n ** 18n); // $1B
+    await globalJAdapter.debugFundReserves(hubEntityId, 1, 1_000_000_000n * 10n ** 18n); // $1B USDC
     console.log('[XLN] Hub reserves funded');
   }
 

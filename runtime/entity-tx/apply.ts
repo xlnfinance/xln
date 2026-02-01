@@ -351,36 +351,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         console.log(`🧭 Right side: waiting for left's frame (mempool stays empty)`);
       }
 
-      // ========================================================================
-      // MAIN HUB FAUCET: Auto-send $100 when someone opens account with us
-      // ========================================================================
-      const mainHubEntityId = (env as any).mainHubEntityId;
-      if (mainHubEntityId && entityState.entityId === mainHubEntityId) {
-        // We are Main hub - send faucet payment to the user who opened account with us
-        const faucetAmount = 100n * 10n ** 18n; // $100 in wei
-        const faucetTokenId = 1; // USDC
-
-        console.log(`🚰 FAUCET: Main hub sending $100 USDC to ${formatEntityId(counterpartyId)}`);
-
-        // Queue direct payment to counterparty
-        const localAccount = newState.accounts.get(counterpartyId);
-        if (localAccount) {
-          localAccount.mempool.push({
-            type: 'direct_payment',
-            data: {
-              amount: faucetAmount,
-              tokenId: faucetTokenId,
-              // Hub pays user - direction determined by sender position in account
-              fromEntityId: newState.entityId,
-              toEntityId: counterpartyId,
-              description: 'Welcome faucet bonus',
-            }
-          });
-
-          addMessage(newState, `🚰 Welcome bonus: Sent $100 USDC to ${formatEntityId(counterpartyId)}`);
-          console.log(`🚰 FAUCET: Queued $100 USDC transfer to ${formatEntityId(counterpartyId)}`);
-        }
-      }
+      // Hub entities no longer auto-send faucet (use /api/faucet/offchain instead)
 
       // Add success message to chat
       addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
