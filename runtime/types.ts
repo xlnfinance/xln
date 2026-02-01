@@ -1680,6 +1680,10 @@ export interface JReplica {
   lastBlockTimestamp: number;             // Timestamp (ms) of last block creation
   blockReady?: boolean;                   // True when mempool has items and blockDelayMs elapsed
 
+  // JAdapter instance (for balance queries, transactions, etc)
+  // Works with both browservm and rpc modes
+  jadapter?: any;                         // TODO: import type { JAdapter } from './jadapter'
+
   // Visual position (for 3D rendering)
   position: { x: number; y: number; z: number };
 
