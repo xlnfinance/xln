@@ -638,10 +638,11 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
     try {
       const { getXLN } = await import('./xlnStore');
       const xln = await getXLN();
-      const browserVM = xln.getBrowserVMInstance?.();
-      if (!browserVM?.getReserves) return 0n;
+      const env = xln.getEnv();
+      const jadapter = xln.getActiveJAdapter?.(env);
+      if (!jadapter?.getReserves) return 0n;
 
-      return await browserVM.getReserves(signer.entityId, tokenId);
+      return await jadapter.getReserves(signer.entityId, tokenId);
     } catch (err) {
       console.error('[VaultStore] Failed to get balance:', err);
       return 0n;
@@ -660,11 +661,12 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
     try {
       const { getXLN } = await import('./xlnStore');
       const xln = await getXLN();
-      const browserVM = xln.getBrowserVMInstance?.() as any;
-      if (!browserVM?.reserveToReserve) return { success: false, error: 'BrowserVM not available' };
+      const env = xln.getEnv();
+      const jadapter = xln.getActiveJAdapter?.(env);
+      if (!jadapter?.reserveToReserve) return { success: false, error: 'J-adapter not available' };
 
       // Execute reserve_to_reserve transfer
-      await browserVM.reserveToReserve(signer.entityId, toEntityId, tokenId, amount);
+      await jadapter.reserveToReserve(signer.entityId, toEntityId, tokenId, amount);
 
       // Process queued J-events to update runtime state
       if (xln.processJBlockEvents) {

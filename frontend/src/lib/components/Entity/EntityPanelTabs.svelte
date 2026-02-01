@@ -167,9 +167,10 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const browserVM = xln.getBrowserVMInstance?.();
-      if (!browserVM?.debugFundReserves) {
-        throw new Error('BrowserVM faucet not available');
+      const env = xln.getEnv();
+      const jadapter = xln.getActiveJAdapter?.(env);
+      if (!jadapter?.debugFundReserves) {
+        throw new Error('J-adapter faucet not available');
       }
 
       // Fund 1000 USDC (token 1), 0.5 WETH (token 2), 500 USDT (token 3)
@@ -180,7 +181,7 @@
       ];
 
       for (const { tokenId, amount } of fundAmounts) {
-        await browserVM.debugFundReserves(entityId, tokenId, amount);
+        await jadapter.debugFundReserves(entityId, tokenId, amount);
       }
 
       console.log('[EntityPanel] Faucet funded reserves for', entityId.slice(0, 10));
@@ -202,8 +203,9 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const browserVM = xln.getBrowserVMInstance?.();
-      if (!browserVM?.getReserves) {
+      const env = xln.getEnv();
+      const jadapter = xln.getActiveJAdapter?.(env);
+      if (!jadapter?.getReserves) {
         reservesLoading = false;
         return;
       }
@@ -211,7 +213,7 @@
       const newReserves = new Map<number, bigint>();
       // Fetch USDC, WETH, USDT (tokens 1, 2, 3)
       for (const tokenId of [1, 2, 3]) {
-        const balance = await browserVM.getReserves(entityId, tokenId);
+        const balance = await jadapter.getReserves(entityId, tokenId);
         if (balance > 0n) {
           newReserves.set(tokenId, balance);
         }
@@ -235,17 +237,18 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const browserVM = xln.getBrowserVMInstance?.();
-      if (!browserVM?.getRegisteredTokens || !browserVM?.getErc20Balance) {
+      const env = xln.getEnv();
+      const jadapter = xln.getActiveJAdapter?.(env);
+      if (!jadapter?.getRegisteredTokens || !jadapter?.getErc20Balance) {
         externalTokensLoading = false;
         return;
       }
 
-      const registeredTokens = browserVM.getRegisteredTokens();
+      const registeredTokens = jadapter.getRegisteredTokens();
       const tokens: ExternalToken[] = [];
 
       for (const token of registeredTokens) {
-        const balance = await browserVM.getErc20Balance(token.address, signerId);
+        const balance = await jadapter.getErc20Balance(token.address, signerId);
         tokens.push({
           symbol: token.symbol,
           address: token.address,
@@ -273,9 +276,10 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const browserVM = xln.getBrowserVMInstance?.();
-      if (!browserVM?.externalTokenToReserve) {
-        throw new Error('BrowserVM deposit not available');
+      const env = xln.getEnv();
+      const jadapter = xln.getActiveJAdapter?.(env);
+      if (!jadapter?.externalTokenToReserve) {
+        throw new Error('J-adapter deposit not available');
       }
 
       // Get signer's private key from runtime
@@ -292,7 +296,7 @@
       }
 
       // Deposit all available balance
-      await browserVM.externalTokenToReserve(privKey, entityId, token.address, token.balance);
+      await jadapter.externalTokenToReserve(privKey, entityId, token.address, token.balance);
 
       console.log(`[EntityPanel] Deposited ${token.symbol} to entity reserves`);
 
@@ -315,12 +319,13 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const browserVM = xln.getBrowserVMInstance?.();
-      if (!browserVM?.fundSignerWallet) {
-        throw new Error('BrowserVM faucet not available');
+      const env = xln.getEnv();
+      const jadapter = xln.getActiveJAdapter?.(env);
+      if (!jadapter?.fundSignerWallet) {
+        throw new Error('J-adapter faucet not available');
       }
 
-      await browserVM.fundSignerWallet(signerId);
+      await jadapter.fundSignerWallet(signerId);
       console.log('[EntityPanel] Faucet funded signer wallet', signerId.slice(0, 10));
 
       // Refresh external tokens display

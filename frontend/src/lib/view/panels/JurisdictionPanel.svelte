@@ -312,16 +312,17 @@
 
   $effect(() => {
     const xln = $xlnInstance;
-    if (!xln?.getBrowserVMInstance) {
+    if (!xln?.getEnv || !xln?.getActiveJAdapter) {
       browserVmTokens = [];
       return;
     }
-    const browserVM = xln.getBrowserVMInstance();
-    if (!browserVM?.getTokenRegistry) {
+    const env = xln.getEnv();
+    const jadapter = xln.getActiveJAdapter(env);
+    if (!jadapter?.getTokenRegistry) {
       browserVmTokens = [];
       return;
     }
-    const registry = browserVM.getTokenRegistry();
+    const registry = jadapter.getTokenRegistry();
     browserVmTokens = Array.isArray(registry) ? registry : [];
   });
 
@@ -436,15 +437,16 @@
     const tokenAddress = tokenMeta?.address;
     const jData = selectedJurisdictionData;
 
-    if (!tokenAddress || signers.length === 0 || !xln?.getBrowserVMInstance) {
+    if (!tokenAddress || signers.length === 0 || !xln?.getEnv || !xln?.getActiveJAdapter) {
       externalBalances = [];
       externalBalancesLoading = false;
       externalBalancesError = null;
       return;
     }
 
-    const browserVM = xln.getBrowserVMInstance();
-    if (!browserVM?.getErc20Balance) {
+    const env = xln.getEnv();
+    const jadapter = xln.getActiveJAdapter(env);
+    if (!jadapter?.getErc20Balance) {
       externalBalances = [];
       externalBalancesLoading = false;
       externalBalancesError = null;
@@ -459,13 +461,13 @@
       try {
         // Time travel to historical state if not live
         const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && browserVM.timeTravel) {
-          await browserVM.timeTravel(stateRoot);
+        if (stateRoot && jadapter.timeTravel) {
+          await jadapter.timeTravel(stateRoot);
         }
 
         const nextBalances: Array<{ address: string; label: string; balance: bigint }> = [];
         for (const signer of signers) {
-          const balance = await browserVM.getErc20Balance(tokenAddress, signer.address);
+          const balance = await jadapter.getErc20Balance(tokenAddress, signer.address);
           if (balance > 0n) {
             nextBalances.push({
               address: signer.address,
@@ -493,15 +495,16 @@
     const xln = $xlnInstance;
     const jData = selectedJurisdictionData;
 
-    if (signers.length === 0 || !xln?.getBrowserVMInstance) {
+    if (signers.length === 0 || !xln?.getEnv || !xln?.getActiveJAdapter) {
       externalEthBalances = [];
       externalEthBalancesLoading = false;
       externalEthBalancesError = null;
       return;
     }
 
-    const browserVM = xln.getBrowserVMInstance();
-    if (!browserVM?.getEthBalance) {
+    const env = xln.getEnv();
+    const jadapter = xln.getActiveJAdapter(env);
+    if (!jadapter?.getEthBalance) {
       externalEthBalances = [];
       externalEthBalancesLoading = false;
       externalEthBalancesError = null;
@@ -516,13 +519,13 @@
       try {
         // Time travel to historical state if not live
         const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && browserVM.timeTravel) {
-          await browserVM.timeTravel(stateRoot);
+        if (stateRoot && jadapter.timeTravel) {
+          await jadapter.timeTravel(stateRoot);
         }
 
         const nextBalances: Array<{ address: string; label: string; balance: bigint }> = [];
         for (const signer of signers) {
-          const balance = await browserVM.getEthBalance(signer.address);
+          const balance = await jadapter.getEthBalance(signer.address);
           if (balance > 0n) {
             nextBalances.push({
               address: signer.address,
@@ -551,21 +554,22 @@
     const names = entityNames;
     const tokenId = selectedTokenId;
 
-    if (!xln?.getBrowserVMInstance) {
+    if (!xln?.getEnv || !xln?.getActiveJAdapter) {
       entityDebts = [];
       debtsLoading = false;
       return;
     }
 
-    const browserVM = xln.getBrowserVMInstance();
-    if (!browserVM || !browserVM.getDebts || tokenId === null) {
+    const env = xln.getEnv();
+    const jadapter = xln.getActiveJAdapter(env);
+    if (!jadapter || !jadapter.getDebts || tokenId === null) {
       entityDebts = [];
       debtsLoading = false;
       return;
     }
 
     // Get entity IDs from eReplicas
-    const env = $isolatedEnv;
+    const isolatedEnvValue = $isolatedEnv;
     const timeIndex = isolatedTimeIndex ? (get(isolatedTimeIndex) ?? -1) : -1;
     const history = isolatedHistory ? get(isolatedHistory) : [];
 
@@ -574,7 +578,7 @@
       const idx = Math.min(timeIndex, history.length - 1);
       eReplicas = history[idx]?.eReplicas;
     } else {
-      eReplicas = env?.eReplicas;
+      eReplicas = isolatedEnvValue?.eReplicas;
     }
 
     if (!eReplicas || eReplicas.size === 0) {
@@ -590,8 +594,8 @@
       try {
         // Time travel to historical state if not live
         const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && browserVM.timeTravel) {
-          await browserVM.timeTravel(stateRoot);
+        if (stateRoot && jadapter.timeTravel) {
+          await jadapter.timeTravel(stateRoot);
         }
 
         const results: typeof entityDebts = [];
@@ -606,7 +610,7 @@
 
         // Query debts for each entity
         for (const entityId of entityIds) {
-          const debts = await browserVM.getDebts(entityId, tokenId!);
+          const debts = await jadapter.getDebts(entityId, tokenId!);
           if (debts && debts.length > 0) {
             results.push({
               entityId,
