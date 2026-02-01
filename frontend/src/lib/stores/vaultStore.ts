@@ -284,16 +284,8 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
       entityInputs: []
     });
 
-    // Fund entity with 3 tokens for demo (uses browserVM directly)
-    const ONE_TOKEN = 1000000000000000000n; // 10^18
-
-    // USDC: $1000
-    await browserVM.debugFundReserves(entityId, 1, 1000n * ONE_TOKEN);
-    // WETH: 0.5 ETH (~$1500)
-    await browserVM.debugFundReserves(entityId, 2, ONE_TOKEN / 2n);
-    // USDT: $500
-    await browserVM.debugFundReserves(entityId, 3, 500n * ONE_TOKEN);
-    console.log('[VaultStore.createRuntime] ✅ Funded entity with USDC/WETH/USDT');
+    // Skip auto-funding (use faucet API)
+    console.log('[VaultStore.createRuntime] ✅ Entity ready (use /api/faucet to fund)');
 
     // Store entityId in signer
     runtime.signers[0]!.entityId = entityId;
@@ -587,17 +579,21 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         }
         console.log(`[VaultStore.initialize] ✅ Registered ${runtime.signers.length} HD-derived keys`);
 
-        // Get SINGLETON jurisdiction via BrowserVMProvider (shared across all components)
-        console.log('[VaultStore.initialize] Initializing BrowserVMProvider...');
-        const { BrowserVMProvider } = await import('@xln/runtime/jadapter');
-        const browserVM = new BrowserVMProvider();
-        await browserVM.init();
-        newEnv.browserVM = browserVM;
-        const depositoryAddress = browserVM.getDepositoryAddress();
-        console.log('[VaultStore.initialize] ✅ BrowserVM ready:', depositoryAddress.slice(0, 10));
-
-        // Set BrowserVM jurisdiction
-        await xln.setBrowserVMJurisdiction(newEnv, depositoryAddress, browserVM);
+        // Import testnet J-machine (NO BrowserVM)
+        console.log('[VaultStore.initialize] Importing testnet...');
+        await xln.applyRuntimeInput(newEnv, {
+          runtimeTxs: [{
+            type: 'importJ',
+            data: {
+              name: 'Testnet',
+              chainId: 31337,
+              ticker: 'USDC',
+              rpcs: ['https://xln.finance/rpc'],
+            }
+          }],
+          entityInputs: []
+        });
+        console.log('[VaultStore.initialize] ✅ Testnet imported');
 
         runtimes.update(r => {
           r.set(runtimeId, {
