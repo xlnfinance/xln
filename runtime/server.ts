@@ -285,17 +285,24 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const hubPrivateKeyHex = '0x' + Buffer.from(hubPrivateKeyBytes).toString('hex');
       const hubWallet = new ethers.Wallet(hubPrivateKeyHex, globalJAdapter.provider);
 
-      // Get token contract
-      const tokenRegistry = (globalJAdapter as any).getBrowserVM?.()?.getTokenRegistry() || [];
-      const token = tokenRegistry.find((t: any) => t.symbol === tokenSymbol);
+      // Get token contract (hardcoded for anvil testnet)
+      const ANVIL_TOKENS: Record<string, string> = {
+        USDC: '0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9',
+        WETH: '0x5FC8d32690cc91D4c39d9d3abcBD16989F875707',
+        USDT: '0x0165878A594ca255338adfa4d48449f69242Eb8F',
+      };
 
-      if (!token) {
+      const tokenAddress = globalJAdapter.mode === 'rpc'
+        ? ANVIL_TOKENS[tokenSymbol]
+        : (globalJAdapter as any).getBrowserVM?.()?.getTokenRegistry()?.find((t: any) => t.symbol === tokenSymbol)?.address;
+
+      if (!tokenAddress) {
         return new Response(JSON.stringify({ error: `Token ${tokenSymbol} not found` }), { status: 404, headers });
       }
 
       // Transfer ERC20 from hub to user
       const ERC20_ABI = ['function transfer(address to, uint256 amount) returns (bool)'];
-      const erc20 = new ethers.Contract(token.address, ERC20_ABI, hubWallet);
+      const erc20 = new ethers.Contract(tokenAddress, ERC20_ABI, hubWallet);
       const tx = await erc20.transfer(userAddress, amountWei);
       await tx.wait();
 
