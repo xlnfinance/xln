@@ -376,10 +376,32 @@ export async function createRpcAdapter(
       return Number(await entityProvider.nextNumber());
     },
 
-    async debugFundReserves(_entityId: string, _tokenId: number, _amount: bigint): Promise<JEvent[]> {
-      // debugFundReserves is only available in BrowserVM mode for testing.
-      // On RPC mode (real networks), funds must be deposited via real token transfers.
-      throw new Error('debugFundReserves is not available on RPC mode - use real token deposits');
+    async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
+      // For anvil (chainId 31337), allow debug funding for testnet
+      if (config.chainId === 31337) {
+        const tx = await depository.debugFundReserves(entityId, tokenId, amount);
+        const receipt = await tx.wait();
+        if (!receipt) throw new Error('Fund reserves failed');
+
+        const events: JEvent[] = [];
+        for (const log of receipt.logs) {
+          try {
+            const parsed = depository.interface.parseLog({ topics: log.topics as string[], data: log.data });
+            if (parsed) {
+              events.push({
+                name: parsed.name,
+                args: Object.fromEntries(Object.entries(parsed.args)),
+                blockNumber: receipt.blockNumber,
+                blockHash: receipt.blockHash,
+                transactionHash: receipt.hash,
+              });
+            }
+          } catch { }
+        }
+        return events;
+      }
+      // Real networks: must use real deposits
+      throw new Error('debugFundReserves only available on anvil (chainId 31337) - use real token deposits');
       /* Original implementation for reference (requires Depository extension):
       const tx = await depository.debugFundReserves(entityId, tokenId, amount);
       const receipt = await tx.wait();

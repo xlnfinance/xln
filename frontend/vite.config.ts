@@ -70,15 +70,13 @@ export default defineConfig({
 				clientPort: 8080
 			})
 		},
-		// RPC Proxy - DISABLED (using BrowserVM now)
-		// proxy: {
-		// 	'/rpc/arrakis': {
-		// 		target: 'http://localhost:8545',
-		// 		changeOrigin: true,
-		// 		rewrite: (path) => path.replace(/^\/rpc\/arrakis/, ''),
-		// 		ws: true,
-		// 	},
-		// },
+		// API Proxy - Forward to server.ts faucet endpoints
+		proxy: {
+			'/api': {
+				target: 'http://localhost:8082',
+				changeOrigin: true,
+			},
+		},
 		// Force no-cache headers for static files
 		headers: {
 			'Cache-Control': 'no-cache, no-store, must-revalidate',
