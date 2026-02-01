@@ -71,22 +71,33 @@ function derivePrivateKey(seed: string, index: number): string {
   return hdNode.privateKey;
 }
 
-async function fundSignerWalletInBrowserVM(address: string): Promise<void> {
+async function fundSignerWalletViaFaucet(address: string): Promise<void> {
   try {
-    const { getXLN } = await import('$lib/stores/xlnStore');
-    const xln = await getXLN();
-    const browserVM = xln.getBrowserVMInstance?.();
-    if (!browserVM?.fundSignerWallet) return;
-    await browserVM.fundSignerWallet(address);
+    // Call testnet faucet API (Faucet A - ERC20 to wallet)
+    const response = await fetch('https://xln.finance/api/faucet/erc20', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userAddress: address,
+        tokenSymbol: 'USDC',
+        amount: '100'
+      })
+    });
+    const result = await response.json();
+    if (result.success) {
+      console.log('[VaultStore] ✅ Funded wallet via faucet:', result.txHash);
+    } else {
+      console.warn('[VaultStore] Faucet failed:', result.error);
+    }
   } catch (err) {
-    console.warn('[VaultStore] Failed to fund signer wallet:', err);
+    console.warn('[VaultStore] Failed to call faucet:', err);
   }
 }
 
 async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<void> {
   if (!runtime) return;
   for (const signer of runtime.signers) {
-    await fundSignerWalletInBrowserVM(signer.address);
+    await fundSignerWalletViaFaucet(signer.address);
   }
 }
 
@@ -416,7 +427,7 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
       console.warn('[VaultStore] Failed to register key/create entity:', err);
     });
 
-    void fundSignerWalletInBrowserVM(address);
+    void fundSignerWalletViaFaucet(address);
 
     return newSigner;
   },
