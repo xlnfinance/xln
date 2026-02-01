@@ -191,26 +191,37 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
     console.log('[VaultStore.createRuntime] Runtime seed stored in env.runtimeSeed (pure)');
     // All crypto functions now read from env.runtimeSeed, not global state
 
-    // Get SINGLETON jurisdiction via BrowserVMProvider (shared across all components)
-    console.log('[VaultStore.createRuntime] Initializing BrowserVMProvider...');
-    const { BrowserVMProvider } = await import('@xln/runtime/jadapter');
-    const browserVM = new BrowserVMProvider();
-    await browserVM.init();
-    newEnv.browserVM = browserVM;
-    const depositoryAddress = browserVM.getDepositoryAddress();
-    console.log('[VaultStore.createRuntime] ✅ BrowserVM ready:', depositoryAddress.slice(0, 10));
+    // Import testnet J-machine (shared anvil on xln.finance)
+    console.log('[VaultStore.createRuntime] Importing testnet anvil...');
+    await xln.applyRuntimeInput(newEnv, {
+      runtimeTxs: [{
+        type: 'importJ',
+        data: {
+          name: 'Testnet',
+          chainId: 31337,
+          ticker: 'USDC',
+          rpcs: ['https://xln.finance/rpc'],
+        }
+      }],
+      entityInputs: []
+    });
+    console.log('[VaultStore.createRuntime] ✅ Testnet imported');
 
-    // Set BrowserVM jurisdiction (updates DEFAULT_JURISDICTIONS for this env)
-    await xln.setBrowserVMJurisdiction(newEnv, depositoryAddress, browserVM);
-
-    // === MVP: Create entity and fund with $1000 USDC ===
+    // === MVP: Create entity ===
     console.log('[VaultStore.createRuntime] Creating user entity...');
     const { generateLazyEntityId } = await import('@xln/runtime/entity-factory');
     const { applyRuntimeInput } = await import('@xln/runtime/runtime');
 
     // Create entity config (single-signer, threshold 1)
     const signerAddress = firstAddress;
-    const entityProviderAddress = browserVM.getEntityProviderAddress();
+
+    // Get contract addresses from imported J-machine
+    const jReplica = newEnv.jReplicas?.get('Testnet');
+    if (!jReplica) {
+      throw new Error('Testnet J-machine not found after import');
+    }
+    const depositoryAddress = jReplica.depositoryAddress;
+    const entityProviderAddress = jReplica.entityProviderAddress;
 
     // Generate entityId using canonical lazy entity ID (sorted validators, consistent encoding)
     // This ensures same signer → same entityId regardless of where it's generated
@@ -241,8 +252,8 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
       shares: { [signerAddress]: 1n },
       jurisdiction: {
         address: depositoryAddress,
-        name: 'Simnet',
-        chainId: 1337,
+        name: 'Testnet',
+        chainId: 31337,
         entityProviderAddress: entityProviderAddress,
         depositoryAddress: depositoryAddress,
       }

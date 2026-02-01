@@ -160,7 +160,7 @@
               name: 'Testnet',
               chainId: 31337,
               ticker: 'USDC',
-              rpcs: ['https://xln.finance/rpc/arrakis'],
+              rpcs: ['https://xln.finance/rpc'],
             }
           }],
           entityInputs: []
