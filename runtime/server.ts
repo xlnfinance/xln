@@ -430,18 +430,24 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
   if (useAnvil) {
     console.log('[XLN] Connecting to Anvil testnet...');
-    try {
-      // Use existing contracts from jurisdictions.json (already deployed)
-      // TODO: Auto-deploy if contracts don't exist
-      console.log('[XLN] Using existing contracts (skipping deployment for now)');
-      globalJAdapter = null; // Will add RPC adapter with existing contracts later
-    } catch (error) {
-      console.warn('[XLN] Anvil setup failed:', error);
-      globalJAdapter = null;
-    }
-  }
+    globalJAdapter = await createJAdapter({
+      mode: 'rpc',
+      chainId: 31337,
+      rpcUrl: anvilRpc,
+    });
 
-  if (!globalJAdapter) {
+    const block = await globalJAdapter.provider.getBlockNumber();
+    console.log(`[XLN] Anvil connected (block: ${block})`);
+
+    // Deploy contracts if fresh anvil
+    if (block === 0) {
+      console.log('[XLN] Deploying contracts to anvil...');
+      await globalJAdapter.deployStack();
+      console.log('[XLN] Contracts deployed');
+    } else {
+      console.log('[XLN] Using existing contracts on anvil');
+    }
+  } else {
     console.log('[XLN] Using BrowserVM (local mode)');
     globalJAdapter = await createJAdapter({
       mode: 'browservm',
