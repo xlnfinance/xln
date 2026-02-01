@@ -912,6 +912,20 @@
       unsubscribe = locale.subscribe(async (loc) => {
         await loadTranslations(loc);
       });
+
+      // Auto-login with demo account if no vaults exist
+      if ($allVaults.length === 0) {
+        const { DEFAULT_DEMO_ACCOUNT } = await import('$lib/config/demo-accounts');
+        console.log('[RuntimeCreation] Auto-logging in as', DEFAULT_DEMO_ACCOUNT.name);
+
+        name = DEFAULT_DEMO_ACCOUNT.name;
+        passphrase = DEFAULT_DEMO_ACCOUNT.password;
+        shardInput = DEFAULT_DEMO_ACCOUNT.factor;
+        mode = 'brainvault';
+
+        // Auto-derive after UI renders
+        setTimeout(() => startDerivation(), 500);
+      }
     })();
 
     return () => {
