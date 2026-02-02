@@ -277,12 +277,11 @@
 
     const names = listJMachineNames(env);
 
-    // Create J-machine if missing (one attempt only)
+    // DISABLED: Don't auto-create J-machine (VaultStore imports Testnet)
+    // User must explicitly create J-machine via UI if needed
     if (names.length === 0) {
-      if (isCreatingJMachine) return;
-      const created = await createJMachineInEnv(env);
-      if (!created) return;
-      names.push(created);
+      console.warn('[ensureSelfEntities] No J-machines - VaultStore should import Testnet');
+      return; // Don't auto-create xlnomy1
     }
 
     let jurisdiction = selectedJurisdictionName && names.includes(selectedJurisdictionName)
