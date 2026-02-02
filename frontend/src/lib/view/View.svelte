@@ -148,9 +148,24 @@
           entities: env.eReplicas.size,
         });
       } else {
-        // Use env from VaultStore (testnet already imported there)
-        env = await XLN.main();
-        console.log('[View] ✅ Environment ready - testnet imported by VaultStore');
+        // Get env from VaultStore's active runtime (testnet already imported)
+        const { runtimes, activeRuntimeId } = await import('$lib/stores/runtimeStore');
+        const { get } = await import('svelte/store');
+        const runtimeId = get(activeRuntimeId);
+
+        if (runtimeId) {
+          const runtime = get(runtimes).get(runtimeId);
+          if (runtime?.env) {
+            env = runtime.env;
+            console.log('[View] ✅ Using env from VaultStore runtime');
+          } else {
+            env = await XLN.main();
+            console.log('[View] ⚠️ VaultStore env not found, created new env');
+          }
+        } else {
+          env = await XLN.main();
+          console.log('[View] ⚠️ No active runtime, created new env');
+        }
       }
 
       // Set to isolated stores
