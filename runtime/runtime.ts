@@ -721,15 +721,25 @@ const applyRuntimeInput = async (
           const isBrowserVM = runtimeTx.data.rpcs.length === 0;
 
           // Create jurisdiction via unified JAdapter interface
+          // If contracts provided, use fromReplica (connect-only mode, no deploy)
+          const fromReplica = runtimeTx.data.contracts ? {
+            depositoryAddress: runtimeTx.data.contracts.depository,
+            entityProviderAddress: runtimeTx.data.contracts.entityProvider,
+            chainId: runtimeTx.data.chainId,
+          } as JReplica : undefined;
+
           const jadapter = await createJAdapter({
             mode: isBrowserVM ? 'browservm' : 'rpc',
             chainId: runtimeTx.data.chainId,
             rpcUrl: isBrowserVM ? undefined : runtimeTx.data.rpcs[0],
+            fromReplica, // Pass pre-deployed addresses (skips deployment)
             // TODO: Pass all rpcs for failover: rpcs: runtimeTx.data.rpcs
           });
 
-          // Deploy contracts (handles "already deployed" case internally)
-          await jadapter.deployStack();
+          // Deploy contracts only if fromReplica not provided
+          if (!fromReplica) {
+            await jadapter.deployStack();
+          }
 
           // For BrowserVM, set as default jurisdiction in env
           if (isBrowserVM) {
