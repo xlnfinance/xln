@@ -56,14 +56,27 @@ export async function createRpcAdapter(
     addresses.account = config.fromReplica.contracts?.account ?? '';
     addresses.depository = config.fromReplica.depositoryAddress ?? config.fromReplica.contracts?.depository ?? '';
     addresses.entityProvider = config.fromReplica.entityProviderAddress ?? config.fromReplica.contracts?.entityProvider ?? '';
-    addresses.deltaTransformer = '';
+    addresses.deltaTransformer = config.fromReplica.contracts?.deltaTransformer ?? '';
+
+    console.log('[JAdapter:rpc] fromReplica mode - connecting to contracts:');
+    console.log('  Account:', addresses.account);
+    console.log('  Depository:', addresses.depository);
+    console.log('  EntityProvider:', addresses.entityProvider);
+    console.log('  DeltaTransformer:', addresses.deltaTransformer);
+
+    if (!addresses.depository || !addresses.entityProvider) {
+      throw new Error('fromReplica: Missing required addresses (depository or entityProvider)');
+    }
 
     // Use any cast to handle ethers version mismatch between root and jurisdictions
     account = Account__factory.connect(addresses.account, signer as any);
     depository = Depository__factory.connect(addresses.depository, signer as any);
     entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer as any);
-    deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, signer as any);
+    if (addresses.deltaTransformer) {
+      deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, signer as any);
+    }
     deployed = true;
+    console.log('[JAdapter:rpc] Connected to existing contracts ✓');
   }
 
   const eventCallbacks = new Map<string, Set<JEventCallback>>();
