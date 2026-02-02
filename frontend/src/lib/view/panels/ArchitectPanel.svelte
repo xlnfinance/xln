@@ -59,7 +59,7 @@
 
   // Xlnomy state
   let showCreateXlnomyModal = false;
-  let newXlnomyName = 'xlnomy1';
+  let newXlnomyName = 'Testnet';
   let newXlnomyEvmType: 'browservm' | 'reth' | 'erigon' | 'monad' = 'browservm';
   let newXlnomyRpcUrl = 'http://localhost:8545';
   let newXlnomyBlockTime = '1000';
@@ -1425,30 +1425,12 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-      // Auto-create default jurisdiction if none exists
+      // VaultStore handles J-machine import - Architect should NOT auto-create
       if (!$isolatedEnv?.activeJurisdiction) {
-        lastAction = 'Connecting to testnet...';
-
-        // Auto-import testnet (prod anvil) - shared J-machine
-        await XLN.applyRuntimeInput($isolatedEnv, {
-          runtimeTxs: [{
-            type: 'importJ',
-            data: {
-              name: 'Testnet',
-              chainId: 31337,
-              ticker: 'USDC',
-              rpcs: ['https://xln.finance/rpc'], // Prod anvil
-            }
-          }],
-          entityInputs: []
-        });
-
-        await XLN.applyRuntimeInput($isolatedEnv, {
-          runtimeTxs: [],
-          entityInputs: []
-        });
-
-        console.log('[Architect] Auto-created demo jurisdiction for topology');
+        lastAction = 'Waiting for J-machine...';
+        loading = false;
+        console.warn('[Architect] No J-machine - VaultStore should import Testnet');
+        return;
       }
 
       if (entityIds.length > 0) {
@@ -2517,12 +2499,12 @@
       showCreateXlnomyModal = false;
 
       // Extract number from xlnomyN format
-      const match = newXlnomyName.match(/xlnomy(\d+)/i);
+      const match = newXlnomyName.match(/Testnet(\d+)/i);
       if (match && match[1]) {
         const num = parseInt(match[1]);
-        newXlnomyName = `xlnomy${num + 1}`;
+        newXlnomyName = `Testnet${num + 1}`;
       } else {
-        newXlnomyName = 'xlnomy1';
+        newXlnomyName = 'Testnet';
       }
 
       // Update stores to trigger reactivity
