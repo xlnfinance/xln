@@ -2768,7 +2768,7 @@
           </button>
 
           <!-- Dropdown for switching (only visible if jurisdictions exist) -->
-          {#if jurisdictions.length > 0}
+          {#if jurisdictions?.length > 0}
             <div class="xlnomy-selector">
               <label for="xlnomy-switch">Switch to:</label>
               <select id="xlnomy-switch" bind:value={activeJurisdiction} on:change={(e) => switchXlnomy(e.currentTarget.value)}>
