@@ -303,6 +303,14 @@
           vaultOperations.setSignerEntity(signerEntry.index, existing.entityId);
         }
         selfEntityChecked.add(signerAddress);
+
+        // Auto-select first entity if none selected
+        if (!selectedEntityId && existing.entityId) {
+          viewMode = 'entity';
+          selectedEntityId = existing.entityId;
+          selectedSignerId = signerAddress;
+          console.log('[ensureSelfEntities] Auto-selected existing entity:', existing.entityId.slice(0, 10));
+        }
         continue;
       }
 
@@ -314,6 +322,12 @@
           vaultOperations.setSignerEntity(signerEntry.index, entityId);
           isolatedEnv.set(env);
           selfEntityChecked.add(signerAddress);
+
+          // Auto-select entity after creation
+          viewMode = 'entity';
+          selectedEntityId = entityId;
+          selectedSignerId = signerAddress;
+          console.log('[ensureSelfEntities] Auto-selected entity:', entityId.slice(0, 10));
         } else {
           console.error('[ensureSelfEntities] ❌ NULL entityId for signer:', signerAddress.slice(0, 10));
         }
