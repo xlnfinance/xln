@@ -392,7 +392,8 @@ export async function createRpcAdapter(
     async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
       // For anvil (chainId 31337), allow debug funding for testnet
       if (config.chainId === 31337) {
-        const tx = await depository.debugFundReserves(entityId, tokenId, amount);
+        // Use mintToReserve (renamed from debugFundReserves in Depository contract)
+        const tx = await depository.mintToReserve(entityId, tokenId, amount);
         const receipt = await tx.wait();
         if (!receipt) throw new Error('Fund reserves failed');
 
