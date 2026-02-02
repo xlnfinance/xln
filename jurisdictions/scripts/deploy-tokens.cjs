@@ -17,7 +17,18 @@ async function main() {
 
   // Deploy with 10B supply (enough for all faucets)
   const initialSupply = hre.ethers.parseUnits("10000000000", 18); // 10B tokens
-  const hubWallet = "0x500dc3002D0B860d8C8Eb3426D0504D16E86b29C";
+
+  // Calculate hub wallet address (same as server.ts)
+  const crypto = require('crypto');
+  const hubSeed = 'xln-main-hub-2026';
+  const hubSignerId = 'hub-validator';
+  const input = hubSeed + '::' + hubSignerId;
+  const privateKeyBytes = crypto.createHash('sha256').update(input).digest();
+  const privateKeyHex = '0x' + privateKeyBytes.toString('hex');
+  const hubWalletSigner = new hre.ethers.Wallet(privateKeyHex);
+  const hubWallet = hubWalletSigner.address;
+
+  console.log(`Hub wallet: ${hubWallet}`);
 
   for (const token of tokens) {
     console.log(`📝 Deploying ${token.symbol}...`);
