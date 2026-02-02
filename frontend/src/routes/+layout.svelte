@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
 	import Topbar from '$lib/components/Topbar.svelte';
+	import Toast from '$lib/components/Toast.svelte';
 	import '$lib/styles/apple-glass.css';
 	let { children } = $props();
 
@@ -24,6 +25,8 @@
 <main class:with-topbar={showTopbar}>
 	{@render children?.()}
 </main>
+
+<Toast />
 
 <style>
 	:global(body) {
