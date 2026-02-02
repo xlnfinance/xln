@@ -245,11 +245,14 @@
       }
 
       const newReserves = new Map<number, bigint>();
-      // Fetch USDC, WETH, USDT (tokens 1, 2, 3)
+      // Fetch USDC, WETH, USDT (tokens 1, 2, 3) - include ALL tokens even with 0 balance
       for (const tokenId of [1, 2, 3]) {
-        const balance = await jadapter.getReserves(entityId, tokenId);
-        if (balance > 0n) {
+        try {
+          const balance = await jadapter.getReserves(entityId, tokenId);
           newReserves.set(tokenId, balance);
+        } catch (err) {
+          // Token might not be registered, set to 0
+          newReserves.set(tokenId, 0n);
         }
       }
       browserVMReserves = newReserves;
@@ -260,7 +263,14 @@
     }
   }
 
-  // Fetch external tokens (ERC20 balances for signer)
+  // Known token addresses for RPC mode (from deploy-tokens.cjs on anvil)
+  const KNOWN_TOKENS: ExternalToken[] = [
+    { symbol: 'USDC', address: '0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E', balance: 0n, decimals: 18, tokenId: 1 },
+    { symbol: 'WETH', address: '0x84eA74d481Ee0A5332c457a4d796187F6Ba67fEB', balance: 0n, decimals: 18, tokenId: 2 },
+    { symbol: 'USDT', address: '0xa82fF9aFd8f496c3d6ac40E2a0F282E47488CFc9', balance: 0n, decimals: 18, tokenId: 3 },
+  ];
+
+  // Fetch external tokens (ERC20 balances for signer) - works for both BrowserVM and RPC modes
   async function fetchExternalTokens() {
     const signerId = tab.signerId;
     if (!signerId) {
@@ -273,26 +283,55 @@
       const xln = await getXLN();
       // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
       const jadapter = xln.getActiveJAdapter?.(activeEnv);
-      if (!jadapter?.getRegisteredTokens || !jadapter?.getErc20Balance) {
+
+      // Get token list - either from BrowserVM registry or known hardcoded list
+      let tokenList: ExternalToken[];
+      const browserVM = jadapter?.getBrowserVM?.();
+      if (browserVM?.getTokenRegistry) {
+        // BrowserVM mode - use registry
+        const registry = browserVM.getTokenRegistry();
+        tokenList = registry.map((t: any) => ({
+          symbol: t.symbol,
+          address: t.address,
+          balance: 0n,
+          decimals: t.decimals,
+          tokenId: t.tokenId,
+        }));
+      } else {
+        // RPC mode - use known tokens
+        tokenList = KNOWN_TOKENS.map(t => ({ ...t, balance: 0n }));
+      }
+
+      // Query ERC20 balances via ethers provider
+      const provider = jadapter?.provider;
+      if (!provider) {
+        // Fallback: try to use browserVM getErc20Balance
+        if (browserVM?.getErc20Balance) {
+          for (const token of tokenList) {
+            try {
+              token.balance = await browserVM.getErc20Balance(token.address, signerId);
+            } catch { }
+          }
+        }
+        externalTokens = tokenList;
         externalTokensLoading = false;
         return;
       }
 
-      const registeredTokens = jadapter.getRegisteredTokens();
-      const tokens: ExternalToken[] = [];
+      // Query balances via ERC20 balanceOf
+      const ERC20_ABI = ['function balanceOf(address owner) view returns (uint256)'];
+      const { ethers } = await import('ethers');
 
-      for (const token of registeredTokens) {
-        const balance = await jadapter.getErc20Balance(token.address, signerId);
-        tokens.push({
-          symbol: token.symbol,
-          address: token.address,
-          balance,
-          decimals: token.decimals,
-          tokenId: token.tokenId,
-        });
+      for (const token of tokenList) {
+        try {
+          const erc20 = new ethers.Contract(token.address, ERC20_ABI, provider);
+          token.balance = await erc20.balanceOf(signerId);
+        } catch (err) {
+          console.warn(`[EntityPanel] Failed to fetch ${token.symbol} balance:`, err);
+        }
       }
 
-      externalTokens = tokens;
+      externalTokens = tokenList;
       externalTokensLoading = false;
     } catch (err) {
       console.error('[EntityPanel] Failed to fetch external tokens:', err);
@@ -648,53 +687,94 @@
       <!-- Tab Content -->
       <section class="content">
         {#if activeTab === 'external'}
-          <!-- External Tokens (moved from main section) -->
+          <!-- External Tokens (ERC20 wallet balances) -->
           <h4 class="section-head">External Tokens (ERC20)</h4>
-          <p class="muted">Wallet: {tab.signerId?.slice(0, 8)}...{tab.signerId?.slice(-4)}</p>
+          <p class="muted wallet-address">Wallet: {tab.signerId?.slice(0, 8)}...{tab.signerId?.slice(-4)}</p>
 
           {#if externalTokensLoading}
-            <p class="muted">Loading...</p>
-          {:else if externalTokens.filter(t => t.balance > 0n).length > 0}
-            {#each externalTokens.filter(t => t.balance > 0n) as token}
-              {@const info = getTokenInfo(token.tokenId)}
-              <div class="ext-row">
-                <span class="ext-symbol" class:eth={token.symbol === 'WETH'} class:usd={token.symbol !== 'WETH'}>
-                  {token.symbol}
-                </span>
-                <span class="ext-amount">{formatAmount(token.balance, token.decimals)}</span>
-                <button class="btn-deposit" on:click={() => depositToReserve(token)} disabled={depositingToken === token.symbol}>
-                  {depositingToken === token.symbol ? '...' : 'Deposit'}
-                </button>
-              </div>
-            {/each}
+            <div class="token-list-loading">
+              <div class="loading-spinner"></div>
+              <span>Loading balances...</span>
+            </div>
           {:else}
-            <p class="muted">No external tokens</p>
-            <button class="btn-faucet-small" on:click={faucetExternalTokens} disabled={faucetFunding}>
-              {faucetFunding ? '...' : '💧 Faucet'}
-            </button>
+            <div class="token-list-grid">
+              {#each externalTokens as token}
+                <div class="token-card" class:has-balance={token.balance > 0n}>
+                  <div class="token-header">
+                    <span class="token-icon" class:usdc={token.symbol === 'USDC'} class:weth={token.symbol === 'WETH'} class:usdt={token.symbol === 'USDT'}>
+                      {token.symbol.slice(0, 1)}
+                    </span>
+                    <span class="token-symbol">{token.symbol}</span>
+                  </div>
+                  <div class="token-balance">
+                    {#if token.balance > 0n}
+                      <span class="balance-amount">{formatAmount(token.balance, token.decimals)}</span>
+                    {:else}
+                      <span class="balance-zero">0.00</span>
+                    {/if}
+                  </div>
+                  <div class="token-actions">
+                    {#if token.balance > 0n}
+                      <button class="btn-token-action deposit" on:click={() => depositToReserve(token)} disabled={depositingToken === token.symbol}>
+                        {depositingToken === token.symbol ? 'Depositing...' : 'Deposit to Reserve'}
+                      </button>
+                    {:else}
+                      <button class="btn-token-action faucet" on:click={faucetExternalTokens} disabled={faucetFunding}>
+                        {faucetFunding ? 'Funding...' : 'Get from Faucet'}
+                      </button>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
           {/if}
 
         {:else if activeTab === 'reserves'}
           <!-- Reserves Detail (Depository.sol balances) -->
-          <h4 class="section-head">On-Chain Reserves</h4>
+          <h4 class="section-head">On-Chain Reserves (Depository)</h4>
+          <p class="muted wallet-address">Entity: {(replica?.state?.entityId || tab.entityId)?.slice(0, 10)}...{(replica?.state?.entityId || tab.entityId)?.slice(-6)}</p>
 
-          {#if browserVMReserves.size > 0}
-            {#each Array.from(browserVMReserves.entries()) as [tokenId, amount]}
-              {@const info = getTokenInfo(Number(tokenId))}
-              {@const value = getAssetValue(Number(tokenId), amount)}
-              <div class="token-row">
-                <span class="t-symbol" class:eth={info.symbol === 'WETH'} class:usd={info.symbol !== 'WETH'}>{info.symbol}</span>
-                <span class="t-amount">{formatAmount(amount, info.decimals)}</span>
-                <span class="t-value">{formatCompact(value)}</span>
-              </div>
-            {/each}
-          {:else if reservesLoading}
-            <p class="muted">Loading reserves...</p>
+          {#if reservesLoading}
+            <div class="token-list-loading">
+              <div class="loading-spinner"></div>
+              <span>Loading reserves...</span>
+            </div>
           {:else}
-            <p class="muted">No reserves in Depository</p>
-            <button class="btn-faucet" on:click={faucetReserves} disabled={faucetFunding}>
-              {faucetFunding ? 'Funding...' : '💧 Get Test Funds'}
-            </button>
+            {@const hasAnyBalance = Array.from(browserVMReserves.values()).some(b => b > 0n)}
+            <div class="token-list-grid">
+              {#each Array.from(browserVMReserves.entries()) as [tokenId, amount]}
+                {@const info = getTokenInfo(Number(tokenId))}
+                {@const value = getAssetValue(Number(tokenId), amount)}
+                <div class="token-card" class:has-balance={amount > 0n}>
+                  <div class="token-header">
+                    <span class="token-icon" class:usdc={info.symbol === 'USDC'} class:weth={info.symbol === 'WETH' || info.symbol === 'ETH'} class:usdt={info.symbol === 'USDT'}>
+                      {info.symbol.slice(0, 1)}
+                    </span>
+                    <span class="token-symbol">{info.symbol}</span>
+                  </div>
+                  <div class="token-balance">
+                    {#if amount > 0n}
+                      <span class="balance-amount">{formatAmount(amount, info.decimals)}</span>
+                      <span class="balance-value">{formatCompact(value)}</span>
+                    {:else}
+                      <span class="balance-zero">0.00</span>
+                    {/if}
+                  </div>
+                  <div class="token-actions">
+                    {#if amount === 0n}
+                      <button class="btn-token-action faucet" on:click={faucetReserves} disabled={faucetFunding}>
+                        {faucetFunding ? 'Funding...' : 'Get from Faucet'}
+                      </button>
+                    {:else}
+                      <span class="token-status">Available for transfers</span>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            </div>
+            {#if !hasAnyBalance}
+              <p class="hint-text">No reserves yet. Use the faucet or deposit external tokens to add funds.</p>
+            {/if}
           {/if}
 
         {:else if activeTab === 'send'}
@@ -1214,6 +1294,176 @@
     font-size: 11px;
     color: #57534e;
     text-align: right;
+  }
+
+  /* Token List Grid - Beautiful card layout */
+  .wallet-address {
+    margin-bottom: 16px;
+  }
+
+  .token-list-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 40px 20px;
+    color: #78716c;
+  }
+
+  .loading-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #292524;
+    border-top-color: #fbbf24;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  .token-list-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .token-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px;
+    background: #1c1917;
+    border: 1px solid #292524;
+    border-radius: 12px;
+    transition: all 0.15s;
+  }
+
+  .token-card:hover {
+    border-color: #44403c;
+  }
+
+  .token-card.has-balance {
+    border-color: #365314;
+    background: linear-gradient(135deg, #1c1917 0%, #1a2e05 100%);
+  }
+
+  .token-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .token-icon {
+    width: 36px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-weight: 700;
+    font-size: 16px;
+    color: white;
+    background: #44403c;
+  }
+
+  .token-icon.usdc {
+    background: linear-gradient(135deg, #2775ca, #1e5aa8);
+  }
+
+  .token-icon.weth {
+    background: linear-gradient(135deg, #627eea, #4c62c7);
+  }
+
+  .token-icon.usdt {
+    background: linear-gradient(135deg, #26a17b, #1e8a69);
+  }
+
+  .token-symbol {
+    font-weight: 600;
+    font-size: 15px;
+    color: #fafaf9;
+  }
+
+  .token-balance {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .balance-amount {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    font-weight: 600;
+    color: #fafaf9;
+  }
+
+  .balance-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #78716c;
+  }
+
+  .balance-zero {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    font-weight: 600;
+    color: #44403c;
+  }
+
+  .token-actions {
+    margin-top: 4px;
+  }
+
+  .btn-token-action {
+    width: 100%;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-token-action.deposit {
+    background: linear-gradient(135deg, #16a34a, #15803d);
+    color: #f0fdf4;
+  }
+
+  .btn-token-action.deposit:hover:not(:disabled) {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+  }
+
+  .btn-token-action.faucet {
+    background: linear-gradient(135deg, #0ea5e9, #0284c7);
+    color: #f0f9ff;
+  }
+
+  .btn-token-action.faucet:hover:not(:disabled) {
+    background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+  }
+
+  .btn-token-action:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .token-status {
+    font-size: 11px;
+    color: #57534e;
+    font-style: italic;
+  }
+
+  .hint-text {
+    text-align: center;
+    font-size: 12px;
+    color: #57534e;
+    margin-top: 16px;
+    padding: 12px;
+    background: #1c1917;
+    border-radius: 8px;
   }
 
   /* Tabs */
