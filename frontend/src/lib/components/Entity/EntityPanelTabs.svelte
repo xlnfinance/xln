@@ -12,6 +12,7 @@
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { xlnFunctions, entityPositions } from '../../stores/xlnStore';
+  import { toasts } from '../../stores/toastStore';
 
   // Icons
   import {
@@ -165,62 +166,30 @@
 
     faucetFunding = true;
     try {
-      const { getXLN } = await import('$lib/stores/xlnStore');
-      const xln = await getXLN();
-      // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
-      const jadapter = xln.getActiveJAdapter?.(activeEnv);
+      // Faucet B: Reserve transfer (ALWAYS use prod API, no BrowserVM fake)
+      const response = await fetch('https://xln.finance/api/faucet/reserve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userEntityId: entityId,
+          tokenId: 1, // USDC
+          amount: '1000'
+        })
+      });
 
-      if (!jadapter) {
-        throw new Error('No J-adapter available');
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'Faucet failed');
       }
 
-      // Check mode: BrowserVM uses debugFundReserves, RPC uses API
-      const isBrowserVM = jadapter.mode === 'browservm';
+      console.log('[EntityPanel] Reserve faucet success:', result);
+      toasts.success('Received 1,000 USDC in reserves!');
 
-      if (isBrowserVM) {
-        // BrowserVM: Use debug method
-        if (!jadapter.debugFundReserves) {
-          throw new Error('debugFundReserves not available');
-        }
-
-        const fundAmounts = [
-          { tokenId: 1, amount: 1000n * 10n**18n },  // 1000 USDC
-          { tokenId: 2, amount: 5n * 10n**17n },     // 0.5 WETH
-          { tokenId: 3, amount: 500n * 10n**18n },   // 500 USDT
-        ];
-
-        for (const { tokenId, amount } of fundAmounts) {
-          await jadapter.debugFundReserves(entityId, tokenId, amount);
-        }
-
-        await fetchBrowserVMReserves();
-      } else {
-        // RPC: Call faucet API (Faucet B: Reserve transfer)
-        const response = await fetch('https://xln.finance/api/faucet/reserve', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userEntityId: entityId,
-            tokenId: 1, // USDC
-            amount: '1000'
-          })
-        });
-
-        const result = await response.json();
-        if (!result.success) {
-          throw new Error(result.error || 'Faucet failed');
-        }
-
-        console.log('[EntityPanel] Faucet success:', result);
-
-        // Refresh reserves (will implement proper fetch later)
-        setTimeout(() => location.reload(), 500);
-      }
-
-      console.log('[EntityPanel] Faucet funded reserves for', entityId.slice(0, 10));
+      // Refresh reserves
+      setTimeout(() => location.reload(), 1000);
     } catch (err) {
-      console.error('[EntityPanel] Faucet failed:', err);
-      alert(`Faucet failed: ${(err as Error).message}`);
+      console.error('[EntityPanel] Reserve faucet failed:', err);
+      toasts.error(`Reserve faucet failed: ${(err as Error).message}`);
     } finally {
       faucetFunding = false;
     }
@@ -249,13 +218,13 @@
       }
 
       console.log('[EntityPanel] Offchain faucet success:', result);
-      alert('✅ Received $100 USDC via offchain payment!');
+      toasts.success('Received $100 USDC via offchain payment!');
 
       // Refresh UI
       setTimeout(() => location.reload(), 500);
     } catch (err) {
       console.error('[EntityPanel] Offchain faucet failed:', err);
-      alert(`Faucet failed: ${(err as Error).message}`);
+      toasts.error(`Offchain faucet failed: ${(err as Error).message}`);
     } finally {
       faucetFunding = false;
     }
@@ -369,7 +338,7 @@
       await Promise.all([fetchBrowserVMReserves(), fetchExternalTokens()]);
     } catch (err) {
       console.error('[EntityPanel] Deposit failed:', err);
-      alert(`Deposit failed: ${(err as Error).message}`);
+      toasts.error(`Deposit failed: ${(err as Error).message}`);
     } finally {
       depositingToken = null;
     }
@@ -382,22 +351,30 @@
 
     faucetFunding = true;
     try {
-      const { getXLN } = await import('$lib/stores/xlnStore');
-      const xln = await getXLN();
-      // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
-      const jadapter = xln.getActiveJAdapter?.(activeEnv);
-      if (!jadapter?.fundSignerWallet) {
-        throw new Error('J-adapter faucet not available');
+      // Faucet A: ERC20 to wallet (ALWAYS use prod API, no BrowserVM fake)
+      const response = await fetch('https://xln.finance/api/faucet/erc20', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userAddress: signerId,
+          tokenSymbol: 'USDC',
+          amount: '100'
+        })
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'Faucet failed');
       }
 
-      await jadapter.fundSignerWallet(signerId);
-      console.log('[EntityPanel] Faucet funded signer wallet', signerId.slice(0, 10));
+      console.log('[EntityPanel] External faucet success:', result);
+      toasts.success('Received 100 USDC in wallet!');
 
-      // Refresh external tokens display
-      await fetchExternalTokens();
+      // Refresh external tokens
+      setTimeout(() => fetchExternalTokens(), 1000);
     } catch (err) {
       console.error('[EntityPanel] External faucet failed:', err);
-      alert(`Faucet failed: ${(err as Error).message}`);
+      toasts.error(`External faucet failed: ${(err as Error).message}`);
     } finally {
       faucetFunding = false;
     }
