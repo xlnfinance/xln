@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
-  import WalletView from '$lib/components/Wallet/WalletView.svelte';
+  // Removed WalletView - Entity = Wallet, no separate signer wallet view
   import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
   import { vaultOperations, activeVault, activeSigner, allVaults, type Runtime as Vault, type Signer } from '$lib/stores/vaultStore';
   import { deriveRequestSignal, showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
@@ -1358,15 +1358,13 @@
               </div>
           {/if}
 
-          <!-- Unified Wallet View (no tabs) -->
-          <WalletView
-              privateKey={currentSignerPrivateKey || masterKeyHex}
-              walletAddress={currentSignerAddress}
-              {entityId}
-              identiconSrc={currentSignerIdenticon}
-              networkEnabled={false}
-              on:portfolioUpdate={handlePortfolioUpdate}
-            />
+          <!-- Entity view (Entity = Wallet) -->
+          <div class="entity-created-message">
+            <h3>✅ Entity Created!</h3>
+            <p>Entity ID: {entityId?.slice(0, 20)}...</p>
+            <p>Signer: {currentSignerAddress?.slice(0, 20)}...</p>
+            <p class="next-step">Close this panel to access your entity wallet.</p>
+          </div>
 
             <!-- Save Vault Modal -->
             {#if showSaveVaultModal}
