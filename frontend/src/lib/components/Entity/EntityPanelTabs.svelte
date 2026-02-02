@@ -226,6 +226,41 @@
     }
   }
 
+  async function faucetOffchain() {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    if (!entityId) return;
+
+    faucetFunding = true;
+    try {
+      // Faucet C: Offchain payment (requires account with hub)
+      const response = await fetch('https://xln.finance/api/faucet/offchain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userEntityId: entityId,
+          tokenId: 1, // USDC
+          amount: '100'
+        })
+      });
+
+      const result = await response.json();
+      if (!result.success) {
+        throw new Error(result.error || 'Faucet failed');
+      }
+
+      console.log('[EntityPanel] Offchain faucet success:', result);
+      alert('✅ Received $100 USDC via offchain payment!');
+
+      // Refresh UI
+      setTimeout(() => location.reload(), 500);
+    } catch (err) {
+      console.error('[EntityPanel] Offchain faucet failed:', err);
+      alert(`Faucet failed: ${(err as Error).message}`);
+    } finally {
+      faucetFunding = false;
+    }
+  }
+
   async function fetchBrowserVMReserves() {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
@@ -703,6 +738,9 @@
           {/if}
 
         {:else if activeTab === 'accounts'}
+          <button class="btn-faucet" on:click={faucetOffchain} disabled={faucetFunding}>
+            {faucetFunding ? 'Funding...' : '💧 Get Test Funds (Offchain)'}
+          </button>
           <AccountList {replica} on:select={handleAccountSelect} />
 
         {:else if activeTab === 'activity'}
