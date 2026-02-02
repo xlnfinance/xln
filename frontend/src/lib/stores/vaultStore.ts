@@ -202,6 +202,13 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
     console.log('[VaultStore.createRuntime] Runtime seed stored in env.runtimeSeed (pure)');
     // All crypto functions now read from env.runtimeSeed, not global state
 
+    // Fetch pre-deployed contract addresses from prod
+    console.log('[VaultStore.createRuntime] Fetching jurisdictions.json...');
+    const jurisdictionsResp = await fetch('https://xln.finance/jurisdictions.json');
+    const jurisdictions = await jurisdictionsResp.json();
+    const testnetConfig = jurisdictions.testnet;
+    console.log('[VaultStore.createRuntime] Loaded contracts:', testnetConfig.contracts);
+
     // Import testnet J-machine (shared anvil on xln.finance)
     console.log('[VaultStore.createRuntime] Importing testnet anvil...');
     await xln.applyRuntimeInput(newEnv, {
@@ -212,6 +219,7 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
           chainId: 31337,
           ticker: 'USDC',
           rpcs: ['https://xln.finance/rpc'],
+          contracts: testnetConfig.contracts, // Use pre-deployed addresses
         }
       }],
       entityInputs: []
@@ -592,6 +600,11 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
 
         // CRITICAL: Import testnet J-machine (shared anvil on xln.finance)
         // This must happen on page reload when restoring runtime from localStorage
+        console.log('[VaultStore.initialize] Fetching jurisdictions.json...');
+        const jurisdictionsResp = await fetch('https://xln.finance/jurisdictions.json');
+        const jurisdictions = await jurisdictionsResp.json();
+        const testnetConfig = jurisdictions.testnet;
+
         console.log('[VaultStore.initialize] Importing testnet anvil...');
         await xln.applyRuntimeInput(newEnv, {
           runtimeTxs: [{
@@ -601,6 +614,7 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
               chainId: 31337,
               ticker: 'USDC',
               rpcs: ['https://xln.finance/rpc'],
+              contracts: testnetConfig.contracts, // Use pre-deployed addresses
             }
           }],
           entityInputs: []
