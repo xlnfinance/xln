@@ -422,34 +422,67 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 // ============================================================================
 
 export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Promise<void> {
+  console.log('═══ startXlnServer() CALLED ═══');
+  console.log('Options:', opts);
   const options = { ...DEFAULT_OPTIONS, ...opts };
 
   // Always initialize runtime - every node needs it
   console.log('[XLN] Initializing runtime...');
   const env = await main();
+  console.log('[XLN] Runtime initialized ✓');
 
   // Initialize J-adapter (anvil for testnet, browserVM for local)
   const anvilRpc = process.env.ANVIL_RPC || 'http://localhost:8545';
   const useAnvil = process.env.USE_ANVIL === 'true';
 
+  console.log('[XLN] J-adapter mode check:');
+  console.log('  USE_ANVIL =', useAnvil);
+  console.log('  ANVIL_RPC =', anvilRpc);
+
   if (useAnvil) {
     console.log('[XLN] Connecting to Anvil testnet...');
+
+    // Fetch deployed contract addresses from jurisdictions.json
+    const fs = await import('fs/promises');
+    let fromReplica = undefined;
+    try {
+      const jurisdictionsPath = '/root/xln/jurisdictions.json';
+      const jurisdictionsData = await fs.readFile(jurisdictionsPath, 'utf-8');
+      const jurisdictions = JSON.parse(jurisdictionsData);
+      const testnetConfig = jurisdictions.testnet;
+
+      if (testnetConfig?.contracts) {
+        fromReplica = {
+          depositoryAddress: testnetConfig.contracts.depository,
+          entityProviderAddress: testnetConfig.contracts.entityProvider,
+          contracts: testnetConfig.contracts,
+          chainId: 31337,
+        } as any;
+        console.log('[XLN] Loaded contract addresses from jurisdictions.json');
+      }
+    } catch (err) {
+      console.warn('[XLN] Could not load jurisdictions.json, will deploy fresh:', (err as Error).message);
+    }
+
     globalJAdapter = await createJAdapter({
       mode: 'rpc',
       chainId: 31337,
       rpcUrl: anvilRpc,
+      fromReplica, // Pass pre-deployed addresses (if available)
     });
 
     const block = await globalJAdapter.provider.getBlockNumber();
     console.log(`[XLN] Anvil connected (block: ${block})`);
 
-    // Deploy contracts if fresh anvil
-    if (block === 0) {
+    // Deploy contracts only if fromReplica not provided AND anvil is fresh
+    if (!fromReplica && block === 0) {
       console.log('[XLN] Deploying contracts to anvil...');
       await globalJAdapter.deployStack();
       console.log('[XLN] Contracts deployed');
+    } else if (fromReplica) {
+      console.log('[XLN] Using pre-deployed contracts from jurisdictions.json');
     } else {
-      console.log('[XLN] Using existing contracts on anvil');
+      console.log('[XLN] Using existing contracts on anvil (block > 0)');
     }
   } else {
     console.log('[XLN] Using BrowserVM (local mode)');
@@ -612,6 +645,11 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 // ============================================================================
 
 if (import.meta.main) {
+  console.log('═══ SERVER.TS ENTRY POINT ═══');
+  console.log('ENV: USE_ANVIL =', process.env.USE_ANVIL);
+  console.log('ENV: ANVIL_RPC =', process.env.ANVIL_RPC);
+  console.log('Args:', process.argv.slice(2));
+
   const args = process.argv.slice(2);
 
   const getArg = (name: string, fallback?: string): string | undefined => {
@@ -627,8 +665,13 @@ if (import.meta.main) {
     serverId: getArg('--server-id', 'xln-server'),
   };
 
-  startXlnServer(options).catch(error => {
+  console.log('Calling startXlnServer with options:', options);
+
+  startXlnServer(options).then(() => {
+    console.log('[XLN] Server started successfully');
+  }).catch(error => {
     console.error('[XLN] Server failed:', error);
+    console.error('Stack:', error.stack);
     process.exit(1);
   });
 }
