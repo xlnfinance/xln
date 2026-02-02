@@ -492,7 +492,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           // Try to find a route through the network
           if (env.gossip) {
             const networkGraph = env.gossip.getNetworkGraph();
-            const paths = networkGraph.findPaths(entityState.entityId, targetEntityId);
+            const paths = await networkGraph.findPaths(entityState.entityId, targetEntityId, amount, tokenId);
 
             if (paths.length > 0) {
               // Use the shortest path

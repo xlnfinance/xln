@@ -191,13 +191,18 @@ export class RuntimeP2P {
           // Target entity
           if (input.entityId) entitiesToCheck.add(input.entityId);
 
-          // Extract sender entities from accountInput transactions
+          // Extract sender entities from accountInput and openAccount transactions
           if (input.entityTxs) {
             for (const tx of input.entityTxs) {
               if (tx.type === 'accountInput' && tx.data) {
                 const accountInput = tx.data as { fromEntityId?: string; toEntityId?: string };
                 if (accountInput.fromEntityId) entitiesToCheck.add(accountInput.fromEntityId);
                 if (accountInput.toEntityId) entitiesToCheck.add(accountInput.toEntityId);
+              }
+              // CRITICAL: openAccount response needs sender's profile to route ACK back
+              if (tx.type === 'openAccount' && tx.data) {
+                const openAccount = tx.data as { targetEntityId?: string };
+                if (openAccount.targetEntityId) entitiesToCheck.add(openAccount.targetEntityId);
               }
             }
           }

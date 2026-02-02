@@ -61,13 +61,16 @@ export function hashHtlcSecret(secret: string): string {
 
 /**
  * Generate secret and hashlock for HTLC
- * Returns 32-byte random secret as 0x-prefixed hex
+ * DEPRECATED: This function uses RNG and is non-deterministic!
+ * For consensus-safe HTLC creation, pass secret/hashlock explicitly in tx.data
+ *
+ * @throws Error - Always throws to prevent non-deterministic usage in consensus
  */
 export function generateHashlock(): { secret: string; hashlock: string } {
-  const secretBytes = crypto.getRandomValues(new Uint8Array(32));
-  const secret = `0x${Buffer.from(secretBytes).toString('hex')}`;
-  const hashlock = hashHtlcSecret(secret);
-  return { secret, hashlock };
+  throw new Error(
+    'generateHashlock() is non-deterministic and BANNED in consensus code. ' +
+    'Pass secret/hashlock as tx.data parameters (derived from tx hash or provided by user).'
+  );
 }
 
 /**

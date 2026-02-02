@@ -39,12 +39,12 @@ export async function handleHtlcPayment(
   // Extract payment details
   let { targetEntityId, tokenId, amount, route, description, secret, hashlock } = entityTx.data;
 
-  // Generate or validate secret/hashlock
+  // Validate secret/hashlock - MUST be provided in tx (determinism requirement)
   if (!secret && !hashlock) {
-    const generated = generateHashlock();
-    secret = generated.secret;
-    hashlock = generated.hashlock;
-    console.log(`🔒 Generated secret: ${secret.slice(0,16)}..., hash: ${hashlock.slice(0,16)}...`);
+    // CRITICAL: Cannot generate in consensus - would cause validator divergence!
+    logError("HTLC_PAYMENT", `❌ secret/hashlock REQUIRED in tx.data (determinism)`);
+    addMessage(newState, `❌ HTLC payment failed: secret/hashlock must be provided`);
+    return { newState, outputs: [], mempoolOps: [] };
   } else if (secret && !hashlock) {
     try {
       hashlock = hashHtlcSecret(secret);
