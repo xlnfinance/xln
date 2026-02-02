@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "dev": "concurrently --names 'RELAY,VITE' -c 'cyan,green' 'bun runtime/networking/ws-server.ts --port 9000' 'cd frontend && vite dev'",
+    "dev": "concurrently --names 'RUNTIME,RELAY,VITE' -c 'yellow,cyan,green' 'bun build runtime/runtime.ts --target=browser --outfile=frontend/static/runtime.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external url --external net --external tls --external os --external util --watch' 'bun runtime/networking/ws-server.ts --port 9000' 'cd frontend && vite dev'",
     "dev:no-relay": "cd frontend && vite dev",
     "relay": "bun runtime/networking/ws-server.ts --port 9000",
     "build": "bun build runtime/runtime.ts --target=browser --outfile=frontend/static/runtime.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external url --external net --external tls --external os --external util",
