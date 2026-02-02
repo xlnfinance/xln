@@ -183,10 +183,11 @@ export async function initializeXLN(): Promise<Env> {
 
     // Start P2P overlay (idempotent, waits for runtimeId if needed)
     if (xln.startP2P) {
-      // Use local relay for dev (localhost), production relay for deployed
+      // Use same host/port as page (unified server serves relay at /relay)
       const isLocalDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const relayUrls = isLocalDev
-        ? ['ws://localhost:9000/relay']
+        ? [`${wsProtocol}//${window.location.host}/relay`]  // Same port as page
         : ['wss://xln.finance/relay'];
       console.log(`[P2P] Connecting to relay: ${relayUrls[0]}`);
       xln.startP2P(env, { relayUrls });

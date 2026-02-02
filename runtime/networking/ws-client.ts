@@ -186,6 +186,8 @@ export class RuntimeWsClient {
       return;
     }
     if ((msg.type === 'gossip_response' || msg.type === 'gossip_subscribed') && msg.payload && msg.from) {
+      const profiles = (msg.payload as any)?.profiles || [];
+      console.log(`[WS-CLIENT] Received gossip_response: ${profiles.length} profiles from ${msg.from}`);
       await this.options.onGossipResponse?.(msg.from, msg.payload);
       return;
     }

@@ -375,6 +375,11 @@ export const setRuntimeId = (id: string | null): void => {
   }
 };
 
+// Derive runtimeId from seed (for isolated envs that need to set their own runtimeId)
+export const deriveRuntimeId = (seed: string): string => {
+  return deriveSignerAddressSync(seed, '1');
+};
+
 export const scheduleNetworkProcess = (env: Env) => {
   if (networkProcessScheduled) return;
   networkProcessScheduled = true;

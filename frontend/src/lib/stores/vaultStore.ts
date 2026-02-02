@@ -111,14 +111,39 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
 
     runtimeOperations.setLocalRuntimeMetadata(meta);
 
-    // Sync runtime seed to enable P2P (P2P needs runtimeId derived from seed)
-    if (runtime?.seed) {
+    // Sync runtime seed and start P2P with correct relay URLs
+    if (runtime?.seed && runtime?.id) {
       import('$lib/stores/xlnStore').then(async ({ getXLN }) => {
+        const { get } = await import('svelte/store');
         const xln = await getXLN();
         if (xln.setRuntimeSeed) {
           xln.setRuntimeSeed(runtime.seed);
-          console.log('[VaultStore] P2P: Runtime seed synced, P2P should connect');
         }
+        // Start P2P on the VaultStore's runtime env (not xlnStore's global env)
+        if (xln.startP2P && xln.deriveRuntimeId) {
+          // Get the env from this specific runtime in runtimeStore
+          const runtimeData = get(runtimes).get(runtime.id);
+          const env = runtimeData?.env;
+          if (env) {
+            // CRITICAL: Set runtimeId on THIS env (not the global one)
+            // This allows P2P to start immediately instead of being deferred
+            if (!env.runtimeId && runtime.seed) {
+              env.runtimeId = xln.deriveRuntimeId(runtime.seed);
+              env.runtimeSeed = runtime.seed;
+              console.log(`[VaultStore] P2P: Set env.runtimeId = ${env.runtimeId.slice(0, 12)}...`);
+            }
+            const isLocalDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const relayUrls = isLocalDev
+              ? [`${wsProtocol}//${window.location.host}/relay`]
+              : ['wss://xln.finance/relay'];
+            console.log(`[VaultStore] P2P: Starting on env with ${env.eReplicas?.size || 0} entities, runtimeId=${env.runtimeId?.slice(0,12)}, relay=${relayUrls[0]}`);
+            xln.startP2P(env, { relayUrls });
+          } else {
+            console.warn('[VaultStore] P2P: No env found for runtime', runtime.id);
+          }
+        }
+        console.log('[VaultStore] P2P: Runtime seed synced, P2P connected');
       }).catch(err => console.warn('[VaultStore] Failed to sync P2P seed:', err));
     }
 
