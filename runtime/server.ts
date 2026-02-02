@@ -531,6 +531,42 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         await (browserVM as any).fundSignerWallet(hubWalletAddress, 1_000_000n * 10n ** 18n); // 1M tokens
         console.log('[XLN] Hub wallet funded with ERC20 + ETH');
       }
+    } else {
+      // Anvil: Fund hub wallet with ERC20 tokens from deployer
+      try {
+        const anvilDefaultPrivateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
+        const deployer = new ethers.Wallet(anvilDefaultPrivateKey, globalJAdapter.provider);
+
+        // Token addresses from jurisdictions.json (deployed via deploy-tokens.cjs)
+        const ANVIL_TOKENS: Record<string, string> = {
+          USDC: '0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E',
+          WETH: '0x84eA74d481Ee0A5332c457a4d796187F6Ba67fEB',
+          USDT: '0xa82fF9aFd8f496c3d6ac40E2a0F282E47488CFc9',
+        };
+
+        const ERC20_ABI = ['function transfer(address to, uint256 amount) returns (bool)', 'function balanceOf(address) view returns (uint256)'];
+
+        // Fund hub wallet with 1B of each token
+        for (const [symbol, tokenAddress] of Object.entries(ANVIL_TOKENS)) {
+          const erc20 = new ethers.Contract(tokenAddress, ERC20_ABI, deployer);
+          const deployerBalance = await erc20.balanceOf(deployer.address);
+          if (deployerBalance > 0n) {
+            const amountToTransfer = 1_000_000_000n * 10n ** 18n; // 1B tokens
+            const actual = deployerBalance < amountToTransfer ? deployerBalance : amountToTransfer;
+            const tx = await erc20.transfer(hubWalletAddress, actual);
+            await tx.wait();
+            console.log(`[XLN] Hub wallet funded with ${symbol}: ${ethers.formatUnits(actual, 18)}`);
+          }
+        }
+
+        // Also fund hub wallet with ETH for gas
+        const ethAmount = ethers.parseEther('10');
+        const ethTx = await deployer.sendTransaction({ to: hubWalletAddress, value: ethAmount });
+        await ethTx.wait();
+        console.log('[XLN] Hub wallet funded with 10 ETH for gas');
+      } catch (err) {
+        console.warn('[XLN] Hub wallet funding failed (anvil):', (err as Error).message);
+      }
     }
 
     // Fund hub entity reserves in Depository
@@ -539,9 +575,14 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       await globalJAdapter.debugFundReserves(hubEntityId, 1, 1_000_000_000n * 10n ** 18n); // $1B USDC
       console.log('[XLN] Hub reserves funded (BrowserVM debug)');
     } else {
-      // Anvil: Fund via real transfers (deployer → hub reserve)
-      // TODO: Implement reserve funding for anvil
-      console.log('[XLN] Hub reserve funding skipped (anvil - use manual funding)');
+      // Anvil: Use mintToReserve via admin signer
+      try {
+        await globalJAdapter.debugFundReserves(hubEntityId, 1, 1_000_000_000n * 10n ** 18n); // $1B USDC
+        console.log('[XLN] Hub reserves funded (anvil mintToReserve)');
+      } catch (err) {
+        console.warn('[XLN] Hub reserve funding failed (anvil):', (err as Error).message);
+        console.log('[XLN] This may be OK if reserves were already funded from state persistence');
+      }
     }
   }
 
