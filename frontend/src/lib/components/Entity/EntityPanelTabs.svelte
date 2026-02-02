@@ -167,27 +167,57 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const env = xln.getEnv();
-      const jadapter = xln.getActiveJAdapter?.(env);
-      if (!jadapter?.debugFundReserves) {
-        throw new Error('J-adapter faucet not available');
+      // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
+      const jadapter = xln.getActiveJAdapter?.(activeEnv);
+
+      if (!jadapter) {
+        throw new Error('No J-adapter available');
       }
 
-      // Fund 1000 USDC (token 1), 0.5 WETH (token 2), 500 USDT (token 3)
-      const fundAmounts = [
-        { tokenId: 1, amount: 1000n * 10n**18n },  // 1000 USDC
-        { tokenId: 2, amount: 5n * 10n**17n },     // 0.5 WETH
-        { tokenId: 3, amount: 500n * 10n**18n },   // 500 USDT
-      ];
+      // Check mode: BrowserVM uses debugFundReserves, RPC uses API
+      const isBrowserVM = jadapter.mode === 'browservm';
 
-      for (const { tokenId, amount } of fundAmounts) {
-        await jadapter.debugFundReserves(entityId, tokenId, amount);
+      if (isBrowserVM) {
+        // BrowserVM: Use debug method
+        if (!jadapter.debugFundReserves) {
+          throw new Error('debugFundReserves not available');
+        }
+
+        const fundAmounts = [
+          { tokenId: 1, amount: 1000n * 10n**18n },  // 1000 USDC
+          { tokenId: 2, amount: 5n * 10n**17n },     // 0.5 WETH
+          { tokenId: 3, amount: 500n * 10n**18n },   // 500 USDT
+        ];
+
+        for (const { tokenId, amount } of fundAmounts) {
+          await jadapter.debugFundReserves(entityId, tokenId, amount);
+        }
+
+        await fetchBrowserVMReserves();
+      } else {
+        // RPC: Call faucet API (Faucet B: Reserve transfer)
+        const response = await fetch('https://xln.finance/api/faucet/reserve', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userEntityId: entityId,
+            tokenId: 1, // USDC
+            amount: '1000'
+          })
+        });
+
+        const result = await response.json();
+        if (!result.success) {
+          throw new Error(result.error || 'Faucet failed');
+        }
+
+        console.log('[EntityPanel] Faucet success:', result);
+
+        // Refresh reserves (will implement proper fetch later)
+        setTimeout(() => location.reload(), 500);
       }
 
       console.log('[EntityPanel] Faucet funded reserves for', entityId.slice(0, 10));
-
-      // Refresh reserves display
-      await fetchBrowserVMReserves();
     } catch (err) {
       console.error('[EntityPanel] Faucet failed:', err);
       alert(`Faucet failed: ${(err as Error).message}`);
@@ -203,8 +233,8 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const env = xln.getEnv();
-      const jadapter = xln.getActiveJAdapter?.(env);
+      // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
+      const jadapter = xln.getActiveJAdapter?.(activeEnv);
       if (!jadapter?.getReserves) {
         reservesLoading = false;
         return;
@@ -237,8 +267,8 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const env = xln.getEnv();
-      const jadapter = xln.getActiveJAdapter?.(env);
+      // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
+      const jadapter = xln.getActiveJAdapter?.(activeEnv);
       if (!jadapter?.getRegisteredTokens || !jadapter?.getErc20Balance) {
         externalTokensLoading = false;
         return;
@@ -276,8 +306,8 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const env = xln.getEnv();
-      const jadapter = xln.getActiveJAdapter?.(env);
+      // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
+      const jadapter = xln.getActiveJAdapter?.(activeEnv);
       if (!jadapter?.externalTokenToReserve) {
         throw new Error('J-adapter deposit not available');
       }
@@ -319,8 +349,8 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const env = xln.getEnv();
-      const jadapter = xln.getActiveJAdapter?.(env);
+      // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
+      const jadapter = xln.getActiveJAdapter?.(activeEnv);
       if (!jadapter?.fundSignerWallet) {
         throw new Error('J-adapter faucet not available');
       }
