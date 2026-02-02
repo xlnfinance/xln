@@ -232,12 +232,9 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
   // Health check
   if (pathname === '/api/health') {
-    return new Response(JSON.stringify({
-      status: 'ok',
-      runtime: !!env,
-      clients: clients.size,
-      timestamp: Date.now(),
-    }), { headers });
+    const { getHealthStatus } = await import('./health.js');
+    const health = await getHealthStatus(env);
+    return new Response(JSON.stringify(health), { headers });
   }
 
   // Runtime state
