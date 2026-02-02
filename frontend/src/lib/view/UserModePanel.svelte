@@ -29,7 +29,7 @@
   import AccountPanel from '$lib/components/Entity/AccountPanel.svelte';
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
   import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
-  import WalletView from '$lib/components/Wallet/WalletView.svelte';
+  // Removed WalletView - using EntityPanelTabs for everything (Entity = Wallet)
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
   import FormationPanel from '$lib/components/Entity/FormationPanel.svelte';
   import WalletSettings from '$lib/components/Settings/WalletSettings.svelte';
@@ -66,7 +66,7 @@
 
   // Selection state
   type ViewMode = 'signer' | 'entity' | 'jurisdiction';
-  let viewMode = $state<ViewMode>('signer');
+  let viewMode = $state<ViewMode>('entity'); // Default to entity view (wallet = entity)
   let selectedEntityId = $state<string | null>(null);
   let selectedSignerId = $state<string | null>(null);
   let selectedAccountId = $state<string | null>(null);
@@ -566,14 +566,6 @@
       </div>
     {:else if showVaultPanelVisible}
       <RuntimeCreation embedded={true} />
-    {:else if viewMode === 'signer'}
-      <WalletView
-        privateKey={signerWalletPrivateKey || ''}
-        walletAddress={signerWalletAddress}
-        entityId={selectedEntityId || ''}
-        identiconSrc={signerWalletIdenticon}
-        networkEnabled={signerNetworkEnabled}
-      />
     {:else if viewMode === 'entity' && selectedEntityId && selectedReplica}
       {#if selectedAccountId && selectedAccount}
         <AccountPanel
