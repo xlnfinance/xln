@@ -389,7 +389,15 @@ export async function verifyHankoForHash(
 
     // Fallback: use gossip profile metadata (remote entity) if no local replica
     if (expectedAddresses.length === 0 && env?.gossip?.getProfiles) {
-      const profile = env.gossip.getProfiles().find((p: any) => p.entityId === expectedEntityId);
+      const allProfiles = env.gossip.getProfiles();
+      console.log(`🔍 HANKO-DEBUG: Looking for ${expectedEntityId.slice(-4)} in ${allProfiles.length} gossip profiles`);
+      console.log(`🔍 HANKO-DEBUG: Available profile entityIds:`, allProfiles.map((p: any) => p.entityId?.slice(-4) || '???'));
+      const profile = allProfiles.find((p: any) => p.entityId === expectedEntityId);
+      if (profile) {
+        console.log(`✅ HANKO-DEBUG: Found profile for ${expectedEntityId.slice(-4)}`);
+      } else {
+        console.log(`❌ HANKO-DEBUG: Profile NOT FOUND for ${expectedEntityId}`);
+      }
       if (profile) {
         const boardMeta = profile.metadata?.board;
         const publicKey = profile.metadata?.entityPublicKey;
@@ -425,7 +433,9 @@ export async function verifyHankoForHash(
 
     // Fallback: check registered public keys (from P2P gossip applyIncomingProfiles)
     if (expectedAddresses.length === 0) {
+      console.log(`🔍 HANKO-DEBUG: Trying getCachedSignerPublicKey for ${expectedEntityId.slice(-4)} (full: ${expectedEntityId})`);
       const registeredPubKey = getCachedSignerPublicKey(expectedEntityId);
+      console.log(`🔍 HANKO-DEBUG: getCachedSignerPublicKey returned ${registeredPubKey ? 'key found' : 'null'}`);
       if (registeredPubKey) {
         const pubKeyHex = '0x' + Array.from(registeredPubKey).map(b => b.toString(16).padStart(2, '0')).join('');
         const derived = publicKeyToAddress(pubKeyHex);

@@ -301,6 +301,7 @@ export interface XLNModule {
   createEmptyEnv: (seed?: Uint8Array | string | null) => Env;
   setRuntimeSeed: (seed: string | null) => void;
   setRuntimeId: (id: string | null) => void;
+  deriveRuntimeId: (seed: string) => string;  // Derive runtimeId from seed (for isolated envs)
 
   // Scenarios namespace (replaces legacy prepopulate functions)
   scenarios: {

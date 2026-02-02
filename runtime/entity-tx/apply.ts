@@ -518,6 +518,13 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         return { newState: entityState, outputs: [] };
       }
 
+      // Validate route ends with targetEntityId
+      if (route[route.length - 1] !== targetEntityId) {
+        console.error(`❌ ROUTE VALIDATION FAILED: route ends with ${route[route.length - 1]?.slice(-4)}, expected targetEntityId=${targetEntityId.slice(-4)}`);
+        logError("ENTITY_TX", `❌ Invalid route: route end must match targetEntityId`);
+        return { newState: entityState, outputs: [] };
+      }
+
       // Check if we're the final destination (route.length === 1)
       if (route.length === 1 && route[0] === targetEntityId) {
         console.error(`✅ FINAL DESTINATION: Entity ${entityState.entityId.slice(-4)} is the final recipient`);

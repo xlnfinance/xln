@@ -55,8 +55,8 @@ export async function handleJBroadcast(
     return { newState, outputs, jOutputs };
   }
 
-  // Find the J-machine for this entity's jurisdiction
-  const jurisdictionName = env.activeJurisdiction || 'default';
+  // Find the J-machine for this entity's jurisdiction (use entity config, not env.activeJurisdiction)
+  const jurisdictionName = jurisdiction.name || env.activeJurisdiction || 'default';
   console.log(`🔍 j_broadcast: Targeting J-machine "${jurisdictionName}"`);
 
   // Create JTx (J-machine transaction) with the batch

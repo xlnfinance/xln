@@ -19,6 +19,7 @@ import type { Env, EntityInput, RuntimeInput } from './types';
 import { encodeBoard, hashBoard } from './entity-factory';
 import { registerSignerKey, deriveSignerKeySync, getCachedSignerAddress } from './account-crypto';
 import { createJAdapter, type JAdapter } from './jadapter';
+import { resolveEntityProposerId } from './state-helpers';
 import { ethers } from 'ethers';
 
 // Global J-adapter instance (set during startup)
@@ -380,7 +381,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
       }
       const hubEntityId = hubs[0].entityId;
-      const hubSignerId = hubs[0].runtimeId || '1';
+      // Get actual signerId from entity's validators (not runtimeId!)
+      const hubSignerId = resolveEntityProposerId(env, hubEntityId, 'faucet-offchain');
 
       const amountWei = ethers.parseUnits(amount, 18);
 

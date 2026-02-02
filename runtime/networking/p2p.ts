@@ -185,12 +185,30 @@ export class RuntimeP2P {
           this.announceLocalProfiles();
         },
         onEntityInput: async (from, input) => {
-          // Ensure we have sender's profile before processing
-          const senderEntity = input.entityId;
-          if (senderEntity && !this.hasProfileForEntity(senderEntity)) {
-            console.log(`P2P_FETCH_PROFILE: ${senderEntity.slice(-4)} (not in cache)`);
+          // Collect all entity IDs that need profiles before we can process
+          const entitiesToCheck = new Set<string>();
+
+          // Target entity
+          if (input.entityId) entitiesToCheck.add(input.entityId);
+
+          // Extract sender entities from accountInput transactions
+          if (input.entityTxs) {
+            for (const tx of input.entityTxs) {
+              if (tx.type === 'accountInput' && tx.data) {
+                const accountInput = tx.data as { fromEntityId?: string; toEntityId?: string };
+                if (accountInput.fromEntityId) entitiesToCheck.add(accountInput.fromEntityId);
+                if (accountInput.toEntityId) entitiesToCheck.add(accountInput.toEntityId);
+              }
+            }
+          }
+
+          // Fetch profiles for any missing entities
+          const missingEntities = Array.from(entitiesToCheck).filter(e => !this.hasProfileForEntity(e));
+          if (missingEntities.length > 0) {
+            console.log(`P2P_FETCH_PROFILE: ${missingEntities.map(e => e.slice(-4)).join(',')} (not in cache)`);
             await this.fetchProfilesWithRetry();
           }
+
           this.onEntityInput(from, input);
         },
         onGossipRequest: (from, payload) => this.handleGossipRequest(from, payload),
@@ -214,7 +232,11 @@ export class RuntimeP2P {
   }
 
   private startPolling() {
-    if (this.pollInterval) return;
+    if (this.pollInterval) {
+      console.log(`[P2P] startPolling: Already polling, skipping`);
+      return;
+    }
+    console.log(`[P2P] startPolling: Starting polling every ${GOSSIP_POLL_MS}ms`);
     // Request immediately, then periodically
     setTimeout(() => this.requestSeedGossip(), 100);
     this.pollInterval = setInterval(() => {
@@ -313,14 +335,23 @@ export class RuntimeP2P {
 
   // Fetch profiles from relay with retry
   private async fetchProfilesWithRetry(): Promise<void> {
+    const startCount = this.env.gossip?.getProfiles?.()?.length || 0;
+    console.log(`P2P_FETCH_PROFILES: Starting fetch, currently have ${startCount} profiles`);
+
     // Request profiles multiple times with delays
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 5; i++) {
       this.requestSeedGossip();
-      await new Promise(resolve => setTimeout(resolve, 500));
-      // Check if profiles arrived
+      await new Promise(resolve => setTimeout(resolve, 300));
+      // Check if new profiles arrived
       const profiles = this.env.gossip?.getProfiles?.() || [];
-      console.log(`P2P_FETCH_RETRY: attempt ${i + 1}, got ${profiles.length} profiles`);
+      const profileIds = profiles.map((p: any) => p.entityId?.slice(-4) || '???').join(',');
+      console.log(`P2P_FETCH_RETRY: attempt ${i + 1}, got ${profiles.length} profiles [${profileIds}]`);
+      if (profiles.length > startCount) {
+        console.log(`P2P_FETCH_SUCCESS: Got ${profiles.length - startCount} new profiles`);
+        return;
+      }
     }
+    console.log(`P2P_FETCH_TIMEOUT: Still have ${this.env.gossip?.getProfiles?.()?.length || 0} profiles after retries`);
   }
 
   private announceLocalProfiles() {

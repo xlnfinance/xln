@@ -235,16 +235,26 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     }
 
     if (msg.type === 'entity_input') {
-      const payload = msg.payload as EntityInput | undefined;
-      if (!payload || typeof payload.entityId !== 'string' || typeof payload.signerId !== 'string') {
-        send(ws, { type: 'error', error: 'Invalid entity_input payload', inReplyTo: msg.id });
+      // CRITICAL: If encrypted=true, payload is opaque ciphertext - relay just routes it
+      // Only validate plaintext payloads (which shouldn't happen in prod - encryption is mandatory)
+      if (!msg.encrypted) {
+        const payload = msg.payload as EntityInput | undefined;
+        if (!payload || typeof payload.entityId !== 'string' || typeof payload.signerId !== 'string') {
+          send(ws, { type: 'error', error: 'Invalid entity_input payload', inReplyTo: msg.id });
+          return;
+        }
+      } else if (!msg.payload || typeof msg.payload !== 'string') {
+        // Encrypted payload must be a non-empty string (ciphertext)
+        send(ws, { type: 'error', error: 'Invalid encrypted payload', inReplyTo: msg.id });
         return;
       }
     }
 
     // Check if target is the server itself - use local delivery for entity_input/runtime_input
+    // EXCEPT: encrypted messages must go through WS client for decryption
     const isLocalTarget = options.serverRuntimeId && target === options.serverRuntimeId;
-    const useLocalDelivery = isLocalTarget && (msg.type === 'entity_input' || msg.type === 'runtime_input');
+    const isEncrypted = msg.encrypted === true;
+    const useLocalDelivery = isLocalTarget && (msg.type === 'entity_input' || msg.type === 'runtime_input') && !isEncrypted;
 
     const targetClient = clients.get(target);
     if (targetClient && !useLocalDelivery) {
