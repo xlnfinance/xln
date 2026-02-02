@@ -444,9 +444,14 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
     // Fetch deployed contract addresses from jurisdictions.json
     const fs = await import('fs/promises');
+    const path = await import('path');
     let fromReplica = undefined;
     try {
-      const jurisdictionsPath = '/root/xln/jurisdictions.json';
+      // Try cwd first, then fallback to /root/xln (prod)
+      const cwdPath = path.join(process.cwd(), 'jurisdictions.json');
+      const prodPath = '/root/xln/jurisdictions.json';
+      const jurisdictionsPath = await fs.access(cwdPath).then(() => cwdPath).catch(() => prodPath);
+      console.log(`[XLN] Loading jurisdictions from: ${jurisdictionsPath}`);
       const jurisdictionsData = await fs.readFile(jurisdictionsPath, 'utf-8');
       const jurisdictions = JSON.parse(jurisdictionsData);
       const testnetConfig = jurisdictions.testnet;
