@@ -725,6 +725,7 @@ const applyRuntimeInput = async (
           const fromReplica = runtimeTx.data.contracts ? {
             depositoryAddress: runtimeTx.data.contracts.depository,
             entityProviderAddress: runtimeTx.data.contracts.entityProvider,
+            contracts: runtimeTx.data.contracts, // Pass all contract addresses
             chainId: runtimeTx.data.chainId,
           } as JReplica : undefined;
 
