@@ -590,8 +590,62 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         }
         console.log(`[VaultStore.initialize] ✅ Registered ${runtime.signers.length} HD-derived keys`);
 
-        // Testnet already imported in createRuntime - skip duplicate
-        console.log('[VaultStore.initialize] Using existing testnet from createRuntime');
+        // CRITICAL: Import testnet J-machine (shared anvil on xln.finance)
+        // This must happen on page reload when restoring runtime from localStorage
+        console.log('[VaultStore.initialize] Importing testnet anvil...');
+        await xln.applyRuntimeInput(newEnv, {
+          runtimeTxs: [{
+            type: 'importJ',
+            data: {
+              name: 'Testnet',
+              chainId: 31337,
+              ticker: 'USDC',
+              rpcs: ['https://xln.finance/rpc'],
+            }
+          }],
+          entityInputs: []
+        });
+        console.log('[VaultStore.initialize] ✅ Testnet imported');
+
+        // Re-import entity if it exists in runtime
+        if (runtime.signers[0]?.entityId) {
+          const entityId = runtime.signers[0].entityId;
+          const signerAddress = runtime.signers[0].address;
+
+          const jReplica = newEnv.jReplicas?.get('Testnet');
+          if (jReplica) {
+            const { generateLazyEntityId } = await import('@xln/runtime/entity-factory');
+            const { applyRuntimeInput } = await import('@xln/runtime/runtime');
+
+            const entityConfig = {
+              mode: 'proposer-based' as const,
+              threshold: 1n,
+              validators: [signerAddress],
+              shares: { [signerAddress]: 1n },
+              jurisdiction: {
+                address: jReplica.depositoryAddress,
+                name: 'Testnet',
+                chainId: 31337,
+                entityProviderAddress: jReplica.entityProviderAddress,
+                depositoryAddress: jReplica.depositoryAddress,
+              }
+            };
+
+            await applyRuntimeInput(newEnv, {
+              runtimeTxs: [{
+                type: 'importReplica',
+                entityId: entityId,
+                signerId: signerAddress,
+                data: {
+                  isProposer: true,
+                  config: entityConfig
+                }
+              }],
+              entityInputs: []
+            });
+            console.log('[VaultStore.initialize] ✅ Entity re-imported:', entityId.slice(0, 18));
+          }
+        }
 
         runtimes.update(r => {
           r.set(runtimeId, {

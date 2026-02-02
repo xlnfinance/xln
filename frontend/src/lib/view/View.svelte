@@ -77,6 +77,10 @@
     }
   });
 
+  // CRITICAL: Subscribe to activeRuntimeId changes and update env reactively
+  // This ensures View.svelte always shows the correct env after VaultStore creates/switches runtimes
+  let unsubActiveRuntime: (() => void) | null = null;
+
   // Pending entity data - bypasses Dockview params timing
   const pendingEntityData = new Map<string, {entityId: string, entityName: string, signerId: string, action?: 'r2r' | 'r2c'}>();
 
@@ -157,14 +161,15 @@
           const runtime = get(runtimes).get(runtimeId);
           if (runtime?.env) {
             env = runtime.env;
-            console.log('[View] ✅ Using env from VaultStore runtime');
+            console.log('[View] ✅ Using env from VaultStore runtime:', {
+              jReplicas: env.jReplicas?.size || 0,
+              entities: env.eReplicas?.size || 0
+            });
           } else {
-            env = await XLN.main();
-            console.log('[View] ⚠️ VaultStore env not found, created new env');
+            throw new Error('VaultStore runtime found but no env - this should not happen');
           }
         } else {
-          env = await XLN.main();
-          console.log('[View] ⚠️ No active runtime, created new env');
+          throw new Error('No active runtime - user must create/import a wallet first');
         }
       }
 
@@ -175,6 +180,26 @@
       // Only use saved timeIndex when explicitly importing from URL
       localTimeIndex.set(urlImport?.state.ui?.ti ?? -1);
       localIsLive.set(true);
+
+      // CRITICAL: Subscribe to activeRuntimeId changes to reactively update env
+      // This ensures View always shows correct env after VaultStore creates/switches runtimes
+      const { runtimes, activeRuntimeId } = await import('$lib/stores/runtimeStore');
+      unsubActiveRuntime = activeRuntimeId.subscribe((runtimeId) => {
+        if (!runtimeId) return;
+        const runtime = get(runtimes).get(runtimeId);
+        if (runtime?.env) {
+          console.log('[View] 🔄 Runtime changed, updating env:', {
+            runtimeId: runtimeId.slice(0, 10),
+            jReplicas: runtime.env.jReplicas?.size || 0,
+            entities: runtime.env.eReplicas?.size || 0
+          });
+          localEnvStore.set(runtime.env);
+          localHistoryStore.set(runtime.env.history || []);
+          // Stay in live mode when runtime changes (don't reset to historical)
+          localIsLive.set(true);
+          localTimeIndex.set(-1);
+        }
+      });
 
       // Auto-run scenario if scenarioId is explicitly provided (no default for /app route)
       if (scenarioId) {
@@ -253,6 +278,7 @@
 
     } catch (err) {
       console.error('[View] ❌ Failed to initialize XLN:', err);
+      // Don't block - ArchitectPanel can still work
     }
 
     // ALWAYS create Dockview (hide in user mode, show in dev mode)
@@ -676,6 +702,9 @@
   onDestroy(() => {
     if (unsubOpenEntity) {
       unsubOpenEntity();
+    }
+    if (unsubActiveRuntime) {
+      unsubActiveRuntime();
     }
     if (dockview) {
       dockview.dispose();
