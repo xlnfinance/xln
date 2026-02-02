@@ -317,6 +317,10 @@
       return;
     }
     const env = xln.getEnv();
+    if (!env) {
+      browserVmTokens = [];
+      return;
+    }
     const jadapter = xln.getActiveJAdapter(env);
     if (!jadapter?.getTokenRegistry) {
       browserVmTokens = [];
@@ -445,6 +449,11 @@
     }
 
     const env = xln.getEnv();
+    if (!env) {
+      externalBalances = [];
+      externalBalancesLoading = false;
+      return;
+    }
     const jadapter = xln.getActiveJAdapter(env);
     if (!jadapter?.getErc20Balance) {
       externalBalances = [];
@@ -503,6 +512,11 @@
     }
 
     const env = xln.getEnv();
+    if (!env) {
+      externalEthBalances = [];
+      externalEthBalancesLoading = false;
+      return;
+    }
     const jadapter = xln.getActiveJAdapter(env);
     if (!jadapter?.getEthBalance) {
       externalEthBalances = [];
@@ -561,6 +575,11 @@
     }
 
     const env = xln.getEnv();
+    if (!env) {
+      entityDebts = [];
+      debtsLoading = false;
+      return;
+    }
     const jadapter = xln.getActiveJAdapter(env);
     if (!jadapter || !jadapter.getDebts || tokenId === null) {
       entityDebts = [];
