@@ -33,7 +33,7 @@ function createToastStore() {
   return {
     subscribe,
     success: (msg: string, duration?: number) => add('success', msg, duration),
-    error: (msg: string, duration?: number) => add('error', msg, duration ?? 6000),
+    error: (msg: string, duration?: number) => add('error', msg, duration ?? 8000), // 8 sec for errors
     info: (msg: string, duration?: number) => add('info', msg, duration),
     warning: (msg: string, duration?: number) => add('warning', msg, duration),
     remove
