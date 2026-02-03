@@ -384,7 +384,7 @@
   }
 
   // Faucet external tokens (ERC20 to signer EOA)
-  async function faucetExternalTokens() {
+  async function faucetExternalTokens(tokenSymbol: string = 'USDC') {
     const signerId = tab.signerId;
     if (!signerId) return;
 
@@ -396,7 +396,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userAddress: signerId,
-          tokenSymbol: 'USDC',
+          tokenSymbol, // Use the clicked token!
           amount: '100'
         })
       });
@@ -724,7 +724,7 @@
                         {depositingToken === token.symbol ? 'Depositing...' : 'Deposit to Reserve'}
                       </button>
                     {:else}
-                      <button class="btn-token-action faucet" on:click={faucetExternalTokens} disabled={faucetFunding}>
+                      <button class="btn-token-action faucet" on:click={() => faucetExternalTokens(token.symbol)} disabled={faucetFunding}>
                         {faucetFunding ? 'Funding...' : 'Get from Faucet'}
                       </button>
                     {/if}
