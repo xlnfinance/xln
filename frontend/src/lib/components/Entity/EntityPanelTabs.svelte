@@ -688,7 +688,12 @@
       <section class="content">
         {#if activeTab === 'external'}
           <!-- External Tokens (ERC20 wallet balances) -->
-          <h4 class="section-head">External Tokens (ERC20)</h4>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <h4 class="section-head" style="margin: 0;">External Tokens (ERC20)</h4>
+            <button class="btn-refresh" on:click={() => fetchExternalTokens()} disabled={externalTokensLoading} style="padding: 4px 12px; cursor: pointer;">
+              {externalTokensLoading ? '⏳' : '🔄 Refresh'}
+            </button>
+          </div>
           <p class="muted wallet-address">Wallet: {tab.signerId?.slice(0, 8)}...{tab.signerId?.slice(-4)}</p>
 
           {#if externalTokensLoading}
