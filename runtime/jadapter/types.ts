@@ -91,6 +91,14 @@ export interface JAdapter {
   debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]>;
   reserveToReserve(from: string, to: string, tokenId: number, amount: bigint): Promise<JEvent[]>;
 
+  // Writes - Deposits (user deposits ERC20 to their entity reserves)
+  externalTokenToReserve(
+    signerPrivateKey: Uint8Array,
+    entityId: string,
+    tokenAddress: string,
+    amount: bigint
+  ): Promise<JEvent[]>;
+
   // BrowserVM-specific (returns null for RPC mode)
   getBrowserVM(): BrowserVMProvider | null;
   setBlockTimestamp(timestamp: number): void;

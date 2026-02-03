@@ -110,15 +110,14 @@ export function signProfileSync(
   signerId: string
 ): Profile {
   // Import here to avoid circular dependency
-  const { getSignerPrivateKey } = require('../account-crypto');
-  const secp256k1 = require('@noble/secp256k1');
+  // CRITICAL: Import account-crypto FIRST - it initializes hmacSha256Sync for secp256k1
+  const accountCrypto = require('../account-crypto');
+  const { getSignerPrivateKey, signDigest } = accountCrypto;
 
   const hash = computeProfileHash(profile);
-  const hashBytes = Buffer.from(hash.replace('0x', ''), 'hex');
 
-  const privateKey = getSignerPrivateKey(env, signerId);
-  const [signature, recovery] = secp256k1.signSync(hashBytes, privateKey, { recovered: true, der: false });
-  const sigHex = `0x${Buffer.from(signature).toString('hex')}${recovery.toString(16).padStart(2, '0')}`;
+  // Use signDigest which properly installs hmacSha256Sync before signing
+  const sigHex = signDigest(env.runtimeSeed, signerId, hash);
 
   return {
     ...profile,
@@ -159,8 +158,10 @@ export async function verifyProfileSignature(
  */
 function verifyLegacySignature(profile: Profile, signature: string): boolean {
   try {
+    // CRITICAL: Import account-crypto FIRST - it initializes hmacSha256Sync for secp256k1
+    const accountCrypto = require('../account-crypto');
+    const { getCachedSignerPublicKey } = accountCrypto;
     const secp256k1 = require('@noble/secp256k1');
-    const { getCachedSignerPublicKey } = require('../account-crypto');
 
     const hash = computeProfileHash(profile);
     const hashBytes = Buffer.from(hash.replace('0x', ''), 'hex');

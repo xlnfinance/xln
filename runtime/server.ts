@@ -63,6 +63,33 @@ let wsCounter = 0;
 const nextWsTimestamp = () => ++wsCounter;
 
 // ============================================================================
+// FAUCET MUTEX (prevent nonce collisions from parallel requests)
+// ============================================================================
+const faucetLock = {
+  locked: false,
+  queue: [] as Array<() => void>,
+
+  async acquire(): Promise<void> {
+    if (!this.locked) {
+      this.locked = true;
+      return;
+    }
+    return new Promise(resolve => {
+      this.queue.push(resolve);
+    });
+  },
+
+  release(): void {
+    const next = this.queue.shift();
+    if (next) {
+      next();
+    } else {
+      this.locked = false;
+    }
+  }
+};
+
+// ============================================================================
 // STATIC FILE SERVING
 // ============================================================================
 
@@ -262,8 +289,11 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
   // Faucet A: External ERC20 → user wallet
   if (pathname === '/api/faucet/erc20' && req.method === 'POST') {
+    // Acquire mutex to prevent nonce collisions
+    await faucetLock.acquire();
     try {
       if (!globalJAdapter) {
+        faucetLock.release();
         return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
       }
 
@@ -271,6 +301,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const { userAddress, tokenSymbol = 'USDC', amount = '100' } = body;
 
       if (!userAddress || !ethers.isAddress(userAddress)) {
+        faucetLock.release();
         return new Response(JSON.stringify({ error: 'Invalid userAddress' }), { status: 400, headers });
       }
 
@@ -295,15 +326,18 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         : (globalJAdapter as any).getBrowserVM?.()?.getTokenRegistry()?.find((t: any) => t.symbol === tokenSymbol)?.address;
 
       if (!tokenAddress) {
+        faucetLock.release();
         return new Response(JSON.stringify({ error: `Token ${tokenSymbol} not found` }), { status: 404, headers });
       }
 
-      // Transfer ERC20 from hub to user
+      // Transfer ERC20 from hub to user (with explicit nonce for safety)
       const ERC20_ABI = ['function transfer(address to, uint256 amount) returns (bool)'];
       const erc20 = new ethers.Contract(tokenAddress, ERC20_ABI, hubWallet);
-      const tx = await erc20.transfer(userAddress, amountWei);
+      const nonce = await hubWallet.getNonce();
+      const tx = await erc20.transfer(userAddress, amountWei, { nonce });
       await tx.wait();
 
+      faucetLock.release();
       return new Response(JSON.stringify({
         success: true,
         type: 'erc20',
@@ -313,6 +347,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         txHash: tx.hash,
       }), { headers });
     } catch (error: any) {
+      faucetLock.release();
       console.error('[FAUCET/ERC20] Error:', error);
       return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
     }
@@ -320,11 +355,15 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
   // Faucet B: Hub reserve → user reserve via processBatch
   if (pathname === '/api/faucet/reserve' && req.method === 'POST') {
+    // Acquire mutex to prevent nonce collisions
+    await faucetLock.acquire();
     try {
       if (!globalJAdapter) {
+        faucetLock.release();
         return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
       }
       if (!env) {
+        faucetLock.release();
         return new Response(JSON.stringify({ error: 'Runtime not initialized' }), { status: 503, headers });
       }
 
@@ -332,12 +371,14 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const { userEntityId, tokenId = 1, amount = '100' } = body;
 
       if (!userEntityId) {
+        faucetLock.release();
         return new Response(JSON.stringify({ error: 'Missing userEntityId' }), { status: 400, headers });
       }
 
       // Get hub from gossip (no hardcoded hub!)
       const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true && p.capabilities?.includes('faucet')) || [];
       if (hubs.length === 0) {
+        faucetLock.release();
         return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
       }
       const hubEntityId = hubs[0].entityId;
@@ -347,6 +388,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       // Use reserveToReserve via jadapter
       await globalJAdapter.reserveToReserve(hubEntityId, userEntityId, tokenId, amountWei);
 
+      faucetLock.release();
       return new Response(JSON.stringify({
         success: true,
         type: 'reserve',
@@ -356,6 +398,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         to: userEntityId.slice(0, 16) + '...',
       }), { headers });
     } catch (error: any) {
+      faucetLock.release();
       console.error('[FAUCET/RESERVE] Error:', error);
       return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
     }

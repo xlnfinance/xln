@@ -236,6 +236,29 @@ export async function createBrowserVMAdapter(
       }));
     },
 
+    async externalTokenToReserve(
+      signerPrivateKey: Uint8Array,
+      entityId: string,
+      tokenAddress: string,
+      amount: bigint
+    ): Promise<JEvent[]> {
+      // BrowserVM: Use debugFundReserves for ERC20 deposits (simulated)
+      // In BrowserVM mode, we simulate the deposit by directly funding reserves
+      // Find tokenId from registry
+      const registry = (browserVM as any).getTokenRegistry?.() || [];
+      const tokenEntry = registry.find((t: any) => t.address.toLowerCase() === tokenAddress.toLowerCase());
+      const tokenId = tokenEntry?.tokenId ?? 1; // Default to 1 (USDC) if not found
+
+      const events = await browserVM.debugFundReserves(entityId, tokenId, amount);
+      return events.map((e: any) => ({
+        name: e.name,
+        args: e.args ?? {},
+        blockNumber: e.blockNumber ?? 0,
+        blockHash: e.blockHash ?? '0x',
+        transactionHash: e.transactionHash ?? '0x',
+      }));
+    },
+
     getBrowserVM(): BrowserVMProvider | null {
       return browserVM;
     },
