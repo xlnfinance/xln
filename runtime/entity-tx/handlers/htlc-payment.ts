@@ -107,6 +107,12 @@ export async function handleHtlcPayment(
     return { newState: entityState, outputs: [] };
   }
 
+  // Validate route ends with targetEntityId
+  if (route[route.length - 1] !== targetEntityId) {
+    logError("HTLC_PAYMENT", `❌ Invalid route: end doesn't match targetEntityId`);
+    return { newState: entityState, outputs: [] };
+  }
+
   // Check if we're the final destination
   if (route.length === 1 && route[0] === targetEntityId) {
     addMessage(newState, `💰 Received HTLC payment of ${amount} (token ${tokenId})`);
@@ -134,7 +140,7 @@ export async function handleHtlcPayment(
   const minExpiryMs = totalHops * HTLC.MIN_TIMELOCK_DELTA_MS + HTLC.MIN_FORWARD_TIMELOCK_MS;
   // Use much longer expiry for test scenarios (100+ frames × 100ms = 10s+ elapsed)
   const expiryMs = Math.max(120_000, minExpiryMs);
-  const baseTimelock = BigInt(entityState.timestamp + expiryMs);
+  const baseTimelock = BigInt(newState.timestamp + expiryMs);
   // Add safety buffer for long-running test scenarios (prevent immediate expiry)
   const baseHeight = (newState.lastFinalizedJHeight || 0) + 50;
 
