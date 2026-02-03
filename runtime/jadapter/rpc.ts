@@ -279,21 +279,25 @@ export async function createRpcAdapter(
         ]);
 
         for (let tokenId = 1; tokenId < length; tokenId++) {
-          const [contractAddress, _externalTokenId, tokenType] = await depository.getTokenMetadata(tokenId);
-          if (Number(tokenType) !== 0) continue; // TypeERC20 only
+          const [contractAddress, _externalTokenId, _tokenType] = await depository.getTokenMetadata(tokenId);
 
+          // Skip zero/null addresses
+          if (contractAddress === ethers.ZeroAddress) continue;
+
+          // Try to read ERC20 metadata - if it has symbol(), treat as ERC20
           const erc20 = new ethers.Contract(contractAddress, erc20Interface, provider);
           const symbolFn = erc20.getFunction('symbol') as () => Promise<string>;
           const nameFn = erc20.getFunction('name') as () => Promise<string>;
           const decimalsFn = erc20.getFunction('decimals') as () => Promise<bigint>;
-          let symbol = `TKN${tokenId}`;
-          let name = symbol;
+          let symbol = '';
+          let name = '';
           let decimals = 18;
-          try { symbol = await symbolFn(); name = symbol; } catch { }
-          try { name = await nameFn(); } catch { }
+          try { symbol = await symbolFn(); } catch { continue; } // Skip if no symbol (not ERC20)
+          try { name = await nameFn(); } catch { name = symbol; }
           try { decimals = Number(await decimalsFn()); } catch { }
 
-          tokens.push({ symbol, name, address: contractAddress, decimals, tokenId });
+          if (!symbol) continue;
+          tokens.push({ symbol, name: name || symbol, address: contractAddress, decimals, tokenId });
         }
 
         return tokens;
