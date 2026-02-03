@@ -1090,6 +1090,11 @@ export const applyEntityFrame = async (
   // CRITICAL: Clone state to avoid mutating the input (determinism fix)
   // Without this, proposer and validator can end up with different states
   let currentEntityState = cloneEntityState(entityState);
+
+  // FIX: Set frame timestamp BEFORE running handlers (not after)
+  // Without this, HTLC timelocks use stale timestamp (1-frame lag)
+  // Handlers need current frame timestamp for correct timelock calculations
+  currentEntityState.timestamp = env.timestamp;
   const allOutputs: EntityInput[] = [];
   const allJOutputs: JInput[] = []; // Collect J-outputs
 
