@@ -70,11 +70,11 @@ const deployDefaultTokensOnRpc = async (): Promise<void> => {
     const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
     await approveTx.wait();
 
+    // Pack token reference: tokenType (8 bits) | address (160 bits) | externalTokenId (96 bits)
+    const packedToken = await depository.packTokenReference(0, tokenAddress, 0); // tokenType=0 (ERC20), externalTokenId=0
     const registerTx = await depository.connect(signer as any).externalTokenToReserve({
       entity: ethers.ZeroHash,
-      contractAddress: tokenAddress,
-      externalTokenId: 0,
-      tokenType: 0,
+      packedToken,
       internalTokenId: 0,
       amount: TOKEN_REGISTRATION_AMOUNT,
     });
