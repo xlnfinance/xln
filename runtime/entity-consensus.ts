@@ -533,7 +533,8 @@ export const applyEntityInput = async (
     // ═══════════════════════════════════════════════════════════════════════════
     // Apply txs locally, compute expected hash, reject if mismatch
     // DETERMINISM: verifyOnly=true skips account frame proposals (timestamp-dependent side effects)
-    const { newState: validatorComputedState } = await applyEntityFrame(env, workingReplica.state, proposedFrame.txs, true);
+    // DETERMINISM: Pass proposedFrame.newState.timestamp so validator uses same timestamp as proposer
+    const { newState: validatorComputedState } = await applyEntityFrame(env, workingReplica.state, proposedFrame.txs, true, proposedFrame.newState.timestamp);
     const validatorNewState = {
       ...validatorComputedState,
       entityId: workingReplica.state.entityId,
@@ -851,7 +852,8 @@ export const applyEntityInput = async (
     if (isSingleSigner) {
       console.log(`🚀 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
       // For single signer entities, directly apply transactions without consensus
-      const { newState: newEntityState, outputs: frameOutputs, jOutputs: frameJOutputs } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool);
+      // DETERMINISM: Proposer passes env.timestamp (their local time when creating the frame)
+      const { newState: newEntityState, outputs: frameOutputs, jOutputs: frameJOutputs } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool, false, env.timestamp);
       const newHeight = workingReplica.state.height + 1;
       const newTimestamp = env.timestamp;
 
@@ -896,7 +898,8 @@ export const applyEntityInput = async (
         `    🚀 Auto-propose triggered: mempool=${workingReplica.mempool.length}, isProposer=${workingReplica.isProposer}, hasProposal=${!!workingReplica.proposal}`,
       );
     // Compute new state once during proposal (outputs stored for commit-time hanko attachment)
-    const { newState: newEntityState, deterministicState: proposerDeterministicState, outputs: proposalOutputs, jOutputs: proposalJOutputs, collectedHashes } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool);
+    // DETERMINISM: Proposer passes env.timestamp (their local time when creating the frame)
+    const { newState: newEntityState, deterministicState: proposerDeterministicState, outputs: proposalOutputs, jOutputs: proposalJOutputs, collectedHashes } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool, false, env.timestamp);
 
     // CRITICAL: proposalOutputs are stored in the proposal, NOT pushed to entityOutbox yet.
     // At commit time, we use these stored outputs and attach hankos.
@@ -1072,6 +1075,9 @@ export const applyEntityFrame = async (
   // non-deterministic stateHash and entity frame hash mismatch.
   // Only the proposer (verifyOnly=false) proposes account frames.
   verifyOnly: boolean = false,
+  // DETERMINISM: Validators pass proposedFrame.newState.timestamp to match proposer's lockIds/timelocks.
+  // Proposers pass env.timestamp (their local time when creating the frame).
+  frameTimestamp?: number,
 ): Promise<{
   newState: EntityState;
   // State snapshot BEFORE account proposals (deterministic across proposer + validators)
@@ -1094,7 +1100,8 @@ export const applyEntityFrame = async (
   // FIX: Set frame timestamp BEFORE running handlers (not after)
   // Without this, HTLC timelocks use stale timestamp (1-frame lag)
   // Handlers need current frame timestamp for correct timelock calculations
-  currentEntityState.timestamp = env.timestamp;
+  // DETERMINISM: Use provided frameTimestamp (validator uses proposer's timestamp), fallback to env.timestamp
+  currentEntityState.timestamp = frameTimestamp ?? env.timestamp;
   const allOutputs: EntityInput[] = [];
   const allJOutputs: JInput[] = []; // Collect J-outputs
 
