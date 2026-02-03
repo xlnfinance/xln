@@ -273,7 +273,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           mempool: [],
           currentFrame: {
             height: 0,
-            timestamp: env.timestamp,
+            timestamp: newState.timestamp, // Entity-level timestamp for determinism
             jHeight: 0,
             accountTxs: [],
             prevFrameHash: '',
@@ -771,7 +771,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         wantTokenId,
         wantAmount,
         minFillRatio: minFillRatio ?? 0,
-        createdAt: BigInt(env.timestamp),
+        createdAt: BigInt(newState.timestamp), // Entity-level timestamp for determinism
       });
 
       const firstValidator = entityState.config.validators[0];

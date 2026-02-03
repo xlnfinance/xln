@@ -33,7 +33,7 @@ export async function handleMintReserves(
       tokenId,
       amount,
     },
-    timestamp: env.timestamp,
+    timestamp: newState.timestamp, // Entity-level timestamp for determinism
   };
 
   // Route to J-machine via standard jOutput flow

@@ -138,8 +138,8 @@ export async function handleSettlePropose(
     status: 'awaiting_counterparty',
     ...(memo && { memo }),
     version: 1,
-    createdAt: env.timestamp,
-    lastUpdatedAt: env.timestamp,
+    createdAt: newState.timestamp,
+    lastUpdatedAt: newState.timestamp,
     broadcastByLeft: !isLeft, // Counterparty (hub) broadcasts by default
   };
 
@@ -227,7 +227,7 @@ export async function handleSettleUpdate(
   if (releaseOp) mempoolOps.push(releaseOp);
   const holdOp = createSettlementHoldOp(counterpartyEntityId, diffs, newVersion, 'set');
   if (holdOp) mempoolOps.push(holdOp);
-  account.settlementWorkspace.lastUpdatedAt = env.timestamp;
+  account.settlementWorkspace.lastUpdatedAt = newState.timestamp;
   account.settlementWorkspace.status = 'awaiting_counterparty';
 
   console.log(`✅ settle_update: Workspace updated (version ${account.settlementWorkspace.version})`);
@@ -534,7 +534,7 @@ export function processSettleAction(
   settleAction: NonNullable<AccountInput['settleAction']>,
   fromEntityId: string,
   myEntityId: string,
-  env: Env
+  entityTimestamp: number // Entity-level timestamp for determinism across validators
 ): { success: boolean; message: string } {
   const { iAmLeft } = getAccountPerspective(account, myEntityId);
   const theyAreLeft = !iAmLeft;
@@ -554,8 +554,8 @@ export function processSettleAction(
         status: 'awaiting_counterparty',
         ...(settleAction.memo && { memo: settleAction.memo }),
         version: settleAction.version || 1,
-        createdAt: env.timestamp,
-        lastUpdatedAt: env.timestamp,
+        createdAt: entityTimestamp,
+        lastUpdatedAt: entityTimestamp,
         broadcastByLeft: theyAreLeft, // Initiator broadcasts
       };
 
@@ -585,7 +585,7 @@ export function processSettleAction(
       account.settlementWorkspace.forgiveTokenIds = settleAction.forgiveTokenIds || account.settlementWorkspace.forgiveTokenIds;
       if (settleAction.memo) account.settlementWorkspace.memo = settleAction.memo;
       account.settlementWorkspace.version = settleAction.version || account.settlementWorkspace.version + 1;
-      account.settlementWorkspace.lastUpdatedAt = env.timestamp;
+      account.settlementWorkspace.lastUpdatedAt = entityTimestamp;
 
       console.log(`📥 Received settle_update from ${fromEntityId.slice(-4)} (v${account.settlementWorkspace.version})`);
       return { success: true, message: `Settlement updated to v${account.settlementWorkspace.version}` };

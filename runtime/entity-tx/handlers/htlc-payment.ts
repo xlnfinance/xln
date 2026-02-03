@@ -134,7 +134,7 @@ export async function handleHtlcPayment(
   const minExpiryMs = totalHops * HTLC.MIN_TIMELOCK_DELTA_MS + HTLC.MIN_FORWARD_TIMELOCK_MS;
   // Use much longer expiry for test scenarios (100+ frames × 100ms = 10s+ elapsed)
   const expiryMs = Math.max(120_000, minExpiryMs);
-  const baseTimelock = BigInt(env.timestamp + expiryMs);
+  const baseTimelock = BigInt(entityState.timestamp + expiryMs);
   // Add safety buffer for long-running test scenarios (prevent immediate expiry)
   const baseHeight = (newState.lastFinalizedJHeight || 0) + 50;
 
@@ -142,14 +142,14 @@ export async function handleHtlcPayment(
   const revealBeforeHeight = calculateHopRevealHeight(baseHeight, hopIndex, totalHops);
 
   // Generate deterministic lockId
-  const lockId = generateLockId(hashlock, newState.height, 0, env.timestamp);
+  const lockId = generateLockId(hashlock, newState.height, 0, newState.timestamp);
 
   // Store routing info (like 2024 hashlockMap)
   newState.htlcRoutes.set(hashlock, {
     hashlock,
     outboundEntity: nextHop,
     outboundLockId: lockId,
-    createdTimestamp: env.timestamp
+    createdTimestamp: newState.timestamp
   });
 
   // Create encrypted onion envelope (privacy-preserving routing)
@@ -215,7 +215,7 @@ export async function handleHtlcPayment(
       hashlock,
       timelock,
       direction: 'outgoing',
-      createdAt: BigInt(env.timestamp),
+      createdAt: BigInt(newState.timestamp),
     });
 
     addMessage(newState,

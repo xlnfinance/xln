@@ -61,7 +61,7 @@ export async function handleJBroadcast(
 
   // Create JTx (J-machine transaction) with the batch
   // Type is ALWAYS 'batch' - the batch contains r2r, r2c, settlements, etc.
-  // Use env.timestamp for determinism (scenarios control time)
+  // Use entity timestamp for determinism across validators
   const jTx: JTx = {
     type: 'batch',
     entityId: entityState.entityId,
@@ -71,7 +71,7 @@ export async function handleJBroadcast(
       batchSize,
       ...(signerId ? { signerId } : {}),
     },
-    timestamp: env.timestamp,
+    timestamp: newState.timestamp,
   };
 
   // PROPER ROUTING: Return jInput to be queued via runtime (like E→E uses entityInput)
@@ -91,7 +91,7 @@ export async function handleJBroadcast(
   // This allows rebroadcast if tx fails and prevents premature batch clearing.
   // Settlement nonce tracking: Both sides use workspace status (symmetric).
   newState.jBatchState.broadcastCount++;
-  newState.jBatchState.lastBroadcast = env.timestamp;
+  newState.jBatchState.lastBroadcast = newState.timestamp;
   newState.jBatchState.pendingBroadcast = true; // Block new operations until finalized
 
   addMessage(newState, `📤 Created J-output (${batchSize} ops) - will queue via runtime`);
