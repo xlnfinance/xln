@@ -24,6 +24,7 @@ import { ethers } from 'ethers';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
+let jWatcherStarted = false;
 
 // ============================================================================
 // SERVER OPTIONS
@@ -44,6 +45,14 @@ const DEFAULT_OPTIONS: XlnServerOptions = {
   relaySeeds: ['wss://xln.finance/relay'],
   serverId: 'xln-server',
 };
+const ANVIL_TOKEN_CATALOG = [
+  { symbol: 'USDC', address: '0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E', decimals: 18, tokenId: 1 },
+  { symbol: 'WETH', address: '0x84eA74d481Ee0A5332c457a4d796187F6Ba67fEB', decimals: 18, tokenId: 2 },
+  { symbol: 'USDT', address: '0xa82fF9aFd8f496c3d6ac40E2a0F282E47488CFc9', decimals: 18, tokenId: 3 },
+];
+const ANVIL_TOKENS: Record<string, string> = Object.fromEntries(
+  ANVIL_TOKEN_CATALOG.map((t) => [t.symbol, t.address])
+);
 
 // ============================================================================
 // WEBSOCKET STATE
@@ -88,6 +97,7 @@ const faucetLock = {
     }
   }
 };
+let faucetNonce: number | null = null;
 
 // ============================================================================
 // STATIC FILE SERVING
@@ -283,6 +293,66 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     }), { headers });
   }
 
+  // Token catalog (for UI token list + deposits)
+  if (pathname === '/api/tokens') {
+    try {
+      if (!globalJAdapter) {
+        return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
+      }
+
+      // BrowserVM: return registry directly
+      if (globalJAdapter.mode === 'browservm') {
+        const registry = globalJAdapter.getBrowserVM?.()?.getTokenRegistry?.() || [];
+        return new Response(JSON.stringify({ tokens: registry }), { headers });
+      }
+
+      // RPC: query Depository token registry
+      const depositoryAddress = (globalJAdapter as any).addresses?.depository;
+      if (!depositoryAddress) {
+        return new Response(JSON.stringify({ error: 'Depository address not available' }), { status: 503, headers });
+      }
+
+      const provider = globalJAdapter.provider;
+      const depository = new ethers.Contract(depositoryAddress, [
+        'function getTokensLength() view returns (uint256)',
+        'function getTokenMetadata(uint256 tokenId) view returns (address contractAddress, uint96 externalTokenId, uint8 tokenType)',
+      ], provider);
+      const erc20Interface = new ethers.Interface([
+        'function symbol() view returns (string)',
+        'function decimals() view returns (uint8)',
+      ]);
+
+      const length = Number(await depository.getTokensLength());
+      const tokens: Array<{ symbol: string; address: string; decimals: number; tokenId: number }> = [];
+
+      for (let tokenId = 1; tokenId < length; tokenId++) {
+        const [contractAddress, _externalTokenId, tokenType] = await depository.getTokenMetadata(tokenId);
+        // TypeERC20 = 0; skip non-ERC20 for UI
+        if (Number(tokenType) !== 0) continue;
+
+        const erc20 = new ethers.Contract(contractAddress, erc20Interface, provider);
+        let symbol = `TKN${tokenId}`;
+        let decimals = 18;
+        try {
+          symbol = await erc20.symbol();
+        } catch { }
+        try {
+          decimals = Number(await erc20.decimals());
+        } catch { }
+        tokens.push({ symbol, address: contractAddress, decimals, tokenId });
+      }
+
+      if (tokens.length === 0 && globalJAdapter.mode === 'rpc') {
+        return new Response(JSON.stringify({ tokens: ANVIL_TOKEN_CATALOG }), { headers });
+      }
+
+      return new Response(JSON.stringify({ tokens }), { headers });
+    } catch (error: any) {
+      console.error('[API/TOKENS] Error:', error);
+      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
+    }
+  }
+
   // ============================================================================
   // FAUCET ENDPOINTS
   // ============================================================================
@@ -314,13 +384,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const hubPrivateKeyHex = '0x' + Buffer.from(hubPrivateKeyBytes).toString('hex');
       const hubWallet = new ethers.Wallet(hubPrivateKeyHex, globalJAdapter.provider);
 
-      // Token addresses from jurisdictions.json (deployed via deploy-tokens.cjs)
-      const ANVIL_TOKENS: Record<string, string> = {
-        USDC: '0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E',
-        WETH: '0x84eA74d481Ee0A5332c457a4d796187F6Ba67fEB',
-        USDT: '0xa82fF9aFd8f496c3d6ac40E2a0F282E47488CFc9',
-      };
-
       const tokenAddress = globalJAdapter.mode === 'rpc'
         ? ANVIL_TOKENS[tokenSymbol]
         : (globalJAdapter as any).getBrowserVM?.()?.getTokenRegistry()?.find((t: any) => t.symbol === tokenSymbol)?.address;
@@ -333,9 +396,25 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       // Transfer ERC20 from hub to user (with explicit nonce for safety)
       const ERC20_ABI = ['function transfer(address to, uint256 amount) returns (bool)'];
       const erc20 = new ethers.Contract(tokenAddress, ERC20_ABI, hubWallet);
-      const nonce = await hubWallet.getNonce();
+      const pendingNonce = await hubWallet.getNonce('pending');
+      if (faucetNonce === null || pendingNonce > faucetNonce) {
+        faucetNonce = pendingNonce;
+      }
+      const nonce = faucetNonce;
       const tx = await erc20.transfer(userAddress, amountWei, { nonce });
+      faucetNonce = nonce + 1;
       await tx.wait();
+
+      // Also send ETH for gas (0.01 ETH) so user can approve/deposit
+      const ethAmount = ethers.parseEther('0.01');
+      const ethNonce = faucetNonce;
+      const ethTx = await hubWallet.sendTransaction({
+        to: userAddress,
+        value: ethAmount,
+        nonce: ethNonce,
+      });
+      faucetNonce = ethNonce + 1;
+      await ethTx.wait();
 
       faucetLock.release();
       return new Response(JSON.stringify({
@@ -345,6 +424,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         tokenSymbol,
         userAddress,
         txHash: tx.hash,
+        ethTxHash: ethTx.hash,
+        ethAmount: '0.01',
       }), { headers });
     } catch (error: any) {
       faucetLock.release();
@@ -383,10 +464,30 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }
       const hubEntityId = hubs[0].entityId;
 
+      const hubSignerId = resolveEntityProposerId(env, hubEntityId, 'faucet-reserve');
       const amountWei = ethers.parseUnits(amount, 18);
+      console.log(`[FAUCET/RESERVE] Request: hub=${hubEntityId.slice(0, 16)}... signer=${hubSignerId} → user=${userEntityId.slice(0, 16)}... tokenId=${tokenId} amount=${amount}`);
 
-      // Use reserveToReserve via jadapter
-      await globalJAdapter.reserveToReserve(hubEntityId, userEntityId, tokenId, amountWei);
+      // Use entity txs (R2R + j_broadcast) instead of direct admin call
+      await runtimeProcess(env, [{
+        entityId: hubEntityId,
+        signerId: hubSignerId,
+        entityTxs: [
+          {
+            type: 'reserve_to_reserve',
+            data: {
+              toEntityId: userEntityId,
+              tokenId,
+              amount: amountWei,
+            },
+          },
+          {
+            type: 'j_broadcast',
+            data: {},
+          },
+        ],
+      }]);
+      console.log('[FAUCET/RESERVE] R2R + j_broadcast queued (waiting for J-event sync)');
 
       faucetLock.release();
       return new Response(JSON.stringify({
@@ -543,6 +644,25 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     await globalJAdapter.deployStack();
   }
 
+  // Start J-Event Watcher for RPC mode (required to sync ReserveUpdated into entityState)
+  if (!jWatcherStarted && globalJAdapter && globalJAdapter.mode !== 'browservm') {
+    try {
+      const { setupJEventWatcher } = await import('./j-event-watcher');
+      const entityProviderAddress = globalJAdapter.addresses.entityProvider;
+      const depositoryAddress = globalJAdapter.addresses.depository;
+      if (anvilRpc && entityProviderAddress && depositoryAddress) {
+        console.log(`[XLN] Starting J-Event Watcher (rpc=${anvilRpc})`);
+        await setupJEventWatcher(env, anvilRpc, entityProviderAddress, depositoryAddress);
+        jWatcherStarted = true;
+        console.log('[XLN] J-Event Watcher started ✓');
+      } else {
+        console.warn('[XLN] J-Event Watcher not started (missing RPC or contract addresses)');
+      }
+    } catch (err) {
+      console.warn('[XLN] Failed to start J-Event Watcher:', (err as Error).message);
+    }
+  }
+
   // Bootstrap hub entity (idempotent - normal entity + gossip tag)
   const { bootstrapHub } = await import('../scripts/bootstrap-hub');
   await bootstrapHub(env);
@@ -582,13 +702,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         const anvilDefaultPrivateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
         const deployer = new ethers.Wallet(anvilDefaultPrivateKey, globalJAdapter.provider);
 
-        // Token addresses from jurisdictions.json (deployed via deploy-tokens.cjs)
-        const ANVIL_TOKENS: Record<string, string> = {
-          USDC: '0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E',
-          WETH: '0x84eA74d481Ee0A5332c457a4d796187F6Ba67fEB',
-          USDT: '0xa82fF9aFd8f496c3d6ac40E2a0F282E47488CFc9',
-        };
-
         const ERC20_ABI = ['function transfer(address to, uint256 amount) returns (bool)', 'function balanceOf(address) view returns (uint256)'];
 
         // Fund hub wallet with 1B of each token
@@ -614,19 +727,23 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       }
     }
 
-    // Fund hub entity reserves in Depository
-    if (globalJAdapter.mode === 'browservm') {
-      // BrowserVM has debugFundReserves
-      await globalJAdapter.debugFundReserves(hubEntityId, 1, 1_000_000_000n * 10n ** 18n); // $1B USDC
-      console.log('[XLN] Hub reserves funded (BrowserVM debug)');
-    } else {
-      // Anvil: Use mintToReserve via admin signer
+    // Fund hub entity reserves in Depository (all registered tokens)
+    const reserveTokens = await globalJAdapter.getTokenRegistry?.().catch(() => []) ?? [];
+    const fallbackTokenIds = [1, 2, 3];
+    const tokensToFund = reserveTokens.length > 0
+      ? reserveTokens.filter(t => typeof t.tokenId === 'number')
+      : fallbackTokenIds.map(tokenId => ({ tokenId, decimals: 18 }));
+
+    for (const token of tokensToFund) {
+      const tokenId = typeof token.tokenId === 'number' ? token.tokenId : undefined;
+      if (!tokenId) continue;
+      const decimals = typeof token.decimals === 'number' ? token.decimals : 18;
+      const amount = 1_000_000_000n * 10n ** BigInt(decimals);
       try {
-        await globalJAdapter.debugFundReserves(hubEntityId, 1, 1_000_000_000n * 10n ** 18n); // $1B USDC
-        console.log('[XLN] Hub reserves funded (anvil mintToReserve)');
+        await globalJAdapter.debugFundReserves(hubEntityId, tokenId, amount);
+        console.log(`[XLN] Hub reserves funded: tokenId=${tokenId} amount=${ethers.formatUnits(amount, decimals)}`);
       } catch (err) {
-        console.warn('[XLN] Hub reserve funding failed (anvil):', (err as Error).message);
-        console.log('[XLN] This may be OK if reserves were already funded from state persistence');
+        console.warn(`[XLN] Hub reserve funding failed (tokenId=${tokenId}):`, (err as Error).message);
       }
     }
   }
