@@ -71,6 +71,37 @@ function derivePrivateKey(seed: string, index: number): string {
   return hdNode.privateKey;
 }
 
+type JurisdictionConfig = {
+  name: string;
+  chainId: number;
+  rpc: string;
+  contracts: {
+    depository: string;
+    entityProvider: string;
+    account?: string;
+    deltaTransformer?: string;
+  };
+};
+
+const resolveJurisdictionConfig = (jurisdictions: any): JurisdictionConfig => {
+  const map = jurisdictions?.jurisdictions ?? {};
+  const arrakis = map.arrakis;
+  const first = arrakis ?? Object.values(map)[0];
+  if (!first) {
+    throw new Error('No jurisdictions found in jurisdictions.json');
+  }
+  return first as JurisdictionConfig;
+};
+
+const resolveRpcUrl = (rpc: string): string => {
+  if (!rpc) throw new Error('Missing RPC URL in jurisdictions.json');
+  if (rpc.startsWith('http')) return rpc;
+  if (typeof window !== 'undefined') {
+    return new URL(rpc, window.location.origin).toString();
+  }
+  return rpc;
+};
+
 async function fundSignerWalletViaFaucet(address: string): Promise<void> {
   try {
     // Call testnet faucet API (Faucet A - ERC20 to wallet)
@@ -231,8 +262,9 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
     console.log('[VaultStore.createRuntime] Fetching jurisdictions.json...');
     const jurisdictionsResp = await fetch('https://xln.finance/jurisdictions.json');
     const jurisdictions = await jurisdictionsResp.json();
-    const testnetConfig = jurisdictions.testnet;
-    console.log('[VaultStore.createRuntime] Loaded contracts:', testnetConfig.contracts);
+    const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
+    console.log('[VaultStore.createRuntime] Loaded contracts:', arrakisConfig.contracts);
+    const rpcUrl = resolveRpcUrl(arrakisConfig.rpc);
 
     // Import testnet J-machine (shared anvil on xln.finance)
     console.log('[VaultStore.createRuntime] Importing testnet anvil...');
@@ -241,10 +273,10 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         type: 'importJ',
         data: {
           name: 'Testnet',
-          chainId: 31337,
+          chainId: arrakisConfig.chainId,
           ticker: 'USDC',
-          rpcs: ['https://xln.finance/rpc'],
-          contracts: testnetConfig.contracts, // Use pre-deployed addresses
+          rpcs: [rpcUrl],
+          contracts: arrakisConfig.contracts, // Use pre-deployed addresses
         }
       }],
       entityInputs: []
@@ -628,7 +660,8 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         console.log('[VaultStore.initialize] Fetching jurisdictions.json...');
         const jurisdictionsResp = await fetch('https://xln.finance/jurisdictions.json');
         const jurisdictions = await jurisdictionsResp.json();
-        const testnetConfig = jurisdictions.testnet;
+        const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
+        const rpcUrl = resolveRpcUrl(arrakisConfig.rpc);
 
         console.log('[VaultStore.initialize] Importing testnet anvil...');
         await xln.applyRuntimeInput(newEnv, {
@@ -636,10 +669,10 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
             type: 'importJ',
             data: {
               name: 'Testnet',
-              chainId: 31337,
+              chainId: arrakisConfig.chainId,
               ticker: 'USDC',
-              rpcs: ['https://xln.finance/rpc'],
-              contracts: testnetConfig.contracts, // Use pre-deployed addresses
+              rpcs: [rpcUrl],
+              contracts: arrakisConfig.contracts, // Use pre-deployed addresses
             }
           }],
           entityInputs: []

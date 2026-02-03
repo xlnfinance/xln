@@ -1487,29 +1487,29 @@ const main = async (): Promise<Env> => {
     }
   }
 
-  // DISABLED: J-watcher temporarily disabled (external RPC not needed for demo)
-  // Re-enable by uncommenting this block when blockchain integration is needed
-  /*
-  if (!jWatcherStarted) {
-    console.log('🔭 STARTING-JWATCHER: Snapshots loaded, starting j-watcher (non-blocking)...');
+  // Start J-watcher in browser when using external RPC (required for ReserveUpdated sync)
+  if (isBrowser) {
+    if (!jWatcherStarted) {
+      console.log('🔭 STARTING-JWATCHER: Snapshots loaded, starting j-watcher (non-blocking)...');
 
-    Promise.race([
-      startJEventWatcher(env),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('J-watcher startup timeout (3s)')), 3000))
-    ])
-      .then(() => {
-        jWatcherStarted = true;
-        console.log('🔭 JWATCHER-READY: J-watcher started successfully');
-      })
-      .catch((error) => {
-        console.warn('⚠️  J-Event Watcher startup failed or timed out (non-critical):', error.message);
-        console.warn('    UI will load anyway. Blockchain sync will retry in background.');
-      });
+      Promise.race([
+        startJEventWatcher(env),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('J-watcher startup timeout (3s)')), 3000))
+      ])
+        .then(() => {
+          jWatcherStarted = true;
+          console.log('🔭 JWATCHER-READY: J-watcher started successfully');
+        })
+        .catch((error) => {
+          console.warn('⚠️  J-Event Watcher startup failed or timed out (non-critical):', error.message);
+          console.warn('    UI will load anyway. Blockchain sync will retry in background.');
+        });
+    } else {
+      console.log('🔭 JWATCHER-SKIP: J-watcher already started, skipping');
+    }
   } else {
-    console.log('🔭 JWATCHER-SKIP: J-watcher already started, skipping');
+    console.log('🔭 J-WATCHER: Skipped in Node (server uses its own watcher)');
   }
-  */
-  console.log('🔭 J-WATCHER: Disabled (external RPC not needed for simnet demo)');
 
   return env;
 };

@@ -39,7 +39,7 @@
   let tokenBalances: TokenBalance[] = [];
   let loading = true;
   let lastUpdated: Date | null = null;
-  let refreshInterval = 30; // seconds
+  let refreshInterval = 1; // seconds
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
   const ERC20_INTERFACE: InterfaceAbi = ERC20_ABI as InterfaceAbi;
