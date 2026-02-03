@@ -13,18 +13,155 @@
  *   bun runtime/server.ts --port 9000        # Custom port
  */
 
-import { main, getEnv, process as runtimeProcess, applyRuntimeInput } from './runtime';
+import { main, process as runtimeProcess, applyRuntimeInput } from './runtime';
 import { safeStringify } from './serialization-utils';
 import type { Env, EntityInput, RuntimeInput } from './types';
 import { encodeBoard, hashBoard } from './entity-factory';
-import { registerSignerKey, deriveSignerKeySync, getCachedSignerAddress } from './account-crypto';
+import { deriveSignerKeySync } from './account-crypto';
 import { createJAdapter, type JAdapter } from './jadapter';
+import type { JTokenInfo } from './jadapter/types';
+import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
 import { ethers } from 'ethers';
+import { ERC20Mock__factory } from '../jurisdictions/typechain-types/factories/ERC20Mock__factory';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
 let jWatcherStarted = false;
+let jWatcher: any = null;
+const HUB_SEED = process.env.HUB_SEED ?? 'xln-main-hub-2026';
+
+let tokenCatalogCache: JTokenInfo[] | null = null;
+let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
+
+const getHubWallet = async (env: Env): Promise<{ hubEntityId: string; hubSignerId: string; wallet: ethers.Wallet } | null> => {
+  if (!globalJAdapter) return null;
+  const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true) || [];
+  if (hubs.length === 0) return null;
+  const hubEntityId = hubs[0].entityId;
+  const hubSignerId = resolveEntityProposerId(env, hubEntityId, 'hub-wallet');
+  const hubPrivateKeyBytes = deriveSignerKeySync(HUB_SEED, hubSignerId);
+  const hubPrivateKeyHex = '0x' + Buffer.from(hubPrivateKeyBytes).toString('hex');
+  const wallet = new ethers.Wallet(hubPrivateKeyHex, globalJAdapter.provider);
+  return { hubEntityId, hubSignerId, wallet };
+};
+
+const deployDefaultTokensOnRpc = async (): Promise<void> => {
+  if (!globalJAdapter || globalJAdapter.mode === 'browservm') return;
+  const existing = await globalJAdapter.getTokenRegistry().catch(() => []);
+  if (existing.length > 0) return;
+
+  const signer = globalJAdapter.signer;
+  const depository = globalJAdapter.depository;
+  const depositoryAddress = globalJAdapter.addresses?.depository;
+  if (!depositoryAddress) {
+    throw new Error('Depository address not available for token deployment');
+  }
+
+  console.log('[XLN] Deploying default ERC20 tokens to RPC...');
+  const erc20Factory = new ERC20Mock__factory(signer as any);
+
+  for (const token of DEFAULT_TOKEN_CATALOG) {
+    const tokenContract = await erc20Factory.deploy(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
+    await tokenContract.waitForDeployment();
+    const tokenAddress = await tokenContract.getAddress();
+    console.log(`[XLN] ${token.symbol} deployed at ${tokenAddress}`);
+
+    const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
+    await approveTx.wait();
+
+    const registerTx = await depository.connect(signer as any).externalTokenToReserve({
+      entity: ethers.ZeroHash,
+      contractAddress: tokenAddress,
+      externalTokenId: 0,
+      tokenType: 0,
+      internalTokenId: 0,
+      amount: TOKEN_REGISTRATION_AMOUNT,
+    });
+    await registerTx.wait();
+    console.log(`[XLN] Token registered: ${token.symbol} @ ${tokenAddress.slice(0, 10)}...`);
+  }
+};
+
+const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
+  if (!globalJAdapter) return [];
+  if (tokenCatalogCache && tokenCatalogCache.length > 0) return tokenCatalogCache;
+  if (tokenCatalogPromise) return tokenCatalogPromise;
+
+  tokenCatalogPromise = (async () => {
+    const current = await globalJAdapter.getTokenRegistry().catch(() => []);
+
+    // Verify tokens have actual code on-chain (not stale addresses)
+    if (current.length > 0 && globalJAdapter.mode !== 'browservm') {
+      const firstToken = current[0];
+      if (firstToken?.address) {
+        const code = await globalJAdapter.provider.getCode(firstToken.address).catch(() => '0x');
+        if (code === '0x' || code.length < 10) {
+          console.warn(`[ensureTokenCatalog] Token ${firstToken.symbol} at ${firstToken.address} has no code - deploying fresh tokens`);
+          await deployDefaultTokensOnRpc();
+          const refreshed = await globalJAdapter.getTokenRegistry().catch(() => []);
+          return refreshed;
+        }
+      }
+      return current;
+    }
+
+    if (current.length > 0 || globalJAdapter.mode === 'browservm') {
+      return current;
+    }
+
+    await deployDefaultTokensOnRpc();
+    const refreshed = await globalJAdapter.getTokenRegistry().catch(() => []);
+    return refreshed;
+  })();
+
+  const tokens = await tokenCatalogPromise;
+  tokenCatalogPromise = null;
+  if (tokens.length > 0) tokenCatalogCache = tokens;
+  return tokens;
+};
+
+const updateJurisdictionsJson = async (contracts: JAdapter['addresses'], rpcUrl?: string): Promise<void> => {
+  try {
+    const fs = await import('fs/promises');
+    const path = await import('path');
+    const candidates = [
+      path.join(process.cwd(), 'jurisdictions.json'),
+      path.join(process.cwd(), 'frontend', 'static', 'jurisdictions.json'),
+      path.join(process.cwd(), 'frontend', 'build', 'jurisdictions.json'),
+      '/var/www/html/jurisdictions.json',
+    ];
+
+    for (const filePath of candidates) {
+      try {
+        await fs.access(filePath);
+      } catch {
+        continue;
+      }
+      let data: any = {};
+      try {
+        data = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+      } catch {
+        data = {};
+      }
+      data.testnet = {
+        ...(data.testnet ?? {}),
+        chainId: 31337,
+        ...(rpcUrl ? { rpcs: [rpcUrl] } : {}),
+        contracts: {
+          account: contracts.account,
+          depository: contracts.depository,
+          entityProvider: contracts.entityProvider,
+          deltaTransformer: contracts.deltaTransformer,
+        },
+      };
+      await fs.writeFile(filePath, JSON.stringify(data, null, 2));
+      console.log(`[XLN] Updated jurisdictions.json: ${filePath}`);
+    }
+  } catch (err) {
+    console.warn('[XLN] Failed to update jurisdictions.json:', (err as Error).message);
+  }
+};
 
 // ============================================================================
 // SERVER OPTIONS
@@ -45,14 +182,7 @@ const DEFAULT_OPTIONS: XlnServerOptions = {
   relaySeeds: ['wss://xln.finance/relay'],
   serverId: 'xln-server',
 };
-const ANVIL_TOKEN_CATALOG = [
-  { symbol: 'USDC', address: '0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E', decimals: 18, tokenId: 1 },
-  { symbol: 'WETH', address: '0x84eA74d481Ee0A5332c457a4d796187F6Ba67fEB', decimals: 18, tokenId: 2 },
-  { symbol: 'USDT', address: '0xa82fF9aFd8f496c3d6ac40E2a0F282E47488CFc9', decimals: 18, tokenId: 3 },
-];
-const ANVIL_TOKENS: Record<string, string> = Object.fromEntries(
-  ANVIL_TOKEN_CATALOG.map((t) => [t.symbol, t.address])
-);
+const DEFAULT_TOKEN_CATALOG = DEFAULT_TOKENS.map((token) => ({ ...token }));
 
 // ============================================================================
 // WEBSOCKET STATE
@@ -293,6 +423,21 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     }), { headers });
   }
 
+  // J-watcher status / manual sync (ops/debug)
+  if (pathname === '/api/jwatcher/status') {
+    return new Response(JSON.stringify({
+      started: jWatcherStarted,
+      status: jWatcher?.getStatus?.() ?? null,
+    }), { headers });
+  }
+  if (pathname === '/api/jwatcher/sync' && req.method === 'POST') {
+    if (!env || !jWatcher?.syncOnce) {
+      return new Response(JSON.stringify({ error: 'J-watcher not initialized' }), { status: 503, headers });
+    }
+    await jWatcher.syncOnce(env);
+    return new Response(JSON.stringify({ success: true }), { headers });
+  }
+
   // Token catalog (for UI token list + deposits)
   if (pathname === '/api/tokens') {
     try {
@@ -300,52 +445,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
       }
 
-      // BrowserVM: return registry directly
-      if (globalJAdapter.mode === 'browservm') {
-        const registry = globalJAdapter.getBrowserVM?.()?.getTokenRegistry?.() || [];
-        return new Response(JSON.stringify({ tokens: registry }), { headers });
-      }
-
-      // RPC: query Depository token registry
-      const depositoryAddress = (globalJAdapter as any).addresses?.depository;
-      if (!depositoryAddress) {
-        return new Response(JSON.stringify({ error: 'Depository address not available' }), { status: 503, headers });
-      }
-
-      const provider = globalJAdapter.provider;
-      const depository = new ethers.Contract(depositoryAddress, [
-        'function getTokensLength() view returns (uint256)',
-        'function getTokenMetadata(uint256 tokenId) view returns (address contractAddress, uint96 externalTokenId, uint8 tokenType)',
-      ], provider);
-      const erc20Interface = new ethers.Interface([
-        'function symbol() view returns (string)',
-        'function decimals() view returns (uint8)',
-      ]);
-
-      const length = Number(await depository.getTokensLength());
-      const tokens: Array<{ symbol: string; address: string; decimals: number; tokenId: number }> = [];
-
-      for (let tokenId = 1; tokenId < length; tokenId++) {
-        const [contractAddress, _externalTokenId, tokenType] = await depository.getTokenMetadata(tokenId);
-        // TypeERC20 = 0; skip non-ERC20 for UI
-        if (Number(tokenType) !== 0) continue;
-
-        const erc20 = new ethers.Contract(contractAddress, erc20Interface, provider);
-        let symbol = `TKN${tokenId}`;
-        let decimals = 18;
-        try {
-          symbol = await erc20.symbol();
-        } catch { }
-        try {
-          decimals = Number(await erc20.decimals());
-        } catch { }
-        tokens.push({ symbol, address: contractAddress, decimals, tokenId });
-      }
-
-      if (tokens.length === 0 && globalJAdapter.mode === 'rpc') {
-        return new Response(JSON.stringify({ tokens: ANVIL_TOKEN_CATALOG }), { headers });
-      }
-
+      const tokens = await ensureTokenCatalog();
       return new Response(JSON.stringify({ tokens }), { headers });
     } catch (error: any) {
       console.error('[API/TOKENS] Error:', error);
@@ -366,6 +466,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         faucetLock.release();
         return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
       }
+      if (!env) {
+        faucetLock.release();
+        return new Response(JSON.stringify({ error: 'Runtime not initialized' }), { status: 503, headers });
+      }
 
       const body = await req.json();
       const { userAddress, tokenSymbol = 'USDC', amount = '100' } = body;
@@ -375,27 +479,43 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         return new Response(JSON.stringify({ error: 'Invalid userAddress' }), { status: 400, headers });
       }
 
-      const amountWei = ethers.parseUnits(amount, 18);
+      if (globalJAdapter.mode === 'browservm') {
+        const browserVM = globalJAdapter.getBrowserVM();
+        if (!browserVM?.fundSignerWallet) {
+          faucetLock.release();
+          return new Response(JSON.stringify({ error: 'BrowserVM faucet unavailable' }), { status: 503, headers });
+        }
+        const amountWei = ethers.parseUnits(amount, 18);
+        await (browserVM as any).fundSignerWallet(userAddress, amountWei);
+        faucetLock.release();
+        return new Response(JSON.stringify({
+          success: true,
+          type: 'erc20',
+          amount,
+          tokenSymbol,
+          userAddress,
+        }), { headers });
+      }
 
-      // Get hub's private key from default seed
-      const hubSeed = 'xln-main-hub-2026';
-      const hubSignerId = 'hub-validator';
-      const hubPrivateKeyBytes = deriveSignerKeySync(hubSeed, hubSignerId);
-      const hubPrivateKeyHex = '0x' + Buffer.from(hubPrivateKeyBytes).toString('hex');
-      const hubWallet = new ethers.Wallet(hubPrivateKeyHex, globalJAdapter.provider);
-
-      const tokenAddress = globalJAdapter.mode === 'rpc'
-        ? ANVIL_TOKENS[tokenSymbol]
-        : (globalJAdapter as any).getBrowserVM?.()?.getTokenRegistry()?.find((t: any) => t.symbol === tokenSymbol)?.address;
-
-      if (!tokenAddress) {
+      const tokens = await ensureTokenCatalog();
+      const tokenInfo = tokens.find(t => t.symbol?.toUpperCase() === tokenSymbol.toUpperCase());
+      if (!tokenInfo?.address) {
         faucetLock.release();
         return new Response(JSON.stringify({ error: `Token ${tokenSymbol} not found` }), { status: 404, headers });
       }
+      const amountWei = ethers.parseUnits(amount, tokenInfo.decimals ?? 18);
+
+      const hub = await getHubWallet(env!);
+      if (!hub) {
+        faucetLock.release();
+        return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
+      }
+
+      const hubWallet = hub.wallet;
 
       // Transfer ERC20 from hub to user (with explicit nonce for safety)
       const ERC20_ABI = ['function transfer(address to, uint256 amount) returns (bool)'];
-      const erc20 = new ethers.Contract(tokenAddress, ERC20_ABI, hubWallet);
+      const erc20 = new ethers.Contract(tokenInfo.address, ERC20_ABI, hubWallet);
       const pendingNonce = await hubWallet.getNonce('pending');
       if (faucetNonce === null || pendingNonce > faucetNonce) {
         faucetNonce = pendingNonce;
@@ -430,6 +550,64 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     } catch (error: any) {
       faucetLock.release();
       console.error('[FAUCET/ERC20] Error:', error);
+      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
+    }
+  }
+
+  // Faucet A2: Gas-only topup (for approve/deposit)
+  if (pathname === '/api/faucet/gas' && req.method === 'POST') {
+    await faucetLock.acquire();
+    try {
+      if (!globalJAdapter) {
+        faucetLock.release();
+        return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
+      }
+      if (!env) {
+        faucetLock.release();
+        return new Response(JSON.stringify({ error: 'Runtime not initialized' }), { status: 503, headers });
+      }
+
+      const body = await req.json();
+      const { userAddress, amount = '0.02' } = body;
+
+      if (!userAddress || !ethers.isAddress(userAddress)) {
+        faucetLock.release();
+        return new Response(JSON.stringify({ error: 'Invalid userAddress' }), { status: 400, headers });
+      }
+
+      // Use hub wallet for gas topups (already funded on startup)
+      const hub = await getHubWallet(env);
+      if (!hub) {
+        faucetLock.release();
+        return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
+      }
+      const hubWallet = hub.wallet;
+
+      const topupAmount = ethers.parseEther(amount);
+      const pendingNonce = await hubWallet.getNonce('pending');
+      if (faucetNonce === null || pendingNonce > faucetNonce) {
+        faucetNonce = pendingNonce;
+      }
+      const nonce = faucetNonce;
+      const tx = await hubWallet.sendTransaction({
+        to: userAddress,
+        value: topupAmount,
+        nonce,
+      });
+      faucetNonce = nonce + 1;
+      await tx.wait();
+
+      faucetLock.release();
+      return new Response(JSON.stringify({
+        success: true,
+        type: 'gas',
+        amount,
+        userAddress,
+        txHash: tx.hash,
+      }), { headers });
+    } catch (error: any) {
+      faucetLock.release();
+      console.error('[FAUCET/GAS] Error:', error);
       return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
     }
   }
@@ -488,6 +666,14 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         ],
       }]);
       console.log('[FAUCET/RESERVE] R2R + j_broadcast queued (waiting for J-event sync)');
+      if (jWatcher?.syncOnce) {
+        try {
+          await jWatcher.syncOnce(env);
+          console.log('[FAUCET/RESERVE] J-watcher syncOnce completed');
+        } catch (err) {
+          console.warn('[FAUCET/RESERVE] J-watcher syncOnce failed:', (err as Error).message);
+        }
+      }
 
       faucetLock.release();
       return new Response(JSON.stringify({
@@ -625,10 +811,18 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     const block = await globalJAdapter.provider.getBlockNumber();
     console.log(`[XLN] Anvil connected (block: ${block})`);
 
-    // Deploy contracts only if fromReplica not provided AND anvil is fresh
-    if (!fromReplica && block === 0) {
-      console.log('[XLN] Deploying contracts to anvil...');
+    const hasAddresses = !!globalJAdapter.addresses?.depository && !!globalJAdapter.addresses?.entityProvider;
+
+    // Deploy if addresses missing (fromReplica invalid or fresh chain)
+    if (!hasAddresses) {
+      console.log('[XLN] Deploying contracts to anvil (missing addresses)...');
       await globalJAdapter.deployStack();
+      await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc);
+      console.log('[XLN] Contracts deployed');
+    } else if (!fromReplica && block === 0) {
+      console.log('[XLN] Deploying contracts to anvil (fresh chain)...');
+      await globalJAdapter.deployStack();
+      await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc);
       console.log('[XLN] Contracts deployed');
     } else if (fromReplica) {
       console.log('[XLN] Using pre-deployed contracts from jurisdictions.json');
@@ -652,7 +846,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       const depositoryAddress = globalJAdapter.addresses.depository;
       if (anvilRpc && entityProviderAddress && depositoryAddress) {
         console.log(`[XLN] Starting J-Event Watcher (rpc=${anvilRpc})`);
-        await setupJEventWatcher(env, anvilRpc, entityProviderAddress, depositoryAddress);
+        jWatcher = await setupJEventWatcher(env, anvilRpc, entityProviderAddress, depositoryAddress);
         jWatcherStarted = true;
         console.log('[XLN] J-Event Watcher started ✓');
       } else {
@@ -675,75 +869,83 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   console.log(`[XLN] Found ${hubs.length} hubs in gossip`);
 
   if (hubs.length > 0 && globalJAdapter) {
-    const hubEntityId = hubs[0].entityId;
-    const hubSignerId = hubs[0].runtimeId || 'hub-validator';
-
     console.log('[XLN] Funding hub reserves...');
 
-    // Fund hub wallet address with ETH (for gas) and ERC20 tokens
-    const hubSeed = 'xln-main-hub-2026'; // TODO: Get from env or config
-    const hubPrivateKeyBytes = deriveSignerKeySync(hubSeed, hubSignerId);
-    const hubPrivateKeyHex = '0x' + Buffer.from(hubPrivateKeyBytes).toString('hex');
-    const hubWallet = new ethers.Wallet(hubPrivateKeyHex, globalJAdapter.provider);
-    const hubWalletAddress = await hubWallet.getAddress();
-
-    console.log(`[XLN] Hub wallet address: ${hubWalletAddress}`);
-
-    // Fund hub wallet if using BrowserVM
-    if (globalJAdapter.mode === 'browservm') {
-      const browserVM = globalJAdapter.getBrowserVM();
-      if (browserVM) {
-        await (browserVM as any).fundSignerWallet(hubWalletAddress, 1_000_000n * 10n ** 18n); // 1M tokens
-        console.log('[XLN] Hub wallet funded with ERC20 + ETH');
-      }
+    const hub = await getHubWallet(env);
+    if (!hub) {
+      console.warn('[XLN] Hub wallet not available (gossip missing)');
     } else {
-      // Anvil: Fund hub wallet with ERC20 tokens from deployer
-      try {
-        const anvilDefaultPrivateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80';
-        const deployer = new ethers.Wallet(anvilDefaultPrivateKey, globalJAdapter.provider);
+      const hubEntityId = hub.hubEntityId;
+      const hubWallet = hub.wallet;
+      const hubWalletAddress = await hubWallet.getAddress();
 
+      console.log(`[XLN] Hub wallet address: ${hubWalletAddress}`);
+
+      // Ensure tokens exist on RPC/anvil before funding
+      const tokenCatalog = await ensureTokenCatalog();
+
+      // Fund hub wallet if using BrowserVM
+      if (globalJAdapter.mode === 'browservm') {
+        const browserVM = globalJAdapter.getBrowserVM();
+        if (browserVM) {
+          await (browserVM as any).fundSignerWallet(hubWalletAddress, 1_000_000_000n * 10n ** 18n); // 1B tokens
+          console.log('[XLN] Hub wallet funded with ERC20 + ETH');
+        }
+      } else {
+        // RPC/anvil: Fund hub wallet with ERC20 tokens + ETH from deployer
+        const deployer = globalJAdapter.signer;
         const ERC20_ABI = ['function transfer(address to, uint256 amount) returns (bool)', 'function balanceOf(address) view returns (uint256)'];
 
         // Fund hub wallet with 1B of each token
-        for (const [symbol, tokenAddress] of Object.entries(ANVIL_TOKENS)) {
-          const erc20 = new ethers.Contract(tokenAddress, ERC20_ABI, deployer);
-          const deployerBalance = await erc20.balanceOf(deployer.address);
-          if (deployerBalance > 0n) {
-            const amountToTransfer = 1_000_000_000n * 10n ** 18n; // 1B tokens
-            const actual = deployerBalance < amountToTransfer ? deployerBalance : amountToTransfer;
-            const tx = await erc20.transfer(hubWalletAddress, actual);
-            await tx.wait();
-            console.log(`[XLN] Hub wallet funded with ${symbol}: ${ethers.formatUnits(actual, 18)}`);
+        for (const token of tokenCatalog) {
+          if (!token?.address) continue;
+          try {
+            const erc20 = new ethers.Contract(token.address, ERC20_ABI, deployer);
+            const hubBalance = await erc20.balanceOf(hubWalletAddress);
+            const targetBalance = 1_000_000_000n * 10n ** BigInt(token.decimals ?? 18);
+            if (hubBalance < targetBalance) {
+              const transferAmount = targetBalance - hubBalance;
+              const tx = await erc20.transfer(hubWalletAddress, transferAmount);
+              await tx.wait();
+              console.log(`[XLN] Hub wallet funded with ${token.symbol}: ${ethers.formatUnits(transferAmount, token.decimals ?? 18)}`);
+            }
+          } catch (err) {
+            console.warn(`[XLN] Hub wallet funding failed (${token.symbol}):`, (err as Error).message);
           }
         }
 
-        // Also fund hub wallet with ETH for gas
-        const ethAmount = ethers.parseEther('10');
-        const ethTx = await deployer.sendTransaction({ to: hubWalletAddress, value: ethAmount });
-        await ethTx.wait();
-        console.log('[XLN] Hub wallet funded with 10 ETH for gas');
-      } catch (err) {
-        console.warn('[XLN] Hub wallet funding failed (anvil):', (err as Error).message);
+        // Fund hub wallet with ETH for gas (huge amount for faucet operations)
+        try {
+          const currentEth = await globalJAdapter.provider.getBalance(hubWalletAddress);
+          const targetEth = ethers.parseEther('1000'); // 1000 ETH for faucet operations
+          console.log(`[XLN] Hub wallet current ETH: ${ethers.formatEther(currentEth)}, target: ${ethers.formatEther(targetEth)}`);
+          if (currentEth < targetEth) {
+            const topup = targetEth - currentEth;
+            const ethTx = await deployer.sendTransaction({ to: hubWalletAddress, value: topup });
+            await ethTx.wait();
+            console.log(`[XLN] Hub wallet funded with ${ethers.formatEther(topup)} ETH for gas`);
+          } else {
+            console.log('[XLN] Hub wallet already has sufficient ETH');
+          }
+        } catch (err) {
+          console.error('[XLN] Hub wallet ETH funding failed:', (err as Error).message);
+        }
+
       }
-    }
 
-    // Fund hub entity reserves in Depository (all registered tokens)
-    const reserveTokens = await globalJAdapter.getTokenRegistry?.().catch(() => []) ?? [];
-    const fallbackTokenIds = [1, 2, 3];
-    const tokensToFund = reserveTokens.length > 0
-      ? reserveTokens.filter(t => typeof t.tokenId === 'number')
-      : fallbackTokenIds.map(tokenId => ({ tokenId, decimals: 18 }));
-
-    for (const token of tokensToFund) {
-      const tokenId = typeof token.tokenId === 'number' ? token.tokenId : undefined;
-      if (!tokenId) continue;
-      const decimals = typeof token.decimals === 'number' ? token.decimals : 18;
-      const amount = 1_000_000_000n * 10n ** BigInt(decimals);
-      try {
-        await globalJAdapter.debugFundReserves(hubEntityId, tokenId, amount);
-        console.log(`[XLN] Hub reserves funded: tokenId=${tokenId} amount=${ethers.formatUnits(amount, decimals)}`);
-      } catch (err) {
-        console.warn(`[XLN] Hub reserve funding failed (tokenId=${tokenId}):`, (err as Error).message);
+      // Fund hub entity reserves in Depository (all registered tokens)
+      const reserveTokens = tokenCatalog.length > 0 ? tokenCatalog : await globalJAdapter.getTokenRegistry().catch(() => []);
+      for (const token of reserveTokens) {
+        const tokenId = typeof token.tokenId === 'number' ? token.tokenId : undefined;
+        if (!tokenId) continue;
+        const decimals = typeof token.decimals === 'number' ? token.decimals : 18;
+        const amount = 1_000_000_000n * 10n ** BigInt(decimals);
+        try {
+          await globalJAdapter.debugFundReserves(hubEntityId, tokenId, amount);
+          console.log(`[XLN] Hub reserves funded: tokenId=${tokenId} amount=${ethers.formatUnits(amount, decimals)}`);
+        } catch (err) {
+          console.warn(`[XLN] Hub reserve funding failed (tokenId=${tokenId}):`, (err as Error).message);
+        }
       }
     }
   }
