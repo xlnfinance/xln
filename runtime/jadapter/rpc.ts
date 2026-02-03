@@ -469,6 +469,72 @@ export async function createRpcAdapter(
       return events;
     },
 
+    async externalTokenToReserve(
+      signerPrivateKey: Uint8Array,
+      entityId: string,
+      tokenAddress: string,
+      amount: bigint
+    ): Promise<JEvent[]> {
+      // Create wallet from private key
+      const signerWallet = new ethers.Wallet(
+        '0x' + Buffer.from(signerPrivateKey).toString('hex'),
+        provider
+      );
+
+      // ERC20 interface for approve
+      const erc20Interface = new ethers.Interface([
+        'function approve(address spender, uint256 amount) returns (bool)',
+      ]);
+
+      // Step 1: Approve Depository to spend tokens
+      const approveTx = await signerWallet.sendTransaction({
+        to: tokenAddress,
+        data: erc20Interface.encodeFunctionData('approve', [addresses.depository, amount]),
+      });
+      await approveTx.wait();
+      console.log(`[JAdapter:rpc] Approved ${amount} tokens for Depository`);
+
+      // Step 2: Pack token reference (TypeERC20=0, address, tokenId=0)
+      // Format: bytes32 = tokenType (1 byte) + tokenId (12 bytes) + address (20 bytes)
+      // Solidity packing: (uint8 tokenType << 248) | (uint96 tokenId << 160) | address
+      const packedToken = ethers.solidityPacked(
+        ['uint8', 'uint96', 'address'],
+        [0, 0, tokenAddress]
+      );
+
+      // Step 3: Call externalTokenToReserve
+      // Connect depository with signer's wallet
+      const depositoryWithSigner = depository.connect(signerWallet as any) as typeof depository;
+      const depositTx = await depositoryWithSigner.externalTokenToReserve({
+        entity: entityId,
+        packedToken: packedToken,
+        internalTokenId: 0, // Auto-detect from registry
+        amount: amount,
+      });
+      const receipt = await depositTx.wait();
+      if (!receipt) throw new Error('Deposit failed');
+
+      // Parse events
+      const events: JEvent[] = [];
+      for (const log of receipt.logs) {
+        try {
+          const parsed = depository.interface.parseLog({ topics: log.topics as string[], data: log.data });
+          if (parsed) {
+            events.push({
+              name: parsed.name,
+              args: Object.fromEntries(Object.entries(parsed.args)),
+              blockNumber: receipt.blockNumber,
+              blockHash: receipt.blockHash,
+              transactionHash: receipt.hash,
+            });
+          }
+        } catch { }
+      }
+
+      console.log(`[JAdapter:rpc] Deposited ${amount} tokens to entity ${entityId.slice(0, 16)}...`);
+      return events;
+    },
+
     getBrowserVM(): BrowserVMProvider | null {
       return null; // RPC mode doesn't have BrowserVM
     },

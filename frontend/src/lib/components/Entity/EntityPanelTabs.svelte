@@ -160,19 +160,20 @@
   let depositingToken: string | null = null; // symbol of token being deposited
 
   // Faucet: fund entity reserves with test tokens
-  async function faucetReserves() {
+  async function faucetReserves(tokenId: number = 1) {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
 
     faucetFunding = true;
     try {
+      const tokenInfo = getTokenInfo(tokenId);
       // Faucet B: Reserve transfer (ALWAYS use prod API, no BrowserVM fake)
       const response = await fetch('https://xln.finance/api/faucet/reserve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userEntityId: entityId,
-          tokenId: 1, // USDC
+          tokenId,
           amount: '1000'
         })
       });
@@ -183,10 +184,10 @@
       }
 
       console.log('[EntityPanel] Reserve faucet success:', result);
-      toasts.success('Received 1,000 USDC in reserves!');
+      toasts.success(`Received 1,000 ${tokenInfo.symbol} in reserves!`);
 
       // Refresh reserves
-      setTimeout(() => location.reload(), 1000);
+      setTimeout(() => fetchBrowserVMReserves(), 500);
     } catch (err) {
       console.error('[EntityPanel] Reserve faucet failed:', err);
       toasts.error(`Reserve faucet failed: ${(err as Error).message}`);
@@ -687,47 +688,49 @@
       <!-- Tab Content -->
       <section class="content">
         {#if activeTab === 'external'}
-          <!-- External Tokens (ERC20 wallet balances) -->
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <!-- External Tokens (ERC20 wallet balances) - Horizontal Table -->
+          <div class="tab-header-row">
             <h4 class="section-head" style="margin: 0;">External Tokens (ERC20)</h4>
-            <button class="btn-refresh" on:click={() => fetchExternalTokens()} disabled={externalTokensLoading} style="padding: 4px 12px; cursor: pointer;">
-              {externalTokensLoading ? '⏳' : '🔄 Refresh'}
+            <button class="btn-refresh-small" on:click={() => fetchExternalTokens()} disabled={externalTokensLoading}>
+              {externalTokensLoading ? '...' : 'Refresh'}
             </button>
           </div>
-          <p class="muted wallet-address">Wallet: {tab.signerId?.slice(0, 8)}...{tab.signerId?.slice(-4)}</p>
+          <p class="muted wallet-label">Wallet: {tab.signerId?.slice(0, 8)}...{tab.signerId?.slice(-4)}</p>
 
           {#if externalTokensLoading}
-            <div class="token-list-loading">
+            <div class="loading-row">
               <div class="loading-spinner"></div>
-              <span>Loading balances...</span>
+              <span>Loading...</span>
             </div>
           {:else}
-            <div class="token-list-grid">
+            <!-- Table Header -->
+            <div class="token-table-header">
+              <span class="col-token">Token</span>
+              <span class="col-balance">Balance</span>
+              <span class="col-actions">Actions</span>
+            </div>
+            <!-- Table Rows -->
+            <div class="token-table">
               {#each externalTokens as token}
-                <div class="token-card" class:has-balance={token.balance > 0n}>
-                  <div class="token-header">
-                    <span class="token-icon" class:usdc={token.symbol === 'USDC'} class:weth={token.symbol === 'WETH'} class:usdt={token.symbol === 'USDT'}>
+                <div class="token-table-row" class:has-balance={token.balance > 0n}>
+                  <div class="col-token">
+                    <span class="token-icon-small" class:usdc={token.symbol === 'USDC'} class:weth={token.symbol === 'WETH'} class:usdt={token.symbol === 'USDT'}>
                       {token.symbol.slice(0, 1)}
                     </span>
-                    <span class="token-symbol">{token.symbol}</span>
+                    <span class="token-name">{token.symbol}</span>
                   </div>
-                  <div class="token-balance">
-                    {#if token.balance > 0n}
-                      <span class="balance-amount">{formatAmount(token.balance, token.decimals)}</span>
-                    {:else}
-                      <span class="balance-zero">0.00</span>
-                    {/if}
+                  <div class="col-balance">
+                    <span class="balance-text" class:zero={token.balance === 0n}>
+                      {formatAmount(token.balance, token.decimals)}
+                    </span>
                   </div>
-                  <div class="token-actions">
-                    {#if token.balance > 0n}
-                      <button class="btn-token-action deposit" on:click={() => depositToReserve(token)} disabled={depositingToken === token.symbol}>
-                        {depositingToken === token.symbol ? 'Depositing...' : 'Deposit to Reserve'}
-                      </button>
-                    {:else}
-                      <button class="btn-token-action faucet" on:click={() => faucetExternalTokens(token.symbol)} disabled={faucetFunding}>
-                        {faucetFunding ? 'Funding...' : 'Get from Faucet'}
-                      </button>
-                    {/if}
+                  <div class="col-actions">
+                    <button class="btn-table-action faucet" on:click={() => faucetExternalTokens(token.symbol)} disabled={faucetFunding}>
+                      {faucetFunding ? '...' : 'Faucet'}
+                    </button>
+                    <button class="btn-table-action deposit" on:click={() => depositToReserve(token)} disabled={depositingToken === token.symbol || token.balance === 0n}>
+                      {depositingToken === token.symbol ? '...' : 'Deposit'}
+                    </button>
                   </div>
                 </div>
               {/each}
@@ -735,51 +738,56 @@
           {/if}
 
         {:else if activeTab === 'reserves'}
-          <!-- Reserves Detail (Depository.sol balances) -->
-          <h4 class="section-head">On-Chain Reserves (Depository)</h4>
-          <p class="muted wallet-address">Entity: {(replica?.state?.entityId || tab.entityId)?.slice(0, 10)}...{(replica?.state?.entityId || tab.entityId)?.slice(-6)}</p>
+          <!-- Reserves Detail (Depository.sol balances) - Horizontal Table -->
+          <div class="tab-header-row">
+            <h4 class="section-head" style="margin: 0;">On-Chain Reserves</h4>
+            <button class="btn-refresh-small" on:click={() => fetchBrowserVMReserves()} disabled={reservesLoading}>
+              {reservesLoading ? '...' : 'Refresh'}
+            </button>
+          </div>
+          <p class="muted wallet-label">Entity: {(replica?.state?.entityId || tab.entityId)?.slice(0, 10)}...{(replica?.state?.entityId || tab.entityId)?.slice(-6)}</p>
 
           {#if reservesLoading}
-            <div class="token-list-loading">
+            <div class="loading-row">
               <div class="loading-spinner"></div>
-              <span>Loading reserves...</span>
+              <span>Loading...</span>
             </div>
           {:else}
-            {@const hasAnyBalance = Array.from(browserVMReserves.values()).some(b => b > 0n)}
-            <div class="token-list-grid">
+            <!-- Table Header -->
+            <div class="token-table-header">
+              <span class="col-token">Token</span>
+              <span class="col-balance">Balance</span>
+              <span class="col-value">Value</span>
+              <span class="col-actions">Actions</span>
+            </div>
+            <!-- Table Rows -->
+            <div class="token-table">
               {#each Array.from(browserVMReserves.entries()) as [tokenId, amount]}
                 {@const info = getTokenInfo(Number(tokenId))}
                 {@const value = getAssetValue(Number(tokenId), amount)}
-                <div class="token-card" class:has-balance={amount > 0n}>
-                  <div class="token-header">
-                    <span class="token-icon" class:usdc={info.symbol === 'USDC'} class:weth={info.symbol === 'WETH' || info.symbol === 'ETH'} class:usdt={info.symbol === 'USDT'}>
+                <div class="token-table-row" class:has-balance={amount > 0n}>
+                  <div class="col-token">
+                    <span class="token-icon-small" class:usdc={info.symbol === 'USDC'} class:weth={info.symbol === 'WETH' || info.symbol === 'ETH'} class:usdt={info.symbol === 'USDT'}>
                       {info.symbol.slice(0, 1)}
                     </span>
-                    <span class="token-symbol">{info.symbol}</span>
+                    <span class="token-name">{info.symbol}</span>
                   </div>
-                  <div class="token-balance">
-                    {#if amount > 0n}
-                      <span class="balance-amount">{formatAmount(amount, info.decimals)}</span>
-                      <span class="balance-value">{formatCompact(value)}</span>
-                    {:else}
-                      <span class="balance-zero">0.00</span>
-                    {/if}
+                  <div class="col-balance">
+                    <span class="balance-text" class:zero={amount === 0n}>
+                      {formatAmount(amount, info.decimals)}
+                    </span>
                   </div>
-                  <div class="token-actions">
-                    {#if amount === 0n}
-                      <button class="btn-token-action faucet" on:click={faucetReserves} disabled={faucetFunding}>
-                        {faucetFunding ? 'Funding...' : 'Get from Faucet'}
-                      </button>
-                    {:else}
-                      <span class="token-status">Available for transfers</span>
-                    {/if}
+                  <div class="col-value">
+                    <span class="value-text">{formatCompact(value)}</span>
+                  </div>
+                  <div class="col-actions">
+                    <button class="btn-table-action faucet" on:click={() => faucetReserves(Number(tokenId))} disabled={faucetFunding}>
+                      {faucetFunding ? '...' : 'Faucet'}
+                    </button>
                   </div>
                 </div>
               {/each}
             </div>
-            {#if !hasAnyBalance}
-              <p class="hint-text">No reserves yet. Use the faucet or deposit external tokens to add funds.</p>
-            {/if}
           {/if}
 
         {:else if activeTab === 'send'}
@@ -1788,5 +1796,209 @@
   .content :global(h4),
   .content :global(label) {
     color: #a8a29e !important;
+  }
+
+  /* ============================================
+     HORIZONTAL TABLE LAYOUT (External/Reserves)
+     ============================================ */
+
+  .tab-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+
+  .btn-refresh-small {
+    padding: 4px 10px;
+    background: #1c1917;
+    border: 1px solid #292524;
+    border-radius: 4px;
+    color: #78716c;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .btn-refresh-small:hover:not(:disabled) {
+    border-color: #44403c;
+    color: #a8a29e;
+  }
+
+  .btn-refresh-small:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .wallet-label {
+    margin-bottom: 12px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .loading-row {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 20px;
+    color: #57534e;
+    font-size: 12px;
+  }
+
+  /* Table Header */
+  .token-table-header {
+    display: grid;
+    grid-template-columns: 100px 1fr 80px 140px;
+    gap: 8px;
+    padding: 8px 12px;
+    background: #1c1917;
+    border-radius: 6px 6px 0 0;
+    border-bottom: 1px solid #292524;
+    font-size: 10px;
+    font-weight: 600;
+    color: #57534e;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* Table Body */
+  .token-table {
+    display: flex;
+    flex-direction: column;
+    background: #1c1917;
+    border-radius: 0 0 6px 6px;
+  }
+
+  /* Table Row */
+  .token-table-row {
+    display: grid;
+    grid-template-columns: 100px 1fr 80px 140px;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid #292524;
+    align-items: center;
+    transition: background 0.1s;
+  }
+
+  .token-table-row:last-child {
+    border-bottom: none;
+    border-radius: 0 0 6px 6px;
+  }
+
+  .token-table-row:hover {
+    background: #292524;
+  }
+
+  .token-table-row.has-balance {
+    background: linear-gradient(90deg, rgba(22, 163, 74, 0.1) 0%, transparent 100%);
+  }
+
+  .token-table-row.has-balance:hover {
+    background: linear-gradient(90deg, rgba(22, 163, 74, 0.15) 0%, #292524 100%);
+  }
+
+  /* Columns */
+  .col-token {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .col-balance {
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .col-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #57534e;
+  }
+
+  .col-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
+  /* Token Icon (small) */
+  .token-icon-small {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-weight: 600;
+    font-size: 11px;
+    color: white;
+    background: #44403c;
+    flex-shrink: 0;
+  }
+
+  .token-icon-small.usdc {
+    background: linear-gradient(135deg, #2775ca, #1e5aa8);
+  }
+
+  .token-icon-small.weth {
+    background: linear-gradient(135deg, #627eea, #4c62c7);
+  }
+
+  .token-icon-small.usdt {
+    background: linear-gradient(135deg, #26a17b, #1e8a69);
+  }
+
+  .token-name {
+    font-weight: 600;
+    font-size: 13px;
+    color: #fafaf9;
+  }
+
+  .balance-text {
+    font-size: 13px;
+    color: #e7e5e4;
+  }
+
+  .balance-text.zero {
+    color: #57534e;
+  }
+
+  .value-text {
+    font-size: 11px;
+    color: #78716c;
+  }
+
+  /* Table Action Buttons */
+  .btn-table-action {
+    padding: 5px 10px;
+    border: none;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+
+  .btn-table-action.faucet {
+    background: linear-gradient(135deg, #0ea5e9, #0284c7);
+    color: #f0f9ff;
+  }
+
+  .btn-table-action.faucet:hover:not(:disabled) {
+    background: linear-gradient(135deg, #38bdf8, #0ea5e9);
+  }
+
+  .btn-table-action.deposit {
+    background: linear-gradient(135deg, #16a34a, #15803d);
+    color: #f0fdf4;
+  }
+
+  .btn-table-action.deposit:hover:not(:disabled) {
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+  }
+
+  .btn-table-action:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 </style>
