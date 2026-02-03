@@ -407,7 +407,7 @@
       }
 
       console.log('[EntityPanel] External faucet success:', result);
-      toasts.success('Received 100 USDC in wallet!');
+      toasts.success(`Received 100 ${tokenSymbol} in wallet!`);
 
       // Refresh external tokens
       setTimeout(() => fetchExternalTokens(), 1000);
