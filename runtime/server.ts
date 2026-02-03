@@ -29,10 +29,29 @@ import { ERC20Mock__factory } from '../jurisdictions/typechain-types/factories/E
 let globalJAdapter: JAdapter | null = null;
 let jWatcherStarted = false;
 let jWatcher: any = null;
+let jWatcherProcessInterval: ReturnType<typeof setInterval> | null = null;
 const HUB_SEED = process.env.HUB_SEED ?? 'xln-main-hub-2026';
 
 let tokenCatalogCache: JTokenInfo[] | null = null;
 let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
+
+const drainJWatcherQueue = async (env: Env): Promise<void> => {
+  const pending = env.runtimeInput?.entityInputs?.length ?? 0;
+  if (pending === 0) return;
+  const toProcess = [...env.runtimeInput.entityInputs];
+  env.runtimeInput.entityInputs = [];
+  await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: toProcess });
+};
+
+const startJWatcherProcessingLoop = (env: Env): void => {
+  if (jWatcherProcessInterval) return;
+  jWatcherProcessInterval = setInterval(() => {
+    if (!env.runtimeInput?.entityInputs?.length) return;
+    drainJWatcherQueue(env).catch((err) => {
+      console.warn('[J-WATCHER] Failed to apply queued events:', (err as Error).message);
+    });
+  }, 100);
+};
 
 const getHubWallet = async (env: Env): Promise<{ hubEntityId: string; hubSignerId: string; wallet: ethers.Wallet } | null> => {
   if (!globalJAdapter) return null;
@@ -132,9 +151,11 @@ const updateJurisdictionsJson = async (contracts: JAdapter['addresses'], rpcUrl?
       '/var/www/html/jurisdictions.json',
     ];
 
+    const publicRpc = process.env.PUBLIC_RPC ?? '/rpc';
+
     for (const filePath of candidates) {
       try {
-        await fs.access(filePath);
+        await fs.access(path.dirname(filePath));
       } catch {
         continue;
       }
@@ -144,10 +165,19 @@ const updateJurisdictionsJson = async (contracts: JAdapter['addresses'], rpcUrl?
       } catch {
         data = {};
       }
-      data.testnet = {
-        ...(data.testnet ?? {}),
+      data.version = data.version ?? '1.0.0';
+      data.lastUpdated = new Date().toISOString();
+      data.defaults = data.defaults ?? {
+        timeout: 30000,
+        retryAttempts: 3,
+        gasLimit: 1_000_000,
+      };
+      if (data.testnet) delete data.testnet;
+      data.jurisdictions = data.jurisdictions ?? {};
+      data.jurisdictions.arrakis = {
+        name: 'Arrakis (Shared Anvil)',
         chainId: 31337,
-        ...(rpcUrl ? { rpcs: [rpcUrl] } : {}),
+        rpc: publicRpc,
         contracts: {
           account: contracts.account,
           depository: contracts.depository,
@@ -674,6 +704,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           console.warn('[FAUCET/RESERVE] J-watcher syncOnce failed:', (err as Error).message);
         }
       }
+      await drainJWatcherQueue(env);
 
       faucetLock.release();
       return new Response(JSON.stringify({
@@ -786,14 +817,14 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       console.log(`[XLN] Loading jurisdictions from: ${jurisdictionsPath}`);
       const jurisdictionsData = await fs.readFile(jurisdictionsPath, 'utf-8');
       const jurisdictions = JSON.parse(jurisdictionsData);
-      const testnetConfig = jurisdictions.testnet;
+      const arrakisConfig = jurisdictions?.jurisdictions?.arrakis;
 
-      if (testnetConfig?.contracts) {
+      if (arrakisConfig?.contracts) {
         fromReplica = {
-          depositoryAddress: testnetConfig.contracts.depository,
-          entityProviderAddress: testnetConfig.contracts.entityProvider,
-          contracts: testnetConfig.contracts,
-          chainId: 31337,
+          depositoryAddress: arrakisConfig.contracts.depository,
+          entityProviderAddress: arrakisConfig.contracts.entityProvider,
+          contracts: arrakisConfig.contracts,
+          chainId: arrakisConfig.chainId ?? 31337,
         } as any;
         console.log('[XLN] Loaded contract addresses from jurisdictions.json');
       }
@@ -848,6 +879,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         console.log(`[XLN] Starting J-Event Watcher (rpc=${anvilRpc})`);
         jWatcher = await setupJEventWatcher(env, anvilRpc, entityProviderAddress, depositoryAddress);
         jWatcherStarted = true;
+        startJWatcherProcessingLoop(env);
         console.log('[XLN] J-Event Watcher started ✓');
       } else {
         console.warn('[XLN] J-Event Watcher not started (missing RPC or contract addresses)');
