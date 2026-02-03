@@ -74,6 +74,7 @@ export {
 
 import type { EntityId, SignerId, ReplicaKey } from './ids';
 import type { Env, Delta, DerivedDelta, EntityProfile, JurisdictionConfig, ConsensusConfig, RuntimeInput, EntityInput } from './types';
+import type { JAdapter } from './jadapter/types';
 
 export type BrowserVMTokenInfo = {
   symbol: string;
@@ -104,7 +105,17 @@ export type BrowserVMInstance = {
   fundSignerWallet: (address: string, amount?: bigint) => Promise<void>;
   approveErc20?: (privKey: Uint8Array, tokenAddress: string, spender: string, amount: bigint) => Promise<string>;
   transferErc20?: (privKey: Uint8Array, tokenAddress: string, to: string, amount: bigint) => Promise<string>;
-  externalTokenToReserve?: (privKey: Uint8Array, entityId: string, tokenAddress: string, amount: bigint) => Promise<BrowserVMEvent[]>;
+  externalTokenToReserve?: (
+    privKey: Uint8Array,
+    entityId: string,
+    tokenAddress: string,
+    amount: bigint,
+    options?: {
+      tokenType?: number;
+      externalTokenId?: bigint;
+      internalTokenId?: number;
+    }
+  ) => Promise<BrowserVMEvent[]>;
   registerEntityWallet?: (entityId: string, privateKey: string) => void;
   // Account queries
   getAccountInfo?: (entityId: string, counterpartyId: string) => Promise<{ cooperativeNonce: bigint; disputeHash: string; disputeTimeout: bigint }>;
@@ -220,6 +231,10 @@ export interface XLNModule {
   main: () => Promise<Env>;
   process: (env: Env, inputs?: unknown[], delay?: number) => Promise<Env>;
   registerEnvChangeCallback: (callback: (env: Env) => void) => void;
+  getEnv: () => Env | null;
+  getActiveJAdapter?: (env: Env | null) => JAdapter | null;
+  processJBlockEvents?: () => Promise<void>;
+  queueEntityInput?: (entityId: string, signerId: string, txData: { type: string; [key: string]: any }) => Promise<void>;
 
   // Identity system (from ids.ts)
   parseReplicaKey: (keyString: string) => ReplicaKey;
@@ -246,6 +261,8 @@ export interface XLNModule {
 
   // Crypto key management (for HD wallet integration)
   registerSignerKey: (signerId: string, privateKey: Uint8Array) => void;
+  deriveSignerKey: (seed: Uint8Array | string, signerId: string) => Promise<Uint8Array>;
+  deriveSignerKeySync: (seed: Uint8Array | string, signerId: string) => Uint8Array;
 
   // Account utilities
   deriveDelta: (delta: Delta, isLeft: boolean) => DerivedDelta;
@@ -358,7 +375,7 @@ export interface XLNModule {
 
   // Blockchain registration
   registerNumberedEntityOnChain: (env: Env, entityId: string) => Promise<Env>;
-  connectToEthereum: () => Promise<void>;
+  connectToEthereum: (jurisdiction: JurisdictionConfig) => Promise<unknown>;
   setBrowserVMJurisdiction: (env: Env, depositoryAddress: string, browserVMInstance?: any) => void;
   getBrowserVMInstance: (env?: Env) => BrowserVMInstance | null;
 

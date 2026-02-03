@@ -1,7 +1,9 @@
 <script lang="ts">
   import { JsonRpcProvider, Wallet, Contract, parseUnits, formatUnits, isAddress, type InterfaceAbi } from 'ethers';
   import { BrowserVMEthersProvider } from '@xln/runtime/jadapter/browservm-ethers-provider';
-// Note: BrowserVMProvider is at @xln/runtime/jadapter/browservm-provider
+  import type { XLNModule } from '@xln/runtime/xln-api';
+  import type { JAdapter } from '@xln/runtime/jadapter';
+  import type { BrowserVMProvider as BrowserVMProviderImpl } from '@xln/runtime/jadapter/browservm-provider';
   import { EVM_NETWORKS, ERC20_ABI, getNetworkByChainId, type EVMNetwork, type TokenInfo } from '$lib/config/evmNetworks';
   import { getAvailableJurisdictions } from '$lib/stores/jurisdictionStore';
   import { onMount } from 'svelte';
@@ -23,8 +25,9 @@
   let useCustomToken = false;
   let availableTokens: TokenInfo[] = [];
   let browserVmTokens: TokenInfo[] = [];
-  let browserVM: any = null;
+  let browserVM: BrowserVMProviderImpl | null = null;
   let browserProvider: BrowserVMEthersProvider | null = null;
+  let cachedXLN: XLNModule | null = null;
   let isBrowserVM = false;
 
   // Form
@@ -43,20 +46,21 @@
 
   // Depository ABI (minimal)
   const DEPOSITORY_ABI = [
-    'function externalTokenToReserve((bytes32 entity, bytes32 packedToken, uint256 internalTokenId, uint256 amount) params)',
-    'function packTokenReference(uint8 tokenType, address contractAddress, uint96 externalTokenId) view returns (bytes32)',
+    'function externalTokenToReserve((bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount) params)',
   ] as const;
 
   onMount(async () => {
     await loadJurisdictions();
   });
 
-  async function ensureBrowserVM(): Promise<any> {
+  async function ensureBrowserVM(): Promise<BrowserVMProviderImpl | null> {
     if (browserVM) return browserVM;
     const { getXLN } = await import('$lib/stores/xlnStore');
-    const xln = await getXLN();
+    const xln = cachedXLN ?? await getXLN();
+    cachedXLN = xln;
     const env = xln.getEnv();
-    browserVM = xln.getActiveJAdapter?.(env);
+    const jadapter: JAdapter | null = xln.getActiveJAdapter?.(env) ?? null;
+    browserVM = (jadapter?.getBrowserVM?.() as BrowserVMProviderImpl | null) ?? null;
     if (browserVM && !browserProvider) {
       browserProvider = new BrowserVMEthersProvider(browserVM);
     }
@@ -206,15 +210,13 @@
       const depository = new Contract(depositoryAddress, DEPOSITORY_ABI as InterfaceAbi, wallet);
       const amountWei = parseUnits(amount, getTokenDecimals());
 
-      // Pack token reference: tokenType=1 (ERC20), address, externalTokenId=0
-      const packFn = depository.getFunction('packTokenReference');
-      const packedToken = await packFn(1, tokenAddr, 0);
-
       // Call externalTokenToReserve
       const depositFn = depository.getFunction('externalTokenToReserve');
       const tx = await depositFn({
         entity: entityId,
-        packedToken: packedToken,
+        contractAddress: tokenAddr,
+        externalTokenId: 0,
+        tokenType: 0, // ERC20
         internalTokenId: 0, // Let contract assign
         amount: amountWei
       });

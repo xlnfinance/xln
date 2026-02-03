@@ -146,7 +146,9 @@ struct EntityAmount {
 
 struct ExternalTokenToReserve {
   bytes32 entity; // The entity to credit. If bytes32(0), defaults to msg.sender
-  bytes32 packedToken;
+  address contractAddress;
+  uint96 externalTokenId;
+  uint8 tokenType;
   uint internalTokenId;
   uint amount;
 }

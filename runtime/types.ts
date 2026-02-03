@@ -218,6 +218,7 @@
  */
 
 import type { Profile } from './networking/gossip';
+import type { JAdapter } from './jadapter/types';
 
 export interface JurisdictionConfig {
   address: string;
@@ -1682,7 +1683,7 @@ export interface JReplica {
 
   // JAdapter instance (for balance queries, transactions, etc)
   // Works with both browservm and rpc modes
-  jadapter?: any;                         // TODO: import type { JAdapter } from './jadapter'
+  jadapter?: JAdapter;
 
   // Visual position (for 3D rendering)
   position: { x: number; y: number; z: number };
@@ -1696,6 +1697,7 @@ export interface JReplica {
     depository?: string;
     entityProvider?: string;
     account?: string;
+    deltaTransformer?: string;
   };
 
   // === SYNCED FROM DEPOSITORY.SOL ===

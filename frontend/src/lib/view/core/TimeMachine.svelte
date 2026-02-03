@@ -1,10 +1,13 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { type Writable, type Readable } from 'svelte/store';
+  import type { XLNModule } from '@xln/runtime/xln-api';
+  import type { JAdapter, BrowserVMProvider } from '@xln/runtime/jadapter';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
   import { panelBridge } from '../utils/panelBridge';
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
-  // BrowserVM accessed via window.__xlnBrowserVM (set by View.svelte)
+  import { getXLN } from '$lib/stores/xlnStore';
+  // BrowserVM resolved via JAdapter
 
   // Props: Accept both Writable and Readable stores (for global vs isolated usage)
   export let history: Writable<any[]> | Readable<any[]>;
@@ -31,6 +34,16 @@
   // BrowserVM time-travel: restore EVM state when timeIndex changes
   let lastTimeTravelIndex = -1;
   let timeTravelNonce = 0;
+  let cachedXLN: XLNModule | null = null;
+
+  async function getBrowserVMFromEnv(envValue: any): Promise<BrowserVMProvider | null> {
+    if (!envValue) return null;
+    const xln = cachedXLN ?? await getXLN();
+    cachedXLN = xln;
+    const jadapter: JAdapter | null = xln.getActiveJAdapter?.(envValue) ?? null;
+    return jadapter?.getBrowserVM?.() ?? null;
+  }
+
   $: if ($timeIndex !== lastTimeTravelIndex && $history.length > 0) {
     const targetIndex = $timeIndex === -1 ? $history.length - 1 : $timeIndex;
     const frame = $history[targetIndex];
@@ -43,11 +56,13 @@
       const hasBrowserVMState = !!browserVMState &&
         typeof browserVMState.stateRoot === 'string' &&
         Array.isArray(browserVMState.trieData);
-      const browserVM = (window as any).__xlnBrowserVM;
       const nonce = ++timeTravelNonce;
 
-      if (hasBrowserVMState && browserVM?.restoreState) {
-        (async () => {
+      (async () => {
+        const browserVM = await getBrowserVMFromEnv($env);
+        if (nonce !== timeTravelNonce) return;
+
+        if (hasBrowserVMState && browserVM?.restoreState) {
           try {
             await browserVM.restoreState(browserVMState);
             if (nonce !== timeTravelNonce) return;
@@ -65,16 +80,16 @@
                 .catch((err: any) => console.warn('[TimeMachine] timeTravel failed:', err));
             }
           }
-        })();
-      } else if (stateRoot && stateRoot.length === 32 && browserVM?.timeTravel) {
-        browserVM.timeTravel(new Uint8Array(stateRoot))
-          .then(() => {
-            if (nonce !== timeTravelNonce) return;
-            console.log(`[TimeMachine] EVM restored to frame ${targetIndex}`);
-            panelBridge.emit('time:changed', { frame: targetIndex, block: Number(jReplicas[0]?.blockNumber || 0) });
-          })
-          .catch((e: any) => console.warn('[TimeMachine] timeTravel failed:', e));
-      }
+        } else if (stateRoot && stateRoot.length === 32 && browserVM?.timeTravel) {
+          browserVM.timeTravel(new Uint8Array(stateRoot))
+            .then(() => {
+              if (nonce !== timeTravelNonce) return;
+              console.log(`[TimeMachine] EVM restored to frame ${targetIndex}`);
+              panelBridge.emit('time:changed', { frame: targetIndex, block: Number(jReplicas[0]?.blockNumber || 0) });
+            })
+            .catch((e: any) => console.warn('[TimeMachine] timeTravel failed:', e));
+        }
+      })();
     }
     lastTimeTravelIndex = $timeIndex;
   }

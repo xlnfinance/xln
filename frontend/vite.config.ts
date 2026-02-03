@@ -1,6 +1,7 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import fs from 'fs';
+import net from 'net';
 
 /**
  * HTTPS CONFIGURATION (DEV-ONLY)
@@ -39,11 +40,43 @@ if (!hasCerts) {
 	console.warn('   (Optional - only needed for local HTTPS development)');
 }
 
-export default defineConfig({
+const DEV_HOST = '0.0.0.0';
+const DEV_PORT = 8080;
+
+async function assertPortAvailable(port: number, host: string): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const server = net.createServer();
+
+		server.once('error', (err: NodeJS.ErrnoException) => {
+			if (err.code === 'EADDRINUSE') {
+				console.error(`\n❌ Port ${port} is already in use.`);
+				console.error('Please stop the process that is using it, then retry.');
+				console.error(`\nFind the process:\n  lsof -nP -iTCP:${port} -sTCP:LISTEN`);
+				console.error(`Kill it (example):\n  lsof -ti TCP:${port} | xargs kill -9\n`);
+				process.exit(1);
+			}
+			reject(err);
+		});
+
+		server.once('listening', () => {
+			server.close(() => resolve());
+		});
+
+		server.listen(port, host);
+	});
+}
+
+export default defineConfig(async ({ command }) => {
+	if (command === 'serve') {
+		await assertPortAvailable(DEV_PORT, DEV_HOST);
+	}
+
+	return {
 	plugins: [sveltekit()],
 	server: {
-		host: '0.0.0.0',
-		port: 8080,
+		host: DEV_HOST,
+		port: DEV_PORT,
+		strictPort: true,
 		// HTTPS for dev server only (nginx handles production HTTPS)
 		...(hasCerts && {
 			https: {
@@ -66,8 +99,8 @@ export default defineConfig({
 			...(hasCerts && {
 				protocol: 'wss',
 				host: 'localhost',
-				port: 8080,
-				clientPort: 8080
+				port: DEV_PORT,
+				clientPort: DEV_PORT
 			})
 		},
 		// API Proxy - Forward to server.ts faucet endpoints
@@ -101,4 +134,5 @@ export default defineConfig({
 			'$types': '../src/types.ts'
 		}
 	}
+	};
 });

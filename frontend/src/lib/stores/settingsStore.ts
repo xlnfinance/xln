@@ -7,6 +7,7 @@ const defaultSettings: Settings = {
   theme: 'dark',
   dropdownMode: 'signer-first',
   runtimeDelay: 250, // 250ms = 4 frames/second (visible lightning effects)
+  balanceRefreshMs: 1000, // Auto-refresh balances (ms)
   portfolioScale: 5000, // Default scale: $5000 max for portfolio bars
   componentStates: {},
   compactNumbers: true, // Display 1.2K instead of 1,234
@@ -92,6 +93,11 @@ const settingsOperations = {
   // Update server delay
   setServerDelay(delay: number) {
     settings.update(current => ({ ...current, runtimeDelay: delay }));
+    this.saveToStorage();
+  },
+
+  setBalanceRefreshMs(refreshMs: number) {
+    settings.update(current => ({ ...current, balanceRefreshMs: refreshMs }));
     this.saveToStorage();
   },
 
