@@ -17,6 +17,8 @@
   import settleScenarioCode from '../../../../../runtime/scenarios/settle.ts?raw';
   import { shortAddress } from '$lib/utils/format';
   import { getXLN } from '$lib/stores/xlnStore';
+  import type { XLNModule } from '@xln/runtime/xln-api';
+  import type { JAdapter } from '@xln/runtime/jadapter';
   import { activeRuntime as activeRuntimeStore } from '$lib/stores/runtimeStore';
   import { activeRuntime as activeVaultRuntime } from '$lib/stores/vaultStore';
   import SolvencyPanel from './SolvencyPanel.svelte';
@@ -77,6 +79,15 @@
 
   // CRITICAL: Check if viewing history (timeIndex >= 0 means historical frame, -1 means LIVE)
   $: isHistoryMode = $isolatedTimeIndex >= 0;
+
+  let cachedXLN: XLNModule | null = null;
+
+  async function getJAdapterFromEnv(): Promise<JAdapter | null> {
+    if (!$isolatedEnv) return null;
+    const xln = cachedXLN ?? await getXLN();
+    cachedXLN = xln;
+    return xln.getActiveJAdapter?.($isolatedEnv) ?? null;
+  }
 
   /** Guard function - blocks mutations when viewing history */
   function requireLiveMode(action: string): boolean {
@@ -189,16 +200,15 @@
       const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-      // Get BrowserVM for real on-chain minting
-      const browserVM = $isolatedEnv.browserVM;
-      if (!browserVM) {
-        throw new Error('BrowserVM not available');
+      const jadapter = await getJAdapterFromEnv();
+      if (!jadapter?.debugFundReserves) {
+        throw new Error('JAdapter not available');
       }
 
       // Mint via REAL BrowserVM call (emits ReserveUpdated event)
       const amount = BigInt(mintAmount);
       console.log(`[Architect] Calling debugFundReserves: entity=${selectedEntityForMint}, tokenId=1, amount=${amount}`);
-      const events = await browserVM.debugFundReserves(selectedEntityForMint, 1, amount);
+      const events = await jadapter.debugFundReserves(selectedEntityForMint, 1, amount);
       console.log(`[Architect] Mint emitted ${events.length} events`);
 
       // Process to capture the J-events and create a new frame
@@ -233,10 +243,9 @@
       return;
     }
 
-    // Get BrowserVM from env
-    const browserVM = $isolatedEnv.browserVM;
-    if (!browserVM) {
-      lastAction = '⚠️ BrowserVM not available';
+    const jadapter = await getJAdapterFromEnv();
+    if (!jadapter?.reserveToReserve || !jadapter?.getReserves) {
+      lastAction = '⚠️ JAdapter not available';
       return;
     }
 
@@ -249,7 +258,7 @@
 
       // Debug: check reserves before R2R
       const amount = BigInt(r2rAmount);
-      const fromReserve = await browserVM.getReserves(r2rFromEntity, 1);
+      const fromReserve = await jadapter.getReserves(r2rFromEntity, 1);
       console.log(`[Architect] DEBUG: fromEntity=${r2rFromEntity}, reserves=${fromReserve}, amount=${amount}`);
 
       if (fromReserve < amount) {
@@ -259,7 +268,7 @@
       // Call Depository.sol reserveToReserve() directly via BrowserVM
       console.log(`[Architect] Calling reserveToReserve: ${r2rFromEntity} → ${r2rToEntity}, amount=${amount}`);
 
-      const events = await browserVM.reserveToReserve(r2rFromEntity, r2rToEntity, 1, amount);
+      const events = await jadapter.reserveToReserve(r2rFromEntity, r2rToEntity, 1, amount);
       console.log(`[Architect] R2R emitted ${events.length} events`);
 
       // Process the environment to create a new frame with the J-events
@@ -352,7 +361,8 @@
 
       // Ensure env exists with seed + eReplicas
       ensureScenarioEnv(XLN, 'AHB');
-      console.log('[AHB] env.browserVM exists after ensureScenarioEnv?', !!$isolatedEnv.browserVM);
+      const jadapter = await getJAdapterFromEnv();
+      console.log('[AHB] jadapter exists after ensureScenarioEnv?', !!jadapter);
 
       // CRITICAL: Clear old state BEFORE running demo
       console.log('[Architect] BEFORE clear: eReplicas =', $isolatedEnv.eReplicas.size);

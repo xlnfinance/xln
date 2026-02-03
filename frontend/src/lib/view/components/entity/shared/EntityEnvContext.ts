@@ -86,6 +86,8 @@ export interface TokenInfo {
 export interface HistoryFrame {
   height: number;
   timestamp: number;
+  runtimeSeed?: string;
+  runtimeId?: string;
   eReplicas: Map<string, EntityReplica>;
   jReplicas?: unknown[];
   runtimeInput?: unknown;

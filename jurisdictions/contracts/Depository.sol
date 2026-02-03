@@ -130,12 +130,15 @@ contract Depository is ReentrancyGuardLite {
 
   uint8 constant TypeERC20 = 0;
   uint8 constant TypeERC721 = 1;
-  uint8 constant TypeERC1155 = 2;   
+  uint8 constant TypeERC1155 = 2;
 
+  struct TokenMetadata {
+    address contractAddress;
+    uint96 externalTokenId;
+    uint8 tokenType;
+  }
 
-
-
-  bytes32[] public _tokens;
+  TokenMetadata[] public _tokens;
   
   // Efficient token lookup: packedToken -> internalTokenId
   mapping(bytes32 => uint256) public tokenToId;
@@ -195,7 +198,7 @@ contract Depository is ReentrancyGuardLite {
     approvedEntityProviders[_entityProvider] = true;
     entityProvidersList.push(_entityProvider);
     admin = msg.sender;
-    _tokens.push(bytes32(0));
+    _tokens.push(TokenMetadata({ contractAddress: address(0), externalTokenId: 0, tokenType: TypeERC20 }));
   }
 
   function setEmergencyPause(bool isPaused) external onlyAdmin {
@@ -225,7 +228,8 @@ contract Depository is ReentrancyGuardLite {
 
   function getTokenMetadata(uint256 tokenId) external view returns (address contractAddress, uint96 externalTokenId, uint8 tokenType) {
     require(tokenId < _tokens.length, "!tok");
-    return unpackTokenReference(_tokens[tokenId]);
+    TokenMetadata memory meta = _tokens[tokenId];
+    return (meta.contractAddress, meta.externalTokenId, meta.tokenType);
   }
 
 
@@ -247,11 +251,11 @@ contract Depository is ReentrancyGuardLite {
   /// @dev Hanko is required; use unsafeProcessBatch only for admin/test flows.
   function processBatch(
     bytes calldata encodedBatch,
-    address entityProvider,
+    address entityProviderAddr,
     bytes calldata hankoData,
     uint256 nonce
-  ) external whenNotPaused nonReentrant onlyApprovedProvider(entityProvider) returns (bool completeSuccess) {
-    (bytes32 entityId, bool hankoValid) = EntityProvider(entityProvider).verifyHankoSignature(hankoData, Account.computeBatchHankoHash(DOMAIN_SEPARATOR, block.chainid, address(this), encodedBatch, nonce));
+  ) external whenNotPaused nonReentrant onlyApprovedProvider(entityProviderAddr) returns (bool completeSuccess) {
+    (bytes32 entityId, bool hankoValid) = EntityProvider(entityProviderAddr).verifyHankoSignature(hankoData, Account.computeBatchHankoHash(DOMAIN_SEPARATOR, block.chainid, address(this), encodedBatch, nonce));
     if (!hankoValid || entityId == bytes32(0)) revert E4();
     address ea = address(uint160(uint256(entityId)));
     if (nonce != entityNonces[ea] + 1) revert E2();
@@ -603,11 +607,14 @@ contract Depository is ReentrancyGuardLite {
   }
 
   function packTokenReference(uint8 tokenType, address contractAddress, uint96 externalTokenId) public pure returns (bytes32) {
-    return Account.packTokenReference(tokenType, contractAddress, externalTokenId);
+    return keccak256(abi.encode(tokenType, contractAddress, externalTokenId));
   }
 
-  function unpackTokenReference(bytes32 packed) public pure returns (address contractAddress, uint96 externalTokenId, uint8 tokenType) {
-    return Account.unpackTokenReference(packed);
+  function unpackTokenReference(bytes32 packed) public view returns (address contractAddress, uint96 externalTokenId, uint8 tokenType) {
+    uint256 tokenId = tokenToId[packed];
+    require(tokenId != 0, "!tok");
+    TokenMetadata memory meta = _tokens[tokenId];
+    return (meta.contractAddress, meta.externalTokenId, meta.tokenType);
   }
 
 
@@ -627,25 +634,33 @@ contract Depository is ReentrancyGuardLite {
     bytes32 targetEntity = params.entity == bytes32(0) ? bytes32(uint256(uint160(msg.sender))) : params.entity;
     if (params.amount == 0) revert E1();
 
+    bytes32 packedToken = packTokenReference(params.tokenType, params.contractAddress, params.externalTokenId);
+
     if (params.internalTokenId == 0) {
-      params.internalTokenId = tokenToId[params.packedToken];
+      params.internalTokenId = tokenToId[packedToken];
       if (params.internalTokenId == 0) {
-        _tokens.push(params.packedToken);
+        _tokens.push(TokenMetadata({
+          contractAddress: params.contractAddress,
+          externalTokenId: params.externalTokenId,
+          tokenType: params.tokenType
+        }));
         params.internalTokenId = _tokens.length - 1;
-        tokenToId[params.packedToken] = params.internalTokenId;
+        tokenToId[packedToken] = params.internalTokenId;
       }
     } else {
-      params.packedToken = _tokens[params.internalTokenId];
+      TokenMetadata memory meta = _tokens[params.internalTokenId];
+      params.contractAddress = meta.contractAddress;
+      params.externalTokenId = meta.externalTokenId;
+      params.tokenType = meta.tokenType;
     }
 
-    (address contractAddress, uint96 tokenId, uint8 tokenType) = unpackTokenReference(params.packedToken);
-    if (tokenType == TypeERC20) {
-      if (!IERC20(contractAddress).transferFrom(msg.sender, address(this), params.amount)) revert E3();
-    } else if (tokenType == TypeERC721) {
-      IERC721(contractAddress).transferFrom(msg.sender, address(this), uint(tokenId));
+    if (params.tokenType == TypeERC20) {
+      if (!IERC20(params.contractAddress).transferFrom(msg.sender, address(this), params.amount)) revert E3();
+    } else if (params.tokenType == TypeERC721) {
+      IERC721(params.contractAddress).transferFrom(msg.sender, address(this), uint(params.externalTokenId));
       params.amount = 1;
-    } else if (tokenType == TypeERC1155) {
-      IERC1155(contractAddress).safeTransferFrom(msg.sender, address(this), uint(tokenId), params.amount, "");
+    } else if (params.tokenType == TypeERC1155) {
+      IERC1155(params.contractAddress).safeTransferFrom(msg.sender, address(this), uint(params.externalTokenId), params.amount, "");
     }
 
     _reserves[targetEntity][params.internalTokenId] += params.amount;
@@ -657,18 +672,18 @@ contract Depository is ReentrancyGuardLite {
   function reserveToExternalToken(bytes32 entity, ReserveToExternalToken memory params) internal {
     enforceDebts(entity, params.tokenId);
 
-    (address contractAddress, uint96 tokenId, uint8 tokenType) = unpackTokenReference(_tokens[params.tokenId]);
+    TokenMetadata memory meta = _tokens[params.tokenId];
     if (_reserves[entity][params.tokenId] < params.amount) revert E3();
 
     _reserves[entity][params.tokenId] -= params.amount;
     emit ReserveUpdated(entity, params.tokenId, _reserves[entity][params.tokenId]);
 
-    if (tokenType == TypeERC20) {
-      if (!IERC20(contractAddress).transfer(address(uint160(uint256(params.receivingEntity))), params.amount)) revert E3();
-    } else if (tokenType == TypeERC721) {
-      IERC721(contractAddress).transferFrom(address(this), address(uint160(uint256(params.receivingEntity))), uint(tokenId));
-    } else if (tokenType == TypeERC1155) {
-      IERC1155(contractAddress).safeTransferFrom(address(this), address(uint160(uint256(params.receivingEntity))), uint(tokenId), params.amount, "");
+    if (meta.tokenType == TypeERC20) {
+      if (!IERC20(meta.contractAddress).transfer(address(uint160(uint256(params.receivingEntity))), params.amount)) revert E3();
+    } else if (meta.tokenType == TypeERC721) {
+      IERC721(meta.contractAddress).transferFrom(address(this), address(uint160(uint256(params.receivingEntity))), uint(meta.externalTokenId));
+    } else if (meta.tokenType == TypeERC1155) {
+      IERC1155(meta.contractAddress).safeTransferFrom(address(this), address(uint160(uint256(params.receivingEntity))), uint(meta.externalTokenId), params.amount, "");
     }
   }
   // ReserveToReserve struct is in Types.sol
@@ -1175,13 +1190,17 @@ contract Depository is ReentrancyGuardLite {
 
   // createDebt removed for size reduction
 
-  function onERC1155Received(address, address from, uint256 id, uint256 value, bytes calldata) external returns (bytes4) {
+  function onERC1155Received(address, address, uint256 id, uint256, bytes calldata) external returns (bytes4) {
     // SECURITY FIX: Don't credit here - _externalTokenToReserve:713 already credits
     // This prevents double-crediting when ERC1155.safeTransferFrom triggers this callback
     // If tokens sent directly (not via externalTokenToReserve), they will be stuck but not inflate reserves
     bytes32 packedToken = packTokenReference(TypeERC1155, msg.sender, uint96(id));
     uint256 tid = tokenToId[packedToken];
-    if (tid == 0) { _tokens.push(packedToken); tid = _tokens.length - 1; tokenToId[packedToken] = tid; }
+    if (tid == 0) {
+      _tokens.push(TokenMetadata({ contractAddress: msg.sender, externalTokenId: uint96(id), tokenType: TypeERC1155 }));
+      tid = _tokens.length - 1;
+      tokenToId[packedToken] = tid;
+    }
     // DO NOT credit reserves here to avoid double-crediting
     // _reserves[entity][tid] += value; // REMOVED
     return this.onERC1155Received.selector;

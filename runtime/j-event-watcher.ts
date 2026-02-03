@@ -811,6 +811,11 @@ export class JEventWatcher {
     };
   }
 
+  // Manual one-shot sync (debug/ops)
+  async syncOnce(env: Env): Promise<void> {
+    await this.syncAllProposerReplicas(env);
+  }
+
   private getEventTimestamp(): number {
     return this.env?.timestamp ?? 0;
   }

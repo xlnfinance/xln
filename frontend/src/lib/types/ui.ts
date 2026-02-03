@@ -68,6 +68,7 @@ export interface Settings {
   theme: ThemeName;
   dropdownMode: 'signer-first' | 'entity-first';
   runtimeDelay: number;
+  balanceRefreshMs: number;
   portfolioScale: number;
   componentStates: ComponentState;
   compactNumbers: boolean;

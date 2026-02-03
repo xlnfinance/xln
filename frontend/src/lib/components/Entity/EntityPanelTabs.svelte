@@ -6,11 +6,13 @@
 -->
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
+  import { get } from 'svelte/store';
   import { Wallet as EthersWallet, hexlify } from 'ethers';
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { history } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex, isLive, timeOperations } from '../../stores/timeStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
+  import { activeVault } from '$lib/stores/vaultStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { xlnFunctions, entityPositions } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
@@ -296,9 +298,9 @@
 
     if (tokens.length === 0) {
       const apiTokens = await fetchTokenCatalog();
-      tokens = apiTokens && apiTokens.length > 0
+      tokens = apiTokens.length > 0
         ? apiTokens.map(t => ({ ...t, balance: 0n }))
-        : KNOWN_TOKENS.map(t => ({ ...t, balance: 0n }));
+        : [];
     }
 
     tokenCatalogCache.set(cacheKey, { tokens: cloneTokenList(tokens), expiresAt: Date.now() + TOKEN_CACHE_TTL_MS });
@@ -342,19 +344,13 @@
   }
 
   // Known token addresses for RPC mode (from deploy-tokens.cjs on anvil)
-  const KNOWN_TOKENS: ExternalToken[] = [
-    { symbol: 'USDC', address: '0xE6E340D132b5f46d1e472DebcD681B2aBc16e57E', balance: 0n, decimals: 18, tokenId: 1 },
-    { symbol: 'WETH', address: '0x84eA74d481Ee0A5332c457a4d796187F6Ba67fEB', balance: 0n, decimals: 18, tokenId: 2 },
-    { symbol: 'USDT', address: '0xa82fF9aFd8f496c3d6ac40E2a0F282E47488CFc9', balance: 0n, decimals: 18, tokenId: 3 },
-  ];
-
-  async function fetchTokenCatalog(): Promise<ExternalToken[] | null> {
+  async function fetchTokenCatalog(): Promise<ExternalToken[]> {
     try {
       const response = await fetch(`${API_BASE}/api/tokens`);
-      if (!response.ok) return null;
+      if (!response.ok) return [];
       const data = await response.json();
       const tokens = Array.isArray(data?.tokens) ? data.tokens : [];
-      if (tokens.length === 0) return null;
+      if (tokens.length === 0) return [];
       return tokens.map((t: any) => ({
         symbol: t.symbol,
         address: t.address,
@@ -363,7 +359,7 @@
         tokenId: typeof t.tokenId === 'number' ? t.tokenId : undefined,
       }));
     } catch {
-      return null;
+      return [];
     }
   }
 
@@ -427,6 +423,10 @@
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = tab.signerId;
     if (!entityId || !signerId || token.balance <= 0n) return;
+    if (!activeIsLive) {
+      toasts.error('Deposit requires LIVE mode');
+      return;
+    }
 
     depositingToken = token.symbol;
     try {
@@ -439,7 +439,13 @@
       }
 
       // Get signer's private key from runtime
-      const seed = activeEnv?.runtimeSeed;
+      let seed = activeEnv?.runtimeSeed;
+      if (!seed) {
+        const vault = get(activeVault);
+        if (vault?.seed) {
+          seed = vault.seed;
+        }
+      }
       if (!seed) {
         throw new Error('No runtime seed available (unlock vault or load runtime)');
       }

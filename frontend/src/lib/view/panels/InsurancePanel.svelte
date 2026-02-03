@@ -6,7 +6,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { panelBridge } from '../utils/panelBridge';
-  // BrowserVM accessed via window.__xlnBrowserVM (set by View.svelte)
+  import { getXLN } from '$lib/stores/xlnStore';
+  import type { XLNModule } from '@xln/runtime/xln-api';
+  import type { JAdapter } from '@xln/runtime/jadapter';
   import type { Writable } from 'svelte/store';
 
   // --- PROPS (passed from View.svelte) ---
@@ -64,14 +66,31 @@
     await fetchInsuranceData();
   }
 
+  let cachedXLN: XLNModule | null = null;
+
+  async function getBrowserVMFromEnv(): Promise<any | null> {
+    const env = isolatedEnv ? $isolatedEnv : null;
+    if (!env) return null;
+    const xln = cachedXLN ?? await getXLN();
+    cachedXLN = xln;
+    const jadapter: JAdapter | null = xln.getActiveJAdapter?.(env) ?? null;
+    return jadapter?.getBrowserVM?.() ?? null;
+  }
+
   async function fetchInsuranceData() {
-    if (!selectedEntityId || !(window as any).__xlnBrowserVM.isInitialized()) return;
+    if (!selectedEntityId) return;
+    const browserVM = await getBrowserVMFromEnv();
+    if (!browserVM?.getInsuranceLines) {
+      errorMessage = 'Insurance data unavailable for this jurisdiction';
+      insuranceLines = [];
+      return;
+    }
 
     isLoading = true;
     errorMessage = null;
     try {
       // Use the function implemented by Claude to get on-chain insurance data
-      const lines = await (window as any).__xlnBrowserVM.getInsuranceLines(selectedEntityId);
+      const lines = await browserVM.getInsuranceLines(selectedEntityId);
       insuranceLines = lines.map((line: any) => ({
         ...line,
         // Convert BigInts from contract to something more usable if needed

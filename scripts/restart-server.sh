@@ -6,7 +6,7 @@
 set -e
 
 cd "$(dirname "$0")/.."
-export PATH="$HOME/.bun/bin:$PATH"
+export PATH="$HOME/.bun/bin:$HOME/.local/share/pnpm:/root/.foundry/bin:$PATH"
 
 echo "=== Restarting XLN Server ==="
 
@@ -26,7 +26,7 @@ echo "[3/4] Checking anvil..."
 if ! pgrep -x anvil > /dev/null; then
     echo "WARNING: Anvil not running! Starting it..."
     cd /root/xln/jurisdictions 2>/dev/null || cd jurisdictions 2>/dev/null || true
-    nohup anvil --port 8545 > /tmp/anvil.log 2>&1 &
+    nohup anvil --port 8545 --block-gas-limit 60000000 --code-size-limit 65536 > /tmp/anvil.log 2>&1 &
     sleep 3
     cd ..
 fi

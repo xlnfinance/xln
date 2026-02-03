@@ -20,6 +20,8 @@ import { keccak256 } from 'ethers';
 import type { Profile } from './gossip';
 import type { Env, HankoString } from '../types';
 import { signEntityHashes, verifyHankoForHash, signHashesAsSingleEntity } from '../hanko-signing';
+import { getCachedSignerPublicKey, signDigest } from '../account-crypto';
+import * as secp256k1 from '@noble/secp256k1';
 
 const PROFILE_SIGN_DOMAIN = 'xln-profile-v1';
 
@@ -109,11 +111,6 @@ export function signProfileSync(
   profile: Profile,
   signerId: string
 ): Profile {
-  // Import here to avoid circular dependency
-  // CRITICAL: Import account-crypto FIRST - it initializes hmacSha256Sync for secp256k1
-  const accountCrypto = require('../account-crypto');
-  const { getSignerPrivateKey, signDigest } = accountCrypto;
-
   const hash = computeProfileHash(profile);
 
   // Use signDigest which properly installs hmacSha256Sync before signing
@@ -158,11 +155,6 @@ export async function verifyProfileSignature(
  */
 function verifyLegacySignature(profile: Profile, signature: string): boolean {
   try {
-    // CRITICAL: Import account-crypto FIRST - it initializes hmacSha256Sync for secp256k1
-    const accountCrypto = require('../account-crypto');
-    const { getCachedSignerPublicKey } = accountCrypto;
-    const secp256k1 = require('@noble/secp256k1');
-
     const hash = computeProfileHash(profile);
     const hashBytes = Buffer.from(hash.replace('0x', ''), 'hex');
 

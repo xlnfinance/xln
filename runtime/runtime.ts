@@ -21,6 +21,7 @@ function signerToEntityId(address: string): string {
 import { getPerfMs, getWallClockMs } from './utils';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { isLeftEntity } from './entity-id-utils';
+import type { JAdapter } from './jadapter';
 import {
   createLazyEntity,
   createNumberedEntity,

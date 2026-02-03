@@ -68,13 +68,11 @@ library Account {
   }
 
   function packTokenReference(uint8 tokenType, address contractAddress, uint96 externalTokenId) external pure returns (bytes32) {
-    return bytes32(uint256(tokenType)) << 248 | bytes32(uint256(uint160(contractAddress))) << 96 | bytes32(uint256(externalTokenId));
+    return keccak256(abi.encode(tokenType, contractAddress, externalTokenId));
   }
 
-  function unpackTokenReference(bytes32 packed) external pure returns (address contractAddress, uint96 externalTokenId, uint8 tokenType) {
-    tokenType = uint8(uint256(packed) >> 248);
-    contractAddress = address(uint160(uint256(packed) >> 96));
-    externalTokenId = uint96(uint256(packed));
+  function unpackTokenReference(bytes32) external pure returns (address, uint96, uint8) {
+    revert("!unpack");
   }
 
   function encodeDisputeHash(

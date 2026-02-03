@@ -28,7 +28,9 @@ export interface JBatch {
   }>;
   externalTokenToReserve: Array<{
     entity: string;
-    packedToken: string;
+    contractAddress: string;
+    externalTokenId: bigint;
+    tokenType: number;
     internalTokenId: number;
     amount: bigint;
   }>;
@@ -215,7 +217,7 @@ const DEPOSITORY_BATCH_ABI =
     'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements,' +
     'tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts,' +
     'tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 finalCooperativeNonce, uint256 initialDisputeNonce, uint256 finalDisputeNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations,' +
-    'tuple(bytes32 entity, bytes32 packedToken, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve,' +
+    'tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve,' +
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken,' +
     'tuple(address transformer, bytes32 secret)[] revealSecrets,' +
     'uint256 hub_id' +
