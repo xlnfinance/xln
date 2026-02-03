@@ -5,7 +5,8 @@
   Clean fintech design with proper form inputs.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
+  import { Wallet as EthersWallet, hexlify } from 'ethers';
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { history } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex, isLive, timeOperations } from '../../stores/timeStore';
@@ -60,6 +61,20 @@
   let selectedJurisdictionName: string | null = null;
   let activityCount = 0;
   let addressCopied = false;
+  const API_BASE = 'https://xln.finance';
+  const REFRESH_OPTIONS = [
+    { label: 'Off', value: 0 },
+    { label: '1s', value: 1000 },
+    { label: '5s', value: 5000 },
+    { label: '15s', value: 15000 },
+    { label: '30s', value: 30000 },
+    { label: '60s', value: 60000 },
+  ];
+
+  function updateBalanceRefresh(event: Event) {
+    const target = event.target as HTMLSelectElement;
+    settingsOperations.setBalanceRefreshMs(Number(target.value));
+  }
 
   // Copy address to clipboard
   async function copyAddress() {
@@ -142,10 +157,18 @@
   let newContactName = '';
   let newContactId = '';
 
-  // BrowserVM reserves (fetched directly from on-chain state)
-  let browserVMReserves: Map<number, bigint> = new Map();
+  // On-chain reserves (from entityState; no RPC reads)
+  let onchainReserves: Map<number, bigint> = new Map();
   let reservesLoading = true;
   let faucetFunding = false;
+  let pendingReserveFaucet: {
+    tokenId: number;
+    amount: bigint;
+    prevBalance: bigint;
+    startedAt: number;
+    symbol: string;
+  } | null = null;
+  const RESERVE_FAUCET_TIMEOUT_MS = 15000;
 
   // External tokens (ERC20 balances held by signer EOA)
   interface ExternalToken {
@@ -153,7 +176,7 @@
     address: string;
     balance: bigint;
     decimals: number;
-    tokenId: number;
+    tokenId?: number;
   }
   let externalTokens: ExternalToken[] = [];
   let externalTokensLoading = true;
@@ -163,18 +186,26 @@
   async function faucetReserves(tokenId: number = 1) {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
+    if (pendingReserveFaucet) {
+      toasts.error('Reserve faucet already pending. Wait for on-chain update.');
+      return;
+    }
 
     faucetFunding = true;
     try {
       const tokenInfo = getTokenInfo(tokenId);
+      const amountUnits = 1000n;
+      const decimals = BigInt(tokenInfo.decimals ?? 18);
+      const amountWei = amountUnits * 10n ** decimals;
+      const prevBalance = onchainReserves.get(tokenId) ?? 0n;
       // Faucet B: Reserve transfer (ALWAYS use prod API, no BrowserVM fake)
-      const response = await fetch('https://xln.finance/api/faucet/reserve', {
+      const response = await fetch(`${API_BASE}/api/faucet/reserve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userEntityId: entityId,
           tokenId,
-          amount: '1000'
+          amount: amountUnits.toString()
         })
       });
 
@@ -183,11 +214,15 @@
         throw new Error(result.error || 'Faucet failed');
       }
 
-      console.log('[EntityPanel] Reserve faucet success:', result);
-      toasts.success(`Received 1,000 ${tokenInfo.symbol} in reserves!`);
-
-      // Refresh reserves
-      setTimeout(() => fetchBrowserVMReserves(), 500);
+      console.log('[EntityPanel] Reserve faucet request queued:', result);
+      pendingReserveFaucet = {
+        tokenId,
+        amount: amountWei,
+        prevBalance,
+        startedAt: Date.now(),
+        symbol: tokenInfo.symbol,
+      };
+      toasts.info(`Reserve faucet requested for ${tokenInfo.symbol}. Waiting for on-chain update...`);
     } catch (err) {
       console.error('[EntityPanel] Reserve faucet failed:', err);
       toasts.error(`Reserve faucet failed: ${(err as Error).message}`);
@@ -203,7 +238,7 @@
     faucetFunding = true;
     try {
       // Faucet C: Offchain payment (requires account with hub)
-      const response = await fetch('https://xln.finance/api/faucet/offchain', {
+      const response = await fetch(`${API_BASE}/api/faucet/offchain`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -231,32 +266,74 @@
     }
   }
 
-  async function fetchBrowserVMReserves() {
-    const entityId = replica?.state?.entityId || tab.entityId;
-    if (!entityId) return;
+  const TOKEN_CACHE_TTL_MS = 60_000;
+  const tokenCatalogCache = new Map<string, { tokens: ExternalToken[]; expiresAt: number }>();
 
+  function cloneTokenList(tokens: ExternalToken[]): ExternalToken[] {
+    return tokens.map(t => ({ ...t, balance: 0n }));
+  }
+
+  async function getTokenList(jadapter: any): Promise<ExternalToken[]> {
+    const cacheKey = String(jadapter?.chainId ?? 'unknown');
+    const cached = tokenCatalogCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cloneTokenList(cached.tokens);
+    }
+
+    let tokens: ExternalToken[] = [];
+    if (jadapter?.getTokenRegistry) {
+      const registry = await jadapter.getTokenRegistry();
+      if (registry?.length) {
+        tokens = registry.map((t: any) => ({
+          symbol: t.symbol,
+          address: t.address,
+          balance: 0n,
+          decimals: typeof t.decimals === 'number' ? t.decimals : 18,
+          tokenId: typeof t.tokenId === 'number' ? t.tokenId : undefined,
+        }));
+      }
+    }
+
+    if (tokens.length === 0) {
+      const apiTokens = await fetchTokenCatalog();
+      tokens = apiTokens && apiTokens.length > 0
+        ? apiTokens.map(t => ({ ...t, balance: 0n }))
+        : KNOWN_TOKENS.map(t => ({ ...t, balance: 0n }));
+    }
+
+    tokenCatalogCache.set(cacheKey, { tokens: cloneTokenList(tokens), expiresAt: Date.now() + TOKEN_CACHE_TTL_MS });
+    return cloneTokenList(tokens);
+  }
+
+  async function fetchOnchainReserves() {
     try {
-      const { getXLN } = await import('$lib/stores/xlnStore');
-      const xln = await getXLN();
-      // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
-      const jadapter = xln.getActiveJAdapter?.(activeEnv);
-      if (!jadapter?.getReserves) {
-        reservesLoading = false;
-        return;
+      const newReserves = new Map<number, bigint>();
+      const defaultTokenIds = [1, 2, 3];
+      for (const tokenId of defaultTokenIds) {
+        newReserves.set(tokenId, 0n);
       }
 
-      const newReserves = new Map<number, bigint>();
-      // Fetch USDC, WETH, USDT (tokens 1, 2, 3) - include ALL tokens even with 0 balance
-      for (const tokenId of [1, 2, 3]) {
-        try {
-          const balance = await jadapter.getReserves(entityId, tokenId);
-          newReserves.set(tokenId, balance);
-        } catch (err) {
-          // Token might not be registered, set to 0
-          newReserves.set(tokenId, 0n);
+      const reserves = replica?.state?.reserves;
+      if (reserves) {
+        for (const [tokenId, amount] of reserves.entries()) {
+          const numericId = Number(tokenId);
+          if (!Number.isNaN(numericId)) {
+            newReserves.set(numericId, amount);
+          }
         }
       }
-      browserVMReserves = newReserves;
+      onchainReserves = newReserves;
+      if (pendingReserveFaucet) {
+        const { tokenId, amount, prevBalance, startedAt, symbol } = pendingReserveFaucet;
+        const current = newReserves.get(tokenId) ?? 0n;
+        if (current >= prevBalance + amount) {
+          toasts.success(`Received ${formatAmount(amount, getTokenInfo(tokenId).decimals)} ${symbol} in reserves!`);
+          pendingReserveFaucet = null;
+        } else if (Date.now() - startedAt > RESERVE_FAUCET_TIMEOUT_MS) {
+          toasts.error(`Reserve faucet timed out for ${symbol}. Check server logs.`);
+          pendingReserveFaucet = null;
+        }
+      }
       reservesLoading = false;
     } catch (err) {
       console.error('[EntityPanel] Failed to fetch reserves:', err);
@@ -271,6 +348,25 @@
     { symbol: 'USDT', address: '0xa82fF9aFd8f496c3d6ac40E2a0F282E47488CFc9', balance: 0n, decimals: 18, tokenId: 3 },
   ];
 
+  async function fetchTokenCatalog(): Promise<ExternalToken[] | null> {
+    try {
+      const response = await fetch(`${API_BASE}/api/tokens`);
+      if (!response.ok) return null;
+      const data = await response.json();
+      const tokens = Array.isArray(data?.tokens) ? data.tokens : [];
+      if (tokens.length === 0) return null;
+      return tokens.map((t: any) => ({
+        symbol: t.symbol,
+        address: t.address,
+        balance: 0n,
+        decimals: typeof t.decimals === 'number' ? t.decimals : 18,
+        tokenId: typeof t.tokenId === 'number' ? t.tokenId : undefined,
+      }));
+    } catch {
+      return null;
+    }
+  }
+
   // Fetch external tokens (ERC20 balances for signer) - works for both BrowserVM and RPC modes
   async function fetchExternalTokens() {
     const signerId = tab.signerId;
@@ -283,52 +379,38 @@
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
       // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
-      const jadapter = xln.getActiveJAdapter?.(activeEnv);
+      const jadapter = xln.getActiveJAdapter?.(activeEnv as any);
 
-      // Get token list - either from BrowserVM registry or known hardcoded list
-      let tokenList: ExternalToken[];
-      const browserVM = jadapter?.getBrowserVM?.();
-      if (browserVM?.getTokenRegistry) {
-        // BrowserVM mode - use registry
-        const registry = browserVM.getTokenRegistry();
-        tokenList = registry.map((t: any) => ({
-          symbol: t.symbol,
-          address: t.address,
-          balance: 0n,
-          decimals: t.decimals,
-          tokenId: t.tokenId,
-        }));
-      } else {
-        // RPC mode - use known tokens
-        tokenList = KNOWN_TOKENS.map(t => ({ ...t, balance: 0n }));
-      }
-
-      // Query ERC20 balances via ethers provider
-      const provider = jadapter?.provider;
-      if (!provider) {
-        // Fallback: try to use browserVM getErc20Balance
-        if (browserVM?.getErc20Balance) {
-          for (const token of tokenList) {
-            try {
-              token.balance = await browserVM.getErc20Balance(token.address, signerId);
-            } catch { }
-          }
-        }
+      const tokenList = await getTokenList(jadapter);
+      if (!jadapter?.getErc20Balance) {
         externalTokens = tokenList;
         externalTokensLoading = false;
         return;
       }
 
-      // Query balances via ERC20 balanceOf
-      const ERC20_ABI = ['function balanceOf(address owner) view returns (uint256)'];
-      const { ethers } = await import('ethers');
-
-      for (const token of tokenList) {
+      if (jadapter.getErc20Balances) {
         try {
-          const erc20 = new ethers.Contract(token.address, ERC20_ABI, provider);
-          token.balance = await erc20.balanceOf(signerId);
+          const balances = await jadapter.getErc20Balances(tokenList.map(t => t.address), signerId);
+          balances.forEach((balance: bigint, idx: number) => {
+            if (tokenList[idx]) tokenList[idx].balance = balance;
+          });
         } catch (err) {
-          console.warn(`[EntityPanel] Failed to fetch ${token.symbol} balance:`, err);
+          console.warn('[EntityPanel] Batch balance fetch failed, falling back to per-token:', err);
+          for (const token of tokenList) {
+            try {
+              token.balance = await jadapter.getErc20Balance(token.address, signerId);
+            } catch (innerErr) {
+              console.warn(`[EntityPanel] Failed to fetch ${token.symbol} balance:`, innerErr);
+            }
+          }
+        }
+      } else {
+        for (const token of tokenList) {
+          try {
+            token.balance = await jadapter.getErc20Balance(token.address, signerId);
+          } catch (err) {
+            console.warn(`[EntityPanel] Failed to fetch ${token.symbol} balance:`, err);
+          }
         }
       }
 
@@ -351,22 +433,43 @@
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
       // CRITICAL: Use activeEnv from context, NOT xln.getEnv() which returns wrong module-level env
-      const jadapter = xln.getActiveJAdapter?.(activeEnv);
+      const jadapter = xln.getActiveJAdapter?.(activeEnv as any);
       if (!jadapter?.externalTokenToReserve) {
         throw new Error('J-adapter deposit not available');
       }
 
       // Get signer's private key from runtime
-      const runtime = xln.getRuntime?.();
-      const seed = runtime?.seed;
+      const seed = activeEnv?.runtimeSeed;
       if (!seed) {
-        throw new Error('No runtime seed available');
+        throw new Error('No runtime seed available (unlock vault or load runtime)');
       }
 
-      // Use the XLN runtime's exposed crypto function
-      const privKey = xln.getCachedSignerPrivateKey?.(seed, signerId);
+      const privKey = xln.deriveSignerKeySync?.(seed, signerId);
       if (!privKey) {
         throw new Error('Cannot derive signer private key');
+      }
+      xln.registerSignerKey?.(signerId, privKey);
+
+      // Ensure signer has gas for approve/deposit (RPC mode only)
+      if (jadapter?.mode !== 'browservm') {
+        let ownerAddress = signerId;
+        try {
+          ownerAddress = new EthersWallet(hexlify(privKey)).address;
+        } catch {
+          // Fallback to signerId if wallet derivation fails
+        }
+        try {
+          await fetch(`${API_BASE}/api/faucet/gas`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              userAddress: ownerAddress,
+              amount: '0.02',
+            }),
+          });
+        } catch (err) {
+          console.warn('[EntityPanel] Gas faucet failed (continuing):', err);
+        }
       }
 
       // Deposit all available balance
@@ -375,7 +478,7 @@
       console.log(`[EntityPanel] Deposited ${token.symbol} to entity reserves`);
 
       // Refresh both balances
-      await Promise.all([fetchBrowserVMReserves(), fetchExternalTokens()]);
+      await Promise.all([fetchOnchainReserves(), fetchExternalTokens()]);
     } catch (err) {
       console.error('[EntityPanel] Deposit failed:', err);
       toasts.error(`Deposit failed: ${(err as Error).message}`);
@@ -392,7 +495,7 @@
     faucetFunding = true;
     try {
       // Faucet A: ERC20 to wallet (ALWAYS use prod API, no BrowserVM fake)
-      const response = await fetch('https://xln.finance/api/faucet/erc20', {
+      const response = await fetch(`${API_BASE}/api/faucet/erc20`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -420,26 +523,38 @@
     }
   }
 
-  // Refetch balances when entity/signer changes
-  $: if (tab.entityId) {
-    fetchBrowserVMReserves();
-  }
-  $: if (tab.signerId) {
+  function refreshBalances() {
+    fetchOnchainReserves();
     fetchExternalTokens();
   }
+
+  let lastEntityId = '';
+  let lastSignerId = '';
+  $: if (tab.entityId !== lastEntityId || tab.signerId !== lastSignerId) {
+    lastEntityId = tab.entityId || '';
+    lastSignerId = tab.signerId || '';
+    refreshBalances();
+  }
+
+  let refreshTimer: ReturnType<typeof setInterval> | null = null;
+  $: {
+    if (refreshTimer) clearInterval(refreshTimer);
+    const refreshMs = $settings.balanceRefreshMs ?? 1000;
+    if (refreshMs > 0) {
+      refreshTimer = setInterval(() => refreshBalances(), refreshMs);
+    }
+  }
+
+  onDestroy(() => {
+    if (refreshTimer) clearInterval(refreshTimer);
+  });
 
   onMount(() => {
     const saved = localStorage.getItem('xln-contacts');
     if (saved) contacts = JSON.parse(saved);
 
-    // Fetch reserves and external tokens on mount and periodically
-    fetchBrowserVMReserves();
-    fetchExternalTokens();
-    const interval = setInterval(() => {
-      fetchBrowserVMReserves();
-      fetchExternalTokens();
-    }, 5000);
-    return () => clearInterval(interval);
+    // Fetch reserves and external tokens on mount
+    refreshBalances();
   });
 
   function saveContact() {
@@ -486,13 +601,57 @@
     return numericAmount * price;
   }
 
-  function calculatePortfolioValue(reserves: Map<string, bigint>): number {
+  function calculatePortfolioValue(reserves: Map<number | string, bigint>): number {
     let total = 0;
     for (const [tokenId, amount] of reserves.entries()) {
       total += getAssetValue(Number(tokenId), amount);
     }
     return total;
   }
+
+  // Calculate totals for the three buckets
+  $: externalTotal = (() => {
+    let total = 0;
+    for (const token of externalTokens) {
+      if (token.balance > 0n) {
+        const tokenId = token.tokenId ?? (token.symbol === 'USDC' ? 1 : token.symbol === 'WETH' ? 2 : 3);
+        total += getAssetValue(tokenId, token.balance);
+      }
+    }
+    return total;
+  })();
+
+  $: reservesTotal = calculatePortfolioValue(onchainReserves);
+
+  $: accountsData = (() => {
+    let collateral = 0;
+    let credit = 0;
+    let count = 0;
+    if (replica?.state?.accounts) {
+      for (const [_, account] of replica.state.accounts.entries()) {
+        count++;
+        if (account.deltas) {
+          for (const [tokenId, delta] of account.deltas.entries()) {
+            const info = getTokenInfo(Number(tokenId));
+            const divisor = BigInt(10) ** BigInt(info.decimals);
+            const price = Number(tokenId) === 1 ? 1 : 2500;
+            // Collateral is what we've put in
+            if (delta.collateral > 0n) {
+              collateral += (Number(delta.collateral) / Number(divisor)) * price;
+            }
+            // Credit is positive delta (what counterparty owes us)
+            const totalDelta = delta.ondelta + delta.offdelta;
+            if (totalDelta > 0n) {
+              credit += (Number(totalDelta) / Number(divisor)) * price;
+            }
+          }
+        }
+      }
+    }
+    return { collateral, credit, count, total: collateral + credit };
+  })();
+
+  $: netWorth = externalTotal + reservesTotal + accountsData.total;
 
   // Handlers
   function handleEntitySelect(event: CustomEvent) {
@@ -607,63 +766,57 @@
       </div>
 
     {:else if replica}
-      <!-- Entity Identity -->
-      <section class="entity-identity">
-        <div class="identity-row">
+      <!-- Hero: Entity + Net Worth -->
+      <section class="hero">
+        <div class="hero-left">
           {#if avatarUrl}
-            <img src={avatarUrl} alt="Entity avatar" class="entity-avatar" />
+            <img src={avatarUrl} alt="Entity avatar" class="hero-avatar" />
           {:else}
-            <div class="entity-avatar placeholder">
+            <div class="hero-avatar placeholder">
               {activeXlnFunctions?.getEntityShortId?.(tab.entityId)?.slice(0,2) || '??'}
             </div>
           {/if}
-          <div class="identity-info">
-            <span class="entity-name">
-              Entity #{activeXlnFunctions?.getEntityShortId?.(tab.entityId) || '?'}
-            </span>
-            <button class="address-row" on:click={copyAddress} title="Click to copy full address">
-              <span class="address-text">{formatAddress(replica?.state?.entityId || tab.entityId)}</span>
+          <div class="hero-identity">
+            <span class="hero-name">Entity #{activeXlnFunctions?.getEntityShortId?.(tab.entityId) || '?'}</span>
+            <button class="hero-address" on:click={copyAddress} title="Copy address">
+              <span>{formatAddress(replica?.state?.entityId || tab.entityId)}</span>
               {#if addressCopied}
-                <Check size={12} class="copy-icon copied" />
+                <Check size={10} />
               {:else}
-                <Copy size={12} class="copy-icon" />
+                <Copy size={10} />
               {/if}
             </button>
           </div>
         </div>
+        <div class="hero-right">
+          <div class="hero-networth">{formatCompact(netWorth)}</div>
+          <div class="hero-label">Net Worth</div>
+        </div>
       </section>
 
-      <!-- Portfolio Summary -->
-      <section class="portfolio">
-        {#if browserVMReserves.size > 0}
-          {@const portfolioValue = calculatePortfolioValue(browserVMReserves)}
-          <div class="total-value">{formatCompact(portfolioValue)}</div>
-          <div class="total-label">Total Reserves</div>
-          <div class="token-list">
-            {#each Array.from(browserVMReserves.entries()) as [tokenId, amount]}
-              {@const info = getTokenInfo(Number(tokenId))}
-              {@const value = getAssetValue(Number(tokenId), amount)}
-              {@const pct = portfolioValue > 0 ? (value / portfolioValue) * 100 : 0}
-              <div class="token-row">
-                <span class="t-symbol" class:eth={info.symbol === 'ETH'} class:usd={info.symbol !== 'ETH'}>
-                  {info.symbol}
-                </span>
-                <span class="t-amount">{formatAmount(amount, info.decimals)}</span>
-                <div class="t-bar"><div class="t-fill" style="width:{pct}%"></div></div>
-                <span class="t-value">{formatCompact(value)}</span>
-              </div>
-            {/each}
+      <!-- Breakdown Cards -->
+      <section class="breakdown">
+        <button class="breakdown-card" class:active={activeTab === 'external'} on:click={() => activeTab = 'external'}>
+          <div class="card-value">{formatCompact(externalTotal)}</div>
+          <div class="card-label">External</div>
+          <div class="card-sub">{externalTokens.filter(t => t.balance > 0n).length} tokens</div>
+        </button>
+        <button class="breakdown-card" class:active={activeTab === 'reserves'} on:click={() => activeTab = 'reserves'}>
+          <div class="card-value">{formatCompact(reservesTotal)}</div>
+          <div class="card-label">Reserves</div>
+          <div class="card-sub">{Array.from(onchainReserves.values()).filter(v => v > 0n).length} tokens</div>
+        </button>
+        <button class="breakdown-card wide" class:active={activeTab === 'accounts'} on:click={() => activeTab = 'accounts'}>
+          <div class="card-value">{formatCompact(accountsData.total)}</div>
+          <div class="card-label">Accounts</div>
+          <div class="card-sub">
+            {#if accountsData.count > 0}
+              {accountsData.count} channel{accountsData.count !== 1 ? 's' : ''}
+            {:else}
+              No channels
+            {/if}
           </div>
-        {:else if reservesLoading}
-          <div class="total-value dim">Loading...</div>
-          <div class="total-label">Fetching reserves</div>
-        {:else}
-          <div class="total-value dim">$0.00</div>
-          <div class="total-label">No reserves</div>
-          <button class="btn-faucet" on:click={faucetReserves} disabled={faucetFunding}>
-            {faucetFunding ? 'Funding...' : '💧 Get Test Funds'}
-          </button>
-        {/if}
+        </button>
       </section>
 
       <!-- Tab Bar -->
@@ -691,9 +844,16 @@
           <!-- External Tokens (ERC20 wallet balances) - Horizontal Table -->
           <div class="tab-header-row">
             <h4 class="section-head" style="margin: 0;">External Tokens (ERC20)</h4>
-            <button class="btn-refresh-small" on:click={() => fetchExternalTokens()} disabled={externalTokensLoading}>
-              {externalTokensLoading ? '...' : 'Refresh'}
-            </button>
+            <div class="header-actions">
+              <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 1000} on:change={updateBalanceRefresh}>
+                {#each REFRESH_OPTIONS as opt}
+                  <option value={opt.value}>{opt.label}</option>
+                {/each}
+              </select>
+              <button class="btn-refresh-small" on:click={() => fetchExternalTokens()} disabled={externalTokensLoading}>
+                {externalTokensLoading ? '...' : 'Refresh'}
+              </button>
+            </div>
           </div>
           <p class="muted wallet-label">Wallet: {tab.signerId?.slice(0, 8)}...{tab.signerId?.slice(-4)}</p>
 
@@ -729,7 +889,7 @@
                       {faucetFunding ? '...' : 'Faucet'}
                     </button>
                     <button class="btn-table-action deposit" on:click={() => depositToReserve(token)} disabled={depositingToken === token.symbol || token.balance === 0n}>
-                      {depositingToken === token.symbol ? '...' : 'Deposit'}
+                      {depositingToken === token.symbol ? '...' : 'Deposit to Reserve'}
                     </button>
                   </div>
                 </div>
@@ -741,9 +901,16 @@
           <!-- Reserves Detail (Depository.sol balances) - Horizontal Table -->
           <div class="tab-header-row">
             <h4 class="section-head" style="margin: 0;">On-Chain Reserves</h4>
-            <button class="btn-refresh-small" on:click={() => fetchBrowserVMReserves()} disabled={reservesLoading}>
-              {reservesLoading ? '...' : 'Refresh'}
-            </button>
+            <div class="header-actions">
+              <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 1000} on:change={updateBalanceRefresh}>
+                {#each REFRESH_OPTIONS as opt}
+                  <option value={opt.value}>{opt.label}</option>
+                {/each}
+              </select>
+              <button class="btn-refresh-small" on:click={() => fetchOnchainReserves()} disabled={reservesLoading}>
+                {reservesLoading ? '...' : 'Refresh'}
+              </button>
+            </div>
           </div>
           <p class="muted wallet-label">Entity: {(replica?.state?.entityId || tab.entityId)?.slice(0, 10)}...{(replica?.state?.entityId || tab.entityId)?.slice(-6)}</p>
 
@@ -762,7 +929,7 @@
             </div>
             <!-- Table Rows -->
             <div class="token-table">
-              {#each Array.from(browserVMReserves.entries()) as [tokenId, amount]}
+              {#each Array.from(onchainReserves.entries()) as [tokenId, amount]}
                 {@const info = getTokenInfo(Number(tokenId))}
                 {@const value = getAssetValue(Number(tokenId), amount)}
                 <div class="token-table-row" class:has-balance={amount > 0n}>
@@ -781,7 +948,7 @@
                     <span class="value-text">{formatCompact(value)}</span>
                   </div>
                   <div class="col-actions">
-                    <button class="btn-table-action faucet" on:click={() => faucetReserves(Number(tokenId))} disabled={faucetFunding}>
+                    <button class="btn-table-action faucet" on:click={() => faucetReserves(Number(tokenId))} disabled={faucetFunding || !!pendingReserveFaucet}>
                       {faucetFunding ? '...' : 'Faucet'}
                     </button>
                   </div>
@@ -1018,81 +1185,145 @@
     margin-bottom: 12px;
   }
 
-  /* Entity Identity */
-  .entity-identity {
-    padding: 16px;
-    border-bottom: 1px solid #1c1917;
+  /* Hero Section - Entity + Net Worth */
+  .hero {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: linear-gradient(180deg, #1c1917 0%, #0c0a09 100%);
+    border-bottom: 1px solid #292524;
   }
 
-  .identity-row {
+  .hero-left {
     display: flex;
     align-items: center;
     gap: 12px;
   }
 
-  .entity-avatar {
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
+  .hero-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
     background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
     flex-shrink: 0;
   }
 
-  .entity-avatar.placeholder {
+  .hero-avatar.placeholder {
     display: flex;
     align-items: center;
     justify-content: center;
     font-family: 'JetBrains Mono', monospace;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     color: #0c0a09;
   }
 
-  .identity-info {
+  .hero-identity {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    min-width: 0;
+    gap: 2px;
   }
 
-  .entity-name {
+  .hero-name {
+    font-size: 14px;
+    font-weight: 600;
+    color: #fafaf9;
+  }
+
+  .hero-address {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 6px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: #78716c;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .hero-address:hover {
+    background: #292524;
+    color: #a8a29e;
+  }
+
+  .hero-right {
+    text-align: right;
+  }
+
+  .hero-networth {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 28px;
+    font-weight: 600;
+    color: #fafaf9;
+    letter-spacing: -0.5px;
+  }
+
+  .hero-label {
+    font-size: 11px;
+    color: #78716c;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* Breakdown Cards */
+  .breakdown {
+    display: flex;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #1c1917;
+  }
+
+  .breakdown-card {
+    flex: 1;
+    padding: 12px;
+    background: #1c1917;
+    border: 1px solid #292524;
+    border-radius: 8px;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .breakdown-card:hover {
+    border-color: #44403c;
+    background: #292524;
+  }
+
+  .breakdown-card.active {
+    border-color: #fbbf24;
+    background: linear-gradient(135deg, rgba(251, 191, 36, 0.1) 0%, transparent 100%);
+  }
+
+  .breakdown-card.wide {
+    flex: 1.2;
+  }
+
+  .card-value {
+    font-family: 'JetBrains Mono', monospace;
     font-size: 16px;
     font-weight: 600;
     color: #fafaf9;
   }
 
-  .address-row {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .address-row:hover {
-    border-color: #fbbf24;
-    background: #292524;
-  }
-
-  .address-text {
-    font-family: 'JetBrains Mono', monospace;
+  .card-label {
     font-size: 11px;
+    font-weight: 500;
     color: #a8a29e;
+    margin-top: 2px;
   }
 
-  .address-row :global(.copy-icon) {
-    color: #78716c;
+  .card-sub {
+    font-size: 10px;
+    color: #57534e;
+    margin-top: 4px;
   }
 
-  .address-row :global(.copy-icon.copied) {
-    color: #22c55e;
-  }
-
-  /* Portfolio */
+  /* Portfolio - legacy, keep btn-faucet for tab content */
   .portfolio {
     padding: 20px 16px;
     text-align: center;
@@ -1807,6 +2038,27 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 8px;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .auto-refresh-select {
+    padding: 4px 8px;
+    background: #1c1917;
+    border: 1px solid #292524;
+    border-radius: 4px;
+    color: #a8a29e;
+    font-size: 11px;
+    cursor: pointer;
+  }
+
+  .auto-refresh-select:focus {
+    outline: none;
+    border-color: #44403c;
   }
 
   .btn-refresh-small {
