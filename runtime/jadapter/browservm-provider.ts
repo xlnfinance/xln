@@ -20,21 +20,13 @@ import { ethers } from 'ethers';
 import { safeStringify } from '../serialization-utils.js';
 import { deriveSignerKeySync, getCachedSignerPrivateKey } from '../account-crypto.js';
 import { isLeftEntity, normalizeEntityId } from '../entity-id-utils';
+import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, DEFAULT_SIGNER_FAUCET, TOKEN_REGISTRATION_AMOUNT } from './default-tokens';
 
-const DEFAULT_TOKEN_DECIMALS = 18;
-const DEFAULT_TOKEN_SUPPLY = 1_000_000_000_000n * 10n ** 18n; // 1T tokens
-const DEFAULT_SIGNER_FAUCET = 1_000_000_000n * 10n ** 18n; // 1B tokens
-const TOKEN_REGISTRATION_AMOUNT = 1n;
 const BLOCK_GAS_LIMIT = 200_000_000n; // Simnet headroom for large deploys/batches
-const DEFAULT_TOKENS = [
-  { symbol: 'USDC', name: 'USD Coin', decimals: DEFAULT_TOKEN_DECIMALS },
-  { symbol: 'WETH', name: 'Wrapped Ether', decimals: DEFAULT_TOKEN_DECIMALS },
-  { symbol: 'USDT', name: 'Tether USD', decimals: DEFAULT_TOKEN_DECIMALS },
-];
 
 // CONTRACT_VERSION - increment when contract ABI/encoding changes to invalidate cached EVM state
-// 2025-01-21: v2 - Added depositoryAddress to dispute/settlement hash encodings
-const CONTRACT_VERSION = 2;
+// 2025-02-03: v3 - Token reference hashing + ExternalTokenToReserve struct update
+const CONTRACT_VERSION = 3;
 
 /** EVM event emitted from the BrowserVM */
 export interface EVMEvent {
@@ -448,7 +440,9 @@ export class BrowserVMProvider {
 
     const callData = this.depositoryInterface!.encodeFunctionData('externalTokenToReserve', [{
       entity: ethers.ZeroHash,
-      packedToken,
+      contractAddress: tokenAddress,
+      externalTokenId: 0,
+      tokenType: 0,
       internalTokenId: 0,
       amount: TOKEN_REGISTRATION_AMOUNT,
     }]);
@@ -560,12 +554,27 @@ export class BrowserVMProvider {
     return result.txHash;
   }
 
-  async externalTokenToReserve(privKey: Uint8Array, entityId: string, tokenAddress: string, amount: bigint): Promise<EVMEvent[]> {
-    const packedToken = await this.packTokenReference(0, tokenAddress, 0);
+  async externalTokenToReserve(
+    privKey: Uint8Array,
+    entityId: string,
+    tokenAddress: string,
+    amount: bigint,
+    options?: {
+      tokenType?: number;
+      externalTokenId?: bigint;
+      internalTokenId?: number;
+    }
+  ): Promise<EVMEvent[]> {
+    const tokenType = options?.tokenType ?? 0;
+    const externalTokenIdRaw = options?.externalTokenId ?? 0n;
+    const externalTokenId = typeof externalTokenIdRaw === 'bigint' ? externalTokenIdRaw : BigInt(externalTokenIdRaw);
+    const internalTokenId = options?.internalTokenId ?? 0;
     const callData = this.depositoryInterface!.encodeFunctionData('externalTokenToReserve', [{
       entity: entityId,
-      packedToken,
-      internalTokenId: 0,
+      contractAddress: tokenAddress,
+      externalTokenId,
+      tokenType,
+      internalTokenId,
       amount,
     }]);
 
