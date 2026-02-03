@@ -16,7 +16,7 @@ import { EntityProvider__factory } from '../../jurisdictions/typechain-types/fac
 import { DeltaTransformer__factory } from '../../jurisdictions/typechain-types/factories/DeltaTransformer__factory';
 
 import type { BrowserVMState } from '../types';
-import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, InsuranceReg } from './types';
+import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, InsuranceReg, JTokenInfo } from './types';
 import { computeAccountKey, entityIdToAddress } from './helpers';
 import type { BrowserVMProvider } from './browservm-provider';
 
@@ -149,6 +149,34 @@ export async function createBrowserVMAdapter(
       return info.registrationBlock !== 0n;
     },
 
+    async getTokenRegistry(): Promise<JTokenInfo[]> {
+      const registry = (browserVM as any).getTokenRegistry?.() || [];
+      return registry.map((t: any) => ({
+        symbol: t.symbol,
+        name: t.name,
+        address: t.address,
+        decimals: typeof t.decimals === 'number' ? t.decimals : 18,
+        tokenId: typeof t.tokenId === 'number' ? t.tokenId : undefined,
+      }));
+    },
+
+    async getErc20Balance(tokenAddress: string, owner: string): Promise<bigint> {
+      if ((browserVM as any).getErc20Balance) {
+        return browserVM.getErc20Balance(tokenAddress, owner);
+      }
+      const erc20 = new ethers.Contract(tokenAddress, ['function balanceOf(address owner) view returns (uint256)'], provider);
+      const balanceOf = erc20.getFunction('balanceOf') as (owner: string) => Promise<bigint>;
+      return balanceOf(owner);
+    },
+
+    async getErc20Balances(tokenAddresses: string[], owner: string): Promise<bigint[]> {
+      const balances: bigint[] = [];
+      for (const tokenAddress of tokenAddresses) {
+        balances.push(await adapter.getErc20Balance(tokenAddress, owner));
+      }
+      return balances;
+    },
+
     // === WRITE METHODS ===
 
     async processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JBatchReceipt> {
@@ -240,16 +268,27 @@ export async function createBrowserVMAdapter(
       signerPrivateKey: Uint8Array,
       entityId: string,
       tokenAddress: string,
-      amount: bigint
+      amount: bigint,
+      options?: {
+        tokenType?: number;
+        externalTokenId?: bigint;
+        internalTokenId?: number;
+      }
     ): Promise<JEvent[]> {
-      // BrowserVM: Use debugFundReserves for ERC20 deposits (simulated)
-      // In BrowserVM mode, we simulate the deposit by directly funding reserves
-      // Find tokenId from registry
-      const registry = (browserVM as any).getTokenRegistry?.() || [];
-      const tokenEntry = registry.find((t: any) => t.address.toLowerCase() === tokenAddress.toLowerCase());
-      const tokenId = tokenEntry?.tokenId ?? 1; // Default to 1 (USDC) if not found
+      const depositoryAddress = browserVM.getDepositoryAddress();
+      const ownerAddress = new ethers.Wallet(ethers.hexlify(signerPrivateKey)).address;
+      const tokenType = options?.tokenType ?? 0;
+      if (tokenType === 0 && browserVM.getErc20Allowance && browserVM.approveErc20) {
+        const allowance = await browserVM.getErc20Allowance(tokenAddress, ownerAddress, depositoryAddress);
+        if (allowance < amount) {
+          await browserVM.approveErc20(signerPrivateKey, tokenAddress, depositoryAddress, (2n ** 256n) - 1n);
+        }
+      }
 
-      const events = await browserVM.debugFundReserves(entityId, tokenId, amount);
+      if (!browserVM.externalTokenToReserve) {
+        throw new Error('BrowserVM externalTokenToReserve not available');
+      }
+      const events = await browserVM.externalTokenToReserve(signerPrivateKey, entityId, tokenAddress, amount, options);
       return events.map((e: any) => ({
         name: e.name,
         args: e.args ?? {},

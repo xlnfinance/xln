@@ -37,6 +37,14 @@ export interface JEvent {
   transactionHash: string;
 }
 
+export interface JTokenInfo {
+  symbol: string;
+  name?: string;
+  address: string;
+  decimals: number;
+  tokenId?: number;
+}
+
 export type JEventCallback = (event: JEvent) => void;
 export type SnapshotId = string;
 
@@ -70,6 +78,9 @@ export interface JAdapter {
   getCollateral(entity1: string, entity2: string, tokenId: number): Promise<bigint>;
   getEntityNonce(entityId: string): Promise<bigint>;
   isEntityRegistered(entityId: string): Promise<boolean>;
+  getTokenRegistry(): Promise<JTokenInfo[]>;
+  getErc20Balance(tokenAddress: string, owner: string): Promise<bigint>;
+  getErc20Balances(tokenAddresses: string[], owner: string): Promise<bigint[]>;
 
   // Writes - Core Operations
   processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JBatchReceipt>;
@@ -96,7 +107,12 @@ export interface JAdapter {
     signerPrivateKey: Uint8Array,
     entityId: string,
     tokenAddress: string,
-    amount: bigint
+    amount: bigint,
+    options?: {
+      tokenType?: number;
+      externalTokenId?: bigint;
+      internalTokenId?: number;
+    }
   ): Promise<JEvent[]>;
 
   // BrowserVM-specific (returns null for RPC mode)

@@ -23,7 +23,7 @@ import type { EntityProvider } from '../../jurisdictions/typechain-types/EntityP
 import type { DeltaTransformer } from '../../jurisdictions/typechain-types/DeltaTransformer';
 
 import type { BrowserVMState } from '../types';
-import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, InsuranceReg, BrowserVMProvider } from './types';
+import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, InsuranceReg, BrowserVMProvider, JTokenInfo } from './types';
 import { computeAccountKey, entityIdToAddress, setupContractEventListeners } from './helpers';
 
 /**
@@ -68,15 +68,28 @@ export async function createRpcAdapter(
       throw new Error('fromReplica: Missing required addresses (depository or entityProvider)');
     }
 
-    // Use any cast to handle ethers version mismatch between root and jurisdictions
-    account = Account__factory.connect(addresses.account, signer as any);
-    depository = Depository__factory.connect(addresses.depository, signer as any);
-    entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer as any);
-    if (addresses.deltaTransformer) {
-      deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, signer as any);
+    const [depCode, epCode] = await Promise.all([
+      provider.getCode(addresses.depository),
+      provider.getCode(addresses.entityProvider),
+    ]);
+
+    if (depCode === '0x' || epCode === '0x') {
+      console.warn('[JAdapter:rpc] fromReplica addresses have no code on chain - redeploying');
+      addresses.account = '';
+      addresses.depository = '';
+      addresses.entityProvider = '';
+      addresses.deltaTransformer = '';
+    } else {
+      // Use any cast to handle ethers version mismatch between root and jurisdictions
+      account = Account__factory.connect(addresses.account, signer as any);
+      depository = Depository__factory.connect(addresses.depository, signer as any);
+      entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer as any);
+      if (addresses.deltaTransformer) {
+        deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, signer as any);
+      }
+      deployed = true;
+      console.log('[JAdapter:rpc] Connected to existing contracts ✓');
     }
-    deployed = true;
-    console.log('[JAdapter:rpc] Connected to existing contracts ✓');
   }
 
   const eventCallbacks = new Map<string, Set<JEventCallback>>();
@@ -136,9 +149,19 @@ export async function createRpcAdapter(
         { 'contracts/Account.sol:Account': addresses.account },
         signer as any
       );
-      // Use explicit gas limit for large contracts
+      // Use block gas limit minus margin (anvil default is 30M)
+      let deployGasLimit = 30_000_000n;
+      try {
+        const latestBlock = await provider.getBlock('latest');
+        if (latestBlock?.gasLimit) {
+          const margin = 1_000_000n;
+          deployGasLimit = latestBlock.gasLimit > margin ? latestBlock.gasLimit - margin : latestBlock.gasLimit;
+        }
+      } catch {
+        // Fallback to 30M if provider can't fetch block gas limit
+      }
       const depositoryContract = await depositoryFactory.deploy(addresses.entityProvider, {
-        gasLimit: 20_000_000n
+        gasLimit: deployGasLimit,
       });
       await depositoryContract.waitForDeployment();
       addresses.depository = await depositoryContract.getAddress();
@@ -243,6 +266,99 @@ export async function createRpcAdapter(
       const info = await entityProvider.entities(entityId);
       // registrationBlock > 0 means entity was registered
       return info.registrationBlock !== 0n;
+    },
+
+    async getTokenRegistry(): Promise<JTokenInfo[]> {
+      try {
+        const length = Number(await depository.getTokensLength());
+        const tokens: JTokenInfo[] = [];
+        const erc20Interface = new ethers.Interface([
+          'function symbol() view returns (string)',
+          'function name() view returns (string)',
+          'function decimals() view returns (uint8)',
+        ]);
+
+        for (let tokenId = 1; tokenId < length; tokenId++) {
+          const [contractAddress, _externalTokenId, tokenType] = await depository.getTokenMetadata(tokenId);
+          if (Number(tokenType) !== 0) continue; // TypeERC20 only
+
+          const erc20 = new ethers.Contract(contractAddress, erc20Interface, provider);
+          const symbolFn = erc20.getFunction('symbol') as () => Promise<string>;
+          const nameFn = erc20.getFunction('name') as () => Promise<string>;
+          const decimalsFn = erc20.getFunction('decimals') as () => Promise<bigint>;
+          let symbol = `TKN${tokenId}`;
+          let name = symbol;
+          let decimals = 18;
+          try { symbol = await symbolFn(); name = symbol; } catch { }
+          try { name = await nameFn(); } catch { }
+          try { decimals = Number(await decimalsFn()); } catch { }
+
+          tokens.push({ symbol, name, address: contractAddress, decimals, tokenId });
+        }
+
+        return tokens;
+      } catch (err) {
+        console.warn('[JAdapter:rpc] Token registry fetch failed:', (err as Error).message);
+        return [];
+      }
+    },
+
+    async getErc20Balance(tokenAddress: string, owner: string): Promise<bigint> {
+      const erc20 = new ethers.Contract(tokenAddress, ['function balanceOf(address owner) view returns (uint256)'], provider);
+      const balanceOf = erc20.getFunction('balanceOf') as (owner: string) => Promise<bigint>;
+      return balanceOf(owner);
+    },
+
+    async getErc20Balances(tokenAddresses: string[], owner: string): Promise<bigint[]> {
+      const erc20Interface = new ethers.Interface([
+        'function balanceOf(address owner) view returns (uint256)',
+      ]);
+
+      const rpcUrl = config.rpcUrl;
+      if (rpcUrl && rpcUrl.startsWith('http')) {
+        try {
+          const batch = tokenAddresses.map((tokenAddress, idx) => ({
+            id: idx + 1,
+            jsonrpc: '2.0',
+            method: 'eth_call',
+            params: [{
+              to: tokenAddress,
+              data: erc20Interface.encodeFunctionData('balanceOf', [owner]),
+            }, 'latest'],
+          }));
+
+          const response = await fetch(rpcUrl, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(batch),
+          });
+
+          if (response.ok) {
+            const json = await response.json();
+            if (Array.isArray(json)) {
+              const byId = new Map<number, string>();
+              for (const item of json) {
+                if (item && typeof item.id === 'number' && typeof item.result === 'string') {
+                  byId.set(item.id, item.result);
+                }
+              }
+              return tokenAddresses.map((_, idx) => {
+                const result = byId.get(idx + 1);
+                try {
+                  return result ? BigInt(result) : 0n;
+                } catch {
+                  return 0n;
+                }
+              });
+            }
+          }
+        } catch (err) {
+          console.warn('[JAdapter:rpc] Batch balance fetch failed, falling back to per-call:', (err as Error).message);
+        }
+      }
+
+      // Fallback: per-token calls
+      return Promise.all(tokenAddresses.map(addr => adapter.getErc20Balance(addr, owner)));
     },
 
     // === WRITE METHODS ===
@@ -473,7 +589,12 @@ export async function createRpcAdapter(
       signerPrivateKey: Uint8Array,
       entityId: string,
       tokenAddress: string,
-      amount: bigint
+      amount: bigint,
+      options?: {
+        tokenType?: number;
+        externalTokenId?: bigint;
+        internalTokenId?: number;
+      }
     ): Promise<JEvent[]> {
       // Create wallet from private key
       const signerWallet = new ethers.Wallet(
@@ -481,34 +602,39 @@ export async function createRpcAdapter(
         provider
       );
 
-      // ERC20 interface for approve
-      const erc20Interface = new ethers.Interface([
+      const tokenType = options?.tokenType ?? 0;
+      const externalTokenIdRaw = options?.externalTokenId ?? 0n;
+      const externalTokenId = typeof externalTokenIdRaw === 'bigint' ? externalTokenIdRaw : BigInt(externalTokenIdRaw);
+      const internalTokenId = options?.internalTokenId ?? 0;
+
+      if (tokenType !== 0) {
+        throw new Error('RPC adapter externalTokenToReserve currently supports ERC20 only');
+      }
+
+      const erc20 = new ethers.Contract(tokenAddress, [
         'function approve(address spender, uint256 amount) returns (bool)',
-      ]);
+        'function allowance(address owner, address spender) view returns (uint256)',
+      ], signerWallet);
 
-      // Step 1: Approve Depository to spend tokens
-      const approveTx = await signerWallet.sendTransaction({
-        to: tokenAddress,
-        data: erc20Interface.encodeFunctionData('approve', [addresses.depository, amount]),
-      });
-      await approveTx.wait();
-      console.log(`[JAdapter:rpc] Approved ${amount} tokens for Depository`);
-
-      // Step 2: Pack token reference (TypeERC20=0, address, tokenId=0)
-      // Format: bytes32 = tokenType (1 byte) + tokenId (12 bytes) + address (20 bytes)
-      // Solidity packing: (uint8 tokenType << 248) | (uint96 tokenId << 160) | address
-      const packedToken = ethers.solidityPacked(
-        ['uint8', 'uint96', 'address'],
-        [0, 0, tokenAddress]
-      );
+      // Step 1: Approve Depository to spend tokens (max allowance for smoother UX)
+      const allowanceFn = erc20.getFunction('allowance') as (owner: string, spender: string) => Promise<bigint>;
+      const approveFn = erc20.getFunction('approve') as (spender: string, amount: bigint) => Promise<{ wait: () => Promise<unknown> }>;
+      const allowance: bigint = await allowanceFn(signerWallet.address, addresses.depository);
+      if (allowance < amount) {
+        const approveTx = await approveFn(addresses.depository, ethers.MaxUint256);
+        await approveTx.wait();
+        console.log('[JAdapter:rpc] Approved max allowance for Depository');
+      }
 
       // Step 3: Call externalTokenToReserve
       // Connect depository with signer's wallet
       const depositoryWithSigner = depository.connect(signerWallet as any) as typeof depository;
       const depositTx = await depositoryWithSigner.externalTokenToReserve({
         entity: entityId,
-        packedToken: packedToken,
-        internalTokenId: 0, // Auto-detect from registry
+        contractAddress: tokenAddress,
+        externalTokenId,
+        tokenType,
+        internalTokenId, // Auto-detect from registry when 0
         amount: amount,
       });
       const receipt = await depositTx.wait();
