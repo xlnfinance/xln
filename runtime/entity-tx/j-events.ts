@@ -156,7 +156,7 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
  * Finalize AccountSettled when BOTH entities agree (2-of-2).
  * Called after receiving j_event_claim from counterparty.
  */
-export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, env: any): void {
+export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, opts: { timestamp: number }): void {
   // Find matching (jHeight, jBlockHash) in left + right observations
   const leftMap = new Map();
   const rightMap = new Map();
@@ -221,7 +221,7 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
     }
 
     // Add to jEventChain (replay prevention) - DETERMINISTIC timestamp
-    account.jEventChain.push({ jHeight, jBlockHash: leftObs.jBlockHash, events: leftObs.events, finalizedAt: env.timestamp });
+    account.jEventChain.push({ jHeight, jBlockHash: leftObs.jBlockHash, events: leftObs.events, finalizedAt: opts.timestamp });
     account.lastFinalizedJHeight = Math.max(account.lastFinalizedJHeight, jHeight);
 
     // SYMMETRIC NONCE TRACKING: Both sides increment when workspace was 'ready_to_submit'
@@ -346,7 +346,7 @@ async function tryFinalizeJBlocks(
         jHeight,
         jBlockHash,
         events,
-        finalizedAt: env.timestamp, // DETERMINISTIC
+        finalizedAt: state.timestamp, // Entity-level timestamp for determinism across validators
         signerCount,
       };
 

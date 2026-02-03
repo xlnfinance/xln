@@ -92,7 +92,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       mempool: [],
       currentFrame: {
         height: 0,
-        timestamp: env.timestamp,
+        timestamp: state.timestamp, // Entity-level timestamp for determinism
         jHeight: 0,
         accountTxs: [],
         prevFrameHash: '',
@@ -164,7 +164,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       input.settleAction,
       input.fromEntityId,
       newState.entityId,
-      env
+      newState.timestamp // Entity-level timestamp for determinism
     );
 
     if (result.success) {
@@ -238,7 +238,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
             // Try finalize now that we have counterparty's observation
             const { tryFinalizeAccountJEvents } = await import('../j-events');
-            tryFinalizeAccountJEvents(accountMachine, counterparty, env);
+            tryFinalizeAccountJEvents(accountMachine, counterparty, { timestamp: newState.timestamp });
 
             continue; // Move to next tx
           }
@@ -417,7 +417,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 inboundLockId: lock.lockId,
                 outboundEntity: nextHop,
                 outboundLockId: `${lock.lockId}-fwd`,
-                createdTimestamp: env.timestamp
+                createdTimestamp: newState.timestamp
               };
               newState.htlcRoutes.set(lock.hashlock, htlcRoute);
 
@@ -457,8 +457,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
                 // Timelock validation: forward must have breathing room (1s safety margin for processing delays)
                 const SAFETY_MARGIN_MS = 1000;
-                if (forwardTimelock < BigInt(env.timestamp) + BigInt(SAFETY_MARGIN_MS)) {
-                  console.log(`❌ HTLC-GATE: TIMELOCK_TOO_TIGHT - forward=${forwardTimelock}, current+margin=${BigInt(env.timestamp) + BigInt(SAFETY_MARGIN_MS)} [lockId=${lock.lockId.slice(0,16)}]`);
+                if (forwardTimelock < BigInt(newState.timestamp) + BigInt(SAFETY_MARGIN_MS)) {
+                  console.log(`❌ HTLC-GATE: TIMELOCK_TOO_TIGHT - forward=${forwardTimelock}, current+margin=${BigInt(newState.timestamp) + BigInt(SAFETY_MARGIN_MS)} [lockId=${lock.lockId.slice(0,16)}]`);
                   continue;
                 }
 
