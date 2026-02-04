@@ -107,6 +107,10 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
     env = await main();
   }
 
+  // Register signer key for this hub BEFORE encoding board
+  const privateKey = deriveSignerKeySync(hubConfig.seed, hubConfig.signerId);
+  registerSignerKey(hubConfig.signerId, privateKey);
+
   const jurisdiction = resolveJurisdiction(env);
   const consensusConfig: ConsensusConfig = {
     mode: 'proposer-based',
@@ -118,10 +122,6 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
 
   const encodedBoard = encodeBoard(consensusConfig);
   const entityId = hashBoard(encodedBoard);
-
-  // Register signer key for this hub
-  const privateKey = deriveSignerKeySync(hubConfig.seed, hubConfig.signerId);
-  registerSignerKey(hubConfig.signerId, privateKey);
 
   const replicaExists = !!Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${entityId}:`));
 
