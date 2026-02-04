@@ -166,20 +166,22 @@
               entities: env.eReplicas?.size || 0
             });
           } else {
-            throw new Error('VaultStore runtime found but no env - this should not happen');
+            console.warn('[View] Runtime exists but env not ready yet - waiting for VaultStore to finish init');
           }
         } else {
-          throw new Error('No active runtime - user must create/import a wallet first');
+          console.warn('[View] No active runtime yet - waiting for VaultStore');
         }
       }
 
-      // Set to isolated stores
-      localEnvStore.set(env);
-      localHistoryStore.set(env.history || []);
-      // CRITICAL: Default to -1 (LIVE mode), not 0 (historical frame 0)
-      // Only use saved timeIndex when explicitly importing from URL
-      localTimeIndex.set(urlImport?.state.ui?.ti ?? -1);
-      localIsLive.set(true);
+      if (env) {
+        // Set to isolated stores
+        localEnvStore.set(env);
+        localHistoryStore.set(env.history || []);
+        // CRITICAL: Default to -1 (LIVE mode), not 0 (historical frame 0)
+        // Only use saved timeIndex when explicitly importing from URL
+        localTimeIndex.set(urlImport?.state.ui?.ti ?? -1);
+        localIsLive.set(true);
+      }
 
       // CRITICAL: Subscribe to activeRuntimeId changes to reactively update env
       // This ensures View always shows correct env after VaultStore creates/switches runtimes
