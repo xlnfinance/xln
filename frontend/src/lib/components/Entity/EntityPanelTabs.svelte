@@ -7,7 +7,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
-  import { Wallet as EthersWallet, hexlify } from 'ethers';
+  import { Wallet as EthersWallet, hexlify, isAddress, ZeroAddress } from 'ethers';
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { history } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex, isLive, timeOperations } from '../../stores/timeStore';
@@ -63,7 +63,7 @@
   let selectedJurisdictionName: string | null = null;
   let activityCount = 0;
   let addressCopied = false;
-  const API_BASE = 'https://xln.finance';
+  const API_BASE = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
   const REFRESH_OPTIONS = [
     { label: 'Off', value: 0 },
     { label: '1s', value: 1000 },
@@ -378,6 +378,22 @@
       const jadapter = xln.getActiveJAdapter?.(activeEnv as any);
 
       const tokenList = await getTokenList(jadapter);
+      let nativeToken: ExternalToken | null = null;
+      // Include native ETH balance (external funds) when possible
+      if (jadapter?.provider && isAddress(signerId)) {
+        try {
+          const nativeBalance = await jadapter.provider.getBalance(signerId);
+          nativeToken = {
+            symbol: 'ETH',
+            address: ZeroAddress,
+            balance: nativeBalance,
+            decimals: 18,
+            tokenId: 0,
+          };
+        } catch (err) {
+          console.warn('[EntityPanel] Failed to fetch native ETH balance:', err);
+        }
+      }
       if (!jadapter?.getErc20Balance) {
         externalTokens = tokenList;
         externalTokensLoading = false;
@@ -410,7 +426,7 @@
         }
       }
 
-      externalTokens = tokenList;
+      externalTokens = nativeToken ? [nativeToken, ...tokenList] : tokenList;
       externalTokensLoading = false;
     } catch (err) {
       console.error('[EntityPanel] Failed to fetch external tokens:', err);
@@ -599,11 +615,23 @@
     return '$' + value.toFixed(2);
   }
 
-  function getAssetValue(tokenId: number, amount: bigint): number {
+  const PRICE_BY_SYMBOL: Record<string, number> = {
+    USDC: 1,
+    USDT: 1,
+    WETH: 2500,
+    ETH: 2500,
+  };
+
+  function getAssetPrice(symbol: string): number {
+    return PRICE_BY_SYMBOL[symbol.toUpperCase()] ?? 0;
+  }
+
+  function getAssetValue(tokenId: number, amount: bigint, symbolOverride?: string): number {
     const info = getTokenInfo(tokenId);
+    const symbol = symbolOverride ?? info.symbol ?? 'UNK';
     const divisor = BigInt(10) ** BigInt(info.decimals);
     const numericAmount = Number(amount) / Number(divisor);
-    const price = tokenId === 1 ? 1 : 2500;
+    const price = getAssetPrice(symbol);
     return numericAmount * price;
   }
 
@@ -620,8 +648,8 @@
     let total = 0;
     for (const token of externalTokens) {
       if (token.balance > 0n) {
-        const tokenId = token.tokenId ?? (token.symbol === 'USDC' ? 1 : token.symbol === 'WETH' ? 2 : 3);
-        total += getAssetValue(tokenId, token.balance);
+        const tokenId = token.tokenId ?? (token.symbol === 'USDC' ? 1 : token.symbol === 'WETH' ? 2 : token.symbol === 'USDT' ? 3 : 0);
+        total += getAssetValue(tokenId, token.balance, token.symbol);
       }
     }
     return total;
@@ -640,7 +668,7 @@
           for (const [tokenId, delta] of account.deltas.entries()) {
             const info = getTokenInfo(Number(tokenId));
             const divisor = BigInt(10) ** BigInt(info.decimals);
-            const price = Number(tokenId) === 1 ? 1 : 2500;
+            const price = getAssetPrice(info.symbol ?? 'UNK');
             // Collateral is what we've put in
             if (delta.collateral > 0n) {
               collateral += (Number(delta.collateral) / Number(divisor)) * price;

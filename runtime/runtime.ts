@@ -794,6 +794,8 @@ const applyRuntimeInput = async (
             position: { x: 0, y: 50, z: 0 }, // Default position for J-machine
             depositoryAddress: jadapter.addresses.depository,
             entityProviderAddress: jadapter.addresses.entityProvider,
+            rpcs: runtimeTx.data.rpcs,
+            chainId: runtimeTx.data.chainId,
             jadapter, // Store for balance queries, faucets, etc
           };
           env.jReplicas.set(runtimeTx.data.name, jReplica);
@@ -2195,6 +2197,19 @@ export const process = async (
           const { broadcastBatch } = await import('./j-batch');
           const { getBrowserVMInstance } = await import('./evm');
           const browserVM = getBrowserVMInstance(env);
+          const rpcUrl = jReplica.rpcs?.[0];
+          const chainId = jReplica.jadapter?.chainId ?? jReplica.chainId;
+          const jurisdiction = !browserVM && rpcUrl && jReplica.depositoryAddress && jReplica.entityProviderAddress ? {
+            name: jReplica.name,
+            chainId: Number(chainId ?? 0),
+            address: rpcUrl,
+            entityProviderAddress: jReplica.entityProviderAddress,
+            depositoryAddress: jReplica.depositoryAddress,
+          } : null;
+
+          if (!browserVM && !jurisdiction) {
+            console.warn(`⚠️ [J-Machine ${jReplica.name}] Missing jurisdiction config (rpc/addresses). Batch broadcast will be skipped.`);
+          }
 
           if (browserVM?.beginJurisdictionBlock) {
             browserVM.beginJurisdictionBlock(env.timestamp);
@@ -2227,12 +2242,17 @@ export const process = async (
                 failedAttempts: 0,
               };
 
+              if (!browserVM && !jurisdiction) {
+                console.error(`   ❌ Batch execution skipped: missing jurisdiction config for ${jReplica.name}`);
+                continue;
+              }
+
               // Execute batch on BrowserVM
               const result = await broadcastBatch(
                 env,
                 jTx.entityId,
                 tempJBatchState,
-                null, // jurisdiction not needed for BrowserVM
+                jurisdiction, // Required for RPC mode; BrowserVM ignores this
                 browserVM || undefined,
                 jTx.timestamp ?? env.timestamp,
                 jTx.data?.signerId

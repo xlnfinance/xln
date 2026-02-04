@@ -151,7 +151,7 @@ const updateJurisdictionsJson = async (contracts: JAdapter['addresses'], rpcUrl?
       '/var/www/html/jurisdictions.json',
     ];
 
-    const publicRpc = process.env.PUBLIC_RPC ?? '/rpc';
+    const publicRpc = process.env.PUBLIC_RPC ?? rpcUrl ?? '/rpc';
 
     for (const filePath of candidates) {
       try {
@@ -865,6 +865,31 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     } else {
       console.log('[XLN] Using existing contracts on anvil (block > 0)');
     }
+
+    // Ensure env has a J-replica for this RPC jurisdiction (required for j_broadcast → j-mempool)
+    if (globalJAdapter && env) {
+      if (!env.jReplicas) env.jReplicas = new Map();
+      const jName = 'arrakis';
+      if (!env.jReplicas.has(jName)) {
+        env.jReplicas.set(jName, {
+          name: jName,
+          blockNumber: 0n,
+          stateRoot: new Uint8Array(32),
+          mempool: [],
+          blockDelayMs: 300,
+          lastBlockTimestamp: env.timestamp,
+          position: { x: 0, y: 50, z: 0 },
+          depositoryAddress: globalJAdapter.addresses.depository,
+          entityProviderAddress: globalJAdapter.addresses.entityProvider,
+          contracts: globalJAdapter.addresses,
+          rpcs: [anvilRpc],
+          chainId: globalJAdapter.chainId,
+          jadapter: globalJAdapter,
+        });
+        console.log(`[XLN] J-replica "${jName}" registered in env`);
+      }
+      if (!env.activeJurisdiction) env.activeJurisdiction = jName;
+    }
   } else {
     console.log('[XLN] Using BrowserVM (local mode)');
     globalJAdapter = await createJAdapter({
@@ -917,6 +942,21 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       const hubWalletAddress = await hubWallet.getAddress();
 
       console.log(`[XLN] Hub wallet address: ${hubWalletAddress}`);
+
+      // Ensure deployer + hub wallet have ETH on anvil (avoids faucet/deploy gas failures)
+      try {
+        if (globalJAdapter.chainId === 31337 && 'send' in globalJAdapter.provider) {
+          const provider = globalJAdapter.provider as ethers.JsonRpcProvider;
+          const deployerAddress = await globalJAdapter.signer.getAddress();
+          const targetDeployerEth = ethers.parseEther('10000');
+          const targetHubEth = ethers.parseEther('1000');
+          await provider.send('anvil_setBalance', [deployerAddress, ethers.toBeHex(targetDeployerEth)]);
+          await provider.send('anvil_setBalance', [hubWalletAddress, ethers.toBeHex(targetHubEth)]);
+          console.log('[XLN] Anvil balances topped up for deployer + hub wallet');
+        }
+      } catch (err) {
+        console.warn('[XLN] Failed to top up anvil balances:', (err as Error).message);
+      }
 
       // Ensure tokens exist on RPC/anvil before funding
       const tokenCatalog = await ensureTokenCatalog();

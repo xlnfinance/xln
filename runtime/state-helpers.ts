@@ -461,6 +461,10 @@ export const captureSnapshot = async (
           blockDelayMs: jr.blockDelayMs || 300,
           lastBlockTimestamp: jr.lastBlockTimestamp || 0,
           position: { ...jr.position },
+          ...(jr.rpcs && { rpcs: [...jr.rpcs] }),
+          ...(jr.chainId !== undefined && { chainId: jr.chainId }),
+          ...(jr.depositoryAddress && { depositoryAddress: jr.depositoryAddress }),
+          ...(jr.entityProviderAddress && { entityProviderAddress: jr.entityProviderAddress }),
           ...(jr.contracts && { contracts: { ...jr.contracts } }),
           reserves,
           collaterals,  // Collateral state from bilateral accounts

@@ -46,10 +46,37 @@ async function bootstrapHub(env?: any) {
     p.metadata?.name === HUB_CONFIG.name && p.metadata?.isHub === true
   ) || [];
 
+  // Resolve active jurisdiction (for j_broadcast routing)
+  const resolveJurisdiction = () => {
+    const name = env.activeJurisdiction || (env.jReplicas ? Array.from(env.jReplicas.keys())[0] : undefined);
+    if (!name || !env.jReplicas) return null;
+    const jr = env.jReplicas.get(name);
+    if (!jr) return null;
+    return {
+      name,
+      chainId: Number(jr.jadapter?.chainId ?? jr.chainId ?? 0),
+      address: jr.rpcs?.[0] ?? '',
+      entityProviderAddress: jr.entityProviderAddress ?? jr.contracts?.entityProvider ?? '',
+      depositoryAddress: jr.depositoryAddress ?? jr.contracts?.depository ?? '',
+    };
+  };
+
   if (existingHubs.length > 0) {
     console.log(`[BOOTSTRAP] ✅ Hub "${HUB_CONFIG.name}" already exists`);
     console.log(`[BOOTSTRAP]    EntityId: ${existingHubs[0].entityId}`);
     console.log(`[BOOTSTRAP]    RuntimeId: ${existingHubs[0].runtimeId}`);
+    // Ensure existing hub has jurisdiction set (needed for j_broadcast routing)
+    const existingJurisdiction = resolveJurisdiction();
+    if (existingJurisdiction && env.eReplicas) {
+      for (const [key, replica] of env.eReplicas.entries()) {
+        if (key.startsWith(existingHubs[0].entityId)) {
+          if (!replica.state.config?.jurisdiction) {
+            replica.state.config.jurisdiction = existingJurisdiction;
+            console.log('[BOOTSTRAP] ✅ Patched existing hub jurisdiction config');
+          }
+        }
+      }
+    }
     console.log('[BOOTSTRAP] Skipping creation (idempotent)');
     return;
   }
@@ -59,12 +86,18 @@ async function bootstrapHub(env?: any) {
   const privateKey = deriveSignerKeySync(seedBytes, HUB_CONFIG.signerId);
   registerSignerKey(HUB_CONFIG.signerId, privateKey);
 
+  const jurisdiction = resolveJurisdiction();
+  if (!jurisdiction) {
+    console.warn('[BOOTSTRAP] ⚠️ No jurisdiction found - j_broadcast may fail until a J-machine is imported');
+  }
+
   // Create board config (normal entity)
   const config = {
     mode: 'proposer-based' as const,
     threshold: 1n,
     validators: [HUB_CONFIG.signerId],
     shares: { [HUB_CONFIG.signerId]: 1n },
+    ...(jurisdiction ? { jurisdiction } : {}),
   };
 
   const encodedBoard = encodeBoard(config);

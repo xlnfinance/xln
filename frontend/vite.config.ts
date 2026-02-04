@@ -109,6 +109,11 @@ export default defineConfig(async ({ command }) => {
 				target: 'http://localhost:8082',
 				changeOrigin: true,
 			},
+			// RPC Proxy - Forward JSON-RPC to local anvil for dev
+			'/rpc': {
+				target: 'http://localhost:8545',
+				changeOrigin: true,
+			},
 		},
 		// Force no-cache headers for static files
 		headers: {
