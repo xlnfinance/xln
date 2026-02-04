@@ -21,6 +21,7 @@ import { deriveSignerKeySync } from './account-crypto';
 import { createJAdapter, type JAdapter } from './jadapter';
 import type { JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
+import { TIMING } from './constants';
 import { resolveEntityProposerId } from './state-helpers';
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../jurisdictions/typechain-types/factories/ERC20Mock__factory';
@@ -30,6 +31,8 @@ let globalJAdapter: JAdapter | null = null;
 let jWatcherStarted = false;
 let jWatcher: any = null;
 let jWatcherProcessInterval: ReturnType<typeof setInterval> | null = null;
+let runtimeTickInterval: ReturnType<typeof setInterval> | null = null;
+let runtimeTickInFlight = false;
 const HUB_SEED = process.env.HUB_SEED ?? 'xln-main-hub-2026';
 
 let tokenCatalogCache: JTokenInfo[] | null = null;
@@ -51,6 +54,38 @@ const startJWatcherProcessingLoop = (env: Env): void => {
       console.warn('[J-WATCHER] Failed to apply queued events:', (err as Error).message);
     });
   }, 100);
+};
+
+const hasPendingRuntimeWork = (env: Env): boolean => {
+  if (env.pendingOutputs?.length) return true;
+  if (env.networkInbox?.length) return true;
+  if (env.pendingNetworkOutputs?.length) return true;
+  if (env.runtimeInput?.runtimeTxs?.length) return true;
+
+  if (env.jReplicas) {
+    for (const replica of env.jReplicas.values()) {
+      if ((replica.mempool?.length ?? 0) > 0) return true;
+    }
+  }
+
+  return false;
+};
+
+const startRuntimeTickLoop = (env: Env): void => {
+  if (runtimeTickInterval) return;
+  runtimeTickInterval = setInterval(async () => {
+    if (runtimeTickInFlight) return;
+    if (!hasPendingRuntimeWork(env)) return;
+    runtimeTickInFlight = true;
+    try {
+      await runtimeProcess(env, []);
+    } catch (err) {
+      console.warn('[RUNTIME-TICK] Failed to process tick:', (err as Error).message);
+    } finally {
+      runtimeTickInFlight = false;
+    }
+  }, TIMING.TICK_INTERVAL_MS);
+  console.log(`[XLN] Runtime tick loop started (${TIMING.TICK_INTERVAL_MS}ms)`);
 };
 
 const getHubWallet = async (env: Env): Promise<{ hubEntityId: string; hubSignerId: string; wallet: ethers.Wallet } | null> => {
@@ -695,7 +730,17 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           },
         ],
       }]);
+      if (env.jReplicas) {
+        for (const [name, replica] of env.jReplicas.entries()) {
+          if ((replica.mempool?.length ?? 0) > 0) {
+            console.log(`[FAUCET/RESERVE] J-mempool "${name}": size=${replica.mempool.length}, block=${replica.blockNumber ?? 0}, lastTs=${replica.lastBlockTimestamp ?? 0}`);
+          }
+        }
+      }
       console.log('[FAUCET/RESERVE] R2R + j_broadcast queued (waiting for J-event sync)');
+      if (jWatcher?.getStatus) {
+        console.log('[FAUCET/RESERVE] J-watcher status:', jWatcher.getStatus());
+      }
       if (jWatcher?.syncOnce) {
         try {
           await jWatcher.syncOnce(env);
@@ -918,6 +963,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       console.warn('[XLN] Failed to start J-Event Watcher:', (err as Error).message);
     }
   }
+
+  // Start runtime tick loop for J-mempool + pending outputs
+  startRuntimeTickLoop(env);
 
   // Bootstrap hub entity (idempotent - normal entity + gossip tag)
   const { bootstrapHub } = await import('../scripts/bootstrap-hub');
