@@ -633,11 +633,10 @@ export async function createRpcAdapter(
       // Step 3: Call externalTokenToReserve
       // Connect depository with signer's wallet
       const depositoryWithSigner = depository.connect(signerWallet as any) as typeof depository;
+      const packedToken = await depository.packTokenReference(tokenType, tokenAddress, externalTokenId);
       const depositTx = await depositoryWithSigner.externalTokenToReserve({
         entity: entityId,
-        contractAddress: tokenAddress,
-        externalTokenId,
-        tokenType,
+        packedToken,
         internalTokenId, // Auto-detect from registry when 0
         amount: amount,
       });

@@ -14,7 +14,7 @@
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { activeVault } from '$lib/stores/vaultStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
-  import { xlnFunctions, entityPositions } from '../../stores/xlnStore';
+  import { xlnFunctions, entityPositions, processWithDelay } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
 
   // Icons
@@ -183,6 +183,7 @@
   let externalTokens: ExternalToken[] = [];
   let externalTokensLoading = true;
   let depositingToken: string | null = null; // symbol of token being deposited
+  let collateralFundingToken: string | null = null; // symbol of token being moved to collateral
 
   // Faucet: fund entity reserves with test tokens
   async function faucetReserves(tokenId: number = 1) {
@@ -509,6 +510,68 @@
     }
   }
 
+  // Reserve → Collateral (deposit reserves into selected bilateral account)
+  async function reserveToCollateral(tokenId: number) {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    const signerId = tab.signerId;
+    if (!entityId || !signerId) return;
+
+    if (!selectedAccountId) {
+      toasts.error('Select an account to deposit collateral');
+      return;
+    }
+
+    if (!activeIsLive) {
+      toasts.error('Deposit requires LIVE mode');
+      return;
+    }
+
+    const amount = onchainReserves.get(tokenId) ?? 0n;
+    if (amount <= 0n) {
+      toasts.error('No reserve balance for this token');
+      return;
+    }
+
+    const accounts = replica?.state?.accounts;
+    if (!accounts || !accounts.has(selectedAccountId)) {
+      toasts.error('No account found for selected counterparty');
+      return;
+    }
+
+    const info = getTokenInfo(tokenId);
+    collateralFundingToken = info.symbol;
+    try {
+      const env = activeEnv;
+      if (!env) throw new Error('Environment not ready');
+
+      await processWithDelay(env as any, [{
+        entityId,
+        signerId,
+        entityTxs: [
+          {
+            type: 'deposit_collateral' as const,
+            data: {
+              counterpartyId: selectedAccountId,
+              tokenId,
+              amount,
+            },
+          },
+          {
+            type: 'j_broadcast',
+            data: {},
+          },
+        ],
+      }]);
+
+      toasts.info(`R→C queued for ${info.symbol}. Waiting for on-chain update...`);
+    } catch (err) {
+      console.error('[EntityPanel] Reserve → Collateral failed:', err);
+      toasts.error(`Reserve → Collateral failed: ${(err as Error).message}`);
+    } finally {
+      collateralFundingToken = null;
+    }
+  }
+
   // Faucet external tokens (ERC20 to signer EOA)
   async function faucetExternalTokens(tokenSymbol: string = 'USDC') {
     const signerId = tab.signerId;
@@ -635,6 +698,13 @@
     return numericAmount * price;
   }
 
+  function getExternalValue(token: ExternalToken): number {
+    const divisor = BigInt(10) ** BigInt(token.decimals ?? 18);
+    const numericAmount = Number(token.balance) / Number(divisor);
+    const price = getAssetPrice(token.symbol);
+    return numericAmount * price;
+  }
+
   function calculatePortfolioValue(reserves: Map<number | string, bigint>): number {
     let total = 0;
     for (const [tokenId, amount] of reserves.entries()) {
@@ -648,8 +718,7 @@
     let total = 0;
     for (const token of externalTokens) {
       if (token.balance > 0n) {
-        const tokenId = token.tokenId ?? (token.symbol === 'USDC' ? 1 : token.symbol === 'WETH' ? 2 : token.symbol === 'USDT' ? 3 : 0);
-        total += getAssetValue(tokenId, token.balance, token.symbol);
+        total += getExternalValue(token);
       }
     }
     return total;
@@ -901,6 +970,7 @@
             <div class="token-table-header">
               <span class="col-token">Token</span>
               <span class="col-balance">Balance</span>
+              <span class="col-value">Value</span>
               <span class="col-actions">Actions</span>
             </div>
             <!-- Table Rows -->
@@ -917,6 +987,9 @@
                     <span class="balance-text" class:zero={token.balance === 0n}>
                       {formatAmount(token.balance, token.decimals)}
                     </span>
+                  </div>
+                  <div class="col-value">
+                    <span class="value-text">{formatCompact(getExternalValue(token))}</span>
                   </div>
                   <div class="col-actions">
                     <button class="btn-table-action faucet" on:click={() => faucetExternalTokens(token.symbol)} disabled={faucetFunding}>
@@ -984,6 +1057,14 @@
                   <div class="col-actions">
                     <button class="btn-table-action faucet" on:click={() => faucetReserves(Number(tokenId))} disabled={faucetFunding || !!pendingReserveFaucet}>
                       {faucetFunding ? '...' : 'Faucet'}
+                    </button>
+                    <button
+                      class="btn-table-action collateral"
+                      on:click={() => reserveToCollateral(Number(tokenId))}
+                      disabled={collateralFundingToken === info.symbol}
+                      title={!selectedAccountId ? 'Select an account to deposit collateral' : 'Deposit reserve to collateral'}
+                    >
+                      {collateralFundingToken === info.symbol ? '...' : 'To Collateral'}
                     </button>
                   </div>
                 </div>
@@ -2134,7 +2215,7 @@
   /* Table Header */
   .token-table-header {
     display: grid;
-    grid-template-columns: 100px 1fr 80px 140px;
+    grid-template-columns: 100px 1fr 90px 200px;
     gap: 8px;
     padding: 8px 12px;
     background: #1c1917;
@@ -2158,7 +2239,7 @@
   /* Table Row */
   .token-table-row {
     display: grid;
-    grid-template-columns: 100px 1fr 80px 140px;
+    grid-template-columns: 100px 1fr 90px 200px;
     gap: 8px;
     padding: 10px 12px;
     border-bottom: 1px solid #292524;
@@ -2281,6 +2362,15 @@
 
   .btn-table-action.deposit:hover:not(:disabled) {
     background: linear-gradient(135deg, #22c55e, #16a34a);
+  }
+
+  .btn-table-action.collateral {
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: #fffbeb;
+  }
+
+  .btn-table-action.collateral:hover:not(:disabled) {
+    background: linear-gradient(135deg, #fbbf24, #f59e0b);
   }
 
   .btn-table-action:disabled {
