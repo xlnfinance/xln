@@ -38,19 +38,43 @@ const HUB_SEED = process.env.HUB_SEED ?? 'xln-main-hub-2026';
 let tokenCatalogCache: JTokenInfo[] | null = null;
 let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
 
-const drainJWatcherQueue = async (env: Env): Promise<void> => {
+const summarizeJWatcherEvents = (inputs: EntityInput[]): { totalEvents: number; summary: string } => {
+  const counts = new Map<string, number>();
+  let totalEvents = 0;
+  for (const input of inputs) {
+    const txs = input.entityTxs || [];
+    for (const tx of txs) {
+      if (tx?.type === 'j_event' && tx?.data?.events) {
+        for (const ev of tx.data.events) {
+          const name = ev?.type || ev?.name || 'Unknown';
+          counts.set(name, (counts.get(name) ?? 0) + 1);
+          totalEvents += 1;
+        }
+      }
+    }
+  }
+  const summary = Array.from(counts.entries())
+    .map(([name, count]) => `${name}=${count}`)
+    .join(', ');
+  return { totalEvents, summary };
+};
+
+const drainJWatcherQueue = async (env: Env, label = 'J-WATCHER'): Promise<void> => {
   const pending = env.runtimeInput?.entityInputs?.length ?? 0;
   if (pending === 0) return;
   const toProcess = [...env.runtimeInput.entityInputs];
   env.runtimeInput.entityInputs = [];
+  const { totalEvents, summary } = summarizeJWatcherEvents(toProcess);
+  console.log(`[${label}] Applying ${pending} queued inputs (${totalEvents} events${summary ? `: ${summary}` : ''})`);
   await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: toProcess });
+  console.log(`[${label}] Applied ${pending} queued inputs`);
 };
 
 const startJWatcherProcessingLoop = (env: Env): void => {
   if (jWatcherProcessInterval) return;
   jWatcherProcessInterval = setInterval(() => {
     if (!env.runtimeInput?.entityInputs?.length) return;
-    drainJWatcherQueue(env).catch((err) => {
+    drainJWatcherQueue(env, 'J-WATCHER').catch((err) => {
       console.warn('[J-WATCHER] Failed to apply queued events:', (err as Error).message);
     });
   }, 100);
@@ -693,6 +717,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
       const body = await req.json();
       const { userEntityId, tokenId = 1, amount = '100' } = body;
+      const requestId = (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+      const logPrefix = `FAUCET/RESERVE ${requestId}`;
 
       if (!userEntityId) {
         faucetLock.release();
@@ -709,7 +735,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
       const hubSignerId = resolveEntityProposerId(env, hubEntityId, 'faucet-reserve');
       const amountWei = ethers.parseUnits(amount, 18);
-      console.log(`[FAUCET/RESERVE] Request: hub=${hubEntityId.slice(0, 16)}... signer=${hubSignerId} → user=${userEntityId.slice(0, 16)}... tokenId=${tokenId} amount=${amount}`);
+      console.log(`[${logPrefix}] Request: hub=${hubEntityId.slice(0, 16)}... signer=${hubSignerId} → user=${userEntityId.slice(0, 16)}... tokenId=${tokenId} amount=${amount}`);
 
       // Use entity txs (R2R + j_broadcast) instead of direct admin call
       await runtimeProcess(env, [{
@@ -730,26 +756,33 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           },
         ],
       }]);
+      // Log hub jBatchState summary after queuing
+      const hubReplicaKey = Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${hubEntityId}:`));
+      const hubReplica = hubReplicaKey ? env.eReplicas?.get(hubReplicaKey) : null;
+      if (hubReplica?.state?.jBatchState?.batch) {
+        const batch = hubReplica.state.jBatchState.batch as any;
+        console.log(`[${logPrefix}] Hub jBatch: r2r=${batch.reserveToReserve?.length || 0}, r2c=${batch.reserveToCollateral?.length || 0}, c2r=${batch.collateralToReserve?.length || 0}, settlements=${batch.settlements?.length || 0}, pending=${hubReplica.state.jBatchState.pendingBroadcast ? 'yes' : 'no'}`);
+      }
       if (env.jReplicas) {
         for (const [name, replica] of env.jReplicas.entries()) {
           if ((replica.mempool?.length ?? 0) > 0) {
-            console.log(`[FAUCET/RESERVE] J-mempool "${name}": size=${replica.mempool.length}, block=${replica.blockNumber ?? 0}, lastTs=${replica.lastBlockTimestamp ?? 0}`);
+            console.log(`[${logPrefix}] J-mempool "${name}": size=${replica.mempool.length}, block=${replica.blockNumber ?? 0}, lastTs=${replica.lastBlockTimestamp ?? 0}`);
           }
         }
       }
-      console.log('[FAUCET/RESERVE] R2R + j_broadcast queued (waiting for J-event sync)');
+      console.log(`[${logPrefix}] R2R + j_broadcast queued (waiting for J-event sync)`);
       if (jWatcher?.getStatus) {
-        console.log('[FAUCET/RESERVE] J-watcher status:', jWatcher.getStatus());
+        console.log(`[${logPrefix}] J-watcher status:`, jWatcher.getStatus());
       }
       if (jWatcher?.syncOnce) {
         try {
           await jWatcher.syncOnce(env);
-          console.log('[FAUCET/RESERVE] J-watcher syncOnce completed');
+          console.log(`[${logPrefix}] J-watcher syncOnce completed`);
         } catch (err) {
-          console.warn('[FAUCET/RESERVE] J-watcher syncOnce failed:', (err as Error).message);
+          console.warn(`[${logPrefix}] J-watcher syncOnce failed:`, (err as Error).message);
         }
       }
-      await drainJWatcherQueue(env);
+      await drainJWatcherQueue(env, logPrefix);
 
       faucetLock.release();
       return new Response(JSON.stringify({
@@ -759,6 +792,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         tokenId,
         from: hubEntityId.slice(0, 16) + '...',
         to: userEntityId.slice(0, 16) + '...',
+        requestId,
       }), { headers });
     } catch (error: any) {
       faucetLock.release();
