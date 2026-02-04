@@ -459,7 +459,7 @@ export class RuntimeP2P {
       let signedProfile = merged;
       if (firstValidator && this.env.runtimeSeed) {
         try {
-          signedProfile = signProfileSync({ runtimeSeed: this.env.runtimeSeed }, profile, firstValidator);
+          signedProfile = signProfileSync({ runtimeSeed: this.env.runtimeSeed }, merged, firstValidator);
         } catch (error) {
           console.warn(`P2P_PROFILE_SIGN_FAILED: ${entityId.slice(-4)} - ${(error as Error).message}`);
         }
