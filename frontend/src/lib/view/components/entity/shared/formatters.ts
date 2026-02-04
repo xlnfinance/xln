@@ -55,35 +55,16 @@ export function formatTokenAmount(
 }
 
 /**
- * Format an entity ID for display by truncating to specified length
+ * Format an entity ID for display (full ID, no truncation)
  *
  * @param entityId - The full entity identifier
- * @param length - Number of characters to show from start and end (default: 6)
- * @returns Truncated entity ID with ellipsis, or full ID if shorter than 2*length
- *
- * @example
- * formatEntityId('0x1234567890abcdef', 6) // "0x1234...cdef"
- * formatEntityId('short', 6) // "short"
+ * @returns Full entity ID string
  */
-export function formatEntityId(entityId: string, length: number = 6): string {
+export function formatEntityId(entityId: string): string {
   if (!entityId || typeof entityId !== 'string') {
     return '';
   }
-
-  if (length < 1) {
-    throw new Error(`Invalid length: ${length}. Must be positive`);
-  }
-
-  const minLength = length * 2 + 3; // length + "..." + length
-
-  if (entityId.length <= minLength) {
-    return entityId;
-  }
-
-  const start = entityId.slice(0, length);
-  const end = entityId.slice(-length);
-
-  return `${start}...${end}`;
+  return entityId;
 }
 
 /**

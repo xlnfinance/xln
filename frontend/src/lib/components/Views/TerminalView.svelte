@@ -172,8 +172,7 @@ SYSTEM:
       const replica = replicaEntry?.[1];
       if (!replica) continue;
 
-      const shortId = entityId.slice(0, 10);
-      addOutput(`Entity: ${shortId}...`, 'success');
+      addOutput(`Entity: ${entityId}`, 'success');
 
       const accounts = replica.state?.accounts;
       if (!accounts || accounts.size === 0) {
@@ -184,8 +183,7 @@ SYSTEM:
 
       // Render each account
       for (const [counterpartyId, accountData] of accounts.entries()) {
-        const counterShort = (counterpartyId as string).slice(0, 10);
-        addOutput(`  ├─ Account with ${counterShort}...`, 'info');
+        addOutput(`  ├─ Account with ${counterpartyId as string}`, 'info');
 
         // Get deltas for visualization
         const deltas = accountData.deltas;

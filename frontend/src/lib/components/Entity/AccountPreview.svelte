@@ -143,9 +143,9 @@
 >
   <div class="account-header">
     <div class="entity-info">
-      <span class="our-entity">{ourName || `#${activeXlnFunctions!.getEntityShortId(entityId)}`}</span>
+      <span class="our-entity">{ourName || entityId}</span>
       <span class="separator">←→</span>
-      <span class="counterparty-name">{counterpartyName || `#${activeXlnFunctions!.getEntityShortId(counterpartyId)}`}</span>
+      <span class="counterparty-name">{counterpartyName || counterpartyId}</span>
     </div>
     <div class="account-status">
       {#if account.mempool.length > 0 || (account as any).pendingFrame || (account as any).sentTransitions > 0}

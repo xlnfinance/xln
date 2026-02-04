@@ -81,12 +81,18 @@ export async function createRpcAdapter(
       addresses.deltaTransformer = '';
     } else {
       // Use any cast to handle ethers version mismatch between root and jurisdictions
+      if (!addresses.account) {
+        console.warn('[JAdapter:rpc] fromReplica missing Account address - using zero address placeholder');
+        addresses.account = ethers.ZeroAddress;
+      }
+      if (!addresses.deltaTransformer) {
+        console.warn('[JAdapter:rpc] fromReplica missing DeltaTransformer address - using zero address placeholder');
+        addresses.deltaTransformer = ethers.ZeroAddress;
+      }
       account = Account__factory.connect(addresses.account, signer as any);
       depository = Depository__factory.connect(addresses.depository, signer as any);
       entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer as any);
-      if (addresses.deltaTransformer) {
-        deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, signer as any);
-      }
+      deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, signer as any);
       deployed = true;
       console.log('[JAdapter:rpc] Connected to existing contracts ✓');
     }
@@ -510,8 +516,8 @@ export async function createRpcAdapter(
     },
 
     async debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]> {
-      // For anvil (chainId 31337), allow debug funding for testnet
-      if (config.chainId === 31337) {
+      // For dev chains (anvil/hardhat), allow debug funding for testnet
+      if (config.chainId === 31337 || config.chainId === 1337) {
         // Use mintToReserve (renamed from debugFundReserves in Depository contract)
         const tx = await depository.mintToReserve(entityId, tokenId, amount);
         const receipt = await tx.wait();
@@ -535,7 +541,7 @@ export async function createRpcAdapter(
         return events;
       }
       // Real networks: must use real deposits
-      throw new Error('debugFundReserves only available on anvil (chainId 31337) - use real token deposits');
+      throw new Error('debugFundReserves only available on dev chains (31337/1337) - use real token deposits');
       /* Original implementation for reference (requires Depository extension):
       const tx = await depository.debugFundReserves(entityId, tokenId, amount);
       const receipt = await tx.wait();
@@ -600,11 +606,12 @@ export async function createRpcAdapter(
         internalTokenId?: number;
       }
     ): Promise<JEvent[]> {
-      // Create wallet from private key
+      // Create wallet from private key (use NonceManager to avoid nonce races)
       const signerWallet = new ethers.Wallet(
         '0x' + Buffer.from(signerPrivateKey).toString('hex'),
         provider
       );
+      const managedSigner = new ethers.NonceManager(signerWallet);
 
       const tokenType = options?.tokenType ?? 0;
       const externalTokenIdRaw = options?.externalTokenId ?? 0n;
@@ -618,7 +625,7 @@ export async function createRpcAdapter(
       const erc20 = new ethers.Contract(tokenAddress, [
         'function approve(address spender, uint256 amount) returns (bool)',
         'function allowance(address owner, address spender) view returns (uint256)',
-      ], signerWallet);
+      ], managedSigner);
 
       // Step 1: Approve Depository to spend tokens (max allowance for smoother UX)
       const allowanceFn = erc20.getFunction('allowance') as (owner: string, spender: string) => Promise<bigint>;
@@ -632,11 +639,12 @@ export async function createRpcAdapter(
 
       // Step 3: Call externalTokenToReserve
       // Connect depository with signer's wallet
-      const depositoryWithSigner = depository.connect(signerWallet as any) as typeof depository;
-      const packedToken = await depository.packTokenReference(tokenType, tokenAddress, externalTokenId);
+      const depositoryWithSigner = depository.connect(managedSigner as any) as typeof depository;
       const depositTx = await depositoryWithSigner.externalTokenToReserve({
         entity: entityId,
-        packedToken,
+        contractAddress: tokenAddress,
+        externalTokenId,
+        tokenType,
         internalTokenId, // Auto-detect from registry when 0
         amount: amount,
       });

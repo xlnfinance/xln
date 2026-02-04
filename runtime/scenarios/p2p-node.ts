@@ -4,10 +4,18 @@
  */
 
 import { startRuntimeWsServer } from '../networking/ws-server';
-import { main, setRuntimeSeed, startP2P, process as runtimeProcess, applyRuntimeInput, createLazyEntity, generateLazyEntityId } from '../runtime';
+import { main, setRuntimeSeed, startP2P, process as runtimeProcess, applyRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter } from '../runtime';
 import { processUntil, converge } from './helpers';
 import { isLeft, deriveDelta } from '../account-utils';
-import { deriveSignerKeySync, registerSignerKey } from '../account-crypto';
+import { deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account-crypto';
+import { loadJurisdictions } from '../jurisdiction-loader';
+import { setupJEventWatcher } from '../j-event-watcher';
+import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
+import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/factories/ERC20Mock__factory';
+import { hashHtlcSecret } from '../htlc-utils';
+import type { JurisdictionConfig } from '../types';
+import type { JAdapter, JTokenInfo } from '../jadapter/types';
+import { ethers } from 'ethers';
 
 const args = globalThis.process.argv.slice(2);
 
@@ -26,12 +34,213 @@ const seedRuntimeId = getArg('--seed-runtime-id');
 const relayPort = Number(getArg('--relay-port', '0'));
 const relayHost = getArg('--relay-host', '127.0.0.1')!;
 const isHub = hasFlag('--hub');
+const useRpc = hasFlag('--rpc');
+const jurisdictionName = getArg('--jurisdiction', 'arrakis')!;
+const rpcUrlOverride = getArg('--rpc-url');
+const skipWalletFunding = hasFlag('--skip-wallet-funding');
 
-const USDC = 1;
+let USDC = 1;
 const DECIMALS = 18n;
 const usd = (amount: number | bigint) => BigInt(amount) * 10n ** DECIMALS;
+const FAUCET_DEPOSIT_AMOUNT = usd(1_000);
+const FAUCET_WALLET_AMOUNT = usd(5_000);
+const R2R_AMOUNT = usd(250);
+const HTLC_AMOUNT = usd(1_000);
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const resolveJurisdiction = (): {
+  jurisdiction: JurisdictionConfig;
+  rpcUrl: string;
+  contracts: { depository: string; entityProvider: string; account?: string; deltaTransformer?: string };
+} => {
+  const data = loadJurisdictions();
+  const entry = data.jurisdictions?.[jurisdictionName];
+  if (!entry) {
+    throw new Error(`JURISDICTION_NOT_FOUND: ${jurisdictionName}`);
+  }
+  const rpcUrl = rpcUrlOverride ?? entry.rpc;
+  const contracts = entry.contracts || {};
+  if (!rpcUrl) {
+    throw new Error(`JURISDICTION_RPC_MISSING: ${jurisdictionName}`);
+  }
+  if (!contracts.depository || !contracts.entityProvider) {
+    throw new Error(`JURISDICTION_CONTRACTS_MISSING: ${jurisdictionName}`);
+  }
+  const jurisdiction: JurisdictionConfig = {
+    name: jurisdictionName,
+    address: rpcUrl,
+    entityProviderAddress: contracts.entityProvider,
+    depositoryAddress: contracts.depository,
+    chainId: entry.chainId,
+  };
+  return { jurisdiction, rpcUrl, contracts };
+};
+
+const deployDefaultTokensOnRpc = async (jadapter: JAdapter): Promise<void> => {
+  if (jadapter.mode === 'browservm') return;
+  const existing = await jadapter.getTokenRegistry().catch(() => []);
+  if (existing.length > 0) return;
+
+  const depositoryAddress = jadapter.addresses?.depository;
+  if (!depositoryAddress) {
+    throw new Error('TOKEN_DEPLOY: Depository address missing');
+  }
+
+  console.log(`[P2P] Deploying default tokens on ${jurisdictionName}...`);
+  const erc20Factory = new ERC20Mock__factory(jadapter.signer as any);
+  for (const token of DEFAULT_TOKENS) {
+    const tokenContract = await erc20Factory.deploy(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
+    await tokenContract.waitForDeployment();
+    const tokenAddress = await tokenContract.getAddress();
+    console.log(`[P2P] ${token.symbol} deployed at ${tokenAddress}`);
+
+    const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
+    await approveTx.wait();
+
+    const registerTx = await jadapter.depository.connect(jadapter.signer as any).externalTokenToReserve({
+      entity: ethers.ZeroHash,
+      contractAddress: tokenAddress,
+      externalTokenId: 0,
+      tokenType: 0,
+      internalTokenId: 0,
+      amount: TOKEN_REGISTRATION_AMOUNT,
+    });
+    await registerTx.wait();
+    console.log(`[P2P] Token registered: ${token.symbol}`);
+  }
+};
+
+const ensureTokenCatalog = async (jadapter: JAdapter, allowDeploy: boolean): Promise<JTokenInfo[]> => {
+  const current = await jadapter.getTokenRegistry().catch(() => []);
+  if (current.length > 0) {
+    if (jadapter.mode !== 'browservm') {
+      const firstToken = current[0];
+      if (firstToken?.address) {
+        const code = await jadapter.provider.getCode(firstToken.address).catch(() => '0x');
+        if (code === '0x' || code.length < 10) {
+          console.warn(`[P2P] Token ${firstToken.symbol} has no code - redeploying`);
+          if (allowDeploy) {
+            await deployDefaultTokensOnRpc(jadapter);
+            return await jadapter.getTokenRegistry().catch(() => []);
+          }
+        }
+      }
+    }
+    return current;
+  }
+
+  if (allowDeploy) {
+    await deployDefaultTokensOnRpc(jadapter);
+    return await jadapter.getTokenRegistry().catch(() => []);
+  }
+
+  return current;
+};
+
+const waitForTokenCatalog = async (jadapter: JAdapter, maxRounds = 40): Promise<JTokenInfo[]> => {
+  for (let i = 0; i < maxRounds; i++) {
+    const tokens = await jadapter.getTokenRegistry().catch(() => []);
+    if (tokens.length > 0) return tokens;
+    await sleep(250);
+  }
+  throw new Error('TOKEN_CATALOG_EMPTY');
+};
+
+const getReserveBalance = (env: any, entityId: string, signerId: string, tokenId: number) => {
+  const replica = env.eReplicas.get(`${entityId}:${signerId}`);
+  if (!replica) return 0n;
+  return replica.state.reserves?.get(String(tokenId)) ?? 0n;
+};
+
+const waitForReserveBalance = async (
+  env: any,
+  entityId: string,
+  signerId: string,
+  tokenId: number,
+  minAmount: bigint,
+  label: string,
+  maxRounds = 300
+) => {
+  await processUntil(
+    env,
+    () => getReserveBalance(env, entityId, signerId, tokenId) >= minAmount,
+    maxRounds,
+    label,
+    round => {
+      if (round % 10 === 0) {
+        console.log(`[P2P_DEBUG] wait-reserve ${label} round=${round} reserve=${getReserveBalance(env, entityId, signerId, tokenId)}`);
+      }
+    },
+    () => {
+      console.log(`[P2P_DEBUG] wait-reserve ${label} timeout reserve=${getReserveBalance(env, entityId, signerId, tokenId)}`);
+    }
+  );
+};
+
+const fundWalletAndDeposit = async (
+  env: any,
+  jadapter: JAdapter,
+  token: JTokenInfo,
+  entityId: string,
+  signerId: string,
+  amount: bigint
+) => {
+  const signerPrivateKey = getSignerPrivateKey(env, signerId);
+  const privateKeyHex = '0x' + Buffer.from(signerPrivateKey).toString('hex');
+  const wallet = new ethers.Wallet(privateKeyHex, jadapter.provider as any);
+  const walletAddress = await wallet.getAddress();
+  console.log(`[P2P] Faucet: ${signerId.slice(-4)} wallet=${walletAddress.slice(0, 10)} token=${token.symbol}`);
+
+  if (skipWalletFunding) {
+    console.log(`[P2P] Faucet: skipping wallet funding (pre-funded)`);
+  }
+
+  if (!skipWalletFunding) {
+    const targetEth = ethers.parseEther('1');
+    const currentEth = await jadapter.provider.getBalance(walletAddress);
+    if (currentEth < targetEth) {
+      const tx = await jadapter.signer.sendTransaction({ to: walletAddress, value: targetEth - currentEth });
+      await tx.wait();
+    }
+
+    const erc20 = new ethers.Contract(
+      token.address,
+      ['function balanceOf(address owner) view returns (uint256)', 'function transfer(address to, uint256 amount) returns (bool)'],
+      jadapter.signer as any
+    );
+    const currentToken = (await erc20.balanceOf(walletAddress)) as bigint;
+    if (currentToken < FAUCET_WALLET_AMOUNT) {
+      const tx = await erc20.transfer(walletAddress, FAUCET_WALLET_AMOUNT - currentToken);
+      await tx.wait();
+    }
+  }
+
+  await jadapter.externalTokenToReserve(signerPrivateKey, entityId, token.address, amount, {
+    internalTokenId: token.tokenId ?? 0,
+  });
+  console.log(`[P2P] Faucet: deposited ${amount} ${token.symbol} to ${entityId.slice(-4)}`);
+};
+
+let jWatcherProcessInterval: ReturnType<typeof setInterval> | null = null;
+let jWatcherInFlight = false;
+
+const startJWatcherProcessingLoop = (env: any) => {
+  if (jWatcherProcessInterval) return;
+  jWatcherProcessInterval = setInterval(async () => {
+    if (jWatcherInFlight) return;
+    const pending = env.runtimeInput?.entityInputs?.length ?? 0;
+    if (pending === 0) return;
+    jWatcherInFlight = true;
+    try {
+      const inputs = [...env.runtimeInput.entityInputs];
+      env.runtimeInput.entityInputs = [];
+      await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: inputs });
+    } finally {
+      jWatcherInFlight = false;
+    }
+  }, 100);
+};
 
 const getProfileByName = (env: any, name: string) => {
   const profiles = env.gossip?.getProfiles?.() || [];
@@ -257,7 +466,13 @@ const waitForAccountReady = async (env: any, entityId: string, signerId: string,
   );
 };
 
-const waitForPayment = async (env: any, entityId: string, signerId: string, counterpartyId: string) => {
+const waitForPayment = async (
+  env: any,
+  entityId: string,
+  signerId: string,
+  counterpartyId: string,
+  maxRounds = 40
+) => {
   await processUntil(
     env,
     () => {
@@ -265,7 +480,7 @@ const waitForPayment = async (env: any, entityId: string, signerId: string, coun
       const delta = account?.deltas?.get(USDC);
       return !!delta && delta.offdelta !== 0n;
     },
-    40,
+    maxRounds,
     'payment',
     round => {
       if (round % 5 === 0) {
@@ -417,6 +632,39 @@ const run = async () => {
 
   setRuntimeSeed(seed);
   const env = await main();
+  let jurisdiction: JurisdictionConfig | null = null;
+  let rpcUrl: string | null = null;
+  let contracts: { depository: string; entityProvider: string; account?: string; deltaTransformer?: string } | null = null;
+
+  if (useRpc) {
+    const resolved = resolveJurisdiction();
+    jurisdiction = resolved.jurisdiction;
+    rpcUrl = resolved.rpcUrl;
+    contracts = resolved.contracts;
+
+    await applyRuntimeInput(env, {
+      runtimeTxs: [
+        {
+          type: 'importJ',
+          data: {
+            name: jurisdictionName,
+            chainId: jurisdiction.chainId ?? 0,
+            ticker: 'XLN',
+            rpcs: [rpcUrl],
+            contracts: {
+              depository: contracts.depository,
+              entityProvider: contracts.entityProvider,
+            },
+          },
+        },
+      ],
+      entityInputs: [],
+    });
+
+    await setupJEventWatcher(env, rpcUrl, contracts.entityProvider, contracts.depository);
+    startJWatcherProcessingLoop(env);
+    console.log(`P2P_JWATCHER_READY role=${role} rpc=${rpcUrl}`);
+  }
 
   // CRITICAL: Start relay AFTER env created so we can pass callbacks
   if (isHub && relayPort > 0) {
@@ -470,7 +718,7 @@ const run = async () => {
   const privateKey = deriveSignerKeySync(seedBytes, signerId);
   registerSignerKey(signerId, privateKey);
 
-  const { config } = createLazyEntity(role, [signerId], 1n);
+  const { config } = createLazyEntity(role, [signerId], 1n, jurisdiction ?? undefined);
   const entityId = generateLazyEntityId([signerId], 1n);
 
   await applyRuntimeInput(env, {
@@ -504,6 +752,26 @@ const run = async () => {
   }
 
   console.log(`P2P_NODE_READY role=${role} runtimeId=${env.runtimeId} entityId=${entityId}`);
+
+  if (useRpc) {
+    const jadapter = getActiveJAdapter(env);
+    if (!jadapter) {
+      throw new Error('JADAPTER_MISSING');
+    }
+    const tokenCatalog = isHub
+      ? await ensureTokenCatalog(jadapter, true)
+      : await waitForTokenCatalog(jadapter);
+    const usdcToken = tokenCatalog.find(t => t.symbol === 'USDC') ?? tokenCatalog[0];
+    if (!usdcToken) {
+      throw new Error('TOKEN_CATALOG_EMPTY');
+    }
+    if (typeof usdcToken.tokenId === 'number') {
+      USDC = usdcToken.tokenId;
+    }
+    await fundWalletAndDeposit(env, jadapter, usdcToken, entityId, signerId, FAUCET_DEPOSIT_AMOUNT);
+    await waitForReserveBalance(env, entityId, signerId, USDC, FAUCET_DEPOSIT_AMOUNT, `${role}-faucet`);
+    console.log(`P2P_FAUCET_READY role=${role} token=${usdcToken.symbol} reserve=${getReserveBalance(env, entityId, signerId, USDC)}`);
+  }
 
   if (role === 'hub') {
     // Hub is relay server - wait for client profiles to arrive via gossip
@@ -661,14 +929,59 @@ const run = async () => {
     logProfile('alice sees bob', bobProfile);
     await waitForHubAccount(env, bobProfile.entityId, refreshGossip);
 
+    if (useRpc) {
+      const reserveBefore = getReserveBalance(env, entityId, signerId, USDC);
+      if (reserveBefore < R2R_AMOUNT) {
+        throw new Error(`R2R_INSUFFICIENT_RESERVE: have=${reserveBefore} need=${R2R_AMOUNT}`);
+      }
+
+      await runtimeProcess(env, [
+        {
+          entityId,
+          signerId,
+          entityTxs: [
+            {
+              type: 'reserve_to_reserve',
+              data: {
+                toEntityId: bobProfile.entityId,
+                tokenId: USDC,
+                amount: R2R_AMOUNT,
+              },
+            },
+            { type: 'j_broadcast', data: {} },
+          ],
+        },
+      ]);
+
+      await processUntil(
+        env,
+        () => getReserveBalance(env, entityId, signerId, USDC) <= reserveBefore - R2R_AMOUNT,
+        300,
+        'alice-r2r',
+        round => {
+          if (round % 10 === 0) {
+            console.log(`[P2P_DEBUG] alice-r2r round=${round} reserve=${getReserveBalance(env, entityId, signerId, USDC)}`);
+          }
+        },
+        () => {
+          console.log(`[P2P_DEBUG] alice-r2r timeout reserve=${getReserveBalance(env, entityId, signerId, USDC)}`);
+        }
+      );
+
+      console.log('P2P_R2R_SENT');
+    }
+
     console.log('='.repeat(80));
-    console.log('ALICE SENDING PAYMENT TO BOB');
+    console.log('ALICE SENDING HTLC PAYMENT TO BOB');
     console.log(`  Alice entityId: ${entityId}`);
     console.log(`  Hub entityId: ${hubProfile.entityId}`);
     console.log(`  Bob entityId: ${bobProfile.entityId}`);
     console.log(`  Route: Alice -> Hub -> Bob`);
-    console.log(`  Amount: $1,000 USDC`);
+    console.log(`  Amount: $${HTLC_AMOUNT / (10n ** DECIMALS)} USDC`);
     console.log('='.repeat(80));
+
+    const secret = ethers.keccak256(ethers.toUtf8Bytes(`htlc-${entityId}-${bobProfile.entityId}`));
+    const hashlock = hashHtlcSecret(secret);
 
     await runtimeProcess(env, [
       {
@@ -676,22 +989,24 @@ const run = async () => {
         signerId,
         entityTxs: [
           {
-            type: 'directPayment',
+            type: 'htlcPayment',
             data: {
               targetEntityId: bobProfile.entityId,
               tokenId: USDC,
-              amount: usd(1_000),
+              amount: HTLC_AMOUNT,
               route: [entityId, hubProfile.entityId, bobProfile.entityId],
-              description: 'p2p-test',
+              description: 'p2p-htlc',
+              secret,
+              hashlock,
             },
           },
         ],
       },
     ]);
 
-    console.log('ALICE: directPayment tx submitted to runtime');
-    logEntityState(env, entityId, signerId, 'alice after payment submit');
-    logAccountState(env, entityId, signerId, hubProfile.entityId, 'alice-hub account after payment');
+    console.log('ALICE: htlcPayment tx submitted to runtime');
+    logEntityState(env, entityId, signerId, 'alice after HTLC submit');
+    logAccountState(env, entityId, signerId, hubProfile.entityId, 'alice-hub account after HTLC');
 
     // Wait for Hub to ACK our payment frame (bilateral consensus complete)
     // This ensures Hub has processed the payment and forwarded to Bob
@@ -703,20 +1018,21 @@ const run = async () => {
         const delta = account?.deltas?.get(USDC);
         return !!account && !account.pendingFrame && delta && delta.offdelta < 0n;
       },
-      60,
-      'alice-payment-ack',
+      240,
+      'alice-htlc-ack',
       round => {
         if (round % 10 === 0) {
-          logAccountState(env, entityId, signerId, hubProfile.entityId, `alice wait payment-ack round=${round}`);
-          logQueues(env, `alice wait payment-ack round=${round}`);
+          logAccountState(env, entityId, signerId, hubProfile.entityId, `alice wait htlc-ack round=${round}`);
+          logQueues(env, `alice wait htlc-ack round=${round}`);
         }
       },
       () => {
-        logAccountState(env, entityId, signerId, hubProfile.entityId, 'alice wait payment-ack timeout');
-        logQueues(env, 'alice wait payment-ack timeout');
+        logAccountState(env, entityId, signerId, hubProfile.entityId, 'alice wait htlc-ack timeout');
+        logQueues(env, 'alice wait htlc-ack timeout');
       }
     );
 
+    console.log('P2P_HTLC_SENT');
     console.log('P2P_PAYMENT_SENT');
     globalThis.process.exit(0);
   }
@@ -753,7 +1069,22 @@ const run = async () => {
     await converge(env, 20);
     await waitForOwnCreditLimit(env, entityId, signerId, hubProfile.entityId, creditAmount, 60);
     console.log('P2P_BOB_READY');
-    await waitForPayment(env, entityId, signerId, hubProfile.entityId);
+
+    if (useRpc) {
+      const reserveBefore = getReserveBalance(env, entityId, signerId, USDC);
+      await waitForReserveBalance(
+        env,
+        entityId,
+        signerId,
+        USDC,
+        reserveBefore + R2R_AMOUNT,
+        'bob-r2r'
+      );
+      console.log('P2P_R2R_RECEIVED');
+    }
+
+    await waitForPayment(env, entityId, signerId, hubProfile.entityId, 240);
+    console.log('P2P_HTLC_RECEIVED');
     console.log('P2P_PAYMENT_RECEIVED');
     globalThis.process.exit(0);
   }

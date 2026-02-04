@@ -24,8 +24,8 @@ const DepositoryModule = buildModule("DepositoryModule", (m) => {
   const erc721Mock = m.contract('ERC721Mock', ["ERC721Mock", "ERC721"]);
   const erc1155Mock = m.contract('ERC1155Mock');
 
-  // Approve EntityProvider in Depository (legacy support)
-  m.call(depository, "addEntityProvider", [entityProvider]);
+  // Depository constructor already registers the EntityProvider.
+  // Do not call addEntityProvider again (reverts with "exists").
 
   return { depository, entityProvider, erc20Mock, erc721Mock, erc1155Mock  };
 });

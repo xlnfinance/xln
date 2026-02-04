@@ -1603,6 +1603,7 @@ export interface Env {
   timestamp: number;
   runtimeSeed?: string; // BrainVault seed backing this runtime (plaintext, dev mode)
   runtimeId?: string; // Runtime identity (usually signer1 address)
+  dbNamespace?: string; // DB namespace for per-runtime persistence (defaults to runtimeId)
   runtimeInput: RuntimeInput; // Persistent storage for merged inputs
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: any; // Gossip layer for network profiles
@@ -1757,6 +1758,7 @@ export interface EnvSnapshot {
   timestamp: number;
   runtimeSeed?: string;
   runtimeId?: string;
+  dbNamespace?: string;
   eReplicas: Map<string, EntityReplica>;  // E-layer state
   jReplicas: JReplica[];                   // J-layer state (with stateRoot for time travel)
   browserVMState?: BrowserVMState;

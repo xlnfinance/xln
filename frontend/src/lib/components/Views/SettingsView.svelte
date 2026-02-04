@@ -63,7 +63,7 @@
         .map(([key, replica]) => {
           const [entityId, signerId] = key.split(':');
           return {
-            entityId: entityId?.slice(0,10) + '...' || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })(),
+            entityId: entityId || (() => { throw new Error('FINTECH-SAFETY: Missing required data'); })(),
             signerId,
             jBlock: replica.state.lastFinalizedJHeight,
           };

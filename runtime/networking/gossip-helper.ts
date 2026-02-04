@@ -88,6 +88,9 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
     }
   }
 
+  const board = buildBoardMetadata(entityState);
+  const entityPublicKey = board.validators[0]?.publicKey;
+
   // Build profile
   const profile: Profile = {
     entityId: entityState.entityId,
@@ -99,8 +102,9 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
       isHub: false, // Future: Determine from entity capabilities or manual config
       routingFeePPM: 100, // Default 100 PPM (0.01%)
       baseFee: 0n,
-      board: buildBoardMetadata(entityState),
+      board,
       threshold: toUint16(entityState.config.threshold, 1),
+      ...(entityPublicKey ? { entityPublicKey } : {}),
       ...(name ? { name } : {}), // Include name if provided
     },
     accounts,

@@ -444,14 +444,8 @@ export interface Account extends BaseContract {
   >;
 
   unpackTokenReference: TypedContractMethod<
-    [packed: BytesLike],
-    [
-      [string, bigint, bigint] & {
-        contractAddress: string;
-        externalTokenId: bigint;
-        tokenType: bigint;
-      }
-    ],
+    [arg0: BytesLike],
+    [[string, bigint, bigint]],
     "view"
   >;
 
@@ -502,17 +496,7 @@ export interface Account extends BaseContract {
   >;
   getFunction(
     nameOrSignature: "unpackTokenReference"
-  ): TypedContractMethod<
-    [packed: BytesLike],
-    [
-      [string, bigint, bigint] & {
-        contractAddress: string;
-        externalTokenId: bigint;
-        tokenType: bigint;
-      }
-    ],
-    "view"
-  >;
+  ): TypedContractMethod<[arg0: BytesLike], [[string, bigint, bigint]], "view">;
 
   getEvent(
     key: "AccountSettled"

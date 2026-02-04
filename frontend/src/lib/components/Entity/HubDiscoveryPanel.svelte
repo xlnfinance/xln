@@ -5,6 +5,7 @@
 -->
 <script lang="ts">
   import { xlnFunctions, xlnEnvironment, getXLN, processWithDelay } from '../../stores/xlnStore';
+  import { settings, settingsOperations } from '$lib/stores/settingsStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { Radio, Globe, Zap, Users, Shield, RefreshCw, Plus, Check, AlertTriangle } from 'lucide-svelte';
 
@@ -24,6 +25,15 @@
   let error = '';
   let connecting: string | null = null;
   const CREDIT_TOKEN_ID = 1;
+  let relaySelection = '';
+  let gossipStatus: { lastRefreshAt: number; received: number; total: number; relay: string } | null = null;
+
+  const RELAY_OPTIONS = [
+    { label: 'Prod (xln.finance)', url: 'wss://xln.finance/relay' },
+    { label: 'Local (localhost:8080)', url: 'ws://localhost:8080/relay' },
+  ];
+
+  $: relaySelection = $settings.relayUrl;
 
   // Hub data structure
   interface Hub {
@@ -68,7 +78,9 @@
     if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.floor(value));
     if (typeof value === 'string' && value.trim() !== '') {
       try {
-        return BigInt(value);
+        const match = value.match(/^BigInt\(([-\d]+)\)$/);
+        const raw = match ? match[1] : value;
+        return BigInt(raw);
       } catch {
         return undefined;
       }
@@ -95,8 +107,16 @@
     try {
       if (refreshGossip) {
         const xln = await getXLN();
+        const beforeCount = env?.gossip?.getProfiles?.()?.length || 0;
         xln.refreshGossip?.();
         await new Promise(resolve => setTimeout(resolve, 250));
+        const afterCount = env?.gossip?.getProfiles?.()?.length || 0;
+        gossipStatus = {
+          lastRefreshAt: Date.now(),
+          received: Math.max(0, afterCount - beforeCount),
+          total: afterCount,
+          relay: $settings.relayUrl
+        };
       }
 
       const currentEnv = env;
@@ -255,15 +275,44 @@
     }
   }
 
+  async function updateRelay(url: string) {
+    settingsOperations.setRelayUrl(url);
+    const currentEnv = env;
+    if (!currentEnv) return;
+    const xln = await getXLN();
+    if (xln.startP2P) {
+      xln.startP2P(currentEnv as any, { relayUrls: [url], gossipPollMs: 0 });
+    }
+  }
+
 </script>
 
 <div class="hub-panel">
   <header class="panel-header">
     <h3>Discover Hubs</h3>
-    <button class="refresh-btn" on:click={() => discoverHubs(true)} disabled={loading}>
-      <span class:spinning={loading}><RefreshCw size={14} /></span>
-    </button>
+    <div class="header-controls">
+      <div class="relay-select">
+        <label>Relay</label>
+        <select bind:value={relaySelection} on:change={(e) => updateRelay((e.currentTarget as HTMLSelectElement).value)}>
+          {#each RELAY_OPTIONS as option}
+            <option value={option.url}>{option.label}</option>
+          {/each}
+          {#if !RELAY_OPTIONS.some(o => o.url === relaySelection)}
+            <option value={relaySelection}>Custom ({relaySelection})</option>
+          {/if}
+        </select>
+      </div>
+      <button class="refresh-btn" on:click={() => discoverHubs(true)} disabled={loading}>
+        <span class:spinning={loading}><RefreshCw size={14} /></span>
+      </button>
+    </div>
   </header>
+
+  {#if gossipStatus}
+    <div class="gossip-status">
+      Gossip refresh: +{gossipStatus.received} / {gossipStatus.total} profiles • {new Date(gossipStatus.lastRefreshAt).toLocaleTimeString()} • {gossipStatus.relay}
+    </div>
+  {/if}
 
   {#if !entityId}
     <div class="warning-banner">
@@ -400,6 +449,29 @@
     justify-content: space-between;
   }
 
+  .header-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .relay-select {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #a8a29e;
+    font-size: 12px;
+  }
+
+  .relay-select select {
+    background: #1c1917;
+    border: 1px solid #292524;
+    color: #e7e5e4;
+    padding: 4px 6px;
+    border-radius: 6px;
+    font-size: 12px;
+  }
+
   .panel-header h3 {
     margin: 0;
     font-size: 14px;
@@ -418,6 +490,15 @@
     border-radius: 6px;
     color: #78716c;
     cursor: pointer;
+  }
+
+  .gossip-status {
+    font-size: 12px;
+    color: #a8a29e;
+    padding: 6px 8px;
+    border: 1px solid #292524;
+    border-radius: 6px;
+    background: #171717;
   }
 
   .refresh-btn:hover:not(:disabled) {

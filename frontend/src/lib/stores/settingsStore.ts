@@ -8,6 +8,7 @@ const defaultSettings: Settings = {
   dropdownMode: 'signer-first',
   runtimeDelay: 250, // 250ms = 4 frames/second (visible lightning effects)
   balanceRefreshMs: 1000, // Auto-refresh balances (ms)
+  relayUrl: 'wss://xln.finance/relay',
   portfolioScale: 5000, // Default scale: $5000 max for portfolio bars
   componentStates: {},
   compactNumbers: true, // Display 1.2K instead of 1,234
@@ -98,6 +99,11 @@ const settingsOperations = {
 
   setBalanceRefreshMs(refreshMs: number) {
     settings.update(current => ({ ...current, balanceRefreshMs: refreshMs }));
+    this.saveToStorage();
+  },
+
+  setRelayUrl(relayUrl: string) {
+    settings.update(current => ({ ...current, relayUrl }));
     this.saveToStorage();
   },
 

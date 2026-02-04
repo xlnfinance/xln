@@ -175,9 +175,9 @@ export function setEntityEnvContext(options: EntityEnvContextOptions = {}): void
         return $xlnEnv as HistoryFrame | null;
       });
 
-  // Replicas - derived from env
+  // Replicas - derived from env (copy map to force Svelte reactivity)
   const replicas: Readable<Map<string, EntityReplica>> = useIsolated
-    ? derived(env, ($e) => $e?.eReplicas ?? new Map())
+    ? derived(env, ($e) => ($e?.eReplicas ? new Map($e.eReplicas) : new Map()))
     : visibleReplicas as Readable<Map<string, EntityReplica>>;
 
   // XLN functions (always from global - loaded once)

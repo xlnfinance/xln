@@ -1,14 +1,12 @@
 <script lang="ts">
   import type { EntityReplica } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
-  import { getXLN, replicas, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
+  import { replicas, xlnFunctions } from '../../stores/xlnStore';
   import AccountPreview from './AccountPreview.svelte';
 
   export let replica: EntityReplica | null;
 
-  // View state (for new account creation only)
   const dispatch = createEventDispatcher();
-  let selectedNewEntityId = '';
 
   // Get accounts from entity state - DIRECT references (no shallow copy!)
   // CRITICAL: Don't spread account object - it creates stale snapshot
@@ -45,57 +43,16 @@
     }
 
     return Array.from(entitySet).map(entityId => {
-      // Try to get a human-readable name for the entity
-      const shortId = $xlnFunctions!.getEntityShortId(entityId);
       const hasAccount = existingAccountIds.has(entityId);
       return {
         entityId,
-        displayName: $xlnFunctions!.formatEntityId(entityId),
-        shortId,
+        displayName: entityId,
+        shortId: entityId,
         hasAccount
       };
     }).sort((a, b) => {
-      const aId = $xlnFunctions!.getEntityShortId(a.entityId);
-      const bId = $xlnFunctions!.getEntityShortId(b.entityId);
-      // Try numeric sort first
-      const aNum = parseInt(aId, 10);
-      const bNum = parseInt(bId, 10);
-      if (!isNaN(aNum) && !isNaN(bNum) && aId === aNum.toString() && bId === bNum.toString()) {
-        return aNum - bNum;
-      }
-      // Fall back to string sort for hash-based IDs
-      return aId.localeCompare(bId);
-    }); // Sort by entity ID
-  }
-
-  async function openAccountWith(targetEntityId: string) {
-    if (!replica) return;
-
-    try {
-      console.log(`💳 NEW-FLOW: Opening account with Entity ${$xlnFunctions!.formatEntityId(targetEntityId)} via entity transaction`);
-
-      const xln = await getXLN();
-      const env = $xlnEnvironment;
-      if (!env) throw new Error('XLN environment not ready');
-
-      // NEW FLOW: Send account_request as EntityTx to local e-machine
-      const accountRequestInput = {
-        entityId: replica.entityId,
-        signerId: replica.signerId,
-        entityTxs: [{
-          type: 'openAccount' as const,
-          data: {
-            targetEntityId
-          }
-        }]
-      };
-
-      await xln.process(env, [accountRequestInput]);
-      console.log(`✅ Account request sent to local e-machine for Entity ${$xlnFunctions!.formatEntityId(targetEntityId)}`);
-    } catch (error) {
-      console.error('Failed to send account request:', error);
-      alert(`Failed to send account request: ${(error as Error)?.message || 'Unknown error'}`);
-    }
+      return a.entityId.localeCompare(b.entityId);
+    });
   }
 
   function selectAccount(event: CustomEvent) {
@@ -130,29 +87,6 @@
           {/each}
         </div>
 
-      <!-- Add Account Section -->
-      <div class="add-account-section">
-        <h5>➕ Open New Account</h5>
-        <select class="entity-select" bind:value={selectedNewEntityId}>
-          <option value="">Select an entity...</option>
-          {#each allEntities.filter(e => !e.hasAccount) as entity}
-            <option value={entity.entityId}>
-              {entity.displayName} ({entity.shortId})
-            </option>
-          {/each}
-        </select>
-        <button
-          class="open-account-button"
-          on:click={() => {
-            if (selectedNewEntityId) {
-              openAccountWith(selectedNewEntityId);
-              selectedNewEntityId = ''; // Reset selection after opening
-            }
-          }}
-        >
-          📝 Open Account
-        </button>
-      </div>
     {/if}
   </div>
 </div>
@@ -202,53 +136,6 @@
     flex-direction: column;
     gap: 12px;
   }
-
-  .add-account-section {
-    padding: 12px;
-    background: #1e1e1e;
-    border-top: 1px solid #3e3e3e;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .add-account-section h5 {
-    margin: 0;
-    font-size: 0.9em;
-    color: #007acc;
-  }
-
-  .entity-select {
-    flex: 1;
-    padding: 6px;
-    background: #2d2d2d;
-    border: 1px solid #3e3e3e;
-    border-radius: 4px;
-    color: #d4d4d4;
-    font-size: 0.85em;
-  }
-
-  .entity-select:focus {
-    border-color: #007acc;
-    outline: none;
-  }
-
-  .open-account-button {
-    padding: 6px 12px;
-    background: #007acc;
-    border: none;
-    border-radius: 4px;
-    color: white;
-    font-size: 0.85em;
-    cursor: pointer;
-    transition: background 0.2s ease;
-  }
-
-  .open-account-button:hover {
-    background: #0086e6;
-  }
-
-
 
 
 

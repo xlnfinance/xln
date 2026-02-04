@@ -175,7 +175,7 @@
     </div>
     {#if entityId}
       <div class="entity-id" title={entityId}>
-        Entity: {entityId.slice(0, 10)}...{entityId.slice(-6)}
+        Entity: {entityId}
       </div>
     {/if}
 

@@ -356,6 +356,7 @@ async function tryFinalizeJBlocks(
       state.lastFinalizedJHeight = jHeight;
       finalizedHeights.push(jHeight);
       console.log(`   ✅ Added block ${jHeight} to jBlockChain (length: ${state.jBlockChain.length})`);
+      console.log(`   🧭 J-HEIGHT: entity=${state.entityId} lastFinalizedJHeight=${state.lastFinalizedJHeight}`);
 
       // ─────────────────────────────────────────────────────────────────────────
       // Step 5: Apply all events from this finalized block
@@ -475,8 +476,11 @@ async function applyFinalizedJEvent(
     const balanceDisplay = (Number(newBalance) / (10 ** decimals)).toFixed(4);
 
     if (entity === entityState.entityId) {
+      const before = entityState.reserves.get(String(tokenId)) ?? 0n;
       newState.reserves.set(String(tokenId), BigInt(newBalance as string | number | bigint));
-      if (DEBUG) console.log(`✅ Reserve updated: Token ${tokenId} → ${newBalance}`);
+      console.log(`💰 ReserveUpdated APPLIED: entity=${entityShort} token=${tokenId} balance=${newBalance}`);
+      console.log(`   Before: ${before.toString()}`);
+      console.log(`   After: ${(newState.reserves.get(String(tokenId)) ?? 0n).toString()}`);
     }
 
     addMessage(newState, `📊 RESERVE: ${tokenSymbol} = ${balanceDisplay} | Block ${blockNumber} | Tx ${txHashShort}`);

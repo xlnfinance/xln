@@ -246,7 +246,7 @@ export class JEventWatcher {
       try {
         await this.syncAllProposerReplicas(env);
       } catch (error) {
-        if (DEBUG && !(error instanceof Error && error.message.includes('ECONNREFUSED'))) {
+        if (!(error instanceof Error && error.message.includes('ECONNREFUSED'))) {
           console.error('🔭❌ J-WATCHER: Sync error:', error instanceof Error ? error.message : String(error));
         }
       }

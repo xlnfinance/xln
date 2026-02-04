@@ -57,7 +57,7 @@
 
       entities.push({
         id: entityId,
-        label: `E${entityId.slice(0, 6)}`,
+        label: `${entityId}`,
         count: accountCount
       });
     }

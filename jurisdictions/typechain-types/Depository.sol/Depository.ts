@@ -212,27 +212,26 @@ export type InitialDisputeProofStructOutput = [
 
 export type ExternalTokenToReserveStruct = {
   entity: BytesLike;
-  packedToken: BytesLike;
+  contractAddress: AddressLike;
+  externalTokenId: BigNumberish;
+  tokenType: BigNumberish;
   internalTokenId: BigNumberish;
   amount: BigNumberish;
 };
 
 export type ExternalTokenToReserveStructOutput = [
   entity: string,
-  packedToken: string,
+  contractAddress: string,
+  externalTokenId: bigint,
+  tokenType: bigint,
   internalTokenId: bigint,
   amount: bigint
 ] & {
   entity: string;
-  packedToken: string;
+  contractAddress: string;
+  externalTokenId: bigint;
+  tokenType: bigint;
   internalTokenId: bigint;
-  amount: bigint;
-};
-
-export type DebtStruct = { creditor: BytesLike; amount: BigNumberish };
-
-export type DebtStructOutput = [creditor: string, amount: bigint] & {
-  creditor: string;
   amount: bigint;
 };
 
@@ -416,7 +415,6 @@ export interface DepositoryInterface extends Interface {
       | "entityProvidersList"
       | "externalTokenToReserve"
       | "getApprovedProviders"
-      | "getDebts"
       | "getTokenMetadata"
       | "getTokensLength"
       | "insuranceCursor"
@@ -507,7 +505,6 @@ export interface DepositoryInterface extends Interface {
     values: [
       BytesLike,
       BytesLike,
-      BytesLike,
       SettlementDiffStruct[],
       BigNumberish[],
       InsuranceRegistrationStruct[]
@@ -519,11 +516,11 @@ export interface DepositoryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "disputeFinalize",
-    values: [BytesLike, FinalDisputeProofStruct]
+    values: [FinalDisputeProofStruct]
   ): string;
   encodeFunctionData(
     functionFragment: "disputeStart",
-    values: [BytesLike, InitialDisputeProofStruct]
+    values: [InitialDisputeProofStruct]
   ): string;
   encodeFunctionData(
     functionFragment: "emergencyPause",
@@ -543,7 +540,7 @@ export interface DepositoryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "entityNonces",
-    values: [BytesLike]
+    values: [AddressLike]
   ): string;
   encodeFunctionData(
     functionFragment: "entityProvider",
@@ -560,10 +557,6 @@ export interface DepositoryInterface extends Interface {
   encodeFunctionData(
     functionFragment: "getApprovedProviders",
     values?: undefined
-  ): string;
-  encodeFunctionData(
-    functionFragment: "getDebts",
-    values: [BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "getTokenMetadata",
@@ -613,15 +606,7 @@ export interface DepositoryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "reserveToReserve",
-    values: [
-      BytesLike,
-      BytesLike,
-      BigNumberish,
-      BigNumberish,
-      AddressLike,
-      BytesLike,
-      BigNumberish
-    ]
+    values: [BytesLike, BytesLike, BigNumberish, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "setDefaultDisputeDelay",
@@ -638,7 +623,6 @@ export interface DepositoryInterface extends Interface {
   encodeFunctionData(
     functionFragment: "settle",
     values: [
-      BytesLike,
       BytesLike,
       BytesLike,
       SettlementDiffStruct[],
@@ -739,7 +723,6 @@ export interface DepositoryInterface extends Interface {
     functionFragment: "getApprovedProviders",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(functionFragment: "getDebts", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "getTokenMetadata",
     data: BytesLike
@@ -1254,7 +1237,17 @@ export interface Depository extends BaseContract {
     "view"
   >;
 
-  _tokens: TypedContractMethod<[arg0: BigNumberish], [string], "view">;
+  _tokens: TypedContractMethod<
+    [arg0: BigNumberish],
+    [
+      [string, bigint, bigint] & {
+        contractAddress: string;
+        externalTokenId: bigint;
+        tokenType: bigint;
+      }
+    ],
+    "view"
+  >;
 
   accountKey: TypedContractMethod<
     [e1: BytesLike, e2: BytesLike],
@@ -1278,7 +1271,6 @@ export interface Depository extends BaseContract {
 
   computeSettlementHash: TypedContractMethod<
     [
-      signer: BytesLike,
       leftEntity: BytesLike,
       rightEntity: BytesLike,
       diffs: SettlementDiffStruct[],
@@ -1298,13 +1290,13 @@ export interface Depository extends BaseContract {
   defaultDisputeDelay: TypedContractMethod<[], [bigint], "view">;
 
   disputeFinalize: TypedContractMethod<
-    [entityId: BytesLike, params: FinalDisputeProofStruct],
+    [params: FinalDisputeProofStruct],
     [boolean],
     "nonpayable"
   >;
 
   disputeStart: TypedContractMethod<
-    [entityId: BytesLike, params: InitialDisputeProofStruct],
+    [params: InitialDisputeProofStruct],
     [boolean],
     "nonpayable"
   >;
@@ -1325,7 +1317,7 @@ export interface Depository extends BaseContract {
 
   entityDisputeDelays: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
-  entityNonces: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
+  entityNonces: TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
 
   entityProvider: TypedContractMethod<[], [string], "view">;
 
@@ -1342,17 +1334,6 @@ export interface Depository extends BaseContract {
   >;
 
   getApprovedProviders: TypedContractMethod<[], [string[]], "view">;
-
-  getDebts: TypedContractMethod<
-    [entity: BytesLike, tokenId: BigNumberish],
-    [
-      [DebtStructOutput[], bigint] & {
-        allDebts: DebtStructOutput[];
-        currentDebtIndex: bigint;
-      }
-    ],
-    "view"
-  >;
 
   getTokenMetadata: TypedContractMethod<
     [tokenId: BigNumberish],
@@ -1404,9 +1385,9 @@ export interface Depository extends BaseContract {
   onERC1155Received: TypedContractMethod<
     [
       arg0: AddressLike,
-      from: AddressLike,
+      arg1: AddressLike,
       id: BigNumberish,
-      value: BigNumberish,
+      arg3: BigNumberish,
       arg4: BytesLike
     ],
     [string],
@@ -1426,7 +1407,7 @@ export interface Depository extends BaseContract {
   processBatch: TypedContractMethod<
     [
       encodedBatch: BytesLike,
-      entityProvider: AddressLike,
+      entityProviderAddr: AddressLike,
       hankoData: BytesLike,
       nonce: BigNumberish
     ],
@@ -1445,10 +1426,7 @@ export interface Depository extends BaseContract {
       fromEntity: BytesLike,
       toEntity: BytesLike,
       tokenId: BigNumberish,
-      amount: BigNumberish,
-      entityProvider: AddressLike,
-      hankoData: BytesLike,
-      nonce: BigNumberish
+      amount: BigNumberish
     ],
     [boolean],
     "nonpayable"
@@ -1474,7 +1452,6 @@ export interface Depository extends BaseContract {
 
   settle: TypedContractMethod<
     [
-      initiator: BytesLike,
       leftEntity: BytesLike,
       rightEntity: BytesLike,
       diffs: SettlementDiffStruct[],
@@ -1559,7 +1536,17 @@ export interface Depository extends BaseContract {
   >;
   getFunction(
     nameOrSignature: "_tokens"
-  ): TypedContractMethod<[arg0: BigNumberish], [string], "view">;
+  ): TypedContractMethod<
+    [arg0: BigNumberish],
+    [
+      [string, bigint, bigint] & {
+        contractAddress: string;
+        externalTokenId: bigint;
+        tokenType: bigint;
+      }
+    ],
+    "view"
+  >;
   getFunction(
     nameOrSignature: "accountKey"
   ): TypedContractMethod<[e1: BytesLike, e2: BytesLike], [string], "view">;
@@ -1576,7 +1563,6 @@ export interface Depository extends BaseContract {
     nameOrSignature: "computeSettlementHash"
   ): TypedContractMethod<
     [
-      signer: BytesLike,
       leftEntity: BytesLike,
       rightEntity: BytesLike,
       diffs: SettlementDiffStruct[],
@@ -1598,14 +1584,14 @@ export interface Depository extends BaseContract {
   getFunction(
     nameOrSignature: "disputeFinalize"
   ): TypedContractMethod<
-    [entityId: BytesLike, params: FinalDisputeProofStruct],
+    [params: FinalDisputeProofStruct],
     [boolean],
     "nonpayable"
   >;
   getFunction(
     nameOrSignature: "disputeStart"
   ): TypedContractMethod<
-    [entityId: BytesLike, params: InitialDisputeProofStruct],
+    [params: InitialDisputeProofStruct],
     [boolean],
     "nonpayable"
   >;
@@ -1631,7 +1617,7 @@ export interface Depository extends BaseContract {
   ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "entityNonces"
-  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
+  ): TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "entityProvider"
   ): TypedContractMethod<[], [string], "view">;
@@ -1648,18 +1634,6 @@ export interface Depository extends BaseContract {
   getFunction(
     nameOrSignature: "getApprovedProviders"
   ): TypedContractMethod<[], [string[]], "view">;
-  getFunction(
-    nameOrSignature: "getDebts"
-  ): TypedContractMethod<
-    [entity: BytesLike, tokenId: BigNumberish],
-    [
-      [DebtStructOutput[], bigint] & {
-        allDebts: DebtStructOutput[];
-        currentDebtIndex: bigint;
-      }
-    ],
-    "view"
-  >;
   getFunction(
     nameOrSignature: "getTokenMetadata"
   ): TypedContractMethod<
@@ -1718,9 +1692,9 @@ export interface Depository extends BaseContract {
   ): TypedContractMethod<
     [
       arg0: AddressLike,
-      from: AddressLike,
+      arg1: AddressLike,
       id: BigNumberish,
-      value: BigNumberish,
+      arg3: BigNumberish,
       arg4: BytesLike
     ],
     [string],
@@ -1742,7 +1716,7 @@ export interface Depository extends BaseContract {
   ): TypedContractMethod<
     [
       encodedBatch: BytesLike,
-      entityProvider: AddressLike,
+      entityProviderAddr: AddressLike,
       hankoData: BytesLike,
       nonce: BigNumberish
     ],
@@ -1759,10 +1733,7 @@ export interface Depository extends BaseContract {
       fromEntity: BytesLike,
       toEntity: BytesLike,
       tokenId: BigNumberish,
-      amount: BigNumberish,
-      entityProvider: AddressLike,
-      hankoData: BytesLike,
-      nonce: BigNumberish
+      amount: BigNumberish
     ],
     [boolean],
     "nonpayable"
@@ -1784,7 +1755,6 @@ export interface Depository extends BaseContract {
     nameOrSignature: "settle"
   ): TypedContractMethod<
     [
-      initiator: BytesLike,
       leftEntity: BytesLike,
       rightEntity: BytesLike,
       diffs: SettlementDiffStruct[],

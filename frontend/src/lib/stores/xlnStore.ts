@@ -61,9 +61,10 @@ export const error = writable<string | null>(null);
 
 export function resolveRelayUrls(): string[] {
   if (typeof window === 'undefined') return ['wss://xln.finance/relay'];
+  const settingsRelay = get(settings)?.relayUrl;
   const envRelay = (import.meta as any)?.env?.VITE_RELAY_URL as string | undefined;
-  if (envRelay) return [envRelay];
-  return ['wss://xln.finance/relay'];
+  const relay = settingsRelay || envRelay || 'wss://xln.finance/relay';
+  return [relay];
 }
 
 // Derived stores for convenience

@@ -271,7 +271,7 @@
   <div class="info-box">
     <div class="info-row">
       <span class="label">Entity ID</span>
-      <code class="value">{entityId.slice(0, 10)}...{entityId.slice(-8)}</code>
+      <code class="value">{entityId}</code>
     </div>
     <div class="info-row">
       <span class="label">Depository</span>

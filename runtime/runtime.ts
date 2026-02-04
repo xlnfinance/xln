@@ -263,6 +263,34 @@ export const db: Level<Buffer, Buffer> = new Level(dbPath, {
   keyEncoding: 'binary',
 });
 
+const DEFAULT_DB_NAMESPACE = 'default';
+
+const normalizeDbNamespace = (value: string): string => value.trim().toLowerCase();
+
+const deriveRuntimeIdFromSeed = (seed?: string | null): string | null => {
+  if (!seed) return null;
+  try {
+    return deriveSignerAddressSync(seed, '1').toLowerCase();
+  } catch (error) {
+    console.warn('⚠️ Failed to derive runtimeId for DB namespace:', error);
+    return null;
+  }
+};
+
+const resolveDbNamespace = (options: { env?: Env | null; runtimeId?: string | null; runtimeSeed?: string | null } = {}): string => {
+  const explicit = options.env?.dbNamespace;
+  if (explicit) return normalizeDbNamespace(explicit);
+  const runtimeId = options.runtimeId ?? options.env?.runtimeId;
+  if (runtimeId) return normalizeDbNamespace(runtimeId);
+  const seed = options.runtimeSeed ?? options.env?.runtimeSeed;
+  const derived = deriveRuntimeIdFromSeed(seed ?? null);
+  if (derived) return derived;
+  return DEFAULT_DB_NAMESPACE;
+};
+
+const makeDbKey = (namespace: string, key: string): Buffer =>
+  Buffer.from(`${namespace}:${key}`);
+
 // Helper: Race promise with timeout
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -1344,6 +1372,7 @@ const main = async (): Promise<Env> => {
   // First, create default environment with gossip layer and event emitters
   env = createEmptyEnv(runtimeSeed);
   env.gossip = gossipLayer; // Override default gossip with persisted profiles
+  const dbNamespace = resolveDbNamespace({ env, runtimeSeed });
 
   // Try to load saved state from database
   try {
@@ -1353,7 +1382,7 @@ const main = async (): Promise<Env> => {
     }
 
     console.log('📥 Loading state from database...');
-    const latestHeightBuffer = await withTimeout(db.get(Buffer.from('latest_height')), 2000);
+    const latestHeightBuffer = await withTimeout(db.get(makeDbKey(dbNamespace, 'latest_height')), 2000);
 
     const latestHeight = parseInt(latestHeightBuffer.toString(), 10);
     console.log(`📊 BROWSER-DEBUG: Found latest height in DB: ${latestHeight}`);
@@ -1367,7 +1396,7 @@ const main = async (): Promise<Env> => {
     // Start from 1 since height 0 is initial state with no snapshot
     for (let i = 1; i <= latestHeight; i++) {
       try {
-        const buffer = await db.get(Buffer.from(`snapshot:${i}`));
+        const buffer = await db.get(makeDbKey(dbNamespace, `snapshot:${i}`));
         const snapshot = decode(buffer);
         normalizeSnapshotInPlace(snapshot);
         snapshots.push(snapshot);
@@ -1962,6 +1991,9 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   const seedText = normalizedSeed !== undefined && normalizedSeed !== null
     ? (typeof normalizedSeed === 'string' ? normalizedSeed : new TextDecoder().decode(normalizedSeed))
     : '';
+  const derivedRuntimeId = seedText ? deriveRuntimeIdFromSeed(seedText) : null;
+  const resolvedRuntimeId = derivedRuntimeId || (runtimeId ? runtimeId.toLowerCase() : null);
+  const resolvedDbNamespace = resolvedRuntimeId ? normalizeDbNamespace(resolvedRuntimeId) : undefined;
 
   const env: Env = {
     eReplicas: new Map(),
@@ -1969,7 +2001,8 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
     height: 0,
     timestamp: 0,
     ...(seedText !== undefined && seedText !== null ? { runtimeSeed: seedText } : {}),
-    ...(runtimeId ? { runtimeId } : {}),
+    ...(resolvedRuntimeId ? { runtimeId: resolvedRuntimeId } : {}),
+    ...(resolvedDbNamespace ? { dbNamespace: resolvedDbNamespace } : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
     history: [],
     gossip: createGossipLayer(),
@@ -2447,9 +2480,10 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
   try {
     const dbReady = await tryOpenDb();
     if (!dbReady) return;
+    const dbNamespace = resolveDbNamespace({ env });
 
     // Save latest height pointer
-    await db.put(Buffer.from('latest_height'), Buffer.from(String(env.height)));
+    await db.put(makeDbKey(dbNamespace, 'latest_height'), Buffer.from(String(env.height)));
 
     // Save environment snapshot (jReplicas with stateRoot are serializable)
     // CRITICAL: Exclude 'history' to prevent exponential growth (history contains all previous snapshots)
@@ -2474,7 +2508,7 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
       }
       return v;
     });
-    await db.put(Buffer.from(`snapshot:${env.height}`), Buffer.from(snapshot));
+    await db.put(makeDbKey(dbNamespace, `snapshot:${env.height}`), Buffer.from(snapshot));
   } catch (err) {
     console.error('❌ Failed to save to LevelDB:', err);
     if (env.scenarioMode) {
@@ -2483,20 +2517,21 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
   }
 };
 
-export const loadEnvFromDB = async (): Promise<Env | null> => {
+export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: string | null): Promise<Env | null> => {
   if (!isBrowser) return null;
 
   try {
     const dbReady = await tryOpenDb();
     if (!dbReady) return null;
 
-    const latestHeightBuffer = await db.get(Buffer.from('latest_height'));
+    const dbNamespace = resolveDbNamespace({ runtimeId, runtimeSeed });
+    const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
     const latestHeight = parseInt(latestHeightBuffer.toString());
 
     // Load all snapshots to build history
     const history: Env[] = [];
     for (let i = 0; i <= latestHeight; i++) {
-      const buffer = await db.get(Buffer.from(`snapshot:${i}`));
+      const buffer = await db.get(makeDbKey(dbNamespace, `snapshot:${i}`));
       const data = JSON.parse(buffer.toString());
 
       // Hydrate Maps/BigInts
@@ -2506,6 +2541,7 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
       const env = createEmptyEnv(runtimeSeedRaw ?? null);
       env.height = Number(data.height || 0);
       env.timestamp = Number(data.timestamp || 0);
+      env.dbNamespace = data.dbNamespace ?? dbNamespace;
       if (data.browserVMState) {
         env.browserVMState = data.browserVMState;
       }

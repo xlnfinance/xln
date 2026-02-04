@@ -38,7 +38,7 @@
       const acc = account as AccountMachine;
       items.push({
         id: counterpartyId,
-        shortId: xlnFuncs?.getEntityShortId?.(counterpartyId) || counterpartyId.slice(-4),
+        shortId: counterpartyId,
         avatarUrl: xlnFuncs?.generateEntityAvatar?.(counterpartyId) || '',
         status: acc.mempool?.length > 0 ? 'pending' : 'synced',
         pendingCount: acc.mempool?.length || 0
@@ -51,7 +51,7 @@
   $: selectedAccount = accounts.find(acc => acc.id === selectedAccountId);
 
   $: displayText = selectedAccount
-    ? `Account #${selectedAccount.shortId}`
+    ? `Account ${selectedAccount.id}`
     : 'Select Account...';
 
   function selectAccount(accountId: string | null) {
@@ -104,7 +104,7 @@
           {#if account.avatarUrl}
             <img src={account.avatarUrl} alt="" class="account-avatar" />
           {/if}
-          <span class="account-name">Account #{account.shortId}</span>
+          <span class="account-name">Account {account.id}</span>
           <span class="account-status" class:pending={account.status === 'pending'}>
             {account.status === 'pending' ? `${account.pendingCount} pending` : 'Synced'}
           </span>

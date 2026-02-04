@@ -2518,8 +2518,7 @@ let vrHammer: VRHammer | null = null;
       entityData = Array.from(uniqueEntityIds).map(entityId => {
         // Prefer gossip name, fallback to entity number (like #1, #2), last resort hex slice
         const gossipName = getNameFromEnv(entityId);
-        const shortId = XLN?.getEntityShortId?.(entityId) || entityId.slice(0, 8);
-        const displayName = gossipName || (shortId.match(/^\d+$/) ? `Entity #${shortId}` : shortId + '...');
+        const displayName = gossipName || entityId;
 
         return {
           entityId,
@@ -5444,7 +5443,7 @@ let vrHammer: VRHammer | null = null;
       // Directly open full entity panel (skip mini panel for faster UX)
       panelBridge.emit('openEntityOperations', {
         entityId: entity.id,
-        entityName: entityName || entity.id.slice(0, 10),
+        entityName: entityName || entity.id,
         signerId: signerId || entity.id
       });
 
@@ -6512,7 +6511,7 @@ let vrHammer: VRHammer | null = null;
     // First check for AHB Demo names (entity IDs 1, 2, 3)
     const shortId = XLN?.getEntityShortId?.(entityId);
     if (shortId && AHB_NAMES.has(shortId)) {
-      return AHB_NAMES.get(shortId)!;
+      return `${AHB_NAMES.get(shortId)!} (${entityId})`;
     }
 
     // Check if it's a Fed entity (from replica signerId) - use time-aware replicas
@@ -6524,14 +6523,14 @@ let vrHammer: VRHammer | null = null;
       // Check if S&P 500 ticker
       for (const ticker of SP500_TICKERS) {
         if (replica.signerId.includes(ticker)) {
-          return ticker; // Show raw ticker (AAPL, MSFT, etc)
+          return `${ticker} (${entityId})`;
         }
       }
 
       // Check if Fed
       for (const [key, name] of FED_NAMES) {
         if (replica.signerId.toLowerCase().includes(key)) {
-          return name;
+          return `${name} (${entityId})`;
         }
       }
 
@@ -6539,11 +6538,11 @@ let vrHammer: VRHammer | null = null;
       const hash = entityId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
       const bankIndex = hash % BANK_NAMES.length;
       // Fallback: first 4 hex chars after 0x (matches getEntityShortId format)
-      return BANK_NAMES[bankIndex] || (entityId.startsWith('0x') ? entityId.slice(2, 6).toUpperCase() : entityId.slice(0, 4).toUpperCase());
+      return `${BANK_NAMES[bankIndex] || 'Bank'} (${entityId})`;
     }
 
-    // Fallback to short ID (first 4 hex chars, matching getEntityShortId)
-    return shortId || (entityId.startsWith('0x') ? entityId.slice(2, 6).toUpperCase() : entityId.slice(0, 4).toUpperCase());
+    // Fallback to full ID
+    return entityId;
   }
 
   /**

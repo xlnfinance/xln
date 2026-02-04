@@ -26,10 +26,10 @@ export async function handleReserveToReserve(
   // Validate: Do we have enough reserve?
   const currentReserve = entityState.reserves.get(String(tokenId)) || 0n;
   if (currentReserve < amount) {
-    addMessage(newState,
-      `❌ Insufficient reserve: have ${currentReserve}, need ${amount} token ${tokenId}`
-    );
-    return { newState, outputs };
+    const msg = `❌ Insufficient reserve: have ${currentReserve}, need ${amount} token ${tokenId}`;
+    addMessage(newState, msg);
+    console.error(`❌ R2R FAILED: ${entityState.entityId.slice(-4)} ${msg}`);
+    throw new Error(msg);
   }
 
   // Initialize jBatch on first use

@@ -150,11 +150,16 @@ function buildJurisdictionConfig(env: Env, name?: string): JurisdictionConfig | 
     throw new Error(`J-machine "${name}" contracts not deployed`);
   }
 
+  const rpcAddress = Array.isArray(jReplica?.rpcs) && jReplica.rpcs.length > 0
+    ? jReplica.rpcs[0]
+    : 'browservm://';
+
   return {
     name: jReplica?.name || name || 'browservm',
-    address: 'browservm://',
+    address: rpcAddress,
     entityProviderAddress,
     depositoryAddress,
+    ...(jReplica?.chainId ? { chainId: jReplica.chainId } : {}),
   };
 }
 

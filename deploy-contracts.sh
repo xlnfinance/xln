@@ -179,13 +179,16 @@ deploy_to_network() {
         echo "   ⏳ Waiting for deployment file... (try $tries/10)"
     done
     
-    # Extract Depository address from deployed_addresses.json
+    # Extract Depository + EntityProvider addresses from deployed_addresses.json
     local depository_address
+    local ignition_entityprovider_address
     if [ -f "$deployment_file" ]; then
         echo "   ✅ Deployment file found, extracting addresses..."
         cat "$deployment_file"
         depository_address=$(jq -r '.["DepositoryModule#Depository"]' "$deployment_file" 2>/dev/null || true)
+        ignition_entityprovider_address=$(jq -r '.["DepositoryModule#EntityProvider"]' "$deployment_file" 2>/dev/null || true)
         echo "   🔍 Extracted Depository: $depository_address"
+        echo "   🔍 Extracted EntityProvider: $ignition_entityprovider_address"
     else
         echo "   ❌ Deployment file not found after waiting"
     fi
@@ -199,6 +202,17 @@ deploy_to_network() {
         return 1
     fi
     echo "   ✅ Depository: $depository_address"
+
+    # Prefer EntityProvider deployed by the Depository ignition module (must match Depository)
+    if [ -n "$ignition_entityprovider_address" ] && [ "$ignition_entityprovider_address" != "null" ]; then
+        if [ "$ignition_entityprovider_address" != "$entityprovider_address" ]; then
+            echo "   ⚠️ EntityProvider mismatch detected"
+            echo "     deploy-entity-provider: $entityprovider_address"
+            echo "     ignition module:        $ignition_entityprovider_address"
+            echo "   ✅ Using ignition EntityProvider to match Depository"
+        fi
+        entityprovider_address="$ignition_entityprovider_address"
+    fi
 
     # CRITICAL: Verify processBatch function exists in deployed contract
     echo "   🚨 CRITICAL: Verifying processBatch function in deployed contract..."

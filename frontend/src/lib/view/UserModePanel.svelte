@@ -359,7 +359,7 @@
   // Tab for EntityPanel
   const entityTab: Tab = $derived({
     id: 'user-entity',
-    title: selectedEntityId ? `Entity ${selectedEntityId.slice(0, 8)}` : 'Entity',
+    title: selectedEntityId ? `Entity ${selectedEntityId}` : 'Entity',
     entityId: selectedEntityId || '',
     signerId: selectedSignerId || '',
     jurisdiction: 'browservm',
@@ -490,7 +490,7 @@
       setTimeout(() => {
         panelBridge.emit('openEntityOperations', {
           entityId,
-          entityName: entityId.slice(0, 10),
+          entityName: entityId,
           signerId
         });
       }, 150);

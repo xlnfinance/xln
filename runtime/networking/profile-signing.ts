@@ -24,6 +24,8 @@ import { getCachedSignerPublicKey, signDigest } from '../account-crypto';
 import * as secp256k1 from '@noble/secp256k1';
 
 const PROFILE_SIGN_DOMAIN = 'xln-profile-v1';
+const bytesToHex = (bytes: Uint8Array): string =>
+  `0x${Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')}`;
 
 /**
  * Canonical profile hash for signing
@@ -50,6 +52,10 @@ export function computeProfileHash(profile: Profile): string {
  * JSON replacer for bigint/Map serialization
  */
 function replacer(_key: string, value: unknown): unknown {
+  if (typeof value === 'string') {
+    const match = value.match(/^BigInt\(([-\d]+)\)$/);
+    if (match) return match[1];
+  }
   if (typeof value === 'bigint') return value.toString();
   if (value instanceof Map) return Object.fromEntries(value);
   return value;
@@ -78,7 +84,20 @@ export async function signProfile(
   profile: Profile,
   signerId: string
 ): Promise<Profile> {
-  const hash = computeProfileHash(profile);
+  const existingPubKey = profile.metadata?.entityPublicKey;
+  let entityPublicKey = existingPubKey;
+  if (!entityPublicKey) {
+    const cached = getCachedSignerPublicKey(signerId);
+    if (cached) {
+      entityPublicKey = bytesToHex(cached);
+    }
+  }
+
+  const profileWithKey = entityPublicKey
+    ? { ...profile, metadata: { ...profile.metadata, entityPublicKey } }
+    : profile;
+
+  const hash = computeProfileHash(profileWithKey);
 
   // Use same signing mechanism as accountFrames
   const hankos = await signHashesAsSingleEntity(
@@ -94,9 +113,9 @@ export async function signProfile(
   }
 
   return {
-    ...profile,
+    ...profileWithKey,
     metadata: {
-      ...profile.metadata,
+      ...(profileWithKey.metadata || {}),
       profileHanko,
     },
   };
@@ -111,15 +130,28 @@ export function signProfileSync(
   profile: Profile,
   signerId: string
 ): Profile {
-  const hash = computeProfileHash(profile);
+  const existingPubKey = profile.metadata?.entityPublicKey;
+  let entityPublicKey = existingPubKey;
+  if (!entityPublicKey) {
+    const cached = getCachedSignerPublicKey(signerId);
+    if (cached) {
+      entityPublicKey = bytesToHex(cached);
+    }
+  }
+
+  const profileWithKey = entityPublicKey
+    ? { ...profile, metadata: { ...profile.metadata, entityPublicKey } }
+    : profile;
+
+  const hash = computeProfileHash(profileWithKey);
 
   // Use signDigest which properly installs hmacSha256Sync before signing
   const sigHex = signDigest(env.runtimeSeed, signerId, hash);
 
   return {
-    ...profile,
+    ...profileWithKey,
     metadata: {
-      ...profile.metadata,
+      ...(profileWithKey.metadata || {}),
       profileSignature: sigHex,  // Legacy field for sync signing
     },
   };
