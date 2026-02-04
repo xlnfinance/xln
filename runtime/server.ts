@@ -13,13 +13,13 @@
  *   bun runtime/server.ts --port 9000        # Custom port
  */
 
-import { main, process as runtimeProcess, applyRuntimeInput } from './runtime';
+import { main, process as runtimeProcess, applyRuntimeInput, startP2P } from './runtime';
 import { safeStringify } from './serialization-utils';
 import type { Env, EntityInput, RuntimeInput } from './types';
 import { encodeBoard, hashBoard } from './entity-factory';
 import { deriveSignerKeySync } from './account-crypto';
 import { createJAdapter, type JAdapter } from './jadapter';
-import type { JTokenInfo } from './jadapter/types';
+import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { TIMING } from './constants';
 import { resolveEntityProposerId } from './state-helpers';
@@ -37,6 +37,8 @@ const HUB_SEED = process.env.HUB_SEED ?? 'xln-main-hub-2026';
 
 let tokenCatalogCache: JTokenInfo[] | null = null;
 let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
+
+ 
 
 const summarizeJWatcherEvents = (inputs: EntityInput[]): { totalEvents: number; summary: string } => {
   const counts = new Map<string, number>();
@@ -68,6 +70,49 @@ const drainJWatcherQueue = async (env: Env, label = 'J-WATCHER'): Promise<void> 
   console.log(`[${label}] Applying ${pending} queued inputs (${totalEvents} events${summary ? `: ${summary}` : ''})`);
   await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: toProcess });
   console.log(`[${label}] Applied ${pending} queued inputs`);
+};
+
+const applyJEventsToEnv = async (env: Env, events: JEvent[], label = 'J-EVENTS'): Promise<void> => {
+  if (!events || events.length === 0) return;
+  const grouped = new Map<string, { events: Array<{ type: string; data: Record<string, unknown> }>; blockNumber: number; blockHash: string; transactionHash: string }>();
+
+  for (const ev of events) {
+    const entity = (ev as any)?.args?.entity || (ev as any)?.args?.entityId || (ev as any)?.args?.leftEntity;
+    if (!entity) continue;
+    const key = String(entity).toLowerCase();
+    const entry = grouped.get(key) ?? {
+      events: [],
+      blockNumber: Number(ev.blockNumber ?? 0),
+      blockHash: ev.blockHash ?? '0x',
+      transactionHash: ev.transactionHash ?? '0x',
+    };
+    entry.events.push({ type: ev.name ?? (ev as any).type ?? 'Unknown', data: (ev as any).args ?? {} });
+    grouped.set(key, entry);
+  }
+
+  const observedAt = Date.now();
+  const entityInputs: EntityInput[] = [];
+  for (const [entityId, entry] of grouped.entries()) {
+    entityInputs.push({
+      entityId,
+      signerId: 'j-event',
+      entityTxs: [{
+        type: 'j_event',
+        data: {
+          from: 'j-event',
+          events: entry.events,
+          observedAt,
+          blockNumber: entry.blockNumber,
+          blockHash: entry.blockHash,
+          transactionHash: entry.transactionHash,
+        },
+      }],
+    });
+  }
+
+  if (entityInputs.length === 0) return;
+  console.log(`[${label}] Applying ${entityInputs.length} J-events directly to env`);
+  await applyRuntimeInput(env, { runtimeTxs: [], entityInputs });
 };
 
 const startJWatcherProcessingLoop = (env: Env): void => {
@@ -112,16 +157,17 @@ const startRuntimeTickLoop = (env: Env): void => {
   console.log(`[XLN] Runtime tick loop started (${TIMING.TICK_INTERVAL_MS}ms)`);
 };
 
-const getHubWallet = async (env: Env): Promise<{ hubEntityId: string; hubSignerId: string; wallet: ethers.Wallet } | null> => {
+const getHubWallet = async (env: Env, hubEntityId?: string): Promise<{ hubEntityId: string; hubSignerId: string; wallet: ethers.Wallet } | null> => {
   if (!globalJAdapter) return null;
   const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true) || [];
   if (hubs.length === 0) return null;
-  const hubEntityId = hubs[0].entityId;
-  const hubSignerId = resolveEntityProposerId(env, hubEntityId, 'hub-wallet');
+  const selectedHub = hubEntityId ? hubs.find(h => h.entityId === hubEntityId) || hubs[0] : hubs[0];
+  const targetEntityId = selectedHub.entityId;
+  const hubSignerId = (selectedHub.metadata?.hubSignerId as string) || resolveEntityProposerId(env, targetEntityId, 'hub-wallet');
   const hubPrivateKeyBytes = deriveSignerKeySync(HUB_SEED, hubSignerId);
   const hubPrivateKeyHex = '0x' + Buffer.from(hubPrivateKeyBytes).toString('hex');
   const wallet = new ethers.Wallet(hubPrivateKeyHex, globalJAdapter.provider);
-  return { hubEntityId, hubSignerId, wallet };
+  return { hubEntityId: targetEntityId, hubSignerId, wallet };
 };
 
 const deployDefaultTokensOnRpc = async (): Promise<void> => {
@@ -148,11 +194,11 @@ const deployDefaultTokensOnRpc = async (): Promise<void> => {
     const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
     await approveTx.wait();
 
-    // Pack token reference: tokenType (8 bits) | address (160 bits) | externalTokenId (96 bits)
-    const packedToken = await depository.packTokenReference(0, tokenAddress, 0); // tokenType=0 (ERC20), externalTokenId=0
     const registerTx = await depository.connect(signer as any).externalTokenToReserve({
       entity: ethers.ZeroHash,
-      packedToken,
+      contractAddress: tokenAddress,
+      externalTokenId: 0,
+      tokenType: 0,
       internalTokenId: 0,
       amount: TOKEN_REGISTRATION_AMOUNT,
     });
@@ -199,7 +245,11 @@ const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
   return tokens;
 };
 
-const updateJurisdictionsJson = async (contracts: JAdapter['addresses'], rpcUrl?: string): Promise<void> => {
+const updateJurisdictionsJson = async (
+  contracts: JAdapter['addresses'],
+  rpcUrl?: string,
+  chainIdOverride?: number
+): Promise<void> => {
   try {
     const fs = await import('fs/promises');
     const path = await import('path');
@@ -235,7 +285,7 @@ const updateJurisdictionsJson = async (contracts: JAdapter['addresses'], rpcUrl?
       data.jurisdictions = data.jurisdictions ?? {};
       data.jurisdictions.arrakis = {
         name: 'Arrakis (Shared Anvil)',
-        chainId: 31337,
+        chainId: chainIdOverride ?? 31337,
         rpc: publicRpc,
         contracts: {
           account: contracts.account,
@@ -286,9 +336,22 @@ type WsClient = {
 
 const clients = new Map<string, WsClient>();
 const pendingMessages = new Map<string, any[]>();
+const gossipProfiles = new Map<string, { profile: any; timestamp: number }>();
 
 let wsCounter = 0;
 const nextWsTimestamp = () => ++wsCounter;
+
+const storeGossipProfile = (profile: any): boolean => {
+  const entityId = profile?.entityId;
+  if (!entityId) return false;
+  const newTs = profile?.metadata?.lastUpdated || 0;
+  const existing = gossipProfiles.get(entityId);
+  if (existing && existing.timestamp >= newTs) return false;
+  gossipProfiles.set(entityId, { profile, timestamp: newTs });
+  return true;
+};
+
+const getAllGossipProfiles = (): any[] => Array.from(gossipProfiles.values()).map(v => v.profile);
 
 // ============================================================================
 // FAUCET MUTEX (prevent nonce collisions from parallel requests)
@@ -386,6 +449,32 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
     pendingMessages.delete(from);
 
     ws.send(safeStringify({ type: 'ack', inReplyTo: 'hello', status: 'delivered' }));
+    return;
+  }
+
+  // Gossip announce: store profiles locally in relay
+  if (type === 'gossip_announce') {
+    const profiles = (payload?.profiles || []) as any[];
+    let stored = 0;
+    for (const profile of profiles) {
+      if (storeGossipProfile(profile)) stored += 1;
+    }
+    ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'stored', count: stored }));
+    return;
+  }
+
+  // Gossip request: return all stored profiles
+  if (type === 'gossip_request') {
+    const profiles = getAllGossipProfiles();
+    ws.send(safeStringify({
+      type: 'gossip_response',
+      id: `gossip_${Date.now()}`,
+      from: options.serverId,
+      to: from,
+      timestamp: Date.now(),
+      payload: { profiles },
+      inReplyTo: id,
+    }));
     return;
   }
 
@@ -591,6 +680,39 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         }), { headers });
       }
 
+      if (tokenSymbol?.toUpperCase?.() === 'ETH') {
+        const hub = await getHubWallet(env!);
+        if (!hub) {
+          faucetLock.release();
+          return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
+        }
+        const hubWallet = hub.wallet;
+        const topupAmount = ethers.parseEther(amount);
+        const pendingNonce = await hubWallet.getNonce('pending');
+        if (faucetNonce === null || pendingNonce > faucetNonce) {
+          faucetNonce = pendingNonce;
+        }
+        const nonce = faucetNonce;
+        const tx = await hubWallet.sendTransaction({
+          to: userAddress,
+          value: topupAmount,
+          nonce,
+        });
+        faucetNonce = nonce + 1;
+        await tx.wait();
+        faucetLock.release();
+        console.log(`[${logPrefix}] ETH-only faucet tx=${tx.hash}`);
+        return new Response(JSON.stringify({
+          success: true,
+          type: 'gas',
+          amount,
+          tokenSymbol: 'ETH',
+          userAddress,
+          txHash: tx.hash,
+          requestId,
+        }), { headers });
+      }
+
       const tokens = await ensureTokenCatalog();
       const tokenInfo = tokens.find(t => t.symbol?.toUpperCase() === tokenSymbol.toUpperCase());
       if (!tokenInfo?.address) {
@@ -622,17 +744,30 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       await tx.wait();
       console.log(`[${logPrefix}] ERC20 transfer tx=${tx.hash}`);
 
-      // Also send ETH for gas (0.01 ETH) so user can approve/deposit
-      const ethAmount = ethers.parseEther('0.01');
-      const ethNonce = faucetNonce;
-      const ethTx = await hubWallet.sendTransaction({
-        to: userAddress,
-        value: ethAmount,
-        nonce: ethNonce,
-      });
-      faucetNonce = ethNonce + 1;
-      await ethTx.wait();
-      console.log(`[${logPrefix}] ETH topup tx=${ethTx.hash}`);
+      // Only top up ETH if user is low on gas
+      let ethTxHash: string | undefined;
+      try {
+        const userEth = await globalJAdapter.provider.getBalance(userAddress);
+        const minBalance = ethers.parseEther('0.01');
+        const targetBalance = ethers.parseEther('0.1');
+        if (userEth < minBalance) {
+          const topup = targetBalance - userEth;
+          const ethNonce = faucetNonce;
+          const ethTx = await hubWallet.sendTransaction({
+            to: userAddress,
+            value: topup,
+            nonce: ethNonce,
+          });
+          faucetNonce = ethNonce + 1;
+          await ethTx.wait();
+          ethTxHash = ethTx.hash;
+          console.log(`[${logPrefix}] ETH topup tx=${ethTx.hash} topup=${ethers.formatEther(topup)}`);
+        } else {
+          console.log(`[${logPrefix}] ETH topup skipped (balance=${ethers.formatEther(userEth)})`);
+        }
+      } catch (err) {
+        console.warn(`[${logPrefix}] ETH topup check failed:`, (err as Error).message);
+      }
 
       faucetLock.release();
       return new Response(JSON.stringify({
@@ -642,8 +777,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         tokenSymbol,
         userAddress,
         txHash: tx.hash,
-        ethTxHash: ethTx.hash,
-        ethAmount: '0.01',
+        ...(ethTxHash ? { ethTxHash } : {}),
         requestId,
       }), { headers });
     } catch (error: any) {
@@ -669,7 +803,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }
 
       const body = await req.json();
-      const { userAddress, amount = '0.02' } = body;
+      const { userAddress, amount = '0.1' } = body;
       console.log(`[${logPrefix}] Request: to=${userAddress} amount=${amount}`);
 
       if (!userAddress || !ethers.isAddress(userAddress)) {
@@ -731,13 +865,21 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }
 
       const body = await req.json();
-      const { userEntityId, tokenId = 1, amount = '100' } = body;
+      const userEntityId = body?.userEntityId;
+      const rawTokenId = body?.tokenId ?? 1;
+      let tokenId = typeof rawTokenId === 'number' ? rawTokenId : Number(rawTokenId);
+      const tokenSymbol = typeof body?.tokenSymbol === 'string' ? body.tokenSymbol : undefined;
+      const amount = typeof body?.amount === 'string' ? body.amount : String(body?.amount ?? '100');
       const requestId = (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
       const logPrefix = `FAUCET/RESERVE ${requestId}`;
 
       if (!userEntityId) {
         faucetLock.release();
         return new Response(JSON.stringify({ error: 'Missing userEntityId' }), { status: 400, headers });
+      }
+      if (!Number.isFinite(tokenId)) {
+        faucetLock.release();
+        return new Response(JSON.stringify({ error: 'Invalid tokenId' }), { status: 400, headers });
       }
 
       // Get hub from gossip (no hardcoded hub!)
@@ -749,8 +891,35 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const hubEntityId = hubs[0].entityId;
 
       const hubSignerId = resolveEntityProposerId(env, hubEntityId, 'faucet-reserve');
-      const amountWei = ethers.parseUnits(amount, 18);
-      console.log(`[${logPrefix}] Request: hub=${hubEntityId.slice(0, 16)}... signer=${hubSignerId} → user=${userEntityId.slice(0, 16)}... tokenId=${tokenId} amount=${amount}`);
+      const tokenCatalog = await ensureTokenCatalog();
+      let tokenMeta = tokenCatalog.find(t => Number(t.tokenId) === Number(tokenId));
+      if (!tokenMeta && tokenSymbol) {
+        tokenMeta = tokenCatalog.find(t => t.symbol?.toUpperCase?.() === tokenSymbol.toUpperCase());
+        if (tokenMeta?.tokenId !== undefined && tokenMeta?.tokenId !== null) {
+          tokenId = Number(tokenMeta.tokenId);
+        }
+      }
+      if (!tokenMeta) {
+        faucetLock.release();
+        return new Response(JSON.stringify({ error: `Unknown token for faucet`, tokenId, tokenSymbol }), { status: 400, headers });
+      }
+      const decimals = typeof tokenMeta.decimals === 'number' ? tokenMeta.decimals : 18;
+      const amountWei = ethers.parseUnits(amount, decimals);
+      console.log(`[${logPrefix}] Request: hub=${hubEntityId.slice(0, 16)}... signer=${hubSignerId} → user=${userEntityId.slice(0, 16)}... tokenId=${tokenId} symbol=${tokenMeta.symbol} amount=${amount} decimals=${decimals}`);
+
+      let hubReplicaKey = Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${hubEntityId}:`));
+      let hubReplica = hubReplicaKey ? env.eReplicas?.get(hubReplicaKey) : null;
+      const hubReserve = hubReplica?.state?.reserves?.get(String(tokenId)) ?? 0n;
+      console.log(`[${logPrefix}] Hub reserve before R2R: token ${tokenId} = ${hubReserve.toString()}`);
+      if (hubReserve < amountWei) {
+        faucetLock.release();
+        return new Response(JSON.stringify({
+          error: `Hub has insufficient reserves for token ${tokenId}`,
+          have: hubReserve.toString(),
+          need: amountWei.toString(),
+          requestId,
+        }), { status: 409, headers });
+      }
 
       // Use entity txs (R2R + j_broadcast) instead of direct admin call
       await runtimeProcess(env, [{
@@ -772,8 +941,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         ],
       }]);
       // Log hub jBatchState summary after queuing
-      const hubReplicaKey = Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${hubEntityId}:`));
-      const hubReplica = hubReplicaKey ? env.eReplicas?.get(hubReplicaKey) : null;
+      hubReplicaKey = Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${hubEntityId}:`));
+      hubReplica = hubReplicaKey ? env.eReplicas?.get(hubReplicaKey) : null;
       if (hubReplica?.state?.jBatchState?.batch) {
         const batch = hubReplica.state.jBatchState.batch as any;
         console.log(`[${logPrefix}] Hub jBatch: r2r=${batch.reserveToReserve?.length || 0}, r2c=${batch.reserveToCollateral?.length || 0}, c2r=${batch.collateralToReserve?.length || 0}, settlements=${batch.settlements?.length || 0}, pending=${hubReplica.state.jBatchState.pendingBroadcast ? 'yes' : 'no'}`);
@@ -882,9 +1051,17 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   console.log('═══ startXlnServer() CALLED ═══');
   console.log('Options:', opts);
   const options = { ...DEFAULT_OPTIONS, ...opts };
+  const relaySeeds =
+    opts.relaySeeds?.length
+      ? opts.relaySeeds
+      : process.env.RELAY_URL
+        ? [process.env.RELAY_URL]
+        : options.relaySeeds;
 
   // Always initialize runtime - every node needs it
   console.log('[XLN] Initializing runtime...');
+  const { setRuntimeSeed } = await import('./runtime');
+  setRuntimeSeed(HUB_SEED);
   const env = await main();
   console.log('[XLN] Runtime initialized ✓');
 
@@ -926,9 +1103,24 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       console.warn('[XLN] Could not load jurisdictions.json, will deploy fresh:', (err as Error).message);
     }
 
+    let detectedChainId = 31337;
+    try {
+      const probe = new ethers.JsonRpcProvider(anvilRpc);
+      const network = await probe.getNetwork();
+      if (network?.chainId) detectedChainId = Number(network.chainId);
+    } catch (err) {
+      console.warn('[XLN] Failed to detect chainId from RPC, defaulting to 31337:', (err as Error).message);
+    }
+
+    // Ensure fromReplica carries correct chainId (override if stale)
+    if (fromReplica && fromReplica.chainId !== detectedChainId) {
+      console.warn(`[XLN] fromReplica chainId (${fromReplica.chainId}) does not match RPC chainId (${detectedChainId}) - overriding`);
+      fromReplica.chainId = detectedChainId as any;
+    }
+
     globalJAdapter = await createJAdapter({
       mode: 'rpc',
-      chainId: 31337,
+      chainId: detectedChainId,
       rpcUrl: anvilRpc,
       fromReplica, // Pass pre-deployed addresses (if available)
     });
@@ -938,7 +1130,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
     // Ensure jurisdictions.json reflects current RPC + addresses (even if using fromReplica)
     if (globalJAdapter.addresses?.depository && globalJAdapter.addresses?.entityProvider) {
-      await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc);
+      await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, detectedChainId);
     }
 
     const hasAddresses = !!globalJAdapter.addresses?.depository && !!globalJAdapter.addresses?.entityProvider;
@@ -947,12 +1139,12 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     if (!hasAddresses) {
       console.log('[XLN] Deploying contracts to anvil (missing addresses)...');
       await globalJAdapter.deployStack();
-      await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc);
+      await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, detectedChainId);
       console.log('[XLN] Contracts deployed');
     } else if (!fromReplica && block === 0) {
       console.log('[XLN] Deploying contracts to anvil (fresh chain)...');
       await globalJAdapter.deployStack();
-      await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc);
+      await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc, detectedChainId);
       console.log('[XLN] Contracts deployed');
     } else if (fromReplica) {
       console.log('[XLN] Using pre-deployed contracts from jurisdictions.json');
@@ -1016,47 +1208,103 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   // Start runtime tick loop for J-mempool + pending outputs
   startRuntimeTickLoop(env);
 
-  // Bootstrap hub entity (idempotent - normal entity + gossip tag)
-  const { bootstrapHub } = await import('../scripts/bootstrap-hub');
-  await bootstrapHub(env);
+  // Bootstrap hub entities (idempotent - normal entity + gossip tag)
+  const { bootstrapHubs } = await import('../scripts/bootstrap-hub');
+  const relayUrl = relaySeeds?.[0] ?? 'wss://xln.finance/relay';
+  const publicRpc = process.env.PUBLIC_RPC ?? anvilRpc;
+  const publicHttp = process.env.PUBLIC_HTTP ?? '';
+  const hubConfigs = [
+    {
+      name: 'H1',
+      region: 'global',
+      signerId: 'hub-1',
+      seed: HUB_SEED,
+      routingFeePPM: 100,
+      relayUrl,
+      rpcUrl: publicRpc,
+      httpUrl: publicHttp,
+      port: options.port,
+      serverId: options.serverId,
+      capabilities: ['hub', 'routing', 'faucet'],
+      position: { x: -80, y: 0, z: 0 },
+    },
+    {
+      name: 'H2',
+      region: 'global',
+      signerId: 'hub-2',
+      seed: HUB_SEED,
+      routingFeePPM: 100,
+      relayUrl,
+      rpcUrl: publicRpc,
+      httpUrl: publicHttp,
+      port: options.port,
+      serverId: options.serverId,
+      capabilities: ['hub', 'routing', 'faucet'],
+      position: { x: 0, y: 0, z: 0 },
+    },
+    {
+      name: 'H3',
+      region: 'global',
+      signerId: 'hub-3',
+      seed: HUB_SEED,
+      routingFeePPM: 100,
+      relayUrl,
+      rpcUrl: publicRpc,
+      httpUrl: publicHttp,
+      port: options.port,
+      serverId: options.serverId,
+      capabilities: ['hub', 'routing', 'faucet'],
+      position: { x: 80, y: 0, z: 0 },
+    },
+  ];
+
+  const hubEntityIds = await bootstrapHubs(env, hubConfigs);
+
+  // Start P2P overlay for hub announcements
+  if (hubEntityIds.length > 0) {
+    startP2P(env, {
+      relayUrls: relaySeeds,
+      advertiseEntityIds: hubEntityIds,
+    });
+  }
 
   // Wait for gossip to update (gossip.announce() might be async)
   await new Promise(resolve => setTimeout(resolve, 100));
 
-  // Get hub from gossip for funding
+  // Get hubs from gossip for funding
   const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true) || [];
   console.log(`[XLN] Found ${hubs.length} hubs in gossip`);
 
   if (hubs.length > 0 && globalJAdapter) {
     console.log('[XLN] Funding hub reserves...');
 
-    const hub = await getHubWallet(env);
-    if (!hub) {
-      console.warn('[XLN] Hub wallet not available (gossip missing)');
-    } else {
+    // Ensure tokens exist on RPC/anvil before funding
+    const tokenCatalog = await ensureTokenCatalog();
+
+    // Ensure deployer has ETH on anvil (avoids faucet/deploy gas failures)
+    try {
+      if (globalJAdapter.chainId === 31337 && 'send' in globalJAdapter.provider) {
+        const provider = globalJAdapter.provider as ethers.JsonRpcProvider;
+        const deployerAddress = await globalJAdapter.signer.getAddress();
+        const targetDeployerEth = ethers.parseEther('10000');
+        await provider.send('anvil_setBalance', [deployerAddress, ethers.toBeHex(targetDeployerEth)]);
+        console.log('[XLN] Anvil deployer balance topped up');
+      }
+    } catch (err) {
+      console.warn('[XLN] Failed to top up anvil deployer:', (err as Error).message);
+    }
+
+    for (const hubProfile of hubs) {
+      const hub = await getHubWallet(env, hubProfile.entityId);
+      if (!hub) {
+        console.warn('[XLN] Hub wallet not available (gossip missing)');
+        continue;
+      }
       const hubEntityId = hub.hubEntityId;
       const hubWallet = hub.wallet;
       const hubWalletAddress = await hubWallet.getAddress();
 
-      console.log(`[XLN] Hub wallet address: ${hubWalletAddress}`);
-
-      // Ensure deployer + hub wallet have ETH on anvil (avoids faucet/deploy gas failures)
-      try {
-        if (globalJAdapter.chainId === 31337 && 'send' in globalJAdapter.provider) {
-          const provider = globalJAdapter.provider as ethers.JsonRpcProvider;
-          const deployerAddress = await globalJAdapter.signer.getAddress();
-          const targetDeployerEth = ethers.parseEther('10000');
-          const targetHubEth = ethers.parseEther('1000');
-          await provider.send('anvil_setBalance', [deployerAddress, ethers.toBeHex(targetDeployerEth)]);
-          await provider.send('anvil_setBalance', [hubWalletAddress, ethers.toBeHex(targetHubEth)]);
-          console.log('[XLN] Anvil balances topped up for deployer + hub wallet');
-        }
-      } catch (err) {
-        console.warn('[XLN] Failed to top up anvil balances:', (err as Error).message);
-      }
-
-      // Ensure tokens exist on RPC/anvil before funding
-      const tokenCatalog = await ensureTokenCatalog();
+      console.log(`[XLN] Hub wallet address (${hubEntityId.slice(0, 10)}...): ${hubWalletAddress}`);
 
       // Fund hub wallet if using BrowserVM
       if (globalJAdapter.mode === 'browservm') {
@@ -1070,7 +1318,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         const deployer = globalJAdapter.signer;
         const ERC20_ABI = ['function transfer(address to, uint256 amount) returns (bool)', 'function balanceOf(address) view returns (uint256)'];
 
-        // Fund hub wallet with 1B of each token
         for (const token of tokenCatalog) {
           if (!token?.address) continue;
           try {
@@ -1092,7 +1339,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         try {
           const currentEth = await globalJAdapter.provider.getBalance(hubWalletAddress);
           const targetEth = ethers.parseEther('1000'); // 1000 ETH for faucet operations
-          console.log(`[XLN] Hub wallet current ETH: ${ethers.formatEther(currentEth)}, target: ${ethers.formatEther(targetEth)}`);
           if (currentEth < targetEth) {
             const topup = targetEth - currentEth;
             const ethTx = await deployer.sendTransaction({ to: hubWalletAddress, value: topup });
@@ -1104,7 +1350,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         } catch (err) {
           console.error('[XLN] Hub wallet ETH funding failed:', (err as Error).message);
         }
-
       }
 
       // Fund hub entity reserves in Depository (all registered tokens)
@@ -1115,8 +1360,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         const decimals = typeof token.decimals === 'number' ? token.decimals : 18;
         const amount = 1_000_000_000n * 10n ** BigInt(decimals);
         try {
-          await globalJAdapter.debugFundReserves(hubEntityId, tokenId, amount);
-          console.log(`[XLN] Hub reserves funded: tokenId=${tokenId} amount=${ethers.formatUnits(amount, decimals)}`);
+          const events = await globalJAdapter.debugFundReserves(hubEntityId, tokenId, amount);
+          console.log(`[XLN] Hub reserves funded: tokenId=${tokenId} amount=${ethers.formatUnits(amount, decimals)} for ${hubEntityId.slice(0, 10)}...`);
+          await applyJEventsToEnv(env, events, 'HUB-FUND');
         } catch (err) {
           console.warn(`[XLN] Hub reserve funding failed (tokenId=${tokenId}):`, (err as Error).message);
         }

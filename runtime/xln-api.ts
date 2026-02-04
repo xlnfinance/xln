@@ -312,6 +312,7 @@ export interface XLNModule {
   startP2P: (env: Env, config?: P2PConfig) => unknown;
   stopP2P: () => void;
   getP2P: () => unknown;
+  refreshGossip?: () => void;
   // runDemo: REMOVED - use scenarios.ahb(env) or scenarios.grid(env) instead
 
   // Environment creation

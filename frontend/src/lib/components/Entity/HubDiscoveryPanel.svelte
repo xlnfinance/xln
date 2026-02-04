@@ -4,7 +4,6 @@
   Browse gossip-advertised hubs and open accounts with them.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { xlnFunctions, xlnEnvironment, getXLN, processWithDelay } from '../../stores/xlnStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { Radio, Globe, Zap, Users, Shield, RefreshCw, Plus, Check, AlertTriangle } from 'lucide-svelte';
@@ -24,9 +23,11 @@
   let loading = false;
   let error = '';
   let connecting: string | null = null;
+  const CREDIT_TOKEN_ID = 1;
 
   // Hub data structure
   interface Hub {
+    profile: any;
     entityId: string;
     name: string;
     metadata: {
@@ -36,20 +37,21 @@
       capacity?: bigint;
       uptime?: number;
     };
+    runtimeId?: string;
+    endpoints?: string[];
+    relays?: string[];
+    capabilities?: string[];
     jurisdiction: string;
     isConnected: boolean;
     lastSeen: number;
+    raw: string;
   }
 
   let hubs: Hub[] = [];
 
   // Format functions
   function formatShortId(id: string): string {
-    if (!id) return '';
-    if (activeFunctions?.getEntityShortId) {
-      return '#' + activeFunctions.getEntityShortId(id);
-    }
-    return '#' + (id.startsWith('0x') ? id.slice(2, 6) : id.slice(0, 4)).toUpperCase();
+    return id || '';
   }
 
   function formatCapacity(cap?: bigint): string {
@@ -60,12 +62,43 @@
     return num.toFixed(2);
   }
 
+  const parseCapacity = (value: unknown): bigint | undefined => {
+    if (value === null || value === undefined) return undefined;
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.floor(value));
+    if (typeof value === 'string' && value.trim() !== '') {
+      try {
+        return BigInt(value);
+      } catch {
+        return undefined;
+      }
+    }
+    return undefined;
+  };
+
+  const formatRawProfile = (profile: any): string => {
+    if (activeFunctions?.safeStringify) {
+      return activeFunctions.safeStringify(profile, 2);
+    }
+    try {
+      return JSON.stringify(profile, null, 2);
+    } catch {
+      return '[unserializable profile]';
+    }
+  };
+
   // Discover hubs from gossip network
-  async function discoverHubs() {
+  async function discoverHubs(refreshGossip: boolean = false) {
     loading = true;
     error = '';
 
     try {
+      if (refreshGossip) {
+        const xln = await getXLN();
+        xln.refreshGossip?.();
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+
       const currentEnv = env;
       if (!currentEnv) throw new Error('Environment not ready');
 
@@ -85,19 +118,26 @@
             isConnected = myReplica?.state?.accounts?.has(profile.entityId) || false;
           }
 
+          const capacity = parseCapacity(profile.metadata?.capacity);
           discovered.push({
+            profile,
             entityId: profile.entityId,
             name: profile.metadata?.name || `Hub ${formatShortId(profile.entityId)}`,
             metadata: {
               description: profile.metadata?.bio || 'Payment hub',
               website: profile.metadata?.website,
               fee: profile.metadata?.routingFeePPM || 100, // Default 0.01%
-              capacity: profile.metadata?.capacity ? BigInt(profile.metadata.capacity) : 0n,
+              capacity: capacity ?? 0n,
               uptime: profile.metadata?.uptime ? parseFloat(profile.metadata.uptime) : 99.9,
             },
+            runtimeId: profile.runtimeId,
+            endpoints: profile.endpoints || [],
+            relays: profile.relays || [],
+            capabilities: profile.capabilities || [],
             jurisdiction: profile.metadata?.region || 'global',
             isConnected,
             lastSeen: profile.metadata?.lastUpdated || Date.now(),
+            raw: formatRawProfile(profile),
           });
         }
       }
@@ -116,7 +156,13 @@
             const myReplica = (currentEnv.eReplicas as Map<string, any>).get(`${entityId}:1`);
             const isConnected = myReplica?.state?.accounts?.has(hubEntityId) || false;
 
+            const profile = {
+              entityId: hubEntityId,
+              metadata: hubMeta || {},
+              accounts: [],
+            };
             discovered.push({
+              profile,
               entityId: hubEntityId,
               name: state.config?.name || hubMeta?.name || `Hub ${formatShortId(hubEntityId)}`,
               metadata: {
@@ -126,9 +172,14 @@
                 capacity: state.reserves?.get?.('1') || 0n,
                 uptime: hubMeta?.uptime || 99.9,
               },
+              runtimeId: undefined,
+              endpoints: [],
+              relays: [],
+              capabilities: [],
               jurisdiction: state.config?.jurisdiction?.name || 'Unknown',
               isConnected,
               lastSeen: Date.now(),
+              raw: formatRawProfile(profile),
             });
           }
         }
@@ -169,7 +220,10 @@
         }
       }
 
-      // Open account with hub
+      const tokenInfo = activeFunctions?.getTokenInfo?.(CREDIT_TOKEN_ID) || { decimals: 18 };
+      const creditAmount = 10_000n * 10n ** BigInt(tokenInfo.decimals ?? 18);
+
+      // Open account with hub + extend credit
       await processWithDelay(currentEnv as any, [{
         entityId,
         signerId,
@@ -177,6 +231,13 @@
           type: 'openAccount' as const,
           data: {
             targetEntityId: hub.entityId,
+          }
+        }, {
+          type: 'extendCredit' as const,
+          data: {
+            counterpartyEntityId: hub.entityId,
+            tokenId: CREDIT_TOKEN_ID,
+            amount: creditAmount,
           }
         }]
       }]);
@@ -194,16 +255,12 @@
     }
   }
 
-  // Load hubs on mount
-  onMount(() => {
-    discoverHubs();
-  });
 </script>
 
 <div class="hub-panel">
   <header class="panel-header">
     <h3>Discover Hubs</h3>
-    <button class="refresh-btn" on:click={discoverHubs} disabled={loading}>
+    <button class="refresh-btn" on:click={() => discoverHubs(true)} disabled={loading}>
       <span class:spinning={loading}><RefreshCw size={14} /></span>
     </button>
   </header>
@@ -228,7 +285,7 @@
     <div class="empty-state">
       <Globe size={40} />
       <p>No hubs discovered yet</p>
-      <button class="btn-scan" on:click={discoverHubs}>
+      <button class="btn-scan" on:click={() => discoverHubs(true)}>
         <Radio size={14} /> Scan Network
       </button>
     </div>
@@ -267,6 +324,34 @@
               <span class="stat-value">{hub.metadata.uptime?.toFixed(1) || '?'}%</span>
             </div>
           </div>
+
+          <div class="hub-fields">
+            <div class="field">
+              <span class="field-label">Runtime</span>
+              <span class="field-value">{hub.runtimeId || 'unknown'}</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Relays</span>
+              <span class="field-value">{hub.relays?.length ? hub.relays.join(', ') : 'none'}</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Endpoints</span>
+              <span class="field-value">{hub.endpoints?.length ? hub.endpoints.join(', ') : 'none'}</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Capabilities</span>
+              <span class="field-value">{hub.capabilities?.length ? hub.capabilities.join(', ') : 'none'}</span>
+            </div>
+            <div class="field">
+              <span class="field-label">Updated</span>
+              <span class="field-value">{new Date(hub.lastSeen).toISOString()}</span>
+            </div>
+          </div>
+
+          <details class="hub-raw">
+            <summary>Raw profile</summary>
+            <pre>{hub.raw}</pre>
+          </details>
 
           <div class="hub-footer">
             <span class="jurisdiction">{hub.jurisdiction}</span>
@@ -509,6 +594,54 @@
     justify-content: space-between;
     padding-top: 10px;
     border-top: 1px solid #292524;
+  }
+
+  .hub-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
+    font-size: 11px;
+    color: #78716c;
+  }
+
+  .field {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .field-label {
+    color: #57534e;
+  }
+
+  .field-value {
+    color: #a8a29e;
+    font-family: 'JetBrains Mono', monospace;
+    text-align: right;
+    word-break: break-all;
+  }
+
+  .hub-raw {
+    margin: 10px 0 0;
+    background: #0c0a09;
+    border: 1px solid #292524;
+    border-radius: 8px;
+    padding: 8px;
+  }
+
+  .hub-raw summary {
+    cursor: pointer;
+    font-size: 11px;
+    color: #a8a29e;
+  }
+
+  .hub-raw pre {
+    margin: 8px 0 0;
+    font-size: 10px;
+    color: #d6d3d1;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 
   .jurisdiction {
