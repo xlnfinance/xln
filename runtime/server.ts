@@ -337,6 +337,7 @@ type WsClient = {
 const clients = new Map<string, WsClient>();
 const pendingMessages = new Map<string, any[]>();
 const gossipProfiles = new Map<string, { profile: any; timestamp: number }>();
+let relayServerId = DEFAULT_OPTIONS.serverId ?? 'xln-server';
 
 let wsCounter = 0;
 const nextWsTimestamp = () => ++wsCounter;
@@ -469,7 +470,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
     ws.send(safeStringify({
       type: 'gossip_response',
       id: `gossip_${Date.now()}`,
-      from: options.serverId,
+      from: relayServerId,
       to: from,
       timestamp: Date.now(),
       payload: { profiles },
@@ -1051,6 +1052,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   console.log('═══ startXlnServer() CALLED ═══');
   console.log('Options:', opts);
   const options = { ...DEFAULT_OPTIONS, ...opts };
+  relayServerId = options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server';
   const relaySeeds =
     opts.relaySeeds?.length
       ? opts.relaySeeds
