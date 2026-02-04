@@ -292,14 +292,11 @@ export function getShortId(entityId: string): string {
  * @returns Display string like "#1234" or "e7f1:#1234"
  */
 export function formatEntityIdDisplay(entityId: string, provider?: string): string {
-  const shortId = getShortId(entityId);
-
+  const normalized = normalizeEntityId(entityId);
   if (provider) {
-    const providerShort = provider.slice(2, 6).toLowerCase();
-    return `${providerShort}:#${shortId}`;
+    return `${provider}:${normalized}`;
   }
-
-  return `#${shortId}`;
+  return normalized;
 }
 
 /**

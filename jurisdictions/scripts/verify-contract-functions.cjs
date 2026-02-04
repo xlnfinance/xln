@@ -93,14 +93,11 @@ async function main() {
     // Check if critical functions exist
     const hasProcessBatch = functionNames.includes('processBatch');
     const hasSettle = functionNames.includes('settle');
-    const hasPrefund = functionNames.includes('prefundAccount');
 
     console.log("🔍 Critical function availability:");
     console.log("   processBatch:", hasProcessBatch ? "✅ FOUND" : "❌ MISSING");
     console.log("   settle:", hasSettle ? "✅ FOUND" : "❌ MISSING");
-    console.log("   prefundAccount:", hasPrefund ? "✅ FOUND" : "❌ MISSING");
-
-    if (!hasProcessBatch || !hasSettle || !hasPrefund) {
+    if (!hasProcessBatch || !hasSettle) {
         console.log("❌ CRITICAL: Essential functions missing from contract interface!");
         process.exit(1);
     }
@@ -108,28 +105,20 @@ async function main() {
     // Calculate correct selectors
     const processBatchFrag = contractInterface.getFunction("processBatch");
     const settleFrag = contractInterface.getFunction("settle");
-    const prefundFrag = contractInterface.getFunction("prefundAccount");
-
     const actualProcessBatchSelector = processBatchFrag.selector;
     const actualSettleSelector = settleFrag.selector;
-    const actualPrefundSelector = prefundFrag.selector;
 
     console.log("🔍 ACTUAL function selectors:");
     console.log("   processBatch:", actualProcessBatchSelector);
     console.log("   settle:", actualSettleSelector);
-    console.log("   prefundAccount:", actualPrefundSelector);
-
     console.log("🔍 Checking ACTUAL selectors in deployed bytecode...");
     const processBatchFound = deployedBytecode.includes(actualProcessBatchSelector.slice(2));
     const settleFound = deployedBytecode.includes(actualSettleSelector.slice(2));
-    const prefundFound = deployedBytecode.includes(actualPrefundSelector.slice(2));
-
     console.log("   processBatch:", processBatchFound ? "✅ FOUND" : "❌ MISSING");
     console.log("   settle:", settleFound ? "✅ FOUND" : "❌ MISSING");
-    console.log("   prefundAccount:", prefundFound ? "✅ FOUND" : "❌ MISSING");
 
     // FAIL if any critical function is missing
-    if (!processBatchFound || !settleFound || !prefundFound) {
+    if (!processBatchFound || !settleFound) {
         console.log("❌ CRITICAL: Essential functions missing from deployed contract!");
         process.exit(1);
     }

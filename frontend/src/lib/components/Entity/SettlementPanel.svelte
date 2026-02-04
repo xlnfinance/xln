@@ -6,6 +6,7 @@
 
   export let entityId: string;
   export let contacts: Array<{ name: string; entityId: string }> = [];
+  export let prefill: { tokenId?: number; id: number } | null = null;
 
   // Context
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
@@ -26,6 +27,7 @@
   let amount = '';
   let disputeReason = '';
   let sending = false;
+  let lastPrefillId = 0;
 
   // Self-transfer check
   $: isSelfTransfer = recipientEntityId && recipientEntityId.toLowerCase() === entityId.toLowerCase();
@@ -38,11 +40,7 @@
 
   // Format short ID
   function formatShortId(id: string): string {
-    if (!id) return '';
-    if (activeXlnFunctions?.getEntityShortId) {
-      return '#' + activeXlnFunctions.getEntityShortId(id);
-    }
-    return '#' + (id.startsWith('0x') ? id.slice(2, 6) : id.slice(0, 4)).toUpperCase();
+    return id || '';
   }
 
   // Get pending batch
@@ -204,6 +202,15 @@
 
   function handleTokenChange(e: CustomEvent) {
     tokenId = e.detail.value;
+  }
+
+  // Apply prefill when requested (token only; account chosen by user)
+  $: if (prefill && prefill.id !== lastPrefillId) {
+    lastPrefillId = prefill.id;
+    if (typeof prefill.tokenId === 'number') {
+      tokenId = prefill.tokenId;
+    }
+    action = 'fund';
   }
 </script>
 

@@ -17,7 +17,7 @@
   }
 
   function formatEntityId(id: string): string {
-    return id.slice(0, 6) + '...' + id.slice(-4);
+    return id;
   }
 </script>
 

@@ -506,13 +506,7 @@ export function getEntityShortId(entityId: string): string {
  * Hash-based entities: "07FF", "A3B2" (no prefix)
  */
 export function formatEntityId(entityId: string): string {
-  const shortId = getEntityShortId(entityId);
-  // Check if it's purely numeric
-  const num = parseInt(shortId, 10);
-  if (!isNaN(num) && shortId === num.toString()) {
-    return `#${shortId}`;
-  }
-  return shortId;
+  return entityId;
 }
 
 /**

@@ -108,14 +108,13 @@
       for (const replica of entityReplicas) {
         const entityId = replica.entityId;
         const name = getEntityName(replica);
-        const shortId = xlnFuncs.getEntityShortId(entityId);
-        const displayName = name || `Entity #${shortId}`;
+        const shortId = entityId;
+        const displayName = name || `Entity ${entityId}`;
 
         // Filter by search - match against entityId, signerId, or shortId
         if (search &&
             !entityId.toLowerCase().includes(searchLower) &&
-            !signerId.toLowerCase().includes(searchLower) &&
-            !shortId.toLowerCase().includes(searchLower)) {
+            !signerId.toLowerCase().includes(searchLower)) {
           continue;
         }
 
@@ -174,13 +173,13 @@
 
     const replicaKey = `${tab.entityId}:${tab.signerId}`;
     const replica = replicas.get(replicaKey);
-    const entityNum = xlnFuncs.getEntityShortId(tab.entityId);
+    const entityNum = tab.entityId;
 
     if (replica) {
       const name = getEntityName(replica);
-      return name ? `${name} (#${entityNum})` : `Entity #${entityNum}`;
+      return name ? `${name} (${entityNum})` : `Entity ${entityNum}`;
     }
-    return `Entity #${entityNum}`;
+    return `Entity ${entityNum}`;
   }
 
   function selectSigner(signerId: string) {

@@ -42,11 +42,7 @@
 
   // Format short ID
   function formatShortId(id: string): string {
-    if (!id) return '';
-    if (activeXlnFunctions?.getEntityShortId) {
-      return '#' + activeXlnFunctions.getEntityShortId(id);
-    }
-    return '#' + (id.startsWith('0x') ? id.slice(2, 6) : id.slice(0, 4)).toUpperCase();
+    return id || '';
   }
 
   // Find paths through accounts (BFS)

@@ -696,7 +696,9 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
 
         const { getXLN } = await import('./xlnStore');
         const xln = await getXLN();
-        const newEnv = xln.createEmptyEnv(runtime.seed);
+        const runtimeSeed = runtime.seed;
+        const runtimeIdLower = runtimeId.toLowerCase();
+        let newEnv = null as any;
 
         // CRITICAL: Register ALL signer private keys from HD derivation BEFORE any entity ops
         // Why: Runtime's deriveSignerKeySync uses different derivation than BIP44 HD
@@ -710,32 +712,64 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         }
         console.log(`[VaultStore.initialize] ✅ Registered ${runtime.signers.length} HD-derived keys`);
 
-        // CRITICAL: Import testnet J-machine (shared anvil on xln.finance)
-        // This must happen on page reload when restoring runtime from localStorage
-        console.log('[VaultStore.initialize] Fetching jurisdictions.json...');
-        const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
-        const jurisdictions = await fetchJurisdictions(baseOrigin);
-        const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
-        const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
+        // Try to restore from per-runtime DB snapshot first
+        try {
+          if (xln.loadEnvFromDB) {
+            console.log('[VaultStore.initialize] Loading env from DB namespace:', runtimeIdLower);
+            newEnv = await xln.loadEnvFromDB(runtimeIdLower, runtimeSeed);
+          }
+        } catch (error) {
+          console.warn('[VaultStore.initialize] ⚠️ Failed to load env from DB, falling back to fresh import:', error);
+          newEnv = null;
+        }
 
-        console.log('[VaultStore.initialize] Importing testnet anvil...');
-        await xln.applyRuntimeInput(newEnv, {
-          runtimeTxs: [{
-            type: 'importJ',
-            data: {
-              name: 'Testnet',
-              chainId: arrakisConfig.chainId,
-              ticker: 'USDC',
-              rpcs: [rpcUrl],
-              contracts: arrakisConfig.contracts, // Use pre-deployed addresses
-            }
-          }],
-          entityInputs: []
-        });
+        if (newEnv && (!newEnv.jReplicas || newEnv.jReplicas.size === 0)) {
+          console.warn('[VaultStore.initialize] ⚠️ Restored env missing J-replicas; re-importing');
+          newEnv = null;
+        }
+
+        if (!newEnv) {
+          newEnv = xln.createEmptyEnv(runtimeSeed);
+          newEnv.runtimeId = runtimeIdLower;
+          newEnv.dbNamespace = runtimeIdLower;
+
+          // CRITICAL: Import testnet J-machine (shared anvil on xln.finance)
+          console.log('[VaultStore.initialize] Fetching jurisdictions.json...');
+          const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
+          const jurisdictions = await fetchJurisdictions(baseOrigin);
+          const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
+          const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
+
+          console.log('[VaultStore.initialize] Importing testnet anvil...');
+          await xln.applyRuntimeInput(newEnv, {
+            runtimeTxs: [{
+              type: 'importJ',
+              data: {
+                name: 'Testnet',
+                chainId: arrakisConfig.chainId,
+                ticker: 'USDC',
+                rpcs: [rpcUrl],
+                contracts: arrakisConfig.contracts, // Use pre-deployed addresses
+              }
+            }],
+            entityInputs: []
+          });
+          console.log('[VaultStore.initialize] ✅ Testnet imported');
+        } else {
+          newEnv.runtimeSeed = runtimeSeed;
+          newEnv.runtimeId = runtimeIdLower;
+          newEnv.dbNamespace = runtimeIdLower;
+          console.log('[VaultStore.initialize] ✅ Env restored from DB:', {
+            height: newEnv.height,
+            history: newEnv.history?.length || 0,
+            jReplicas: newEnv.jReplicas?.size || 0,
+            entities: newEnv.eReplicas?.size || 0
+          });
+        }
+
         if (xln.startJEventWatcher) {
           await xln.startJEventWatcher(newEnv);
         }
-        console.log('[VaultStore.initialize] ✅ Testnet imported');
 
         // Re-import entity if it exists in runtime
         if (runtime.signers[0]?.entityId) {

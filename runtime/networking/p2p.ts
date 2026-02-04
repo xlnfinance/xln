@@ -514,7 +514,19 @@ export class RuntimeP2P {
       if (hasHanko || hasLegacySig) {
         const valid = await verifyProfileSignature(profile, this.env);
         if (!valid) {
-          console.warn(`P2P_PROFILE_INVALID_SIGNATURE: ${profile.entityId.slice(-4)} - rejecting`);
+          const boardValidators = profile.metadata?.board?.validators;
+          const hasBoardKey = Array.isArray(boardValidators) && boardValidators.some(v => typeof v?.publicKey === 'string');
+          const hasEntityKey = typeof profile.metadata?.entityPublicKey === 'string';
+          console.warn(
+            `P2P_PROFILE_INVALID_SIGNATURE: ${profile.entityId.slice(-4)} - rejecting`,
+            {
+              hasHanko: !!hasHanko,
+              hasLegacySig: !!hasLegacySig,
+              entityPublicKey: hasEntityKey ? 'yes' : 'no',
+              boardPublicKey: hasBoardKey ? 'yes' : 'no',
+              validators: Array.isArray(boardValidators) ? boardValidators.length : 0,
+            }
+          );
           continue; // Skip invalid profiles
         }
         verified++;
@@ -525,6 +537,18 @@ export class RuntimeP2P {
 
       // Store in local gossip cache
       this.env.gossip?.announce?.(profile);
+
+      // Register validator public keys from profile board (for account signature verification)
+      const boardValidators = profile.metadata?.board?.validators;
+      if (Array.isArray(boardValidators)) {
+        for (const validator of boardValidators) {
+          const signerId = validator?.signerId;
+          const publicKey = validator?.publicKey;
+          if (signerId && publicKey && typeof publicKey === 'string' && isHexPublicKey(publicKey)) {
+            registerSignerPublicKey(signerId, publicKey);
+          }
+        }
+      }
 
       // Register public key for signature verification
       const publicKey = profile.metadata?.entityPublicKey;

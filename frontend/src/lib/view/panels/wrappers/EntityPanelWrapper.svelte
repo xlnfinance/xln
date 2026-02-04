@@ -53,7 +53,7 @@
   // Local tab state (mutable for EntityPanel)
   let localTab: Tab = $state({
     id: tabId,
-    title: entityName || entityId.slice(0, 12) + '...',
+    title: entityName || entityId,
     entityId,
     signerId: signerId || entityId,
     jurisdiction: 'browservm',

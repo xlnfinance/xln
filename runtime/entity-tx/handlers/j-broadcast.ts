@@ -31,12 +31,13 @@ export async function handleJBroadcast(
   if (!newState.jBatchState || isBatchEmpty(newState.jBatchState.batch)) {
     const batch = newState.jBatchState?.batch;
     if (batch) {
-      console.warn(`⚠️ j_broadcast: empty batch for ${entityState.entityId.slice(-4)} (r2r=${batch.reserveToReserve.length}, r2c=${batch.reserveToCollateral.length}, c2r=${batch.collateralToReserve.length}, settlements=${batch.settlements.length}, starts=${batch.disputeStarts.length}, finals=${batch.disputeFinalizations.length})`);
+      console.error(`❌ j_broadcast EMPTY: ${entityState.entityId.slice(-4)} (r2r=${batch.reserveToReserve.length}, r2c=${batch.reserveToCollateral.length}, c2r=${batch.collateralToReserve.length}, settlements=${batch.settlements.length}, starts=${batch.disputeStarts.length}, finals=${batch.disputeFinalizations.length})`);
     } else {
-      console.warn(`⚠️ j_broadcast: missing jBatchState for ${entityState.entityId.slice(-4)}`);
+      console.error(`❌ j_broadcast EMPTY: missing jBatchState for ${entityState.entityId.slice(-4)}`);
     }
-    addMessage(newState, `❌ No operations to broadcast - jBatch is empty`);
-    return { newState, outputs, jOutputs };
+    const msg = '❌ No operations to broadcast - jBatch is empty';
+    addMessage(newState, msg);
+    throw new Error(msg);
   }
 
   // Validate: jurisdiction configured

@@ -177,8 +177,8 @@
       for (const [key] of entries) {
         const entityId = key.split(':')[0];
         if (entityId && !names.has(entityId)) {
-          // Fallback: use short ID format
-          names.set(entityId, `E${entityId.slice(2, 6).toUpperCase()}`);
+          // Fallback: use full ID
+          names.set(entityId, entityId);
         }
       }
     }
@@ -204,7 +204,7 @@
         if (amount > 0n) {
           result.push({
             entityId,
-            name: entityNames.get(entityId) || `E${entityId.slice(2, 6).toUpperCase()}`,
+            name: entityNames.get(entityId) || entityId,
             tokenId: Number(tokenId),
             amount,
           });
@@ -297,9 +297,9 @@
 
         disputes.push({
           entityId,
-          entityName: entityNames.get(entityId) || `E${entityId.slice(2, 6).toUpperCase()}`,
+          entityName: entityNames.get(entityId) || entityId,
           counterpartyId,
-          counterpartyName: entityNames.get(counterpartyId) || `E${counterpartyId.slice(-4)}`,
+          counterpartyName: entityNames.get(counterpartyId) || counterpartyId,
           startedByLeft: account.activeDispute.startedByLeft,
           disputeTimeout: account.activeDispute.disputeTimeout,
           initialDisputeNonce: account.activeDispute.initialDisputeNonce,
@@ -633,12 +633,12 @@
           if (debts && debts.length > 0) {
             results.push({
               entityId,
-              entityName: names.get(entityId) || `E${entityId.slice(2, 6).toUpperCase()}`,
+              entityName: names.get(entityId) || entityId,
               tokenId,
               debts: debts.map((d: any) => ({
                 amount: d.amount,
                 creditor: d.creditor,
-                creditorName: names.get(d.creditor) || `E${d.creditor.slice(-4)}`
+                creditorName: names.get(d.creditor) || d.creditor
               }))
             });
           }
@@ -664,9 +664,6 @@
 
   function formatEntityId(entityId: string): string {
     if (!entityId) return 'N/A';
-    if (entityId.startsWith('0x') && entityId.length > 10) {
-      return entityId.slice(0, 6) + '...' + entityId.slice(2, 6).toUpperCase();
-    }
     return entityId;
   }
 
@@ -935,8 +932,8 @@
                 {@const parts = c.channelKey.includes(':') ? c.channelKey.split(':') : c.channelKey.split('-')}
                 {@const leftId = parts[0] || '??'}
                 {@const rightId = parts[1] || '??'}
-                {@const leftName = entityNames.get(leftId) || `E${leftId.slice(-4)}`}
-                {@const rightName = entityNames.get(rightId) || `E${rightId.slice(-4)}`}
+                {@const leftName = entityNames.get(leftId) || leftId}
+                {@const rightName = entityNames.get(rightId) || rightId}
                 <tr>
                   <td class="account-cell">
                     <span class="entity-left">{leftName}</span>

@@ -26,6 +26,21 @@ export interface NetworkGraph {
   }>;
 }
 
+const normalizeBigInt = (value: unknown): bigint => {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.floor(value));
+  if (typeof value === 'string' && value.trim() !== '') {
+    const match = value.match(/^BigInt\(([-\d]+)\)$/);
+    const raw = match ? match[1] : value;
+    try {
+      return BigInt(raw);
+    } catch {
+      return 0n;
+    }
+  }
+  return 0n;
+};
+
 /**
  * Build network graph from gossip profiles
  */
@@ -66,7 +81,7 @@ export function buildNetworkGraph(
         if (!metadata) {
           console.warn(`🚨 ROUTING-SAFETY: Entity ${fromEntity} has no metadata, using safe defaults`);
         }
-        const baseFee = metadata?.baseFee ?? 0n; // Explicit null/undefined check
+        const baseFee = normalizeBigInt(metadata?.baseFee ?? 0n); // Explicit null/undefined check
         const feePPM = metadata?.routingFeePPM ?? 100; // Explicit default: 100 PPM (0.01%)
 
         // Create edge

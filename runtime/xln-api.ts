@@ -338,7 +338,7 @@ export interface XLNModule {
   clearDatabase: () => Promise<void>;
   clearDatabaseAndHistory: () => Promise<void>;
   saveEnvToDB: (env: Env) => Promise<void>;
-  loadEnvFromDB: () => Promise<Env | null>;
+  loadEnvFromDB: (runtimeId?: string | null, runtimeSeed?: string | null) => Promise<Env | null>;
 
   // Blockchain operations
   submitSettle: (

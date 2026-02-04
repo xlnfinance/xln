@@ -24,11 +24,7 @@
 
   // Format short ID
   function formatShortId(id: string): string {
-    if (!id) return '';
-    if (activeFunctions?.getEntityShortId) {
-      return '#' + activeFunctions.getEntityShortId(id);
-    }
-    return '#' + (id.startsWith('0x') ? id.slice(2, 6) : id.slice(0, 4)).toUpperCase();
+    return id || '';
   }
 
   // Simple QR code generator (minimal implementation)
@@ -139,7 +135,7 @@
     <div class="entity-info">
       <div class="short-id">{formatShortId(entityId)}</div>
       <div class="full-id">
-        <code>{entityId.slice(0, 20)}...{entityId.slice(-8)}</code>
+      <code>{entityId}</code>
         <button class="copy-btn" on:click={copyEntityId}>
           {#if copied}
             <Check size={14} />

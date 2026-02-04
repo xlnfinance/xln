@@ -28,7 +28,7 @@
             <span class="tx-type">Import</span>
             <span class="tx-details">
               {#if imp.type === 'importReplica'}
-                Entity {imp.entityId.slice(-4)}
+                Entity {imp.entityId}
               {:else}
                 {imp.type}
               {/if}

@@ -146,20 +146,13 @@
 
   // Format entity ID consistently: #XXXX (last 4 hex chars)
   function formatShortId(id: string): string {
-    if (!id) return '';
-    // Use xlnFunctions if available, otherwise extract last 4 chars
-    if (activeFunctions?.getEntityShortId) {
-      return '#' + activeFunctions.getEntityShortId(id);
-    }
-    // Fallback: last 4 hex chars
-    const clean = id.replace('0x', '');
-    return '#' + clean.slice(-4).toUpperCase();
+    return id || '';
   }
 
   // Get display name for entity (contact name or short ID)
   function getDisplayName(id: string): string {
     const contact = contacts.find(c => c.entityId === id || c.entityId.toLowerCase() === id.toLowerCase());
-    if (contact) return contact.name;
+    if (contact) return `${contact.name} (${id})`;
     return formatShortId(id);
   }
 

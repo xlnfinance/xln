@@ -135,7 +135,7 @@
       {#each entityIds as entityId}
         {#if entityId}
           <option value={entityId}>
-            {$xlnFunctions?.getEntityNumber?.(entityId) ?? entityId.slice(-8)}
+            {entityId}
           </option>
         {/if}
       {/each}

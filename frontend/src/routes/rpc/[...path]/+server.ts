@@ -13,9 +13,9 @@ import type { RequestHandler } from './$types';
  */
 
 const RPC_ENDPOINTS: Record<string, string> = {
-  ethereum: 'http://localhost:8545',
-  polygon: 'http://localhost:8546',
-  arbitrum: 'http://localhost:8547'
+  ethereum: process.env.RPC_ETHEREUM ?? process.env.ANVIL_RPC ?? 'http://localhost:8545',
+  polygon: process.env.RPC_POLYGON ?? 'http://localhost:8546',
+  arbitrum: process.env.RPC_ARBITRUM ?? 'http://localhost:8547'
 };
 
 export const POST: RequestHandler = async ({ params, request }) => {
@@ -56,9 +56,10 @@ export const POST: RequestHandler = async ({ params, request }) => {
     return new Response(
       JSON.stringify({
         error: 'RPC request failed',
-        details: error instanceof Error ? error.message : String(error)
+        details: error instanceof Error ? error.message : String(error),
+        hint: 'Start a local chain (e.g. `bun run env:run`) or set RPC_ETHEREUM/ANVIL_RPC'
       }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+      { status: 503, headers: { 'Content-Type': 'application/json' } }
     );
   }
 };

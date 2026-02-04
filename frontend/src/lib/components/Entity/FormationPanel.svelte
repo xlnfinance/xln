@@ -115,11 +115,7 @@
   }
 
   function formatShortId(id: string): string {
-    if (!id) return '';
-    if (activeFunctions?.getEntityShortId) {
-      return '#' + activeFunctions.getEntityShortId(id);
-    }
-    return '#' + (id.startsWith('0x') ? id.slice(2, 6) : id.slice(0, 4)).toUpperCase();
+    return id || '';
   }
 
   async function createEntity() {

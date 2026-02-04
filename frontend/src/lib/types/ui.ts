@@ -69,6 +69,7 @@ export interface Settings {
   dropdownMode: 'signer-first' | 'entity-first';
   runtimeDelay: number;
   balanceRefreshMs: number;
+  relayUrl: string;
   portfolioScale: number;
   componentStates: ComponentState;
   compactNumbers: boolean;

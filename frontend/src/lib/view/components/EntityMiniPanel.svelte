@@ -118,7 +118,7 @@
   style="left: {position.x}px; top: {position.y}px;"
 >
   <div class="header">
-    <span class="name">{entityName || entityId.slice(0, 10) + '...'}</span>
+    <span class="name">{entityName || entityId}</span>
     <button class="close-btn" on:click={close}>×</button>
   </div>
 
@@ -156,7 +156,7 @@
         {@const delta = getDelta(acc, 1)}
         {@const ondelta = BigInt(delta?.ondelta || 0)}
         <div class="account-row">
-          <span class="peer">{counterpartyId.slice(0, 8)}...</span>
+          <span class="peer">{counterpartyId}</span>
           <span class="ondelta" class:positive={ondelta > 0n} class:negative={ondelta < 0n}>
             {ondelta > 0n ? '+' : ''}{formatAmount(ondelta)}
           </span>

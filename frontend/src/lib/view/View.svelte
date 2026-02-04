@@ -95,7 +95,7 @@
     const signerId = replicaKey.split(':')[1] || entityId;
     return {
       entityId,
-      entityName: replica?.name || entityId.slice(0, 10),
+      entityName: replica?.name || entityId,
       signerId
     };
   };
@@ -107,6 +107,8 @@
   const BUILD_TIME: string = typeof globalThis.__BUILD_TIME__ !== 'undefined' ? globalThis.__BUILD_TIME__ : (typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : 'unknown');
 
   console.log('[View.svelte] 🎬 MODULE LOADED - scenarioId prop:', scenarioId);
+
+  let envChangeRegistered = false;
 
   onMount(async () => {
     console.log('[View] ============ onMount ENTRY ============');
@@ -120,11 +122,21 @@
 
     // Initialize isolated XLN runtime
     try {
-      // Load XLN runtime module
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
+      // Load XLN runtime module (single instance shared via xlnStore)
+      const { getXLN } = await import('$lib/stores/xlnStore');
+      const XLN = await getXLN();
 
       console.log('[View] Runtime module loaded, creating env...');
+
+      if (!envChangeRegistered && XLN.registerEnvChangeCallback) {
+        envChangeRegistered = true;
+        XLN.registerEnvChangeCallback((nextEnv: any) => {
+          // Only update the active env (avoid cross-runtime bleed)
+          if (get(localEnvStore) !== nextEnv) return;
+          localEnvStore.set(nextEnv);
+          localHistoryStore.set(nextEnv.history || []);
+        });
+      }
 
       // CRITICAL: Initialize global xlnInstance for utility functions (deriveDelta, etc)
       // Graph3DPanel needs xlnFunctions even when using isolated stores
@@ -607,7 +619,7 @@
       const existingPanel = allPanels.find(p => p.id === panelId);
 
       if (existingPanel) {
-        console.log('[View] Focusing existing entity panel:', entityId.slice(0, 10));
+        console.log('[View] Focusing existing entity panel:', entityId);
         existingPanel.api.setActive();
         // TODO: If action passed, switch tab in existing panel
         return;
@@ -616,25 +628,25 @@
       // STORE entity data BEFORE creating panel (bypasses Dockview params race)
       pendingEntityData.set(panelId, {
         entityId,
-        entityName: entityName || entityId.slice(0, 10),
+        entityName: entityName || entityId,
         signerId: signerId || entityId,
         ...(action && { action }) // 'r2r' or 'r2c' if quick action requested
       });
 
       // Create new panel using EntityPanelWrapper (reuses full EntityPanel)
       try {
-        console.log('[View] 📋 Stored entity data + creating panel:', panelId.slice(0, 20));
+        console.log('[View] 📋 Stored entity data + creating panel:', panelId);
 
         dockview.addPanel({
           id: panelId,
           component: 'entity-panel',
-          title: `🏢 ${entityName || entityId.slice(0, 10) + '...'}`,
+          title: `🏢 ${entityName || entityId}`,
           position: { direction: 'within', referencePanel: 'architect' },
           params: {
             closeable: true, // Entity panels ARE closeable (dynamic)
           },
         });
-        console.log('[View] ✅ Entity panel created:', entityId.slice(0, 10));
+        console.log('[View] ✅ Entity panel created:', entityId);
       } catch (err) {
         // Panel might already exist from race condition - force focus
         console.error('[View] ❌ Panel creation failed:', err);

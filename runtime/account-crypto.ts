@@ -205,6 +205,8 @@ export function getCachedSignerAddress(signerId: string): string | null {
 
 // Export for hanko-signing.ts
 export function getSignerPrivateKey(env: any, signerId: string): Uint8Array {
+  const cached = signerKeys.get(signerId);
+  if (cached) return cached;
   if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getSignerPrivateKey called without env.runtimeSeed for signer ${signerId}`);
   }

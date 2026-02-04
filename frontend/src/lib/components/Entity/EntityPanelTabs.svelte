@@ -21,7 +21,7 @@
   import {
     ArrowUpRight, ArrowDownLeft, Repeat, Landmark, Users, Activity,
     MessageCircle, Settings as SettingsIcon, BookUser,
-    ChevronDown, Wallet, AlertTriangle, PlusCircle, Radio, Copy, Check
+    ChevronDown, Wallet, AlertTriangle, PlusCircle, Copy, Check
   } from 'lucide-svelte';
 
   // Child components
@@ -47,7 +47,7 @@
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
 
   // Tab types
-  type ViewTab = 'external' | 'reserves' | 'accounts' | 'send' | 'swap' | 'onj' | 'activity' | 'chat' | 'contacts' | 'receive' | 'hubs' | 'create' | 'settings';
+  type ViewTab = 'external' | 'reserves' | 'accounts' | 'send' | 'swap' | 'onj' | 'activity' | 'chat' | 'contacts' | 'receive' | 'create' | 'settings';
 
   // Set initial tab based on action
   function getInitialTab(): ViewTab {
@@ -60,9 +60,11 @@
   // State
   let replica: EntityReplica | null = null;
   let selectedAccountId: string | null = null;
+  let onchainPrefill: { tokenId?: number; id: number } | null = null;
   let selectedJurisdictionName: string | null = null;
   let activityCount = 0;
   let addressCopied = false;
+  let openAccountEntityId = '';
   const API_BASE = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
   const REFRESH_OPTIONS = [
     { label: 'Off', value: 0 },
@@ -76,6 +78,16 @@
   function updateBalanceRefresh(event: Event) {
     const target = event.target as HTMLSelectElement;
     settingsOperations.setBalanceRefreshMs(Number(target.value));
+  }
+
+  async function readJsonResponse(response: Response): Promise<any> {
+    const raw = await response.text();
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
   }
 
   // Copy address to clipboard
@@ -96,8 +108,7 @@
 
   // Format short address for display
   function formatAddress(addr: string): string {
-    if (!addr || addr.length < 12) return addr;
-    return `${addr.slice(0, 8)}...${addr.slice(-6)}`;
+    return addr;
   }
 
   // Context
@@ -186,7 +197,30 @@
   let collateralFundingToken: string | null = null; // symbol of token being moved to collateral
 
   // Faucet: fund entity reserves with test tokens
-  async function faucetReserves(tokenId: number = 1) {
+  function resolveReserveTokenMeta(tokenId: number, symbolHint?: string): { tokenId: number; symbol: string; decimals: number } {
+    const byId = externalTokens.find(t => typeof t.tokenId === 'number' && t.tokenId === tokenId);
+    if (byId) {
+      return { tokenId: byId.tokenId as number, symbol: byId.symbol, decimals: byId.decimals ?? 18 };
+    }
+    if (symbolHint) {
+      const bySymbol = externalTokens.find(t => t.symbol?.toUpperCase?.() === symbolHint.toUpperCase());
+      if (bySymbol && typeof bySymbol.tokenId === 'number') {
+        return { tokenId: bySymbol.tokenId, symbol: bySymbol.symbol, decimals: bySymbol.decimals ?? 18 };
+      }
+    }
+    const info = getTokenInfo(tokenId);
+    return { tokenId, symbol: info.symbol ?? 'UNK', decimals: info.decimals ?? 18 };
+  }
+
+  function parseTokenAmount(amount: string, decimals: number): bigint {
+    const [wholeRaw, fracRaw = ''] = amount.split('.');
+    const whole = wholeRaw && wholeRaw.length > 0 ? BigInt(wholeRaw) : 0n;
+    const fracPadded = (fracRaw + '0'.repeat(decimals)).slice(0, decimals);
+    const frac = fracPadded.length > 0 ? BigInt(fracPadded) : 0n;
+    return whole * 10n ** BigInt(decimals) + frac;
+  }
+
+  async function faucetReserves(tokenId: number = 1, symbolHint?: string) {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
     if (pendingReserveFaucet) {
@@ -196,40 +230,36 @@
 
     faucetFunding = true;
     try {
-      const tokenInfo = getTokenInfo(tokenId);
-      const amountUnits = 1000n;
-      const decimals = BigInt(tokenInfo.decimals ?? 18);
-      const amountWei = amountUnits * 10n ** decimals;
-      const prevBalance = onchainReserves.get(tokenId) ?? 0n;
+      const tokenMeta = resolveReserveTokenMeta(tokenId, symbolHint);
+      const amountStr = tokenMeta.symbol === 'WETH' || tokenMeta.symbol === 'ETH' ? '0.1' : '100';
+      const amountWei = parseTokenAmount(amountStr, tokenMeta.decimals);
+      const prevBalance = onchainReserves.get(tokenMeta.tokenId) ?? 0n;
       // Faucet B: Reserve transfer (ALWAYS use prod API, no BrowserVM fake)
       const response = await fetch(`${API_BASE}/api/faucet/reserve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userEntityId: entityId,
-          tokenId,
-          amount: amountUnits.toString()
+          tokenId: tokenMeta.tokenId,
+          tokenSymbol: tokenMeta.symbol,
+          amount: amountStr
         })
       });
 
-      const raw = await response.text();
-      let result: any = null;
-      if (raw) {
-        try { result = JSON.parse(raw); } catch { /* ignore */ }
-      }
+      const result = await readJsonResponse(response);
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || `Faucet failed (${response.status})`);
       }
 
       console.log('[EntityPanel] Reserve faucet request queued:', result);
       pendingReserveFaucet = {
-        tokenId,
+        tokenId: tokenMeta.tokenId,
         amount: amountWei,
         prevBalance,
         startedAt: Date.now(),
-        symbol: tokenInfo.symbol,
+        symbol: tokenMeta.symbol,
       };
-      toasts.info(`Reserve faucet requested for ${tokenInfo.symbol}. Waiting for on-chain update...`);
+      toasts.info(`Reserve faucet requested for ${tokenMeta.symbol}. Waiting for on-chain update...`);
     } catch (err) {
       console.error('[EntityPanel] Reserve faucet failed:', err);
       toasts.error(`Reserve faucet failed: ${(err as Error).message}`);
@@ -255,9 +285,9 @@
         })
       });
 
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error || 'Faucet failed');
+      const result = await readJsonResponse(response);
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || `Faucet failed (${response.status})`);
       }
 
       console.log('[EntityPanel] Offchain faucet success:', result);
@@ -315,7 +345,10 @@
   async function fetchOnchainReserves() {
     try {
       const newReserves = new Map<number, bigint>();
-      const defaultTokenIds = [1, 2, 3];
+      const catalogTokenIds = externalTokens
+        .map(t => t.tokenId)
+        .filter((id): id is number => typeof id === 'number' && id > 0);
+      const defaultTokenIds = catalogTokenIds.length > 0 ? catalogTokenIds : [1, 2, 3];
       for (const tokenId of defaultTokenIds) {
         newReserves.set(tokenId, 0n);
       }
@@ -327,6 +360,13 @@
           if (!Number.isNaN(numericId)) {
             newReserves.set(numericId, amount);
           }
+        }
+      }
+      if (pendingReserveFaucet) {
+        console.log(`[EntityPanel] fetchOnchainReserves: replica=${replica?.state?.entityId?.slice(-4) || 'none'}`);
+        console.log(`[EntityPanel]   reserves Map size: ${reserves?.size ?? 'null'}`);
+        for (const [tid, amt] of reserves?.entries?.() ?? []) {
+          console.log(`[EntityPanel]   token ${tid}: ${amt}`);
         }
       }
       onchainReserves = newReserves;
@@ -353,7 +393,7 @@
     try {
       const response = await fetch(`${API_BASE}/api/tokens`);
       if (!response.ok) return [];
-      const data = await response.json();
+      const data = await readJsonResponse(response);
       const tokens = Array.isArray(data?.tokens) ? data.tokens : [];
       if (tokens.length === 0) return [];
       return tokens.map((t: any) => ({
@@ -491,7 +531,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               userAddress: ownerAddress,
-              amount: '0.02',
+              amount: '0.1',
             }),
           });
         } catch (err) {
@@ -576,6 +616,38 @@
     }
   }
 
+  async function openAccountWithFullId(targetEntityId: string) {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    const signerId = tab.signerId;
+    const trimmed = targetEntityId.trim();
+    if (!entityId || !signerId) return;
+    if (!trimmed.startsWith('0x') || trimmed.length !== 66) {
+      toasts.error('Full entity ID required (0x + 64 hex chars)');
+      return;
+    }
+    if (!activeIsLive) {
+      toasts.error('Open account requires LIVE mode');
+      return;
+    }
+    try {
+      const env = activeEnv;
+      if (!env) throw new Error('Environment not ready');
+      await processWithDelay(env as any, [{
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'openAccount' as const,
+          data: { targetEntityId: trimmed },
+        }],
+      }]);
+      openAccountEntityId = '';
+      toasts.success('Account request sent');
+    } catch (err) {
+      console.error('[EntityPanel] Open account failed:', err);
+      toasts.error(`Open account failed: ${(err as Error).message}`);
+    }
+  }
+
   // Faucet external tokens (ERC20 to signer EOA)
   async function faucetExternalTokens(tokenSymbol: string = 'USDC') {
     const signerId = tab.signerId;
@@ -583,24 +655,26 @@
 
     faucetFunding = true;
     try {
-      // Faucet A: ERC20 to wallet (ALWAYS use prod API, no BrowserVM fake)
-      const response = await fetch(`${API_BASE}/api/faucet/erc20`, {
+      const amount = tokenSymbol === 'ETH' ? '0.1' : '100';
+      const isEth = tokenSymbol === 'ETH';
+      const endpoint = isEth ? `${API_BASE}/api/faucet/gas` : `${API_BASE}/api/faucet/erc20`;
+      const payload = isEth
+        ? { userAddress: signerId, amount }
+        : { userAddress: signerId, tokenSymbol, amount };
+      // Faucet A: ERC20 to wallet (or native ETH gas faucet)
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userAddress: signerId,
-          tokenSymbol, // Use the clicked token!
-          amount: '100'
-        })
+        body: JSON.stringify(payload),
       });
 
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error || 'Faucet failed');
+      const result = await readJsonResponse(response);
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || `Faucet failed (${response.status})`);
       }
 
       console.log('[EntityPanel] External faucet success:', result);
-      toasts.success(`Received 100 ${tokenSymbol} in wallet!`);
+      toasts.success(`Received ${amount} ${tokenSymbol} in wallet!`);
 
       // Refresh external tokens
       setTimeout(() => fetchExternalTokens(), 1000);
@@ -781,6 +855,11 @@
     activeTab = 'accounts';
   }
 
+  function openOnchainDeposit(tokenId: number) {
+    onchainPrefill = { tokenId, id: Date.now() };
+    activeTab = 'onj';
+  }
+
   function goToLive() {
     // Jump to live frame
     timeOperations.goToLive();
@@ -809,7 +888,6 @@
     { id: 'chat', icon: MessageCircle, label: 'Chat' },
     { id: 'contacts', icon: BookUser, label: 'Contacts' },
     { id: 'receive', icon: ArrowDownLeft, label: 'Receive' },
-    { id: 'hubs', icon: Radio, label: 'Hubs' },
     { id: 'create', icon: PlusCircle, label: 'Create' },
     { id: 'settings', icon: SettingsIcon, label: 'Settings' },
   ];
@@ -862,7 +940,7 @@
           Back to Entity
         </button>
         <div class="focused-title">
-          Account with #{activeXlnFunctions?.getEntityShortId(selectedAccountId)}
+          Account with {selectedAccountId}
         </div>
         <AccountPanel
           account={selectedAccount}
@@ -884,7 +962,7 @@
             </div>
           {/if}
           <div class="hero-identity">
-            <span class="hero-name">Entity #{activeXlnFunctions?.getEntityShortId?.(tab.entityId) || '?'}</span>
+            <span class="hero-name">Entity {replica?.state?.entityId || tab.entityId}</span>
             <button class="hero-address" on:click={copyAddress} title="Copy address">
               <span>{formatAddress(replica?.state?.entityId || tab.entityId)}</span>
               {#if addressCopied}
@@ -932,6 +1010,7 @@
           <button
             class="tab"
             class:active={activeTab === t.id}
+            data-testid={`tab-${t.id}`}
             on:click={() => activeTab = t.id}
           >
             <svelte:component this={t.icon} size={15} />
@@ -996,10 +1075,20 @@
                     <span class="value-text">{formatCompact(getExternalValue(token))}</span>
                   </div>
                   <div class="col-actions">
-                    <button class="btn-table-action faucet" on:click={() => faucetExternalTokens(token.symbol)} disabled={faucetFunding}>
+                    <button
+                      class="btn-table-action faucet"
+                      on:click={() => faucetExternalTokens(token.symbol)}
+                      disabled={faucetFunding}
+                      title="Faucet"
+                    >
                       {faucetFunding ? '...' : 'Faucet'}
                     </button>
-                    <button class="btn-table-action deposit" on:click={() => depositToReserve(token)} disabled={depositingToken === token.symbol || token.balance === 0n}>
+                    <button
+                      class="btn-table-action deposit"
+                      on:click={() => depositToReserve(token)}
+                      disabled={depositingToken === token.symbol || token.balance === 0n || token.symbol === 'ETH'}
+                      title={token.symbol === 'ETH' ? 'ETH deposit not supported (use WETH)' : 'Deposit to Reserve'}
+                    >
                       {depositingToken === token.symbol ? '...' : 'Deposit to Reserve'}
                     </button>
                   </div>
@@ -1023,7 +1112,7 @@
               </button>
             </div>
           </div>
-          <p class="muted wallet-label">Entity: {(replica?.state?.entityId || tab.entityId)?.slice(0, 10)}...{(replica?.state?.entityId || tab.entityId)?.slice(-6)}</p>
+          <p class="muted wallet-label">Entity: {replica?.state?.entityId || tab.entityId}</p>
 
           {#if reservesLoading}
             <div class="loading-row">
@@ -1041,9 +1130,9 @@
             <!-- Table Rows -->
             <div class="token-table">
               {#each Array.from(onchainReserves.entries()) as [tokenId, amount]}
-                {@const info = getTokenInfo(Number(tokenId))}
+                {@const info = resolveReserveTokenMeta(Number(tokenId))}
                 {@const value = getAssetValue(Number(tokenId), amount)}
-                <div class="token-table-row" class:has-balance={amount > 0n}>
+                <div class="token-table-row" class:has-balance={amount > 0n} data-testid={`reserve-row-${info.symbol}`}>
                   <div class="col-token">
                     <span class="token-icon-small" class:usdc={info.symbol === 'USDC'} class:weth={info.symbol === 'WETH' || info.symbol === 'ETH'} class:usdt={info.symbol === 'USDT'}>
                       {info.symbol.slice(0, 1)}
@@ -1051,7 +1140,7 @@
                     <span class="token-name">{info.symbol}</span>
                   </div>
                   <div class="col-balance">
-                    <span class="balance-text" class:zero={amount === 0n}>
+                    <span class="balance-text" class:zero={amount === 0n} data-testid={`reserve-balance-${info.symbol}`}>
                       {formatAmount(amount, info.decimals)}
                     </span>
                   </div>
@@ -1059,16 +1148,21 @@
                     <span class="value-text">{formatCompact(value)}</span>
                   </div>
                   <div class="col-actions">
-                    <button class="btn-table-action faucet" on:click={() => faucetReserves(Number(tokenId))} disabled={faucetFunding || !!pendingReserveFaucet}>
+                    <button
+                      class="btn-table-action faucet"
+                      data-testid={`reserve-faucet-${info.symbol}`}
+                      on:click={() => faucetReserves(Number(tokenId), info.symbol)}
+                      disabled={faucetFunding || !!pendingReserveFaucet}
+                    >
                       {faucetFunding ? '...' : 'Faucet'}
                     </button>
                     <button
                       class="btn-table-action collateral"
-                      on:click={() => reserveToCollateral(Number(tokenId))}
+                      on:click={() => openOnchainDeposit(Number(tokenId))}
                       disabled={collateralFundingToken === info.symbol}
-                      title={!selectedAccountId ? 'Select an account to deposit collateral' : 'Deposit reserve to collateral'}
+                      title="Deposit reserve to account"
                     >
-                      {collateralFundingToken === info.symbol ? '...' : 'To Collateral'}
+                      {collateralFundingToken === info.symbol ? '...' : 'Deposit to Account'}
                     </button>
                   </div>
                 </div>
@@ -1090,7 +1184,14 @@
               <button class="btn-live" on:click={goToLive}>Go to LIVE</button>
             </div>
           {:else}
-            <SettlementPanel entityId={replica.state?.entityId || tab.entityId} {contacts} />
+            {#if !replica?.state?.accounts || replica.state.accounts.size === 0}
+              <div class="live-required" style="margin-bottom: 12px;">
+                <AlertTriangle size={20} />
+                <p>No accounts yet. Open one in Accounts (hubs or private).</p>
+                <button class="btn-live" on:click={() => activeTab = 'accounts'}>Open Accounts</button>
+              </div>
+            {/if}
+            <SettlementPanel entityId={replica.state?.entityId || tab.entityId} {contacts} prefill={onchainPrefill} />
           {/if}
 
         {:else if activeTab === 'accounts'}
@@ -1098,6 +1199,20 @@
             {faucetFunding ? 'Funding...' : '💧 Get Test Funds (Offchain)'}
           </button>
           <AccountList {replica} on:select={handleAccountSelect} />
+          <div class="account-open-sections">
+            <div class="open-section">
+              <h4 class="section-head">Open with Public Hub</h4>
+              <HubDiscoveryPanel entityId={replica?.state?.entityId || tab.entityId} />
+            </div>
+            <div class="open-section">
+              <h4 class="section-head">Open Private Account</h4>
+              <div class="add-contact">
+                <input type="text" placeholder="Full Entity ID (0x...)" bind:value={openAccountEntityId} />
+                <button class="btn-add" on:click={() => openAccountWithFullId(openAccountEntityId)}>Open</button>
+              </div>
+              <div class="muted" style="margin-top: 6px;">Only full entity IDs are accepted.</div>
+            </div>
+          </div>
 
         {:else if activeTab === 'activity'}
           {#if replica.state?.lockBook && replica.state.lockBook.size > 0}
@@ -1130,7 +1245,7 @@
               <div class="contact-row">
                 <div class="c-info">
                   <span class="c-name">{contact.name}</span>
-                  <span class="c-id">{contact.entityId.slice(0, 16)}...</span>
+                  <span class="c-id">{contact.entityId}</span>
                 </div>
                 <button class="c-delete" on:click={() => deleteContact(idx)}>x</button>
               </div>
@@ -1140,15 +1255,12 @@
           <h4 class="section-head">Add Contact</h4>
           <div class="add-contact">
             <input type="text" placeholder="Name" bind:value={newContactName} />
-            <input type="text" placeholder="Entity ID (0x... or #123)" bind:value={newContactId} />
+            <input type="text" placeholder="Full Entity ID (0x...)" bind:value={newContactId} />
             <button class="btn-add" on:click={saveContact}>Add</button>
           </div>
 
         {:else if activeTab === 'receive'}
           <QRPanel entityId={replica?.state?.entityId || tab.entityId} />
-
-        {:else if activeTab === 'hubs'}
-          <HubDiscoveryPanel entityId={replica?.state?.entityId || tab.entityId} />
 
         {:else if activeTab === 'create'}
           <FormationPanel />
@@ -2380,5 +2492,19 @@
   .btn-table-action:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .account-open-sections {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 12px;
+  }
+
+  .open-section {
+    padding: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
   }
 </style>

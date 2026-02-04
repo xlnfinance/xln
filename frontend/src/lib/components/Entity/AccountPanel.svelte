@@ -300,7 +300,7 @@
     </button>
     <div class="account-title">
       <span class="entity-pair">
-        Entity #{activeXlnFunctions!.getEntityShortId(entityId)} ⟷ Entity #{activeXlnFunctions!.getEntityShortId(counterpartyId)}
+        Entity {entityId} ⟷ Entity {counterpartyId}
       </span>
       <div class="consensus-status">
         <span class="frame-badge">Frame #{account.currentFrame.height}</span>
@@ -352,11 +352,11 @@
               </div>
               <div class="canonical-item">
                 <span class="canonical-key">leftCreditLimit:</span>
-                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.leftCreditLimit)} (Entity #{activeXlnFunctions!.getEntityShortId(isLeftEntity ? entityId : counterpartyId)})</span>
+                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.leftCreditLimit)} (Entity {isLeftEntity ? entityId : counterpartyId})</span>
               </div>
               <div class="canonical-item">
                 <span class="canonical-key">rightCreditLimit:</span>
-                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.rightCreditLimit)} (Entity #{activeXlnFunctions!.getEntityShortId(isLeftEntity ? counterpartyId : entityId)})</span>
+                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.rightCreditLimit)} (Entity {isLeftEntity ? counterpartyId : entityId})</span>
               </div>
             </div>
             <!-- ASCII Visualization -->
@@ -376,7 +376,7 @@
 
     <!-- Personal View (Perspective-based) -->
     <div class="section">
-      <h3>👤 My View (Entity #{activeXlnFunctions!.getEntityShortId(entityId)} perspective)</h3>
+      <h3>👤 My View (Entity {entityId} perspective)</h3>
       {#each tokenDetails as td (td.tokenId)}
         <div class="token-detail-card">
           <div class="token-header">

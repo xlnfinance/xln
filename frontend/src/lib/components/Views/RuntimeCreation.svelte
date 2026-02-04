@@ -1361,7 +1361,7 @@
           <!-- Entity view (Entity = Wallet) -->
           <div class="entity-created-message">
             <h3>✅ Entity Created!</h3>
-            <p>Entity ID: {entityId?.slice(0, 20)}...</p>
+            <p>Entity ID: {entityId}</p>
             <p>Signer: {currentSignerAddress?.slice(0, 20)}...</p>
             <p class="next-step">Close this panel to access your entity wallet.</p>
           </div>
