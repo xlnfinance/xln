@@ -842,6 +842,11 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     const block = await globalJAdapter.provider.getBlockNumber();
     console.log(`[XLN] Anvil connected (block: ${block})`);
 
+    // Ensure jurisdictions.json reflects current RPC + addresses (even if using fromReplica)
+    if (globalJAdapter.addresses?.depository && globalJAdapter.addresses?.entityProvider) {
+      await updateJurisdictionsJson(globalJAdapter.addresses, anvilRpc);
+    }
+
     const hasAddresses = !!globalJAdapter.addresses?.depository && !!globalJAdapter.addresses?.entityProvider;
 
     // Deploy if addresses missing (fromReplica invalid or fresh chain)
