@@ -93,11 +93,12 @@ const resolveJurisdictionConfig = (jurisdictions: any): JurisdictionConfig => {
   return first as JurisdictionConfig;
 };
 
-const resolveRpcUrl = (rpc: string): string => {
+const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
   if (!rpc) throw new Error('Missing RPC URL in jurisdictions.json');
   if (rpc.startsWith('http')) return rpc;
   if (typeof window !== 'undefined') {
-    return new URL(rpc, window.location.origin).toString();
+    const origin = baseOrigin ?? window.location.origin;
+    return new URL(rpc, origin).toString();
   }
   return rpc;
 };
@@ -264,7 +265,7 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
     const jurisdictions = await jurisdictionsResp.json();
     const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
     console.log('[VaultStore.createRuntime] Loaded contracts:', arrakisConfig.contracts);
-    const rpcUrl = resolveRpcUrl(arrakisConfig.rpc);
+    const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, 'https://xln.finance');
 
     // Import testnet J-machine (shared anvil on xln.finance)
     console.log('[VaultStore.createRuntime] Importing testnet anvil...');
@@ -281,6 +282,9 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
       }],
       entityInputs: []
     });
+    if (xln.startJEventWatcher) {
+      await xln.startJEventWatcher(newEnv);
+    }
     console.log('[VaultStore.createRuntime] ✅ Testnet imported');
 
     // === MVP: Create entity ===
@@ -661,7 +665,7 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         const jurisdictionsResp = await fetch('https://xln.finance/jurisdictions.json');
         const jurisdictions = await jurisdictionsResp.json();
         const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
-        const rpcUrl = resolveRpcUrl(arrakisConfig.rpc);
+        const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, 'https://xln.finance');
 
         console.log('[VaultStore.initialize] Importing testnet anvil...');
         await xln.applyRuntimeInput(newEnv, {
@@ -677,6 +681,9 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
           }],
           entityInputs: []
         });
+        if (xln.startJEventWatcher) {
+          await xln.startJEventWatcher(newEnv);
+        }
         console.log('[VaultStore.initialize] ✅ Testnet imported');
 
         // Re-import entity if it exists in runtime

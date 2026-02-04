@@ -585,23 +585,45 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
     return;
   }
 
-  // External RPC mode (future - not yet supported)
+  // External RPC mode (use imported J-machines first, fallback to static config)
   try {
-    const arrakis = await getJurisdictionByAddress('arrakis');
-    if (!arrakis) {
-      console.warn('⚠️ Arrakis jurisdiction not found, skipping j-watcher');
-      return;
+    let rpcUrl: string | undefined;
+    let entityProviderAddress: string | undefined;
+    let depositoryAddress: string | undefined;
+
+    // Prefer J-machines imported into this env (VaultStore uses importJ)
+    if (env.jReplicas) {
+      for (const replica of env.jReplicas.values()) {
+        const candidateRpc = replica.rpcs?.[0];
+        if (candidateRpc && replica.entityProviderAddress && replica.depositoryAddress) {
+          rpcUrl = candidateRpc;
+          entityProviderAddress = replica.entityProviderAddress;
+          depositoryAddress = replica.depositoryAddress;
+          break;
+        }
+      }
     }
 
-    jWatcher = await setupJEventWatcher(
-      env,
-      arrakis.address,
-      arrakis.entityProviderAddress,
-      arrakis.depositoryAddress
-    );
+    // Fallback to static jurisdictions (legacy)
+    if (!rpcUrl || !entityProviderAddress || !depositoryAddress) {
+      const arrakis = await getJurisdictionByAddress('arrakis');
+      if (!arrakis) {
+        console.warn('⚠️ Arrakis jurisdiction not found, skipping j-watcher');
+        return;
+      }
+      rpcUrl = arrakis.address;
+      entityProviderAddress = arrakis.entityProviderAddress;
+      depositoryAddress = arrakis.depositoryAddress;
+    }
+
+    if (isBrowser && rpcUrl.startsWith('/')) {
+      rpcUrl = `${window.location.origin}${rpcUrl}`;
+    }
+
+    jWatcher = await setupJEventWatcher(env, rpcUrl, entityProviderAddress, depositoryAddress);
 
     console.log('✅ J-Event Watcher started (external RPC)');
-    console.log(`🔭 Monitoring: ${arrakis.address}`);
+    console.log(`🔭 Monitoring: ${rpcUrl}`);
 
     setInterval(async () => {
       if (env.runtimeInput.entityInputs.length > 0) {
