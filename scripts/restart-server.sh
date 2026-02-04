@@ -20,6 +20,7 @@ sleep 2
 echo "[2/4] Setting environment..."
 export USE_ANVIL=true
 export ANVIL_RPC=http://localhost:8545
+export PUBLIC_RPC=${PUBLIC_RPC:-https://xln.finance/rpc}
 
 # Check anvil
 echo "[3/4] Checking anvil..."
