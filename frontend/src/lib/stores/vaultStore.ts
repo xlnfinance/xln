@@ -58,6 +58,9 @@ export const allRuntimes = derived(runtimesState, ($state) => {
 export const activeVault = activeRuntime;
 export const allVaults = allRuntimes;
 
+let initializePromise: Promise<void> | null = null;
+let initialized = false;
+
 // HD derivation helper
 function deriveAddress(seed: string, index: number): string {
   const mnemonic = Mnemonic.fromPhrase(seed);
@@ -116,11 +119,23 @@ async function fundSignerWalletViaFaucet(address: string): Promise<void> {
         amount: '100'
       })
     });
-    const result = await response.json();
-    if (result.success) {
+
+    const raw = await response.text();
+    let result: any = null;
+    if (raw) {
+      try { result = JSON.parse(raw); } catch { /* ignore */ }
+    }
+
+    if (!response.ok) {
+      const errorMsg = result?.error || `Faucet failed (${response.status})`;
+      console.warn('[VaultStore] Faucet failed:', errorMsg);
+      return;
+    }
+
+    if (result?.success) {
       console.log('[VaultStore] ✅ Funded wallet via faucet:', result.txHash);
     } else {
-      console.warn('[VaultStore] Faucet failed:', result.error);
+      console.warn('[VaultStore] Faucet failed:', result?.error || 'Unknown faucet error');
     }
   } catch (err) {
     console.warn('[VaultStore] Failed to call faucet:', err);
@@ -633,6 +648,10 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
 
   // Initialize
   async initialize() {
+    if (initialized) return;
+    if (initializePromise) return initializePromise;
+
+    initializePromise = (async () => {
     this.loadFromStorage();
     const current = get(runtimesState);
     const runtime = current.activeRuntimeId ? current.runtimes[current.activeRuntimeId] || null : null;
@@ -754,6 +773,14 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
     }
 
     this.syncRuntime(runtime);
+      initialized = true;
+    })();
+
+    try {
+      await initializePromise;
+    } finally {
+      initializePromise = null;
+    }
   },
 
   // Clear all runtimes

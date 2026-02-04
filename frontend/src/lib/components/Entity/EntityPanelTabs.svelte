@@ -212,9 +212,13 @@
         })
       });
 
-      const result = await response.json();
-      if (!result.success) {
-        throw new Error(result.error || 'Faucet failed');
+      const raw = await response.text();
+      let result: any = null;
+      if (raw) {
+        try { result = JSON.parse(raw); } catch { /* ignore */ }
+      }
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || `Faucet failed (${response.status})`);
       }
 
       console.log('[EntityPanel] Reserve faucet request queued:', result);

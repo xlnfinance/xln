@@ -551,6 +551,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     // Acquire mutex to prevent nonce collisions
     await faucetLock.acquire();
     try {
+      const requestId = (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+      const logPrefix = `FAUCET/ERC20 ${requestId}`;
       if (!globalJAdapter) {
         faucetLock.release();
         return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
@@ -562,6 +564,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
       const body = await req.json();
       const { userAddress, tokenSymbol = 'USDC', amount = '100' } = body;
+      console.log(`[${logPrefix}] Request: to=${userAddress} token=${tokenSymbol} amount=${amount}`);
 
       if (!userAddress || !ethers.isAddress(userAddress)) {
         faucetLock.release();
@@ -577,12 +580,14 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         const amountWei = ethers.parseUnits(amount, 18);
         await (browserVM as any).fundSignerWallet(userAddress, amountWei);
         faucetLock.release();
+        console.log(`[${logPrefix}] BrowserVM funded ${userAddress} amount=${amount}`);
         return new Response(JSON.stringify({
           success: true,
           type: 'erc20',
           amount,
           tokenSymbol,
           userAddress,
+          requestId,
         }), { headers });
       }
 
@@ -593,6 +598,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         return new Response(JSON.stringify({ error: `Token ${tokenSymbol} not found` }), { status: 404, headers });
       }
       const amountWei = ethers.parseUnits(amount, tokenInfo.decimals ?? 18);
+      console.log(`[${logPrefix}] Token resolved: ${tokenInfo.symbol} @ ${tokenInfo.address}`);
 
       const hub = await getHubWallet(env!);
       if (!hub) {
@@ -601,6 +607,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }
 
       const hubWallet = hub.wallet;
+      console.log(`[${logPrefix}] Hub wallet: ${await hubWallet.getAddress()}`);
 
       // Transfer ERC20 from hub to user (with explicit nonce for safety)
       const ERC20_ABI = ['function transfer(address to, uint256 amount) returns (bool)'];
@@ -613,6 +620,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const tx = await erc20.transfer(userAddress, amountWei, { nonce });
       faucetNonce = nonce + 1;
       await tx.wait();
+      console.log(`[${logPrefix}] ERC20 transfer tx=${tx.hash}`);
 
       // Also send ETH for gas (0.01 ETH) so user can approve/deposit
       const ethAmount = ethers.parseEther('0.01');
@@ -624,6 +632,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       });
       faucetNonce = ethNonce + 1;
       await ethTx.wait();
+      console.log(`[${logPrefix}] ETH topup tx=${ethTx.hash}`);
 
       faucetLock.release();
       return new Response(JSON.stringify({
@@ -635,6 +644,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         txHash: tx.hash,
         ethTxHash: ethTx.hash,
         ethAmount: '0.01',
+        requestId,
       }), { headers });
     } catch (error: any) {
       faucetLock.release();
@@ -647,6 +657,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   if (pathname === '/api/faucet/gas' && req.method === 'POST') {
     await faucetLock.acquire();
     try {
+      const requestId = (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`);
+      const logPrefix = `FAUCET/GAS ${requestId}`;
       if (!globalJAdapter) {
         faucetLock.release();
         return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
@@ -658,6 +670,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
       const body = await req.json();
       const { userAddress, amount = '0.02' } = body;
+      console.log(`[${logPrefix}] Request: to=${userAddress} amount=${amount}`);
 
       if (!userAddress || !ethers.isAddress(userAddress)) {
         faucetLock.release();
@@ -685,6 +698,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       });
       faucetNonce = nonce + 1;
       await tx.wait();
+      console.log(`[${logPrefix}] ETH topup tx=${tx.hash}`);
 
       faucetLock.release();
       return new Response(JSON.stringify({
@@ -693,6 +707,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         amount,
         userAddress,
         txHash: tx.hash,
+        requestId,
       }), { headers });
     } catch (error: any) {
       faucetLock.release();
