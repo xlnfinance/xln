@@ -61,13 +61,8 @@ export const error = writable<string | null>(null);
 
 export function resolveRelayUrls(): string[] {
   if (typeof window === 'undefined') return ['wss://xln.finance/relay'];
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.hostname;
   const envRelay = (import.meta as any)?.env?.VITE_RELAY_URL as string | undefined;
   if (envRelay) return [envRelay];
-  if (host === 'localhost' || host === '127.0.0.1') {
-    return [`${wsProtocol}//${host}:9000`];
-  }
   return ['wss://xln.finance/relay'];
 }
 
