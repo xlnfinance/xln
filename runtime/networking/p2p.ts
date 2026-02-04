@@ -25,7 +25,7 @@
 import type { Env, EntityInput } from '../types';
 import type { Profile } from './gossip';
 import { RuntimeWsClient } from './ws-client';
-import { buildEntityProfile } from './gossip-helper';
+import { buildEntityProfile, mergeProfileWithExisting } from './gossip-helper';
 import { extractEntityId } from '../ids';
 import { getCachedSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
 import { signProfileSync, verifyProfileSignature } from './profile-signing';
@@ -42,6 +42,7 @@ export type P2PConfig = {
   advertiseEntityIds?: string[];
   isHub?: boolean;
   profileName?: string;
+  gossipPollMs?: number;
 };
 
 type RuntimeP2POptions = {
@@ -53,6 +54,7 @@ type RuntimeP2POptions = {
   advertiseEntityIds?: string[];
   isHub?: boolean;
   profileName?: string;
+  gossipPollMs?: number;
   onEntityInput: (from: string, input: EntityInput) => void;
   onGossipProfiles: (from: string, profiles: Profile[]) => void;
 };
@@ -96,6 +98,7 @@ export class RuntimeP2P {
   private advertiseEntityIds: string[] | null;
   private isHub: boolean;
   private profileName: string | undefined;
+  private gossipPollMs: number;
   private onEntityInput: (from: string, input: EntityInput) => void;
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
   private clients: RuntimeWsClient[] = [];
@@ -112,6 +115,7 @@ export class RuntimeP2P {
     this.advertiseEntityIds = options.advertiseEntityIds || null;
     this.isHub = options.isHub ?? false;
     this.profileName = options.profileName;
+    this.gossipPollMs = options.gossipPollMs ?? GOSSIP_POLL_MS;
     this.onEntityInput = options.onEntityInput;
     this.onGossipProfiles = options.onGossipProfiles;
     // Derive X25519 encryption keypair from seed (mandatory, no fallback)
@@ -143,6 +147,14 @@ export class RuntimeP2P {
     }
     if (config.profileName !== undefined) {
       this.profileName = config.profileName;
+    }
+    if (config.gossipPollMs !== undefined) {
+      this.gossipPollMs = config.gossipPollMs;
+      if (this.gossipPollMs <= 0) {
+        this.stopPolling();
+      } else if (!this.pollInterval) {
+        this.startPolling();
+      }
     }
     if (config.relayUrls) {
       const nextUrls = unique(config.relayUrls);
@@ -181,7 +193,9 @@ export class RuntimeP2P {
         },
         onOpen: () => {
           this.flushPending();
-          this.requestSeedGossip();
+          if (this.gossipPollMs > 0) {
+            this.requestSeedGossip();
+          }
           this.announceLocalProfiles();
         },
         onEntityInput: async (from, input) => {
@@ -241,12 +255,16 @@ export class RuntimeP2P {
       console.log(`[P2P] startPolling: Already polling, skipping`);
       return;
     }
-    console.log(`[P2P] startPolling: Starting polling every ${GOSSIP_POLL_MS}ms`);
+    if (this.gossipPollMs <= 0) {
+      console.log('[P2P] startPolling: Gossip polling disabled (manual refresh only)');
+      return;
+    }
+    console.log(`[P2P] startPolling: Starting polling every ${this.gossipPollMs}ms`);
     // Request immediately, then periodically
     setTimeout(() => this.requestSeedGossip(), 100);
     this.pollInterval = setInterval(() => {
       this.requestSeedGossip();
-    }, GOSSIP_POLL_MS);
+    }, this.gossipPollMs);
   }
 
   private stopPolling() {
@@ -402,13 +420,15 @@ export class RuntimeP2P {
       const monotonicTimestamp = Math.max(lastTimestamp + 1, this.env.timestamp);
       console.log(`🕐 MONOTONIC: entity=${entityId.slice(-4)} lastTs=${lastTimestamp} envTs=${this.env.timestamp} → ${monotonicTimestamp}`);
 
-      const profile = buildEntityProfile(replica.state, this.profileName, monotonicTimestamp);
+      const existingName = existingProfile?.metadata?.name;
+      const profile = buildEntityProfile(replica.state, this.profileName ?? existingName, monotonicTimestamp);
       profile.runtimeId = this.runtimeId;
       if (this.isHub) {
         profile.capabilities = Array.from(new Set([...(profile.capabilities || []), 'hub', 'relay']));
         profile.metadata = { ...(profile.metadata || {}), isHub: true };
         if (this.relayUrls.length > 0) {
           profile.endpoints = this.relayUrls;
+          profile.relays = this.relayUrls;
         }
       }
       if (this.profileName) {
@@ -431,9 +451,12 @@ export class RuntimeP2P {
         encryptionPubKey: this.getEncryptionPubKeyHex(),
       };
 
+      // Preserve existing hub metadata + custom fields
+      const merged = mergeProfileWithExisting(profile, existingProfile);
+
       // Sign profile using same mechanism as accountFrames (Hanko-based)
       // Uses sync version here; async signProfile() available for full Hanko with ABI encoding
-      let signedProfile = profile;
+      let signedProfile = merged;
       if (firstValidator && this.env.runtimeSeed) {
         try {
           signedProfile = signProfileSync({ runtimeSeed: this.env.runtimeSeed }, profile, firstValidator);

@@ -59,6 +59,18 @@ export const error = writable<string | null>(null);
 
 // xlnFunctions is now defined at the end of the file
 
+export function resolveRelayUrls(): string[] {
+  if (typeof window === 'undefined') return ['wss://xln.finance/relay'];
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.hostname;
+  const envRelay = (import.meta as any)?.env?.VITE_RELAY_URL as string | undefined;
+  if (envRelay) return [envRelay];
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return [`${wsProtocol}//${host}:9000`];
+  }
+  return ['wss://xln.finance/relay'];
+}
+
 // Derived stores for convenience
 export const replicas = derived(
   xlnEnvironment,
@@ -184,13 +196,9 @@ export async function initializeXLN(): Promise<Env> {
     // Start P2P overlay (idempotent, waits for runtimeId if needed)
     if (xln.startP2P) {
       // Use same host/port as page (unified server serves relay at /relay)
-      const isLocalDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
-      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const relayUrls = isLocalDev
-        ? [`${wsProtocol}//${window.location.host}/relay`]  // Same port as page
-        : ['wss://xln.finance/relay'];
+      const relayUrls = resolveRelayUrls();
       console.log(`[P2P] Connecting to relay: ${relayUrls[0]}`);
-      xln.startP2P(env, { relayUrls });
+      xln.startP2P(env, { relayUrls, gossipPollMs: 0 });
     }
 
     // Expose to window for e2e testing

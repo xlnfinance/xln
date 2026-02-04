@@ -7,7 +7,7 @@ import { db } from '../runtime';
 import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput } from '../types';
 import { DEBUG, HEAVY_LOGS, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
-import { buildEntityProfile } from '../networking/gossip-helper';
+import { buildEntityProfile, mergeProfileWithExisting } from '../networking/gossip-helper';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import { handleAccountInput, type MempoolOp, type SwapOfferEvent, type SwapCancelEvent } from './handlers/account';
 import { handleJEvent } from './j-events';
@@ -379,14 +379,15 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         // Preserve existing name if any (don't overwrite with undefined)
         const existingName = existingProfile?.metadata?.name;
         const profile = buildEntityProfile(newState, existingName, monotonicTimestamp);
+        const mergedProfile = mergeProfileWithExisting(profile, existingProfile);
 
-        console.log(`🏗️ Built profile for ${newState.entityId.slice(-4)}: accounts=${profile.accounts?.length || 0} name=${profile.metadata?.name || 'none'}`);
+        console.log(`🏗️ Built profile for ${newState.entityId.slice(-4)}: accounts=${mergedProfile.accounts?.length || 0} name=${mergedProfile.metadata?.name || 'none'}`);
 
         if (env.runtimeId) {
-          profile.runtimeId = env.runtimeId;
+          mergedProfile.runtimeId = env.runtimeId;
         }
-        console.log(`📡 Announcing profile ${newState.entityId.slice(-4)} ts=${monotonicTimestamp} accounts=${profile.accounts?.length || 0}`);
-        env.gossip.announce(profile);
+        console.log(`📡 Announcing profile ${newState.entityId.slice(-4)} ts=${monotonicTimestamp} accounts=${mergedProfile.accounts?.length || 0}`);
+        env.gossip.announce(mergedProfile);
       }
 
       return { newState, outputs };

@@ -98,12 +98,47 @@ const resolveJurisdictionConfig = (jurisdictions: any): JurisdictionConfig => {
 
 const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
   if (!rpc) throw new Error('Missing RPC URL in jurisdictions.json');
+  if (typeof window !== 'undefined' && rpc.startsWith('http')) {
+    try {
+      const parsed = new URL(rpc);
+      const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1' || parsed.hostname === '0.0.0.0';
+      if (isLocal) {
+        const origin = baseOrigin ?? window.location.origin;
+        return new URL('/rpc', origin).toString();
+      }
+    } catch {
+      // fall through
+    }
+  }
   if (rpc.startsWith('http')) return rpc;
   if (typeof window !== 'undefined') {
     const origin = baseOrigin ?? window.location.origin;
     return new URL(rpc, origin).toString();
   }
   return rpc;
+};
+
+const fetchJurisdictions = async (baseOrigin?: string): Promise<any> => {
+  const primaryOrigin = baseOrigin ?? (typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance');
+  const candidates = [
+    `${primaryOrigin}/jurisdictions.json`,
+    ...(primaryOrigin !== 'https://xln.finance' ? ['https://xln.finance/jurisdictions.json'] : []),
+  ];
+
+  let lastError: unknown = null;
+  for (const url of candidates) {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        lastError = new Error(`HTTP ${resp.status}`);
+        continue;
+      }
+      return await resp.json();
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError ?? new Error('Failed to fetch jurisdictions.json');
 };
 
 async function fundSignerWalletViaFaucet(address: string): Promise<void> {
@@ -161,7 +196,7 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
 
     // Sync runtime seed and start P2P with correct relay URLs
     if (runtime?.seed && runtime?.id) {
-      import('$lib/stores/xlnStore').then(async ({ getXLN }) => {
+      import('$lib/stores/xlnStore').then(async ({ getXLN, resolveRelayUrls }) => {
         const { get } = await import('svelte/store');
         const xln = await getXLN();
         if (xln.setRuntimeSeed) {
@@ -180,13 +215,9 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
               env.runtimeSeed = runtime.seed;
               console.log(`[VaultStore] P2P: Set env.runtimeId = ${env.runtimeId.slice(0, 12)}...`);
             }
-            const isLocalDev = typeof window !== 'undefined' && window.location.hostname === 'localhost';
-            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const relayUrls = isLocalDev
-              ? [`${wsProtocol}//${window.location.host}/relay`]
-              : ['wss://xln.finance/relay'];
+            const relayUrls = resolveRelayUrls();
             console.log(`[VaultStore] P2P: Starting on env with ${env.eReplicas?.size || 0} entities, runtimeId=${env.runtimeId?.slice(0,12)}, relay=${relayUrls[0]}`);
-            xln.startP2P(env, { relayUrls });
+            xln.startP2P(env, { relayUrls, gossipPollMs: 0 });
           } else {
             console.warn('[VaultStore] P2P: No env found for runtime', runtime.id);
           }
@@ -278,8 +309,7 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
     // Fetch pre-deployed contract addresses from prod
     console.log('[VaultStore.createRuntime] Fetching jurisdictions.json...');
     const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
-    const jurisdictionsResp = await fetch(`${baseOrigin}/jurisdictions.json`);
-    const jurisdictions = await jurisdictionsResp.json();
+    const jurisdictions = await fetchJurisdictions(baseOrigin);
     const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
     console.log('[VaultStore.createRuntime] Loaded contracts:', arrakisConfig.contracts);
     const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
@@ -683,10 +713,10 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         // CRITICAL: Import testnet J-machine (shared anvil on xln.finance)
         // This must happen on page reload when restoring runtime from localStorage
         console.log('[VaultStore.initialize] Fetching jurisdictions.json...');
-        const jurisdictionsResp = await fetch('https://xln.finance/jurisdictions.json');
-        const jurisdictions = await jurisdictionsResp.json();
+        const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
+        const jurisdictions = await fetchJurisdictions(baseOrigin);
         const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
-        const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, 'https://xln.finance');
+        const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
 
         console.log('[VaultStore.initialize] Importing testnet anvil...');
         await xln.applyRuntimeInput(newEnv, {

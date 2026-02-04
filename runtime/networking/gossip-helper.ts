@@ -110,6 +110,38 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
 }
 
 /**
+ * Merge an updated profile with any existing gossip profile metadata.
+ * Preserves hub flags + custom fields while keeping computed fields current.
+ */
+export function mergeProfileWithExisting(profile: Profile, existing?: Profile | null): Profile {
+  if (!existing) return profile;
+
+  const existingMetadata = existing.metadata || {};
+  const mergedMetadata = { ...existingMetadata, ...(profile.metadata || {}) };
+
+  // Preserve hub flag if previously set
+  if (existingMetadata.isHub === true) {
+    mergedMetadata.isHub = true;
+  }
+
+  const mergedProfile: Profile = {
+    ...profile,
+    metadata: mergedMetadata,
+    capabilities: Array.from(new Set([...(existing.capabilities || []), ...(profile.capabilities || [])])),
+  };
+
+  // Preserve endpoints/relays if missing on new profile
+  if ((mergedProfile.endpoints?.length ?? 0) === 0 && (existing.endpoints?.length ?? 0) > 0) {
+    mergedProfile.endpoints = existing.endpoints;
+  }
+  if ((mergedProfile.relays?.length ?? 0) === 0 && (existing.relays?.length ?? 0) > 0) {
+    mergedProfile.relays = existing.relays;
+  }
+
+  return mergedProfile;
+}
+
+/**
  * Create a RuntimeTx to broadcast profile update
  */
 export function createProfileBroadcastTx(entityState: EntityState, timestamp: number): any {

@@ -56,7 +56,7 @@ import {
 import { createGossipLayer } from './networking/gossip';
 import { attachEventEmitters } from './env-events';
 import { deriveSignerAddressSync, deriveSignerKeySync, getSignerPrivateKey, getSignerPublicKey, registerSignerKey, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
-import { buildEntityProfile } from './networking/gossip-helper';
+import { buildEntityProfile, mergeProfileWithExisting } from './networking/gossip-helper';
 import { RuntimeP2P, type P2PConfig } from './networking/p2p';
 import {
   parseReplicaKey,
@@ -486,6 +486,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     advertiseEntityIds: config.advertiseEntityIds,
     isHub: config.isHub,
     profileName: config.profileName,
+    gossipPollMs: config.gossipPollMs,
     onEntityInput: (from, input) => {
       const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
       console.log(`📨 P2P-RECEIVE: from=${from.slice(0,10)} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
@@ -529,6 +530,12 @@ export const stopP2P = (): void => {
 
 export const getP2P = (): RuntimeP2P | null => p2pOverlay;
 
+export const refreshGossip = (): void => {
+  if (p2pOverlay) {
+    p2pOverlay.refreshGossip();
+  }
+};
+
 /**
  * Initialize module-level env if not already set
  * Call this early in frontend initialization before prepopulate
@@ -561,6 +568,11 @@ export const processJBlockEvents = async (): Promise<void> => {
     return;
   }
 
+  if (processing) {
+    console.warn('⏸️ processJBlockEvents: Runtime busy, leaving j-events queued');
+    return;
+  }
+
   const pending = env.runtimeInput.entityInputs.length;
   if (pending === 0) return;
 
@@ -568,10 +580,12 @@ export const processJBlockEvents = async (): Promise<void> => {
   const toProcess = [...env.runtimeInput.entityInputs];
   env.runtimeInput.entityInputs = [];
 
-  await applyRuntimeInput(env, {
-    runtimeTxs: [],
-    entityInputs: toProcess,
-  });
+  try {
+    await process(env, toProcess);
+  } catch (error) {
+    env.runtimeInput.entityInputs = [...toProcess, ...env.runtimeInput.entityInputs];
+    throw error;
+  }
   console.log(`   ✓ ${toProcess.length} j-events processed`);
 };
 
@@ -626,10 +640,15 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
     console.log(`🔭 Monitoring: ${rpcUrl}`);
 
     setInterval(async () => {
-      if (env.runtimeInput.entityInputs.length > 0) {
-        const pendingInputs = [...env.runtimeInput.entityInputs];
-        env.runtimeInput.entityInputs = [];
-        await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: pendingInputs });
+      if (processing) return;
+      if (env.runtimeInput.entityInputs.length === 0) return;
+      const pendingInputs = [...env.runtimeInput.entityInputs];
+      env.runtimeInput.entityInputs = [];
+      try {
+        await process(env, pendingInputs);
+      } catch (error) {
+        env.runtimeInput.entityInputs = [...pendingInputs, ...env.runtimeInput.entityInputs];
+        throw error;
       }
     }, 100);
 
@@ -980,12 +999,15 @@ const applyRuntimeInput = async (
         if (env.gossip && createdReplica) {
           const entityPublicKey = getSignerPublicKey(env, runtimeTx.entityId);
           const publicKeyHex = entityPublicKey ? `0x${Buffer.from(entityPublicKey).toString('hex')}` : undefined;
-          const profile = buildEntityProfile(createdReplica.state, undefined, env.timestamp);
-          profile.runtimeId = env.runtimeId;
+          const existingProfile = env.gossip?.getProfiles?.().find((p: any) => p.entityId === runtimeTx.entityId);
+          const existingName = existingProfile?.metadata?.name;
+          const profile = buildEntityProfile(createdReplica.state, existingName, env.timestamp);
+          const mergedProfile = mergeProfileWithExisting(profile, existingProfile);
+          mergedProfile.runtimeId = env.runtimeId;
           if (publicKeyHex) {
-            profile.metadata = { ...(profile.metadata || {}), entityPublicKey: publicKeyHex };
+            mergedProfile.metadata = { ...(mergedProfile.metadata || {}), entityPublicKey: publicKeyHex };
           }
-          env.gossip.announce(profile);
+          env.gossip.announce(mergedProfile);
         }
 
         if (typeof actualJBlock !== 'number') {
@@ -2125,9 +2147,13 @@ export const process = async (
     }
     getBrowserVMInstance(env)?.setBlockTimestamp?.(env.timestamp);
 
-    if (allInputs.length > 0) {
+    const hasQueuedRuntimeTxs = (env.runtimeInput?.runtimeTxs?.length ?? 0) > 0;
+    if (allInputs.length > 0 || hasQueuedRuntimeTxs) {
       if (!quietRuntimeLogs) {
         console.log(`📥 TICK: Processing ${allInputs.length} inputs for [${allInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
+        if (hasQueuedRuntimeTxs) {
+          console.log(`📥 TICK: Processing ${env.runtimeInput.runtimeTxs.length} queued runtimeTxs`);
+        }
       }
 
       const result = await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: allInputs });
