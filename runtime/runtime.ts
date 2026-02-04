@@ -881,9 +881,9 @@ const applyRuntimeInput = async (
 
               env.eReplicas.set(replicaKey, replica);
 
-              // Fund with test tokens (BrowserVM only)
-              if (isBrowserVM && browserVM?.debugFundReserves) {
-                await browserVM.debugFundReserves(selfEntityId, 1, 1000n * 10n**18n);
+              // Fund with test tokens (BrowserVM only, opt-in)
+              if (runtimeTx.data?.fundSelfEntity && isBrowserVM && browserVM?.debugFundReserves) {
+                await browserVM.debugFundReserves(selfEntityId, 1, 1000n * 10n ** 18n);
                 console.log(`[Runtime] Funded self-entity with 1000 tokens`);
               }
 
