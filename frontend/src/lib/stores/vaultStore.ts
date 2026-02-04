@@ -106,7 +106,8 @@ const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
 async function fundSignerWalletViaFaucet(address: string): Promise<void> {
   try {
     // Call testnet faucet API (Faucet A - ERC20 to wallet)
-    const response = await fetch('https://xln.finance/api/faucet/erc20', {
+    const apiBase = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
+    const response = await fetch(`${apiBase}/api/faucet/erc20`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -261,11 +262,12 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
 
     // Fetch pre-deployed contract addresses from prod
     console.log('[VaultStore.createRuntime] Fetching jurisdictions.json...');
-    const jurisdictionsResp = await fetch('https://xln.finance/jurisdictions.json');
+    const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
+    const jurisdictionsResp = await fetch(`${baseOrigin}/jurisdictions.json`);
     const jurisdictions = await jurisdictionsResp.json();
     const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
     console.log('[VaultStore.createRuntime] Loaded contracts:', arrakisConfig.contracts);
-    const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, 'https://xln.finance');
+    const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
 
     // Import testnet J-machine (shared anvil on xln.finance)
     console.log('[VaultStore.createRuntime] Importing testnet anvil...');

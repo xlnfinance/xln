@@ -912,14 +912,10 @@ export const getJurisdictionByAddress = async (address: string): Promise<Jurisdi
 
 /**
  * Get BrowserVM instance (for demos that need direct BrowserVM access)
- * Prefers env.browserVM (isolated), falls back to global singleton (legacy)
+ * Uses env.browserVM only (no legacy global fallback)
  */
 export const getBrowserVMInstance = (env?: any): BrowserVMInstance | null => {
-  if (env?.browserVM) {
-    return env.browserVM;
-  }
-  // BACKWARD COMPAT: Fall back to global singleton
-  return BROWSER_VM_INSTANCE;
+  return env?.browserVM || null;
 };
 
 // Settlement diff structure matching contract

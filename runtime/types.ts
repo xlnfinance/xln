@@ -1684,6 +1684,10 @@ export interface JReplica {
   // JAdapter instance (for balance queries, transactions, etc)
   // Works with both browservm and rpc modes
   jadapter?: JAdapter;
+  // RPC endpoints for this jurisdiction (preferred for j-watcher + batch broadcast)
+  rpcs?: string[];
+  // Chain id (optional, prefer jadapter.chainId when available)
+  chainId?: number;
 
   // Visual position (for 3D rendering)
   position: { x: number; y: number; z: number };
