@@ -237,7 +237,7 @@
           console.error(`[View] 💡 To add "${scenarioId}", implement it in View.svelte autoplay section`);
         }
 
-        if (scenarioId === 'ahb') {
+        if (scenarioId === 'ahb' && env) {
           try {
             // CRITICAL: Clear old state BEFORE running (Architect panel pattern)
             console.log('[View] BEFORE clear: eReplicas =', env.eReplicas?.size || 0);
