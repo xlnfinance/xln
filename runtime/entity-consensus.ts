@@ -1209,15 +1209,14 @@ export const applyEntityFrame = async (
         }
       }
     } else if (entityTx.type === 'openAccount' && entityTx.data) {
-      // Account opened - may need initial frame
+      // openAccount processed - account may have mempool items queued
       const targetEntity = entityTx.data.targetEntityId;
-      // Account keyed by counterparty ID
       const accountMachine = currentEntityState.accounts.get(targetEntity);
       if (accountMachine) {
         const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
         if (isLeft && accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
           proposableAccounts.add(targetEntity);
-          console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (new account opened)`);
+          console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (account opened)`);
         }
       }
     } else if (entityTx.type === 'extendCredit' && entityTx.data) {

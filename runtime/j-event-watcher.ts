@@ -65,11 +65,12 @@ export interface BrowserVMEvent {
 /**
  * BrowserVM interface for event subscription.
  * onAny receives BATCHED events (all events from one tx/block together).
+ * All methods optional to match BrowserVMInstance from xln-api.ts.
  */
 export interface BrowserVMEventSource {
-  onAny(callback: (events: BrowserVMEvent[]) => void): () => void;
-  getBlockNumber(): bigint;
-  getBlockHash(): string;
+  onAny?: (callback: (events: BrowserVMEvent[]) => void) => () => void;
+  getBlockNumber?: () => bigint;
+  getBlockHash?: () => string;
 }
 
 interface WatcherConfig {
@@ -218,7 +219,7 @@ export class JEventWatcher {
     this.env = env; // Store for BrowserVM event handler
 
     // BrowserVM mode - subscribe to batched events
-    if (this.browserVM) {
+    if (this.browserVM && this.browserVM.onAny) {
       console.log('🔭 J-WATCHER: Starting BrowserVM subscription mode...');
       this.browserVMUnsubscribe = this.browserVM.onAny((events) => {
         // Events arrive as batch (all events from one tx/block)
@@ -274,8 +275,8 @@ export class JEventWatcher {
 
     // All events in batch share same block info (they're from same tx)
     const firstEvent = canonicalEvents[0]!;  // Safe: length check above guarantees element exists
-    const blockNumber = firstEvent.blockNumber ?? Number(this.browserVM!.getBlockNumber());
-    const blockHash = firstEvent.blockHash ?? this.browserVM!.getBlockHash();
+    const blockNumber = firstEvent.blockNumber ?? Number(this.browserVM?.getBlockNumber?.() ?? 0n);
+    const blockHash = firstEvent.blockHash ?? this.browserVM?.getBlockHash?.() ?? '0x0';
 
     console.log(`📡 [1/3] J-EVENT-BATCH: ${canonicalEvents.length} events from block ${blockNumber}`);
 
@@ -327,7 +328,7 @@ export class JEventWatcher {
       };
 
       console.log(`   📮 QUEUE → ${entityId.slice(-4)} (${jEvents.length} events from block ${blockNumber})`);
-      this.env.runtimeInput.entityInputs.push({
+      enqueueRuntimeEntityInput(this.env, {
         entityId,
         signerId,
         entityTxs: [entityTx],
@@ -768,13 +769,14 @@ export class JEventWatcher {
     };
 
     console.log(`🚨 J-WATCHER-CREATING-EVENT: ${signerId} creating j-event batch block=${blockNumber} for entity ${entityId.slice(0,10)}... (${jEvents.length} events)`);
-    env.runtimeInput.entityInputs.push({
+    enqueueRuntimeEntityInput(env, {
       entityId: entityId,
       signerId: signerId,
       entityTxs: [entityTx],
     });
 
-    console.log(`🔭✅ J-WATCHER-QUEUED: ${signerId} → Entity ${entityId.slice(0,10)}... (${jEvents.length} events) block=${blockNumber} - Queue length now: ${env.runtimeInput.entityInputs.length}`);
+    const queueLength = (env.runtimeMempool ?? env.runtimeInput)?.entityInputs?.length ?? 0;
+    console.log(`🔭✅ J-WATCHER-QUEUED: ${signerId} → Entity ${entityId.slice(0,10)}... (${jEvents.length} events) block=${blockNumber} - Queue length now: ${queueLength}`);
   }
 
   /**
@@ -820,6 +822,14 @@ export class JEventWatcher {
     return this.env?.timestamp ?? 0;
   }
 }
+
+const enqueueRuntimeEntityInput = (env: Env, input: any): void => {
+  const mempool = env.runtimeMempool ?? env.runtimeInput;
+  if (!mempool.entityInputs) {
+    mempool.entityInputs = [];
+  }
+  mempool.entityInputs.push(input);
+};
 
 /**
  * Create and configure a J-Event Watcher instance

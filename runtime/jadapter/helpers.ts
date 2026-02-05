@@ -4,8 +4,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { Depository } from '../../jurisdictions/typechain-types/Depository';
-import type { EntityProvider } from '../../jurisdictions/typechain-types/EntityProvider';
+import type { Depository, EntityProvider } from '../../jurisdictions/typechain-types';
 import type { JEvent, JEventCallback } from './types';
 
 // Hardhat account #0 (publicly known test key)

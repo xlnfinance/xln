@@ -316,7 +316,7 @@
       browserVmTokens = [];
       return;
     }
-    const env = xln.getEnv();
+    const env = get(isolatedEnv);
     if (!env) {
       browserVmTokens = [];
       return;
@@ -448,7 +448,7 @@
       return;
     }
 
-    const env = xln.getEnv();
+    const env = get(isolatedEnv);
     if (!env) {
       externalBalances = [];
       externalBalancesLoading = false;
@@ -511,7 +511,7 @@
       return;
     }
 
-    const env = xln.getEnv();
+    const env = get(isolatedEnv);
     if (!env) {
       externalEthBalances = [];
       externalEthBalancesLoading = false;
@@ -574,7 +574,7 @@
       return;
     }
 
-    const env = xln.getEnv();
+    const env = get(isolatedEnv);
     if (!env) {
       entityDebts = [];
       debtsLoading = false;

@@ -227,8 +227,7 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         console.log('[VaultStore] P2P: Runtime seed synced, P2P connected');
       }).catch(err => console.warn('[VaultStore] Failed to sync P2P seed:', err));
     }
-
-    void fundRuntimeSignersInBrowserVM(runtime);
+    // Auto-faucet removed - user can request funds manually via XLNSend
     },
 
   // Load from localStorage
@@ -544,8 +543,7 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
     }).catch(err => {
       console.warn('[VaultStore] Failed to register key/create entity:', err);
     });
-
-    void fundSignerWalletViaFaucet(address);
+    // Auto-faucet removed - user can request funds manually via XLNSend
 
     return newSigner;
   },

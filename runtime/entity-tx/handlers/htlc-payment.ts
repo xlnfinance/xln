@@ -163,12 +163,23 @@ export async function handleHtlcPayment(
   let envelope;
   try {
     // Gather public keys from route entities (for encryption)
+    // Check local replicas first, then gossip profiles for remote entities
     const entityPubKeys = new Map<string, string>();
     for (const entityId of route) {
-      // Find entity replica in env
+      // 1. Check local replica
       const replica = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
       if (replica && replica[1].state.cryptoPublicKey) {
         entityPubKeys.set(entityId, replica[1].state.cryptoPublicKey);
+        continue;
+      }
+      // 2. Check gossip profiles for remote entities (P2P scenario)
+      if (env.gossip) {
+        const profiles = typeof env.gossip.getProfiles === 'function' ? env.gossip.getProfiles() : [];
+        const profile = profiles.find((p: any) => p.entityId === entityId);
+        if (profile?.metadata?.cryptoPublicKey) {
+          entityPubKeys.set(entityId, profile.metadata.cryptoPublicKey);
+          console.log(`🔑 Found crypto key for ${formatEntityId(entityId)} from gossip profile`);
+        }
       }
     }
 

@@ -339,18 +339,34 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       if (isLeft) {
-        // Token 1 = USDC
-        const usdcTokenId = 1;
-        // Add transactions to mempool - will be batched into frame #1 on next tick
-        // NOTE: Only add_delta is queued. Credit limits are 0 by default - must be explicitly set
+        // Token for delta (default: 1 = USDC)
+        const tokenId = entityTx.data.tokenId ?? 1;
+
+        // STEP 1: Add delta - creates the token delta for this account
         localAccount.mempool.push({
           type: 'add_delta',
-          data: { tokenId: usdcTokenId }
+          data: { tokenId }
         });
 
-        console.log(`📝 Queued add_delta to mempool (total: ${localAccount.mempool.length})`);
-        console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms) via AUTO-PROPOSE`);
-        console.log(`   Transactions: [add_delta] - credit limits start at 0, must be explicitly set`);
+        // STEP 2: Extend credit (optional) - must come AFTER add_delta in same frame
+        // Order matters: add_delta creates delta, then set_credit_limit modifies it
+        const creditAmount = entityTx.data.creditAmount;
+        if (creditAmount && creditAmount > 0n) {
+          // Determine canonical side for credit limit
+          // leftCreditLimit = credit I extend to LEFT entity (counterparty if I'm right)
+          const counterpartyIsLeft = counterpartyId < entityState.entityId;
+          const side = counterpartyIsLeft ? 'left' : 'right';
+
+          localAccount.mempool.push({
+            type: 'set_credit_limit',
+            data: { tokenId, amount: creditAmount, side: side as 'left' | 'right' }
+          });
+          console.log(`📝 Queued [add_delta, set_credit_limit] to mempool (${side}=${creditAmount})`);
+        } else {
+          console.log(`📝 Queued [add_delta] to mempool (credit=0, must be set explicitly)`);
+        }
+
+        console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms)`);
       } else {
         console.log(`🧭 Right side: waiting for left's frame (mempool stays empty)`);
       }

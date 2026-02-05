@@ -28,7 +28,7 @@ import { ethers } from 'ethers';
 
 // Lazy-loaded runtime functions to avoid circular dependency (runtime.ts imports this file)
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
-let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
+let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>) | null = null;
 
 const getProcess = async () => {
   if (!_process) {
@@ -48,6 +48,30 @@ const getApplyRuntimeInput = async () => {
 
 const USDC_TOKEN_ID = 1;
 const DECIMALS = 18n;
+
+// BrowserVM with required methods for this scenario (all optional methods are used)
+type RequiredBrowserVM = {
+  getReserves: (entityId: string, tokenId: number) => Promise<bigint>;
+  externalTokenToReserve: (privKey: Uint8Array, entityId: string, tokenAddress: string, amount: bigint, opts?: any) => Promise<any[]>;
+  getBlockNumber: () => bigint;
+  getBlockHash: () => string;
+  getChainId: () => bigint;
+  getDepositoryAddress: () => string;
+  getEntityProviderAddress: () => string;
+  getEntityNonce: (entityId: string) => Promise<bigint>;
+  getAccountInfo: (entityId: string, counterpartyId: string) => Promise<{ cooperativeNonce: bigint; disputeHash: string; disputeTimeout: bigint }>;
+  onAny: (callback: (events: any[]) => void) => () => void;
+  getTokenRegistry: () => any[];
+  getTokenAddress: (symbol: string) => string | null;
+  fundSignerWallet: (address: string, amount?: bigint) => Promise<void>;
+  approveErc20: (privKey: Uint8Array, tokenAddress: string, spender: string, amount: bigint) => Promise<string>;
+  reserveToReserve?: (from: string, to: string, tokenId: number, amount: bigint) => Promise<any[]>;
+  debugFundReserves?: (entityId: string, tokenId: number, amount: bigint) => Promise<any[]>;
+  captureStateRoot?: () => Promise<Uint8Array>;
+  timeTravel?: (stateRoot: Uint8Array) => Promise<void>;
+  setDefaultDisputeDelay?: (delayBlocks: number) => Promise<void>;
+  processBatch?: (encodedBatch: string, entityProvider: string, hankoData: string, nonce: bigint) => Promise<any[]>;
+};
 const ONE_TOKEN = 10n ** DECIMALS;
 
 const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
@@ -151,7 +175,7 @@ async function processUntil(
  * Enable/disable via AHB_DEBUG=1 environment variable or pass enabled=true
  */
 function dumpSystemState(env: Env, label: string, enabled: boolean = true): void {
-  const debugEnabled = typeof process !== 'undefined' && process.env && process.env.AHB_DEBUG;
+  const debugEnabled = typeof process !== 'undefined' && process.env && process.env['AHB_DEBUG'];
   if (!enabled && !debugEnabled) return;
 
   // Build JSON-serializable state object
@@ -163,7 +187,7 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
   };
 
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    const entityId = replicaKey.split(':')[0];
+    const entityId = replicaKey.split(':')[0] ?? '';
     const entityName = getEntityName(entityId);
 
     const entityState: Record<string, any> = {
@@ -177,7 +201,7 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
     if (replica.state.reserves) {
       for (const [tokenId, amount] of replica.state.reserves.entries()) {
         const usd = Number(amount) / 1e18;
-        entityState.reserves[tokenId] = { raw: amount.toString(), usd: `$${usd.toLocaleString()}` };
+        entityState['reserves'][tokenId] = { raw: amount.toString(), usd: `$${usd.toLocaleString()}` };
       }
     }
 
@@ -200,7 +224,7 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
 
         for (const [tokenId, delta] of account.deltas.entries()) {
           const totalDelta = delta.ondelta + delta.offdelta;
-          accountState.deltas[tokenId] = {
+          accountState['deltas'][tokenId] = {
             collateral: { raw: delta.collateral.toString(), usd: `$${(Number(delta.collateral) / 1e18).toLocaleString()}` },
             ondelta: { raw: delta.ondelta.toString(), usd: `$${(Number(delta.ondelta) / 1e18).toLocaleString()}` },
             offdelta: { raw: delta.offdelta.toString(), usd: `$${(Number(delta.offdelta) / 1e18).toLocaleString()}` },
@@ -214,11 +238,11 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
           };
         }
 
-        entityState.accounts[counterpartyName] = accountState;
+        entityState['accounts'][counterpartyName] = accountState;
       }
     }
 
-    state.entities[entityName] = entityState;
+    state['entities'][entityName] = entityState;
   }
 
   console.log('\n' + '='.repeat(80));
@@ -385,7 +409,7 @@ export async function ahb(env: Env): Promise<void> {
     env.pendingNetworkOutputs = [];
     env.frameLogs = [];
     env.gossip = createGossipLayer();
-    env.activeJurisdiction = undefined;
+    (env as any).activeJurisdiction = undefined;
     if (env.scenarioMode) {
       env.timestamp = 1;
     }
@@ -400,10 +424,11 @@ export async function ahb(env: Env): Promise<void> {
     let browserVM = getBrowserVMInstance(env);
     if (!browserVM) {
       console.log('[AHB] No BrowserVM found (getBrowserVMInstance returned null) - creating one...');
-      browserVM = new BrowserVMProvider();
-      await browserVM.init();
+      const newVM = new BrowserVMProvider();
+      await newVM.init?.();
+      browserVM = newVM as any; // Type coercion for interface compatibility
       env.browserVM = browserVM; // Store in env for isolation
-      const depositoryAddress = browserVM.getDepositoryAddress();
+      const depositoryAddress = newVM.getDepositoryAddress?.() ?? '';
       // Register with runtime so other code can access it
       setBrowserVMJurisdiction(env, depositoryAddress, browserVM);
       console.log('[AHB] ✅ BrowserVM created, depository:', depositoryAddress);
@@ -413,11 +438,18 @@ export async function ahb(env: Env): Promise<void> {
 
     // CRITICAL: Reset BrowserVM to fresh state EVERY time AHB runs
     // This prevents reserve accumulation on re-runs (button clicks, HMR, etc.)
-    if (browserVM.reset) {
+    if (browserVM && typeof (browserVM as any).reset === 'function') {
       console.log('[AHB] Calling browserVM.reset()...');
-      await browserVM.reset();
+      await (browserVM as any).reset();
       console.log(`[AHB] ✅ BrowserVM reset complete`);
     }
+
+    // ASSERT: BrowserVM must exist at this point
+    if (!browserVM) {
+      throw new Error('[AHB] BrowserVM is required but not available');
+    }
+    // Cast to required type - all methods are assumed present after this point
+    const vm = browserVM as unknown as RequiredBrowserVM;
 
     const jurisdictions = await getAvailableJurisdictions();
     let arrakis = jurisdictions.find(j => j.name.toLowerCase() === 'arrakis');
@@ -428,13 +460,13 @@ export async function ahb(env: Env): Promise<void> {
       arrakis = {
         name: 'AHB Demo', // MUST match jReplica name for routing
         chainId: 31337,
-        entityProviderAddress: browserVM.getEntityProviderAddress(),
-        depositoryAddress: browserVM.getDepositoryAddress(),
-        rpc: 'browservm://'
+        address: 'browservm://', // BrowserVM doesn't use RPC
+        entityProviderAddress: (browserVM as any)?.getEntityProviderAddress?.() ?? '',
+        depositoryAddress: (browserVM as any)?.getDepositoryAddress?.() ?? '',
       };
     }
 
-    console.log(`📋 Jurisdiction: ${arrakis.name}`);
+    console.log(`📋 Jurisdiction: ${arrakis!.name}`);
 
     // ============================================================================
     // STEP 0a: Create Xlnomy (J-Machine) for visualization
@@ -454,8 +486,8 @@ export async function ahb(env: Env): Promise<void> {
       lastBlockTimestamp: env.timestamp,  // Use env.timestamp for determinism
       position: { x: 0, y: 600, z: 0 }, // Match EVM jMachine.position for consistent entity placement
       contracts: {
-        depository: arrakis.depositoryAddress,
-        entityProvider: arrakis.entityProviderAddress,
+        depository: arrakis!.depositoryAddress,
+        entityProvider: arrakis!.entityProviderAddress,
       },
     };
 
@@ -506,9 +538,9 @@ export async function ahb(env: Env): Promise<void> {
     const { encodeBoard, hashBoard } = await import('../entity-factory');
 
     for (let i = 0; i < 3; i++) {
-      const name = entityNames[i];
+      const name = entityNames[i]!;
       const signer = String(i + 1);
-      const position = AHB_POSITIONS[name];
+      const position = AHB_POSITIONS[name as keyof typeof AHB_POSITIONS];
 
       // Compute boardHash for lazy entity (entityId MUST equal boardHash)
       const config = {
@@ -516,7 +548,7 @@ export async function ahb(env: Env): Promise<void> {
         threshold: 1n,
         validators: [signer],
         shares: { [signer]: 1n },
-        jurisdiction: arrakis
+        jurisdiction: arrakis!
       };
       const encodedBoard = encodeBoard(config);
       const boardHash = hashBoard(encodedBoard);
@@ -596,13 +628,13 @@ export async function ahb(env: Env): Promise<void> {
     console.log('\n💳 Prefunding signer wallets (1M each token)...');
     for (const entity of entities) {
       const { wallet } = ensureSignerWallet(entity.signer);
-      await browserVM.fundSignerWallet(wallet.address, SIGNER_PREFUND);
+      await vm.fundSignerWallet(wallet.address, SIGNER_PREFUND);
       console.log(`✅ Prefunded ${entity.name} signer ${entity.signer} (${wallet.address.slice(0, 10)}...)`);
     }
 
     const hubWalletInfo = ensureSignerWallet(hub.signer);
     if (HUB_INITIAL_RESERVE > SIGNER_PREFUND) {
-      await browserVM.fundSignerWallet(hubWalletInfo.wallet.address, HUB_INITIAL_RESERVE);
+      await vm.fundSignerWallet(hubWalletInfo.wallet.address, HUB_INITIAL_RESERVE);
       console.log(`✅ Hub signer topped up to ${HUB_INITIAL_RESERVE / ONE_TOKEN} tokens`);
     }
 
@@ -644,17 +676,17 @@ export async function ahb(env: Env): Promise<void> {
     // This ensures fresh state on every page load/HMR
 
     // REAL deposit flow: ERC20 approve + externalTokenToReserve
-    usdcTokenAddress = browserVM.getTokenAddress('USDC');
+    usdcTokenAddress = vm.getTokenAddress('USDC');
     if (!usdcTokenAddress) {
       throw new Error('USDC token not found in BrowserVM registry');
     }
-    await browserVM.approveErc20(
+    await vm.approveErc20(
       hubWalletInfo.privateKey,
       usdcTokenAddress,
-      browserVM.getDepositoryAddress(),
+      vm.getDepositoryAddress(),
       HUB_INITIAL_RESERVE
     );
-    const mintEvents = await browserVM.externalTokenToReserve(
+    const mintEvents = await vm.externalTokenToReserve(
       hubWalletInfo.privateKey,
       hub.id,
       usdcTokenAddress,
@@ -795,8 +827,8 @@ export async function ahb(env: Env): Promise<void> {
     // No manual clearing needed!
 
     // Verify Hub funding reserves
-    const fundedAliceReserves = await browserVM.getReserves(alice.id, USDC_TOKEN_ID);
-    const fundedBobReserves = await browserVM.getReserves(bob.id, USDC_TOKEN_ID);
+    const fundedAliceReserves = await vm.getReserves(alice.id, USDC_TOKEN_ID);
+    const fundedBobReserves = await vm.getReserves(bob.id, USDC_TOKEN_ID);
     console.log(`[AHB] J-Block #1 executed - Fundings complete:`);
     console.log(`  Alice: ${Number(fundedAliceReserves) / 1e18} USDC`);
     console.log(`  Bob: ${Number(fundedBobReserves) / 1e18} USDC`);
@@ -869,9 +901,9 @@ export async function ahb(env: Env): Promise<void> {
     // NOTE: J-Machine block processing in process() automatically handles mempool clearing
 
     // Verify final reserves from BrowserVM
-    const finalHubReserves = await browserVM.getReserves(hub.id, USDC_TOKEN_ID);
-    const finalAliceReserves = await browserVM.getReserves(alice.id, USDC_TOKEN_ID);
-    const finalBobReserves = await browserVM.getReserves(bob.id, USDC_TOKEN_ID);
+    const finalHubReserves = await vm.getReserves(hub.id, USDC_TOKEN_ID);
+    const finalAliceReserves = await vm.getReserves(alice.id, USDC_TOKEN_ID);
+    const finalBobReserves = await vm.getReserves(bob.id, USDC_TOKEN_ID);
 
     console.log(`[AHB] J-Block #2 executed - Final reserves:`);
     console.log(`  Hub: ${Number(finalHubReserves) / 1e18} USDC`);
@@ -1070,7 +1102,7 @@ export async function ahb(env: Env): Promise<void> {
     console.log('\n💰 FRAME 9: J-Machine processes R2C batch from mempool');
 
     // DEBUG: Check Alice's on-chain reserves + EntityProvider registration
-    const aliceOnChainReserves = await browserVM.getReserves(alice.id, USDC_TOKEN_ID);
+    const aliceOnChainReserves = await vm.getReserves(alice.id, USDC_TOKEN_ID);
     console.log(`[Frame 9 DEBUG] Alice on-chain reserves: ${aliceOnChainReserves / 10n**18n}M`);
 
     console.log(`[Frame 9 DEBUG] Alice entityId=${alice.id.slice(0, 10)}..., Hub entityId=${hub.id.slice(0, 10)}...`);
@@ -2248,18 +2280,18 @@ export async function ahb(env: Env): Promise<void> {
   assert(bobDeltaTarget.ondelta === disputeOndeltaTarget, 'PHASE 7: ondelta mismatch');
   assert(bobDeltaTarget.offdelta === disputeOffdeltaTarget, 'PHASE 7: offdelta mismatch');
 
-  const hubReserveBeforeDrain = await browserVM.getReserves(hub.id, USDC_TOKEN_ID);
+  const hubReserveBeforeDrain = await vm.getReserves(hub.id, USDC_TOKEN_ID);
   if (hubReserveBeforeDrain > 0n) {
     console.log(`🧹 Draining Hub reserves to force debt: ${hubReserveBeforeDrain}`);
-    await browserVM.reserveToReserve(hub.id, alice.id, USDC_TOKEN_ID, hubReserveBeforeDrain);
+    await vm.reserveToReserve(hub.id, alice.id, USDC_TOKEN_ID, hubReserveBeforeDrain);
     await processJEvents(env);
     await process(env);
-    const hubReserveAfterDrain = await browserVM.getReserves(hub.id, USDC_TOKEN_ID);
+    const hubReserveAfterDrain = await vm.getReserves(hub.id, USDC_TOKEN_ID);
     assert(hubReserveAfterDrain === 0n, `PHASE 7: Hub reserve not fully drained (${hubReserveAfterDrain})`);
   }
 
-  if (browserVM.setDefaultDisputeDelay) {
-    await browserVM.setDefaultDisputeDelay(3);
+  if (vm.setDefaultDisputeDelay) {
+    await vm.setDefaultDisputeDelay(3);
   }
 
   const [, bobRepDispute] = findReplica(env, bob.id);
@@ -2357,7 +2389,7 @@ export async function ahb(env: Env): Promise<void> {
   const { createEmptyBatch } = await import('../j-batch');
 
   while (true) {
-    const currentBlock = browserVM.getBlockNumber();
+    const currentBlock = vm.getBlockNumber();
     console.log(`   Current block: ${currentBlock}, target: ${targetBlock}`);
 
     if (currentBlock >= targetBlock) {
@@ -2369,10 +2401,10 @@ export async function ahb(env: Env): Promise<void> {
     const emptyBatch = createEmptyBatch();
     const { encodeJBatch, computeBatchHankoHash } = await import('../j-batch');
     const encodedBatch = encodeJBatch(emptyBatch);
-    const chainId = browserVM.getChainId();
-    const depositoryAddress = browserVM.getDepositoryAddress();
-    const entityProviderAddress = browserVM.getEntityProviderAddress();
-    const currentNonce = await browserVM.getEntityNonce(bob.id);
+    const chainId = vm.getChainId();
+    const depositoryAddress = vm.getDepositoryAddress();
+    const entityProviderAddress = vm.getEntityProviderAddress();
+    const currentNonce = await vm.getEntityNonce(bob.id);
     const nextNonce = currentNonce + 1n;
     const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
     const { signHashesAsSingleEntity } = await import('../hanko-signing');
@@ -2381,13 +2413,13 @@ export async function ahb(env: Env): Promise<void> {
     if (!hankoData) {
       throw new Error('Failed to build empty batch hanko');
     }
-    await browserVM.processBatch(encodedBatch, entityProviderAddress, hankoData, nextNonce);
+    await vm.processBatch(encodedBatch, entityProviderAddress, hankoData, nextNonce);
     await process(env);  // Let runtime process any events
   }
 
   // 6) Bob finalizes dispute (unilateral after timeout)
   console.log('\n⚖️ STEP 6: Bob finalizes dispute (unilateral)...');
-  const bobReserveBeforeDispute = await browserVM.getReserves(bob.id, USDC_TOKEN_ID);
+  const bobReserveBeforeDispute = await vm.getReserves(bob.id, USDC_TOKEN_ID);
 
   await process(env, [{
     entityId: bob.id,
@@ -2422,7 +2454,7 @@ export async function ahb(env: Env): Promise<void> {
   // 7) Verify dispute cleared on-chain and results correct
   console.log('✅ STEP 7: Verify dispute finalized on-chain...');
   const zeroHash = '0x' + '0'.repeat(64);
-  const disputeFinalInfo = await browserVM.getAccountInfo(bob.id, hub.id);
+  const disputeFinalInfo = await vm.getAccountInfo(bob.id, hub.id);
   assert(disputeFinalInfo.disputeHash === zeroHash, 'PHASE 7: Dispute hash not cleared after finalize');
   assert(disputeFinalInfo.disputeTimeout === 0n, 'PHASE 7: Dispute timeout not cleared');
   console.log(`   Dispute cleared on-chain ✅`);
@@ -2435,7 +2467,7 @@ export async function ahb(env: Env): Promise<void> {
   assert(!hubAccountFinal?.activeDispute, 'PHASE 7: Hub activeDispute not cleared after finalize');
   console.log(`   Dispute cleared in runtime ✅`);
 
-  const bobReserveAfterDispute = await browserVM.getReserves(bob.id, USDC_TOKEN_ID);
+  const bobReserveAfterDispute = await vm.getReserves(bob.id, USDC_TOKEN_ID);
   // Bob gets full $100K collateral. The additional $50K owed (delta > collateral)
   // becomes debt because Hub has $0 reserves.
   const expectedBobReserve = bobReserveBeforeDispute + disputeCollateralTarget;
@@ -2522,7 +2554,7 @@ export async function ahb(env: Env): Promise<void> {
 
   // Starter tries to finalize before timeout (should fail)
   console.log('🧪 STEP 8a: Bob attempts early finalize (should fail)...');
-  const edgeInfoBeforeFail = await browserVM.getAccountInfo(bob.id, hub.id);
+  const edgeInfoBeforeFail = await vm.getAccountInfo(bob.id, hub.id);
   const jRepEarly = env.jReplicas?.get('AHB Demo');
   if (!jRepEarly) {
     throw new Error('PHASE 8: J-Machine not found for early finalize check');
@@ -2546,7 +2578,7 @@ export async function ahb(env: Env): Promise<void> {
 
   await processJEvents(env);
 
-  const edgeInfoAfterFail = await browserVM.getAccountInfo(bob.id, hub.id);
+  const edgeInfoAfterFail = await vm.getAccountInfo(bob.id, hub.id);
   assert(edgeInfoAfterFail.disputeHash !== zeroHash, 'PHASE 8: dispute cleared by early finalize (expected fail)');
   const [, bobEdgeAfterFail] = findReplica(env, bob.id);
   assert(bobEdgeAfterFail.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute cleared after early finalize');
@@ -2646,7 +2678,7 @@ export async function ahb(env: Env): Promise<void> {
 
   await processJEvents(env);
 
-  const edgeInfoAfterCounter = await browserVM.getAccountInfo(bob.id, hub.id);
+  const edgeInfoAfterCounter = await vm.getAccountInfo(bob.id, hub.id);
   assert(edgeInfoAfterCounter.disputeHash === zeroHash, 'PHASE 8: dispute not cleared after counter-dispute');
   const [, bobEdgeFinal] = findReplica(env, bob.id);
   assert(!bobEdgeFinal.state.accounts.get(hub.id)?.activeDispute, 'PHASE 8: activeDispute not cleared after counter-dispute');
@@ -2730,20 +2762,20 @@ export async function ahb(env: Env): Promise<void> {
   // Wait for timeout and finalize unilaterally
   const [, bobCoopTimeout] = findReplica(env, bob.id);
   const coopTimeoutBlock = bobCoopTimeout.state.accounts.get(hub.id)?.activeDispute?.disputeTimeout || 100n;
-  while (browserVM.getBlockNumber() < coopTimeoutBlock) {
+  while (vm.getBlockNumber() < coopTimeoutBlock) {
     const { encodeJBatch, computeBatchHankoHash } = await import('../j-batch');
     const { signHashesAsSingleEntity } = await import('../hanko-signing');
     const emptyBatch = createEmptyBatch();
     const encodedBatch = encodeJBatch(emptyBatch);
-    const chainId = browserVM.getChainId();
-    const depositoryAddress = browserVM.getDepositoryAddress();
-    const entityProviderAddress = browserVM.getEntityProviderAddress();
-    const currentNonce = await browserVM.getEntityNonce(bob.id);
+    const chainId = vm.getChainId();
+    const depositoryAddress = vm.getDepositoryAddress();
+    const entityProviderAddress = vm.getEntityProviderAddress();
+    const currentNonce = await vm.getEntityNonce(bob.id);
     const nextNonce = currentNonce + 1n;
     const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
     const hankos = await signHashesAsSingleEntity(env, bob.id, bob.signer, [batchHash]);
     if (hankos[0]) {
-      await browserVM.processBatch(encodedBatch, entityProviderAddress, hankos[0], nextNonce);
+      await vm.processBatch(encodedBatch, entityProviderAddress, hankos[0], nextNonce);
     }
     await process(env);
   }
@@ -2899,7 +2931,7 @@ export async function ahb(env: Env): Promise<void> {
     }
 
     const { wallet: carolWallet } = ensureSignerWallet(carol.signer);
-    await browserVM.fundSignerWallet(carolWallet.address, SIGNER_PREFUND);
+    await vm.fundSignerWallet(carolWallet.address, SIGNER_PREFUND);
     console.log(`✅ Prefunded ${carol.name} signer ${carol.signer} (${carolWallet.address.slice(0, 10)}...)`);
 
     snap(env, 'Carol Joins (Cooperative Close Demo)', {

@@ -709,7 +709,7 @@ async function applyFinalizedJEvent(
     if (account) {
       // Query on-chain for timeout
       const browserVM = (await import('../evm')).getBrowserVMInstance(env);
-      if (!browserVM) {
+      if (!browserVM || !browserVM.getAccountInfo) {
         console.warn(`⚠️ DisputeStarted: No browserVM to query timeout`);
         return { newState, mempoolOps };
       }

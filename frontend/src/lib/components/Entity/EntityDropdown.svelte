@@ -228,7 +228,7 @@
   $: canAddJurisdiction = allowAddJurisdiction && !!activeEnv;
 </script>
 
-<Dropdown bind:open={isOpen} minWidth={320} maxWidth={500}>
+<Dropdown bind:open={isOpen} minWidth={420} maxWidth={650}>
   <span slot="trigger" class="trigger-content">
     <span class="trigger-icon">🏛️</span>
     <span class="trigger-text">{displayText}</span>
@@ -403,6 +403,12 @@
     padding: 4px 0;
     max-height: 50vh;
     overflow-y: auto;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none; /* IE/Edge */
+  }
+
+  .entity-list::-webkit-scrollbar {
+    display: none; /* Chrome/Safari/Opera */
   }
 
   .jmachine-list {

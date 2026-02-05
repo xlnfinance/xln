@@ -1,5 +1,5 @@
 # XLN: Bilateral Ethereum + Bank-Grade Credit + Instant Settlement
-# ~242k tokens | Generated: 2026-02-03 23:30:43 | Git: 1175dcf
+# ~243k tokens | Generated: 2026-02-05 20:48:20 | Git: 06462d4
 
 **TL;DR**: Banks without bailouts. Lightning without the inbound capacity wall.
 
@@ -144,7 +144,7 @@ One account, many subcontracts. All execute bilaterally, chain sees nothing unle
 - "What happens if counterparty disappears?" → On-chain settlement with your collateral
 - "What's the worst case?" → Lose credit limit you extended, nothing more
 
-## Token Budget Guide (~242k tokens total)
+## Token Budget Guide (~243k tokens total)
 
 **Critical path (read first, ~30min):**
 - intro.md (3min) - High-signal overview
@@ -166,33 +166,33 @@ One account, many subcontracts. All execute bilaterally, chain sees nothing unle
 xln/
   jurisdictions/contracts/
     Types.sol                  198 lines - Shared types: Diff, BatchArgs, InsuranceReg
-    Depository.sol             1210 lines - enforceDebts() FIFO, collateral + credit (INVARIANT: L+R+C=0)
+    Depository.sol             1211 lines - enforceDebts() FIFO, collateral + credit (INVARIANT: L+R+C=0)
     EntityProvider.sol         1181 lines - Hanko sigs, Control/Dividend, governance
-    Account.sol                450 lines - A-machine on-chain: bilateral accounts, settlements
+    Account.sol                442 lines - A-machine on-chain: bilateral accounts, settlements
     DeltaTransformer.sol       191 lines - Delta transformations: HTLCs, swaps, limit orders
 
   runtime/
-    types.ts                     2041 lines - All TypeScript interfaces (START HERE)
+    types.ts                     2079 lines - All TypeScript interfaces (START HERE)
     ids.ts                       519 lines - Identity system: EntityId, SignerId, JId, ReplicaKey
-    runtime.ts                   2613 lines - Main coordinator, 100ms ticks, R->E->A routing
-    entity-consensus.ts          1638 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
-    account-consensus.ts         1489 lines - Bilateral consensus, left/right perspective
+    runtime.ts                   2596 lines - Main coordinator, 100ms ticks, R->E->A routing
+    entity-consensus.ts          1637 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
+    account-consensus.ts         1497 lines - Bilateral consensus, left/right perspective
     account-consensus-state.ts   168 lines - Bilateral state machine
     j-batch.ts                   971 lines - J-batch: E-machine accumulates → jBroadcast → J-machine
     account-utils.ts             228 lines - deriveDelta() RCPAN calculation
     serialization-utils.ts       116 lines - BigInt serialization
-    account-crypto.ts            432 lines - Signature verification
+    account-crypto.ts            434 lines - Signature verification
 
     entity-tx/
       index.ts                   7 lines - Entity transaction types
-      apply.ts                   978 lines - Entity tx dispatcher
+      apply.ts                   999 lines - Entity tx dispatcher
       validation.ts              37 lines - Transaction validation
       financial.ts               33 lines - Financial accounting
       proposals.ts               35 lines - Proposal logic
-      j-events.ts                842 lines - Jurisdiction events
+      j-events.ts                846 lines - Jurisdiction events
       handlers/account.ts              930 lines - Account operations
       handlers/deposit-collateral.ts   74 lines - R2C deposits
-      handlers/htlc-payment.ts         244 lines - HTLC routing
+      handlers/htlc-payment.ts         255 lines - HTLC routing
       handlers/create-settlement.ts    66 lines - Settlement creation
       handlers/mint-reserves.ts        53 lines - Reserve minting
 
@@ -202,12 +202,12 @@ xln/
       handlers/add-delta.ts      42 lines - Delta addition
 
     routing/
-      graph.ts                   117 lines - Network graph
+      graph.ts                   133 lines - Network graph
       pathfinding.ts             227 lines - Dijkstra routing
 
-    state-helpers.ts             744 lines - Pure state management
+    state-helpers.ts             748 lines - Pure state management
     snapshot-coder.ts            316 lines - Deterministic RLP serialization
-    evm.ts                       1030 lines - Blockchain integration
+    evm.ts                       1026 lines - Blockchain integration
 
   docs/
     intro.md                           53 lines - ⚡ 5-min overview (new reader onramp)
@@ -431,7 +431,7 @@ enum MessageType {
 }
 
 
-//jurisdictions/contracts/Depository.sol (1210 lines)
+//jurisdictions/contracts/Depository.sol (1211 lines)
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
@@ -461,6 +461,7 @@ interface IERC20 {
 interface IERC721 {
   function transferFrom(address from, address to, uint256 tokenId) external;
 }
+// IERC1155 already defined in @openzeppelin/contracts (imported via EntityProvider.sol)
 
 contract Depository is ReentrancyGuardLite {
 
@@ -2826,7 +2827,7 @@ contract EntityProvider is ERC1155 {
 
 }
 
-//jurisdictions/contracts/Account.sol (450 lines)
+//jurisdictions/contracts/Account.sol (442 lines)
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
@@ -2894,14 +2895,6 @@ library Account {
 
   function _accountKey(bytes32 e1, bytes32 e2) internal pure returns (bytes memory) {
     return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);
-  }
-
-  function packTokenReference(uint8 tokenType, address contractAddress, uint96 externalTokenId) external pure returns (bytes32) {
-    return keccak256(abi.encode(tokenType, contractAddress, externalTokenId));
-  }
-
-  function unpackTokenReference(bytes32) external pure returns (address, uint96, uint8) {
-    revert("!unpack");
   }
 
   function encodeDisputeHash(
@@ -3471,7 +3464,7 @@ contract DeltaTransformer is Console {
 }
 
 
-//runtime/types.ts (2041 lines)
+//runtime/types.ts (2079 lines)
 /**
  * XLN Type Definitions
  * All interfaces and type definitions used across the XLN system
@@ -3714,6 +3707,7 @@ export interface RuntimeInput {
   runtimeTxs: RuntimeTx[];
   entityInputs: EntityInput[];
   jInputs?: JInput[]; // J-layer inputs (queue to J-mempool)
+  queuedAt?: number; // When first queued into runtime mempool (ms)
 }
 
 /** J-layer input - queues JTx to jurisdiction mempool */
@@ -3994,7 +3988,11 @@ export type EntityTx =
     }
   | {
       type: 'openAccount';
-      data: { targetEntityId: string };
+      data: {
+        targetEntityId: string;
+        creditAmount?: bigint;  // Optional: extend credit in same frame as add_delta
+        tokenId?: number;       // Token for credit (default: 1 = USDC)
+      };
     }
   | {
       type: 'j_event_account_claim';
@@ -4409,6 +4407,7 @@ export interface AccountMachine {
   currentHeight: number; // Renamed from currentFrameId for S/E/A consistency
   pendingFrame?: AccountFrame;
   pendingSignatures: string[];
+  pendingAccountInput?: AccountInput; // Cached outbound frame input for resend/nudge
 
   // Rollback support for bilateral disagreements
   rollbackCount: number;
@@ -5077,7 +5076,34 @@ export interface Env {
   timestamp: number;
   runtimeSeed?: string; // BrainVault seed backing this runtime (plaintext, dev mode)
   runtimeId?: string; // Runtime identity (usually signer1 address)
-  runtimeInput: RuntimeInput; // Persistent storage for merged inputs
+  dbNamespace?: string; // DB namespace for per-runtime persistence (defaults to runtimeId)
+  // Runtime mempool (runtime-level queue; WAL-like)
+  // NOTE: runtimeInput is deprecated alias - both point to same object
+  runtimeMempool?: RuntimeInput;
+  runtimeInput: RuntimeInput; // Deprecated alias of runtimeMempool
+  runtimeConfig?: {
+    minFrameDelayMs?: number; // Minimum delay between runtime frames
+    loopIntervalMs?: number;  // Loop interval for runtime processing
+  };
+  runtimeState?: {
+    processing?: boolean;
+    loopActive?: boolean;
+    loopTimer?: any;
+    lastFrameAt?: number;
+    p2p?: any;
+    pendingP2PConfig?: any;
+    lastP2PConfig?: any;
+    jWatcher?: any;
+    jWatcherStarted?: boolean;
+    envChangeCallbacks?: Set<(env: Env) => void>;
+    db?: any;
+    dbOpenPromise?: Promise<boolean> | null;
+    logState?: {
+      nextId: number;
+      mirrorToConsole?: boolean;
+    };
+    cleanLogs?: string[];
+  };
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: any; // Gossip layer for network profiles
 
@@ -5158,6 +5184,10 @@ export interface JReplica {
   // JAdapter instance (for balance queries, transactions, etc)
   // Works with both browservm and rpc modes
   jadapter?: JAdapter;
+  // RPC endpoints for this jurisdiction (preferred for j-watcher + batch broadcast)
+  rpcs?: string[];
+  // Chain id (optional, prefer jadapter.chainId when available)
+  chainId?: number;
 
   // Visual position (for 3D rendering)
   position: { x: number; y: number; z: number };
@@ -5227,6 +5257,7 @@ export interface EnvSnapshot {
   timestamp: number;
   runtimeSeed?: string;
   runtimeId?: string;
+  dbNamespace?: string;
   eReplicas: Map<string, EntityReplica>;  // E-layer state
   jReplicas: JReplica[];                   // J-layer state (with stateRoot for time travel)
   browserVMState?: BrowserVMState;
@@ -6035,7 +6066,7 @@ export const safeExtractEntityId = (keyString: string): EntityId | null => {
 };
 
 
-//runtime/runtime.ts (2613 lines)
+//runtime/runtime.ts (2596 lines)
 // for regular use > bun run runtime/runtime.ts
 // for debugging > bun repl
 // await import('./debug.js');
@@ -6094,7 +6125,7 @@ import {
 import { createGossipLayer } from './networking/gossip';
 import { attachEventEmitters } from './env-events';
 import { deriveSignerAddressSync, deriveSignerKeySync, getSignerPrivateKey, getSignerPublicKey, registerSignerKey, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
-import { buildEntityProfile } from './networking/gossip-helper';
+import { buildEntityProfile, mergeProfileWithExisting } from './networking/gossip-helper';
 import { RuntimeP2P, type P2PConfig } from './networking/p2p';
 import {
   parseReplicaKey,
@@ -6170,7 +6201,7 @@ import {
   BigIntMath,
   FINANCIAL_CONSTANTS
 } from './financial-utils';
-import { captureSnapshot, cloneEntityReplica } from './state-helpers';
+import { captureSnapshot, cloneEntityReplica, resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, getEntityNumber, formatEntityId, HEAVY_LOGS } from './utils';
 import { safeStringify } from './serialization-utils';
 import { validateDelta, validateAccountDeltas, createDefaultDelta, isDelta, validateEntityInput, validateEntityOutput } from './validation-utils';
@@ -6225,69 +6256,6 @@ if (isBrowser && typeof globalThis.process === 'undefined') {
   } as any;
 }
 
-// --- Clean Log Capture (for debugging without file:line noise) ---
-const cleanLogs: string[] = [];
-const MAX_CLEAN_LOGS = 2000;
-
-// Wrap console to capture clean logs (browser only)
-if (isBrowser) {
-  const originalLog = console.log;
-  const originalWarn = console.warn;
-  const originalError = console.error;
-  const originalDebug = console.debug;
-
-  const formatArgs = (args: any[]): string => {
-    return args.map(a => {
-      if (typeof a === 'string') return a;
-      if (typeof a === 'bigint') return a.toString() + 'n';
-      try { return JSON.stringify(a); } catch { return String(a); }
-    }).join(' ');
-  };
-
-  const addCleanLog = (level: string, msg: string) => {
-    const ts = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
-    cleanLogs.push(`[${ts}] ${level}: ${msg}`);
-    if (cleanLogs.length > MAX_CLEAN_LOGS) cleanLogs.shift();
-  };
-
-  console.log = function(...args: any[]) {
-    originalLog.apply(console, args);
-    addCleanLog('LOG', formatArgs(args));
-  };
-  console.warn = function(...args: any[]) {
-    originalWarn.apply(console, args);
-    addCleanLog('WARN', formatArgs(args));
-  };
-  console.error = function(...args: any[]) {
-    originalError.apply(console, args);
-    addCleanLog('ERR', formatArgs(args));
-  };
-  console.debug = function(...args: any[]) {
-    originalDebug.apply(console, args);
-    addCleanLog('DBG', formatArgs(args));
-  };
-}
-
-/** Get all clean logs as text (no file:line references) */
-export const getCleanLogs = (): string => cleanLogs.join('\n');
-
-/** Clear clean logs buffer */
-export const clearCleanLogs = (): void => { cleanLogs.length = 0; };
-
-/** Copy clean logs to clipboard (returns text if clipboard fails) */
-export const copyCleanLogs = async (): Promise<string> => {
-  const text = getCleanLogs();
-  if (isBrowser && navigator.clipboard) {
-    try {
-      await navigator.clipboard.writeText(text);
-      console.log(`✅ Copied ${cleanLogs.length} log entries to clipboard`);
-    } catch {
-      // Clipboard fails when devtools focused - just return text
-    }
-  }
-  return text;
-};
-
 // --- Database Setup ---
 // Level polyfill: Node.js uses filesystem, Browser uses IndexedDB
 const nodeProcess =
@@ -6295,11 +6263,35 @@ const nodeProcess =
     ? globalThis.process
     : undefined;
 const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
-const dbPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
-export const db: Level<Buffer, Buffer> = new Level(dbPath, {
-  valueEncoding: 'buffer',
-  keyEncoding: 'binary',
-});
+const dbRootPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
+
+const DEFAULT_DB_NAMESPACE = 'default';
+
+const normalizeDbNamespace = (value: string): string => value.trim().toLowerCase();
+
+const deriveRuntimeIdFromSeed = (seed?: string | null): string | null => {
+  if (!seed) return null;
+  try {
+    return deriveSignerAddressSync(seed, '1').toLowerCase();
+  } catch (error) {
+    console.warn('⚠️ Failed to derive runtimeId for DB namespace:', error);
+    return null;
+  }
+};
+
+const resolveDbNamespace = (options: { env?: Env | null; runtimeId?: string | null; runtimeSeed?: string | null } = {}): string => {
+  const explicit = options.env?.dbNamespace;
+  if (explicit) return normalizeDbNamespace(explicit);
+  const runtimeId = options.runtimeId ?? options.env?.runtimeId;
+  if (runtimeId) return normalizeDbNamespace(runtimeId);
+  const seed = options.runtimeSeed ?? options.env?.runtimeSeed;
+  const derived = deriveRuntimeIdFromSeed(seed ?? null);
+  if (derived) return derived;
+  return DEFAULT_DB_NAMESPACE;
+};
+
+const makeDbKey = (namespace: string, key: string): Buffer =>
+  Buffer.from(`${namespace}:${key}`);
 
 // Helper: Race promise with timeout
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -6311,106 +6303,246 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-// Database availability check
-let dbOpenPromise: Promise<boolean> | null = null;
+const resolveDbPath = (env: Env): string => {
+  const namespace = resolveDbNamespace({ env });
+  if (nodeProcess) {
+    return `${dbRootPath}/${namespace}`;
+  }
+  return `${dbRootPath}-${namespace}`;
+};
 
-async function tryOpenDb(): Promise<boolean> {
-  if (!dbOpenPromise) {
-    dbOpenPromise = (async () => {
+export const getRuntimeDb = (env: Env): Level<Buffer, Buffer> => {
+  const state = ensureRuntimeState(env);
+  if (!state.db) {
+    const path = resolveDbPath(env);
+    state.db = new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' });
+  }
+  return state.db;
+};
+
+export async function tryOpenDb(env: Env): Promise<boolean> {
+  const state = ensureRuntimeState(env);
+  if (!state.dbOpenPromise) {
+    const db = getRuntimeDb(env);
+    state.dbOpenPromise = (async () => {
       try {
         await db.open();
         console.log('✅ Database opened');
         return true;
       } catch (error) {
-        // Check if IndexedDB is completely blocked (Safari incognito)
         const isBlocked = error instanceof Error &&
           (error.message?.includes('blocked') ||
            error.name === 'SecurityError' ||
            error.name === 'InvalidStateError');
-
         if (isBlocked) {
           console.log('⚠️ IndexedDB blocked (incognito/private mode) - running in-memory');
           return false;
         }
-
-        // Other errors - log but assume DB is available
         console.warn('⚠️ DB open warning:', error instanceof Error ? error.message : error);
         return true;
       }
     })();
   }
-  return dbOpenPromise;
+  return state.dbOpenPromise;
 }
 
 // === ETHEREUM INTEGRATION ===
 
 // === SVELTE REACTIVITY INTEGRATION ===
-// Callback that Svelte can register to get notified of env changes
-let envChangeCallback: ((env: Env) => void) | null = null;
+// Per-runtime state is stored on env.runtimeState/runtimeMempool/runtimeConfig.
 
-// Module-level environment variable
-let env: Env;
-let runtimeSeed: string | null = null;
-let runtimeId: string | null = null;
-let p2pOverlay: RuntimeP2P | null = null;
-let pendingP2PConfig: { env: Env; config: P2PConfig } | null = null;
-let networkProcessScheduled = false;
-let lastP2PConfig: P2PConfig | null = null;
+export const registerEnvChangeCallback = (env: Env, callback: (env: Env) => void): (() => void) => {
+  const state = ensureRuntimeState(env);
+  if (!state.envChangeCallbacks) {
+    state.envChangeCallbacks = new Set();
+  }
+  state.envChangeCallbacks.add(callback);
+  return () => state.envChangeCallbacks?.delete(callback);
+};
 
-// Module-level j-watcher instance - prevent multiple instances
-let jWatcher: JEventWatcher | null = null;
-let jWatcherStarted = false;
+const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
+  if (!env.runtimeConfig) {
+    env.runtimeConfig = {
+      minFrameDelayMs: 0,
+      loopIntervalMs: 25,
+    };
+  }
+  return env.runtimeConfig;
+};
 
-export const registerEnvChangeCallback = (callback: (env: Env) => void) => {
-  envChangeCallback = callback;
+const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
+  if (!env.runtimeState) {
+    env.runtimeState = {
+      processing: false,
+      loopActive: false,
+      lastFrameAt: undefined,
+      p2p: null,
+      pendingP2PConfig: null,
+      lastP2PConfig: null,
+      jWatcher: null,
+      jWatcherStarted: false,
+    };
+  }
+  return env.runtimeState;
+};
+
+// --- Clean Log Capture (per-runtime, stored on env.runtimeState.cleanLogs) ---
+const getCleanLogBuffer = (env: Env): string[] => {
+  const state = ensureRuntimeState(env);
+  if (!state.cleanLogs) state.cleanLogs = [];
+  return state.cleanLogs;
+};
+
+/** Get all clean logs as text (no file:line references) */
+export const getCleanLogs = (env: Env): string => getCleanLogBuffer(env).join('\n');
+
+/** Clear clean logs buffer */
+export const clearCleanLogs = (env: Env): void => {
+  const buffer = getCleanLogBuffer(env);
+  buffer.length = 0;
+};
+
+/** Copy clean logs to clipboard (returns text if clipboard fails) */
+export const copyCleanLogs = async (env: Env): Promise<string> => {
+  const text = getCleanLogs(env);
+  if (isBrowser && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      console.log(`✅ Copied ${getCleanLogBuffer(env).length} log entries to clipboard`);
+    } catch {
+      // Clipboard fails when devtools focused - just return text
+    }
+  }
+  return text;
+};
+
+const ensureRuntimeMempool = (env: Env): RuntimeInput => {
+  if (!env.runtimeMempool) {
+    const base = env.runtimeInput ?? { runtimeTxs: [], entityInputs: [] };
+    env.runtimeMempool = base;
+    env.runtimeInput = base;
+  } else if (env.runtimeInput !== env.runtimeMempool) {
+    env.runtimeInput = env.runtimeMempool;
+  }
+  return env.runtimeMempool;
+};
+
+const enqueueRuntimeInputs = (env: Env, inputs?: EntityInput[], runtimeTxs?: RuntimeTx[]): void => {
+  const mempool = ensureRuntimeMempool(env);
+  if (runtimeTxs && runtimeTxs.length > 0) {
+    mempool.runtimeTxs.push(...runtimeTxs);
+  }
+  if (inputs && inputs.length > 0) {
+    mempool.entityInputs.push(...inputs);
+  }
+  if (inputs?.length || runtimeTxs?.length) {
+    if (mempool.queuedAt === undefined) {
+      mempool.queuedAt = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+    }
+  }
+};
+
+const hasRuntimeWork = (env: Env): boolean => {
+  const mempool = ensureRuntimeMempool(env);
+  if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return true;
+  if (env.pendingOutputs && env.pendingOutputs.length > 0) return true;
+  if (env.networkInbox && env.networkInbox.length > 0) return true;
+  if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) return true;
+  if (env.jReplicas) {
+    const now = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+    for (const jr of env.jReplicas.values()) {
+      const mempoolSize = jr.mempool?.length ?? 0;
+      if (mempoolSize === 0) continue;
+      const blockDelayMs = jr.blockDelayMs || 300;
+      const lastBlockTs = jr.lastBlockTimestamp || 0;
+      const elapsed = now - lastBlockTs;
+      const oldestTxAge = jr.mempool[0]?.queuedAt ? now - jr.mempool[0].queuedAt! : 999999;
+      if (elapsed >= blockDelayMs || oldestTxAge >= blockDelayMs) return true;
+    }
+  }
+  return false;
+};
+
+const isRuntimeFrameReady = (env: Env, now: number, overrideDelayMs?: number): boolean => {
+  if (env.scenarioMode) return true; // deterministic scenarios advance manually
+  const config = ensureRuntimeConfig(env);
+  const delayMs = overrideDelayMs !== undefined ? overrideDelayMs : (config.minFrameDelayMs ?? 0);
+  const state = ensureRuntimeState(env);
+  if (!state.lastFrameAt) return true;
+  return now - state.lastFrameAt >= delayMs;
+};
+
+async function runtimeTick(env: Env): Promise<void> {
+  await process(env);
+}
+
+const ensureRuntimeLoop = (env: Env): void => {
+  const state = ensureRuntimeState(env);
+  const config = ensureRuntimeConfig(env);
+  if (env.scenarioMode) return;
+  if (state.loopActive) return;
+  state.loopActive = true;
+  const interval = config.loopIntervalMs ?? 25;
+  state.loopTimer = setInterval(async () => {
+    if (!hasRuntimeWork(env)) {
+      return;
+    }
+    await runtimeTick(env);
+  }, interval);
 };
 
 /**
- * Get the module-level env (used for j-watcher and runtime tick)
- * CRITICAL: This returns the SAME env that the runtime tick processes!
- * View.svelte should use this instead of createEmptyEnv() for proper event routing.
+ * Identity function for env (no module-level env exists).
+ * Use to preserve legacy call sites that expected getEnv().
  */
-export const getEnv = (): Env | null => {
-  return env || null;
+export const getEnv = (env?: Env | null): Env | null => {
+  if (!env) {
+    console.warn('⚠️ getEnv called without env - runtime no longer keeps global env');
+    return null;
+  }
+  return env;
 };
 
-export const setRuntimeSeed = (seed: string | null): void => {
+export const setRuntimeSeed = (env: Env, seed: string | null): void => {
   if (env?.lockRuntimeSeed) {
     console.warn('⚠️ Runtime seed update blocked (scenario lock enabled)');
     return;
   }
   const normalized = seed === null || seed === undefined ? '' : seed;
-  runtimeSeed = normalized;
-  setCryptoRuntimeSeed(normalized);
-  if (normalized !== null && normalized !== undefined) {
+  env.runtimeSeed = normalized;
+  if (normalized) {
     try {
-      runtimeId = deriveSignerAddressSync(normalized, '1');
+      env.runtimeId = deriveSignerAddressSync(normalized, '1');
     } catch (error) {
       console.warn('⚠️ Failed to derive runtimeId from seed:', error);
-      runtimeId = null;
+      env.runtimeId = undefined;
     }
   } else {
-    runtimeId = null;
+    env.runtimeId = undefined;
   }
-  if (env) {
-    env.runtimeSeed = normalized;
-    env.runtimeId = runtimeId || undefined;
+  if (env.runtimeId) {
+    env.dbNamespace = normalizeDbNamespace(env.runtimeId);
   }
-  if (pendingP2PConfig && runtimeId) {
-    console.log(`[P2P] pendingP2PConfig triggered, relayUrls=${pendingP2PConfig.config.relayUrls?.join(',')}`);
-    const { env: pendingEnv, config } = pendingP2PConfig;
-    pendingP2PConfig = null;
-    startP2P(pendingEnv, config);
-  }
-  if (env && p2pOverlay && lastP2PConfig && runtimeId) {
-    startP2P(env, lastP2PConfig);
+  const state = ensureRuntimeState(env);
+  if (state.pendingP2PConfig && env.runtimeId) {
+    console.log(`[P2P] pendingP2PConfig triggered, relayUrls=${state.pendingP2PConfig.relayUrls?.join(',')}`);
+    const config = state.pendingP2PConfig;
+    state.pendingP2PConfig = null;
+    startP2P(env, config);
   }
 };
 
-export const setRuntimeId = (id: string | null): void => {
-  runtimeId = id && id.length > 0 ? id : null;
-  if (env) {
-    env.runtimeId = runtimeId || undefined;
+export const setRuntimeId = (env: Env, id: string | null): void => {
+  env.runtimeId = id && id.length > 0 ? id : undefined;
+  if (env.runtimeId) {
+    env.dbNamespace = normalizeDbNamespace(env.runtimeId);
+  }
+  const state = ensureRuntimeState(env);
+  if (state.pendingP2PConfig && env.runtimeId) {
+    console.log(`[P2P] pendingP2PConfig triggered, relayUrls=${state.pendingP2PConfig.relayUrls?.join(',')}`);
+    const config = state.pendingP2PConfig;
+    state.pendingP2PConfig = null;
+    startP2P(env, config);
   }
 };
 
@@ -6420,31 +6552,7 @@ export const deriveRuntimeId = (seed: string): string => {
 };
 
 export const scheduleNetworkProcess = (env: Env) => {
-  if (networkProcessScheduled) return;
-  networkProcessScheduled = true;
-  const defer =
-    typeof setImmediate === 'function'
-      ? setImmediate
-      : (cb: () => void) => {
-          if (typeof queueMicrotask === 'function') {
-            queueMicrotask(cb);
-          } else {
-            setTimeout(cb, 0);
-          }
-        };
-  defer(async () => {
-    networkProcessScheduled = false;
-    if (!env.networkInbox || env.networkInbox.length === 0) return;
-    if (processing) {
-      scheduleNetworkProcess(env);
-      return;
-    }
-    try {
-      await process(env);
-    } catch (error) {
-      logError('NETWORK', 'Failed to process network inbox', error);
-    }
-  });
+  ensureRuntimeLoop(env);
 };
 
 const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null => {
@@ -6454,8 +6562,11 @@ const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null =>
   return profile?.runtimeId || null;
 };
 
-const routeEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] => {
-  if (!p2pOverlay) return outputs;
+const planEntityOutputs = (env: Env, outputs: EntityInput[]): {
+  localOutputs: EntityInput[];
+  remoteOutputs: EntityInput[];
+  deferredOutputs: EntityInput[];
+} => {
   const localEntityIds = new Set<string>();
   for (const replicaKey of env.eReplicas.keys()) {
     try {
@@ -6466,8 +6577,8 @@ const routeEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] => 
   }
 
   const localOutputs: EntityInput[] = [];
+  const remoteOutputs: EntityInput[] = [];
   const pendingOutputs = env.pendingNetworkOutputs ? [...env.pendingNetworkOutputs] : [];
-  env.pendingNetworkOutputs = [];
   const allOutputs = [...pendingOutputs, ...outputs];
   const deferredOutputs: EntityInput[] = [];
 
@@ -6478,44 +6589,114 @@ const routeEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] => 
     }
     const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
     console.log(`🔀 ROUTE: Output for entity ${output.entityId.slice(-4)} → runtimeId=${targetRuntimeId?.slice(0,10) || 'UNKNOWN'}`);
-
     if (!targetRuntimeId) {
       console.warn(`⚠️ ROUTE-DEFER: No runtimeId for entity ${output.entityId.slice(-4)} - deferring output`);
       env.warn('network', 'Missing runtimeId for entity output (queued)', { entityId: output.entityId });
       deferredOutputs.push(output);
       continue;
     }
-
-    console.log(`📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId.slice(0, 10)} for entity ${output.entityId.slice(-4)}`);
-    p2pOverlay.enqueueEntityInput(targetRuntimeId, output);
+    remoteOutputs.push(output);
   }
 
-  if (deferredOutputs.length > 0) {
-    env.pendingNetworkOutputs = deferredOutputs;
+  return { localOutputs, remoteOutputs, deferredOutputs };
+};
+
+// Batch multiple outputs to same entityId:signerId into one EntityInput
+const batchOutputsByTarget = (outputs: EntityInput[]): EntityInput[] => {
+  const batched = new Map<string, EntityInput>();
+
+  for (const output of outputs) {
+    const key = `${output.entityId}:${output.signerId}`;
+    const existing = batched.get(key);
+
+    if (existing) {
+      // Merge entityTxs
+      if (output.entityTxs?.length) {
+        existing.entityTxs = [...(existing.entityTxs || []), ...output.entityTxs];
+      }
+      // Keep latest proposedFrame (or first if only one has it)
+      if (output.proposedFrame) {
+        existing.proposedFrame = output.proposedFrame;
+      }
+      // Merge hashPrecommits
+      if (output.hashPrecommits) {
+        existing.hashPrecommits = existing.hashPrecommits || new Map();
+        output.hashPrecommits.forEach((sigs, signerId) => {
+          existing.hashPrecommits!.set(signerId, sigs);
+        });
+      }
+      console.log(`📦 BATCH: Merged output into ${key} (now ${existing.entityTxs?.length || 0} txs)`);
+    } else {
+      batched.set(key, { ...output });
+    }
   }
 
-  return localOutputs;
+  return Array.from(batched.values());
+};
+
+const dispatchEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] => {
+  const p2p = getP2P(env);
+  if (!p2p) return outputs;
+
+  // CRITICAL: Batch outputs to same target before sending
+  const batchedOutputs = batchOutputsByTarget(outputs);
+  if (batchedOutputs.length < outputs.length) {
+    console.log(`📦 BATCH: Reduced ${outputs.length} outputs → ${batchedOutputs.length} batched messages`);
+  }
+
+  const deferredOutputs: EntityInput[] = [];
+  for (const output of batchedOutputs) {
+    const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
+    if (!targetRuntimeId) {
+      deferredOutputs.push(output);
+      continue;
+    }
+    console.log(`📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId.slice(0, 10)} for entity ${output.entityId.slice(-4)} (${output.entityTxs?.length || 0} txs)`);
+    p2p.enqueueEntityInput(targetRuntimeId, output);
+  }
+  return deferredOutputs;
+};
+
+export const sendEntityInput = (env: Env, input: EntityInput): { sent: boolean; deferred: boolean; queuedLocal: boolean } => {
+  const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, [input]);
+  if (localOutputs.length > 0) {
+    enqueueRuntimeInputs(env, localOutputs);
+  }
+  const deferred = dispatchEntityOutputs(env, remoteOutputs);
+  const remainingDeferred = [...deferredOutputs, ...deferred];
+  if (remainingDeferred.length > 0) {
+    env.pendingNetworkOutputs = remainingDeferred;
+  } else {
+    env.pendingNetworkOutputs = [];
+  }
+  ensureRuntimeLoop(env);
+  return {
+    sent: remoteOutputs.length > 0 && deferred.length === 0,
+    deferred: remainingDeferred.length > 0,
+    queuedLocal: localOutputs.length > 0,
+  };
 };
 
 export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null => {
   console.log(`[P2P] startP2P called, relayUrls=${config.relayUrls?.join(',')}, env.runtimeId=${env.runtimeId?.slice(0,10) || 'NONE'}`);
-  lastP2PConfig = config;
+  const state = ensureRuntimeState(env);
+  state.lastP2PConfig = config;
   const resolvedRuntimeId = config.runtimeId || env.runtimeId;
   if (!resolvedRuntimeId) {
     console.log(`[P2P] No runtimeId, storing as pendingP2PConfig`);
-    pendingP2PConfig = { env, config };
+    state.pendingP2PConfig = config;
     return null;
   }
 
-  if (p2pOverlay) {
-    if (p2pOverlay.matchesIdentity(resolvedRuntimeId, config.signerId)) {
-      p2pOverlay.updateConfig(config);
-      return p2pOverlay;
+  if (state.p2p) {
+    if (state.p2p.matchesIdentity(resolvedRuntimeId, config.signerId)) {
+      state.p2p.updateConfig(config);
+      return state.p2p;
     }
-    p2pOverlay.close();
+    state.p2p.close();
   }
 
-  p2pOverlay = new RuntimeP2P({
+  state.p2p = new RuntimeP2P({
     env,
     runtimeId: resolvedRuntimeId,
     signerId: config.signerId,
@@ -6524,67 +6705,67 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     advertiseEntityIds: config.advertiseEntityIds,
     isHub: config.isHub,
     profileName: config.profileName,
+    gossipPollMs: config.gossipPollMs,
     onEntityInput: (from, input) => {
       const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
       console.log(`📨 P2P-RECEIVE: from=${from.slice(0,10)} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
-      env.networkInbox = env.networkInbox || [];
-      env.networkInbox.push(input);
-      console.log(`📥 NETWORK-INBOX: Added, size=${env.networkInbox.length}`);
+      enqueueRuntimeInputs(env, [input]);
+      console.log(`📥 RUNTIME-MEMPOOL: Added inbound, size=${ensureRuntimeMempool(env).entityInputs.length}`);
       env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
-      scheduleNetworkProcess(env);
+      ensureRuntimeLoop(env);
     },
-    onGossipProfiles: (from, profiles) => {
-      console.log(`📥 onGossipProfiles: Received ${profiles.length} profiles from ${from.slice(0,10)}`);
-      console.log(`📥 Profile details:`, profiles.map(p => `${p.entityId?.slice(-4) || '????'}:${p.accounts?.length || 0}acc`).join(', '));
-
-      if (!env.gossip?.announce) {
-        console.warn(`⚠️ No env.gossip.announce!`);
-        return;
-      }
-
-      console.log(`📥 Starting announce loop for ${profiles.length} profiles...`);
-      for (let i = 0; i < profiles.length; i++) {
-        const profile = profiles[i];
-        console.log(`  [${i}] Announcing ${profile.entityId.slice(-4)} accounts=${profile.accounts?.length || 0} ts=${profile.metadata?.lastUpdated}`);
+    onGossipProfiles: (_from, profiles) => {
+      if (!env.gossip?.announce) return;
+      // Store profiles in local gossip cache (silently)
+      for (const profile of profiles) {
         env.gossip.announce(profile);
       }
-      console.log(`📥 Announce loop complete`);
-      env.info('network', 'GOSSIP_SYNC', { fromRuntimeId: from, profiles: profiles.length });
     },
   });
 
-  p2pOverlay.connect();
-  return p2pOverlay;
+  state.p2p.connect();
+  return state.p2p;
 };
 
-export const stopP2P = (): void => {
-  if (p2pOverlay) {
-    p2pOverlay.close();
-    p2pOverlay = null;
+export const stopP2P = (env: Env): void => {
+  const state = ensureRuntimeState(env);
+  if (state.p2p) {
+    state.p2p.close();
+    state.p2p = null;
   }
-  lastP2PConfig = null;
+  state.lastP2PConfig = null;
 };
 
-export const getP2P = (): RuntimeP2P | null => p2pOverlay;
+export const getP2P = (env: Env): RuntimeP2P | null => ensureRuntimeState(env).p2p ?? null;
+
+export const refreshGossip = (env: Env): void => {
+  const state = ensureRuntimeState(env);
+  if (state.p2p) {
+    state.p2p.refreshGossip();
+  }
+};
 
 /**
  * Initialize module-level env if not already set
  * Call this early in frontend initialization before prepopulate
  */
-export const initEnv = (): Env => {
-  if (!env) {
-    env = createEmptyEnv(runtimeSeed);
-    if (env.runtimeSeed !== undefined && env.runtimeSeed !== null) {
-      setCryptoRuntimeSeed(env.runtimeSeed);
-    }
-    console.log('🌍 Runtime env initialized (module-level)');
+export const initEnv = (seed?: string | null): Env => {
+  const env = createEmptyEnv(seed ?? null);
+  if (env.runtimeSeed !== undefined && env.runtimeSeed !== null) {
+    setCryptoRuntimeSeed(env.runtimeSeed);
   }
   return env;
 };
 
 const notifyEnvChange = (env: Env) => {
-  if (envChangeCallback) {
-    envChangeCallback(env);
+  const state = ensureRuntimeState(env);
+  if (!state.envChangeCallbacks || state.envChangeCallbacks.size === 0) return;
+  for (const cb of state.envChangeCallbacks) {
+    try {
+      cb(env);
+    } catch (error) {
+      console.warn('⚠️ Env change callback failed:', error);
+    }
   }
 };
 
@@ -6593,61 +6774,89 @@ const notifyEnvChange = (env: Env) => {
  * Called automatically after each BrowserVM batch execution
  * This is the R-machine routing j-events from jReplicas to eReplicas
  */
-export const processJBlockEvents = async (): Promise<void> => {
+export const processJBlockEvents = async (env: Env): Promise<void> => {
   if (!env) {
     console.warn('⚠️ processJBlockEvents: No env available');
     return;
   }
 
-  const pending = env.runtimeInput.entityInputs.length;
+  const state = ensureRuntimeState(env);
+  if (state.processing) {
+    console.warn('⏸️ processJBlockEvents: Runtime busy, leaving j-events queued');
+    return;
+  }
+
+  const mempool = ensureRuntimeMempool(env);
+  const pending = mempool.entityInputs.length;
   if (pending === 0) return;
 
   console.log(`🔗 J-BLOCK: ${pending} j-events queued → routing to eReplicas`);
-  const toProcess = [...env.runtimeInput.entityInputs];
-  env.runtimeInput.entityInputs = [];
+  const toProcess = [...mempool.entityInputs];
+  mempool.entityInputs = [];
 
-  await applyRuntimeInput(env, {
-    runtimeTxs: [],
-    entityInputs: toProcess,
-  });
+  try {
+    await process(env, toProcess);
+  } catch (error) {
+    mempool.entityInputs = [...toProcess, ...mempool.entityInputs];
+    throw error;
+  }
   console.log(`   ✓ ${toProcess.length} j-events processed`);
 };
 
 // J-Watcher initialization
 const startJEventWatcher = async (env: Env): Promise<void> => {
+  const state = ensureRuntimeState(env);
   // BrowserVM is the default - it handles events synchronously via processJBlockEvents()
   // External RPC watcher is disabled until we support remote jurisdictions
   const browserVM = getBrowserVMInstance(env);
   if (browserVM) {
     console.log('🔭 J-WATCHER: Using BrowserVM (external RPC not needed)');
+    ensureRuntimeLoop(env);
     return;
   }
 
-  // External RPC mode (future - not yet supported)
+  // External RPC mode (use imported J-machines first, fallback to static config)
   try {
-    const arrakis = await getJurisdictionByAddress('arrakis');
-    if (!arrakis) {
-      console.warn('⚠️ Arrakis jurisdiction not found, skipping j-watcher');
-      return;
+    let rpcUrl: string | undefined;
+    let entityProviderAddress: string | undefined;
+    let depositoryAddress: string | undefined;
+
+    // Prefer J-machines imported into this env (VaultStore uses importJ)
+    if (env.jReplicas) {
+      for (const replica of env.jReplicas.values()) {
+        const candidateRpc = replica.rpcs?.[0];
+        if (candidateRpc && replica.entityProviderAddress && replica.depositoryAddress) {
+          rpcUrl = candidateRpc;
+          entityProviderAddress = replica.entityProviderAddress;
+          depositoryAddress = replica.depositoryAddress;
+          break;
+        }
+      }
     }
 
-    jWatcher = await setupJEventWatcher(
-      env,
-      arrakis.address,
-      arrakis.entityProviderAddress,
-      arrakis.depositoryAddress
-    );
+    // Fallback to static jurisdictions (legacy)
+    if (!rpcUrl || !entityProviderAddress || !depositoryAddress) {
+      const arrakis = await getJurisdictionByAddress('arrakis');
+      if (!arrakis) {
+        console.warn('⚠️ Arrakis jurisdiction not found, skipping j-watcher');
+        return;
+      }
+      rpcUrl = arrakis.address;
+      entityProviderAddress = arrakis.entityProviderAddress;
+      depositoryAddress = arrakis.depositoryAddress;
+    }
+
+    if (isBrowser && rpcUrl.startsWith('/')) {
+      rpcUrl = `${window.location.origin}${rpcUrl}`;
+    }
+
+    if (state.jWatcherStarted) return;
+    state.jWatcherStarted = true;
+    state.jWatcher = await setupJEventWatcher(env, rpcUrl, entityProviderAddress, depositoryAddress);
 
     console.log('✅ J-Event Watcher started (external RPC)');
-    console.log(`🔭 Monitoring: ${arrakis.address}`);
-
-    setInterval(async () => {
-      if (env.runtimeInput.entityInputs.length > 0) {
-        const pendingInputs = [...env.runtimeInput.entityInputs];
-        env.runtimeInput.entityInputs = [];
-        await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: pendingInputs });
-      }
-    }, 100);
+    console.log(`🔭 Monitoring: ${rpcUrl}`);
+    ensureRuntimeLoop(env);
 
   } catch (error) {
     logError("RUNTIME_TICK", '❌ Failed to start J-Event Watcher:', error);
@@ -6712,19 +6921,13 @@ const applyRuntimeInput = async (
       }
     }
 
-    // Capture queued inputs and clear to allow new ones during processing
-    const queuedRuntimeTxs = [...env.runtimeInput.runtimeTxs];
-    const queuedEntityInputs = [...env.runtimeInput.entityInputs];
-    env.runtimeInput.runtimeTxs = [];
-    env.runtimeInput.entityInputs = [];
-
-    // SECURITY: Resource limits (include queued + new inputs)
-    if (queuedRuntimeTxs.length + runtimeInput.runtimeTxs.length > 1000) {
-      log.error(`❌ Too many runtime transactions: ${queuedRuntimeTxs.length + runtimeInput.runtimeTxs.length} > 1000`);
+    // SECURITY: Resource limits
+    if (runtimeInput.runtimeTxs.length > 1000) {
+      log.error(`❌ Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
       return { entityOutbox: [], mergedInputs: [] };
     }
-    if (queuedEntityInputs.length + runtimeInput.entityInputs.length > 10000) {
-      log.error(`❌ Too many entity inputs: ${queuedEntityInputs.length + runtimeInput.entityInputs.length} > 10000`);
+    if (runtimeInput.entityInputs.length > 10000) {
+      log.error(`❌ Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
       return { entityOutbox: [], mergedInputs: [] };
     }
 
@@ -6746,8 +6949,8 @@ const applyRuntimeInput = async (
       }
     });
 
-    const mergedRuntimeTxs = [...queuedRuntimeTxs, ...validatedRuntimeTxs];
-    const mergedEntityInputs = [...queuedEntityInputs, ...validatedEntityInputs];
+    const mergedRuntimeTxs = [...validatedRuntimeTxs];
+    const mergedEntityInputs = [...validatedEntityInputs];
 
     // Merge all entityInputs (already validated above)
     const mergedInputs = mergeEntityInputs(mergedEntityInputs);
@@ -6810,6 +7013,8 @@ const applyRuntimeInput = async (
             position: { x: 0, y: 50, z: 0 }, // Default position for J-machine
             depositoryAddress: jadapter.addresses.depository,
             entityProviderAddress: jadapter.addresses.entityProvider,
+            rpcs: runtimeTx.data.rpcs,
+            chainId: runtimeTx.data.chainId,
             jadapter, // Store for balance queries, faucets, etc
           };
           env.jReplicas.set(runtimeTx.data.name, jReplica);
@@ -6876,9 +7081,9 @@ const applyRuntimeInput = async (
 
               env.eReplicas.set(replicaKey, replica);
 
-              // Fund with test tokens (BrowserVM only)
-              if (isBrowserVM && browserVM?.debugFundReserves) {
-                await browserVM.debugFundReserves(selfEntityId, 1, 1000n * 10n**18n);
+              // Fund with test tokens (BrowserVM only, opt-in)
+              if (runtimeTx.data?.fundSelfEntity && isBrowserVM && browserVM?.debugFundReserves) {
+                await browserVM.debugFundReserves(selfEntityId, 1, 1000n * 10n ** 18n);
                 console.log(`[Runtime] Funded self-entity with 1000 tokens`);
               }
 
@@ -6975,9 +7180,9 @@ const applyRuntimeInput = async (
         }
 
         // Ensure entity-level signing key exists for this runtime (needed for gossip public key)
-        if (runtimeSeed !== undefined && runtimeSeed !== null) {
+        if (env.runtimeSeed !== undefined && env.runtimeSeed !== null) {
           try {
-            const seedBytes = new TextEncoder().encode(runtimeSeed);
+            const seedBytes = new TextEncoder().encode(env.runtimeSeed);
             const entityKey = deriveSignerKeySync(seedBytes, runtimeTx.entityId);
             registerSignerKey(runtimeTx.entityId, entityKey);
           } catch (error) {
@@ -6994,12 +7199,15 @@ const applyRuntimeInput = async (
         if (env.gossip && createdReplica) {
           const entityPublicKey = getSignerPublicKey(env, runtimeTx.entityId);
           const publicKeyHex = entityPublicKey ? `0x${Buffer.from(entityPublicKey).toString('hex')}` : undefined;
-          const profile = buildEntityProfile(createdReplica.state, undefined, env.timestamp);
-          profile.runtimeId = env.runtimeId;
+          const existingProfile = env.gossip?.getProfiles?.().find((p: any) => p.entityId === runtimeTx.entityId);
+          const existingName = existingProfile?.metadata?.name;
+          const profile = buildEntityProfile(createdReplica.state, existingName, env.timestamp);
+          const mergedProfile = mergeProfileWithExisting(profile, existingProfile);
+          mergedProfile.runtimeId = env.runtimeId;
           if (publicKeyHex) {
-            profile.metadata = { ...(profile.metadata || {}), entityPublicKey: publicKeyHex };
+            mergedProfile.metadata = { ...(mergedProfile.metadata || {}), entityPublicKey: publicKeyHex };
           }
-          env.gossip.announce(profile);
+          env.gossip.announce(mergedProfile);
         }
 
         if (typeof actualJBlock !== 'number') {
@@ -7302,263 +7510,88 @@ const applyRuntimeInput = async (
   }
 };
 
-// This is the new, robust main function that replaces the old one.
-const main = async (): Promise<Env> => {
+// Runtime bootstrap
+const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
   console.log(`🚀 RUNTIME.JS VERSION: ${RUNTIME_BUILD_ID}`);
 
-  // Open database before any operations
-  const dbReady = await tryOpenDb();
-
-  // DEBUG: Log jurisdictions content on startup using centralized loader
-  if (!isBrowser) {
-    try {
-      const { loadJurisdictions } = await import('./jurisdiction-loader');
-      const jurisdictions = loadJurisdictions();
-      console.log('🔍 STARTUP: Current jurisdictions content (from centralized loader):');
-      console.log('📍 Arrakis Depository:', jurisdictions.jurisdictions['arrakis']?.contracts?.depository);
-      console.log('📍 Arrakis EntityProvider:', jurisdictions.jurisdictions['arrakis']?.contracts?.entityProvider);
-      console.log('📍 Last updated:', jurisdictions.lastUpdated);
-      console.log('📍 Full Arrakis config:', safeStringify(jurisdictions.jurisdictions['arrakis']));
-    } catch (error) {
-      console.log('⚠️ Failed to load jurisdictions:', (error as Error).message);
-    }
+  const baseEnv = createEmptyEnv(runtimeSeedOverride ?? null);
+  if (baseEnv.runtimeSeed !== undefined && baseEnv.runtimeSeed !== null) {
+    setCryptoRuntimeSeed(baseEnv.runtimeSeed);
   }
 
-  // Initialize gossip layer
-  console.log('🕸️ Initializing gossip layer...');
-  const gossipLayer = createGossipLayer();
-  console.log('✅ Gossip layer initialized');
-
-  // Load persisted profiles from database into gossip layer
-  console.log('📡 Loading persisted profiles from database...');
-  await loadPersistedProfiles(db, gossipLayer);
-
-  // First, create default environment with gossip layer and event emitters
-  env = createEmptyEnv(runtimeSeed);
-  env.gossip = gossipLayer; // Override default gossip with persisted profiles
-
-  // Try to load saved state from database
-  try {
-    if (!dbReady) {
-      console.log('💾 Database unavailable - starting fresh');
-      throw new Error('DB_UNAVAILABLE');
-    }
-
-    console.log('📥 Loading state from database...');
-    const latestHeightBuffer = await withTimeout(db.get(Buffer.from('latest_height')), 2000);
-
-    const latestHeight = parseInt(latestHeightBuffer.toString(), 10);
-    console.log(`📊 BROWSER-DEBUG: Found latest height in DB: ${latestHeight}`);
-
-    console.log(`📊 Found latest height: ${latestHeight}, loading ${latestHeight + 1} snapshots...`);
-
-    // Load snapshots starting from 1 (height 0 is initial state, no snapshot saved)
-    console.log(`📥 Loading snapshots: 1 to ${latestHeight}...`);
-    const snapshots = [];
-
-    // Start from 1 since height 0 is initial state with no snapshot
-    for (let i = 1; i <= latestHeight; i++) {
-      try {
-        const buffer = await db.get(Buffer.from(`snapshot:${i}`));
-        const snapshot = decode(buffer);
-        normalizeSnapshotInPlace(snapshot);
-        snapshots.push(snapshot);
-        console.log(`📦 Snapshot ${i}: loaded ${buffer.length} bytes`);
-      } catch (error) {
-        logError("RUNTIME_TICK", `❌ Failed to load snapshot ${i}:`, error);
-        console.warn(`⚠️ Snapshot ${i} missing, continuing with available data...`);
-      }
-    }
-
-    if (snapshots.length === 0) {
-      console.log(`📦 No snapshots found (latestHeight: ${latestHeight}), using fresh environment`);
-      throw new Error('LEVEL_NOT_FOUND');
-    }
-
-    console.log(`📊 Successfully loaded ${snapshots.length}/${latestHeight} snapshots (starting from height 1)`);
-    env.history = snapshots;
-
-    if (snapshots.length > 0) {
-      const latestSnapshot = snapshots[snapshots.length - 1];
-
-      // CRITICAL: Validate snapshot has proper eReplicas data
-      if (!latestSnapshot.eReplicas) {
-        console.warn('⚠️ Latest snapshot missing eReplicas data, using fresh environment');
-        throw new Error('LEVEL_NOT_FOUND');
-      }
-
-      // Restore gossip profiles from snapshot
-      const gossipLayer = createGossipLayer();
-      if (latestSnapshot.gossip?.profiles) {
-        for (const [id, profile] of Object.entries(latestSnapshot.gossip.profiles)) {
-          gossipLayer.profiles.set(id, profile as Profile);
-        }
-        console.log(`📡 Restored gossip profiles: ${Object.keys(latestSnapshot.gossip.profiles).length} entries`);
-      }
-
-      // CRITICAL: Convert eReplicas to proper Map if needed (handle deserialization from DB)
-      let eReplicasMap: Map<string, EntityReplica>;
-      try {
-        eReplicasMap = normalizeReplicaMap(latestSnapshot.eReplicas);
-      } catch (conversionError) {
-        logError("RUNTIME_TICK", '❌ Failed to convert eReplicas to Map:', conversionError);
-        console.warn('⚠️ Falling back to fresh environment');
-        throw new Error('LEVEL_NOT_FOUND');
-      }
-
-      const jReplicasMap = normalizeJReplicaMap(latestSnapshot.jReplicas);
-
-      // Create env with proper event emitters, then populate from snapshot
-      const snapshotSeed = latestSnapshot.runtimeSeed ?? null;
-      env = createEmptyEnv(snapshotSeed);
-      if (snapshotSeed !== undefined && snapshotSeed !== null) {
-        runtimeSeed = snapshotSeed;
-        setCryptoRuntimeSeed(runtimeSeed);
-      }
-      if (latestSnapshot.runtimeId) {
-        runtimeId = latestSnapshot.runtimeId;
-        env.runtimeId = runtimeId;
-      } else if (runtimeSeed !== undefined && runtimeSeed !== null) {
-        try {
-          runtimeId = deriveSignerAddressSync(runtimeSeed, '1');
-          env.runtimeId = runtimeId;
-        } catch (error) {
-          console.warn('⚠️ Failed to derive runtimeId on restore:', error);
-        }
-      }
-      // CRITICAL: Clone the eReplicas Map to avoid mutating snapshot data!
-      env.eReplicas = new Map(Array.from(eReplicasMap).map(([key, replica]): [string, EntityReplica] => {
-        return [key, cloneEntityReplica(replica)];
-      }));
-      env.jReplicas = jReplicasMap;
-      env.height = latestSnapshot.height;
-      env.timestamp = latestSnapshot.timestamp;
-      // CRITICAL: runtimeInput must start EMPTY on restore!
-      // The snapshot's runtimeInput was already processed
-      env.runtimeInput = {
-        runtimeTxs: [],
-        entityInputs: []
-      };
-      env.history = snapshots; // Include the loaded history
-      env.gossip = gossipLayer; // Use restored gossip layer
-      env.frameLogs = [];
-      if (latestSnapshot.browserVMState && isBrowser) {
-        try {
-          const { BrowserVMProvider } = await import('./jadapter');
-          const browserVM = new BrowserVMProvider();
-          await browserVM.init();
-          await browserVM.restoreState(latestSnapshot.browserVMState);
-          env.browserVM = browserVM;
-          setBrowserVMJurisdiction(env, browserVM.getDepositoryAddress(), browserVM);
-          if (typeof window !== 'undefined') {
-            (window as any).__xlnBrowserVM = browserVM;
-          }
-          console.log('✅ BrowserVM restored from persisted state');
-        } catch (error) {
-          console.warn('⚠️ Failed to restore BrowserVM state:', error);
-        }
-      }
-      console.log(`✅ History restored. Runtime is at height ${env.height} with ${env.history.length} snapshots.`);
-      console.log(`📈 Snapshot details:`, {
-        height: env.height,
-        replicaCount: env.eReplicas.size,
-        timestamp: new Date(env.timestamp).toISOString(),
-        runtimeInputs: env.runtimeInput.entityInputs.length,
-      });
-    }
-  } catch (error) {
-    const isTimeout = error instanceof Error && error.message === 'TIMEOUT';
-    const isNotFound = error instanceof Error &&
-      (error.name === 'NotFoundError' ||
-       error.message?.includes('NotFoundError') ||
-       error.message?.includes('Entry not found'));
-
-    if (isTimeout || isNotFound) {
-      console.log('📦 No saved state found - starting fresh');
-    } else if (error instanceof Error && error.message === 'DB_UNAVAILABLE') {
-      // Already logged above
-    } else {
-      console.warn('⚠️ Error loading state:', error instanceof Error ? error.message : error);
-      console.log('📦 Starting fresh');
-    }
+  const dbReady = await tryOpenDb(baseEnv);
+  if (dbReady) {
+    console.log('📡 Loading persisted profiles from database...');
+    await loadPersistedProfiles(getRuntimeDb(baseEnv), baseEnv.gossip);
   }
 
-  // Demo profiles are only initialized during runDemo - not by default
-
-  // Only run demos in Node.js environment, not browser
-  if (!isBrowser) {
-    // DISABLED: Hanko tests during development
-    console.log('\n🚀 Hanko tests disabled during development - focusing on core functionality');
-    
-    // // Add hanko demo to the main execution
-    // console.log('\n🖋️  Testing Complete Hanko Implementation...');
-    // await demoCompleteHanko();
-
-    // // 🧪 Run basic Hanko functionality tests first
-    // console.log('\n🧪 Running basic Hanko functionality tests...');
-    // await runBasicHankoTests();
-
-    // // 🧪 Run comprehensive Depository-Hanko integration tests
-    // console.log('\n🧪 Running comprehensive Depository-Hanko integration tests...');
-    // try {
-    //   await runDepositoryHankoTests();
-    // } catch (error) {
-    //   console.log(
-    //     'ℹ️  Depository integration tests skipped (contract setup required):',
-    //     (error as Error).message?.substring(0, 100) || 'Unknown error',
-    //   );
-    // }
-  } else {
-    console.log('🌐 Browser environment: Demos available via UI buttons, not auto-running');
-  }
-
-  log.info(`🎯 Runtime startup complete. Height: ${env.height}, Entities: ${env.eReplicas.size}`);
-
-  // Debug final state before starting j-watcher
+  let env = baseEnv;
   if (isBrowser) {
-    if (HEAVY_LOGS) console.log(`🔍 BROWSER-DEBUG: Final state before j-watcher start:`);
-    if (HEAVY_LOGS) console.log(`🔍   Environment height: ${env.height}`);
-    if (HEAVY_LOGS) console.log(`🔍   Total replicas: ${env.eReplicas.size}`);
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
-      const { entityId, signerId } = parseReplicaKey(replicaKey);
-      if (HEAVY_LOGS) console.log(`🔍   Entity ${entityId.slice(0,10)}... (${signerId}): jBlock=${replica.state.lastFinalizedJHeight}, isProposer=${replica.isProposer}`);
+    const loaded = await loadEnvFromDB(baseEnv.runtimeId, baseEnv.runtimeSeed);
+    if (loaded) {
+      const loadedState = ensureRuntimeState(loaded);
+      const baseState = ensureRuntimeState(baseEnv);
+      loadedState.db = baseState.db;
+      loadedState.dbOpenPromise = baseState.dbOpenPromise;
+      if (baseEnv.gossip?.profiles) {
+        for (const [k, v] of baseEnv.gossip.profiles.entries()) {
+          loaded.gossip.profiles.set(k, v);
+        }
+      }
+      env = loaded;
     }
   }
 
-  // DISABLED: J-watcher temporarily disabled (external RPC not needed for demo)
-  // Re-enable by uncommenting this block when blockchain integration is needed
-  /*
-  if (!jWatcherStarted) {
-    console.log('🔭 STARTING-JWATCHER: Snapshots loaded, starting j-watcher (non-blocking)...');
+  attachEventEmitters(env);
 
-    Promise.race([
-      startJEventWatcher(env),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('J-watcher startup timeout (3s)')), 3000))
-    ])
-      .then(() => {
-        jWatcherStarted = true;
-        console.log('🔭 JWATCHER-READY: J-watcher started successfully');
-      })
-      .catch((error) => {
-        console.warn('⚠️  J-Event Watcher startup failed or timed out (non-critical):', error.message);
-        console.warn('    UI will load anyway. Blockchain sync will retry in background.');
-      });
-  } else {
-    console.log('🔭 JWATCHER-SKIP: J-watcher already started, skipping');
+  if (!env.runtimeId && env.runtimeSeed) {
+    try {
+      env.runtimeId = deriveSignerAddressSync(env.runtimeSeed, '1');
+      console.log(`🔐 Derived runtimeId: ${env.runtimeId.slice(0, 12)}...`);
+    } catch (error) {
+      console.warn('⚠️ Failed to derive runtimeId:', error);
+    }
   }
-  */
-  console.log('🔭 J-WATCHER: Disabled (external RPC not needed for simnet demo)');
+
+  if (env.runtimeSeed) {
+    try {
+      const seedBytes = new TextEncoder().encode(env.runtimeSeed);
+      const signerKey = deriveSignerKeySync(seedBytes, '1');
+      registerSignerKey('1', signerKey);
+      env.signers = [{ address: deriveSignerAddressSync(env.runtimeSeed, '1'), name: 'signer1' }];
+    } catch (error) {
+      console.warn('⚠️ Failed to derive signer:', error);
+    }
+  }
+
+  if (isBrowser) {
+    const state = ensureRuntimeState(env);
+    if (!state.jWatcherStarted) {
+      console.log('🔭 STARTING-JWATCHER: Starting j-watcher (non-blocking)...');
+      Promise.race([
+        startJEventWatcher(env),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('J-watcher startup timeout (3s)')), 3000))
+      ])
+        .then(() => {
+          state.jWatcherStarted = true;
+          console.log('🔭 JWATCHER-READY: J-watcher started successfully');
+        })
+        .catch((error) => {
+          console.warn('⚠️  J-Event Watcher startup failed or timed out (non-critical):', error.message);
+        });
+    }
+  }
 
   return env;
 };
 
 // === TIME MACHINE API ===
-const getHistory = () => env.history || [];
-const getSnapshot = (index: number) => {
+const getHistory = (env: Env) => env.history || [];
+const getSnapshot = (env: Env, index: number) => {
   const history = env.history || [];
   return index >= 0 && index < history.length ? history[index] : null;
 };
-const getCurrentHistoryIndex = () => (env.history || []).length - 1;
+const getCurrentHistoryIndex = (env: Env) => (env.history || []).length - 1;
 
 // === SYSTEM SOLVENCY CHECK ===
 // Total tokens in system: reserves + collateral must equal minted supply
@@ -7569,7 +7602,7 @@ interface Solvency {
   byToken: Map<number, { reserves: bigint; collateral: bigint; total: bigint }>;
 }
 
-const calculateSolvency = (snapshot?: Env): Solvency => {
+const calculateSolvency = (env: Env, snapshot?: Env): Solvency => {
   const targetEnv = snapshot || env;
   const byToken = new Map<number, { reserves: bigint; collateral: bigint; total: bigint }>();
 
@@ -7603,8 +7636,8 @@ const calculateSolvency = (snapshot?: Env): Solvency => {
   return { reserves, collateral, total: reserves + collateral, byToken };
 };
 
-const verifySolvency = (expected?: bigint, label?: string): boolean => {
-  const s = calculateSolvency();
+const verifySolvency = (env: Env, expected?: bigint, label?: string): boolean => {
+  const s = calculateSolvency(env);
   const prefix = label ? `[${label}] ` : '';
 
   if (expected !== undefined && s.total !== expected) {
@@ -7617,35 +7650,30 @@ const verifySolvency = (expected?: bigint, label?: string): boolean => {
   return true;
 };
 
-// Server-specific clearDatabase that also resets history
-const clearDatabaseAndHistory = async () => {
+// Clear database for a specific runtime and return a fresh env
+const clearDatabaseAndHistory = async (env: Env): Promise<Env> => {
   console.log('🗑️ Clearing database and resetting runtime history...');
-
-  // Clear the Level database
+  const db = getRuntimeDb(env);
   await clearDatabase(db);
 
-  // Reset the runtime environment to initial state (including history)
-  env = {
-    eReplicas: new Map(),
-    jReplicas: new Map(),
-    height: 0,
-    timestamp: 0,
-    ...(runtimeSeed !== undefined && runtimeSeed !== null ? { runtimeSeed } : {}),
-    ...(runtimeId ? { runtimeId } : {}),
-    runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    history: [],
-    gossip: createGossipLayer(),
-    frameLogs: [],
-  };
+  const seed = env.runtimeSeed ?? null;
+  const freshEnv = createEmptyEnv(seed);
+  if (env.runtimeId) {
+    freshEnv.runtimeId = env.runtimeId;
+    freshEnv.dbNamespace = normalizeDbNamespace(env.runtimeId);
+  }
+  attachEventEmitters(freshEnv);
 
   console.log('✅ Database and runtime history cleared');
+  return freshEnv;
 };
 
 // Export j-watcher status for frontend display
-export const getJWatcherStatus = () => {
-  if (!jWatcher || !env) return null;
+export const getJWatcherStatus = (env: Env) => {
+  const state = ensureRuntimeState(env);
+  if (!state.jWatcher) return null;
   return {
-    isWatching: jWatcher.getStatus().isWatching,
+    isWatching: state.jWatcher.getStatus().isWatching,
     proposers: Array.from(env.eReplicas.entries())
       .filter(([, replica]) => replica.isProposer)
       .map(([key, replica]) => {
@@ -7665,19 +7693,17 @@ export const getJWatcherStatus = () => {
  * Wraps applyRuntimeInput with a single entity tx
  */
 export const queueEntityInput = async (
+  env: Env,
   entityId: string,
   signerId: string,
   txData: { type: string; [key: string]: any }
 ): Promise<void> => {
-  if (!env) throw new Error('Runtime not initialized');
-  await applyRuntimeInput(env, {
-    runtimeTxs: [],
-    entityInputs: [{
-      entityId,
-      signerId,
-      entityTxs: [{ type: txData.type, data: txData }]
-    }]
-  });
+  enqueueRuntimeInputs(env, [{
+    entityId,
+    signerId,
+    entityTxs: [{ type: txData.type, data: txData }]
+  }]);
+  ensureRuntimeLoop(env);
 };
 
 export {
@@ -7720,6 +7746,7 @@ export {
   isEntityRegistered,
   main,
   startJEventWatcher,
+  resolveEntityProposerId,
   // Blockchain registration functions
   registerNumberedEntityOnChain,
   requestNamedEntity,
@@ -7861,8 +7888,6 @@ const demoCompleteHanko = async (): Promise<void> => {
 // Demo wrapper removed - use scenarios.ahb(env) or scenarios.grid(env) instead
 
 // === ENVIRONMENT UTILITIES ===
-// Global reference to current env for log capturing
-let currentEnvForLogs: Env | null = null;
 
 const isEntryArray = (value: unknown): value is Array<[unknown, unknown]> =>
   Array.isArray(value) && value.length > 0 && Array.isArray(value[0]) && value[0].length === 2;
@@ -7954,6 +7979,9 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   const seedText = normalizedSeed !== undefined && normalizedSeed !== null
     ? (typeof normalizedSeed === 'string' ? normalizedSeed : new TextDecoder().decode(normalizedSeed))
     : '';
+  const derivedRuntimeId = seedText ? deriveRuntimeIdFromSeed(seedText) : null;
+  const resolvedRuntimeId = derivedRuntimeId ? derivedRuntimeId.toLowerCase() : null;
+  const resolvedDbNamespace = resolvedRuntimeId ? normalizeDbNamespace(resolvedRuntimeId) : undefined;
 
   const env: Env = {
     eReplicas: new Map(),
@@ -7961,8 +7989,12 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
     height: 0,
     timestamp: 0,
     ...(seedText !== undefined && seedText !== null ? { runtimeSeed: seedText } : {}),
-    ...(runtimeId ? { runtimeId } : {}),
+    ...(resolvedRuntimeId ? { runtimeId: resolvedRuntimeId } : {}),
+    ...(resolvedDbNamespace ? { dbNamespace: resolvedDbNamespace } : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
+    runtimeMempool: undefined,
+    runtimeConfig: undefined,
+    runtimeState: undefined,
     history: [],
     gossip: createGossipLayer(),
     frameLogs: [],
@@ -7983,108 +8015,26 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   // Attach event emission methods (EVM-style)
   attachEventEmitters(env);
 
-  // Set as current env for log capturing
-  currentEnvForLogs = env;
+  // Ensure runtime structures exist
+  ensureRuntimeMempool(env);
+  ensureRuntimeConfig(env);
+  ensureRuntimeState(env);
 
   return env;
 };
 
-// Intercept console for frame log capturing (browser only)
-// TEMPORARILY DISABLED - debugging solvency regression
-if (false && isBrowser) {
-  const originalLog = console.log;
-  const originalWarn = console.warn;
-  const originalError = console.error;
-
-  console.log = function(...args: any[]) {
-    originalLog.apply(console, args);
-    if (currentEnvForLogs) {
-      try {
-        const msg = args.map(a => {
-          if (typeof a === 'string') return a;
-          if (typeof a === 'bigint') return a.toString() + 'n';
-          try { return JSON.stringify(a); } catch { return String(a); }
-        }).join(' ');
-        currentEnvForLogs.frameLogs.push({
-          level: 'info',
-          category: detectLogCategory(msg),
-          message: msg,
-          timestamp: currentEnvForLogs?.timestamp ?? 0,
-        });
-      } catch (e) {
-        // Silently fail log capture - don't break runtime
-      }
-    }
-  };
-
-  console.warn = function(...args: any[]) {
-    originalWarn.apply(console, args);
-    if (currentEnvForLogs) {
-      try {
-        const msg = args.map(a => {
-          if (typeof a === 'string') return a;
-          if (typeof a === 'bigint') return a.toString() + 'n';
-          try { return JSON.stringify(a); } catch { return String(a); }
-        }).join(' ');
-        currentEnvForLogs.frameLogs.push({
-          level: 'warn',
-          category: detectLogCategory(msg),
-          message: msg,
-          timestamp: currentEnvForLogs?.timestamp ?? 0,
-        });
-      } catch (e) {
-        // Silently fail
-      }
-    }
-  };
-
-  console.error = function(...args: any[]) {
-    originalError.apply(console, args);
-    if (currentEnvForLogs) {
-      try {
-        const msg = args.map(a => {
-          if (typeof a === 'string') return a;
-          if (typeof a === 'bigint') return a.toString() + 'n';
-          try { return JSON.stringify(a); } catch { return String(a); }
-        }).join(' ');
-        currentEnvForLogs.frameLogs.push({
-          level: 'error',
-          category: detectLogCategory(msg),
-          message: msg,
-          timestamp: currentEnvForLogs?.timestamp ?? 0,
-        });
-      } catch (e) {
-        // Silently fail
-      }
-    }
-  };
-}
-
-function detectLogCategory(msg: string): 'consensus' | 'account' | 'jurisdiction' | 'evm' | 'network' | 'ui' | 'system' {
-  if (msg.includes('CONSENSUS') || msg.includes('E-MACHINE') || msg.includes('PROPOSE')) return 'consensus';
-  if (msg.includes('ACCOUNT') || msg.includes('A-MACHINE') || msg.includes('BILATERAL')) return 'account';
-  if (msg.includes('J-MACHINE') || msg.includes('JURISDICTION')) return 'jurisdiction';
-  if (msg.includes('EVM') || msg.includes('BrowserVM')) return 'evm';
-  if (msg.includes('GOSSIP') || msg.includes('NETWORK')) return 'network';
-  if (msg.includes('[View]') || msg.includes('[Graph3D]')) return 'ui';
-  return 'system';
-}
-
 // === CONSENSUS PROCESSING ===
 // ONE TICK = ONE ITERATION. No cascade. E→E communication always requires new tick.
-let processing = false;
 
 export const process = async (
   env: Env,
   inputs?: EntityInput[],
   runtimeDelay = 0
 ) => {
-  // Ensure event emitters are attached (may be lost after store serialization)
   if (!env.emit) {
     attachEventEmitters(env);
   }
 
-  // Frame stepping: check if we should stop and dump state
   if (env.stopAtFrame !== undefined && env.height >= env.stopAtFrame) {
     console.log(`\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);
     console.log('═'.repeat(80));
@@ -8095,84 +8045,113 @@ export const process = async (
     throw new Error(`FRAME_STEP: Stopped at frame ${env.height} for debugging`);
   }
 
-  // Lock: prevent interleaving
-  if (processing) {
+  if (inputs && inputs.length > 0) {
+    enqueueRuntimeInputs(env, inputs);
+  }
+  if (env.pendingOutputs && env.pendingOutputs.length > 0) {
+    enqueueRuntimeInputs(env, env.pendingOutputs);
+    env.pendingOutputs = [];
+  }
+  if (env.networkInbox && env.networkInbox.length > 0) {
+    enqueueRuntimeInputs(env, env.networkInbox);
+    env.networkInbox = [];
+  }
+
+  if (!hasRuntimeWork(env)) return env;
+
+  const now = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+  if (!isRuntimeFrameReady(env, now, runtimeDelay)) {
+    ensureRuntimeLoop(env);
+    return env;
+  }
+
+  const state = ensureRuntimeState(env);
+  if (state.processing) {
     console.warn('⏸️ SKIP: Previous tick still processing');
     return env;
   }
 
-  processing = true;
-
-  // Merge pending outputs from previous tick with new inputs
-  const allInputs = [
-    ...(env.pendingOutputs || []),
-    ...(env.networkInbox || []),
-    ...(inputs || []),
-  ];
-  env.pendingOutputs = [];
-  env.networkInbox = [];
-
-  // Validate inputs
-  allInputs.forEach(o => {
-    try {
-      validateEntityInput(o);
-    } catch (error) {
-      logError("RUNTIME_TICK", `🚨 CRITICAL: Invalid EntityInput!`, {
-        error: (error as Error).message,
-        entityId: o.entityId.slice(0, 10),
-        signerId: o.signerId,
-      });
-      throw error;
-    }
-  });
+  state.processing = true;
 
   try {
     const quietRuntimeLogs = env.quietRuntimeLogs === true;
     getBrowserVMInstance(env)?.setQuietLogs?.(quietRuntimeLogs);
-    // Update timestamp
-    // In scenario mode, advance by 100ms per tick (deterministic)
-    // In live mode, use real time
+
     if (env.scenarioMode) {
-      env.timestamp = (env.timestamp ?? 0) + 100; // Advance 100ms per frame
+      env.timestamp = (env.timestamp ?? 0) + 100;
     } else {
       env.timestamp = getWallClockMs();
     }
     getBrowserVMInstance(env)?.setBlockTimestamp?.(env.timestamp);
 
-    if (allInputs.length > 0) {
+    const mempool = ensureRuntimeMempool(env);
+    const runtimeInput: RuntimeInput = {
+      runtimeTxs: [...mempool.runtimeTxs],
+      entityInputs: [...mempool.entityInputs],
+      ...(mempool.jInputs && mempool.jInputs.length > 0 ? { jInputs: [...mempool.jInputs] } : {}),
+    };
+    const mempoolQueuedAt = mempool.queuedAt;
+    mempool.runtimeTxs = [];
+    mempool.entityInputs = [];
+    if (mempool.jInputs) mempool.jInputs = [];
+    mempool.queuedAt = undefined;
+
+    runtimeInput.entityInputs.forEach(o => {
+      try {
+        validateEntityInput(o);
+      } catch (error) {
+        logError("RUNTIME_TICK", `🚨 CRITICAL: Invalid EntityInput!`, {
+          error: (error as Error).message,
+          entityId: o.entityId.slice(0, 10),
+          signerId: o.signerId,
+        });
+        throw error;
+      }
+    });
+
+    const hasRuntimeInput =
+      runtimeInput.runtimeTxs.length > 0 ||
+      runtimeInput.entityInputs.length > 0 ||
+      (runtimeInput.jInputs?.length ?? 0) > 0;
+
+    let entityOutbox: EntityInput[] = [];
+    if (hasRuntimeInput) {
       if (!quietRuntimeLogs) {
-        console.log(`📥 TICK: Processing ${allInputs.length} inputs for [${allInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
-      }
-
-      const result = await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: allInputs });
-
-      // DEBUG: Log what applyRuntimeInput returned
-      if (HEAVY_LOGS) console.log(`🔍 PROCESS-DEBUG: applyRuntimeInput returned entityOutbox.length=${result.entityOutbox.length}`);
-
-      // Store outputs for NEXT tick
-      const routedOutputs = routeEntityOutputs(env, result.entityOutbox);
-      env.pendingOutputs = routedOutputs;
-
-      if (routedOutputs.length > 0 && !quietRuntimeLogs) {
-        console.log(`📤 TICK: ${routedOutputs.length} outputs queued for next tick → [${routedOutputs.map(o => o.entityId.slice(-4)).join(',')}]`);
-      }
-    } else {
-      // No inputs to process - retry routing any pending network outputs
-      if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
-        const routedOutputs = routeEntityOutputs(env, []);
-        if (routedOutputs.length > 0) {
-          env.pendingOutputs = [...(env.pendingOutputs || []), ...routedOutputs];
-          if (!quietRuntimeLogs) {
-            console.log(`📤 TICK: ${routedOutputs.length} local outputs queued from pending network outputs`);
-          }
+        console.log(`📥 TICK: Processing ${runtimeInput.entityInputs.length} inputs for [${runtimeInput.entityInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
+        if (runtimeInput.runtimeTxs.length > 0) {
+          console.log(`📥 TICK: Processing ${runtimeInput.runtimeTxs.length} queued runtimeTxs`);
         }
-      } else {
-        // No inputs to process - keep env.extra so narrative-only frames still render
       }
+      try {
+        const result = await applyRuntimeInput(env, runtimeInput);
+        if (HEAVY_LOGS) console.log(`🔍 PROCESS-DEBUG: applyRuntimeInput returned entityOutbox.length=${result.entityOutbox.length}`);
+        entityOutbox = result.entityOutbox;
+      } catch (error) {
+        // Restore runtime mempool on failure (WAL safety)
+        mempool.runtimeTxs = [...runtimeInput.runtimeTxs, ...mempool.runtimeTxs];
+        mempool.entityInputs = [...runtimeInput.entityInputs, ...mempool.entityInputs];
+        if (runtimeInput.jInputs) {
+          mempool.jInputs = [...runtimeInput.jInputs, ...(mempool.jInputs ?? [])];
+        }
+        if (mempool.queuedAt === undefined) {
+          mempool.queuedAt = mempoolQueuedAt ?? (env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs());
+        }
+        throw error;
+      }
+    } else if (!quietRuntimeLogs && env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
+      console.log(`📤 TICK: No entity inputs - retrying ${env.pendingNetworkOutputs.length} pending network outputs`);
     }
 
-    // === J-MACHINE BLOCK PROCESSING ===
-    // Process J-machine mempools when blockDelayMs has elapsed
+    const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, entityOutbox);
+    if (localOutputs.length > 0) {
+      enqueueRuntimeInputs(env, localOutputs);
+      if (!quietRuntimeLogs) {
+        console.log(`📤 TICK: ${localOutputs.length} local outputs queued for next tick → [${localOutputs.map(o => o.entityId.slice(-4)).join(',')}]`);
+      }
+    }
+    env.pendingNetworkOutputs = deferredOutputs;
+
+    let jMachineProcessed = false;
     if (env.jReplicas) {
       for (const [jName, jReplica] of env.jReplicas.entries()) {
         const mempool = jReplica.mempool || [];
@@ -8180,12 +8159,10 @@ export const process = async (
         const lastBlockTs = jReplica.lastBlockTimestamp || 0;
         const elapsed = env.timestamp - lastBlockTs;
 
-        // Debug logging
         if (mempool.length > 0) {
           if (HEAVY_LOGS) console.log(`🔍 [J-Machine ${jName}] mempool=${mempool.length}, elapsed=${elapsed}ms, blockDelay=${blockDelayMs}ms, ready=${elapsed >= blockDelayMs}`);
         }
 
-        // Check if mempool items are ready (minimum 1 tick delay for visualization)
         const oldestTxAge = mempool.length > 0 && mempool[0].queuedAt ? env.timestamp - mempool[0].queuedAt : 999999;
         const mempoolReady = mempool.length > 0 && oldestTxAge >= blockDelayMs;
 
@@ -8193,24 +8170,35 @@ export const process = async (
           console.log(`⏳ [J-Machine] ${mempool.length} pending (age: ${oldestTxAge}ms < ${blockDelayMs}ms) - waiting...`);
         }
 
-        // If mempool ready AND block delay passed → PROCESS
         if (mempoolReady) {
+          jMachineProcessed = true;
           if (!quietRuntimeLogs) {
             console.log(`⚡ [5/6] J-Machine ${jReplica.name}: Processing ${mempool.length} txs (oldest: ${oldestTxAge}ms >= ${blockDelayMs}ms)`);
             console.log(`   Mempool BEFORE execution:`, mempool.map(tx => `${tx.entityId.slice(-4)}:${tx.data.batchSize || '?'}`));
           }
 
-          // Emit J-block event
           env.emit('JBlockProcessing', {
             jurisdictionName: jName,
             txCount: mempool.length,
             blockNumber: Number(jReplica.blockNumber) + 1,
           });
 
-          // Process each JTx in mempool
           const { broadcastBatch } = await import('./j-batch');
           const { getBrowserVMInstance } = await import('./evm');
           const browserVM = getBrowserVMInstance(env);
+          const rpcUrl = jReplica.rpcs?.[0];
+          const chainId = jReplica.jadapter?.chainId ?? jReplica.chainId;
+          const jurisdiction = !browserVM && rpcUrl && jReplica.depositoryAddress && jReplica.entityProviderAddress ? {
+            name: jReplica.name,
+            chainId: Number(chainId ?? 0),
+            address: rpcUrl,
+            entityProviderAddress: jReplica.entityProviderAddress,
+            depositoryAddress: jReplica.depositoryAddress,
+          } : null;
+
+          if (!browserVM && !jurisdiction) {
+            console.warn(`⚠️ [J-Machine ${jReplica.name}] Missing jurisdiction config (rpc/addresses). Batch broadcast will be skipped.`);
+          }
 
           if (browserVM?.beginJurisdictionBlock) {
             browserVM.beginJurisdictionBlock(env.timestamp);
@@ -8234,7 +8222,6 @@ export const process = async (
                 // best-effort debug only
               }
 
-              // Create temporary jBatchState for broadcastBatch call
               const tempJBatchState = {
                 batch: jTx.data.batch,
                 jurisdiction: null,
@@ -8243,12 +8230,16 @@ export const process = async (
                 failedAttempts: 0,
               };
 
-              // Execute batch on BrowserVM
+              if (!browserVM && !jurisdiction) {
+                console.error(`   ❌ Batch execution skipped: missing jurisdiction config for ${jReplica.name}`);
+                continue;
+              }
+
               const result = await broadcastBatch(
                 env,
                 jTx.entityId,
                 tempJBatchState,
-                null, // jurisdiction not needed for BrowserVM
+                jurisdiction,
                 browserVM || undefined,
                 jTx.timestamp ?? env.timestamp,
                 jTx.data?.signerId
@@ -8278,7 +8269,6 @@ export const process = async (
               }
             }
 
-            // Handle direct mint operations (admin function, bypasses batch)
             if (jTx.type === 'mint' && jTx.data && browserVM?.debugFundReserves) {
               const { entityId, tokenId, amount } = jTx.data;
               if (!quietRuntimeLogs) {
@@ -8302,12 +8292,10 @@ export const process = async (
             browserVM.endJurisdictionBlock();
           }
 
-          // Clear mempool immediately after processing (all txs executed)
           const processedCount = mempool.length;
-          const successCount = processedCount; // Failures would throw in scenario mode
+          const successCount = processedCount;
           const failCount = 0;
 
-          // CRITICAL: Clear mempool immediately (txs already executed)
           if (!quietRuntimeLogs) {
             console.log(`🧹 [J-Machine] Clearing mempool (before: ${jReplica.mempool.length} items)...`);
           }
@@ -8316,9 +8304,9 @@ export const process = async (
             console.log(`🧹 [J-Machine] Mempool AFTER clear: ${jReplica.mempool.length} items (should be 0)`);
           }
 
-          jReplica.lastBlockTimestamp = env.timestamp; // Reset timer for next block
-          jReplica.blockNumber = jReplica.blockNumber + 1n; // Increment ONLY when block processed
-          jReplica.blockReady = false; // Block created, mempool empty
+          jReplica.lastBlockTimestamp = env.timestamp;
+          jReplica.blockNumber = jReplica.blockNumber + 1n;
+          jReplica.blockReady = false;
 
           if (!quietRuntimeLogs) {
             console.log(`✅ [J-Machine ${jReplica.name}] Block #${jReplica.blockNumber} finalized (${successCount}/${processedCount} batches)`);
@@ -8330,14 +8318,12 @@ export const process = async (
             console.log(`   Next block in ${blockDelayMs}ms`);
           }
 
-          // Emit J-block finalized event
           env.emit('JBlockFinalized', {
             jurisdictionName: jName,
             blockNumber: Number(jReplica.blockNumber),
             txCount: mempool.length,
           });
         } else if (mempool.length > 0) {
-          // Mempool has items but delay not elapsed yet (yellow cube visible, waiting)
           jReplica.blockReady = true;
         } else {
           jReplica.blockReady = false;
@@ -8345,8 +8331,10 @@ export const process = async (
       }
     }
 
-    // ALWAYS snapshot after tick (full frame chain)
-    // env.extra only adds metadata (subtitle, description) - optional
+    if (!hasRuntimeInput && jMachineProcessed) {
+      env.height += 1;
+    }
+
     let browserVMState: any = undefined;
     const browserVMStateSource = getBrowserVMInstance(env);
     if (browserVMStateSource?.serializeState) {
@@ -8369,25 +8357,24 @@ export const process = async (
       eReplicas: new Map(env.eReplicas),
       jReplicas: env.jReplicas ? Array.from(env.jReplicas.values()).map(jr => ({
         ...jr,
-        mempool: [...jr.mempool], // Deep clone mempool array
-        stateRoot: new Uint8Array(jr.stateRoot), // Clone Uint8Array
+        mempool: [...jr.mempool],
+        stateRoot: new Uint8Array(jr.stateRoot),
       })) : [],
       runtimeInput: env.runtimeInput,
       runtimeOutputs: env.pendingOutputs || [],
       frameLogs: env.frameLogs || [],
-      title: `Frame ${env.history?.length || 0}`, // Default title
+      title: `Frame ${env.history?.length || 0}`,
       ...(browserVMState ? { browserVMState } : {}),
     };
 
-    // Add metadata if provided via snap()
     if (env.extra) {
       const { subtitle, description } = env.extra;
       if (subtitle) {
         snapshot.subtitle = subtitle;
-        snapshot.title = subtitle.title || snapshot.title; // Override title
+        snapshot.title = subtitle.title || snapshot.title;
       }
       if (description) snapshot.description = description;
-      env.extra = undefined; // Clear after use
+      env.extra = undefined;
     }
 
     if (!env.history) env.history = [];
@@ -8397,16 +8384,27 @@ export const process = async (
       console.log(`📸 Snapshot: ${snapshot.title} (${env.history.length} total)`);
     }
 
-    // Auto-persist
     await saveEnvToDB(env);
+
+    const deferredAfterSend = dispatchEntityOutputs(env, remoteOutputs);
+    if (deferredAfterSend.length > 0) {
+      env.pendingNetworkOutputs = [...(env.pendingNetworkOutputs || []), ...deferredAfterSend];
+    }
+
+    if (remoteOutputs.length > 0 || deferredAfterSend.length > 0) {
+      await saveEnvToDB(env);
+    }
+
+    state.lastFrameAt = env.timestamp;
 
     if (env.strictScenario) {
       const { assertRuntimeStateStrict } = await import('./strict-assertions');
       await assertRuntimeStateStrict(env);
     }
+
     return env;
   } finally {
-    processing = false;
+    state.processing = false;
   }
 };
 
@@ -8415,11 +8413,13 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
   if (!isBrowser) return; // Only persist in browser
 
   try {
-    const dbReady = await tryOpenDb();
+    const dbReady = await tryOpenDb(env);
     if (!dbReady) return;
+    const dbNamespace = resolveDbNamespace({ env });
+    const db = getRuntimeDb(env);
 
     // Save latest height pointer
-    await db.put(Buffer.from('latest_height'), Buffer.from(String(env.height)));
+    await db.put(makeDbKey(dbNamespace, 'latest_height'), Buffer.from(String(env.height)));
 
     // Save environment snapshot (jReplicas with stateRoot are serializable)
     // CRITICAL: Exclude 'history' to prevent exponential growth (history contains all previous snapshots)
@@ -8444,7 +8444,7 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
       }
       return v;
     });
-    await db.put(Buffer.from(`snapshot:${env.height}`), Buffer.from(snapshot));
+    await db.put(makeDbKey(dbNamespace, `snapshot:${env.height}`), Buffer.from(snapshot));
   } catch (err) {
     console.error('❌ Failed to save to LevelDB:', err);
     if (env.scenarioMode) {
@@ -8453,20 +8453,27 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
   }
 };
 
-export const loadEnvFromDB = async (): Promise<Env | null> => {
+export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: string | null): Promise<Env | null> => {
   if (!isBrowser) return null;
 
   try {
-    const dbReady = await tryOpenDb();
+    const tempEnv = createEmptyEnv(runtimeSeed ?? null);
+    if (runtimeId) {
+      tempEnv.runtimeId = runtimeId;
+      tempEnv.dbNamespace = normalizeDbNamespace(runtimeId);
+    }
+    const dbReady = await tryOpenDb(tempEnv);
     if (!dbReady) return null;
 
-    const latestHeightBuffer = await db.get(Buffer.from('latest_height'));
+    const dbNamespace = resolveDbNamespace({ runtimeId, runtimeSeed, env: tempEnv });
+    const db = getRuntimeDb(tempEnv);
+    const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
     const latestHeight = parseInt(latestHeightBuffer.toString());
 
     // Load all snapshots to build history
     const history: Env[] = [];
     for (let i = 0; i <= latestHeight; i++) {
-      const buffer = await db.get(Buffer.from(`snapshot:${i}`));
+      const buffer = await db.get(makeDbKey(dbNamespace, `snapshot:${i}`));
       const data = JSON.parse(buffer.toString());
 
       // Hydrate Maps/BigInts
@@ -8476,6 +8483,7 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
       const env = createEmptyEnv(runtimeSeedRaw ?? null);
       env.height = Number(data.height || 0);
       env.timestamp = Number(data.timestamp || 0);
+      env.dbNamespace = data.dbNamespace ?? dbNamespace;
       if (data.browserVMState) {
         env.browserVMState = data.browserVMState;
       }
@@ -8507,6 +8515,10 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
       if (data.gossip?.profiles) {
         env.gossip.profiles = new Map(data.gossip.profiles);
       }
+      const envState = ensureRuntimeState(env);
+      const tempState = ensureRuntimeState(tempEnv);
+      envState.db = tempState.db;
+      envState.dbOpenPromise = tempState.dbOpenPromise;
       history.push(env);
     }
 
@@ -8538,13 +8550,15 @@ export const loadEnvFromDB = async (): Promise<Env | null> => {
   }
 };
 
-export const clearDB = async (): Promise<void> => {
+export const clearDB = async (env?: Env): Promise<void> => {
   if (!isBrowser) return;
+  const targetEnv = env ?? createEmptyEnv(null);
 
   try {
-    const dbReady = await tryOpenDb();
+    const dbReady = await tryOpenDb(targetEnv);
     if (!dbReady) return;
 
+    const db = getRuntimeDb(targetEnv);
     await db.clear();
     console.log('✅ LevelDB cleared');
   } catch (err) {
@@ -8650,7 +8664,7 @@ export type { ParsedEntityId } from './entity-id-utils';
 export { formatRuntime, formatEntity, formatAccount, formatOrderbook, formatSummary } from './runtime-ascii';
 
 
-//runtime/entity-consensus.ts (1638 lines)
+//runtime/entity-consensus.ts (1637 lines)
 /**
  * XLN Entity Consensus and State Management
  * Core entity processing logic, consensus, proposals, and state transitions
@@ -9862,15 +9876,14 @@ export const applyEntityFrame = async (
         }
       }
     } else if (entityTx.type === 'openAccount' && entityTx.data) {
-      // Account opened - may need initial frame
+      // openAccount processed - account may have mempool items queued
       const targetEntity = entityTx.data.targetEntityId;
-      // Account keyed by counterparty ID
       const accountMachine = currentEntityState.accounts.get(targetEntity);
       if (accountMachine) {
         const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
         if (isLeft && accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
           proposableAccounts.add(targetEntity);
-          console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (new account opened)`);
+          console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (account opened)`);
         }
       }
     } else if (entityTx.type === 'extendCredit' && entityTx.data) {
@@ -10290,7 +10303,7 @@ export const handleEmptyMempoolProposer = (): void => {
 };
 
 
-//runtime/account-consensus.ts (1489 lines)
+//runtime/account-consensus.ts (1497 lines)
 /**
  * XLN Account Consensus System
  *
@@ -10826,6 +10839,7 @@ export async function proposeAccountFrame(
     // NOTE: Settlement hankos now handled via SettlementWorkspace (entity-tx/handlers/settle.ts)
     counter: skipCounterIncrement ? accountMachine.proofHeader.cooperativeNonce : ++accountMachine.proofHeader.cooperativeNonce,
   };
+  accountMachine.pendingAccountInput = accountInput;
 
   // Collect hashes for entity-quorum signing (multi-signer support)
   const hashesToSign: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }> = [
@@ -11036,6 +11050,7 @@ export async function handleAccountInput(
 
       // Clear pending state
       delete accountMachine.pendingFrame;
+      delete accountMachine.pendingAccountInput;
       accountMachine.sentTransitions = 0;
       delete accountMachine.clonedForValidation;
       accountMachine.rollbackCount = Math.max(0, accountMachine.rollbackCount - 1); // Successful confirmation reduces rollback
@@ -11158,6 +11173,7 @@ export async function handleAccountInput(
 
           accountMachine.sentTransitions = 0;
           delete accountMachine.pendingFrame;
+          delete accountMachine.pendingAccountInput;
           delete accountMachine.clonedForValidation;
           accountMachine.rollbackCount++;
           accountMachine.lastRollbackFrameHash = receivedHash; // Track this rollback
@@ -11381,6 +11397,11 @@ export async function handleAccountInput(
     if (HEAVY_LOGS) console.log(`🔍 COMPUTING-HASH: Creating hash for frame ${receivedFrame.height}...`);
     // After bilateral field verification above, use OUR computed fullDeltaStates for hash
     // This ensures the stored frame has correct bilateral state
+    const leftEntityId = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity)
+      ? accountMachine.proofHeader.fromEntity
+      : accountMachine.proofHeader.toEntity;
+    const proposerIsLeft = input.fromEntityId === leftEntityId;
+
     const recomputedHash = await createFrameHash({
       height: receivedFrame.height,
       timestamp: receivedFrame.timestamp,
@@ -11391,7 +11412,7 @@ export async function handleAccountInput(
       deltas: ourFinalDeltas, // Use OUR computed deltas
       fullDeltaStates: ourFullDeltaStates, // Use OUR computed fullDeltaStates
       stateHash: '', // Computed by createFrameHash
-      byLeft: receivedFrame.byLeft ?? true,
+      byLeft: proposerIsLeft,
     });
 
     if (recomputedHash !== receivedFrame.stateHash) {
@@ -11414,7 +11435,7 @@ export async function handleAccountInput(
     // that passes transaction verification but corrupts our stored state.
     //
     // Safe to use from receivedFrame (inputs/metadata):
-    //   - height, timestamp, jHeight, accountTxs, prevFrameHash, byLeft
+    //   - height, timestamp, jHeight, accountTxs, prevFrameHash
     // NEVER use (computed state - could be poisoned):
     //   - tokenIds, deltas, fullDeltaStates, stateHash (except for comparison)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -11477,7 +11498,7 @@ export async function handleAccountInput(
       tokenIds: ourFinalTokenIds, // Use OUR computed tokenIds
       deltas: ourFinalDeltas, // Use OUR computed deltas
       stateHash: recomputedHash, // Use hash computed from OUR values
-      byLeft: receivedFrame.byLeft ?? true, // Copy proposer info
+      byLeft: proposerIsLeft, // Compute proposer side locally
       fullDeltaStates: ourFullDeltaStates, // Use OUR verified fullDeltaStates
     });
     accountMachine.currentHeight = receivedFrame.height;
@@ -13281,17 +13302,17 @@ export * from './proposals';
 export * from './validation';
 
 
-//runtime/entity-tx/apply.ts (978 lines)
+//runtime/entity-tx/apply.ts (999 lines)
 import { calculateQuorumPower } from '../entity-consensus';
 import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
 import { processProfileUpdate } from '../name-resolution';
 import { createOrderbookExtState } from '../orderbook';
-import { db } from '../runtime';
+import { getRuntimeDb, tryOpenDb } from '../runtime';
 import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput } from '../types';
 import { DEBUG, HEAVY_LOGS, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
-import { buildEntityProfile } from '../networking/gossip-helper';
+import { buildEntityProfile, mergeProfileWithExisting } from '../networking/gossip-helper';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import { handleAccountInput, type MempoolOp, type SwapOfferEvent, type SwapCancelEvent } from './handlers/account';
 import { handleJEvent } from './j-events';
@@ -13457,7 +13478,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         console.log(`🏷️ Calling processProfileUpdate for entity ${profileData.entityId}`);
         // Process profile update synchronously to ensure gossip is updated before snapshot
         try {
-          await processProfileUpdate(db, profileData.entityId, profileData, profileData.hankoSignature || '', env);
+          const runtimeDb = env ? getRuntimeDb(env) : null;
+          if (runtimeDb && env) {
+            await tryOpenDb(env);
+            await processProfileUpdate(runtimeDb, profileData.entityId, profileData, profileData.hankoSignature || '', env);
+          }
         } catch (error) {
           logError("ENTITY_TX", `❌ Failed to process profile update for ${profileData.entityId}:`, error);
         }
@@ -13619,18 +13644,34 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       if (isLeft) {
-        // Token 1 = USDC
-        const usdcTokenId = 1;
-        // Add transactions to mempool - will be batched into frame #1 on next tick
-        // NOTE: Only add_delta is queued. Credit limits are 0 by default - must be explicitly set
+        // Token for delta (default: 1 = USDC)
+        const tokenId = entityTx.data.tokenId ?? 1;
+
+        // STEP 1: Add delta - creates the token delta for this account
         localAccount.mempool.push({
           type: 'add_delta',
-          data: { tokenId: usdcTokenId }
+          data: { tokenId }
         });
 
-        console.log(`📝 Queued add_delta to mempool (total: ${localAccount.mempool.length})`);
-        console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms) via AUTO-PROPOSE`);
-        console.log(`   Transactions: [add_delta] - credit limits start at 0, must be explicitly set`);
+        // STEP 2: Extend credit (optional) - must come AFTER add_delta in same frame
+        // Order matters: add_delta creates delta, then set_credit_limit modifies it
+        const creditAmount = entityTx.data.creditAmount;
+        if (creditAmount && creditAmount > 0n) {
+          // Determine canonical side for credit limit
+          // leftCreditLimit = credit I extend to LEFT entity (counterparty if I'm right)
+          const counterpartyIsLeft = counterpartyId < entityState.entityId;
+          const side = counterpartyIsLeft ? 'left' : 'right';
+
+          localAccount.mempool.push({
+            type: 'set_credit_limit',
+            data: { tokenId, amount: creditAmount, side: side as 'left' | 'right' }
+          });
+          console.log(`📝 Queued [add_delta, set_credit_limit] to mempool (${side}=${creditAmount})`);
+        } else {
+          console.log(`📝 Queued [add_delta] to mempool (credit=0, must be set explicitly)`);
+        }
+
+        console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms)`);
       } else {
         console.log(`🧭 Right side: waiting for left's frame (mempool stays empty)`);
       }
@@ -13663,14 +13704,15 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         // Preserve existing name if any (don't overwrite with undefined)
         const existingName = existingProfile?.metadata?.name;
         const profile = buildEntityProfile(newState, existingName, monotonicTimestamp);
+        const mergedProfile = mergeProfileWithExisting(profile, existingProfile);
 
-        console.log(`🏗️ Built profile for ${newState.entityId.slice(-4)}: accounts=${profile.accounts?.length || 0} name=${profile.metadata?.name || 'none'}`);
+        console.log(`🏗️ Built profile for ${newState.entityId.slice(-4)}: accounts=${mergedProfile.accounts?.length || 0} name=${mergedProfile.metadata?.name || 'none'}`);
 
         if (env.runtimeId) {
-          profile.runtimeId = env.runtimeId;
+          mergedProfile.runtimeId = env.runtimeId;
         }
-        console.log(`📡 Announcing profile ${newState.entityId.slice(-4)} ts=${monotonicTimestamp} accounts=${profile.accounts?.length || 0}`);
-        env.gossip.announce(profile);
+        console.log(`📡 Announcing profile ${newState.entityId.slice(-4)} ts=${monotonicTimestamp} accounts=${mergedProfile.accounts?.length || 0}`);
+        env.gossip.announce(mergedProfile);
       }
 
       return { newState, outputs };
@@ -14372,7 +14414,7 @@ export const executeProposal = (entityState: EntityState, proposal: Proposal): E
 };
 
 
-//runtime/entity-tx/j-events.ts (842 lines)
+//runtime/entity-tx/j-events.ts (846 lines)
 import type { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env } from '../types';
 import { DEBUG } from '../utils';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
@@ -14731,6 +14773,7 @@ async function tryFinalizeJBlocks(
       state.lastFinalizedJHeight = jHeight;
       finalizedHeights.push(jHeight);
       console.log(`   ✅ Added block ${jHeight} to jBlockChain (length: ${state.jBlockChain.length})`);
+      console.log(`   🧭 J-HEIGHT: entity=${state.entityId} lastFinalizedJHeight=${state.lastFinalizedJHeight}`);
 
       // ─────────────────────────────────────────────────────────────────────────
       // Step 5: Apply all events from this finalized block
@@ -14850,8 +14893,11 @@ async function applyFinalizedJEvent(
     const balanceDisplay = (Number(newBalance) / (10 ** decimals)).toFixed(4);
 
     if (entity === entityState.entityId) {
+      const before = entityState.reserves.get(String(tokenId)) ?? 0n;
       newState.reserves.set(String(tokenId), BigInt(newBalance as string | number | bigint));
-      if (DEBUG) console.log(`✅ Reserve updated: Token ${tokenId} → ${newBalance}`);
+      console.log(`💰 ReserveUpdated APPLIED: entity=${entityShort} token=${tokenId} balance=${newBalance}`);
+      console.log(`   Before: ${before.toString()}`);
+      console.log(`   After: ${(newState.reserves.get(String(tokenId)) ?? 0n).toString()}`);
     }
 
     addMessage(newState, `📊 RESERVE: ${tokenSymbol} = ${balanceDisplay} | Block ${blockNumber} | Tx ${txHashShort}`);
@@ -15079,8 +15125,8 @@ async function applyFinalizedJEvent(
 
     if (account) {
       // Query on-chain for timeout
-      const browserVM = env.browserVM || (await import('../evm')).getBrowserVMInstance();
-      if (!browserVM) {
+      const browserVM = (await import('../evm')).getBrowserVMInstance(env);
+      if (!browserVM || !browserVM.getAccountInfo) {
         console.warn(`⚠️ DisputeStarted: No browserVM to query timeout`);
         return { newState, mempoolOps };
       }
@@ -16224,7 +16270,7 @@ export async function handleDepositCollateral(
 }
 
 
-//runtime/entity-tx/handlers/htlc-payment.ts (244 lines)
+//runtime/entity-tx/handlers/htlc-payment.ts (255 lines)
 /**
  * HTLC Payment Handler (Entity-level)
  * Creates conditional payment with hashlock, routes through network
@@ -16390,12 +16436,23 @@ export async function handleHtlcPayment(
   let envelope;
   try {
     // Gather public keys from route entities (for encryption)
+    // Check local replicas first, then gossip profiles for remote entities
     const entityPubKeys = new Map<string, string>();
     for (const entityId of route) {
-      // Find entity replica in env
+      // 1. Check local replica
       const replica = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
       if (replica && replica[1].state.cryptoPublicKey) {
         entityPubKeys.set(entityId, replica[1].state.cryptoPublicKey);
+        continue;
+      }
+      // 2. Check gossip profiles for remote entities (P2P scenario)
+      if (env.gossip) {
+        const profiles = typeof env.gossip.getProfiles === 'function' ? env.gossip.getProfiles() : [];
+        const profile = profiles.find((p: any) => p.entityId === entityId);
+        if (profile?.metadata?.cryptoPublicKey) {
+          entityPubKeys.set(entityId, profile.metadata.cryptoPublicKey);
+          console.log(`🔑 Found crypto key for ${formatEntityId(entityId)} from gossip profile`);
+        }
       }
     }
 
@@ -16900,7 +16957,7 @@ export function handleAddDelta(
 }
 
 
-//runtime/routing/graph.ts (117 lines)
+//runtime/routing/graph.ts (133 lines)
 /**
  * Network Graph Structure for Payment Routing
  * Builds from gossip profiles to create routing graph
@@ -16928,6 +16985,21 @@ export interface NetworkGraph {
     inbound: bigint;
   }>;
 }
+
+const normalizeBigInt = (value: unknown): bigint => {
+  if (typeof value === 'bigint') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.floor(value));
+  if (typeof value === 'string' && value.trim() !== '') {
+    const match = value.match(/^BigInt\(([-\d]+)\)$/);
+    const raw = match ? match[1] : value;
+    try {
+      return BigInt(raw);
+    } catch {
+      return 0n;
+    }
+  }
+  return 0n;
+};
 
 /**
  * Build network graph from gossip profiles
@@ -16969,7 +17041,7 @@ export function buildNetworkGraph(
         if (!metadata) {
           console.warn(`🚨 ROUTING-SAFETY: Entity ${fromEntity} has no metadata, using safe defaults`);
         }
-        const baseFee = metadata?.baseFee ?? 0n; // Explicit null/undefined check
+        const baseFee = normalizeBigInt(metadata?.baseFee ?? 0n); // Explicit null/undefined check
         const feePPM = metadata?.routingFeePPM ?? 100; // Explicit default: 100 PPM (0.01%)
 
         // Create edge
@@ -17018,6 +17090,7 @@ export function getEdge(
   const edges = graph.edges.get(from) ?? [];  // Explicit undefined handling
   return edges.find(e => e.to === to && e.tokenId === tokenId);
 }
+
 
 //runtime/routing/pathfinding.ts (227 lines)
 /**
@@ -17248,7 +17321,7 @@ export class PathFinder {
   }
 }
 
-//runtime/account-crypto.ts (432 lines)
+//runtime/account-crypto.ts (434 lines)
 /**
  * Real cryptographic signatures for account consensus
  * Uses secp256k1 (Ethereum standard) with BIP-39 derivation for numeric signer IDs
@@ -17456,6 +17529,8 @@ export function getCachedSignerAddress(signerId: string): string | null {
 
 // Export for hanko-signing.ts
 export function getSignerPrivateKey(env: any, signerId: string): Uint8Array {
+  const cached = signerKeys.get(signerId);
+  if (cached) return cached;
   if (env?.runtimeSeed === undefined || env?.runtimeSeed === null) {
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getSignerPrivateKey called without env.runtimeSeed for signer ${signerId}`);
   }
@@ -17682,7 +17757,7 @@ export function validateAccountSignatures(
 }
 
 
-//runtime/state-helpers.ts (744 lines)
+//runtime/state-helpers.ts (748 lines)
 /**
  * XLN State Management Helpers
  * Utilities for entity replica cloning, snapshots, and state persistence
@@ -18146,6 +18221,10 @@ export const captureSnapshot = async (
           blockDelayMs: jr.blockDelayMs || 300,
           lastBlockTimestamp: jr.lastBlockTimestamp || 0,
           position: { ...jr.position },
+          ...(jr.rpcs && { rpcs: [...jr.rpcs] }),
+          ...(jr.chainId !== undefined && { chainId: jr.chainId }),
+          ...(jr.depositoryAddress && { depositoryAddress: jr.depositoryAddress }),
+          ...(jr.entityProviderAddress && { entityProviderAddress: jr.entityProviderAddress }),
           ...(jr.contracts && { contracts: { ...jr.contracts } }),
           reserves,
           collaterals,  // Collateral state from bilateral accounts
@@ -18746,7 +18825,7 @@ export const decodeAsync = async (buffer: Buffer): Promise<any> => {
 export { USE_MSGPACK };
 
 
-//runtime/evm.ts (1030 lines)
+//runtime/evm.ts (1026 lines)
 /**
  * XLN EVM Integration
  * Handles blockchain interactions, jurisdictions, and smart contract operations
@@ -19661,14 +19740,10 @@ export const getJurisdictionByAddress = async (address: string): Promise<Jurisdi
 
 /**
  * Get BrowserVM instance (for demos that need direct BrowserVM access)
- * Prefers env.browserVM (isolated), falls back to global singleton (legacy)
+ * Uses env.browserVM only (no legacy global fallback)
  */
 export const getBrowserVMInstance = (env?: any): BrowserVMInstance | null => {
-  if (env?.browserVM) {
-    return env.browserVM;
-  }
-  // BACKWARD COMPAT: Fall back to global singleton
-  return BROWSER_VM_INSTANCE;
+  return env?.browserVM || null;
 };
 
 // Settlement diff structure matching contract

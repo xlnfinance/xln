@@ -4,10 +4,7 @@
  */
 
 import type { Provider, Signer } from 'ethers';
-import type { Account } from '../../jurisdictions/typechain-types/Account';
-import type { Depository } from '../../jurisdictions/typechain-types/Depository';
-import type { EntityProvider } from '../../jurisdictions/typechain-types/EntityProvider';
-import type { DeltaTransformer } from '../../jurisdictions/typechain-types/DeltaTransformer';
+import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types';
 import type { JReplica, BrowserVMState } from '../types';
 
 export type JAdapterMode = 'browservm' | 'anvil' | 'rpc';

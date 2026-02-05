@@ -330,26 +330,29 @@ export async function lockAhb(env: Env): Promise<void> {
     let browserVM = getBrowserVMInstance(env);
     if (!browserVM) {
       console.log('[AHB] No BrowserVM found - creating one...');
-      browserVM = new BrowserVMProvider();
-      await browserVM.init();
+      const newVM = new BrowserVMProvider();
+      await newVM.init();
+      browserVM = newVM as any; // Type coercion for interface compatibility
       env.browserVM = browserVM; // Store in env for isolation
-      const depositoryAddress = browserVM.getDepositoryAddress();
+      const depositoryAddress = newVM.getDepositoryAddress();
       // Register with runtime so other code can access it
       setBrowserVMJurisdiction(env, depositoryAddress, browserVM);
       console.log('[AHB] ✅ BrowserVM created, depository:', depositoryAddress);
     } else {
       console.log('[AHB] ✅ BrowserVM instance available');
     }
+    // Type-safe access after null check
+    const vm = browserVM!;
 
     // CRITICAL: Reset BrowserVM to fresh state EVERY time AHB runs
     // This prevents reserve accumulation on re-runs (button clicks, HMR, etc.)
-    if (browserVM.reset) {
-      console.log('[AHB] Calling browserVM.reset()...');
-      await browserVM.reset();
+    if (vm.reset) {
+      console.log('[AHB] Calling vm.reset()...');
+      await vm.reset();
       // Verify reset worked by checking Hub's reserves (should be 0)
       // Hub entityId = 0x0003 (entity #3, since #1 is foundation)
       const HUB_ENTITY_ID = '0x' + '3'.padStart(64, '0');
-      const hubReservesAfterReset = await browserVM.getReserves(HUB_ENTITY_ID, USDC_TOKEN_ID);
+      const hubReservesAfterReset = await vm.getReserves(HUB_ENTITY_ID, USDC_TOKEN_ID);
       console.log(`[AHB] ✅ BrowserVM reset complete. Hub reserves after reset: ${hubReservesAfterReset}`);
       if (hubReservesAfterReset !== 0n) {
         throw new Error(`BrowserVM reset FAILED: Hub still has ${hubReservesAfterReset} reserves`);

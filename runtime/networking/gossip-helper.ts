@@ -90,6 +90,8 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
 
   const board = buildBoardMetadata(entityState);
   const entityPublicKey = board.validators[0]?.publicKey;
+  // Include X25519 crypto key for HTLC envelope encryption (if available)
+  const cryptoPublicKey = entityState.cryptoPublicKey;
 
   // Build profile
   const profile: Profile = {
@@ -105,6 +107,7 @@ export function buildEntityProfile(entityState: EntityState, name?: string, time
       board,
       threshold: toUint16(entityState.config.threshold, 1),
       ...(entityPublicKey ? { entityPublicKey } : {}),
+      ...(cryptoPublicKey ? { cryptoPublicKey } : {}), // X25519 key for HTLC encryption
       ...(name ? { name } : {}), // Include name if provided
     },
     accounts,
@@ -135,11 +138,11 @@ export function mergeProfileWithExisting(profile: Profile, existing?: Profile | 
   };
 
   // Preserve endpoints/relays if missing on new profile
-  if ((mergedProfile.endpoints?.length ?? 0) === 0 && (existing.endpoints?.length ?? 0) > 0) {
-    mergedProfile.endpoints = existing.endpoints;
+  if ((mergedProfile.endpoints?.length ?? 0) === 0 && existing.endpoints && existing.endpoints.length > 0) {
+    mergedProfile.endpoints = [...existing.endpoints];
   }
-  if ((mergedProfile.relays?.length ?? 0) === 0 && (existing.relays?.length ?? 0) > 0) {
-    mergedProfile.relays = existing.relays;
+  if ((mergedProfile.relays?.length ?? 0) === 0 && existing.relays && existing.relays.length > 0) {
+    mergedProfile.relays = [...existing.relays];
   }
 
   return mergedProfile;

@@ -4,6 +4,8 @@
    * MVP: Simple form to send USDC between entities
    */
   import { onMount, onDestroy } from 'svelte';
+  import { get } from 'svelte/store';
+  import { xlnEnvironment } from '$lib/stores/xlnStore';
 
   // Props - entityId comes from parent (WalletView)
   export let entityId: string = '';
@@ -21,6 +23,9 @@
   const USDC_TOKEN_ID = 1;
   const FAUCET_AMOUNT = 100n * ONE_TOKEN; // $100 per click
 
+  // Token options for future extensibility
+  const selectedToken = { id: 1, symbol: 'USDC', name: 'USD Coin' };
+
   // Fetch balance periodically
   let balanceInterval: ReturnType<typeof setInterval>;
 
@@ -34,7 +39,7 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const env = xln.getEnv();
+      const env = get(xlnEnvironment);
       const jadapter = xln.getActiveJAdapter?.(env);
       if (jadapter?.getReserves) {
         balance = await jadapter.getReserves(entityId, USDC_TOKEN_ID);
@@ -93,7 +98,7 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const env = xln.getEnv();
+      const env = get(xlnEnvironment);
       const jadapter = xln.getActiveJAdapter?.(env);
       if (!jadapter?.reserveToReserve) {
         status = 'error';
@@ -105,8 +110,8 @@
       await jadapter.reserveToReserve(entityId, recipientAddress, USDC_TOKEN_ID, amountBigint);
 
       // Process queued J-events to update runtime state
-      if (xln.processJBlockEvents) {
-        await xln.processJBlockEvents();
+      if (xln.processJBlockEvents && env) {
+        await xln.processJBlockEvents(env);
       }
 
       status = 'success';
@@ -137,7 +142,7 @@
     try {
       const { getXLN } = await import('$lib/stores/xlnStore');
       const xln = await getXLN();
-      const env = xln.getEnv();
+      const env = get(xlnEnvironment);
       const jadapter = xln.getActiveJAdapter?.(env);
       if (!jadapter?.debugFundReserves) {
         console.error('debugFundReserves not available');
@@ -146,7 +151,7 @@
       }
 
       await jadapter.debugFundReserves(entityId, USDC_TOKEN_ID, FAUCET_AMOUNT);
-      console.log(`💰 Faucet: Minted $100 to ${entityId.slice(0, 12)}...`);
+      console.log(`Faucet: Minted $100 to ${entityId.slice(0, 12)}...`);
 
       faucetStatus = 'success';
       await fetchBalance();
@@ -161,84 +166,78 @@
   }
 </script>
 
-<div class="xln-send">
-  <div class="send-header">
-    <span class="send-icon">⚡</span>
-    <span class="send-title">Send XLN</span>
-  </div>
-
-  <!-- Balance Display -->
+<div class="send-card">
+  <!-- Balance Section -->
   <div class="balance-section">
-    <div class="balance-label">Your Balance</div>
-    <div class="balance-value" class:loading>
-      {loading ? '...' : formatUSD(balance)}
+    <div class="balance-row">
+      <span class="balance-label">Available balance</span>
+      <button
+        class="faucet-btn"
+        on:click={handleFaucet}
+        disabled={faucetStatus === 'minting' || !entityId}
+      >
+        {#if faucetStatus === 'minting'}
+          Requesting...
+        {:else if faucetStatus === 'success'}
+          +$100 added
+        {:else}
+          Request test funds
+        {/if}
+      </button>
     </div>
-    {#if entityId}
-      <div class="entity-id" title={entityId}>
-        Entity: {entityId}
-      </div>
-    {/if}
-
-    <!-- Faucet Button -->
-    <button
-      class="faucet-btn"
-      on:click={handleFaucet}
-      disabled={faucetStatus === 'minting' || !entityId}
-    >
-      {#if faucetStatus === 'minting'}
-        💰 Minting...
-      {:else if faucetStatus === 'success'}
-        ✅ +$100!
-      {:else}
-        🚰 Get $100 (Faucet)
-      {/if}
-    </button>
+    <div class="balance-amount" class:loading>
+      {loading ? '—' : formatUSD(balance)}
+    </div>
   </div>
 
-  <!-- Recipient -->
-  <div class="field-group">
-    <label>Recipient Entity ID</label>
-    <input
-      type="text"
-      class="address-input"
-      placeholder="0x... (66 characters)"
-      bind:value={recipientAddress}
-      class:invalid={recipientAddress && (recipientAddress.length !== 66 || !recipientAddress.startsWith('0x'))}
-    />
-    {#if recipientAddress && (recipientAddress.length !== 66 || !recipientAddress.startsWith('0x'))}
-      <span class="field-error">Invalid entity ID (must be 66 chars starting with 0x)</span>
-    {:else if isSelfTransfer}
-      <span class="field-error">Cannot transfer to yourself</span>
-    {/if}
-  </div>
-
-  <!-- Amount -->
-  <div class="field-group">
-    <label>Amount (USDC)</label>
-    <div class="amount-input-wrapper">
+  <!-- Amount Input (Stripe-style) -->
+  <div class="amount-section">
+    <span class="field-label">Amount</span>
+    <div class="amount-input-group">
+      <span class="currency-symbol">$</span>
       <input
         type="text"
         class="amount-input"
         placeholder="0.00"
         bind:value={amount}
       />
-      <button class="max-btn" on:click={handleMaxAmount}>MAX</button>
+      <button class="token-badge" title={selectedToken.name}>
+        {selectedToken.symbol}
+      </button>
+      <button class="max-btn" on:click={handleMaxAmount}>Max</button>
     </div>
     {#if parseAmount(amount) > balance}
       <span class="field-error">Insufficient balance</span>
     {/if}
   </div>
 
+  <!-- Recipient Input -->
+  <div class="recipient-section">
+    <span class="field-label">Recipient</span>
+    <input
+      type="text"
+      class="recipient-input"
+      placeholder="Entity ID (0x...)"
+      bind:value={recipientAddress}
+      class:invalid={recipientAddress && (recipientAddress.length !== 66 || !recipientAddress.startsWith('0x'))}
+    />
+    {#if recipientAddress && (recipientAddress.length !== 66 || !recipientAddress.startsWith('0x'))}
+      <span class="field-error">Invalid entity ID format</span>
+    {:else if isSelfTransfer}
+      <span class="field-error">Cannot send to yourself</span>
+    {/if}
+  </div>
+
   <!-- Status Messages -->
   {#if status === 'success'}
-    <div class="success-message">
-      ✅ Transfer complete!
+    <div class="status-banner success">
+      Transfer complete
     </div>
   {/if}
 
   {#if status === 'error' && errorMessage}
-    <div class="error-message">
-      ❌ {errorMessage}
+    <div class="status-banner error">
+      {errorMessage}
     </div>
   {/if}
 
@@ -248,88 +247,65 @@
     on:click={handleSend}
     disabled={!canSend}
   >
-    {status === 'sending' ? 'Sending...' : 'Send'}
+    {status === 'sending' ? 'Sending...' : 'Send payment'}
   </button>
 </div>
 
 <style>
-  .xln-send {
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+  .send-card {
+    background: #0a0a0a;
+    border: 1px solid #1f1f1f;
     border-radius: 12px;
-    padding: 16px;
-  }
-
-  .send-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  }
-
-  .send-icon {
-    font-size: 18px;
-  }
-
-  .send-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  .balance-section {
-    text-align: center;
     padding: 20px;
-    background: rgba(255, 255, 255, 0.02);
-    border-radius: 8px;
-    margin-bottom: 16px;
   }
 
-  .balance-label {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.5);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+  /* Balance Section */
+  .balance-section {
+    margin-bottom: 24px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #1a1a1a;
+  }
+
+  .balance-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 8px;
   }
 
-  .balance-value {
-    font-size: 28px;
-    font-weight: 700;
-    color: rgba(100, 255, 100, 0.9);
-    font-family: monospace;
+  .balance-label {
+    font-size: 12px;
+    color: #666;
+    font-weight: 500;
   }
 
-  .balance-value.loading {
-    color: rgba(255, 255, 255, 0.3);
+  .balance-amount {
+    font-size: 32px;
+    font-weight: 600;
+    color: #e5e5e5;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+    letter-spacing: -0.02em;
   }
 
-  .entity-id {
-    font-size: 10px;
-    color: rgba(255, 255, 255, 0.4);
-    margin-top: 8px;
-    font-family: monospace;
+  .balance-amount.loading {
+    color: #333;
   }
 
   .faucet-btn {
-    margin-top: 12px;
-    padding: 10px 20px;
-    background: linear-gradient(135deg, rgba(100, 150, 255, 0.3), rgba(150, 100, 255, 0.3));
-    border: 1px solid rgba(150, 150, 255, 0.3);
-    border-radius: 8px;
-    color: rgba(200, 200, 255, 0.95);
-    font-size: 13px;
+    padding: 6px 12px;
+    background: transparent;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    color: #888;
+    font-size: 11px;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease;
   }
 
   .faucet-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, rgba(100, 150, 255, 0.5), rgba(150, 100, 255, 0.5));
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(100, 150, 255, 0.2);
+    border-color: #3b82f6;
+    color: #3b82f6;
   }
 
   .faucet-btn:disabled {
@@ -337,117 +313,170 @@
     cursor: not-allowed;
   }
 
-  .field-group {
-    margin-bottom: 14px;
+  /* Amount Section */
+  .amount-section {
+    margin-bottom: 16px;
   }
 
-  .field-group label {
+  .field-label {
     display: block;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
-    color: rgba(255, 255, 255, 0.5);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 6px;
+    color: #666;
+    margin-bottom: 8px;
   }
 
-  .address-input,
-  .amount-input {
-    width: 100%;
-    padding: 10px 12px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+  .amount-input-group {
+    display: flex;
+    align-items: center;
+    background: #111;
+    border: 1px solid #222;
     border-radius: 8px;
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 13px;
-    font-family: monospace;
-    box-sizing: border-box;
+    padding: 0 4px;
+    transition: border-color 0.15s ease;
   }
 
-  .address-input:focus,
+  .amount-input-group:focus-within {
+    border-color: #3b82f6;
+  }
+
+  .currency-symbol {
+    padding: 0 8px 0 12px;
+    color: #555;
+    font-size: 18px;
+    font-weight: 500;
+  }
+
+  .amount-input {
+    flex: 1;
+    padding: 14px 0;
+    background: transparent;
+    border: none;
+    color: #e5e5e5;
+    font-size: 18px;
+    font-weight: 500;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+  }
+
+  .amount-input::placeholder {
+    color: #333;
+  }
+
   .amount-input:focus {
     outline: none;
-    border-color: rgba(100, 255, 100, 0.4);
   }
 
-  .address-input.invalid {
-    border-color: rgba(255, 100, 100, 0.5);
+  .token-badge {
+    padding: 6px 10px;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    color: #888;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: default;
+  }
+
+  .max-btn {
+    padding: 6px 10px;
+    margin: 0 4px;
+    background: transparent;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    color: #666;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .max-btn:hover {
+    border-color: #444;
+    color: #888;
+  }
+
+  /* Recipient Section */
+  .recipient-section {
+    margin-bottom: 20px;
+  }
+
+  .recipient-input {
+    width: 100%;
+    padding: 12px 14px;
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 8px;
+    color: #e5e5e5;
+    font-size: 13px;
+    font-family: 'SF Mono', 'JetBrains Mono', monospace;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease;
+  }
+
+  .recipient-input::placeholder {
+    color: #444;
+  }
+
+  .recipient-input:focus {
+    outline: none;
+    border-color: #3b82f6;
+  }
+
+  .recipient-input.invalid {
+    border-color: #dc2626;
   }
 
   .field-error {
     display: block;
     font-size: 11px;
-    color: rgba(255, 100, 100, 0.9);
-    margin-top: 4px;
+    color: #ef4444;
+    margin-top: 6px;
   }
 
-  .amount-input-wrapper {
-    display: flex;
-    gap: 8px;
-  }
-
-  .amount-input-wrapper .amount-input {
-    flex: 1;
-  }
-
-  .max-btn {
-    padding: 10px 14px;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+  /* Status Messages */
+  .status-banner {
+    padding: 12px 14px;
     border-radius: 8px;
-    color: rgba(255, 255, 255, 0.7);
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .max-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-  }
-
-  .success-message {
-    padding: 12px;
-    background: rgba(100, 255, 100, 0.1);
-    border: 1px solid rgba(100, 255, 100, 0.2);
-    border-radius: 8px;
-    color: rgba(100, 255, 100, 0.9);
     font-size: 13px;
+    font-weight: 500;
     text-align: center;
-    margin-bottom: 12px;
+    margin-bottom: 16px;
   }
 
-  .error-message {
-    padding: 12px;
-    background: rgba(255, 100, 100, 0.1);
-    border: 1px solid rgba(255, 100, 100, 0.2);
-    border-radius: 8px;
-    color: rgba(255, 150, 150, 0.9);
-    font-size: 13px;
-    text-align: center;
-    margin-bottom: 12px;
+  .status-banner.success {
+    background: rgba(34, 197, 94, 0.1);
+    border: 1px solid rgba(34, 197, 94, 0.2);
+    color: #22c55e;
   }
 
+  .status-banner.error {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+  }
+
+  /* Send Button */
   .send-btn {
     width: 100%;
     padding: 14px;
-    background: linear-gradient(135deg, rgba(100, 255, 100, 0.8), rgba(50, 200, 100, 0.8));
+    background: #3b82f6;
     border: none;
     border-radius: 8px;
-    color: #000;
+    color: #fff;
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: all 0.15s ease;
   }
 
   .send-btn:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(100, 255, 100, 0.3);
+    background: #2563eb;
   }
 
   .send-btn:disabled {
-    opacity: 0.4;
+    background: #1e3a5f;
+    color: #4b7bb8;
     cursor: not-allowed;
-    transform: none;
   }
 </style>

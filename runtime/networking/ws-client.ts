@@ -164,19 +164,31 @@ export class RuntimeWsClient {
       return;
     }
     if (msg.type === 'entity_input' && msg.payload && msg.from) {
+      console.log(`📨 WS-CLIENT-RECEIVE: entity_input from=${msg.from?.slice(0, 10)} encrypted=${msg.encrypted}`);
+
       // Reject unencrypted entity_input messages
       if (!msg.encrypted) {
+        console.error(`❌ WS-CLIENT: Rejected unencrypted entity_input from ${msg.from}`);
         this.options.onError?.(new Error(`P2P_UNENCRYPTED: Received unencrypted entity_input from ${msg.from}`));
         return;
       }
 
       if (!this.options.encryptionKeyPair) {
+        console.error(`❌ WS-CLIENT: No encryption keypair for decryption`);
         this.options.onError?.(new Error('P2P_NO_DECRYPTION: Cannot decrypt without keypair'));
         return;
       }
 
       // Decrypt - throws on error (fail-fast)
-      const entityInput = decryptJSON<EntityInput>(msg.payload as string, this.options.encryptionKeyPair.privateKey);
+      let entityInput: EntityInput;
+      try {
+        entityInput = decryptJSON<EntityInput>(msg.payload as string, this.options.encryptionKeyPair.privateKey);
+        console.log(`✅ WS-CLIENT-DECRYPTED: entityId=${entityInput.entityId?.slice(-4)} txs=${entityInput.entityTxs?.length || 0}`);
+      } catch (decryptError) {
+        console.error(`❌ WS-CLIENT-DECRYPT-FAILED:`, decryptError);
+        this.options.onError?.(decryptError as Error);
+        return;
+      }
 
       await this.options.onEntityInput?.(msg.from, entityInput);
       return;

@@ -7,6 +7,8 @@
   import { EVM_NETWORKS, ERC20_ABI, getNetworkByChainId, type EVMNetwork, type TokenInfo } from '$lib/config/evmNetworks';
   import { getAvailableJurisdictions } from '$lib/stores/jurisdictionStore';
   import { onMount } from 'svelte';
+  import { get } from 'svelte/store';
+  import { xlnEnvironment } from '$lib/stores/xlnStore';
 
   // Props
   export let privateKey: string;
@@ -58,7 +60,7 @@
     const { getXLN } = await import('$lib/stores/xlnStore');
     const xln = cachedXLN ?? await getXLN();
     cachedXLN = xln;
-    const env = xln.getEnv();
+    const env = get(xlnEnvironment);
     const jadapter: JAdapter | null = xln.getActiveJAdapter?.(env) ?? null;
     browserVM = (jadapter?.getBrowserVM?.() as BrowserVMProviderImpl | null) ?? null;
     if (browserVM && !browserProvider) {

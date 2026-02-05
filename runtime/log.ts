@@ -11,38 +11,29 @@
 
 import type { Env, LogLevel, LogCategory, FrameLogEntry } from './types';
 
-// Global log ID counter for deterministic ordering
-let globalLogId = 0;
-
-// Current environment reference (set by runtime.ts)
-let currentEnv: Env | null = null;
-
-// Mirror to DevTools console (for debugging)
-let mirrorToConsole = true;
-
-/**
- * Set the current environment for logging.
- * Called by runtime.ts at the start of each tick.
- */
-export const setLogEnv = (env: Env): void => {
-  currentEnv = env;
+const getLogState = (env: Env) => {
+  if (!env.runtimeState) env.runtimeState = {};
+  if (!env.runtimeState.logState) {
+    env.runtimeState.logState = { nextId: 0, mirrorToConsole: true };
+  }
+  return env.runtimeState.logState;
 };
 
 /**
- * Enable/disable console mirroring.
+ * Enable/disable console mirroring for a specific runtime.
  */
-export const setMirrorToConsole = (enabled: boolean): void => {
-  mirrorToConsole = enabled;
+export const setMirrorToConsole = (env: Env, enabled: boolean): void => {
+  const logState = getLogState(env);
+  logState.mirrorToConsole = enabled;
 };
 
 /**
  * Flush current frame logs and reset buffer.
  * Called by captureSnapshot before capturing.
  */
-export const flushFrameLogs = (): FrameLogEntry[] => {
-  if (!currentEnv) return [];
-  const logs = [...currentEnv.frameLogs];
-  currentEnv.frameLogs = [];
+export const flushFrameLogs = (env: Env): FrameLogEntry[] => {
+  const logs = [...env.frameLogs];
+  env.frameLogs = [];
   return logs;
 };
 
@@ -50,15 +41,17 @@ export const flushFrameLogs = (): FrameLogEntry[] => {
  * Core logging function.
  */
 const log = (
+  env: Env,
   level: LogLevel,
   category: LogCategory,
   message: string,
   data?: Record<string, unknown>,
   entityId?: string,
 ): void => {
+  const logState = getLogState(env);
   const entry: FrameLogEntry = {
-    id: globalLogId++,
-    timestamp: currentEnv?.timestamp ?? 0,
+    id: logState.nextId++,
+    timestamp: env.timestamp ?? 0,
     level,
     category,
     message,
@@ -67,12 +60,10 @@ const log = (
   };
 
   // Add to frame buffer if env is set
-  if (currentEnv) {
-    currentEnv.frameLogs.push(entry);
-  }
+  env.frameLogs.push(entry);
 
   // Mirror to DevTools console
-  if (mirrorToConsole) {
+  if (logState.mirrorToConsole) {
     const prefix = `[${level.toUpperCase()}][${category}]`;
     const consoleMethod = level === 'error' ? console.error
       : level === 'warn' ? console.warn
@@ -94,34 +85,36 @@ const log = (
  * xlog.info('consensus', 'Frame committed', { entityId, height });
  * xlog.error('evm', 'Transaction reverted', { txHash, reason });
  */
-export const xlog = {
+export const createLogger = (env: Env) => ({
   trace: (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) =>
-    log('trace', category, message, data, entityId),
+    log(env, 'trace', category, message, data, entityId),
 
   debug: (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) =>
-    log('debug', category, message, data, entityId),
+    log(env, 'debug', category, message, data, entityId),
 
   info: (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) =>
-    log('info', category, message, data, entityId),
+    log(env, 'info', category, message, data, entityId),
 
   warn: (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) =>
-    log('warn', category, message, data, entityId),
+    log(env, 'warn', category, message, data, entityId),
 
   error: (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) =>
-    log('error', category, message, data, entityId),
+    log(env, 'error', category, message, data, entityId),
 
   // Convenience methods for common patterns
   consensus: (message: string, data?: Record<string, unknown>, entityId?: string) =>
-    log('info', 'consensus', message, data, entityId),
+    log(env, 'info', 'consensus', message, data, entityId),
 
   account: (message: string, data?: Record<string, unknown>, entityId?: string) =>
-    log('info', 'account', message, data, entityId),
+    log(env, 'info', 'account', message, data, entityId),
 
   jurisdiction: (message: string, data?: Record<string, unknown>) =>
-    log('info', 'jurisdiction', message, data),
+    log(env, 'info', 'jurisdiction', message, data),
 
   evm: (message: string, data?: Record<string, unknown>) =>
-    log('info', 'evm', message, data),
-};
+    log(env, 'info', 'evm', message, data),
+});
 
-export default xlog;
+export const xlog = createLogger;
+
+export default createLogger;

@@ -7,13 +7,8 @@
 import { ethers } from 'ethers';
 import type { Provider, Signer } from 'ethers';
 
-import type { Depository } from '../../jurisdictions/typechain-types/Depository';
-import type { EntityProvider } from '../../jurisdictions/typechain-types/EntityProvider';
-import type { Account } from '../../jurisdictions/typechain-types/Account';
-import type { DeltaTransformer } from '../../jurisdictions/typechain-types/DeltaTransformer';
-import { Depository__factory } from '../../jurisdictions/typechain-types/factories/Depository__factory';
-import { EntityProvider__factory } from '../../jurisdictions/typechain-types/factories/EntityProvider__factory';
-import { DeltaTransformer__factory } from '../../jurisdictions/typechain-types/factories/DeltaTransformer__factory';
+import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types';
+import { Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types';
 
 import type { BrowserVMState } from '../types';
 import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, InsuranceReg, JTokenInfo } from './types';

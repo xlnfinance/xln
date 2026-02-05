@@ -4,7 +4,7 @@
  */
 
 import { startRuntimeWsServer } from '../networking/ws-server';
-import { main, setRuntimeSeed, startP2P, process as runtimeProcess, applyRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter } from '../runtime';
+import { main, startP2P, process as runtimeProcess, applyRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter } from '../runtime';
 import { processUntil, converge } from './helpers';
 import { isLeft, deriveDelta } from '../account-utils';
 import { deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account-crypto';
@@ -630,8 +630,7 @@ const waitForOwnCreditLimit = async (
 const run = async () => {
   console.log(`P2P_NODE_CONFIG role=${role} relayUrl=${relayUrl} relayPort=${relayPort} isHub=${isHub}`);
 
-  setRuntimeSeed(seed);
-  const env = await main();
+  const env = await main(seed);
   let jurisdiction: JurisdictionConfig | null = null;
   let rpcUrl: string | null = null;
   let contracts: { depository: string; entityProvider: string; account?: string; deltaTransformer?: string } | null = null;

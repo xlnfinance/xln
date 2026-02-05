@@ -73,6 +73,7 @@ export default defineConfig(async ({ command }) => {
 
 	return {
 	plugins: [sveltekit()],
+	publicDir: 'static',
 	server: {
 		host: DEV_HOST,
 		port: DEV_PORT,
@@ -112,6 +113,12 @@ export default defineConfig(async ({ command }) => {
 			// RPC Proxy - Forward JSON-RPC to local anvil for dev
 			'/rpc': {
 				target: 'http://localhost:8545',
+				changeOrigin: true,
+			},
+			// Relay Proxy - Forward WebSocket to relay server for P2P
+			'/relay': {
+				target: 'ws://localhost:9000',
+				ws: true,
 				changeOrigin: true,
 			},
 		},

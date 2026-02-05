@@ -235,6 +235,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     }
 
     if (msg.type === 'entity_input') {
+      console.log(`[WS] ENTITY_INPUT: from=${msg.from?.slice(0,10)} to=${target?.slice(0,10)} encrypted=${msg.encrypted}`);
       // CRITICAL: If encrypted=true, payload is opaque ciphertext - relay just routes it
       // Only validate plaintext payloads (which shouldn't happen in prod - encryption is mandatory)
       if (!msg.encrypted) {
@@ -257,7 +258,10 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     const useLocalDelivery = isLocalTarget && (msg.type === 'entity_input' || msg.type === 'runtime_input') && !isEncrypted;
 
     const targetClient = clients.get(target);
+    const clientsConnected = Array.from(clients.keys()).map(k => k.slice(0,10)).join(',');
+    console.log(`[WS] ROUTE: type=${msg.type} to=${target?.slice(0,10)} hasClient=${!!targetClient} localDelivery=${useLocalDelivery} clients=[${clientsConnected}]`);
     if (targetClient && !useLocalDelivery) {
+      console.log(`[WS] DELIVERED: ${msg.type} → ${target?.slice(0,10)}`);
       send(targetClient.ws, msg);
       send(ws, { type: 'ack', inReplyTo: msg.id, status: 'delivered' });
       return;
@@ -438,7 +442,13 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
 };
 
 if (import.meta.main) {
-  const port = Number(process.env.WS_PORT || 8787);
+  // Parse --port argument or use WS_PORT env var
+  const args = process.argv;
+  const portArgIdx = args.indexOf('--port');
+  const port = portArgIdx !== -1 && args[portArgIdx + 1]
+    ? Number(args[portArgIdx + 1])
+    : Number(process.env.WS_PORT || 8787);
   const serverId = process.env.WS_SERVER_ID || 'hub';
+  console.log(`[WS] Starting relay server on port ${port}`);
   startRuntimeWsServer({ port, serverId });
 }
