@@ -3,7 +3,7 @@ import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
 import { processProfileUpdate } from '../name-resolution';
 import { createOrderbookExtState } from '../orderbook';
-import { db } from '../runtime';
+import { getRuntimeDb, tryOpenDb } from '../runtime';
 import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput } from '../types';
 import { DEBUG, HEAVY_LOGS, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
@@ -173,7 +173,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         console.log(`🏷️ Calling processProfileUpdate for entity ${profileData.entityId}`);
         // Process profile update synchronously to ensure gossip is updated before snapshot
         try {
-          await processProfileUpdate(db, profileData.entityId, profileData, profileData.hankoSignature || '', env);
+          const runtimeDb = env ? getRuntimeDb(env) : null;
+          if (runtimeDb && env) {
+            await tryOpenDb(env);
+            await processProfileUpdate(runtimeDb, profileData.entityId, profileData, profileData.hankoSignature || '', env);
+          }
         } catch (error) {
           logError("ENTITY_TX", `❌ Failed to process profile update for ${profileData.entityId}:`, error);
         }
