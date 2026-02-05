@@ -364,19 +364,27 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
         console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms)`);
       } else {
-        // RIGHT side: queue credit limit to mempool — it will be proposed in our ACK frame
-        // after we receive LEFT's first frame (which contains add_delta)
+        // RIGHT side: queue add_delta THEN set_credit_limit — both in mempool
+        // add_delta creates the token delta, set_credit_limit modifies it
+        // Both get batched into our ACK frame after LEFT's first frame arrives
         const creditAmount = entityTx.data.creditAmount;
         const tokenId = entityTx.data.tokenId ?? 1;
+
+        // STEP 1: add_delta (idempotent — safe even if LEFT also adds it)
+        localAccount.mempool.push({
+          type: 'add_delta',
+          data: { tokenId }
+        });
+
         if (creditAmount && creditAmount > 0n) {
-          // We are RIGHT, extending credit to LEFT (counterparty)
+          // STEP 2: set_credit_limit on the delta we just created
           localAccount.mempool.push({
             type: 'set_credit_limit',
             data: { tokenId, amount: creditAmount, side: 'right' as const }
           });
-          console.log(`🧭 Right side: queued set_credit_limit (right=${creditAmount}) — will propose after left's frame`);
+          console.log(`🧭 Right side: queued [add_delta, set_credit_limit] (right=${creditAmount})`);
         } else {
-          console.log(`🧭 Right side: waiting for left's frame (no credit requested)`);
+          console.log(`🧭 Right side: queued [add_delta] (no credit requested)`);
         }
       }
 
