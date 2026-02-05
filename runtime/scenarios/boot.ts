@@ -4,9 +4,59 @@
  */
 
 import type { Env, JurisdictionConfig } from '../types';
+import type { JAdapter, JAdapterMode } from '../jadapter/types';
+
+export type { JAdapterMode };
 
 /**
- * Create or get BrowserVM instance
+ * Get JAdapter mode from environment
+ * Set via: JADAPTER_MODE=browservm|rpc (default: browservm)
+ */
+export function getJAdapterMode(): JAdapterMode {
+  const mode = process.env.JADAPTER_MODE?.toLowerCase();
+  if (mode === 'rpc' || mode === 'anvil') return mode as JAdapterMode;
+  return 'browservm';
+}
+
+/**
+ * Create JAdapter based on mode flag
+ *
+ * Usage:
+ *   # Default (browservm - no external dependencies)
+ *   bun runtime/scenarios/htlc-4hop.ts
+ *
+ *   # Against Anvil (requires: anvil running on 8545)
+ *   JADAPTER_MODE=rpc ANVIL_RPC=http://localhost:8545 bun runtime/scenarios/htlc-4hop.ts
+ */
+export async function ensureJAdapter(env?: Env, mode?: JAdapterMode): Promise<JAdapter> {
+  const { createJAdapter } = await import('../jadapter');
+  const { setBrowserVMJurisdiction } = await import('../evm');
+
+  const actualMode = mode ?? getJAdapterMode();
+  const rpcUrl = process.env.ANVIL_RPC || 'http://localhost:8545';
+
+  console.log(`[JAdapter] Mode: ${actualMode}${actualMode !== 'browservm' ? ` (${rpcUrl})` : ''}`);
+
+  const jadapter = await createJAdapter({
+    mode: actualMode,
+    chainId: 31337,
+    rpcUrl: actualMode !== 'browservm' ? rpcUrl : undefined,
+  });
+
+  // If browservm and env provided, register the BrowserVM instance
+  if (actualMode === 'browservm' && env) {
+    const browserVM = jadapter.getBrowserVM();
+    if (browserVM) {
+      (env as any).browserVM = browserVM;
+      setBrowserVMJurisdiction(env, jadapter.addresses.depository, browserVM);
+    }
+  }
+
+  return jadapter;
+}
+
+/**
+ * Create or get BrowserVM instance (legacy - use ensureJAdapter instead)
  */
 export async function ensureBrowserVM(env: any) {
   const { getBrowserVMInstance, setBrowserVMJurisdiction } = await import('../evm');
