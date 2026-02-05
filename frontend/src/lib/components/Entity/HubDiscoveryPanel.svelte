@@ -1,13 +1,13 @@
 <!--
   HubDiscoveryPanel.svelte - Discover and connect to payment hubs
-
-  Browse gossip-advertised hubs and open accounts with them.
+  Compact sortable list with expandable details.
 -->
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { xlnFunctions, xlnEnvironment, getXLN, processWithDelay } from '../../stores/xlnStore';
   import { settings, settingsOperations } from '$lib/stores/settingsStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
-  import { Radio, Globe, Zap, Users, Shield, RefreshCw, Plus, Check, AlertTriangle } from 'lucide-svelte';
+  import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle, ArrowUpDown } from 'lucide-svelte';
 
   export let entityId: string = '';
 
@@ -24,13 +24,13 @@
   let loading = false;
   let error = '';
   let connecting: string | null = null;
-  const CREDIT_TOKEN_ID = 1;
-  let relaySelection = '';
-  let gossipStatus: { lastRefreshAt: number; received: number; total: number; relay: string } | null = null;
+  let expandedHub: string | null = null;
+  let sortKey: 'name' | 'fee' | 'capacity' | 'uptime' | 'region' = 'fee';
+  let sortAsc = true;
 
   const RELAY_OPTIONS = [
     { label: 'Prod (xln.finance)', url: 'wss://xln.finance/relay' },
-    { label: 'Local (localhost:8080)', url: 'ws://localhost:8080/relay' },
+    { label: 'Local (localhost:9000)', url: 'ws://localhost:9000' },
   ];
 
   $: relaySelection = $settings.relayUrl;
@@ -49,27 +49,100 @@
     };
     runtimeId?: string;
     endpoints?: string[];
-    relays?: string[];
     capabilities?: string[];
     jurisdiction: string;
     isConnected: boolean;
     lastSeen: number;
     raw: string;
+    identicon: string;
   }
 
   let hubs: Hub[] = [];
 
-  // Format functions
-  function formatShortId(id: string): string {
-    return id || '';
+  // Generate identicon SVG for entity address
+  function generateIdenticon(address: string, size = 8): string {
+    const seed = address.toLowerCase().replace('0x', '');
+    let seedInt = 0;
+    for (let i = 0; i < seed.length; i++) {
+      seedInt = ((seedInt << 5) - seedInt + seed.charCodeAt(i)) | 0;
+    }
+
+    const rand = () => {
+      const x = Math.sin(seedInt++) * 10000;
+      return x - Math.floor(x);
+    };
+
+    const hue = Math.floor(rand() * 360);
+    const sat = 50 + Math.floor(rand() * 30);
+    const colors = [
+      `hsl(${hue}, ${sat}%, 65%)`,
+      `hsl(${(hue + 120) % 360}, ${sat}%, 35%)`,
+      `hsl(${(hue + 240) % 360}, ${sat}%, 50%)`
+    ];
+
+    const pattern: number[][] = [];
+    for (let y = 0; y < size; y++) {
+      const row: number[] = [];
+      pattern[y] = row;
+      for (let x = 0; x < Math.ceil(size / 2); x++) {
+        const v = Math.floor(rand() * 3);
+        row[x] = v;
+        row[size - 1 - x] = v;
+      }
+    }
+
+    const cellSize = 10;
+    let svg = `<svg width="${size * cellSize}" height="${size * cellSize}" viewBox="0 0 ${size * cellSize} ${size * cellSize}" xmlns="http://www.w3.org/2000/svg">`;
+    svg += `<rect width="100%" height="100%" fill="${colors[0]}"/>`;
+    for (let y = 0; y < size; y++) {
+      const row = pattern[y];
+      if (!row) continue;
+      for (let x = 0; x < size; x++) {
+        const val = row[x] ?? 0;
+        if (val > 0) {
+          svg += `<rect x="${x * cellSize}" y="${y * cellSize}" width="${cellSize}" height="${cellSize}" fill="${colors[val]}"/>`;
+        }
+      }
+    }
+    svg += '</svg>';
+    return `data:image/svg+xml,${encodeURIComponent(svg)}`;
   }
 
+  // Sorted hubs
+  $: sortedHubs = [...hubs].sort((a, b) => {
+    let cmp = 0;
+    switch (sortKey) {
+      case 'name':
+        cmp = a.name.localeCompare(b.name);
+        break;
+      case 'fee':
+        cmp = (a.metadata.fee || 0) - (b.metadata.fee || 0);
+        break;
+      case 'capacity':
+        cmp = Number((a.metadata.capacity || 0n) - (b.metadata.capacity || 0n));
+        break;
+      case 'uptime':
+        cmp = (a.metadata.uptime || 0) - (b.metadata.uptime || 0);
+        break;
+      case 'region':
+        cmp = a.jurisdiction.localeCompare(b.jurisdiction);
+        break;
+    }
+    return sortAsc ? cmp : -cmp;
+  });
+
+  // Format functions
   function formatCapacity(cap?: bigint): string {
-    if (!cap) return 'Unknown';
+    if (!cap) return '-';
     const num = Number(cap) / 1e18;
     if (num >= 1_000_000) return (num / 1_000_000).toFixed(1) + 'M';
     if (num >= 1_000) return (num / 1_000).toFixed(1) + 'K';
     return num.toFixed(2);
+  }
+
+  function formatFee(ppm?: number): string {
+    if (!ppm && ppm !== 0) return '-';
+    return (ppm / 100).toFixed(2) + ' bps';
   }
 
   const parseCapacity = (value: unknown): bigint | undefined => {
@@ -99,6 +172,19 @@
     }
   };
 
+  function toggleSort(key: typeof sortKey) {
+    if (sortKey === key) {
+      sortAsc = !sortAsc;
+    } else {
+      sortKey = key;
+      sortAsc = true;
+    }
+  }
+
+  function toggleExpand(hubId: string) {
+    expandedHub = expandedHub === hubId ? null : hubId;
+  }
+
   // Discover hubs from gossip network
   async function discoverHubs(refreshGossip: boolean = false) {
     loading = true;
@@ -107,16 +193,8 @@
     try {
       if (refreshGossip) {
         const xln = await getXLN();
-        const beforeCount = env?.gossip?.getProfiles?.()?.length || 0;
         if (env) xln.refreshGossip?.(env);
         await new Promise(resolve => setTimeout(resolve, 250));
-        const afterCount = env?.gossip?.getProfiles?.()?.length || 0;
-        gossipStatus = {
-          lastRefreshAt: Date.now(),
-          received: Math.max(0, afterCount - beforeCount),
-          total: afterCount,
-          relay: $settings.relayUrl
-        };
       }
 
       const currentEnv = env;
@@ -139,25 +217,27 @@
           }
 
           const capacity = parseCapacity(profile.metadata?.capacity);
+          const fullEntityId = profile.entityId.startsWith('0x') ? profile.entityId : `0x${profile.entityId}`;
+
           discovered.push({
             profile,
             entityId: profile.entityId,
-            name: profile.metadata?.name || `Hub ${formatShortId(profile.entityId)}`,
+            name: profile.metadata?.name || `Hub ${profile.entityId.slice(0, 8)}`,
             metadata: {
               description: profile.metadata?.bio || 'Payment hub',
               website: profile.metadata?.website,
-              fee: profile.metadata?.routingFeePPM || 100, // Default 0.01%
+              fee: profile.metadata?.routingFeePPM || 100,
               capacity: capacity ?? 0n,
               uptime: profile.metadata?.uptime ? parseFloat(profile.metadata.uptime) : 99.9,
             },
             runtimeId: profile.runtimeId,
             endpoints: profile.endpoints || [],
-            relays: profile.relays || [],
             capabilities: profile.capabilities || [],
             jurisdiction: profile.metadata?.region || 'global',
             isConnected,
             lastSeen: profile.metadata?.lastUpdated || Date.now(),
             raw: formatRawProfile(profile),
+            identicon: generateIdenticon(fullEntityId),
           });
         }
       }
@@ -175,6 +255,7 @@
           if (hubMeta || state.accounts?.size > 2) {
             const myReplica = (currentEnv.eReplicas as Map<string, any>).get(`${entityId}:1`);
             const isConnected = myReplica?.state?.accounts?.has(hubEntityId) || false;
+            const fullEntityId = hubEntityId.startsWith('0x') ? hubEntityId : `0x${hubEntityId}`;
 
             const profile = {
               entityId: hubEntityId,
@@ -184,7 +265,7 @@
             discovered.push({
               profile,
               entityId: hubEntityId,
-              name: state.config?.name || hubMeta?.name || `Hub ${formatShortId(hubEntityId)}`,
+              name: state.config?.name || hubMeta?.name || `Hub ${hubEntityId.slice(0, 8)}`,
               metadata: {
                 description: hubMeta?.description || 'Payment hub',
                 website: hubMeta?.website,
@@ -194,12 +275,12 @@
               },
               runtimeId: undefined,
               endpoints: [],
-              relays: [],
               capabilities: [],
               jurisdiction: state.config?.jurisdiction?.name || 'Unknown',
               isConnected,
               lastSeen: Date.now(),
               raw: formatRawProfile(profile),
+              identicon: generateIdenticon(fullEntityId),
             });
           }
         }
@@ -215,7 +296,7 @@
     }
   }
 
-  // Connect to hub (open account)
+  // Connect to hub (open account + extend credit in same frame)
   async function connectToHub(hub: Hub) {
     if (!entityId || connecting) return;
 
@@ -240,26 +321,25 @@
         }
       }
 
-      const tokenInfo = activeFunctions?.getTokenInfo?.(CREDIT_TOKEN_ID) || { decimals: 18 };
-      const creditAmount = 10_000n * 10n ** BigInt(tokenInfo.decimals ?? 18);
+      // Default credit amount: 10,000 tokens (with 18 decimals)
+      const creditAmount = 10_000n * 10n ** 18n;
 
-      // Open account with hub + extend credit
+      // Open account WITH credit extension (both in same frame)
+      // Frame #1 will have: [add_delta, set_credit_limit] - order matters!
+      console.log('[HubDiscovery] Opening account + extending credit to', hub.entityId);
       await processWithDelay(currentEnv as any, [{
         entityId,
         signerId,
-        entityTxs: [{
-          type: 'openAccount' as const,
-          data: {
-            targetEntityId: hub.entityId,
+        entityTxs: [
+          {
+            type: 'openAccount' as const,
+            data: {
+              targetEntityId: hub.entityId,
+              creditAmount,    // Both txs go in same frame
+              tokenId: 1,      // USDC
+            }
           }
-        }, {
-          type: 'extendCredit' as const,
-          data: {
-            counterpartyEntityId: hub.entityId,
-            tokenId: CREDIT_TOKEN_ID,
-            amount: creditAmount,
-          }
-        }]
+        ]
       }]);
 
       // Update hub status
@@ -281,38 +361,46 @@
     if (!currentEnv) return;
     const xln = await getXLN();
     if (xln.startP2P) {
-      xln.startP2P(currentEnv as any, { relayUrls: [url], gossipPollMs: 0 });
+      xln.startP2P(currentEnv as any, { relayUrls: [url] });
     }
   }
 
+  // Track if we've already discovered (prevent infinite loop)
+  let hasDiscoveredOnce = false;
+
+  // Auto-load on mount
+  onMount(() => {
+    if (env) {
+      hasDiscoveredOnce = true;
+      discoverHubs(true);
+    }
+  });
+
+  // Also refresh when env becomes available (only once)
+  $: if (env && hubs.length === 0 && !loading && !hasDiscoveredOnce) {
+    hasDiscoveredOnce = true;
+    discoverHubs(true);
+  }
 </script>
 
 <div class="hub-panel">
   <header class="panel-header">
-    <h3>Discover Hubs</h3>
+    <h3>Hubs</h3>
     <div class="header-controls">
-      <div class="relay-select">
-        <label>Relay</label>
-        <select bind:value={relaySelection} on:change={(e) => updateRelay((e.currentTarget as HTMLSelectElement).value)}>
-          {#each RELAY_OPTIONS as option}
-            <option value={option.url}>{option.label}</option>
-          {/each}
-          {#if !RELAY_OPTIONS.some(o => o.url === relaySelection)}
-            <option value={relaySelection}>Custom ({relaySelection})</option>
-          {/if}
-        </select>
-      </div>
+      <select class="relay-select" bind:value={relaySelection} on:change={(e) => updateRelay((e.currentTarget as HTMLSelectElement).value)}>
+        {#each RELAY_OPTIONS as option}
+          <option value={option.url}>{option.label}</option>
+        {/each}
+        {#if !RELAY_OPTIONS.some(o => o.url === relaySelection)}
+          <option value={relaySelection}>Custom</option>
+        {/if}
+      </select>
       <button class="refresh-btn" on:click={() => discoverHubs(true)} disabled={loading}>
         <span class:spinning={loading}><RefreshCw size={14} /></span>
+        Refresh
       </button>
     </div>
   </header>
-
-  {#if gossipStatus}
-    <div class="gossip-status">
-      Gossip refresh: +{gossipStatus.received} / {gossipStatus.total} profiles • {new Date(gossipStatus.lastRefreshAt).toLocaleTimeString()} • {gossipStatus.relay}
-    </div>
-  {/if}
 
   {#if !entityId}
     <div class="warning-banner">
@@ -325,151 +413,131 @@
     <div class="error-banner">{error}</div>
   {/if}
 
-  {#if loading}
+  {#if loading && hubs.length === 0}
     <div class="loading-state">
-      <span class="pulse"><Radio size={24} /></span>
-      <p>Scanning network for hubs...</p>
+      <span class="pulse"><RefreshCw size={20} /></span>
+      <span>Scanning network...</span>
     </div>
   {:else if hubs.length === 0}
     <div class="empty-state">
-      <Globe size={40} />
-      <p>No hubs discovered yet</p>
-      <button class="btn-scan" on:click={() => discoverHubs(true)}>
-        <Radio size={14} /> Scan Network
-      </button>
+      <span>No hubs found</span>
     </div>
   {:else}
-    <div class="hub-list">
-      {#each hubs as hub}
-        <div class="hub-card" class:connected={hub.isConnected}>
-          <div class="hub-header">
-            <div class="hub-identity">
-              <span class="hub-name">{hub.name}</span>
-              <span class="hub-id">{formatShortId(hub.entityId)}</span>
-            </div>
-            {#if hub.isConnected}
-              <span class="connected-badge">
-                <Check size={10} /> Connected
-              </span>
-            {/if}
-          </div>
+    <div class="hub-table">
+      <div class="table-header">
+        <button class="col col-name" on:click={() => toggleSort('name')}>
+          Name {#if sortKey === 'name'}<ArrowUpDown size={10} />{/if}
+        </button>
+        <button class="col col-fee" on:click={() => toggleSort('fee')}>
+          Fee {#if sortKey === 'fee'}<ArrowUpDown size={10} />{/if}
+        </button>
+        <button class="col col-capacity" on:click={() => toggleSort('capacity')}>
+          Capacity {#if sortKey === 'capacity'}<ArrowUpDown size={10} />{/if}
+        </button>
+        <button class="col col-uptime" on:click={() => toggleSort('uptime')}>
+          Uptime {#if sortKey === 'uptime'}<ArrowUpDown size={10} />{/if}
+        </button>
+        <button class="col col-region" on:click={() => toggleSort('region')}>
+          Region {#if sortKey === 'region'}<ArrowUpDown size={10} />{/if}
+        </button>
+        <div class="col col-action"></div>
+      </div>
 
-          <p class="hub-description">{hub.metadata.description || 'No description'}</p>
-
-          <div class="hub-stats">
-            <div class="stat">
-              <Zap size={12} />
-              <span class="stat-label">Capacity</span>
-              <span class="stat-value">{formatCapacity(hub.metadata.capacity)}</span>
-            </div>
-            <div class="stat">
-              <Shield size={12} />
-              <span class="stat-label">Fee</span>
-              <span class="stat-value">{(hub.metadata.fee || 0) / 10000}%</span>
-            </div>
-            <div class="stat">
-              <Users size={12} />
-              <span class="stat-label">Uptime</span>
-              <span class="stat-value">{hub.metadata.uptime?.toFixed(1) || '?'}%</span>
-            </div>
-          </div>
-
-          <div class="hub-fields">
-            <div class="field">
-              <span class="field-label">Runtime</span>
-              <span class="field-value">{hub.runtimeId || 'unknown'}</span>
-            </div>
-            <div class="field">
-              <span class="field-label">Relays</span>
-              <span class="field-value">{hub.relays?.length ? hub.relays.join(', ') : 'none'}</span>
-            </div>
-            <div class="field">
-              <span class="field-label">Endpoints</span>
-              <span class="field-value">{hub.endpoints?.length ? hub.endpoints.join(', ') : 'none'}</span>
-            </div>
-            <div class="field">
-              <span class="field-label">Capabilities</span>
-              <span class="field-value">{hub.capabilities?.length ? hub.capabilities.join(', ') : 'none'}</span>
-            </div>
-            <div class="field">
-              <span class="field-label">Updated</span>
-              <span class="field-value">{new Date(hub.lastSeen).toISOString()}</span>
-            </div>
-          </div>
-
-          <details class="hub-raw">
-            <summary>Raw profile</summary>
-            <pre>{hub.raw}</pre>
-          </details>
-
-          <div class="hub-footer">
-            <span class="jurisdiction">{hub.jurisdiction}</span>
-            {#if !hub.isConnected && entityId}
-              <button
-                class="btn-connect"
-                on:click={() => connectToHub(hub)}
-                disabled={connecting === hub.entityId}
-              >
-                {#if connecting === hub.entityId}
-                  Connecting...
+      {#each sortedHubs as hub (hub.entityId)}
+        <div class="hub-row" class:connected={hub.isConnected} class:expanded={expandedHub === hub.entityId}>
+          <div class="row-main" on:click={() => toggleExpand(hub.entityId)}>
+            <div class="col col-name">
+              <span class="expand-icon">
+                {#if expandedHub === hub.entityId}
+                  <ChevronUp size={12} />
                 {:else}
-                  <Plus size={12} /> Connect
+                  <ChevronDown size={12} />
                 {/if}
-              </button>
-            {:else if hub.isConnected}
-              <span class="connected-status">Account Open</span>
-            {/if}
+              </span>
+              <img src={hub.identicon} alt="" class="hub-identicon" />
+              <span class="hub-name">{hub.name}</span>
+              {#if hub.isConnected}
+                <span class="connected-dot" title="Connected"></span>
+              {/if}
+            </div>
+            <div class="col col-fee">{formatFee(hub.metadata.fee)}</div>
+            <div class="col col-capacity">{formatCapacity(hub.metadata.capacity)}</div>
+            <div class="col col-uptime">{hub.metadata.uptime?.toFixed(1) || '-'}%</div>
+            <div class="col col-region">{hub.jurisdiction}</div>
+            <div class="col col-action" on:click|stopPropagation>
+              {#if hub.isConnected}
+                <span class="status-connected"><Check size={12} /> Open</span>
+              {:else if entityId}
+                <button
+                  class="btn-connect"
+                  on:click={() => connectToHub(hub)}
+                  disabled={connecting === hub.entityId}
+                >
+                  {#if connecting === hub.entityId}
+                    ...
+                  {:else}
+                    <Plus size={12} /> Connect
+                  {/if}
+                </button>
+              {/if}
+            </div>
           </div>
+
+          {#if expandedHub === hub.entityId}
+            <div class="row-details">
+              <div class="detail-grid">
+                <div class="detail">
+                  <span class="label">Entity ID</span>
+                  <span class="value mono">{hub.entityId}</span>
+                </div>
+                <div class="detail">
+                  <span class="label">Runtime ID</span>
+                  <span class="value mono">{hub.runtimeId || '-'}</span>
+                </div>
+                <div class="detail">
+                  <span class="label">Description</span>
+                  <span class="value">{hub.metadata.description || '-'}</span>
+                </div>
+                <div class="detail">
+                  <span class="label">Website</span>
+                  <span class="value">{hub.metadata.website || '-'}</span>
+                </div>
+                <div class="detail">
+                  <span class="label">Endpoints</span>
+                  <span class="value mono">{hub.endpoints?.join(', ') || '-'}</span>
+                </div>
+                <div class="detail">
+                  <span class="label">Capabilities</span>
+                  <span class="value">{hub.capabilities?.join(', ') || '-'}</span>
+                </div>
+                <div class="detail">
+                  <span class="label">Last Seen</span>
+                  <span class="value">{new Date(hub.lastSeen).toLocaleString()}</span>
+                </div>
+              </div>
+              <details class="raw-details">
+                <summary>Raw Profile</summary>
+                <pre>{hub.raw}</pre>
+              </details>
+            </div>
+          {/if}
         </div>
       {/each}
     </div>
   {/if}
-
-  <!-- Info Section -->
-  <div class="info-section">
-    <h4>What are Hubs?</h4>
-    <p>
-      Payment hubs are well-connected entities that provide liquidity and routing.
-      Connecting to a hub allows you to send payments to anyone in the network
-      through them, even if you don't have a direct account.
-    </p>
-  </div>
 </div>
 
 <style>
   .hub-panel {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 12px;
   }
 
   .panel-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-  }
-
-  .header-controls {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .relay-select {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: #a8a29e;
-    font-size: 12px;
-  }
-
-  .relay-select select {
-    background: #1c1917;
-    border: 1px solid #292524;
-    color: #e7e5e4;
-    padding: 4px 6px;
-    border-radius: 6px;
-    font-size: 12px;
   }
 
   .panel-header h3 {
@@ -479,31 +547,38 @@
     color: #e7e5e4;
   }
 
-  .refresh-btn {
-    width: 28px;
-    height: 28px;
+  .header-controls {
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 8px;
+  }
+
+  .relay-select {
+    background: #1c1917;
+    border: 1px solid #292524;
+    color: #a8a29e;
+    padding: 6px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+  }
+
+  .refresh-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
     background: #1c1917;
     border: 1px solid #292524;
     border-radius: 6px;
-    color: #78716c;
-    cursor: pointer;
-  }
-
-  .gossip-status {
-    font-size: 12px;
     color: #a8a29e;
-    padding: 6px 8px;
-    border: 1px solid #292524;
-    border-radius: 6px;
-    background: #171717;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
   }
 
   .refresh-btn:hover:not(:disabled) {
-    border-color: #fbbf24;
-    color: #fbbf24;
+    border-color: #3b82f6;
+    color: #3b82f6;
   }
 
   .refresh-btn:disabled {
@@ -524,16 +599,16 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 12px;
-    background: rgba(251, 191, 36, 0.1);
-    border: 1px solid rgba(251, 191, 36, 0.2);
+    padding: 8px 12px;
+    background: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.15);
     border-radius: 6px;
-    color: #fbbf24;
+    color: #d97706;
     font-size: 12px;
   }
 
   .error-banner {
-    padding: 10px 12px;
+    padding: 8px 12px;
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid rgba(239, 68, 68, 0.3);
     border-radius: 6px;
@@ -543,17 +618,12 @@
 
   .loading-state, .empty-state {
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    padding: 40px;
+    gap: 8px;
+    padding: 24px;
     color: #57534e;
-    gap: 12px;
-  }
-
-  .loading-state p, .empty-state p {
-    margin: 0;
-    font-size: 13px;
+    font-size: 12px;
   }
 
   .pulse {
@@ -566,187 +636,130 @@
     50% { opacity: 1; }
   }
 
-  .btn-scan {
+  /* Table styles */
+  .hub-table {
+    border: 1px solid #292524;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .table-header {
+    display: flex;
+    background: #1c1917;
+    border-bottom: 1px solid #292524;
+  }
+
+  .table-header button {
+    background: none;
+    border: none;
+    color: #666;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .table-header button:hover {
+    color: #a8a29e;
+  }
+
+  .col {
+    padding: 8px;
+    font-size: 12px;
+  }
+
+  .col-name { flex: 2; min-width: 140px; }
+  .col-fee { flex: 1; min-width: 70px; text-align: right; }
+  .col-capacity { flex: 1; min-width: 70px; text-align: right; }
+  .col-uptime { flex: 1; min-width: 60px; text-align: right; }
+  .col-region { flex: 1; min-width: 60px; }
+  .col-action { width: 90px; text-align: right; }
+
+  .hub-row {
+    border-bottom: 1px solid #292524;
+  }
+
+  .hub-row:last-child {
+    border-bottom: none;
+  }
+
+  .hub-row.connected {
+    background: rgba(34, 197, 94, 0.03);
+  }
+
+  .row-main {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+
+  .row-main:hover {
+    background: rgba(255, 255, 255, 0.02);
+  }
+
+  .row-main .col {
+    color: #a8a29e;
+  }
+
+  .row-main .col-name {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 10px 16px;
-    background: #422006;
-    border: 1px solid #713f12;
-    border-radius: 6px;
-    color: #fbbf24;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .hub-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .hub-card {
-    padding: 14px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 10px;
-    transition: all 0.15s;
-  }
-
-  .hub-card:hover {
-    border-color: #44403c;
-  }
-
-  .hub-card.connected {
-    border-color: rgba(34, 197, 94, 0.3);
-    background: rgba(34, 197, 94, 0.05);
-  }
-
-  .hub-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    margin-bottom: 8px;
-  }
-
-  .hub-identity {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .hub-name {
-    font-size: 14px;
-    font-weight: 600;
     color: #e7e5e4;
   }
 
-  .hub-id {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #78716c;
+  .expand-icon {
+    display: flex;
+    color: #57534e;
   }
 
-  .connected-badge {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px 8px;
-    background: rgba(34, 197, 94, 0.15);
+  .hub-identicon {
+    width: 20px;
+    height: 20px;
     border-radius: 4px;
-    color: #22c55e;
-    font-size: 10px;
+    flex-shrink: 0;
+  }
+
+  .hub-name {
     font-weight: 500;
   }
 
-  .hub-description {
-    margin: 0 0 12px;
-    font-size: 12px;
-    color: #78716c;
-    line-height: 1.4;
+  .connected-dot {
+    width: 6px;
+    height: 6px;
+    background: #22c55e;
+    border-radius: 50%;
   }
 
-  .hub-stats {
-    display: flex;
-    gap: 16px;
-    margin-bottom: 12px;
-  }
-
-  .stat {
+  .status-connected {
     display: flex;
     align-items: center;
     gap: 4px;
+    color: #22c55e;
     font-size: 11px;
-    color: #57534e;
-  }
-
-  .stat-label {
-    color: #57534e;
-  }
-
-  .stat-value {
-    color: #a8a29e;
-    font-weight: 500;
-  }
-
-  .hub-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-top: 10px;
-    border-top: 1px solid #292524;
-  }
-
-  .hub-fields {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-bottom: 12px;
-    font-size: 11px;
-    color: #78716c;
-  }
-
-  .field {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
-  }
-
-  .field-label {
-    color: #57534e;
-  }
-
-  .field-value {
-    color: #a8a29e;
-    font-family: 'JetBrains Mono', monospace;
-    text-align: right;
-    word-break: break-all;
-  }
-
-  .hub-raw {
-    margin: 10px 0 0;
-    background: #0c0a09;
-    border: 1px solid #292524;
-    border-radius: 8px;
-    padding: 8px;
-  }
-
-  .hub-raw summary {
-    cursor: pointer;
-    font-size: 11px;
-    color: #a8a29e;
-  }
-
-  .hub-raw pre {
-    margin: 8px 0 0;
-    font-size: 10px;
-    color: #d6d3d1;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .jurisdiction {
-    font-size: 10px;
-    color: #57534e;
-    text-transform: uppercase;
   }
 
   .btn-connect {
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 6px 12px;
-    background: linear-gradient(135deg, #15803d, #166534);
+    padding: 5px 12px;
+    background: #3b82f6;
     border: none;
     border-radius: 4px;
-    color: #dcfce7;
+    color: #fff;
     font-size: 11px;
     font-weight: 500;
     cursor: pointer;
+    transition: background 0.15s ease;
   }
 
   .btn-connect:hover:not(:disabled) {
-    background: linear-gradient(135deg, #16a34a, #15803d);
+    background: #2563eb;
   }
 
   .btn-connect:disabled {
@@ -754,29 +767,63 @@
     cursor: not-allowed;
   }
 
-  .connected-status {
+  /* Expanded details */
+  .row-details {
+    padding: 12px 16px;
+    background: #0c0a09;
+    border-top: 1px solid #292524;
+  }
+
+  .detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px 16px;
+    margin-bottom: 12px;
+  }
+
+  .detail {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .detail .label {
+    font-size: 10px;
+    color: #57534e;
+  }
+
+  .detail .value {
     font-size: 11px;
-    color: #22c55e;
-  }
-
-  .info-section {
-    padding: 14px;
-    background: rgba(251, 191, 36, 0.03);
-    border: 1px solid rgba(251, 191, 36, 0.08);
-    border-radius: 8px;
-  }
-
-  .info-section h4 {
-    margin: 0 0 8px;
-    font-size: 12px;
-    font-weight: 600;
     color: #a8a29e;
+    word-break: break-all;
   }
 
-  .info-section p {
-    margin: 0;
+  .detail .value.mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .raw-details {
+    margin-top: 8px;
+  }
+
+  .raw-details summary {
+    cursor: pointer;
     font-size: 11px;
     color: #78716c;
-    line-height: 1.5;
+    padding: 4px 0;
+  }
+
+  .raw-details pre {
+    margin: 8px 0 0;
+    padding: 8px;
+    background: #171717;
+    border: 1px solid #292524;
+    border-radius: 4px;
+    font-size: 10px;
+    color: #d6d3d1;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
   }
 </style>

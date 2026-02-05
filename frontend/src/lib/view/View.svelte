@@ -108,7 +108,8 @@
 
   console.log('[View.svelte] 🎬 MODULE LOADED - scenarioId prop:', scenarioId);
 
-  let envChangeRegistered = false;
+  let envChangeRegisteredFor: string | null = null;
+  let unregisterEnvChange: (() => void) | null = null;
 
   onMount(async () => {
     console.log('[View] ============ onMount ENTRY ============');
@@ -127,16 +128,6 @@
       const XLN = await getXLN();
 
       console.log('[View] Runtime module loaded, creating env...');
-
-      if (!envChangeRegistered && XLN.registerEnvChangeCallback) {
-        envChangeRegistered = true;
-        XLN.registerEnvChangeCallback((nextEnv: any) => {
-          // Only update the active env (avoid cross-runtime bleed)
-          if (get(localEnvStore) !== nextEnv) return;
-          localEnvStore.set(nextEnv);
-          localHistoryStore.set(nextEnv.history || []);
-        });
-      }
 
       // CRITICAL: Initialize global xlnInstance for utility functions (deriveDelta, etc)
       // Graph3DPanel needs xlnFunctions even when using isolated stores
@@ -185,6 +176,22 @@
         }
       }
 
+      const registerEnvChanges = (envToRegister: any) => {
+        if (!envToRegister || !XLN.registerEnvChangeCallback) return;
+        const runtimeKey = envToRegister.runtimeId || null;
+        if (envChangeRegisteredFor === runtimeKey) return;
+        if (unregisterEnvChange) {
+          unregisterEnvChange();
+          unregisterEnvChange = null;
+        }
+        unregisterEnvChange = XLN.registerEnvChangeCallback(envToRegister, (nextEnv: any) => {
+          if (get(localEnvStore) !== nextEnv) return;
+          localEnvStore.set(nextEnv);
+          localHistoryStore.set(nextEnv.history || []);
+        });
+        envChangeRegisteredFor = runtimeKey;
+      };
+
       if (env) {
         // Set to isolated stores
         localEnvStore.set(env);
@@ -193,6 +200,7 @@
         // Only use saved timeIndex when explicitly importing from URL
         localTimeIndex.set(urlImport?.state.ui?.ti ?? -1);
         localIsLive.set(true);
+        registerEnvChanges(env);
       }
 
       // CRITICAL: Subscribe to activeRuntimeId changes to reactively update env
@@ -212,6 +220,7 @@
           // Stay in live mode when runtime changes (don't reset to historical)
           localIsLive.set(true);
           localTimeIndex.set(-1);
+          registerEnvChanges(runtime.env);
         }
       });
 
@@ -786,7 +795,7 @@
   .view-wrapper {
     width: 100%;
     height: calc(100vh - 56px); /* Account for topbar (56px) */
-    background: #1e1e1e;
+    background: #0a0a0a;
     display: flex;
     flex-direction: column;
   }
@@ -797,6 +806,7 @@
     height: 100%;
     overflow: visible; /* Dropdowns must overlay - scroll is in panel-content */
     padding-bottom: 52px; /* Space for TimeMachine bar */
+    background: #0a0a0a;
   }
 
   .user-mode-container.hidden {

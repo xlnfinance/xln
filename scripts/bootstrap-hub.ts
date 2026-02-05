@@ -7,7 +7,7 @@
  */
 
 import { main, process as runtimeProcess } from '../runtime/runtime';
-import { deriveSignerKeySync, registerSignerKey } from '../runtime/account-crypto';
+import { deriveSignerKeySync, deriveSignerAddressSync, registerSignerKey } from '../runtime/account-crypto';
 import { encodeBoard, hashBoard } from '../runtime/entity-factory';
 import type { ConsensusConfig, Env } from '../runtime/types';
 
@@ -48,6 +48,13 @@ const DEFAULT_CONFIG: HubConfig = {
   position: { x: 0, y: 0, z: 0 },
 };
 
+const deriveHubSigner = (seed: string, signerLabel: string): { signerAddress: string; signerLabel: string } => {
+  const privateKey = deriveSignerKeySync(seed, signerLabel);
+  const signerAddress = deriveSignerAddressSync(seed, signerLabel);
+  registerSignerKey(signerAddress, privateKey);
+  return { signerAddress, signerLabel };
+};
+
 const ensureRuntimeInput = (env: Env) => {
   if (!env.runtimeInput) {
     env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
@@ -68,7 +75,7 @@ const resolveJurisdiction = (env: Env) => {
   };
 };
 
-const announceHubProfile = (env: Env, entityId: string, config: HubConfig, jurisdictionName?: string, chainId?: number) => {
+const announceHubProfile = (env: Env, entityId: string, config: HubConfig, signerAddress: string, jurisdictionName?: string, chainId?: number) => {
   if (!env.gossip) return;
   env.gossip.announce({
     entityId,
@@ -86,7 +93,7 @@ const announceHubProfile = (env: Env, entityId: string, config: HubConfig, juris
       httpUrl: config.httpUrl || undefined,
       port: config.port,
       serverId: config.serverId,
-      hubSignerId: config.signerId,
+      hubSignerId: signerAddress,
       jurisdiction: jurisdictionName,
       chainId,
       routingFeePPM: config.routingFeePPM ?? 100,
@@ -97,26 +104,24 @@ const announceHubProfile = (env: Env, entityId: string, config: HubConfig, juris
 
 export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Promise<{ entityId: string; signerId: string } | null> {
   const hubConfig: HubConfig = { ...DEFAULT_CONFIG, ...(config || {}) };
+  const { signerAddress, signerLabel } = deriveHubSigner(hubConfig.seed, hubConfig.signerId);
 
   console.log('[BOOTSTRAP] Starting hub bootstrap...');
   console.log(`[BOOTSTRAP] Name: ${hubConfig.name}`);
   console.log(`[BOOTSTRAP] Region: ${hubConfig.region || 'global'}`);
+  console.log(`[BOOTSTRAP] Signer: ${signerAddress}`);
 
   // Initialize runtime if not provided
   if (!env) {
     env = await main();
   }
 
-  // Register signer key for this hub BEFORE encoding board
-  const privateKey = deriveSignerKeySync(hubConfig.seed, hubConfig.signerId);
-  registerSignerKey(hubConfig.signerId, privateKey);
-
   const jurisdiction = resolveJurisdiction(env);
   const consensusConfig: ConsensusConfig = {
     mode: 'proposer-based',
     threshold: 1n,
-    validators: [hubConfig.signerId],
-    shares: { [hubConfig.signerId]: 1n },
+    validators: [signerAddress],
+    shares: { [signerAddress]: 1n },
     ...(jurisdiction ? { jurisdiction } : {}),
   };
 
@@ -133,7 +138,7 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
     env.runtimeInput.runtimeTxs.push({
       type: 'importReplica',
       entityId,
-      signerId: hubConfig.signerId,
+      signerId: signerAddress,
       data: {
         config: consensusConfig,
         isProposer: true,
@@ -155,7 +160,7 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
     console.log('[BOOTSTRAP] ✅ Hub entity already exists');
   }
 
-  announceHubProfile(env, entityId, hubConfig, jurisdiction?.name, jurisdiction?.chainId);
+  announceHubProfile(env, entityId, hubConfig, signerAddress, jurisdiction?.name, jurisdiction?.chainId);
 
   if (env.gossip?.getHubs) {
     const hubs = env.gossip.getHubs();
@@ -169,18 +174,22 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
   console.log(`[BOOTSTRAP]    Fee: ${(hubConfig.routingFeePPM ?? 100) / 10000}%`);
   console.log(`[BOOTSTRAP]    Relay: ${hubConfig.relayUrl}`);
 
-  return { entityId, signerId: hubConfig.signerId };
+  return { entityId, signerId: signerAddress };
 }
 
-export async function bootstrapHubs(env: Env, configs: HubConfig[]): Promise<string[]> {
-  const entityIds: string[] = [];
+export async function bootstrapHubs(env: Env, configs: HubConfig[]): Promise<Array<{ entityId: string; signerId: string; signerLabel: string }>> {
+  const entities: Array<{ entityId: string; signerId: string; signerLabel: string }> = [];
   for (const config of configs) {
     const result = await bootstrapHub(env, config);
     if (result?.entityId) {
-      entityIds.push(result.entityId);
+      entities.push({
+        entityId: result.entityId,
+        signerId: result.signerId,
+        signerLabel: config.signerId,
+      });
     }
   }
-  return entityIds;
+  return entities;
 }
 
 if (import.meta.main) {

@@ -27,9 +27,7 @@ interface IERC20 {
 interface IERC721 {
   function transferFrom(address from, address to, uint256 tokenId) external;
 }
-interface IERC1155 {
-  function safeTransferFrom(address from, address to, uint256 id, uint256 amount, bytes calldata data) external;
-}
+// IERC1155 already defined in @openzeppelin/contracts (imported via EntityProvider.sol)
 
 contract Depository is ReentrancyGuardLite {
 

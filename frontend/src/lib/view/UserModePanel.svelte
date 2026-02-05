@@ -605,8 +605,8 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    background: var(--bg-primary, #0d1117);
-    color: var(--text-primary, #e6edf3);
+    background: #0a0a0a;
+    color: #e5e5e5;
   }
 
   .rjea-bar {
@@ -658,10 +658,9 @@
     min-height: 0;
     position: relative;
     z-index: 1;
-    padding: 16px;
+    padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 16px;
   }
 
   .wallet-section {

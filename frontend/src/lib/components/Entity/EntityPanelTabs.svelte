@@ -292,9 +292,7 @@
 
       console.log('[EntityPanel] Offchain faucet success:', result);
       toasts.success('Received $100 USDC via offchain payment!');
-
-      // Refresh UI
-      setTimeout(() => location.reload(), 500);
+      // No reload needed - reactive stores will update
     } catch (err) {
       console.error('[EntityPanel] Offchain faucet failed:', err);
       toasts.error(`Offchain faucet failed: ${(err as Error).message}`);
@@ -1303,8 +1301,8 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    background: #0c0a09;
-    color: #e7e5e4;
+    background: #0a0a0a;
+    color: #e5e5e5;
     font-family: 'Inter', -apple-system, sans-serif;
     font-size: 13px;
   }

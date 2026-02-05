@@ -240,6 +240,7 @@ export interface RuntimeInput {
   runtimeTxs: RuntimeTx[];
   entityInputs: EntityInput[];
   jInputs?: JInput[]; // J-layer inputs (queue to J-mempool)
+  queuedAt?: number; // When first queued into runtime mempool (ms)
 }
 
 /** J-layer input - queues JTx to jurisdiction mempool */
@@ -520,7 +521,11 @@ export type EntityTx =
     }
   | {
       type: 'openAccount';
-      data: { targetEntityId: string };
+      data: {
+        targetEntityId: string;
+        creditAmount?: bigint;  // Optional: extend credit in same frame as add_delta
+        tokenId?: number;       // Token for credit (default: 1 = USDC)
+      };
     }
   | {
       type: 'j_event_account_claim';
@@ -935,6 +940,7 @@ export interface AccountMachine {
   currentHeight: number; // Renamed from currentFrameId for S/E/A consistency
   pendingFrame?: AccountFrame;
   pendingSignatures: string[];
+  pendingAccountInput?: AccountInput; // Cached outbound frame input for resend/nudge
 
   // Rollback support for bilateral disagreements
   rollbackCount: number;
@@ -1604,7 +1610,33 @@ export interface Env {
   runtimeSeed?: string; // BrainVault seed backing this runtime (plaintext, dev mode)
   runtimeId?: string; // Runtime identity (usually signer1 address)
   dbNamespace?: string; // DB namespace for per-runtime persistence (defaults to runtimeId)
-  runtimeInput: RuntimeInput; // Persistent storage for merged inputs
+  // Runtime mempool (runtime-level queue; WAL-like)
+  // NOTE: runtimeInput is deprecated alias - both point to same object
+  runtimeMempool?: RuntimeInput;
+  runtimeInput: RuntimeInput; // Deprecated alias of runtimeMempool
+  runtimeConfig?: {
+    minFrameDelayMs?: number; // Minimum delay between runtime frames
+    loopIntervalMs?: number;  // Loop interval for runtime processing
+  };
+  runtimeState?: {
+    processing?: boolean;
+    loopActive?: boolean;
+    loopTimer?: any;
+    lastFrameAt?: number;
+    p2p?: any;
+    pendingP2PConfig?: any;
+    lastP2PConfig?: any;
+    jWatcher?: any;
+    jWatcherStarted?: boolean;
+    envChangeCallbacks?: Set<(env: Env) => void>;
+    db?: any;
+    dbOpenPromise?: Promise<boolean> | null;
+    logState?: {
+      nextId: number;
+      mirrorToConsole?: boolean;
+    };
+    cleanLogs?: string[];
+  };
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: any; // Gossip layer for network profiles
 

@@ -62,14 +62,32 @@ const summarizeJWatcherEvents = (inputs: EntityInput[]): { totalEvents: number; 
 };
 
 const drainJWatcherQueue = async (env: Env, label = 'J-WATCHER'): Promise<void> => {
-  const pending = env.runtimeInput?.entityInputs?.length ?? 0;
-  if (pending === 0) return;
-  const toProcess = [...env.runtimeInput.entityInputs];
-  env.runtimeInput.entityInputs = [];
-  const { totalEvents, summary } = summarizeJWatcherEvents(toProcess);
-  console.log(`[${label}] Applying ${pending} queued inputs (${totalEvents} events${summary ? `: ${summary}` : ''})`);
-  await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: toProcess });
-  console.log(`[${label}] Applied ${pending} queued inputs`);
+  const allPending = env.runtimeInput?.entityInputs ?? [];
+  if (allPending.length === 0) return;
+
+  // CRITICAL FIX: Only process inputs that contain J-events (j_event type)
+  // Leave P2P inputs (openAccount, accountInput, etc.) for the runtime tick to process
+  const jEventInputs: typeof allPending = [];
+  const otherInputs: typeof allPending = [];
+
+  for (const input of allPending) {
+    const hasJEvents = input.entityTxs?.some(tx => tx.type === 'j_event');
+    if (hasJEvents) {
+      jEventInputs.push(input);
+    } else {
+      otherInputs.push(input);
+    }
+  }
+
+  if (jEventInputs.length === 0) return;
+
+  // Only drain J-event inputs, keep others in queue
+  env.runtimeInput.entityInputs = otherInputs;
+
+  const { totalEvents, summary } = summarizeJWatcherEvents(jEventInputs);
+  console.log(`[${label}] Applying ${jEventInputs.length} queued inputs (${totalEvents} events${summary ? `: ${summary}` : ''})`);
+  await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: jEventInputs });
+  console.log(`[${label}] Applied ${jEventInputs.length} queued inputs`);
 };
 
 const applyJEventsToEnv = async (env: Env, events: JEvent[], label = 'J-EVENTS'): Promise<void> => {
@@ -130,6 +148,9 @@ const hasPendingRuntimeWork = (env: Env): boolean => {
   if (env.networkInbox?.length) return true;
   if (env.pendingNetworkOutputs?.length) return true;
   if (env.runtimeInput?.runtimeTxs?.length) return true;
+  // Check P2P mempool (where enqueueRuntimeInputs puts inbound messages)
+  if ((env as any).runtimeMempool?.entityInputs?.length) return true;
+  if ((env as any).runtimeMempool?.runtimeTxs?.length) return true;
 
   if (env.jReplicas) {
     for (const replica of env.jReplicas.values()) {
@@ -192,17 +213,29 @@ const startRuntimeTickLoop = (env: Env): void => {
   console.log(`[XLN] Runtime tick loop started (${TIMING.TICK_INTERVAL_MS}ms)`);
 };
 
+const hubSignerLabels = new Map<string, string>();
+const hubSignerAddresses = new Map<string, string>();
+
 const getHubWallet = async (env: Env, hubEntityId?: string): Promise<{ hubEntityId: string; hubSignerId: string; wallet: ethers.Wallet } | null> => {
   if (!globalJAdapter) return null;
   const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true) || [];
   if (hubs.length === 0) return null;
   const selectedHub = hubEntityId ? hubs.find(h => h.entityId === hubEntityId) || hubs[0] : hubs[0];
   const targetEntityId = selectedHub.entityId;
-  const hubSignerId = (selectedHub.metadata?.hubSignerId as string) || resolveEntityProposerId(env, targetEntityId, 'hub-wallet');
-  const hubPrivateKeyBytes = deriveSignerKeySync(HUB_SEED, hubSignerId);
+  const signerLabel = hubSignerLabels.get(targetEntityId);
+  if (!signerLabel) {
+    console.warn(`[XLN] Hub signer label missing for ${targetEntityId.slice(0, 12)}...`);
+    return null;
+  }
+  const hubSignerAddress = hubSignerAddresses.get(targetEntityId);
+  const hubPrivateKeyBytes = deriveSignerKeySync(HUB_SEED, signerLabel);
   const hubPrivateKeyHex = '0x' + Buffer.from(hubPrivateKeyBytes).toString('hex');
   const wallet = new ethers.Wallet(hubPrivateKeyHex, globalJAdapter.provider);
-  return { hubEntityId: targetEntityId, hubSignerId, wallet };
+  if (hubSignerAddress && wallet.address.toLowerCase() !== hubSignerAddress.toLowerCase()) {
+    console.error(`[XLN] Hub signer address mismatch for ${targetEntityId.slice(0, 12)}... expected=${hubSignerAddress} got=${wallet.address}`);
+    return null;
+  }
+  return { hubEntityId: targetEntityId, hubSignerId: hubSignerAddress ?? wallet.address, wallet };
 };
 
 const deployDefaultTokensOnRpc = async (): Promise<void> => {
@@ -1172,13 +1205,25 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       console.warn('[XLN] Could not load jurisdictions.json, will deploy fresh:', (err as Error).message);
     }
 
+    // Wait for ANVIL to be ready (retry up to 30s)
     let detectedChainId = 31337;
-    try {
-      const probe = new ethers.JsonRpcProvider(anvilRpc);
-      const network = await probe.getNetwork();
-      if (network?.chainId) detectedChainId = Number(network.chainId);
-    } catch (err) {
-      console.warn('[XLN] Failed to detect chainId from RPC, defaulting to 31337:', (err as Error).message);
+    const maxRetries = 30;
+    let anvilReady = false;
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const probe = new ethers.JsonRpcProvider(anvilRpc);
+        const network = await probe.getNetwork();
+        if (network?.chainId) detectedChainId = Number(network.chainId);
+        anvilReady = true;
+        console.log(`[XLN] ✅ ANVIL ready (chainId: ${detectedChainId})`);
+        break;
+      } catch (err) {
+        if (i === 0) console.log(`[XLN] ⏳ Waiting for ANVIL at ${anvilRpc}...`);
+        await new Promise(r => setTimeout(r, 1000));
+      }
+    }
+    if (!anvilReady) {
+      throw new Error(`❌ FAIL-FAST: ANVIL not reachable at ${anvilRpc} after ${maxRetries}s. Is hardhat node running?`);
     }
 
     // Ensure fromReplica carries correct chainId (override if stale)
@@ -1327,7 +1372,12 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     },
   ];
 
-  const hubEntityIds = await bootstrapHubs(env, hubConfigs);
+  const hubBootstraps = await bootstrapHubs(env, hubConfigs);
+  const hubEntityIds = hubBootstraps.map(h => h.entityId);
+  for (const hub of hubBootstraps) {
+    hubSignerLabels.set(hub.entityId, hub.signerLabel);
+    hubSignerAddresses.set(hub.entityId, hub.signerId);
+  }
 
   // Start P2P overlay for hub announcements
   if (hubEntityIds.length > 0) {

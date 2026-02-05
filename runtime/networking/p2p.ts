@@ -514,7 +514,8 @@ export class RuntimeP2P {
       if (hasHanko || hasLegacySig) {
         const valid = await verifyProfileSignature(profile, this.env);
         if (!valid) {
-          const boardValidators = profile.metadata?.board?.validators;
+          const board = profile.metadata?.board;
+          const boardValidators = board && typeof board === 'object' && 'validators' in board ? board.validators : undefined;
           const hasBoardKey = Array.isArray(boardValidators) && boardValidators.some(v => typeof v?.publicKey === 'string');
           const hasEntityKey = typeof profile.metadata?.entityPublicKey === 'string';
           console.warn(
@@ -539,7 +540,8 @@ export class RuntimeP2P {
       this.env.gossip?.announce?.(profile);
 
       // Register validator public keys from profile board (for account signature verification)
-      const boardValidators = profile.metadata?.board?.validators;
+      const board2 = profile.metadata?.board;
+      const boardValidators = board2 && typeof board2 === 'object' && 'validators' in board2 ? board2.validators : undefined;
       if (Array.isArray(boardValidators)) {
         for (const validator of boardValidators) {
           const signerId = validator?.signerId;

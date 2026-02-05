@@ -67,14 +67,6 @@ library Account {
     return e1 < e2 ? abi.encodePacked(e1, e2) : abi.encodePacked(e2, e1);
   }
 
-  function packTokenReference(uint8 tokenType, address contractAddress, uint96 externalTokenId) external pure returns (bytes32) {
-    return keccak256(abi.encode(tokenType, contractAddress, externalTokenId));
-  }
-
-  function unpackTokenReference(bytes32) external pure returns (address, uint96, uint8) {
-    revert("!unpack");
-  }
-
   function encodeDisputeHash(
     uint cooperativeNonce, uint disputeNonce, bool startedByLeft,
     uint256 timeout, bytes32 proofbodyHash, bytes memory initialArguments

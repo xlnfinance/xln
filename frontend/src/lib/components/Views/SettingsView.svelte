@@ -284,7 +284,9 @@
     if (confirm('Are you sure you want to clear the database? This will reset all data.')) {
       try {
         const xln = await getXLN();
-        await xln.clearDatabaseAndHistory();
+        const env = $xlnEnvironment;
+        if (!env) throw new Error('No active runtime to clear');
+        const freshEnv = await xln.clearDatabaseAndHistory(env);
         localStorage.clear();
         sessionStorage.clear();
 
@@ -315,7 +317,7 @@
           }
         }
         // Reset stores instead of reload
-        xlnEnvironment.set(null);
+        xlnEnvironment.set(freshEnv);
         alert('Database cleared. Please reinitialize or navigate to /vault.');
       } catch (error) {
         console.error('❌ Clear database failed:', error);

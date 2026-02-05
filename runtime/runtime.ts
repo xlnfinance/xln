@@ -532,17 +532,57 @@ const planEntityOutputs = (env: Env, outputs: EntityInput[]): {
   return { localOutputs, remoteOutputs, deferredOutputs };
 };
 
+// Batch multiple outputs to same entityId:signerId into one EntityInput
+const batchOutputsByTarget = (outputs: EntityInput[]): EntityInput[] => {
+  const batched = new Map<string, EntityInput>();
+
+  for (const output of outputs) {
+    const key = `${output.entityId}:${output.signerId}`;
+    const existing = batched.get(key);
+
+    if (existing) {
+      // Merge entityTxs
+      if (output.entityTxs?.length) {
+        existing.entityTxs = [...(existing.entityTxs || []), ...output.entityTxs];
+      }
+      // Keep latest proposedFrame (or first if only one has it)
+      if (output.proposedFrame) {
+        existing.proposedFrame = output.proposedFrame;
+      }
+      // Merge hashPrecommits
+      if (output.hashPrecommits) {
+        existing.hashPrecommits = existing.hashPrecommits || new Map();
+        output.hashPrecommits.forEach((sigs, signerId) => {
+          existing.hashPrecommits!.set(signerId, sigs);
+        });
+      }
+      console.log(`📦 BATCH: Merged output into ${key} (now ${existing.entityTxs?.length || 0} txs)`);
+    } else {
+      batched.set(key, { ...output });
+    }
+  }
+
+  return Array.from(batched.values());
+};
+
 const dispatchEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] => {
   const p2p = getP2P(env);
   if (!p2p) return outputs;
+
+  // CRITICAL: Batch outputs to same target before sending
+  const batchedOutputs = batchOutputsByTarget(outputs);
+  if (batchedOutputs.length < outputs.length) {
+    console.log(`📦 BATCH: Reduced ${outputs.length} outputs → ${batchedOutputs.length} batched messages`);
+  }
+
   const deferredOutputs: EntityInput[] = [];
-  for (const output of outputs) {
+  for (const output of batchedOutputs) {
     const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
     if (!targetRuntimeId) {
       deferredOutputs.push(output);
       continue;
     }
-    console.log(`📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId.slice(0, 10)} for entity ${output.entityId.slice(-4)}`);
+    console.log(`📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId.slice(0, 10)} for entity ${output.entityId.slice(-4)} (${output.entityTxs?.length || 0} txs)`);
     p2p.enqueueEntityInput(targetRuntimeId, output);
   }
   return deferredOutputs;
@@ -605,23 +645,12 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
       env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
       ensureRuntimeLoop(env);
     },
-    onGossipProfiles: (from, profiles) => {
-      console.log(`📥 onGossipProfiles: Received ${profiles.length} profiles from ${from.slice(0,10)}`);
-      console.log(`📥 Profile details:`, profiles.map(p => `${p.entityId?.slice(-4) || '????'}:${p.accounts?.length || 0}acc`).join(', '));
-
-      if (!env.gossip?.announce) {
-        console.warn(`⚠️ No env.gossip.announce!`);
-        return;
-      }
-
-      console.log(`📥 Starting announce loop for ${profiles.length} profiles...`);
-      for (let i = 0; i < profiles.length; i++) {
-        const profile = profiles[i];
-        console.log(`  [${i}] Announcing ${profile.entityId.slice(-4)} accounts=${profile.accounts?.length || 0} ts=${profile.metadata?.lastUpdated}`);
+    onGossipProfiles: (_from, profiles) => {
+      if (!env.gossip?.announce) return;
+      // Store profiles in local gossip cache (silently)
+      for (const profile of profiles) {
         env.gossip.announce(profile);
       }
-      console.log(`📥 Announce loop complete`);
-      env.info('network', 'GOSSIP_SYNC', { fromRuntimeId: from, profiles: profiles.length });
     },
   });
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { AccountMachine } from '$lib/types/ui';
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { getXLN, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import BigIntInput from '../Common/BigIntInput.svelte';
@@ -55,6 +55,19 @@
   let creditAdjustment = 0;
   let paymentAmountBigInt = 0n; // BigInt for precision
   let paymentDescription = '';
+  const RESEND_AFTER_MS = 10_000;
+  let nowMs = Date.now();
+  let nowTimer: ReturnType<typeof setInterval> | null = null;
+
+  onMount(() => {
+    nowTimer = setInterval(() => {
+      nowMs = Date.now();
+    }, 1000);
+  });
+
+  onDestroy(() => {
+    if (nowTimer) clearInterval(nowTimer);
+  });
 
   // Auto-set defaults for faster testing
   $: {
@@ -178,6 +191,37 @@
 
     return result;
   });
+
+  $: pendingFrameAgeMs = account.pendingFrame?.timestamp ? (nowMs - account.pendingFrame.timestamp) : 0;
+  $: canResendPendingFrame = !!account.pendingFrame && !!account.pendingAccountInput && pendingFrameAgeMs > RESEND_AFTER_MS;
+
+  async function resendPendingFrame() {
+    try {
+      if (!canResendPendingFrame || !account.pendingAccountInput) return;
+      const env = activeEnv;
+      if (!env || !('history' in env)) throw new Error('XLN environment not ready or in historical mode');
+      if (!activeXlnFunctions?.resolveEntityProposerId || !activeXlnFunctions?.sendEntityInput) {
+        throw new Error('Resend helpers not available');
+      }
+
+      const accountInput = account.pendingAccountInput;
+      const proposerId = activeXlnFunctions.resolveEntityProposerId(env, accountInput.toEntityId, 'resend-account-frame');
+      const result = activeXlnFunctions.sendEntityInput(env, {
+        entityId: accountInput.toEntityId,
+        signerId: proposerId,
+        entityTxs: [{ type: 'accountInput', data: accountInput }],
+      });
+
+      if (result.deferred) {
+        console.warn('Resend deferred - counterparty runtimeId unknown');
+      } else {
+        console.log('✅ Resent pending account frame');
+      }
+    } catch (err: any) {
+      console.error('Failed to resend pending frame:', err);
+      error.set(`Resend failed: ${err?.message || 'Unknown error'}`);
+    }
+  }
 
   async function sendPayment() {
     try {
@@ -589,6 +633,9 @@
               <span class="frame-timestamp">
                 {formatTimestamp(account.pendingFrame.timestamp)}
               </span>
+              {#if canResendPendingFrame}
+                <button class="resend-button" on:click|preventDefault={resendPendingFrame}>Resend Frame</button>
+              {/if}
             </div>
             <div class="frame-details">
               <div class="frame-detail">
@@ -1275,6 +1322,21 @@
     font-size: 0.8em;
     color: #9d9d9d;
     font-family: monospace;
+  }
+
+  .resend-button {
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid #f59e0b;
+    background: rgba(245, 158, 11, 0.15);
+    color: #f59e0b;
+    font-size: 0.75em;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .resend-button:hover {
+    background: rgba(245, 158, 11, 0.25);
   }
 
   .frame-details {

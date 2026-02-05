@@ -181,6 +181,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   const jurisdiction = {
     name: JURISDICTION,
     chainId: 31337,
+    address: 'browservm://', // BrowserVM doesn't use RPC
     entityProviderAddress,
     depositoryAddress,
   };

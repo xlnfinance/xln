@@ -14,13 +14,8 @@ import { ethers } from 'ethers';
 import type { Provider, Signer } from 'ethers';
 
 import { Account__factory } from '../../jurisdictions/typechain-types/factories/Account__factory';
-import { Depository__factory } from '../../jurisdictions/typechain-types/factories/Depository__factory';
-import { EntityProvider__factory } from '../../jurisdictions/typechain-types/factories/EntityProvider__factory';
-import { DeltaTransformer__factory } from '../../jurisdictions/typechain-types/factories/DeltaTransformer__factory';
-import type { Account } from '../../jurisdictions/typechain-types/Account';
-import type { Depository } from '../../jurisdictions/typechain-types/Depository';
-import type { EntityProvider } from '../../jurisdictions/typechain-types/EntityProvider';
-import type { DeltaTransformer } from '../../jurisdictions/typechain-types/DeltaTransformer';
+import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types';
+import { Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types';
 
 import type { BrowserVMState } from '../types';
 import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, InsuranceReg, BrowserVMProvider, JTokenInfo } from './types';
@@ -389,7 +384,7 @@ export async function createRpcAdapter(
             events.push({
               name: parsed.name,
               args: Object.fromEntries(
-                parsed.fragment.inputs.map((input, i) => [input.name, parsed.args[i]])
+                parsed.fragment.inputs.map((input: { name: string }, i: number) => [input.name, parsed.args[i]])
               ),
               blockNumber: receipt.blockNumber,
               blockHash: receipt.blockHash,
@@ -555,7 +550,7 @@ export async function createRpcAdapter(
             events.push({
               name: parsed.name,
               args: Object.fromEntries(
-                parsed.fragment.inputs.map((input, i) => [input.name, parsed.args[i]])
+                parsed.fragment.inputs.map((input: { name: string }, i: number) => [input.name, parsed.args[i]])
               ),
               blockNumber: receipt.blockNumber,
               blockHash: receipt.blockHash,
@@ -581,7 +576,7 @@ export async function createRpcAdapter(
             events.push({
               name: parsed.name,
               args: Object.fromEntries(
-                parsed.fragment.inputs.map((input, i) => [input.name, parsed.args[i]])
+                parsed.fragment.inputs.map((input: { name: string }, i: number) => [input.name, parsed.args[i]])
               ),
               blockNumber: receipt.blockNumber,
               blockHash: receipt.blockHash,
