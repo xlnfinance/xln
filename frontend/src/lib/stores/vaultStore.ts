@@ -811,6 +811,11 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
           }
         }
 
+        // Start runtime event loop (processes inbound P2P messages, bilateral consensus)
+        if (xln.startRuntimeLoop) {
+          xln.startRuntimeLoop(newEnv);
+        }
+
         runtimes.update(r => {
           r.set(runtimeId, {
             id: runtimeId,
@@ -831,6 +836,12 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         // Runtime exists, just switch to it
         // REMOVED: setRuntimeSeed() - seed already in env.runtimeSeed (pure)
         console.log('[VaultStore.initialize] Switched to existing runtime (seed in env):', runtimeId.slice(0, 10));
+
+        // Ensure runtime loop is running (may not have been started on previous init)
+        const existingRuntime = get(runtimes).get(runtimeId);
+        if (existingRuntime?.env && xln.startRuntimeLoop) {
+          xln.startRuntimeLoop(existingRuntime.env);
+        }
 
         activeRuntimeId.set(runtimeId);
       }

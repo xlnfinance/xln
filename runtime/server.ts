@@ -398,7 +398,7 @@ const DEFAULT_OPTIONS: XlnServerOptions = {
   port: 8080,
   host: '0.0.0.0',
   staticDir: './frontend/build',
-  relaySeeds: ['wss://xln.finance/relay'],
+  relaySeeds: ['ws://localhost:8080/relay'],
   serverId: 'xln-server',
 };
 const DEFAULT_TOKEN_CATALOG = DEFAULT_TOKENS.map((token) => ({ ...token }));
