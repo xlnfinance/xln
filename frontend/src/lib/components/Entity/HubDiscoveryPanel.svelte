@@ -108,7 +108,7 @@
       if (refreshGossip) {
         const xln = await getXLN();
         const beforeCount = env?.gossip?.getProfiles?.()?.length || 0;
-        xln.refreshGossip?.();
+        if (env) xln.refreshGossip?.(env);
         await new Promise(resolve => setTimeout(resolve, 250));
         const afterCount = env?.gossip?.getProfiles?.()?.length || 0;
         gossipStatus = {

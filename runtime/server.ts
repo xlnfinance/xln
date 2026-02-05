@@ -1334,6 +1334,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     startP2P(env, {
       relayUrls: relaySeeds,
       advertiseEntityIds: hubEntityIds,
+      isHub: true,  // CRITICAL: Mark as hub so profiles get isHub metadata
     });
   }
 
