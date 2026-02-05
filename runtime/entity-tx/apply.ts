@@ -352,23 +352,32 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         // Order matters: add_delta creates delta, then set_credit_limit modifies it
         const creditAmount = entityTx.data.creditAmount;
         if (creditAmount && creditAmount > 0n) {
-          // Determine canonical side for credit limit
-          // leftCreditLimit = credit I extend to LEFT entity (counterparty if I'm right)
-          const counterpartyIsLeft = counterpartyId < entityState.entityId;
-          const side = counterpartyIsLeft ? 'left' : 'right';
-
+          // We are LEFT → set leftCreditLimit (our credit line)
           localAccount.mempool.push({
             type: 'set_credit_limit',
-            data: { tokenId, amount: creditAmount, side: side as 'left' | 'right' }
+            data: { tokenId, amount: creditAmount, side: 'left' as const }
           });
-          console.log(`📝 Queued [add_delta, set_credit_limit] to mempool (${side}=${creditAmount})`);
+          console.log(`📝 Queued [add_delta, set_credit_limit] to mempool (left=${creditAmount})`);
         } else {
           console.log(`📝 Queued [add_delta] to mempool (credit=0, must be set explicitly)`);
         }
 
         console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms)`);
       } else {
-        console.log(`🧭 Right side: waiting for left's frame (mempool stays empty)`);
+        // RIGHT side: queue credit limit to mempool — it will be proposed in our ACK frame
+        // after we receive LEFT's first frame (which contains add_delta)
+        const creditAmount = entityTx.data.creditAmount;
+        const tokenId = entityTx.data.tokenId ?? 1;
+        if (creditAmount && creditAmount > 0n) {
+          // We are RIGHT, extending credit to LEFT (counterparty)
+          localAccount.mempool.push({
+            type: 'set_credit_limit',
+            data: { tokenId, amount: creditAmount, side: 'right' as const }
+          });
+          console.log(`🧭 Right side: queued set_credit_limit (right=${creditAmount}) — will propose after left's frame`);
+        } else {
+          console.log(`🧭 Right side: waiting for left's frame (no credit requested)`);
+        }
       }
 
       // Hub entities no longer auto-send faucet (use /api/faucet/offchain instead)
@@ -378,13 +387,17 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // CRITICAL: Notify counterparty to create mirror account
       // Without this, Hub won't know about Alice-Hub account when j-events arrive!
+      // Do NOT pass creditAmount — only initiator extends credit, not counterparty
       const counterpartySigner = resolveEntityProposerId(env, targetEntityId, 'openAccount');
       outputs.push({
         entityId: targetEntityId,
         signerId: counterpartySigner,
         entityTxs: [{
           type: 'openAccount',
-          data: { targetEntityId: entityState.entityId }
+          data: {
+            targetEntityId: entityState.entityId,
+            tokenId: entityTx.data.tokenId ?? 1,
+          }
         }]
       });
       console.log(`📤 Sent openAccount request to counterparty ${formatEntityId(targetEntityId)} (signer: ${counterpartySigner})`);
