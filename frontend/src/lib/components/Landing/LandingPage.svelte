@@ -224,12 +224,7 @@
   }
 </script>
 
-<div class="landing-controls">
-  <LanguageSwitcher />
-  <button on:click={() => darkMode = !darkMode} class="theme-toggle">
-    {darkMode ? '☀️ Light' : '🌙 Dark'}
-  </button>
-</div>
+<!-- Theme controls moved to Topbar -->
 
 <div class="landing" class:light-mode={!darkMode}>
   <div class="content">
