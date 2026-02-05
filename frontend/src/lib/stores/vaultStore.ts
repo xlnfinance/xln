@@ -1,6 +1,7 @@
 import { writable, get, derived } from 'svelte/store';
 import { HDNodeWallet, Mnemonic } from 'ethers';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
+import { xlnEnvironment } from './xlnStore';
 
 // Types
 export interface Signer {
@@ -199,14 +200,15 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
       import('$lib/stores/xlnStore').then(async ({ getXLN, resolveRelayUrls }) => {
         const { get } = await import('svelte/store');
         const xln = await getXLN();
-        if (xln.setRuntimeSeed) {
-          xln.setRuntimeSeed(runtime.seed);
-        }
         // Start P2P on the VaultStore's runtime env (not xlnStore's global env)
         if (xln.startP2P && xln.deriveRuntimeId) {
           // Get the env from this specific runtime in runtimeStore
           const runtimeData = get(runtimes).get(runtime.id);
           const env = runtimeData?.env;
+          // Set runtime seed on the env
+          if (xln.setRuntimeSeed && env) {
+            xln.setRuntimeSeed(env, runtime.seed);
+          }
           if (env) {
             // CRITICAL: Set runtimeId on THIS env (not the global one)
             // This allows P2P to start immediately instead of being deferred
@@ -864,7 +866,7 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
     try {
       const { getXLN } = await import('./xlnStore');
       const xln = await getXLN();
-      const env = xln.getEnv();
+      const env = get(xlnEnvironment);
       const jadapter = xln.getActiveJAdapter?.(env);
       if (!jadapter?.getReserves) return 0n;
 
@@ -887,7 +889,7 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
     try {
       const { getXLN } = await import('./xlnStore');
       const xln = await getXLN();
-      const env = xln.getEnv();
+      const env = get(xlnEnvironment);
       const jadapter = xln.getActiveJAdapter?.(env);
       if (!jadapter?.reserveToReserve) return { success: false, error: 'J-adapter not available' };
 
@@ -896,7 +898,7 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
 
       // Process queued J-events to update runtime state
       if (xln.processJBlockEvents) {
-        await xln.processJBlockEvents();
+        await xln.processJBlockEvents(env);
       }
 
       console.log(`[VaultStore] ✅ Sent ${amount} to ${toEntityId.slice(0, 12)}...`);
