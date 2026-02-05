@@ -533,6 +533,7 @@ export async function proposeAccountFrame(
     // NOTE: Settlement hankos now handled via SettlementWorkspace (entity-tx/handlers/settle.ts)
     counter: skipCounterIncrement ? accountMachine.proofHeader.cooperativeNonce : ++accountMachine.proofHeader.cooperativeNonce,
   };
+  accountMachine.pendingAccountInput = accountInput;
 
   // Collect hashes for entity-quorum signing (multi-signer support)
   const hashesToSign: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }> = [
@@ -743,6 +744,7 @@ export async function handleAccountInput(
 
       // Clear pending state
       delete accountMachine.pendingFrame;
+      delete accountMachine.pendingAccountInput;
       accountMachine.sentTransitions = 0;
       delete accountMachine.clonedForValidation;
       accountMachine.rollbackCount = Math.max(0, accountMachine.rollbackCount - 1); // Successful confirmation reduces rollback
@@ -865,6 +867,7 @@ export async function handleAccountInput(
 
           accountMachine.sentTransitions = 0;
           delete accountMachine.pendingFrame;
+          delete accountMachine.pendingAccountInput;
           delete accountMachine.clonedForValidation;
           accountMachine.rollbackCount++;
           accountMachine.lastRollbackFrameHash = receivedHash; // Track this rollback
@@ -1088,6 +1091,11 @@ export async function handleAccountInput(
     if (HEAVY_LOGS) console.log(`🔍 COMPUTING-HASH: Creating hash for frame ${receivedFrame.height}...`);
     // After bilateral field verification above, use OUR computed fullDeltaStates for hash
     // This ensures the stored frame has correct bilateral state
+    const leftEntityId = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity)
+      ? accountMachine.proofHeader.fromEntity
+      : accountMachine.proofHeader.toEntity;
+    const proposerIsLeft = input.fromEntityId === leftEntityId;
+
     const recomputedHash = await createFrameHash({
       height: receivedFrame.height,
       timestamp: receivedFrame.timestamp,
@@ -1098,7 +1106,7 @@ export async function handleAccountInput(
       deltas: ourFinalDeltas, // Use OUR computed deltas
       fullDeltaStates: ourFullDeltaStates, // Use OUR computed fullDeltaStates
       stateHash: '', // Computed by createFrameHash
-      byLeft: receivedFrame.byLeft ?? true,
+      byLeft: proposerIsLeft,
     });
 
     if (recomputedHash !== receivedFrame.stateHash) {
@@ -1121,7 +1129,7 @@ export async function handleAccountInput(
     // that passes transaction verification but corrupts our stored state.
     //
     // Safe to use from receivedFrame (inputs/metadata):
-    //   - height, timestamp, jHeight, accountTxs, prevFrameHash, byLeft
+    //   - height, timestamp, jHeight, accountTxs, prevFrameHash
     // NEVER use (computed state - could be poisoned):
     //   - tokenIds, deltas, fullDeltaStates, stateHash (except for comparison)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1184,7 +1192,7 @@ export async function handleAccountInput(
       tokenIds: ourFinalTokenIds, // Use OUR computed tokenIds
       deltas: ourFinalDeltas, // Use OUR computed deltas
       stateHash: recomputedHash, // Use hash computed from OUR values
-      byLeft: receivedFrame.byLeft ?? true, // Copy proposer info
+      byLeft: proposerIsLeft, // Compute proposer side locally
       fullDeltaStates: ourFullDeltaStates, // Use OUR verified fullDeltaStates
     });
     accountMachine.currentHeight = receivedFrame.height;

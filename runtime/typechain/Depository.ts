@@ -21,7 +21,7 @@ import type {
   TypedLogDescription,
   TypedListener,
   TypedContractMethod,
-} from "./common";
+} from "../common";
 
 export type SettledStruct = {
   left: BytesLike;
@@ -49,6 +49,50 @@ export type SettledStructOutput = [
   rightReserve: bigint;
   collateral: bigint;
   ondelta: bigint;
+};
+
+export type SettlementDiffStruct = {
+  tokenId: BigNumberish;
+  leftDiff: BigNumberish;
+  rightDiff: BigNumberish;
+  collateralDiff: BigNumberish;
+  ondeltaDiff: BigNumberish;
+};
+
+export type SettlementDiffStructOutput = [
+  tokenId: bigint,
+  leftDiff: bigint,
+  rightDiff: bigint,
+  collateralDiff: bigint,
+  ondeltaDiff: bigint
+] & {
+  tokenId: bigint;
+  leftDiff: bigint;
+  rightDiff: bigint;
+  collateralDiff: bigint;
+  ondeltaDiff: bigint;
+};
+
+export type InsuranceRegistrationStruct = {
+  insured: BytesLike;
+  insurer: BytesLike;
+  tokenId: BigNumberish;
+  limit: BigNumberish;
+  expiresAt: BigNumberish;
+};
+
+export type InsuranceRegistrationStructOutput = [
+  insured: string,
+  insurer: string,
+  tokenId: bigint,
+  limit: bigint,
+  expiresAt: bigint
+] & {
+  insured: string;
+  insurer: string;
+  tokenId: bigint;
+  limit: bigint;
+  expiresAt: bigint;
 };
 
 export type AllowanceStruct = {
@@ -97,6 +141,7 @@ export type ProofBodyStructOutput = [
 
 export type FinalDisputeProofStruct = {
   counterentity: BytesLike;
+  initialCooperativeNonce: BigNumberish;
   finalCooperativeNonce: BigNumberish;
   initialDisputeNonce: BigNumberish;
   finalDisputeNonce: BigNumberish;
@@ -112,6 +157,7 @@ export type FinalDisputeProofStruct = {
 
 export type FinalDisputeProofStructOutput = [
   counterentity: string,
+  initialCooperativeNonce: bigint,
   finalCooperativeNonce: bigint,
   initialDisputeNonce: bigint,
   finalDisputeNonce: bigint,
@@ -125,6 +171,7 @@ export type FinalDisputeProofStructOutput = [
   cooperative: boolean
 ] & {
   counterentity: string;
+  initialCooperativeNonce: bigint;
   finalCooperativeNonce: bigint;
   initialDisputeNonce: bigint;
   finalDisputeNonce: bigint;
@@ -165,19 +212,25 @@ export type InitialDisputeProofStructOutput = [
 
 export type ExternalTokenToReserveStruct = {
   entity: BytesLike;
-  packedToken: BytesLike;
+  contractAddress: AddressLike;
+  externalTokenId: BigNumberish;
+  tokenType: BigNumberish;
   internalTokenId: BigNumberish;
   amount: BigNumberish;
 };
 
 export type ExternalTokenToReserveStructOutput = [
   entity: string,
-  packedToken: string,
+  contractAddress: string,
+  externalTokenId: bigint,
+  tokenType: bigint,
   internalTokenId: bigint,
   amount: bigint
 ] & {
   entity: string;
-  packedToken: string;
+  contractAddress: string;
+  externalTokenId: bigint;
+  tokenType: bigint;
   internalTokenId: bigint;
   amount: bigint;
 };
@@ -224,49 +277,19 @@ export type ReserveToCollateralStructOutput = [
   pairs: EntityAmountStructOutput[];
 };
 
-export type SettlementDiffStruct = {
+export type CollateralToReserveStruct = {
+  counterparty: BytesLike;
   tokenId: BigNumberish;
-  leftDiff: BigNumberish;
-  rightDiff: BigNumberish;
-  collateralDiff: BigNumberish;
-  ondeltaDiff: BigNumberish;
+  amount: BigNumberish;
+  sig: BytesLike;
 };
 
-export type SettlementDiffStructOutput = [
+export type CollateralToReserveStructOutput = [
+  counterparty: string,
   tokenId: bigint,
-  leftDiff: bigint,
-  rightDiff: bigint,
-  collateralDiff: bigint,
-  ondeltaDiff: bigint
-] & {
-  tokenId: bigint;
-  leftDiff: bigint;
-  rightDiff: bigint;
-  collateralDiff: bigint;
-  ondeltaDiff: bigint;
-};
-
-export type InsuranceRegistrationStruct = {
-  insured: BytesLike;
-  insurer: BytesLike;
-  tokenId: BigNumberish;
-  limit: BigNumberish;
-  expiresAt: BigNumberish;
-};
-
-export type InsuranceRegistrationStructOutput = [
-  insured: string,
-  insurer: string,
-  tokenId: bigint,
-  limit: bigint,
-  expiresAt: bigint
-] & {
-  insured: string;
-  insurer: string;
-  tokenId: bigint;
-  limit: bigint;
-  expiresAt: bigint;
-};
+  amount: bigint,
+  sig: string
+] & { counterparty: string; tokenId: bigint; amount: bigint; sig: string };
 
 export type SettlementStruct = {
   leftEntity: BytesLike;
@@ -314,15 +337,27 @@ export type ReserveToExternalTokenStructOutput = [
   amount: bigint
 ] & { receivingEntity: string; tokenId: bigint; amount: bigint };
 
+export type SecretRevealStruct = {
+  transformer: AddressLike;
+  secret: BytesLike;
+};
+
+export type SecretRevealStructOutput = [transformer: string, secret: string] & {
+  transformer: string;
+  secret: string;
+};
+
 export type BatchStruct = {
   flashloans: FlashloanStruct[];
   reserveToReserve: ReserveToReserveStruct[];
   reserveToCollateral: ReserveToCollateralStruct[];
+  collateralToReserve: CollateralToReserveStruct[];
   settlements: SettlementStruct[];
   disputeStarts: InitialDisputeProofStruct[];
   disputeFinalizations: FinalDisputeProofStruct[];
   externalTokenToReserve: ExternalTokenToReserveStruct[];
   reserveToExternalToken: ReserveToExternalTokenStruct[];
+  revealSecrets: SecretRevealStruct[];
   hub_id: BigNumberish;
 };
 
@@ -330,21 +365,25 @@ export type BatchStructOutput = [
   flashloans: FlashloanStructOutput[],
   reserveToReserve: ReserveToReserveStructOutput[],
   reserveToCollateral: ReserveToCollateralStructOutput[],
+  collateralToReserve: CollateralToReserveStructOutput[],
   settlements: SettlementStructOutput[],
   disputeStarts: InitialDisputeProofStructOutput[],
   disputeFinalizations: FinalDisputeProofStructOutput[],
   externalTokenToReserve: ExternalTokenToReserveStructOutput[],
   reserveToExternalToken: ReserveToExternalTokenStructOutput[],
+  revealSecrets: SecretRevealStructOutput[],
   hub_id: bigint
 ] & {
   flashloans: FlashloanStructOutput[];
   reserveToReserve: ReserveToReserveStructOutput[];
   reserveToCollateral: ReserveToCollateralStructOutput[];
+  collateralToReserve: CollateralToReserveStructOutput[];
   settlements: SettlementStructOutput[];
   disputeStarts: InitialDisputeProofStructOutput[];
   disputeFinalizations: FinalDisputeProofStructOutput[];
   externalTokenToReserve: ExternalTokenToReserveStructOutput[];
   reserveToExternalToken: ReserveToExternalTokenStructOutput[];
+  revealSecrets: SecretRevealStructOutput[];
   hub_id: bigint;
 };
 
@@ -363,13 +402,16 @@ export interface DepositoryInterface extends Interface {
       | "addEntityProvider"
       | "admin"
       | "approvedEntityProviders"
+      | "computeSettlementHash"
       | "defaultDisputeDelay"
       | "disputeFinalize"
       | "disputeStart"
       | "emergencyPause"
       | "enforceDebts"
+      | "enforceDebtsLarge"
       | "entityDisputeDelays"
       | "entityNonces"
+      | "entityProvider"
       | "entityProvidersList"
       | "externalTokenToReserve"
       | "getApprovedProviders"
@@ -382,7 +424,6 @@ export interface DepositoryInterface extends Interface {
       | "onERC1155Received"
       | "packTokenReference"
       | "processBatch"
-      | "processBatchWithHanko"
       | "removeEntityProvider"
       | "reserveToReserve"
       | "setDefaultDisputeDelay"
@@ -391,6 +432,7 @@ export interface DepositoryInterface extends Interface {
       | "settle"
       | "tokenToId"
       | "unpackTokenReference"
+      | "unsafeProcessBatch"
   ): FunctionFragment;
 
   getEvent(
@@ -400,6 +442,8 @@ export interface DepositoryInterface extends Interface {
       | "DebtCreated"
       | "DebtEnforced"
       | "DebtForgiven"
+      | "DebugSettleStart"
+      | "DisputeFinalized"
       | "DisputeStarted"
       | "EmergencyPauseToggled"
       | "EntityProviderAdded"
@@ -408,7 +452,7 @@ export interface DepositoryInterface extends Interface {
       | "InsuranceClaimed"
       | "InsuranceRegistered"
       | "ReserveUpdated"
-      | "TestModeDisabled"
+      | "SecretRevealed"
   ): EventFragment;
 
   encodeFunctionData(
@@ -457,6 +501,16 @@ export interface DepositoryInterface extends Interface {
     values: [AddressLike]
   ): string;
   encodeFunctionData(
+    functionFragment: "computeSettlementHash",
+    values: [
+      BytesLike,
+      BytesLike,
+      SettlementDiffStruct[],
+      BigNumberish[],
+      InsuranceRegistrationStruct[]
+    ]
+  ): string;
+  encodeFunctionData(
     functionFragment: "defaultDisputeDelay",
     values?: undefined
   ): string;
@@ -477,12 +531,20 @@ export interface DepositoryInterface extends Interface {
     values: [BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
+    functionFragment: "enforceDebtsLarge",
+    values: [BytesLike, BigNumberish]
+  ): string;
+  encodeFunctionData(
     functionFragment: "entityDisputeDelays",
     values: [BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "entityNonces",
     values: [AddressLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "entityProvider",
+    values?: undefined
   ): string;
   encodeFunctionData(
     functionFragment: "entityProvidersList",
@@ -536,10 +598,6 @@ export interface DepositoryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "processBatch",
-    values: [BytesLike, BatchStruct]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "processBatchWithHanko",
     values: [BytesLike, AddressLike, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
@@ -581,6 +639,10 @@ export interface DepositoryInterface extends Interface {
     functionFragment: "unpackTokenReference",
     values: [BytesLike]
   ): string;
+  encodeFunctionData(
+    functionFragment: "unsafeProcessBatch",
+    values: [BytesLike, BatchStruct]
+  ): string;
 
   decodeFunctionResult(
     functionFragment: "DOMAIN_SEPARATOR",
@@ -610,6 +672,10 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "computeSettlementHash",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "defaultDisputeDelay",
     data: BytesLike
   ): Result;
@@ -630,11 +696,19 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "enforceDebtsLarge",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "entityDisputeDelays",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
     functionFragment: "entityNonces",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "entityProvider",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -686,10 +760,6 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "processBatchWithHanko",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "removeEntityProvider",
     data: BytesLike
   ): Result;
@@ -713,6 +783,10 @@ export interface DepositoryInterface extends Interface {
   decodeFunctionResult(functionFragment: "tokenToId", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "unpackTokenReference",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "unsafeProcessBatch",
     data: BytesLike
   ): Result;
 }
@@ -838,23 +912,79 @@ export namespace DebtForgivenEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace DebugSettleStartEvent {
+  export type InputTuple = [
+    leftEntity: BytesLike,
+    rightEntity: BytesLike,
+    sigLen: BigNumberish,
+    entityProvider: AddressLike
+  ];
+  export type OutputTuple = [
+    leftEntity: string,
+    rightEntity: string,
+    sigLen: bigint,
+    entityProvider: string
+  ];
+  export interface OutputObject {
+    leftEntity: string;
+    rightEntity: string;
+    sigLen: bigint;
+    entityProvider: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace DisputeFinalizedEvent {
+  export type InputTuple = [
+    sender: BytesLike,
+    counterentity: BytesLike,
+    initialDisputeNonce: BigNumberish,
+    initialProofbodyHash: BytesLike,
+    finalProofbodyHash: BytesLike
+  ];
+  export type OutputTuple = [
+    sender: string,
+    counterentity: string,
+    initialDisputeNonce: bigint,
+    initialProofbodyHash: string,
+    finalProofbodyHash: string
+  ];
+  export interface OutputObject {
+    sender: string;
+    counterentity: string;
+    initialDisputeNonce: bigint;
+    initialProofbodyHash: string;
+    finalProofbodyHash: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export namespace DisputeStartedEvent {
   export type InputTuple = [
     sender: BytesLike,
     counterentity: BytesLike,
     disputeNonce: BigNumberish,
+    proofbodyHash: BytesLike,
     initialArguments: BytesLike
   ];
   export type OutputTuple = [
     sender: string,
     counterentity: string,
     disputeNonce: bigint,
+    proofbodyHash: string,
     initialArguments: string
   ];
   export interface OutputObject {
     sender: string;
     counterentity: string;
     disputeNonce: bigint;
+    proofbodyHash: string;
     initialArguments: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
@@ -1002,10 +1132,22 @@ export namespace ReserveUpdatedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace TestModeDisabledEvent {
-  export type InputTuple = [];
-  export type OutputTuple = [];
-  export interface OutputObject {}
+export namespace SecretRevealedEvent {
+  export type InputTuple = [
+    hashlock: BytesLike,
+    revealer: BytesLike,
+    secret: BytesLike
+  ];
+  export type OutputTuple = [
+    hashlock: string,
+    revealer: string,
+    secret: string
+  ];
+  export interface OutputObject {
+    hashlock: string;
+    revealer: string;
+    secret: string;
+  }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
   export type Log = TypedEventLog<Event>;
@@ -1095,7 +1237,17 @@ export interface Depository extends BaseContract {
     "view"
   >;
 
-  _tokens: TypedContractMethod<[arg0: BigNumberish], [string], "view">;
+  _tokens: TypedContractMethod<
+    [arg0: BigNumberish],
+    [
+      [string, bigint, bigint] & {
+        contractAddress: string;
+        externalTokenId: bigint;
+        tokenType: bigint;
+      }
+    ],
+    "view"
+  >;
 
   accountKey: TypedContractMethod<
     [e1: BytesLike, e2: BytesLike],
@@ -1114,6 +1266,24 @@ export interface Depository extends BaseContract {
   approvedEntityProviders: TypedContractMethod<
     [arg0: AddressLike],
     [boolean],
+    "view"
+  >;
+
+  computeSettlementHash: TypedContractMethod<
+    [
+      leftEntity: BytesLike,
+      rightEntity: BytesLike,
+      diffs: SettlementDiffStruct[],
+      forgiveDebtsInTokenIds: BigNumberish[],
+      insuranceRegs: InsuranceRegistrationStruct[]
+    ],
+    [
+      [string, bigint, bigint] & {
+        hash: string;
+        nonce: bigint;
+        encodedMsgLength: bigint;
+      }
+    ],
     "view"
   >;
 
@@ -1139,9 +1309,17 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
 
+  enforceDebtsLarge: TypedContractMethod<
+    [entity: BytesLike, tokenId: BigNumberish],
+    [bigint],
+    "nonpayable"
+  >;
+
   entityDisputeDelays: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
   entityNonces: TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
+
+  entityProvider: TypedContractMethod<[], [string], "view">;
 
   entityProvidersList: TypedContractMethod<
     [arg0: BigNumberish],
@@ -1207,9 +1385,9 @@ export interface Depository extends BaseContract {
   onERC1155Received: TypedContractMethod<
     [
       arg0: AddressLike,
-      from: AddressLike,
+      arg1: AddressLike,
       id: BigNumberish,
-      value: BigNumberish,
+      arg3: BigNumberish,
       arg4: BytesLike
     ],
     [string],
@@ -1227,15 +1405,9 @@ export interface Depository extends BaseContract {
   >;
 
   processBatch: TypedContractMethod<
-    [entity: BytesLike, batch: BatchStruct],
-    [boolean],
-    "nonpayable"
-  >;
-
-  processBatchWithHanko: TypedContractMethod<
     [
       encodedBatch: BytesLike,
-      entityProvider: AddressLike,
+      entityProviderAddr: AddressLike,
       hankoData: BytesLike,
       nonce: BigNumberish
     ],
@@ -1305,6 +1477,12 @@ export interface Depository extends BaseContract {
     "view"
   >;
 
+  unsafeProcessBatch: TypedContractMethod<
+    [entity: BytesLike, batch: BatchStruct],
+    [boolean],
+    "nonpayable"
+  >;
+
   getFunction<T extends ContractMethod = ContractMethod>(
     key: string | FunctionFragment
   ): T;
@@ -1358,7 +1536,17 @@ export interface Depository extends BaseContract {
   >;
   getFunction(
     nameOrSignature: "_tokens"
-  ): TypedContractMethod<[arg0: BigNumberish], [string], "view">;
+  ): TypedContractMethod<
+    [arg0: BigNumberish],
+    [
+      [string, bigint, bigint] & {
+        contractAddress: string;
+        externalTokenId: bigint;
+        tokenType: bigint;
+      }
+    ],
+    "view"
+  >;
   getFunction(
     nameOrSignature: "accountKey"
   ): TypedContractMethod<[e1: BytesLike, e2: BytesLike], [string], "view">;
@@ -1371,6 +1559,25 @@ export interface Depository extends BaseContract {
   getFunction(
     nameOrSignature: "approvedEntityProviders"
   ): TypedContractMethod<[arg0: AddressLike], [boolean], "view">;
+  getFunction(
+    nameOrSignature: "computeSettlementHash"
+  ): TypedContractMethod<
+    [
+      leftEntity: BytesLike,
+      rightEntity: BytesLike,
+      diffs: SettlementDiffStruct[],
+      forgiveDebtsInTokenIds: BigNumberish[],
+      insuranceRegs: InsuranceRegistrationStruct[]
+    ],
+    [
+      [string, bigint, bigint] & {
+        hash: string;
+        nonce: bigint;
+        encodedMsgLength: bigint;
+      }
+    ],
+    "view"
+  >;
   getFunction(
     nameOrSignature: "defaultDisputeDelay"
   ): TypedContractMethod<[], [bigint], "view">;
@@ -1399,11 +1606,21 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "enforceDebtsLarge"
+  ): TypedContractMethod<
+    [entity: BytesLike, tokenId: BigNumberish],
+    [bigint],
+    "nonpayable"
+  >;
+  getFunction(
     nameOrSignature: "entityDisputeDelays"
   ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "entityNonces"
   ): TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "entityProvider"
+  ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "entityProvidersList"
   ): TypedContractMethod<[arg0: BigNumberish], [string], "view">;
@@ -1475,9 +1692,9 @@ export interface Depository extends BaseContract {
   ): TypedContractMethod<
     [
       arg0: AddressLike,
-      from: AddressLike,
+      arg1: AddressLike,
       id: BigNumberish,
-      value: BigNumberish,
+      arg3: BigNumberish,
       arg4: BytesLike
     ],
     [string],
@@ -1497,16 +1714,9 @@ export interface Depository extends BaseContract {
   getFunction(
     nameOrSignature: "processBatch"
   ): TypedContractMethod<
-    [entity: BytesLike, batch: BatchStruct],
-    [boolean],
-    "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "processBatchWithHanko"
-  ): TypedContractMethod<
     [
       encodedBatch: BytesLike,
-      entityProvider: AddressLike,
+      entityProviderAddr: AddressLike,
       hankoData: BytesLike,
       nonce: BigNumberish
     ],
@@ -1571,6 +1781,13 @@ export interface Depository extends BaseContract {
     ],
     "view"
   >;
+  getFunction(
+    nameOrSignature: "unsafeProcessBatch"
+  ): TypedContractMethod<
+    [entity: BytesLike, batch: BatchStruct],
+    [boolean],
+    "nonpayable"
+  >;
 
   getEvent(
     key: "AccountSettled"
@@ -1606,6 +1823,20 @@ export interface Depository extends BaseContract {
     DebtForgivenEvent.InputTuple,
     DebtForgivenEvent.OutputTuple,
     DebtForgivenEvent.OutputObject
+  >;
+  getEvent(
+    key: "DebugSettleStart"
+  ): TypedContractEvent<
+    DebugSettleStartEvent.InputTuple,
+    DebugSettleStartEvent.OutputTuple,
+    DebugSettleStartEvent.OutputObject
+  >;
+  getEvent(
+    key: "DisputeFinalized"
+  ): TypedContractEvent<
+    DisputeFinalizedEvent.InputTuple,
+    DisputeFinalizedEvent.OutputTuple,
+    DisputeFinalizedEvent.OutputObject
   >;
   getEvent(
     key: "DisputeStarted"
@@ -1664,11 +1895,11 @@ export interface Depository extends BaseContract {
     ReserveUpdatedEvent.OutputObject
   >;
   getEvent(
-    key: "TestModeDisabled"
+    key: "SecretRevealed"
   ): TypedContractEvent<
-    TestModeDisabledEvent.InputTuple,
-    TestModeDisabledEvent.OutputTuple,
-    TestModeDisabledEvent.OutputObject
+    SecretRevealedEvent.InputTuple,
+    SecretRevealedEvent.OutputTuple,
+    SecretRevealedEvent.OutputObject
   >;
 
   filters: {
@@ -1727,7 +1958,29 @@ export interface Depository extends BaseContract {
       DebtForgivenEvent.OutputObject
     >;
 
-    "DisputeStarted(bytes32,bytes32,uint256,bytes)": TypedContractEvent<
+    "DebugSettleStart(bytes32,bytes32,uint256,address)": TypedContractEvent<
+      DebugSettleStartEvent.InputTuple,
+      DebugSettleStartEvent.OutputTuple,
+      DebugSettleStartEvent.OutputObject
+    >;
+    DebugSettleStart: TypedContractEvent<
+      DebugSettleStartEvent.InputTuple,
+      DebugSettleStartEvent.OutputTuple,
+      DebugSettleStartEvent.OutputObject
+    >;
+
+    "DisputeFinalized(bytes32,bytes32,uint256,bytes32,bytes32)": TypedContractEvent<
+      DisputeFinalizedEvent.InputTuple,
+      DisputeFinalizedEvent.OutputTuple,
+      DisputeFinalizedEvent.OutputObject
+    >;
+    DisputeFinalized: TypedContractEvent<
+      DisputeFinalizedEvent.InputTuple,
+      DisputeFinalizedEvent.OutputTuple,
+      DisputeFinalizedEvent.OutputObject
+    >;
+
+    "DisputeStarted(bytes32,bytes32,uint256,bytes32,bytes)": TypedContractEvent<
       DisputeStartedEvent.InputTuple,
       DisputeStartedEvent.OutputTuple,
       DisputeStartedEvent.OutputObject
@@ -1815,15 +2068,15 @@ export interface Depository extends BaseContract {
       ReserveUpdatedEvent.OutputObject
     >;
 
-    "TestModeDisabled()": TypedContractEvent<
-      TestModeDisabledEvent.InputTuple,
-      TestModeDisabledEvent.OutputTuple,
-      TestModeDisabledEvent.OutputObject
+    "SecretRevealed(bytes32,bytes32,bytes32)": TypedContractEvent<
+      SecretRevealedEvent.InputTuple,
+      SecretRevealedEvent.OutputTuple,
+      SecretRevealedEvent.OutputObject
     >;
-    TestModeDisabled: TypedContractEvent<
-      TestModeDisabledEvent.InputTuple,
-      TestModeDisabledEvent.OutputTuple,
-      TestModeDisabledEvent.OutputObject
+    SecretRevealed: TypedContractEvent<
+      SecretRevealedEvent.InputTuple,
+      SecretRevealedEvent.OutputTuple,
+      SecretRevealedEvent.OutputObject
     >;
   };
 }

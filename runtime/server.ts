@@ -140,6 +140,41 @@ const hasPendingRuntimeWork = (env: Env): boolean => {
   return false;
 };
 
+const waitForJBatchClear = async (env: Env, timeoutMs = 5000): Promise<boolean> => {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const pending = Array.from(env.jReplicas?.values?.() || []).some(j => (j.mempool?.length ?? 0) > 0);
+    if (!pending) return true;
+    try {
+      await runtimeProcess(env, []);
+    } catch (err) {
+      console.warn('[FAUCET] Runtime tick failed while waiting for J-batch:', (err as Error).message);
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return false;
+};
+
+const waitForReserveUpdate = async (
+  entityId: string,
+  tokenId: number,
+  expectedMin: bigint,
+  timeoutMs = 10000
+): Promise<bigint | null> => {
+  if (!globalJAdapter) return null;
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const current = await globalJAdapter.getReserves(entityId, tokenId);
+      if (current >= expectedMin) return current;
+    } catch (err) {
+      console.warn('[FAUCET] getReserves failed while waiting:', (err as Error).message);
+    }
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
+  return null;
+};
+
 const startRuntimeTickLoop = (env: Env): void => {
   if (runtimeTickInterval) return;
   runtimeTickInterval = setInterval(async () => {
@@ -209,7 +244,21 @@ const deployDefaultTokensOnRpc = async (): Promise<void> => {
 
 const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
   if (!globalJAdapter) return [];
-  if (tokenCatalogCache && tokenCatalogCache.length > 0) return tokenCatalogCache;
+  if (tokenCatalogCache && tokenCatalogCache.length > 0) {
+    if (globalJAdapter.mode !== 'browservm') {
+      const firstToken = tokenCatalogCache[0];
+      if (firstToken?.address) {
+        const code = await globalJAdapter.provider.getCode(firstToken.address).catch(() => '0x');
+        if (code !== '0x' && code.length > 10) {
+          return tokenCatalogCache;
+        }
+        console.warn('[ensureTokenCatalog] Cached token registry appears stale - refreshing');
+        tokenCatalogCache = null;
+      }
+    } else {
+      return tokenCatalogCache;
+    }
+  }
   if (tokenCatalogPromise) return tokenCatalogPromise;
 
   tokenCatalogPromise = (async () => {
@@ -908,6 +957,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const amountWei = ethers.parseUnits(amount, decimals);
       console.log(`[${logPrefix}] Request: hub=${hubEntityId.slice(0, 16)}... signer=${hubSignerId} → user=${userEntityId.slice(0, 16)}... tokenId=${tokenId} symbol=${tokenMeta.symbol} amount=${amount} decimals=${decimals}`);
 
+      const prevUserReserve = await globalJAdapter.getReserves(userEntityId, tokenId).catch(() => 0n);
       let hubReplicaKey = Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${hubEntityId}:`));
       let hubReplica = hubReplicaKey ? env.eReplicas?.get(hubReplicaKey) : null;
       const hubReserve = hubReplica?.state?.reserves?.get(String(tokenId)) ?? 0n;
@@ -968,6 +1018,25 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         }
       }
       await drainJWatcherQueue(env, logPrefix);
+
+      const jBatchCleared = await waitForJBatchClear(env, 5000);
+      if (!jBatchCleared) {
+        faucetLock.release();
+        return new Response(JSON.stringify({
+          error: 'J-batch did not broadcast in time',
+          requestId,
+        }), { status: 504, headers });
+      }
+
+      const expectedMin = prevUserReserve + amountWei;
+      const updatedReserve = await waitForReserveUpdate(userEntityId, tokenId, expectedMin, 10000);
+      if (updatedReserve === null) {
+        faucetLock.release();
+        return new Response(JSON.stringify({
+          error: 'Reserve update not confirmed on-chain',
+          requestId,
+        }), { status: 504, headers });
+      }
 
       faucetLock.release();
       return new Response(JSON.stringify({
@@ -1062,9 +1131,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
   // Always initialize runtime - every node needs it
   console.log('[XLN] Initializing runtime...');
-  const { setRuntimeSeed } = await import('./runtime');
-  setRuntimeSeed(HUB_SEED);
-  const env = await main();
+  const env = await main(HUB_SEED);
   console.log('[XLN] Runtime initialized ✓');
 
   // Initialize J-adapter (anvil for testnet, browserVM for local)

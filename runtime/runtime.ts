@@ -132,7 +132,7 @@ import {
   BigIntMath,
   FINANCIAL_CONSTANTS
 } from './financial-utils';
-import { captureSnapshot, cloneEntityReplica } from './state-helpers';
+import { captureSnapshot, cloneEntityReplica, resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, getEntityNumber, formatEntityId, HEAVY_LOGS } from './utils';
 import { safeStringify } from './serialization-utils';
 import { validateDelta, validateAccountDeltas, createDefaultDelta, isDelta, validateEntityInput, validateEntityOutput } from './validation-utils';
@@ -187,69 +187,6 @@ if (isBrowser && typeof globalThis.process === 'undefined') {
   } as any;
 }
 
-// --- Clean Log Capture (for debugging without file:line noise) ---
-const cleanLogs: string[] = [];
-const MAX_CLEAN_LOGS = 2000;
-
-// Wrap console to capture clean logs (browser only)
-if (isBrowser) {
-  const originalLog = console.log;
-  const originalWarn = console.warn;
-  const originalError = console.error;
-  const originalDebug = console.debug;
-
-  const formatArgs = (args: any[]): string => {
-    return args.map(a => {
-      if (typeof a === 'string') return a;
-      if (typeof a === 'bigint') return a.toString() + 'n';
-      try { return JSON.stringify(a); } catch { return String(a); }
-    }).join(' ');
-  };
-
-  const addCleanLog = (level: string, msg: string) => {
-    const ts = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 });
-    cleanLogs.push(`[${ts}] ${level}: ${msg}`);
-    if (cleanLogs.length > MAX_CLEAN_LOGS) cleanLogs.shift();
-  };
-
-  console.log = function(...args: any[]) {
-    originalLog.apply(console, args);
-    addCleanLog('LOG', formatArgs(args));
-  };
-  console.warn = function(...args: any[]) {
-    originalWarn.apply(console, args);
-    addCleanLog('WARN', formatArgs(args));
-  };
-  console.error = function(...args: any[]) {
-    originalError.apply(console, args);
-    addCleanLog('ERR', formatArgs(args));
-  };
-  console.debug = function(...args: any[]) {
-    originalDebug.apply(console, args);
-    addCleanLog('DBG', formatArgs(args));
-  };
-}
-
-/** Get all clean logs as text (no file:line references) */
-export const getCleanLogs = (): string => cleanLogs.join('\n');
-
-/** Clear clean logs buffer */
-export const clearCleanLogs = (): void => { cleanLogs.length = 0; };
-
-/** Copy clean logs to clipboard (returns text if clipboard fails) */
-export const copyCleanLogs = async (): Promise<string> => {
-  const text = getCleanLogs();
-  if (isBrowser && navigator.clipboard) {
-    try {
-      await navigator.clipboard.writeText(text);
-      console.log(`✅ Copied ${cleanLogs.length} log entries to clipboard`);
-    } catch {
-      // Clipboard fails when devtools focused - just return text
-    }
-  }
-  return text;
-};
-
 // --- Database Setup ---
 // Level polyfill: Node.js uses filesystem, Browser uses IndexedDB
 const nodeProcess =
@@ -257,11 +194,7 @@ const nodeProcess =
     ? globalThis.process
     : undefined;
 const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
-const dbPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
-export const db: Level<Buffer, Buffer> = new Level(dbPath, {
-  valueEncoding: 'buffer',
-  keyEncoding: 'binary',
-});
+const dbRootPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
 
 const DEFAULT_DB_NAMESPACE = 'default';
 
@@ -301,106 +234,246 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-// Database availability check
-let dbOpenPromise: Promise<boolean> | null = null;
+const resolveDbPath = (env: Env): string => {
+  const namespace = resolveDbNamespace({ env });
+  if (nodeProcess) {
+    return `${dbRootPath}/${namespace}`;
+  }
+  return `${dbRootPath}-${namespace}`;
+};
 
-async function tryOpenDb(): Promise<boolean> {
-  if (!dbOpenPromise) {
-    dbOpenPromise = (async () => {
+export const getRuntimeDb = (env: Env): Level<Buffer, Buffer> => {
+  const state = ensureRuntimeState(env);
+  if (!state.db) {
+    const path = resolveDbPath(env);
+    state.db = new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' });
+  }
+  return state.db;
+};
+
+export async function tryOpenDb(env: Env): Promise<boolean> {
+  const state = ensureRuntimeState(env);
+  if (!state.dbOpenPromise) {
+    const db = getRuntimeDb(env);
+    state.dbOpenPromise = (async () => {
       try {
         await db.open();
         console.log('✅ Database opened');
         return true;
       } catch (error) {
-        // Check if IndexedDB is completely blocked (Safari incognito)
         const isBlocked = error instanceof Error &&
           (error.message?.includes('blocked') ||
            error.name === 'SecurityError' ||
            error.name === 'InvalidStateError');
-
         if (isBlocked) {
           console.log('⚠️ IndexedDB blocked (incognito/private mode) - running in-memory');
           return false;
         }
-
-        // Other errors - log but assume DB is available
         console.warn('⚠️ DB open warning:', error instanceof Error ? error.message : error);
         return true;
       }
     })();
   }
-  return dbOpenPromise;
+  return state.dbOpenPromise;
 }
 
 // === ETHEREUM INTEGRATION ===
 
 // === SVELTE REACTIVITY INTEGRATION ===
-// Callback that Svelte can register to get notified of env changes
-let envChangeCallback: ((env: Env) => void) | null = null;
+// Per-runtime state is stored on env.runtimeState/runtimeMempool/runtimeConfig.
 
-// Module-level environment variable
-let env: Env;
-let runtimeSeed: string | null = null;
-let runtimeId: string | null = null;
-let p2pOverlay: RuntimeP2P | null = null;
-let pendingP2PConfig: { env: Env; config: P2PConfig } | null = null;
-let networkProcessScheduled = false;
-let lastP2PConfig: P2PConfig | null = null;
+export const registerEnvChangeCallback = (env: Env, callback: (env: Env) => void): (() => void) => {
+  const state = ensureRuntimeState(env);
+  if (!state.envChangeCallbacks) {
+    state.envChangeCallbacks = new Set();
+  }
+  state.envChangeCallbacks.add(callback);
+  return () => state.envChangeCallbacks?.delete(callback);
+};
 
-// Module-level j-watcher instance - prevent multiple instances
-let jWatcher: JEventWatcher | null = null;
-let jWatcherStarted = false;
+const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
+  if (!env.runtimeConfig) {
+    env.runtimeConfig = {
+      minFrameDelayMs: 0,
+      loopIntervalMs: 25,
+    };
+  }
+  return env.runtimeConfig;
+};
 
-export const registerEnvChangeCallback = (callback: (env: Env) => void) => {
-  envChangeCallback = callback;
+const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
+  if (!env.runtimeState) {
+    env.runtimeState = {
+      processing: false,
+      loopActive: false,
+      lastFrameAt: undefined,
+      p2p: null,
+      pendingP2PConfig: null,
+      lastP2PConfig: null,
+      jWatcher: null,
+      jWatcherStarted: false,
+    };
+  }
+  return env.runtimeState;
+};
+
+// --- Clean Log Capture (per-runtime, stored on env.runtimeState.cleanLogs) ---
+const getCleanLogBuffer = (env: Env): string[] => {
+  const state = ensureRuntimeState(env);
+  if (!state.cleanLogs) state.cleanLogs = [];
+  return state.cleanLogs;
+};
+
+/** Get all clean logs as text (no file:line references) */
+export const getCleanLogs = (env: Env): string => getCleanLogBuffer(env).join('\n');
+
+/** Clear clean logs buffer */
+export const clearCleanLogs = (env: Env): void => {
+  const buffer = getCleanLogBuffer(env);
+  buffer.length = 0;
+};
+
+/** Copy clean logs to clipboard (returns text if clipboard fails) */
+export const copyCleanLogs = async (env: Env): Promise<string> => {
+  const text = getCleanLogs(env);
+  if (isBrowser && navigator.clipboard) {
+    try {
+      await navigator.clipboard.writeText(text);
+      console.log(`✅ Copied ${getCleanLogBuffer(env).length} log entries to clipboard`);
+    } catch {
+      // Clipboard fails when devtools focused - just return text
+    }
+  }
+  return text;
+};
+
+const ensureRuntimeMempool = (env: Env): RuntimeInput => {
+  if (!env.runtimeMempool) {
+    const base = env.runtimeInput ?? { runtimeTxs: [], entityInputs: [] };
+    env.runtimeMempool = base;
+    env.runtimeInput = base;
+  } else if (env.runtimeInput !== env.runtimeMempool) {
+    env.runtimeInput = env.runtimeMempool;
+  }
+  return env.runtimeMempool;
+};
+
+const enqueueRuntimeInputs = (env: Env, inputs?: EntityInput[], runtimeTxs?: RuntimeTx[]): void => {
+  const mempool = ensureRuntimeMempool(env);
+  if (runtimeTxs && runtimeTxs.length > 0) {
+    mempool.runtimeTxs.push(...runtimeTxs);
+  }
+  if (inputs && inputs.length > 0) {
+    mempool.entityInputs.push(...inputs);
+  }
+  if (inputs?.length || runtimeTxs?.length) {
+    if (mempool.queuedAt === undefined) {
+      mempool.queuedAt = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+    }
+  }
+};
+
+const hasRuntimeWork = (env: Env): boolean => {
+  const mempool = ensureRuntimeMempool(env);
+  if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return true;
+  if (env.pendingOutputs && env.pendingOutputs.length > 0) return true;
+  if (env.networkInbox && env.networkInbox.length > 0) return true;
+  if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) return true;
+  if (env.jReplicas) {
+    const now = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+    for (const jr of env.jReplicas.values()) {
+      const mempoolSize = jr.mempool?.length ?? 0;
+      if (mempoolSize === 0) continue;
+      const blockDelayMs = jr.blockDelayMs || 300;
+      const lastBlockTs = jr.lastBlockTimestamp || 0;
+      const elapsed = now - lastBlockTs;
+      const oldestTxAge = jr.mempool[0]?.queuedAt ? now - jr.mempool[0].queuedAt! : 999999;
+      if (elapsed >= blockDelayMs || oldestTxAge >= blockDelayMs) return true;
+    }
+  }
+  return false;
+};
+
+const isRuntimeFrameReady = (env: Env, now: number, overrideDelayMs?: number): boolean => {
+  if (env.scenarioMode) return true; // deterministic scenarios advance manually
+  const config = ensureRuntimeConfig(env);
+  const delayMs = overrideDelayMs !== undefined ? overrideDelayMs : (config.minFrameDelayMs ?? 0);
+  const state = ensureRuntimeState(env);
+  if (!state.lastFrameAt) return true;
+  return now - state.lastFrameAt >= delayMs;
+};
+
+async function runtimeTick(env: Env): Promise<void> {
+  await process(env);
+}
+
+const ensureRuntimeLoop = (env: Env): void => {
+  const state = ensureRuntimeState(env);
+  const config = ensureRuntimeConfig(env);
+  if (env.scenarioMode) return;
+  if (state.loopActive) return;
+  state.loopActive = true;
+  const interval = config.loopIntervalMs ?? 25;
+  state.loopTimer = setInterval(async () => {
+    if (!hasRuntimeWork(env)) {
+      return;
+    }
+    await runtimeTick(env);
+  }, interval);
 };
 
 /**
- * Get the module-level env (used for j-watcher and runtime tick)
- * CRITICAL: This returns the SAME env that the runtime tick processes!
- * View.svelte should use this instead of createEmptyEnv() for proper event routing.
+ * Identity function for env (no module-level env exists).
+ * Use to preserve legacy call sites that expected getEnv().
  */
-export const getEnv = (): Env | null => {
-  return env || null;
+export const getEnv = (env?: Env | null): Env | null => {
+  if (!env) {
+    console.warn('⚠️ getEnv called without env - runtime no longer keeps global env');
+    return null;
+  }
+  return env;
 };
 
-export const setRuntimeSeed = (seed: string | null): void => {
+export const setRuntimeSeed = (env: Env, seed: string | null): void => {
   if (env?.lockRuntimeSeed) {
     console.warn('⚠️ Runtime seed update blocked (scenario lock enabled)');
     return;
   }
   const normalized = seed === null || seed === undefined ? '' : seed;
-  runtimeSeed = normalized;
-  setCryptoRuntimeSeed(normalized);
-  if (normalized !== null && normalized !== undefined) {
+  env.runtimeSeed = normalized;
+  if (normalized) {
     try {
-      runtimeId = deriveSignerAddressSync(normalized, '1');
+      env.runtimeId = deriveSignerAddressSync(normalized, '1');
     } catch (error) {
       console.warn('⚠️ Failed to derive runtimeId from seed:', error);
-      runtimeId = null;
+      env.runtimeId = undefined;
     }
   } else {
-    runtimeId = null;
+    env.runtimeId = undefined;
   }
-  if (env) {
-    env.runtimeSeed = normalized;
-    env.runtimeId = runtimeId || undefined;
+  if (env.runtimeId) {
+    env.dbNamespace = normalizeDbNamespace(env.runtimeId);
   }
-  if (pendingP2PConfig && runtimeId) {
-    console.log(`[P2P] pendingP2PConfig triggered, relayUrls=${pendingP2PConfig.config.relayUrls?.join(',')}`);
-    const { env: pendingEnv, config } = pendingP2PConfig;
-    pendingP2PConfig = null;
-    startP2P(pendingEnv, config);
-  }
-  if (env && p2pOverlay && lastP2PConfig && runtimeId) {
-    startP2P(env, lastP2PConfig);
+  const state = ensureRuntimeState(env);
+  if (state.pendingP2PConfig && env.runtimeId) {
+    console.log(`[P2P] pendingP2PConfig triggered, relayUrls=${state.pendingP2PConfig.relayUrls?.join(',')}`);
+    const config = state.pendingP2PConfig;
+    state.pendingP2PConfig = null;
+    startP2P(env, config);
   }
 };
 
-export const setRuntimeId = (id: string | null): void => {
-  runtimeId = id && id.length > 0 ? id : null;
-  if (env) {
-    env.runtimeId = runtimeId || undefined;
+export const setRuntimeId = (env: Env, id: string | null): void => {
+  env.runtimeId = id && id.length > 0 ? id : undefined;
+  if (env.runtimeId) {
+    env.dbNamespace = normalizeDbNamespace(env.runtimeId);
+  }
+  const state = ensureRuntimeState(env);
+  if (state.pendingP2PConfig && env.runtimeId) {
+    console.log(`[P2P] pendingP2PConfig triggered, relayUrls=${state.pendingP2PConfig.relayUrls?.join(',')}`);
+    const config = state.pendingP2PConfig;
+    state.pendingP2PConfig = null;
+    startP2P(env, config);
   }
 };
 
@@ -410,31 +483,7 @@ export const deriveRuntimeId = (seed: string): string => {
 };
 
 export const scheduleNetworkProcess = (env: Env) => {
-  if (networkProcessScheduled) return;
-  networkProcessScheduled = true;
-  const defer =
-    typeof setImmediate === 'function'
-      ? setImmediate
-      : (cb: () => void) => {
-          if (typeof queueMicrotask === 'function') {
-            queueMicrotask(cb);
-          } else {
-            setTimeout(cb, 0);
-          }
-        };
-  defer(async () => {
-    networkProcessScheduled = false;
-    if (!env.networkInbox || env.networkInbox.length === 0) return;
-    if (processing) {
-      scheduleNetworkProcess(env);
-      return;
-    }
-    try {
-      await process(env);
-    } catch (error) {
-      logError('NETWORK', 'Failed to process network inbox', error);
-    }
-  });
+  ensureRuntimeLoop(env);
 };
 
 const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null => {
@@ -444,8 +493,11 @@ const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null =>
   return profile?.runtimeId || null;
 };
 
-const routeEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] => {
-  if (!p2pOverlay) return outputs;
+const planEntityOutputs = (env: Env, outputs: EntityInput[]): {
+  localOutputs: EntityInput[];
+  remoteOutputs: EntityInput[];
+  deferredOutputs: EntityInput[];
+} => {
   const localEntityIds = new Set<string>();
   for (const replicaKey of env.eReplicas.keys()) {
     try {
@@ -456,8 +508,8 @@ const routeEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] => 
   }
 
   const localOutputs: EntityInput[] = [];
+  const remoteOutputs: EntityInput[] = [];
   const pendingOutputs = env.pendingNetworkOutputs ? [...env.pendingNetworkOutputs] : [];
-  env.pendingNetworkOutputs = [];
   const allOutputs = [...pendingOutputs, ...outputs];
   const deferredOutputs: EntityInput[] = [];
 
@@ -468,44 +520,74 @@ const routeEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] => 
     }
     const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
     console.log(`🔀 ROUTE: Output for entity ${output.entityId.slice(-4)} → runtimeId=${targetRuntimeId?.slice(0,10) || 'UNKNOWN'}`);
-
     if (!targetRuntimeId) {
       console.warn(`⚠️ ROUTE-DEFER: No runtimeId for entity ${output.entityId.slice(-4)} - deferring output`);
       env.warn('network', 'Missing runtimeId for entity output (queued)', { entityId: output.entityId });
       deferredOutputs.push(output);
       continue;
     }
+    remoteOutputs.push(output);
+  }
 
+  return { localOutputs, remoteOutputs, deferredOutputs };
+};
+
+const dispatchEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] => {
+  const p2p = getP2P(env);
+  if (!p2p) return outputs;
+  const deferredOutputs: EntityInput[] = [];
+  for (const output of outputs) {
+    const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
+    if (!targetRuntimeId) {
+      deferredOutputs.push(output);
+      continue;
+    }
     console.log(`📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId.slice(0, 10)} for entity ${output.entityId.slice(-4)}`);
-    p2pOverlay.enqueueEntityInput(targetRuntimeId, output);
+    p2p.enqueueEntityInput(targetRuntimeId, output);
   }
+  return deferredOutputs;
+};
 
-  if (deferredOutputs.length > 0) {
-    env.pendingNetworkOutputs = deferredOutputs;
+export const sendEntityInput = (env: Env, input: EntityInput): { sent: boolean; deferred: boolean; queuedLocal: boolean } => {
+  const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, [input]);
+  if (localOutputs.length > 0) {
+    enqueueRuntimeInputs(env, localOutputs);
   }
-
-  return localOutputs;
+  const deferred = dispatchEntityOutputs(env, remoteOutputs);
+  const remainingDeferred = [...deferredOutputs, ...deferred];
+  if (remainingDeferred.length > 0) {
+    env.pendingNetworkOutputs = remainingDeferred;
+  } else {
+    env.pendingNetworkOutputs = [];
+  }
+  ensureRuntimeLoop(env);
+  return {
+    sent: remoteOutputs.length > 0 && deferred.length === 0,
+    deferred: remainingDeferred.length > 0,
+    queuedLocal: localOutputs.length > 0,
+  };
 };
 
 export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null => {
   console.log(`[P2P] startP2P called, relayUrls=${config.relayUrls?.join(',')}, env.runtimeId=${env.runtimeId?.slice(0,10) || 'NONE'}`);
-  lastP2PConfig = config;
+  const state = ensureRuntimeState(env);
+  state.lastP2PConfig = config;
   const resolvedRuntimeId = config.runtimeId || env.runtimeId;
   if (!resolvedRuntimeId) {
     console.log(`[P2P] No runtimeId, storing as pendingP2PConfig`);
-    pendingP2PConfig = { env, config };
+    state.pendingP2PConfig = config;
     return null;
   }
 
-  if (p2pOverlay) {
-    if (p2pOverlay.matchesIdentity(resolvedRuntimeId, config.signerId)) {
-      p2pOverlay.updateConfig(config);
-      return p2pOverlay;
+  if (state.p2p) {
+    if (state.p2p.matchesIdentity(resolvedRuntimeId, config.signerId)) {
+      state.p2p.updateConfig(config);
+      return state.p2p;
     }
-    p2pOverlay.close();
+    state.p2p.close();
   }
 
-  p2pOverlay = new RuntimeP2P({
+  state.p2p = new RuntimeP2P({
     env,
     runtimeId: resolvedRuntimeId,
     signerId: config.signerId,
@@ -518,11 +600,10 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     onEntityInput: (from, input) => {
       const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
       console.log(`📨 P2P-RECEIVE: from=${from.slice(0,10)} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
-      env.networkInbox = env.networkInbox || [];
-      env.networkInbox.push(input);
-      console.log(`📥 NETWORK-INBOX: Added, size=${env.networkInbox.length}`);
+      enqueueRuntimeInputs(env, [input]);
+      console.log(`📥 RUNTIME-MEMPOOL: Added inbound, size=${ensureRuntimeMempool(env).entityInputs.length}`);
       env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
-      scheduleNetworkProcess(env);
+      ensureRuntimeLoop(env);
     },
     onGossipProfiles: (from, profiles) => {
       console.log(`📥 onGossipProfiles: Received ${profiles.length} profiles from ${from.slice(0,10)}`);
@@ -544,23 +625,25 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     },
   });
 
-  p2pOverlay.connect();
-  return p2pOverlay;
+  state.p2p.connect();
+  return state.p2p;
 };
 
-export const stopP2P = (): void => {
-  if (p2pOverlay) {
-    p2pOverlay.close();
-    p2pOverlay = null;
+export const stopP2P = (env: Env): void => {
+  const state = ensureRuntimeState(env);
+  if (state.p2p) {
+    state.p2p.close();
+    state.p2p = null;
   }
-  lastP2PConfig = null;
+  state.lastP2PConfig = null;
 };
 
-export const getP2P = (): RuntimeP2P | null => p2pOverlay;
+export const getP2P = (env: Env): RuntimeP2P | null => ensureRuntimeState(env).p2p ?? null;
 
-export const refreshGossip = (): void => {
-  if (p2pOverlay) {
-    p2pOverlay.refreshGossip();
+export const refreshGossip = (env: Env): void => {
+  const state = ensureRuntimeState(env);
+  if (state.p2p) {
+    state.p2p.refreshGossip();
   }
 };
 
@@ -568,20 +651,23 @@ export const refreshGossip = (): void => {
  * Initialize module-level env if not already set
  * Call this early in frontend initialization before prepopulate
  */
-export const initEnv = (): Env => {
-  if (!env) {
-    env = createEmptyEnv(runtimeSeed);
-    if (env.runtimeSeed !== undefined && env.runtimeSeed !== null) {
-      setCryptoRuntimeSeed(env.runtimeSeed);
-    }
-    console.log('🌍 Runtime env initialized (module-level)');
+export const initEnv = (seed?: string | null): Env => {
+  const env = createEmptyEnv(seed ?? null);
+  if (env.runtimeSeed !== undefined && env.runtimeSeed !== null) {
+    setCryptoRuntimeSeed(env.runtimeSeed);
   }
   return env;
 };
 
 const notifyEnvChange = (env: Env) => {
-  if (envChangeCallback) {
-    envChangeCallback(env);
+  const state = ensureRuntimeState(env);
+  if (!state.envChangeCallbacks || state.envChangeCallbacks.size === 0) return;
+  for (const cb of state.envChangeCallbacks) {
+    try {
+      cb(env);
+    } catch (error) {
+      console.warn('⚠️ Env change callback failed:', error);
+    }
   }
 };
 
@@ -590,28 +676,30 @@ const notifyEnvChange = (env: Env) => {
  * Called automatically after each BrowserVM batch execution
  * This is the R-machine routing j-events from jReplicas to eReplicas
  */
-export const processJBlockEvents = async (): Promise<void> => {
+export const processJBlockEvents = async (env: Env): Promise<void> => {
   if (!env) {
     console.warn('⚠️ processJBlockEvents: No env available');
     return;
   }
 
-  if (processing) {
+  const state = ensureRuntimeState(env);
+  if (state.processing) {
     console.warn('⏸️ processJBlockEvents: Runtime busy, leaving j-events queued');
     return;
   }
 
-  const pending = env.runtimeInput.entityInputs.length;
+  const mempool = ensureRuntimeMempool(env);
+  const pending = mempool.entityInputs.length;
   if (pending === 0) return;
 
   console.log(`🔗 J-BLOCK: ${pending} j-events queued → routing to eReplicas`);
-  const toProcess = [...env.runtimeInput.entityInputs];
-  env.runtimeInput.entityInputs = [];
+  const toProcess = [...mempool.entityInputs];
+  mempool.entityInputs = [];
 
   try {
     await process(env, toProcess);
   } catch (error) {
-    env.runtimeInput.entityInputs = [...toProcess, ...env.runtimeInput.entityInputs];
+    mempool.entityInputs = [...toProcess, ...mempool.entityInputs];
     throw error;
   }
   console.log(`   ✓ ${toProcess.length} j-events processed`);
@@ -619,11 +707,13 @@ export const processJBlockEvents = async (): Promise<void> => {
 
 // J-Watcher initialization
 const startJEventWatcher = async (env: Env): Promise<void> => {
+  const state = ensureRuntimeState(env);
   // BrowserVM is the default - it handles events synchronously via processJBlockEvents()
   // External RPC watcher is disabled until we support remote jurisdictions
   const browserVM = getBrowserVMInstance(env);
   if (browserVM) {
     console.log('🔭 J-WATCHER: Using BrowserVM (external RPC not needed)');
+    ensureRuntimeLoop(env);
     return;
   }
 
@@ -662,23 +752,13 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
       rpcUrl = `${window.location.origin}${rpcUrl}`;
     }
 
-    jWatcher = await setupJEventWatcher(env, rpcUrl, entityProviderAddress, depositoryAddress);
+    if (state.jWatcherStarted) return;
+    state.jWatcherStarted = true;
+    state.jWatcher = await setupJEventWatcher(env, rpcUrl, entityProviderAddress, depositoryAddress);
 
     console.log('✅ J-Event Watcher started (external RPC)');
     console.log(`🔭 Monitoring: ${rpcUrl}`);
-
-    setInterval(async () => {
-      if (processing) return;
-      if (env.runtimeInput.entityInputs.length === 0) return;
-      const pendingInputs = [...env.runtimeInput.entityInputs];
-      env.runtimeInput.entityInputs = [];
-      try {
-        await process(env, pendingInputs);
-      } catch (error) {
-        env.runtimeInput.entityInputs = [...pendingInputs, ...env.runtimeInput.entityInputs];
-        throw error;
-      }
-    }, 100);
+    ensureRuntimeLoop(env);
 
   } catch (error) {
     logError("RUNTIME_TICK", '❌ Failed to start J-Event Watcher:', error);
@@ -743,19 +823,13 @@ const applyRuntimeInput = async (
       }
     }
 
-    // Capture queued inputs and clear to allow new ones during processing
-    const queuedRuntimeTxs = [...env.runtimeInput.runtimeTxs];
-    const queuedEntityInputs = [...env.runtimeInput.entityInputs];
-    env.runtimeInput.runtimeTxs = [];
-    env.runtimeInput.entityInputs = [];
-
-    // SECURITY: Resource limits (include queued + new inputs)
-    if (queuedRuntimeTxs.length + runtimeInput.runtimeTxs.length > 1000) {
-      log.error(`❌ Too many runtime transactions: ${queuedRuntimeTxs.length + runtimeInput.runtimeTxs.length} > 1000`);
+    // SECURITY: Resource limits
+    if (runtimeInput.runtimeTxs.length > 1000) {
+      log.error(`❌ Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
       return { entityOutbox: [], mergedInputs: [] };
     }
-    if (queuedEntityInputs.length + runtimeInput.entityInputs.length > 10000) {
-      log.error(`❌ Too many entity inputs: ${queuedEntityInputs.length + runtimeInput.entityInputs.length} > 10000`);
+    if (runtimeInput.entityInputs.length > 10000) {
+      log.error(`❌ Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
       return { entityOutbox: [], mergedInputs: [] };
     }
 
@@ -777,8 +851,8 @@ const applyRuntimeInput = async (
       }
     });
 
-    const mergedRuntimeTxs = [...queuedRuntimeTxs, ...validatedRuntimeTxs];
-    const mergedEntityInputs = [...queuedEntityInputs, ...validatedEntityInputs];
+    const mergedRuntimeTxs = [...validatedRuntimeTxs];
+    const mergedEntityInputs = [...validatedEntityInputs];
 
     // Merge all entityInputs (already validated above)
     const mergedInputs = mergeEntityInputs(mergedEntityInputs);
@@ -1008,9 +1082,9 @@ const applyRuntimeInput = async (
         }
 
         // Ensure entity-level signing key exists for this runtime (needed for gossip public key)
-        if (runtimeSeed !== undefined && runtimeSeed !== null) {
+        if (env.runtimeSeed !== undefined && env.runtimeSeed !== null) {
           try {
-            const seedBytes = new TextEncoder().encode(runtimeSeed);
+            const seedBytes = new TextEncoder().encode(env.runtimeSeed);
             const entityKey = deriveSignerKeySync(seedBytes, runtimeTx.entityId);
             registerSignerKey(runtimeTx.entityId, entityKey);
           } catch (error) {
@@ -1338,264 +1412,88 @@ const applyRuntimeInput = async (
   }
 };
 
-// This is the new, robust main function that replaces the old one.
-const main = async (): Promise<Env> => {
+// Runtime bootstrap
+const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
   console.log(`🚀 RUNTIME.JS VERSION: ${RUNTIME_BUILD_ID}`);
 
-  // Open database before any operations
-  const dbReady = await tryOpenDb();
+  const baseEnv = createEmptyEnv(runtimeSeedOverride ?? null);
+  if (baseEnv.runtimeSeed !== undefined && baseEnv.runtimeSeed !== null) {
+    setCryptoRuntimeSeed(baseEnv.runtimeSeed);
+  }
 
-  // DEBUG: Log jurisdictions content on startup using centralized loader
-  if (!isBrowser) {
+  const dbReady = await tryOpenDb(baseEnv);
+  if (dbReady) {
+    console.log('📡 Loading persisted profiles from database...');
+    await loadPersistedProfiles(getRuntimeDb(baseEnv), baseEnv.gossip);
+  }
+
+  let env = baseEnv;
+  if (isBrowser) {
+    const loaded = await loadEnvFromDB(baseEnv.runtimeId, baseEnv.runtimeSeed);
+    if (loaded) {
+      const loadedState = ensureRuntimeState(loaded);
+      const baseState = ensureRuntimeState(baseEnv);
+      loadedState.db = baseState.db;
+      loadedState.dbOpenPromise = baseState.dbOpenPromise;
+      if (baseEnv.gossip?.profiles) {
+        for (const [k, v] of baseEnv.gossip.profiles.entries()) {
+          loaded.gossip.profiles.set(k, v);
+        }
+      }
+      env = loaded;
+    }
+  }
+
+  attachEventEmitters(env);
+
+  if (!env.runtimeId && env.runtimeSeed) {
     try {
-      const { loadJurisdictions } = await import('./jurisdiction-loader');
-      const jurisdictions = loadJurisdictions();
-      console.log('🔍 STARTUP: Current jurisdictions content (from centralized loader):');
-      console.log('📍 Arrakis Depository:', jurisdictions.jurisdictions['arrakis']?.contracts?.depository);
-      console.log('📍 Arrakis EntityProvider:', jurisdictions.jurisdictions['arrakis']?.contracts?.entityProvider);
-      console.log('📍 Last updated:', jurisdictions.lastUpdated);
-      console.log('📍 Full Arrakis config:', safeStringify(jurisdictions.jurisdictions['arrakis']));
+      env.runtimeId = deriveSignerAddressSync(env.runtimeSeed, '1');
+      console.log(`🔐 Derived runtimeId: ${env.runtimeId.slice(0, 12)}...`);
     } catch (error) {
-      console.log('⚠️ Failed to load jurisdictions:', (error as Error).message);
+      console.warn('⚠️ Failed to derive runtimeId:', error);
     }
   }
 
-  // Initialize gossip layer
-  console.log('🕸️ Initializing gossip layer...');
-  const gossipLayer = createGossipLayer();
-  console.log('✅ Gossip layer initialized');
-
-  // Load persisted profiles from database into gossip layer
-  console.log('📡 Loading persisted profiles from database...');
-  await loadPersistedProfiles(db, gossipLayer);
-
-  // First, create default environment with gossip layer and event emitters
-  env = createEmptyEnv(runtimeSeed);
-  env.gossip = gossipLayer; // Override default gossip with persisted profiles
-  const dbNamespace = resolveDbNamespace({ env, runtimeSeed });
-
-  // Try to load saved state from database
-  try {
-    if (!dbReady) {
-      console.log('💾 Database unavailable - starting fresh');
-      throw new Error('DB_UNAVAILABLE');
-    }
-
-    console.log('📥 Loading state from database...');
-    const latestHeightBuffer = await withTimeout(db.get(makeDbKey(dbNamespace, 'latest_height')), 2000);
-
-    const latestHeight = parseInt(latestHeightBuffer.toString(), 10);
-    console.log(`📊 BROWSER-DEBUG: Found latest height in DB: ${latestHeight}`);
-
-    console.log(`📊 Found latest height: ${latestHeight}, loading ${latestHeight + 1} snapshots...`);
-
-    // Load snapshots starting from 1 (height 0 is initial state, no snapshot saved)
-    console.log(`📥 Loading snapshots: 1 to ${latestHeight}...`);
-    const snapshots = [];
-
-    // Start from 1 since height 0 is initial state with no snapshot
-    for (let i = 1; i <= latestHeight; i++) {
-      try {
-        const buffer = await db.get(makeDbKey(dbNamespace, `snapshot:${i}`));
-        const snapshot = decode(buffer);
-        normalizeSnapshotInPlace(snapshot);
-        snapshots.push(snapshot);
-        console.log(`📦 Snapshot ${i}: loaded ${buffer.length} bytes`);
-      } catch (error) {
-        logError("RUNTIME_TICK", `❌ Failed to load snapshot ${i}:`, error);
-        console.warn(`⚠️ Snapshot ${i} missing, continuing with available data...`);
-      }
-    }
-
-    if (snapshots.length === 0) {
-      console.log(`📦 No snapshots found (latestHeight: ${latestHeight}), using fresh environment`);
-      throw new Error('LEVEL_NOT_FOUND');
-    }
-
-    console.log(`📊 Successfully loaded ${snapshots.length}/${latestHeight} snapshots (starting from height 1)`);
-    env.history = snapshots;
-
-    if (snapshots.length > 0) {
-      const latestSnapshot = snapshots[snapshots.length - 1];
-
-      // CRITICAL: Validate snapshot has proper eReplicas data
-      if (!latestSnapshot.eReplicas) {
-        console.warn('⚠️ Latest snapshot missing eReplicas data, using fresh environment');
-        throw new Error('LEVEL_NOT_FOUND');
-      }
-
-      // Restore gossip profiles from snapshot
-      const gossipLayer = createGossipLayer();
-      if (latestSnapshot.gossip?.profiles) {
-        for (const [id, profile] of Object.entries(latestSnapshot.gossip.profiles)) {
-          gossipLayer.profiles.set(id, profile as Profile);
-        }
-        console.log(`📡 Restored gossip profiles: ${Object.keys(latestSnapshot.gossip.profiles).length} entries`);
-      }
-
-      // CRITICAL: Convert eReplicas to proper Map if needed (handle deserialization from DB)
-      let eReplicasMap: Map<string, EntityReplica>;
-      try {
-        eReplicasMap = normalizeReplicaMap(latestSnapshot.eReplicas);
-      } catch (conversionError) {
-        logError("RUNTIME_TICK", '❌ Failed to convert eReplicas to Map:', conversionError);
-        console.warn('⚠️ Falling back to fresh environment');
-        throw new Error('LEVEL_NOT_FOUND');
-      }
-
-      const jReplicasMap = normalizeJReplicaMap(latestSnapshot.jReplicas);
-
-      // Create env with proper event emitters, then populate from snapshot
-      const snapshotSeed = latestSnapshot.runtimeSeed ?? null;
-      env = createEmptyEnv(snapshotSeed);
-      if (snapshotSeed !== undefined && snapshotSeed !== null) {
-        runtimeSeed = snapshotSeed;
-        setCryptoRuntimeSeed(runtimeSeed);
-      }
-      if (latestSnapshot.runtimeId) {
-        runtimeId = latestSnapshot.runtimeId;
-        env.runtimeId = runtimeId;
-      } else if (runtimeSeed !== undefined && runtimeSeed !== null) {
-        try {
-          runtimeId = deriveSignerAddressSync(runtimeSeed, '1');
-          env.runtimeId = runtimeId;
-        } catch (error) {
-          console.warn('⚠️ Failed to derive runtimeId on restore:', error);
-        }
-      }
-      // CRITICAL: Clone the eReplicas Map to avoid mutating snapshot data!
-      env.eReplicas = new Map(Array.from(eReplicasMap).map(([key, replica]): [string, EntityReplica] => {
-        return [key, cloneEntityReplica(replica)];
-      }));
-      env.jReplicas = jReplicasMap;
-      env.height = latestSnapshot.height;
-      env.timestamp = latestSnapshot.timestamp;
-      // CRITICAL: runtimeInput must start EMPTY on restore!
-      // The snapshot's runtimeInput was already processed
-      env.runtimeInput = {
-        runtimeTxs: [],
-        entityInputs: []
-      };
-      env.history = snapshots; // Include the loaded history
-      env.gossip = gossipLayer; // Use restored gossip layer
-      env.frameLogs = [];
-      if (latestSnapshot.browserVMState && isBrowser) {
-        try {
-          const { BrowserVMProvider } = await import('./jadapter');
-          const browserVM = new BrowserVMProvider();
-          await browserVM.init();
-          await browserVM.restoreState(latestSnapshot.browserVMState);
-          env.browserVM = browserVM;
-          setBrowserVMJurisdiction(env, browserVM.getDepositoryAddress(), browserVM);
-          if (typeof window !== 'undefined') {
-            (window as any).__xlnBrowserVM = browserVM;
-          }
-          console.log('✅ BrowserVM restored from persisted state');
-        } catch (error) {
-          console.warn('⚠️ Failed to restore BrowserVM state:', error);
-        }
-      }
-      console.log(`✅ History restored. Runtime is at height ${env.height} with ${env.history.length} snapshots.`);
-      console.log(`📈 Snapshot details:`, {
-        height: env.height,
-        replicaCount: env.eReplicas.size,
-        timestamp: new Date(env.timestamp).toISOString(),
-        runtimeInputs: env.runtimeInput.entityInputs.length,
-      });
-    }
-  } catch (error) {
-    const isTimeout = error instanceof Error && error.message === 'TIMEOUT';
-    const isNotFound = error instanceof Error &&
-      (error.name === 'NotFoundError' ||
-       error.message?.includes('NotFoundError') ||
-       error.message?.includes('Entry not found'));
-
-    if (isTimeout || isNotFound) {
-      console.log('📦 No saved state found - starting fresh');
-    } else if (error instanceof Error && error.message === 'DB_UNAVAILABLE') {
-      // Already logged above
-    } else {
-      console.warn('⚠️ Error loading state:', error instanceof Error ? error.message : error);
-      console.log('📦 Starting fresh');
+  if (env.runtimeSeed) {
+    try {
+      const seedBytes = new TextEncoder().encode(env.runtimeSeed);
+      const signerKey = deriveSignerKeySync(seedBytes, '1');
+      registerSignerKey('1', signerKey);
+      env.signers = [{ address: deriveSignerAddressSync(env.runtimeSeed, '1'), name: 'signer1' }];
+    } catch (error) {
+      console.warn('⚠️ Failed to derive signer:', error);
     }
   }
 
-  // Demo profiles are only initialized during runDemo - not by default
-
-  // Only run demos in Node.js environment, not browser
-  if (!isBrowser) {
-    // DISABLED: Hanko tests during development
-    console.log('\n🚀 Hanko tests disabled during development - focusing on core functionality');
-    
-    // // Add hanko demo to the main execution
-    // console.log('\n🖋️  Testing Complete Hanko Implementation...');
-    // await demoCompleteHanko();
-
-    // // 🧪 Run basic Hanko functionality tests first
-    // console.log('\n🧪 Running basic Hanko functionality tests...');
-    // await runBasicHankoTests();
-
-    // // 🧪 Run comprehensive Depository-Hanko integration tests
-    // console.log('\n🧪 Running comprehensive Depository-Hanko integration tests...');
-    // try {
-    //   await runDepositoryHankoTests();
-    // } catch (error) {
-    //   console.log(
-    //     'ℹ️  Depository integration tests skipped (contract setup required):',
-    //     (error as Error).message?.substring(0, 100) || 'Unknown error',
-    //   );
-    // }
-  } else {
-    console.log('🌐 Browser environment: Demos available via UI buttons, not auto-running');
-  }
-
-  log.info(`🎯 Runtime startup complete. Height: ${env.height}, Entities: ${env.eReplicas.size}`);
-
-  // Debug final state before starting j-watcher
   if (isBrowser) {
-    if (HEAVY_LOGS) console.log(`🔍 BROWSER-DEBUG: Final state before j-watcher start:`);
-    if (HEAVY_LOGS) console.log(`🔍   Environment height: ${env.height}`);
-    if (HEAVY_LOGS) console.log(`🔍   Total replicas: ${env.eReplicas.size}`);
-    for (const [replicaKey, replica] of env.eReplicas.entries()) {
-      const { entityId, signerId } = parseReplicaKey(replicaKey);
-      if (HEAVY_LOGS) console.log(`🔍   Entity ${entityId.slice(0,10)}... (${signerId}): jBlock=${replica.state.lastFinalizedJHeight}, isProposer=${replica.isProposer}`);
-    }
-  }
-
-  // Start J-watcher in browser when using external RPC (required for ReserveUpdated sync)
-  if (isBrowser) {
-    if (!jWatcherStarted) {
-      console.log('🔭 STARTING-JWATCHER: Snapshots loaded, starting j-watcher (non-blocking)...');
-
+    const state = ensureRuntimeState(env);
+    if (!state.jWatcherStarted) {
+      console.log('🔭 STARTING-JWATCHER: Starting j-watcher (non-blocking)...');
       Promise.race([
         startJEventWatcher(env),
         new Promise((_, reject) => setTimeout(() => reject(new Error('J-watcher startup timeout (3s)')), 3000))
       ])
         .then(() => {
-          jWatcherStarted = true;
+          state.jWatcherStarted = true;
           console.log('🔭 JWATCHER-READY: J-watcher started successfully');
         })
         .catch((error) => {
           console.warn('⚠️  J-Event Watcher startup failed or timed out (non-critical):', error.message);
-          console.warn('    UI will load anyway. Blockchain sync will retry in background.');
         });
-    } else {
-      console.log('🔭 JWATCHER-SKIP: J-watcher already started, skipping');
     }
-  } else {
-    console.log('🔭 J-WATCHER: Skipped in Node (server uses its own watcher)');
   }
 
   return env;
 };
 
 // === TIME MACHINE API ===
-const getHistory = () => env.history || [];
-const getSnapshot = (index: number) => {
+const getHistory = (env: Env) => env.history || [];
+const getSnapshot = (env: Env, index: number) => {
   const history = env.history || [];
   return index >= 0 && index < history.length ? history[index] : null;
 };
-const getCurrentHistoryIndex = () => (env.history || []).length - 1;
+const getCurrentHistoryIndex = (env: Env) => (env.history || []).length - 1;
 
 // === SYSTEM SOLVENCY CHECK ===
 // Total tokens in system: reserves + collateral must equal minted supply
@@ -1606,7 +1504,7 @@ interface Solvency {
   byToken: Map<number, { reserves: bigint; collateral: bigint; total: bigint }>;
 }
 
-const calculateSolvency = (snapshot?: Env): Solvency => {
+const calculateSolvency = (env: Env, snapshot?: Env): Solvency => {
   const targetEnv = snapshot || env;
   const byToken = new Map<number, { reserves: bigint; collateral: bigint; total: bigint }>();
 
@@ -1640,8 +1538,8 @@ const calculateSolvency = (snapshot?: Env): Solvency => {
   return { reserves, collateral, total: reserves + collateral, byToken };
 };
 
-const verifySolvency = (expected?: bigint, label?: string): boolean => {
-  const s = calculateSolvency();
+const verifySolvency = (env: Env, expected?: bigint, label?: string): boolean => {
+  const s = calculateSolvency(env);
   const prefix = label ? `[${label}] ` : '';
 
   if (expected !== undefined && s.total !== expected) {
@@ -1654,35 +1552,30 @@ const verifySolvency = (expected?: bigint, label?: string): boolean => {
   return true;
 };
 
-// Server-specific clearDatabase that also resets history
-const clearDatabaseAndHistory = async () => {
+// Clear database for a specific runtime and return a fresh env
+const clearDatabaseAndHistory = async (env: Env): Promise<Env> => {
   console.log('🗑️ Clearing database and resetting runtime history...');
-
-  // Clear the Level database
+  const db = getRuntimeDb(env);
   await clearDatabase(db);
 
-  // Reset the runtime environment to initial state (including history)
-  env = {
-    eReplicas: new Map(),
-    jReplicas: new Map(),
-    height: 0,
-    timestamp: 0,
-    ...(runtimeSeed !== undefined && runtimeSeed !== null ? { runtimeSeed } : {}),
-    ...(runtimeId ? { runtimeId } : {}),
-    runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    history: [],
-    gossip: createGossipLayer(),
-    frameLogs: [],
-  };
+  const seed = env.runtimeSeed ?? null;
+  const freshEnv = createEmptyEnv(seed);
+  if (env.runtimeId) {
+    freshEnv.runtimeId = env.runtimeId;
+    freshEnv.dbNamespace = normalizeDbNamespace(env.runtimeId);
+  }
+  attachEventEmitters(freshEnv);
 
   console.log('✅ Database and runtime history cleared');
+  return freshEnv;
 };
 
 // Export j-watcher status for frontend display
-export const getJWatcherStatus = () => {
-  if (!jWatcher || !env) return null;
+export const getJWatcherStatus = (env: Env) => {
+  const state = ensureRuntimeState(env);
+  if (!state.jWatcher) return null;
   return {
-    isWatching: jWatcher.getStatus().isWatching,
+    isWatching: state.jWatcher.getStatus().isWatching,
     proposers: Array.from(env.eReplicas.entries())
       .filter(([, replica]) => replica.isProposer)
       .map(([key, replica]) => {
@@ -1702,19 +1595,17 @@ export const getJWatcherStatus = () => {
  * Wraps applyRuntimeInput with a single entity tx
  */
 export const queueEntityInput = async (
+  env: Env,
   entityId: string,
   signerId: string,
   txData: { type: string; [key: string]: any }
 ): Promise<void> => {
-  if (!env) throw new Error('Runtime not initialized');
-  await applyRuntimeInput(env, {
-    runtimeTxs: [],
-    entityInputs: [{
-      entityId,
-      signerId,
-      entityTxs: [{ type: txData.type, data: txData }]
-    }]
-  });
+  enqueueRuntimeInputs(env, [{
+    entityId,
+    signerId,
+    entityTxs: [{ type: txData.type, data: txData }]
+  }]);
+  ensureRuntimeLoop(env);
 };
 
 export {
@@ -1757,6 +1648,7 @@ export {
   isEntityRegistered,
   main,
   startJEventWatcher,
+  resolveEntityProposerId,
   // Blockchain registration functions
   registerNumberedEntityOnChain,
   requestNamedEntity,
@@ -1898,8 +1790,6 @@ const demoCompleteHanko = async (): Promise<void> => {
 // Demo wrapper removed - use scenarios.ahb(env) or scenarios.grid(env) instead
 
 // === ENVIRONMENT UTILITIES ===
-// Global reference to current env for log capturing
-let currentEnvForLogs: Env | null = null;
 
 const isEntryArray = (value: unknown): value is Array<[unknown, unknown]> =>
   Array.isArray(value) && value.length > 0 && Array.isArray(value[0]) && value[0].length === 2;
@@ -1992,7 +1882,7 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
     ? (typeof normalizedSeed === 'string' ? normalizedSeed : new TextDecoder().decode(normalizedSeed))
     : '';
   const derivedRuntimeId = seedText ? deriveRuntimeIdFromSeed(seedText) : null;
-  const resolvedRuntimeId = derivedRuntimeId || (runtimeId ? runtimeId.toLowerCase() : null);
+  const resolvedRuntimeId = derivedRuntimeId ? derivedRuntimeId.toLowerCase() : null;
   const resolvedDbNamespace = resolvedRuntimeId ? normalizeDbNamespace(resolvedRuntimeId) : undefined;
 
   const env: Env = {
@@ -2004,6 +1894,9 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
     ...(resolvedRuntimeId ? { runtimeId: resolvedRuntimeId } : {}),
     ...(resolvedDbNamespace ? { dbNamespace: resolvedDbNamespace } : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
+    runtimeMempool: undefined,
+    runtimeConfig: undefined,
+    runtimeState: undefined,
     history: [],
     gossip: createGossipLayer(),
     frameLogs: [],
@@ -2024,108 +1917,26 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   // Attach event emission methods (EVM-style)
   attachEventEmitters(env);
 
-  // Set as current env for log capturing
-  currentEnvForLogs = env;
+  // Ensure runtime structures exist
+  ensureRuntimeMempool(env);
+  ensureRuntimeConfig(env);
+  ensureRuntimeState(env);
 
   return env;
 };
 
-// Intercept console for frame log capturing (browser only)
-// TEMPORARILY DISABLED - debugging solvency regression
-if (false && isBrowser) {
-  const originalLog = console.log;
-  const originalWarn = console.warn;
-  const originalError = console.error;
-
-  console.log = function(...args: any[]) {
-    originalLog.apply(console, args);
-    if (currentEnvForLogs) {
-      try {
-        const msg = args.map(a => {
-          if (typeof a === 'string') return a;
-          if (typeof a === 'bigint') return a.toString() + 'n';
-          try { return JSON.stringify(a); } catch { return String(a); }
-        }).join(' ');
-        currentEnvForLogs.frameLogs.push({
-          level: 'info',
-          category: detectLogCategory(msg),
-          message: msg,
-          timestamp: currentEnvForLogs?.timestamp ?? 0,
-        });
-      } catch (e) {
-        // Silently fail log capture - don't break runtime
-      }
-    }
-  };
-
-  console.warn = function(...args: any[]) {
-    originalWarn.apply(console, args);
-    if (currentEnvForLogs) {
-      try {
-        const msg = args.map(a => {
-          if (typeof a === 'string') return a;
-          if (typeof a === 'bigint') return a.toString() + 'n';
-          try { return JSON.stringify(a); } catch { return String(a); }
-        }).join(' ');
-        currentEnvForLogs.frameLogs.push({
-          level: 'warn',
-          category: detectLogCategory(msg),
-          message: msg,
-          timestamp: currentEnvForLogs?.timestamp ?? 0,
-        });
-      } catch (e) {
-        // Silently fail
-      }
-    }
-  };
-
-  console.error = function(...args: any[]) {
-    originalError.apply(console, args);
-    if (currentEnvForLogs) {
-      try {
-        const msg = args.map(a => {
-          if (typeof a === 'string') return a;
-          if (typeof a === 'bigint') return a.toString() + 'n';
-          try { return JSON.stringify(a); } catch { return String(a); }
-        }).join(' ');
-        currentEnvForLogs.frameLogs.push({
-          level: 'error',
-          category: detectLogCategory(msg),
-          message: msg,
-          timestamp: currentEnvForLogs?.timestamp ?? 0,
-        });
-      } catch (e) {
-        // Silently fail
-      }
-    }
-  };
-}
-
-function detectLogCategory(msg: string): 'consensus' | 'account' | 'jurisdiction' | 'evm' | 'network' | 'ui' | 'system' {
-  if (msg.includes('CONSENSUS') || msg.includes('E-MACHINE') || msg.includes('PROPOSE')) return 'consensus';
-  if (msg.includes('ACCOUNT') || msg.includes('A-MACHINE') || msg.includes('BILATERAL')) return 'account';
-  if (msg.includes('J-MACHINE') || msg.includes('JURISDICTION')) return 'jurisdiction';
-  if (msg.includes('EVM') || msg.includes('BrowserVM')) return 'evm';
-  if (msg.includes('GOSSIP') || msg.includes('NETWORK')) return 'network';
-  if (msg.includes('[View]') || msg.includes('[Graph3D]')) return 'ui';
-  return 'system';
-}
-
 // === CONSENSUS PROCESSING ===
 // ONE TICK = ONE ITERATION. No cascade. E→E communication always requires new tick.
-let processing = false;
 
 export const process = async (
   env: Env,
   inputs?: EntityInput[],
   runtimeDelay = 0
 ) => {
-  // Ensure event emitters are attached (may be lost after store serialization)
   if (!env.emit) {
     attachEventEmitters(env);
   }
 
-  // Frame stepping: check if we should stop and dump state
   if (env.stopAtFrame !== undefined && env.height >= env.stopAtFrame) {
     console.log(`\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);
     console.log('═'.repeat(80));
@@ -2136,88 +1947,113 @@ export const process = async (
     throw new Error(`FRAME_STEP: Stopped at frame ${env.height} for debugging`);
   }
 
-  // Lock: prevent interleaving
-  if (processing) {
+  if (inputs && inputs.length > 0) {
+    enqueueRuntimeInputs(env, inputs);
+  }
+  if (env.pendingOutputs && env.pendingOutputs.length > 0) {
+    enqueueRuntimeInputs(env, env.pendingOutputs);
+    env.pendingOutputs = [];
+  }
+  if (env.networkInbox && env.networkInbox.length > 0) {
+    enqueueRuntimeInputs(env, env.networkInbox);
+    env.networkInbox = [];
+  }
+
+  if (!hasRuntimeWork(env)) return env;
+
+  const now = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+  if (!isRuntimeFrameReady(env, now, runtimeDelay)) {
+    ensureRuntimeLoop(env);
+    return env;
+  }
+
+  const state = ensureRuntimeState(env);
+  if (state.processing) {
     console.warn('⏸️ SKIP: Previous tick still processing');
     return env;
   }
 
-  processing = true;
-
-  // Merge pending outputs from previous tick with new inputs
-  const allInputs = [
-    ...(env.pendingOutputs || []),
-    ...(env.networkInbox || []),
-    ...(inputs || []),
-  ];
-  env.pendingOutputs = [];
-  env.networkInbox = [];
-
-  // Validate inputs
-  allInputs.forEach(o => {
-    try {
-      validateEntityInput(o);
-    } catch (error) {
-      logError("RUNTIME_TICK", `🚨 CRITICAL: Invalid EntityInput!`, {
-        error: (error as Error).message,
-        entityId: o.entityId.slice(0, 10),
-        signerId: o.signerId,
-      });
-      throw error;
-    }
-  });
+  state.processing = true;
 
   try {
     const quietRuntimeLogs = env.quietRuntimeLogs === true;
     getBrowserVMInstance(env)?.setQuietLogs?.(quietRuntimeLogs);
-    // Update timestamp
-    // In scenario mode, advance by 100ms per tick (deterministic)
-    // In live mode, use real time
+
     if (env.scenarioMode) {
-      env.timestamp = (env.timestamp ?? 0) + 100; // Advance 100ms per frame
+      env.timestamp = (env.timestamp ?? 0) + 100;
     } else {
       env.timestamp = getWallClockMs();
     }
     getBrowserVMInstance(env)?.setBlockTimestamp?.(env.timestamp);
 
-    const hasQueuedRuntimeTxs = (env.runtimeInput?.runtimeTxs?.length ?? 0) > 0;
-    if (allInputs.length > 0 || hasQueuedRuntimeTxs) {
+    const mempool = ensureRuntimeMempool(env);
+    const runtimeInput: RuntimeInput = {
+      runtimeTxs: [...mempool.runtimeTxs],
+      entityInputs: [...mempool.entityInputs],
+      ...(mempool.jInputs && mempool.jInputs.length > 0 ? { jInputs: [...mempool.jInputs] } : {}),
+    };
+    const mempoolQueuedAt = mempool.queuedAt;
+    mempool.runtimeTxs = [];
+    mempool.entityInputs = [];
+    if (mempool.jInputs) mempool.jInputs = [];
+    mempool.queuedAt = undefined;
+
+    runtimeInput.entityInputs.forEach(o => {
+      try {
+        validateEntityInput(o);
+      } catch (error) {
+        logError("RUNTIME_TICK", `🚨 CRITICAL: Invalid EntityInput!`, {
+          error: (error as Error).message,
+          entityId: o.entityId.slice(0, 10),
+          signerId: o.signerId,
+        });
+        throw error;
+      }
+    });
+
+    const hasRuntimeInput =
+      runtimeInput.runtimeTxs.length > 0 ||
+      runtimeInput.entityInputs.length > 0 ||
+      (runtimeInput.jInputs?.length ?? 0) > 0;
+
+    let entityOutbox: EntityInput[] = [];
+    if (hasRuntimeInput) {
       if (!quietRuntimeLogs) {
-        console.log(`📥 TICK: Processing ${allInputs.length} inputs for [${allInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
-        if (hasQueuedRuntimeTxs) {
-          console.log(`📥 TICK: Processing ${env.runtimeInput.runtimeTxs.length} queued runtimeTxs`);
+        console.log(`📥 TICK: Processing ${runtimeInput.entityInputs.length} inputs for [${runtimeInput.entityInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
+        if (runtimeInput.runtimeTxs.length > 0) {
+          console.log(`📥 TICK: Processing ${runtimeInput.runtimeTxs.length} queued runtimeTxs`);
         }
       }
-
-      const result = await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: allInputs });
-
-      // DEBUG: Log what applyRuntimeInput returned
-      if (HEAVY_LOGS) console.log(`🔍 PROCESS-DEBUG: applyRuntimeInput returned entityOutbox.length=${result.entityOutbox.length}`);
-
-      // Store outputs for NEXT tick
-      const routedOutputs = routeEntityOutputs(env, result.entityOutbox);
-      env.pendingOutputs = routedOutputs;
-
-      if (routedOutputs.length > 0 && !quietRuntimeLogs) {
-        console.log(`📤 TICK: ${routedOutputs.length} outputs queued for next tick → [${routedOutputs.map(o => o.entityId.slice(-4)).join(',')}]`);
-      }
-    } else {
-      // No inputs to process - retry routing any pending network outputs
-      if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
-        const routedOutputs = routeEntityOutputs(env, []);
-        if (routedOutputs.length > 0) {
-          env.pendingOutputs = [...(env.pendingOutputs || []), ...routedOutputs];
-          if (!quietRuntimeLogs) {
-            console.log(`📤 TICK: ${routedOutputs.length} local outputs queued from pending network outputs`);
-          }
+      try {
+        const result = await applyRuntimeInput(env, runtimeInput);
+        if (HEAVY_LOGS) console.log(`🔍 PROCESS-DEBUG: applyRuntimeInput returned entityOutbox.length=${result.entityOutbox.length}`);
+        entityOutbox = result.entityOutbox;
+      } catch (error) {
+        // Restore runtime mempool on failure (WAL safety)
+        mempool.runtimeTxs = [...runtimeInput.runtimeTxs, ...mempool.runtimeTxs];
+        mempool.entityInputs = [...runtimeInput.entityInputs, ...mempool.entityInputs];
+        if (runtimeInput.jInputs) {
+          mempool.jInputs = [...runtimeInput.jInputs, ...(mempool.jInputs ?? [])];
         }
-      } else {
-        // No inputs to process - keep env.extra so narrative-only frames still render
+        if (mempool.queuedAt === undefined) {
+          mempool.queuedAt = mempoolQueuedAt ?? (env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs());
+        }
+        throw error;
       }
+    } else if (!quietRuntimeLogs && env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
+      console.log(`📤 TICK: No entity inputs - retrying ${env.pendingNetworkOutputs.length} pending network outputs`);
     }
 
-    // === J-MACHINE BLOCK PROCESSING ===
-    // Process J-machine mempools when blockDelayMs has elapsed
+    const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, entityOutbox);
+    if (localOutputs.length > 0) {
+      enqueueRuntimeInputs(env, localOutputs);
+      if (!quietRuntimeLogs) {
+        console.log(`📤 TICK: ${localOutputs.length} local outputs queued for next tick → [${localOutputs.map(o => o.entityId.slice(-4)).join(',')}]`);
+      }
+    }
+    env.pendingNetworkOutputs = deferredOutputs;
+
+    let jMachineProcessed = false;
     if (env.jReplicas) {
       for (const [jName, jReplica] of env.jReplicas.entries()) {
         const mempool = jReplica.mempool || [];
@@ -2225,12 +2061,10 @@ export const process = async (
         const lastBlockTs = jReplica.lastBlockTimestamp || 0;
         const elapsed = env.timestamp - lastBlockTs;
 
-        // Debug logging
         if (mempool.length > 0) {
           if (HEAVY_LOGS) console.log(`🔍 [J-Machine ${jName}] mempool=${mempool.length}, elapsed=${elapsed}ms, blockDelay=${blockDelayMs}ms, ready=${elapsed >= blockDelayMs}`);
         }
 
-        // Check if mempool items are ready (minimum 1 tick delay for visualization)
         const oldestTxAge = mempool.length > 0 && mempool[0].queuedAt ? env.timestamp - mempool[0].queuedAt : 999999;
         const mempoolReady = mempool.length > 0 && oldestTxAge >= blockDelayMs;
 
@@ -2238,21 +2072,19 @@ export const process = async (
           console.log(`⏳ [J-Machine] ${mempool.length} pending (age: ${oldestTxAge}ms < ${blockDelayMs}ms) - waiting...`);
         }
 
-        // If mempool ready AND block delay passed → PROCESS
         if (mempoolReady) {
+          jMachineProcessed = true;
           if (!quietRuntimeLogs) {
             console.log(`⚡ [5/6] J-Machine ${jReplica.name}: Processing ${mempool.length} txs (oldest: ${oldestTxAge}ms >= ${blockDelayMs}ms)`);
             console.log(`   Mempool BEFORE execution:`, mempool.map(tx => `${tx.entityId.slice(-4)}:${tx.data.batchSize || '?'}`));
           }
 
-          // Emit J-block event
           env.emit('JBlockProcessing', {
             jurisdictionName: jName,
             txCount: mempool.length,
             blockNumber: Number(jReplica.blockNumber) + 1,
           });
 
-          // Process each JTx in mempool
           const { broadcastBatch } = await import('./j-batch');
           const { getBrowserVMInstance } = await import('./evm');
           const browserVM = getBrowserVMInstance(env);
@@ -2292,7 +2124,6 @@ export const process = async (
                 // best-effort debug only
               }
 
-              // Create temporary jBatchState for broadcastBatch call
               const tempJBatchState = {
                 batch: jTx.data.batch,
                 jurisdiction: null,
@@ -2306,12 +2137,11 @@ export const process = async (
                 continue;
               }
 
-              // Execute batch on BrowserVM
               const result = await broadcastBatch(
                 env,
                 jTx.entityId,
                 tempJBatchState,
-                jurisdiction, // Required for RPC mode; BrowserVM ignores this
+                jurisdiction,
                 browserVM || undefined,
                 jTx.timestamp ?? env.timestamp,
                 jTx.data?.signerId
@@ -2341,7 +2171,6 @@ export const process = async (
               }
             }
 
-            // Handle direct mint operations (admin function, bypasses batch)
             if (jTx.type === 'mint' && jTx.data && browserVM?.debugFundReserves) {
               const { entityId, tokenId, amount } = jTx.data;
               if (!quietRuntimeLogs) {
@@ -2365,12 +2194,10 @@ export const process = async (
             browserVM.endJurisdictionBlock();
           }
 
-          // Clear mempool immediately after processing (all txs executed)
           const processedCount = mempool.length;
-          const successCount = processedCount; // Failures would throw in scenario mode
+          const successCount = processedCount;
           const failCount = 0;
 
-          // CRITICAL: Clear mempool immediately (txs already executed)
           if (!quietRuntimeLogs) {
             console.log(`🧹 [J-Machine] Clearing mempool (before: ${jReplica.mempool.length} items)...`);
           }
@@ -2379,9 +2206,9 @@ export const process = async (
             console.log(`🧹 [J-Machine] Mempool AFTER clear: ${jReplica.mempool.length} items (should be 0)`);
           }
 
-          jReplica.lastBlockTimestamp = env.timestamp; // Reset timer for next block
-          jReplica.blockNumber = jReplica.blockNumber + 1n; // Increment ONLY when block processed
-          jReplica.blockReady = false; // Block created, mempool empty
+          jReplica.lastBlockTimestamp = env.timestamp;
+          jReplica.blockNumber = jReplica.blockNumber + 1n;
+          jReplica.blockReady = false;
 
           if (!quietRuntimeLogs) {
             console.log(`✅ [J-Machine ${jReplica.name}] Block #${jReplica.blockNumber} finalized (${successCount}/${processedCount} batches)`);
@@ -2393,14 +2220,12 @@ export const process = async (
             console.log(`   Next block in ${blockDelayMs}ms`);
           }
 
-          // Emit J-block finalized event
           env.emit('JBlockFinalized', {
             jurisdictionName: jName,
             blockNumber: Number(jReplica.blockNumber),
             txCount: mempool.length,
           });
         } else if (mempool.length > 0) {
-          // Mempool has items but delay not elapsed yet (yellow cube visible, waiting)
           jReplica.blockReady = true;
         } else {
           jReplica.blockReady = false;
@@ -2408,8 +2233,10 @@ export const process = async (
       }
     }
 
-    // ALWAYS snapshot after tick (full frame chain)
-    // env.extra only adds metadata (subtitle, description) - optional
+    if (!hasRuntimeInput && jMachineProcessed) {
+      env.height += 1;
+    }
+
     let browserVMState: any = undefined;
     const browserVMStateSource = getBrowserVMInstance(env);
     if (browserVMStateSource?.serializeState) {
@@ -2432,25 +2259,24 @@ export const process = async (
       eReplicas: new Map(env.eReplicas),
       jReplicas: env.jReplicas ? Array.from(env.jReplicas.values()).map(jr => ({
         ...jr,
-        mempool: [...jr.mempool], // Deep clone mempool array
-        stateRoot: new Uint8Array(jr.stateRoot), // Clone Uint8Array
+        mempool: [...jr.mempool],
+        stateRoot: new Uint8Array(jr.stateRoot),
       })) : [],
       runtimeInput: env.runtimeInput,
       runtimeOutputs: env.pendingOutputs || [],
       frameLogs: env.frameLogs || [],
-      title: `Frame ${env.history?.length || 0}`, // Default title
+      title: `Frame ${env.history?.length || 0}`,
       ...(browserVMState ? { browserVMState } : {}),
     };
 
-    // Add metadata if provided via snap()
     if (env.extra) {
       const { subtitle, description } = env.extra;
       if (subtitle) {
         snapshot.subtitle = subtitle;
-        snapshot.title = subtitle.title || snapshot.title; // Override title
+        snapshot.title = subtitle.title || snapshot.title;
       }
       if (description) snapshot.description = description;
-      env.extra = undefined; // Clear after use
+      env.extra = undefined;
     }
 
     if (!env.history) env.history = [];
@@ -2460,16 +2286,27 @@ export const process = async (
       console.log(`📸 Snapshot: ${snapshot.title} (${env.history.length} total)`);
     }
 
-    // Auto-persist
     await saveEnvToDB(env);
+
+    const deferredAfterSend = dispatchEntityOutputs(env, remoteOutputs);
+    if (deferredAfterSend.length > 0) {
+      env.pendingNetworkOutputs = [...(env.pendingNetworkOutputs || []), ...deferredAfterSend];
+    }
+
+    if (remoteOutputs.length > 0 || deferredAfterSend.length > 0) {
+      await saveEnvToDB(env);
+    }
+
+    state.lastFrameAt = env.timestamp;
 
     if (env.strictScenario) {
       const { assertRuntimeStateStrict } = await import('./strict-assertions');
       await assertRuntimeStateStrict(env);
     }
+
     return env;
   } finally {
-    processing = false;
+    state.processing = false;
   }
 };
 
@@ -2478,9 +2315,10 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
   if (!isBrowser) return; // Only persist in browser
 
   try {
-    const dbReady = await tryOpenDb();
+    const dbReady = await tryOpenDb(env);
     if (!dbReady) return;
     const dbNamespace = resolveDbNamespace({ env });
+    const db = getRuntimeDb(env);
 
     // Save latest height pointer
     await db.put(makeDbKey(dbNamespace, 'latest_height'), Buffer.from(String(env.height)));
@@ -2521,10 +2359,16 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
   if (!isBrowser) return null;
 
   try {
-    const dbReady = await tryOpenDb();
+    const tempEnv = createEmptyEnv(runtimeSeed ?? null);
+    if (runtimeId) {
+      tempEnv.runtimeId = runtimeId;
+      tempEnv.dbNamespace = normalizeDbNamespace(runtimeId);
+    }
+    const dbReady = await tryOpenDb(tempEnv);
     if (!dbReady) return null;
 
-    const dbNamespace = resolveDbNamespace({ runtimeId, runtimeSeed });
+    const dbNamespace = resolveDbNamespace({ runtimeId, runtimeSeed, env: tempEnv });
+    const db = getRuntimeDb(tempEnv);
     const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
     const latestHeight = parseInt(latestHeightBuffer.toString());
 
@@ -2573,6 +2417,10 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       if (data.gossip?.profiles) {
         env.gossip.profiles = new Map(data.gossip.profiles);
       }
+      const envState = ensureRuntimeState(env);
+      const tempState = ensureRuntimeState(tempEnv);
+      envState.db = tempState.db;
+      envState.dbOpenPromise = tempState.dbOpenPromise;
       history.push(env);
     }
 
@@ -2604,13 +2452,15 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
   }
 };
 
-export const clearDB = async (): Promise<void> => {
+export const clearDB = async (env?: Env): Promise<void> => {
   if (!isBrowser) return;
+  const targetEnv = env ?? createEmptyEnv(null);
 
   try {
-    const dbReady = await tryOpenDb();
+    const dbReady = await tryOpenDb(targetEnv);
     if (!dbReady) return;
 
+    const db = getRuntimeDb(targetEnv);
     await db.clear();
     console.log('✅ LevelDB cleared');
   } catch (err) {
