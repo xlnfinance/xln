@@ -1619,9 +1619,8 @@ export interface Env {
     loopIntervalMs?: number;  // Loop interval for runtime processing
   };
   runtimeState?: {
-    processing?: boolean;
     loopActive?: boolean;
-    loopTimer?: any;
+    stopLoop?: (() => void) | null;
     lastFrameAt?: number;
     p2p?: any;
     pendingP2PConfig?: any;

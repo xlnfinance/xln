@@ -4,7 +4,7 @@
  */
 
 import { startRuntimeWsServer } from '../networking/ws-server';
-import { main, startP2P, process as runtimeProcess, applyRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter } from '../runtime';
+import { main, startP2P, process as runtimeProcess, applyRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter, startRuntimeLoop } from '../runtime';
 import { processUntil, converge } from './helpers';
 import { isLeft, deriveDelta } from '../account-utils';
 import { deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account-crypto';
@@ -631,6 +631,8 @@ const run = async () => {
   console.log(`P2P_NODE_CONFIG role=${role} relayUrl=${relayUrl} relayPort=${relayPort} isHub=${isHub}`);
 
   const env = await main(seed);
+  startRuntimeLoop(env);
+  console.log('[P2P-NODE] Runtime event loop started');
   let jurisdiction: JurisdictionConfig | null = null;
   let rpcUrl: string | null = null;
   let contracts: { depository: string; entityProvider: string; account?: string; deltaTransformer?: string } | null = null;
@@ -691,11 +693,7 @@ const run = async () => {
         if (!env.networkInbox) env.networkInbox = [];
         env.networkInbox.push(input);
         console.log(`[HUB-RELAY] Added to networkInbox, size=${env.networkInbox.length}`);
-        // Trigger processing via async import (ESM-safe)
-        const runtime = await import('../runtime');
-        if (runtime.scheduleNetworkProcess) {
-          (runtime.scheduleNetworkProcess as any)(env);
-        }
+        // Runtime loop will pick this up on next tick (always-on via startRuntimeLoop)
       },
     });
     relay.server.on('listening', () => {
