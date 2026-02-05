@@ -161,25 +161,45 @@ export function signProfileSync(
  * Verify profile using Hanko mechanism (same as accountFrame verification)
  * Falls back to legacy signature verification for migration
  */
+export type ProfileVerifyResult = {
+  valid: boolean;
+  reason?: string;
+  hash?: string;
+  signerId?: string;
+};
+
 export async function verifyProfileSignature(
   profile: Profile,
   env?: Env
-): Promise<boolean> {
+): Promise<ProfileVerifyResult> {
   // Prefer Hanko verification
   const hanko = profile.metadata?.['profileHanko'] as HankoString | undefined;
   if (hanko) {
     const hash = computeProfileHash(profile);
     const result = await verifyHankoForHash(hanko, hash, profile.entityId, env);
-    return result.valid;
+    if (!result.valid) {
+      return {
+        valid: false,
+        reason: `hanko_invalid: entityId=${result.entityId?.slice(-8) || 'none'}`,
+        hash,
+      };
+    }
+    return { valid: true, hash };
   }
 
   // Fallback: legacy signature verification (migration period)
   const signature = profile.metadata?.['profileSignature'];
   if (signature && typeof signature === 'string') {
-    return verifyLegacySignature(profile, signature);
+    const hash = computeProfileHash(profile);
+    const valid = verifyLegacySignature(profile, signature);
+    return {
+      valid,
+      reason: valid ? undefined : 'legacy_sig_mismatch',
+      hash,
+    };
   }
 
-  return false; // No signature
+  return { valid: false, reason: 'no_signature' };
 }
 
 /**

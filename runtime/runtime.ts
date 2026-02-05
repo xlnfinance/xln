@@ -136,8 +136,7 @@ import { captureSnapshot, cloneEntityReplica, resolveEntityProposerId } from './
 import { getEntityShortId, getEntityNumber, formatEntityId, HEAVY_LOGS } from './utils';
 import { safeStringify } from './serialization-utils';
 import { validateDelta, validateAccountDeltas, createDefaultDelta, isDelta, validateEntityInput, validateEntityOutput } from './validation-utils';
-import { EntityInput, EntityReplica, Env, RuntimeInput } from './types';
-import type { JReplica } from './types';
+import type { EntityInput, EntityReplica, Env, JInput, JReplica, RuntimeInput } from './types';
 import {
   clearDatabase,
   DEBUG,
@@ -304,8 +303,8 @@ const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
 const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
   if (!env.runtimeState) {
     env.runtimeState = {
-      processing: false,
       loopActive: false,
+      stopLoop: null,
       lastFrameAt: undefined,
       p2p: null,
       pendingP2PConfig: null,
@@ -379,18 +378,8 @@ const hasRuntimeWork = (env: Env): boolean => {
   if (env.pendingOutputs && env.pendingOutputs.length > 0) return true;
   if (env.networkInbox && env.networkInbox.length > 0) return true;
   if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) return true;
-  if (env.jReplicas) {
-    const now = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
-    for (const jr of env.jReplicas.values()) {
-      const mempoolSize = jr.mempool?.length ?? 0;
-      if (mempoolSize === 0) continue;
-      const blockDelayMs = jr.blockDelayMs || 300;
-      const lastBlockTs = jr.lastBlockTimestamp || 0;
-      const elapsed = now - lastBlockTs;
-      const oldestTxAge = jr.mempool[0]?.queuedAt ? now - jr.mempool[0].queuedAt! : 999999;
-      if (elapsed >= blockDelayMs || oldestTxAge >= blockDelayMs) return true;
-    }
-  }
+  // J-machine mempool removed from work check — J-batches are now executed post-save
+  // as side effects, not queued for processing in the next frame
   return false;
 };
 
@@ -403,24 +392,51 @@ const isRuntimeFrameReady = (env: Env, now: number, overrideDelayMs?: number): b
   return now - state.lastFrameAt >= delayMs;
 };
 
-async function runtimeTick(env: Env): Promise<void> {
-  await process(env);
-}
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
-const ensureRuntimeLoop = (env: Env): void => {
+/**
+ * Start the single runtime event loop. Called once on init.
+ * Async while-loop — no re-entry possible by construction.
+ * Returns a stop function for graceful shutdown.
+ *
+ * Loop cycle:
+ *   1. process() — drain mempool, apply R-frame (pure E/A consensus)
+ *   2. persist   — atomic LevelDB write of finalized frame
+ *   3. broadcast — J-batch execution + E-output P2P dispatch (side effects)
+ *   4. sleep     — configurable delay (0 = no wait, just yield)
+ */
+export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): () => void {
+  if (env.scenarioMode) return () => {};
   const state = ensureRuntimeState(env);
-  const config = ensureRuntimeConfig(env);
-  if (env.scenarioMode) return;
-  if (state.loopActive) return;
+  if (state.loopActive) return state.stopLoop ?? (() => {});
+
+  const tickDelayMs = config?.tickDelayMs ?? ensureRuntimeConfig(env).loopIntervalMs ?? 25;
+  let running = true;
   state.loopActive = true;
-  const interval = config.loopIntervalMs ?? 25;
-  state.loopTimer = setInterval(async () => {
-    if (!hasRuntimeWork(env)) {
-      return;
+
+  const loop = async () => {
+    while (running) {
+      try {
+        if (hasRuntimeWork(env)) {
+          await process(env);
+        }
+      } catch (error) {
+        console.error('❌ Runtime loop error:', error);
+      }
+      if (tickDelayMs > 0) {
+        await sleep(tickDelayMs);
+      } else {
+        // yield to event loop even with 0 delay (let network/UI callbacks run)
+        await sleep(0);
+      }
     }
-    await runtimeTick(env);
-  }, interval);
-};
+    state.loopActive = false;
+  };
+
+  loop(); // fire-and-forget — single async chain, never overlaps
+  state.stopLoop = () => { running = false; };
+  return state.stopLoop;
+}
 
 /**
  * Identity function for env (no module-level env exists).
@@ -482,9 +498,7 @@ export const deriveRuntimeId = (seed: string): string => {
   return deriveSignerAddressSync(seed, '1');
 };
 
-export const scheduleNetworkProcess = (env: Env) => {
-  ensureRuntimeLoop(env);
-};
+// scheduleNetworkProcess removed — loop is always-on via startRuntimeLoop()
 
 const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null => {
   if (!env.gossip?.getProfiles) return null;
@@ -600,7 +614,7 @@ export const sendEntityInput = (env: Env, input: EntityInput): { sent: boolean; 
   } else {
     env.pendingNetworkOutputs = [];
   }
-  ensureRuntimeLoop(env);
+
   return {
     sent: remoteOutputs.length > 0 && deferred.length === 0,
     deferred: remainingDeferred.length > 0,
@@ -643,7 +657,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
       enqueueRuntimeInputs(env, [input]);
       console.log(`📥 RUNTIME-MEMPOOL: Added inbound, size=${ensureRuntimeMempool(env).entityInputs.length}`);
       env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
-      ensureRuntimeLoop(env);
+    
     },
     onGossipProfiles: (_from, profiles) => {
       if (!env.gossip?.announce) return;
@@ -711,12 +725,7 @@ export const processJBlockEvents = async (env: Env): Promise<void> => {
     return;
   }
 
-  const state = ensureRuntimeState(env);
-  if (state.processing) {
-    console.warn('⏸️ processJBlockEvents: Runtime busy, leaving j-events queued');
-    return;
-  }
-
+  // No processing guard needed — single async loop prevents re-entry
   const mempool = ensureRuntimeMempool(env);
   const pending = mempool.entityInputs.length;
   if (pending === 0) return;
@@ -742,7 +751,7 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
   const browserVM = getBrowserVMInstance(env);
   if (browserVM) {
     console.log('🔭 J-WATCHER: Using BrowserVM (external RPC not needed)');
-    ensureRuntimeLoop(env);
+  
     return;
   }
 
@@ -787,7 +796,7 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
 
     console.log('✅ J-Event Watcher started (external RPC)');
     console.log(`🔭 Monitoring: ${rpcUrl}`);
-    ensureRuntimeLoop(env);
+  
 
   } catch (error) {
     logError("RUNTIME_TICK", '❌ Failed to start J-Event Watcher:', error);
@@ -806,7 +815,7 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
 const applyRuntimeInput = async (
   env: Env,
   runtimeInput: RuntimeInput,
-): Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }> => {
+): Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[]; jOutbox: JInput[] }> => {
   const startTime = getPerfMs();
 
   // Ensure event emitters are attached (may be lost after store serialization)
@@ -818,48 +827,41 @@ const applyRuntimeInput = async (
     // SECURITY: Validate runtime input
     if (!runtimeInput) {
       log.error('❌ Null runtime input provided');
-      return { entityOutbox: [], mergedInputs: [] };
+      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
     }
     if (!Array.isArray(runtimeInput.runtimeTxs)) {
       log.error(`❌ Invalid runtimeTxs: expected array, got ${typeof runtimeInput.runtimeTxs}`);
-      return { entityOutbox: [], mergedInputs: [] };
+      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
     }
     if (!Array.isArray(runtimeInput.entityInputs)) {
       log.error(`❌ Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
-      return { entityOutbox: [], mergedInputs: [] };
+      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
     }
 
-    // Process J-layer inputs (queue to J-mempool)
+    // Collect incoming J-inputs into early jOutbox (will be merged with handler jOutputs later)
+    // These are NOT pushed to jReplica.mempool — they go to jOutbox → JAdapter post-save
+    const earlyJOutbox: JInput[] = [];
     if (runtimeInput.jInputs && Array.isArray(runtimeInput.jInputs)) {
-      if (HEAVY_LOGS) console.log(`🔍 J-Input processing: ${runtimeInput.jInputs.length} jInputs`);
+      console.log(`📥 [J-OUTBOX] Incoming jInputs: ${runtimeInput.jInputs.length} from mempool`);
       for (const jInput of runtimeInput.jInputs) {
         const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
         if (!jReplica) {
-          console.error(`❌ J-Input: Jurisdiction "${jInput.jurisdictionName}" not found`);
+          console.error(`❌ [J-OUTBOX] Jurisdiction "${jInput.jurisdictionName}" not found — dropping ${jInput.jTxs.length} jTxs`);
           continue;
         }
-
-        if (HEAVY_LOGS) console.log(`🔍 J-Input has ${jInput.jTxs.length} JTxs for ${jInput.jurisdictionName}`);
-        // Queue all JTxs to J-mempool with queuedAt timestamp
-        for (const jTx of jInput.jTxs) {
-          // Mark when added (for minimum 1-tick delay visualization)
-          const jTxWithQueueTime = { ...jTx, queuedAt: env.timestamp };
-          jReplica.mempool.push(jTxWithQueueTime);
-          console.log(`📥 J-Input: Queued ${jTx.type} from ${jTx.entityId.slice(-4)} to ${jInput.jurisdictionName} mempool (mempool size now: ${jReplica.mempool.length})`);
-        }
-
-        console.log(`✅ J-Input: ${jInput.jTxs.length} txs queued (mempool: ${jReplica.mempool.length})`);
+        console.log(`📥 [J-OUTBOX] Collecting ${jInput.jTxs.length} jTxs for ${jInput.jurisdictionName} (types: ${jInput.jTxs.map(t => t.type).join(',')})`);
+        earlyJOutbox.push(jInput);
       }
     }
 
     // SECURITY: Resource limits
     if (runtimeInput.runtimeTxs.length > 1000) {
       log.error(`❌ Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
-      return { entityOutbox: [], mergedInputs: [] };
+      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
     }
     if (runtimeInput.entityInputs.length > 10000) {
       log.error(`❌ Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
-      return { entityOutbox: [], mergedInputs: [] };
+      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
     }
 
     // FINTECH-LEVEL TYPE SAFETY: Validate all inputs BEFORE mutating env
@@ -887,7 +889,7 @@ const applyRuntimeInput = async (
     const mergedInputs = mergeEntityInputs(mergedEntityInputs);
 
     const entityOutbox: EntityInput[] = [];
-    const jOutbox: JInput[] = []; // Collect J-outputs from entities
+    const jOutbox: JInput[] = [...earlyJOutbox]; // Seed with incoming jInputs, handler jOutputs added later
 
     // Process runtime transactions (handle async operations properly)
     for (const runtimeTx of mergedRuntimeTxs) {
@@ -1238,34 +1240,19 @@ const applyRuntimeInput = async (
       }
     }
 
-    // Process J-outputs BEFORE creating frame (queue to J-mempool)
+    // Log J-outputs — they stay in jOutbox and are returned to process() for post-save execution
     if (jOutbox.length > 0) {
-      console.log(`📤 [3/6] J-OUTPUTS: ${jOutbox.length} J-outputs collected → routing to J-mempools`);
-
+      const totalJTxs = jOutbox.reduce((n, ji) => n + ji.jTxs.length, 0);
+      console.log(`📤 [J-OUTBOX] ${jOutbox.length} JInputs (${totalJTxs} JTxs) collected — will broadcast to JAdapter post-save`);
       for (const jInput of jOutbox) {
-        const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
-        if (!jReplica) {
-          console.error(`❌ J-Output: Jurisdiction "${jInput.jurisdictionName}" not found`);
-          continue;
-        }
-
-        // Queue JTxs to J-mempool (PROPER ROUTING)
         for (const jTx of jInput.jTxs) {
-          // Mark when queued (for minimum 1-tick visualization delay)
-          const jTxWithQueueTime = { ...jTx, queuedAt: env.timestamp };
-          jReplica.mempool.push(jTxWithQueueTime);
-          console.log(`📥 [4/6] J-Output: Queued ${jTx.type} from ${jTx.entityId.slice(-4)} to ${jInput.jurisdictionName} mempool (queuedAt: ${env.timestamp}, mempool.length: ${jReplica.mempool.length})`);
-
-          // Emit event when actually queued
+          console.log(`  📋 [J-OUTBOX] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName} (batchSize=${jTx.data?.batchSize ?? '?'})`);
           env.emit('JBatchQueued', {
             entityId: jTx.entityId,
-            batchSize: jTx.data.batchSize,
-            mempoolSize: jReplica.mempool.length,
+            batchSize: jTx.data?.batchSize,
             jurisdictionName: jInput.jurisdictionName,
           });
         }
-
-        console.log(`✅ J-Output: ${jInput.jTxs.length} txs queued to ${jInput.jurisdictionName} (mempool: ${jReplica.mempool.length})`);
       }
     }
 
@@ -1434,7 +1421,7 @@ const applyRuntimeInput = async (
     }
 
     // APPLY-SERVER-INPUT-FINAL-RETURN removed
-    return { entityOutbox, mergedInputs };
+    return { entityOutbox, mergedInputs, jOutbox };
   } catch (error) {
     console.error(`❌ CRITICAL: applyRuntimeInput failed!`, error);
     throw error; // Don't swallow - fail fast and loud
@@ -1511,6 +1498,12 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
           console.warn('⚠️  J-Event Watcher startup failed or timed out (non-critical):', error.message);
         });
     }
+  }
+
+  // Start the runtime event loop (single async while-loop, never re-enters)
+  if (isBrowser) {
+    console.log('🔄 [LOOP] Starting runtime event loop (browser mode)');
+    startRuntimeLoop(env);
   }
 
   return env;
@@ -1634,7 +1627,7 @@ export const queueEntityInput = async (
     signerId,
     entityTxs: [{ type: txData.type, data: txData }]
   }]);
-  ensureRuntimeLoop(env);
+
 };
 
 export {
@@ -1992,20 +1985,13 @@ export const process = async (
 
   const now = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
   if (!isRuntimeFrameReady(env, now, runtimeDelay)) {
-    ensureRuntimeLoop(env);
+  
     return env;
   }
 
   const state = ensureRuntimeState(env);
-  if (state.processing) {
-    console.warn('⏸️ SKIP: Previous tick still processing');
-    return env;
-  }
-
-  state.processing = true;
-
-  try {
-    const quietRuntimeLogs = env.quietRuntimeLogs === true;
+  const quietRuntimeLogs = env.quietRuntimeLogs === true;
+  {
     getBrowserVMInstance(env)?.setQuietLogs?.(quietRuntimeLogs);
 
     if (env.scenarioMode) {
@@ -2046,6 +2032,7 @@ export const process = async (
       (runtimeInput.jInputs?.length ?? 0) > 0;
 
     let entityOutbox: EntityInput[] = [];
+    let jOutbox: JInput[] = [];
     if (hasRuntimeInput) {
       if (!quietRuntimeLogs) {
         console.log(`📥 TICK: Processing ${runtimeInput.entityInputs.length} inputs for [${runtimeInput.entityInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
@@ -2055,8 +2042,9 @@ export const process = async (
       }
       try {
         const result = await applyRuntimeInput(env, runtimeInput);
-        if (HEAVY_LOGS) console.log(`🔍 PROCESS-DEBUG: applyRuntimeInput returned entityOutbox.length=${result.entityOutbox.length}`);
+        console.log(`🔍 PROCESS: applyRuntimeInput returned entityOutbox=${result.entityOutbox.length}, jOutbox=${result.jOutbox.length}`);
         entityOutbox = result.entityOutbox;
+        jOutbox = result.jOutbox;
       } catch (error) {
         // Restore runtime mempool on failure (WAL safety)
         mempool.runtimeTxs = [...runtimeInput.runtimeTxs, ...mempool.runtimeTxs];
@@ -2080,192 +2068,6 @@ export const process = async (
         console.log(`📤 TICK: ${localOutputs.length} local outputs queued for next tick → [${localOutputs.map(o => o.entityId.slice(-4)).join(',')}]`);
       }
     }
-    env.pendingNetworkOutputs = deferredOutputs;
-
-    let jMachineProcessed = false;
-    if (env.jReplicas) {
-      for (const [jName, jReplica] of env.jReplicas.entries()) {
-        const mempool = jReplica.mempool || [];
-        const blockDelayMs = jReplica.blockDelayMs || 300;
-        const lastBlockTs = jReplica.lastBlockTimestamp || 0;
-        const elapsed = env.timestamp - lastBlockTs;
-
-        if (mempool.length > 0) {
-          if (HEAVY_LOGS) console.log(`🔍 [J-Machine ${jName}] mempool=${mempool.length}, elapsed=${elapsed}ms, blockDelay=${blockDelayMs}ms, ready=${elapsed >= blockDelayMs}`);
-        }
-
-        const oldestTxAge = mempool.length > 0 && mempool[0].queuedAt ? env.timestamp - mempool[0].queuedAt : 999999;
-        const mempoolReady = mempool.length > 0 && oldestTxAge >= blockDelayMs;
-
-        if (mempool.length > 0 && !mempoolReady && !quietRuntimeLogs) {
-          console.log(`⏳ [J-Machine] ${mempool.length} pending (age: ${oldestTxAge}ms < ${blockDelayMs}ms) - waiting...`);
-        }
-
-        if (mempoolReady) {
-          jMachineProcessed = true;
-          if (!quietRuntimeLogs) {
-            console.log(`⚡ [5/6] J-Machine ${jReplica.name}: Processing ${mempool.length} txs (oldest: ${oldestTxAge}ms >= ${blockDelayMs}ms)`);
-            console.log(`   Mempool BEFORE execution:`, mempool.map(tx => `${tx.entityId.slice(-4)}:${tx.data.batchSize || '?'}`));
-          }
-
-          env.emit('JBlockProcessing', {
-            jurisdictionName: jName,
-            txCount: mempool.length,
-            blockNumber: Number(jReplica.blockNumber) + 1,
-          });
-
-          const { broadcastBatch } = await import('./j-batch');
-          const { getBrowserVMInstance } = await import('./evm');
-          const browserVM = getBrowserVMInstance(env);
-          const rpcUrl = jReplica.rpcs?.[0];
-          const chainId = jReplica.jadapter?.chainId ?? jReplica.chainId;
-          const jurisdiction = !browserVM && rpcUrl && jReplica.depositoryAddress && jReplica.entityProviderAddress ? {
-            name: jReplica.name,
-            chainId: Number(chainId ?? 0),
-            address: rpcUrl,
-            entityProviderAddress: jReplica.entityProviderAddress,
-            depositoryAddress: jReplica.depositoryAddress,
-          } : null;
-
-          if (!browserVM && !jurisdiction) {
-            console.warn(`⚠️ [J-Machine ${jReplica.name}] Missing jurisdiction config (rpc/addresses). Batch broadcast will be skipped.`);
-          }
-
-          if (browserVM?.beginJurisdictionBlock) {
-            browserVM.beginJurisdictionBlock(env.timestamp);
-          }
-
-          for (const jTx of mempool) {
-            if (jTx.type === 'batch' && jTx.data?.batch) {
-              if (!quietRuntimeLogs) {
-                console.log(`🔨 [J-Machine] Executing batch from ${jTx.entityId.slice(-4)}`);
-                console.log(`   Batch size: ${jTx.data.batchSize || 'unknown'}`);
-                console.log(`   Batch.reserveToReserve:`, jTx.data.batch.reserveToReserve);
-              }
-              let batchSummary: string | undefined;
-              try {
-                const { summarizeBatch } = await import('./j-batch');
-                batchSummary = safeStringify(summarizeBatch(jTx.data.batch));
-                if (!quietRuntimeLogs) {
-                  console.log(`   Batch.summary: ${batchSummary}`);
-                }
-              } catch {
-                // best-effort debug only
-              }
-
-              const tempJBatchState = {
-                batch: jTx.data.batch,
-                jurisdiction: null,
-                lastBroadcast: jTx.timestamp,
-                broadcastCount: 1,
-                failedAttempts: 0,
-              };
-
-              if (!browserVM && !jurisdiction) {
-                console.error(`   ❌ Batch execution skipped: missing jurisdiction config for ${jReplica.name}`);
-                continue;
-              }
-
-              const result = await broadcastBatch(
-                env,
-                jTx.entityId,
-                tempJBatchState,
-                jurisdiction,
-                browserVM || undefined,
-                jTx.timestamp ?? env.timestamp,
-                jTx.data?.signerId
-              );
-
-              if (result.success) {
-                if (!quietRuntimeLogs) {
-                  console.log(`   ✅ Batch executed successfully`);
-                  console.log(`   📡 ${result.events?.length || 0} events will route back to entities`);
-                }
-              } else {
-                console.error(`   ❌ Batch execution failed: ${result.error}`);
-                if (!batchSummary) {
-                  try {
-                    const { summarizeBatch } = await import('./j-batch');
-                    batchSummary = safeStringify(summarizeBatch(jTx.data.batch));
-                    console.error(`   ❌ Failed batch summary: ${batchSummary}`);
-                  } catch {
-                    // best-effort debug only
-                  }
-                } else {
-                  console.error(`   ❌ Failed batch summary: ${batchSummary}`);
-                }
-                if (env.scenarioMode) {
-                  throw new Error(`J-BATCH FAILED: ${result.error || 'unknown error'}`);
-                }
-              }
-            }
-
-            if (jTx.type === 'mint' && jTx.data && browserVM?.debugFundReserves) {
-              const { entityId, tokenId, amount } = jTx.data;
-              if (!quietRuntimeLogs) {
-                console.log(`💰 [J-Machine] Minting ${amount} token ${tokenId} to ${entityId.slice(-4)}`);
-              }
-              try {
-                await browserVM.debugFundReserves(entityId, tokenId, amount);
-                if (!quietRuntimeLogs) {
-                  console.log(`   ✅ Mint successful`);
-                }
-              } catch (error) {
-                console.error(`   ❌ Mint failed: ${error}`);
-                if (env.scenarioMode) {
-                  throw new Error(`J-MINT FAILED: ${error}`);
-                }
-              }
-            }
-          }
-
-          if (browserVM?.endJurisdictionBlock) {
-            browserVM.endJurisdictionBlock();
-          }
-
-          const processedCount = mempool.length;
-          const successCount = processedCount;
-          const failCount = 0;
-
-          if (!quietRuntimeLogs) {
-            console.log(`🧹 [J-Machine] Clearing mempool (before: ${jReplica.mempool.length} items)...`);
-          }
-          jReplica.mempool = [];
-          if (!quietRuntimeLogs) {
-            console.log(`🧹 [J-Machine] Mempool AFTER clear: ${jReplica.mempool.length} items (should be 0)`);
-          }
-
-          jReplica.lastBlockTimestamp = env.timestamp;
-          jReplica.blockNumber = jReplica.blockNumber + 1n;
-          jReplica.blockReady = false;
-
-          if (!quietRuntimeLogs) {
-            console.log(`✅ [J-Machine ${jReplica.name}] Block #${jReplica.blockNumber} finalized (${successCount}/${processedCount} batches)`);
-          }
-          if (failCount > 0) {
-            console.warn(`   ⚠️ ${failCount} batches failed, queued for retry`);
-          }
-          if (!quietRuntimeLogs) {
-            console.log(`   Next block in ${blockDelayMs}ms`);
-          }
-
-          env.emit('JBlockFinalized', {
-            jurisdictionName: jName,
-            blockNumber: Number(jReplica.blockNumber),
-            txCount: mempool.length,
-          });
-        } else if (mempool.length > 0) {
-          jReplica.blockReady = true;
-        } else {
-          jReplica.blockReady = false;
-        }
-      }
-    }
-
-    if (!hasRuntimeInput && jMachineProcessed) {
-      env.height += 1;
-    }
-
     let browserVMState: any = undefined;
     const browserVMStateSource = getBrowserVMInstance(env);
     if (browserVMStateSource?.serializeState) {
@@ -2315,15 +2117,116 @@ export const process = async (
       console.log(`📸 Snapshot: ${snapshot.title} (${env.history.length} total)`);
     }
 
+    // === COMMIT POINT: persist finalized R-frame ===
+    console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
     await saveEnvToDB(env);
+    console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
 
-    const deferredAfterSend = dispatchEntityOutputs(env, remoteOutputs);
-    if (deferredAfterSend.length > 0) {
-      env.pendingNetworkOutputs = [...(env.pendingNetworkOutputs || []), ...deferredAfterSend];
+    // === SIDE EFFECTS (safe to fail — bilateral consensus retries) ===
+
+    // 1. Broadcast entity outputs via P2P (fire-and-forget)
+    if (remoteOutputs.length > 0) {
+      console.log(`📡 [SIDE-EFFECT] Dispatching ${remoteOutputs.length} remote entity outputs via P2P`);
     }
+    dispatchEntityOutputs(env, remoteOutputs);
 
-    if (remoteOutputs.length > 0 || deferredAfterSend.length > 0) {
-      await saveEnvToDB(env);
+    // 2. Execute J-batches via JAdapter (fire-and-forget, events arrive next frame via j-watcher)
+    if (jOutbox.length > 0) {
+      const totalJTxs = jOutbox.reduce((n, ji) => n + ji.jTxs.length, 0);
+      console.log(`⚡ [SIDE-EFFECT] Broadcasting ${totalJTxs} J-txs to JAdapter (${jOutbox.length} JInputs)`);
+
+      const { broadcastBatch } = await import('./j-batch');
+      const browserVM = getBrowserVMInstance(env);
+
+      for (const jInput of jOutbox) {
+        const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
+        if (!jReplica) {
+          console.error(`❌ [J-BROADCAST] Jurisdiction "${jInput.jurisdictionName}" not found — skipping`);
+          continue;
+        }
+
+        const rpcUrl = jReplica.rpcs?.[0];
+        const chainId = jReplica.jadapter?.chainId ?? jReplica.chainId;
+        const jurisdiction = !browserVM && rpcUrl && jReplica.depositoryAddress && jReplica.entityProviderAddress ? {
+          name: jReplica.name,
+          chainId: Number(chainId ?? 0),
+          address: rpcUrl,
+          entityProviderAddress: jReplica.entityProviderAddress,
+          depositoryAddress: jReplica.depositoryAddress,
+        } : null;
+
+        // Begin J-block for BrowserVM (groups all txs into one block)
+        if (browserVM?.beginJurisdictionBlock) {
+          browserVM.beginJurisdictionBlock(env.timestamp);
+          console.log(`🔨 [J-BROADCAST] BrowserVM: beginJurisdictionBlock(ts=${env.timestamp})`);
+        }
+
+        for (const jTx of jInput.jTxs) {
+          console.log(`🔨 [J-BROADCAST] Executing ${jTx.type} from ${jTx.entityId.slice(-4)} on ${jInput.jurisdictionName}`);
+
+          if (jTx.type === 'batch' && jTx.data?.batch) {
+            const tempJBatchState = {
+              batch: jTx.data.batch,
+              jurisdiction: null,
+              lastBroadcast: jTx.timestamp,
+              broadcastCount: 1,
+              failedAttempts: 0,
+            };
+
+            if (!browserVM && !jurisdiction) {
+              console.error(`❌ [J-BROADCAST] Missing jurisdiction config for ${jReplica.name} — cannot execute batch`);
+              continue;
+            }
+
+            try {
+              const result = await broadcastBatch(
+                env,
+                jTx.entityId,
+                tempJBatchState,
+                jurisdiction,
+                browserVM || undefined,
+                jTx.timestamp ?? env.timestamp,
+                jTx.data?.signerId
+              );
+
+              if (result.success) {
+                console.log(`✅ [J-BROADCAST] Batch from ${jTx.entityId.slice(-4)} executed (${result.events?.length ?? 0} events, txHash=${result.txHash ?? 'n/a'})`);
+              } else {
+                console.error(`❌ [J-BROADCAST] Batch from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
+                if (env.scenarioMode) {
+                  throw new Error(`J-BATCH FAILED: ${result.error || 'unknown error'}`);
+                }
+              }
+            } catch (error) {
+              console.error(`❌ [J-BROADCAST] broadcastBatch threw for ${jTx.entityId.slice(-4)}:`, error);
+              if (env.scenarioMode) throw error;
+            }
+          }
+
+          if (jTx.type === 'mint' && jTx.data && browserVM?.debugFundReserves) {
+            const { entityId, tokenId, amount } = jTx.data;
+            console.log(`💰 [J-BROADCAST] Minting ${amount} token ${tokenId} to ${entityId.slice(-4)}`);
+            try {
+              await browserVM.debugFundReserves(entityId, tokenId, amount);
+              console.log(`✅ [J-BROADCAST] Mint successful`);
+            } catch (error) {
+              console.error(`❌ [J-BROADCAST] Mint failed:`, error);
+              if (env.scenarioMode) throw error;
+            }
+          }
+        }
+
+        // End J-block for BrowserVM
+        if (browserVM?.endJurisdictionBlock) {
+          browserVM.endJurisdictionBlock();
+          console.log(`🔨 [J-BROADCAST] BrowserVM: endJurisdictionBlock`);
+        }
+
+        // Update jReplica metadata
+        jReplica.lastBlockTimestamp = env.timestamp;
+        jReplica.blockNumber = jReplica.blockNumber + 1n;
+        console.log(`📊 [J-BROADCAST] ${jReplica.name} block #${jReplica.blockNumber} finalized`);
+      }
     }
 
     state.lastFrameAt = env.timestamp;
@@ -2334,8 +2237,6 @@ export const process = async (
     }
 
     return env;
-  } finally {
-    state.processing = false;
   }
 };
 

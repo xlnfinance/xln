@@ -13,7 +13,7 @@
  *   bun runtime/server.ts --port 9000        # Custom port
  */
 
-import { main, process as runtimeProcess, applyRuntimeInput, startP2P } from './runtime';
+import { main, process as runtimeProcess, applyRuntimeInput, startP2P, startRuntimeLoop } from './runtime';
 import { safeStringify } from './serialization-utils';
 import type { Env, EntityInput, RuntimeInput } from './types';
 import { encodeBoard, hashBoard } from './entity-factory';
@@ -1166,6 +1166,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   console.log('[XLN] Initializing runtime...');
   const env = await main(HUB_SEED);
   console.log('[XLN] Runtime initialized ✓');
+  startRuntimeLoop(env);
+  console.log('[XLN] Runtime event loop started ✓');
 
   // Initialize J-adapter (anvil for testnet, browserVM for local)
   const anvilRpc = process.env.ANVIL_RPC || 'http://localhost:8545';

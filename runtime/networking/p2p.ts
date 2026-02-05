@@ -512,20 +512,24 @@ export class RuntimeP2P {
       const hasHanko = profile.metadata?.['profileHanko'];
       const hasLegacySig = profile.metadata?.['profileSignature'];
       if (hasHanko || hasLegacySig) {
-        const valid = await verifyProfileSignature(profile, this.env);
-        if (!valid) {
+        const result = await verifyProfileSignature(profile, this.env);
+        if (!result.valid) {
           const board = profile.metadata?.board;
           const boardValidators = board && typeof board === 'object' && 'validators' in board ? board.validators : undefined;
           const hasBoardKey = Array.isArray(boardValidators) && boardValidators.some(v => typeof v?.publicKey === 'string');
           const hasEntityKey = typeof profile.metadata?.entityPublicKey === 'string';
-          console.warn(
-            `P2P_PROFILE_INVALID_SIGNATURE: ${profile.entityId.slice(-4)} - rejecting`,
+          console.error(
+            `P2P_PROFILE_INVALID_SIGNATURE: ${profile.entityId.slice(-4)} from=${from.slice(-6)}`,
             {
-              hasHanko: !!hasHanko,
-              hasLegacySig: !!hasLegacySig,
-              entityPublicKey: hasEntityKey ? 'yes' : 'no',
+              reason: result.reason,
+              hash: result.hash?.slice(0, 18),
+              signerId: result.signerId,
+              hanko: typeof hasHanko === 'string' ? hasHanko.slice(0, 30) + '...' : !!hasHanko,
+              entityPublicKey: hasEntityKey ? (profile.metadata?.entityPublicKey as string).slice(0, 20) + '...' : 'none',
               boardPublicKey: hasBoardKey ? 'yes' : 'no',
               validators: Array.isArray(boardValidators) ? boardValidators.length : 0,
+              runtimeId: profile.runtimeId?.slice(-8),
+              name: profile.metadata?.name,
             }
           );
           continue; // Skip invalid profiles
