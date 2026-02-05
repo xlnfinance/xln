@@ -113,7 +113,18 @@ export async function handleSettleHold(
   // ═══════════════════════════════════════════════════════════════════════════
   // SECURITY: Validate capacity (RCPAN check)
   // ═══════════════════════════════════════════════════════════════════════════
-  // Ensure holds don't exceed what the entity actually has available
+  // Ensure holds don't exceed what the entity actually has available.
+  //
+  // Two sources of funds for settlements:
+  //   1. Entity RESERVES (leftDiff < 0 → depositing from reserves into account)
+  //      → Capacity = entity reserves (validated on-chain by Depository.sol)
+  //      → Off-chain hold only prevents concurrent double-spend of same reserves
+  //   2. Bilateral ACCOUNT (collateralDiff < 0 → withdrawing from collateral)
+  //      → Capacity = collateral + credit + delta position (checked here)
+  //
+  // We only enforce bilateral capacity limits for withdrawals from the account.
+  // Reserve-sourced deposits are validated by L1 at settlement execution time.
+  // ═══════════════════════════════════════════════════════════════════════════
   const iAmLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
   for (const diff of diffs) {
@@ -123,16 +134,13 @@ export async function handleSettleHold(
       continue;
     }
 
-    // Calculate available capacity for each side
-    // Available = collateral + creditLimit extended to us + current delta position
+    // Find matching workspace diff to determine operation type
+    const wsDiff = workspaceDiffs.find(d => d.tokenId === diff.tokenId);
+    const isLeftDeposit = (wsDiff?.leftDiff ?? 0n) < 0n && (wsDiff?.collateralDiff ?? 0n) > 0n;
+    const isRightDeposit = (wsDiff?.rightDiff ?? 0n) < 0n && (wsDiff?.collateralDiff ?? 0n) > 0n;
+
+    // Calculate bilateral account capacity (for withdrawal operations)
     const totalDelta = delta.ondelta + delta.offdelta;
-
-    // For left entity: positive totalDelta = owes right, negative = owed by right
-    // For right entity: negative totalDelta = owes left, positive = owed by left
-    // Simplified: each side can withdraw up to their portion of collateral + credit
-
-    // Left's capacity: portion of collateral they can claim + credit from right
-    // Right's capacity: portion of collateral they can claim + credit from left
     const leftCapacity = delta.collateral + delta.rightCreditLimit + (totalDelta > 0n ? 0n : -totalDelta);
     const rightCapacity = delta.collateral + delta.leftCreditLimit + (totalDelta < 0n ? 0n : totalDelta);
 
@@ -140,8 +148,8 @@ export async function handleSettleHold(
     const existingLeftHold = delta.leftSettleHold ?? 0n;
     const existingRightHold = delta.rightSettleHold ?? 0n;
 
-    // Check left withdrawal doesn't exceed capacity
-    if (existingLeftHold + diff.leftWithdrawing > leftCapacity) {
+    // Check left capacity (skip for deposits — L1 validates reserves)
+    if (!isLeftDeposit && existingLeftHold + diff.leftWithdrawing > leftCapacity) {
       console.error(`❌ SECURITY: settle_hold exceeds left capacity for token ${diff.tokenId}`);
       console.error(`   requested: ${existingLeftHold} + ${diff.leftWithdrawing} = ${existingLeftHold + diff.leftWithdrawing}`);
       console.error(`   capacity: ${leftCapacity}`);
@@ -152,8 +160,8 @@ export async function handleSettleHold(
       };
     }
 
-    // Check right withdrawal doesn't exceed capacity
-    if (existingRightHold + diff.rightWithdrawing > rightCapacity) {
+    // Check right capacity (skip for deposits — L1 validates reserves)
+    if (!isRightDeposit && existingRightHold + diff.rightWithdrawing > rightCapacity) {
       console.error(`❌ SECURITY: settle_hold exceeds right capacity for token ${diff.tokenId}`);
       console.error(`   requested: ${existingRightHold} + ${diff.rightWithdrawing} = ${existingRightHold + diff.rightWithdrawing}`);
       console.error(`   capacity: ${rightCapacity}`);
@@ -168,11 +176,11 @@ export async function handleSettleHold(
     delta.leftSettleHold ??= 0n;
     delta.rightSettleHold ??= 0n;
 
-    // Add holds
+    // Add holds (tracked even for deposits to prevent concurrent double-spend)
     delta.leftSettleHold += diff.leftWithdrawing;
     delta.rightSettleHold += diff.rightWithdrawing;
 
-    console.log(`   Token ${diff.tokenId}: leftHold=${delta.leftSettleHold}, rightHold=${delta.rightSettleHold}`);
+    console.log(`   Token ${diff.tokenId}: leftHold=${delta.leftSettleHold}, rightHold=${delta.rightSettleHold}${isLeftDeposit ? ' (L-deposit)' : ''}${isRightDeposit ? ' (R-deposit)' : ''}`);
   }
 
   return {

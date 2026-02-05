@@ -1625,8 +1625,6 @@ export interface Env {
     p2p?: any;
     pendingP2PConfig?: any;
     lastP2PConfig?: any;
-    jWatcher?: any;
-    jWatcherStarted?: boolean;
     envChangeCallbacks?: Set<(env: Env) => void>;
     db?: any;
     dbOpenPromise?: Promise<boolean> | null;

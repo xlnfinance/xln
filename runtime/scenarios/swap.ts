@@ -23,7 +23,6 @@ import { getBestAsk } from '../orderbook/core';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
 import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime, formatEntity } from '../runtime-ascii';
-import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
 import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
 
@@ -32,13 +31,6 @@ let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boole
 let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
 
 let _processWithStep: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
-let jWatcherInstance: JEventWatcher | null = null;
-
-const ensureJWatcher = async (env: Env, browserVM: any): Promise<void> => {
-  if (!jWatcherInstance) {
-    jWatcherInstance = await setupBrowserVMWatcher(env, browserVM);
-  }
-};
 
 const getProcess = async () => {
   if (!_process) {
@@ -262,8 +254,9 @@ export async function swap(env: Env): Promise<void> {
   const depositoryAddress = browserVM.getDepositoryAddress();
   createJReplica(env, 'Swap Demo', depositoryAddress, J_MACHINE_POSITION);
   const jurisdiction = createJurisdictionConfig('Swap Demo', depositoryAddress);
+  const { attachBrowserVMAdapter } = await import('./boot');
+  await attachBrowserVMAdapter(env, 'Swap Demo', browserVM);
   console.log('✅ BrowserVM J-Machine created\n');
-  await ensureJWatcher(env, browserVM);
 
   // ============================================================================
   // SETUP: Create Alice and Hub entities
@@ -680,7 +673,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
   const browserVM = env.browserVM || await ensureBrowserVM(env);
-  await ensureJWatcher(env, browserVM);
+
 
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('             PHASE 2: ORDERBOOK MATCHING (RJEA FLOW)            ');
@@ -1277,7 +1270,7 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   const process = await getProcess();
   const applyRuntimeInput = await getApplyRuntimeInput();
   const browserVM = env.browserVM || await ensureBrowserVM(env);
-  await ensureJWatcher(env, browserVM);
+
 
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('         PHASE 3: MULTI-PARTY TRADING (Carol & Dave)           ');

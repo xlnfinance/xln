@@ -28,8 +28,6 @@ import { ERC20Mock__factory } from '../jurisdictions/typechain-types/factories/E
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
-let jWatcherStarted = false;
-let jWatcher: any = null;
 let jWatcherProcessInterval: ReturnType<typeof setInterval> | null = null;
 let runtimeTickInterval: ReturnType<typeof setInterval> | null = null;
 let runtimeTickInFlight = false;
@@ -684,20 +682,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     }), { headers });
   }
 
-  // J-watcher status / manual sync (ops/debug)
-  if (pathname === '/api/jwatcher/status') {
-    return new Response(JSON.stringify({
-      started: jWatcherStarted,
-      status: jWatcher?.getStatus?.() ?? null,
-    }), { headers });
-  }
-  if (pathname === '/api/jwatcher/sync' && req.method === 'POST') {
-    if (!env || !jWatcher?.syncOnce) {
-      return new Response(JSON.stringify({ error: 'J-watcher not initialized' }), { status: 503, headers });
-    }
-    await jWatcher.syncOnce(env);
-    return new Response(JSON.stringify({ success: true }), { headers });
-  }
+  // J-event watching is handled by JAdapter.startWatching() per-jReplica
 
   // Token catalog (for UI token list + deposits)
   if (pathname === '/api/tokens') {
@@ -1039,17 +1024,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         }
       }
       console.log(`[${logPrefix}] R2R + j_broadcast queued (waiting for J-event sync)`);
-      if (jWatcher?.getStatus) {
-        console.log(`[${logPrefix}] J-watcher status:`, jWatcher.getStatus());
-      }
-      if (jWatcher?.syncOnce) {
-        try {
-          await jWatcher.syncOnce(env);
-          console.log(`[${logPrefix}] J-watcher syncOnce completed`);
-        } catch (err) {
-          console.warn(`[${logPrefix}] J-watcher syncOnce failed:`, (err as Error).message);
-        }
-      }
       await drainJWatcherQueue(env, logPrefix);
 
       const jBatchCleared = await waitForJBatchClear(env, 5000);
@@ -1301,25 +1275,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     await globalJAdapter.deployStack();
   }
 
-  // Start J-Event Watcher for RPC mode (required to sync ReserveUpdated into entityState)
-  if (!jWatcherStarted && globalJAdapter && globalJAdapter.mode !== 'browservm') {
-    try {
-      const { setupJEventWatcher } = await import('./j-event-watcher');
-      const entityProviderAddress = globalJAdapter.addresses.entityProvider;
-      const depositoryAddress = globalJAdapter.addresses.depository;
-      if (anvilRpc && entityProviderAddress && depositoryAddress) {
-        console.log(`[XLN] Starting J-Event Watcher (rpc=${anvilRpc})`);
-        jWatcher = await setupJEventWatcher(env, anvilRpc, entityProviderAddress, depositoryAddress);
-        jWatcherStarted = true;
-        startJWatcherProcessingLoop(env);
-        console.log('[XLN] J-Event Watcher started ✓');
-      } else {
-        console.warn('[XLN] J-Event Watcher not started (missing RPC or contract addresses)');
-      }
-    } catch (err) {
-      console.warn('[XLN] Failed to start J-Event Watcher:', (err as Error).message);
-    }
-  }
+  // J-event watching is handled by JAdapter.startWatching() per-jReplica
+  // Start J-event queue processing loop (drains events pushed by JAdapter)
+  startJWatcherProcessingLoop(env);
 
   // Start runtime tick loop for J-mempool + pending outputs
   startRuntimeTickLoop(env);

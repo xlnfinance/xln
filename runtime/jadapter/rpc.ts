@@ -17,9 +17,10 @@ import { Account__factory } from '../../jurisdictions/typechain-types/factories/
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types';
 import { Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types';
 
-import type { BrowserVMState } from '../types';
-import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, InsuranceReg, BrowserVMProvider, JTokenInfo } from './types';
-import { computeAccountKey, entityIdToAddress, setupContractEventListeners } from './helpers';
+import type { BrowserVMState, JTx } from '../types';
+import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, InsuranceReg, BrowserVMProvider, JTokenInfo } from './types';
+import { computeAccountKey, entityIdToAddress, setupContractEventListeners, processEventBatch, type RawJEvent } from './helpers';
+import { CANONICAL_J_EVENTS } from './helpers';
 
 /**
  * Create RPC adapter - works with any JSON-RPC provider
@@ -667,20 +668,195 @@ export async function createRpcAdapter(
       return events;
     },
 
+    // === High-level J-tx submission ===
+    async submitTx(jTx: JTx, options: { env: any; signerId?: string; timestamp?: number }): Promise<JSubmitResult> {
+      const { env, signerId, timestamp } = options;
+
+      console.log(`📤 [JAdapter:rpc] submitTx type=${jTx.type} entity=${jTx.entityId.slice(-4)}`);
+
+      if (jTx.type === 'batch' && jTx.data?.batch) {
+        const { encodeJBatch, computeBatchHankoHash, isBatchEmpty, getBatchSize } = await import('../j-batch');
+        const { normalizeEntityId } = await import('../entity-id-utils');
+
+        if (isBatchEmpty(jTx.data.batch)) {
+          console.log(`📦 [JAdapter:rpc] Empty batch, skipping`);
+          return { success: true };
+        }
+
+        const sid = signerId ?? jTx.data.signerId;
+        if (!sid) {
+          return { success: false, error: `Missing signerId for batch from ${jTx.entityId.slice(-4)}` };
+        }
+
+        const depositoryAddr = addresses.depository;
+        const entityProviderAddr = addresses.entityProvider;
+        const resolvedChainId = BigInt(config.chainId || (await provider.getNetwork()).chainId);
+
+        // Validate settlement signatures
+        for (const settlement of jTx.data.batch.settlements ?? []) {
+          settlement.entityProvider = entityProviderAddr;
+          if (settlement.diffs?.length > 0 && (!settlement.sig || settlement.sig === '0x')) {
+            return { success: false, error: `Settlement missing hanko sig` };
+          }
+        }
+
+        const encodedBatch = encodeJBatch(jTx.data.batch);
+        const normalizedId = normalizeEntityId(jTx.entityId);
+        const entityAddress = ethers.getAddress(`0x${normalizedId.slice(-40)}`);
+        const currentNonce = await depository['entityNonces']?.(entityAddress) ?? 0n;
+        const nextNonce = BigInt(currentNonce) + 1n;
+        const batchHash = computeBatchHankoHash(resolvedChainId, depositoryAddr, encodedBatch, nextNonce);
+
+        console.log(`🔐 [JAdapter:rpc] Signing hanko: entity=${normalizedId.slice(-4)} nonce=${nextNonce} chainId=${resolvedChainId}`);
+
+        const { signHashesAsSingleEntity } = await import('../hanko-signing');
+        const hankos = await signHashesAsSingleEntity(env, normalizedId, sid, [batchHash]);
+        const hankoData = hankos[0];
+        if (!hankoData) {
+          return { success: false, error: 'Failed to build batch hanko signature' };
+        }
+
+        try {
+          console.log(`📦 [JAdapter:rpc] processBatch (${getBatchSize(jTx.data.batch)} ops) nonce=${nextNonce}`);
+          const tx = await depository['processBatch']!(encodedBatch, entityProviderAddr, hankoData, nextNonce, {
+            gasLimit: 5000000,
+          });
+          const receipt = await tx.wait();
+          const txHash = receipt?.hash ?? tx.hash;
+          const blockNum = receipt?.blockNumber ?? 0;
+          console.log(`✅ [JAdapter:rpc] Batch executed: block=${blockNum} gas=${receipt?.gasUsed}`);
+          return { success: true, txHash, blockNumber: blockNum };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error(`❌ [JAdapter:rpc] processBatch failed: ${msg}`);
+          return { success: false, error: msg };
+        }
+      }
+
+      if (jTx.type === 'mint') {
+        console.warn(`⚠️ [JAdapter:rpc] Mint not supported on RPC chains`);
+        return { success: false, error: 'Mint not supported on RPC chains' };
+      }
+
+      return { success: false, error: `Unknown JTx type: ${(jTx as any).type}` };
+    },
+
+    // === J-Watcher integration (RPC polling — uses shared event conversion from helpers.ts) ===
+    startWatching(env: any): void {
+      if (watcherInterval) {
+        console.log(`🔭 [JAdapter:rpc] Already watching`);
+        return;
+      }
+      watcherEnv = env;
+      lastSyncedBlock = 0;
+      console.log(`🔭 [JAdapter:rpc] Starting event watcher (1s polling)...`);
+
+      // Depository ABI for queryFilter — must match CANONICAL_J_EVENTS
+      const depositoryABI = [
+        'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
+        'event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret)',
+        'event AccountSettled(tuple(bytes32 left, bytes32 right, uint256 tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)[])',
+        'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments)',
+        'event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed initialDisputeNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash)',
+        'event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex)',
+        'event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed hankoHash, uint256 nonce, bool success)',
+      ];
+      const depositoryIface = new ethers.Interface(depositoryABI);
+      const depositoryForQuery = new ethers.Contract(addresses.depository, depositoryABI, provider);
+
+      watcherInterval = setInterval(async () => {
+        if (!watcherEnv) return;
+        try {
+          const currentBlock = await provider.getBlockNumber();
+          if (lastSyncedBlock >= currentBlock) return;
+
+          const fromBlock = lastSyncedBlock + 1;
+          // Query ALL depository logs in range
+          const filter = { address: addresses.depository, fromBlock, toBlock: currentBlock };
+          const logs = await provider.getLogs(filter);
+
+          if (logs.length > 0) {
+            // Parse logs into RawJEvent format using depository ABI
+            const rawEvents: RawJEvent[] = [];
+            for (const log of logs) {
+              try {
+                const parsed = depositoryIface.parseLog({ topics: log.topics as string[], data: log.data });
+                if (!parsed) continue;
+                // Only process canonical events
+                if (!CANONICAL_J_EVENTS.includes(parsed.name as any)) continue;
+                // Convert ethers Result to plain object args
+                const args: Record<string, any> = {};
+                for (const key of Object.keys(parsed.args)) {
+                  if (/^\d+$/.test(key)) continue; // skip positional
+                  args[key] = parsed.args[key];
+                }
+                rawEvents.push({
+                  name: parsed.name,
+                  args,
+                  blockNumber: log.blockNumber,
+                  blockHash: log.blockHash,
+                  transactionHash: log.transactionHash,
+                });
+              } catch {
+                // Skip unparseable logs
+              }
+            }
+
+            if (rawEvents.length > 0) {
+              // Group by block for proper batch processing
+              const byBlock = new Map<number, RawJEvent[]>();
+              for (const e of rawEvents) {
+                const bn = e.blockNumber ?? 0;
+                if (!byBlock.has(bn)) byBlock.set(bn, []);
+                byBlock.get(bn)!.push(e);
+              }
+              for (const [blockNum, events] of byBlock) {
+                const blockHash = events[0]?.blockHash ?? '0x0';
+                processEventBatch(events, watcherEnv, blockNum, blockHash, txCounter, 'rpc');
+              }
+            }
+          }
+
+          lastSyncedBlock = currentBlock;
+        } catch (error) {
+          if (!(error instanceof Error && error.message.includes('ECONNREFUSED'))) {
+            console.error(`🔭❌ [JAdapter:rpc] Sync error:`, error instanceof Error ? error.message : String(error));
+          }
+        }
+      }, 1000);
+
+      console.log(`🔭 [JAdapter:rpc] Watcher started (1s polling)`);
+    },
+
+    stopWatching(): void {
+      if (watcherInterval) {
+        clearInterval(watcherInterval);
+        watcherInterval = null;
+        watcherEnv = null;
+        console.log(`🔭 [JAdapter:rpc] Watcher stopped`);
+      }
+    },
+
     getBrowserVM(): BrowserVMProvider | null {
-      return null; // RPC mode doesn't have BrowserVM
+      return null;
     },
 
     setBlockTimestamp(_timestamp: number): void {
-      // RPC mode can't control timestamps (except maybe anvil with evm_setNextBlockTimestamp)
       console.warn('[JAdapter:rpc] setBlockTimestamp not supported in RPC mode');
     },
 
     async close(): Promise<void> {
+      adapter.stopWatching();
       depository?.removeAllListeners();
       entityProvider?.removeAllListeners();
     },
   };
+
+  // Watcher state
+  let watcherInterval: any = null;
+  let watcherEnv: any = null;
+  let lastSyncedBlock = 0;
+  const txCounter = { value: 0 };
 
   return adapter;
 }

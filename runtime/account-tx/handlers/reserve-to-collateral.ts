@@ -12,7 +12,7 @@
  *
  * PROPER FLOW:
  * Collateral updates MUST go through bilateral j_event consensus:
- * 1. Entity observes L1 event (AccountSettled) via j-event-watcher
+ * 1. Entity observes L1 event (AccountSettled) via JAdapter.startWatching
  * 2. Entity stores observation in leftJObservations/rightJObservations
  * 3. Entity proposes j_event_claim tx to counterparty
  * 4. Both sides exchange j_event_claim → 2-of-2 agreement
