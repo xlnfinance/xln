@@ -97,7 +97,7 @@ export const DEPOSITORY_ABI = [
   'function getInsuranceLines(bytes32 insured) external view returns (tuple(bytes32 insurer, uint256 tokenId, uint256 remaining, uint64 expiresAt)[])',
   'function getInsuranceLinesCount(bytes32 insured) external view returns (uint256)',
   'function getAvailableInsurance(bytes32 insured, uint256 tokenId) external view returns (uint256)',
-  // Canonical J-Events (must match CANONICAL_J_EVENTS in j-event-watcher.ts)
+  // Canonical J-Events (must match CANONICAL_J_EVENTS in jadapter/helpers.ts)
   'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
   'event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret)',
   'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments)',

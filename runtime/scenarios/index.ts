@@ -15,6 +15,13 @@ export interface ScenarioMetadata {
 // Lazy-load scenarios - run is async callable that imports on first call
 export const SCENARIOS: ScenarioMetadata[] = [
   {
+    id: 'settle',
+    name: 'Settlement Workspace',
+    description: 'Settlement workspace negotiation: propose, update, approve, execute, reject',
+    tags: ['settlement', 'core', 'bilateral'],
+    run: async (env: Env) => { await (await import('./settle')).runSettleScenario(env); },
+  },
+  {
     id: 'ahb',
     name: 'Alice-Hub-Bob Triangle',
     description: 'Full bilateral consensus test with 6 phases, simultaneous payments, rollback verification',
@@ -85,6 +92,10 @@ export type ScenarioEntry = {
 };
 
 export const scenarioRegistry: ScenarioEntry[] = [
+  { key: 'settle', name: 'Settlement', load: async () => {
+    const { runSettleScenario } = await import('./settle');
+    return async (env: Env): Promise<void> => { await runSettleScenario(env); };
+  }},
   { key: 'ahb', name: 'AHB', load: async () => (await import('./ahb')).ahb },
   { key: 'lock-ahb', name: 'HTLC AHB', load: async () => (await import('./lock-ahb')).lockAhb },
   { key: 'htlc-4hop', name: 'HTLC 4-Hop', load: async () => (await import('./htlc-4hop')).htlc4hop },

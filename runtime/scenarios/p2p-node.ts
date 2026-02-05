@@ -9,7 +9,6 @@ import { processUntil, converge } from './helpers';
 import { isLeft, deriveDelta } from '../account-utils';
 import { deriveSignerKeySync, registerSignerKey, getSignerPrivateKey } from '../account-crypto';
 import { loadJurisdictions } from '../jurisdiction-loader';
-import { setupJEventWatcher } from '../j-event-watcher';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/factories/ERC20Mock__factory';
 import { hashHtlcSecret } from '../htlc-utils';
@@ -662,9 +661,9 @@ const run = async () => {
       entityInputs: [],
     });
 
-    await setupJEventWatcher(env, rpcUrl, contracts.entityProvider, contracts.depository);
+    // J-event watching is handled by JAdapter.startWatching() per-jReplica
     startJWatcherProcessingLoop(env);
-    console.log(`P2P_JWATCHER_READY role=${role} rpc=${rpcUrl}`);
+    console.log(`P2P_JADAPTER_READY role=${role} rpc=${rpcUrl}`);
   }
 
   // CRITICAL: Start relay AFTER env created so we can pass callbacks

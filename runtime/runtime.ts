@@ -112,7 +112,6 @@ import {
   safeExtractEntityId,
 } from './ids';
 import { type Profile, loadPersistedProfiles } from './networking/gossip';
-import { setupJEventWatcher, JEventWatcher } from './j-event-watcher';
 import {
   createProfileUpdateTx,
   getEntityDisplayInfo as getEntityDisplayInfoFromProfileOriginal,
@@ -309,8 +308,6 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
       p2p: null,
       pendingP2PConfig: null,
       lastP2PConfig: null,
-      jWatcher: null,
-      jWatcherStarted: false,
     };
   }
   return env.runtimeState;
@@ -743,65 +740,6 @@ export const processJBlockEvents = async (env: Env): Promise<void> => {
   console.log(`   ✓ ${toProcess.length} j-events processed`);
 };
 
-// J-Watcher initialization
-const startJEventWatcher = async (env: Env): Promise<void> => {
-  const state = ensureRuntimeState(env);
-  // BrowserVM is the default - it handles events synchronously via processJBlockEvents()
-  // External RPC watcher is disabled until we support remote jurisdictions
-  const browserVM = getBrowserVMInstance(env);
-  if (browserVM) {
-    console.log('🔭 J-WATCHER: Using BrowserVM (external RPC not needed)');
-  
-    return;
-  }
-
-  // External RPC mode (use imported J-machines first, fallback to static config)
-  try {
-    let rpcUrl: string | undefined;
-    let entityProviderAddress: string | undefined;
-    let depositoryAddress: string | undefined;
-
-    // Prefer J-machines imported into this env (VaultStore uses importJ)
-    if (env.jReplicas) {
-      for (const replica of env.jReplicas.values()) {
-        const candidateRpc = replica.rpcs?.[0];
-        if (candidateRpc && replica.entityProviderAddress && replica.depositoryAddress) {
-          rpcUrl = candidateRpc;
-          entityProviderAddress = replica.entityProviderAddress;
-          depositoryAddress = replica.depositoryAddress;
-          break;
-        }
-      }
-    }
-
-    // Fallback to static jurisdictions (legacy)
-    if (!rpcUrl || !entityProviderAddress || !depositoryAddress) {
-      const arrakis = await getJurisdictionByAddress('arrakis');
-      if (!arrakis) {
-        console.warn('⚠️ Arrakis jurisdiction not found, skipping j-watcher');
-        return;
-      }
-      rpcUrl = arrakis.address;
-      entityProviderAddress = arrakis.entityProviderAddress;
-      depositoryAddress = arrakis.depositoryAddress;
-    }
-
-    if (isBrowser && rpcUrl.startsWith('/')) {
-      rpcUrl = `${window.location.origin}${rpcUrl}`;
-    }
-
-    if (state.jWatcherStarted) return;
-    state.jWatcherStarted = true;
-    state.jWatcher = await setupJEventWatcher(env, rpcUrl, entityProviderAddress, depositoryAddress);
-
-    console.log('✅ J-Event Watcher started (external RPC)');
-    console.log(`🔭 Monitoring: ${rpcUrl}`);
-  
-
-  } catch (error) {
-    logError("RUNTIME_TICK", '❌ Failed to start J-Event Watcher:', error);
-  }
-};
 
 // Note: History is now stored in env.history (no global variable needed)
 
@@ -1024,7 +962,9 @@ const applyRuntimeInput = async (
             }
           }
 
-          console.log(`[Runtime] ✅ JReplica "${runtimeTx.data.name}" ready`);
+          // Start JAdapter's integrated watcher (feeds J-events → runtime mempool)
+          jadapter.startWatching(env);
+          console.log(`[Runtime] ✅ JReplica "${runtimeTx.data.name}" ready (watching)`);
         } catch (error) {
           console.error(`[Runtime] ❌ Failed to import J-machine:`, error);
         }
@@ -1482,23 +1422,7 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
     }
   }
 
-  if (isBrowser) {
-    const state = ensureRuntimeState(env);
-    if (!state.jWatcherStarted) {
-      console.log('🔭 STARTING-JWATCHER: Starting j-watcher (non-blocking)...');
-      Promise.race([
-        startJEventWatcher(env),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('J-watcher startup timeout (3s)')), 3000))
-      ])
-        .then(() => {
-          state.jWatcherStarted = true;
-          console.log('🔭 JWATCHER-READY: J-watcher started successfully');
-        })
-        .catch((error) => {
-          console.warn('⚠️  J-Event Watcher startup failed or timed out (non-critical):', error.message);
-        });
-    }
-  }
+  // J-event watching is handled by JAdapter.startWatching() per-jReplica
 
   // Start the runtime event loop (single async while-loop, never re-enters)
   if (isBrowser) {
@@ -1592,25 +1516,6 @@ const clearDatabaseAndHistory = async (env: Env): Promise<Env> => {
   return freshEnv;
 };
 
-// Export j-watcher status for frontend display
-export const getJWatcherStatus = (env: Env) => {
-  const state = ensureRuntimeState(env);
-  if (!state.jWatcher) return null;
-  return {
-    isWatching: state.jWatcher.getStatus().isWatching,
-    proposers: Array.from(env.eReplicas.entries())
-      .filter(([, replica]) => replica.isProposer)
-      .map(([key, replica]) => {
-        const { entityId, signerId } = parseReplicaKey(key);
-        return {
-          entityId: entityId.slice(0,10) + '...',
-          signerId,
-          lastFinalizedJHeight: replica.state.lastFinalizedJHeight,
-        };
-      }),
-    nextSyncIn: Math.floor((1000 - ((env.timestamp || 0) % 1000)) / 100) / 10, // Seconds until next 1s sync
-  };
-};
 
 /**
  * Queue an entity transaction for processing (helper for UI components)
@@ -1669,7 +1574,6 @@ export {
   hashBoard,
   isEntityRegistered,
   main,
-  startJEventWatcher,
   resolveEntityProposerId,
   // Blockchain registration functions
   registerNumberedEntityOnChain,
@@ -2068,19 +1972,8 @@ export const process = async (
         console.log(`📤 TICK: ${localOutputs.length} local outputs queued for next tick → [${localOutputs.map(o => o.entityId.slice(-4)).join(',')}]`);
       }
     }
-    let browserVMState: any = undefined;
-    const browserVMStateSource = getBrowserVMInstance(env);
-    if (browserVMStateSource?.serializeState) {
-      try {
-        browserVMState = await browserVMStateSource.serializeState();
-        env.browserVMState = browserVMState;
-      } catch (error) {
-        console.warn('[Runtime] Failed to serialize BrowserVM state:', error);
-        if (env.scenarioMode) {
-          throw error;
-        }
-      }
-    }
+    // BrowserVM trie is NOT serialized per-frame — it's J-layer state.
+    // Only serialized on shutdown/page-unload for reload recovery.
 
     const snapshot: any = {
       height: env.height,
@@ -2097,7 +1990,6 @@ export const process = async (
       runtimeOutputs: env.pendingOutputs || [],
       frameLogs: env.frameLogs || [],
       title: `Frame ${env.history?.length || 0}`,
-      ...(browserVMState ? { browserVMState } : {}),
     };
 
     if (env.extra) {
@@ -2130,102 +2022,51 @@ export const process = async (
     }
     dispatchEntityOutputs(env, remoteOutputs);
 
-    // 2. Execute J-batches via JAdapter (fire-and-forget, events arrive next frame via j-watcher)
+    // 2. Execute J-batches via JAdapter.submitTx (events arrive next frame via j-watcher)
     if (jOutbox.length > 0) {
       const totalJTxs = jOutbox.reduce((n, ji) => n + ji.jTxs.length, 0);
-      console.log(`⚡ [SIDE-EFFECT] Broadcasting ${totalJTxs} J-txs to JAdapter (${jOutbox.length} JInputs)`);
-
-      const { broadcastBatch } = await import('./j-batch');
-      const browserVM = getBrowserVMInstance(env);
+      console.log(`⚡ [SIDE-EFFECT] Submitting ${totalJTxs} J-txs via JAdapter (${jOutbox.length} JInputs)`);
 
       for (const jInput of jOutbox) {
         const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
         if (!jReplica) {
-          console.error(`❌ [J-BROADCAST] Jurisdiction "${jInput.jurisdictionName}" not found — skipping`);
+          console.error(`❌ [J-SUBMIT] Jurisdiction "${jInput.jurisdictionName}" not found — skipping`);
           continue;
         }
 
-        const rpcUrl = jReplica.rpcs?.[0];
-        const chainId = jReplica.jadapter?.chainId ?? jReplica.chainId;
-        const jurisdiction = !browserVM && rpcUrl && jReplica.depositoryAddress && jReplica.entityProviderAddress ? {
-          name: jReplica.name,
-          chainId: Number(chainId ?? 0),
-          address: rpcUrl,
-          entityProviderAddress: jReplica.entityProviderAddress,
-          depositoryAddress: jReplica.depositoryAddress,
-        } : null;
-
-        // Begin J-block for BrowserVM (groups all txs into one block)
-        if (browserVM?.beginJurisdictionBlock) {
-          browserVM.beginJurisdictionBlock(env.timestamp);
-          console.log(`🔨 [J-BROADCAST] BrowserVM: beginJurisdictionBlock(ts=${env.timestamp})`);
+        const jAdapter = jReplica.jadapter;
+        if (!jAdapter) {
+          console.error(`❌ [J-SUBMIT] No JAdapter for jurisdiction "${jInput.jurisdictionName}" — skipping`);
+          continue;
         }
 
         for (const jTx of jInput.jTxs) {
-          console.log(`🔨 [J-BROADCAST] Executing ${jTx.type} from ${jTx.entityId.slice(-4)} on ${jInput.jurisdictionName}`);
+          console.log(`📤 [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName}`);
+          try {
+            const result = await jAdapter.submitTx(jTx, {
+              env,
+              signerId: jTx.data?.signerId,
+              timestamp: jTx.timestamp ?? env.timestamp,
+            });
 
-          if (jTx.type === 'batch' && jTx.data?.batch) {
-            const tempJBatchState = {
-              batch: jTx.data.batch,
-              jurisdiction: null,
-              lastBroadcast: jTx.timestamp,
-              broadcastCount: 1,
-              failedAttempts: 0,
-            };
-
-            if (!browserVM && !jurisdiction) {
-              console.error(`❌ [J-BROADCAST] Missing jurisdiction config for ${jReplica.name} — cannot execute batch`);
-              continue;
-            }
-
-            try {
-              const result = await broadcastBatch(
-                env,
-                jTx.entityId,
-                tempJBatchState,
-                jurisdiction,
-                browserVM || undefined,
-                jTx.timestamp ?? env.timestamp,
-                jTx.data?.signerId
-              );
-
-              if (result.success) {
-                console.log(`✅ [J-BROADCAST] Batch from ${jTx.entityId.slice(-4)} executed (${result.events?.length ?? 0} events, txHash=${result.txHash ?? 'n/a'})`);
-              } else {
-                console.error(`❌ [J-BROADCAST] Batch from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
-                if (env.scenarioMode) {
-                  throw new Error(`J-BATCH FAILED: ${result.error || 'unknown error'}`);
-                }
+            if (result.success) {
+              console.log(`✅ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)}: ok (events=${result.events?.length ?? 0}, txHash=${result.txHash ?? 'n/a'})`);
+            } else {
+              console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
+              if (env.scenarioMode) {
+                throw new Error(`J-SUBMIT FAILED: ${result.error || 'unknown'}`);
               }
-            } catch (error) {
-              console.error(`❌ [J-BROADCAST] broadcastBatch threw for ${jTx.entityId.slice(-4)}:`, error);
-              if (env.scenarioMode) throw error;
             }
+          } catch (error) {
+            console.error(`❌ [J-SUBMIT] submitTx threw for ${jTx.entityId.slice(-4)}:`, error);
+            if (env.scenarioMode) throw error;
           }
-
-          if (jTx.type === 'mint' && jTx.data && browserVM?.debugFundReserves) {
-            const { entityId, tokenId, amount } = jTx.data;
-            console.log(`💰 [J-BROADCAST] Minting ${amount} token ${tokenId} to ${entityId.slice(-4)}`);
-            try {
-              await browserVM.debugFundReserves(entityId, tokenId, amount);
-              console.log(`✅ [J-BROADCAST] Mint successful`);
-            } catch (error) {
-              console.error(`❌ [J-BROADCAST] Mint failed:`, error);
-              if (env.scenarioMode) throw error;
-            }
-          }
-        }
-
-        // End J-block for BrowserVM
-        if (browserVM?.endJurisdictionBlock) {
-          browserVM.endJurisdictionBlock();
-          console.log(`🔨 [J-BROADCAST] BrowserVM: endJurisdictionBlock`);
         }
 
         // Update jReplica metadata
         jReplica.lastBlockTimestamp = env.timestamp;
         jReplica.blockNumber = jReplica.blockNumber + 1n;
-        console.log(`📊 [J-BROADCAST] ${jReplica.name} block #${jReplica.blockNumber} finalized`);
+        console.log(`📊 [J-SUBMIT] ${jReplica.name} block #${jReplica.blockNumber}`);
       }
     }
 
@@ -2357,6 +2198,9 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
     const latestEnv = history[history.length - 1];
     if (latestEnv) {
       latestEnv.history = history;
+
+      // Restore BrowserVM if state was persisted
+      let restoredBrowserVM: any = null;
       if (latestEnv.browserVMState && isBrowser) {
         try {
           const { BrowserVMProvider } = await import('./jadapter');
@@ -2364,6 +2208,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
           await browserVM.init();
           await browserVM.restoreState(latestEnv.browserVMState);
           latestEnv.browserVM = browserVM;
+          restoredBrowserVM = browserVM;
           setBrowserVMJurisdiction(latestEnv, browserVM.getDepositoryAddress(), browserVM);
           if (typeof window !== 'undefined') {
             (window as any).__xlnBrowserVM = browserVM;
@@ -2371,6 +2216,66 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
           console.log('✅ BrowserVM restored from loadEnvFromDB');
         } catch (error) {
           console.warn('⚠️ Failed to restore BrowserVM state (loadEnvFromDB):', error);
+        }
+      }
+
+      // Derive JAdapters for all jReplicas (they are not serialized — runtime objects)
+      if (latestEnv.jReplicas && latestEnv.jReplicas.size > 0) {
+        const { createJAdapter } = await import('./jadapter');
+        const { createBrowserVMAdapter } = await import('./jadapter/browservm');
+
+        for (const [name, jReplica] of latestEnv.jReplicas.entries()) {
+          if (jReplica.jadapter) continue; // Already has adapter (shouldn't happen on restore)
+
+          try {
+            const hasRpcs = jReplica.rpcs && jReplica.rpcs.length > 0 && jReplica.rpcs[0] !== '';
+            const chainId = jReplica.chainId ?? 31337;
+
+            if (!hasRpcs && restoredBrowserVM) {
+              // BrowserVM mode: wrap restored VM in JAdapter
+              const jadapter = await createJAdapter({
+                mode: 'browservm',
+                chainId,
+                browserVMState: undefined, // VM already restored above
+              });
+              // Replace the inner browserVM with the already-restored one
+              const inner = jadapter.getBrowserVM();
+              if (inner && restoredBrowserVM) {
+                // The VM was already initialized fresh in createJAdapter.
+                // We need to use the restored VM instead. Re-create with it.
+                const { BrowserVMEthersProvider } = await import('./jadapter/browservm-ethers-provider');
+                const provider = new BrowserVMEthersProvider(restoredBrowserVM);
+                const { ethers } = await import('ethers');
+                const { DEFAULT_PRIVATE_KEY } = await import('./jadapter/helpers');
+                const signer = new ethers.Wallet(DEFAULT_PRIVATE_KEY, provider);
+                const adapter = await createBrowserVMAdapter(
+                  { mode: 'browservm', chainId },
+                  provider,
+                  signer,
+                  restoredBrowserVM,
+                );
+                jReplica.jadapter = adapter;
+              } else {
+                jReplica.jadapter = jadapter;
+              }
+            } else if (hasRpcs) {
+              // RPC mode: connect using stored rpcs + addresses
+              const jadapter = await createJAdapter({
+                mode: 'rpc',
+                chainId,
+                rpcUrl: jReplica.rpcs![0],
+                fromReplica: jReplica as any, // Pass addresses for connect-only mode
+              });
+              jReplica.jadapter = jadapter;
+            }
+
+            if (jReplica.jadapter) {
+              jReplica.jadapter.startWatching(latestEnv);
+              console.log(`✅ JAdapter derived for jReplica "${name}" (${hasRpcs ? 'rpc' : 'browservm'})`);
+            }
+          } catch (error) {
+            console.warn(`⚠️ Failed to derive JAdapter for jReplica "${name}":`, error);
+          }
         }
       }
     }

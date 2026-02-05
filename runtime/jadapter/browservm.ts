@@ -10,9 +10,9 @@ import type { Provider, Signer } from 'ethers';
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types';
 import { Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types';
 
-import type { BrowserVMState } from '../types';
-import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, InsuranceReg, JTokenInfo } from './types';
-import { computeAccountKey, entityIdToAddress } from './helpers';
+import type { BrowserVMState, JTx } from '../types';
+import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, InsuranceReg, JTokenInfo } from './types';
+import { computeAccountKey, entityIdToAddress, isCanonicalEvent, processEventBatch, type RawJEvent } from './helpers';
 import type { BrowserVMProvider } from './browservm-provider';
 
 // Re-export BrowserVMProvider for external use
@@ -293,6 +293,154 @@ export async function createBrowserVMAdapter(
       }));
     },
 
+    // === High-level J-tx submission ===
+    async submitTx(jTx: JTx, options: { env: any; signerId?: string; timestamp?: number }): Promise<JSubmitResult> {
+      const { env, signerId, timestamp } = options;
+      const ts = timestamp ?? env.timestamp ?? 0;
+
+      console.log(`📤 [JAdapter:browservm] submitTx type=${jTx.type} entity=${jTx.entityId.slice(-4)}`);
+
+      if (jTx.type === 'batch' && jTx.data?.batch) {
+        const { encodeJBatch, computeBatchHankoHash, isBatchEmpty, getBatchSize, preflightBatchForE2 } = await import('../j-batch');
+        const { normalizeEntityId } = await import('../entity-id-utils');
+
+        if (isBatchEmpty(jTx.data.batch)) {
+          console.log(`📦 [JAdapter:browservm] Empty batch, skipping`);
+          return { success: true };
+        }
+
+        const entityProviderAddr = browserVM.getEntityProviderAddress();
+        const depositoryAddr = browserVM.getDepositoryAddress();
+        const chainId = (browserVM as any).getChainId?.() ?? BigInt(config.chainId);
+        const sid = signerId ?? jTx.data.signerId;
+
+        if (!sid) {
+          return { success: false, error: `Missing signerId for batch from ${jTx.entityId.slice(-4)}` };
+        }
+
+        // Validate settlements have signatures
+        for (const settlement of jTx.data.batch.settlements ?? []) {
+          settlement.entityProvider = entityProviderAddr;
+          if (settlement.diffs?.length > 0 && (!settlement.sig || settlement.sig === '0x')) {
+            return { success: false, error: `Settlement missing hanko sig: ${settlement.leftEntity?.slice(-4)}↔${settlement.rightEntity?.slice(-4)}` };
+          }
+        }
+
+        const encodedBatch = encodeJBatch(jTx.data.batch);
+        const normalizedId = normalizeEntityId(jTx.entityId);
+        const currentNonce = await browserVM.getEntityNonce(normalizedId);
+        const nextNonce = currentNonce + 1n;
+        const batchHash = computeBatchHankoHash(chainId, depositoryAddr, encodedBatch, nextNonce);
+
+        console.log(`🔐 [JAdapter:browservm] Signing hanko: entity=${normalizedId.slice(-4)} nonce=${nextNonce} chainId=${chainId}`);
+
+        const { signHashesAsSingleEntity } = await import('../hanko-signing');
+        const hankos = await signHashesAsSingleEntity(env, normalizedId, sid, [batchHash]);
+        const hankoData = hankos[0];
+        if (!hankoData) {
+          return { success: false, error: 'Failed to build batch hanko signature' };
+        }
+
+        // Preflight check
+        const issues = preflightBatchForE2(normalizedId, jTx.data.batch, Math.floor(ts / 1000));
+        if (issues.length > 0) {
+          return { success: false, error: `Preflight failed: ${issues.join('; ')}` };
+        }
+
+        browserVM.setBlockTimestamp(ts);
+        if ((browserVM as any).beginJurisdictionBlock) {
+          (browserVM as any).beginJurisdictionBlock(ts);
+          console.log(`🔨 [JAdapter:browservm] beginJurisdictionBlock(ts=${ts})`);
+        }
+
+        try {
+          console.log(`📦 [JAdapter:browservm] processBatch (${getBatchSize(jTx.data.batch)} ops) nonce=${nextNonce}`);
+          const events = await browserVM.processBatch(encodedBatch, entityProviderAddr, hankoData, nextNonce);
+
+          if ((browserVM as any).endJurisdictionBlock) {
+            (browserVM as any).endJurisdictionBlock();
+          }
+
+          console.log(`✅ [JAdapter:browservm] Batch executed: ${events.length} events`);
+          return {
+            success: true,
+            txHash: `0x${'browservm-batch'.padStart(64, '0')}`,
+            blockNumber: Number((browserVM as any).getBlockNumber?.() ?? 0),
+            events: events.map((e: any) => ({
+              name: e.name,
+              args: e.args ?? {},
+              blockNumber: e.blockNumber ?? 0,
+              blockHash: e.blockHash ?? '0x',
+              transactionHash: e.transactionHash ?? '0x',
+            })),
+          };
+        } catch (error) {
+          if ((browserVM as any).endJurisdictionBlock) {
+            (browserVM as any).endJurisdictionBlock();
+          }
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error(`❌ [JAdapter:browservm] processBatch failed: ${msg}`);
+          return { success: false, error: msg };
+        }
+      }
+
+      if (jTx.type === 'mint' && jTx.data && browserVM.debugFundReserves) {
+        const { entityId, tokenId, amount } = jTx.data as any;
+        console.log(`💰 [JAdapter:browservm] Minting ${amount} token ${tokenId} to ${entityId.slice(-4)}`);
+        try {
+          const events = await browserVM.debugFundReserves(entityId, tokenId, amount);
+          console.log(`✅ [JAdapter:browservm] Mint ok (${events.length} events)`);
+          return { success: true, events: events.map((e: any) => ({ name: e.name, args: e.args ?? {}, blockNumber: 0, blockHash: '0x', transactionHash: '0x' })) };
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          console.error(`❌ [JAdapter:browservm] Mint failed: ${msg}`);
+          return { success: false, error: msg };
+        }
+      }
+
+      return { success: false, error: `Unknown JTx type: ${(jTx as any).type}` };
+    },
+
+    // === J-Watcher integration (uses shared event conversion from helpers.ts) ===
+    startWatching(env: any): void {
+      if (watcherUnsubscribe) {
+        console.log(`🔭 [JAdapter:browservm] Already watching`);
+        return;
+      }
+      watcherEnv = env;
+      console.log(`🔭 [JAdapter:browservm] Starting event watcher (eReplicas=${env.eReplicas?.size ?? 0})...`);
+
+      watcherUnsubscribe = browserVM.onAny((rawEvents: any[]) => {
+        if (!watcherEnv) return;
+
+        // Normalize to RawJEvent format (BrowserVM already emits { name, args })
+        const normalized: RawJEvent[] = rawEvents.map((e: any) => ({
+          name: e.name,
+          args: e.args ?? {},
+          blockNumber: e.blockNumber,
+          blockHash: e.blockHash,
+          transactionHash: e.transactionHash,
+        }));
+
+        const blockNumber = normalized[0]?.blockNumber ?? Number((browserVM as any).getBlockNumber?.() ?? 0n);
+        const blockHash = normalized[0]?.blockHash ?? (browserVM as any).getBlockHash?.() ?? '0x0';
+
+        // Shared: filter canonical, group by entity, convert, enqueue
+        processEventBatch(normalized, watcherEnv, blockNumber, blockHash, txCounter, 'browservm');
+      });
+
+      console.log(`🔭 [JAdapter:browservm] Watcher started (event subscription)`);
+    },
+
+    stopWatching(): void {
+      if (watcherUnsubscribe) {
+        watcherUnsubscribe();
+        watcherUnsubscribe = null;
+        watcherEnv = null;
+        console.log(`🔭 [JAdapter:browservm] Watcher stopped`);
+      }
+    },
+
     getBrowserVM(): BrowserVMProvider | null {
       return browserVM;
     },
@@ -302,9 +450,16 @@ export async function createBrowserVMAdapter(
     },
 
     async close(): Promise<void> {
-      // BrowserVM doesn't have persistent connections to close
+      adapter.stopWatching();
     },
   };
 
+  // Watcher state (managed by adapter, not external j-watcher)
+  let watcherUnsubscribe: (() => void) | null = null;
+  let watcherEnv: any = null;
+  const txCounter = { value: 0 };
+
   return adapter;
 }
+
+// Event conversion and relevance checking now in jadapter/helpers.ts (shared with RPC adapter)

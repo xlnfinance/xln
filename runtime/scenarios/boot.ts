@@ -75,6 +75,45 @@ export async function ensureBrowserVM(env: any) {
 }
 
 /**
+ * Attach a BrowserVM-backed JAdapter to an existing jReplica and start watching.
+ * This bridges BrowserVM events → JAdapter → env.runtimeInput.entityInputs
+ */
+export async function attachBrowserVMAdapter(
+  env: Env,
+  jReplicaName: string,
+  browserVM: any,
+): Promise<void> {
+  const jReplica = env.jReplicas?.get(jReplicaName);
+  if (!jReplica) throw new Error(`jReplica "${jReplicaName}" not found`);
+
+  const { createBrowserVMAdapter } = await import('../jadapter/browservm');
+  const { ethers } = await import('ethers');
+  const { BrowserVMEthersProvider } = await import('../jadapter/browservm-ethers-provider');
+
+  const bvmProvider = new BrowserVMEthersProvider(browserVM);
+  const bvmSigner = new ethers.Wallet(
+    '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
+    bvmProvider as any,
+  );
+
+  const jadapter = await createBrowserVMAdapter(
+    { mode: 'browservm', chainId: 31337 },
+    bvmProvider as any,
+    bvmSigner as any,
+    browserVM,
+  );
+
+  // Attach to jReplica
+  (jReplica as any).jadapter = jadapter;
+  (jReplica as any).depositoryAddress = jadapter.addresses.depository;
+  (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+
+  // Start watching (feeds events into env.runtimeInput.entityInputs)
+  jadapter.startWatching(env);
+  console.log(`[JAdapter] BrowserVM adapter attached to "${jReplicaName}" + watching started`);
+}
+
+/**
  * Create jReplica (J-Machine) for a jurisdiction
  */
 export function createJReplica(

@@ -18,7 +18,6 @@
 import type { Env, EntityInput, EntityReplica, Delta } from '../types';
 import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from '../evm';
 import { BrowserVMProvider } from '../jadapter';
-import { setupBrowserVMWatcher, type JEventWatcher } from '../j-event-watcher';
 import { getProcess, getApplyRuntimeInput, usd, snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime } from '../runtime-ascii';
@@ -106,8 +105,6 @@ async function converge(env: Env, maxCycles = 10): Promise<void> {
   }
 }
 
-// J-Watcher instance for BrowserVM event subscription
-let jWatcherInstance: JEventWatcher | null = null;
 
 /**
  * Process any pending j_events from BrowserVM operations
@@ -410,6 +407,10 @@ export async function lockAhb(env: Env): Promise<void> {
 
     env.jReplicas.set('AHB Demo', ahbJReplica);
     env.activeJurisdiction = 'AHB Demo';
+
+    // Attach JAdapter so BrowserVM events flow into runtime
+    const { attachBrowserVMAdapter } = await import('./boot');
+    await attachBrowserVMAdapter(env, 'AHB Demo', browserVM);
     console.log('✅ AHB Xlnomy created (J-Machine visible in 3D)');
 
     // Push Frame 0: Clean slate with J-Machine only (no entities yet)
@@ -513,16 +514,6 @@ export async function lockAhb(env: Env): Promise<void> {
       await browserVM.fundSignerWallet(hubWalletInfo.wallet.address, HUB_INITIAL_RESERVE);
       console.log(`✅ Hub signer topped up to ${HUB_INITIAL_RESERVE / 10n ** 18n} tokens`);
     }
-
-    // ============================================================================
-    // Set up j-watcher subscription to BrowserVM for proper R→E→A event flow
-    // ============================================================================
-    console.log('\n🔭 Setting up j-watcher subscription to BrowserVM...');
-    if (jWatcherInstance) {
-      jWatcherInstance.stopWatching();
-    }
-    jWatcherInstance = await setupBrowserVMWatcher(env, browserVM);
-    console.log('✅ j-watcher subscribed to BrowserVM events');
 
     // Frame 0.5: Entities created but not yet funded
     snap(env, 'Three Entities Deployed', {

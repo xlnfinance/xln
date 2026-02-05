@@ -5,7 +5,7 @@
 
 import type { Provider, Signer } from 'ethers';
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types';
-import type { JReplica, BrowserVMState } from '../types';
+import type { JReplica, JTx, BrowserVMState } from '../types';
 
 export type JAdapterMode = 'browservm' | 'anvil' | 'rpc';
 
@@ -112,12 +112,34 @@ export interface JAdapter {
     }
   ): Promise<JEvent[]>;
 
+  // === High-level J-tx submission (unified interface for all modes) ===
+  // Handles encoding, signing, and execution. Events arrive via j-watcher → next frame.
+  submitTx(jTx: JTx, options: {
+    env: any;           // Runtime env (for hanko signing)
+    signerId?: string;  // Which signer to use for hanko
+    timestamp?: number; // Block timestamp (scenarioMode)
+  }): Promise<JSubmitResult>;
+
+  // === J-Watcher integration ===
+  // Starts feeding J-events back to runtime mempool. Same object handles submit + watch.
+  startWatching(env: any): void;
+  stopWatching(): void;
+
   // BrowserVM-specific (returns null for RPC mode)
   getBrowserVM(): BrowserVMProvider | null;
   setBlockTimestamp(timestamp: number): void;
 
   // Cleanup
   close(): Promise<void>;
+}
+
+// Result from submitTx
+export interface JSubmitResult {
+  success: boolean;
+  txHash?: string;
+  blockNumber?: number;
+  events?: JEvent[];
+  error?: string;
 }
 
 // Settlement diff structure matching Depository contract

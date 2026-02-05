@@ -4,11 +4,11 @@ import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-help
 import { getTokenInfo, getDefaultCreditLimit } from '../account-utils';
 import { isLeftEntity } from '../entity-id-utils';
 import { safeStringify } from '../serialization-utils';
-import { CANONICAL_J_EVENTS } from '../j-event-watcher';
+import { CANONICAL_J_EVENTS } from '../jadapter/helpers';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
- * J-EVENT HANDLERS (Single Source of Truth - must match j-event-watcher.ts)
+ * J-EVENT HANDLERS (Single Source of Truth - must match jadapter/helpers.ts)
  * ═══════════════════════════════════════════════════════════════════════════
  *
  * Canonical J-Events (update entity state):
@@ -55,7 +55,7 @@ const getTokenDecimals = (tokenId: number): number => {
 // J-EVENT HANDLER: Entry point for jurisdiction (blockchain) events
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// When a signer observes a blockchain event (via j-event-watcher.ts), it submits
+// When a signer observes a blockchain event (via JAdapter.startWatching), it submits
 // a j_event EntityTx. This handler:
 //
 // 1. Creates a JBlockObservation from the incoming event
