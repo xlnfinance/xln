@@ -231,9 +231,9 @@ export interface XLNModule {
   main: () => Promise<Env>;
   process: (env: Env, inputs?: unknown[], delay?: number) => Promise<Env>;
   registerEnvChangeCallback: (callback: (env: Env) => void) => void;
-  getEnv: () => Env | null;
+  getEnv: (env?: Env | null) => Env | null;
   getActiveJAdapter?: (env: Env | null) => JAdapter | null;
-  processJBlockEvents?: () => Promise<void>;
+  processJBlockEvents?: (env: Env) => Promise<void>;
   queueEntityInput?: (entityId: string, signerId: string, txData: { type: string; [key: string]: any }) => Promise<void>;
 
   // Identity system (from ids.ts)
@@ -312,13 +312,13 @@ export interface XLNModule {
   startP2P: (env: Env, config?: P2PConfig) => unknown;
   stopP2P: () => void;
   getP2P: () => unknown;
-  refreshGossip?: () => void;
+  refreshGossip?: (env: Env) => void;
   // runDemo: REMOVED - use scenarios.ahb(env) or scenarios.grid(env) instead
 
   // Environment creation
   createEmptyEnv: (seed?: Uint8Array | string | null) => Env;
-  setRuntimeSeed: (seed: string | null) => void;
-  setRuntimeId: (id: string | null) => void;
+  setRuntimeSeed: (env: Env, seed: string | null) => void;
+  setRuntimeId: (env: Env, id: string | null) => void;
   deriveRuntimeId: (seed: string) => string;  // Derive runtimeId from seed (for isolated envs)
 
   // Scenarios namespace (replaces legacy prepopulate functions)
@@ -336,7 +336,7 @@ export interface XLNModule {
 
   // Database operations
   clearDatabase: () => Promise<void>;
-  clearDatabaseAndHistory: () => Promise<void>;
+  clearDatabaseAndHistory: (env: Env) => Promise<Env>;
   saveEnvToDB: (env: Env) => Promise<void>;
   loadEnvFromDB: (runtimeId?: string | null, runtimeSeed?: string | null) => Promise<Env | null>;
 
@@ -356,9 +356,12 @@ export interface XLNModule {
   debugFundReserves: (env: Env, entityId: string, tokenAddress: string, amount: bigint) => Promise<Env>;
 
   // History and snapshots
-  getHistory: () => Env[];
-  getSnapshot: (index: number) => Env | null;
-  getCurrentHistoryIndex: () => number;
+  getHistory: (env: Env) => Env[];
+  getSnapshot: (env: Env, index: number) => Env | null;
+  getCurrentHistoryIndex: (env: Env) => number;
+  getCleanLogs: (env: Env) => string;
+  clearCleanLogs: (env: Env) => void;
+  copyCleanLogs: (env: Env) => Promise<string>;
 
   // Entity detection
   detectEntityType: (entityId: string) => string;
@@ -379,6 +382,10 @@ export interface XLNModule {
   connectToEthereum: (jurisdiction: JurisdictionConfig) => Promise<unknown>;
   setBrowserVMJurisdiction: (env: Env, depositoryAddress: string, browserVMInstance?: any) => void;
   getBrowserVMInstance: (env?: Env) => BrowserVMInstance | null;
+
+  // Networking helpers
+  sendEntityInput: (env: Env, input: EntityInput) => { sent: boolean; deferred: boolean; queuedLocal: boolean };
+  resolveEntityProposerId: (env: Env, entityId: string, context: string) => string;
 
   // Demo utilities
   demoCompleteHanko: (env: Env) => Promise<Env>;
