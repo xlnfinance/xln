@@ -372,7 +372,7 @@ export async function lockAhb(env: Env): Promise<void> {
     if (!arrakis) {
       console.log('[AHB] No jurisdiction found - using BrowserVM jurisdiction');
       arrakis = {
-        name: 'Arrakis (BrowserVM)',
+        name: 'AHB Demo', // Must match jReplica name for routing
         chainId: 31337,
         entityProviderAddress: browserVM.getEntityProviderAddress(),
         depositoryAddress: browserVM.getDepositoryAddress(),
