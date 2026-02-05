@@ -61,9 +61,20 @@ export const error = writable<string | null>(null);
 
 export function resolveRelayUrls(): string[] {
   if (typeof window === 'undefined') return ['wss://xln.finance/relay'];
+
+  // Priority: 1) localStorage (direct read for reliability), 2) store, 3) env var, 4) default
+  let localStorageRelay: string | undefined;
+  try {
+    const saved = localStorage.getItem('xln-settings');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      localStorageRelay = parsed.relayUrl;
+    }
+  } catch { /* ignore */ }
+
   const settingsRelay = get(settings)?.relayUrl;
   const envRelay = (import.meta as any)?.env?.VITE_RELAY_URL as string | undefined;
-  const relay = settingsRelay || envRelay || 'wss://xln.finance/relay';
+  const relay = localStorageRelay || settingsRelay || envRelay || 'wss://xln.finance/relay';
   return [relay];
 }
 
@@ -360,6 +371,8 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
         isDashed: false,
         pulseSpeed: 1,
       })) as any,
+      sendEntityInput: safe(() => ({ sent: false, deferred: true, queuedLocal: false })) as any,
+      resolveEntityProposerId: safe(() => '') as any,
 
       isReady: false
     };
@@ -474,6 +487,8 @@ export const xlnFunctions = derived([xlnEnvironment, xlnInstance], ([, $xlnInsta
     createReplicaKey: $xlnInstance.createReplicaKey,
     classifyBilateralState: $xlnInstance.classifyBilateralState,
     getAccountBarVisual: $xlnInstance.getAccountBarVisual,
+    sendEntityInput: $xlnInstance.sendEntityInput,
+    resolveEntityProposerId: $xlnInstance.resolveEntityProposerId,
 
     // State management - indicates functions are fully loaded
     isReady: true
