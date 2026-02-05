@@ -352,12 +352,13 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         // Order matters: add_delta creates delta, then set_credit_limit modifies it
         const creditAmount = entityTx.data.creditAmount;
         if (creditAmount && creditAmount > 0n) {
-          // We are LEFT → set leftCreditLimit (our credit line)
+          // We are LEFT, counterparty is RIGHT → set rightCreditLimit
+          // "I trust the counterparty up to X" = counterparty can owe me up to X
           localAccount.mempool.push({
             type: 'set_credit_limit',
-            data: { tokenId, amount: creditAmount, side: 'left' as const }
+            data: { tokenId, amount: creditAmount, side: 'right' as const }
           });
-          console.log(`📝 Queued [add_delta, set_credit_limit] to mempool (left=${creditAmount})`);
+          console.log(`📝 Queued [add_delta, set_credit_limit] to mempool (right=${creditAmount})`);
         } else {
           console.log(`📝 Queued [add_delta] to mempool (credit=0, must be set explicitly)`);
         }
@@ -377,12 +378,13 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         });
 
         if (creditAmount && creditAmount > 0n) {
-          // STEP 2: set_credit_limit on the delta we just created
+          // STEP 2: set_credit_limit — counterparty is LEFT → set leftCreditLimit
+          // "I trust the counterparty up to X" = counterparty can owe me up to X
           localAccount.mempool.push({
             type: 'set_credit_limit',
-            data: { tokenId, amount: creditAmount, side: 'right' as const }
+            data: { tokenId, amount: creditAmount, side: 'left' as const }
           });
-          console.log(`🧭 Right side: queued [add_delta, set_credit_limit] (right=${creditAmount})`);
+          console.log(`🧭 Right side: queued [add_delta, set_credit_limit] (left=${creditAmount})`);
         } else {
           console.log(`🧭 Right side: queued [add_delta] (no credit requested)`);
         }
