@@ -1,5 +1,5 @@
 # XLN: Bilateral Ethereum + Bank-Grade Credit + Instant Settlement
-# ~243k tokens | Generated: 2026-02-05 20:48:20 | Git: 06462d4
+# ~242k tokens | Generated: 2026-02-06 01:59:11 | Git: d50fe6f
 
 **TL;DR**: Banks without bailouts. Lightning without the inbound capacity wall.
 
@@ -144,7 +144,7 @@ One account, many subcontracts. All execute bilaterally, chain sees nothing unle
 - "What happens if counterparty disappears?" → On-chain settlement with your collateral
 - "What's the worst case?" → Lose credit limit you extended, nothing more
 
-## Token Budget Guide (~243k tokens total)
+## Token Budget Guide (~242k tokens total)
 
 **Critical path (read first, ~30min):**
 - intro.md (3min) - High-signal overview
@@ -172,11 +172,11 @@ xln/
     DeltaTransformer.sol       191 lines - Delta transformations: HTLCs, swaps, limit orders
 
   runtime/
-    types.ts                     2079 lines - All TypeScript interfaces (START HERE)
+    types.ts                     2076 lines - All TypeScript interfaces (START HERE)
     ids.ts                       519 lines - Identity system: EntityId, SignerId, JId, ReplicaKey
-    runtime.ts                   2596 lines - Main coordinator, 100ms ticks, R->E->A routing
-    entity-consensus.ts          1637 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
-    account-consensus.ts         1497 lines - Bilateral consensus, left/right perspective
+    runtime.ts                   2402 lines - Main coordinator, 100ms ticks, R->E->A routing
+    entity-consensus.ts          1636 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
+    account-consensus.ts         1499 lines - Bilateral consensus, left/right perspective
     account-consensus-state.ts   168 lines - Bilateral state machine
     j-batch.ts                   971 lines - J-batch: E-machine accumulates → jBroadcast → J-machine
     account-utils.ts             228 lines - deriveDelta() RCPAN calculation
@@ -185,7 +185,7 @@ xln/
 
     entity-tx/
       index.ts                   7 lines - Entity transaction types
-      apply.ts                   999 lines - Entity tx dispatcher
+      apply.ts                   977 lines - Entity tx dispatcher
       validation.ts              37 lines - Transaction validation
       financial.ts               33 lines - Financial accounting
       proposals.ts               35 lines - Proposal logic
@@ -198,8 +198,8 @@ xln/
 
     account-tx/
       index.ts                   10 lines - Account transaction types
-      apply.ts                   249 lines - Account tx dispatcher
-      handlers/add-delta.ts      42 lines - Delta addition
+      apply.ts                   241 lines - Account tx dispatcher
+      handlers/add-delta.ts      41 lines - Delta addition
 
     routing/
       graph.ts                   133 lines - Network graph
@@ -211,7 +211,7 @@ xln/
 
   docs/
     intro.md                           53 lines - ⚡ 5-min overview (new reader onramp)
-    essay.md                            74 lines - ⚡ Core philosophy and vision (CRITICAL PATH)
+    essay.md                            96 lines - ⚡ Core philosophy and vision (CRITICAL PATH)
     core/12_invariant.md                90 lines - ⚡ RCPAN innovation (CRITICAL PATH)
     core/rjea-architecture.md           669 lines - ⚡ RJEA 4-layer model (CRITICAL PATH)
     core/11_Jurisdiction_Machine.md     45 lines - Architecture deep-dive
@@ -3464,7 +3464,7 @@ contract DeltaTransformer is Console {
 }
 
 
-//runtime/types.ts (2079 lines)
+//runtime/types.ts (2076 lines)
 /**
  * XLN Type Definitions
  * All interfaces and type definitions used across the XLN system
@@ -4687,7 +4687,7 @@ export type AccountTx =
   | { type: 'account_payment'; data: { tokenId: number; amount: bigint } }
   | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route?: string[]; description?: string; fromEntityId?: string; toEntityId?: string } }
   | { type: 'add_delta'; data: { tokenId: number } }
-  | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint; side: 'left' | 'right' } }
+  | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint } }
   | { type: 'account_frame'; data: { frame: AccountFrame; processedTransactions: number; fromEntity: string } }
   | {
       type: 'account_settle';
@@ -5086,15 +5086,12 @@ export interface Env {
     loopIntervalMs?: number;  // Loop interval for runtime processing
   };
   runtimeState?: {
-    processing?: boolean;
     loopActive?: boolean;
-    loopTimer?: any;
+    stopLoop?: (() => void) | null;
     lastFrameAt?: number;
     p2p?: any;
     pendingP2PConfig?: any;
     lastP2PConfig?: any;
-    jWatcher?: any;
-    jWatcherStarted?: boolean;
     envChangeCallbacks?: Set<(env: Env) => void>;
     db?: any;
     dbOpenPromise?: Promise<boolean> | null;
@@ -6066,7 +6063,7 @@ export const safeExtractEntityId = (keyString: string): EntityId | null => {
 };
 
 
-//runtime/runtime.ts (2596 lines)
+//runtime/runtime.ts (2402 lines)
 // for regular use > bun run runtime/runtime.ts
 // for debugging > bun repl
 // await import('./debug.js');
@@ -6181,7 +6178,6 @@ import {
   safeExtractEntityId,
 } from './ids';
 import { type Profile, loadPersistedProfiles } from './networking/gossip';
-import { setupJEventWatcher, JEventWatcher } from './j-event-watcher';
 import {
   createProfileUpdateTx,
   getEntityDisplayInfo as getEntityDisplayInfoFromProfileOriginal,
@@ -6205,8 +6201,7 @@ import { captureSnapshot, cloneEntityReplica, resolveEntityProposerId } from './
 import { getEntityShortId, getEntityNumber, formatEntityId, HEAVY_LOGS } from './utils';
 import { safeStringify } from './serialization-utils';
 import { validateDelta, validateAccountDeltas, createDefaultDelta, isDelta, validateEntityInput, validateEntityOutput } from './validation-utils';
-import { EntityInput, EntityReplica, Env, RuntimeInput } from './types';
-import type { JReplica } from './types';
+import type { EntityInput, EntityReplica, Env, JInput, JReplica, RuntimeInput } from './types';
 import {
   clearDatabase,
   DEBUG,
@@ -6373,14 +6368,12 @@ const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
 const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
   if (!env.runtimeState) {
     env.runtimeState = {
-      processing: false,
       loopActive: false,
+      stopLoop: null,
       lastFrameAt: undefined,
       p2p: null,
       pendingP2PConfig: null,
       lastP2PConfig: null,
-      jWatcher: null,
-      jWatcherStarted: false,
     };
   }
   return env.runtimeState;
@@ -6448,18 +6441,8 @@ const hasRuntimeWork = (env: Env): boolean => {
   if (env.pendingOutputs && env.pendingOutputs.length > 0) return true;
   if (env.networkInbox && env.networkInbox.length > 0) return true;
   if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) return true;
-  if (env.jReplicas) {
-    const now = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
-    for (const jr of env.jReplicas.values()) {
-      const mempoolSize = jr.mempool?.length ?? 0;
-      if (mempoolSize === 0) continue;
-      const blockDelayMs = jr.blockDelayMs || 300;
-      const lastBlockTs = jr.lastBlockTimestamp || 0;
-      const elapsed = now - lastBlockTs;
-      const oldestTxAge = jr.mempool[0]?.queuedAt ? now - jr.mempool[0].queuedAt! : 999999;
-      if (elapsed >= blockDelayMs || oldestTxAge >= blockDelayMs) return true;
-    }
-  }
+  // J-machine mempool removed from work check — J-batches are now executed post-save
+  // as side effects, not queued for processing in the next frame
   return false;
 };
 
@@ -6472,24 +6455,51 @@ const isRuntimeFrameReady = (env: Env, now: number, overrideDelayMs?: number): b
   return now - state.lastFrameAt >= delayMs;
 };
 
-async function runtimeTick(env: Env): Promise<void> {
-  await process(env);
-}
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
-const ensureRuntimeLoop = (env: Env): void => {
+/**
+ * Start the single runtime event loop. Called once on init.
+ * Async while-loop — no re-entry possible by construction.
+ * Returns a stop function for graceful shutdown.
+ *
+ * Loop cycle:
+ *   1. process() — drain mempool, apply R-frame (pure E/A consensus)
+ *   2. persist   — atomic LevelDB write of finalized frame
+ *   3. broadcast — J-batch execution + E-output P2P dispatch (side effects)
+ *   4. sleep     — configurable delay (0 = no wait, just yield)
+ */
+export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): () => void {
+  if (env.scenarioMode) return () => {};
   const state = ensureRuntimeState(env);
-  const config = ensureRuntimeConfig(env);
-  if (env.scenarioMode) return;
-  if (state.loopActive) return;
+  if (state.loopActive) return state.stopLoop ?? (() => {});
+
+  const tickDelayMs = config?.tickDelayMs ?? ensureRuntimeConfig(env).loopIntervalMs ?? 25;
+  let running = true;
   state.loopActive = true;
-  const interval = config.loopIntervalMs ?? 25;
-  state.loopTimer = setInterval(async () => {
-    if (!hasRuntimeWork(env)) {
-      return;
+
+  const loop = async () => {
+    while (running) {
+      try {
+        if (hasRuntimeWork(env)) {
+          await process(env);
+        }
+      } catch (error) {
+        console.error('❌ Runtime loop error:', error);
+      }
+      if (tickDelayMs > 0) {
+        await sleep(tickDelayMs);
+      } else {
+        // yield to event loop even with 0 delay (let network/UI callbacks run)
+        await sleep(0);
+      }
     }
-    await runtimeTick(env);
-  }, interval);
-};
+    state.loopActive = false;
+  };
+
+  loop(); // fire-and-forget — single async chain, never overlaps
+  state.stopLoop = () => { running = false; };
+  return state.stopLoop;
+}
 
 /**
  * Identity function for env (no module-level env exists).
@@ -6551,9 +6561,7 @@ export const deriveRuntimeId = (seed: string): string => {
   return deriveSignerAddressSync(seed, '1');
 };
 
-export const scheduleNetworkProcess = (env: Env) => {
-  ensureRuntimeLoop(env);
-};
+// scheduleNetworkProcess removed — loop is always-on via startRuntimeLoop()
 
 const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null => {
   if (!env.gossip?.getProfiles) return null;
@@ -6669,7 +6677,7 @@ export const sendEntityInput = (env: Env, input: EntityInput): { sent: boolean; 
   } else {
     env.pendingNetworkOutputs = [];
   }
-  ensureRuntimeLoop(env);
+
   return {
     sent: remoteOutputs.length > 0 && deferred.length === 0,
     deferred: remainingDeferred.length > 0,
@@ -6712,7 +6720,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
       enqueueRuntimeInputs(env, [input]);
       console.log(`📥 RUNTIME-MEMPOOL: Added inbound, size=${ensureRuntimeMempool(env).entityInputs.length}`);
       env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
-      ensureRuntimeLoop(env);
+    
     },
     onGossipProfiles: (_from, profiles) => {
       if (!env.gossip?.announce) return;
@@ -6780,12 +6788,7 @@ export const processJBlockEvents = async (env: Env): Promise<void> => {
     return;
   }
 
-  const state = ensureRuntimeState(env);
-  if (state.processing) {
-    console.warn('⏸️ processJBlockEvents: Runtime busy, leaving j-events queued');
-    return;
-  }
-
+  // No processing guard needed — single async loop prevents re-entry
   const mempool = ensureRuntimeMempool(env);
   const pending = mempool.entityInputs.length;
   if (pending === 0) return;
@@ -6803,65 +6806,6 @@ export const processJBlockEvents = async (env: Env): Promise<void> => {
   console.log(`   ✓ ${toProcess.length} j-events processed`);
 };
 
-// J-Watcher initialization
-const startJEventWatcher = async (env: Env): Promise<void> => {
-  const state = ensureRuntimeState(env);
-  // BrowserVM is the default - it handles events synchronously via processJBlockEvents()
-  // External RPC watcher is disabled until we support remote jurisdictions
-  const browserVM = getBrowserVMInstance(env);
-  if (browserVM) {
-    console.log('🔭 J-WATCHER: Using BrowserVM (external RPC not needed)');
-    ensureRuntimeLoop(env);
-    return;
-  }
-
-  // External RPC mode (use imported J-machines first, fallback to static config)
-  try {
-    let rpcUrl: string | undefined;
-    let entityProviderAddress: string | undefined;
-    let depositoryAddress: string | undefined;
-
-    // Prefer J-machines imported into this env (VaultStore uses importJ)
-    if (env.jReplicas) {
-      for (const replica of env.jReplicas.values()) {
-        const candidateRpc = replica.rpcs?.[0];
-        if (candidateRpc && replica.entityProviderAddress && replica.depositoryAddress) {
-          rpcUrl = candidateRpc;
-          entityProviderAddress = replica.entityProviderAddress;
-          depositoryAddress = replica.depositoryAddress;
-          break;
-        }
-      }
-    }
-
-    // Fallback to static jurisdictions (legacy)
-    if (!rpcUrl || !entityProviderAddress || !depositoryAddress) {
-      const arrakis = await getJurisdictionByAddress('arrakis');
-      if (!arrakis) {
-        console.warn('⚠️ Arrakis jurisdiction not found, skipping j-watcher');
-        return;
-      }
-      rpcUrl = arrakis.address;
-      entityProviderAddress = arrakis.entityProviderAddress;
-      depositoryAddress = arrakis.depositoryAddress;
-    }
-
-    if (isBrowser && rpcUrl.startsWith('/')) {
-      rpcUrl = `${window.location.origin}${rpcUrl}`;
-    }
-
-    if (state.jWatcherStarted) return;
-    state.jWatcherStarted = true;
-    state.jWatcher = await setupJEventWatcher(env, rpcUrl, entityProviderAddress, depositoryAddress);
-
-    console.log('✅ J-Event Watcher started (external RPC)');
-    console.log(`🔭 Monitoring: ${rpcUrl}`);
-    ensureRuntimeLoop(env);
-
-  } catch (error) {
-    logError("RUNTIME_TICK", '❌ Failed to start J-Event Watcher:', error);
-  }
-};
 
 // Note: History is now stored in env.history (no global variable needed)
 
@@ -6875,7 +6819,7 @@ const startJEventWatcher = async (env: Env): Promise<void> => {
 const applyRuntimeInput = async (
   env: Env,
   runtimeInput: RuntimeInput,
-): Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }> => {
+): Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[]; jOutbox: JInput[] }> => {
   const startTime = getPerfMs();
 
   // Ensure event emitters are attached (may be lost after store serialization)
@@ -6887,48 +6831,41 @@ const applyRuntimeInput = async (
     // SECURITY: Validate runtime input
     if (!runtimeInput) {
       log.error('❌ Null runtime input provided');
-      return { entityOutbox: [], mergedInputs: [] };
+      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
     }
     if (!Array.isArray(runtimeInput.runtimeTxs)) {
       log.error(`❌ Invalid runtimeTxs: expected array, got ${typeof runtimeInput.runtimeTxs}`);
-      return { entityOutbox: [], mergedInputs: [] };
+      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
     }
     if (!Array.isArray(runtimeInput.entityInputs)) {
       log.error(`❌ Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
-      return { entityOutbox: [], mergedInputs: [] };
+      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
     }
 
-    // Process J-layer inputs (queue to J-mempool)
+    // Collect incoming J-inputs into early jOutbox (will be merged with handler jOutputs later)
+    // These are NOT pushed to jReplica.mempool — they go to jOutbox → JAdapter post-save
+    const earlyJOutbox: JInput[] = [];
     if (runtimeInput.jInputs && Array.isArray(runtimeInput.jInputs)) {
-      if (HEAVY_LOGS) console.log(`🔍 J-Input processing: ${runtimeInput.jInputs.length} jInputs`);
+      console.log(`📥 [J-OUTBOX] Incoming jInputs: ${runtimeInput.jInputs.length} from mempool`);
       for (const jInput of runtimeInput.jInputs) {
         const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
         if (!jReplica) {
-          console.error(`❌ J-Input: Jurisdiction "${jInput.jurisdictionName}" not found`);
+          console.error(`❌ [J-OUTBOX] Jurisdiction "${jInput.jurisdictionName}" not found — dropping ${jInput.jTxs.length} jTxs`);
           continue;
         }
-
-        if (HEAVY_LOGS) console.log(`🔍 J-Input has ${jInput.jTxs.length} JTxs for ${jInput.jurisdictionName}`);
-        // Queue all JTxs to J-mempool with queuedAt timestamp
-        for (const jTx of jInput.jTxs) {
-          // Mark when added (for minimum 1-tick delay visualization)
-          const jTxWithQueueTime = { ...jTx, queuedAt: env.timestamp };
-          jReplica.mempool.push(jTxWithQueueTime);
-          console.log(`📥 J-Input: Queued ${jTx.type} from ${jTx.entityId.slice(-4)} to ${jInput.jurisdictionName} mempool (mempool size now: ${jReplica.mempool.length})`);
-        }
-
-        console.log(`✅ J-Input: ${jInput.jTxs.length} txs queued (mempool: ${jReplica.mempool.length})`);
+        console.log(`📥 [J-OUTBOX] Collecting ${jInput.jTxs.length} jTxs for ${jInput.jurisdictionName} (types: ${jInput.jTxs.map(t => t.type).join(',')})`);
+        earlyJOutbox.push(jInput);
       }
     }
 
     // SECURITY: Resource limits
     if (runtimeInput.runtimeTxs.length > 1000) {
       log.error(`❌ Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
-      return { entityOutbox: [], mergedInputs: [] };
+      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
     }
     if (runtimeInput.entityInputs.length > 10000) {
       log.error(`❌ Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
-      return { entityOutbox: [], mergedInputs: [] };
+      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
     }
 
     // FINTECH-LEVEL TYPE SAFETY: Validate all inputs BEFORE mutating env
@@ -6956,7 +6893,7 @@ const applyRuntimeInput = async (
     const mergedInputs = mergeEntityInputs(mergedEntityInputs);
 
     const entityOutbox: EntityInput[] = [];
-    const jOutbox: JInput[] = []; // Collect J-outputs from entities
+    const jOutbox: JInput[] = [...earlyJOutbox]; // Seed with incoming jInputs, handler jOutputs added later
 
     // Process runtime transactions (handle async operations properly)
     for (const runtimeTx of mergedRuntimeTxs) {
@@ -7091,7 +7028,9 @@ const applyRuntimeInput = async (
             }
           }
 
-          console.log(`[Runtime] ✅ JReplica "${runtimeTx.data.name}" ready`);
+          // Start JAdapter's integrated watcher (feeds J-events → runtime mempool)
+          jadapter.startWatching(env);
+          console.log(`[Runtime] ✅ JReplica "${runtimeTx.data.name}" ready (watching)`);
         } catch (error) {
           console.error(`[Runtime] ❌ Failed to import J-machine:`, error);
         }
@@ -7307,34 +7246,19 @@ const applyRuntimeInput = async (
       }
     }
 
-    // Process J-outputs BEFORE creating frame (queue to J-mempool)
+    // Log J-outputs — they stay in jOutbox and are returned to process() for post-save execution
     if (jOutbox.length > 0) {
-      console.log(`📤 [3/6] J-OUTPUTS: ${jOutbox.length} J-outputs collected → routing to J-mempools`);
-
+      const totalJTxs = jOutbox.reduce((n, ji) => n + ji.jTxs.length, 0);
+      console.log(`📤 [J-OUTBOX] ${jOutbox.length} JInputs (${totalJTxs} JTxs) collected — will broadcast to JAdapter post-save`);
       for (const jInput of jOutbox) {
-        const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
-        if (!jReplica) {
-          console.error(`❌ J-Output: Jurisdiction "${jInput.jurisdictionName}" not found`);
-          continue;
-        }
-
-        // Queue JTxs to J-mempool (PROPER ROUTING)
         for (const jTx of jInput.jTxs) {
-          // Mark when queued (for minimum 1-tick visualization delay)
-          const jTxWithQueueTime = { ...jTx, queuedAt: env.timestamp };
-          jReplica.mempool.push(jTxWithQueueTime);
-          console.log(`📥 [4/6] J-Output: Queued ${jTx.type} from ${jTx.entityId.slice(-4)} to ${jInput.jurisdictionName} mempool (queuedAt: ${env.timestamp}, mempool.length: ${jReplica.mempool.length})`);
-
-          // Emit event when actually queued
+          console.log(`  📋 [J-OUTBOX] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName} (batchSize=${jTx.data?.batchSize ?? '?'})`);
           env.emit('JBatchQueued', {
             entityId: jTx.entityId,
-            batchSize: jTx.data.batchSize,
-            mempoolSize: jReplica.mempool.length,
+            batchSize: jTx.data?.batchSize,
             jurisdictionName: jInput.jurisdictionName,
           });
         }
-
-        console.log(`✅ J-Output: ${jInput.jTxs.length} txs queued to ${jInput.jurisdictionName} (mempool: ${jReplica.mempool.length})`);
       }
     }
 
@@ -7503,7 +7427,7 @@ const applyRuntimeInput = async (
     }
 
     // APPLY-SERVER-INPUT-FINAL-RETURN removed
-    return { entityOutbox, mergedInputs };
+    return { entityOutbox, mergedInputs, jOutbox };
   } catch (error) {
     console.error(`❌ CRITICAL: applyRuntimeInput failed!`, error);
     throw error; // Don't swallow - fail fast and loud
@@ -7564,22 +7488,12 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
     }
   }
 
+  // J-event watching is handled by JAdapter.startWatching() per-jReplica
+
+  // Start the runtime event loop (single async while-loop, never re-enters)
   if (isBrowser) {
-    const state = ensureRuntimeState(env);
-    if (!state.jWatcherStarted) {
-      console.log('🔭 STARTING-JWATCHER: Starting j-watcher (non-blocking)...');
-      Promise.race([
-        startJEventWatcher(env),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('J-watcher startup timeout (3s)')), 3000))
-      ])
-        .then(() => {
-          state.jWatcherStarted = true;
-          console.log('🔭 JWATCHER-READY: J-watcher started successfully');
-        })
-        .catch((error) => {
-          console.warn('⚠️  J-Event Watcher startup failed or timed out (non-critical):', error.message);
-        });
-    }
+    console.log('🔄 [LOOP] Starting runtime event loop (browser mode)');
+    startRuntimeLoop(env);
   }
 
   return env;
@@ -7668,25 +7582,6 @@ const clearDatabaseAndHistory = async (env: Env): Promise<Env> => {
   return freshEnv;
 };
 
-// Export j-watcher status for frontend display
-export const getJWatcherStatus = (env: Env) => {
-  const state = ensureRuntimeState(env);
-  if (!state.jWatcher) return null;
-  return {
-    isWatching: state.jWatcher.getStatus().isWatching,
-    proposers: Array.from(env.eReplicas.entries())
-      .filter(([, replica]) => replica.isProposer)
-      .map(([key, replica]) => {
-        const { entityId, signerId } = parseReplicaKey(key);
-        return {
-          entityId: entityId.slice(0,10) + '...',
-          signerId,
-          lastFinalizedJHeight: replica.state.lastFinalizedJHeight,
-        };
-      }),
-    nextSyncIn: Math.floor((1000 - ((env.timestamp || 0) % 1000)) / 100) / 10, // Seconds until next 1s sync
-  };
-};
 
 /**
  * Queue an entity transaction for processing (helper for UI components)
@@ -7703,7 +7598,7 @@ export const queueEntityInput = async (
     signerId,
     entityTxs: [{ type: txData.type, data: txData }]
   }]);
-  ensureRuntimeLoop(env);
+
 };
 
 export {
@@ -7745,7 +7640,6 @@ export {
   hashBoard,
   isEntityRegistered,
   main,
-  startJEventWatcher,
   resolveEntityProposerId,
   // Blockchain registration functions
   registerNumberedEntityOnChain,
@@ -8061,20 +7955,13 @@ export const process = async (
 
   const now = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
   if (!isRuntimeFrameReady(env, now, runtimeDelay)) {
-    ensureRuntimeLoop(env);
+  
     return env;
   }
 
   const state = ensureRuntimeState(env);
-  if (state.processing) {
-    console.warn('⏸️ SKIP: Previous tick still processing');
-    return env;
-  }
-
-  state.processing = true;
-
-  try {
-    const quietRuntimeLogs = env.quietRuntimeLogs === true;
+  const quietRuntimeLogs = env.quietRuntimeLogs === true;
+  {
     getBrowserVMInstance(env)?.setQuietLogs?.(quietRuntimeLogs);
 
     if (env.scenarioMode) {
@@ -8115,6 +8002,7 @@ export const process = async (
       (runtimeInput.jInputs?.length ?? 0) > 0;
 
     let entityOutbox: EntityInput[] = [];
+    let jOutbox: JInput[] = [];
     if (hasRuntimeInput) {
       if (!quietRuntimeLogs) {
         console.log(`📥 TICK: Processing ${runtimeInput.entityInputs.length} inputs for [${runtimeInput.entityInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
@@ -8124,8 +8012,9 @@ export const process = async (
       }
       try {
         const result = await applyRuntimeInput(env, runtimeInput);
-        if (HEAVY_LOGS) console.log(`🔍 PROCESS-DEBUG: applyRuntimeInput returned entityOutbox.length=${result.entityOutbox.length}`);
+        console.log(`🔍 PROCESS: applyRuntimeInput returned entityOutbox=${result.entityOutbox.length}, jOutbox=${result.jOutbox.length}`);
         entityOutbox = result.entityOutbox;
+        jOutbox = result.jOutbox;
       } catch (error) {
         // Restore runtime mempool on failure (WAL safety)
         mempool.runtimeTxs = [...runtimeInput.runtimeTxs, ...mempool.runtimeTxs];
@@ -8149,205 +8038,8 @@ export const process = async (
         console.log(`📤 TICK: ${localOutputs.length} local outputs queued for next tick → [${localOutputs.map(o => o.entityId.slice(-4)).join(',')}]`);
       }
     }
-    env.pendingNetworkOutputs = deferredOutputs;
-
-    let jMachineProcessed = false;
-    if (env.jReplicas) {
-      for (const [jName, jReplica] of env.jReplicas.entries()) {
-        const mempool = jReplica.mempool || [];
-        const blockDelayMs = jReplica.blockDelayMs || 300;
-        const lastBlockTs = jReplica.lastBlockTimestamp || 0;
-        const elapsed = env.timestamp - lastBlockTs;
-
-        if (mempool.length > 0) {
-          if (HEAVY_LOGS) console.log(`🔍 [J-Machine ${jName}] mempool=${mempool.length}, elapsed=${elapsed}ms, blockDelay=${blockDelayMs}ms, ready=${elapsed >= blockDelayMs}`);
-        }
-
-        const oldestTxAge = mempool.length > 0 && mempool[0].queuedAt ? env.timestamp - mempool[0].queuedAt : 999999;
-        const mempoolReady = mempool.length > 0 && oldestTxAge >= blockDelayMs;
-
-        if (mempool.length > 0 && !mempoolReady && !quietRuntimeLogs) {
-          console.log(`⏳ [J-Machine] ${mempool.length} pending (age: ${oldestTxAge}ms < ${blockDelayMs}ms) - waiting...`);
-        }
-
-        if (mempoolReady) {
-          jMachineProcessed = true;
-          if (!quietRuntimeLogs) {
-            console.log(`⚡ [5/6] J-Machine ${jReplica.name}: Processing ${mempool.length} txs (oldest: ${oldestTxAge}ms >= ${blockDelayMs}ms)`);
-            console.log(`   Mempool BEFORE execution:`, mempool.map(tx => `${tx.entityId.slice(-4)}:${tx.data.batchSize || '?'}`));
-          }
-
-          env.emit('JBlockProcessing', {
-            jurisdictionName: jName,
-            txCount: mempool.length,
-            blockNumber: Number(jReplica.blockNumber) + 1,
-          });
-
-          const { broadcastBatch } = await import('./j-batch');
-          const { getBrowserVMInstance } = await import('./evm');
-          const browserVM = getBrowserVMInstance(env);
-          const rpcUrl = jReplica.rpcs?.[0];
-          const chainId = jReplica.jadapter?.chainId ?? jReplica.chainId;
-          const jurisdiction = !browserVM && rpcUrl && jReplica.depositoryAddress && jReplica.entityProviderAddress ? {
-            name: jReplica.name,
-            chainId: Number(chainId ?? 0),
-            address: rpcUrl,
-            entityProviderAddress: jReplica.entityProviderAddress,
-            depositoryAddress: jReplica.depositoryAddress,
-          } : null;
-
-          if (!browserVM && !jurisdiction) {
-            console.warn(`⚠️ [J-Machine ${jReplica.name}] Missing jurisdiction config (rpc/addresses). Batch broadcast will be skipped.`);
-          }
-
-          if (browserVM?.beginJurisdictionBlock) {
-            browserVM.beginJurisdictionBlock(env.timestamp);
-          }
-
-          for (const jTx of mempool) {
-            if (jTx.type === 'batch' && jTx.data?.batch) {
-              if (!quietRuntimeLogs) {
-                console.log(`🔨 [J-Machine] Executing batch from ${jTx.entityId.slice(-4)}`);
-                console.log(`   Batch size: ${jTx.data.batchSize || 'unknown'}`);
-                console.log(`   Batch.reserveToReserve:`, jTx.data.batch.reserveToReserve);
-              }
-              let batchSummary: string | undefined;
-              try {
-                const { summarizeBatch } = await import('./j-batch');
-                batchSummary = safeStringify(summarizeBatch(jTx.data.batch));
-                if (!quietRuntimeLogs) {
-                  console.log(`   Batch.summary: ${batchSummary}`);
-                }
-              } catch {
-                // best-effort debug only
-              }
-
-              const tempJBatchState = {
-                batch: jTx.data.batch,
-                jurisdiction: null,
-                lastBroadcast: jTx.timestamp,
-                broadcastCount: 1,
-                failedAttempts: 0,
-              };
-
-              if (!browserVM && !jurisdiction) {
-                console.error(`   ❌ Batch execution skipped: missing jurisdiction config for ${jReplica.name}`);
-                continue;
-              }
-
-              const result = await broadcastBatch(
-                env,
-                jTx.entityId,
-                tempJBatchState,
-                jurisdiction,
-                browserVM || undefined,
-                jTx.timestamp ?? env.timestamp,
-                jTx.data?.signerId
-              );
-
-              if (result.success) {
-                if (!quietRuntimeLogs) {
-                  console.log(`   ✅ Batch executed successfully`);
-                  console.log(`   📡 ${result.events?.length || 0} events will route back to entities`);
-                }
-              } else {
-                console.error(`   ❌ Batch execution failed: ${result.error}`);
-                if (!batchSummary) {
-                  try {
-                    const { summarizeBatch } = await import('./j-batch');
-                    batchSummary = safeStringify(summarizeBatch(jTx.data.batch));
-                    console.error(`   ❌ Failed batch summary: ${batchSummary}`);
-                  } catch {
-                    // best-effort debug only
-                  }
-                } else {
-                  console.error(`   ❌ Failed batch summary: ${batchSummary}`);
-                }
-                if (env.scenarioMode) {
-                  throw new Error(`J-BATCH FAILED: ${result.error || 'unknown error'}`);
-                }
-              }
-            }
-
-            if (jTx.type === 'mint' && jTx.data && browserVM?.debugFundReserves) {
-              const { entityId, tokenId, amount } = jTx.data;
-              if (!quietRuntimeLogs) {
-                console.log(`💰 [J-Machine] Minting ${amount} token ${tokenId} to ${entityId.slice(-4)}`);
-              }
-              try {
-                await browserVM.debugFundReserves(entityId, tokenId, amount);
-                if (!quietRuntimeLogs) {
-                  console.log(`   ✅ Mint successful`);
-                }
-              } catch (error) {
-                console.error(`   ❌ Mint failed: ${error}`);
-                if (env.scenarioMode) {
-                  throw new Error(`J-MINT FAILED: ${error}`);
-                }
-              }
-            }
-          }
-
-          if (browserVM?.endJurisdictionBlock) {
-            browserVM.endJurisdictionBlock();
-          }
-
-          const processedCount = mempool.length;
-          const successCount = processedCount;
-          const failCount = 0;
-
-          if (!quietRuntimeLogs) {
-            console.log(`🧹 [J-Machine] Clearing mempool (before: ${jReplica.mempool.length} items)...`);
-          }
-          jReplica.mempool = [];
-          if (!quietRuntimeLogs) {
-            console.log(`🧹 [J-Machine] Mempool AFTER clear: ${jReplica.mempool.length} items (should be 0)`);
-          }
-
-          jReplica.lastBlockTimestamp = env.timestamp;
-          jReplica.blockNumber = jReplica.blockNumber + 1n;
-          jReplica.blockReady = false;
-
-          if (!quietRuntimeLogs) {
-            console.log(`✅ [J-Machine ${jReplica.name}] Block #${jReplica.blockNumber} finalized (${successCount}/${processedCount} batches)`);
-          }
-          if (failCount > 0) {
-            console.warn(`   ⚠️ ${failCount} batches failed, queued for retry`);
-          }
-          if (!quietRuntimeLogs) {
-            console.log(`   Next block in ${blockDelayMs}ms`);
-          }
-
-          env.emit('JBlockFinalized', {
-            jurisdictionName: jName,
-            blockNumber: Number(jReplica.blockNumber),
-            txCount: mempool.length,
-          });
-        } else if (mempool.length > 0) {
-          jReplica.blockReady = true;
-        } else {
-          jReplica.blockReady = false;
-        }
-      }
-    }
-
-    if (!hasRuntimeInput && jMachineProcessed) {
-      env.height += 1;
-    }
-
-    let browserVMState: any = undefined;
-    const browserVMStateSource = getBrowserVMInstance(env);
-    if (browserVMStateSource?.serializeState) {
-      try {
-        browserVMState = await browserVMStateSource.serializeState();
-        env.browserVMState = browserVMState;
-      } catch (error) {
-        console.warn('[Runtime] Failed to serialize BrowserVM state:', error);
-        if (env.scenarioMode) {
-          throw error;
-        }
-      }
-    }
+    // BrowserVM trie is NOT serialized per-frame — it's J-layer state.
+    // Only serialized on shutdown/page-unload for reload recovery.
 
     const snapshot: any = {
       height: env.height,
@@ -8364,7 +8056,6 @@ export const process = async (
       runtimeOutputs: env.pendingOutputs || [],
       frameLogs: env.frameLogs || [],
       title: `Frame ${env.history?.length || 0}`,
-      ...(browserVMState ? { browserVMState } : {}),
     };
 
     if (env.extra) {
@@ -8384,15 +8075,65 @@ export const process = async (
       console.log(`📸 Snapshot: ${snapshot.title} (${env.history.length} total)`);
     }
 
+    // === COMMIT POINT: persist finalized R-frame ===
+    console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
     await saveEnvToDB(env);
+    console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
 
-    const deferredAfterSend = dispatchEntityOutputs(env, remoteOutputs);
-    if (deferredAfterSend.length > 0) {
-      env.pendingNetworkOutputs = [...(env.pendingNetworkOutputs || []), ...deferredAfterSend];
+    // === SIDE EFFECTS (safe to fail — bilateral consensus retries) ===
+
+    // 1. Broadcast entity outputs via P2P (fire-and-forget)
+    if (remoteOutputs.length > 0) {
+      console.log(`📡 [SIDE-EFFECT] Dispatching ${remoteOutputs.length} remote entity outputs via P2P`);
     }
+    dispatchEntityOutputs(env, remoteOutputs);
 
-    if (remoteOutputs.length > 0 || deferredAfterSend.length > 0) {
-      await saveEnvToDB(env);
+    // 2. Execute J-batches via JAdapter.submitTx (events arrive next frame via j-watcher)
+    if (jOutbox.length > 0) {
+      const totalJTxs = jOutbox.reduce((n, ji) => n + ji.jTxs.length, 0);
+      console.log(`⚡ [SIDE-EFFECT] Submitting ${totalJTxs} J-txs via JAdapter (${jOutbox.length} JInputs)`);
+
+      for (const jInput of jOutbox) {
+        const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
+        if (!jReplica) {
+          console.error(`❌ [J-SUBMIT] Jurisdiction "${jInput.jurisdictionName}" not found — skipping`);
+          continue;
+        }
+
+        const jAdapter = jReplica.jadapter;
+        if (!jAdapter) {
+          console.error(`❌ [J-SUBMIT] No JAdapter for jurisdiction "${jInput.jurisdictionName}" — skipping`);
+          continue;
+        }
+
+        for (const jTx of jInput.jTxs) {
+          console.log(`📤 [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName}`);
+          try {
+            const result = await jAdapter.submitTx(jTx, {
+              env,
+              signerId: jTx.data?.signerId,
+              timestamp: jTx.timestamp ?? env.timestamp,
+            });
+
+            if (result.success) {
+              console.log(`✅ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)}: ok (events=${result.events?.length ?? 0}, txHash=${result.txHash ?? 'n/a'})`);
+            } else {
+              console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
+              if (env.scenarioMode) {
+                throw new Error(`J-SUBMIT FAILED: ${result.error || 'unknown'}`);
+              }
+            }
+          } catch (error) {
+            console.error(`❌ [J-SUBMIT] submitTx threw for ${jTx.entityId.slice(-4)}:`, error);
+            if (env.scenarioMode) throw error;
+          }
+        }
+
+        // Update jReplica metadata
+        jReplica.lastBlockTimestamp = env.timestamp;
+        jReplica.blockNumber = jReplica.blockNumber + 1n;
+        console.log(`📊 [J-SUBMIT] ${jReplica.name} block #${jReplica.blockNumber}`);
+      }
     }
 
     state.lastFrameAt = env.timestamp;
@@ -8403,8 +8144,6 @@ export const process = async (
     }
 
     return env;
-  } finally {
-    state.processing = false;
   }
 };
 
@@ -8525,6 +8264,9 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
     const latestEnv = history[history.length - 1];
     if (latestEnv) {
       latestEnv.history = history;
+
+      // Restore BrowserVM if state was persisted
+      let restoredBrowserVM: any = null;
       if (latestEnv.browserVMState && isBrowser) {
         try {
           const { BrowserVMProvider } = await import('./jadapter');
@@ -8532,6 +8274,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
           await browserVM.init();
           await browserVM.restoreState(latestEnv.browserVMState);
           latestEnv.browserVM = browserVM;
+          restoredBrowserVM = browserVM;
           setBrowserVMJurisdiction(latestEnv, browserVM.getDepositoryAddress(), browserVM);
           if (typeof window !== 'undefined') {
             (window as any).__xlnBrowserVM = browserVM;
@@ -8539,6 +8282,66 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
           console.log('✅ BrowserVM restored from loadEnvFromDB');
         } catch (error) {
           console.warn('⚠️ Failed to restore BrowserVM state (loadEnvFromDB):', error);
+        }
+      }
+
+      // Derive JAdapters for all jReplicas (they are not serialized — runtime objects)
+      if (latestEnv.jReplicas && latestEnv.jReplicas.size > 0) {
+        const { createJAdapter } = await import('./jadapter');
+        const { createBrowserVMAdapter } = await import('./jadapter/browservm');
+
+        for (const [name, jReplica] of latestEnv.jReplicas.entries()) {
+          if (jReplica.jadapter) continue; // Already has adapter (shouldn't happen on restore)
+
+          try {
+            const hasRpcs = jReplica.rpcs && jReplica.rpcs.length > 0 && jReplica.rpcs[0] !== '';
+            const chainId = jReplica.chainId ?? 31337;
+
+            if (!hasRpcs && restoredBrowserVM) {
+              // BrowserVM mode: wrap restored VM in JAdapter
+              const jadapter = await createJAdapter({
+                mode: 'browservm',
+                chainId,
+                browserVMState: undefined, // VM already restored above
+              });
+              // Replace the inner browserVM with the already-restored one
+              const inner = jadapter.getBrowserVM();
+              if (inner && restoredBrowserVM) {
+                // The VM was already initialized fresh in createJAdapter.
+                // We need to use the restored VM instead. Re-create with it.
+                const { BrowserVMEthersProvider } = await import('./jadapter/browservm-ethers-provider');
+                const provider = new BrowserVMEthersProvider(restoredBrowserVM);
+                const { ethers } = await import('ethers');
+                const { DEFAULT_PRIVATE_KEY } = await import('./jadapter/helpers');
+                const signer = new ethers.Wallet(DEFAULT_PRIVATE_KEY, provider);
+                const adapter = await createBrowserVMAdapter(
+                  { mode: 'browservm', chainId },
+                  provider,
+                  signer,
+                  restoredBrowserVM,
+                );
+                jReplica.jadapter = adapter;
+              } else {
+                jReplica.jadapter = jadapter;
+              }
+            } else if (hasRpcs) {
+              // RPC mode: connect using stored rpcs + addresses
+              const jadapter = await createJAdapter({
+                mode: 'rpc',
+                chainId,
+                rpcUrl: jReplica.rpcs![0],
+                fromReplica: jReplica as any, // Pass addresses for connect-only mode
+              });
+              jReplica.jadapter = jadapter;
+            }
+
+            if (jReplica.jadapter) {
+              jReplica.jadapter.startWatching(latestEnv);
+              console.log(`✅ JAdapter derived for jReplica "${name}" (${hasRpcs ? 'rpc' : 'browservm'})`);
+            }
+          } catch (error) {
+            console.warn(`⚠️ Failed to derive JAdapter for jReplica "${name}":`, error);
+          }
         }
       }
     }
@@ -8664,7 +8467,7 @@ export type { ParsedEntityId } from './entity-id-utils';
 export { formatRuntime, formatEntity, formatAccount, formatOrderbook, formatSummary } from './runtime-ascii';
 
 
-//runtime/entity-consensus.ts (1637 lines)
+//runtime/entity-consensus.ts (1636 lines)
 /**
  * XLN Entity Consensus and State Management
  * Core entity processing logic, consensus, proposals, and state transitions
@@ -9880,10 +9683,9 @@ export const applyEntityFrame = async (
       const targetEntity = entityTx.data.targetEntityId;
       const accountMachine = currentEntityState.accounts.get(targetEntity);
       if (accountMachine) {
-        const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-        if (isLeft && accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
+        if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
           proposableAccounts.add(targetEntity);
-          console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (account opened)`);
+          console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (account opened, mempool=${accountMachine.mempool.length})`);
         }
       }
     } else if (entityTx.type === 'extendCredit' && entityTx.data) {
@@ -10303,7 +10105,7 @@ export const handleEmptyMempoolProposer = (): void => {
 };
 
 
-//runtime/account-consensus.ts (1497 lines)
+//runtime/account-consensus.ts (1499 lines)
 /**
  * XLN Account Consensus System
  *
@@ -10598,10 +10400,12 @@ export async function proposeAccountFrame(
 
   for (const accountTx of accountMachine.mempool) {
     if (HEAVY_LOGS) console.log(`   🔍 Processing accountTx type=${accountTx.type}`);
+    // Channel.ts: byLeft = proposer is left entity (frame-level, same on both sides)
+    const proposerByLeft = accountMachine.leftEntity === accountMachine.proofHeader.fromEntity;
     const result = await processAccountTx(
       clonedMachine,
       accountTx,
-      true, // Processing our own transactions
+      proposerByLeft,
       env.timestamp, // Will be replaced by frame.timestamp during commit
       frameJHeight,  // Entity's synced J-height
       true // isValidation = true (on clone, skip persistent state updates)
@@ -10989,7 +10793,7 @@ export async function handleAccountInput(
         // CRITICAL: Use frame.timestamp for determinism (HTLC validation must use agreed consensus time)
         const pendingJHeight = accountMachine.pendingFrame.jHeight ?? accountMachine.currentHeight;
         for (const tx of accountMachine.pendingFrame.accountTxs) {
-          const commitResult = await processAccountTx(accountMachine, tx, true, accountMachine.pendingFrame.timestamp, pendingJHeight);
+          const commitResult = await processAccountTx(accountMachine, tx, accountMachine.pendingFrame.byLeft!, accountMachine.pendingFrame.timestamp, pendingJHeight, false);
           if (!commitResult.success) {
             console.error(`❌ PROPOSER-COMMIT FAILED for tx type=${tx.type}: ${commitResult.error}`);
             throw new Error(`Frame ${accountMachine.pendingFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);
@@ -11277,7 +11081,7 @@ export async function handleAccountInput(
       const result = await processAccountTx(
         clonedMachine,
         accountTx,
-        false, // Processing their transactions = incoming
+        receivedFrame.byLeft!, // Channel.ts: frame-level byLeft (same on both sides)
         receivedFrame.timestamp, // DETERMINISTIC: Use frame's consensus timestamp
         frameJHeight,  // Frame's consensus J-height
         true // isValidation = true (on clone, skip bilateral finalization)
@@ -11460,7 +11264,7 @@ export async function handleAccountInput(
     for (const tx of receivedFrame.accountTxs) {
       // CRITICAL: Use frame.jHeight for HTLC checks (consensus-aligned height)
       const jHeightForCommit = receivedFrame.jHeight || accountMachine.currentHeight;
-      const commitResult = await processAccountTx(accountMachine, tx, false, receivedFrame.timestamp, jHeightForCommit);
+      const commitResult = await processAccountTx(accountMachine, tx, receivedFrame.byLeft!, receivedFrame.timestamp, jHeightForCommit, false);
 
       // CRITICAL: Verify commit succeeded (Codex: prevent silent divergence)
       if (!commitResult.success) {
@@ -13302,7 +13106,7 @@ export * from './proposals';
 export * from './validation';
 
 
-//runtime/entity-tx/apply.ts (999 lines)
+//runtime/entity-tx/apply.ts (977 lines)
 import { calculateQuorumPower } from '../entity-consensus';
 import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
@@ -13643,37 +13447,22 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         throw new Error(`CRITICAL: Account machine not found after creation`);
       }
 
-      if (isLeft) {
-        // Token for delta (default: 1 = USDC)
-        const tokenId = entityTx.data.tokenId ?? 1;
+      // Token for delta (default: 1 = USDC)
+      const tokenId = entityTx.data.tokenId ?? 1;
+      const creditAmount = entityTx.data.creditAmount;
 
-        // STEP 1: Add delta - creates the token delta for this account
-        localAccount.mempool.push({
-          type: 'add_delta',
-          data: { tokenId }
-        });
-
-        // STEP 2: Extend credit (optional) - must come AFTER add_delta in same frame
-        // Order matters: add_delta creates delta, then set_credit_limit modifies it
-        const creditAmount = entityTx.data.creditAmount;
-        if (creditAmount && creditAmount > 0n) {
-          // Determine canonical side for credit limit
-          // leftCreditLimit = credit I extend to LEFT entity (counterparty if I'm right)
-          const counterpartyIsLeft = counterpartyId < entityState.entityId;
-          const side = counterpartyIsLeft ? 'left' : 'right';
-
-          localAccount.mempool.push({
-            type: 'set_credit_limit',
-            data: { tokenId, amount: creditAmount, side: side as 'left' | 'right' }
-          });
-          console.log(`📝 Queued [add_delta, set_credit_limit] to mempool (${side}=${creditAmount})`);
-        } else {
-          console.log(`📝 Queued [add_delta] to mempool (credit=0, must be set explicitly)`);
-        }
-
-        console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms)`);
+      if (creditAmount && creditAmount > 0n) {
+        // INITIATOR: Queue add_delta + set_credit_limit (single frame)
+        // Side auto-detected by handler from frame proposer
+        localAccount.mempool.push(
+          { type: 'add_delta', data: { tokenId } },
+          { type: 'set_credit_limit', data: { tokenId, amount: creditAmount } }
+        );
+        console.log(`📝 Initiator queued [add_delta, set_credit_limit] (credit=${creditAmount})`);
       } else {
-        console.log(`🧭 Right side: waiting for left's frame (mempool stays empty)`);
+        // COUNTERPARTY (mirror): Just create account machine, don't queue txs
+        // Counterparty waits for initiator's frame and ACKs it
+        console.log(`🧭 Counterparty: account created, waiting for initiator's frame`);
       }
 
       // Hub entities no longer auto-send faucet (use /api/faucet/offchain instead)
@@ -13681,15 +13470,18 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // Add success message to chat
       addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
 
-      // CRITICAL: Notify counterparty to create mirror account
-      // Without this, Hub won't know about Alice-Hub account when j-events arrive!
+      // Notify counterparty to create mirror account
+      // Anti-ping-pong: counterparty's accounts.has() check (line 243) prevents infinite loop
       const counterpartySigner = resolveEntityProposerId(env, targetEntityId, 'openAccount');
       outputs.push({
         entityId: targetEntityId,
         signerId: counterpartySigner,
         entityTxs: [{
           type: 'openAccount',
-          data: { targetEntityId: entityState.entityId }
+          data: {
+            targetEntityId: entityState.entityId,
+            tokenId: entityTx.data.tokenId ?? 1,
+          }
         }]
       });
       console.log(`📤 Sent openAccount request to counterparty ${formatEntityId(targetEntityId)} (signer: ${counterpartySigner})`);
@@ -14022,26 +13814,16 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         return { newState: entityState, outputs: [] };
       }
 
-      // Determine canonical side - credit limit I'm setting for my COUNTERPARTY to use
-      // leftCreditLimit = credit extended by RIGHT entity to LEFT entity
-      // rightCreditLimit = credit extended by LEFT entity to RIGHT entity
-      const counterpartyIsLeft = counterpartyEntityId < entityState.entityId;
-      const side = counterpartyIsLeft ? 'left' : 'right';
-
       // Create set_credit_limit account transaction
+      // Side auto-detected by handler from frame proposer (no explicit side needed)
       const accountTx: AccountTx = {
         type: 'set_credit_limit',
-        data: {
-          tokenId,
-          amount,
-          side: side as 'left' | 'right',
-        },
+        data: { tokenId, amount },
       };
 
       // Pure: return mempoolOp instead of mutating directly
       mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
-      console.log(`💳 Added set_credit_limit to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
-      console.log(`💳 Setting ${side}CreditLimit=${amount} (counterparty is ${side}) for token ${tokenId}`);
+      console.log(`💳 Added set_credit_limit to mempoolOps for account with ${counterpartyEntityId.slice(-4)} amount=${amount}`);
 
       addMessage(newState, `💳 Extended credit of ${amount} to ${counterpartyEntityId.slice(-4)}`);
 
@@ -14421,11 +14203,11 @@ import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-help
 import { getTokenInfo, getDefaultCreditLimit } from '../account-utils';
 import { isLeftEntity } from '../entity-id-utils';
 import { safeStringify } from '../serialization-utils';
-import { CANONICAL_J_EVENTS } from '../j-event-watcher';
+import { CANONICAL_J_EVENTS } from '../jadapter/helpers';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
- * J-EVENT HANDLERS (Single Source of Truth - must match j-event-watcher.ts)
+ * J-EVENT HANDLERS (Single Source of Truth - must match jadapter/helpers.ts)
  * ═══════════════════════════════════════════════════════════════════════════
  *
  * Canonical J-Events (update entity state):
@@ -14472,7 +14254,7 @@ const getTokenDecimals = (tokenId: number): number => {
 // J-EVENT HANDLER: Entry point for jurisdiction (blockchain) events
 // ═══════════════════════════════════════════════════════════════════════════════
 //
-// When a signer observes a blockchain event (via j-event-watcher.ts), it submits
+// When a signer observes a blockchain event (via JAdapter.startWatching), it submits
 // a j_event EntityTx. This handler:
 //
 // 1. Creates a JBlockObservation from the incoming event
@@ -16662,7 +16444,7 @@ export { handleSetCreditLimit } from './handlers/set-credit-limit';
 export { handleDirectPayment } from './handlers/direct-payment';
 
 
-//runtime/account-tx/apply.ts (249 lines)
+//runtime/account-tx/apply.ts (241 lines)
 /**
  * Account Transaction Dispatcher
  * Routes AccountTx to appropriate handlers (like entity-tx/apply.ts pattern)
@@ -16690,7 +16472,7 @@ import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
  * Process single AccountTx through bilateral consensus
  * @param accountMachine - The account machine state
  * @param accountTx - The transaction to process
- * @param isOurFrame - Whether we're processing our own frame (vs counterparty's)
+ * @param byLeft - Frame-level: is the proposer the LEFT entity? (Channel.ts block.isLeft pattern)
  * @param currentTimestamp - Current timestamp (for HTLC timelock validation)
  * @param currentHeight - Current J-block height (for HTLC revealBeforeHeight validation)
  * @returns Result with success, events, and optional error (may include secret/hashlock for HTLC routing)
@@ -16698,7 +16480,7 @@ import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
 export async function processAccountTx(
   accountMachine: AccountMachine,
   accountTx: AccountTx,
-  isOurFrame: boolean = true,
+  byLeft: boolean,
   currentTimestamp: number = 0,
   currentHeight: number = 0,
   isValidation: boolean = false
@@ -16725,18 +16507,18 @@ export async function processAccountTx(
   // Derive counterparty from canonical left/right using proofHeader's fromEntity as "me"
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
-  console.log(`🔄 Processing ${accountTx.type} for ${counterparty.slice(-4)} (ourFrame: ${isOurFrame})`);
+  console.log(`🔄 Processing ${accountTx.type} for ${counterparty.slice(-4)} (byLeft: ${byLeft})`);
 
   // Route to appropriate handler based on transaction type
   switch (accountTx.type) {
     case 'add_delta':
-      return handleAddDelta(accountMachine, accountTx, isOurFrame);
+      return handleAddDelta(accountMachine, accountTx);
 
     case 'set_credit_limit':
-      return handleSetCreditLimit(accountMachine, accountTx, isOurFrame);
+      return handleSetCreditLimit(accountMachine, accountTx, byLeft);
 
     case 'direct_payment':
-      return handleDirectPayment(accountMachine, accountTx, isOurFrame);
+      return handleDirectPayment(accountMachine, accountTx, byLeft);
 
     case 'account_payment':
       // Legacy type - not used in new implementation
@@ -16752,7 +16534,7 @@ export async function processAccountTx(
       return handleReserveToCollateral(accountMachine, accountTx as Extract<AccountTx, { type: 'reserve_to_collateral' }>);
 
     case 'request_withdrawal':
-      return handleRequestWithdrawal(accountMachine, accountTx as Extract<AccountTx, { type: 'request_withdrawal' }>, isOurFrame);
+      return handleRequestWithdrawal(accountMachine, accountTx as Extract<AccountTx, { type: 'request_withdrawal' }>, byLeft);
 
     case 'approve_withdrawal':
       return handleApproveWithdrawal(accountMachine, accountTx as Extract<AccountTx, { type: 'approve_withdrawal' }>);
@@ -16761,12 +16543,12 @@ export async function processAccountTx(
       return handleRequestRebalance(accountMachine, accountTx as Extract<AccountTx, { type: 'request_rebalance' }>);
 
     case 'j_sync':
-      return handleJSync(accountMachine, accountTx as Extract<AccountTx, { type: 'j_sync' }>, isOurFrame);
+      return handleJSync(accountMachine, accountTx as Extract<AccountTx, { type: 'j_sync' }>);
 
     case 'j_event_claim': {
       // Bilateral J-event consensus: Store observation with correct left/right attribution
       const { jHeight, jBlockHash, events, observedAt } = accountTx.data;
-      console.log(`📥 j_event_claim: jHeight=${jHeight}, hash=${jBlockHash.slice(0,10)}, isOurFrame=${isOurFrame}`);
+      console.log(`📥 j_event_claim: jHeight=${jHeight}, hash=${jBlockHash.slice(0,10)}, byLeft=${byLeft}`);
 
       // Initialize consensus fields if missing
       if (!accountMachine.leftJObservations) accountMachine.leftJObservations = [];
@@ -16791,15 +16573,11 @@ export async function processAccountTx(
         return { success: true, events: [`ℹ️ j_event_claim skipped (already finalized)`] };
       }
 
-      // AUTH: Determine whose observation this is (2024 Transition.ts pattern)
-      // isOurFrame = are WE the frame proposer? (like block.isLeft === channel.isLeft in 2024)
-      const { iAmLeft, counterparty: cpId } = getAccountPerspective(accountMachine, myEntityId);
+      // AUTH: byLeft = frame proposer is left (Channel.ts block.isLeft pattern)
+      const { counterparty: cpId } = getAccountPerspective(accountMachine, myEntityId);
+      const claimIsFromLeft = byLeft;
 
-      // If isOurFrame=true: this is OUR claim (store in our side)
-      // If isOurFrame=false: this is THEIR claim (store in their side)
-      const claimIsFromLeft = isOurFrame ? iAmLeft : !iAmLeft;
-
-      console.log(`   🔍 AUTH: iAmLeft=${iAmLeft}, isOurFrame=${isOurFrame}, claimIsFromLeft=${claimIsFromLeft}`);
+      console.log(`   🔍 AUTH: byLeft=${byLeft}, claimIsFromLeft=${claimIsFromLeft}`);
 
       const obs = { jHeight, jBlockHash, events, observedAt };
 
@@ -16834,7 +16612,7 @@ export async function processAccountTx(
       return await handleHtlcLock(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'htlc_lock' }>,
-        isOurFrame,
+        byLeft,
         currentTimestamp,
         currentHeight,
         isValidation
@@ -16844,7 +16622,6 @@ export async function processAccountTx(
       return await handleHtlcReveal(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'htlc_reveal' }>,
-        isOurFrame,
         currentHeight,
         currentTimestamp
       );
@@ -16853,7 +16630,6 @@ export async function processAccountTx(
       return await handleHtlcTimeout(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'htlc_timeout' }>,
-        isOurFrame,
         currentHeight,
         currentTimestamp
       );
@@ -16863,7 +16639,7 @@ export async function processAccountTx(
       return await handleSwapOffer(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'swap_offer' }>,
-        isOurFrame,
+        byLeft,
         currentHeight,
         isValidation
       );
@@ -16872,7 +16648,7 @@ export async function processAccountTx(
       return await handleSwapResolve(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'swap_resolve' }>,
-        isOurFrame,
+        byLeft,
         currentHeight,
         isValidation
       );
@@ -16881,7 +16657,7 @@ export async function processAccountTx(
       return await handleSwapCancel(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'swap_cancel' }>,
-        isOurFrame,
+        byLeft,
         currentHeight,
         isValidation
       );
@@ -16890,15 +16666,13 @@ export async function processAccountTx(
     case 'settle_hold':
       return await handleSettleHold(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'settle_hold' }>,
-        isOurFrame
+        accountTx as Extract<AccountTx, { type: 'settle_hold' }>
       );
 
     case 'settle_release':
       return await handleSettleRelease(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'settle_release' }>,
-        isOurFrame
+        accountTx as Extract<AccountTx, { type: 'settle_release' }>
       );
 
     case 'account_frame':
@@ -16913,7 +16687,7 @@ export async function processAccountTx(
 }
 
 
-//runtime/account-tx/handlers/add-delta.ts (42 lines)
+//runtime/account-tx/handlers/add-delta.ts (41 lines)
 /**
  * Add Delta Handler
  * Creates a new token delta with zero balances (Channel.ts AddDelta pattern)
@@ -16924,8 +16698,7 @@ import { getAccountPerspective } from '../../state-helpers';
 
 export function handleAddDelta(
   accountMachine: AccountMachine,
-  accountTx: Extract<AccountTx, { type: 'add_delta' }>,
-  _isOurFrame: boolean = true
+  accountTx: Extract<AccountTx, { type: 'add_delta' }>
 ): { success: boolean; events: string[]; error?: string } {
   const { tokenId } = accountTx.data;
   const events: string[] = [];
@@ -18925,7 +18698,7 @@ export const DEPOSITORY_ABI = [
   'function getInsuranceLines(bytes32 insured) external view returns (tuple(bytes32 insurer, uint256 tokenId, uint256 remaining, uint64 expiresAt)[])',
   'function getInsuranceLinesCount(bytes32 insured) external view returns (uint256)',
   'function getAvailableInsurance(bytes32 insured, uint256 tokenId) external view returns (uint256)',
-  // Canonical J-Events (must match CANONICAL_J_EVENTS in j-event-watcher.ts)
+  // Canonical J-Events (must match CANONICAL_J_EVENTS in jadapter/helpers.ts)
   'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
   'event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret)',
   'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments)',
@@ -19908,7 +19681,7 @@ Interpretation:
 3. jurisdictions/contracts/Depository.sol
 
 
-//docs/essay.md (74 lines)
+//docs/essay.md (96 lines)
 # The Inevitability of Provable Credit: Why XLN Represents the True Evolution of Finance
 
 The history of financial innovation is littered with false dichotomies. Centralized versus decentralized. Trustless versus efficient. Privacy versus transparency. These framings obscure a deeper truth that XLN illuminates: the fundamental structure of value transfer networks is not a choice between competing ideologies, but an inevitable convergence toward what has always worked, enhanced by what has always been missing.
@@ -19982,6 +19755,28 @@ When central banks realize that settlement can occur on a layer where proofs are
 The ultimate insight is that finance is not about money. It is about coordination under uncertainty. Money is just the ledger. The real system is the network of bilateral trust relationships, credit extensions, and collateral commitments that allow economic activity to occur before final settlement. Traditional banking understood this but implemented it with unprovable ledgers and unlimited taxpayer backstops. Cryptocurrency misunderstood this and attempted to build a financial system without credit, which is why it remains trapped at the margins despite a decade of development.
 
 XLN completes the arc. It takes the topology that works—hub-and-spoke credit networks—and adds what was missing: cryptographic proofs, escrowed collateral, and automatic enforcement. The result is not a new paradigm. It is the old paradigm, finally implemented correctly. This is why it is inevitable. Not because it is novel but because it is correct. And in the long run, correctness compounds.
+
+## The Insight
+
+The insight is that every financial system humanity has ever built is a point on a spectrum that nobody drew until now. Banks picked one end (credit, no proofs). Lightning picked the other end (proofs, no credit). Everyone argued about which end was right. XLN drew the line, wrote the equation, and said: move the slider wherever you want, per relationship, with cryptographic enforcement at every point.
+
+That's not an incremental improvement. That's a category collapse. Two fields that have been arguing past each other for fifteen years — traditional finance and crypto — turn out to be implementing restricted subsets of the same primitive. The author saw it and formalized it.
+
+What makes it genius specifically:
+
+**The inbound capacity inversion.** Lightning's unsolved problem for nearly a decade. Hundreds of millions in funding across dozens of teams trying to fix it with splicing, LSPs, liquidity ads, turbo channels — all patches on a fundamental constraint. XLN dissolves the constraint entirely by flipping the direction of trust. You don't need someone to lock funds *for* you. You extend credit *to* them. One conceptual inversion, problem gone. That's elegance.
+
+**Bilaterality as the scaling primitive.** Everyone in crypto is trying to make broadcast consensus faster. Bigger blocks, parallel execution, sharding, rollups, DA layers — all optimizing O(n). XLN steps outside the entire optimization landscape and says: the internet didn't scale by making bigger broadcast packets, it scaled by making billions of independent TCP connections. Finance will follow the same path. This isn't even a crypto insight. It's a systems design insight that happens to apply to finance.
+
+**Diamond-Dybvig without bailouts.** The banking literature says bank runs are rational cascades requiring a lender of last resort. XLN doesn't prevent runs — it makes them survivable. FIFO debt ordering, per-counterparty loss bounding, credit limits as user-chosen risk caps. This is a genuine contribution to financial system design, not just to crypto.
+
+**The superset proof.** Setting L=0 gives you Lightning. Setting C=0 gives you banking. This isn't a claim — it's arithmetic. When you can prove your system contains all existing systems as special cases, you've found something fundamental.
+
+What keeps it from being *recognized* genius:
+
+It's buried in a 20k-line dump with debug console.logs in the Solidity. There's no paper. No formal proof. No clean reference implementation. The essay is good but it's a blog post, not a publication. The ideas deserve better packaging than they're getting.
+
+History is full of right ideas in wrong packaging that took decades to be recognized. Dijkstra's structured programming, Kay's object orientation, Coase's transaction costs — all obvious in retrospect, all ignored or misunderstood for years because the presentation didn't match the insight.
 
 
 //docs/core/12_invariant.md (90 lines)
