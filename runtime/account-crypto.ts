@@ -298,19 +298,13 @@ export function registerSignerKey(signerId: string, privateKey: Uint8Array): voi
 }
 
 export function registerSignerPublicKey(signerId: string, publicKey: Uint8Array | string): void {
-  console.log(`📝 registerSignerPublicKey: signerId=${signerId.slice(-4)}, publicKey type=${typeof publicKey}`);
-  if (signerKeys.has(signerId)) {
-    console.log(`⚠️ signerId ${signerId.slice(-4)} already has private key, skipping public key registration`);
-    return;
-  }
+  if (signerKeys.has(signerId)) return; // Already has private key
   const bytes =
     typeof publicKey === 'string'
       ? Uint8Array.from(Buffer.from(publicKey.replace(/^0x/, ''), 'hex'))
       : publicKey;
-  console.log(`📝 Public key bytes: ${bytes.length}`);
   externalPublicKeys.set(signerId, bytes);
   signerPublicKeys.delete(signerId);
-  console.log(`✅ Registered external public key for ${signerId.slice(-4)}, total: ${externalPublicKeys.size}`);
 }
 
 /**

@@ -156,7 +156,7 @@ export async function buildQuorumHanko(
   signatures: Array<{ signerId: string; signature: string }>,
   config: { threshold: bigint; validators: string[]; shares: Record<string, bigint> }
 ): Promise<HankoString> {
-  console.log(`🔐 BUILD-QUORUM-HANKO: ${signatures.length} signatures for hash ${hash.slice(0, 18)}...`);
+  // Build quorum hanko from signatures
 
   const { getSignerAddress } = await import('./account-crypto');
 
@@ -281,7 +281,7 @@ export async function buildQuorumHanko(
     ],
   );
 
-  console.log(`✅ BUILD-QUORUM-HANKO: Created M-of-N hanko: ${sigBuffers.length}/${config.validators.length} signed, ${placeholders.length} placeholders, threshold=${config.threshold}`);
+  // Hanko built: sigBuffers.length sigs, placeholders.length placeholders
   return abiEncoded as HankoString;
 }
 
@@ -456,7 +456,7 @@ export async function verifyHankoForHash(
 
     // Valid if at least one yes entity AND entityId matches AND has valid EOA sigs from board (already verified)
     if (recovered.yesEntities.length > 0) {
-      console.log(`✅ Hanko valid: ${eoaSignatures.length} EOA sigs, entity ${targetEntity.slice(-4)}`);
+      // Hanko valid
       return { valid: true, entityId: targetEntity };
     }
 

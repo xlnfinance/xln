@@ -151,7 +151,7 @@ export const verifySignatureRecovery = async (
 // === SIGNATURE PACKING (Real Version) ===
 
 export const packRealSignatures = (signatures: Buffer[]): Buffer => {
-  console.log(`📦 Packing ${signatures.length} REAL signatures...`);
+  // Pack signatures into compact format
 
   if (signatures.length === 0) {
     return bufferAlloc(0);
@@ -195,7 +195,7 @@ export const packRealSignatures = (signatures: Buffer[]): Buffer => {
   }
 
   const packed = bufferConcat([rsValues, vValues]);
-  console.log(`✅ Packed ${signatures.length} real signatures: ${packed.length} bytes`);
+  // Packed: signatures.length sigs, packed.length bytes
 
   return packed;
 };
@@ -216,7 +216,7 @@ export const detectSignatureCount = (packedSignatures: Buffer): number => {
     const expectedTotal = expectedRSBytes + expectedVBytes;
 
     if (packedSignatures.length === expectedTotal) {
-      console.log(`🔍 Detected ${count} signatures from ${packedSignatures.length} bytes`);
+      // Detected count signatures
       return count;
     }
 
@@ -231,7 +231,7 @@ export const detectSignatureCount = (packedSignatures: Buffer): number => {
 
 export const unpackRealSignatures = (packedSignatures: Buffer): Buffer[] => {
   const signatureCount = detectSignatureCount(packedSignatures);
-  console.log(`📦 Unpacking ${signatureCount} REAL signatures...`);
+  // Unpack signatures
 
   if (signatureCount === 0) return [];
 
@@ -259,7 +259,7 @@ export const unpackRealSignatures = (packedSignatures: Buffer): Buffer[] => {
     signatures.push(signature);
   }
 
-  console.log(`✅ Unpacked ${signatures.length} real signatures`);
+  // Unpacked: signatures.length sigs
   return signatures;
 };
 
@@ -315,7 +315,7 @@ export const buildRealHanko = async (
     }[];
   },
 ): Promise<HankoBytes> => {
-  console.log(`🖋️  Building REAL hanko: ${config.claims.length} claims, ${config.privateKeys.length} signatures`);
+  // Build real hanko with verifiable signatures
 
   // Create REAL Ethereum signatures
   const signatures: Buffer[] = [];
@@ -328,7 +328,7 @@ export const buildRealHanko = async (
     const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
     signerAddresses.push(wallet.address);
 
-    console.log(`🔑 Signing with key ${i + 1}/${config.privateKeys.length}: ${wallet.address.slice(0, 10)}...`);
+    // Sign with key i
 
     // Create real signature
     const signature = await createDirectHashSignature(hashToSign!, privateKey);
@@ -359,9 +359,7 @@ export const buildRealHanko = async (
     claims, // Entity claims (index M..∞)
   };
 
-  console.log(`✅ Built REAL hanko with verifiable signatures`);
-  console.log(`   📋 Signers: ${signerAddresses.map(addr => addr.slice(0, 10) + '...').join(', ')}`);
-  console.log(`   📊 Signature count: ${signatures.length} (detected from length)`);
+  // Built hanko: signatures.length sigs, claims.length claims
 
   return hanko;
 };
@@ -398,15 +396,12 @@ export const recoverHankoEntities = async (
   noEntities: Buffer[];
   claims: HankoClaim[];
 }> => {
-  console.log('🔍 Recovering hanko entities with flashloan governance...');
-
   // Step 1: Unpack and recover signatures
   const signatures = unpackRealSignatures(hanko.packedSignatures);
   const yesEntities: Buffer[] = [];
 
   for (let i = 0; i < signatures.length; i++) {
     try {
-      // Use ethers to recover the signer address
       const sig = signatures[i]!;
       const r = ethers.hexlify(sig.slice(0, 32));
       const s = ethers.hexlify(sig.slice(32, 64));
@@ -415,13 +410,10 @@ export const recoverHankoEntities = async (
       const yParity = (v! >= 27 ? v! - 27 : v!) as 0 | 1;
       const recoveredAddress = ethers.recoverAddress(ethers.hexlify(hash), { r, s, v: v!, yParity });
 
-      // Convert address to bytes32 (same format as Solidity)
       const addressAsBytes32 = Buffer.from(ethers.zeroPadValue(recoveredAddress, 32).slice(2), 'hex');
-
       yesEntities.push(addressAsBytes32);
-      console.log(`✅ Recovered signer ${i + 1}: ${recoveredAddress.slice(0, 10)}...`);
     } catch (error) {
-      console.log(`❌ Failed to recover signature ${i + 1}: ${error}`);
+      console.error(`Hanko: Failed to recover signature ${i + 1}: ${error}`);
     }
   }
 
@@ -439,10 +431,6 @@ export const recoverHankoEntities = async (
     const claim = hanko.claims[claimIndex];
     if (!claim) continue;
 
-    console.log(
-      `🔄 Processing claim ${claimIndex + 1}/${hanko.claims.length}: Entity ${ethers.hexlify(claim.entityId).slice(0, 10)}...`,
-    );
-
     // Calculate voting power with flashloan assumptions
     let totalVotingPower = 0;
     const totalEntities = hanko.placeholders.length + signatures.length + hanko.claims.length;
@@ -451,48 +439,26 @@ export const recoverHankoEntities = async (
       const entityIndex = claim.entityIndexes[i];
       if (entityIndex === undefined) continue;
 
-      // Validate bounds
-      if (entityIndex >= totalEntities) {
-        console.log(`❌ Entity index ${entityIndex} out of bounds (max: ${totalEntities})`);
-        continue;
-      }
+      if (entityIndex >= totalEntities) continue; // Out of bounds
 
       // Prevent self-reference
       const referencedClaimIndex = entityIndex - hanko.placeholders.length - signatures.length;
-      if (referencedClaimIndex === claimIndex) {
-        console.log(`❌ Claim ${claimIndex} cannot reference itself`);
-        continue;
-      }
+      if (referencedClaimIndex === claimIndex) continue;
 
       if (entityIndex < hanko.placeholders.length) {
-        // Index 0..N-1: Placeholder (failed entity) - contributes 0 voting power
-        console.log(`  📍 Index ${entityIndex}: Placeholder (no power)`);
-        continue;
+        continue; // Placeholder — no power
       } else if (entityIndex < hanko.placeholders.length + signatures.length) {
-        // Index N..M-1: EOA signature - verified, contributes full weight
-        const weight = claim.weights[i] || 0;
-        console.log(`  🔑 Index ${entityIndex}: EOA signature (power: ${weight})`);
-        totalVotingPower += weight;
+        totalVotingPower += claim.weights[i] || 0;
       } else {
-        // Index M..∞: Entity claim - ASSUME YES! (flashloan governance)
-        const refClaimIdx = referencedClaimIndex;
-        const weight = claim.weights[i] || 0;
-        console.log(`  🔥 Index ${entityIndex}: ASSUME claim ${refClaimIdx} = YES (power: ${weight})`);
-        totalVotingPower += weight;
+        // Entity claim — ASSUME YES (flashloan governance)
+        totalVotingPower += claim.weights[i] || 0;
       }
     }
 
-    // Check threshold
     if (totalVotingPower >= claim.threshold) {
       yesEntities.push(claim.entityId);
-      console.log(`✅ Claim ${claimIndex + 1} passed: ${totalVotingPower}/${claim.threshold} (flashloan assumption)`);
-    } else {
-      console.log(`❌ Claim ${claimIndex + 1} failed: ${totalVotingPower}/${claim.threshold}`);
-      // Note: In flashloan governance, any failure means total failure
     }
   }
-
-  console.log(`📊 Flashloan recovery complete: ${yesEntities.length} yes, ${hanko.placeholders.length} placeholders`);
 
   return {
     yesEntities,
