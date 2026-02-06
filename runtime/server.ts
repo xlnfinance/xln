@@ -516,7 +516,10 @@ const serveStatic = async (pathname: string, staticDir: string): Promise<Respons
 
 const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
   const { type, to, from, payload, id } = msg;
-  console.log(`[RELAY-MSG] type=${type} from=${from?.slice?.(0,10) || 'none'} to=${to?.slice?.(0,10) || 'none'} env=${!!env}`);
+  // Only log non-gossip messages (gossip fires every 1s per client)
+  if (type !== 'gossip_request' && type !== 'gossip_response' && type !== 'gossip_announce') {
+    console.log(`[RELAY-MSG] type=${type} from=${from?.slice?.(0,10) || 'none'} to=${to?.slice?.(0,10) || 'none'}`);
+  }
 
   // Hello - register client
   if (type === 'hello' && from) {

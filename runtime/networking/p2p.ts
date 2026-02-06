@@ -494,7 +494,16 @@ export class RuntimeP2P {
     if (profiles.length === 0) return;
     let verified = 0;
     let unsigned = 0;
+    let skipped = 0;
     for (const profile of profiles) {
+      // Skip profiles we already have at the same or newer timestamp (avoids re-verification)
+      const existingProfiles = this.env.gossip?.getProfiles?.() || [];
+      const existing = existingProfiles.find((p: any) => p.entityId === profile.entityId);
+      if (existing && existing.metadata?.lastUpdated >= (profile.metadata?.lastUpdated || 0)) {
+        skipped++;
+        continue;
+      }
+
       // Verify profile signature if present (anti-spoofing)
       // Hanko is self-contained: claims embed the board, signatures prove identity
       const hasHanko = profile.metadata?.['profileHanko'];
@@ -549,7 +558,7 @@ export class RuntimeP2P {
         registerSignerPublicKey(profile.entityId, publicKey);
       }
     }
-    if (verified > 0 || unsigned > 0) console.log(`P2P_PROFILE_RECEIVED from=${from.slice(0, 10)} total=${profiles.length} verified=${verified} unsigned=${unsigned}`);
+    if (verified > 0 || unsigned > 0) console.log(`P2P_PROFILE_NEW from=${from.slice(0, 10)} verified=${verified} unsigned=${unsigned} skipped=${skipped}`);
     this.onGossipProfiles(from, profiles);
   }
 
