@@ -116,77 +116,62 @@ export async function executeCrontab(
 async function checkAccountTimeoutsHandler(_env: Env, replica: EntityReplica): Promise<EntityInput[]> {
   const outputs: EntityInput[] = [];
   const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
+  const currentHeight = replica.state.lastFinalizedJHeight || 0;
 
-  // Iterate over all accounts
+  // Collect accounts with expired HTLC locks in their pending frames
+  const timedOutAccounts: Array<{ counterpartyId: string; frameHeight: number }> = [];
+
   for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
-    // Check if there's a pending frame waiting for ACK
-    if (accountMachine.pendingFrame) {
-      const frameAge = now - accountMachine.pendingFrame.timestamp;
+    if (!accountMachine.pendingFrame) continue;
 
-      if (frameAge > ACCOUNT_TIMEOUT_MS) {
-        console.warn(`⏰ TIMEOUT DETECTED: Account with ${counterpartyId.slice(-4)} has pending frame ${accountMachine.pendingFrame.height} for ${frameAge}ms`);
-        console.warn(`   Frame timestamp: ${accountMachine.pendingFrame.timestamp}`);
-        console.warn(`   Current time: ${now}`);
-        console.warn(`   Age: ${frameAge}ms (threshold: ${ACCOUNT_TIMEOUT_MS}ms)`);
-
-        // Generate chat message event for entity members to see
-        const disputeSuggestion = createDisputeSuggestionEvent(
-          replica,
-          counterpartyId,
-          accountMachine,
-          frameAge
-        );
-
-        outputs.push(disputeSuggestion);
-
-        console.warn(`💬 DISPUTE-SUGGESTION: Generated event for entity ${replica.entityId.slice(-4)}`);
-        console.warn(`   Counterparty: ${counterpartyId.slice(-4)}`);
-        console.warn(`   Frame: ${accountMachine.pendingFrame.height}`);
-        console.warn(`   Age: ${Math.floor(frameAge / 1000)}s`);
+    // Check if any htlc_lock in the pending frame has expired
+    // Cancel ONLY when hashlock expires — until then, counterparty could still claim
+    let hasExpiredHtlc = false;
+    for (const tx of accountMachine.pendingFrame.accountTxs) {
+      if (tx.type === 'htlc_lock') {
+        const heightExpired = currentHeight > 0 && currentHeight > tx.data.revealBeforeHeight;
+        const timestampExpired = now > Number(tx.data.timelock);
+        if (heightExpired || timestampExpired) {
+          console.warn(`⏰ HTLC-IN-PENDING-EXPIRED: Account ${counterpartyId.slice(-4)} frame h${accountMachine.pendingFrame.height}, lock ${tx.data.lockId.slice(0,12)}... expired`);
+          hasExpiredHtlc = true;
+          break;
+        }
       }
+    }
+
+    if (hasExpiredHtlc) {
+      timedOutAccounts.push({
+        counterpartyId,
+        frameHeight: accountMachine.pendingFrame.height,
+      });
+    } else {
+      // Non-HTLC pending frames: dispute suggestion after 30s
+      const frameAge = now - accountMachine.pendingFrame.timestamp;
+      if (frameAge > ACCOUNT_TIMEOUT_MS) {
+        console.warn(`⏰ PENDING-FRAME-STALE: Account with ${counterpartyId.slice(-4)} h${accountMachine.pendingFrame.height} for ${Math.floor(frameAge / 1000)}s — consider dispute`);
+      }
+    }
+  }
+
+  // Generate rollback EntityTx for accounts with expired HTLC locks in pending frames
+  if (timedOutAccounts.length > 0) {
+    const firstValidator = replica.state.config.validators?.[0];
+    if (firstValidator) {
+      outputs.push({
+        entityId: replica.entityId,
+        signerId: firstValidator,
+        entityTxs: [{
+          type: 'rollbackTimedOutFrames',
+          data: { timedOutAccounts }
+        }]
+      });
+      console.warn(`⏰ ROLLBACK: Generated rollbackTimedOutFrames for ${timedOutAccounts.length} accounts (HTLC expired in pendingFrame)`);
     }
   }
 
   return outputs;
 }
 
-/**
- * Create a chat message suggesting dispute to entity members
- *
- * This doesn't auto-initiate dispute - it's up to entity signers to decide.
- * Frame stays in "sent" status.
- */
-function createDisputeSuggestionEvent(
-  replica: EntityReplica,
-  counterpartyId: string,
-  accountMachine: AccountMachine,
-  frameAge: number
-): EntityInput {
-  const message = `🚨 DISPUTE SUGGESTION: Account with ${counterpartyId.slice(-4)} has not acknowledged frame #${accountMachine.pendingFrame!.height} for ${Math.floor(frameAge / 1000)}s (threshold: ${Math.floor(ACCOUNT_TIMEOUT_MS / 1000)}s). Consider initiating dispute or investigating network issues.`;
-
-  // Create a chat message entity transaction
-  // For now, just create an EntityInput with a message
-  // In production, this would be a proper EntityTx that gets added to mempool
-  return {
-    entityId: replica.entityId,
-    signerId: 'system', // System-generated message
-    entityTxs: [
-      {
-        type: 'chatMessage',
-        data: {
-          message,
-          timestamp: replica.state.timestamp, // DETERMINISTIC: Use entity's own timestamp
-          metadata: {
-            type: 'DISPUTE_SUGGESTION',
-            counterpartyId,
-            height: accountMachine.pendingFrame!.height,
-            frameAge,
-          },
-        },
-      }
-    ],
-  };
-}
 
 /**
  * Check all HTLC locks for expiration and auto-timeout

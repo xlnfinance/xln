@@ -778,6 +778,13 @@ export type EntityTx =
       };
     }
   | {
+      // Rollback timed-out pending frames and cancel HTLC locks backward
+      type: 'rollbackTimedOutFrames';
+      data: {
+        timedOutAccounts: Array<{ counterpartyId: string; frameHeight: number }>;
+      };
+    }
+  | {
       // Manual HTLC lock creation without envelope (timeout test)
       type: 'manualHtlcLock';
       data: {
@@ -1285,16 +1292,12 @@ export type AccountTx =
       };
     }
   | {
-      type: 'htlc_reveal';
+      type: 'htlc_resolve';
       data: {
         lockId: string;
-        secret: string;
-      };
-    }
-  | {
-      type: 'htlc_timeout';
-      data: {
-        lockId: string;
+        outcome: 'secret' | 'error';
+        secret?: string;  // required when outcome='secret'
+        reason?: string;  // when outcome='error': no_account, no_capacity, timeout, amount_too_small, etc.
       };
     }
   // === SWAP TRANSACTION TYPES ===

@@ -413,16 +413,78 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const outputs: EntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
 
-      // Convert expired locks to htlc_timeout mempoolOps
+      // Convert expired locks to htlc_resolve(error:timeout)
       for (const { accountId, lockId } of entityTx.data.expiredLocks || []) {
         mempoolOps.push({
           accountId,
           tx: {
-            type: 'htlc_timeout',
-            data: { lockId }
+            type: 'htlc_resolve',
+            data: { lockId, outcome: 'error' as const, reason: 'timeout' }
           }
         });
         console.log(`⏰   Queued timeout for lock ${lockId.slice(0,16)}... on account ${accountId.slice(-4)}`);
+      }
+
+      return { newState, outputs, mempoolOps };
+    }
+
+    if (entityTx.type === 'rollbackTimedOutFrames') {
+      console.log(`⏰ ROLLBACK-TIMED-OUT-FRAMES: Processing ${entityTx.data.timedOutAccounts.length} timed-out accounts`);
+
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
+
+      for (const { counterpartyId, frameHeight } of entityTx.data.timedOutAccounts) {
+        const accountMachine = newState.accounts.get(counterpartyId);
+        if (!accountMachine?.pendingFrame) {
+          console.log(`⏰   Account ${counterpartyId.slice(-4)}: no pendingFrame (already resolved)`);
+          continue;
+        }
+
+        // Verify the frame height matches (avoid stale rollback)
+        if (accountMachine.pendingFrame.height !== frameHeight) {
+          console.log(`⏰   Account ${counterpartyId.slice(-4)}: frame height mismatch (pending=${accountMachine.pendingFrame.height}, expected=${frameHeight})`);
+          continue;
+        }
+
+        console.log(`⏰   Rolling back pendingFrame h${frameHeight} for account ${counterpartyId.slice(-4)}`);
+
+        // Scan pending frame for HTLC locks that need backward cancellation
+        for (const tx of accountMachine.pendingFrame.accountTxs) {
+          if (tx.type === 'htlc_lock') {
+            const hashlock = tx.data.hashlock;
+            // Look up htlcRoute for backward cancellation
+            const route = newState.htlcRoutes.get(hashlock);
+            if (route && route.inboundEntity && route.inboundLockId) {
+              mempoolOps.push({
+                accountId: route.inboundEntity,
+                tx: {
+                  type: 'htlc_resolve',
+                  data: {
+                    lockId: route.inboundLockId,
+                    outcome: 'error' as const,
+                    reason: 'ack_timeout',
+                  }
+                }
+              });
+              console.log(`⬅️   HTLC cancel backward: hashlock=${hashlock.slice(0,12)}... → inbound ${route.inboundEntity.slice(-4)}`);
+              newState.htlcRoutes.delete(hashlock);
+            }
+            // Don't re-add htlc_lock to mempool (it's being cancelled)
+          } else {
+            // Non-HTLC txs: restore to mempool for re-proposal
+            accountMachine.mempool.push(tx);
+            console.log(`📥   Restored ${tx.type} to mempool`);
+          }
+        }
+
+        // Clear pending state (same as rollback in account-consensus.ts)
+        delete accountMachine.pendingFrame;
+        delete accountMachine.pendingAccountInput;
+        delete accountMachine.clonedForValidation;
+        accountMachine.sentTransitions = 0;
+        console.log(`⏰   Account ${counterpartyId.slice(-4)}: pendingFrame cleared, mempool=${accountMachine.mempool.length}`);
       }
 
       return { newState, outputs, mempoolOps };

@@ -384,9 +384,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 mempoolOps.push({
                   accountId: input.fromEntityId,
                   tx: {
-                    type: 'htlc_reveal',
+                    type: 'htlc_resolve',
                     data: {
                       lockId: lock.lockId,
+                      outcome: 'secret' as const,
                       secret: envelope.secret
                     }
                   }
@@ -423,6 +424,20 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
               const nextAccount = newState.accounts.get(nextHop);
 
+              // Helper: cancel inbound lock and propagate error backward
+              const cancelInboundLock = (cancelReason: string) => {
+                console.log(`❌ HTLC-CANCEL: Cancelling inbound lock, reason=${cancelReason}`);
+                mempoolOps.push({
+                  accountId: input.fromEntityId,
+                  tx: {
+                    type: 'htlc_resolve',
+                    data: { lockId: lock.lockId, outcome: 'error' as const, reason: cancelReason }
+                  }
+                });
+                // Clean up route
+                newState.htlcRoutes.delete(lock.hashlock);
+              };
+
               if (nextAccount) {
                 // Calculate forwarded amounts/timelocks with safety checks
                 const { calculateHtlcFee, calculateHtlcFeeAmount } = await import('../../htlc-utils');
@@ -435,7 +450,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                   feeAmount = calculateHtlcFeeAmount(lock.amount);
                 } catch (e) {
                   console.log(`❌ HTLC: Fee calculation failed for amount ${lock.amount}: ${e instanceof Error ? e.message : String(e)}`);
-                  console.log(`   Cannot forward - amount too small`);
+                  cancelInboundLock(`amount_too_small`);
                   continue;
                 }
 
@@ -459,11 +474,13 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 const SAFETY_MARGIN_MS = 1000;
                 if (forwardTimelock < BigInt(newState.timestamp) + BigInt(SAFETY_MARGIN_MS)) {
                   console.log(`❌ HTLC-GATE: TIMELOCK_TOO_TIGHT - forward=${forwardTimelock}, current+margin=${BigInt(newState.timestamp) + BigInt(SAFETY_MARGIN_MS)} [lockId=${lock.lockId.slice(0,16)}]`);
+                  cancelInboundLock(`timelock_too_tight`);
                   continue;
                 }
 
                 if (forwardHeight <= currentJHeight) {
                   console.log(`❌ HTLC-GATE: HEIGHT_EXPIRED - forward=${forwardHeight}, current=${currentJHeight}, lock=${lock.revealBeforeHeight} [lockId=${lock.lockId.slice(0,16)}]`);
+                  cancelInboundLock(`height_expired`);
                   continue;
                 }
 
@@ -495,6 +512,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 console.log(`➡️ HTLC: Forwarding to ${nextHop.slice(-4)}, amount ${forwardAmount} (fee ${feeAmount})`);
               } else {
                 console.log(`❌ HTLC: No account found for nextHop ${nextHop.slice(-4)}`);
+                cancelInboundLock(`no_account:${nextHop.slice(-4)}`);
               }
             }
           }
@@ -558,19 +576,35 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         delete accountMachine.pendingForward;
       }
 
-      // === HTLC TIMEOUT CLEANUP (MEDIUM-7) ===
-      // Check if any timeouts happened - clean up htlcRoutes
+      // === HTLC ERROR PROPAGATION (timeout/cancel) ===
+      // When an htlc_resolve(error) happens, propagate cancel backward through route
       const timedOutHashlocks = result.timedOutHashlocks || [];
       for (const timedOutHashlock of timedOutHashlocks) {
-        console.log(`⏰ HTLC-TIMEOUT: Cleaning up route for hashlock ${timedOutHashlock.slice(0,16)}...`);
+        console.log(`⬅️ HTLC-ERROR: Propagating cancel for hashlock ${timedOutHashlock.slice(0,16)}...`);
         const route = newState.htlcRoutes.get(timedOutHashlock);
         if (route) {
           // Clear pending fee (won't be earned)
           if (route.pendingFee) {
-            console.log(`   Clearing pending fee: ${route.pendingFee} (not earned due to timeout)`);
+            console.log(`   Clearing pending fee: ${route.pendingFee}`);
           }
 
-          // Remove from htlcRoutes (prevent state leak)
+          // Propagate cancel backward to inbound (sender gets lock released)
+          if (route.inboundEntity && route.inboundLockId) {
+            mempoolOps.push({
+              accountId: route.inboundEntity,
+              tx: {
+                type: 'htlc_resolve',
+                data: {
+                  lockId: route.inboundLockId,
+                  outcome: 'error' as const,
+                  reason: 'downstream_error',
+                }
+              }
+            });
+            console.log(`⬅️ HTLC: Propagating cancel to ${route.inboundEntity.slice(-4)}`);
+          }
+
+          // Remove from htlcRoutes
           newState.htlcRoutes.delete(timedOutHashlock);
           console.log(`   ✅ Route cleaned up`);
         }
@@ -622,9 +656,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             mempoolOps.push({
               accountId: route.inboundEntity,
               tx: {
-                type: 'htlc_reveal',
+                type: 'htlc_resolve',
                 data: {
                   lockId: route.inboundLockId,
+                  outcome: 'secret' as const,
                   secret
                 }
               }

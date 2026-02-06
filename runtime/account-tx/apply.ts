@@ -14,8 +14,7 @@ import { handleApproveWithdrawal } from './handlers/approve-withdrawal';
 import { handleRequestRebalance } from './handlers/request-rebalance';
 import { handleJSync } from './handlers/j-sync';
 import { handleHtlcLock } from './handlers/htlc-lock';
-import { handleHtlcReveal } from './handlers/htlc-reveal';
-import { handleHtlcTimeout } from './handlers/htlc-timeout';
+// htlc_resolve: unified handler imported dynamically in switch case
 import { handleSwapOffer } from './handlers/swap-offer';
 import { handleSwapResolve } from './handlers/swap-resolve';
 import { handleSwapCancel } from './handlers/swap-cancel';
@@ -171,21 +170,24 @@ export async function processAccountTx(
         isValidation
       );
 
-    case 'htlc_reveal':
-      return await handleHtlcReveal(
+    case 'htlc_resolve': {
+      const { handleHtlcResolve } = await import('./handlers/htlc-resolve');
+      const resolveResult = await handleHtlcResolve(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'htlc_reveal' }>,
+        accountTx as Extract<AccountTx, { type: 'htlc_resolve' }>,
         currentHeight,
-        currentTimestamp
+        currentTimestamp,
       );
-
-    case 'htlc_timeout':
-      return await handleHtlcTimeout(
-        accountMachine,
-        accountTx as Extract<AccountTx, { type: 'htlc_timeout' }>,
-        currentHeight,
-        currentTimestamp
-      );
+      const ret: typeof processAccountTx extends (...args: any[]) => Promise<infer R> ? R : never = {
+        success: resolveResult.success,
+        events: resolveResult.events,
+      };
+      if (resolveResult.error) ret.error = resolveResult.error;
+      if (resolveResult.secret) ret.secret = resolveResult.secret;
+      if (resolveResult.hashlock) ret.hashlock = resolveResult.hashlock;
+      if (resolveResult.outcome === 'error' && resolveResult.hashlock) ret.timedOutHashlock = resolveResult.hashlock;
+      return ret;
+    }
 
     // === SWAP HANDLERS ===
     case 'swap_offer':

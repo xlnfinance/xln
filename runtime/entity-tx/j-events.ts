@@ -520,9 +520,10 @@ async function applyFinalizedJEvent(
       mempoolOps.push({
         accountId: route.inboundEntity,
         tx: {
-          type: 'htlc_reveal',
+          type: 'htlc_resolve',
           data: {
             lockId: route.inboundLockId,
+            outcome: 'secret' as const,
             secret: String(secret),
           }
         }
