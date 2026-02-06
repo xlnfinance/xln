@@ -96106,7 +96106,9 @@ async function handleHtlcPayment(entityState, entityTx, env) {
   let envelope;
   try {
     const entityPubKeys = new Map;
-    for (const entityId of route) {
+    const hops = route.slice(1);
+    const missingKeys = [];
+    for (const entityId of hops) {
       const replica = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ":"));
       if (replica && replica[1].state.cryptoPublicKey) {
         entityPubKeys.set(entityId, replica[1].state.cryptoPublicKey);
@@ -96117,21 +96119,19 @@ async function handleHtlcPayment(entityState, entityTx, env) {
         const profile = profiles.find((p) => p.entityId === entityId);
         if (profile?.metadata?.cryptoPublicKey) {
           entityPubKeys.set(entityId, profile.metadata.cryptoPublicKey);
-          console.log(`\uD83D\uDD11 Found crypto key for ${formatEntityId2(entityId)} from gossip profile`);
+          continue;
         }
       }
+      missingKeys.push(entityId);
     }
     const { NobleCryptoProvider: NobleCryptoProvider2 } = await Promise.resolve().then(() => (init_crypto_noble(), exports_crypto_noble));
-    const crypto4 = entityPubKeys.size === route.length ? new NobleCryptoProvider2 : undefined;
+    if (missingKeys.length > 0) {
+      console.warn(`\u26A0\uFE0F HTLC: Missing crypto keys for ${missingKeys.length} hops: ${missingKeys.map((e) => formatEntityId2(e)).join(", ")}`);
+      console.warn(`\u26A0\uFE0F HTLC: Available keys: ${[...entityPubKeys.keys()].map((e) => formatEntityId2(e)).join(", ")}`);
+    }
+    const crypto4 = missingKeys.length === 0 ? new NobleCryptoProvider2 : undefined;
     envelope = await createOnionEnvelopes2(route, secret, entityPubKeys, crypto4);
-    console.log(`\uD83E\uDDC5 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`);
-    console.log(`\uD83E\uDDC5 ENVELOPE CREATED at ${formatEntityId2(entityState.entityId)}`);
-    console.log(`\uD83E\uDDC5 Route: ${route.map((r) => formatEntityId2(r)).join(" \u2192 ")}`);
-    console.log(`\uD83E\uDDC5 Encryption: ${crypto4 ? "ENCRYPTED" : "CLEARTEXT"}`);
-    console.log(`\uD83E\uDDC5 Secret: ${secret.slice(0, 16)}...`);
-    console.log(`\uD83E\uDDC5 Hashlock: ${hashlock.slice(0, 16)}...`);
-    console.log(`\uD83E\uDDC5 Envelope structure: ${JSON.stringify(envelope, null, 2).slice(0, 300)}...`);
-    console.log(`\uD83E\uDDC5 \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`);
+    console.log(`\uD83E\uDDC5 ENVELOPE: ${crypto4 ? "ENCRYPTED" : "CLEARTEXT"} | hops=${hops.length} keys=${entityPubKeys.size} missing=[${missingKeys.map((e) => formatEntityId2(e))}]`);
   } catch (e) {
     logError2("HTLC_PAYMENT", `\u274C Envelope creation failed: ${e instanceof Error ? e.message : String(e)}`);
     addMessage2(newState, `\u274C HTLC payment failed: Invalid route`);

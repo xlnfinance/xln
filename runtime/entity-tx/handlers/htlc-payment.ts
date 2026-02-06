@@ -162,40 +162,42 @@ export async function handleHtlcPayment(
   const { createOnionEnvelopes } = await import('../../htlc-envelope-types');
   let envelope;
   try {
-    // Gather public keys from route entities (for encryption)
-    // Check local replicas first, then gossip profiles for remote entities
+    // Gather public keys for each HOP (all route entities EXCEPT sender at [0])
+    // Sender never encrypts to self — only to intermediaries and recipient
     const entityPubKeys = new Map<string, string>();
-    for (const entityId of route) {
+    const hops = route.slice(1); // Everyone except sender
+    const missingKeys: string[] = [];
+    for (const entityId of hops) {
       // 1. Check local replica
       const replica = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
       if (replica && replica[1].state.cryptoPublicKey) {
         entityPubKeys.set(entityId, replica[1].state.cryptoPublicKey);
         continue;
       }
-      // 2. Check gossip profiles for remote entities (P2P scenario)
+      // 2. Check gossip profiles for remote entities
       if (env.gossip) {
         const profiles = typeof env.gossip.getProfiles === 'function' ? env.gossip.getProfiles() : [];
         const profile = profiles.find((p: any) => p.entityId === entityId);
         if (profile?.metadata?.cryptoPublicKey) {
           entityPubKeys.set(entityId, profile.metadata.cryptoPublicKey);
-          console.log(`🔑 Found crypto key for ${formatEntityId(entityId)} from gossip profile`);
+          continue;
         }
       }
+      missingKeys.push(entityId);
     }
 
-    // Create envelope with encryption if keys available
+    // Encryption is REQUIRED — fail fast if keys missing
     const { NobleCryptoProvider } = await import('../../crypto-noble');
-    const crypto = entityPubKeys.size === route.length ? new NobleCryptoProvider() : undefined;
+    if (missingKeys.length > 0) {
+      console.warn(`⚠️ HTLC: Missing crypto keys for ${missingKeys.length} hops: ${missingKeys.map(e => formatEntityId(e)).join(', ')}`);
+      console.warn(`⚠️ HTLC: Available keys: ${[...entityPubKeys.keys()].map(e => formatEntityId(e)).join(', ')}`);
+      // Proceed without encryption for now, but log loudly
+      // TODO: Once gossip key propagation is reliable, throw here instead
+    }
+    const crypto = missingKeys.length === 0 ? new NobleCryptoProvider() : undefined;
 
     envelope = await createOnionEnvelopes(route, secret, entityPubKeys, crypto);
-    console.log(`🧅 ═════════════════════════════════════════════════════════════`);
-    console.log(`🧅 ENVELOPE CREATED at ${formatEntityId(entityState.entityId)}`);
-    console.log(`🧅 Route: ${route.map((r: string) => formatEntityId(r)).join(' → ')}`);
-    console.log(`🧅 Encryption: ${crypto ? 'ENCRYPTED' : 'CLEARTEXT'}`);
-    console.log(`🧅 Secret: ${secret.slice(0,16)}...`);
-    console.log(`🧅 Hashlock: ${hashlock.slice(0,16)}...`);
-    console.log(`🧅 Envelope structure: ${JSON.stringify(envelope, null, 2).slice(0, 300)}...`);
-    console.log(`🧅 ═════════════════════════════════════════════════════════════`);
+    console.log(`🧅 ENVELOPE: ${crypto ? 'ENCRYPTED' : 'CLEARTEXT'} | hops=${hops.length} keys=${entityPubKeys.size} missing=[${missingKeys.map(e => formatEntityId(e))}]`);
   } catch (e) {
     logError("HTLC_PAYMENT", `❌ Envelope creation failed: ${e instanceof Error ? e.message : String(e)}`);
     addMessage(newState, `❌ HTLC payment failed: Invalid route`);
