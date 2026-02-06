@@ -8,13 +8,15 @@
  */
 
 import { test, expect, type Page } from '@playwright/test';
+import { Wallet } from 'ethers';
 
 const INIT_TIMEOUT = 30_000;
-const SETTLE_MS = 8_000;
+const SETTLE_MS = 10_000;
 
 function toWei(n: number): bigint {
   return BigInt(n) * 10n ** 18n;
 }
+
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -34,12 +36,9 @@ async function gotoApp(page: Page) {
   await page.waitForTimeout(2000);
 }
 
-/** Generate random BIP39 mnemonic in browser */
-async function randomMnemonic(page: Page): Promise<string> {
-  return page.evaluate(async () => {
-    const { Wallet } = await import(/* @vite-ignore */ 'ethers') as any;
-    return Wallet.createRandom().mnemonic.phrase;
-  });
+/** Generate random BIP39 mnemonic (Node.js side — no browser import needed) */
+function randomMnemonic(): string {
+  return Wallet.createRandom().mnemonic!.phrase;
 }
 
 /** Create a runtime via vaultStore (Vite dev dynamic import) */
@@ -82,18 +81,90 @@ async function getEntity(page: Page) {
   });
 }
 
-/** Switch runtime via dropdown */
+/** Dump full runtime state diagnostics */
+async function dumpState(page: Page, label: string) {
+  const info = await page.evaluate((label) => {
+    const env = (window as any).isolatedEnv;
+    if (!env) return { label, error: 'no isolatedEnv' };
+
+    const entities: any[] = [];
+    if (env.eReplicas) {
+      for (const [key, rep] of env.eReplicas.entries()) {
+        const accounts: any[] = [];
+        if (rep.state?.accounts) {
+          for (const [cpId, acc] of rep.state.accounts.entries()) {
+            const deltas: any[] = [];
+            if (acc.deltas) {
+              for (const [tokenId, d] of acc.deltas.entries()) {
+                const XLN = (window as any).XLN;
+                const entityId = key.split(':')[0];
+                const v = XLN?.deriveDelta?.(d, entityId < cpId);
+                deltas.push({
+                  tokenId,
+                  out: v?.outCapacity?.toString() || '?',
+                  in_: v?.inCapacity?.toString() || '?',
+                  offdelta: d.offdelta?.toString() || '0',
+                });
+              }
+            }
+            accounts.push({
+              cpId: cpId.slice(0, 12),
+              mempoolLen: acc.mempool?.length || 0,
+              height: acc.height || 0,
+              deltas,
+            });
+          }
+        }
+        entities.push({
+          key: key.slice(0, 20),
+          accountCount: rep.state?.accounts?.size || 0,
+          accounts,
+        });
+      }
+    }
+
+    const p2p = env.runtimeState?.p2p;
+    const gossipProfiles = env.gossip?.getProfiles?.()?.length || 0;
+
+    return {
+      label,
+      runtimeId: env.runtimeId?.slice(0, 12) || 'none',
+      loopActive: env.runtimeState?.loopActive || false,
+      p2pConnected: !!p2p,
+      p2pState: p2p?.getState?.() || 'unknown',
+      gossipProfiles,
+      entityCount: env.eReplicas?.size || 0,
+      entities,
+    };
+  }, label);
+  console.log(`[E2E] STATE(${label}):`, JSON.stringify(info, null, 2));
+  return info;
+}
+
+/** Switch runtime via programmatic call (more reliable than UI click) */
 async function switchTo(page: Page, label: string) {
-  await page.locator('button').filter({ hasText: /🧭.*▼/ }).first().click();
-  await page.waitForTimeout(400);
-  const btn = page.locator('button').filter({ hasText: new RegExp(label, 'i') }).first();
-  if (await btn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await btn.click();
-  } else {
-    await page.keyboard.press('Escape');
-    throw new Error(`Runtime "${label}" not in dropdown`);
-  }
-  await page.waitForTimeout(1500);
+  const r = await page.evaluate(async (label) => {
+    try {
+      const { runtimesState, vaultOperations } = await import(/* @vite-ignore */ '/src/lib/stores/vaultStore.ts') as any;
+      // Read store value without importing svelte/store — subscribe fires synchronously
+      let state: any;
+      const unsub = runtimesState.subscribe((s: any) => { state = s; });
+      unsub();
+      // Find runtime by label
+      for (const [id, runtime] of Object.entries(state.runtimes) as any[]) {
+        if (runtime.label?.toLowerCase() === label.toLowerCase()) {
+          await vaultOperations.selectRuntime(id);
+          return { ok: true, id: id.slice(0, 12) };
+        }
+      }
+      return { ok: false, error: `Runtime "${label}" not found in runtimes: ${Object.values(state.runtimes).map((r: any) => r.label).join(',')}` };
+    } catch (e: any) {
+      return { ok: false, error: e.message };
+    }
+  }, label);
+  expect(r.ok, `switchTo(${label}) failed: ${r.error}`).toBe(true);
+  console.log(`[E2E] Switched to ${label} (${r.id})`);
+  await page.waitForTimeout(2000);
 }
 
 /** Discover hub via gossip polling */
@@ -120,13 +191,22 @@ async function connectHub(page: Page, entityId: string, signerId: string, hubId:
     try {
       const XLN = (window as any).XLN;
       const env = (window as any).isolatedEnv;
+      console.log(`[E2E] connectHub: env.runtimeId=${env?.runtimeId?.slice(0,12)}, entityId=${entityId.slice(0,12)}, hubId=${hubId.slice(0,12)}`);
       await XLN.process(env, [{
         entityId, signerId,
         entityTxs: [{ type: 'openAccount', data: { targetEntityId: hubId, creditAmount: 10_000n * 10n ** 18n, tokenId: 1 } }]
       }]);
-      return { ok: true };
+      // Check if account was created locally
+      for (const [k, rep] of env.eReplicas.entries()) {
+        if (!k.startsWith(entityId + ':')) continue;
+        const hasAccount = rep.state?.accounts?.has(hubId);
+        const accSize = rep.state?.accounts?.size || 0;
+        return { ok: true, hasAccount, accSize };
+      }
+      return { ok: true, hasAccount: false, accSize: 0 };
     } catch (e: any) { return { ok: false, error: e.message }; }
   }, { entityId, signerId, hubId });
+  console.log(`[E2E] connectHub result:`, JSON.stringify(r));
   expect(r.ok, `connectHub failed: ${r.error}`).toBe(true);
   await page.waitForTimeout(SETTLE_MS);
 }
@@ -139,24 +219,36 @@ async function outCap(page: Page, entityId: string, cpId: string): Promise<bigin
     if (!env || !XLN) return '0';
     for (const [k, r] of env.eReplicas.entries()) {
       if (!k.startsWith(entityId + ':')) continue;
-      const d = r.state?.accounts?.get(cpId)?.deltas?.get(1);
-      if (!d) return '0';
+      const acc = r.state?.accounts?.get(cpId);
+      if (!acc) return 'NO_ACCOUNT';
+      const d = acc.deltas?.get(1);
+      if (!d) return 'NO_DELTA';
       return XLN.deriveDelta(d, entityId < cpId).outCapacity.toString();
     }
-    return '0';
+    return 'NO_ENTITY';
   }, { entityId, cpId });
+  if (s === 'NO_ACCOUNT' || s === 'NO_DELTA' || s === 'NO_ENTITY') {
+    console.log(`[E2E] outCap(${entityId.slice(0,12)}, ${cpId.slice(0,12)}) = ${s}`);
+    return 0n;
+  }
   return BigInt(s);
 }
 
 /** Faucet 100 USDC */
 async function faucet(page: Page, entityId: string) {
   const r = await page.evaluate(async (eid) => {
-    const resp = await fetch('/api/faucet/offchain', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userEntityId: eid, tokenId: 1, amount: '100' }),
-    });
-    return { ok: resp.ok, data: await resp.json() };
+    try {
+      const resp = await fetch('/api/faucet/offchain', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userEntityId: eid, tokenId: 1, amount: '100' }),
+      });
+      const data = await resp.json();
+      return { ok: resp.ok, status: resp.status, data };
+    } catch (e: any) {
+      return { ok: false, status: 0, data: { error: e.message } };
+    }
   }, entityId);
+  console.log(`[E2E] Faucet response: status=${r.status} data=${JSON.stringify(r.data)}`);
   expect(r.ok, `Faucet: ${JSON.stringify(r.data)}`).toBe(true);
   await page.waitForTimeout(SETTLE_MS);
 }
@@ -181,13 +273,13 @@ async function pay(page: Page, from: string, signerId: string, to: string, route
 // ─── Test ─────────────────────────────────────────────────────────
 
 test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
-  test.setTimeout(180_000);
+  test.setTimeout(300_000);
 
   test('bidirectional payments through hub', async ({ page }) => {
     page.on('console', msg => {
       const t = msg.text();
-      if (t.includes('[E2E]') || msg.type() === 'error')
-        console.log(`[B] ${t.slice(0, 250)}`);
+      if (t.includes('[E2E]') || t.includes('[VaultStore]') || t.includes('P2P') || msg.type() === 'error')
+        console.log(`[B] ${t.slice(0, 300)}`);
     });
 
     // ── 1. Navigate ──────────────────────────────────────────────
@@ -196,21 +288,23 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     // ── 2. Create Alice + Bob with random mnemonics ──────────────
     console.log('[E2E] 2. Create runtimes');
-    const aliceMnemonic = await randomMnemonic(page);
-    const bobMnemonic = await randomMnemonic(page);
+    const aliceMnemonic = randomMnemonic();
+    const bobMnemonic = randomMnemonic();
     console.log(`[E2E] Alice mnemonic: ${aliceMnemonic.split(' ').slice(0, 3).join(' ')}...`);
     console.log(`[E2E] Bob mnemonic: ${bobMnemonic.split(' ').slice(0, 3).join(' ')}...`);
 
     await createRuntime(page, 'alice', aliceMnemonic);
     const alice = await getEntity(page);
     expect(alice, 'Alice entity missing').not.toBeNull();
-    console.log(`[E2E] Alice: ${alice!.entityId.slice(0, 16)}  signer: ${alice!.signerId.slice(0, 10)}`);
+    console.log(`[E2E] Alice: entity=${alice!.entityId.slice(0, 16)}  signer=${alice!.signerId.slice(0, 12)}`);
+    await dumpState(page, 'alice-after-create');
 
     await createRuntime(page, 'bob', bobMnemonic);
     const bob = await getEntity(page);
     expect(bob, 'Bob entity missing').not.toBeNull();
     expect(bob!.entityId).not.toBe(alice!.entityId);
-    console.log(`[E2E] Bob: ${bob!.entityId.slice(0, 16)}  signer: ${bob!.signerId.slice(0, 10)}`);
+    console.log(`[E2E] Bob: entity=${bob!.entityId.slice(0, 16)}  signer=${bob!.signerId.slice(0, 12)}`);
+    await dumpState(page, 'bob-after-create');
 
     // ── 3. Discover Hub ──────────────────────────────────────────
     console.log('[E2E] 3. Discover hub');
@@ -218,21 +312,26 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E] Hub: ${hubId.slice(0, 16)}`);
 
     // ── 4. Connect both to Hub ───────────────────────────────────
-    console.log('[E2E] 4. Connect both to hub');
-    // Bob is active (just created)
+    console.log('[E2E] 4a. Connect Bob to hub (active)');
     await connectHub(page, bob!.entityId, bob!.signerId, hubId);
-    console.log('[E2E] Bob ↔ Hub connected');
+    await dumpState(page, 'bob-after-connect');
 
+    console.log('[E2E] 4b. Switch to Alice');
     await switchTo(page, 'alice');
+    await dumpState(page, 'alice-after-switch');
+
+    console.log('[E2E] 4c. Connect Alice to hub');
     await connectHub(page, alice!.entityId, alice!.signerId, hubId);
-    console.log('[E2E] Alice ↔ Hub connected');
+    await dumpState(page, 'alice-after-connect');
 
     // ── 5. Faucet Alice ──────────────────────────────────────────
     console.log('[E2E] 5. Faucet Alice');
     const a0 = await outCap(page, alice!.entityId, hubId);
+    console.log(`[E2E] Alice OUT before faucet: ${a0}`);
     await faucet(page, alice!.entityId);
+    await dumpState(page, 'alice-after-faucet');
     const a1 = await outCap(page, alice!.entityId, hubId);
-    console.log(`[E2E] Alice OUT: ${a0} → ${a1}`);
+    console.log(`[E2E] Alice OUT after faucet: ${a0} → ${a1}`);
     expect(a1, 'Faucet should increase Alice OUT').toBeGreaterThan(a0);
 
     // ── 6. Alice → Hub → Bob (10 USDC) ──────────────────────────

@@ -376,7 +376,7 @@ export class RuntimeP2P {
     console.log(`P2P_FETCH_TIMEOUT: Still have ${this.env.gossip?.getProfiles?.()?.length || 0} profiles after retries`);
   }
 
-  private async announceLocalProfiles() {
+  async announceLocalProfiles() {
     const profiles = await this.getLocalProfiles();
     if (profiles.length === 0) return;
     for (const profile of profiles) {

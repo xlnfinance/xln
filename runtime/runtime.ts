@@ -2022,6 +2022,15 @@ export const process = async (
     }
     dispatchEntityOutputs(env, remoteOutputs);
 
+    // 1b. Re-announce gossip profiles after account state changes (new accounts, capacity shifts)
+    // Without this, routing graph is stale — peers won't know about new connections
+    if (remoteOutputs.length > 0) {
+      const p2p = getP2P(env);
+      if (p2p) {
+        p2p.announceLocalProfiles();
+      }
+    }
+
     // 2. Execute J-batches via JAdapter.submitTx (events arrive next frame via j-watcher)
     if (jOutbox.length > 0) {
       const totalJTxs = jOutbox.reduce((n, ji) => n + ji.jTxs.length, 0);
