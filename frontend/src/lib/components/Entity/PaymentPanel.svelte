@@ -3,6 +3,7 @@
   import { getXLN, xlnEnvironment, replicas, xlnFunctions, processWithDelay } from '../../stores/xlnStore';
   import { routePreview } from '../../stores/routePreviewStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
+  import { keccak256, AbiCoder, hexlify } from 'ethers';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
 
@@ -24,6 +25,7 @@
   let amount = '';
   let tokenId = 1;
   let description = '';
+  let useHtlc = true; // HTLC by default (atomic), toggle for direct
   let findingRoutes = false;
   let sendingPayment = false;
   let routes: any[] = [];
@@ -40,9 +42,20 @@
     .filter((id: string, index: number, self: string[]) => self.indexOf(id) === index)
     .sort() : [];
 
-  // Format short ID
+  // Format short ID — show first 6 + last 4 chars
   function formatShortId(id: string): string {
-    return id || '';
+    if (!id || id.length < 14) return id || '';
+    return id.slice(0, 6) + '...' + id.slice(-4);
+  }
+
+  // Generate HTLC secret/hashlock pair (browser-side, outside consensus)
+  function generateSecretHashlock(): { secret: string; hashlock: string } {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    const secret = hexlify(bytes);
+    const abiCoder = AbiCoder.defaultAbiCoder();
+    const hashlock = keccak256(abiCoder.encode(['bytes32'], [secret]));
+    return { secret, hashlock };
   }
 
   // Build bidirectional adjacency from all available sources
@@ -184,23 +197,45 @@
         }
       }
 
-      const paymentInput = {
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'directPayment' as const,
-          data: {
-            targetEntityId,
-            tokenId,
-            amount: route.totalAmount,
-            route: route.path,
-            description: description || undefined,
-          },
-        }],
-      };
+      let paymentInput: any;
+
+      if (useHtlc) {
+        // HTLC: atomic multi-hop with hashlock
+        const { secret, hashlock } = generateSecretHashlock();
+        console.log(`[Send] HTLC secret=${secret.slice(0,16)}... hashlock=${hashlock.slice(0,16)}...`);
+        paymentInput = {
+          entityId,
+          signerId,
+          entityTxs: [{
+            type: 'htlcPayment' as const,
+            data: {
+              targetEntityId, tokenId,
+              amount: route.totalAmount,
+              route: route.path,
+              description: description || undefined,
+              secret, hashlock,
+            },
+          }],
+        };
+      } else {
+        // Direct: simple non-atomic payment
+        paymentInput = {
+          entityId,
+          signerId,
+          entityTxs: [{
+            type: 'directPayment' as const,
+            data: {
+              targetEntityId, tokenId,
+              amount: route.totalAmount,
+              route: route.path,
+              description: description || undefined,
+            },
+          }],
+        };
+      }
 
       await processWithDelay(env, [paymentInput]);
-      console.log('[Send] Payment sent via:', route.path.map(formatShortId).join(' -> '));
+      console.log(`[Send] ${useHtlc ? 'HTLC' : 'Direct'} payment sent via:`, route.path.map(formatShortId).join(' -> '));
 
       routes = [];
       selectedRouteIndex = -1;
@@ -259,6 +294,13 @@
       placeholder="Payment for..."
       disabled={findingRoutes || sendingPayment}
     />
+  </div>
+
+  <div class="mode-toggle">
+    <label class="toggle-label">
+      <input type="checkbox" bind:checked={useHtlc} disabled={findingRoutes || sendingPayment} />
+      <span class="toggle-text">{useHtlc ? 'HTLC (atomic)' : 'Direct (simple)'}</span>
+    </label>
   </div>
 
   <button
@@ -451,5 +493,32 @@
   .route-meta {
     font-size: 11px;
     color: #78716c;
+  }
+
+  .mode-toggle {
+    display: flex;
+    align-items: center;
+  }
+
+  .toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 12px;
+    text-transform: none;
+    color: #a8a29e;
+  }
+
+  .toggle-label input[type="checkbox"] {
+    width: 16px;
+    padding: 0;
+    accent-color: #fbbf24;
+  }
+
+  .toggle-text {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: #d6d3d1;
   }
 </style>
