@@ -13,7 +13,6 @@ import type { AccountMachine, AccountTx } from '../../types';
 export async function handleHtlcTimeout(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'htlc_timeout' }>,
-  isOurFrame: boolean,
   currentHeight: number,
   currentTimestamp: number
 ): Promise<{ success: boolean; events: string[]; error?: string; timedOutHashlock?: string }> {

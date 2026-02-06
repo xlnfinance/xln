@@ -438,6 +438,11 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
       return r;
     });
 
+    // Start runtime event loop (processes inbound P2P messages, bilateral consensus)
+    if (xln.startRuntimeLoop) {
+      xln.startRuntimeLoop(newEnv);
+    }
+
     // Switch to new runtime
     activeRuntimeId.set(runtimeId);
     console.log('[VaultStore.createRuntime] ✅ Runtime created with entity:', entityId.slice(0, 18));

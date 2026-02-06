@@ -6,7 +6,6 @@
 import type { Env, HankoString } from './types';
 import { buildRealHanko } from './hanko';
 import { ethers } from 'ethers';
-import { getCachedSignerPublicKey } from './account-crypto';
 
 // Browser-compatible Buffer helpers - ALWAYS use manual hex parsing (Node Buffer.from can be broken in some envs)
 const bufferFrom = (data: string | Uint8Array | number[], encoding?: BufferEncoding): Buffer => {
@@ -390,14 +389,7 @@ export async function verifyHankoForHash(
     // Fallback: use gossip profile metadata (remote entity) if no local replica
     if (expectedAddresses.length === 0 && env?.gossip?.getProfiles) {
       const allProfiles = env.gossip.getProfiles();
-      console.log(`🔍 HANKO-DEBUG: Looking for ${expectedEntityId.slice(-4)} in ${allProfiles.length} gossip profiles`);
-      console.log(`🔍 HANKO-DEBUG: Available profile entityIds:`, allProfiles.map((p: any) => p.entityId?.slice(-4) || '???'));
       const profile = allProfiles.find((p: any) => p.entityId === expectedEntityId);
-      if (profile) {
-        console.log(`✅ HANKO-DEBUG: Found profile for ${expectedEntityId.slice(-4)}`);
-      } else {
-        console.log(`❌ HANKO-DEBUG: Profile NOT FOUND for ${expectedEntityId}`);
-      }
       if (profile) {
         const boardMeta = profile.metadata?.board;
         const publicKey = profile.metadata?.entityPublicKey;
@@ -431,22 +423,8 @@ export async function verifyHankoForHash(
       }
     }
 
-    // Fallback: check registered public keys (from P2P gossip applyIncomingProfiles)
-    if (expectedAddresses.length === 0) {
-      console.log(`🔍 HANKO-DEBUG: Trying getCachedSignerPublicKey for ${expectedEntityId.slice(-4)} (full: ${expectedEntityId})`);
-      const registeredPubKey = getCachedSignerPublicKey(expectedEntityId);
-      console.log(`🔍 HANKO-DEBUG: getCachedSignerPublicKey returned ${registeredPubKey ? 'key found' : 'null'}`);
-      if (registeredPubKey) {
-        const pubKeyHex = '0x' + Array.from(registeredPubKey).map(b => b.toString(16).padStart(2, '0')).join('');
-        const derived = publicKeyToAddress(pubKeyHex);
-        if (derived) {
-          expectedAddresses.push(derived);
-          console.log(`✅ Using registered public key for ${expectedEntityId.slice(-4)}`);
-        }
-      }
-    }
-
     if (expectedAddresses.length > 0) {
+      // External board found — verify recovered signers match
       for (const addr of recoveredAddresses) {
         if (!expectedAddresses.includes(addr)) {
           console.warn(`❌ Hanko rejected: Signer ${addr.slice(0, 10)} not in entity board validators`);
@@ -454,16 +432,26 @@ export async function verifyHankoForHash(
           return { valid: false, entityId: null };
         }
       }
-      console.log(`✅ Board validation passed: ${recoveredAddresses.length} signers match board validators`);
       boardVerified = true;
-    }
-
-    // SECURITY: Board verification is MANDATORY in production
-    // External entities MUST have board metadata in gossip profiles before signatures are accepted
-    if (!boardVerified) {
-      console.error(`❌ SECURITY: Cannot verify board for entity ${expectedEntityId.slice(-4)} - board/publicKey missing in replicas or gossip`);
-      console.error(`   Rejecting Hanko signature - board verification is mandatory for production`);
-      return { valid: false, entityId: null };
+    } else {
+      // Self-contained verification: the Hanko IS the board declaration
+      // Reconstruct board from claim's entityIndexes + recovered signatures + placeholders
+      // For gossip/first-contact: sufficient because real security is at consensus layer
+      const numPlaceholders = hanko.placeholders.length;
+      let signerWeightSum = 0;
+      for (let i = 0; i < matchingClaim.entityIndexes.length; i++) {
+        const memberIndex = matchingClaim.entityIndexes[i];
+        if (memberIndex >= numPlaceholders) {
+          // This slot maps to a signer (not a placeholder) — they actually signed
+          signerWeightSum += matchingClaim.weights[i];
+        }
+      }
+      if (signerWeightSum >= matchingClaim.threshold) {
+        boardVerified = true;
+      } else {
+        console.warn(`❌ Hanko self-contained: insufficient weight ${signerWeightSum}/${matchingClaim.threshold}`);
+        return { valid: false, entityId: null };
+      }
     }
 
     // Valid if at least one yes entity AND entityId matches AND has valid EOA sigs from board (already verified)

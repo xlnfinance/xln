@@ -367,14 +367,32 @@
 
   // Track if we've already discovered (prevent infinite loop)
   let hasDiscoveredOnce = false;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let retryCount = 0;
+  const MAX_RETRIES = 5;
 
-  // Auto-load on mount
+  // Auto-load on mount with retry for WS connection timing
   onMount(() => {
     if (env) {
       hasDiscoveredOnce = true;
-      discoverHubs(true);
+      discoverHubs(true).then(() => {
+        // If 0 hubs found, schedule retries (WS may not be connected yet)
+        if (hubs.length === 0) scheduleRetry();
+      });
     }
+    return () => { if (retryTimer) clearTimeout(retryTimer); };
   });
+
+  function scheduleRetry() {
+    if (retryCount >= MAX_RETRIES) return;
+    retryCount++;
+    const delay = retryCount * 500; // 500, 1000, 1500, 2000, 2500ms
+    retryTimer = setTimeout(async () => {
+      retryTimer = null;
+      await discoverHubs(true);
+      if (hubs.length === 0) scheduleRetry();
+    }, delay);
+  }
 
   // Also refresh when env becomes available (only once)
   $: if (env && hubs.length === 0 && !loading && !hasDiscoveredOnce) {

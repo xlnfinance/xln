@@ -14,13 +14,12 @@
 import type { AccountMachine, AccountTx, HtlcLock, Delta } from '../../types';
 import { deriveDelta, getDefaultCreditLimit } from '../../account-utils';
 import { FINANCIAL } from '../../constants';
-import { isLeftEntity } from '../../entity-id-utils';
 import { HTLC } from '../../constants';
 
 export async function handleHtlcLock(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'htlc_lock' }>,
-  isOurFrame: boolean,
+  byLeft: boolean,
   currentTimestamp: number,
   currentHeight: number,
   isValidation: boolean = false
@@ -85,15 +84,8 @@ export async function handleHtlcLock(
   if (delta.leftHtlcHold === undefined) delta.leftHtlcHold = 0n;
   if (delta.rightHtlcHold === undefined) delta.rightHtlcHold = 0n;
 
-  // 5. Determine sender perspective (canonical direction)
-  const leftEntity = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity)
-    ? accountMachine.proofHeader.fromEntity
-    : accountMachine.proofHeader.toEntity;
-
-  // CRITICAL: Lock is ALWAYS initiated by sender (who is creating the AccountTx)
-  const senderIsLeft = isOurFrame
-    ? (accountMachine.proofHeader.fromEntity === leftEntity)
-    : (accountMachine.proofHeader.fromEntity !== leftEntity);
+  // 5. Determine sender perspective (Channel.ts: byLeft = frame proposer = sender)
+  const senderIsLeft = byLeft;
 
   // 6. Check available capacity (deriveDelta auto-deducts HTLC holds now)
   const derived = deriveDelta(delta, senderIsLeft);

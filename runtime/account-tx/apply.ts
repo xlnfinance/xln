@@ -25,7 +25,7 @@ import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
  * Process single AccountTx through bilateral consensus
  * @param accountMachine - The account machine state
  * @param accountTx - The transaction to process
- * @param isOurFrame - Whether we're processing our own frame (vs counterparty's)
+ * @param byLeft - Frame-level: is the proposer the LEFT entity? (Channel.ts block.isLeft pattern)
  * @param currentTimestamp - Current timestamp (for HTLC timelock validation)
  * @param currentHeight - Current J-block height (for HTLC revealBeforeHeight validation)
  * @returns Result with success, events, and optional error (may include secret/hashlock for HTLC routing)
@@ -33,7 +33,7 @@ import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
 export async function processAccountTx(
   accountMachine: AccountMachine,
   accountTx: AccountTx,
-  isOurFrame: boolean = true,
+  byLeft: boolean,
   currentTimestamp: number = 0,
   currentHeight: number = 0,
   isValidation: boolean = false
@@ -60,18 +60,18 @@ export async function processAccountTx(
   // Derive counterparty from canonical left/right using proofHeader's fromEntity as "me"
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
-  console.log(`🔄 Processing ${accountTx.type} for ${counterparty.slice(-4)} (ourFrame: ${isOurFrame})`);
+  console.log(`🔄 Processing ${accountTx.type} for ${counterparty.slice(-4)} (byLeft: ${byLeft})`);
 
   // Route to appropriate handler based on transaction type
   switch (accountTx.type) {
     case 'add_delta':
-      return handleAddDelta(accountMachine, accountTx, isOurFrame);
+      return handleAddDelta(accountMachine, accountTx);
 
     case 'set_credit_limit':
-      return handleSetCreditLimit(accountMachine, accountTx, isOurFrame);
+      return handleSetCreditLimit(accountMachine, accountTx, byLeft);
 
     case 'direct_payment':
-      return handleDirectPayment(accountMachine, accountTx, isOurFrame);
+      return handleDirectPayment(accountMachine, accountTx, byLeft);
 
     case 'account_payment':
       // Legacy type - not used in new implementation
@@ -87,7 +87,7 @@ export async function processAccountTx(
       return handleReserveToCollateral(accountMachine, accountTx as Extract<AccountTx, { type: 'reserve_to_collateral' }>);
 
     case 'request_withdrawal':
-      return handleRequestWithdrawal(accountMachine, accountTx as Extract<AccountTx, { type: 'request_withdrawal' }>, isOurFrame);
+      return handleRequestWithdrawal(accountMachine, accountTx as Extract<AccountTx, { type: 'request_withdrawal' }>, byLeft);
 
     case 'approve_withdrawal':
       return handleApproveWithdrawal(accountMachine, accountTx as Extract<AccountTx, { type: 'approve_withdrawal' }>);
@@ -96,12 +96,12 @@ export async function processAccountTx(
       return handleRequestRebalance(accountMachine, accountTx as Extract<AccountTx, { type: 'request_rebalance' }>);
 
     case 'j_sync':
-      return handleJSync(accountMachine, accountTx as Extract<AccountTx, { type: 'j_sync' }>, isOurFrame);
+      return handleJSync(accountMachine, accountTx as Extract<AccountTx, { type: 'j_sync' }>);
 
     case 'j_event_claim': {
       // Bilateral J-event consensus: Store observation with correct left/right attribution
       const { jHeight, jBlockHash, events, observedAt } = accountTx.data;
-      console.log(`📥 j_event_claim: jHeight=${jHeight}, hash=${jBlockHash.slice(0,10)}, isOurFrame=${isOurFrame}`);
+      console.log(`📥 j_event_claim: jHeight=${jHeight}, hash=${jBlockHash.slice(0,10)}, byLeft=${byLeft}`);
 
       // Initialize consensus fields if missing
       if (!accountMachine.leftJObservations) accountMachine.leftJObservations = [];
@@ -126,15 +126,11 @@ export async function processAccountTx(
         return { success: true, events: [`ℹ️ j_event_claim skipped (already finalized)`] };
       }
 
-      // AUTH: Determine whose observation this is (2024 Transition.ts pattern)
-      // isOurFrame = are WE the frame proposer? (like block.isLeft === channel.isLeft in 2024)
-      const { iAmLeft, counterparty: cpId } = getAccountPerspective(accountMachine, myEntityId);
+      // AUTH: byLeft = frame proposer is left (Channel.ts block.isLeft pattern)
+      const { counterparty: cpId } = getAccountPerspective(accountMachine, myEntityId);
+      const claimIsFromLeft = byLeft;
 
-      // If isOurFrame=true: this is OUR claim (store in our side)
-      // If isOurFrame=false: this is THEIR claim (store in their side)
-      const claimIsFromLeft = isOurFrame ? iAmLeft : !iAmLeft;
-
-      console.log(`   🔍 AUTH: iAmLeft=${iAmLeft}, isOurFrame=${isOurFrame}, claimIsFromLeft=${claimIsFromLeft}`);
+      console.log(`   🔍 AUTH: byLeft=${byLeft}, claimIsFromLeft=${claimIsFromLeft}`);
 
       const obs = { jHeight, jBlockHash, events, observedAt };
 
@@ -169,7 +165,7 @@ export async function processAccountTx(
       return await handleHtlcLock(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'htlc_lock' }>,
-        isOurFrame,
+        byLeft,
         currentTimestamp,
         currentHeight,
         isValidation
@@ -179,7 +175,6 @@ export async function processAccountTx(
       return await handleHtlcReveal(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'htlc_reveal' }>,
-        isOurFrame,
         currentHeight,
         currentTimestamp
       );
@@ -188,7 +183,6 @@ export async function processAccountTx(
       return await handleHtlcTimeout(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'htlc_timeout' }>,
-        isOurFrame,
         currentHeight,
         currentTimestamp
       );
@@ -198,7 +192,7 @@ export async function processAccountTx(
       return await handleSwapOffer(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'swap_offer' }>,
-        isOurFrame,
+        byLeft,
         currentHeight,
         isValidation
       );
@@ -207,7 +201,7 @@ export async function processAccountTx(
       return await handleSwapResolve(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'swap_resolve' }>,
-        isOurFrame,
+        byLeft,
         currentHeight,
         isValidation
       );
@@ -216,7 +210,7 @@ export async function processAccountTx(
       return await handleSwapCancel(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'swap_cancel' }>,
-        isOurFrame,
+        byLeft,
         currentHeight,
         isValidation
       );
@@ -225,15 +219,13 @@ export async function processAccountTx(
     case 'settle_hold':
       return await handleSettleHold(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'settle_hold' }>,
-        isOurFrame
+        accountTx as Extract<AccountTx, { type: 'settle_hold' }>
       );
 
     case 'settle_release':
       return await handleSettleRelease(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'settle_release' }>,
-        isOurFrame
+        accountTx as Extract<AccountTx, { type: 'settle_release' }>
       );
 
     case 'account_frame':

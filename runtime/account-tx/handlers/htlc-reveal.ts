@@ -16,7 +16,6 @@ import { hashHtlcSecret } from '../../htlc-utils';
 export async function handleHtlcReveal(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'htlc_reveal' }>,
-  isOurFrame: boolean,
   currentHeight: number,
   currentTimestamp: number
 ): Promise<{

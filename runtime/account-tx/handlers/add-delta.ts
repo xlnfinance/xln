@@ -8,8 +8,7 @@ import { getAccountPerspective } from '../../state-helpers';
 
 export function handleAddDelta(
   accountMachine: AccountMachine,
-  accountTx: Extract<AccountTx, { type: 'add_delta' }>,
-  _isOurFrame: boolean = true
+  accountTx: Extract<AccountTx, { type: 'add_delta' }>
 ): { success: boolean; events: string[]; error?: string } {
   const { tokenId } = accountTx.data;
   const events: string[] = [];

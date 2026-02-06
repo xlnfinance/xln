@@ -338,56 +338,22 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         throw new Error(`CRITICAL: Account machine not found after creation`);
       }
 
-      if (isLeft) {
-        // Token for delta (default: 1 = USDC)
-        const tokenId = entityTx.data.tokenId ?? 1;
+      // Token for delta (default: 1 = USDC)
+      const tokenId = entityTx.data.tokenId ?? 1;
+      const creditAmount = entityTx.data.creditAmount;
 
-        // STEP 1: Add delta - creates the token delta for this account
-        localAccount.mempool.push({
-          type: 'add_delta',
-          data: { tokenId }
-        });
-
-        // STEP 2: Extend credit (optional) - must come AFTER add_delta in same frame
-        // Order matters: add_delta creates delta, then set_credit_limit modifies it
-        const creditAmount = entityTx.data.creditAmount;
-        if (creditAmount && creditAmount > 0n) {
-          // We are LEFT, counterparty is RIGHT → set rightCreditLimit
-          // "I trust the counterparty up to X" = counterparty can owe me up to X
-          localAccount.mempool.push({
-            type: 'set_credit_limit',
-            data: { tokenId, amount: creditAmount, side: 'right' as const }
-          });
-          console.log(`📝 Queued [add_delta, set_credit_limit] to mempool (right=${creditAmount})`);
-        } else {
-          console.log(`📝 Queued [add_delta] to mempool (credit=0, must be set explicitly)`);
-        }
-
-        console.log(`⏰ Frame #1 will be auto-proposed on next tick (100ms)`);
+      if (creditAmount && creditAmount > 0n) {
+        // INITIATOR: Queue add_delta + set_credit_limit (single frame)
+        // Side auto-detected by handler from frame proposer
+        localAccount.mempool.push(
+          { type: 'add_delta', data: { tokenId } },
+          { type: 'set_credit_limit', data: { tokenId, amount: creditAmount } }
+        );
+        console.log(`📝 Initiator queued [add_delta, set_credit_limit] (credit=${creditAmount})`);
       } else {
-        // RIGHT side: queue add_delta THEN set_credit_limit — both in mempool
-        // add_delta creates the token delta, set_credit_limit modifies it
-        // Both get batched into our ACK frame after LEFT's first frame arrives
-        const creditAmount = entityTx.data.creditAmount;
-        const tokenId = entityTx.data.tokenId ?? 1;
-
-        // STEP 1: add_delta (idempotent — safe even if LEFT also adds it)
-        localAccount.mempool.push({
-          type: 'add_delta',
-          data: { tokenId }
-        });
-
-        if (creditAmount && creditAmount > 0n) {
-          // STEP 2: set_credit_limit — counterparty is LEFT → set leftCreditLimit
-          // "I trust the counterparty up to X" = counterparty can owe me up to X
-          localAccount.mempool.push({
-            type: 'set_credit_limit',
-            data: { tokenId, amount: creditAmount, side: 'left' as const }
-          });
-          console.log(`🧭 Right side: queued [add_delta, set_credit_limit] (left=${creditAmount})`);
-        } else {
-          console.log(`🧭 Right side: queued [add_delta] (no credit requested)`);
-        }
+        // COUNTERPARTY (mirror): Just create account machine, don't queue txs
+        // Counterparty waits for initiator's frame and ACKs it
+        console.log(`🧭 Counterparty: account created, waiting for initiator's frame`);
       }
 
       // Hub entities no longer auto-send faucet (use /api/faucet/offchain instead)
@@ -395,9 +361,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // Add success message to chat
       addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
 
-      // CRITICAL: Notify counterparty to create mirror account
-      // Without this, Hub won't know about Alice-Hub account when j-events arrive!
-      // Do NOT pass creditAmount — only initiator extends credit, not counterparty
+      // Notify counterparty to create mirror account
+      // Anti-ping-pong: counterparty's accounts.has() check (line 243) prevents infinite loop
       const counterpartySigner = resolveEntityProposerId(env, targetEntityId, 'openAccount');
       outputs.push({
         entityId: targetEntityId,
@@ -740,26 +705,16 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         return { newState: entityState, outputs: [] };
       }
 
-      // Determine canonical side - credit limit I'm setting for my COUNTERPARTY to use
-      // leftCreditLimit = credit extended by RIGHT entity to LEFT entity
-      // rightCreditLimit = credit extended by LEFT entity to RIGHT entity
-      const counterpartyIsLeft = counterpartyEntityId < entityState.entityId;
-      const side = counterpartyIsLeft ? 'left' : 'right';
-
       // Create set_credit_limit account transaction
+      // Side auto-detected by handler from frame proposer (no explicit side needed)
       const accountTx: AccountTx = {
         type: 'set_credit_limit',
-        data: {
-          tokenId,
-          amount,
-          side: side as 'left' | 'right',
-        },
+        data: { tokenId, amount },
       };
 
       // Pure: return mempoolOp instead of mutating directly
       mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
-      console.log(`💳 Added set_credit_limit to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
-      console.log(`💳 Setting ${side}CreditLimit=${amount} (counterparty is ${side}) for token ${tokenId}`);
+      console.log(`💳 Added set_credit_limit to mempoolOps for account with ${counterpartyEntityId.slice(-4)} amount=${amount}`);
 
       addMessage(newState, `💳 Extended credit of ${amount} to ${counterpartyEntityId.slice(-4)}`);
 

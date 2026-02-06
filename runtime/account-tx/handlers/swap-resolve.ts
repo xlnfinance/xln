@@ -31,7 +31,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
-import { isLeft, deriveDelta } from '../../account-utils';
+import { deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL } from '../../constants';
 
@@ -40,7 +40,7 @@ const MAX_FILL_RATIO = 65535;
 export async function handleSwapResolve(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'swap_resolve' }>,
-  isOurFrame: boolean,
+  byLeft: boolean,
   currentHeight: number,
   isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelled?: { offerId: string; accountId: string } }> {
@@ -56,10 +56,8 @@ export async function handleSwapResolve(
     return { success: false, error: `Offer ${offerId} not found`, events };
   }
 
-  // 2. Validate caller is the counterparty (NOT the maker)
-  const { fromEntity, toEntity } = accountMachine.proofHeader;
-  const weAreLeft = isLeft(fromEntity, toEntity);
-  const callerIsLeft = isOurFrame ? weAreLeft : !weAreLeft;
+  // 2. Validate caller is the counterparty (Channel.ts: byLeft = frame proposer = caller)
+  const callerIsLeft = byLeft;
 
   // Caller must be opposite of maker
   if (callerIsLeft === offer.makerIsLeft) {

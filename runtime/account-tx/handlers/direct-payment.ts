@@ -14,7 +14,7 @@ import { getAccountPerspective } from '../../state-helpers';
 export function handleDirectPayment(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'direct_payment' }>,
-  isOurFrame: boolean = true
+  byLeft: boolean
 ): { success: boolean; events: string[]; error?: string } {
   const { tokenId, amount, route, description } = accountTx.data;
   const events: string[] = [];
@@ -164,8 +164,10 @@ export function handleDirectPayment(
   console.log(`🔍 OFFDELTA-UPDATE: ${oldOffdelta} + ${canonicalDelta} = ${delta.offdelta}`);
   console.log(`🔍 NEW-TOTAL: ondelta=${delta.ondelta} + offdelta=${delta.offdelta} = ${delta.ondelta + delta.offdelta}`);
 
-  // Events differ by perspective but state is identical
+  // Events differ by perspective but state is identical (derive from byLeft)
   const { counterparty: cpForEvent } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
+  const iAmLeft = accountMachine.proofHeader.fromEntity === leftEntity;
+  const isOurFrame = (byLeft === iAmLeft);
   if (isOurFrame) {
     events.push(`💸 Sent ${amount.toString()} token ${tokenId} to Entity ${cpForEvent.slice(-4)} ${description ? '(' + description + ')' : ''}`);
   } else {

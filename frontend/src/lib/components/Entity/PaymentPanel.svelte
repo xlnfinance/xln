@@ -45,21 +45,40 @@
     return id || '';
   }
 
-  // Find paths through accounts (BFS)
-  function findPathsThroughAccounts(replicas: Map<string, any>, startId: string, targetId: string): Array<{ path: string[], probability: number }> {
+  // Build bidirectional adjacency from all available sources
+  function buildNetworkAdjacency(env: any, replicas: Map<string, any>): Map<string, Set<string>> {
     const adjacency = new Map<string, Set<string>>();
 
+    const addEdge = (a: string, b: string) => {
+      if (!adjacency.has(a)) adjacency.set(a, new Set());
+      if (!adjacency.has(b)) adjacency.set(b, new Set());
+      adjacency.get(a)!.add(b);
+      adjacency.get(b)!.add(a); // Bidirectional: if A↔B exists, both can route through it
+    };
+
+    // Source 1: Local replicas (our own entities' accounts)
     for (const [replicaKey, replica] of replicas.entries()) {
       const [entId] = replicaKey.split(':');
       if (!entId || !replica.state?.accounts) continue;
-
-      if (!adjacency.has(entId)) adjacency.set(entId, new Set());
-
       for (const counterpartyId of replica.state.accounts.keys()) {
-        adjacency.get(entId)!.add(String(counterpartyId));
+        addEdge(entId, String(counterpartyId));
       }
     }
 
+    // Source 2: Gossip profiles (network-wide channel graph)
+    const profiles = env?.gossip?.getProfiles?.() || [];
+    for (const profile of profiles) {
+      if (!profile.entityId || !profile.accounts) continue;
+      for (const account of profile.accounts) {
+        addEdge(profile.entityId, account.counterpartyId);
+      }
+    }
+
+    return adjacency;
+  }
+
+  // BFS pathfinding over network adjacency graph
+  function findPathsFromGraph(adjacency: Map<string, Set<string>>, startId: string, targetId: string): Array<{ path: string[], probability: number }> {
     const maxDepth = 5;
     const foundPaths: Array<{ path: string[], probability: number }> = [];
     const queue: Array<{ current: string, path: string[], depth: number }> = [
@@ -75,9 +94,8 @@
         continue;
       }
 
-      const visitKey = `${current}-${depth}`;
-      if (visited.has(visitKey)) continue;
-      visited.add(visitKey);
+      if (visited.has(current)) continue;
+      visited.add(current);
 
       const neighbors = adjacency.get(current);
       if (!neighbors) continue;
@@ -112,7 +130,8 @@
       const amountInSmallestUnit = wholePart * BigInt(10 ** decimals) + BigInt(decimalPart || 0);
 
       if (!currentReplicas) throw new Error('Replicas not available');
-      const foundPaths = findPathsThroughAccounts(currentReplicas, entityId, targetEntityId);
+      const adjacency = buildNetworkAdjacency(env, currentReplicas);
+      const foundPaths = findPathsFromGraph(adjacency, entityId, targetEntityId);
 
       if (foundPaths.length === 0) {
         throw new Error(`No route found to ${formatShortId(targetEntityId)}`);

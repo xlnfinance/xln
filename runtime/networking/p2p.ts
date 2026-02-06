@@ -28,7 +28,7 @@ import { RuntimeWsClient } from './ws-client';
 import { buildEntityProfile, mergeProfileWithExisting } from './gossip-helper';
 import { extractEntityId } from '../ids';
 import { getCachedSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
-import { signProfileSync, verifyProfileSignature } from './profile-signing';
+import { signProfile, verifyProfileSignature } from './profile-signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
@@ -193,9 +193,8 @@ export class RuntimeP2P {
         },
         onOpen: () => {
           this.flushPending();
-          if (this.gossipPollMs > 0) {
-            this.requestSeedGossip();
-          }
+          // ALWAYS request gossip on connect (even if periodic polling is disabled)
+          this.requestSeedGossip();
           this.announceLocalProfiles();
         },
         onEntityInput: async (from, input) => {
@@ -377,8 +376,8 @@ export class RuntimeP2P {
     console.log(`P2P_FETCH_TIMEOUT: Still have ${this.env.gossip?.getProfiles?.()?.length || 0} profiles after retries`);
   }
 
-  private announceLocalProfiles() {
-    const profiles = this.getLocalProfiles();
+  private async announceLocalProfiles() {
+    const profiles = await this.getLocalProfiles();
     if (profiles.length === 0) return;
     for (const profile of profiles) {
       this.env.gossip?.announce?.(profile);
@@ -398,7 +397,7 @@ export class RuntimeP2P {
     }
   }
 
-  private getLocalProfiles(): Profile[] {
+  private async getLocalProfiles(): Promise<Profile[]> {
     if (!this.env.eReplicas || this.env.eReplicas.size === 0) return [];
     const profiles: Profile[] = [];
     const seen = new Set<string>();
@@ -424,7 +423,7 @@ export class RuntimeP2P {
       const profile = buildEntityProfile(replica.state, this.profileName ?? existingName, monotonicTimestamp);
       profile.runtimeId = this.runtimeId;
       if (this.isHub) {
-        profile.capabilities = Array.from(new Set([...(profile.capabilities || []), 'hub', 'relay']));
+        profile.capabilities = Array.from(new Set([...(profile.capabilities || []), 'hub', 'relay', 'routing', 'faucet']));
         profile.metadata = { ...(profile.metadata || {}), isHub: true };
         if (this.relayUrls.length > 0) {
           profile.endpoints = this.relayUrls;
@@ -454,12 +453,11 @@ export class RuntimeP2P {
       // Preserve existing hub metadata + custom fields
       const merged = mergeProfileWithExisting(profile, existingProfile);
 
-      // Sign profile using same mechanism as accountFrames (Hanko-based)
-      // Uses sync version here; async signProfile() available for full Hanko with ABI encoding
+      // Sign profile using Hanko mechanism (same as accountFrames)
       let signedProfile = merged;
       if (firstValidator && this.env.runtimeSeed) {
         try {
-          signedProfile = signProfileSync({ runtimeSeed: this.env.runtimeSeed }, merged, firstValidator);
+          signedProfile = await signProfile(this.env as Env, merged, firstValidator);
         } catch (error) {
           console.warn(`P2P_PROFILE_SIGN_FAILED: ${entityId.slice(-4)} - ${(error as Error).message}`);
         }
@@ -508,10 +506,9 @@ export class RuntimeP2P {
     let unsigned = 0;
     for (const profile of profiles) {
       // Verify profile signature if present (anti-spoofing)
-      // Uses same Hanko verification as accountFrames
+      // Hanko is self-contained: claims embed the board, signatures prove identity
       const hasHanko = profile.metadata?.['profileHanko'];
-      const hasLegacySig = profile.metadata?.['profileSignature'];
-      if (hasHanko || hasLegacySig) {
+      if (hasHanko) {
         const result = await verifyProfileSignature(profile, this.env);
         if (!result.valid) {
           const board = profile.metadata?.board;

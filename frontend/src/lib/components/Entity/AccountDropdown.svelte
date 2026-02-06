@@ -52,7 +52,9 @@
 
   $: displayText = selectedAccount
     ? `Account ${selectedAccount.id}`
-    : 'Select Account...';
+    : accounts.length > 0
+      ? `${accounts.length} Account${accounts.length !== 1 ? 's' : ''}`
+      : 'Select Account...';
 
   function selectAccount(accountId: string | null) {
     dispatch('accountSelect', { accountId });

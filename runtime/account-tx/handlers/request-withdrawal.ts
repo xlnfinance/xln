@@ -10,7 +10,7 @@ import type { AccountMachine, AccountTx } from '../../types';
 export function handleRequestWithdrawal(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'request_withdrawal' }>,
-  isOurFrame: boolean = true
+  byLeft: boolean
 ): { success: boolean; events: string[]; error?: string; approvalNeeded?: AccountTx } {
   const { tokenId, amount, requestId } = accountTx.data;
   const events: string[] = [];
@@ -33,6 +33,10 @@ export function handleRequestWithdrawal(
       events
     };
   }
+
+  // Derive perspective from byLeft (cosmetic: direction labeling)
+  const iAmLeft = accountMachine.leftEntity === accountMachine.proofHeader.fromEntity;
+  const isOurFrame = (byLeft === iAmLeft);
 
   if (isOurFrame) {
     // We are requesting

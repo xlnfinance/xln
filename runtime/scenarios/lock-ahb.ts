@@ -776,11 +776,13 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // ✅ ASSERT Frame 6: Alice-Hub account exists (bidirectional)
     const [, aliceRep6] = findReplica(env, alice.id);
+    const [, hubRep6] = findReplica(env, hub.id);
     const aliceHubAcc6 = aliceRep6?.state?.accounts?.get(hub.id);
-    if (!aliceHubAcc6) {
-      throw new Error(`ASSERT FAIL Frame 6: Alice-Hub account does NOT exist!`);
+    const hubAliceAcc6 = hubRep6?.state?.accounts?.get(alice.id);
+    if (!aliceHubAcc6 || !hubAliceAcc6) {
+      throw new Error(`ASSERT FAIL Frame 6: Alice-Hub account NOT bidirectional! Alice→Hub: ${!!aliceHubAcc6}, Hub→Alice: ${!!hubAliceAcc6}`);
     }
-    console.log(`✅ ASSERT Frame 6: Alice-Hub account EXISTS`);
+    console.log(`✅ ASSERT Frame 6: Alice-Hub accounts EXIST (both directions)`);
 
     await pushSnapshot(env, 'Alice ↔ Hub: Account Created', {
       title: 'Bilateral Account: Alice ↔ Hub (A-H)',
