@@ -2,6 +2,7 @@
 // Returns status of all J-machines, hubs, and system health
 
 import type { Env } from './types.js';
+import { getP2P } from './runtime.js';
 
 export interface HealthStatus {
   timestamp: number;
@@ -125,9 +126,9 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
     hubs,
     system: {
       runtime: !!env,
-      p2p: !!env?.p2p,
+      p2p: !!(env && getP2P(env)),
       database: true, // TODO: Check actual DB connection
-      relay: false, // TODO: Check relay connection
+      relay: !!(env && getP2P(env)?.isConnected()),
     },
   };
 }
