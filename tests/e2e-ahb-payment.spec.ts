@@ -235,18 +235,26 @@ async function outCap(page: Page, entityId: string, cpId: string): Promise<bigin
   const s = await page.evaluate(({ entityId, cpId }) => {
     const env = (window as any).isolatedEnv;
     const XLN = (window as any).XLN;
-    if (!env || !XLN) return '0';
+    if (!env || !XLN) return 'ENV_MISSING';
     for (const [k, r] of env.eReplicas.entries()) {
       if (!k.startsWith(entityId + ':')) continue;
       const acc = r.state?.accounts?.get(cpId);
-      if (!acc) return 'NO_ACCOUNT';
+      if (!acc) {
+        const accKeys = r.state?.accounts ? [...r.state.accounts.keys()].map((k: string) => k.slice(0, 12)) : [];
+        console.log(`[E2E] outCap: NO_ACCOUNT for ${cpId.slice(0,12)}, accounts=[${accKeys}]`);
+        return 'NO_ACCOUNT';
+      }
       const d = acc.deltas?.get(1);
-      if (!d) return 'NO_DELTA';
+      if (!d) {
+        const deltaKeys = acc.deltas ? [...acc.deltas.keys()] : [];
+        console.log(`[E2E] outCap: NO_DELTA for tokenId=1, deltaKeys=[${deltaKeys}], height=${acc.currentHeight}, mempool=${acc.mempool?.length}`);
+        return 'NO_DELTA';
+      }
       return XLN.deriveDelta(d, entityId < cpId).outCapacity.toString();
     }
     return 'NO_ENTITY';
   }, { entityId, cpId });
-  if (s === 'NO_ACCOUNT' || s === 'NO_DELTA' || s === 'NO_ENTITY') {
+  if (s === 'NO_ACCOUNT' || s === 'NO_DELTA' || s === 'NO_ENTITY' || s === 'ENV_MISSING') {
     console.log(`[E2E] outCap(${entityId.slice(0,12)}, ${cpId.slice(0,12)}) = ${s}`);
     return 0n;
   }
@@ -351,7 +359,11 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
   test('bidirectional payments through hub', async ({ page }) => {
     page.on('console', msg => {
       const t = msg.text();
-      if (t.includes('[E2E]') || t.includes('[VaultStore]') || t.includes('P2P') || msg.type() === 'error')
+      if (t.includes('[E2E]') || t.includes('[VaultStore]') || t.includes('P2P') || msg.type() === 'error'
+          || t.includes('APPLY') || t.includes('Frame consensus') || t.includes('PROPOSE')
+          || t.includes('credit') || t.includes('add_delta') || t.includes('SINGLE-SIGNER')
+          || t.includes('Hanko') || t.includes('Replay') || t.includes('ENVELOPE')
+          || t.includes('HTLC') || t.includes('Missing crypto') || t.includes('🧅'))
         console.log(`[B] ${t.slice(0, 300)}`);
     });
 
