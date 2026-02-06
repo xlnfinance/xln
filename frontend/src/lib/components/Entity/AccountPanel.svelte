@@ -348,14 +348,12 @@
       </span>
       <div class="consensus-status">
         <span class="frame-badge">Frame #{account.currentFrame.height}</span>
-        {#if account.mempool.length > 0 || account.pendingFrame || account.sentTransitions > 0}
+        {#if account.mempool.length > 0 || account.pendingFrame}
           <span class="status-badge pending">
             {#if account.pendingFrame}
               Awaiting Consensus
-            {:else if account.mempool.length > 0}
-              {account.mempool.length} pending
             {:else}
-              {account.sentTransitions} in flight
+              {account.mempool.length} pending
             {/if}
           </span>
         {:else}

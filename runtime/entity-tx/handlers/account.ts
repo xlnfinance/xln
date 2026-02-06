@@ -55,10 +55,9 @@ export interface AccountHandlerResult {
 
 export async function handleAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<AccountHandlerResult> {
   console.log(`🚀 APPLY accountInput: ${input.fromEntityId.slice(-4)} → ${input.toEntityId.slice(-4)}`);
-  console.log(`🚀 APPLY accountInput details: height=${input.height}, hasNewFrame=${!!input.newAccountFrame}, hasPrevHanko=${!!input.prevHanko}, counter=${input.counter}`);
+  console.log(`🚀 APPLY accountInput details: height=${input.height}, hasNewFrame=${!!input.newAccountFrame}, hasPrevHanko=${!!input.prevHanko}`);
 
   // CRITICAL: Don't clone here - state already cloned at entity level (applyEntityTx)
-  // Cloning here causes ackedTransitions updates to be lost between sequential messages
   const newState: EntityState = state;  // Use state directly
   const outputs: EntityInput[] = [];
 
@@ -101,8 +100,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         stateHash: '',
         byLeft: state.entityId === leftEntity, // Am I left entity?
       },
-      sentTransitions: 0,
-      ackedTransitions: 0,
       deltas: initialDeltas,
       globalCreditLimits: {
         ownLimit: 0n, // Credit starts at 0 - must be explicitly extended
@@ -111,8 +108,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       currentHeight: 0,
       pendingSignatures: [],
       rollbackCount: 0,
-      sendCounter: 0,    // Channel.ts message counter
-      receiveCounter: 0,
       proofHeader: {
         fromEntity: state.entityId,
         toEntity: counterpartyId,
@@ -192,7 +187,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           entityId: newState.entityId,
           counterpartyId,
           frameHeight: input.newAccountFrame?.height ?? input.height,
-          counter: input.counter,
           hasNewFrame: Boolean(input.newAccountFrame),
         },
         newState.entityId,
@@ -714,7 +708,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           }]
         });
 
-        console.log(`✅ ACK-RESPONSE queued: ${state.entityId.slice(-4)} → ${result.response.toEntityId.slice(-4)}, height=${result.response.height}, hasPrevHanko=${!!result.response.prevHanko}, counter=${result.response.counter}`);
+        console.log(`✅ ACK-RESPONSE queued: ${state.entityId.slice(-4)} → ${result.response.toEntityId.slice(-4)}, height=${result.response.height}, hasPrevHanko=${!!result.response.prevHanko}`);
       }
     } else {
       console.error(`❌ Frame consensus failed: ${result.error}`);
@@ -779,7 +773,8 @@ export function processOrderbookSwaps(
     if (side === 1) {
       const baseAmount = offer.giveAmount;
       if (baseAmount % LOT_SCALE !== 0n) {
-        throw new Error(`ORDERBOOK: giveAmount not aligned to LOT_SCALE (offer=${offer.offerId}, amount=${baseAmount})`);
+        console.warn(`⚠️ ORDERBOOK: giveAmount not aligned to LOT_SCALE — skipping offer=${offer.offerId}, amount=${baseAmount}`);
+        continue;
       }
       priceTicks = (offer.wantAmount * 100n) / offer.giveAmount;
       qtyLots = baseAmount / LOT_SCALE;
@@ -788,7 +783,8 @@ export function processOrderbookSwaps(
     } else {
       const baseAmount = offer.wantAmount;
       if (baseAmount % LOT_SCALE !== 0n) {
-        throw new Error(`ORDERBOOK: wantAmount not aligned to LOT_SCALE (offer=${offer.offerId}, amount=${baseAmount})`);
+        console.warn(`⚠️ ORDERBOOK: wantAmount not aligned to LOT_SCALE — skipping offer=${offer.offerId}, amount=${baseAmount}`);
+        continue;
       }
       priceTicks = (offer.giveAmount * 100n) / offer.wantAmount;
       qtyLots = baseAmount / LOT_SCALE;
@@ -797,7 +793,8 @@ export function processOrderbookSwaps(
     }
 
     if (qtyLots === 0n || qtyLots > MAX_LOTS || priceTicks <= 0n || priceTicks > MAX_LOTS) {
-      throw new Error(`ORDERBOOK: Invalid order (offer=${offer.offerId}, qty=${qtyLots}, price=${priceTicks})`);
+      console.warn(`⚠️ ORDERBOOK: Invalid order — skipping offer=${offer.offerId}, qty=${qtyLots}, price=${priceTicks}`);
+      continue;
     }
 
     const account = hubState.accounts.get(accountId);

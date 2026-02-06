@@ -69,7 +69,6 @@ export async function createEntityFrameHash(
       cpId: cpId.slice(-8),
       height: acct.currentHeight,
       stateHash: acct.currentFrame?.stateHash?.slice(0, 12) || 'genesis',
-      ackedTransitions: acct.ackedTransitions,
       mempoolSize: acct.mempool.length,
       pendingFrame: acct.pendingFrame?.height ?? null,
     }));
@@ -103,7 +102,6 @@ export async function createEntityFrameHash(
         cpId,
         height: acct.currentHeight,
         stateHash: acct.currentFrame?.stateHash || 'genesis',
-        ackedTransitions: acct.ackedTransitions,
       })),
     // HTLC routing state hash
     htlcRoutesHash: newState.htlcRoutes.size > 0
@@ -418,10 +416,7 @@ export const applyEntityInput = async (
       entityTxs: [...workingReplica.mempool],
     });
 
-    // CHANNEL.TS PATTERN: Track sent txs, DON'T clear mempool yet
-    // Only clear after receiving commit confirmation (like Channel.ts line 217)
-    workingReplica.sentTransitions = txCount;
-    console.log(`📊 Tracked ${txCount} sent transitions (will clear on commit)`);
+    console.log(`📊 Forwarded ${txCount} txs to proposer (will clear on commit)`);
   }
 
   // Handle commit notifications AFTER forwarding (when receiving finalized frame from proposer)
@@ -489,11 +484,7 @@ export const applyEntityInput = async (
       if (committedTxCount > 0) {
         console.log(`📊 Clearing ${committedTxCount} committed txs from mempool (${workingReplica.mempool.length} total)`);
         workingReplica.mempool.splice(0, committedTxCount);
-        workingReplica.sentTransitions = 0;
         console.log(`📊 Mempool after commit: ${workingReplica.mempool.length} txs remaining`);
-      } else {
-        // No txs committed - leave mempool as-is
-        workingReplica.sentTransitions = 0;
       }
 
       delete workingReplica.lockedFrame; // Release lock after commit
@@ -1004,26 +995,6 @@ export const applyEntityInput = async (
     });
   } else if (workingReplica.isProposer && workingReplica.mempool.length === 0 && !workingReplica.proposal) {
     // DEBUG removed: ⚠️  CORNER CASE: Proposer with empty mempool - no auto-propose`);
-  } else if (!workingReplica.isProposer && workingReplica.mempool.length > 0) {
-    // DEBUG removed: → Non-proposer sending ${workingReplica.mempool.length} txs to proposer`);
-    // Send mempool to proposer
-    const proposerId = workingReplica.state.config.validators[0];
-    if (!proposerId) {
-      logError("FRAME_CONSENSUS", `❌ No proposer found in validators: ${workingReplica.state.config.validators}`);
-      return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
-    }
-    console.log(`🔥 BOB-TO-ALICE: Bob sending ${workingReplica.mempool.length} txs to proposer ${proposerId}`);
-    console.log(
-      `🔥 BOB-TO-ALICE: Transaction types:`,
-      workingReplica.mempool.map(tx => tx.type),
-    );
-    entityOutbox.push({
-      entityId: entityInput.entityId,
-      signerId: proposerId,
-      entityTxs: [...workingReplica.mempool],
-    });
-    // Clear mempool after sending
-    workingReplica.mempool.length = 0;
   } else if (workingReplica.isProposer && workingReplica.proposal) {
     // DEBUG removed: ⚠️  CORNER CASE: Proposer already has pending proposal - no new auto-propose`);
   }
@@ -1261,7 +1232,13 @@ export const applyEntityFrame = async (
     console.log(`📊 ENTITY-ORCHESTRATOR: Enriched ${enrichedOffers.length} offers with accountId`);
 
     const { processOrderbookSwaps } = await import('./entity-tx/handlers/account');
-    const matchResult = processOrderbookSwaps(currentEntityState, enrichedOffers);
+    let matchResult: Awaited<ReturnType<typeof processOrderbookSwaps>>;
+    try {
+      matchResult = processOrderbookSwaps(currentEntityState, enrichedOffers);
+    } catch (e) {
+      logError("FRAME_CONSENSUS", `❌ processOrderbookSwaps threw — skipping batch: ${(e as Error).message}`);
+      matchResult = { mempoolOps: [], bookUpdates: [] };
+    }
 
     // Apply match results to account mempools
     for (const { accountId, tx } of matchResult.mempoolOps) {
@@ -1440,7 +1417,8 @@ export const calculateQuorumPower = (config: ConsensusConfig, signers: string[])
   return signers.reduce((total, signerId) => {
     const shares = config.shares[signerId];
     if (shares === undefined) {
-      throw new Error(`CONSENSUS-SAFETY: Unknown validator ${signerId} - cannot calculate quorum power`);
+      logError("FRAME_CONSENSUS", `⚠️ BYZANTINE: Unknown signer ${signerId} in quorum calculation — skipped`);
+      return total;
     }
     return total + shares;
   }, 0n);

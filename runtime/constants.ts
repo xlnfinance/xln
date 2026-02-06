@@ -217,12 +217,6 @@ export const CRYPTO = {
 // ═══════════════════════════════════════════════════════════════
 
 export const VALIDATION = {
-  /** Maximum nonce gap before rejecting (replay protection) */
-  MAX_NONCE_GAP: 100,
-
-  /** Maximum counter gap before rejecting (bilateral replay) */
-  MAX_COUNTER_GAP: 100,
-
   /** Maximum age of frame before rejection (milliseconds) */
   MAX_FRAME_AGE_MS: 3600_000, // 1 hour
 

@@ -11,13 +11,6 @@ import { Level } from 'level';
 const RUNTIME_BUILD_ID = '2026-01-21-00:40Z';
 console.log(`🚀 RUNTIME.JS BUILD: ${RUNTIME_BUILD_ID}`);
 
-// Helper: Convert signer address to entity ID (pad to bytes32)
-function signerToEntityId(address: string): string {
-  // 0x1234...ABCD (20 bytes) → 0x000000000000000000000000 + address.slice(2) (32 bytes)
-  const addr = address.toLowerCase().startsWith('0x') ? address.slice(2) : address;
-  return '0x' + '0'.repeat(24) + addr;
-}
-
 import { getPerfMs, getWallClockMs } from './utils';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { isLeftEntity } from './entity-id-utils';
@@ -895,73 +888,6 @@ const applyRuntimeInput = async (
             env.activeJurisdiction = runtimeTx.data.name;
           }
 
-          // Auto-create self-entity for signer (if not exists)
-          const signer = env.signers?.[0];
-          if (signer) {
-            const selfEntityId = signerToEntityId(signer.address);
-            const replicaKey = `${selfEntityId}:${signer.address}`;
-
-            if (!env.eReplicas.has(replicaKey)) {
-              console.log(`[Runtime] Auto-creating self-entity for signer ${signer.address.slice(0, 10)}...`);
-
-              // Register on-chain via EntityProvider
-              const browserVM = (jadapter as any).browserVM;
-              if (browserVM?.registerEntitiesWithSigners) {
-                await browserVM.registerEntitiesWithSigners([{
-                  entityId: selfEntityId,
-                  signerAddresses: [signer.address],
-                  threshold: 1,
-                }]);
-              }
-
-              // Create local replica
-              const entityConfig: ConsensusConfig = {
-                mode: 'proposer-based',
-                threshold: 1n,
-                validators: [signer.address],
-                shares: { [signer.address]: 1n },
-                jurisdiction: {
-                  address: jadapter.addresses.depository,
-                  name: runtimeTx.data.name,
-                  chainId: runtimeTx.data.chainId,
-                  entityProviderAddress: jadapter.addresses.entityProvider,
-                  depositoryAddress: jadapter.addresses.depository,
-                },
-              };
-
-              const replica: EntityReplica = {
-                entityId: selfEntityId,
-                signerId: signer.address,
-                mempool: [],
-                isProposer: true,
-                state: {
-                  entityId: selfEntityId,
-                  height: 0,
-                  timestamp: env.timestamp,
-                  nonces: new Map(),
-                  accounts: new Map(),
-                  reserves: new Map(),
-                  lockBook: new Map(),
-                  config: entityConfig,
-                  messages: [],
-                  proposals: new Map(),
-                  lastFinalizedJHeight: 0,
-                  htlcFeesEarned: 0n,
-                },
-              };
-
-              env.eReplicas.set(replicaKey, replica);
-
-              // Fund with test tokens (BrowserVM only, opt-in)
-              if (runtimeTx.data?.fundSelfEntity && isBrowserVM && browserVM?.debugFundReserves) {
-                await browserVM.debugFundReserves(selfEntityId, 1, 1000n * 10n ** 18n);
-                console.log(`[Runtime] Funded self-entity with 1000 tokens`);
-              }
-
-              console.log(`[Runtime] ✅ Self-entity created: ${selfEntityId.slice(0, 18)}`);
-            }
-          }
-
           // Start JAdapter's integrated watcher (feeds J-events → runtime mempool)
           jadapter.startWatching(env);
           console.log(`[Runtime] ✅ JReplica "${runtimeTx.data.name}" ready (watching)`);
@@ -1153,7 +1079,6 @@ const applyRuntimeInput = async (
           mempool: workingReplica.mempool, // Preserve mempool state
           proposal: workingReplica.proposal, // CRITICAL: Preserve for multi-signer threshold
           lockedFrame: workingReplica.lockedFrame, // CRITICAL: Preserve validator locks
-          sentTransitions: workingReplica.sentTransitions ?? 0, // Preserve counter
         });
 
         // FINTECH-LEVEL TYPE SAFETY: Validate all entity outputs before routing
@@ -1270,7 +1195,7 @@ const applyRuntimeInput = async (
             const entityId = replicaKey.split(':')[0];
             for (const [counterpartyId, account] of replica.state.accounts) {
               // Avoid mutating live consensus state mid-flight.
-              if (account.pendingFrame || account.mempool.length > 0 || account.sentTransitions > account.ackedTransitions) {
+              if (account.pendingFrame || account.mempool.length > 0) {
                 continue;
               }
               const key = `${entityId}:${counterpartyId}`;

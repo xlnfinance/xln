@@ -5,10 +5,10 @@
     "": {
       "dependencies": {
         "@anthropic-ai/sdk": "^0.71.2",
-        "@ethereumjs/common": "^10.1.0",
-        "@ethereumjs/tx": "^10.1.0",
-        "@ethereumjs/util": "^10.1.0",
-        "@ethereumjs/vm": "^10.1.0",
+        "@ethereumjs/common": "^10.1.1",
+        "@ethereumjs/tx": "^10.1.1",
+        "@ethereumjs/util": "^10.1.1",
+        "@ethereumjs/vm": "^10.1.1",
         "@noble/ciphers": "^2.1.1",
         "@noble/curves": "^2.0.1",
         "@noble/hashes": "^2.0.1",
@@ -30,11 +30,11 @@
       },
       "devDependencies": {
         "@nomicfoundation/hardhat-toolbox": "^5.0.0",
-        "@playwright/test": "^1.57.0",
-        "@tsconfig/node20": "^20.1.8",
+        "@playwright/test": "^1.58.2",
+        "@tsconfig/node20": "^20.1.9",
         "@types/minimatch": "^6.0.0",
         "@types/mocha": "^10.0.10",
-        "@types/node": "^20.19.30",
+        "@types/node": "^20.19.31",
         "@types/ws": "^8.18.1",
         "@typescript-eslint/eslint-plugin": "^7.18.0",
         "@typescript-eslint/parser": "^7.18.0",
@@ -43,9 +43,10 @@
         "eslint": "^8.57.1",
         "eslint-config-prettier": "^9.1.2",
         "eslint-plugin-prettier": "^5.5.5",
-        "hardhat": "^2.28.3",
+        "hardhat": "^2.28.4",
         "mocha": "^10.8.2",
-        "prettier": "^3.8.0",
+        "playwright": "^1.58.2",
+        "prettier": "^3.8.1",
         "ts-node": "^10.9.2",
         "typescript": "^5.9.3",
       },
@@ -364,7 +365,7 @@
 
     "@pkgr/core": ["@pkgr/core@0.2.9", "", {}, "sha512-QNqXyfVS2wm9hweSYD2O7F0G06uurj9kZ96TRQE5Y9hU7+tgdZwIkbAKc5Ocy1HxEY2kuDQa6cQ1WRs/O5LFKA=="],
 
-    "@playwright/test": ["@playwright/test@1.58.1", "", { "dependencies": { "playwright": "1.58.1" }, "bin": { "playwright": "cli.js" } }, "sha512-6LdVIUERWxQMmUSSQi0I53GgCBYgM2RpGngCPY7hSeju+VrKjq3lvs7HpJoPbDiY5QM5EYRtRX5fvrinnMAz3w=="],
+    "@playwright/test": ["@playwright/test@1.58.2", "", { "dependencies": { "playwright": "1.58.2" }, "bin": { "playwright": "cli.js" } }, "sha512-akea+6bHYBBfA9uQqSYmlJXn61cTa+jbO87xVLCWbTqbWadRVmhxlXATaOjOgcBaWU4ePo0wB41KMFv3o35IXA=="],
 
     "@ponder/utils": ["@ponder/utils@0.2.14", "", { "peerDependencies": { "typescript": ">=5.0.4", "viem": ">=2" }, "optionalPeers": ["typescript"] }, "sha512-O4t14Hb6/tVcD0WoS13ghFnDntP6x33/DDvA+sd0tRjemzS+Cne4YTkXl9TKW3AawBIEwMjGrGbAn82C8gXQWQ=="],
 
@@ -1462,9 +1463,9 @@
 
     "pino-std-serializers": ["pino-std-serializers@7.0.0", "", {}, "sha512-e906FRY0+tV27iq4juKzSYPbUj2do2X2JX4EzSca1631EB2QJQUqGbDuERal7LCtOpxl6x3+nvo9NPZcmjkiFA=="],
 
-    "playwright": ["playwright@1.58.1", "", { "dependencies": { "playwright-core": "1.58.1" }, "optionalDependencies": { "fsevents": "2.3.2" }, "bin": { "playwright": "cli.js" } }, "sha512-+2uTZHxSCcxjvGc5C891LrS1/NlxglGxzrC4seZiVjcYVQfUa87wBL6rTDqzGjuoWNjnBzRqKmF6zRYGMvQUaQ=="],
+    "playwright": ["playwright@1.58.2", "", { "dependencies": { "playwright-core": "1.58.2" }, "optionalDependencies": { "fsevents": "2.3.2" }, "bin": { "playwright": "cli.js" } }, "sha512-vA30H8Nvkq/cPBnNw4Q8TWz1EJyqgpuinBcHET0YVJVFldr8JDNiU9LaWAE1KqSkRYazuaBhTpB5ZzShOezQ6A=="],
 
-    "playwright-core": ["playwright-core@1.58.1", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-bcWzOaTxcW+VOOGBCQgnaKToLJ65d6AqfLVKEWvexyS3AS6rbXl+xdpYRMGSRBClPvyj44njOWoxjNdL/H9UNg=="],
+    "playwright-core": ["playwright-core@1.58.2", "", { "bin": { "playwright-core": "cli.js" } }, "sha512-yZkEtftgwS8CsfYo7nm0KE8jsvm6i/PTgVtB8DL726wNf6H2IMsDuxCpJj59KDaxCtSnrWan2AeDqM7JBaultg=="],
 
     "plur": ["plur@5.1.0", "", { "dependencies": { "irregular-plurals": "^3.3.0" } }, "sha512-VP/72JeXqak2KiOzjgKtQen5y3IZHn+9GOuLDafPv0eXa47xq0At93XahYBs26MsifCQ4enGKwbjBTKgb9QJXg=="],
 

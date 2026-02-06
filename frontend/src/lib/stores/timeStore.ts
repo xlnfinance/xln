@@ -10,7 +10,7 @@ const loadTimeState = (): TimeState => {
       if (saved) {
         const parsed = JSON.parse(saved);
         const loadedState = {
-          currentTimeIndex: parsed.currentTimeIndex ?? -1,
+          currentTimeIndex: Math.max(0, parsed.currentTimeIndex ?? 0),
           maxTimeIndex: parsed.maxTimeIndex ?? 0,
           isLive: parsed.isLive ?? true
         };
@@ -24,7 +24,7 @@ const loadTimeState = (): TimeState => {
   }
 
   const defaultState = {
-    currentTimeIndex: -1, // -1 means current time (live)
+    currentTimeIndex: 0,
     maxTimeIndex: 0,
     isLive: true
   };
@@ -44,17 +44,15 @@ export const maxTimeIndex = derived(timeState, $state => $state.maxTimeIndex);
 export const visibleReplicas = derived(
   [timeState, history, xlnEnvironment],
   ([$timeState, $history, $env]) => {
-    if ($timeState.isLive) {
-      // CRITICAL FIX: Return NEW Map reference to trigger Svelte reactivity
-      // Derived stores only notify subscribers when return value identity changes
-      // Mutating eReplicas.set() doesn't change Map reference, so we clone it
-      return $env?.eReplicas ? new Map($env.eReplicas) : new Map();
-    }
+    // Always read from history[timeIndex] (consistent snapshots)
     const idx = $timeState.currentTimeIndex;
-    if (idx >= 0 && idx < $history.length) {
-      return $history[idx]?.eReplicas || new Map();
+    if ($history && $history.length > 0) {
+      const clampedIdx = Math.max(0, Math.min(idx, $history.length - 1));
+      const frame = $history[clampedIdx];
+      if (frame?.eReplicas) return new Map(frame.eReplicas);
     }
-    return new Map();
+    // Fallback to raw env before any frames exist
+    return $env?.eReplicas ? new Map($env.eReplicas) : new Map();
   }
 );
 
@@ -132,41 +130,45 @@ const timeOperations = {
 
     // TIME-MACHINE-DEBUG removed
 
-    // SAFETY: Only update if the new maxIndex is different and valid
+    // Update maxTimeIndex, and auto-advance currentTimeIndex if in live mode
     if (maxIndex !== currentState.maxTimeIndex && maxIndex >= 0) {
       timeState.update(current => ({
         ...current,
-        maxTimeIndex: maxIndex
+        maxTimeIndex: maxIndex,
+        // LIVE auto-advance: keep timeIndex at latest frame
+        currentTimeIndex: current.isLive ? maxIndex : current.currentTimeIndex,
       }));
-    } else {
     }
   },
 
-  // Go to specific time index
+  // Go to specific time index (exits live mode)
   goToTimeIndex: (index: number) => {
     const $timeState = get(timeState);
-    const clampedIndex = Math.max(-1, Math.min(index, $timeState.maxTimeIndex));
+    const clampedIndex = Math.max(0, Math.min(index, $timeState.maxTimeIndex));
 
     const newState = {
       currentTimeIndex: clampedIndex,
       maxTimeIndex: $timeState.maxTimeIndex,
-      isLive: clampedIndex === -1
+      isLive: false
     };
 
     timeState.set(newState);
-
-    // Persist to localStorage
     timeOperations.saveTimeState(newState);
-
-    console.log('🕰️ Time machine moved to index:', clampedIndex);
-
-    // Trigger entity panel updates like old index.html
     timeOperations.triggerEntityPanelUpdates();
   },
 
-  // Go to live (current time)
+  // Go to live (auto-advance to latest frame)
   goToLive: () => {
-    timeOperations.goToTimeIndex(-1);
+    const $history = get(history);
+    const maxIndex = Math.max(0, $history.length - 1);
+    const newState = {
+      currentTimeIndex: maxIndex,
+      maxTimeIndex: maxIndex,
+      isLive: true
+    };
+    timeState.set(newState);
+    timeOperations.saveTimeState(newState);
+    timeOperations.triggerEntityPanelUpdates();
   },
 
   // Go to history start
@@ -180,34 +182,24 @@ const timeOperations = {
     timeOperations.goToTimeIndex($timeState.maxTimeIndex);
   },
 
-  // Step backward in time
+  // Step backward in time (exits live mode)
   stepBackward: () => {
     const $timeState = get(timeState);
-    const $history = get(history);
-
-    const actualMaxIndex = Math.max(0, $history.length - 1);
-
-    if ($timeState.isLive) {
-      timeOperations.goToTimeIndex(actualMaxIndex);
-    } else {
-      const targetIndex = Math.max(0, $timeState.currentTimeIndex - 1);
-      timeOperations.goToTimeIndex(targetIndex);
-    }
+    const targetIndex = Math.max(0, $timeState.currentTimeIndex - 1);
+    timeOperations.goToTimeIndex(targetIndex);
   },
 
   // Step forward in time
   stepForward: () => {
     const $timeState = get(timeState);
     const $history = get(history);
-
     const actualMaxIndex = Math.max(0, $history.length - 1);
 
-    if ($timeState.isLive) {
-      return;
-    } else if ($timeState.currentTimeIndex < actualMaxIndex) {
-      const targetIndex = $timeState.currentTimeIndex + 1;
-      timeOperations.goToTimeIndex(targetIndex);
-    } else {
+    if ($timeState.currentTimeIndex < actualMaxIndex) {
+      timeOperations.goToTimeIndex($timeState.currentTimeIndex + 1);
+    }
+    // At latest frame → go live
+    if ($timeState.currentTimeIndex + 1 >= actualMaxIndex) {
       timeOperations.goToLive();
     }
   },

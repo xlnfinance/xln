@@ -111,7 +111,7 @@
  *    ├─ prevSignatures: string[]       // ACK their previous frame
  *    ├─ newAccountFrame: AccountFrame  // Our proposed frame
  *    ├─ newSignatures: string[]        // Signatures on new frame
- *    └─ counter: number                // Replay protection (CRITICAL)
+ *    └─ disputeProofNonce: number       // cooperativeNonce at dispute proof signing
  *
  * 5. AccountFrame (Agreed bilateral state - like a block)
  *    ├─ height: number                 // Frame number in bilateral chain
@@ -178,7 +178,7 @@
  *   - Updates Alice's AccountMachine.mempool
  *
  * Step 3: Bob receives AccountInput (account-consensus.ts)
- *   - Validates counter, prevSignatures
+ *   - Validates frame chain (prevFrameHash), signatures
  *   - Applies payment tx: Bob.offdelta += 100n, Alice.offdelta -= 100n
  *   - Creates AccountFrame with new state
  *   - Signs frame, sends back to Alice
@@ -203,16 +203,10 @@
  *   - EntityTx, AccountTx, RuntimeTx (transaction = state change request)
  *   - Used for actual state modifications
  *
- * **transition** (NOT tx):
- *   - ackedTransitions, sentTransitions (counter = message sequence number)
- *   - Used for replay protection counters, NOT transaction counts
- *   - Counts message exchanges, not individual transactions
- *   - Example: One message can contain multiple AccountTxs, but only increments counter by 1
- *
- * **counter** (for replay protection):
- *   - AccountInput.counter (sequential message counter, starts at 1)
- *   - CRITICAL: Must be exactly ackedTransitions + 1 (no gaps allowed)
- *   - Different from "transitions" which tracks confirmed message count
+ * **cooperativeNonce** (on-chain dispute domain):
+ *   - proofHeader.cooperativeNonce — incremented per message (propose/ACK)
+ *   - Used in dispute proof bodies for on-chain settlement ordering
+ *   - Replay protection is handled by frame chain (height + prevFrameHash), NOT counters
  *
  * ═══════════════════════════════════════════════════════════════════════
  */
@@ -925,8 +919,6 @@ export interface AccountMachine {
 
   mempool: AccountTx[]; // Unprocessed account transactions
   currentFrame: AccountFrame; // Current agreed state (includes full transaction history for replay/audit)
-  sentTransitions: number; // Number of transitions sent but not yet confirmed
-  ackedTransitions: number; // Number of transitions acknowledged by counterparty
 
   // Per-token delta states (giant per-token table like old_src)
   deltas: Map<number, Delta>; // tokenId -> Delta
@@ -959,9 +951,6 @@ export interface AccountMachine {
   jEventChain: Array<{ jHeight: number; jBlockHash: string; events: any[]; finalizedAt: number }>;
   lastFinalizedJHeight: number;
 
-  // CHANNEL.TS REFERENCE: Proper message counters (NOT timestamps!)
-  sendCounter: number;    // Incremented for each outgoing message
-  receiveCounter: number; // Incremented for each incoming message
   // Removed isProposer - use isLeft() function like old_src Channel.ts instead
 
   // Cloned state for validation before committing (replaces dryRun)
@@ -1104,7 +1093,7 @@ export interface AccountInput {
   prevSignatures?: string[];         // ACK for their frame (LEGACY)
   newSignatures?: string[];          // Signatures on new frame (LEGACY)
 
-  counter?: number;                  // Message counter for replay protection (like Channel.ts line 620)
+  disputeProofNonce?: number;        // cooperativeNonce at which dispute proof was signed (explicit, replaces counter-1 hack)
 }
 
 // Delta structure for per-token account state (based on old_src)
@@ -1549,7 +1538,6 @@ export interface EntityReplica {
   // Used at commit time instead of proposer's newState to prevent state injection
   validatorComputedState?: EntityState;
   isProposer: boolean;
-  sentTransitions?: number; // Number of txs sent to proposer but not yet committed (Channel.ts pattern)
   // Position is RELATIVE to j-machine (jurisdiction)
   // Frontend calculates: worldPos = jMachine.position + relativePosition
   position?: {

@@ -729,20 +729,14 @@ async function applyFinalizedJEvent(
         if (account.counterpartyDisputeProofCooperativeNonce !== undefined) {
           initialCooperativeNonce = account.counterpartyDisputeProofCooperativeNonce;
           nonceSource = 'counterpartySig';
-        } else if (hasCounterpartySig && account.ackedTransitions > 0) {
-          initialCooperativeNonce = account.ackedTransitions - 1;
-          nonceSource = 'ackedTransitions-1';
         }
       } else {
         if (account.currentDisputeProofCooperativeNonce !== undefined) {
           initialCooperativeNonce = account.currentDisputeProofCooperativeNonce;
           nonceSource = 'currentSig';
-        } else if (account.ackedTransitions > 0) {
-          initialCooperativeNonce = account.ackedTransitions - 1;
-          nonceSource = 'ackedTransitions-1';
         }
       }
-      console.log(`   DEBUG DisputeStarted: starter=${weAreStarter}, source=${nonceSource}, ackedTransitions=${account.ackedTransitions}, proofHeader.cooperativeNonce=${account.proofHeader.cooperativeNonce}, initialCooperativeNonce=${initialCooperativeNonce}`);
+      console.log(`   DEBUG DisputeStarted: starter=${weAreStarter}, source=${nonceSource}, proofHeader.cooperativeNonce=${account.proofHeader.cooperativeNonce}, initialCooperativeNonce=${initialCooperativeNonce}`);
 
       // Store dispute state from event + on-chain (source of truth)
       account.activeDispute = {

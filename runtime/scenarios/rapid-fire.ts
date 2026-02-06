@@ -11,7 +11,7 @@
  * - Rollback handling under rapid proposals
  * - Frame chain integrity with high throughput
  * - Memory pool management
- * - sentTransitions counter correctness
+ * - Frame chain replay protection
  * - No deadlocks or infinite loops
  *
  * Run with: bun runtime/scenarios/rapid-fire.ts

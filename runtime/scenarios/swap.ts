@@ -1199,19 +1199,11 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
       throw new Error(`Dispute cleanup missing account for counter sync (${label})`);
     }
     const synced = Math.max(
-      leftAccount.ackedTransitions,
-      rightAccount.ackedTransitions,
       leftAccount.proofHeader.cooperativeNonce,
       rightAccount.proofHeader.cooperativeNonce
     );
-    leftAccount.ackedTransitions = synced;
-    rightAccount.ackedTransitions = synced;
     leftAccount.proofHeader.cooperativeNonce = synced;
     rightAccount.proofHeader.cooperativeNonce = synced;
-    leftAccount.sendCounter = synced;
-    rightAccount.sendCounter = synced;
-    leftAccount.receiveCounter = synced;
-    rightAccount.receiveCounter = synced;
   };
   syncCounters(hub.id, alice.id, 'hub↔alice');
 

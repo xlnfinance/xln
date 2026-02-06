@@ -31,6 +31,11 @@
   // Direct store usage - no fallback logic
   $: maxTimeIndex = Math.max(0, $history.length - 1);
 
+  // LIVE auto-advance: when new frames arrive, stay at latest
+  $: if ($isLive && maxTimeIndex > 0 && $timeIndex !== maxTimeIndex) {
+    safeSet(timeIndex, maxTimeIndex);
+  }
+
   // BrowserVM time-travel: restore EVM state when timeIndex changes
   let lastTimeTravelIndex = -1;
   let timeTravelNonce = 0;
@@ -45,7 +50,7 @@
   }
 
   $: if ($timeIndex !== lastTimeTravelIndex && $history.length > 0) {
-    const targetIndex = $timeIndex === -1 ? $history.length - 1 : $timeIndex;
+    const targetIndex = $timeIndex < 0 ? $history.length - 1 : $timeIndex;
     const frame = $history[targetIndex];
     if (frame?.jReplicas) {
       const jReplicas = Array.isArray(frame.jReplicas)
@@ -122,7 +127,7 @@
       safeSet(isLive, false);
     },
     goToLive: () => {
-      safeSet(timeIndex, -1);
+      safeSet(timeIndex, maxTimeIndex);
       safeSet(isLive, true);
     }
   };

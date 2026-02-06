@@ -190,8 +190,7 @@ export async function handleDisputeStart(
   }
 
   // Use cooperativeNonce that matches the stored counterparty dispute signature.
-  // Prefer exact hash mapping, then cached nonce, then ackedTransitions fallback.
-  const hasCounterpartySig = Boolean(account.counterpartyDisputeProofHanko);
+  // Prefer exact hash mapping, then cached nonce, then proofHeader fallback.
   let cooperativeNonce = account.proofHeader.cooperativeNonce;
   let nonceSource = 'proofHeader';
   const mappedNonce = account.disputeProofNoncesByHash?.[proofBodyHashToUse];
@@ -201,9 +200,6 @@ export async function handleDisputeStart(
   } else if (account.counterpartyDisputeProofCooperativeNonce !== undefined) {
     cooperativeNonce = account.counterpartyDisputeProofCooperativeNonce;
     nonceSource = 'counterpartySig';
-  } else if (hasCounterpartySig && account.ackedTransitions > 0) {
-    cooperativeNonce = account.ackedTransitions - 1;
-    nonceSource = 'ackedTransitions-1';
   }
   console.log(`   Using cooperativeNonce=${cooperativeNonce} (${nonceSource}), disputeNonce=${disputeNonce}`);
 

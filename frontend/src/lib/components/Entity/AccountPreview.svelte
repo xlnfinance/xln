@@ -148,14 +148,12 @@
       <span class="counterparty-name">{counterpartyName || counterpartyId}</span>
     </div>
     <div class="account-status">
-      {#if account.mempool.length > 0 || (account as any).pendingFrame || (account as any).sentTransitions > 0}
+      {#if account.mempool.length > 0 || (account as any).pendingFrame}
         <span class="status-badge pending">
           {#if (account as any).pendingFrame}
             Awaiting Consensus
-          {:else if account.mempool.length > 0}
-            {account.mempool.length} pending
           {:else}
-            {(account as any).sentTransitions} in flight
+            {account.mempool.length} pending
           {/if}
         </span>
       {:else}
