@@ -164,7 +164,7 @@ export class RuntimeWsClient {
       return;
     }
     if (msg.type === 'entity_input' && msg.payload && msg.from) {
-      console.log(`📨 WS-CLIENT-RECEIVE: entity_input from=${msg.from?.slice(0, 10)} encrypted=${msg.encrypted}`);
+      // entity_input received - decrypt below
 
       // Reject unencrypted entity_input messages
       if (!msg.encrypted) {
@@ -183,7 +183,7 @@ export class RuntimeWsClient {
       let entityInput: EntityInput;
       try {
         entityInput = decryptJSON<EntityInput>(msg.payload as string, this.options.encryptionKeyPair.privateKey);
-        console.log(`✅ WS-CLIENT-DECRYPTED: entityId=${entityInput.entityId?.slice(-4)} txs=${entityInput.entityTxs?.length || 0}`);
+        // Decrypted successfully
       } catch (decryptError) {
         console.error(`❌ WS-CLIENT-DECRYPT-FAILED:`, decryptError);
         this.options.onError?.(decryptError as Error);
@@ -198,8 +198,6 @@ export class RuntimeWsClient {
       return;
     }
     if ((msg.type === 'gossip_response' || msg.type === 'gossip_subscribed') && msg.payload && msg.from) {
-      const profiles = (msg.payload as any)?.profiles || [];
-      console.log(`[WS-CLIENT] Received gossip_response: ${profiles.length} profiles from ${msg.from}`);
       await this.options.onGossipResponse?.(msg.from, msg.payload);
       return;
     }

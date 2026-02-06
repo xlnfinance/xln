@@ -176,13 +176,11 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     if (existing && existing.timestamp >= newTs) {
       return false; // Existing is newer or same
     }
+    const isNew = !existing;
     gossipProfiles.set(entityId, { profile, timestamp: newTs, fromRuntimeId });
-    // Debug: show board structure
-    const board = profile?.metadata?.board;
-    const validators = board?.validators || [];
-    const hasPublicKeys = validators.filter((v: any) => v?.publicKey).length;
-    const entityPubKey = profile?.metadata?.entityPublicKey ? 'yes' : 'no';
-    console.log(`[WS] Gossip stored: ${entityId.slice(-4)} name="${name}" ts=${newTs} board=${validators.length}v/${hasPublicKeys}pk entityPubKey=${entityPubKey}`);
+    if (isNew) {
+      console.log(`[WS] Gossip new profile: ${entityId.slice(-4)} name="${name}"`);
+    }
     return true;
   };
 
@@ -206,8 +204,6 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     // GOSSIP REQUEST: Return all stored profiles
     if (msg.type === 'gossip_request') {
       const allProfiles = getAllGossipProfiles();
-      const profileNames = allProfiles.map((p: any) => p.metadata?.name || '?').join(',');
-      console.log(`[WS] Gossip request from ${msg.from?.slice(0,10)}: sending ${allProfiles.length} profiles (${profileNames})`);
       send(ws, {
         type: 'gossip_response',
         id: makeMessageId(),
@@ -235,7 +231,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     }
 
     if (msg.type === 'entity_input') {
-      console.log(`[WS] ENTITY_INPUT: from=${msg.from?.slice(0,10)} to=${target?.slice(0,10)} encrypted=${msg.encrypted}`);
+      // Entity input routing - validated below
       // CRITICAL: If encrypted=true, payload is opaque ciphertext - relay just routes it
       // Only validate plaintext payloads (which shouldn't happen in prod - encryption is mandatory)
       if (!msg.encrypted) {
@@ -258,10 +254,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     const useLocalDelivery = isLocalTarget && (msg.type === 'entity_input' || msg.type === 'runtime_input') && !isEncrypted;
 
     const targetClient = clients.get(target);
-    const clientsConnected = Array.from(clients.keys()).map(k => k.slice(0,10)).join(',');
-    console.log(`[WS] ROUTE: type=${msg.type} to=${target?.slice(0,10)} hasClient=${!!targetClient} localDelivery=${useLocalDelivery} clients=[${clientsConnected}]`);
     if (targetClient && !useLocalDelivery) {
-      console.log(`[WS] DELIVERED: ${msg.type} → ${target?.slice(0,10)}`);
       send(targetClient.ws, msg);
       send(ws, { type: 'ack', inReplyTo: msg.id, status: 'delivered' });
       return;

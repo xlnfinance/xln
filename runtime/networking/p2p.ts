@@ -251,7 +251,7 @@ export class RuntimeP2P {
 
   private startPolling() {
     if (this.pollInterval) {
-      console.log(`[P2P] startPolling: Already polling, skipping`);
+      // Already polling
       return;
     }
     if (this.gossipPollMs <= 0) {
@@ -278,20 +278,13 @@ export class RuntimeP2P {
   }
 
   enqueueEntityInput(targetRuntimeId: string, input: EntityInput) {
-    console.log(`📨 P2P-ENQUEUE: to=${targetRuntimeId.slice(0,10)} entity=${input.entityId.slice(-4)} txs=${input.entityTxs?.length || 0}`);
-    console.log(`📨 P2P-DEBUG: clients=${this.clients.length} open=${this.clients.map(c => c.isOpen())}`);
-
     const client = this.getActiveClient();
     if (client && client.isOpen()) {
-      console.log(`📡 P2P-SEND-NOW: Client is open, sending immediately`);
       const sent = client.sendEntityInput(targetRuntimeId, input);
-      if (sent) {
-        console.log(`✅ P2P-SENT: Message sent successfully`);
-        return;
-      }
-      console.warn(`⚠️ P2P-SEND-FAILED: Client.send returned false`);
+      if (sent) return;
+      console.warn(`P2P-SEND-FAILED: Client.send returned false for ${targetRuntimeId.slice(0,10)}`);
     } else {
-      console.warn(`⚠️ P2P-NO-CLIENT: No active client, queueing message`);
+      console.warn(`P2P-NO-CLIENT: No active relay connection, queueing for ${targetRuntimeId.slice(0,10)}`);
     }
 
     const queue = this.pendingByRuntime.get(targetRuntimeId) || [];
@@ -299,7 +292,7 @@ export class RuntimeP2P {
     // Enforce queue size limit to prevent memory exhaustion
     while (queue.length > MAX_QUEUE_PER_RUNTIME) queue.shift();
     this.pendingByRuntime.set(targetRuntimeId, queue);
-    console.log(`📥 P2P-QUEUED: Message queued for ${targetRuntimeId.slice(0,10)}, queue size: ${queue.length}`);
+    console.log(`P2P-QUEUED: ${targetRuntimeId.slice(0,10)}, queue size: ${queue.length}`);
   }
 
   requestGossip(runtimeId: string) {
@@ -312,6 +305,10 @@ export class RuntimeP2P {
     const client = this.getActiveClient();
     if (!client) return;
     client.sendGossipAnnounce(runtimeId, { profiles } satisfies GossipResponsePayload);
+  }
+
+  isConnected(): boolean {
+    return !!this.getActiveClient();
   }
 
   private getActiveClient(): RuntimeWsClient | null {
@@ -341,7 +338,6 @@ export class RuntimeP2P {
 
     // Request all profiles from relay (simple polling)
     client.sendGossipRequest(this.runtimeId, { scope: 'all' } satisfies GossipRequestPayload);
-    console.log(`P2P_GOSSIP_REQUEST scope=all`);
   }
 
   // Call this to refresh profiles from relay
@@ -358,22 +354,18 @@ export class RuntimeP2P {
   // Fetch profiles from relay with retry
   private async fetchProfilesWithRetry(): Promise<void> {
     const startCount = this.env.gossip?.getProfiles?.()?.length || 0;
-    console.log(`P2P_FETCH_PROFILES: Starting fetch, currently have ${startCount} profiles`);
 
     // Request profiles multiple times with delays
     for (let i = 0; i < 5; i++) {
       this.requestSeedGossip();
       await new Promise(resolve => setTimeout(resolve, 300));
-      // Check if new profiles arrived
       const profiles = this.env.gossip?.getProfiles?.() || [];
-      const profileIds = profiles.map((p: any) => p.entityId?.slice(-4) || '???').join(',');
-      console.log(`P2P_FETCH_RETRY: attempt ${i + 1}, got ${profiles.length} profiles [${profileIds}]`);
       if (profiles.length > startCount) {
-        console.log(`P2P_FETCH_SUCCESS: Got ${profiles.length - startCount} new profiles`);
+        console.log(`P2P_FETCH: Got ${profiles.length - startCount} new profiles (total: ${profiles.length})`);
         return;
       }
     }
-    console.log(`P2P_FETCH_TIMEOUT: Still have ${this.env.gossip?.getProfiles?.()?.length || 0} profiles after retries`);
+    console.log(`P2P_FETCH: No new profiles after 5 retries (have ${startCount})`);
   }
 
   async announceLocalProfiles() {
@@ -387,13 +379,11 @@ export class RuntimeP2P {
     const client = this.getActiveClient();
     if (client) {
       client.sendGossipAnnounce(this.runtimeId, { profiles });
-      console.log(`P2P_PROFILE_ANNOUNCE n=${profiles.length}`);
     }
 
     // Also send to specific seeds if configured (for direct peer notification)
     for (const seedId of this.seedRuntimeIds) {
       this.announceProfilesTo(seedId, profiles);
-      console.log(`P2P_PROFILE_SENT from=${this.runtimeId.slice(0, 10)} to=${seedId.slice(0, 10)} profiles=${profiles.length}`);
     }
   }
 
@@ -417,7 +407,7 @@ export class RuntimeP2P {
       const existingProfile = this.env.gossip?.getProfiles?.().find((p: any) => p.entityId === entityId);
       const lastTimestamp = existingProfile?.metadata?.lastUpdated || 0;
       const monotonicTimestamp = Math.max(lastTimestamp + 1, this.env.timestamp);
-      console.log(`🕐 MONOTONIC: entity=${entityId.slice(-4)} lastTs=${lastTimestamp} envTs=${this.env.timestamp} → ${monotonicTimestamp}`);
+      // Monotonic timestamp: ensures profiles always advance
 
       const existingName = existingProfile?.metadata?.name;
       const profile = buildEntityProfile(replica.state, this.profileName ?? existingName, monotonicTimestamp);
@@ -559,7 +549,7 @@ export class RuntimeP2P {
         registerSignerPublicKey(profile.entityId, publicKey);
       }
     }
-    console.log(`P2P_PROFILE_RECEIVED from=${from.slice(0, 10)} total=${profiles.length} verified=${verified} unsigned=${unsigned}`);
+    if (verified > 0 || unsigned > 0) console.log(`P2P_PROFILE_RECEIVED from=${from.slice(0, 10)} total=${profiles.length} verified=${verified} unsigned=${unsigned}`);
     this.onGossipProfiles(from, profiles);
   }
 
