@@ -286,8 +286,6 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
             stateHash: '',
             byLeft: isLeft,
           },
-          sentTransitions: 0,
-          ackedTransitions: 0,
           deltas: initialDeltas,
           globalCreditLimits: {
             ownLimit: 0n, // Credit starts at 0 - must be explicitly extended via set_credit_limit
@@ -298,8 +296,6 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           pendingSignatures: [],
           rollbackCount: 0,
           // CHANNEL.TS REFERENCE: Proper message counters (NOT timestamps!)
-          sendCounter: 0,    // Like Channel.ts line 131
-          receiveCounter: 0, // Like Channel.ts line 132
           // Removed isProposer - use isLeft() function like old_src Channel.ts
           proofHeader: {
             fromEntity: entityState.entityId,  // Perspective-dependent for signing
@@ -483,7 +479,6 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         delete accountMachine.pendingFrame;
         delete accountMachine.pendingAccountInput;
         delete accountMachine.clonedForValidation;
-        accountMachine.sentTransitions = 0;
         console.log(`⏰   Account ${counterpartyId.slice(-4)}: pendingFrame cleared, mempool=${accountMachine.mempool.length}`);
       }
 

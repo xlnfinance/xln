@@ -701,8 +701,6 @@ export async function swapMarket(env: Env): Promise<void> {
     console.warn(
       `[SWAP-MARKET] ${label}: ${entityId.slice(-4)}↔${counterpartyId.slice(-4)} ` +
         `height=${account.currentHeight} pending=${account.pendingFrame ? 'yes' : 'no'} ` +
-        `sent=${account.sentTransitions} acked=${account.ackedTransitions} ` +
-        `sendCounter=${account.sendCounter} recvCounter=${account.receiveCounter} ` +
         `mempool=[${mempoolTypes.join(',')}] pendingTxs=[${pendingTypes.join(',')}]`,
     );
   };

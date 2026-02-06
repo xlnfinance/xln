@@ -2073,7 +2073,7 @@ export async function ahb(env: Env): Promise<void> {
   console.log('   - Alice→Hub $10K: ✅');
   console.log('   - Hub→Alice $5K: ✅');
   console.log('   - Rollback + re-proposal: ✅');
-  console.log('   - sentTransitions counter: ✅\n');
+  console.log('   - frame chain replay protection: ✅\n');
 
   // ============================================================================
   // PHASE 7: DISPUTE GAME (On-Chain Enforcement)

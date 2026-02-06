@@ -14,9 +14,8 @@ export function handleRequestWithdrawal(
     throw new Error(`No account exists with ${counterpartyEntityId.slice(-8)}`);
   }
 
-  // DETERMINISTIC: Use height + counter for withdrawal ID (not Date.now())
-  const withdrawalCounter = accountMachine?.sendCounter || 0;
-  const requestId = `w-${state.entityId.slice(-4)}-${state.height}-${withdrawalCounter}`;
+  // DETERMINISTIC: Use entity height + account height for withdrawal ID (not Date.now())
+  const requestId = `w-${state.entityId.slice(-4)}-${state.height}-${accountMachine.currentHeight}`;
 
   // Create request_withdrawal AccountTx
   const accountTx: AccountTx = {

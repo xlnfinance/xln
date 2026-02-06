@@ -310,10 +310,6 @@ const describeAccount = (account: any) => {
     pendingFrameTxs: summarizeTxs(account.pendingFrame?.accountTxs),
     mempoolTxs: summarizeTxs(account.mempool),
     pendingSignatures: account.pendingSignatures?.length ?? 0,
-    sentTransitions: account.sentTransitions ?? 0,
-    ackedTransitions: account.ackedTransitions ?? 0,
-    sendCounter: account.sendCounter ?? 0,
-    receiveCounter: account.receiveCounter ?? 0,
   };
 };
 

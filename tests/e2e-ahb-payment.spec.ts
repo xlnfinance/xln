@@ -1,17 +1,23 @@
 /**
- * E2E: Alice → Hub → Bob Payment Flow (and reverse)
+ * E2E: Alice → Hub → Bob HTLC Payment Flow (and reverse)
  *
  * Uses random BIP39 mnemonics → fresh entities each run → no server state conflicts.
- * Exercises: runtime creation, hub discovery, account opening, faucet, directPayment.
+ * Exercises: runtime creation, hub discovery, account opening, faucet, htlcPayment.
  *
  * Prereqs: localhost:8080 dev server, xln.finance for relay/faucet
  */
 
 import { test, expect, type Page } from '@playwright/test';
-import { Wallet } from 'ethers';
+import { Wallet, ethers } from 'ethers';
 
 const INIT_TIMEOUT = 30_000;
 const SETTLE_MS = 10_000;
+
+// Fee: amount × FEE_RATE_UBP / FEE_DENOMINATOR (0.001% per hop)
+const FEE_RATE = 100n;
+const FEE_DENOM = 10_000_000n;
+const calcFee = (amount: bigint): bigint => amount * FEE_RATE / FEE_DENOM;
+const afterFee = (amount: bigint): bigint => amount - calcFee(amount);
 
 function toWei(n: number): bigint {
   return BigInt(n) * 10n ** 18n;
@@ -47,12 +53,16 @@ async function createRuntime(page: Page, label: string, mnemonic: string) {
     try {
       const { vaultOperations } = await import(/* @vite-ignore */ '/src/lib/stores/vaultStore.ts') as any;
       await vaultOperations.createRuntime(label, mnemonic);
-      return { ok: true };
+      // Tag env with debug ID for tracking identity
+      const env = (window as any).isolatedEnv;
+      if (env && !env._debugId) env._debugId = label + '-' + Date.now();
+      return { ok: true, debugId: env?._debugId };
     } catch (e: any) {
       return { ok: false, error: e.message };
     }
   }, { label, mnemonic });
   expect(r.ok, `createRuntime(${label}) failed: ${r.error}`).toBe(true);
+  console.log(`[E2E] Created runtime ${label}, env debugId=${r.debugId}`);
   // Wait for entity creation, P2P start, gossip
   await page.waitForTimeout(5000);
 }
@@ -108,7 +118,7 @@ async function dumpState(page: Page, label: string) {
               }
             }
             accounts.push({
-              cpId: cpId.slice(0, 12),
+              cpId: cpId.slice(0, 16),
               mempoolLen: acc.mempool?.length || 0,
               height: acc.height || 0,
               deltas,
@@ -116,7 +126,8 @@ async function dumpState(page: Page, label: string) {
           }
         }
         entities.push({
-          key: key.slice(0, 20),
+          key,  // Full key to see entityId:signerId
+          entityHeight: rep.state?.height || 0,
           accountCount: rep.state?.accounts?.size || 0,
           accounts,
         });
@@ -129,11 +140,12 @@ async function dumpState(page: Page, label: string) {
     return {
       label,
       runtimeId: env.runtimeId?.slice(0, 12) || 'none',
+      envObjId: `env@${env._debugId || 'no-id'}`,
       loopActive: env.runtimeState?.loopActive || false,
       p2pConnected: !!p2p,
-      p2pState: p2p?.getState?.() || 'unknown',
       gossipProfiles,
       entityCount: env.eReplicas?.size || 0,
+      eReplicaKeys: env.eReplicas ? [...env.eReplicas.keys()] : [],
       entities,
     };
   }, label);
@@ -163,7 +175,14 @@ async function switchTo(page: Page, label: string) {
     }
   }, label);
   expect(r.ok, `switchTo(${label}) failed: ${r.error}`).toBe(true);
-  console.log(`[E2E] Switched to ${label} (${r.id})`);
+  // Check and tag env after switch
+  const envInfo = await page.evaluate((label) => {
+    const env = (window as any).isolatedEnv;
+    if (env && !env._debugId) env._debugId = label + '-switch-' + Date.now();
+    const keys = env?.eReplicas ? [...env.eReplicas.keys()] : [];
+    return { debugId: env?._debugId, eReplicaCount: keys.length, keys: keys.map((k: string) => k.slice(0, 20)) };
+  }, label);
+  console.log(`[E2E] Switched to ${label} (${r.id}), envId=${envInfo.debugId}, eReplicas=${envInfo.eReplicaCount}: [${envInfo.keys.join(', ')}]`);
   await page.waitForTimeout(2000);
 }
 
@@ -234,14 +253,18 @@ async function outCap(page: Page, entityId: string, cpId: string): Promise<bigin
   return BigInt(s);
 }
 
-/** Faucet 100 USDC */
+/** Faucet 100 USDC (with 30s timeout) */
 async function faucet(page: Page, entityId: string) {
   const r = await page.evaluate(async (eid) => {
     try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 30_000);
       const resp = await fetch('/api/faucet/offchain', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userEntityId: eid, tokenId: 1, amount: '100' }),
+        signal: ctrl.signal,
       });
+      clearTimeout(timer);
       const data = await resp.json();
       return { ok: resp.ok, status: resp.status, data };
     } catch (e: any) {
@@ -253,21 +276,71 @@ async function faucet(page: Page, entityId: string) {
   await page.waitForTimeout(SETTLE_MS);
 }
 
-/** Send directPayment */
+/** Generate HTLC secret + hashlock (Node.js side) */
+function generateHtlc(): { secret: string; hashlock: string } {
+  const secret = ethers.hexlify(ethers.randomBytes(32));
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  const hashlock = ethers.keccak256(abiCoder.encode(['bytes32'], [secret]));
+  return { secret, hashlock };
+}
+
+/** Send htlcPayment (replaces directPayment) */
 async function pay(page: Page, from: string, signerId: string, to: string, route: string[], amount: bigint) {
-  const r = await page.evaluate(async ({ from, signerId, to, route, amt }) => {
+  const { secret, hashlock } = generateHtlc();
+  console.log(`[E2E] HTLC: secret=${secret.slice(0, 16)}... hashlock=${hashlock.slice(0, 16)}...`);
+
+  const r = await page.evaluate(async ({ from, signerId, to, route, amt, secret, hashlock }) => {
     try {
       const XLN = (window as any).XLN;
       const env = (window as any).isolatedEnv;
+
+      // Pre-pay diagnostics
+      const preKeys = env.eReplicas ? [...env.eReplicas.keys()] : [];
+      let preAccounts = 0;
+      for (const [k, rep] of (env.eReplicas || new Map()).entries()) {
+        if (k.startsWith(from + ':')) preAccounts = rep.state?.accounts?.size || 0;
+      }
+      console.log(`[E2E] pay() PRE: envId=${env._debugId}, eReplicas=[${preKeys.join(', ')}], fromAccounts=${preAccounts}`);
+
       await XLN.process(env, [{
         entityId: from, signerId,
-        entityTxs: [{ type: 'directPayment', data: { targetEntityId: to, tokenId: 1, amount: BigInt(amt), route } }],
+        entityTxs: [{ type: 'htlcPayment', data: { targetEntityId: to, tokenId: 1, amount: BigInt(amt), route, secret, hashlock } }],
       }]);
-      return { ok: true };
-    } catch (e: any) { return { ok: false, error: e.message }; }
-  }, { from, signerId, to, route, amt: amount.toString() });
-  expect(r.ok, `Payment: ${r.error}`).toBe(true);
-  await page.waitForTimeout(SETTLE_MS);
+
+      // Post-process diagnostics (immediate, before settle)
+      const postKeys = env.eReplicas ? [...env.eReplicas.keys()] : [];
+      let postAccounts = 0;
+      for (const [k, rep] of (env.eReplicas || new Map()).entries()) {
+        if (k.startsWith(from + ':')) postAccounts = rep.state?.accounts?.size || 0;
+      }
+      console.log(`[E2E] pay() POST-PROCESS: eReplicas=[${postKeys.join(', ')}], fromAccounts=${postAccounts}`);
+
+      return { ok: true, preKeys, postKeys, preAccounts, postAccounts };
+    } catch (e: any) { return { ok: false, error: e.message, preKeys: [], postKeys: [], preAccounts: 0, postAccounts: 0 }; }
+  }, { from, signerId, to, route, amt: amount.toString(), secret, hashlock });
+  console.log(`[E2E] pay() result: pre=${r.preAccounts}accs/${r.preKeys.length}ents → post=${r.postAccounts}accs/${r.postKeys.length}ents`);
+  expect(r.ok, `htlcPayment: ${r.error}`).toBe(true);
+
+  // Check state midway through settle
+  await page.waitForTimeout(SETTLE_MS / 2);
+  const mid = await page.evaluate((from) => {
+    const env = (window as any).isolatedEnv;
+    const keys = env.eReplicas ? [...env.eReplicas.keys()] : [];
+    let accounts = 0;
+    for (const [k, rep] of (env.eReplicas || new Map()).entries()) {
+      if (k.startsWith(from + ':')) accounts = rep.state?.accounts?.size || 0;
+    }
+    return { envId: env._debugId, keys, accounts };
+  }, from);
+  console.log(`[E2E] pay() MID-SETTLE: envId=${mid.envId}, eReplicas=[${mid.keys.join(', ')}], fromAccounts=${mid.accounts}`);
+
+  await page.waitForTimeout(SETTLE_MS / 2);
+}
+
+/** Take named screenshot and save to test-results */
+async function screenshot(page: Page, name: string) {
+  await page.screenshot({ path: `tests/test-results/${name}.png`, fullPage: true });
+  console.log(`[E2E] 📸 Screenshot: ${name}.png`);
 }
 
 // ─── Test ─────────────────────────────────────────────────────────
@@ -324,6 +397,8 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await connectHub(page, alice!.entityId, alice!.signerId, hubId);
     await dumpState(page, 'alice-after-connect');
 
+    await screenshot(page, '04-alice-connected');
+
     // ── 5. Faucet Alice ──────────────────────────────────────────
     console.log('[E2E] 5. Faucet Alice');
     const a0 = await outCap(page, alice!.entityId, hubId);
@@ -333,48 +408,149 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const a1 = await outCap(page, alice!.entityId, hubId);
     console.log(`[E2E] Alice OUT after faucet: ${a0} → ${a1}`);
     expect(a1, 'Faucet should increase Alice OUT').toBeGreaterThan(a0);
+    await screenshot(page, '05-alice-after-faucet');
 
-    // ── 6. Alice → Hub → Bob (10 USDC) ──────────────────────────
-    console.log('[E2E] 6. Forward payment: Alice → Hub → Bob');
+    // ── 6. Alice → Hub → Bob (10 USDC via HTLC) ─────────────────
+    const payAmount = toWei(10);
+    const expectedReceived = afterFee(payAmount);
+    const fee = calcFee(payAmount);
+    console.log(`[E2E] 6. Forward HTLC: Alice → Hub → Bob`);
+    console.log(`[E2E]    Amount: ${payAmount} (${ethers.formatUnits(payAmount, 18)} USDC)`);
+    console.log(`[E2E]    Fee:    ${fee} (${ethers.formatUnits(fee, 18)} USDC)`);
+    console.log(`[E2E]    Received: ${expectedReceived} (${ethers.formatUnits(expectedReceived, 18)} USDC)`);
+
     await switchTo(page, 'bob');
     const b0 = await outCap(page, bob!.entityId, hubId);
 
     await switchTo(page, 'alice');
     await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
-      [alice!.entityId, hubId, bob!.entityId], toWei(10));
+      [alice!.entityId, hubId, bob!.entityId], payAmount);
 
+    // Alice: sender pays full amount (capacity decreases by payAmount)
     const a2 = await outCap(page, alice!.entityId, hubId);
-    expect(a2, 'Alice OUT should decrease').toBeLessThan(a1);
+    const alicePaid = a1 - a2;
+    console.log(`[E2E] Alice paid: ${alicePaid} (OUT ${a1} → ${a2})`);
+    expect(alicePaid, 'Alice should pay full amount').toBe(payAmount);
+    await screenshot(page, '06a-alice-after-send');
 
+    // Bob: receiver gets amount minus fee
     await switchTo(page, 'bob');
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
     const b1 = await outCap(page, bob!.entityId, hubId);
-    console.log(`[E2E] Bob OUT: ${b0} → ${b1}`);
-    expect(b1, 'Bob OUT should increase').toBeGreaterThan(b0);
-    console.log('[E2E] ✅ Forward verified');
+    const bobReceived = b1 - b0;
+    console.log(`[E2E] Bob received: ${bobReceived} (OUT ${b0} → ${b1})`);
+    expect(bobReceived, `Bob should receive amount-fee (${expectedReceived})`).toBe(expectedReceived);
 
-    // ── 7. Faucet Bob + Reverse: Bob → Hub → Alice (10 USDC) ────
-    console.log('[E2E] 7. Reverse: Bob → Hub → Alice');
+    // Bob's UI shows the received funds (data already verified via outCap above)
+    await screenshot(page, '06b-bob-after-receive');
+
+    console.log('[E2E] ✅ Forward HTLC verified (fee on sender)');
+
+    // ── 7. Faucet Bob + Reverse: Bob → Hub → Alice (5 USDC) ──────
+    const reverseAmount = toWei(5);
+    const reverseReceived = afterFee(reverseAmount);
+    const reverseFee = calcFee(reverseAmount);
+    console.log(`[E2E] 7. Reverse HTLC: Bob → Hub → Alice`);
+    console.log(`[E2E]    Amount: ${ethers.formatUnits(reverseAmount, 18)} USDC, fee: ${ethers.formatUnits(reverseFee, 18)} USDC`);
+
     await faucet(page, bob!.entityId);
     const b2 = await outCap(page, bob!.entityId, hubId);
+    console.log(`[E2E] Bob OUT after faucet: ${b2}`);
 
     await switchTo(page, 'alice');
     const a3 = await outCap(page, alice!.entityId, hubId);
 
     await switchTo(page, 'bob');
-    await pay(page, bob!.entityId, bob!.signerId, alice!.entityId,
-      [bob!.entityId, hubId, alice!.entityId], toWei(10));
+    // Verify Bob still has account before paying
+    const b2check = await outCap(page, bob!.entityId, hubId);
+    console.log(`[E2E] Bob OUT pre-pay check: ${b2check}`);
+    expect(b2check, 'Bob must have account before reverse pay').toBe(b2);
 
+    await pay(page, bob!.entityId, bob!.signerId, alice!.entityId,
+      [bob!.entityId, hubId, alice!.entityId], reverseAmount);
+
+    // Dump state to understand what happened
+    await dumpState(page, 'bob-after-reverse-pay');
+
+    // Bob: sender pays full amount
     const b3 = await outCap(page, bob!.entityId, hubId);
-    expect(b3, 'Bob OUT should decrease').toBeLessThan(b2);
+    console.log(`[E2E] Bob OUT after reverse: ${b3}`);
+    const bobPaid = b2 - b3;
+    console.log(`[E2E] Bob paid: ${bobPaid} (OUT ${b2} → ${b3})`);
+    expect(b3, 'Bob account must still exist after pay').toBeGreaterThan(0n);
+    expect(bobPaid, 'Bob should pay full reverse amount').toBe(reverseAmount);
+    await screenshot(page, '07a-bob-after-reverse-send');
+
+    // Alice: receiver gets amount minus fee
+    await switchTo(page, 'alice');
+    await page.waitForTimeout(3000);
+    const a4 = await outCap(page, alice!.entityId, hubId);
+    const aliceReceived = a4 - a3;
+    console.log(`[E2E] Alice received: ${aliceReceived} (OUT ${a3} → ${a4})`);
+    expect(aliceReceived, `Alice should receive amount-fee (${reverseReceived})`).toBe(reverseReceived);
+    await screenshot(page, '07b-alice-after-reverse-receive');
+
+    console.log('[E2E] ✅ Reverse HTLC verified (fee on sender)');
+
+    // ── 8. Second forward payment (state accumulates) ─────────────
+    const pay2Amount = toWei(3);
+    const pay2Received = afterFee(pay2Amount);
+    console.log(`[E2E] 8. Second forward: Alice → Hub → Bob (${ethers.formatUnits(pay2Amount, 18)} USDC)`);
+
+    const a5 = await outCap(page, alice!.entityId, hubId);
+    await switchTo(page, 'bob');
+    const b4 = await outCap(page, bob!.entityId, hubId);
 
     await switchTo(page, 'alice');
-    await page.waitForTimeout(2000);
-    const a4 = await outCap(page, alice!.entityId, hubId);
-    console.log(`[E2E] Alice OUT: ${a3} → ${a4}`);
-    expect(a4, 'Alice OUT should increase').toBeGreaterThan(a3);
+    await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
+      [alice!.entityId, hubId, bob!.entityId], pay2Amount);
 
-    console.log('[E2E] ✅ Reverse verified');
-    console.log('[E2E] ✅ Full bidirectional E2E complete');
+    const a6 = await outCap(page, alice!.entityId, hubId);
+    expect(a5 - a6, '2nd payment: Alice pays exact amount').toBe(pay2Amount);
+
+    await switchTo(page, 'bob');
+    await page.waitForTimeout(5000);
+    const b5 = await outCap(page, bob!.entityId, hubId);
+    console.log(`[E2E] 2nd: Bob OUT ${b4} → ${b5}, diff=${b5 - b4}, expected=${pay2Received}`);
+    expect(b5 - b4, '2nd payment: Bob receives amount-fee').toBe(pay2Received);
+    await screenshot(page, '08-bob-after-second-payment');
+
+    console.log('[E2E] ✅ Second payment accumulates correctly');
+
+    // ── 9. Insufficient capacity (should fail gracefully) ─────────
+    await switchTo(page, 'alice');
+    console.log('[E2E] 9. Overspend: Alice tries to send more than capacity');
+    const overAmount = a6 + toWei(1); // more than Alice has
+    const { secret: overSecret, hashlock: overHash } = generateHtlc();
+    const overResult = await page.evaluate(async ({ from, signerId, to, route, amt, secret, hashlock }) => {
+      try {
+        const XLN = (window as any).XLN;
+        const env = (window as any).isolatedEnv;
+        await XLN.process(env, [{
+          entityId: from, signerId,
+          entityTxs: [{ type: 'htlcPayment', data: { targetEntityId: to, tokenId: 1, amount: BigInt(amt), route, secret, hashlock } }],
+        }]);
+        return { ok: true };
+      } catch (e: any) { return { ok: false, error: e.message }; }
+    }, { from: alice!.entityId, signerId: alice!.signerId, to: bob!.entityId,
+         route: [alice!.entityId, hubId, bob!.entityId], amt: overAmount.toString(),
+         secret: overSecret, hashlock: overHash });
+    // Overspend should either throw or not change Alice's balance
+    const a7 = await outCap(page, alice!.entityId, hubId);
+    console.log(`[E2E] Overspend result: ok=${overResult.ok}, error=${overResult.error?.slice(0, 80)}`);
+    console.log(`[E2E] Alice OUT unchanged: ${a6} → ${a7}`);
+    expect(a7, 'Overspend should not change Alice balance').toBe(a6);
+
+    console.log('[E2E] ✅ Overspend rejected');
+
+    // ── Summary ───────────────────────────────────────────────────
+    console.log('\n[E2E] ══════ SUMMARY ══════');
+    console.log(`[E2E] Route: Alice → H1 (1.00 bps) → Bob`);
+    console.log(`[E2E] Fee per hop: ${ethers.formatUnits(fee, 18)} USDC on 10 USDC (0.001%)`);
+    console.log(`[E2E] Forward:  Alice sent 10, Bob got ${ethers.formatUnits(expectedReceived, 18)}`);
+    console.log(`[E2E] Reverse:  Bob sent 5, Alice got ${ethers.formatUnits(reverseReceived, 18)}`);
+    console.log(`[E2E] 2nd fwd:  Alice sent 3, Bob got ${ethers.formatUnits(pay2Received, 18)}`);
+    console.log(`[E2E] Overspend: correctly rejected`);
+    console.log('[E2E] ✅ All payment cases passed');
   });
 });

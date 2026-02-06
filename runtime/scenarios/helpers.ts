@@ -295,7 +295,7 @@ export async function converge(env: Env, maxCycles = 10): Promise<void> {
       }
       // Check account-level work (bilateral consensus)
       for (const [, account] of replica.state.accounts) {
-        if (account.mempool.length > 0 || account.pendingFrame || account.sentTransitions > account.ackedTransitions) {
+        if (account.mempool.length > 0 || account.pendingFrame) {
           hasWork = true;
           break;
         }
@@ -369,7 +369,7 @@ export async function convergeWithOffline(
       }
       // Check account-level work (bilateral consensus)
       for (const [, account] of replica.state.accounts) {
-        if (account.mempool.length > 0 || account.pendingFrame || account.sentTransitions > account.ackedTransitions) {
+        if (account.mempool.length > 0 || account.pendingFrame) {
           hasWork = true;
           break;
         }
@@ -529,9 +529,6 @@ export function assertRuntimeIdle(env: Env, label: string = 'runtime'): void {
       }
       if (account.mempool.length > 0) {
         errors.push(`accountMempool ${replicaKey}↔${counterpartyId.slice(-4)}=${account.mempool.length}`);
-      }
-      if (account.sentTransitions > account.ackedTransitions) {
-        errors.push(`unackedTransitions ${replicaKey}↔${counterpartyId.slice(-4)}=${account.sentTransitions - account.ackedTransitions}`);
       }
     }
   }

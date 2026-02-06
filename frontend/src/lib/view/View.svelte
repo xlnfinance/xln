@@ -64,18 +64,27 @@
   // Isolated XLN environment for this View instance (passed to ALL panels + TimeMachine)
   const localEnvStore = writable<any>(null);
   const localHistoryStore = writable<any[]>([]);
-  const localTimeIndex = writable<number>(-1);  // -1 = live mode
+  const localTimeIndex = writable<number>(0);  // real frame index, auto-advanced when isLive
   const localIsLive = writable<boolean>(true);
 
-  // Expose env to window for E2E testing (Playwright tests need access to history)
+  // Sync localEnvStore → runtimeStore for panels that read from global
   localEnvStore.subscribe((env) => {
     if (env) {
       runtimeOperations.updateLocalEnv(env);
     }
-    if (typeof window !== 'undefined' && env) {
-      (window as any).isolatedEnv = env;
-    }
   });
+
+  // CRITICAL: window.isolatedEnv is a GETTER — always reads from active runtime.
+  // This prevents stale env references after runtime switch (race-free).
+  if (typeof window !== 'undefined') {
+    Object.defineProperty(window, 'isolatedEnv', {
+      get() {
+        return get(localEnvStore);
+      },
+      configurable: true,
+      enumerable: true,
+    });
+  }
 
   // CRITICAL: Subscribe to activeRuntimeId changes and update env reactively
   // This ensures View.svelte always shows the correct env after VaultStore creates/switches runtimes
@@ -196,10 +205,10 @@
         // Set to isolated stores
         localEnvStore.set(env);
         localHistoryStore.set(env.history || []);
-        // CRITICAL: Default to -1 (LIVE mode), not 0 (historical frame 0)
-        // Only use saved timeIndex when explicitly importing from URL
-        localTimeIndex.set(urlImport?.state.ui?.ti ?? -1);
-        localIsLive.set(true);
+        // LIVE mode: start at latest frame, auto-advance on new frames
+        const histLen = (env.history || []).length;
+        localTimeIndex.set(urlImport?.state.ui?.ti ?? Math.max(0, histLen - 1));
+        localIsLive.set(urlImport?.state.ui?.ti === undefined);
         registerEnvChanges(env);
       }
 
@@ -208,19 +217,39 @@
       const { runtimes, activeRuntimeId } = await import('$lib/stores/runtimeStore');
       unsubActiveRuntime = activeRuntimeId.subscribe((runtimeId) => {
         if (!runtimeId) return;
-        const runtime = get(runtimes).get(runtimeId);
-        if (runtime?.env) {
-          console.log('[View] 🔄 Runtime changed, updating env:', {
-            runtimeId: runtimeId.slice(0, 10),
-            jReplicas: runtime.env.jReplicas?.size || 0,
-            entities: runtime.env.eReplicas?.size || 0
-          });
-          localEnvStore.set(runtime.env);
-          localHistoryStore.set(runtime.env.history || []);
-          // Stay in live mode when runtime changes (don't reset to historical)
-          localIsLive.set(true);
-          localTimeIndex.set(-1);
-          registerEnvChanges(runtime.env);
+        const allRuntimes = get(runtimes);
+        const runtime = allRuntimes.get(runtimeId);
+
+        // ASSERT: runtime must exist in runtimes Map
+        if (!runtime) {
+          console.error(`[View] RUNTIME NOT FOUND: activeRuntimeId="${runtimeId}" not in runtimes Map (keys: ${[...allRuntimes.keys()].join(', ')})`);
+          return;
+        }
+        if (!runtime.env) {
+          console.error(`[View] RUNTIME ENV NULL: activeRuntimeId="${runtimeId}" has no env`);
+          return;
+        }
+
+        const prevEnv = get(localEnvStore);
+        console.log('[View] Runtime switch:', {
+          from: prevEnv?.runtimeId?.slice(0, 12) || 'none',
+          to: runtime.env.runtimeId?.slice(0, 12) || '?',
+          runtimeId: runtimeId.slice(0, 12),
+          entities: runtime.env.eReplicas?.size || 0
+        });
+
+        localEnvStore.set(runtime.env);
+        localHistoryStore.set(runtime.env.history || []);
+        // Stay in live mode when runtime changes — start at latest frame
+        localIsLive.set(true);
+        const h = runtime.env.history || [];
+        localTimeIndex.set(Math.max(0, h.length - 1));
+        registerEnvChanges(runtime.env);
+
+        // ASSERT: verify the switch took effect
+        const currentEnv = get(localEnvStore);
+        if (currentEnv !== runtime.env) {
+          console.error(`[View] ENV SWITCH FAILED: localEnvStore has ${currentEnv?.runtimeId} but expected ${runtime.env.runtimeId}`);
         }
       });
 

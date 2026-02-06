@@ -21,7 +21,7 @@ import type { EntityReplica } from '$lib/types/ui';
 
 // Import global stores as fallback
 import { xlnEnvironment, xlnFunctions as globalXlnFunctions } from '$lib/stores/xlnStore';
-import { visibleReplicas, currentTimeIndex } from '$lib/stores/timeStore';
+import { visibleReplicas, currentTimeIndex, isLive as globalIsLive } from '$lib/stores/timeStore';
 import { history as globalHistory } from '$lib/stores/xlnStore';
 
 const ENTITY_ENV_CONTEXT_KEY = Symbol('entity-env-context');
@@ -155,29 +155,24 @@ export function setEntityEnvContext(options: EntityEnvContextOptions = {}): void
   // History store
   const history: Readable<HistoryFrame[]> = isolatedHistory ?? globalHistory as Readable<HistoryFrame[]>;
 
-  // Is live store
-  const isLive: Readable<boolean> = isolatedIsLive ?? derived(timeIndex, ($idx) => $idx < 0);
+  // Is live store — explicit boolean, not derived from timeIndex
+  const isLive: Readable<boolean> = isolatedIsLive ?? derived(globalIsLive, ($v) => $v);
 
-  // Environment - derives from history + timeIndex or uses isolated
+  // Environment: raw env for off-runtime infra (gossip, signers, jadapter, P2P)
   const env: Readable<HistoryFrame | null> = useIsolated
-    ? derived([isolatedHistory!, isolatedTimeIndex!, isolatedEnv!], ([$hist, $idx, $env]) => {
-        if ($idx >= 0 && $hist && $hist.length > 0) {
-          const idx = Math.min($idx, $hist.length - 1);
-          return $hist[idx] ?? null;
-        }
-        return $env;
-      })
-    : derived([globalHistory as Readable<HistoryFrame[]>, currentTimeIndex, xlnEnvironment], ([$hist, $idx, $xlnEnv]) => {
-        if ($idx >= 0 && $hist && $hist.length > 0) {
-          const idx = Math.min($idx, $hist.length - 1);
-          return $hist[idx] ?? null;
-        }
-        return $xlnEnv as HistoryFrame | null;
-      });
+    ? (isolatedEnv! as Readable<HistoryFrame | null>)
+    : (xlnEnvironment as Readable<HistoryFrame | null>);
 
-  // Replicas - derived from env (copy map to force Svelte reactivity)
+  // Replicas: ALWAYS from history[timeIndex] (consistent snapshots), fallback to raw env
   const replicas: Readable<Map<string, EntityReplica>> = useIsolated
-    ? derived(env, ($e) => ($e?.eReplicas ? new Map($e.eReplicas) : new Map()))
+    ? derived([isolatedHistory!, isolatedTimeIndex!, isolatedEnv!], ([$hist, $idx, $env]) => {
+        if ($hist && $hist.length > 0) {
+          const idx = Math.max(0, Math.min($idx, $hist.length - 1));
+          const frame = $hist[idx];
+          if (frame?.eReplicas) return new Map(frame.eReplicas);
+        }
+        return $env?.eReplicas ? new Map($env.eReplicas) : new Map();
+      })
     : visibleReplicas as Readable<Map<string, EntityReplica>>;
 
   // XLN functions (always from global - loaded once)

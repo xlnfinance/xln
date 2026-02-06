@@ -328,7 +328,6 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
       }
     }),
     isProposer: replica.isProposer,
-    ...(replica.sentTransitions !== undefined && { sentTransitions: replica.sentTransitions }),
     ...(replica.position && { position: { ...replica.position } }),
     // SECURITY: Clone validator's computed state for state injection prevention
     ...(replica.validatorComputedState && { validatorComputedState: cloneEntityState(replica.validatorComputedState) }),
@@ -619,8 +618,6 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
       tokenIds: [...account.currentFrame.tokenIds],
       deltas: [...account.currentFrame.deltas],
     },
-    sentTransitions: account.sentTransitions,
-    ackedTransitions: account.ackedTransitions,
     deltas: new Map(Array.from(account.deltas.entries()).map(([key, delta]) => [key, { ...delta }])),
     locks: new Map(Array.from(account.locks.entries()).map(([key, lock]) => [key, { ...lock }])),
     swapOffers: new Map(Array.from(account.swapOffers.entries()).map(([key, offer]) => [key, { ...offer }])),
@@ -629,8 +626,6 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     pendingSignatures: [...account.pendingSignatures],
     rollbackCount: account.rollbackCount,
     ...(account.lastRollbackFrameHash !== undefined && { lastRollbackFrameHash: account.lastRollbackFrameHash }),
-    sendCounter: account.sendCounter,
-    receiveCounter: account.receiveCounter,
     frameHistory: [...account.frameHistory], // Clone frame history array
     proofHeader: { ...account.proofHeader },
     proofBody: {
