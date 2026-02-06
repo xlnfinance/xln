@@ -111505,6 +111505,7 @@ var RUNTIME_BUILD_ID = "2026-01-21-00:40Z", nodeProcess, defaultDbPath, dbRootPa
       console.log(`\uD83D\uDCE4 TICK: No entity inputs - retrying ${env.pendingNetworkOutputs.length} pending network outputs`);
     }
     const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, entityOutbox);
+    env.pendingNetworkOutputs = [];
     if (localOutputs.length > 0) {
       enqueueRuntimeInputs(env, localOutputs);
       if (!quietRuntimeLogs) {
@@ -111549,7 +111550,12 @@ var RUNTIME_BUILD_ID = "2026-01-21-00:40Z", nodeProcess, defaultDbPath, dbRootPa
     if (remoteOutputs.length > 0) {
       console.log(`\uD83D\uDCE1 [SIDE-EFFECT] Dispatching ${remoteOutputs.length} remote entity outputs via P2P`);
     }
-    dispatchEntityOutputs(env, remoteOutputs);
+    const dispatchDeferred = dispatchEntityOutputs(env, remoteOutputs);
+    const allDeferred = [...deferredOutputs, ...dispatchDeferred];
+    if (allDeferred.length > 0) {
+      env.pendingNetworkOutputs = allDeferred;
+      console.log(`\uD83D\uDCE4 DEFERRED: ${allDeferred.length} outputs queued for retry (gossip runtimeId missing)`);
+    }
     if (remoteOutputs.length > 0) {
       const p2p = getP2P(env);
       if (p2p) {
@@ -111602,6 +111608,7 @@ var RUNTIME_BUILD_ID = "2026-01-21-00:40Z", nodeProcess, defaultDbPath, dbRootPa
       const { assertRuntimeStateStrict: assertRuntimeStateStrict2 } = await Promise.resolve().then(() => (init_strict_assertions(), exports_strict_assertions));
       await assertRuntimeStateStrict2(env);
     }
+    notifyEnvChange(env);
     return env;
   }
 }, saveEnvToDB = async (env) => {

@@ -1890,7 +1890,9 @@ export const process = async (
       console.log(`📤 TICK: No entity inputs - retrying ${env.pendingNetworkOutputs.length} pending network outputs`);
     }
 
+    // CRITICAL: planEntityOutputs consumes env.pendingNetworkOutputs — clear before replanning
     const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, entityOutbox);
+    env.pendingNetworkOutputs = []; // Consumed by planEntityOutputs above
     if (localOutputs.length > 0) {
       enqueueRuntimeInputs(env, localOutputs);
       if (!quietRuntimeLogs) {
@@ -1945,7 +1947,14 @@ export const process = async (
     if (remoteOutputs.length > 0) {
       console.log(`📡 [SIDE-EFFECT] Dispatching ${remoteOutputs.length} remote entity outputs via P2P`);
     }
-    dispatchEntityOutputs(env, remoteOutputs);
+    const dispatchDeferred = dispatchEntityOutputs(env, remoteOutputs);
+
+    // Store all deferred outputs (from planning + dispatch) for retry on next tick
+    const allDeferred = [...deferredOutputs, ...dispatchDeferred];
+    if (allDeferred.length > 0) {
+      env.pendingNetworkOutputs = allDeferred;
+      console.log(`📤 DEFERRED: ${allDeferred.length} outputs queued for retry (gossip runtimeId missing)`);
+    }
 
     // 1b. Re-announce gossip profiles after account state changes (new accounts, capacity shifts)
     // Without this, routing graph is stale — peers won't know about new connections
@@ -2010,6 +2019,10 @@ export const process = async (
       const { assertRuntimeStateStrict } = await import('./strict-assertions');
       await assertRuntimeStateStrict(env);
     }
+
+    // CRITICAL: Notify frontend after snapshot is pushed to history
+    // Without this, UI (TimeMachine, AccountPanel) never learns about new frames
+    notifyEnvChange(env);
 
     return env;
   }
