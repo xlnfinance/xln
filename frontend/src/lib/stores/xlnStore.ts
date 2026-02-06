@@ -200,13 +200,8 @@ export async function initializeXLN(): Promise<Env> {
 
     isLoading.set(false);
 
-    // Start P2P overlay (idempotent, waits for runtimeId if needed)
-    if (xln.startP2P) {
-      // Use same host/port as page (unified server serves relay at /relay)
-      const relayUrls = resolveRelayUrls();
-      console.log(`[P2P] Connecting to relay: ${relayUrls[0]}`);
-      xln.startP2P(env, { relayUrls, gossipPollMs: 0 });
-    }
+    // P2P is started per-runtime in vaultStore.createRuntime() and initialize()
+    // No need to start P2P on xlnStore's env — it's not a runtime env
 
     // Expose to window for e2e testing
     if (typeof window !== 'undefined') {

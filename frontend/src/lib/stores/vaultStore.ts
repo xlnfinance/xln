@@ -194,40 +194,8 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
     if (runtime?.id) meta.vaultId = runtime.id;
 
     runtimeOperations.setLocalRuntimeMetadata(meta);
-
-    // Sync runtime seed and start P2P with correct relay URLs
-    if (runtime?.seed && runtime?.id) {
-      import('$lib/stores/xlnStore').then(async ({ getXLN, resolveRelayUrls }) => {
-        const { get } = await import('svelte/store');
-        const xln = await getXLN();
-        // Start P2P on the VaultStore's runtime env (not xlnStore's global env)
-        if (xln.startP2P && xln.deriveRuntimeId) {
-          // Get the env from this specific runtime in runtimeStore
-          const runtimeData = get(runtimes).get(runtime.id);
-          const env = runtimeData?.env;
-          // Set runtime seed on the env
-          if (xln.setRuntimeSeed && env) {
-            xln.setRuntimeSeed(env, runtime.seed);
-          }
-          if (env) {
-            // CRITICAL: Set runtimeId on THIS env (not the global one)
-            // This allows P2P to start immediately instead of being deferred
-            if (!env.runtimeId && runtime.seed) {
-              env.runtimeId = xln.deriveRuntimeId(runtime.seed);
-              env.runtimeSeed = runtime.seed;
-              console.log(`[VaultStore] P2P: Set env.runtimeId = ${env.runtimeId.slice(0, 12)}...`);
-            }
-            const relayUrls = resolveRelayUrls();
-            console.log(`[VaultStore] P2P: Starting on env with ${env.eReplicas?.size || 0} entities, runtimeId=${env.runtimeId?.slice(0,12)}, relay=${relayUrls[0]}`);
-            xln.startP2P(env, { relayUrls, gossipPollMs: 0 });
-          } else {
-            console.warn('[VaultStore] P2P: No env found for runtime', runtime.id);
-          }
-        }
-        console.log('[VaultStore] P2P: Runtime seed synced, P2P connected');
-      }).catch(err => console.warn('[VaultStore] Failed to sync P2P seed:', err));
-    }
-    // Auto-faucet removed - user can request funds manually via XLNSend
+    // P2P is started per-env in createRuntime() and initialize() — no need to restart here
+    // Restarting on every selectRuntime caused WS connection leak (15+ connections with 4 runtimes)
     },
 
   // Load from localStorage
@@ -443,11 +411,19 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
       xln.startRuntimeLoop(newEnv);
     }
 
+    // Start P2P for this runtime's env (one WS per runtime, stays alive across switches)
+    if (xln.startP2P) {
+      const { resolveRelayUrls } = await import('./xlnStore');
+      const relayUrls = resolveRelayUrls();
+      console.log(`[VaultStore.createRuntime] P2P: Starting on env runtimeId=${newEnv.runtimeId?.slice(0,12)}, relay=${relayUrls[0]}`);
+      xln.startP2P(newEnv, { relayUrls, gossipPollMs: 0 });
+    }
+
     // Switch to new runtime
     activeRuntimeId.set(runtimeId);
     console.log('[VaultStore.createRuntime] ✅ Runtime created with entity:', entityId.slice(0, 18));
 
-    // Sync runtime seed
+    // Sync metadata (no P2P — already started above)
     this.syncRuntime(runtime);
 
     return runtime;
@@ -821,6 +797,13 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
           xln.startRuntimeLoop(newEnv);
         }
 
+        // Start P2P for this runtime's env (one WS per runtime)
+        if (xln.startP2P) {
+          const { resolveRelayUrls } = await import('./xlnStore');
+          const relayUrls = resolveRelayUrls();
+          xln.startP2P(newEnv, { relayUrls, gossipPollMs: 0 });
+        }
+
         runtimes.update(r => {
           r.set(runtimeId, {
             id: runtimeId,
@@ -839,13 +822,16 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
         console.log('[VaultStore.initialize] ✅ Runtime created for runtime:', runtimeId);
       } else {
         // Runtime exists, just switch to it
-        // REMOVED: setRuntimeSeed() - seed already in env.runtimeSeed (pure)
         console.log('[VaultStore.initialize] Switched to existing runtime (seed in env):', runtimeId.slice(0, 10));
 
-        // Ensure runtime loop is running (may not have been started on previous init)
+        // Ensure runtime loop + P2P are running
         const existingRuntime = get(runtimes).get(runtimeId);
-        if (existingRuntime?.env && xln.startRuntimeLoop) {
-          xln.startRuntimeLoop(existingRuntime.env);
+        if (existingRuntime?.env) {
+          if (xln.startRuntimeLoop) xln.startRuntimeLoop(existingRuntime.env);
+          if (xln.startP2P) {
+            const { resolveRelayUrls } = await import('./xlnStore');
+            xln.startP2P(existingRuntime.env, { relayUrls: resolveRelayUrls(), gossipPollMs: 0 });
+          }
         }
 
         activeRuntimeId.set(runtimeId);
