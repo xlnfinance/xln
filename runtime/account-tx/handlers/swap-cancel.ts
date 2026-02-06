@@ -17,12 +17,11 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
-import { isLeft } from '../../account-utils';
 
 export async function handleSwapCancel(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'swap_cancel' }>,
-  isOurFrame: boolean,
+  byLeft: boolean,
   currentHeight: number,
   isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelled?: { offerId: string; accountId: string; makerId: string } }> {
@@ -38,10 +37,8 @@ export async function handleSwapCancel(
     return { success: false, error: `Offer ${offerId} not found`, events };
   }
 
-  // 2. Validate caller IS the maker (only maker can cancel)
-  const { fromEntity, toEntity } = accountMachine.proofHeader;
-  const weAreLeft = isLeft(fromEntity, toEntity);
-  const callerIsLeft = isOurFrame ? weAreLeft : !weAreLeft;
+  // 2. Validate caller IS the maker (Channel.ts: byLeft = frame proposer = caller)
+  const callerIsLeft = byLeft;
 
   if (callerIsLeft !== offer.makerIsLeft) {
     return { success: false, error: `Only maker can cancel swap offer`, events };

@@ -681,7 +681,7 @@
                       <span class="tx-token">Token #{tx.data.tokenId}</span>
                     {:else if tx.type === 'set_credit_limit'}
                       <span class="tx-amount">{activeXlnFunctions?.formatTokenAmount(tx.data.tokenId, tx.data.amount)}</span>
-                      <span class="tx-desc">{tx.data.side === 'left' ? 'Left limit' : 'Right limit'}</span>
+                      <span class="tx-desc">Credit extension</span>
                     {:else}
                       <span class="tx-desc">{activeXlnFunctions?.safeStringify(tx.data)}</span>
                     {/if}

@@ -1213,10 +1213,9 @@ export const applyEntityFrame = async (
       const targetEntity = entityTx.data.targetEntityId;
       const accountMachine = currentEntityState.accounts.get(targetEntity);
       if (accountMachine) {
-        const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-        if (isLeft && accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
+        if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
           proposableAccounts.add(targetEntity);
-          console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (account opened)`);
+          console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (account opened, mempool=${accountMachine.mempool.length})`);
         }
       }
     } else if (entityTx.type === 'extendCredit' && entityTx.data) {

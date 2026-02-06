@@ -292,10 +292,12 @@ export async function proposeAccountFrame(
 
   for (const accountTx of accountMachine.mempool) {
     if (HEAVY_LOGS) console.log(`   🔍 Processing accountTx type=${accountTx.type}`);
+    // Channel.ts: byLeft = proposer is left entity (frame-level, same on both sides)
+    const proposerByLeft = accountMachine.leftEntity === accountMachine.proofHeader.fromEntity;
     const result = await processAccountTx(
       clonedMachine,
       accountTx,
-      true, // Processing our own transactions
+      proposerByLeft,
       env.timestamp, // Will be replaced by frame.timestamp during commit
       frameJHeight,  // Entity's synced J-height
       true // isValidation = true (on clone, skip persistent state updates)
@@ -683,7 +685,7 @@ export async function handleAccountInput(
         // CRITICAL: Use frame.timestamp for determinism (HTLC validation must use agreed consensus time)
         const pendingJHeight = accountMachine.pendingFrame.jHeight ?? accountMachine.currentHeight;
         for (const tx of accountMachine.pendingFrame.accountTxs) {
-          const commitResult = await processAccountTx(accountMachine, tx, true, accountMachine.pendingFrame.timestamp, pendingJHeight);
+          const commitResult = await processAccountTx(accountMachine, tx, accountMachine.pendingFrame.byLeft!, accountMachine.pendingFrame.timestamp, pendingJHeight, false);
           if (!commitResult.success) {
             console.error(`❌ PROPOSER-COMMIT FAILED for tx type=${tx.type}: ${commitResult.error}`);
             throw new Error(`Frame ${accountMachine.pendingFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);
@@ -971,7 +973,7 @@ export async function handleAccountInput(
       const result = await processAccountTx(
         clonedMachine,
         accountTx,
-        false, // Processing their transactions = incoming
+        receivedFrame.byLeft!, // Channel.ts: frame-level byLeft (same on both sides)
         receivedFrame.timestamp, // DETERMINISTIC: Use frame's consensus timestamp
         frameJHeight,  // Frame's consensus J-height
         true // isValidation = true (on clone, skip bilateral finalization)
@@ -1154,7 +1156,7 @@ export async function handleAccountInput(
     for (const tx of receivedFrame.accountTxs) {
       // CRITICAL: Use frame.jHeight for HTLC checks (consensus-aligned height)
       const jHeightForCommit = receivedFrame.jHeight || accountMachine.currentHeight;
-      const commitResult = await processAccountTx(accountMachine, tx, false, receivedFrame.timestamp, jHeightForCommit);
+      const commitResult = await processAccountTx(accountMachine, tx, receivedFrame.byLeft!, receivedFrame.timestamp, jHeightForCommit, false);
 
       // CRITICAL: Verify commit succeeded (Codex: prevent silent divergence)
       if (!commitResult.success) {

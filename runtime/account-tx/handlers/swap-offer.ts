@@ -11,7 +11,7 @@
  */
 
 import type { AccountMachine, AccountTx, SwapOffer } from '../../types';
-import { deriveDelta, isLeft } from '../../account-utils';
+import { deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { formatEntityId } from '../../utils';
 import { canonicalAccountKey } from '../../state-helpers';
@@ -21,7 +21,7 @@ import { FINANCIAL } from '../../constants';
 export async function handleSwapOffer(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'swap_offer' }>,
-  isOurFrame: boolean,
+  byLeft: boolean,
   currentHeight: number,
   isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: { offerId: string; makerIsLeft: boolean; fromEntity: string; toEntity: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; minFillRatio: number } }> {
@@ -64,16 +64,9 @@ export async function handleSwapOffer(
     return { success: false, error: `Invalid minFillRatio: ${minFillRatio}`, events };
   }
 
-  // 3. Determine maker perspective using CANONICAL entities
-  // CRITICAL: Use leftEntity/rightEntity (canonical, same on both sides)
-  // NOT fromEntity/toEntity (perspective-dependent, can flip!)
+  // 3. Determine maker perspective (Channel.ts: byLeft = frame proposer = maker)
   const { leftEntity, rightEntity } = accountMachine;
-  const weAreLeft = accountMachine.proofHeader.fromEntity === leftEntity;
-
-  // Maker is whoever created this frame (isOurFrame means WE created it)
-  // If isOurFrame=true: we are the maker
-  // If isOurFrame=false: counterparty is the maker
-  const makerIsLeft = isOurFrame ? weAreLeft : !weAreLeft;
+  const makerIsLeft = byLeft;
 
   // 4. Get or create delta for giveToken (the token being locked)
   let delta = accountMachine.deltas.get(giveTokenId);

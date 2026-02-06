@@ -276,7 +276,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   await process(env, [{
     entityId: ALICE_ID,
     signerId: '2',
-    entityTxs: [{ type: 'openAccount', data: { targetEntityId: HUB_ID } }]
+    entityTxs: [{ type: 'openAccount', data: { targetEntityId: HUB_ID, creditAmount: 0n } }]
   }]);
 
   // Let account setup complete

@@ -1220,7 +1220,7 @@ export type AccountTx =
   | { type: 'account_payment'; data: { tokenId: number; amount: bigint } }
   | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route?: string[]; description?: string; fromEntityId?: string; toEntityId?: string } }
   | { type: 'add_delta'; data: { tokenId: number } }
-  | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint; side: 'left' | 'right' } }
+  | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint } }
   | { type: 'account_frame'; data: { frame: AccountFrame; processedTransactions: number; fromEntity: string } }
   | {
       type: 'account_settle';

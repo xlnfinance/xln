@@ -19,9 +19,8 @@
 import { keccak256 } from 'ethers';
 import type { Profile } from './gossip';
 import type { Env, HankoString } from '../types';
-import { signEntityHashes, verifyHankoForHash, signHashesAsSingleEntity } from '../hanko-signing';
-import { getCachedSignerPublicKey, signDigest } from '../account-crypto';
-import * as secp256k1 from '@noble/secp256k1';
+import { signHashesAsSingleEntity, verifyHankoForHash } from '../hanko-signing';
+import { getCachedSignerPublicKey } from '../account-crypto';
 
 const PROFILE_SIGN_DOMAIN = 'xln-profile-v1';
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -122,44 +121,8 @@ export async function signProfile(
 }
 
 /**
- * Synchronous sign for backward compatibility (uses raw secp256k1)
- * Prefer async signProfile() which uses full Hanko mechanism
- */
-export function signProfileSync(
-  env: { runtimeSeed: Uint8Array | string },
-  profile: Profile,
-  signerId: string
-): Profile {
-  const existingPubKey = profile.metadata?.entityPublicKey;
-  let entityPublicKey = existingPubKey;
-  if (!entityPublicKey) {
-    const cached = getCachedSignerPublicKey(signerId);
-    if (cached) {
-      entityPublicKey = bytesToHex(cached);
-    }
-  }
-
-  const profileWithKey = entityPublicKey
-    ? { ...profile, metadata: { ...profile.metadata, entityPublicKey } }
-    : profile;
-
-  const hash = computeProfileHash(profileWithKey);
-
-  // Use signDigest which properly installs hmacSha256Sync before signing
-  const sigHex = signDigest(env.runtimeSeed, signerId, hash);
-
-  return {
-    ...profileWithKey,
-    metadata: {
-      ...(profileWithKey.metadata || {}),
-      profileSignature: sigHex,  // Legacy field for sync signing
-    },
-  };
-}
-
-/**
  * Verify profile using Hanko mechanism (same as accountFrame verification)
- * Falls back to legacy signature verification for migration
+ * Self-contained: Hanko embeds the board, no external lookup needed
  */
 export type ProfileVerifyResult = {
   valid: boolean;
@@ -187,68 +150,7 @@ export async function verifyProfileSignature(
     return { valid: true, hash };
   }
 
-  // Fallback: legacy signature verification (migration period)
-  const signature = profile.metadata?.['profileSignature'];
-  if (signature && typeof signature === 'string') {
-    const hash = computeProfileHash(profile);
-    const valid = verifyLegacySignature(profile, signature);
-    return {
-      valid,
-      reason: valid ? undefined : 'legacy_sig_mismatch',
-      hash,
-    };
-  }
-
   return { valid: false, reason: 'no_signature' };
-}
-
-/**
- * Legacy signature verification (for profiles signed before Hanko migration)
- */
-function verifyLegacySignature(profile: Profile, signature: string): boolean {
-  try {
-    const hash = computeProfileHash(profile);
-    const hashBytes = Buffer.from(hash.replace('0x', ''), 'hex');
-
-    // Get public key from entityPublicKey or board
-    let publicKey: Uint8Array | null = null;
-
-    const publicKeyHex = profile.metadata?.entityPublicKey;
-    if (publicKeyHex && typeof publicKeyHex === 'string') {
-      publicKey = hexToBytes(publicKeyHex);
-    }
-
-    if (!publicKey) {
-      const boardMeta = profile.metadata?.board;
-      if (boardMeta && typeof boardMeta === 'object' && 'validators' in boardMeta) {
-        const firstValidator = boardMeta.validators[0];
-        if (firstValidator?.publicKey) {
-          publicKey = hexToBytes(firstValidator.publicKey);
-        } else if (firstValidator?.signerId) {
-          publicKey = getCachedSignerPublicKey(firstValidator.signerId);
-        }
-      }
-    }
-
-    if (!publicKey) return false;
-
-    const sigHex = signature.replace('0x', '');
-    const sigBytes = Buffer.from(sigHex.slice(0, 128), 'hex');
-
-    return secp256k1.verify(sigBytes, hashBytes, publicKey);
-  } catch (error) {
-    console.warn('Legacy profile signature verification failed:', error);
-    return false;
-  }
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
-  const bytes = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
-  }
-  return bytes;
 }
 
 /**
@@ -256,5 +158,5 @@ function hexToBytes(hex: string): Uint8Array {
  * Note: For full Hanko verification, use async verifyProfileSignature()
  */
 export function hasValidProfileSignature(profile: Profile): boolean {
-  return !!(profile.metadata?.['profileHanko'] || profile.metadata?.['profileSignature']);
+  return !!profile.metadata?.['profileHanko'];
 }

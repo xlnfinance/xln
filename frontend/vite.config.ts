@@ -107,8 +107,9 @@ export default defineConfig(async ({ command }) => {
 		// API Proxy - Forward to server.ts faucet endpoints
 		proxy: {
 			'/api': {
-				target: 'http://localhost:8082',
+				target: 'https://xln.finance',
 				changeOrigin: true,
+				secure: false,
 			},
 			// RPC Proxy - Forward JSON-RPC to local anvil for dev
 			'/rpc': {

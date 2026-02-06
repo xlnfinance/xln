@@ -29,8 +29,7 @@ type SettleReleaseTx = Extract<AccountTx, { type: 'settle_release' }>;
  */
 export async function handleSettleHold(
   accountMachine: AccountMachine,
-  tx: SettleHoldTx,
-  _isOurFrame: boolean = true
+  tx: SettleHoldTx
 ): Promise<{
   success: boolean;
   events: string[];
@@ -197,8 +196,7 @@ export async function handleSettleHold(
  */
 export async function handleSettleRelease(
   accountMachine: AccountMachine,
-  tx: SettleReleaseTx,
-  _isOurFrame: boolean = true
+  tx: SettleReleaseTx
 ): Promise<{
   success: boolean;
   events: string[];

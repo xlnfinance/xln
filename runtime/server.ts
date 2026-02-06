@@ -23,11 +23,14 @@ import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { TIMING } from './constants';
 import { resolveEntityProposerId } from './state-helpers';
+import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from './networking/p2p-crypto';
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../jurisdictions/typechain-types/factories/ERC20Mock__factory';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
+// Cached server encryption keypair for decrypting relay messages locally
+let serverKeyPair: P2PKeyPair | null = null;
 let jWatcherProcessInterval: ReturnType<typeof setInterval> | null = null;
 let runtimeTickInterval: ReturnType<typeof setInterval> | null = null;
 let runtimeTickInFlight = false;
@@ -513,6 +516,7 @@ const serveStatic = async (pathname: string, staticDir: string): Promise<Respons
 
 const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
   const { type, to, from, payload, id } = msg;
+  console.log(`[RELAY-MSG] type=${type} from=${from?.slice?.(0,10) || 'none'} to=${to?.slice?.(0,10) || 'none'} env=${!!env}`);
 
   // Hello - register client
   if (type === 'hello' && from) {
@@ -572,19 +576,35 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
       return;
     }
 
+    console.log(`[RELAY] ${type} from=${from?.slice(0,10)} to=${to?.slice(0,10)} encrypted=${msg.encrypted ?? false}`);
+
     const target = clients.get(to);
     if (target) {
+      console.log(`[RELAY] → forwarding to WS client`);
       target.ws.send(safeStringify(msg));
       ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'delivered' }));
       return;
     }
 
-    // Local delivery for entity_input if we're running runtime
+    // Local delivery for entity_input — server IS the relay, no need for self-WS-client
     if (type === 'entity_input' && env && payload) {
       try {
-        const input = payload as EntityInput;
-        // Queue to runtime's entity input handling
+        let input: EntityInput;
+        if (msg.encrypted && typeof payload === 'string') {
+          // Decrypt using server's keypair (derived from runtimeSeed)
+          if (!serverKeyPair && env.runtimeSeed) {
+            serverKeyPair = deriveEncryptionKeyPair(env.runtimeSeed);
+            console.log(`[RELAY] Derived server decryption key`);
+          }
+          if (!serverKeyPair) throw new Error('No server encryption key for local decrypt');
+          input = decryptJSON<EntityInput>(payload, serverKeyPair.privateKey);
+          console.log(`[RELAY] → decrypted entity_input: entityId=${input.entityId?.slice(-8)} txs=${input.entityTxs?.length ?? 0}`);
+        } else {
+          input = payload as EntityInput;
+          console.log(`[RELAY] → plaintext entity_input: entityId=${input.entityId?.slice(-8)}`);
+        }
         await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: [{ ...input, from }] });
+        console.log(`[RELAY] → delivered to runtime`);
         ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'delivered' }));
         return;
       } catch (error) {
@@ -597,6 +617,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
     queue.push(msg);
     if (queue.length > 200) queue.shift();
     pendingMessages.set(to, queue);
+    console.log(`[RELAY] → queued (no client, queue=${queue.length})`);
     ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'queued' }));
     return;
   }
@@ -1077,13 +1098,19 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }
 
       // Get hub from gossip (no hardcoded hub!)
-      const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true && p.capabilities?.includes('faucet')) || [];
+      const allProfiles = env.gossip?.getProfiles() || [];
+      console.log(`[FAUCET/OFFCHAIN] profiles=${allProfiles.length} user=${userEntityId.slice(-8)}`);
+      for (const p of allProfiles) {
+        console.log(`  profile: ${p.entityId.slice(-8)} isHub=${p.metadata?.isHub} caps=[${p.capabilities?.join(',')}]`);
+      }
+      const hubs = allProfiles.filter(p => p.metadata?.isHub === true && p.capabilities?.includes('faucet'));
       if (hubs.length === 0) {
         return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
       }
       const hubEntityId = hubs[0].entityId;
       // Get actual signerId from entity's validators (not runtimeId!)
       const hubSignerId = resolveEntityProposerId(env, hubEntityId, 'faucet-offchain');
+      console.log(`[FAUCET/OFFCHAIN] hub=${hubEntityId.slice(-8)} signer=${hubSignerId.slice(-8)} amount=${amount} token=${tokenId}`);
 
       const amountWei = ethers.parseUnits(amount, 18);
 
@@ -1102,6 +1129,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           },
         }],
       }]);
+      console.log(`[FAUCET/OFFCHAIN] ✅ Payment sent`);
 
       return new Response(JSON.stringify({
         success: true,
@@ -1501,15 +1529,16 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
       message(ws, message) {
         const data = (ws as any).data;
+        const msgStr = message.toString();
         try {
-          const msg = JSON.parse(message.toString());
+          const msg = JSON.parse(msgStr);
           if (data.type === 'relay') {
             handleRelayMessage(ws, msg, data.env);
           } else if (data.type === 'rpc') {
             handleRpcMessage(ws, msg, data.env);
           }
         } catch (error) {
-          console.error('[WS] Parse error:', error);
+          console.error(`[WS] Parse error (type=${data.type}, len=${msgStr.length}):`, error);
           ws.send(safeStringify({ type: 'error', error: 'Invalid JSON' }));
         }
       },

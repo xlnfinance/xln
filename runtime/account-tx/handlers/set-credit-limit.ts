@@ -1,10 +1,10 @@
 /**
  * Set Credit Limit Handler
- * Sets credit limit for a specific token (Channel.ts SetCreditLimit pattern)
+ * Channel.ts pattern: proposer extends credit to counterparty.
+ * Uses byLeft (frame property, same on both sides) — NOT perspective-dependent.
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
-import { getAccountPerspective } from '../../state-helpers';
 import { FINANCIAL } from '../../constants';
 
 // Maximum credit limit (prevents overflow attacks)
@@ -13,12 +13,11 @@ const MAX_CREDIT_LIMIT = FINANCIAL.MAX_PAYMENT_AMOUNT * 1000n; // 1000x max paym
 export function handleSetCreditLimit(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'set_credit_limit' }>,
-  _isOurFrame: boolean = true
+  byLeft: boolean
 ): { success: boolean; events: string[]; error?: string } {
-  const { tokenId, amount, side } = accountTx.data;
+  const { tokenId, amount } = accountTx.data;
   const events: string[] = [];
 
-  // H15 FIX: Validate credit limit bounds
   if (amount < 0n) {
     return { success: false, error: `Credit limit cannot be negative: ${amount}`, events };
   }
@@ -26,13 +25,16 @@ export function handleSetCreditLimit(
     return { success: false, error: `Credit limit exceeds maximum: ${amount} > ${MAX_CREDIT_LIMIT}`, events };
   }
 
-  const { counterparty } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
-  console.log(`💳 SET-CREDIT-LIMIT HANDLER: tokenId=${tokenId}, amount=${amount.toString()}, side=${side}, counterparty=${counterparty.slice(-4)}`);
+  // Channel.ts pattern (Transition.ts:358-362):
+  //   if (!block.isLeft) { delta.leftCreditLimit = amount; }  // RIGHT proposer → sets LEFT limit
+  //   else { delta.rightCreditLimit = amount; }                // LEFT proposer → sets RIGHT limit
+  // Proposer extends credit → set counterparty's credit limit field
+  const side = byLeft ? 'right' : 'left';
 
-  // Get or create delta - credit extension can happen before collateral deposit
+  console.log(`💳 SET-CREDIT-LIMIT: tokenId=${tokenId}, amount=${amount.toString()}, side=${side} (byLeft=${byLeft})`);
+
   let delta = accountMachine.deltas.get(tokenId);
   if (!delta) {
-    console.log(`💳 Creating delta for token ${tokenId} (credit extension without collateral)`);
     delta = {
       tokenId,
       collateral: 0n,
@@ -47,14 +49,12 @@ export function handleSetCreditLimit(
     events.push(`📊 Created delta for token ${tokenId}`);
   }
 
-  // DETERMINISTIC: side is canonical ('left' or 'right'), not perspective-dependent
-  // This ensures both sides set the same field when processing the same transaction
   if (side === 'left') {
     delta.leftCreditLimit = amount;
-    events.push(`💳 Left entity credit limit set to ${amount.toString()} for token ${tokenId}`);
+    events.push(`💳 Left credit limit = ${amount.toString()} for token ${tokenId}`);
   } else {
     delta.rightCreditLimit = amount;
-    events.push(`💳 Right entity credit limit set to ${amount.toString()} for token ${tokenId}`);
+    events.push(`💳 Right credit limit = ${amount.toString()} for token ${tokenId}`);
   }
 
   console.log(`✅ Set credit limit for token ${tokenId}: left=${delta.leftCreditLimit}, right=${delta.rightCreditLimit}`);
