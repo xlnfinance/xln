@@ -89,14 +89,10 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   let inCapacity = nonNegative(inOwnCredit + inCollateral + inPeerCredit - inAllowance);
   let outCapacity = nonNegative(outPeerCredit + outCollateral + outOwnCredit - outAllowance);
 
-  // CRITICAL: Deduct holds from capacity (prevents double-spend)
-  if (isLeft) {
-    outCapacity = nonNegative(outCapacity - leftHold);
-    inCapacity = nonNegative(inCapacity - rightHold);
-  } else {
-    outCapacity = nonNegative(outCapacity - rightHold);
-    inCapacity = nonNegative(inCapacity - leftHold);
-  }
+  // CRITICAL: Deduct holds from capacity in LEFT's perspective (prevents double-spend)
+  // Always deduct leftHold from out, rightHold from in — the flip at line 101 handles RIGHT perspective
+  outCapacity = nonNegative(outCapacity - leftHold);
+  inCapacity = nonNegative(inCapacity - rightHold);
 
   if (!isLeft) {
     // Flip for RIGHT entity perspective

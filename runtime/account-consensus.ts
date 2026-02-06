@@ -226,6 +226,8 @@ export async function proposeAccountFrame(
   swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
   // MULTI-SIGNER: Hashes that need entity-quorum signing
   hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
+  // Failed HTLC locks that need backward cancellation via htlcRoutes
+  failedHtlcLocks?: Array<{ hashlock: string; reason: string }>;
 }> {
   // Derive counterparty from canonical left/right
   const myEntityId = accountMachine.proofHeader.fromEntity;
@@ -290,6 +292,10 @@ export async function proposeAccountFrame(
 
   if (HEAVY_LOGS) console.log(`🔍 MEMPOOL-BEFORE-PROCESS: ${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
 
+  const validTxs: typeof accountMachine.mempool = [];
+  const failedHtlcLocks: Array<{ hashlock: string; reason: string }> = [];
+  const txsToRemove: typeof accountMachine.mempool = [];
+
   for (const accountTx of accountMachine.mempool) {
     if (HEAVY_LOGS) console.log(`   🔍 Processing accountTx type=${accountTx.type}`);
     // Channel.ts: byLeft = proposer is left entity (frame-level, same on both sides)
@@ -304,15 +310,22 @@ export async function proposeAccountFrame(
     );
 
     if (!result.success) {
-      // CRITICAL: Remove failed tx from mempool to prevent blocking future proposals
-      const failedIndex = accountMachine.mempool.indexOf(accountTx);
-      if (failedIndex >= 0) {
-        accountMachine.mempool.splice(failedIndex, 1);
-        console.log(`⚠️ Removed failed tx from mempool: ${accountTx.type} (${result.error})`);
+      // Skip failed tx — remove from mempool, don't abort entire proposal
+      txsToRemove.push(accountTx);
+      console.log(`⚠️ Skipping failed tx: ${accountTx.type} (${result.error})`);
+
+      // Track failed HTLC locks for backward cancellation
+      if (accountTx.type === 'htlc_lock') {
+        failedHtlcLocks.push({
+          hashlock: accountTx.data.hashlock,
+          reason: result.error || 'validation_failed',
+        });
+        console.log(`⬅️ Failed htlc_lock queued for cancel: hashlock=${accountTx.data.hashlock.slice(0,12)}...`);
       }
-      return { success: false, error: `Tx validation failed: ${result.error}`, events: allEvents };
+      continue; // Skip to next tx
     }
 
+    validTxs.push(accountTx);
     allEvents.push(...result.events);
 
     // Collect revealed secrets for backward propagation
@@ -333,6 +346,23 @@ export async function proposeAccountFrame(
       if (!quiet) console.log(`📊 Collected swap cancel: ${result.swapOfferCancelled.offerId}`);
       swapOffersCancelled.push(result.swapOfferCancelled);
     }
+  }
+
+  // Remove failed txs from mempool
+  for (const tx of txsToRemove) {
+    const idx = accountMachine.mempool.indexOf(tx);
+    if (idx >= 0) accountMachine.mempool.splice(idx, 1);
+  }
+
+  // If no valid txs remain after filtering, return early
+  if (validTxs.length === 0) {
+    const earlyResult: { success: false; error: string; events: string[]; failedHtlcLocks?: Array<{ hashlock: string; reason: string }> } = {
+      success: false,
+      error: 'All transactions failed validation',
+      events: allEvents,
+    };
+    if (failedHtlcLocks.length > 0) earlyResult.failedHtlcLocks = failedHtlcLocks;
+    return earlyResult;
   }
 
   // CRITICAL FIX: Extract FULL delta state from clonedMachine.deltas (after processing)
@@ -397,7 +427,8 @@ export async function proposeAccountFrame(
   // Create account frame matching the real AccountFrame interface
   // CRITICAL: Deep-copy accountTxs to prevent mutation issues (j_event_claim data can be modified later)
   // Use structuredClone to preserve BigInt values
-  const accountTxsCopy = structuredClone([...accountMachine.mempool]);
+  // NOTE: Use validTxs (filtered) not accountMachine.mempool (may contain failed txs)
+  const accountTxsCopy = structuredClone([...validTxs]);
   const frameData = {
     height: accountMachine.currentHeight + 1,
     timestamp: frameTimestamp, // MONOTONIC: max(env.timestamp, prev+1) for multi-runtime safety
@@ -515,10 +546,10 @@ export async function proposeAccountFrame(
 
   // Set pending state (no longer storing clone - re-execution on commit)
   accountMachine.pendingFrame = newFrame;
-  accountMachine.sentTransitions = accountMachine.mempool.length;
+  accountMachine.sentTransitions = validTxs.length;
   console.log(`🔒 PROPOSE: Account ${accountMachine.proofHeader.fromEntity.slice(-4)}:${accountMachine.proofHeader.toEntity.slice(-4)} pendingFrame=${newFrame.height}, txs=${newFrame.accountTxs.length}`);
 
-  // Clear mempool
+  // Clear mempool (failed txs already removed above)
   accountMachine.mempool = [];
 
   events.push(`🚀 Proposed frame ${newFrame.height} with ${newFrame.accountTxs.length} transactions`);
@@ -543,7 +574,11 @@ export async function proposeAccountFrame(
     { hash: disputeHash, type: 'dispute', context: `account:${counterparty.slice(-8)}:dispute` },
   ];
 
-  return { success: true, accountInput, events, revealedSecrets, swapOffersCreated, swapOffersCancelled, hashesToSign };
+  const finalResult: Awaited<ReturnType<typeof proposeAccountFrame>> = {
+    success: true, accountInput, events, revealedSecrets, swapOffersCreated, swapOffersCancelled, hashesToSign,
+  };
+  if (failedHtlcLocks.length > 0) finalResult.failedHtlcLocks = failedHtlcLocks;
+  return finalResult;
 }
 
 /**
