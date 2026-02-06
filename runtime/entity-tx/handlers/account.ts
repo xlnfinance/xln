@@ -281,12 +281,15 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               try {
                 let envelopeData: string = envelope;
 
-                // Decrypt if crypto keys are configured
-                if (newState.cryptoPrivateKey) {
+                // Decrypt if encrypted (base64), or use cleartext (JSON starts with '{')
+                const isCleartext1 = envelopeData.trimStart().startsWith('{');
+                if (newState.cryptoPrivateKey && !isCleartext1) {
                   const { NobleCryptoProvider } = await import('../../crypto-noble');
                   const crypto = new NobleCryptoProvider();
                   envelopeData = await crypto.decrypt(envelope as string, newState.cryptoPrivateKey);
                   console.log(`🔓 Decryption successful`);
+                } else if (isCleartext1) {
+                  console.log(`🔓 Envelope is cleartext JSON — skipping decrypt`);
                 }
 
                 // Unwrap decrypted envelope
@@ -306,12 +309,15 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               try {
                 let envelopeData = envelope.innerEnvelope;
 
-                // Decrypt if crypto keys are configured
-                if (newState.cryptoPrivateKey) {
+                // Decrypt if encrypted (base64), or use cleartext (JSON starts with '{')
+                const isCleartext2 = envelopeData.trimStart().startsWith('{');
+                if (newState.cryptoPrivateKey && !isCleartext2) {
                   const { NobleCryptoProvider } = await import('../../crypto-noble');
                   const crypto = new NobleCryptoProvider();
                   envelopeData = await crypto.decrypt(envelope.innerEnvelope, newState.cryptoPrivateKey);
                   console.log(`🔓 Decryption successful`);
+                } else if (isCleartext2) {
+                  console.log(`🔓 InnerEnvelope is cleartext JSON — skipping decrypt`);
                 }
 
                 // Unwrap decrypted envelope - THIS is our actual routing instruction
