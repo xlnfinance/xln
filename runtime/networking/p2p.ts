@@ -274,6 +274,8 @@ export class RuntimeP2P {
   }
 
   reconnect() {
+    console.log(`[P2P] reconnect() called — closing existing clients and reconnecting`);
+    this.closeClients();
     this.connect();
   }
 

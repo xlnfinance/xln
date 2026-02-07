@@ -99112,43 +99112,66 @@ var init_p2p_crypto = __esm(() => {
 class RuntimeWsClient {
   ws = null;
   closed = false;
-  reconnectMs;
+  connecting = false;
   options;
-  reconnectTimer = null;
   constructor(options) {
     this.options = options;
-    this.reconnectMs = options.reconnectMs ?? 2000;
   }
   async connect() {
+    if (this.connecting) {
+      console.warn(`[WS] Already connecting to ${this.options.url} \u2014 skipping`);
+      return;
+    }
+    if (this.isOpen()) {
+      console.warn(`[WS] Already connected to ${this.options.url} \u2014 skipping`);
+      return;
+    }
     this.closed = false;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
+    this.connecting = true;
+    if (this.ws) {
+      try {
+        this.ws.close();
+      } catch {}
+      this.ws = null;
     }
     this.ws = await createWs(this.options.url);
     if ("on" in this.ws) {
       this.ws.on("open", () => {
+        this.connecting = false;
         console.log(`[WS] Connected to ${this.options.url}`);
         this.sendHello();
         this.options.onOpen?.();
       });
       this.ws.on("message", (data4) => this.handleMessage(data4));
-      this.ws.on("close", () => this.scheduleReconnect());
+      this.ws.on("close", () => {
+        this.connecting = false;
+        if (!this.closed) {
+          console.error(`[WS] Connection lost to ${this.options.url} \u2014 no auto-reconnect`);
+          this.options.onError?.(new Error(`WS_DISCONNECTED: Connection lost to ${this.options.url}`));
+        }
+      });
       this.ws.on("error", (err) => {
+        this.connecting = false;
         this.options.onError?.(err);
-        this.scheduleReconnect();
       });
     } else {
       this.ws.onopen = () => {
+        this.connecting = false;
         console.log(`[WS] Connected to ${this.options.url}`);
         this.sendHello();
         this.options.onOpen?.();
       };
       this.ws.onmessage = (event) => this.handleMessage(event.data);
-      this.ws.onclose = () => this.scheduleReconnect();
+      this.ws.onclose = () => {
+        this.connecting = false;
+        if (!this.closed) {
+          console.error(`[WS] Connection lost to ${this.options.url} \u2014 no auto-reconnect`);
+          this.options.onError?.(new Error(`WS_DISCONNECTED: Connection lost to ${this.options.url}`));
+        }
+      };
       this.ws.onerror = (event) => {
+        this.connecting = false;
         this.options.onError?.(new Error(`WebSocket error: ${event.type}`));
-        this.scheduleReconnect();
       };
     }
   }
@@ -99171,18 +99194,6 @@ class RuntimeWsClient {
       }
     }
     this.sendRaw({ type: "hello", from: this.options.runtimeId, timestamp: nextTimestamp() });
-  }
-  scheduleReconnect() {
-    if (this.closed)
-      return;
-    if (this.reconnectTimer)
-      return;
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      if (!this.closed) {
-        this.connect().catch((err) => this.options.onError?.(err));
-      }
-    }, this.reconnectMs);
   }
   async handleMessage(raw) {
     let msg;
@@ -99322,11 +99333,9 @@ class RuntimeWsClient {
   }
   close() {
     this.closed = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.connecting = false;
     this.ws?.close();
+    this.ws = null;
   }
 }
 var isBrowser2, wsTimestampCounter = 0, nextTimestamp = () => {
@@ -99823,6 +99832,8 @@ class RuntimeP2P {
     }
   }
   reconnect() {
+    console.log(`[P2P] reconnect() called \u2014 closing existing clients and reconnecting`);
+    this.closeClients();
     this.connect();
   }
   enqueueEntityInput(targetRuntimeId, input) {

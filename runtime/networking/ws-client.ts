@@ -46,7 +46,6 @@ export type RuntimeWsClientOptions = {
   onGossipAnnounce?: (from: string, payload: unknown) => Promise<void> | void;
   onOpen?: () => void;
   onError?: (error: Error) => void;
-  reconnectMs?: number;
 };
 
 const isBrowser = typeof window !== 'undefined' && typeof WebSocket !== 'undefined';
@@ -71,46 +70,72 @@ const createWs = async (url: string): Promise<WebSocketLike> => {
 export class RuntimeWsClient {
   private ws: WebSocketLike | null = null;
   private closed = false;
-  private reconnectMs: number;
+  private connecting = false;
   private options: RuntimeWsClientOptions;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: RuntimeWsClientOptions) {
     this.options = options;
-    this.reconnectMs = options.reconnectMs ?? 2000;
   }
 
   async connect(): Promise<void> {
-    this.closed = false;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
+    // Guard: no concurrent connections
+    if (this.connecting) {
+      console.warn(`[WS] Already connecting to ${this.options.url} — skipping`);
+      return;
     }
+    if (this.isOpen()) {
+      console.warn(`[WS] Already connected to ${this.options.url} — skipping`);
+      return;
+    }
+
+    this.closed = false;
+    this.connecting = true;
+
+    // Close any stale WS before creating new one
+    if (this.ws) {
+      try { this.ws.close(); } catch {}
+      this.ws = null;
+    }
+
     this.ws = await createWs(this.options.url);
 
     if ('on' in this.ws) {
       this.ws.on('open', () => {
+        this.connecting = false;
         console.log(`[WS] Connected to ${this.options.url}`);
         this.sendHello();
         this.options.onOpen?.();
       });
       this.ws.on('message', (data: Buffer) => this.handleMessage(data));
-      this.ws.on('close', () => this.scheduleReconnect());
+      this.ws.on('close', () => {
+        this.connecting = false;
+        if (!this.closed) {
+          console.error(`[WS] Connection lost to ${this.options.url} — no auto-reconnect`);
+          this.options.onError?.(new Error(`WS_DISCONNECTED: Connection lost to ${this.options.url}`));
+        }
+      });
       this.ws.on('error', (err: Error) => {
+        this.connecting = false;
         this.options.onError?.(err);
-        this.scheduleReconnect();
       });
     } else {
       this.ws.onopen = () => {
+        this.connecting = false;
         console.log(`[WS] Connected to ${this.options.url}`);
         this.sendHello();
         this.options.onOpen?.();
       };
       this.ws.onmessage = (event: MessageEvent) => this.handleMessage(event.data);
-      this.ws.onclose = () => this.scheduleReconnect();
+      this.ws.onclose = () => {
+        this.connecting = false;
+        if (!this.closed) {
+          console.error(`[WS] Connection lost to ${this.options.url} — no auto-reconnect`);
+          this.options.onError?.(new Error(`WS_DISCONNECTED: Connection lost to ${this.options.url}`));
+        }
+      };
       this.ws.onerror = (event: Event) => {
+        this.connecting = false;
         this.options.onError?.(new Error(`WebSocket error: ${event.type}`));
-        this.scheduleReconnect();
       };
     }
   }
@@ -134,17 +159,6 @@ export class RuntimeWsClient {
       }
     }
     this.sendRaw({ type: 'hello', from: this.options.runtimeId, timestamp: nextTimestamp() });
-  }
-
-  private scheduleReconnect() {
-    if (this.closed) return;
-    if (this.reconnectTimer) return;
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null;
-      if (!this.closed) {
-        this.connect().catch(err => this.options.onError?.(err));
-      }
-    }, this.reconnectMs);
   }
 
   private async handleMessage(raw: string | Buffer | ArrayBuffer) {
@@ -306,10 +320,8 @@ export class RuntimeWsClient {
 
   close() {
     this.closed = true;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.connecting = false;
     this.ws?.close();
+    this.ws = null;
   }
 }
