@@ -68,12 +68,16 @@ const createWs = async (url: string): Promise<WebSocketLike> => {
 };
 
 export class RuntimeWsClient {
+  private static readonly RECONNECT_BASE_MS = 150;
+  private static readonly RECONNECT_CAP_MS = 2000;
+  private static readonly MAX_RECONNECT_ATTEMPTS = 20;
   private ws: WebSocketLike | null = null;
   private closed = false;
   private connecting = false;
   private options: RuntimeWsClientOptions;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
+  private suppressNextClose = false;
 
   constructor(options: RuntimeWsClientOptions) {
     this.options = options;
@@ -95,6 +99,7 @@ export class RuntimeWsClient {
 
     // Close any stale WS before creating new one
     if (this.ws) {
+      this.suppressNextClose = true;
       try { this.ws.close(); } catch {}
       this.ws = null;
     }
@@ -112,16 +117,20 @@ export class RuntimeWsClient {
       this.ws.on('message', (data: Buffer) => this.handleMessage(data));
       this.ws.on('close', () => {
         this.connecting = false;
+        if (this.suppressNextClose) {
+          this.suppressNextClose = false;
+          return;
+        }
         if (!this.closed) {
-          console.error(`[WS] Connection lost to ${this.options.url} — scheduling reconnect`);
+          console.error(`[WS] Connection lost to ${this.options.url} — reconnect in ${RuntimeWsClient.RECONNECT_DELAY_MS}ms`);
           this.options.onError?.(new Error(`WS_DISCONNECTED: Connection lost to ${this.options.url}`));
           this.scheduleReconnect();
         }
       });
       this.ws.on('error', (err: Error) => {
         this.connecting = false;
+        // Let "close" own reconnect scheduling; prevents double-scheduling loops.
         this.options.onError?.(err);
-        if (!this.closed) this.scheduleReconnect();
       });
     } else {
       this.ws.onopen = () => {
@@ -134,16 +143,20 @@ export class RuntimeWsClient {
       this.ws.onmessage = (event: MessageEvent) => this.handleMessage(event.data);
       this.ws.onclose = () => {
         this.connecting = false;
+        if (this.suppressNextClose) {
+          this.suppressNextClose = false;
+          return;
+        }
         if (!this.closed) {
-          console.error(`[WS] Connection lost to ${this.options.url} — scheduling reconnect`);
+          console.error(`[WS] Connection lost to ${this.options.url} — reconnect in ${RuntimeWsClient.RECONNECT_DELAY_MS}ms`);
           this.options.onError?.(new Error(`WS_DISCONNECTED: Connection lost to ${this.options.url}`));
           this.scheduleReconnect();
         }
       };
       this.ws.onerror = (event: Event) => {
         this.connecting = false;
+        // Let "close" own reconnect scheduling; prevents double-scheduling loops.
         this.options.onError?.(new Error(`WebSocket error: ${event.type}`));
-        if (!this.closed) this.scheduleReconnect();
       };
     }
   }
@@ -151,8 +164,14 @@ export class RuntimeWsClient {
   private scheduleReconnect() {
     if (this.closed || this.connecting || this.isOpen()) return;
     if (this.reconnectTimer) return;
-    const cappedAttempts = Math.min(this.reconnectAttempts, 6);
-    const delayMs = Math.min(2000, 150 * (2 ** cappedAttempts));
+    if (this.reconnectAttempts >= RuntimeWsClient.MAX_RECONNECT_ATTEMPTS) {
+      this.options.onError?.(new Error(`WS_RECONNECT_EXHAUSTED: gave up after ${this.reconnectAttempts} attempts`));
+      return;
+    }
+    const delayMs = Math.min(
+      RuntimeWsClient.RECONNECT_CAP_MS,
+      RuntimeWsClient.RECONNECT_BASE_MS * (2 ** this.reconnectAttempts)
+    );
     this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -370,6 +389,7 @@ export class RuntimeWsClient {
   close() {
     this.closed = true;
     this.connecting = false;
+    this.suppressNextClose = true;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
