@@ -28,10 +28,14 @@
   let sortKey: 'name' | 'fee' | 'capacity' | 'uptime' | 'region' = 'fee';
   let sortAsc = true;
 
-  const RELAY_OPTIONS = [
+  const RELAY_OPTIONS_ALL = [
     { label: 'Prod (xln.finance)', url: 'wss://xln.finance/relay' },
     { label: 'Local (localhost:9000)', url: 'ws://localhost:9000' },
   ];
+  const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0']);
+  const isLocalHost = typeof window !== 'undefined' && LOCAL_HOSTS.has(window.location.hostname);
+  const RELAY_OPTIONS = isLocalHost ? RELAY_OPTIONS_ALL : RELAY_OPTIONS_ALL.filter((o) => !o.url.includes('localhost'));
+  const FALLBACK_RELAY = 'wss://xln.finance/relay';
 
   let relaySelection = $settings.relayUrl;
 
@@ -242,7 +246,60 @@
         }
       }
 
-      // Fallback: scan eReplicas for entities with hub metadata (legacy)
+      // Fallback 1: relay directory (single source from server gossip cache)
+      if (discovered.length === 0) {
+        try {
+          const res = await fetch('/api/debug/entities?limit=5000');
+          if (res.ok) {
+            const body = await res.json() as { entities?: Array<{
+              entityId: string;
+              runtimeId?: string;
+              name?: string;
+              isHub?: boolean;
+              metadata?: Record<string, unknown>;
+              capabilities?: string[];
+              lastUpdated?: number;
+            }> };
+            const fromRelay = Array.isArray(body.entities) ? body.entities : [];
+            for (const entry of fromRelay) {
+              if (!entry.entityId || entry.entityId === entityId) continue;
+              if (!entry.isHub) continue;
+              if (discovered.some((h) => h.entityId === entry.entityId)) continue;
+
+              const myReplica = (currentEnv.eReplicas as Map<string, any>)?.get?.(`${entityId}:1`);
+              const isConnected = myReplica?.state?.accounts?.has(entry.entityId) || false;
+              const fullEntityId = entry.entityId.startsWith('0x') ? entry.entityId : `0x${entry.entityId}`;
+              const metadata = (entry.metadata || {}) as Record<string, unknown>;
+              const capacity = parseCapacity(metadata.capacity);
+
+              discovered.push({
+                profile: { entityId: entry.entityId, metadata, capabilities: entry.capabilities || [] },
+                entityId: entry.entityId,
+                name: entry.name || String(metadata.name || `Hub ${entry.entityId.slice(0, 8)}`),
+                metadata: {
+                  description: String(metadata.bio || 'Payment hub'),
+                  website: typeof metadata.website === 'string' ? metadata.website : undefined,
+                  fee: typeof metadata.routingFeePPM === 'number' ? metadata.routingFeePPM : 100,
+                  capacity: capacity ?? 0n,
+                  uptime: typeof metadata.uptime === 'number' ? metadata.uptime : 99.9,
+                },
+                runtimeId: entry.runtimeId,
+                endpoints: [],
+                capabilities: entry.capabilities || [],
+                jurisdiction: typeof metadata.region === 'string' ? metadata.region : 'global',
+                isConnected,
+                lastSeen: entry.lastUpdated || Date.now(),
+                raw: JSON.stringify(entry, null, 2),
+                identicon: generateIdenticon(fullEntityId),
+              });
+            }
+          }
+        } catch {
+          // Best effort fallback only
+        }
+      }
+
+      // Fallback 2: scan eReplicas for entities with hub metadata (legacy)
       if (discovered.length === 0 && currentEnv.eReplicas instanceof Map) {
         for (const [key, replica] of currentEnv.eReplicas.entries()) {
           const [hubEntityId] = key.split(':');
@@ -356,6 +413,12 @@
   }
 
   async function updateRelay(url: string) {
+    if (!isLocalHost && url.includes('localhost')) {
+      relaySelection = FALLBACK_RELAY;
+      settingsOperations.setRelayUrl(FALLBACK_RELAY);
+      error = 'Local relay is disabled on non-localhost environments.';
+      return;
+    }
     settingsOperations.setRelayUrl(url);
     const currentEnv = env;
     if (!currentEnv) return;
@@ -373,6 +436,10 @@
 
   // Auto-load on mount with retry for WS connection timing
   onMount(() => {
+    if (!isLocalHost && relaySelection.includes('localhost')) {
+      relaySelection = FALLBACK_RELAY;
+      settingsOperations.setRelayUrl(FALLBACK_RELAY);
+    }
     if (env) {
       hasDiscoveredOnce = true;
       discoverHubs(true).then(() => {

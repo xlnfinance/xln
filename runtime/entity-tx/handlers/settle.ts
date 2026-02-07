@@ -16,7 +16,7 @@
  */
 
 import type { EntityState, EntityTx, EntityInput, SettlementWorkspace, SettlementDiff, AccountInput } from '../../types';
-import { cloneEntityState, addMessage, resolveEntityProposerId, getAccountPerspective } from '../../state-helpers';
+import { cloneEntityState, addMessage, getAccountPerspective } from '../../state-helpers';
 import { initJBatch, batchAddSettlement } from '../../j-batch';
 import { isLeftEntity } from '../../entity-id-utils';
 import type { Env, HankoString } from '../../types';
@@ -153,8 +153,6 @@ export async function handleSettlePropose(
   addMessage(newState, `⚖️ Settlement proposed to ${counterpartyEntityId.slice(-4)} - awaiting response`);
 
   // Send workspace to counterparty via AccountInput
-  const targetProposerId = resolveEntityProposerId(env, counterpartyEntityId, 'settle_propose');
-
   const settleAction: AccountInput['settleAction'] = {
     type: 'propose',
     diffs,
@@ -165,7 +163,6 @@ export async function handleSettlePropose(
 
   outputs.push({
     entityId: counterpartyEntityId,
-    signerId: targetProposerId,
     entityTxs: [{
       type: 'accountInput',
       data: {
@@ -234,8 +231,6 @@ export async function handleSettleUpdate(
   addMessage(newState, `⚖️ Settlement updated (v${account.settlementWorkspace.version})`);
 
   // Send update to counterparty
-  const targetProposerId = resolveEntityProposerId(env, counterpartyEntityId, 'settle_update');
-
   const settleAction: AccountInput['settleAction'] = {
     type: 'update',
     diffs,
@@ -246,7 +241,6 @@ export async function handleSettleUpdate(
 
   outputs.push({
     entityId: counterpartyEntityId,
-    signerId: targetProposerId,
     entityTxs: [{
       type: 'accountInput',
       data: {
@@ -350,8 +344,6 @@ export async function handleSettleApprove(
   }
 
   // Send approval to counterparty
-  const targetProposerId = resolveEntityProposerId(env, counterpartyEntityId, 'settle_approve');
-
   const settleAction: AccountInput['settleAction'] = {
     type: 'approve',
     ...(hanko && { hanko }),
@@ -360,7 +352,6 @@ export async function handleSettleApprove(
 
   outputs.push({
     entityId: counterpartyEntityId,
-    signerId: targetProposerId,
     entityTxs: [{
       type: 'accountInput',
       data: {
@@ -502,8 +493,6 @@ export async function handleSettleReject(
   addMessage(newState, `❌ Settlement rejected${reason ? `: ${reason}` : ''}`);
 
   // Notify counterparty
-  const targetProposerId = resolveEntityProposerId(env, counterpartyEntityId, 'settle_reject');
-
   const settleAction: AccountInput['settleAction'] = {
     type: 'reject',
     ...(reason && { memo: reason }),
@@ -511,7 +500,6 @@ export async function handleSettleReject(
 
   outputs.push({
     entityId: counterpartyEntityId,
-    signerId: targetProposerId,
     entityTxs: [{
       type: 'accountInput',
       data: {

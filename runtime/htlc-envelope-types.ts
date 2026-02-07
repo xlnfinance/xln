@@ -82,6 +82,9 @@ export async function createOnionEnvelopes(
   const isSelfRoute = route[0] === route[route.length - 1];
   if (isSelfRoute) {
     const intermediates = route.slice(1, -1);
+    if (intermediates.length < 2) {
+      throw new Error('Self-pay route must include at least 2 intermediate entities');
+    }
     const uniqueIntermediates = new Set(intermediates);
     const expectedUnique = route.length - 1; // all unique except sender repeated at end
     const hasOnlyAllowedRepeat = uniqueEntities.size === expectedUnique;

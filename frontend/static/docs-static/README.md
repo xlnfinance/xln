@@ -63,8 +63,9 @@
 
 ---
 
-## 🐛 Debugging (1 file)
+## 🐛 Debugging (2 files)
 
+- [debug.md](debug.md) - Single-source network debug/event-sourcing contract (MUST for runtime/network/payment code)
 - [consensus-debugging-guide.md](debugging/consensus-debugging-guide.md) - How to debug consensus failures
 
 ---
@@ -97,9 +98,9 @@ Historical documents preserved for context:
 - **Core docs:** 5 files (start here)
 - **Implementation:** 3 files (build with xln)
 - **Architecture:** 4 files (design decisions)
-- **Operations:** 2 files (debugging + deployment)
-- **Total critical:** 16 files
-- **Reduction:** 95 → 16 files (83% deleted)
+- **Operations:** 3 files (debugging + deployment)
+- **Total critical:** 17 files
+- **Reduction:** 95 → 17 files (82% deleted)
 - **Bloat removed:** 1,303 lines cut from remaining docs
 
 ---
@@ -121,7 +122,8 @@ This documentation is available at:
 ├── core/              - 5 files: protocol fundamentals
 ├── implementation/    - 4 files: how to build
 ├── architecture/      - 4 files: design decisions
-├── debugging/         - 1 file: troubleshooting
+├── debugging/         - 1 file: consensus troubleshooting
+├── debug.md           - single-source network debugging contract
 ├── deployment/        - 1 file: production setup
 │
 └── archive/           - historical docs

@@ -475,14 +475,17 @@
             localStorage.clear();
             sessionStorage.clear();
             // Clear IndexedDB
-            const dbs = await indexedDB.databases?.() || [];
-            for (const db of dbs) {
-              if (db.name) indexedDB.deleteDatabase(db.name);
+            try {
+              const listDatabases = (indexedDB as IDBFactory & { databases?: () => Promise<Array<{ name?: string }>> }).databases;
+              const dbs = listDatabases ? await listDatabases.call(indexedDB) : [];
+              for (const db of dbs) {
+                if (db.name) indexedDB.deleteDatabase(db.name);
+              }
+            } catch {
+              // Browser does not support indexedDB.databases() - best effort clear only.
             }
-            // Reset stores instead of reload
-            vaultOperations.logout();
-            dispatch('close');
-            alert('All data cleared. Please create a new wallet.');
+            await vaultOperations.clearAll();
+            window.location.reload();
           }
         }}>
           Clear All Data

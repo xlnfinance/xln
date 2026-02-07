@@ -26,7 +26,7 @@ export interface ApplyEntityTxResult {
 }
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
-import { cloneEntityState, addMessage, canonicalAccountKey, resolveEntityProposerId } from '../state-helpers';
+import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
 import { submitSettle } from '../evm';
 import { logError } from '../logger';
 import { FINANCIAL } from '../constants';
@@ -359,10 +359,8 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Notify counterparty to create mirror account
       // Anti-ping-pong: counterparty's accounts.has() check (line 243) prevents infinite loop
-      const counterpartySigner = resolveEntityProposerId(env, targetEntityId, 'openAccount');
       outputs.push({
         entityId: targetEntityId,
-        signerId: counterpartySigner,
         entityTxs: [{
           type: 'openAccount',
           data: {
@@ -371,7 +369,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           }
         }]
       });
-      console.log(`📤 Sent openAccount request to counterparty ${formatEntityId(targetEntityId)} (signer: ${counterpartySigner})`);
+      console.log(`📤 Sent openAccount request to counterparty ${formatEntityId(targetEntityId)} (signer: auto)`);
 
       // Broadcast updated profile to gossip layer
       if (env.gossip) {

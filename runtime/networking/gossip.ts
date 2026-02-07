@@ -74,8 +74,30 @@ export interface GossipLayer {
   };
 }
 
+const PROFILE_TTL_MS = 5 * 60 * 1000;
+
 export function createGossipLayer(): GossipLayer {
   const profiles = new Map<string, Profile>();
+
+  const getLastUpdated = (profile: Profile): number => {
+    const ts = profile.metadata?.lastUpdated;
+    return typeof ts === 'number' ? ts : 0;
+  };
+
+  const getExpiresAt = (profile: Profile): number => {
+    const explicit = profile.metadata?.expiresAt;
+    if (typeof explicit === 'number') return explicit;
+    return getLastUpdated(profile) + PROFILE_TTL_MS;
+  };
+
+  const pruneExpiredProfiles = (): void => {
+    const now = Date.now();
+    for (const [entityId, profile] of profiles.entries()) {
+      if (getExpiresAt(profile) <= now) {
+        profiles.delete(entityId);
+      }
+    }
+  };
 
   const announce = (profile: Profile): void => {
     logDebug('GOSSIP', `📢 gossip.announce INPUT: ${profile.entityId.slice(-4)} accounts=${profile.accounts?.length || 0}`);
@@ -88,6 +110,10 @@ export function createGossipLayer(): GossipLayer {
       relays: profile.relays || [],
       metadata: {
         ...(profile.metadata || {}),
+        expiresAt:
+          typeof profile.metadata?.expiresAt === 'number'
+            ? profile.metadata.expiresAt
+            : (profile.metadata?.lastUpdated || Date.now()) + PROFILE_TTL_MS,
         // Compatibility: treat capability-tagged hubs as hubs even if metadata.isHub was omitted upstream.
         isHub:
           profile.metadata?.isHub === true ||
@@ -125,6 +151,7 @@ export function createGossipLayer(): GossipLayer {
   };
 
   const getProfiles = (): Profile[] => {
+    pruneExpiredProfiles();
     const result = Array.from(profiles.values());
     logDebug('GOSSIP', `🔍 getProfiles(): Returning ${result.length} profiles`);
     for (const p of result) {
@@ -135,6 +162,7 @@ export function createGossipLayer(): GossipLayer {
 
   // Get all hubs (profiles with isHub=true)
   const getHubs = (): Profile[] => {
+    pruneExpiredProfiles();
     const hubs = Array.from(profiles.values()).filter(
       p =>
         p.metadata?.isHub === true ||
@@ -149,6 +177,7 @@ export function createGossipLayer(): GossipLayer {
   };
 
   const getProfileBundle = (entityId: string): { profile?: Profile; peers: Profile[] } => {
+    pruneExpiredProfiles();
     const profile = profiles.get(entityId);
     if (!profile) {
       return { peers: [] };

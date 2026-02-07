@@ -60,6 +60,23 @@ export const error = writable<string | null>(null);
 
 // xlnFunctions is now defined at the end of the file
 
+function isLocalRelayUrl(url: string): boolean {
+  return (
+    url.startsWith('ws://localhost') ||
+    url.startsWith('wss://localhost') ||
+    url.startsWith('ws://127.0.0.1') ||
+    url.startsWith('wss://127.0.0.1') ||
+    url.startsWith('ws://0.0.0.0') ||
+    url.startsWith('wss://0.0.0.0')
+  );
+}
+
+function isLocalBrowserHost(): boolean {
+  if (typeof window === 'undefined') return false;
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1' || host === '0.0.0.0';
+}
+
 export function resolveRelayUrls(): string[] {
   if (typeof window === 'undefined') return ['wss://xln.finance/relay'];
 
@@ -75,7 +92,12 @@ export function resolveRelayUrls(): string[] {
 
   const settingsRelay = get(settings)?.relayUrl;
   const envRelay = (import.meta as any)?.env?.VITE_RELAY_URL as string | undefined;
-  const relay = localStorageRelay || settingsRelay || envRelay || 'wss://xln.finance/relay';
+  const fallbackRelay = 'wss://xln.finance/relay';
+  const relay = localStorageRelay || settingsRelay || envRelay || fallbackRelay;
+  if (!isLocalBrowserHost() && isLocalRelayUrl(relay)) {
+    console.warn(`[relay] Ignoring local relay URL on non-local host: ${relay} -> ${fallbackRelay}`);
+    return [fallbackRelay];
+  }
   return [relay];
 }
 

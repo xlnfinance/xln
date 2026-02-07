@@ -128,7 +128,8 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
       runtime: !!env,
       p2p: !!(env && getP2P(env)),
       database: true, // TODO: Check actual DB connection
-      relay: !!(env && getP2P(env)?.isConnected()),
+      // On Bun server, relay lives in-process as /relay regardless of local P2P client status.
+      relay: !!env && (typeof Bun !== 'undefined' || !!getP2P(env)?.isConnected()),
     },
   };
 }

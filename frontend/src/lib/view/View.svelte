@@ -9,6 +9,7 @@
 
   import { onMount, onDestroy, mount } from 'svelte';
   import { writable, get } from 'svelte/store';
+  import { toasts } from '$lib/stores/toastStore';
   import { DockviewComponent } from 'dockview';
   import './utils/frontendLogger'; // Initialize global log control
   import Graph3DPanel from './panels/Graph3DPanel.svelte';
@@ -43,6 +44,9 @@
   let container: HTMLDivElement;
   let dockview: DockviewComponent;
   let unsubOpenEntity: (() => void) | null = null;
+  let unsubOpenJurisdiction: (() => void) | null = null;
+  let unsubFocusPanel: (() => void) | null = null;
+  let saveLayoutTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Track mode changes to update panel visibility
   let currentMode = userMode;
@@ -71,6 +75,68 @@
   const unsubLocalEnvSync = localEnvStore.subscribe((env) => {
     if (env) {
       runtimeOperations.updateLocalEnv(env);
+    }
+  });
+
+  const LOG_TOAST_COOLDOWN_MS = 12000;
+  const lastSeenFrameLogIdByRuntime = new Map<string, number>();
+  const lastToastAtByKey = new Map<string, number>();
+
+  const shouldSurfaceLogAsToast = (entry: any): boolean => {
+    const level = String(entry?.level || '').toLowerCase();
+    const message = String(entry?.message || '').toLowerCase();
+    if (level === 'error') return true;
+    const criticalTokens = [
+      'ws_client_error',
+      'ws_connect_failed',
+      'ws_disconnected',
+      'decrypt_fail',
+      'frame_consensus_failed',
+      'p2p_unencrypted',
+      'jsonrpcprovider failed to detect network',
+      'testnet j-machine not found',
+      'route-defer',
+    ];
+    return criticalTokens.some((token) => message.includes(token));
+  };
+
+  const unsubRuntimeErrorToasts = localEnvStore.subscribe((env) => {
+    if (!env?.frameLogs || !Array.isArray(env.frameLogs)) return;
+    const runtimeKey = String(env.runtimeId || 'local');
+    const lastSeen = lastSeenFrameLogIdByRuntime.get(runtimeKey) ?? -1;
+    let newLastSeen = lastSeen;
+
+    for (const entry of env.frameLogs as any[]) {
+      const id = Number(entry?.id);
+      if (!Number.isFinite(id) || id <= lastSeen) continue;
+      if (id > newLastSeen) newLastSeen = id;
+      if (!shouldSurfaceLogAsToast(entry)) continue;
+
+      const level = String(entry?.level || 'warn').toLowerCase();
+      const message = String(entry?.message || 'Runtime error');
+      const dedupeKey = `${runtimeKey}:${message}`;
+      const now = Date.now();
+      const lastToastAt = lastToastAtByKey.get(dedupeKey) ?? 0;
+      if (now - lastToastAt < LOG_TOAST_COOLDOWN_MS) continue;
+      lastToastAtByKey.set(dedupeKey, now);
+      if (lastToastAtByKey.size > 1000) {
+        lastToastAtByKey.clear();
+      }
+
+      const prefix = level === 'error' ? 'Runtime error' : 'Runtime warning';
+      const text = `${prefix}: ${message}`;
+      if (level === 'error') {
+        toasts.error(text, 9000);
+      } else {
+        toasts.warning(text, 7000);
+      }
+    }
+
+    if (newLastSeen > lastSeen) {
+      lastSeenFrameLogIdByRuntime.set(runtimeKey, newLastSeen);
+      if (lastSeenFrameLogIdByRuntime.size > 200) {
+        lastSeenFrameLogIdByRuntime.clear();
+      }
     }
   });
 
@@ -629,7 +695,6 @@
     // Save panel IDs, positions, sizes manually and recreate on mount
 
     // Auto-save layout on ANY change (debounced)
-    let saveLayoutTimer: ReturnType<typeof setTimeout> | null = null;
     dockview.onDidLayoutChange(() => {
       if (saveLayoutTimer) clearTimeout(saveLayoutTimer);
       saveLayoutTimer = setTimeout(() => {
@@ -699,7 +764,7 @@
     });
 
     // Listen for J-Machine click to open Jurisdiction panel
-    panelBridge.on('openJurisdiction', ({ jurisdictionName }) => {
+    unsubOpenJurisdiction = panelBridge.on('openJurisdiction', ({ jurisdictionName }) => {
       const jurisdictionPanel = dockview.getPanel('jurisdiction');
       if (jurisdictionPanel) {
         jurisdictionPanel.api.setActive();
@@ -708,7 +773,7 @@
     });
 
     // Listen for focus panel requests (from TimeMachine settings button)
-    panelBridge.on('focusPanel', ({ panelId }) => {
+    unsubFocusPanel = panelBridge.on('focusPanel', ({ panelId }) => {
       const panel = dockview.getPanel(panelId);
       if (panel) {
         panel.api.setActive();
@@ -759,12 +824,27 @@
     if (unsubLocalEnvSync) {
       unsubLocalEnvSync();
     }
+    if (unsubRuntimeErrorToasts) {
+      unsubRuntimeErrorToasts();
+    }
     if (unsubOpenEntity) {
       unsubOpenEntity();
+    }
+    if (unsubOpenJurisdiction) {
+      unsubOpenJurisdiction();
+    }
+    if (unsubFocusPanel) {
+      unsubFocusPanel();
     }
     if (unsubActiveRuntime) {
       unsubActiveRuntime();
     }
+    if (saveLayoutTimer) {
+      clearTimeout(saveLayoutTimer);
+      saveLayoutTimer = null;
+    }
+    lastSeenFrameLogIdByRuntime.clear();
+    lastToastAtByKey.clear();
     if (dockview) {
       dockview.dispose();
     }
