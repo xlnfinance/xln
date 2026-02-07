@@ -53,7 +53,12 @@ const isBrowser = typeof window !== 'undefined' && typeof WebSocket !== 'undefin
 let wsTimestampCounter = 0;
 
 const nextTimestamp = () => {
-  wsTimestampCounter += 1;
+  const now = Date.now();
+  if (now <= wsTimestampCounter) {
+    wsTimestampCounter += 1;
+    return wsTimestampCounter;
+  }
+  wsTimestampCounter = now;
   return wsTimestampCounter;
 };
 

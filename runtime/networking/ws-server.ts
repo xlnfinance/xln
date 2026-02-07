@@ -56,7 +56,12 @@ const DEFAULT_HELLO_SKEW_MS = 5 * 60 * 1000;
 
 let wsClock = 0;
 const now = () => {
-  wsClock += 1;
+  const ts = Date.now();
+  if (ts <= wsClock) {
+    wsClock += 1;
+    return wsClock;
+  }
+  wsClock = ts;
   return wsClock;
 };
 
