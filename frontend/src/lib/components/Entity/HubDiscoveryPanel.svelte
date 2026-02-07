@@ -33,7 +33,7 @@
     { label: 'Local (localhost:9000)', url: 'ws://localhost:9000' },
   ];
 
-  $: relaySelection = $settings.relayUrl;
+  let relaySelection = $settings.relayUrl;
 
   // Hub data structure
   interface Hub {
