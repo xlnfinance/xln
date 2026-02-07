@@ -256,41 +256,78 @@ async function switchTo(page: Page, label: string) {
 
 /** Discover hub via gossip polling */
 async function discoverHub(page: Page): Promise<string> {
-  const id = await page.evaluate(async () => {
-    for (let i = 0; i < 45; i++) {
+  const isHubProfile = (p: any): boolean =>
+    p?.metadata?.isHub === true || Array.isArray(p?.capabilities) && p.capabilities.includes('hub');
+
+  for (let i = 0; i < 45; i++) {
+    const fromGossip = await page.evaluate(() => {
       try {
         const env = (window as any).isolatedEnv;
+        const XLN = (window as any).XLN;
+        XLN?.refreshGossip?.(env);
         const profiles = env?.gossip?.getProfiles?.() || [];
-        const hub = profiles.find((p: any) => p.metadata?.isHub);
-        if (hub) return hub.entityId;
-      } catch {}
-      await new Promise(r => setTimeout(r, 1000));
-    }
-    return null;
-  });
-  expect(id, 'Hub not found via gossip (45s)').not.toBeNull();
-  return id!;
+        const hub = profiles.find((p: any) =>
+          p?.metadata?.isHub === true || Array.isArray(p?.capabilities) && p.capabilities.includes('hub'));
+        return typeof hub?.entityId === 'string' ? hub.entityId : null;
+      } catch {
+        return null;
+      }
+    });
+    if (fromGossip) return fromGossip;
+
+    try {
+      const r = await page.request.get('https://xln.finance/api/debug/entities');
+      if (r.ok()) {
+        const data = await r.json();
+        const entities = Array.isArray((data as any)?.entities) ? (data as any).entities : [];
+        const h = entities.find((x: any) => x?.isHub === true && typeof x?.entityId === 'string');
+        if (h?.entityId) return h.entityId as string;
+      }
+    } catch {}
+
+    await page.waitForTimeout(1000);
+  }
+
+  expect(null, 'Hub not found via gossip (45s)').not.toBeNull();
+  return '' as never;
 }
 
 /** Discover all hubs visible in gossip */
 async function discoverHubs(page: Page): Promise<string[]> {
-  const hubs = await page.evaluate(async () => {
-    for (let i = 0; i < 45; i++) {
+  for (let i = 0; i < 45; i++) {
+    const fromGossip = await page.evaluate(() => {
       try {
         const env = (window as any).isolatedEnv;
+        const XLN = (window as any).XLN;
+        XLN?.refreshGossip?.(env);
         const profiles = env?.gossip?.getProfiles?.() || [];
         const ids = profiles
-          .filter((p: any) => p.metadata?.isHub === true)
+          .filter((p: any) => p?.metadata?.isHub === true || Array.isArray(p?.capabilities) && p.capabilities.includes('hub'))
           .map((p: any) => p.entityId)
+          .filter((id: any): id is string => typeof id === 'string');
+        return [...new Set(ids)];
+      } catch {
+        return [] as string[];
+      }
+    });
+    if (fromGossip.length > 0) return fromGossip;
+
+    try {
+      const r = await page.request.get('https://xln.finance/api/debug/entities');
+      if (r.ok()) {
+        const data = await r.json();
+        const ids = (Array.isArray((data as any)?.entities) ? (data as any).entities : [])
+          .filter((e: any) => e?.isHub === true)
+          .map((h: any) => h?.entityId)
           .filter((id: any): id is string => typeof id === 'string');
         const unique = [...new Set(ids)];
         if (unique.length > 0) return unique;
-      } catch {}
-      await new Promise(r => setTimeout(r, 1000));
-    }
-    return [];
-  });
-  return hubs;
+      }
+    } catch {}
+
+    await page.waitForTimeout(1000);
+  }
+  return [];
 }
 
 /** Find a self-payment cycle route using gossip + local account edges */

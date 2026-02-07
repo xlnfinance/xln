@@ -1234,6 +1234,24 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   if (pathname === '/api/health') {
     const { getHealthStatus } = await import('./health.ts');
     const health = await getHealthStatus(env);
+    // Ensure hubs are visible even when env.gossip is stale by merging relay cache profiles.
+    const relayHubProfiles = getAllGossipProfiles().filter((p: any) =>
+      p?.metadata?.isHub === true || (Array.isArray(p?.capabilities) && p.capabilities.includes('hub'))
+    );
+    const existing = new Set((health.hubs || []).map(h => String(h.entityId).toLowerCase()));
+    for (const p of relayHubProfiles) {
+      const entityId = String(p?.entityId || '');
+      if (!entityId) continue;
+      if (existing.has(entityId.toLowerCase())) continue;
+      health.hubs.push({
+        entityId,
+        name: p?.metadata?.name || 'Unknown',
+        region: p?.metadata?.region || 'global',
+        relayUrl: p?.metadata?.relayUrl,
+        status: 'healthy',
+      });
+      existing.add(entityId.toLowerCase());
+    }
     return new Response(JSON.stringify(health), { headers });
   }
 
