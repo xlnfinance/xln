@@ -37,7 +37,8 @@ export type RuntimeWsClientOptions = {
   url: string;
   runtimeId: string;
   signerId?: string;
-  seed?: Uint8Array | string;  // Required if signerId is provided for hello auth
+  seed?: Uint8Array | string;
+  useHelloAuth?: boolean; // Optional transport hardening; disabled by default
   encryptionKeyPair?: { publicKey: Uint8Array; privateKey: Uint8Array }; // For E2E encryption
   getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null; // Lookup target's pubkey
   onRuntimeInput?: (from: string, input: RuntimeInput) => Promise<void> | void;
@@ -183,7 +184,9 @@ export class RuntimeWsClient {
   }
 
   private sendHello() {
-    if (this.options.signerId && this.options.seed) {
+    if (this.options.useHelloAuth && this.options.signerId && this.options.seed) {
+      // Transport hello auth is optional; keep plain hello as default path.
+      // Signature verification still happens at frame/account consensus level.
       try {
         const timestamp = nextTimestamp();
         const nonce = makeHelloNonce();

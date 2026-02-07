@@ -348,17 +348,20 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
 
       if (!handshakeDone) {
         if (msg.type === 'hello' && msg.from) {
-          if (msg.auth) {
+          if (requireAuth) {
+            if (!msg.auth) {
+              send(ws, { type: 'error', error: 'Hello auth required' });
+              ws.close();
+              return;
+            }
             const authError = verifyHelloAuth(msg.from, msg.auth, helloSkewMs);
             if (authError) {
               send(ws, { type: 'error', error: authError });
               ws.close();
               return;
             }
-          } else if (requireAuth) {
-            send(ws, { type: 'error', error: 'Hello auth required' });
-            ws.close();
-            return;
+          } else if (msg.auth && process.env.XLN_LOG_HELLO_AUTH === '1') {
+            console.log(`[WS] Ignoring optional hello auth for ${msg.from.slice(0, 10)}...`);
           }
           registerClient(msg.from);
         } else if (runtimeId && !requireAuth) {
