@@ -12,8 +12,8 @@ let unregisterEnvChange: (() => void) | null = null;
 async function getXLN(): Promise<XLNModule> {
   if (XLN) return XLN;
 
-  // Add timestamp to bust cache
-  const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
+  // Keep a stable module URL so all frontend imports share one runtime module instance.
+  const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
   XLN = await import(/* @vite-ignore */ runtimeUrl) as XLNModule;
   xlnInstance.set(XLN);
 

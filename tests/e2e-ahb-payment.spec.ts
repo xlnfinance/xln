@@ -67,6 +67,51 @@ async function createRuntime(page: Page, label: string, mnemonic: string) {
   await page.waitForTimeout(5000);
 }
 
+async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
+  const snapshot = await page.evaluate(async () => {
+    const env = (window as any).isolatedEnv;
+    const runtimeId = String(env?.runtimeId || '');
+    const p2p = env?.runtimeState?.p2p as any;
+    const clients = Array.isArray(p2p?.clients) ? p2p.clients : [];
+    const relayUrls = Array.isArray(p2p?.relayUrls) ? p2p.relayUrls : [];
+    let wsOpenForRuntime = 0;
+    let wsCloseForRuntime = 0;
+
+    if (runtimeId) {
+      try {
+        const res = await fetch(`/api/debug/events?last=1500&runtimeId=${encodeURIComponent(runtimeId)}`);
+        if (res.ok) {
+          const body = await res.json();
+          const events = Array.isArray(body?.events) ? body.events : [];
+          for (const ev of events) {
+            if (ev?.event === 'ws_open') wsOpenForRuntime += 1;
+            if (ev?.event === 'ws_close') wsCloseForRuntime += 1;
+          }
+        }
+      } catch {
+        // best-effort diagnostics
+      }
+    }
+
+    return {
+      runtimeId,
+      hasP2P: !!p2p,
+      clientCount: clients.length,
+      relayCount: relayUrls.length,
+      wsOpenForRuntime,
+      wsCloseForRuntime,
+    };
+  });
+
+  expect(snapshot.hasP2P, `[${tag}] runtime must have active P2P`).toBe(true);
+  expect(snapshot.clientCount, `[${tag}] runtime must have exactly one WS client`).toBe(1);
+  expect(snapshot.relayCount, `[${tag}] runtime must have exactly one relay URL`).toBe(1);
+  expect(
+    snapshot.wsOpenForRuntime,
+    `[${tag}] relay should not churn ws_open for same runtime (opens=${snapshot.wsOpenForRuntime}, closes=${snapshot.wsCloseForRuntime})`,
+  ).toBeLessThanOrEqual(snapshot.wsCloseForRuntime + 2);
+}
+
 async function waitForEntityAdvertised(page: Page, entityId: string) {
   const advertised = await page.evaluate(async (entityId) => {
     const target = String(entityId).toLowerCase();
@@ -576,6 +621,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E] Bob mnemonic: ${bobMnemonic.split(' ').slice(0, 3).join(' ')}...`);
 
     await createRuntime(page, 'alice', aliceMnemonic);
+    await assertP2PSingletonAndWsHealth(page, 'alice-create');
     const alice = await getEntity(page);
     expect(alice, 'Alice entity missing').not.toBeNull();
     await waitForEntityAdvertised(page, alice!.entityId);
@@ -583,6 +629,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await dumpState(page, 'alice-after-create');
 
     await createRuntime(page, 'bob', bobMnemonic);
+    await assertP2PSingletonAndWsHealth(page, 'bob-create');
     const bob = await getEntity(page);
     expect(bob, 'Bob entity missing').not.toBeNull();
     expect(bob!.entityId).not.toBe(alice!.entityId);
@@ -602,6 +649,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     console.log('[E2E] 4b. Switch to Alice');
     await switchTo(page, 'alice');
+    await assertP2PSingletonAndWsHealth(page, 'switch-alice');
     await dumpState(page, 'alice-after-switch');
 
     console.log('[E2E] 4c. Connect Alice to hub');
@@ -631,9 +679,11 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E]    Received: ${expectedReceived} (${ethers.formatUnits(expectedReceived, 18)} USDC)`);
 
     await switchTo(page, 'bob');
+    await assertP2PSingletonAndWsHealth(page, 'switch-bob-forward-recv');
     const b0 = await outCap(page, bob!.entityId, hubId);
 
     await switchTo(page, 'alice');
+    await assertP2PSingletonAndWsHealth(page, 'switch-alice-reverse-recv');
     await pay(page, alice!.entityId, alice!.signerId, bob!.entityId,
       [alice!.entityId, hubId, bob!.entityId], payAmount);
 
