@@ -1638,6 +1638,10 @@ export interface Env {
       deferredCount: number;
       escalated: boolean;
     }>;
+    entityRuntimeHints?: Map<string, {
+      runtimeId: string;
+      seenAt: number;
+    }>;
   };
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: any; // Gossip layer for network profiles
