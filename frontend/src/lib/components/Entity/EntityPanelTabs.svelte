@@ -8,6 +8,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
   import { Wallet as EthersWallet, hexlify, isAddress, ZeroAddress } from 'ethers';
+  import type { Env } from '@xln/runtime/xln-api';
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { history } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex, isLive, timeOperations } from '../../stores/timeStore';
@@ -21,7 +22,7 @@
   import {
     ArrowUpRight, ArrowDownLeft, Repeat, Landmark, Users, Activity,
     MessageCircle, Settings as SettingsIcon, BookUser,
-    ChevronDown, Wallet, AlertTriangle, PlusCircle, Copy, Check
+    ChevronDown, Wallet, AlertTriangle, PlusCircle, Copy, Check, Scale, Globe
   } from 'lucide-svelte';
 
   // Child components
@@ -39,6 +40,7 @@
   import FormationPanel from './FormationPanel.svelte';
   import QRPanel from './QRPanel.svelte';
   import HubDiscoveryPanel from './HubDiscoveryPanel.svelte';
+  import GossipPanel from './GossipPanel.svelte';
 
   export let tab: Tab;
   export let isLast: boolean = false;
@@ -47,7 +49,7 @@
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
 
   // Tab types
-  type ViewTab = 'external' | 'reserves' | 'accounts' | 'send' | 'swap' | 'onj' | 'activity' | 'chat' | 'contacts' | 'receive' | 'create' | 'settings';
+  type ViewTab = 'external' | 'reserves' | 'accounts' | 'send' | 'swap' | 'onj' | 'activity' | 'chat' | 'contacts' | 'receive' | 'create' | 'gossip' | 'governance' | 'settings';
 
   // Set initial tab based on action
   function getInitialTab(): ViewTab {
@@ -80,6 +82,12 @@
     settingsOperations.setBalanceRefreshMs(Number(target.value));
   }
 
+  function isRuntimeEnv(value: unknown): value is Env {
+    if (!value || typeof value !== 'object') return false;
+    const obj = value as { eReplicas?: unknown; jReplicas?: unknown };
+    return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
+  }
+
   async function readJsonResponse(response: Response): Promise<any> {
     const raw = await response.text();
     if (!raw) return null;
@@ -108,7 +116,9 @@
 
   // Format short address for display
   function formatAddress(addr: string): string {
-    return addr;
+    if (!addr) return '';
+    if (addr.length <= 18) return addr;
+    return `${addr.slice(0, 10)}...${addr.slice(-6)}`;
   }
 
   // Context
@@ -170,24 +180,30 @@
   let newContactName = '';
   let newContactId = '';
 
+  // Governance/Profile settings (REA flow: profile-update entityTx)
+  let governanceName = '';
+  let governanceBio = '';
+  let governanceWebsite = '';
+  let governanceSaving = false;
+  let governanceLoadedForEntity = '';
+
   // On-chain reserves (from entityState; no RPC reads)
   let onchainReserves: Map<number, bigint> = new Map();
   let reservesLoading = true;
-  let faucetFunding = false;
-  let pendingReserveFaucet: {
+  let pendingReserveFaucets: Array<{
     tokenId: number;
     amount: bigint;
-    prevBalance: bigint;
+    expectedBalance: bigint;
     startedAt: number;
     symbol: string;
-  } | null = null;
+  }> = [];
   const RESERVE_FAUCET_TIMEOUT_MS = 15000;
-  let pendingOffchainFaucet: {
+  let pendingOffchainFaucets: Array<{
     entityId: string;
     amountLabel: string;
     tokenSymbol: string;
     startedAt: number;
-  } | null = null;
+  }> = [];
   const OFFCHAIN_FAUCET_TIMEOUT_MS = 30000;
   const seenPaymentFinalizeEvents = new Set<string>();
 
@@ -231,17 +247,16 @@
   async function faucetReserves(tokenId: number = 1, symbolHint?: string) {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
-    if (pendingReserveFaucet) {
-      toasts.error('Reserve faucet already pending. Wait for on-chain update.');
-      return;
-    }
-
-    faucetFunding = true;
     try {
       const tokenMeta = resolveReserveTokenMeta(tokenId, symbolHint);
       const amountStr = tokenMeta.symbol === 'WETH' || tokenMeta.symbol === 'ETH' ? '0.1' : '100';
       const amountWei = parseTokenAmount(amountStr, tokenMeta.decimals);
-      const prevBalance = onchainReserves.get(tokenMeta.tokenId) ?? 0n;
+      const currentBalance = onchainReserves.get(tokenMeta.tokenId) ?? 0n;
+      const existingForToken = pendingReserveFaucets
+        .filter((req) => req.tokenId === tokenMeta.tokenId)
+        .sort((a, b) => b.startedAt - a.startedAt)[0];
+      const baseExpected = existingForToken ? existingForToken.expectedBalance : currentBalance;
+      const expectedBalance = baseExpected + amountWei;
       // Faucet B: Reserve transfer (ALWAYS use prod API, no BrowserVM fake)
       const response = await fetch(`${API_BASE}/api/faucet/reserve`, {
         method: 'POST',
@@ -260,31 +275,23 @@
       }
 
       console.log('[EntityPanel] Reserve faucet request queued:', result);
-      pendingReserveFaucet = {
+      pendingReserveFaucets = [...pendingReserveFaucets, {
         tokenId: tokenMeta.tokenId,
         amount: amountWei,
-        prevBalance,
+        expectedBalance,
         startedAt: Date.now(),
         symbol: tokenMeta.symbol,
-      };
+      }];
       toasts.info(`Reserve faucet requested for ${tokenMeta.symbol}. Waiting for on-chain update...`);
     } catch (err) {
       console.error('[EntityPanel] Reserve faucet failed:', err);
       toasts.error(`Reserve faucet failed: ${(err as Error).message}`);
-    } finally {
-      faucetFunding = false;
     }
   }
 
   async function faucetOffchain() {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
-    if (pendingOffchainFaucet) {
-      toasts.warning('Offchain faucet is already pending. Wait for finalization.');
-      return;
-    }
-
-    faucetFunding = true;
     try {
       // Faucet C: Offchain payment (requires account with hub)
       const response = await fetch(`${API_BASE}/api/faucet/offchain`, {
@@ -303,17 +310,15 @@
       }
 
       console.log('[EntityPanel] Offchain faucet success:', result);
-      pendingOffchainFaucet = {
+      pendingOffchainFaucets = [...pendingOffchainFaucets, {
         entityId,
         amountLabel: '100',
         tokenSymbol: 'USDC',
         startedAt: Date.now(),
-      };
+      }];
     } catch (err) {
       console.error('[EntityPanel] Offchain faucet failed:', err);
       toasts.error(`Offchain faucet failed: ${(err as Error).message}`);
-    } finally {
-      faucetFunding = false;
     }
   }
 
@@ -376,7 +381,7 @@
           }
         }
       }
-      if (pendingReserveFaucet) {
+      if (pendingReserveFaucets.length > 0) {
         console.log(`[EntityPanel] fetchOnchainReserves: replica=${replica?.state?.entityId?.slice(-4) || 'none'}`);
         console.log(`[EntityPanel]   reserves Map size: ${reserves?.size ?? 'null'}`);
         for (const [tid, amt] of reserves?.entries?.() ?? []) {
@@ -384,16 +389,20 @@
         }
       }
       onchainReserves = newReserves;
-      if (pendingReserveFaucet) {
-        const { tokenId, amount, prevBalance, startedAt, symbol } = pendingReserveFaucet;
-        const current = newReserves.get(tokenId) ?? 0n;
-        if (current >= prevBalance + amount) {
-          toasts.success(`Received ${formatAmount(amount, getTokenInfo(tokenId).decimals)} ${symbol} in reserves!`);
-          pendingReserveFaucet = null;
-        } else if (Date.now() - startedAt > RESERVE_FAUCET_TIMEOUT_MS) {
-          toasts.error(`Reserve faucet timed out for ${symbol}. Check server logs.`);
-          pendingReserveFaucet = null;
+      if (pendingReserveFaucets.length > 0) {
+        const now = Date.now();
+        const remaining: typeof pendingReserveFaucets = [];
+        for (const req of pendingReserveFaucets) {
+          const current = newReserves.get(req.tokenId) ?? 0n;
+          if (current >= req.expectedBalance) {
+            toasts.success(`Received ${formatAmount(req.amount, getTokenInfo(req.tokenId).decimals)} ${req.symbol} in reserves!`);
+          } else if (now - req.startedAt > RESERVE_FAUCET_TIMEOUT_MS) {
+            toasts.error(`Reserve faucet timed out for ${req.symbol}. Check server logs.`);
+          } else {
+            remaining.push(req);
+          }
         }
+        pendingReserveFaucets = remaining;
       }
       reservesLoading = false;
     } catch (err) {
@@ -667,7 +676,6 @@
     const signerId = tab.signerId;
     if (!signerId) return;
 
-    faucetFunding = true;
     try {
       const amount = tokenSymbol === 'ETH' ? '0.1' : '100';
       const isEth = tokenSymbol === 'ETH';
@@ -695,8 +703,6 @@
     } catch (err) {
       console.error('[EntityPanel] External faucet failed:', err);
       toasts.error(`External faucet failed: ${(err as Error).message}`);
-    } finally {
-      faucetFunding = false;
     }
   }
 
@@ -716,7 +722,7 @@
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
   $: {
     if (refreshTimer) clearInterval(refreshTimer);
-    const refreshMs = $settings.balanceRefreshMs ?? 1000;
+    const refreshMs = $settings.balanceRefreshMs ?? 15000;
     if (refreshMs > 0) {
       refreshTimer = setInterval(() => refreshBalances(), refreshMs);
     }
@@ -742,10 +748,18 @@
   }
 
   function maybeFinalizeOffchainFaucet() {
-    if (!pendingOffchainFaucet || !Array.isArray(activeHistory) || activeHistory.length === 0) return;
+    if (pendingOffchainFaucets.length === 0 || !Array.isArray(activeHistory) || activeHistory.length === 0) return;
 
-    const targetEntityId = pendingOffchainFaucet.entityId.toLowerCase();
-    const cutoffTs = pendingOffchainFaucet.startedAt;
+    const pendingByEntity = new Map<string, Array<typeof pendingOffchainFaucets[number]>>();
+    for (const req of pendingOffchainFaucets) {
+      const key = req.entityId.toLowerCase();
+      const arr = pendingByEntity.get(key) ?? [];
+      arr.push(req);
+      pendingByEntity.set(key, arr);
+    }
+    for (const arr of pendingByEntity.values()) {
+      arr.sort((a, b) => a.startedAt - b.startedAt);
+    }
 
     // Scan recent history only; finalize event should appear shortly after request.
     const startIndex = Math.max(0, activeHistory.length - 120);
@@ -759,7 +773,8 @@
         const data = (log?.data || {}) as Record<string, unknown>;
         const rawEntityId = data['entityId'];
         const logEntity = typeof rawEntityId === 'string' ? rawEntityId.toLowerCase() : '';
-        if (logEntity !== targetEntityId) continue;
+        const queue = pendingByEntity.get(logEntity);
+        if (!queue || queue.length === 0) continue;
 
         // We only want the final recipient confirmation, not sender-side completion.
         const isFinalRecipient = !data['outboundEntity'];
@@ -768,20 +783,40 @@
         const eventKey = makeEventKey(snapshot, log, i);
         if (seenPaymentFinalizeEvents.has(eventKey)) continue;
         seenPaymentFinalizeEvents.add(eventKey);
+        if (seenPaymentFinalizeEvents.size > 2000) {
+          // Prevent unbounded growth on long-lived tabs.
+          seenPaymentFinalizeEvents.clear();
+          seenPaymentFinalizeEvents.add(eventKey);
+        }
 
-        toasts.success(`Received $${pendingOffchainFaucet.amountLabel} ${pendingOffchainFaucet.tokenSymbol} via offchain payment!`);
-        pendingOffchainFaucet = null;
-        return;
+        const ts = typeof log?.timestamp === 'number' ? log.timestamp : Date.now();
+        const matchIndex = queue.findIndex((req) => req.startedAt <= ts);
+        const req = matchIndex >= 0 ? queue.splice(matchIndex, 1)[0] : queue.shift();
+        if (req) {
+          toasts.success(`Received $${req.amountLabel} ${req.tokenSymbol} via offchain payment!`);
+        }
       }
     }
 
-    if (Date.now() - pendingOffchainFaucet.startedAt > OFFCHAIN_FAUCET_TIMEOUT_MS) {
-      toasts.error('Offchain faucet timed out before payment finalization.');
-      pendingOffchainFaucet = null;
+    const now = Date.now();
+    for (const [entityKey, queue] of pendingByEntity.entries()) {
+      for (const req of queue) {
+        if (now - req.startedAt > OFFCHAIN_FAUCET_TIMEOUT_MS) {
+          toasts.error(`Offchain faucet timed out for ${entityKey.slice(0, 10)}...`);
+        }
+      }
+      pendingByEntity.set(entityKey, queue.filter((req) => now - req.startedAt <= OFFCHAIN_FAUCET_TIMEOUT_MS));
     }
+
+    pendingOffchainFaucets = Array.from(pendingByEntity.values()).flat();
   }
 
-  $: maybeFinalizeOffchainFaucet();
+  $: if (pendingOffchainFaucets.length > 0 && Array.isArray(activeHistory)) {
+    maybeFinalizeOffchainFaucet();
+  }
+  $: if (activeTab === 'governance') {
+    loadGovernanceProfileFromGossip();
+  }
 
   function saveContact() {
     if (!newContactName.trim() || !newContactId.trim()) return;
@@ -794,6 +829,63 @@
   function deleteContact(idx: number) {
     contacts = contacts.filter((_, i) => i !== idx);
     localStorage.setItem('xln-contacts', JSON.stringify(contacts));
+  }
+
+  function loadGovernanceProfileFromGossip() {
+    const currentEntityId = (replica?.state?.entityId || tab.entityId || '').toLowerCase();
+    if (!currentEntityId || governanceLoadedForEntity === currentEntityId) return;
+    governanceLoadedForEntity = currentEntityId;
+    const profiles = (activeEnv?.gossip?.getProfiles?.() || []) as Array<{
+      entityId?: string;
+      metadata?: { name?: string; bio?: string; website?: string };
+    }>;
+    const profile = profiles.find((p) => String(p?.entityId || '').toLowerCase() === currentEntityId);
+    const metadata = profile?.metadata;
+    governanceName = String(metadata?.name || '');
+    governanceBio = String(metadata?.bio || '');
+    governanceWebsite = String(metadata?.website || '');
+  }
+
+  async function saveGovernanceProfile() {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    const signerId = tab.signerId;
+    const env = activeEnv;
+    if (!entityId || !signerId) {
+      toasts.error('Entity/signer is required for governance profile update');
+      return;
+    }
+    if (!isRuntimeEnv(env) || !activeIsLive) {
+      toasts.error('Governance profile updates require LIVE mode');
+      return;
+    }
+
+    governanceSaving = true;
+    try {
+      const profileUpdateInput = {
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'profile-update' as const,
+          data: {
+            profile: {
+              entityId,
+              name: governanceName.trim(),
+              bio: governanceBio.trim(),
+              website: governanceWebsite.trim(),
+              hankoSignature: '',
+            },
+          },
+        }],
+      };
+      await processWithDelay(env, [profileUpdateInput]);
+      toasts.success('Governance profile update submitted');
+      governanceLoadedForEntity = '';
+      loadGovernanceProfileFromGossip();
+    } catch (err) {
+      toasts.error(`Governance profile update failed: ${(err as Error).message}`);
+    } finally {
+      governanceSaving = false;
+    }
   }
 
   // Formatting
@@ -952,6 +1044,8 @@
     { id: 'contacts', icon: BookUser, label: 'Contacts' },
     { id: 'receive', icon: ArrowDownLeft, label: 'Receive' },
     { id: 'create', icon: PlusCircle, label: 'Create' },
+    { id: 'gossip', icon: Globe, label: 'Gossip' },
+    { id: 'governance', icon: Scale, label: 'Governance' },
     { id: 'settings', icon: SettingsIcon, label: 'Settings' },
   ];
 </script>
@@ -1094,7 +1188,7 @@
           <div class="tab-header-row">
             <h4 class="section-head" style="margin: 0;">External Tokens (ERC20)</h4>
             <div class="header-actions">
-              <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 1000} on:change={updateBalanceRefresh}>
+              <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 15000} on:change={updateBalanceRefresh}>
                 {#each REFRESH_OPTIONS as opt}
                   <option value={opt.value}>{opt.label}</option>
                 {/each}
@@ -1141,10 +1235,9 @@
                     <button
                       class="btn-table-action faucet"
                       on:click={() => faucetExternalTokens(token.symbol)}
-                      disabled={faucetFunding}
                       title="Faucet"
                     >
-                      {faucetFunding ? '...' : 'Faucet'}
+                      Faucet
                     </button>
                     <button
                       class="btn-table-action deposit"
@@ -1165,7 +1258,7 @@
           <div class="tab-header-row">
             <h4 class="section-head" style="margin: 0;">On-Chain Reserves</h4>
             <div class="header-actions">
-              <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 1000} on:change={updateBalanceRefresh}>
+              <select class="auto-refresh-select" value={$settings.balanceRefreshMs ?? 15000} on:change={updateBalanceRefresh}>
                 {#each REFRESH_OPTIONS as opt}
                   <option value={opt.value}>{opt.label}</option>
                 {/each}
@@ -1215,9 +1308,8 @@
                       class="btn-table-action faucet"
                       data-testid={`reserve-faucet-${info.symbol}`}
                       on:click={() => faucetReserves(Number(tokenId), info.symbol)}
-                      disabled={faucetFunding || !!pendingReserveFaucet}
                     >
-                      {faucetFunding ? '...' : 'Faucet'}
+                      Faucet
                     </button>
                     <button
                       class="btn-table-action collateral"
@@ -1258,13 +1350,10 @@
           {/if}
 
         {:else if activeTab === 'accounts'}
-          <button class="btn-faucet" on:click={faucetOffchain} disabled={faucetFunding || !!pendingOffchainFaucet}>
-            {#if faucetFunding}
-              Funding...
-            {:else if pendingOffchainFaucet}
-              Waiting for finalization...
-            {:else}
-              💧 Get Test Funds (Offchain)
+          <button class="btn-faucet" on:click={faucetOffchain}>
+            💧 Get Test Funds (Offchain)
+            {#if pendingOffchainFaucets.length > 0}
+              ({pendingOffchainFaucets.length} pending)
             {/if}
           </button>
           <AccountList {replica} on:select={handleAccountSelect} />
@@ -1333,6 +1422,43 @@
 
         {:else if activeTab === 'create'}
           <FormationPanel />
+
+        {:else if activeTab === 'gossip'}
+          <GossipPanel entityId={replica?.state?.entityId || tab.entityId} />
+
+        {:else if activeTab === 'governance'}
+          <h4 class="section-head">Entity Governance Profile</h4>
+          <p class="muted">Updates are submitted through REA as `profile-update` entity transactions.</p>
+          <div class="setting-block">
+            <label>Display Name</label>
+            <input
+              type="text"
+              bind:value={governanceName}
+              placeholder="Entity name"
+              maxlength="64"
+            />
+          </div>
+          <div class="setting-block">
+            <label>Bio</label>
+            <input
+              type="text"
+              bind:value={governanceBio}
+              placeholder="Short description"
+              maxlength="180"
+            />
+          </div>
+          <div class="setting-block">
+            <label>Website</label>
+            <input
+              type="url"
+              bind:value={governanceWebsite}
+              placeholder="https://"
+              maxlength="160"
+            />
+          </div>
+          <button class="btn-add" on:click={saveGovernanceProfile} disabled={governanceSaving}>
+            {governanceSaving ? 'Submitting...' : 'Save Governance Profile'}
+          </button>
 
         {:else if activeTab === 'settings'}
           <div class="setting-row">
@@ -2247,6 +2373,22 @@
     padding: 8px;
     border-radius: 4px;
     word-break: break-all;
+  }
+
+  .setting-block input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px;
+    border-radius: 6px;
+    border: 1px solid #292524;
+    background: #0c0a09;
+    color: #e7e5e4;
+    font-size: 13px;
+  }
+
+  .setting-block input:focus {
+    outline: none;
+    border-color: #fbbf24;
   }
 
   /* Live Required */

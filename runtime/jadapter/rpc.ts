@@ -34,6 +34,7 @@ export async function createRpcAdapter(
   provider: Provider,
   signer: Signer
 ): Promise<JAdapter> {
+  const WATCH_POLL_MS = 15000;
   const addresses: JAdapterAddresses = {
     account: '',
     depository: '',
@@ -749,7 +750,7 @@ export async function createRpcAdapter(
       }
       watcherEnv = env;
       lastSyncedBlock = 0;
-      console.log(`🔭 [JAdapter:rpc] Starting event watcher (1s polling)...`);
+      console.log(`🔭 [JAdapter:rpc] Starting event watcher (${WATCH_POLL_MS}ms polling)...`);
 
       // Depository ABI for queryFilter — must match CANONICAL_J_EVENTS
       const depositoryABI = [
@@ -823,9 +824,9 @@ export async function createRpcAdapter(
             console.error(`🔭❌ [JAdapter:rpc] Sync error:`, error instanceof Error ? error.message : String(error));
           }
         }
-      }, 1000);
+      }, WATCH_POLL_MS);
 
-      console.log(`🔭 [JAdapter:rpc] Watcher started (1s polling)`);
+      console.log(`🔭 [JAdapter:rpc] Watcher started (${WATCH_POLL_MS}ms polling)`);
     },
 
     stopWatching(): void {

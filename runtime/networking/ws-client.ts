@@ -1,7 +1,8 @@
-import type { RuntimeInput, EntityInput } from '../types';
+import type { RuntimeInput, RoutedEntityInput } from '../types';
 import { deserializeWsMessage, makeHelloNonce, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { signDigest } from '../account-crypto';
 import { encryptJSON, decryptJSON } from './p2p-crypto';
+import { asFailFastPayload, failfastAssert } from './failfast';
 
 // Separate interfaces for browser and Node.js WebSocket implementations
 interface BrowserWebSocket {
@@ -40,7 +41,7 @@ export type RuntimeWsClientOptions = {
   encryptionKeyPair?: { publicKey: Uint8Array; privateKey: Uint8Array }; // For E2E encryption
   getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null; // Lookup target's pubkey
   onRuntimeInput?: (from: string, input: RuntimeInput) => Promise<void> | void;
-  onEntityInput?: (from: string, input: EntityInput) => Promise<void> | void;
+  onEntityInput?: (from: string, input: RoutedEntityInput) => Promise<void> | void;
   onGossipRequest?: (from: string, payload: unknown) => Promise<void> | void;
   onGossipResponse?: (from: string, payload: unknown) => Promise<void> | void;
   onGossipAnnounce?: (from: string, payload: unknown) => Promise<void> | void;
@@ -68,9 +69,7 @@ const createWs = async (url: string): Promise<WebSocketLike> => {
 };
 
 export class RuntimeWsClient {
-  private static readonly RECONNECT_BASE_MS = 150;
-  private static readonly RECONNECT_CAP_MS = 2000;
-  private static readonly MAX_RECONNECT_ATTEMPTS = 20;
+  private static readonly RECONNECT_DELAY_MS = 5000;
   private ws: WebSocketLike | null = null;
   private closed = false;
   private connecting = false;
@@ -80,7 +79,13 @@ export class RuntimeWsClient {
   private suppressNextClose = false;
 
   constructor(options: RuntimeWsClientOptions) {
+    failfastAssert(!!options.url, 'WS_INIT_URL_MISSING', 'RuntimeWsClient url is required');
+    failfastAssert(!!options.runtimeId, 'WS_INIT_RUNTIME_MISSING', 'RuntimeWsClient runtimeId is required');
     this.options = options;
+  }
+
+  getUrl(): string {
+    return this.options.url;
   }
 
   async connect(): Promise<void> {
@@ -164,20 +169,12 @@ export class RuntimeWsClient {
   private scheduleReconnect() {
     if (this.closed || this.connecting || this.isOpen()) return;
     if (this.reconnectTimer) return;
-    if (this.reconnectAttempts >= RuntimeWsClient.MAX_RECONNECT_ATTEMPTS) {
-      this.options.onError?.(new Error(`WS_RECONNECT_EXHAUSTED: gave up after ${this.reconnectAttempts} attempts`));
-      return;
-    }
-    const delayMs = Math.min(
-      RuntimeWsClient.RECONNECT_CAP_MS,
-      RuntimeWsClient.RECONNECT_BASE_MS * (2 ** this.reconnectAttempts)
-    );
     this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.closed) return;
       this.connect().catch(error => this.options.onError?.(error as Error));
-    }, delayMs);
+    }, RuntimeWsClient.RECONNECT_DELAY_MS);
   }
 
   private sendHello() {
@@ -205,12 +202,20 @@ export class RuntimeWsClient {
     let msg: RuntimeWsMessage;
     try {
       msg = deserializeWsMessage(raw);
+      failfastAssert(!!msg && typeof msg === 'object', 'WS_MSG_NOT_OBJECT', 'WS message must be an object');
+      failfastAssert(typeof msg.type === 'string', 'WS_MSG_TYPE_INVALID', 'WS message type must be a string', { msg });
     } catch (error) {
+      this.sendDebugEvent({
+        level: 'error',
+        code: 'WS_MSG_DECODE_FAILFAST',
+        failfast: asFailFastPayload(error),
+      });
       this.options.onError?.(error as Error);
       return;
     }
     if (msg.type === 'error') {
       this.options.onError?.(new Error(msg.error || 'Unknown error'));
+      return;
     }
 
     if (msg.type === 'runtime_input' && msg.payload && msg.from) {
@@ -246,9 +251,9 @@ export class RuntimeWsClient {
       }
 
       // Decrypt - throws on error (fail-fast)
-      let entityInput: EntityInput;
+      let entityInput: RoutedEntityInput;
       try {
-        entityInput = decryptJSON<EntityInput>(msg.payload as string, this.options.encryptionKeyPair.privateKey);
+        entityInput = decryptJSON<RoutedEntityInput>(msg.payload as string, this.options.encryptionKeyPair.privateKey);
         // Decrypted successfully
       } catch (decryptError) {
         console.error(`❌ WS-CLIENT-DECRYPT-FAILED:`, decryptError);
@@ -290,7 +295,7 @@ export class RuntimeWsClient {
     });
   }
 
-  sendEntityInput(to: string, input: EntityInput): boolean {
+  sendEntityInput(to: string, input: RoutedEntityInput): boolean {
     // Encryption is MANDATORY for entity_input messages
     if (!this.options.getTargetEncryptionKey || !this.options.encryptionKeyPair) {
       throw new Error('P2P_NO_ENCRYPTION: Encryption not configured');
@@ -372,6 +377,21 @@ export class RuntimeWsClient {
   private sendRaw(msg: RuntimeWsMessage): boolean {
     if (!this.ws) return false;
     if ('readyState' in this.ws && this.ws.readyState !== 1) return false;
+    try {
+      failfastAssert(typeof msg.type === 'string', 'WS_SEND_TYPE_INVALID', 'Outgoing WS message type must be string', { msg });
+      failfastAssert(typeof msg.from === 'string' && msg.from.length > 0, 'WS_SEND_FROM_INVALID', 'Outgoing WS message missing from', { msgType: msg.type });
+      if (msg.type !== 'hello') {
+        failfastAssert(typeof msg.id === 'string' && msg.id.length > 0, 'WS_SEND_ID_INVALID', 'Outgoing WS message missing id', { msgType: msg.type });
+      }
+    } catch (error) {
+      this.options.onError?.(error as Error);
+      this.sendDebugEvent({
+        level: 'error',
+        code: 'WS_SEND_FAILFAST',
+        failfast: asFailFastPayload(error),
+      });
+      return false;
+    }
     const payload = serializeWsMessage(msg);
     try {
       this.ws.send(payload);

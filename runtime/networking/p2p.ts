@@ -22,7 +22,7 @@
  * - Invalid signatures rejected; unsigned profiles accepted with warning (migration)
  */
 
-import type { Env, EntityInput } from '../types';
+import type { Env, RoutedEntityInput } from '../types';
 import type { Profile } from './gossip';
 import { RuntimeWsClient } from './ws-client';
 import { buildEntityProfile, mergeProfileWithExisting } from './gossip-helper';
@@ -30,6 +30,7 @@ import { extractEntityId } from '../ids';
 import { getCachedSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
 import { signProfile, verifyProfileSignature } from './profile-signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
+import { asFailFastPayload, failfastAssert } from './failfast';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const MAX_QUEUE_PER_RUNTIME = 100; // Prevent memory exhaustion (DoS protection)
@@ -55,7 +56,7 @@ type RuntimeP2POptions = {
   isHub?: boolean;
   profileName?: string;
   gossipPollMs?: number;
-  onEntityInput: (from: string, input: EntityInput) => void;
+  onEntityInput: (from: string, input: RoutedEntityInput) => void;
   onGossipProfiles: (from: string, profiles: Profile[]) => void;
 };
 
@@ -89,7 +90,7 @@ const isHexPublicKey = (value: string): boolean => {
 
 const normalizeId = (value: string): string => value.toLowerCase();
 
-const GOSSIP_POLL_MS = 1000; // Poll relay every second
+const GOSSIP_POLL_MS = 5000; // Poll relay every 5s by default to avoid relay spam
 
 export class RuntimeP2P {
   private env: Env;
@@ -101,10 +102,10 @@ export class RuntimeP2P {
   private isHub: boolean;
   private profileName: string | undefined;
   private gossipPollMs: number;
-  private onEntityInput: (from: string, input: EntityInput) => void;
+  private onEntityInput: (from: string, input: RoutedEntityInput) => void;
   private onGossipProfiles: (from: string, profiles: Profile[]) => void;
   private clients: RuntimeWsClient[] = [];
-  private pendingByRuntime = new Map<string, EntityInput[]>();
+  private pendingByRuntime = new Map<string, RoutedEntityInput[]>();
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private encryptionKeyPair: P2PKeyPair;
   private announceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -153,10 +154,15 @@ export class RuntimeP2P {
       this.profileName = config.profileName;
     }
     if (config.gossipPollMs !== undefined) {
+      const prevPollMs = this.gossipPollMs;
       this.gossipPollMs = config.gossipPollMs;
       if (this.gossipPollMs <= 0) {
         this.stopPolling();
       } else if (!this.pollInterval) {
+        this.startPolling();
+      } else if (prevPollMs !== this.gossipPollMs) {
+        // Interval changed while polling: restart to apply the new cadence.
+        this.stopPolling();
         this.startPolling();
       }
     }
@@ -230,7 +236,7 @@ export class RuntimeP2P {
           const missingEntities = Array.from(entitiesToCheck).filter(e => !this.hasProfileForEntity(e));
           if (missingEntities.length > 0) {
             console.log(`P2P_FETCH_PROFILE: ${missingEntities.map(e => e.slice(-4)).join(',')} (not in cache)`);
-            await this.fetchProfilesWithRetry();
+            await this.fetchProfilesWithRetry(missingEntities);
           }
 
           this.onEntityInput(from, input);
@@ -290,7 +296,24 @@ export class RuntimeP2P {
     this.connect();
   }
 
-  enqueueEntityInput(targetRuntimeId: string, input: EntityInput) {
+  enqueueEntityInput(targetRuntimeId: string, input: RoutedEntityInput) {
+    try {
+      failfastAssert(typeof targetRuntimeId === 'string' && targetRuntimeId.length > 0, 'P2P_TARGET_RUNTIME_INVALID', 'targetRuntimeId is required');
+      failfastAssert(typeof input?.entityId === 'string' && input.entityId.length > 0, 'P2P_ENTITY_INPUT_INVALID', 'entity_input missing entityId', { targetRuntimeId });
+    } catch (error) {
+      this.env.warn('network', 'P2P_FAILFAST_REJECT', {
+        failfast: asFailFastPayload(error),
+      });
+      this.sendDebugEvent({
+        level: 'error',
+        code: 'P2P_FAILFAST_REJECT',
+        failfast: asFailFastPayload(error),
+      });
+      throw error;
+    }
+
+    this.ensureRelayConnectionsForEntity(input.entityId);
+
     const client = this.getActiveClient();
     if (client && client.isOpen()) {
       const sent = client.sendEntityInput(targetRuntimeId, input);
@@ -304,6 +327,15 @@ export class RuntimeP2P {
     queue.push(input);
     // Enforce queue size limit to prevent memory exhaustion
     while (queue.length > MAX_QUEUE_PER_RUNTIME) queue.shift();
+    if (queue.length >= MAX_QUEUE_PER_RUNTIME) {
+      this.sendDebugEvent({
+        level: 'warn',
+        code: 'P2P_QUEUE_PRESSURE',
+        message: 'Pending queue at cap',
+        targetRuntimeId,
+        queueSize: queue.length,
+      });
+    }
     this.pendingByRuntime.set(targetRuntimeId, queue);
     console.log(`P2P-QUEUED: ${targetRuntimeId.slice(0,10)}, queue size: ${queue.length}`);
   }
@@ -338,7 +370,7 @@ export class RuntimeP2P {
     const client = this.getActiveClient();
     if (!client || !client.isOpen()) return;
     for (const [targetRuntimeId, queue] of this.pendingByRuntime.entries()) {
-      const remaining: EntityInput[] = [];
+      const remaining: RoutedEntityInput[] = [];
       for (const input of queue) {
         const sent = client.sendEntityInput(targetRuntimeId, input);
         if (!sent) remaining.push(input);
@@ -359,6 +391,23 @@ export class RuntimeP2P {
     client.sendGossipRequest(this.runtimeId, { scope: 'all' } satisfies GossipRequestPayload);
   }
 
+  private ensureRelayConnectionsForEntity(entityId: string): void {
+    const profiles = this.env.gossip?.getProfiles?.() || [];
+    const profile = profiles.find((p: Profile) => p.entityId === entityId);
+    if (!profile) return;
+
+    const hintedRelays = unique([
+      ...(profile.relays || []),
+      ...(profile.endpoints || []),
+    ]);
+    const missingRelayUrls = hintedRelays.filter((relayUrl) => !this.relayUrls.includes(relayUrl));
+    if (missingRelayUrls.length === 0) return;
+
+    this.relayUrls = unique([...this.relayUrls, ...missingRelayUrls]);
+    console.log(`P2P_RELAY_DISCOVERY: adding ${missingRelayUrls.length} relays from profile ${entityId.slice(-6)}`);
+    this.reconnect();
+  }
+
   // Call this to refresh profiles from relay
   refreshGossip() {
     this.requestSeedGossip();
@@ -371,7 +420,7 @@ export class RuntimeP2P {
   }
 
   // Fetch profiles from relay with retry
-  private async fetchProfilesWithRetry(): Promise<void> {
+  private async fetchProfilesWithRetry(missingEntityIds: string[] = []): Promise<void> {
     const startCount = this.env.gossip?.getProfiles?.()?.length || 0;
 
     // Request profiles multiple times with delays
@@ -379,12 +428,25 @@ export class RuntimeP2P {
       this.requestSeedGossip();
       await new Promise(resolve => setTimeout(resolve, 300));
       const profiles = this.env.gossip?.getProfiles?.() || [];
-      if (profiles.length > startCount) {
+      const hasAllMissing = missingEntityIds.length === 0 || missingEntityIds.every((entityId) => this.hasProfileForEntity(entityId));
+      if (profiles.length > startCount || hasAllMissing) {
         console.log(`P2P_FETCH: Got ${profiles.length - startCount} new profiles (total: ${profiles.length})`);
         return;
       }
     }
     console.log(`P2P_FETCH: No new profiles after 5 retries (have ${startCount})`);
+    if (missingEntityIds.length > 0) {
+      this.env.warn('network', 'GOSSIP_PROFILE_MISS', {
+        missingEntityIds,
+        retries: 5,
+      });
+      this.sendDebugEvent({
+        level: 'warn',
+        code: 'GOSSIP_PROFILE_MISS',
+        missingEntityIds,
+        retries: 5,
+      });
+    }
   }
 
   async announceLocalProfiles() {

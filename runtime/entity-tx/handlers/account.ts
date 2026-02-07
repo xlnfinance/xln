@@ -1,6 +1,6 @@
 import type { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
-import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents, resolveEntityProposerId } from '../../state-helpers';
+import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
 import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
 import { HTLC } from '../../constants';
 import { formatEntityId, HEAVY_LOGS } from '../../utils';
@@ -730,15 +730,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         // Get target proposer
         // IMPORTANT: Send only to PROPOSER - bilateral consensus between entity proposers
         // Multi-validator entities sync account state via entity-level consensus (not bilateral broadcast)
-        const targetProposerId = resolveEntityProposerId(
-          env,
-          result.response!.toEntityId,
-          'accountInput.response'
-        );
-
         outputs.push({
           entityId: result.response.toEntityId,
-          signerId: targetProposerId,
           entityTxs: [{
             type: 'accountInput',
             data: result.response

@@ -3,6 +3,7 @@
   import { getXLN, xlnEnvironment, replicas, xlnFunctions, processWithDelay } from '../../stores/xlnStore';
   import { routePreview } from '../../stores/routePreviewStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
+  import { toasts } from '$lib/stores/toastStore';
   import { keccak256, AbiCoder, hexlify } from 'ethers';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
@@ -40,18 +41,56 @@
   let selectedRouteIndex = -1;
   const MAX_ROUTES = 100;
   const MAX_PATH_HOPS = 6;
-  const MIN_SELF_HOPS = 2;
+  const MIN_SELF_INTERMEDIATES = 2;
 
   // Reactive stores
   $: currentReplicas = contextReplicas ? $contextReplicas : (isolatedReplicas ? $isolatedReplicas : $replicas);
   $: currentEnv = contextEnv ? $contextEnv : (isolatedEnv ? $isolatedEnv : $xlnEnvironment);
   $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
 
-  // All entities for dropdown
-  $: allEntities = currentReplicas ? Array.from(currentReplicas.keys() as IterableIterator<string>)
-    .map((key: string) => key.split(':')[0]!)
-    .filter((id: string, index: number, self: string[]) => self.indexOf(id) === index)
-    .sort() : [];
+  // All entities for dropdown (local + gossip network)
+  $: allEntities = (() => {
+    const ids = new Set<string>();
+    if (entityId) ids.add(entityId);
+    if (currentReplicas) {
+      for (const key of currentReplicas.keys() as IterableIterator<string>) {
+        const localEntityId = key.split(':')[0];
+        if (localEntityId) ids.add(localEntityId);
+      }
+    }
+    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
+    for (const profile of profiles) {
+      if (profile?.entityId) ids.add(String(profile.entityId));
+    }
+    return Array.from(ids).sort();
+  })();
+
+  // Contacts for selector: self first, then known names from gossip, then parent-provided contacts.
+  $: selectorContacts = (() => {
+    const byEntity = new Map<string, { name: string; entityId: string }>();
+    if (entityId) byEntity.set(entityId, { name: 'Self', entityId });
+    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
+    for (const profile of profiles) {
+      const id = profile?.entityId;
+      if (!id || byEntity.has(id)) continue;
+      const name = profile?.metadata?.name?.trim?.();
+      if (name) byEntity.set(id, { name, entityId: id });
+    }
+    for (const contact of contacts) {
+      if (!contact?.entityId || byEntity.has(contact.entityId)) continue;
+      byEntity.set(contact.entityId, contact);
+    }
+    const self = entityId ? byEntity.get(entityId) : null;
+    const rest = Array.from(byEntity.values())
+      .filter((c) => c.entityId !== entityId)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return self ? [self, ...rest] : rest;
+  })();
+
+  // Default recipient to self for obfuscated self-route flows.
+  $: if (!targetEntityId && entityId) {
+    targetEntityId = entityId;
+  }
 
   // Format short ID — show first 6 + last 4 chars
   function formatShortId(id: string): string {
@@ -106,11 +145,24 @@
     if (!/^\d+(\.\d+)?$/.test(normalized)) {
       throw new Error('Amount must be a positive decimal number');
     }
-    const [wholeRaw, fracRaw = ''] = normalized.split('.');
+    const [wholeRaw = '0', fracRaw = ''] = normalized.split('.');
     const whole = BigInt(wholeRaw);
     const frac = fracRaw.slice(0, decimals).padEnd(decimals, '0');
     const fracValue = frac.length > 0 ? BigInt(frac) : 0n;
     return whole * (10n ** BigInt(decimals)) + fracValue;
+  }
+
+  function quoteHopFee(from: string, amountIn: bigint): { fee: bigint; feePPM: number } {
+    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
+    const profile = profiles.find((p: any) => p?.entityId === from);
+    const rawPpm = Number(profile?.metadata?.routingFeePPM ?? 100);
+    const feePPM = Number.isFinite(rawPpm) && rawPpm >= 0 ? Math.floor(rawPpm) : 100;
+    const rawBaseFee = profile?.metadata?.baseFee;
+    const baseFee = typeof rawBaseFee === 'bigint'
+      ? rawBaseFee
+      : (typeof rawBaseFee === 'number' && Number.isFinite(rawBaseFee) ? BigInt(Math.max(0, Math.floor(rawBaseFee))) : 0n);
+    const ppmFee = (amountIn * BigInt(feePPM)) / 1_000_000n;
+    return { fee: baseFee + ppmFee, feePPM };
   }
 
   // Enumerate simple paths up to a hop cap; for self-pay enumerate cycles back to self.
@@ -149,7 +201,8 @@
 
         if (isSelfTarget) {
           if (next === startId) {
-            if (nextHops >= MIN_SELF_HOPS) {
+            const intermediateCount = path.length - 1;
+            if (nextHops >= MIN_SELF_INTERMEDIATES + 1 && intermediateCount >= MIN_SELF_INTERMEDIATES) {
               pushPath([...path, startId]);
             }
             continue;
@@ -205,25 +258,32 @@
       const foundPaths = findPathsFromGraph(adjacency, entityId, targetEntityId);
 
       if (foundPaths.length === 0) {
+        if (targetEntityId === entityId) {
+          throw new Error('No self-route found with at least 2 different intermediates');
+        }
         throw new Error(`No route found to ${formatShortId(targetEntityId)}`);
       }
 
       routes = foundPaths.map((path) => {
-        const hops = path.slice(0, -1).map((from, i) => ({
-          from,
-          to: path[i + 1]!,
-          fee: 0n,
-          feePPM: 0,
-        }));
+        const hops = path.slice(0, -1).map((from, i) => {
+          const { fee, feePPM } = quoteHopFee(from, amountInSmallestUnit);
+          return {
+            from,
+            to: path[i + 1]!,
+            fee,
+            feePPM,
+          };
+        });
         const hopCount = hops.length;
+        const totalFee = hops.reduce((sum, hop) => sum + hop.fee, 0n);
         const obfuscationScore = Math.max(0, path.length - 2);
         const probability = Math.max(0.01, 1 / (hopCount + 1));
 
         return {
           path,
           hops,
-          totalFee: 0n,
-          totalAmount: amountInSmallestUnit,
+          totalFee,
+          totalAmount: amountInSmallestUnit + totalFee,
           probability,
           obfuscationScore,
         };
@@ -232,7 +292,7 @@
       if (routes.length > 0) selectedRouteIndex = 0;
     } catch (error) {
       console.error('[Send] Route finding failed:', error);
-      alert(`Failed: ${(error as Error)?.message}`);
+      toasts.error(`Route finding failed: ${(error as Error)?.message || 'Unknown error'}`);
     } finally {
       findingRoutes = false;
     }
@@ -248,6 +308,7 @@
       if (!env) throw new Error('Environment not ready');
 
       const route = routes[selectedRouteIndex];
+      if (!route) throw new Error('Selected route is no longer available');
 
       // Find signer
       let signerId = '1';
@@ -303,7 +364,7 @@
       selectedRouteIndex = -1;
     } catch (error) {
       console.error('[Send] Payment failed:', error);
-      alert(`Failed: ${(error as Error)?.message}`);
+      toasts.error(`Payment failed: ${(error as Error)?.message || 'Unknown error'}`);
     } finally {
       sendingPayment = false;
     }
@@ -323,7 +384,7 @@
     label="Recipient"
     value={targetEntityId}
     entities={allEntities}
-    {contacts}
+    contacts={selectorContacts}
     excludeId=""
     placeholder="Select recipient..."
     disabled={findingRoutes || sendingPayment}

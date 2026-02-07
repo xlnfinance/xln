@@ -12,7 +12,7 @@ import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import type {
   Delta,
-  EntityInput,
+  RoutedEntityInput,
   EntityState,
   AccountMachine,
   AccountFrame
@@ -163,11 +163,11 @@ export function isDelta(obj: unknown): obj is Delta {
 // ============================================================================
 
 /**
- * CRITICAL: Validate EntityInput has required routing identifiers
- * Never allow undefined entityId/signerId in financial flows
+ * CRITICAL: Validate EntityInput has required routing identifiers.
+ * signerId is an optional transport hint resolved at runtime boundary.
  * @param input - Unvalidated input claiming to be EntityInput
  */
-export function validateEntityInput(input: unknown): EntityInput {
+export function validateEntityInput(input: unknown): RoutedEntityInput {
   if (!input || typeof input !== 'object') {
     throw new Error(`FINANCIAL-SAFETY: EntityInput is null/undefined or not an object`);
   }
@@ -179,8 +179,8 @@ export function validateEntityInput(input: unknown): EntityInput {
     throw new Error(`FINANCIAL-SAFETY: entityId is missing or invalid - financial routing corruption detected`);
   }
 
-  if (!obj.signerId || typeof obj.signerId !== 'string') {
-    throw new Error(`FINANCIAL-SAFETY: signerId is missing or invalid - payment routing will fail`);
+  if (obj.signerId !== undefined && typeof obj.signerId !== 'string') {
+    throw new Error(`FINANCIAL-SAFETY: signerId must be string when provided`);
   }
 
   // entityTxs optional if proposedFrame or hashPrecommits present (multi-signer proposals)
@@ -192,15 +192,15 @@ export function validateEntityInput(input: unknown): EntityInput {
     throw new Error(`FINANCIAL-SAFETY: entityTxs must be array`);
   }
 
-  return obj as EntityInput;
+  return obj as RoutedEntityInput;
 }
 
 /**
- * CRITICAL: Validate EntityOutput (same as EntityInput) has required routing identifiers
+ * CRITICAL: Validate EntityOutput (same as EntityInput) has required routing identifiers.
  * Ensure all outputs have proper routing data for financial flows
  * @param output - Unvalidated output claiming to be EntityOutput
  */
-export function validateEntityOutput(output: unknown): EntityInput {
+export function validateEntityOutput(output: unknown): RoutedEntityInput {
   if (!output || typeof output !== 'object') {
     throw new Error(`FINANCIAL-SAFETY: EntityOutput is null/undefined or not an object`);
   }
@@ -212,11 +212,11 @@ export function validateEntityOutput(output: unknown): EntityInput {
     throw new Error(`FINANCIAL-SAFETY: EntityOutput entityId is missing - routing corruption`);
   }
 
-  if (!obj.signerId || typeof obj.signerId !== 'string') {
-    throw new Error(`FINANCIAL-SAFETY: EntityOutput signerId is missing - routing corruption`);
+  if (obj.signerId !== undefined && typeof obj.signerId !== 'string') {
+    throw new Error(`FINANCIAL-SAFETY: EntityOutput signerId must be string when provided`);
   }
 
-  return obj as EntityInput;
+  return obj as RoutedEntityInput;
 }
 
 /**

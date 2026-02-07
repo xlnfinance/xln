@@ -24,6 +24,8 @@ import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from 
 import { TIMING } from './constants';
 import { resolveEntityProposerId } from './state-helpers';
 import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from './networking/p2p-crypto';
+import { asFailFastPayload, failfastAssert } from './networking/failfast';
+import { buildEntityProfile } from './networking/gossip-helper';
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../jurisdictions/typechain-types/factories/ERC20Mock__factory';
 
@@ -217,6 +219,8 @@ const startRuntimeTickLoop = (env: Env): void => {
 
 const hubSignerLabels = new Map<string, string>();
 const hubSignerAddresses = new Map<string, string>();
+const HUB_MESH_TOKEN_ID = 1;
+const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;
 
 const getHubWallet = async (env: Env, hubEntityId?: string): Promise<{ hubEntityId: string; hubSignerId: string; wallet: ethers.Wallet } | null> => {
   if (!globalJAdapter) return null;
@@ -238,6 +242,168 @@ const getHubWallet = async (env: Env, hubEntityId?: string): Promise<{ hubEntity
     return null;
   }
   return { hubEntityId: targetEntityId, hubSignerId: hubSignerAddress ?? wallet.address, wallet };
+};
+
+const sleep = async (ms: number): Promise<void> => {
+  await new Promise(resolve => setTimeout(resolve, ms));
+};
+
+const getEntityReplicaById = (env: Env, entityId: string): any | null => {
+  if (!env.eReplicas) return null;
+  for (const [key, replica] of env.eReplicas.entries()) {
+    if (typeof key === 'string' && key.startsWith(`${entityId}:`)) {
+      return replica;
+    }
+  }
+  return null;
+};
+
+const getAccountDelta = (env: Env, entityId: string, counterpartyId: string, tokenId: number): any | null => {
+  const replica = getEntityReplicaById(env, entityId);
+  if (!replica?.state?.accounts) return null;
+  const account = replica.state.accounts.get(counterpartyId);
+  if (!account?.deltas) return null;
+  return account.deltas.get(tokenId) ?? null;
+};
+
+const hasPairMutualCredit = (env: Env, leftEntityId: string, rightEntityId: string, tokenId: number, amount: bigint): boolean => {
+  const delta = getAccountDelta(env, leftEntityId, rightEntityId, tokenId);
+  if (!delta) return false;
+  return (delta.leftCreditLimit ?? 0n) >= amount && (delta.rightCreditLimit ?? 0n) >= amount;
+};
+
+const hasAccount = (env: Env, entityId: string, counterpartyId: string): boolean => {
+  const replica = getEntityReplicaById(env, entityId);
+  return !!replica?.state?.accounts?.has(counterpartyId);
+};
+
+const getHubSignerForEntity = (env: Env, entityId: string): string => {
+  return hubSignerAddresses.get(entityId) || resolveEntityProposerId(env, entityId, 'hub-mesh-bootstrap');
+};
+
+const waitUntil = async (
+  predicate: () => boolean,
+  maxAttempts = 120,
+  stepMs = 200,
+): Promise<boolean> => {
+  for (let i = 0; i < maxAttempts; i++) {
+    if (predicate()) return true;
+    await sleep(stepMs);
+  }
+  return false;
+};
+
+const settleRuntimeFor = async (env: Env, rounds = 30): Promise<void> => {
+  for (let i = 0; i < rounds; i++) {
+    await runtimeProcess(env, []);
+    await sleep(60);
+  }
+};
+
+const ensureHubPairMeshCredit = async (env: Env, leftEntityId: string, rightEntityId: string): Promise<void> => {
+  const leftSignerId = getHubSignerForEntity(env, leftEntityId);
+  const rightSignerId = getHubSignerForEntity(env, rightEntityId);
+  const alreadyReady = hasPairMutualCredit(env, leftEntityId, rightEntityId, HUB_MESH_TOKEN_ID, HUB_MESH_CREDIT_AMOUNT);
+  if (alreadyReady) {
+    console.log(`[XLN] Hub pair already funded: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`);
+    return;
+  }
+
+  const entityInputs: EntityInput[] = [];
+  const leftHasAccount = hasAccount(env, leftEntityId, rightEntityId);
+  const rightHasAccount = hasAccount(env, rightEntityId, leftEntityId);
+
+  if (!leftHasAccount) {
+    entityInputs.push({
+      entityId: leftEntityId,
+      signerId: leftSignerId,
+      entityTxs: [{ type: 'openAccount', data: { targetEntityId: rightEntityId, tokenId: HUB_MESH_TOKEN_ID } }],
+    });
+  }
+  if (!rightHasAccount) {
+    entityInputs.push({
+      entityId: rightEntityId,
+      signerId: rightSignerId,
+      entityTxs: [{ type: 'openAccount', data: { targetEntityId: leftEntityId, tokenId: HUB_MESH_TOKEN_ID } }],
+    });
+  }
+  if (entityInputs.length > 0) {
+    console.log(`[XLN] Opening hub account pair ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`);
+    await applyRuntimeInput(env, { runtimeTxs: [], entityInputs });
+    await settleRuntimeFor(env, 35);
+  }
+
+  const hasBothAccounts = await waitUntil(
+    () => hasAccount(env, leftEntityId, rightEntityId) && hasAccount(env, rightEntityId, leftEntityId),
+    120,
+    120,
+  );
+  if (!hasBothAccounts) {
+    console.warn(`[XLN] Hub mesh account open timed out: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`);
+  }
+
+  const creditInputs: EntityInput[] = [
+    {
+      entityId: leftEntityId,
+      signerId: leftSignerId,
+      entityTxs: [{
+        type: 'extendCredit',
+        data: {
+          counterpartyEntityId: rightEntityId,
+          tokenId: HUB_MESH_TOKEN_ID,
+          amount: HUB_MESH_CREDIT_AMOUNT,
+        },
+      }],
+    },
+    {
+      entityId: rightEntityId,
+      signerId: rightSignerId,
+      entityTxs: [{
+        type: 'extendCredit',
+        data: {
+          counterpartyEntityId: leftEntityId,
+          tokenId: HUB_MESH_TOKEN_ID,
+          amount: HUB_MESH_CREDIT_AMOUNT,
+        },
+      }],
+    },
+  ];
+
+  console.log(`[XLN] Extending $1M bidirectional credit for ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`);
+  await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: creditInputs });
+  await settleRuntimeFor(env, 45);
+
+  const ready = hasPairMutualCredit(env, leftEntityId, rightEntityId, HUB_MESH_TOKEN_ID, HUB_MESH_CREDIT_AMOUNT);
+  if (!ready) {
+    console.warn(`[XLN] Hub pair credit still below target: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`);
+  } else {
+    console.log(`[XLN] Hub pair credit ready: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`);
+  }
+};
+
+const bootstrapHubMeshCredit = async (env: Env, requiredHubEntityIds: string[]): Promise<void> => {
+  if (requiredHubEntityIds.length < 3) return;
+  const normalized = requiredHubEntityIds.map(id => id.toLowerCase());
+  const gossipReady = await waitUntil(() => {
+    const profiles = env.gossip?.getProfiles?.() || [];
+    const ids = new Set(profiles.map(p => p.entityId.toLowerCase()));
+    return normalized.every(id => ids.has(id));
+  }, 120, 100);
+
+  if (!gossipReady) {
+    console.warn('[XLN] Hub mesh bootstrap skipped: all hubs were not visible in gossip in time');
+    return;
+  }
+
+  console.log('[XLN] Bootstrapping H1/H2/H3 mutual credit mesh ($1M each direction, tokenId=1)');
+  for (let i = 0; i < requiredHubEntityIds.length; i++) {
+    for (let j = i + 1; j < requiredHubEntityIds.length; j++) {
+      const left = requiredHubEntityIds[i];
+      const right = requiredHubEntityIds[j];
+      if (!left || !right) continue;
+      await ensureHubPairMeshCredit(env, left, right);
+    }
+  }
 };
 
 const deployDefaultTokensOnRpc = async (): Promise<void> => {
@@ -442,6 +608,7 @@ type RelayDebugEvent = {
 const relayDebugEvents: RelayDebugEvent[] = [];
 const MAX_RELAY_DEBUG_EVENTS = 5000;
 let relayDebugId = 0;
+let activeHubEntityIds: string[] = [];
 
 const pushRelayDebugEvent = (event: Omit<RelayDebugEvent, 'id' | 'ts'>): void => {
   relayDebugId += 1;
@@ -453,6 +620,107 @@ const pushRelayDebugEvent = (event: Omit<RelayDebugEvent, 'id' | 'ts'>): void =>
   if (relayDebugEvents.length > MAX_RELAY_DEBUG_EVENTS) {
     relayDebugEvents.shift();
   }
+};
+
+const resetServerDebugState = (env: Env | null, preserveHubs = true): { remainingReplicas: number; remainingProfiles: number } => {
+  relayDebugEvents.length = 0;
+  relayDebugId = 0;
+  pendingMessages.clear();
+
+  // Preserve full hub profiles (runtimeId + encryption keys) so immediate post-reset
+  // routing does not fail with P2P_NO_PUBKEY before fresh gossip arrives.
+  const hubSet = new Set(activeHubEntityIds.map((id) => id.toLowerCase()));
+  const preservedHubProfiles = preserveHubs
+    ? new Map(
+      Array.from(gossipProfiles.entries()).filter(([entityId]) =>
+        hubSet.has(String(entityId).toLowerCase())
+      )
+    )
+    : new Map<string, { profile: any; timestamp: number }>();
+
+  if (env) {
+    env.history = [];
+    env.frameLogs = [];
+    env.height = 0;
+    env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
+    env.pendingOutputs = [];
+    env.networkInbox = [];
+    env.pendingNetworkOutputs = [];
+
+    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      const [entityId] = String(replicaKey).split(':');
+      const isHubReplica = preserveHubs && !!entityId && hubSet.has(entityId.toLowerCase());
+      if (!isHubReplica) {
+        env.eReplicas.delete(replicaKey);
+        continue;
+      }
+
+      // Keep hub replicas, but clear transient runtime state and user-facing queues/locks.
+      replica.mempool = [];
+      replica.proposal = undefined;
+      replica.lockedFrame = undefined;
+      replica.hankoWitness = new Map();
+      replica.validatorComputedState = undefined;
+
+      const state = replica.state;
+      if (state) {
+        state.messages = [];
+        state.proposals = new Map();
+        state.deferredAccountProposals = new Map();
+        state.lockBook = new Map();
+        state.swapBook = new Map();
+        state.htlcRoutes = new Map();
+        state.pendingSwapFillRatios = new Map();
+        state.jBatchState = undefined;
+
+        if (state.accounts) {
+          for (const [counterpartyId, account] of state.accounts.entries()) {
+            const isHubCounterparty = hubSet.has(String(counterpartyId).toLowerCase());
+            if (!isHubCounterparty) {
+              state.accounts.delete(counterpartyId);
+              continue;
+            }
+            account.mempool = [];
+            account.pendingFrame = undefined;
+            account.pendingAccountInput = undefined;
+            if (account.locks?.clear) account.locks.clear();
+            if (account.swapOffers?.clear) account.swapOffers.clear();
+            if (account.activeDispute) {
+              account.activeDispute = undefined;
+            }
+          }
+        }
+      }
+    }
+
+    gossipProfiles.clear();
+    if (preserveHubs && preservedHubProfiles.size > 0) {
+      for (const [entityId, entry] of preservedHubProfiles.entries()) {
+        gossipProfiles.set(entityId, entry);
+      }
+    } else {
+      // Fallback rebuild from current env gossip profile cache.
+      const profiles = env.gossip?.getProfiles?.() || [];
+      for (const profile of profiles) {
+        const entityId = String(profile?.entityId || '').toLowerCase();
+        if (!entityId) continue;
+        if (preserveHubs && !hubSet.has(entityId)) continue;
+        storeGossipProfile(profile);
+      }
+    }
+  } else {
+    gossipProfiles.clear();
+    if (preserveHubs) {
+      for (const [entityId, entry] of preservedHubProfiles.entries()) {
+        gossipProfiles.set(entityId, entry);
+      }
+    }
+  }
+
+  return {
+    remainingReplicas: env?.eReplicas?.size ?? 0,
+    remainingProfiles: gossipProfiles.size,
+  };
 };
 
 const installProcessSafetyGuards = (): void => {
@@ -495,6 +763,45 @@ const storeGossipProfile = (profile: any): boolean => {
 };
 
 const getAllGossipProfiles = (): any[] => Array.from(gossipProfiles.values()).map(v => v.profile);
+
+const seedHubProfilesInRelayCache = (
+  env: Env,
+  hubs: Array<{ entityId: string; name?: string; region?: string; routingFeePPM?: number; capabilities?: string[] }>,
+  relayUrl: string,
+): void => {
+  const p2p = env.runtimeState?.p2p as { getEncryptionPubKeyHex?: () => string } | undefined;
+  const encryptionPubKey = p2p?.getEncryptionPubKeyHex?.();
+  const seededAt = Date.now();
+
+  for (const hub of hubs) {
+    let hubState: any = null;
+    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      const [entityId] = String(replicaKey).split(':');
+      if (entityId === hub.entityId) {
+        hubState = replica.state;
+        break;
+      }
+    }
+    if (!hubState) continue;
+
+    const profile = buildEntityProfile(hubState, hub.name, seededAt);
+    profile.runtimeId = env.runtimeId;
+    profile.capabilities = Array.from(new Set([...(profile.capabilities || []), ...(hub.capabilities || ['hub', 'routing', 'faucet'])]));
+    profile.metadata = {
+      ...(profile.metadata || {}),
+      isHub: true,
+      name: hub.name || profile.metadata?.name || hub.entityId.slice(0, 10),
+      region: hub.region || 'global',
+      relayUrl,
+      routingFeePPM: hub.routingFeePPM ?? profile.metadata?.routingFeePPM ?? 100,
+      ...(encryptionPubKey ? { encryptionPubKey } : {}),
+      lastUpdated: seededAt,
+    };
+
+    storeGossipProfile(profile);
+    env.gossip?.announce?.(profile);
+  }
+};
 
 // ============================================================================
 // FAUCET MUTEX (prevent nonce collisions from parallel requests)
@@ -574,7 +881,24 @@ const serveStatic = async (pathname: string, staticDir: string): Promise<Respons
 // ============================================================================
 
 const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
+  try {
+    failfastAssert(!!msg && typeof msg === 'object', 'RELAY_MSG_OBJECT_INVALID', 'Relay payload must be an object');
+    failfastAssert(typeof msg.type === 'string' && msg.type.length > 0, 'RELAY_MSG_TYPE_INVALID', 'Relay message type is required');
+  } catch (error) {
+    const ff = asFailFastPayload(error);
+    pushRelayDebugEvent({
+      event: 'error',
+      msgType: 'unknown',
+      status: 'rejected',
+      reason: ff.code,
+      details: ff,
+    });
+    ws.send(safeStringify({ type: 'error', error: `${ff.code}: ${ff.message}` }));
+    return;
+  }
+
   const { type, to, from, payload, id } = msg;
+  const traceId = typeof id === 'string' && id.length > 0 ? id : `relay-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   let size = 0;
   try {
     size = JSON.stringify(msg).length;
@@ -592,6 +916,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
     msgType: type,
     encrypted: msg.encrypted === true,
     size,
+    details: { traceId },
   });
 
   // Hello - register client
@@ -607,6 +932,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
       from,
       msgType: type,
       status: 'connected',
+      details: { traceId },
     });
 
     // Flush pending messages
@@ -632,7 +958,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
       from,
       msgType: type,
       status: 'stored',
-      details: { received: profiles.length, stored },
+      details: { received: profiles.length, stored, traceId },
     });
     ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'stored', count: stored }));
     return;
@@ -646,7 +972,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
       from,
       to,
       msgType: type,
-      details: { returnedProfiles: profiles.length },
+      details: { returnedProfiles: profiles.length, traceId },
     });
     ws.send(safeStringify({
       type: 'gossip_response',
@@ -667,7 +993,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
       from,
       to,
       msgType: type,
-      details: payload,
+      details: { traceId, payload },
     });
     ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'stored' }));
     return;
@@ -688,6 +1014,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
         msgType: type,
         status: 'rejected',
         reason: 'Missing target runtimeId',
+        details: { traceId },
       });
       ws.send(safeStringify({ type: 'error', error: 'Missing target runtimeId' }));
       return;
@@ -706,6 +1033,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
         msgType: type,
         encrypted: msg.encrypted === true,
         status: 'delivered',
+        details: { traceId },
       });
       ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'delivered' }));
       return;
@@ -737,7 +1065,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
           msgType: type,
           encrypted: msg.encrypted === true,
           status: 'delivered-local',
-          details: { entityId: input.entityId, txs: input.entityTxs?.length ?? 0 },
+          details: { traceId, entityId: input.entityId, txs: input.entityTxs?.length ?? 0 },
         });
         ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'delivered' }));
         return;
@@ -750,6 +1078,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
           msgType: type,
           status: 'local-delivery-failed',
           reason: (error as Error).message,
+          details: { traceId },
         });
       }
     }
@@ -768,6 +1097,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
       encrypted: msg.encrypted === true,
       status: 'queued',
       queueSize: queue.length,
+      details: { traceId },
     });
     ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'queued' }));
     return;
@@ -780,6 +1110,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
     msgType: type,
     status: 'unsupported',
     reason: `Unknown message type: ${type}`,
+    details: { traceId },
   });
   ws.send(safeStringify({ type: 'error', error: `Unknown message type: ${type}` }));
 };
@@ -837,9 +1168,71 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     return new Response(null, { headers });
   }
 
+  // JSON-RPC proxy endpoint.
+  // Accept both /api/rpc and /rpc so frontend does not depend on external rewrite rules.
+  // Production guard: refuse localhost/anvil upstreams unless explicitly allowed.
+  if ((pathname === '/api/rpc' || pathname === '/rpc') && req.method === 'POST') {
+    const allowLocal = process.env.ALLOW_LOCAL_RPC_PROXY === 'true';
+    const explicitUpstream = process.env.RPC_UPSTREAM_URL || process.env.PUBLIC_RPC_URL || process.env.ANVIL_RPC;
+    const jMachineRpc = env?.activeJurisdiction
+      ? env.jReplicas.get(env.activeJurisdiction)?.rpcUrl
+      : undefined;
+    const upstream = explicitUpstream || jMachineRpc || '';
+    const isLocal =
+      upstream.includes('localhost') ||
+      upstream.includes('127.0.0.1') ||
+      upstream.includes('0.0.0.0');
+
+    if (!upstream) {
+      pushRelayDebugEvent({
+        event: 'error',
+        reason: 'RPC_PROXY_NO_UPSTREAM',
+        details: { path: pathname },
+      });
+      return new Response(JSON.stringify({ error: 'RPC upstream not configured' }), { status: 503, headers });
+    }
+    if (isLocal && !allowLocal) {
+      pushRelayDebugEvent({
+        event: 'error',
+        reason: 'RPC_PROXY_LOCAL_BLOCKED',
+        details: { upstream },
+      });
+      return new Response(JSON.stringify({
+        error: 'Local RPC upstream is blocked in this environment',
+        upstream,
+      }), { status: 503, headers });
+    }
+
+    try {
+      const bodyText = await req.text();
+      const rpcRes = await fetch(upstream, {
+        method: 'POST',
+        headers: {
+          'content-type': req.headers.get('content-type') || 'application/json',
+        },
+        body: bodyText,
+      });
+      const respBody = await rpcRes.text();
+      return new Response(respBody, {
+        status: rpcRes.status,
+        headers: {
+          ...headers,
+          'Content-Type': rpcRes.headers.get('content-type') || 'application/json',
+        },
+      });
+    } catch (error: any) {
+      pushRelayDebugEvent({
+        event: 'error',
+        reason: 'RPC_PROXY_FETCH_FAILED',
+        details: { upstream, error: error?.message || String(error) },
+      });
+      return new Response(JSON.stringify({ error: error?.message || 'RPC proxy failed' }), { status: 502, headers });
+    }
+  }
+
   // Health check
   if (pathname === '/api/health') {
-    const { getHealthStatus } = await import('./health.js');
+    const { getHealthStatus } = await import('./health.ts');
     const health = await getHealthStatus(env);
     return new Response(JSON.stringify(health), { headers });
   }
@@ -884,13 +1277,94 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     if (status) filtered = filtered.filter(e => e.status === status);
 
     const events = filtered.slice(-last);
-    return new Response(JSON.stringify({
+    return new Response(safeStringify({
       ok: true,
       total: relayDebugEvents.length,
       returned: events.length,
       serverTime: Date.now(),
       filters: { last, event, runtimeId, from, to, msgType, status, since: Number.isFinite(since) ? since : 0 },
       events,
+    }), { headers });
+  }
+
+  if (pathname === '/api/debug/reset' && req.method === 'POST') {
+    const configuredToken = process.env.DEBUG_RESET_TOKEN;
+    if (configuredToken) {
+      const supplied = req.headers.get('x-debug-reset-token') || '';
+      if (supplied !== configuredToken) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers });
+      }
+    }
+
+    let preserveHubs = true;
+    try {
+      const body = await req.json().catch(() => ({}));
+      if (typeof body?.preserveHubs === 'boolean') {
+        preserveHubs = body.preserveHubs;
+      }
+    } catch {
+      // Keep defaults for malformed/empty body.
+    }
+
+    const stats = resetServerDebugState(env, preserveHubs);
+    pushRelayDebugEvent({
+      event: 'reset',
+      status: 'ok',
+      details: {
+        preserveHubs,
+        ...stats,
+      },
+    });
+    return new Response(safeStringify({
+      ok: true,
+      preserveHubs,
+      ...stats,
+      ts: Date.now(),
+    }), { headers });
+  }
+
+  // Registered gossip entities (single source from relay profile store)
+  if (pathname === '/api/debug/entities') {
+    const url = new URL(req.url);
+    const q = (url.searchParams.get('q') || '').trim().toLowerCase();
+    const limit = Math.max(1, Math.min(5000, Number(url.searchParams.get('limit') || '1000')));
+    const onlineOnly = url.searchParams.get('online') === 'true';
+
+    const entities = Array.from(gossipProfiles.entries())
+      .map(([entityId, entry]) => {
+        const profile = entry.profile || {};
+        const runtimeId = typeof profile.runtimeId === 'string' ? profile.runtimeId : undefined;
+        const name = typeof profile?.metadata?.name === 'string' && profile.metadata.name.trim().length > 0
+          ? profile.metadata.name.trim()
+          : entityId;
+        const isHub = profile?.metadata?.isHub === true || (Array.isArray(profile?.capabilities) && profile.capabilities.includes('hub'));
+        const online = runtimeId ? clients.has(runtimeId) : false;
+        return {
+          entityId,
+          runtimeId,
+          name,
+          isHub,
+          online,
+          lastUpdated: Number(profile?.metadata?.lastUpdated || entry.timestamp || 0),
+          capabilities: Array.isArray(profile?.capabilities) ? profile.capabilities : [],
+          metadata: profile?.metadata || {},
+        };
+      })
+      .filter((e) => {
+        if (onlineOnly && !e.online) return false;
+        if (!q) return true;
+        const blob = `${e.entityId} ${e.runtimeId || ''} ${e.name} ${JSON.stringify(e.capabilities || [])}`.toLowerCase();
+        return blob.includes(q);
+      })
+      .sort((a, b) => (b.lastUpdated || 0) - (a.lastUpdated || 0))
+      .slice(0, limit);
+
+    return new Response(safeStringify({
+      ok: true,
+      totalRegistered: gossipProfiles.size,
+      returned: entities.length,
+      serverTime: Date.now(),
+      entities,
     }), { headers });
   }
 
@@ -1554,6 +2028,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
   const hubBootstraps = await bootstrapHubs(env, hubConfigs);
   const hubEntityIds = hubBootstraps.map(h => h.entityId);
+  activeHubEntityIds = [...hubEntityIds];
   for (const hub of hubBootstraps) {
     hubSignerLabels.set(hub.entityId, hub.signerLabel);
     hubSignerAddresses.set(hub.entityId, hub.signerId);
@@ -1566,6 +2041,15 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       advertiseEntityIds: hubEntityIds,
       isHub: true,  // CRITICAL: Mark as hub so profiles get isHub metadata
     });
+    // Seed relay gossip cache immediately with full hub metadata so first client
+    // message routing does not fail waiting for async relay round-trips.
+    seedHubProfilesInRelayCache(env, hubConfigs.map((cfg, idx) => ({
+      entityId: hubEntityIds[idx],
+      name: cfg.name,
+      region: cfg.region,
+      routingFeePPM: cfg.routingFeePPM,
+      capabilities: cfg.capabilities,
+    })), relayUrl);
   }
 
   // Wait for gossip to update (gossip.announce() might be async)
@@ -1668,6 +2152,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         }
       }
     }
+  }
+
+  if (hubEntityIds.length >= 3) {
+    await bootstrapHubMeshCredit(env, hubEntityIds.slice(0, 3));
   }
 
   const server = Bun.serve({

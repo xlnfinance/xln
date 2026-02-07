@@ -20,8 +20,9 @@ import type { AddressInfo } from 'net';
 import * as secp256k1 from '@noble/secp256k1';
 import { keccak256 } from 'ethers';
 
-import type { RuntimeInput, EntityInput } from '../types';
+import type { RuntimeInput, RoutedEntityInput } from '../types';
 import { deserializeWsMessage, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage, type RuntimeWsAuth } from './ws-protocol';
+import { asFailFastPayload, failfastAssert } from './failfast';
 
 type ClientEntry = {
   ws: WebSocket;
@@ -40,7 +41,7 @@ export type RuntimeWsServerOptions = {
   serverId: string;
   serverRuntimeId?: string;  // If set, messages to this runtimeId use local delivery
   onRuntimeInput?: (from: string, input: RuntimeInput) => Promise<void> | void;
-  onEntityInput?: (from: string, input: EntityInput) => Promise<void> | void;
+  onEntityInput?: (from: string, input: RoutedEntityInput) => Promise<void> | void;
   maxQueuePerRuntime?: number;
   queueTtlMs?: number;
   requireAuth?: boolean;
@@ -189,6 +190,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
   };
 
   const routeMessage = async (msg: RuntimeWsMessage, ws: WebSocket) => {
+    failfastAssert(typeof msg.type === 'string' && msg.type.length > 0, 'WS_SERVER_TYPE_INVALID', 'Missing message type');
     // GOSSIP ANNOUNCE: Store profiles in relay (clients pull when needed)
     if (msg.type === 'gossip_announce') {
       const payload = msg.payload as { profiles?: any[] } | undefined;
@@ -235,8 +237,8 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       // CRITICAL: If encrypted=true, payload is opaque ciphertext - relay just routes it
       // Only validate plaintext payloads (which shouldn't happen in prod - encryption is mandatory)
       if (!msg.encrypted) {
-        const payload = msg.payload as EntityInput | undefined;
-        if (!payload || typeof payload.entityId !== 'string' || typeof payload.signerId !== 'string') {
+        const payload = msg.payload as RoutedEntityInput | undefined;
+        if (!payload || typeof payload.entityId !== 'string') {
           send(ws, { type: 'error', error: 'Invalid entity_input payload', inReplyTo: msg.id });
           return;
         }
@@ -262,7 +264,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
 
     // Local delivery for entity_input ONLY when target IS the server itself
     if (msg.type === 'entity_input' && options.onEntityInput && msg.from && useLocalDelivery) {
-      const payload = msg.payload as EntityInput;
+      const payload = msg.payload as RoutedEntityInput;
       try {
         await options.onEntityInput(msg.from, payload);
         send(ws, { type: 'ack', inReplyTo: msg.id, status: 'delivered' });
@@ -331,8 +333,11 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       let msg: RuntimeWsMessage;
       try {
         msg = deserializeWsMessage(data as Buffer);
+        failfastAssert(!!msg && typeof msg === 'object', 'WS_SERVER_MSG_INVALID', 'WS message must decode to object');
+        failfastAssert(typeof msg.type === 'string', 'WS_SERVER_MSG_TYPE_INVALID', 'WS message type must be string', { msg });
       } catch (error) {
-        send(ws, { type: 'error', error: `Bad JSON: ${(error as Error).message}` });
+        const ff = asFailFastPayload(error);
+        send(ws, { type: 'error', error: `Bad JSON: ${ff.code}: ${ff.message}` });
         return;
       }
 

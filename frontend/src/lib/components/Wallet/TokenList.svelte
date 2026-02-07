@@ -39,8 +39,9 @@
   let tokenBalances: TokenBalance[] = [];
   let loading = true;
   let lastUpdated: Date | null = null;
-  let refreshInterval = 1; // seconds
+  let refreshInterval = 15; // seconds (default; manual refresh button is primary)
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
+  let lastFetchKey = '';
 
   const ERC20_INTERFACE: InterfaceAbi = ERC20_ABI as InterfaceAbi;
 
@@ -141,6 +142,10 @@
     }
   }
 
+  function refreshScopeKey(): string {
+    return `${enabled ? '1' : '0'}:${walletAddress || ''}:${selectedNetwork?.rpcUrl || ''}:${selectedNetwork?.chainId || ''}`;
+  }
+
   function formatBalance(balance: string, symbol: string): string {
     const num = parseFloat(balance);
     if (num === 0) return '0';
@@ -182,16 +187,21 @@
     stopRefreshTimer();
   });
 
-  // Re-fetch when network changes
-  $: if (enabled && selectedNetwork && walletAddress) {
-    fetchBalances();
-  }
-
-  $: if (!enabled) {
-    loading = false;
-    tokenBalances = [];
-    lastUpdated = null;
-    stopRefreshTimer();
+  $: {
+    const key = refreshScopeKey();
+    if (key === lastFetchKey) {
+      // No-op: same wallet/network/enable scope.
+    } else {
+      lastFetchKey = key;
+      if (!enabled) {
+        loading = false;
+        tokenBalances = [];
+        lastUpdated = null;
+        stopRefreshTimer();
+      } else if (walletAddress && selectedNetwork) {
+        startRefreshTimer();
+      }
+    }
   }
 </script>
 

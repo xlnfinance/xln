@@ -232,7 +232,7 @@ export interface ConsensusConfig {
 
 export interface RuntimeInput {
   runtimeTxs: RuntimeTx[];
-  entityInputs: EntityInput[];
+  entityInputs: RoutedEntityInput[];
   jInputs?: JInput[]; // J-layer inputs (queue to J-mempool)
   queuedAt?: number; // When first queued into runtime mempool (ms)
 }
@@ -276,7 +276,6 @@ export type RuntimeTx =
 
 export interface EntityInput {
   entityId: string;
-  signerId: string;
   entityTxs?: EntityTx[];
   proposedFrame?: ProposedEntityFrame;
 
@@ -285,9 +284,18 @@ export interface EntityInput {
   hashPrecommits?: Map<string, string[]>;
 }
 
+/**
+ * Transport envelope for REA-bound entity inputs.
+ * signerId/runtimeId are routing hints and MUST NOT be used by deterministic REA logic.
+ */
+export interface RoutedEntityInput extends EntityInput {
+  signerId?: string;
+  runtimeId?: string;
+}
+
 /** Entity output - can include both E→E messages AND J-layer outputs */
 export interface EntityOutput {
-  entityInputs: EntityInput[];  // E→E messages
+  entityInputs: RoutedEntityInput[];  // E→E messages
   jInputs: JInput[];             // E→J messages (batches to queue)
 }
 
@@ -1669,10 +1677,10 @@ export interface Env {
   };
 
   // E→E message queue (always spans ticks - no same-tick cascade)
-  pendingOutputs?: EntityInput[]; // Outputs queued for next tick
+  pendingOutputs?: RoutedEntityInput[]; // Outputs queued for next tick
   skipPendingForward?: boolean;   // Temp flag to defer forwarding to next frame
-  networkInbox?: EntityInput[];   // Inbound network messages queued for next tick
-  pendingNetworkOutputs?: EntityInput[]; // Outputs waiting for runtimeId gossip before routing
+  networkInbox?: RoutedEntityInput[];   // Inbound network messages queued for next tick
+  pendingNetworkOutputs?: RoutedEntityInput[]; // Outputs waiting for runtimeId gossip before routing
   lockRuntimeSeed?: boolean;      // Prevent runtime seed updates during scenarios
 
   // Frame-scoped structured logs (captured into snapshot, then reset)
@@ -1783,7 +1791,7 @@ export interface EnvSnapshot {
   jReplicas: JReplica[];                   // J-layer state (with stateRoot for time travel)
   browserVMState?: BrowserVMState;
   runtimeInput: RuntimeInput;
-  runtimeOutputs: EntityInput[];
+  runtimeOutputs: RoutedEntityInput[];
   description: string;
   gossip?: {
     profiles: Profile[];

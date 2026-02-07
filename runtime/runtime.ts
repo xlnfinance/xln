@@ -128,7 +128,7 @@ import { captureSnapshot, cloneEntityReplica, resolveEntityProposerId } from './
 import { getEntityShortId, getEntityNumber, formatEntityId, HEAVY_LOGS } from './utils';
 import { safeStringify } from './serialization-utils';
 import { validateDelta, validateAccountDeltas, createDefaultDelta, isDelta, validateEntityInput, validateEntityOutput } from './validation-utils';
-import type { EntityInput, EntityReplica, Env, JInput, JReplica, RuntimeInput } from './types';
+import type { EntityInput, EntityReplica, Env, JInput, JReplica, RoutedEntityInput, RuntimeInput } from './types';
 import {
   clearDatabase,
   DEBUG,
@@ -347,7 +347,7 @@ const ensureRuntimeMempool = (env: Env): RuntimeInput => {
   return env.runtimeMempool;
 };
 
-const enqueueRuntimeInputs = (env: Env, inputs?: EntityInput[], runtimeTxs?: RuntimeTx[]): void => {
+const enqueueRuntimeInputs = (env: Env, inputs?: RoutedEntityInput[], runtimeTxs?: RuntimeTx[]): void => {
   const mempool = ensureRuntimeMempool(env);
   if (runtimeTxs && runtimeTxs.length > 0) {
     mempool.runtimeTxs.push(...runtimeTxs);
@@ -497,10 +497,10 @@ const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null =>
   return profile?.runtimeId || null;
 };
 
-const planEntityOutputs = (env: Env, outputs: EntityInput[]): {
-  localOutputs: EntityInput[];
-  remoteOutputs: EntityInput[];
-  deferredOutputs: EntityInput[];
+const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
+  localOutputs: RoutedEntityInput[];
+  remoteOutputs: RoutedEntityInput[];
+  deferredOutputs: RoutedEntityInput[];
 } => {
   const localEntityIds = new Set<string>();
   for (const replicaKey of env.eReplicas.keys()) {
@@ -511,11 +511,11 @@ const planEntityOutputs = (env: Env, outputs: EntityInput[]): {
     }
   }
 
-  const localOutputs: EntityInput[] = [];
-  const remoteOutputs: EntityInput[] = [];
+  const localOutputs: RoutedEntityInput[] = [];
+  const remoteOutputs: RoutedEntityInput[] = [];
   const pendingOutputs = env.pendingNetworkOutputs ? [...env.pendingNetworkOutputs] : [];
   const allOutputs = [...pendingOutputs, ...outputs];
-  const deferredOutputs: EntityInput[] = [];
+  const deferredOutputs: RoutedEntityInput[] = [];
 
   for (const output of allOutputs) {
     if (localEntityIds.has(output.entityId)) {
@@ -527,6 +527,7 @@ const planEntityOutputs = (env: Env, outputs: EntityInput[]): {
     if (!targetRuntimeId) {
       console.warn(`⚠️ ROUTE-DEFER: No runtimeId for entity ${output.entityId.slice(-4)} - deferring output`);
       env.warn('network', 'Missing runtimeId for entity output (queued)', { entityId: output.entityId });
+      getP2P(env)?.refreshGossip();
       deferredOutputs.push(output);
       continue;
     }
@@ -537,11 +538,11 @@ const planEntityOutputs = (env: Env, outputs: EntityInput[]): {
 };
 
 // Batch multiple outputs to same entityId:signerId into one EntityInput
-const batchOutputsByTarget = (outputs: EntityInput[]): EntityInput[] => {
-  const batched = new Map<string, EntityInput>();
+const batchOutputsByTarget = (outputs: RoutedEntityInput[]): RoutedEntityInput[] => {
+  const batched = new Map<string, RoutedEntityInput>();
 
   for (const output of outputs) {
-    const key = `${output.entityId}:${output.signerId}`;
+    const key = `${output.entityId}:${output.signerId || ''}`;
     const existing = batched.get(key);
 
     if (existing) {
@@ -569,7 +570,7 @@ const batchOutputsByTarget = (outputs: EntityInput[]): EntityInput[] => {
   return Array.from(batched.values());
 };
 
-const dispatchEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] => {
+const dispatchEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): RoutedEntityInput[] => {
   const p2p = getP2P(env);
   if (!p2p) return outputs;
 
@@ -579,7 +580,7 @@ const dispatchEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] 
     console.log(`📦 BATCH: Reduced ${outputs.length} outputs → ${batchedOutputs.length} batched messages`);
   }
 
-  const deferredOutputs: EntityInput[] = [];
+  const deferredOutputs: RoutedEntityInput[] = [];
   for (const output of batchedOutputs) {
     const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
     if (!targetRuntimeId) {
@@ -592,7 +593,7 @@ const dispatchEntityOutputs = (env: Env, outputs: EntityInput[]): EntityInput[] 
   return deferredOutputs;
 };
 
-export const sendEntityInput = (env: Env, input: EntityInput): { sent: boolean; deferred: boolean; queuedLocal: boolean } => {
+export const sendEntityInput = (env: Env, input: RoutedEntityInput): { sent: boolean; deferred: boolean; queuedLocal: boolean } => {
   const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, [input]);
   if (localOutputs.length > 0) {
     enqueueRuntimeInputs(env, localOutputs);
@@ -680,6 +681,12 @@ export const refreshGossip = (env: Env): void => {
   }
 };
 
+export const clearGossip = (env: Env): void => {
+  if (!env.gossip?.profiles) return;
+  env.gossip.profiles.clear();
+  notifyEnvChange(env);
+};
+
 /**
  * Initialize module-level env if not already set
  * Call this early in frontend initialization before prepopulate
@@ -746,7 +753,7 @@ export const processJBlockEvents = async (env: Env): Promise<void> => {
 const applyRuntimeInput = async (
   env: Env,
   runtimeInput: RuntimeInput,
-): Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[]; jOutbox: JInput[] }> => {
+): Promise<{ entityOutbox: RoutedEntityInput[]; mergedInputs: RoutedEntityInput[]; jOutbox: JInput[] }> => {
   const startTime = getPerfMs();
 
   // Ensure event emitters are attached (may be lost after store serialization)
@@ -819,7 +826,7 @@ const applyRuntimeInput = async (
     // Merge all entityInputs (already validated above)
     const mergedInputs = mergeEntityInputs(mergedEntityInputs);
 
-    const entityOutbox: EntityInput[] = [];
+    const entityOutbox: RoutedEntityInput[] = [];
     const jOutbox: JInput[] = [...earlyJOutbox]; // Seed with incoming jInputs, handler jOutputs added later
 
     // Process runtime transactions (handle async operations properly)
@@ -1025,25 +1032,20 @@ const applyRuntimeInput = async (
       // Track j-events in this input - entityInput.entityTxs guaranteed by validateEntityInput above
       // J-EVENT logging removed - too verbose
 
-      // Handle empty signerId for AccountInputs - auto-route to proposer
+      // Routing boundary: resolve missing signerId to local proposer before REA apply.
+      // This keeps proposer lookup out of REA handlers and consensus logic.
       let actualSignerId = entityInput.signerId;
       if (!actualSignerId || actualSignerId === '') {
-        // Check if this is an AccountInput that needs auto-routing
-        const hasAccountInput = entityInput.entityTxs!.some(tx => tx.type === 'accountInput');
-        if (hasAccountInput) {
-          // Find the proposer for this entity
-          const entityReplicaKeys = Array.from(env.eReplicas.keys()).filter(key => key.startsWith(entityInput.entityId + ':'));
-          if (entityReplicaKeys.length > 0) {
-            const firstReplicaKey = entityReplicaKeys[0];
-            if (!firstReplicaKey) {
-              logError("RUNTIME_TICK", `❌ Invalid replica key for entity ${entityInput.entityId}`);
-              continue;
-            }
-            const firstReplica = env.eReplicas.get(firstReplicaKey);
-            if (firstReplica?.state.config.validators[0]) {
-              actualSignerId = firstReplica.state.config.validators[0];
-              // AUTO-ROUTE log removed
-            }
+        const entityReplicaKeys = Array.from(env.eReplicas.keys()).filter(key => key.startsWith(entityInput.entityId + ':'));
+        if (entityReplicaKeys.length > 0) {
+          const firstReplicaKey = entityReplicaKeys[0];
+          if (!firstReplicaKey) {
+            logError("RUNTIME_TICK", `❌ Invalid replica key for entity ${entityInput.entityId}`);
+            continue;
+          }
+          const firstReplica = env.eReplicas.get(firstReplicaKey);
+          if (firstReplica?.state.config.validators[0]) {
+            actualSignerId = firstReplica.state.config.validators[0];
           }
         }
 
@@ -1067,7 +1069,13 @@ const applyRuntimeInput = async (
           if (entityInput.hashPrecommits?.size) console.log(`  → ${entityInput.hashPrecommits.size} precommits`);
         }
 
-        const { newState, outputs, jOutputs, workingReplica } = await applyEntityInput(env, entityReplica, entityInput);
+        const normalizedInput: EntityInput = {
+          entityId: entityInput.entityId,
+          ...(entityInput.entityTxs ? { entityTxs: entityInput.entityTxs } : {}),
+          ...(entityInput.proposedFrame ? { proposedFrame: entityInput.proposedFrame } : {}),
+          ...(entityInput.hashPrecommits ? { hashPrecommits: entityInput.hashPrecommits } : {}),
+        };
+        const { newState, outputs, jOutputs, workingReplica } = await applyEntityInput(env, entityReplica, normalizedInput);
         // APPLY-ENTITY-INPUT-RESULT removed - too noisy
 
         // IMMUTABILITY: Update replica with new state from applyEntityInput
@@ -1079,6 +1087,9 @@ const applyRuntimeInput = async (
           mempool: workingReplica.mempool, // Preserve mempool state
           proposal: workingReplica.proposal, // CRITICAL: Preserve for multi-signer threshold
           lockedFrame: workingReplica.lockedFrame, // CRITICAL: Preserve validator locks
+          // Preserve multi-signer consensus artifacts across ticks.
+          hankoWitness: workingReplica.hankoWitness,
+          validatorComputedState: workingReplica.validatorComputedState,
         });
 
         // FINTECH-LEVEL TYPE SAFETY: Validate all entity outputs before routing
@@ -1267,7 +1278,7 @@ const applyRuntimeInput = async (
       console.log(`📤 Outputs: ${entityOutbox.length} messages`);
       entityOutbox.forEach((output, i) => {
         console.log(
-          `  ${i + 1}. → ${output.signerId} (${output.entityTxs ? `${output.entityTxs.length} txs` : ''}${output.proposedFrame ? ` proposal: ${output.proposedFrame.hash.slice(0, 10)}...` : ''}${output.hashPrecommits ? ` ${output.hashPrecommits.size} precommits` : ''})`,
+          `  ${i + 1}. → ${output.entityId.slice(-6)} (${output.entityTxs ? `${output.entityTxs.length} txs` : ''}${output.proposedFrame ? ` proposal: ${output.proposedFrame.hash.slice(0, 10)}...` : ''}${output.hashPrecommits ? ` ${output.hashPrecommits.size} precommits` : ''})`,
         );
       });
     } else if (DEBUG && entityOutbox.length === 0) {
@@ -1781,7 +1792,7 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
 
 export const process = async (
   env: Env,
-  inputs?: EntityInput[],
+  inputs?: RoutedEntityInput[],
   runtimeDelay = 0
 ) => {
   if (!env.emit) {
@@ -1860,7 +1871,7 @@ export const process = async (
       runtimeInput.entityInputs.length > 0 ||
       (runtimeInput.jInputs?.length ?? 0) > 0;
 
-    let entityOutbox: EntityInput[] = [];
+    let entityOutbox: RoutedEntityInput[] = [];
     let jOutbox: JInput[] = [];
     const changedEntityIds = new Set<string>();
     if (hasRuntimeInput) {

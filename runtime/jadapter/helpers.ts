@@ -290,7 +290,11 @@ export function processEventBatch(
   const canonical = rawEvents.filter(isCanonicalEvent);
   if (canonical.length === 0) return;
 
-  console.log(`📡 [JAdapter:${adapterLabel}] ${canonical.length} canonical events from block ${blockNumber}`);
+  // Keep runtime console readable: disable noisy per-block watcher logs unless explicitly enabled.
+  const shouldLogBatch = !!env?.debugJWatcherBatches;
+  if (shouldLogBatch) {
+    console.log(`📡 [JAdapter:${adapterLabel}] ${canonical.length} canonical events from block ${blockNumber}`);
+  }
 
   // Group events by relevant entity
   const eventsByEntity = new Map<string, { signerId: string; events: RawJEvent[] }>();
@@ -329,7 +333,9 @@ export function processEventBatch(
       },
     };
 
-    console.log(`   📮 [JAdapter:${adapterLabel}] → ${entityId.slice(-4)} (${jEvents.length} events)`);
+    if (shouldLogBatch) {
+      console.log(`   📮 [JAdapter:${adapterLabel}] → ${entityId.slice(-4)} (${jEvents.length} events)`);
+    }
     const mempool = env.runtimeMempool ?? env.runtimeInput;
     if (!mempool.entityInputs) mempool.entityInputs = [];
     mempool.entityInputs.push({ entityId, signerId, entityTxs: [entityTx] });

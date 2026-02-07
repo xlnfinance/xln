@@ -5,11 +5,11 @@
 
 import { applyEntityTx } from './entity-tx';
 import { isLeftEntity } from './entity-id-utils';
-import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, JInput } from './types';
+import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, JInput, RoutedEntityInput } from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
-import { addMessages, cloneEntityReplica, cloneEntityState, canonicalAccountKey, getAccountPerspective, emitScopedEvents, resolveEntityProposerId } from './state-helpers';
+import { addMessages, cloneEntityReplica, cloneEntityState, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from './state-helpers';
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
 import { ethers } from 'ethers';
@@ -157,11 +157,6 @@ const validateEntityInput = (input: EntityInput): boolean => {
       log.error(`❌ Invalid entityId: ${input.entityId}`);
       return false;
     }
-    if (!input.signerId || typeof input.signerId !== 'string') {
-      log.error(`❌ Invalid signerId: ${input.signerId}`);
-      return false;
-    }
-
     // EntityTx validation
     if (input.entityTxs) {
       if (!Array.isArray(input.entityTxs)) {
@@ -1369,16 +1364,9 @@ export const applyEntityFrame = async (
           // Get the proposer of the target entity from env
           // IMPORTANT: AccountInput sent only to PROPOSER (bilateral consensus between entity proposers)
           // Multi-validator entities share account state via entity-level consensus
-          const targetProposerId = resolveEntityProposerId(
-            env,
-            proposal.accountInput!.toEntityId,
-            'accountInput.propose'
-          );
-
           // Convert AccountInput to EntityInput for routing
           const outputEntityInput: EntityInput = {
             entityId: proposal.accountInput.toEntityId,
-            signerId: targetProposerId, // Route to target entity's proposer
             entityTxs: [{
               type: 'accountInput' as const,
               data: proposal.accountInput
@@ -1504,24 +1492,13 @@ const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
   return merged;
 };
 
-export const mergeEntityInputs = (inputs: EntityInput[]): EntityInput[] => {
-  const merged = new Map<string, EntityInput>();
-  const conflicts: EntityInput[] = [];
+export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInput[] => {
+  const merged = new Map<string, RoutedEntityInput>();
+  const conflicts: RoutedEntityInput[] = [];
   let duplicateCount = 0;
 
-  // Look for potential Carol duplicates specifically
-  const carolInputs = inputs.filter(input => input.signerId.includes('carol'));
-  if (carolInputs.length > 1) {
-    if (HEAVY_LOGS) console.log(`🔍 MERGE-CAROL-ALERT: Found ${carolInputs.length} inputs from Carol - potential duplicate source!`);
-    carolInputs.forEach((input, i) => {
-      const entityShort = input.entityId.slice(0, 10);
-      const precommitSigners = input.hashPrecommits ? Array.from(input.hashPrecommits.keys()).join(',') : 'none';
-      if (HEAVY_LOGS) console.log(`🔍 MERGE-CAROL-${i + 1}: ${entityShort}:${input.signerId} - hashPrecommits: ${precommitSigners}`);
-    });
-  }
-
   for (const input of inputs) {
-    const key = `${input.entityId}:${input.signerId}`;
+    const key = `${input.entityId}:${input.signerId || ''}`;
     const entityShort = input.entityId.slice(0, 10);
 
     if (merged.has(key)) {
@@ -1545,7 +1522,7 @@ export const mergeEntityInputs = (inputs: EntityInput[]): EntityInput[] => {
         continue;
       }
 
-      if (HEAVY_LOGS) console.log(`🔍 DUPLICATE-FOUND: Merging duplicate input ${duplicateCount} for ${entityShort}:${input.signerId}`);
+      if (HEAVY_LOGS) console.log(`🔍 DUPLICATE-FOUND: Merging duplicate input ${duplicateCount} for ${entityShort}:${input.signerId || ''}`);
 
       // Merge entity transactions
       if (input.entityTxs) {
@@ -1560,7 +1537,7 @@ export const mergeEntityInputs = (inputs: EntityInput[]): EntityInput[] => {
       if (input.hashPrecommits) {
         const existingPrecommits = existing.hashPrecommits || new Map<string, string[]>();
         console.log(
-          `🔍 MERGE-PRECOMMITS: Merging ${input.hashPrecommits.size} hashPrecommits into existing ${existingPrecommits.size} for ${entityShort}:${input.signerId}`,
+          `🔍 MERGE-PRECOMMITS: Merging ${input.hashPrecommits.size} hashPrecommits into existing ${existingPrecommits.size} for ${entityShort}:${input.signerId || ''}`,
         );
         input.hashPrecommits.forEach((sigs, signerId) => {
           if (HEAVY_LOGS) console.log(`🔍 MERGE-DETAIL: Adding hashPrecommit from ${signerId} (${sigs.length} sigs)`);

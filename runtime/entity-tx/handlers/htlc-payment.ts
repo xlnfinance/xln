@@ -189,15 +189,17 @@ export async function handleHtlcPayment(
       missingKeys.push(entityId);
     }
 
-    // Encryption is REQUIRED — fail fast if keys missing
     const { NobleCryptoProvider } = await import('../../crypto-noble');
     if (missingKeys.length > 0) {
-      console.warn(`⚠️ HTLC: Missing crypto keys for ${missingKeys.length} hops: ${missingKeys.map(e => formatEntityId(e)).join(', ')}`);
-      console.warn(`⚠️ HTLC: Available keys: ${[...entityPubKeys.keys()].map(e => formatEntityId(e)).join(', ')}`);
-      // Proceed without encryption for now, but log loudly
-      // TODO: Once gossip key propagation is reliable, throw here instead
+      const missingList = missingKeys.map(e => formatEntityId(e)).join(', ');
+      const availableList = [...entityPubKeys.keys()].map(e => formatEntityId(e)).join(', ');
+      const msg = `❌ HTLC rejected: missing encryption keys for route hops [${missingList}]`;
+      logError("HTLC_PAYMENT", `${msg} route=${route.map(formatEntityId).join('→')} available=[${availableList}]`);
+      addMessage(newState, `${msg}. Refresh gossip and retry.`);
+      console.warn(`⚠️ HTLC: Available keys: ${availableList}`);
+      return { newState, outputs: [], mempoolOps: [] };
     }
-    const crypto = missingKeys.length === 0 ? new NobleCryptoProvider() : undefined;
+    const crypto = new NobleCryptoProvider();
 
     envelope = await createOnionEnvelopes(route, secret, entityPubKeys, crypto);
     console.log(`🧅 ENVELOPE: ${crypto ? 'ENCRYPTED' : 'CLEARTEXT'} | hops=${hops.length} keys=${entityPubKeys.size} missing=[${missingKeys.map(e => formatEntityId(e))}]`);

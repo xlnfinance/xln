@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
 
-  interface HealthData {
+  type HealthData = {
     timestamp: number;
     uptime: number;
     jMachines: Array<{
@@ -29,428 +30,690 @@
       database: boolean;
       relay: boolean;
     };
-  }
+  };
+
+  type RelayDebugEvent = {
+    id: number;
+    ts: number;
+    event: string;
+    runtimeId?: string;
+    from?: string;
+    to?: string;
+    msgType?: string;
+    status?: string;
+    reason?: string;
+    encrypted?: boolean;
+    size?: number;
+    queueSize?: number;
+    details?: unknown;
+  };
+
+  type DebugResponse = {
+    ok: boolean;
+    total: number;
+    returned: number;
+    serverTime: number;
+    events: RelayDebugEvent[];
+  };
+
+  type DebugEntity = {
+    entityId: string;
+    runtimeId?: string;
+    name: string;
+    isHub: boolean;
+    online: boolean;
+    lastUpdated: number;
+    capabilities: string[];
+    metadata: Record<string, unknown>;
+  };
+
+  type DebugEntitiesResponse = {
+    ok: boolean;
+    totalRegistered: number;
+    returned: number;
+    serverTime: number;
+    entities: DebugEntity[];
+  };
 
   let health: HealthData | null = $state(null);
+  let events: RelayDebugEvent[] = $state([]);
+  let entities: DebugEntity[] = $state([]);
+  let filteredEvents: RelayDebugEvent[] = $state([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let autoRefresh = $state(true);
 
-  async function fetchHealth() {
+  let rpcOk = $state<boolean | null>(null);
+  let rpcLatencyMs = $state<number | null>(null);
+  let rpcError = $state<string | null>(null);
+
+  let search = $state('');
+  let filterEvent = $state('');
+  let filterMsgType = $state('');
+  let filterStatus = $state('');
+  let filterRuntime = $state('');
+  let filterFrom = $state('');
+  let filterTo = $state('');
+  let onlyCritical = $state(false);
+
+  let eventOptions: string[] = $state([]);
+  let msgTypeOptions: string[] = $state([]);
+  let statusOptions: string[] = $state([]);
+
+  const BUG_PATTERNS = [
+    'jsonrpcprovider failed to detect network',
+    'testnet j-machine not found',
+    'server_error',
+    'requesturl',
+    '/rpc',
+    'ws_client_error',
+    'envelope_decrypt_fail',
+    'frame_consensus_failed',
+    'route-defer',
+    'deferred',
+  ];
+
+  function formatUptime(ms: number | null): string {
+    if (ms === null || ms === undefined) return 'N/A';
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const h = Math.floor(m / 60);
+    const d = Math.floor(h / 24);
+    if (d > 0) return `${d}d ${h % 24}h`;
+    if (h > 0) return `${h}h ${m % 60}m`;
+    if (m > 0) return `${m}m ${s % 60}s`;
+    return `${s}s`;
+  }
+
+  function formatLatency(ms?: number): string {
+    if (typeof ms !== 'number') return 'N/A';
+    return `${ms}ms`;
+  }
+
+  function short(id?: string, len = 10): string {
+    if (!id) return '-';
+    return id.length <= len ? id : `${id.slice(0, len)}...`;
+  }
+
+  function eventBlob(e: RelayDebugEvent): string {
+    return JSON.stringify(e).toLowerCase();
+  }
+
+  function isCriticalEvent(e: RelayDebugEvent): boolean {
+    if (e.event === 'error') return true;
+    const blob = eventBlob(e);
+    return BUG_PATTERNS.some((p) => blob.includes(p));
+  }
+
+  const criticalSignals = $derived(
+    events.filter(isCriticalEvent).slice(-30).reverse()
+  );
+
+  function applyFilters(): void {
+    const q = search.trim().toLowerCase();
+    const r = filterRuntime.trim().toLowerCase();
+    const f = filterFrom.trim().toLowerCase();
+    const t = filterTo.trim().toLowerCase();
+
+    filteredEvents = events
+      .filter((e) => {
+        if (filterEvent && e.event !== filterEvent) return false;
+        if (filterMsgType && e.msgType !== filterMsgType) return false;
+        if (filterStatus && e.status !== filterStatus) return false;
+        if (r) {
+          const hit =
+            (e.runtimeId || '').toLowerCase().includes(r) ||
+            (e.from || '').toLowerCase().includes(r) ||
+            (e.to || '').toLowerCase().includes(r);
+          if (!hit) return false;
+        }
+        if (f && !(e.from || '').toLowerCase().includes(f)) return false;
+        if (t && !(e.to || '').toLowerCase().includes(t)) return false;
+        if (onlyCritical && !isCriticalEvent(e)) return false;
+        if (q && !eventBlob(e).includes(q)) return false;
+        return true;
+      })
+      .reverse();
+  }
+
+  function clearFilters(): void {
+    search = '';
+    filterEvent = '';
+    filterMsgType = '';
+    filterStatus = '';
+    filterRuntime = '';
+    filterFrom = '';
+    filterTo = '';
+    onlyCritical = false;
+    applyFilters();
+  }
+
+  async function checkRpc(): Promise<void> {
+    const started = performance.now();
     try {
-      const response = await fetch('https://xln.finance/api/health');
-      health = await response.json();
+      const resp = await fetch('/rpc', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'eth_chainId',
+          params: [],
+        }),
+      });
+      const ms = Math.round(performance.now() - started);
+      rpcLatencyMs = ms;
+
+      if (!resp.ok) {
+        rpcOk = false;
+        rpcError = `HTTP ${resp.status}`;
+        return;
+      }
+
+      const body = (await resp.json()) as { result?: string; error?: unknown };
+      if (!body.result) {
+        rpcOk = false;
+        rpcError = body.error ? JSON.stringify(body.error) : 'No chainId result';
+        return;
+      }
+      rpcOk = true;
+      rpcError = null;
+    } catch (err) {
+      rpcOk = false;
+      rpcLatencyMs = null;
+      rpcError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  async function fetchHealth(): Promise<void> {
+    try {
+      const [hRes, dRes, eRes] = await Promise.all([
+        fetch('/api/health'),
+        fetch('/api/debug/events?last=1000'),
+        fetch('/api/debug/entities?limit=1000'),
+      ]);
+
+      if (!hRes.ok) throw new Error(`health HTTP ${hRes.status}`);
+      if (!dRes.ok) throw new Error(`debug HTTP ${dRes.status}`);
+      if (!eRes.ok) throw new Error(`entities HTTP ${eRes.status}`);
+
+      health = (await hRes.json()) as HealthData;
+      const debugData = (await dRes.json()) as DebugResponse;
+      const entitiesData = (await eRes.json()) as DebugEntitiesResponse;
+      events = Array.isArray(debugData.events) ? debugData.events : [];
+      entities = Array.isArray(entitiesData.entities) ? entitiesData.entities : [];
+
+      eventOptions = [...new Set(events.map((e) => e.event).filter(Boolean))].sort();
+      msgTypeOptions = [...new Set(events.map((e) => e.msgType).filter(Boolean) as string[])].sort();
+      statusOptions = [...new Set(events.map((e) => e.status).filter(Boolean) as string[])].sort();
+
+      await checkRpc();
+      applyFilters();
       error = null;
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to fetch health';
+      error = err instanceof Error ? err.message : 'Failed to fetch health/debug data';
     } finally {
       loading = false;
     }
   }
 
   onMount(() => {
+    document.body.classList.add('health-console');
     fetchHealth();
-    const interval = setInterval(() => {
+    const t = setInterval(() => {
       if (autoRefresh) fetchHealth();
-    }, 5000);
-    return () => clearInterval(interval);
+    }, 4000);
+    return () => {
+      clearInterval(t);
+      document.body.classList.remove('health-console');
+    };
   });
-
-  function formatUptime(ms: number | null): string {
-    if (!ms) return 'N/A';
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    if (hours > 0) return `${hours}h ${minutes % 60}m`;
-    if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
-    return `${seconds}s`;
-  }
-
-  function formatResponseTime(ms: number | undefined): string {
-    if (!ms) return 'N/A';
-    return `${ms}ms`;
-  }
 </script>
 
 <svelte:head>
-  <title>XLN Health Status</title>
+  <title>XLN Health Console</title>
 </svelte:head>
 
 <div class="health-page">
-  <header>
-    <h1>🏥 XLN Network Health</h1>
-    <div class="controls">
-      <label>
+  <header class="top">
+    <div>
+      <h1>XLN Health Console</h1>
+      <p>Runtime + Relay diagnostics (single-source event timeline)</p>
+    </div>
+    <div class="actions">
+      <label class="switch">
         <input type="checkbox" bind:checked={autoRefresh} />
-        Auto-refresh (5s)
+        Auto (4s)
       </label>
-      <button onclick={() => fetchHealth()}>🔄 Refresh Now</button>
+      <button onclick={fetchHealth}>Refresh</button>
     </div>
   </header>
 
+  {#if rpcOk === false}
+    <section class="banner down">
+      <strong>RPC DOWN</strong>
+      <span>Runtime bootstrap may fail. /rpc check failed: {rpcError || 'unknown'}.</span>
+    </section>
+  {/if}
+
+  {#if criticalSignals.length > 0}
+    <section class="banner warn">
+      <strong>Active Critical Signals</strong>
+      <span>{criticalSignals.length} recent critical events detected in relay timeline.</span>
+    </section>
+  {/if}
+
   {#if loading && !health}
-    <div class="loading">Loading health data...</div>
+    <div class="panel">Loading health console...</div>
   {:else if error}
-    <div class="error">❌ {error}</div>
+    <div class="panel error">{error}</div>
   {:else if health}
-    <!-- System Overview -->
-    <section class="system-overview">
-      <h2>System Status</h2>
-      <div class="status-grid">
-        <div class="status-card" class:healthy={health.system?.runtime} class:down={!health.system?.runtime}>
-          <div class="status-icon">{health.system?.runtime ? '✅' : '❌'}</div>
-          <div class="status-label">Runtime</div>
-        </div>
-        <div class="status-card" class:healthy={health.system?.p2p} class:down={!health.system?.p2p}>
-          <div class="status-icon">{health.system?.p2p ? '✅' : '❌'}</div>
-          <div class="status-label">P2P</div>
-        </div>
-        <div class="status-card" class:healthy={health.system?.database} class:down={!health.system?.database}>
-          <div class="status-icon">{health.system?.database ? '✅' : '❌'}</div>
-          <div class="status-label">Database</div>
-        </div>
-        <div class="status-card" class:healthy={health.system?.relay} class:down={!health.system?.relay}>
-          <div class="status-icon">{health.system?.relay ? '✅' : '❌'}</div>
-          <div class="status-label">Relay</div>
+    <section class="metrics-grid">
+      <article class="metric"><div class="k">Runtime</div><div class="v" class:ok={health.system.runtime} class:bad={!health.system.runtime}>{health.system.runtime ? 'healthy' : 'down'}</div></article>
+      <article class="metric"><div class="k">P2P</div><div class="v" class:ok={health.system.p2p} class:bad={!health.system.p2p}>{health.system.p2p ? 'healthy' : 'down'}</div></article>
+      <article class="metric"><div class="k">Relay</div><div class="v" class:ok={health.system.relay} class:bad={!health.system.relay}>{health.system.relay ? 'healthy' : 'down'}</div></article>
+      <article class="metric"><div class="k">Database</div><div class="v" class:ok={health.system.database} class:bad={!health.system.database}>{health.system.database ? 'healthy' : 'down'}</div></article>
+      <article class="metric"><div class="k">RPC</div><div class="v" class:ok={rpcOk === true} class:bad={rpcOk === false}>{rpcOk === null ? 'checking' : rpcOk ? `ok (${formatLatency(rpcLatencyMs || undefined)})` : 'down'}</div></article>
+      <article class="metric"><div class="k">Uptime</div><div class="v">{formatUptime(health.uptime)}</div></article>
+      <article class="metric"><div class="k">J Block</div><div class="v">#{health.jMachines?.[0]?.lastBlock ?? '-'}</div></article>
+      <article class="metric"><div class="k">Debug Events</div><div class="v">{events.length}</div></article>
+    </section>
+
+    <section class="panel">
+      <h2>Filters</h2>
+      <div class="filters">
+        <input placeholder="search" bind:value={search} oninput={applyFilters} />
+        <select bind:value={filterEvent} onchange={applyFilters}>
+          <option value="">event: all</option>
+          {#each eventOptions as opt}<option value={opt}>{opt}</option>{/each}
+        </select>
+        <select bind:value={filterMsgType} onchange={applyFilters}>
+          <option value="">msgType: all</option>
+          {#each msgTypeOptions as opt}<option value={opt}>{opt}</option>{/each}
+        </select>
+        <select bind:value={filterStatus} onchange={applyFilters}>
+          <option value="">status: all</option>
+          {#each statusOptions as opt}<option value={opt}>{opt}</option>{/each}
+        </select>
+        <input placeholder="runtimeId" bind:value={filterRuntime} oninput={applyFilters} />
+        <input placeholder="from" bind:value={filterFrom} oninput={applyFilters} />
+        <input placeholder="to" bind:value={filterTo} oninput={applyFilters} />
+        <label class="switch mini"><input type="checkbox" bind:checked={onlyCritical} onchange={applyFilters} />critical only</label>
+        <button class="ghost" onclick={clearFilters}>Clear</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Registered Gossip Entities</h2>
+      <p class="sub">{entities.length} registered in relay gossip cache</p>
+      <div class="entity-list">
+        {#if entities.length === 0}
+          <div class="empty">No registered entities found.</div>
+        {:else}
+          {#each entities as entity}
+            <article class="entity-row" class:entity-offline={!entity.online}>
+              <EntityIdentity
+                entityId={entity.entityId}
+                name={entity.name}
+                size={28}
+                copyable={true}
+                clickable={true}
+                compact={false}
+              />
+              <div class="entity-tags">
+                <span class="chip" class:ok={entity.online} class:bad={!entity.online}>{entity.online ? 'online' : 'offline'}</span>
+                {#if entity.isHub}<span class="chip">hub</span>{/if}
+                {#if entity.runtimeId}<span class="chip">rt:{short(entity.runtimeId, 12)}</span>{/if}
+              </div>
+            </article>
+          {/each}
+        {/if}
+      </div>
+    </section>
+
+    <section class="panel split">
+      <div>
+        <h2>Latest 1000 Debug Events</h2>
+        <p class="sub">{filteredEvents.length} shown</p>
+        <div class="stream">
+          {#if filteredEvents.length === 0}
+            <div class="empty">No events match filters.</div>
+          {:else}
+            {#each filteredEvents as e}
+              <article class="evt" class:err={e.event === 'error' || e.status === 'rejected' || e.status === 'local-delivery-failed'} class:warn={e.status === 'queued' || e.event === 'debug_event'}>
+                <div class="evt-head">
+                  <span>{new Date(e.ts).toLocaleString()}</span>
+                  <span class="chip">{e.event}</span>
+                  {#if e.msgType}<span class="chip">{e.msgType}</span>{/if}
+                  {#if e.status}<span class="chip">{e.status}</span>{/if}
+                  {#if e.encrypted === true}<span class="chip">enc</span>{/if}
+                </div>
+                <div class="evt-meta">
+                  <span>from: {short(e.from, 14)}</span>
+                  <span>to: {short(e.to, 14)}</span>
+                  <span>runtime: {short(e.runtimeId, 14)}</span>
+                  {#if e.queueSize !== undefined}<span>queue: {e.queueSize}</span>{/if}
+                  {#if e.size !== undefined}<span>size: {e.size}</span>{/if}
+                </div>
+                <pre>{JSON.stringify({ id: e.id, reason: e.reason, details: e.details }, null, 2)}</pre>
+              </article>
+            {/each}
+          {/if}
         </div>
       </div>
-      <div class="uptime">Uptime: {formatUptime(health.uptime)}</div>
-    </section>
 
-    <!-- J-Machines -->
-    <section class="j-machines">
-      <h2>Jurisdictions ({health.jMachines?.length || 0})</h2>
-      {#if !health.jMachines || health.jMachines.length === 0}
-        <div class="empty">No J-machines connected</div>
-      {:else}
-        <div class="j-machine-list">
-          {#each health.jMachines as jm}
-            <div class="j-machine-card" class:healthy={jm.status === 'healthy'} class:degraded={jm.status === 'degraded'} class:down={jm.status === 'down'}>
-              <div class="j-machine-header">
-                <h3>{jm.name}</h3>
-                <span class="status-badge {jm.status}">{jm.status}</span>
-              </div>
-              <div class="j-machine-info">
-                <div class="info-row">
-                  <span class="label">Chain ID:</span>
-                  <span class="value">{jm.chainId}</span>
+      <div>
+        <h2>Critical Bug Feed</h2>
+        <p class="sub">Visual failures impacting runtime boot, payments, or routing</p>
+        <div class="stream small">
+          {#if criticalSignals.length === 0}
+            <div class="empty">No active critical signals in latest window.</div>
+          {:else}
+            {#each criticalSignals as e}
+              <article class="evt err compact">
+                <div class="evt-head">
+                  <span>{new Date(e.ts).toLocaleTimeString()}</span>
+                  <span class="chip">{e.event}</span>
+                  {#if e.msgType}<span class="chip">{e.msgType}</span>{/if}
                 </div>
-                {#if jm.lastBlock !== undefined}
-                  <div class="info-row">
-                    <span class="label">Block:</span>
-                    <span class="value">#{jm.lastBlock}</span>
-                  </div>
-                {/if}
-                {#if jm.responseTime}
-                  <div class="info-row">
-                    <span class="label">Latency:</span>
-                    <span class="value">{formatResponseTime(jm.responseTime)}</span>
-                  </div>
-                {/if}
-                {#if jm.rpc.length > 0}
-                  <div class="info-row">
-                    <span class="label">RPC:</span>
-                    <span class="value rpc">{jm.rpc[0]}</span>
-                  </div>
-                {/if}
-                {#if jm.error}
-                  <div class="error-msg">⚠️ {jm.error}</div>
-                {/if}
-              </div>
-            </div>
-          {/each}
-        </div>
-      {/if}
-    </section>
-
-    <!-- Hubs -->
-    <section class="hubs">
-      <h2>Active Hubs ({health.hubs?.length || 0})</h2>
-      {#if !health.hubs || health.hubs.length === 0}
-        <div class="empty">No hubs online</div>
-      {:else}
-        <div class="hub-list">
-          {#each health.hubs as hub}
-            <div class="hub-card">
-              <div class="hub-header">
-                <h3>{hub.name}</h3>
-                <span class="status-badge {hub.status}">{hub.status}</span>
-              </div>
-              <div class="hub-info">
-                <div class="info-row">
-                  <span class="label">Entity ID:</span>
-                  <span class="value mono">{hub.entityId.slice(0, 20)}...</span>
+                <div class="evt-meta">
+                  <span>{e.reason || 'critical pattern match'}</span>
                 </div>
-                {#if hub.region}
-                  <div class="info-row">
-                    <span class="label">Region:</span>
-                    <span class="value">{hub.region}</span>
-                  </div>
-                {/if}
-                {#if hub.accounts}
-                  <div class="info-row">
-                    <span class="label">Accounts:</span>
-                    <span class="value">{hub.accounts}</span>
-                  </div>
-                {/if}
-                {#if hub.relayUrl}
-                  <div class="info-row">
-                    <span class="label">Relay:</span>
-                    <span class="value">{hub.relayUrl}</span>
-                  </div>
-                {/if}
-              </div>
-            </div>
-          {/each}
+                <pre>{JSON.stringify(e.details ?? e, null, 2)}</pre>
+              </article>
+            {/each}
+          {/if}
         </div>
-      {/if}
+      </div>
     </section>
 
     <footer>
-      <div class="last-updated">Last updated: {new Date(health.timestamp).toLocaleString()}</div>
+      Last updated: {new Date(health.timestamp).toLocaleString()}
     </footer>
   {/if}
 </div>
 
 <style>
-  .health-page {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 2rem;
-    font-family: system-ui, -apple-system, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    min-height: 100vh;
+  :global(body.health-console) {
+    margin: 0;
+    background: radial-gradient(1200px 700px at 5% -10%, #111926 0%, #06080b 55%, #05070a 100%);
+    color: #b7c2d3;
+    font-family: 'Space Grotesk', 'IBM Plex Sans', 'SF Pro Text', 'Segoe UI', sans-serif;
   }
 
-  header {
+  .health-page {
+    max-width: 1680px;
+    margin: 0 auto;
+    padding: 24px 20px 18px;
+  }
+
+  .top {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 2rem;
-    color: white;
+    gap: 12px;
+    margin-bottom: 12px;
   }
 
   h1 {
-    font-size: 2rem;
     margin: 0;
-  }
-
-  .controls {
-    display: flex;
-    gap: 1rem;
-    align-items: center;
-  }
-
-  .controls label {
-    display: flex;
-    gap: 0.5rem;
-    align-items: center;
-    cursor: pointer;
-  }
-
-  .controls button {
-    background: white;
-    color: #667eea;
-    border: none;
-    padding: 0.5rem 1rem;
-    border-radius: 0.5rem;
-    cursor: pointer;
-    font-weight: 600;
-    transition: transform 0.2s;
-  }
-
-  .controls button:hover {
-    transform: scale(1.05);
-  }
-
-  section {
-    background: white;
-    border-radius: 1rem;
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    font-size: clamp(28px, 3vw, 40px);
+    letter-spacing: 0.2px;
+    color: #d6deea;
   }
 
   h2 {
-    margin-top: 0;
-    color: #667eea;
-    font-size: 1.5rem;
+    margin: 0 0 6px 0;
+    font-size: 16px;
+    letter-spacing: 0.2px;
   }
 
-  .status-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 1rem;
-    margin: 1rem 0;
+  .top p,
+  .sub {
+    margin: 4px 0 0 0;
+    color: #6f7d93;
+    font-size: 12px;
   }
 
-  .status-card {
-    text-align: center;
-    padding: 1.5rem;
-    border-radius: 0.75rem;
-    border: 2px solid #e5e7eb;
-    transition: all 0.2s;
+  .actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
-  .status-card.healthy {
-    background: #ecfdf5;
-    border-color: #10b981;
+  .switch {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    color: #94a3b8;
+    background: #0b1018;
+    border: 1px solid #1e2a38;
+    border-radius: 8px;
+    padding: 8px 10px;
   }
 
-  .status-card.down {
-    background: #fef2f2;
-    border-color: #ef4444;
-  }
-
-  .status-icon {
-    font-size: 2rem;
-    margin-bottom: 0.5rem;
-  }
-
-  .status-label {
+  button {
+    height: 36px;
+    border-radius: 8px;
+    border: 1px solid #2b3746;
+    background: #111a28;
+    color: #c7d3e4;
+    padding: 0 12px;
     font-weight: 600;
-    color: #374151;
+    cursor: pointer;
   }
 
-  .uptime {
-    text-align: center;
-    margin-top: 1rem;
-    color: #6b7280;
-    font-size: 0.9rem;
+  .banner {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    border-radius: 10px;
+    border: 1px solid;
+    padding: 10px 12px;
+    margin-bottom: 10px;
   }
 
-  .j-machine-list, .hub-list {
+  .banner.down {
+    background: #220f16;
+    border-color: #6c2335;
+    color: #ff9db0;
+  }
+
+  .banner.warn {
+    background: #1d160b;
+    border-color: #6a5120;
+    color: #f4d694;
+  }
+
+  .panel {
+    background: linear-gradient(180deg, #0e141f, #0a1119);
+    border: 1px solid #1f2b3a;
+    border-radius: 12px;
+    padding: 13px;
+    margin-bottom: 12px;
+  }
+
+  .panel.error {
+    border-color: #6a2435;
+    color: #ff9db0;
+  }
+
+  .metrics-grid {
     display: grid;
-    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+    gap: 10px;
+    margin-bottom: 12px;
   }
 
-  .j-machine-card, .hub-card {
-    border: 2px solid #e5e7eb;
-    border-radius: 0.75rem;
-    padding: 1rem;
-    transition: all 0.2s;
+  .metric {
+    background: linear-gradient(180deg, #0a1119, #080f16);
+    border: 1px solid #1f2b3a;
+    border-radius: 12px;
+    padding: 12px;
+    min-height: 76px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
   }
 
-  .j-machine-card:hover, .hub-card:hover {
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
-    transform: translateY(-2px);
+  .k {
+    color: #6f7d93;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 10px;
   }
 
-  .j-machine-card.healthy {
-    border-color: #10b981;
-    background: #f0fdf4;
+  .v {
+    margin-top: 5px;
+    font-weight: 700;
+    font-size: 20px;
+    color: #c6d1df;
   }
 
-  .j-machine-card.degraded {
-    border-color: #f59e0b;
-    background: #fffbeb;
+  .ok { color: #00d26a; }
+  .bad { color: #ff5b73; }
+
+  .filters {
+    display: grid;
+    grid-template-columns: 1.4fr repeat(3, minmax(120px, 0.8fr)) repeat(3, minmax(120px, 1fr)) minmax(160px, 0.9fr) 96px;
+    gap: 8px;
   }
 
-  .j-machine-card.down {
-    border-color: #ef4444;
-    background: #fef2f2;
+  .filters input,
+  .filters select {
+    height: 36px;
+    border: 1px solid #263240;
+    border-radius: 8px;
+    background: #0a0f15;
+    color: #b8c3d3;
+    padding: 0 10px;
+    font-size: 12px;
+    min-width: 0;
   }
 
-  .j-machine-header, .hub-header {
+  .ghost {
+    background: #0d131b;
+  }
+
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 1.7fr) minmax(380px, 1fr);
+    gap: 12px;
+  }
+
+  .stream {
+    border: 1px solid #1c2836;
+    border-radius: 10px;
+    background: #070c13;
+    padding: 10px;
+    max-height: calc(100vh - 350px);
+    min-height: 500px;
+    overflow: auto;
+  }
+
+  .entity-list {
+    border: 1px solid #1c2836;
+    border-radius: 10px;
+    background: #070c13;
+    max-height: 300px;
+    overflow: auto;
+    padding: 8px;
+  }
+
+  .entity-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.75rem;
+    gap: 10px;
+    padding: 8px;
+    border: 1px solid #1f2c3a;
+    border-radius: 9px;
+    background: #0b121b;
+    margin-bottom: 8px;
   }
 
-  .j-machine-header h3, .hub-header h3 {
-    margin: 0;
-    font-size: 1.125rem;
-  }
-
-  .status-badge {
-    padding: 0.25rem 0.75rem;
-    border-radius: 9999px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    text-transform: uppercase;
-  }
-
-  .status-badge.healthy {
-    background: #10b981;
-    color: white;
-  }
-
-  .status-badge.degraded {
-    background: #f59e0b;
-    color: white;
-  }
-
-  .status-badge.down {
-    background: #ef4444;
-    color: white;
-  }
-
-  .info-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 0.5rem 0;
-    border-bottom: 1px solid #f3f4f6;
-  }
-
-  .info-row:last-child {
-    border-bottom: none;
-  }
-
-  .label {
-    color: #6b7280;
-    font-size: 0.875rem;
-  }
-
-  .value {
-    font-weight: 600;
-    color: #111827;
-    font-size: 0.875rem;
-  }
-
-  .value.mono {
-    font-family: 'Monaco', 'Courier New', monospace;
-  }
-
-  .value.rpc {
-    font-size: 0.75rem;
-    color: #667eea;
-  }
-
-  .error-msg {
-    margin-top: 0.5rem;
-    padding: 0.5rem;
-    background: #fef2f2;
-    border-left: 3px solid #ef4444;
-    font-size: 0.875rem;
-    color: #dc2626;
-  }
-
-  .empty {
-    text-align: center;
-    padding: 2rem;
-    color: #9ca3af;
-    font-style: italic;
-  }
-
-  .loading, .error {
-    text-align: center;
-    padding: 3rem;
-    font-size: 1.25rem;
-  }
-
-  .error {
-    color: #ef4444;
-  }
-
-  footer {
-    text-align: center;
-    color: white;
-    margin-top: 2rem;
+  .entity-offline {
     opacity: 0.8;
   }
 
-  .last-updated {
-    font-size: 0.875rem;
+  .entity-tags {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .stream.small {
+    max-height: calc(100vh - 350px);
+  }
+
+  .evt {
+    border: 1px solid #1f2c3a;
+    border-radius: 9px;
+    background: #0b121b;
+    padding: 9px 10px;
+    margin-bottom: 8px;
+  }
+
+  .evt.warn {
+    border-color: #564218;
+    background: #161208;
+  }
+
+  .evt.err {
+    border-color: #5f2031;
+    background: #160a10;
+  }
+
+  .evt.compact pre {
+    max-height: 120px;
+  }
+
+  .evt-head,
+  .evt-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+    font-size: 11px;
+    color: #7f8fa7;
+  }
+
+  .chip {
+    border: 1px solid #324154;
+    border-radius: 999px;
+    padding: 1px 7px;
+    background: #0f1724;
+    color: #9fb0c8;
+  }
+
+  pre {
+    margin: 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px;
+    color: #9fb0c8;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .empty {
+    color: #8795aa;
+    text-align: center;
+    padding: 20px 8px;
+    font-size: 13px;
+  }
+
+  footer {
+    color: #8a97aa;
+    font-size: 12px;
+    text-align: right;
+  }
+
+  @media (max-width: 1180px) {
+    .metrics-grid { grid-template-columns: repeat(4, minmax(110px, 1fr)); }
+    .filters { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+    .split { grid-template-columns: 1fr; }
+    .stream { max-height: 420px; min-height: 280px; }
   }
 </style>

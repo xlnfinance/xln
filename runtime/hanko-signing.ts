@@ -373,14 +373,23 @@ export async function verifyHankoForHash(
     if (env && env.eReplicas) {
       const replica: any = Array.from(env.eReplicas.values()).find((r: any) => r.state?.entityId === expectedEntityId);
       if (replica) {
-        const validators: string[] = replica.state?.config?.validators || [];
+        const validators = (replica.state?.config?.validators || []) as unknown[];
 
         // Convert validators to addresses (local entity: signerId derivation is allowed)
         const { getSignerAddress } = await import('./account-crypto');
-        expectedAddresses = validators.map((v: string) => {
+        expectedAddresses = validators.map((validator) => {
+          if (typeof validator !== 'string' || !validator) return null;
+          const v = validator.trim();
+          if (!v) return null;
+          // Validator may already be an EOA address (0x + 40 hex chars)
+          if (ethers.isAddress(v)) {
+            return v.toLowerCase();
+          }
+          // Or it may be a secp256k1 public key (33/65 bytes hex)
           if (v.startsWith('0x')) {
             return publicKeyToAddress(v);
           }
+          // Legacy signerId path (numeric/string ids)
           return getSignerAddress(env, v)?.toLowerCase();
         }).filter(Boolean) as string[];
       }
@@ -405,8 +414,12 @@ export async function verifyHankoForHash(
         for (const entry of boardEntries) {
           if (!entry) continue;
           if (typeof entry === 'string') {
-            const derived = publicKeyToAddress(entry);
-            if (derived) expectedAddresses.push(derived);
+            if (ethers.isAddress(entry)) {
+              expectedAddresses.push(entry.toLowerCase());
+            } else {
+              const derived = publicKeyToAddress(entry);
+              if (derived) expectedAddresses.push(derived);
+            }
             continue;
           }
           if (entry.publicKey) {
@@ -414,8 +427,12 @@ export async function verifyHankoForHash(
             if (derived) expectedAddresses.push(derived);
           }
           if (entry.signer) {
-            const derived = publicKeyToAddress(entry.signer);
-            if (derived) expectedAddresses.push(derived);
+            if (ethers.isAddress(entry.signer)) {
+              expectedAddresses.push(entry.signer.toLowerCase());
+            } else {
+              const derived = publicKeyToAddress(entry.signer);
+              if (derived) expectedAddresses.push(derived);
+            }
           }
         }
 

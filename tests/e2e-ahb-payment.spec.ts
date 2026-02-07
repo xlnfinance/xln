@@ -67,6 +67,29 @@ async function createRuntime(page: Page, label: string, mnemonic: string) {
   await page.waitForTimeout(5000);
 }
 
+async function waitForEntityAdvertised(page: Page, entityId: string) {
+  const advertised = await page.evaluate(async (entityId) => {
+    const target = String(entityId).toLowerCase();
+    const start = Date.now();
+    while (Date.now() - start < 30_000) {
+      try {
+        const res = await fetch(`/api/debug/entities?limit=5000&q=${encodeURIComponent(entityId)}`);
+        if (res.ok) {
+          const body = await res.json();
+          const entities = Array.isArray(body?.entities) ? body.entities : [];
+          const hit = entities.find((e: any) => String(e?.entityId || '').toLowerCase() === target);
+          if (hit && hit.runtimeId) return true;
+        }
+      } catch {
+        // ignore and retry
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    return false;
+  }, entityId);
+  expect(advertised, `Entity ${entityId.slice(0, 12)} not advertised in relay debug entities`).toBe(true);
+}
+
 /** Get first entity from active runtime's env */
 async function getEntity(page: Page) {
   return page.evaluate(() => {
@@ -226,8 +249,13 @@ async function discoverHubs(page: Page): Promise<string[]> {
 }
 
 /** Find a self-payment cycle route using gossip + local account edges */
-async function findSelfCycleRoute(page: Page, selfEntityId: string): Promise<string[]> {
-  const route = await page.evaluate(({ selfEntityId }) => {
+async function findSelfCycleRoute(
+  page: Page,
+  selfEntityId: string,
+  minIntermediates: number = 2,
+  requiredHubs: string[] = [],
+): Promise<string[]> {
+  const route = await page.evaluate(({ selfEntityId, minIntermediates, requiredHubs }) => {
     const env = (window as any).isolatedEnv;
     const replicas = env?.eReplicas;
     const profiles = env?.gossip?.getProfiles?.() || [];
@@ -254,8 +282,10 @@ async function findSelfCycleRoute(page: Page, selfEntityId: string): Promise<str
       }
     }
 
-    const MAX_HOPS = 6;
+    const MAX_HOPS = 8;
     let best: string[] | null = null;
+    const requiredSet = new Set((requiredHubs || []).map((h: string) => String(h).toLowerCase()));
+    const minHopCount = Math.max(2, Number(minIntermediates || 2) + 1);
 
     const dfs = (current: string, path: string[], used: Set<string>) => {
       if (best) return;
@@ -267,9 +297,17 @@ async function findSelfCycleRoute(page: Page, selfEntityId: string): Promise<str
         const nextHops = hops + 1;
         if (nextHops > MAX_HOPS) continue;
         if (next === selfEntityId) {
-          // Require at least 2 hops (A->X->A)
-          if (nextHops >= 2) {
-            best = [...path, selfEntityId];
+          // Require configurable minimum intermediates and required hubs if provided.
+          if (nextHops >= minHopCount) {
+            const candidate = [...path, selfEntityId];
+            if (requiredSet.size > 0) {
+              const middle = candidate.slice(1, -1).map((x) => String(x).toLowerCase());
+              const hasAllRequired = [...requiredSet].every((h) => middle.includes(h));
+              if (!hasAllRequired) {
+                continue;
+              }
+            }
+            best = candidate;
             return;
           }
           continue;
@@ -295,7 +333,7 @@ async function findSelfCycleRoute(page: Page, selfEntityId: string): Promise<str
     }
 
     return best || [];
-  }, { selfEntityId });
+  }, { selfEntityId, minIntermediates, requiredHubs });
 
   return route;
 }
@@ -323,7 +361,35 @@ async function connectHub(page: Page, entityId: string, signerId: string, hubId:
   }, { entityId, signerId, hubId });
   console.log(`[E2E] connectHub result:`, JSON.stringify(r));
   expect(r.ok, `connectHub failed: ${r.error}`).toBe(true);
-  await page.waitForTimeout(SETTLE_MS);
+  // Wait until bilateral account is actually usable (delta exists, no pending frame).
+  const opened = await page.evaluate(async ({ entityId, hubId }) => {
+    const start = Date.now();
+    while (Date.now() - start < 45_000) {
+      const env = (window as any).isolatedEnv;
+      if (!env?.eReplicas) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        continue;
+      }
+      let ready = false;
+      for (const [k, rep] of env.eReplicas.entries()) {
+        if (!String(k).startsWith(entityId + ':')) continue;
+        const acc = rep.state?.accounts?.get(hubId);
+        if (!acc) continue;
+        const hasDelta = !!acc.deltas?.get?.(1);
+        const noPending = !acc.pendingFrame;
+        const atLeastOneFrame = Number(acc.currentHeight || 0) > 0;
+        if (hasDelta && noPending && atLeastOneFrame) {
+          ready = true;
+          break;
+        }
+      }
+      if (ready) return true;
+      await new Promise((resolve) => setTimeout(resolve, 750));
+    }
+    return false;
+  }, { entityId, hubId });
+  console.log(`[E2E] account-open readiness ${entityId.slice(0, 10)}↔${hubId.slice(0, 10)}: ${opened ? 'OPEN' : 'AWAITING'}`);
+  await page.waitForTimeout(opened ? SETTLE_MS : SETTLE_MS * 2);
 }
 
 /** Get USDC outCapacity */
@@ -359,23 +425,31 @@ async function outCap(page: Page, entityId: string, cpId: string): Promise<bigin
 
 /** Faucet 100 USDC (with 30s timeout) */
 async function faucet(page: Page, entityId: string) {
-  const r = await page.evaluate(async (eid) => {
-    try {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 30_000);
-      const resp = await fetch('/api/faucet/offchain', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userEntityId: eid, tokenId: 1, amount: '100' }),
-        signal: ctrl.signal,
-      });
-      clearTimeout(timer);
-      const data = await resp.json();
-      return { ok: resp.ok, status: resp.status, data };
-    } catch (e: any) {
-      return { ok: false, status: 0, data: { error: e.message } };
-    }
-  }, entityId);
-  console.log(`[E2E] Faucet response: status=${r.status} data=${JSON.stringify(r.data)}`);
+  let r: { ok: boolean; status: number; data: any } = { ok: false, status: 0, data: { error: 'not-run' } };
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    r = await page.evaluate(async (eid) => {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 30_000);
+        const resp = await fetch('/api/faucet/offchain', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userEntityId: eid, tokenId: 1, amount: '100' }),
+          signal: ctrl.signal,
+        });
+        clearTimeout(timer);
+        const data = await resp.json();
+        return { ok: resp.ok, status: resp.status, data };
+      } catch (e: any) {
+        return { ok: false, status: 0, data: { error: e.message } };
+      }
+    }, entityId);
+    console.log(`[E2E] Faucet response attempt ${attempt}: status=${r.status} data=${JSON.stringify(r.data)}`);
+    if (r.ok) break;
+    const message = String(r.data?.error || '');
+    const transient = message.includes('SIGNER_RESOLUTION_FAILED') || message.includes('AWAITING') || message.includes('pending');
+    if (!transient || attempt === 4) break;
+    await page.waitForTimeout(3000);
+  }
   expect(r.ok, `Faucet: ${JSON.stringify(r.data)}`).toBe(true);
   await page.waitForTimeout(SETTLE_MS);
 }
@@ -447,10 +521,38 @@ async function screenshot(page: Page, name: string) {
   console.log(`[E2E] 📸 Screenshot: ${name}.png`);
 }
 
+async function resetProdServer(page: Page, preserveHubs = true) {
+  const reset = await page.evaluate(async ({ preserveHubs }) => {
+    try {
+      const response = await fetch('/api/debug/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ preserveHubs }),
+      });
+      const data = await response.json().catch(() => ({}));
+      return { ok: response.ok, status: response.status, data };
+    } catch (error: any) {
+      return { ok: false, status: 0, data: { error: error?.message || String(error) } };
+    }
+  }, { preserveHubs });
+
+  expect(reset.ok, `Server reset failed: ${JSON.stringify(reset.data)}`).toBe(true);
+  console.log(`[E2E] Server reset: preserveHubs=${preserveHubs} replicas=${reset.data?.remainingReplicas} profiles=${reset.data?.remainingProfiles}`);
+}
+
 // ─── Test ─────────────────────────────────────────────────────────
 
 test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
   test.setTimeout(300_000);
+
+  test.beforeEach(async ({ page }) => {
+    await gotoApp(page);
+    await resetProdServer(page, true);
+  });
+
+  test.afterEach(async ({ page }) => {
+    await resetProdServer(page, true);
+  });
 
   test('bidirectional payments through hub', async ({ page }) => {
     page.on('console', msg => {
@@ -465,7 +567,6 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     // ── 1. Navigate ──────────────────────────────────────────────
     console.log('[E2E] 1. Navigate to app');
-    await gotoApp(page);
 
     // ── 2. Create Alice + Bob with random mnemonics ──────────────
     console.log('[E2E] 2. Create runtimes');
@@ -477,6 +578,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     await createRuntime(page, 'alice', aliceMnemonic);
     const alice = await getEntity(page);
     expect(alice, 'Alice entity missing').not.toBeNull();
+    await waitForEntityAdvertised(page, alice!.entityId);
     console.log(`[E2E] Alice: entity=${alice!.entityId.slice(0, 16)}  signer=${alice!.signerId.slice(0, 12)}`);
     await dumpState(page, 'alice-after-create');
 
@@ -484,6 +586,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const bob = await getEntity(page);
     expect(bob, 'Bob entity missing').not.toBeNull();
     expect(bob!.entityId).not.toBe(alice!.entityId);
+    await waitForEntityAdvertised(page, bob!.entityId);
     console.log(`[E2E] Bob: entity=${bob!.entityId.slice(0, 16)}  signer=${bob!.signerId.slice(0, 12)}`);
     await dumpState(page, 'bob-after-create');
 
@@ -655,8 +758,20 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log('[E2E] 10. Self-pay obfuscated loop route');
     const hubs = await discoverHubs(page);
     console.log(`[E2E] Hubs discovered: ${hubs.map(h => h.slice(0, 10)).join(', ')}`);
-    const selfRoute = await findSelfCycleRoute(page, alice!.entityId);
-    expect(selfRoute.length, 'Need at least A->X->A route').toBeGreaterThanOrEqual(3);
+    const preferredThreeHubs = hubs.slice(0, 3);
+    const requireThreeHubs = preferredThreeHubs.length >= 3;
+    const selfRoute = await findSelfCycleRoute(
+      page,
+      alice!.entityId,
+      requireThreeHubs ? 3 : 2,
+      requireThreeHubs ? preferredThreeHubs : [],
+    );
+    expect(
+      selfRoute.length,
+      requireThreeHubs
+        ? 'Need explicit A->H1->H2->H3->A self-route when 3 hubs are visible'
+        : 'Need at least A->X->Y->A route',
+    ).toBeGreaterThanOrEqual(requireThreeHubs ? 5 : 4);
     console.log(`[E2E] Self route selected: ${selfRoute.map(r => r.slice(0, 10)).join(' -> ')}`);
 
     const selfBefore = await outCap(page, alice!.entityId, hubId);
