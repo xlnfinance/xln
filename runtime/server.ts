@@ -1769,9 +1769,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         console.log(`  profile: ${p.entityId.slice(-8)} isHub=${p.metadata?.isHub} caps=[${p.capabilities?.join(',')}]`);
       }
       const hubs = allProfiles.filter(p => p.metadata?.isHub === true && p.capabilities?.includes('faucet'));
-      const fallbackHubs = HUBS
-        .filter(h => h.capabilities?.includes('faucet'))
-        .map(h => ({ entityId: h.entityId }));
+      const fallbackHubs = activeHubEntityIds.map(entityId => ({ entityId }));
       const candidateHubs = hubs.length > 0 ? hubs : fallbackHubs;
       if (candidateHubs.length === 0) {
         return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
