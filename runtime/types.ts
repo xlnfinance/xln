@@ -1632,6 +1632,12 @@ export interface Env {
       mirrorToConsole?: boolean;
     };
     cleanLogs?: string[];
+    routeDeferState?: Map<string, {
+      warnAt: number;
+      gossipAt: number;
+      deferredCount: number;
+      escalated: boolean;
+    }>;
   };
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: any; // Gossip layer for network profiles
