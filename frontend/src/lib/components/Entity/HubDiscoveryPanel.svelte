@@ -423,8 +423,12 @@
     const currentEnv = env;
     if (!currentEnv) return;
     const xln = await getXLN();
-    if (xln.startP2P) {
-      xln.startP2P(currentEnv as any, { relayUrls: [url] });
+    const p2p = xln.getP2P?.(currentEnv as any) as { updateConfig?: (cfg: any) => void } | null | undefined;
+    if (p2p?.updateConfig) {
+      // Runtime must keep a single P2P instance; relay changes are config updates only.
+      p2p.updateConfig({ relayUrls: [url] });
+    } else {
+      error = 'P2P is not running for this runtime yet. Create or restore the runtime first.';
     }
   }
 

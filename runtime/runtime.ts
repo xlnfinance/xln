@@ -306,6 +306,14 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
   return env.runtimeState;
 };
 
+const ENV_P2P_SINGLETON_KEY = Symbol.for('xln.runtime.env.p2p.singleton');
+
+type P2Pish = {
+  matchesIdentity?: (runtimeId: string, signerId?: string) => boolean;
+  updateConfig?: (config: P2PConfig) => void;
+  close?: () => void;
+};
+
 // --- Clean Log Capture (per-runtime, stored on env.runtimeState.cleanLogs) ---
 const getCleanLogBuffer = (env: Env): string[] => {
   const state = ensureRuntimeState(env);
@@ -624,6 +632,21 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     return null;
   }
 
+  const existingGlobalP2P = (env as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY] as P2Pish | undefined;
+  if (existingGlobalP2P && existingGlobalP2P !== state.p2p) {
+    const canReuse =
+      typeof existingGlobalP2P.matchesIdentity === 'function' &&
+      existingGlobalP2P.matchesIdentity(resolvedRuntimeId, config.signerId);
+    if (!canReuse) {
+      throw new Error(`P2P_SINGLETON_VIOLATION: attempted second p2p attachment for env runtimeId=${resolvedRuntimeId}`);
+    }
+    if (typeof existingGlobalP2P.updateConfig === 'function') {
+      existingGlobalP2P.updateConfig(config);
+    }
+    state.p2p = existingGlobalP2P as RuntimeP2P;
+    return state.p2p;
+  }
+
   if (state.p2p) {
     if (state.p2p.matchesIdentity(resolvedRuntimeId, config.signerId)) {
       state.p2p.updateConfig(config);
@@ -659,6 +682,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     },
   });
 
+  (env as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY] = state.p2p;
   state.p2p.connect();
   return state.p2p;
 };
@@ -667,6 +691,10 @@ export const stopP2P = (env: Env): void => {
   const state = ensureRuntimeState(env);
   if (state.p2p) {
     state.p2p.close();
+    const singleton = (env as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY];
+    if (singleton === state.p2p) {
+      delete (env as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY];
+    }
     state.p2p = null;
   }
   state.lastP2PConfig = null;
