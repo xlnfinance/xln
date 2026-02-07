@@ -94,7 +94,8 @@ test.describe('E2E HTLC Payment Flow', () => {
     process.stdout.write('Step 1: Loading app with fresh state...\n');
     await page.goto('https://localhost:8080/app');
     await page.evaluate(() => localStorage.clear());
-    await page.reload({ waitUntil: 'networkidle' });
+    // WebSocket + polling keep network active; networkidle can hang indefinitely.
+    await page.reload({ waitUntil: 'domcontentloaded' });
 
     // Handle access code gate
     const accessInput = page.locator('input[placeholder*="access" i], input[placeholder*="code" i]');

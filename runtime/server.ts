@@ -1769,10 +1769,14 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         console.log(`  profile: ${p.entityId.slice(-8)} isHub=${p.metadata?.isHub} caps=[${p.capabilities?.join(',')}]`);
       }
       const hubs = allProfiles.filter(p => p.metadata?.isHub === true && p.capabilities?.includes('faucet'));
-      if (hubs.length === 0) {
+      const fallbackHubs = HUBS
+        .filter(h => h.capabilities?.includes('faucet'))
+        .map(h => ({ entityId: h.entityId }));
+      const candidateHubs = hubs.length > 0 ? hubs : fallbackHubs;
+      if (candidateHubs.length === 0) {
         return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
       }
-      const hubEntityId = hubs[0].entityId;
+      const hubEntityId = candidateHubs[0].entityId;
       // Get actual signerId from entity's validators (not runtimeId!)
       const hubSignerId = resolveEntityProposerId(env, hubEntityId, 'faucet-offchain');
       console.log(`[FAUCET/OFFCHAIN] hub=${hubEntityId.slice(-8)} signer=${hubSignerId.slice(-8)} amount=${amount} token=${tokenId}`);
