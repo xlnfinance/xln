@@ -204,6 +204,102 @@ async function discoverHub(page: Page): Promise<string> {
   return id!;
 }
 
+/** Discover all hubs visible in gossip */
+async function discoverHubs(page: Page): Promise<string[]> {
+  const hubs = await page.evaluate(async () => {
+    for (let i = 0; i < 45; i++) {
+      try {
+        const env = (window as any).isolatedEnv;
+        const profiles = env?.gossip?.getProfiles?.() || [];
+        const ids = profiles
+          .filter((p: any) => p.metadata?.isHub === true)
+          .map((p: any) => p.entityId)
+          .filter((id: any): id is string => typeof id === 'string');
+        const unique = [...new Set(ids)];
+        if (unique.length > 0) return unique;
+      } catch {}
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    return [];
+  });
+  return hubs;
+}
+
+/** Find a self-payment cycle route using gossip + local account edges */
+async function findSelfCycleRoute(page: Page, selfEntityId: string): Promise<string[]> {
+  const route = await page.evaluate(({ selfEntityId }) => {
+    const env = (window as any).isolatedEnv;
+    const replicas = env?.eReplicas;
+    const profiles = env?.gossip?.getProfiles?.() || [];
+    const adjacency = new Map<string, Set<string>>();
+
+    const addEdge = (a: string, b: string) => {
+      if (!adjacency.has(a)) adjacency.set(a, new Set());
+      if (!adjacency.has(b)) adjacency.set(b, new Set());
+      adjacency.get(a)!.add(b);
+      adjacency.get(b)!.add(a);
+    };
+
+    if (replicas) {
+      for (const [key, rep] of replicas.entries()) {
+        const [entId] = String(key).split(':');
+        if (!entId || !rep?.state?.accounts) continue;
+        for (const cp of rep.state.accounts.keys()) addEdge(entId, String(cp));
+      }
+    }
+    for (const p of profiles) {
+      if (!p?.entityId || !Array.isArray(p?.accounts)) continue;
+      for (const a of p.accounts) {
+        if (a?.counterpartyId) addEdge(p.entityId, a.counterpartyId);
+      }
+    }
+
+    const MAX_HOPS = 6;
+    let best: string[] | null = null;
+
+    const dfs = (current: string, path: string[], used: Set<string>) => {
+      if (best) return;
+      const hops = path.length - 1;
+      if (hops > MAX_HOPS) return;
+      const neighbors = adjacency.get(current);
+      if (!neighbors) return;
+      for (const next of neighbors) {
+        const nextHops = hops + 1;
+        if (nextHops > MAX_HOPS) continue;
+        if (next === selfEntityId) {
+          // Require at least 2 hops (A->X->A)
+          if (nextHops >= 2) {
+            best = [...path, selfEntityId];
+            return;
+          }
+          continue;
+        }
+        if (used.has(next)) continue;
+        used.add(next);
+        path.push(next);
+        dfs(next, path, used);
+        path.pop();
+        used.delete(next);
+      }
+    };
+
+    // Try deeper paths first by ordering neighbors with hub preference.
+    const hubSet = new Set(
+      profiles.filter((p: any) => p?.metadata?.isHub).map((p: any) => p.entityId)
+    );
+    const neighbors = [...(adjacency.get(selfEntityId) || [])]
+      .sort((a, b) => Number(hubSet.has(b)) - Number(hubSet.has(a)));
+    for (const n of neighbors) {
+      if (best) break;
+      dfs(n, [selfEntityId, n], new Set([selfEntityId, n]));
+    }
+
+    return best || [];
+  }, { selfEntityId });
+
+  return route;
+}
+
 /** Open account + 10k USDC credit with hub */
 async function connectHub(page: Page, entityId: string, signerId: string, hubId: string) {
   const r = await page.evaluate(async ({ entityId, signerId, hubId }) => {
@@ -556,6 +652,46 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log('[E2E] ✅ Overspend rejected');
 
     // ── Summary ───────────────────────────────────────────────────
+    console.log('[E2E] 10. Self-pay obfuscated loop route');
+    const hubs = await discoverHubs(page);
+    console.log(`[E2E] Hubs discovered: ${hubs.map(h => h.slice(0, 10)).join(', ')}`);
+    const selfRoute = await findSelfCycleRoute(page, alice!.entityId);
+    expect(selfRoute.length, 'Need at least A->X->A route').toBeGreaterThanOrEqual(3);
+    console.log(`[E2E] Self route selected: ${selfRoute.map(r => r.slice(0, 10)).join(' -> ')}`);
+
+    const selfBefore = await outCap(page, alice!.entityId, hubId);
+    await pay(page, alice!.entityId, alice!.signerId, alice!.entityId, selfRoute, toWei(1));
+    await page.waitForTimeout(5000);
+    const selfAfter = await outCap(page, alice!.entityId, hubId);
+    console.log(`[E2E] Self-pay OUT via hub: ${selfBefore} → ${selfAfter}`);
+    expect(selfAfter, 'Self-pay should not increase outbound unexpectedly').toBeLessThanOrEqual(selfBefore);
+
+    const lockInfo = await page.evaluate((eid) => {
+      const env = (window as any).isolatedEnv;
+      for (const [k, rep] of (env?.eReplicas || new Map()).entries()) {
+        if (String(k).startsWith(eid + ':')) {
+          return { locks: rep?.state?.lockBook?.size || 0 };
+        }
+      }
+      return { locks: -1 };
+    }, alice!.entityId);
+    expect(lockInfo.locks, 'Self-pay route should fully resolve (no lingering locks)').toBe(0);
+
+    const debugCheck = await page.evaluate(async () => {
+      try {
+        const r = await fetch('/api/debug/events?last=200');
+        if (!r.ok) return { ok: false, status: r.status, count: 0 };
+        const body = await r.json();
+        const events = Array.isArray(body?.events) ? body.events : [];
+        return { ok: true, status: r.status, count: events.length };
+      } catch (e: any) {
+        return { ok: false, status: 0, count: 0, error: e?.message };
+      }
+    });
+    expect(debugCheck.ok, `Debug endpoint must be reachable: ${JSON.stringify(debugCheck)}`).toBe(true);
+    expect(debugCheck.count, 'Debug timeline should contain events').toBeGreaterThan(0);
+
+    // ── Summary ───────────────────────────────────────────────────
     console.log('\n[E2E] ══════ SUMMARY ══════');
     console.log(`[E2E] Route: Alice → H1 (1.00 bps) → Bob`);
     console.log(`[E2E] Fee per hop: ${ethers.formatUnits(fee, 18)} USDC on 10 USDC (0.001%)`);
@@ -563,6 +699,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E] Reverse:  Bob sent 5, Alice got ${ethers.formatUnits(reverseReceived, 18)}`);
     console.log(`[E2E] 2nd fwd:  Alice sent 3, Bob got ${ethers.formatUnits(pay2Received, 18)}`);
     console.log(`[E2E] Overspend: correctly rejected`);
+    console.log(`[E2E] Self route: ${selfRoute.map(r => r.slice(0, 6)).join(' -> ')}`);
     console.log('[E2E] ✅ All payment cases passed');
   });
 });

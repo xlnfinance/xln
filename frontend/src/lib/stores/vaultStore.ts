@@ -185,6 +185,31 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
   }
 }
 
+async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
+  try {
+    const runtimeEntry = get(runtimes).get(runtimeId);
+    const env = runtimeEntry?.env;
+    if (!env) return;
+
+    const { getXLN } = await import('./xlnStore');
+    const xln = await getXLN();
+
+    // Stop WS/P2P first to avoid new inbound events while shutting down loop.
+    if (xln.stopP2P) {
+      (xln.stopP2P as any)(env);
+    }
+
+    // Stop async runtime loop if active.
+    env.runtimeState?.stopLoop?.();
+    if (env.runtimeState) {
+      env.runtimeState.loopActive = false;
+      env.runtimeState.stopLoop = null;
+    }
+  } catch (err) {
+    console.warn(`[VaultStore] Failed to cleanup runtime ${runtimeId.slice(0, 12)}:`, err);
+  }
+}
+
   // Runtime operations
   export const vaultOperations = {
     syncRuntime(runtime: Runtime | null) {
@@ -600,27 +625,37 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
   },
 
   // Delete runtime
-  deleteRuntime(runtimeId: string) {
+  async deleteRuntime(runtimeId: string) {
+    await cleanupRuntimeEnv(runtimeId);
+
+    let nextActiveId: string | null = null;
     runtimesState.update(state => {
       const { [runtimeId]: removed, ...remaining } = state.runtimes;
       const remainingIds = Object.keys(remaining);
+      nextActiveId = state.activeRuntimeId === runtimeId
+        ? (remainingIds[0] || null)
+        : state.activeRuntimeId;
 
       return {
         runtimes: remaining,
-        activeRuntimeId: state.activeRuntimeId === runtimeId
-          ? (remainingIds[0] || null)
-          : state.activeRuntimeId
+        activeRuntimeId: nextActiveId
       };
     });
 
+    runtimes.update(r => {
+      r.delete(runtimeId);
+      return r;
+    });
+
+    activeRuntimeId.set(nextActiveId || 'local');
     this.saveToStorage();
     const current = get(runtimesState);
     this.syncRuntime(current.activeRuntimeId ? current.runtimes[current.activeRuntimeId] || null : null);
   },
 
   // Alias for backward compatibility
-  deleteVault(vaultId: string) {
-    this.deleteRuntime(vaultId);
+  async deleteVault(vaultId: string) {
+    await this.deleteRuntime(vaultId);
   },
 
   // Get private key for active signer
@@ -850,11 +885,27 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
   },
 
   // Clear all runtimes
-  clearAll() {
+  async clearAll() {
+    const runtimeIds = Array.from(get(runtimes).keys()).filter(id => id !== 'local');
+    await Promise.all(runtimeIds.map(id => cleanupRuntimeEnv(id)));
+
     runtimesState.set(defaultState);
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(VAULT_STORAGE_KEY);
     }
+
+    runtimes.update(r => {
+      const local = r.get('local') || {
+        id: 'local',
+        type: 'local' as const,
+        label: 'Runtime',
+        env: null,
+        permissions: 'write' as const,
+        status: 'connected' as const
+      };
+      return new Map([[local.id, local]]);
+    });
+    activeRuntimeId.set('local');
     this.syncRuntime(null);
   },
 

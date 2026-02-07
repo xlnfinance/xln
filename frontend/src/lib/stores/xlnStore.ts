@@ -7,6 +7,7 @@ import type { XLNModule, Env, EnvSnapshot, EntityId, ReplicaKey } from '@xln/run
 let XLN: XLNModule | null = null;
 export const xlnInstance = writable<XLNModule | null>(null);
 let warnedMissingXLN = false;
+let unregisterEnvChange: (() => void) | null = null;
 
 async function getXLN(): Promise<XLNModule> {
   if (XLN) return XLN;
@@ -129,8 +130,8 @@ export async function initializeXLN(): Promise<Env> {
     // Store XLN instance separately for function access
     xlnInstance.set(xln);
 
-    // Register callback for automatic reactivity (fires on every process())
-    xln.registerEnvChangeCallback?.((env: Env) => {
+    // Shared callback for automatic reactivity (fires on every process())
+    const onEnvChange = (env: Env) => {
       xlnEnvironment.set(env);
       history.set(env?.history || []);
       currentHeight.set(env?.height || 0);
@@ -164,15 +165,20 @@ export async function initializeXLN(): Promise<Env> {
       if (typeof window !== 'undefined') {
         (window as any).xlnEnv = env;
       }
-    });
+    };
 
     // Load from IndexedDB - main() handles DB timeout internally
     const env = await xln.main();
 
+    // Register callback for THIS env instance (runtime API is env-scoped)
+    if (unregisterEnvChange) {
+      unregisterEnvChange();
+      unregisterEnvChange = null;
+    }
+    unregisterEnvChange = xln.registerEnvChangeCallback?.(env, onEnvChange) || null;
+
     // Set all stores immediately (no derived timing races)
-    xlnEnvironment.set(env);
-    history.set(env?.history || []);
-    currentHeight.set(env?.height || 0);
+    onEnvChange(env);
 
     // Sync to runtimeStore (local runtime)
     import('./runtimeStore').then(({ runtimeOperations }) => {

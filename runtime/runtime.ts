@@ -1862,6 +1862,7 @@ export const process = async (
 
     let entityOutbox: EntityInput[] = [];
     let jOutbox: JInput[] = [];
+    const changedEntityIds = new Set<string>();
     if (hasRuntimeInput) {
       if (!quietRuntimeLogs) {
         console.log(`📥 TICK: Processing ${runtimeInput.entityInputs.length} inputs for [${runtimeInput.entityInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
@@ -1874,6 +1875,16 @@ export const process = async (
         console.log(`🔍 PROCESS: applyRuntimeInput returned entityOutbox=${result.entityOutbox.length}, jOutbox=${result.jOutbox.length}`);
         entityOutbox = result.entityOutbox;
         jOutbox = result.jOutbox;
+        for (const runtimeTx of runtimeInput.runtimeTxs) {
+          if (runtimeTx.type === 'importReplica') {
+            changedEntityIds.add(runtimeTx.entityId.toLowerCase());
+          }
+        }
+        for (const entityInput of runtimeInput.entityInputs) {
+          if (entityInput.entityId) {
+            changedEntityIds.add(entityInput.entityId.toLowerCase());
+          }
+        }
       } catch (error) {
         // Restore runtime mempool on failure (WAL safety)
         mempool.runtimeTxs = [...runtimeInput.runtimeTxs, ...mempool.runtimeTxs];
@@ -1957,10 +1968,22 @@ export const process = async (
     }
 
     // 1b. Re-announce gossip profiles after account state changes (new accounts, capacity shifts)
-    // Without this, routing graph is stale — peers won't know about new connections
-    if (remoteOutputs.length > 0) {
-      const p2p = getP2P(env);
-      if (p2p) {
+    // Broadcast changed local entities so relay routing metadata stays fresh.
+    const p2p = getP2P(env);
+    if (p2p) {
+      const localEntityIds = new Set<string>();
+      for (const replicaKey of env.eReplicas.keys()) {
+        try {
+          localEntityIds.add(extractEntityId(replicaKey).toLowerCase());
+        } catch {
+          // ignore malformed key
+        }
+      }
+      const changedLocalEntityIds = [...changedEntityIds].filter(entityId => localEntityIds.has(entityId));
+      if (changedLocalEntityIds.length > 0) {
+        p2p.announceProfilesForEntities(changedLocalEntityIds, 'entity-state-change');
+      } else if (remoteOutputs.length > 0) {
+        // Backstop for older flows where output exists but change set was empty.
         p2p.announceLocalProfiles();
       }
     }

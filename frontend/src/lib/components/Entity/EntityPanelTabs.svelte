@@ -182,6 +182,14 @@
     symbol: string;
   } | null = null;
   const RESERVE_FAUCET_TIMEOUT_MS = 15000;
+  let pendingOffchainFaucet: {
+    entityId: string;
+    amountLabel: string;
+    tokenSymbol: string;
+    startedAt: number;
+  } | null = null;
+  const OFFCHAIN_FAUCET_TIMEOUT_MS = 30000;
+  const seenPaymentFinalizeEvents = new Set<string>();
 
   // External tokens (ERC20 balances held by signer EOA)
   interface ExternalToken {
@@ -271,6 +279,10 @@
   async function faucetOffchain() {
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
+    if (pendingOffchainFaucet) {
+      toasts.warning('Offchain faucet is already pending. Wait for finalization.');
+      return;
+    }
 
     faucetFunding = true;
     try {
@@ -291,8 +303,12 @@
       }
 
       console.log('[EntityPanel] Offchain faucet success:', result);
-      toasts.success('Received $100 USDC via offchain payment!');
-      // No reload needed - reactive stores will update
+      pendingOffchainFaucet = {
+        entityId,
+        amountLabel: '100',
+        tokenSymbol: 'USDC',
+        startedAt: Date.now(),
+      };
     } catch (err) {
       console.error('[EntityPanel] Offchain faucet failed:', err);
       toasts.error(`Offchain faucet failed: ${(err as Error).message}`);
@@ -717,6 +733,55 @@
     // Fetch reserves and external tokens on mount
     refreshBalances();
   });
+
+  function makeEventKey(snapshot: any, log: any, snapshotIndex: number): string {
+    const h = snapshot?.height ?? snapshotIndex;
+    const id = log?.id ?? -1;
+    const ts = log?.timestamp ?? 0;
+    return `${h}:${id}:${ts}`;
+  }
+
+  function maybeFinalizeOffchainFaucet() {
+    if (!pendingOffchainFaucet || !Array.isArray(activeHistory) || activeHistory.length === 0) return;
+
+    const targetEntityId = pendingOffchainFaucet.entityId.toLowerCase();
+    const cutoffTs = pendingOffchainFaucet.startedAt;
+
+    // Scan recent history only; finalize event should appear shortly after request.
+    const startIndex = Math.max(0, activeHistory.length - 120);
+    for (let i = startIndex; i < activeHistory.length; i += 1) {
+      const snapshot: any = activeHistory[i];
+      const logs: any[] = Array.isArray(snapshot?.logs) ? snapshot.logs : [];
+      for (const log of logs) {
+        if (log?.message !== 'PaymentFinalized') continue;
+        if (typeof log?.timestamp === 'number' && log.timestamp < cutoffTs) continue;
+
+        const data = (log?.data || {}) as Record<string, unknown>;
+        const rawEntityId = data['entityId'];
+        const logEntity = typeof rawEntityId === 'string' ? rawEntityId.toLowerCase() : '';
+        if (logEntity !== targetEntityId) continue;
+
+        // We only want the final recipient confirmation, not sender-side completion.
+        const isFinalRecipient = !data['outboundEntity'];
+        if (!isFinalRecipient) continue;
+
+        const eventKey = makeEventKey(snapshot, log, i);
+        if (seenPaymentFinalizeEvents.has(eventKey)) continue;
+        seenPaymentFinalizeEvents.add(eventKey);
+
+        toasts.success(`Received $${pendingOffchainFaucet.amountLabel} ${pendingOffchainFaucet.tokenSymbol} via offchain payment!`);
+        pendingOffchainFaucet = null;
+        return;
+      }
+    }
+
+    if (Date.now() - pendingOffchainFaucet.startedAt > OFFCHAIN_FAUCET_TIMEOUT_MS) {
+      toasts.error('Offchain faucet timed out before payment finalization.');
+      pendingOffchainFaucet = null;
+    }
+  }
+
+  $: maybeFinalizeOffchainFaucet();
 
   function saveContact() {
     if (!newContactName.trim() || !newContactId.trim()) return;
@@ -1193,8 +1258,14 @@
           {/if}
 
         {:else if activeTab === 'accounts'}
-          <button class="btn-faucet" on:click={faucetOffchain} disabled={faucetFunding}>
-            {faucetFunding ? 'Funding...' : '💧 Get Test Funds (Offchain)'}
+          <button class="btn-faucet" on:click={faucetOffchain} disabled={faucetFunding || !!pendingOffchainFaucet}>
+            {#if faucetFunding}
+              Funding...
+            {:else if pendingOffchainFaucet}
+              Waiting for finalization...
+            {:else}
+              💧 Get Test Funds (Offchain)
+            {/if}
           </button>
           <AccountList {replica} on:select={handleAccountSelect} />
           <div class="account-open-sections">

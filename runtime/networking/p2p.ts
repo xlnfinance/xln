@@ -87,6 +87,8 @@ const isHexPublicKey = (value: string): boolean => {
   return hex.length === 66 || hex.length === 130;
 };
 
+const normalizeId = (value: string): string => value.toLowerCase();
+
 const GOSSIP_POLL_MS = 1000; // Poll relay every second
 
 export class RuntimeP2P {
@@ -105,6 +107,8 @@ export class RuntimeP2P {
   private pendingByRuntime = new Map<string, EntityInput[]>();
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private encryptionKeyPair: P2PKeyPair;
+  private announceTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingAnnounceEntities = new Set<string>();
 
   constructor(options: RuntimeP2POptions) {
     this.env = options.env;
@@ -183,10 +187,12 @@ export class RuntimeP2P {
           // Lookup target's public key from gossip
           const profiles = this.env.gossip?.getProfiles?.() || [];
           const targetProfile = profiles.find((p: any) => p.runtimeId === targetRuntimeId);
-          if (!targetProfile?.metadata?.encryptionPubKey) return null;
+          const pubKeyHex =
+            targetProfile?.metadata?.encryptionPubKey ||
+            targetProfile?.metadata?.cryptoPublicKey;
+          if (!pubKeyHex) return null;
           try {
-            const hexToPubKey = require('./p2p-crypto').hexToPubKey;
-            return hexToPubKey(targetProfile.metadata.encryptionPubKey);
+            return hexToPubKey(pubKeyHex);
           } catch {
             return null;
           }
@@ -245,6 +251,11 @@ export class RuntimeP2P {
 
   close() {
     this.stopPolling();
+    if (this.announceTimer) {
+      clearTimeout(this.announceTimer);
+      this.announceTimer = null;
+    }
+    this.pendingAnnounceEntities.clear();
     this.closeClients();
     this.pendingByRuntime.clear();
   }
@@ -313,6 +324,12 @@ export class RuntimeP2P {
     return !!this.getActiveClient();
   }
 
+  sendDebugEvent(payload: unknown): boolean {
+    const client = this.getActiveClient();
+    if (!client) return false;
+    return client.sendDebugEvent(payload);
+  }
+
   private getActiveClient(): RuntimeWsClient | null {
     return this.clients.find(client => client.isOpen()) || null;
   }
@@ -371,7 +388,7 @@ export class RuntimeP2P {
   }
 
   async announceLocalProfiles() {
-    const profiles = await this.getLocalProfiles();
+    const profiles = await this.getLocalProfilesForEntities();
     if (profiles.length === 0) return;
     for (const profile of profiles) {
       this.env.gossip?.announce?.(profile);
@@ -389,8 +406,45 @@ export class RuntimeP2P {
     }
   }
 
-  private async getLocalProfiles(): Promise<Profile[]> {
+  announceProfilesForEntities(entityIds: string[], reason: string = 'runtime-change') {
+    if (!entityIds || entityIds.length === 0) return;
+    for (const entityId of entityIds) {
+      if (!entityId) continue;
+      this.pendingAnnounceEntities.add(normalizeId(entityId));
+    }
+    if (this.announceTimer) return;
+    this.announceTimer = setTimeout(() => {
+      const targets = Array.from(this.pendingAnnounceEntities);
+      this.pendingAnnounceEntities.clear();
+      this.announceTimer = null;
+      this.announceProfilesNow(targets, reason).catch(error => {
+        console.warn(`P2P_ANNOUNCE_FAILED (${reason}): ${(error as Error).message}`);
+      });
+    }, 150);
+  }
+
+  private async announceProfilesNow(entityIds: string[], reason: string) {
+    const profiles = await this.getLocalProfilesForEntities(entityIds);
+    if (profiles.length === 0) return;
+    for (const profile of profiles) {
+      this.env.gossip?.announce?.(profile);
+    }
+    const client = this.getActiveClient();
+    if (client) {
+      client.sendGossipAnnounce(this.runtimeId, { profiles });
+    }
+    for (const seedId of this.seedRuntimeIds) {
+      this.announceProfilesTo(seedId, profiles);
+    }
+    console.log(`P2P_PROFILE_ANNOUNCE: reason=${reason} count=${profiles.length}`);
+  }
+
+  private async getLocalProfilesForEntities(entityIds?: string[]): Promise<Profile[]> {
     if (!this.env.eReplicas || this.env.eReplicas.size === 0) return [];
+    const targetSet = entityIds && entityIds.length > 0 ? new Set(entityIds.map(normalizeId)) : null;
+    const advertisedSet = this.advertiseEntityIds && this.advertiseEntityIds.length > 0
+      ? new Set(this.advertiseEntityIds.map(normalizeId))
+      : null;
     const profiles: Profile[] = [];
     const seen = new Set<string>();
     for (const [replicaKey, replica] of this.env.eReplicas.entries()) {
@@ -400,9 +454,11 @@ export class RuntimeP2P {
       } catch {
         continue;
       }
-      if (seen.has(entityId)) continue;
-      if (this.advertiseEntityIds && !this.advertiseEntityIds.includes(entityId)) continue;
-      seen.add(entityId);
+      const normalizedEntityId = normalizeId(entityId);
+      if (seen.has(normalizedEntityId)) continue;
+      if (advertisedSet && !advertisedSet.has(normalizedEntityId)) continue;
+      if (targetSet && !targetSet.has(normalizedEntityId)) continue;
+      seen.add(normalizedEntityId);
 
       // MONOTONIC TIMESTAMP: Ensure timestamp grows even if env.timestamp doesn't change
       // Get last announced timestamp for this entity from gossip

@@ -24,6 +24,7 @@ export type RuntimeWsMessageType =
   | 'hello'
   | 'runtime_input'
   | 'entity_input'
+  | 'debug_event'
   | 'gossip_request'
   | 'gossip_response'
   | 'gossip_announce'

@@ -72,6 +72,8 @@ export class RuntimeWsClient {
   private closed = false;
   private connecting = false;
   private options: RuntimeWsClientOptions;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempts = 0;
 
   constructor(options: RuntimeWsClientOptions) {
     this.options = options;
@@ -102,6 +104,7 @@ export class RuntimeWsClient {
     if ('on' in this.ws) {
       this.ws.on('open', () => {
         this.connecting = false;
+        this.reconnectAttempts = 0;
         console.log(`[WS] Connected to ${this.options.url}`);
         this.sendHello();
         this.options.onOpen?.();
@@ -110,17 +113,20 @@ export class RuntimeWsClient {
       this.ws.on('close', () => {
         this.connecting = false;
         if (!this.closed) {
-          console.error(`[WS] Connection lost to ${this.options.url} — no auto-reconnect`);
+          console.error(`[WS] Connection lost to ${this.options.url} — scheduling reconnect`);
           this.options.onError?.(new Error(`WS_DISCONNECTED: Connection lost to ${this.options.url}`));
+          this.scheduleReconnect();
         }
       });
       this.ws.on('error', (err: Error) => {
         this.connecting = false;
         this.options.onError?.(err);
+        if (!this.closed) this.scheduleReconnect();
       });
     } else {
       this.ws.onopen = () => {
         this.connecting = false;
+        this.reconnectAttempts = 0;
         console.log(`[WS] Connected to ${this.options.url}`);
         this.sendHello();
         this.options.onOpen?.();
@@ -129,15 +135,30 @@ export class RuntimeWsClient {
       this.ws.onclose = () => {
         this.connecting = false;
         if (!this.closed) {
-          console.error(`[WS] Connection lost to ${this.options.url} — no auto-reconnect`);
+          console.error(`[WS] Connection lost to ${this.options.url} — scheduling reconnect`);
           this.options.onError?.(new Error(`WS_DISCONNECTED: Connection lost to ${this.options.url}`));
+          this.scheduleReconnect();
         }
       };
       this.ws.onerror = (event: Event) => {
         this.connecting = false;
         this.options.onError?.(new Error(`WebSocket error: ${event.type}`));
+        if (!this.closed) this.scheduleReconnect();
       };
     }
+  }
+
+  private scheduleReconnect() {
+    if (this.closed || this.connecting || this.isOpen()) return;
+    if (this.reconnectTimer) return;
+    const cappedAttempts = Math.min(this.reconnectAttempts, 6);
+    const delayMs = Math.min(2000, 150 * (2 ** cappedAttempts));
+    this.reconnectAttempts += 1;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.closed) return;
+      this.connect().catch(error => this.options.onError?.(error as Error));
+    }, delayMs);
   }
 
   private sendHello() {
@@ -183,12 +204,24 @@ export class RuntimeWsClient {
       // Reject unencrypted entity_input messages
       if (!msg.encrypted) {
         console.error(`❌ WS-CLIENT: Rejected unencrypted entity_input from ${msg.from}`);
+        this.sendDebugEvent({
+          level: 'error',
+          code: 'P2P_UNENCRYPTED',
+          message: 'Rejected unencrypted entity_input',
+          from: msg.from,
+        });
         this.options.onError?.(new Error(`P2P_UNENCRYPTED: Received unencrypted entity_input from ${msg.from}`));
         return;
       }
 
       if (!this.options.encryptionKeyPair) {
         console.error(`❌ WS-CLIENT: No encryption keypair for decryption`);
+        this.sendDebugEvent({
+          level: 'error',
+          code: 'P2P_NO_DECRYPTION',
+          message: 'Missing encryption keypair for decrypt',
+          from: msg.from,
+        });
         this.options.onError?.(new Error('P2P_NO_DECRYPTION: Cannot decrypt without keypair'));
         return;
       }
@@ -200,6 +233,12 @@ export class RuntimeWsClient {
         // Decrypted successfully
       } catch (decryptError) {
         console.error(`❌ WS-CLIENT-DECRYPT-FAILED:`, decryptError);
+        this.sendDebugEvent({
+          level: 'error',
+          code: 'DECRYPT_FAIL',
+          message: (decryptError as Error).message,
+          from: msg.from,
+        });
         this.options.onError?.(decryptError as Error);
         return;
       }
@@ -301,6 +340,16 @@ export class RuntimeWsClient {
     });
   }
 
+  sendDebugEvent(payload: unknown): boolean {
+    return this.sendRaw({
+      type: 'debug_event',
+      id: makeMessageId(),
+      from: this.options.runtimeId,
+      timestamp: nextTimestamp(),
+      payload,
+    });
+  }
+
   private sendRaw(msg: RuntimeWsMessage): boolean {
     if (!this.ws) return false;
     if ('readyState' in this.ws && this.ws.readyState !== 1) return false;
@@ -321,6 +370,10 @@ export class RuntimeWsClient {
   close() {
     this.closed = true;
     this.connecting = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     this.ws?.close();
     this.ws = null;
   }
