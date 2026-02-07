@@ -210,6 +210,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         for (const accountTx of justCommittedFrame.accountTxs) {
           if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: Checking committed tx type=${accountTx.type}`);
 
+          // Keep lockBook aligned with finalized account-level HTLC lifecycle.
+          if (accountTx.type === 'htlc_resolve') {
+            newState.lockBook.delete(accountTx.data.lockId);
+          }
+
           // === J-EVENT BILATERAL CONSENSUS ===
           if (accountTx.type === 'j_event_claim') {
             const { jHeight, jBlockHash, events, observedAt } = accountTx.data;
@@ -299,6 +304,12 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 console.log(`🔓 Decrypted envelope structure: ${JSON.stringify(envelope, null, 2).slice(0, 300)}...`);
               } catch (e) {
                 console.log(`❌ HTLC-GATE: ENVELOPE_DECRYPT_FAIL - ${e instanceof Error ? e.message : String(e)} [lockId=${lock.lockId.slice(0,16)}]`);
+                env.error('network', 'ENVELOPE_DECRYPT_FAIL', {
+                  lockId: lock.lockId,
+                  reason: e instanceof Error ? e.message : String(e),
+                  fromEntityId: input.fromEntityId,
+                  toEntityId: input.toEntityId,
+                }, state.entityId);
                 console.log(`🧅 ═════════════════════════════════════════════════════════════`);
                 continue;
               }
@@ -327,6 +338,12 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 console.log(`🔓 Decrypted envelope structure: ${JSON.stringify(envelope, null, 2).slice(0, 300)}...`);
               } catch (e) {
                 console.log(`❌ HTLC-GATE: ENVELOPE_DECRYPT_FAIL - ${e instanceof Error ? e.message : String(e)} [lockId=${lock.lockId.slice(0,16)}]`);
+                env.error('network', 'ENVELOPE_DECRYPT_FAIL', {
+                  lockId: lock.lockId,
+                  reason: e instanceof Error ? e.message : String(e),
+                  fromEntityId: input.fromEntityId,
+                  toEntityId: input.toEntityId,
+                }, state.entityId);
                 console.log(`🧅 ═════════════════════════════════════════════════════════════`);
                 continue;
               }
@@ -358,6 +375,13 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             }
             if (lock.hashlock !== accountTx.data.hashlock) {
               console.log(`❌ HTLC: Envelope hashlock mismatch: lock=${lock.hashlock.slice(0,16)}..., tx=${accountTx.data.hashlock.slice(0,16)}...`);
+              env.error('consensus', 'HTLC_ENVELOPE_HASHLOCK_MISMATCH', {
+                lockId: lock.lockId,
+                lockHashlock: lock.hashlock,
+                txHashlock: accountTx.data.hashlock,
+                fromEntityId: input.fromEntityId,
+                toEntityId: input.toEntityId,
+              }, state.entityId);
               console.log(`🧅 ═════════════════════════════════════════════════════════════`);
               continue;
             }
@@ -668,6 +692,13 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           } else {
             console.log(`✅ HTLC: Payment complete (we initiated)`);
           }
+          env.emit('PaymentFinalized', {
+            hashlock,
+            secret,
+            inboundEntity: route.inboundEntity,
+            outboundEntity: route.outboundEntity,
+            entityId: state.entityId,
+          });
         } else {
           console.log(`⚠️ HTLC: No route found for hashlock ${hashlock.slice(0,16)}...`);
         }
@@ -719,6 +750,17 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     } else {
       console.error(`❌ Frame consensus failed: ${result.error}`);
       addMessage(newState, `❌ ${result.error}`);
+      env.emit('PaymentFailed', {
+        entityId: state.entityId,
+        fromEntityId: input.fromEntityId,
+        toEntityId: input.toEntityId,
+        reason: result.error || 'unknown',
+      });
+      env.error('consensus', 'FRAME_CONSENSUS_FAILED', {
+        reason: result.error || 'unknown',
+        fromEntityId: input.fromEntityId,
+        toEntityId: input.toEntityId,
+      }, state.entityId);
     }
   } else if (!input.settleAction) {
     // Only error if there was no settleAction either

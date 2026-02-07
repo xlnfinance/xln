@@ -76,8 +76,20 @@ export async function createOnionEnvelopes(
   }
 
   // MEDIUM-8: Detect loops (duplicate entities in route)
+  // Allow exactly one special case for privacy routes:
+  // - sender === recipient (self-pay), with unique intermediate hops.
   const uniqueEntities = new Set(route);
-  if (uniqueEntities.size !== route.length) {
+  const isSelfRoute = route[0] === route[route.length - 1];
+  if (isSelfRoute) {
+    const intermediates = route.slice(1, -1);
+    const uniqueIntermediates = new Set(intermediates);
+    const expectedUnique = route.length - 1; // all unique except sender repeated at end
+    const hasOnlyAllowedRepeat = uniqueEntities.size === expectedUnique;
+    const hasDuplicateIntermediates = uniqueIntermediates.size !== intermediates.length;
+    if (!hasOnlyAllowedRepeat || hasDuplicateIntermediates) {
+      throw new Error(`Route contains invalid self-loop duplicates`);
+    }
+  } else if (uniqueEntities.size !== route.length) {
     throw new Error(`Route contains loops: ${route.length} entities but only ${uniqueEntities.size} unique`);
   }
 

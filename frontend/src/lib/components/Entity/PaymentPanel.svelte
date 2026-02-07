@@ -28,8 +28,19 @@
   let useHtlc = true; // HTLC by default (atomic), toggle for direct
   let findingRoutes = false;
   let sendingPayment = false;
-  let routes: any[] = [];
+  type RouteOption = {
+    path: string[];
+    hops: Array<{ from: string; to: string; fee: bigint; feePPM: number }>;
+    totalFee: bigint;
+    totalAmount: bigint;
+    probability: number;
+    obfuscationScore: number;
+  };
+  let routes: RouteOption[] = [];
   let selectedRouteIndex = -1;
+  const MAX_ROUTES = 100;
+  const MAX_PATH_HOPS = 6;
+  const MIN_SELF_HOPS = 2;
 
   // Reactive stores
   $: currentReplicas = contextReplicas ? $contextReplicas : (isolatedReplicas ? $isolatedReplicas : $replicas);
@@ -90,37 +101,86 @@
     return adjacency;
   }
 
-  // BFS pathfinding over network adjacency graph
-  function findPathsFromGraph(adjacency: Map<string, Set<string>>, startId: string, targetId: string): Array<{ path: string[], probability: number }> {
-    const maxDepth = 5;
-    const foundPaths: Array<{ path: string[], probability: number }> = [];
-    const queue: Array<{ current: string, path: string[], depth: number }> = [
-      { current: startId, path: [startId], depth: 0 }
-    ];
-    const visited = new Set<string>();
+  function parseAmountToWei(input: string, decimals = 18): bigint {
+    const normalized = input.trim();
+    if (!/^\d+(\.\d+)?$/.test(normalized)) {
+      throw new Error('Amount must be a positive decimal number');
+    }
+    const [wholeRaw, fracRaw = ''] = normalized.split('.');
+    const whole = BigInt(wholeRaw);
+    const frac = fracRaw.slice(0, decimals).padEnd(decimals, '0');
+    const fracValue = frac.length > 0 ? BigInt(frac) : 0n;
+    return whole * (10n ** BigInt(decimals)) + fracValue;
+  }
 
-    while (queue.length > 0 && foundPaths.length < 5) {
-      const { current, path, depth } = queue.shift()!;
-      if (depth > maxDepth) continue;
-      if (current === targetId) {
-        foundPaths.push({ path, probability: 1.0 / (path.length - 1) });
-        continue;
-      }
+  // Enumerate simple paths up to a hop cap; for self-pay enumerate cycles back to self.
+  function findPathsFromGraph(adjacency: Map<string, Set<string>>, startId: string, targetId: string): string[][] {
+    const results: string[][] = [];
+    const seen = new Set<string>();
+    const isSelfTarget = startId === targetId;
 
-      if (visited.has(current)) continue;
-      visited.add(current);
+    const scorePath = (path: string[]) => {
+      const hops = path.length - 1;
+      const intermediates = Math.max(0, path.length - 2);
+      const distinct = new Set(path).size;
+      // Prefer more obfuscation but keep deterministic ordering.
+      return (intermediates * 1000) + (distinct * 10) - hops;
+    };
+
+    const pushPath = (path: string[]) => {
+      const key = path.join('>');
+      if (seen.has(key)) return;
+      seen.add(key);
+      results.push(path);
+    };
+
+    const dfs = (current: string, path: string[], used: Set<string>) => {
+      if (results.length >= MAX_ROUTES) return;
+      const hops = path.length - 1;
+      if (hops > MAX_PATH_HOPS) return;
 
       const neighbors = adjacency.get(current);
-      if (!neighbors) continue;
+      if (!neighbors || neighbors.size === 0) return;
 
-      for (const neighbor of neighbors) {
-        if (!path.includes(neighbor)) {
-          queue.push({ current: neighbor, path: [...path, neighbor], depth: depth + 1 });
+      for (const next of neighbors) {
+        if (results.length >= MAX_ROUTES) break;
+        const nextHops = hops + 1;
+        if (nextHops > MAX_PATH_HOPS) continue;
+
+        if (isSelfTarget) {
+          if (next === startId) {
+            if (nextHops >= MIN_SELF_HOPS) {
+              pushPath([...path, startId]);
+            }
+            continue;
+          }
+          if (used.has(next)) continue;
+          used.add(next);
+          path.push(next);
+          dfs(next, path, used);
+          path.pop();
+          used.delete(next);
+          continue;
         }
-      }
-    }
 
-    return foundPaths.sort((a, b) => a.path.length - b.path.length);
+        if (next === targetId) {
+          pushPath([...path, targetId]);
+          continue;
+        }
+        if (used.has(next) || next === startId) continue;
+        used.add(next);
+        path.push(next);
+        dfs(next, path, used);
+        path.pop();
+        used.delete(next);
+      }
+    };
+
+    dfs(startId, [startId], new Set([startId]));
+
+    return results
+      .sort((a, b) => scorePath(b) - scorePath(a))
+      .slice(0, MAX_ROUTES);
   }
 
   async function findRoutes() {
@@ -135,12 +195,10 @@
       const env = currentEnv;
       if (!env) throw new Error('Environment not ready');
 
-      // Parse amount
-      const decimals = 18;
-      const amountParts = String(amount).split('.');
-      const wholePart = BigInt(amountParts[0] || 0);
-      const decimalPart = (amountParts[1] || '').padEnd(decimals, '0').slice(0, decimals);
-      const amountInSmallestUnit = wholePart * BigInt(10 ** decimals) + BigInt(decimalPart || 0);
+      const amountInSmallestUnit = parseAmountToWei(amount, 18);
+      if (amountInSmallestUnit <= 0n) {
+        throw new Error('Amount must be greater than zero');
+      }
 
       if (!currentReplicas) throw new Error('Replicas not available');
       const adjacency = buildNetworkAdjacency(env, currentReplicas);
@@ -150,20 +208,24 @@
         throw new Error(`No route found to ${formatShortId(targetEntityId)}`);
       }
 
-      routes = foundPaths.map((pathInfo) => {
-        const hops = pathInfo.path.slice(0, -1).map((from, i) => ({
+      routes = foundPaths.map((path) => {
+        const hops = path.slice(0, -1).map((from, i) => ({
           from,
-          to: pathInfo.path[i + 1]!,
+          to: path[i + 1]!,
           fee: 0n,
           feePPM: 0,
         }));
+        const hopCount = hops.length;
+        const obfuscationScore = Math.max(0, path.length - 2);
+        const probability = Math.max(0.01, 1 / (hopCount + 1));
 
         return {
-          path: pathInfo.path,
+          path,
           hops,
           totalFee: 0n,
           totalAmount: amountInSmallestUnit,
-          probability: pathInfo.probability,
+          probability,
+          obfuscationScore,
         };
       });
 
@@ -262,7 +324,7 @@
     value={targetEntityId}
     entities={allEntities}
     {contacts}
-    excludeId={entityId}
+    excludeId=""
     placeholder="Select recipient..."
     disabled={findingRoutes || sendingPayment}
     on:change={handleTargetChange}
@@ -327,7 +389,7 @@
               {route.path.map(formatShortId).join(' -> ')}
             </span>
             <span class="route-meta">
-              {route.hops.length} hop{route.hops.length !== 1 ? 's' : ''} | {(route.probability * 100).toFixed(0)}% success
+              {route.hops.length} hop{route.hops.length !== 1 ? 's' : ''} | obfuscation {route.obfuscationScore} | {(route.probability * 100).toFixed(0)}% success
             </span>
           </div>
         </label>
@@ -441,6 +503,8 @@
   .routes {
     padding-top: 16px;
     border-top: 1px solid #292524;
+    max-height: 360px;
+    overflow-y: auto;
   }
 
   .routes h4 {

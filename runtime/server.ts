@@ -38,6 +38,7 @@ const HUB_SEED = process.env.HUB_SEED ?? 'xln-main-hub-2026';
 
 let tokenCatalogCache: JTokenInfo[] | null = null;
 let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
+let processGuardsInstalled = false;
 
  
 
@@ -422,6 +423,64 @@ const pendingMessages = new Map<string, any[]>();
 const gossipProfiles = new Map<string, { profile: any; timestamp: number }>();
 let relayServerId = DEFAULT_OPTIONS.serverId ?? 'xln-server';
 
+type RelayDebugEvent = {
+  id: number;
+  ts: number;
+  event: string;
+  runtimeId?: string;
+  from?: string;
+  to?: string;
+  msgType?: string;
+  status?: string;
+  reason?: string;
+  encrypted?: boolean;
+  size?: number;
+  queueSize?: number;
+  details?: unknown;
+};
+
+const relayDebugEvents: RelayDebugEvent[] = [];
+const MAX_RELAY_DEBUG_EVENTS = 5000;
+let relayDebugId = 0;
+
+const pushRelayDebugEvent = (event: Omit<RelayDebugEvent, 'id' | 'ts'>): void => {
+  relayDebugId += 1;
+  relayDebugEvents.push({
+    id: relayDebugId,
+    ts: Date.now(),
+    ...event,
+  });
+  if (relayDebugEvents.length > MAX_RELAY_DEBUG_EVENTS) {
+    relayDebugEvents.shift();
+  }
+};
+
+const installProcessSafetyGuards = (): void => {
+  if (processGuardsInstalled) return;
+  processGuardsInstalled = true;
+
+  process.on('unhandledRejection', (reason) => {
+    const message = reason instanceof Error ? reason.message : String(reason);
+    const stack = reason instanceof Error ? reason.stack : undefined;
+    console.error(`[PROCESS] Unhandled rejection: ${message}`);
+    pushRelayDebugEvent({
+      event: 'error',
+      reason: 'UNHANDLED_REJECTION',
+      details: { message, stack },
+    });
+  });
+
+  process.on('uncaughtException', (error) => {
+    const message = error?.message || 'Unknown uncaught exception';
+    console.error(`[PROCESS] Uncaught exception: ${message}`);
+    pushRelayDebugEvent({
+      event: 'error',
+      reason: 'UNCAUGHT_EXCEPTION',
+      details: { message, stack: error?.stack },
+    });
+  });
+};
+
 let wsCounter = 0;
 const nextWsTimestamp = () => ++wsCounter;
 
@@ -516,10 +575,24 @@ const serveStatic = async (pathname: string, staticDir: string): Promise<Respons
 
 const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
   const { type, to, from, payload, id } = msg;
+  let size = 0;
+  try {
+    size = JSON.stringify(msg).length;
+  } catch {
+    size = 0;
+  }
   // Only log non-gossip messages (gossip fires every 1s per client)
   if (type !== 'gossip_request' && type !== 'gossip_response' && type !== 'gossip_announce') {
     console.log(`[RELAY-MSG] type=${type} from=${from?.slice?.(0,10) || 'none'} to=${to?.slice?.(0,10) || 'none'}`);
   }
+  pushRelayDebugEvent({
+    event: 'message',
+    from,
+    to,
+    msgType: type,
+    encrypted: msg.encrypted === true,
+    size,
+  });
 
   // Hello - register client
   if (type === 'hello' && from) {
@@ -528,6 +601,13 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
       existing.ws.close();
     }
     clients.set(from, { ws, runtimeId: from, lastSeen: nextWsTimestamp(), topics: new Set() });
+    pushRelayDebugEvent({
+      event: 'hello',
+      runtimeId: from,
+      from,
+      msgType: type,
+      status: 'connected',
+    });
 
     // Flush pending messages
     const pending = pendingMessages.get(from) || [];
@@ -547,6 +627,13 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
     for (const profile of profiles) {
       if (storeGossipProfile(profile)) stored += 1;
     }
+    pushRelayDebugEvent({
+      event: 'gossip_store',
+      from,
+      msgType: type,
+      status: 'stored',
+      details: { received: profiles.length, stored },
+    });
     ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'stored', count: stored }));
     return;
   }
@@ -554,6 +641,13 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
   // Gossip request: return all stored profiles
   if (type === 'gossip_request') {
     const profiles = getAllGossipProfiles();
+    pushRelayDebugEvent({
+      event: 'gossip_request',
+      from,
+      to,
+      msgType: type,
+      details: { returnedProfiles: profiles.length },
+    });
     ws.send(safeStringify({
       type: 'gossip_response',
       id: `gossip_${Date.now()}`,
@@ -566,6 +660,19 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
     return;
   }
 
+  // Client-sent debug event (captured by relay and queryable via HTTP)
+  if (type === 'debug_event') {
+    pushRelayDebugEvent({
+      event: 'debug_event',
+      from,
+      to,
+      msgType: type,
+      details: payload,
+    });
+    ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'stored' }));
+    return;
+  }
+
   // Ping/pong
   if (type === 'ping') {
     ws.send(safeStringify({ type: 'pong', inReplyTo: id }));
@@ -575,6 +682,13 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
   // Routable messages
   if (type === 'entity_input' || type === 'runtime_input' || type === 'gossip_request' || type === 'gossip_response' || type === 'gossip_announce') {
     if (!to) {
+      pushRelayDebugEvent({
+        event: 'error',
+        from,
+        msgType: type,
+        status: 'rejected',
+        reason: 'Missing target runtimeId',
+      });
       ws.send(safeStringify({ type: 'error', error: 'Missing target runtimeId' }));
       return;
     }
@@ -585,6 +699,14 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
     if (target) {
       console.log(`[RELAY] → forwarding to WS client`);
       target.ws.send(safeStringify(msg));
+      pushRelayDebugEvent({
+        event: 'delivery',
+        from,
+        to,
+        msgType: type,
+        encrypted: msg.encrypted === true,
+        status: 'delivered',
+      });
       ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'delivered' }));
       return;
     }
@@ -608,10 +730,27 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
         }
         await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: [{ ...input, from }] });
         console.log(`[RELAY] → delivered to runtime`);
+        pushRelayDebugEvent({
+          event: 'delivery',
+          from,
+          to,
+          msgType: type,
+          encrypted: msg.encrypted === true,
+          status: 'delivered-local',
+          details: { entityId: input.entityId, txs: input.entityTxs?.length ?? 0 },
+        });
         ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'delivered' }));
         return;
       } catch (error) {
         console.log(`[RELAY] Local delivery failed: ${(error as Error).message}`);
+        pushRelayDebugEvent({
+          event: 'error',
+          from,
+          to,
+          msgType: type,
+          status: 'local-delivery-failed',
+          reason: (error as Error).message,
+        });
       }
     }
 
@@ -621,10 +760,27 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
     if (queue.length > 200) queue.shift();
     pendingMessages.set(to, queue);
     console.log(`[RELAY] → queued (no client, queue=${queue.length})`);
+    pushRelayDebugEvent({
+      event: 'delivery',
+      from,
+      to,
+      msgType: type,
+      encrypted: msg.encrypted === true,
+      status: 'queued',
+      queueSize: queue.length,
+    });
     ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'queued' }));
     return;
   }
 
+  pushRelayDebugEvent({
+    event: 'error',
+    from,
+    to,
+    msgType: type,
+    status: 'unsupported',
+    reason: `Unknown message type: ${type}`,
+  });
   ws.send(safeStringify({ type: 'error', error: `Unknown message type: ${type}` }));
 };
 
@@ -703,6 +859,38 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     return new Response(JSON.stringify({
       count: clients.size,
       clients: Array.from(clients.keys()),
+    }), { headers });
+  }
+
+  // Relay debug timeline (single source for network + critical runtime events)
+  if (pathname === '/api/debug/events') {
+    const url = new URL(req.url);
+    const last = Math.max(1, Math.min(5000, Number(url.searchParams.get('last') || '200')));
+    const event = url.searchParams.get('event') || undefined;
+    const runtimeId = url.searchParams.get('runtimeId') || undefined;
+    const from = url.searchParams.get('from') || undefined;
+    const to = url.searchParams.get('to') || undefined;
+    const msgType = url.searchParams.get('msgType') || undefined;
+    const status = url.searchParams.get('status') || undefined;
+    const since = Number(url.searchParams.get('since') || '0');
+
+    let filtered = relayDebugEvents;
+    if (since > 0) filtered = filtered.filter(e => e.ts >= since);
+    if (event) filtered = filtered.filter(e => e.event === event);
+    if (runtimeId) filtered = filtered.filter(e => e.runtimeId === runtimeId || e.from === runtimeId || e.to === runtimeId);
+    if (from) filtered = filtered.filter(e => e.from === from);
+    if (to) filtered = filtered.filter(e => e.to === to);
+    if (msgType) filtered = filtered.filter(e => e.msgType === msgType);
+    if (status) filtered = filtered.filter(e => e.status === status);
+
+    const events = filtered.slice(-last);
+    return new Response(JSON.stringify({
+      ok: true,
+      total: relayDebugEvents.length,
+      returned: events.length,
+      serverTime: Date.now(),
+      filters: { last, event, runtimeId, from, to, msgType, status, since: Number.isFinite(since) ? since : 0 },
+      events,
     }), { headers });
   }
 
@@ -1156,6 +1344,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 // ============================================================================
 
 export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Promise<void> {
+  installProcessSafetyGuards();
   console.log('═══ startXlnServer() CALLED ═══');
   console.log('Options:', opts);
   const options = { ...DEFAULT_OPTIONS, ...opts };
@@ -1528,6 +1717,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       open(ws) {
         const data = (ws as any).data;
         console.log(`[WS] New ${data.type} connection`);
+        pushRelayDebugEvent({
+          event: 'ws_open',
+          details: { channel: data.type },
+        });
       },
 
       message(ws, message) {
@@ -1536,12 +1729,48 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         try {
           const msg = JSON.parse(msgStr);
           if (data.type === 'relay') {
-            handleRelayMessage(ws, msg, data.env);
+            Promise.resolve(handleRelayMessage(ws, msg, data.env)).catch((error) => {
+              const reason = (error as Error).message || 'relay handler error';
+              console.error(`[WS] Relay handler error: ${reason}`);
+              pushRelayDebugEvent({
+                event: 'error',
+                reason: 'RELAY_HANDLER_EXCEPTION',
+                details: {
+                  error: reason,
+                  msgType: msg?.type,
+                  from: msg?.from,
+                  to: msg?.to,
+                },
+              });
+              try {
+                ws.send(safeStringify({ type: 'error', error: 'Relay handler exception' }));
+              } catch {
+                // Socket may already be closed; ignore.
+              }
+            });
           } else if (data.type === 'rpc') {
-            handleRpcMessage(ws, msg, data.env);
+            Promise.resolve(handleRpcMessage(ws, msg, data.env)).catch((error) => {
+              const reason = (error as Error).message || 'rpc handler error';
+              console.error(`[WS] RPC handler error: ${reason}`);
+              pushRelayDebugEvent({
+                event: 'error',
+                reason: 'RPC_HANDLER_EXCEPTION',
+                details: { error: reason, msgType: msg?.type },
+              });
+              try {
+                ws.send(safeStringify({ type: 'error', error: 'RPC handler exception' }));
+              } catch {
+                // Socket may already be closed; ignore.
+              }
+            });
           }
         } catch (error) {
           console.error(`[WS] Parse error (type=${data.type}, len=${msgStr.length}):`, error);
+          pushRelayDebugEvent({
+            event: 'error',
+            reason: 'Invalid JSON',
+            details: { channel: data.type, len: msgStr.length, error: (error as Error).message },
+          });
           ws.send(safeStringify({ type: 'error', error: 'Invalid JSON' }));
         }
       },
@@ -1551,6 +1780,12 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         for (const [id, client] of clients) {
           if (client.ws === ws) {
             clients.delete(id);
+            pushRelayDebugEvent({
+              event: 'ws_close',
+              runtimeId: id,
+              from: id,
+              details: { channel: ((ws as any).data || {}).type || 'unknown' },
+            });
             break;
           }
         }

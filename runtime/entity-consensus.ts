@@ -1338,20 +1338,28 @@ export const applyEntityFrame = async (
         if (proposal.failedHtlcLocks && proposal.failedHtlcLocks.length > 0) {
           for (const { hashlock, reason } of proposal.failedHtlcLocks) {
             const route = currentEntityState.htlcRoutes.get(hashlock);
-            if (route && route.inboundEntity && route.inboundLockId) {
-              const inboundAccount = currentEntityState.accounts.get(route.inboundEntity);
-              if (inboundAccount) {
-                inboundAccount.mempool.push({
-                  type: 'htlc_resolve',
-                  data: {
-                    lockId: route.inboundLockId,
-                    outcome: 'error' as const,
-                    reason: `forward_failed:${reason}`,
-                  }
-                });
-                proposableAccounts.add(route.inboundEntity);
-                console.log(`⬅️ HTLC-CANCEL-BACKWARD: hashlock=${hashlock.slice(0,12)}... → inbound ${route.inboundEntity.slice(-4)} (reason: ${reason})`);
+            if (route) {
+              // Always clean local bookkeeping for failed proposals.
+              if (route.outboundLockId) {
+                currentEntityState.lockBook.delete(route.outboundLockId);
               }
+
+              if (route.inboundEntity && route.inboundLockId) {
+                const inboundAccount = currentEntityState.accounts.get(route.inboundEntity);
+                if (inboundAccount) {
+                  inboundAccount.mempool.push({
+                    type: 'htlc_resolve',
+                    data: {
+                      lockId: route.inboundLockId,
+                      outcome: 'error' as const,
+                      reason: `forward_failed:${reason}`,
+                    }
+                  });
+                  proposableAccounts.add(route.inboundEntity);
+                  console.log(`⬅️ HTLC-CANCEL-BACKWARD: hashlock=${hashlock.slice(0,12)}... → inbound ${route.inboundEntity.slice(-4)} (reason: ${reason})`);
+                }
+              }
+
               currentEntityState.htlcRoutes.delete(hashlock);
             }
           }

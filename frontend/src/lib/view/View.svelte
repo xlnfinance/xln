@@ -68,7 +68,7 @@
   const localIsLive = writable<boolean>(true);
 
   // Sync localEnvStore → runtimeStore for panels that read from global
-  localEnvStore.subscribe((env) => {
+  const unsubLocalEnvSync = localEnvStore.subscribe((env) => {
     if (env) {
       runtimeOperations.updateLocalEnv(env);
     }
@@ -752,6 +752,13 @@
   }
 
   onDestroy(() => {
+    if (unregisterEnvChange) {
+      unregisterEnvChange();
+      unregisterEnvChange = null;
+    }
+    if (unsubLocalEnvSync) {
+      unsubLocalEnvSync();
+    }
     if (unsubOpenEntity) {
       unsubOpenEntity();
     }

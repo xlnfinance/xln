@@ -86,6 +86,14 @@ export function createGossipLayer(): GossipLayer {
       hubs: profile.hubs || profile.publicAccounts || [],
       endpoints: profile.endpoints || [],
       relays: profile.relays || [],
+      metadata: {
+        ...(profile.metadata || {}),
+        // Compatibility: treat capability-tagged hubs as hubs even if metadata.isHub was omitted upstream.
+        isHub:
+          profile.metadata?.isHub === true ||
+          profile.capabilities?.includes('hub') === true ||
+          profile.capabilities?.includes('routing') === true,
+      },
     };
 
     logDebug('GOSSIP', `📢 After normalize: ${profile.entityId.slice(-4)} accounts=${normalizedProfile.accounts?.length || 0}`);
@@ -127,7 +135,12 @@ export function createGossipLayer(): GossipLayer {
 
   // Get all hubs (profiles with isHub=true)
   const getHubs = (): Profile[] => {
-    const hubs = Array.from(profiles.values()).filter(p => p.metadata?.isHub === true);
+    const hubs = Array.from(profiles.values()).filter(
+      p =>
+        p.metadata?.isHub === true ||
+        p.capabilities?.includes('hub') === true ||
+        p.capabilities?.includes('routing') === true
+    );
     logDebug('GOSSIP', `🏠 getHubs(): Found ${hubs.length} hubs`);
     for (const h of hubs) {
       logDebug('GOSSIP', `  - ${h.entityId.slice(-4)}: ${h.metadata?.name || 'unnamed'} region=${h.metadata?.region || 'unknown'}`);

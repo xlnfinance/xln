@@ -40,6 +40,38 @@ const addCleanLog = (env: Env, level: string, msg: string): void => {
   if (buffer.length > MAX_CLEAN_LOGS) buffer.shift();
 };
 
+const HIGH_SIGNAL_EVENTS = new Set([
+  'PaymentInitiated',
+  'PaymentFinalized',
+  'PaymentFailed',
+  'HtlcPaymentInitiated',
+  'BilateralFrameCommitted',
+  'EntityFrameCommitted',
+  'AccountOpening',
+]);
+
+const isCriticalMessage = (message: string): boolean => {
+  const m = message.toLowerCase();
+  return (
+    m.includes('error') ||
+    m.includes('fail') ||
+    m.includes('mismatch') ||
+    m.includes('decrypt') ||
+    m.includes('secret') ||
+    m.includes('timeout') ||
+    m.includes('route-defer')
+  );
+};
+
+const forwardDebugEvent = (env: Env, payload: Record<string, unknown>): void => {
+  const p2p = env.runtimeState?.p2p as { sendDebugEvent?: (data: unknown) => boolean } | undefined;
+  try {
+    p2p?.sendDebugEvent?.(payload);
+  } catch {
+    // Best effort only.
+  }
+};
+
 /**
  * Create event emission methods for an environment.
  * Called once during env creation (createEmptyEnv).
@@ -91,6 +123,15 @@ export function attachEventEmitters(env: Env): void {
     env.frameLogs.push(entry);
     addCleanLog(env, 'WARN', message);
     console.warn(`[${category}]`, message, data || '');
+    forwardDebugEvent(env, {
+      level: 'warn',
+      category,
+      message,
+      entityId,
+      data,
+      runtimeId: env.runtimeId,
+      at: getTimestamp(),
+    });
   };
 
   // Structured error log
@@ -107,6 +148,15 @@ export function attachEventEmitters(env: Env): void {
     env.frameLogs.push(entry);
     addCleanLog(env, 'ERR', message);
     console.error(`[${category}]`, message, data || '');
+    forwardDebugEvent(env, {
+      level: 'error',
+      category,
+      message,
+      entityId,
+      data,
+      runtimeId: env.runtimeId,
+      at: getTimestamp(),
+    });
   };
 
   // Generic event emission (EVM-style)
@@ -121,6 +171,15 @@ export function attachEventEmitters(env: Env): void {
     };
     env.frameLogs.push(entry);
     addCleanLog(env, 'EVENT', eventName);
+    if (HIGH_SIGNAL_EVENTS.has(eventName) || isCriticalMessage(eventName)) {
+      forwardDebugEvent(env, {
+        level: 'event',
+        eventName,
+        data,
+        runtimeId: env.runtimeId,
+        at: getTimestamp(),
+      });
+    }
   };
 }
 

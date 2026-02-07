@@ -231,7 +231,7 @@ export interface XLNModule {
   // Core lifecycle
   main: () => Promise<Env>;
   process: (env: Env, inputs?: unknown[], delay?: number) => Promise<Env>;
-  registerEnvChangeCallback: (callback: (env: Env) => void) => void;
+  registerEnvChangeCallback: (env: Env, callback: (env: Env) => void) => (() => void);
   getEnv: (env?: Env | null) => Env | null;
   getActiveJAdapter?: (env: Env | null) => JAdapter | null;
   processJBlockEvents?: (env: Env) => Promise<void>;
@@ -311,8 +311,8 @@ export interface XLNModule {
   // Runtime operations
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>;
   startP2P: (env: Env, config?: P2PConfig) => unknown;
-  stopP2P: () => void;
-  getP2P: () => unknown;
+  stopP2P: (env: Env) => void;
+  getP2P: (env: Env) => unknown;
   refreshGossip?: (env: Env) => void;
   // runDemo: REMOVED - use scenarios.ahb(env) or scenarios.grid(env) instead
 

@@ -178,8 +178,11 @@ export async function handleHtlcPayment(
       if (env.gossip) {
         const profiles = typeof env.gossip.getProfiles === 'function' ? env.gossip.getProfiles() : [];
         const profile = profiles.find((p: any) => p.entityId === entityId);
-        if (profile?.metadata?.cryptoPublicKey) {
-          entityPubKeys.set(entityId, profile.metadata.cryptoPublicKey);
+        const gossipCryptoKey =
+          profile?.metadata?.cryptoPublicKey ||
+          profile?.metadata?.encryptionPubKey; // Compatibility: some peers may still publish only this field
+        if (gossipCryptoKey) {
+          entityPubKeys.set(entityId, gossipCryptoKey);
           continue;
         }
       }
