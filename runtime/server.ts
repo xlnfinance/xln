@@ -951,7 +951,25 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
     const profiles = (payload?.profiles || []) as any[];
     let stored = 0;
     for (const profile of profiles) {
-      if (storeGossipProfile(profile)) stored += 1;
+      if (!profile || typeof profile !== 'object') continue;
+      // Ensure runtimeId is always present for routing resolution.
+      const normalized = {
+        ...profile,
+        runtimeId: profile.runtimeId || from,
+      };
+      if (storeGossipProfile(normalized)) stored += 1;
+      // Mirror into server env gossip cache so runtime-side routing can resolve immediately.
+      try {
+        env.gossip?.announce?.(normalized);
+      } catch (error) {
+        pushRelayDebugEvent({
+          event: 'error',
+          reason: 'GOSSIP_ANNOUNCE_ENV_MIRROR_FAILED',
+          from,
+          msgType: type,
+          details: { traceId, error: (error as Error).message },
+        });
+      }
     }
     pushRelayDebugEvent({
       event: 'gossip_store',
