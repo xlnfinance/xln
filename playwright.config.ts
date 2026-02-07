@@ -22,13 +22,19 @@ export default defineConfig({
     viewport: { width: 1920, height: 1080 },
     video: { mode: 'on', size: { width: 1920, height: 1080 } },
     launchOptions: {
-      args: ['--start-maximized'], // optional, maximizes the window
+      args: [
+        '--start-maximized',
+        '--disable-gpu',
+        '--use-gl=swiftshader',
+        '--disable-dev-shm-usage',
+      ],
     },
   },
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      // Force full Chromium instead of chromium_headless_shell (regressed WebGL in 1.58+)
+      use: { ...devices['Desktop Chrome'], channel: 'chromium' },
     },
     {
       name: 'brainvault',

@@ -46,6 +46,7 @@
   let unsubOpenEntity: (() => void) | null = null;
   let unsubOpenJurisdiction: (() => void) | null = null;
   let unsubFocusPanel: (() => void) | null = null;
+  let activePanelDisposable: { dispose: () => void } | null = null;
   let saveLayoutTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Track mode changes to update panel visibility
@@ -70,6 +71,7 @@
   const localHistoryStore = writable<any[]>([]);
   const localTimeIndex = writable<number>(0);  // real frame index, auto-advanced when isLive
   const localIsLive = writable<boolean>(true);
+  const graphInitSignal = writable<boolean>(embedMode);
 
   // Sync localEnvStore → runtimeStore for panels that read from global
   const unsubLocalEnvSync = localEnvStore.subscribe((env) => {
@@ -420,7 +422,8 @@
             props: {
               isolatedEnv: localEnvStore,
               isolatedHistory: localHistoryStore,
-              isolatedTimeIndex: localTimeIndex
+              isolatedTimeIndex: localTimeIndex,
+              graphInitSignal,
             }
           });
         } else if (options.name === 'brainvault') {
@@ -686,6 +689,14 @@
       }, 100);
     }
 
+    activePanelDisposable = dockview.onDidActivePanelChange((event: any) => {
+      const panel = event?.panel ?? event;
+      const panelId = panel?.id || panel?.api?.id;
+      if (panelId === 'graph3d') {
+        graphInitSignal.set(true);
+      }
+    });
+
     // DISABLED: Dockview layout persistence (Svelte 5 incompatibility)
     // Issue: fromJSON() tries to destroy existing panels using $destroy()
     // which doesn't exist in Svelte 5. Need to implement custom serialization.
@@ -842,6 +853,10 @@
     if (saveLayoutTimer) {
       clearTimeout(saveLayoutTimer);
       saveLayoutTimer = null;
+    }
+    if (activePanelDisposable) {
+      activePanelDisposable.dispose();
+      activePanelDisposable = null;
     }
     lastSeenFrameLogIdByRuntime.clear();
     lastToastAtByKey.clear();

@@ -34,6 +34,8 @@
   export let isolatedEnv: Writable<any>;
   export let isolatedHistory: Writable<any[]>;
   export let isolatedTimeIndex: Writable<number>;
+  export let graphInitSignal: Writable<boolean> | undefined = undefined;
+  $: initEnabled = graphInitSignal ? $graphInitSignal : true;
 
   // Time-travel aware: Read from history[timeIndex] when scrubbing, else live state
   $: env = (() => {
@@ -205,7 +207,12 @@
         // WebGPU fallback to WebGL (silent)
       }
     }
-    return new THREE.WebGLRenderer(options);
+    try {
+      return new THREE.WebGLRenderer(options);
+    } catch (err) {
+      console.error('[Graph3D] Renderer init failed:', err);
+      return null;
+    }
   };
   type RendererMode = 'webgl' | 'webgpu';
 
@@ -1380,6 +1387,7 @@ let vrHammer: VRHammer | null = null;
     hops: number;
   }> = [];
   let selectedRouteIndex: number = 0;
+  let graphInitialized = false;
 
   // Real-time activity ticker
   let recentActivity: Array<{
@@ -1389,41 +1397,49 @@ let vrHammer: VRHammer | null = null;
     type: 'payment' | 'credit' | 'settlement' | 'j-event' | 'commit';
   }> = [];
 
-  onMount(() => {
-    const initAndSetup = async () => {
-      // Load XLN runtime functions
-      try {
-        const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-        XLN = await import(/* @vite-ignore */ runtimeUrl);
-      } catch (err) {
-        console.error('[Graph3D] Failed to load XLN runtime:', err);
-      }
+  async function initAndSetup() {
+    if (graphInitialized) return;
+    graphInitialized = true;
 
-      // Check VR support (WebXR API for Quest 3/Oculus)
-      // CRITICAL: Must check BOTH xr existence AND isSessionSupported
-      // WebXR requires HTTPS in production (works on localhost HTTP for dev)
-      if ('xr' in navigator && (navigator as any).xr) {
-        try {
-          // Oculus Quest browsers support 'immersive-vr'
-          const vrSupported = await (navigator as any).xr.isSessionSupported('immersive-vr');
-          isVRSupported = vrSupported === true;
-        } catch (err) {
-          isVRSupported = false;
-        }
-      } else {
+    // Load XLN runtime functions
+    try {
+      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+      XLN = await import(/* @vite-ignore */ runtimeUrl);
+    } catch (err) {
+      console.error('[Graph3D] Failed to load XLN runtime:', err);
+    }
+
+    // Check VR support (WebXR API for Quest 3/Oculus)
+    // CRITICAL: Must check BOTH xr existence AND isSessionSupported
+    // WebXR requires HTTPS in production (works on localhost HTTP for dev)
+    if ('xr' in navigator && (navigator as any).xr) {
+      try {
+        // Oculus Quest browsers support 'immersive-vr'
+        const vrSupported = await (navigator as any).xr.isSessionSupported('immersive-vr');
+        isVRSupported = vrSupported === true;
+      } catch (err) {
         isVRSupported = false;
       }
+    } else {
+      isVRSupported = false;
+    }
 
-      await initThreeJS();
-      // updateNetworkData() is called automatically by reactive statement: $: if ($isolatedEnv && scene)
-      animate();
+    await initThreeJS();
+    // updateNetworkData() is called automatically by reactive statement: $: if ($isolatedEnv && scene)
+    animate();
 
-      // Start J auto-proposer (1-second instant consensus simulation)
-      startJAutoProposer();
-    };
+    // Start J auto-proposer (1-second instant consensus simulation)
+    startJAutoProposer();
+  }
 
-    initAndSetup().catch(error => {
-    });
+  $: if (initEnabled && !graphInitialized) {
+    initAndSetup().catch(() => {});
+  }
+
+  onMount(() => {
+    if (initEnabled) {
+      initAndSetup().catch(() => {});
+    }
 
     // Listen for VR toggle events from ArchitectPanel
     const handleVRToggle = () => {
@@ -1884,7 +1900,11 @@ let vrHammer: VRHammer | null = null;
 
     // Renderer setup with VR support
     renderer = await createRenderer(rendererMode, { antialias: false }); // Disabled for performance
-    renderer.xr.enabled = true;  // Enable XR separately
+    if (!renderer) {
+      console.warn('[Graph3D] Renderer unavailable - skipping 3D init');
+      return;
+    }
+    renderer.xr.enabled = !(typeof navigator !== 'undefined' && (navigator as any).webdriver);  // Keep XR off in automation
     renderer.setSize(containerWidth, containerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5)); // Cap at 1.5 for performance
     container.appendChild(renderer.domElement);
