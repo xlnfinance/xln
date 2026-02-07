@@ -306,6 +306,9 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
   if (!env.runtimeState.routeDeferState) {
     env.runtimeState.routeDeferState = new Map();
   }
+  if (!env.runtimeState.entityRuntimeHints) {
+    env.runtimeState.entityRuntimeHints = new Map();
+  }
   return env.runtimeState;
 };
 
@@ -531,11 +534,53 @@ const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | nul
 };
 
 const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null => {
-  if (!env.gossip?.getProfiles || !entityId) return null;
+  if (!entityId) return null;
+  const hints = ensureRuntimeState(env).entityRuntimeHints;
   const target = normalizeEntityKey(entityId);
+  const hinted = hints?.get(target)?.runtimeId;
+  if (typeof hinted === 'string' && hinted.length > 0) {
+    return hinted;
+  }
+  if (!env.gossip?.getProfiles) return null;
   const profiles = env.gossip.getProfiles() as Profile[];
   const profile = profiles.find((p: Profile) => normalizeEntityKey(String(p.entityId || '')) === target);
-  return resolveRuntimeIdFromProfile(profile);
+  const resolved = resolveRuntimeIdFromProfile(profile);
+  if (resolved && hints) {
+    hints.set(target, { runtimeId: resolved, seenAt: Date.now() });
+  }
+  return resolved;
+};
+
+export const registerEntityRuntimeHint = (env: Env, entityId: string, runtimeId: string): void => {
+  if (!entityId || !runtimeId) return;
+  const state = ensureRuntimeState(env);
+  const hints = state.entityRuntimeHints!;
+  hints.set(normalizeEntityKey(entityId), {
+    runtimeId: runtimeId.toLowerCase(),
+    seenAt: Date.now(),
+  });
+};
+
+const collectSenderEntityHints = (input: RoutedEntityInput): string[] => {
+  const hints = new Set<string>();
+  for (const tx of input.entityTxs || []) {
+    const data = tx.data as Record<string, unknown> | undefined;
+    if (!data || typeof data !== 'object') continue;
+    if (tx.type === 'accountInput') {
+      const fromEntityId = data.fromEntityId;
+      if (typeof fromEntityId === 'string' && fromEntityId.length > 0) {
+        hints.add(fromEntityId);
+      }
+      continue;
+    }
+    if (tx.type === 'openAccount') {
+      const targetEntityId = data.targetEntityId;
+      if (typeof targetEntityId === 'string' && targetEntityId.length > 0) {
+        hints.add(targetEntityId);
+      }
+    }
+  }
+  return [...hints];
 };
 
 const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
@@ -732,6 +777,9 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     onEntityInput: (from, input) => {
       const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
       console.log(`📨 P2P-RECEIVE: from=${from.slice(0,10)} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
+      for (const hintedEntityId of collectSenderEntityHints(input)) {
+        registerEntityRuntimeHint(env, hintedEntityId, from);
+      }
       enqueueRuntimeInputs(env, [input]);
       console.log(`📥 RUNTIME-MEMPOOL: Added inbound, size=${ensureRuntimeMempool(env).entityInputs.length}`);
       env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
