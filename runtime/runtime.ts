@@ -303,6 +303,9 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
       lastP2PConfig: null,
     };
   }
+  if (!env.runtimeState.routeDeferState) {
+    env.runtimeState.routeDeferState = new Map();
+  }
   return env.runtimeState;
 };
 
@@ -498,11 +501,41 @@ export const deriveRuntimeId = (seed: string): string => {
 
 // scheduleNetworkProcess removed — loop is always-on via startRuntimeLoop()
 
+const ROUTE_DEFER_WARN_COOLDOWN_MS = 60_000;
+const ROUTE_DEFER_GOSSIP_COOLDOWN_MS = 5_000;
+const ROUTE_DEFER_ESCALATE_AFTER = 20;
+
+const normalizeEntityKey = (value: string): string => value.toLowerCase();
+
+const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | null => {
+  if (!profile) return null;
+  const direct = typeof profile.runtimeId === 'string' && profile.runtimeId.length > 0
+    ? profile.runtimeId
+    : null;
+  if (direct) return direct;
+
+  const metaRuntimeId = (profile.metadata as Record<string, unknown> | undefined)?.runtimeId;
+  if (typeof metaRuntimeId === 'string' && metaRuntimeId.length > 0) {
+    return metaRuntimeId;
+  }
+
+  const board = profile.metadata?.board;
+  if (board && typeof board === 'object' && 'validators' in board && Array.isArray(board.validators)) {
+    const firstSigner = board.validators[0]?.signer;
+    if (typeof firstSigner === 'string' && firstSigner.startsWith('0x') && firstSigner.length === 42) {
+      return firstSigner;
+    }
+  }
+
+  return null;
+};
+
 const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null => {
-  if (!env.gossip?.getProfiles) return null;
-  const profiles = env.gossip.getProfiles();
-  const profile = profiles.find((p: Profile) => p.entityId === entityId);
-  return profile?.runtimeId || null;
+  if (!env.gossip?.getProfiles || !entityId) return null;
+  const target = normalizeEntityKey(entityId);
+  const profiles = env.gossip.getProfiles() as Profile[];
+  const profile = profiles.find((p: Profile) => normalizeEntityKey(String(p.entityId || '')) === target);
+  return resolveRuntimeIdFromProfile(profile);
 };
 
 const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
@@ -524,6 +557,8 @@ const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
   const pendingOutputs = env.pendingNetworkOutputs ? [...env.pendingNetworkOutputs] : [];
   const allOutputs = [...pendingOutputs, ...outputs];
   const deferredOutputs: RoutedEntityInput[] = [];
+  const routeDeferState = ensureRuntimeState(env).routeDeferState!;
+  const nowMs = Date.now();
 
   for (const output of allOutputs) {
     if (localEntityIds.has(output.entityId)) {
@@ -533,12 +568,41 @@ const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
     const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
     console.log(`🔀 ROUTE: Output for entity ${output.entityId.slice(-4)} → runtimeId=${targetRuntimeId?.slice(0,10) || 'UNKNOWN'}`);
     if (!targetRuntimeId) {
-      console.warn(`⚠️ ROUTE-DEFER: No runtimeId for entity ${output.entityId.slice(-4)} - deferring output`);
-      env.warn('network', 'Missing runtimeId for entity output (queued)', { entityId: output.entityId });
-      getP2P(env)?.refreshGossip();
+      const key = normalizeEntityKey(output.entityId);
+      const defer = routeDeferState.get(key) || {
+        warnAt: 0,
+        gossipAt: 0,
+        deferredCount: 0,
+        escalated: false,
+      };
+      defer.deferredCount += 1;
+      const shouldWarn = nowMs - defer.warnAt >= ROUTE_DEFER_WARN_COOLDOWN_MS;
+      const shouldRefreshGossip = nowMs - defer.gossipAt >= ROUTE_DEFER_GOSSIP_COOLDOWN_MS;
+      if (shouldWarn) {
+        defer.warnAt = nowMs;
+        console.warn(`⚠️ ROUTE-DEFER: No runtimeId for entity ${output.entityId.slice(-4)} (deferred=${defer.deferredCount})`);
+        env.warn('network', 'Missing runtimeId for entity output (queued)', {
+          entityId: output.entityId,
+          deferredCount: defer.deferredCount,
+        });
+      }
+      if (!defer.escalated && defer.deferredCount >= ROUTE_DEFER_ESCALATE_AFTER) {
+        defer.escalated = true;
+        env.error('network', 'ROUTE_DEFER_STUCK', {
+          entityId: output.entityId,
+          deferredCount: defer.deferredCount,
+          reason: 'No runtimeId in gossip profile',
+        });
+      }
+      if (shouldRefreshGossip) {
+        defer.gossipAt = nowMs;
+        getP2P(env)?.refreshGossip();
+      }
+      routeDeferState.set(key, defer);
       deferredOutputs.push(output);
       continue;
     }
+    routeDeferState.delete(normalizeEntityKey(output.entityId));
     remoteOutputs.push(output);
   }
 

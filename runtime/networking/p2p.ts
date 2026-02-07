@@ -89,6 +89,7 @@ const isHexPublicKey = (value: string): boolean => {
 };
 
 const normalizeId = (value: string): string => value.toLowerCase();
+const normalizeRuntimeId = (value: string): string => value.toLowerCase();
 
 const GOSSIP_POLL_MS = 5000; // Poll relay every 5s by default to avoid relay spam
 
@@ -192,7 +193,8 @@ export class RuntimeP2P {
         getTargetEncryptionKey: (targetRuntimeId: string) => {
           // Lookup target's public key from gossip
           const profiles = this.env.gossip?.getProfiles?.() || [];
-          const targetProfile = profiles.find((p: any) => p.runtimeId === targetRuntimeId);
+          const targetRuntimeIdNorm = normalizeRuntimeId(targetRuntimeId);
+          const targetProfile = profiles.find((p: any) => normalizeRuntimeId(String(p.runtimeId || '')) === targetRuntimeIdNorm);
           const pubKeyHex =
             targetProfile?.metadata?.encryptionPubKey ||
             targetProfile?.metadata?.cryptoPublicKey;
@@ -393,7 +395,8 @@ export class RuntimeP2P {
 
   private ensureRelayConnectionsForEntity(entityId: string): void {
     const profiles = this.env.gossip?.getProfiles?.() || [];
-    const profile = profiles.find((p: Profile) => p.entityId === entityId);
+    const targetEntityId = normalizeId(entityId);
+    const profile = profiles.find((p: Profile) => normalizeId(String(p.entityId || '')) === targetEntityId);
     if (!profile) return;
 
     const hintedRelays = unique([
@@ -416,7 +419,8 @@ export class RuntimeP2P {
   // Check if we have a profile for an entity in local gossip cache
   private hasProfileForEntity(entityId: string): boolean {
     const profiles = this.env.gossip?.getProfiles?.() || [];
-    return profiles.some((p: any) => p.entityId === entityId);
+    const targetEntityId = normalizeId(entityId);
+    return profiles.some((p: any) => normalizeId(String(p.entityId || '')) === targetEntityId);
   }
 
   // Fetch profiles from relay with retry

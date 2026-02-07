@@ -10,25 +10,13 @@ git pull origin main
 
 # Add bun to PATH
 export PATH="$HOME/.bun/bin:$PATH"
-
-# CRITICAL: Build runtime.js FIRST (for browser)
-echo "🔧 Building runtime.js..."
-bun build runtime/runtime.ts --target=browser --outfile=frontend/static/runtime.js --minify \
-  --external http --external https --external zlib \
-  --external fs --external path --external crypto \
-  --external stream --external buffer --external url \
-  --external net --external tls --external os --external util
-
-# Then build frontend
-cd frontend
-npm run build
-cp -r build/* /var/www/html/
-
-# Deploy/restart relay server (P2P)
-cd ..
-pm2 restart xln-relay || pm2 start runtime/networking/ws-server.ts --name xln-relay --interpreter bun -- --port 9000 --host 127.0.0.1
-pm2 save
+if [ "${XLN_DEPLOY_FRONTEND:-0}" = "1" ]; then
+  ./deploy.sh --frontend --skip-pull
+else
+  ./deploy.sh --skip-pull
+fi
 
 echo "✅ Deployed at $(date)"
-echo "✅ Relay server: pm2 status xln-relay"
+echo "✅ Server status:"
+pm2 status | sed -n '1,40p'
 ENDSSH

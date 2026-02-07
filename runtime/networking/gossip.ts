@@ -101,6 +101,15 @@ export function createGossipLayer(): GossipLayer {
 
   const announce = (profile: Profile): void => {
     logDebug('GOSSIP', `📢 gossip.announce INPUT: ${profile.entityId.slice(-4)} accounts=${profile.accounts?.length || 0}`);
+    const nowTs = Date.now();
+    const incomingLastUpdated = typeof profile.metadata?.lastUpdated === 'number'
+      ? profile.metadata.lastUpdated
+      : 0;
+    const incomingExpiresAt = typeof profile.metadata?.expiresAt === 'number'
+      ? profile.metadata.expiresAt
+      : 0;
+    const fallbackExpiresAt = Math.max(nowTs + PROFILE_TTL_MS, incomingLastUpdated + PROFILE_TTL_MS);
+    const sanitizedExpiresAt = incomingExpiresAt > nowTs ? incomingExpiresAt : fallbackExpiresAt;
 
     const normalizedProfile: Profile = {
       ...profile,
@@ -110,10 +119,7 @@ export function createGossipLayer(): GossipLayer {
       relays: profile.relays || [],
       metadata: {
         ...(profile.metadata || {}),
-        expiresAt:
-          typeof profile.metadata?.expiresAt === 'number'
-            ? profile.metadata.expiresAt
-            : (profile.metadata?.lastUpdated || Date.now()) + PROFILE_TTL_MS,
+        expiresAt: sanitizedExpiresAt,
         // Compatibility: treat capability-tagged hubs as hubs even if metadata.isHub was omitted upstream.
         isHub:
           profile.metadata?.isHub === true ||

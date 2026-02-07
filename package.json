@@ -26,6 +26,8 @@
     "test": "cd jurisdictions && echo 'ℹ️ Contract tests now run as part of deployment cycle (see deploy-contracts.sh)'",
     "build:static": "cd frontend && bun run build:static && echo '✅ Static build complete for GitHub Pages'",
     "build:deploy": "npm run build:static && echo '🚀 Ready for GitHub Pages deployment'",
+    "deploy": "./deploy.sh",
+    "deploy:full": "./deploy.sh --frontend",
     "test:contracts:r2r": "cd jurisdictions && bunx hardhat run test-r2r-post-deployment.cjs --network localhost",
     "test:governance": "cd jurisdictions && npx hardhat test --grep governance",
     "test:entity": "cd jurisdictions && npx hardhat test --grep entity",
