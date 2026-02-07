@@ -1769,12 +1769,24 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         console.log(`  profile: ${p.entityId.slice(-8)} isHub=${p.metadata?.isHub} caps=[${p.capabilities?.join(',')}]`);
       }
       const hubs = allProfiles.filter(p => p.metadata?.isHub === true && p.capabilities?.includes('faucet'));
-      const fallbackHubs = activeHubEntityIds.map(entityId => ({ entityId }));
-      const candidateHubs = hubs.length > 0 ? hubs : fallbackHubs;
-      if (candidateHubs.length === 0) {
-        return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
+      if (hubs.length === 0) {
+        pushRelayDebugEvent({
+          event: 'error',
+          status: 'rejected',
+          reason: 'FAUCET_HUBS_EMPTY',
+          details: {
+            endpoint: '/api/faucet/offchain',
+            profiles: allProfiles.length,
+            hint: 'No faucet-capable hubs in gossip cache',
+          },
+        });
+        return new Response(JSON.stringify({
+          error: 'No faucet hub available in gossip',
+          code: 'FAUCET_HUBS_EMPTY',
+          profiles: allProfiles.length,
+        }), { status: 503, headers });
       }
-      const hubEntityId = candidateHubs[0].entityId;
+      const hubEntityId = hubs[0].entityId;
       // Get actual signerId from entity's validators (not runtimeId!)
       const hubSignerId = resolveEntityProposerId(env, hubEntityId, 'faucet-offchain');
       console.log(`[FAUCET/OFFCHAIN] hub=${hubEntityId.slice(-8)} signer=${hubSignerId.slice(-8)} amount=${amount} token=${tokenId}`);
