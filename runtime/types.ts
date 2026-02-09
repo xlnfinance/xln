@@ -214,6 +214,16 @@
 import type { Profile } from './networking/gossip';
 import type { JAdapter } from './jadapter/types';
 
+// ═══════════════════════════════════════════════════════════════
+// RESULT TYPE - Discriminated success/failure
+// ═══════════════════════════════════════════════════════════════
+
+export type Result<T, E> = { _tag: 'Ok'; value: T } | { _tag: 'Err'; error: E };
+export const Ok = <T>(value: T): Result<T, never> => ({ _tag: 'Ok', value });
+export const Err = <E>(error: E): Result<never, E> => ({ _tag: 'Err', error });
+export const isOk = <T, E>(r: Result<T, E>): r is { _tag: 'Ok'; value: T } => r._tag === 'Ok';
+export const isErr = <T, E>(r: Result<T, E>): r is { _tag: 'Err'; error: E } => r._tag === 'Err';
+
 export interface JurisdictionConfig {
   address: string;
   name: string;

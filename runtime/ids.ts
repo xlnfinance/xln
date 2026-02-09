@@ -32,6 +32,18 @@ export type JId = string & { readonly [JIdBrand]: typeof JIdBrand };
 /** EntityProvider contract address - 20-byte hex (0x + 40 chars) */
 export type EntityProviderAddress = string & { readonly [EntityProviderAddressBrand]: typeof EntityProviderAddressBrand };
 
+declare const TokenIdBrand: unique symbol;
+/** Token identifier - non-negative integer */
+export type TokenId = number & { readonly [TokenIdBrand]: typeof TokenIdBrand };
+
+declare const LockIdBrand: unique symbol;
+/** HTLC lock identifier */
+export type LockId = string & { readonly [LockIdBrand]: typeof LockIdBrand };
+
+declare const AccountKeyBrand: unique symbol;
+/** Bilateral account key - canonical sorted entity pair "leftId:rightId" */
+export type AccountKey = string & { readonly [AccountKeyBrand]: typeof AccountKeyBrand };
+
 // =============================================================================
 // CONSTANTS
 // =============================================================================
@@ -136,6 +148,40 @@ export const toEpAddress = (s: string): EntityProviderAddress => {
     throw new Error(`FINTECH-SAFETY: Invalid EntityProviderAddress: ${s}`);
   }
   return s;
+};
+
+/** Check if number is valid TokenId (non-negative integer) */
+export const isValidTokenId = (n: number): n is TokenId =>
+  Number.isInteger(n) && n >= 0;
+
+/** Create validated TokenId - throws if invalid */
+export const toTokenId = (n: number): TokenId => {
+  if (!isValidTokenId(n)) {
+    throw new Error(`FINTECH-SAFETY: Invalid TokenId: ${n}`);
+  }
+  return n;
+};
+
+/** Check if string is valid LockId (non-empty string) */
+export const isValidLockId = (s: string): s is LockId =>
+  typeof s === 'string' && s.length > 0;
+
+/** Create validated LockId - throws if invalid */
+export const toLockId = (s: string): LockId => {
+  if (!isValidLockId(s)) {
+    throw new Error(`FINTECH-SAFETY: Invalid LockId: ${s}`);
+  }
+  return s;
+};
+
+/** Check if string is valid AccountKey (contains colon separator) */
+export const isValidAccountKey = (s: string): s is AccountKey =>
+  typeof s === 'string' && s.includes(':');
+
+/** Create AccountKey from two entity IDs (canonical sorted order: left < right) */
+export const toAccountKey = (entityA: string, entityB: string): AccountKey => {
+  const sorted = entityA < entityB ? `${entityA}:${entityB}` : `${entityB}:${entityA}`;
+  return sorted as AccountKey;
 };
 
 // =============================================================================
