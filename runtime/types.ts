@@ -1156,6 +1156,17 @@ export interface SettlementDiff {
   ondeltaDiff: bigint;    // Change to ondelta (tracks left's share)
 }
 
+/** Create SettlementDiff with conservation law validation: leftDiff + rightDiff + collateralDiff = 0 */
+export const createSettlementDiff = (diff: SettlementDiff): SettlementDiff => {
+  if (diff.leftDiff + diff.rightDiff + diff.collateralDiff !== 0n) {
+    throw new Error(
+      `FINTECH-SAFETY: Settlement conservation violation for token ${diff.tokenId}: ` +
+      `leftDiff(${diff.leftDiff}) + rightDiff(${diff.rightDiff}) + collateralDiff(${diff.collateralDiff}) != 0`
+    );
+  }
+  return diff;
+};
+
 /**
  * Settlement workspace - shared editing area per bilateral account
  *
@@ -1166,7 +1177,7 @@ export interface SettlementDiff {
  * 4. Initiator or counterparty executes via settle_execute (adds to jBatch)
  * 5. Execute or reject clears workspace
  */
-export interface SettlementWorkspace {
+interface SettlementWorkspaceBase {
   diffs: SettlementDiff[];                    // The settlement operations
   forgiveTokenIds: number[];                  // Debts to forgive (optional)
   insuranceRegs: Array<{                      // Insurance registrations (optional)
@@ -1177,13 +1188,8 @@ export interface SettlementWorkspace {
     expiresAt: bigint;
   }>;
 
-  // Hanko signatures
-  leftHanko?: HankoString;                    // Left's signature on settlement
-  rightHanko?: HankoString;                   // Right's signature on settlement
-
   // Metadata
   initiatedBy: 'left' | 'right';              // Who created the workspace
-  status: 'draft' | 'awaiting_counterparty' | 'ready_to_submit';
   memo?: string;                              // Human-readable description
   version: number;                            // Increments on each update
   createdAt: number;                          // Timestamp when created
@@ -1193,10 +1199,12 @@ export interface SettlementWorkspace {
   // When cross-signed, this determines whose responsibility it is to submit on-chain.
   // Generally hub (larger batches = cheaper gas) should broadcast.
   broadcastByLeft: boolean;
-
-  // Nonce tracking (for invalidating old dispute proofs)
-  cooperativeNonceAtSign?: number;            // coopNonce when signing
 }
+
+export type SettlementWorkspace =
+  | (SettlementWorkspaceBase & { status: 'draft' })
+  | (SettlementWorkspaceBase & { status: 'awaiting_counterparty'; leftHanko?: HankoString; rightHanko?: HankoString })
+  | (SettlementWorkspaceBase & { status: 'ready_to_submit'; leftHanko: HankoString; rightHanko: HankoString; cooperativeNonceAtSign: number });
 
 // Derived account balance information per token
 export interface DerivedDelta {

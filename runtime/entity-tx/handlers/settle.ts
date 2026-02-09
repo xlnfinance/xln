@@ -16,6 +16,7 @@
  */
 
 import type { EntityState, EntityTx, EntityInput, SettlementWorkspace, SettlementDiff, AccountInput } from '../../types';
+import { createSettlementDiff } from '../../types';
 import { cloneEntityState, addMessage, getAccountPerspective } from '../../state-helpers';
 import { initJBatch, batchAddSettlement } from '../../j-batch';
 import { isLeftEntity } from '../../entity-id-utils';
@@ -30,11 +31,8 @@ const MAX_SETTLEMENT_DIFF = FINANCIAL.MAX_PAYMENT_AMOUNT;
 // Validate conservation law and bounds for all diffs
 function validateDiffs(diffs: SettlementDiff[]): void {
   for (const diff of diffs) {
-    // Conservation law: leftDiff + rightDiff + collateralDiff = 0
-    const sum = diff.leftDiff + diff.rightDiff + diff.collateralDiff;
-    if (sum !== 0n) {
-      throw new Error(`Conservation law violated: leftDiff + rightDiff + collateralDiff = ${sum} (must be 0)`);
-    }
+    // Conservation law validated by createSettlementDiff
+    createSettlementDiff(diff);
 
     // Bounds check: Prevent overflow/underflow attacks
     const absDiffs = [
@@ -205,38 +203,48 @@ export async function handleSettleUpdate(
   }
 
   // Cannot update after either party has signed
-  if (account.settlementWorkspace.leftHanko || account.settlementWorkspace.rightHanko) {
+  if (account.settlementWorkspace.status === 'awaiting_counterparty' &&
+      (account.settlementWorkspace.leftHanko || account.settlementWorkspace.rightHanko)) {
+    throw new Error(`Cannot update after signing. Use settle_reject to start over.`);
+  }
+  if (account.settlementWorkspace.status === 'ready_to_submit') {
     throw new Error(`Cannot update after signing. Use settle_reject to start over.`);
   }
 
-  const oldVersion = account.settlementWorkspace.version;
+  const oldWs = account.settlementWorkspace;
+  const oldVersion = oldWs.version;
   const newVersion = oldVersion + 1;
-  const oldDiffs = account.settlementWorkspace.diffs;
+  const oldDiffs = oldWs.diffs;
 
-  // Update workspace (replaces diffs entirely)
-  account.settlementWorkspace.diffs = diffs;
-  account.settlementWorkspace.forgiveTokenIds = forgiveTokenIds || account.settlementWorkspace.forgiveTokenIds;
-  if (memo) account.settlementWorkspace.memo = memo;
-  account.settlementWorkspace.version = newVersion;
+  // Reconstruct workspace with updated fields
+  const updatedForgive = forgiveTokenIds || oldWs.forgiveTokenIds;
+  const updatedMemo = memo || oldWs.memo;
+  account.settlementWorkspace = {
+    ...oldWs,
+    status: 'awaiting_counterparty' as const,
+    diffs,
+    forgiveTokenIds: updatedForgive,
+    ...(updatedMemo ? { memo: updatedMemo } : {}),
+    version: newVersion,
+    lastUpdatedAt: newState.timestamp,
+  };
 
   // Ring-fence: Release old holds, set new holds
   const releaseOp = createSettlementHoldOp(counterpartyEntityId, oldDiffs, oldVersion, 'release');
   if (releaseOp) mempoolOps.push(releaseOp);
   const holdOp = createSettlementHoldOp(counterpartyEntityId, diffs, newVersion, 'set');
   if (holdOp) mempoolOps.push(holdOp);
-  account.settlementWorkspace.lastUpdatedAt = newState.timestamp;
-  account.settlementWorkspace.status = 'awaiting_counterparty';
 
-  console.log(`✅ settle_update: Workspace updated (version ${account.settlementWorkspace.version})`);
-  addMessage(newState, `⚖️ Settlement updated (v${account.settlementWorkspace.version})`);
+  console.log(`✅ settle_update: Workspace updated (version ${newVersion})`);
+  addMessage(newState, `⚖️ Settlement updated (v${newVersion})`);
 
   // Send update to counterparty
   const settleAction: AccountInput['settleAction'] = {
     type: 'update',
     diffs,
-    forgiveTokenIds: account.settlementWorkspace.forgiveTokenIds,
-    ...(account.settlementWorkspace.memo && { memo: account.settlementWorkspace.memo }),
-    version: account.settlementWorkspace.version,
+    forgiveTokenIds: updatedForgive,
+    ...(updatedMemo && { memo: updatedMemo }),
+    version: newVersion,
   };
 
   outputs.push({
@@ -282,9 +290,15 @@ export async function handleSettleApprove(
   }
 
   const workspace = account.settlementWorkspace;
+  if (workspace.status === 'draft') {
+    throw new Error(`Cannot approve a draft workspace. Propose first.`);
+  }
   const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
 
   // Check if we already signed
+  if (workspace.status === 'ready_to_submit') {
+    throw new Error(`Already signed this workspace.`);
+  }
   const myHanko = iAmLeft ? workspace.leftHanko : workspace.rightHanko;
   if (myHanko) {
     throw new Error(`Already signed this workspace.`);
@@ -293,7 +307,6 @@ export async function handleSettleApprove(
   // Use ON-CHAIN settlement nonce for signing (NOT proofHeader.cooperativeNonce)
   // proofHeader.cooperativeNonce is for frame consensus, on-chain nonce is for settlements
   const onChainNonce = account.onChainSettlementNonce ?? 0;
-  workspace.cooperativeNonceAtSign = onChainNonce;
 
   console.log(`⚖️ Using on-chain settlement nonce: ${onChainNonce} (local frame nonce: ${account.proofHeader.cooperativeNonce})`);
 
@@ -324,21 +337,29 @@ export async function handleSettleApprove(
     throw new Error(`Failed to generate settlement hanko for ${signerId.slice(-4)}`);
   }
 
-  // Store our hanko
-  if (iAmLeft) {
-    workspace.leftHanko = hanko;
-  } else {
-    workspace.rightHanko = hanko;
-  }
+  // Determine new hankos
+  const newLeftHanko = iAmLeft ? hanko : workspace.leftHanko;
+  const newRightHanko = iAmLeft ? workspace.rightHanko : hanko;
 
-  // Update status
+  // Reconstruct workspace with correct status variant
   const otherHanko = iAmLeft ? workspace.rightHanko : workspace.leftHanko;
-  if (otherHanko) {
-    workspace.status = 'ready_to_submit';
+  if (otherHanko && newLeftHanko && newRightHanko) {
+    account.settlementWorkspace = {
+      ...workspace,
+      status: 'ready_to_submit',
+      leftHanko: newLeftHanko,
+      rightHanko: newRightHanko,
+      cooperativeNonceAtSign: onChainNonce,
+    };
     console.log(`✅ settle_approve: Both parties signed - ready to submit`);
     addMessage(newState, `✅ Settlement fully signed - ready to execute`);
   } else {
-    workspace.status = 'awaiting_counterparty';
+    account.settlementWorkspace = {
+      ...workspace,
+      status: 'awaiting_counterparty',
+      ...(newLeftHanko ? { leftHanko: newLeftHanko } : {}),
+      ...(newRightHanko ? { rightHanko: newRightHanko } : {}),
+    };
     console.log(`✅ settle_approve: We signed - awaiting counterparty`);
     addMessage(newState, `⚖️ Settlement signed - awaiting counterparty signature`);
   }
@@ -398,9 +419,9 @@ export async function handleSettleExecute(
 
   const workspace = account.settlementWorkspace;
 
-  // Require both signatures
-  if (!workspace.leftHanko || !workspace.rightHanko) {
-    throw new Error(`Settlement not fully signed. leftHanko=${!!workspace.leftHanko}, rightHanko=${!!workspace.rightHanko}`);
+  // Require ready_to_submit status (both signatures present)
+  if (workspace.status !== 'ready_to_submit') {
+    throw new Error(`Settlement not fully signed (status: ${workspace.status}). Both parties must approve first.`);
   }
 
   // Initialize jBatch if needed
@@ -432,10 +453,10 @@ export async function handleSettleExecute(
     workspace.diffs,
     workspace.forgiveTokenIds,
     workspace.insuranceRegs,
-    counterpartyHanko!,
+    counterpartyHanko,
     jurisdiction.entityProviderAddress,
     '0x', // hankoData - not needed for single-signer entities
-    workspace.cooperativeNonceAtSign ?? account.proofHeader.cooperativeNonce,
+    workspace.cooperativeNonceAtSign,
     entityState.entityId
   );
 
@@ -562,21 +583,31 @@ export function processSettleAction(
         return { success: false, message: 'No workspace to update' };
       }
 
-      if (account.settlementWorkspace.leftHanko || account.settlementWorkspace.rightHanko) {
+      if (account.settlementWorkspace.status === 'ready_to_submit') {
+        return { success: false, message: 'Cannot update after signing' };
+      }
+      if (account.settlementWorkspace.status === 'awaiting_counterparty' &&
+          (account.settlementWorkspace.leftHanko || account.settlementWorkspace.rightHanko)) {
         return { success: false, message: 'Cannot update after signing' };
       }
 
       // NOTE: Do NOT queue settle_release/settle_hold here - they arrive via updater's frame
       // The updater already queued the txs; we'll apply them during frame consensus
 
-      account.settlementWorkspace.diffs = settleAction.diffs || account.settlementWorkspace.diffs;
-      account.settlementWorkspace.forgiveTokenIds = settleAction.forgiveTokenIds || account.settlementWorkspace.forgiveTokenIds;
-      if (settleAction.memo) account.settlementWorkspace.memo = settleAction.memo;
-      account.settlementWorkspace.version = settleAction.version || account.settlementWorkspace.version + 1;
-      account.settlementWorkspace.lastUpdatedAt = entityTimestamp;
+      const ws = account.settlementWorkspace;
+      const newVersion = settleAction.version || ws.version + 1;
+      account.settlementWorkspace = {
+        ...ws,
+        status: 'awaiting_counterparty' as const,
+        diffs: settleAction.diffs || ws.diffs,
+        forgiveTokenIds: settleAction.forgiveTokenIds || ws.forgiveTokenIds,
+        ...(settleAction.memo && { memo: settleAction.memo }),
+        version: newVersion,
+        lastUpdatedAt: entityTimestamp,
+      };
 
-      console.log(`📥 Received settle_update from ${fromEntityId.slice(-4)} (v${account.settlementWorkspace.version})`);
-      return { success: true, message: `Settlement updated to v${account.settlementWorkspace.version}` };
+      console.log(`📥 Received settle_update from ${fromEntityId.slice(-4)} (v${newVersion})`);
+      return { success: true, message: `Settlement updated to v${newVersion}` };
     }
 
     case 'approve': {
@@ -589,17 +620,33 @@ export function processSettleAction(
         return { success: false, message: 'No hanko provided' };
       }
 
-      // Store their hanko
-      if (theyAreLeft) {
-        account.settlementWorkspace.leftHanko = settleAction.hanko;
-      } else {
-        account.settlementWorkspace.rightHanko = settleAction.hanko;
+      if (account.settlementWorkspace.status === 'draft') {
+        return { success: false, message: 'Cannot approve a draft workspace' };
       }
 
-      // Update status
-      const myHanko = iAmLeft ? account.settlementWorkspace.leftHanko : account.settlementWorkspace.rightHanko;
-      if (myHanko) {
-        account.settlementWorkspace.status = 'ready_to_submit';
+      const awsWs = account.settlementWorkspace;
+
+      // Determine new hankos
+      const newLeftHanko = theyAreLeft ? settleAction.hanko : (awsWs.status === 'awaiting_counterparty' ? awsWs.leftHanko : awsWs.leftHanko);
+      const newRightHanko = theyAreLeft ? (awsWs.status === 'awaiting_counterparty' ? awsWs.rightHanko : awsWs.rightHanko) : settleAction.hanko;
+
+      // Check if both parties have now signed
+      const myHanko = iAmLeft ? newLeftHanko : newRightHanko;
+      if (myHanko && newLeftHanko && newRightHanko) {
+        account.settlementWorkspace = {
+          ...awsWs,
+          status: 'ready_to_submit',
+          leftHanko: newLeftHanko,
+          rightHanko: newRightHanko,
+          cooperativeNonceAtSign: account.onChainSettlementNonce ?? 0,
+        };
+      } else {
+        account.settlementWorkspace = {
+          ...awsWs,
+          status: 'awaiting_counterparty',
+          ...(newLeftHanko ? { leftHanko: newLeftHanko } : {}),
+          ...(newRightHanko ? { rightHanko: newRightHanko } : {}),
+        };
       }
 
       console.log(`📥 Received settle_approve from ${fromEntityId.slice(-4)}`);
