@@ -498,7 +498,9 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   }
 
   const aliceAccount3 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
-  assert(aliceAccount3?.settlementWorkspace?.leftHanko, 'Alice should have signed', env);
+  assert(aliceAccount3?.settlementWorkspace, 'Alice should have settlement workspace', env);
+  assert(aliceAccount3.settlementWorkspace.status === 'awaiting_counterparty', 'Should be awaiting counterparty', env);
+  assert(aliceAccount3.settlementWorkspace.leftHanko, 'Alice should have signed', env);
   assert(!aliceAccount3.settlementWorkspace.rightHanko, 'Hub should not have signed yet', env);
 
   console.log(`✅ Alice approved settlement`);
@@ -520,9 +522,10 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   }
 
   const aliceAccount4 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
-  assert(aliceAccount4?.settlementWorkspace?.leftHanko, 'Alice hanko still present', env);
-  assert(aliceAccount4.settlementWorkspace.rightHanko, 'Hub should have signed', env);
+  assert(aliceAccount4?.settlementWorkspace, 'Alice should have settlement workspace', env);
   assert(aliceAccount4.settlementWorkspace.status === 'ready_to_submit', 'Should be ready to submit', env);
+  assert(aliceAccount4.settlementWorkspace.leftHanko, 'Alice hanko still present', env);
+  assert(aliceAccount4.settlementWorkspace.rightHanko, 'Hub should have signed', env);
 
   console.log(`✅ Hub approved settlement`);
   console.log(`   rightHanko: ${aliceAccount4.settlementWorkspace.rightHanko?.slice(0, 20)}...`);

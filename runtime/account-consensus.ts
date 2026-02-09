@@ -12,7 +12,12 @@
  * - Event Bubbling: Account events bubble up to E-Machine for entity messages
  */
 
-import type { AccountMachine, AccountFrame, AccountTx, AccountInput, Env, EntityState, Delta, EntityReplica } from './types';
+import type { AccountMachine, AccountFrame, AccountTx, AccountInput, AccountInputProposal, AccountInputAck, Env, EntityState, Delta, EntityReplica } from './types';
+
+/** Type guard: input has frame-level consensus fields (proposal or ack) */
+function isFrameInput(input: AccountInput): input is AccountInputProposal | AccountInputAck {
+  return input.type === 'proposal' || input.type === 'ack';
+}
 import { cloneAccountMachine, getAccountPerspective } from './state-helpers';
 import { isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-crypto';
@@ -536,6 +541,7 @@ export async function proposeAccountFrame(
   events.push(`🚀 Proposed frame ${newFrame.height} with ${newFrame.accountTxs.length} transactions`);
 
   const accountInput: AccountInput = {
+    type: 'proposal' as const,
     fromEntityId: accountMachine.proofHeader.fromEntity,
     toEntityId: accountMachine.proofHeader.toEntity,
     height: newFrame.height,
@@ -594,8 +600,8 @@ export async function handleAccountInput(
   // MULTI-SIGNER: Hashes that need entity-quorum signing
   hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
 }> {
-  console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`);
-  console.log(`📨 A-MACHINE INPUT: height=${input.height || 'none'}, hasACK=${!!input.prevHanko}, hasNewFrame=${!!input.newAccountFrame}`);
+  console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, type=${input.type}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`);
+  console.log(`📨 A-MACHINE INPUT: type=${input.type}, height=${isFrameInput(input) ? input.height : 'none'}, hasACK=${input.type === 'ack'}, hasNewFrame=${isFrameInput(input) ? !!input.newAccountFrame : false}`);
 
   const events: string[] = [];
   const timedOutHashlocks: string[] = [];
@@ -604,7 +610,7 @@ export async function handleAccountInput(
   // Replay protection: frame chain (height + prevFrameHash) checked at :836
   // ACK replay protection: pendingFrame cleared on commit, so replayed ACK fails pendingFrame check
 
-  if (input.newDisputeHanko !== undefined && input.newDisputeHanko !== null) {
+  if (isFrameInput(input) && input.newDisputeHanko !== undefined && input.newDisputeHanko !== null) {
     if (typeof input.newDisputeHanko !== 'string') {
       return { success: false, error: 'Invalid dispute hanko type', events };
     }
@@ -619,7 +625,7 @@ export async function handleAccountInput(
   }
 
   // Handle pending frame confirmation
-  if (accountMachine.pendingFrame && input.height === accountMachine.pendingFrame.height && input.prevHanko) {
+  if (accountMachine.pendingFrame && input.type === 'ack' && input.height === accountMachine.pendingFrame.height && input.prevHanko) {
     console.log(`✅ Received confirmation for pending frame ${input.height}`);
     console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}`);
 
@@ -774,8 +780,8 @@ export async function handleAccountInput(
     }
   }
 
-  // Handle new frame proposal
-  if (input.newAccountFrame) {
+  // Handle new frame proposal (proposal or batched ack with newAccountFrame)
+  if (isFrameInput(input) && input.newAccountFrame) {
     const receivedFrame = input.newAccountFrame;
 
     // Validate frame with timestamp checks (HTLC safety)
@@ -1246,12 +1252,13 @@ export async function handleAccountInput(
     }
     accountMachine.disputeProofBodiesByHash[ackProofResult.proofBodyHash] = ackProofResult.proofBodyStruct;
 
-    const response: AccountInput = {
+    const response: AccountInputAck = {
+      type: 'ack' as const,
       fromEntityId: accountMachine.proofHeader.fromEntity,
       toEntityId: input.fromEntityId,
       height: receivedFrame.height,
       prevHanko: confirmationHanko,       // Hanko ACK on their frame
-      ...(ackDisputeHanko && { newDisputeHanko: ackDisputeHanko }),   // My dispute proof hanko (current state)
+      ...(ackDisputeHanko ? { newDisputeHanko: ackDisputeHanko } : {}),   // My dispute proof hanko (current state)
       newDisputeHash: ackDisputeHash,     // Full dispute hash (key in hankoWitness for quorum lookup)
       newDisputeProofBodyHash: ackProofResult.proofBodyHash, // ProofBodyHash that ackDisputeHanko signs
       disputeProofNonce: ackSignedCooperativeNonce, // nonce at which ACK's dispute proof was signed
@@ -1264,20 +1271,17 @@ export async function handleAccountInput(
       // Pass skipNonceIncrement=true since we'll increment for the whole batch below
       proposeResult = await proposeAccountFrame(env, accountMachine, true);
 
-      if (proposeResult.success && proposeResult.accountInput) {
+      if (proposeResult.success && proposeResult.accountInput && proposeResult.accountInput.type === 'proposal') {
         batchedWithNewFrame = true;
         // Merge ACK and new proposal into same AccountInput
-        if (proposeResult.accountInput.newAccountFrame) {
-          response.newAccountFrame = proposeResult.accountInput.newAccountFrame;
-        }
-        if (proposeResult.accountInput.newHanko) {
-          response.newHanko = proposeResult.accountInput.newHanko;
-        }
+        const proposal = proposeResult.accountInput;
+        response.newAccountFrame = proposal.newAccountFrame;
+        response.newHanko = proposal.newHanko;
         // DON'T overwrite response.newDisputeHanko (it's ACK's dispute hanko for current committed state)
         // Proposal's newDisputeHanko will be delivered when proposal commits, not now
         // This preserves ACK's dispute hanko for last agreed state
 
-        const newFrameId = proposeResult.accountInput.newAccountFrame?.height || 0;
+        const newFrameId = proposal.newAccountFrame.height;
         console.log(`✅ Batched ACK for frame ${receivedFrame.height} + proposal for frame ${newFrameId}`);
         events.push(`📤 Batched ACK + frame ${newFrameId}`);
       }

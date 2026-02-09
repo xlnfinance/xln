@@ -1,4 +1,4 @@
-import type { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine } from '../../types';
+import type { AccountInput, AccountInputProposal, AccountInputAck, AccountInputSettlement, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
 import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
@@ -55,7 +55,8 @@ export interface AccountHandlerResult {
 
 export async function handleAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<AccountHandlerResult> {
   console.log(`🚀 APPLY accountInput: ${input.fromEntityId.slice(-4)} → ${input.toEntityId.slice(-4)}`);
-  console.log(`🚀 APPLY accountInput details: height=${input.height}, hasNewFrame=${!!input.newAccountFrame}, hasPrevHanko=${!!input.prevHanko}`);
+  const isFrame = input.type === 'proposal' || input.type === 'ack';
+  console.log(`🚀 APPLY accountInput details: type=${input.type}, height=${isFrame ? input.height : 'N/A'}, hasNewFrame=${isFrame ? !!input.newAccountFrame : false}, hasPrevHanko=${input.type === 'ack' ? !!input.prevHanko : false}`);
 
   // CRITICAL: Don't clone here - state already cloned at entity level (applyEntityTx)
   const newState: EntityState = state;  // Use state directly
@@ -152,7 +153,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
   // === SETTLEMENT WORKSPACE ACTIONS ===
   // Process settleAction before frame consensus (bilateral negotiation)
-  if (input.settleAction) {
+  if (input.type === 'settlement') {
     const { processSettleAction } = await import('./settle');
     const result = processSettleAction(
       accountMachine,
@@ -168,10 +169,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       console.warn(`⚠️ settleAction failed: ${result.message}`);
       addMessage(newState, `⚠️ Settlement: ${result.message}`);
     }
-  }
-
+  } else if (input.type === 'proposal' || input.type === 'ack') {
   // CHANNEL.TS PATTERN: Process frame-level consensus ONLY
-  if (input.height || input.newAccountFrame) {
     console.log(`🤝 Processing frame from ${input.fromEntityId.slice(-4)}, accountMachine.pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}`);
 
     const result = await processAccountInput(env, accountMachine, input);
@@ -738,7 +737,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           }]
         });
 
-        console.log(`✅ ACK-RESPONSE queued: ${state.entityId.slice(-4)} → ${result.response.toEntityId.slice(-4)}, height=${result.response.height}, hasPrevHanko=${!!result.response.prevHanko}`);
+        console.log(`✅ ACK-RESPONSE queued: ${state.entityId.slice(-4)} → ${result.response.toEntityId.slice(-4)}, type=${result.response.type}, hasPrevHanko=${result.response.type === 'ack' ? !!result.response.prevHanko : false}`);
       }
     } else {
       console.error(`❌ Frame consensus failed: ${result.error}`);
@@ -755,11 +754,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         toEntityId: input.toEntityId,
       }, state.entityId);
     }
-  } else if (!input.settleAction) {
-    // Only error if there was no settleAction either
-    // Settlement workspace actions (propose/update/approve/reject) don't require frames
-    console.error(`❌ Received AccountInput without frames - invalid!`);
-    addMessage(newState, `❌ Invalid AccountInput from ${input.fromEntityId.slice(-4)}`);
+  } else {
+    // Exhaustive check: all AccountInput variants handled above
+    const _exhaustive: never = input;
+    console.error(`❌ Received unknown AccountInput type - invalid!`);
   }
 
   return {

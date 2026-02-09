@@ -1081,38 +1081,54 @@ export interface AccountFrame {
 }
 
 // AccountInput - Maps 1:1 to Channel.ts FlushMessage (frame-level consensus ONLY)
-export interface AccountInput {
+// AccountInput base fields shared by all variants
+interface AccountInputBase {
   fromEntityId: string;
   toEntityId: string;
-
-  // Frame-level consensus (matches Channel.ts FlushMessage structure)
-  height?: number;                   // Which frame we're ACKing or referencing (renamed from frameId)
-
-  // HANKO SYSTEM:
-  prevHanko?: HankoString;                // ACK hanko for their frame
-  newAccountFrame?: AccountFrame;         // Our new proposed frame (like block in Channel.ts)
-  newHanko?: HankoString;                 // Hanko on newAccountFrame
-  newDisputeHanko?: HankoString;          // Hanko on dispute proof (for J-machine enforcement)
-  newDisputeHash?: string;               // Full dispute hash (key in hankoWitness, wraps proofBodyHash)
-  newDisputeProofBodyHash?: string;       // ProofBodyHash that newDisputeHanko signs
-  newSettlementHanko?: HankoString;       // Hanko for settlement operations
-
-  // SETTLEMENT WORKSPACE ACTIONS (bilateral negotiation)
-  settleAction?: {
-    type: 'propose' | 'update' | 'approve' | 'execute' | 'reject';
-    diffs?: SettlementDiff[];            // For propose/update
-    forgiveTokenIds?: number[];          // For propose/update
-    hanko?: HankoString;                 // For approve (signer's hanko)
-    memo?: string;                       // For propose/update/reject
-    version?: number;                    // Version being approved/executed
-  };
-
-  // LEGACY (will be removed):
-  prevSignatures?: string[];         // ACK for their frame (LEGACY)
-  newSignatures?: string[];          // Signatures on new frame (LEGACY)
-
-  disputeProofNonce?: number;        // cooperativeNonce at which dispute proof was signed (explicit, replaces counter-1 hack)
+  disputeProofNonce?: number;
 }
+
+// Proposal: We propose a new bilateral frame
+export interface AccountInputProposal extends AccountInputBase {
+  type: 'proposal';
+  height: number;
+  newAccountFrame: AccountFrame;
+  newHanko: HankoString;
+  newDisputeHanko?: HankoString;
+  newDisputeHash?: string;
+  newDisputeProofBodyHash?: string;
+  newSettlementHanko?: HankoString;
+}
+
+// ACK: We acknowledge their frame (optionally batched with our new proposal)
+export interface AccountInputAck extends AccountInputBase {
+  type: 'ack';
+  height: number;
+  prevHanko: HankoString;
+  // Optional batched proposal (ACK + new frame in one message):
+  newAccountFrame?: AccountFrame;
+  newHanko?: HankoString;
+  newDisputeHanko?: HankoString;
+  newDisputeHash?: string;
+  newDisputeProofBodyHash?: string;
+  newSettlementHanko?: HankoString;
+}
+
+// Settlement: Bilateral settlement negotiation action
+export interface AccountInputSettlement extends AccountInputBase {
+  type: 'settlement';
+  settleAction: {
+    type: 'propose' | 'update' | 'approve' | 'execute' | 'reject';
+    diffs?: SettlementDiff[];
+    forgiveTokenIds?: number[];
+    hanko?: HankoString;
+    memo?: string;
+    version?: number;
+  };
+}
+
+// Discriminated union - replaces flat AccountInput
+export type AccountInput = AccountInputProposal | AccountInputAck | AccountInputSettlement;
 
 // Delta structure for per-token account state (based on old_src)
 export interface Delta {

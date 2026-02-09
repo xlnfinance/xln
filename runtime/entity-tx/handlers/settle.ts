@@ -15,7 +15,7 @@
  * Conservation Law: leftDiff + rightDiff + collateralDiff = 0 (enforced by Account.sol)
  */
 
-import type { EntityState, EntityTx, EntityInput, SettlementWorkspace, SettlementDiff, AccountInput } from '../../types';
+import type { EntityState, EntityTx, EntityInput, SettlementWorkspace, SettlementDiff, AccountInput, AccountInputSettlement } from '../../types';
 import { createSettlementDiff } from '../../types';
 import { cloneEntityState, addMessage, getAccountPerspective } from '../../state-helpers';
 import { initJBatch, batchAddSettlement } from '../../j-batch';
@@ -151,7 +151,7 @@ export async function handleSettlePropose(
   addMessage(newState, `⚖️ Settlement proposed to ${counterpartyEntityId.slice(-4)} - awaiting response`);
 
   // Send workspace to counterparty via AccountInput
-  const settleAction: AccountInput['settleAction'] = {
+  const settleAction: AccountInputSettlement['settleAction'] = {
     type: 'propose',
     diffs,
     forgiveTokenIds: forgiveTokenIds || [],
@@ -164,6 +164,7 @@ export async function handleSettlePropose(
     entityTxs: [{
       type: 'accountInput',
       data: {
+        type: 'settlement' as const,
         fromEntityId: entityState.entityId,
         toEntityId: counterpartyEntityId,
         settleAction,
@@ -239,7 +240,7 @@ export async function handleSettleUpdate(
   addMessage(newState, `⚖️ Settlement updated (v${newVersion})`);
 
   // Send update to counterparty
-  const settleAction: AccountInput['settleAction'] = {
+  const settleAction: AccountInputSettlement['settleAction'] = {
     type: 'update',
     diffs,
     forgiveTokenIds: updatedForgive,
@@ -252,6 +253,7 @@ export async function handleSettleUpdate(
     entityTxs: [{
       type: 'accountInput',
       data: {
+        type: 'settlement' as const,
         fromEntityId: entityState.entityId,
         toEntityId: counterpartyEntityId,
         settleAction,
@@ -365,7 +367,7 @@ export async function handleSettleApprove(
   }
 
   // Send approval to counterparty
-  const settleAction: AccountInput['settleAction'] = {
+  const settleAction: AccountInputSettlement['settleAction'] = {
     type: 'approve',
     ...(hanko && { hanko }),
     version: workspace.version,
@@ -376,6 +378,7 @@ export async function handleSettleApprove(
     entityTxs: [{
       type: 'accountInput',
       data: {
+        type: 'settlement' as const,
         fromEntityId: entityState.entityId,
         toEntityId: counterpartyEntityId,
         settleAction,
@@ -514,7 +517,7 @@ export async function handleSettleReject(
   addMessage(newState, `❌ Settlement rejected${reason ? `: ${reason}` : ''}`);
 
   // Notify counterparty
-  const settleAction: AccountInput['settleAction'] = {
+  const settleAction: AccountInputSettlement['settleAction'] = {
     type: 'reject',
     ...(reason && { memo: reason }),
   };
@@ -524,6 +527,7 @@ export async function handleSettleReject(
     entityTxs: [{
       type: 'accountInput',
       data: {
+        type: 'settlement' as const,
         fromEntityId: entityState.entityId,
         toEntityId: counterpartyEntityId,
         settleAction,
@@ -540,7 +544,7 @@ export async function handleSettleReject(
  */
 export function processSettleAction(
   account: import('../../types').AccountMachine,
-  settleAction: NonNullable<AccountInput['settleAction']>,
+  settleAction: AccountInputSettlement['settleAction'],
   fromEntityId: string,
   myEntityId: string,
   entityTimestamp: number // Entity-level timestamp for determinism across validators

@@ -716,26 +716,29 @@ export const applyEntityInput = async (
         for (const tx of output.entityTxs) {
           if (tx.type === 'accountInput' && tx.data) {
             const accountInput = tx.data as import('./types').AccountInput;
-            // Attach quorum hanko for new account frame
-            if (accountInput.newAccountFrame?.stateHash) {
-              const frameHankoEntry = workingReplica.hankoWitness?.get(accountInput.newAccountFrame.stateHash);
-              if (frameHankoEntry) {
-                accountInput.newHanko = frameHankoEntry.hanko;
-                attachedCount++;
-                console.log(`🔐 ATTACH-HANKO: frame for ${accountInput.toEntityId?.slice(-4)}`);
+            // Attach quorum hankos based on AccountInput variant
+            if (accountInput.type === 'proposal' || accountInput.type === 'ack') {
+              // Attach quorum hanko for new account frame
+              if (accountInput.newAccountFrame?.stateHash) {
+                const frameHankoEntry = workingReplica.hankoWitness?.get(accountInput.newAccountFrame.stateHash);
+                if (frameHankoEntry) {
+                  (accountInput as any).newHanko = frameHankoEntry.hanko;
+                  attachedCount++;
+                  console.log(`🔐 ATTACH-HANKO: frame for ${accountInput.toEntityId?.slice(-4)}`);
+                }
               }
-            }
-            // Attach quorum hanko for dispute proof (replaces single-signer hanko)
-            if (accountInput.newDisputeHash) {
-              const disputeHankoEntry = workingReplica.hankoWitness?.get(accountInput.newDisputeHash);
-              if (disputeHankoEntry) {
-                accountInput.newDisputeHanko = disputeHankoEntry.hanko;
-                attachedCount++;
-                console.log(`🔐 ATTACH-HANKO: dispute for ${accountInput.toEntityId?.slice(-4)}`);
+              // Attach quorum hanko for dispute proof (replaces single-signer hanko)
+              if (accountInput.newDisputeHash) {
+                const disputeHankoEntry = workingReplica.hankoWitness?.get(accountInput.newDisputeHash);
+                if (disputeHankoEntry) {
+                  (accountInput as any).newDisputeHanko = disputeHankoEntry.hanko;
+                  attachedCount++;
+                  console.log(`🔐 ATTACH-HANKO: dispute for ${accountInput.toEntityId?.slice(-4)}`);
+                }
               }
             }
             // Attach quorum hanko for settlement approval (find by type in hankoWitness)
-            if (accountInput.settleAction?.type === 'approve' && accountInput.settleAction.hanko) {
+            if (accountInput.type === 'settlement' && accountInput.settleAction.type === 'approve' && accountInput.settleAction.hanko) {
               for (const [witnessHash, entry] of workingReplica.hankoWitness || []) {
                 if (entry.type === 'settlement' && entry.entityHeight === (workingReplica.state.height + 1)) {
                   accountInput.settleAction.hanko = entry.hanko;
@@ -1137,7 +1140,7 @@ export const applyEntityFrame = async (
       if (accountMachine) {
         // Add to proposable if:
         // - We have pending mempool items and no pending frame
-        const isAck = entityTx.data.height && entityTx.data.prevHanko;
+        const isAck = entityTx.data.type === 'ack';
         const hasPendingTxs = accountMachine.mempool.length > 0;
 
         // Only propose if we have something to send:
@@ -1374,7 +1377,9 @@ export const applyEntityFrame = async (
           };
           allOutputs.push(outputEntityInput);
 
-          console.log(`📮 ACCOUNT-FRAME-OUTPUT: frame ${proposal.accountInput.height} → Entity ${proposal.accountInput.toEntityId.slice(-4)} (${accountKey.slice(-8)} account)`);
+          const proposalInput = proposal.accountInput;
+          const frameHeight = proposalInput.type === 'proposal' || proposalInput.type === 'ack' ? proposalInput.height : 0;
+          console.log(`📮 ACCOUNT-FRAME-OUTPUT: frame ${frameHeight} → Entity ${proposalInput.toEntityId.slice(-4)} (${accountKey.slice(-8)} account)`);
 
           // Add events to entity messages with size limiting
           addMessages(currentEntityState, proposal.events);
@@ -1386,7 +1391,7 @@ export const applyEntityFrame = async (
             {
               entityId: currentEntityState.entityId,
               counterpartyId: cpId,
-              frameHeight: proposal.accountInput.height,
+              frameHeight,
               accountKey,
             },
             currentEntityState.entityId,
