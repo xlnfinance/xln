@@ -7,8 +7,11 @@
 // High-level database using Level polyfill (works in both Node.js and browser)
 import { Level } from 'level';
 
-// Bump this when you need to confirm the browser picked up a new runtime bundle.
-const RUNTIME_BUILD_ID = '2026-01-21-00:40Z';
+// Bump this on runtime bundle changes that must be reflected in frontend immediately.
+const RUNTIME_BUILD_ID = '2026-02-09-22:10Z';
+// Bump this only on breaking persistence/replay format or invariants.
+export const RUNTIME_SCHEMA_VERSION = 2;
+export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
 console.log(`🚀 RUNTIME.JS BUILD: ${RUNTIME_BUILD_ID}`);
 
 import { getPerfMs, getWallClockMs } from './utils';
@@ -189,6 +192,7 @@ const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
 const dbRootPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
 
 const DEFAULT_DB_NAMESPACE = 'default';
+const PERSISTENCE_SCHEMA_VERSION = 2;
 
 const normalizeDbNamespace = (value: string): string => value.trim().toLowerCase();
 
@@ -215,6 +219,16 @@ const resolveDbNamespace = (options: { env?: Env | null; runtimeId?: string | nu
 
 const makeDbKey = (namespace: string, key: string): Buffer =>
   Buffer.from(`${namespace}:${key}`);
+
+const captureEntityJHeights = (env: Env): Record<string, number> => {
+  const result: Record<string, number> = {};
+  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    const entityId = String(replica?.entityId || safeExtractEntityId(replicaKey) || '').toLowerCase();
+    if (!entityId) continue;
+    result[entityId] = Number(replica?.state?.lastFinalizedJHeight ?? 0);
+  }
+  return result;
+};
 
 // Helper: Race promise with timeout
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -274,12 +288,18 @@ export async function tryOpenDb(env: Env): Promise<boolean> {
           console.log('⚠️ IndexedDB blocked (incognito/private mode) - running in-memory');
           return false;
         }
-        console.warn('⚠️ DB open warning:', error instanceof Error ? error.message : error);
-        return true;
+        // Non-blocked open errors are fatal for persistence.
+        state.dbOpenPromise = null;
+        throw error;
       }
     })();
   }
-  return state.dbOpenPromise;
+  try {
+    return await state.dbOpenPromise;
+  } catch (error) {
+    console.error('❌ Failed to open runtime DB:', error);
+    throw error;
+  }
 }
 
 // === ETHEREUM INTEGRATION ===
@@ -323,9 +343,6 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
       directEntityInputDispatch: null,
     };
   }
-  if (!env.runtimeState.routeDeferState) {
-    env.runtimeState.routeDeferState = new Map();
-  }
   if (!env.runtimeState.entityRuntimeHints) {
     env.runtimeState.entityRuntimeHints = new Map();
   }
@@ -334,6 +351,7 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
 
 const ENV_P2P_SINGLETON_KEY = Symbol.for('xln.runtime.env.p2p.singleton');
 const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
+const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
 
 const failfastAssert = (
   condition: unknown,
@@ -417,7 +435,8 @@ const hasRuntimeWork = (env: Env): boolean => {
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return true;
   if (env.pendingOutputs && env.pendingOutputs.length > 0) return true;
   if (env.networkInbox && env.networkInbox.length > 0) return true;
-  if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) return true;
+  // Deferred network outputs are intentionally dropped (no background retry loop).
+  // Do not treat them as work to avoid tick/save/log storms.
   // J-machine mempool removed from work check — J-batches are now executed post-save
   // as side effects, not queued for processing in the next frame
   return false;
@@ -462,6 +481,15 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
         }
       } catch (error) {
         console.error('❌ Runtime loop error:', error);
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes('PERSISTENCE_FATAL')) {
+          running = false;
+          try {
+            env.error?.('RUNTIME_PERSISTENCE_FATAL', { message });
+          } catch {
+            // best-effort diagnostics
+          }
+        }
       }
       if (tickDelayMs > 0) {
         await sleep(tickDelayMs);
@@ -539,11 +567,6 @@ export const deriveRuntimeId = (seed: string): string => {
 };
 
 // scheduleNetworkProcess removed — loop is always-on via startRuntimeLoop()
-
-const ROUTE_DEFER_WARN_COOLDOWN_MS = 60_000;
-const ROUTE_DEFER_GOSSIP_COOLDOWN_MS = 5_000;
-const ROUTE_DEFER_ESCALATE_AFTER = 20;
-const ROUTE_DEFER_MAX_QUEUE = 256;
 
 const outputDeferKey = (output: RoutedEntityInput): string => {
   const txPart = (output.entityTxs || [])
@@ -659,18 +682,9 @@ const collectSenderEntityHints = (input: RoutedEntityInput): string[] => {
   for (const tx of input.entityTxs || []) {
     const data = tx.data as Record<string, unknown> | undefined;
     if (!data || typeof data !== 'object') continue;
-    if (tx.type === 'accountInput') {
-      const fromEntityId = data.fromEntityId;
-      if (typeof fromEntityId === 'string' && fromEntityId.length > 0) {
-        hints.add(fromEntityId);
-      }
-      continue;
-    }
-    if (tx.type === 'openAccount') {
-      const targetEntityId = data.targetEntityId;
-      if (typeof targetEntityId === 'string' && targetEntityId.length > 0) {
-        hints.add(targetEntityId);
-      }
+    const fromEntityId = data.fromEntityId;
+    if (typeof fromEntityId === 'string' && fromEntityId.length > 0) {
+      hints.add(fromEntityId);
     }
   }
   return [...hints];
@@ -697,21 +711,12 @@ const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
 
   const localOutputs: RoutedEntityInput[] = [];
   const remoteOutputs: PlannedRemoteOutput[] = [];
-  const pendingOutputs = env.pendingNetworkOutputs ? [...env.pendingNetworkOutputs] : [];
   const deduped = new Map<string, RoutedEntityInput>();
-  for (const output of [...pendingOutputs, ...outputs]) {
+  for (const output of outputs) {
     deduped.set(outputDeferKey(output), output);
   }
-  const allOutputs = [...deduped.values()].slice(-ROUTE_DEFER_MAX_QUEUE);
-  if (deduped.size > ROUTE_DEFER_MAX_QUEUE) {
-    env.warn('network', 'ROUTE_DEFER_QUEUE_TRUNCATED', {
-      queued: deduped.size,
-      kept: ROUTE_DEFER_MAX_QUEUE,
-    });
-  }
+  const allOutputs = [...deduped.values()];
   const deferredOutputs: RoutedEntityInput[] = [];
-  const routeDeferState = ensureRuntimeState(env).routeDeferState!;
-  const nowMs = Date.now();
 
   for (const output of allOutputs) {
     if (localEntityIds.has(output.entityId)) {
@@ -721,41 +726,10 @@ const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
     const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
     console.log(`🔀 ROUTE: Output for entity ${output.entityId.slice(-4)} → runtimeId=${targetRuntimeId?.slice(0,10) || 'UNKNOWN'}`);
     if (!targetRuntimeId) {
-      const key = normalizeEntityKey(output.entityId);
-      const defer = routeDeferState.get(key) || {
-        warnAt: 0,
-        gossipAt: 0,
-        deferredCount: 0,
-        escalated: false,
-      };
-      defer.deferredCount += 1;
-      const shouldWarn = nowMs - defer.warnAt >= ROUTE_DEFER_WARN_COOLDOWN_MS;
-      const shouldRefreshGossip = nowMs - defer.gossipAt >= ROUTE_DEFER_GOSSIP_COOLDOWN_MS;
-      if (shouldWarn) {
-        defer.warnAt = nowMs;
-        console.warn(`⚠️ ROUTE-DEFER: No runtimeId for entity ${output.entityId.slice(-4)} (deferred=${defer.deferredCount})`);
-        env.warn('network', 'Missing runtimeId for entity output (queued)', {
-          entityId: output.entityId,
-          deferredCount: defer.deferredCount,
-        });
-      }
-      if (!defer.escalated && defer.deferredCount >= ROUTE_DEFER_ESCALATE_AFTER) {
-        defer.escalated = true;
-        env.error('network', 'ROUTE_DEFER_STUCK', {
-          entityId: output.entityId,
-          deferredCount: defer.deferredCount,
-          reason: 'No runtimeId in gossip profile',
-        });
-      }
-      if (shouldRefreshGossip) {
-        defer.gossipAt = nowMs;
-        getP2P(env)?.refreshGossip();
-      }
-      routeDeferState.set(key, defer);
-      deferredOutputs.push(output);
+      // Policy: no deferred retries. Drop undeliverable outputs immediately.
+      env.warn('network', 'ROUTE_DROP_NO_RUNTIME_ID', { entityId: output.entityId });
       continue;
     }
-    routeDeferState.delete(normalizeEntityKey(output.entityId));
     remoteOutputs.push({ output, targetRuntimeId });
   }
 
@@ -828,7 +802,10 @@ const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): Routed
       }
     }
     if (!p2p) {
-      deferredOutputs.push(output);
+      env.warn('network', 'ROUTE_DROP_NO_P2P', {
+        entityId: output.entityId,
+        runtimeId: targetRuntimeId,
+      });
       continue;
     }
     console.log(`📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId.slice(0, 10)} for entity ${output.entityId.slice(-4)} (${output.entityTxs?.length || 0} txs)`);
@@ -844,11 +821,7 @@ export const sendEntityInput = (env: Env, input: RoutedEntityInput): { sent: boo
   }
   const deferred = dispatchEntityOutputs(env, remoteOutputs);
   const remainingDeferred = [...deferredOutputs, ...deferred];
-  if (remainingDeferred.length > 0) {
-    env.pendingNetworkOutputs = remainingDeferred;
-  } else {
-    env.pendingNetworkOutputs = [];
-  }
+  env.pendingNetworkOutputs = [];
 
   return {
     sent: remoteOutputs.length > 0 && deferred.length === 0,
@@ -990,22 +963,13 @@ export const processJBlockEvents = async (env: Env): Promise<void> => {
     return;
   }
 
-  // No processing guard needed — single async loop prevents re-entry
   const mempool = ensureRuntimeMempool(env);
   const pending = mempool.entityInputs.length;
   if (pending === 0) return;
 
-  console.log(`🔗 J-BLOCK: ${pending} j-events queued → routing to eReplicas`);
-  const toProcess = [...mempool.entityInputs];
-  mempool.entityInputs = [];
-
-  try {
-    await process(env, toProcess);
-  } catch (error) {
-    mempool.entityInputs = [...toProcess, ...mempool.entityInputs];
-    throw error;
-  }
-  console.log(`   ✓ ${toProcess.length} j-events processed`);
+  // Never process directly from UI/helper paths. Runtime loop is the single
+  // state-mutating ingress executor and will consume mempool on its next tick.
+  console.log(`🔗 J-BLOCK: ${pending} j-events queued in mempool (runtime loop will process)`);
 };
 
 
@@ -1021,7 +985,12 @@ export const processJBlockEvents = async (env: Env): Promise<void> => {
 const applyRuntimeInput = async (
   env: Env,
   runtimeInput: RuntimeInput,
-): Promise<{ entityOutbox: RoutedEntityInput[]; mergedInputs: RoutedEntityInput[]; jOutbox: JInput[] }> => {
+): Promise<{
+  entityOutbox: RoutedEntityInput[];
+  mergedInputs: RoutedEntityInput[];
+  jOutbox: JInput[];
+  appliedRuntimeInput: RuntimeInput;
+}> => {
   failfastAssert(
     env.scenarioMode === true || (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] === true,
     'RUNTIME_APPLY_DIRECT_CALL',
@@ -1036,18 +1005,23 @@ const applyRuntimeInput = async (
   }
 
   try {
+    if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
+      console.log(
+        `[REPLAY] applyRuntimeInput runtimeTxs=${runtimeInput.runtimeTxs.length} entityInputs=${runtimeInput.entityInputs.length}`
+      );
+    }
     // SECURITY: Validate runtime input
     if (!runtimeInput) {
       log.error('❌ Null runtime input provided');
-      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
+      return { entityOutbox: [], mergedInputs: [], jOutbox: [], appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] } };
     }
     if (!Array.isArray(runtimeInput.runtimeTxs)) {
       log.error(`❌ Invalid runtimeTxs: expected array, got ${typeof runtimeInput.runtimeTxs}`);
-      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
+      return { entityOutbox: [], mergedInputs: [], jOutbox: [], appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] } };
     }
     if (!Array.isArray(runtimeInput.entityInputs)) {
       log.error(`❌ Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
-      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
+      return { entityOutbox: [], mergedInputs: [], jOutbox: [], appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] } };
     }
 
     // Collect incoming J-inputs into early jOutbox (will be merged with handler jOutputs later)
@@ -1069,7 +1043,7 @@ const applyRuntimeInput = async (
     // SECURITY: Resource limits
     if (runtimeInput.runtimeTxs.length > 1000) {
       log.error(`❌ Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
-      return { entityOutbox: [], mergedInputs: [], jOutbox: [] };
+      return { entityOutbox: [], mergedInputs: [], jOutbox: [], appliedRuntimeInput: { runtimeTxs: [], entityInputs: [] } };
     }
     if (runtimeInput.entityInputs.length > 10000) {
       log.error(`❌ Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
@@ -1101,6 +1075,7 @@ const applyRuntimeInput = async (
     const mergedInputs = mergeEntityInputs(mergedEntityInputs);
 
     const entityOutbox: RoutedEntityInput[] = [];
+    const appliedEntityInputs: RoutedEntityInput[] = [];
     const jOutbox: JInput[] = [...earlyJOutbox]; // Seed with incoming jInputs, handler jOutputs added later
 
     // Process runtime transactions (handle async operations properly)
@@ -1308,36 +1283,75 @@ const applyRuntimeInput = async (
       }
     }
     // REPLICA-DEBUG and SERVER-PROCESSING logs removed
+    const findReplicaKeyInsensitive = (entityId: string, signerId?: string | null): string | null => {
+      const entityNorm = String(entityId || '').toLowerCase();
+      const signerNorm = signerId ? String(signerId).toLowerCase() : null;
+      for (const key of env.eReplicas.keys()) {
+        const [repEntityId, repSignerId] = String(key).split(':');
+        if (!repEntityId || String(repEntityId).toLowerCase() !== entityNorm) continue;
+        if (!signerNorm) return key;
+        if (repSignerId && String(repSignerId).toLowerCase() === signerNorm) return key;
+      }
+      return null;
+    };
+
     for (const entityInput of mergedInputs) {
+      if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
+        console.log(
+          `[REPLAY][RUNTIME] merged input entity=${String(entityInput.entityId).slice(-8)} ` +
+          `signer=${String(entityInput.signerId ?? '')} txs=${entityInput.entityTxs?.length ?? 0} ` +
+          `types=${(entityInput.entityTxs ?? []).map((tx) => tx.type).join(',')}`
+        );
+      }
       // Track j-events in this input - entityInput.entityTxs guaranteed by validateEntityInput above
       // J-EVENT logging removed - too verbose
 
       // Routing boundary: resolve missing signerId to local proposer before REA apply.
       // This keeps proposer lookup out of REA handlers and consensus logic.
       let actualSignerId = entityInput.signerId;
-      if (!actualSignerId || actualSignerId === '') {
-        const entityReplicaKeys = Array.from(env.eReplicas.keys()).filter(key => key.startsWith(entityInput.entityId + ':'));
-        if (entityReplicaKeys.length > 0) {
-          const firstReplicaKey = entityReplicaKeys[0];
-          if (!firstReplicaKey) {
-            logError("RUNTIME_TICK", `❌ Invalid replica key for entity ${entityInput.entityId}`);
-            continue;
-          }
-          const firstReplica = env.eReplicas.get(firstReplicaKey);
-          if (firstReplica?.state.config.validators[0]) {
-            actualSignerId = firstReplica.state.config.validators[0];
-          }
-        }
+      const syntheticSignerHint = String(actualSignerId || '').toLowerCase();
+      if (
+        !actualSignerId ||
+        actualSignerId === '' ||
+        syntheticSignerHint === 'j-event' ||
+        syntheticSignerHint === 'system'
+      ) {
+        actualSignerId = resolveEntityProposerId(env, entityInput.entityId, 'applyRuntimeInput');
+      }
+      failfastAssert(
+        typeof actualSignerId === 'string' && actualSignerId.length > 0,
+        'RUNTIME_SIGNER_RESOLUTION_FAILED',
+        'Unable to resolve signerId for entity input',
+        { entityId: entityInput.entityId, providedSignerId: entityInput.signerId }
+      );
 
-        // Fallback if still no signerId
-        if (!actualSignerId || actualSignerId === '') {
-          console.warn(`⚠️ No signerId and unable to determine proposer for entity ${entityInput.entityId.slice(0,10)}...`);
-          continue; // Skip this input
+      let replicaKey = `${entityInput.entityId}:${actualSignerId}`;
+      let entityReplica = env.eReplicas.get(replicaKey);
+      if (!entityReplica) {
+        // Recovery path for stale/misrouted signer hints: resolve to current proposer once.
+        // This preserves deterministic REA behavior while keeping signer resolution at ingress.
+        const proposerSignerId = resolveEntityProposerId(env, entityInput.entityId, 'applyRuntimeInput.recovery');
+        if (proposerSignerId !== actualSignerId) {
+          actualSignerId = proposerSignerId;
+          replicaKey = `${entityInput.entityId}:${actualSignerId}`;
+          entityReplica = env.eReplicas.get(replicaKey);
+          if (!entityReplica) {
+            const insensitiveMatch = findReplicaKeyInsensitive(entityInput.entityId, actualSignerId);
+            if (insensitiveMatch) {
+              replicaKey = insensitiveMatch;
+              entityReplica = env.eReplicas.get(insensitiveMatch);
+            }
+          }
         }
       }
 
-      const replicaKey = `${entityInput.entityId}:${actualSignerId}`;
-      const entityReplica = env.eReplicas.get(replicaKey);
+      if (!entityReplica) {
+        const insensitiveMatch = findReplicaKeyInsensitive(entityInput.entityId, actualSignerId);
+        if (insensitiveMatch) {
+          replicaKey = insensitiveMatch;
+          entityReplica = env.eReplicas.get(insensitiveMatch);
+        }
+      }
 
       // REPLICA-LOOKUP logs removed - not consensus-critical
 
@@ -1355,7 +1369,21 @@ const applyRuntimeInput = async (
           ...(entityInput.proposedFrame ? { proposedFrame: entityInput.proposedFrame } : {}),
           ...(entityInput.hashPrecommits ? { hashPrecommits: entityInput.hashPrecommits } : {}),
         };
-        const { newState, outputs, jOutputs, workingReplica } = await applyEntityInput(env, entityReplica, normalizedInput);
+        const normalizedInputWithSigner: EntityInput = {
+          ...normalizedInput,
+          signerId: actualSignerId,
+        };
+        appliedEntityInputs.push({
+          ...normalizedInputWithSigner,
+          signerId: actualSignerId,
+        });
+        if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
+          console.log(
+            `[REPLAY][RUNTIME] applyEntityInput replica=${replicaKey.slice(0, 20)} ` +
+            `txs=${normalizedInput.entityTxs?.length ?? 0}`
+          );
+        }
+        const { newState, outputs, jOutputs, workingReplica } = await applyEntityInput(env, entityReplica, normalizedInputWithSigner);
         // APPLY-ENTITY-INPUT-RESULT removed - too noisy
 
         // IMMUTABILITY: Update replica with new state from applyEntityInput
@@ -1393,6 +1421,20 @@ const applyRuntimeInput = async (
           jOutbox.push(...jOutputs);
         }
         // ENTITY-OUTBOX log removed - too noisy
+      } else {
+        failfastAssert(
+          false,
+          'RUNTIME_REPLICA_NOT_FOUND',
+          'Entity input target replica missing after signer resolution',
+          {
+            entityId: entityInput.entityId,
+            resolvedSignerId: actualSignerId,
+            inputSignerId: entityInput.signerId,
+            knownReplicas: Array.from(env.eReplicas.keys()).filter((k) =>
+              String(k).toLowerCase().startsWith(`${String(entityInput.entityId).toLowerCase()}:`)
+            ),
+          }
+        );
       }
     }
 
@@ -1429,10 +1471,9 @@ const applyRuntimeInput = async (
 
       // Update env (mutable)
       env.height++;
-      // Don't overwrite timestamp in scenario mode (deterministic time control)
-      if (!env.scenarioMode) {
-        env.timestamp = getWallClockMs();
-      }
+      // IMPORTANT: Do NOT mutate env.timestamp here.
+      // process() sets a single frame timestamp before applyRuntimeInput(),
+      // and that exact value must be used both for frame hashing and WAL journal.
 
       // Capture snapshot BEFORE clearing (to show what was actually processed)
       const inputDescription = `Tick ${env.height - 1}: ${mergedRuntimeTxs.length} runtimeTxs, ${mergedInputs.length} merged entityInputs → ${entityOutbox.length} outputs`;
@@ -1552,7 +1593,9 @@ const applyRuntimeInput = async (
       }
     }
 
-    notifyEnvChange(env);
+    if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] !== true) {
+      notifyEnvChange(env);
+    }
 
     if (DEBUG && entityOutbox.length > 0) {
       console.log(`📤 Outputs: ${entityOutbox.length} messages`);
@@ -1568,7 +1611,9 @@ const applyRuntimeInput = async (
     // Replica states dump removed - too verbose
 
     // Always notify UI after processing a frame (this is the discrete simulation step)
-    notifyEnvChange(env);
+    if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] !== true) {
+      notifyEnvChange(env);
+    }
 
     // Performance logging
     const endTime = getPerfMs();
@@ -1577,7 +1622,12 @@ const applyRuntimeInput = async (
     }
 
     // APPLY-SERVER-INPUT-FINAL-RETURN removed
-    return { entityOutbox, mergedInputs, jOutbox };
+    const appliedRuntimeInput: RuntimeInput = {
+      runtimeTxs: mergedRuntimeTxs,
+      entityInputs: appliedEntityInputs,
+      ...(runtimeInput.jInputs && runtimeInput.jInputs.length > 0 ? { jInputs: runtimeInput.jInputs } : {}),
+    };
+    return { entityOutbox, mergedInputs, jOutbox, appliedRuntimeInput };
   } catch (error) {
     console.error(`❌ CRITICAL: applyRuntimeInput failed!`, error);
     throw error; // Don't swallow - fail fast and loud
@@ -1591,6 +1641,11 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
   const baseEnv = createEmptyEnv(runtimeSeedOverride ?? null);
   if (baseEnv.runtimeSeed !== undefined && baseEnv.runtimeSeed !== null) {
     setCryptoRuntimeSeed(baseEnv.runtimeSeed);
+    try {
+      prewarmSignerKeyCache(baseEnv.runtimeSeed, 20);
+    } catch (error) {
+      console.warn('⚠️ Failed to prewarm signer cache before restore:', error);
+    }
   }
 
   const dbReady = await tryOpenDb(baseEnv);
@@ -1936,15 +1991,36 @@ const isEntryArray = (value: unknown): value is Array<[unknown, unknown]> =>
   Array.isArray(value) && value.length > 0 && Array.isArray(value[0]) && value[0].length === 2;
 
 const normalizeReplicaMap = (raw: unknown): Map<string, EntityReplica> => {
-  if (raw instanceof Map) return raw as Map<string, EntityReplica>;
-  if (Array.isArray(raw)) {
+  let map: Map<string, EntityReplica>;
+  if (raw instanceof Map) {
+    map = raw as Map<string, EntityReplica>;
+  } else if (Array.isArray(raw)) {
     if (raw.length === 0) return new Map();
-    if (isEntryArray(raw)) return new Map(raw as Array<[string, EntityReplica]>);
+    if (isEntryArray(raw)) {
+      map = new Map(raw as Array<[string, EntityReplica]>);
+    } else {
+      throw new Error('Invalid eReplicas array format in snapshot');
+    }
+  } else if (raw && typeof raw === 'object') {
+    map = new Map(Object.entries(raw as Record<string, EntityReplica>));
+  } else {
+    throw new Error('Invalid eReplicas format in snapshot');
   }
-  if (raw && typeof raw === 'object') {
-    return new Map(Object.entries(raw as Record<string, EntityReplica>));
+
+  // Recovery safety: ensure signer/entity identity fields exist even if older
+  // snapshots only had them in the replica map key ("entityId:signerId").
+  for (const [key, replica] of map.entries()) {
+    if (!replica || typeof replica !== 'object') continue;
+    const [entityIdFromKey, signerIdFromKey] = String(key).split(':');
+    if (!replica.entityId && entityIdFromKey) {
+      (replica as EntityReplica).entityId = entityIdFromKey;
+    }
+    if (!replica.signerId && signerIdFromKey) {
+      (replica as EntityReplica).signerId = signerIdFromKey;
+    }
+    map.set(key, replica);
   }
-  throw new Error('Invalid eReplicas format in snapshot');
+  return map;
 };
 
 const normalizeContractAddress = (value: unknown): string | undefined => {
@@ -2066,6 +2142,28 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   return env;
 };
 
+const buildRuntimeHistorySnapshot = (env: Env, title?: string): any => {
+  return {
+    height: env.height,
+    frame: env.height,
+    timestamp: env.timestamp,
+    ...(env.runtimeSeed !== undefined && env.runtimeSeed !== null ? { runtimeSeed: env.runtimeSeed } : {}),
+    ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
+    eReplicas: new Map(env.eReplicas),
+    jReplicas: env.jReplicas
+      ? Array.from(env.jReplicas.values()).map((jr) => ({
+          ...jr,
+          mempool: [...jr.mempool],
+          stateRoot: new Uint8Array(jr.stateRoot),
+        }))
+      : [],
+    runtimeInput: env.runtimeInput,
+    runtimeOutputs: env.pendingOutputs || [],
+    frameLogs: env.frameLogs || [],
+    title: title ?? `Frame ${env.height}`,
+  };
+};
+
 // === CONSENSUS PROCESSING ===
 // ONE TICK = ONE ITERATION. No cascade. E→E communication always requires new tick.
 
@@ -2084,6 +2182,10 @@ export const process = async (
   });
 
   try {
+    // IMPORTANT: capture frame baseline only after acquiring the process lock.
+    // If captured before waiting on an in-flight tick, we can mis-detect
+    // frame advancement and overwrite WAL entries with empty runtime input.
+    const frameHeightBeforeTick = env.height;
     env.lastProcessEnteredAt = Date.now();
 
     if (!env.emit) {
@@ -2137,7 +2239,6 @@ export const process = async (
       entityInputs: [...mempool.entityInputs],
       ...(mempool.jInputs && mempool.jInputs.length > 0 ? { jInputs: [...mempool.jInputs] } : {}),
     };
-    (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput = runtimeInput;
     const mempoolQueuedAt = mempool.queuedAt;
     mempool.runtimeTxs = [];
     mempool.entityInputs = [];
@@ -2161,6 +2262,7 @@ export const process = async (
       runtimeInput.runtimeTxs.length > 0 ||
       runtimeInput.entityInputs.length > 0 ||
       (runtimeInput.jInputs?.length ?? 0) > 0;
+    (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput = undefined;
 
     let entityOutbox: RoutedEntityInput[] = [];
     let jOutbox: JInput[] = [];
@@ -2188,6 +2290,7 @@ export const process = async (
         console.log(`🔍 PROCESS: applyRuntimeInput returned entityOutbox=${result.entityOutbox.length}, jOutbox=${result.jOutbox.length}`);
         entityOutbox = result.entityOutbox;
         jOutbox = result.jOutbox;
+        (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput = result.appliedRuntimeInput;
         for (const runtimeTx of runtimeInput.runtimeTxs) {
           if (runtimeTx.type === 'importReplica') {
             changedEntityIds.add(runtimeTx.entityId.toLowerCase());
@@ -2212,8 +2315,6 @@ export const process = async (
       } finally {
         (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] = false;
       }
-    } else if (!quietRuntimeLogs && env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
-      console.log(`📤 TICK: No entity inputs - retrying ${env.pendingNetworkOutputs.length} pending network outputs`);
     }
 
     // CRITICAL: planEntityOutputs consumes env.pendingNetworkOutputs — clear before replanning
@@ -2228,46 +2329,34 @@ export const process = async (
     // BrowserVM trie is NOT serialized per-frame — it's J-layer state.
     // Only serialized on shutdown/page-unload for reload recovery.
 
-    const snapshot: any = {
-      height: env.height,
-      timestamp: env.timestamp,
-      ...(env.runtimeSeed !== undefined && env.runtimeSeed !== null ? { runtimeSeed: env.runtimeSeed } : {}),
-      ...(env.runtimeId ? { runtimeId: env.runtimeId } : {}),
-      eReplicas: new Map(env.eReplicas),
-      jReplicas: env.jReplicas ? Array.from(env.jReplicas.values()).map(jr => ({
-        ...jr,
-        mempool: [...jr.mempool],
-        stateRoot: new Uint8Array(jr.stateRoot),
-      })) : [],
-      runtimeInput: env.runtimeInput,
-      runtimeOutputs: env.pendingOutputs || [],
-      frameLogs: env.frameLogs || [],
-      title: `Frame ${env.history?.length || 0}`,
-    };
+    const frameAdvanced = env.height !== frameHeightBeforeTick;
+    if (frameAdvanced) {
+      const snapshot: any = buildRuntimeHistorySnapshot(env, `Frame ${env.height}`);
 
-    if (env.extra) {
-      const { subtitle, description } = env.extra;
-      if (subtitle) {
-        snapshot.subtitle = subtitle;
-        snapshot.title = subtitle.title || snapshot.title;
+      if (env.extra) {
+        const { subtitle, description } = env.extra;
+        if (subtitle) {
+          snapshot.subtitle = subtitle;
+          snapshot.title = subtitle.title || snapshot.title;
+        }
+        if (description) snapshot.description = description;
       }
-      if (description) snapshot.description = description;
-      env.extra = undefined;
-    }
 
-    if (!env.history) env.history = [];
-    env.history.push(snapshot);
+      if (!env.history) env.history = [];
+      env.history.push(snapshot);
 
-    if (!quietRuntimeLogs) {
-      console.log(`📸 Snapshot: ${snapshot.title} (${env.history.length} total)`);
+      if (!quietRuntimeLogs) {
+        console.log(`📸 Snapshot: ${snapshot.title} (${env.history.length} total)`);
+      }
     }
+    env.extra = undefined;
 
     // === COMMIT POINT: persist finalized R-frame ===
     console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
     // Persist only when a new runtime frame was actually applied.
     // Side-effect-only ticks (e.g. deferred network retries) must never
     // overwrite WAL entries for the current height.
-    if (hasRuntimeInput) {
+    if (frameAdvanced) {
       await saveEnvToDB(env);
       (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput = undefined;
     }
@@ -2281,11 +2370,14 @@ export const process = async (
     }
     const dispatchDeferred = dispatchEntityOutputs(env, remoteOutputs);
 
-    // Store all deferred outputs (from planning + dispatch) for retry on next tick
+    // Deferred outputs are dropped by policy (no retry loop).
     const allDeferred = [...deferredOutputs, ...dispatchDeferred];
     if (allDeferred.length > 0) {
-      env.pendingNetworkOutputs = allDeferred;
-      console.log(`📤 DEFERRED: ${allDeferred.length} outputs queued for retry (gossip runtimeId missing)`);
+      env.pendingNetworkOutputs = [];
+      env.warn('network', 'ROUTE_DEFER_DROPPED', {
+        count: allDeferred.length,
+        reason: 'deferred_outputs_disabled',
+      });
     }
 
     // 1b. Re-announce gossip profiles after account state changes (new accounts, capacity shifts)
@@ -2376,6 +2468,9 @@ export const process = async (
 
 // === LEVELDB PERSISTENCE ===
 export const saveEnvToDB = async (env: Env): Promise<void> => {
+  if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
+    throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
+  }
   try {
     const dbReady = await tryOpenDb(env);
     if (!dbReady) return;
@@ -2389,37 +2484,85 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
       timestamp: env.timestamp,
       // Always persist a frame record so replay has a contiguous frame timeline.
       runtimeInput: currentFrameInput ?? { runtimeTxs: [], entityInputs: [] },
+      // Replay can deterministically require routing/encryption metadata
+      // (e.g. HTLC onion key lookup), so persist gossip snapshot per frame.
+      persistedGossipProfiles:
+        typeof env.gossip?.getProfiles === 'function'
+          ? env.gossip.getProfiles()
+          : [],
     });
-    await db.put(makeDbKey(dbNamespace, `frame_input:${env.height}`), Buffer.from(frameJournal));
+    const ops: Array<{ key: Buffer; value: Buffer }> = [
+      { key: makeDbKey(dbNamespace, 'persistence_schema_version'), value: Buffer.from(String(PERSISTENCE_SCHEMA_VERSION)) },
+      { key: makeDbKey(dbNamespace, `frame_input:${env.height}`), value: Buffer.from(frameJournal) },
+    ];
 
-    const config = ensureRuntimeConfig(env);
-    const snapshotInterval = Math.max(1, Math.floor(config.snapshotIntervalFrames ?? 100));
+    const persistedGossipProfiles =
+      typeof env.gossip?.getProfiles === 'function'
+        ? env.gossip.getProfiles()
+        : [];
+    const snapshotPayload = {
+      ...env,
+      persistedGossipProfiles,
+    };
+    const snapshot = serializeTaggedJson(snapshotPayload, new Set([
+      'history',
+      'browserVM',
+      'gossip',
+      'log',
+      'info',
+      'warn',
+      'error',
+      'emit',
+    ]));
+    // Persist a durable checkpoint snapshot every N runtime frames.
+    // Restore is always: checkpoint snapshot + contiguous WAL replay on top.
+    const CHECKPOINT_INTERVAL = ensureRuntimeConfig(env).snapshotIntervalFrames ?? 100;
     const shouldCheckpoint =
-      env.height <= 1 ||
-      env.height % snapshotInterval === 0;
-
+      env.height <= 1 || (env.height % CHECKPOINT_INTERVAL === 0);
     if (shouldCheckpoint) {
-      const snapshot = serializeTaggedJson(env, new Set([
-        'history',
-        'browserVM',
-        'gossip',
-        'log',
-        'info',
-        'warn',
-        'error',
-        'emit',
-      ]));
-      await db.put(makeDbKey(dbNamespace, `snapshot:${env.height}`), Buffer.from(snapshot));
-      await db.put(makeDbKey(dbNamespace, 'latest_checkpoint_height'), Buffer.from(String(env.height)));
+      ops.push(
+        { key: makeDbKey(dbNamespace, `snapshot:${env.height}`), value: Buffer.from(snapshot) },
+        { key: makeDbKey(dbNamespace, 'latest_checkpoint_height'), value: Buffer.from(String(env.height)) },
+      );
     }
 
     // Write pointer last so latest_height is only advanced after all frame data is durable.
-    await db.put(makeDbKey(dbNamespace, 'latest_height'), Buffer.from(String(env.height)));
+    ops.push({ key: makeDbKey(dbNamespace, 'latest_height'), value: Buffer.from(String(env.height)) });
+
+    // NOTE: Browser Level polyfill has shown flaky behavior with db.batch(ops[]) on binary keys.
+    // Use chained batch API first, then fail over to sequential puts if needed.
+    let wrote = false;
+    try {
+      const batch = db.batch();
+      for (const op of ops) {
+        batch.put(op.key, op.value);
+      }
+      await batch.write();
+      wrote = true;
+    } catch (batchError) {
+      console.warn('⚠️ db.batch().write() failed, falling back to sequential put:', batchError);
+    }
+    if (!wrote) {
+      for (const op of ops) {
+        await db.put(op.key, op.value);
+      }
+    }
+
+    // Fail-fast: if we just persisted frame N, frame_input:N and latest_height must be readable now.
+    try {
+      await db.get(makeDbKey(dbNamespace, `frame_input:${env.height}`));
+      const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
+      const latestHeight = Number.parseInt(latestHeightBuffer.toString(), 10);
+      if (!Number.isFinite(latestHeight) || latestHeight !== env.height) {
+        throw new Error(`latest_height mismatch: expected=${env.height} actual=${String(latestHeightBuffer.toString())}`);
+      }
+    } catch (verifyError) {
+      throw new Error(`PERSISTENCE_FATAL: write verification failed at frame ${env.height}: ${String(verifyError)}`);
+    }
   } catch (err) {
     console.error('❌ Failed to save to LevelDB:', err);
-    if (env.scenarioMode) {
-      throw err;
-    }
+    const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    throw new Error(`PERSISTENCE_FATAL: ${reason}`);
   }
 };
 
@@ -2443,6 +2586,13 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
     const db = getRuntimeDb(tempEnv);
     let latestHeightBuffer: Buffer;
     try {
+      const schemaVersionBuffer = await db.get(makeDbKey(dbNamespace, 'persistence_schema_version'));
+      const schemaVersion = Number.parseInt(schemaVersionBuffer.toString(), 10);
+      if (!Number.isFinite(schemaVersion) || schemaVersion !== PERSISTENCE_SCHEMA_VERSION) {
+        throw new Error(
+          `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=n/a latest=n/a restored=n/a reason=Unsupported persistence schema (${schemaVersion})`
+        );
+      }
       latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
     } catch (error) {
       if (isDbNotFound(error)) {
@@ -2467,6 +2617,12 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
         `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=${String(checkpointHeight)} latest=${latestHeight} restored=n/a reason=Invalid checkpoint pointer`
       );
     }
+    if (latestHeight > 0 && checkpointHeight < 1) {
+      throw new Error(
+        `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=${String(checkpointHeight)} latest=${latestHeight} restored=n/a reason=Missing durable checkpoint`
+      );
+    }
+    console.log(`[loadEnvFromDB] namespace=${dbNamespace} latest=${latestHeight} checkpoint=${checkpointHeight}`);
     try {
       checkpointBuffer = await db.get(makeDbKey(dbNamespace, `snapshot:${checkpointHeight}`));
     } catch (error) {
@@ -2476,26 +2632,29 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       );
     }
 
-    const data = deserializeTaggedJson<any>(checkpointBuffer.toString());
-    const pushRecoveredHistoryFrame = (
-      targetEnv: Env,
-      frame: number,
-      timestamp: number,
-      kind: 'checkpoint' | 'wal'
-    ): void => {
-      if (!targetEnv.history) targetEnv.history = [];
-      targetEnv.history.push({
-        frame,
-        title: kind === 'checkpoint' ? `Recovered Checkpoint ${frame}` : `Recovered Frame ${frame}`,
-        timestamp,
-        subtitle: {
-          title: kind === 'checkpoint' ? `Recovered Checkpoint ${frame}` : `Recovered Frame ${frame}`,
-          description: kind === 'checkpoint'
-            ? 'Recovered from persisted snapshot'
-            : 'Recovered from WAL replay',
-        },
-      } as any);
-    };
+    // Time-machine requirement: always rebuild full frame history on reload.
+    // Use genesis checkpoint (frame 1) as replay base when runtime has frames.
+    let selectedSnapshotHeight = checkpointHeight;
+    let selectedSnapshotLabel = `checkpoint:${checkpointHeight}`;
+    let snapshotBufferToUse = checkpointBuffer;
+    if (latestHeight > 0) {
+      try {
+        const genesisSnapshotBuffer = await db.get(makeDbKey(dbNamespace, 'snapshot:1'));
+        selectedSnapshotHeight = 1;
+        selectedSnapshotLabel = 'checkpoint:1';
+        snapshotBufferToUse = genesisSnapshotBuffer;
+      } catch (error) {
+        const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        throw new Error(
+          `REPLAY_INVARIANT_FAILED: frame=1 checkpoint=${checkpointHeight} latest=${latestHeight} restored=n/a reason=Missing genesis checkpoint snapshot (${message})`
+        );
+      }
+    }
+    console.log(
+      `[loadEnvFromDB] snapshot selection checkpoint=${checkpointHeight} selected=${selectedSnapshotHeight} source=${selectedSnapshotLabel}`
+    );
+
+    const data = deserializeTaggedJson<any>(snapshotBufferToUse.toString());
 
       // Hydrate Maps/BigInts
       const runtimeSeedRaw = Array.isArray(data.runtimeSeed)
@@ -2505,6 +2664,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       env.height = Number(data.height || 0);
       env.timestamp = Number(data.timestamp || 0);
       env.dbNamespace = data.dbNamespace ?? dbNamespace;
+      env.activeJurisdiction = typeof data.activeJurisdiction === 'string' ? data.activeJurisdiction : undefined;
       if (data.browserVMState) {
         env.browserVMState = data.browserVMState;
       }
@@ -2521,8 +2681,8 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       env.eReplicas = normalizeReplicaMap(data.eReplicas || data.replicas || []);
       env.jReplicas = normalizeJReplicaMap(data.jReplicas || []);
       env.history = [];
-      if (checkpointHeight > 0) {
-        pushRecoveredHistoryFrame(env, checkpointHeight, env.timestamp, 'checkpoint');
+      if (selectedSnapshotHeight > 0) {
+        env.history.push(buildRuntimeHistorySnapshot(env, `Frame ${selectedSnapshotHeight}`));
       }
       if (env.jReplicas.size > 0) {
         for (const [name, jr] of env.jReplicas.entries()) {
@@ -2534,16 +2694,14 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
           }
         }
       }
-      if (data.gossip?.profiles) {
-        const rawProfiles = data.gossip.profiles instanceof Map
-          ? Array.from(data.gossip.profiles.values())
-          : Array.isArray(data.gossip.profiles)
-            ? data.gossip.profiles
-            : [];
+      const snapshotProfiles = Array.isArray(data.persistedGossipProfiles)
+        ? data.persistedGossipProfiles
+        : [];
+      if (snapshotProfiles.length > 0) {
         if (typeof env.gossip?.setProfiles === 'function') {
-          env.gossip.setProfiles(rawProfiles);
+          env.gossip.setProfiles(snapshotProfiles);
         } else if (typeof env.gossip?.announce === 'function') {
-          for (const profile of rawProfiles) env.gossip.announce(profile);
+          for (const profile of snapshotProfiles) env.gossip.announce(profile);
         }
       }
     const envState = ensureRuntimeState(env);
@@ -2553,12 +2711,75 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
 
     // Replay frame journal from checkpoint+1 to latest.
     // STRICT MODE: any missing/corrupt frame is fatal (deterministic replay invariant).
-    let lastGoodHeight = checkpointHeight;
-    for (let h = checkpointHeight + 1; h <= latestHeight; h++) {
-      try {
+    if (latestHeight > checkpointHeight) {
+      const missingFrames: number[] = [];
+      for (let h = checkpointHeight + 1; h <= latestHeight; h++) {
+        try {
+          await db.get(makeDbKey(dbNamespace, `frame_input:${h}`));
+        } catch (error) {
+          if (isDbNotFound(error)) {
+            missingFrames.push(h);
+            continue;
+          }
+          throw error;
+        }
+      }
+      if (missingFrames.length > 0) {
+        const sample = missingFrames.slice(0, 8).join(',');
+        throw new Error(
+          `REPLAY_INVARIANT_FAILED: frame=${missingFrames[0]} checkpoint=${checkpointHeight} latest=${latestHeight} restored=${checkpointHeight} reason=Missing WAL frames (${sample}${missingFrames.length > 8 ? ',…' : ''})`
+        );
+      }
+    }
+    let lastGoodHeight = selectedSnapshotHeight;
+    const runtimeEnv = env as Record<PropertyKey, unknown>;
+    const originalLog = env.log;
+    const originalInfo = env.info;
+    const originalWarn = env.warn;
+    const originalError = env.error;
+    const originalEmit = env.emit;
+    const replayNoop = () => {};
+    const assertReplayNoSideEffects = (frame: number): void => {
+      const pendingOutputs = env.pendingOutputs?.length ?? 0;
+      const pendingNetworkOutputs = env.pendingNetworkOutputs?.length ?? 0;
+      const networkInbox = env.networkInbox?.length ?? 0;
+      if (pendingOutputs > 0 || pendingNetworkOutputs > 0 || networkInbox > 0) {
+        throw new Error(
+          `REPLAY_SIDE_EFFECT_DETECTED: frame=${frame} pendingOutputs=${pendingOutputs} pendingNetworkOutputs=${pendingNetworkOutputs} networkInbox=${networkInbox}`
+        );
+      }
+    };
+
+    runtimeEnv[ENV_REPLAY_MODE_KEY] = true;
+    env.log = replayNoop;
+    env.info = replayNoop;
+    env.warn = replayNoop;
+    env.error = replayNoop;
+    env.emit = replayNoop;
+    try {
+      for (let h = selectedSnapshotHeight + 1; h <= latestHeight; h++) {
+        try {
         const frameBuffer = await db.get(makeDbKey(dbNamespace, `frame_input:${h}`));
-        const frame = deserializeTaggedJson<{ height: number; timestamp: number; runtimeInput: RuntimeInput }>(
+        const frame = deserializeTaggedJson<{
+          height: number;
+          timestamp: number;
+          runtimeInput: RuntimeInput;
+          persistedGossipProfiles?: unknown[];
+        }>(
           frameBuffer.toString()
+        );
+        if (Array.isArray(frame?.persistedGossipProfiles) && frame.persistedGossipProfiles.length > 0) {
+          if (typeof env.gossip?.setProfiles === 'function') {
+            env.gossip.setProfiles(frame.persistedGossipProfiles);
+          } else if (typeof env.gossip?.announce === 'function') {
+            for (const profile of frame.persistedGossipProfiles) env.gossip.announce(profile);
+          }
+        }
+        const replayRuntimeTxs = frame?.runtimeInput?.runtimeTxs?.length ?? 0;
+        const replayEntityInputs = frame?.runtimeInput?.entityInputs?.length ?? 0;
+        const replayJInputs = frame?.runtimeInput?.jInputs?.length ?? 0;
+        console.log(
+          `[loadEnvFromDB] replay frame=${h} runtimeTxs=${replayRuntimeTxs} entityInputs=${replayEntityInputs} jInputs=${replayJInputs}`
         );
         if (Number(frame?.height) !== h) {
           throw new Error(`Frame height mismatch: key=${h} payload=${String(frame?.height)}`);
@@ -2566,19 +2787,137 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
         if (!frame?.runtimeInput) {
           throw new Error(`Missing runtimeInput at frame ${h}`);
         }
-        env.timestamp = Number(frame.timestamp || env.timestamp);
-        (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] = true;
-        await applyRuntimeInput(env, frame.runtimeInput);
-        (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] = false;
-        pushRecoveredHistoryFrame(env, h, env.timestamp, 'wal');
+        for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
+          for (const tx of entityInput.entityTxs ?? []) {
+            if (tx.type !== 'accountInput') continue;
+            const data = tx.data as Record<string, unknown> | undefined;
+            const inputHeight = Number(data?.height ?? 0);
+            const newFrameHeight = Number((data?.newAccountFrame as { height?: number } | undefined)?.height ?? 0);
+            const hasPrev = Boolean(data?.prevHanko);
+            const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
+            console.log(
+              `[loadEnvFromDB] frame=${h} accountInput from=${fromEntityId.slice(-8)} ` +
+              `height=${inputHeight} hasPrev=${hasPrev} newFrame=${newFrameHeight || 'none'}`
+            );
+          }
+        }
+        // Keep replay semantics identical to process():
+        // applyRuntimeInput increments env.height once per applied frame.
+        // Therefore env.height must be h-1 before applying frame h.
+        env.height = h - 1;
+        env.timestamp = Number(frame.timestamp ?? env.timestamp);
+          runtimeEnv[ENV_APPLY_ALLOWED_KEY] = true;
+          await applyRuntimeInput(env, frame.runtimeInput);
+          runtimeEnv[ENV_APPLY_ALLOWED_KEY] = false;
+          assertReplayNoSideEffects(h);
+          // Replay diagnostics: show bilateral account heights after each frame
+          // for all accountInput txs seen in this frame.
+          for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
+            const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
+            for (const tx of entityInput.entityTxs ?? []) {
+              if (tx.type !== 'accountInput') continue;
+              const data = tx.data as Record<string, unknown> | undefined;
+              const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
+              if (!fromEntityId) continue;
+              for (const replica of env.eReplicas.values()) {
+                if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
+                const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
+                console.log(
+                  `[loadEnvFromDB] frame=${h} POST-APPLY entity=${String(entityInput.entityId).slice(-8)} ` +
+                  `from=${fromEntityId.slice(-8)} current=${Number(accountMachine?.currentHeight ?? 0)} ` +
+                  `pending=${Number(accountMachine?.pendingFrame?.height ?? 0)} mempool=${Number(accountMachine?.mempool?.length ?? 0)}`
+                );
+              }
+            }
+          }
+        if (env.height !== h) {
+          throw new Error(`Replay height mismatch after apply: expected=${h} actual=${env.height}`);
+        }
+        // Fail-fast replay invariant: if frame carries accountInput(newAccountFrame),
+        // replay MUST materialize that account frame in restored state.
+        for (const entityInput of frame.runtimeInput.entityInputs ?? []) {
+          for (const tx of entityInput.entityTxs ?? []) {
+            if (tx.type !== 'accountInput') continue;
+            const data = tx.data as Record<string, unknown> | undefined;
+            const fromEntityId = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
+            const newAccountFrame = data?.newAccountFrame as Record<string, unknown> | undefined;
+            const hasPrevHanko = Boolean(data?.prevHanko);
+            const inputHeightRaw = data?.height;
+            const inputHeight = Number(inputHeightRaw ?? 0);
+            if (hasPrevHanko && !newAccountFrame && fromEntityId && Number.isFinite(inputHeight) && inputHeight > 0) {
+              const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
+              for (const replica of env.eReplicas.values()) {
+                if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
+                const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
+                const currentHeight = Number(accountMachine?.currentHeight ?? 0);
+                const pendingHeight = Number(accountMachine?.pendingFrame?.height ?? 0);
+                console.log(
+                  `[loadEnvFromDB] frame=${h} ACK-check entity=${String(entityInput.entityId).slice(-8)} ` +
+                  `from=${fromEntityId.slice(-8)} current=${currentHeight} pending=${pendingHeight} inputHeight=${inputHeight}`
+                );
+                if (currentHeight < inputHeight || pendingHeight === inputHeight) {
+                  throw new Error(
+                    `REPLAY_ACK_NOT_APPLIED: frame=${h} ackHeight=${inputHeight} currentHeight=${currentHeight} pendingHeight=${pendingHeight} ` +
+                    `entity=${String(entityInput.entityId).slice(0, 12)} from=${fromEntityId.slice(0, 12)}`
+                  );
+                }
+              }
+            }
+            const expectedHeight = Number(newAccountFrame?.height ?? 0);
+            if (!fromEntityId || !Number.isFinite(expectedHeight) || expectedHeight <= 0) continue;
+            const entityIdNorm = String(entityInput.entityId || '').toLowerCase();
+            let applied = false;
+            for (const replica of env.eReplicas.values()) {
+              if (String(replica?.entityId || '').toLowerCase() !== entityIdNorm) continue;
+              const accountMachine = replica?.state?.accounts?.get?.(fromEntityId);
+              const currentHeight = Number(accountMachine?.currentHeight ?? 0);
+              const pendingHeight = Number(accountMachine?.pendingFrame?.height ?? 0);
+              console.log(
+                `[loadEnvFromDB] frame=${h} NEWFRAME-check entity=${String(entityInput.entityId).slice(-8)} ` +
+                `from=${fromEntityId.slice(-8)} current=${currentHeight} pending=${pendingHeight} expected=${expectedHeight}`
+              );
+              if (currentHeight >= expectedHeight) {
+                applied = true;
+                break;
+              }
+            }
+            if (!applied) {
+              const replayDebug = Array.from(env.eReplicas.values())
+                .filter((replica) => String(replica?.entityId || '').toLowerCase() === entityIdNorm)
+                .map((replica) => {
+                  const am = replica?.state?.accounts?.get?.(fromEntityId);
+                  return {
+                    replicaKey: `${String(replica.entityId).slice(0, 10)}...:${String(replica.signerId).slice(0, 10)}...`,
+                    currentHeight: Number(am?.currentHeight ?? 0),
+                    pendingFrame: Number(am?.pendingFrame?.height ?? 0),
+                    mempoolSize: Number(am?.mempool?.length ?? 0),
+                    frameHistorySize: Number(am?.frameHistory?.length ?? 0),
+                  };
+                });
+              throw new Error(
+                `REPLAY_ACCOUNT_FRAME_NOT_APPLIED: frame=${h} expected=${expectedHeight} actual=${JSON.stringify(replayDebug)}`
+              );
+            }
+          }
+        }
+        env.history.push(buildRuntimeHistorySnapshot(env, `Frame ${h}`));
         lastGoodHeight = h;
-      } catch (error) {
-        (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] = false;
-        const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-        throw new Error(
-          `REPLAY_INVARIANT_FAILED: frame=${h} checkpoint=${checkpointHeight} latest=${latestHeight} restored=${lastGoodHeight} reason=${message}`
-        );
+        } catch (error) {
+          runtimeEnv[ENV_APPLY_ALLOWED_KEY] = false;
+          const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+          throw new Error(
+            `REPLAY_INVARIANT_FAILED: frame=${h} checkpoint=${checkpointHeight} latest=${latestHeight} restored=${lastGoodHeight} reason=${message}`
+          );
+        }
       }
+    } finally {
+      runtimeEnv[ENV_APPLY_ALLOWED_KEY] = false;
+      runtimeEnv[ENV_REPLAY_MODE_KEY] = false;
+      env.log = originalLog;
+      env.info = originalInfo;
+      env.warn = originalWarn;
+      env.error = originalError;
+      env.emit = originalEmit;
     }
     env.height = lastGoodHeight;
     if (lastGoodHeight !== latestHeight) {
@@ -2586,12 +2925,20 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
         `REPLAY_INVARIANT_FAILED: replay completed at ${lastGoodHeight}, expected latest ${latestHeight}`
       );
     }
+    console.log(
+      `[loadEnvFromDB] replay complete latest=${latestHeight} restored=${lastGoodHeight} history=${env.history?.length ?? 0}`
+    );
 
     const latestEnv = env;
+    (latestEnv as any).__replayMeta = {
+      namespace: dbNamespace,
+      latestHeight,
+      checkpointHeight,
+      restoredHeight: lastGoodHeight,
+      recoveredHistoryFrames: latestEnv.history?.length ?? 0,
+    };
     if (latestEnv) {
-      if (latestEnv.history.length === 0 && latestEnv.height > 0) {
-        pushRecoveredHistoryFrame(latestEnv, latestEnv.height, latestEnv.timestamp, 'checkpoint');
-      }
+      (latestEnv as any).__replayMeta.recoveredHistoryFrames = latestEnv.history?.length ?? 0;
 
       // Restore BrowserVM if state was persisted
       let restoredBrowserVM: any = null;

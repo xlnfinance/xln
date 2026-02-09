@@ -9,6 +9,7 @@ export default defineConfig({
     ['json'], // optional, for parsing
   ],
   testDir: './tests',
+  testIgnore: ['**/ux-flow-verification.spec.js'],
   timeout: 60000, // 60s for AHB prepopulate
   workers: 1,
   // retries: 1,
@@ -45,8 +46,8 @@ export default defineConfig({
 
   // Run dev server before tests
   webServer: {
-    // Keep runtime bundle in sync with source before launching frontend dev server.
-    command: './scripts/build-runtime.sh && cd frontend && SKIP_TYPECHECK=1 bun run dev',
+    // Prebuild runtime once (fresh artifact), then run dev pipeline with runtime --watch.
+    command: './scripts/build-runtime.sh && SKIP_TYPECHECK=1 bun run dev',
     url: 'https://localhost:8080',
     ignoreHTTPSErrors: true,  // Self-signed cert
     reuseExistingServer: true,

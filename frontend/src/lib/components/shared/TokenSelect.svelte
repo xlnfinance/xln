@@ -114,7 +114,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 12px;
+    padding: 12px 14px;
     background: #1c1917;
     border: 1px solid #292524;
     border-radius: 8px;
@@ -122,7 +122,8 @@
     font-size: 14px;
     cursor: pointer;
     transition: border-color 0.15s;
-    min-width: 100px;
+    width: 100%;
+    box-sizing: border-box;
   }
 
   .compact .select-trigger {

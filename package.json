@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "dev": "concurrently --names 'ANVIL,API,RUNTIME,RELAY,VITE' -c 'magenta,blue,yellow,cyan,green' 'cd jurisdictions && npx hardhat node --hostname 0.0.0.0' 'USE_ANVIL=true RELAY_URL=ws://localhost:9000 ANVIL_RPC=http://localhost:8545 bun runtime/server.ts --port 8082' 'bun build runtime/runtime.ts --target=browser --outfile=frontend/public/runtime.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external url --external net --external tls --external os --external util --watch' 'bun runtime/networking/ws-server.ts --port 9000' 'cd frontend && vite dev'",
+    "dev": "concurrently --names 'ANVIL,API,RUNTIME,RELAY,VITE' -c 'magenta,blue,yellow,cyan,green' 'cd jurisdictions && npx hardhat node --hostname 0.0.0.0' 'USE_ANVIL=true RELAY_URL=ws://localhost:9000 ANVIL_RPC=http://localhost:8545 bun runtime/server.ts --port 8082' 'bun build runtime/runtime.ts --target=browser --outfile=frontend/static/runtime.js --minify --external http --external https --external zlib --external fs --external path --external crypto --external stream --external url --external net --external tls --external os --external util --watch' 'bun runtime/networking/ws-server.ts --port 9000' 'cd frontend && vite dev'",
     "dev:no-relay": "cd frontend && vite dev",
     "relay": "bun runtime/networking/ws-server.ts --port 9000",
     "build": "./scripts/build-runtime.sh",

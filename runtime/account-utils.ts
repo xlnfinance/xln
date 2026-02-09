@@ -50,14 +50,14 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   let inOwnCredit = nonNegative(-totalDelta);
   if (inOwnCredit > ownCreditLimit) inOwnCredit = ownCreditLimit;
 
-  // outPeerCredit = how much peer owes using OUR credit (when delta > 0 beyond collateral)
+  // outPeerCredit = how much peer owes us (backed by THEIR credit to us, i.e. peerCreditLimit)
   let outPeerCredit = nonNegative(totalDelta - collateral);
   if (outPeerCredit > peerCreditLimit) outPeerCredit = peerCreditLimit;
 
-  // outOwnCredit = remaining OWN credit we can extend
+  // outOwnCredit = unused portion of credit WE set (ownCreditLimit), allowing peer to owe us more
   let outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
 
-  // inPeerCredit = remaining credit peer extended to us (simple formula from original)
+  // inPeerCredit = unused portion of credit PEER opened to us (peerCreditLimit)
   let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
 
   // Track used credit for reporting (not used in capacity calculation)

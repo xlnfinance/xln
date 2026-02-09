@@ -15,7 +15,7 @@
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
-  import { xlnFunctions, entityPositions, processWithDelay } from '../../stores/xlnStore';
+  import { xlnFunctions, entityPositions, enqueueEntityInputs } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
 
   // Icons
@@ -67,7 +67,31 @@
   let activityCount = 0;
   let addressCopied = false;
   let openAccountEntityId = '';
-  const API_BASE = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
+  function isLocalHost(hostname: string): boolean {
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0';
+  }
+
+  function resolveApiBaseFromRelay(relayUrl: string | undefined | null): string {
+    if (typeof window === 'undefined') return 'https://xln.finance';
+    if (!relayUrl) return window.location.origin;
+    try {
+      const relay = new URL(relayUrl);
+      const pageHost = window.location.hostname;
+      // Local dev split-port setup: relay on :9000, API/UI on :8080.
+      if (isLocalHost(relay.hostname) && isLocalHost(pageHost)) {
+        return window.location.origin;
+      }
+      const protocol =
+        relay.protocol === 'wss:' ? 'https:' :
+        relay.protocol === 'ws:' ? 'http:' :
+        relay.protocol;
+      return `${protocol}//${relay.host}`;
+    } catch {
+      return window.location.origin;
+    }
+  }
+
+  $: apiBase = resolveApiBaseFromRelay($settings?.relayUrl);
   const REFRESH_OPTIONS = [
     { label: 'Off', value: 0 },
     { label: '1s', value: 1000 },
@@ -258,7 +282,7 @@
       const baseExpected = existingForToken ? existingForToken.expectedBalance : currentBalance;
       const expectedBalance = baseExpected + amountWei;
       // Faucet B: Reserve transfer (ALWAYS use prod API, no BrowserVM fake)
-      const response = await fetch(`${API_BASE}/api/faucet/reserve`, {
+      const response = await fetch(`${apiBase}/api/faucet/reserve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -293,20 +317,41 @@
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
     try {
-      // Faucet C: Offchain payment (requires account with hub)
-      const response = await fetch(`${API_BASE}/api/faucet/offchain`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userEntityId: entityId,
-          tokenId: 1, // USDC
-          amount: '100'
-        })
-      });
+      // Faucet C: Offchain payment (requires account with hub).
+      // Retry a few times when account is still opening.
+      let result: any = null;
+      const maxAttempts = 3;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const response = await fetch(`${apiBase}/api/faucet/offchain`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userEntityId: entityId,
+            userRuntimeId: (activeEnv as any)?.runtimeId ?? null,
+            tokenId: 1, // USDC
+            amount: '100'
+          })
+        });
 
-      const result = await readJsonResponse(response);
-      if (!response.ok || !result?.success) {
-        throw new Error(result?.error || `Faucet failed (${response.status})`);
+        result = await readJsonResponse(response);
+        if (response.ok && result?.success) break;
+
+        const code = String(result?.code || '');
+        const transient =
+          response.status === 202 ||
+          response.status === 409 ||
+          code === 'FAUCET_CHANNEL_NOT_READY' ||
+          result?.status === 'channel_opening' ||
+          result?.status === 'channel_not_ready';
+
+        if (!transient || attempt >= maxAttempts) {
+          throw new Error(result?.error || `Faucet failed (${response.status})`);
+        }
+
+        if (attempt === 1) {
+          toasts.info('Opening account with hub...');
+        }
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
 
       console.log('[EntityPanel] Offchain faucet success:', result);
@@ -414,7 +459,7 @@
   // Known token addresses for RPC mode (from deploy-tokens.cjs on anvil)
   async function fetchTokenCatalog(): Promise<ExternalToken[]> {
     try {
-      const response = await fetch(`${API_BASE}/api/tokens`);
+      const response = await fetch(`${apiBase}/api/tokens`);
       if (!response.ok) return [];
       const data = await readJsonResponse(response);
       const tokens = Array.isArray(data?.tokens) ? data.tokens : [];
@@ -549,7 +594,7 @@
           // Fallback to signerId if wallet derivation fails
         }
         try {
-          await fetch(`${API_BASE}/api/faucet/gas`, {
+          await fetch(`${apiBase}/api/faucet/gas`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -611,7 +656,7 @@
       const env = activeEnv;
       if (!env) throw new Error('Environment not ready');
 
-      await processWithDelay(env as any, [{
+      await enqueueEntityInputs(env as any, [{
         entityId,
         signerId,
         entityTxs: [
@@ -655,7 +700,7 @@
     try {
       const env = activeEnv;
       if (!env) throw new Error('Environment not ready');
-      await processWithDelay(env as any, [{
+      await enqueueEntityInputs(env as any, [{
         entityId,
         signerId,
         entityTxs: [{
@@ -679,7 +724,7 @@
     try {
       const amount = tokenSymbol === 'ETH' ? '0.1' : '100';
       const isEth = tokenSymbol === 'ETH';
-      const endpoint = isEth ? `${API_BASE}/api/faucet/gas` : `${API_BASE}/api/faucet/erc20`;
+      const endpoint = isEth ? `${apiBase}/api/faucet/gas` : `${apiBase}/api/faucet/erc20`;
       const payload = isEth
         ? { userAddress: signerId, amount }
         : { userAddress: signerId, tokenSymbol, amount };
@@ -878,7 +923,7 @@
           },
         }],
       };
-      await processWithDelay(env, [profileUpdateInput]);
+      await enqueueEntityInputs(env, [profileUpdateInput]);
       toasts.success('Governance profile update submitted');
       governanceLoadedForEntity = '';
       loadGovernanceProfileFromGossip();
@@ -961,31 +1006,44 @@
   $: reservesTotal = calculatePortfolioValue(onchainReserves);
 
   $: accountsData = (() => {
-    let collateral = 0;
-    let credit = 0;
+    let outbound = 0;
+    let inbound = 0;
+    let outPeerDebt = 0;   // peer owes us (backed by their credit to us)
+    let outCollateral = 0; // collateral on our out side
+    let outOurCredit = 0;  // unused credit we set (our risk)
     let count = 0;
     if (replica?.state?.accounts) {
-      for (const [_, account] of replica.state.accounts.entries()) {
+      for (const [counterpartyId, account] of replica.state.accounts.entries()) {
         count++;
         if (account.deltas) {
           for (const [tokenId, delta] of account.deltas.entries()) {
             const info = getTokenInfo(Number(tokenId));
             const divisor = BigInt(10) ** BigInt(info.decimals);
             const price = getAssetPrice(info.symbol ?? 'UNK');
-            // Collateral is what we've put in
-            if (delta.collateral > 0n) {
-              collateral += (Number(delta.collateral) / Number(divisor)) * price;
-            }
-            // Credit is positive delta (what counterparty owes us)
-            const totalDelta = delta.ondelta + delta.offdelta;
-            if (totalDelta > 0n) {
-              credit += (Number(totalDelta) / Number(divisor)) * price;
-            }
+            const valueOf = (amount: bigint) => (Number(amount) / Number(divisor)) * price;
+            const isLeftEntity = activeXlnFunctions?.isLeft?.(tab.entityId, String(counterpartyId)) ?? true;
+            const derived = activeXlnFunctions?.deriveDelta?.(delta, isLeftEntity);
+            if (!derived) continue;
+
+            if (derived.outCapacity > 0n) outbound += valueOf(derived.outCapacity);
+            if (derived.inCapacity > 0n) inbound += valueOf(derived.inCapacity);
+            // outCapacity = outPeerCredit + outCollateral + outOwnCredit
+            if (derived.outPeerCredit > 0n) outPeerDebt += valueOf(derived.outPeerCredit);
+            if (derived.outCollateral > 0n) outCollateral += valueOf(derived.outCollateral);
+            if (derived.outOwnCredit > 0n) outOurCredit += valueOf(derived.outOwnCredit);
           }
         }
       }
     }
-    return { collateral, credit, count, total: collateral + credit };
+    return {
+      outbound,
+      inbound,
+      outPeerDebt,
+      outCollateral,
+      outOurCredit,
+      count,
+      total: outbound,
+    };
   })();
 
   $: netWorth = externalTotal + reservesTotal + accountsData.total;
@@ -1094,12 +1152,6 @@
 
     {:else if isAccountFocused && selectedAccount && selectedAccountId}
       <div class="focused-view">
-        <button class="back-btn" on:click={handleBackToAccounts}>
-          Back to Entity
-        </button>
-        <div class="focused-title">
-          Account with {selectedAccountId}
-        </div>
         <AccountPanel
           account={selectedAccount}
           counterpartyId={selectedAccountId}
@@ -1154,9 +1206,21 @@
           <div class="card-label">Accounts</div>
           <div class="card-sub">
             {#if accountsData.count > 0}
-              {accountsData.count} channel{accountsData.count !== 1 ? 's' : ''}
+              {accountsData.count} ch
+              {#if accountsData.outPeerDebt > 0}
+                <span class="accounts-breakdown">owed {formatCompact(accountsData.outPeerDebt)}</span>
+              {/if}
+              {#if accountsData.outCollateral > 0}
+                <span class="accounts-breakdown">coll {formatCompact(accountsData.outCollateral)}</span>
+              {/if}
+              {#if accountsData.outOurCredit > 0}
+                <span class="accounts-breakdown">credit {formatCompact(accountsData.outOurCredit)}</span>
+              {/if}
+              {#if accountsData.inbound > 0}
+                <span class="accounts-breakdown in-capacity">in {formatCompact(accountsData.inbound)}</span>
+              {/if}
             {:else}
-              No channels
+              No accounts
             {/if}
           </div>
         </button>
@@ -1608,25 +1672,7 @@
 
   /* Focused Account View */
   .focused-view {
-    padding: 16px;
-  }
-
-  .back-btn {
-    display: inline-block;
-    padding: 6px 12px;
-    margin-bottom: 12px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 6px;
-    color: #fbbf24;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .focused-title {
-    font-size: 14px;
-    color: #78716c;
-    margin-bottom: 12px;
+    height: 100%;
   }
 
   /* Hero Section - Entity + Net Worth */
@@ -1765,6 +1811,21 @@
     font-size: 10px;
     color: #57534e;
     margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .accounts-breakdown {
+    color: #78716c;
+    text-transform: none;
+  }
+  .accounts-breakdown.in-capacity {
+    color: #57534e;
+    opacity: 0.7;
+    border-left: 1px solid #292524;
+    padding-left: 6px;
+    margin-left: 2px;
   }
 
   /* Portfolio - legacy, keep btn-faucet for tab content */
@@ -1793,25 +1854,26 @@
   }
 
   .btn-faucet {
-    margin-top: 8px;
-    padding: 12px 24px;
-    background: linear-gradient(135deg, #0ea5e9, #0284c7);
-    border: none;
-    border-radius: 8px;
-    color: #f0f9ff;
-    font-size: 14px;
-    font-weight: 600;
+    margin: 8px 8px 0;
+    padding: 10px 16px;
+    background: #1c1917;
+    border: 1px solid #292524;
+    border-radius: 6px;
+    color: #a8a29e;
+    font-size: 12px;
+    font-weight: 500;
     cursor: pointer;
     transition: all 0.15s;
+    text-align: left;
   }
 
   .btn-faucet:hover:not(:disabled) {
-    background: linear-gradient(135deg, #38bdf8, #0ea5e9);
-    transform: translateY(-1px);
+    border-color: #fbbf24;
+    color: #fbbf24;
   }
 
   .btn-faucet:disabled {
-    opacity: 0.6;
+    opacity: 0.5;
     cursor: not-allowed;
   }
 

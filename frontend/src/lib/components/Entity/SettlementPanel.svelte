@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getXLN, xlnEnvironment, replicas, processWithDelay, xlnFunctions } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment, replicas, enqueueEntityInputs, xlnFunctions } from '../../stores/xlnStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
@@ -175,7 +175,7 @@
         console.log('[On-J] Dispute with:', formatShortId(counterpartyEntityId));
       }
 
-      await processWithDelay(env, [{
+      await enqueueEntityInputs(env, [{
         entityId,
         signerId,
         entityTxs: [entityTx],

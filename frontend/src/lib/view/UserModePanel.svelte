@@ -185,11 +185,20 @@
     if (!selectedEntityId || !selectedSignerId || !currentFrame?.eReplicas) {
       return null;
     }
-    const key = `${selectedEntityId}:${selectedSignerId}`;
     const replicas = currentFrame.eReplicas instanceof Map
       ? currentFrame.eReplicas
       : new Map(Object.entries(currentFrame.eReplicas || {}));
-    return replicas.get(key) || null;
+    const selectedEntityLower = selectedEntityId.toLowerCase();
+    const selectedSignerLower = selectedSignerId.toLowerCase();
+    for (const [key, replica] of replicas.entries()) {
+      const [entityFromKey, signerFromKey] = String(key).split(':');
+      const entityLower = String(entityFromKey || replica?.entityId || '').toLowerCase();
+      const signerLower = String(signerFromKey || replica?.signerId || '').toLowerCase();
+      if (entityLower === selectedEntityLower && signerLower === selectedSignerLower) {
+        return replica || null;
+      }
+    }
+    return null;
   });
 
   // Clear entity/account if jurisdiction filter no longer matches
@@ -225,8 +234,11 @@
     const reps = env?.eReplicas;
     if (!reps) return null;
     const replicas = reps instanceof Map ? reps : new Map(Object.entries(reps || {}));
-    for (const [, replica] of replicas) {
-      if (replica?.signerId?.toLowerCase?.() === signerId.toLowerCase()) {
+    const signerLower = signerId.toLowerCase();
+    for (const [key, replica] of replicas) {
+      const [, signerFromKey] = String(key).split(':');
+      const replicaSigner = String(replica?.signerId || signerFromKey || '').toLowerCase();
+      if (replicaSigner === signerLower) {
         return replica;
       }
     }

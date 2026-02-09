@@ -559,6 +559,10 @@ export type EntityTx =
         description?: string;
         secret?: string;   // Optional - generated if not provided
         hashlock?: string; // Optional - generated if not provided
+        // Deterministic replay payload captured on first execution.
+        preparedEnvelope?: unknown;
+        preparedSenderLockAmount?: bigint | string;
+        preparedTotalFee?: bigint | string;
       };
     }
   | {

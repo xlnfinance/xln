@@ -31,6 +31,15 @@ import { submitSettle } from '../evm';
 import { logError } from '../logger';
 import { FINANCIAL } from '../constants';
 
+const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+const findAccountKey = (state: EntityState, counterpartyId: string): string | null => {
+  const target = normalizeEntityRef(counterpartyId);
+  for (const key of state.accounts.keys()) {
+    if (normalizeEntityRef(key) === target) return key;
+  }
+  return null;
+};
+
 export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx: EntityTx): Promise<ApplyEntityTxResult> => {
   if (!entityTx) {
     logError("ENTITY_TX", `❌ EntityTx is undefined!`);
@@ -210,12 +219,22 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     }
 
     if (entityTx.type === 'j_event') {
+      const jEventData = entityTx.data as {
+        event?: { type?: string };
+        events?: Array<{ type?: string }>;
+        blockNumber?: number;
+        transactionHash?: string;
+      };
+      const firstEventType =
+        jEventData.event?.type ??
+        (Array.isArray(jEventData.events) && jEventData.events.length > 0 ? jEventData.events[0]?.type : undefined) ??
+        'unknown';
       // Emit J-event received
       env.emit('JEventReceived', {
         entityId: entityState.entityId,
-        eventType: entityTx.data.event.type,
-        blockNumber: entityTx.data.blockNumber,
-        txHash: entityTx.data.transactionHash,
+        eventType: firstEventType,
+        blockNumber: jEventData.blockNumber,
+        txHash: jEventData.transactionHash,
       });
 
       const { newState, mempoolOps } = await handleJEvent(entityState, entityTx.data, env);
@@ -223,6 +242,15 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     }
 
     if (entityTx.type === 'accountInput') {
+      if ((env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true) {
+        const data = entityTx.data as Record<string, unknown> | undefined;
+        const frame = data?.newAccountFrame as Record<string, unknown> | undefined;
+        console.log(
+          `[REPLAY] applyEntityTx accountInput from=${String(data?.fromEntityId || '').slice(-8)} ` +
+          `to=${String(data?.toEntityId || '').slice(-8)} height=${String(data?.height ?? '')} ` +
+          `newFrame=${String(frame?.height ?? 'none')}`
+        );
+      }
       const result = await handleAccountInput(entityState, entityTx.data, env);
       return {
         newState: result.newState,
@@ -237,10 +265,10 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
     if (entityTx.type === 'openAccount') {
       const targetEntityId = entityTx.data.targetEntityId;
       // Account keyed by counterparty ID (simpler than canonical)
-      const counterpartyId = targetEntityId;
+      const counterpartyId = normalizeEntityRef(targetEntityId);
       const isLeft = isLeftEntity(entityState.entityId, targetEntityId);
 
-      if (entityState.accounts.has(counterpartyId)) {
+      if (findAccountKey(entityState, counterpartyId)) {
         console.log(`💳 OPEN-ACCOUNT: Account with ${formatEntityId(counterpartyId)} already exists, skipping duplicate request`);
         return { newState: entityState, outputs: [] };
       }
@@ -259,8 +287,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // Add chat message about account opening
       addMessage(newState, `💳 Opening account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);
 
-      // STEP 1: Create local account machine
-      if (!newState.accounts.has(counterpartyId)) {
+      // STEP 1: Create local account machine (idempotent across replay/live)
+      const existingAccountKey = findAccountKey(newState, counterpartyId);
+      const createdLocalAccount = !existingAccountKey;
+      const accountKey = existingAccountKey ?? counterpartyId;
+      if (createdLocalAccount) {
         console.log(`💳 LOCAL-ACCOUNT: Creating local account with Entity ${formatEntityId(counterpartyId)}...`);
 
         // CONSENSUS FIX: Start with empty deltas - let all delta creation happen through transactions
@@ -271,13 +302,15 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         const leftEntity = isLeft ? entityState.entityId : counterpartyId;
         const rightEntity = isLeft ? counterpartyId : entityState.entityId;
 
-        newState.accounts.set(counterpartyId, {
+        newState.accounts.set(accountKey, {
           leftEntity,
           rightEntity,
           mempool: [],
           currentFrame: {
             height: 0,
-            timestamp: newState.timestamp, // Entity-level timestamp for determinism
+            // Deterministic account genesis: do not depend on mutable entity timestamp.
+            // First proposed frame will use env.timestamp via proposeAccountFrame().
+            timestamp: 0,
             jHeight: 0,
             accountTxs: [],
             prevFrameHash: '',
@@ -329,7 +362,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // Right side waits for left's frame; otherwise it will re-propose add_delta and stall.
       console.log(`💳 Preparing account setup for ${formatEntityId(entityTx.data.targetEntityId)} (left=${isLeft})`);
 
-      const localAccount = newState.accounts.get(counterpartyId);
+      const localAccount = newState.accounts.get(accountKey);
       if (!localAccount) {
         throw new Error(`CRITICAL: Account machine not found after creation`);
       }
@@ -338,18 +371,24 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const tokenId = entityTx.data.tokenId ?? 1;
       const creditAmount = entityTx.data.creditAmount;
 
-      if (creditAmount && creditAmount > 0n) {
-        // INITIATOR: Queue add_delta + set_credit_limit (single frame)
-        // Side auto-detected by handler from frame proposer
-        localAccount.mempool.push(
-          { type: 'add_delta', data: { tokenId } },
-          { type: 'set_credit_limit', data: { tokenId, amount: creditAmount } }
-        );
-        console.log(`📝 Initiator queued [add_delta, set_credit_limit] (credit=${creditAmount})`);
+      if (createdLocalAccount) {
+        // INITIATOR: always emit at least add_delta so the counterparty can
+        // materialize the bilateral account via inbound accountInput.
+        localAccount.mempool.push({ type: 'add_delta', data: { tokenId } });
+        if (creditAmount && creditAmount > 0n) {
+          localAccount.mempool.push({ type: 'set_credit_limit', data: { tokenId, amount: creditAmount } });
+          console.log(`📝 Initiator queued [add_delta, set_credit_limit] (credit=${creditAmount})`);
+        } else {
+          console.log(`📝 Initiator queued [add_delta] (no initial credit)`);
+        }
       } else {
         // COUNTERPARTY (mirror): Just create account machine, don't queue txs
         // Counterparty waits for initiator's frame and ACKs it
-        console.log(`🧭 Counterparty: account created, waiting for initiator's frame`);
+        if (createdLocalAccount) {
+          console.log(`🧭 Counterparty: account created, waiting for initiator's frame`);
+        } else {
+          console.log(`↩️ openAccount duplicate ignored for ${formatEntityId(counterpartyId)} (already exists)`);
+        }
       }
 
       // Hub entities no longer auto-send faucet (use /api/faucet/offchain instead)
@@ -357,19 +396,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // Add success message to chat
       addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
 
-      // Notify counterparty to create mirror account
-      // Anti-ping-pong: counterparty's accounts.has() check (line 243) prevents infinite loop
-      outputs.push({
-        entityId: targetEntityId,
-        entityTxs: [{
-          type: 'openAccount',
-          data: {
-            targetEntityId: entityState.entityId,
-            tokenId: entityTx.data.tokenId ?? 1,
-          }
-        }]
-      });
-      console.log(`📤 Sent openAccount request to counterparty ${formatEntityId(targetEntityId)} (signer: auto)`);
+      // Do not mirror openAccount back to counterparty.
+      // Counterparty account auto-creation happens on first inbound accountInput frame.
+      // Mirroring openAccount creates redundant replay ordering hazards.
 
       // Broadcast updated profile to gossip layer
       if (env.gossip) {
@@ -1026,6 +1055,11 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
   } catch (error) {
     console.error(`❌ Transaction execution error:`, error);
     log.error(`❌ Transaction execution error: ${error}`);
+    const replayMode = (env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true;
+    if (replayMode) {
+      // Replay must be strictly deterministic; swallowing tx failures corrupts restore state.
+      throw error;
+    }
     return { newState: entityState, outputs: [], jOutputs: [] }; // Return unchanged state on error
   }
 };

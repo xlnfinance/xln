@@ -247,11 +247,10 @@ export async function proposeAccountFrame(
   // Dispute nonce tracks committed frame height for counter-dispute support
   clonedMachine.proofHeader.disputeNonce = accountMachine.currentHeight + 1;
 
-  // Get entity's synced J-height for deterministic HTLC validation
-  const ourEntityId = accountMachine.proofHeader.fromEntity;
-  const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
-  const currentJHeight = ourReplica?.state.lastFinalizedJHeight || 0;
-  const frameJHeight = entityJHeight ?? currentJHeight;
+  // Deterministic J-height for account frame hashing:
+  // Use account-level finalized J-height (consensus state), not live replica tip.
+  // Replica tip can drift between runtime sessions and break WAL replay hashes.
+  const frameJHeight = entityJHeight ?? accountMachine.lastFinalizedJHeight ?? 0;
 
   // Process all transactions on the clone
   const allEvents: string[] = [];
@@ -280,8 +279,13 @@ export async function proposeAccountFrame(
 
   for (const accountTx of accountMachine.mempool) {
     if (HEAVY_LOGS) console.log(`   🔍 Processing accountTx type=${accountTx.type}`);
-    // Channel.ts: byLeft = proposer is left entity (frame-level, same on both sides)
-    const proposerByLeft = accountMachine.leftEntity === accountMachine.proofHeader.fromEntity;
+    // Channel.ts: byLeft = proposer is left entity (frame-level, same on both sides).
+    // Use normalized ordering helper (not raw string equality) to avoid casing-induced
+    // divergence during WAL replay.
+    const proposerByLeft = isLeft(
+      accountMachine.proofHeader.fromEntity,
+      accountMachine.proofHeader.toEntity
+    );
     const result = await processAccountTx(
       clonedMachine,
       accountTx,
@@ -594,12 +598,27 @@ export async function handleAccountInput(
   // MULTI-SIGNER: Hashes that need entity-quorum signing
   hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
 }> {
+  const normalizedInputHeight =
+    input.height === undefined || input.height === null
+      ? undefined
+      : Number(input.height as number | string);
+  if (normalizedInputHeight !== undefined && !Number.isFinite(normalizedInputHeight)) {
+    return { success: false, error: `Invalid account input height: ${String(input.height)}`, events: [] };
+  }
+  const replayMode = (env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true;
   console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`);
-  console.log(`📨 A-MACHINE INPUT: height=${input.height || 'none'}, hasACK=${!!input.prevHanko}, hasNewFrame=${!!input.newAccountFrame}`);
+  console.log(`📨 A-MACHINE INPUT: height=${normalizedInputHeight ?? 'none'}, hasACK=${!!input.prevHanko}, hasNewFrame=${!!input.newAccountFrame}`);
 
   const events: string[] = [];
   const timedOutHashlocks: string[] = [];
   let ackProcessed = false;
+  if (replayMode) {
+    console.log(
+      `[REPLAY][A-MACHINE] from=${input.fromEntityId.slice(-8)} to=${input.toEntityId.slice(-8)} ` +
+      `height=${String(normalizedInputHeight ?? 'none')} hasACK=${Boolean(input.prevHanko)} hasNewFrame=${Boolean(input.newAccountFrame)} ` +
+      `currentHeight=${accountMachine.currentHeight} pending=${accountMachine.pendingFrame?.height ?? 0}`
+    );
+  }
 
   // Replay protection: frame chain (height + prevFrameHash) checked at :836
   // ACK replay protection: pendingFrame cleared on commit, so replayed ACK fails pendingFrame check
@@ -618,9 +637,25 @@ export async function handleAccountInput(
     }
   }
 
+  const pendingHeight = Number(accountMachine.pendingFrame?.height ?? 0);
+  const bundledNewFrameHeight =
+    input.newAccountFrame === undefined || input.newAccountFrame === null
+      ? undefined
+      : Number(input.newAccountFrame.height);
+  const ackTargetsPendingFrame =
+    Boolean(input.prevHanko) &&
+    Boolean(accountMachine.pendingFrame) &&
+    (
+      // Normal ACK-only message.
+      normalizedInputHeight === pendingHeight ||
+      // BATCHED message: ACK for pending frame + next proposed frame.
+      (bundledNewFrameHeight !== undefined && bundledNewFrameHeight === pendingHeight + 1)
+    );
+  const ackHeight = ackTargetsPendingFrame ? pendingHeight : normalizedInputHeight;
+
   // Handle pending frame confirmation
-  if (accountMachine.pendingFrame && input.height === accountMachine.pendingFrame.height && input.prevHanko) {
-    console.log(`✅ Received confirmation for pending frame ${input.height}`);
+  if (accountMachine.pendingFrame && ackHeight === accountMachine.pendingFrame.height && input.prevHanko) {
+    console.log(`✅ Received confirmation for pending frame ${ackHeight}`);
     console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}`);
 
     const frameHash = accountMachine.pendingFrame.stateHash;
@@ -631,12 +666,12 @@ export async function handleAccountInput(
       return { success: false, error: 'Missing ACK hanko', events };
     }
 
-    console.log(`🔐 HANKO-ACK-VERIFY: Verifying ACK hanko for our pending frame`);
-
-    const { verifyHankoForHash } = await import('./hanko-signing');
     const expectedAckEntity = accountMachine.proofHeader.toEntity;
-    const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(ackHanko, frameHash, expectedAckEntity, env);
-
+    console.log(`🔐 HANKO-ACK-VERIFY: Verifying ACK hanko for our pending frame`);
+    const { verifyHankoForHash } = await import('./hanko-signing');
+    const verifyResult = await verifyHankoForHash(ackHanko, frameHash, expectedAckEntity, env);
+    const valid = verifyResult.valid;
+    const recoveredEntityId = verifyResult.entityId;
     if (!valid) {
       return { success: false, error: 'Invalid ACK hanko signature', events };
     }
@@ -644,8 +679,7 @@ export async function handleAccountInput(
     if (!recoveredEntityId || recoveredEntityId.toLowerCase() !== expectedAckEntity.toLowerCase()) {
       return { success: false, error: `ACK hanko entityId mismatch: got ${recoveredEntityId?.slice(-4)}, expected ${expectedAckEntity.slice(-4)}`, events };
     }
-
-    console.log(`✅ HANKO-ACK-VERIFIED: ACK from ${recoveredEntityId.slice(-4)}`);
+    console.log(`✅ HANKO-ACK-VERIFIED: ACK from ${(recoveredEntityId ?? expectedAckEntity).slice(-4)}`);
 
     // ACK is valid - proceed
     ackProcessed = true;
@@ -745,8 +779,8 @@ export async function handleAccountInput(
         delete accountMachine.lastRollbackFrameHash; // Reset deduplication on full resolution
       }
 
-      console.log(`✅ PENDING-CLEARED: Frame ${input.height} confirmed, mempool now has ${accountMachine.mempool.length} txs: [${accountMachine.mempool.map(tx => tx.type).join(',')}]`);
-      events.push(`✅ Frame ${input.height} confirmed and committed`);
+      console.log(`✅ PENDING-CLEARED: Frame ${ackHeight} confirmed, mempool now has ${accountMachine.mempool.length} txs: [${accountMachine.mempool.map(tx => tx.type).join(',')}]`);
+      events.push(`✅ Frame ${ackHeight} confirmed and committed`);
 
       // CRITICAL FIX: Chained Proposal - if mempool has items (e.g. j_event_claim), propose immediately
       if (!input.newAccountFrame) {
@@ -766,7 +800,7 @@ export async function handleAccountInput(
             };
           }
         }
-        if (HEAVY_LOGS) console.log(`🔍 RETURN-ACK-ONLY: frame ${input.height} ACKed, no new frame bundled`);
+        if (HEAVY_LOGS) console.log(`🔍 RETURN-ACK-ONLY: frame ${ackHeight} ACKed, no new frame bundled`);
         return { success: true, events, timedOutHashlocks };
       }
       // Fall through to process newAccountFrame below
@@ -774,9 +808,76 @@ export async function handleAccountInput(
     }
   }
 
+  // ACK for a pending frame must never be ignored (ACK-only or batched ACK+newFrame).
+  if (input.prevHanko && !ackProcessed && accountMachine.pendingFrame) {
+    const pending = accountMachine.pendingFrame.height;
+    return {
+      success: false,
+      error:
+        `Unmatched ACK with pending frame: ` +
+        `inputHeight=${String(normalizedInputHeight ?? 'none')} ` +
+        `pending=${String(pending)} ` +
+        `newFrame=${String(input.newAccountFrame?.height ?? 'none')}`,
+      events,
+    };
+  }
+
   // Handle new frame proposal
   if (input.newAccountFrame) {
+    if (replayMode) {
+      console.log(
+        `[REPLAY][A-MACHINE] new frame path: receivedHeight=${input.newAccountFrame.height} ` +
+        `current=${accountMachine.currentHeight} prev=${String(input.newAccountFrame.prevFrameHash).slice(0, 12)}`
+      );
+    }
     const receivedFrame = input.newAccountFrame;
+
+    // Replay-only recovery:
+    // If we are one frame behind with a pendingFrame, deterministically commit it first.
+    // This preserves frame-chain continuity when ACK and next frame were split across WAL frames.
+    if (
+      replayMode &&
+      accountMachine.pendingFrame &&
+      Number(receivedFrame.height) === Number(accountMachine.pendingFrame.height) + 1 &&
+      Number(accountMachine.currentHeight) + 1 !== Number(receivedFrame.height)
+    ) {
+      console.warn(
+        `[loadEnvFromDB][A-MACHINE] replay precommit pending frame ` +
+        `pending=${accountMachine.pendingFrame.height} current=${accountMachine.currentHeight} incoming=${receivedFrame.height}`
+      );
+      const pendingJHeight = accountMachine.pendingFrame.jHeight
+        ?? accountMachine.currentFrame?.jHeight
+        ?? 0;
+      for (const tx of accountMachine.pendingFrame.accountTxs) {
+        const commitResult = await processAccountTx(
+          accountMachine,
+          tx,
+          accountMachine.pendingFrame.byLeft!,
+          accountMachine.pendingFrame.timestamp,
+          pendingJHeight,
+          false
+        );
+        if (!commitResult.success) {
+          return {
+            success: false,
+            error: `Replay pending commit failed: ${tx.type} - ${commitResult.error}`,
+            events
+          };
+        }
+      }
+      accountMachine.currentFrame = structuredClone(accountMachine.pendingFrame);
+      accountMachine.currentHeight = accountMachine.pendingFrame.height;
+      accountMachine.proofHeader.disputeNonce = accountMachine.currentHeight;
+      accountMachine.frameHistory.push({ ...accountMachine.pendingFrame });
+      if (accountMachine.frameHistory.length > 10) accountMachine.frameHistory.shift();
+      delete accountMachine.pendingFrame;
+      delete accountMachine.pendingAccountInput;
+      delete accountMachine.clonedForValidation;
+      console.warn(
+        `[loadEnvFromDB][A-MACHINE] replay precommit done ` +
+        `current=${accountMachine.currentHeight} pending=${accountMachine.pendingFrame?.height ?? 0}`
+      );
+    }
 
     // Validate frame with timestamp checks (HTLC safety)
     const previousTimestamp = accountMachine.currentFrame?.timestamp;
@@ -1174,6 +1275,12 @@ export async function handleAccountInput(
       fullDeltaStates: ourFullDeltaStates, // Use OUR verified fullDeltaStates
     });
     accountMachine.currentHeight = receivedFrame.height;
+    if (replayMode) {
+      console.log(
+        `[REPLAY][A-MACHINE] committed frame=${receivedFrame.height} ` +
+        `newCurrentHeight=${accountMachine.currentHeight} accountTxs=${receivedFrame.accountTxs.length}`
+      );
+    }
     accountMachine.proofHeader.disputeNonce = accountMachine.currentHeight;
 
     // Store counterparty dispute metadata on COMMIT (verified, frame accepted)
@@ -1324,6 +1431,16 @@ export async function handleAccountInput(
       swapOffersCancelled: allSwapOffersCancelled,
       timedOutHashlocks,
       ...(hashesToSign.length > 0 && { hashesToSign }),
+    };
+  }
+
+  // ACK inputs must never be silently ignored; this causes replay divergence.
+  if (input.prevHanko && !ackProcessed && !input.newAccountFrame) {
+    const pending = accountMachine.pendingFrame?.height ?? 'none';
+    return {
+      success: false,
+      error: `Unmatched ACK: height=${String(normalizedInputHeight ?? 'none')} pending=${String(pending)}`,
+      events,
     };
   }
 

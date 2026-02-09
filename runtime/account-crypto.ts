@@ -7,7 +7,7 @@ import * as secp256k1 from '@noble/secp256k1';
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { concatBytes } from '@noble/hashes/utils.js';
-import { HDNodeWallet, getIndexedAccountPath, getBytes, keccak256 } from 'ethers';
+import { HDNodeWallet, getIndexedAccountPath, getBytes, keccak256, recoverAddress } from 'ethers';
 import { Buffer as BufferPolyfill } from 'buffer';
 import * as bip39 from 'bip39';
 
@@ -404,11 +404,26 @@ export function verifyAccountSignature(
   frameHash: string,
   signature: string
 ): boolean {
+  const key = signerId.toLowerCase();
   const quiet = env?.quietRuntimeLogs === true;
-  const publicKey = getSignerPublicKey(env, signerId);
+  const publicKey = getSignerPublicKey(env, key);
   if (!publicKey) {
-    // Always warn on missing keys - this is a real error
-    console.warn(`⚠️ Cannot verify - no public key for signerId=${signerId.slice(-4)}`);
+    // Deterministic fallback for replay/recovery: recover address from signature.
+    // This removes runtime dependence on gossip key registration for account frame verification.
+    if (/^0x[a-f0-9]{40}$/i.test(key)) {
+      try {
+        const recovered = recoverAddress(frameHash, signature).toLowerCase();
+        if (recovered === key) {
+          return true;
+        }
+      } catch (error) {
+        if (!quiet) {
+          console.warn(`⚠️ recoverAddress failed for signer ${key.slice(-4)}:`, error);
+        }
+      }
+    }
+
+    console.warn(`⚠️ Cannot verify - no public key for signerId=${key.slice(-4)}`);
     if (!quiet) {
       console.warn(`⚠️ Available keys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
       console.warn(`⚠️ Available external keys:`, Array.from(externalPublicKeys.keys()).map(k => k.slice(-4)));

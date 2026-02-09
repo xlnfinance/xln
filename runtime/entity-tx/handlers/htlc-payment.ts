@@ -14,6 +14,7 @@ import { calculateRequiredInboundForDesiredForward } from '../../htlc-utils';
 import { HTLC } from '../../constants';
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from '../../routing/fees';
 import { getTokenCapacity } from '../../routing/capacity';
+import { deriveDelta } from '../../account-utils';
 
 const formatEntityId = (id: string) => id.slice(-4);
 const addMessage = (state: EntityState, message: string) => state.messages.push(message);
@@ -139,9 +140,17 @@ export async function handleHtlcPayment(
     return { newState, outputs: [] };
   }
 
+  const preparedSenderLockRaw = entityTx.data.preparedSenderLockAmount;
+  const preparedEnvelopeRaw = entityTx.data.preparedEnvelope;
+  let senderLockAmount: bigint | null = null;
+  let totalFee: bigint | null = null;
+  const hopForwardAmounts = new Map<string, bigint>();
+
   // Recipient-exact semantics:
   // tx.data.amount is what final recipient should receive.
   // Compute sender lock amount by inverting per-intermediary fee schedule.
+  // On replay, prefer persisted prepared payload to avoid non-deterministic
+  // re-encryption and route-dependent drift.
   const feeConfigForHop = (
     fromEntityId: string,
     toEntityId: string,
@@ -163,23 +172,60 @@ export async function handleHtlcPayment(
     const feePpm = calculateDirectionalFeePPM(basePpm, outCap, inCap);
     return { feePpm, baseFee };
   };
-  let senderLockAmount = desiredRecipientAmount;
-  const hopForwardAmounts = new Map<string, bigint>();
-  for (let i = route.length - 2; i >= 1; i -= 1) {
-    const intermediary = route[i]!;
-    const nextHop = route[i + 1]!;
-    const { feePpm, baseFee } = feeConfigForHop(intermediary, nextHop, tokenId);
-    const forwardAmount = senderLockAmount;
-    hopForwardAmounts.set(intermediary, forwardAmount);
-    senderLockAmount = calculateRequiredInboundForDesiredForward(forwardAmount, feePpm, baseFee);
+  if (preparedSenderLockRaw !== undefined && preparedEnvelopeRaw !== undefined) {
+    try {
+      senderLockAmount = typeof preparedSenderLockRaw === 'bigint'
+        ? preparedSenderLockRaw
+        : BigInt(String(preparedSenderLockRaw));
+      totalFee = senderLockAmount - desiredRecipientAmount;
+      if (senderLockAmount <= 0n || totalFee < 0n) {
+        throw new Error(`invalid prepared amounts senderLock=${senderLockAmount} totalFee=${totalFee}`);
+      }
+      console.log(
+        `🔒 HTLC using prepared payload: recipient=${desiredRecipientAmount}, senderLock=${senderLockAmount}, totalFee=${totalFee}`
+      );
+    } catch (error) {
+      logError('HTLC_PAYMENT', `❌ Invalid prepared sender lock amount: ${error instanceof Error ? error.message : String(error)}`);
+      addMessage(newState, '❌ HTLC payment failed: invalid prepared payload');
+      return { newState, outputs: [], mempoolOps: [] };
+    }
+  } else {
+    senderLockAmount = desiredRecipientAmount;
+    for (let i = route.length - 2; i >= 1; i -= 1) {
+      const intermediary = route[i]!;
+      const nextHop = route[i + 1]!;
+      const { feePpm, baseFee } = feeConfigForHop(intermediary, nextHop, tokenId);
+      const forwardAmount = senderLockAmount;
+      hopForwardAmounts.set(intermediary, forwardAmount);
+      senderLockAmount = calculateRequiredInboundForDesiredForward(forwardAmount, feePpm, baseFee);
+    }
+    if (senderLockAmount < desiredRecipientAmount) {
+      logError('HTLC_PAYMENT', '❌ Sender lock amount underflow after fee inversion');
+      addMessage(newState, '❌ HTLC payment failed: fee inversion underflow');
+      return { newState, outputs: [], mempoolOps: [] };
+    }
+    totalFee = senderLockAmount - desiredRecipientAmount;
+    console.log(`🔒 HTLC recipient-exact quote: recipient=${desiredRecipientAmount}, senderLock=${senderLockAmount}, totalFee=${totalFee}`);
   }
-  if (senderLockAmount < desiredRecipientAmount) {
-    logError('HTLC_PAYMENT', '❌ Sender lock amount underflow after fee inversion');
-    addMessage(newState, '❌ HTLC payment failed: fee inversion underflow');
+
+  // Fail-fast sender-side capacity gate:
+  // reject overspend before queuing any account mempool operation.
+  const nextHopDelta = newState.accounts.get(nextHop)?.deltas?.get(tokenId);
+  if (!nextHopDelta) {
+    logError("HTLC_PAYMENT", `❌ No delta state for next hop ${formatEntityId(nextHop)} token ${tokenId}`);
+    addMessage(newState, `❌ HTLC payment failed: missing channel state`);
     return { newState, outputs: [], mempoolOps: [] };
   }
-  const totalFee = senderLockAmount - desiredRecipientAmount;
-  console.log(`🔒 HTLC recipient-exact quote: recipient=${desiredRecipientAmount}, senderLock=${senderLockAmount}, totalFee=${totalFee}`);
+  const senderIsLeftOnNextAccount = newState.accounts.get(nextHop)?.leftEntity === entityState.entityId;
+  const nextHopCapacity = deriveDelta(nextHopDelta, senderIsLeftOnNextAccount).outCapacity;
+  if (senderLockAmount > nextHopCapacity) {
+    logError(
+      "HTLC_PAYMENT",
+      `❌ Insufficient outbound capacity to ${formatEntityId(nextHop)}: required=${senderLockAmount} available=${nextHopCapacity}`
+    );
+    addMessage(newState, `❌ HTLC payment failed: insufficient capacity`);
+    return { newState, outputs: [], mempoolOps: [] };
+  }
 
   // Calculate timelocks and reveal heights (Alice gets most time)
   const totalHops = route.length - 1; // Minus sender
@@ -206,9 +252,11 @@ export async function handleHtlcPayment(
   });
 
   // Create encrypted onion envelope (privacy-preserving routing)
-  const { createOnionEnvelopes } = await import('../../htlc-envelope-types');
   let envelope;
-  try {
+  if (preparedEnvelopeRaw !== undefined) {
+    envelope = preparedEnvelopeRaw;
+  } else try {
+    const { createOnionEnvelopes } = await import('../../htlc-envelope-types');
     const normalizeX25519Hex = (raw: unknown): string | null => {
       if (typeof raw !== 'string') return null;
       const trimmed = raw.trim();
@@ -300,6 +348,11 @@ export async function handleHtlcPayment(
 
     envelope = await createOnionEnvelopes(route, secret, entityPubKeys, crypto, hopForwardAmounts);
     console.log(`🧅 ENVELOPE: ${crypto ? 'ENCRYPTED' : 'CLEARTEXT'} | hops=${hops.length} keys=${entityPubKeys.size} missing=[${missingKeys.map(e => formatEntityId(e))}]`);
+
+    // Persist deterministic payload for WAL replay.
+    entityTx.data.preparedEnvelope = envelope;
+    entityTx.data.preparedSenderLockAmount = senderLockAmount.toString();
+    entityTx.data.preparedTotalFee = totalFee.toString();
   } catch (e) {
     logError("HTLC_PAYMENT", `❌ Envelope creation failed: ${e instanceof Error ? e.message : String(e)}`);
     addMessage(newState, `❌ HTLC payment failed: Invalid route`);

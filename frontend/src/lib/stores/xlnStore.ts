@@ -8,6 +8,7 @@ let XLN: XLNModule | null = null;
 export const xlnInstance = writable<XLNModule | null>(null);
 let warnedMissingXLN = false;
 let unregisterEnvChange: (() => void) | null = null;
+const REQUIRED_RUNTIME_SCHEMA_VERSION = 2;
 
 async function getXLN(): Promise<XLNModule> {
   if (XLN) return XLN;
@@ -15,6 +16,13 @@ async function getXLN(): Promise<XLNModule> {
   // Always cache-bust runtime module per page load; stale runtime.js caused prod-debug desync.
   const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
   XLN = await import(/* @vite-ignore */ runtimeUrl) as XLNModule;
+  const runtimeAny = XLN as unknown as Record<string, unknown>;
+  const loadedSchema = Number(runtimeAny.RUNTIME_SCHEMA_VERSION ?? NaN);
+  if (!Number.isFinite(loadedSchema) || loadedSchema !== REQUIRED_RUNTIME_SCHEMA_VERSION) {
+    throw new Error(
+      `RUNTIME_VERSION_MISMATCH: expected schema=${REQUIRED_RUNTIME_SCHEMA_VERSION} got=${String(runtimeAny.RUNTIME_SCHEMA_VERSION ?? 'undefined')}`
+    );
+  }
   xlnInstance.set(XLN);
 
   // Expose globally for console debugging
@@ -103,7 +111,7 @@ export function resolveRelayUrls(): string[] {
 
   const settingsRelay = get(settings)?.relayUrl;
   const envRelay = (import.meta as any)?.env?.VITE_RELAY_URL as string | undefined;
-  const fallbackRelay = 'wss://xln.finance/relay';
+  const fallbackRelay = isLocalBrowserHost() ? 'ws://localhost:9000' : 'wss://xln.finance/relay';
   const relay = localStorageRelay || settingsRelay || envRelay || fallbackRelay;
   if (!isLocalBrowserHost() && isLocalRelayUrl(relay)) {
     console.warn(`[relay] Ignoring local relay URL on non-local host: ${relay} -> ${fallbackRelay}`);
@@ -277,7 +285,7 @@ export function getEnv(): Env | null {
 }
 
 // Wrapper for process() that auto-injects runtimeDelay from settings
-export async function processWithDelay(env: Env, inputs?: unknown[]): Promise<Env> {
+export async function enqueueEntityInputs(env: Env, inputs?: unknown[]): Promise<Env> {
   const xln = await getXLN();
   xln.enqueueRuntimeInput(env, {
     runtimeTxs: [],

@@ -12,18 +12,13 @@
   let copied = false;
 
   $: safeEntityId = (entityId || '').trim();
-  $: displayName = (name || '').trim() || formatShortEntity(safeEntityId);
-  $: detailAddress = compact ? formatShortEntity(safeEntityId) : safeEntityId;
+  $: hasRealName = (name || '').trim().length > 0;
+  $: displayName = hasRealName ? (name || '').trim() : (safeEntityId || 'Unknown');
+  $: detailAddress = safeEntityId;
   $: identiconSvg = safeEntityId
     ? `data:image/svg+xml;utf8,${encodeURIComponent(jdenticon.toSvg(safeEntityId.toLowerCase(), size))}`
     : '';
   $: href = safeEntityId ? `/address/${encodeURIComponent(safeEntityId)}` : '#';
-
-  function formatShortEntity(id: string): string {
-    if (!id) return 'Unknown';
-    if (id.length <= 14) return id;
-    return `${id.slice(0, 8)}...${id.slice(-6)}`;
-  }
 
   async function copyAddress(event: MouseEvent): Promise<void> {
     event.stopPropagation();
@@ -44,13 +39,19 @@
   <a class="entity-identity" href={href} title={safeEntityId}>
     <img class="avatar" src={identiconSvg} alt="" width={size} height={size} />
     <div class="text">
-      <div class="name"><span class="explore">🧭</span>{displayName}</div>
+      {#if hasRealName}
+        <div class="name"><span class="explore">🧭</span>{displayName}</div>
+      {/if}
       {#if showAddress}
         <div class="address-wrap">
           <code class="address">{detailAddress}</code>
           {#if copyable}
             <button class="copy" type="button" onclick={copyAddress}>{copied ? 'copied' : 'copy'}</button>
           {/if}
+        </div>
+      {:else if !hasRealName}
+        <div class="address-wrap">
+          <code class="address">{detailAddress}</code>
         </div>
       {/if}
     </div>
@@ -59,13 +60,19 @@
   <div class="entity-identity" title={safeEntityId}>
     <img class="avatar" src={identiconSvg} alt="" width={size} height={size} />
     <div class="text">
-      <div class="name"><span class="explore">🧭</span>{displayName}</div>
+      {#if hasRealName}
+        <div class="name"><span class="explore">🧭</span>{displayName}</div>
+      {/if}
       {#if showAddress}
         <div class="address-wrap">
           <code class="address">{detailAddress}</code>
           {#if copyable}
             <button class="copy" type="button" onclick={copyAddress}>{copied ? 'copied' : 'copy'}</button>
           {/if}
+        </div>
+      {:else if !hasRealName}
+        <div class="address-wrap">
+          <code class="address">{detailAddress}</code>
         </div>
       {/if}
     </div>

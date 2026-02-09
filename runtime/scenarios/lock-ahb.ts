@@ -768,7 +768,11 @@ export async function lockAhb(env: Env): Promise<void> {
       signerId: alice.signer,
       entityTxs: [{
         type: 'openAccount',
-        data: { targetEntityId: hub.id }
+        data: {
+          targetEntityId: hub.id,
+          tokenId: USDC_TOKEN_ID,
+          creditAmount: usd(10_000),
+        }
       }]
     }]);
     // Tick 2: Hub receives, creates Hub→Alice
@@ -808,7 +812,11 @@ export async function lockAhb(env: Env): Promise<void> {
       signerId: bob.signer,
       entityTxs: [{
         type: 'openAccount',
-        data: { targetEntityId: hub.id }
+        data: {
+          targetEntityId: hub.id,
+          tokenId: USDC_TOKEN_ID,
+          creditAmount: usd(10_000),
+        }
       }]
     }]);
     // Tick 2: Hub receives, creates Hub→Bob

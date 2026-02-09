@@ -82,6 +82,13 @@ const parseRuntimeIdFromReq = (req: { headers?: Record<string, string | string[]
   }
 };
 
+const normalizeRuntimeId = (runtimeId: string | null | undefined): string | null => {
+  if (!runtimeId || typeof runtimeId !== 'string') return null;
+  const trimmed = runtimeId.trim();
+  if (!trimmed) return null;
+  return trimmed.toLowerCase();
+};
+
 const recoverAddressFromSignature = (digestHex: string, signatureHex: string): string => {
   const sig = signatureHex.replace('0x', '');
   if (sig.length < 130) {
@@ -126,6 +133,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
 
   const clients = new Map<string, ClientEntry>();
   const pending = new Map<string, PendingMessage[]>();
+  const normalizedServerRuntimeId = normalizeRuntimeId(options.serverRuntimeId);
 
   const wss = new WebSocketServer({
     host: options.host || '0.0.0.0',
@@ -143,14 +151,18 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
   };
 
   const enqueue = (runtimeId: string, message: RuntimeWsMessage) => {
-    const queue = pending.get(runtimeId) || [];
+    const normalized = normalizeRuntimeId(runtimeId);
+    if (!normalized) return;
+    const queue = pending.get(normalized) || [];
     queue.push({ queuedAt: now(), message });
     while (queue.length > maxQueue) queue.shift();
-    pending.set(runtimeId, queue);
+    pending.set(normalized, queue);
   };
 
   const flushQueue = (runtimeId: string, ws: WebSocket) => {
-    const queue = pending.get(runtimeId);
+    const normalized = normalizeRuntimeId(runtimeId);
+    if (!normalized) return;
+    const queue = pending.get(normalized);
     if (!queue || queue.length === 0) return;
 
     const stillValid: PendingMessage[] = [];
@@ -163,9 +175,9 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       }
     }
     if (stillValid.length > 0) {
-      pending.set(runtimeId, stillValid);
+      pending.set(normalized, stillValid);
     } else {
-      pending.delete(runtimeId);
+      pending.delete(normalized);
     }
   };
 
@@ -235,6 +247,11 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       send(ws, { type: 'error', error: 'Missing target runtimeId' });
       return;
     }
+    const normalizedTarget = normalizeRuntimeId(target);
+    if (!normalizedTarget) {
+      send(ws, { type: 'error', error: 'Invalid target runtimeId' });
+      return;
+    }
 
     if (msg.type === 'runtime_input') {
       const payload = msg.payload as RuntimeInput | undefined;
@@ -263,11 +280,11 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
 
     // Check if target is the server itself - use local delivery for entity_input/runtime_input
     // EXCEPT: encrypted messages must go through WS client for decryption
-    const isLocalTarget = options.serverRuntimeId && target === options.serverRuntimeId;
+    const isLocalTarget = normalizedServerRuntimeId && normalizedTarget === normalizedServerRuntimeId;
     const isEncrypted = msg.encrypted === true;
     const useLocalDelivery = isLocalTarget && (msg.type === 'entity_input' || msg.type === 'runtime_input') && !isEncrypted;
 
-    const targetClient = clients.get(target);
+    const targetClient = clients.get(normalizedTarget);
     if (targetClient && !useLocalDelivery) {
       send(targetClient.ws, msg);
       send(ws, { type: 'ack', inReplyTo: msg.id, status: 'delivered' });
@@ -297,7 +314,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       }
     }
 
-    enqueue(target, msg);
+    enqueue(normalizedTarget, msg);
     send(ws, { type: 'ack', inReplyTo: msg.id, status: 'queued' });
   };
 
@@ -307,14 +324,20 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     let closed = false;
 
     const registerClient = (id: string) => {
-      runtimeId = id;
+      const normalized = normalizeRuntimeId(id);
+      if (!normalized) {
+        send(ws, { type: 'error', error: 'Invalid runtimeId in handshake' });
+        ws.close();
+        return;
+      }
+      runtimeId = normalized;
       handshakeDone = true;
-      const existing = clients.get(id);
+      const existing = clients.get(normalized);
       if (existing && existing.ws !== ws) {
         existing.ws.close();
       }
-      clients.set(id, { ws, runtimeId: id, lastSeen: now() });
-      flushQueue(id, ws);
+      clients.set(normalized, { ws, runtimeId: normalized, lastSeen: now() });
+      flushQueue(normalized, ws);
       send(ws, { type: 'ack', inReplyTo: 'hello', status: 'delivered' });
     };
 
@@ -449,13 +472,15 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     server: wss,
     close: () => wss.close(),
     sendToRuntime: (runtimeId: string, message: RuntimeWsMessage) => {
-      const client = clients.get(runtimeId);
+      const normalized = normalizeRuntimeId(runtimeId);
+      if (!normalized) return;
+      const client = clients.get(normalized);
       if (!message.id) message.id = makeMessageId();
       if (!message.timestamp) message.timestamp = now();
       if (client) {
         send(client.ws, message);
       } else {
-        enqueue(runtimeId, message);
+        enqueue(normalized, message);
       }
     },
   };

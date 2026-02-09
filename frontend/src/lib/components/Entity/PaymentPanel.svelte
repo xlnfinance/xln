@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import type { Writable } from 'svelte/store';
-  import { getXLN, xlnEnvironment, replicas, xlnFunctions, processWithDelay } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment, replicas, xlnFunctions, enqueueEntityInputs } from '../../stores/xlnStore';
   import { routePreview } from '../../stores/routePreviewStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { toasts } from '$lib/stores/toastStore';
@@ -43,6 +44,15 @@
   let routes: RouteOption[] = [];
   let selectedRouteIndex = -1;
   let preflightError: string | null = null;
+  let repeatIntervalMs = 0;
+  let repeatTimer: ReturnType<typeof setInterval> | null = null;
+  let profileExpanded = false;
+  const REPEAT_OPTIONS = [
+    { value: 0, label: 'No repeat' },
+    { value: 1_000, label: 'Repeat 1s' },
+    { value: 10_000, label: 'Repeat 10s' },
+    { value: 60_000, label: 'Repeat 1m' },
+  ];
   const MAX_ROUTES = 100;
   const MAX_PATH_HOPS = 6;
   const MIN_SELF_INTERMEDIATES = 2;
@@ -121,11 +131,28 @@
     ? safeStringify(selectedTargetProfile, 2)
     : null;
 
-  // Format short ID — show first 6 + last 4 chars
-  function formatShortId(id: string): string {
-    if (!id || id.length < 14) return id || '';
-    return id.slice(0, 6) + '...' + id.slice(-4);
+  const clearRepeatTimer = () => {
+    if (repeatTimer) {
+      clearInterval(repeatTimer);
+      repeatTimer = null;
+    }
+  };
+
+  const restartRepeatTimer = () => {
+    clearRepeatTimer();
+    if (repeatIntervalMs <= 0 || selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return;
+    repeatTimer = setInterval(() => {
+      void sendPayment(false);
+    }, repeatIntervalMs);
+  };
+
+  $: if (repeatIntervalMs === 0) {
+    clearRepeatTimer();
   }
+
+  onDestroy(() => {
+    clearRepeatTimer();
+  });
 
   function getEntityName(id: string): string {
     if (!id) return 'Unknown';
@@ -135,7 +162,7 @@
     const profile = (currentEnv?.gossip?.getProfiles?.() || [])
       .find((p: GossipProfileView) => p?.entityId === id);
     const metaName = profile?.metadata?.name;
-    return typeof metaName === 'string' && metaName.trim() ? metaName.trim() : formatShortId(id);
+    return typeof metaName === 'string' && metaName.trim() ? metaName.trim() : id;
   }
 
   function formatToken(value: bigint): string {
@@ -177,7 +204,7 @@
       }
     }
 
-    // Source 2: Gossip profiles (network-wide channel graph)
+    // Source 2: Gossip profiles (network-wide account graph)
     const profiles = env?.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
       if (!profile.entityId || !profile.accounts) continue;
@@ -218,8 +245,9 @@
     }
     if (typeof raw === 'string' && raw.trim() !== '') {
       const trimmed = raw.trim();
-      const match = trimmed.match(/^BigInt\(([-\d]+)\)$/);
-      const parsed = match ? match[1] : trimmed;
+      const parsed = trimmed.startsWith('BigInt(') && trimmed.endsWith(')')
+        ? trimmed.slice(7, -1)
+        : trimmed;
       try {
         const v = BigInt(parsed);
         return v < 0n ? 0n : v;
@@ -326,12 +354,12 @@
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
     const targetProfile = profiles.find((p: GossipProfileView) => p?.entityId === targetEntityId) as GossipProfileView | undefined;
     if (!targetProfile) {
-      const msg = `Recipient ${formatShortId(targetEntityId)} has no downloaded gossip profile`;
+      const msg = `Recipient ${targetEntityId} has no downloaded gossip profile`;
       emitUiDebugEvent('PAYMENT_PREFLIGHT_PROFILE_MISSING', msg);
       throw new Error(`${msg}. Refresh gossip/hubs and retry.`);
     }
     if (!extractEntityCryptoKey(targetEntityId)) {
-      const msg = `Recipient ${formatShortId(targetEntityId)} profile has no encryption key`;
+      const msg = `Recipient ${targetEntityId} profile has no encryption key`;
       emitUiDebugEvent('PAYMENT_PREFLIGHT_KEY_MISSING', msg, { targetProfile });
       throw new Error(`${msg}. Cannot build encrypted HTLC route.`);
     }
@@ -345,7 +373,7 @@
       }
     }
     if (missing.length > 0) {
-      const missingShort = missing.map(formatShortId);
+      const missingShort = missing;
       const msg = `Missing encryption keys for route hops: ${missingShort.join(', ')}`;
       emitUiDebugEvent('PAYMENT_PREFLIGHT_ROUTE_KEYS_MISSING', msg, {
         route: path,
@@ -452,6 +480,7 @@
     routes = [];
     selectedRouteIndex = -1;
     preflightError = null;
+    clearRepeatTimer();
 
     try {
       await getXLN();
@@ -473,7 +502,7 @@
         if (targetEntityId === entityId) {
           throw new Error('No self-route found with at least 2 different intermediates');
         }
-        throw new Error(`No route found to ${formatShortId(targetEntityId)}`);
+        throw new Error(`No route found to ${targetEntityId}`);
       }
 
       routes = foundPaths.map((path) => {
@@ -536,8 +565,9 @@
     }
   }
 
-  async function sendPayment() {
+  async function sendPayment(manual = true) {
     if (selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return;
+    if (sendingPayment) return;
 
     sendingPayment = true;
     try {
@@ -598,17 +628,22 @@
         };
       }
 
-      await processWithDelay(env, [paymentInput]);
-      console.log(`[Send] ${useHtlc ? 'HTLC' : 'Direct'} payment sent via:`, route.path.map(formatShortId).join(' -> '));
+      await enqueueEntityInputs(env, [paymentInput]);
+      console.log(`[Send] ${useHtlc ? 'HTLC' : 'Direct'} payment sent via:`, route.path.join(' -> '));
 
-      routes = [];
-      selectedRouteIndex = -1;
+      if (repeatIntervalMs <= 0) {
+        routes = [];
+        selectedRouteIndex = -1;
+      }
     } catch (error) {
       console.error('[Send] Payment failed:', error);
       preflightError = (error as Error)?.message || 'Unknown send error';
       toasts.error(`Payment failed: ${preflightError}`);
     } finally {
       sendingPayment = false;
+      if (manual) {
+        restartRepeatTimer();
+      }
     }
   }
 
@@ -617,10 +652,17 @@
     preflightError = null;
     routes = [];
     selectedRouteIndex = -1;
+    clearRepeatTimer();
   }
 
   function handleTokenChange(e: CustomEvent) {
     tokenId = e.detail.value;
+  }
+
+  function handleRepeatChange(event: Event) {
+    const target = event.target as HTMLSelectElement | null;
+    repeatIntervalMs = target ? Number(target.value) : 0;
+    restartRepeatTimer();
   }
 </script>
 
@@ -642,26 +684,30 @@
 
   {#if targetEntityId}
     <div class="profile-preview">
-      <div class="profile-preview-header">
-        <span>Recipient Gossip Profile</span>
-        {#if targetEntityId === entityId}
-          <span class="profile-status ok">self</span>
-        {:else if selectedTargetProfile}
-          {#if extractEntityCryptoKey(targetEntityId)}
-            <span class="profile-status ok">key ready</span>
+      <button class="profile-preview-header" on:click={() => profileExpanded = !profileExpanded}>
+        <span class="profile-toggle">{profileExpanded ? '▾' : '▸'} Recipient Gossip Profile</span>
+        <div class="profile-header-right">
+          {#if targetEntityId === entityId}
+            <span class="profile-status ok">self</span>
+          {:else if selectedTargetProfile}
+            {#if extractEntityCryptoKey(targetEntityId)}
+              <span class="profile-status ok">key ready</span>
+            {:else}
+              <span class="profile-status fail">missing key</span>
+            {/if}
           {:else}
-            <span class="profile-status fail">missing key</span>
+            <span class="profile-status fail">not downloaded</span>
           {/if}
+        </div>
+      </button>
+      {#if profileExpanded}
+        {#if selectedTargetProfileJson}
+          <pre>{selectedTargetProfileJson}</pre>
+        {:else if targetEntityId === entityId}
+          <pre>{safeStringify({ entityId, note: 'Self recipient uses local entity state' }, 2)}</pre>
         {:else}
-          <span class="profile-status fail">not downloaded</span>
+          <pre>{safeStringify({ entityId: targetEntityId, error: 'No gossip profile in local cache' }, 2)}</pre>
         {/if}
-      </div>
-      {#if selectedTargetProfileJson}
-        <pre>{selectedTargetProfileJson}</pre>
-      {:else if targetEntityId === entityId}
-        <pre>{safeStringify({ entityId, note: 'Self recipient uses local entity state' }, 2)}</pre>
-      {:else}
-        <pre>{safeStringify({ entityId: targetEntityId, error: 'No gossip profile in local cache' }, 2)}</pre>
       {/if}
     </div>
   {/if}
@@ -751,13 +797,28 @@
         {/each}
       </div>
     </div>
-    <button
-      class="btn-send"
-      on:click={sendPayment}
-      disabled={selectedRouteIndex < 0 || sendingPayment}
-    >
-      {sendingPayment ? 'Sending...' : 'Send Payment'}
-    </button>
+    <div class="send-controls">
+      <button
+        class="btn-send"
+        on:click={() => sendPayment(true)}
+        disabled={selectedRouteIndex < 0 || sendingPayment}
+      >
+        {sendingPayment ? 'Sending...' : 'Send Payment'}
+      </button>
+      <label class="repeat-control">
+        <span>Repeat</span>
+        <select value={repeatIntervalMs} on:change={handleRepeatChange} disabled={sendingPayment}>
+          {#each REPEAT_OPTIONS as option}
+            <option value={option.value}>{option.label}</option>
+          {/each}
+        </select>
+      </label>
+    </div>
+    {#if repeatIntervalMs > 0}
+      <div class="repeat-status">
+        Auto-send every {repeatIntervalMs >= 60000 ? `${Math.floor(repeatIntervalMs / 60000)}m` : `${Math.floor(repeatIntervalMs / 1000)}s`}
+      </div>
+    {/if}
   {/if}
 </div>
 
@@ -770,7 +831,7 @@
 
   .row {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr 1fr;
     gap: 12px;
     align-items: end;
   }
@@ -843,7 +904,6 @@
   .btn-send {
     background: linear-gradient(135deg, #15803d, #166534);
     color: #dcfce7;
-    margin-top: 12px;
   }
 
   .btn-send:hover:not(:disabled) {
@@ -858,6 +918,42 @@
   .routes {
     padding-top: 16px;
     border-top: 1px solid #292524;
+  }
+
+  .send-controls {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: end;
+  }
+
+  .repeat-control {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 11px;
+    color: #78716c;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .repeat-control select {
+    min-width: 140px;
+    height: 44px;
+    padding: 0 10px;
+    background: #1c1917;
+    border: 1px solid #292524;
+    border-radius: 8px;
+    color: #e7e5e4;
+    font-size: 13px;
+    font-family: inherit;
+  }
+
+  .repeat-status {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #a3e635;
   }
 
   .routes-scroll {
@@ -976,11 +1072,30 @@
     align-items: center;
     justify-content: space-between;
     padding: 10px 12px;
-    border-bottom: 1px solid #292524;
     color: #a8a29e;
     font-size: 11px;
     letter-spacing: 0.03em;
     text-transform: uppercase;
+    width: 100%;
+    background: none;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: color 0.15s;
+  }
+
+  .profile-preview-header:hover {
+    color: #d6d3d1;
+  }
+
+  .profile-toggle {
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .profile-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
   }
 
   .profile-status {
@@ -1007,6 +1122,7 @@
     max-height: 220px;
     overflow: auto;
     padding: 12px;
+    border-top: 1px solid #292524;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     line-height: 1.45;

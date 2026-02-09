@@ -254,9 +254,7 @@
       on:keydown={handleKeydown}
     />
 
-    {#if value && !showDropdown}
-      <span class="selected-badge">{formatShortId(value)}</span>
-    {:else if unresolvedInput && !showDropdown}
+    {#if unresolvedInput && !showDropdown && !value}
       <span class="selected-badge unresolved" title="Entity not found in gossip">?{unresolvedInput}</span>
     {/if}
 
@@ -287,7 +285,6 @@
             on:mousedown|preventDefault={() => selectEntity(opt.id)}
           >
             <span class="item-name">{opt.display}</span>
-            <span class="item-id">{formatShortId(opt.id)}</span>
             {#if opt.isContact}
               <span class="contact-badge">Contact</span>
             {/if}
@@ -443,13 +440,13 @@
 
   .item-name {
     flex: 1;
-    font-weight: 500;
-  }
-
-  .item-id {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #78716c;
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
   }
 
   .contact-badge {
