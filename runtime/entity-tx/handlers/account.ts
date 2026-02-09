@@ -1,4 +1,5 @@
 import type { AccountInput, AccountInputProposal, AccountInputAck, AccountInputSettlement, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine } from '../../types';
+import { isOk, isErr } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
 import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
@@ -174,13 +175,14 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
     const result = await processAccountInput(env, accountMachine, input);
 
-    if (result.success) {
-      addMessages(newState, result.events);
+    if (isOk(result)) {
+      const rv = result.value;
+      addMessages(newState, rv.events);
       emitScopedEvents(
         env,
         'account',
         `E/A/${newState.entityId.slice(-4)}:${counterpartyId.slice(-4)}/consensus`,
-        result.events,
+        rv.events,
         {
           entityId: newState.entityId,
           counterpartyId,
@@ -191,8 +193,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       );
 
       // Multi-signer: Collect hashes from result during processing
-      if (result.hashesToSign) {
-        allHashesToSign.push(...result.hashesToSign);
+      if (rv.hashesToSign) {
+        allHashesToSign.push(...rv.hashesToSign);
       }
 
       // === HTLC LOCK PROCESSING: Check if we need to forward ===
@@ -600,7 +602,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
       // === HTLC ERROR PROPAGATION (timeout/cancel) ===
       // When an htlc_resolve(error) happens, propagate cancel backward through route
-      const timedOutHashlocks = result.timedOutHashlocks || [];
+      const timedOutHashlocks = rv.timedOutHashlocks || [];
       for (const timedOutHashlock of timedOutHashlocks) {
         console.log(`⬅️ HTLC-ERROR: Propagating cancel for hashlock ${timedOutHashlock.slice(0,16)}...`);
         const route = newState.htlcRoutes.get(timedOutHashlock);
@@ -634,7 +636,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
       // === HTLC SECRET PROPAGATION ===
       // Check if any reveals happened in this frame
-      const revealedSecrets = result.revealedSecrets || [];
+      const revealedSecrets = rv.revealedSecrets || [];
       if (HEAVY_LOGS) console.log(`🔍 HTLC-SECRET-CHECK: ${revealedSecrets.length} secrets revealed in frame`);
 
       if (revealedSecrets.length > 0) {
@@ -703,13 +705,13 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       }
 
       // === COLLECT SWAP EVENTS (deferred to entity-level orchestration) ===
-      const swapOffersCreated = result.swapOffersCreated || [];
+      const swapOffersCreated = rv.swapOffersCreated || [];
       if (swapOffersCreated.length > 0) {
         console.log(`📊 SWAP-EVENTS: Collected ${swapOffersCreated.length} swap offers for entity-level matching`);
         allSwapOffersCreated.push(...swapOffersCreated);
       }
 
-      const swapOffersCancelled = result.swapOffersCancelled || [];
+      const swapOffersCancelled = rv.swapOffersCancelled || [];
       if (swapOffersCancelled.length > 0) {
         console.log(`📊 SWAP-EVENTS: Collected ${swapOffersCancelled.length} swap cancels`);
         allSwapOffersCancelled.push(...swapOffersCancelled);
@@ -722,33 +724,34 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       }
 
       // Send response (ACK + optional new frame)
-      if (result.response) {
-        console.log(`📤 Sending response to ${result.response.toEntityId.slice(-4)}`);
+      if (rv.response) {
+        console.log(`📤 Sending response to ${rv.response.toEntityId.slice(-4)}`);
 
         // Get target proposer
         // IMPORTANT: Send only to PROPOSER - bilateral consensus between entity proposers
         // Multi-validator entities sync account state via entity-level consensus (not bilateral broadcast)
         outputs.push({
-          entityId: result.response.toEntityId,
+          entityId: rv.response.toEntityId,
           entityTxs: [{
             type: 'accountInput',
-            data: result.response
+            data: rv.response
           }]
         });
 
-        console.log(`✅ ACK-RESPONSE queued: ${state.entityId.slice(-4)} → ${result.response.toEntityId.slice(-4)}, type=${result.response.type}, hasPrevHanko=${result.response.type === 'ack' ? !!result.response.prevHanko : false}`);
+        console.log(`✅ ACK-RESPONSE queued: ${state.entityId.slice(-4)} → ${rv.response.toEntityId.slice(-4)}, type=${rv.response.type}, hasPrevHanko=${rv.response.type === 'ack' ? !!rv.response.prevHanko : false}`);
       }
     } else {
-      console.error(`❌ Frame consensus failed: ${result.error}`);
-      addMessage(newState, `❌ ${result.error}`);
+      const errVal = result.error;
+      console.error(`❌ Frame consensus failed: ${errVal.error}`);
+      addMessage(newState, `❌ ${errVal.error}`);
       env.emit('PaymentFailed', {
         entityId: state.entityId,
         fromEntityId: input.fromEntityId,
         toEntityId: input.toEntityId,
-        reason: result.error || 'unknown',
+        reason: errVal.error,
       });
       env.error('consensus', 'FRAME_CONSENSUS_FAILED', {
-        reason: result.error || 'unknown',
+        reason: errVal.error,
         fromEntityId: input.fromEntityId,
         toEntityId: input.toEntityId,
       }, state.entityId);

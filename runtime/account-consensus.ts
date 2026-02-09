@@ -12,7 +12,8 @@
  * - Event Bubbling: Account events bubble up to E-Machine for entity messages
  */
 
-import type { AccountMachine, AccountFrame, AccountTx, AccountInput, AccountInputProposal, AccountInputAck, Env, EntityState, Delta, EntityReplica } from './types';
+import type { AccountMachine, AccountFrame, AccountTx, AccountInput, AccountInputProposal, AccountInputAck, Env, EntityState, Delta, EntityReplica, Result } from './types';
+import { Ok, Err, isOk, isErr } from './types';
 
 /** Type guard: input has frame-level consensus fields (proposal or ack) */
 function isFrameInput(input: AccountInput): input is AccountInputProposal | AccountInputAck {
@@ -184,19 +185,10 @@ export async function computeFrameHash(frame: AccountFrame): Promise<string> {
 
 // === FRAME CONSENSUS ===
 
-/**
- * Propose account frame (like old_src Channel consensus)
- */
-export async function proposeAccountFrame(
-  env: Env,
-  accountMachine: AccountMachine,
-  skipNonceIncrement: boolean = false,
-  entityJHeight?: number // Optional: J-height from entity state for HTLC consensus
-): Promise<{
-  success: boolean;
-  accountInput?: AccountInput;
+// === RESULT TYPES ===
+export interface ProposeSuccess {
+  accountInput: AccountInput;
   events: string[];
-  error?: string;
   revealedSecrets?: Array<{ secret: string; hashlock: string }>;
   swapOffersCreated?: Array<{
     offerId: string;
@@ -211,11 +203,52 @@ export async function proposeAccountFrame(
     minFillRatio: number;
   }>;
   swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
-  // MULTI-SIGNER: Hashes that need entity-quorum signing
   hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
-  // Failed HTLC locks that need backward cancellation via htlcRoutes
   failedHtlcLocks?: Array<{ hashlock: string; reason: string }>;
-}> {
+}
+
+export interface ProposeError {
+  error: string;
+  events: string[];
+  failedHtlcLocks?: Array<{ hashlock: string; reason: string }>;
+}
+
+export interface HandleSuccess {
+  response?: AccountInput;
+  events: string[];
+  approvalNeeded?: AccountTx;
+  revealedSecrets?: Array<{ secret: string; hashlock: string }>;
+  swapOffersCreated?: Array<{
+    offerId: string;
+    makerIsLeft: boolean;
+    fromEntity: string;
+    toEntity: string;
+    accountId?: string;
+    giveTokenId: number;
+    giveAmount: bigint;
+    wantTokenId: number;
+    wantAmount: bigint;
+    minFillRatio: number;
+  }>;
+  swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
+  timedOutHashlocks?: string[];
+  hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
+}
+
+export interface HandleError {
+  error: string;
+  events: string[];
+}
+
+/**
+ * Propose account frame (like old_src Channel consensus)
+ */
+export async function proposeAccountFrame(
+  env: Env,
+  accountMachine: AccountMachine,
+  skipNonceIncrement: boolean = false,
+  entityJHeight?: number // Optional: J-height from entity state for HTLC consensus
+): Promise<Result<ProposeSuccess, ProposeError>> {
   // Derive counterparty from canonical left/right
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
@@ -230,18 +263,18 @@ export async function proposeAccountFrame(
   // Mempool size validation
   if (accountMachine.mempool.length > MEMPOOL_LIMIT) {
     console.log(`❌ E-MACHINE: Mempool overflow ${accountMachine.mempool.length} > ${MEMPOOL_LIMIT}`);
-    return { success: false, error: `Mempool overflow: ${accountMachine.mempool.length} > ${MEMPOOL_LIMIT}`, events };
+    return Err({ error: `Mempool overflow: ${accountMachine.mempool.length} > ${MEMPOOL_LIMIT}`, events });
   }
 
   if (accountMachine.mempool.length === 0) {
     console.log(`❌ E-MACHINE: No transactions in mempool to propose`);
-    return { success: false, error: 'No transactions to propose', events };
+    return Err({ error: 'No transactions to propose', events });
   }
 
   // Check if we have a pending frame waiting for ACK
   if (accountMachine.proposal) {
     if (!quiet) console.log(`⏳ E-MACHINE: Still waiting for ACK on pending frame #${accountMachine.proposal.pendingFrame.height}`);
-    return { success: false, error: 'Waiting for ACK on pending frame', events };
+    return Err({ error: 'Waiting for ACK on pending frame', events });
   }
 
   if (!quiet) console.log(`✅ E-MACHINE: Creating frame with ${accountMachine.mempool.length} transactions...`);
@@ -343,13 +376,11 @@ export async function proposeAccountFrame(
 
   // If no valid txs remain after filtering, return early
   if (validTxs.length === 0) {
-    const earlyResult: { success: false; error: string; events: string[]; failedHtlcLocks?: Array<{ hashlock: string; reason: string }> } = {
-      success: false,
+    return Err({
       error: 'All transactions failed validation',
       events: allEvents,
-    };
-    if (failedHtlcLocks.length > 0) earlyResult.failedHtlcLocks = failedHtlcLocks;
-    return earlyResult;
+      ...(failedHtlcLocks.length > 0 ? { failedHtlcLocks } : {}),
+    });
   }
 
   // CRITICAL FIX: Extract FULL delta state from clonedMachine.deltas (after processing)
@@ -457,22 +488,20 @@ export async function proposeAccountFrame(
     newFrame = validateAccountFrameStrict(frameData, 'proposeAccountFrame');
   } catch (error) {
     console.warn(`⚠️ Frame validation failed: ${error instanceof Error ? error.message : String(error)}`);
-    return {
-      success: false,
+    return Err({
       error: `Frame validation failed: ${(error as Error).message}`,
       events,
-    };
+    });
   }
 
   // Validate frame size (Bitcoin 1MB block limit)
   const frameSize = safeStringify(newFrame).length;
   if (frameSize > MAX_FRAME_SIZE_BYTES) {
     console.warn(`⚠️ Frame too large: ${frameSize} bytes`);
-    return {
-      success: false,
+    return Err({
       error: `Frame exceeds 1MB limit: ${frameSize} bytes`,
       events,
-    };
+    });
   }
   console.log(`✅ Frame size: ${frameSize} bytes (${(frameSize / MAX_FRAME_SIZE_BYTES * 100).toFixed(2)}% of 1MB limit)`);
 
@@ -481,11 +510,11 @@ export async function proposeAccountFrame(
   const signingEntityId = accountMachine.proofHeader.fromEntity;
   const signingReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === signingEntityId);
   if (!signingReplica) {
-    return { success: false, error: `Cannot find replica for entity ${signingEntityId.slice(-4)}`, events };
+    return Err({ error: `Cannot find replica for entity ${signingEntityId.slice(-4)}`, events });
   }
   const signingSignerId = signingReplica.state.config.validators[0]; // Single-signer: use first validator
   if (!signingSignerId) {
-    return { success: false, error: `Entity ${signingEntityId.slice(-4)} has no validators`, events };
+    return Err({ error: `Entity ${signingEntityId.slice(-4)} has no validators`, events });
   }
 
   console.log(`🔐 HANKO-SIGN: entityId=${signingEntityId.slice(-4)} → signerId=${signingSignerId.slice(-4)}`);
@@ -496,7 +525,7 @@ export async function proposeAccountFrame(
   const hankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [newFrame.stateHash]);
   const frameHanko = hankos[0];
   if (!frameHanko) {
-    return { success: false, error: 'Failed to build frame hanko', events };
+    return Err({ error: 'Failed to build frame hanko', events });
   }
   accountMachine.currentFrameHanko = frameHanko;
 
@@ -512,7 +541,7 @@ export async function proposeAccountFrame(
   const disputeHankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [disputeHash]);
   const disputeHanko = disputeHankos[0];
   if (!disputeHanko) {
-    return { success: false, error: 'Failed to build dispute hanko', events };
+    return Err({ error: 'Failed to build dispute hanko', events });
   }
   accountMachine.currentDisputeProofHanko = disputeHanko;
   accountMachine.currentDisputeProofCooperativeNonce = clonedMachine.proofHeader.cooperativeNonce;
@@ -565,11 +594,10 @@ export async function proposeAccountFrame(
     { hash: disputeHash, type: 'dispute', context: `account:${counterparty.slice(-8)}:dispute` },
   ];
 
-  const finalResult: Awaited<ReturnType<typeof proposeAccountFrame>> = {
-    success: true, accountInput, events, revealedSecrets, swapOffersCreated, swapOffersCancelled, hashesToSign,
-  };
-  if (failedHtlcLocks.length > 0) finalResult.failedHtlcLocks = failedHtlcLocks;
-  return finalResult;
+  return Ok({
+    accountInput, events, revealedSecrets, swapOffersCreated, swapOffersCancelled, hashesToSign,
+    ...(failedHtlcLocks.length > 0 ? { failedHtlcLocks } : {}),
+  });
 }
 
 /**
@@ -579,30 +607,7 @@ export async function handleAccountInput(
   env: Env,
   accountMachine: AccountMachine,
   input: AccountInput
-): Promise<{
-  success: boolean;
-  response?: AccountInput;
-  events: string[];
-  error?: string;
-  approvalNeeded?: AccountTx;
-  revealedSecrets?: Array<{ secret: string; hashlock: string }>;
-  swapOffersCreated?: Array<{
-    offerId: string;
-    makerIsLeft: boolean;
-    fromEntity: string;
-    toEntity: string;
-    accountId?: string;
-    giveTokenId: number;
-    giveAmount: bigint;
-    wantTokenId: number;
-    wantAmount: bigint;
-    minFillRatio: number;
-  }>;
-  swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
-  timedOutHashlocks?: string[];
-  // MULTI-SIGNER: Hashes that need entity-quorum signing
-  hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
-}> {
+): Promise<Result<HandleSuccess, HandleError>> {
   console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, type=${input.type}, pendingFrame=${accountMachine.proposal ? `h${accountMachine.proposal.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`);
   console.log(`📨 A-MACHINE INPUT: type=${input.type}, height=${isFrameInput(input) ? input.height : 'none'}, hasACK=${input.type === 'ack'}, hasNewFrame=${isFrameInput(input) ? !!input.newAccountFrame : false}`);
 
@@ -615,15 +620,15 @@ export async function handleAccountInput(
 
   if (isFrameInput(input) && input.newDisputeHanko !== undefined && input.newDisputeHanko !== null) {
     if (typeof input.newDisputeHanko !== 'string') {
-      return { success: false, error: 'Invalid dispute hanko type', events };
+      return Err({ error: 'Invalid dispute hanko type', events });
     }
     const hankoHex = input.newDisputeHanko.toLowerCase();
     const normalized = hankoHex.startsWith('0x') ? hankoHex.slice(2) : hankoHex;
     if (normalized.length === 0) {
-      return { success: false, error: 'Invalid dispute hanko (empty)', events };
+      return Err({ error: 'Invalid dispute hanko (empty)', events });
     }
     if (normalized.length % 2 !== 0) {
-      return { success: false, error: 'Invalid dispute hanko (odd length)', events };
+      return Err({ error: 'Invalid dispute hanko (odd length)', events });
     }
   }
 
@@ -637,7 +642,7 @@ export async function handleAccountInput(
     // HANKO ACK VERIFICATION: Verify hanko instead of single signature
     const ackHanko = input.prevHanko;
     if (!ackHanko) {
-      return { success: false, error: 'Missing ACK hanko', events };
+      return Err({ error: 'Missing ACK hanko', events });
     }
 
     console.log(`🔐 HANKO-ACK-VERIFY: Verifying ACK hanko for our pending frame`);
@@ -647,11 +652,11 @@ export async function handleAccountInput(
     const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(ackHanko, frameHash, expectedAckEntity, env);
 
     if (!valid) {
-      return { success: false, error: 'Invalid ACK hanko signature', events };
+      return Err({ error: 'Invalid ACK hanko signature', events });
     }
 
     if (!recoveredEntityId || recoveredEntityId.toLowerCase() !== expectedAckEntity.toLowerCase()) {
-      return { success: false, error: `ACK hanko entityId mismatch: got ${recoveredEntityId?.slice(-4)}, expected ${expectedAckEntity.slice(-4)}`, events };
+      return Err({ error: `ACK hanko entityId mismatch: got ${recoveredEntityId?.slice(-4)}, expected ${expectedAckEntity.slice(-4)}`, events });
     }
 
     console.log(`✅ HANKO-ACK-VERIFIED: ACK from ${recoveredEntityId.slice(-4)}`);
@@ -758,21 +763,21 @@ export async function handleAccountInput(
         if (accountMachine.mempool.length > 0) {
           console.log(`🚀 CHAINED-PROPOSAL: ACK received, mempool has ${accountMachine.mempool.length} txs - proposing next frame immediately`);
           const proposeResult = await proposeAccountFrame(env, accountMachine);
-          if (proposeResult.success && proposeResult.accountInput) {
-            return {
-              success: true,
-              response: proposeResult.accountInput,
-              events: [...events, ...proposeResult.events],
+          if (isOk(proposeResult)) {
+            const pv = proposeResult.value;
+            return Ok({
+              response: pv.accountInput,
+              events: [...events, ...pv.events],
               timedOutHashlocks,
-              ...(proposeResult.revealedSecrets && { revealedSecrets: proposeResult.revealedSecrets }),
-              ...(proposeResult.swapOffersCreated && { swapOffersCreated: proposeResult.swapOffersCreated }),
-              ...(proposeResult.swapOffersCancelled && { swapOffersCancelled: proposeResult.swapOffersCancelled }),
-              ...(proposeResult.hashesToSign && proposeResult.hashesToSign.length > 0 && { hashesToSign: proposeResult.hashesToSign }),
-            };
+              ...(pv.revealedSecrets ? { revealedSecrets: pv.revealedSecrets } : {}),
+              ...(pv.swapOffersCreated ? { swapOffersCreated: pv.swapOffersCreated } : {}),
+              ...(pv.swapOffersCancelled ? { swapOffersCancelled: pv.swapOffersCancelled } : {}),
+              ...(pv.hashesToSign && pv.hashesToSign.length > 0 ? { hashesToSign: pv.hashesToSign } : {}),
+            });
           }
         }
         if (HEAVY_LOGS) console.log(`🔍 RETURN-ACK-ONLY: frame ${input.height} ACKed, no new frame bundled`);
-        return { success: true, events, timedOutHashlocks };
+        return Ok({ events, timedOutHashlocks });
       }
       // Fall through to process newAccountFrame below
       console.log(`📦 BATCHED-MESSAGE: ACK processed, now processing bundled new frame...`);
@@ -786,7 +791,7 @@ export async function handleAccountInput(
     // Validate frame with timestamp checks (HTLC safety)
     const previousTimestamp = accountMachine.currentFrame?.timestamp;
     if (!validateAccountFrame(receivedFrame, env.timestamp, previousTimestamp)) {
-      return { success: false, error: 'Invalid frame structure', events };
+      return Err({ error: 'Invalid frame structure', events });
     }
 
     // CRITICAL: Verify prevFrameHash links to our current frame (prevent state fork)
@@ -796,11 +801,10 @@ export async function handleAccountInput(
 
     if (receivedFrame.prevFrameHash !== expectedPrevFrameHash) {
       console.warn(`⚠️ FRAME-CHAIN: prevHash mismatch at height ${accountMachine.currentHeight}`);
-      return {
-        success: false,
+      return Err({
         error: `Frame chain broken: prevFrameHash mismatch (expected ${expectedPrevFrameHash.slice(0, 16)}...)`,
         events
-      };
+      });
     }
 
     console.log(`✅ Frame chain verified: prevFrameHash matches frame ${accountMachine.currentHeight}`);
@@ -835,7 +839,7 @@ export async function handleAccountInput(
           // TODO: Determine if we should send frames or just signal
         }
         // This is NOT an error - it's correct consensus behavior (Channel.ts handlePendingBlock)
-        return { success: true, events };
+        return Ok({ events });
       } else {
         // We are RIGHT - rollback our frame, accept theirs
         // DEDUPLICATION: Check if we already rolled back this exact frame
@@ -876,7 +880,7 @@ export async function handleAccountInput(
         } else {
           // Should never rollback twice (unless duplicate messages)
           console.warn(`⚠️ ROLLBACK-LIMIT: ${accountMachine.rollbackCount}x - consensus stalled`);
-          return { success: false, error: 'Multiple rollbacks detected - consensus failure', events };
+          return Err({ error: 'Multiple rollbacks detected - consensus failure', events });
         }
       }
     }
@@ -888,14 +892,14 @@ export async function handleAccountInput(
     if (HEAVY_LOGS) console.log(`🔍 SEQUENCE-CHECK: receivedFrame.height=${receivedFrame.height}, currentHeight=${accountMachine.currentHeight}, expected=${accountMachine.currentHeight + 1}`);
     if (receivedFrame.height !== accountMachine.currentHeight + 1) {
       console.log(`❌ Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`);
-      return { success: false, error: `Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`, events };
+      return Err({ error: `Frame sequence mismatch: expected ${accountMachine.currentHeight + 1}, got ${receivedFrame.height}`, events });
     }
 
     // SECURITY: Verify signatures (REQUIRED for all frames)
     // HANKO VERIFICATION: Require hanko for all frames
     const hankoToVerify = input.newHanko;
     if (!hankoToVerify) {
-      return { success: false, error: 'SECURITY: Frame must have hanko signature', events };
+      return Err({ error: 'SECURITY: Frame must have hanko signature', events });
     }
 
     console.log(`🔐 HANKO-VERIFY: Verifying hanko for frame ${receivedFrame.height} from ${input.fromEntityId.slice(-4)}`);
@@ -905,7 +909,7 @@ export async function handleAccountInput(
     const { valid, entityId: recoveredEntityId } = await verifyHankoForHash(hankoToVerify, receivedFrame.stateHash, input.fromEntityId, env);
 
     if (!valid || !recoveredEntityId) {
-      return { success: false, error: `Invalid hanko signature from ${input.fromEntityId.slice(-4)}`, events };
+      return Err({ error: `Invalid hanko signature from ${input.fromEntityId.slice(-4)}`, events });
     }
 
     console.log(`✅ HANKO-VERIFIED: Frame from ${recoveredEntityId.slice(-4)}`);
@@ -959,7 +963,7 @@ export async function handleAccountInput(
         true // isValidation = true (on clone, skip bilateral finalization)
       );
       if (!result.success) {
-        return { success: false, error: `Frame application failed: ${result.error}`, events };
+        return Err({ error: `Frame application failed: ${result.error}`, events });
       }
       processEvents.push(...result.events);
 
@@ -1032,7 +1036,7 @@ export async function handleAccountInput(
     if (ourComputedState !== theirClaimedState) {
       // Compact error - full dump only if DEBUG enabled
       console.warn(`⚠️ CONSENSUS: Frame ${receivedFrame.height} - state mismatch (our: ${ourComputedState.slice(0,16)}... vs their: ${theirClaimedState.slice(0,16)}...)`);
-      return { success: false, error: `Bilateral consensus failure - states don't match`, events };
+      return Err({ error: `Bilateral consensus failure - states don't match`, events });
     }
 
     // SECURITY FIX: Verify BILATERAL fields in fullDeltaStates (prevents state injection attack)
@@ -1043,7 +1047,7 @@ export async function handleAccountInput(
     const theirFullDeltaStates = receivedFrame.fullDeltaStates || [];
     if (ourFullDeltaStates.length !== theirFullDeltaStates.length) {
       console.warn(`⚠️ SECURITY: fullDeltaStates count mismatch (our: ${ourFullDeltaStates.length}, their: ${theirFullDeltaStates.length})`);
-      return { success: false, error: `Bilateral state injection detected - delta count mismatch`, events };
+      return Err({ error: `Bilateral state injection detected - delta count mismatch`, events });
     }
 
     for (let i = 0; i < ourFullDeltaStates.length; i++) {
@@ -1063,7 +1067,7 @@ export async function handleAccountInput(
         console.warn(`   offdelta: our=${ours.offdelta}, their=${theirs.offdelta}`);
         console.warn(`   leftCreditLimit: our=${ours.leftCreditLimit}, their=${theirs.leftCreditLimit}`);
         console.warn(`   rightCreditLimit: our=${ours.rightCreditLimit}, their=${theirs.rightCreditLimit}`);
-        return { success: false, error: `Bilateral state injection detected - credit/allowance mismatch`, events };
+        return Err({ error: `Bilateral state injection detected - credit/allowance mismatch`, events });
       }
     }
 
@@ -1095,7 +1099,7 @@ export async function handleAccountInput(
       console.warn(`⚠️ SECURITY: Frame hash mismatch after validation`);
       console.warn(`   Recomputed: ${recomputedHash.slice(0,16)}...`);
       console.warn(`   Claimed:    ${receivedFrame.stateHash.slice(0,16)}...`);
-      return { success: false, error: `Frame hash verification failed - dispute proof mismatch`, events };
+      return Err({ error: `Frame hash verification failed - dispute proof mismatch`, events });
     }
 
     console.log(`✅ CONSENSUS-SUCCESS: Both sides computed identical state for frame ${receivedFrame.height}`);
@@ -1214,7 +1218,7 @@ export async function handleAccountInput(
     const ackReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ackEntityId);
     const ackSignerId = ackReplica?.state.config.validators[0];
     if (!ackSignerId) {
-      return { success: false, error: `Cannot find signerId for ACK from ${ackEntityId.slice(-4)}`, events };
+      return Err({ error: `Cannot find signerId for ACK from ${ackEntityId.slice(-4)}`, events });
     }
 
     console.log(`🔐 HANKO-ACK: entityId=${ackEntityId.slice(-4)} → signerId=${ackSignerId.slice(-4)}`);
@@ -1224,7 +1228,7 @@ export async function handleAccountInput(
     const ackHankos = await signHashesAsSingleEntity(env, ackEntityId, ackSignerId, [receivedFrame.stateHash]);
     const confirmationHanko = ackHankos[0];
     if (!confirmationHanko) {
-      return { success: false, error: 'Failed to build ACK hanko', events };
+      return Err({ error: 'Failed to build ACK hanko', events });
     }
 
     console.log(`📤 ACK-SEND: Preparing ACK for frame ${receivedFrame.height} from ${accountMachine.proofHeader.fromEntity.slice(-4)} to ${input.fromEntityId.slice(-4)}`);
@@ -1232,7 +1236,7 @@ export async function handleAccountInput(
     // CHANNEL.TS PATTERN (Lines 576-612): Batch ACK + new frame in same message!
     // Check if we should batch BEFORE incrementing cooperativeNonce
     let batchedWithNewFrame = false;
-    let proposeResult: Awaited<ReturnType<typeof proposeAccountFrame>> | undefined;
+    let proposeResult: Result<ProposeSuccess, ProposeError> | undefined;
     // Build dispute proof hanko for ACK response (always include current state's dispute proof)
     const { buildAccountProofBody: buildProof, createDisputeProofHash: createHash } = await import('./proof-builder');
     const ackDepositoryAddress = getDepositoryAddress(env);
@@ -1269,10 +1273,10 @@ export async function handleAccountInput(
       // Pass skipNonceIncrement=true since we'll increment for the whole batch below
       proposeResult = await proposeAccountFrame(env, accountMachine, true);
 
-      if (proposeResult.success && proposeResult.accountInput && proposeResult.accountInput.type === 'proposal') {
+      if (isOk(proposeResult) && proposeResult.value.accountInput.type === 'proposal') {
         batchedWithNewFrame = true;
         // Merge ACK and new proposal into same AccountInput
-        const proposal = proposeResult.accountInput;
+        const proposal = proposeResult.value.accountInput;
         response.newAccountFrame = proposal.newAccountFrame;
         response.newHanko = proposal.newHanko;
         // DON'T overwrite response.newDisputeHanko (it's ACK's dispute hanko for current committed state)
@@ -1295,42 +1299,45 @@ export async function handleAccountInput(
     ++accountMachine.proofHeader.cooperativeNonce;
     console.log(`🔢 cooperativeNonce: ${accountMachine.proofHeader.cooperativeNonce} (batched=${batchedWithNewFrame})`);
 
+    // Extract Ok value from proposeResult (if batched and successful)
+    const proposedOk = proposeResult && isOk(proposeResult) ? proposeResult.value : undefined;
+
     // Merge revealed secrets from BOTH incoming frame AND proposed frame
     const allRevealedSecrets = [
       ...revealedSecrets, // From incoming frame (line 493)
-      ...(proposeResult?.revealedSecrets || []) // From our proposed frame (if batched)
+      ...(proposedOk?.revealedSecrets || []) // From our proposed frame (if batched)
     ];
 
     // Merge swap offers from BOTH incoming frame AND proposed frame
     const allSwapOffersCreated = [
       ...swapOffersCreated,
-      ...(proposeResult?.swapOffersCreated || [])
+      ...(proposedOk?.swapOffersCreated || [])
     ];
     const allSwapOffersCancelled = [
       ...swapOffersCancelled,
-      ...(proposeResult?.swapOffersCancelled || [])
+      ...(proposedOk?.swapOffersCancelled || [])
     ];
 
     // Collect hashes that need entity-quorum signing (multi-signer support)
     const hashesToSign: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }> = [
       { hash: receivedFrame.stateHash, type: 'accountFrame', context: `account:${input.fromEntityId.slice(-8)}:ack:${receivedFrame.height}` },
       { hash: ackDisputeHash, type: 'dispute', context: `account:${input.fromEntityId.slice(-8)}:ack-dispute` },
-      ...(proposeResult?.hashesToSign || []) // From batched proposal
+      ...(proposedOk?.hashesToSign || []) // From batched proposal
     ];
 
     if (HEAVY_LOGS) console.log(`🔍 RETURN-RESPONSE: h=${response.height} prevHanko=${!!response.prevHanko} newFrame=${!!response.newAccountFrame}`);
-    return {
-      success: true, response, events,
+    return Ok({
+      response, events,
       revealedSecrets: allRevealedSecrets,
       swapOffersCreated: allSwapOffersCreated,
       swapOffersCancelled: allSwapOffersCancelled,
       timedOutHashlocks,
-      ...(hashesToSign.length > 0 && { hashesToSign }),
-    };
+      ...(hashesToSign.length > 0 ? { hashesToSign } : {}),
+    });
   }
 
   if (HEAVY_LOGS) console.log(`🔍 RETURN-NO-RESPONSE: No response object`);
-  return { success: true, events, swapOffersCreated: [], swapOffersCancelled: [], timedOutHashlocks };
+  return Ok({ events, swapOffersCreated: [], swapOffersCancelled: [], timedOutHashlocks });
 }
 
 // === E-MACHINE INTEGRATION ===

@@ -6,6 +6,7 @@
 import { applyEntityTx } from './entity-tx';
 import { isLeftEntity } from './entity-id-utils';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, JInput, RoutedEntityInput } from './types';
+import { isOk, isErr } from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
@@ -1325,16 +1326,20 @@ export const applyEntityFrame = async (
         console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: Full mempool details:`, accountMachine.mempool.map((tx, i) => `${i}:${tx.type}`).join(', '));
         const proposal = await proposeAccountFrame(env, accountMachine, false, currentEntityState.lastFinalizedJHeight);
 
-        console.log(`📤 PROPOSE-RESULT for ${cpId.slice(-4)}: success=${proposal.success}, hasAccountInput=${!!proposal.accountInput}, error=${proposal.error || 'none'}`);
+        const proposalOk = isOk(proposal) ? proposal.value : undefined;
+        const proposalErr = isErr(proposal) ? proposal.error : undefined;
+        console.log(`📤 PROPOSE-RESULT for ${cpId.slice(-4)}: success=${isOk(proposal)}, hasAccountInput=${!!proposalOk?.accountInput}, error=${proposalErr?.error || 'none'}`);
 
         // Collect hashes from proposal (multi-signer support)
-        if (proposal.hashesToSign) {
-          collectedHashes.push(...proposal.hashesToSign);
+        if (proposalOk?.hashesToSign) {
+          collectedHashes.push(...proposalOk.hashesToSign);
         }
 
         // Handle failed HTLC locks: cancel backward via htlcRoutes
-        if (proposal.failedHtlcLocks && proposal.failedHtlcLocks.length > 0) {
-          for (const { hashlock, reason } of proposal.failedHtlcLocks) {
+        // failedHtlcLocks can appear on both Ok and Err results
+        const failedHtlcLocks = proposalOk?.failedHtlcLocks || proposalErr?.failedHtlcLocks;
+        if (failedHtlcLocks && failedHtlcLocks.length > 0) {
+          for (const { hashlock, reason } of failedHtlcLocks) {
             const route = currentEntityState.htlcRoutes.get(hashlock);
             if (route) {
               // Always clean local bookkeeping for failed proposals.
@@ -1363,31 +1368,31 @@ export const applyEntityFrame = async (
           }
         }
 
-        if (proposal.success && proposal.accountInput) {
+        if (proposalOk) {
           // Get the proposer of the target entity from env
           // IMPORTANT: AccountInput sent only to PROPOSER (bilateral consensus between entity proposers)
           // Multi-validator entities share account state via entity-level consensus
           // Convert AccountInput to EntityInput for routing
           const outputEntityInput: EntityInput = {
-            entityId: proposal.accountInput.toEntityId,
+            entityId: proposalOk.accountInput.toEntityId,
             entityTxs: [{
               type: 'accountInput' as const,
-              data: proposal.accountInput
+              data: proposalOk.accountInput
             }]
           };
           allOutputs.push(outputEntityInput);
 
-          const proposalInput = proposal.accountInput;
+          const proposalInput = proposalOk.accountInput;
           const frameHeight = proposalInput.type === 'proposal' || proposalInput.type === 'ack' ? proposalInput.height : 0;
           console.log(`📮 ACCOUNT-FRAME-OUTPUT: frame ${frameHeight} → Entity ${proposalInput.toEntityId.slice(-4)} (${accountKey.slice(-8)} account)`);
 
           // Add events to entity messages with size limiting
-          addMessages(currentEntityState, proposal.events);
+          addMessages(currentEntityState, proposalOk.events);
           emitScopedEvents(
             env,
             'account',
             `E/A/${currentEntityState.entityId.slice(-4)}:${cpId.slice(-4)}/propose`,
-            proposal.events,
+            proposalOk.events,
             {
               entityId: currentEntityState.entityId,
               counterpartyId: cpId,
