@@ -361,7 +361,7 @@
     class="btn-submit"
     class:dispute={action === 'dispute'}
     on:click={submit}
-    disabled={sending || (action === 'dispute' ? !counterpartyEntityId : (!amount || (action === 'transfer' ? (!recipientEntityId || isSelfTransfer) : !counterpartyEntityId)))}
+    disabled={sending || !!(action === 'dispute' ? !counterpartyEntityId : (!amount || (action === 'transfer' ? (!recipientEntityId || isSelfTransfer) : !counterpartyEntityId)))}
   >
     {#if sending}
       Processing...

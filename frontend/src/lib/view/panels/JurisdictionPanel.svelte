@@ -470,8 +470,8 @@
       try {
         // Time travel to historical state if not live
         const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && jadapter.timeTravel) {
-          await jadapter.timeTravel(stateRoot);
+        if (stateRoot && (jadapter as any).timeTravel) {
+          await (jadapter as any).timeTravel(stateRoot);
         }
 
         const nextBalances: Array<{ address: string; label: string; balance: bigint }> = [];
@@ -518,7 +518,7 @@
       return;
     }
     const jadapter = xln.getActiveJAdapter(env);
-    if (!jadapter?.getEthBalance) {
+    if (!(jadapter as any)?.getEthBalance) {
       externalEthBalances = [];
       externalEthBalancesLoading = false;
       externalEthBalancesError = null;
@@ -533,13 +533,13 @@
       try {
         // Time travel to historical state if not live
         const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && jadapter.timeTravel) {
-          await jadapter.timeTravel(stateRoot);
+        if (stateRoot && (jadapter as any).timeTravel) {
+          await (jadapter as any).timeTravel(stateRoot);
         }
 
         const nextBalances: Array<{ address: string; label: string; balance: bigint }> = [];
         for (const signer of signers) {
-          const balance = await jadapter.getEthBalance(signer.address);
+          const balance = await (jadapter as any).getEthBalance(signer.address);
           if (balance > 0n) {
             nextBalances.push({
               address: signer.address,
@@ -581,7 +581,7 @@
       return;
     }
     const jadapter = xln.getActiveJAdapter(env);
-    if (!jadapter || !jadapter.getDebts || tokenId === null) {
+    if (!jadapter || !(jadapter as any).getDebts || tokenId === null) {
       entityDebts = [];
       debtsLoading = false;
       return;
@@ -613,8 +613,8 @@
       try {
         // Time travel to historical state if not live
         const stateRoot = !isLive && jData?.stateRoot ? jData.stateRoot : null;
-        if (stateRoot && jadapter.timeTravel) {
-          await jadapter.timeTravel(stateRoot);
+        if (stateRoot && (jadapter as any).timeTravel) {
+          await (jadapter as any).timeTravel(stateRoot);
         }
 
         const results: typeof entityDebts = [];
@@ -629,7 +629,7 @@
 
         // Query debts for each entity
         for (const entityId of entityIds) {
-          const debts = await jadapter.getDebts(entityId, tokenId!);
+          const debts = await (jadapter as any).getDebts(entityId, tokenId!);
           if (debts && debts.length > 0) {
             results.push({
               entityId,

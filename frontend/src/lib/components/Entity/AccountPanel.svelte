@@ -200,13 +200,13 @@
       if (!canResendPendingFrame || !account.proposal) return;
       const env = activeEnv;
       if (!env || !('history' in env)) throw new Error('XLN environment not ready or in historical mode');
-      if (!activeXlnFunctions?.resolveEntityProposerId || !activeXlnFunctions?.sendEntityInput) {
+      if (!(activeXlnFunctions as any)?.resolveEntityProposerId || !(activeXlnFunctions as any)?.sendEntityInput) {
         throw new Error('Resend helpers not available');
       }
 
       const accountInput = account.proposal.pendingAccountInput;
-      const proposerId = activeXlnFunctions.resolveEntityProposerId(env, accountInput.toEntityId, 'resend-account-frame');
-      const result = activeXlnFunctions.sendEntityInput(env, {
+      const proposerId = (activeXlnFunctions as any).resolveEntityProposerId(env, accountInput.toEntityId, 'resend-account-frame');
+      const result = (activeXlnFunctions as any).sendEntityInput(env, {
         entityId: accountInput.toEntityId,
         signerId: proposerId,
         entityTxs: [{ type: 'accountInput', data: accountInput }],

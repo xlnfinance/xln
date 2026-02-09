@@ -36,9 +36,9 @@ const getProcess = async () => {
 const getApplyRuntimeInput = async () => {
   if (!_applyRuntimeInput) {
     const runtime = await import('../runtime');
-    _applyRuntimeInput = runtime.applyRuntimeInput;
+    _applyRuntimeInput = runtime.applyRuntimeInput as any;
   }
-  return _applyRuntimeInput;
+  return _applyRuntimeInput!;
 };
 
 // Token IDs - USDC is quote (highest ID) so price > 1 for all pairs
@@ -152,7 +152,7 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('🏛️  Setting up BrowserVM J-Machine...');
 
   const browserVM = await ensureBrowserVM(env);
-  const depositoryAddress = browserVM.getDepositoryAddress();
+  const depositoryAddress = browserVM!.getDepositoryAddress!();
   const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
   createJReplica(env, 'Market', depositoryAddress, J_MACHINE_POSITION); // Match ahb.ts positioning
   const jurisdiction = createJurisdictionConfig('Market', depositoryAddress);
@@ -231,7 +231,9 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log(`  ✅ Created: ${entities.map(e => e.name).join(', ')}\n`);
 
   const [hubEth, hubWbtc, hubDai] = hubs;
+  if (!hubEth || !hubWbtc || !hubDai) throw new Error('Missing hubs');
   const [alice, bob, carol, dave, eve, frank, grace] = traders;
+  if (!alice || !bob || !carol || !dave || !eve || !frank || !grace) throw new Error('Missing traders');
 
   // Initialize orderbookExt for each hub
   const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../orderbook');
@@ -261,11 +263,11 @@ export async function swapMarket(env: Env): Promise<void> {
   const hubWbtcTraders = [alice, grace, dave];
   const hubDaiTraders = [bob, eve, frank];
 
-  const openPairs: Array<{ trader: typeof traders[number]; hub: typeof hubs[number] }> = [
+  const openPairs: Array<{ trader: (typeof traders)[0]; hub: (typeof hubs)[0] }> = [
     ...hubEthTraders.map(trader => ({ trader, hub: hubEth })),
     ...hubWbtcTraders.map(trader => ({ trader, hub: hubWbtc })),
     ...hubDaiTraders.map(trader => ({ trader, hub: hubDai })),
-  ];
+  ] as any;
 
   for (const { trader, hub } of openPairs) {
     await process(env, [{
@@ -285,13 +287,13 @@ export async function swapMarket(env: Env): Promise<void> {
   const creditLimitUnits = 10_000_000n / 3n;
 
   const creditPairs: Array<{
-    trader: typeof traders[number];
-    hub: typeof hubs[number];
+    trader: (typeof traders)[0];
+    hub: (typeof hubs)[0];
     tokenA: number;
     tokenB: number;
     amountA: bigint;
     amountB: bigint;
-  }> = [
+  }> = ([
     ...hubEthTraders.map(trader => ({
       trader,
       hub: hubEth,
@@ -316,7 +318,7 @@ export async function swapMarket(env: Env): Promise<void> {
       amountA: usdc(creditLimitUnits),
       amountB: dai(creditLimitUnits),
     })),
-  ];
+  ] as any);
 
   for (const { trader, hub, tokenA, tokenB, amountA, amountB } of creditPairs) {
     await process(env, [{
@@ -820,7 +822,7 @@ export async function swapMarketStress(env: Env): Promise<void> {
   console.log('🏛️  Setting up stress test environment...');
 
   const browserVM = await ensureBrowserVM(env);
-  const depositoryAddress = browserVM.getDepositoryAddress();
+  const depositoryAddress = browserVM!.getDepositoryAddress!();
   const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
   createJReplica(env, 'StressTest', depositoryAddress, J_MACHINE_POSITION);
   const jurisdiction = createJurisdictionConfig('StressTest', depositoryAddress);
@@ -1030,6 +1032,7 @@ export async function swapMarketStress(env: Env): Promise<void> {
 }
 
 // Self-executing scenario
+// @ts-ignore - Bun runtime provides import.meta.main
 if (import.meta.main) {
   const { createEmptyEnv } = await import('../runtime');
   const env = createEmptyEnv();

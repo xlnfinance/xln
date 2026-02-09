@@ -14,7 +14,7 @@ export type { JAdapterMode };
  * Set via: JADAPTER_MODE=browservm|rpc (default: browservm)
  */
 export function getJAdapterMode(): JAdapterMode {
-  const mode = process.env.JADAPTER_MODE?.toLowerCase();
+  const mode = process.env['JADAPTER_MODE']?.toLowerCase();
   if (mode === 'rpc' || mode === 'anvil') return mode as JAdapterMode;
   return 'browservm';
 }
@@ -34,14 +34,14 @@ export async function ensureJAdapter(env?: Env, mode?: JAdapterMode): Promise<JA
   const { setBrowserVMJurisdiction } = await import('../evm');
 
   const actualMode = mode ?? getJAdapterMode();
-  const rpcUrl = process.env.ANVIL_RPC || 'http://localhost:8545';
+  const rpcUrl = process.env['ANVIL_RPC'] || 'http://localhost:8545';
 
   console.log(`[JAdapter] Mode: ${actualMode}${actualMode !== 'browservm' ? ` (${rpcUrl})` : ''}`);
 
   const jadapter = await createJAdapter({
     mode: actualMode,
     chainId: 31337,
-    rpcUrl: actualMode !== 'browservm' ? rpcUrl : undefined,
+    ...(actualMode !== 'browservm' ? { rpcUrl } : {}),
   });
 
   // If browservm and env provided, register the BrowserVM instance
@@ -65,11 +65,12 @@ export async function ensureBrowserVM(env: any) {
 
   if (!browserVM) {
     const { BrowserVMProvider } = await import('../jadapter');
-    browserVM = new BrowserVMProvider();
-    await browserVM.init();
-    env.browserVM = browserVM; // Store in env for isolation
-    const depositoryAddress = browserVM.getDepositoryAddress();
-    setBrowserVMJurisdiction(env, depositoryAddress, browserVM);
+    const vm = new BrowserVMProvider();
+    await (vm as any).init();
+    env.browserVM = vm; // Store in env for isolation
+    const depositoryAddress = (vm as any).getDepositoryAddress();
+    setBrowserVMJurisdiction(env, depositoryAddress, vm);
+    return vm;
   }
 
   return browserVM;
@@ -155,11 +156,11 @@ export function createJurisdictionConfig(
   depositoryAddress: string
 ): JurisdictionConfig {
   return {
+    address: depositoryAddress,
     name,
     chainId: 31337,
     entityProviderAddress: '0x0000000000000000000000000000000000000000',
     depositoryAddress,
-    rpc: 'browservm://'
   };
 }
 

@@ -222,7 +222,7 @@ function filterOfflineInputs(
   const dropped: RoutedEntityInput[] = [];
 
   for (const input of inputs) {
-    if (offlineSigners.has(input.signerId)) {
+    if (input.signerId && offlineSigners.has(input.signerId)) {
       dropped.push(input);
     } else {
       filtered.push(input);

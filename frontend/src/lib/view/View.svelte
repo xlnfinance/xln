@@ -219,9 +219,9 @@
         env.quietRuntimeLogs = true;
 
         // Restore jurisdictions + entities
-        env.jReplicas = urlImport.state.x;
+        env.jReplicas = new Map(urlImport.state.x);
         env.activeJurisdiction = urlImport.state.a;
-        env.eReplicas = urlImport.state.e;
+        env.eReplicas = new Map(urlImport.state.e);
 
         console.log('[View] ✅ Imported:', {
           jReplicas: env.jReplicas.size,

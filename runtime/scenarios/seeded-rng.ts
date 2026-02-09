@@ -35,7 +35,7 @@ function fillBytes(rng: () => number, buf: Uint8Array): Uint8Array {
 
 export interface SeededRng {
   /** Generate a deterministic HTLC hashlock pair (secret + SHA-256 hash) */
-  nextHashlock(): { secret: Uint8Array; hash: Uint8Array };
+  nextHashlock(): { secret: Uint8Array; hash: Uint8Array; hashlock: Uint8Array };
   /** Generate n deterministic random bytes */
   nextBytes(n: number): Uint8Array;
   /** Generate a deterministic float in [0, 1) */
@@ -65,13 +65,13 @@ export function createRng(seed: string): SeededRng {
       return fillBytes(rng, new Uint8Array(n));
     },
 
-    nextHashlock(): { secret: Uint8Array; hash: Uint8Array } {
+    nextHashlock(): { secret: Uint8Array; hash: Uint8Array; hashlock: Uint8Array } {
       const secret = fillBytes(rng, new Uint8Array(32));
       // SHA-256 of secret — uses Web Crypto (sync not available), so we
       // compute a simple deterministic hash instead for scenario use.
       // This is NOT cryptographic — scenarios don't need real SHA-256 security.
       const hash = simpleHash(secret);
-      return { secret, hash };
+      return { secret, hash, hashlock: hash };
     },
   };
 }

@@ -2274,7 +2274,7 @@ export async function ahb(env: Env): Promise<void> {
   const hubReserveBeforeDrain = await vm.getReserves(hub.id, USDC_TOKEN_ID);
   if (hubReserveBeforeDrain > 0n) {
     console.log(`🧹 Draining Hub reserves to force debt: ${hubReserveBeforeDrain}`);
-    await vm.reserveToReserve(hub.id, alice.id, USDC_TOKEN_ID, hubReserveBeforeDrain);
+    await vm.reserveToReserve!(hub.id, alice.id, USDC_TOKEN_ID, hubReserveBeforeDrain);
     await processJEvents(env);
     await process(env);
     const hubReserveAfterDrain = await vm.getReserves(hub.id, USDC_TOKEN_ID);
@@ -2404,7 +2404,7 @@ export async function ahb(env: Env): Promise<void> {
     if (!hankoData) {
       throw new Error('Failed to build empty batch hanko');
     }
-    await vm.processBatch(encodedBatch, entityProviderAddress, hankoData, nextNonce);
+    await vm.processBatch!(encodedBatch, entityProviderAddress, hankoData, nextNonce);
     await process(env);  // Let runtime process any events
   }
 
@@ -2477,7 +2477,7 @@ export async function ahb(env: Env): Promise<void> {
   // H14: Parse and verify DebtCreated event fields
   // Format: "🔴 DEBT: {debtor} owes {amount} USDC to {creditor} | Block {block}"
   const debtAmountMatch = debtMessage?.match(/owes\s+([\d.]+)\s+USDC/);
-  const debtAmount = debtAmountMatch ? parseFloat(debtAmountMatch[1]) : 0;
+  const debtAmount = debtAmountMatch ? parseFloat(debtAmountMatch[1]!) : 0;
   const expectedDebtAmount = 50000; // $50K debt (delta $150K - collateral $100K)
   assert(
     Math.abs(debtAmount - expectedDebtAmount) < 1, // Allow small float tolerance
@@ -2766,7 +2766,7 @@ export async function ahb(env: Env): Promise<void> {
     const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
     const hankos = await signHashesAsSingleEntity(env, bob.id, bob.signer, [batchHash]);
     if (hankos[0]) {
-      await vm.processBatch(encodedBatch, entityProviderAddress, hankos[0], nextNonce);
+      await vm.processBatch!(encodedBatch, entityProviderAddress, hankos[0], nextNonce);
     }
     await process(env);
   }
@@ -3206,6 +3206,7 @@ export async function ahb(env: Env): Promise<void> {
 
 // ===== CLI ENTRY POINT =====
 // Run this file directly: bun runtime/scenarios/ahb.ts
+// @ts-ignore - Bun runtime provides import.meta.main
 if (import.meta.main) {
   console.log('🚀 Running AHB scenario from CLI...\n');
 

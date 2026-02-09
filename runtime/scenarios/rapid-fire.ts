@@ -37,9 +37,9 @@ const getProcess = async () => {
 const getApplyRuntimeInput = async () => {
   if (!_applyRuntimeInput) {
     const runtime = await import('../runtime');
-    _applyRuntimeInput = runtime.applyRuntimeInput;
+    _applyRuntimeInput = runtime.applyRuntimeInput as any;
   }
-  return _applyRuntimeInput;
+  return _applyRuntimeInput!;
 };
 
 const USDC = 1;
@@ -73,7 +73,7 @@ export async function rapidFire(env: Env): Promise<void> {
   console.log('🏛️  Setting up test environment...');
 
   const browserVM = await ensureBrowserVM(env);
-  const depositoryAddress = browserVM.getDepositoryAddress();
+  const depositoryAddress = browserVM!.getDepositoryAddress!();
   createJReplica(env, 'RapidFire', depositoryAddress, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
 
   const entities = [
@@ -97,6 +97,7 @@ export async function rapidFire(env: Env): Promise<void> {
   });
 
   const [alice, hub, bob] = entities;
+  if (!alice || !hub || !bob) throw new Error('Missing entities');
   console.log(`  ✅ Created: ${entities.map(e => e.name).join(', ')}\n`);
 
   // ============================================================================
@@ -286,6 +287,7 @@ export async function rapidFire(env: Env): Promise<void> {
 }
 
 // Self-executing
+// @ts-ignore - Bun runtime provides import.meta.main
 if (import.meta.main) {
   const { createEmptyEnv } = await import('../runtime');
   const env = createEmptyEnv();

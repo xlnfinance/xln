@@ -13,9 +13,9 @@ import type { RequestHandler } from './$types';
  */
 
 const RPC_ENDPOINTS: Record<string, string> = {
-  ethereum: process.env.RPC_ETHEREUM ?? process.env.ANVIL_RPC ?? 'http://localhost:8545',
-  polygon: process.env.RPC_POLYGON ?? 'http://localhost:8546',
-  arbitrum: process.env.RPC_ARBITRUM ?? 'http://localhost:8547'
+  ethereum: process.env['RPC_ETHEREUM'] ?? process.env['ANVIL_RPC'] ?? 'http://localhost:8545',
+  polygon: process.env['RPC_POLYGON'] ?? 'http://localhost:8546',
+  arbitrum: process.env['RPC_ARBITRUM'] ?? 'http://localhost:8547'
 };
 
 export const POST: RequestHandler = async ({ params, request }) => {

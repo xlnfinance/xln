@@ -323,8 +323,8 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
       }],
       entityInputs: []
     });
-    if (xln.startJEventWatcher) {
-      await xln.startJEventWatcher(newEnv);
+    if ((xln as any).startJEventWatcher) {
+      await (xln as any).startJEventWatcher(newEnv);
     }
     console.log('[VaultStore.createRuntime] ✅ Testnet imported');
 
@@ -372,11 +372,11 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
       validators: [signerAddress],
       shares: { [signerAddress]: 1n },
       jurisdiction: {
-        address: depositoryAddress,
+        address: depositoryAddress!,
         name: 'Testnet',
         chainId: 31337,
-        entityProviderAddress: entityProviderAddress,
-        depositoryAddress: depositoryAddress,
+        entityProviderAddress: entityProviderAddress!,
+        depositoryAddress: depositoryAddress!,
       }
     };
 
@@ -432,8 +432,8 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
     });
 
     // Start runtime event loop (processes inbound P2P messages, bilateral consensus)
-    if (xln.startRuntimeLoop) {
-      xln.startRuntimeLoop(newEnv);
+    if ((xln as any).startRuntimeLoop) {
+      (xln as any).startRuntimeLoop(newEnv);
     }
 
     // Start P2P for this runtime's env (one WS per runtime, stays alive across switches)
@@ -783,8 +783,8 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
           });
         }
 
-        if (xln.startJEventWatcher) {
-          await xln.startJEventWatcher(newEnv);
+        if ((xln as any).startJEventWatcher) {
+          await (xln as any).startJEventWatcher(newEnv);
         }
 
         // Re-import entity if it exists in runtime
@@ -828,8 +828,8 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
         }
 
         // Start runtime event loop (processes inbound P2P messages, bilateral consensus)
-        if (xln.startRuntimeLoop) {
-          xln.startRuntimeLoop(newEnv);
+        if ((xln as any).startRuntimeLoop) {
+          (xln as any).startRuntimeLoop(newEnv);
         }
 
         // Start P2P for this runtime's env (one WS per runtime)
@@ -862,10 +862,12 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
         // Ensure runtime loop + P2P are running
         const existingRuntime = get(runtimes).get(runtimeId);
         if (existingRuntime?.env) {
-          if (xln.startRuntimeLoop) xln.startRuntimeLoop(existingRuntime.env);
-          if (xln.startP2P) {
+          const { getXLN: getXLNImport } = await import('./xlnStore');
+          const xlnMod = await getXLNImport() as any;
+          if (xlnMod.startRuntimeLoop) xlnMod.startRuntimeLoop(existingRuntime.env);
+          if (xlnMod.startP2P) {
             const { resolveRelayUrls } = await import('./xlnStore');
-            xln.startP2P(existingRuntime.env, { relayUrls: resolveRelayUrls(), gossipPollMs: 0 });
+            xlnMod.startP2P(existingRuntime.env, { relayUrls: resolveRelayUrls(), gossipPollMs: 0 });
           }
         }
 
@@ -948,7 +950,7 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
       await jadapter.reserveToReserve(signer.entityId, toEntityId, tokenId, amount);
 
       // Process queued J-events to update runtime state
-      if (xln.processJBlockEvents) {
+      if (xln.processJBlockEvents && env) {
         await xln.processJBlockEvents(env);
       }
 

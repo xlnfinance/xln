@@ -20,10 +20,10 @@
 
     sending = true;
     try {
-      const xln = getXLN();
+      const xln = await getXLN();
       if (!xln) throw new Error('XLN not initialized');
 
-      await xln.queueEntityInput(tab.entityId, tab.signerId, {
+      await (xln as any).queueEntityInput(tab.entityId, tab.signerId, {
         type: 'chat',
         message: newMessage.trim()
       });

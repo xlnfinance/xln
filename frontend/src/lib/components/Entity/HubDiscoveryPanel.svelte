@@ -156,7 +156,7 @@
     if (typeof value === 'string' && value.trim() !== '') {
       try {
         const match = value.match(/^BigInt\(([-\d]+)\)$/);
-        const raw = match ? match[1] : value;
+        const raw = match ? match[1]! : value;
         return BigInt(raw);
       } catch {
         return undefined;
@@ -197,7 +197,7 @@
     try {
       if (refreshGossip) {
         const xln = await getXLN();
-        if (env) xln.refreshGossip?.(env);
+        if (env) xln.refreshGossip?.(env as any);
         await new Promise(resolve => setTimeout(resolve, 250));
       }
 
@@ -270,23 +270,23 @@
               const isConnected = myReplica?.state?.accounts?.has(entry.entityId) || false;
               const fullEntityId = entry.entityId.startsWith('0x') ? entry.entityId : `0x${entry.entityId}`;
               const metadata = (entry.metadata || {}) as Record<string, unknown>;
-              const capacity = parseCapacity(metadata.capacity);
+              const capacity = parseCapacity(metadata['capacity']);
 
               discovered.push({
                 profile: { entityId: entry.entityId, metadata, capabilities: entry.capabilities || [] },
                 entityId: entry.entityId,
-                name: entry.name || String(metadata.name || `Hub ${entry.entityId.slice(0, 8)}`),
+                name: entry.name || String(metadata['name'] || `Hub ${entry.entityId.slice(0, 8)}`),
                 metadata: {
-                  description: String(metadata.bio || 'Payment hub'),
-                  website: typeof metadata.website === 'string' ? metadata.website : undefined,
-                  fee: typeof metadata.routingFeePPM === 'number' ? metadata.routingFeePPM : 100,
+                  description: String(metadata['bio'] || 'Payment hub'),
+                  ...(typeof metadata['website'] === 'string' ? { website: metadata['website'] } : {}),
+                  fee: typeof metadata['routingFeePPM'] === 'number' ? metadata['routingFeePPM'] : 100,
                   capacity: capacity ?? 0n,
-                  uptime: typeof metadata.uptime === 'number' ? metadata.uptime : 99.9,
+                  uptime: typeof metadata['uptime'] === 'number' ? metadata['uptime'] : 99.9,
                 },
-                runtimeId: entry.runtimeId,
+                ...(entry.runtimeId ? { runtimeId: entry.runtimeId } : {}),
                 endpoints: [],
                 capabilities: entry.capabilities || [],
-                jurisdiction: typeof metadata.region === 'string' ? metadata.region : 'global',
+                jurisdiction: typeof metadata['region'] === 'string' ? metadata['region'] : 'global',
                 isConnected,
                 lastSeen: entry.lastUpdated || Date.now(),
                 raw: JSON.stringify(entry, null, 2),
@@ -325,12 +325,11 @@
               name: state.config?.name || hubMeta?.name || `Hub ${hubEntityId.slice(0, 8)}`,
               metadata: {
                 description: hubMeta?.description || 'Payment hub',
-                website: hubMeta?.website,
+                ...(hubMeta?.website ? { website: hubMeta.website } : {}),
                 fee: hubMeta?.feePPM || 100,
                 capacity: state.reserves?.get?.('1') || 0n,
                 uptime: hubMeta?.uptime || 99.9,
               },
-              runtimeId: undefined,
               endpoints: [],
               capabilities: [],
               jurisdiction: state.config?.jurisdiction?.name || 'Unknown',

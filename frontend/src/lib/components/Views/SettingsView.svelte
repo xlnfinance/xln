@@ -136,8 +136,8 @@
     // Re-initialize connection without reload
     try {
       const xln = await getXLN();
-      if (xln.connectToEthereum) {
-        await xln.connectToEthereum(value);
+      if ((xln as any).connectToEthereum) {
+        await (xln as any).connectToEthereum(value);
       }
       alert('RPC configuration updated. New connection established.');
     } catch (err) {

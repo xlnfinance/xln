@@ -120,7 +120,7 @@
 
       // Auto-detect WebGPU if not explicitly set by user
       if (!stored || !JSON.parse(stored).rendererMode) {
-        if (typeof navigator !== 'undefined' && navigator.gpu) {
+        if (typeof navigator !== 'undefined' && (navigator as any).gpu) {
           settings.rendererMode = 'webgpu';
           saveSettings();
           console.log('[Settings] ✅ WebGPU detected - enabled by default');

@@ -49,13 +49,13 @@ export function getRuntimeFrames(history: Snapshot[], replica: EntityReplica | n
     // Filter inputs TO this specific replica
     const replicaInputs = entityInputs.filter(
       (input: EntityInput) =>
-        input.entityId === replica.entityId && input.signerId === replica.signerId,
+        input.entityId === replica.entityId && (input as any).signerId === replica.signerId,
     );
 
     // Filter outputs FROM this specific replica
     const replicaOutputs = runtimeOutputs.filter(
       (output: EntityInput) =>
-        output.entityId === replica.entityId && output.signerId === replica.signerId,
+        output.entityId === replica.entityId && (output as any).signerId === replica.signerId,
     );
 
     // Filter runtimeTx imports related to this replica

@@ -19,7 +19,6 @@ jurisdictions/bun.lock
 frontend/static/runtime.js
 frontend/static/jurisdictions.json
 frontend/build/
-frontend/src/lib/generated/version.ts
 .svelte-kit/
 
 # Backend generated files

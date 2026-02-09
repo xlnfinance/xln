@@ -130,6 +130,11 @@ export default defineConfig(async ({ command }) => {
 			'Expires': '0'
 		}
 	},
+	build: {
+		rollupOptions: {
+			external: ['react', 'react-dom']
+		}
+	},
 	// Fast builds
 	esbuild: {
 		target: 'es2022'

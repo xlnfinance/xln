@@ -40,7 +40,7 @@ export async function htlc4hop(env: Env): Promise<void> {
 
   // Setup BrowserVM
   const browserVM = await ensureBrowserVM(env);
-  const depositoryAddress = browserVM.getDepositoryAddress();
+  const depositoryAddress = browserVM!.getDepositoryAddress!();
   createJReplica(env, '4-Hop Demo', depositoryAddress);
 
   // Create economy: 3 hubs + 2 users
@@ -54,8 +54,9 @@ export async function htlc4hop(env: Env): Promise<void> {
   });
 
   const [hub1, hub2, hub3] = hubs;
-  const alice = users[0][0]; // User under Hub1
-  const bob = users[2][0];   // User under Hub3
+  if (!hub1 || !hub2 || !hub3) throw new Error('Missing hubs');
+  const alice = users[0]![0]!; // User under Hub1
+  const bob = users[2]![0]!;   // User under Hub3
 
   console.log(`📋 Entities created:`);
   console.log(`   Alice: ${alice.id.slice(-4)} (user, connected to ${hub1.name})`);
@@ -180,6 +181,7 @@ export async function htlc4hop(env: Env): Promise<void> {
 }
 
 // CLI entry point
+// @ts-ignore - Bun runtime provides import.meta.main
 if (import.meta.main) {
   const runtime = await import('../runtime');
   const env = runtime.createEmptyEnv();

@@ -469,7 +469,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // Verify update
   const aliceAccount2 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID as AccountKey);
   assert(aliceAccount2?.settlementWorkspace?.version === 2, 'Version should be 2 after update', env);
-  assert(aliceAccount2.settlementWorkspace.diffs[0].leftDiff === -usd(50), 'Diff should be updated');
+  assert(aliceAccount2!.settlementWorkspace!.diffs[0]!.leftDiff === -usd(50), 'Diff should be updated');
 
   console.log(`✅ Settlement updated by Hub`);
   console.log(`   New version: ${aliceAccount2.settlementWorkspace.version}`);
@@ -644,6 +644,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
 }
 
 // Run if executed directly
+// @ts-ignore - Bun runtime provides import.meta.main
 if (import.meta.main) {
   runSettleScenario()
     .then(() => {

@@ -76,7 +76,7 @@ export async function grid(env: Env): Promise<void> {
   // ============================================================================
 
   const browserVM = await ensureBrowserVM(env);
-  const depositoryAddress = browserVM.getDepositoryAddress();
+  const depositoryAddress = browserVM!.getDepositoryAddress!();
 
   // J-Machine at center (0, 600, 0) - elevated above grid
   createJReplica(env, 'Grid Demo', depositoryAddress, { x: 0, y: 600, z: 0 });
@@ -126,8 +126,8 @@ export async function grid(env: Env): Promise<void> {
   // Fund all nodes with initial reserves (direct BrowserVM call)
   console.log('💰 Funding nodes with initial reserves...');
   for (let i = 0; i < gridEntities.length; i++) {
-    const nodeId = gridEntities[i];
-    await browserVM.debugFundReserves(nodeId, USDC_TOKEN_ID, usd(100_000));
+    const nodeId = gridEntities[i]!;
+    await (browserVM as any).debugFundReserves!(nodeId, USDC_TOKEN_ID, usd(100_000));
   }
 
   // Process j_events from BrowserVM
@@ -146,11 +146,11 @@ export async function grid(env: Env): Promise<void> {
 
   // Each node sends $10K to next node (circular)
   for (let i = 0; i < gridEntities.length; i++) {
-    const fromNode = gridEntities[i];
-    const toNode = gridEntities[(i + 1) % gridEntities.length]; // Circular
+    const fromNode = gridEntities[i]!;
+    const toNode = gridEntities[(i + 1) % gridEntities.length]!; // Circular
 
     // Add to J-Machine mempool (PENDING state - yellow cubes!)
-    jReplica.mempool.push({
+    (jReplica.mempool as any[]).push({
       type: 'r2r',
       from: fromNode,
       to: toNode,
@@ -179,9 +179,9 @@ export async function grid(env: Env): Promise<void> {
   console.log('\n⚡ J-Block #1: Processing batch...');
 
   // Execute all R2R txs from mempool
-  for (const tx of jReplica.mempool) {
+  for (const tx of jReplica.mempool as any[]) {
     if (tx.type === 'r2r' && tx.from && tx.to && tx.amount) {
-      await browserVM.reserveToReserve(tx.from, tx.to, USDC_TOKEN_ID, tx.amount);
+      await (browserVM as any).reserveToReserve!(tx.from, tx.to, USDC_TOKEN_ID, tx.amount);
     }
   }
 
@@ -344,6 +344,7 @@ export async function grid(env: Env): Promise<void> {
 
 // ===== CLI ENTRY POINT =====
 // Run this file directly: bun runtime/scenarios/grid.ts
+// @ts-ignore - Bun runtime provides import.meta.main
 if (import.meta.main) {
   console.log('🚀 Running GRID scenario from CLI...\n');
 

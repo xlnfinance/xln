@@ -135,7 +135,7 @@ async function processJEvents(env: Env): Promise<void> {
  * Enable/disable via AHB_DEBUG=1 environment variable or pass enabled=true
  */
 function dumpSystemState(env: Env, label: string, enabled: boolean = true): void {
-  const debugEnabled = typeof process !== 'undefined' && process.env && process.env.AHB_DEBUG;
+  const debugEnabled = typeof process !== 'undefined' && process.env && process.env['AHB_DEBUG'];
   if (!enabled && !debugEnabled) return;
 
   // Named entities for easier reading
@@ -156,7 +156,7 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
   };
 
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    const entityId = replicaKey.split(':')[0];
+    const entityId = replicaKey.split(':')[0]!;
     const entityName = getName(entityId);
 
     const entityState: Record<string, any> = {
@@ -170,14 +170,14 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
     if (replica.state.reserves) {
       for (const [tokenId, amount] of replica.state.reserves.entries()) {
         const usd = Number(amount) / 1e18;
-        entityState.reserves[tokenId] = { raw: amount.toString(), usd: `$${usd.toLocaleString()}` };
+        (entityState as any).reserves[tokenId] = { raw: amount.toString(), usd: `$${usd.toLocaleString()}` };
       }
     }
 
     // Accounts
     if (replica.state.accounts) {
       for (const [counterpartyId, account] of replica.state.accounts.entries()) {
-        const counterpartyName = getName(counterpartyId);
+        const counterpartyName = getName(counterpartyId as string);
         const isLeftEntity = isLeft(entityId, counterpartyId);
 
         const accountState: Record<string, any> = {
@@ -193,7 +193,7 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
 
         for (const [tokenId, delta] of account.deltas.entries()) {
           const totalDelta = delta.ondelta + delta.offdelta;
-          accountState.deltas[tokenId] = {
+          (accountState as any).deltas[tokenId] = {
             collateral: { raw: delta.collateral.toString(), usd: `$${(Number(delta.collateral) / 1e18).toLocaleString()}` },
             ondelta: { raw: delta.ondelta.toString(), usd: `$${(Number(delta.ondelta) / 1e18).toLocaleString()}` },
             offdelta: { raw: delta.offdelta.toString(), usd: `$${(Number(delta.offdelta) / 1e18).toLocaleString()}` },
@@ -207,11 +207,11 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
           };
         }
 
-        entityState.accounts[counterpartyName] = accountState;
+        (entityState as any).accounts[counterpartyName] = accountState;
       }
     }
 
-    state.entities[entityName] = entityState;
+    (state as any).entities[entityName] = entityState;
   }
 
   console.log('\n' + '='.repeat(80));
@@ -350,7 +350,7 @@ export async function lockAhb(env: Env): Promise<void> {
       // Verify reset worked by checking Hub's reserves (should be 0)
       // Hub entityId = 0x0003 (entity #3, since #1 is foundation)
       const HUB_ENTITY_ID = '0x' + '3'.padStart(64, '0');
-      const hubReservesAfterReset = await vm.getReserves(HUB_ENTITY_ID, USDC_TOKEN_ID);
+      const hubReservesAfterReset = await vm.getReserves!(HUB_ENTITY_ID, USDC_TOKEN_ID);
       console.log(`[AHB] ✅ BrowserVM reset complete. Hub reserves after reset: ${hubReservesAfterReset}`);
       if (hubReservesAfterReset !== 0n) {
         throw new Error(`BrowserVM reset FAILED: Hub still has ${hubReservesAfterReset} reserves`);
@@ -360,9 +360,9 @@ export async function lockAhb(env: Env): Promise<void> {
     // Register entities with EntityProvider for Hanko signature verification
     // This creates boards with each signer as sole validator
     // 2..6 → entity numbers 2..6 (entity 1 is foundation)
-    if (browserVM.registerEntitiesWithSigners) {
+    if ((vm as any).registerEntitiesWithSigners) {
       console.log('[AHB] Registering entities with EntityProvider...');
-      const entityNumbers = await browserVM.registerEntitiesWithSigners(['2', '3', '4', '5', '6']);
+      const entityNumbers = await (vm as any).registerEntitiesWithSigners(['2', '3', '4', '5', '6']);
       console.log(`[AHB] ✅ Registered entities: [${entityNumbers.join(', ')}]`);
     }
 
@@ -373,15 +373,15 @@ export async function lockAhb(env: Env): Promise<void> {
     if (!arrakis) {
       console.log('[AHB] No jurisdiction found - using BrowserVM jurisdiction');
       arrakis = {
+        address: vm.getDepositoryAddress!(),
         name: 'AHB Demo', // Must match jReplica name for routing
         chainId: 31337,
-        entityProviderAddress: browserVM.getEntityProviderAddress(),
-        depositoryAddress: browserVM.getDepositoryAddress(),
-        rpc: 'browservm://'
+        entityProviderAddress: (vm as any).getEntityProviderAddress(),
+        depositoryAddress: vm.getDepositoryAddress!(),
       };
     }
 
-    console.log(`📋 Jurisdiction: ${arrakis.name}`);
+    console.log(`📋 Jurisdiction: ${arrakis!.name}`);
 
     // ============================================================================
     // STEP 0a: Create Xlnomy (J-Machine) for visualization
@@ -401,8 +401,8 @@ export async function lockAhb(env: Env): Promise<void> {
       lastBlockTimestamp: env.timestamp,  // Use env.timestamp for determinism
       position: { x: 0, y: 600, z: 0 }, // Match EVM jMachine.position for consistent entity placement
       contracts: {
-        depository: arrakis.depositoryAddress,
-        entityProvider: arrakis.entityProviderAddress,
+        depository: arrakis!.depositoryAddress,
+        entityProvider: arrakis!.entityProviderAddress,
       },
     };
 
@@ -446,7 +446,7 @@ export async function lockAhb(env: Env): Promise<void> {
     const createEntityTxs = [];
 
     for (let i = 0; i < 3; i++) {
-      const name = entityNames[i];
+      const name = entityNames[i]!;
       const signer = String(i + 2); // 2, 3, 4 (skip 1 for foundation)
       const position = AHB_POSITIONS[name];
 
@@ -454,7 +454,7 @@ export async function lockAhb(env: Env): Promise<void> {
       // Entity numbers start at 2 (1 is foundation in EntityProvider)
       const entityNumber = i + 2;
       const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
-      entities.push({ id: entityId, signer, name });
+      entities.push({ id: entityId, signer, name: name as string });
 
       createEntityTxs.push({
         type: 'importReplica' as const,
@@ -468,7 +468,7 @@ export async function lockAhb(env: Env): Promise<void> {
             threshold: 1n,
             validators: [signer],
             shares: { [signer]: 1n },
-            jurisdiction: arrakis
+            jurisdiction: arrakis!
           }
         }
       });
@@ -506,13 +506,13 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log('\n💳 Prefunding signer wallets (1M each token)...');
     for (const entity of entities) {
       const { wallet } = ensureSignerWallet(entity.signer);
-      await browserVM.fundSignerWallet(wallet.address, SIGNER_PREFUND);
+      await vm.fundSignerWallet!(wallet.address, SIGNER_PREFUND);
       console.log(`✅ Prefunded ${entity.name} signer ${entity.signer} (${wallet.address.slice(0, 10)}...)`);
     }
 
     const hubWalletInfo = ensureSignerWallet(hub.signer);
     if (HUB_INITIAL_RESERVE > SIGNER_PREFUND) {
-      await browserVM.fundSignerWallet(hubWalletInfo.wallet.address, HUB_INITIAL_RESERVE);
+      await vm.fundSignerWallet!(hubWalletInfo.wallet.address, HUB_INITIAL_RESERVE);
       console.log(`✅ Hub signer topped up to ${HUB_INITIAL_RESERVE / 10n ** 18n} tokens`);
     }
 
@@ -536,17 +536,17 @@ export async function lockAhb(env: Env): Promise<void> {
     // This ensures fresh state on every page load/HMR
 
     // REAL deposit flow: ERC20 approve + externalTokenToReserve
-    const usdcTokenAddress = browserVM.getTokenAddress('USDC');
+    const usdcTokenAddress = vm.getTokenAddress!('USDC');
     if (!usdcTokenAddress) {
       throw new Error('USDC token not found in BrowserVM registry');
     }
-    await browserVM.approveErc20(
+    await (vm as any).approveErc20(
       hubWalletInfo.privateKey,
       usdcTokenAddress,
-      browserVM.getDepositoryAddress(),
+      vm.getDepositoryAddress!(),
       HUB_INITIAL_RESERVE
     );
-    await browserVM.externalTokenToReserve(
+    await (vm as any).externalTokenToReserve(
       hubWalletInfo.privateKey,
       hub.id,
       usdcTokenAddress,
@@ -605,7 +605,6 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log('✅ R2R operations added to Hub jBatch (2 operations)');
 
     await pushSnapshot(env, 'Hub R2R batch created', {
-      title: 'R2R Batch Ready',
       what: 'Hub created batch with 2 R2R transfers: $3M to Alice, $2M to Bob.',
       why: 'Batching R2Rs for efficiency - one broadcast, multiple transfers.',
       tradfiParallel: 'Like ACH batch file - multiple wire transfers in one submission.',
@@ -631,7 +630,6 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log('✅ R2R batch queued to J-mempool (yellow cube)');
 
     await pushSnapshot(env, 'R2R batch in J-mempool', {
-      title: 'J-Mempool: Yellow Cube #1',
       what: 'R2R batch sits in J-mempool (yellow cube). Will execute after blockDelayMs.',
       why: 'Visual feedback: batch queued, awaiting block time.',
       tradfiParallel: 'Like SWIFT queue - message sent, pending settlement window.',
@@ -678,7 +676,6 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log('✅ ASSERT: R2R batch executed correctly ✓');
 
     await pushSnapshot(env, 'Hub fundings complete', {
-      title: 'Hub Distributed Reserves',
       what: 'Hub: $5M, Alice: $3M, Bob: $2M.',
       why: 'Hub funded both entities for bilateral trading.',
       tradfiParallel: 'Like correspondent bank funding smaller banks.',
@@ -715,7 +712,6 @@ export async function lockAhb(env: Env): Promise<void> {
     }]);
 
     await pushSnapshot(env, 'Alice→Bob R2R in J-mempool', {
-      title: 'Peer-to-Peer Transfer',
       what: 'Alice sends $500K to Bob (yellow cube #3).',
       keyMetrics: ['Alice → Bob: $500K']
     }, { expectedSolvency: TOTAL_SOLVENCY });
@@ -742,7 +738,6 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log('✅ ASSERT: Alice→Bob R2R executed ✓');
 
     await pushSnapshot(env, 'R2R Complete: All reserves distributed', {
-      title: 'Phase 1 Complete: Reserve Distribution',
       what: 'Hub: $5M, Alice: $2.5M, Bob: $2.5M. Total: $10M preserved.',
       why: 'R2R transfers complete. Now move to Phase 2: Bilateral Accounts.',
       tradfiParallel: 'Like Fedwire settlement: instant, final, auditable.',
@@ -786,7 +781,6 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`✅ ASSERT Frame 6: Alice-Hub accounts EXIST (both directions)`);
 
     await pushSnapshot(env, 'Alice ↔ Hub: Account Created', {
-      title: 'Bilateral Account: Alice ↔ Hub (A-H)',
       what: 'Alice opens bilateral account with Hub. Creates off-chain channel for instant payments.',
       why: 'Bilateral accounts enable unlimited off-chain transactions with final on-chain settlement.',
       tradfiParallel: 'Like opening a margin account: enables trading before settlement.',
@@ -826,7 +820,6 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`✅ ASSERT Frame 7: Hub-Bob accounts EXIST (both directions)`);
 
     await pushSnapshot(env, 'Bob ↔ Hub: Account Created', {
-      title: 'Bilateral Account: Bob ↔ Hub (B-H)',
       what: 'Bob opens bilateral account with Hub. Now both spoke entities connected to hub.',
       why: 'Star topology: Alice and Bob both connect to Hub. Hub routes payments between them.',
       tradfiParallel: 'Like correspondent banking: small banks connect to large banks for interbank settlement.',
@@ -863,7 +856,6 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log('✅ Alice deposit_collateral added to jBatch');
 
     await pushSnapshot(env, 'Alice R2C: jBatch created', {
-      title: 'R2C Batch Ready',
       what: 'Alice R2C added to jBatch (not yet broadcast).',
       keyMetrics: ['Batch: 1 R2C ($500K)']
     }, { expectedSolvency: TOTAL_SOLVENCY });
@@ -883,7 +875,6 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log('✅ R2C batch queued to J-mempool');
 
     await pushSnapshot(env, 'R2C in J-mempool', {
-      title: 'Yellow Cube #2',
       what: 'R2C batch in J-mempool',
       keyMetrics: ['J-mempool: 1 batch']
     }, { expectedSolvency: TOTAL_SOLVENCY });
@@ -935,7 +926,6 @@ export async function lockAhb(env: Env): Promise<void> {
     assertBilateralSync(env, alice.id, hub.id, USDC_TOKEN_ID, 'Frame 9 - Alice R2C Collateral');
 
     await pushSnapshot(env, 'Alice R2C: $500K Reserve → Collateral', {
-      title: 'Reserve-to-Collateral (R2C): Alice → A-H Account',
       what: 'Alice moves $500K from reserve to A-H account collateral. J-Machine processed batch.',
       why: 'Collateral enables off-chain payments. Alice can now send up to $500K to Hub instantly.',
       tradfiParallel: 'Like posting margin: Alice locks funds in the bilateral account as security.',
@@ -993,7 +983,6 @@ export async function lockAhb(env: Env): Promise<void> {
     assertBilateralSync(env, bob.id, hub.id, USDC_TOKEN_ID, 'Frame 9 - Bob Credit Extension');
 
     await pushSnapshot(env, 'Bob Credit Extension: $500K', {
-      title: 'Credit Extension: Bob → Hub',
       what: 'Bob extends $500K credit limit to Hub in B-H account. Purely off-chain, no collateral.',
       why: 'Credit extension allows Hub to owe Bob. Bob trusts Hub up to $500K.',
       tradfiParallel: 'Like a credit line: Bob says "Hub can owe me up to $500K".',
@@ -1040,15 +1029,14 @@ export async function lockAhb(env: Env): Promise<void> {
           amount: payment1,
           route: [alice.id, hub.id, bob.id],
           description: 'HTLC Payment 1 of 2',
-          secret: htlc1.secret,
-          hashlock: htlc1.hashlock,
+          secret: ethers.hexlify(htlc1.secret),
+          hashlock: ethers.hexlify(htlc1.hashlock),
         }
       }]
     }]);
     logPending();
 
     await pushSnapshot(env, 'Frame 10: Alice initiates A→H→B', {
-      title: 'Payment 1/2: Alice → Hub',
       what: 'Alice sends $125K, Hub receives and forwards proposal to Bob',
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
@@ -1058,7 +1046,6 @@ export async function lockAhb(env: Env): Promise<void> {
     logPending();
 
     await pushSnapshot(env, 'Frame 11: Hub forwards to Bob', {
-      title: 'Payment 1/2: Hub → Bob proposal',
       what: 'Hub-Alice commits, Hub proposes to Bob',
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
@@ -1150,7 +1137,6 @@ export async function lockAhb(env: Env): Promise<void> {
     // Continue to let Bob process the HTLC (remove early return)
 
     await pushSnapshot(env, 'Frame 13: Payment 1 complete', {
-      title: 'Payment 1/2 Complete',
       what: `A→H→B $125K done. A-H shift: -$125K, H-B shift: -$125K`,
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
@@ -1178,7 +1164,6 @@ export async function lockAhb(env: Env): Promise<void> {
     logPending();
 
     await pushSnapshot(env, 'Frame 14: Alice initiates second payment', {
-      title: 'Payment 2/2: Alice → Hub',
       what: 'Second $125K payment to reach $250K total shift',
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
@@ -1188,7 +1173,6 @@ export async function lockAhb(env: Env): Promise<void> {
     logPending();
 
     await pushSnapshot(env, 'Frame 15: Hub forwards second payment', {
-      title: 'Payment 2/2: Hub → Bob proposal',
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
     // Frame 16: Bob ACKs Hub
@@ -1243,7 +1227,6 @@ export async function lockAhb(env: Env): Promise<void> {
     }
 
     await pushSnapshot(env, 'Frame 17: Both payments complete - $250K shifted', {
-      title: '✅ Payments Complete: $250K A→B',
       what: 'Two $125K payments complete. Total: $250K shifted from Alice to Bob via Hub.',
       why: 'Hub now has $250K uninsured liability to Bob (TR=$250K). Rebalancing needed!',
       keyMetrics: [
@@ -1289,7 +1272,6 @@ export async function lockAhb(env: Env): Promise<void> {
     // Note: At this point Bob's local mempool has the tx but Hub hasn't received yet
 
     await pushSnapshot(env, 'Frame 18: Bob initiates B→H→A', {
-      title: 'Reverse Payment: Bob → Hub',
       what: 'Bob sends $50K to Alice via Hub. First hop: B→H',
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
@@ -1312,7 +1294,6 @@ export async function lockAhb(env: Env): Promise<void> {
     }
 
     await pushSnapshot(env, 'Frame 19: Hub forwards to Alice', {
-      title: 'Reverse Payment: Hub → Alice',
       what: 'Hub receives B→H and forwards H→A proposal',
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
@@ -1345,7 +1326,6 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`✅ Reverse payment B→H→A verified: A-H=${ahDeltaRev}, B-H=${bhDeltaRev} (fee=${htlcFee})`);
 
     await pushSnapshot(env, 'Frame 21: Reverse payment complete', {
-      title: '✅ Reverse Payment: $50K B→A',
       what: 'Bob paid Alice $50K via Hub. Net position: $200K shifted A→B.',
       keyMetrics: [
         'A-H shift: -$200K (was -$250K)',
@@ -1415,8 +1395,8 @@ export async function lockAhb(env: Env): Promise<void> {
       collateralDiff: rebalanceAmount,   // H-B collateral +$200K
       ondeltaDiff: hbOndeltaDiff,        // ondelta toward zero
     }];
-    const ahSettlementSig = await browserVM.signSettlement(hub.id, alice.id, ahSettlementDiffs, [], []);
-    const hbSettlementSig = await browserVM.signSettlement(hub.id, bob.id, hbSettlementDiffs, [], []);
+    const ahSettlementSig = await (vm as any).signSettlement(hub.id, alice.id, ahSettlementDiffs, [], []);
+    const hbSettlementSig = await (vm as any).signSettlement(hub.id, bob.id, hbSettlementDiffs, [], []);
 
     await process(env, [{
       entityId: hub.id,
@@ -1446,7 +1426,6 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`✅ Settlement batch created via createSettlement EntityTxs (2 settlements)`);
 
     await pushSnapshot(env, 'Frame 22: Rebalancing batch created', {
-      title: 'Rebalancing: Unified Batch Ready',
       what: 'Hub created ONE batch with 2 settlements: pull from Alice, deposit to Bob.',
       why: 'Batching is efficient. One J-block processes both operations atomically.',
       tradfiParallel: 'Like ACH batch file: multiple transfers in single settlement instruction.',
@@ -1472,7 +1451,6 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`✅ j_broadcast sent → should create YELLOW CUBE in J-mempool`);
 
     await pushSnapshot(env, 'Frame 23: jBatch in J-mempool (PENDING)', {
-      title: 'J-Mempool: Yellow Cube',
       what: 'Settlement batch sits in J-Machine mempool (yellow cube). Will process after blockDelayMs.',
       why: 'Visual feedback: batch is queued, not yet executed. Realistic blockchain delay.',
       tradfiParallel: 'Like SWIFT queue: message sent, awaiting settlement window.',
@@ -1532,7 +1510,6 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`✅ ASSERT: Hub reserve ${hubPreReserve} (unchanged - pulled/deposited $200K) ✓`);
 
     await pushSnapshot(env, 'Frame 24: Rebalancing complete (atomic)', {
-      title: 'Rebalancing Complete',
       what: 'ONE batch executed BOTH settlements atomically. TR = $0.',
       why: 'Batching proves efficiency. Hub pulled from Alice, deposited to Bob, all in 1 J-block.',
       tradfiParallel: 'Like FedACH batch processing: multiple operations, single settlement window.',
@@ -1587,7 +1564,7 @@ export async function lockAhb(env: Env): Promise<void> {
           jurisdictionId: 'AHB Demo',
           tokenId: USDC_TOKEN_ID,
           amount: usd(100_000)
-        }
+        } as any
       }]
     }]);
 
@@ -1649,7 +1626,9 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // Generate hashlock without sharing secret with Charlie (timeout test)
     const { generateLockId } = await import('../htlc-utils');
-    const { secret: testSecret, hashlock: testHashlock } = rng.nextHashlock(); // Deterministic
+    const testHashlockRaw = rng.nextHashlock(); // Deterministic
+    const testSecret = ethers.hexlify(testHashlockRaw.secret);
+    const testHashlock = ethers.hexlify(testHashlockRaw.hashlock);
     const testLockId = generateLockId(testHashlock, shortExpiry, 0, env.timestamp);
 
     console.log(`   Lock ID: ${testLockId.slice(0,16)}...`);
@@ -1788,7 +1767,7 @@ export async function lockAhb(env: Env): Promise<void> {
           jurisdictionId: 'AHB Demo',
           tokenId: USDC_TOKEN_ID,
           amount: usd(500_000)
-        }
+        } as any
       }]
     }]);
 
@@ -1880,8 +1859,8 @@ export async function lockAhb(env: Env): Promise<void> {
           tokenId: USDC_TOKEN_ID,
           amount: payment4Hop,
           description: '4-hop onion routing test',
-          secret: htlc4.secret,
-          hashlock: htlc4.hashlock,
+          secret: ethers.hexlify(htlc4.secret),
+          hashlock: ethers.hexlify(htlc4.hashlock),
         }
       }]
     }]);
@@ -1931,16 +1910,18 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // Create a new HTLC that Bob will have to reveal on-chain
     // Deterministic secret from seeded RNG (generateLockId already imported above)
-    const hostageSecret = rng.nextHashlock();
+    const hostageSecretRaw = rng.nextHashlock();
+    const hostageHashlock = ethers.hexlify(hostageSecretRaw.hashlock);
+    const hostageSecretHex = ethers.hexlify(hostageSecretRaw.secret);
     const currentJHeightHostage = env.jReplicas.get('AHB Demo')?.blockNumber || 0n;
     const hostageExpiry = Number(currentJHeightHostage) + 100; // Long expiry
-    const hostageLockId = generateLockId(hostageSecret.hashlock, hostageExpiry, 0, env.timestamp);
+    const hostageLockId = generateLockId(hostageHashlock, hostageExpiry, 0, env.timestamp);
     const hostageAmount = usd(5_000);
 
     console.log(`📋 Creating HTLC Hub→Bob that Bob will reveal on-chain`);
     console.log(`   LockId: ${hostageLockId.slice(0, 16)}...`);
-    console.log(`   Hashlock: ${hostageSecret.hashlock.slice(0, 16)}...`);
-    console.log(`   Secret: ${hostageSecret.secret.slice(0, 16)}...\n`);
+    console.log(`   Hashlock: ${hostageHashlock.slice(0, 16)}...`);
+    console.log(`   Secret: ${hostageSecretHex.slice(0, 16)}...\n`);
 
     // Hub creates HTLC lock to Bob (manually so we control the secret)
     await process(env, [{
@@ -1951,7 +1932,7 @@ export async function lockAhb(env: Env): Promise<void> {
         data: {
           counterpartyId: bob.id,
           lockId: hostageLockId,
-          hashlock: hostageSecret.hashlock,
+          hashlock: hostageHashlock,
           timelock: BigInt(env.timestamp + 100000), // Long timelock
           revealBeforeHeight: hostageExpiry,
           amount: hostageAmount,
@@ -1975,13 +1956,14 @@ export async function lockAhb(env: Env): Promise<void> {
     if (!bobRepHostage.state.htlcRoutes) {
       bobRepHostage.state.htlcRoutes = new Map();
     }
-    bobRepHostage.state.htlcRoutes.set(hostageSecret.hashlock, {
-      hashlock: hostageSecret.hashlock,
-      secret: hostageSecret.secret, // Bob knows the secret!
+    bobRepHostage.state.htlcRoutes.set(hostageHashlock, {
+      hashlock: hostageHashlock,
+      secret: hostageSecretHex, // Bob knows the secret!
       inboundEntity: hub.id, // Hub sent the HTLC to Bob
-      outboundEntity: undefined, // Bob is the final recipient
+      // outboundEntity omitted - Bob is the final recipient
       inboundLockId: hostageLockId,
-      outboundLockId: undefined,
+      // outboundLockId omitted - Bob is the final recipient
+      createdTimestamp: env.timestamp,
     });
     console.log(`✅ Bob now has the secret in htlcRoutes\n`);
 
@@ -2038,7 +2020,7 @@ export async function lockAhb(env: Env): Promise<void> {
     const { createEmptyBatch, encodeJBatch, computeBatchHankoHash } = await import('../j-batch');
     const { signHashesAsSingleEntity } = await import('../hanko-signing');
     while (true) {
-      const currentBlock = browserVM.getBlockNumber();
+      const currentBlock = (vm as any).getBlockNumber();
       if (currentBlock >= targetBlock) {
         console.log(`✅ Timeout reached at block ${currentBlock}`);
         break;
@@ -2046,16 +2028,16 @@ export async function lockAhb(env: Env): Promise<void> {
       // Mine empty blocks (requires hanko-signed batch)
       const emptyBatch = createEmptyBatch();
       const encodedBatch = encodeJBatch(emptyBatch);
-      const chainId = browserVM.getChainId();
-      const depositoryAddress = browserVM.getDepositoryAddress();
-      const entityProviderAddress = browserVM.getEntityProviderAddress();
-      const currentNonce = await browserVM.getEntityNonce(bob.id);
+      const chainId = (vm as any).getChainId();
+      const depositoryAddress = vm.getDepositoryAddress!();
+      const entityProviderAddress = (vm as any).getEntityProviderAddress();
+      const currentNonce = await (vm as any).getEntityNonce(bob.id);
       const nextNonce = currentNonce + 1n;
       const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
       const hankos = await signHashesAsSingleEntity(env, bob.id, bob.signer, [batchHash]);
       const hankoData = hankos[0];
       if (!hankoData) throw new Error('Failed to build empty batch hanko');
-      await browserVM.processBatch(encodedBatch, entityProviderAddress, hankoData, nextNonce);
+      await (vm as any).processBatch(encodedBatch, entityProviderAddress, hankoData, nextNonce);
       await process(env); // Let runtime process any events
     }
 
@@ -2094,7 +2076,7 @@ export async function lockAhb(env: Env): Promise<void> {
     const [, bobRepAfterFinalize] = findReplica(env, bob.id);
     const secretsAfter = bobRepAfterFinalize.state.jBatchState?.batch.revealSecrets || [];
     const secretRevealed = secretsAfter.some(
-      (r: { secret: string }) => r.secret === hostageSecret.secret
+      (r: { secret: string }) => r.secret === hostageSecretHex
     );
 
     console.log(`\n🔍 HOSTAGE REVEAL VERIFICATION:`);
@@ -2207,6 +2189,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
 // ===== CLI ENTRY POINT =====
 // Run this file directly: bun runtime/scenarios/ahb.ts
+// @ts-ignore - Bun runtime provides import.meta.main
 if (import.meta.main) {
   console.log('🚀 Running AHB scenario from CLI...\n');
 

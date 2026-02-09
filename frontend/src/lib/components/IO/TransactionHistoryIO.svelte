@@ -64,8 +64,8 @@
                       {#if tx.type === 'importReplica'}
                         : {tx.entityId}:{tx.signerId}
                         {tx.data.isProposer ? ' (👑 Proposer)' : ' (✅ Validator)'}
-                      {:else if tx.type === 'createXlnomy'}
-                        : "{tx.data.name}" ({tx.data.evmType})
+                      {:else if (tx as any).type === 'createXlnomy'}
+                        : "{(tx as any).data.name}" ({(tx as any).data.evmType})
                       {/if}
                     </div>
                     {#if showJsonDetails.serverTxs}

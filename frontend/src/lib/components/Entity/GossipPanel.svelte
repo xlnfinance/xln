@@ -92,7 +92,7 @@
       const env = activeEnv;
       if (!isRuntimeEnv(env)) throw new Error('Environment not ready');
       const xln = await getXLN();
-      xln.refreshGossip?.(env);
+      xln.refreshGossip?.(env as any);
       await new Promise(resolve => setTimeout(resolve, 250));
       pullProfilesFromEnv();
     } catch (err) {
@@ -109,7 +109,7 @@
       const env = activeEnv;
       if (!isRuntimeEnv(env)) throw new Error('Environment not ready');
       const xln = await getXLN();
-      xln.clearGossip?.(env);
+      xln.clearGossip?.(env as any);
       pullProfilesFromEnv();
     } catch (err) {
       error = (err as Error).message || 'Failed to clear gossip';

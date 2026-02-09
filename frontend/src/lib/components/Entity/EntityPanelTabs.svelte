@@ -763,6 +763,7 @@
     }
 
     // Scan recent history only; finalize event should appear shortly after request.
+    const cutoffTs = Math.min(...pendingOffchainFaucets.map(r => r.startedAt));
     const startIndex = Math.max(0, activeHistory.length - 120);
     for (let i = startIndex; i < activeHistory.length; i += 1) {
       const snapshot: any = activeHistory[i];

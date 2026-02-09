@@ -51,7 +51,7 @@ export async function multiSig(env: Env): Promise<void> {
   // ============================================================================
   console.log('🏛️  Setting up BrowserVM...');
   const browserVM = await ensureBrowserVM(env);
-  const depositoryAddress = browserVM.getDepositoryAddress();
+  const depositoryAddress = browserVM!.getDepositoryAddress!();
   createJReplica(env, 'MultiSig', depositoryAddress, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
   console.log('✅ BrowserVM ready\n');
 
@@ -158,7 +158,7 @@ export async function multiSig(env: Env): Promise<void> {
     console.log(`  ${validator}: ${hasAccount ? '✅' : '❌'} account with Hub (total accounts: ${accountCount})`);
     if (hasAccount) {
       const account = replica.state.accounts.get(hub.id as AccountKey)!;
-      console.log(`    → Account height: ${account.height}, mempool: ${account.mempool.length}, pending: ${!!account.proposal}`);
+      console.log(`    → Account height: ${(account as any).height}, mempool: ${account.mempool.length}, pending: ${!!account.proposal}`);
     }
   }
 
@@ -316,7 +316,7 @@ export async function multiSig(env: Env): Promise<void> {
   }
 
   console.log(`\\n🔍 Alice-Hub account state:`);
-  console.log(`   Account height: ${accountAfterCredit.height}`);
+  console.log(`   Account height: ${(accountAfterCredit as any).height}`);
   console.log(`   Mempool: ${accountAfterCredit.mempool.length}`);
   console.log(`   PendingFrame: ${accountAfterCredit.proposal ? 'yes' : 'no'}`);
 
@@ -329,7 +329,7 @@ export async function multiSig(env: Env): Promise<void> {
   const [, hubAfterCredit] = findReplica(env, hub.id);
   const hubAccount = hubAfterCredit.state.accounts.get(alice.id as AccountKey);
   console.log(`🔍 Hub-Alice account state:`);
-  console.log(`   Account height: ${hubAccount?.height}`);
+  console.log(`   Account height: ${(hubAccount as any)?.height}`);
   console.log(`   Mempool: ${hubAccount?.mempool.length || 0}`);
   console.log(`   PendingFrame: ${hubAccount?.proposal ? 'yes' : 'no'}\\n`);
 
@@ -445,6 +445,7 @@ export async function multiSig(env: Env): Promise<void> {
   }
 }
 
+// @ts-ignore - Bun runtime provides import.meta.main
 if (import.meta.main) {
   const { createEmptyEnv } = await import('../runtime');
   const env = createEmptyEnv();

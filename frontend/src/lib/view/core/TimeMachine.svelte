@@ -46,7 +46,7 @@
     const xln = cachedXLN ?? await getXLN();
     cachedXLN = xln;
     const jadapter: JAdapter | null = xln.getActiveJAdapter?.(envValue) ?? null;
-    return jadapter?.getBrowserVM?.() ?? null;
+    return (jadapter?.getBrowserVM?.() ?? null) as BrowserVMProvider | null;
   }
 
   $: if ($timeIndex !== lastTimeTravelIndex && $history.length > 0) {

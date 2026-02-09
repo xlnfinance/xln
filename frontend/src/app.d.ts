@@ -10,4 +10,9 @@ declare global {
 	}
 }
 
+// Bun-specific: import.meta.main
+interface ImportMeta {
+	main: boolean;
+}
+
 export {};
