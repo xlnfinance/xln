@@ -4,9 +4,11 @@
   import { routePreview } from '../../stores/routePreviewStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { toasts } from '$lib/stores/toastStore';
+  import { safeStringify } from '$lib/utils/safeStringify';
   import { keccak256, AbiCoder, hexlify } from 'ethers';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
+  import EntityIdentity from '../shared/EntityIdentity.svelte';
 
   export let entityId: string;
   export let contacts: Array<{ name: string; entityId: string }> = [];
@@ -33,15 +35,33 @@
     path: string[];
     hops: Array<{ from: string; to: string; fee: bigint; feePPM: number }>;
     totalFee: bigint;
-    totalAmount: bigint;
+    senderAmount: bigint;
+    recipientAmount: bigint;
     probability: number;
     obfuscationScore: number;
   };
   let routes: RouteOption[] = [];
   let selectedRouteIndex = -1;
+  let preflightError: string | null = null;
   const MAX_ROUTES = 100;
   const MAX_PATH_HOPS = 6;
   const MIN_SELF_INTERMEDIATES = 2;
+
+  type GossipAccount = {
+    counterpartyId: string;
+  };
+
+  type GossipProfileView = {
+    entityId: string;
+    metadata?: {
+      name?: string;
+      cryptoPublicKey?: string;
+      encryptionPubKey?: string;
+      [key: string]: unknown;
+    };
+    accounts?: GossipAccount[];
+    [key: string]: unknown;
+  };
 
   // Reactive stores
   $: currentReplicas = contextReplicas ? $contextReplicas : (isolatedReplicas ? $isolatedReplicas : $replicas);
@@ -92,10 +112,39 @@
     targetEntityId = entityId;
   }
 
+  $: selectedTargetProfile = (() => {
+    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
+    return profiles.find((profile: GossipProfileView) => profile?.entityId === targetEntityId) as GossipProfileView | undefined;
+  })();
+
+  $: selectedTargetProfileJson = selectedTargetProfile
+    ? safeStringify(selectedTargetProfile, 2)
+    : null;
+
   // Format short ID — show first 6 + last 4 chars
   function formatShortId(id: string): string {
     if (!id || id.length < 14) return id || '';
     return id.slice(0, 6) + '...' + id.slice(-4);
+  }
+
+  function getEntityName(id: string): string {
+    if (!id) return 'Unknown';
+    if (id === entityId) return 'Self';
+    const contact = selectorContacts.find((c) => c.entityId === id);
+    if (contact?.name) return contact.name;
+    const profile = (currentEnv?.gossip?.getProfiles?.() || [])
+      .find((p: GossipProfileView) => p?.entityId === id);
+    const metaName = profile?.metadata?.name;
+    return typeof metaName === 'string' && metaName.trim() ? metaName.trim() : formatShortId(id);
+  }
+
+  function formatToken(value: bigint): string {
+    try {
+      if (activeXlnFunctions?.formatTokenAmount) return activeXlnFunctions.formatTokenAmount(tokenId, value);
+    } catch {
+      // best effort formatting
+    }
+    return value.toString();
   }
 
   // Generate HTLC secret/hashlock pair (browser-side, outside consensus)
@@ -152,17 +201,158 @@
     return whole * (10n ** BigInt(decimals)) + fracValue;
   }
 
-  function quoteHopFee(from: string, amountIn: bigint): { fee: bigint; feePPM: number } {
+  function sanitizeFeePPM(raw: unknown, fallback = 10): number {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return fallback;
+    const v = Math.floor(n);
+    if (v < 0) return 0;
+    if (v > 1_000_000) return 1_000_000;
+    return v;
+  }
+
+  function sanitizeBigInt(raw: unknown): bigint {
+    if (typeof raw === 'bigint') return raw < 0n ? 0n : raw;
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      const v = BigInt(Math.floor(raw));
+      return v < 0n ? 0n : v;
+    }
+    if (typeof raw === 'string' && raw.trim() !== '') {
+      const trimmed = raw.trim();
+      const match = trimmed.match(/^BigInt\(([-\d]+)\)$/);
+      const parsed = match ? match[1] : trimmed;
+      try {
+        const v = BigInt(parsed);
+        return v < 0n ? 0n : v;
+      } catch {
+        return 0n;
+      }
+    }
+    return 0n;
+  }
+
+  function directionalFeePPM(basePPM: number, outCapacity: bigint, inCapacity: bigint): number {
+    const PPM_DENOM = 1_000_000n;
+    const UTIL_STEP = 50_000n; // 5%
+    const UTIL_CAP = 500_000n; // +50%
+    const total = outCapacity + inCapacity;
+    if (total <= 0n) return sanitizeFeePPM(basePPM, 10);
+    let util = ((total - outCapacity) * PPM_DENOM) / total;
+    if (util > UTIL_CAP) util = UTIL_CAP;
+    util = (util / UTIL_STEP) * UTIL_STEP;
+    const base = BigInt(sanitizeFeePPM(basePPM, 10));
+    return Number(base + (base * util) / PPM_DENOM);
+  }
+
+  function quoteHopFee(from: string, to: string, token: number, amountIn: bigint): { fee: bigint; feePPM: number } {
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
     const profile = profiles.find((p: any) => p?.entityId === from);
-    const rawPpm = Number(profile?.metadata?.routingFeePPM ?? 100);
-    const feePPM = Number.isFinite(rawPpm) && rawPpm >= 0 ? Math.floor(rawPpm) : 100;
-    const rawBaseFee = profile?.metadata?.baseFee;
-    const baseFee = typeof rawBaseFee === 'bigint'
-      ? rawBaseFee
-      : (typeof rawBaseFee === 'number' && Number.isFinite(rawBaseFee) ? BigInt(Math.max(0, Math.floor(rawBaseFee))) : 0n);
+    const basePpm = sanitizeFeePPM(profile?.metadata?.routingFeePPM ?? 10, 10);
+    const baseFee = sanitizeBigInt(profile?.metadata?.baseFee ?? 0n);
+    const account = Array.isArray(profile?.accounts)
+      ? profile.accounts.find((a: any) => String(a?.counterpartyId || '') === String(to))
+      : null;
+    const caps = account?.tokenCapacities;
+    const tokenCap = caps
+      ? (caps.get?.(token)
+        ?? caps[String(token)]
+        ?? caps[token])
+      : null;
+    const outCap = sanitizeBigInt(tokenCap?.outCapacity ?? 0n);
+    const inCap = sanitizeBigInt(tokenCap?.inCapacity ?? 0n);
+    const feePPM = directionalFeePPM(basePpm, outCap, inCap);
     const ppmFee = (amountIn * BigInt(feePPM)) / 1_000_000n;
     return { fee: baseFee + ppmFee, feePPM };
+  }
+
+  function quoteRequiredInboundForForward(desiredForward: bigint, feePPM: number, baseFee: bigint): bigint {
+    if (desiredForward <= 0n) {
+      throw new Error(`Invalid desired forward amount: ${desiredForward}`);
+    }
+    let low = desiredForward + baseFee;
+    let high = low;
+    const forwardOut = (amountIn: bigint) => {
+      const ppmFee = (amountIn * BigInt(Math.max(0, Math.floor(feePPM)))) / 1_000_000n;
+      const totalFee = baseFee + ppmFee;
+      if (totalFee >= amountIn) throw new Error(`Fee too high for amount ${amountIn}`);
+      return amountIn - totalFee;
+    };
+    while (forwardOut(high) < desiredForward) high *= 2n;
+    while (low < high) {
+      const mid = (low + high) / 2n;
+      if (forwardOut(mid) >= desiredForward) high = mid;
+      else low = mid + 1n;
+    }
+    return low;
+  }
+
+  function extractEntityCryptoKey(entity: string): string | null {
+    if (!entity) return null;
+    if (currentReplicas) {
+      for (const [replicaKey, replica] of currentReplicas.entries()) {
+        const [replicaEntityId] = replicaKey.split(':');
+        if (replicaEntityId !== entity) continue;
+        const localKey = replica?.state?.cryptoPublicKey;
+        if (typeof localKey === 'string' && localKey.length > 0) {
+          return localKey;
+        }
+      }
+    }
+    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
+    const profile = profiles.find((p: GossipProfileView) => p?.entityId === entity) as GossipProfileView | undefined;
+    if (!profile?.metadata) return null;
+    const gossipKey = profile.metadata.cryptoPublicKey || profile.metadata.encryptionPubKey;
+    return typeof gossipKey === 'string' && gossipKey.length > 0 ? gossipKey : null;
+  }
+
+  function emitUiDebugEvent(code: string, message: string, details: Record<string, unknown> = {}) {
+    const payload = {
+      source: 'PaymentPanel',
+      code,
+      message,
+      entityId,
+      targetEntityId,
+      timestamp: Date.now(),
+      details,
+    };
+    try {
+      currentEnv?.p2p?.sendDebugEvent?.(payload);
+    } catch {
+      // Best effort only; never block UI on debug forwarding.
+    }
+  }
+
+  function assertRecipientProfileReady() {
+    if (!targetEntityId || targetEntityId === entityId) return;
+    const profiles = currentEnv?.gossip?.getProfiles?.() || [];
+    const targetProfile = profiles.find((p: GossipProfileView) => p?.entityId === targetEntityId) as GossipProfileView | undefined;
+    if (!targetProfile) {
+      const msg = `Recipient ${formatShortId(targetEntityId)} has no downloaded gossip profile`;
+      emitUiDebugEvent('PAYMENT_PREFLIGHT_PROFILE_MISSING', msg);
+      throw new Error(`${msg}. Refresh gossip/hubs and retry.`);
+    }
+    if (!extractEntityCryptoKey(targetEntityId)) {
+      const msg = `Recipient ${formatShortId(targetEntityId)} profile has no encryption key`;
+      emitUiDebugEvent('PAYMENT_PREFLIGHT_KEY_MISSING', msg, { targetProfile });
+      throw new Error(`${msg}. Cannot build encrypted HTLC route.`);
+    }
+  }
+
+  function assertRouteKeyCoverage(path: string[]) {
+    const missing: string[] = [];
+    for (const hopEntity of path.slice(1)) {
+      if (!extractEntityCryptoKey(hopEntity)) {
+        missing.push(hopEntity);
+      }
+    }
+    if (missing.length > 0) {
+      const missingShort = missing.map(formatShortId);
+      const msg = `Missing encryption keys for route hops: ${missingShort.join(', ')}`;
+      emitUiDebugEvent('PAYMENT_PREFLIGHT_ROUTE_KEYS_MISSING', msg, {
+        route: path,
+        missingEntities: missing,
+      });
+      throw new Error(msg);
+    }
   }
 
   // Enumerate simple paths up to a hop cap; for self-pay enumerate cycles back to self.
@@ -236,17 +426,38 @@
       .slice(0, MAX_ROUTES);
   }
 
+  function isValidRoutePath(path: string[], startId: string, targetId: string): boolean {
+    if (!Array.isArray(path) || path.length < 2) return false;
+    if (path[0] !== startId) return false;
+    if (path[path.length - 1] !== targetId) return false;
+
+    // Interior hops must be unique and must never include sender.
+    const interior = path.slice(1, -1);
+    if (interior.some((hop) => hop === startId)) return false;
+    if (new Set(interior).size !== interior.length) return false;
+
+    // Self routes must include enough obfuscating intermediaries.
+    if (startId === targetId) {
+      if (interior.length < MIN_SELF_INTERMEDIATES) return false;
+      if (new Set(interior).size < MIN_SELF_INTERMEDIATES) return false;
+    }
+
+    return true;
+  }
+
   async function findRoutes() {
     if (!targetEntityId || !amount) return;
 
     findingRoutes = true;
     routes = [];
     selectedRouteIndex = -1;
+    preflightError = null;
 
     try {
       await getXLN();
       const env = currentEnv;
       if (!env) throw new Error('Environment not ready');
+      assertRecipientProfileReady();
 
       const amountInSmallestUnit = parseAmountToWei(amount, 18);
       if (amountInSmallestUnit <= 0n) {
@@ -255,7 +466,8 @@
 
       if (!currentReplicas) throw new Error('Replicas not available');
       const adjacency = buildNetworkAdjacency(env, currentReplicas);
-      const foundPaths = findPathsFromGraph(adjacency, entityId, targetEntityId);
+      const foundPaths = findPathsFromGraph(adjacency, entityId, targetEntityId)
+        .filter((path) => isValidRoutePath(path, entityId, targetEntityId));
 
       if (foundPaths.length === 0) {
         if (targetEntityId === entityId) {
@@ -265,17 +477,33 @@
       }
 
       routes = foundPaths.map((path) => {
+        const intermediaries = path.slice(1, -1);
+        let downstreamAmount = amountInSmallestUnit;
+        const intermediaryFeeByEntity = new Map<string, { fee: bigint; feePPM: number }>();
+        for (let i = intermediaries.length - 1; i >= 0; i -= 1) {
+          const intermediary = intermediaries[i]!;
+          const nextHop = path[i + 2]!;
+          const { fee, feePPM } = quoteHopFee(intermediary, nextHop, tokenId, downstreamAmount);
+          const baseFee = fee - ((downstreamAmount * BigInt(feePPM)) / 1_000_000n);
+          const requiredInbound = quoteRequiredInboundForForward(downstreamAmount, feePPM, baseFee);
+          intermediaryFeeByEntity.set(intermediary, {
+            fee: requiredInbound - downstreamAmount,
+            feePPM,
+          });
+          downstreamAmount = requiredInbound;
+        }
+        const senderAmount = downstreamAmount;
         const hops = path.slice(0, -1).map((from, i) => {
-          const { fee, feePPM } = quoteHopFee(from, amountInSmallestUnit);
+          const feeInfo = intermediaryFeeByEntity.get(from) || { fee: 0n, feePPM: 0 };
           return {
             from,
             to: path[i + 1]!,
-            fee,
-            feePPM,
+            fee: feeInfo.fee,
+            feePPM: feeInfo.feePPM,
           };
         });
         const hopCount = hops.length;
-        const totalFee = hops.reduce((sum, hop) => sum + hop.fee, 0n);
+        const totalFee = senderAmount - amountInSmallestUnit;
         const obfuscationScore = Math.max(0, path.length - 2);
         const probability = Math.max(0.01, 1 / (hopCount + 1));
 
@@ -283,16 +511,26 @@
           path,
           hops,
           totalFee,
-          totalAmount: amountInSmallestUnit + totalFee,
+          senderAmount,
+          recipientAmount: amountInSmallestUnit,
           probability,
           obfuscationScore,
         };
+      }).sort((a, b) => {
+        if (a.totalFee !== b.totalFee) return a.totalFee < b.totalFee ? -1 : 1;
+        if (a.hops.length !== b.hops.length) return a.hops.length - b.hops.length;
+        return b.probability - a.probability;
       });
+
+      for (const route of routes) {
+        assertRouteKeyCoverage(route.path);
+      }
 
       if (routes.length > 0) selectedRouteIndex = 0;
     } catch (error) {
       console.error('[Send] Route finding failed:', error);
-      toasts.error(`Route finding failed: ${(error as Error)?.message || 'Unknown error'}`);
+      preflightError = (error as Error)?.message || 'Unknown route preflight error';
+      toasts.error(`Route finding failed: ${preflightError}`);
     } finally {
       findingRoutes = false;
     }
@@ -306,9 +544,12 @@
       await getXLN();
       const env = currentEnv;
       if (!env) throw new Error('Environment not ready');
+      preflightError = null;
+      assertRecipientProfileReady();
 
       const route = routes[selectedRouteIndex];
       if (!route) throw new Error('Selected route is no longer available');
+      assertRouteKeyCoverage(route.path);
 
       // Find signer
       let signerId = '1';
@@ -333,7 +574,7 @@
             type: 'htlcPayment' as const,
             data: {
               targetEntityId, tokenId,
-              amount: route.totalAmount,
+              amount: route.recipientAmount,
               route: route.path,
               description: description || undefined,
               secret, hashlock,
@@ -349,7 +590,7 @@
             type: 'directPayment' as const,
             data: {
               targetEntityId, tokenId,
-              amount: route.totalAmount,
+              amount: route.recipientAmount,
               route: route.path,
               description: description || undefined,
             },
@@ -364,7 +605,8 @@
       selectedRouteIndex = -1;
     } catch (error) {
       console.error('[Send] Payment failed:', error);
-      toasts.error(`Payment failed: ${(error as Error)?.message || 'Unknown error'}`);
+      preflightError = (error as Error)?.message || 'Unknown send error';
+      toasts.error(`Payment failed: ${preflightError}`);
     } finally {
       sendingPayment = false;
     }
@@ -372,6 +614,9 @@
 
   function handleTargetChange(e: CustomEvent) {
     targetEntityId = e.detail.value;
+    preflightError = null;
+    routes = [];
+    selectedRouteIndex = -1;
   }
 
   function handleTokenChange(e: CustomEvent) {
@@ -390,6 +635,36 @@
     disabled={findingRoutes || sendingPayment}
     on:change={handleTargetChange}
   />
+
+  {#if preflightError}
+    <div class="profile-preflight-error">{preflightError}</div>
+  {/if}
+
+  {#if targetEntityId}
+    <div class="profile-preview">
+      <div class="profile-preview-header">
+        <span>Recipient Gossip Profile</span>
+        {#if targetEntityId === entityId}
+          <span class="profile-status ok">self</span>
+        {:else if selectedTargetProfile}
+          {#if extractEntityCryptoKey(targetEntityId)}
+            <span class="profile-status ok">key ready</span>
+          {:else}
+            <span class="profile-status fail">missing key</span>
+          {/if}
+        {:else}
+          <span class="profile-status fail">not downloaded</span>
+        {/if}
+      </div>
+      {#if selectedTargetProfileJson}
+        <pre>{selectedTargetProfileJson}</pre>
+      {:else if targetEntityId === entityId}
+        <pre>{safeStringify({ entityId, note: 'Self recipient uses local entity state' }, 2)}</pre>
+      {:else}
+        <pre>{safeStringify({ entityId: targetEntityId, error: 'No gossip profile in local cache' }, 2)}</pre>
+      {/if}
+    </div>
+  {/if}
 
   <div class="row">
     <div class="amount-field">
@@ -437,33 +712,52 @@
   {#if routes.length > 0}
     <div class="routes">
       <h4>Routes ({routes.length})</h4>
-      {#each routes as route, index}
-        <label class="route-option" class:selected={selectedRouteIndex === index}>
-          <input
-            type="radio"
-            bind:group={selectedRouteIndex}
-            value={index}
-            disabled={sendingPayment}
-          />
-          <div class="route-info">
-            <span class="route-path">
-              {route.path.map(formatShortId).join(' -> ')}
-            </span>
-            <span class="route-meta">
-              {route.hops.length} hop{route.hops.length !== 1 ? 's' : ''} | obfuscation {route.obfuscationScore} | {(route.probability * 100).toFixed(0)}% success
-            </span>
-          </div>
-        </label>
-      {/each}
-
-      <button
-        class="btn-send"
-        on:click={sendPayment}
-        disabled={selectedRouteIndex < 0 || sendingPayment}
-      >
-        {sendingPayment ? 'Sending...' : 'Send Payment'}
-      </button>
+      <div class="routes-scroll">
+        {#each routes as route, index}
+          <label class="route-option" class:selected={selectedRouteIndex === index}>
+            <input
+              type="radio"
+              bind:group={selectedRouteIndex}
+              value={index}
+              disabled={sendingPayment}
+            />
+            <div class="route-info">
+              <div class="route-cards">
+                {#each route.path as hopId, hopIndex}
+                  <div class="hop-card">
+                    <EntityIdentity
+                      entityId={hopId}
+                      name={getEntityName(hopId)}
+                      compact={true}
+                      clickable={false}
+                      copyable={false}
+                      showAddress={true}
+                      size={24}
+                    />
+                  </div>
+                  {#if hopIndex < route.path.length - 1}
+                    <span class="hop-arrow">→</span>
+                  {/if}
+                {/each}
+              </div>
+              <span class="route-meta">
+                {route.hops.length} hop{route.hops.length !== 1 ? 's' : ''} | obfuscation {route.obfuscationScore} | {(route.probability * 100).toFixed(0)}% success
+              </span>
+              <span class="route-meta">
+                fee {formatToken(route.totalFee)}
+              </span>
+            </div>
+          </label>
+        {/each}
+      </div>
     </div>
+    <button
+      class="btn-send"
+      on:click={sendPayment}
+      disabled={selectedRouteIndex < 0 || sendingPayment}
+    >
+      {sendingPayment ? 'Sending...' : 'Send Payment'}
+    </button>
   {/if}
 </div>
 
@@ -564,6 +858,9 @@
   .routes {
     padding-top: 16px;
     border-top: 1px solid #292524;
+  }
+
+  .routes-scroll {
     max-height: 360px;
     overflow-y: auto;
   }
@@ -615,6 +912,26 @@
     color: #e7e5e4;
   }
 
+  .route-cards {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .hop-card {
+    padding: 6px 8px;
+    border-radius: 8px;
+    border: 1px solid #2a2623;
+    background: #171311;
+    min-width: 0;
+  }
+
+  .hop-arrow {
+    color: #7c7168;
+    font-size: 13px;
+  }
+
   .route-meta {
     font-size: 11px;
     color: #78716c;
@@ -645,5 +962,65 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     color: #d6d3d1;
+  }
+
+  .profile-preview {
+    border: 1px solid #292524;
+    border-radius: 8px;
+    background: #11100f;
+    overflow: hidden;
+  }
+
+  .profile-preview-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-bottom: 1px solid #292524;
+    color: #a8a29e;
+    font-size: 11px;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .profile-status {
+    font-size: 10px;
+    border-radius: 999px;
+    padding: 2px 8px;
+    border: 1px solid transparent;
+  }
+
+  .profile-status.ok {
+    color: #86efac;
+    border-color: #166534;
+    background: #052e16;
+  }
+
+  .profile-status.fail {
+    color: #fca5a5;
+    border-color: #7f1d1d;
+    background: #450a0a;
+  }
+
+  .profile-preview pre {
+    margin: 0;
+    max-height: 220px;
+    overflow: auto;
+    padding: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    color: #d6d3d1;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .profile-preflight-error {
+    border: 1px solid #7f1d1d;
+    background: #450a0a;
+    color: #fecaca;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12px;
   }
 </style>

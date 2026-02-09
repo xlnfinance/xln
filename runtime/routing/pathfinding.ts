@@ -151,8 +151,19 @@ export class PathFinder {
 
       const edge = getEdge(this.graph, path[i - 1]!, path[i]!, tokenId);
       if (edge) {
-        // Add fee that this hop will charge
-        amount = amount + this.calculateFee(edge, amount);
+        // Invert forward equation:
+        //   forward = inbound - fee(inbound)
+        // solve minimal inbound s.t. forward >= amount.
+        let low = amount + edge.baseFee;
+        let high = low;
+        const forwardOut = (inbound: bigint): bigint => inbound - this.calculateFee(edge, inbound);
+        while (forwardOut(high) < amount) high *= 2n;
+        while (low < high) {
+          const mid = (low + high) / 2n;
+          if (forwardOut(mid) >= amount) high = mid;
+          else low = mid + 1n;
+        }
+        amount = low;
       }
     }
 
@@ -171,23 +182,36 @@ export class PathFinder {
 
     const hops: PaymentRoute['hops'] = [];
     let totalFee = 0n;
-    let currentAmount = amount;
 
-    // Build hops forward, calculating fees
+    // Exact-receive math: compute required inbound per hop from target to source.
+    const inboundAmounts: bigint[] = new Array(path.length).fill(0n);
+    inboundAmounts[path.length - 1] = amount;
+    for (let i = path.length - 2; i >= 0; i--) {
+      const edge = getEdge(this.graph, path[i]!, path[i + 1]!, tokenId);
+      if (!edge) return null;
+      const forwardAmount = inboundAmounts[i + 1]!;
+      // Binary search inversion of forward fee equation:
+      // forward = inbound - (baseFee + inbound*ppm/1e6)
+      let low = forwardAmount + edge.baseFee;
+      let high = low;
+      const forwardOut = (inbound: bigint): bigint => inbound - this.calculateFee(edge, inbound);
+      while (forwardOut(high) < forwardAmount) high *= 2n;
+      while (low < high) {
+        const mid = (low + high) / 2n;
+        if (forwardOut(mid) >= forwardAmount) high = mid;
+        else low = mid + 1n;
+      }
+      inboundAmounts[i] = low;
+    }
+
     for (let i = 0; i < path.length - 1; i++) {
       const edge = getEdge(this.graph, path[i]!, path[i + 1]!, tokenId);
       if (!edge) return null;
-
-      const fee = this.calculateFee(edge, currentAmount);
-      hops.push({
-        from: path[i]!,
-        to: path[i + 1]!,
-        fee,
-        feePPM: edge.feePPM,
-      });
-
+      const inbound = inboundAmounts[i]!;
+      const forward = inboundAmounts[i + 1]!;
+      const fee = inbound - forward;
+      hops.push({ from: path[i]!, to: path[i + 1]!, fee, feePPM: edge.feePPM });
       totalFee += fee;
-      currentAmount += fee; // Next hop needs more to cover this fee
     }
 
     // Calculate success probability
@@ -211,11 +235,28 @@ export class PathFinder {
     tokenId: number
   ): number {
     let probability = 1.0;
+    const inboundAmounts: bigint[] = new Array(path.length).fill(0n);
+    inboundAmounts[path.length - 1] = amount;
+    for (let i = path.length - 2; i >= 0; i--) {
+      const edge = getEdge(this.graph, path[i]!, path[i + 1]!, tokenId);
+      if (!edge) continue;
+      let low = inboundAmounts[i + 1]! + edge.baseFee;
+      let high = low;
+      const forwardOut = (inbound: bigint): bigint => inbound - this.calculateFee(edge, inbound);
+      while (forwardOut(high) < inboundAmounts[i + 1]!) high *= 2n;
+      while (low < high) {
+        const mid = (low + high) / 2n;
+        if (forwardOut(mid) >= inboundAmounts[i + 1]!) high = mid;
+        else low = mid + 1n;
+      }
+      inboundAmounts[i] = low;
+    }
 
     for (let i = 0; i < path.length - 1; i++) {
       const edge = getEdge(this.graph, path[i]!, path[i + 1]!, tokenId);
       if (edge && edge.capacity > 0n) {
-        const utilization = Number(amount) / Number(edge.capacity);
+        const hopAmount = inboundAmounts[i]!;
+        const utilization = Number(hopAmount) / Number(edge.capacity);
         // Higher utilization = lower success probability
         // Using exponential decay: e^(-2 * utilization)
         probability *= Math.exp(-2 * utilization);

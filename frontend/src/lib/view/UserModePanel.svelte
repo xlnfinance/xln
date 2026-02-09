@@ -13,7 +13,7 @@
   import type { Writable } from 'svelte/store';
   import { writable, get } from 'svelte/store';
   import { activeVault, vaultOperations, allVaults } from '$lib/stores/vaultStore';
-  import { entityPositions, xlnFunctions, xlnInstance, getXLN } from '$lib/stores/xlnStore';
+  import { entityPositions, xlnFunctions, xlnInstance, getXLN, enqueueAndProcess } from '$lib/stores/xlnStore';
   import { jmachineOperations } from '$lib/stores/jmachineStore';
   import { runtimes, activeRuntimeId } from '$lib/stores/runtimeStore';
   import { appStateOperations } from '$lib/stores/appStateStore';
@@ -77,6 +77,7 @@
   let activeInlinePanel = $state<InlinePanel>('none');
   const selfEntityChecked = new Set<string>();
   const selfEntityInFlight = new Set<string>();
+  let ensureSelfEntitiesEpoch = 0;
 
   // Reactive: signer info from vault
   const signer = $derived($activeVault?.signers?.[0] || null);
@@ -246,7 +247,7 @@
       }
 
       const xln = await getXLN();
-      await xln.applyRuntimeInput(env, {
+      await enqueueAndProcess(env, {
         runtimeTxs: [{
           type: 'importJ',
           data: {
@@ -270,6 +271,7 @@
   }
 
   async function ensureSelfEntities() {
+    const runEpoch = ++ensureSelfEntitiesEpoch;
     const env = get(isolatedEnv);
     const vault = get(activeVault);
 
@@ -291,10 +293,18 @@
       jurisdiction = names[0] || null;
     }
 
+    const activeRuntimeSigner = typeof env.runtimeId === 'string' ? env.runtimeId.toLowerCase() : '';
+    if (!activeRuntimeSigner) {
+      console.warn('[ensureSelfEntities] Missing env.runtimeId - skip auto-entity ensure');
+      return;
+    }
+
     for (const signerEntry of vault.signers) {
+      if (runEpoch !== ensureSelfEntitiesEpoch) return;
       const signerAddress = signerEntry.address;
 
       if (!signerAddress) continue;
+      if (signerAddress.toLowerCase() !== activeRuntimeSigner) continue;
       if (selfEntityChecked.has(signerAddress) || selfEntityInFlight.has(signerAddress)) continue;
 
       const existing = findReplicaBySigner(env, signerAddress);
@@ -316,18 +326,37 @@
 
       selfEntityInFlight.add(signerAddress);
       try {
+        // Re-check right before creation to avoid duplicate create on reactive races.
+        const alreadyNow = findReplicaBySigner(env, signerAddress);
+        if (alreadyNow?.entityId) {
+          if (!signerEntry.entityId) {
+            vaultOperations.setSignerEntity(signerEntry.index, alreadyNow.entityId);
+          }
+          selfEntityChecked.add(signerAddress);
+          if (!selectedEntityId) {
+            viewMode = 'entity';
+            selectedEntityId = alreadyNow.entityId;
+            selectedSignerId = signerAddress;
+          }
+          continue;
+        }
+
         const entityId = await createNumberedSelfEntity(env, signerAddress, jurisdiction || undefined);
+        if (runEpoch !== ensureSelfEntitiesEpoch) return;
         if (entityId) {
-          console.log(`[ensureSelfEntities] ✅ Entity created: ${entityId.slice(0, 10)} for signer ${signerAddress.slice(0, 10)}`);
-          vaultOperations.setSignerEntity(signerEntry.index, entityId);
+          // Resolve canonical entity by signer after create to prevent duplicate/late-selection drift.
+          const canonical = findReplicaBySigner(env, signerAddress);
+          const finalEntityId = canonical?.entityId || entityId;
+          console.log(`[ensureSelfEntities] ✅ Entity created: ${finalEntityId.slice(0, 10)} for signer ${signerAddress.slice(0, 10)}`);
+          vaultOperations.setSignerEntity(signerEntry.index, finalEntityId);
           isolatedEnv.set(env);
           selfEntityChecked.add(signerAddress);
 
           // Auto-select entity after creation
           viewMode = 'entity';
-          selectedEntityId = entityId;
+          selectedEntityId = finalEntityId;
           selectedSignerId = signerAddress;
-          console.log('[ensureSelfEntities] Auto-selected entity:', entityId.slice(0, 10));
+          console.log('[ensureSelfEntities] Auto-selected entity:', finalEntityId.slice(0, 10));
         } else {
           console.error('[ensureSelfEntities] ❌ NULL entityId for signer:', signerAddress.slice(0, 10));
         }
@@ -445,7 +474,7 @@
     isCreatingJMachine = true;
     try {
       const xln = await getXLN();
-      await xln.applyRuntimeInput(env, {
+      await enqueueAndProcess(env, {
         runtimeTxs: [{
           type: 'importJ',
           data: { name, chainId, ticker, rpcs }

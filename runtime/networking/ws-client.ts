@@ -1,7 +1,7 @@
 import type { RuntimeInput, RoutedEntityInput } from '../types';
 import { deserializeWsMessage, makeHelloNonce, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { signDigest } from '../account-crypto';
-import { encryptJSON, decryptJSON } from './p2p-crypto';
+import { encryptJSON, decryptJSON, pubKeyToHex } from './p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 
 // Separate interfaces for browser and Node.js WebSocket implementations
@@ -76,6 +76,7 @@ const createWs = async (url: string): Promise<WebSocketLike> => {
 
 export class RuntimeWsClient {
   private static readonly RECONNECT_DELAY_MS = 5000;
+  private static readonly MAX_RECONNECT_ATTEMPTS = 3;
   private ws: WebSocketLike | null = null;
   private closed = false;
   private connecting = false;
@@ -176,6 +177,14 @@ export class RuntimeWsClient {
     if (this.closed || this.connecting || this.isOpen()) return;
     if (this.reconnectTimer) return;
     this.reconnectAttempts += 1;
+    if (this.reconnectAttempts > RuntimeWsClient.MAX_RECONNECT_ATTEMPTS) {
+      const err = new Error(
+        `WS_RECONNECT_EXHAUSTED: ${this.options.url} failed after ${RuntimeWsClient.MAX_RECONNECT_ATTEMPTS} attempts`
+      );
+      console.error(`[WS] Reconnect exhausted for ${this.options.url}`);
+      this.options.onError?.(err);
+      return;
+    }
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       if (this.closed) return;
@@ -195,6 +204,7 @@ export class RuntimeWsClient {
         this.sendRaw({
           type: 'hello',
           from: this.options.runtimeId,
+          fromEncryptionPubKey: pubKeyToHex(this.options.encryptionKeyPair.publicKey),
           timestamp,
           auth: { nonce, signature, timestamp },
         });
@@ -203,7 +213,12 @@ export class RuntimeWsClient {
         this.options.onError?.(error as Error);
       }
     }
-    this.sendRaw({ type: 'hello', from: this.options.runtimeId, timestamp: nextTimestamp() });
+    this.sendRaw({
+      type: 'hello',
+      from: this.options.runtimeId,
+      fromEncryptionPubKey: pubKeyToHex(this.options.encryptionKeyPair.publicKey),
+      timestamp: nextTimestamp(),
+    });
   }
 
   private async handleMessage(raw: string | Buffer | ArrayBuffer) {
@@ -321,6 +336,7 @@ export class RuntimeWsClient {
       type: 'entity_input',
       id: makeMessageId(),
       from: this.options.runtimeId,
+      fromEncryptionPubKey: pubKeyToHex(this.options.encryptionKeyPair.publicKey),
       to,
       timestamp: nextTimestamp(),
       payload,

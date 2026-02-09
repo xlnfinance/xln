@@ -45,10 +45,11 @@ export default defineConfig({
 
   // Run dev server before tests
   webServer: {
-    command: 'cd frontend && SKIP_TYPECHECK=1 bun run dev',
+    // Keep runtime bundle in sync with source before launching frontend dev server.
+    command: './scripts/build-runtime.sh && cd frontend && SKIP_TYPECHECK=1 bun run dev',
     url: 'https://localhost:8080',
     ignoreHTTPSErrors: true,  // Self-signed cert
-    reuseExistingServer: true,  // Reuse if already running (from dev-full.sh)
+    reuseExistingServer: true,
     timeout: 120 * 1000,
   },
 });

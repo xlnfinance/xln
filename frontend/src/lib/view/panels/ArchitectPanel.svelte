@@ -89,6 +89,10 @@
     return xln.getActiveJAdapter?.($isolatedEnv) ?? null;
   }
 
+  async function ingressRuntimeInput(XLN: any, input: { runtimeTxs: any[]; entityInputs: any[] }): Promise<void> {
+    XLN.enqueueRuntimeInput($isolatedEnv, input);
+  }
+
   /** Guard function - blocks mutations when viewing history */
   function requireLiveMode(action: string): boolean {
     if (isHistoryMode) {
@@ -212,7 +216,7 @@
       console.log(`[Architect] Mint emitted ${events.length} events`);
 
       // Process to capture the J-events and create a new frame
-      await XLN.process($isolatedEnv, []);
+      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [] });
 
       lastAction = `✅ Minted ${mintAmount} to entity (on-chain)`;
 
@@ -272,7 +276,7 @@
       console.log(`[Architect] R2R emitted ${events.length} events`);
 
       // Process the environment to create a new frame with the J-events
-      await XLN.process($isolatedEnv, []);
+      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [] });
 
       lastAction = `✅ R2R sent: ${r2rAmount} units (on-chain)`;
 
@@ -915,7 +919,7 @@
         lastAction = 'Connecting to testnet...';
 
         // Auto-import testnet (prod anvil) - shared J-machine
-        await XLN.applyRuntimeInput($isolatedEnv, {
+        await ingressRuntimeInput(XLN, {
           runtimeTxs: [{
             type: 'importJ',
             data: {
@@ -929,7 +933,7 @@
         });
 
         // Process queued importReplica transactions
-        await XLN.applyRuntimeInput($isolatedEnv, {
+        await ingressRuntimeInput(XLN, {
           runtimeTxs: [],
           entityInputs: []
         });
@@ -986,7 +990,7 @@
       }
 
       // Import all entities
-      await XLN.applyRuntimeInput($isolatedEnv, {
+      await ingressRuntimeInput(XLN, {
         runtimeTxs: entities,
         entityInputs: []
       });
@@ -1026,7 +1030,7 @@
         const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
 
         if (replica) {
-          await XLN.process($isolatedEnv, [{
+          XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
             entityId,
             signerId: replica.signerId,
             entityTxs: [{
@@ -1049,7 +1053,7 @@
                 transactionHash: '0x' + Array(64).fill('0').join('')
               }
             }]
-          }]);
+          }] });
         }
       }
 
@@ -1103,19 +1107,19 @@
 
       // Open account if needed
       if (!hasAccount) {
-        await XLN.process($isolatedEnv, [{
+        XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
           entityId: from,
           signerId: fromReplica.signerId,
           entityTxs: [{
             type: 'openAccount',
             data: { targetEntityId: to }
           }]
-        }]);
+        }] });
       }
 
       // Send payment
       const amount = Math.floor(Math.random() * 100000) + 10000; // 10K-110K
-      await XLN.process($isolatedEnv, [{
+      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
         entityId: from,
         signerId: fromReplica.signerId,
         entityTxs: [{
@@ -1128,7 +1132,7 @@
             description: 'Random banker demo payment'
           }
         }]
-      }]);
+      }] });
 
       lastAction = ` Payment: ${shortAddress(from)} → ${shortAddress(to)} ($${(amount/1000).toFixed(0)}K)`;
 
@@ -1228,7 +1232,7 @@
         }]
       });
 
-      await XLN.process($isolatedEnv, txBatch);
+      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: txBatch });
 
       lastAction = ` 20% Transfer: ${shortAddress(from!)} → ${shortAddress(to!)} ($${(Number(amount)/1000).toFixed(0)}K)`;
 
@@ -1291,7 +1295,7 @@
       }
 
       // Batch create all 100 entities in ONE frame
-      await XLN.process($isolatedEnv, entityInputs);
+      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: entityInputs });
 
       // Get created entity IDs
       const newReplicas = Array.from($isolatedEnv.eReplicas.entries()) as [string, any][];
@@ -1568,8 +1572,8 @@
     }
 
     // Import all entities
-    console.log('[createEntities] Importing', entities.length, 'entities via applyRuntimeInput...');
-    await XLN.applyRuntimeInput($isolatedEnv, {
+    console.log('[createEntities] Importing', entities.length, 'entities via runtime ingress queue...');
+    await ingressRuntimeInput(XLN, {
       runtimeTxs: entities,
       entityInputs: []
     });
@@ -1616,7 +1620,7 @@
 
     // Single batch: all entities funded in ONE frame
     if (fundingInputs.length > 0) {
-      await XLN.process($isolatedEnv, fundingInputs);
+      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: fundingInputs });
       console.log('[createEntities]  Funded', fundingInputs.length, 'entities in 1 frame');
     }
 
@@ -1689,7 +1693,7 @@
 
     // Single batch: all accounts opened in ONE frame
     if (accountInputs.length > 0) {
-      await XLN.process($isolatedEnv, accountInputs);
+      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: accountInputs });
       console.log('[createEntities]  Opened', accountInputs.length, 'accounts in 1 frame');
     }
 
@@ -1832,7 +1836,7 @@
       }
 
       // Import all entities
-      await XLN.applyRuntimeInput($isolatedEnv, {
+      await ingressRuntimeInput(XLN, {
         runtimeTxs: entities,
         entityInputs: []
       });
@@ -1842,7 +1846,7 @@
       const fedReplica = fedReplicaKey ? $isolatedEnv.eReplicas.get(fedReplicaKey) : null;
 
       if (fedReplica) {
-        await XLN.process($isolatedEnv, [{
+        XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
           entityId: fedEntityId,
           signerId: fedReplica.signerId,
           entityTxs: [{
@@ -1865,7 +1869,7 @@
               transactionHash: '0x' + Array(64).fill('0').join('')
             }
           }]
-        }]);
+        }] });
       }
 
       // FUNDING TIER 2: Banks with $1M each
@@ -1874,7 +1878,7 @@
         const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
 
         if (replica) {
-          await XLN.process($isolatedEnv, [{
+          XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
             entityId: bankData.entityId,
             signerId: replica.signerId,
             entityTxs: [{
@@ -1897,7 +1901,7 @@
                 transactionHash: '0x' + Array(64).fill('0').join('')
               }
             }]
-          }]);
+          }] });
         }
       }
 
@@ -1909,7 +1913,7 @@
         const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
 
         if (replica) {
-          await XLN.process($isolatedEnv, [{
+          XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
             entityId: entity.entityId,
             signerId: replica.signerId,
             entityTxs: [{
@@ -1932,7 +1936,7 @@
                 transactionHash: '0x' + Array(64).fill('0').join('')
               }
             }]
-          }]);
+          }] });
         }
       }
 
@@ -1942,14 +1946,14 @@
         const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
 
         if (replica) {
-          await XLN.process($isolatedEnv, [{
+          XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
             entityId: bankData.entityId,
             signerId: replica.signerId,
             entityTxs: [{
               type: 'openAccount',
               data: { targetEntityId: fedEntityId }
             }]
-          }]);
+          }] });
         }
       }
 
@@ -1967,14 +1971,14 @@
           const custReplica = custReplicaKey ? $isolatedEnv.eReplicas.get(custReplicaKey) : null;
 
           if (custReplica) {
-            await XLN.process($isolatedEnv, [{
+            XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
               entityId: custEntity.entityId,
               signerId: custReplica.signerId,
               entityTxs: [{
                 type: 'openAccount',
                 data: { targetEntityId: parentBank.entityId }
               }]
-            }]);
+            }] });
           }
         }
       }
@@ -2080,7 +2084,7 @@
         const currentReserves = fedReplica.state?.reserves?.get(0) || 0n;
         const newBalance = BigInt(currentReserves) + mintAmount;
 
-        await XLN.process($isolatedEnv, [{
+        XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
           entityId: fedId,
           signerId: fedReplica.signerId,
           entityTxs: [{
@@ -2103,7 +2107,7 @@
               transactionHash: '0x' + Array(64).fill('0').join('')
             }
           }]
-        }]);
+        }] });
 
         console.log(`[Smart QE] 💵 Fed printed $${(Number(mintAmount)/1000).toFixed(0)}K (avg: $${(Number(averageReserves)/1000).toFixed(0)}K → target: $${(Number(targetAverage)/1000).toFixed(0)}K)`);
       }
@@ -2147,18 +2151,18 @@
 
       if (!hasAccount) {
         // Open account first
-        await XLN.process($isolatedEnv, [{
+        XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
           entityId: fromId,
           signerId: fromReplica.signerId,
           entityTxs: [{
             type: 'openAccount',
             data: { targetEntityId: toId }
           }]
-        }]);
+        }] });
       }
 
       // Send 20% payment
-      await XLN.process($isolatedEnv, [{
+      XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
         entityId: fromId,
         signerId: fromReplica.signerId,
         entityTxs: [{
@@ -2171,7 +2175,7 @@
             description: `20% circular payment`
           }
         }]
-      }]);
+      }] });
     }
   }
 
@@ -2253,7 +2257,7 @@
           const fedReplica = fedKey ? $isolatedEnv.eReplicas.get(fedKey) : null;
 
           if (fedReplica) {
-            await XLN.process($isolatedEnv, [{
+            XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
               entityId: fedId,
               signerId: fedReplica.signerId,
               entityTxs: [{
@@ -2266,7 +2270,7 @@
                   description: `Fed discount window lending`
                 }
               }]
-            }]);
+            }] });
 
             console.log(`[Fed Loop]  →  Fed lent $${(amount/1000).toFixed(0)}K to bank`);
           }
@@ -2279,7 +2283,7 @@
           const bankReplica = bankKey ? $isolatedEnv.eReplicas.get(bankKey) : null;
 
           if (bankReplica) {
-            await XLN.process($isolatedEnv, [{
+            XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
               entityId: bank,
               signerId: bankReplica.signerId,
               entityTxs: [{
@@ -2292,7 +2296,7 @@
                   description: `Bank repaying Fed loan`
                 }
               }]
-            }]);
+            }] });
 
             console.log(`[Fed Loop]  →  Bank repaid $${(amount/1000).toFixed(0)}K to Fed`);
           }
@@ -2315,18 +2319,18 @@
 
             if (!hasAccount) {
               // Open account first
-              await XLN.process($isolatedEnv, [{
+              XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
                 entityId: from,
                 signerId: fromReplica.signerId,
                 entityTxs: [{
                   type: 'openAccount',
                   data: { targetEntityId: to }
                 }]
-              }]);
+              }] });
             }
 
             // Send payment
-            await XLN.process($isolatedEnv, [{
+            XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
               entityId: from,
               signerId: fromReplica.signerId,
               entityTxs: [{
@@ -2339,7 +2343,7 @@
                   description: `Interbank settlement`
                 }
               }]
-            }]);
+            }] });
 
             console.log(`[Fed Loop]  →  Interbank payment $${(amount/1000).toFixed(0)}K`);
           }
@@ -2480,7 +2484,7 @@
 
       // Step 1: Import J-machine
       const isBrowserVM = newXlnomyEvmType === 'browservm';
-      await XLN.applyRuntimeInput($isolatedEnv, {
+      await ingressRuntimeInput(XLN, {
         runtimeTxs: [{
           type: 'importJ',
           data: {
@@ -2494,7 +2498,7 @@
       });
 
       // Step 2: Process the queued importReplica transactions
-      await XLN.applyRuntimeInput($isolatedEnv, {
+      await ingressRuntimeInput(XLN, {
         runtimeTxs: [],
         entityInputs: []
       });
@@ -2592,7 +2596,7 @@
       };
 
       // Create entity via importReplica RuntimeTx
-      await XLN.applyRuntimeInput($isolatedEnv, {
+      await ingressRuntimeInput(XLN, {
         runtimeTxs: [{
           type: 'importReplica',
           entityId,

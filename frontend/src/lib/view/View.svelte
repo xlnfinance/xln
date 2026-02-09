@@ -104,7 +104,7 @@
 
   const unsubRuntimeErrorToasts = localEnvStore.subscribe((env) => {
     if (!env?.frameLogs || !Array.isArray(env.frameLogs)) return;
-    const runtimeKey = String(env.runtimeId || 'local');
+    const runtimeKey = String(env.runtimeId || 'unknown');
     const lastSeen = lastSeenFrameLogIdByRuntime.get(runtimeKey) ?? -1;
     let newLastSeen = lastSeen;
 

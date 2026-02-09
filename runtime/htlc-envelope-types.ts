@@ -26,6 +26,7 @@ export interface HtlcEnvelope {
   finalRecipient?: boolean;   // Is this the last hop?
   secret?: string;            // Only in final recipient's envelope
   innerEnvelope?: string;     // Encoded envelope for next hop (encrypted or JSON)
+  forwardAmount?: string;     // Exact amount this hop must forward to next hop
 }
 
 export interface HtlcRoutingContext {
@@ -61,7 +62,8 @@ export async function createOnionEnvelopes(
   route: string[],
   secret: string,
   entityPubKeys?: Map<string, string>,
-  crypto?: CryptoProvider
+  crypto?: CryptoProvider,
+  hopForwardAmounts?: Map<string, bigint>
 ): Promise<HtlcEnvelope> {
   if (route.length < 2) {
     throw new Error('Route must have at least sender and recipient');
@@ -132,7 +134,10 @@ export async function createOnionEnvelopes(
 
     const layerPayload = safeStringify({
       nextHop,
-      innerEnvelope: encryptedBlob
+      innerEnvelope: encryptedBlob,
+      ...(hopForwardAmounts?.has(currentHop)
+        ? { forwardAmount: hopForwardAmounts.get(currentHop)!.toString() }
+        : {})
     });
 
     if (crypto && entityPubKeys) {
@@ -192,6 +197,17 @@ export function validateEnvelope(envelope: HtlcEnvelope): boolean {
     }
     if (!envelope.innerEnvelope) {
       throw new Error('Intermediary envelope must have innerEnvelope');
+    }
+    if (typeof envelope.forwardAmount !== 'string' || envelope.forwardAmount.length === 0) {
+      throw new Error('Intermediary envelope must have forwardAmount');
+    }
+    try {
+      const forwardAmount = BigInt(envelope.forwardAmount);
+      if (forwardAmount <= 0n) {
+        throw new Error('Intermediary envelope forwardAmount must be > 0');
+      }
+    } catch {
+      throw new Error('Intermediary envelope forwardAmount must be a valid bigint string');
     }
     if (envelope.secret) {
       throw new Error('Intermediary envelope must not have secret (privacy leak!)');

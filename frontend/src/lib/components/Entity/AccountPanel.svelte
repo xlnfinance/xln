@@ -244,7 +244,7 @@
         }]
       };
 
-      await xln.process(env, [paymentInput]);
+      xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [paymentInput] });
       console.log(`✅ Payment sent: ${activeXlnFunctions?.formatTokenAmount(selectedTokenId, paymentAmountBigInt)}`);
 
       // Reset form
@@ -277,7 +277,7 @@
         }]
       };
 
-      await xln.process(env, [adjustmentInput]);
+      xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [adjustmentInput] });
       console.log(`✅ Credit adjusted to: ${creditAdjustment}`);
 
       creditAdjustment = 0;

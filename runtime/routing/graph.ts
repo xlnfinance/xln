@@ -4,6 +4,8 @@
  */
 
 import type { Profile } from '../networking/gossip';
+import { getTokenCapacity } from './capacity';
+import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from './fees';
 
 export interface ChannelEdge {
   from: string;
@@ -25,21 +27,6 @@ export interface NetworkGraph {
     inbound: bigint;
   }>;
 }
-
-const normalizeBigInt = (value: unknown): bigint => {
-  if (typeof value === 'bigint') return value;
-  if (typeof value === 'number' && Number.isFinite(value)) return BigInt(Math.floor(value));
-  if (typeof value === 'string' && value.trim() !== '') {
-    const match = value.match(/^BigInt\(([-\d]+)\)$/);
-    const raw = match ? match[1] : value;
-    try {
-      return BigInt(raw);
-    } catch {
-      return 0n;
-    }
-  }
-  return 0n;
-};
 
 /**
  * Build network graph from gossip profiles
@@ -73,7 +60,7 @@ export function buildNetworkGraph(
         if (!nodes.has(toEntity)) continue;
 
         // Get capacities for this token
-        const tokenCapacity = account.tokenCapacities.get(tokenId);
+        const tokenCapacity = getTokenCapacity(account.tokenCapacities, tokenId);
         if (!tokenCapacity || tokenCapacity.outCapacity === 0n) continue;
 
         // Get fee configuration from profile with explicit validation
@@ -81,8 +68,13 @@ export function buildNetworkGraph(
         if (!metadata) {
           console.warn(`🚨 ROUTING-SAFETY: Entity ${fromEntity} has no metadata, using safe defaults`);
         }
-        const baseFee = normalizeBigInt(metadata?.baseFee ?? 0n); // Explicit null/undefined check
-        const feePPM = metadata?.routingFeePPM ?? 100; // Explicit default: 100 PPM (0.01%)
+        const baseFee = sanitizeBaseFee(metadata?.baseFee ?? 0n);
+        const basePpm = sanitizeFeePPM(metadata?.routingFeePPM ?? 100, 100);
+        const feePPM = calculateDirectionalFeePPM(
+          basePpm,
+          tokenCapacity.outCapacity,
+          tokenCapacity.inCapacity
+        );
 
         // Create edge
         const edge: ChannelEdge = {

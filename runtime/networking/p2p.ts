@@ -27,7 +27,7 @@ import type { Profile } from './gossip';
 import { RuntimeWsClient } from './ws-client';
 import { buildEntityProfile, mergeProfileWithExisting } from './gossip-helper';
 import { extractEntityId } from '../ids';
-import { getCachedSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
+import { getCachedSignerPrivateKey, getCachedSignerPublicKey, registerSignerPublicKey } from '../account-crypto';
 import { signProfile, verifyProfileSignature } from './profile-signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
@@ -90,6 +90,10 @@ const isHexPublicKey = (value: string): boolean => {
 
 const normalizeId = (value: string): string => value.toLowerCase();
 const normalizeRuntimeId = (value: string): string => value.toLowerCase();
+const getReplicaSignerId = (replicaKey: string): string => {
+  const idx = replicaKey.lastIndexOf(':');
+  return idx === -1 ? '' : replicaKey.slice(idx + 1);
+};
 
 const GOSSIP_POLL_MS = 5000; // Poll relay every 5s by default to avoid relay spam
 
@@ -318,9 +322,31 @@ export class RuntimeP2P {
 
     const client = this.getActiveClient();
     if (client && client.isOpen()) {
-      const sent = client.sendEntityInput(targetRuntimeId, input);
-      if (sent) return;
-      console.warn(`P2P-SEND-FAILED: Client.send returned false for ${targetRuntimeId.slice(0,10)}`);
+      try {
+        const sent = client.sendEntityInput(targetRuntimeId, input);
+        if (sent) return;
+        console.warn(`P2P-SEND-FAILED: Client.send returned false for ${targetRuntimeId.slice(0,10)}`);
+      } catch (error) {
+        const message = (error as Error).message || String(error);
+        if (message.includes('P2P_NO_PUBKEY')) {
+          this.sendDebugEvent({
+            level: 'warn',
+            code: 'P2P_NO_PUBKEY_QUEUE',
+            message,
+            targetRuntimeId,
+            entityId: input.entityId,
+          });
+          this.refreshGossip();
+        } else {
+          this.sendDebugEvent({
+            level: 'error',
+            code: 'P2P_SEND_THROW',
+            message,
+            targetRuntimeId,
+            entityId: input.entityId,
+          });
+        }
+      }
     } else {
       console.warn(`P2P-NO-CLIENT: No active relay connection, queueing for ${targetRuntimeId.slice(0,10)}`);
     }
@@ -518,6 +544,13 @@ export class RuntimeP2P {
       try {
         entityId = extractEntityId(replicaKey);
       } catch {
+        continue;
+      }
+      const replicaSignerId = getReplicaSignerId(replicaKey);
+      // Only advertise entities we can actually sign for.
+      // This excludes imported/foreign replicas in browser runtimes while still
+      // allowing server runtimes (runtimeId may differ from signer addresses).
+      if (!replicaSignerId || !getCachedSignerPrivateKey(replicaSignerId)) {
         continue;
       }
       const normalizedEntityId = normalizeId(entityId);

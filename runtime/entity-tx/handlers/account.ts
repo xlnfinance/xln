@@ -7,6 +7,7 @@ import { formatEntityId, HEAVY_LOGS } from '../../utils';
 import { isLeftEntity } from '../../entity-id-utils';
 import { batchAddRevealSecret, initJBatch } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
+import { sanitizeBaseFee } from '../../routing/fees';
 
 // === PURE EVENT TYPES ===
 // Events returned by handlers, applied by entity orchestrator
@@ -464,17 +465,41 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
               if (nextAccount) {
                 // Calculate forwarded amounts/timelocks with safety checks
-                const { calculateHtlcFee, calculateHtlcFeeAmount } = await import('../../htlc-utils');
+                const localEntityId = String(newState.entityId || '').toLowerCase();
+                const localProfile = env.gossip?.getProfiles?.()?.find((p: any) =>
+                  String(p?.entityId || '').toLowerCase() === localEntityId
+                );
+                const baseFee = sanitizeBaseFee(localProfile?.metadata?.baseFee ?? 0n);
 
                 let forwardAmount: bigint;
                 let feeAmount: bigint;
 
-                try {
-                  forwardAmount = calculateHtlcFee(lock.amount);
-                  feeAmount = calculateHtlcFeeAmount(lock.amount);
-                } catch (e) {
-                  console.log(`❌ HTLC: Fee calculation failed for amount ${lock.amount}: ${e instanceof Error ? e.message : String(e)}`);
-                  cancelInboundLock(`amount_too_small`);
+                const envelopeForwardAmountRaw = (envelope as { forwardAmount?: unknown })?.forwardAmount;
+                if (typeof envelopeForwardAmountRaw === 'string' && envelopeForwardAmountRaw.length > 0) {
+                  try {
+                    forwardAmount = BigInt(envelopeForwardAmountRaw);
+                  } catch {
+                    console.log(`❌ HTLC: Invalid envelope forwardAmount=${String(envelopeForwardAmountRaw)}`);
+                    cancelInboundLock(`invalid_forward_amount`);
+                    continue;
+                  }
+                  if (forwardAmount <= 0n || forwardAmount > lock.amount) {
+                    console.log(`❌ HTLC: Envelope forwardAmount out of range inbound=${lock.amount} forward=${forwardAmount}`);
+                    cancelInboundLock(`invalid_forward_amount`);
+                    continue;
+                  }
+                  feeAmount = lock.amount - forwardAmount;
+                } else {
+                  // Exact-receive invariant: intermediary hops must use sender-quoted
+                  // forwardAmount from onion envelope; never recompute locally.
+                  console.log(`❌ HTLC: Missing envelope forwardAmount for intermediary hop`);
+                  cancelInboundLock(`missing_forward_amount`);
+                  continue;
+                }
+
+                if (feeAmount < baseFee) {
+                  console.log(`❌ HTLC: Fee floor violation inbound=${lock.amount} forward=${forwardAmount} fee=${feeAmount} minBaseFee=${baseFee}`);
+                  cancelInboundLock(`fee_below_base`);
                   continue;
                 }
 

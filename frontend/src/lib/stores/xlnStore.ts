@@ -12,8 +12,8 @@ let unregisterEnvChange: (() => void) | null = null;
 async function getXLN(): Promise<XLNModule> {
   if (XLN) return XLN;
 
-  // Keep a stable module URL so all frontend imports share one runtime module instance.
-  const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
+  // Always cache-bust runtime module per page load; stale runtime.js caused prod-debug desync.
+  const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
   XLN = await import(/* @vite-ignore */ runtimeUrl) as XLNModule;
   xlnInstance.set(XLN);
 
@@ -45,6 +45,17 @@ function exposeGlobalDebugObjects() {
     console.log('  window.xlnErrorLog - Logs to Settings error panel');
     console.log('  Usage: window.XLN.deriveDelta(delta, true).ascii');
     console.log('  Usage: Get current env value with xlnEnv subscribe pattern');
+
+    // Ensure vault controls are reachable in production E2E/debug sessions
+    // even before RuntimeCreation panel imports vaultStore.
+    import('./vaultStore').then(({ vaultOperations, runtimesState }) => {
+      // @ts-ignore - intentional debug/test surface
+      window.vaultOperations = vaultOperations;
+      // @ts-ignore - intentional debug/test surface
+      window.runtimesState = runtimesState;
+    }).catch((err) => {
+      console.warn('[xlnStore] Failed to expose vaultStore globals:', err);
+    });
   }
 }
 
@@ -268,8 +279,17 @@ export function getEnv(): Env | null {
 // Wrapper for process() that auto-injects runtimeDelay from settings
 export async function processWithDelay(env: Env, inputs?: unknown[]): Promise<Env> {
   const xln = await getXLN();
-  const delay = get(settings).runtimeDelay;
-  return await xln.process(env, inputs, delay);
+  xln.enqueueRuntimeInput(env, {
+    runtimeTxs: [],
+    entityInputs: (inputs as any[]) ?? []
+  });
+  return env;
+}
+
+export async function enqueueAndProcess(env: Env, input: { runtimeTxs: any[]; entityInputs: any[] }): Promise<Env> {
+  const xln = await getXLN();
+  xln.enqueueRuntimeInput(env, input as any);
+  return env;
 }
 
 // === FRONTEND UTILITY FUNCTIONS ===

@@ -36,6 +36,8 @@ const defaultState: RuntimesState = {
 
 // Storage key
 const VAULT_STORAGE_KEY = 'xln-vaults';
+const normalizeRuntimeId = (value: string | null | undefined): string =>
+  String(value || '').trim().toLowerCase();
 
 // Main store
 export const runtimesState = writable<RuntimesState>(defaultState);
@@ -74,6 +76,22 @@ function derivePrivateKey(seed: string, index: number): string {
   const hdNode = HDNodeWallet.fromMnemonic(mnemonic, ETH_PATH_PREFIX + index);
   return hdNode.privateKey;
 }
+
+const findRuntimeByIdCaseInsensitive = (
+  runtimeMap: Record<string, Runtime>,
+  requestedId: string | null | undefined,
+): { key: string; runtime: Runtime } | null => {
+  if (!requestedId) return null;
+  const direct = runtimeMap[requestedId];
+  if (direct) return { key: requestedId, runtime: direct };
+  const requestedLower = requestedId.toLowerCase();
+  for (const [key, runtime] of Object.entries(runtimeMap)) {
+    if (key.toLowerCase() === requestedLower || runtime.id.toLowerCase() === requestedLower) {
+      return { key, runtime };
+    }
+  }
+  return null;
+};
 
 type JurisdictionConfig = {
   name: string;
@@ -210,8 +228,166 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
   }
 }
 
+function runtimeToEntry(runtime: Runtime, env: any) {
+  const runtimeId = normalizeRuntimeId(runtime.id);
+  return {
+    id: runtimeId,
+    type: 'local' as const,
+    label: runtime.label,
+    env,
+    seed: runtime.seed,
+    vaultId: runtimeId,
+    permissions: 'write' as const,
+    status: 'connected' as const,
+  };
+}
+
+async function registerRuntimeSignerKeys(runtime: Runtime, xln: any): Promise<void> {
+  for (const signer of runtime.signers) {
+    const privateKey = derivePrivateKey(runtime.seed, signer.index);
+    const privateKeyBytes = new Uint8Array(
+      privateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
+    );
+    xln.registerSignerKey(signer.address, privateKeyBytes);
+  }
+}
+
+async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: any, strictRestore = false): Promise<any> {
+  const runtimeIdLower = normalizeRuntimeId(runtime.id);
+  const runtimeSeed = runtime.seed;
+  let env: any = null;
+
+  try {
+    if (xln.loadEnvFromDB) {
+      console.log('[VaultStore] Loading env from DB namespace:', runtimeIdLower);
+      env = await xln.loadEnvFromDB(runtimeIdLower, runtimeSeed);
+    }
+  } catch (error) {
+    if (strictRestore) {
+      throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    console.warn('[VaultStore] ⚠️ Failed to load env from DB, falling back to fresh import:', error);
+    env = null;
+  }
+
+  if (!env && strictRestore) {
+    throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: persisted env missing`);
+  }
+
+  if (env && (!env.jReplicas || env.jReplicas.size === 0)) {
+    if (strictRestore) {
+      throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: restored env missing jReplicas`);
+    }
+    console.warn('[VaultStore] ⚠️ Restored env missing J-replicas; re-importing');
+    env = null;
+  }
+
+  if (!env) {
+    env = xln.createEmptyEnv(runtimeSeed);
+    env.runtimeId = runtimeIdLower;
+    env.dbNamespace = runtimeIdLower;
+
+    const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
+    const jurisdictions = await fetchJurisdictions(baseOrigin);
+    const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
+    const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
+
+    console.log('[VaultStore] Importing testnet anvil...');
+    xln.enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importJ',
+        data: {
+          name: 'Testnet',
+          chainId: arrakisConfig.chainId,
+          ticker: 'USDC',
+          rpcs: [rpcUrl],
+          contracts: arrakisConfig.contracts,
+        }
+      }],
+      entityInputs: []
+    });
+    await xln.process(env, []);
+    console.log('[VaultStore] ✅ Testnet imported');
+  } else {
+    env.runtimeSeed = runtimeSeed;
+    env.runtimeId = runtimeIdLower;
+    env.dbNamespace = runtimeIdLower;
+    let restoredAccounts = 0;
+    for (const [, replica] of (env.eReplicas ?? new Map()).entries()) {
+      restoredAccounts += Number(replica?.state?.accounts?.size || 0);
+    }
+    console.log('[VaultStore] ✅ Env restored from DB:', {
+      runtimeId: runtime.id.slice(0, 12),
+      height: env.height,
+      history: env.history?.length || 0,
+      jReplicas: env.jReplicas?.size || 0,
+      entities: env.eReplicas?.size || 0,
+      accounts: restoredAccounts,
+    });
+  }
+
+  if (xln.startJEventWatcher) {
+    await xln.startJEventWatcher(env);
+  }
+
+  if (runtime.signers[0]?.entityId) {
+    const entityId = runtime.signers[0].entityId;
+    const signerAddress = runtime.signers[0].address;
+    const entityIdNorm = String(entityId).toLowerCase();
+    const hasEntityAlready = !!(
+      env.eReplicas &&
+      [...env.eReplicas.keys()].some((k: string) => String(k).split(':')[0]?.toLowerCase() === entityIdNorm)
+    );
+    if (hasEntityAlready) {
+      console.log('[VaultStore] ✅ Entity already present in restored env:', entityId.slice(0, 18));
+    }
+    const jReplica = env.jReplicas?.get('Testnet');
+    if (jReplica && !hasEntityAlready) {
+      const entityConfig = {
+        mode: 'proposer-based' as const,
+        threshold: 1n,
+        validators: [signerAddress],
+        shares: { [signerAddress]: 1n },
+        jurisdiction: {
+          address: jReplica.depositoryAddress,
+          name: 'Testnet',
+          chainId: 31337,
+          entityProviderAddress: jReplica.entityProviderAddress,
+          depositoryAddress: jReplica.depositoryAddress,
+        }
+      };
+
+      xln.enqueueRuntimeInput(env, {
+        runtimeTxs: [{
+          type: 'importReplica',
+          entityId,
+          signerId: signerAddress,
+          data: {
+            isProposer: true,
+            config: entityConfig
+          }
+        }],
+        entityInputs: []
+      });
+      await xln.process(env, []);
+      console.log('[VaultStore] ✅ Entity ensured:', entityId.slice(0, 18));
+    }
+  }
+
+  if (xln.startRuntimeLoop) {
+    xln.startRuntimeLoop(env);
+  }
+
+  if (xln.startP2P) {
+    const { resolveRelayUrls } = await import('./xlnStore');
+    xln.startP2P(env, { relayUrls: resolveRelayUrls(), gossipPollMs: 0 });
+  }
+
+  return env;
+}
+
   // Runtime operations
-  export const vaultOperations = {
+export const vaultOperations = {
     syncRuntime(runtime: Runtime | null) {
     const meta: { label?: string; seed?: string; vaultId?: string } = {};
     meta.label = runtime?.label || 'Runtime';
@@ -231,7 +407,22 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
       const saved = localStorage.getItem(VAULT_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        runtimesState.set(parsed);
+        const normalizedRuntimes: Record<string, Runtime> = {};
+        for (const [rawKey, rawRuntime] of Object.entries(parsed?.runtimes || {})) {
+          const runtime = rawRuntime as Runtime;
+          const normalizedId = normalizeRuntimeId(runtime?.id || rawKey);
+          normalizedRuntimes[normalizedId] = {
+            ...runtime,
+            id: normalizedId,
+          };
+        }
+        const normalizedActiveId = normalizeRuntimeId(parsed?.activeRuntimeId || '');
+        runtimesState.set({
+          runtimes: normalizedRuntimes,
+          activeRuntimeId: normalizedActiveId && normalizedRuntimes[normalizedActiveId]
+            ? normalizedActiveId
+            : (Object.keys(normalizedRuntimes)[0] || null),
+        });
         console.log('🔐 Runtimes loaded from localStorage');
       }
     } catch (error) {
@@ -260,7 +451,7 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
     const firstAddress = deriveAddress(seed, 0);
 
     // Use signer EOA as ID (deterministic, unique)
-    const id = firstAddress;
+    const id = normalizeRuntimeId(firstAddress);
     const label = name;
 
     const runtime: Runtime = {
@@ -288,13 +479,16 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
     this.saveToStorage();
 
     // CRITICAL: Create NEW isolated runtime for this runtime (AWAIT to avoid race)
-    const runtimeId = id; // Use runtime ID (EOA) as runtime ID
+    const runtimeId = normalizeRuntimeId(id); // Use normalized runtime ID key
     console.log('[VaultStore.createRuntime] Creating isolated runtime:', runtimeId);
 
     // Import XLN and create env BEFORE returning
     const { getXLN } = await import('./xlnStore');
     const xln = await getXLN();
     const newEnv = xln.createEmptyEnv(seed);
+    const runtimeIdLower = runtimeId.toLowerCase();
+    newEnv.runtimeId = runtimeIdLower;
+    newEnv.dbNamespace = runtimeIdLower;
 
     // REMOVED: setRuntimeSeed() - seed now stored in env.runtimeSeed and passed to pure functions
     console.log('[VaultStore.createRuntime] Runtime seed stored in env.runtimeSeed (pure)');
@@ -310,7 +504,7 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
 
     // Import testnet J-machine (shared anvil on xln.finance)
     console.log('[VaultStore.createRuntime] Importing testnet anvil...');
-    await xln.applyRuntimeInput(newEnv, {
+    xln.enqueueRuntimeInput(newEnv, {
       runtimeTxs: [{
         type: 'importJ',
         data: {
@@ -323,6 +517,7 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
       }],
       entityInputs: []
     });
+    await xln.process(newEnv, []);
     if (xln.startJEventWatcher) {
       await xln.startJEventWatcher(newEnv);
     }
@@ -331,7 +526,6 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
     // === MVP: Create entity ===
     console.log('[VaultStore.createRuntime] Creating user entity...');
     const { generateLazyEntityId } = await import('@xln/runtime/entity-factory');
-    const { applyRuntimeInput } = await import('@xln/runtime/runtime');
 
     // Create entity config (single-signer, threshold 1)
     const signerAddress = firstAddress;
@@ -392,7 +586,7 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
     console.log('[VaultStore.createRuntime] ✅ Registered HD-derived private key for signer');
 
     // Import entity replica into runtime
-    await applyRuntimeInput(newEnv, {
+    xln.enqueueRuntimeInput(newEnv, {
       runtimeTxs: [{
         type: 'importReplica',
         entityId: entityId,
@@ -404,6 +598,7 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
       }],
       entityInputs: []
     });
+    await xln.process(newEnv, []);
 
     // Skip auto-funding (use faucet API)
     console.log('[VaultStore.createRuntime] ✅ Entity ready (use /api/faucet to fund)');
@@ -461,21 +656,30 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
 
   // Select runtime
   async selectRuntime(runtimeId: string) {
+    const requestedRuntimeId = normalizeRuntimeId(runtimeId);
+    const currentState = get(runtimesState);
+    const resolved = findRuntimeByIdCaseInsensitive(currentState.runtimes, requestedRuntimeId);
+    if (!resolved) {
+      throw new Error(`Runtime not found: ${requestedRuntimeId}`);
+    }
+    const resolvedRuntimeId = normalizeRuntimeId(resolved.key);
+
     runtimesState.update(state => ({
       ...state,
-      activeRuntimeId: runtimeId
+      activeRuntimeId: resolvedRuntimeId
     }));
     this.saveToStorage();
 
     // CRITICAL: Switch to runtime's isolated runtime + seed
     const current = get(runtimesState);
-    const runtime = current.runtimes[runtimeId];
+    const runtime = current.runtimes[resolvedRuntimeId];
 
     if (runtime) {
       // CRITICAL: Re-register ALL signer private keys when switching runtimes
       // Keys are stored in memory (signerKeys Map), lost on page refresh
       // Must re-register from HD derivation to enable signing
       const { getXLN } = await import('./xlnStore');
+      const { resolveRelayUrls } = await import('./xlnStore');
       const xln = await getXLN();
 
       for (const signer of runtime.signers) {
@@ -486,9 +690,44 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
         xln.registerSignerKey(signer.address, privateKeyBytes);
       }
       console.log(`[VaultStore.selectRuntime] ✅ Registered ${runtime.signers.length} signer keys`);
+
+      // Ensure selected runtime processing pipeline is alive.
+      // We do NOT blindly recreate P2P; we only recover if missing/disconnected.
+      const runtimeEntry = get(runtimes).get(resolvedRuntimeId);
+      let env = runtimeEntry?.env;
+      if (!env) {
+        await registerRuntimeSignerKeys(runtime, xln);
+        env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
+        runtimes.update(r => {
+          r.set(resolvedRuntimeId, runtimeToEntry(runtime, env));
+          return r;
+        });
+      }
+      if (env) {
+        if (!env.runtimeState?.loopActive && xln.startRuntimeLoop) {
+          xln.startRuntimeLoop(env);
+          console.log(`[VaultStore.selectRuntime] ♻️ Restarted runtime loop for ${resolvedRuntimeId.slice(0, 12)}`);
+        }
+
+        let p2p: any = xln.getP2P ? xln.getP2P(env) : null;
+        if (!p2p && xln.startP2P) {
+          xln.startP2P(env, { relayUrls: resolveRelayUrls(), gossipPollMs: 0 });
+          p2p = xln.getP2P ? xln.getP2P(env) : null;
+          console.log(`[VaultStore.selectRuntime] ♻️ Started P2P for ${resolvedRuntimeId.slice(0, 12)}`);
+        } else if (p2p && typeof p2p.isConnected === 'function' && !p2p.isConnected()) {
+          if (typeof p2p.connect === 'function') {
+            p2p.connect();
+            console.log(`[VaultStore.selectRuntime] ♻️ Reconnected P2P for ${resolvedRuntimeId.slice(0, 12)}`);
+          }
+        }
+
+        if (p2p && typeof p2p.refreshGossip === 'function') {
+          p2p.refreshGossip();
+        }
+      }
     }
 
-    activeRuntimeId.set(runtimeId);
+    activeRuntimeId.set(resolvedRuntimeId);
     this.syncRuntime(runtime || null);
   },
 
@@ -626,13 +865,14 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
 
   // Delete runtime
   async deleteRuntime(runtimeId: string) {
-    await cleanupRuntimeEnv(runtimeId);
+    const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
+    await cleanupRuntimeEnv(normalizedRuntimeId);
 
     let nextActiveId: string | null = null;
     runtimesState.update(state => {
-      const { [runtimeId]: removed, ...remaining } = state.runtimes;
+      const { [normalizedRuntimeId]: removed, ...remaining } = state.runtimes;
       const remainingIds = Object.keys(remaining);
-      nextActiveId = state.activeRuntimeId === runtimeId
+      nextActiveId = state.activeRuntimeId === normalizedRuntimeId
         ? (remainingIds[0] || null)
         : state.activeRuntimeId;
 
@@ -643,11 +883,11 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
     });
 
     runtimes.update(r => {
-      r.delete(runtimeId);
+      r.delete(normalizedRuntimeId);
       return r;
     });
 
-    activeRuntimeId.set(nextActiveId || 'local');
+    activeRuntimeId.set(nextActiveId || '');
     this.saveToStorage();
     const current = get(runtimesState);
     this.syncRuntime(current.activeRuntimeId ? current.runtimes[current.activeRuntimeId] || null : null);
@@ -684,7 +924,7 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
   runtimeExists(id: string): boolean {
     const current = get(runtimesState);
     if (!current?.runtimes) return false;
-    return id in current.runtimes;
+    return normalizeRuntimeId(id) in current.runtimes;
   },
 
   // Alias for backward compatibility
@@ -698,182 +938,40 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
     if (initializePromise) return initializePromise;
 
     initializePromise = (async () => {
-    this.loadFromStorage();
-    const current = get(runtimesState);
-    const runtime = current.activeRuntimeId ? current.runtimes[current.activeRuntimeId] || null : null;
+      this.loadFromStorage();
+      const current = get(runtimesState);
+      const all = Object.values(current.runtimes);
 
-    if (runtime) {
-      // CRITICAL: Ensure runtime exists for this runtime
-      const runtimeId = runtime.id;
-      const existingRuntime = get(runtimes).get(runtimeId);
-
-      if (!existingRuntime) {
-        console.log('[VaultStore.initialize] Creating runtime for restored runtime:', runtimeId);
-
+      if (all.length > 0) {
         const { getXLN } = await import('./xlnStore');
         const xln = await getXLN();
-        const runtimeSeed = runtime.seed;
-        const runtimeIdLower = runtimeId.toLowerCase();
-        let newEnv = null as any;
 
-        // CRITICAL: Register ALL signer private keys from HD derivation BEFORE any entity ops
-        // Why: Runtime's deriveSignerKeySync uses different derivation than BIP44 HD
-        // Without this, hanko verification fails (signature from wrong key)
-        for (const signer of runtime.signers) {
-          const privateKey = derivePrivateKey(runtime.seed, signer.index);
-          const privateKeyBytes = new Uint8Array(
-            privateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
-          );
-          xln.registerSignerKey(signer.address, privateKeyBytes);
-        }
-        console.log(`[VaultStore.initialize] ✅ Registered ${runtime.signers.length} HD-derived keys`);
-
-        // Try to restore from per-runtime DB snapshot first
-        try {
-          if (xln.loadEnvFromDB) {
-            console.log('[VaultStore.initialize] Loading env from DB namespace:', runtimeIdLower);
-            newEnv = await xln.loadEnvFromDB(runtimeIdLower, runtimeSeed);
+        for (const runtime of all) {
+          const runtimeId = normalizeRuntimeId(runtime.id);
+          const existing = get(runtimes).get(runtimeId);
+          if (existing?.env) {
+            continue;
           }
-        } catch (error) {
-          console.warn('[VaultStore.initialize] ⚠️ Failed to load env from DB, falling back to fresh import:', error);
-          newEnv = null;
-        }
 
-        if (newEnv && (!newEnv.jReplicas || newEnv.jReplicas.size === 0)) {
-          console.warn('[VaultStore.initialize] ⚠️ Restored env missing J-replicas; re-importing');
-          newEnv = null;
-        }
+          console.log('[VaultStore.initialize] Restoring runtime:', runtimeId);
+          await registerRuntimeSignerKeys(runtime, xln);
+          console.log(`[VaultStore.initialize] ✅ Registered ${runtime.signers.length} HD-derived keys for ${runtimeId.slice(0, 12)}`);
 
-        if (!newEnv) {
-          newEnv = xln.createEmptyEnv(runtimeSeed);
-          newEnv.runtimeId = runtimeIdLower;
-          newEnv.dbNamespace = runtimeIdLower;
-
-          // CRITICAL: Import testnet J-machine (shared anvil on xln.finance)
-          console.log('[VaultStore.initialize] Fetching jurisdictions.json...');
-          const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
-          const jurisdictions = await fetchJurisdictions(baseOrigin);
-          const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
-          const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
-
-          console.log('[VaultStore.initialize] Importing testnet anvil...');
-          await xln.applyRuntimeInput(newEnv, {
-            runtimeTxs: [{
-              type: 'importJ',
-              data: {
-                name: 'Testnet',
-                chainId: arrakisConfig.chainId,
-                ticker: 'USDC',
-                rpcs: [rpcUrl],
-                contracts: arrakisConfig.contracts, // Use pre-deployed addresses
-              }
-            }],
-            entityInputs: []
+          const env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
+          runtimes.update(r => {
+            r.set(runtimeId, runtimeToEntry({ ...runtime, id: runtimeId }, env));
+            return r;
           });
-          console.log('[VaultStore.initialize] ✅ Testnet imported');
-        } else {
-          newEnv.runtimeSeed = runtimeSeed;
-          newEnv.runtimeId = runtimeIdLower;
-          newEnv.dbNamespace = runtimeIdLower;
-          console.log('[VaultStore.initialize] ✅ Env restored from DB:', {
-            height: newEnv.height,
-            history: newEnv.history?.length || 0,
-            jReplicas: newEnv.jReplicas?.size || 0,
-            entities: newEnv.eReplicas?.size || 0
-          });
+          console.log('[VaultStore.initialize] ✅ Runtime restored:', runtimeId.slice(0, 12));
         }
-
-        if (xln.startJEventWatcher) {
-          await xln.startJEventWatcher(newEnv);
-        }
-
-        // Re-import entity if it exists in runtime
-        if (runtime.signers[0]?.entityId) {
-          const entityId = runtime.signers[0].entityId;
-          const signerAddress = runtime.signers[0].address;
-
-          const jReplica = newEnv.jReplicas?.get('Testnet');
-          if (jReplica) {
-            const { generateLazyEntityId } = await import('@xln/runtime/entity-factory');
-            const { applyRuntimeInput } = await import('@xln/runtime/runtime');
-
-            const entityConfig = {
-              mode: 'proposer-based' as const,
-              threshold: 1n,
-              validators: [signerAddress],
-              shares: { [signerAddress]: 1n },
-              jurisdiction: {
-                address: jReplica.depositoryAddress,
-                name: 'Testnet',
-                chainId: 31337,
-                entityProviderAddress: jReplica.entityProviderAddress,
-                depositoryAddress: jReplica.depositoryAddress,
-              }
-            };
-
-            await applyRuntimeInput(newEnv, {
-              runtimeTxs: [{
-                type: 'importReplica',
-                entityId: entityId,
-                signerId: signerAddress,
-                data: {
-                  isProposer: true,
-                  config: entityConfig
-                }
-              }],
-              entityInputs: []
-            });
-            console.log('[VaultStore.initialize] ✅ Entity re-imported:', entityId.slice(0, 18));
-          }
-        }
-
-        // Start runtime event loop (processes inbound P2P messages, bilateral consensus)
-        if (xln.startRuntimeLoop) {
-          xln.startRuntimeLoop(newEnv);
-        }
-
-        // Start P2P for this runtime's env (one WS per runtime)
-        if (xln.startP2P) {
-          const { resolveRelayUrls } = await import('./xlnStore');
-          const relayUrls = resolveRelayUrls();
-          xln.startP2P(newEnv, { relayUrls, gossipPollMs: 0 });
-        }
-
-        runtimes.update(r => {
-          r.set(runtimeId, {
-            id: runtimeId,
-            type: 'local',
-            label: runtime.label,
-            env: newEnv,
-            seed: runtime.seed,
-            vaultId: runtime.id,
-            permissions: 'write',
-            status: 'connected'
-          });
-          return r;
-        });
-
-        activeRuntimeId.set(runtimeId);
-        console.log('[VaultStore.initialize] ✅ Runtime created for runtime:', runtimeId);
-      } else {
-        // Runtime exists, just switch to it
-        console.log('[VaultStore.initialize] Switched to existing runtime (seed in env):', runtimeId.slice(0, 10));
-
-        // Ensure runtime loop + P2P are running
-        const existingRuntime = get(runtimes).get(runtimeId);
-        if (existingRuntime?.env) {
-          if (xln.startRuntimeLoop) xln.startRuntimeLoop(existingRuntime.env);
-          if (xln.startP2P) {
-            const { resolveRelayUrls } = await import('./xlnStore');
-            xln.startP2P(existingRuntime.env, { relayUrls: resolveRelayUrls(), gossipPollMs: 0 });
-          }
-        }
-
-        activeRuntimeId.set(runtimeId);
       }
-    }
 
-    this.syncRuntime(runtime);
+      const latest = get(runtimesState);
+      const allLatest = Object.values(latest.runtimes);
+      const resolvedActive = findRuntimeByIdCaseInsensitive(latest.runtimes, latest.activeRuntimeId ?? undefined);
+      const activeId = normalizeRuntimeId(resolvedActive?.key ?? allLatest[0]?.id ?? null);
+      activeRuntimeId.set(activeId);
+      this.syncRuntime(activeId ? latest.runtimes[activeId] : null);
       initialized = true;
     })();
 
@@ -886,7 +984,7 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
 
   // Clear all runtimes
   async clearAll() {
-    const runtimeIds = Array.from(get(runtimes).keys()).filter(id => id !== 'local');
+    const runtimeIds = Array.from(get(runtimes).keys());
     await Promise.all(runtimeIds.map(id => cleanupRuntimeEnv(id)));
 
     runtimesState.set(defaultState);
@@ -894,18 +992,8 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
       localStorage.removeItem(VAULT_STORAGE_KEY);
     }
 
-    runtimes.update(r => {
-      const local = r.get('local') || {
-        id: 'local',
-        type: 'local' as const,
-        label: 'Runtime',
-        env: null,
-        permissions: 'write' as const,
-        status: 'connected' as const
-      };
-      return new Map([[local.id, local]]);
-    });
-    activeRuntimeId.set('local');
+    runtimes.set(new Map());
+    activeRuntimeId.set('');
     this.syncRuntime(null);
   },
 
@@ -966,3 +1054,11 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
     return signer?.entityId || null;
   }
 };
+
+// Expose vault controls globally for E2E and runtime debugging on built/prod app.
+if (typeof window !== 'undefined') {
+  // @ts-ignore - intentional debug/test surface
+  window.vaultOperations = vaultOperations;
+  // @ts-ignore - intentional debug/test surface
+  window.runtimesState = runtimesState;
+}

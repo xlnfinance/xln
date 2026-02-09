@@ -310,6 +310,7 @@ export interface XLNModule {
 
   // Runtime operations
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>;
+  enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
   startP2P: (env: Env, config?: P2PConfig) => unknown;
   stopP2P: (env: Env) => void;
   getP2P: (env: Env) => unknown;

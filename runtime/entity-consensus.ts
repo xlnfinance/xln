@@ -303,7 +303,7 @@ export const applyEntityInput = async (
   const frameHash = entityInput.proposedFrame?.hash?.slice(0, 10) || 'none';
 
   console.log(
-    `🔍 INPUT-RECEIVED: [${timestamp}] Processing input for Entity #${entityDisplay}:${formatSignerDisplay(entityInput.signerId)}`,
+    `🔍 INPUT-RECEIVED: [${timestamp}] Processing input for Entity #${entityDisplay}`,
   );
   console.log(
     `🔍 INPUT-STATE: Current proposal: ${currentProposalHash}, Mempool: ${workingReplica.mempool.length}, isProposer: ${workingReplica.isProposer}`,
@@ -318,7 +318,7 @@ export const applyEntityInput = async (
 
   // SECURITY: Validate all inputs
   if (!validateEntityInput(entityInput)) {
-    log.error(`❌ Invalid input for ${entityInput.entityId}:${entityInput.signerId}`);
+    log.error(`❌ Invalid input for ${entityInput.entityId}`);
     return { newState: workingReplica.state, outputs: [], jOutputs: [], workingReplica };
   }
   if (!validateEntityReplica(workingReplica)) {

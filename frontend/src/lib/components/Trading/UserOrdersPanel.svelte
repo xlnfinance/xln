@@ -157,7 +157,7 @@
     }
 
     try {
-      await runtime.process(env, [{
+      runtime.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [{
         entityId,
         signerId,
         entityTxs: [{
@@ -167,7 +167,7 @@
             offerId: order.offerId,
           }
         }]
-      }]);
+      }] });
       console.log(`Cancelled order ${order.offerId}`);
     } catch (err) {
       console.error('Failed to cancel order:', err);

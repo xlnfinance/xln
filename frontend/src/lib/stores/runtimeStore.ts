@@ -2,7 +2,7 @@ import { writable, derived, get } from 'svelte/store';
 import type { Env } from '@xln/runtime/xln-api';
 
 export interface Runtime {
-  id: string;                    // URI: "local" or "localhost:3001" or "https://cex.com:8080"
+  id: string;                    // Runtime identifier (EOA for local runtimes)
   type: 'local' | 'remote';
   label: string;                 // Display name: "Local" or "CEX Production"
   env: Env | null;               // Local: full state, Remote: synced subset
@@ -16,20 +16,11 @@ export interface Runtime {
   latencyMs?: number;            // Connection latency
 }
 
-// All runtimes (local + remote)
-export const runtimes = writable<Map<string, Runtime>>(new Map([
-  ['local', {
-    id: 'local',
-    type: 'local',
-    label: 'Runtime',
-    env: null,  // Will be initialized on mount
-    permissions: 'write',
-    status: 'connected'
-  }]
-]));
+// All runtimes (EOA-keyed for local, URI-keyed for remote)
+export const runtimes = writable<Map<string, Runtime>>(new Map());
 
 // Active runtime (which one time machine controls)
-export const activeRuntimeId = writable<string>('local');
+export const activeRuntimeId = writable<string>('');
 
 // Derived: Get active runtime's env
 export const activeRuntime = derived(
@@ -144,32 +135,34 @@ export const runtimeOperations = {
       return r;
     });
 
-    // If we just deleted the active runtime, switch to local
+    // If we just deleted the active runtime, clear selection.
     if (get(activeRuntimeId) === id) {
-      activeRuntimeId.set('local');
+      activeRuntimeId.set('');
     }
   },
 
-  // Update local runtime's env (called by xlnStore when env changes)
+  // Update active runtime env (legacy name kept for compatibility).
   updateLocalEnv(env: Env) {
     runtimes.update(r => {
-      const local = r.get('local');
-      if (local) {
-        local.env = env;
-        local.lastSynced = Date.now();
+      const activeId = get(activeRuntimeId);
+      if (activeId && r.has(activeId)) {
+        const runtime = r.get(activeId)!;
+        runtime.env = env;
+        runtime.lastSynced = Date.now();
       }
       return r;
     });
   },
 
-  // Update local runtime metadata (vault name + seed)
+  // Update active runtime metadata (legacy name kept for compatibility).
   setLocalRuntimeMetadata(meta: { label?: string; seed?: string; vaultId?: string }) {
     runtimes.update(r => {
-      const local = r.get('local');
-      if (local) {
-        if (meta.label !== undefined) local.label = meta.label;
-        if (meta.seed !== undefined) local.seed = meta.seed;
-        if (meta.vaultId !== undefined) local.vaultId = meta.vaultId;
+      const activeId = get(activeRuntimeId);
+      if (activeId && r.has(activeId)) {
+        const runtime = r.get(activeId)!;
+        if (meta.label !== undefined) runtime.label = meta.label;
+        if (meta.seed !== undefined) runtime.seed = meta.seed;
+        if (meta.vaultId !== undefined) runtime.vaultId = meta.vaultId;
       }
       return r;
     });

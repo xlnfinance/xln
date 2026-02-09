@@ -196,6 +196,13 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
 
   const routeMessage = async (msg: RuntimeWsMessage, ws: WebSocket) => {
     failfastAssert(typeof msg.type === 'string' && msg.type.length > 0, 'WS_SERVER_TYPE_INVALID', 'Missing message type');
+    // DEBUG EVENT: best-effort sink for client-side diagnostics.
+    // Local dev relay does not persist these; acknowledge and drop.
+    if (msg.type === 'debug_event') {
+      send(ws, { type: 'ack', inReplyTo: msg.id, status: 'stored', count: 1 });
+      return;
+    }
+
     // GOSSIP ANNOUNCE: Store profiles in relay (clients pull when needed)
     if (msg.type === 'gossip_announce') {
       const payload = msg.payload as { profiles?: any[] } | undefined;
@@ -381,10 +388,17 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
         send(ws, { type: 'pong', inReplyTo: msg.id });
         return;
       }
+      // Some clients still send hello after query-param auto-registration.
+      // Treat as harmless keepalive/re-auth and acknowledge.
+      if (msg.type === 'hello') {
+        send(ws, { type: 'ack', inReplyTo: msg.id || 'hello', status: 'delivered' });
+        return;
+      }
 
       if (
         msg.type === 'runtime_input' ||
         msg.type === 'entity_input' ||
+        msg.type === 'debug_event' ||
         msg.type === 'gossip_request' ||
         msg.type === 'gossip_response' ||
         msg.type === 'gossip_announce' ||

@@ -68,26 +68,29 @@
         throw new Error('XLN environment not ready');
       }
 
-      // Send accountInput transaction
-      await xln.process(env, [
-        {
-          entityId: currentEntityId,
-          signerId: currentSignerId,
-          entityTxs: [
-            {
-              type: 'accountInput',
-              data: {
-                fromEntityId: currentEntityId,
-                toEntityId: targetEntityId,
-                metadata: {
-                  purpose: 'hub_connection',
-                  description: `Joining hub ${targetEntityId}`,
+      // Send accountInput transaction through runtime ingress queue
+      xln.enqueueRuntimeInput(env, {
+        runtimeTxs: [],
+        entityInputs: [
+          {
+            entityId: currentEntityId,
+            signerId: currentSignerId,
+            entityTxs: [
+              {
+                type: 'accountInput',
+                data: {
+                  fromEntityId: currentEntityId,
+                  toEntityId: targetEntityId,
+                  metadata: {
+                    purpose: 'hub_connection',
+                    description: `Joining hub ${targetEntityId}`,
+                  },
                 },
               },
-            },
-          ],
-        },
-      ]);
+            ],
+          },
+        ],
+      });
 
       console.log(`✅ Successfully sent join request to ${targetEntityId}`);
     } catch (err) {

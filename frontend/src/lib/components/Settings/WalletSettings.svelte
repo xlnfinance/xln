@@ -8,9 +8,10 @@
    * - General: Theme, UI preferences
    */
 
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onDestroy, onMount } from 'svelte';
   import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
   import { settings, settingsOperations } from '$lib/stores/settingsStore';
+  import { xlnEnvironment } from '$lib/stores/xlnStore';
   import { POPULAR_NETWORKS, BROWSERVM_CHAIN_START, type NetworkConfig } from '$lib/config/networks';
   import { THEME_DEFINITIONS } from '$lib/utils/themes';
   import type { ThemeName } from '$lib/types/ui';
@@ -80,6 +81,23 @@
 
   // Initialize
   loadJMachineSettings();
+
+  let nowMs = Date.now();
+  let livenessTimer: ReturnType<typeof setInterval> | null = null;
+  onMount(() => {
+    livenessTimer = setInterval(() => {
+      nowMs = Date.now();
+    }, 1000);
+  });
+  onDestroy(() => {
+    if (livenessTimer) clearInterval(livenessTimer);
+  });
+
+  $: processEnteredAt = $xlnEnvironment?.lastProcessEnteredAt || 0;
+  $: processLagMs = processEnteredAt > 0 ? Math.max(0, nowMs - processEnteredAt) : null;
+  $: processLivenessLabel = processEnteredAt > 0
+    ? `${new Date(processEnteredAt).toLocaleTimeString()} (${Math.round((processLagMs || 0) / 1000)}s ago)`
+    : 'never';
 
   // Wallet functions
   function copySeed() {
@@ -452,18 +470,23 @@
         <h3>Developer</h3>
 
         <label class="setting-row">
-          <span>Server Delay</span>
+          <span>process() frame delay</span>
           <div class="slider-row">
             <input
               type="range"
               min="0"
-              max="1000"
-              step="50"
+              max="10000"
+              step="100"
               value={$settings.runtimeDelay}
               on:input={(e) => settingsOperations.setServerDelay(Number(e.currentTarget.value))}
             />
             <span class="slider-value">{$settings.runtimeDelay}ms</span>
           </div>
+        </label>
+
+        <label class="setting-row">
+          <span>Last process() entry</span>
+          <span class="mono-value">{processLivenessLabel}</span>
         </label>
       </div>
 
@@ -1093,6 +1116,13 @@
     color: rgba(255, 200, 100, 0.9);
     font-family: monospace;
     min-width: 60px;
+    text-align: right;
+  }
+
+  .mono-value {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.82);
+    font-family: monospace;
     text-align: right;
   }
 

@@ -5,8 +5,9 @@
  * It manages entity profiles and their capabilities in a distributed network.
  */
 
-import { FINANCIAL } from '../constants';
 import { logDebug } from '../logger';
+import { buildNetworkGraph } from '../routing/graph';
+import { PathFinder } from '../routing/pathfinding';
 export type BoardValidator = {
   signer: string; // canonical signer address (0x...) or signerId fallback
   weight: number; // uint16 voting power
@@ -56,10 +57,15 @@ export type Profile = {
   // Account capacities for routing
   accounts?: Array<{
     counterpartyId: string;
-    tokenCapacities: Map<number, {
-      inCapacity: bigint;
-      outCapacity: bigint;
-    }>;
+    tokenCapacities:
+      | Map<number | string, {
+          inCapacity: bigint | string;
+          outCapacity: bigint | string;
+        }>
+      | Record<string, {
+          inCapacity: bigint | string;
+          outCapacity: bigint | string;
+        }>;
   }>;
 };
 
@@ -68,6 +74,7 @@ export interface GossipLayer {
   announce: (profile: Profile) => void;
   getProfiles: () => Profile[];
   getHubs: () => Profile[];  // Get all profiles with isHub=true
+  setProfiles?: (incoming: Iterable<Profile>) => void;
   getProfileBundle?: (entityId: string) => { profile?: Profile; peers: Profile[] };
   getNetworkGraph: () => {
     findPaths: (source: string, target: string, amount?: bigint, tokenId?: number) => Promise<any[]>;
@@ -193,64 +200,24 @@ export function createGossipLayer(): GossipLayer {
     return { profile, peers };
   };
 
+  const setProfiles = (incoming: Iterable<Profile>): void => {
+    profiles.clear();
+    for (const profile of incoming) {
+      announce(profile);
+    }
+  };
+
   /**
    * Get network graph with pathfinding capabilities
-   * Returns object with findPaths() method using Dijkstra algorithm
-   *
-   * TODO: Wire to PathFinder class - currently using simple BFS for stability
+   * Returns object with findPaths() method using Dijkstra pathfinder.
    */
   const getNetworkGraph = () => {
     return {
       findPaths: async (source: string, target: string, amount?: bigint, tokenId: number = 1) => {
-        // Simple BFS pathfinding from profiles
-        // Full Dijkstra in routing/pathfinding.ts (to be integrated)
-
-        const adjacency = new Map<string, Set<string>>();
-
-        // Build adjacency from profiles (capacity-aware)
-        const minAmount = amount ?? FINANCIAL.MIN_PAYMENT_AMOUNT;
-
-        for (const profile of profiles.values()) {
-          if (profile.accounts) {
-            const neighbors = new Set<string>();
-            for (const account of profile.accounts) {
-              const tokenCap = account.tokenCapacities.get(tokenId);
-              // Filter by capacity >= required amount (not just > 0)
-              if (tokenCap && tokenCap.outCapacity >= minAmount) {
-                neighbors.add(account.counterpartyId);
-              }
-            }
-            if (neighbors.size > 0) {
-              adjacency.set(profile.entityId, neighbors);
-            }
-          }
-        }
-
-        // BFS to find path
-        const queue: string[][] = [[source]];
-        const visited = new Set<string>([source]);
-
-        while (queue.length > 0) {
-          const path = queue.shift()!;
-          const current = path[path.length - 1];
-          if (!current) continue; // Safety check
-
-          if (current === target) {
-            return [{ path }]; // Found!
-          }
-
-          const neighbors = adjacency.get(current);
-          if (neighbors) {
-            for (const neighbor of neighbors) {
-              if (neighbor && !visited.has(neighbor)) {
-                visited.add(neighbor);
-                queue.push([...path, neighbor]);
-              }
-            }
-          }
-        }
-
-        return []; // No path found
+        const requiredRecipientAmount = amount ?? 1n;
+        const graph = buildNetworkGraph(profiles, tokenId);
+        const finder = new PathFinder(graph);
+        return finder.findRoutes(source, target, requiredRecipientAmount, tokenId, 100);
       }
     };
   };
@@ -260,6 +227,7 @@ export function createGossipLayer(): GossipLayer {
     announce,
     getProfiles,
     getHubs,
+    setProfiles,
     getProfileBundle,
     getNetworkGraph,
   };
