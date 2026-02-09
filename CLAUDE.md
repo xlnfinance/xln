@@ -30,7 +30,9 @@ xln is a bilateral consensus network for instant off-chain settlement with on-ch
 bun run dev                    # localhost:8080 (runtime), :5173 (vite), :9000 (relay), :8545 (anvil)
 
 # Type checking (MUST pass before commit)
-bun run check                  # Root tsc --noEmit + frontend svelte-check + vite build
+bun run check                  # Root tsc --noEmit (vestigial) + svelte-check + vite build
+# NOTE: svelte-check is the ONLY real type checker — it checks runtime/ via frontend/../runtime/ imports
+# Core protocol has 0 errors. Remaining errors are in scenarios (noUncheckedIndexedAccess) + frontend
 
 # Build runtime for browser
 bun run build                  # → frontend/static/runtime.js (minified, browser target)
@@ -132,7 +134,7 @@ Quick iteration signals (full autonomy):
 - Always end with clear next steps: **NEXT:** A) B) C)
 
 ## 🎯 TOKEN EFFICIENCY
-- Grep/offset before reading files >300 lines (NetworkTopology.svelte has function index at 163-282)
+- Grep/offset before reading files >300 lines
 - Filter command output: `grep -E "error|FAIL"`, never dump full output
 - Agents for architecture, not verification
 - Terse confirmations with metrics: "Fixed. 0.2→45 FPS"
@@ -173,15 +175,16 @@ Functional/declarative paradigm. Pure functions. Immutability. Small composable 
 **Buffer comparison:** Use `buffersEqual()` from `serialization-utils.ts` (not Buffer.compare)
 **Contract addresses:** Use `getAvailableJurisdictions()` from `evm.ts` (never hardcode)
 **Bilateral consensus:** Study `.archive/2024_src/app/Channel.ts` for state verification patterns
+**EntityInput vs RoutedEntityInput:** `EntityInput` = deterministic consensus fields only. `RoutedEntityInput extends EntityInput` adds signerId/runtimeId as routing hints. runtime.ts strips routing at R→E boundary. All output arrays use `RoutedEntityInput`.
+**exactOptionalPropertyTypes:** Use `delete obj.prop` not `obj.prop = undefined`. Use `...(val ? {prop: val} : {})` not `prop: val ?? undefined`.
 
 ## 📁 STRUCTURE
 - `/runtime/` — Core consensus engine, state machines, networking, scenarios
 - `/jurisdictions/` — Solidity contracts (Depository.sol, EntityProvider.sol), Hardhat config
-- `/frontend/` — Svelte 5 + Vite 7 + Three.js + Dockview (Bloomberg Terminal UX)
+- `/frontend/` — Svelte 5 + Vite 7 + Dockview (Bloomberg Terminal UX). Pure visualization, zero consensus impact.
 - `/docs/` — All documentation (never create .md in /runtime or /frontend)
 - `/tests/` — Playwright E2E tests
 - `/brainvault/` — HD wallet derivation
-- `/ai/` — AI integrations (council, STT, telegram bot)
 - `.archive/2024_src/app/Channel.ts` — Reference implementation for bilateral consensus
 
 ## 🛠️ PATTERNS
