@@ -11,6 +11,7 @@
  */
 
 import type { AccountMachine, AccountTx, SwapOffer } from '../../types';
+import type { TokenId } from '../../ids';
 import { deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { formatEntityId } from '../../utils';
@@ -69,10 +70,10 @@ export async function handleSwapOffer(
   const makerIsLeft = byLeft;
 
   // 4. Get or create delta for giveToken (the token being locked)
-  let delta = accountMachine.deltas.get(giveTokenId);
+  let delta = accountMachine.deltas.get(giveTokenId as TokenId);
   if (!delta) {
-    delta = createDefaultDelta(giveTokenId);
-    accountMachine.deltas.set(giveTokenId, delta);
+    delta = createDefaultDelta(giveTokenId as TokenId);
+    accountMachine.deltas.set(giveTokenId as TokenId, delta);
   }
 
   // Initialize swap holds if not present

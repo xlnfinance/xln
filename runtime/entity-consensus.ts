@@ -7,6 +7,7 @@ import { applyEntityTx } from './entity-tx';
 import { isLeftEntity } from './entity-id-utils';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, JInput, RoutedEntityInput } from './types';
 import { isOk, isErr } from './types';
+import type { AccountKey } from './ids';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
@@ -1104,7 +1105,7 @@ export const applyEntityFrame = async (
     if (mempoolOps && mempoolOps.length > 0) {
       console.log(`📦 ENTITY-ORCHESTRATOR: Applying ${mempoolOps.length} mempoolOps (inline)`);
       for (const { accountId, tx } of mempoolOps) {
-        const account = currentEntityState.accounts.get(accountId);
+        const account = currentEntityState.accounts.get(accountId as AccountKey);
         if (account) {
           account.mempool.push(tx);
           proposableAccounts.add(accountId);
@@ -1136,7 +1137,7 @@ export const applyEntityFrame = async (
     if (entityTx.type === 'accountInput' && entityTx.data) {
       const fromEntity = entityTx.data.fromEntityId;
       // Account keyed by counterparty ID (fromEntity is our counterparty)
-      const accountMachine = currentEntityState.accounts.get(fromEntity);
+      const accountMachine = currentEntityState.accounts.get(fromEntity as AccountKey);
 
       if (accountMachine) {
         // Add to proposable if:
@@ -1181,7 +1182,7 @@ export const applyEntityFrame = async (
     } else if (entityTx.type === 'openAccount' && entityTx.data) {
       // openAccount processed - account may have mempool items queued
       const targetEntity = entityTx.data.targetEntityId;
-      const accountMachine = currentEntityState.accounts.get(targetEntity);
+      const accountMachine = currentEntityState.accounts.get(targetEntity as AccountKey);
       if (accountMachine) {
         if (accountMachine.mempool.length > 0 && !accountMachine.proposal) {
           proposableAccounts.add(targetEntity);
@@ -1192,7 +1193,7 @@ export const applyEntityFrame = async (
       // Credit extension - mark account for proposal
       const counterpartyId = entityTx.data.counterpartyEntityId;
       // Account keyed by counterparty ID
-      const accountMachine = currentEntityState.accounts.get(counterpartyId);
+      const accountMachine = currentEntityState.accounts.get(counterpartyId as AccountKey);
       console.log(`💳 EXTEND-CREDIT: Checking account ${counterpartyId.slice(0,10)} for proposal`);
       console.log(`💳 EXTEND-CREDIT: accountMachine exists: ${!!accountMachine}, mempool: ${accountMachine?.mempool?.length || 0}`);
       if (accountMachine && accountMachine.mempool.length > 0) {
@@ -1241,7 +1242,7 @@ export const applyEntityFrame = async (
 
     // Apply match results to account mempools
     for (const { accountId, tx } of matchResult.mempoolOps) {
-      const account = currentEntityState.accounts.get(accountId);
+      const account = currentEntityState.accounts.get(accountId as AccountKey);
       if (account) {
         account.mempool.push(tx);
         proposableAccounts.add(accountId);
@@ -1293,7 +1294,7 @@ export const applyEntityFrame = async (
   // If pendingFrame exists, skip - will be handled by BATCH-CHECK when ACK arrives
   const accountsToProposeFrames = Array.from(proposableAccounts)
     .filter(accountId => {
-      const accountMachine = currentEntityState.accounts.get(accountId);
+      const accountMachine = currentEntityState.accounts.get(accountId as AccountKey);
       if (!accountMachine) {
         if (HEAVY_LOGS) console.log(`🔍 FILTER: Account ${accountId.slice(-8)} not found - skip`);
         return false;
@@ -1317,7 +1318,7 @@ export const applyEntityFrame = async (
   if (accountsToProposeFrames.length > 0) {
 
     for (const accountKey of accountsToProposeFrames) {
-      const accountMachine = currentEntityState.accounts.get(accountKey);
+      const accountMachine = currentEntityState.accounts.get(accountKey as AccountKey);
       const { counterparty: cpId } = accountMachine ? getAccountPerspective(accountMachine, currentEntityState.entityId) : { counterparty: 'unknown' };
       if (HEAVY_LOGS) console.log(`🔍 [Frame ${env.height}] BEFORE-PROPOSE: Getting account for ${cpId.slice(-4)}`);
       if (accountMachine) {
@@ -1348,7 +1349,7 @@ export const applyEntityFrame = async (
               }
 
               if (route.inboundEntity && route.inboundLockId) {
-                const inboundAccount = currentEntityState.accounts.get(route.inboundEntity);
+                const inboundAccount = currentEntityState.accounts.get(route.inboundEntity as AccountKey);
                 if (inboundAccount) {
                   inboundAccount.mempool.push({
                     type: 'htlc_resolve',

@@ -5,6 +5,7 @@ import { processProfileUpdate } from '../name-resolution';
 import { createOrderbookExtState } from '../orderbook';
 import { getRuntimeDb, tryOpenDb } from '../runtime';
 import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, RoutedEntityInput, JInput } from '../types';
+import type { AccountKey, SignerId, TokenId, EntityId } from '../ids';
 import { DEBUG, HEAVY_LOGS, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { buildEntityProfile, mergeProfileWithExisting } from '../networking/gossip-helper';
@@ -46,12 +47,12 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         return { newState: entityState, outputs: [] }; // Return unchanged state
       }
 
-      const currentNonce = entityState.nonces.get(from) || 0;
+      const currentNonce = entityState.nonces.get(from as SignerId) || 0;
       const expectedNonce = currentNonce + 1;
 
       const newEntityState = cloneEntityState(entityState);
 
-      newEntityState.nonces.set(from, expectedNonce);
+      newEntityState.nonces.set(from as SignerId, expectedNonce);
       addMessage(newEntityState, `${from}: ${message}`);
 
       return { newState: newEntityState, outputs: [] };
@@ -240,7 +241,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const counterpartyId = targetEntityId;
       const isLeft = isLeftEntity(entityState.entityId, targetEntityId);
 
-      if (entityState.accounts.has(counterpartyId)) {
+      if (entityState.accounts.has(counterpartyId as AccountKey)) {
         console.log(`💳 OPEN-ACCOUNT: Account with ${formatEntityId(counterpartyId)} already exists, skipping duplicate request`);
         return { newState: entityState, outputs: [] };
       }
@@ -260,18 +261,18 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       addMessage(newState, `💳 Opening account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);
 
       // STEP 1: Create local account machine
-      if (!newState.accounts.has(counterpartyId)) {
+      if (!newState.accounts.has(counterpartyId as AccountKey)) {
         console.log(`💳 LOCAL-ACCOUNT: Creating local account with Entity ${formatEntityId(counterpartyId)}...`);
 
         // CONSENSUS FIX: Start with empty deltas - let all delta creation happen through transactions
         // This ensures both sides have identical delta Maps (matches Channel.ts pattern)
-        const initialDeltas = new Map<number, Delta>();
+        const initialDeltas = new Map<TokenId, Delta>();
 
         // CANONICAL: Store leftEntity/rightEntity (sorted) for AccountMachine internals
-        const leftEntity = isLeft ? entityState.entityId : counterpartyId;
-        const rightEntity = isLeft ? counterpartyId : entityState.entityId;
+        const leftEntity = (isLeft ? entityState.entityId : counterpartyId) as EntityId;
+        const rightEntity = (isLeft ? counterpartyId : entityState.entityId) as EntityId;
 
-        newState.accounts.set(counterpartyId, {
+        newState.accounts.set(counterpartyId as AccountKey, {
           leftEntity,
           rightEntity,
           mempool: [],
@@ -328,7 +329,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       // Right side waits for left's frame; otherwise it will re-propose add_delta and stall.
       console.log(`💳 Preparing account setup for ${formatEntityId(entityTx.data.targetEntityId)} (left=${isLeft})`);
 
-      const localAccount = newState.accounts.get(counterpartyId);
+      const localAccount = newState.accounts.get(counterpartyId as AccountKey);
       if (!localAccount) {
         throw new Error(`CRITICAL: Account machine not found after creation`);
       }
@@ -429,7 +430,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const mempoolOps: MempoolOp[] = [];
 
       for (const { counterpartyId, frameHeight } of entityTx.data.timedOutAccounts) {
-        const accountMachine = newState.accounts.get(counterpartyId);
+        const accountMachine = newState.accounts.get(counterpartyId as AccountKey);
         if (!accountMachine?.proposal) {
           console.log(`⏰   Account ${counterpartyId.slice(-4)}: no pendingFrame (already resolved)`);
           continue;
@@ -543,7 +544,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       if (!route || route.length === 0) {
         // Check if we have a direct account with target
         // Account keyed by counterparty ID
-        if (newState.accounts.has(targetEntityId)) {
+        if (newState.accounts.has(targetEntityId as AccountKey)) {
           console.log(`💸 Direct account exists with ${formatEntityId(targetEntityId)}`);
           route = [entityState.entityId, targetEntityId];
         } else {
@@ -606,7 +607,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Check if we have an account with next hop
       // Account keyed by counterparty ID
-      const accountMachine = newState.accounts.get(nextHop);
+      const accountMachine = newState.accounts.get(nextHop as AccountKey);
       if (!accountMachine) {
         logError("ENTITY_TX", `❌ No account with next hop: ${nextHop}`);
         addMessage(newState, `❌ Payment failed: No account with ${formatEntityId(nextHop)}`);
@@ -751,7 +752,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Get account machine (use canonical key)
       // Account keyed by counterparty ID
-      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      const accountMachine = newState.accounts.get(counterpartyEntityId as AccountKey);
       if (!accountMachine) {
         console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for credit extension`);
         return { newState: entityState, outputs: [] };
@@ -796,7 +797,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Use canonical key for account lookup
       // Account keyed by counterparty ID
-      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      const accountMachine = newState.accounts.get(counterpartyEntityId as AccountKey);
       if (!accountMachine) {
         console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap offer`);
         return { newState: entityState, outputs: [] };
@@ -843,7 +844,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Use canonical key for account lookup
       // Account keyed by counterparty ID
-      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      const accountMachine = newState.accounts.get(counterpartyEntityId as AccountKey);
       if (!accountMachine) {
         console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap resolve`);
         return { newState: entityState, outputs: [] };
@@ -875,7 +876,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const mempoolOps: MempoolOp[] = [];
       const { offerId, counterpartyId, fillRatio } = entityTx.data;
 
-      const accountMachine = newState.accounts.get(counterpartyId);
+      const accountMachine = newState.accounts.get(counterpartyId as AccountKey);
       if (!accountMachine) {
         console.error(`❌ No account with ${counterpartyId.slice(-4)}`);
         return { newState: entityState, outputs: [] };
@@ -907,7 +908,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       // Use canonical key for account lookup
       // Account keyed by counterparty ID
-      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      const accountMachine = newState.accounts.get(counterpartyEntityId as AccountKey);
       if (!accountMachine) {
         console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap cancel`);
         return { newState: entityState, outputs: [] };
@@ -955,7 +956,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       // Step 2: Validate account exists (keyed by counterparty ID)
-      if (!newState.accounts.has(counterpartyEntityId)) {
+      if (!newState.accounts.has(counterpartyEntityId as AccountKey)) {
         logError("ENTITY_TX", `❌ No account exists with ${formatEntityId(counterpartyEntityId)}`);
         throw new Error(`No account with ${counterpartyEntityId}`);
       }

@@ -9,6 +9,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import type { TokenId, LockId } from '../../ids';
 
 export async function handleHtlcTimeout(
   accountMachine: AccountMachine,
@@ -16,7 +17,7 @@ export async function handleHtlcTimeout(
   currentHeight: number,
   currentTimestamp: number
 ): Promise<{ success: boolean; events: string[]; error?: string; timedOutHashlock?: string }> {
-  const { lockId } = accountTx.data;
+  const lockId = accountTx.data.lockId as LockId;
   const events: string[] = [];
 
   // 1. Find lock
@@ -42,7 +43,7 @@ export async function handleHtlcTimeout(
   }
 
   // 3. Get delta to release hold
-  const delta = accountMachine.deltas.get(lock.tokenId);
+  const delta = accountMachine.deltas.get(lock.tokenId as TokenId);
   if (!delta) {
     return { success: false, error: `Delta ${lock.tokenId} not found`, events };
   }

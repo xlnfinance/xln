@@ -10,6 +10,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import type { LockId, TokenId } from '../../ids';
 import { hashHtlcSecret } from '../../htlc-utils';
 
 export async function handleHtlcResolve(
@@ -26,7 +27,8 @@ export async function handleHtlcResolve(
   hashlock?: string;
   reason?: string;
 }> {
-  const { lockId, outcome, secret, reason } = accountTx.data;
+  const lockId = accountTx.data.lockId as LockId;
+  const { outcome, secret, reason } = accountTx.data;
   const events: string[] = [];
 
   // 1. Find lock
@@ -36,7 +38,7 @@ export async function handleHtlcResolve(
   }
 
   // 2. Get delta
-  const delta = accountMachine.deltas.get(lock.tokenId);
+  const delta = accountMachine.deltas.get(lock.tokenId as TokenId);
   if (!delta) {
     return { success: false, error: `Delta ${lock.tokenId} not found`, events };
   }

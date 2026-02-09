@@ -213,6 +213,7 @@
 
 import type { Profile } from './networking/gossip';
 import type { JAdapter } from './jadapter/types';
+import type { EntityId, SignerId, AccountKey, TokenId, LockId } from './ids';
 
 // ═══════════════════════════════════════════════════════════════
 // RESULT TYPE - Discriminated success/failure
@@ -940,17 +941,17 @@ export interface ProposalState {
 
 export interface AccountMachine {
   // CANONICAL REPRESENTATION (like Channel.ts - both entities store IDENTICAL structure)
-  leftEntity: string;   // Lower entity ID (canonical left)
-  rightEntity: string;  // Higher entity ID (canonical right)
+  leftEntity: EntityId;   // Lower entity ID (canonical left)
+  rightEntity: EntityId;  // Higher entity ID (canonical right)
 
   mempool: AccountTx[]; // Unprocessed account transactions
   currentFrame: AccountFrame; // Current agreed state (includes full transaction history for replay/audit)
 
   // Per-token delta states (giant per-token table like old_src)
-  deltas: Map<number, Delta>; // tokenId -> Delta
+  deltas: Map<TokenId, Delta>; // tokenId -> Delta
 
   // HTLC state (conditional payments)
-  locks: Map<string, HtlcLock>; // lockId → lock details
+  locks: Map<LockId, HtlcLock>; // lockId → lock details
 
   // Swap offers (limit orders)
   swapOffers: Map<string, SwapOffer>; // offerId → offer details
@@ -1064,7 +1065,7 @@ export interface AccountMachine {
   }>;
 
   // Rebalancing hints (Phase 3: Hub coordination)
-  requestedRebalance: Map<number, bigint>; // tokenId → amount entity wants rebalanced (credit→collateral)
+  requestedRebalance: Map<TokenId, bigint>; // tokenId → amount entity wants rebalanced (credit→collateral)
 }
 
 // Account frame structure for bilateral consensus (renamed from AccountBlock)
@@ -1133,7 +1134,7 @@ export type AccountInput = AccountInputProposal | AccountInputAck | AccountInput
 
 // Delta structure for per-token account state (based on old_src)
 export interface Delta {
-  tokenId: number;
+  tokenId: TokenId;
   collateral: bigint;
   ondelta: bigint; // On-chain delta
   offdelta: bigint; // Off-chain delta
@@ -1450,7 +1451,7 @@ export interface EntityState {
   entityId: string; // The entity ID this state belongs to
   height: number;
   timestamp: number;
-  nonces: Map<string, number>;
+  nonces: Map<SignerId, number>;
   messages: string[];
   proposals: Map<string, Proposal>;
   config: ConsensusConfig;
@@ -1458,9 +1459,9 @@ export interface EntityState {
 
   // 💰 Financial state
   reserves: Map<string, bigint>; // tokenId -> amount only, metadata from TOKEN_REGISTRY
-  accounts: Map<string, AccountMachine>; // canonicalKey "left:right" -> account state
+  accounts: Map<AccountKey, AccountMachine>; // canonicalKey "left:right" -> account state
   // Account frame scheduling (accounts blocked by pendingFrame, retried on next ACK)
-  deferredAccountProposals?: Map<string, true>;
+  deferredAccountProposals?: Map<AccountKey, true>;
   // 🔭 J-machine tracking (JBlock consensus)
   lastFinalizedJHeight: number;           // Last finalized J-block height
   jBlockObservations: JBlockObservation[]; // Pending observations from signers

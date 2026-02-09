@@ -13,6 +13,7 @@
  */
 
 import type { EntityState, EntityTx, EntityInput } from '../../types';
+import type { AccountKey } from '../../ids';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../../state-helpers';
 
 export async function handleDepositCollateral(
@@ -34,7 +35,7 @@ export async function handleDepositCollateral(
 
   // Validate: Does account exist?
   // Account keyed by counterparty ID
-  if (!entityState.accounts.has(counterpartyId)) {
+  if (!entityState.accounts.has(counterpartyId as AccountKey)) {
     addMessage(newState,
       `❌ Cannot deposit collateral: no account with ${counterpartyId.slice(-4)}`
     );

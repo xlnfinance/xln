@@ -5,6 +5,7 @@
  */
 
 import type { Env } from '../types';
+import type { AccountKey, TokenId } from '../ids';
 import { createEconomy, connectEconomy, testHtlcRoute, type EconomyEntity } from './test-economy';
 import { usd, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { ensureBrowserVM, createJReplica } from './boot';
@@ -101,10 +102,10 @@ export async function htlc4hop(env: Env): Promise<void> {
   const [, bobRep] = findReplica(env, bob.id);
 
   // All locks should be cleared (auto-revealed)
-  const aliceHub1Account = aliceRep.state.accounts.get(hub1.id);
-  const hub1Hub2Account = hub1Rep.state.accounts.get(hub2.id);
-  const hub2Hub3Account = hub2Rep.state.accounts.get(hub3.id);
-  const hub3BobAccount = hub3Rep.state.accounts.get(bob.id);
+  const aliceHub1Account = aliceRep.state.accounts.get(hub1.id as AccountKey);
+  const hub1Hub2Account = hub1Rep.state.accounts.get(hub2.id as AccountKey);
+  const hub2Hub3Account = hub2Rep.state.accounts.get(hub3.id as AccountKey);
+  const hub3BobAccount = hub3Rep.state.accounts.get(bob.id as AccountKey);
 
   console.log(`   Locks after settlement:`);
   console.log(`   Alice-Hub1: ${aliceHub1Account?.locks.size || 0}`);
@@ -143,8 +144,8 @@ export async function htlc4hop(env: Env): Promise<void> {
   }
 
   // Verify deltas (total across all payments)
-  const aliceHub1Delta = aliceHub1Account?.deltas.get(USDC_TOKEN_ID);
-  const hub3BobDelta = hub3BobAccount?.deltas.get(USDC_TOKEN_ID);
+  const aliceHub1Delta = aliceHub1Account?.deltas.get(USDC_TOKEN_ID as TokenId);
+  const hub3BobDelta = hub3BobAccount?.deltas.get(USDC_TOKEN_ID as TokenId);
 
   const totalPaymentAmount = paymentAmounts.reduce((sum, amt) => sum + amt, 0n);
 

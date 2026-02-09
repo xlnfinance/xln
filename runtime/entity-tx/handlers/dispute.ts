@@ -15,6 +15,7 @@
 
 import { ethers } from 'ethers';
 import type { EntityState, EntityTx, EntityInput, Env, AccountMachine } from '../../types';
+import type { AccountKey } from '../../ids';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddRevealSecret, assertBatchNotPending } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
@@ -145,7 +146,7 @@ export async function handleDisputeStart(
   assertBatchNotPending(newState.jBatchState, 'disputeStart');
 
   // Get bilateral account
-  const account = newState.accounts.get(counterpartyEntityId);
+  const account = newState.accounts.get(counterpartyEntityId as AccountKey);
   if (!account) {
     addMessage(newState, `❌ No account with ${counterpartyEntityId.slice(-4)} - cannot start dispute`);
     return { newState, outputs };
@@ -251,7 +252,7 @@ export async function handleDisputeFinalize(
   assertBatchNotPending(newState.jBatchState, 'disputeFinalize');
 
   // Get bilateral account
-  const account = newState.accounts.get(counterpartyEntityId);
+  const account = newState.accounts.get(counterpartyEntityId as AccountKey);
   if (!account) {
     addMessage(newState, `❌ No account with ${counterpartyEntityId.slice(-4)} - cannot finalize dispute`);
     return { newState, outputs };

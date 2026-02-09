@@ -17,6 +17,7 @@
  */
 
 import type { Env } from '../types';
+import type { AccountKey, TokenId } from '../ids';
 import {
   ensureBrowserVM,
   createJReplica,

@@ -16,6 +16,7 @@
 import { main, process as runtimeProcess, applyRuntimeInput, startP2P, startRuntimeLoop } from './runtime';
 import { safeStringify } from './serialization-utils';
 import type { Env, EntityInput, RuntimeInput } from './types';
+import type { AccountKey, TokenId } from './ids';
 import { encodeBoard, hashBoard } from './entity-factory';
 import { deriveSignerKeySync } from './account-crypto';
 import { createJAdapter, type JAdapter } from './jadapter';
@@ -261,9 +262,9 @@ const getEntityReplicaById = (env: Env, entityId: string): any | null => {
 const getAccountDelta = (env: Env, entityId: string, counterpartyId: string, tokenId: number): any | null => {
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.accounts) return null;
-  const account = replica.state.accounts.get(counterpartyId);
+  const account = replica.state.accounts.get(counterpartyId as AccountKey);
   if (!account?.deltas) return null;
-  return account.deltas.get(tokenId) ?? null;
+  return account.deltas.get(tokenId as TokenId) ?? null;
 };
 
 const hasPairMutualCredit = (env: Env, leftEntityId: string, rightEntityId: string, tokenId: number, amount: bigint): boolean => {
@@ -274,7 +275,7 @@ const hasPairMutualCredit = (env: Env, leftEntityId: string, rightEntityId: stri
 
 const hasAccount = (env: Env, entityId: string, counterpartyId: string): boolean => {
   const replica = getEntityReplicaById(env, entityId);
-  return !!replica?.state?.accounts?.has(counterpartyId);
+  return !!replica?.state?.accounts?.has(counterpartyId as AccountKey);
 };
 
 const getHubSignerForEntity = (env: Env, entityId: string): string => {

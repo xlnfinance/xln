@@ -18,6 +18,7 @@
  */
 
 import type { Env, RoutedEntityInput, JurisdictionConfig } from '../types';
+import type { AccountKey, TokenId } from '../ids';
 import { ethers } from 'ethers';
 import { getBestAsk } from '../orderbook/core';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
@@ -316,7 +317,7 @@ export async function swap(env: Env): Promise<void> {
   const [, aliceRep] = findReplica(env, alice.id);
   console.log(`🔍 DEBUG: Alice has ${aliceRep.state.accounts.size} accounts, keys: ${Array.from(aliceRep.state.accounts.keys()).map(k => k.slice(-4)).join(', ')}`);
   console.log(`🔍 DEBUG: Looking for hub.id=${hub.id.slice(-4)}`);
-  assert(aliceRep.state.accounts.has(hub.id), 'Alice-Hub account exists');
+  assert(aliceRep.state.accounts.has(hub.id as AccountKey), 'Alice-Hub account exists');
   console.log('  ✅ Account created\n');
 
   // ============================================================================
@@ -383,7 +384,7 @@ export async function swap(env: Env): Promise<void> {
 
   // Verify offer was created in A-Machine
   const [, aliceRep1] = findReplica(env, alice.id);
-  const aliceHubAccount1 = aliceRep1.state.accounts.get(hub.id);
+  const aliceHubAccount1 = aliceRep1.state.accounts.get(hub.id as AccountKey);
   assert(aliceHubAccount1?.swapOffers?.has(offerId1), 'Offer created in A-Machine account');
 
   const offer1 = aliceHubAccount1?.swapOffers?.get(offerId1);
@@ -400,7 +401,7 @@ export async function swap(env: Env): Promise<void> {
   console.log('  ✅ E-Machine swapBook updated');
 
   // Check hold was applied
-  const ethDelta1 = aliceHubAccount1?.deltas.get(ETH_TOKEN_ID);
+  const ethDelta1 = aliceHubAccount1?.deltas.get(ETH_TOKEN_ID as TokenId);
   assert(ethDelta1?.leftSwapHold === eth(TRADE_ETH), `ETH hold = ${TRADE_ETH} (Alice is LEFT)`);
   console.log(`  ✅ Swap offer created, ${TRADE_ETH} ETH locked\n`);
 
@@ -429,7 +430,7 @@ export async function swap(env: Env): Promise<void> {
 
   // Verify partial fill
   const [, aliceRep2] = findReplica(env, alice.id);
-  const aliceHubAccount2 = aliceRep2.state.accounts.get(hub.id);
+  const aliceHubAccount2 = aliceRep2.state.accounts.get(hub.id as AccountKey);
   const offer2 = aliceHubAccount2?.swapOffers?.get(offerId1);
 
   // After 50% fill: deterministic remaining based on fillRatio
@@ -437,8 +438,8 @@ export async function swap(env: Env): Promise<void> {
   assert(offer2?.giveAmount === expectedRemaining, `Remaining amount = ${expectedRemaining} (got ${offer2?.giveAmount})`);
 
   // Check offdelta changes
-  const ethDelta2 = aliceHubAccount2?.deltas.get(ETH_TOKEN_ID);
-  const usdcDelta2 = aliceHubAccount2?.deltas.get(USDC_TOKEN_ID);
+  const ethDelta2 = aliceHubAccount2?.deltas.get(ETH_TOKEN_ID as TokenId);
+  const usdcDelta2 = aliceHubAccount2?.deltas.get(USDC_TOKEN_ID as TokenId);
 
   // Alice (LEFT) gave ETH → offdelta decreased (more negative)
   // Alice (LEFT) received USDC → offdelta increased (more positive)
@@ -480,16 +481,16 @@ export async function swap(env: Env): Promise<void> {
 
   // Verify offer removed
   const [, aliceRep3] = findReplica(env, alice.id);
-  const aliceHubAccount3 = aliceRep3.state.accounts.get(hub.id);
+  const aliceHubAccount3 = aliceRep3.state.accounts.get(hub.id as AccountKey);
   assert(!aliceHubAccount3?.swapOffers?.has(offerId1), 'Offer removed after full fill');
 
   // Verify holds released
-  const ethDelta3 = aliceHubAccount3?.deltas.get(ETH_TOKEN_ID);
+  const ethDelta3 = aliceHubAccount3?.deltas.get(ETH_TOKEN_ID as TokenId);
   assert(ethDelta3?.leftSwapHold === 0n, 'ETH hold released');
 
   // Verify final deltas (deterministic)
   assert(ethDelta3?.offdelta === -eth(TRADE_ETH), `Final ETH delta = -${TRADE_ETH} (Alice gave ${TRADE_ETH} ETH total)`);
-  const usdcDelta3 = aliceHubAccount3?.deltas.get(USDC_TOKEN_ID);
+  const usdcDelta3 = aliceHubAccount3?.deltas.get(USDC_TOKEN_ID as TokenId);
   assert(usdcDelta3?.offdelta === usdc(TRADE_USDC_MAIN_UNITS), `Final USDC delta = +${TRADE_USDC_MAIN_UNITS} (Alice received ${TRADE_USDC_MAIN_UNITS} USDC)`);
 
   console.log(`  ✅ Swap complete: Alice traded ${TRADE_ETH} ETH for ${TRADE_USDC_MAIN_UNITS} USDC\n`);
@@ -526,7 +527,7 @@ export async function swap(env: Env): Promise<void> {
 
   // Verify offer created in A-Machine and E-Machine (using namespaced key)
   const [, aliceRep4] = findReplica(env, alice.id);
-  const account4 = aliceRep4.state.accounts.get(hub.id);
+  const account4 = aliceRep4.state.accounts.get(hub.id as AccountKey);
   assert(account4?.swapOffers?.has(offerId2), 'Order 2 created in A-Machine');
   const swapBookKey2 = `${hub.id}:${offerId2}`;
   assert(aliceRep4.state.swapBook.has(swapBookKey2), 'Order 2 in E-Machine swapBook');
@@ -549,12 +550,12 @@ export async function swap(env: Env): Promise<void> {
 
   // Verify cancelled in A-Machine and E-Machine (using namespaced key)
   const [, aliceRep5] = findReplica(env, alice.id);
-  const account5 = aliceRep5.state.accounts.get(hub.id);
+  const account5 = aliceRep5.state.accounts.get(hub.id as AccountKey);
   assert(!account5?.swapOffers?.has(offerId2), 'Order 2 cancelled in A-Machine');
   assert(!aliceRep5.state.swapBook.has(swapBookKey2), 'Order 2 removed from E-Machine swapBook');
 
   // Verify hold released
-  const ethDelta5 = account5?.deltas.get(ETH_TOKEN_ID);
+  const ethDelta5 = account5?.deltas.get(ETH_TOKEN_ID as TokenId);
   assert(ethDelta5?.leftSwapHold === 0n, 'Hold released after cancel');
 
   console.log('  ✅ Order cancelled, swapBook cleaned, hold released\n');
@@ -610,7 +611,7 @@ export async function swap(env: Env): Promise<void> {
 
   // Verify offer still exists (fill was rejected)
   const [, aliceRep6] = findReplica(env, alice.id);
-  const account6 = aliceRep6.state.accounts.get(hub.id);
+  const account6 = aliceRep6.state.accounts.get(hub.id as AccountKey);
   assert(account6?.swapOffers?.has(offerId3), 'Order 3 still exists (50% fill rejected)');
 
   // Hub fills 80% - should succeed
@@ -634,7 +635,7 @@ export async function swap(env: Env): Promise<void> {
 
   // Verify offer removed (filled + cancelled)
   const [, aliceRep7] = findReplica(env, alice.id);
-  const account7 = aliceRep7.state.accounts.get(hub.id);
+  const account7 = aliceRep7.state.accounts.get(hub.id as AccountKey);
   assert(!account7?.swapOffers?.has(offerId3), 'Order 3 removed (80% fill + cancel)');
 
   console.log('  ✅ minFillRatio enforced correctly\n');
@@ -786,20 +787,20 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
 
   // Verify Alice's offer exists in bilateral account (from Hub's perspective)
   const [, hubRepCheck] = findReplica(env, hub.id);
-  const aliceAccountCheck = hubRepCheck.state.accounts.get(alice.id);  // Hub's account WITH Alice
+  const aliceAccountCheck = hubRepCheck.state.accounts.get(alice.id as AccountKey);  // Hub's account WITH Alice
   const aliceOffer = aliceAccountCheck?.swapOffers?.get('alice-sell-001');
   assert(!!aliceOffer, 'Alice offer should exist in Hub bilateral account');
   console.log('  ✅ Alice offer created in bilateral account\n');
 
   const [, aliceRepBaseline] = findReplica(env, alice.id);
-  const aliceBaselineAccount = aliceRepBaseline.state.accounts.get(hub.id);
-  const aliceBaselineEth = aliceBaselineAccount?.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
-  const aliceBaselineUsdc = aliceBaselineAccount?.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
+  const aliceBaselineAccount = aliceRepBaseline.state.accounts.get(hub.id as AccountKey);
+  const aliceBaselineEth = aliceBaselineAccount?.deltas.get(ETH_TOKEN_ID as TokenId)?.offdelta ?? 0n;
+  const aliceBaselineUsdc = aliceBaselineAccount?.deltas.get(USDC_TOKEN_ID as TokenId)?.offdelta ?? 0n;
 
   const [, bobRepBaseline] = findReplica(env, bob.id);
-  const bobBaselineAccount = bobRepBaseline.state.accounts.get(hub.id);
-  const bobBaselineEth = bobBaselineAccount?.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
-  const bobBaselineUsdc = bobBaselineAccount?.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
+  const bobBaselineAccount = bobRepBaseline.state.accounts.get(hub.id as AccountKey);
+  const bobBaselineEth = bobBaselineAccount?.deltas.get(ETH_TOKEN_ID as TokenId)?.offdelta ?? 0n;
+  const bobBaselineUsdc = bobBaselineAccount?.deltas.get(USDC_TOKEN_ID as TokenId)?.offdelta ?? 0n;
 
   // Check hub's orderbook extension state
   const ext = hubRepCheck.state.orderbookExt;
@@ -860,8 +861,8 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   // Check Alice's and Bob's accounts from their own perspectives
   const [, aliceRepAfter] = findReplica(env, alice.id);
   const [, bobRepAfter] = findReplica(env, bob.id);
-  const aliceAccount = aliceRepAfter.state.accounts.get(hub.id);  // Alice's account WITH Hub
-  const bobAccount = bobRepAfter.state.accounts.get(hub.id);      // Bob's account WITH Hub
+  const aliceAccount = aliceRepAfter.state.accounts.get(hub.id as AccountKey);  // Alice's account WITH Hub
+  const bobAccount = bobRepAfter.state.accounts.get(hub.id as AccountKey);      // Bob's account WITH Hub
 
   console.log(`  Alice offer exists: ${aliceAccount?.swapOffers?.has('alice-sell-001')}`);
   console.log(`  Bob offer exists: ${bobAccount?.swapOffers?.has('bob-buy-001')}`);
@@ -881,13 +882,13 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   const [, aliceRepFinal] = findReplica(env, alice.id);
   const [, bobRepFinal] = findReplica(env, bob.id);
 
-  const aliceHubFinal = aliceRepFinal.state.accounts.get(hub.id);  // Alice's account WITH Hub
-  const bobHubFinal = bobRepFinal.state.accounts.get(hub.id);      // Bob's account WITH Hub (counterparty key!)
+  const aliceHubFinal = aliceRepFinal.state.accounts.get(hub.id as AccountKey);  // Alice's account WITH Hub
+  const bobHubFinal = bobRepFinal.state.accounts.get(hub.id as AccountKey);      // Bob's account WITH Hub (counterparty key!)
 
-  const aliceEth = aliceHubFinal?.deltas.get(ETH_TOKEN_ID);
-  const aliceUsdc = aliceHubFinal?.deltas.get(USDC_TOKEN_ID);
-  const bobEth = bobHubFinal?.deltas.get(ETH_TOKEN_ID);
-  const bobUsdc = bobHubFinal?.deltas.get(USDC_TOKEN_ID);
+  const aliceEth = aliceHubFinal?.deltas.get(ETH_TOKEN_ID as TokenId);
+  const aliceUsdc = aliceHubFinal?.deltas.get(USDC_TOKEN_ID as TokenId);
+  const bobEth = bobHubFinal?.deltas.get(ETH_TOKEN_ID as TokenId);
+  const bobUsdc = bobHubFinal?.deltas.get(USDC_TOKEN_ID as TokenId);
 
   console.log(`  Alice↔Hub ETH offdelta: ${aliceEth?.offdelta ?? 0n}`);
   console.log(`  Alice↔Hub USDC offdelta: ${aliceUsdc?.offdelta ?? 0n}`);
@@ -941,7 +942,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
 
   // Clear residual open orders to isolate dispute test
   const [, aliceBeforeDispute] = findReplica(env, alice.id);
-  const aliceHubAccountPreDispute = aliceBeforeDispute.state.accounts.get(hub.id);
+  const aliceHubAccountPreDispute = aliceBeforeDispute.state.accounts.get(hub.id as AccountKey);
   if (aliceHubAccountPreDispute?.swapOffers?.has('alice-sell-001')) {
     console.log('🧹 Cancelling leftover alice-sell-001 before dispute test...');
     await process(env, [{
@@ -969,12 +970,12 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   const disputeFillEth = (disputeEth * 2n) / 5n; // 40%
 
   const [, hubDisputeBaseline] = findReplica(env, hub.id);
-  const aliceDisputeAccount = hubDisputeBaseline.state.accounts.get(alice.id);
-  const bobDisputeAccount = hubDisputeBaseline.state.accounts.get(bob.id);
-  const aliceDisputeBaselineEth = aliceDisputeAccount?.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
-  const aliceDisputeBaselineUsdc = aliceDisputeAccount?.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
-  const bobDisputeBaselineEth = bobDisputeAccount?.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
-  const bobDisputeBaselineUsdc = bobDisputeAccount?.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
+  const aliceDisputeAccount = hubDisputeBaseline.state.accounts.get(alice.id as AccountKey);
+  const bobDisputeAccount = hubDisputeBaseline.state.accounts.get(bob.id as AccountKey);
+  const aliceDisputeBaselineEth = aliceDisputeAccount?.deltas.get(ETH_TOKEN_ID as TokenId)?.offdelta ?? 0n;
+  const aliceDisputeBaselineUsdc = aliceDisputeAccount?.deltas.get(USDC_TOKEN_ID as TokenId)?.offdelta ?? 0n;
+  const bobDisputeBaselineEth = bobDisputeAccount?.deltas.get(ETH_TOKEN_ID as TokenId)?.offdelta ?? 0n;
+  const bobDisputeBaselineUsdc = bobDisputeAccount?.deltas.get(USDC_TOKEN_ID as TokenId)?.offdelta ?? 0n;
 
   console.log(`📊 Alice: swap_offer (${disputeEth} ETH → ${disputeUsdc} USDC)`);
   await process(env, [{
@@ -1036,9 +1037,9 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   // Allow Bob's swap_resolve to fully commit before dispute enforcement
   await converge(env);
   const [, hubAfterBobSettle] = findReplica(env, hub.id);
-  const bobAfterSettle = hubAfterBobSettle.state.accounts.get(bob.id);
-  const bobSettledEth = bobAfterSettle?.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
-  const bobSettledUsdc = bobAfterSettle?.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
+  const bobAfterSettle = hubAfterBobSettle.state.accounts.get(bob.id as AccountKey);
+  const bobSettledEth = bobAfterSettle?.deltas.get(ETH_TOKEN_ID as TokenId)?.offdelta ?? 0n;
+  const bobSettledUsdc = bobAfterSettle?.deltas.get(USDC_TOKEN_ID as TokenId)?.offdelta ?? 0n;
   const bobDisputeFilled = computeFilledAmounts(
     usdcForEth(disputeFillEth, ETH_PRICE_MAIN),
     eth(disputeFillEth),
@@ -1087,7 +1088,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   await processJEvents(env);
 
   const [, hubAfterStart] = findReplica(env, hub.id);
-  const hubAccountAfterStart = hubAfterStart.state.accounts.get(alice.id);
+  const hubAccountAfterStart = hubAfterStart.state.accounts.get(alice.id as AccountKey);
   assert(!!hubAccountAfterStart?.activeDispute, 'Dispute started for swap');
   const { buildAccountProofBody } = await import('../proof-builder');
   const hubProofAfterStart = buildAccountProofBody(hubAccountAfterStart);
@@ -1096,7 +1097,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
     'Hub dispute proofBodyHash matches on-chain start hash'
   );
   const [, aliceAfterStart] = findReplica(env, alice.id);
-  const aliceAccountAfterStart = aliceAfterStart.state.accounts.get(hub.id);
+  const aliceAccountAfterStart = aliceAfterStart.state.accounts.get(hub.id as AccountKey);
   assert(!!aliceAccountAfterStart?.activeDispute, 'Dispute visible on counterparty');
   const aliceProofAfterStart = buildAccountProofBody(aliceAccountAfterStart);
   assert(
@@ -1168,15 +1169,15 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
 
   console.log('✅ Dispute swap finalize broadcast complete');
   const [, hubAfterFinalize] = findReplica(env, hub.id);
-  const hubAccountAfterFinalize = hubAfterFinalize.state.accounts.get(alice.id);
+  const hubAccountAfterFinalize = hubAfterFinalize.state.accounts.get(alice.id as AccountKey);
   assert(!hubAccountAfterFinalize?.activeDispute, 'Dispute cleared on hub after finalize');
   const [, aliceAfterFinalize] = findReplica(env, alice.id);
-  const aliceAccountAfterFinalize = aliceAfterFinalize.state.accounts.get(hub.id);
+  const aliceAccountAfterFinalize = aliceAfterFinalize.state.accounts.get(hub.id as AccountKey);
   assert(!aliceAccountAfterFinalize?.activeDispute, 'Dispute cleared on counterparty after finalize');
 
   const clearPending = (ownerId: string, counterpartyId: string, label: string) => {
     const [, replica] = findReplica(env, ownerId);
-    const account = replica.state.accounts.get(counterpartyId);
+    const account = replica.state.accounts.get(counterpartyId as AccountKey);
     if (!account) {
       throw new Error(`Dispute cleanup missing account ${label}`);
     }
@@ -1193,8 +1194,8 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   const syncCounters = (leftId: string, rightId: string, label: string) => {
     const [, leftRep] = findReplica(env, leftId);
     const [, rightRep] = findReplica(env, rightId);
-    const leftAccount = leftRep.state.accounts.get(rightId);
-    const rightAccount = rightRep.state.accounts.get(leftId);
+    const leftAccount = leftRep.state.accounts.get(rightId as AccountKey);
+    const rightAccount = rightRep.state.accounts.get(leftId as AccountKey);
     if (!leftAccount || !rightAccount) {
       throw new Error(`Dispute cleanup missing account for counter sync (${label})`);
     }
@@ -1219,10 +1220,10 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   await converge(env);
 
   const [, hubAfterResolve] = findReplica(env, hub.id);
-  const aliceResolved = hubAfterResolve.state.accounts.get(alice.id);
+  const aliceResolved = hubAfterResolve.state.accounts.get(alice.id as AccountKey);
 
-  const aliceResolvedEth = aliceResolved?.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
-  const aliceResolvedUsdc = aliceResolved?.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
+  const aliceResolvedEth = aliceResolved?.deltas.get(ETH_TOKEN_ID as TokenId)?.offdelta ?? 0n;
+  const aliceResolvedUsdc = aliceResolved?.deltas.get(USDC_TOKEN_ID as TokenId)?.offdelta ?? 0n;
 
   const aliceDisputeFilled = computeFilledAmounts(eth(disputeEth), usdc(disputeUsdc), pendingRatio);
 
@@ -1470,13 +1471,13 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
   // Print final positions
   console.log('\n📊 Final positions:');
   // Account keyed by counterparty ID (from Hub's perspective)
-  const carolAccount = hubRepFinal.state.accounts.get(carol.id);
-  const daveAccount = hubRepFinal.state.accounts.get(dave.id);
+  const carolAccount = hubRepFinal.state.accounts.get(carol.id as AccountKey);
+  const daveAccount = hubRepFinal.state.accounts.get(dave.id as AccountKey);
 
-  const carolEth = carolAccount?.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
-  const carolUsdc = carolAccount?.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
-  const daveEth = daveAccount?.deltas.get(ETH_TOKEN_ID)?.offdelta ?? 0n;
-  const daveUsdc = daveAccount?.deltas.get(USDC_TOKEN_ID)?.offdelta ?? 0n;
+  const carolEth = carolAccount?.deltas.get(ETH_TOKEN_ID as TokenId)?.offdelta ?? 0n;
+  const carolUsdc = carolAccount?.deltas.get(USDC_TOKEN_ID as TokenId)?.offdelta ?? 0n;
+  const daveEth = daveAccount?.deltas.get(ETH_TOKEN_ID as TokenId)?.offdelta ?? 0n;
+  const daveUsdc = daveAccount?.deltas.get(USDC_TOKEN_ID as TokenId)?.offdelta ?? 0n;
 
   console.log(`  Carol: ${Number(carolEth) / 1e18} ETH, ${Number(carolUsdc) / 1e18} USDC`);
   console.log(`  Dave:  ${Number(daveEth) / 1e18} ETH, ${Number(daveUsdc) / 1e18} USDC`);

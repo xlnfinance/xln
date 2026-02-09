@@ -1,4 +1,5 @@
 import type { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env } from '../types';
+import type { AccountKey, TokenId } from '../ids';
 import { DEBUG } from '../utils';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
 import { getTokenInfo, getDefaultCreditLimit } from '../account-utils';
@@ -193,11 +194,11 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
         const { tokenId, collateral, ondelta } = event.data;
         const tokenIdNum = Number(tokenId);
 
-        let delta = account.deltas.get(tokenIdNum);
+        let delta = account.deltas.get(tokenIdNum as TokenId);
         if (!delta) {
-          const defaultCreditLimit = getDefaultCreditLimit(tokenIdNum);
+          const defaultCreditLimit = getDefaultCreditLimit(tokenIdNum as TokenId);
           delta = {
-            tokenId: tokenIdNum,
+            tokenId: tokenIdNum as TokenId,
             collateral: 0n,
             ondelta: 0n,
             offdelta: 0n,
@@ -206,7 +207,7 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
             leftAllowance: 0n,
             rightAllowance: 0n,
           };
-          account.deltas.set(tokenIdNum, delta);
+          account.deltas.set(tokenIdNum as TokenId, delta);
         }
 
         const oldColl = delta.collateral;
@@ -557,7 +558,7 @@ async function applyFinalizedJEvent(
     // BILATERAL J-EVENT CONSENSUS: Need 2-of-2 agreement before applying to account
     // Use canonical key for account lookup
     // Account keyed by counterparty ID
-    const account = newState.accounts.get(counterpartyEntityId as string);
+    const account = newState.accounts.get(counterpartyEntityId as string as AccountKey);
     if (!account) {
       console.warn(`   ⚠️ No account for ${cpShort}`);
       return { newState, mempoolOps };
@@ -696,7 +697,7 @@ async function applyFinalizedJEvent(
     // Find which account this affects (we are either sender or counterentity)
     const candidateCounterpartyId = senderStr === entityIdNorm ? counterentityStr : senderStr;
     let counterpartyId = candidateCounterpartyId;
-    let account = newState.accounts.get(counterpartyId);
+    let account = newState.accounts.get(counterpartyId as AccountKey);
     if (!account) {
       for (const [key, value] of newState.accounts.entries()) {
         if (normalizeId(key) === candidateCounterpartyId) {
@@ -779,7 +780,7 @@ async function applyFinalizedJEvent(
 
     const candidateCounterpartyId = senderStr === entityIdNorm ? counterentityStr : senderStr;
     let counterpartyId = candidateCounterpartyId;
-    let account = newState.accounts.get(counterpartyId);
+    let account = newState.accounts.get(counterpartyId as AccountKey);
     if (!account) {
       for (const [key, value] of newState.accounts.entries()) {
         if (normalizeId(key) === candidateCounterpartyId) {

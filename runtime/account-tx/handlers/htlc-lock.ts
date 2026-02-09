@@ -12,6 +12,7 @@
  */
 
 import type { AccountMachine, AccountTx, HtlcLock, Delta } from '../../types';
+import type { TokenId, LockId } from '../../ids';
 import { deriveDelta, getDefaultCreditLimit } from '../../account-utils';
 import { FINANCIAL } from '../../constants';
 import { HTLC } from '../../constants';
@@ -25,7 +26,9 @@ export async function handleHtlcLock(
   isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
   console.log('🔒 handleHtlcLock CALLED');
-  const { lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId, envelope } = accountTx.data;
+  const lockId = accountTx.data.lockId as LockId;
+  const tokenId = accountTx.data.tokenId as TokenId;
+  const { hashlock, timelock, revealBeforeHeight, amount, envelope } = accountTx.data;
   const events: string[] = [];
 
   // Initialize locks Map if not present (defensive - should be initialized at account creation)

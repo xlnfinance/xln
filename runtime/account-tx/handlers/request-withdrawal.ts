@@ -5,6 +5,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import type { TokenId } from '../../ids';
 // deriveDelta used for withdrawable calculation
 
 export function handleRequestWithdrawal(
@@ -12,7 +13,8 @@ export function handleRequestWithdrawal(
   accountTx: Extract<AccountTx, { type: 'request_withdrawal' }>,
   byLeft: boolean
 ): { success: boolean; events: string[]; error?: string; approvalNeeded?: AccountTx } {
-  const { tokenId, amount, requestId } = accountTx.data;
+  const tokenId = accountTx.data.tokenId as TokenId;
+  const { amount, requestId } = accountTx.data;
   const events: string[] = [];
 
   const delta = accountMachine.deltas.get(tokenId);

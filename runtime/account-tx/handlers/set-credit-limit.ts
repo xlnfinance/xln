@@ -5,6 +5,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import type { TokenId } from '../../ids';
 import { FINANCIAL } from '../../constants';
 
 // Maximum credit limit (prevents overflow attacks)
@@ -15,7 +16,8 @@ export function handleSetCreditLimit(
   accountTx: Extract<AccountTx, { type: 'set_credit_limit' }>,
   byLeft: boolean
 ): { success: boolean; events: string[]; error?: string } {
-  const { tokenId, amount } = accountTx.data;
+  const tokenId = accountTx.data.tokenId as TokenId;
+  const { amount } = accountTx.data;
   const events: string[] = [];
 
   if (amount < 0n) {

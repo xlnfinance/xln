@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { EntityReplica } from '$lib/types/ui';
+  import type { AccountKey } from '@xln/runtime/ids';
   import { createEventDispatcher } from 'svelte';
   import { replicas, xlnFunctions } from '../../stores/xlnStore';
   import AccountPreview from './AccountPreview.svelte';
@@ -43,7 +44,7 @@
     }
 
     return Array.from(entitySet).map(entityId => {
-      const hasAccount = existingAccountIds.has(entityId);
+      const hasAccount = existingAccountIds.has(entityId as AccountKey);
       return {
         entityId,
         displayName: entityId,

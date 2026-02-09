@@ -16,6 +16,7 @@
  */
 
 import type { Env } from '../types';
+import type { AccountKey, TokenId } from '../ids';
 import { ensureBrowserVM, createJReplica } from './boot';
 import { findReplica, assert, processWithOffline, convergeWithOffline, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 
@@ -152,17 +153,17 @@ export async function multiSig(env: Env): Promise<void> {
       console.log(`  ❌ ${validator}: replica not found`);
       continue;
     }
-    const hasAccount = replica.state.accounts.has(hub.id);
+    const hasAccount = replica.state.accounts.has(hub.id as AccountKey);
     const accountCount = replica.state.accounts.size;
     console.log(`  ${validator}: ${hasAccount ? '✅' : '❌'} account with Hub (total accounts: ${accountCount})`);
     if (hasAccount) {
-      const account = replica.state.accounts.get(hub.id)!;
+      const account = replica.state.accounts.get(hub.id as AccountKey)!;
       console.log(`    → Account height: ${account.height}, mempool: ${account.mempool.length}, pending: ${!!account.proposal}`);
     }
   }
 
   const [replicaKey, aliceCheck] = findReplica(env, alice.id);
-  const hasAccount = aliceCheck.state.accounts.has(hub.id);
+  const hasAccount = aliceCheck.state.accounts.has(hub.id as AccountKey);
   console.log(`\\n  Using replica: ${replicaKey}`);
   console.log(`  Account opened: ${hasAccount ? '✅' : '❌ FAILED'}\\n`);
 
@@ -240,8 +241,8 @@ export async function multiSig(env: Env): Promise<void> {
     env.runtimeInput.entityInputs = env.runtimeInput.entityInputs.filter(input => input.entityId !== testEntity.id);
   }
   for (const [, replica] of env.eReplicas) {
-    if (replica.state.accounts.has(testEntity.id)) {
-      replica.state.accounts.delete(testEntity.id);
+    if (replica.state.accounts.has(testEntity.id as AccountKey)) {
+      replica.state.accounts.delete(testEntity.id as AccountKey);
     }
   }
 
@@ -309,7 +310,7 @@ export async function multiSig(env: Env): Promise<void> {
   console.log(`   Proposal: ${aliceAfterCredit.proposal ? 'present' : 'none'}`);
   console.log(`   LockedFrame: ${aliceAfterCredit.lockedFrame ? 'present' : 'none'}`);
 
-  const accountAfterCredit = aliceAfterCredit.state.accounts.get(hub.id);
+  const accountAfterCredit = aliceAfterCredit.state.accounts.get(hub.id as AccountKey);
   if (!accountAfterCredit) {
     throw new Error('Account with Hub not found after credit');
   }
@@ -319,14 +320,14 @@ export async function multiSig(env: Env): Promise<void> {
   console.log(`   Mempool: ${accountAfterCredit.mempool.length}`);
   console.log(`   PendingFrame: ${accountAfterCredit.proposal ? 'yes' : 'no'}`);
 
-  const deltaAfterCredit = accountAfterCredit.deltas.get(USDC);
+  const deltaAfterCredit = accountAfterCredit.deltas.get(USDC as TokenId);
   console.log(`\\n  💳 Credit limits:`);
   console.log(`     Alice→Hub leftCreditLimit: ${deltaAfterCredit?.leftCreditLimit || 0n}`);
   console.log(`     Alice→Hub rightCreditLimit: ${deltaAfterCredit?.rightCreditLimit || 0n}\\n`);
 
   // Check Hub's side
   const [, hubAfterCredit] = findReplica(env, hub.id);
-  const hubAccount = hubAfterCredit.state.accounts.get(alice.id);
+  const hubAccount = hubAfterCredit.state.accounts.get(alice.id as AccountKey);
   console.log(`🔍 Hub-Alice account state:`);
   console.log(`   Account height: ${hubAccount?.height}`);
   console.log(`   Mempool: ${hubAccount?.mempool.length || 0}`);
@@ -419,8 +420,8 @@ export async function multiSig(env: Env): Promise<void> {
 
   // Verify payment applied
   const [, aliceRep3] = findReplica(env, alice.id);
-  const account = aliceRep3.state.accounts.get(hub.id);
-  const delta = account?.deltas.get(USDC);
+  const account = aliceRep3.state.accounts.get(hub.id as AccountKey);
+  const delta = account?.deltas.get(USDC as TokenId);
   const offdelta = delta?.offdelta || 0n;
 
   console.log(`\n📊 Final state:`);

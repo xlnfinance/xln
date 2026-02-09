@@ -12,12 +12,14 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import type { TokenId, LockId } from '../../ids';
 
 export async function handleHtlcCancel(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'htlc_cancel' }>,
 ): Promise<{ success: boolean; events: string[]; error?: string; cancelledHashlock?: string; cancelReason?: string }> {
-  const { lockId, reason } = accountTx.data;
+  const lockId = accountTx.data.lockId as LockId;
+  const { reason } = accountTx.data;
   const events: string[] = [];
 
   // 1. Find lock
@@ -27,7 +29,7 @@ export async function handleHtlcCancel(
   }
 
   // 2. Get delta to release hold
-  const delta = accountMachine.deltas.get(lock.tokenId);
+  const delta = accountMachine.deltas.get(lock.tokenId as TokenId);
   if (!delta) {
     return { success: false, error: `Delta ${lock.tokenId} not found`, events };
   }

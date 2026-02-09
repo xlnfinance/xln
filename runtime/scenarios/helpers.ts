@@ -3,6 +3,7 @@
  */
 
 import type { Env, RoutedEntityInput, EntityReplica, Delta, RuntimeInput } from '../types';
+import type { AccountKey, TokenId } from '../ids';
 import { formatRuntime } from '../runtime-ascii';
 import { setFailFastErrors } from '../logger';
 import { getCachedSignerPrivateKey, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
@@ -201,8 +202,8 @@ export function findReplica(env: Env, entityId: string): [string, EntityReplica]
  */
 export function getOffdelta(env: Env, leftId: string, rightId: string, tokenId: number): bigint {
   const [, leftRep] = findReplica(env, leftId);
-  const account = leftRep.state.accounts.get(rightId);
-  return account?.deltas.get(tokenId)?.offdelta || 0n;
+  const account = leftRep.state.accounts.get(rightId as AccountKey);
+  return account?.deltas.get(tokenId as TokenId)?.offdelta || 0n;
 }
 
 // ============================================================================
@@ -417,15 +418,15 @@ export function assertBilateralSync(
   const [, replicaA] = findReplica(env, entityA);
   const [, replicaB] = findReplica(env, entityB);
 
-  const accountFromA = replicaA?.state?.accounts?.get(entityB);
-  const accountFromB = replicaB?.state?.accounts?.get(entityA);
+  const accountFromA = replicaA?.state?.accounts?.get(entityB as AccountKey);
+  const accountFromB = replicaB?.state?.accounts?.get(entityA as AccountKey);
 
   if (!accountFromA || !accountFromB) {
     throw new Error(`BILATERAL-SYNC FAIL: Missing account at ${label}`);
   }
 
-  const deltaFromA = accountFromA.deltas?.get(tokenId);
-  const deltaFromB = accountFromB.deltas?.get(tokenId);
+  const deltaFromA = accountFromA.deltas?.get(tokenId as TokenId);
+  const deltaFromB = accountFromB.deltas?.get(tokenId as TokenId);
 
   if (!deltaFromA || !deltaFromB) {
     throw new Error(`BILATERAL-SYNC FAIL: Missing delta at ${label}`);

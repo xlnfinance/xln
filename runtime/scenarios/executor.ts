@@ -5,6 +5,7 @@
  */
 
 import type { Env, RuntimeTx, ConsensusConfig } from '../types.js';
+import type { AccountKey } from '../ids';
 import type {
   Scenario,
   ScenarioEvent,
@@ -514,7 +515,7 @@ async function handleGrid(
   // Helper to check if account already exists
   const hasAccount = (from: string, to: string): boolean => {
     for (const replica of env.eReplicas.values()) {
-      if (replica.entityId === from && replica.state?.accounts?.has(to)) {
+      if (replica.entityId === from && replica.state?.accounts?.has(to as AccountKey)) {
         return true;
       }
     }

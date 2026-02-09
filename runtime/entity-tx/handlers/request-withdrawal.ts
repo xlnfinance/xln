@@ -1,4 +1,5 @@
 import type { EntityState, EntityTx, AccountTx } from '../../types';
+import type { AccountKey } from '../../ids';
 import { canonicalAccountKey } from '../../state-helpers';
 
 export function handleRequestWithdrawal(
@@ -9,7 +10,7 @@ export function handleRequestWithdrawal(
 
   // Find or create account (use canonical key)
   // Account keyed by counterparty ID
-  let accountMachine = state.accounts.get(counterpartyEntityId);
+  let accountMachine = state.accounts.get(counterpartyEntityId as AccountKey);
   if (!accountMachine) {
     throw new Error(`No account exists with ${counterpartyEntityId.slice(-8)}`);
   }

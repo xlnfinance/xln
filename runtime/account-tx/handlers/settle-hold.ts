@@ -13,6 +13,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import type { TokenId } from '../../ids';
 import { isLeftEntity } from '../../entity-id-utils';
 
 type SettleHoldTx = Extract<AccountTx, { type: 'settle_hold' }>;
@@ -127,7 +128,7 @@ export async function handleSettleHold(
   const iAmLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
   for (const diff of diffs) {
-    const delta = accountMachine.deltas.get(diff.tokenId);
+    const delta = accountMachine.deltas.get(diff.tokenId as TokenId);
     if (!delta) {
       console.warn(`⚠️ SETTLE-HOLD: No delta for tokenId ${diff.tokenId}`);
       continue;
@@ -207,7 +208,7 @@ export async function handleSettleRelease(
   console.log(`🔓 SETTLE-RELEASE: Releasing holds for workspace v${workspaceVersion}`);
 
   for (const diff of diffs) {
-    const delta = accountMachine.deltas.get(diff.tokenId);
+    const delta = accountMachine.deltas.get(diff.tokenId as TokenId);
     if (!delta) {
       console.warn(`⚠️ SETTLE-RELEASE: No delta for tokenId ${diff.tokenId}`);
       continue;

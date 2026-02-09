@@ -31,6 +31,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import type { TokenId } from '../../ids';
 import { deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL } from '../../constants';
@@ -105,16 +106,16 @@ export async function handleSwapResolve(
   }
 
   // 5. Get or create deltas for both tokens
-  let giveDelta = accountMachine.deltas.get(offer.giveTokenId);
+  let giveDelta = accountMachine.deltas.get(offer.giveTokenId as TokenId);
   if (!giveDelta) {
-    giveDelta = createDefaultDelta(offer.giveTokenId);
-    accountMachine.deltas.set(offer.giveTokenId, giveDelta);
+    giveDelta = createDefaultDelta(offer.giveTokenId as TokenId);
+    accountMachine.deltas.set(offer.giveTokenId as TokenId, giveDelta);
   }
 
-  let wantDelta = accountMachine.deltas.get(offer.wantTokenId);
+  let wantDelta = accountMachine.deltas.get(offer.wantTokenId as TokenId);
   if (!wantDelta) {
-    wantDelta = createDefaultDelta(offer.wantTokenId);
-    accountMachine.deltas.set(offer.wantTokenId, wantDelta);
+    wantDelta = createDefaultDelta(offer.wantTokenId as TokenId);
+    accountMachine.deltas.set(offer.wantTokenId as TokenId, wantDelta);
   }
 
   // Initialize all holds if needed (both HTLC and Swap)

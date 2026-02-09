@@ -16,6 +16,7 @@
  */
 
 import type { Env, RoutedEntityInput, EntityReplica, Delta } from '../types';
+import type { AccountKey, TokenId } from '../ids';
 import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from '../evm';
 import { BrowserVMProvider } from '../jadapter';
 import { getProcess, getApplyRuntimeInput, usd, snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
@@ -225,8 +226,8 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
 function getOffdelta(env: Env, entityA: string, entityB: string, tokenId: number): bigint {
   // Use entityA's perspective: lookup account by counterparty (entityB)
   const [, replicaA] = findReplica(env, entityA);
-  const account = replicaA?.state?.accounts?.get(entityB); // counterparty ID is key
-  const delta = account?.deltas?.get(tokenId);
+  const account = replicaA?.state?.accounts?.get(entityB as AccountKey); // counterparty ID is key
+  const delta = account?.deltas?.get(tokenId as TokenId);
 
   return delta?.offdelta ?? 0n;
 }
@@ -237,8 +238,8 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
   const [, replicaB] = findReplica(env, entityB);
 
   // Each entity stores account keyed by counterparty ID
-  const accountAB = replicaA?.state?.accounts?.get(entityB); // A's view: key=B
-  const accountBA = replicaB?.state?.accounts?.get(entityA); // B's view: key=A
+  const accountAB = replicaA?.state?.accounts?.get(entityB as AccountKey); // A's view: key=B
+  const accountBA = replicaB?.state?.accounts?.get(entityA as AccountKey); // B's view: key=A
 
   console.log(`\n[BILATERAL-SYNC ${label}] Checking ${entityA.slice(-4)}←→${entityB.slice(-4)} for token ${tokenId}...`);
 
@@ -252,8 +253,8 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
     throw new Error(`BILATERAL-SYNC FAIL at "${label}": Entity ${entityB.slice(-4)} missing account with ${entityA.slice(-4)}`);
   }
 
-  const deltaAB = accountAB.deltas?.get(tokenId);
-  const deltaBA = accountBA.deltas?.get(tokenId);
+  const deltaAB = accountAB.deltas?.get(tokenId as TokenId);
+  const deltaBA = accountBA.deltas?.get(tokenId as TokenId);
 
   // Both sides must have the delta for this token
   if (!deltaAB) {
@@ -777,8 +778,8 @@ export async function lockAhb(env: Env): Promise<void> {
     // ✅ ASSERT Frame 6: Alice-Hub account exists (bidirectional)
     const [, aliceRep6] = findReplica(env, alice.id);
     const [, hubRep6] = findReplica(env, hub.id);
-    const aliceHubAcc6 = aliceRep6?.state?.accounts?.get(hub.id);
-    const hubAliceAcc6 = hubRep6?.state?.accounts?.get(alice.id);
+    const aliceHubAcc6 = aliceRep6?.state?.accounts?.get(hub.id as AccountKey);
+    const hubAliceAcc6 = hubRep6?.state?.accounts?.get(alice.id as AccountKey);
     if (!aliceHubAcc6 || !hubAliceAcc6) {
       throw new Error(`ASSERT FAIL Frame 6: Alice-Hub account NOT bidirectional! Alice→Hub: ${!!aliceHubAcc6}, Hub→Alice: ${!!hubAliceAcc6}`);
     }
@@ -817,8 +818,8 @@ export async function lockAhb(env: Env): Promise<void> {
     // ✅ ASSERT Frame 7: Both Hub-Bob accounts exist (bidirectional)
     const [, hubRep7] = findReplica(env, hub.id);
     const [, bobRep7] = findReplica(env, bob.id);
-    const hubBobAcc7 = hubRep7?.state?.accounts?.get(bob.id); // Hub's account with Bob
-    const bobHubAcc7 = bobRep7?.state?.accounts?.get(hub.id); // Bob's account with Hub (counterparty key)
+    const hubBobAcc7 = hubRep7?.state?.accounts?.get(bob.id as AccountKey); // Hub's account with Bob
+    const bobHubAcc7 = bobRep7?.state?.accounts?.get(hub.id as AccountKey); // Bob's account with Hub (counterparty key)
     if (!hubBobAcc7 || !bobHubAcc7) {
       throw new Error(`ASSERT FAIL Frame 7: Hub-Bob account does NOT exist! Hub→Bob: ${!!hubBobAcc7}, Bob→Hub: ${!!bobHubAcc7}`);
     }
@@ -907,8 +908,8 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // ✅ ASSERT: R2C delivered - Alice delta.collateral = $500K
     const [, aliceRep9] = findReplica(env, alice.id);
-    const aliceHubAccount9 = aliceRep9.state.accounts.get(hub.id);
-    const aliceDelta9 = aliceHubAccount9?.deltas.get(USDC_TOKEN_ID);
+    const aliceHubAccount9 = aliceRep9.state.accounts.get(hub.id as AccountKey);
+    const aliceDelta9 = aliceHubAccount9?.deltas.get(USDC_TOKEN_ID as TokenId);
     if (!aliceDelta9 || aliceDelta9.collateral !== aliceCollateralAmount) {
       const actual = aliceDelta9?.collateral || 0n;
       throw new Error(`ASSERT FAIL Frame 9: Alice-Hub collateral = ${actual}, expected ${aliceCollateralAmount}. R2C j-event NOT delivered!`);
@@ -979,8 +980,8 @@ export async function lockAhb(env: Env): Promise<void> {
     // leftCreditLimit = credit extended by LEFT to RIGHT
     // rightCreditLimit = credit extended by RIGHT to LEFT
     const [, bobRep9] = findReplica(env, bob.id);
-    const bobHubAccount9 = bobRep9.state.accounts.get(hub.id); // Account keyed by counterparty
-    const bobDelta9 = bobHubAccount9?.deltas.get(USDC_TOKEN_ID);
+    const bobHubAccount9 = bobRep9.state.accounts.get(hub.id as AccountKey); // Account keyed by counterparty
+    const bobDelta9 = bobHubAccount9?.deltas.get(USDC_TOKEN_ID as TokenId);
     const counterpartyIsLeft = isLeft(hub.id, bob.id);
     const expectedField = counterpartyIsLeft ? 'leftCreditLimit' : 'rightCreditLimit';
     const actualLimit = bobDelta9 ? bobDelta9[expectedField] : 0n;
@@ -1230,8 +1231,8 @@ export async function lockAhb(env: Env): Promise<void> {
     // Verify Bob's view (Bob receives payment1 minus fee + payment2)
     const expectedBobReceived = (payment1 - htlcFee) + payment2;
     const [, bobRep] = findReplica(env, bob.id);
-    const bobHubAcc = bobRep.state.accounts.get(bob.id);
-    const bobDelta = bobHubAcc?.deltas.get(USDC_TOKEN_ID);
+    const bobHubAcc = bobRep.state.accounts.get(bob.id as AccountKey);
+    const bobDelta = bobHubAcc?.deltas.get(USDC_TOKEN_ID as TokenId);
     if (bobDelta) {
       const bobIsLeftHB = isLeft(bob.id, hub.id);
       const bobDerived = deriveDelta(bobDelta, bobIsLeftHB);
@@ -1380,8 +1381,8 @@ export async function lockAhb(env: Env): Promise<void> {
     const [, alicePreSettle] = findReplica(env, alice.id);
     const [, hubPreSettle] = findReplica(env, hub.id);
     const [, bobPreSettle] = findReplica(env, bob.id);
-    const ahPreCollateral = alicePreSettle.state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
-    const hbPreCollateral = hubPreSettle.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+    const ahPreCollateral = alicePreSettle.state.accounts.get(hub.id as AccountKey)?.deltas.get(USDC_TOKEN_ID as TokenId)?.collateral || 0n;
+    const hbPreCollateral = hubPreSettle.state.accounts.get(bob.id as AccountKey)?.deltas.get(USDC_TOKEN_ID as TokenId)?.collateral || 0n;
     const hubPreReserve = hubPreSettle.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
 
     console.log(`   Pre-settlement state:`);
@@ -1503,8 +1504,8 @@ export async function lockAhb(env: Env): Promise<void> {
     const [, hubRepRebal] = findReplica(env, hub.id);
     const [, bobRepRebal] = findReplica(env, bob.id);
 
-    const ahAccountRebal = aliceRepRebal.state.accounts.get(hub.id);
-    const ahDeltaRebal = ahAccountRebal?.deltas.get(USDC_TOKEN_ID);
+    const ahAccountRebal = aliceRepRebal.state.accounts.get(hub.id as AccountKey);
+    const ahDeltaRebal = ahAccountRebal?.deltas.get(USDC_TOKEN_ID as TokenId);
     const expectedAHCollateral = ahPreCollateral - rebalanceAmount;
 
     if (!ahDeltaRebal || ahDeltaRebal.collateral !== expectedAHCollateral) {
@@ -1513,8 +1514,8 @@ export async function lockAhb(env: Env): Promise<void> {
     }
     console.log(`✅ ASSERT: A-H collateral ${ahPreCollateral} → ${ahDeltaRebal.collateral} (-$200K) ✓`);
 
-    const hbAccountRebal = hubRepRebal.state.accounts.get(bob.id);
-    const hbDeltaRebal = hbAccountRebal?.deltas.get(USDC_TOKEN_ID);
+    const hbAccountRebal = hubRepRebal.state.accounts.get(bob.id as AccountKey);
+    const hbDeltaRebal = hbAccountRebal?.deltas.get(USDC_TOKEN_ID as TokenId);
     const expectedHBCollateral = hbPreCollateral + rebalanceAmount;
 
     if (!hbDeltaRebal || hbDeltaRebal.collateral !== expectedHBCollateral) {
@@ -1675,11 +1676,11 @@ export async function lockAhb(env: Env): Promise<void> {
     // Verify lock created and committed
     const [, hubRepBeforeTimeout] = findReplica(env, hub.id);
     const [, charlieRepBeforeTimeout] = findReplica(env, charlie.id);
-    const hubCharlieAccount = hubRepBeforeTimeout.state.accounts.get(charlie.id);
-    const charlieHubAccount = charlieRepBeforeTimeout.state.accounts.get(hub.id);
+    const hubCharlieAccount = hubRepBeforeTimeout.state.accounts.get(charlie.id as AccountKey);
+    const charlieHubAccount = charlieRepBeforeTimeout.state.accounts.get(hub.id as AccountKey);
 
     // H4 AUDIT FIX: Capture balance BEFORE lock for refund verification
-    const hubCharlieOffsetBefore = hubCharlieAccount?.deltas.get(USDC_TOKEN_ID)?.offdelta || 0n;
+    const hubCharlieOffsetBefore = hubCharlieAccount?.deltas.get(USDC_TOKEN_ID as TokenId)?.offdelta || 0n;
     const htlcAmount = usd(10_000);
     console.log(`💰 Hub-Charlie offdelta BEFORE lock: ${hubCharlieOffsetBefore}`);
 
@@ -1713,12 +1714,12 @@ export async function lockAhb(env: Env): Promise<void> {
         }
 
         const hubRepEnd = findReplica(env, hub.id)[1];
-        const hubCharlieAccountAfter = hubRepEnd.state.accounts.get(charlie.id);
+        const hubCharlieAccountAfter = hubRepEnd.state.accounts.get(charlie.id as AccountKey);
 
         console.log(`🔐 Hub-Charlie locks after timeout advance: ${hubCharlieAccountAfter?.locks.size || 0}\n`);
 
         // H4 AUDIT FIX: Verify balance restored after timeout
-        const hubCharlieOffsetAfter = hubCharlieAccountAfter?.deltas.get(USDC_TOKEN_ID)?.offdelta || 0n;
+        const hubCharlieOffsetAfter = hubCharlieAccountAfter?.deltas.get(USDC_TOKEN_ID as TokenId)?.offdelta || 0n;
         console.log(`💰 Hub-Charlie offdelta AFTER timeout: ${hubCharlieOffsetAfter}`);
 
         if ((hubCharlieAccountAfter?.locks.size || 0) === 0) {
@@ -1726,10 +1727,10 @@ export async function lockAhb(env: Env): Promise<void> {
 
           // H4: Verify offdelta was restored (Hub got refund)
           // When lock expires, Hub's hold is released, offdelta should return to pre-lock value
-          const hubHtlcHold = hubCharlieAccountAfter?.deltas.get(USDC_TOKEN_ID)?.leftHtlcHold || 0n;
+          const hubHtlcHold = hubCharlieAccountAfter?.deltas.get(USDC_TOKEN_ID as TokenId)?.leftHtlcHold || 0n;
           const hubIsLeft = hub.id < charlie.id;
           const holdField = hubIsLeft ? 'leftHtlcHold' : 'rightHtlcHold';
-          const currentHold = hubCharlieAccountAfter?.deltas.get(USDC_TOKEN_ID)?.[holdField] || 0n;
+          const currentHold = hubCharlieAccountAfter?.deltas.get(USDC_TOKEN_ID as TokenId)?.[holdField] || 0n;
           if (currentHold === 0n) {
             console.log(`✅ H4: HTLC hold released (${holdField} = 0)`);
           } else {
@@ -1897,7 +1898,7 @@ export async function lockAhb(env: Env): Promise<void> {
     const [, hub2Rep] = findReplica(env, hub2.id);
 
     // Check locks cleared
-    const aliceHubAccount4Hop = aliceRep4Hop.state.accounts.get(hub.id);
+    const aliceHubAccount4Hop = aliceRep4Hop.state.accounts.get(hub.id as AccountKey);
     const aliceHubLockCount = aliceHubAccount4Hop?.locks.size || 0;
 
     console.log(`   Locks after 4-hop: Alice-Hub=${aliceHubLockCount}`);
@@ -1963,8 +1964,8 @@ export async function lockAhb(env: Env): Promise<void> {
     // Verify lock exists on Hub-Bob account
     const [, hubRepHostage] = findReplica(env, hub.id);
     const [, bobRepHostage] = findReplica(env, bob.id);
-    const hubBobAccountHostage = hubRepHostage.state.accounts.get(bob.id);
-    const bobHubAccountHostage = bobRepHostage.state.accounts.get(hub.id);
+    const hubBobAccountHostage = hubRepHostage.state.accounts.get(bob.id as AccountKey);
+    const bobHubAccountHostage = bobRepHostage.state.accounts.get(hub.id as AccountKey);
 
     console.log(`🔐 Hub-Bob locks: ${hubBobAccountHostage?.locks.size || 0}`);
     console.log(`🔐 Bob-Hub locks: ${bobHubAccountHostage?.locks.size || 0}`);
@@ -2027,7 +2028,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // Verify dispute started (activeDispute set by DisputeStarted event)
     const [, bobRepAfterStart] = findReplica(env, bob.id);
-    const bobHubAccountAfterStart = bobRepAfterStart.state.accounts.get(hub.id);
+    const bobHubAccountAfterStart = bobRepAfterStart.state.accounts.get(hub.id as AccountKey);
     assert(!!bobHubAccountAfterStart?.activeDispute, 'Dispute started on Bob-Hub account');
     console.log(`✅ Dispute started (initialNonce: ${bobHubAccountAfterStart?.activeDispute?.initialDisputeNonce})\n`);
 
@@ -2107,7 +2108,7 @@ export async function lockAhb(env: Env): Promise<void> {
       console.log(`   On-chain transformer will unlock Bob's funds\n`);
     } else {
       // Check if dispute finalized (might have revealed via different path)
-      const bobHubAccountFinal = bobRepAfterFinalize.state.accounts.get(hub.id);
+      const bobHubAccountFinal = bobRepAfterFinalize.state.accounts.get(hub.id as AccountKey);
       if (!bobHubAccountFinal?.activeDispute) {
         console.log(`\n⚠️  Dispute finalized but secret not in revealSecrets`);
         console.log(`   This may be expected if transformer address not set`);

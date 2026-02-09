@@ -1,5 +1,6 @@
 import type { AccountInput, AccountInputProposal, AccountInputAck, AccountInputSettlement, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine } from '../../types';
 import { isOk, isErr } from '../../types';
+import type { AccountKey, LockId, EntityId } from '../../ids';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
 import { applyCommand, createBook, canonicalPair, deriveSide, type BookState, type OrderbookExtState } from '../../orderbook';
@@ -73,7 +74,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   // Get or create account machine (KEY: counterparty ID for simpler lookups)
   // AccountMachine still uses canonical left/right internally
   const counterpartyId = input.fromEntityId;
-  let accountMachine = newState.accounts.get(counterpartyId);
+  let accountMachine = newState.accounts.get(counterpartyId as AccountKey);
   let isNewAccount = false;
 
   if (!accountMachine) {
@@ -88,8 +89,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     const rightEntity = isLeftEntity(state.entityId, counterpartyId) ? counterpartyId : state.entityId;
 
     accountMachine = {
-      leftEntity,
-      rightEntity,
+      leftEntity: leftEntity as EntityId,
+      rightEntity: rightEntity as EntityId,
       mempool: [],
       currentFrame: {
         height: 0,
@@ -139,7 +140,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
     // Store with counterparty ID as key (simpler than canonical)
     // Type assertion safe: accountMachine was just created above in this block
-    newState.accounts.set(counterpartyId, accountMachine as AccountMachine);
+    newState.accounts.set(counterpartyId as AccountKey, accountMachine as AccountMachine);
     console.log(`✅ Account created with counterparty key: ${counterpartyId.slice(-4)}`);
   }
 
@@ -251,7 +252,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
           if (accountTx.type === 'htlc_lock') {
             if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: Found htlc_lock in committed frame!`);
-            const lock = accountMachine.locks.get(accountTx.data.lockId);
+            const lock = accountMachine.locks.get(accountTx.data.lockId as LockId);
             if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: lock found? ${!!lock}`);
             if (!lock) {
               console.log(`❌ HTLC-CHECK: Lock not in accountMachine.locks (lockId=${accountTx.data.lockId.slice(0,16)}...)`);
@@ -390,7 +391,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             // For intermediary hops, verify nextHop is a valid entity
             if (envelope.nextHop && !envelope.finalRecipient) {
               // Check if we have an account with nextHop (can forward)
-              const hasNextHopAccount = newState.accounts.has(envelope.nextHop);
+              const hasNextHopAccount = newState.accounts.has(envelope.nextHop as AccountKey);
               if (!hasNextHopAccount) {
                 console.log(`❌ HTLC: Cannot forward - no account with nextHop ${envelope.nextHop.slice(-4)}`);
                 console.log(`❌ HTLC: Available accounts: [${Array.from(newState.accounts.keys()).map(k => k.slice(-4)).join(', ')}]`);
@@ -446,7 +447,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               };
               newState.htlcRoutes.set(lock.hashlock, htlcRoute);
 
-              const nextAccount = newState.accounts.get(nextHop);
+              const nextAccount = newState.accounts.get(nextHop as AccountKey);
 
               // Helper: cancel inbound lock and propagate error backward
               const cancelInboundLock = (cancelReason: string) => {
@@ -559,7 +560,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         if (nextHop) {
           console.log(`💸 Next hop: ${nextHop.slice(-4)}`);
           const nextHopAccountKey = nextHop; // counterparty ID is key
-          const nextHopAccount = newState.accounts.get(nextHopAccountKey);
+          const nextHopAccount = newState.accounts.get(nextHopAccountKey as AccountKey);
           if (nextHopAccount) {
             // Forward full amount (no fees for simplicity)
             const forwardAmount = forward.amount;
@@ -838,7 +839,7 @@ export function processOrderbookSwaps(
       continue;
     }
 
-    const account = hubState.accounts.get(accountId);
+    const account = hubState.accounts.get(accountId as AccountKey);
     const accountOffer = account?.swapOffers?.get(offer.offerId);
     if (accountOffer) {
       accountOffer.quantizedGive = quantizedGive;
@@ -927,8 +928,8 @@ export function processOrderbookSwaps(
       // Verify account exists in hub's state
       if (HEAVY_LOGS) console.log(`🔍 ORDERBOOK-LOOKUP: Looking for accountId="${accountId}"`);
       if (HEAVY_LOGS) console.log(`🔍 ORDERBOOK-LOOKUP: Hub accounts:`, Array.from(hubState.accounts.keys()));
-      if (HEAVY_LOGS) console.log(`🔍 ORDERBOOK-LOOKUP: Match found:`, hubState.accounts.has(accountId));
-      if (!hubState.accounts.has(accountId)) {
+      if (HEAVY_LOGS) console.log(`🔍 ORDERBOOK-LOOKUP: Match found:`, hubState.accounts.has(accountId as AccountKey));
+      if (!hubState.accounts.has(accountId as AccountKey)) {
         console.warn(`⚠️ ORDERBOOK: Account not found for swap_resolve, skipping`);
         console.warn(`   Looking for: "${accountId}"`);
         console.warn(`   Hub has: ${Array.from(hubState.accounts.keys()).map(k => `"${k}"`).join(', ')}`);

@@ -7,6 +7,7 @@
  */
 
 import type { EntityState, EntityInput, RoutedEntityInput, AccountTx, Env } from '../../types';
+import type { AccountKey } from '../../ids';
 import { cloneEntityState, canonicalAccountKey } from '../../state-helpers';
 import { generateHashlock, generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../htlc-utils';
 import { HTLC } from '../../constants';
@@ -76,7 +77,7 @@ export async function handleHtlcPayment(
   // If no route provided, check for direct account or calculate route
   if (!route || route.length === 0) {
     // Account keyed by counterparty ID (no canonical helper needed)
-    if (newState.accounts.has(targetEntityId)) {
+    if (newState.accounts.has(targetEntityId as AccountKey)) {
       console.log(`🔒 Direct account exists with ${formatEntityId(targetEntityId)}`);
       route = [entityState.entityId, targetEntityId];
     } else {
@@ -128,7 +129,7 @@ export async function handleHtlcPayment(
 
   // Check if we have an account with next hop
   // Accounts keyed by counterparty ID (simpler than canonical)
-  if (!newState.accounts.has(nextHop)) {
+  if (!newState.accounts.has(nextHop as AccountKey)) {
     logError("HTLC_PAYMENT", `❌ No account with next hop: ${nextHop.slice(-4)}`);
     addMessage(newState, `❌ HTLC payment failed: No account with ${formatEntityId(nextHop)}`);
     return { newState, outputs: [] };
@@ -224,7 +225,7 @@ export async function handleHtlcPayment(
   };
 
   // Queue mempool operation (entity-consensus will apply + mark account proposable)
-  const accountMachine = newState.accounts.get(nextHop);
+  const accountMachine = newState.accounts.get(nextHop as AccountKey);
   if (accountMachine) {
     mempoolOps.push({ accountId: nextHop, tx: accountTx });
     console.log(`🔒 Queued HTLC lock for mempool (account ${formatEntityId(nextHop)})`);

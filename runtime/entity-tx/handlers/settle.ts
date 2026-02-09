@@ -17,6 +17,7 @@
 
 import type { EntityState, EntityTx, EntityInput, SettlementWorkspace, SettlementDiff, AccountInput, AccountInputSettlement } from '../../types';
 import { createSettlementDiff } from '../../types';
+import type { AccountKey } from '../../ids';
 import { cloneEntityState, addMessage, getAccountPerspective } from '../../state-helpers';
 import { initJBatch, batchAddSettlement } from '../../j-batch';
 import { isLeftEntity } from '../../entity-id-utils';
@@ -114,7 +115,7 @@ export async function handleSettlePropose(
   validateDiffs(diffs);
 
   // Get or validate account exists
-  const account = newState.accounts.get(counterpartyEntityId);
+  const account = newState.accounts.get(counterpartyEntityId as AccountKey);
   if (!account) {
     throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
   }
@@ -194,7 +195,7 @@ export async function handleSettleUpdate(
   validateDiffs(diffs);
 
   // Get account and workspace
-  const account = newState.accounts.get(counterpartyEntityId);
+  const account = newState.accounts.get(counterpartyEntityId as AccountKey);
   if (!account) {
     throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
   }
@@ -282,7 +283,7 @@ export async function handleSettleApprove(
   console.log(`⚖️ settle_approve: ${entityState.entityId.slice(-4)} signing settlement with ${counterpartyEntityId.slice(-4)}`);
 
   // Get account and workspace
-  const account = newState.accounts.get(counterpartyEntityId);
+  const account = newState.accounts.get(counterpartyEntityId as AccountKey);
   if (!account) {
     throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
   }
@@ -411,7 +412,7 @@ export async function handleSettleExecute(
   console.log(`⚖️ settle_execute: ${entityState.entityId.slice(-4)} executing settlement with ${counterpartyEntityId.slice(-4)}`);
 
   // Get account and workspace
-  const account = newState.accounts.get(counterpartyEntityId);
+  const account = newState.accounts.get(counterpartyEntityId as AccountKey);
   if (!account) {
     throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
   }
@@ -495,7 +496,7 @@ export async function handleSettleReject(
   console.log(`⚖️ settle_reject: ${entityState.entityId.slice(-4)} rejecting settlement with ${counterpartyEntityId.slice(-4)}`);
 
   // Get account
-  const account = newState.accounts.get(counterpartyEntityId);
+  const account = newState.accounts.get(counterpartyEntityId as AccountKey);
   if (!account) {
     throw new Error(`No account with ${counterpartyEntityId.slice(-4)}`);
   }

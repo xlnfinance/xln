@@ -10,6 +10,7 @@
 
 import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
+import type { TokenId } from './ids';
 import type {
   Delta,
   RoutedEntityInput,
@@ -66,7 +67,7 @@ export function validateDelta(delta: unknown, source: string = 'unknown'): Delta
 
   // After validation, safe to cast to Delta
   return {
-    tokenId: obj.tokenId as number,
+    tokenId: obj.tokenId as TokenId,
     collateral: obj.collateral as bigint,
     ondelta: obj.ondelta as bigint,
     offdelta: obj.offdelta as bigint,
@@ -128,7 +129,7 @@ export function validateAccountDeltas(deltas: unknown, source: string = 'unknown
 /**
  * Create a safe default Delta object with proper BigInt values
  */
-export function createDefaultDelta(tokenId: number): Delta {
+export function createDefaultDelta(tokenId: import('./ids').TokenId): Delta {
   return {
     tokenId,
     collateral: 0n,

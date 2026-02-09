@@ -17,6 +17,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import type { TokenId } from '../../ids';
 
 export async function handleSwapCancel(
   accountMachine: AccountMachine,
@@ -46,7 +47,7 @@ export async function handleSwapCancel(
 
   // 3. Release hold (CRITICAL: Apply during BOTH validation and commit!)
   // Holds are consensus-critical - must be in state hash
-  const giveDelta = accountMachine.deltas.get(offer.giveTokenId);
+  const giveDelta = accountMachine.deltas.get(offer.giveTokenId as TokenId);
   if (giveDelta) {
     if (giveDelta.leftSwapHold === undefined) giveDelta.leftSwapHold = 0n;
     if (giveDelta.rightSwapHold === undefined) giveDelta.rightSwapHold = 0n;

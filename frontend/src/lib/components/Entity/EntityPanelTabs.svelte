@@ -9,6 +9,7 @@
   import { get } from 'svelte/store';
   import { Wallet as EthersWallet, hexlify, isAddress, ZeroAddress } from 'ethers';
   import type { Env } from '@xln/runtime/xln-api';
+  import type { AccountKey } from '@xln/runtime/ids';
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { history } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex, isLive, timeOperations } from '../../stores/timeStore';
@@ -151,7 +152,7 @@
   // Navigation
   $: isAccountFocused = selectedAccountId !== null;
   $: selectedAccount = isAccountFocused && replica?.state?.accounts && selectedAccountId
-    ? replica.state.accounts.get(selectedAccountId) : null;
+    ? replica.state.accounts.get(selectedAccountId as AccountKey) : null;
 
   // Jurisdictions
   $: availableJurisdictions = (() => {
@@ -600,7 +601,7 @@
     }
 
     const accounts = replica?.state?.accounts;
-    if (!accounts || !accounts.has(selectedAccountId)) {
+    if (!accounts || !accounts.has(selectedAccountId as AccountKey)) {
       toasts.error('No account found for selected counterparty');
       return;
     }

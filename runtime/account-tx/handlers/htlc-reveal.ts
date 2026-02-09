@@ -11,6 +11,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import type { TokenId, LockId } from '../../ids';
 import { hashHtlcSecret } from '../../htlc-utils';
 
 export async function handleHtlcReveal(
@@ -26,7 +27,8 @@ export async function handleHtlcReveal(
   hashlock?: string;   // To identify route
 }> {
   console.log('🔓 handleHtlcReveal CALLED');
-  const { lockId, secret } = accountTx.data;
+  const lockId = accountTx.data.lockId as LockId;
+  const { secret } = accountTx.data;
   const events: string[] = [];
 
   console.log(`🔓 REVEAL: lockId=${lockId.slice(0,16)}..., locks.size=${accountMachine.locks.size}`);
@@ -77,7 +79,7 @@ export async function handleHtlcReveal(
   }
 
   // 4. Get delta
-  const delta = accountMachine.deltas.get(lock.tokenId);
+  const delta = accountMachine.deltas.get(lock.tokenId as TokenId);
   if (!delta) {
     return { success: false, error: `Delta ${lock.tokenId} not found`, events };
   }

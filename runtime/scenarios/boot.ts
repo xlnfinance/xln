@@ -4,6 +4,7 @@
  */
 
 import type { Env, JurisdictionConfig } from '../types';
+import type { AccountKey, TokenId } from '../ids';
 import type { JAdapter, JAdapterMode } from '../jadapter/types';
 
 export type { JAdapterMode };

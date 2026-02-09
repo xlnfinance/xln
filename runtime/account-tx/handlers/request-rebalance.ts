@@ -5,12 +5,14 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import type { TokenId } from '../../ids';
 
 export function handleRequestRebalance(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'request_rebalance' }>
 ): { success: boolean; events: string[] } {
-  const { tokenId, amount } = accountTx.data;
+  const tokenId = accountTx.data.tokenId as TokenId;
+  const { amount } = accountTx.data;
 
   accountMachine.requestedRebalance.set(tokenId, amount);
 

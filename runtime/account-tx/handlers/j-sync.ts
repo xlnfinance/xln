@@ -11,6 +11,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import type { TokenId } from '../../ids';
 import { getDefaultCreditLimit } from '../../account-utils';
 import { getAccountPerspective } from '../../state-helpers';
 
@@ -18,7 +19,8 @@ export function handleJSync(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'j_sync' }>
 ): { success: boolean; events: string[]; error?: string } {
-  const { jBlockNumber, tokenId, collateral, ondelta } = accountTx.data;
+  const tokenId = accountTx.data.tokenId as TokenId;
+  const { jBlockNumber, collateral, ondelta } = accountTx.data;
   const events: string[] = [];
 
   const entityShort = accountMachine.proofHeader.fromEntity.slice(-4);

@@ -11,6 +11,7 @@
  */
 
 import type { Env, EntityReplica, SettlementDiff } from '../types';
+import type { AccountKey, TokenId } from '../ids';
 import { getAvailableJurisdictions, setBrowserVMJurisdiction } from '../evm';
 import { BrowserVMProvider } from '../jadapter';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, getProcess, getApplyRuntimeInput } from './helpers';
@@ -408,8 +409,8 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   const [, aliceReplica] = findReplica(env, ALICE_ID);
   const [, hubReplica] = findReplica(env, HUB_ID);
 
-  const aliceAccount = aliceReplica.state.accounts.get(HUB_ID);
-  const hubAccount = hubReplica.state.accounts.get(ALICE_ID);
+  const aliceAccount = aliceReplica.state.accounts.get(HUB_ID as AccountKey);
+  const hubAccount = hubReplica.state.accounts.get(ALICE_ID as AccountKey);
 
   assert(aliceAccount?.settlementWorkspace, 'Alice should have settlement workspace', env);
   assert(hubAccount?.settlementWorkspace, 'Hub should have settlement workspace', env);
@@ -418,7 +419,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
 
   // TEST: Verify settlement holds are set via frame consensus
   // depositDiff has leftDiff: -usd(100), so leftSettleHold should be usd(100)
-  const usdcDelta = aliceAccount.deltas.get(USDC_TOKEN_ID);
+  const usdcDelta = aliceAccount.deltas.get(USDC_TOKEN_ID as TokenId);
   assert(usdcDelta, 'USDC delta should exist', env);
   const expectedHold = usd(100);
   console.log(`   HOLD CHECK: leftSettleHold=${usdcDelta.leftSettleHold || 0n}, expected=${expectedHold}`);
@@ -466,7 +467,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   }
 
   // Verify update
-  const aliceAccount2 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
+  const aliceAccount2 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID as AccountKey);
   assert(aliceAccount2?.settlementWorkspace?.version === 2, 'Version should be 2 after update', env);
   assert(aliceAccount2.settlementWorkspace.diffs[0].leftDiff === -usd(50), 'Diff should be updated');
 
@@ -497,7 +498,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     await process(env);
   }
 
-  const aliceAccount3 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
+  const aliceAccount3 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID as AccountKey);
   assert(aliceAccount3?.settlementWorkspace, 'Alice should have settlement workspace', env);
   assert(aliceAccount3.settlementWorkspace.status === 'awaiting_counterparty', 'Should be awaiting counterparty', env);
   assert(aliceAccount3.settlementWorkspace.leftHanko, 'Alice should have signed', env);
@@ -521,7 +522,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     await process(env);
   }
 
-  const aliceAccount4 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
+  const aliceAccount4 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID as AccountKey);
   assert(aliceAccount4?.settlementWorkspace, 'Alice should have settlement workspace', env);
   assert(aliceAccount4.settlementWorkspace.status === 'ready_to_submit', 'Should be ready to submit', env);
   assert(aliceAccount4.settlementWorkspace.leftHanko, 'Alice hanko still present', env);
@@ -556,7 +557,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   }
 
   const aliceState = findReplica(env, ALICE_ID)[1].state;
-  assert(!aliceState.accounts.get(HUB_ID)?.settlementWorkspace, 'Workspace should be cleared after execute', env);
+  assert(!aliceState.accounts.get(HUB_ID as AccountKey)?.settlementWorkspace, 'Workspace should be cleared after execute', env);
   // With JAdapter.submitTx(), jBatch is broadcast immediately post-save.
   // By the time we check here, the batch was already processed on-chain and cleared.
   // Verify it was executed (batch cleared = success) rather than still pending.
@@ -612,7 +613,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     await process(env);
   }
 
-  const aliceAccount5 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID);
+  const aliceAccount5 = findReplica(env, ALICE_ID)[1].state.accounts.get(HUB_ID as AccountKey);
   assert(!aliceAccount5?.settlementWorkspace, 'Workspace should be cleared after reject', env);
 
   console.log(`✅ Settlement rejected - workspace cleared`);

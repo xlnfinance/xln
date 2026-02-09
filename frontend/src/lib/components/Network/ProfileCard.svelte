@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getXLN, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { tabs } from '../../stores/tabStore';
+  import type { AccountKey } from '@xln/runtime/ids';
 
   export let profile: any;
 
@@ -29,7 +30,7 @@
     if (!replica?.state?.accounts) return false;
 
     // Check if there's an account with this hub
-    return replica.state.accounts.has(profile.entityId);
+    return replica.state.accounts.has(profile.entityId as AccountKey);
   })();
 
   async function joinHub(targetEntityId: string = profile.entityId) {

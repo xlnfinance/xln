@@ -4,6 +4,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../types';
+import type { TokenId } from '../ids';
 import { getAccountPerspective } from '../state-helpers';
 import { handleAddDelta } from './handlers/add-delta';
 import { handleSetCreditLimit } from './handlers/set-credit-limit';
@@ -150,7 +151,7 @@ export async function processAccountTx(
         tryFinalizeAccountJEvents(accountMachine, cpId, { timestamp: currentTimestamp });
 
         // DEBUG: Check if bilateral finalization persisted
-        const delta = accountMachine.deltas.get(1); // USDC token
+        const delta = accountMachine.deltas.get(1 as TokenId); // USDC token
         console.log(`🔍 AFTER-BILATERAL-FINALIZE (isValidation=${isValidation}): collateral=${delta?.collateral || 0n}`);
       } else {
         console.log(`⏭️ SKIP-BILATERAL-FINALIZE: On validation clone, will finalize during commit`);

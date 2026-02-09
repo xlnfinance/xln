@@ -5,6 +5,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import type { TokenId } from '../../ids';
 import { deriveDelta, getDefaultCreditLimit } from '../../account-utils';
 import { FINANCIAL } from '../../constants';
 import { isLeftEntity } from '../../entity-id-utils';
@@ -16,7 +17,8 @@ export function handleDirectPayment(
   accountTx: Extract<AccountTx, { type: 'direct_payment' }>,
   byLeft: boolean
 ): { success: boolean; events: string[]; error?: string } {
-  const { tokenId, amount, route, description } = accountTx.data;
+  const tokenId = accountTx.data.tokenId as TokenId;
+  const { amount, route, description } = accountTx.data;
   const events: string[] = [];
 
   if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
