@@ -16,7 +16,8 @@ export interface LogConfig {
   ACCOUNT_OPEN: boolean;
   SIGNER_LOOKUP: boolean;
   PROCESS_TICK: boolean;
-  FRAME_CONSENSUS: boolean;
+  ENTITY_CONSENSUS: boolean;
+  ACCOUNT_CONSENSUS: boolean;
   ENTITY_OUTPUT: boolean;
   ENTITY_INPUT: boolean;
   SERVER_TICK: boolean;
@@ -35,7 +36,8 @@ export const LOG_CONFIG: LogConfig = {
   ACCOUNT_OPEN: PERFORMANCE.DEBUG_ACCOUNTS,      // Account creation
   SIGNER_LOOKUP: PERFORMANCE.DEBUG_CONSENSUS,    // Validator management
   PROCESS_TICK: PERFORMANCE.DEBUG_LOGGING,       // Tick processing
-  FRAME_CONSENSUS: PERFORMANCE.DEBUG_CONSENSUS,  // BFT consensus
+  ENTITY_CONSENSUS: PERFORMANCE.DEBUG_CONSENSUS,  // Entity BFT consensus
+  ACCOUNT_CONSENSUS: PERFORMANCE.DEBUG_CONSENSUS, // Bilateral account consensus
   ENTITY_OUTPUT: PERFORMANCE.DEBUG_LOGGING,      // Entity outputs
   ENTITY_INPUT: PERFORMANCE.DEBUG_LOGGING,       // Entity inputs
   SERVER_TICK: PERFORMANCE.DEBUG_LOGGING,        // Runtime tick processing

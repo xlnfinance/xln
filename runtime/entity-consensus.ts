@@ -12,7 +12,7 @@ import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from
 import { safeStringify } from './serialization-utils';
 import { logDebug, logInfo, logWarn, logError } from './logger';
 
-const L = 'FRAME_CONSENSUS' as const;
+const L = 'ENTITY_CONSENSUS' as const;
 import { addMessages, cloneEntityReplica, cloneEntityState, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from './state-helpers';
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
@@ -1274,17 +1274,6 @@ export const calculateQuorumPower = (config: ConsensusConfig, signers: string[])
   }, 0n);
 };
 
-export const sortSignatures = (signatures: Map<string, string>, config: ConsensusConfig): Map<string, string> => {
-  const sortedEntries = Array.from(signatures.entries()).sort(([a], [b]) => {
-    const indexA = config.validators.indexOf(a);
-    const indexB = config.validators.indexOf(b);
-    return indexA - indexB;
-  });
-  return new Map(sortedEntries);
-};
-
-// === ENTITY UTILITIES (existing) ===
-
 /**
  * Merges duplicate entity inputs to reduce processing overhead
  */
@@ -1417,51 +1406,3 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
   });
 };
 
-/**
- * Gets entity state summary for debugging
- */
-export const getEntityStateSummary = (replica: EntityReplica): string => {
-  const hasProposal = replica.proposal ? '✓' : '✗';
-  return `mempool=${replica.mempool.length}, messages=${replica.state.messages.length}, proposal=${hasProposal}`;
-};
-
-/**
- * Checks if entity should auto-propose (simplified version)
- */
-export const shouldAutoPropose = (replica: EntityReplica, _config: ConsensusConfig): boolean => {
-  const hasMempool = replica.mempool.length > 0;
-  const isProposer = replica.isProposer;
-  const hasProposal = replica.proposal !== undefined;
-
-  return hasMempool && isProposer && !hasProposal;
-};
-
-/**
- * Processes empty transaction arrays (corner case)
- */
-export const handleEmptyTransactions = (): void => {
-  logDebug(L, `Empty transaction array received - no mempool changes`);
-};
-
-/**
- * Logs large transaction batches (corner case)
- */
-export const handleLargeBatch = (txCount: number): void => {
-  if (txCount >= 8) {
-    logWarn(L, `Large batch of ${txCount} transactions`);
-  }
-};
-
-/**
- * Handles gossip mode precommit distribution
- */
-export const handleGossipMode = (): void => {
-  logDebug(L, `Gossip mode - all validators receive precommits`);
-};
-
-/**
- * Logs proposer with empty mempool corner case
- */
-export const handleEmptyMempoolProposer = (): void => {
-  logDebug(L, `Proposer with empty mempool - no auto-propose`);
-};

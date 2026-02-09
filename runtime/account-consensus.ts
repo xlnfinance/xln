@@ -12,14 +12,14 @@
  * - Event Bubbling: Account events bubble up to E-Machine for entity messages
  */
 
-import type { AccountMachine, AccountFrame, AccountTx, AccountInput, AccountInputProposal, AccountInputAck, Env, EntityState, Delta, EntityReplica, Result } from './types';
+import type { AccountMachine, AccountFrame, AccountTx, AccountInput, AccountInputProposal, AccountInputAck, Env, EntityState, Delta, Result } from './types';
 import { Ok, Err, isOk, isErr } from './types';
 
 /** Type guard: input has frame-level consensus fields (proposal or ack) */
 function isFrameInput(input: AccountInput): input is AccountInputProposal | AccountInputAck {
   return input.type === 'proposal' || input.type === 'ack';
 }
-import { cloneAccountMachine, getAccountPerspective } from './state-helpers';
+import { cloneAccountMachine, getAccountPerspective, findSigningReplica } from './state-helpers';
 import { isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-crypto';
 import { cryptoHash as hash, formatEntityId, HEAVY_LOGS } from './utils';
@@ -28,7 +28,7 @@ import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
 import { processAccountTx } from './account-tx/apply';
 
-const L = 'FRAME_CONSENSUS' as const;
+const L = 'ACCOUNT_CONSENSUS' as const;
 // NOTE: Settlements now use SettlementWorkspace flow (see entity-tx/handlers/settle.ts)
 
 // Removed createValidAccountSnapshot - using simplified AccountSnapshot interface
@@ -267,7 +267,7 @@ export async function proposeAccountFrame(
 
   // Get entity's synced J-height for deterministic HTLC validation
   const ourEntityId = accountMachine.proofHeader.fromEntity;
-  const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
+  const ourReplica = findSigningReplica(env, ourEntityId);
   const currentJHeight = ourReplica?.state.lastFinalizedJHeight || 0;
   const frameJHeight = entityJHeight ?? currentJHeight;
 
@@ -296,11 +296,11 @@ export async function proposeAccountFrame(
 
   for (const accountTx of accountMachine.mempool) {
     // Channel.ts: byLeft = proposer is left entity (frame-level, same on both sides)
-    const proposerByLeft = accountMachine.leftEntity === accountMachine.proofHeader.fromEntity;
+    const weAreLeft = accountMachine.leftEntity === accountMachine.proofHeader.fromEntity;
     const result = await processAccountTx(
       clonedMachine,
       accountTx,
-      proposerByLeft,
+      weAreLeft,
       env.timestamp, // Will be replaced by frame.timestamp during commit
       frameJHeight,  // Entity's synced J-height
       true // isValidation = true (on clone, skip persistent state updates)
@@ -452,7 +452,7 @@ export async function proposeAccountFrame(
   // Generate HANKO signature - CRITICAL: Use signerId, not entityId
   // For single-signer entities, build hanko with single EOA signature
   const signingEntityId = accountMachine.proofHeader.fromEntity;
-  const signingReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === signingEntityId);
+  const signingReplica = findSigningReplica(env, signingEntityId);
   if (!signingReplica) {
     return Err({ error: `Cannot find replica for entity ${signingEntityId.slice(-4)}`, events });
   }
@@ -716,9 +716,9 @@ export async function handleAccountInput(
       logDebug(L, `SIMULTANEOUS: Both proposed h=${receivedFrame.height}`);
 
       // Deterministic tiebreaker: Left always wins (CHANNEL.TS REFERENCE: Line 140-157)
-      const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
+      const weAreLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
-      if (isLeftEntity) {
+      if (weAreLeft) {
         // We are LEFT - ignore their frame, keep ours (deterministic tiebreaker)
         events.push(`LEFT-WINS: Ignored RIGHT's frame ${receivedFrame.height}`);
         env.info('consensus', 'LEFT-WINS', {
@@ -788,7 +788,7 @@ export async function handleAccountInput(
 
     // Get entity's synced J-height for deterministic HTLC validation
     const ourEntityId = accountMachine.proofHeader.fromEntity;
-    const ourReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ourEntityId);
+    const ourReplica = findSigningReplica(env, ourEntityId);
     const currentJHeight = ourReplica?.state.lastFinalizedJHeight || 0;
     const frameJHeight = receivedFrame.jHeight ?? currentJHeight;
 
@@ -1033,7 +1033,7 @@ export async function handleAccountInput(
 
     // Send confirmation (ACK) using HANKO
     const ackEntityId = accountMachine.proofHeader.fromEntity;
-    const ackReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === ackEntityId);
+    const ackReplica = findSigningReplica(env, ackEntityId);
     const ackSignerId = ackReplica?.state.config.validators[0];
     if (!ackSignerId) {
       return Err({ error: `Cannot find signerId for ACK from ${ackEntityId.slice(-4)}`, events });
@@ -1248,7 +1248,7 @@ export async function generateAccountProof(env: Env, accountMachine: AccountMach
 
   // Generate hanko signature - CRITICAL: Use signerId, not entityId
   const proofEntityId = accountMachine.proofHeader.fromEntity;
-  const proofReplica = Array.from(env.eReplicas.values()).find((r: EntityReplica) => r.state.entityId === proofEntityId);
+  const proofReplica = findSigningReplica(env, proofEntityId);
   const proofSignerId = proofReplica?.state.config.validators[0];
   if (!proofSignerId) {
     throw new Error(`Cannot find signerId for proof from ${proofEntityId.slice(-4)}`);

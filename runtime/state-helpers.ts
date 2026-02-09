@@ -115,6 +115,11 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
   throw new Error(`SIGNER_RESOLUTION_FAILED: ${context} entityId=${entityId}`);
 }
 
+/** Find the EntityReplica that owns a given entityId */
+export function findSigningReplica(env: Env, entityId: string): EntityReplica | undefined {
+  return Array.from(env.eReplicas.values()).find(r => r.state.entityId === entityId);
+}
+
 // === CLONING UTILITIES ===
 export const cloneMap = <K, V>(map: Map<K, V>) => new Map(map);
 export const cloneArray = <T>(arr: T[]) => [...arr];
