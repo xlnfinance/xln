@@ -14,7 +14,7 @@
  * Each frame includes Fed-style subtitles explaining what/why/tradfi-parallel
  */
 
-import type { Env, EntityInput, EntityReplica, Delta } from '../types';
+import type { Env, RoutedEntityInput, EntityReplica, Delta } from '../types';
 import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from '../evm';
 import { BrowserVMProvider } from '../jadapter';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD } from './helpers';
@@ -26,8 +26,8 @@ import { safeStringify } from '../serialization-utils';
 import { ethers } from 'ethers';
 
 // Lazy-loaded runtime functions to avoid circular dependency (runtime.ts imports this file)
-let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
-let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>) | null = null;
+let _process: ((env: Env, inputs?: RoutedEntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
+let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<{ entityOutbox: RoutedEntityInput[]; mergedInputs: RoutedEntityInput[] }>) | null = null;
 
 const getProcess = async () => {
   if (!_process) {
@@ -716,7 +716,7 @@ export async function ahb(env: Env): Promise<void> {
     console.log('\n🔄 FRAME 2: Hub → Alice R2R - QUEUED IN BATCH (PENDING)');
 
     // Hub creates reserve_to_reserve tx (adds to jBatch)
-    const r2rTx1: EntityInput = {
+    const r2rTx1: RoutedEntityInput = {
       entityId: hub.id,
       signerId: hub.signer,
       entityTxs: [
@@ -759,7 +759,7 @@ export async function ahb(env: Env): Promise<void> {
     console.log('\n🔄 FRAME 3: Hub → Bob R2R - BATCH BROADCASTED (PENDING)');
 
     // Hub adds second R2R op, then broadcasts the batch to J-mempool
-    const r2rTx2: EntityInput = {
+    const r2rTx2: RoutedEntityInput = {
       entityId: hub.id,
       signerId: hub.signer,
       entityTxs: [
@@ -843,7 +843,7 @@ export async function ahb(env: Env): Promise<void> {
     console.log('\n🔄 FRAME 5: Alice → Bob R2R - TX ENTERS MEMPOOL (PENDING)');
 
     // Alice creates reserve_to_reserve tx → generates jOutput → process() auto-queues to J-Machine
-    const r2rTx3: EntityInput = {
+    const r2rTx3: RoutedEntityInput = {
       entityId: alice.id,
       signerId: alice.signer,
       entityTxs: [

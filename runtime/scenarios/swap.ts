@@ -17,7 +17,7 @@
  * Run with: bun runtime/scenarios/swap.ts
  */
 
-import type { Env, EntityInput, JurisdictionConfig } from '../types';
+import type { Env, RoutedEntityInput, JurisdictionConfig } from '../types';
 import { ethers } from 'ethers';
 import { getBestAsk } from '../orderbook/core';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
@@ -27,10 +27,10 @@ import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRu
 import { createGossipLayer } from '../networking/gossip';
 
 // Lazy-loaded runtime functions
-let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
+let _process: ((env: Env, inputs?: RoutedEntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
 
-let _processWithStep: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
+let _processWithStep: ((env: Env, inputs?: RoutedEntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 
 const getProcess = async () => {
   if (!_process) {
@@ -38,7 +38,7 @@ const getProcess = async () => {
     _process = runtime.process;
   }
   if (!_processWithStep) {
-    _processWithStep = async (env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => {
+    _processWithStep = async (env: Env, inputs?: RoutedEntityInput[], delay?: number, single?: boolean) => {
       if (env.scenarioMode) {
         const step = typeof delay === 'number' && delay > 0 ? delay : 1;
         env.timestamp = (env.timestamp || 0) + step;

@@ -379,10 +379,10 @@ export async function verifyHankoForHash(
         const { getSignerAddress } = await import('./account-crypto');
         expectedAddresses = validators.map((validator) => {
           if (typeof validator !== 'string' || !validator) return null;
-          const v = validator.trim();
+          const v: string = validator.trim();
           if (!v) return null;
           // Validator may already be an EOA address (0x + 40 hex chars)
-          if (ethers.isAddress(v)) {
+          if (ethers.isAddress(v) as boolean) {
             return v.toLowerCase();
           }
           // Or it may be a secp256k1 public key (33/65 bytes hex)

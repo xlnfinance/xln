@@ -15,13 +15,13 @@
  * Run with: bun runtime/scenarios/swap-market.ts
  */
 
-import type { Env, EntityInput } from '../types';
+import type { Env, RoutedEntityInput } from '../types';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
 import { findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
 
 // Lazy-loaded runtime functions
-let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
+let _process: ((env: Env, inputs?: RoutedEntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
 
 const getProcess = async () => {

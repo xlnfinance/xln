@@ -291,7 +291,7 @@ export const applyEntityInput = async (
   env: Env,
   entityReplica: EntityReplica,
   entityInput: EntityInput,
-): Promise<{ newState: EntityState, outputs: EntityInput[], jOutputs: JInput[], workingReplica: EntityReplica }> => {
+): Promise<{ newState: EntityState, outputs: RoutedEntityInput[], jOutputs: JInput[], workingReplica: EntityReplica }> => {
   // IMMUTABILITY: Clone replica at function start (fintech-safe, hacker-proof)
   // Prevents state mutations from escaping function scope
   const workingReplica = cloneEntityReplica(entityReplica);
@@ -303,7 +303,7 @@ export const applyEntityInput = async (
   const frameHash = entityInput.proposedFrame?.hash?.slice(0, 10) || 'none';
 
   console.log(
-    `🔍 INPUT-RECEIVED: [${timestamp}] Processing input for Entity #${entityDisplay}:${formatSignerDisplay(entityInput.signerId)}`,
+    `🔍 INPUT-RECEIVED: [${timestamp}] Processing input for Entity #${entityDisplay}:${formatSignerDisplay(workingReplica.signerId)}`,
   );
   console.log(
     `🔍 INPUT-STATE: Current proposal: ${currentProposalHash}, Mempool: ${workingReplica.mempool.length}, isProposer: ${workingReplica.isProposer}`,
@@ -318,7 +318,7 @@ export const applyEntityInput = async (
 
   // SECURITY: Validate all inputs
   if (!validateEntityInput(entityInput)) {
-    log.error(`❌ Invalid input for ${entityInput.entityId}:${entityInput.signerId}`);
+    log.error(`❌ Invalid input for ${entityInput.entityId}:${workingReplica.signerId}`);
     return { newState: workingReplica.state, outputs: [], jOutputs: [], workingReplica };
   }
   if (!validateEntityReplica(workingReplica)) {
@@ -326,7 +326,7 @@ export const applyEntityInput = async (
     return { newState: workingReplica.state, outputs: [], jOutputs: [], workingReplica };
   }
 
-  const entityOutbox: EntityInput[] = [];
+  const entityOutbox: RoutedEntityInput[] = [];
   const jOutbox: JInput[] = []; // J-layer outputs
 
   // ⏰ Execute crontab tasks (periodic checks like account timeouts)
@@ -1007,7 +1007,7 @@ export const applyEntityInput = async (
     const outputFrameHash = output.proposedFrame?.hash?.slice(0, 10) || 'none';
     const hashPrecommitCount = output.hashPrecommits?.size || 0;
     console.log(
-      `🔍 OUTPUT-${index + 1}: [${timestamp}] To Entity #${targetDisplay}:${formatSignerDisplay(output.signerId)} - txs=${output.entityTxs?.length || 0}, hashPrecommits=${hashPrecommitCount}, frame=${outputFrameHash}`,
+      `🔍 OUTPUT-${index + 1}: [${timestamp}] To Entity #${targetDisplay}:${formatSignerDisplay(output.signerId || '')} - txs=${output.entityTxs?.length || 0}, hashPrecommits=${hashPrecommitCount}, frame=${outputFrameHash}`,
     );
 
     if (output.hashPrecommits?.size) {

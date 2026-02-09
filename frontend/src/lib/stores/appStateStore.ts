@@ -10,7 +10,7 @@ import { writable, get } from 'svelte/store';
 import { browser } from '$app/environment';
 
 export type AppMode = 'user' | 'dev';
-export type ViewMode = 'home' | 'settings' | 'docs' | 'brainvault' | 'panels' | 'graph3d' | 'terminal';
+export type ViewMode = 'home' | 'settings' | 'docs' | 'brainvault' | 'panels' | 'terminal';
 
 export interface NavigationSelection {
   runtime: string | null;      // Runtime ID
@@ -78,7 +78,7 @@ function loadState(): AppState {
     mode: (savedMode === 'dev' || savedMode === 'user') ? savedMode : 'user',
     landingVisible: true,
     viewMode: (savedViewMode === 'home' || savedViewMode === 'settings' || savedViewMode === 'docs' ||
-               savedViewMode === 'brainvault' || savedViewMode === 'panels' || savedViewMode === 'graph3d' ||
+               savedViewMode === 'brainvault' || savedViewMode === 'panels' ||
                savedViewMode === 'terminal') ? savedViewMode : 'home',
     navigation: {
       runtime: 'local',

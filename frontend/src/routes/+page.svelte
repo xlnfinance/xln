@@ -1,8 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { browser } from '$app/environment';
-  import { goto } from '$app/navigation';
-  import LandingPage from '../lib/components/Landing/LandingPage.svelte';
   import AdminTopBar from '../lib/components/Layout/AdminTopBar.svelte';
   import TimeMachine from '../lib/view/core/TimeMachine.svelte';
   import EntityPanelTabs from '../lib/components/Entity/EntityPanelTabs.svelte';
@@ -10,7 +8,6 @@
   import FormationPanel from '../lib/components/Entity/FormationPanel.svelte';
   import JurisdictionStatus from '../lib/components/Jurisdiction/JurisdictionStatus.svelte';
   import NetworkDirectory from '../lib/components/Network/NetworkDirectory.svelte';
-  import Graph3DPanel from '../lib/view/panels/Graph3DPanel.svelte';
   import ErrorDisplay from '../lib/components/Common/ErrorDisplay.svelte';
   import ErrorPopup from '../lib/components/Common/ErrorPopup.svelte';
   import ScenarioPanel from '../lib/components/Scenario/ScenarioPanel.svelte';
@@ -57,60 +54,12 @@
   let activeTab = 'formation';
   let zenMode = false; // Zen mode: hide UI chrome
   let hideButton = false; // Full zen: also hide the toggle button
-  let showLanding = true;
 
-  // Sync showLanding with store and toggle app-mode class
-  $: {
-    appStateOperations.setLandingVisible(showLanding);
-    if (browser) {
-      if (showLanding) {
-        document.documentElement.classList.remove('app-mode');
-        document.body.classList.remove('app-mode');
-      } else {
-        document.documentElement.classList.add('app-mode');
-        document.body.classList.add('app-mode');
-      }
-    }
-  }
-
-  // Safe localStorage helpers
-  function safeGetItem(key: string): string | null {
-    try {
-      return localStorage.getItem(key);
-    } catch (error) {
-      console.warn(`localStorage.getItem("${key}") failed:`, error);
-      return null;
-    }
-  }
-
-  function safeSetItem(key: string, value: string): void {
-    try {
-      localStorage.setItem(key, value);
-    } catch (error) {
-      console.warn(`localStorage.setItem("${key}") failed:`, error);
-    }
-  }
-
-  // Check if user has unlocked - sync BEFORE mount for SSR hydration
+  // Always in app mode — no landing page
   if (browser) {
-    // Check for #MML invite hash FIRST (takes precedence over localStorage)
-    if (window.location.hash === '#MML') {
-      safeSetItem('open', 'true');
-      window.location.hash = ''; // Remove hash after processing
-      showLanding = false;
-      appStateOperations.setLandingVisible(false);
-    } else {
-      showLanding = safeGetItem('open') !== 'true';
-      appStateOperations.setLandingVisible(showLanding);
-    }
-  }
-
-  function handleUnlock() {
-    showLanding = false;
-    safeSetItem('open', 'true');
-    if (browser) {
-      goto('/app');
-    }
+    document.documentElement.classList.add('app-mode');
+    document.body.classList.add('app-mode');
+    appStateOperations.setLandingVisible(false);
   }
 
   // Keyboard shortcut for zen mode
@@ -220,9 +169,6 @@
   <meta property="twitter:site" content="@xlnfinance" />
 </svelte:head>
 
-{#if showLanding}
-  <LandingPage onUnlock={handleUnlock} />
-{:else}
 <main class="app" class:zen-mode={zenMode}>
   {#if !zenMode}
     <AdminTopBar />
@@ -344,13 +290,6 @@
     {:else if $appState.viewMode === 'brainvault'}
       <!-- BrainVault View: Wallet Generator -->
       <RuntimeCreation />
-    {:else if $appState.viewMode === 'graph3d'}
-      <!-- Graph View Mode: DISABLED - Use /app route instead -->
-      <div class="disabled-message">
-        <h2>Graph3D has moved to /app</h2>
-        <p>Visit <a href="/app">/app</a> for the full workspace with dev tools.</p>
-      </div>
-      <!-- <Graph3DPanel {zenMode} {hideButton} {toggleZenMode} /> -->
     {:else if $appState.viewMode === 'terminal'}
       <!-- Terminal View: Command Interface -->
       <TerminalView />
@@ -452,7 +391,6 @@
     />
   {/if}
 </main>
-{/if}
 
 <style>
   :global(body) {

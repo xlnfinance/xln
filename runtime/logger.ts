@@ -25,6 +25,7 @@ export interface LogConfig {
   GOSSIP: boolean;
   R2R_FLOW: boolean;
   ACCOUNT_STATE: boolean;
+  RUNTIME_TICK: boolean;
 }
 
 // Default log config - derived from constants.ts PERFORMANCE flags
@@ -43,6 +44,7 @@ export const LOG_CONFIG: LogConfig = {
   GOSSIP: PERFORMANCE.DEBUG_LOGGING,             // Network gossip
   R2R_FLOW: PERFORMANCE.DEBUG_ACCOUNTS,          // Reserve-to-reserve transfers
   ACCOUNT_STATE: PERFORMANCE.DEBUG_ACCOUNTS,     // Account state changes
+  RUNTIME_TICK: PERFORMANCE.DEBUG_LOGGING,       // Runtime tick processing
 };
 
 let FAIL_FAST_ERRORS = false;

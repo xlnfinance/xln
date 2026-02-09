@@ -251,7 +251,7 @@ export type RuntimeTx =
       data: {
         config: ConsensusConfig;
         isProposer: boolean;
-        position?: { x: number; y: number; z: number };
+        position?: { x: number; y: number; z: number; jurisdiction?: string; xlnomy?: string };
       };
     }
   | {

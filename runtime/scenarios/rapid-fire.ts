@@ -17,12 +17,12 @@
  * Run with: bun runtime/scenarios/rapid-fire.ts
  */
 
-import type { Env, EntityInput } from '../types';
+import type { Env, RoutedEntityInput } from '../types';
 import { getPerfMs } from '../utils';
 import { ensureBrowserVM, createJReplica, createJurisdictionConfig } from './boot';
 import { findReplica, getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 
-let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
+let _process: ((env: Env, inputs?: RoutedEntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
 
 const getProcess = async () => {
@@ -167,7 +167,7 @@ export async function rapidFire(env: Env): Promise<void> {
     const batchStart = getPerfMs();
 
     // Send batch of 10 forward + 10 reverse
-    const batchInputs: EntityInput[] = [];
+    const batchInputs: RoutedEntityInput[] = [];
 
     for (let i = 0; i < batchSize; i++) {
       // Forward: Alice → Hub → Bob

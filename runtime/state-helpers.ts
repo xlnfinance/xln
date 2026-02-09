@@ -4,7 +4,7 @@
  */
 
 import { encode } from './snapshot-coder';
-import type { EntityInput, EntityReplica, EntityState, Env, EnvSnapshot, RuntimeInput, AccountMachine, JReplica, LogCategory, BrowserVMState } from './types';
+import type { EntityInput, RoutedEntityInput, EntityReplica, EntityState, Env, EnvSnapshot, RuntimeInput, AccountMachine, JReplica, LogCategory, BrowserVMState } from './types';
 import type { Profile } from './networking/gossip';
 import { DEBUG } from './utils';
 import { validateEntityState } from './validation-utils';
@@ -339,7 +339,7 @@ export const captureSnapshot = async (
   envHistory: EnvSnapshot[],
   db: any,
   runtimeInput: RuntimeInput,
-  runtimeOutputs: EntityInput[],
+  runtimeOutputs: RoutedEntityInput[],
   description: string,
 ): Promise<void> => {
   // Snapshots ALWAYS happen - they're essential for time-travel debugging
@@ -493,7 +493,7 @@ export const captureSnapshot = async (
       runtimeTxs: [...runtimeInput.runtimeTxs],
       entityInputs: runtimeInput.entityInputs.map(input => ({
         entityId: input.entityId,
-        signerId: input.signerId,
+        ...(input.signerId ? { signerId: input.signerId } : {}),
         ...(input.entityTxs && { entityTxs: [...input.entityTxs] }),
         ...(input.hashPrecommits && { hashPrecommits: new Map(Array.from(input.hashPrecommits.entries()).map(([k, v]) => [k, [...v]])) }),
         ...(input.proposedFrame && { proposedFrame: input.proposedFrame }),
@@ -501,7 +501,7 @@ export const captureSnapshot = async (
     },
     runtimeOutputs: runtimeOutputs.map(output => ({
       entityId: output.entityId,
-      signerId: output.signerId,
+      ...(output.signerId ? { signerId: output.signerId } : {}),
       ...(output.entityTxs && { entityTxs: [...output.entityTxs] }),
       ...(output.hashPrecommits && { hashPrecommits: new Map(Array.from(output.hashPrecommits.entries()).map(([k, v]) => [k, [...v]])) }),
       ...(output.proposedFrame && { proposedFrame: output.proposedFrame }),

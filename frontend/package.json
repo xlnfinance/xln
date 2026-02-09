@@ -12,8 +12,6 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --threshold error && vite build",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "playwright test",
-		"test:landing": "playwright test tests/landing.spec.ts",
-		"test:fed": "playwright test tests/fed-chair-demo.spec.ts",
 		"test:ui": "playwright test --ui"
 	},
 	"devDependencies": {
@@ -30,12 +28,8 @@
 	},
 	"dependencies": {
 		"@scure/bip39": "^2.0.1",
-		"@types/three": "^0.180.0",
 		"dockview": "^4.9.0",
 		"hash-wasm": "^4.12.0",
-		"lucide-svelte": "^0.544.0",
-		"react": "^19.2.0",
-		"react-dom": "^19.2.0",
-		"three": "^0.180.0"
+		"lucide-svelte": "^0.544.0"
 	}
 }

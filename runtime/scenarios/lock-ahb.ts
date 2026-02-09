@@ -15,7 +15,7 @@
  * - Griefing protection (timelock cascade)
  */
 
-import type { Env, EntityInput, EntityReplica, Delta } from '../types';
+import type { Env, RoutedEntityInput, EntityReplica, Delta } from '../types';
 import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from '../evm';
 import { BrowserVMProvider } from '../jadapter';
 import { getProcess, getApplyRuntimeInput, usd, snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
@@ -33,7 +33,7 @@ const SIGNER_PREFUND = usd(1_000_000);
 // This maintains backward compatibility while we migrate calls
 // Note: The old pushSnapshot had complex signature. This version accepts:
 // - env, title, opts (required)
-// - Optional 4th param: either EntityInput[] OR {expectedSolvency: bigint} to merge into opts
+// - Optional 4th param: either RoutedEntityInput[] OR {expectedSolvency: bigint} to merge into opts
 async function pushSnapshot(
   env: Env,
   title: string,
@@ -45,12 +45,12 @@ async function pushSnapshot(
     expectedSolvency?: bigint;
     description?: string;
   },
-  fourthArg?: EntityInput[] | { expectedSolvency?: bigint }
+  fourthArg?: RoutedEntityInput[] | { expectedSolvency?: bigint }
 ): Promise<void> {
   const process = await getProcess();
 
   // Handle 4th arg: can be inputs array OR extra solvency opts
-  let inputs: EntityInput[] | undefined;
+  let inputs: RoutedEntityInput[] | undefined;
   if (Array.isArray(fourthArg)) {
     inputs = fourthArg;
   } else if (fourthArg && typeof fourthArg === 'object' && 'expectedSolvency' in fourthArg) {

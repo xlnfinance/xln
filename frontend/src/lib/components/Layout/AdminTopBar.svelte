@@ -10,7 +10,6 @@
     { mode: 'settings', icon: '⚙️', labelKey: 'nav.settings', titleKey: 'nav.settings' },
     { mode: 'docs', icon: '📚', labelKey: 'nav.docs', titleKey: 'nav.docs' },
     { mode: 'brainvault', icon: '🧠', labelKey: 'nav.vault', titleKey: 'nav.vault' },
-    { mode: 'graph3d', icon: '🗺️', labelKey: 'view.title', titleKey: 'view.title' },
     { mode: 'panels', icon: '📊', labelKey: 'nav.panels', titleKey: 'nav.panels' },
     { mode: 'terminal', icon: '💻', labelKey: 'nav.terminal', titleKey: 'nav.terminal' }
   ];

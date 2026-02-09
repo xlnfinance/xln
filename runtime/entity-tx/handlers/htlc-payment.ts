@@ -6,7 +6,7 @@
  * Reference: entity-tx/apply.ts:302-437 (directPayment handler)
  */
 
-import type { EntityState, EntityInput, AccountTx, Env } from '../../types';
+import type { EntityState, EntityInput, RoutedEntityInput, AccountTx, Env } from '../../types';
 import { cloneEntityState, canonicalAccountKey } from '../../state-helpers';
 import { generateHashlock, generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../htlc-utils';
 import { HTLC } from '../../constants';
@@ -19,7 +19,7 @@ export async function handleHtlcPayment(
   entityState: EntityState,
   entityTx: Extract<any, { type: 'htlcPayment' }>,
   env: Env
-): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps?: Array<{ accountId: string; tx: any }> }> {
+): Promise<{ newState: EntityState; outputs: RoutedEntityInput[]; mempoolOps?: Array<{ accountId: string; tx: any }> }> {
   console.log(`🔒 HTLC-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`);
   console.log(`   Amount: ${entityTx.data.amount}, Route: ${entityTx.data.route?.map((r: string) => r.slice(-4)).join('→') || 'none'}`);
 
@@ -33,7 +33,7 @@ export async function handleHtlcPayment(
   });
 
   const newState = cloneEntityState(entityState);
-  const outputs: EntityInput[] = [];
+  const outputs: RoutedEntityInput[] = [];
   const mempoolOps: Array<{ accountId: string; tx: any }> = [];
 
   // Extract payment details

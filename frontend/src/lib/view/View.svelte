@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * View - Main embeddable workspace
-   * Single source for XLN dashboard (4 panels: Graph3D, Entities, Depository, Architect)
+   * Single source for XLN dashboard (panels: Architect, Console, Jurisdiction, etc.)
    *
    * @license AGPL-3.0
    * Copyright (C) 2025 XLN Finance
@@ -12,7 +12,6 @@
   import { toasts } from '$lib/stores/toastStore';
   import { DockviewComponent } from 'dockview';
   import './utils/frontendLogger'; // Initialize global log control
-  import Graph3DPanel from './panels/Graph3DPanel.svelte';
   import ArchitectPanel from './panels/ArchitectPanel.svelte';
   import ConsolePanel from './panels/ConsolePanel.svelte';
   import RuntimeIOPanel from './panels/RuntimeIOPanel.svelte';
@@ -24,7 +23,7 @@
   import RuntimeCreation from '$lib/components/Views/RuntimeCreation.svelte';
   import UserModePanel from './UserModePanel.svelte';
   // REMOVED PANELS:
-  // - EntitiesPanel: Graph3D entity cards provide better UX
+  // - EntitiesPanel: entity cards provide better UX
   // - DepositoryPanel: JurisdictionPanel shows same data with better tables
   // - ConsolePanel: Now embedded in SettingsPanel as tab
   import EntityPanelWrapper from './panels/wrappers/EntityPanelWrapper.svelte';
@@ -71,8 +70,6 @@
   const localHistoryStore = writable<any[]>([]);
   const localTimeIndex = writable<number>(0);  // real frame index, auto-advanced when isLive
   const localIsLive = writable<boolean>(true);
-  const graphInitSignal = writable<boolean>(embedMode);
-
   // Sync localEnvStore → runtimeStore for panels that read from global
   const unsubLocalEnvSync = localEnvStore.subscribe((env) => {
     if (env) {
@@ -207,7 +204,6 @@
       console.log('[View] Runtime module loaded, creating env...');
 
       // CRITICAL: Initialize global xlnInstance for utility functions (deriveDelta, etc)
-      // Graph3DPanel needs xlnFunctions even when using isolated stores
       const { xlnInstance } = await import('$lib/stores/xlnStore');
       xlnInstance.set(XLN);
 
@@ -350,25 +346,19 @@
             const frames = env.history || [];
             console.log('[View] Setting stores with frames:', frames.length);
 
-            // CRITICAL: Wait for Graph3DPanel to mount before updating stores
-            // Fix race condition: on first load, Graph3D subscriptions not yet set up
-            await new Promise(resolve => setTimeout(resolve, 500)); // Give panels time to mount (increased from 100ms)
-            console.log('[View] Graph3D mount delay complete (500ms)');
+            // Wait for panels to mount before updating stores
+            await new Promise(resolve => setTimeout(resolve, 500));
 
             // CRITICAL: Set in EXACT order from ArchitectPanel lines 348-353
             // 1. Exit live mode FIRST
             localIsLive.set(false);
             // 2. Set timeIndex to LAST frame
             localTimeIndex.set(Math.max(0, frames.length - 1));
-            // 3. Set history (triggers Graph3D subscription)
+            // 3. Set history
             localHistoryStore.set(frames);
             // 4. Set env (triggers final update)
             localEnvStore.set(env);
 
-            console.log('[View] ✅ Stores updated, Graph3D should re-render');
-
-            // CRITICAL: Manually trigger Graph3D render after scenario loads
-            // Store subscriptions may not fire if Graph3D already mounted
             panelBridge.emit('scenario:loaded', { name: 'ahb', frames: frames.length });
 
             console.log(`[View] ✅ AHB scenario loaded successfully!`);
@@ -416,17 +406,7 @@
         let component: any;
 
         // Mount Svelte 5 components - pass SAME shared stores to ALL panels
-        if (options.name === 'graph3d') {
-          component = mount(Graph3DPanel, {
-            target: div,
-            props: {
-              isolatedEnv: localEnvStore,
-              isolatedHistory: localHistoryStore,
-              isolatedTimeIndex: localTimeIndex,
-              graphInitSignal,
-            }
-          });
-        } else if (options.name === 'brainvault') {
+        if (options.name === 'brainvault') {
           component = mount(RuntimeCreation, {
             target: div,
             props: {}  // BrainVault manages its own state
@@ -582,19 +562,9 @@
     };
 
     ensurePanel({
-      id: 'graph3d',
-      component: 'graph3d',
-      title: '🌐 Graph3D',
-      params: {
-        closeable: false,
-      },
-    });
-
-    ensurePanel({
       id: 'architect',
       component: 'architect',
       title: '🎬 Architect',
-      position: { direction: 'right', referencePanel: 'graph3d' },
       params: {
         closeable: false,
       },
@@ -676,25 +646,10 @@
       }, 0);
     }
 
-    // Set initial sizes (Graph3D panel)
-    const graph3dApi = dockview.getPanel('graph3d');
-    if (graph3dApi) {
-      // Delay size adjustment for AVP compatibility
-      setTimeout(() => {
-        // In embed mode: start fullscreen (100%), user can toggle sidebar
-        // In normal mode: 70:30 split
-        const widthPercent = embedMode ? 1.0 : 0.70;
-        graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
-        console.log(`[View] ✅ Graph3D resized to ${widthPercent * 100}%${embedMode ? ' (embed mode)' : ''}`);
-      }, 100);
-    }
-
     activePanelDisposable = dockview.onDidActivePanelChange((event: any) => {
       const panel = event?.panel ?? event;
       const panelId = panel?.id || panel?.api?.id;
-      if (panelId === 'graph3d') {
-        graphInitSignal.set(true);
-      }
+      void panelId;
     });
 
     // DISABLED: Dockview layout persistence (Svelte 5 incompatibility)
@@ -797,12 +752,7 @@
   // Toggle sidebar visibility in embed mode
   function toggleEmbedSidebar() {
     showSidebarInEmbed = !showSidebarInEmbed;
-    const graph3dApi = dockview?.getPanel('graph3d');
-    if (graph3dApi) {
-      const widthPercent = showSidebarInEmbed ? 0.70 : 1.0;
-      graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
-      console.log(`[View] Embed sidebar ${showSidebarInEmbed ? 'shown' : 'hidden'}`);
-    }
+    console.log(`[View] Embed sidebar ${showSidebarInEmbed ? 'shown' : 'hidden'}`);
   }
 
   // Function to update panel visibility when mode toggles (preserves layout)
@@ -818,11 +768,6 @@
         const width = container?.clientWidth || window.innerWidth;
         const height = container?.clientHeight || window.innerHeight;
         dockview.layout(width, height);
-        const graph3dApi = dockview.getPanel('graph3d');
-        if (graph3dApi) {
-          const widthPercent = embedMode ? 1.0 : 0.70;
-          graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
-        }
       });
     }
   }

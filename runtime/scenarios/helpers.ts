@@ -2,14 +2,14 @@
  * Shared scenario helpers
  */
 
-import type { Env, EntityInput, EntityReplica, Delta, RuntimeInput } from '../types';
+import type { Env, RoutedEntityInput, EntityReplica, Delta, RuntimeInput } from '../types';
 import { formatRuntime } from '../runtime-ascii';
 import { setFailFastErrors } from '../logger';
 import { getCachedSignerPrivateKey, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 
 // Lazy-loaded process to avoid circular deps
-let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
-let _applyRuntimeInput: ((env: Env, runtimeInput: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>) | null = null;
+let _process: ((env: Env, inputs?: RoutedEntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
+let _applyRuntimeInput: ((env: Env, runtimeInput: RuntimeInput) => Promise<{ entityOutbox: RoutedEntityInput[]; mergedInputs: RoutedEntityInput[] }>) | null = null;
 
 export const getProcess = async () => {
   if (!_process) {
@@ -210,15 +210,15 @@ export function getOffdelta(env: Env, leftId: string, rightId: string, tokenId: 
 // ============================================================================
 
 function filterOfflineInputs(
-  inputs: EntityInput[],
+  inputs: RoutedEntityInput[],
   offlineSigners: Set<string>,
-): { filtered: EntityInput[]; dropped: EntityInput[] } {
+): { filtered: RoutedEntityInput[]; dropped: RoutedEntityInput[] } {
   if (offlineSigners.size === 0) {
     return { filtered: inputs, dropped: [] };
   }
 
-  const filtered: EntityInput[] = [];
-  const dropped: EntityInput[] = [];
+  const filtered: RoutedEntityInput[] = [];
+  const dropped: RoutedEntityInput[] = [];
 
   for (const input of inputs) {
     if (offlineSigners.has(input.signerId)) {
@@ -233,7 +233,7 @@ function filterOfflineInputs(
 
 export async function processWithOffline(
   env: Env,
-  inputs: EntityInput[] | undefined,
+  inputs: RoutedEntityInput[] | undefined,
   offlineSigners: Set<string>,
   reason: string = 'offline',
 ): Promise<Env> {

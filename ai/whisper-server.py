@@ -1,1 +1,0 @@
-/Users/zigota/xln/ai/stt-server.py

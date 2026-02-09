@@ -48,7 +48,7 @@ const assertAccountFrames = async (
   }
 
   if (account.frameHistory.length > 0) {
-    const lastFrame = account.frameHistory[account.frameHistory.length - 1];
+    const lastFrame = account.frameHistory[account.frameHistory.length - 1]!;
     if (lastFrame.height !== account.currentHeight) {
       throw new Error(`[STRICT] ${label}: frameHistory tail height ${lastFrame.height} != currentHeight ${account.currentHeight}`);
     }

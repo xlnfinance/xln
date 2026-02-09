@@ -1,8 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { marked } from 'marked';
-  import IsolatedScenarioPlayer from '$lib/components/Embed/IsolatedScenarioPlayer.svelte';
-
   let currentDoc = 'README';
   let docContent = '';
   let renderedHtml = '';
@@ -47,8 +45,6 @@
       title: 'Frontend Development',
       items: [
         { label: 'Network Topology', file: 'frontend-dev/network-topology-integration' },
-        { label: 'Graph 3D Embed', file: 'frontend-dev/graph3d-embed' },
-        { label: 'VR Support', file: 'frontend-dev/vr' },
         { label: 'Refactor Plan', file: 'frontend-dev/refactor-plan' },
         { label: 'Design Patterns', file: 'frontend-dev/design-patterns' }
       ]
@@ -154,15 +150,8 @@
       <div class="intro-scenario">
         <h1>🧠 XLN Architecture</h1>
         <p style="font-size: 1.125rem; margin-bottom: 2rem; color: rgba(255, 255, 255, 0.6);">
-          Experience the first xlnomy — a 2×2×2 grid cube where value flows through 3D space.
+          Reserve-Credit Provable Account Network — bilateral consensus with on-chain finality.
         </p>
-        <IsolatedScenarioPlayer
-          scenario="phantom-grid"
-          height="500px"
-          autoplay={true}
-          loop={true}
-          slice="0:3"
-        />
       </div>
     {/if}
 

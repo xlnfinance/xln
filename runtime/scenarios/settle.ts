@@ -10,7 +10,7 @@
  * Also tests auto-approve logic and conservation law validation.
  */
 
-import type { Env, EntityInput, EntityReplica, SettlementDiff } from '../types';
+import type { Env, EntityReplica, SettlementDiff } from '../types';
 import { getAvailableJurisdictions, setBrowserVMJurisdiction } from '../evm';
 import { BrowserVMProvider } from '../jadapter';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, getProcess, getApplyRuntimeInput } from './helpers';
@@ -97,6 +97,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   let env: Env = existingEnv || {
     eReplicas: new Map(),
     jReplicas: new Map(),
+    evms: new Map(),
     height: 0,
     timestamp: SCENARIO_START_TIMESTAMP,
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
@@ -247,8 +248,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   console.log(`✅ Created Alice (${ALICE_ID.slice(-4)}) and Hub (${HUB_ID.slice(-4)})`);
 
   snap(env, 'Entities Created', {
-    description: 'Alice and Hub entities initialized',
-    phase: 'setup'
+    description: 'Alice and Hub entities initialized'
   });
 
   // JAdapter.startWatching() handles J-events (setup at line 185)
@@ -288,8 +288,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   console.log(`✅ Account opened between Alice and Hub`);
 
   snap(env, 'Account Opened', {
-    description: 'Bilateral account between Alice and Hub',
-    phase: 'setup'
+    description: 'Bilateral account between Alice and Hub'
   });
 
   // ══════════════════════════════════════════════════════════════════════════════
@@ -430,9 +429,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   console.log(`   Status: ${aliceAccount.settlementWorkspace.status}`);
 
   snap(env, 'Settlement Proposed', {
-    description: 'Alice proposes $100 deposit to collateral',
-    phase: 'propose',
-    holdAmount: expectedHold.toString()
+    description: 'Alice proposes $100 deposit to collateral'
   });
 
   // ══════════════════════════════════════════════════════════════════════════════
@@ -477,8 +474,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   console.log(`   New version: ${aliceAccount2.settlementWorkspace.version}`);
 
   snap(env, 'Settlement Updated', {
-    description: 'Hub counter-proposes $50 instead of $100',
-    phase: 'update'
+    description: 'Hub counter-proposes $50 instead of $100'
   });
 
   // ══════════════════════════════════════════════════════════════════════════════
@@ -533,8 +529,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   console.log(`   Status: ${aliceAccount4.settlementWorkspace.status}`);
 
   snap(env, 'Settlement Approved', {
-    description: 'Both parties signed - ready to submit',
-    phase: 'approve'
+    description: 'Both parties signed - ready to submit'
   });
 
   // ══════════════════════════════════════════════════════════════════════════════
@@ -569,8 +564,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   console.log(`✅ Settlement executed via JAdapter (batch cleared: ${batchSettlements === 0})`);
 
   snap(env, 'Settlement Executed', {
-    description: 'Settlement added to jBatch for on-chain commit',
-    phase: 'execute'
+    description: 'Settlement added to jBatch for on-chain commit'
   });
 
   // ══════════════════════════════════════════════════════════════════════════════
@@ -621,13 +615,11 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   console.log(`✅ Settlement rejected - workspace cleared`);
 
   snap(env, 'Settlement Rejected', {
-    description: 'Hub rejected - workspace cleared, holds released',
-    phase: 'reject'
+    description: 'Hub rejected - workspace cleared, holds released'
   });
 
   snap(env, 'Scenario Complete', {
-    description: 'All settlement tests passed',
-    phase: 'complete'
+    description: 'All settlement tests passed'
   });
 
   // ══════════════════════════════════════════════════════════════════════════════

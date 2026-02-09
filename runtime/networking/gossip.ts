@@ -51,6 +51,7 @@ export type Profile = {
     // Additional fields
     entityPublicKey?: string; // hex public key for signature verification
     encryptionPubKey?: string; // X25519 public key for E2E encryption (hex)
+    expiresAt?: number; // TTL timestamp for profile expiry
     [key: string]: unknown;
   };
   // Account capacities for routing

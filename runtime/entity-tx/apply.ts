@@ -4,7 +4,7 @@ import { formatEntityId } from '../utils';
 import { processProfileUpdate } from '../name-resolution';
 import { createOrderbookExtState } from '../orderbook';
 import { getRuntimeDb, tryOpenDb } from '../runtime';
-import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput } from '../types';
+import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, RoutedEntityInput, JInput } from '../types';
 import { DEBUG, HEAVY_LOGS, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { buildEntityProfile, mergeProfileWithExisting } from '../networking/gossip-helper';
@@ -15,7 +15,7 @@ import { handleJEvent } from './j-events';
 // Extended return type including pure events from handlers
 export interface ApplyEntityTxResult {
   newState: EntityState;
-  outputs: EntityInput[];
+  outputs: RoutedEntityInput[];
   jOutputs?: JInput[];
   // Pure events for entity-level orchestration
   mempoolOps?: MempoolOp[];
@@ -254,7 +254,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       });
 
       const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
+      const outputs: RoutedEntityInput[] = [];
 
       // Add chat message about account opening
       addMessage(newState, `💳 Opening account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);
@@ -404,7 +404,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`⏰ PROCESS-HTLC-TIMEOUTS: Processing ${entityTx.data.expiredLocks?.length || 0} expired locks`);
 
       const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
+      const outputs: RoutedEntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
 
       // Convert expired locks to htlc_resolve(error:timeout)
@@ -426,7 +426,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`⏰ ROLLBACK-TIMED-OUT-FRAMES: Processing ${entityTx.data.timedOutAccounts.length} timed-out accounts`);
 
       const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
+      const outputs: RoutedEntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
 
       for (const { counterpartyId, frameHeight } of entityTx.data.timedOutAccounts) {
@@ -487,7 +487,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`🔒 MANUAL-HTLC-LOCK: Creating lock without envelope (timeout test)`);
 
       const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
+      const outputs: RoutedEntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
 
       const { counterpartyId, lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId } = entityTx.data;
@@ -530,7 +530,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       });
 
       const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
+      const outputs: RoutedEntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
       console.log(`💸 Initialized: outputs=[], mempoolOps=[]`);
 
@@ -748,7 +748,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`💳 EXTEND-CREDIT: ${entityState.entityId.slice(-4)} extending credit to ${entityTx.data.counterpartyEntityId.slice(-4)}`);
 
       const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
+      const outputs: RoutedEntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
       const { counterpartyEntityId, tokenId, amount } = entityTx.data;
 
@@ -793,7 +793,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`📊 PLACE-SWAP-OFFER: ${entityState.entityId.slice(-4)} placing offer with ${entityTx.data.counterpartyEntityId.slice(-4)}`);
 
       const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
+      const outputs: RoutedEntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
       const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, minFillRatio } = entityTx.data;
 
@@ -840,7 +840,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`💱 RESOLVE-SWAP: ${entityState.entityId.slice(-4)} resolving offer with ${entityTx.data.counterpartyEntityId.slice(-4)}`);
 
       const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
+      const outputs: RoutedEntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
       const { counterpartyEntityId, offerId, fillRatio, cancelRemainder } = entityTx.data;
 
@@ -874,7 +874,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`💱 FILL-SWAP-OFFER: ${entityState.entityId.slice(-4)} filling offer`);
 
       const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
+      const outputs: RoutedEntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
       const { offerId, counterpartyId, fillRatio } = entityTx.data;
 
@@ -904,7 +904,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       console.log(`📊 CANCEL-SWAP: ${entityState.entityId.slice(-4)} cancelling offer with ${entityTx.data.counterpartyEntityId.slice(-4)}`);
 
       const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
+      const outputs: RoutedEntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
       const { counterpartyEntityId, offerId } = entityTx.data;
 

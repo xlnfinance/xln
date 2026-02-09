@@ -128,7 +128,7 @@ import { captureSnapshot, cloneEntityReplica, resolveEntityProposerId } from './
 import { getEntityShortId, getEntityNumber, formatEntityId, HEAVY_LOGS } from './utils';
 import { safeStringify } from './serialization-utils';
 import { validateDelta, validateAccountDeltas, createDefaultDelta, isDelta, validateEntityInput, validateEntityOutput } from './validation-utils';
-import type { EntityInput, EntityReplica, Env, JInput, JReplica, RoutedEntityInput, RuntimeInput } from './types';
+import type { EntityInput, EntityReplica, EntityTx, Env, EnvSnapshot, JInput, JReplica, RoutedEntityInput, RuntimeInput, RuntimeTx } from './types';
 import {
   clearDatabase,
   DEBUG,
@@ -185,7 +185,7 @@ const nodeProcess =
     ? globalThis.process
     : undefined;
 const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
-const dbRootPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
+const dbRootPath = nodeProcess?.env?.['XLN_DB_PATH'] || defaultDbPath;
 
 const DEFAULT_DB_NAMESPACE = 'default';
 
@@ -293,23 +293,21 @@ const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
 };
 
 const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
-  if (!env.runtimeState) {
-    env.runtimeState = {
-      loopActive: false,
-      stopLoop: null,
-      lastFrameAt: undefined,
-      p2p: null,
-      pendingP2PConfig: null,
-      lastP2PConfig: null,
-    };
+  const state = env.runtimeState ?? {
+    loopActive: false,
+    stopLoop: null,
+    p2p: null,
+    pendingP2PConfig: null,
+    lastP2PConfig: null,
+  };
+  if (!state.routeDeferState) {
+    state.routeDeferState = new Map();
   }
-  if (!env.runtimeState.routeDeferState) {
-    env.runtimeState.routeDeferState = new Map();
+  if (!state.entityRuntimeHints) {
+    state.entityRuntimeHints = new Map();
   }
-  if (!env.runtimeState.entityRuntimeHints) {
-    env.runtimeState.entityRuntimeHints = new Map();
-  }
-  return env.runtimeState;
+  env.runtimeState = state;
+  return state;
 };
 
 const ENV_P2P_SINGLETON_KEY = Symbol.for('xln.runtime.env.p2p.singleton');
@@ -466,10 +464,10 @@ export const setRuntimeSeed = (env: Env, seed: string | null): void => {
       env.runtimeId = deriveSignerAddressSync(normalized, '1');
     } catch (error) {
       console.warn('⚠️ Failed to derive runtimeId from seed:', error);
-      env.runtimeId = undefined;
+      delete env.runtimeId;
     }
   } else {
-    env.runtimeId = undefined;
+    delete env.runtimeId;
   }
   if (env.runtimeId) {
     env.dbNamespace = normalizeDbNamespace(env.runtimeId);
@@ -484,7 +482,11 @@ export const setRuntimeSeed = (env: Env, seed: string | null): void => {
 };
 
 export const setRuntimeId = (env: Env, id: string | null): void => {
-  env.runtimeId = id && id.length > 0 ? id : undefined;
+  if (id && id.length > 0) {
+    env.runtimeId = id;
+  } else {
+    delete env.runtimeId;
+  }
   if (env.runtimeId) {
     env.dbNamespace = normalizeDbNamespace(env.runtimeId);
   }
@@ -517,7 +519,7 @@ const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | nul
     : null;
   if (direct) return direct;
 
-  const metaRuntimeId = (profile.metadata as Record<string, unknown> | undefined)?.runtimeId;
+  const metaRuntimeId = (profile.metadata as Record<string, unknown> | undefined)?.['runtimeId'];
   if (typeof metaRuntimeId === 'string' && metaRuntimeId.length > 0) {
     return metaRuntimeId;
   }
@@ -567,14 +569,14 @@ const collectSenderEntityHints = (input: RoutedEntityInput): string[] => {
     const data = tx.data as Record<string, unknown> | undefined;
     if (!data || typeof data !== 'object') continue;
     if (tx.type === 'accountInput') {
-      const fromEntityId = data.fromEntityId;
+      const fromEntityId = data['fromEntityId'];
       if (typeof fromEntityId === 'string' && fromEntityId.length > 0) {
         hints.add(fromEntityId);
       }
       continue;
     }
     if (tx.type === 'openAccount') {
-      const targetEntityId = data.targetEntityId;
+      const targetEntityId = data['targetEntityId'];
       if (typeof targetEntityId === 'string' && targetEntityId.length > 0) {
         hints.add(targetEntityId);
       }
@@ -741,7 +743,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     return null;
   }
 
-  const existingGlobalP2P = (env as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY] as P2Pish | undefined;
+  const existingGlobalP2P = (env as unknown as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY] as P2Pish | undefined;
   if (existingGlobalP2P && existingGlobalP2P !== state.p2p) {
     const canReuse =
       typeof existingGlobalP2P.matchesIdentity === 'function' &&
@@ -767,13 +769,13 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
   state.p2p = new RuntimeP2P({
     env,
     runtimeId: resolvedRuntimeId,
-    signerId: config.signerId,
-    relayUrls: config.relayUrls,
-    seedRuntimeIds: config.seedRuntimeIds,
-    advertiseEntityIds: config.advertiseEntityIds,
-    isHub: config.isHub,
-    profileName: config.profileName,
-    gossipPollMs: config.gossipPollMs,
+    ...(config.signerId !== undefined ? { signerId: config.signerId } : {}),
+    ...(config.relayUrls !== undefined ? { relayUrls: config.relayUrls } : {}),
+    ...(config.seedRuntimeIds !== undefined ? { seedRuntimeIds: config.seedRuntimeIds } : {}),
+    ...(config.advertiseEntityIds !== undefined ? { advertiseEntityIds: config.advertiseEntityIds } : {}),
+    ...(config.isHub !== undefined ? { isHub: config.isHub } : {}),
+    ...(config.profileName !== undefined ? { profileName: config.profileName } : {}),
+    ...(config.gossipPollMs !== undefined ? { gossipPollMs: config.gossipPollMs } : {}),
     onEntityInput: (from, input) => {
       const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
       console.log(`📨 P2P-RECEIVE: from=${from.slice(0,10)} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
@@ -794,7 +796,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     },
   });
 
-  (env as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY] = state.p2p;
+  (env as unknown as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY] = state.p2p;
   state.p2p.connect();
   return state.p2p;
 };
@@ -803,9 +805,9 @@ export const stopP2P = (env: Env): void => {
   const state = ensureRuntimeState(env);
   if (state.p2p) {
     state.p2p.close();
-    const singleton = (env as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY];
+    const singleton = (env as unknown as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY];
     if (singleton === state.p2p) {
-      delete (env as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY];
+      delete (env as unknown as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY];
     }
     state.p2p = null;
   }
@@ -990,8 +992,8 @@ const applyRuntimeInput = async (
           const jadapter = await createJAdapter({
             mode: isBrowserVM ? 'browservm' : 'rpc',
             chainId: runtimeTx.data.chainId,
-            rpcUrl: isBrowserVM ? undefined : runtimeTx.data.rpcs[0],
-            fromReplica, // Pass pre-deployed addresses (skips deployment)
+            ...(!isBrowserVM && runtimeTx.data.rpcs[0] ? { rpcUrl: runtimeTx.data.rpcs[0] } : {}),
+            ...(fromReplica ? { fromReplica } : {}),
             // TODO: Pass all rpcs for failover: rpcs: runtimeTx.data.rpcs
           });
 
@@ -1071,12 +1073,6 @@ const applyRuntimeInput = async (
             jBlockObservations: [],
             jBlockChain: [],
 
-            // ⏰ Crontab system - will be initialized on first use
-            crontabState: undefined,
-
-            // 📦 J-Batch system - will be initialized on first use
-            jBatchState: undefined,
-
             // 🔒 HTLC routing and fee tracking
             htlcRoutes: new Map(),
             htlcFeesEarned: 0n,
@@ -1111,6 +1107,7 @@ const applyRuntimeInput = async (
           const threshold = runtimeTx.data.config.threshold;
           if (validators.length === 1 && threshold === 1n) {
             const signerId = validators[0];
+            if (!signerId) throw new Error('Missing signerId in validators array');
             try {
               const privateKey = getSignerPrivateKey(env, signerId);
               const privateKeyHex = `0x${Array.from(privateKey).map(b => b.toString(16).padStart(2, '0')).join('')}`;
@@ -1149,7 +1146,7 @@ const applyRuntimeInput = async (
           const existingName = existingProfile?.metadata?.name;
           const profile = buildEntityProfile(createdReplica.state, existingName, env.timestamp);
           const mergedProfile = mergeProfileWithExisting(profile, existingProfile);
-          mergedProfile.runtimeId = env.runtimeId;
+          if (env.runtimeId) mergedProfile.runtimeId = env.runtimeId;
           if (publicKeyHex) {
             mergedProfile.metadata = { ...(mergedProfile.metadata || {}), entityPublicKey: publicKeyHex };
           }
@@ -1225,11 +1222,11 @@ const applyRuntimeInput = async (
           ...entityReplica,
           state: newState,
           mempool: workingReplica.mempool, // Preserve mempool state
-          proposal: workingReplica.proposal, // CRITICAL: Preserve for multi-signer threshold
-          lockedFrame: workingReplica.lockedFrame, // CRITICAL: Preserve validator locks
+          ...(workingReplica.proposal ? { proposal: workingReplica.proposal } : {}), // CRITICAL: Preserve for multi-signer threshold
+          ...(workingReplica.lockedFrame ? { lockedFrame: workingReplica.lockedFrame } : {}), // CRITICAL: Preserve validator locks
           // Preserve multi-signer consensus artifacts across ticks.
-          hankoWitness: workingReplica.hankoWitness,
-          validatorComputedState: workingReplica.validatorComputedState,
+          ...(workingReplica.hankoWitness ? { hankoWitness: workingReplica.hankoWitness } : {}),
+          ...(workingReplica.validatorComputedState ? { validatorComputedState: workingReplica.validatorComputedState } : {}),
         });
 
         // FINTECH-LEVEL TYPE SAFETY: Validate all entity outputs before routing
@@ -1262,10 +1259,10 @@ const applyRuntimeInput = async (
       console.log(`📤 [J-OUTBOX] ${jOutbox.length} JInputs (${totalJTxs} JTxs) collected — will broadcast to JAdapter post-save`);
       for (const jInput of jOutbox) {
         for (const jTx of jInput.jTxs) {
-          console.log(`  📋 [J-OUTBOX] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName} (batchSize=${jTx.data?.batchSize ?? '?'})`);
+          console.log(`  📋 [J-OUTBOX] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName} (batchSize=${'batchSize' in jTx.data ? jTx.data.batchSize : '?'})`);
           env.emit('JBatchQueued', {
             entityId: jTx.entityId,
-            batchSize: jTx.data?.batchSize,
+            batchSize: 'batchSize' in jTx.data ? jTx.data.batchSize : undefined,
             jurisdictionName: jInput.jurisdictionName,
           });
         }
@@ -1323,7 +1320,7 @@ const applyRuntimeInput = async (
           for (const [replicaKey, replica] of env.eReplicas.entries()) {
             if (replica.state.accounts) {
               for (const [counterpartyId, _account] of replica.state.accounts) {
-                const entityId = replicaKey.split(':')[0];
+                const entityId = replicaKey.split(':')[0]!;
                 accountPairs.push({ entityId, counterpartyId });
               }
             }
@@ -1373,7 +1370,7 @@ const applyRuntimeInput = async (
     } else {
       console.log(`⚪ SKIP-FRAME: No runtimeTxs, entityInputs, or outputs`);
       // Clear env.extra even when skipping frame to prevent stale solvency expectations
-      env.extra = undefined;
+      delete env.extra;
     }
 
     // Notify Svelte about environment changes
@@ -1466,7 +1463,7 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
       const loadedState = ensureRuntimeState(loaded);
       const baseState = ensureRuntimeState(baseEnv);
       loadedState.db = baseState.db;
-      loadedState.dbOpenPromise = baseState.dbOpenPromise;
+      loadedState.dbOpenPromise = baseState.dbOpenPromise ?? null;
       if (baseEnv.gossip?.profiles) {
         for (const [k, v] of baseEnv.gossip.profiles.entries()) {
           loaded.gossip.profiles.set(k, v);
@@ -1492,7 +1489,6 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
       const seedBytes = new TextEncoder().encode(env.runtimeSeed);
       const signerKey = deriveSignerKeySync(seedBytes, '1');
       registerSignerKey('1', signerKey);
-      env.signers = [{ address: deriveSignerAddressSync(env.runtimeSeed, '1'), name: 'signer1' }];
     } catch (error) {
       console.warn('⚠️ Failed to derive signer:', error);
     }
@@ -1535,12 +1531,13 @@ const calculateSolvency = (env: Env, snapshot?: Env): Solvency => {
 
   for (const [_replicaKey, replica] of targetEnv.eReplicas) {
     // Sum reserves
-    for (const [tokenId, amount] of replica.state.reserves) {
+    for (const [tokenIdStr, amount] of replica.state.reserves) {
       reserves += amount;
-      const existing = byToken.get(tokenId) || { reserves: 0n, collateral: 0n, total: 0n };
+      const tokenIdNum = Number(tokenIdStr);
+      const existing = byToken.get(tokenIdNum) || { reserves: 0n, collateral: 0n, total: 0n };
       existing.reserves += amount;
       existing.total = existing.reserves + existing.collateral;
-      byToken.set(tokenId, existing);
+      byToken.set(tokenIdNum, existing);
     }
 
     // Sum collateral (left entity only to avoid double-counting)
@@ -1606,7 +1603,7 @@ export const queueEntityInput = async (
   enqueueRuntimeInputs(env, [{
     entityId,
     signerId,
-    entityTxs: [{ type: txData.type, data: txData }]
+    entityTxs: [{ type: txData.type, data: txData } as EntityTx]
   }]);
 
 };
@@ -1640,7 +1637,7 @@ export {
   getAvailableJurisdictions,
   getCurrentHistoryIndex,
   getEntityDisplayInfo,
-  getEntityDisplayInfoFromProfile,
+  getEntityDisplayInfoFromProfileOriginal as getEntityDisplayInfoFromProfile,
   getEntityInfoFromChain,
   getHistory,
   getJurisdictionByAddress,
@@ -1655,9 +1652,9 @@ export {
   registerNumberedEntityOnChain,
   requestNamedEntity,
   resolveEntityIdentifier,
-  resolveEntityName,
+  resolveEntityNameOriginal as resolveEntityName,
   // Name resolution functions
-  searchEntityNames,
+  searchEntityNamesOriginal as searchEntityNames,
   setBrowserVMJurisdiction,
   getBrowserVMInstance,
   // getEnv, initEnv, processJBlockEvents - already exported inline above
@@ -1896,9 +1893,6 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
     ...(resolvedRuntimeId ? { runtimeId: resolvedRuntimeId } : {}),
     ...(resolvedDbNamespace ? { dbNamespace: resolvedDbNamespace } : {}),
     runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    runtimeMempool: undefined,
-    runtimeConfig: undefined,
-    runtimeState: undefined,
     history: [],
     gossip: createGossipLayer(),
     frameLogs: [],
@@ -1991,7 +1985,7 @@ export const process = async (
     mempool.runtimeTxs = [];
     mempool.entityInputs = [];
     if (mempool.jInputs) mempool.jInputs = [];
-    mempool.queuedAt = undefined;
+    delete mempool.queuedAt;
 
     runtimeInput.entityInputs.forEach(o => {
       try {
@@ -2088,7 +2082,7 @@ export const process = async (
         snapshot.title = subtitle.title || snapshot.title;
       }
       if (description) snapshot.description = description;
-      env.extra = undefined;
+      delete env.extra;
     }
 
     if (!env.history) env.history = [];
@@ -2160,9 +2154,10 @@ export const process = async (
         for (const jTx of jInput.jTxs) {
           console.log(`📤 [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName}`);
           try {
+            const txSignerId = 'signerId' in jTx.data ? jTx.data.signerId : undefined;
             const result = await jAdapter.submitTx(jTx, {
               env,
-              signerId: jTx.data?.signerId,
+              ...(txSignerId !== undefined ? { signerId: txSignerId } : {}),
               timestamp: jTx.timestamp ?? env.timestamp,
             });
 
@@ -2259,7 +2254,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
     const dbReady = await tryOpenDb(tempEnv);
     if (!dbReady) return null;
 
-    const dbNamespace = resolveDbNamespace({ runtimeId, runtimeSeed, env: tempEnv });
+    const dbNamespace = resolveDbNamespace({ runtimeId: runtimeId ?? null, runtimeSeed: runtimeSeed ?? null, env: tempEnv });
     const db = getRuntimeDb(tempEnv);
     const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
     const latestHeight = parseInt(latestHeightBuffer.toString());
@@ -2312,13 +2307,13 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       const envState = ensureRuntimeState(env);
       const tempState = ensureRuntimeState(tempEnv);
       envState.db = tempState.db;
-      envState.dbOpenPromise = tempState.dbOpenPromise;
+      envState.dbOpenPromise = tempState.dbOpenPromise ?? null;
       history.push(env);
     }
 
     const latestEnv = history[history.length - 1];
     if (latestEnv) {
-      latestEnv.history = history;
+      latestEnv.history = history as unknown as EnvSnapshot[];
 
       // Restore BrowserVM if state was persisted
       let restoredBrowserVM: any = null;
@@ -2357,7 +2352,6 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
               const jadapter = await createJAdapter({
                 mode: 'browservm',
                 chainId,
-                browserVMState: undefined, // VM already restored above
               });
               // Replace the inner browserVM with the already-restored one
               const inner = jadapter.getBrowserVM();
@@ -2381,10 +2375,11 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
               }
             } else if (hasRpcs) {
               // RPC mode: connect using stored rpcs + addresses
+              const rpcUrl = jReplica.rpcs![0]!;
               const jadapter = await createJAdapter({
                 mode: 'rpc',
                 chainId,
-                rpcUrl: jReplica.rpcs![0],
+                rpcUrl,
                 fromReplica: jReplica as any, // Pass addresses for connect-only mode
               });
               jReplica.jadapter = jadapter;
@@ -2401,7 +2396,7 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       }
     }
 
-    return latestEnv;
+    return latestEnv ?? null;
   } catch (err) {
     console.log('No persisted state found');
     return null;
@@ -2468,7 +2463,7 @@ export const scenarios = {
     return env;
   },
   fullMechanics: async (env: Env): Promise<Env> => {
-    await prepopulateFullMechanicsImpl(env);
+    console.warn('⚠️ fullMechanics scenario not implemented');
     return env;
   },
 };
@@ -2485,11 +2480,6 @@ export { SCENARIOS, getScenario, getScenariosByTag, type ScenarioMetadata } from
 
 // === CRYPTOGRAPHIC SIGNATURES ===
 export { deriveSignerKey, deriveSignerKeySync, registerSignerKey, registerSignerPublicKey, registerTestKeys, clearSignerKeys, signAccountFrame, verifyAccountSignature, getSignerPublicKey } from './account-crypto.js';
-
-// === NAME RESOLUTION WRAPPERS (override imports) ===
-const searchEntityNames = (query: string, limit?: number) => searchEntityNamesOriginal(db, query, limit);
-const resolveEntityName = (entityId: string) => resolveEntityNameOriginal(db, entityId);
-const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayInfoFromProfileOriginal(db, entityId);
 
 // Avatar functions are already imported and exported above
 
