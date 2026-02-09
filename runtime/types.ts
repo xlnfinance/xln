@@ -106,12 +106,12 @@
  *    ├─ 'directPayment'                // Multi-hop payment through accounts
  *    └─ 'accountInput'                 // Process bilateral consensus message
  *
- * 4. AccountInput (Bilateral consensus between two entities)
- *    ├─ height: number                 // Which frame we're ACKing
- *    ├─ prevSignatures: string[]       // ACK their previous frame
- *    ├─ newAccountFrame: AccountFrame  // Our proposed frame
- *    ├─ newSignatures: string[]        // Signatures on new frame
- *    └─ disputeProofNonce: number       // cooperativeNonce at dispute proof signing
+ * 4. AccountInput (Bilateral consensus between two entities - discriminated union)
+ *    ├─ type: 'proposal' | 'ack' | 'settlement'  // Discriminant
+ *    ├─ height: number                 // Which frame (proposal/ack)
+ *    ├─ newAccountFrame: AccountFrame  // Our proposed frame (proposal, optional on ack)
+ *    ├─ prevHanko: HankoString         // ACK hanko (ack only)
+ *    └─ settleAction: {...}            // Settlement operations (settlement only)
  *
  * 5. AccountFrame (Agreed bilateral state - like a block)
  *    ├─ height: number                 // Frame number in bilateral chain
@@ -152,7 +152,7 @@
  * Account Level (Bilateral):
  *   - Both sides must sign every frame (2-of-2 consensus)
  *   - Counter prevents replay attacks
- *   - prevSignatures ACK prevents forks
+ *   - prevHanko ACK prevents forks
  *   - State hash ensures deterministic state computation
  *   - Dispute resolution via on-chain proof submission
  *
@@ -1037,8 +1037,6 @@ export interface AccountMachine {
     onChainCooperativeNonce: number;  // On-chain nonce (may differ from initial)
     initialArguments?: string;        // On-chain initialArguments from disputeStart
   };
-
-  hankoSignature?: string; // LEGACY - will be removed
 
   // Historical frame log - grows until manually pruned by entity
   frameHistory: AccountFrame[]; // All confirmed bilateral frames in chronological order

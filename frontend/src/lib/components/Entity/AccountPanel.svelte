@@ -505,11 +505,11 @@
                 </div>
               {/if}
 
-              {#if account.hankoSignature}
+              {#if account.counterpartyFrameHanko}
                 <div class="signature-row">
                   <span class="sig-label">Their Hanko:</span>
-                  <code class="sig-value" title="{account.hankoSignature}">
-                    hanko_{account.hankoSignature.slice(0, 12)}...
+                  <code class="sig-value" title="{account.counterpartyFrameHanko}">
+                    hanko_{account.counterpartyFrameHanko.slice(0, 12)}...
                   </code>
                   <span class="sig-status verified">✓</span>
                 </div>

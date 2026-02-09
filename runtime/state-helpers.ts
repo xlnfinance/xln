@@ -666,9 +666,6 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     result.clonedForValidation = manualCloneAccountMachine(account.clonedForValidation, true);
   }
 
-  if (account.hankoSignature) {
-    result.hankoSignature = account.hankoSignature;
-  }
   if (account.currentDisputeProofHanko) {
     result.currentDisputeProofHanko = account.currentDisputeProofHanko;
   }

@@ -1452,9 +1452,6 @@ export async function generateAccountProof(env: Env, accountMachine: AccountMach
   console.log(`🔐 PROOF-SIGN: entityId=${proofEntityId.slice(-4)} → signerId=${proofSignerId.slice(-4)}`);
   const signature = signAccountFrame(env, proofSignerId, `0x${proofHash}`);
 
-  // Store signature for later use
-  accountMachine.hankoSignature = signature;
-
   console.log(`Generated account proof: ${accountMachine.proofBody.tokenIds.length} tokens`);
   console.log(`  Simple hash: 0x${proofHash.slice(0, 20)}...`);
   console.log(`  ABI hash: ${abiResult.proofBodyHash.slice(0, 20)}...`);
