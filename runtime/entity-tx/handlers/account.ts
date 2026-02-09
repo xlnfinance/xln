@@ -9,6 +9,15 @@ import { batchAddRevealSecret, initJBatch } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
 import { sanitizeBaseFee } from '../../routing/fees';
 
+const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+const findAccountKeyInsensitive = (accounts: Map<string, AccountMachine>, counterpartyId: string): string | null => {
+  const target = normalizeEntityRef(counterpartyId);
+  for (const key of accounts.keys()) {
+    if (normalizeEntityRef(key) === target) return key;
+  }
+  return null;
+};
+
 // === PURE EVENT TYPES ===
 // Events returned by handlers, applied by entity orchestrator
 
@@ -71,9 +80,18 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
   // Get or create account machine (KEY: counterparty ID for simpler lookups)
   // AccountMachine still uses canonical left/right internally
-  const counterpartyId = input.fromEntityId;
-  let accountMachine = newState.accounts.get(counterpartyId);
+  const counterpartyId = normalizeEntityRef(input.fromEntityId);
+  const existingAccountKey = findAccountKeyInsensitive(newState.accounts, counterpartyId);
+  let accountMachine = existingAccountKey ? newState.accounts.get(existingAccountKey) : undefined;
   let isNewAccount = false;
+  const replayMode = (env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true;
+  if (replayMode) {
+    console.log(
+      `[REPLAY][ACCOUNT-HANDLER] lookup from=${counterpartyId.slice(-8)} ` +
+      `foundKey=${existingAccountKey ? existingAccountKey.slice(-8) : 'none'} ` +
+      `accounts=${Array.from(newState.accounts.keys()).map((k) => k.slice(-8)).join(',')}`
+    );
+  }
 
   if (!accountMachine) {
     isNewAccount = true;
@@ -92,7 +110,9 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       mempool: [],
       currentFrame: {
         height: 0,
-        timestamp: state.timestamp, // Entity-level timestamp for determinism
+        // Deterministic account genesis: fixed zero timestamp.
+        // First committed account frame carries consensus timestamp.
+        timestamp: 0,
         jHeight: 0,
         accountTxs: [],
         prevFrameHash: '',
@@ -143,6 +163,14 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     console.log(`✅ Account created with counterparty key: ${counterpartyId.slice(-4)}`);
   }
 
+  if (isNewAccount && input.prevHanko && !input.newAccountFrame) {
+    const error = `ACCOUNT_INPUT_ACK_FOR_UNKNOWN_ACCOUNT: from=${input.fromEntityId.slice(-8)} to=${input.toEntityId.slice(-8)}`;
+    if (replayMode) {
+      console.error(`[REPLAY][ACCOUNT-HANDLER] ${error}`);
+    }
+    throw new Error(error);
+  }
+
   // FINTECH-SAFETY: Ensure accountMachine exists
   if (!accountMachine) {
     throw new Error(`CRITICAL: AccountMachine creation failed for ${input.fromEntityId}`);
@@ -172,10 +200,24 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   }
 
   // CHANNEL.TS PATTERN: Process frame-level consensus ONLY
-  if (input.height || input.newAccountFrame) {
+  if (input.height !== undefined || input.newAccountFrame) {
     console.log(`🤝 Processing frame from ${input.fromEntityId.slice(-4)}, accountMachine.pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}`);
 
     const result = await processAccountInput(env, accountMachine, input);
+    if (replayMode) {
+      console.log(
+        `[REPLAY][ACCOUNT-HANDLER] result success=${result.success} ` +
+        `currentHeight=${accountMachine.currentHeight} pending=${accountMachine.pendingFrame?.height ?? 0} ` +
+        `error=${result.error || 'none'}`
+      );
+    }
+    if ((env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true) {
+      console.log(
+        `REPLAY_ACCOUNT_RESULT from=${input.fromEntityId.slice(-8)} to=${input.toEntityId.slice(-8)} ` +
+        `height=${input.height} newFrame=${input.newAccountFrame?.height ?? 'none'} ` +
+        `success=${result.success} error=${result.error || 'none'}`
+      );
+    }
 
     if (result.success) {
       addMessages(newState, result.events);
@@ -779,6 +821,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         fromEntityId: input.fromEntityId,
         toEntityId: input.toEntityId,
       }, state.entityId);
+      throw new Error(`FRAME_CONSENSUS_FAILED: ${result.error || 'unknown'}`);
     }
   } else if (!input.settleAction) {
     // Only error if there was no settleAction either

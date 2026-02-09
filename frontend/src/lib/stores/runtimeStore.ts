@@ -144,11 +144,26 @@ export const runtimeOperations = {
   // Update active runtime env (legacy name kept for compatibility).
   updateLocalEnv(env: Env) {
     runtimes.update(r => {
-      const activeId = get(activeRuntimeId);
-      if (activeId && r.has(activeId)) {
-        const runtime = r.get(activeId)!;
+      const envRuntimeId = String((env as any)?.runtimeId || '').toLowerCase();
+      if (envRuntimeId && r.has(envRuntimeId)) {
+        const runtime = r.get(envRuntimeId)!;
         runtime.env = env;
         runtime.lastSynced = Date.now();
+        return r;
+      }
+
+      const activeId = String(get(activeRuntimeId) || '').toLowerCase();
+      if (activeId && r.has(activeId)) {
+        const runtime = r.get(activeId)!;
+        const activeEnvRuntimeId = String((runtime.env as any)?.runtimeId || '').toLowerCase();
+        if (!activeEnvRuntimeId || activeEnvRuntimeId === envRuntimeId || !envRuntimeId) {
+          runtime.env = env;
+          runtime.lastSynced = Date.now();
+        } else {
+          console.error(
+            `[runtimeStore] Refusing cross-runtime env overwrite: active=${activeId} activeEnv=${activeEnvRuntimeId} incoming=${envRuntimeId}`
+          );
+        }
       }
       return r;
     });

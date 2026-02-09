@@ -395,50 +395,10 @@ export async function verifyHankoForHash(
       }
     }
 
-    // Fallback: use gossip profile metadata (remote entity) if no local replica
-    if (expectedAddresses.length === 0 && env?.gossip?.getProfiles) {
-      const allProfiles = env.gossip.getProfiles();
-      const profile = allProfiles.find((p: any) => p.entityId === expectedEntityId);
-      if (profile) {
-        const boardMeta = profile.metadata?.board;
-        const publicKey = profile.metadata?.entityPublicKey;
-        if (typeof publicKey === 'string') {
-          const derived = publicKeyToAddress(publicKey);
-          if (derived) expectedAddresses.push(derived);
-        }
-
-        const boardEntries = Array.isArray(boardMeta)
-          ? boardMeta.map(entry => ({ signer: entry }))
-          : (boardMeta?.validators || []);
-
-        for (const entry of boardEntries) {
-          if (!entry) continue;
-          if (typeof entry === 'string') {
-            if (ethers.isAddress(entry)) {
-              expectedAddresses.push(entry.toLowerCase());
-            } else {
-              const derived = publicKeyToAddress(entry);
-              if (derived) expectedAddresses.push(derived);
-            }
-            continue;
-          }
-          if (entry.publicKey) {
-            const derived = publicKeyToAddress(entry.publicKey);
-            if (derived) expectedAddresses.push(derived);
-          }
-          if (entry.signer) {
-            if (ethers.isAddress(entry.signer)) {
-              expectedAddresses.push(entry.signer.toLowerCase());
-            } else {
-              const derived = publicKeyToAddress(entry.signer);
-              if (derived) expectedAddresses.push(derived);
-            }
-          }
-        }
-
-        expectedAddresses = Array.from(new Set(expectedAddresses));
-      }
-    }
+    // IMPORTANT (determinism): do NOT use gossip metadata as board-of-record
+    // for consensus signature verification. Gossip can be stale/incomplete and
+    // must not make valid WAL replay fail. If no local replica board is present,
+    // fall back to self-contained hanko quorum verification below.
 
     if (expectedAddresses.length > 0) {
       // External board found — verify recovered signers match

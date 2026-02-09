@@ -4,7 +4,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { xlnFunctions, xlnEnvironment, getXLN, processWithDelay } from '../../stores/xlnStore';
+  import { xlnFunctions, xlnEnvironment, getXLN, enqueueEntityInputs } from '../../stores/xlnStore';
   import { settings, settingsOperations } from '$lib/stores/settingsStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle, ArrowUpDown } from 'lucide-svelte';
@@ -62,6 +62,17 @@
   }
 
   let hubs: Hub[] = [];
+  const DISCOVERY_TIMEOUT_MS = 8000;
+
+  async function fetchJsonWithTimeout(url: string, init: RequestInit = {}, timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<Response> {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...init, signal: ctrl.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   // Generate identicon SVG for entity address
   function generateIdenticon(address: string, size = 8): string {
@@ -189,6 +200,23 @@
     expandedHub = expandedHub === hubId ? null : hubId;
   }
 
+  function isP2PConnected(currentEnv: any): boolean {
+    try {
+      return Boolean(currentEnv?.runtimeState?.p2p?.isConnected?.());
+    } catch {
+      return false;
+    }
+  }
+
+  async function waitForP2PReady(currentEnv: any, timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<boolean> {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (isP2PConnected(currentEnv)) return true;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return false;
+  }
+
   // Discover hubs from gossip network
   async function discoverHubs(refreshGossip: boolean = false) {
     loading = true;
@@ -197,7 +225,14 @@
     try {
       if (refreshGossip) {
         const xln = await getXLN();
-        if (env) xln.refreshGossip?.(env);
+        if (env && xln.refreshGossip) {
+          await Promise.race([
+            Promise.resolve(xln.refreshGossip(env)),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('gossip refresh timeout')), DISCOVERY_TIMEOUT_MS)),
+          ]).catch(() => {
+            // best-effort refresh only
+          });
+        }
         await new Promise(resolve => setTimeout(resolve, 250));
       }
 
@@ -249,7 +284,7 @@
       // Fallback 1: relay directory (single source from server gossip cache)
       if (discovered.length === 0) {
         try {
-          const res = await fetch('/api/debug/entities?limit=5000');
+          const res = await fetchJsonWithTimeout('/api/debug/entities?limit=5000');
           if (res.ok) {
             const body = await res.json() as { entities?: Array<{
               entityId: string;
@@ -344,6 +379,9 @@
       }
 
       hubs = discovered;
+      if (hubs.length === 0) {
+        error = 'No hubs discovered yet. Try Refresh; if it persists, check relay connectivity.';
+      }
 
     } catch (err) {
       console.error('[HubDiscovery] Failed:', err);
@@ -384,7 +422,7 @@
       // Open account WITH credit extension (both in same frame)
       // Frame #1 will have: [add_delta, set_credit_limit] - order matters!
       console.log('[HubDiscovery] Opening account + extending credit to', hub.entityId);
-      await processWithDelay(currentEnv as any, [{
+      await enqueueEntityInputs(currentEnv as any, [{
         entityId,
         signerId,
         entityTxs: [
@@ -432,13 +470,10 @@
     }
   }
 
-  // Track if we've already discovered (prevent infinite loop)
+  // Track if we've already discovered (prevent repeated auto-fetch loops)
   let hasDiscoveredOnce = false;
-  let retryTimer: ReturnType<typeof setTimeout> | null = null;
-  let retryCount = 0;
-  const MAX_RETRIES = 5;
 
-  // Auto-load on mount with retry for WS connection timing
+  // Auto-load once on mount. No background retries; user can press Refresh.
   onMount(() => {
     if (!isLocalHost && relaySelection.includes('localhost')) {
       relaySelection = FALLBACK_RELAY;
@@ -446,29 +481,32 @@
     }
     if (env) {
       hasDiscoveredOnce = true;
-      discoverHubs(true).then(() => {
-        // If 0 hubs found, schedule retries (WS may not be connected yet)
-        if (hubs.length === 0) scheduleRetry();
-      });
+      (async () => {
+        const ready = await waitForP2PReady(env);
+        if (!ready) {
+          loading = false;
+          error = 'Relay not connected yet. Wait a moment or press Refresh.';
+          return;
+        }
+        // One-shot gossip refresh on first load once network is connected.
+        await discoverHubs(true);
+      })();
     }
-    return () => { if (retryTimer) clearTimeout(retryTimer); };
+    return () => {};
   });
-
-  function scheduleRetry() {
-    if (retryCount >= MAX_RETRIES) return;
-    retryCount++;
-    const delay = retryCount * 500; // 500, 1000, 1500, 2000, 2500ms
-    retryTimer = setTimeout(async () => {
-      retryTimer = null;
-      await discoverHubs(true);
-      if (hubs.length === 0) scheduleRetry();
-    }, delay);
-  }
 
   // Also refresh when env becomes available (only once)
   $: if (env && hubs.length === 0 && !loading && !hasDiscoveredOnce) {
     hasDiscoveredOnce = true;
-    discoverHubs(true);
+    (async () => {
+      const ready = await waitForP2PReady(env);
+      if (!ready) {
+        loading = false;
+        error = 'Relay not connected yet. Wait a moment or press Refresh.';
+        return;
+      }
+      await discoverHubs(true);
+    })();
   }
 </script>
 

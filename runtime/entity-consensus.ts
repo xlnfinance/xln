@@ -316,13 +316,21 @@ export const applyEntityInput = async (
     if (HEAVY_LOGS) console.log(`🔍 INPUT-PRECOMMITS: Received hashPrecommits from: ${precommitSigners.join(', ')}`);
   }
 
+  const replayMode = (env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true;
   // SECURITY: Validate all inputs
   if (!validateEntityInput(entityInput)) {
+    const detail = `entityId=${entityInput.entityId} txs=${entityInput.entityTxs?.map(tx => tx.type).join(',') || 'none'}`;
     log.error(`❌ Invalid input for ${entityInput.entityId}`);
+    if (replayMode) {
+      throw new Error(`REPLAY_INVALID_ENTITY_INPUT: ${detail}`);
+    }
     return { newState: workingReplica.state, outputs: [], jOutputs: [], workingReplica };
   }
   if (!validateEntityReplica(workingReplica)) {
     log.error(`❌ Invalid replica state for ${workingReplica.entityId}:${workingReplica.signerId}`);
+    if (replayMode) {
+      throw new Error(`REPLAY_INVALID_ENTITY_REPLICA: ${workingReplica.entityId}:${workingReplica.signerId}`);
+    }
     return { newState: workingReplica.state, outputs: [], jOutputs: [], workingReplica };
   }
 
@@ -354,6 +362,9 @@ export const applyEntityInput = async (
 
   // Add transactions to mempool (mutable for performance)
   if (entityInput.entityTxs?.length) {
+    if (replayMode) {
+      console.log(`[REPLAY] applyEntityInput entityId=${entityInput.entityId} txs=${entityInput.entityTxs.map(tx => tx.type).join(',')}`);
+    }
     // DEBUG: Track vote transactions specifically
     const voteTransactions = entityInput.entityTxs.filter(tx => tx.type === 'vote');
     if (voteTransactions.length > 0) {
@@ -1079,7 +1090,15 @@ export const applyEntityFrame = async (
   const allSwapOffersCreated: Array<any> = [];
   const allSwapOffersCancelled: Array<any> = [];
 
+  // Preserve WAL transaction order exactly during live processing and replay.
+  // Reordering batched txs can change bilateral account state transitions
+  // (e.g., openAccount + accountInput ACK in same frame).
   for (const entityTx of entityTxs) {
+    if ((env as Record<PropertyKey, unknown>)[Symbol.for('xln.runtime.env.replay.mode')] === true) {
+      console.log(
+        `[REPLAY][E-FRAME] entity=${currentEntityState.entityId.slice(-8)} txType=${entityTx.type}`
+      );
+    }
     const { newState, outputs, jOutputs, mempoolOps, swapOffersCreated, swapOffersCancelled } = await applyEntityTx(env, currentEntityState, entityTx);
     currentEntityState = newState;
 

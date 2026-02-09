@@ -5,6 +5,7 @@
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import AccountPreview from './AccountPreview.svelte';
+  import EntityIdentity from '../shared/EntityIdentity.svelte';
 
   // Get environment from context (for /view route) or use global stores (for / route)
   const entityEnv = hasEntityEnvContext() ? getEntityEnv() : null;
@@ -87,20 +88,22 @@
     }
   }
 
+  // Get entity name from gossip
+  function getEntityName(id: string): string {
+    const envData = contextEnv ? $contextEnv : $xlnEnvironment;
+    if (envData?.gossip) {
+      const profiles = typeof envData.gossip.getProfiles === 'function' ? envData.gossip.getProfiles() : (envData.gossip.profiles || []);
+      const profile = profiles.find((p: any) => p.entityId === id);
+      if (profile?.metadata?.name) return profile.metadata.name;
+    }
+    return '';
+  }
+
+  $: counterpartyName = getEntityName(counterpartyId);
+
   // Determine if we are the "left" entity in the canonical bilateral ordering
   // Use lexicographic comparison for deterministic left/right assignment
   $: isLeftEntity = entityId < counterpartyId;
-
-  // Debug perspective calculation
-  $: {
-    console.log(`🔍 PERSPECTIVE DEBUG:`, {
-      entityId: entityId.slice(-4),
-      counterpartyId: counterpartyId.slice(-4),
-      isLeftEntity,
-      entityIdFull: entityId,
-      counterpartyIdFull: counterpartyId
-    });
-  }
 
   // XLN functions accessed through $xlnEnvironment.xln (attached in xlnStore)
 
@@ -135,28 +138,6 @@
       name: `Token ${tokenId}`,
       decimals: 18
     };
-
-    // Debug derived values including ASCII
-    console.log(`🔍 DERIVED DEBUG (Entity ${entityId.slice(-4)}, isLeft=${isLeftEntity}):`, {
-      tokenId,
-      rawDelta: {
-        collateral: delta.collateral.toString(),
-        ondelta: delta.ondelta.toString(),
-        offdelta: delta.offdelta.toString(),
-        leftCredit: delta.leftCreditLimit.toString(),
-        rightCredit: delta.rightCreditLimit.toString()
-      },
-      derived: {
-        delta: derived.delta.toString(),
-        totalCapacity: derived.totalCapacity.toString(),
-        ownCreditLimit: derived.ownCreditLimit.toString(),
-        peerCreditLimit: derived.peerCreditLimit.toString(),
-        inCapacity: derived.inCapacity.toString(),
-        outCapacity: derived.outCapacity.toString(),
-        hasAscii: 'ascii' in derived,
-        ascii: derived.ascii || 'MISSING'
-      }
-    });
 
     // Calculate detailed segments
     // FINTECH-SAFETY: Convert BigInt to Number BEFORE arithmetic operations
@@ -340,33 +321,29 @@
 <div class="account-panel">
   <div class="panel-header">
     <button class="back-button" on:click={handleBackToEntity}>
-      ← Back to Entity
+      ←
     </button>
-    <div class="account-title">
-      <span class="entity-pair">
-        Entity {entityId} ⟷ Entity {counterpartyId}
-      </span>
-      <div class="consensus-status">
-        <span class="frame-badge">Frame #{account.currentFrame.height}</span>
-        {#if account.mempool.length > 0 || account.pendingFrame}
-          <span class="status-badge pending">
-            {#if account.pendingFrame}
-              Awaiting Consensus
-            {:else}
-              {account.mempool.length} pending
-            {/if}
-          </span>
-        {:else}
-          <span class="status-badge synced">Synced</span>
-        {/if}
-
-        <!-- Quick Trust Indicator -->
-        {#if account.currentFrame.stateHash}
-          <span class="trust-indicator verified" title="Cryptographically verified account state">🔒 Secured</span>
-        {:else}
-          <span class="trust-indicator pending" title="Awaiting cryptographic verification">⏳ Unverified</span>
-        {/if}
-      </div>
+    <div class="header-identity">
+      <EntityIdentity entityId={counterpartyId} name={counterpartyName} size={32} clickable={false} compact={false} copyable={true} showAddress={true} />
+    </div>
+    <div class="consensus-status">
+      <span class="frame-badge">Frame #{account.currentFrame.height}</span>
+      {#if account.mempool.length > 0 || account.pendingFrame}
+        <span class="status-badge pending">
+          {#if account.pendingFrame}
+            Awaiting Consensus
+          {:else}
+            {account.mempool.length} pending
+          {/if}
+        </span>
+      {:else}
+        <span class="status-badge synced">Synced</span>
+      {/if}
+      {#if account.currentFrame.stateHash}
+        <span class="trust-indicator verified" title="Cryptographically verified account state">🔒</span>
+      {:else}
+        <span class="trust-indicator pending" title="Awaiting cryptographic verification">⏳</span>
+      {/if}
     </div>
   </div>
 
@@ -394,21 +371,11 @@
               </div>
               <div class="canonical-item">
                 <span class="canonical-key">leftCreditLimit:</span>
-                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.leftCreditLimit)} (Entity {isLeftEntity ? entityId : counterpartyId})</span>
+                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.leftCreditLimit)} ({isLeftEntity ? 'you' : counterpartyName || counterpartyId})</span>
               </div>
               <div class="canonical-item">
                 <span class="canonical-key">rightCreditLimit:</span>
-                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.rightCreditLimit)} (Entity {isLeftEntity ? counterpartyId : entityId})</span>
-              </div>
-            </div>
-            <!-- ASCII Visualization -->
-            <div class="ascii-visualization">
-              <div class="ascii-label">Position:</div>
-              <div class="ascii-bar">{td.derived.ascii || '[not available]'}</div>
-              <div class="ascii-legend">
-                <span>[-] Credit</span>
-                <span>[=] Collateral</span>
-                <span>[|] Balance Position</span>
+                <span class="canonical-value">{activeXlnFunctions?.formatTokenAmount(td.tokenId, td.delta.rightCreditLimit)} ({isLeftEntity ? counterpartyName || counterpartyId : 'you'})</span>
               </div>
             </div>
           </div>
@@ -418,7 +385,7 @@
 
     <!-- Personal View (Perspective-based) -->
     <div class="section">
-      <h3>👤 My View (Entity {entityId} perspective)</h3>
+      <h3>👤 My View</h3>
       {#each tokenDetails as td (td.tokenId)}
         <div class="token-detail-card">
           <div class="token-header">
@@ -740,7 +707,7 @@
                   </div>
                   <div class="frame-detail">
                     <span class="detail-label">Proposer:</span>
-                    <span class="detail-value">{frame.byLeft === true ? 'Left' : frame.byLeft === false ? 'Right' : '—'}</span>
+                    <span class="detail-value">{frame.byLeft === true ? (isLeftEntity ? 'Left (you)' : 'Left') : frame.byLeft === false ? (isLeftEntity ? 'Right' : 'Right (you)') : '—'}</span>
                   </div>
                   <div class="frame-detail">
                     <span class="detail-label">Tokens:</span>
@@ -790,88 +757,83 @@
     height: 100%;
     display: flex;
     flex-direction: column;
-    background: #1e1e1e;
+    background: #0c0a09;
   }
 
   .panel-header {
-    padding: 16px;
-    border-bottom: 1px solid #3e3e3e;
-    background: #252526;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid #292524;
+    background: #1c1917;
   }
 
   .back-button {
-    padding: 6px 12px;
-    background: transparent;
-    border: 1px solid #007acc;
-    color: #007acc;
-    border-radius: 4px;
+    padding: 6px 10px;
+    background: #1c1917;
+    border: 1px solid #292524;
+    color: #fbbf24;
+    border-radius: 6px;
     cursor: pointer;
-    font-size: 0.85em;
-    margin-bottom: 12px;
-    transition: all 0.2s ease;
+    font-size: 14px;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
   }
 
   .back-button:hover {
-    background: #007acc;
-    color: white;
+    background: #292524;
+    border-color: #44403c;
   }
 
-  .account-title {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .entity-pair {
-    font-size: 1.2em;
-    font-weight: 600;
-    color: #d4d4d4;
+  .header-identity {
+    flex: 1;
+    min-width: 0;
   }
 
   .consensus-status {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     align-items: center;
+    flex-shrink: 0;
   }
 
   .frame-badge {
-    padding: 4px 8px;
-    background: #2d2d2d;
-    border: 1px solid #3e3e3e;
+    padding: 3px 8px;
+    background: #1c1917;
+    border: 1px solid #292524;
     border-radius: 4px;
-    font-size: 0.85em;
-    color: #9cdcfe;
+    font-size: 0.8em;
+    color: #a8a29e;
+    font-family: 'JetBrains Mono', monospace;
   }
 
   .status-badge {
-    font-size: 0.85em;
+    font-size: 0.8em;
+    padding: 3px 8px;
+    border-radius: 4px;
   }
 
   .status-badge.synced {
-    color: #4ec9b0;
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.1);
   }
 
   .status-badge.pending {
-    color: #dcdcaa;
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.1);
   }
 
   .trust-indicator {
-    font-size: 0.75em;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-weight: 500;
+    font-size: 0.85em;
   }
 
   .trust-indicator.verified {
-    background: #1a4d1a;
-    color: #00ff88;
-    border: 1px solid #2d5a2d;
+    color: #4ade80;
   }
 
   .trust-indicator.pending {
-    background: #4d4d1a;
-    color: #dcdcaa;
-    border: 1px solid #5a5a2d;
+    color: #a8a29e;
   }
 
   .panel-content {
@@ -885,14 +847,15 @@
   }
 
   .section h3 {
-    margin: 0 0 16px 0;
-    color: #007acc;
-    font-size: 1.1em;
+    margin: 0 0 12px 0;
+    color: #d6d3d1;
+    font-size: 0.95em;
+    font-weight: 600;
   }
 
   .token-detail-card {
-    background: #2d2d2d;
-    border: 1px solid #3e3e3e;
+    background: #1c1917;
+    border: 1px solid #292524;
     border-radius: 6px;
     padding: 16px;
     margin-bottom: 12px;
@@ -911,11 +874,11 @@
   }
 
   .net-position {
-    font-family: monospace;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 0.95em;
     padding: 4px 8px;
     border-radius: 4px;
-    background: #1a1a1a;
+    background: #0c0a09;
   }
 
   .net-position.positive {
@@ -1018,7 +981,7 @@
     grid-template-columns: repeat(3, 1fr);
     gap: 12px;
     padding: 12px;
-    background: #1a1a1a;
+    background: #0c0a09;
     border-radius: 4px;
     margin-bottom: 12px;
   }
@@ -1059,7 +1022,7 @@
     display: flex;
     justify-content: space-between;
     padding: 4px 8px;
-    background: #1a1a1a;
+    background: #0c0a09;
     border-radius: 3px;
   }
 
@@ -1073,8 +1036,8 @@
   }
 
   .action-card {
-    background: #2d2d2d;
-    border: 1px solid #3e3e3e;
+    background: #1c1917;
+    border: 1px solid #292524;
     border-radius: 6px;
     padding: 16px;
     margin-bottom: 12px;
@@ -1095,10 +1058,10 @@
   .form-select,
   .form-input {
     padding: 8px;
-    background: #1a1a1a;
-    border: 1px solid #3e3e3e;
+    background: #0c0a09;
+    border: 1px solid #292524;
     border-radius: 4px;
-    color: #d4d4d4;
+    color: #d6d3d1;
     font-size: 0.9em;
   }
 
@@ -1112,7 +1075,7 @@
 
   .form-input:focus,
   .form-select:focus {
-    border-color: #007acc;
+    border-color: #fbbf24;
     outline: none;
   }
 
@@ -1186,8 +1149,8 @@
     align-items: center;
     gap: 12px;
     padding: 8px;
-    background: #2d2d2d;
-    border: 1px solid #3e3e3e;
+    background: #1c1917;
+    border: 1px solid #292524;
     border-radius: 4px;
     font-size: 0.85em;
   }
@@ -1212,7 +1175,7 @@
   .frame-txs-list {
     margin-top: 8px;
     padding-top: 8px;
-    border-top: 1px solid #3e3e3e;
+    border-top: 1px solid #292524;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -1222,7 +1185,7 @@
     display: flex;
     gap: 8px;
     padding: 6px;
-    background: #1a1a1a;
+    background: #0c0a09;
     border-radius: 3px;
     font-size: 0.75em;
     align-items: flex-start;
@@ -1256,9 +1219,9 @@
   }
 
   .frame-item {
-    background: #2d2d2d;
+    background: #1c1917;
     border-radius: 6px;
-    border: 1px solid #3e3e3e;
+    border: 1px solid #292524;
     overflow: hidden;
   }
 
@@ -1279,8 +1242,8 @@
     justify-content: space-between;
     align-items: center;
     padding: 8px 12px;
-    background: #252526;
-    border-bottom: 1px solid #3e3e3e;
+    background: #1c1917;
+    border-bottom: 1px solid #292524;
   }
 
   .frame-id {
@@ -1369,7 +1332,7 @@
     width: 100%;
     margin-top: 8px;
     padding: 8px;
-    background: #1e1e1e;
+    background: #0c0a09;
     border-radius: 4px;
   }
 
@@ -1378,11 +1341,11 @@
     gap: 8px;
     align-items: center;
     font-size: 0.8em;
-    color: #d4d4d4;
-    font-family: monospace;
+    color: #d6d3d1;
+    font-family: 'JetBrains Mono', monospace;
     margin-bottom: 4px;
     padding: 4px;
-    background: #1a1a1a;
+    background: #1c1917;
     border-radius: 2px;
   }
 
@@ -1390,7 +1353,7 @@
     width: 100%;
     margin-top: 8px;
     padding: 8px;
-    background: #1e1e1e;
+    background: #0c0a09;
     border-radius: 4px;
   }
 
@@ -1414,8 +1377,8 @@
 
   /* Canonical State Styles */
   .canonical-data {
-    background: #1e1e1e;
-    border: 1px solid #007acc;
+    background: #0c0a09;
+    border: 1px solid #292524;
     border-radius: 6px;
     padding: 12px;
   }
@@ -1430,7 +1393,7 @@
   .canonical-token {
     margin-bottom: 16px;
     padding-bottom: 12px;
-    border-bottom: 1px solid #3e3e3e;
+    border-bottom: 1px solid #292524;
   }
 
   .canonical-token:last-child {
@@ -1468,48 +1431,14 @@
     font-weight: 600;
   }
 
-  /* ASCII Visualization Styles */
-  .ascii-visualization {
-    margin-top: 8px;
-    padding: 8px;
-    background: #252526;
-    border-radius: 4px;
-    border: 1px solid #3e3e3e;
-  }
-
-  .ascii-label {
-    font-size: 0.8em;
-    color: #9d9d9d;
-    margin-bottom: 4px;
-  }
-
-  .ascii-bar {
-    font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
-    font-size: 0.9em;
-    color: #00ff88;
-    background: #1a1a1a;
-    padding: 6px 8px;
-    border-radius: 2px;
-    letter-spacing: 0.5px;
-    word-break: break-all;
-  }
-
-  .ascii-legend {
-    display: flex;
-    gap: 12px;
-    margin-top: 4px;
-    font-size: 0.75em;
-    color: #888;
-  }
-
-  /* 🔐 Hanko Signature Proof Styles */
+  /* Hanko Signature Proof Styles */
   .signature-proof-section {
     margin-top: 16px;
     padding: 12px;
-    background: #1e1e1e;
-    border: 1px solid #4a4a4a;
+    background: #0c0a09;
+    border: 1px solid #292524;
     border-radius: 6px;
-    border-left: 3px solid #007acc;
+    border-left: 3px solid #fbbf24;
   }
 
   .signature-header {
@@ -1526,7 +1455,7 @@
   }
 
   .proof-title {
-    color: #007acc;
+    color: #fbbf24;
   }
 
   .frame-info {
@@ -1556,18 +1485,18 @@
   }
 
   .sig-value {
-    font-family: 'Courier New', monospace;
-    background: #2a2a2a;
+    font-family: 'JetBrains Mono', monospace;
+    background: #1c1917;
     padding: 2px 6px;
     border-radius: 3px;
-    color: #dcdcaa;
-    border: 1px solid #3e3e3e;
+    color: #d6d3d1;
+    border: 1px solid #292524;
     cursor: pointer;
     transition: background 0.2s;
   }
 
   .sig-value:hover {
-    background: #3a3a3a;
+    background: #292524;
   }
 
   .sig-value.pending {
@@ -1593,7 +1522,7 @@
     font-size: 0.75em;
     margin-top: 4px;
     padding-top: 4px;
-    border-top: 1px solid #3e3e3e;
+    border-top: 1px solid #292524;
   }
 
   .timestamp-label {

@@ -4,11 +4,11 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-// ⭐ CORE FILES ONLY - Everything an LLM needs to understand XLN
-// 🔴 READ ORDER: Solidity contracts FIRST (source of truth), then TypeScript runtime
+// CORE FILES ONLY - Everything an LLM needs to understand XLN
+// READ ORDER: Solidity contracts FIRST (source of truth), then TypeScript runtime
 const CORE_FILES = {
   contracts: [
-    // ⚡ READ THESE FIRST - On-chain source of truth for all invariants
+    // * READ THESE FIRST - On-chain source of truth for all invariants
     'Types.sol',           // Shared types: Diff, BatchArgs, InsuranceReg
     'Depository.sol',      // Reserve/collateral management, enforceDebts FIFO, RCPAN invariant
     'EntityProvider.sol',  // Hanko verification, governance, C/D shares
@@ -21,11 +21,11 @@ const CORE_FILES = {
     'ids.ts',                // Identity system: EntityId, SignerId, JId, ReplicaKey
 
     // Main coordinators (how the system works)
-    'runtime.ts',            // Main coordinator, 100ms ticks, R→E→A routing
-    'entity-consensus.ts',   // BFT consensus (ADD_TX → PROPOSE → SIGN → COMMIT)
+    'runtime.ts',            // Main coordinator, 100ms ticks, R->E->A routing
+    'entity-consensus.ts',   // BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
     'account-consensus.ts',  // Bilateral account consensus between entities
     'account-consensus-state.ts', // Bilateral state machine (classifyBilateralState)
-    'j-batch.ts',            // J-batch system: E-machine accumulates → jBroadcast → J-machine
+    'j-batch.ts',            // J-batch system: E-machine accumulates -> jBroadcast -> J-machine
 
     // Financial accounting (CRITICAL for bug analysis)
     'account-utils.ts',      // deriveDelta() RCPAN calculation, TOKEN_REGISTRY
@@ -62,10 +62,10 @@ const CORE_FILES = {
   ],
   docs: [
     // Ordered by dependency - read in this order
-    'intro.md',                      // ⚡ 5-min overview (new reader onramp)
-    'essay.md',                      // ⚡ Core philosophy and vision (5min)
-    'core/12_invariant.md',          // ⚡ RCPAN vs FCUAN vs FRPAP (THE core innovation) (10min)
-    'core/rjea-architecture.md',     // ⚡ Runtime-Jurisdiction-Entity-Account 4-layer model (8min)
+    'intro.md',                      // * 5-min overview (new reader onramp)
+    'essay.md',                      // * Core philosophy and vision (5min)
+    'core/12_invariant.md',          // * RCPAN vs FCUAN vs FRPAP (THE core innovation) (10min)
+    'core/rjea-architecture.md',     // * Runtime-Jurisdiction-Entity-Account 4-layer model (8min)
     'core/11_Jurisdiction_Machine.md', // Architecture deep-dive
     'architecture/bilaterality.md',  // Why bilateral > multilateral
   ],
@@ -130,16 +130,16 @@ XLN (Cross-Local Network) achieves:
 ## The Core Innovation: RCPAN Superset
 
 \`\`\`
-Banks (FCUAN):     [---Δ---]         Credit only, unprovable
-Lightning (FRPAP): [Δ===]            Collateral only, no credit
-XLN (RCPAN):       [---Δ===---]      BOTH. The superset.
+Banks (FCUAN):     [---D---]         Credit only, unprovable
+Lightning (FRPAP): [D===]            Collateral only, no credit
+XLN (RCPAN):       [---D===---]      BOTH. The superset.
 
-                   ←credit→ ←collateral→ ←credit→
+                   <-credit-> <-collateral-> <-credit->
 \`\`\`
 
-**The invariant**: −Lₗ ≤ Δ ≤ C + Lᵣ
+**The invariant**: -L_left <= D <= C + L_right
 
-Where: Δ = net balance, C = collateral, Lₗ/Lᵣ = credit limits left/right extend
+Where: D = net balance (delta), C = collateral, L_left/L_right = credit limits left/right extend
 
 Banks are XLN with C=0. Lightning is XLN with L=0. XLN generalizes both.
 
@@ -149,11 +149,11 @@ Lightning's fatal flaw: To RECEIVE $1000, someone must lock $1000 FOR you.
 
 XLN inverts this:
 \`\`\`
-Alice (spoke) ←→ Hub
-├─ Alice sets credit_limit = 1000 (her choice, her risk)
-├─ Hub routes payment TO Alice by going -500 debt
-├─ Alice now has +500 balance — received with ZERO pre-funding
-└─ Max loss if Hub fails = 1000 (the limit Alice chose)
+Alice (spoke) <-> Hub
+ - Alice sets credit_limit = 1000 (her choice, her risk)
+ - Hub routes payment TO Alice by going -500 debt
+ - Alice now has +500 balance -- received with ZERO pre-funding
+ - Max loss if Hub fails = 1000 (the limit Alice chose)
 \`\`\`
 
 This is Coase's insight applied to payments: bilateral negotiation costs O(1),
@@ -168,49 +168,49 @@ State N+1: Alice: +700, Bob: -700  [signed by Alice, Bob]
 \`\`\`
 
 Implications:
-- No fraud period — can't submit old state without counterparty signature
-- Instant finality — mutual signature IS consensus
-- No watchtowers — nothing to watch for
-- Privacy — only parties know intermediate states
+- No fraud period -- can't submit old state without counterparty signature
+- Instant finality -- mutual signature IS consensus
+- No watchtowers -- nothing to watch for
+- Privacy -- only parties know intermediate states
 
 On-chain role: anchor collateral, enforce FIFO liquidation if entity fails.
 
 ## Failure Model: Diamond-Dybvig Without Bailouts
 
-Traditional banking (Diamond-Dybvig): bank runs are rational cascades → bailouts required.
+Traditional banking (Diamond-Dybvig): bank runs are rational cascades -> bailouts required.
 
 XLN insight: don't prevent runs, make them survivable.
 
 When an entity fails:
 1. On-chain collateral covers provable debts first
-2. FIFO ordering — creditors paid in timestamp order, no discretion
+2. FIFO ordering -- creditors paid in timestamp order, no discretion
 3. Losses bounded by credit limits each counterparty chose
-4. No contagion — your exposure is YOUR credit limit, not network-wide
+4. No contagion -- your exposure is YOUR credit limit, not network-wide
 
 This requires EVM: FIFO debt iteration needs Turing-complete execution.
 
 ## Architecture Overview
 
 \`\`\`
-┌─────────────────────────────────────────────────┐
-│                   ENTITIES                       │
-│  (Users, Merchants, Hubs, Market Makers)        │
-└──────────────────────┬──────────────────────────┘
-                       │ Bilateral Accounts
-                       ▼
-┌─────────────────────────────────────────────────┐
-│              BILATERAL ACCOUNTS                  │
-│  State: Δ per token, signatures, transformers   │
-│  Updates: Both parties sign every change        │
-│  Settlement: Instant, no fraud period           │
-└──────────────────────┬──────────────────────────┘
-                       │ Anchor/Enforce (rare)
-                       ▼
-┌─────────────────────────────────────────────────┐
-│              JURISDICTION (EVM)                  │
-│  Collateral escrow, FIFO liquidation           │
-│  Delta transformer verification on disputes    │
-└─────────────────────────────────────────────────┘
++---------------------------------------------------+
+|                   ENTITIES                         |
+|  (Users, Merchants, Hubs, Market Makers)           |
++---------------------------+-----------------------+
+                            | Bilateral Accounts
+                            v
++---------------------------------------------------+
+|              BILATERAL ACCOUNTS                    |
+|  State: D per token, signatures, transformers      |
+|  Updates: Both parties sign every change           |
+|  Settlement: Instant, no fraud period              |
++---------------------------+-----------------------+
+                            | Anchor/Enforce (rare)
+                            v
++---------------------------------------------------+
+|              JURISDICTION (EVM)                    |
+|  Collateral escrow, FIFO liquidation               |
+|  Delta transformer verification on disputes        |
++---------------------------------------------------+
 \`\`\`
 
 ## Comparison Matrix
@@ -229,10 +229,10 @@ This requires EVM: FIFO debt iteration needs Turing-complete execution.
 
 Every bilateral account supports programmable delta rules:
 \`\`\`
-HTLC:        Δ changes when hash preimage revealed (atomic swaps)
-Limit Order: Δ changes when oracle price crosses threshold
-Escrow:      Δ changes when arbiter signs release
-AMM:         Δ follows x*y=k curve for bilateral swaps
+HTLC:        D changes when hash preimage revealed (atomic swaps)
+Limit Order: D changes when oracle price crosses threshold
+Escrow:      D changes when arbiter signs release
+AMM:         D follows x*y=k curve for bilateral swaps
 \`\`\`
 
 One account, many subcontracts. All execute bilaterally, chain sees nothing unless dispute.
@@ -246,7 +246,7 @@ One account, many subcontracts. All execute bilaterally, chain sees nothing unle
 - A federation (pure cryptographic enforcement, no trusted parties)
 
 **Terminology precision:**
-- Credit ≠ Debt. Credit is a LIMIT you set. Debt is what's currently owed.
+- Credit != Debt. Credit is a LIMIT you set. Debt is what's currently owed.
 - Left/Right = deterministic from entityId (lower hex = left), not role-based
 - "Instant" = no fraud period, not just fast confirmation
 
@@ -257,10 +257,10 @@ One account, many subcontracts. All execute bilaterally, chain sees nothing unle
 4. Failures are localized, not systemic (no bailouts needed)
 
 **Key questions users ask:**
-- "How is this different from Lightning?" → Credit extension solves inbound capacity
-- "How is this different from banks?" → Cryptographic proofs, no bailout requirement
-- "What happens if counterparty disappears?" → On-chain settlement with your collateral
-- "What's the worst case?" → Lose credit limit you extended, nothing more
+- "How is this different from Lightning?" -> Credit extension solves inbound capacity
+- "How is this different from banks?" -> Cryptographic proofs, no bailout requirement
+- "What happens if counterparty disappears?" -> On-chain settlement with your collateral
+- "What's the worst case?" -> Lose credit limit you extended, nothing more
 
 ## Token Budget Guide (~${Math.round(totalTokens / 1000)}k tokens total)
 
@@ -296,7 +296,7 @@ xln/
     entity-consensus.ts          ${fileSizes['runtime/entity-consensus.ts'] || '?'} lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
     account-consensus.ts         ${fileSizes['runtime/account-consensus.ts'] || '?'} lines - Bilateral consensus, left/right perspective
     account-consensus-state.ts   ${fileSizes['runtime/account-consensus-state.ts'] || '?'} lines - Bilateral state machine
-    j-batch.ts                   ${fileSizes['runtime/j-batch.ts'] || '?'} lines - J-batch: E-machine accumulates → jBroadcast → J-machine
+    j-batch.ts                   ${fileSizes['runtime/j-batch.ts'] || '?'} lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
     account-utils.ts             ${fileSizes['runtime/account-utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
     serialization-utils.ts       ${fileSizes['runtime/serialization-utils.ts'] || '?'} lines - BigInt serialization
     account-crypto.ts            ${fileSizes['runtime/account-crypto.ts'] || '?'} lines - Signature verification
@@ -328,10 +328,10 @@ xln/
     evm.ts                       ${fileSizes['runtime/evm.ts'] || '?'} lines - Blockchain integration
 
   docs/
-    intro.md                           ${fileSizes['docs/intro.md'] || '?'} lines - ⚡ 5-min overview (new reader onramp)
-    essay.md                            ${fileSizes['docs/essay.md'] || '?'} lines - ⚡ Core philosophy and vision (CRITICAL PATH)
-    core/12_invariant.md                ${fileSizes['docs/core/12_invariant.md'] || '?'} lines - ⚡ RCPAN innovation (CRITICAL PATH)
-    core/rjea-architecture.md           ${fileSizes['docs/core/rjea-architecture.md'] || '?'} lines - ⚡ RJEA 4-layer model (CRITICAL PATH)
+    intro.md                           ${fileSizes['docs/intro.md'] || '?'} lines - * 5-min overview (new reader onramp)
+    essay.md                            ${fileSizes['docs/essay.md'] || '?'} lines - * Core philosophy and vision (CRITICAL PATH)
+    core/12_invariant.md                ${fileSizes['docs/core/12_invariant.md'] || '?'} lines - * RCPAN innovation (CRITICAL PATH)
+    core/rjea-architecture.md           ${fileSizes['docs/core/rjea-architecture.md'] || '?'} lines - * RJEA 4-layer model (CRITICAL PATH)
     core/11_Jurisdiction_Machine.md     ${fileSizes['docs/core/11_Jurisdiction_Machine.md'] || '?'} lines - Architecture deep-dive
     architecture/bilaterality.md        ${fileSizes['docs/architecture/bilaterality.md'] || '?'} lines - Why bilateral > multilateral
 
@@ -350,9 +350,9 @@ ${includeFrontend ? `
 Reading Guide:
 1. Start with intro.md, then header sections (RCPAN invariant, competitive landscape, impossibilities)
 2. Follow the token budget guide for efficient learning:
-   - Critical path (30min): essay.md → 12_invariant.md → rjea-architecture.md → Depository.sol
-   - Implementation (45min): types.ts → entity-consensus.ts → account-consensus.ts → entity-tx/apply.ts
-   - Deep dives (60min): runtime.ts → routing/pathfinding.ts → bilaterality.md → 11_Jurisdiction_Machine.md
+   - Critical path (30min): essay.md -> 12_invariant.md -> rjea-architecture.md -> Depository.sol
+   - Implementation (45min): types.ts -> entity-consensus.ts -> account-consensus.ts -> entity-tx/apply.ts
+   - Deep dives (60min): runtime.ts -> routing/pathfinding.ts -> bilaterality.md -> 11_Jurisdiction_Machine.md
 3. Verify claims using the Proof & Verification section
 4. Explore delta transformer examples for extensibility patterns
 
@@ -367,7 +367,7 @@ function readFileContent(baseDir, relativePath) {
     const content = fs.readFileSync(fullPath, 'utf8');
     return content;
   } catch (error) {
-    console.warn(`⚠️  Could not read ${relativePath}: ${error.message}`);
+    console.warn(`WARNING: Could not read ${relativePath}: ${error.message}`);
     return null;
   }
 }
@@ -463,7 +463,8 @@ if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
 }
 
-fs.writeFileSync(outputPath, context);
+// Write with UTF-8 BOM so browsers detect encoding correctly
+fs.writeFileSync(outputPath, '\ufeff' + context, 'utf8');
 
 // Stats
 const lines = context.split('\n').length;
@@ -471,14 +472,14 @@ const bytes = Buffer.byteLength(context, 'utf8');
 const kb = (bytes / 1024).toFixed(1);
 const tokensTotal = Math.round(bytes / 3.5);
 
-console.log(`✅ ${outputFilename} generated`);
-console.log(`📊 ${lines.toLocaleString()} lines, ${kb} KB, ~${tokensTotal.toLocaleString()} tokens`);
-console.log(`🌐 xln.finance/${outputFilename}`);
+console.log(`OK ${outputFilename} generated`);
+console.log(`${lines.toLocaleString()} lines, ${kb} KB, ~${tokensTotal.toLocaleString()} tokens`);
+console.log(`xln.finance/${outputFilename}`);
 const frontendLabel = includeFrontend ? ` | Frontend: ${CORE_FILES.frontend.length}` : '';
-console.log(`📁 Contracts: ${CORE_FILES.contracts.length} | Runtime: ${CORE_FILES.runtime.length} | Docs: ${CORE_FILES.docs.length}${frontendLabel}`);
+console.log(`Contracts: ${CORE_FILES.contracts.length} | Runtime: ${CORE_FILES.runtime.length} | Docs: ${CORE_FILES.docs.length}${frontendLabel}`);
 
 // Token breakdown by file (top 15)
-console.log('\n📈 Token Breakdown (top 15):');
+console.log('\nToken Breakdown (top 15):');
 const fileTokens = fileStats.map(f => ({
   ...f,
   tokens: Math.round(f.bytes / 3.5),

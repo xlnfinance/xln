@@ -13,7 +13,7 @@
  *   bun runtime/server.ts --port 9000        # Custom port
  */
 
-import { main, enqueueRuntimeInput, startP2P, startRuntimeLoop, registerEntityRuntimeHint } from './runtime';
+import { main, enqueueRuntimeInput, startP2P, startRuntimeLoop, registerEntityRuntimeHint, clearDB } from './runtime';
 import { safeStringify } from './serialization-utils';
 import type { Env, EntityInput, RoutedEntityInput, RuntimeInput } from './types';
 import { encodeBoard, hashBoard } from './entity-factory';
@@ -96,7 +96,6 @@ const applyJEventsToEnv = async (env: Env, events: JEvent[], label = 'J-EVENTS')
 const hasPendingRuntimeWork = (env: Env): boolean => {
   if (env.pendingOutputs?.length) return true;
   if (env.networkInbox?.length) return true;
-  if (env.pendingNetworkOutputs?.length) return true;
   if (env.runtimeInput?.runtimeTxs?.length) return true;
   // Check P2P mempool (where enqueueRuntimeInputs puts inbound messages)
   if ((env as any).runtimeMempool?.entityInputs?.length) return true;
@@ -128,6 +127,37 @@ const waitForJBatchClear = async (env: Env, timeoutMs = 5000): Promise<boolean> 
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   return false;
+};
+
+const waitForBilateralAccountReady = async (
+  env: Env,
+  leftEntityId: string,
+  rightEntityId: string,
+  timeoutMs = 20_000,
+): Promise<{ ok: true; account: any } | { ok: false; reason: 'missing' | 'pending'; pendingFrameHeight?: number | null }> => {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const accountMachine = getAccountMachine(env, leftEntityId, rightEntityId);
+    if (!accountMachine) {
+      await sleep(200);
+      continue;
+    }
+    if (!accountMachine.pendingFrame) {
+      return { ok: true, account: accountMachine };
+    }
+    await sleep(200);
+  }
+
+  const last = getAccountMachine(env, leftEntityId, rightEntityId);
+  if (!last) return { ok: false, reason: 'missing' };
+  if (last?.pendingFrame) {
+    return {
+      ok: false,
+      reason: 'pending',
+      pendingFrameHeight: Number(last.pendingFrame.height ?? 0) || null,
+    };
+  }
+  return { ok: true, account: last };
 };
 
 const waitForReserveUpdate = async (
@@ -203,6 +233,15 @@ const getFaucetHubProfiles = (env: Env): any[] => {
     const bActive = activeSet.has(String(b?.entityId || '').toLowerCase()) ? 1 : 0;
     return bActive - aActive;
   });
+  if (selected.length === 0 && activeHubEntityIds.length > 0) {
+    // Fallback for cold gossip cache: active server hubs remain faucet-capable.
+    return activeHubEntityIds.map((entityId) => ({
+      entityId,
+      metadata: { isHub: true },
+      capabilities: ['hub', 'routing', 'faucet'],
+      accounts: [],
+    }));
+  }
   return selected;
 };
 
@@ -212,8 +251,9 @@ const sleep = async (ms: number): Promise<void> => {
 
 const getEntityReplicaById = (env: Env, entityId: string): any | null => {
   if (!env.eReplicas) return null;
+  const target = entityId.toLowerCase();
   for (const [key, replica] of env.eReplicas.entries()) {
-    if (typeof key === 'string' && key.startsWith(`${entityId}:`)) {
+    if (typeof key === 'string' && key.toLowerCase().startsWith(`${target}:`)) {
       return replica;
     }
   }
@@ -236,7 +276,26 @@ const hasPairMutualCredit = (env: Env, leftEntityId: string, rightEntityId: stri
 
 const hasAccount = (env: Env, entityId: string, counterpartyId: string): boolean => {
   const replica = getEntityReplicaById(env, entityId);
-  return !!replica?.state?.accounts?.has(counterpartyId);
+  if (!replica?.state?.accounts) return false;
+  const needle = counterpartyId.toLowerCase();
+  for (const key of replica.state.accounts.keys()) {
+    if (typeof key === 'string' && key.toLowerCase() === needle) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const getAccountMachine = (env: Env, entityId: string, counterpartyId: string): any | null => {
+  const replica = getEntityReplicaById(env, entityId);
+  if (!replica?.state?.accounts) return null;
+  const needle = counterpartyId.toLowerCase();
+  for (const [key, account] of replica.state.accounts.entries()) {
+    if (typeof key === 'string' && key.toLowerCase() === needle) {
+      return account ?? null;
+    }
+  }
+  return null;
 };
 
 const getHubMeshHealth = (env: Env) => {
@@ -848,6 +907,47 @@ const resetServerDebugState = (env: Env | null, preserveHubs = true): { remainin
   };
 };
 
+const triggerColdReset = async (
+  env: Env,
+  opts: { resetRpc?: boolean; clearDb?: boolean } = {},
+): Promise<{ resetRpc: boolean; clearDb: boolean; activeClientsClosed: number }> => {
+  const resetRpc = opts.resetRpc !== false;
+  const clearDbState = opts.clearDb !== false;
+
+  const activeClients = clients.size;
+  for (const [runtimeId, client] of clients.entries()) {
+    try {
+      client.ws.close(1012, 'server-reset');
+    } catch {
+      // Best effort; socket may already be closed.
+    }
+    clients.delete(runtimeId);
+  }
+
+  runtimeEncryptionKeys.clear();
+  pendingMessages.clear();
+
+  if (clearDbState) {
+    await clearDB(env);
+  }
+  // Keep hub replicas/profiles alive so API remains operational after in-process reset.
+  // Cold reset is for user/runtime state + RPC/DB, not for deleting server hub identities.
+  resetServerDebugState(env, true);
+
+  if (resetRpc && globalJAdapter?.mode === 'rpc') {
+    try {
+      const provider = globalJAdapter.provider as ethers.JsonRpcProvider;
+      // Works on anvil/hardhat nodes and gives a real cold chain reset.
+      await provider.send('anvil_reset', []);
+      console.log('[RESET] RPC reset via anvil_reset completed');
+    } catch (error) {
+      console.warn('[RESET] RPC reset skipped/failed:', (error as Error).message);
+    }
+  }
+
+  return { resetRpc, clearDb: clearDbState, activeClientsClosed: activeClients };
+};
+
 const installProcessSafetyGuards = (): void => {
   if (processGuardsInstalled) return;
   processGuardsInstalled = true;
@@ -972,6 +1072,7 @@ const MIME_TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
+  '.txt': 'text/plain; charset=utf-8',
 };
 
 const getMimeType = (path: string): string | undefined => {
@@ -998,6 +1099,29 @@ const serveStatic = async (pathname: string, staticDir: string): Promise<Respons
     }
   }
 
+  return null;
+};
+
+// Serve runtime bundle from canonical static/public locations.
+// In dev, Vite serves frontend/static. In server mode, frontend/public/build
+// may be used depending on deploy workflow.
+const serveRuntimeBundle = async (): Promise<Response | null> => {
+  const candidates = [
+    path.join(process.cwd(), 'frontend', 'static', 'runtime.js'),
+    path.join(process.cwd(), 'frontend', 'public', 'runtime.js'),
+    path.join(process.cwd(), 'frontend', 'build', 'runtime.js'),
+  ];
+  for (const runtimePath of candidates) {
+    const file = Bun.file(runtimePath);
+    if (!(await file.exists())) continue;
+    return new Response(file, {
+      headers: {
+        'content-type': 'text/javascript; charset=utf-8',
+        // Prevent stale module cache across reloads while debugging/prod hotfixes.
+        'cache-control': 'no-store, must-revalidate',
+      },
+    });
+  }
   return null;
 };
 
@@ -1249,15 +1373,12 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
           console.log(`[RELAY] → plaintext entity_input: entityId=${input.entityId?.slice(-8)}`);
         }
         // Register sender runtime hint BEFORE processing so ACK/response can route back.
-        // Sender entity is always input.entityId for inbound entity_input.
-        if (from && typeof input.entityId === 'string' && input.entityId.length > 0) {
-          registerEntityRuntimeHint(env, input.entityId, from);
-        }
-        // Also capture explicit sender fields on accountInput payloads.
+        // IMPORTANT: never infer sender from input.entityId here; input.entityId is the
+        // target entity for this message and mapping it to "from" poisons routing.
         if (from && input.entityTxs) {
           for (const tx of input.entityTxs) {
             const data = tx.data as Record<string, unknown> | undefined;
-            if (tx.type === 'accountInput' && typeof data?.fromEntityId === 'string') {
+            if (typeof data?.fromEntityId === 'string') {
               registerEntityRuntimeHint(env, data.fromEntityId, from);
             }
           }
@@ -1583,6 +1704,44 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       ...stats,
       ts: Date.now(),
     }), { headers });
+  }
+
+  if ((pathname === '/api/reset' || pathname === '/reset') && (req.method === 'POST' || req.method === 'GET')) {
+    const configuredToken = process.env.DEBUG_RESET_TOKEN;
+    if (configuredToken) {
+      const supplied = req.headers.get('x-debug-reset-token') || '';
+      if (supplied !== configuredToken) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers });
+      }
+    }
+
+    const url = new URL(req.url);
+    const resetRpc = url.searchParams.get('rpc') !== '0';
+    const clearDbState = url.searchParams.get('db') !== '0';
+    const shouldExit = url.searchParams.get('exit') !== '0';
+
+    const result = await triggerColdReset(env, { resetRpc, clearDb: clearDbState });
+    pushRelayDebugEvent({
+      event: 'reset',
+      status: 'ok',
+      details: { mode: 'cold', ...result },
+    });
+
+    // Optional process restart for supervisor-managed environments.
+    // In local dev/E2E we keep the API alive and continue on the same process.
+    if (shouldExit) {
+      setTimeout(() => process.exit(0), 250);
+    }
+    return new Response(
+      safeStringify({
+        ok: true,
+        mode: 'cold',
+        restarting: shouldExit,
+        ...result,
+        ts: Date.now(),
+      }),
+      { headers },
+    );
   }
 
   // Registered gossip entities (single source from relay profile store)
@@ -2029,19 +2188,31 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }
 
       const body = await req.json();
-      const { userEntityId, tokenId = 1, amount = '100' } = body;
+      const { userEntityId, userRuntimeId, tokenId = 1, amount = '100', hubEntityId: requestedHubEntityId } = body;
 
       if (!userEntityId) {
         return new Response(JSON.stringify({ error: 'Missing userEntityId' }), { status: 400, headers });
       }
+      if (typeof userRuntimeId === 'string' && userRuntimeId.length > 0) {
+        registerEntityRuntimeHint(env, userEntityId, userRuntimeId);
+      }
 
       // Get hub from server-authoritative hub set + gossip
       const allProfiles = env.gossip?.getProfiles() || [];
-      console.log(`[FAUCET/OFFCHAIN] profiles=${allProfiles.length} user=${userEntityId.slice(-8)}`);
+      const userSuffix = typeof userEntityId === 'string' ? userEntityId.slice(-8) : 'unknown';
+      console.log(`[FAUCET/OFFCHAIN] profiles=${allProfiles.length} user=${userSuffix}`);
       for (const p of allProfiles) {
-        console.log(`  profile: ${p.entityId.slice(-8)} isHub=${p.metadata?.isHub} caps=[${p.capabilities?.join(',')}]`);
+        const entityId = typeof p?.entityId === 'string' ? p.entityId : 'unknown';
+        const capabilities = Array.isArray(p?.capabilities) ? p.capabilities.join(',') : '';
+        console.log(`  profile: ${entityId === 'unknown' ? entityId : entityId.slice(-8)} isHub=${p?.metadata?.isHub === true} caps=[${capabilities}]`);
       }
-      const hubs = getFaucetHubProfiles(env);
+      const gossipHubs = getFaucetHubProfiles(env);
+      const activeHubCandidates = activeHubEntityIds
+        .map((entityId) => ({ entityId }))
+        .filter((hub) => !!hub.entityId);
+      // Server authority first: if hubs are active on this server, faucet can always target them
+      // without depending on client gossip freshness.
+      const hubs = activeHubCandidates.length > 0 ? activeHubCandidates : gossipHubs;
       if (hubs.length === 0) {
         pushRelayDebugEvent({
           event: 'error',
@@ -2051,6 +2222,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
             endpoint: '/api/faucet/offchain',
             profiles: allProfiles.length,
             activeHubEntityIds,
+            gossipHubCount: gossipHubs.length,
             hint: 'No faucet-capable hubs in server active set or gossip cache',
           },
         });
@@ -2059,55 +2231,118 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           code: 'FAUCET_HUBS_EMPTY',
           profiles: allProfiles.length,
           activeHubEntityIds,
+          gossipHubCount: gossipHubs.length,
         }), { status: 503, headers });
       }
-      const hubEntityId = hubs[0].entityId;
+      const requestedHubId =
+        typeof requestedHubEntityId === 'string' && requestedHubEntityId.length > 0
+          ? requestedHubEntityId.toLowerCase()
+          : '';
+      const requestedHub = requestedHubId
+        ? hubs.find((hub) => hub.entityId.toLowerCase() === requestedHubId)
+        : undefined;
+      const existingHubAccount = hubs.find((hub) => hasAccount(env, hub.entityId, userEntityId));
+      const selectedHub = requestedHub ?? existingHubAccount ?? hubs[0];
+      if (!selectedHub) {
+        return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
+      }
+      const hubEntityId = selectedHub.entityId;
+      if (!getEntityReplicaById(env, hubEntityId)) {
+        return new Response(JSON.stringify({
+          error: 'Faucet hub is not ready yet',
+          code: 'FAUCET_HUB_NOT_READY',
+          hubEntityId,
+        }), { status: 503, headers });
+      }
       // Get actual signerId from entity's validators (not runtimeId!)
-      const hubSignerId = resolveEntityProposerId(env, hubEntityId, 'faucet-offchain');
+      let hubSignerId: string;
+      try {
+        hubSignerId = resolveEntityProposerId(env, hubEntityId, 'faucet-offchain');
+      } catch (error) {
+        return new Response(JSON.stringify({
+          error: 'Faucet hub signer is unavailable',
+          code: 'FAUCET_HUB_SIGNER_UNAVAILABLE',
+          hubEntityId,
+          details: (error as Error).message,
+        }), { status: 503, headers });
+      }
       console.log(`[FAUCET/OFFCHAIN] hub=${hubEntityId.slice(-8)} signer=${hubSignerId.slice(-8)} amount=${amount} token=${tokenId}`);
 
-      // Explicit fail-fast: faucet only enqueues directPayment into an existing bilateral channel.
-      if (!hasAccount(env, hubEntityId, userEntityId)) {
-        pushRelayDebugEvent({
-          event: 'error',
-          status: 'rejected',
-          reason: 'FAUCET_ACCOUNT_MISSING',
-          details: {
-            endpoint: '/api/faucet/offchain',
-            hubEntityId,
-            userEntityId,
-            tokenId,
-          },
-        });
+      const amountWei = ethers.parseUnits(amount, 18);
+      let accountMachine = getAccountMachine(env, hubEntityId, userEntityId);
+      if (!accountMachine) {
+        // No blocking wait here: enqueue openAccount and return immediately.
+        // Client can retry faucet; this avoids 20s hanging requests and false hard failures.
+        const defaultCredit = 10_000n * 10n ** 18n;
+        try {
+          enqueueRuntimeInput(env, {
+            runtimeTxs: [],
+            entityInputs: [{
+              entityId: hubEntityId,
+              signerId: hubSignerId,
+              entityTxs: [{
+                type: 'openAccount',
+                data: {
+                  targetEntityId: userEntityId,
+                  tokenId: Number(tokenId),
+                  creditAmount: defaultCredit,
+                },
+              }],
+            }],
+          });
+        } catch (error) {
+          return new Response(JSON.stringify({
+            error: 'Failed to enqueue channel opening',
+            code: 'FAUCET_OPENACCOUNT_ENQUEUE_FAILED',
+            details: (error as Error).message,
+          }), { status: 503, headers });
+        }
+
         return new Response(JSON.stringify({
-          error: 'No hub account with target entity',
-          code: 'FAUCET_ACCOUNT_MISSING',
-          hubEntityId,
-          userEntityId,
-        }), { status: 409, headers });
+          success: true,
+          status: 'channel_opening',
+          code: 'FAUCET_CHANNEL_OPENING',
+          amount,
+          tokenId,
+          from: hubEntityId.slice(0, 16) + '...',
+          to: userEntityId.slice(0, 16) + '...',
+          message: 'Bilateral channel opening enqueued. Retry faucet shortly.',
+        }), { status: 202, headers });
       }
 
-      const amountWei = ethers.parseUnits(amount, 18);
+      if (accountMachine?.pendingFrame) {
+        // Channel exists but is still finalizing a frame; queueing payment now is safe,
+        // it will execute once pending frame is acknowledged.
+        console.log(`[FAUCET/OFFCHAIN] account pending frame=${accountMachine.pendingFrame.height}`);
+      }
 
       // Send payment from hub to user via account.
       // Single-writer invariant: enqueue only; runtime loop applies.
-      enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: [{
-          entityId: hubEntityId,
-          signerId: hubSignerId,
-          entityTxs: [{
-            type: 'directPayment',
-            data: {
-              targetEntityId: userEntityId,
-              tokenId,
-              amount: amountWei,
-              route: [hubEntityId, userEntityId], // Direct route
-              description: 'faucet-offchain',
-            },
+      try {
+        enqueueRuntimeInput(env, {
+          runtimeTxs: [],
+          entityInputs: [{
+            entityId: hubEntityId,
+            signerId: hubSignerId,
+            entityTxs: [{
+              type: 'directPayment',
+              data: {
+                targetEntityId: userEntityId,
+                tokenId,
+                amount: amountWei,
+                route: [hubEntityId, userEntityId],
+                description: 'faucet-offchain',
+              },
+            }],
           }],
-        }],
-      });
+        });
+      } catch (error) {
+        return new Response(JSON.stringify({
+          error: 'Failed to enqueue faucet payment',
+          code: 'FAUCET_PAYMENT_ENQUEUE_FAILED',
+          details: (error as Error).message,
+        }), { status: 503, headers });
+      }
       console.log(`[FAUCET/OFFCHAIN] ✅ Payment enqueued`);
 
       return new Response(JSON.stringify({
@@ -2120,7 +2355,9 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }), { headers });
     } catch (error: any) {
       console.error('[FAUCET/OFFCHAIN] Error:', error);
-      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
+      const message = error?.message || 'Unknown faucet error';
+      const status = message.includes('SIGNER_RESOLUTION_FAILED') || message.includes('RUNTIME_REPLICA_NOT_FOUND') ? 503 : 500;
+      return new Response(JSON.stringify({ error: message }), { status, headers });
     }
   }
 
@@ -2506,13 +2743,19 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         return new Response('WebSocket upgrade failed', { status: 400 });
       }
 
-      // REST API
-      if (pathname.startsWith('/api/')) {
+      // REST API (+ hard reset shortcut at /reset)
+      if (pathname.startsWith('/api/') || pathname === '/reset') {
         return handleApi(req, pathname, env);
       }
 
       // Static files
       if (options.staticDir) {
+        // Runtime bundle is served from canonical runtime locations.
+        if (pathname === '/runtime.js') {
+          const runtimeBundle = await serveRuntimeBundle();
+          if (runtimeBundle) return runtimeBundle;
+        }
+
         // Root → index.html
         if (pathname === '/') {
           const index = await serveStatic('/index.html', options.staticDir);

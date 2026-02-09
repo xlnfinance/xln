@@ -14,13 +14,6 @@
     ? Array.from(replica.state.accounts.entries())
     : [];
 
-  // DEBUG: Log accounts for entity
-  $: if (replica && accounts.length > 0) {
-    console.log(`[AccountList] Entity ${replica.entityId.slice(0,6)} has ${accounts.length} accounts:`,
-      accounts.map(([id]) => id.slice(0,6)));
-  }
-
-
   // Safety guard for XLN functions
 
   // Get ALL entities in the system (excluding self) - reactive to accounts changes
@@ -64,7 +57,7 @@
 
 </script>
 
-<div class="account-channels" data-testid="account-channels">
+<div class="account-list-wrapper" data-testid="account-list-wrapper">
   <!-- Account List View (Always show previews, never full panel) -->
   <div class="accounts-list-view">
 
@@ -92,7 +85,7 @@
 </div>
 
 <style>
-  .account-channels {
+  .account-list-wrapper {
     height: 100%;
     display: flex;
     flex-direction: column;

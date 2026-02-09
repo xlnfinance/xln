@@ -18,6 +18,20 @@ const inflightAutoCreates = new Map<string, Promise<string | null>>();
 let warnedMissingEnv = false;
 let isCreatingJMachine = false;
 
+async function waitForCondition(
+  check: () => boolean,
+  label: string,
+  timeoutMs = 30_000,
+  intervalMs = 50,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error(`[EntityFactory] Timeout waiting for condition: ${label}`);
+}
+
 /**
  * Counter for deterministic ephemeral entity ID generation
  * Ensures same signer + counter always generates same entity ID
@@ -87,7 +101,19 @@ export async function createEphemeralEntity(
 
   // Apply runtime input
   xln.enqueueRuntimeInput(env, runtimeInput);
-  await xln.process(env, []);
+  await waitForCondition(
+    () => {
+      const reps = (env as any)?.eReplicas;
+      if (!reps?.keys) return false;
+      const expected = String(entityId).toLowerCase();
+      for (const key of reps.keys()) {
+        const repEntity = String(key).split(':')[0];
+        if (String(repEntity || '').toLowerCase() === expected) return true;
+      }
+      return false;
+    },
+    `importReplica(${entityId.slice(0, 12)})`
+  );
 
   return entityId;
 }

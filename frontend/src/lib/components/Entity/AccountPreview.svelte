@@ -3,6 +3,7 @@
   import { createEventDispatcher } from 'svelte';
   import { xlnFunctions } from '../../stores/xlnStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
+  import EntityIdentity from '../shared/EntityIdentity.svelte';
 
   export let account: AccountMachine;
   export let counterpartyId: string;
@@ -28,7 +29,6 @@
     return '';
   }
 
-  $: ourName = getEntityName(entityId);
   $: counterpartyName = getEntityName(counterpartyId);
 
   // Validate xlnFunctions availability - fail fast if not ready
@@ -38,25 +38,16 @@
 
   function calculateUtilization(): number {
     if (!account.deltas || account.deltas.size === 0) return 0;
-    // XLN is always ready - no guards needed
-
-    let totalCapacity = 0n;
-    let totalUsed = 0n;
-
-    // Determine if current entity is left in the relationship
     const isLeftEntity = entityId < counterpartyId;
-
+    let totalCap = 0n;
+    let freeCap = 0n;
     for (const [, delta] of account.deltas.entries()) {
       const derived = activeXlnFunctions!.deriveDelta(delta, isLeftEntity);
-      totalCapacity += derived.outCapacity + derived.inCapacity;
-
-      // Used = credit they spent + our collateral locked
-      const theirUsedCredit = delta.rightCreditLimit > 0n ?
-        delta.rightCreditLimit - (derived.outCapacity - delta.collateral) : 0n;
-      totalUsed += theirUsedCredit + delta.collateral;
+      totalCap += derived.totalCapacity;
+      freeCap += derived.outCapacity + derived.inCapacity;
     }
-
-    return totalCapacity > 0n ? Number((totalUsed * 100n) / totalCapacity) : 0;
+    if (totalCap <= 0n) return 0;
+    return Number(((totalCap - freeCap) * 100n) / totalCap);
   }
 
   function handleClick() {
@@ -114,19 +105,6 @@
     const derived = activeXlnFunctions.deriveDelta(delta, isLeftEntity);
     const tokenInfo = activeXlnFunctions.getTokenInfo(tokenId);
 
-    // DEBUG: Log all accounts to trace offdelta issue
-    console.log(`📊 AccountPreview ${entityId.slice(-4)}↔${counterpartyId.slice(-4)} token${tokenId}:`, {
-      ondelta: delta.ondelta?.toString(),
-      offdelta: delta.offdelta?.toString(),
-      collateral: delta.collateral?.toString(),
-      totalDelta: (delta.ondelta + delta.offdelta).toString(),
-      isLeftEntity,
-      'derived.outCollateral': derived.outCollateral?.toString(),
-      'derived.inCollateral': derived.inCollateral?.toString(),
-      'derived.outCapacity': derived.outCapacity?.toString(),
-      'derived.inCapacity': derived.inCapacity?.toString(),
-    });
-
     // deriveDelta is single source of truth - use derived.* directly everywhere
     return { tokenId, tokenInfo, delta, derived };
   });
@@ -143,9 +121,7 @@
 >
   <div class="account-header">
     <div class="entity-info">
-      <span class="our-entity">{ourName || entityId}</span>
-      <span class="separator">←→</span>
-      <span class="counterparty-name">{counterpartyName || counterpartyId}</span>
+      <EntityIdentity entityId={counterpartyId} name={counterpartyName} size={28} clickable={false} compact={false} copyable={false} showAddress={true} />
     </div>
     <div class="account-status">
       {#if account.mempool.length > 0 || (account as any).pendingFrame}
@@ -163,6 +139,9 @@
   </div>
 
   <div class="delta-bars">
+    {#if tokenDeltas.length === 0}
+      <div class="no-deltas">No deltas yet</div>
+    {/if}
     {#each tokenDeltas as td (td.tokenId)}
       <div class="token-row">
         <span class="token-label" style="color: {td.tokenInfo.color}">
@@ -177,27 +156,27 @@
              class:glow-both={bilateralState?.glowSide === 'both'}
              style="--glow-intensity: {bilateralState?.glowIntensity ?? 0}">
           <!-- 7-REGION MODEL: OUT side | IN side -->
-          <!-- LEFT (OUT): outOwnCredit → outCollateral → outPeerCredit -->
+          <!-- LEFT (OUT): outOwnCredit -> outCollateral -> outPeerCredit -->
           <div class="bar-section left-side">
             {#if td.derived.outOwnCredit > 0n}
               <div
                 class="bar-segment unused-credit"
                 style="width: {Number((td.derived.outOwnCredit * 100n) / td.derived.totalCapacity)}%"
-                title="Credit we can use: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outOwnCredit)}"
+                title="Our credit (we allow peer to owe us): {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outOwnCredit)}"
               ></div>
             {/if}
             {#if td.derived.outCollateral > 0n}
               <div
                 class="bar-segment collateral"
                 style="width: {Number((td.derived.outCollateral * 100n) / td.derived.totalCapacity)}%"
-                title="Our collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCollateral)}"
+                title="Collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outCollateral)}"
               ></div>
             {/if}
             {#if td.derived.outPeerCredit > 0n}
               <div
                 class="bar-segment used-credit"
                 style="width: {Number((td.derived.outPeerCredit * 100n) / td.derived.totalCapacity)}%"
-                title="Peer debt (using our credit): {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outPeerCredit)}"
+                title="Peer owes us (their credit to us): {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.outPeerCredit)}"
               ></div>
             {/if}
           </div>
@@ -205,38 +184,62 @@
           <!-- Visual separator -->
           <div class="bar-separator">|</div>
 
-          <!-- RIGHT (IN): inOwnCredit → inCollateral → inPeerCredit -->
+          <!-- RIGHT (IN): inOwnCredit -> inCollateral -> inPeerCredit -->
           <div class="bar-section right-side">
             {#if td.derived.inOwnCredit > 0n}
               <div
                 class="bar-segment used-credit"
                 style="width: {Number((td.derived.inOwnCredit * 100n) / td.derived.totalCapacity)}%"
-                title="Our debt (using our credit): {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inOwnCredit)}"
+                title="We owe peer (our credit used): {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inOwnCredit)}"
               ></div>
             {/if}
             {#if td.derived.inCollateral > 0n}
               <div
                 class="bar-segment collateral"
                 style="width: {Number((td.derived.inCollateral * 100n) / td.derived.totalCapacity)}%"
-                title="Peer collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCollateral)}"
+                title="Collateral: {activeXlnFunctions?.formatTokenAmount(td.tokenId, td.derived.inCollateral)}"
               ></div>
             {/if}
             {#if td.derived.inPeerCredit > 0n}
               <div
                 class="bar-segment unused-credit"
                 style="width: {Number((td.derived.inPeerCredit * 100n) / td.derived.totalCapacity)}%"
-                title="Credit peer can use: {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived.inPeerCredit)}"
+                title="Peer credit to us (unused): {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived.inPeerCredit)}"
               ></div>
             {/if}
           </div>
         </div>
         <div class="capacity-labels">
-          <span class="capacity-out" title="Available to send (outCapacity)">
+          <span class="capacity-out">
             OUT {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived?.outCapacity || 0n)}
           </span>
-          <span class="capacity-in" title="Available to receive (inCapacity)">
+          <span class="capacity-in">
             IN {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived?.inCapacity || 0n)}
           </span>
+        </div>
+        <div class="capacity-breakdown">
+          <div class="breakdown-side">
+            {#if td.derived.outPeerCredit > 0n}
+              <span class="breakdown-item debt">owed {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived.outPeerCredit)}</span>
+            {/if}
+            {#if td.derived.outCollateral > 0n}
+              <span class="breakdown-item coll">coll {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived.outCollateral)}</span>
+            {/if}
+            {#if td.derived.outOwnCredit > 0n}
+              <span class="breakdown-item credit">credit {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived.outOwnCredit)}</span>
+            {/if}
+          </div>
+          <div class="breakdown-side right">
+            {#if td.derived.inPeerCredit > 0n}
+              <span class="breakdown-item credit">peer credit {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived.inPeerCredit)}</span>
+            {/if}
+            {#if td.derived.inCollateral > 0n}
+              <span class="breakdown-item coll">coll {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived.inCollateral)}</span>
+            {/if}
+            {#if td.derived.inOwnCredit > 0n}
+              <span class="breakdown-item debt">debt {activeXlnFunctions!.formatTokenAmount(td.tokenId, td.derived.inOwnCredit)}</span>
+            {/if}
+          </div>
         </div>
       </div>
     {/each}
@@ -245,27 +248,25 @@
 
 <style>
   .account-preview {
-    background: #1a1a1a;
-    border: 1px solid #2d2d2d;
-    border-radius: 4px;
-    padding: 16px;
+    background: #1c1917;
+    border: 1px solid #292524;
+    border-radius: 6px;
+    padding: 14px;
     margin-bottom: 8px;
     cursor: pointer;
     transition: all 0.15s ease;
   }
 
-
-
   .account-preview:hover {
-    background: #222;
-    border-color: #3e3e3e;
+    background: #292524;
+    border-color: #44403c;
     transform: translateX(2px);
   }
 
   .account-preview.selected {
-    background: #252525;
-    border-color: #0084ff;
-    border-left: 3px solid #0084ff;
+    background: #292524;
+    border-color: #fbbf24;
+    border-left: 3px solid #fbbf24;
   }
 
   .account-header {
@@ -279,48 +280,6 @@
     display: flex;
     align-items: center;
     gap: 6px;
-  }
-
-  .our-entity {
-    color: rgba(255, 255, 255, 0.5);
-    font-weight: 400;
-    font-size: 0.9em;
-  }
-
-  .separator {
-    color: rgba(255, 255, 255, 0.3);
-    font-weight: 300;
-    font-size: 0.85em;
-  }
-
-  .counterparty-name {
-    font-weight: 600;
-    color: #4fd18b;
-    font-size: 0.95em;
-    text-decoration: underline;
-    text-decoration-color: rgba(79, 209, 139, 0.3);
-    text-underline-offset: 3px;
-  }
-
-  .our-entity {
-    color: rgba(255, 255, 255, 0.5);
-    font-weight: 400;
-    font-size: 0.9em;
-  }
-
-  .separator {
-    color: rgba(255, 255, 255, 0.3);
-    font-weight: 300;
-    font-size: 0.85em;
-  }
-
-  .counterparty-name {
-    font-weight: 600;
-    color: #4fd18b;
-    font-size: 0.95em;
-    text-decoration: underline;
-    text-decoration-color: rgba(79, 209, 139, 0.3);
-    text-underline-offset: 3px;
   }
 
   .account-status {
@@ -340,42 +299,20 @@
   .status-badge.synced {
     color: #4ade80;
     background: rgba(74, 222, 128, 0.1);
-    border: 1px solid rgba(74, 222, 128, 0.2);
+    border: 1px solid rgba(74, 222, 128, 0.15);
   }
 
   .status-badge.pending {
     color: #fbbf24;
     background: rgba(251, 191, 36, 0.1);
-    border: 1px solid rgba(251, 191, 36, 0.2);
+    border: 1px solid rgba(251, 191, 36, 0.15);
   }
 
-  .utilization-indicator {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin: 12px 0;
-  }
-
-  .utilization-bar {
-    flex: 1;
-    height: 3px;
-    background: #0d0d0d;
-    border-radius: 1px;
-    overflow: hidden;
-  }
-
-  .utilization-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #0084ff, #00d4ff);
-    transition: width 0.3s ease;
-  }
-
-  .utilization-text {
-    font-size: 0.7em;
-    color: #999;
-    min-width: 60px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
+  .no-deltas {
+    font-size: 0.8em;
+    color: #666;
+    font-style: italic;
+    padding: 4px 0;
   }
 
   .delta-bars {
@@ -400,10 +337,10 @@
     display: flex;
     align-items: center;
     height: 20px;
-    background: #0d0d0d;
-    border-radius: 2px;
+    background: #0c0a09;
+    border-radius: 3px;
     overflow: hidden;
-    border: 1px solid #1a1a1a;
+    border: 1px solid #292524;
     position: relative;
   }
 
@@ -502,17 +439,41 @@
     color: #3b82f6;
   }
 
-  .capacity-used {
-    color: #ef4444;
-    font-weight: 600;
-  }
-
-  .capacity-owed {
-    color: #f59e0b;
-    font-weight: 600;
-  }
-
   .capacity-in {
     color: #10b981;
+  }
+
+  .capacity-breakdown {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.6em;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 0 0 2px;
+  }
+
+  .breakdown-side {
+    display: flex;
+    gap: 6px;
+  }
+
+  .breakdown-side.right {
+    justify-content: flex-end;
+  }
+
+  .breakdown-item {
+    opacity: 0.7;
+  }
+
+  .breakdown-item.debt {
+    color: #dc2626;
+  }
+
+  .breakdown-item.coll {
+    color: #10b981;
+  }
+
+  .breakdown-item.credit {
+    color: #ef4444;
+    opacity: 0.6;
   }
 </style>
