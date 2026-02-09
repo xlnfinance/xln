@@ -27,6 +27,12 @@ import { processAccountTx } from './account-tx/apply';
 
 // === CONSTANTS ===
 const MEMPOOL_LIMIT = 1000;
+const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
+const ADDRESS_HEX_20_RE = /^0x[0-9a-fA-F]{40}$/;
+const isEntityId32 = (value: unknown): value is string =>
+  typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
+const isAddress20 = (value: unknown): value is string =>
+  typeof value === 'string' && ADDRESS_HEX_20_RE.test(value);
 
 /**
  * Get depositoryAddress from environment (BrowserVM or active J-replica)
@@ -501,12 +507,43 @@ export async function proposeAccountFrame(
 
   // Build dispute proof and sign it (CRITICAL: always sign dispute proof with every frame)
   // BUG FIX: Use clonedMachine (has NEW state after txs) NOT accountMachine (old state)
+  if (!isEntityId32(clonedMachine.leftEntity) || !isEntityId32(clonedMachine.rightEntity)) {
+    accountMachine.mempool = [];
+    delete accountMachine.pendingFrame;
+    delete accountMachine.pendingAccountInput;
+    const left = String(clonedMachine.leftEntity);
+    const right = String(clonedMachine.rightEntity);
+    return {
+      success: false,
+      error: `INVALID_ACCOUNT_ENTITY_ID: left=${left} right=${right}`,
+      events,
+    };
+  }
+
   const { buildAccountProofBody, createDisputeProofHash } = await import('./proof-builder');
-  const depositoryAddress = getDepositoryAddress(env);
-  console.log(`🔐 DISPUTE-SIGN: depositoryAddress=${depositoryAddress}, counterparty=${accountMachine.proofHeader.toEntity.slice(-4)}`);
-  const proofResult = buildAccountProofBody(clonedMachine);
-  const disputeHash = createDisputeProofHash(clonedMachine, proofResult.proofBodyHash, depositoryAddress);
-  console.log(`🔐 DISPUTE-SIGN: disputeHash=${disputeHash.slice(0, 18)}..., proofBodyHash=${proofResult.proofBodyHash.slice(0, 18)}...`);
+  let depositoryAddress = getDepositoryAddress(env);
+  if (!isAddress20(depositoryAddress)) {
+    console.warn(`[account-consensus] ⚠️ Invalid depositoryAddress "${depositoryAddress}", using zero address`);
+    depositoryAddress = '0x0000000000000000000000000000000000000000';
+  }
+
+  let proofResult: ReturnType<typeof buildAccountProofBody>;
+  let disputeHash: string;
+  try {
+    console.log(`🔐 DISPUTE-SIGN: depositoryAddress=${depositoryAddress}, counterparty=${accountMachine.proofHeader.toEntity.slice(-4)}`);
+    proofResult = buildAccountProofBody(clonedMachine);
+    disputeHash = createDisputeProofHash(clonedMachine, proofResult.proofBodyHash, depositoryAddress);
+    console.log(`🔐 DISPUTE-SIGN: disputeHash=${disputeHash.slice(0, 18)}..., proofBodyHash=${proofResult.proofBodyHash.slice(0, 18)}...`);
+  } catch (error) {
+    accountMachine.mempool = [];
+    delete accountMachine.pendingFrame;
+    delete accountMachine.pendingAccountInput;
+    return {
+      success: false,
+      error: `DISPUTE_PROOF_BUILD_FAILED: ${(error as Error).message}`,
+      events,
+    };
+  }
 
   const disputeHankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [disputeHash]);
   const disputeHanko = disputeHankos[0];

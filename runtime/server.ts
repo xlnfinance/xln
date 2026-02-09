@@ -37,6 +37,9 @@ const HUB_SEED = process.env.HUB_SEED ?? 'xln-main-hub-2026';
 let tokenCatalogCache: JTokenInfo[] | null = null;
 let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
 let processGuardsInstalled = false;
+const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
+const isEntityId32 = (value: unknown): value is string =>
+  typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
 
 const oneShotLogs = new Map<string, number>();
 const ONE_SHOT_TTL_MS = 60_000;
@@ -296,6 +299,85 @@ const getAccountMachine = (env: Env, entityId: string, counterpartyId: string): 
     }
   }
   return null;
+};
+
+const enqueueOffchainFaucetPaymentWhenReady = (
+  env: Env,
+  hubEntityId: string,
+  hubSignerId: string,
+  userEntityId: string,
+  tokenId: number,
+  amountWei: bigint,
+  requestId: string,
+): void => {
+  const maxAttempts = 30;
+  const stepMs = 1000;
+  let attempts = 0;
+
+  const tick = () => {
+    attempts += 1;
+    const accountMachine = getAccountMachine(env, hubEntityId, userEntityId);
+    const ready = !!accountMachine && !accountMachine.pendingFrame;
+    if (ready) {
+      try {
+        enqueueRuntimeInput(env, {
+          runtimeTxs: [],
+          entityInputs: [{
+            entityId: hubEntityId,
+            signerId: hubSignerId,
+            entityTxs: [{
+              type: 'directPayment',
+              data: {
+                targetEntityId: userEntityId,
+                tokenId,
+                amount: amountWei,
+                route: [hubEntityId, userEntityId],
+                description: 'faucet-offchain-auto',
+              },
+            }],
+          }],
+        });
+        console.log(`[FAUCET/OFFCHAIN] ${requestId} auto-enqueued payment after channel-ready (attempt=${attempts})`);
+        pushRelayDebugEvent({
+          event: 'faucet',
+          status: 'queued',
+          details: {
+            requestId,
+            phase: 'auto-payment',
+            attempts,
+            hubEntityId,
+            userEntityId,
+            tokenId,
+            amount: amountWei.toString(),
+          },
+        });
+      } catch (error) {
+        console.error(`[FAUCET/OFFCHAIN] ${requestId} auto-payment enqueue failed:`, (error as Error).message);
+      }
+      return;
+    }
+
+    if (attempts >= maxAttempts) {
+      console.warn(`[FAUCET/OFFCHAIN] ${requestId} auto-payment timed out waiting for channel readiness`);
+      pushRelayDebugEvent({
+        event: 'faucet',
+        status: 'timeout',
+        reason: 'channel_not_ready',
+        details: {
+          requestId,
+          phase: 'auto-payment',
+          attempts,
+          hubEntityId,
+          userEntityId,
+        },
+      });
+      return;
+    }
+
+    setTimeout(tick, stepMs);
+  };
+
+  setTimeout(tick, stepMs);
 };
 
 const getHubMeshHealth = (env: Env) => {
@@ -909,10 +991,11 @@ const resetServerDebugState = (env: Env | null, preserveHubs = true): { remainin
 
 const triggerColdReset = async (
   env: Env,
-  opts: { resetRpc?: boolean; clearDb?: boolean } = {},
-): Promise<{ resetRpc: boolean; clearDb: boolean; activeClientsClosed: number }> => {
+  opts: { resetRpc?: boolean; clearDb?: boolean; preserveHubs?: boolean } = {},
+): Promise<{ resetRpc: boolean; clearDb: boolean; activeClientsClosed: number; preserveHubs: boolean }> => {
   const resetRpc = opts.resetRpc !== false;
   const clearDbState = opts.clearDb !== false;
+  const preserveHubs = opts.preserveHubs !== false;
 
   const activeClients = clients.size;
   for (const [runtimeId, client] of clients.entries()) {
@@ -930,9 +1013,9 @@ const triggerColdReset = async (
   if (clearDbState) {
     await clearDB(env);
   }
-  // Keep hub replicas/profiles alive so API remains operational after in-process reset.
-  // Cold reset is for user/runtime state + RPC/DB, not for deleting server hub identities.
-  resetServerDebugState(env, true);
+  // Cold reset can preserve hubs (default) or wipe everything (preserveHubs=0).
+  // Use preserveHubs=0 for full clean-room debugging.
+  resetServerDebugState(env, preserveHubs);
 
   if (resetRpc && globalJAdapter?.mode === 'rpc') {
     try {
@@ -945,7 +1028,7 @@ const triggerColdReset = async (
     }
   }
 
-  return { resetRpc, clearDb: clearDbState, activeClientsClosed: activeClients };
+  return { resetRpc, clearDb: clearDbState, activeClientsClosed: activeClients, preserveHubs };
 };
 
 const installProcessSafetyGuards = (): void => {
@@ -1718,9 +1801,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     const url = new URL(req.url);
     const resetRpc = url.searchParams.get('rpc') !== '0';
     const clearDbState = url.searchParams.get('db') !== '0';
+    const preserveHubs = url.searchParams.get('preserveHubs') !== '0';
     const shouldExit = url.searchParams.get('exit') !== '0';
 
-    const result = await triggerColdReset(env, { resetRpc, clearDb: clearDbState });
+    const result = await triggerColdReset(env, { resetRpc, clearDb: clearDbState, preserveHubs });
     pushRelayDebugEvent({
       event: 'reset',
       status: 'ok',
@@ -2189,9 +2273,22 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
       const body = await req.json();
       const { userEntityId, userRuntimeId, tokenId = 1, amount = '100', hubEntityId: requestedHubEntityId } = body;
+      const requestId = `offchain_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
       if (!userEntityId) {
         return new Response(JSON.stringify({ error: 'Missing userEntityId' }), { status: 400, headers });
+      }
+      if (!isEntityId32(userEntityId)) {
+        return new Response(JSON.stringify({
+          error: `Invalid userEntityId: expected bytes32 hex, got "${String(userEntityId)}"`,
+          code: 'FAUCET_INVALID_USER_ENTITY_ID',
+        }), { status: 400, headers });
+      }
+      if (requestedHubEntityId !== undefined && requestedHubEntityId !== null && requestedHubEntityId !== '' && !isEntityId32(requestedHubEntityId)) {
+        return new Response(JSON.stringify({
+          error: `Invalid hubEntityId: expected bytes32 hex, got "${String(requestedHubEntityId)}"`,
+          code: 'FAUCET_INVALID_HUB_ENTITY_ID',
+        }), { status: 400, headers });
       }
       if (typeof userRuntimeId === 'string' && userRuntimeId.length > 0) {
         registerEntityRuntimeHint(env, userEntityId, userRuntimeId);
@@ -2298,15 +2395,26 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           }), { status: 503, headers });
         }
 
+        enqueueOffchainFaucetPaymentWhenReady(
+          env,
+          hubEntityId,
+          hubSignerId,
+          userEntityId,
+          Number(tokenId),
+          amountWei,
+          requestId,
+        );
+
         return new Response(JSON.stringify({
           success: true,
           status: 'channel_opening',
           code: 'FAUCET_CHANNEL_OPENING',
+          requestId,
           amount,
           tokenId,
           from: hubEntityId.slice(0, 16) + '...',
           to: userEntityId.slice(0, 16) + '...',
-          message: 'Bilateral channel opening enqueued. Retry faucet shortly.',
+          message: 'Bilateral channel opening enqueued. Faucet payment will auto-send once the channel is ready.',
         }), { status: 202, headers });
       }
 
@@ -2348,6 +2456,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       return new Response(JSON.stringify({
         success: true,
         type: 'offchain',
+        requestId,
         amount,
         tokenId,
         from: hubEntityId.slice(0, 16) + '...',

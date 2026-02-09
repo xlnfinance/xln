@@ -32,6 +32,9 @@ import { logError } from '../logger';
 import { FINANCIAL } from '../constants';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
+const isEntityId32 = (value: unknown): value is string =>
+  typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
 const findAccountKey = (state: EntityState, counterpartyId: string): string | null => {
   const target = normalizeEntityRef(counterpartyId);
   for (const key of state.accounts.keys()) {
@@ -264,6 +267,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
     if (entityTx.type === 'openAccount') {
       const targetEntityId = entityTx.data.targetEntityId;
+      if (!isEntityId32(targetEntityId)) {
+        throw new Error(`INVALID_ENTITY_ID: openAccount targetEntityId must be bytes32 hex, got "${String(targetEntityId)}"`);
+      }
       // Account keyed by counterparty ID (simpler than canonical)
       const counterpartyId = normalizeEntityRef(targetEntityId);
       const isLeft = isLeftEntity(entityState.entityId, targetEntityId);
