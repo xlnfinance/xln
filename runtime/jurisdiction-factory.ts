@@ -16,7 +16,7 @@ import type {
   XlnomySnapshot,
   JurisdictionEVM,
   Env,
-} from './types.js';
+} from './types';
 
 /**
  * Create new Xlnomy (jurisdiction + J-Machine + entities)

@@ -4,7 +4,7 @@
  * Executes parsed scenarios by feeding events to the XLN runtime
  */
 
-import type { Env, RuntimeTx, ConsensusConfig } from '../types.js';
+import type { Env, RuntimeTx, ConsensusConfig } from '../types';
 import type { AccountKey } from '../ids';
 import type {
   Scenario,

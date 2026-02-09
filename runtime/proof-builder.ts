@@ -11,7 +11,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { AccountMachine, HtlcLock, SwapOffer, Delta } from './types.js';
+import type { AccountMachine, HtlcLock, SwapOffer, Delta } from './types';
 import type {
   RuntimeProofBody,
   RuntimeTransformerClause,

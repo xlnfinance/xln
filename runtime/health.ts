@@ -1,7 +1,7 @@
 // Health check endpoint
 // Returns status of all J-machines, hubs, and system health
 
-import type { Env } from './types.js';
+import type { Env } from './types';
 import { getP2P } from './runtime.js';
 
 export interface HealthStatus {

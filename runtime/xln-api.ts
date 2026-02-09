@@ -30,7 +30,6 @@ export type {
   EntityState,
   AccountMachine,
   AccountFrame,
-  AccountSnapshot,
   Delta,
   DerivedDelta,
   Xlnomy,

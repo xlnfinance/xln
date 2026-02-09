@@ -1,4 +1,7 @@
-import type { AssetBalance } from '../types';
+/** Asset balance in smallest unit (wei, cents, shares) */
+interface AssetBalance {
+  amount: bigint;
+}
 
 // Financial helpers: formatAssetAmount, addToReserves, subtractFromReserves
 // Use unified financial utilities with ethers.js
