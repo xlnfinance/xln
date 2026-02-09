@@ -13,7 +13,7 @@
   import { history } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex, isLive, timeOperations } from '../../stores/timeStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
-  import { activeVault } from '$lib/stores/vaultStore';
+  import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
   import { xlnFunctions, entityPositions, processWithDelay } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
@@ -22,7 +22,7 @@
   import {
     ArrowUpRight, ArrowDownLeft, Repeat, Landmark, Users, Activity,
     MessageCircle, Settings as SettingsIcon, BookUser,
-    ChevronDown, Wallet, AlertTriangle, PlusCircle, Copy, Check, Scale, Globe
+    ChevronDown, Wallet, AlertTriangle, PlusCircle, Copy, Check, Scale, Globe, Trash2
   } from 'lucide-svelte';
 
   // Child components
@@ -749,6 +749,7 @@
 
   function maybeFinalizeOffchainFaucet() {
     if (pendingOffchainFaucets.length === 0 || !Array.isArray(activeHistory) || activeHistory.length === 0) return;
+    const cutoffTs = Math.min(...pendingOffchainFaucets.map((r) => r.startedAt)) - 2000;
 
     const pendingByEntity = new Map<string, Array<typeof pendingOffchainFaucets[number]>>();
     for (const req of pendingOffchainFaucets) {
@@ -1179,6 +1180,23 @@
             {/if}
           </button>
         {/each}
+        <button
+          class="tab tab-clear"
+          title="Clear All Data"
+          on:click={async () => {
+            localStorage.clear();
+            sessionStorage.clear();
+            try {
+              const dbs = await (indexedDB as any).databases?.() || [];
+              for (const db of dbs) { if (db.name) indexedDB.deleteDatabase(db.name); }
+            } catch { /* best effort */ }
+            await vaultOperations.clearAll();
+            window.location.reload();
+          }}
+        >
+          <Trash2 size={15} />
+          <span>Reset</span>
+        </button>
       </nav>
 
       <!-- Tab Content -->
@@ -2173,6 +2191,16 @@
   .tab.active {
     color: #fbbf24;
     border-bottom-color: #fbbf24;
+  }
+
+  .tab-clear {
+    margin-left: auto;
+    color: #78716c;
+    border-bottom-color: transparent;
+  }
+  .tab-clear:hover {
+    color: #fca5a5;
+    background: #7f1d1d33;
   }
 
   .badge {

@@ -84,6 +84,11 @@
     nextSyncTimer = Math.floor((1000 - (Date.now() % 1000)) / 100) / 10;
   }, 100);
 
+  $: processEnteredAt = $xlnEnvironment?.lastProcessEnteredAt || 0;
+  $: processLivenessLabel = processEnteredAt > 0
+    ? `${new Date(processEnteredAt).toLocaleTimeString()} (${Math.round((Date.now() - processEnteredAt) / 1000)}s ago)`
+    : 'never';
+
   // RPC endpoint override (for Oculus Quest compatibility)
   const RPC_PRESETS = [
     { label: 'Auto (default)', value: '' },
@@ -615,17 +620,22 @@
       <h2>Developer Tools</h2>
 
       <div class="preference-item">
-        <label for="runtimeDelaySlider">Server Processing Delay: {$settings.runtimeDelay}ms</label>
+        <label for="runtimeDelaySlider">process() frame delay: {$settings.runtimeDelay}ms</label>
         <input
           type="range"
           id="runtimeDelaySlider"
           min="0"
-          max="1000"
-          step="50"
+          max="10000"
+          step="100"
           value={$settings.runtimeDelay}
           on:input={handleServerDelayChange}
           class="settings-slider"
         />
+      </div>
+
+      <div class="preference-item">
+        <label>Last process() entry</label>
+        <div class="status-value">{processLivenessLabel}</div>
       </div>
     </div>
 
@@ -1098,6 +1108,12 @@
   .settings-slider {
     width: 100%;
     margin-top: 8px;
+  }
+
+  .status-value {
+    font-family: 'Courier New', monospace;
+    color: #d6d6d6;
+    font-size: 13px;
   }
 
 

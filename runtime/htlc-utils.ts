@@ -6,6 +6,8 @@
 import { ethers } from 'ethers';
 import { HTLC } from './constants';
 
+const DEFAULT_FEE_PPM = Number((HTLC.FEE_RATE_UBP * 1_000_000n) / HTLC.FEE_DENOMINATOR);
+
 /**
  * Calculate HTLC fee (Coasian micro basis points)
  * Returns: amount after fee deduction
@@ -14,23 +16,73 @@ import { HTLC } from './constants';
  * Example: $10,000 × 100 μbp = $0.10 fee
  */
 export function calculateHtlcFee(amount: bigint): bigint {
-  // Fee = base + (amount × rate_ubp / FEE_DENOMINATOR)
-  const rateFee = (amount * HTLC.FEE_RATE_UBP) / HTLC.FEE_DENOMINATOR;
-  const totalFee = HTLC.BASE_FEE_USD + rateFee;
+  return calculateHtlcForwardAmount(amount);
+}
 
-  if (totalFee >= amount) {
-    throw new Error(`Fee ${totalFee} exceeds amount ${amount}`);
+/**
+ * Calculate forwarded amount after fees.
+ * Fee = baseFee + floor(amountIn * feePPM / 1,000,000)
+ */
+export function calculateHtlcForwardAmount(
+  amountIn: bigint,
+  feePPM: number = DEFAULT_FEE_PPM,
+  baseFee: bigint = HTLC.BASE_FEE_USD
+): bigint {
+  if (amountIn <= 0n) {
+    throw new Error(`Amount must be positive (got ${amountIn})`);
+  }
+  const ppm = Number.isFinite(feePPM) && feePPM >= 0 ? BigInt(Math.floor(feePPM)) : 0n;
+  const rateFee = (amountIn * ppm) / 1_000_000n;
+  const totalFee = baseFee + rateFee;
+
+  if (totalFee >= amountIn) {
+    throw new Error(`Fee ${totalFee} exceeds amount ${amountIn}`);
   }
 
-  return amount - totalFee;
+  return amountIn - totalFee;
 }
 
 /**
  * Calculate fee amount (not remaining amount)
  */
-export function calculateHtlcFeeAmount(amount: bigint): bigint {
-  const rateFee = (amount * HTLC.FEE_RATE_UBP) / HTLC.FEE_DENOMINATOR;
-  return HTLC.BASE_FEE_USD + rateFee;
+export function calculateHtlcFeeAmount(
+  amountIn: bigint,
+  feePPM: number = DEFAULT_FEE_PPM,
+  baseFee: bigint = HTLC.BASE_FEE_USD
+): bigint {
+  const ppm = Number.isFinite(feePPM) && feePPM >= 0 ? BigInt(Math.floor(feePPM)) : 0n;
+  const rateFee = (amountIn * ppm) / 1_000_000n;
+  return baseFee + rateFee;
+}
+
+/**
+ * Compute minimal inbound amount needed to guarantee desired forwarded amount.
+ * Inversion of calculateHtlcForwardAmount with integer rounding.
+ */
+export function calculateRequiredInboundForDesiredForward(
+  desiredForwardAmount: bigint,
+  feePPM: number = DEFAULT_FEE_PPM,
+  baseFee: bigint = HTLC.BASE_FEE_USD
+): bigint {
+  if (desiredForwardAmount <= 0n) {
+    throw new Error(`Desired forward amount must be positive (got ${desiredForwardAmount})`);
+  }
+  const ppm = Number.isFinite(feePPM) && feePPM >= 0 ? Math.floor(feePPM) : 0;
+  if (ppm === 0 && baseFee === 0n) return desiredForwardAmount;
+
+  let low = desiredForwardAmount + baseFee;
+  let high = low;
+  while (calculateHtlcForwardAmount(high, ppm, baseFee) < desiredForwardAmount) {
+    high = high * 2n;
+  }
+
+  while (low < high) {
+    const mid = (low + high) / 2n;
+    const out = calculateHtlcForwardAmount(mid, ppm, baseFee);
+    if (out >= desiredForwardAmount) high = mid;
+    else low = mid + 1n;
+  }
+  return low;
 }
 
 /**

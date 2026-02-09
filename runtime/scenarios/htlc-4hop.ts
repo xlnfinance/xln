@@ -114,18 +114,6 @@ export async function htlc4hop(env: Env): Promise<void> {
 
   assert((aliceHub1Account?.locks.size || 0) === 0, 'All locks cleared after concurrent payments');
 
-  // Check fees earned at each hop (across ALL payments)
-  const { calculateHtlcFeeAmount } = await import('../htlc-utils');
-
-  // Calculate expected fees for all payments
-  let expectedTotalFees = 0n;
-  for (const amount of paymentAmounts) {
-    const hop1Fee = calculateHtlcFeeAmount(amount);
-    const hop2Fee = calculateHtlcFeeAmount(amount - hop1Fee);
-    const hop3Fee = calculateHtlcFeeAmount(amount - hop1Fee - hop2Fee);
-    expectedTotalFees += hop1Fee + hop2Fee + hop3Fee;
-  }
-
   const totalFeesEarned = (hub1Rep.state.htlcFeesEarned || 0n) +
                           (hub2Rep.state.htlcFeesEarned || 0n) +
                           (hub3Rep.state.htlcFeesEarned || 0n);
@@ -135,7 +123,7 @@ export async function htlc4hop(env: Env): Promise<void> {
   console.log(`   Hub2: ${hub2Rep.state.htlcFeesEarned || 0n}`);
   console.log(`   Hub3: ${hub3Rep.state.htlcFeesEarned || 0n}`);
   console.log(`   Total earned: ${totalFeesEarned}`);
-  console.log(`   Expected: ${expectedTotalFees}\n`);
+  console.log(`   Expected: dynamic (directional fees)\n`);
 
   if (totalFeesEarned === 0n) {
     console.log(`   ⚠️  No fees collected - likely direct route was used`);
@@ -159,16 +147,21 @@ export async function htlc4hop(env: Env): Promise<void> {
   // Bob received = -offdelta from Hub3's perspective
   const bobReceived = -(hub3BobDelta?.offdelta || 0n);
 
-  assert(alicePaid === totalPaymentAmount, `Alice paid total amount: ${alicePaid} === ${totalPaymentAmount}`);
-  assert(bobReceived === totalPaymentAmount - expectedTotalFees || bobReceived === totalPaymentAmount,
-         `Bob received amount (${bobReceived}) ≈ total minus fees (${totalPaymentAmount - expectedTotalFees})`);
+  // Exact-receive semantics:
+  // - receiver gets exact quoted amount
+  // - sender pays amount + hop fees
+  // - spread equals fee income on intermediary hubs
+  const spread = alicePaid - bobReceived;
+  assert(bobReceived === totalPaymentAmount, `Bob received exact amount: ${bobReceived} === ${totalPaymentAmount}`);
+  assert(alicePaid >= totalPaymentAmount, `Alice paid amount+fees: ${alicePaid} >= ${totalPaymentAmount}`);
+  assert(spread === totalFeesEarned, `Fee spread equals earned fees: ${spread} === ${totalFeesEarned}`);
 
   console.log('═══════════════════════════════════════');
   console.log('✅ 4-HOP CONCURRENT HTLC TEST PASSED!');
   console.log(`   Payments: ${paymentAmounts.length} concurrent (stress test)`);
   console.log(`   Route: ${route.length + 2} entities (${route.length} intermediate hops)`);
   console.log(`   Privacy: RSA-OAEP encrypted envelopes (each hop only sees nextHop)`);
-  console.log(`   Fees: $${Number(expectedTotalFees) / 1e18} total (${paymentAmounts.length} payments × 3 hops)`);
+  console.log(`   Fees: $${Number(totalFeesEarned) / 1e18} total (${paymentAmounts.length} payments × 3 hops)`);
   console.log(`   Settlement: All ${paymentAmounts.length} payments atomic via secret revelation`);
   console.log(`   Total volume: $${Number(totalPaymentAmount) / 1e18}`);
   console.log('═══════════════════════════════════════\n');

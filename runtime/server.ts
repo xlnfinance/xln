@@ -13,17 +13,16 @@
  *   bun runtime/server.ts --port 9000        # Custom port
  */
 
-import { main, process as runtimeProcess, applyRuntimeInput, startP2P, startRuntimeLoop } from './runtime';
+import { main, enqueueRuntimeInput, startP2P, startRuntimeLoop, registerEntityRuntimeHint } from './runtime';
 import { safeStringify } from './serialization-utils';
-import type { Env, EntityInput, RuntimeInput } from './types';
+import type { Env, EntityInput, RoutedEntityInput, RuntimeInput } from './types';
 import { encodeBoard, hashBoard } from './entity-factory';
 import { deriveSignerKeySync } from './account-crypto';
 import { createJAdapter, type JAdapter } from './jadapter';
 import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
-import { TIMING } from './constants';
 import { resolveEntityProposerId } from './state-helpers';
-import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from './networking/p2p-crypto';
+import { deriveEncryptionKeyPair, decryptJSON, encryptJSON, hexToPubKey, type P2PKeyPair } from './networking/p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './networking/failfast';
 import { buildEntityProfile } from './networking/gossip-helper';
 import { ethers } from 'ethers';
@@ -33,66 +32,23 @@ import { ERC20Mock__factory } from '../jurisdictions/typechain-types/factories/E
 let globalJAdapter: JAdapter | null = null;
 // Cached server encryption keypair for decrypting relay messages locally
 let serverKeyPair: P2PKeyPair | null = null;
-let jWatcherProcessInterval: ReturnType<typeof setInterval> | null = null;
-let runtimeTickInterval: ReturnType<typeof setInterval> | null = null;
-let runtimeTickInFlight = false;
 const HUB_SEED = process.env.HUB_SEED ?? 'xln-main-hub-2026';
 
 let tokenCatalogCache: JTokenInfo[] | null = null;
 let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
 let processGuardsInstalled = false;
 
+const oneShotLogs = new Map<string, number>();
+const ONE_SHOT_TTL_MS = 60_000;
+const logOneShot = (key: string, message: string) => {
+  const nowMs = Date.now();
+  const last = oneShotLogs.get(key) ?? 0;
+  if (nowMs - last < ONE_SHOT_TTL_MS) return;
+  oneShotLogs.set(key, nowMs);
+  console.warn(message);
+};
+
  
-
-const summarizeJWatcherEvents = (inputs: EntityInput[]): { totalEvents: number; summary: string } => {
-  const counts = new Map<string, number>();
-  let totalEvents = 0;
-  for (const input of inputs) {
-    const txs = input.entityTxs || [];
-    for (const tx of txs) {
-      if (tx?.type === 'j_event' && tx?.data?.events) {
-        for (const ev of tx.data.events) {
-          const name = ev?.type || ev?.name || 'Unknown';
-          counts.set(name, (counts.get(name) ?? 0) + 1);
-          totalEvents += 1;
-        }
-      }
-    }
-  }
-  const summary = Array.from(counts.entries())
-    .map(([name, count]) => `${name}=${count}`)
-    .join(', ');
-  return { totalEvents, summary };
-};
-
-const drainJWatcherQueue = async (env: Env, label = 'J-WATCHER'): Promise<void> => {
-  const allPending = env.runtimeInput?.entityInputs ?? [];
-  if (allPending.length === 0) return;
-
-  // CRITICAL FIX: Only process inputs that contain J-events (j_event type)
-  // Leave P2P inputs (openAccount, accountInput, etc.) for the runtime tick to process
-  const jEventInputs: typeof allPending = [];
-  const otherInputs: typeof allPending = [];
-
-  for (const input of allPending) {
-    const hasJEvents = input.entityTxs?.some(tx => tx.type === 'j_event');
-    if (hasJEvents) {
-      jEventInputs.push(input);
-    } else {
-      otherInputs.push(input);
-    }
-  }
-
-  if (jEventInputs.length === 0) return;
-
-  // Only drain J-event inputs, keep others in queue
-  env.runtimeInput.entityInputs = otherInputs;
-
-  const { totalEvents, summary } = summarizeJWatcherEvents(jEventInputs);
-  console.log(`[${label}] Applying ${jEventInputs.length} queued inputs (${totalEvents} events${summary ? `: ${summary}` : ''})`);
-  await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: jEventInputs });
-  console.log(`[${label}] Applied ${jEventInputs.length} queued inputs`);
-};
 
 const applyJEventsToEnv = async (env: Env, events: JEvent[], label = 'J-EVENTS'): Promise<void> => {
   if (!events || events.length === 0) return;
@@ -133,18 +89,8 @@ const applyJEventsToEnv = async (env: Env, events: JEvent[], label = 'J-EVENTS')
   }
 
   if (entityInputs.length === 0) return;
-  console.log(`[${label}] Applying ${entityInputs.length} J-events directly to env`);
-  await applyRuntimeInput(env, { runtimeTxs: [], entityInputs });
-};
-
-const startJWatcherProcessingLoop = (env: Env): void => {
-  if (jWatcherProcessInterval) return;
-  jWatcherProcessInterval = setInterval(() => {
-    if (!env.runtimeInput?.entityInputs?.length) return;
-    drainJWatcherQueue(env, 'J-WATCHER').catch((err) => {
-      console.warn('[J-WATCHER] Failed to apply queued events:', (err as Error).message);
-    });
-  }, 100);
+  console.log(`[${label}] Queueing ${entityInputs.length} J-events`);
+  enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs });
 };
 
 const hasPendingRuntimeWork = (env: Env): boolean => {
@@ -165,16 +111,20 @@ const hasPendingRuntimeWork = (env: Env): boolean => {
   return false;
 };
 
+const waitForRuntimeIdle = async (env: Env, timeoutMs = 5000): Promise<boolean> => {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (!hasPendingRuntimeWork(env)) return true;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  return false;
+};
+
 const waitForJBatchClear = async (env: Env, timeoutMs = 5000): Promise<boolean> => {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    const pending = Array.from(env.jReplicas?.values?.() || []).some(j => (j.mempool?.length ?? 0) > 0);
-    if (!pending) return true;
-    try {
-      await runtimeProcess(env, []);
-    } catch (err) {
-      console.warn('[FAUCET] Runtime tick failed while waiting for J-batch:', (err as Error).message);
-    }
+    const pendingJ = Array.from(env.jReplicas?.values?.() || []).some(j => (j.mempool?.length ?? 0) > 0);
+    if (!pendingJ && !hasPendingRuntimeWork(env)) return true;
     await new Promise(resolve => setTimeout(resolve, 100));
   }
   return false;
@@ -200,31 +150,15 @@ const waitForReserveUpdate = async (
   return null;
 };
 
-const startRuntimeTickLoop = (env: Env): void => {
-  if (runtimeTickInterval) return;
-  runtimeTickInterval = setInterval(async () => {
-    if (runtimeTickInFlight) return;
-    if (!hasPendingRuntimeWork(env)) return;
-    runtimeTickInFlight = true;
-    try {
-      await runtimeProcess(env, []);
-    } catch (err) {
-      console.warn('[RUNTIME-TICK] Failed to process tick:', (err as Error).message);
-    } finally {
-      runtimeTickInFlight = false;
-    }
-  }, TIMING.TICK_INTERVAL_MS);
-  console.log(`[XLN] Runtime tick loop started (${TIMING.TICK_INTERVAL_MS}ms)`);
-};
-
 const hubSignerLabels = new Map<string, string>();
 const hubSignerAddresses = new Map<string, string>();
 const HUB_MESH_TOKEN_ID = 1;
 const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;
+const HUB_MESH_REQUIRED_HUBS = 3;
 
 const getHubWallet = async (env: Env, hubEntityId?: string): Promise<{ hubEntityId: string; hubSignerId: string; wallet: ethers.Wallet } | null> => {
   if (!globalJAdapter) return null;
-  const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true) || [];
+  const hubs = getFaucetHubProfiles(env);
   if (hubs.length === 0) return null;
   const selectedHub = hubEntityId ? hubs.find(h => h.entityId === hubEntityId) || hubs[0] : hubs[0];
   const targetEntityId = selectedHub.entityId;
@@ -242,6 +176,34 @@ const getHubWallet = async (env: Env, hubEntityId?: string): Promise<{ hubEntity
     return null;
   }
   return { hubEntityId: targetEntityId, hubSignerId: hubSignerAddress ?? wallet.address, wallet };
+};
+
+const isHubProfile = (profile: any): boolean => {
+  const caps: string[] = Array.isArray(profile?.capabilities) ? profile.capabilities : [];
+  return profile?.metadata?.isHub === true || caps.includes('hub') || caps.includes('routing');
+};
+
+const isFaucetHubProfile = (profile: any): boolean => {
+  if (!profile?.entityId) return false;
+  const caps: string[] = Array.isArray(profile?.capabilities) ? profile.capabilities : [];
+  if (caps.includes('faucet')) return true;
+  return activeHubEntityIds.some(id => id.toLowerCase() === String(profile.entityId).toLowerCase());
+};
+
+const getFaucetHubProfiles = (env: Env): any[] => {
+  const profiles = env.gossip?.getProfiles?.() || [];
+  const selected: any[] = [];
+  for (const profile of profiles) {
+    if (!isHubProfile(profile) || !isFaucetHubProfile(profile)) continue;
+    selected.push(profile);
+  }
+  const activeSet = new Set(activeHubEntityIds.map((id) => id.toLowerCase()));
+  selected.sort((a, b) => {
+    const aActive = activeSet.has(String(a?.entityId || '').toLowerCase()) ? 1 : 0;
+    const bActive = activeSet.has(String(b?.entityId || '').toLowerCase()) ? 1 : 0;
+    return bActive - aActive;
+  });
+  return selected;
 };
 
 const sleep = async (ms: number): Promise<void> => {
@@ -277,6 +239,63 @@ const hasAccount = (env: Env, entityId: string, counterpartyId: string): boolean
   return !!replica?.state?.accounts?.has(counterpartyId);
 };
 
+const getHubMeshHealth = (env: Env) => {
+  const hubIds = activeHubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS);
+  const pairStatuses: Array<{
+    left: string;
+    right: string;
+    tokenId: number;
+    requiredCredit: string;
+    leftHasAccount: boolean;
+    rightHasAccount: boolean;
+    leftToRightCredit: string;
+    rightToLeftCredit: string;
+    ok: boolean;
+  }> = [];
+
+  for (let i = 0; i < hubIds.length; i++) {
+    for (let j = i + 1; j < hubIds.length; j++) {
+      const left = hubIds[i]!;
+      const right = hubIds[j]!;
+      const leftDelta = getAccountDelta(env, left, right, HUB_MESH_TOKEN_ID);
+      const rightDelta = getAccountDelta(env, right, left, HUB_MESH_TOKEN_ID);
+      const leftHasAccount = hasAccount(env, left, right);
+      const rightHasAccount = hasAccount(env, right, left);
+      const leftToRightCredit = BigInt(leftDelta?.leftCreditLimit ?? 0n);
+      const rightToLeftCredit = BigInt(rightDelta?.leftCreditLimit ?? 0n);
+      const ok = leftHasAccount
+        && rightHasAccount
+        && leftToRightCredit >= HUB_MESH_CREDIT_AMOUNT
+        && rightToLeftCredit >= HUB_MESH_CREDIT_AMOUNT;
+
+      pairStatuses.push({
+        left,
+        right,
+        tokenId: HUB_MESH_TOKEN_ID,
+        requiredCredit: HUB_MESH_CREDIT_AMOUNT.toString(),
+        leftHasAccount,
+        rightHasAccount,
+        leftToRightCredit: leftToRightCredit.toString(),
+        rightToLeftCredit: rightToLeftCredit.toString(),
+        ok,
+      });
+    }
+  }
+
+  const ok = hubIds.length >= HUB_MESH_REQUIRED_HUBS
+    && pairStatuses.length > 0
+    && pairStatuses.every((p) => p.ok);
+
+  return {
+    requiredHubCount: HUB_MESH_REQUIRED_HUBS,
+    tokenId: HUB_MESH_TOKEN_ID,
+    requiredCredit: HUB_MESH_CREDIT_AMOUNT.toString(),
+    hubIds,
+    pairs: pairStatuses,
+    ok,
+  };
+};
+
 const getHubSignerForEntity = (env: Env, entityId: string): string => {
   return hubSignerAddresses.get(entityId) || resolveEntityProposerId(env, entityId, 'hub-mesh-bootstrap');
 };
@@ -295,7 +314,7 @@ const waitUntil = async (
 
 const settleRuntimeFor = async (env: Env, rounds = 30): Promise<void> => {
   for (let i = 0; i < rounds; i++) {
-    await runtimeProcess(env, []);
+    if (!hasPendingRuntimeWork(env)) break;
     await sleep(60);
   }
 };
@@ -329,7 +348,7 @@ const ensureHubPairMeshCredit = async (env: Env, leftEntityId: string, rightEnti
   }
   if (entityInputs.length > 0) {
     console.log(`[XLN] Opening hub account pair ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`);
-    await applyRuntimeInput(env, { runtimeTxs: [], entityInputs });
+    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs });
     await settleRuntimeFor(env, 35);
   }
 
@@ -370,7 +389,7 @@ const ensureHubPairMeshCredit = async (env: Env, leftEntityId: string, rightEnti
   ];
 
   console.log(`[XLN] Extending $1M bidirectional credit for ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`);
-  await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: creditInputs });
+  enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: creditInputs });
   await settleRuntimeFor(env, 45);
 
   const ready = hasPairMutualCredit(env, leftEntityId, rightEntityId, HUB_MESH_TOKEN_ID, HUB_MESH_CREDIT_AMOUNT);
@@ -568,7 +587,7 @@ const DEFAULT_OPTIONS: XlnServerOptions = {
   port: 8080,
   host: '0.0.0.0',
   staticDir: './frontend/build',
-  relaySeeds: ['ws://localhost:8080/relay'],
+  relaySeeds: [],
   serverId: 'xln-server',
 };
 const DEFAULT_TOKEN_CATALOG = DEFAULT_TOKENS.map((token) => ({ ...token }));
@@ -587,6 +606,7 @@ type WsClient = {
 const clients = new Map<string, WsClient>();
 const pendingMessages = new Map<string, any[]>();
 const gossipProfiles = new Map<string, { profile: any; timestamp: number }>();
+const runtimeEncryptionKeys = new Map<string, string>();
 let relayServerId = DEFAULT_OPTIONS.serverId ?? 'xln-server';
 
 type RelayDebugEvent = {
@@ -622,10 +642,115 @@ const pushRelayDebugEvent = (event: Omit<RelayDebugEvent, 'id' | 'ts'>): void =>
   }
 };
 
+const normalizeHubProfileForRelay = (profile: any): any => {
+  if (!profile || !profile.entityId) return profile;
+  const capabilities = Array.isArray(profile.capabilities) ? profile.capabilities : [];
+  return {
+    ...profile,
+    capabilities: Array.from(new Set([...capabilities, 'hub', 'routing', 'faucet'])),
+    metadata: {
+      ...(profile.metadata || {}),
+      isHub: true,
+      name: profile.metadata?.name || String(profile.entityId).slice(0, 10),
+      region: profile.metadata?.region || 'global',
+      lastUpdated: profile.metadata?.lastUpdated || Date.now(),
+    },
+  };
+};
+
+const resolveRuntimeEncryptionPubKey = (targetRuntimeId: string): Uint8Array | null => {
+  const normalizedTarget = String(targetRuntimeId || '').toLowerCase();
+  if (!normalizedTarget) return null;
+
+  const directKey = runtimeEncryptionKeys.get(normalizedTarget);
+  if (typeof directKey === 'string' && directKey.length > 0) {
+    try {
+      return hexToPubKey(directKey);
+    } catch {
+      // Continue to gossip fallback.
+    }
+  }
+
+  for (const { profile } of gossipProfiles.values()) {
+    if (!profile || typeof profile !== 'object') continue;
+    const profileRuntimeId = String(profile.runtimeId || profile.metadata?.runtimeId || '').toLowerCase();
+    if (!profileRuntimeId || profileRuntimeId !== normalizedTarget) continue;
+    const candidateKeys = [
+      profile.metadata?.encryptionPubKey,
+      profile.metadata?.cryptoPublicKey,
+    ];
+    for (const key of candidateKeys) {
+      if (typeof key !== 'string' || key.length === 0) continue;
+      const normalizedKey = key.startsWith('0x') ? key : `0x${key}`;
+      try {
+        return hexToPubKey(normalizedKey);
+      } catch {
+        // Try next candidate/profile instead of hard-failing.
+      }
+    }
+  }
+
+  return null;
+};
+
+const sendEntityInputDirectViaRelaySocket = (
+  env: Env,
+  targetRuntimeId: string,
+  input: RoutedEntityInput,
+): boolean => {
+  const fromRuntimeId = String(env.runtimeId || '');
+  if (!fromRuntimeId) return false;
+  const target = clients.get(targetRuntimeId);
+  if (!target) return false;
+
+  const targetPubKey = resolveRuntimeEncryptionPubKey(targetRuntimeId);
+  if (!targetPubKey) {
+    logOneShot(
+      `direct-dispatch-missing-key:${targetRuntimeId}`,
+      `[RELAY] Direct dispatch missing encryption key for runtime ${targetRuntimeId.slice(0, 10)}`,
+    );
+    return false;
+  }
+
+  try {
+    const payload = encryptJSON(input, targetPubKey);
+    const msg = {
+      type: 'entity_input',
+      id: `srv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+      from: fromRuntimeId,
+      to: targetRuntimeId,
+      timestamp: nextWsTimestamp(),
+      payload,
+      encrypted: true,
+    };
+    target.ws.send(safeStringify(msg));
+    pushRelayDebugEvent({
+      event: 'delivery',
+      from: fromRuntimeId,
+      to: targetRuntimeId,
+      msgType: 'entity_input',
+      encrypted: true,
+      status: 'delivered-direct-local',
+      details: {
+        entityId: input.entityId,
+        txs: input.entityTxs?.length ?? 0,
+      },
+    });
+    return true;
+  } catch (error) {
+    logOneShot(
+      `direct-dispatch-send-failed:${targetRuntimeId}`,
+      `[RELAY] Direct dispatch send failed for runtime ${targetRuntimeId.slice(0, 10)}: ${(error as Error).message}`,
+    );
+    return false;
+  }
+};
+
 const resetServerDebugState = (env: Env | null, preserveHubs = true): { remainingReplicas: number; remainingProfiles: number } => {
   relayDebugEvents.length = 0;
   relayDebugId = 0;
   pendingMessages.clear();
+  runtimeEncryptionKeys.clear();
 
   // Preserve full hub profiles (runtimeId + encryption keys) so immediate post-reset
   // routing does not fail with P2P_NO_PUBKEY before fresh gossip arrives.
@@ -696,7 +821,7 @@ const resetServerDebugState = (env: Env | null, preserveHubs = true): { remainin
     gossipProfiles.clear();
     if (preserveHubs && preservedHubProfiles.size > 0) {
       for (const [entityId, entry] of preservedHubProfiles.entries()) {
-        gossipProfiles.set(entityId, entry);
+        gossipProfiles.set(entityId, { ...entry, profile: normalizeHubProfileForRelay(entry.profile) });
       }
     } else {
       // Fallback rebuild from current env gossip profile cache.
@@ -705,14 +830,14 @@ const resetServerDebugState = (env: Env | null, preserveHubs = true): { remainin
         const entityId = String(profile?.entityId || '').toLowerCase();
         if (!entityId) continue;
         if (preserveHubs && !hubSet.has(entityId)) continue;
-        storeGossipProfile(profile);
+        storeGossipProfile(preserveHubs ? normalizeHubProfileForRelay(profile) : profile);
       }
     }
   } else {
     gossipProfiles.clear();
     if (preserveHubs) {
       for (const [entityId, entry] of preservedHubProfiles.entries()) {
-        gossipProfiles.set(entityId, entry);
+        gossipProfiles.set(entityId, { ...entry, profile: normalizeHubProfileForRelay(entry.profile) });
       }
     }
   }
@@ -898,6 +1023,18 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
   }
 
   const { type, to, from, payload, id } = msg;
+  const fromEncryptionPubKey = typeof msg.fromEncryptionPubKey === 'string'
+    ? msg.fromEncryptionPubKey
+    : null;
+  if (from && fromEncryptionPubKey) {
+    const normalizedRuntimeId = String(from).toLowerCase();
+    const normalizedPubKey = fromEncryptionPubKey.startsWith('0x')
+      ? fromEncryptionPubKey.toLowerCase()
+      : `0x${fromEncryptionPubKey.toLowerCase()}`;
+    if (/^0x[0-9a-f]{64}$/.test(normalizedPubKey)) {
+      runtimeEncryptionKeys.set(normalizedRuntimeId, normalizedPubKey);
+    }
+  }
   const traceId = typeof id === 'string' && id.length > 0 ? id : `relay-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   let size = 0;
   try {
@@ -916,7 +1053,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
     msgType: type,
     encrypted: msg.encrypted === true,
     size,
-    details: { traceId },
+    details: { traceId, hasFromEncryptionPubKey: !!fromEncryptionPubKey },
   });
 
   // Hello - register client
@@ -950,6 +1087,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
   if (type === 'gossip_announce') {
     const profiles = (payload?.profiles || []) as any[];
     let stored = 0;
+    const storedProfiles: any[] = [];
     for (const profile of profiles) {
       if (!profile || typeof profile !== 'object') continue;
       // Ensure runtimeId is always present for routing resolution.
@@ -957,7 +1095,10 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
         ...profile,
         runtimeId: profile.runtimeId || from,
       };
-      if (storeGossipProfile(normalized)) stored += 1;
+      if (storeGossipProfile(normalized)) {
+        stored += 1;
+        storedProfiles.push(normalized);
+      }
       // Mirror into server env gossip cache so runtime-side routing can resolve immediately.
       try {
         env.gossip?.announce?.(normalized);
@@ -978,6 +1119,32 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
       status: 'stored',
       details: { received: profiles.length, stored, traceId },
     });
+
+    // Push fresh profile updates to all other connected clients so newly created entities
+    // become routable without waiting for manual refresh/poll.
+    if (storedProfiles.length > 0) {
+      const gossipPush = safeStringify({
+        type: 'gossip_response',
+        id: `gossip_push_${Date.now()}`,
+        from: relayServerId,
+        timestamp: Date.now(),
+        payload: { profiles: storedProfiles },
+        inReplyTo: id,
+      });
+      for (const [clientRuntimeId, client] of clients.entries()) {
+        if (!from || clientRuntimeId !== from) {
+          client.ws.send(gossipPush);
+        }
+      }
+      pushRelayDebugEvent({
+        event: 'gossip_push',
+        from,
+        msgType: type,
+        status: 'delivered',
+        details: { clients: Math.max(0, clients.size - (from ? 1 : 0)), profiles: storedProfiles.length, traceId },
+      });
+    }
+
     ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'stored', count: stored }));
     return;
   }
@@ -1040,8 +1207,15 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
 
     console.log(`[RELAY] ${type} from=${from?.slice(0,10)} to=${to?.slice(0,10)} encrypted=${msg.encrypted ?? false}`);
 
+    const isLocalEntityInput =
+      type === 'entity_input' &&
+      !!env &&
+      typeof to === 'string' &&
+      typeof env.runtimeId === 'string' &&
+      to.toLowerCase() === env.runtimeId.toLowerCase();
+
     const target = clients.get(to);
-    if (target) {
+    if (target && !isLocalEntityInput) {
       console.log(`[RELAY] → forwarding to WS client`);
       target.ws.send(safeStringify(msg));
       pushRelayDebugEvent({
@@ -1074,21 +1248,36 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
           input = payload as EntityInput;
           console.log(`[RELAY] → plaintext entity_input: entityId=${input.entityId?.slice(-8)}`);
         }
-        await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: [{ ...input, from }] });
-        console.log(`[RELAY] → delivered to runtime`);
+        // Register sender runtime hint BEFORE processing so ACK/response can route back.
+        // Sender entity is always input.entityId for inbound entity_input.
+        if (from && typeof input.entityId === 'string' && input.entityId.length > 0) {
+          registerEntityRuntimeHint(env, input.entityId, from);
+        }
+        // Also capture explicit sender fields on accountInput payloads.
+        if (from && input.entityTxs) {
+          for (const tx of input.entityTxs) {
+            const data = tx.data as Record<string, unknown> | undefined;
+            if (tx.type === 'accountInput' && typeof data?.fromEntityId === 'string') {
+              registerEntityRuntimeHint(env, data.fromEntityId, from);
+            }
+          }
+        }
+        enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [{ ...input, from }] });
+        const queueSize = (env as any).runtimeMempool?.entityInputs?.length ?? env.runtimeInput?.entityInputs?.length ?? 0;
+        console.log(`[RELAY] → enqueued to runtime (queue=${queueSize})`);
         pushRelayDebugEvent({
           event: 'delivery',
           from,
           to,
           msgType: type,
           encrypted: msg.encrypted === true,
-          status: 'delivered-local',
-          details: { traceId, entityId: input.entityId, txs: input.entityTxs?.length ?? 0 },
+          status: 'delivered-local-queued',
+          details: { traceId, entityId: input.entityId, txs: input.entityTxs?.length ?? 0, queueSize },
         });
         ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'delivered' }));
         return;
       } catch (error) {
-        console.log(`[RELAY] Local delivery failed: ${(error as Error).message}`);
+        logOneShot(`relay-local-delivery-failed:${traceId || 'na'}`, `[RELAY] Local delivery failed: ${(error as Error).message}`);
         pushRelayDebugEvent({
           event: 'error',
           from,
@@ -1252,6 +1441,13 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   if (pathname === '/api/health') {
     const { getHealthStatus } = await import('./health.ts');
     const health = await getHealthStatus(env);
+    const activeClientRuntimeIds = Array.from(clients.keys());
+    const activeClientsDetailed = Array.from(clients.entries()).map(([runtimeId, client]) => ({
+      runtimeId,
+      lastSeen: client.lastSeen,
+      ageMs: Math.max(0, Date.now() - client.lastSeen),
+      topics: Array.from(client.topics || []),
+    }));
     // Ensure hubs are visible even when env.gossip is stale by merging relay cache profiles.
     const relayHubProfiles = getAllGossipProfiles().filter((p: any) =>
       p?.metadata?.isHub === true || (Array.isArray(p?.capabilities) && p.capabilities.includes('hub'))
@@ -1270,7 +1466,37 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       });
       existing.add(entityId.toLowerCase());
     }
-    return new Response(JSON.stringify(health), { headers });
+
+    const relayHubsByEntity = new Map<string, any>();
+    for (const p of relayHubProfiles) {
+      relayHubsByEntity.set(String(p?.entityId || '').toLowerCase(), p);
+    }
+    health.hubs = (health.hubs || []).map((hub: any) => {
+      const entityId = String(hub?.entityId || '');
+      const profile = relayHubsByEntity.get(entityId.toLowerCase());
+      const runtimeId = typeof profile?.runtimeId === 'string'
+        ? profile.runtimeId
+        : typeof profile?.metadata?.runtimeId === 'string'
+          ? profile.metadata.runtimeId
+          : undefined;
+      const activeClients = runtimeId && clients.has(runtimeId) ? [runtimeId] : [];
+      return {
+        ...hub,
+        runtimeId,
+        online: activeClients.length > 0,
+        activeClients,
+      };
+    });
+
+    return new Response(JSON.stringify({
+      ...health,
+      hubMesh: getHubMeshHealth(env),
+      relay: {
+        activeClients: activeClientRuntimeIds,
+        activeClientCount: activeClientRuntimeIds.length,
+        clientsDetailed: activeClientsDetailed,
+      },
+    }), { headers });
   }
 
   // Runtime state
@@ -1383,6 +1609,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           online,
           lastUpdated: Number(profile?.metadata?.lastUpdated || entry.timestamp || 0),
           capabilities: Array.isArray(profile?.capabilities) ? profile.capabilities : [],
+          accounts: Array.isArray(profile?.accounts) ? profile.accounts : [],
+          publicAccounts: Array.isArray(profile?.publicAccounts) ? profile.publicAccounts : [],
           metadata: profile?.metadata || {},
         };
       })
@@ -1672,11 +1900,16 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         return new Response(JSON.stringify({ error: 'Invalid tokenId' }), { status: 400, headers });
       }
 
-      // Get hub from gossip (no hardcoded hub!)
-      const hubs = env.gossip?.getProfiles()?.filter(p => p.metadata?.isHub === true && p.capabilities?.includes('faucet')) || [];
+      // Get hub from server-authoritative hub set + gossip
+      const hubs = getFaucetHubProfiles(env);
       if (hubs.length === 0) {
         faucetLock.release();
-        return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
+        return new Response(JSON.stringify({
+          error: 'No faucet hub available',
+          code: 'FAUCET_HUBS_EMPTY',
+          profiles: env.gossip?.getProfiles?.()?.length || 0,
+          activeHubEntityIds,
+        }), { status: 503, headers });
       }
       const hubEntityId = hubs[0].entityId;
 
@@ -1712,25 +1945,29 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         }), { status: 409, headers });
       }
 
-      // Use entity txs (R2R + j_broadcast) instead of direct admin call
-      await runtimeProcess(env, [{
-        entityId: hubEntityId,
-        signerId: hubSignerId,
-        entityTxs: [
-          {
-            type: 'reserve_to_reserve',
-            data: {
-              toEntityId: userEntityId,
-              tokenId,
-              amount: amountWei,
+      // Use entity txs (R2R + j_broadcast) instead of direct admin call.
+      // Single-writer invariant: enqueue only; runtime loop applies.
+      enqueueRuntimeInput(env, {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId: hubEntityId,
+          signerId: hubSignerId,
+          entityTxs: [
+            {
+              type: 'reserve_to_reserve',
+              data: {
+                toEntityId: userEntityId,
+                tokenId,
+                amount: amountWei,
+              },
             },
-          },
-          {
-            type: 'j_broadcast',
-            data: {},
-          },
-        ],
-      }]);
+            {
+              type: 'j_broadcast',
+              data: {},
+            },
+          ],
+        }],
+      });
       // Log hub jBatchState summary after queuing
       hubReplicaKey = Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${hubEntityId}:`));
       hubReplica = hubReplicaKey ? env.eReplicas?.get(hubReplicaKey) : null;
@@ -1746,7 +1983,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         }
       }
       console.log(`[${logPrefix}] R2R + j_broadcast queued (waiting for J-event sync)`);
-      await drainJWatcherQueue(env, logPrefix);
+      await waitForRuntimeIdle(env, 5000);
 
       const jBatchCleared = await waitForJBatchClear(env, 5000);
       if (!jBatchCleared) {
@@ -1798,13 +2035,13 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         return new Response(JSON.stringify({ error: 'Missing userEntityId' }), { status: 400, headers });
       }
 
-      // Get hub from gossip (no hardcoded hub!)
+      // Get hub from server-authoritative hub set + gossip
       const allProfiles = env.gossip?.getProfiles() || [];
       console.log(`[FAUCET/OFFCHAIN] profiles=${allProfiles.length} user=${userEntityId.slice(-8)}`);
       for (const p of allProfiles) {
         console.log(`  profile: ${p.entityId.slice(-8)} isHub=${p.metadata?.isHub} caps=[${p.capabilities?.join(',')}]`);
       }
-      const hubs = allProfiles.filter(p => p.metadata?.isHub === true && p.capabilities?.includes('faucet'));
+      const hubs = getFaucetHubProfiles(env);
       if (hubs.length === 0) {
         pushRelayDebugEvent({
           event: 'error',
@@ -1813,13 +2050,15 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           details: {
             endpoint: '/api/faucet/offchain',
             profiles: allProfiles.length,
-            hint: 'No faucet-capable hubs in gossip cache',
+            activeHubEntityIds,
+            hint: 'No faucet-capable hubs in server active set or gossip cache',
           },
         });
         return new Response(JSON.stringify({
           error: 'No faucet hub available in gossip',
           code: 'FAUCET_HUBS_EMPTY',
           profiles: allProfiles.length,
+          activeHubEntityIds,
         }), { status: 503, headers });
       }
       const hubEntityId = hubs[0].entityId;
@@ -1827,24 +2066,49 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const hubSignerId = resolveEntityProposerId(env, hubEntityId, 'faucet-offchain');
       console.log(`[FAUCET/OFFCHAIN] hub=${hubEntityId.slice(-8)} signer=${hubSignerId.slice(-8)} amount=${amount} token=${tokenId}`);
 
+      // Explicit fail-fast: faucet only enqueues directPayment into an existing bilateral channel.
+      if (!hasAccount(env, hubEntityId, userEntityId)) {
+        pushRelayDebugEvent({
+          event: 'error',
+          status: 'rejected',
+          reason: 'FAUCET_ACCOUNT_MISSING',
+          details: {
+            endpoint: '/api/faucet/offchain',
+            hubEntityId,
+            userEntityId,
+            tokenId,
+          },
+        });
+        return new Response(JSON.stringify({
+          error: 'No hub account with target entity',
+          code: 'FAUCET_ACCOUNT_MISSING',
+          hubEntityId,
+          userEntityId,
+        }), { status: 409, headers });
+      }
+
       const amountWei = ethers.parseUnits(amount, 18);
 
-      // Send payment from hub to user via account
-      await runtimeProcess(env, [{
-        entityId: hubEntityId,
-        signerId: hubSignerId,
-        entityTxs: [{
-          type: 'directPayment',
-          data: {
-            targetEntityId: userEntityId,
-            tokenId,
-            amount: amountWei,
-            route: [hubEntityId, userEntityId], // Direct route
-            description: 'faucet-offchain',
-          },
+      // Send payment from hub to user via account.
+      // Single-writer invariant: enqueue only; runtime loop applies.
+      enqueueRuntimeInput(env, {
+        runtimeTxs: [],
+        entityInputs: [{
+          entityId: hubEntityId,
+          signerId: hubSignerId,
+          entityTxs: [{
+            type: 'directPayment',
+            data: {
+              targetEntityId: userEntityId,
+              tokenId,
+              amount: amountWei,
+              route: [hubEntityId, userEntityId], // Direct route
+              description: 'faucet-offchain',
+            },
+          }],
         }],
-      }]);
-      console.log(`[FAUCET/OFFCHAIN] ✅ Payment sent`);
+      });
+      console.log(`[FAUCET/OFFCHAIN] ✅ Payment enqueued`);
 
       return new Response(JSON.stringify({
         success: true,
@@ -1873,17 +2137,28 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   console.log('Options:', opts);
   const options = { ...DEFAULT_OPTIONS, ...opts };
   relayServerId = options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server';
-  const relaySeeds =
+  const advertisedRelayUrl =
+    process.env.PUBLIC_RELAY_URL
+    ?? process.env.RELAY_URL
+    ?? 'wss://xln.finance/relay';
+  const internalRelaySeeds =
     opts.relaySeeds?.length
       ? opts.relaySeeds
+      : process.env.INTERNAL_RELAY_URL
+        ? [process.env.INTERNAL_RELAY_URL]
       : process.env.RELAY_URL
         ? [process.env.RELAY_URL]
-        : options.relaySeeds;
+      : options.relaySeeds?.length
+          ? options.relaySeeds
+          : [advertisedRelayUrl];
 
   // Always initialize runtime - every node needs it
   console.log('[XLN] Initializing runtime...');
   const env = await main(HUB_SEED);
   console.log('[XLN] Runtime initialized ✓');
+  env.runtimeState = env.runtimeState ?? {};
+  env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input) =>
+    sendEntityInputDirectViaRelaySocket(env, targetRuntimeId, input);
   startRuntimeLoop(env);
   console.log('[XLN] Runtime event loop started ✓');
 
@@ -2019,16 +2294,12 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     await globalJAdapter.deployStack();
   }
 
-  // J-event watching is handled by JAdapter.startWatching() per-jReplica
-  // Start J-event queue processing loop (drains events pushed by JAdapter)
-  startJWatcherProcessingLoop(env);
-
-  // Start runtime tick loop for J-mempool + pending outputs
-  startRuntimeTickLoop(env);
+  // J-event watching is handled by JAdapter.startWatching() per-jReplica.
+  // J-events enter through enqueueRuntimeInput and are consumed by the single runtime loop.
 
   // Bootstrap hub entities (idempotent - normal entity + gossip tag)
   const { bootstrapHubs } = await import('../scripts/bootstrap-hub');
-  const relayUrl = relaySeeds?.[0] ?? 'wss://xln.finance/relay';
+  const relayUrl = advertisedRelayUrl;
   const publicRpc = process.env.PUBLIC_RPC ?? anvilRpc;
   const publicHttp = process.env.PUBLIC_HTTP ?? '';
   const hubConfigs = [
@@ -2087,7 +2358,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   // Start P2P overlay for hub announcements
   if (hubEntityIds.length > 0) {
     startP2P(env, {
-      relayUrls: relaySeeds,
+      relayUrls: internalRelaySeeds,
       advertiseEntityIds: hubEntityIds,
       isHub: true,  // CRITICAL: Mark as hub so profiles get isHub metadata
     });
@@ -2206,6 +2477,15 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
   if (hubEntityIds.length >= 3) {
     await bootstrapHubMeshCredit(env, hubEntityIds.slice(0, 3));
+    // Reseed gossip cache with post-bootstrap hub state so hub↔hub account edges
+    // are visible to clients for multi-hop route discovery.
+    seedHubProfilesInRelayCache(env, hubConfigs.map((cfg, idx) => ({
+      entityId: hubEntityIds[idx],
+      name: cfg.name,
+      region: cfg.region,
+      routingFeePPM: cfg.routingFeePPM,
+      capabilities: cfg.capabilities,
+    })), relayUrl);
   }
 
   const server = Bun.serve({
@@ -2318,6 +2598,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         for (const [id, client] of clients) {
           if (client.ws === ws) {
             clients.delete(id);
+            runtimeEncryptionKeys.delete(id.toLowerCase());
             pushRelayDebugEvent({
               event: 'ws_close',
               runtimeId: id,

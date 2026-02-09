@@ -48,9 +48,10 @@ import {
 } from './evm';
 import { createGossipLayer } from './networking/gossip';
 import { attachEventEmitters } from './env-events';
-import { deriveSignerAddressSync, deriveSignerKeySync, getSignerPrivateKey, getSignerPublicKey, registerSignerKey, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
+import { deriveSignerAddressSync, getCachedSignerPrivateKey, getSignerPrivateKey, getSignerPublicKey, prewarmSignerKeyCache, setRuntimeSeed as setCryptoRuntimeSeed } from './account-crypto';
 import { buildEntityProfile, mergeProfileWithExisting } from './networking/gossip-helper';
 import { RuntimeP2P, type P2PConfig } from './networking/p2p';
+import { deriveEncryptionKeyPair, pubKeyToHex } from './networking/p2p-crypto';
 import {
   parseReplicaKey,
   extractEntityId,
@@ -126,7 +127,7 @@ import {
 } from './financial-utils';
 import { captureSnapshot, cloneEntityReplica, resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, getEntityNumber, formatEntityId, HEAVY_LOGS } from './utils';
-import { safeStringify } from './serialization-utils';
+import { deserializeTaggedJson, serializeTaggedJson, safeStringify } from './serialization-utils';
 import { validateDelta, validateAccountDeltas, createDefaultDelta, isDelta, validateEntityInput, validateEntityOutput } from './validation-utils';
 import type { EntityInput, EntityReplica, Env, JInput, JReplica, RoutedEntityInput, RuntimeInput } from './types';
 import {
@@ -242,6 +243,19 @@ export const getRuntimeDb = (env: Env): Level<Buffer, Buffer> => {
   return state.db;
 };
 
+export const closeRuntimeDb = async (env: Env): Promise<void> => {
+  const state = ensureRuntimeState(env);
+  if (!state.db) return;
+  try {
+    await state.db.close();
+  } catch (error) {
+    console.warn('⚠️ Failed to close runtime DB:', error instanceof Error ? error.message : error);
+  } finally {
+    state.db = null;
+    state.dbOpenPromise = null;
+  }
+};
+
 export async function tryOpenDb(env: Env): Promise<boolean> {
   const state = ensureRuntimeState(env);
   if (!state.dbOpenPromise) {
@@ -287,7 +301,12 @@ const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
     env.runtimeConfig = {
       minFrameDelayMs: 0,
       loopIntervalMs: 25,
+      snapshotIntervalFrames: 100,
     };
+  }
+  const configuredSnapshotInterval = env.runtimeConfig.snapshotIntervalFrames;
+  if (!Number.isFinite(configuredSnapshotInterval ?? NaN) || (configuredSnapshotInterval ?? 0) < 1) {
+    env.runtimeConfig.snapshotIntervalFrames = 100;
   }
   return env.runtimeConfig;
 };
@@ -301,6 +320,7 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
       p2p: null,
       pendingP2PConfig: null,
       lastP2PConfig: null,
+      directEntityInputDispatch: null,
     };
   }
   if (!env.runtimeState.routeDeferState) {
@@ -313,6 +333,18 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
 };
 
 const ENV_P2P_SINGLETON_KEY = Symbol.for('xln.runtime.env.p2p.singleton');
+const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
+
+const failfastAssert = (
+  condition: unknown,
+  code: string,
+  message: string,
+  details?: Record<string, unknown>,
+): asserts condition => {
+  if (condition) return;
+  const detailText = details ? ` ${safeStringify(details)}` : '';
+  throw new Error(`${code}: ${message}${detailText}`);
+};
 
 type P2Pish = {
   matchesIdentity?: (runtimeId: string, signerId?: string) => boolean;
@@ -374,6 +406,10 @@ const enqueueRuntimeInputs = (env: Env, inputs?: RoutedEntityInput[], runtimeTxs
       mempool.queuedAt = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
     }
   }
+};
+
+export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void => {
+  enqueueRuntimeInputs(env, runtimeInput.entityInputs, runtimeInput.runtimeTxs);
 };
 
 const hasRuntimeWork = (env: Env): boolean => {
@@ -507,8 +543,65 @@ export const deriveRuntimeId = (seed: string): string => {
 const ROUTE_DEFER_WARN_COOLDOWN_MS = 60_000;
 const ROUTE_DEFER_GOSSIP_COOLDOWN_MS = 5_000;
 const ROUTE_DEFER_ESCALATE_AFTER = 20;
+const ROUTE_DEFER_MAX_QUEUE = 256;
+
+const outputDeferKey = (output: RoutedEntityInput): string => {
+  const txPart = (output.entityTxs || [])
+    .map((tx) => {
+      const data = tx.data as Record<string, unknown> | undefined;
+      const height = typeof data?.height === 'number' ? data.height : '';
+      const from = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
+      const to = typeof data?.toEntityId === 'string' ? data.toEntityId : '';
+      return `${tx.type}:${height}:${from}:${to}`;
+    })
+    .join('|');
+  return `${output.entityId}:${output.signerId || ''}:${txPart}`;
+};
 
 const normalizeEntityKey = (value: string): string => value.toLowerCase();
+const bytesToHex = (bytes: Uint8Array): string =>
+  `0x${Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+
+const deriveEntityCryptoKeyPairHex = (material: Uint8Array | string): { publicKey: string; privateKey: string } => {
+  const pair = deriveEncryptionKeyPair(material);
+  return {
+    publicKey: pubKeyToHex(pair.publicKey),
+    privateKey: bytesToHex(pair.privateKey),
+  };
+};
+
+const hasLocalSignerKey = (env: Env, signerId: string): boolean => {
+  try {
+    getSignerPrivateKey(env, signerId);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const deriveLocalEntityCryptoKeys = (env: Env, entityId: string, signerId: string): { publicKey: string; privateKey: string } | null => {
+  try {
+    const signerPriv = getSignerPrivateKey(env, signerId);
+    const signerMaterial = `${bytesToHex(signerPriv)}:${entityId}:htlc-v1`;
+    return deriveEntityCryptoKeyPairHex(signerMaterial);
+  } catch {
+    return null;
+  }
+};
+
+const ensureLocalEntityCryptoKeys = (env: Env): void => {
+  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    const signerId = extractSignerId(replicaKey);
+    if (!hasLocalSignerKey(env, signerId)) continue;
+    const keys = deriveLocalEntityCryptoKeys(env, replica.entityId, signerId);
+    if (!keys) continue;
+    const { publicKey, privateKey } = keys;
+    if (replica.state.cryptoPublicKey !== publicKey || replica.state.cryptoPrivateKey !== privateKey) {
+      replica.state.cryptoPublicKey = publicKey;
+      replica.state.cryptoPrivateKey = privateKey;
+    }
+  }
+};
 
 const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | null => {
   if (!profile) return null;
@@ -583,9 +676,14 @@ const collectSenderEntityHints = (input: RoutedEntityInput): string[] => {
   return [...hints];
 };
 
+type PlannedRemoteOutput = {
+  output: RoutedEntityInput;
+  targetRuntimeId: string;
+};
+
 const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
   localOutputs: RoutedEntityInput[];
-  remoteOutputs: RoutedEntityInput[];
+  remoteOutputs: PlannedRemoteOutput[];
   deferredOutputs: RoutedEntityInput[];
 } => {
   const localEntityIds = new Set<string>();
@@ -598,9 +696,19 @@ const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
   }
 
   const localOutputs: RoutedEntityInput[] = [];
-  const remoteOutputs: RoutedEntityInput[] = [];
+  const remoteOutputs: PlannedRemoteOutput[] = [];
   const pendingOutputs = env.pendingNetworkOutputs ? [...env.pendingNetworkOutputs] : [];
-  const allOutputs = [...pendingOutputs, ...outputs];
+  const deduped = new Map<string, RoutedEntityInput>();
+  for (const output of [...pendingOutputs, ...outputs]) {
+    deduped.set(outputDeferKey(output), output);
+  }
+  const allOutputs = [...deduped.values()].slice(-ROUTE_DEFER_MAX_QUEUE);
+  if (deduped.size > ROUTE_DEFER_MAX_QUEUE) {
+    env.warn('network', 'ROUTE_DEFER_QUEUE_TRUNCATED', {
+      queued: deduped.size,
+      kept: ROUTE_DEFER_MAX_QUEUE,
+    });
+  }
   const deferredOutputs: RoutedEntityInput[] = [];
   const routeDeferState = ensureRuntimeState(env).routeDeferState!;
   const nowMs = Date.now();
@@ -648,7 +756,7 @@ const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
       continue;
     }
     routeDeferState.delete(normalizeEntityKey(output.entityId));
-    remoteOutputs.push(output);
+    remoteOutputs.push({ output, targetRuntimeId });
   }
 
   return { localOutputs, remoteOutputs, deferredOutputs };
@@ -687,20 +795,39 @@ const batchOutputsByTarget = (outputs: RoutedEntityInput[]): RoutedEntityInput[]
   return Array.from(batched.values());
 };
 
-const dispatchEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): RoutedEntityInput[] => {
+const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): RoutedEntityInput[] => {
+  const state = ensureRuntimeState(env);
+  const directDispatch = state.directEntityInputDispatch;
   const p2p = getP2P(env);
-  if (!p2p) return outputs;
 
   // CRITICAL: Batch outputs to same target before sending
-  const batchedOutputs = batchOutputsByTarget(outputs);
+  const groupedByRuntime = new Map<string, RoutedEntityInput[]>();
+  for (const { output, targetRuntimeId } of outputs) {
+    const list = groupedByRuntime.get(targetRuntimeId) || [];
+    list.push(output);
+    groupedByRuntime.set(targetRuntimeId, list);
+  }
+
+  const batchedOutputs: PlannedRemoteOutput[] = [];
+  for (const [targetRuntimeId, grouped] of groupedByRuntime.entries()) {
+    const batchedGrouped = batchOutputsByTarget(grouped);
+    for (const output of batchedGrouped) {
+      batchedOutputs.push({ output, targetRuntimeId });
+    }
+  }
   if (batchedOutputs.length < outputs.length) {
     console.log(`📦 BATCH: Reduced ${outputs.length} outputs → ${batchedOutputs.length} batched messages`);
   }
 
   const deferredOutputs: RoutedEntityInput[] = [];
-  for (const output of batchedOutputs) {
-    const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
-    if (!targetRuntimeId) {
+  for (const { output, targetRuntimeId } of batchedOutputs) {
+    if (directDispatch) {
+      const deliveredDirect = directDispatch(targetRuntimeId, output);
+      if (deliveredDirect) {
+        continue;
+      }
+    }
+    if (!p2p) {
       deferredOutputs.push(output);
       continue;
     }
@@ -734,6 +861,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
   console.log(`[P2P] startP2P called, relayUrls=${config.relayUrls?.join(',')}, env.runtimeId=${env.runtimeId?.slice(0,10) || 'NONE'}`);
   const state = ensureRuntimeState(env);
   state.lastP2PConfig = config;
+  ensureLocalEntityCryptoKeys(env);
   const resolvedRuntimeId = config.runtimeId || env.runtimeId;
   if (!resolvedRuntimeId) {
     console.log(`[P2P] No runtimeId, storing as pendingP2PConfig`);
@@ -894,6 +1022,12 @@ const applyRuntimeInput = async (
   env: Env,
   runtimeInput: RuntimeInput,
 ): Promise<{ entityOutbox: RoutedEntityInput[]; mergedInputs: RoutedEntityInput[]; jOutbox: JInput[] }> => {
+  failfastAssert(
+    env.scenarioMode === true || (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] === true,
+    'RUNTIME_APPLY_DIRECT_CALL',
+    'applyRuntimeInput must be invoked via process()/WAL replay (non-scenario)',
+    { runtimeId: env.runtimeId, height: env.height }
+  );
   const startTime = getPerfMs();
 
   // Ensure event emitters are attached (may be lost after store serialization)
@@ -1048,6 +1182,21 @@ const applyRuntimeInput = async (
           );
 
         const replicaKey = `${runtimeTx.entityId}:${runtimeTx.signerId}`;
+        const existingReplica = env.eReplicas.get(replicaKey);
+        if (existingReplica) {
+          // Persistence safety: never overwrite restored replica state on re-import.
+          existingReplica.isProposer = runtimeTx.data.isProposer;
+          if (runtimeTx.data.config) {
+            existingReplica.state.config = runtimeTx.data.config;
+          }
+          env.eReplicas.set(replicaKey, existingReplica);
+          if (DEBUG) {
+            console.log(
+              `Skipping fresh replica init for restored entity #${formatEntityDisplay(runtimeTx.entityId)}:${formatSignerDisplay(runtimeTx.signerId)}`
+            );
+          }
+          continue;
+        }
         const replica: EntityReplica = {
           entityId: runtimeTx.entityId,
           signerId: runtimeTx.signerId,
@@ -1088,12 +1237,13 @@ const applyRuntimeInput = async (
           },
         };
 
-        // 🔐 Generate crypto keys for HTLC envelope encryption
-        const { NobleCryptoProvider } = await import('./crypto-noble');
-        const crypto = new NobleCryptoProvider();
-        const { publicKey, privateKey } = await crypto.generateKeyPair();
-        replica.state.cryptoPublicKey = publicKey;
-        replica.state.cryptoPrivateKey = privateKey;
+        // 🔐 Deterministic HTLC envelope keys (stable across reloads)
+        const localKeys = deriveLocalEntityCryptoKeys(env, runtimeTx.entityId, runtimeTx.signerId);
+        if (localKeys) {
+          const { publicKey, privateKey } = localKeys;
+          replica.state.cryptoPublicKey = publicKey;
+          replica.state.cryptoPrivateKey = privateKey;
+        }
 
         // Only add position if it exists (exactOptionalPropertyTypes compliance)
         if (runtimeTx.data.position) {
@@ -1125,17 +1275,6 @@ const applyRuntimeInput = async (
           }
         }
 
-        // Ensure entity-level signing key exists for this runtime (needed for gossip public key)
-        if (env.runtimeSeed !== undefined && env.runtimeSeed !== null) {
-          try {
-            const seedBytes = new TextEncoder().encode(env.runtimeSeed);
-            const entityKey = deriveSignerKeySync(seedBytes, runtimeTx.entityId);
-            registerSignerKey(runtimeTx.entityId, entityKey);
-          } catch (error) {
-            console.warn(`⚠️ Failed to derive entity key for ${runtimeTx.entityId.slice(0, 10)}:`, error);
-          }
-        }
-
         // Validate jBlock immediately after creation
         const createdReplica = env.eReplicas.get(replicaKey);
         const actualJBlock = createdReplica?.state.lastFinalizedJHeight;
@@ -1143,7 +1282,8 @@ const applyRuntimeInput = async (
 
         // Broadcast initial profile to gossip layer
         if (env.gossip && createdReplica) {
-          const entityPublicKey = getSignerPublicKey(env, runtimeTx.entityId);
+          const primarySignerId = runtimeTx.data.config.validators?.[0];
+          const entityPublicKey = primarySignerId ? getSignerPublicKey(env, primarySignerId) : null;
           const publicKeyHex = entityPublicKey ? `0x${Buffer.from(entityPublicKey).toString('hex')}` : undefined;
           const existingProfile = env.gossip?.getProfiles?.().find((p: any) => p.entityId === runtimeTx.entityId);
           const existingName = existingProfile?.metadata?.name;
@@ -1489,10 +1629,9 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
 
   if (env.runtimeSeed) {
     try {
-      const seedBytes = new TextEncoder().encode(env.runtimeSeed);
-      const signerKey = deriveSignerKeySync(seedBytes, '1');
-      registerSignerKey('1', signerKey);
+      prewarmSignerKeyCache(env.runtimeSeed, 20);
       env.signers = [{ address: deriveSignerAddressSync(env.runtimeSeed, '1'), name: 'signer1' }];
+      console.log('🔐 Prewarmed signer key cache (20 addresses)');
     } catch (error) {
       console.warn('⚠️ Failed to derive signer:', error);
     }
@@ -1935,43 +2074,54 @@ export const process = async (
   inputs?: RoutedEntityInput[],
   runtimeDelay = 0
 ) => {
-  if (!env.emit) {
-    attachEventEmitters(env);
+  const processState = ensureRuntimeState(env);
+  while (processState.processingPromise) {
+    await processState.processingPromise;
   }
+  let releaseProcessLock: (() => void) | null = null;
+  processState.processingPromise = new Promise<void>((resolve) => {
+    releaseProcessLock = resolve;
+  });
 
-  if (env.stopAtFrame !== undefined && env.height >= env.stopAtFrame) {
-    console.log(`\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);
-    console.log('═'.repeat(80));
-    const { formatRuntime } = await import('./runtime-ascii');
-    console.log(formatRuntime(env, { maxAccounts: 10, maxLocks: 20, maxSwaps: 20 }));
-    console.log('═'.repeat(80) + '\n');
-    console.log('💾 State captured - use jq on /tmp/{scenario}-runtime.json for deep queries');
-    throw new Error(`FRAME_STEP: Stopped at frame ${env.height} for debugging`);
-  }
+  try {
+    env.lastProcessEnteredAt = Date.now();
 
-  if (inputs && inputs.length > 0) {
-    enqueueRuntimeInputs(env, inputs);
-  }
-  if (env.pendingOutputs && env.pendingOutputs.length > 0) {
-    enqueueRuntimeInputs(env, env.pendingOutputs);
-    env.pendingOutputs = [];
-  }
-  if (env.networkInbox && env.networkInbox.length > 0) {
-    enqueueRuntimeInputs(env, env.networkInbox);
-    env.networkInbox = [];
-  }
+    if (!env.emit) {
+      attachEventEmitters(env);
+    }
 
-  if (!hasRuntimeWork(env)) return env;
+    if (env.stopAtFrame !== undefined && env.height >= env.stopAtFrame) {
+      console.log(`\n⏸️  FRAME STEPPING: Stopped at frame ${env.height}`);
+      console.log('═'.repeat(80));
+      const { formatRuntime } = await import('./runtime-ascii');
+      console.log(formatRuntime(env, { maxAccounts: 10, maxLocks: 20, maxSwaps: 20 }));
+      console.log('═'.repeat(80) + '\n');
+      console.log('💾 State captured - use jq on /tmp/{scenario}-runtime.json for deep queries');
+      throw new Error(`FRAME_STEP: Stopped at frame ${env.height} for debugging`);
+    }
 
-  const now = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
-  if (!isRuntimeFrameReady(env, now, runtimeDelay)) {
-  
-    return env;
-  }
+    if (inputs && inputs.length > 0) {
+      enqueueRuntimeInputs(env, inputs);
+    }
+    if (env.pendingOutputs && env.pendingOutputs.length > 0) {
+      enqueueRuntimeInputs(env, env.pendingOutputs);
+      env.pendingOutputs = [];
+    }
+    if (env.networkInbox && env.networkInbox.length > 0) {
+      enqueueRuntimeInputs(env, env.networkInbox);
+      env.networkInbox = [];
+    }
 
-  const state = ensureRuntimeState(env);
-  const quietRuntimeLogs = env.quietRuntimeLogs === true;
-  {
+    if (!hasRuntimeWork(env)) return env;
+
+    const now = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+    if (!isRuntimeFrameReady(env, now, runtimeDelay)) {
+    
+      return env;
+    }
+
+    const state = ensureRuntimeState(env);
+    const quietRuntimeLogs = env.quietRuntimeLogs === true;
     getBrowserVMInstance(env)?.setQuietLogs?.(quietRuntimeLogs);
 
     if (env.scenarioMode) {
@@ -1987,6 +2137,7 @@ export const process = async (
       entityInputs: [...mempool.entityInputs],
       ...(mempool.jInputs && mempool.jInputs.length > 0 ? { jInputs: [...mempool.jInputs] } : {}),
     };
+    (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput = runtimeInput;
     const mempoolQueuedAt = mempool.queuedAt;
     mempool.runtimeTxs = [];
     mempool.entityInputs = [];
@@ -2014,6 +2165,16 @@ export const process = async (
     let entityOutbox: RoutedEntityInput[] = [];
     let jOutbox: JInput[] = [];
     const changedEntityIds = new Set<string>();
+    const shouldAnnounceEntityProfile = (input: RoutedEntityInput): boolean => {
+      if (!input?.entityTxs?.length) return false;
+      return input.entityTxs.some((tx) =>
+        tx.type === 'openAccount' ||
+        tx.type === 'closeAccount' ||
+        tx.type === 'governance_profile_update' ||
+        tx.type === 'governanceUpdateProfile' ||
+        tx.type === 'updateProfile'
+      );
+    };
     if (hasRuntimeInput) {
       if (!quietRuntimeLogs) {
         console.log(`📥 TICK: Processing ${runtimeInput.entityInputs.length} inputs for [${runtimeInput.entityInputs.map(o => o.entityId.slice(-4)).join(',')}]`);
@@ -2022,6 +2183,7 @@ export const process = async (
         }
       }
       try {
+        (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] = true;
         const result = await applyRuntimeInput(env, runtimeInput);
         console.log(`🔍 PROCESS: applyRuntimeInput returned entityOutbox=${result.entityOutbox.length}, jOutbox=${result.jOutbox.length}`);
         entityOutbox = result.entityOutbox;
@@ -2032,7 +2194,7 @@ export const process = async (
           }
         }
         for (const entityInput of runtimeInput.entityInputs) {
-          if (entityInput.entityId) {
+          if (entityInput.entityId && shouldAnnounceEntityProfile(entityInput)) {
             changedEntityIds.add(entityInput.entityId.toLowerCase());
           }
         }
@@ -2047,6 +2209,8 @@ export const process = async (
           mempool.queuedAt = mempoolQueuedAt ?? (env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs());
         }
         throw error;
+      } finally {
+        (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] = false;
       }
     } else if (!quietRuntimeLogs && env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
       console.log(`📤 TICK: No entity inputs - retrying ${env.pendingNetworkOutputs.length} pending network outputs`);
@@ -2100,7 +2264,13 @@ export const process = async (
 
     // === COMMIT POINT: persist finalized R-frame ===
     console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
-    await saveEnvToDB(env);
+    // Persist only when a new runtime frame was actually applied.
+    // Side-effect-only ticks (e.g. deferred network retries) must never
+    // overwrite WAL entries for the current height.
+    if (hasRuntimeInput) {
+      await saveEnvToDB(env);
+      (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput = undefined;
+    }
     console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
 
     // === SIDE EFFECTS (safe to fail — bilateral consensus retries) ===
@@ -2125,6 +2295,8 @@ export const process = async (
       const localEntityIds = new Set<string>();
       for (const replicaKey of env.eReplicas.keys()) {
         try {
+          const signerId = extractSignerId(replicaKey);
+          if (!signerId || !getCachedSignerPrivateKey(signerId)) continue;
           localEntityIds.add(extractEntityId(replicaKey).toLowerCase());
         } catch {
           // ignore malformed key
@@ -2132,10 +2304,7 @@ export const process = async (
       }
       const changedLocalEntityIds = [...changedEntityIds].filter(entityId => localEntityIds.has(entityId));
       if (changedLocalEntityIds.length > 0) {
-        p2p.announceProfilesForEntities(changedLocalEntityIds, 'entity-state-change');
-      } else if (remoteOutputs.length > 0) {
-        // Backstop for older flows where output exists but change set was empty.
-        p2p.announceLocalProfiles();
+        p2p.announceProfilesForEntities(changedLocalEntityIds, 'major-entity-change');
       }
     }
 
@@ -2199,46 +2368,53 @@ export const process = async (
     notifyEnvChange(env);
 
     return env;
+  } finally {
+    processState.processingPromise = null;
+    releaseProcessLock?.();
   }
 };
 
 // === LEVELDB PERSISTENCE ===
 export const saveEnvToDB = async (env: Env): Promise<void> => {
-  if (!isBrowser) return; // Only persist in browser
-
   try {
     const dbReady = await tryOpenDb(env);
     if (!dbReady) return;
     const dbNamespace = resolveDbNamespace({ env });
     const db = getRuntimeDb(env);
 
-    // Save latest height pointer
-    await db.put(makeDbKey(dbNamespace, 'latest_height'), Buffer.from(String(env.height)));
-
-    // Save environment snapshot (jReplicas with stateRoot are serializable)
-    // CRITICAL: Exclude 'history' to prevent exponential growth (history contains all previous snapshots)
-    const seen = new WeakSet();
-    const snapshot = JSON.stringify(env, (k, v) => {
-      if (k === 'history') return undefined; // Skip history - it's rebuilt from individual snapshots
-      if (k === 'browserVM') return undefined; // BrowserVM is non-serializable (circular refs)
-      if (k === 'log' || k === 'info' || k === 'warn' || k === 'error' || k === 'emit') return undefined;
-      if (k === 'gossip' && v && typeof v === 'object') {
-        return {
-          profiles: v.profiles instanceof Map ? Array.from(v.profiles.entries()) : v.profiles,
-        };
-      }
-      if (typeof v === 'bigint') return String(v);
-      if (v instanceof Uint8Array) return Array.from(v);
-      if (v instanceof Map) return Array.from(v.entries());
-      if (v instanceof Set) return Array.from(v);
-      if (typeof v === 'function') return undefined;
-      if (v && typeof v === 'object') {
-        if (seen.has(v)) return '[Circular]';
-        seen.add(v);
-      }
-      return v;
+    // Persist compact per-frame runtime input for replay from checkpoint.
+    const currentFrameInput = (env as Env & { __lastProcessedRuntimeInput?: RuntimeInput }).__lastProcessedRuntimeInput;
+    const frameJournal = serializeTaggedJson({
+      height: env.height,
+      timestamp: env.timestamp,
+      // Always persist a frame record so replay has a contiguous frame timeline.
+      runtimeInput: currentFrameInput ?? { runtimeTxs: [], entityInputs: [] },
     });
-    await db.put(makeDbKey(dbNamespace, `snapshot:${env.height}`), Buffer.from(snapshot));
+    await db.put(makeDbKey(dbNamespace, `frame_input:${env.height}`), Buffer.from(frameJournal));
+
+    const config = ensureRuntimeConfig(env);
+    const snapshotInterval = Math.max(1, Math.floor(config.snapshotIntervalFrames ?? 100));
+    const shouldCheckpoint =
+      env.height <= 1 ||
+      env.height % snapshotInterval === 0;
+
+    if (shouldCheckpoint) {
+      const snapshot = serializeTaggedJson(env, new Set([
+        'history',
+        'browserVM',
+        'gossip',
+        'log',
+        'info',
+        'warn',
+        'error',
+        'emit',
+      ]));
+      await db.put(makeDbKey(dbNamespace, `snapshot:${env.height}`), Buffer.from(snapshot));
+      await db.put(makeDbKey(dbNamespace, 'latest_checkpoint_height'), Buffer.from(String(env.height)));
+    }
+
+    // Write pointer last so latest_height is only advanced after all frame data is durable.
+    await db.put(makeDbKey(dbNamespace, 'latest_height'), Buffer.from(String(env.height)));
   } catch (err) {
     console.error('❌ Failed to save to LevelDB:', err);
     if (env.scenarioMode) {
@@ -2248,8 +2424,12 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
 };
 
 export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: string | null): Promise<Env | null> => {
-  if (!isBrowser) return null;
-
+  const isDbNotFound = (error: unknown): boolean => {
+    if (!error || typeof error !== 'object') return false;
+    const code = String((error as { code?: unknown }).code ?? '');
+    const name = String((error as { name?: unknown }).name ?? '');
+    return code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError';
+  };
   try {
     const tempEnv = createEmptyEnv(runtimeSeed ?? null);
     if (runtimeId) {
@@ -2261,14 +2441,61 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
 
     const dbNamespace = resolveDbNamespace({ runtimeId, runtimeSeed, env: tempEnv });
     const db = getRuntimeDb(tempEnv);
-    const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
+    let latestHeightBuffer: Buffer;
+    try {
+      latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
+    } catch (error) {
+      if (isDbNotFound(error)) {
+        return null;
+      }
+      throw error;
+    }
     const latestHeight = parseInt(latestHeightBuffer.toString());
+    let checkpointHeight = 0;
+    let checkpointBuffer: Buffer;
+    try {
+      const checkpointHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_checkpoint_height'));
+      checkpointHeight = parseInt(checkpointHeightBuffer.toString());
+    } catch (error) {
+      const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      throw new Error(
+        `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=n/a latest=${latestHeight} restored=n/a reason=Missing latest_checkpoint_height pointer (${message})`
+      );
+    }
+    if (!Number.isFinite(checkpointHeight) || checkpointHeight < 0 || checkpointHeight > latestHeight) {
+      throw new Error(
+        `REPLAY_INVARIANT_FAILED: frame=n/a checkpoint=${String(checkpointHeight)} latest=${latestHeight} restored=n/a reason=Invalid checkpoint pointer`
+      );
+    }
+    try {
+      checkpointBuffer = await db.get(makeDbKey(dbNamespace, `snapshot:${checkpointHeight}`));
+    } catch (error) {
+      const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      throw new Error(
+        `REPLAY_INVARIANT_FAILED: frame=${checkpointHeight} checkpoint=${checkpointHeight} latest=${latestHeight} restored=n/a reason=Missing checkpoint snapshot (${message})`
+      );
+    }
 
-    // Load all snapshots to build history
-    const history: Env[] = [];
-    for (let i = 0; i <= latestHeight; i++) {
-      const buffer = await db.get(makeDbKey(dbNamespace, `snapshot:${i}`));
-      const data = JSON.parse(buffer.toString());
+    const data = deserializeTaggedJson<any>(checkpointBuffer.toString());
+    const pushRecoveredHistoryFrame = (
+      targetEnv: Env,
+      frame: number,
+      timestamp: number,
+      kind: 'checkpoint' | 'wal'
+    ): void => {
+      if (!targetEnv.history) targetEnv.history = [];
+      targetEnv.history.push({
+        frame,
+        title: kind === 'checkpoint' ? `Recovered Checkpoint ${frame}` : `Recovered Frame ${frame}`,
+        timestamp,
+        subtitle: {
+          title: kind === 'checkpoint' ? `Recovered Checkpoint ${frame}` : `Recovered Frame ${frame}`,
+          description: kind === 'checkpoint'
+            ? 'Recovered from persisted snapshot'
+            : 'Recovered from WAL replay',
+        },
+      } as any);
+    };
 
       // Hydrate Maps/BigInts
       const runtimeSeedRaw = Array.isArray(data.runtimeSeed)
@@ -2280,9 +2507,6 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       env.dbNamespace = data.dbNamespace ?? dbNamespace;
       if (data.browserVMState) {
         env.browserVMState = data.browserVMState;
-      }
-      if (runtimeSeedRaw !== undefined && runtimeSeedRaw !== null) {
-        setCryptoRuntimeSeed(runtimeSeedRaw);
       }
       if (data.runtimeId) {
         env.runtimeId = data.runtimeId;
@@ -2296,6 +2520,10 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
       // Support both old (replicas) and new (eReplicas) format
       env.eReplicas = normalizeReplicaMap(data.eReplicas || data.replicas || []);
       env.jReplicas = normalizeJReplicaMap(data.jReplicas || []);
+      env.history = [];
+      if (checkpointHeight > 0) {
+        pushRecoveredHistoryFrame(env, checkpointHeight, env.timestamp, 'checkpoint');
+      }
       if (env.jReplicas.size > 0) {
         for (const [name, jr] of env.jReplicas.entries()) {
           if ((jr as any).stateRoot) {
@@ -2307,18 +2535,63 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
         }
       }
       if (data.gossip?.profiles) {
-        env.gossip.profiles = new Map(data.gossip.profiles);
+        const rawProfiles = data.gossip.profiles instanceof Map
+          ? Array.from(data.gossip.profiles.values())
+          : Array.isArray(data.gossip.profiles)
+            ? data.gossip.profiles
+            : [];
+        if (typeof env.gossip?.setProfiles === 'function') {
+          env.gossip.setProfiles(rawProfiles);
+        } else if (typeof env.gossip?.announce === 'function') {
+          for (const profile of rawProfiles) env.gossip.announce(profile);
+        }
       }
-      const envState = ensureRuntimeState(env);
-      const tempState = ensureRuntimeState(tempEnv);
-      envState.db = tempState.db;
-      envState.dbOpenPromise = tempState.dbOpenPromise;
-      history.push(env);
+    const envState = ensureRuntimeState(env);
+    const tempState = ensureRuntimeState(tempEnv);
+    envState.db = tempState.db;
+    envState.dbOpenPromise = tempState.dbOpenPromise;
+
+    // Replay frame journal from checkpoint+1 to latest.
+    // STRICT MODE: any missing/corrupt frame is fatal (deterministic replay invariant).
+    let lastGoodHeight = checkpointHeight;
+    for (let h = checkpointHeight + 1; h <= latestHeight; h++) {
+      try {
+        const frameBuffer = await db.get(makeDbKey(dbNamespace, `frame_input:${h}`));
+        const frame = deserializeTaggedJson<{ height: number; timestamp: number; runtimeInput: RuntimeInput }>(
+          frameBuffer.toString()
+        );
+        if (Number(frame?.height) !== h) {
+          throw new Error(`Frame height mismatch: key=${h} payload=${String(frame?.height)}`);
+        }
+        if (!frame?.runtimeInput) {
+          throw new Error(`Missing runtimeInput at frame ${h}`);
+        }
+        env.timestamp = Number(frame.timestamp || env.timestamp);
+        (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] = true;
+        await applyRuntimeInput(env, frame.runtimeInput);
+        (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] = false;
+        pushRecoveredHistoryFrame(env, h, env.timestamp, 'wal');
+        lastGoodHeight = h;
+      } catch (error) {
+        (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] = false;
+        const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+        throw new Error(
+          `REPLAY_INVARIANT_FAILED: frame=${h} checkpoint=${checkpointHeight} latest=${latestHeight} restored=${lastGoodHeight} reason=${message}`
+        );
+      }
+    }
+    env.height = lastGoodHeight;
+    if (lastGoodHeight !== latestHeight) {
+      throw new Error(
+        `REPLAY_INVARIANT_FAILED: replay completed at ${lastGoodHeight}, expected latest ${latestHeight}`
+      );
     }
 
-    const latestEnv = history[history.length - 1];
+    const latestEnv = env;
     if (latestEnv) {
-      latestEnv.history = history;
+      if (latestEnv.history.length === 0 && latestEnv.height > 0) {
+        pushRecoveredHistoryFrame(latestEnv, latestEnv.height, latestEnv.timestamp, 'checkpoint');
+      }
 
       // Restore BrowserVM if state was persisted
       let restoredBrowserVM: any = null;
@@ -2403,8 +2676,9 @@ export const loadEnvFromDB = async (runtimeId?: string | null, runtimeSeed?: str
 
     return latestEnv;
   } catch (err) {
-    console.log('No persisted state found');
-    return null;
+    const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    console.error(`❌ loadEnvFromDB failed: ${message}`);
+    throw err;
   }
 };
 

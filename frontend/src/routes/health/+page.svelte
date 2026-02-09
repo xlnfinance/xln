@@ -19,11 +19,24 @@
       name: string;
       region?: string;
       relayUrl?: string;
+      runtimeId?: string;
+      online?: boolean;
+      activeClients?: string[];
       status: 'healthy' | 'degraded' | 'down';
       reserves?: Record<string, string>;
       accounts?: number;
       error?: string;
     }>;
+    relay?: {
+      activeClients?: string[];
+      activeClientCount?: number;
+      clientsDetailed?: Array<{
+        runtimeId: string;
+        lastSeen: number;
+        ageMs: number;
+        topics?: string[];
+      }>;
+    };
     system: {
       runtime: boolean;
       p2p: boolean;
@@ -317,6 +330,69 @@
       <article class="metric"><div class="k">Uptime</div><div class="v">{formatUptime(health.uptime)}</div></article>
       <article class="metric"><div class="k">J Block</div><div class="v">#{health.jMachines?.[0]?.lastBlock ?? '-'}</div></article>
       <article class="metric"><div class="k">Debug Events</div><div class="v">{events.length}</div></article>
+      <article class="metric"><div class="k">Relay Clients</div><div class="v">{health.relay?.activeClientCount ?? 0}</div></article>
+    </section>
+
+    <section class="panel">
+      <h2>Hub Sockets</h2>
+      <p class="sub">Relay-connected runtime sockets per hub</p>
+      <div class="entity-list">
+        {#if !health.hubs || health.hubs.length === 0}
+          <div class="empty">No hubs found.</div>
+        {:else}
+          {#each health.hubs as hub}
+            <article class="entity-row" class:entity-offline={!hub.online}>
+              <EntityIdentity
+                entityId={hub.entityId}
+                name={hub.name}
+                size={28}
+                copyable={true}
+                clickable={true}
+                compact={false}
+              />
+              <div class="entity-tags">
+                <span class="chip" class:ok={hub.online === true} class:bad={hub.online === false}>{hub.online ? 'online' : 'offline'}</span>
+                {#if hub.runtimeId}<span class="chip">rt:{short(hub.runtimeId, 12)}</span>{/if}
+                {#if hub.activeClients && hub.activeClients.length > 0}
+                  {#each hub.activeClients as rt}
+                    <span class="chip">ws:{short(rt, 10)}</span>
+                  {/each}
+                {:else}
+                  <span class="chip">ws:none</span>
+                {/if}
+              </div>
+            </article>
+          {/each}
+        {/if}
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Active Relay Clients</h2>
+      <p class="sub">All live websocket clients connected to relay</p>
+      <div class="entity-list">
+        {#if !health.relay?.clientsDetailed || health.relay.clientsDetailed.length === 0}
+          <div class="empty">No active websocket clients.</div>
+        {:else}
+          {#each health.relay.clientsDetailed as client}
+            <article class="entity-row">
+              <EntityIdentity
+                entityId={client.runtimeId}
+                name="runtime"
+                size={24}
+                copyable={true}
+                clickable={false}
+                compact={true}
+              />
+              <div class="entity-tags">
+                <span class="chip">age:{Math.round(client.ageMs / 1000)}s</span>
+                <span class="chip">last:{new Date(client.lastSeen).toLocaleTimeString()}</span>
+                <span class="chip">topics:{client.topics?.length ?? 0}</span>
+              </div>
+            </article>
+          {/each}
+        {/if}
+      </div>
     </section>
 
     <section class="panel">

@@ -1,22 +1,16 @@
 #!/bin/bash
-# Auto-deploy script - run after every git push
-# IMPORTANT: Run `npm run test:landing` locally BEFORE pushing
+# Auto-deploy wrapper (delegates to unified deploy.sh)
 
-set -e  # Exit on any error
+set -euo pipefail
 
-ssh -i ~/.ssh/xln_deploy root@xln.finance << 'ENDSSH'
-cd /root/xln
-git pull origin main
+REMOTE_HOST="${XLN_DEPLOY_HOST:-root@xln.finance}"
+ARGS=(--remote "$REMOTE_HOST" --push)
 
-# Add bun to PATH
-export PATH="$HOME/.bun/bin:$PATH"
 if [ "${XLN_DEPLOY_FRONTEND:-0}" = "1" ]; then
-  ./deploy.sh --frontend --skip-pull
-else
-  ./deploy.sh --skip-pull
+  ARGS+=(--frontend)
+fi
+if [ "${XLN_DEPLOY_FRESH:-0}" = "1" ]; then
+  ARGS+=(--fresh)
 fi
 
-echo "✅ Deployed at $(date)"
-echo "✅ Server status:"
-pm2 status | sed -n '1,40p'
-ENDSSH
+exec ./deploy.sh "${ARGS[@]}"

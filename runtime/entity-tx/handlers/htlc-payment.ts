@@ -7,9 +7,13 @@
  */
 
 import type { EntityState, EntityInput, AccountTx, Env } from '../../types';
+import type { Profile } from '../../networking/gossip';
 import { cloneEntityState, canonicalAccountKey } from '../../state-helpers';
 import { generateHashlock, generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../htlc-utils';
+import { calculateRequiredInboundForDesiredForward } from '../../htlc-utils';
 import { HTLC } from '../../constants';
+import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from '../../routing/fees';
+import { getTokenCapacity } from '../../routing/capacity';
 
 const formatEntityId = (id: string) => id.slice(-4);
 const addMessage = (state: EntityState, message: string) => state.messages.push(message);
@@ -38,6 +42,7 @@ export async function handleHtlcPayment(
 
   // Extract payment details
   let { targetEntityId, tokenId, amount, route, description, secret, hashlock } = entityTx.data;
+  const desiredRecipientAmount = amount;
 
   // Validate secret/hashlock - MUST be provided in tx (determinism requirement)
   if (!secret && !hashlock) {
@@ -134,6 +139,48 @@ export async function handleHtlcPayment(
     return { newState, outputs: [] };
   }
 
+  // Recipient-exact semantics:
+  // tx.data.amount is what final recipient should receive.
+  // Compute sender lock amount by inverting per-intermediary fee schedule.
+  const feeConfigForHop = (
+    fromEntityId: string,
+    toEntityId: string,
+    tokId: number
+  ): { feePpm: number; baseFee: bigint } => {
+    const fromNorm = String(fromEntityId || '').toLowerCase();
+    const toNorm = String(toEntityId || '').toLowerCase();
+    const profile = (env.gossip?.getProfiles?.() as Profile[] | undefined)
+      ?.find((p) => String(p?.entityId || '').toLowerCase() === fromNorm);
+    const basePpm = sanitizeFeePPM(profile?.metadata?.routingFeePPM ?? 10, 10);
+    const baseFee = sanitizeBaseFee(profile?.metadata?.baseFee ?? 0n);
+
+    const account = Array.isArray(profile?.accounts)
+      ? profile.accounts.find((a) => String(a?.counterpartyId || '').toLowerCase() === toNorm)
+      : null;
+    const tokenCap = getTokenCapacity(account?.tokenCapacities, tokId);
+    const outCap = tokenCap?.outCapacity ?? 0n;
+    const inCap = tokenCap?.inCapacity ?? 0n;
+    const feePpm = calculateDirectionalFeePPM(basePpm, outCap, inCap);
+    return { feePpm, baseFee };
+  };
+  let senderLockAmount = desiredRecipientAmount;
+  const hopForwardAmounts = new Map<string, bigint>();
+  for (let i = route.length - 2; i >= 1; i -= 1) {
+    const intermediary = route[i]!;
+    const nextHop = route[i + 1]!;
+    const { feePpm, baseFee } = feeConfigForHop(intermediary, nextHop, tokenId);
+    const forwardAmount = senderLockAmount;
+    hopForwardAmounts.set(intermediary, forwardAmount);
+    senderLockAmount = calculateRequiredInboundForDesiredForward(forwardAmount, feePpm, baseFee);
+  }
+  if (senderLockAmount < desiredRecipientAmount) {
+    logError('HTLC_PAYMENT', '❌ Sender lock amount underflow after fee inversion');
+    addMessage(newState, '❌ HTLC payment failed: fee inversion underflow');
+    return { newState, outputs: [], mempoolOps: [] };
+  }
+  const totalFee = senderLockAmount - desiredRecipientAmount;
+  console.log(`🔒 HTLC recipient-exact quote: recipient=${desiredRecipientAmount}, senderLock=${senderLockAmount}, totalFee=${totalFee}`);
+
   // Calculate timelocks and reveal heights (Alice gets most time)
   const totalHops = route.length - 1; // Minus sender
   const hopIndex = 0; // We're always hop 0 (sender) in this handler
@@ -162,29 +209,72 @@ export async function handleHtlcPayment(
   const { createOnionEnvelopes } = await import('../../htlc-envelope-types');
   let envelope;
   try {
+    const normalizeX25519Hex = (raw: unknown): string | null => {
+      if (typeof raw !== 'string') return null;
+      const trimmed = raw.trim();
+      if (!trimmed) return null;
+      const prefixed = trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
+      return /^0x[0-9a-fA-F]{64}$/.test(prefixed) ? prefixed.toLowerCase() : null;
+    };
+    const normalizeX25519Base64 = (raw: unknown): string | null => {
+      if (typeof raw !== 'string') return null;
+      const trimmed = raw.trim();
+      if (!trimmed) return null;
+      // Strict base64 gate to avoid decoding arbitrary hex/signature strings.
+      if (trimmed.length % 4 !== 0) return null;
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(trimmed)) return null;
+      try {
+        const bytes = typeof atob === 'function'
+          ? Uint8Array.from(atob(trimmed), (c) => c.charCodeAt(0))
+          : new Uint8Array(Buffer.from(trimmed, 'base64'));
+        return bytes.length === 32 ? trimmed : null;
+      } catch {
+        return null;
+      }
+    };
+    type ResolvedKey = { key: string; source: string };
+    const resolveEntityEncryptionKey = (entityId: string): ResolvedKey | null => {
+      // Prefer gossip-advertised key first: it is the network source-of-truth for remote delivery.
+      // Local mirrored replicas can be stale/mixed across runtime switches.
+      if (env.gossip) {
+        const profiles = typeof env.gossip.getProfiles === 'function' ? env.gossip.getProfiles() : [];
+        const matches = profiles.filter((p: any) => p?.entityId === entityId);
+        for (const profile of matches) {
+          const candidates: Array<{ value: unknown; source: string }> = [
+            { value: profile?.metadata?.cryptoPublicKey, source: 'gossip.metadata.cryptoPublicKey' },
+          ];
+          for (const candidate of candidates) {
+            const key = normalizeX25519Hex(candidate.value) ?? normalizeX25519Base64(candidate.value);
+            if (key) return { key, source: candidate.source };
+          }
+        }
+      }
+
+      // Fallback: local replica key for same-rt scenarios or when gossip is stale.
+      const replica = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
+      const localCandidates: Array<{ value: unknown; source: string }> = [
+        { value: replica?.[1]?.state?.cryptoPublicKey, source: 'localReplica.state.cryptoPublicKey' },
+      ];
+      for (const candidate of localCandidates) {
+        const key = normalizeX25519Hex(candidate.value) ?? normalizeX25519Base64(candidate.value);
+        if (key) return { key, source: candidate.source };
+      }
+
+      return null;
+    };
+
     // Gather public keys for each HOP (all route entities EXCEPT sender at [0])
     // Sender never encrypts to self — only to intermediaries and recipient
     const entityPubKeys = new Map<string, string>();
+    const keySources = new Map<string, string>();
     const hops = route.slice(1); // Everyone except sender
     const missingKeys: string[] = [];
     for (const entityId of hops) {
-      // 1. Check local replica
-      const replica = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
-      if (replica && replica[1].state.cryptoPublicKey) {
-        entityPubKeys.set(entityId, replica[1].state.cryptoPublicKey);
+      const resolved = resolveEntityEncryptionKey(entityId);
+      if (resolved) {
+        entityPubKeys.set(entityId, resolved.key);
+        keySources.set(entityId, resolved.source);
         continue;
-      }
-      // 2. Check gossip profiles for remote entities
-      if (env.gossip) {
-        const profiles = typeof env.gossip.getProfiles === 'function' ? env.gossip.getProfiles() : [];
-        const profile = profiles.find((p: any) => p.entityId === entityId);
-        const gossipCryptoKey =
-          profile?.metadata?.cryptoPublicKey ||
-          profile?.metadata?.encryptionPubKey; // Compatibility: some peers may still publish only this field
-        if (gossipCryptoKey) {
-          entityPubKeys.set(entityId, gossipCryptoKey);
-          continue;
-        }
       }
       missingKeys.push(entityId);
     }
@@ -199,9 +289,16 @@ export async function handleHtlcPayment(
       console.warn(`⚠️ HTLC: Available keys: ${availableList}`);
       return { newState, outputs: [], mempoolOps: [] };
     }
+    const keyDebug = hops.map((entityId) => {
+      const key = entityPubKeys.get(entityId) || '';
+      const isHex = /^0x[0-9a-f]{64}$/i.test(key);
+      const source = keySources.get(entityId) || 'unknown';
+      return `${formatEntityId(entityId)}:${isHex ? 'hex32' : 'b64'}:len=${key.length}:src=${source}`;
+    }).join(' | ');
+    console.log(`🧅 HTLC-KEYS: ${keyDebug}`);
     const crypto = new NobleCryptoProvider();
 
-    envelope = await createOnionEnvelopes(route, secret, entityPubKeys, crypto);
+    envelope = await createOnionEnvelopes(route, secret, entityPubKeys, crypto, hopForwardAmounts);
     console.log(`🧅 ENVELOPE: ${crypto ? 'ENCRYPTED' : 'CLEARTEXT'} | hops=${hops.length} keys=${entityPubKeys.size} missing=[${missingKeys.map(e => formatEntityId(e))}]`);
   } catch (e) {
     logError("HTLC_PAYMENT", `❌ Envelope creation failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -217,7 +314,7 @@ export async function handleHtlcPayment(
       hashlock,
       timelock,
       revealBeforeHeight,
-      amount,
+      amount: senderLockAmount,
       tokenId,
       envelope  // Onion envelope (cleartext JSON in Phase 2)
     },
@@ -235,7 +332,7 @@ export async function handleHtlcPayment(
       lockId,
       accountId: nextHop, // Use counterparty ID as key (simpler than canonical)
       tokenId,
-      amount,
+      amount: senderLockAmount,
       hashlock,
       timelock,
       direction: 'outgoing',
@@ -243,7 +340,7 @@ export async function handleHtlcPayment(
     });
 
     addMessage(newState,
-      `🔒 HTLC: Locking ${amount} (token ${tokenId}) to ${formatEntityId(targetEntityId)} via ${route.length - 1} hops`
+      `🔒 HTLC: Recipient ${desiredRecipientAmount}, sender lock ${senderLockAmount} (fee ${totalFee}) to ${formatEntityId(targetEntityId)} via ${route.length - 1} hops`
     );
 
     // Trigger processing

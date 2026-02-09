@@ -114,3 +114,53 @@ export function bufferCompare(buf1: Buffer, buf2: Buffer): number {
 export function buffersEqual(buf1: Buffer, buf2: Buffer): boolean {
   return bufferCompare(buf1, buf2) === 0;
 }
+
+type TaggedValue =
+  | { __xlnType: 'BigInt'; value: string }
+  | { __xlnType: 'Map'; value: [unknown, unknown][] }
+  | { __xlnType: 'Set'; value: unknown[] }
+  | { __xlnType: 'Uint8Array'; value: number[] };
+
+const isTaggedValue = (value: unknown): value is TaggedValue =>
+  !!value &&
+  typeof value === 'object' &&
+  '__xlnType' in (value as Record<string, unknown>);
+
+const encodeTaggedValue = (value: unknown): unknown => {
+  if (typeof value === 'bigint') return { __xlnType: 'BigInt', value: value.toString() };
+  if (value instanceof Map) return { __xlnType: 'Map', value: Array.from(value.entries()) };
+  if (value instanceof Set) return { __xlnType: 'Set', value: Array.from(value.values()) };
+  if (value instanceof Uint8Array) return { __xlnType: 'Uint8Array', value: Array.from(value) };
+  return value;
+};
+
+const decodeTaggedValue = (value: unknown): unknown => {
+  if (!isTaggedValue(value)) return value;
+  if (value.__xlnType === 'BigInt') return BigInt(value.value);
+  if (value.__xlnType === 'Map') return new Map(value.value);
+  if (value.__xlnType === 'Set') return new Set(value.value);
+  if (value.__xlnType === 'Uint8Array') return new Uint8Array(value.value);
+  return value;
+};
+
+/**
+ * Deterministic JSON snapshot codec for runtime persistence.
+ * Preserves BigInt/Map/Set/Uint8Array across save/load.
+ */
+export function serializeTaggedJson(input: unknown, excludeKeys?: Set<string>): string {
+  const seen = new WeakSet<object>();
+  return JSON.stringify(input, (key, raw) => {
+    if (excludeKeys?.has(key)) return undefined;
+    if (typeof raw === 'function') return undefined;
+    const value = encodeTaggedValue(raw);
+    if (value && typeof value === 'object') {
+      if (seen.has(value as object)) return '[Circular]';
+      seen.add(value as object);
+    }
+    return value;
+  });
+}
+
+export function deserializeTaggedJson<T = unknown>(json: string): T {
+  return JSON.parse(json, (_key, value) => decodeTaggedValue(value)) as T;
+}

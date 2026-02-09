@@ -46,6 +46,7 @@ export type RuntimeWsMessage = {
   type: RuntimeWsMessageType;
   id?: string;
   from?: string;
+  fromEncryptionPubKey?: string;
   to?: string;
   timestamp?: number;
   payload?: unknown;

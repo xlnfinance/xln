@@ -86,7 +86,8 @@ export async function createEphemeralEntity(
   };
 
   // Apply runtime input
-  await xln.applyRuntimeInput(env, runtimeInput);
+  xln.enqueueRuntimeInput(env, runtimeInput);
+  await xln.process(env, []);
 
   return entityId;
 }

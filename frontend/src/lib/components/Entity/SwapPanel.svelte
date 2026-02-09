@@ -52,7 +52,7 @@
       const offerId = `swap-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
       const minFillRatio = percentToFillRatio(parseFloat(minFillPercent));
 
-      await xln.process(env, [{
+      xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [{
         entityId: tab.entityId,
         signerId: tab.signerId,
         entityTxs: [{
@@ -67,7 +67,7 @@
             minFillRatio,
           }
         }]
-      }]);
+      }] });
 
       console.log('📊 Swap offer placed:', offerId);
 
@@ -88,7 +88,7 @@
       const env = $xlnEnvironment;
       if (!env) throw new Error('XLN environment not ready');
 
-      await xln.process(env, [{
+      xln.enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [{
         entityId: tab.entityId,
         signerId: tab.signerId,
         entityTxs: [{
@@ -98,7 +98,7 @@
             counterpartyId: accountId, // accountId is the counterparty entity ID
           }
         }]
-      }]);
+      }] });
 
       console.log('🚫 Swap offer cancelled:', offerId);
     } catch (error) {

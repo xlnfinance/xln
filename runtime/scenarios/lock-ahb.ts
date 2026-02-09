@@ -1097,23 +1097,28 @@ export async function lockAhb(env: Env): Promise<void> {
       console.log('      Codex safety fixes may require more bilateral consensus rounds');
     }
 
-    // Verify deltas updated (payment settled with fee deduction)
-    const { calculateHtlcFeeAmount } = await import('../htlc-utils');
-    const htlcFeePayment1 = calculateHtlcFeeAmount(payment1);
+    // Verify deltas updated (recipient-exact HTLC semantics)
+    const { calculateRequiredInboundForDesiredForward } = await import('../htlc-utils');
+    const hubProfile = env.gossip?.getProfiles?.().find((p: any) => p?.entityId === hub.id);
+    const hubFeePpm = Number.isFinite(Number(hubProfile?.metadata?.routingFeePPM))
+      ? Math.max(0, Math.floor(Number(hubProfile?.metadata?.routingFeePPM)))
+      : 10;
+    const payment1SenderGross = calculateRequiredInboundForDesiredForward(payment1, hubFeePpm, 0n);
+    const htlcFeePayment1 = payment1SenderGross - payment1;
 
     console.log(`   💰 Delta verification after HTLC settlement:`);
-    console.log(`   A-H delta: ${ahDelta1} (expected: -${payment1})`);
-    console.log(`   H-B delta: ${hbDelta1} (expected: -${payment1 - htlcFeePayment1}, fee=${htlcFeePayment1})`);
+    console.log(`   A-H delta: ${ahDelta1} (expected: -${payment1SenderGross}, fee=${htlcFeePayment1})`);
+    console.log(`   H-B delta: ${hbDelta1} (expected: -${payment1})`);
 
     // Verify deltas (may be in progress with Codex fixes)
-    if (ahDelta1 === -payment1 && Math.abs(Number(hbDelta1 + (payment1 - htlcFeePayment1))) < 1e10) {
+    if (ahDelta1 === -payment1SenderGross && Math.abs(Number(hbDelta1 + payment1)) < 1e10) {
       console.log(`   ✅ Deltas correct - payment settled`);
       console.log(`   Hub HTLC fees: ${hubRepHtlc.state.htlcFeesEarned}`);
       console.log('   ✅ Onion routing + fees verified\n');
     } else {
       console.log(`   ⚠️  HTLC settlement in progress or delayed by Codex safety checks`);
-      console.log(`      A-H delta: ${ahDelta1} (expected: -${payment1})`);
-      console.log(`      H-B delta: ${hbDelta1} (expected: -${payment1 - htlcFeePayment1})\n`);
+      console.log(`      A-H delta: ${ahDelta1} (expected: -${payment1SenderGross})`);
+      console.log(`      H-B delta: ${hbDelta1} (expected: -${payment1})\n`);
     }
 
     // On-chain HTLC reveal (Sprites-style) - Bob broadcasts reveal to J
@@ -1210,25 +1215,25 @@ export async function lockAhb(env: Env): Promise<void> {
     await process(env);
     logPending();
 
-    // Verify total shift = $250K (A-H) and $250K minus HTLC fee (H-B)
-    // HTLC routing takes a fee on forwarded payments (payment1 only, payment2 is direct)
-    const htlcFee = calculateHtlcFeeAmount(payment1);
+    // Verify total shift with recipient-exact HTLC:
+    // A-H includes sender gross for payment1 + direct payment2; H-B tracks recipient net.
+    const htlcFee = payment1SenderGross - payment1;
 
     const ahDeltaFinal = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const hbDeltaFinal = getOffdelta(env, hub.id, bob.id, USDC_TOKEN_ID);
-    const expectedAHShift = -(payment1 + payment2); // -$250K (full amount from Alice)
-    const expectedHBShift = -(payment1 - htlcFee + payment2); // -$250K + fee (Hub keeps fee on forwarded payment)
+    const expectedAHShift = -(payment1SenderGross + payment2);
+    const expectedHBShift = -(payment1 + payment2);
 
     if (ahDeltaFinal !== expectedAHShift) {
       throw new Error(`❌ ASSERTION FAILED: A-H shift=${ahDeltaFinal}, expected ${expectedAHShift}`);
     }
     if (hbDeltaFinal !== expectedHBShift) {
-      throw new Error(`❌ ASSERTION FAILED: H-B shift=${hbDeltaFinal}, expected ${expectedHBShift} (includes fee=${htlcFee})`);
+      throw new Error(`❌ ASSERTION FAILED: H-B shift=${hbDeltaFinal}, expected ${expectedHBShift}`);
     }
     console.log(`✅ Total shift verified: A-H=${ahDeltaFinal}, H-B=${hbDeltaFinal} (fee=${htlcFee})`);
 
-    // Verify Bob's view (Bob receives payment1 minus fee + payment2)
-    const expectedBobReceived = (payment1 - htlcFee) + payment2;
+    // Verify Bob's view (recipient-exact amount for HTLC + direct payment2)
+    const expectedBobReceived = payment1 + payment2;
     const [, bobRep] = findReplica(env, bob.id);
     const bobHubAcc = bobRep.state.accounts.get(bob.id);
     const bobDelta = bobHubAcc?.deltas.get(USDC_TOKEN_ID);
@@ -1305,7 +1310,7 @@ export async function lockAhb(env: Env): Promise<void> {
     // B-H should have shifted +$50K (Bob paid Hub, reducing Hub's debt)
     // Account for the HTLC fee already retained on payment1.
     // A-H should NOT have changed yet (Hub forwarding is in next frame)
-    const expectedBH19 = -(payment1 - htlcFee + payment2) + reversePayment; // -$200K + fee kept
+    const expectedBH19 = -(payment1 + payment2) + reversePayment;
     if (bhDelta19 !== expectedBH19) {
       throw new Error(`B-H shift unexpected: got ${bhDelta19}, expected ${expectedBH19}`);
     }
@@ -1329,17 +1334,16 @@ export async function lockAhb(env: Env): Promise<void> {
     const ahDeltaRev = getOffdelta(env, alice.id, hub.id, USDC_TOKEN_ID);
     const bhDeltaRev = getOffdelta(env, bob.id, hub.id, USDC_TOKEN_ID);
 
-    // After $250K A→B (with HTLC fee on forwarded payment1) and $50K B→A:
-    // A-H: -$250K + $50K = -$200K (Alice's debt reduced - no fee on her side)
-    // B-H: -(payment1-fee + payment2) + $50K = Hub's debt to Bob
-    const expectedAH = -(payment1 + payment2) + reversePayment; // -$200K
-    const expectedBH = -(payment1 - htlcFee + payment2) + reversePayment; // -$200K + fee kept
+    // After recipient-exact HTLC + direct + reverse:
+    // A-H includes initial sender gross fee burden.
+    const expectedAH = -(payment1SenderGross + payment2) + reversePayment;
+    const expectedBH = -(payment1 + payment2) + reversePayment;
 
     if (ahDeltaRev !== expectedAH) {
       throw new Error(`❌ REVERSE PAYMENT FAIL: A-H offdelta=${ahDeltaRev}, expected ${expectedAH}`);
     }
     if (bhDeltaRev !== expectedBH) {
-      throw new Error(`❌ REVERSE PAYMENT FAIL: B-H offdelta=${bhDeltaRev}, expected ${expectedBH} (fee=${htlcFee})`);
+      throw new Error(`❌ REVERSE PAYMENT FAIL: B-H offdelta=${bhDeltaRev}, expected ${expectedBH}`);
     }
     console.log(`✅ Reverse payment B→H→A verified: A-H=${ahDeltaRev}, B-H=${bhDeltaRev} (fee=${htlcFee})`);
 

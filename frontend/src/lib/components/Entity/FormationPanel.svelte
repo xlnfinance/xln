@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
-  import { xlnFunctions, getXLN, xlnEnvironment } from '../../stores/xlnStore';
+  import { xlnFunctions, getXLN, xlnEnvironment, enqueueAndProcess } from '../../stores/xlnStore';
   import { activeVault, vaultOperations } from '../../stores/vaultStore';
   import { tabOperations } from '../../stores/tabStore';
   import { getEntityEnv, hasEntityEnvContext } from '$lib/view/components/entity/shared/EntityEnvContext';
@@ -190,13 +190,10 @@
       }));
 
       // Apply to runtime
-      const result = await xln.applyRuntimeInput(currentEnv as any, {
+      await enqueueAndProcess(currentEnv as any, {
         runtimeTxs: serverTxs,
         entityInputs: []
       });
-
-      // Process outbox
-      await xln.process(currentEnv as any, result.entityOutbox);
 
       success = `Entity created: ${formatShortId(entityId)}`;
 

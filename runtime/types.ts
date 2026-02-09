@@ -1608,6 +1608,7 @@ export interface Env {
   timestamp: number;
   runtimeSeed?: string; // BrainVault seed backing this runtime (plaintext, dev mode)
   runtimeId?: string; // Runtime identity (usually signer1 address)
+  lastProcessEnteredAt?: number; // Wall-clock timestamp of most recent process() entry
   dbNamespace?: string; // DB namespace for per-runtime persistence (defaults to runtimeId)
   // Runtime mempool (runtime-level queue; WAL-like)
   // NOTE: runtimeInput is deprecated alias - both point to same object
@@ -1621,6 +1622,7 @@ export interface Env {
     loopActive?: boolean;
     stopLoop?: (() => void) | null;
     lastFrameAt?: number;
+    processingPromise?: Promise<void> | null;
     p2p?: any;
     pendingP2PConfig?: any;
     lastP2PConfig?: any;
@@ -1642,6 +1644,7 @@ export interface Env {
       runtimeId: string;
       seenAt: number;
     }>;
+    directEntityInputDispatch?: ((targetRuntimeId: string, input: RoutedEntityInput) => boolean) | null;
   };
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: any; // Gossip layer for network profiles

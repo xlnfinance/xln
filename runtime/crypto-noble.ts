@@ -35,8 +35,23 @@ export class NobleCryptoProvider implements CryptoProvider {
     const ephemeralPub = ephemeral.publicKey;
 
     // ECDH: derive shared secret
-    const recipientPubBytes = this.base64ToBytes(recipientPubKey);
-    const sharedSecret = x25519.getSharedSecret(ephemeralPriv, recipientPubBytes);
+    const recipientPubBytes = this.parseKeyBytes(recipientPubKey, 'recipient public key');
+    if (recipientPubBytes.length !== 32) {
+      throw new Error(`Invalid recipient public key length: expected 32, got ${recipientPubBytes.length}`);
+    }
+    let sharedSecret: Uint8Array;
+    try {
+      sharedSecret = x25519.getSharedSecret(ephemeralPriv, recipientPubBytes);
+    } catch (error) {
+      const preview = recipientPubKey.slice(0, 24);
+      console.error('[NOBLE_ENCRYPT_FAIL]', {
+        error: error instanceof Error ? error.message : String(error),
+        rawKeyLength: recipientPubKey.length,
+        parsedKeyLength: recipientPubBytes.length,
+        preview,
+      });
+      throw error;
+    }
 
     // Derive ChaCha20-Poly1305 key from shared secret (use first 32 bytes)
     const key = sharedSecret.slice(0, 32);
@@ -66,7 +81,10 @@ export class NobleCryptoProvider implements CryptoProvider {
     const ciphertext = packed.slice(44);
 
     // ECDH: derive shared secret
-    const privKeyBytes = this.base64ToBytes(privateKey);
+    const privKeyBytes = this.parseKeyBytes(privateKey, 'private key');
+    if (privKeyBytes.length !== 32) {
+      throw new Error(`Invalid private key length: expected 32, got ${privKeyBytes.length}`);
+    }
     const sharedSecret = x25519.getSharedSecret(privKeyBytes, ephemeralPub);
 
     // Derive ChaCha20-Poly1305 key
@@ -94,6 +112,37 @@ export class NobleCryptoProvider implements CryptoProvider {
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {
       bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  // Accept both modern hex (0x + 64 chars) and legacy/base64 key encodings.
+  private parseKeyBytes(raw: string, label: string): Uint8Array {
+    const key = raw.trim();
+    if (!key) throw new Error(`Missing ${label}`);
+
+    const hex = key.startsWith('0x') ? key.slice(2) : key;
+    if (/^[0-9a-fA-F]{64}$/.test(hex)) {
+      const out = new Uint8Array(32);
+      for (let i = 0; i < 32; i++) {
+        const v = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+        if (!Number.isFinite(v)) throw new Error(`Invalid hex ${label}`);
+        out[i] = v;
+      }
+      return out;
+    }
+
+    if (key.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(key)) {
+      throw new Error(`Unsupported ${label} format`);
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = this.base64ToBytes(key);
+    } catch {
+      throw new Error(`Unsupported ${label} format`);
+    }
+    if (bytes.length !== 32) {
+      throw new Error(`Invalid ${label} length: expected 32, got ${bytes.length}`);
     }
     return bytes;
   }

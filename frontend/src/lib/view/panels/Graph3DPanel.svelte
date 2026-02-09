@@ -6053,8 +6053,8 @@ let vrHammer: VRHammer | null = null;
       triggerEntityActivity(job.from);
       triggerEntityActivity(job.to);
 
-      // Process the payment (COPY EXACT CALL from PaymentPanel)
-      await XLN.process(env, [paymentInput]);
+      // Queue the payment through runtime ingress (single-writer loop processes it)
+      (XLN as any).enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [paymentInput] });
 
       // Add to activity ticker AFTER successful processing
       recentActivity = [{

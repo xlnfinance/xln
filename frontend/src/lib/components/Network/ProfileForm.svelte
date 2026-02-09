@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { getXLN, xlnEnvironment } from '../../stores/xlnStore';
+  import { getXLN, xlnEnvironment, enqueueAndProcess } from '../../stores/xlnStore';
   import { tabs } from '../../stores/tabStore';
   import MultiSelect from 'svelte-multiselect';
 
@@ -121,7 +121,7 @@
         signature: '', // TODO: Add proper signature
       };
 
-      await xln.applyRuntimeInput(env, {
+      await enqueueAndProcess(env, {
         runtimeTxs: [],
         entityInputs: [entityInput],
       });
