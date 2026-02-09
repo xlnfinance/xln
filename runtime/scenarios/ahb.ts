@@ -1908,7 +1908,7 @@ export async function ahb(env: Env): Promise<void> {
     const aliceIsLeftAH6 = isLeft(alice.id, hub.id);
     const creditField = aliceIsLeftAH6 ? 'rightCreditLimit' : 'leftCreditLimit';
     const creditApplied = aliceDelta?.[creditField] === phase6Credit && hubDelta?.[creditField] === phase6Credit;
-    const noPending = !aliceAccount.pendingFrame && !hubAccount.pendingFrame;
+    const noPending = !aliceAccount.proposal && !hubAccount.proposal;
     const mempoolClear = (aliceAccount.mempool.length === 0) && (hubAccount.mempool.length === 0);
     return Boolean(creditApplied && noPending && mempoolClear);
   }, 8, 'Phase 6 A→H credit convergence');
@@ -1975,8 +1975,8 @@ export async function ahb(env: Env): Promise<void> {
   const hubAccountAfterSubmit = hubRepAfterSubmit.state.accounts.get(alice.id);
 
   console.log(`\n🔍 DEBUG: Account state after simultaneous submit:`);
-  console.log(`   Alice's view: mempool=${aliceAccountAfterSubmit?.mempool.length || 0}, pending=${aliceAccountAfterSubmit?.pendingFrame ? 'h' + aliceAccountAfterSubmit.pendingFrame.height : 'none'}`);
-  console.log(`   Hub's view:   mempool=${hubAccountAfterSubmit?.mempool.length || 0}, pending=${hubAccountAfterSubmit?.pendingFrame ? 'h' + hubAccountAfterSubmit.pendingFrame.height : 'none'}`);
+  console.log(`   Alice's view: mempool=${aliceAccountAfterSubmit?.mempool.length || 0}, pending=${aliceAccountAfterSubmit?.proposal ? 'h' + aliceAccountAfterSubmit.proposal.pendingFrame.height : 'none'}`);
+  console.log(`   Hub's view:   mempool=${hubAccountAfterSubmit?.mempool.length || 0}, pending=${hubAccountAfterSubmit?.proposal ? 'h' + hubAccountAfterSubmit.proposal.pendingFrame.height : 'none'}`);
 
   if (aliceAccountAfterSubmit?.mempool) {
     console.log(`   Alice mempool txs: [${aliceAccountAfterSubmit.mempool.map((t: any) => t.type).join(', ')}]`);
@@ -2036,7 +2036,7 @@ export async function ahb(env: Env): Promise<void> {
         const [, hubRep] = findReplica(env, hub.id);
         const aliceAccount = aliceRep.state.accounts.get(hub.id);
         const hubAccount = hubRep.state.accounts.get(alice.id);
-        const noPendingFrames = !aliceAccount?.pendingFrame && !hubAccount?.pendingFrame;
+        const noPendingFrames = !aliceAccount?.proposal && !hubAccount?.proposal;
         const noPendingOutputs = (env.pendingOutputs?.length || 0) === 0;
         return Boolean(noPendingFrames && noPendingOutputs);
       }, 8, 'Phase 6 ACK drain');
@@ -2190,8 +2190,8 @@ export async function ahb(env: Env): Promise<void> {
         hubDelta.collateral === disputeCollateralTarget &&
         hubDelta.ondelta === disputeOndeltaTarget;
       const noPending =
-        !bobAcc?.pendingFrame &&
-        !hubAcc?.pendingFrame &&
+        !bobAcc?.proposal &&
+        !hubAcc?.proposal &&
         (bobAcc?.mempool.length || 0) === 0 &&
         (hubAcc?.mempool.length || 0) === 0;
       return deltasOk && noPending;
@@ -2250,8 +2250,8 @@ export async function ahb(env: Env): Promise<void> {
       const delta = bobAcc?.deltas.get(USDC_TOKEN_ID);
       const offdeltaOk = delta?.offdelta === disputeOffdeltaTarget;
       const noPendingFrames =
-        !bobAcc?.pendingFrame &&
-        !findReplica(env, hub.id)[1].state.accounts.get(bob.id)?.pendingFrame;
+        !bobAcc?.proposal &&
+        !findReplica(env, hub.id)[1].state.accounts.get(bob.id)?.proposal;
       return Boolean(offdeltaOk && noPendingFrames);
     }, 12, 'Dispute offdelta adjustment');
   }
@@ -2612,7 +2612,7 @@ export async function ahb(env: Env): Promise<void> {
     const [, hubRep] = findReplica(env, hub.id);
     const bobAcc = bobRep.state.accounts.get(hub.id);
     const hubAcc = hubRep.state.accounts.get(bob.id);
-    return Boolean(bobAcc && hubAcc && !bobAcc.pendingFrame && !hubAcc.pendingFrame);
+    return Boolean(bobAcc && hubAcc && !bobAcc.proposal && !hubAcc.proposal);
   }, 12, 'Counter-dispute bump commit');
 
   const [, bobAfterBump] = findReplica(env, bob.id);
@@ -2847,7 +2847,7 @@ export async function ahb(env: Env): Promise<void> {
           const [, hubRep] = findReplica(env, hub.id);
           const aliceAccount = aliceRep.state.accounts.get(hub.id);
           const hubAccount = hubRep.state.accounts.get(alice.id);
-          const noPendingFrames = !aliceAccount?.pendingFrame && !hubAccount?.pendingFrame;
+          const noPendingFrames = !aliceAccount?.proposal && !hubAccount?.proposal;
           const mempoolClear = (aliceAccount?.mempool.length === 0) && (hubAccount?.mempool.length === 0);
           const noPendingOutputs = (env.pendingOutputs?.length || 0) === 0;
           return Boolean(noPendingFrames && mempoolClear && noPendingOutputs);
@@ -2860,7 +2860,7 @@ export async function ahb(env: Env): Promise<void> {
       const [, hubRep] = findReplica(env, hub.id);
       const aliceAccount = aliceRep.state.accounts.get(hub.id);
       const hubAccount = hubRep.state.accounts.get(alice.id);
-      const noPendingFrames = !aliceAccount?.pendingFrame && !hubAccount?.pendingFrame;
+      const noPendingFrames = !aliceAccount?.proposal && !hubAccount?.proposal;
       const mempoolClear = (aliceAccount?.mempool.length === 0) && (hubAccount?.mempool.length === 0);
       const noPendingOutputs = (env.pendingOutputs?.length || 0) === 0;
       return Boolean(noPendingFrames && mempoolClear && noPendingOutputs);
@@ -3156,7 +3156,7 @@ export async function ahb(env: Env): Promise<void> {
       const hubAccount = hubRep.state.accounts.get(carol.id);
       const carolDelta = carolAccount?.deltas.get(USDC_TOKEN_ID);
       if (!carolAccount || !hubAccount || !carolDelta) return false;
-      const noPendingFrames = !carolAccount.pendingFrame && !hubAccount.pendingFrame;
+      const noPendingFrames = !carolAccount.proposal && !hubAccount.proposal;
       const mempoolClear = carolAccount.mempool.length === 0 && hubAccount.mempool.length === 0;
       return noPendingFrames && mempoolClear && carolDelta.collateral === 0n && carolDelta.ondelta === 0n;
     }, 60, 'Carol cooperative close finalize');

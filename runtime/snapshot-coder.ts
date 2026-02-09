@@ -12,7 +12,7 @@ const createSafeJsonReplacer = () => {
   return (key: string, value: any) => {
     // Skip fields that may contain cycles (ethers providers, validation state)
     if (key === 'clonedForValidation' || key === 'jurisdiction' || key === 'provider' || key === 'ethersProvider') {
-      return undefined;
+      return undefined; // clonedForValidation is now inside proposal.clonedForValidation
     }
     // Handle Maps BEFORE cycle detection (Map entries need processing)
     if (value instanceof Map) {
@@ -47,7 +47,7 @@ const removeCycles = (obj: any, seen = new WeakSet()): any => {
     return { _dataType: 'BigInt', value: obj.toString() };
   }
 
-  // Skip known problematic keys
+  // Skip known problematic keys (clonedForValidation now inside proposal.clonedForValidation)
   if (obj.clonedForValidation !== undefined) {
     const { clonedForValidation, ...rest } = obj;
     return removeCycles(rest, seen);

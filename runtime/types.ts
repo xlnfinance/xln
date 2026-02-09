@@ -930,6 +930,14 @@ export interface HtlcRoute {
   createdTimestamp: number;
 }
 
+/** Bundled proposal state - couples fields that must exist/not-exist together */
+export interface ProposalState {
+  pendingFrame: AccountFrame;
+  pendingSignatures: string[];
+  pendingAccountInput: AccountInput;
+  clonedForValidation?: AccountMachine;
+}
+
 export interface AccountMachine {
   // CANONICAL REPRESENTATION (like Channel.ts - both entities store IDENTICAL structure)
   leftEntity: string;   // Lower entity ID (canonical left)
@@ -955,9 +963,7 @@ export interface AccountMachine {
 
   // Frame-based consensus (like old_src Channel, consistent with entity frames)
   currentHeight: number; // Renamed from currentFrameId for S/E/A consistency
-  pendingFrame?: AccountFrame;
-  pendingSignatures: string[];
-  pendingAccountInput?: AccountInput; // Cached outbound frame input for resend/nudge
+  proposal?: ProposalState; // Bundled pending proposal (frame + sigs + input + clone)
 
   // Rollback support for bilateral disagreements
   rollbackCount: number;
@@ -970,9 +976,6 @@ export interface AccountMachine {
   lastFinalizedJHeight: number;
 
   // Removed isProposer - use isLeft() function like old_src Channel.ts instead
-
-  // Cloned state for validation before committing (replaces dryRun)
-  clonedForValidation?: AccountMachine;
 
   // Proof structures for dispute resolution
   proofHeader: {

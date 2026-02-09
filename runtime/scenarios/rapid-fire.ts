@@ -259,7 +259,7 @@ export async function rapidFire(env: Env): Promise<void> {
   for (const [, replica] of env.eReplicas) {
     for (const [, account] of replica.state.accounts) {
       totalMempool += account.mempool.length;
-      if (account.pendingFrame) totalPending++;
+      if (account.proposal) totalPending++;
     }
   }
 

@@ -222,7 +222,7 @@ export async function proposeAccountFrame(
   const quiet = env.quietRuntimeLogs === true;
   if (!quiet) {
     console.log(`🚀 E-MACHINE: Proposing account frame for ${counterparty.slice(-4)}`);
-    console.log(`🚀 E-MACHINE: Account state - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, currentHeight=${accountMachine.currentHeight}`);
+    console.log(`🚀 E-MACHINE: Account state - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.proposal}, currentHeight=${accountMachine.currentHeight}`);
   }
 
   const events: string[] = [];
@@ -239,8 +239,8 @@ export async function proposeAccountFrame(
   }
 
   // Check if we have a pending frame waiting for ACK
-  if (accountMachine.pendingFrame) {
-    if (!quiet) console.log(`⏳ E-MACHINE: Still waiting for ACK on pending frame #${accountMachine.pendingFrame.height}`);
+  if (accountMachine.proposal) {
+    if (!quiet) console.log(`⏳ E-MACHINE: Still waiting for ACK on pending frame #${accountMachine.proposal.pendingFrame.height}`);
     return { success: false, error: 'Waiting for ACK on pending frame', events };
   }
 
@@ -531,10 +531,6 @@ export async function proposeAccountFrame(
 
   console.log(`✅ Signed frame + dispute proof for account ${accountMachine.proofHeader.toEntity.slice(-4)}`);
 
-  // Set pending state (no longer storing clone - re-execution on commit)
-  accountMachine.pendingFrame = newFrame;
-  console.log(`🔒 PROPOSE: Account ${accountMachine.proofHeader.fromEntity.slice(-4)}:${accountMachine.proofHeader.toEntity.slice(-4)} pendingFrame=${newFrame.height}, txs=${newFrame.accountTxs.length}`);
-
   // Clear mempool (failed txs already removed above)
   accountMachine.mempool = [];
 
@@ -554,7 +550,14 @@ export async function proposeAccountFrame(
     disputeProofNonce: accountMachine.proofHeader.cooperativeNonce, // nonce at which dispute proof was signed (before increment)
   };
   if (!skipNonceIncrement) ++accountMachine.proofHeader.cooperativeNonce;
-  accountMachine.pendingAccountInput = accountInput;
+
+  // Bundle all pending state into proposal
+  accountMachine.proposal = {
+    pendingFrame: newFrame,
+    pendingSignatures: [],
+    pendingAccountInput: accountInput,
+  };
+  console.log(`🔒 PROPOSE: Account ${accountMachine.proofHeader.fromEntity.slice(-4)}:${accountMachine.proofHeader.toEntity.slice(-4)} pendingFrame=${newFrame.height}, txs=${newFrame.accountTxs.length}`);
 
   // Collect hashes for entity-quorum signing (multi-signer support)
   const hashesToSign: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }> = [
@@ -600,7 +603,7 @@ export async function handleAccountInput(
   // MULTI-SIGNER: Hashes that need entity-quorum signing
   hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
 }> {
-  console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, type=${input.type}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`);
+  console.log(`📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, type=${input.type}, pendingFrame=${accountMachine.proposal ? `h${accountMachine.proposal.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`);
   console.log(`📨 A-MACHINE INPUT: type=${input.type}, height=${isFrameInput(input) ? input.height : 'none'}, hasACK=${input.type === 'ack'}, hasNewFrame=${isFrameInput(input) ? !!input.newAccountFrame : false}`);
 
   const events: string[] = [];
@@ -625,11 +628,11 @@ export async function handleAccountInput(
   }
 
   // Handle pending frame confirmation
-  if (accountMachine.pendingFrame && input.type === 'ack' && input.height === accountMachine.pendingFrame.height && input.prevHanko) {
+  if (accountMachine.proposal && input.type === 'ack' && input.height === accountMachine.proposal.pendingFrame.height && input.prevHanko) {
     console.log(`✅ Received confirmation for pending frame ${input.height}`);
     console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}`);
 
-    const frameHash = accountMachine.pendingFrame.stateHash;
+    const frameHash = accountMachine.proposal.pendingFrame.stateHash;
 
     // HANKO ACK VERIFICATION: Verify hanko instead of single signature
     const ackHanko = input.prevHanko;
@@ -656,28 +659,29 @@ export async function handleAccountInput(
     // ACK is valid - proceed
     ackProcessed = true;
     {
+      const pf = accountMachine.proposal!.pendingFrame;
       // CRITICAL DEBUG: Log what we're committing
-      console.log(`🔒 COMMIT: Frame ${accountMachine.pendingFrame.height}`);
-      console.log(`  Transactions: ${accountMachine.pendingFrame.accountTxs.length}`);
-      console.log(`  Transactions detail:`, accountMachine.pendingFrame.accountTxs);
-      console.log(`  TokenIds: ${accountMachine.pendingFrame.tokenIds.join(',')}`);
-      console.log(`  Deltas: ${accountMachine.pendingFrame.deltas.map(d => `${d}`).join(',')}`);
+      console.log(`🔒 COMMIT: Frame ${pf.height}`);
+      console.log(`  Transactions: ${pf.accountTxs.length}`);
+      console.log(`  Transactions detail:`, pf.accountTxs);
+      console.log(`  TokenIds: ${pf.tokenIds.join(',')}`);
+      console.log(`  Deltas: ${pf.deltas.map(d => `${d}`).join(',')}`);
       console.log(`  StateHash: ${frameHash.slice(0,16)}...`);
 
       // PROPOSER COMMIT: Re-execute txs on REAL state (Channel.ts pattern)
       // This eliminates fragile manual field copying
       {
         const { counterparty: cpForLog } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
-        console.log(`🔓 PROPOSER-COMMIT: Re-executing ${accountMachine.pendingFrame.accountTxs.length} txs for ${cpForLog.slice(-4)}`);
+        console.log(`🔓 PROPOSER-COMMIT: Re-executing ${pf.accountTxs.length} txs for ${cpForLog.slice(-4)}`);
 
         // Re-execute all frame txs on REAL accountMachine (deterministic)
         // CRITICAL: Use frame.timestamp for determinism (HTLC validation must use agreed consensus time)
-        const pendingJHeight = accountMachine.pendingFrame.jHeight ?? accountMachine.currentHeight;
-        for (const tx of accountMachine.pendingFrame.accountTxs) {
-          const commitResult = await processAccountTx(accountMachine, tx, accountMachine.pendingFrame.byLeft!, accountMachine.pendingFrame.timestamp, pendingJHeight, false);
+        const pendingJHeight = pf.jHeight ?? accountMachine.currentHeight;
+        for (const tx of pf.accountTxs) {
+          const commitResult = await processAccountTx(accountMachine, tx, pf.byLeft!, pf.timestamp, pendingJHeight, false);
           if (!commitResult.success) {
             console.error(`❌ PROPOSER-COMMIT FAILED for tx type=${tx.type}: ${commitResult.error}`);
-            throw new Error(`Frame ${accountMachine.pendingFrame.height} commit failed: ${tx.type} - ${commitResult.error}`);
+            throw new Error(`Frame ${pf.height} commit failed: ${tx.type} - ${commitResult.error}`);
           }
           if (commitResult.timedOutHashlock) {
             timedOutHashlocks.push(commitResult.timedOutHashlock);
@@ -694,12 +698,9 @@ export async function handleAccountInput(
             rightCreditLimit: delta.rightCreditLimit?.toString(),
           })));
 
-        // Clean up clone (no longer needed with re-execution)
-        delete accountMachine.clonedForValidation;
-
         // CRITICAL: Deep-copy entire pendingFrame to prevent mutation issues
-        accountMachine.currentFrame = structuredClone(accountMachine.pendingFrame);
-        accountMachine.currentHeight = accountMachine.pendingFrame.height;
+        accountMachine.currentFrame = structuredClone(pf);
+        accountMachine.currentHeight = pf.height;
         accountMachine.proofHeader.disputeNonce = accountMachine.currentHeight;
 
         if (input.newDisputeHanko) {
@@ -734,18 +735,16 @@ export async function handleAccountInput(
         }
 
         // Add confirmed frame to history
-        accountMachine.frameHistory.push({...accountMachine.pendingFrame});
+        accountMachine.frameHistory.push({...pf});
         // Cap history at 10 frames to prevent snapshot bloat
         if (accountMachine.frameHistory.length > 10) {
           accountMachine.frameHistory.shift();
         }
-        console.log(`📚 Frame ${accountMachine.pendingFrame.height} added to history (total: ${accountMachine.frameHistory.length})`);
+        console.log(`📚 Frame ${pf.height} added to history (total: ${accountMachine.frameHistory.length})`);
       }
 
       // Clear pending state
-      delete accountMachine.pendingFrame;
-      delete accountMachine.pendingAccountInput;
-      delete accountMachine.clonedForValidation;
+      delete accountMachine.proposal;
       accountMachine.rollbackCount = Math.max(0, accountMachine.rollbackCount - 1); // Successful confirmation reduces rollback
       if (accountMachine.rollbackCount === 0) {
         delete accountMachine.lastRollbackFrameHash; // Reset deduplication on full resolution
@@ -808,7 +807,7 @@ export async function handleAccountInput(
 
     // CHANNEL.TS REFERENCE: Lines 138-165 - Proper rollback logic for simultaneous proposals
     // Handle simultaneous proposals when both sides send same height
-    if (accountMachine.pendingFrame && receivedFrame.height === accountMachine.pendingFrame.height) {
+    if (accountMachine.proposal && receivedFrame.height === accountMachine.proposal.pendingFrame.height) {
       console.log(`🔄 SIMULTANEOUS-PROPOSALS: Both proposed frame ${receivedFrame.height}`);
 
       // Deterministic tiebreaker: Left always wins (CHANNEL.TS REFERENCE: Line 140-157)
@@ -847,26 +846,25 @@ export async function handleAccountInput(
         } else if (accountMachine.rollbackCount === 0) {
           // First rollback - restore transactions to mempool before discarding frame
           let restoredTxCount = 0;
-          if (accountMachine.pendingFrame) {
-            restoredTxCount = accountMachine.pendingFrame.accountTxs.length;
+          if (accountMachine.proposal) {
+            const rpf = accountMachine.proposal.pendingFrame;
+            restoredTxCount = rpf.accountTxs.length;
             console.log(`📥 RIGHT-ROLLBACK: Restoring ${restoredTxCount} txs to mempool`);
             // CRITICAL: Re-add transactions to mempool (Channel.ts pattern)
-            accountMachine.mempool.unshift(...accountMachine.pendingFrame.accountTxs);
+            accountMachine.mempool.unshift(...rpf.accountTxs);
             console.log(`📥 Mempool now has ${accountMachine.mempool.length} txs after rollback restore`);
 
             // EMIT EVENT: Track rollback for debugging
-            events.push(`🔄 ROLLBACK: Discarded our frame ${accountMachine.pendingFrame.height}, restored ${restoredTxCount} txs to mempool`);
+            events.push(`🔄 ROLLBACK: Discarded our frame ${rpf.height}, restored ${restoredTxCount} txs to mempool`);
             env.info('consensus', 'ROLLBACK', {
               fromEntity: accountMachine.proofHeader.fromEntity,
               toEntity: accountMachine.proofHeader.toEntity,
-              height: accountMachine.pendingFrame.height,
+              height: rpf.height,
               restoredTxCount,
             }, accountMachine.proofHeader.fromEntity);
           }
 
-          delete accountMachine.pendingFrame;
-          delete accountMachine.pendingAccountInput;
-          delete accountMachine.clonedForValidation;
+          delete accountMachine.proposal;
           accountMachine.rollbackCount++;
           accountMachine.lastRollbackFrameHash = receivedHash; // Track this rollback
           console.log(`📥 RIGHT-ROLLBACK: Accepting left's frame (rollbacks: ${accountMachine.rollbackCount})`);
@@ -1264,8 +1262,8 @@ export async function handleAccountInput(
       disputeProofNonce: ackSignedCooperativeNonce, // nonce at which ACK's dispute proof was signed
     };
 
-    if (HEAVY_LOGS) console.log(`🔍 BATCH-CHECK for account ${input.fromEntityId.slice(-4)}: mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map(tx => tx.type).join(',')}]`);
-    if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
+    if (HEAVY_LOGS) console.log(`🔍 BATCH-CHECK for account ${input.fromEntityId.slice(-4)}: mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.proposal}, mempoolTxs=[${accountMachine.mempool.map(tx => tx.type).join(',')}]`);
+    if (accountMachine.mempool.length > 0 && !accountMachine.proposal) {
       console.log(`📦 BATCH-OPTIMIZATION: Sending ACK + new frame in single message (Channel.ts pattern)`);
 
       // Pass skipNonceIncrement=true since we'll increment for the whole batch below
@@ -1358,8 +1356,8 @@ export function shouldProposeFrame(accountMachine: AccountMachine): boolean {
   // Should propose if:
   // 1. Has transactions in mempool
   // 2. No pending frame waiting for confirmation
-  const should = accountMachine.mempool.length > 0 && !accountMachine.pendingFrame;
-  console.error(`   shouldProposeFrame: mempool=${accountMachine.mempool.length}, pending=${!!accountMachine.pendingFrame}, result=${should}`);
+  const should = accountMachine.mempool.length > 0 && !accountMachine.proposal;
+  console.error(`   shouldProposeFrame: mempool=${accountMachine.mempool.length}, pending=${!!accountMachine.proposal}, result=${should}`);
   return should;
 }
 

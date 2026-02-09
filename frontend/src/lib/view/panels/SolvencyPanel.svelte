@@ -53,8 +53,8 @@
             }
 
             // Sum pending collateral from pendingFrame (if exists)
-            if (account.pendingFrame?.fullDeltaStates) {
-              for (const delta of account.pendingFrame.fullDeltaStates) {
+            if (account.proposal?.pendingFrame.fullDeltaStates) {
+              for (const delta of account.proposal.pendingFrame.fullDeltaStates) {
                 pendingCollateral += delta.collateral || 0n;
               }
             }

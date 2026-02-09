@@ -57,8 +57,8 @@ const assertAccountFrames = async (
     }
   }
 
-  if (account.pendingFrame) {
-    const pending = account.pendingFrame;
+  if (account.proposal) {
+    const pending = account.proposal.pendingFrame;
     const expectedHeight = account.currentHeight + 1;
     if (pending.height !== expectedHeight) {
       throw new Error(`[STRICT] ${label}: pendingFrame.height ${pending.height} != expected ${expectedHeight}`);

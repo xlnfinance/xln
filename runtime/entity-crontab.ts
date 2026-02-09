@@ -122,17 +122,18 @@ async function checkAccountTimeoutsHandler(_env: Env, replica: EntityReplica): P
   const timedOutAccounts: Array<{ counterpartyId: string; frameHeight: number }> = [];
 
   for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
-    if (!accountMachine.pendingFrame) continue;
+    if (!accountMachine.proposal) continue;
+    const pf = accountMachine.proposal.pendingFrame;
 
     // Check if any htlc_lock in the pending frame has expired
     // Cancel ONLY when hashlock expires — until then, counterparty could still claim
     let hasExpiredHtlc = false;
-    for (const tx of accountMachine.pendingFrame.accountTxs) {
+    for (const tx of pf.accountTxs) {
       if (tx.type === 'htlc_lock') {
         const heightExpired = currentHeight > 0 && currentHeight > tx.data.revealBeforeHeight;
         const timestampExpired = now > Number(tx.data.timelock);
         if (heightExpired || timestampExpired) {
-          console.warn(`⏰ HTLC-IN-PENDING-EXPIRED: Account ${counterpartyId.slice(-4)} frame h${accountMachine.pendingFrame.height}, lock ${tx.data.lockId.slice(0,12)}... expired`);
+          console.warn(`⏰ HTLC-IN-PENDING-EXPIRED: Account ${counterpartyId.slice(-4)} frame h${pf.height}, lock ${tx.data.lockId.slice(0,12)}... expired`);
           hasExpiredHtlc = true;
           break;
         }
@@ -142,13 +143,13 @@ async function checkAccountTimeoutsHandler(_env: Env, replica: EntityReplica): P
     if (hasExpiredHtlc) {
       timedOutAccounts.push({
         counterpartyId,
-        frameHeight: accountMachine.pendingFrame.height,
+        frameHeight: pf.height,
       });
     } else {
       // Non-HTLC pending frames: dispute suggestion after 30s
-      const frameAge = now - accountMachine.pendingFrame.timestamp;
+      const frameAge = now - pf.timestamp;
       if (frameAge > ACCOUNT_TIMEOUT_MS) {
-        console.warn(`⏰ PENDING-FRAME-STALE: Account with ${counterpartyId.slice(-4)} h${accountMachine.pendingFrame.height} for ${Math.floor(frameAge / 1000)}s — consider dispute`);
+        console.warn(`⏰ PENDING-FRAME-STALE: Account with ${counterpartyId.slice(-4)} h${pf.height} for ${Math.floor(frameAge / 1000)}s — consider dispute`);
       }
     }
   }
@@ -262,9 +263,9 @@ export function getAccountTimeoutStats(replica: EntityReplica): {
   let oldestPendingFrameAge = 0;
 
   for (const accountMachine of replica.state.accounts.values()) {
-    if (accountMachine.pendingFrame) {
+    if (accountMachine.proposal) {
       pendingFrames++;
-      const frameAge = now - accountMachine.pendingFrame.timestamp;
+      const frameAge = now - accountMachine.proposal.pendingFrame.timestamp;
 
       if (frameAge > ACCOUNT_TIMEOUT_MS) {
         timedOutFrames++;

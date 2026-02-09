@@ -107,7 +107,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         peerLimit: 0n, // Credit starts at 0 - must be explicitly extended
       },
       currentHeight: 0,
-      pendingSignatures: [],
       rollbackCount: 0,
       proofHeader: {
         fromEntity: state.entityId,
@@ -171,7 +170,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     }
   } else if (input.type === 'proposal' || input.type === 'ack') {
   // CHANNEL.TS PATTERN: Process frame-level consensus ONLY
-    console.log(`🤝 Processing frame from ${input.fromEntityId.slice(-4)}, accountMachine.pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}`);
+    console.log(`🤝 Processing frame from ${input.fromEntityId.slice(-4)}, accountMachine.pendingFrame=${accountMachine.proposal ? `h${accountMachine.proposal.pendingFrame.height}` : 'none'}`);
 
     const result = await processAccountInput(env, accountMachine, input);
 

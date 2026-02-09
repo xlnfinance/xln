@@ -1343,7 +1343,7 @@ const applyRuntimeInput = async (
             const entityId = replicaKey.split(':')[0];
             for (const [counterpartyId, account] of replica.state.accounts) {
               // Avoid mutating live consensus state mid-flight.
-              if (account.pendingFrame || account.mempool.length > 0) {
+              if (account.proposal || account.mempool.length > 0) {
                 continue;
               }
               const key = `${entityId}:${counterpartyId}`;

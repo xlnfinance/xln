@@ -70,7 +70,7 @@ export async function createEntityFrameHash(
       height: acct.currentHeight,
       stateHash: acct.currentFrame?.stateHash?.slice(0, 12) || 'genesis',
       mempoolSize: acct.mempool.length,
-      pendingFrame: acct.pendingFrame?.height ?? null,
+      pendingFrame: acct.proposal?.pendingFrame.height ?? null,
     }));
   console.log(`🔢 FRAME-HASH-INPUT: h=${height}, prevHash=${prevFrameHash.slice(0, 12)}, accounts=${JSON.stringify(accountSnapshot)}`);
 
@@ -1107,7 +1107,7 @@ export const applyEntityFrame = async (
         if (account) {
           account.mempool.push(tx);
           proposableAccounts.add(accountId);
-          console.log(`📦   → ${accountId.slice(-8)}: ${tx.type} (mempool now: ${account.mempool.length} txs, pendingFrame=${!!account.pendingFrame ? 'h'+account.pendingFrame.height : 'none'})`);
+          console.log(`📦   → ${accountId.slice(-8)}: ${tx.type} (mempool now: ${account.mempool.length} txs, pendingFrame=${account.proposal ? 'h'+account.proposal.pendingFrame.height : 'none'})`);
         } else {
           console.warn(`📦   ⚠️ Account ${accountId.slice(-8)} not found for mempoolOp`);
         }
@@ -1121,11 +1121,11 @@ export const applyEntityFrame = async (
     if (entityTx.type === 'extendCredit') {
       console.log(`💳 POST-EXTEND-CREDIT: Checking all account mempools:`);
       for (const [cpId, acctMachine] of currentEntityState.accounts) {
-        console.log(`💳   Account with ${cpId.slice(0,10)}: mempool=${acctMachine.mempool.length}, pendingFrame=${acctMachine.pendingFrame ? `height=${acctMachine.pendingFrame.height}` : 'none'}, currentHeight=${acctMachine.currentHeight}`);
+        console.log(`💳   Account with ${cpId.slice(0,10)}: mempool=${acctMachine.mempool.length}, pendingFrame=${acctMachine.proposal ? `height=${acctMachine.proposal.pendingFrame.height}` : 'none'}, currentHeight=${acctMachine.currentHeight}`);
         if (acctMachine.mempool.length > 0) {
           console.log(`💳   Mempool txs:`, acctMachine.mempool.map(tx => tx.type));
         }
-        if (acctMachine.pendingFrame) {
+        if (acctMachine.proposal) {
           console.log(`💳   ⚠️ BLOCKING: pendingFrame exists - no new proposals until ACKed!`);
         }
       }
@@ -1145,7 +1145,7 @@ export const applyEntityFrame = async (
 
         // Only propose if we have something to send:
         // - Have transactions in mempool
-        if (hasPendingTxs && !accountMachine.pendingFrame) {
+        if (hasPendingTxs && !accountMachine.proposal) {
           proposableAccounts.add(fromEntity); // counterparty ID
           console.log(`🔄 Added ${fromEntity.slice(0,10)} to proposable - Pending:${hasPendingTxs}`);
         } else if (isAck) {
@@ -1169,12 +1169,12 @@ export const applyEntityFrame = async (
       if (HEAVY_LOGS) console.log(`🔍 DIRECT-PAYMENT-SCAN: Entity ${currentEntityState.entityId.slice(-4)} has ${currentEntityState.accounts.size} accounts`);
       for (const [counterpartyId, accountMachine] of currentEntityState.accounts) {
         const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-        if (HEAVY_LOGS) console.log(`🔍 Checking account ${counterpartyId.slice(-10)}: mempool=${accountMachine.mempool.length}, isLeft=${isLeft}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map((t: any) => t.type).join(',')}]`);
-        if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
+        if (HEAVY_LOGS) console.log(`🔍 Checking account ${counterpartyId.slice(-10)}: mempool=${accountMachine.mempool.length}, isLeft=${isLeft}, pendingFrame=${!!accountMachine.proposal}, mempoolTxs=[${accountMachine.mempool.map((t: any) => t.type).join(',')}]`);
+        if (accountMachine.mempool.length > 0 && !accountMachine.proposal) {
           proposableAccounts.add(counterpartyId);
           console.log(`🔄 ✅ Added ${counterpartyId.slice(-10)} to proposableAccounts (has ${accountMachine.mempool.length} mempool items)`);
-        } else if (accountMachine.pendingFrame) {
-          console.log(`🔄 ⏸️  SKIP: ${counterpartyId.slice(-10)} has pendingFrame h${accountMachine.pendingFrame.height} - will propose after ACK`);
+        } else if (accountMachine.proposal) {
+          console.log(`🔄 ⏸️  SKIP: ${counterpartyId.slice(-10)} has pendingFrame h${accountMachine.proposal.pendingFrame.height} - will propose after ACK`);
         }
       }
     } else if (entityTx.type === 'openAccount' && entityTx.data) {
@@ -1182,7 +1182,7 @@ export const applyEntityFrame = async (
       const targetEntity = entityTx.data.targetEntityId;
       const accountMachine = currentEntityState.accounts.get(targetEntity);
       if (accountMachine) {
-        if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
+        if (accountMachine.mempool.length > 0 && !accountMachine.proposal) {
           proposableAccounts.add(targetEntity);
           console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (account opened, mempool=${accountMachine.mempool.length})`);
         }
@@ -1301,8 +1301,8 @@ export const applyEntityFrame = async (
         if (HEAVY_LOGS) console.log(`🔍 FILTER: Account ${accountId.slice(-8)} mempool empty - skip`);
         return false;
       }
-      if (accountMachine.pendingFrame) {
-        if (HEAVY_LOGS) console.log(`🔍 FILTER: Account ${accountId.slice(-8)} has pendingFrame h${accountMachine.pendingFrame.height} - SKIP (will batch on ACK)`);
+      if (accountMachine.proposal) {
+        if (HEAVY_LOGS) console.log(`🔍 FILTER: Account ${accountId.slice(-8)} has pendingFrame h${accountMachine.proposal.pendingFrame.height} - SKIP (will batch on ACK)`);
         return false;
       }
       if (HEAVY_LOGS) console.log(`🔍 FILTER: Account ${accountId.slice(-8)} READY - proposing (mempool: ${accountMachine.mempool.length})`);

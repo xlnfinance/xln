@@ -697,10 +697,10 @@ export async function swapMarket(env: Env): Promise<void> {
       return;
     }
     const mempoolTypes = account.mempool.map(tx => tx.type);
-    const pendingTypes = account.pendingFrame?.accountTxs.map(tx => tx.type) ?? [];
+    const pendingTypes = account.proposal?.pendingFrame.accountTxs.map(tx => tx.type) ?? [];
     console.warn(
       `[SWAP-MARKET] ${label}: ${entityId.slice(-4)}↔${counterpartyId.slice(-4)} ` +
-        `height=${account.currentHeight} pending=${account.pendingFrame ? 'yes' : 'no'} ` +
+        `height=${account.currentHeight} pending=${account.proposal ? 'yes' : 'no'} ` +
         `mempool=[${mempoolTypes.join(',')}] pendingTxs=[${pendingTypes.join(',')}]`,
     );
   };

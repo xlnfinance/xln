@@ -395,7 +395,7 @@ export function formatAccount(account: AccountMachine, myEntityId: string, optio
   // Sort by importance: state first, then technical
   const summary = [
     `Perspective: ${isLeft ? 'LEFT' : 'RIGHT'} (canonical)`,
-    `Frame: ${account.currentHeight} | Mempool: ${account.mempool.length} | Pending: ${account.pendingFrame ? `h${account.pendingFrame.height}` : 'none'}`
+    `Frame: ${account.currentHeight} | Mempool: ${account.mempool.length} | Pending: ${account.proposal ? `h${account.proposal.pendingFrame.height}` : 'none'}`
   ];
 
   output.push(drawBox(title, summary, indent));

@@ -157,7 +157,7 @@ export async function multiSig(env: Env): Promise<void> {
     console.log(`  ${validator}: ${hasAccount ? '✅' : '❌'} account with Hub (total accounts: ${accountCount})`);
     if (hasAccount) {
       const account = replica.state.accounts.get(hub.id)!;
-      console.log(`    → Account height: ${account.height}, mempool: ${account.mempool.length}, pending: ${!!account.pendingFrame}`);
+      console.log(`    → Account height: ${account.height}, mempool: ${account.mempool.length}, pending: ${!!account.proposal}`);
     }
   }
 
@@ -317,7 +317,7 @@ export async function multiSig(env: Env): Promise<void> {
   console.log(`\\n🔍 Alice-Hub account state:`);
   console.log(`   Account height: ${accountAfterCredit.height}`);
   console.log(`   Mempool: ${accountAfterCredit.mempool.length}`);
-  console.log(`   PendingFrame: ${accountAfterCredit.pendingFrame ? 'yes' : 'no'}`);
+  console.log(`   PendingFrame: ${accountAfterCredit.proposal ? 'yes' : 'no'}`);
 
   const deltaAfterCredit = accountAfterCredit.deltas.get(USDC);
   console.log(`\\n  💳 Credit limits:`);
@@ -330,7 +330,7 @@ export async function multiSig(env: Env): Promise<void> {
   console.log(`🔍 Hub-Alice account state:`);
   console.log(`   Account height: ${hubAccount?.height}`);
   console.log(`   Mempool: ${hubAccount?.mempool.length || 0}`);
-  console.log(`   PendingFrame: ${hubAccount?.pendingFrame ? 'yes' : 'no'}\\n`);
+  console.log(`   PendingFrame: ${hubAccount?.proposal ? 'yes' : 'no'}\\n`);
 
   if (!deltaAfterCredit || deltaAfterCredit.rightCreditLimit === 0n) {
     throw new Error('Multi-sig credit not applied - bilateral consensus is broken');

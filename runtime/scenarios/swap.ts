@@ -66,7 +66,7 @@ async function converge(env: Env, maxCycles = 10): Promise<void> {
     let hasWork = false;
     for (const [, replica] of env.eReplicas) {
       for (const [, account] of replica.state.accounts) {
-        if (account.mempool.length > 0 || account.pendingFrame) {
+        if (account.mempool.length > 0 || account.proposal) {
           hasWork = true;
           break;
         }
@@ -1180,8 +1180,8 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
     if (!account) {
       throw new Error(`Dispute cleanup missing account ${label}`);
     }
-    if (account.pendingFrame) {
-      account.pendingFrame = undefined;
+    if (account.proposal) {
+      delete account.proposal;
     }
     if (account.mempool.length > 0) {
       account.mempool = [];

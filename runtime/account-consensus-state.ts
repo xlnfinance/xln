@@ -44,7 +44,7 @@ export function classifyBilateralState(
   }
 
   const myHeight = myAccount.currentFrame?.height ?? 0;
-  const myPendingHeight = myAccount.pendingFrame?.height ?? null;
+  const myPendingHeight = myAccount.proposal?.pendingFrame.height ?? null;
   const peerHeight = peerCurrentHeight ?? 0;
   const mempoolCount = myAccount.mempool?.length ?? 0;
 

@@ -681,8 +681,7 @@ const resetServerDebugState = (env: Env | null, preserveHubs = true): { remainin
               continue;
             }
             account.mempool = [];
-            account.pendingFrame = undefined;
-            account.pendingAccountInput = undefined;
+            delete account.proposal;
             if (account.locks?.clear) account.locks.clear();
             if (account.swapOffers?.clear) account.swapOffers.clear();
             if (account.activeDispute) {

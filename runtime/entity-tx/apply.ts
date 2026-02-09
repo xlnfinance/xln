@@ -293,7 +293,6 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           },
           // Frame-based consensus fields
           currentHeight: 0,
-          pendingSignatures: [],
           rollbackCount: 0,
           // CHANNEL.TS REFERENCE: Proper message counters (NOT timestamps!)
           // Removed isProposer - use isLeft() function like old_src Channel.ts
@@ -431,21 +430,21 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
       for (const { counterpartyId, frameHeight } of entityTx.data.timedOutAccounts) {
         const accountMachine = newState.accounts.get(counterpartyId);
-        if (!accountMachine?.pendingFrame) {
+        if (!accountMachine?.proposal) {
           console.log(`⏰   Account ${counterpartyId.slice(-4)}: no pendingFrame (already resolved)`);
           continue;
         }
 
         // Verify the frame height matches (avoid stale rollback)
-        if (accountMachine.pendingFrame.height !== frameHeight) {
-          console.log(`⏰   Account ${counterpartyId.slice(-4)}: frame height mismatch (pending=${accountMachine.pendingFrame.height}, expected=${frameHeight})`);
+        if (accountMachine.proposal.pendingFrame.height !== frameHeight) {
+          console.log(`⏰   Account ${counterpartyId.slice(-4)}: frame height mismatch (pending=${accountMachine.proposal.pendingFrame.height}, expected=${frameHeight})`);
           continue;
         }
 
         console.log(`⏰   Rolling back pendingFrame h${frameHeight} for account ${counterpartyId.slice(-4)}`);
 
         // Scan pending frame for HTLC locks that need backward cancellation
-        for (const tx of accountMachine.pendingFrame.accountTxs) {
+        for (const tx of accountMachine.proposal.pendingFrame.accountTxs) {
           if (tx.type === 'htlc_lock') {
             const hashlock = tx.data.hashlock;
             // Look up htlcRoute for backward cancellation
@@ -474,9 +473,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         }
 
         // Clear pending state (same as rollback in account-consensus.ts)
-        delete accountMachine.pendingFrame;
-        delete accountMachine.pendingAccountInput;
-        delete accountMachine.clonedForValidation;
+        delete accountMachine.proposal;
         console.log(`⏰   Account ${counterpartyId.slice(-4)}: pendingFrame cleared, mempool=${accountMachine.mempool.length}`);
       }
 
@@ -646,7 +643,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
         console.log(`💸 mempoolOps.length: ${mempoolOps.length}`);
 
         const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-        console.log(`💸 Account state: isLeft=${isLeft}, hasPendingFrame=${!!accountMachine.pendingFrame}`);
+        console.log(`💸 Account state: isLeft=${isLeft}, hasPendingFrame=${!!accountMachine.proposal}`);
 
         // Message about payment initiation
         addMessage(newState,

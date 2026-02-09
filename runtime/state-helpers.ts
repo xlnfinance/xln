@@ -141,10 +141,12 @@ export function cloneEntityState(entityState: EntityState, forSnapshot: boolean 
       cloned.lastFinalizedJHeight = entityState.lastFinalizedJHeight ?? 0; // Force fix
     }
 
-    // For snapshots, remove clonedForValidation from all accounts to avoid cycles
+    // For snapshots, remove proposal.clonedForValidation from all accounts to avoid cycles
     if (forSnapshot) {
       for (const account of cloned.accounts.values()) {
-        delete (account as any).clonedForValidation;
+        if (account.proposal?.clonedForValidation) {
+          delete account.proposal.clonedForValidation;
+        }
       }
     }
 
@@ -585,17 +587,25 @@ export const captureSnapshot = async (
  * Clone AccountMachine for validation (replaces dryRun pattern)
  */
 export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolean = false): AccountMachine {
-  // For snapshots, exclude clonedForValidation to avoid cycles
+  // For snapshots, exclude proposal.clonedForValidation to avoid cycles
   if (forSnapshot) {
-    const { clonedForValidation, ...accountWithoutCloned } = account as any;
+    if (account.proposal?.clonedForValidation) {
+      const { clonedForValidation, ...proposalWithoutCloned } = account.proposal;
+      const accountForSnapshot = { ...account, proposal: proposalWithoutCloned };
+      try {
+        return structuredClone(accountForSnapshot) as AccountMachine;
+      } catch {
+        return manualCloneAccountMachine(account, true);
+      }
+    }
     try {
-      return structuredClone(accountWithoutCloned) as AccountMachine;
+      return structuredClone(account) as AccountMachine;
     } catch {
       return manualCloneAccountMachine(account, true);
     }
   }
 
-  // Normal clone - preserve clonedForValidation for consensus
+  // Normal clone - preserve proposal.clonedForValidation for consensus
   try {
     const cloned = structuredClone(account);
     return cloned;
@@ -623,7 +633,6 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     swapOffers: new Map(Array.from(account.swapOffers.entries()).map(([key, offer]) => [key, { ...offer }])),
     globalCreditLimits: { ...account.globalCreditLimits },
     currentHeight: account.currentHeight,
-    pendingSignatures: [...account.pendingSignatures],
     rollbackCount: account.rollbackCount,
     ...(account.lastRollbackFrameHash !== undefined && { lastRollbackFrameHash: account.lastRollbackFrameHash }),
     frameHistory: [...account.frameHistory], // Clone frame history array
@@ -652,18 +661,22 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     requestedRebalance: new Map(account.requestedRebalance), // Phase 3: Clone rebalance hints
   };
 
-  // Add optional properties if they exist
-  if (account.pendingFrame) {
-    result.pendingFrame = {
-      ...account.pendingFrame,
-      accountTxs: [...account.pendingFrame.accountTxs],
-      tokenIds: [...account.pendingFrame.tokenIds],
-      deltas: [...account.pendingFrame.deltas]
+  // Clone proposal state as a whole
+  if (account.proposal) {
+    const pf = account.proposal.pendingFrame;
+    result.proposal = {
+      pendingFrame: {
+        ...pf,
+        accountTxs: [...pf.accountTxs],
+        tokenIds: [...pf.tokenIds],
+        deltas: [...pf.deltas],
+      },
+      pendingSignatures: [...account.proposal.pendingSignatures],
+      pendingAccountInput: { ...account.proposal.pendingAccountInput } as any,
     };
-  }
-
-  if (account.clonedForValidation && !skipClonedForValidation) {
-    result.clonedForValidation = manualCloneAccountMachine(account.clonedForValidation, true);
+    if (account.proposal.clonedForValidation && !skipClonedForValidation) {
+      result.proposal.clonedForValidation = manualCloneAccountMachine(account.proposal.clonedForValidation, true);
+    }
   }
 
   if (account.currentDisputeProofHanko) {

@@ -192,19 +192,19 @@
     return result;
   });
 
-  $: pendingFrameAgeMs = account.pendingFrame?.timestamp ? (nowMs - account.pendingFrame.timestamp) : 0;
-  $: canResendPendingFrame = !!account.pendingFrame && !!account.pendingAccountInput && pendingFrameAgeMs > RESEND_AFTER_MS;
+  $: pendingFrameAgeMs = account.proposal?.pendingFrame.timestamp ? (nowMs - account.proposal.pendingFrame.timestamp) : 0;
+  $: canResendPendingFrame = !!account.proposal && pendingFrameAgeMs > RESEND_AFTER_MS;
 
   async function resendPendingFrame() {
     try {
-      if (!canResendPendingFrame || !account.pendingAccountInput) return;
+      if (!canResendPendingFrame || !account.proposal) return;
       const env = activeEnv;
       if (!env || !('history' in env)) throw new Error('XLN environment not ready or in historical mode');
       if (!activeXlnFunctions?.resolveEntityProposerId || !activeXlnFunctions?.sendEntityInput) {
         throw new Error('Resend helpers not available');
       }
 
-      const accountInput = account.pendingAccountInput;
+      const accountInput = account.proposal.pendingAccountInput;
       const proposerId = activeXlnFunctions.resolveEntityProposerId(env, accountInput.toEntityId, 'resend-account-frame');
       const result = activeXlnFunctions.sendEntityInput(env, {
         entityId: accountInput.toEntityId,
@@ -348,9 +348,9 @@
       </span>
       <div class="consensus-status">
         <span class="frame-badge">Frame #{account.currentFrame.height}</span>
-        {#if account.mempool.length > 0 || account.pendingFrame}
+        {#if account.mempool.length > 0 || account.proposal}
           <span class="status-badge pending">
-            {#if account.pendingFrame}
+            {#if account.proposal}
               Awaiting Consensus
             {:else}
               {account.mempool.length} pending
@@ -623,13 +623,13 @@
       <div class="frame-history">
 
         <!-- Pending Frame (TOP PRIORITY) -->
-        {#if account.pendingFrame}
+        {#if account.proposal}
           <div class="frame-item pending">
             <div class="frame-header">
-              <span class="frame-id">⏳ Pending Frame #{account.pendingFrame.height}</span>
+              <span class="frame-id">⏳ Pending Frame #{account.proposal.pendingFrame.height}</span>
               <span class="frame-status pending">Awaiting Consensus</span>
               <span class="frame-timestamp">
-                {formatTimestamp(account.pendingFrame.timestamp)}
+                {formatTimestamp(account.proposal.pendingFrame.timestamp)}
               </span>
               {#if canResendPendingFrame}
                 <button class="resend-button" on:click|preventDefault={resendPendingFrame}>Resend Frame</button>
@@ -638,14 +638,14 @@
             <div class="frame-details">
               <div class="frame-detail">
                 <span class="detail-label">Transactions:</span>
-                <span class="detail-value">{account.pendingFrame.accountTxs.length}</span>
+                <span class="detail-value">{account.proposal.pendingFrame.accountTxs.length}</span>
               </div>
               <div class="frame-detail">
                 <span class="detail-label">Signatures:</span>
-                <span class="detail-value">{account.pendingSignatures?.length || 0}/2</span>
+                <span class="detail-value">{account.proposal?.pendingSignatures?.length || 0}/2</span>
               </div>
               <div class="pending-transactions">
-                {#each account.pendingFrame.accountTxs as tx, i}
+                {#each account.proposal.pendingFrame.accountTxs as tx, i}
                   <div class="pending-tx">
                     <span class="tx-index">{i+1}.</span>
                     <span class="tx-type">{tx.type}</span>
@@ -775,7 +775,7 @@
           </div>
         {/if}
 
-        {#if !account.currentFrame && !account.pendingFrame && account.mempool.length === 0 && (!account.frameHistory || account.frameHistory.length === 0)}
+        {#if !account.currentFrame && !account.proposal && account.mempool.length === 0 && (!account.frameHistory || account.frameHistory.length === 0)}
           <div class="no-frames">
             No account activity yet. Send a payment to start bilateral consensus.
           </div>
