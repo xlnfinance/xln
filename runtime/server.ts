@@ -2281,6 +2281,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           code: 'FAUCET_INVALID_HUB_ENTITY_ID',
         }), { status: 400, headers });
       }
+      const normalizedUserEntityId = String(userEntityId).toLowerCase();
       const normalizedUserRuntimeId = typeof userRuntimeId === 'string' ? userRuntimeId.trim().toLowerCase() : '';
       if (!normalizedUserRuntimeId) {
         return new Response(JSON.stringify({
@@ -2290,11 +2291,11 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           message: 'Runtime is offline or not initialized yet. Re-open runtime and retry faucet.',
         }), { status: 400, headers });
       }
-      registerEntityRuntimeHint(env, userEntityId, normalizedUserRuntimeId);
+      registerEntityRuntimeHint(env, normalizedUserEntityId, normalizedUserRuntimeId);
 
       // Get hub from server-authoritative hub set + gossip
       const allProfiles = env.gossip?.getProfiles() || [];
-      const userSuffix = typeof userEntityId === 'string' ? userEntityId.slice(-8) : 'unknown';
+      const userSuffix = normalizedUserEntityId.slice(-8);
       console.log(`[FAUCET/OFFCHAIN] profiles=${allProfiles.length} user=${userSuffix}`);
       for (const p of allProfiles) {
         const entityId = typeof p?.entityId === 'string' ? p.entityId : 'unknown';
@@ -2336,7 +2337,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const requestedHub = requestedHubId
         ? hubs.find((hub) => hub.entityId.toLowerCase() === requestedHubId)
         : undefined;
-      const existingHubAccount = hubs.find((hub) => hasAccount(env, hub.entityId, userEntityId));
+      const existingHubAccount = hubs.find((hub) => hasAccount(env, hub.entityId, normalizedUserEntityId));
       const selectedHub = requestedHub ?? existingHubAccount ?? hubs[0];
       if (!selectedHub) {
         return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
@@ -2365,7 +2366,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
       const amountWei = ethers.parseUnits(amount, 18);
 
-      let accountMachine = getAccountMachine(env, hubEntityId, userEntityId);
+      let accountMachine = getAccountMachine(env, hubEntityId, normalizedUserEntityId);
       if (!accountMachine) {
         // Enqueue openAccount and do a short bounded wait to catch the common fast path.
         // If channel is still not materialized, fail fast with explicit 409 code.
@@ -2379,7 +2380,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
               entityTxs: [{
                 type: 'openAccount',
                 data: {
-                  targetEntityId: userEntityId,
+                  targetEntityId: normalizedUserEntityId,
                   tokenId: Number(tokenId),
                   creditAmount: defaultCredit,
                 },
@@ -2396,8 +2397,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
         // Best effort: wait for bilateral channel materialization.
         // Keep bounded and return a soft "opening" status if not ready yet.
-        const ready = await waitForBilateralAccountReady(env, hubEntityId, userEntityId, 8_000);
-        accountMachine = ready.ok ? ready.account : getAccountMachine(env, hubEntityId, userEntityId);
+        const ready = await waitForBilateralAccountReady(env, hubEntityId, normalizedUserEntityId, 8_000);
+        accountMachine = ready.ok ? ready.account : getAccountMachine(env, hubEntityId, normalizedUserEntityId);
         if (!accountMachine) {
           return new Response(JSON.stringify({
             success: false,
@@ -2407,7 +2408,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
             amount,
             tokenId,
             from: hubEntityId.slice(0, 16) + '...',
-            to: userEntityId.slice(0, 16) + '...',
+            to: normalizedUserEntityId.slice(0, 16) + '...',
             message: 'Bilateral channel is still opening; retry faucet shortly.',
             retryAfterMs: 1000,
           }), { status: 202, headers });
@@ -2431,10 +2432,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
             entityTxs: [{
               type: 'directPayment',
               data: {
-                targetEntityId: userEntityId,
+                targetEntityId: normalizedUserEntityId,
                 tokenId,
                 amount: amountWei,
-                route: [hubEntityId, userEntityId],
+                route: [hubEntityId, normalizedUserEntityId],
                 description: 'faucet-offchain',
               },
             }],
@@ -2456,7 +2457,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         amount,
         tokenId,
         from: hubEntityId.slice(0, 16) + '...',
-        to: userEntityId.slice(0, 16) + '...',
+        to: normalizedUserEntityId.slice(0, 16) + '...',
       }), { headers });
     } catch (error: any) {
       console.error('[FAUCET/OFFCHAIN] Error:', error);
