@@ -87,18 +87,27 @@ export function emitScopedEvents(
  * Throws if no signer can be resolved (fail early).
  */
 export function resolveEntityProposerId(env: Env, entityId: string, context: string): string {
+  const targetEntityId = String(entityId || '').toLowerCase();
   let fallback: string | null = null;
 
-  for (const replica of env.eReplicas.values()) {
-    if (replica.entityId !== entityId) continue;
+  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    const keyParts = String(replicaKey).split(':');
+    const keyEntityId = String(keyParts[0] || '').toLowerCase();
+    const replicaEntityId = String(replica.entityId || '').toLowerCase();
+    if (replicaEntityId !== targetEntityId && keyEntityId !== targetEntityId) continue;
     if (replica.isProposer) return replica.signerId;
     if (!fallback) {
-      fallback = replica.state.config.validators[0] || replica.signerId;
+      fallback =
+        replica.state.config.validators[0] ||
+        replica.signerId ||
+        (keyParts[1] ? String(keyParts[1]) : null);
     }
   }
 
   if (env.gossip?.getProfiles) {
-    const profile = (env.gossip.getProfiles() as Profile[]).find(p => p.entityId === entityId);
+    const profile = (env.gossip.getProfiles() as Profile[]).find(
+      (p) => String(p.entityId || '').toLowerCase() === targetEntityId,
+    );
     const board = profile?.metadata?.board;
     if (Array.isArray(board) && board.length > 0 && board[0]) {
       return board[0];

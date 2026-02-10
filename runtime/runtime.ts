@@ -430,13 +430,32 @@ export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void 
   enqueueRuntimeInputs(env, runtimeInput.entityInputs, runtimeInput.runtimeTxs);
 };
 
+const buildRouteOutputKey = (output: RoutedEntityInput): string => {
+  const txPart = (output.entityTxs || [])
+    .map((tx) => {
+      const data = tx.data as Record<string, unknown> | undefined;
+      const height = typeof data?.height === 'number' ? data.height : '';
+      const from = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
+      const to = typeof data?.toEntityId === 'string' ? data.toEntityId : '';
+      return `${tx.type}:${height}:${from}:${to}`;
+    })
+    .join('|');
+  return `${output.entityId}:${output.signerId || ''}:${txPart}`;
+};
+
 const hasRuntimeWork = (env: Env): boolean => {
   const mempool = ensureRuntimeMempool(env);
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return true;
   if (env.pendingOutputs && env.pendingOutputs.length > 0) return true;
   if (env.networkInbox && env.networkInbox.length > 0) return true;
-  // Deferred network outputs are intentionally dropped (no background retry loop).
-  // Do not treat them as work to avoid tick/save/log storms.
+  if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
+    const nowMs = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+    const deferredMeta = ensureRuntimeState(env).deferredNetworkMeta;
+    for (const output of env.pendingNetworkOutputs) {
+      const retryAt = deferredMeta?.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0;
+      if (retryAt <= nowMs) return true;
+    }
+  }
   // J-machine mempool removed from work check — J-batches are now executed post-save
   // as side effects, not queued for processing in the next frame
   return false;
@@ -568,18 +587,7 @@ export const deriveRuntimeId = (seed: string): string => {
 
 // scheduleNetworkProcess removed — loop is always-on via startRuntimeLoop()
 
-const outputDeferKey = (output: RoutedEntityInput): string => {
-  const txPart = (output.entityTxs || [])
-    .map((tx) => {
-      const data = tx.data as Record<string, unknown> | undefined;
-      const height = typeof data?.height === 'number' ? data.height : '';
-      const from = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
-      const to = typeof data?.toEntityId === 'string' ? data.toEntityId : '';
-      return `${tx.type}:${height}:${from}:${to}`;
-    })
-    .join('|');
-  return `${output.entityId}:${output.signerId || ''}:${txPart}`;
-};
+const outputDeferKey = (output: RoutedEntityInput): string => buildRouteOutputKey(output);
 
 const normalizeEntityKey = (value: string): string => value.toLowerCase();
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -649,22 +657,36 @@ const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | nul
   return null;
 };
 
+const RUNTIME_HINT_TTL_MS = 60_000;
+
 const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null => {
   if (!entityId) return null;
   const hints = ensureRuntimeState(env).entityRuntimeHints;
   const target = normalizeEntityKey(entityId);
-  const hinted = hints?.get(target)?.runtimeId;
-  if (typeof hinted === 'string' && hinted.length > 0) {
-    return hinted;
+  const now = Date.now();
+
+  const hinted = hints?.get(target);
+  if (
+    hinted &&
+    typeof hinted.runtimeId === 'string' &&
+    hinted.runtimeId.length > 0 &&
+    Number.isFinite(hinted.seenAt) &&
+    now - hinted.seenAt <= RUNTIME_HINT_TTL_MS
+  ) {
+    return hinted.runtimeId;
   }
-  if (!env.gossip?.getProfiles) return null;
-  const profiles = env.gossip.getProfiles() as Profile[];
-  const profile = profiles.find((p: Profile) => normalizeEntityKey(String(p.entityId || '')) === target);
-  const resolved = resolveRuntimeIdFromProfile(profile);
-  if (resolved && hints) {
-    hints.set(target, { runtimeId: resolved, seenAt: Date.now() });
+
+  // Fallback to gossip profile runtimeId when we don't have a fresh inbound hint.
+  if (env.gossip?.getProfiles) {
+    const profiles = env.gossip.getProfiles() as Profile[];
+    const profile = profiles.find((p: Profile) => normalizeEntityKey(String(p.entityId || '')) === target);
+    const resolved = resolveRuntimeIdFromProfile(profile);
+    if (resolved && hints) {
+      hints.set(target, { runtimeId: resolved.toLowerCase(), seenAt: now });
+      return resolved.toLowerCase();
+    }
   }
-  return resolved;
+  return null;
 };
 
 export const registerEntityRuntimeHint = (env: Env, entityId: string, runtimeId: string): void => {
@@ -693,6 +715,101 @@ const collectSenderEntityHints = (input: RoutedEntityInput): string[] => {
 type PlannedRemoteOutput = {
   output: RoutedEntityInput;
   targetRuntimeId: string;
+};
+
+const DEFER_RETRY_DELAY_MS = 5_000;
+const DEFER_MAX_ATTEMPTS = 3;
+
+const getDeferredNetworkMeta = (
+  env: Env,
+): Map<string, { attempts: number; nextRetryAt: number }> => {
+  const state = ensureRuntimeState(env);
+  if (!state.deferredNetworkMeta) {
+    state.deferredNetworkMeta = new Map();
+  }
+  return state.deferredNetworkMeta;
+};
+
+const getRuntimeNowMs = (env: Env): number =>
+  env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+
+const splitPendingOutputsByRetryWindow = (
+  env: Env,
+  pending: RoutedEntityInput[],
+): { ready: RoutedEntityInput[]; waiting: RoutedEntityInput[] } => {
+  if (pending.length === 0) return { ready: [], waiting: [] };
+  const nowMs = getRuntimeNowMs(env);
+  const meta = getDeferredNetworkMeta(env);
+  const ready: RoutedEntityInput[] = [];
+  const waiting: RoutedEntityInput[] = [];
+
+  for (const output of pending) {
+    const key = outputDeferKey(output);
+    const entry = meta.get(key);
+    if (!entry || entry.nextRetryAt <= nowMs) {
+      ready.push(output);
+      continue;
+    }
+    waiting.push(output);
+  }
+  return { ready, waiting };
+};
+
+const rescheduleDeferredOutputs = (
+  env: Env,
+  attemptedPending: RoutedEntityInput[],
+  failed: RoutedEntityInput[],
+  waiting: RoutedEntityInput[],
+): RoutedEntityInput[] => {
+  const nowMs = getRuntimeNowMs(env);
+  const meta = getDeferredNetworkMeta(env);
+  const next = new Map<string, RoutedEntityInput>();
+
+  // Keep outputs still waiting for their retry window.
+  for (const output of waiting) {
+    next.set(outputDeferKey(output), output);
+  }
+
+  const failedKeys = new Set(failed.map((output) => outputDeferKey(output)));
+
+  // Pending outputs that were retried and delivered can clear retry metadata.
+  for (const output of attemptedPending) {
+    const key = outputDeferKey(output);
+    if (!failedKeys.has(key)) {
+      meta.delete(key);
+    }
+  }
+
+  // Failed attempts get bounded retry with fixed 5s delay.
+  for (const output of failed) {
+    const key = outputDeferKey(output);
+    const entry = meta.get(key);
+    const attempts = (entry?.attempts ?? 0) + 1;
+    if (attempts >= DEFER_MAX_ATTEMPTS) {
+      meta.delete(key);
+      env.warn('network', 'ROUTE_DROP_MAX_RETRIES', {
+        entityId: output.entityId,
+        attempts,
+      });
+      continue;
+    }
+
+    meta.set(key, {
+      attempts,
+      nextRetryAt: nowMs + DEFER_RETRY_DELAY_MS,
+    });
+    next.set(key, output);
+
+    if (attempts === 1) {
+      env.warn('network', 'ROUTE_DEFER_RETRY', {
+        entityId: output.entityId,
+        retryInMs: DEFER_RETRY_DELAY_MS,
+        attemptsRemaining: DEFER_MAX_ATTEMPTS - attempts,
+      });
+    }
+  }
+
+  return [...next.values()];
 };
 
 const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
@@ -726,8 +843,7 @@ const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
     const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
     console.log(`🔀 ROUTE: Output for entity ${output.entityId.slice(-4)} → runtimeId=${targetRuntimeId?.slice(0,10) || 'UNKNOWN'}`);
     if (!targetRuntimeId) {
-      // Policy: no deferred retries. Drop undeliverable outputs immediately.
-      env.warn('network', 'ROUTE_DROP_NO_RUNTIME_ID', { entityId: output.entityId });
+      deferredOutputs.push(output);
       continue;
     }
     remoteOutputs.push({ output, targetRuntimeId });
@@ -806,26 +922,46 @@ const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): Routed
         entityId: output.entityId,
         runtimeId: targetRuntimeId,
       });
+      deferredOutputs.push(output);
       continue;
     }
     console.log(`📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId.slice(0, 10)} for entity ${output.entityId.slice(-4)} (${output.entityTxs?.length || 0} txs)`);
-    p2p.enqueueEntityInput(targetRuntimeId, output);
+    try {
+      p2p.enqueueEntityInput(targetRuntimeId, output);
+    } catch (error) {
+      env.warn('network', 'ROUTE_DEFER_SEND_FAILED', {
+        entityId: output.entityId,
+        runtimeId: targetRuntimeId,
+        error: (error as Error).message,
+      });
+      deferredOutputs.push(output);
+    }
   }
   return deferredOutputs;
 };
 
 export const sendEntityInput = (env: Env, input: RoutedEntityInput): { sent: boolean; deferred: boolean; queuedLocal: boolean } => {
-  const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, [input]);
+  const pendingBeforePlan = env.pendingNetworkOutputs ?? [];
+  const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } =
+    splitPendingOutputsByRetryWindow(env, pendingBeforePlan);
+  const outputsToPlan = [...readyPendingOutputs, input];
+  const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan);
+  env.pendingNetworkOutputs = [];
   if (localOutputs.length > 0) {
     enqueueRuntimeInputs(env, localOutputs);
   }
   const deferred = dispatchEntityOutputs(env, remoteOutputs);
   const remainingDeferred = [...deferredOutputs, ...deferred];
-  env.pendingNetworkOutputs = [];
+  env.pendingNetworkOutputs = rescheduleDeferredOutputs(
+    env,
+    readyPendingOutputs,
+    remainingDeferred,
+    waitingPendingOutputs,
+  );
 
   return {
     sent: remoteOutputs.length > 0 && deferred.length === 0,
-    deferred: remainingDeferred.length > 0,
+    deferred: env.pendingNetworkOutputs.length > 0,
     queuedLocal: localOutputs.length > 0,
   };
 };
@@ -878,6 +1014,21 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     onEntityInput: (from, input) => {
       const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
       console.log(`📨 P2P-RECEIVE: from=${from.slice(0,10)} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
+      const targetEntityId = String(input.entityId || '').toLowerCase();
+      const localReplicaExists = Array.from(env.eReplicas.keys()).some((key) => {
+        const [entityKey] = String(key).split(':');
+        return String(entityKey || '').toLowerCase() === targetEntityId;
+      });
+      if (!localReplicaExists) {
+        // Drop poison ingress early: this runtime has no local replica for target entity.
+        // Enqueuing would trigger failfast in applyRuntimeInput and loop forever.
+        env.warn('network', 'INBOUND_ENTITY_UNKNOWN_TARGET', {
+          fromRuntimeId: from,
+          entityId: input.entityId,
+          txTypes,
+        }, input.entityId);
+        return;
+      }
       for (const hintedEntityId of collectSenderEntityHints(input)) {
         registerEntityRuntimeHint(env, hintedEntityId, from);
       }
@@ -2317,9 +2468,15 @@ export const process = async (
       }
     }
 
-    // CRITICAL: planEntityOutputs consumes env.pendingNetworkOutputs — clear before replanning
-    const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, entityOutbox);
-    env.pendingNetworkOutputs = []; // Consumed by planEntityOutputs above
+    // Retry deferred network outputs only when their retry window is due.
+    const pendingBeforePlan = env.pendingNetworkOutputs ?? [];
+    const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } =
+      splitPendingOutputsByRetryWindow(env, pendingBeforePlan);
+    const outputsToPlan = readyPendingOutputs.length > 0
+      ? [...readyPendingOutputs, ...entityOutbox]
+      : entityOutbox;
+    const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan);
+    env.pendingNetworkOutputs = [];
     if (localOutputs.length > 0) {
       enqueueRuntimeInputs(env, localOutputs);
       if (!quietRuntimeLogs) {
@@ -2370,15 +2527,13 @@ export const process = async (
     }
     const dispatchDeferred = dispatchEntityOutputs(env, remoteOutputs);
 
-    // Deferred outputs are dropped by policy (no retry loop).
     const allDeferred = [...deferredOutputs, ...dispatchDeferred];
-    if (allDeferred.length > 0) {
-      env.pendingNetworkOutputs = [];
-      env.warn('network', 'ROUTE_DEFER_DROPPED', {
-        count: allDeferred.length,
-        reason: 'deferred_outputs_disabled',
-      });
-    }
+    env.pendingNetworkOutputs = rescheduleDeferredOutputs(
+      env,
+      readyPendingOutputs,
+      allDeferred,
+      waitingPendingOutputs,
+    );
 
     // 1b. Re-announce gossip profiles after account state changes (new accounts, capacity shifts)
     // Broadcast changed local entities so relay routing metadata stays fresh.

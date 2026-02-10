@@ -10,6 +10,30 @@ function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
 }
 
+function relayToApiBase(relayUrl: string | null | undefined): string | null {
+  if (!relayUrl) return null;
+  try {
+    const relay = new URL(relayUrl);
+    const protocol =
+      relay.protocol === 'wss:' ? 'https:' :
+      relay.protocol === 'ws:' ? 'http:' :
+      relay.protocol;
+    return `${protocol}//${relay.host}`;
+  } catch {
+    return null;
+  }
+}
+
+async function getActiveApiBase(page: Page): Promise<string> {
+  if (process.env.E2E_API_BASE_URL) return API_BASE_URL;
+  const runtimeApi = await page.evaluate(() => {
+    const env = (window as any).isolatedEnv;
+    const relay = env?.runtimeState?.p2p?.relayUrls?.[0] ?? null;
+    return typeof relay === 'string' ? relay : null;
+  });
+  return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
+}
+
 async function gotoApp(page: Page) {
   await page.goto(`${APP_BASE_URL}/app`);
   const unlock = page.locator('button:has-text("Unlock")');
@@ -44,7 +68,7 @@ async function resetProdServer(page: Page) {
   let resetDone = false;
   for (let attempt = 1; attempt <= 10; attempt++) {
     try {
-      const coldResponse = await page.request.post(`${RESET_BASE_URL}/reset?rpc=1&db=1&exit=0`);
+      const coldResponse = await page.request.post(`${RESET_BASE_URL}/reset?rpc=1&db=1`);
       const coldBody = await coldResponse.json().catch(() => ({}));
       if (coldResponse.ok()) {
         resetDone = true;
@@ -467,12 +491,13 @@ async function faucet(page: Page, entityId: string) {
   let result: { ok: boolean; status: number; data: any } = { ok: false, status: 0, data: { error: 'not-run' } };
   for (let attempt = 1; attempt <= 15; attempt++) {
     const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
+    const apiBaseUrl = await getActiveApiBase(page);
     if (!runtimeId) {
       result = { ok: false, status: 0, data: { error: 'missing runtimeId in isolatedEnv' } };
       break;
     }
     try {
-      const resp = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
+      const resp = await page.request.post(`${apiBaseUrl}/api/faucet/offchain`, {
         data: { userEntityId: entityId, userRuntimeId: runtimeId, tokenId: 1, amount: '100' },
       });
       const data = await resp.json().catch(() => ({}));
@@ -496,6 +521,7 @@ async function faucet(page: Page, entityId: string) {
 }
 
 async function faucetViaBrowserFetch(page: Page, entityId: string) {
+  const apiBaseUrl = await getActiveApiBase(page);
   const result = await page.evaluate(async ({ eid, apiBaseUrl }) => {
     try {
       const runtimeId = (window as any).isolatedEnv?.runtimeId;
@@ -512,7 +538,7 @@ async function faucetViaBrowserFetch(page: Page, entityId: string) {
     } catch (e: any) {
       return { ok: false, status: 0, data: { error: e?.message || String(e) } };
     }
-  }, { eid: entityId, apiBaseUrl: API_BASE_URL });
+  }, { eid: entityId, apiBaseUrl });
   expect(result.ok, `faucet failed for ${entityId.slice(0, 10)}: ${JSON.stringify(result.data)}`).toBe(true);
 }
 

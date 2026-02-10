@@ -38,6 +38,7 @@
   const FALLBACK_RELAY = 'wss://xln.finance/relay';
 
   let relaySelection = $settings.relayUrl;
+  $: relaySelection = $settings.relayUrl || FALLBACK_RELAY;
 
   // Hub data structure
   interface Hub {
@@ -63,6 +64,24 @@
 
   let hubs: Hub[] = [];
   const DISCOVERY_TIMEOUT_MS = 8000;
+
+  function resolveApiBaseFromRelay(relayUrl: string | undefined | null): string {
+    if (typeof window === 'undefined') return 'https://xln.finance';
+    if (!relayUrl) return 'https://xln.finance';
+    try {
+      const relay = new URL(relayUrl);
+      if (LOCAL_HOSTS.has(relay.hostname) && LOCAL_HOSTS.has(window.location.hostname)) {
+        return window.location.origin;
+      }
+      const protocol =
+        relay.protocol === 'wss:' ? 'https:' :
+        relay.protocol === 'ws:' ? 'http:' :
+        relay.protocol;
+      return `${protocol}//${relay.host}`;
+    } catch {
+      return 'https://xln.finance';
+    }
+  }
 
   async function fetchJsonWithTimeout(url: string, init: RequestInit = {}, timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<Response> {
     const ctrl = new AbortController();
@@ -238,6 +257,7 @@
 
       const currentEnv = env;
       if (!currentEnv) throw new Error('Environment not ready');
+      await ensureRuntimeRelay(currentEnv, relaySelection || $settings?.relayUrl || FALLBACK_RELAY);
 
       const discovered: Hub[] = [];
 
@@ -284,7 +304,8 @@
       // Fallback 1: relay directory (single source from server gossip cache)
       if (discovered.length === 0) {
         try {
-          const res = await fetchJsonWithTimeout('/api/debug/entities?limit=5000');
+          const directoryApiBase = resolveApiBaseFromRelay(relaySelection || $settings?.relayUrl);
+          const res = await fetchJsonWithTimeout(`${directoryApiBase}/api/debug/entities?limit=5000`);
           if (res.ok) {
             const body = await res.json() as { entities?: Array<{
               entityId: string;
@@ -404,6 +425,7 @@
 
       const currentEnv = env;
       if (!currentEnv) throw new Error('Environment not ready');
+      await ensureRuntimeRelay(currentEnv, relaySelection || $settings?.relayUrl || FALLBACK_RELAY);
 
       // Find signer for our entity
       let signerId = '1';
@@ -437,6 +459,11 @@
         ]
       }]);
 
+      const opened = await waitForAccountReady(currentEnv, entityId, hub.entityId, 20_000);
+      if (!opened) {
+        throw new Error('Channel opening is still pending consensus. Wait for ACK and retry.');
+      }
+
       // Update hub status
       hubs = hubs.map(h =>
         h.entityId === hub.entityId ? { ...h, isConnected: true } : h
@@ -460,14 +487,81 @@
     settingsOperations.setRelayUrl(url);
     const currentEnv = env;
     if (!currentEnv) return;
-    const xln = await getXLN();
-    const p2p = xln.getP2P?.(currentEnv as any) as { updateConfig?: (cfg: any) => void } | null | undefined;
-    if (p2p?.updateConfig) {
-      // Runtime must keep a single P2P instance; relay changes are config updates only.
-      p2p.updateConfig({ relayUrls: [url] });
-    } else {
-      error = 'P2P is not running for this runtime yet. Create or restore the runtime first.';
+    try {
+      await ensureRuntimeRelay(currentEnv, url);
+      error = '';
+    } catch (err) {
+      error = (err as Error)?.message || 'Failed to update relay';
     }
+  }
+
+  function hasAccountEntry(currentEnv: any, ownerEntityId: string, counterpartyEntityId: string): boolean {
+    if (!currentEnv?.eReplicas || !(currentEnv.eReplicas instanceof Map)) return false;
+    const owner = String(ownerEntityId).toLowerCase();
+    const counterparty = String(counterpartyEntityId).toLowerCase();
+    for (const [key, replica] of currentEnv.eReplicas.entries()) {
+      const [entityKey] = String(key).split(':');
+      if (String(entityKey || '').toLowerCase() !== owner) continue;
+      const accounts = replica?.state?.accounts;
+      if (!(accounts instanceof Map)) return false;
+      for (const accountKey of accounts.keys()) {
+        if (String(accountKey).toLowerCase() === counterparty) return true;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  function accountPending(currentEnv: any, ownerEntityId: string, counterpartyEntityId: string): boolean {
+    if (!currentEnv?.eReplicas || !(currentEnv.eReplicas instanceof Map)) return false;
+    const owner = String(ownerEntityId).toLowerCase();
+    const counterparty = String(counterpartyEntityId).toLowerCase();
+    for (const [key, replica] of currentEnv.eReplicas.entries()) {
+      const [entityKey] = String(key).split(':');
+      if (String(entityKey || '').toLowerCase() !== owner) continue;
+      const accounts = replica?.state?.accounts;
+      if (!(accounts instanceof Map)) return false;
+      for (const [accountKey, account] of accounts.entries()) {
+        if (String(accountKey).toLowerCase() !== counterparty) continue;
+        return !!account?.pendingFrame;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  async function waitForAccountReady(currentEnv: any, ownerEntityId: string, counterpartyEntityId: string, timeoutMs = 20_000): Promise<boolean> {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      if (hasAccountEntry(currentEnv, ownerEntityId, counterpartyEntityId) && !accountPending(currentEnv, ownerEntityId, counterpartyEntityId)) {
+        return true;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return false;
+  }
+
+  async function ensureRuntimeRelay(currentEnv: any, relayUrl: string, timeoutMs = 12_000): Promise<void> {
+    const desired = String(relayUrl || '').trim();
+    if (!desired) return;
+    const xln = await getXLN();
+    const p2p = xln.getP2P?.(currentEnv as any) as { relayUrls?: string[]; isConnected?: () => boolean; updateConfig?: (cfg: any) => void } | null | undefined;
+    if (!p2p?.updateConfig) {
+      throw new Error('P2P is not running for this runtime yet. Create or restore the runtime first.');
+    }
+    const currentRelays = Array.isArray(p2p.relayUrls) ? p2p.relayUrls : [];
+    if (currentRelays.length !== 1 || currentRelays[0] !== desired) {
+      p2p.updateConfig({ relayUrls: [desired] });
+    }
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const relaysNow = Array.isArray(p2p.relayUrls) ? p2p.relayUrls : [];
+      const connected = typeof p2p.isConnected === 'function' ? p2p.isConnected() : false;
+      if (relaysNow.length === 1 && relaysNow[0] === desired && connected) return;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    const relaysNow = Array.isArray(p2p.relayUrls) ? p2p.relayUrls.join(',') : 'none';
+    throw new Error(`Relay switch timeout (desired=${desired}, actual=${relaysNow})`);
   }
 
   // Track if we've already discovered (prevent repeated auto-fetch loops)
@@ -486,6 +580,9 @@
         if (!ready) {
           loading = false;
           error = 'Relay not connected yet. Wait a moment or press Refresh.';
+          setTimeout(() => {
+            hasDiscoveredOnce = false;
+          }, 1500);
           return;
         }
         // One-shot gossip refresh on first load once network is connected.
@@ -503,6 +600,9 @@
       if (!ready) {
         loading = false;
         error = 'Relay not connected yet. Wait a moment or press Refresh.';
+        setTimeout(() => {
+          hasDiscoveredOnce = false;
+        }, 1500);
         return;
       }
       await discoverHubs(true);
