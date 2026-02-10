@@ -10,7 +10,7 @@
   import { Wallet as EthersWallet, hexlify, isAddress, ZeroAddress } from 'ethers';
   import type { Env } from '@xln/runtime/xln-api';
   import type { Tab, EntityReplica } from '$lib/types/ui';
-  import { history } from '../../stores/xlnStore';
+  import { history, xlnEnvironment } from '../../stores/xlnStore';
   import { visibleReplicas, currentTimeIndex, isLive, timeOperations } from '../../stores/timeStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
@@ -159,7 +159,7 @@
   $: activeXlnFunctions = contextXlnFunctions ? $contextXlnFunctions : $xlnFunctions;
   $: activeHistory = contextHistory ? $contextHistory : $history;
   $: activeTimeIndex = contextTimeIndex !== undefined ? $contextTimeIndex : $currentTimeIndex;
-  $: activeEnv = contextEnv ? $contextEnv : null;
+  $: activeEnv = contextEnv ? $contextEnv : $xlnEnvironment;
   $: activeIsLive = contextIsLive !== undefined ? $contextIsLive : $isLive;
 
   // Get replica
@@ -317,41 +317,71 @@
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
     try {
+      const runtimeId = (activeEnv as any)?.runtimeId;
+      if (typeof runtimeId !== 'string' || runtimeId.length === 0) {
+        throw new Error('Runtime is not ready yet (missing runtimeId). Re-open runtime and retry.');
+      }
+
+      const profiles = (activeEnv as any)?.gossip?.getProfiles?.() || [];
+      const isHubEntity = (candidate: string): boolean => {
+        const profile = profiles.find((p: any) => String(p?.entityId || '').toLowerCase() === String(candidate).toLowerCase());
+        return !!(profile?.metadata?.isHub === true || (Array.isArray(profile?.capabilities) && profile.capabilities.includes('hub')));
+      };
+      const accountIds = replica?.state?.accounts ? Array.from(replica.state.accounts.keys()) : [];
+      const preferredHubEntityId = accountIds.find((id) => isHubEntity(String(id)));
+
       // Faucet C: Offchain payment (requires account with hub).
       // Retry a few times when account is still opening.
       let result: any = null;
-      const maxAttempts = 3;
+      const maxAttempts = 20;
+      const requestTimeoutMs = 12000;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        const response = await fetch(`${apiBase}/api/faucet/offchain`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userEntityId: entityId,
-            userRuntimeId: (activeEnv as any)?.runtimeId ?? null,
-            tokenId: 1, // USDC
-            amount: '100'
-          })
-        });
-
-        result = await readJsonResponse(response);
-        if (response.ok && result?.success) break;
+        let response: Response | null = null;
+        let timeout: ReturnType<typeof setTimeout> | null = null;
+        try {
+          const controller = new AbortController();
+          timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+          response = await fetch(`${apiBase}/api/faucet/offchain`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+              userEntityId: entityId,
+              userRuntimeId: runtimeId,
+              tokenId: 1, // USDC
+              amount: '100',
+              ...(preferredHubEntityId ? { hubEntityId: preferredHubEntityId } : {}),
+            })
+          });
+          result = await readJsonResponse(response);
+          if (response.ok && result?.success) break;
+        } catch (error: any) {
+          const aborted = error?.name === 'AbortError';
+          result = aborted
+            ? { error: `Faucet request timed out after ${requestTimeoutMs}ms`, status: 'timeout', code: 'FAUCET_TIMEOUT' }
+            : { error: error?.message || String(error), status: 'fetch_error', code: 'FAUCET_FETCH_ERROR' };
+        } finally {
+          if (timeout) clearTimeout(timeout);
+        }
 
         const code = String(result?.code || '');
         const transient =
-          response.status === 202 ||
-          response.status === 409 ||
+          response?.status === 202 ||
+          response?.status === 409 ||
           code === 'FAUCET_CHANNEL_NOT_READY' ||
+          code === 'FAUCET_TIMEOUT' ||
           result?.status === 'channel_opening' ||
           result?.status === 'channel_not_ready';
 
         if (!transient || attempt >= maxAttempts) {
-          throw new Error(result?.error || `Faucet failed (${response.status})`);
+          const status = response ? response.status : 'fetch-error';
+          throw new Error(result?.error || `Faucet failed (${status})`);
         }
 
         if (attempt === 1) {
           toasts.info('Opening account with hub...');
         }
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        await new Promise(resolve => setTimeout(resolve, 1000));
       }
 
       console.log('[EntityPanel] Offchain faucet success:', result);

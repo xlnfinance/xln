@@ -301,85 +301,6 @@ const getAccountMachine = (env: Env, entityId: string, counterpartyId: string): 
   return null;
 };
 
-const enqueueOffchainFaucetPaymentWhenReady = (
-  env: Env,
-  hubEntityId: string,
-  hubSignerId: string,
-  userEntityId: string,
-  tokenId: number,
-  amountWei: bigint,
-  requestId: string,
-): void => {
-  const maxAttempts = 30;
-  const stepMs = 1000;
-  let attempts = 0;
-
-  const tick = () => {
-    attempts += 1;
-    const accountMachine = getAccountMachine(env, hubEntityId, userEntityId);
-    const ready = !!accountMachine && !accountMachine.pendingFrame;
-    if (ready) {
-      try {
-        enqueueRuntimeInput(env, {
-          runtimeTxs: [],
-          entityInputs: [{
-            entityId: hubEntityId,
-            signerId: hubSignerId,
-            entityTxs: [{
-              type: 'directPayment',
-              data: {
-                targetEntityId: userEntityId,
-                tokenId,
-                amount: amountWei,
-                route: [hubEntityId, userEntityId],
-                description: 'faucet-offchain-auto',
-              },
-            }],
-          }],
-        });
-        console.log(`[FAUCET/OFFCHAIN] ${requestId} auto-enqueued payment after channel-ready (attempt=${attempts})`);
-        pushRelayDebugEvent({
-          event: 'faucet',
-          status: 'queued',
-          details: {
-            requestId,
-            phase: 'auto-payment',
-            attempts,
-            hubEntityId,
-            userEntityId,
-            tokenId,
-            amount: amountWei.toString(),
-          },
-        });
-      } catch (error) {
-        console.error(`[FAUCET/OFFCHAIN] ${requestId} auto-payment enqueue failed:`, (error as Error).message);
-      }
-      return;
-    }
-
-    if (attempts >= maxAttempts) {
-      console.warn(`[FAUCET/OFFCHAIN] ${requestId} auto-payment timed out waiting for channel readiness`);
-      pushRelayDebugEvent({
-        event: 'faucet',
-        status: 'timeout',
-        reason: 'channel_not_ready',
-        details: {
-          requestId,
-          phase: 'auto-payment',
-          attempts,
-          hubEntityId,
-          userEntityId,
-        },
-      });
-      return;
-    }
-
-    setTimeout(tick, stepMs);
-  };
-
-  setTimeout(tick, stepMs);
-};
-
 const getHubMeshHealth = (env: Env) => {
   const hubIds = activeHubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS);
   const pairStatuses: Array<{
@@ -771,6 +692,9 @@ const MAX_RELAY_DEBUG_EVENTS = 5000;
 let relayDebugId = 0;
 let activeHubEntityIds: string[] = [];
 
+const normalizeRuntimeKey = (runtimeId: unknown): string =>
+  String(runtimeId || '').toLowerCase();
+
 const pushRelayDebugEvent = (event: Omit<RelayDebugEvent, 'id' | 'ts'>): void => {
   relayDebugId += 1;
   relayDebugEvents.push({
@@ -841,10 +765,8 @@ const sendEntityInputDirectViaRelaySocket = (
 ): boolean => {
   const fromRuntimeId = String(env.runtimeId || '');
   if (!fromRuntimeId) return false;
-  const target = clients.get(targetRuntimeId);
-  if (!target) return false;
-
-  const targetPubKey = resolveRuntimeEncryptionPubKey(targetRuntimeId);
+  const targetKey = normalizeRuntimeKey(targetRuntimeId);
+  const targetPubKey = resolveRuntimeEncryptionPubKey(targetKey);
   if (!targetPubKey) {
     logOneShot(
       `direct-dispatch-missing-key:${targetRuntimeId}`,
@@ -855,29 +777,51 @@ const sendEntityInputDirectViaRelaySocket = (
 
   try {
     const payload = encryptJSON(input, targetPubKey);
+    const target = clients.get(targetKey);
     const msg = {
       type: 'entity_input',
       id: `srv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
       from: fromRuntimeId,
-      to: targetRuntimeId,
+      to: target?.runtimeId || targetRuntimeId,
       timestamp: nextWsTimestamp(),
       payload,
       encrypted: true,
     };
-    target.ws.send(safeStringify(msg));
+    if (target) {
+      target.ws.send(safeStringify(msg));
+      pushRelayDebugEvent({
+        event: 'delivery',
+        from: fromRuntimeId,
+        to: targetRuntimeId,
+        msgType: 'entity_input',
+        encrypted: true,
+        status: 'delivered-direct-local',
+        details: {
+          entityId: input.entityId,
+          txs: input.entityTxs?.length ?? 0,
+        },
+      });
+      return true;
+    }
+
+    // No local WS client for target runtime in this process.
+    // IMPORTANT: return false so runtime falls back to normal P2P dispatch
+    // via relay socket. Do not queue in local pendingMessages here because
+    // that queue is process-local and can blackhole outputs when relay is
+    // external to this API/runtime process.
     pushRelayDebugEvent({
       event: 'delivery',
       from: fromRuntimeId,
       to: targetRuntimeId,
       msgType: 'entity_input',
       encrypted: true,
-      status: 'delivered-direct-local',
+      status: 'direct-miss-fallback',
       details: {
         entityId: input.entityId,
         txs: input.entityTxs?.length ?? 0,
       },
     });
-    return true;
+    return false;
   } catch (error) {
     logOneShot(
       `direct-dispatch-send-failed:${targetRuntimeId}`,
@@ -997,14 +941,36 @@ const triggerColdReset = async (
   const clearDbState = opts.clearDb !== false;
   const preserveHubs = opts.preserveHubs !== false;
 
-  const activeClients = clients.size;
+  const localRuntimeKey = normalizeRuntimeKey(env.runtimeId);
+  const preservedRuntimeIds = new Set<string>();
+  if (preserveHubs) {
+    if (localRuntimeKey) preservedRuntimeIds.add(localRuntimeKey);
+    for (const hubEntityId of activeHubEntityIds) {
+      const entry = gossipProfiles.get(String(hubEntityId).toLowerCase());
+      const hintedRuntime = normalizeRuntimeKey(
+        entry?.profile?.runtimeId
+        ?? entry?.profile?.metadata?.runtimeId
+        ?? entry?.profile?.metadata?.runtime_id,
+      );
+      if (hintedRuntime) preservedRuntimeIds.add(hintedRuntime);
+    }
+  }
+
+  let activeClientsClosed = 0;
   for (const [runtimeId, client] of clients.entries()) {
+    const isLocalHubRuntimeClient = preserveHubs && preservedRuntimeIds.has(runtimeId);
+    if (isLocalHubRuntimeClient) {
+      // Keep local hub runtime WS attached to relay so hub entities stay online
+      // immediately after reset. User/browser clients are still dropped.
+      continue;
+    }
     try {
       client.ws.close(1012, 'server-reset');
     } catch {
       // Best effort; socket may already be closed.
     }
     clients.delete(runtimeId);
+    activeClientsClosed += 1;
   }
 
   runtimeEncryptionKeys.clear();
@@ -1028,7 +994,7 @@ const triggerColdReset = async (
     }
   }
 
-  return { resetRpc, clearDb: clearDbState, activeClientsClosed: activeClients, preserveHubs };
+  return { resetRpc, clearDb: clearDbState, activeClientsClosed, preserveHubs };
 };
 
 const installProcessSafetyGuards = (): void => {
@@ -1230,11 +1196,13 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
   }
 
   const { type, to, from, payload, id } = msg;
+  const fromKey = normalizeRuntimeKey(from);
+  const toKey = normalizeRuntimeKey(to);
   const fromEncryptionPubKey = typeof msg.fromEncryptionPubKey === 'string'
     ? msg.fromEncryptionPubKey
     : null;
   if (from && fromEncryptionPubKey) {
-    const normalizedRuntimeId = String(from).toLowerCase();
+    const normalizedRuntimeId = fromKey;
     const normalizedPubKey = fromEncryptionPubKey.startsWith('0x')
       ? fromEncryptionPubKey.toLowerCase()
       : `0x${fromEncryptionPubKey.toLowerCase()}`;
@@ -1265,11 +1233,11 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
 
   // Hello - register client
   if (type === 'hello' && from) {
-    const existing = clients.get(from);
+    const existing = clients.get(fromKey);
     if (existing && existing.ws !== ws) {
       existing.ws.close();
     }
-    clients.set(from, { ws, runtimeId: from, lastSeen: nextWsTimestamp(), topics: new Set() });
+    clients.set(fromKey, { ws, runtimeId: from, lastSeen: nextWsTimestamp(), topics: new Set() });
     pushRelayDebugEvent({
       event: 'hello',
       runtimeId: from,
@@ -1280,11 +1248,11 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
     });
 
     // Flush pending messages
-    const pending = pendingMessages.get(from) || [];
+    const pending = pendingMessages.get(fromKey) || [];
     for (const pendingMsg of pending) {
       ws.send(safeStringify(pendingMsg));
     }
-    pendingMessages.delete(from);
+    pendingMessages.delete(fromKey);
 
     ws.send(safeStringify({ type: 'ack', inReplyTo: 'hello', status: 'delivered' }));
     return;
@@ -1339,7 +1307,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
         inReplyTo: id,
       });
       for (const [clientRuntimeId, client] of clients.entries()) {
-        if (!from || clientRuntimeId !== from) {
+        if (!fromKey || clientRuntimeId !== fromKey) {
           client.ws.send(gossipPush);
         }
       }
@@ -1399,7 +1367,7 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
 
   // Routable messages
   if (type === 'entity_input' || type === 'runtime_input' || type === 'gossip_request' || type === 'gossip_response' || type === 'gossip_announce') {
-    if (!to) {
+    if (!toKey) {
       pushRelayDebugEvent({
         event: 'error',
         from,
@@ -1417,11 +1385,10 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
     const isLocalEntityInput =
       type === 'entity_input' &&
       !!env &&
-      typeof to === 'string' &&
       typeof env.runtimeId === 'string' &&
-      to.toLowerCase() === env.runtimeId.toLowerCase();
+      toKey === normalizeRuntimeKey(env.runtimeId);
 
-    const target = clients.get(to);
+    const target = clients.get(toKey);
     if (target && !isLocalEntityInput) {
       console.log(`[RELAY] → forwarding to WS client`);
       target.ws.send(safeStringify(msg));
@@ -1438,7 +1405,9 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
       return;
     }
 
-    // Local delivery for entity_input — server IS the relay, no need for self-WS-client
+    // Local delivery for entity_input:
+    // - normal path: target runtime is this server runtime
+    // - fallback path: target runtime lookup may be stale, but payload entityId is local
     if (type === 'entity_input' && env && payload) {
       try {
         let input: EntityInput;
@@ -1454,6 +1423,28 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
         } else {
           input = payload as EntityInput;
           console.log(`[RELAY] → plaintext entity_input: entityId=${input.entityId?.slice(-8)}`);
+        }
+        const localRuntimeKey = normalizeRuntimeKey(env.runtimeId);
+        const targetIsServerRuntime = !!toKey && !!localRuntimeKey && toKey === localRuntimeKey;
+        const localReplicaExists = !!getEntityReplicaById(env, String(input.entityId || ''));
+        if (!targetIsServerRuntime && !localReplicaExists) {
+          // Not for this server runtime or any local entity: do NOT apply locally.
+          // Leave message on relay queue for its target runtime.
+          const queue = pendingMessages.get(toKey) || [];
+          queue.push(msg);
+          if (queue.length > 200) queue.shift();
+          pendingMessages.set(toKey, queue);
+          pushRelayDebugEvent({
+            event: 'delivery',
+            from,
+            to,
+            msgType: type,
+            encrypted: msg.encrypted === true,
+            status: 'queued-nonlocal-target',
+            details: { traceId, entityId: input.entityId, queueSize: queue.length },
+          });
+          ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'queued' }));
+          return;
         }
         // Register sender runtime hint BEFORE processing so ACK/response can route back.
         // IMPORTANT: never infer sender from input.entityId here; input.entityId is the
@@ -1495,10 +1486,10 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
     }
 
     // Queue for later
-    const queue = pendingMessages.get(to) || [];
+    const queue = pendingMessages.get(toKey) || [];
     queue.push(msg);
     if (queue.length > 200) queue.shift();
-    pendingMessages.set(to, queue);
+    pendingMessages.set(toKey, queue);
     console.log(`[RELAY] → queued (no client, queue=${queue.length})`);
     pushRelayDebugEvent({
       event: 'delivery',
@@ -2290,9 +2281,16 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           code: 'FAUCET_INVALID_HUB_ENTITY_ID',
         }), { status: 400, headers });
       }
-      if (typeof userRuntimeId === 'string' && userRuntimeId.length > 0) {
-        registerEntityRuntimeHint(env, userEntityId, userRuntimeId);
+      const normalizedUserRuntimeId = typeof userRuntimeId === 'string' ? userRuntimeId.trim().toLowerCase() : '';
+      if (!normalizedUserRuntimeId) {
+        return new Response(JSON.stringify({
+          success: false,
+          code: 'FAUCET_RUNTIME_REQUIRED',
+          error: 'Missing userRuntimeId',
+          message: 'Runtime is offline or not initialized yet. Re-open runtime and retry faucet.',
+        }), { status: 400, headers });
       }
+      registerEntityRuntimeHint(env, userEntityId, normalizedUserRuntimeId);
 
       // Get hub from server-authoritative hub set + gossip
       const allProfiles = env.gossip?.getProfiles() || [];
@@ -2366,10 +2364,11 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       console.log(`[FAUCET/OFFCHAIN] hub=${hubEntityId.slice(-8)} signer=${hubSignerId.slice(-8)} amount=${amount} token=${tokenId}`);
 
       const amountWei = ethers.parseUnits(amount, 18);
+
       let accountMachine = getAccountMachine(env, hubEntityId, userEntityId);
       if (!accountMachine) {
-        // No blocking wait here: enqueue openAccount and return immediately.
-        // Client can retry faucet; this avoids 20s hanging requests and false hard failures.
+        // Enqueue openAccount and do a short bounded wait to catch the common fast path.
+        // If channel is still not materialized, fail fast with explicit 409 code.
         const defaultCredit = 10_000n * 10n ** 18n;
         try {
           enqueueRuntimeInput(env, {
@@ -2395,27 +2394,24 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           }), { status: 503, headers });
         }
 
-        enqueueOffchainFaucetPaymentWhenReady(
-          env,
-          hubEntityId,
-          hubSignerId,
-          userEntityId,
-          Number(tokenId),
-          amountWei,
-          requestId,
-        );
-
-        return new Response(JSON.stringify({
-          success: true,
-          status: 'channel_opening',
-          code: 'FAUCET_CHANNEL_OPENING',
-          requestId,
-          amount,
-          tokenId,
-          from: hubEntityId.slice(0, 16) + '...',
-          to: userEntityId.slice(0, 16) + '...',
-          message: 'Bilateral channel opening enqueued. Faucet payment will auto-send once the channel is ready.',
-        }), { status: 202, headers });
+        // Best effort: wait for bilateral channel materialization.
+        // Keep bounded and return a soft "opening" status if not ready yet.
+        const ready = await waitForBilateralAccountReady(env, hubEntityId, userEntityId, 8_000);
+        accountMachine = ready.ok ? ready.account : getAccountMachine(env, hubEntityId, userEntityId);
+        if (!accountMachine) {
+          return new Response(JSON.stringify({
+            success: false,
+            status: 'channel_opening',
+            code: 'FAUCET_CHANNEL_NOT_READY',
+            requestId,
+            amount,
+            tokenId,
+            from: hubEntityId.slice(0, 16) + '...',
+            to: userEntityId.slice(0, 16) + '...',
+            message: 'Bilateral channel is still opening; retry faucet shortly.',
+            retryAfterMs: 1000,
+          }), { status: 202, headers });
+        }
       }
 
       if (accountMachine?.pendingFrame) {
@@ -2487,16 +2483,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     process.env.PUBLIC_RELAY_URL
     ?? process.env.RELAY_URL
     ?? 'wss://xln.finance/relay';
-  const internalRelaySeeds =
-    opts.relaySeeds?.length
-      ? opts.relaySeeds
-      : process.env.INTERNAL_RELAY_URL
-        ? [process.env.INTERNAL_RELAY_URL]
-      : process.env.RELAY_URL
-        ? [process.env.RELAY_URL]
-      : options.relaySeeds?.length
-          ? options.relaySeeds
-          : [advertisedRelayUrl];
+  const internalRelayUrl =
+    process.env.INTERNAL_RELAY_URL
+    ?? `ws://127.0.0.1:${options.port}/relay`;
 
   // Always initialize runtime - every node needs it
   console.log('[XLN] Initializing runtime...');
@@ -2701,15 +2690,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     hubSignerAddresses.set(hub.entityId, hub.signerId);
   }
 
-  // Start P2P overlay for hub announcements
+  // Seed relay gossip cache immediately with full hub metadata so first client
+  // message routing does not fail waiting for async relay round-trips.
   if (hubEntityIds.length > 0) {
-    startP2P(env, {
-      relayUrls: internalRelaySeeds,
-      advertiseEntityIds: hubEntityIds,
-      isHub: true,  // CRITICAL: Mark as hub so profiles get isHub metadata
-    });
-    // Seed relay gossip cache immediately with full hub metadata so first client
-    // message routing does not fail waiting for async relay round-trips.
     seedHubProfilesInRelayCache(env, hubConfigs.map((cfg, idx) => ({
       entityId: hubEntityIds[idx],
       name: cfg.name,
@@ -2963,6 +2946,18 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       },
     },
   });
+
+  // Start P2P overlay for hub announcements only after WS /relay is actually listening.
+  if (hubEntityIds.length > 0) {
+    startP2P(env, {
+      relayUrls: [internalRelayUrl],
+      advertiseEntityIds: hubEntityIds,
+      isHub: true,  // CRITICAL: Mark as hub so profiles get isHub metadata
+      // Avoid background gossip request spam on the server runtime.
+      // Hub profiles are pushed on connect and on major entity changes.
+      gossipPollMs: 0,
+    });
+  }
 
   console.log(`
 ╔══════════════════════════════════════════════════════════════════╗

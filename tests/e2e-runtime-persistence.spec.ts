@@ -464,19 +464,55 @@ async function outCap(page: Page, entityId: string, cpId: string): Promise<bigin
 }
 
 async function faucet(page: Page, entityId: string) {
-  const result = await page.evaluate(async (eid) => {
+  let result: { ok: boolean; status: number; data: any } = { ok: false, status: 0, data: { error: 'not-run' } };
+  for (let attempt = 1; attempt <= 15; attempt++) {
+    const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
+    if (!runtimeId) {
+      result = { ok: false, status: 0, data: { error: 'missing runtimeId in isolatedEnv' } };
+      break;
+    }
     try {
-      const resp = await fetch('/api/faucet/offchain', {
+      const resp = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
+        data: { userEntityId: entityId, userRuntimeId: runtimeId, tokenId: 1, amount: '100' },
+      });
+      const data = await resp.json().catch(() => ({}));
+      result = { ok: resp.ok(), status: resp.status(), data };
+    } catch (e: any) {
+      result = { ok: false, status: 0, data: { error: e?.message || String(e) } };
+    }
+    if (result.ok) break;
+    const code = String(result.data?.code || '');
+    const status = String(result.data?.status || '');
+    const transient =
+      result.status === 202 ||
+      result.status === 409 ||
+      code === 'FAUCET_CHANNEL_NOT_READY' ||
+      status === 'channel_opening' ||
+      status === 'channel_not_ready';
+    if (!transient || attempt === 15) break;
+    await page.waitForTimeout(1000);
+  }
+  expect(result.ok, `faucet failed for ${entityId.slice(0, 10)}: ${JSON.stringify(result.data)}`).toBe(true);
+}
+
+async function faucetViaBrowserFetch(page: Page, entityId: string) {
+  const result = await page.evaluate(async ({ eid, apiBaseUrl }) => {
+    try {
+      const runtimeId = (window as any).isolatedEnv?.runtimeId;
+      if (!runtimeId) {
+        return { ok: false, status: 0, data: { error: 'missing runtimeId in isolatedEnv' } };
+      }
+      const resp = await fetch(`${apiBaseUrl}/api/faucet/offchain`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userEntityId: eid, tokenId: 1, amount: '100' }),
+        body: JSON.stringify({ userEntityId: eid, userRuntimeId: runtimeId, tokenId: 1, amount: '100' }),
       });
       const data = await resp.json().catch(() => ({}));
       return { ok: resp.ok, status: resp.status, data };
     } catch (e: any) {
       return { ok: false, status: 0, data: { error: e?.message || String(e) } };
     }
-  }, entityId);
+  }, { eid: entityId, apiBaseUrl: API_BASE_URL });
   expect(result.ok, `faucet failed for ${entityId.slice(0, 10)}: ${JSON.stringify(result.data)}`).toBe(true);
 }
 
