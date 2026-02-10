@@ -1644,6 +1644,10 @@ export interface Env {
       deferredCount: number;
       escalated: boolean;
     }>;
+    deferredNetworkMeta?: Map<string, {
+      attempts: number;
+      nextRetryAt: number;
+    }>;
     entityRuntimeHints?: Map<string, {
       runtimeId: string;
       seenAt: number;

@@ -38,6 +38,30 @@ function toWei(n: number): bigint {
   return BigInt(n) * 10n ** 18n;
 }
 
+function relayToApiBase(relayUrl: string | null | undefined): string | null {
+  if (!relayUrl) return null;
+  try {
+    const relay = new URL(relayUrl);
+    const protocol =
+      relay.protocol === 'wss:' ? 'https:' :
+      relay.protocol === 'ws:' ? 'http:' :
+      relay.protocol;
+    return `${protocol}//${relay.host}`;
+  } catch {
+    return null;
+  }
+}
+
+async function getActiveApiBase(page: Page): Promise<string> {
+  if (process.env.E2E_API_BASE_URL) return API_BASE_URL;
+  const runtimeApi = await page.evaluate(() => {
+    const env = (window as any).isolatedEnv;
+    const relay = env?.runtimeState?.p2p?.relayUrls?.[0] ?? null;
+    return typeof relay === 'string' ? relay : null;
+  });
+  return relayToApiBase(runtimeApi) ?? APP_BASE_URL;
+}
+
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -86,6 +110,7 @@ async function createRuntime(page: Page, label: string, mnemonic: string) {
 }
 
 async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
+  const apiBaseUrl = await getActiveApiBase(page);
   const connected = await page.evaluate(async () => {
     const start = Date.now();
     while (Date.now() - start < 45_000) {
@@ -141,7 +166,7 @@ async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
       wsOpenForRuntime,
       wsCloseForRuntime,
     };
-  }, { apiBaseUrl: API_BASE_URL });
+  }, { apiBaseUrl });
 
   expect(snapshot.hasP2P, `[${tag}] runtime must have active P2P`).toBe(true);
   expect(snapshot.isConnected, `[${tag}] runtime P2P must have open WS`).toBe(true);
@@ -174,6 +199,7 @@ async function ensureRuntimeOnline(page: Page, tag: string) {
 }
 
 async function waitForEntityAdvertised(page: Page, entityId: string) {
+  const apiBaseUrl = await getActiveApiBase(page);
   const advertised = await page.evaluate(async ({ entityId, apiBaseUrl }) => {
     const target = String(entityId).toLowerCase();
     const start = Date.now();
@@ -204,7 +230,7 @@ async function waitForEntityAdvertised(page: Page, entityId: string) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     return false;
-  }, { entityId, apiBaseUrl: API_BASE_URL });
+  }, { entityId, apiBaseUrl });
   expect(advertised, `Entity ${entityId.slice(0, 12)} not advertised in relay debug or local gossip cache`).toBe(true);
 }
 
@@ -340,6 +366,7 @@ async function switchTo(page: Page, label: string) {
 
 /** Discover hub via gossip polling */
 async function discoverHub(page: Page): Promise<string> {
+  const apiBaseUrl = await getActiveApiBase(page);
   const isHubProfile = (p: any): boolean =>
     p?.metadata?.isHub === true || Array.isArray(p?.capabilities) && p.capabilities.includes('hub');
 
@@ -360,7 +387,7 @@ async function discoverHub(page: Page): Promise<string> {
     if (fromGossip) return fromGossip;
 
     try {
-      const r = await page.request.get('https://xln.finance/api/debug/entities');
+      const r = await page.request.get(`${apiBaseUrl}/api/debug/entities`);
       if (r.ok()) {
         const data = await r.json();
         const entities = Array.isArray((data as any)?.entities) ? (data as any).entities : [];
@@ -403,6 +430,7 @@ async function getHubFeeConfig(page: Page, hubId: string): Promise<{ feePPM: big
 
 /** Discover all hubs visible in gossip */
 async function discoverHubs(page: Page): Promise<string[]> {
+  const apiBaseUrl = await getActiveApiBase(page);
   for (let i = 0; i < 45; i++) {
     const fromGossip = await page.evaluate(() => {
       try {
@@ -422,7 +450,7 @@ async function discoverHubs(page: Page): Promise<string[]> {
     if (fromGossip.length > 0) return fromGossip;
 
     try {
-      const r = await page.request.get('https://xln.finance/api/debug/entities');
+      const r = await page.request.get(`${apiBaseUrl}/api/debug/entities`);
       if (r.ok()) {
         const data = await r.json();
         const ids = (Array.isArray((data as any)?.entities) ? (data as any).entities : [])
@@ -717,12 +745,13 @@ async function faucet(page: Page, entityId: string) {
   let r: { ok: boolean; status: number; data: any } = { ok: false, status: 0, data: { error: 'not-run' } };
   for (let attempt = 1; attempt <= 6; attempt++) {
     const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
+    const apiBaseUrl = await getActiveApiBase(page);
     if (!runtimeId) {
       r = { ok: false, status: 0, data: { error: 'missing runtimeId in isolatedEnv' } };
       break;
     }
     try {
-      const resp = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
+      const resp = await page.request.post(`${apiBaseUrl}/api/faucet/offchain`, {
         data: { userEntityId: entityId, userRuntimeId: runtimeId, tokenId: 1, amount: '100' },
       });
       const data = await resp.json().catch(() => ({}));
@@ -888,7 +917,7 @@ async function resetProdServer(page: Page) {
   let resetDone = false;
   for (let attempt = 1; attempt <= 10; attempt++) {
     try {
-      const coldResponse = await page.request.post(`${RESET_BASE_URL}/reset?rpc=1&db=1&exit=0`);
+      const coldResponse = await page.request.post(`${RESET_BASE_URL}/reset?rpc=1&db=1`);
       const coldData = await coldResponse.json().catch(() => ({}));
       if (coldResponse.ok()) {
         console.log(`[E2E] Cold reset requested: ${JSON.stringify(coldData)}`);
@@ -1040,16 +1069,17 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
 
     console.log('[E2E] ✅ Forward HTLC verified (fee on sender)');
 
-    // ── 7. Faucet Bob + Reverse: Bob → Hub → Alice (5 USDC) ──────
+    // ── 7. Reverse: Bob → Hub → Alice (5 USDC) ────────────────────
     const reverseAmount = toWei(5);
     const reverseSenderSpend = requiredInbound(reverseAmount, hubFee.feePPM, hubFee.baseFee);
     const reverseFee = reverseSenderSpend - reverseAmount;
     console.log(`[E2E] 7. Reverse HTLC: Bob → Hub → Alice`);
     console.log(`[E2E]    Amount: ${ethers.formatUnits(reverseAmount, 18)} USDC, fee: ${ethers.formatUnits(reverseFee, 18)} USDC`);
 
-    await faucet(page, bob!.entityId);
-    const b2 = await waitForOutCapIncrease(page, bob!.entityId, hubId, b1);
-    console.log(`[E2E] Bob OUT after faucet: ${b2}`);
+    // Bob already received funds in step 6, so reverse payment should not depend on a second faucet call.
+    const b2 = b1;
+    expect(b2, 'Bob must have enough OUT capacity for reverse payment').toBeGreaterThanOrEqual(reverseSenderSpend);
+    console.log(`[E2E] Bob OUT available for reverse: ${b2}`);
 
     await switchTo(page, 'alice');
     const a3 = await outCap(page, alice!.entityId, hubId);
@@ -1194,6 +1224,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     }, alice!.entityId);
     expect(lockInfo.locks, 'Self-pay route should fully resolve (no lingering locks)').toBe(0);
 
+    const activeApiBase = await getActiveApiBase(page);
     const debugCheck = await page.evaluate(async ({ apiBaseUrl }) => {
       try {
         const r = await fetch(`${apiBaseUrl}/api/debug/events?last=200`);
@@ -1204,7 +1235,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       } catch (e: any) {
         return { ok: false, status: 0, count: 0, error: e?.message };
       }
-    }, { apiBaseUrl: API_BASE_URL });
+    }, { apiBaseUrl: activeApiBase });
     expect(debugCheck.ok, `Debug endpoint must be reachable: ${JSON.stringify(debugCheck)}`).toBe(true);
     expect(debugCheck.count, 'Debug timeline should contain events').toBeGreaterThan(0);
 

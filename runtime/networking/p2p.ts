@@ -350,12 +350,13 @@ export class RuntimeP2P {
 
     this.ensureRelayConnectionsForEntity(input.entityId);
 
+    const normalizedTargetRuntimeId = normalizeRuntimeId(targetRuntimeId);
     const client = this.getActiveClient();
     if (client && client.isOpen()) {
       try {
-        const sent = client.sendEntityInput(targetRuntimeId, input);
+        const sent = client.sendEntityInput(normalizedTargetRuntimeId, input);
         if (sent) return;
-        console.warn(`P2P-SEND-FAILED: Client.send returned false for ${targetRuntimeId.slice(0,10)}`);
+        console.warn(`P2P-SEND-FAILED: Client.send returned false for ${normalizedTargetRuntimeId.slice(0,10)}`);
       } catch (error) {
         const message = (error as Error).message || String(error);
         if (message.includes('P2P_NO_PUBKEY')) {
@@ -363,7 +364,7 @@ export class RuntimeP2P {
             level: 'warn',
             code: 'P2P_NO_PUBKEY_QUEUE',
             message,
-            targetRuntimeId,
+            targetRuntimeId: normalizedTargetRuntimeId,
             entityId: input.entityId,
           });
           this.refreshGossip();
@@ -372,7 +373,7 @@ export class RuntimeP2P {
             level: 'error',
             code: 'P2P_SEND_THROW',
             message,
-            targetRuntimeId,
+            targetRuntimeId: normalizedTargetRuntimeId,
             entityId: input.entityId,
           });
         }
@@ -381,7 +382,7 @@ export class RuntimeP2P {
       console.warn(`P2P-NO-CLIENT: No active relay connection, queueing for ${targetRuntimeId.slice(0,10)}`);
     }
 
-    const queue = this.pendingByRuntime.get(targetRuntimeId) || [];
+    const queue = this.pendingByRuntime.get(normalizedTargetRuntimeId) || [];
     queue.push(input);
     // Enforce queue size limit to prevent memory exhaustion
     while (queue.length > MAX_QUEUE_PER_RUNTIME) queue.shift();
@@ -390,12 +391,12 @@ export class RuntimeP2P {
         level: 'warn',
         code: 'P2P_QUEUE_PRESSURE',
         message: 'Pending queue at cap',
-        targetRuntimeId,
+        targetRuntimeId: normalizedTargetRuntimeId,
         queueSize: queue.length,
       });
     }
-    this.pendingByRuntime.set(targetRuntimeId, queue);
-    console.log(`P2P-QUEUED: ${targetRuntimeId.slice(0,10)}, queue size: ${queue.length}`);
+    this.pendingByRuntime.set(normalizedTargetRuntimeId, queue);
+    console.log(`P2P-QUEUED: ${normalizedTargetRuntimeId.slice(0,10)}, queue size: ${queue.length}`);
   }
 
   requestGossip(runtimeId: string) {
@@ -430,8 +431,12 @@ export class RuntimeP2P {
     for (const [targetRuntimeId, queue] of this.pendingByRuntime.entries()) {
       const remaining: RoutedEntityInput[] = [];
       for (const input of queue) {
-        const sent = client.sendEntityInput(targetRuntimeId, input);
-        if (!sent) remaining.push(input);
+        try {
+          const sent = client.sendEntityInput(targetRuntimeId, input);
+          if (!sent) remaining.push(input);
+        } catch {
+          remaining.push(input);
+        }
       }
       if (remaining.length > 0) {
         this.pendingByRuntime.set(targetRuntimeId, remaining);
@@ -695,6 +700,7 @@ export class RuntimeP2P {
     let verified = 0;
     let unsigned = 0;
     let skipped = 0;
+    let accepted = 0;
     for (const profile of profiles) {
       // Skip profiles we already have at the same or newer timestamp (avoids re-verification)
       const existingProfiles = this.env.gossip?.getProfiles?.() || [];
@@ -738,6 +744,7 @@ export class RuntimeP2P {
 
       // Store in local gossip cache
       this.env.gossip?.announce?.(profile);
+      accepted++;
 
       // Register validator public keys from profile board (for account signature verification)
       const board2 = profile.metadata?.board;
@@ -759,6 +766,9 @@ export class RuntimeP2P {
       }
     }
     if (verified > 0 || unsigned > 0) console.log(`P2P_PROFILE_NEW from=${from.slice(0, 10)} verified=${verified} unsigned=${unsigned} skipped=${skipped}`);
+    if (accepted > 0 && this.pendingByRuntime.size > 0) {
+      this.flushPending();
+    }
     this.onGossipProfiles(from, profiles);
   }
 

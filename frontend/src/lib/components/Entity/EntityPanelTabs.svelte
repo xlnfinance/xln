@@ -91,6 +91,15 @@
     }
   }
 
+  function resolveApiBaseForEnv(envLike: unknown): string {
+    const runtimeRelay = (envLike as any)?.runtimeState?.p2p?.relayUrls?.[0];
+    const settingsRelay = $settings?.relayUrl;
+    const relayUrl = typeof runtimeRelay === 'string' && runtimeRelay.length > 0
+      ? runtimeRelay
+      : settingsRelay;
+    return resolveApiBaseFromRelay(relayUrl);
+  }
+
   $: apiBase = resolveApiBaseFromRelay($settings?.relayUrl);
   const REFRESH_OPTIONS = [
     { label: 'Off', value: 0 },
@@ -222,14 +231,6 @@
     symbol: string;
   }> = [];
   const RESERVE_FAUCET_TIMEOUT_MS = 15000;
-  let pendingOffchainFaucets: Array<{
-    entityId: string;
-    amountLabel: string;
-    tokenSymbol: string;
-    startedAt: number;
-  }> = [];
-  const OFFCHAIN_FAUCET_TIMEOUT_MS = 30000;
-  const seenPaymentFinalizeEvents = new Set<string>();
 
   // External tokens (ERC20 balances held by signer EOA)
   interface ExternalToken {
@@ -272,6 +273,7 @@
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
     try {
+      const requestApiBase = resolveApiBaseForEnv(activeEnv);
       const tokenMeta = resolveReserveTokenMeta(tokenId, symbolHint);
       const amountStr = tokenMeta.symbol === 'WETH' || tokenMeta.symbol === 'ETH' ? '0.1' : '100';
       const amountWei = parseTokenAmount(amountStr, tokenMeta.decimals);
@@ -282,7 +284,7 @@
       const baseExpected = existingForToken ? existingForToken.expectedBalance : currentBalance;
       const expectedBalance = baseExpected + amountWei;
       // Faucet B: Reserve transfer (ALWAYS use prod API, no BrowserVM fake)
-      const response = await fetch(`${apiBase}/api/faucet/reserve`, {
+      const response = await fetch(`${requestApiBase}/api/faucet/reserve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -317,6 +319,7 @@
     const entityId = replica?.state?.entityId || tab.entityId;
     if (!entityId) return;
     try {
+      const requestApiBase = resolveApiBaseForEnv(activeEnv);
       const runtimeId = (activeEnv as any)?.runtimeId;
       if (typeof runtimeId !== 'string' || runtimeId.length === 0) {
         throw new Error('Runtime is not ready yet (missing runtimeId). Re-open runtime and retry.');
@@ -338,8 +341,8 @@
       try {
         const controller = new AbortController();
         timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
-        console.log(`[EntityPanel] Offchain faucet request apiBase=${apiBase} runtime=${runtimeId.slice(0, 10)} entity=${String(entityId).slice(0, 10)}`);
-        response = await fetch(`${apiBase}/api/faucet/offchain`, {
+        console.log(`[EntityPanel] Offchain faucet request apiBase=${requestApiBase} runtime=${runtimeId.slice(0, 10)} entity=${String(entityId).slice(0, 10)}`);
+        response = await fetch(`${requestApiBase}/api/faucet/offchain`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
@@ -368,12 +371,7 @@
       }
 
       console.log('[EntityPanel] Offchain faucet success:', result);
-      pendingOffchainFaucets = [...pendingOffchainFaucets, {
-        entityId,
-        amountLabel: '100',
-        tokenSymbol: 'USDC',
-        startedAt: Date.now(),
-      }];
+      toasts.info('Offchain faucet request accepted.');
     } catch (err) {
       console.error('[EntityPanel] Offchain faucet failed:', err);
       toasts.error(`Offchain faucet failed: ${(err as Error).message}`);
@@ -798,81 +796,6 @@
     refreshBalances();
   });
 
-  function makeEventKey(snapshot: any, log: any, snapshotIndex: number): string {
-    const h = snapshot?.height ?? snapshotIndex;
-    const id = log?.id ?? -1;
-    const ts = log?.timestamp ?? 0;
-    return `${h}:${id}:${ts}`;
-  }
-
-  function maybeFinalizeOffchainFaucet() {
-    if (pendingOffchainFaucets.length === 0 || !Array.isArray(activeHistory) || activeHistory.length === 0) return;
-    const cutoffTs = Math.min(...pendingOffchainFaucets.map((r) => r.startedAt)) - 2000;
-
-    const pendingByEntity = new Map<string, Array<typeof pendingOffchainFaucets[number]>>();
-    for (const req of pendingOffchainFaucets) {
-      const key = req.entityId.toLowerCase();
-      const arr = pendingByEntity.get(key) ?? [];
-      arr.push(req);
-      pendingByEntity.set(key, arr);
-    }
-    for (const arr of pendingByEntity.values()) {
-      arr.sort((a, b) => a.startedAt - b.startedAt);
-    }
-
-    // Scan recent history only; finalize event should appear shortly after request.
-    const startIndex = Math.max(0, activeHistory.length - 120);
-    for (let i = startIndex; i < activeHistory.length; i += 1) {
-      const snapshot: any = activeHistory[i];
-      const logs: any[] = Array.isArray(snapshot?.logs) ? snapshot.logs : [];
-      for (const log of logs) {
-        if (log?.message !== 'PaymentFinalized') continue;
-        if (typeof log?.timestamp === 'number' && log.timestamp < cutoffTs) continue;
-
-        const data = (log?.data || {}) as Record<string, unknown>;
-        const rawEntityId = data['entityId'];
-        const logEntity = typeof rawEntityId === 'string' ? rawEntityId.toLowerCase() : '';
-        const queue = pendingByEntity.get(logEntity);
-        if (!queue || queue.length === 0) continue;
-
-        // We only want the final recipient confirmation, not sender-side completion.
-        const isFinalRecipient = !data['outboundEntity'];
-        if (!isFinalRecipient) continue;
-
-        const eventKey = makeEventKey(snapshot, log, i);
-        if (seenPaymentFinalizeEvents.has(eventKey)) continue;
-        seenPaymentFinalizeEvents.add(eventKey);
-        if (seenPaymentFinalizeEvents.size > 2000) {
-          // Prevent unbounded growth on long-lived tabs.
-          seenPaymentFinalizeEvents.clear();
-          seenPaymentFinalizeEvents.add(eventKey);
-        }
-
-        const ts = typeof log?.timestamp === 'number' ? log.timestamp : Date.now();
-        const matchIndex = queue.findIndex((req) => req.startedAt <= ts);
-        const req = matchIndex >= 0 ? queue.splice(matchIndex, 1)[0] : queue.shift();
-        if (req) {
-          toasts.success(`Received $${req.amountLabel} ${req.tokenSymbol} via offchain payment!`);
-        }
-      }
-    }
-
-    const now = Date.now();
-    for (const [entityKey, queue] of pendingByEntity.entries()) {
-      for (const req of queue) {
-        if (now - req.startedAt > OFFCHAIN_FAUCET_TIMEOUT_MS) {
-          toasts.error(`Offchain faucet timed out for ${entityKey.slice(0, 10)}...`);
-        }
-      }
-      pendingByEntity.set(entityKey, queue.filter((req) => now - req.startedAt <= OFFCHAIN_FAUCET_TIMEOUT_MS));
-    }
-
-    pendingOffchainFaucets = Array.from(pendingByEntity.values()).flat();
-  }
-
-  $: if (pendingOffchainFaucets.length > 0 && Array.isArray(activeHistory)) {
-    maybeFinalizeOffchainFaucet();
-  }
   $: if (activeTab === 'governance') {
     loadGovernanceProfileFromGossip();
   }
@@ -1447,9 +1370,6 @@
         {:else if activeTab === 'accounts'}
           <button class="btn-faucet" on:click={faucetOffchain}>
             💧 Get Test Funds (Offchain)
-            {#if pendingOffchainFaucets.length > 0}
-              ({pendingOffchainFaucets.length} pending)
-            {/if}
           </button>
           <AccountList {replica} on:select={handleAccountSelect} />
           <div class="account-open-sections">
