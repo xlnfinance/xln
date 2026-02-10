@@ -132,37 +132,6 @@ const waitForJBatchClear = async (env: Env, timeoutMs = 5000): Promise<boolean> 
   return false;
 };
 
-const waitForBilateralAccountReady = async (
-  env: Env,
-  leftEntityId: string,
-  rightEntityId: string,
-  timeoutMs = 20_000,
-): Promise<{ ok: true; account: any } | { ok: false; reason: 'missing' | 'pending'; pendingFrameHeight?: number | null }> => {
-  const started = Date.now();
-  while (Date.now() - started < timeoutMs) {
-    const accountMachine = getAccountMachine(env, leftEntityId, rightEntityId);
-    if (!accountMachine) {
-      await sleep(200);
-      continue;
-    }
-    if (!accountMachine.pendingFrame) {
-      return { ok: true, account: accountMachine };
-    }
-    await sleep(200);
-  }
-
-  const last = getAccountMachine(env, leftEntityId, rightEntityId);
-  if (!last) return { ok: false, reason: 'missing' };
-  if (last?.pendingFrame) {
-    return {
-      ok: false,
-      reason: 'pending',
-      pendingFrameHeight: Number(last.pendingFrame.height ?? 0) || null,
-    };
-  }
-  return { ok: true, account: last };
-};
-
 const waitForReserveUpdate = async (
   entityId: string,
   tokenId: number,
@@ -1450,10 +1419,35 @@ const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
         // IMPORTANT: never infer sender from input.entityId here; input.entityId is the
         // target entity for this message and mapping it to "from" poisons routing.
         if (from && input.entityTxs) {
+          const localEntityId = String(input.entityId || '').toLowerCase();
           for (const tx of input.entityTxs) {
             const data = tx.data as Record<string, unknown> | undefined;
-            if (typeof data?.fromEntityId === 'string') {
-              registerEntityRuntimeHint(env, data.fromEntityId, from);
+            if (!data) continue;
+            if (tx.type !== 'accountInput') continue;
+
+            const fromEntityId =
+              typeof data.fromEntityId === 'string' ? String(data.fromEntityId).toLowerCase() : '';
+            const toEntityId =
+              typeof data.toEntityId === 'string' ? String(data.toEntityId).toLowerCase() : '';
+
+            // Infer sender entity robustly:
+            // - expected: toEntityId == local entity, sender = fromEntityId
+            // - fallback for swapped direction bugs: fromEntityId == local entity, sender = toEntityId
+            let senderEntityId = '';
+            if (fromEntityId && toEntityId) {
+              if (toEntityId === localEntityId && fromEntityId !== localEntityId) {
+                senderEntityId = fromEntityId;
+              } else if (fromEntityId === localEntityId && toEntityId !== localEntityId) {
+                senderEntityId = toEntityId;
+              } else {
+                senderEntityId = fromEntityId;
+              }
+            } else {
+              senderEntityId = fromEntityId;
+            }
+
+            if (senderEntityId) {
+              registerEntityRuntimeHint(env, senderEntityId, from);
             }
           }
         }
@@ -2338,11 +2332,17 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         ? hubs.find((hub) => hub.entityId.toLowerCase() === requestedHubId)
         : undefined;
       const existingHubAccount = hubs.find((hub) => hasAccount(env, hub.entityId, normalizedUserEntityId));
-      const selectedHub = requestedHub ?? existingHubAccount ?? hubs[0];
+      const requestedHubHasAccount = requestedHub ? hasAccount(env, requestedHub.entityId, normalizedUserEntityId) : false;
+      // Prefer a hub with an already-open bilateral account.
+      const selectedHub = requestedHubHasAccount ? requestedHub : (existingHubAccount ?? requestedHub ?? hubs[0]);
       if (!selectedHub) {
         return new Response(JSON.stringify({ error: 'No faucet hub available' }), { status: 503, headers });
       }
       const hubEntityId = selectedHub.entityId;
+      console.log(
+        `[FAUCET/OFFCHAIN] selectedHub=${hubEntityId.slice(-8)} requested=${requestedHubId ? requestedHubId.slice(-8) : 'none'} ` +
+        `requestedHasAccount=${requestedHubHasAccount} existingHubAccount=${existingHubAccount?.entityId?.slice(-8) ?? 'none'}`
+      );
       if (!getEntityReplicaById(env, hubEntityId)) {
         return new Response(JSON.stringify({
           error: 'Faucet hub is not ready yet',
@@ -2366,59 +2366,31 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
       const amountWei = ethers.parseUnits(amount, 18);
 
-      let accountMachine = getAccountMachine(env, hubEntityId, normalizedUserEntityId);
+      const accountMachine = getAccountMachine(env, hubEntityId, normalizedUserEntityId);
       if (!accountMachine) {
-        // Enqueue openAccount and do a short bounded wait to catch the common fast path.
-        // If channel is still not materialized, fail fast with explicit 409 code.
-        const defaultCredit = 10_000n * 10n ** 18n;
-        try {
-          enqueueRuntimeInput(env, {
-            runtimeTxs: [],
-            entityInputs: [{
-              entityId: hubEntityId,
-              signerId: hubSignerId,
-              entityTxs: [{
-                type: 'openAccount',
-                data: {
-                  targetEntityId: normalizedUserEntityId,
-                  tokenId: Number(tokenId),
-                  creditAmount: defaultCredit,
-                },
-              }],
-            }],
-          });
-        } catch (error) {
-          return new Response(JSON.stringify({
-            error: 'Failed to enqueue channel opening',
-            code: 'FAUCET_OPENACCOUNT_ENQUEUE_FAILED',
-            details: (error as Error).message,
-          }), { status: 503, headers });
-        }
-
-        // Best effort: wait for bilateral channel materialization.
-        // Keep bounded and return a soft "opening" status if not ready yet.
-        const ready = await waitForBilateralAccountReady(env, hubEntityId, normalizedUserEntityId, 8_000);
-        accountMachine = ready.ok ? ready.account : getAccountMachine(env, hubEntityId, normalizedUserEntityId);
-        if (!accountMachine) {
-          return new Response(JSON.stringify({
-            success: false,
-            status: 'channel_opening',
-            code: 'FAUCET_CHANNEL_NOT_READY',
-            requestId,
-            amount,
-            tokenId,
-            from: hubEntityId.slice(0, 16) + '...',
-            to: normalizedUserEntityId.slice(0, 16) + '...',
-            message: 'Bilateral channel is still opening; retry faucet shortly.',
-            retryAfterMs: 1000,
-          }), { status: 202, headers });
-        }
+        const accountPresence = hubs.map((hub) => ({
+          hubEntityId: hub.entityId,
+          hasAccount: hasAccount(env, hub.entityId, normalizedUserEntityId),
+        }));
+        console.warn(`[FAUCET/OFFCHAIN] missing account for user=${userSuffix} selectedHub=${hubEntityId.slice(-8)}`, accountPresence);
+        return new Response(JSON.stringify({
+          success: false,
+          status: 'channel_not_ready',
+          code: 'FAUCET_CHANNEL_NOT_READY',
+          requestId,
+          amount,
+          tokenId,
+          from: hubEntityId.slice(0, 16) + '...',
+          to: normalizedUserEntityId.slice(0, 16) + '...',
+          message: 'Missing bilateral account between hub and user',
+          accountPresence,
+        }), { status: 409, headers });
       }
 
-      if (accountMachine?.pendingFrame) {
-        // Channel exists but is still finalizing a frame; queueing payment now is safe,
-        // it will execute once pending frame is acknowledged.
-        console.log(`[FAUCET/OFFCHAIN] account pending frame=${accountMachine.pendingFrame.height}`);
+      if (accountMachine.pendingFrame) {
+        console.warn(
+          `[FAUCET/OFFCHAIN] account has pendingFrame=${accountMachine.pendingFrame.height}; enqueueing faucet payment anyway`
+        );
       }
 
       // Send payment from hub to user via account.

@@ -73,7 +73,7 @@
 
   function resolveApiBaseFromRelay(relayUrl: string | undefined | null): string {
     if (typeof window === 'undefined') return 'https://xln.finance';
-    if (!relayUrl) return window.location.origin;
+    if (!relayUrl) return 'https://xln.finance';
     try {
       const relay = new URL(relayUrl);
       const pageHost = window.location.hostname;
@@ -87,7 +87,7 @@
         relay.protocol;
       return `${protocol}//${relay.host}`;
     } catch {
-      return window.location.origin;
+      return 'https://xln.finance';
     }
   }
 
@@ -330,58 +330,41 @@
       const accountIds = replica?.state?.accounts ? Array.from(replica.state.accounts.keys()) : [];
       const preferredHubEntityId = accountIds.find((id) => isHubEntity(String(id)));
 
-      // Faucet C: Offchain payment (requires account with hub).
-      // Retry a few times when account is still opening.
-      let result: any = null;
-      const maxAttempts = 3;
+      // Faucet C: offchain payment (single request, no client-side retry loops).
       const requestTimeoutMs = 12000;
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        let response: Response | null = null;
-        let timeout: ReturnType<typeof setTimeout> | null = null;
-        try {
-          const controller = new AbortController();
-          timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
-          response = await fetch(`${apiBase}/api/faucet/offchain`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            signal: controller.signal,
-            body: JSON.stringify({
-              userEntityId: entityId,
-              userRuntimeId: runtimeId,
-              tokenId: 1, // USDC
-              amount: '100',
-              ...(preferredHubEntityId ? { hubEntityId: preferredHubEntityId } : {}),
-            })
-          });
-          result = await readJsonResponse(response);
-          if (response.ok && result?.success) break;
-        } catch (error: any) {
-          const aborted = error?.name === 'AbortError';
-          result = aborted
-            ? { error: `Faucet request timed out after ${requestTimeoutMs}ms`, status: 'timeout', code: 'FAUCET_TIMEOUT' }
-            : { error: error?.message || String(error), status: 'fetch_error', code: 'FAUCET_FETCH_ERROR' };
-        } finally {
-          if (timeout) clearTimeout(timeout);
-        }
+      let response: Response | null = null;
+      let result: any = null;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      try {
+        const controller = new AbortController();
+        timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
+        console.log(`[EntityPanel] Offchain faucet request apiBase=${apiBase} runtime=${runtimeId.slice(0, 10)} entity=${String(entityId).slice(0, 10)}`);
+        response = await fetch(`${apiBase}/api/faucet/offchain`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal: controller.signal,
+          body: JSON.stringify({
+            userEntityId: entityId,
+            userRuntimeId: runtimeId,
+            tokenId: 1, // USDC
+            amount: '100',
+            ...(preferredHubEntityId ? { hubEntityId: preferredHubEntityId } : {}),
+          })
+        });
+        result = await readJsonResponse(response);
+      } catch (error: any) {
+        const aborted = error?.name === 'AbortError';
+        const message = aborted
+          ? `Faucet request timed out after ${requestTimeoutMs}ms`
+          : (error?.message || String(error));
+        throw new Error(message);
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
 
-        const code = String(result?.code || '');
-        const transient =
-          response?.status === 202 ||
-          response?.status === 409 ||
-          code === 'FAUCET_CHANNEL_NOT_READY' ||
-          code === 'FAUCET_TIMEOUT' ||
-          result?.status === 'channel_opening' ||
-          result?.status === 'channel_not_ready';
-
-        if (!transient || attempt >= maxAttempts) {
-          const status = response ? response.status : 'fetch-error';
-          throw new Error(result?.error || `Faucet failed (${status})`);
-        }
-
-        if (attempt === 1) {
-          toasts.info('Opening account with hub...');
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000));
+      if (!response?.ok || !result?.success) {
+        const status = response ? response.status : 'fetch-error';
+        throw new Error(result?.error || `Faucet failed (${status})`);
       }
 
       console.log('[EntityPanel] Offchain faucet success:', result);
