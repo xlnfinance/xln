@@ -74,6 +74,32 @@ const toHex = (bytes: Uint8Array): string =>
 
 const unique = (items: string[]): string[] => Array.from(new Set(items.filter(Boolean)));
 
+const isLoopbackHost = (host: string): boolean => {
+  const normalized = String(host || '').toLowerCase();
+  return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
+};
+
+const isRelayUrlUsable = (relayUrl: string): boolean => {
+  try {
+    const parsed = new URL(relayUrl);
+    if (typeof window === 'undefined') return true;
+    const pageProtocol = window.location.protocol;
+    const pageHost = window.location.hostname.toLowerCase();
+    const relayHost = parsed.hostname.toLowerCase();
+    const isLoopbackRelay = isLoopbackHost(relayHost);
+    if (isLoopbackRelay && relayHost !== pageHost) {
+      return false;
+    }
+    // Browser on HTTPS cannot open insecure WS endpoints.
+    if (pageProtocol === 'https:' && parsed.protocol === 'ws:') {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const isSameList = (a: string[], b: string[]): boolean => {
   if (a.length !== b.length) return false;
   const aSorted = [...a].sort();
@@ -188,6 +214,7 @@ export class RuntimeP2P {
     this.startPolling();
     for (const url of this.relayUrls) {
       const runtimeSeed = this.env.runtimeSeed;
+      const isBrowserRuntime = typeof window !== 'undefined';
       const client = new RuntimeWsClient({
         url,
         runtimeId: this.runtimeId,
@@ -253,6 +280,9 @@ export class RuntimeP2P {
         onError: (error) => {
           this.env.warn('network', 'WS_CLIENT_ERROR', { relay: url, error: error.message });
         },
+        // Browser UX: stop after bounded attempts.
+        // Server/hub runtime: keep reconnecting to avoid dead relay state after transient boot races.
+        maxReconnectAttempts: 0,
       });
       this.clients.push(client);
       client.connect().catch(error => {
@@ -428,8 +458,21 @@ export class RuntimeP2P {
     const hintedRelays = unique([
       ...(profile.relays || []),
       ...(profile.endpoints || []),
-    ]);
-    const missingRelayUrls = hintedRelays.filter((relayUrl) => !this.relayUrls.includes(relayUrl));
+    ]).filter(isRelayUrlUsable);
+    const missingRelayUrls = hintedRelays.filter((relayUrl) => {
+      if (this.relayUrls.includes(relayUrl)) return false;
+      if (typeof window !== 'undefined') {
+        // Never auto-discover/add loopback relays in browser mode.
+        // Keep relay selection explicit from settings/hub selector.
+        try {
+          const relayHost = new URL(relayUrl).hostname.toLowerCase();
+          if (isLoopbackHost(relayHost)) return false;
+        } catch {
+          return false;
+        }
+      }
+      return true;
+    });
     if (missingRelayUrls.length === 0) return;
 
     this.relayUrls = unique([...this.relayUrls, ...missingRelayUrls]);

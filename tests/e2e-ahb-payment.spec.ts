@@ -86,7 +86,28 @@ async function createRuntime(page: Page, label: string, mnemonic: string) {
 }
 
 async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
-  const snapshot = await page.evaluate(async () => {
+  const connected = await page.evaluate(async () => {
+    const start = Date.now();
+    while (Date.now() - start < 45_000) {
+      const env = (window as any).isolatedEnv;
+      const p2p = env?.runtimeState?.p2p as any;
+      if (p2p && typeof p2p.isConnected === 'function' && p2p.isConnected()) {
+        return true;
+      }
+      if (p2p) {
+        if (typeof p2p.connect === 'function') {
+          try { p2p.connect(); } catch {}
+        } else if (typeof p2p.reconnect === 'function') {
+          try { p2p.reconnect(); } catch {}
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    return false;
+  });
+  expect(connected, `[${tag}] runtime P2P must connect within 45s`).toBe(true);
+
+  const snapshot = await page.evaluate(async ({ apiBaseUrl }) => {
     const env = (window as any).isolatedEnv;
     const runtimeId = String(env?.runtimeId || '');
     const p2p = env?.runtimeState?.p2p as any;
@@ -97,7 +118,7 @@ async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
 
     if (runtimeId) {
       try {
-        const res = await fetch(`/api/debug/events?last=1500&runtimeId=${encodeURIComponent(runtimeId)}`);
+        const res = await fetch(`${apiBaseUrl}/api/debug/events?last=1500&runtimeId=${encodeURIComponent(runtimeId)}`);
         if (res.ok) {
           const body = await res.json();
           const events = Array.isArray(body?.events) ? body.events : [];
@@ -120,7 +141,7 @@ async function assertP2PSingletonAndWsHealth(page: Page, tag: string) {
       wsOpenForRuntime,
       wsCloseForRuntime,
     };
-  });
+  }, { apiBaseUrl: API_BASE_URL });
 
   expect(snapshot.hasP2P, `[${tag}] runtime must have active P2P`).toBe(true);
   expect(snapshot.isConnected, `[${tag}] runtime P2P must have open WS`).toBe(true);
@@ -153,13 +174,13 @@ async function ensureRuntimeOnline(page: Page, tag: string) {
 }
 
 async function waitForEntityAdvertised(page: Page, entityId: string) {
-  const advertised = await page.evaluate(async (entityId) => {
+  const advertised = await page.evaluate(async ({ entityId, apiBaseUrl }) => {
     const target = String(entityId).toLowerCase();
     const start = Date.now();
     while (Date.now() - start < 30_000) {
       // Path 1: relay debug entity registry
       try {
-        const res = await fetch(`/api/debug/entities?limit=5000&q=${encodeURIComponent(entityId)}`);
+        const res = await fetch(`${apiBaseUrl}/api/debug/entities?limit=5000&q=${encodeURIComponent(entityId)}`);
         if (res.ok) {
           const body = await res.json();
           const entities = Array.isArray(body?.entities) ? body.entities : [];
@@ -183,7 +204,7 @@ async function waitForEntityAdvertised(page: Page, entityId: string) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
     return false;
-  }, entityId);
+  }, { entityId, apiBaseUrl: API_BASE_URL });
   expect(advertised, `Entity ${entityId.slice(0, 12)} not advertised in relay debug or local gossip cache`).toBe(true);
 }
 
@@ -672,26 +693,43 @@ async function waitForOutCapDelta(
   );
 }
 
+async function waitForOutCapIncrease(
+  page: Page,
+  entityId: string,
+  cpId: string,
+  baseline: bigint,
+  timeoutMs = 30_000
+): Promise<bigint> {
+  const start = Date.now();
+  let latest = baseline;
+  while (Date.now() - start < timeoutMs) {
+    latest = await outCap(page, entityId, cpId);
+    if (latest > baseline) return latest;
+    await page.waitForTimeout(500);
+  }
+  throw new Error(
+    `Timed out waiting outCap increase for ${entityId.slice(0, 10)}↔${cpId.slice(0, 10)}: baseline=${baseline} latest=${latest}`
+  );
+}
+
 /** Faucet 100 USDC (with 30s timeout) */
 async function faucet(page: Page, entityId: string) {
   let r: { ok: boolean; status: number; data: any } = { ok: false, status: 0, data: { error: 'not-run' } };
   for (let attempt = 1; attempt <= 6; attempt++) {
-    r = await page.evaluate(async (eid) => {
-      try {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 10_000);
-        const resp = await fetch('/api/faucet/offchain', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ userEntityId: eid, tokenId: 1, amount: '100' }),
-          signal: ctrl.signal,
-        });
-        clearTimeout(timer);
-        const data = await resp.json();
-        return { ok: resp.ok, status: resp.status, data };
-      } catch (e: any) {
-        return { ok: false, status: 0, data: { error: e.message } };
-      }
-    }, entityId);
+    const runtimeId = await page.evaluate(() => (window as any).isolatedEnv?.runtimeId || null);
+    if (!runtimeId) {
+      r = { ok: false, status: 0, data: { error: 'missing runtimeId in isolatedEnv' } };
+      break;
+    }
+    try {
+      const resp = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
+        data: { userEntityId: entityId, userRuntimeId: runtimeId, tokenId: 1, amount: '100' },
+      });
+      const data = await resp.json().catch(() => ({}));
+      r = { ok: resp.ok(), status: resp.status(), data };
+    } catch (e: any) {
+      r = { ok: false, status: 0, data: { error: e?.message || String(e) } };
+    }
     console.log(`[E2E] Faucet response attempt ${attempt}: status=${r.status} data=${JSON.stringify(r.data)}`);
     if (r.ok) break;
     const message = String(r.data?.error || '');
@@ -956,7 +994,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E] Alice OUT before faucet: ${a0}`);
     await faucet(page, alice!.entityId);
     await dumpState(page, 'alice-after-faucet');
-    const a1 = await outCap(page, alice!.entityId, hubId);
+    const a1 = await waitForOutCapIncrease(page, alice!.entityId, hubId, a0);
     console.log(`[E2E] Alice OUT after faucet: ${a0} → ${a1}`);
     expect(a1, 'Faucet should increase Alice OUT').toBeGreaterThan(a0);
     await screenshot(page, '05-alice-after-faucet');
@@ -1009,7 +1047,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E]    Amount: ${ethers.formatUnits(reverseAmount, 18)} USDC, fee: ${ethers.formatUnits(reverseFee, 18)} USDC`);
 
     await faucet(page, bob!.entityId);
-    const b2 = await outCap(page, bob!.entityId, hubId);
+    const b2 = await waitForOutCapIncrease(page, bob!.entityId, hubId, b1);
     console.log(`[E2E] Bob OUT after faucet: ${b2}`);
 
     await switchTo(page, 'alice');
@@ -1155,9 +1193,9 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     }, alice!.entityId);
     expect(lockInfo.locks, 'Self-pay route should fully resolve (no lingering locks)').toBe(0);
 
-    const debugCheck = await page.evaluate(async () => {
+    const debugCheck = await page.evaluate(async ({ apiBaseUrl }) => {
       try {
-        const r = await fetch('/api/debug/events?last=200');
+        const r = await fetch(`${apiBaseUrl}/api/debug/events?last=200`);
         if (!r.ok) return { ok: false, status: r.status, count: 0 };
         const body = await r.json();
         const events = Array.isArray(body?.events) ? body.events : [];
@@ -1165,7 +1203,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       } catch (e: any) {
         return { ok: false, status: 0, count: 0, error: e?.message };
       }
-    });
+    }, { apiBaseUrl: API_BASE_URL });
     expect(debugCheck.ok, `Debug endpoint must be reachable: ${JSON.stringify(debugCheck)}`).toBe(true);
     expect(debugCheck.count, 'Debug timeline should contain events').toBeGreaterThan(0);
 

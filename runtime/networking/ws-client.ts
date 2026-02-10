@@ -48,6 +48,8 @@ export type RuntimeWsClientOptions = {
   onGossipAnnounce?: (from: string, payload: unknown) => Promise<void> | void;
   onOpen?: () => void;
   onError?: (error: Error) => void;
+  // <= 0 means unlimited reconnect attempts
+  maxReconnectAttempts?: number;
 };
 
 const isBrowser = typeof window !== 'undefined' && typeof WebSocket !== 'undefined';
@@ -76,7 +78,7 @@ const createWs = async (url: string): Promise<WebSocketLike> => {
 
 export class RuntimeWsClient {
   private static readonly RECONNECT_DELAY_MS = 5000;
-  private static readonly MAX_RECONNECT_ATTEMPTS = 3;
+  private static readonly DEFAULT_MAX_RECONNECT_ATTEMPTS = 0;
   private ws: WebSocketLike | null = null;
   private closed = false;
   private connecting = false;
@@ -84,11 +86,15 @@ export class RuntimeWsClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
   private suppressNextClose = false;
+  private readonly maxReconnectAttempts: number;
 
   constructor(options: RuntimeWsClientOptions) {
     failfastAssert(!!options.url, 'WS_INIT_URL_MISSING', 'RuntimeWsClient url is required');
     failfastAssert(!!options.runtimeId, 'WS_INIT_RUNTIME_MISSING', 'RuntimeWsClient runtimeId is required');
     this.options = options;
+    this.maxReconnectAttempts = Number.isFinite(options.maxReconnectAttempts as number)
+      ? Number(options.maxReconnectAttempts)
+      : RuntimeWsClient.DEFAULT_MAX_RECONNECT_ATTEMPTS;
   }
 
   getUrl(): string {
@@ -141,8 +147,13 @@ export class RuntimeWsClient {
       });
       this.ws.on('error', (err: Error) => {
         this.connecting = false;
-        // Let "close" own reconnect scheduling; prevents double-scheduling loops.
         this.options.onError?.(err);
+        // Some WS handshake failures emit only "error" without a "close" callback.
+        // Keep reconnect ownership idempotent via scheduleReconnect() guards.
+        if (!this.closed && !this.isOpen()) {
+          console.error(`[WS] Error on ${this.options.url} — reconnect in ${RuntimeWsClient.RECONNECT_DELAY_MS}ms`);
+          this.scheduleReconnect();
+        }
       });
     } else {
       this.ws.onopen = () => {
@@ -167,8 +178,12 @@ export class RuntimeWsClient {
       };
       this.ws.onerror = (event: Event) => {
         this.connecting = false;
-        // Let "close" own reconnect scheduling; prevents double-scheduling loops.
         this.options.onError?.(new Error(`WebSocket error: ${event.type}`));
+        // Browser can also surface error before close in transient network failures.
+        if (!this.closed && !this.isOpen()) {
+          console.error(`[WS] Error on ${this.options.url} — reconnect in ${RuntimeWsClient.RECONNECT_DELAY_MS}ms`);
+          this.scheduleReconnect();
+        }
       };
     }
   }
@@ -177,9 +192,10 @@ export class RuntimeWsClient {
     if (this.closed || this.connecting || this.isOpen()) return;
     if (this.reconnectTimer) return;
     this.reconnectAttempts += 1;
-    if (this.reconnectAttempts > RuntimeWsClient.MAX_RECONNECT_ATTEMPTS) {
+    const capped = this.maxReconnectAttempts > 0;
+    if (capped && this.reconnectAttempts > this.maxReconnectAttempts) {
       const err = new Error(
-        `WS_RECONNECT_EXHAUSTED: ${this.options.url} failed after ${RuntimeWsClient.MAX_RECONNECT_ATTEMPTS} attempts`
+        `WS_RECONNECT_EXHAUSTED: ${this.options.url} failed after ${this.maxReconnectAttempts} attempts`
       );
       console.error(`[WS] Reconnect exhausted for ${this.options.url}`);
       this.options.onError?.(err);
