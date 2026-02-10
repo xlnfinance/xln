@@ -111,7 +111,8 @@ export function resolveRelayUrls(): string[] {
 
   const settingsRelay = get(settings)?.relayUrl;
   const envRelay = (import.meta as any)?.env?.VITE_RELAY_URL as string | undefined;
-  const fallbackRelay = isLocalBrowserHost() ? 'ws://localhost:9000' : 'wss://xln.finance/relay';
+  // Always default to prod relay unless user explicitly overrides settings.
+  const fallbackRelay = 'wss://xln.finance/relay';
   const relay = localStorageRelay || settingsRelay || envRelay || fallbackRelay;
   if (!isLocalBrowserHost() && isLocalRelayUrl(relay)) {
     console.warn(`[relay] Ignoring local relay URL on non-local host: ${relay} -> ${fallbackRelay}`);
