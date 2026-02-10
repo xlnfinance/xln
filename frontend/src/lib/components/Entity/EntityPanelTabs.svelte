@@ -333,7 +333,7 @@
       // Faucet C: Offchain payment (requires account with hub).
       // Retry a few times when account is still opening.
       let result: any = null;
-      const maxAttempts = 20;
+      const maxAttempts = 3;
       const requestTimeoutMs = 12000;
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         let response: Response | null = null;

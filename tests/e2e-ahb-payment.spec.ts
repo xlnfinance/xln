@@ -926,6 +926,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
   });
 
   test.afterEach(async ({ page }) => {
+    if (process.env.E2E_SKIP_AFTER_RESET === '1') return;
     await resetProdServer(page);
   });
 
