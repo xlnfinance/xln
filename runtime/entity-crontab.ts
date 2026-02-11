@@ -1,28 +1,77 @@
 /**
  * Entity Crontab System
  *
- * Generalized periodic task execution within entity consensus.
- * Runs during applyEntityInput/applyEntityFrame to execute tasks at specified intervals.
+ * Two mechanisms for scheduling work inside entity consensus:
  *
- * Design:
- * - Every N seconds, execute a function
- * - Tracks last execution time per task
- * - Runs inside entity processing (not a separate thread)
- * - Tasks are idempotent (safe to run multiple times)
+ * ═══════════════════════════════════════════════════════════════════════
+ * 1. PERIODIC TASKS (setInterval-like)
+ *    Run a function every N milliseconds. For continuous monitoring:
+ *    account timeouts, batch broadcasts, rebalancing, HTLC polling.
+ *
+ * 2. SCHEDULED HOOKS (setTimeout-like)
+ *    Fire once at a specific wall-clock time. For point-in-time events:
+ *    HTLC lock expiry, dispute deadlines, settlement windows.
+ * ═══════════════════════════════════════════════════════════════════════
+ *
+ * SCHEDULED HOOKS — How to use:
+ *
+ *   // Schedule: "wake this entity at time T to run security check"
+ *   scheduleHook(crontabState, {
+ *     id: `htlc-timeout:${lockId}`,   // Unique — prevents duplicates
+ *     triggerAt: Number(lock.timelock), // Wall-clock ms
+ *     type: 'htlc_timeout',            // Routes to correct handler
+ *     data: { accountId, lockId }       // Payload for the handler
+ *   });
+ *
+ *   // Cancel: "lock resolved early, no need to fire"
+ *   cancelHook(crontabState, `htlc-timeout:${lockId}`);
+ *
+ * WHY HOOKS EXIST:
+ *   Entities only process crontab during applyEntityInput(). If an entity
+ *   is idle (no messages, no payments), periodic tasks never run. Hooks
+ *   solve this: the runtime loop checks getEarliestHookTime() and injects
+ *   a ping entityInput to wake the entity at the right time.
+ *
+ * HOOK TYPES & SECURITY APPLICATIONS:
+ *   'htlc_timeout'      — Auto-resolve expired HTLC locks (prevents fund lockup)
+ *   'dispute_deadline'   — Auto-finalize disputes after challenge period
+ *   'settlement_window'  — Auto-execute approved settlements
+ *   'watchdog'           — Detect unresponsive counterparties
+ *
+ * DETERMINISM: Hooks use wall-clock time for scheduling, but processing
+ * happens through entity consensus (deterministic). Both sides see the
+ * same hook fire at the same logical time because the proposer's
+ * env.timestamp is used for the frame.
+ *
+ * PERSISTENCE: Hooks live on crontabState (transient, not in consensus hash).
+ * Lost on page reload — periodic task polling serves as safety-net fallback.
  */
 
 import type { Env, EntityReplica, EntityInput, AccountMachine } from './types';
 import { isLeftEntity } from './entity-id-utils';
 
+// ═══════════════════════════════════════════════════════════════════════
+// Types
+// ═══════════════════════════════════════════════════════════════════════
+
 export interface CrontabTask {
   name: string;
   intervalMs: number; // How often to run (in milliseconds)
   lastRun: number; // Timestamp of last execution
-  handler: (env: Env, replica: EntityReplica) => Promise<EntityInput[]>; // Returns messages to send
+  handler: (env: Env, replica: EntityReplica) => Promise<EntityInput[]>;
+}
+
+/** A one-shot hook that fires at a specific wall-clock time */
+export interface ScheduledHook {
+  id: string;                    // Unique ID (e.g., "htlc-timeout:0xabc...")
+  triggerAt: number;             // Wall-clock ms — when this should fire
+  type: string;                  // Hook type for routing (e.g., 'htlc_timeout')
+  data: Record<string, any>;    // Payload passed to handler
 }
 
 export interface CrontabState {
   tasks: Map<string, CrontabTask>;
+  hooks: Map<string, ScheduledHook>;
 }
 
 // Configuration constants
@@ -35,11 +84,11 @@ export const ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS = 10000; // Check every 10 second
 export function initCrontab(): CrontabState {
   const tasks = new Map<string, CrontabTask>();
 
-  // Register default tasks
+  // Register default periodic tasks (setInterval-like)
   tasks.set('checkAccountTimeouts', {
     name: 'checkAccountTimeouts',
     intervalMs: ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS,
-    lastRun: 0, // Never run yet
+    lastRun: 0,
     handler: checkAccountTimeoutsHandler,
   });
 
@@ -59,12 +108,45 @@ export function initCrontab(): CrontabState {
 
   tasks.set('checkHtlcTimeouts', {
     name: 'checkHtlcTimeouts',
-    intervalMs: 5000, // Check HTLC expirations every 5 seconds
+    intervalMs: 5000, // Safety-net polling (hooks are primary, this is fallback)
     lastRun: 0,
     handler: checkHtlcTimeoutsHandler,
   });
 
-  return { tasks };
+  return { tasks, hooks: new Map() };
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Scheduled Hooks API (setTimeout-like)
+// ═══════════════════════════════════════════════════════════════════════
+
+/** Schedule a one-shot hook at a specific wall-clock time */
+export function scheduleHook(state: CrontabState, hook: ScheduledHook): void {
+  if (!state.hooks) state.hooks = new Map();
+  state.hooks.set(hook.id, hook);
+  console.log(`⏰ HOOK scheduled: ${hook.type} id=${hook.id.slice(0,24)}... triggerAt=${hook.triggerAt}`);
+}
+
+/** Cancel a previously scheduled hook (e.g., lock resolved before timeout) */
+export function cancelHook(state: CrontabState, hookId: string): void {
+  if (!state.hooks) return;
+  if (state.hooks.delete(hookId)) {
+    console.log(`⏰ HOOK cancelled: ${hookId.slice(0,24)}...`);
+  }
+}
+
+/**
+ * Get the earliest hook trigger time across all hooks.
+ * Returns Infinity if no hooks are scheduled.
+ * Used by the runtime loop to know when to wake this entity.
+ */
+export function getEarliestHookTime(state: CrontabState): number {
+  if (!state.hooks || state.hooks.size === 0) return Infinity;
+  let earliest = Infinity;
+  for (const hook of state.hooks.values()) {
+    if (hook.triggerAt < earliest) earliest = hook.triggerAt;
+  }
+  return earliest;
 }
 
 /**
@@ -80,19 +162,32 @@ export async function executeCrontab(
   const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
   const allOutputs: EntityInput[] = [];
 
+  // ── 1. Process scheduled hooks (setTimeout-like, fires once) ──
+  if (crontabState.hooks && crontabState.hooks.size > 0) {
+    const dueHooks: ScheduledHook[] = [];
+    for (const [id, hook] of crontabState.hooks) {
+      if (hook.triggerAt <= now) {
+        dueHooks.push(hook);
+        crontabState.hooks.delete(id); // One-shot: remove after firing
+      }
+    }
+
+    if (dueHooks.length > 0) {
+      console.log(`⏰ HOOKS: ${dueHooks.length} hooks fired (entity ${replica.entityId.slice(-4)}, timestamp=${now})`);
+      const hookOutputs = processDueHooks(dueHooks, replica);
+      allOutputs.push(...hookOutputs);
+    }
+  }
+
+  // ── 2. Process periodic tasks (setInterval-like, fires repeatedly) ──
   for (const task of crontabState.tasks.values()) {
     const timeSinceLastRun = now - task.lastRun;
 
     if (timeSinceLastRun >= task.intervalMs) {
-      // Removed verbose crontab logging (only log task completion)
-
       try {
         const outputs = await task.handler(env, replica);
         allOutputs.push(...outputs);
-
-        // Update last run time
         task.lastRun = now;
-        // Only log if outputs generated
         if (outputs.length > 0) {
           console.log(`✅ CRONTAB: Task "${task.name}" generated ${outputs.length} outputs`);
         }
@@ -103,6 +198,66 @@ export async function executeCrontab(
   }
 
   return allOutputs;
+}
+
+/**
+ * Process fired hooks → generate entityTxs by hook type.
+ * Each hook type maps to a specific security/protocol action.
+ */
+function processDueHooks(hooks: ScheduledHook[], replica: EntityReplica): EntityInput[] {
+  const outputs: EntityInput[] = [];
+  const firstValidator = replica.state.config.validators?.[0];
+  if (!firstValidator) return outputs;
+
+  // Group expired locks by type for batch processing
+  const htlcTimeoutLocks: Array<{ accountId: string; lockId: string }> = [];
+
+  for (const hook of hooks) {
+    console.log(`⏰ HOOK FIRED: type=${hook.type} id=${hook.id.slice(0,24)}...`);
+
+    switch (hook.type) {
+      case 'htlc_timeout':
+        // HTLC lock expired → resolve with error:timeout
+        htlcTimeoutLocks.push({
+          accountId: hook.data.accountId,
+          lockId: hook.data.lockId,
+        });
+        break;
+
+      case 'dispute_deadline':
+        // Future: auto-finalize dispute after challenge period
+        console.log(`⏰ HOOK: dispute_deadline — not yet implemented`);
+        break;
+
+      case 'settlement_window':
+        // Future: auto-execute settlement after approval window
+        console.log(`⏰ HOOK: settlement_window — not yet implemented`);
+        break;
+
+      case 'watchdog':
+        // Future: detect unresponsive counterparty
+        console.log(`⏰ HOOK: watchdog — not yet implemented`);
+        break;
+
+      default:
+        console.warn(`⏰ HOOK: Unknown type "${hook.type}" — skipping`);
+    }
+  }
+
+  // Batch HTLC timeouts into single entityTx
+  if (htlcTimeoutLocks.length > 0) {
+    outputs.push({
+      entityId: replica.entityId,
+      signerId: firstValidator,
+      entityTxs: [{
+        type: 'processHtlcTimeouts',
+        data: { expiredLocks: htlcTimeoutLocks }
+      }]
+    });
+    console.log(`⏰ HOOKS: Generated processHtlcTimeouts for ${htlcTimeoutLocks.length} expired locks`);
+  }
+
+  return outputs;
 }
 
 /**

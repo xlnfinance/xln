@@ -337,8 +337,15 @@ export const applyEntityInput = async (
   const entityOutbox: EntityInput[] = [];
   const jOutbox: JInput[] = []; // J-layer outputs
 
+  // Proposer advances entity timestamp from its own wall clock (source of truth).
+  // This ensures crontab and hooks see current time, even when no frame is produced.
+  // Validators will receive the proposer's timestamp in the frame when frames ARE created.
+  if (!env.scenarioMode) {
+    workingReplica.state.timestamp = env.timestamp;
+  }
+
   // ⏰ Execute crontab tasks (periodic checks like account timeouts)
-  const { executeCrontab, initCrontab } = await import('./entity-crontab');
+  const { executeCrontab, initCrontab, scheduleHook, cancelHook } = await import('./entity-crontab');
 
   // Initialize crontab on first use
   if (!workingReplica.state.crontabState) {
@@ -1070,9 +1077,14 @@ export const applyEntityFrame = async (
     console.log(`🎯 Transaction ${index}: type="${tx.type}", data=`, tx.data);
   });
 
+  // Import hook scheduling for HTLC timeout hooks
+  const { scheduleHook: scheduleHookFn, cancelHook: cancelHookFn } = await import('./entity-crontab');
+
   // CRITICAL: Clone state to avoid mutating the input (determinism fix)
   // Without this, proposer and validator can end up with different states
   let currentEntityState = cloneEntityState(entityState);
+  // Carry transient crontabState through clone (not in consensus hash, but needed for hooks)
+  if (entityState.crontabState) currentEntityState.crontabState = entityState.crontabState;
 
   // FIX: Set frame timestamp BEFORE running handlers (not after)
   // Without this, HTLC timelocks use stale timestamp (1-frame lag)
@@ -1124,6 +1136,27 @@ export const applyEntityFrame = async (
           account.mempool.push(tx);
           proposableAccounts.add(accountId);
           console.log(`📦   → ${accountId.slice(-8)}: ${tx.type} (mempool now: ${account.mempool.length} txs, pendingFrame=${!!account.pendingFrame ? 'h'+account.pendingFrame.height : 'none'})`);
+
+          // Schedule timeout hooks for HTLC locks (setTimeout-like)
+          // When the lock's timelock expires, the runtime will ping this entity
+          // to trigger crontab → processHtlcTimeouts → resolve with error:timeout
+          if (tx.type === 'htlc_lock' && tx.data?.timelock && tx.data?.lockId) {
+            if (currentEntityState.crontabState) {
+              scheduleHookFn(currentEntityState.crontabState, {
+                id: `htlc-timeout:${tx.data.lockId}`,
+                triggerAt: Number(tx.data.timelock),
+                type: 'htlc_timeout',
+                data: { accountId, lockId: tx.data.lockId },
+              });
+            }
+          }
+
+          // Cancel timeout hooks for resolved/revealed HTLC locks
+          if ((tx.type === 'htlc_resolve' || tx.type === 'htlc_reveal') && tx.data?.lockId) {
+            if (currentEntityState.crontabState) {
+              cancelHookFn(currentEntityState.crontabState, `htlc-timeout:${tx.data.lockId}`);
+            }
+          }
         } else {
           console.warn(`📦   ⚠️ Account ${accountId.slice(-8)} not found for mempoolOp`);
         }

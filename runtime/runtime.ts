@@ -456,9 +456,63 @@ const hasRuntimeWork = (env: Env): boolean => {
       if (retryAt <= nowMs) return true;
     }
   }
-  // J-machine mempool removed from work check — J-batches are now executed post-save
-  // as side effects, not queued for processing in the next frame
+  // Check for due scheduled hooks (setTimeout-like entity pings)
+  if (hasDueEntityHooks(env)) return true;
   return false;
+};
+
+/**
+ * Check if any entity has scheduled hooks that are due to fire.
+ * Used by the runtime loop to wake up idle entities at the right time.
+ */
+const hasDueEntityHooks = (env: Env): boolean => {
+  if (!env.eReplicas || env.eReplicas.size === 0) return false;
+  const nowMs = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+  for (const [, replica] of env.eReplicas) {
+    const hooks = (replica as any).state?.crontabState?.hooks;
+    if (hooks && hooks.size > 0) {
+      for (const hook of hooks.values()) {
+        if ((hook as any).triggerAt <= nowMs) return true;
+      }
+    }
+  }
+  return false;
+};
+
+/**
+ * Generate entity input pings for entities with due hooks.
+ * Injects empty entityInputs so applyEntityInput runs → crontab fires → hooks execute.
+ */
+const generateHookPings = (env: Env): void => {
+  if (!env.eReplicas || env.eReplicas.size === 0) return;
+  const nowMs = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+  const mempool = ensureRuntimeMempool(env);
+
+  for (const [key, replica] of env.eReplicas) {
+    const hooks = (replica as any).state?.crontabState?.hooks;
+    if (!hooks || hooks.size === 0) continue;
+
+    let hasDue = false;
+    for (const hook of hooks.values()) {
+      if ((hook as any).triggerAt <= nowMs) { hasDue = true; break; }
+    }
+    if (!hasDue) continue;
+
+    // Extract entityId and signerId from replica key (format: "entityId:signerId")
+    const entityId = (replica as any).entityId ?? String(key).split(':')[0];
+    const signerId = (replica as any).state?.config?.validators?.[0] ?? String(key).split(':')[1];
+    if (!entityId || !signerId) continue;
+
+    // Check if there's already a pending entityInput for this entity
+    const alreadyQueued = mempool.entityInputs.some(
+      ei => ei.entityId === entityId
+    );
+    if (alreadyQueued) continue;
+
+    // Inject empty entityInput ping — just enough to trigger crontab
+    mempool.entityInputs.push({ entityId, signerId, entityTxs: [] });
+    console.log(`⏰ HOOK-PING: Waking entity ${entityId.slice(-4)} (due hooks)`);
+  }
 };
 
 const isRuntimeFrameReady = (env: Env, now: number, overrideDelayMs?: number): boolean => {
@@ -2383,6 +2437,9 @@ export const process = async (
       env.timestamp = getWallClockMs();
     }
     getBrowserVMInstance(env)?.setBlockTimestamp?.(env.timestamp);
+
+    // Inject pings for entities with due scheduled hooks (setTimeout-like)
+    generateHookPings(env);
 
     const mempool = ensureRuntimeMempool(env);
     const runtimeInput: RuntimeInput = {

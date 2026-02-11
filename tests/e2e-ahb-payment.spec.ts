@@ -14,7 +14,7 @@ const INIT_TIMEOUT = 30_000;
 const SETTLE_MS = 10_000;
 const APP_BASE_URL = process.env.E2E_BASE_URL ?? 'https://localhost:8080';
 const API_BASE_URL = process.env.E2E_API_BASE_URL ?? APP_BASE_URL;
-const RESET_BASE_URL = process.env.E2E_RESET_BASE_URL ?? 'http://localhost:8082';
+const RESET_BASE_URL = process.env.E2E_RESET_BASE_URL ?? APP_BASE_URL;
 
 const DEFAULT_FEE_PPM = 10n;
 const FEE_DENOM = 1_000_000n;

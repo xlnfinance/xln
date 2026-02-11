@@ -22,16 +22,29 @@ import { createJAdapter, type JAdapter } from './jadapter';
 import type { JEvent, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
-import { deriveEncryptionKeyPair, decryptJSON, encryptJSON, hexToPubKey, type P2PKeyPair } from './networking/p2p-crypto';
-import { asFailFastPayload, failfastAssert } from './networking/failfast';
+import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
 import { buildEntityProfile } from './networking/gossip-helper';
+import {
+  type RelayStore,
+  createRelayStore,
+  normalizeRuntimeKey,
+  nextWsTimestamp,
+  pushDebugEvent,
+  storeGossipProfile,
+  getAllGossipProfiles,
+  removeClient,
+  resetStore as resetRelayStore,
+  resolveEncryptionPubKeyHex,
+  cacheEncryptionKey,
+} from './relay-store';
+import { relayRoute, type RelayRouterConfig } from './relay-router';
+import { createLocalDeliveryHandler } from './relay-local-delivery';
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../jurisdictions/typechain-types/factories/ERC20Mock__factory';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
-// Cached server encryption keypair for decrypting relay messages locally
-let serverKeyPair: P2PKeyPair | null = null;
+// Server encryption keypair now managed by relay-local-delivery.ts
 const HUB_SEED = process.env.HUB_SEED ?? 'xln-main-hub-2026';
 
 let tokenCatalogCache: JTokenInfo[] | null = null;
@@ -189,7 +202,7 @@ const isFaucetHubProfile = (profile: any): boolean => {
   if (!profile?.entityId) return false;
   const caps: string[] = Array.isArray(profile?.capabilities) ? profile.capabilities : [];
   if (caps.includes('faucet')) return true;
-  return activeHubEntityIds.some(id => id.toLowerCase() === String(profile.entityId).toLowerCase());
+  return relayStore.activeHubEntityIds.some(id => id.toLowerCase() === String(profile.entityId).toLowerCase());
 };
 
 const getFaucetHubProfiles = (env: Env): any[] => {
@@ -199,15 +212,15 @@ const getFaucetHubProfiles = (env: Env): any[] => {
     if (!isHubProfile(profile) || !isFaucetHubProfile(profile)) continue;
     selected.push(profile);
   }
-  const activeSet = new Set(activeHubEntityIds.map((id) => id.toLowerCase()));
+  const activeSet = new Set(relayStore.activeHubEntityIds.map((id) => id.toLowerCase()));
   selected.sort((a, b) => {
     const aActive = activeSet.has(String(a?.entityId || '').toLowerCase()) ? 1 : 0;
     const bActive = activeSet.has(String(b?.entityId || '').toLowerCase()) ? 1 : 0;
     return bActive - aActive;
   });
-  if (selected.length === 0 && activeHubEntityIds.length > 0) {
+  if (selected.length === 0 && relayStore.activeHubEntityIds.length > 0) {
     // Fallback for cold gossip cache: active server hubs remain faucet-capable.
-    return activeHubEntityIds.map((entityId) => ({
+    return relayStore.activeHubEntityIds.map((entityId) => ({
       entityId,
       metadata: { isHub: true },
       capabilities: ['hub', 'routing', 'faucet'],
@@ -270,54 +283,8 @@ const getAccountMachine = (env: Env, entityId: string, counterpartyId: string): 
   return null;
 };
 
-const ensureRuntimeHintProfile = (env: Env, entityId: string, runtimeId: string): void => {
-  const normalizedEntityId = String(entityId || '').toLowerCase();
-  const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
-  if (!normalizedEntityId || !normalizedRuntimeId) return;
-
-  const encryptionPubKey = runtimeEncryptionKeys.get(normalizedRuntimeId);
-  if (!encryptionPubKey) return;
-
-  const profiles = env.gossip?.getProfiles?.() || [];
-  const existing = profiles.find((profile: any) =>
-    String(profile?.entityId || '').toLowerCase() === normalizedEntityId
-  ) as any | undefined;
-
-  const existingRuntimeId = normalizeRuntimeKey(
-    existing?.runtimeId ?? existing?.metadata?.runtimeId ?? existing?.metadata?.runtime_id
-  );
-  const existingEncryptionKey = typeof existing?.metadata?.encryptionPubKey === 'string'
-    ? existing.metadata.encryptionPubKey
-    : undefined;
-
-  if (existingRuntimeId === normalizedRuntimeId && existingEncryptionKey === encryptionPubKey) {
-    return;
-  }
-
-  const now = Date.now();
-  const mergedProfile = {
-    ...(existing || {}),
-    entityId: normalizedEntityId,
-    runtimeId: normalizedRuntimeId,
-    metadata: {
-      ...(existing?.metadata || {}),
-      runtimeId: normalizedRuntimeId,
-      encryptionPubKey,
-      lastUpdated: now,
-      runtimeHint: true,
-    },
-  };
-
-  try {
-    env.gossip?.announce?.(mergedProfile);
-  } catch {
-    // Best effort; relay cache fallback still helps for direct routing.
-  }
-  storeGossipProfile(mergedProfile);
-};
-
 const getHubMeshHealth = (env: Env) => {
-  const hubIds = activeHubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS);
+  const hubIds = relayStore.relayStore.activeHubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS);
   const pairStatuses: Array<{
     left: string;
     right: string;
@@ -732,57 +699,10 @@ const DEFAULT_OPTIONS: XlnServerOptions = {
 const DEFAULT_TOKEN_CATALOG = DEFAULT_TOKENS.map((token) => ({ ...token }));
 
 // ============================================================================
-// WEBSOCKET STATE
+// RELAY STATE (single store for all relay concerns)
 // ============================================================================
 
-type WsClient = {
-  ws: any; // Bun.ServerWebSocket
-  runtimeId: string;
-  lastSeen: number;
-  topics: Set<string>;
-};
-
-const clients = new Map<string, WsClient>();
-const pendingMessages = new Map<string, any[]>();
-const gossipProfiles = new Map<string, { profile: any; timestamp: number }>();
-const runtimeEncryptionKeys = new Map<string, string>();
-let relayServerId = DEFAULT_OPTIONS.serverId ?? 'xln-server';
-
-type RelayDebugEvent = {
-  id: number;
-  ts: number;
-  event: string;
-  runtimeId?: string;
-  from?: string;
-  to?: string;
-  msgType?: string;
-  status?: string;
-  reason?: string;
-  encrypted?: boolean;
-  size?: number;
-  queueSize?: number;
-  details?: unknown;
-};
-
-const relayDebugEvents: RelayDebugEvent[] = [];
-const MAX_RELAY_DEBUG_EVENTS = 5000;
-let relayDebugId = 0;
-let activeHubEntityIds: string[] = [];
-
-const normalizeRuntimeKey = (runtimeId: unknown): string =>
-  String(runtimeId || '').toLowerCase();
-
-const pushRelayDebugEvent = (event: Omit<RelayDebugEvent, 'id' | 'ts'>): void => {
-  relayDebugId += 1;
-  relayDebugEvents.push({
-    id: relayDebugId,
-    ts: Date.now(),
-    ...event,
-  });
-  if (relayDebugEvents.length > MAX_RELAY_DEBUG_EVENTS) {
-    relayDebugEvents.shift();
-  }
-};
+let relayStore = createRelayStore(DEFAULT_OPTIONS.serverId ?? 'xln-server');
 
 const normalizeHubProfileForRelay = (profile: any): any => {
   if (!profile || !profile.entityId) return profile;
@@ -800,41 +720,6 @@ const normalizeHubProfileForRelay = (profile: any): any => {
   };
 };
 
-const resolveRuntimeEncryptionPubKey = (targetRuntimeId: string): Uint8Array | null => {
-  const normalizedTarget = String(targetRuntimeId || '').toLowerCase();
-  if (!normalizedTarget) return null;
-
-  const directKey = runtimeEncryptionKeys.get(normalizedTarget);
-  if (typeof directKey === 'string' && directKey.length > 0) {
-    try {
-      return hexToPubKey(directKey);
-    } catch {
-      // Continue to gossip fallback.
-    }
-  }
-
-  for (const { profile } of gossipProfiles.values()) {
-    if (!profile || typeof profile !== 'object') continue;
-    const profileRuntimeId = String(profile.runtimeId || profile.metadata?.runtimeId || '').toLowerCase();
-    if (!profileRuntimeId || profileRuntimeId !== normalizedTarget) continue;
-    const candidateKeys = [
-      profile.metadata?.encryptionPubKey,
-      profile.metadata?.cryptoPublicKey,
-    ];
-    for (const key of candidateKeys) {
-      if (typeof key !== 'string' || key.length === 0) continue;
-      const normalizedKey = key.startsWith('0x') ? key : `0x${key}`;
-      try {
-        return hexToPubKey(normalizedKey);
-      } catch {
-        // Try next candidate/profile instead of hard-failing.
-      }
-    }
-  }
-
-  return null;
-};
-
 const sendEntityInputDirectViaRelaySocket = (
   env: Env,
   targetRuntimeId: string,
@@ -843,8 +728,8 @@ const sendEntityInputDirectViaRelaySocket = (
   const fromRuntimeId = String(env.runtimeId || '');
   if (!fromRuntimeId) return false;
   const targetKey = normalizeRuntimeKey(targetRuntimeId);
-  const targetPubKey = resolveRuntimeEncryptionPubKey(targetKey);
-  if (!targetPubKey) {
+  const targetPubKeyHex = resolveEncryptionPubKeyHex(relayStore, targetKey);
+  if (!targetPubKeyHex) {
     logOneShot(
       `direct-dispatch-missing-key:${targetRuntimeId}`,
       `[RELAY] Direct dispatch missing encryption key for runtime ${targetRuntimeId.slice(0, 10)}`,
@@ -853,20 +738,20 @@ const sendEntityInputDirectViaRelaySocket = (
   }
 
   try {
-    const payload = encryptJSON(input, targetPubKey);
-    const target = clients.get(targetKey);
+    const payload = encryptJSON(input, hexToPubKey(targetPubKeyHex));
+    const target = relayStore.clients.get(targetKey);
     const msg = {
       type: 'entity_input',
       id: `srv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
       from: fromRuntimeId,
       to: target?.runtimeId || targetRuntimeId,
-      timestamp: nextWsTimestamp(),
+      timestamp: nextWsTimestamp(relayStore),
       payload,
       encrypted: true,
     };
     if (target) {
       target.ws.send(safeStringify(msg));
-      pushRelayDebugEvent({
+      pushDebugEvent(relayStore, {
         event: 'delivery',
         from: fromRuntimeId,
         to: targetRuntimeId,
@@ -886,7 +771,7 @@ const sendEntityInputDirectViaRelaySocket = (
     // via relay socket. Do not queue in local pendingMessages here because
     // that queue is process-local and can blackhole outputs when relay is
     // external to this API/runtime process.
-    pushRelayDebugEvent({
+    pushDebugEvent(relayStore, {
       event: 'delivery',
       from: fromRuntimeId,
       to: targetRuntimeId,
@@ -909,17 +794,14 @@ const sendEntityInputDirectViaRelaySocket = (
 };
 
 const resetServerDebugState = (env: Env | null, preserveHubs = true): { remainingReplicas: number; remainingProfiles: number } => {
-  relayDebugEvents.length = 0;
-  relayDebugId = 0;
-  pendingMessages.clear();
-  runtimeEncryptionKeys.clear();
+  resetRelayStore(relayStore);
 
   // Preserve full hub profiles (runtimeId + encryption keys) so immediate post-reset
   // routing does not fail with P2P_NO_PUBKEY before fresh gossip arrives.
-  const hubSet = new Set(activeHubEntityIds.map((id) => id.toLowerCase()));
+  const hubSet = new Set(relayStore.relayStore.activeHubEntityIds.map((id) => id.toLowerCase()));
   const preservedHubProfiles = preserveHubs
     ? new Map(
-      Array.from(gossipProfiles.entries()).filter(([entityId]) =>
+      Array.from(relayStore.gossipProfiles.entries()).filter(([entityId]) =>
         hubSet.has(String(entityId).toLowerCase())
       )
     )
@@ -984,10 +866,10 @@ const resetServerDebugState = (env: Env | null, preserveHubs = true): { remainin
       }
     }
 
-    gossipProfiles.clear();
+    relayStore.gossipProfiles.clear();
     if (preserveHubs && preservedHubProfiles.size > 0) {
       for (const [entityId, entry] of preservedHubProfiles.entries()) {
-        gossipProfiles.set(entityId, { ...entry, profile: normalizeHubProfileForRelay(entry.profile) });
+        relayStore.gossipProfiles.set(entityId, { ...entry, profile: normalizeHubProfileForRelay(entry.profile) });
       }
     } else {
       // Fallback rebuild from current env gossip profile cache.
@@ -996,21 +878,21 @@ const resetServerDebugState = (env: Env | null, preserveHubs = true): { remainin
         const entityId = String(profile?.entityId || '').toLowerCase();
         if (!entityId) continue;
         if (preserveHubs && !hubSet.has(entityId)) continue;
-        storeGossipProfile(preserveHubs ? normalizeHubProfileForRelay(profile) : profile);
+        storeGossipProfile(relayStore, preserveHubs ? normalizeHubProfileForRelay(profile) : profile);
       }
     }
   } else {
-    gossipProfiles.clear();
+    relayStore.gossipProfiles.clear();
     if (preserveHubs) {
       for (const [entityId, entry] of preservedHubProfiles.entries()) {
-        gossipProfiles.set(entityId, { ...entry, profile: normalizeHubProfileForRelay(entry.profile) });
+        relayStore.gossipProfiles.set(entityId, { ...entry, profile: normalizeHubProfileForRelay(entry.profile) });
       }
     }
   }
 
   return {
     remainingReplicas: env?.eReplicas?.size ?? 0,
-    remainingProfiles: gossipProfiles.size,
+    remainingProfiles: relayStore.gossipProfiles.size,
   };
 };
 
@@ -1026,8 +908,8 @@ const triggerColdReset = async (
   const preservedRuntimeIds = new Set<string>();
   if (preserveHubs) {
     if (localRuntimeKey) preservedRuntimeIds.add(localRuntimeKey);
-    for (const hubEntityId of activeHubEntityIds) {
-      const entry = gossipProfiles.get(String(hubEntityId).toLowerCase());
+    for (const hubEntityId of relayStore.relayStore.activeHubEntityIds) {
+      const entry = relayStore.gossipProfiles.get(String(hubEntityId).toLowerCase());
       const hintedRuntime = normalizeRuntimeKey(
         entry?.profile?.runtimeId
         ?? entry?.profile?.metadata?.runtimeId
@@ -1038,7 +920,7 @@ const triggerColdReset = async (
   }
 
   let activeClientsClosed = 0;
-  for (const [runtimeId, client] of clients.entries()) {
+  for (const [runtimeId, client] of relayStore.clients.entries()) {
     const isLocalHubRuntimeClient = preserveHubs && preservedRuntimeIds.has(runtimeId);
     if (isLocalHubRuntimeClient) {
       // Keep local hub runtime WS attached to relay so hub entities stay online
@@ -1050,12 +932,12 @@ const triggerColdReset = async (
     } catch {
       // Best effort; socket may already be closed.
     }
-    clients.delete(runtimeId);
+    relayStore.clients.delete(runtimeId);
     activeClientsClosed += 1;
   }
 
-  runtimeEncryptionKeys.clear();
-  pendingMessages.clear();
+  relayStore.runtimeEncryptionKeys.clear();
+  relayStore.pendingMessages.clear();
 
   if (clearDbState) {
     await clearDB(env);
@@ -1085,7 +967,7 @@ const installProcessSafetyGuards = (): void => {
     const message = reason instanceof Error ? reason.message : String(reason);
     const stack = reason instanceof Error ? reason.stack : undefined;
     console.error(`[PROCESS] Unhandled rejection: ${message}`);
-    pushRelayDebugEvent({
+    pushDebugEvent(relayStore, {
       event: 'error',
       reason: 'UNHANDLED_REJECTION',
       details: { message, stack },
@@ -1095,28 +977,13 @@ const installProcessSafetyGuards = (): void => {
   process.on('uncaughtException', (error) => {
     const message = error?.message || 'Unknown uncaught exception';
     console.error(`[PROCESS] Uncaught exception: ${message}`);
-    pushRelayDebugEvent({
+    pushDebugEvent(relayStore, {
       event: 'error',
       reason: 'UNCAUGHT_EXCEPTION',
       details: { message, stack: error?.stack },
     });
   });
 };
-
-let wsCounter = 0;
-const nextWsTimestamp = () => ++wsCounter;
-
-const storeGossipProfile = (profile: any): boolean => {
-  const entityId = profile?.entityId;
-  if (!entityId) return false;
-  const newTs = profile?.metadata?.lastUpdated || 0;
-  const existing = gossipProfiles.get(entityId);
-  if (existing && existing.timestamp >= newTs) return false;
-  gossipProfiles.set(entityId, { profile, timestamp: newTs });
-  return true;
-};
-
-const getAllGossipProfiles = (): any[] => Array.from(gossipProfiles.values()).map(v => v.profile);
 
 const seedHubProfilesInRelayCache = (
   env: Env,
@@ -1152,7 +1019,7 @@ const seedHubProfilesInRelayCache = (
       lastUpdated: seededAt,
     };
 
-    storeGossipProfile(profile);
+    storeGossipProfile(relayStore, profile);
     env.gossip?.announce?.(profile);
   }
 };
@@ -1255,378 +1122,8 @@ const serveRuntimeBundle = async (): Promise<Response | null> => {
 };
 
 // ============================================================================
-// RELAY PROTOCOL
+// RELAY PROTOCOL (now delegated to relay-router + relay-local-delivery)
 // ============================================================================
-
-const handleRelayMessage = async (ws: any, msg: any, env: Env | null) => {
-  try {
-    failfastAssert(!!msg && typeof msg === 'object', 'RELAY_MSG_OBJECT_INVALID', 'Relay payload must be an object');
-    failfastAssert(typeof msg.type === 'string' && msg.type.length > 0, 'RELAY_MSG_TYPE_INVALID', 'Relay message type is required');
-  } catch (error) {
-    const ff = asFailFastPayload(error);
-    pushRelayDebugEvent({
-      event: 'error',
-      msgType: 'unknown',
-      status: 'rejected',
-      reason: ff.code,
-      details: ff,
-    });
-    ws.send(safeStringify({ type: 'error', error: `${ff.code}: ${ff.message}` }));
-    return;
-  }
-
-  const { type, to, from, payload, id } = msg;
-  const fromKey = normalizeRuntimeKey(from);
-  const toKey = normalizeRuntimeKey(to);
-  const fromEncryptionPubKey = typeof msg.fromEncryptionPubKey === 'string'
-    ? msg.fromEncryptionPubKey
-    : null;
-  if (from && fromEncryptionPubKey) {
-    const normalizedRuntimeId = fromKey;
-    const normalizedPubKey = fromEncryptionPubKey.startsWith('0x')
-      ? fromEncryptionPubKey.toLowerCase()
-      : `0x${fromEncryptionPubKey.toLowerCase()}`;
-    if (/^0x[0-9a-f]{64}$/.test(normalizedPubKey)) {
-      runtimeEncryptionKeys.set(normalizedRuntimeId, normalizedPubKey);
-    }
-  }
-  const traceId = typeof id === 'string' && id.length > 0 ? id : `relay-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
-  let size = 0;
-  try {
-    size = JSON.stringify(msg).length;
-  } catch {
-    size = 0;
-  }
-  // Only log non-gossip messages (gossip fires every 1s per client)
-  if (type !== 'gossip_request' && type !== 'gossip_response' && type !== 'gossip_announce') {
-    console.log(`[RELAY-MSG] type=${type} from=${from?.slice?.(0,10) || 'none'} to=${to?.slice?.(0,10) || 'none'}`);
-  }
-  pushRelayDebugEvent({
-    event: 'message',
-    from,
-    to,
-    msgType: type,
-    encrypted: msg.encrypted === true,
-    size,
-    details: { traceId, hasFromEncryptionPubKey: !!fromEncryptionPubKey },
-  });
-
-  // Hello - register client
-  if (type === 'hello' && from) {
-    const existing = clients.get(fromKey);
-    if (existing && existing.ws !== ws) {
-      existing.ws.close();
-    }
-    clients.set(fromKey, { ws, runtimeId: from, lastSeen: nextWsTimestamp(), topics: new Set() });
-    pushRelayDebugEvent({
-      event: 'hello',
-      runtimeId: from,
-      from,
-      msgType: type,
-      status: 'connected',
-      details: { traceId },
-    });
-
-    // Flush pending messages
-    const pending = pendingMessages.get(fromKey) || [];
-    for (const pendingMsg of pending) {
-      ws.send(safeStringify(pendingMsg));
-    }
-    pendingMessages.delete(fromKey);
-
-    ws.send(safeStringify({ type: 'ack', inReplyTo: 'hello', status: 'delivered' }));
-    return;
-  }
-
-  // Gossip announce: store profiles locally in relay
-  if (type === 'gossip_announce') {
-    const profiles = (payload?.profiles || []) as any[];
-    let stored = 0;
-    const storedProfiles: any[] = [];
-    for (const profile of profiles) {
-      if (!profile || typeof profile !== 'object') continue;
-      // Ensure runtimeId is always present for routing resolution.
-      const normalized = {
-        ...profile,
-        runtimeId: profile.runtimeId || from,
-      };
-      if (storeGossipProfile(normalized)) {
-        stored += 1;
-        storedProfiles.push(normalized);
-      }
-      // Mirror into server env gossip cache so runtime-side routing can resolve immediately.
-      try {
-        env.gossip?.announce?.(normalized);
-      } catch (error) {
-        pushRelayDebugEvent({
-          event: 'error',
-          reason: 'GOSSIP_ANNOUNCE_ENV_MIRROR_FAILED',
-          from,
-          msgType: type,
-          details: { traceId, error: (error as Error).message },
-        });
-      }
-    }
-    pushRelayDebugEvent({
-      event: 'gossip_store',
-      from,
-      msgType: type,
-      status: 'stored',
-      details: { received: profiles.length, stored, traceId },
-    });
-
-    // Push fresh profile updates to all other connected clients so newly created entities
-    // become routable without waiting for manual refresh/poll.
-    if (storedProfiles.length > 0) {
-      const gossipPush = safeStringify({
-        type: 'gossip_response',
-        id: `gossip_push_${Date.now()}`,
-        from: relayServerId,
-        timestamp: Date.now(),
-        payload: { profiles: storedProfiles },
-        inReplyTo: id,
-      });
-      for (const [clientRuntimeId, client] of clients.entries()) {
-        if (!fromKey || clientRuntimeId !== fromKey) {
-          client.ws.send(gossipPush);
-        }
-      }
-      pushRelayDebugEvent({
-        event: 'gossip_push',
-        from,
-        msgType: type,
-        status: 'delivered',
-        details: { clients: Math.max(0, clients.size - (from ? 1 : 0)), profiles: storedProfiles.length, traceId },
-      });
-    }
-
-    ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'stored', count: stored }));
-    return;
-  }
-
-  // Gossip request: return all stored profiles
-  if (type === 'gossip_request') {
-    const profiles = getAllGossipProfiles();
-    pushRelayDebugEvent({
-      event: 'gossip_request',
-      from,
-      to,
-      msgType: type,
-      details: { returnedProfiles: profiles.length, traceId },
-    });
-    ws.send(safeStringify({
-      type: 'gossip_response',
-      id: `gossip_${Date.now()}`,
-      from: relayServerId,
-      to: from,
-      timestamp: Date.now(),
-      payload: { profiles },
-      inReplyTo: id,
-    }));
-    return;
-  }
-
-  // Client-sent debug event (captured by relay and queryable via HTTP)
-  if (type === 'debug_event') {
-    pushRelayDebugEvent({
-      event: 'debug_event',
-      from,
-      to,
-      msgType: type,
-      details: { traceId, payload },
-    });
-    ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'stored' }));
-    return;
-  }
-
-  // Ping/pong
-  if (type === 'ping') {
-    ws.send(safeStringify({ type: 'pong', inReplyTo: id }));
-    return;
-  }
-
-  // Routable messages
-  if (type === 'entity_input' || type === 'runtime_input' || type === 'gossip_request' || type === 'gossip_response' || type === 'gossip_announce') {
-    if (!toKey) {
-      pushRelayDebugEvent({
-        event: 'error',
-        from,
-        msgType: type,
-        status: 'rejected',
-        reason: 'Missing target runtimeId',
-        details: { traceId },
-      });
-      ws.send(safeStringify({ type: 'error', error: 'Missing target runtimeId' }));
-      return;
-    }
-
-    console.log(`[RELAY] ${type} from=${from?.slice(0,10)} to=${to?.slice(0,10)} encrypted=${msg.encrypted ?? false}`);
-
-    const isLocalEntityInput =
-      type === 'entity_input' &&
-      !!env &&
-      typeof env.runtimeId === 'string' &&
-      toKey === normalizeRuntimeKey(env.runtimeId);
-
-    const target = clients.get(toKey);
-    if (target && !isLocalEntityInput) {
-      console.log(`[RELAY] → forwarding to WS client`);
-      target.ws.send(safeStringify(msg));
-      pushRelayDebugEvent({
-        event: 'delivery',
-        from,
-        to,
-        msgType: type,
-        encrypted: msg.encrypted === true,
-        status: 'delivered',
-        details: { traceId },
-      });
-      ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'delivered' }));
-      return;
-    }
-
-    // Local delivery for entity_input:
-    // - normal path: target runtime is this server runtime
-    // - fallback path: target runtime lookup may be stale, but payload entityId is local
-    if (type === 'entity_input' && env && payload) {
-      try {
-        let input: EntityInput;
-        if (msg.encrypted && typeof payload === 'string') {
-          // Decrypt using server's keypair (derived from runtimeSeed)
-          if (!serverKeyPair && env.runtimeSeed) {
-            serverKeyPair = deriveEncryptionKeyPair(env.runtimeSeed);
-            console.log(`[RELAY] Derived server decryption key`);
-          }
-          if (!serverKeyPair) throw new Error('No server encryption key for local decrypt');
-          input = decryptJSON<EntityInput>(payload, serverKeyPair.privateKey);
-          console.log(`[RELAY] → decrypted entity_input: entityId=${input.entityId?.slice(-8)} txs=${input.entityTxs?.length ?? 0}`);
-        } else {
-          input = payload as EntityInput;
-          console.log(`[RELAY] → plaintext entity_input: entityId=${input.entityId?.slice(-8)}`);
-        }
-        const localRuntimeKey = normalizeRuntimeKey(env.runtimeId);
-        const targetIsServerRuntime = !!toKey && !!localRuntimeKey && toKey === localRuntimeKey;
-        const localReplicaExists = !!getEntityReplicaById(env, String(input.entityId || ''));
-        if (!localReplicaExists) {
-          // Not for this server runtime or any local entity: do NOT apply locally.
-          // Leave message on relay queue for its target runtime.
-          const queue = pendingMessages.get(toKey) || [];
-          queue.push(msg);
-          if (queue.length > 200) queue.shift();
-          pendingMessages.set(toKey, queue);
-          pushRelayDebugEvent({
-            event: 'delivery',
-            from,
-            to,
-            msgType: type,
-            encrypted: msg.encrypted === true,
-            status: targetIsServerRuntime ? 'queued-unknown-local-entity' : 'queued-nonlocal-target',
-            details: {
-              traceId,
-              entityId: input.entityId,
-              queueSize: queue.length,
-              targetIsServerRuntime,
-            },
-          });
-          ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'queued' }));
-          return;
-        }
-        // Register sender runtime hint BEFORE processing so ACK/response can route back.
-        // IMPORTANT: never infer sender from input.entityId here; input.entityId is the
-        // target entity for this message and mapping it to "from" poisons routing.
-        if (from && input.entityTxs) {
-          const localEntityId = String(input.entityId || '').toLowerCase();
-          for (const tx of input.entityTxs) {
-            const data = tx.data as Record<string, unknown> | undefined;
-            if (!data) continue;
-            if (tx.type !== 'accountInput') continue;
-
-            const fromEntityId =
-              typeof data.fromEntityId === 'string' ? String(data.fromEntityId).toLowerCase() : '';
-            const toEntityId =
-              typeof data.toEntityId === 'string' ? String(data.toEntityId).toLowerCase() : '';
-
-            // Infer sender entity robustly:
-            // - expected: toEntityId == local entity, sender = fromEntityId
-            // - fallback for swapped direction bugs: fromEntityId == local entity, sender = toEntityId
-            let senderEntityId = '';
-            if (fromEntityId && toEntityId) {
-              if (toEntityId === localEntityId && fromEntityId !== localEntityId) {
-                senderEntityId = fromEntityId;
-              } else if (fromEntityId === localEntityId && toEntityId !== localEntityId) {
-                senderEntityId = toEntityId;
-              } else {
-                senderEntityId = fromEntityId;
-              }
-            } else {
-              senderEntityId = fromEntityId;
-            }
-
-            if (senderEntityId) {
-              registerEntityRuntimeHint(env, senderEntityId, from);
-            }
-          }
-        }
-        enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [{ ...input, from }] });
-        const queueSize = (env as any).runtimeMempool?.entityInputs?.length ?? env.runtimeInput?.entityInputs?.length ?? 0;
-        console.log(`[RELAY] → enqueued to runtime (queue=${queueSize})`);
-        pushRelayDebugEvent({
-          event: 'delivery',
-          from,
-          to,
-          msgType: type,
-          encrypted: msg.encrypted === true,
-          status: 'delivered-local-queued',
-          details: { traceId, entityId: input.entityId, txs: input.entityTxs?.length ?? 0, queueSize },
-        });
-        ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'delivered' }));
-        return;
-      } catch (error) {
-        logOneShot(`relay-local-delivery-failed:${traceId || 'na'}`, `[RELAY] Local delivery failed: ${(error as Error).message}`);
-        pushRelayDebugEvent({
-          event: 'error',
-          from,
-          to,
-          msgType: type,
-          status: 'local-delivery-failed',
-          reason: (error as Error).message,
-          details: { traceId },
-        });
-      }
-    }
-
-    // Queue for later
-    const queue = pendingMessages.get(toKey) || [];
-    queue.push(msg);
-    if (queue.length > 200) queue.shift();
-    pendingMessages.set(toKey, queue);
-    console.log(`[RELAY] → queued (no client, queue=${queue.length})`);
-    pushRelayDebugEvent({
-      event: 'delivery',
-      from,
-      to,
-      msgType: type,
-      encrypted: msg.encrypted === true,
-      status: 'queued',
-      queueSize: queue.length,
-      details: { traceId },
-    });
-    ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'queued' }));
-    return;
-  }
-
-  pushRelayDebugEvent({
-    event: 'error',
-    from,
-    to,
-    msgType: type,
-    status: 'unsupported',
-    reason: `Unknown message type: ${type}`,
-    details: { traceId },
-  });
-  ws.send(safeStringify({ type: 'error', error: `Unknown message type: ${type}` }));
-};
-
 // ============================================================================
 // RPC PROTOCOL (for remote UI)
 // ============================================================================
@@ -1635,7 +1132,7 @@ const handleRpcMessage = (ws: any, msg: any, env: Env | null) => {
   const { type, id } = msg;
 
   if (type === 'subscribe') {
-    const client = Array.from(clients.values()).find(c => c.ws === ws);
+    const client = Array.from(relayStore.clients.values()).find(c => c.ws === ws);
     if (client && msg.topics) {
       for (const topic of msg.topics) {
         client.topics.add(topic);
@@ -1696,7 +1193,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       upstream.includes('0.0.0.0');
 
     if (!upstream) {
-      pushRelayDebugEvent({
+      pushDebugEvent(relayStore, {
         event: 'error',
         reason: 'RPC_PROXY_NO_UPSTREAM',
         details: { path: pathname },
@@ -1704,7 +1201,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       return new Response(JSON.stringify({ error: 'RPC upstream not configured' }), { status: 503, headers });
     }
     if (isLocal && !allowLocal) {
-      pushRelayDebugEvent({
+      pushDebugEvent(relayStore, {
         event: 'error',
         reason: 'RPC_PROXY_LOCAL_BLOCKED',
         details: { upstream },
@@ -1733,7 +1230,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         },
       });
     } catch (error: any) {
-      pushRelayDebugEvent({
+      pushDebugEvent(relayStore, {
         event: 'error',
         reason: 'RPC_PROXY_FETCH_FAILED',
         details: { upstream, error: error?.message || String(error) },
@@ -1746,15 +1243,15 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   if (pathname === '/api/health') {
     const { getHealthStatus } = await import('./health.ts');
     const health = await getHealthStatus(env);
-    const activeClientRuntimeIds = Array.from(clients.keys());
-    const activeClientsDetailed = Array.from(clients.entries()).map(([runtimeId, client]) => ({
+    const activeClientRuntimeIds = Array.from(relayStore.clients.keys());
+    const activeClientsDetailed = Array.from(relayStore.clients.entries()).map(([runtimeId, client]) => ({
       runtimeId,
       lastSeen: client.lastSeen,
       ageMs: Math.max(0, Date.now() - client.lastSeen),
       topics: Array.from(client.topics || []),
     }));
     // Ensure hubs are visible even when env.gossip is stale by merging relay cache profiles.
-    const relayHubProfiles = getAllGossipProfiles().filter((p: any) =>
+    const relayHubProfiles = getAllGossipProfiles(relayStore).filter((p: any) =>
       p?.metadata?.isHub === true || (Array.isArray(p?.capabilities) && p.capabilities.includes('hub'))
     );
     const existing = new Set((health.hubs || []).map(h => String(h.entityId).toLowerCase()));
@@ -1785,7 +1282,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           ? profile.metadata.runtimeId
           : undefined;
       const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
-      const activeClients = normalizedRuntimeId && clients.has(normalizedRuntimeId) ? [normalizedRuntimeId] : [];
+      const activeClients = normalizedRuntimeId && relayStore.clients.has(normalizedRuntimeId) ? [normalizedRuntimeId] : [];
       return {
         ...hub,
         runtimeId: normalizedRuntimeId || runtimeId,
@@ -1818,8 +1315,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   // Connected clients
   if (pathname === '/api/clients') {
     return new Response(JSON.stringify({
-      count: clients.size,
-      clients: Array.from(clients.keys()),
+      count: relayStore.clients.size,
+      clients: Array.from(relayStore.clients.keys()),
     }), { headers });
   }
 
@@ -1835,7 +1332,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     const status = url.searchParams.get('status') || undefined;
     const since = Number(url.searchParams.get('since') || '0');
 
-    let filtered = relayDebugEvents;
+    let filtered = relayStore.debugEvents;
     if (since > 0) filtered = filtered.filter(e => e.ts >= since);
     if (event) filtered = filtered.filter(e => e.event === event);
     if (runtimeId) filtered = filtered.filter(e => e.runtimeId === runtimeId || e.from === runtimeId || e.to === runtimeId);
@@ -1847,7 +1344,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     const events = filtered.slice(-last);
     return new Response(safeStringify({
       ok: true,
-      total: relayDebugEvents.length,
+      total: relayStore.debugEvents.length,
       returned: events.length,
       serverTime: Date.now(),
       filters: { last, event, runtimeId, from, to, msgType, status, since: Number.isFinite(since) ? since : 0 },
@@ -1875,7 +1372,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     }
 
     const stats = resetServerDebugState(env, preserveHubs);
-    pushRelayDebugEvent({
+    pushDebugEvent(relayStore, {
       event: 'reset',
       status: 'ok',
       details: {
@@ -1909,7 +1406,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     const shouldExit = url.searchParams.get('exit') !== '0';
 
     const result = await triggerColdReset(env, { resetRpc, clearDb: clearDbState, preserveHubs });
-    pushRelayDebugEvent({
+    pushDebugEvent(relayStore, {
       event: 'reset',
       status: 'ok',
       details: { mode: 'cold', ...result },
@@ -1939,7 +1436,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     const limit = Math.max(1, Math.min(5000, Number(url.searchParams.get('limit') || '1000')));
     const onlineOnly = url.searchParams.get('online') === 'true';
 
-    const entities = Array.from(gossipProfiles.entries())
+    const entities = Array.from(relayStore.gossipProfiles.entries())
       .map(([entityId, entry]) => {
         const profile = entry.profile || {};
         const runtimeId = typeof profile.runtimeId === 'string' ? profile.runtimeId : undefined;
@@ -1948,7 +1445,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           ? profile.metadata.name.trim()
           : entityId;
         const isHub = profile?.metadata?.isHub === true || (Array.isArray(profile?.capabilities) && profile.capabilities.includes('hub'));
-        const online = normalizedRuntimeId ? clients.has(normalizedRuntimeId) : false;
+        const online = normalizedRuntimeId ? relayStore.clients.has(normalizedRuntimeId) : false;
         return {
           entityId,
           runtimeId: normalizedRuntimeId || runtimeId,
@@ -1973,7 +1470,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
     return new Response(safeStringify({
       ok: true,
-      totalRegistered: gossipProfiles.size,
+      totalRegistered: relayStore.gossipProfiles.size,
       returned: entities.length,
       serverTime: Date.now(),
       entities,
@@ -2256,7 +1753,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           error: 'No faucet hub available',
           code: 'FAUCET_HUBS_EMPTY',
           profiles: env.gossip?.getProfiles?.()?.length || 0,
-          activeHubEntityIds,
+          relayStore.activeHubEntityIds,
         }), { status: 503, headers });
       }
       const hubEntityId = hubs[0].entityId;
@@ -2418,10 +1915,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       // and relay endpoint are the same node. With external relay (e.g. wss://xln.finance/relay),
       // this process may not see the runtime socket directly. Treat local visibility as diagnostic,
       // not a hard reject.
-      const runtimeSeenLocally = clients.has(normalizedRuntimeKey);
-      const runtimePubKey = runtimeEncryptionKeys.get(normalizedRuntimeKey);
+      const runtimeSeenLocally = relayStore.clients.has(normalizedRuntimeKey);
+      const runtimePubKey = relayStore.runtimeEncryptionKeys.get(normalizedRuntimeKey);
       if (!runtimeSeenLocally || !runtimePubKey) {
-        pushRelayDebugEvent({
+        pushDebugEvent(relayStore, {
           event: 'debug_event',
           status: 'warning',
           reason: !runtimeSeenLocally ? 'FAUCET_RUNTIME_NOT_LOCAL_RELAY_CLIENT' : 'FAUCET_RUNTIME_PUBKEY_MISSING_LOCAL',
@@ -2434,9 +1931,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           },
         });
       }
-      registerEntityRuntimeHint(env, normalizedUserEntityId, normalizedUserRuntimeId);
-      ensureRuntimeHintProfile(env, normalizedUserEntityId, normalizedUserRuntimeId);
-
       // Get hub from server-authoritative hub set + gossip
       const userSuffix = normalizedUserEntityId.slice(-8);
       console.log(`[FAUCET/OFFCHAIN] profiles=${allProfiles.length} user=${userSuffix}`);
@@ -2446,21 +1940,21 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         console.log(`  profile: ${entityId === 'unknown' ? entityId : entityId.slice(-8)} isHub=${p?.metadata?.isHub === true} caps=[${capabilities}]`);
       }
       const gossipHubs = getFaucetHubProfiles(env);
-      const activeHubCandidates = activeHubEntityIds
+      const activeHubCandidates = relayStore.activeHubEntityIds
         .map((entityId) => ({ entityId }))
         .filter((hub) => !!hub.entityId);
       // Server authority first: if hubs are active on this server, faucet can always target them
       // without depending on client gossip freshness.
       const hubs = activeHubCandidates.length > 0 ? activeHubCandidates : gossipHubs;
       if (hubs.length === 0) {
-        pushRelayDebugEvent({
+        pushDebugEvent(relayStore, {
           event: 'error',
           status: 'rejected',
           reason: 'FAUCET_HUBS_EMPTY',
           details: {
             endpoint: '/api/faucet/offchain',
             profiles: allProfiles.length,
-            activeHubEntityIds,
+            relayStore.activeHubEntityIds,
             gossipHubCount: gossipHubs.length,
             hint: 'No faucet-capable hubs in server active set or gossip cache',
           },
@@ -2469,7 +1963,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           error: 'No faucet hub available in gossip',
           code: 'FAUCET_HUBS_EMPTY',
           profiles: allProfiles.length,
-          activeHubEntityIds,
+          relayStore.activeHubEntityIds,
           gossipHubCount: gossipHubs.length,
         }), { status: 503, headers });
       }
@@ -2541,7 +2035,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const autoOpenAccount = !hasHubAccount;
 
       if (autoOpenAccount) {
-        pushRelayDebugEvent({
+        pushDebugEvent(relayStore, {
           event: 'debug_event',
           status: 'warning',
           reason: 'FAUCET_ACCOUNT_AUTO_OPEN',
@@ -2555,7 +2049,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           },
         });
       } else if (accountPending) {
-        pushRelayDebugEvent({
+        pushDebugEvent(relayStore, {
           event: 'debug_event',
           status: 'warning',
           reason: 'FAUCET_ACCOUNT_PENDING_BUT_ALLOWED',
@@ -2643,7 +2137,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   console.log('═══ startXlnServer() CALLED ═══');
   console.log('Options:', opts);
   const options = { ...DEFAULT_OPTIONS, ...opts };
-  relayServerId = options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server';
+  relayStore = createRelayStore(options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server');
   const advertisedRelayUrl =
     process.env.PUBLIC_RELAY_URL
     ?? process.env.RELAY_URL
@@ -2866,7 +2360,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
   const hubBootstraps = await bootstrapHubs(env, hubConfigs);
   const hubEntityIds = hubBootstraps.map(h => h.entityId);
-  activeHubEntityIds = [...hubEntityIds];
+  relayStore.activeHubEntityIds = [...hubEntityIds];
   for (const hub of hubBootstraps) {
     hubSignerLabels.set(hub.entityId, hub.signerLabel);
     hubSignerAddresses.set(hub.entityId, hub.signerId);
@@ -2999,6 +2493,16 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     })), relayUrl);
   }
 
+  // Wire relay-router + local delivery
+  const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
+  const routerConfig: RelayRouterConfig = {
+    store: relayStore,
+    localRuntimeId: env.runtimeId,
+    localDeliver,
+    send: (ws, data) => ws.send(data),
+    onGossipStore: (profile) => { try { env.gossip?.announce?.(profile); } catch { /* best effort */ } },
+  };
+
   const server = Bun.serve({
     port: options.port,
     hostname: options.host,
@@ -3052,7 +2556,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       open(ws) {
         const data = (ws as any).data;
         console.log(`[WS] New ${data.type} connection`);
-        pushRelayDebugEvent({
+        pushDebugEvent(relayStore, {
           event: 'ws_open',
           details: { channel: data.type },
         });
@@ -3064,10 +2568,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         try {
           const msg = JSON.parse(msgStr);
           if (data.type === 'relay') {
-            Promise.resolve(handleRelayMessage(ws, msg, data.env)).catch((error) => {
+            Promise.resolve(relayRoute(routerConfig, ws, msg)).catch((error) => {
               const reason = (error as Error).message || 'relay handler error';
               console.error(`[WS] Relay handler error: ${reason}`);
-              pushRelayDebugEvent({
+              pushDebugEvent(relayStore, {
                 event: 'error',
                 reason: 'RELAY_HANDLER_EXCEPTION',
                 details: {
@@ -3087,7 +2591,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             Promise.resolve(handleRpcMessage(ws, msg, data.env)).catch((error) => {
               const reason = (error as Error).message || 'rpc handler error';
               console.error(`[WS] RPC handler error: ${reason}`);
-              pushRelayDebugEvent({
+              pushDebugEvent(relayStore, {
                 event: 'error',
                 reason: 'RPC_HANDLER_EXCEPTION',
                 details: { error: reason, msgType: msg?.type },
@@ -3101,7 +2605,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
           }
         } catch (error) {
           console.error(`[WS] Parse error (type=${data.type}, len=${msgStr.length}):`, error);
-          pushRelayDebugEvent({
+          pushDebugEvent(relayStore, {
             event: 'error',
             reason: 'Invalid JSON',
             details: { channel: data.type, len: msgStr.length, error: (error as Error).message },
@@ -3111,19 +2615,14 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       },
 
       close(ws) {
-        // Remove from clients
-        for (const [id, client] of clients) {
-          if (client.ws === ws) {
-            clients.delete(id);
-            runtimeEncryptionKeys.delete(id.toLowerCase());
-            pushRelayDebugEvent({
-              event: 'ws_close',
-              runtimeId: id,
-              from: id,
-              details: { channel: ((ws as any).data || {}).type || 'unknown' },
-            });
-            break;
-          }
+        const removedId = removeClient(relayStore, ws);
+        if (removedId) {
+          pushDebugEvent(relayStore, {
+            event: 'ws_close',
+            runtimeId: removedId,
+            from: removedId,
+            details: { channel: ((ws as any).data || {}).type || 'unknown' },
+          });
         }
       },
     },

@@ -693,6 +693,19 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               }
             });
             console.log(`⬅️ HTLC: Propagating cancel to ${route.inboundEntity.slice(-4)}`);
+          } else {
+            // We're the origin — payment failed, notify via event
+            console.log(`❌ HTLC: Payment failed (we initiated), hashlock=${timedOutHashlock.slice(0,16)}...`);
+            env.emit('PaymentFailed', {
+              hashlock: timedOutHashlock,
+              reason: 'timeout',
+              entityId: state.entityId,
+            });
+          }
+
+          // Remove from lockBook
+          if (route.outboundLockId) {
+            newState.lockBook.delete(route.outboundLockId);
           }
 
           // Remove from htlcRoutes
