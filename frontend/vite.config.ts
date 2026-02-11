@@ -42,7 +42,7 @@ if (!hasCerts) {
 
 const DEV_HOST = '0.0.0.0';
 const DEV_PORT = 8080;
-const API_PROXY_TARGET = process.env.VITE_API_PROXY_TARGET || 'http://localhost:8082';
+const API_PROXY_TARGET = process.env.VITE_API_PROXY_TARGET || 'https://xln.finance';
 const RPC_PROXY_TARGET = process.env.VITE_RPC_PROXY_TARGET || 'http://localhost:8545';
 const RELAY_PROXY_TARGET = process.env.VITE_RELAY_PROXY_TARGET || 'ws://localhost:9000';
 
@@ -109,6 +109,11 @@ export default defineConfig(async ({ command }) => {
 		},
 		// API Proxy - Forward to server.ts faucet endpoints
 		proxy: {
+			'/reset': {
+				target: API_PROXY_TARGET,
+				changeOrigin: true,
+				secure: false,
+			},
 			'/api': {
 				target: API_PROXY_TARGET,
 				changeOrigin: true,

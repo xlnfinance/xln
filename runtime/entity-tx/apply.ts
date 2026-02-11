@@ -525,7 +525,12 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       const outputs: EntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
 
-      const { counterpartyId, lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId } = entityTx.data;
+      const { counterpartyId, lockId, hashlock } = entityTx.data;
+      // Type coercion: page.evaluate passes strings, htlc_lock needs bigint/number
+      const timelock = BigInt(entityTx.data.timelock);
+      const revealBeforeHeight = Number(entityTx.data.revealBeforeHeight);
+      const amount = BigInt(entityTx.data.amount);
+      const tokenId = Number(entityTx.data.tokenId);
 
       mempoolOps.push({
         accountId: counterpartyId,
@@ -537,13 +542,13 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
             timelock,
             revealBeforeHeight,
             amount,
-            tokenId
+            tokenId,
             // NO envelope - for timeout testing
           }
         }
       });
 
-      console.log(`🔒   Queued htlc_lock for ${counterpartyId.slice(-4)}, lockId=${lockId.slice(0,16)}...`);
+      console.log(`🔒   Queued htlc_lock for ${counterpartyId.slice(-4)}, lockId=${lockId.slice(0,16)}..., amount=${amount}, timelock=${timelock}`);
 
       return { newState, outputs, mempoolOps };
     }

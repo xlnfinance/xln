@@ -1,5 +1,5 @@
 ﻿# XLN: Bilateral Ethereum + Bank-Grade Credit + Instant Settlement
-# ~260k tokens | Generated: 2026-02-09 21:03:30 | Git: b175fec
+# ~262k tokens | Generated: 2026-02-11 14:20:08 | Git: d7946ac
 
 **TL;DR**: Banks without bailouts. Lightning without the inbound capacity wall.
 
@@ -144,7 +144,7 @@ One account, many subcontracts. All execute bilaterally, chain sees nothing unle
 - "What happens if counterparty disappears?" -> On-chain settlement with your collateral
 - "What's the worst case?" -> Lose credit limit you extended, nothing more
 
-## Token Budget Guide (~260k tokens total)
+## Token Budget Guide (~262k tokens total)
 
 **Critical path (read first, ~30min):**
 - intro.md (3min) - High-signal overview
@@ -172,11 +172,11 @@ xln/
     DeltaTransformer.sol       191 lines - Delta transformations: HTLCs, swaps, limit orders
 
   runtime/
-    types.ts                     2092 lines - All TypeScript interfaces (START HERE)
+    types.ts                     2096 lines - All TypeScript interfaces (START HERE)
     ids.ts                       519 lines - Identity system: EntityId, SignerId, JId, ReplicaKey
-    runtime.ts                   3174 lines - Main coordinator, 100ms ticks, R->E->A routing
+    runtime.ts                   3299 lines - Main coordinator, 100ms ticks, R->E->A routing
     entity-consensus.ts          1641 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
-    account-consensus.ts         1583 lines - Bilateral consensus, left/right perspective
+    account-consensus.ts         1620 lines - Bilateral consensus, left/right perspective
     account-consensus-state.ts   168 lines - Bilateral state machine
     j-batch.ts                   971 lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
     account-utils.ts             224 lines - deriveDelta() RCPAN calculation
@@ -185,12 +185,12 @@ xln/
 
     entity-tx/
       index.ts                   7 lines - Entity transaction types
-      apply.ts                   1066 lines - Entity tx dispatcher
+      apply.ts                   1072 lines - Entity tx dispatcher
       validation.ts              37 lines - Transaction validation
       financial.ts               33 lines - Financial accounting
       proposals.ts               35 lines - Proposal logic
       j-events.ts                841 lines - Jurisdiction events
-      handlers/account.ts              1071 lines - Account operations
+      handlers/account.ts              1084 lines - Account operations
       handlers/deposit-collateral.ts   74 lines - R2C deposits
       handlers/htlc-payment.ts         412 lines - HTLC routing
       handlers/create-settlement.ts    66 lines - Settlement creation
@@ -205,7 +205,7 @@ xln/
       graph.ts                   125 lines - Network graph
       pathfinding.ts             269 lines - Dijkstra routing
 
-    state-helpers.ts             743 lines - Pure state management
+    state-helpers.ts             752 lines - Pure state management
     snapshot-coder.ts            316 lines - Deterministic RLP serialization
     evm.ts                       1032 lines - Blockchain integration
 
@@ -3464,7 +3464,7 @@ contract DeltaTransformer is Console {
 }
 
 
-//runtime/types.ts (2092 lines)
+//runtime/types.ts (2096 lines)
 /**
  * XLN Type Definitions
  * All interfaces and type definitions used across the XLN system
@@ -5111,6 +5111,10 @@ export interface Env {
       deferredCount: number;
       escalated: boolean;
     }>;
+    deferredNetworkMeta?: Map<string, {
+      attempts: number;
+      nextRetryAt: number;
+    }>;
     entityRuntimeHints?: Map<string, {
       runtimeId: string;
       seenAt: number;
@@ -6079,7 +6083,7 @@ export const safeExtractEntityId = (keyString: string): EntityId | null => {
 };
 
 
-//runtime/runtime.ts (3174 lines)
+//runtime/runtime.ts (3299 lines)
 // for regular use > bun run runtime/runtime.ts
 // for debugging > bun repl
 // await import('./debug.js');
@@ -6425,9 +6429,6 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
       directEntityInputDispatch: null,
     };
   }
-  if (!env.runtimeState.routeDeferState) {
-    env.runtimeState.routeDeferState = new Map();
-  }
   if (!env.runtimeState.entityRuntimeHints) {
     env.runtimeState.entityRuntimeHints = new Map();
   }
@@ -6515,13 +6516,32 @@ export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void 
   enqueueRuntimeInputs(env, runtimeInput.entityInputs, runtimeInput.runtimeTxs);
 };
 
+const buildRouteOutputKey = (output: RoutedEntityInput): string => {
+  const txPart = (output.entityTxs || [])
+    .map((tx) => {
+      const data = tx.data as Record<string, unknown> | undefined;
+      const height = typeof data?.height === 'number' ? data.height : '';
+      const from = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
+      const to = typeof data?.toEntityId === 'string' ? data.toEntityId : '';
+      return `${tx.type}:${height}:${from}:${to}`;
+    })
+    .join('|');
+  return `${output.entityId}:${output.signerId || ''}:${txPart}`;
+};
+
 const hasRuntimeWork = (env: Env): boolean => {
   const mempool = ensureRuntimeMempool(env);
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return true;
   if (env.pendingOutputs && env.pendingOutputs.length > 0) return true;
   if (env.networkInbox && env.networkInbox.length > 0) return true;
-  // Deferred network outputs are intentionally dropped (no background retry loop).
-  // Do not treat them as work to avoid tick/save/log storms.
+  if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
+    const nowMs = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+    const deferredMeta = ensureRuntimeState(env).deferredNetworkMeta;
+    for (const output of env.pendingNetworkOutputs) {
+      const retryAt = deferredMeta?.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0;
+      if (retryAt <= nowMs) return true;
+    }
+  }
   // J-machine mempool removed from work check — J-batches are now executed post-save
   // as side effects, not queued for processing in the next frame
   return false;
@@ -6653,23 +6673,7 @@ export const deriveRuntimeId = (seed: string): string => {
 
 // scheduleNetworkProcess removed — loop is always-on via startRuntimeLoop()
 
-const ROUTE_DEFER_WARN_COOLDOWN_MS = 60_000;
-const ROUTE_DEFER_GOSSIP_COOLDOWN_MS = 5_000;
-const ROUTE_DEFER_ESCALATE_AFTER = 20;
-const ROUTE_DEFER_MAX_QUEUE = 256;
-
-const outputDeferKey = (output: RoutedEntityInput): string => {
-  const txPart = (output.entityTxs || [])
-    .map((tx) => {
-      const data = tx.data as Record<string, unknown> | undefined;
-      const height = typeof data?.height === 'number' ? data.height : '';
-      const from = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
-      const to = typeof data?.toEntityId === 'string' ? data.toEntityId : '';
-      return `${tx.type}:${height}:${from}:${to}`;
-    })
-    .join('|');
-  return `${output.entityId}:${output.signerId || ''}:${txPart}`;
-};
+const outputDeferKey = (output: RoutedEntityInput): string => buildRouteOutputKey(output);
 
 const normalizeEntityKey = (value: string): string => value.toLowerCase();
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -6739,22 +6743,36 @@ const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | nul
   return null;
 };
 
+const RUNTIME_HINT_TTL_MS = 60_000;
+
 const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null => {
   if (!entityId) return null;
   const hints = ensureRuntimeState(env).entityRuntimeHints;
   const target = normalizeEntityKey(entityId);
-  const hinted = hints?.get(target)?.runtimeId;
-  if (typeof hinted === 'string' && hinted.length > 0) {
-    return hinted;
+  const now = Date.now();
+
+  const hinted = hints?.get(target);
+  if (
+    hinted &&
+    typeof hinted.runtimeId === 'string' &&
+    hinted.runtimeId.length > 0 &&
+    Number.isFinite(hinted.seenAt) &&
+    now - hinted.seenAt <= RUNTIME_HINT_TTL_MS
+  ) {
+    return hinted.runtimeId;
   }
-  if (!env.gossip?.getProfiles) return null;
-  const profiles = env.gossip.getProfiles() as Profile[];
-  const profile = profiles.find((p: Profile) => normalizeEntityKey(String(p.entityId || '')) === target);
-  const resolved = resolveRuntimeIdFromProfile(profile);
-  if (resolved && hints) {
-    hints.set(target, { runtimeId: resolved, seenAt: Date.now() });
+
+  // Fallback to gossip profile runtimeId when we don't have a fresh inbound hint.
+  if (env.gossip?.getProfiles) {
+    const profiles = env.gossip.getProfiles() as Profile[];
+    const profile = profiles.find((p: Profile) => normalizeEntityKey(String(p.entityId || '')) === target);
+    const resolved = resolveRuntimeIdFromProfile(profile);
+    if (resolved && hints) {
+      hints.set(target, { runtimeId: resolved.toLowerCase(), seenAt: now });
+      return resolved.toLowerCase();
+    }
   }
-  return resolved;
+  return null;
 };
 
 export const registerEntityRuntimeHint = (env: Env, entityId: string, runtimeId: string): void => {
@@ -6769,20 +6787,12 @@ export const registerEntityRuntimeHint = (env: Env, entityId: string, runtimeId:
 
 const collectSenderEntityHints = (input: RoutedEntityInput): string[] => {
   const hints = new Set<string>();
-  // Always treat envelope entityId as sender hint for routing ACKs back.
-  // This is critical for openAccount flow where tx payload may not include fromEntityId.
-  if (typeof input.entityId === 'string' && input.entityId.length > 0) {
-    hints.add(input.entityId);
-  }
   for (const tx of input.entityTxs || []) {
     const data = tx.data as Record<string, unknown> | undefined;
     if (!data || typeof data !== 'object') continue;
-    if (tx.type === 'accountInput') {
-      const fromEntityId = data.fromEntityId;
-      if (typeof fromEntityId === 'string' && fromEntityId.length > 0) {
-        hints.add(fromEntityId);
-      }
-      continue;
+    const fromEntityId = data.fromEntityId;
+    if (typeof fromEntityId === 'string' && fromEntityId.length > 0) {
+      hints.add(fromEntityId);
     }
   }
   return [...hints];
@@ -6791,6 +6801,101 @@ const collectSenderEntityHints = (input: RoutedEntityInput): string[] => {
 type PlannedRemoteOutput = {
   output: RoutedEntityInput;
   targetRuntimeId: string;
+};
+
+const DEFER_RETRY_DELAY_MS = 5_000;
+const DEFER_MAX_ATTEMPTS = 3;
+
+const getDeferredNetworkMeta = (
+  env: Env,
+): Map<string, { attempts: number; nextRetryAt: number }> => {
+  const state = ensureRuntimeState(env);
+  if (!state.deferredNetworkMeta) {
+    state.deferredNetworkMeta = new Map();
+  }
+  return state.deferredNetworkMeta;
+};
+
+const getRuntimeNowMs = (env: Env): number =>
+  env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
+
+const splitPendingOutputsByRetryWindow = (
+  env: Env,
+  pending: RoutedEntityInput[],
+): { ready: RoutedEntityInput[]; waiting: RoutedEntityInput[] } => {
+  if (pending.length === 0) return { ready: [], waiting: [] };
+  const nowMs = getRuntimeNowMs(env);
+  const meta = getDeferredNetworkMeta(env);
+  const ready: RoutedEntityInput[] = [];
+  const waiting: RoutedEntityInput[] = [];
+
+  for (const output of pending) {
+    const key = outputDeferKey(output);
+    const entry = meta.get(key);
+    if (!entry || entry.nextRetryAt <= nowMs) {
+      ready.push(output);
+      continue;
+    }
+    waiting.push(output);
+  }
+  return { ready, waiting };
+};
+
+const rescheduleDeferredOutputs = (
+  env: Env,
+  attemptedPending: RoutedEntityInput[],
+  failed: RoutedEntityInput[],
+  waiting: RoutedEntityInput[],
+): RoutedEntityInput[] => {
+  const nowMs = getRuntimeNowMs(env);
+  const meta = getDeferredNetworkMeta(env);
+  const next = new Map<string, RoutedEntityInput>();
+
+  // Keep outputs still waiting for their retry window.
+  for (const output of waiting) {
+    next.set(outputDeferKey(output), output);
+  }
+
+  const failedKeys = new Set(failed.map((output) => outputDeferKey(output)));
+
+  // Pending outputs that were retried and delivered can clear retry metadata.
+  for (const output of attemptedPending) {
+    const key = outputDeferKey(output);
+    if (!failedKeys.has(key)) {
+      meta.delete(key);
+    }
+  }
+
+  // Failed attempts get bounded retry with fixed 5s delay.
+  for (const output of failed) {
+    const key = outputDeferKey(output);
+    const entry = meta.get(key);
+    const attempts = (entry?.attempts ?? 0) + 1;
+    if (attempts >= DEFER_MAX_ATTEMPTS) {
+      meta.delete(key);
+      env.warn('network', 'ROUTE_DROP_MAX_RETRIES', {
+        entityId: output.entityId,
+        attempts,
+      });
+      continue;
+    }
+
+    meta.set(key, {
+      attempts,
+      nextRetryAt: nowMs + DEFER_RETRY_DELAY_MS,
+    });
+    next.set(key, output);
+
+    if (attempts === 1) {
+      env.warn('network', 'ROUTE_DEFER_RETRY', {
+        entityId: output.entityId,
+        retryInMs: DEFER_RETRY_DELAY_MS,
+        attemptsRemaining: DEFER_MAX_ATTEMPTS - attempts,
+      });
+    }
+  }
+
+  return [...next.values()];
 };
 
 const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
@@ -6809,22 +6914,12 @@ const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
 
   const localOutputs: RoutedEntityInput[] = [];
   const remoteOutputs: PlannedRemoteOutput[] = [];
-  // Deferred outputs are not retried; plan only fresh outputs for this frame.
-  const pendingOutputs: RoutedEntityInput[] = [];
   const deduped = new Map<string, RoutedEntityInput>();
-  for (const output of [...pendingOutputs, ...outputs]) {
+  for (const output of outputs) {
     deduped.set(outputDeferKey(output), output);
   }
-  const allOutputs = [...deduped.values()].slice(-ROUTE_DEFER_MAX_QUEUE);
-  if (deduped.size > ROUTE_DEFER_MAX_QUEUE) {
-    env.warn('network', 'ROUTE_DEFER_QUEUE_TRUNCATED', {
-      queued: deduped.size,
-      kept: ROUTE_DEFER_MAX_QUEUE,
-    });
-  }
+  const allOutputs = [...deduped.values()];
   const deferredOutputs: RoutedEntityInput[] = [];
-  const routeDeferState = ensureRuntimeState(env).routeDeferState!;
-  const nowMs = Date.now();
 
   for (const output of allOutputs) {
     if (localEntityIds.has(output.entityId)) {
@@ -6834,41 +6929,9 @@ const planEntityOutputs = (env: Env, outputs: RoutedEntityInput[]): {
     const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
     console.log(`🔀 ROUTE: Output for entity ${output.entityId.slice(-4)} → runtimeId=${targetRuntimeId?.slice(0,10) || 'UNKNOWN'}`);
     if (!targetRuntimeId) {
-      const key = normalizeEntityKey(output.entityId);
-      const defer = routeDeferState.get(key) || {
-        warnAt: 0,
-        gossipAt: 0,
-        deferredCount: 0,
-        escalated: false,
-      };
-      defer.deferredCount += 1;
-      const shouldWarn = nowMs - defer.warnAt >= ROUTE_DEFER_WARN_COOLDOWN_MS;
-      const shouldRefreshGossip = nowMs - defer.gossipAt >= ROUTE_DEFER_GOSSIP_COOLDOWN_MS;
-      if (shouldWarn) {
-        defer.warnAt = nowMs;
-        console.warn(`⚠️ ROUTE-DEFER: No runtimeId for entity ${output.entityId.slice(-4)} (deferred=${defer.deferredCount})`);
-        env.warn('network', 'Missing runtimeId for entity output (queued)', {
-          entityId: output.entityId,
-          deferredCount: defer.deferredCount,
-        });
-      }
-      if (!defer.escalated && defer.deferredCount >= ROUTE_DEFER_ESCALATE_AFTER) {
-        defer.escalated = true;
-        env.error('network', 'ROUTE_DEFER_STUCK', {
-          entityId: output.entityId,
-          deferredCount: defer.deferredCount,
-          reason: 'No runtimeId in gossip profile',
-        });
-      }
-      if (shouldRefreshGossip) {
-        defer.gossipAt = nowMs;
-        getP2P(env)?.refreshGossip();
-      }
-      routeDeferState.set(key, defer);
       deferredOutputs.push(output);
       continue;
     }
-    routeDeferState.delete(normalizeEntityKey(output.entityId));
     remoteOutputs.push({ output, targetRuntimeId });
   }
 
@@ -6941,33 +7004,50 @@ const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): Routed
       }
     }
     if (!p2p) {
+      env.warn('network', 'ROUTE_DROP_NO_P2P', {
+        entityId: output.entityId,
+        runtimeId: targetRuntimeId,
+      });
       deferredOutputs.push(output);
       continue;
     }
     console.log(`📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId.slice(0, 10)} for entity ${output.entityId.slice(-4)} (${output.entityTxs?.length || 0} txs)`);
-    p2p.enqueueEntityInput(targetRuntimeId, output);
+    try {
+      p2p.enqueueEntityInput(targetRuntimeId, output);
+    } catch (error) {
+      env.warn('network', 'ROUTE_DEFER_SEND_FAILED', {
+        entityId: output.entityId,
+        runtimeId: targetRuntimeId,
+        error: (error as Error).message,
+      });
+      deferredOutputs.push(output);
+    }
   }
   return deferredOutputs;
 };
 
 export const sendEntityInput = (env: Env, input: RoutedEntityInput): { sent: boolean; deferred: boolean; queuedLocal: boolean } => {
-  const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, [input]);
+  const pendingBeforePlan = env.pendingNetworkOutputs ?? [];
+  const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } =
+    splitPendingOutputsByRetryWindow(env, pendingBeforePlan);
+  const outputsToPlan = [...readyPendingOutputs, input];
+  const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan);
+  env.pendingNetworkOutputs = [];
   if (localOutputs.length > 0) {
     enqueueRuntimeInputs(env, localOutputs);
   }
   const deferred = dispatchEntityOutputs(env, remoteOutputs);
   const remainingDeferred = [...deferredOutputs, ...deferred];
-  env.pendingNetworkOutputs = [];
-  if (remainingDeferred.length > 0) {
-    env.warn('network', 'ROUTE_DEFER_DROPPED', {
-      count: remainingDeferred.length,
-      reason: 'deferred_outputs_disabled',
-    });
-  }
+  env.pendingNetworkOutputs = rescheduleDeferredOutputs(
+    env,
+    readyPendingOutputs,
+    remainingDeferred,
+    waitingPendingOutputs,
+  );
 
   return {
     sent: remoteOutputs.length > 0 && deferred.length === 0,
-    deferred: remainingDeferred.length > 0,
+    deferred: env.pendingNetworkOutputs.length > 0,
     queuedLocal: localOutputs.length > 0,
   };
 };
@@ -7020,6 +7100,21 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     onEntityInput: (from, input) => {
       const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
       console.log(`📨 P2P-RECEIVE: from=${from.slice(0,10)} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
+      const targetEntityId = String(input.entityId || '').toLowerCase();
+      const localReplicaExists = Array.from(env.eReplicas.keys()).some((key) => {
+        const [entityKey] = String(key).split(':');
+        return String(entityKey || '').toLowerCase() === targetEntityId;
+      });
+      if (!localReplicaExists) {
+        // Drop poison ingress early: this runtime has no local replica for target entity.
+        // Enqueuing would trigger failfast in applyRuntimeInput and loop forever.
+        env.warn('network', 'INBOUND_ENTITY_UNKNOWN_TARGET', {
+          fromRuntimeId: from,
+          entityId: input.entityId,
+          txTypes,
+        }, input.entityId);
+        return;
+      }
       for (const hintedEntityId of collectSenderEntityHints(input)) {
         registerEntityRuntimeHint(env, hintedEntityId, from);
       }
@@ -8459,9 +8554,15 @@ export const process = async (
       }
     }
 
-    // CRITICAL: planEntityOutputs consumes env.pendingNetworkOutputs — clear before replanning
-    const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, entityOutbox);
-    env.pendingNetworkOutputs = []; // Consumed by planEntityOutputs above
+    // Retry deferred network outputs only when their retry window is due.
+    const pendingBeforePlan = env.pendingNetworkOutputs ?? [];
+    const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } =
+      splitPendingOutputsByRetryWindow(env, pendingBeforePlan);
+    const outputsToPlan = readyPendingOutputs.length > 0
+      ? [...readyPendingOutputs, ...entityOutbox]
+      : entityOutbox;
+    const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan);
+    env.pendingNetworkOutputs = [];
     if (localOutputs.length > 0) {
       enqueueRuntimeInputs(env, localOutputs);
       if (!quietRuntimeLogs) {
@@ -8512,15 +8613,13 @@ export const process = async (
     }
     const dispatchDeferred = dispatchEntityOutputs(env, remoteOutputs);
 
-    // Deferred outputs are dropped by policy (no retry loop).
     const allDeferred = [...deferredOutputs, ...dispatchDeferred];
-    if (allDeferred.length > 0) {
-      env.pendingNetworkOutputs = [];
-      env.warn('network', 'ROUTE_DEFER_DROPPED', {
-        count: allDeferred.length,
-        reason: 'deferred_outputs_disabled',
-      });
-    }
+    env.pendingNetworkOutputs = rescheduleDeferredOutputs(
+      env,
+      readyPendingOutputs,
+      allDeferred,
+      waitingPendingOutputs,
+    );
 
     // 1b. Re-announce gossip profiles after account state changes (new accounts, capacity shifts)
     // Broadcast changed local entities so relay routing metadata stays fresh.
@@ -8633,9 +8732,9 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
           ? env.gossip.getProfiles()
           : [],
     });
-    const ops: Array<{ type: 'put'; key: Buffer; value: Buffer }> = [
-      { type: 'put', key: makeDbKey(dbNamespace, 'persistence_schema_version'), value: Buffer.from(String(PERSISTENCE_SCHEMA_VERSION)) },
-      { type: 'put', key: makeDbKey(dbNamespace, `frame_input:${env.height}`), value: Buffer.from(frameJournal) },
+    const ops: Array<{ key: Buffer; value: Buffer }> = [
+      { key: makeDbKey(dbNamespace, 'persistence_schema_version'), value: Buffer.from(String(PERSISTENCE_SCHEMA_VERSION)) },
+      { key: makeDbKey(dbNamespace, `frame_input:${env.height}`), value: Buffer.from(frameJournal) },
     ];
 
     const persistedGossipProfiles =
@@ -8663,14 +8762,44 @@ export const saveEnvToDB = async (env: Env): Promise<void> => {
       env.height <= 1 || (env.height % CHECKPOINT_INTERVAL === 0);
     if (shouldCheckpoint) {
       ops.push(
-        { type: 'put', key: makeDbKey(dbNamespace, `snapshot:${env.height}`), value: Buffer.from(snapshot) },
-        { type: 'put', key: makeDbKey(dbNamespace, 'latest_checkpoint_height'), value: Buffer.from(String(env.height)) },
+        { key: makeDbKey(dbNamespace, `snapshot:${env.height}`), value: Buffer.from(snapshot) },
+        { key: makeDbKey(dbNamespace, 'latest_checkpoint_height'), value: Buffer.from(String(env.height)) },
       );
     }
 
     // Write pointer last so latest_height is only advanced after all frame data is durable.
-    ops.push({ type: 'put', key: makeDbKey(dbNamespace, 'latest_height'), value: Buffer.from(String(env.height)) });
-    await db.batch(ops);
+    ops.push({ key: makeDbKey(dbNamespace, 'latest_height'), value: Buffer.from(String(env.height)) });
+
+    // NOTE: Browser Level polyfill has shown flaky behavior with db.batch(ops[]) on binary keys.
+    // Use chained batch API first, then fail over to sequential puts if needed.
+    let wrote = false;
+    try {
+      const batch = db.batch();
+      for (const op of ops) {
+        batch.put(op.key, op.value);
+      }
+      await batch.write();
+      wrote = true;
+    } catch (batchError) {
+      console.warn('⚠️ db.batch().write() failed, falling back to sequential put:', batchError);
+    }
+    if (!wrote) {
+      for (const op of ops) {
+        await db.put(op.key, op.value);
+      }
+    }
+
+    // Fail-fast: if we just persisted frame N, frame_input:N and latest_height must be readable now.
+    try {
+      await db.get(makeDbKey(dbNamespace, `frame_input:${env.height}`));
+      const latestHeightBuffer = await db.get(makeDbKey(dbNamespace, 'latest_height'));
+      const latestHeight = Number.parseInt(latestHeightBuffer.toString(), 10);
+      if (!Number.isFinite(latestHeight) || latestHeight !== env.height) {
+        throw new Error(`latest_height mismatch: expected=${env.height} actual=${String(latestHeightBuffer.toString())}`);
+      }
+    } catch (verifyError) {
+      throw new Error(`PERSISTENCE_FATAL: write verification failed at frame ${env.height}: ${String(verifyError)}`);
+    }
   } catch (err) {
     console.error('❌ Failed to save to LevelDB:', err);
     const reason = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
@@ -10898,7 +11027,7 @@ export const handleEmptyMempoolProposer = (): void => {
 };
 
 
-//runtime/account-consensus.ts (1583 lines)
+//runtime/account-consensus.ts (1620 lines)
 /**
  * XLN Account Consensus System
  *
@@ -10928,6 +11057,12 @@ import { processAccountTx } from './account-tx/apply';
 
 // === CONSTANTS ===
 const MEMPOOL_LIMIT = 1000;
+const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
+const ADDRESS_HEX_20_RE = /^0x[0-9a-fA-F]{40}$/;
+const isEntityId32 = (value: unknown): value is string =>
+  typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
+const isAddress20 = (value: unknown): value is string =>
+  typeof value === 'string' && ADDRESS_HEX_20_RE.test(value);
 
 /**
  * Get depositoryAddress from environment (BrowserVM or active J-replica)
@@ -11402,12 +11537,43 @@ export async function proposeAccountFrame(
 
   // Build dispute proof and sign it (CRITICAL: always sign dispute proof with every frame)
   // BUG FIX: Use clonedMachine (has NEW state after txs) NOT accountMachine (old state)
+  if (!isEntityId32(clonedMachine.leftEntity) || !isEntityId32(clonedMachine.rightEntity)) {
+    accountMachine.mempool = [];
+    delete accountMachine.pendingFrame;
+    delete accountMachine.pendingAccountInput;
+    const left = String(clonedMachine.leftEntity);
+    const right = String(clonedMachine.rightEntity);
+    return {
+      success: false,
+      error: `INVALID_ACCOUNT_ENTITY_ID: left=${left} right=${right}`,
+      events,
+    };
+  }
+
   const { buildAccountProofBody, createDisputeProofHash } = await import('./proof-builder');
-  const depositoryAddress = getDepositoryAddress(env);
-  console.log(`🔐 DISPUTE-SIGN: depositoryAddress=${depositoryAddress}, counterparty=${accountMachine.proofHeader.toEntity.slice(-4)}`);
-  const proofResult = buildAccountProofBody(clonedMachine);
-  const disputeHash = createDisputeProofHash(clonedMachine, proofResult.proofBodyHash, depositoryAddress);
-  console.log(`🔐 DISPUTE-SIGN: disputeHash=${disputeHash.slice(0, 18)}..., proofBodyHash=${proofResult.proofBodyHash.slice(0, 18)}...`);
+  let depositoryAddress = getDepositoryAddress(env);
+  if (!isAddress20(depositoryAddress)) {
+    console.warn(`[account-consensus] ⚠️ Invalid depositoryAddress "${depositoryAddress}", using zero address`);
+    depositoryAddress = '0x0000000000000000000000000000000000000000';
+  }
+
+  let proofResult: ReturnType<typeof buildAccountProofBody>;
+  let disputeHash: string;
+  try {
+    console.log(`🔐 DISPUTE-SIGN: depositoryAddress=${depositoryAddress}, counterparty=${accountMachine.proofHeader.toEntity.slice(-4)}`);
+    proofResult = buildAccountProofBody(clonedMachine);
+    disputeHash = createDisputeProofHash(clonedMachine, proofResult.proofBodyHash, depositoryAddress);
+    console.log(`🔐 DISPUTE-SIGN: disputeHash=${disputeHash.slice(0, 18)}..., proofBodyHash=${proofResult.proofBodyHash.slice(0, 18)}...`);
+  } catch (error) {
+    accountMachine.mempool = [];
+    delete accountMachine.pendingFrame;
+    delete accountMachine.pendingAccountInput;
+    return {
+      success: false,
+      error: `DISPUTE_PROOF_BUILD_FAILED: ${(error as Error).message}`,
+      events,
+    };
+  }
 
   const disputeHankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [disputeHash]);
   const disputeHanko = disputeHankos[0];
@@ -13679,14 +13845,14 @@ export function deriveDelta(delta: Delta, isLeft: boolean): DerivedDelta {
   let inOwnCredit = nonNegative(-totalDelta);
   if (inOwnCredit > ownCreditLimit) inOwnCredit = ownCreditLimit;
 
-  // outPeerCredit = how much peer owes using OUR credit (when delta > 0 beyond collateral)
+  // outPeerCredit = how much peer owes us (backed by THEIR credit to us, i.e. peerCreditLimit)
   let outPeerCredit = nonNegative(totalDelta - collateral);
   if (outPeerCredit > peerCreditLimit) outPeerCredit = peerCreditLimit;
 
-  // outOwnCredit = remaining OWN credit we can extend
+  // outOwnCredit = unused portion of credit WE set (ownCreditLimit), allowing peer to owe us more
   let outOwnCredit = nonNegative(ownCreditLimit - inOwnCredit);
 
-  // inPeerCredit = remaining credit peer extended to us (simple formula from original)
+  // inPeerCredit = unused portion of credit PEER opened to us (peerCreditLimit)
   let inPeerCredit = nonNegative(peerCreditLimit - outPeerCredit);
 
   // Track used credit for reporting (not used in capacity calculation)
@@ -14030,7 +14196,7 @@ export * from './proposals';
 export * from './validation';
 
 
-//runtime/entity-tx/apply.ts (1066 lines)
+//runtime/entity-tx/apply.ts (1072 lines)
 import { calculateQuorumPower } from '../entity-consensus';
 import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
@@ -14065,6 +14231,9 @@ import { logError } from '../logger';
 import { FINANCIAL } from '../constants';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
+const isEntityId32 = (value: unknown): value is string =>
+  typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
 const findAccountKey = (state: EntityState, counterpartyId: string): string | null => {
   const target = normalizeEntityRef(counterpartyId);
   for (const key of state.accounts.keys()) {
@@ -14297,6 +14466,9 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
     if (entityTx.type === 'openAccount') {
       const targetEntityId = entityTx.data.targetEntityId;
+      if (!isEntityId32(targetEntityId)) {
+        throw new Error(`INVALID_ENTITY_ID: openAccount targetEntityId must be bytes32 hex, got "${String(targetEntityId)}"`);
+      }
       // Account keyed by counterparty ID (simpler than canonical)
       const counterpartyId = normalizeEntityRef(targetEntityId);
       const isLeft = isLeftEntity(entityState.entityId, targetEntityId);
@@ -16052,7 +16224,7 @@ async function applyFinalizedJEvent(
 }
 
 
-//runtime/entity-tx/handlers/account.ts (1071 lines)
+//runtime/entity-tx/handlers/account.ts (1084 lines)
 import type { AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
@@ -16748,6 +16920,19 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               }
             });
             console.log(`⬅️ HTLC: Propagating cancel to ${route.inboundEntity.slice(-4)}`);
+          } else {
+            // We're the origin — payment failed, notify via event
+            console.log(`❌ HTLC: Payment failed (we initiated), hashlock=${timedOutHashlock.slice(0,16)}...`);
+            env.emit('PaymentFailed', {
+              hashlock: timedOutHashlock,
+              reason: 'timeout',
+              entityId: state.entityId,
+            });
+          }
+
+          // Remove from lockBook
+          if (route.outboundLockId) {
+            newState.lockBook.delete(route.outboundLockId);
           }
 
           // Remove from htlcRoutes
@@ -18916,7 +19101,7 @@ export function validateAccountSignatures(
 }
 
 
-//runtime/state-helpers.ts (743 lines)
+//runtime/state-helpers.ts (752 lines)
 /**
  * XLN State Management Helpers
  * Utilities for entity replica cloning, snapshots, and state persistence
@@ -19006,18 +19191,27 @@ export function emitScopedEvents(
  * Throws if no signer can be resolved (fail early).
  */
 export function resolveEntityProposerId(env: Env, entityId: string, context: string): string {
+  const targetEntityId = String(entityId || '').toLowerCase();
   let fallback: string | null = null;
 
-  for (const replica of env.eReplicas.values()) {
-    if (replica.entityId !== entityId) continue;
+  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    const keyParts = String(replicaKey).split(':');
+    const keyEntityId = String(keyParts[0] || '').toLowerCase();
+    const replicaEntityId = String(replica.entityId || '').toLowerCase();
+    if (replicaEntityId !== targetEntityId && keyEntityId !== targetEntityId) continue;
     if (replica.isProposer) return replica.signerId;
     if (!fallback) {
-      fallback = replica.state.config.validators[0] || replica.signerId;
+      fallback =
+        replica.state.config.validators[0] ||
+        replica.signerId ||
+        (keyParts[1] ? String(keyParts[1]) : null);
     }
   }
 
   if (env.gossip?.getProfiles) {
-    const profile = (env.gossip.getProfiles() as Profile[]).find(p => p.entityId === entityId);
+    const profile = (env.gossip.getProfiles() as Profile[]).find(
+      (p) => String(p.entityId || '').toLowerCase() === targetEntityId,
+    );
     const board = profile?.metadata?.board;
     if (Array.isArray(board) && board.length > 0 && board[0]) {
       return board[0];
