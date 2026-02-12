@@ -32,7 +32,7 @@
   <meta property="twitter:site" content="@xlnfinance" />
 </svelte:head>
 
-<LandingPage {onUnlock} />
+<LandingPage onUnlock={handleUnlock} />
 
 <style>
   :global(body) {
