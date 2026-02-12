@@ -1266,7 +1266,7 @@ export type AccountTx =
       type: 'request_rebalance';
       data: {
         tokenId: number;
-        amount: bigint; // How much collateral requested for insurance
+        amount: bigint; // Requested collateral rebalance amount
       };
     }
   // === HTLC TRANSACTION TYPES ===

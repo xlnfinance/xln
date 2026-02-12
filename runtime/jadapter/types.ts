@@ -185,8 +185,7 @@ export interface BrowserVMProvider {
     initiatorEntityId: string,
     counterpartyEntityId: string,
     diffs: SettlementDiff[],
-    forgiveDebtsInTokenIds?: number[],
-    insuranceRegs?: InsuranceReg[]
+    forgiveDebtsInTokenIds?: number[]
   ): Promise<string>;
   settle(
     leftEntity: string,

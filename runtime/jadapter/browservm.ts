@@ -195,10 +195,9 @@ export async function createBrowserVMAdapter(
       rightEntity: string,
       diffs: SettlementDiff[],
       forgiveDebtsInTokenIds: number[] = [],
-      insuranceRegs: InsuranceReg[] = [],
       sig?: string
     ): Promise<JTxReceipt> {
-      // BrowserVM has settleWithInsurance which handles both cases
+      // BrowserVM settle handles both signed and no-op calls
       // Ensure ondeltaDiff is set (default to 0n if not provided)
       const normalizedDiffs = diffs.map(d => ({
         tokenId: d.tokenId,
@@ -207,12 +206,11 @@ export async function createBrowserVMAdapter(
         collateralDiff: d.collateralDiff,
         ondeltaDiff: d.ondeltaDiff ?? 0n,
       }));
-      const events = await browserVM.settleWithInsurance(
+      const events = await browserVM.settle(
         leftEntity,
         rightEntity,
         normalizedDiffs,
         forgiveDebtsInTokenIds,
-        insuranceRegs,
         sig
       );
       return {

@@ -572,7 +572,6 @@ function mergeSignerObservations(observations: JBlockObservation[]): Jurisdictio
 // Each event type maps to a specific state change:
 // - ReserveUpdated  → entity.reserves[tokenId] = newBalance
 // - AccountSettled  → entity.accounts[cp].deltas[tokenId] = {collateral, ondelta}
-// - InsuranceXxx    → entity.insuranceLines (future)
 // - DebtXxx         → entity.debts (future)
 // ═══════════════════════════════════════════════════════════════════════════════
 

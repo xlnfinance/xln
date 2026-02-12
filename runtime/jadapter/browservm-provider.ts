@@ -1472,21 +1472,15 @@ export class BrowserVMProvider {
     return this.initialized;
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //                              INSURANCE
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** Get all insurance lines for an entity */
-
   /**
-   * Execute settle with insurance registration.
+   * Execute settlement.
    * Signature is required for any state changes.
    *
    * @param leftEntity - The left entity (smaller entityId)
    * @param rightEntity - The right entity (larger entityId)
    * @param sig - Hanko signature from counterparty (required if there are changes).
    */
-  async settleWithInsurance(
+  async settle(
     leftEntity: string,
     rightEntity: string,
     diffs: Array<{
@@ -1505,9 +1499,9 @@ export class BrowserVMProvider {
 
     const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0;
     let finalSig = sig || '';
-    console.log(`[BrowserVM] settleWithInsurance: input sig length=${sig?.length || 0}, diffs=${diffs.length}`);
+    console.log(`[BrowserVM] settle: input sig length=${sig?.length || 0}, diffs=${diffs.length}`);
     if (hasChanges && (!finalSig || finalSig === '0x')) {
-      throw new Error('Settlement signature required for settleWithInsurance');
+      throw new Error('Settlement signature required for settle');
     }
     if (!finalSig) {
       finalSig = '0x';
@@ -1616,8 +1610,7 @@ export class BrowserVMProvider {
     // Parse and emit logs to j-watcher subscribers
     const logs = this.emitEvents(result.execResult.logs || []);
 
-    const insuranceCount = insuranceRegs.length;
-    console.log(`[BrowserVM] Settle completed: ${diffs.length} diffs, ${insuranceCount} insurance regs`);
+    console.log(`[BrowserVM] Settle completed: ${diffs.length} diffs`);
 
     return logs;
   }
