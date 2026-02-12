@@ -325,13 +325,12 @@ async function main() {
     // Compare hash computation between TypeScript and Solidity
     console.log('\n🔍 Comparing hash computation...');
     const depInterface = new ethers.Interface([
-      'function computeSettlementHash(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256,int256,int256,int256,int256)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32,bytes32,uint256,uint256,uint256)[] insuranceRegs) view returns (bytes32 hash, uint256 nonce, uint256 encodedMsgLength)'
+      'function computeSettlementHash(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256,int256,int256,int256,int256)[] diffs, uint256[] forgiveDebtsInTokenIds) view returns (bytes32 hash, uint256 nonce, uint256 encodedMsgLength)'
     ]);
     const hashCallData = depInterface.encodeFunctionData('computeSettlementHash', [
       leftEntity,
       rightEntity,
       diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]),
-      [],
       [],
     ]);
     const hashResult = await browserVM.executeTx({
@@ -368,15 +367,14 @@ async function main() {
     console.log('   ✅ Funded left entity reserves\n');
 
     // Use the original signature (nonce should still be 0)
-    console.log('   Calling settleWithInsurance...');
+    console.log('   Calling settle...');
     console.log(`   Using original sig length: ${sig.length} chars`);
     console.log(`   Using sig prefix: ${sig.slice(0, 50)}...`);
 
-    const hankoResult = await browserVM.settleWithInsurance(
+    const hankoResult = await browserVM.settle(
       leftEntity,
       rightEntity,
       diffs,
-      [],
       [],
       sig
     );
@@ -408,11 +406,10 @@ async function main() {
     {
       const dummySig100 = ethers.hexlify(new Uint8Array(100).fill(0xab));
       console.log(`   Dummy sig length: ${(dummySig100.length - 2) / 2} bytes`);
-      const result100 = await browserVM.settleWithInsurance(
+      const result100 = await browserVM.settle(
         leftEntity,
         rightEntity,
         diffs,
-        [],
         [],
         dummySig100
       );

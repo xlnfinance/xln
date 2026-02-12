@@ -39,7 +39,6 @@ library Account {
   event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments);
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
-  event InsuranceRegistered(bytes32 indexed insured, bytes32 indexed insurer, uint256 indexed tokenId, uint256 limit, uint256 expiresAt);
 
   // Debug events (remove in production)
   event DebugSettleEntry(bytes32 leftEntity, bytes32 rightEntity, bytes32 initiator, uint256 sigLen);
@@ -154,7 +153,7 @@ library Account {
 
   // ========== ENTRY POINTS (split to avoid stack too deep) ==========
 
-  /// @notice Process settlements - diffs only (debt/insurance handled by Depository)
+  /// @notice Process settlements - diffs only (debt handled by Depository)
   function processSettlements(
     mapping(bytes32 => mapping(uint256 => uint256)) storage _reserves,
     mapping(bytes => AccountInfo) storage _accounts,
@@ -206,8 +205,7 @@ library Account {
       ch_key,
       _accounts[ch_key].cooperativeNonce,
       diffs,
-      new uint[](0),  // forgiveDebtsInTokenIds
-      new InsuranceRegistration[](0)  // insuranceRegs
+      new uint[](0)  // forgiveDebtsInTokenIds
     );
     bytes32 hash = keccak256(encoded_msg);
 
@@ -270,7 +268,7 @@ library Account {
 
   // processDisputeFinalizations removed - stays in Depository due to storage complexity
 
-  // ========== SETTLEMENT (diffs only - debt/insurance handled by Depository) ==========
+  // ========== SETTLEMENT (diffs only - debt handled by Depository) ==========
 
   function _settleDiffs(
     mapping(bytes32 => mapping(uint256 => uint256)) storage _reserves,
@@ -289,10 +287,10 @@ library Account {
     bytes32 counterparty = (initiator == leftEntity) ? rightEntity : leftEntity;
 
     // Counterparty signature REQUIRED for any state changes (cooperative proof)
-    if (s.diffs.length > 0 || s.forgiveDebtsInTokenIds.length > 0 || s.insuranceRegs.length > 0) {
+    if (s.diffs.length > 0 || s.forgiveDebtsInTokenIds.length > 0) {
       require(s.sig.length > 0, "Signature required for settlement");
       // Include address(this) (depository via DELEGATECALL) for chain+depository binding (replay protection)
-      bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), ch_key, _accounts[ch_key].cooperativeNonce, s.diffs, s.forgiveDebtsInTokenIds, s.insuranceRegs);
+      bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), ch_key, _accounts[ch_key].cooperativeNonce, s.diffs, s.forgiveDebtsInTokenIds);
 
       // Debug: emit hash details
       emit DebugSettlementHash(keccak256(encoded_msg), counterparty, _accounts[ch_key].cooperativeNonce, s.diffs.length, encoded_msg.length);
@@ -430,10 +428,7 @@ library Account {
    * DESIGN DECISION: Dispute finalization stays in Depository.sol
    *
    * Reason: _disputeFinalizeInternal requires deep storage access:
-   * - insuranceLines[debtor] storage array
-   * - insuranceCursor[debtor] storage uint
-   * - _claimFromInsurance which iterates insurance lines
-   * - Complex debt/reserve interactions
+   * - Complex debt/reserve interactions across multiple mappings
    *
    * Passing all these via library params causes "stack too deep" compiler errors.
    * Settlement diffs CAN be delegated because they only need _reserves, _accounts, _collaterals.

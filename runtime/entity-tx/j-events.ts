@@ -18,7 +18,6 @@ import { hashHtlcSecret } from '../htlc-utils';
  * - AccountSettled  → entity.accounts[counterparty].deltas[tokenId] = { collateral, ondelta }
  *
  * Future J-Events (when added to Solidity):
- * - InsuranceRegistered, InsuranceClaimed, InsuranceExpired
  * - DebtCreated, DebtEnforced
  *
  * Design: One event = One state change. No redundant handlers.
@@ -573,7 +572,6 @@ function mergeSignerObservations(observations: JBlockObservation[]): Jurisdictio
 // Each event type maps to a specific state change:
 // - ReserveUpdated  → entity.reserves[tokenId] = newBalance
 // - AccountSettled  → entity.accounts[cp].deltas[tokenId] = {collateral, ondelta}
-// - InsuranceXxx    → entity.insuranceLines (future)
 // - DebtXxx         → entity.debts (future)
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -692,51 +690,7 @@ async function applyFinalizedJEvent(
   // FUTURE J-EVENTS (when added to Solidity - handlers ready)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  } else if (event.type === 'InsuranceRegistered') {
-    const { insured, insurer, tokenId, limit, expiresAt } = event.data;
-    const tokenSymbol = getTokenSymbol(tokenId as number);
-    const decimals = getTokenDecimals(tokenId as number);
-    const limitDisplay = (Number(limit) / (10 ** decimals)).toFixed(2);
-
-    if (!newState.insuranceLines) {
-      newState.insuranceLines = [];
-    }
-
-    if (insured === entityState.entityId) {
-      newState.insuranceLines.push({
-        insurer: insurer as string,
-        tokenId: tokenId as number,
-        remaining: BigInt(limit as string | number | bigint),
-        expiresAt: BigInt(expiresAt as string | number | bigint),
-      });
-    }
-
-    addMessage(newState, `🛡️ INSURANCE: ${(insurer as string).slice(-8)} covers ${limitDisplay} ${tokenSymbol} | Block ${blockNumber}`);
-
-  } else if (event.type === 'InsuranceClaimed') {
-    const { insured, insurer, creditor, tokenId, amount } = event.data;
-    const tokenSymbol = getTokenSymbol(tokenId as number);
-    const decimals = getTokenDecimals(tokenId as number);
-    const amountDisplay = (Number(amount) / (10 ** decimals)).toFixed(4);
-
-    if (insured === entityState.entityId && newState.insuranceLines) {
-      const line = newState.insuranceLines.find(
-        l => l.insurer === insurer && l.tokenId === tokenId
-      );
-      if (line) {
-        line.remaining -= BigInt(amount as string | number | bigint);
-      }
-    }
-
-    addMessage(newState, `💸 INSURANCE CLAIMED: ${amountDisplay} ${tokenSymbol} paid to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
-
-  } else if (event.type === 'InsuranceExpired') {
-    const { insured, insurer, tokenId } = event.data;
-    const tokenSymbol = getTokenSymbol(tokenId as number);
-
-    addMessage(newState, `⏰ INSURANCE EXPIRED: ${(insurer as string).slice(-8)} → ${(insured as string).slice(-8)} ${tokenSymbol} | Block ${blockNumber}`);
-
-  } else if (event.type === 'DebtCreated') {
+ else if (event.type === 'DebtCreated') {
     const { debtor, creditor, tokenId, amount, debtIndex } = event.data;
     const tokenSymbol = getTokenSymbol(tokenId as number);
     const decimals = getTokenDecimals(tokenId as number);

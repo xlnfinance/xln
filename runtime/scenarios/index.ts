@@ -104,15 +104,6 @@ export const scenarioRegistry: ScenarioEntry[] = [
   { key: 'grid', name: 'Grid', load: async () => (await import('./grid')).grid },
   { key: 'multi-sig', name: 'Multi-Sig', load: async () => (await import('./multi-sig')).multiSig },
   {
-    key: 'insurance-cascade',
-    name: 'Insurance Cascade',
-    load: async () => {
-      const { insuranceCascadeScenario } = await import('./insurance-cascade');
-      const { process } = await import('../runtime');
-      return async (env: Env) => insuranceCascadeScenario(env, process);
-    },
-  },
-  {
     key: 'rapid-fire',
     name: 'Rapid Fire',
     requiresStress: true,

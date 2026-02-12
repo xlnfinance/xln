@@ -716,7 +716,6 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
       ...account.settlementWorkspace,
       diffs: account.settlementWorkspace.diffs.map(diff => ({ ...diff })),
       forgiveTokenIds: [...account.settlementWorkspace.forgiveTokenIds],
-      insuranceRegs: account.settlementWorkspace.insuranceRegs.map(reg => ({ ...reg })),
     };
   }
   if (account.pendingForward) {

@@ -69,7 +69,7 @@
             match.totalDebt += debtAmount;
           }
 
-          // Net receiver: requested rebalance (wants insurance)
+          // Net receiver: requested rebalance
           const requestedRebalance = accountMachine.requestedRebalance.get(tokenId);
           if (requestedRebalance && requestedRebalance > 0n) {
             if (!tokenMatches.has(tokenId)) {

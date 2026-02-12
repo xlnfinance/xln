@@ -915,7 +915,6 @@ export class BrowserVMProvider {
       rightEntity,
       diffs,
       [], // forgiveDebtsInTokenIds
-      [], // insuranceRegs
       sig,
     ]);
 
@@ -1148,14 +1147,7 @@ export class BrowserVMProvider {
       collateralDiff: bigint;
       ondeltaDiff: bigint;
     }>,
-    forgiveDebtsInTokenIds: number[] = [],
-    insuranceRegs: Array<{
-      insured: string;
-      insurer: string;
-      tokenId: number;
-      limit: bigint;
-      expiresAt: bigint;
-    }> = []
+    forgiveDebtsInTokenIds: number[] = []
   ): Promise<string> {
     // Get current cooperativeNonce from chain
     const accountInfo = await this.getAccountInfo(initiatorEntityId, counterpartyEntityId);
@@ -1172,7 +1164,7 @@ export class BrowserVMProvider {
     // Include depositoryAddress for chain+depository binding (replay protection)
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
     const encodedMsg = abiCoder.encode(
-      ['uint256', 'address', 'bytes', 'uint256', 'tuple(uint256,int256,int256,int256,int256)[]', 'uint256[]', 'tuple(bytes32,bytes32,uint256,uint256,uint256)[]'],
+      ['uint256', 'address', 'bytes', 'uint256', 'tuple(uint256,int256,int256,int256,int256)[]', 'uint256[]'],
       [
         BrowserVMProvider.MessageType.CooperativeUpdate,
         this.depositoryAddress?.toString() || '0x0000000000000000000000000000000000000000',
@@ -1180,7 +1172,6 @@ export class BrowserVMProvider {
         cooperativeNonce,
         diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]),
         forgiveDebtsInTokenIds,
-        insuranceRegs.map(r => [r.insured, r.insurer, r.tokenId, r.limit, r.expiresAt]),
       ]
     );
 
@@ -1481,84 +1472,15 @@ export class BrowserVMProvider {
     return this.initialized;
   }
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  //                              INSURANCE
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  /** Get all insurance lines for an entity */
-  async getInsuranceLines(entityId: string): Promise<Array<{
-    insurer: string;
-    tokenId: number;
-    remaining: bigint;
-    expiresAt: bigint;
-  }>> {
-    if (!this.depositoryAddress || !this.depositoryInterface) {
-      throw new Error('Depository not deployed');
-    }
-
-    const callData = this.depositoryInterface.encodeFunctionData('getInsuranceLines', [entityId]);
-
-    const result = await this.vm.evm.runCall({
-      to: this.depositoryAddress,
-      caller: this.deployerAddress,
-      data: hexToBytes(callData as `0x${string}`),
-      gasLimit: 500000n,
-    });
-
-    if (result.execResult.exceptionError) {
-      console.error('[BrowserVM] getInsuranceLines failed:', result.execResult.exceptionError);
-      return [];
-    }
-    try {
-      const decoded = this.depositoryInterface.decodeFunctionResult('getInsuranceLines', result.execResult.returnValue);
-      return decoded[0].map((line: any) => ({
-        insurer: line.insurer,
-        tokenId: Number(line.tokenId),
-        remaining: line.remaining,
-        expiresAt: line.expiresAt,
-      }));
-    } catch {
-      return [];
-    }
-  }
-
-  /** Get available insurance coverage for entity+token */
-  async getAvailableInsurance(entityId: string, tokenId: number): Promise<bigint> {
-    if (!this.depositoryAddress || !this.depositoryInterface) {
-      throw new Error('Depository not deployed');
-    }
-
-    const callData = this.depositoryInterface.encodeFunctionData('getAvailableInsurance', [entityId, tokenId]);
-
-    const result = await this.vm.evm.runCall({
-      to: this.depositoryAddress,
-      caller: this.deployerAddress,
-      data: hexToBytes(callData as `0x${string}`),
-      gasLimit: 100000n,
-    });
-
-    if (result.execResult.exceptionError) {
-      console.error('[BrowserVM] getAvailableInsurance failed:', result.execResult.exceptionError);
-      return 0n;
-    }
-
-    try {
-      const decoded = this.depositoryInterface.decodeFunctionResult('getAvailableInsurance', result.execResult.returnValue);
-      return decoded[0];
-    } catch {
-      return 0n;
-    }
-  }
-
   /**
-   * Execute settle with insurance registration.
+   * Execute settlement.
    * Signature is required for any state changes.
    *
    * @param leftEntity - The left entity (smaller entityId)
    * @param rightEntity - The right entity (larger entityId)
    * @param sig - Hanko signature from counterparty (required if there are changes).
    */
-  async settleWithInsurance(
+  async settle(
     leftEntity: string,
     rightEntity: string,
     diffs: Array<{
@@ -1569,24 +1491,17 @@ export class BrowserVMProvider {
       ondeltaDiff: bigint;
     }>,
     forgiveDebtsInTokenIds: number[] = [],
-    insuranceRegs: Array<{
-      insured: string;
-      insurer: string;
-      tokenId: number;
-      limit: bigint;
-      expiresAt: bigint;
-    }> = [],
     sig?: string
   ): Promise<any[]> {
     if (!this.depositoryAddress || !this.depositoryInterface) {
       throw new Error('Depository not deployed');
     }
 
-    const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0 || insuranceRegs.length > 0;
+    const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0;
     let finalSig = sig || '';
-    console.log(`[BrowserVM] settleWithInsurance: input sig length=${sig?.length || 0}, diffs=${diffs.length}`);
+    console.log(`[BrowserVM] settle: input sig length=${sig?.length || 0}, diffs=${diffs.length}`);
     if (hasChanges && (!finalSig || finalSig === '0x')) {
-      throw new Error('Settlement signature required for settleWithInsurance');
+      throw new Error('Settlement signature required for settle');
     }
     if (!finalSig) {
       finalSig = '0x';
@@ -1603,7 +1518,6 @@ export class BrowserVMProvider {
       rightEntity,
       diffs,
       forgiveDebtsInTokenIds,
-      insuranceRegs,
       finalSig,
     ]);
     console.log(`[BrowserVM] settle calldata length: ${(callData.length - 2) / 2} bytes`);
@@ -1696,8 +1610,7 @@ export class BrowserVMProvider {
     // Parse and emit logs to j-watcher subscribers
     const logs = this.emitEvents(result.execResult.logs || []);
 
-    const insuranceCount = insuranceRegs.length;
-    console.log(`[BrowserVM] Settle completed: ${diffs.length} diffs, ${insuranceCount} insurance regs`);
+    console.log(`[BrowserVM] Settle completed: ${diffs.length} diffs`);
 
     return logs;
   }

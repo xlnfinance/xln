@@ -350,7 +350,6 @@ export interface XLNModule {
     rightEntity: string,
     diffs: SettlementDiff[],
     forgiveDebtsInTokenIds?: number[],
-    insuranceRegs?: Array<{ insured: string; insurer: string; tokenId: number; limit: bigint; expiresAt: bigint }>,
     sig?: string
   ) => Promise<{ txHash: string }>;
   submitReserveToReserve: (jurisdiction: JurisdictionConfig, fromEntity: string, toEntity: string, tokenId: number, amount: string) => Promise<{ txHash: string }>;

@@ -72,13 +72,6 @@ export interface JBatch {
       ondeltaDiff: bigint;
     }>;
     forgiveDebtsInTokenIds: number[];
-    insuranceRegs: Array<{
-      insured: string;
-      insurer: string;
-      tokenId: number;
-      limit: bigint;
-      expiresAt: bigint;
-    }>;
     sig: string; // Hanko signature (required when there are changes)
     entityProvider: string; // EntityProvider address
     hankoData: string; // Hanko signature data
@@ -189,7 +182,6 @@ export function cloneJBatch(batch: JBatch): JBatch {
         ...settlement,
         diffs: settlement.diffs.map(diff => ({ ...diff })),
         forgiveDebtsInTokenIds: [...settlement.forgiveDebtsInTokenIds],
-        insuranceRegs: settlement.insuranceRegs.map(reg => ({ ...reg })),
       })),
       disputeStarts: batch.disputeStarts.map(op => ({ ...op })),
       disputeFinalizations: batch.disputeFinalizations.map(op => ({
@@ -214,7 +206,7 @@ const DEPOSITORY_BATCH_ABI =
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve,' +
     'tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral,' +
     'tuple(bytes32 counterparty, uint256 tokenId, uint256 amount, bytes sig)[] collateralToReserve,' +
-    'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements,' +
+    'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements,' +
     'tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts,' +
     'tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 finalCooperativeNonce, uint256 initialDisputeNonce, uint256 finalDisputeNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations,' +
     'tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve,' +
@@ -251,7 +243,6 @@ export function summarizeBatch(batch: JBatch): Record<string, unknown> {
             right: batch.settlements[0]?.rightEntity,
             diffs: batch.settlements[0]?.diffs.length ?? 0,
             forgive: batch.settlements[0]?.forgiveDebtsInTokenIds.length ?? 0,
-            insurance: batch.settlements[0]?.insuranceRegs.length ?? 0,
             sigLen: batch.settlements[0]?.sig?.length ?? 0,
           }
         : null,
@@ -295,20 +286,9 @@ export function preflightBatchForE2(
     if (compareEntityIds(s.leftEntity, s.rightEntity) >= 0) {
       issues.push(`settlement left>=right: ${s.leftEntity.slice(-4)} >= ${s.rightEntity.slice(-4)}`);
     }
-    const hasChanges = s.diffs.length > 0 || s.forgiveDebtsInTokenIds.length > 0 || s.insuranceRegs.length > 0;
+    const hasChanges = s.diffs.length > 0 || s.forgiveDebtsInTokenIds.length > 0;
     if (hasChanges && (!s.sig || s.sig === '0x')) {
       issues.push(`settlement missing sig: ${s.leftEntity.slice(-4)}↔${s.rightEntity.slice(-4)}`);
-    }
-    for (const reg of s.insuranceRegs) {
-      if (normalizeEntityId(reg.insured) === normalizeEntityId(reg.insurer)) {
-        issues.push(`insuranceReg insured==insurer (${reg.insured.slice(-4)})`);
-      }
-      if (reg.limit <= 0n) {
-        issues.push(`insuranceReg limit=0 (${reg.insured.slice(-4)})`);
-      }
-      if (nowSec > 0 && reg.expiresAt <= BigInt(nowSec)) {
-        issues.push(`insuranceReg expired (${reg.insured.slice(-4)})`);
-      }
     }
   }
 
@@ -424,16 +404,6 @@ export function batchAddReserveToCollateral(
   console.log(`📦 jBatch: Added R→C ${amount} token ${tokenId} for ${entityId.slice(-4)}→${counterpartyId.slice(-4)}`);
 }
 
-/**
- * Insurance registration for settlement
- */
-export interface InsuranceReg {
-  insured: string;
-  insurer: string;
-  tokenId: number;
-  limit: bigint;
-  expiresAt: bigint;
-}
 
 
 /**
@@ -442,7 +412,7 @@ export interface InsuranceReg {
  *
  * Pattern:
  * - Only 1 diff
- * - No forgiveDebtsInTokenIds or insuranceRegs
+ * - No forgiveDebtsInTokenIds
  * - One of: leftDiff > 0 XOR rightDiff > 0
  * - collateralDiff = -amount (negative)
  * - ondeltaDiff follows the rule: only left affects ondelta
@@ -457,14 +427,13 @@ export function detectPureC2R(
     collateralDiff: bigint;
     ondeltaDiff: bigint;
   }>,
-  forgiveDebtsInTokenIds: number[],
-  insuranceRegs: InsuranceReg[]
+  forgiveDebtsInTokenIds: number[]
 ): { isPureC2R: true; withdrawer: 'left' | 'right'; tokenId: number; amount: bigint } | { isPureC2R: false } {
   // Must have exactly 1 diff
   if (diffs.length !== 1) return { isPureC2R: false };
 
-  // Must have no debt forgiveness or insurance
-  if (forgiveDebtsInTokenIds.length > 0 || insuranceRegs.length > 0) return { isPureC2R: false };
+  // Must have no debt forgiveness
+  if (forgiveDebtsInTokenIds.length > 0) return { isPureC2R: false };
 
   const diff = diffs[0]!; // Safe: we checked length === 1
 
@@ -502,7 +471,6 @@ export function batchAddSettlement(
     ondeltaDiff: bigint;
   }>,
   forgiveDebtsInTokenIds: number[] = [],
-  insuranceRegs: InsuranceReg[] = [],
   sig?: string,
   entityProvider: string = '0x0000000000000000000000000000000000000000',
   hankoData: string = '0x',
@@ -517,16 +485,14 @@ export function batchAddSettlement(
     throw new Error(`Settlement entities must be ordered: ${leftEntity} >= ${rightEntity}`);
   }
 
-  const hasChanges = diffs.length > 0 ||
-    forgiveDebtsInTokenIds.length > 0 ||
-    insuranceRegs.length > 0;
+  const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0;
 
   if (hasChanges && (!sig || sig === '0x')) {
     throw new Error(`Settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)} missing hanko signature`);
   }
 
   // Compress pure C2R settlements into collateralToReserve (saves calldata)
-  const c2rResult = detectPureC2R(diffs, forgiveDebtsInTokenIds, insuranceRegs);
+  const c2rResult = detectPureC2R(diffs, forgiveDebtsInTokenIds);
   if (c2rResult.isPureC2R && sig) {
     // Determine counterparty based on who is withdrawing
     const counterparty = c2rResult.withdrawer === 'left' ? rightEntity : leftEntity;
@@ -567,8 +533,6 @@ export function batchAddSettlement(
         existing.diffs.push(newDiff);
       }
     }
-    // Append new insurance registrations
-    existing.insuranceRegs.push(...insuranceRegs);
     // Append debt forgiveness (dedup)
     for (const tokenId of forgiveDebtsInTokenIds) {
       if (!existing.forgiveDebtsInTokenIds.includes(tokenId)) {
@@ -587,7 +551,6 @@ export function batchAddSettlement(
       rightEntity,
       diffs,
       forgiveDebtsInTokenIds,
-      insuranceRegs,
       sig: sig || '',
       entityProvider,
       hankoData,
@@ -595,52 +558,7 @@ export function batchAddSettlement(
     });
   }
 
-  const insuranceMsg = insuranceRegs.length > 0 ? `, ${insuranceRegs.length} insurance regs` : '';
-  console.log(`📦 jBatch: Added settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)}, ${diffs.length} tokens${insuranceMsg}`);
-}
-
-/**
- * Add insurance registration to existing settlement (or create new settlement)
- */
-export function batchAddInsurance(
-  jBatchState: JBatchState,
-  leftEntity: string,
-  rightEntity: string,
-  insuranceReg: InsuranceReg
-): void {
-  // Block if batch has pending broadcast
-  assertBatchNotPending(jBatchState, 'insurance');
-
-  // Validate entities are in canonical order
-  const [left, right] = isLeftEntity(leftEntity, rightEntity) ? [leftEntity, rightEntity] : [rightEntity, leftEntity];
-
-  // Find or create settlement
-  let existing = jBatchState.batch.settlements.find(
-    s => s.leftEntity === left && s.rightEntity === right
-  );
-
-  if (!existing) {
-    // Create empty settlement just for insurance
-    existing = {
-      leftEntity: left,
-      rightEntity: right,
-      diffs: [],
-      forgiveDebtsInTokenIds: [],
-      insuranceRegs: [],
-      sig: '',
-      entityProvider: '0x0000000000000000000000000000000000000000',
-      hankoData: '0x',
-      nonce: 0,
-    };
-    jBatchState.batch.settlements.push(existing);
-  }
-
-  if (!existing) {
-    throw new Error('Failed to create settlement for insurance registration');
-  }
-
-  existing.insuranceRegs.push(insuranceReg);
-  console.log(`📦 jBatch: Added insurance ${insuranceReg.insurer.slice(-4)}→${insuranceReg.insured.slice(-4)}, ${insuranceReg.limit} limit`);
+  console.log(`📦 jBatch: Added settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)}, ${diffs.length} tokens`);
 }
 
 /**
@@ -720,14 +638,7 @@ export interface BrowserVMBatchProcessor {
       collateralDiff: bigint;
       ondeltaDiff: bigint;
     }>,
-    forgiveDebtsInTokenIds?: number[],
-    insuranceRegs?: Array<{
-      insured: string;
-      insurer: string;
-      tokenId: number;
-      limit: bigint;
-      expiresAt: bigint;
-    }>
+    forgiveDebtsInTokenIds?: number[]
   ) => Promise<string>;
   getEntityProviderAddress?: () => string;
   getDepositoryAddress?: () => string;
@@ -778,9 +689,7 @@ export async function broadcastBatch(
       browserVM.setBlockTimestamp?.(timestamp);
 
       for (const settlement of jBatchState.batch.settlements) {
-        const hasChanges = settlement.diffs.length > 0 ||
-          settlement.forgiveDebtsInTokenIds.length > 0 ||
-          settlement.insuranceRegs.length > 0;
+        const hasChanges = settlement.diffs.length > 0 || settlement.forgiveDebtsInTokenIds.length > 0;
 
         if (hasChanges) {
           if (entityProviderAddress === '0x0000000000000000000000000000000000000000') {
@@ -865,9 +774,7 @@ export async function broadcastBatch(
     const { depository, provider } = await connectToEthereum(jurisdiction);
 
     for (const settlement of jBatchState.batch.settlements) {
-      const hasChanges = settlement.diffs.length > 0 ||
-        settlement.forgiveDebtsInTokenIds.length > 0 ||
-        settlement.insuranceRegs.length > 0;
+      const hasChanges = settlement.diffs.length > 0 || settlement.forgiveDebtsInTokenIds.length > 0;
       if (hasChanges) {
         if (entityProviderAddress === '0x0000000000000000000000000000000000000000') {
           console.warn(`⚠️ Settlement missing EntityProvider address (required for Hanko verification)`);
