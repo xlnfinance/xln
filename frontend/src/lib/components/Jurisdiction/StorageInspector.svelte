@@ -18,7 +18,6 @@
     tokenId: number;
     amount: string;
     debts: number;
-    insurance: number;
   }
 
   interface CollateralRow {
@@ -223,9 +222,6 @@
             <th on:click={() => sortTable('debts')}>
               Debts {sortColumn === 'debts' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
             </th>
-            <th on:click={() => sortTable('insurance')}>
-              Insurance {sortColumn === 'insurance' ? (sortDirection === 'asc' ? '↑' : '↓') : '↕'}
-            </th>
           </tr>
         </thead>
         <tbody>
@@ -243,7 +239,6 @@
                   {row.debts > 0 ? `🔴 ${row.debts}` : '✅'}
                 </td>
                 <td>
-                  {row.insurance > 0 ? `🛡️ ${row.insurance}` : '-'}
                 </td>
               </tr>
             {/each}
