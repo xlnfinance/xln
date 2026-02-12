@@ -16,7 +16,6 @@
     tokenId: number;
     amount: bigint;
     debtCount: number;
-    insuranceCount: number;
   }
 
   interface CollateralEntry {

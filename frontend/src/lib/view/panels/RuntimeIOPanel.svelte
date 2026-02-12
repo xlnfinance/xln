@@ -424,13 +424,6 @@
                         {/if}
                       </div>
 
-                      <!-- Insurance Lines -->
-                      {#if replica.state?.insuranceLines?.length > 0}
-                        <div class="replica-section">
-                          <h5>🛡️ Insurance Lines</h5>
-                          <pre class="json-mini">{safeStringify(replica.state.insuranceLines)}</pre>
-                        </div>
-                      {/if}
 
                       <!-- Debts -->
                       {#if replica.state?.debts?.length > 0}

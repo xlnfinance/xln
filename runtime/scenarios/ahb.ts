@@ -1839,7 +1839,7 @@ export async function ahb(env: Env): Promise<void> {
       description: 'Frame 25: Hub-Bob Settlement complete',
       what: 'Hub deposited $200K to Bob (net-receiver). Bob now fully collateralized.',
       keyMetrics: [
-        'H-B collateral: $200K (Bob\'s insurance)',
+        'H-B collateral: $200K',
         'Bob\'s uninsured balance: $200K → $0',
         'Rebalance complete!',
       ],

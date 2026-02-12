@@ -88,10 +88,10 @@ export const DEPOSITORY_ABI = [
   'function debugBulkFundEntities() external',
   'function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint256 tokenId, uint256 amount) external returns (bool)',
   'function processBatch(bytes encodedBatch, address entityProvider, bytes hankoData, uint256 nonce) external returns (bool)',
-  'function unsafeProcessBatch(bytes32 entity, tuple(tuple(uint256 tokenId, uint256 amount)[] flashloans, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts, tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 finalCooperativeNonce, uint256 initialDisputeNonce, uint256 finalDisputeNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations, tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(address transformer, bytes32 secret)[] revealSecrets, uint256 hub_id) batch) external returns (bool)',
+  'function unsafeProcessBatch(bytes32 entity, tuple(tuple(uint256 tokenId, uint256 amount)[] flashloans, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts, tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 finalCooperativeNonce, uint256 initialDisputeNonce, uint256 finalDisputeNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations, tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(address transformer, bytes32 secret)[] revealSecrets, uint256 hub_id) batch) external returns (bool)',
   'function entityNonces(address) view returns (uint256)',
   'function prefundAccount(bytes32 fundingEntity, bytes32 counterpartyEntity, uint256 tokenId, uint256 amount) external returns (bool)',
-  'function settle(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, tuple(bytes32 insured, bytes32 insurer, uint256 tokenId, uint256 limit, uint64 expiresAt)[] insuranceRegs, bytes sig) external returns (bool)',
+  'function settle(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig) external returns (bool)',
   'function _reserves(bytes32 entity, uint256 tokenId) external view returns (uint256)',
   // Insurance view functions
   'function getInsuranceLines(bytes32 insured) external view returns (tuple(bytes32 insurer, uint256 tokenId, uint256 remaining, uint64 expiresAt)[])',
@@ -939,7 +939,6 @@ export const submitSettle = async (
   rightEntity: string,
   diffs: SettlementDiff[],
   forgiveDebtsInTokenIds: number[] = [],
-  insuranceRegs: Array<{ insured: string; insurer: string; tokenId: number; limit: bigint; expiresAt: bigint }> = [],
   sig?: string
 ) => {
   try {
@@ -951,7 +950,7 @@ export const submitSettle = async (
       collateralDiff: d.collateralDiff.toString()
     })));
 
-    const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0 || insuranceRegs.length > 0;
+    const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0;
     if (hasChanges && (!sig || sig === '0x')) {
       throw new Error('Settlement signature required for settle');
     }
@@ -973,7 +972,6 @@ export const submitSettle = async (
       rightEntity,
       diffs,
       forgiveDebtsInTokenIds,
-      insuranceRegs,
       finalSig
     );
     console.log(`💫 Transaction sent: ${tx.hash}`);
