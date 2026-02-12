@@ -1,10 +1,12 @@
 import type { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env } from '../types';
+import { ethers } from 'ethers';
 import { DEBUG } from '../utils';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
 import { getTokenInfo, getDefaultCreditLimit } from '../account-utils';
 import { isLeftEntity } from '../entity-id-utils';
 import { safeStringify } from '../serialization-utils';
 import { CANONICAL_J_EVENTS } from '../jadapter/helpers';
+import { hashHtlcSecret } from '../htlc-utils';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -50,6 +52,142 @@ const getTokenSymbol = (tokenId: number): string => {
 const getTokenDecimals = (tokenId: number): number => {
   return getTokenInfo(tokenId).decimals;
 };
+
+function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
+  const initialArguments = String(initialArgumentsRaw || '0x');
+  if (initialArguments === '0x') return [];
+
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  let argArray: string[];
+  try {
+    [argArray] = abiCoder.decode(['bytes[]'], initialArguments) as [string[]];
+  } catch {
+    return [];
+  }
+
+  const secrets = new Set<string>();
+  for (const arg of argArray) {
+    if (!arg || arg === '0x') continue;
+    try {
+      const [, decodedSecrets] = abiCoder.decode(['uint32[]', 'bytes32[]'], arg) as [Array<bigint>, Array<string>];
+      for (const secret of decodedSecrets) {
+        if (ethers.isHexString(secret, 32)) {
+          secrets.add(String(secret).toLowerCase());
+        }
+      }
+    } catch {
+      // Ignore non-HTLC transformer argument formats.
+    }
+  }
+
+  return Array.from(secrets);
+}
+
+function queueInboundResolvesByHashlock(
+  newState: EntityState,
+  mempoolOps: Array<{ accountId: string; tx: any }>,
+  hashlock: string,
+  secret: string,
+): number {
+  let queued = 0;
+  for (const [counterpartyId, account] of newState.accounts.entries()) {
+    const weAreLeft = account.leftEntity === newState.entityId;
+    for (const lock of account.locks.values()) {
+      if (String(lock.hashlock).toLowerCase() !== hashlock) continue;
+      const senderIsUs = (lock.senderIsLeft && weAreLeft) || (!lock.senderIsLeft && !weAreLeft);
+      if (senderIsUs) continue;
+      mempoolOps.push({
+        accountId: counterpartyId,
+        tx: {
+          type: 'htlc_resolve',
+          data: {
+            lockId: lock.lockId,
+            outcome: 'secret' as const,
+            secret,
+          },
+        },
+      });
+      queued++;
+    }
+  }
+  return queued;
+}
+
+function applyKnownHtlcSecret(
+  newState: EntityState,
+  mempoolOps: Array<{ accountId: string; tx: any }>,
+  hashlockRaw: string,
+  secretRaw: string,
+  blockNumber: number,
+  source: 'SecretRevealed' | 'DisputeStarted',
+): boolean {
+  const hashlock = String(hashlockRaw).toLowerCase();
+  const secret = String(secretRaw).toLowerCase();
+
+  let routeKey = hashlock;
+  let route = newState.htlcRoutes.get(routeKey);
+  if (!route) {
+    for (const [candidateKey, candidateRoute] of newState.htlcRoutes.entries()) {
+      if (candidateKey.toLowerCase() === hashlock) {
+        routeKey = candidateKey;
+        route = candidateRoute;
+        break;
+      }
+    }
+  }
+
+  if (!route) {
+    const recovered = queueInboundResolvesByHashlock(newState, mempoolOps, hashlock, secret);
+    if (recovered > 0) {
+      console.log(`⬅️ HTLC: ${source} secret propagated via lock-scan (${recovered} lock${recovered > 1 ? 's' : ''})`);
+      addMessage(newState, `🔓 HTLC reveal observed: ${hashlock.slice(0, 10)}... | Block ${blockNumber}`);
+      return true;
+    }
+    console.log(`⚠️ HTLC: ${source} secret for unknown hashlock ${hashlock.slice(0, 16)}...`);
+    return false;
+  }
+
+  if (route.secret) {
+    console.log(`✅ HTLC: Secret already stored for hashlock ${routeKey.slice(0, 16)}...`);
+    addMessage(newState, `🔓 HTLC reveal observed: ${hashlock.slice(0, 10)}... | Block ${blockNumber}`);
+    return true;
+  }
+
+  route.secret = secret;
+
+  if (route.pendingFee) {
+    newState.htlcFeesEarned = (newState.htlcFeesEarned || 0n) + route.pendingFee;
+    console.log(`💰 HTLC: Fee earned on ${source}: ${route.pendingFee} (total: ${newState.htlcFeesEarned})`);
+    delete route.pendingFee;
+  }
+
+  if (route.outboundLockId) {
+    newState.lockBook.delete(route.outboundLockId);
+  }
+  if (route.inboundLockId) {
+    newState.lockBook.delete(route.inboundLockId);
+  }
+
+  if (route.inboundEntity && route.inboundLockId) {
+    mempoolOps.push({
+      accountId: route.inboundEntity,
+      tx: {
+        type: 'htlc_resolve',
+        data: {
+          lockId: route.inboundLockId,
+          outcome: 'secret' as const,
+          secret,
+        },
+      },
+    });
+    console.log(`⬅️ HTLC: ${source} secret propagated to ${route.inboundEntity.slice(-4)}`);
+  } else {
+    console.log(`✅ HTLC: ${source} reveal complete (no inbound hop)`);
+  }
+
+  addMessage(newState, `🔓 HTLC reveal observed: ${hashlock.slice(0, 10)}... | Block ${blockNumber}`);
+  return true;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // J-EVENT HANDLER: Entry point for jurisdiction (blockchain) events
@@ -487,53 +625,7 @@ async function applyFinalizedJEvent(
 
   } else if (event.type === 'SecretRevealed') {
     const { hashlock, secret } = event.data;
-    const hashlockKey = String(hashlock).toLowerCase();
-    const route = newState.htlcRoutes.get(hashlockKey);
-
-    if (!route) {
-      console.log(`⚠️ HTLC: Secret reveal for unknown hashlock ${hashlockKey.slice(0, 16)}...`);
-      return { newState, mempoolOps };
-    }
-
-    if (route.secret) {
-      console.log(`✅ HTLC: Secret already stored for hashlock ${hashlockKey.slice(0, 16)}...`);
-      addMessage(newState, `🔓 HTLC reveal observed: ${hashlockKey.slice(0, 10)}... | Block ${blockNumber}`);
-      return { newState, mempoolOps };
-    }
-
-    route.secret = String(secret);
-
-    if (route.pendingFee) {
-      newState.htlcFeesEarned = (newState.htlcFeesEarned || 0n) + route.pendingFee;
-      console.log(`💰 HTLC: Fee earned on on-chain reveal: ${route.pendingFee} (total: ${newState.htlcFeesEarned})`);
-      delete route.pendingFee;
-    }
-
-    if (route.outboundLockId) {
-      newState.lockBook.delete(route.outboundLockId);
-    }
-    if (route.inboundLockId) {
-      newState.lockBook.delete(route.inboundLockId);
-    }
-
-    if (route.inboundEntity && route.inboundLockId) {
-      mempoolOps.push({
-        accountId: route.inboundEntity,
-        tx: {
-          type: 'htlc_resolve',
-          data: {
-            lockId: route.inboundLockId,
-            outcome: 'secret' as const,
-            secret: String(secret),
-          }
-        }
-      });
-      console.log(`⬅️ HTLC: On-chain secret propagated to ${route.inboundEntity.slice(-4)}`);
-    } else {
-      console.log(`✅ HTLC: On-chain reveal complete (no inbound hop)`);
-    }
-
-    addMessage(newState, `🔓 HTLC reveal observed: ${hashlockKey.slice(0, 10)}... | Block ${blockNumber}`);
+    applyKnownHtlcSecret(newState, mempoolOps, String(hashlock), String(secret), blockNumber, 'SecretRevealed');
 
   } else if (event.type === 'AccountSettled') {
     // Universal settlement event (covers R2C, C2R, settle, rebalance)
@@ -760,6 +852,15 @@ async function applyFinalizedJEvent(
         // Continue but log for audit
       } else {
         console.log(`✅ Proof hash verified: local matches on-chain`);
+      }
+
+      const disputeSecrets = decodeDisputeInitialSecrets(event.data.initialArguments || '0x');
+      if (disputeSecrets.length > 0) {
+        console.log(`🔓 DISPUTE-ARGS: ${disputeSecrets.length} secret(s) decoded from initialArguments`);
+        for (const disputeSecret of disputeSecrets) {
+          const hashlock = hashHtlcSecret(disputeSecret);
+          applyKnownHtlcSecret(newState, mempoolOps, hashlock, disputeSecret, blockNumber, 'DisputeStarted');
+        }
       }
 
       addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout}`);

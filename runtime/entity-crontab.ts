@@ -106,13 +106,6 @@ export function initCrontab(): CrontabState {
     handler: hubRebalanceHandler,
   });
 
-  tasks.set('checkHtlcTimeouts', {
-    name: 'checkHtlcTimeouts',
-    intervalMs: 5000, // Safety-net polling (hooks are primary, this is fallback)
-    lastRun: 0,
-    handler: checkHtlcTimeoutsHandler,
-  });
-
   return { tasks, hooks: new Map() };
 }
 
@@ -218,10 +211,16 @@ function processDueHooks(hooks: ScheduledHook[], replica: EntityReplica): Entity
     switch (hook.type) {
       case 'htlc_timeout':
         // HTLC lock expired → resolve with error:timeout
-        htlcTimeoutLocks.push({
-          accountId: hook.data.accountId,
-          lockId: hook.data.lockId,
-        });
+        {
+          const accountId = String(hook.data['accountId'] || '');
+          const lockId = String(hook.data['lockId'] || '');
+          const account = replica.state.accounts.get(accountId);
+          // Stale hook (already resolved/cancelled path) — skip silently.
+          if (!account?.locks?.has(lockId)) {
+            break;
+          }
+          htlcTimeoutLocks.push({ accountId, lockId });
+        }
         break;
 
       case 'dispute_deadline':

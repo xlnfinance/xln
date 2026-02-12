@@ -1151,8 +1151,8 @@ export const applyEntityFrame = async (
             }
           }
 
-          // Cancel timeout hooks for resolved/revealed HTLC locks
-          if ((tx.type === 'htlc_resolve' || tx.type === 'htlc_reveal') && tx.data?.lockId) {
+          // Cancel timeout hooks for resolved HTLC locks
+          if (tx.type === 'htlc_resolve' && tx.data?.lockId) {
             if (currentEntityState.crontabState) {
               cancelHookFn(currentEntityState.crontabState, `htlc-timeout:${tx.data.lockId}`);
             }

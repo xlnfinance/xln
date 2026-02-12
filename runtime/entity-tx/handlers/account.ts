@@ -8,6 +8,7 @@ import { isLeftEntity } from '../../entity-id-utils';
 import { batchAddRevealSecret, initJBatch } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
 import { sanitizeBaseFee } from '../../routing/fees';
+import { cancelHook as cancelScheduledHook } from '../../entity-crontab';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const findAccountKeyInsensitive = (accounts: Map<string, AccountMachine>, counterpartyId: string): string | null => {
@@ -256,6 +257,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           // Keep lockBook aligned with finalized account-level HTLC lifecycle.
           if (accountTx.type === 'htlc_resolve') {
             newState.lockBook.delete(accountTx.data.lockId);
+            // Cancel any scheduled timeout hook once resolve is finalized in committed frame.
+            if (newState.crontabState) {
+              cancelScheduledHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
+            }
           }
 
           // === J-EVENT BILATERAL CONSENSUS ===
