@@ -155,8 +155,13 @@ export async function handleDisputeStart(
   const counterpartyIsLeft = account.leftEntity === counterpartyEntityId;
 
   const fillRatiosByOfferId = buildPendingSwapFillRatios(newState, counterpartyEntityId, account);
+  const htlcSecrets = collectHtlcSecrets(newState, counterpartyEntityId);
   const { leftArguments, rightArguments } = buildDeltaTransformerArguments(account, {
     fillRatiosByOfferId,
+    // disputeStart commits the argument blob later replayed as activeDispute.initialArguments
+    // Keep secrets on the same side that we commit as initialArguments.
+    leftSecrets: counterpartyIsLeft ? htlcSecrets : [],
+    rightSecrets: counterpartyIsLeft ? [] : htlcSecrets,
   });
 
   const initialArguments = counterpartyIsLeft ? leftArguments : rightArguments;
