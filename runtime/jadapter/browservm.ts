@@ -11,7 +11,7 @@ import type { Account, Depository, EntityProvider, DeltaTransformer } from '../.
 import { Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types';
 
 import type { BrowserVMState, JTx } from '../types';
-import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, InsuranceReg, JTokenInfo } from './types';
+import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, JTokenInfo } from './types';
 import { computeAccountKey, entityIdToAddress, isCanonicalEvent, processEventBatch, type RawJEvent } from './helpers';
 import type { BrowserVMProvider } from './browservm-provider';
 

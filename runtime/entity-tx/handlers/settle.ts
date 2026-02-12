@@ -133,7 +133,6 @@ export async function handleSettlePropose(
   const workspace: SettlementWorkspace = {
     diffs,
     forgiveTokenIds: forgiveTokenIds || [],
-    insuranceRegs: [],
     initiatedBy: isLeft ? 'left' : 'right',
     status: 'awaiting_counterparty',
     ...(memo && { memo }),
@@ -431,7 +430,6 @@ export async function handleSettleExecute(
     rightEntity,
     workspace.diffs,
     workspace.forgiveTokenIds,
-    workspace.insuranceRegs,
     counterpartyHanko!,
     jurisdiction.entityProviderAddress,
     '0x', // hankoData - not needed for single-signer entities
@@ -537,7 +535,6 @@ export function processSettleAction(
       const workspace: SettlementWorkspace = {
         diffs: settleAction.diffs || [],
         forgiveTokenIds: settleAction.forgiveTokenIds || [],
-        insuranceRegs: [],
         initiatedBy: theyAreLeft ? 'left' : 'right',
         status: 'awaiting_counterparty',
         ...(settleAction.memo && { memo: settleAction.memo }),
