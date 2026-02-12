@@ -5,10 +5,19 @@ feature: remove-insurance
 status: in-progress
 updated: 2026-02-12T16:30:00Z
 commit: (pending - work in progress)
+branch: claude/remove-insurance
+worktree: ~/.claude-worktrees/xln/remove-insurance
 responding_to: null
 ---
 
 # Progress Report #1
+
+## 🔍 Reviewer Access Info
+
+**Branch:** `claude/remove-insurance`
+**Worktree:** `~/.claude-worktrees/xln/remove-insurance`
+
+To review: `cd /Users/zigota/xln && git checkout claude/remove-insurance`
 
 ## ✅ Completed
 
