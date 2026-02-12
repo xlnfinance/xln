@@ -205,7 +205,7 @@ library Account {
       ch_key,
       _accounts[ch_key].cooperativeNonce,
       diffs,
-      new uint[](0),  // forgiveDebtsInTokenIds
+      new uint[](0)  // forgiveDebtsInTokenIds
     );
     bytes32 hash = keccak256(encoded_msg);
 
