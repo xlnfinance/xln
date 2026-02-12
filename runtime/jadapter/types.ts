@@ -86,7 +86,6 @@ export interface JAdapter {
     rightEntity: string,
     diffs: SettlementDiff[],
     forgiveDebtsInTokenIds?: number[],
-    insuranceRegs?: InsuranceReg[],
     sig?: string
   ): Promise<JTxReceipt>;
 
@@ -151,14 +150,6 @@ export interface SettlementDiff {
   ondeltaDiff?: bigint;
 }
 
-// Insurance registration structure
-export interface InsuranceReg {
-  insured: string;
-  insurer: string;
-  tokenId: number;
-  limit: bigint;
-  expiresAt: bigint;
-}
 
 // Receipt for processBatch
 export interface JBatchReceipt {
@@ -194,15 +185,13 @@ export interface BrowserVMProvider {
     initiatorEntityId: string,
     counterpartyEntityId: string,
     diffs: SettlementDiff[],
-    forgiveDebtsInTokenIds?: number[],
-    insuranceRegs?: InsuranceReg[]
+    forgiveDebtsInTokenIds?: number[]
   ): Promise<string>;
-  settleWithInsurance(
+  settle(
     leftEntity: string,
     rightEntity: string,
     diffs: SettlementDiff[],
     forgiveDebtsInTokenIds?: number[],
-    insuranceRegs?: InsuranceReg[],
     sig?: string
   ): Promise<any[]>;
 }

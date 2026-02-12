@@ -17,7 +17,6 @@
   import ConsolePanel from './panels/ConsolePanel.svelte';
   import RuntimeIOPanel from './panels/RuntimeIOPanel.svelte';
   import SettingsPanel from './panels/SettingsPanel.svelte';
-  import InsurancePanel from './panels/InsurancePanel.svelte';
   import JurisdictionPanel from './panels/JurisdictionPanel.svelte';
   import SolvencyPanel from './panels/SolvencyPanel.svelte';
   import GossipPanel from './panels/GossipPanel.svelte';
@@ -468,15 +467,6 @@
               isolatedTimeIndex: localTimeIndex
             }
           });
-        } else if (options.name === 'insurance') {
-          component = mount(InsurancePanel, {
-            target: div,
-            props: {
-              isolatedEnv: localEnvStore,
-              isolatedHistory: localHistoryStore,
-              isolatedTimeIndex: localTimeIndex
-            }
-          });
         } else if (options.name === 'solvency') {
           component = mount(SolvencyPanel, {
             target: div,
@@ -647,7 +637,6 @@
     });
 
     // REMOVED PANELS (merged elsewhere):
-    // - Insurance: now in EntityPanel after Reserves
     // - Solvency: now in RuntimeIOPanel as first section
 
     // Restore saved layout if available (clear on any error)

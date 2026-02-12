@@ -18,7 +18,7 @@ import type { Account, Depository, EntityProvider, DeltaTransformer } from '../.
 import { Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types';
 
 import type { BrowserVMState, JTx } from '../types';
-import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, InsuranceReg, BrowserVMProvider, JTokenInfo } from './types';
+import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, BrowserVMProvider, JTokenInfo } from './types';
 import { computeAccountKey, entityIdToAddress, setupContractEventListeners, processEventBatch, type RawJEvent } from './helpers';
 import { CANONICAL_J_EVENTS } from './helpers';
 
@@ -426,10 +426,9 @@ export async function createRpcAdapter(
       rightEntity: string,
       diffs: SettlementDiff[],
       forgiveDebtsInTokenIds: number[] = [],
-      insuranceRegs: InsuranceReg[] = [],
       sig?: string
     ): Promise<JTxReceipt> {
-      const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0 || insuranceRegs.length > 0;
+      const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0;
       if (hasChanges && (!sig || sig === '0x')) {
         throw new Error('Settlement signature required');
       }
@@ -449,7 +448,6 @@ export async function createRpcAdapter(
         rightEntity,
         normalizedDiffs,
         forgiveDebtsInTokenIds,
-        insuranceRegs,
         finalSig,
         { gasLimit: 2_000_000n }
       );

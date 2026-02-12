@@ -11,7 +11,7 @@ import type { Account, Depository, EntityProvider, DeltaTransformer } from '../.
 import { Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types';
 
 import type { BrowserVMState, JTx } from '../types';
-import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, InsuranceReg, JTokenInfo } from './types';
+import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTxReceipt, SettlementDiff, JTokenInfo } from './types';
 import { computeAccountKey, entityIdToAddress, isCanonicalEvent, processEventBatch, type RawJEvent } from './helpers';
 import type { BrowserVMProvider } from './browservm-provider';
 
@@ -195,10 +195,9 @@ export async function createBrowserVMAdapter(
       rightEntity: string,
       diffs: SettlementDiff[],
       forgiveDebtsInTokenIds: number[] = [],
-      insuranceRegs: InsuranceReg[] = [],
       sig?: string
     ): Promise<JTxReceipt> {
-      // BrowserVM has settleWithInsurance which handles both cases
+      // BrowserVM settle handles both signed and no-op calls
       // Ensure ondeltaDiff is set (default to 0n if not provided)
       const normalizedDiffs = diffs.map(d => ({
         tokenId: d.tokenId,
@@ -207,12 +206,11 @@ export async function createBrowserVMAdapter(
         collateralDiff: d.collateralDiff,
         ondeltaDiff: d.ondeltaDiff ?? 0n,
       }));
-      const events = await browserVM.settleWithInsurance(
+      const events = await browserVM.settle(
         leftEntity,
         rightEntity,
         normalizedDiffs,
         forgiveDebtsInTokenIds,
-        insuranceRegs,
         sig
       );
       return {

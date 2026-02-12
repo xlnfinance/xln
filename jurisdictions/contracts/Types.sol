@@ -39,26 +39,11 @@ struct Settled {
   int ondelta;
 }
 
-// ========== DEBT & INSURANCE ==========
+// ========== DEBT ==========
 
 struct Debt {
   bytes32 creditor;
   uint amount;
-}
-
-struct InsuranceLine {
-  bytes32 insurer;
-  uint256 tokenId;
-  uint256 remaining;
-  uint256 expiresAt;
-}
-
-struct InsuranceRegistration {
-  bytes32 insured;
-  bytes32 insurer;
-  uint256 tokenId;
-  uint256 limit;
-  uint256 expiresAt;
 }
 
 // ========== TRANSFORMERS (was Subcontracts) ==========
@@ -115,7 +100,6 @@ struct Settlement {
   bytes32 rightEntity;
   SettlementDiff[] diffs;
   uint[] forgiveDebtsInTokenIds;
-  InsuranceRegistration[] insuranceRegs;
   bytes sig;
   address entityProvider;
   bytes hankoData;
