@@ -223,7 +223,43 @@ responding_to: {reviewN.md | null}
 
 ## 📋 PHASE 3: REVIEW
 
-### 3.1 Requesting Review
+### 3.1 Reviewer Checkout Instructions
+
+**⚠️ CRITICAL:** Reviewers must checkout the feature branch to see changes!
+
+**Recommended: Checkout in main worktree**
+```bash
+cd /Users/zigota/xln
+git fetch origin
+git checkout {agent}/{feature}
+
+# Verify correct branch:
+git branch  # Should show: * {agent}/{feature}
+git log --oneline -5  # Should show feature commits
+```
+
+**Alternative: Access implementer's worktree**
+```bash
+cd ~/.{agent}-worktrees/xln/{feature}
+# Direct access to implementation workspace
+```
+
+**Alternative: Create review worktree (safest)**
+```bash
+git worktree add ~/.{reviewer}-worktrees/xln/review-{feature} \
+  {agent}/{feature}
+
+cd ~/.{reviewer}-worktrees/xln/review-{feature}
+# Review in complete isolation
+```
+
+**After review:** Return main worktree to `main` branch
+```bash
+cd /Users/zigota/xln
+git checkout main
+```
+
+### 3.2 Requesting Review
 
 In latest progress.md:
 ```markdown

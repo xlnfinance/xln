@@ -467,15 +467,6 @@
               isolatedTimeIndex: localTimeIndex
             }
           });
-        } else if (options.name === 'insurance') {
-          component = mount(InsurancePanel, {
-            target: div,
-            props: {
-              isolatedEnv: localEnvStore,
-              isolatedHistory: localHistoryStore,
-              isolatedTimeIndex: localTimeIndex
-            }
-          });
         } else if (options.name === 'solvency') {
           component = mount(SolvencyPanel, {
             target: div,
@@ -646,7 +637,6 @@
     });
 
     // REMOVED PANELS (merged elsewhere):
-    // - Insurance: now in EntityPanel after Reserves
     // - Solvency: now in RuntimeIOPanel as first section
 
     // Restore saved layout if available (clear on any error)
