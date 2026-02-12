@@ -362,7 +362,6 @@ export function createSettlementHashWithNonce(
       nonce,
       diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]),
       [], // forgiveDebtsInTokenIds (empty for now)
-      []  // insuranceRegs (empty for now)
     ]
   );
 

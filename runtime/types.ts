@@ -1163,13 +1163,6 @@ export interface SettlementDiff {
 export interface SettlementWorkspace {
   diffs: SettlementDiff[];                    // The settlement operations
   forgiveTokenIds: number[];                  // Debts to forgive (optional)
-  insuranceRegs: Array<{                      // Insurance registrations (optional)
-    insured: string;
-    insurer: string;
-    tokenId: number;
-    limit: bigint;
-    expiresAt: bigint;
-  }>;
 
   // Hanko signatures
   leftHanko?: HankoString;                    // Left's signature on settlement
@@ -1444,13 +1437,6 @@ export interface EntityState {
   // 📦 J-Batch system - accumulates operations for on-chain submission (typed in j-batch.ts)
   jBatchState?: any; // JBatchState - avoid circular import
 
-  // 🛡️ Insurance - coverage lines from insurers
-  insuranceLines?: Array<{
-    insurer: string;
-    tokenId: number;
-    remaining: bigint;
-    expiresAt: bigint;
-  }>;
 
   // 🔐 Cryptography - RSA-OAEP keys for HTLC envelope encryption
   cryptoPublicKey?: string;  // Base64 RSA-OAEP public key (shareable)
@@ -1761,8 +1747,6 @@ export interface JReplica {
   // mapping(bytes => mapping(uint => AccountCollateral)) _collaterals
   collaterals?: Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>; // accountKey -> tokenId -> {collateral, ondelta}
 
-  // mapping(bytes32 => InsuranceLine[]) insuranceLines
-  insuranceLines?: Map<string, Array<{ insurer: string; tokenId: number; remaining: bigint; expiresAt: bigint }>>;
 
   // === SYNCED FROM ENTITYPROVIDER.SOL ===
   // mapping(bytes32 => Entity) entities

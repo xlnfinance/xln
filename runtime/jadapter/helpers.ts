@@ -43,8 +43,6 @@ export function setupContractEventListeners(
     'SecretRevealed',
     'DisputeStarted',
     'DisputeFinalized',
-    'InsuranceRegistered',
-    'InsuranceClaimed',
     'DebtCreated',
     'DebtEnforced',
     'CooperativeClose',
