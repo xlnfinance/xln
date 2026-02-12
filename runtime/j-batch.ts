@@ -290,16 +290,6 @@ export function preflightBatchForE2(
     if (hasChanges && (!s.sig || s.sig === '0x')) {
       issues.push(`settlement missing sig: ${s.leftEntity.slice(-4)}↔${s.rightEntity.slice(-4)}`);
     }
-      if (normalizeEntityId(reg.insured) === normalizeEntityId(reg.insurer)) {
-        issues.push(`insuranceReg insured==insurer (${reg.insured.slice(-4)})`);
-      }
-      if (reg.limit <= 0n) {
-        issues.push(`insuranceReg limit=0 (${reg.insured.slice(-4)})`);
-      }
-      if (nowSec > 0 && reg.expiresAt <= BigInt(nowSec)) {
-        issues.push(`insuranceReg expired (${reg.insured.slice(-4)})`);
-      }
-    }
   }
 
   for (const f of batch.disputeFinalizations) {
@@ -481,7 +471,6 @@ export function batchAddSettlement(
     ondeltaDiff: bigint;
   }>,
   forgiveDebtsInTokenIds: number[] = [],
-  insuranceRegs: InsuranceReg[] = [],
   sig?: string,
   entityProvider: string = '0x0000000000000000000000000000000000000000',
   hankoData: string = '0x',
@@ -496,9 +485,7 @@ export function batchAddSettlement(
     throw new Error(`Settlement entities must be ordered: ${leftEntity} >= ${rightEntity}`);
   }
 
-  const hasChanges = diffs.length > 0 ||
-    forgiveDebtsInTokenIds.length > 0 ||
-    insuranceRegs.length > 0;
+  const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0;
 
   if (hasChanges && (!sig || sig === '0x')) {
     throw new Error(`Settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)} missing hanko signature`);
@@ -572,50 +559,6 @@ export function batchAddSettlement(
   }
 
   console.log(`📦 jBatch: Added settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)}, ${diffs.length} tokens`);
-}
-
-/**
- * Add insurance registration to existing settlement (or create new settlement)
- */
-export function batchAddInsurance(
-  jBatchState: JBatchState,
-  leftEntity: string,
-  rightEntity: string,
-  insuranceReg: InsuranceReg
-): void {
-  // Block if batch has pending broadcast
-  assertBatchNotPending(jBatchState, 'insurance');
-
-  // Validate entities are in canonical order
-  const [left, right] = isLeftEntity(leftEntity, rightEntity) ? [leftEntity, rightEntity] : [rightEntity, leftEntity];
-
-  // Find or create settlement
-  let existing = jBatchState.batch.settlements.find(
-    s => s.leftEntity === left && s.rightEntity === right
-  );
-
-  if (!existing) {
-    // Create empty settlement just for insurance
-    existing = {
-      leftEntity: left,
-      rightEntity: right,
-      diffs: [],
-      forgiveDebtsInTokenIds: [],
-      insuranceRegs: [],
-      sig: '',
-      entityProvider: '0x0000000000000000000000000000000000000000',
-      hankoData: '0x',
-      nonce: 0,
-    };
-    jBatchState.batch.settlements.push(existing);
-  }
-
-  if (!existing) {
-    throw new Error('Failed to create settlement for insurance registration');
-  }
-
-  existing.insuranceRegs.push(insuranceReg);
-  console.log(`📦 jBatch: Added insurance ${insuranceReg.insurer.slice(-4)}→${insuranceReg.insured.slice(-4)}, ${insuranceReg.limit} limit`);
 }
 
 /**
@@ -695,14 +638,7 @@ export interface BrowserVMBatchProcessor {
       collateralDiff: bigint;
       ondeltaDiff: bigint;
     }>,
-    forgiveDebtsInTokenIds?: number[],
-    insuranceRegs?: Array<{
-      insured: string;
-      insurer: string;
-      tokenId: number;
-      limit: bigint;
-      expiresAt: bigint;
-    }>
+    forgiveDebtsInTokenIds?: number[]
   ) => Promise<string>;
   getEntityProviderAddress?: () => string;
   getDepositoryAddress?: () => string;
@@ -753,9 +689,7 @@ export async function broadcastBatch(
       browserVM.setBlockTimestamp?.(timestamp);
 
       for (const settlement of jBatchState.batch.settlements) {
-        const hasChanges = settlement.diffs.length > 0 ||
-          settlement.forgiveDebtsInTokenIds.length > 0 ||
-          settlement.insuranceRegs.length > 0;
+        const hasChanges = settlement.diffs.length > 0 || settlement.forgiveDebtsInTokenIds.length > 0;
 
         if (hasChanges) {
           if (entityProviderAddress === '0x0000000000000000000000000000000000000000') {
@@ -840,9 +774,7 @@ export async function broadcastBatch(
     const { depository, provider } = await connectToEthereum(jurisdiction);
 
     for (const settlement of jBatchState.batch.settlements) {
-      const hasChanges = settlement.diffs.length > 0 ||
-        settlement.forgiveDebtsInTokenIds.length > 0 ||
-        settlement.insuranceRegs.length > 0;
+      const hasChanges = settlement.diffs.length > 0 || settlement.forgiveDebtsInTokenIds.length > 0;
       if (hasChanges) {
         if (entityProviderAddress === '0x0000000000000000000000000000000000000000') {
           console.warn(`⚠️ Settlement missing EntityProvider address (required for Hanko verification)`);

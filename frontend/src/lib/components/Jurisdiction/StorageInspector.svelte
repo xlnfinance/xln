@@ -93,7 +93,6 @@
     // - All entities with non-zero reserves
     // - All active debts
     // - All collaterals
-    // - All insurance lines
 
     // Mock data for now (replace with actual contract calls)
     reserves = [
@@ -101,15 +100,13 @@
         entity: '0x0000000000000000000000000000000000000000000000000000000000000002',
         tokenId: 1,
         amount: '1,000.00',
-        debts: 0,
-        insurance: 1
+        debts: 0
       },
       {
         entity: '0x0000000000000000000000000000000000000000000000000000000000000003',
         tokenId: 1,
         amount: '500.50',
-        debts: 2,
-        insurance: 0
+        debts: 2
       }
     ];
 
@@ -226,9 +223,9 @@
         </thead>
         <tbody>
           {#if loading}
-            <tr><td colspan="5" class="loading">Loading storage...</td></tr>
+            <tr><td colspan="4" class="loading">Loading storage...</td></tr>
           {:else if reserves.length === 0}
-            <tr><td colspan="5" class="empty">No reserves found</td></tr>
+            <tr><td colspan="4" class="empty">No reserves found</td></tr>
           {:else}
             {#each reserves as row}
               <tr>
@@ -237,8 +234,6 @@
                 <td class="amount">{row.amount}</td>
                 <td class:warn={row.debts > 0}>
                   {row.debts > 0 ? `🔴 ${row.debts}` : '✅'}
-                </td>
-                <td>
                 </td>
               </tr>
             {/each}

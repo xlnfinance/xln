@@ -426,7 +426,6 @@ export async function createRpcAdapter(
       rightEntity: string,
       diffs: SettlementDiff[],
       forgiveDebtsInTokenIds: number[] = [],
-      insuranceRegs: InsuranceReg[] = [],
       sig?: string
     ): Promise<JTxReceipt> {
       const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0;

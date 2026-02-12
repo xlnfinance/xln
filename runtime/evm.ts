@@ -93,20 +93,12 @@ export const DEPOSITORY_ABI = [
   'function prefundAccount(bytes32 fundingEntity, bytes32 counterpartyEntity, uint256 tokenId, uint256 amount) external returns (bool)',
   'function settle(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig) external returns (bool)',
   'function _reserves(bytes32 entity, uint256 tokenId) external view returns (uint256)',
-  // Insurance view functions
-  'function getInsuranceLines(bytes32 insured) external view returns (tuple(bytes32 insurer, uint256 tokenId, uint256 remaining, uint64 expiresAt)[])',
-  'function getInsuranceLinesCount(bytes32 insured) external view returns (uint256)',
-  'function getAvailableInsurance(bytes32 insured, uint256 tokenId) external view returns (uint256)',
   // Canonical J-Events (must match CANONICAL_J_EVENTS in jadapter/helpers.ts)
   'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
   'event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret)',
   'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments)',
   'event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed initialDisputeNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash)',
   // Note: AccountSettled is emitted via DELEGATECALL from Account.sol - parsed directly from logs
-  // Insurance events
-  'event InsuranceRegistered(bytes32 indexed insured, bytes32 indexed insurer, uint256 indexed tokenId, uint256 limit, uint64 expiresAt)',
-  'event InsuranceClaimed(bytes32 indexed insured, bytes32 indexed insurer, bytes32 indexed creditor, uint256 tokenId, uint256 amount)',
-  'event InsuranceExpired(bytes32 indexed insured, bytes32 indexed insurer, uint256 indexed tokenId, uint256 index)',
   // Debt events
   'event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex)',
   'event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex)',
