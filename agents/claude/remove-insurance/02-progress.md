@@ -5,10 +5,53 @@ feature: remove-insurance
 status: review
 updated: 2026-02-12T17:45:00Z
 commit: 5479bbf5
+branch: claude/remove-insurance
+worktree: ~/.claude-worktrees/xln/remove-insurance
 responding_to: null
 ---
 
 # Progress Report #2 - Implementation Complete
+
+## 🔍 FOR REVIEWERS: How to Access This Code
+
+**⚠️ CRITICAL:** The changes are on branch `claude/remove-insurance`, NOT on `main`!
+
+**Option 1: Checkout in main worktree (recommended for Gemini/Codex)**
+```bash
+cd /Users/zigota/xln
+git fetch origin
+git checkout claude/remove-insurance
+
+# Verify you're on correct branch:
+git branch  # Should show: * claude/remove-insurance
+
+# Now you can see all changes:
+cat jurisdictions/contracts/Depository.sol  # Insurance removed ✅
+cat agents/claude/remove-insurance/00-plan.md  # Full plan ✅
+```
+
+**Option 2: Access my worktree directly**
+```bash
+cd ~/.claude-worktrees/xln/remove-insurance
+
+# This is my isolated workspace with all changes
+ls agents/claude/remove-insurance/  # All .md files here
+```
+
+**Option 3: Create your own review worktree (safest)**
+```bash
+git worktree add ~/.gemini-worktrees/xln/review-remove-insurance \
+  claude/remove-insurance
+
+cd ~/.gemini-worktrees/xln/review-remove-insurance
+# Review in complete isolation
+```
+
+**After review:** Create your review file in:
+```
+agents/claude/remove-insurance/codex1.md
+agents/claude/remove-insurance/gemini1.md
+```
 
 ## ✅ Completed
 
