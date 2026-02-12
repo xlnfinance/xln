@@ -69,9 +69,6 @@ contract Depository is ReentrancyGuardLite {
   address public immutable admin;
   bool public emergencyPause;
 
-  // Insurance cursor - tracks iteration position per insured entity
-  mapping(bytes32 => uint256) public insuranceCursor;
-
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
@@ -344,7 +341,6 @@ contract Depository is ReentrancyGuardLite {
     bytes32 rightEntity,
     SettlementDiff[] memory diffs,
     uint[] memory forgiveDebtsInTokenIds,
-    InsuranceRegistration[] memory insuranceRegs,
     bytes memory sig
   ) public whenNotPaused nonReentrant returns (bool) {
     emit DebugSettleStart(leftEntity, rightEntity, sig.length, entityProvider);
@@ -357,7 +353,6 @@ contract Depository is ReentrancyGuardLite {
       rightEntity: rightEntity,
       diffs: diffs,
       forgiveDebtsInTokenIds: forgiveDebtsInTokenIds,
-      insuranceRegs: insuranceRegs,
       sig: sig,
       entityProvider: entityProvider,  // Use Depository's entityProvider for Hanko verification
       hankoData: "",
@@ -368,8 +363,12 @@ contract Depository is ReentrancyGuardLite {
     if (!Account.processSettlements(_reserves, _accounts, _collaterals, caller, settlements)) {
       return false;
     }
-    // Handle debt/insurance in Depository
-    _handleSettlementDebtAndInsurance(leftEntity, rightEntity, forgiveDebtsInTokenIds, insuranceRegs);
+    // Handle debt forgiveness in Depository
+    for (uint i = 0; i < forgiveDebtsInTokenIds.length; i++) {
+      uint tokenId = forgiveDebtsInTokenIds[i];
+      _forgiveDebtsBetweenEntities(leftEntity, rightEntity, tokenId);
+      _forgiveDebtsBetweenEntities(rightEntity, leftEntity, tokenId);
+    }
     return true;
   }
 
@@ -450,15 +449,19 @@ contract Depository is ReentrancyGuardLite {
       }
     }
 
-    // Delegate settlement diffs to Account library, handle debt/insurance in Depository
+    // Delegate settlement diffs to Account library, handle debt forgiveness in Depository
     if (batch.settlements.length > 0) {
       if (!Account.processSettlements(_reserves, _accounts, _collaterals, entityId, batch.settlements)) {
         completeSuccess = false;
       }
-      // Handle debt forgiveness and insurance registration (not in Account due to stack limits)
+      // Handle debt forgiveness (not in Account due to stack limits)
       for (uint i = 0; i < batch.settlements.length; i++) {
         Settlement memory s = batch.settlements[i];
-        _handleSettlementDebtAndInsurance(s.leftEntity, s.rightEntity, s.forgiveDebtsInTokenIds, s.insuranceRegs);
+        for (uint j = 0; j < s.forgiveDebtsInTokenIds.length; j++) {
+          uint tokenId = s.forgiveDebtsInTokenIds[j];
+          _forgiveDebtsBetweenEntities(s.leftEntity, s.rightEntity, tokenId);
+          _forgiveDebtsBetweenEntities(s.rightEntity, s.leftEntity, tokenId);
+        }
       }
     }
 
@@ -520,18 +523,6 @@ contract Depository is ReentrancyGuardLite {
 
 
   // Allowance, TransformerClause, ProofBody, InitialDisputeProof, FinalDisputeProof, Debt are in Types.sol
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  //                              INSURANCE
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  // InsuranceLine and InsuranceRegistration structs are in Types.sol
-
-  // insured entity => insurance lines (FIFO queue)
-  mapping(bytes32 => InsuranceLine[]) public insuranceLines;
-
-  event InsuranceRegistered(bytes32 indexed insured, bytes32 indexed insurer, uint256 indexed tokenId, uint256 limit, uint256 expiresAt);
-  event InsuranceClaimed(bytes32 indexed insured, bytes32 indexed insurer, bytes32 indexed creditor, uint256 tokenId, uint256 amount);
 
   // DebtSnapshot moved to DepositoryView.sol
 
@@ -803,14 +794,6 @@ contract Depository is ReentrancyGuardLite {
         amount -= payableAmount;
       }
 
-      // If reserves exhausted but debt remains, try insurance
-      if (amount > 0 && available == 0) {
-        uint256 insuranceRemaining = _claimFromInsurance(entity, creditor, tokenId, amount);
-        uint256 insurancePaid = amount - insuranceRemaining;
-        if (insurancePaid > 0) {
-          amount = insuranceRemaining;
-        }
-      }
 
       // Update debt state
       uint256 totalPaid = debt.amount - amount;
@@ -851,12 +834,11 @@ contract Depository is ReentrancyGuardLite {
     bytes32 leftEntity,
     bytes32 rightEntity,
     SettlementDiff[] memory diffs,
-    uint[] memory forgiveDebtsInTokenIds,
-    InsuranceRegistration[] memory insuranceRegs
+    uint[] memory forgiveDebtsInTokenIds
   ) public view returns (bytes32 hash, uint256 nonce, uint256 encodedMsgLength) {
     bytes memory ch_key = accountKey(leftEntity, rightEntity);
     nonce = _accounts[ch_key].cooperativeNonce;
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, ch_key, nonce, diffs, forgiveDebtsInTokenIds, insuranceRegs);
+    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, ch_key, nonce, diffs, forgiveDebtsInTokenIds);
     hash = keccak256(encoded_msg);
     encodedMsgLength = encoded_msg.length;
   }
@@ -913,37 +895,6 @@ contract Depository is ReentrancyGuardLite {
   }
 
 
-  // Handle debt forgiveness and insurance registration for settlements (separated from Account due to stack limits)
-  function _handleSettlementDebtAndInsurance(
-    bytes32 leftEntity,
-    bytes32 rightEntity,
-    uint[] memory forgiveDebtsInTokenIds,
-    InsuranceRegistration[] memory insuranceRegs
-  ) internal {
-    // Forgive debts
-    for (uint i = 0; i < forgiveDebtsInTokenIds.length; i++) {
-      uint tokenId = forgiveDebtsInTokenIds[i];
-      _forgiveDebtsBetweenEntities(leftEntity, rightEntity, tokenId);
-      _forgiveDebtsBetweenEntities(rightEntity, leftEntity, tokenId);
-    }
-
-    // Register insurance
-    for (uint i = 0; i < insuranceRegs.length; i++) {
-      InsuranceRegistration memory reg = insuranceRegs[i];
-      if (reg.insurer != leftEntity && reg.insurer != rightEntity) revert E7();
-      if (reg.insured != leftEntity && reg.insured != rightEntity) revert E7();
-      if (reg.insurer == reg.insured || reg.limit == 0) revert E2();
-      if (reg.expiresAt <= block.timestamp) revert E2();
-
-      insuranceLines[reg.insured].push(InsuranceLine({
-        insurer: reg.insurer,
-        tokenId: reg.tokenId,
-        remaining: reg.limit,
-        expiresAt: reg.expiresAt
-      }));
-      emit InsuranceRegistered(reg.insured, reg.insurer, reg.tokenId, reg.limit, reg.expiresAt);
-    }
-  }
 
   function _forgiveDebtsBetweenEntities(bytes32 debtor, bytes32 creditor, uint tokenId) internal {
     uint256 idx = _debtIndex[debtor][tokenId];
@@ -966,46 +917,6 @@ contract Depository is ReentrancyGuardLite {
     emit ReserveUpdated(entity, tokenId, _reserves[entity][tokenId]);
   }
 
-  // Claims from debtor's insurance lines in FIFO order
-  function _claimFromInsurance(bytes32 debtor, bytes32 creditor, uint256 tokenId, uint256 shortfall) internal returns (uint256 remaining) {
-    remaining = shortfall;
-    InsuranceLine[] storage lines = insuranceLines[debtor];
-    uint256 length = lines.length;
-    if (length == 0) return remaining;
-
-    uint256 cursor = insuranceCursor[debtor];
-    for (uint256 i = cursor; i < length && remaining > 0; i++) {
-      InsuranceLine storage line = lines[i];
-
-      // SECURITY FIX: Only advance cursor when line is actually used
-      // Skip expired/wrong-token lines WITHOUT advancing cursor
-      if (line.tokenId != tokenId || block.timestamp > line.expiresAt || line.remaining == 0) {
-        // Don't update cursor for skipped lines
-        continue;
-      }
-
-      uint256 insurerReserves = _reserves[line.insurer][tokenId];
-      uint256 claimAmount = line.remaining < insurerReserves ? line.remaining : insurerReserves;
-      if (claimAmount > remaining) claimAmount = remaining;
-      if (claimAmount == 0) continue;
-
-      _reserves[line.insurer][tokenId] -= claimAmount;
-      emit ReserveUpdated(line.insurer, tokenId, _reserves[line.insurer][tokenId]);
-      _increaseReserve(creditor, tokenId, claimAmount);
-      line.remaining -= claimAmount;
-      remaining -= claimAmount;
-      _addDebt(debtor, tokenId, line.insurer, claimAmount);
-      emit InsuranceClaimed(debtor, line.insurer, creditor, tokenId, claimAmount);
-
-      // ONLY update cursor when insurance actually claimed
-      cursor = i + 1;
-    }
-
-    // Only save cursor if it actually advanced (found valid insurance)
-    if (cursor > insuranceCursor[debtor]) {
-      insuranceCursor[debtor] = cursor;
-    }
-  }
 
   // ========== DISPUTE FUNCTIONS ==========
   /// @notice Start dispute - uses Account library
@@ -1161,7 +1072,7 @@ contract Depository is ReentrancyGuardLite {
     col.ondelta = 0;
   }
 
-  /// @notice Settle shortfall via reserves, insurance, then debt
+  /// @notice Settle shortfall via reserves, then debt
   function _settleShortfall(bytes32 debtor, bytes32 creditor, uint256 tokenId, uint256 amount) internal {
     if (amount == 0) return;
 
@@ -1174,9 +1085,6 @@ contract Depository is ReentrancyGuardLite {
     }
 
     uint256 remaining = amount - payAmount;
-    if (remaining == 0) return;
-
-    remaining = _claimFromInsurance(debtor, creditor, tokenId, remaining);
     if (remaining > 0) {
       _addDebt(debtor, tokenId, creditor, remaining);
       _syncDebtIndex(debtor, tokenId);
