@@ -690,7 +690,7 @@ async function applyFinalizedJEvent(
   // FUTURE J-EVENTS (when added to Solidity - handlers ready)
   // ═══════════════════════════════════════════════════════════════════════════
 
- else if (event.type === 'DebtCreated') {
+  } else if (event.type === 'DebtCreated') {
     const { debtor, creditor, tokenId, amount, debtIndex } = event.data;
     const tokenSymbol = getTokenSymbol(tokenId as number);
     const decimals = getTokenDecimals(tokenId as number);
