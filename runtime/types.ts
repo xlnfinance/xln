@@ -371,7 +371,6 @@ export type JurisdictionEvent =
       };
     })
   | (JEventMetadata & {
-      type: 'InsuranceClaimed';
       data: {
         insured: string;
         insurer: string;
@@ -397,7 +396,6 @@ export type JurisdictionEvent =
       };
     })
   | (JEventMetadata & {
-      type: 'InsuranceRegistered';
       data: {
         insured: string;
         insurer: string;
@@ -407,7 +405,6 @@ export type JurisdictionEvent =
       };
     })
   | (JEventMetadata & {
-      type: 'InsuranceExpired';
       data: {
         insured: string;
         insurer: string;

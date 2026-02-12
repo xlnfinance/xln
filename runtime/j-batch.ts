@@ -505,7 +505,7 @@ export function batchAddSettlement(
   }
 
   // Compress pure C2R settlements into collateralToReserve (saves calldata)
-  const c2rResult = detectPureC2R(diffs, forgiveDebtsInTokenIds, insuranceRegs);
+  const c2rResult = detectPureC2R(diffs, forgiveDebtsInTokenIds);
   if (c2rResult.isPureC2R && sig) {
     // Determine counterparty based on who is withdrawing
     const counterparty = c2rResult.withdrawer === 'left' ? rightEntity : leftEntity;
@@ -546,8 +546,6 @@ export function batchAddSettlement(
         existing.diffs.push(newDiff);
       }
     }
-    // Append new insurance registrations
-    existing.insuranceRegs.push(...insuranceRegs);
     // Append debt forgiveness (dedup)
     for (const tokenId of forgiveDebtsInTokenIds) {
       if (!existing.forgiveDebtsInTokenIds.includes(tokenId)) {
@@ -566,7 +564,6 @@ export function batchAddSettlement(
       rightEntity,
       diffs,
       forgiveDebtsInTokenIds,
-      insuranceRegs,
       sig: sig || '',
       entityProvider,
       hankoData,
@@ -574,8 +571,7 @@ export function batchAddSettlement(
     });
   }
 
-  const insuranceMsg = insuranceRegs.length > 0 ? `, ${insuranceRegs.length} insurance regs` : '';
-  console.log(`📦 jBatch: Added settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)}, ${diffs.length} tokens${insuranceMsg}`);
+  console.log(`📦 jBatch: Added settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)}, ${diffs.length} tokens`);
 }
 
 /**
