@@ -48,7 +48,9 @@
  */
 
 import type { Env, EntityReplica, EntityInput, AccountMachine } from './types';
+import { QUOTE_EXPIRY_MS, REFERENCE_TOKEN_ID } from './types';
 import { isLeftEntity } from './entity-id-utils';
+import { resolveEntityProposerId } from './state-helpers';
 
 // ═══════════════════════════════════════════════════════════════════════
 // Types
@@ -524,84 +526,147 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
 
 /**
  * Hub Rebalance Handler
- * Scans all accounts, matches net-spenders with net-receivers
+ * Bilateral quote-based rebalance flow. See docs/rebalance.md for full spec.
+ *
+ * Phase 1: Execute accepted quotes (deposit_collateral + fee collection)
+ * Phase 2: Send new quotes for accounts below softLimit or with pending requests
+ *
+ * Matching: configurable HNW (biggest first) or FIFO (oldest quote first)
  * Reference: 2019src.txt lines 2973-3114
  */
 async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<EntityInput[]> {
   const outputs: EntityInput[] = [];
-  // Removed verbose scan start log
+  const signerId = resolveEntityProposerId(_env, replica.entityId, 'hub-rebalance');
+  const now = _env.timestamp;
+  const strategy = replica.state.hubRebalanceConfig?.matchingStrategy || 'hnw';
 
-  const { deriveDelta } = await import('./account-utils');
+  // Static fee: hub computes from config. V1 = flat $5 USDT.
+  // TODO: server-side gas-aware fee computation
+  const computeFee = (_amount: bigint): bigint => 5_000_000n; // $5 USDT (6 decimals)
 
-  const tokenAccountMap = new Map<number, {
-    netSpenders: Array<{ entityId: string; debt: bigint; collateral: bigint }>;
-    netReceivers: Array<{ entityId: string; requested: bigint }>;
-  }>();
+  // Collect all actionable accounts
+  type ActionItem = {
+    counterpartyId: string;
+    tokenId: number;
+    amount: bigint;
+    quote?: { quoteId: number; feeAmount: bigint; feeTokenId: number };
+  };
+  const toExecute: ActionItem[] = [];
+  const toQuote: ActionItem[] = [];
 
   for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
-    for (const [tokenId, delta] of accountMachine.deltas.entries()) {
-      const weAreLeft = isLeftEntity(replica.entityId, counterpartyId);
-      const derived = deriveDelta(delta, weAreLeft);
-
-      if (derived.delta < 0n) {
-        const debtAmount = -derived.delta;
-        if (debtAmount > 0n) {
-          if (!tokenAccountMap.has(tokenId)) {
-            tokenAccountMap.set(tokenId, { netSpenders: [], netReceivers: [] });
-          }
-          tokenAccountMap.get(tokenId)!.netSpenders.push({
-            entityId: counterpartyId,
-            debt: debtAmount,
-            collateral: delta.collateral,
-          });
-        }
-      }
-
-      const requestedRebalance = accountMachine.requestedRebalance.get(tokenId);
-      if (requestedRebalance && requestedRebalance > 0n) {
-        if (!tokenAccountMap.has(tokenId)) {
-          tokenAccountMap.set(tokenId, { netSpenders: [], netReceivers: [] });
-        }
-        tokenAccountMap.get(tokenId)!.netReceivers.push({
-          entityId: counterpartyId,
-          requested: requestedRebalance,
+    // Phase 1: Check for accepted, non-expired quotes → ready to execute
+    const quote = accountMachine.activeRebalanceQuote;
+    if (quote && quote.accepted && now <= quote.quoteId + QUOTE_EXPIRY_MS) {
+      // Check hub has enough reserve
+      const currentReserve = replica.state.reserves.get(String(quote.tokenId)) || 0n;
+      if (currentReserve >= quote.amount) {
+        toExecute.push({
+          counterpartyId,
+          tokenId: quote.tokenId,
+          amount: quote.amount,
+          quote: { quoteId: quote.quoteId, feeAmount: quote.feeAmount, feeTokenId: quote.feeTokenId },
         });
+      } else {
+        console.log(`⚠️  Insufficient reserve for ${counterpartyId.slice(-4)}: need ${quote.amount}, have ${currentReserve}`);
+      }
+      continue; // Don't re-quote while we have an active accepted quote
+    }
+
+    // Clear expired quotes
+    if (quote && now > quote.quoteId + QUOTE_EXPIRY_MS) {
+      accountMachine.activeRebalanceQuote = undefined;
+    }
+
+    // Phase 2a: Check pending manual requests → need quote
+    const pendingReq = accountMachine.pendingRebalanceRequest;
+    if (pendingReq) {
+      const currentReserve = replica.state.reserves.get(String(pendingReq.tokenId)) || 0n;
+      if (currentReserve >= pendingReq.targetAmount) {
+        toQuote.push({
+          counterpartyId,
+          tokenId: pendingReq.tokenId,
+          amount: pendingReq.targetAmount,
+        });
+      }
+      continue;
+    }
+
+    // Phase 2b: Check absolute policy triggers (collateral < softLimit)
+    for (const [tokenId, policy] of accountMachine.rebalancePolicy.entries()) {
+      // Skip manual mode
+      if (policy.softLimit === policy.hardLimit) continue;
+
+      const delta = accountMachine.deltas.get(tokenId);
+      if (!delta) continue;
+
+      const currentCollateral = delta.collateral;
+      if (currentCollateral < policy.softLimit) {
+        const needed = policy.softLimit - currentCollateral;
+        const currentReserve = replica.state.reserves.get(String(tokenId)) || 0n;
+        if (currentReserve >= needed) {
+          // Don't send new quote if there's already an active one for this token
+          if (quote && quote.tokenId === tokenId) continue;
+          toQuote.push({ counterpartyId, tokenId, amount: needed });
+        }
       }
     }
   }
 
-  for (const [tokenId, { netSpenders, netReceivers }] of tokenAccountMap.entries()) {
-    if (netSpenders.length === 0 || netReceivers.length === 0) continue;
+  // Sort by strategy
+  if (strategy === 'hnw') {
+    toExecute.sort((a, b) => Number(b.amount - a.amount));
+    toQuote.sort((a, b) => Number(b.amount - a.amount));
+  } else {
+    // fifo: sort by quoteId ascending (oldest first)
+    toExecute.sort((a, b) => (a.quote?.quoteId || 0) - (b.quote?.quoteId || 0));
+    // For quotes, order doesn't matter much (all new)
+  }
 
-    const totalDebt = netSpenders.reduce((sum, s) => sum + s.debt, 0n);
-    const totalRequested = netReceivers.reduce((sum, r) => sum + r.requested, 0n);
-    const rebalanceAmount = totalDebt < totalRequested ? totalDebt : totalRequested;
-
-    if (rebalanceAmount === 0n) continue;
-
-    console.log(`🔄 REBALANCE OPPORTUNITY token ${tokenId}: ${rebalanceAmount}`);
-
-    const message = `🔄 REBALANCE OPPORTUNITY (Token ${tokenId}):
-Spenders: ${netSpenders.length} (debt: ${totalDebt})
-Receivers: ${netReceivers.length} (requested: ${totalRequested})
-Match: ${rebalanceAmount} (${Number(rebalanceAmount * 100n) / Number(totalDebt || 1n)}%)`;
-
+  // Execute accepted quotes: deposit_collateral + j_broadcast + fee
+  for (const item of toExecute) {
     outputs.push({
       entityId: replica.entityId,
-      signerId: 'system',
-      entityTxs: [{
-        type: 'chatMessage',
-        data: {
-          message,
-          timestamp: replica.state.timestamp,
-          metadata: {
-            type: 'REBALANCE_OPPORTUNITY',
-            tokenId,
-            rebalanceAmount: rebalanceAmount.toString(),
+      signerId,
+      entityTxs: [
+        {
+          type: 'deposit_collateral',
+          data: {
+            counterpartyId: item.counterpartyId,
+            tokenId: item.tokenId,
+            amount: item.amount,
+            rebalanceQuoteId: item.quote!.quoteId,
+            rebalanceFeeTokenId: item.quote!.feeTokenId,
+            rebalanceFeeAmount: item.quote!.feeAmount,
           },
+        },
+        {
+          type: 'j_broadcast',
+          data: {},
+        },
+      ],
+    });
+    console.log(`✅ Executing rebalance: ${item.amount} token ${item.tokenId} → ${item.counterpartyId.slice(-4)} (fee: ${item.quote!.feeAmount})`);
+  }
+
+  // Send new quotes for accounts that need rebalancing
+  for (const item of toQuote) {
+    const fee = computeFee(item.amount);
+    outputs.push({
+      entityId: replica.entityId,
+      signerId,
+      entityTxs: [{
+        type: 'sendRebalanceQuote',
+        data: {
+          counterpartyEntityId: item.counterpartyId,
+          tokenId: item.tokenId,
+          amount: item.amount,
+          feeTokenId: REFERENCE_TOKEN_ID,
+          feeAmount: fee,
         },
       }],
     });
+    console.log(`💰 Sent quote: ${item.amount} token ${item.tokenId} → ${item.counterpartyId.slice(-4)} (fee: ${fee})`);
   }
 
   return outputs;

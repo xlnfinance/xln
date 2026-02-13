@@ -5,23 +5,32 @@
  * Reference: 2019src.txt lines 233-239 (reserveToChannel batchAdd)
  * Reference: Depository.sol reserveToCollateral() (line 1035)
  *
+ * Enhanced: optional rebalance fee collection (atomic with deposit)
+ * See docs/rebalance.md for fee flow spec
+ *
  * Flow:
  * 1. Entity validates sufficient reserve
  * 2. Add R→C operation to jBatch
- * 3. Wait for jBatch crontab to broadcast
- * 4. On-chain event triggers bilateral account state update
+ * 3. If rebalanceQuoteId present: validate + collect fee via bilateral offdelta shift
+ * 4. Wait for jBatch crontab to broadcast
+ * 5. On-chain event triggers bilateral account state update
  */
 
-import type { EntityState, EntityTx, EntityInput } from '../../types';
+import type { EntityState, EntityTx, EntityInput, AccountTx } from '../../types';
+import { QUOTE_EXPIRY_MS } from '../../types';
 import { cloneEntityState, addMessage, canonicalAccountKey } from '../../state-helpers';
+
+type MempoolOp = { accountId: string; tx: AccountTx };
 
 export async function handleDepositCollateral(
   entityState: EntityState,
-  entityTx: Extract<EntityTx, { type: 'deposit_collateral' }>
-): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: any[] }> {
-  const { counterpartyId, tokenId, amount } = entityTx.data;
+  entityTx: Extract<EntityTx, { type: 'deposit_collateral' }>,
+  currentTimestamp: number = 0
+): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: any[]; mempoolOps?: MempoolOp[] }> {
+  const { counterpartyId, tokenId, amount, rebalanceQuoteId, rebalanceFeeTokenId, rebalanceFeeAmount } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
+  const mempoolOps: MempoolOp[] = [];
 
   // Validate: Do we have enough reserve?
   const currentReserve = entityState.reserves.get(String(tokenId)) || 0n;
@@ -33,12 +42,62 @@ export async function handleDepositCollateral(
   }
 
   // Validate: Does account exist?
-  // Account keyed by counterparty ID
   if (!entityState.accounts.has(counterpartyId)) {
     addMessage(newState,
       `❌ Cannot deposit collateral: no account with ${counterpartyId.slice(-4)}`
     );
     return { newState, outputs };
+  }
+
+  // Validate rebalance fee if present
+  if (rebalanceQuoteId !== undefined) {
+    const account = newState.accounts.get(counterpartyId);
+    const quote = account?.activeRebalanceQuote;
+
+    if (!quote) {
+      addMessage(newState, `❌ Rebalance fee: no active quote for ${counterpartyId.slice(-4)}`);
+      return { newState, outputs };
+    }
+    if (quote.quoteId !== rebalanceQuoteId) {
+      addMessage(newState, `❌ Rebalance fee: quoteId mismatch (expected ${quote.quoteId}, got ${rebalanceQuoteId})`);
+      return { newState, outputs };
+    }
+    if (!quote.accepted) {
+      addMessage(newState, `❌ Rebalance fee: quote not accepted`);
+      return { newState, outputs };
+    }
+    if (currentTimestamp > quote.quoteId + QUOTE_EXPIRY_MS) {
+      // Quote expired — clear it
+      account!.activeRebalanceQuote = undefined;
+      addMessage(newState, `❌ Rebalance fee: quote expired (age: ${currentTimestamp - quote.quoteId}ms)`);
+      return { newState, outputs };
+    }
+    if (rebalanceFeeAmount !== quote.feeAmount) {
+      addMessage(newState, `❌ Rebalance fee: amount mismatch (expected ${quote.feeAmount}, got ${rebalanceFeeAmount})`);
+      return { newState, outputs };
+    }
+
+    // Fee collection: inject a direct_payment accountTx to shift offdelta (user→hub)
+    // This goes into the bilateral account mempool for the next frame
+    if (rebalanceFeeAmount && rebalanceFeeAmount > 0n && rebalanceFeeTokenId !== undefined) {
+      mempoolOps.push({
+        accountId: counterpartyId,
+        tx: {
+          type: 'direct_payment',
+          data: {
+            recipientEntityId: entityState.entityId, // hub receives
+            tokenId: rebalanceFeeTokenId,
+            amount: rebalanceFeeAmount,
+            description: `rebalance fee (quoteId: ${rebalanceQuoteId})`,
+          },
+        },
+      });
+    }
+
+    // Clear the quote (consumed)
+    account!.activeRebalanceQuote = undefined;
+
+    console.log(`💰 Rebalance fee collected: ${rebalanceFeeAmount} token ${rebalanceFeeTokenId} (quoteId: ${rebalanceQuoteId})`);
   }
 
   // CRITICAL: Do NOT update state here - wait for SettlementProcessed event from j-watcher
@@ -67,7 +126,6 @@ export async function handleDepositCollateral(
   console.log(`✅ deposit_collateral: Added to jBatch for ${entityState.entityId.slice(-4)}`);
   console.log(`   Counterparty: ${counterpartyId.slice(-4)}`);
   console.log(`   Token: ${tokenId}, Amount: ${amount}`);
-  console.log(`   ⚠️  Remember to send j_broadcast tx to commit batch to J-Machine`);
 
-  return { newState, outputs };
+  return { newState, outputs, mempoolOps };
 }

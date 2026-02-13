@@ -659,6 +659,9 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     onChainSettlementNonce: account.onChainSettlementNonce,
     pendingWithdrawals: new Map(account.pendingWithdrawals), // Phase 2: Clone withdrawal tracking
     requestedRebalance: new Map(account.requestedRebalance), // Phase 3: Clone rebalance hints
+    rebalancePolicy: new Map(account.rebalancePolicy || []),
+    activeRebalanceQuote: account.activeRebalanceQuote ? { ...account.activeRebalanceQuote } : undefined,
+    pendingRebalanceRequest: account.pendingRebalanceRequest ? { ...account.pendingRebalanceRequest } : undefined,
   };
 
   // Add optional properties if they exist
