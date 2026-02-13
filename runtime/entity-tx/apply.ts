@@ -351,6 +351,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
           frameHistory: [],
           pendingWithdrawals: new Map(),
           requestedRebalance: new Map(),
+          rebalancePolicy: new Map(),
           locks: new Map(), // HTLC: Initialize empty locks
           swapOffers: new Map(), // Swap: Initialize empty offers
           // Bilateral J-event consensus
@@ -718,7 +719,7 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
 
     if (entityTx.type === 'deposit_collateral') {
       const { handleDepositCollateral } = await import('./handlers/deposit-collateral');
-      return await handleDepositCollateral(entityState, entityTx);
+      return await handleDepositCollateral(entityState, entityTx, env.timestamp);
     }
 
     if (entityTx.type === 'reserve_to_reserve') {
@@ -824,6 +825,34 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       }
 
       console.log(`💸 DIRECT-PAYMENT RETURN: outputs.length=${outputs.length}`);
+
+      return { newState, outputs, mempoolOps };
+    }
+
+    // === REBALANCE QUOTE (Hub → bilateral account) ===
+    if (entityTx.type === 'sendRebalanceQuote') {
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
+      const { counterpartyEntityId, tokenId, amount, feeTokenId, feeAmount } = entityTx.data;
+
+      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      if (!accountMachine) {
+        console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for rebalance quote`);
+        return { newState: entityState, outputs: [] };
+      }
+
+      const accountTx: AccountTx = {
+        type: 'rebalance_quote',
+        data: { tokenId, amount, feeTokenId, feeAmount },
+      };
+      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+
+      // Trigger processing
+      const firstValidator = entityState.config.validators[0];
+      if (firstValidator) {
+        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
+      }
 
       return { newState, outputs, mempoolOps };
     }

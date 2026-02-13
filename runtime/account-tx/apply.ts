@@ -12,6 +12,10 @@ import { handleReserveToCollateral } from './handlers/reserve-to-collateral';
 import { handleRequestWithdrawal } from './handlers/request-withdrawal';
 import { handleApproveWithdrawal } from './handlers/approve-withdrawal';
 import { handleRequestRebalance } from './handlers/request-rebalance';
+import { handleSetRebalancePolicy } from './handlers/set-rebalance-policy';
+import { handleRebalanceRequest } from './handlers/rebalance-request';
+import { handleRebalanceQuote } from './handlers/rebalance-quote';
+import { handleRebalanceAccept } from './handlers/rebalance-accept';
 import { handleJSync } from './handlers/j-sync';
 import { handleHtlcLock } from './handlers/htlc-lock';
 // htlc_resolve: unified handler imported dynamically in switch case
@@ -93,6 +97,18 @@ export async function processAccountTx(
 
     case 'request_rebalance':
       return handleRequestRebalance(accountMachine, accountTx as Extract<AccountTx, { type: 'request_rebalance' }>);
+
+    case 'set_rebalance_policy':
+      return handleSetRebalancePolicy(accountMachine, accountTx as Extract<AccountTx, { type: 'set_rebalance_policy' }>);
+
+    case 'rebalance_request':
+      return handleRebalanceRequest(accountMachine, accountTx as Extract<AccountTx, { type: 'rebalance_request' }>);
+
+    case 'rebalance_quote':
+      return handleRebalanceQuote(accountMachine, accountTx as Extract<AccountTx, { type: 'rebalance_quote' }>, currentTimestamp);
+
+    case 'rebalance_accept':
+      return handleRebalanceAccept(accountMachine, accountTx as Extract<AccountTx, { type: 'rebalance_accept' }>, currentTimestamp);
 
     case 'j_sync':
       return handleJSync(accountMachine, accountTx as Extract<AccountTx, { type: 'j_sync' }>);

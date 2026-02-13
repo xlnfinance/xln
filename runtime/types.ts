@@ -607,6 +607,10 @@ export type EntityTx =
         counterpartyId: string; // Which account to add collateral to
         tokenId: number;
         amount: bigint;
+        // Optional: rebalance fee collection (atomic with deposit)
+        rebalanceQuoteId?: number;      // References accepted quote
+        rebalanceFeeTokenId?: number;   // Fee token (1 = USDT)
+        rebalanceFeeAmount?: bigint;    // Must match accepted quote
       };
     }
   | {
@@ -640,6 +644,17 @@ export type EntityTx =
         counterpartyEntityId: string;
         tokenId: number;
         amount: bigint;
+      };
+    }
+  | {
+      // Hub sends rebalance quote to bilateral account (pushes rebalance_quote AccountTx)
+      type: 'sendRebalanceQuote';
+      data: {
+        counterpartyEntityId: string;
+        tokenId: number;
+        amount: bigint;
+        feeTokenId: number;
+        feeAmount: bigint;
       };
     }
   | {
@@ -1055,6 +1070,15 @@ export interface AccountMachine {
 
   // Rebalancing hints (Phase 3: Hub coordination)
   requestedRebalance: Map<number, bigint>; // tokenId → amount entity wants rebalanced (credit→collateral)
+
+  // Rebalance policy (per-token soft/hard limits + max acceptable fee)
+  rebalancePolicy: Map<number, RebalancePolicy>; // tokenId → policy
+
+  // Active rebalance quote (one at a time, quoteId = timestamp)
+  activeRebalanceQuote?: RebalanceQuote;
+
+  // Pending manual rebalance request (user-initiated, awaiting hub quote)
+  pendingRebalanceRequest?: { tokenId: number; targetAmount: bigint };
 }
 
 // Account frame structure for bilateral consensus (renamed from AccountBlock)
@@ -1269,6 +1293,37 @@ export type AccountTx =
         amount: bigint; // Requested collateral rebalance amount
       };
     }
+  | {
+      type: 'set_rebalance_policy';
+      data: {
+        tokenId: number;
+        softLimit: bigint;         // Auto-trigger below this
+        hardLimit: bigint;         // Never exceed
+        maxAcceptableFee: bigint;  // Auto-accept quotes with fee ≤ this (USDT)
+      };
+    }
+  | {
+      type: 'rebalance_request';
+      data: {
+        tokenId: number;
+        targetAmount: bigint;      // Desired collateral amount (manual rebalance)
+      };
+    }
+  | {
+      type: 'rebalance_quote';
+      data: {
+        tokenId: number;
+        amount: bigint;            // Collateral to deposit
+        feeTokenId: number;        // Fee denomination (1 = USDT)
+        feeAmount: bigint;         // Computed fee
+      };
+    }
+  | {
+      type: 'rebalance_accept';
+      data: {
+        quoteId: number;           // = timestamp of quote frame
+      };
+    }
   // === HTLC TRANSACTION TYPES ===
   | {
       type: 'htlc_lock';
@@ -1461,7 +1516,39 @@ export interface EntityState {
 
   // 📈 Pending swap fill ratios (orderbook → dispute arguments)
   pendingSwapFillRatios?: Map<string, number>; // key = "accountId:offerId"
+
+  // 🔄 Rebalance Configuration - Hub-level matching strategy
+  hubRebalanceConfig?: HubRebalanceConfig;
 }
+
+/** Hub-level rebalance config (matching strategy, not per-account) */
+export interface HubRebalanceConfig {
+  matchingStrategy: 'hnw' | 'fifo'; // hnw = biggest first, fifo = oldest quote first
+}
+
+/** Per-token rebalance policy (stored per-token in AccountMachine) */
+export interface RebalancePolicy {
+  softLimit: bigint;         // Auto-trigger threshold
+  hardLimit: bigint;         // Never exceed
+  maxAcceptableFee: bigint;  // Auto-accept quotes with fee ≤ this (USDT)
+}
+
+/** Active rebalance quote (one per account, quoteId = env.timestamp) */
+export interface RebalanceQuote {
+  quoteId: number;      // = env.timestamp when quote frame was applied
+  tokenId: number;
+  amount: bigint;
+  feeTokenId: number;
+  feeAmount: bigint;
+  accepted: boolean;    // true if auto-accepted or manually accepted
+}
+
+// Rebalance constants
+export const REFERENCE_TOKEN_ID = 1;               // USDT (stable, 6 decimals)
+export const DEFAULT_SOFT_LIMIT = 500_000_000n;     // $500 USDT (6 decimals)
+export const DEFAULT_HARD_LIMIT = 10_000_000_000n;  // $10,000 USDT
+export const DEFAULT_MAX_FEE = 15_000_000n;         // $15 USDT
+export const QUOTE_EXPIRY_MS = 300_000;             // 5 minutes
 
 /** Aggregated swap order entry at E-Machine level */
 export interface SwapBookEntry {
