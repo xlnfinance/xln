@@ -111,7 +111,7 @@
  *    ├─ prevSignatures: string[]       // ACK their previous frame
  *    ├─ newAccountFrame: AccountFrame  // Our proposed frame
  *    ├─ newSignatures: string[]        // Signatures on new frame
- *    └─ disputeProofNonce: number       // cooperativeNonce at dispute proof signing
+ *    └─ disputeProofNonce: number       // nonce at dispute proof signing
  *
  * 5. AccountFrame (Agreed bilateral state - like a block)
  *    ├─ height: number                 // Frame number in bilateral chain
@@ -203,9 +203,9 @@
  *   - EntityTx, AccountTx, RuntimeTx (transaction = state change request)
  *   - Used for actual state modifications
  *
- * **cooperativeNonce** (on-chain dispute domain):
- *   - proofHeader.cooperativeNonce — incremented per message (propose/ACK)
- *   - Used in dispute proof bodies for on-chain settlement ordering
+ * **nonce** (unified on-chain nonce):
+ *   - proofHeader.nonce — unified nonce for all on-chain operations
+ *   - Used in dispute proofs and settlements for on-chain ordering
  *   - Replay protection is handled by frame chain (height + prevFrameHash), NOT counters
  *
  * ═══════════════════════════════════════════════════════════════════════
@@ -426,7 +426,7 @@ export type JurisdictionEvent =
       data: {
         sender: string;
         counterentity: string;
-        disputeNonce: string;
+        nonce: string;
         proofbodyHash: string;
         initialArguments: string;
       };
@@ -436,7 +436,7 @@ export type JurisdictionEvent =
       data: {
         sender: string;
         counterentity: string;
-        initialDisputeNonce: string;
+        initialNonce: string;
         initialProofbodyHash: string;
         finalProofbodyHash: string;
       };
@@ -1004,8 +1004,7 @@ export interface AccountMachine {
   proofHeader: {
     fromEntity: string; // Our entity ID
     toEntity: string; // Counterparty entity ID
-    cooperativeNonce: number;
-    disputeNonce: number;
+    nonce: number;  // Unified on-chain nonce (replaces cooperativeNonce + disputeNonce)
   };
   // Simple proofBody for internal use (computed on demand from deltas/locks/swapOffers)
   proofBody: {
@@ -1035,19 +1034,18 @@ export interface AccountMachine {
   counterpartyFrameHanko?: HankoString;      // Their hanko on current frame (bilateral consensus)
 
   currentDisputeProofHanko?: HankoString;              // My hanko on dispute proof (for J-machine enforcement)
-  currentDisputeProofCooperativeNonce?: number;        // Cooperative nonce used in currentDisputeProofHanko
+  currentDisputeProofNonce?: number;                    // Nonce used in currentDisputeProofHanko
   currentDisputeProofBodyHash?: string;                // ProofBodyHash used in currentDisputeProofHanko
   counterpartyDisputeProofHanko?: HankoString;         // Their hanko on dispute proof (ready for disputes)
-  counterpartyDisputeProofCooperativeNonce?: number;   // Cooperative nonce used in counterpartyDisputeProofHanko
+  counterpartyDisputeProofNonce?: number;               // Nonce used in counterpartyDisputeProofHanko
   counterpartyDisputeProofBodyHash?: string;           // ProofBodyHash that counterparty signed (MUST match dispute)
   counterpartySettlementHanko?: HankoString;           // Their hanko on settlement operations
-  disputeProofNoncesByHash?: Record<string, number>;   // ProofBodyHash → cooperative nonce (local + counterparty)
+  disputeProofNoncesByHash?: Record<string, number>;   // ProofBodyHash → nonce (local + counterparty)
   disputeProofBodiesByHash?: Record<string, any>;      // ProofBodyHash → ProofBodyStruct (for dispute finalize)
 
-  // ON-CHAIN SETTLEMENT NONCE: Tracks the cooperativeNonce stored on-chain
-  // Starts at 0, incremented when settlement succeeds (NOT on R2C)
-  // DISTINCT from proofHeader.cooperativeNonce (which is local-only frame consensus)
-  // SYMMETRIC: Both sides increment via workspace status check in j-events.ts
+  // ON-CHAIN NONCE: Tracks the nonce stored on-chain
+  // Starts at 0, set to signedNonce when settlement/dispute succeeds
+  // DISTINCT from proofHeader.nonce (which tracks what value to use next)
   onChainSettlementNonce: number;
 
   // SETTLEMENT WORKSPACE: Structured negotiation area (replaces legacy fields)
@@ -1057,10 +1055,9 @@ export interface AccountMachine {
   activeDispute?: {
     startedByLeft: boolean;           // Who initiated dispute (from on-chain)
     initialProofbodyHash: string;     // Hash committed in disputeStart
-    initialDisputeNonce: number;      // Dispute nonce from disputeStart
+    initialNonce: number;             // Unified nonce from disputeStart (replaces initialDisputeNonce)
     disputeTimeout: number;           // Block number when timeout expires
-    initialCooperativeNonce: number;  // Cooperative nonce PASSED to disputeStart (for hash match)
-    onChainCooperativeNonce: number;  // On-chain nonce (may differ from initial)
+    onChainNonce: number;             // On-chain nonce at dispute start (replaces initialCooperativeNonce + onChainCooperativeNonce)
     initialArguments?: string;        // On-chain initialArguments from disputeStart
   };
 
@@ -1140,13 +1137,14 @@ export interface AccountInput {
     hanko?: HankoString;                 // For approve (signer's hanko)
     memo?: string;                       // For propose/update/reject
     version?: number;                    // Version being approved/executed
+    nonceAtSign?: number;                // Settlement nonce counterparty signed with (approve)
   };
 
   // LEGACY (will be removed):
   prevSignatures?: string[];         // ACK for their frame (LEGACY)
   newSignatures?: string[];          // Signatures on new frame (LEGACY)
 
-  disputeProofNonce?: number;        // cooperativeNonce at which dispute proof was signed (explicit, replaces counter-1 hack)
+  disputeProofNonce?: number;        // nonce at which dispute proof was signed (explicit, replaces counter-1 hack)
 }
 
 // Delta structure for per-token account state (based on old_src)
@@ -1223,10 +1221,10 @@ export interface SettlementWorkspace {
   broadcastByLeft: boolean;
 
   // Nonce tracking (for invalidating old dispute proofs)
-  cooperativeNonceAtSign?: number;            // coopNonce when signing
+  nonceAtSign?: number;                       // nonce when signing
 
   // Post-settlement dispute proofs (nonce+1)
-  // Settlement increments on-chain cooperativeNonce. Old dispute proofs become invalid.
+  // Settlement increments on-chain nonce. Old dispute proofs become invalid.
   // These pre-signed proofs at nonce+1 become active after settlement passes.
   // proofBodyHash is unchanged by settlement (settlement modifies ondelta/collateral,
   // not offdelta — and proofBody only hashes offdelta).
@@ -1234,7 +1232,7 @@ export interface SettlementWorkspace {
     leftHanko?: HankoString;                  // Left's dispute hanko at nonce+1
     rightHanko?: HankoString;                 // Right's dispute hanko at nonce+1
     proofBodyHash: string;                    // Same as pre-settlement (offdelta unchanged)
-    cooperativeNonce: number;                 // = onChainSettlementNonce + 1
+    nonce: number;                            // = onChainSettlementNonce + 1 (replaces cooperativeNonce)
   };
 }
 
@@ -1520,6 +1518,7 @@ export interface EntityState {
 
   // 📦 J-Batch system - accumulates operations for on-chain submission (typed in j-batch.ts)
   jBatchState?: any; // JBatchState - avoid circular import
+  batchHistory?: any[]; // CompletedBatch[] - last 20 completed batch records
 
 
   // 🔐 Cryptography - RSA-OAEP keys for HTLC envelope encryption
@@ -1610,7 +1609,7 @@ export interface LockBookEntry {
 }
 
 /** Hash type for entity-level signing */
-export type HashType = 'entityFrame' | 'accountFrame' | 'dispute' | 'settlement' | 'profile';
+export type HashType = 'entityFrame' | 'accountFrame' | 'dispute' | 'settlement' | 'profile' | 'jBatch';
 
 /** Hash with type info for entity-level signing */
 export interface HashToSign {
@@ -1879,7 +1878,10 @@ export type JTx =
       entityId: string;
       data: {
         batch: any; // JBatch structure from j-batch.ts
-        hankoSignature?: string;
+        hankoSignature?: string; // Quorum hanko (attached post-commit by entity consensus)
+        batchHash?: string; // Hash of encoded batch (for hanko signing)
+        encodedBatch?: string; // ABI-encoded batch (for on-chain submission)
+        entityNonce?: number; // Entity nonce used for this batch
         batchSize: number;
         signerId?: string;
       };
