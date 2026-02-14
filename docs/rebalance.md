@@ -4,9 +4,12 @@
 
 ## what
 
-Hub automatically converts unsecured credit into on-chain collateral for users.
-When a user's collateral drops below their configured threshold, the hub deposits
-more from its reserves via the jurisdiction (L1). Users pay a fee in USDT.
+Hub automatically manages on-chain collateral across all bilateral accounts:
+- **R→C** (reserve→collateral): deposits collateral for users with unsecured credit
+- **C→R** (collateral→reserve): withdraws excess collateral where hub has net positive position
+
+Both directions execute in a single `processBatch` on-chain. Users pay a fee for R→C.
+C→R uses the existing settlement workspace flow (no new types needed).
 
 ## why
 
@@ -445,18 +448,6 @@ Both sides compute identically because the feeAmount comes from the stored quote
 
 ---
 
-## defaults
-
-```typescript
-const REFERENCE_TOKEN_ID = 1              // USDT (6 decimals)
-const DEFAULT_SOFT_LIMIT = 500_000_000n   // $500
-const DEFAULT_HARD_LIMIT = 10_000_000_000n // $10,000
-const DEFAULT_MAX_FEE = 15_000_000n       // $15
-const QUOTE_EXPIRY_MS = 300_000           // 5 minutes
-```
-
----
-
 ## files
 
 | file | change |
@@ -472,10 +463,129 @@ const QUOTE_EXPIRY_MS = 300_000           // 5 minutes
 
 ---
 
+## C→R flow (collateral→reserve via settlement)
+
+### when does hub withdraw?
+
+Hub has excess collateral when its net position is positive (user owes hub).
+This is idle capital that can be recycled to fund R→C deposits elsewhere.
+
+```
+totalDelta = ondelta + offdelta
+hubIsLeft:  hubDebt = max(0, -totalDelta)   // hub pays when delta < 0
+hubIsRight: hubDebt = max(0, totalDelta)    // hub pays when delta > 0
+
+excess = collateral - hubDebt  (if excess > 0, hub can withdraw)
+```
+
+### settlement workspace lifecycle
+
+C→R reuses the existing settlement system. No new AccountTx types needed.
+
+```
+1. Hub crontab detects excess → generates settle_propose EntityTx
+     → creates settlementWorkspace with C→R diffs
+     → workspace.status = 'awaiting_counterparty'
+
+2. Counterparty auto-approves (inline, during processSettleAction):
+     → canAutoApproveWorkspace() checks diffs are safe
+     → signs settlement hanko via signHashesAsSingleEntity()
+     → workspace stores counterparty hanko (leftHanko or rightHanko)
+
+3. Hub crontab detects counterparty hanko → generates settle_execute EntityTx
+     → batchAddSettlement() adds to jBatch with counterparty hanko only
+     → batch-level hanko covers Hub authorization on-chain
+     → workspace.status = 'submitted' (NOT deleted yet)
+
+4. On-chain processBatch executes → emits AccountSettled event
+
+5. j_event_claim processes event → tryFinalizeAccountJEvents():
+     → detects workspace with signed hanko(s)
+     → increments onChainSettlementNonce
+     → activates post-settlement dispute proof
+     → deletes workspace (cleanup)
+```
+
+Key design: Hub does NOT sign its own settlement hanko. On-chain reads:
+- **Batch-level hanko** for Hub authorization (covers all operations)
+- **Per-settlement hanko** for counterparty authorization (one per C→R)
+
+### workspace status transitions
+
+```
+draft → awaiting_counterparty → submitted → (deleted by j-event)
+                                    ↑
+                  counterparty hanko stored inline
+```
+
+The `submitted` status prevents premature deletion. The workspace must survive
+until the on-chain event confirms execution, at which point the nonce increments
+and the workspace is cleared by `tryFinalizeAccountJEvents`.
+
+---
+
+## hub crontab: 3 processes
+
+The hub crontab runs 3 processes in order:
+
+### process 1: detect C→R targets
+
+```
+for each bilateral account:
+  compute excess collateral (collateral - hubDebt)
+  if excess > threshold AND no active settlementWorkspace:
+    generate settle_propose EntityTx with C→R diffs
+    → counterparty auto-approves inline (signs hanko)
+```
+
+### process 2: execute C→R settlements
+
+```
+for each bilateral account:
+  if settlementWorkspace exists:
+    check counterparty hanko is present
+    generate settle_execute EntityTx
+    → adds to jBatch (collateralToReserve[])
+```
+
+### process 3: execute R→C deposits (with effective reserve)
+
+```
+effectiveReserve = actualReserve + sum(signed C→R amounts in pending jBatch)
+
+for each bilateral account:
+  compute uncollateralizedCredit = max(0, hubDebt - collateral)
+  if uncollateralizedCredit > softLimit:
+    if accepted quote exists and not expired:
+      generate deposit_collateral EntityTx
+      → adds to jBatch (reserveToCollateral[])
+    else:
+      send rebalance_quote if no active unexpired quote
+```
+
+**Effective reserve:** When computing whether hub can afford R→C deposits,
+C→R withdrawals in the same batch are counted as "almost available" reserve.
+This enables recycling excess from one account to fund deposits for another
+in a single processBatch.
+
+---
+
+## defaults
+
+```typescript
+const REFERENCE_TOKEN_ID = 1                     // USDC (18 decimals in registry)
+const DEFAULT_SOFT_LIMIT = 500n * 10n ** 18n     // $500
+const DEFAULT_HARD_LIMIT = 10_000n * 10n ** 18n  // $10,000
+const DEFAULT_MAX_FEE = 15n * 10n ** 18n         // $15
+const QUOTE_EXPIRY_MS = 300_000                  // 5 minutes
+```
+
+---
+
 ## future (V2+)
 
 - **relative policy**: target % of capacity, with hysteresis band
-- **C2R pull**: hub withdraws from net-senders to fund deposits (2019 pattern)
+- **deferred fee**: collect fee after on-chain settlement confirms (true atomicity)
 - **batch settlement**: pack multiple deposits into one L1 tx (gas efficiency)
 - **cross-hub rebalance**: hub requests collateral from another hub
 - **dynamic fee tiers**: VIP rates for high-volume users
