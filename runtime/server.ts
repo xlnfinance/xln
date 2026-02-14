@@ -284,7 +284,7 @@ const getAccountMachine = (env: Env, entityId: string, counterpartyId: string): 
 };
 
 const getHubMeshHealth = (env: Env) => {
-  const hubIds = relayStore.relayStore.activeHubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS);
+  const hubIds = relayStore.activeHubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS);
   const pairStatuses: Array<{
     left: string;
     right: string;
@@ -798,7 +798,7 @@ const resetServerDebugState = (env: Env | null, preserveHubs = true): { remainin
 
   // Preserve full hub profiles (runtimeId + encryption keys) so immediate post-reset
   // routing does not fail with P2P_NO_PUBKEY before fresh gossip arrives.
-  const hubSet = new Set(relayStore.relayStore.activeHubEntityIds.map((id) => id.toLowerCase()));
+  const hubSet = new Set(relayStore.activeHubEntityIds.map((id) => id.toLowerCase()));
   const preservedHubProfiles = preserveHubs
     ? new Map(
       Array.from(relayStore.gossipProfiles.entries()).filter(([entityId]) =>
@@ -908,7 +908,7 @@ const triggerColdReset = async (
   const preservedRuntimeIds = new Set<string>();
   if (preserveHubs) {
     if (localRuntimeKey) preservedRuntimeIds.add(localRuntimeKey);
-    for (const hubEntityId of relayStore.relayStore.activeHubEntityIds) {
+    for (const hubEntityId of relayStore.activeHubEntityIds) {
       const entry = relayStore.gossipProfiles.get(String(hubEntityId).toLowerCase());
       const hintedRuntime = normalizeRuntimeKey(
         entry?.profile?.runtimeId
