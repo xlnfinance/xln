@@ -437,6 +437,8 @@ const buildRouteOutputKey = (output: RoutedEntityInput): string => {
       const height = typeof data?.height === 'number' ? data.height : '';
       const from = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
       const to = typeof data?.toEntityId === 'string' ? data.toEntityId : '';
+      // Handles both field names: settle_propose uses counterpartyEntityId,
+      // deposit_collateral uses counterpartyId — both must produce unique keys.
       const cp = typeof data?.counterpartyEntityId === 'string' ? data.counterpartyEntityId
         : typeof data?.counterpartyId === 'string' ? data.counterpartyId : '';
       return `${tx.type}:${height}:${from}:${to}:${cp}`;
