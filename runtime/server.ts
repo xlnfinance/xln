@@ -1753,7 +1753,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           error: 'No faucet hub available',
           code: 'FAUCET_HUBS_EMPTY',
           profiles: env.gossip?.getProfiles?.()?.length || 0,
-          relayStore.activeHubEntityIds,
+          activeHubEntityIds: relayStore.activeHubEntityIds,
         }), { status: 503, headers });
       }
       const hubEntityId = hubs[0].entityId;
@@ -1954,7 +1954,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           details: {
             endpoint: '/api/faucet/offchain',
             profiles: allProfiles.length,
-            relayStore.activeHubEntityIds,
+            activeHubEntityIds: relayStore.activeHubEntityIds,
             gossipHubCount: gossipHubs.length,
             hint: 'No faucet-capable hubs in server active set or gossip cache',
           },
@@ -1963,7 +1963,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           error: 'No faucet hub available in gossip',
           code: 'FAUCET_HUBS_EMPTY',
           profiles: allProfiles.length,
-          relayStore.activeHubEntityIds,
+          activeHubEntityIds: relayStore.activeHubEntityIds,
           gossipHubCount: gossipHubs.length,
         }), { status: 503, headers });
       }
