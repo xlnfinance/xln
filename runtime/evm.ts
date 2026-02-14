@@ -88,7 +88,7 @@ export const DEPOSITORY_ABI = [
   'function debugBulkFundEntities() external',
   'function reserveToReserve(bytes32 fromEntity, bytes32 toEntity, uint256 tokenId, uint256 amount) external returns (bool)',
   'function processBatch(bytes encodedBatch, address entityProvider, bytes hankoData, uint256 nonce) external returns (bool)',
-  'function unsafeProcessBatch(bytes32 entity, tuple(tuple(uint256 tokenId, uint256 amount)[] flashloans, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements, tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts, tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 finalCooperativeNonce, uint256 initialDisputeNonce, uint256 finalDisputeNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations, tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(address transformer, bytes32 secret)[] revealSecrets, uint256 hub_id) batch) external returns (bool)',
+  'function unsafeProcessBatch(bytes32 entity, tuple(tuple(uint256 tokenId, uint256 amount)[] flashloans, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve, tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral, tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements, tuple(bytes32 counterentity, uint256 nonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts, tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations, tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve, tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken, tuple(address transformer, bytes32 secret)[] revealSecrets, uint256 hub_id) batch) external returns (bool)',
   'function entityNonces(address) view returns (uint256)',
   'function prefundAccount(bytes32 fundingEntity, bytes32 counterpartyEntity, uint256 tokenId, uint256 amount) external returns (bool)',
   'function settle(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig) external returns (bool)',
@@ -96,8 +96,8 @@ export const DEPOSITORY_ABI = [
   // Canonical J-Events (must match CANONICAL_J_EVENTS in jadapter/helpers.ts)
   'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
   'event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret)',
-  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments)',
-  'event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed initialDisputeNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash)',
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes initialArguments)',
+  'event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed initialNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash)',
   // Note: AccountSettled is emitted via DELEGATECALL from Account.sol - parsed directly from logs
   // Debt events
   'event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex)',
@@ -816,60 +816,11 @@ export const setBrowserVMJurisdiction = (env: any, depositoryAddress: string, br
   console.log('[BrowserVM] rawBrowserVM:', !!rawBrowserVM, 'resolvedBrowserVM:', !!resolvedBrowserVM, 'hasGetProvider:', !!rawBrowserVM?.getProvider);
 
   // Store browserVM instance in env (isolated per-runtime)
+  // NOTE: J-event forwarding is handled by JAdapter.startWatching() — not here.
+  // This function only stores the BrowserVM reference and sets up DEFAULT_JURISDICTIONS.
   if (resolvedBrowserVM && env) {
     env.browserVM = resolvedBrowserVM;
-    console.log('[BrowserVM] Stored browserVM instance in env (isolated), env.browserVM now:', !!env.browserVM);
-
-    // Set up J-event forwarding: BrowserVM events → enqueueRuntimeInput()
-    if (resolvedBrowserVM.onAny && !env._browserVMEventSubscribed) {
-      env._browserVMEventSubscribed = true;
-      resolvedBrowserVM.onAny((events: any[]) => {
-        // Group events by entity
-        const eventsByEntity = new Map<string, any[]>();
-        for (const event of events) {
-          // Only process canonical J-events
-          if (!['ReserveUpdated', 'SecretRevealed', 'AccountSettled', 'DisputeStarted', 'DebtCreated'].includes(event.name)) continue;
-
-          // Extract entityId from event args
-          const entityId = event.args?.entity || event.args?.entityId || event.args?.leftEntity;
-          if (!entityId) continue;
-
-          const key = String(entityId).toLowerCase();
-          if (!eventsByEntity.has(key)) eventsByEntity.set(key, []);
-          eventsByEntity.get(key)!.push({
-            type: event.name,
-            data: event.args,
-            blockNumber: event.blockNumber || 0,
-            transactionHash: event.transactionHash || '0x',
-          });
-        }
-
-        // Build entityInputs for each affected entity
-        const entityInputs: any[] = [];
-        for (const [entityId, entityEvents] of eventsByEntity) {
-          entityInputs.push({
-            entityId,
-            signerId: 'j-event',
-            entityTxs: [{
-              type: 'j_event',
-              data: { events: entityEvents }
-            }]
-          });
-        }
-
-        if (entityInputs.length > 0) {
-          void import('./runtime')
-            .then(({ enqueueRuntimeInput }) => {
-              enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs });
-              console.log(`🔗 BrowserVM → ${entityInputs.length} entities enqueued for J-event processing`);
-            })
-            .catch((error) => {
-              console.warn('[BrowserVM] Failed to enqueue J-events via runtime ingress:', error);
-            });
-        }
-      });
-      console.log('[BrowserVM] J-event forwarding enabled (events → enqueueRuntimeInput)');
-    }
+    console.log('[BrowserVM] Stored browserVM instance in env (isolated)');
   } else {
     console.warn('[BrowserVM] FAILED to store: resolvedBrowserVM=', !!resolvedBrowserVM, 'env=', !!env);
   }
