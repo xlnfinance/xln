@@ -640,8 +640,43 @@ export async function runRebalanceScenario(): Promise<void> {
     const totalDelta = delta ? delta.ondelta + delta.offdelta : 0n;
     const hubDebt = delta ? (hubIsLeft ? (totalDelta < 0n ? -totalDelta : 0n) : (totalDelta > 0n ? totalDelta : 0n)) : 0n;
     const uncollateralized = delta ? (hubDebt > delta.collateral ? hubDebt - delta.collateral : 0n) : 0n;
-    console.log(`  Hub↔${user.name}: collateral=${delta?.collateral}, outCol=${derived?.outCollateral}, uncollateralized=${uncollateralized}, ws=${acc?.settlementWorkspace?.status || 'none'}`);
+    const nonce = acc?.onChainSettlementNonce || 0;
+    console.log(`  Hub↔${user.name}: collateral=${delta?.collateral}, outCol=${derived?.outCollateral}, uncollateralized=${uncollateralized}, nonce=${nonce}, ws=${acc?.settlementWorkspace?.status || 'none'}`);
   }
+
+  // ── EXPLICIT NONCE ASSERTIONS ──
+  // C→R settlements (Alice, Charlie) must have incremented nonce to 1
+  // R→C deposits (Bob, Dave) don't use settlement workspace → nonce stays 0
+  for (const user of [alice, charlie]) {
+    const acc = hubFinal.accounts.get(user.id);
+    const nonce = acc?.onChainSettlementNonce || 0;
+    assert(nonce >= 1, `Hub↔${user.name} nonce should be >= 1 after C→R (got ${nonce})`, env);
+  }
+  for (const user of [bob, dave]) {
+    const acc = hubFinal.accounts.get(user.id);
+    const nonce = acc?.onChainSettlementNonce || 0;
+    // R→C uses deposit_collateral, not settlement — nonce unchanged
+    console.log(`  ✅ Hub↔${user.name} nonce=${nonce} (R→C, no settlement nonce change expected)`);
+  }
+
+  // ── WORKSPACE CLEANUP ASSERTIONS ──
+  for (const user of [alice, bob, charlie, dave]) {
+    const acc = hubFinal.accounts.get(user.id);
+    assert(!acc?.settlementWorkspace, `Hub↔${user.name} workspace should be cleared (got status=${acc?.settlementWorkspace?.status})`, env);
+  }
+
+  // ── COUNTERPARTY NONCE ASSERTIONS ──
+  // Verify the counterparty side also incremented nonce (fixes Q5)
+  for (const user of [alice, charlie]) {
+    const [, userReplica] = findReplica(env, user.id);
+    const userAcc = userReplica.state.accounts.get(hub.id);
+    const userNonce = userAcc?.onChainSettlementNonce || 0;
+    assert(userNonce >= 1, `${user.name}↔Hub counterparty nonce should be >= 1 after C→R (got ${userNonce})`, env);
+    const userWs = userAcc?.settlementWorkspace;
+    assert(!userWs, `${user.name}↔Hub counterparty workspace should be cleared (got status=${userWs?.status})`, env);
+  }
+
+  console.log('  ✅ All nonce + workspace assertions passed');
 
   console.log('\n' + '═'.repeat(80));
   console.log('  REBALANCE SCENARIO COMPLETE');
