@@ -238,8 +238,7 @@ export function buildInitialDisputeProof(
   initialArguments: string = '0x'
 ): {
   counterentity: string;
-  cooperativeNonce: number;
-  disputeNonce: number;
+  nonce: number;
   proofbodyHash: string;
   sig: string;
   initialArguments: string;
@@ -248,8 +247,7 @@ export function buildInitialDisputeProof(
 
   return {
     counterentity: accountMachine.proofHeader.toEntity,
-    cooperativeNonce: accountMachine.proofHeader.cooperativeNonce,
-    disputeNonce: accountMachine.proofHeader.disputeNonce,
+    nonce: accountMachine.proofHeader.nonce,
     proofbodyHash: proofBodyHash,
     sig: counterpartySignature,
     initialArguments,
@@ -260,7 +258,7 @@ export function buildInitialDisputeProof(
  * Encode dispute message for signing (matches Account.sol verifyDisputeProofHanko)
  *
  * MessageType.DisputeProof = 1
- * Format: abi.encode(MessageType.DisputeProof, depository, ch_key, cooperativeNonce, disputeNonce, proofbodyHash)
+ * Format: abi.encode(MessageType.DisputeProof, depository, account_key, nonce, proofbodyHash)
  *
  * The depository address binds the proof to a specific chain+depository for replay protection.
  */
@@ -271,7 +269,7 @@ export function encodeDisputeMessage(
 ): string {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
 
-  // Channel key is canonical (left:right)
+  // Account key is canonical (left:right)
   const leftEntity = accountMachine.leftEntity;
   const rightEntity = accountMachine.rightEntity;
   const chKey = ethers.solidityPacked(
@@ -283,13 +281,12 @@ export function encodeDisputeMessage(
   const MESSAGE_TYPE_DISPUTE_PROOF = 1;
 
   return abiCoder.encode(
-    ['uint256', 'address', 'bytes', 'uint256', 'uint256', 'bytes32'],
+    ['uint256', 'address', 'bytes', 'uint256', 'bytes32'],
     [
       MESSAGE_TYPE_DISPUTE_PROOF,
       depositoryAddress,
       chKey,
-      accountMachine.proofHeader.cooperativeNonce,
-      accountMachine.proofHeader.disputeNonce,
+      accountMachine.proofHeader.nonce,
       proofBodyHash,
     ]
   );
@@ -309,9 +306,9 @@ export function createDisputeProofHash(
 }
 
 /**
- * Create dispute proof hash with explicit cooperativeNonce.
+ * Create dispute proof hash with explicit nonce.
  * Used for nonce+1 pre-signing during settlement: after a settlement is applied
- * on-chain, cooperativeNonce is incremented. Proofs signed at the old nonce
+ * on-chain, nonce is incremented. Proofs signed at the old nonce
  * become invalid. Pre-signing at nonce+1 ensures valid dispute proofs exist
  * immediately after settlement.
  *
@@ -323,8 +320,7 @@ export function createDisputeProofHashWithNonce(
   accountMachine: AccountMachine,
   proofBodyHash: string,
   depositoryAddress: string,
-  cooperativeNonce: number,
-  disputeNonce?: number,
+  nonce: number,
 ): string {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   const chKey = ethers.solidityPacked(
@@ -333,13 +329,12 @@ export function createDisputeProofHashWithNonce(
   );
   const MESSAGE_TYPE_DISPUTE_PROOF = 1;
   const encodedMessage = abiCoder.encode(
-    ['uint256', 'address', 'bytes', 'uint256', 'uint256', 'bytes32'],
+    ['uint256', 'address', 'bytes', 'uint256', 'bytes32'],
     [
       MESSAGE_TYPE_DISPUTE_PROOF,
       depositoryAddress,
       chKey,
-      cooperativeNonce,
-      disputeNonce ?? accountMachine.proofHeader.disputeNonce,
+      nonce,
       proofBodyHash,
     ]
   );
@@ -366,7 +361,7 @@ export function getDisputeDelayBlocks(configValue: number): number {
 /**
  * Create settlement hash for bilateral signature with explicit nonce
  * Matches Account.sol CooperativeUpdate encoding
- * @param nonce The on-chain cooperativeNonce (NOT proofHeader.cooperativeNonce)
+ * @param nonce The on-chain nonce for cooperative settlement
  *
  * The depository address binds the settlement to a specific chain+depository for replay protection.
  */
@@ -382,25 +377,25 @@ export function createSettlementHashWithNonce(
   depositoryAddress: string,
   nonce: number
 ): string {
-  // Channel key is canonical (left:right)
-  const channelKey = ethers.solidityPacked(
+  // Account key is canonical (left:right)
+  const accountKey = ethers.solidityPacked(
     ['bytes32', 'bytes32'],
     [accountMachine.leftEntity, accountMachine.rightEntity]
   );
 
-  // Match Account.sol CooperativeUpdate encoding
+  // Match Account.sol CooperativeUpdate encoding exactly:
+  // abi.encode(MessageType.CooperativeUpdate, address(this), ch_key, s.nonce, s.diffs, s.forgiveDebtsInTokenIds)
   const MESSAGE_TYPE_COOPERATIVE_UPDATE = 0;
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   const encodedMsg = abiCoder.encode(
-    ['uint256', 'address', 'bytes', 'uint256', 'tuple(uint256,int256,int256,int256,int256)[]', 'uint256[]', 'tuple(bytes32,bytes32,uint256,uint256,uint256)[]'],
+    ['uint256', 'address', 'bytes', 'uint256', 'tuple(uint256,int256,int256,int256,int256)[]', 'uint256[]'],
     [
       MESSAGE_TYPE_COOPERATIVE_UPDATE,
       depositoryAddress,
-      channelKey,
+      accountKey,
       nonce,
       diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]),
-      [], // forgiveDebtsInTokenIds (empty for now)
-      [], // subChannelUpdates (empty for now)
+      [], // forgiveDebtsInTokenIds
     ]
   );
 

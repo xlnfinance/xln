@@ -11,9 +11,9 @@
  */
 
 import type { Env, EntityInput, EntityReplica, SettlementDiff } from '../types';
-import { getAvailableJurisdictions, setBrowserVMJurisdiction } from '../evm';
-import { BrowserVMProvider } from '../jadapter';
-import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, getProcess, getApplyRuntimeInput } from './helpers';
+import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, getProcess, getApplyRuntimeInput, processJEvents as processJEventsHelper, converge as convergeHelper, syncChain as syncChainHelper } from './helpers';
+import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig, registerEntities as bootRegisterEntities } from './boot';
+import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../runtime-ascii';
 import { createGossipLayer } from '../networking/gossip';
 import { userAutoApprove, canAutoApproveWorkspace } from '../entity-tx/handlers/settle';
@@ -135,114 +135,35 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   // Ensure signer keys BEFORE entity registration (needed to compute board hash)
   ensureSignerKeysFromSeed(env, ['2', '3'], 'settle');
 
-  // Initialize BrowserVM
-  const browserVM = new BrowserVMProvider();
-  await browserVM.init();
-  env.browserVM = browserVM;
-  const depositoryAddress = browserVM.getDepositoryAddress();
-  const entityProviderAddress = browserVM.getEntityProviderAddress();
-  setBrowserVMJurisdiction(env, depositoryAddress, browserVM);
-
-  // Register entities with EntityProvider for Hanko signature verification
-  // Use signers 2 and 3 (entity 1 is reserved for foundation in EntityProvider)
-  if (browserVM.registerEntitiesWithSigners) {
-    console.log('[SETTLE] Registering entities with EntityProvider...');
-    const entityNumbers = await browserVM.registerEntitiesWithSigners(['2', '3']);
-    console.log(`[SETTLE] ✅ Registered entities: [${entityNumbers.join(', ')}]`);
+  // Setup JAdapter (browservm or rpc, depending on JADAPTER_MODE)
+  let jadapter: JAdapter;
+  try {
+    jadapter = getScenarioJAdapter(env);
+  } catch {
+    jadapter = await ensureJAdapter(env);
+    const jReplica = createJReplica(env, JURISDICTION, jadapter.addresses.depository);
+    (jReplica as any).jadapter = jadapter;
+    (jReplica as any).depositoryAddress = jadapter.addresses.depository;
+    (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+    jadapter.startWatching(env);
   }
-
-  // Create JAdapter from existing BrowserVM (unified interface)
-  const { createBrowserVMAdapter } = await import('../jadapter/browservm');
-  const { ethers } = await import('ethers');
-  const { BrowserVMEthersProvider } = await import('../jadapter/browservm-ethers-provider');
-  const bvmProvider = new BrowserVMEthersProvider(browserVM);
-  const bvmSigner = new ethers.Wallet('0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80', bvmProvider as any);
-  const jadapter = await createBrowserVMAdapter(
-    { mode: 'browservm', chainId: 31337 },
-    bvmProvider as any,
-    bvmSigner as any,
-    browserVM as any,
-  );
-
-  // Create J-Replica with JAdapter
-  env.jReplicas.set(JURISDICTION, {
-    name: JURISDICTION,
-    blockNumber: 0n,
-    stateRoot: new Uint8Array(32),
-    mempool: [],
-    blockDelayMs: 100,
-    lastBlockTimestamp: env.timestamp,
-    position: { x: 0, y: 600, z: 0 },
-    depositoryAddress,
-    entityProviderAddress,
-    contracts: { depository: depositoryAddress, entityProvider: entityProviderAddress },
-    jadapter,
-  });
-  env.activeJurisdiction = JURISDICTION;
-
-  // Start JAdapter watcher (feeds J-events → runtime mempool)
-  jadapter.startWatching(env);
 
   // Initialize gossip
   env.gossip = createGossipLayer();
 
-  // Create entities: Alice and Hub
-  // Use entity numbers 2 and 3 (entity 1 is reserved for foundation in EntityProvider)
-  const ALICE_ID = '0x' + '2'.padStart(64, '0');
-  const HUB_ID = '0x' + '3'.padStart(64, '0');
+  const jurisdiction = createJurisdictionConfig(JURISDICTION, jadapter.addresses.depository, jadapter.addresses.entityProvider);
+
+  // Register entities: Alice(signer=2) and Hub(signer=3)
+  const registered = await bootRegisterEntities(env, jadapter, [
+    { name: 'Alice', signer: '2', position: { x: -30, y: -30, z: 0 } },
+    { name: 'Hub',   signer: '3', position: { x: 30, y: -30, z: 0 } },
+  ], jurisdiction);
+
+  const ALICE_ID = registered[0].id;
+  const HUB_ID = registered[1].id;
 
   ENTITY_NAME_MAP.set(ALICE_ID, 'Alice');
   ENTITY_NAME_MAP.set(HUB_ID, 'Hub');
-
-  const jurisdiction = {
-    name: JURISDICTION,
-    chainId: 31337,
-    address: 'browservm://', // BrowserVM doesn't use RPC
-    entityProviderAddress,
-    depositoryAddress,
-  };
-
-  // Create Alice (left of jurisdiction) - entity #2, signer '2'
-  await applyRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica' as const,
-      entityId: ALICE_ID,
-      signerId: '2',
-      data: {
-        isProposer: true,
-        position: { x: -30, y: -30, z: 0 },
-        config: {
-          mode: 'proposer-based' as const,
-          threshold: 1n,
-          validators: ['2'],
-          shares: { '2': 1n },
-          jurisdiction
-        }
-      }
-    }],
-    entityInputs: []
-  });
-
-  // Create Hub (right of jurisdiction) - entity #3, signer '3'
-  await applyRuntimeInput(env, {
-    runtimeTxs: [{
-      type: 'importReplica' as const,
-      entityId: HUB_ID,
-      signerId: '3',
-      data: {
-        isProposer: true,
-        position: { x: 30, y: -30, z: 0 },
-        config: {
-          mode: 'proposer-based' as const,
-          threshold: 1n,
-          validators: ['3'],
-          shares: { '3': 1n },
-          jurisdiction
-        }
-      }
-    }],
-    entityInputs: []
-  });
 
   console.log(`✅ Created Alice (${ALICE_ID.slice(-4)}) and Hub (${HUB_ID.slice(-4)})`);
 
@@ -250,8 +171,6 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     description: 'Alice and Hub entities initialized',
     phase: 'setup'
   });
-
-  // JAdapter.startWatching() handles J-events (setup at line 185)
 
   // Mint reserves
   await process(env, [{
@@ -557,16 +476,20 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     await process(env);
   }
 
+  // Broadcast the jBatch to chain
+  await process(env, [{
+    entityId: ALICE_ID,
+    signerId: '2',
+    entityTxs: [{ type: 'j_broadcast', data: {} }]
+  }]);
+
+  // Sync chain events — poll JAdapter + process events through runtime
+  await syncChainHelper(env, 5);
+
   const aliceState = findReplica(env, ALICE_ID)[1].state;
   assert(!aliceState.accounts.get(HUB_ID)?.settlementWorkspace, 'Workspace should be cleared after execute', env);
-  // With JAdapter.submitTx(), jBatch is broadcast immediately post-save.
-  // By the time we check here, the batch was already processed on-chain and cleared.
-  // Verify it was executed (batch cleared = success) rather than still pending.
-  const batchPending = aliceState.jBatchState?.pendingBroadcast ?? false;
-  const batchSettlements = aliceState.jBatchState?.batch?.settlements?.length ?? 0;
-  assert(!batchPending || batchSettlements === 0, 'jBatch should be cleared or broadcast after immediate submit', env);
 
-  console.log(`✅ Settlement executed via JAdapter (batch cleared: ${batchSettlements === 0})`);
+  console.log(`✅ Settlement executed + on-chain confirmed`);
 
   snap(env, 'Settlement Executed', {
     description: 'Settlement added to jBatch for on-chain commit',

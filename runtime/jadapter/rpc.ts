@@ -682,41 +682,91 @@ export async function createRpcAdapter(
           return { success: true };
         }
 
-        const sid = signerId ?? jTx.data.signerId;
-        if (!sid) {
-          return { success: false, error: `Missing signerId for batch from ${jTx.entityId.slice(-4)}` };
-        }
-
-        const depositoryAddr = addresses.depository;
         const entityProviderAddr = addresses.entityProvider;
-        const resolvedChainId = BigInt(config.chainId || (await provider.getNetwork()).chainId);
 
-        // Validate settlement signatures
+        // Validate settlement signatures + entityProvider
         for (const settlement of jTx.data.batch.settlements ?? []) {
-          settlement.entityProvider = entityProviderAddr;
+          if (!settlement.entityProvider || settlement.entityProvider === '0x0000000000000000000000000000000000000000') {
+            settlement.entityProvider = entityProviderAddr;
+          }
           if (settlement.diffs?.length > 0 && (!settlement.sig || settlement.sig === '0x')) {
             return { success: false, error: `Settlement missing hanko sig` };
           }
         }
 
-        const encodedBatch = encodeJBatch(jTx.data.batch);
+        // Use pre-provided encoded batch + hanko (from entity consensus) or sign locally
+        let encodedBatch: string;
+        let hankoData: string;
+        let nextNonce: bigint;
         const normalizedId = normalizeEntityId(jTx.entityId);
-        const entityAddress = ethers.getAddress(`0x${normalizedId.slice(-40)}`);
-        const currentNonce = await depository['entityNonces']?.(entityAddress) ?? 0n;
-        const nextNonce = BigInt(currentNonce) + 1n;
-        const batchHash = computeBatchHankoHash(resolvedChainId, depositoryAddr, encodedBatch, nextNonce);
 
-        console.log(`🔐 [JAdapter:rpc] Signing hanko: entity=${normalizedId.slice(-4)} nonce=${nextNonce} chainId=${resolvedChainId}`);
+        if (jTx.data.hankoSignature && jTx.data.encodedBatch && jTx.data.entityNonce) {
+          // Entity consensus already signed — use pre-provided hanko
+          encodedBatch = jTx.data.encodedBatch;
+          hankoData = jTx.data.hankoSignature;
+          nextNonce = BigInt(jTx.data.entityNonce);
+          console.log(`🔐 [JAdapter:rpc] Using consensus hanko: nonce=${nextNonce}`);
+        } else {
+          // Fallback: single-signer sign locally
+          const sid = signerId ?? jTx.data.signerId;
+          if (!sid) {
+            return { success: false, error: `Missing signerId for batch from ${jTx.entityId.slice(-4)}` };
+          }
 
-        const { signHashesAsSingleEntity } = await import('../hanko-signing');
-        const hankos = await signHashesAsSingleEntity(env, normalizedId, sid, [batchHash]);
-        const hankoData = hankos[0];
-        if (!hankoData) {
-          return { success: false, error: 'Failed to build batch hanko signature' };
+          const depositoryAddr = addresses.depository;
+          const resolvedChainId = BigInt(config.chainId || (await provider.getNetwork()).chainId);
+          encodedBatch = encodeJBatch(jTx.data.batch);
+          const entityAddress = ethers.getAddress(`0x${normalizedId.slice(-40)}`);
+          const currentNonce = await depository['entityNonces']?.(entityAddress) ?? 0n;
+          nextNonce = BigInt(currentNonce) + 1n;
+          const batchHash = computeBatchHankoHash(resolvedChainId, depositoryAddr, encodedBatch, nextNonce);
+
+          console.log(`🔐 [JAdapter:rpc] Local signing: entity=${normalizedId.slice(-4)} nonce=${nextNonce}`);
+          const { signHashesAsSingleEntity } = await import('../hanko-signing');
+          const hankos = await signHashesAsSingleEntity(env, normalizedId, sid, [batchHash]);
+          hankoData = hankos[0]!;
+          if (!hankoData) {
+            return { success: false, error: 'Failed to build batch hanko signature' };
+          }
         }
 
         try {
           console.log(`📦 [JAdapter:rpc] processBatch (${getBatchSize(jTx.data.batch)} ops) nonce=${nextNonce}`);
+
+          // Pre-flight: staticCall to decode revert reason before sending real tx
+          try {
+            await depository['processBatch']!.staticCall(encodedBatch, entityProviderAddr, hankoData, nextNonce, {
+              gasLimit: 5000000,
+            });
+          } catch (simErr: any) {
+            // Decode custom errors (E1-E7) from revert data
+            const revertData = simErr?.data ?? simErr?.error?.data ?? simErr?.info?.error?.data;
+            let errDetail = '';
+            if (revertData && revertData !== '0x') {
+              const errorSigs: Record<string, string> = {
+                '0xd551aa22': 'E1()', '0x5765d571': 'E2()', '0x4e0b9e8f': 'E3()',
+                '0x899ef10d': 'E4()', '0x6b8b4ac3': 'E5()', '0x56e9b103': 'E6()', '0xb83dc242': 'E7()',
+              };
+              const sig = typeof revertData === 'string' ? revertData.slice(0, 10) : '';
+              const errName = errorSigs[sig] || `unknown(${sig})`;
+              // Decode Error(string) if present
+              let decoded = '';
+              if (sig === '0x08c379a0' && typeof revertData === 'string') {
+                try {
+                  const reason = ethers.AbiCoder.defaultAbiCoder().decode(['string'], '0x' + revertData.slice(10));
+                  decoded = ` reason="${reason[0]}"`;
+                } catch { }
+              }
+              errDetail = `${errName}${decoded}`;
+              console.error(`🔍 [JAdapter:rpc] staticCall revert: ${errDetail} data=${typeof revertData === 'string' ? revertData.slice(0, 40) : revertData}...`);
+            } else {
+              errDetail = simErr?.reason ?? simErr?.message ?? String(simErr);
+              console.error(`🔍 [JAdapter:rpc] staticCall revert: ${errDetail}`);
+            }
+            // Bail — do NOT submit a known-bad batch on-chain
+            return { success: false, error: `staticCall revert: ${errDetail}` };
+          }
+
           const tx = await depository['processBatch']!(encodedBatch, entityProviderAddr, hankoData, nextNonce, {
             gasLimit: 5000000,
           });
@@ -754,9 +804,9 @@ export async function createRpcAdapter(
       const depositoryABI = [
         'event ReserveUpdated(bytes32 indexed entity, uint256 indexed tokenId, uint256 newBalance)',
         'event SecretRevealed(bytes32 indexed hashlock, bytes32 indexed revealer, bytes32 secret)',
-        'event AccountSettled(tuple(bytes32 left, bytes32 right, uint256 tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)[])',
-        'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed disputeNonce, bytes32 proofbodyHash, bytes initialArguments)',
-        'event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed initialDisputeNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash)',
+        'event AccountSettled(tuple(bytes32 left, bytes32 right, tuple(uint256 tokenId, uint256 leftReserve, uint256 rightReserve, uint256 collateral, int256 ondelta)[] tokens, uint256 nonce)[] settled)',
+        'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes initialArguments)',
+        'event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed initialNonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash)',
         'event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex)',
         'event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed hankoHash, uint256 nonce, bool success)',
       ];

@@ -8,7 +8,7 @@
  * Flow:
  * 1. settle_propose: Either party creates workspace with initial diffs
  * 2. settle_update: Either party can update diffs (replaces current)
- * 3. settle_approve: Either party signs (bumps coopNonce to invalidate old disputes)
+ * 3. settle_approve: Either party signs (bumps nonce to invalidate old disputes)
  * 4. settle_execute: Adds approved settlement to jBatch
  * 5. settle_reject: Clears workspace without executing
  *
@@ -31,7 +31,7 @@ const MAX_SETTLEMENT_DIFF = FINANCIAL.MAX_PAYMENT_AMOUNT;
 
 /**
  * Sign nonce+1 dispute proof for post-settlement validity.
- * Settlement increments on-chain cooperativeNonce, invalidating old dispute proofs.
+ * Settlement increments on-chain nonce, invalidating old dispute proofs.
  * This pre-signs a proof at nonce+1 so disputes remain possible after settlement.
  *
  * proofBody is UNCHANGED by settlement (settlement modifies ondelta/collateral,
@@ -42,7 +42,7 @@ async function signPostSettlementDisputeProof(
   entityState: EntityState,
   account: AccountMachine,
   onChainNonce: number,
-): Promise<{ hanko: HankoString; proofBodyHash: string; cooperativeNonce: number } | null> {
+): Promise<{ hanko: HankoString; proofBodyHash: string; nonce: number } | null> {
   const jurisdiction = entityState.config.jurisdiction;
   if (!jurisdiction?.depositoryAddress) return null;
   const signerId = entityState.config.validators[0];
@@ -55,7 +55,7 @@ async function signPostSettlementDisputeProof(
     );
     const hankos = await signHashesAsSingleEntity(env, entityState.entityId, signerId, [disputeHash]);
     if (!hankos[0]) return null;
-    return { hanko: hankos[0], proofBodyHash, cooperativeNonce: onChainNonce + 1 };
+    return { hanko: hankos[0], proofBodyHash, nonce: onChainNonce + 1 };
   } catch (e) {
     console.warn(`⚠️ Post-settlement dispute proof signing failed: ${e instanceof Error ? e.message : String(e)}`);
     return null;
@@ -290,7 +290,7 @@ export async function handleSettleUpdate(
 
 /**
  * settle_approve: Sign the current workspace state
- * CRITICAL: This bumps cooperativeNonce to invalidate older dispute proofs
+ * CRITICAL: This bumps nonce to invalidate older dispute proofs
  * No mempoolOps - signing doesn't create/release holds
  */
 export async function handleSettleApprove(
@@ -324,21 +324,24 @@ export async function handleSettleApprove(
     throw new Error(`Already signed this workspace.`);
   }
 
-  // Use ON-CHAIN settlement nonce for signing (NOT proofHeader.cooperativeNonce)
-  // proofHeader.cooperativeNonce is for frame consensus, on-chain nonce is for settlements
+  // Use ON-CHAIN settlement nonce + 1 for signing.
+  // proofHeader.nonce is for frame consensus, on-chain nonce is for settlements.
+  // Contract requires: signed_nonce > on-chain nonce (Account.sol:163, 261).
+  // So we sign with on-chain + 1 to satisfy the strictly-greater check.
   const onChainNonce = account.onChainSettlementNonce ?? 0;
-  workspace.cooperativeNonceAtSign = onChainNonce;
+  const signedNonce = onChainNonce + 1;
+  workspace.nonceAtSign = signedNonce;
 
-  console.log(`⚖️ Using on-chain settlement nonce: ${onChainNonce} (local frame nonce: ${account.proofHeader.cooperativeNonce})`);
+  console.log(`⚖️ Using settlement nonce: ${signedNonce} (onChain=${onChainNonce}, frame=${account.proofHeader.nonce})`);
 
-  // Create settlement hash for signing with the on-chain nonce
+  // Create settlement hash for signing with the signed nonce
   // NOTE: C2R is just a calldata optimization - signature is always over the full diffs
   const jurisdiction = entityState.config.jurisdiction;
   if (!jurisdiction) {
     throw new Error('No jurisdiction configured');
   }
 
-  const settlementHash = createSettlementHashWithNonce(account, workspace.diffs, jurisdiction.depositoryAddress, onChainNonce);
+  const settlementHash = createSettlementHashWithNonce(account, workspace.diffs, jurisdiction.depositoryAddress, signedNonce);
 
   // Get signer ID for this entity (first validator for single-signer entities)
   const signerId = entityState.config.validators[0];
@@ -365,13 +368,14 @@ export async function handleSettleApprove(
     workspace.rightHanko = hanko;
   }
 
-  // Nonce+1 dispute proof: pre-sign for post-settlement validity
-  const disputeResult = await signPostSettlementDisputeProof(env, newState, account, onChainNonce);
+  // Post-settlement dispute proof: sign at signedNonce (settlement sets on-chain nonce to signedNonce,
+  // then signPostSettlementDisputeProof adds +1 internally, giving signedNonce + 1 > on-chain nonce)
+  const disputeResult = await signPostSettlementDisputeProof(env, newState, account, signedNonce);
   if (disputeResult) {
     if (!workspace.postSettlementDisputeProof) {
       workspace.postSettlementDisputeProof = {
         proofBodyHash: disputeResult.proofBodyHash,
-        cooperativeNonce: disputeResult.cooperativeNonce,
+        nonce: disputeResult.nonce,
       };
     }
     if (iAmLeft) {
@@ -379,7 +383,7 @@ export async function handleSettleApprove(
     } else {
       workspace.postSettlementDisputeProof.rightHanko = disputeResult.hanko;
     }
-    console.log(`✅ Nonce+1 dispute proof signed (nonce=${disputeResult.cooperativeNonce})`);
+    console.log(`✅ Nonce+1 dispute proof signed (nonce=${disputeResult.nonce})`);
   }
 
   // Update status
@@ -394,11 +398,12 @@ export async function handleSettleApprove(
     addMessage(newState, `⚖️ Settlement signed - awaiting counterparty signature`);
   }
 
-  // Send approval to counterparty
+  // Send approval to counterparty (include nonceAtSign so they use the correct nonce in batch)
   const settleAction: AccountInput['settleAction'] = {
     type: 'approve',
     ...(hanko && { hanko }),
     version: workspace.version,
+    nonceAtSign: workspace.nonceAtSign,
   };
 
   outputs.push({
@@ -484,7 +489,7 @@ export async function handleSettleExecute(
     counterpartyHanko!,
     jurisdiction.entityProviderAddress,
     '0x', // hankoData - not needed for single-signer entities
-    workspace.cooperativeNonceAtSign ?? account.proofHeader.cooperativeNonce,
+    workspace.nonceAtSign ?? account.proofHeader.nonce,
     entityState.entityId
   );
 
@@ -615,12 +620,13 @@ export async function processSettleAction(
         console.log(`✅ Auto-approving settlement from ${fromEntityId.slice(-4)}`);
         try {
           const onChainNonce = account.onChainSettlementNonce ?? 0;
-          workspace.cooperativeNonceAtSign = onChainNonce;
+          const signedNonce = onChainNonce + 1;
+          workspace.nonceAtSign = signedNonce;
 
           const jurisdiction = entityState.config.jurisdiction;
           if (jurisdiction?.depositoryAddress) {
             const settlementHash = createSettlementHashWithNonce(
-              account, workspace.diffs, jurisdiction.depositoryAddress, onChainNonce
+              account, workspace.diffs, jurisdiction.depositoryAddress, signedNonce
             );
 
             const signerId = entityState.config.validators[0];
@@ -648,19 +654,20 @@ export async function processSettleAction(
                         type: 'approve' as const,
                         hanko,
                         version: workspace.version,
+                        nonceAtSign: signedNonce,
                       },
                     }
                   }]
                 };
-                console.log(`✅ Auto-approve: signed settlement hanko for ${fromEntityId.slice(-4)} (nonce=${onChainNonce})`);
+                console.log(`✅ Auto-approve: signed settlement hanko for ${fromEntityId.slice(-4)} (nonce=${signedNonce})`);
 
-                // Nonce+1 dispute proof: pre-sign for post-settlement validity
-                const disputeResult = await signPostSettlementDisputeProof(env, entityState, account, onChainNonce);
+                // Post-settlement dispute proof: use signedNonce as base (settlement sets on-chain nonce to it)
+                const disputeResult = await signPostSettlementDisputeProof(env, entityState, account, signedNonce);
                 if (disputeResult) {
                   if (!workspace.postSettlementDisputeProof) {
                     workspace.postSettlementDisputeProof = {
                       proofBodyHash: disputeResult.proofBodyHash,
-                      cooperativeNonce: disputeResult.cooperativeNonce,
+                      nonce: disputeResult.nonce,
                     };
                   }
                   if (iAmLeft) {
@@ -668,7 +675,7 @@ export async function processSettleAction(
                   } else {
                     workspace.postSettlementDisputeProof.rightHanko = disputeResult.hanko;
                   }
-                  console.log(`✅ Nonce+1 dispute proof signed (nonce=${disputeResult.cooperativeNonce})`);
+                  console.log(`✅ Nonce+1 dispute proof signed (nonce=${disputeResult.nonce})`);
                 }
               }
             }
@@ -719,11 +726,14 @@ export async function processSettleAction(
         return { success: false, message: 'No hanko provided' };
       }
 
-      // Store their hanko
+      // Store their hanko + nonce they signed with
       if (theyAreLeft) {
         account.settlementWorkspace.leftHanko = settleAction.hanko;
       } else {
         account.settlementWorkspace.rightHanko = settleAction.hanko;
+      }
+      if (settleAction.nonceAtSign != null) {
+        account.settlementWorkspace.nonceAtSign = settleAction.nonceAtSign;
       }
 
       // Update status

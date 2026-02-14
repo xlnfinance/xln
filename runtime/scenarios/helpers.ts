@@ -462,6 +462,25 @@ export function assertBilateralSync(
 }
 
 // ============================================================================
+// J-EVENT PROCESSING
+// ============================================================================
+
+/**
+ * Process pending j-events from JAdapter operations (BrowserVM or RPC).
+ * Drains env.runtimeInput.entityInputs queue through process().
+ * Call after any JAdapter write operation (debugFundReserves, processBatch, etc.)
+ */
+export async function processJEvents(env: Env): Promise<void> {
+  const process = await getProcess();
+  const pendingInputs = env.runtimeInput?.entityInputs || [];
+  if (pendingInputs.length > 0) {
+    const toProcess = [...pendingInputs];
+    env.runtimeInput.entityInputs = [];
+    await process(env, toProcess);
+  }
+}
+
+// ============================================================================
 // TOKEN CONVERSION HELPERS
 // ============================================================================
 
@@ -471,6 +490,35 @@ export const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 export const eth = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 export const btc = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 export const dai = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
+
+// ============================================================================
+// CHAIN SYNC (poll JAdapter events + process through runtime)
+// ============================================================================
+
+/**
+ * Poll on-chain events from all JAdapters and process them through the runtime.
+ * Used after any on-chain write (j_broadcast, debugFundReserves, etc.)
+ * to ensure the runtime sees the resulting events.
+ */
+export async function syncChain(env: Env, rounds = 3): Promise<void> {
+  const process = await getProcess();
+
+  // Poll all jadapters attached to jReplicas
+  for (const [, jReplica] of env.jReplicas) {
+    const ja = (jReplica as any).jadapter;
+    if (ja?.pollNow) await ja.pollNow();
+  }
+
+  // Process events through runtime loop
+  for (let i = 0; i < rounds; i++) {
+    advanceScenarioTime(env, 350);
+    await process(env);
+    await processJEvents(env);
+    await process(env);
+  }
+
+  await converge(env);
+}
 
 /** Format bigint as USD string (e.g. "$1,234.56") */
 export const formatUSD = (amount: bigint): string => {
