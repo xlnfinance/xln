@@ -20,12 +20,47 @@ import { cloneEntityState, addMessage, getAccountPerspective } from '../../state
 import { initJBatch, batchAddSettlement } from '../../j-batch';
 import { isLeftEntity } from '../../entity-id-utils';
 import type { Env, HankoString } from '../../types';
-import { createSettlementHashWithNonce } from '../../proof-builder';
+import { createSettlementHashWithNonce, createDisputeProofHashWithNonce, buildAccountProofBody } from '../../proof-builder';
 import { signHashesAsSingleEntity } from '../../hanko-signing';
 import { FINANCIAL } from '../../constants';
 
+import type { AccountMachine } from '../../types';
+
 // Maximum absolute value for any single diff (prevents overflow/underflow attacks)
 const MAX_SETTLEMENT_DIFF = FINANCIAL.MAX_PAYMENT_AMOUNT;
+
+/**
+ * Sign nonce+1 dispute proof for post-settlement validity.
+ * Settlement increments on-chain cooperativeNonce, invalidating old dispute proofs.
+ * This pre-signs a proof at nonce+1 so disputes remain possible after settlement.
+ *
+ * proofBody is UNCHANGED by settlement (settlement modifies ondelta/collateral,
+ * not offdelta — and proofBody only hashes offdelta).
+ */
+async function signPostSettlementDisputeProof(
+  env: Env,
+  entityState: EntityState,
+  account: AccountMachine,
+  onChainNonce: number,
+): Promise<{ hanko: HankoString; proofBodyHash: string; cooperativeNonce: number } | null> {
+  const jurisdiction = entityState.config.jurisdiction;
+  if (!jurisdiction?.depositoryAddress) return null;
+  const signerId = entityState.config.validators[0];
+  if (!signerId) return null;
+
+  try {
+    const { proofBodyHash } = buildAccountProofBody(account);
+    const disputeHash = createDisputeProofHashWithNonce(
+      account, proofBodyHash, jurisdiction.depositoryAddress, onChainNonce + 1
+    );
+    const hankos = await signHashesAsSingleEntity(env, entityState.entityId, signerId, [disputeHash]);
+    if (!hankos[0]) return null;
+    return { hanko: hankos[0], proofBodyHash, cooperativeNonce: onChainNonce + 1 };
+  } catch (e) {
+    console.warn(`⚠️ Post-settlement dispute proof signing failed: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}
 
 // Validate conservation law and bounds for all diffs
 function validateDiffs(diffs: SettlementDiff[]): void {
@@ -330,6 +365,23 @@ export async function handleSettleApprove(
     workspace.rightHanko = hanko;
   }
 
+  // Nonce+1 dispute proof: pre-sign for post-settlement validity
+  const disputeResult = await signPostSettlementDisputeProof(env, newState, account, onChainNonce);
+  if (disputeResult) {
+    if (!workspace.postSettlementDisputeProof) {
+      workspace.postSettlementDisputeProof = {
+        proofBodyHash: disputeResult.proofBodyHash,
+        cooperativeNonce: disputeResult.cooperativeNonce,
+      };
+    }
+    if (iAmLeft) {
+      workspace.postSettlementDisputeProof.leftHanko = disputeResult.hanko;
+    } else {
+      workspace.postSettlementDisputeProof.rightHanko = disputeResult.hanko;
+    }
+    console.log(`✅ Nonce+1 dispute proof signed (nonce=${disputeResult.cooperativeNonce})`);
+  }
+
   // Update status
   const otherHanko = iAmLeft ? workspace.rightHanko : workspace.leftHanko;
   if (otherHanko) {
@@ -397,9 +449,13 @@ export async function handleSettleExecute(
 
   const workspace = account.settlementWorkspace;
 
-  // Require both signatures
-  if (!workspace.leftHanko || !workspace.rightHanko) {
-    throw new Error(`Settlement not fully signed. leftHanko=${!!workspace.leftHanko}, rightHanko=${!!workspace.rightHanko}`);
+  // Only require counterparty's hanko — batch submitter's auth comes from
+  // the batch-level hanko signed over the full processBatch calldata.
+  // On-chain: batch hanko validates submitter, per-settlement hanko validates counterparty.
+  const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
+  const counterpartyHanko = iAmLeft ? workspace.rightHanko : workspace.leftHanko;
+  if (!counterpartyHanko) {
+    throw new Error(`Missing counterparty hanko for settlement execution (iAmLeft=${iAmLeft})`);
   }
 
   // Initialize jBatch if needed
@@ -411,11 +467,6 @@ export async function handleSettleExecute(
   const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId);
   const leftEntity = isLeft ? entityState.entityId : counterpartyEntityId;
   const rightEntity = isLeft ? counterpartyEntityId : entityState.entityId;
-
-  // Use counterparty's hanko for the settlement signature (we already have ours)
-  // The settlement sig field expects the OTHER party's signature
-  const { iAmLeft } = getAccountPerspective(account, entityState.entityId);
-  const counterpartyHanko = iAmLeft ? workspace.rightHanko : workspace.leftHanko;
 
   // Get entityProvider address from jurisdiction config
   const jurisdiction = entityState.config.jurisdiction;
@@ -445,8 +496,9 @@ export async function handleSettleExecute(
   const releaseOp = createSettlementHoldOp(counterpartyEntityId, workspace.diffs, workspace.version, 'release');
   if (releaseOp) mempoolOps.push(releaseOp);
 
-  // Clear workspace
-  delete account.settlementWorkspace;
+  // Mark as submitted — don't delete yet. j-events will clear workspace
+  // and increment onChainSettlementNonce when the on-chain event confirms.
+  account.settlementWorkspace.status = 'submitted';
 
   addMessage(newState, `✅ Settlement executed (${workspace.diffs.length} diffs) - use j_broadcast to commit`);
 
@@ -514,14 +566,20 @@ export async function handleSettleReject(
 /**
  * Process incoming settleAction from AccountInput
  * Called by account handler when AccountInput contains settleAction
+ *
+ * When env + entityState are provided (normal flow), auto-approve is attempted
+ * for incoming proposals using canAutoApproveWorkspace(). If safe, the hanko
+ * is signed inline and returned in autoApproveOutput for the caller to send back.
  */
-export function processSettleAction(
+export async function processSettleAction(
   account: import('../../types').AccountMachine,
   settleAction: NonNullable<AccountInput['settleAction']>,
   fromEntityId: string,
   myEntityId: string,
-  entityTimestamp: number // Entity-level timestamp for determinism across validators
-): { success: boolean; message: string } {
+  entityTimestamp: number, // Entity-level timestamp for determinism across validators
+  env?: Env,
+  entityState?: EntityState,
+): Promise<{ success: boolean; message: string; autoApproveOutput?: EntityInput }> {
   const { iAmLeft } = getAccountPerspective(account, myEntityId);
   const theyAreLeft = !iAmLeft;
 
@@ -550,7 +608,82 @@ export function processSettleAction(
       // The proposer already queued settle_hold; we'll apply it during frame consensus
 
       console.log(`📥 Received settle_propose from ${fromEntityId.slice(-4)}`);
-      return { success: true, message: `Settlement proposed by ${fromEntityId.slice(-4)}` };
+
+      // Inline auto-approve: if safe, sign and send hanko back immediately
+      let autoApproveOutput: EntityInput | undefined;
+      if (env && entityState && canAutoApproveWorkspace(workspace, iAmLeft)) {
+        console.log(`✅ Auto-approving settlement from ${fromEntityId.slice(-4)}`);
+        try {
+          const onChainNonce = account.onChainSettlementNonce ?? 0;
+          workspace.cooperativeNonceAtSign = onChainNonce;
+
+          const jurisdiction = entityState.config.jurisdiction;
+          if (jurisdiction?.depositoryAddress) {
+            const settlementHash = createSettlementHashWithNonce(
+              account, workspace.diffs, jurisdiction.depositoryAddress, onChainNonce
+            );
+
+            const signerId = entityState.config.validators[0];
+            if (signerId) {
+              const hankos = await signHashesAsSingleEntity(env, myEntityId, signerId, [settlementHash]);
+              const hanko = hankos[0];
+              if (hanko) {
+                // Store our hanko in workspace
+                if (iAmLeft) {
+                  workspace.leftHanko = hanko;
+                } else {
+                  workspace.rightHanko = hanko;
+                }
+                workspace.status = 'awaiting_counterparty'; // They still need to collect
+
+                // Build response to send hanko back to proposer
+                autoApproveOutput = {
+                  entityId: fromEntityId,
+                  entityTxs: [{
+                    type: 'accountInput',
+                    data: {
+                      fromEntityId: myEntityId,
+                      toEntityId: fromEntityId,
+                      settleAction: {
+                        type: 'approve' as const,
+                        hanko,
+                        version: workspace.version,
+                      },
+                    }
+                  }]
+                };
+                console.log(`✅ Auto-approve: signed settlement hanko for ${fromEntityId.slice(-4)} (nonce=${onChainNonce})`);
+
+                // Nonce+1 dispute proof: pre-sign for post-settlement validity
+                const disputeResult = await signPostSettlementDisputeProof(env, entityState, account, onChainNonce);
+                if (disputeResult) {
+                  if (!workspace.postSettlementDisputeProof) {
+                    workspace.postSettlementDisputeProof = {
+                      proofBodyHash: disputeResult.proofBodyHash,
+                      cooperativeNonce: disputeResult.cooperativeNonce,
+                    };
+                  }
+                  if (iAmLeft) {
+                    workspace.postSettlementDisputeProof.leftHanko = disputeResult.hanko;
+                  } else {
+                    workspace.postSettlementDisputeProof.rightHanko = disputeResult.hanko;
+                  }
+                  console.log(`✅ Nonce+1 dispute proof signed (nonce=${disputeResult.cooperativeNonce})`);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn(`⚠️ Auto-approve signing failed: ${e instanceof Error ? e.message : String(e)}`);
+          // Fall through — manual approve still possible
+        }
+      }
+
+      return {
+        success: true,
+        message: `Settlement proposed by ${fromEntityId.slice(-4)}${autoApproveOutput ? ' (auto-approved)' : ''}`,
+        autoApproveOutput,
+      };
     }
 
     case 'update': {

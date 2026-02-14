@@ -4,21 +4,17 @@
     "type": "split",
     "children": [
       {
-        "id": "79ff329f9e6f44e0",
+        "id": "4dab5a25b030754c",
         "type": "tabs",
         "children": [
           {
-            "id": "23c8fd7be79fe55e",
+            "id": "d252c0332bacbde0",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "docs/insights/bilateral.md",
-                "mode": "source",
-                "source": false
-              },
+              "type": "empty",
+              "state": {},
               "icon": "lucide-file",
-              "title": "bilateral"
+              "title": "New tab"
             }
           }
         ]
@@ -183,11 +179,36 @@
       "bases:Create new base": false
     }
   },
-  "active": "23c8fd7be79fe55e",
+  "active": "d252c0332bacbde0",
   "lastOpenFiles": [
+    "docs/insights/bilateral.md",
+    "agents/claude/hub-auto-rebalance/gemini3.md",
+    "agents/claude/hub-auto-rebalance/06-final-flow.md",
+    "agents/claude/hub-auto-rebalance/05-final-v1.md",
+    "agents/claude/hub-auto-rebalance/gemini2.md",
+    "agents/claude/hub-auto-rebalance/04-v1-simplified.md",
+    "agents/claude/hub-auto-rebalance/codex3.md",
+    "agents/claude/hub-auto-rebalance/README.md",
+    "agents/claude/hub-auto-rebalance/03-understanding-check.md",
+    "agents/claude/account-ui-improvements/00-plan.md",
+    "agents/claude/account-ui-improvements",
+    "agents/claude/hub-auto-rebalance/codex2.md",
+    "agents/claude/hub-auto-rebalance/gemini1.md",
+    "agents/claude/hub-auto-rebalance/02-final-plan.md",
+    "agents/claude/hub-auto-rebalance/01-progress.md",
+    "agents/claude/hub-auto-rebalance/00-plan-amendment.md",
+    "agents/claude/hub-auto-rebalance/codex1.md",
+    "agents/claude/hub-auto-rebalance/00-plan.md",
+    "agents/claude/hub-auto-rebalance",
+    "frontend/build/_app/immutable/nodes/8.mGmwLw7T.js",
+    "frontend/build/_app/immutable/nodes/6.CpbwAhGb.js",
+    "frontend/build/_app/immutable/nodes/4.BJ4CBBYw.js",
+    "frontend/build/_app/immutable/nodes/2.DXF6NJrl.js",
+    "frontend/build/_app/immutable/nodes/13.BFEICdPb.js",
+    "frontend/build/_app/immutable/nodes/1.xjhDQ4h4.js",
+    "frontend/build/_app/immutable/nodes/0.Bc7-myUV.js",
+    "frontend/build/_app/immutable/entry/start.DC6D51MK.js",
     "agents/claude/remove-insurance/gemini2.md",
-    "runtime/scenarios/insurance-cascade.ts",
-    "frontend/src/lib/view/panels/InsurancePanel.svelte",
     "agents/claude/remove-insurance/05-final.md",
     "agents/claude/remove-insurance/codex1.md",
     "agents/claude/remove-insurance/04-status.md",
@@ -196,40 +217,15 @@
     "agents/claude/remove-insurance/02-progress.md",
     "agents/claude/remove-insurance/01-progress.md",
     "agents/claude/remove-insurance/00-plan.md",
-    "agents/claude/remove-insurance",
-    "agents/_templates/review.md",
-    "agents/_templates/progress.md",
-    "agents/_templates/00-plan.md",
-    "agents/workflow.md",
-    "agents/AGENTS.md",
-    "agents/README.md",
-    "agents/gemini",
-    "agents/codex",
-    "agents/claude",
-    "agents/_templates",
-    "agents/_archive",
-    "agents",
-    "db-tmp/runtime/default/000191.ldb",
     "playwright-report/data/22daaee34955940084c9de9deac0592c08326023.png",
     "tests/test-results/e2e-multiroute-load-E2E-Mu-03197-th-diverse-payment-patterns-chromium/test-finished-1.png",
-    "playwright-report/data/4a705b5e035a7c11a00a0a4e281101bebba61168.md",
     "playwright-report/data/3ca2673b2283c4e4e1c3a07a6a8294f0b75f0157.png",
-    "tests/test-results/e2e-multiroute-load-E2E-Mu-03197-th-diverse-payment-patterns-chromium/error-context.md",
     "tests/test-results/e2e-multiroute-load-E2E-Mu-03197-th-diverse-payment-patterns-chromium/test-failed-1.png",
     "playwright-report/data/94c8614dd20a95ac7b69ae641cca0f1980791dbf.png",
     "tests/test-results/04-alice-connected.png",
     "tests/test-results/e2e-multiroute-load-E2E-Mu-aa2e5-th-diverse-payment-patterns-chromium/test-finished-1.png",
-    "tests/test-results/e2e-multiroute-load-E2E-Mu-aa2e5-th-diverse-payment-patterns-chromium/error-context.md",
     "tests/test-results/e2e-multiroute-load-E2E-Mu-aa2e5-th-diverse-payment-patterns-chromium/test-failed-1.png",
-    "playwright-report/data/3f52ff324e18f884eb482c159644efc7e65350da.md",
     "playwright-report/data/e5839d565ec43199f0b995fd65bdc135c79643df.png",
-    "playwright-report/data/563c42dbc17a6b9122b1c6eb350aac44e4d42fc1.md",
-    "playwright-report/data/4102273d2402c257cceb29fe31acfad47123719d.png",
-    "playwright-report/data/8cfe5cbaba6ccc960069a0df61214d45e69c935c.md",
-    "playwright-report/data/19572719731c60261ca0b5ea288ca9c2eb4e61d8.md",
-    "playwright-report/data/c926ee11fd60f0c69d0f53bf65ab406ec5c9c1f9.md",
-    "playwright-report/data/89de28a87d6214d242a9e9ca523baab71dd2790c.md",
-    "tests/test-results/e2e-ahb-payment-E2E-Alice--96f45-tional-payments-through-hub-chromium/error-context.md",
-    "playwright-report/data/9ba31e3eda8fde2d05b79a46c611bc118efc8188.md"
+    "playwright-report/data/4102273d2402c257cceb29fe31acfad47123719d.png"
   ]
 }

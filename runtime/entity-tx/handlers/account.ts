@@ -185,16 +185,22 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   // Process settleAction before frame consensus (bilateral negotiation)
   if (input.settleAction) {
     const { processSettleAction } = await import('./settle');
-    const result = processSettleAction(
+    const result = await processSettleAction(
       accountMachine,
       input.settleAction,
       input.fromEntityId,
       newState.entityId,
-      newState.timestamp // Entity-level timestamp for determinism
+      newState.timestamp, // Entity-level timestamp for determinism
+      env,
+      newState,
     );
 
     if (result.success) {
       addMessage(newState, `⚖️ ${result.message}`);
+      // Inline auto-approve: send hanko back to proposer immediately
+      if (result.autoApproveOutput) {
+        outputs.push(result.autoApproveOutput);
+      }
     } else {
       console.warn(`⚠️ settleAction failed: ${result.message}`);
       addMessage(newState, `⚠️ Settlement: ${result.message}`);

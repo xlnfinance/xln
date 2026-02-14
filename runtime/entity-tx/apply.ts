@@ -829,6 +829,32 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       return { newState, outputs, mempoolOps };
     }
 
+    // === HUB CONFIG (declare entity as hub, enable rebalance crontab) ===
+    if (entityTx.type === 'setHubConfig') {
+      const newState = cloneEntityState(entityState);
+      const { matchingStrategy = 'hnw', routingFeePPM = 100, baseFee = 0n } = entityTx.data;
+
+      newState.hubRebalanceConfig = { matchingStrategy, routingFeePPM, baseFee };
+      console.log(`🏦 Hub config set: strategy=${matchingStrategy}, routingFee=${routingFeePPM}ppm, baseFee=${baseFee}`);
+
+      // Announce updated profile with isHub: true
+      if (env?.gossip) {
+        const existingProfile = env.gossip.getProfiles?.().find((p: any) => p.entityId === newState.entityId);
+        const lastTimestamp = existingProfile?.metadata?.lastUpdated || 0;
+        const monotonicTimestamp = Math.max(lastTimestamp + 1, env.timestamp);
+        const existingName = existingProfile?.metadata?.name;
+        const profile = buildEntityProfile(newState, existingName, monotonicTimestamp);
+        const merged = mergeProfileWithExisting(profile, existingProfile);
+        merged.metadata = { ...(merged.metadata || {}), isHub: true, routingFeePPM, baseFee };
+        if (env.runtimeId) merged.runtimeId = env.runtimeId;
+        env.gossip.announce(merged);
+        console.log(`📡 Hub profile announced: ${newState.entityId.slice(-4)} isHub=true`);
+      }
+
+      addMessage(newState, `🏦 Hub config activated: ${matchingStrategy} strategy, ${routingFeePPM}ppm routing fee`);
+      return { newState, outputs: [] };
+    }
+
     // === REBALANCE QUOTE (Hub → bilateral account) ===
     if (entityTx.type === 'sendRebalanceQuote') {
       const newState = cloneEntityState(entityState);
@@ -849,6 +875,32 @@ export const applyEntityTx = async (env: Env, entityState: EntityState, entityTx
       mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
 
       // Trigger processing
+      const firstValidator = entityState.config.validators[0];
+      if (firstValidator) {
+        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
+      }
+
+      return { newState, outputs, mempoolOps };
+    }
+
+    if (entityTx.type === 'setRebalancePolicy') {
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
+      const { counterpartyEntityId, tokenId, softLimit, hardLimit, maxAcceptableFee } = entityTx.data;
+
+      const accountMachine = newState.accounts.get(counterpartyEntityId);
+      if (!accountMachine) {
+        console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for rebalance policy`);
+        return { newState: entityState, outputs: [] };
+      }
+
+      const accountTx: AccountTx = {
+        type: 'set_rebalance_policy',
+        data: { tokenId, softLimit, hardLimit, maxAcceptableFee },
+      };
+      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
+
       const firstValidator = entityState.config.validators[0];
       if (firstValidator) {
         outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });

@@ -28,6 +28,7 @@ export async function handleDepositCollateral(
   currentTimestamp: number = 0
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: any[]; mempoolOps?: MempoolOp[] }> {
   const { counterpartyId, tokenId, amount, rebalanceQuoteId, rebalanceFeeTokenId, rebalanceFeeAmount } = entityTx.data;
+  console.log(`🔍 deposit_collateral: counterpartyId=${counterpartyId}, tokenId=${tokenId}, amount=${amount}, quoteId=${rebalanceQuoteId}`);
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
@@ -35,6 +36,7 @@ export async function handleDepositCollateral(
   // Validate: Do we have enough reserve?
   const currentReserve = entityState.reserves.get(String(tokenId)) || 0n;
   if (currentReserve < amount) {
+    console.log(`❌ deposit_collateral: Insufficient reserve ${currentReserve} < ${amount}`);
     addMessage(newState,
       `❌ Insufficient reserve for collateral deposit: have ${currentReserve}, need ${amount} token ${tokenId}`
     );
@@ -43,8 +45,9 @@ export async function handleDepositCollateral(
 
   // Validate: Does account exist?
   if (!entityState.accounts.has(counterpartyId)) {
+    console.log(`❌ deposit_collateral: No account with ${counterpartyId}`);
     addMessage(newState,
-      `❌ Cannot deposit collateral: no account with ${counterpartyId.slice(-4)}`
+      `❌ Cannot deposit collateral: no account with ${counterpartyId?.slice(-4)}`
     );
     return { newState, outputs };
   }
@@ -53,12 +56,15 @@ export async function handleDepositCollateral(
   if (rebalanceQuoteId !== undefined) {
     const account = newState.accounts.get(counterpartyId);
     const quote = account?.activeRebalanceQuote;
+    console.log(`🔍 deposit_collateral: quote validation - hasAccount=${!!account}, quote=${JSON.stringify(quote ? { quoteId: quote.quoteId, accepted: quote.accepted, feeAmount: String(quote.feeAmount) } : null)}`);
 
     if (!quote) {
+      console.log(`❌ deposit_collateral: no active quote`);
       addMessage(newState, `❌ Rebalance fee: no active quote for ${counterpartyId.slice(-4)}`);
       return { newState, outputs };
     }
     if (quote.quoteId !== rebalanceQuoteId) {
+      console.log(`❌ deposit_collateral: quoteId mismatch ${quote.quoteId} !== ${rebalanceQuoteId}`);
       addMessage(newState, `❌ Rebalance fee: quoteId mismatch (expected ${quote.quoteId}, got ${rebalanceQuoteId})`);
       return { newState, outputs };
     }
@@ -76,6 +82,10 @@ export async function handleDepositCollateral(
       addMessage(newState, `❌ Rebalance fee: amount mismatch (expected ${quote.feeAmount}, got ${rebalanceFeeAmount})`);
       return { newState, outputs };
     }
+    if (rebalanceFeeTokenId !== quote.feeTokenId) {
+      addMessage(newState, `❌ Rebalance fee: tokenId mismatch (expected ${quote.feeTokenId}, got ${rebalanceFeeTokenId})`);
+      return { newState, outputs };
+    }
 
     // Fee collection: inject a direct_payment accountTx to shift offdelta (user→hub)
     // This goes into the bilateral account mempool for the next frame
@@ -85,7 +95,8 @@ export async function handleDepositCollateral(
         tx: {
           type: 'direct_payment',
           data: {
-            recipientEntityId: entityState.entityId, // hub receives
+            fromEntityId: counterpartyId,        // user pays fee
+            toEntityId: entityState.entityId,     // hub receives fee
             tokenId: rebalanceFeeTokenId,
             amount: rebalanceFeeAmount,
             description: `rebalance fee (quoteId: ${rebalanceQuoteId})`,

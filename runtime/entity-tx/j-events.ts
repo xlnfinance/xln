@@ -361,13 +361,28 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
     account.jEventChain.push({ jHeight, jBlockHash: leftObs.jBlockHash, events: leftObs.events, finalizedAt: opts.timestamp });
     account.lastFinalizedJHeight = Math.max(account.lastFinalizedJHeight, jHeight);
 
-    // SYMMETRIC NONCE TRACKING: Both sides increment when workspace was 'ready_to_submit'
-    // This ensures both entities maintain identical onChainSettlementNonce.
-    // R2C events don't affect nonce - only settlements (workspace-based).
-    if (account.settlementWorkspace?.status === 'ready_to_submit') {
+    // SYMMETRIC NONCE TRACKING: Both sides increment when workspace has signed hankos.
+    // Covers all settlement types: C2R (counterparty hanko only), full settle (both hankos).
+    // R2C events don't create workspaces, so this check safely skips them.
+    const ws = account.settlementWorkspace;
+    if (ws && (ws.leftHanko || ws.rightHanko)) {
+      // Activate post-settlement dispute proof (nonce+1) before clearing workspace
+      const postProof = ws.postSettlementDisputeProof;
+      if (postProof?.leftHanko && postProof?.rightHanko) {
+        // Side-safe: store MY hanko vs THEIR hanko based on which side I am
+        const iAmLeftHere = account.leftEntity !== counterpartyId;
+        account.currentDisputeProofHanko = iAmLeftHere ? postProof.leftHanko : postProof.rightHanko;
+        account.counterpartyDisputeProofHanko = iAmLeftHere ? postProof.rightHanko : postProof.leftHanko;
+        account.currentDisputeProofCooperativeNonce = postProof.cooperativeNonce;
+        account.currentDisputeProofBodyHash = postProof.proofBodyHash;
+        account.counterpartyDisputeProofCooperativeNonce = postProof.cooperativeNonce;
+        account.counterpartyDisputeProofBodyHash = postProof.proofBodyHash;
+        console.log(`   🔐 Post-settlement dispute proof activated (nonce=${postProof.cooperativeNonce})`);
+      }
+
       account.onChainSettlementNonce = (account.onChainSettlementNonce || 0) + 1;
-      console.log(`   💰 NONCE-INC: Settlement finalized → onChainNonce=${account.onChainSettlementNonce}`);
-      // Clear workspace after nonce increment
+      console.log(`   💰 NONCE-INC: Settlement finalized → onChainNonce=${account.onChainSettlementNonce} (ws.status was '${ws.status}')`);
+      // Clear workspace after nonce increment — both sides (Hub + counterparty)
       delete account.settlementWorkspace;
       console.log(`   🧹 WORKSPACE-CLEAR: Settlement completed`);
     }

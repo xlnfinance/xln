@@ -437,7 +437,9 @@ const buildRouteOutputKey = (output: RoutedEntityInput): string => {
       const height = typeof data?.height === 'number' ? data.height : '';
       const from = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
       const to = typeof data?.toEntityId === 'string' ? data.toEntityId : '';
-      return `${tx.type}:${height}:${from}:${to}`;
+      const cp = typeof data?.counterpartyEntityId === 'string' ? data.counterpartyEntityId
+        : typeof data?.counterpartyId === 'string' ? data.counterpartyId : '';
+      return `${tx.type}:${height}:${from}:${to}:${cp}`;
     })
     .join('|');
   return `${output.entityId}:${output.signerId || ''}:${txPart}`;

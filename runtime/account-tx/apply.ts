@@ -99,7 +99,7 @@ export async function processAccountTx(
       return handleRequestRebalance(accountMachine, accountTx as Extract<AccountTx, { type: 'request_rebalance' }>);
 
     case 'set_rebalance_policy':
-      return handleSetRebalancePolicy(accountMachine, accountTx as Extract<AccountTx, { type: 'set_rebalance_policy' }>);
+      return handleSetRebalancePolicy(accountMachine, accountTx as Extract<AccountTx, { type: 'set_rebalance_policy' }>, byLeft);
 
     case 'rebalance_request':
       return handleRebalanceRequest(accountMachine, accountTx as Extract<AccountTx, { type: 'rebalance_request' }>);

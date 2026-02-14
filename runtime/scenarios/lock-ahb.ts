@@ -1366,110 +1366,158 @@ export async function lockAhb(env: Env): Promise<void> {
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
     // ============================================================================
-    // PHASE 5: REBALANCING - Reduce Total Risk from $200K to $0
+    // PHASE 5: REBALANCING via Quote Flow (Reserve → Collateral)
     // ============================================================================
     // Current state after $250K A→H→B minus $50K B→H→A = $200K net shift:
     // - A-H: offdelta = -$200K (Alice owes Hub), collateral = $500K
     // - H-B: offdelta = -$200K (Hub owes Bob), collateral = $0
     // - TR = $200K (Hub's uninsured liability to Bob)
     //
-    // Rebalancing plan:
-    // 1. Alice-Hub settlement: Alice withdraws $200K collateral (pays Hub on-chain)
-    // 2. Hub-Bob settlement: Hub deposits $200K collateral (insures Bob's position)
-    // 3. Result: TR = $0, both accounts fully settled
+    // Rebalance flow (mainnet-grade bilateral quote negotiation):
+    // 1. Bob sets rebalance policy (softLimit=$100K, maxFee=$10)
+    // 2. Hub detects H-B collateral ($0) < softLimit → sends quote
+    // 3. Quote auto-accepted (fee $5 < maxFee $10)
+    // 4. Hub deposits $200K from reserve → H-B collateral (R→C)
+    // 5. Fee collected via direct_payment (Bob pays Hub $5)
     // ============================================================================
 
-    console.log('\n\n🔄🔄🔄 REBALANCING SECTION START 🔄🔄🔄\n');
+    console.log('\n\n🔄🔄🔄 REBALANCING SECTION START (Quote Flow) 🔄🔄🔄\n');
 
     const rebalanceAmount = usd(200_000);
+    const rebalanceFee = usd(5);
 
-    // ============================================================================
-    // STEP 22-24: Unified Rebalancing Batch (BOTH settlements in ONE batch)
-    // ============================================================================
-    console.log('\n🏦 FRAME 22: Creating unified rebalancing batch (A-H + H-B)');
+    // STEP 21.5: Hub declares itself as hub (enables rebalance crontab)
+    console.log('\n🏦 Hub declares hub config');
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'setHubConfig',
+        data: { matchingStrategy: 'hnw', routingFeePPM: 100, baseFee: 0n },
+      }]
+    }]);
+    await converge(env);
 
-    // ✅ Store pre-settlement state for assertions
-    const [, alicePreSettle] = findReplica(env, alice.id);
-    const [, hubPreSettle] = findReplica(env, hub.id);
-    const [, bobPreSettle] = findReplica(env, bob.id);
-    const ahPreCollateral = alicePreSettle.state.accounts.get(hub.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
-    const hbPreCollateral = hubPreSettle.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
-    const hubPreReserve = hubPreSettle.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+    const [, hubAfterConfig] = findReplica(env, hub.id);
+    if (!hubAfterConfig.state.hubRebalanceConfig) {
+      throw new Error('❌ ASSERT FAIL: Hub config not set after setHubConfig');
+    }
+    console.log(`✅ Hub config active: strategy=${hubAfterConfig.state.hubRebalanceConfig.matchingStrategy}`);
 
-    console.log(`   Pre-settlement state:`);
-    console.log(`     A-H collateral: ${ahPreCollateral}`);
+    // ✅ Store pre-rebalance state for assertions
+    const [, hubPreRebal] = findReplica(env, hub.id);
+    const [, bobPreRebal] = findReplica(env, bob.id);
+    const hbPreCollateral = hubPreRebal.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
+    const hubPreReserve = hubPreRebal.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
+
+    console.log(`   Pre-rebalance state:`);
     console.log(`     H-B collateral: ${hbPreCollateral}`);
     console.log(`     Hub reserve: ${hubPreReserve}`);
 
-    // Hub creates BOTH settlements via createSettlement EntityTxs (proper E-layer flow)
-    const aliceIsLeftAH = isLeft(alice.id, hub.id);
-    const ahLeftDiff = aliceIsLeftAH ? 0n : rebalanceAmount; // Hub receives reserve
-    const ahRightDiff = aliceIsLeftAH ? rebalanceAmount : 0n;
-    const ahOndeltaDiff = aliceIsLeftAH ? rebalanceAmount : -rebalanceAmount; // Net-sender is Alice
+    // STEP 22: Bob sets rebalance policy on H-B account
+    console.log('\n🏦 FRAME 22: Bob sets rebalance policy');
 
-    const hubIsLeftHB = isLeft(hub.id, bob.id);
-    const hbLeftDiff = hubIsLeftHB ? -rebalanceAmount : 0n; // Hub pays reserve
-    const hbRightDiff = hubIsLeftHB ? 0n : -rebalanceAmount;
-    const hbOndeltaDiff = hubIsLeftHB ? rebalanceAmount : -rebalanceAmount; // Net-sender is Hub
+    await process(env, [{
+      entityId: bob.id,
+      signerId: bob.signer,
+      entityTxs: [{
+        type: 'setRebalancePolicy',
+        data: {
+          counterpartyEntityId: hub.id,
+          tokenId: USDC_TOKEN_ID,
+          softLimit: usd(100_000),   // Request rebalance when collateral < $100K
+          hardLimit: usd(200_000),   // Target collateral after rebalance
+          maxAcceptableFee: usd(10), // Auto-accept fees up to $10
+        }
+      }]
+    }]);
+    await converge(env);
 
-    const ahSettlementDiffs = [{
-      tokenId: USDC_TOKEN_ID,
-      leftDiff: ahLeftDiff,              // Hub reserve +$200K (side depends on ordering)
-      rightDiff: ahRightDiff,
-      collateralDiff: -rebalanceAmount,  // A-H collateral -$200K
-      ondeltaDiff: ahOndeltaDiff,        // ondelta toward zero
-    }];
-    const hbSettlementDiffs = [{
-      tokenId: USDC_TOKEN_ID,
-      leftDiff: hbLeftDiff,              // Hub reserve -$200K (side depends on ordering)
-      rightDiff: hbRightDiff,
-      collateralDiff: rebalanceAmount,   // H-B collateral +$200K
-      ondeltaDiff: hbOndeltaDiff,        // ondelta toward zero
-    }];
-    const ahSettlementSig = await browserVM.signSettlement(hub.id, alice.id, ahSettlementDiffs, [], []);
-    const hbSettlementSig = await browserVM.signSettlement(hub.id, bob.id, hbSettlementDiffs, [], []);
+    // Verify policy was set on both sides
+    const [, hubAfterPolicy] = findReplica(env, hub.id);
+    const bobAccount = hubAfterPolicy.state.accounts.get(bob.id);
+    if (!bobAccount?.rebalancePolicy) {
+      throw new Error('❌ ASSERT FAIL: Rebalance policy not set on H-B account');
+    }
+    console.log(`✅ Rebalance policy set: softLimit=$100K, maxFee=$10`);
+
+    await pushSnapshot(env, 'Frame 22: Bob sets rebalance policy', {
+      title: 'Rebalance Policy Set',
+      what: 'Bob tells Hub: "keep at least $100K collateral on our account".',
+      why: 'User-driven policy — Bob decides his risk tolerance, Hub executes.',
+      tradfiParallel: 'Like setting a margin maintenance requirement.',
+      keyMetrics: [
+        'softLimit: $100K',
+        'maxAcceptableFee: $10',
+        'H-B collateral: $0 (needs rebalancing)',
+      ]
+    }, { expectedSolvency: TOTAL_SOLVENCY });
+
+    // STEP 23: Hub sends rebalance quote to Bob (mimics crontab detection)
+    console.log('\n🏦 FRAME 23: Hub sends rebalance quote');
 
     await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,
-      entityTxs: [
-        // Settlement 1: Alice ↔ Hub (canonical ordering) - Hub pulls $200K from Alice
-        {
-          type: 'createSettlement',
-          data: {
-            counterpartyEntityId: alice.id,
-            diffs: ahSettlementDiffs,
-            sig: ahSettlementSig,
-          }
-        },
-        // Settlement 2: Hub ↔ Bob (canonical ordering) - Hub deposits $200K to Bob
-        {
-          type: 'createSettlement',
-          data: {
-            counterpartyEntityId: bob.id,
-            diffs: hbSettlementDiffs,
-            sig: hbSettlementSig,
-          }
+      entityTxs: [{
+        type: 'sendRebalanceQuote',
+        data: {
+          counterpartyEntityId: bob.id,
+          tokenId: USDC_TOKEN_ID,
+          amount: rebalanceAmount,
+          feeTokenId: USDC_TOKEN_ID,
+          feeAmount: rebalanceFee,
         }
-      ]
+      }]
     }]);
+    await converge(env);
 
-    console.log(`✅ Settlement batch created via createSettlement EntityTxs (2 settlements)`);
+    // Verify quote was auto-accepted (fee $5 <= maxAcceptableFee $10)
+    const [, hubAfterQuote] = findReplica(env, hub.id);
+    const bobAccAfterQuote = hubAfterQuote.state.accounts.get(bob.id);
+    const activeQuote = bobAccAfterQuote?.activeRebalanceQuote;
+    if (!activeQuote || !activeQuote.accepted) {
+      const { safeStringify } = await import('../serialization-utils');
+      throw new Error(`❌ ASSERT FAIL: Quote not auto-accepted. Quote: ${safeStringify(activeQuote)}, Policy: ${safeStringify(bobAccAfterQuote?.rebalancePolicy)}`);
+    }
+    const actualQuoteId = activeQuote.quoteId;
+    console.log(`✅ Quote auto-accepted: $${Number(rebalanceAmount) / 1e18}K deposit, $${Number(rebalanceFee) / 1e18} fee, quoteId=${actualQuoteId}`);
 
-    await pushSnapshot(env, 'Frame 22: Rebalancing batch created', {
-      title: 'Rebalancing: Unified Batch Ready',
-      what: 'Hub created ONE batch with 2 settlements: pull from Alice, deposit to Bob.',
-      why: 'Batching is efficient. One J-block processes both operations atomically.',
-      tradfiParallel: 'Like ACH batch file: multiple transfers in single settlement instruction.',
+    await pushSnapshot(env, 'Frame 23: Quote auto-accepted', {
+      title: 'Rebalance Quote: Auto-Accepted',
+      what: 'Hub quoted $200K deposit with $5 fee. Bob auto-accepted (fee < $10 limit).',
+      why: 'Bilateral negotiation — both sides agree on price before on-chain execution.',
+      tradfiParallel: 'Like requesting a wire transfer quote — bank quotes fee, client approves.',
       keyMetrics: [
-        'Settlement 1: A-H collateral -$200K',
-        'Settlement 2: H-B collateral +$200K',
-        'Total operations: 2 (in 1 batch)',
+        `quoteId: ${actualQuoteId}`,
+        'Amount: $200K',
+        'Fee: $5 (auto-accepted)',
       ]
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
-    // STEP 23: Hub broadcasts jBatch via j_broadcast EntityTx (PROPER E→J FLOW)
-    console.log('\n🏦 FRAME 23: Hub broadcasts jBatch to J-Machine');
+    // STEP 24: Hub executes deposit_collateral with accepted quote
+    console.log('\n🏦 FRAME 24: Hub deposits collateral (R→C with fee)');
+
+    await process(env, [{
+      entityId: hub.id,
+      signerId: hub.signer,
+      entityTxs: [{
+        type: 'deposit_collateral',
+        data: {
+          counterpartyId: bob.id,
+          tokenId: USDC_TOKEN_ID,
+          amount: rebalanceAmount,
+          rebalanceQuoteId: actualQuoteId,
+          rebalanceFeeTokenId: USDC_TOKEN_ID,
+          rebalanceFeeAmount: rebalanceFee,
+        }
+      }]
+    }]);
+    await converge(env);
+    console.log(`✅ deposit_collateral queued in jBatch (R→C $200K + fee $5)`);
+
+    // STEP 25: Hub broadcasts jBatch via j_broadcast
+    console.log('\n🏦 FRAME 25: Hub broadcasts jBatch to J-Machine');
 
     await process(env, [{
       entityId: hub.id,
@@ -1480,53 +1528,36 @@ export async function lockAhb(env: Env): Promise<void> {
       }]
     }]);
 
-    console.log(`✅ j_broadcast sent → should create YELLOW CUBE in J-mempool`);
+    console.log(`✅ j_broadcast sent`);
 
-    await pushSnapshot(env, 'Frame 23: jBatch in J-mempool (PENDING)', {
-      title: 'J-Mempool: Yellow Cube',
-      what: 'Settlement batch sits in J-Machine mempool (yellow cube). Will process after blockDelayMs.',
-      why: 'Visual feedback: batch is queued, not yet executed. Realistic blockchain delay.',
-      tradfiParallel: 'Like SWIFT queue: message sent, awaiting settlement window.',
+    await pushSnapshot(env, 'Frame 25: R→C batch in J-mempool', {
+      title: 'J-Mempool: R→C Deposit',
+      what: 'Hub deposits $200K reserve → H-B collateral. In J-mempool, awaiting block.',
+      why: 'R→C is unilateral (Hub giving) — no settlement signature needed.',
+      tradfiParallel: 'Like funding a margin account — bank deposits, no counterparty approval on-chain.',
       keyMetrics: [
-        'J-mempool: 1 batch (2 settlements)',
+        'J-mempool: 1 batch (R→C $200K)',
         'Block delay: 300ms',
-        'Status: PENDING',
       ]
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
-    // STEP 24: Advance time and process J-mempool
-    console.log('\n🏦 FRAME 24: Advancing time for J-Machine block processing...');
+    // STEP 26: Advance time and process J-mempool
+    console.log('\n🏦 FRAME 26: Processing J-block...');
 
-    // Manually advance timestamp past blockDelayMs (deterministic, no real sleep)
-    env.timestamp += 350; // Advance 350ms (> 300ms blockDelayMs)
-    console.log(`   ⏰ Time advanced: +350ms (blockDelayMs = 300ms)`);
+    env.timestamp += 350;
+    console.log(`   Time advanced: +350ms (> 300ms blockDelayMs)`);
 
-    // Trigger runtime tick to process J-mempool
-    console.log('   Triggering runtime tick to process J-mempool...');
-    await process(env); // This will run J-machine block processor
-
-    // Process any j_events that came back from BrowserVM
+    await process(env);
     await processJEvents(env);
-    await process(env); // Second tick to route events to entities
+    await process(env);
+    await converge(env);
     logPending();
 
-    // ✅ ASSERT: Both settlements executed atomically
-    const [, aliceRepRebal] = findReplica(env, alice.id);
+    // ✅ ASSERT: H-B collateral increased by $200K
     const [, hubRepRebal] = findReplica(env, hub.id);
     const [, bobRepRebal] = findReplica(env, bob.id);
 
-    const ahAccountRebal = aliceRepRebal.state.accounts.get(hub.id);
-    const ahDeltaRebal = ahAccountRebal?.deltas.get(USDC_TOKEN_ID);
-    const expectedAHCollateral = ahPreCollateral - rebalanceAmount;
-
-    if (!ahDeltaRebal || ahDeltaRebal.collateral !== expectedAHCollateral) {
-      const actual = ahDeltaRebal?.collateral || 0n;
-      throw new Error(`❌ ASSERT FAIL: A-H collateral = ${actual}, expected ${expectedAHCollateral}`);
-    }
-    console.log(`✅ ASSERT: A-H collateral ${ahPreCollateral} → ${ahDeltaRebal.collateral} (-$200K) ✓`);
-
-    const hbAccountRebal = hubRepRebal.state.accounts.get(bob.id);
-    const hbDeltaRebal = hbAccountRebal?.deltas.get(USDC_TOKEN_ID);
+    const hbDeltaRebal = hubRepRebal.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID);
     const expectedHBCollateral = hbPreCollateral + rebalanceAmount;
 
     if (!hbDeltaRebal || hbDeltaRebal.collateral !== expectedHBCollateral) {
@@ -1535,23 +1566,31 @@ export async function lockAhb(env: Env): Promise<void> {
     }
     console.log(`✅ ASSERT: H-B collateral ${hbPreCollateral} → ${hbDeltaRebal.collateral} (+$200K) ✓`);
 
-    // ✅ ASSERT: Hub reserve net zero (pulled $200K, deposited $200K)
+    // ✅ ASSERT: Hub reserve decreased by $200K
     const hubPostReserve = hubRepRebal.state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
-    if (hubPostReserve !== hubPreReserve) {
-      throw new Error(`❌ ASSERT FAIL: Hub reserve changed: ${hubPreReserve} → ${hubPostReserve} (should be unchanged)`);
+    const expectedHubReserve = hubPreReserve - rebalanceAmount;
+    if (hubPostReserve !== expectedHubReserve) {
+      throw new Error(`❌ ASSERT FAIL: Hub reserve = ${hubPostReserve}, expected ${expectedHubReserve}`);
     }
-    console.log(`✅ ASSERT: Hub reserve ${hubPreReserve} (unchanged - pulled/deposited $200K) ✓`);
+    console.log(`✅ ASSERT: Hub reserve ${hubPreReserve} → ${hubPostReserve} (-$200K) ✓`);
 
-    await pushSnapshot(env, 'Frame 24: Rebalancing complete (atomic)', {
-      title: 'Rebalancing Complete',
-      what: 'ONE batch executed BOTH settlements atomically. TR = $0.',
-      why: 'Batching proves efficiency. Hub pulled from Alice, deposited to Bob, all in 1 J-block.',
-      tradfiParallel: 'Like FedACH batch processing: multiple operations, single settlement window.',
+    // ✅ ASSERT: Quote cleared after execution
+    const bobAccFinal = hubRepRebal.state.accounts.get(bob.id);
+    if (bobAccFinal?.activeRebalanceQuote) {
+      throw new Error(`❌ ASSERT FAIL: activeRebalanceQuote should be cleared after deposit`);
+    }
+    console.log(`✅ ASSERT: Quote cleared after deposit ✓`);
+
+    await pushSnapshot(env, 'Frame 26: Rebalancing complete (quote flow)', {
+      title: 'Rebalancing Complete (Quote Flow)',
+      what: 'Hub deposited $200K from reserve to H-B collateral. Fee: $5.',
+      why: 'Quote-based rebalancing: user sets policy, hub quotes, auto-accept, R→C deposit.',
+      tradfiParallel: 'Like prime brokerage margin top-up with pre-agreed fee schedule.',
       keyMetrics: [
-        'A-H collateral: $500K → $300K (-$200K)',
-        'H-B collateral: $0 → $200K (+$200K)',
-        'Hub reserve: unchanged (net zero)',
-        'Total Risk: $0 (fully balanced)',
+        `H-B collateral: $0 → $${Number(expectedHBCollateral) / 1e18}K`,
+        `Hub reserve: -$200K`,
+        'Fee: $5 (bilateral, not on-chain)',
+        'Total Risk: reduced',
       ]
     }, { expectedSolvency: TOTAL_SOLVENCY });
 
