@@ -123,6 +123,8 @@ export interface JAdapter {
   // Starts feeding J-events back to runtime mempool. Same object handles submit + watch.
   startWatching(env: any): void;
   stopWatching(): void;
+  // Immediate poll for scenarios (no-op if watcher not started)
+  pollNow?(): Promise<void>;
 
   // BrowserVM-specific (returns null for RPC mode)
   getBrowserVM(): BrowserVMProvider | null;

@@ -763,31 +763,33 @@ export async function createRpcAdapter(
       const depositoryIface = new ethers.Interface(depositoryABI);
       const depositoryForQuery = new ethers.Contract(addresses.depository, depositoryABI, provider);
 
-      watcherInterval = setInterval(async () => {
+      const doPoll = async () => {
         if (!watcherEnv) return;
         try {
-          const currentBlock = await provider.getBlockNumber();
+          // Use raw RPC call to bypass ethers' block number caching
+          const rpcResult = await (provider as ethers.JsonRpcProvider).send('eth_blockNumber', []);
+          const currentBlock = parseInt(rpcResult, 16);
           if (lastSyncedBlock >= currentBlock) return;
 
           const fromBlock = lastSyncedBlock + 1;
-          // Query ALL depository logs in range
           const filter = { address: addresses.depository, fromBlock, toBlock: currentBlock };
           const logs = await provider.getLogs(filter);
 
           if (logs.length > 0) {
-            // Parse logs into RawJEvent format using depository ABI
             const rawEvents: RawJEvent[] = [];
             for (const log of logs) {
               try {
                 const parsed = depositoryIface.parseLog({ topics: log.topics as string[], data: log.data });
                 if (!parsed) continue;
-                // Only process canonical events
                 if (!CANONICAL_J_EVENTS.includes(parsed.name as any)) continue;
-                // Convert ethers Result to plain object args
+                // Extract named args from ethers v6 Result (array-like, named keys
+                // not enumerable via Object.keys). Use positional fallback for unnamed params.
                 const args: Record<string, any> = {};
-                for (const key of Object.keys(parsed.args)) {
-                  if (/^\d+$/.test(key)) continue; // skip positional
-                  args[key] = parsed.args[key];
+                for (let idx = 0; idx < parsed.fragment.inputs.length; idx++) {
+                  const input = parsed.fragment.inputs[idx];
+                  const key = input.name || String(idx);
+                  args[key] = parsed.args[idx]; // Use positional index (always works)
+                  if (input.name) args[input.name] = parsed.args[idx];
                 }
                 rawEvents.push({
                   name: parsed.name,
@@ -802,7 +804,6 @@ export async function createRpcAdapter(
             }
 
             if (rawEvents.length > 0) {
-              // Group by block for proper batch processing
               const byBlock = new Map<number, RawJEvent[]>();
               for (const e of rawEvents) {
                 const bn = e.blockNumber ?? 0;
@@ -822,9 +823,18 @@ export async function createRpcAdapter(
             console.error(`🔭❌ [JAdapter:rpc] Sync error:`, error instanceof Error ? error.message : String(error));
           }
         }
-      }, WATCH_POLL_MS);
+      };
+
+      // Store pollNow for scenarios that need immediate sync
+      (adapter as any)._pollNow = doPoll;
+      watcherInterval = setInterval(doPoll, WATCH_POLL_MS);
 
       console.log(`🔭 [JAdapter:rpc] Watcher started (${WATCH_POLL_MS}ms polling)`);
+    },
+
+    async pollNow(): Promise<void> {
+      const fn = (adapter as any)._pollNow;
+      if (fn) await fn();
     },
 
     stopWatching(): void {
