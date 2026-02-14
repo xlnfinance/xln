@@ -47,13 +47,12 @@ export async function handleCreateSettlement(
     leftEntity,
     rightEntity,
     diffs,
-    [],
-    [],
-    sig,
-    undefined,
-    '0x',
-    0,
-    entityState.entityId
+    [],    // forgiveDebtsInTokenIds
+    sig,   // hanko signature
+    undefined, // entityProvider (use default)
+    '0x',  // hankoData
+    0,     // nonce
+    entityState.entityId // initiatorEntity
   );
 
   console.log(`✅ createSettlement: Added to jBatch for ${entityState.entityId.slice(-4)}`);

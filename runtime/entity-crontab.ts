@@ -47,10 +47,11 @@
  * Lost on page reload — periodic task polling serves as safety-net fallback.
  */
 
-import type { Env, EntityReplica, EntityInput, AccountMachine } from './types';
+import type { Env, EntityReplica, EntityInput, AccountMachine, SettlementDiff } from './types';
 import { QUOTE_EXPIRY_MS, REFERENCE_TOKEN_ID } from './types';
 import { isLeftEntity } from './entity-id-utils';
 import { resolveEntityProposerId } from './state-helpers';
+import { deriveDelta } from './account-utils';
 
 // ═══════════════════════════════════════════════════════════════════════
 // Types
@@ -535,54 +536,161 @@ async function broadcastBatchHandler(env: Env, replica: EntityReplica): Promise<
  * Reference: 2019src.txt lines 2973-3114
  */
 async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<EntityInput[]> {
+  // Only hubs should run the rebalance handler
+  if (!replica.state.hubRebalanceConfig) return [];
+
   const outputs: EntityInput[] = [];
   const signerId = resolveEntityProposerId(_env, replica.entityId, 'hub-rebalance');
-  const now = _env.timestamp;
-  const strategy = replica.state.hubRebalanceConfig?.matchingStrategy || 'hnw';
+  const now = replica.state.timestamp; // DETERMINISTIC: use entity's own timestamp
+  const strategy = replica.state.hubRebalanceConfig.matchingStrategy || 'hnw';
+  const hubId = replica.entityId;
 
-  // Static fee: hub computes from config. V1 = flat $5 USDT.
+  // Static fee: hub computes from config. V1 = flat $5 USDC.
   // TODO: server-side gas-aware fee computation
-  const computeFee = (_amount: bigint): bigint => 5_000_000n; // $5 USDT (6 decimals)
+  const computeFee = (_amount: bigint): bigint => 5n * 10n ** 18n; // $5 USDC (18 decimals, matches TOKEN_REGISTRY)
 
-  // Collect all actionable accounts
-  type ActionItem = {
+  // ═══════════════════════════════════════════════════════════════════
+  // PROCESS 1: Detect C→R targets (Hub withdraws excess collateral)
+  // Uses deriveDelta to find accounts where Hub has outCollateral > 0
+  // ═══════════════════════════════════════════════════════════════════
+  type C2RTarget = { counterpartyId: string; tokenId: number; amount: bigint };
+  const c2rTargets: C2RTarget[] = [];
+
+  for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
+    // Skip if workspace already exists (C→R or other settlement in progress)
+    if (accountMachine.settlementWorkspace) continue;
+
+    const hubIsLeft = isLeftEntity(hubId, counterpartyId);
+
+    for (const [tokenId, delta] of accountMachine.deltas.entries()) {
+      const derived = deriveDelta(delta, hubIsLeft);
+      // Hub's outCollateral = Hub's share of collateral pool (withdrawable)
+      if (derived.outCollateral > 0n) {
+        c2rTargets.push({ counterpartyId, tokenId, amount: derived.outCollateral });
+      }
+    }
+  }
+
+  // Sort C→R by strategy (biggest first for HNW)
+  if (strategy === 'hnw') {
+    c2rTargets.sort((a, b) => Number(b.amount - a.amount));
+  }
+
+  // Generate settle_propose for C→R targets
+  for (const target of c2rTargets) {
+    const hubIsLeft = isLeftEntity(hubId, target.counterpartyId);
+
+    // Build settlement diffs: Hub withdraws collateral to reserve
+    // Conservation: leftDiff + rightDiff + collateralDiff = 0
+    const diffs: SettlementDiff[] = [{
+      tokenId: target.tokenId,
+      leftDiff: hubIsLeft ? target.amount : 0n,      // Hub LEFT: reserve increases
+      rightDiff: hubIsLeft ? 0n : target.amount,      // Hub RIGHT: reserve increases
+      collateralDiff: -target.amount,                 // Collateral decreases
+      ondeltaDiff: hubIsLeft ? -target.amount : 0n,   // Hub LEFT: ondelta tracks collateral
+    }];
+
+    outputs.push({
+      entityId: hubId,
+      signerId,
+      entityTxs: [{
+        type: 'settle_propose',
+        data: {
+          counterpartyEntityId: target.counterpartyId,
+          diffs,
+          memo: `Hub C→R: withdraw ${target.amount} token ${target.tokenId}`,
+        },
+      }],
+    });
+    console.log(`🔄 C→R propose: withdraw ${target.amount} from ${target.counterpartyId.slice(-4)} (token ${target.tokenId})`);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // PROCESS 2: Execute ready settlements (counterparty signed → jBatch)
+  // Detect workspaces where counterparty hanko is present → settle_execute
+  // ═══════════════════════════════════════════════════════════════════
+  for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
+    const ws = accountMachine.settlementWorkspace;
+    if (!ws) continue;
+
+    // Hub only needs counterparty's hanko — batch-level hanko covers Hub's auth.
+    // Check for counterparty hanko directly (not workspace status).
+    const hubIsLeftHere = isLeftEntity(hubId, counterpartyId);
+    const counterpartyHanko = hubIsLeftHere ? ws.rightHanko : ws.leftHanko;
+    if (!counterpartyHanko) continue;
+
+    outputs.push({
+      entityId: hubId,
+      signerId,
+      entityTxs: [{
+        type: 'settle_execute',
+        data: { counterpartyEntityId: counterpartyId },
+      }],
+    });
+    console.log(`✅ C→R execute: counterparty signed, executing with ${counterpartyId.slice(-4)}`);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // PROCESS 3: R→C with effective reserve (Hub deposits for users)
+  // Effective reserve = actual reserve + sum(signed C→R amounts in jBatch)
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Calculate effective reserve: actual + pending C→R amounts
+  const effectiveReserves = new Map<string, bigint>();
+  for (const [tokenKey, amount] of replica.state.reserves.entries()) {
+    effectiveReserves.set(tokenKey, amount);
+  }
+  // Add pending C→R from jBatch (signed settlements that will release collateral → reserve)
+  if (replica.state.jBatchState?.batch) {
+    const batch = replica.state.jBatchState.batch;
+    if (batch.collateralToReserve) {
+      for (const c2r of batch.collateralToReserve) {
+        const tokenKey = String(c2r.tokenId);
+        const current = effectiveReserves.get(tokenKey) || 0n;
+        effectiveReserves.set(tokenKey, current + c2r.amount);
+      }
+    }
+  }
+
+  // Collect R→C actions (existing quote-based flow)
+  type R2CItem = {
     counterpartyId: string;
     tokenId: number;
     amount: bigint;
     quote?: { quoteId: number; feeAmount: bigint; feeTokenId: number };
   };
-  const toExecute: ActionItem[] = [];
-  const toQuote: ActionItem[] = [];
+  const toExecute: R2CItem[] = [];
+  const toQuote: R2CItem[] = [];
 
   for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
     // Phase 1: Check for accepted, non-expired quotes → ready to execute
     const quote = accountMachine.activeRebalanceQuote;
     if (quote && quote.accepted && now <= quote.quoteId + QUOTE_EXPIRY_MS) {
-      // Check hub has enough reserve
-      const currentReserve = replica.state.reserves.get(String(quote.tokenId)) || 0n;
-      if (currentReserve >= quote.amount) {
+      // Check hub has enough effective reserve
+      const reserve = effectiveReserves.get(String(quote.tokenId)) || 0n;
+      if (reserve >= quote.amount) {
         toExecute.push({
           counterpartyId,
           tokenId: quote.tokenId,
           amount: quote.amount,
           quote: { quoteId: quote.quoteId, feeAmount: quote.feeAmount, feeTokenId: quote.feeTokenId },
         });
+        // Deduct from effective reserve (prevent double-spend in same cycle)
+        effectiveReserves.set(String(quote.tokenId), reserve - quote.amount);
       } else {
-        console.log(`⚠️  Insufficient reserve for ${counterpartyId.slice(-4)}: need ${quote.amount}, have ${currentReserve}`);
+        console.log(`⚠️  Insufficient effective reserve for ${counterpartyId.slice(-4)}: need ${quote.amount}, have ${reserve}`);
       }
-      continue; // Don't re-quote while we have an active accepted quote
+      continue;
     }
 
-    // Clear expired quotes
-    if (quote && now > quote.quoteId + QUOTE_EXPIRY_MS) {
-      accountMachine.activeRebalanceQuote = undefined;
-    }
+    // Expired quotes: fall through to Phase 2b so account can get a new quote.
+    // Quote clearing happens via deposit_collateral handler or new quote replacing old.
 
     // Phase 2a: Check pending manual requests → need quote
     const pendingReq = accountMachine.pendingRebalanceRequest;
     if (pendingReq) {
-      const currentReserve = replica.state.reserves.get(String(pendingReq.tokenId)) || 0n;
-      if (currentReserve >= pendingReq.targetAmount) {
+      const reserve = effectiveReserves.get(String(pendingReq.tokenId)) || 0n;
+      if (reserve >= pendingReq.targetAmount) {
         toQuote.push({
           counterpartyId,
           tokenId: pendingReq.tokenId,
@@ -592,21 +700,28 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
       continue;
     }
 
-    // Phase 2b: Check absolute policy triggers (collateral < softLimit)
+    // Phase 2b: Check absolute policy triggers (uncollateralized credit > softLimit)
+    // 2019 ref: "finding who has uninsured balances AND gone beyond soft limit"
+    // uncollateralizedCredit = max(0, hubDebtToUser - collateral)
+    const hubIsLeftP2 = isLeftEntity(hubId, counterpartyId);
     for (const [tokenId, policy] of accountMachine.rebalancePolicy.entries()) {
-      // Skip manual mode
       if (policy.softLimit === policy.hardLimit) continue;
 
       const delta = accountMachine.deltas.get(tokenId);
       if (!delta) continue;
 
-      const currentCollateral = delta.collateral;
-      if (currentCollateral < policy.softLimit) {
-        const needed = policy.softLimit - currentCollateral;
-        const currentReserve = replica.state.reserves.get(String(tokenId)) || 0n;
-        if (currentReserve >= needed) {
-          // Don't send new quote if there's already an active one for this token
-          if (quote && quote.tokenId === tokenId) continue;
+      const totalDelta = delta.ondelta + delta.offdelta;
+      // Hub's debt to user: when Hub LEFT and totalDelta < 0, or Hub RIGHT and totalDelta > 0
+      const hubDebt = hubIsLeftP2 ? (totalDelta < 0n ? -totalDelta : 0n) : (totalDelta > 0n ? totalDelta : 0n);
+      const uncollateralized = hubDebt > delta.collateral ? hubDebt - delta.collateral : 0n;
+
+      if (uncollateralized > policy.softLimit) {
+        // Deposit enough to fully collateralize (capped at reserve)
+        const needed = uncollateralized;
+        const reserve = effectiveReserves.get(String(tokenId)) || 0n;
+        if (reserve >= needed) {
+          // Skip if non-expired quote already exists for this token
+          if (quote && quote.tokenId === tokenId && now <= quote.quoteId + QUOTE_EXPIRY_MS) continue;
           toQuote.push({ counterpartyId, tokenId, amount: needed });
         }
       }
@@ -618,42 +733,34 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
     toExecute.sort((a, b) => Number(b.amount - a.amount));
     toQuote.sort((a, b) => Number(b.amount - a.amount));
   } else {
-    // fifo: sort by quoteId ascending (oldest first)
     toExecute.sort((a, b) => (a.quote?.quoteId || 0) - (b.quote?.quoteId || 0));
-    // For quotes, order doesn't matter much (all new)
   }
 
-  // Execute accepted quotes: deposit_collateral + j_broadcast + fee
+  // Execute accepted quotes: deposit_collateral + fee (no j_broadcast per-item)
   for (const item of toExecute) {
     outputs.push({
-      entityId: replica.entityId,
+      entityId: hubId,
       signerId,
-      entityTxs: [
-        {
-          type: 'deposit_collateral',
-          data: {
-            counterpartyId: item.counterpartyId,
-            tokenId: item.tokenId,
-            amount: item.amount,
-            rebalanceQuoteId: item.quote!.quoteId,
-            rebalanceFeeTokenId: item.quote!.feeTokenId,
-            rebalanceFeeAmount: item.quote!.feeAmount,
-          },
+      entityTxs: [{
+        type: 'deposit_collateral',
+        data: {
+          counterpartyId: item.counterpartyId,
+          tokenId: item.tokenId,
+          amount: item.amount,
+          rebalanceQuoteId: item.quote!.quoteId,
+          rebalanceFeeTokenId: item.quote!.feeTokenId,
+          rebalanceFeeAmount: item.quote!.feeAmount,
         },
-        {
-          type: 'j_broadcast',
-          data: {},
-        },
-      ],
+      }],
     });
-    console.log(`✅ Executing rebalance: ${item.amount} token ${item.tokenId} → ${item.counterpartyId.slice(-4)} (fee: ${item.quote!.feeAmount})`);
+    console.log(`✅ R→C execute: ${item.amount} token ${item.tokenId} → ${item.counterpartyId.slice(-4)} (fee: ${item.quote!.feeAmount})`);
   }
 
-  // Send new quotes for accounts that need rebalancing
+  // Send new quotes for accounts that need R→C
   for (const item of toQuote) {
     const fee = computeFee(item.amount);
     outputs.push({
-      entityId: replica.entityId,
+      entityId: hubId,
       signerId,
       entityTxs: [{
         type: 'sendRebalanceQuote',
@@ -666,7 +773,7 @@ async function hubRebalanceHandler(_env: Env, replica: EntityReplica): Promise<E
         },
       }],
     });
-    console.log(`💰 Sent quote: ${item.amount} token ${item.tokenId} → ${item.counterpartyId.slice(-4)} (fee: ${fee})`);
+    console.log(`💰 R→C quote: ${item.amount} token ${item.tokenId} → ${item.counterpartyId.slice(-4)} (fee: ${fee})`);
   }
 
   return outputs;

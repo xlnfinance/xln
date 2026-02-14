@@ -309,6 +309,44 @@ export function createDisputeProofHash(
 }
 
 /**
+ * Create dispute proof hash with explicit cooperativeNonce.
+ * Used for nonce+1 pre-signing during settlement: after a settlement is applied
+ * on-chain, cooperativeNonce is incremented. Proofs signed at the old nonce
+ * become invalid. Pre-signing at nonce+1 ensures valid dispute proofs exist
+ * immediately after settlement.
+ *
+ * proofBodyHash is UNCHANGED by settlement (settlement modifies ondelta/collateral,
+ * but proofBody only includes offdelta). So the same proofBodyHash can be re-signed
+ * at the new nonce.
+ */
+export function createDisputeProofHashWithNonce(
+  accountMachine: AccountMachine,
+  proofBodyHash: string,
+  depositoryAddress: string,
+  cooperativeNonce: number,
+  disputeNonce?: number,
+): string {
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  const chKey = ethers.solidityPacked(
+    ['bytes32', 'bytes32'],
+    [accountMachine.leftEntity, accountMachine.rightEntity]
+  );
+  const MESSAGE_TYPE_DISPUTE_PROOF = 1;
+  const encodedMessage = abiCoder.encode(
+    ['uint256', 'address', 'bytes', 'uint256', 'uint256', 'bytes32'],
+    [
+      MESSAGE_TYPE_DISPUTE_PROOF,
+      depositoryAddress,
+      chKey,
+      cooperativeNonce,
+      disputeNonce ?? accountMachine.proofHeader.disputeNonce,
+      proofBodyHash,
+    ]
+  );
+  return ethers.keccak256(encodedMessage);
+}
+
+/**
  * Default dispute config (conservative)
  * 2 * 10 = 20 blocks delay for both sides
  */
@@ -362,6 +400,7 @@ export function createSettlementHashWithNonce(
       nonce,
       diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]),
       [], // forgiveDebtsInTokenIds (empty for now)
+      [], // subChannelUpdates (empty for now)
     ]
   );
 

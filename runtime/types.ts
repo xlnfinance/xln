@@ -647,6 +647,15 @@ export type EntityTx =
       };
     }
   | {
+      // Declare entity as hub: sets rebalance config + routing fees, announces to gossip
+      type: 'setHubConfig';
+      data: {
+        matchingStrategy?: 'hnw' | 'fifo'; // Default: 'hnw'
+        routingFeePPM?: number;             // Default: 100 (0.01%)
+        baseFee?: bigint;                   // Default: 0n
+      };
+    }
+  | {
       // Hub sends rebalance quote to bilateral account (pushes rebalance_quote AccountTx)
       type: 'sendRebalanceQuote';
       data: {
@@ -655,6 +664,17 @@ export type EntityTx =
         amount: bigint;
         feeTokenId: number;
         feeAmount: bigint;
+      };
+    }
+  | {
+      // User sets rebalance policy on bilateral account (pushes set_rebalance_policy AccountTx)
+      type: 'setRebalancePolicy';
+      data: {
+        counterpartyEntityId: string;
+        tokenId: number;
+        softLimit: bigint;
+        hardLimit: bigint;
+        maxAcceptableFee: bigint;
       };
     }
   | {
@@ -1191,7 +1211,7 @@ export interface SettlementWorkspace {
 
   // Metadata
   initiatedBy: 'left' | 'right';              // Who created the workspace
-  status: 'draft' | 'awaiting_counterparty' | 'ready_to_submit';
+  status: 'draft' | 'awaiting_counterparty' | 'ready_to_submit' | 'submitted';
   memo?: string;                              // Human-readable description
   version: number;                            // Increments on each update
   createdAt: number;                          // Timestamp when created
@@ -1204,6 +1224,18 @@ export interface SettlementWorkspace {
 
   // Nonce tracking (for invalidating old dispute proofs)
   cooperativeNonceAtSign?: number;            // coopNonce when signing
+
+  // Post-settlement dispute proofs (nonce+1)
+  // Settlement increments on-chain cooperativeNonce. Old dispute proofs become invalid.
+  // These pre-signed proofs at nonce+1 become active after settlement passes.
+  // proofBodyHash is unchanged by settlement (settlement modifies ondelta/collateral,
+  // not offdelta — and proofBody only hashes offdelta).
+  postSettlementDisputeProof?: {
+    leftHanko?: HankoString;                  // Left's dispute hanko at nonce+1
+    rightHanko?: HankoString;                 // Right's dispute hanko at nonce+1
+    proofBodyHash: string;                    // Same as pre-settlement (offdelta unchanged)
+    cooperativeNonce: number;                 // = onChainSettlementNonce + 1
+  };
 }
 
 // Derived account balance information per token
@@ -1521,16 +1553,19 @@ export interface EntityState {
   hubRebalanceConfig?: HubRebalanceConfig;
 }
 
-/** Hub-level rebalance config (matching strategy, not per-account) */
+/** Hub-level config: rebalance strategy + routing fees. Set via setHubConfig EntityTx. */
 export interface HubRebalanceConfig {
   matchingStrategy: 'hnw' | 'fifo'; // hnw = biggest first, fifo = oldest quote first
+  routingFeePPM: number;             // Routing fee in parts per million (0-10000 = 0%-1%)
+  baseFee: bigint;                   // Fixed fee per routed payment (smallest unit)
 }
 
 /** Per-token rebalance policy (stored per-token in AccountMachine) */
 export interface RebalancePolicy {
-  softLimit: bigint;         // Auto-trigger threshold
-  hardLimit: bigint;         // Never exceed
-  maxAcceptableFee: bigint;  // Auto-accept quotes with fee ≤ this (USDT)
+  softLimit: bigint;         // Trigger when uncollateralized credit > this
+  hardLimit: bigint;         // Max uncollateralized credit (emergency threshold)
+  maxAcceptableFee: bigint;  // Auto-accept quotes with fee ≤ this
+  setByLeft?: boolean;       // Who set the policy (for auth: fee-payer should set maxAcceptableFee)
 }
 
 /** Active rebalance quote (one per account, quoteId = env.timestamp) */
@@ -1543,12 +1578,12 @@ export interface RebalanceQuote {
   accepted: boolean;    // true if auto-accepted or manually accepted
 }
 
-// Rebalance constants
-export const REFERENCE_TOKEN_ID = 1;               // USDT (stable, 6 decimals)
-export const DEFAULT_SOFT_LIMIT = 500_000_000n;     // $500 USDT (6 decimals)
-export const DEFAULT_HARD_LIMIT = 10_000_000_000n;  // $10,000 USDT
-export const DEFAULT_MAX_FEE = 15_000_000n;         // $15 USDT
-export const QUOTE_EXPIRY_MS = 300_000;             // 5 minutes
+// Rebalance constants (all amounts in 18-decimal base, matching TOKEN_REGISTRY)
+export const REFERENCE_TOKEN_ID = 1;                              // USDC (stable, 18 decimals in registry)
+export const DEFAULT_SOFT_LIMIT = 500n * 10n ** 18n;              // $500 uncollateralized credit trigger
+export const DEFAULT_HARD_LIMIT = 10_000n * 10n ** 18n;           // $10,000 max uncollateralized credit
+export const DEFAULT_MAX_FEE = 15n * 10n ** 18n;                  // $15 max acceptable fee
+export const QUOTE_EXPIRY_MS = 300_000;                           // 5 minutes
 
 /** Aggregated swap order entry at E-Machine level */
 export interface SwapBookEntry {
