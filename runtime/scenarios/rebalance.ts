@@ -12,15 +12,13 @@
  */
 
 import type { Env, EntityInput, EntityReplica, Delta } from '../types';
-import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from '../evm';
-import { BrowserVMProvider } from '../jadapter';
-import { getProcess, getApplyRuntimeInput, usd, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
-import { attachBrowserVMAdapter, createJurisdictionConfig } from './boot';
+import { getProcess, getApplyRuntimeInput, usd, ensureSignerKeysFromSeed } from './helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { attachEventEmitters } from '../env-events';
-import { deriveDelta, isLeft } from '../account-utils';
+import { deriveDelta } from '../account-utils';
 import { isLeftEntity } from '../entity-id-utils';
-import { ethers } from 'ethers';
+import { createJAdapter } from '../jadapter';
+import { encodeBoard, hashBoard } from '../entity-factory';
 
 const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(200_000); // $200K
@@ -87,9 +85,10 @@ export async function runRebalanceScenario(): Promise<void> {
   const applyRuntimeInput = await getApplyRuntimeInput();
 
   // ══════════════════════════════════════════════════════════════
-  // SETUP: BrowserVM + Jurisdiction
+  // SETUP: Real JAdapter (anvil RPC)
   // ══════════════════════════════════════════════════════════════
-  console.log('\n📦 Setting up BrowserVM...');
+  const rpcUrl = globalThis.process?.env?.ANVIL_RPC || 'http://localhost:18545';
+  console.log(`\n📦 Setting up JAdapter (rpc → ${rpcUrl})...`);
 
   let env: Env = {
     timestamp: 1000000,
@@ -107,31 +106,27 @@ export async function runRebalanceScenario(): Promise<void> {
 
   ensureSignerKeysFromSeed(env, ['2','3','4','5','6'], 'rebalance');
 
-  // Create BrowserVM
-  const browserVM = new BrowserVMProvider();
-  await browserVM.init();
+  // Create RPC JAdapter + deploy contracts on fresh anvil
+  const jadapter = await createJAdapter({ mode: 'rpc', chainId: 31337, rpcUrl });
+  await jadapter.deployStack();
+  console.log(`✅ JAdapter created, depository: ${jadapter.addresses.depository}`);
 
-  // Store browserVM in env + set jurisdiction override
-  const depositoryAddress = browserVM.getDepositoryAddress();
-  setBrowserVMJurisdiction(env, depositoryAddress, browserVM);
-  console.log('✅ BrowserVM created, depository:', depositoryAddress);
-
-  // Register entities with EntityProvider (2..6)
-  if (browserVM.registerEntitiesWithSigners) {
-    const entityNumbers = await browserVM.registerEntitiesWithSigners(['2', '3', '4', '5', '6']);
-    console.log(`✅ Registered entities: [${entityNumbers.join(', ')}]`);
+  // Register 5 entities on-chain via EntityProvider
+  const boardHashes: string[] = [];
+  for (let i = 2; i <= 6; i++) {
+    const config = {
+      mode: 'proposer-based' as const,
+      threshold: 1n,
+      validators: [String(i)],
+      shares: { [String(i)]: 1n },
+    };
+    boardHashes.push(hashBoard(encodeBoard(config)));
   }
+  const { entityNumbers } = await jadapter.registerNumberedEntitiesBatch(boardHashes);
+  console.log(`✅ Registered entities on-chain: [${entityNumbers.join(', ')}]`);
 
-  // Get or create jurisdiction config
-  let arrakis = (await getAvailableJurisdictions()).find(j => j.name.toLowerCase() === 'arrakis');
-  if (!arrakis) {
-    arrakis = createJurisdictionConfig('Rebalance Demo', depositoryAddress);
-    (arrakis as any).entityProviderAddress = browserVM.getEntityProviderAddress();
-  }
-  console.log(`📋 Jurisdiction: ${arrakis.name}`);
-
-  // Create jReplica manually (like lock-ahb.ts)
-  const jReplicaName = arrakis.name;
+  // Create jReplica + attach jadapter
+  const jReplicaName = 'Rebalance Demo';
   const jReplica = {
     name: jReplicaName,
     blockNumber: 0n,
@@ -141,17 +136,29 @@ export async function runRebalanceScenario(): Promise<void> {
     lastBlockTimestamp: env.timestamp,
     position: { x: 0, y: 600, z: 0 },
     contracts: {
-      depository: arrakis.depositoryAddress,
-      entityProvider: arrakis.entityProviderAddress,
+      depository: jadapter.addresses.depository,
+      entityProvider: jadapter.addresses.entityProvider,
     },
   };
   env.jReplicas.set(jReplicaName, jReplica);
   env.activeJurisdiction = jReplicaName;
 
-  // Attach JAdapter for BrowserVM events
-  await attachBrowserVMAdapter(env, jReplicaName, browserVM);
-  console.log('✅ JAdapter attached');
+  // Attach jadapter to jReplica + start watching for events
+  (jReplica as any).jadapter = jadapter;
+  (jReplica as any).depositoryAddress = jadapter.addresses.depository;
+  (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+  jadapter.startWatching(env);
+  console.log('✅ JAdapter attached + watching');
   await process(env);
+
+  // Jurisdiction config for entity creation
+  const jurisdictionConfig = {
+    name: jReplicaName,
+    chainId: 31337,
+    entityProviderAddress: jadapter.addresses.entityProvider,
+    depositoryAddress: jadapter.addresses.depository,
+    rpc: rpcUrl,
+  };
 
   // ══════════════════════════════════════════════════════════════
   // CREATE 5 ENTITIES: Hub, Alice, Bob, Charlie, Dave
@@ -180,7 +187,7 @@ export async function runRebalanceScenario(): Promise<void> {
           threshold: 1n,
           validators: [signer],
           shares: { [signer]: 1n },
-          jurisdiction: arrakis
+          jurisdiction: jurisdictionConfig
         }
       }
     });
@@ -190,65 +197,31 @@ export async function runRebalanceScenario(): Promise<void> {
   const [hub, alice, bob, charlie, dave] = entities;
   console.log(`✅ Created: ${entities.map(e => e.name).join(', ')}`);
 
-  // Prefund signer wallets
-  const { getCachedSignerPrivateKey } = await import('../account-crypto');
-  for (const entity of entities) {
-    const privateKey = getCachedSignerPrivateKey(entity.signer);
-    if (!privateKey) throw new Error(`Missing key for ${entity.name}`);
-    const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
-    await browserVM.fundSignerWallet(wallet.address, SIGNER_PREFUND);
+  // ══════════════════════════════════════════════════════════════
+  // FUND HUB + USERS via debugFundReserves (on-chain)
+  // ══════════════════════════════════════════════════════════════
+  console.log('\n💰 Funding Hub and users via on-chain debugFundReserves...');
+
+  // Helper: poll on-chain events and feed into runtime
+  const syncChain = async () => {
+    if (jadapter.pollNow) await jadapter.pollNow();
+    env.timestamp += 150;
+    await process(env);
+    await processJEvents(env);
+    await process(env);
+  };
+
+  // Fund Hub with $200K via debugFundReserves (mints directly into depository)
+  await jadapter.debugFundReserves(hub.id, USDC_TOKEN_ID, HUB_INITIAL_RESERVE);
+  // Fund each user with $25K
+  for (const user of [alice, bob, charlie, dave]) {
+    await jadapter.debugFundReserves(user.id, USDC_TOKEN_ID, USER_RESERVE);
   }
+  await syncChain(); // Poll all ReserveUpdated events at once
 
-  // ══════════════════════════════════════════════════════════════
-  // FUND HUB + USERS via R2R
-  // ══════════════════════════════════════════════════════════════
-  console.log('\n💰 Funding Hub and users...');
-
-  const hubKey = getCachedSignerPrivateKey(hub.signer);
-  if (!hubKey) throw new Error('Hub key missing');
-  const hubWallet = new ethers.Wallet(ethers.hexlify(hubKey));
-
-  const usdcAddr = browserVM.getTokenAddress('USDC');
-  if (!usdcAddr) throw new Error('USDC not found');
-
-  // Fund Hub with $100K
-  await browserVM.approveErc20(hubKey, usdcAddr, browserVM.getDepositoryAddress(), HUB_INITIAL_RESERVE);
-  await browserVM.externalTokenToReserve(hubKey, hub.id, usdcAddr, HUB_INITIAL_RESERVE);
-  env.timestamp += 150; // Past blockDelayMs (100ms)
-  await process(env);
-  await processJEvents(env);
-  await process(env);
-
-  // Hub → users R2R ($25K each)
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [
-      { type: 'reserve_to_reserve', data: { toEntityId: alice.id, tokenId: USDC_TOKEN_ID, amount: USER_RESERVE } },
-      { type: 'reserve_to_reserve', data: { toEntityId: bob.id, tokenId: USDC_TOKEN_ID, amount: USER_RESERVE } },
-      { type: 'reserve_to_reserve', data: { toEntityId: charlie.id, tokenId: USDC_TOKEN_ID, amount: USER_RESERVE } },
-      { type: 'reserve_to_reserve', data: { toEntityId: dave.id, tokenId: USDC_TOKEN_ID, amount: USER_RESERVE } },
-    ]
-  }]);
-
-  // Broadcast R2R batch
-  await process(env, [{
-    entityId: hub.id,
-    signerId: hub.signer,
-    entityTxs: [{ type: 'j_broadcast', data: {} }]
-  }]);
-
-  env.timestamp += 150; // Past blockDelayMs
-  await process(env); // Triggers J-processor → BrowserVM tx
-  env.timestamp += 150;
-  await process(env); // Events arrive from BrowserVM
-  await processJEvents(env);
-  await process(env);
-
-  // Verify reserves (Hub: $200K - 4*$25K = $100K)
+  // Verify reserves (Hub: $200K)
   const hubReserve = findReplica(env, hub.id)[1].state.reserves.get(String(USDC_TOKEN_ID)) || 0n;
-  const expectedHubReserve = HUB_INITIAL_RESERVE - USER_RESERVE * 4n;
-  assert(hubReserve === expectedHubReserve, `Hub reserve wrong: ${hubReserve}, expected ${expectedHubReserve}`, env);
+  assert(hubReserve === HUB_INITIAL_RESERVE, `Hub reserve wrong: ${hubReserve}, expected ${HUB_INITIAL_RESERVE}`, env);
   console.log(`✅ Funding complete: Hub=$${hubReserve / 10n**18n}K, Users=$${USER_RESERVE / 10n**18n}K each`);
 
   // ══════════════════════════════════════════════════════════════
@@ -349,12 +322,10 @@ export async function runRebalanceScenario(): Promise<void> {
     entityTxs: [{ type: 'j_broadcast' as const, data: {} }],
   }]);
 
-  // Step 3: time advance → J-processor → BrowserVM tx → events
+  // Step 3: J-processor → on-chain tx → poll events
   env.timestamp += 150;
-  await process(env);
-  env.timestamp += 150;
-  await process(env);
-  await processJEvents(env);
+  await process(env); // J-processor fires batch
+  await syncChain();  // Poll events + process
   await converge(env);
 
   // Verify collateral
@@ -578,12 +549,10 @@ export async function runRebalanceScenario(): Promise<void> {
       entityTxs: [{ type: 'j_broadcast', data: {} }]
     }]);
 
-    // Process J-block: time advance → processor → events
+    // Process J-block: processor → on-chain tx → poll events
     advanceTime(150);
-    await process(env); // J-processor fires BrowserVM tx
-    advanceTime(150);
-    await process(env); // Events arrive from BrowserVM
-    await processJEvents(env);
+    await process(env); // J-processor fires on-chain tx
+    await syncChain();  // Poll events + process
     await converge(env);
   } else {
     console.log('  ⚠️  jBatch empty — running one more cycle...');
@@ -614,10 +583,8 @@ export async function runRebalanceScenario(): Promise<void> {
         entityTxs: [{ type: 'j_broadcast', data: {} }]
       }]);
       advanceTime(150);
-      await process(env);
-      advanceTime(150);
-      await process(env);
-      await processJEvents(env);
+      await process(env); // J-processor fires on-chain tx
+      await syncChain();  // Poll events + process
       await converge(env);
     }
   }
@@ -681,6 +648,9 @@ export async function runRebalanceScenario(): Promise<void> {
   console.log('\n' + '═'.repeat(80));
   console.log('  REBALANCE SCENARIO COMPLETE');
   console.log('═'.repeat(80));
+
+  // Cleanup
+  await jadapter.close();
 }
 
 // Run if executed directly

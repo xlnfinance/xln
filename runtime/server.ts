@@ -2493,6 +2493,15 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     })), relayUrl);
   }
 
+  // Auto-set hubRebalanceConfig for all hub entities (direct state mutation at boot)
+  for (const hubEntityId of hubEntityIds) {
+    const replica = getEntityReplicaById(env, hubEntityId);
+    if (replica?.state) {
+      replica.state.hubRebalanceConfig = { matchingStrategy: 'hnw', routingFeePPM: 1000, baseFee: 5n * 10n ** 18n };
+      console.log(`[XLN] Hub ${hubEntityId.slice(-8)} rebalance config set (hnw, 1000ppm)`);
+    }
+  }
+
   // Wire relay-router + local delivery
   const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
   const routerConfig: RelayRouterConfig = {
