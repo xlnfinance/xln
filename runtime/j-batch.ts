@@ -57,6 +57,7 @@ export interface JBatch {
     counterparty: string;
     tokenId: number;
     amount: bigint;
+    nonce: number; // signed nonce (must be > stored account nonce)
     sig: string; // counterparty hanko (still bilateral)
   }>;
 
@@ -78,23 +79,18 @@ export interface JBatch {
     nonce: number; // Settlement nonce
   }>;
 
-  // Dispute proofs (active in Depository.sol)
-  cooperativeUpdate: never[];  // Legacy - not used
-  cooperativeDisputeProof: never[];  // Legacy - not used
+  // Dispute proofs (active in Depository.sol) - unified nonce model
   disputeStarts: Array<{
     counterentity: string;
-    cooperativeNonce: number;
-    disputeNonce: number;
+    nonce: number; // unified nonce (must be > stored account nonce)
     proofbodyHash: string;
     sig: string;
     initialArguments: string;
   }>;
   disputeFinalizations: Array<{
     counterentity: string;
-    initialCooperativeNonce: number;
-    finalCooperativeNonce: number;
-    initialDisputeNonce: number;
-    finalDisputeNonce: number;
+    initialNonce: number; // nonce when dispute was started
+    finalNonce: number; // nonce of the counter-proof (must be > initialNonce)
     initialProofbodyHash: string;
     finalProofbody: any;  // ProofBody struct
     finalArguments: string;
@@ -121,18 +117,38 @@ export interface JBatch {
   hub_id: number;
 }
 
+/** Batch lifecycle: empty → accumulating → broadcasting → sent → confirmed/failed */
+export type JBatchStatus = 'empty' | 'accumulating' | 'broadcasting' | 'sent' | 'confirmed' | 'failed';
+
 /**
  * JBatch state for an entity
  */
 export interface JBatchState {
   batch: JBatch;
-  jurisdiction: JurisdictionConfig | null; // Cached jurisdiction for this entity
-  lastBroadcast: number; // Timestamp of last broadcast
-  broadcastCount: number; // Total broadcasts
-  failedAttempts: number; // Failed broadcast attempts (for exponential backoff)
-  // PENDING BROADCAST: Set true on j_broadcast, cleared on HankoBatchProcessed or j_clear_batch
-  // When true, new operations CANNOT be added to the batch (must wait for finalization or clear)
+  jurisdiction: JurisdictionConfig | null;
+  lastBroadcast: number;
+  broadcastCount: number;
+  failedAttempts: number;
   pendingBroadcast: boolean;
+
+  // Lifecycle tracking
+  status: JBatchStatus;
+  batchHash?: string; // Hash of encoded batch (for hanko signing / retry)
+  encodedBatch?: string; // ABI-encoded batch (for retry with different gas)
+  broadcastedAt?: number; // Timestamp when batch was sent to chain
+  txHash?: string; // On-chain transaction hash (set when submitted)
+  entityNonce?: number; // Entity nonce used for this batch (for replay prevention)
+}
+
+/** Completed batch record (stored in entity state history) */
+export interface CompletedBatch {
+  batchHash: string;
+  txHash: string;
+  status: 'confirmed' | 'failed';
+  broadcastedAt: number;
+  confirmedAt: number;
+  opCount: number; // Total operations in batch
+  entityNonce: number;
 }
 
 /**
@@ -145,9 +161,7 @@ export function createEmptyBatch(): JBatch {
     reserveToCollateral: [],
     collateralToReserve: [],
     settlements: [],
-    cooperativeUpdate: [],
-    cooperativeDisputeProof: [],
-    disputeStarts: [], // Match Solidity: InitialDisputeProof[]
+    disputeStarts: [],
     disputeFinalizations: [], // Match Solidity: FinalDisputeProof[]
     externalTokenToReserve: [],
     reserveToExternalToken: [],
@@ -192,8 +206,6 @@ export function cloneJBatch(batch: JBatch): JBatch {
       reserveToExternalToken: batch.reserveToExternalToken.map(op => ({ ...op })),
       revealSecrets: batch.revealSecrets.map(op => ({ ...op })),
       hub_id: batch.hub_id,
-      cooperativeUpdate: [],  // Legacy - not used
-      cooperativeDisputeProof: [],  // Legacy - not used
     };
   }
 }
@@ -205,10 +217,10 @@ const DEPOSITORY_BATCH_ABI =
     'tuple(uint256 tokenId, uint256 amount)[] flashloans,' +
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToReserve,' +
     'tuple(uint256 tokenId, bytes32 receivingEntity, tuple(bytes32 entity, uint256 amount)[] pairs)[] reserveToCollateral,' +
-    'tuple(bytes32 counterparty, uint256 tokenId, uint256 amount, bytes sig)[] collateralToReserve,' +
+    'tuple(bytes32 counterparty, uint256 tokenId, uint256 amount, uint256 nonce, bytes sig)[] collateralToReserve,' +
     'tuple(bytes32 leftEntity, bytes32 rightEntity, tuple(uint256 tokenId, int256 leftDiff, int256 rightDiff, int256 collateralDiff, int256 ondeltaDiff)[] diffs, uint256[] forgiveDebtsInTokenIds, bytes sig, address entityProvider, bytes hankoData, uint256 nonce)[] settlements,' +
-    'tuple(bytes32 counterentity, uint256 cooperativeNonce, uint256 disputeNonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts,' +
-    'tuple(bytes32 counterentity, uint256 initialCooperativeNonce, uint256 finalCooperativeNonce, uint256 initialDisputeNonce, uint256 finalDisputeNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations,' +
+    'tuple(bytes32 counterentity, uint256 nonce, bytes32 proofbodyHash, bytes sig, bytes initialArguments)[] disputeStarts,' +
+    'tuple(bytes32 counterentity, uint256 initialNonce, uint256 finalNonce, bytes32 initialProofbodyHash, tuple(int256[] offdeltas, uint256[] tokenIds, tuple(address transformerAddress, bytes encodedBatch, tuple(uint256 deltaIndex, uint256 rightAllowance, uint256 leftAllowance)[] allowances)[] transformers) finalProofbody, bytes finalArguments, bytes initialArguments, bytes sig, bool startedByLeft, uint256 disputeUntilBlock, bool cooperative)[] disputeFinalizations,' +
     'tuple(bytes32 entity, address contractAddress, uint96 externalTokenId, uint8 tokenType, uint256 internalTokenId, uint256 amount)[] externalTokenToReserve,' +
     'tuple(bytes32 receivingEntity, uint256 tokenId, uint256 amount)[] reserveToExternalToken,' +
     'tuple(address transformer, bytes32 secret)[] revealSecrets,' +
@@ -297,10 +309,10 @@ export function preflightBatchForE2(
       issues.push(`cooperative dispute finalize missing sig (${f.counterentity.slice(-4)})`);
     }
     if (!f.cooperative && f.sig && f.sig !== '0x') {
-      const initialNonce = typeof f.initialDisputeNonce === 'bigint' ? f.initialDisputeNonce : BigInt(f.initialDisputeNonce);
-      const finalNonce = typeof f.finalDisputeNonce === 'bigint' ? f.finalDisputeNonce : BigInt(f.finalDisputeNonce);
+      const initialNonce = typeof f.initialNonce === 'bigint' ? f.initialNonce : BigInt(f.initialNonce);
+      const finalNonce = typeof f.finalNonce === 'bigint' ? f.finalNonce : BigInt(f.finalNonce);
       if (initialNonce >= finalNonce) {
-        issues.push(`counterdispute nonce order (${f.counterentity.slice(-4)})`);
+        issues.push(`dispute finalization nonce order (${f.counterentity.slice(-4)})`);
       }
     }
   }
@@ -326,11 +338,12 @@ export function computeBatchHankoHash(
 export function initJBatch(): JBatchState {
   return {
     batch: createEmptyBatch(),
-    jurisdiction: null, // Will be set when first operation is added
+    jurisdiction: null,
     lastBroadcast: 0,
     broadcastCount: 0,
     failedAttempts: 0,
     pendingBroadcast: false,
+    status: 'empty',
   };
 }
 
@@ -362,6 +375,22 @@ export function isBatchEmpty(batch: JBatch): boolean {
     batch.externalTokenToReserve.length === 0 &&
     batch.reserveToExternalToken.length === 0 &&
     batch.revealSecrets.length === 0
+  );
+}
+
+/** Count total operations in a batch */
+export function batchOpCount(batch: JBatch): number {
+  return (
+    batch.flashloans.length +
+    batch.reserveToReserve.length +
+    batch.reserveToCollateral.length +
+    batch.collateralToReserve.length +
+    batch.settlements.length +
+    batch.disputeStarts.length +
+    batch.disputeFinalizations.length +
+    batch.externalTokenToReserve.length +
+    batch.reserveToExternalToken.length +
+    batch.revealSecrets.length
   );
 }
 
@@ -401,6 +430,7 @@ export function batchAddReserveToCollateral(
     });
   }
 
+  if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
   console.log(`📦 jBatch: Added R→C ${amount} token ${tokenId} for ${entityId.slice(-4)}→${counterpartyId.slice(-4)}`);
 }
 
@@ -504,9 +534,11 @@ export function batchAddSettlement(
         counterparty,
         tokenId: c2rResult.tokenId,
         amount: c2rResult.amount,
+        nonce,
         sig,
       });
 
+      if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
       console.log(`📦 jBatch: Added C2R shortcut ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)}, ${c2rResult.withdrawer} withdraws ${c2rResult.amount} token ${c2rResult.tokenId}`);
       return; // Skip full settlement
     }
@@ -558,6 +590,7 @@ export function batchAddSettlement(
     });
   }
 
+  if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
   console.log(`📦 jBatch: Added settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)}, ${diffs.length} tokens`);
 }
 
@@ -579,6 +612,7 @@ export function batchAddReserveToReserve(
     amount,
   });
 
+  if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
   console.log(`📦 jBatch: Added R→R ${amount} token ${tokenId} to ${receivingEntity.slice(-4)}`);
 }
 
@@ -600,6 +634,7 @@ export function batchAddRevealSecret(
     return;
   }
   jBatchState.batch.revealSecrets.push({ transformer, secret });
+  if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
   console.log(`📦 jBatch: Added secret reveal ${secret.slice(0, 10)}... via ${transformer.slice(0, 10)}...`);
 }
 

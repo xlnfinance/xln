@@ -129,7 +129,7 @@ export function validateAccountFrame(
 }
 
 // Counter-based replay protection REMOVED — frame chain (height + prevFrameHash) handles replay.
-// cooperativeNonce is kept for on-chain dispute domain only.
+// nonce is kept for on-chain operations only (dispute proofs, settlements).
 
 // === FRAME HASH COMPUTATION ===
 
@@ -250,8 +250,7 @@ export async function proposeAccountFrame(
 
   // Clone account machine for validation
   const clonedMachine = cloneAccountMachine(accountMachine);
-  // Dispute nonce tracks committed frame height for counter-dispute support
-  clonedMachine.proofHeader.disputeNonce = accountMachine.currentHeight + 1;
+  // NOTE: proofHeader.nonce is NOT set here — it's incremented per-message, not per-frame
 
   // Deterministic J-height for account frame hashing:
   // Use account-level finalized J-height (consensus state), not live replica tip.
@@ -551,12 +550,12 @@ export async function proposeAccountFrame(
     return { success: false, error: 'Failed to build dispute hanko', events };
   }
   accountMachine.currentDisputeProofHanko = disputeHanko;
-  accountMachine.currentDisputeProofCooperativeNonce = clonedMachine.proofHeader.cooperativeNonce;
+  accountMachine.currentDisputeProofNonce = clonedMachine.proofHeader.nonce;
   accountMachine.currentDisputeProofBodyHash = proofResult.proofBodyHash;
   if (!accountMachine.disputeProofNoncesByHash) {
     accountMachine.disputeProofNoncesByHash = {};
   }
-  accountMachine.disputeProofNoncesByHash[proofResult.proofBodyHash] = clonedMachine.proofHeader.cooperativeNonce;
+  accountMachine.disputeProofNoncesByHash[proofResult.proofBodyHash] = clonedMachine.proofHeader.nonce;
   if (!accountMachine.disputeProofBodiesByHash) {
     accountMachine.disputeProofBodiesByHash = {};
   }
@@ -586,9 +585,9 @@ export async function proposeAccountFrame(
     newDisputeHash: disputeHash,   // Full dispute hash (key in hankoWitness for quorum lookup)
     newDisputeProofBodyHash: proofResult.proofBodyHash, // ProofBodyHash that disputeHanko signs
     // NOTE: Settlement hankos now handled via SettlementWorkspace (entity-tx/handlers/settle.ts)
-    disputeProofNonce: accountMachine.proofHeader.cooperativeNonce, // nonce at which dispute proof was signed (before increment)
+    disputeProofNonce: accountMachine.proofHeader.nonce, // nonce at which dispute proof was signed (before increment)
   };
-  if (!skipNonceIncrement) ++accountMachine.proofHeader.cooperativeNonce;
+  if (!skipNonceIncrement) ++accountMachine.proofHeader.nonce;
   accountMachine.pendingAccountInput = accountInput;
 
   // Collect hashes for entity-quorum signing (multi-signer support)
@@ -765,8 +764,6 @@ export async function handleAccountInput(
         // CRITICAL: Deep-copy entire pendingFrame to prevent mutation issues
         accountMachine.currentFrame = structuredClone(accountMachine.pendingFrame);
         accountMachine.currentHeight = accountMachine.pendingFrame.height;
-        accountMachine.proofHeader.disputeNonce = accountMachine.currentHeight;
-
         if (input.newDisputeHanko) {
           if (input.disputeProofNonce === undefined || !input.newDisputeHash) {
             console.warn(`⚠️ ACK has newDisputeHanko but missing disputeProofNonce or newDisputeHash — skipping dispute metadata`);
@@ -779,7 +776,7 @@ export async function handleAccountInput(
             } else {
               accountMachine.counterpartyDisputeProofHanko = input.newDisputeHanko;
               const signedCooperativeNonce = input.disputeProofNonce;
-              accountMachine.counterpartyDisputeProofCooperativeNonce = signedCooperativeNonce;
+              accountMachine.counterpartyDisputeProofNonce = signedCooperativeNonce;
               if (input.newDisputeProofBodyHash) {
                 accountMachine.counterpartyDisputeProofBodyHash = input.newDisputeProofBodyHash;
                 if (!accountMachine.disputeProofNoncesByHash) {
@@ -904,7 +901,6 @@ export async function handleAccountInput(
       }
       accountMachine.currentFrame = structuredClone(accountMachine.pendingFrame);
       accountMachine.currentHeight = accountMachine.pendingFrame.height;
-      accountMachine.proofHeader.disputeNonce = accountMachine.currentHeight;
       accountMachine.frameHistory.push({ ...accountMachine.pendingFrame });
       if (accountMachine.frameHistory.length > 10) accountMachine.frameHistory.shift();
       delete accountMachine.pendingFrame;
@@ -1318,15 +1314,13 @@ export async function handleAccountInput(
         `newCurrentHeight=${accountMachine.currentHeight} accountTxs=${receivedFrame.accountTxs.length}`
       );
     }
-    accountMachine.proofHeader.disputeNonce = accountMachine.currentHeight;
-
     // Store counterparty dispute metadata on COMMIT (verified, frame accepted)
     if (input.newDisputeHanko && !ackProcessed && input.disputeProofNonce !== undefined && input.newDisputeHash) {
       const { verifyHankoForHash } = await import('./hanko-signing');
       const { valid: disputeValid } = await verifyHankoForHash(input.newDisputeHanko, input.newDisputeHash, input.fromEntityId, env);
       if (disputeValid) {
         accountMachine.counterpartyDisputeProofHanko = input.newDisputeHanko;
-        accountMachine.counterpartyDisputeProofCooperativeNonce = input.disputeProofNonce;
+        accountMachine.counterpartyDisputeProofNonce = input.disputeProofNonce;
         if (input.newDisputeProofBodyHash) {
           accountMachine.counterpartyDisputeProofBodyHash = input.newDisputeProofBodyHash;
           if (!accountMachine.disputeProofNoncesByHash) accountMachine.disputeProofNoncesByHash = {};
@@ -1370,7 +1364,7 @@ export async function handleAccountInput(
     console.log(`📤 ACK-SEND: Preparing ACK for frame ${receivedFrame.height} from ${accountMachine.proofHeader.fromEntity.slice(-4)} to ${input.fromEntityId.slice(-4)}`);
 
     // CHANNEL.TS PATTERN (Lines 576-612): Batch ACK + new frame in same message!
-    // Check if we should batch BEFORE incrementing cooperativeNonce
+    // Check if we should batch BEFORE incrementing nonce
     let batchedWithNewFrame = false;
     let proposeResult: Awaited<ReturnType<typeof proposeAccountFrame>> | undefined;
     // Build dispute proof hanko for ACK response (always include current state's dispute proof)
@@ -1380,11 +1374,11 @@ export async function handleAccountInput(
     const ackDisputeHash = createHash(accountMachine, ackProofResult.proofBodyHash, ackDepositoryAddress);
     const ackDisputeHankos = await signHashesAsSingleEntity(env, ackEntityId, ackSignerId, [ackDisputeHash]);
     const ackDisputeHanko = ackDisputeHankos[0];
-    const ackSignedCooperativeNonce = accountMachine.proofHeader.cooperativeNonce;
+    const ackSignedNonce = accountMachine.proofHeader.nonce;
     if (!accountMachine.disputeProofNoncesByHash) {
       accountMachine.disputeProofNoncesByHash = {};
     }
-    accountMachine.disputeProofNoncesByHash[ackProofResult.proofBodyHash] = ackSignedCooperativeNonce;
+    accountMachine.disputeProofNoncesByHash[ackProofResult.proofBodyHash] = ackSignedNonce;
     if (!accountMachine.disputeProofBodiesByHash) {
       accountMachine.disputeProofBodiesByHash = {};
     }
@@ -1398,7 +1392,7 @@ export async function handleAccountInput(
       ...(ackDisputeHanko && { newDisputeHanko: ackDisputeHanko }),   // My dispute proof hanko (current state)
       newDisputeHash: ackDisputeHash,     // Full dispute hash (key in hankoWitness for quorum lookup)
       newDisputeProofBodyHash: ackProofResult.proofBodyHash, // ProofBodyHash that ackDisputeHanko signs
-      disputeProofNonce: ackSignedCooperativeNonce, // nonce at which ACK's dispute proof was signed
+      disputeProofNonce: ackSignedNonce, // nonce at which ACK's dispute proof was signed
     };
 
     if (HEAVY_LOGS) console.log(`🔍 BATCH-CHECK for account ${input.fromEntityId.slice(-4)}: mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map(tx => tx.type).join(',')}]`);
@@ -1429,13 +1423,13 @@ export async function handleAccountInput(
 
     if (!batchedWithNewFrame && ackDisputeHanko) {
       accountMachine.currentDisputeProofHanko = ackDisputeHanko;
-      accountMachine.currentDisputeProofCooperativeNonce = ackSignedCooperativeNonce;
+      accountMachine.currentDisputeProofNonce = ackSignedNonce;
       accountMachine.currentDisputeProofBodyHash = ackProofResult.proofBodyHash;
     }
 
-    // Increment cooperativeNonce for this message (dispute domain nonce)
-    ++accountMachine.proofHeader.cooperativeNonce;
-    console.log(`🔢 cooperativeNonce: ${accountMachine.proofHeader.cooperativeNonce} (batched=${batchedWithNewFrame})`);
+    // Increment nonce for this message (on-chain nonce for dispute proofs / settlements)
+    ++accountMachine.proofHeader.nonce;
+    console.log(`🔢 nonce: ${accountMachine.proofHeader.nonce} (batched=${batchedWithNewFrame})`);
 
     // Merge revealed secrets from BOTH incoming frame AND proposed frame
     const allRevealedSecrets = [
@@ -1581,8 +1575,7 @@ export async function generateAccountProof(env: Env, accountMachine: AccountMach
   const proofData = {
     fromEntity: accountMachine.proofHeader.fromEntity,
     toEntity: accountMachine.proofHeader.toEntity,
-    cooperativeNonce: accountMachine.proofHeader.cooperativeNonce,
-    disputeNonce: accountMachine.proofHeader.disputeNonce,
+    nonce: accountMachine.proofHeader.nonce,
     tokenIds: accountMachine.proofBody.tokenIds,
     deltas: accountMachine.proofBody.deltas.map(d => d.toString()), // Convert BigInt for JSON
   };

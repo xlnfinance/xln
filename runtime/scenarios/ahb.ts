@@ -15,8 +15,8 @@
  */
 
 import type { Env, EntityInput, EntityReplica, Delta } from '../types';
-import { getAvailableJurisdictions, getBrowserVMInstance, setBrowserVMJurisdiction } from '../evm';
-import { BrowserVMProvider } from '../jadapter';
+import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig } from './boot';
+import type { JAdapter } from '../jadapter/types';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD } from './helpers';
 import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime } from '../runtime-ascii';
@@ -58,7 +58,7 @@ type RequiredBrowserVM = {
   getDepositoryAddress: () => string;
   getEntityProviderAddress: () => string;
   getEntityNonce: (entityId: string) => Promise<bigint>;
-  getAccountInfo: (entityId: string, counterpartyId: string) => Promise<{ cooperativeNonce: bigint; disputeHash: string; disputeTimeout: bigint }>;
+  getAccountInfo: (entityId: string, counterpartyId: string) => Promise<{ nonce: bigint; disputeHash: string; disputeTimeout: bigint }>;
   onAny: (callback: (events: any[]) => void) => () => void;
   getTokenRegistry: () => any[];
   getTokenAddress: (symbol: string) => string | null;
@@ -412,89 +412,38 @@ export async function ahb(env: Env): Promise<void> {
     }
 
     console.log('[AHB] ========================================');
-    console.log('[AHB] Starting Alice-Hub-Bob Demo (REAL BrowserVM transactions)');
+    console.log('[AHB] Starting Alice-Hub-Bob Demo (JAdapter)');
     console.log('[AHB] BEFORE: eReplicas =', env.eReplicas.size, 'history =', env.history?.length || 0);
     console.log('[AHB] ========================================');
 
-    // Get or create BrowserVM instance for real transactions
-    console.log('[AHB] env.browserVM exists?', !!env.browserVM, 'type:', typeof env.browserVM);
-    let browserVM = getBrowserVMInstance(env);
-    if (!browserVM) {
-      console.log('[AHB] No BrowserVM found (getBrowserVMInstance returned null) - creating one...');
-      const newVM = new BrowserVMProvider();
-      await newVM.init?.();
-      browserVM = newVM as any; // Type coercion for interface compatibility
-      env.browserVM = browserVM; // Store in env for isolation
-      const depositoryAddress = newVM.getDepositoryAddress?.() ?? '';
-      // Register with runtime so other code can access it
-      setBrowserVMJurisdiction(env, depositoryAddress, browserVM);
-      console.log('[AHB] ✅ BrowserVM created, depository:', depositoryAddress);
-    } else {
-      console.log('[AHB] ✅ BrowserVM instance available');
+    // Setup JAdapter (browservm or rpc, depending on JADAPTER_MODE)
+    let jadapter: JAdapter;
+    try {
+      jadapter = getScenarioJAdapter(env);
+    } catch {
+      jadapter = await ensureJAdapter(env);
+      const jReplica = createJReplica(env, 'AHB Demo', jadapter.addresses.depository);
+      (jReplica as any).jadapter = jadapter;
+      (jReplica as any).depositoryAddress = jadapter.addresses.depository;
+      (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+      jadapter.startWatching(env);
     }
 
-    // CRITICAL: Reset BrowserVM to fresh state EVERY time AHB runs
-    // This prevents reserve accumulation on re-runs (button clicks, HMR, etc.)
-    if (browserVM && typeof (browserVM as any).reset === 'function') {
-      console.log('[AHB] Calling browserVM.reset()...');
-      await (browserVM as any).reset();
-      console.log(`[AHB] ✅ BrowserVM reset complete`);
-    }
-
-    // ASSERT: BrowserVM must exist at this point
-    if (!browserVM) {
-      throw new Error('[AHB] BrowserVM is required but not available');
-    }
-    // Cast to required type - all methods are assumed present after this point
+    // BrowserVM handle (for mode-specific calls — null in RPC mode)
+    const browserVM = jadapter.getBrowserVM();
     const vm = browserVM as unknown as RequiredBrowserVM;
 
-    const jurisdictions = await getAvailableJurisdictions();
-    let arrakis = jurisdictions.find(j => j.name.toLowerCase() === 'arrakis');
-
-    // FALLBACK: Create mock jurisdiction if none exist (for isolated /view mode)
-    if (!arrakis) {
-      console.log('[AHB] No jurisdiction found - using BrowserVM jurisdiction');
-      arrakis = {
-        name: 'AHB Demo', // MUST match jReplica name for routing
-        chainId: 31337,
-        address: 'browservm://', // BrowserVM doesn't use RPC
-        entityProviderAddress: (browserVM as any)?.getEntityProviderAddress?.() ?? '',
-        depositoryAddress: (browserVM as any)?.getDepositoryAddress?.() ?? '',
-      };
-    }
-
-    console.log(`📋 Jurisdiction: ${arrakis!.name}`);
-
-    // ============================================================================
-    // STEP 0a: Create Xlnomy (J-Machine) for visualization
-    // ============================================================================
-    console.log('\n🏛️ Creating AHB Xlnomy (J-Machine at center)...');
-
-    if (!env.jReplicas) {
-      env.jReplicas = new Map();
-    }
-
-    const ahbJReplica = {
+    const arrakis = {
       name: 'AHB Demo',
-      blockNumber: 0n,
-      stateRoot: new Uint8Array(32), // Will be captured from BrowserVM
-      mempool: [] as any[],
-      blockDelayMs: 100,             // 100ms block time (1 tick minimum for visualization)
-      lastBlockTimestamp: env.timestamp,  // Use env.timestamp for determinism
-      position: { x: 0, y: 600, z: 0 }, // Match EVM jMachine.position for consistent entity placement
-      contracts: {
-        depository: arrakis!.depositoryAddress,
-        entityProvider: arrakis!.entityProviderAddress,
-      },
+      chainId: jadapter.chainId,
+      address: jadapter.mode === 'browservm' ? 'browservm://' : '',
+      entityProviderAddress: jadapter.addresses.entityProvider,
+      depositoryAddress: jadapter.addresses.depository,
+      rpc: jadapter.mode === 'browservm' ? 'browservm://' : '',
     };
 
-    env.jReplicas.set('AHB Demo', ahbJReplica);
-    env.activeJurisdiction = 'AHB Demo';
-
-    // Attach JAdapter so BrowserVM events flow into runtime
-    const { attachBrowserVMAdapter } = await import('./boot');
-    await attachBrowserVMAdapter(env, 'AHB Demo', browserVM);
-    console.log('✅ AHB Xlnomy created (J-Machine visible in 3D)');
+    console.log(`📋 Jurisdiction: ${arrakis.name}`);
+    console.log('✅ AHB JAdapter + J-Machine ready');
 
     // Push Frame 0: Clean slate with J-Machine only (no entities yet)
     // Define total system solvency - $10M minted to Hub
@@ -816,8 +765,8 @@ export async function ahb(env: Env): Promise<void> {
     // No manual clearing needed!
 
     // Verify Hub funding reserves
-    const fundedAliceReserves = await vm.getReserves(alice.id, USDC_TOKEN_ID);
-    const fundedBobReserves = await vm.getReserves(bob.id, USDC_TOKEN_ID);
+    const fundedAliceReserves = await jadapter.getReserves(alice.id, USDC_TOKEN_ID);
+    const fundedBobReserves = await jadapter.getReserves(bob.id, USDC_TOKEN_ID);
     console.log(`[AHB] J-Block #1 executed - Fundings complete:`);
     console.log(`  Alice: ${Number(fundedAliceReserves) / 1e18} USDC`);
     console.log(`  Bob: ${Number(fundedBobReserves) / 1e18} USDC`);
@@ -890,9 +839,9 @@ export async function ahb(env: Env): Promise<void> {
     // NOTE: J-Machine block processing in process() automatically handles mempool clearing
 
     // Verify final reserves from BrowserVM
-    const finalHubReserves = await vm.getReserves(hub.id, USDC_TOKEN_ID);
-    const finalAliceReserves = await vm.getReserves(alice.id, USDC_TOKEN_ID);
-    const finalBobReserves = await vm.getReserves(bob.id, USDC_TOKEN_ID);
+    const finalHubReserves = await jadapter.getReserves(hub.id, USDC_TOKEN_ID);
+    const finalAliceReserves = await jadapter.getReserves(alice.id, USDC_TOKEN_ID);
+    const finalBobReserves = await jadapter.getReserves(bob.id, USDC_TOKEN_ID);
 
     console.log(`[AHB] J-Block #2 executed - Final reserves:`);
     console.log(`  Hub: ${Number(finalHubReserves) / 1e18} USDC`);
@@ -946,7 +895,7 @@ export async function ahb(env: Env): Promise<void> {
 
     snap(env, 'Bilateral Account: Alice ↔ Hub (A-H)', {
       description: 'Alice ↔ Hub: Account Created',
-      what: 'Alice opens bilateral account with Hub. Creates off-chain channel for instant payments.',
+      what: 'Alice opens bilateral account with Hub for instant off-chain payments.',
       why: 'Bilateral accounts enable unlimited off-chain transactions with final on-chain settlement.',
       tradfiParallel: 'Like opening a margin account: enables trading before settlement.',
       keyMetrics: [
@@ -1092,7 +1041,7 @@ export async function ahb(env: Env): Promise<void> {
     console.log('\n💰 FRAME 9: J-Machine processes R2C batch from mempool');
 
     // DEBUG: Check Alice's on-chain reserves + EntityProvider registration
-    const aliceOnChainReserves = await vm.getReserves(alice.id, USDC_TOKEN_ID);
+    const aliceOnChainReserves = await jadapter.getReserves(alice.id, USDC_TOKEN_ID);
     console.log(`[Frame 9 DEBUG] Alice on-chain reserves: ${aliceOnChainReserves / 10n**18n}M`);
 
     console.log(`[Frame 9 DEBUG] Alice entityId=${alice.id.slice(0, 10)}..., Hub entityId=${hub.id.slice(0, 10)}...`);
@@ -2270,13 +2219,13 @@ export async function ahb(env: Env): Promise<void> {
   assert(bobDeltaTarget.ondelta === disputeOndeltaTarget, 'PHASE 7: ondelta mismatch');
   assert(bobDeltaTarget.offdelta === disputeOffdeltaTarget, 'PHASE 7: offdelta mismatch');
 
-  const hubReserveBeforeDrain = await vm.getReserves(hub.id, USDC_TOKEN_ID);
+  const hubReserveBeforeDrain = await jadapter.getReserves(hub.id, USDC_TOKEN_ID);
   if (hubReserveBeforeDrain > 0n) {
     console.log(`🧹 Draining Hub reserves to force debt: ${hubReserveBeforeDrain}`);
-    await vm.reserveToReserve(hub.id, alice.id, USDC_TOKEN_ID, hubReserveBeforeDrain);
+    await jadapter.reserveToReserve(hub.id, alice.id, USDC_TOKEN_ID, hubReserveBeforeDrain);
     await processJEvents(env);
     await process(env);
-    const hubReserveAfterDrain = await vm.getReserves(hub.id, USDC_TOKEN_ID);
+    const hubReserveAfterDrain = await jadapter.getReserves(hub.id, USDC_TOKEN_ID);
     assert(hubReserveAfterDrain === 0n, `PHASE 7: Hub reserve not fully drained (${hubReserveAfterDrain})`);
   }
 
@@ -2363,7 +2312,7 @@ export async function ahb(env: Env): Promise<void> {
   const [, bobAfterStart] = findReplica(env, bob.id);
   const bobAccountAfterStart = bobAfterStart.state.accounts.get(hub.id);
   assert(bobAccountAfterStart?.activeDispute, 'PHASE 7: Bob activeDispute not set after DisputeStarted');
-  console.log(`   Bob activeDispute: timeout=block ${bobAccountAfterStart.activeDispute.disputeTimeout}, nonce=${bobAccountAfterStart.activeDispute.initialDisputeNonce}`);
+  console.log(`   Bob activeDispute: timeout=block ${bobAccountAfterStart.activeDispute.disputeTimeout}, nonce=${bobAccountAfterStart.activeDispute.initialNonce}`);
 
   const [, hubAfterStart] = findReplica(env, hub.id);
   const hubAccountAfterStart = hubAfterStart.state.accounts.get(bob.id);
@@ -2379,7 +2328,7 @@ export async function ahb(env: Env): Promise<void> {
   const { createEmptyBatch } = await import('../j-batch');
 
   while (true) {
-    const currentBlock = vm.getBlockNumber();
+    const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
     console.log(`   Current block: ${currentBlock}, target: ${targetBlock}`);
 
     if (currentBlock >= targetBlock) {
@@ -2391,10 +2340,9 @@ export async function ahb(env: Env): Promise<void> {
     const emptyBatch = createEmptyBatch();
     const { encodeJBatch, computeBatchHankoHash } = await import('../j-batch');
     const encodedBatch = encodeJBatch(emptyBatch);
-    const chainId = vm.getChainId();
-    const depositoryAddress = vm.getDepositoryAddress();
-    const entityProviderAddress = vm.getEntityProviderAddress();
-    const currentNonce = await vm.getEntityNonce(bob.id);
+    const chainId = BigInt(jadapter.chainId);
+    const depositoryAddress = jadapter.addresses.depository;
+    const currentNonce = await jadapter.getEntityNonce(bob.id);
     const nextNonce = currentNonce + 1n;
     const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
     const { signHashesAsSingleEntity } = await import('../hanko-signing');
@@ -2403,13 +2351,13 @@ export async function ahb(env: Env): Promise<void> {
     if (!hankoData) {
       throw new Error('Failed to build empty batch hanko');
     }
-    await vm.processBatch(encodedBatch, entityProviderAddress, hankoData, nextNonce);
+    await jadapter.processBatch(encodedBatch, hankoData, nextNonce);
     await process(env);  // Let runtime process any events
   }
 
   // 6) Bob finalizes dispute (unilateral after timeout)
   console.log('\n⚖️ STEP 6: Bob finalizes dispute (unilateral)...');
-  const bobReserveBeforeDispute = await vm.getReserves(bob.id, USDC_TOKEN_ID);
+  const bobReserveBeforeDispute = await jadapter.getReserves(bob.id, USDC_TOKEN_ID);
 
   await process(env, [{
     entityId: bob.id,
@@ -2457,7 +2405,7 @@ export async function ahb(env: Env): Promise<void> {
   assert(!hubAccountFinal?.activeDispute, 'PHASE 7: Hub activeDispute not cleared after finalize');
   console.log(`   Dispute cleared in runtime ✅`);
 
-  const bobReserveAfterDispute = await vm.getReserves(bob.id, USDC_TOKEN_ID);
+  const bobReserveAfterDispute = await jadapter.getReserves(bob.id, USDC_TOKEN_ID);
   // Bob gets full $100K collateral. The additional $50K owed (delta > collateral)
   // becomes debt because Hub has $0 reserves.
   const expectedBobReserve = bobReserveBeforeDispute + disputeCollateralTarget;
@@ -2624,13 +2572,13 @@ export async function ahb(env: Env): Promise<void> {
   // - Same nonce: ACCEPTED (cooperative approval - you agree with disputed state)
   // - Higher nonce: ACCEPTED (counter-dispute with newer state)
   // - Lower nonce: REJECTED (regression attack)
-  const initialNonce = bobAccountAfterBump.activeDispute.initialDisputeNonce;
-  const currentNonce = bobAccountAfterBump.proofHeader.disputeNonce;
+  const initialNonce = bobAccountAfterBump.activeDispute.initialNonce;
+  const currentNonce = bobAccountAfterBump.proofHeader.nonce;
   assert(
     currentNonce >= initialNonce,
-    `H13: disputeNonce must be >= initial for counter-dispute (initial=${initialNonce}, current=${currentNonce})`
+    `H13: nonce must be >= initial for counter-dispute (initial=${initialNonce}, current=${currentNonce})`
   );
-  console.log(`   H13: Counter-dispute nonce check: ${initialNonce} → ${currentNonce} (same or higher ✅)`);
+  console.log(`   H13: Dispute finalization nonce check: ${initialNonce} → ${currentNonce} (same or higher ✅)`);
   assert(bobAccountAfterBump.counterpartyDisputeProofHanko, 'PHASE 8: missing counterparty dispute hanko for counter-dispute');
 
   // H10 AUDIT FIX: Verify solvency after counter-dispute bump (state changed during dispute)
@@ -2752,20 +2700,21 @@ export async function ahb(env: Env): Promise<void> {
   // Wait for timeout and finalize unilaterally
   const [, bobCoopTimeout] = findReplica(env, bob.id);
   const coopTimeoutBlock = bobCoopTimeout.state.accounts.get(hub.id)?.activeDispute?.disputeTimeout || 100n;
-  while (vm.getBlockNumber() < coopTimeoutBlock) {
+  while (true) {
+    const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
+    if (currentBlock >= coopTimeoutBlock) break;
     const { encodeJBatch, computeBatchHankoHash } = await import('../j-batch');
     const { signHashesAsSingleEntity } = await import('../hanko-signing');
     const emptyBatch = createEmptyBatch();
     const encodedBatch = encodeJBatch(emptyBatch);
-    const chainId = vm.getChainId();
-    const depositoryAddress = vm.getDepositoryAddress();
-    const entityProviderAddress = vm.getEntityProviderAddress();
-    const currentNonce = await vm.getEntityNonce(bob.id);
+    const chainId = BigInt(jadapter.chainId);
+    const depositoryAddress = jadapter.addresses.depository;
+    const currentNonce = await jadapter.getEntityNonce(bob.id);
     const nextNonce = currentNonce + 1n;
     const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);
     const hankos = await signHashesAsSingleEntity(env, bob.id, bob.signer, [batchHash]);
     if (hankos[0]) {
-      await vm.processBatch(encodedBatch, entityProviderAddress, hankos[0], nextNonce);
+      await jadapter.processBatch(encodedBatch, hankos[0], nextNonce);
     }
     await process(env);
   }

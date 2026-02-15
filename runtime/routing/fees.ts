@@ -27,7 +27,7 @@ export const sanitizeBaseFee = (raw: unknown): bigint => {
 };
 
 /**
- * Effective directional PPM derived from channel direction utilization.
+ * Effective directional PPM derived from account direction utilization.
  * - outCapacity: available amount in this direction
  * - inCapacity: reverse-side capacity (used to estimate total directional room)
  */

@@ -403,7 +403,7 @@ export const captureSnapshot = async (
         // Sync reserves from eReplicas into JReplica snapshot
         const reserves = new Map<string, Map<number, bigint>>();
         const registeredEntities = new Map<string, { name: string; quorum: string[]; threshold: number }>();
-        // Collaterals: channelKey → tokenId → { collateral, ondelta }
+        // Collaterals: accountKey → tokenId → { collateral, ondelta }
         const collaterals = new Map<string, Map<number, { collateral: bigint; ondelta: bigint }>>();
 
         // Aggregate reserves and collaterals from all entity replicas
@@ -431,8 +431,8 @@ export const captureSnapshot = async (
             for (const [counterpartyId, account] of replica.state.accounts.entries()) {
               // Only capture from LEFT entity (smaller ID) to avoid duplicates
               if (isLeftEntity(entityId, counterpartyId) && account.deltas) {
-                // Create channel key: LEFT-RIGHT (canonical ordering)
-                const channelKey = `${entityId.slice(-4)}-${counterpartyId.slice(-4)}`;
+                // Create account key: LEFT-RIGHT (canonical ordering)
+                const accountKey = `${entityId.slice(-4)}-${counterpartyId.slice(-4)}`;
                 const tokenMap = new Map<number, { collateral: bigint; ondelta: bigint }>();
 
                 for (const [tokenId, delta] of account.deltas.entries()) {
@@ -445,7 +445,7 @@ export const captureSnapshot = async (
                 }
 
                 if (tokenMap.size > 0) {
-                  collaterals.set(channelKey, tokenMap);
+                  collaterals.set(accountKey, tokenMap);
                 }
               }
             }
@@ -684,8 +684,8 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   if (account.currentDisputeProofHanko) {
     result.currentDisputeProofHanko = account.currentDisputeProofHanko;
   }
-  if (account.currentDisputeProofCooperativeNonce !== undefined) {
-    result.currentDisputeProofCooperativeNonce = account.currentDisputeProofCooperativeNonce;
+  if (account.currentDisputeProofNonce !== undefined) {
+    result.currentDisputeProofNonce = account.currentDisputeProofNonce;
   }
   if (account.currentDisputeProofBodyHash) {
     result.currentDisputeProofBodyHash = account.currentDisputeProofBodyHash;
@@ -693,8 +693,8 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   if (account.counterpartyDisputeProofHanko) {
     result.counterpartyDisputeProofHanko = account.counterpartyDisputeProofHanko;
   }
-  if (account.counterpartyDisputeProofCooperativeNonce !== undefined) {
-    result.counterpartyDisputeProofCooperativeNonce = account.counterpartyDisputeProofCooperativeNonce;
+  if (account.counterpartyDisputeProofNonce !== undefined) {
+    result.counterpartyDisputeProofNonce = account.counterpartyDisputeProofNonce;
   }
   if (account.counterpartyDisputeProofBodyHash) {
     result.counterpartyDisputeProofBodyHash = account.counterpartyDisputeProofBodyHash;

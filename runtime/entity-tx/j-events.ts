@@ -373,15 +373,22 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
         const iAmLeftHere = account.leftEntity !== counterpartyId;
         account.currentDisputeProofHanko = iAmLeftHere ? postProof.leftHanko : postProof.rightHanko;
         account.counterpartyDisputeProofHanko = iAmLeftHere ? postProof.rightHanko : postProof.leftHanko;
-        account.currentDisputeProofCooperativeNonce = postProof.cooperativeNonce;
+        account.currentDisputeProofNonce = postProof.nonce;
         account.currentDisputeProofBodyHash = postProof.proofBodyHash;
-        account.counterpartyDisputeProofCooperativeNonce = postProof.cooperativeNonce;
+        account.counterpartyDisputeProofNonce = postProof.nonce;
         account.counterpartyDisputeProofBodyHash = postProof.proofBodyHash;
-        console.log(`   🔐 Post-settlement dispute proof activated (nonce=${postProof.cooperativeNonce})`);
+        console.log(`   🔐 Post-settlement dispute proof activated (nonce=${postProof.nonce})`);
       }
 
-      account.onChainSettlementNonce = (account.onChainSettlementNonce || 0) + 1;
-      console.log(`   💰 NONCE-INC: Settlement finalized → onChainNonce=${account.onChainSettlementNonce} (ws.status was '${ws.status}')`);
+      // Set on-chain nonce from event data (not +1 — handles nonce jumps from disputes)
+      const eventNonce = leftObs.events[0]?.data?.nonce;
+      if (eventNonce !== undefined) {
+        account.onChainSettlementNonce = Number(eventNonce);
+      } else {
+        // Fallback: use workspace's signed nonce (should match on-chain after settlement)
+        account.onChainSettlementNonce = ws.nonceAtSign ?? ((account.onChainSettlementNonce || 0) + 1);
+      }
+      console.log(`   💰 NONCE-SET: Settlement finalized → onChainNonce=${account.onChainSettlementNonce} (ws.status was '${ws.status}', eventNonce=${eventNonce})`);
       // Clear workspace after nonce increment — both sides (Hub + counterparty)
       delete account.settlementWorkspace;
       console.log(`   🧹 WORKSPACE-CLEAR: Settlement completed`);
@@ -748,7 +755,7 @@ async function applyFinalizedJEvent(
     console.log(`🔍 DISPUTE-EVENT HANDLER: entityId=${newState.entityId.slice(-4)}`);
 
     // Dispute started on-chain - store dispute state from event
-    const { sender, counterentity, disputeNonce, proofbodyHash } = event.data;
+    const { sender, counterentity, nonce, proofbodyHash } = event.data as { sender: string; counterentity: string; nonce: string; proofbodyHash: string; initialArguments: string };
     const normalizeId = (id: string) => String(id).toLowerCase();
     const senderStr = normalizeId(sender as string);
     const counterentityStr = normalizeId(counterentity as string);
@@ -780,33 +787,16 @@ async function applyFinalizedJEvent(
 
       const weAreStarter = senderStr === entityIdNorm;
       const hasCounterpartySig = Boolean(account.counterpartyDisputeProofHanko);
-      let initialCooperativeNonce = account.proofHeader.cooperativeNonce;
-      let nonceSource = 'proofHeader';
-      const mappedNonce = account.disputeProofNoncesByHash?.[String(proofbodyHash)];
-      if (mappedNonce !== undefined) {
-        initialCooperativeNonce = mappedNonce;
-        nonceSource = 'hashMap';
-      } else if (weAreStarter) {
-        if (account.counterpartyDisputeProofCooperativeNonce !== undefined) {
-          initialCooperativeNonce = account.counterpartyDisputeProofCooperativeNonce;
-          nonceSource = 'counterpartySig';
-        }
-      } else {
-        if (account.currentDisputeProofCooperativeNonce !== undefined) {
-          initialCooperativeNonce = account.currentDisputeProofCooperativeNonce;
-          nonceSource = 'currentSig';
-        }
-      }
-      console.log(`   DEBUG DisputeStarted: starter=${weAreStarter}, source=${nonceSource}, proofHeader.cooperativeNonce=${account.proofHeader.cooperativeNonce}, initialCooperativeNonce=${initialCooperativeNonce}`);
 
       // Store dispute state from event + on-chain (source of truth)
+      // Unified nonce: initialNonce = the nonce used in disputeStart (from event)
+      // onChainNonce = the nonce stored on-chain at time of dispute
       account.activeDispute = {
         startedByLeft: senderStr < counterentityStr,
         initialProofbodyHash: String(proofbodyHash),  // From event (committed on-chain)
-        initialDisputeNonce: Number(disputeNonce),
+        initialNonce: Number(nonce),
         disputeTimeout: Number(accountInfo.disputeTimeout),  // From on-chain
-        initialCooperativeNonce,  // Nonce PASSED to disputeStart (for hash match)
-        onChainCooperativeNonce: Number(accountInfo.cooperativeNonce),  // May differ
+        onChainNonce: Number(accountInfo.nonce),
         initialArguments: event.data.initialArguments || '0x',
       };
 
@@ -841,7 +831,7 @@ async function applyFinalizedJEvent(
   } else if (event.type === 'DisputeFinalized') {
     console.log(`🔍 DISPUTE-FINALIZED HANDLER: entityId=${newState.entityId.slice(-4)}`);
 
-    const { sender, counterentity, initialDisputeNonce, initialProofbodyHash } = event.data;
+    const { sender, counterentity, initialNonce, initialProofbodyHash } = event.data as { sender: string; counterentity: string; initialNonce: string; initialProofbodyHash: string; finalProofbodyHash: string };
     const normalizeId = (id: string) => String(id).toLowerCase();
     const senderStr = normalizeId(sender as string);
     const counterentityStr = normalizeId(counterentity as string);
@@ -863,7 +853,7 @@ async function applyFinalizedJEvent(
     if (account) {
       if (account.activeDispute) {
         delete account.activeDispute;
-        addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialDisputeNonce)})`);
+        addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialNonce)})`);
         console.log(`✅ activeDispute cleared for ${counterpartyId.slice(-4)} (proof=${String(initialProofbodyHash).slice(0, 10)}...)`);
       } else {
         console.warn(`⚠️ DisputeFinalized: No activeDispute for ${counterpartyId.slice(-4)}`);
@@ -874,7 +864,7 @@ async function applyFinalizedJEvent(
 
   } else if (event.type === 'HankoBatchProcessed') {
     // jBatch finalization event - confirms our batch was processed on-chain
-    const { entityId: batchEntityId, hankoHash, nonce, success } = event.data;
+    const { entityId: batchEntityId, hankoHash, nonce, success } = event.data as { entityId: string; hankoHash: string; nonce: number; success: boolean };
 
     // Only process if this is our batch
     if (batchEntityId !== newState.entityId) {
@@ -885,17 +875,57 @@ async function applyFinalizedJEvent(
     console.log(`📦 HankoBatchProcessed: nonce=${nonce}, success=${success}, hanko=${String(hankoHash).slice(0, 10)}...`);
 
     if (success) {
-      // Clear jBatch now that it's finalized on-chain
       if (newState.jBatchState) {
-        const { createEmptyBatch } = await import('../j-batch');
+        const { createEmptyBatch, batchOpCount: countOps } = await import('../j-batch');
+        const opCount = countOps(newState.jBatchState.batch);
+
+        // Record completed batch in history (keep last 20)
+        if (!newState.batchHistory) newState.batchHistory = [];
+        newState.batchHistory.push({
+          batchHash: newState.jBatchState.batchHash || '',
+          txHash: newState.jBatchState.txHash || '',
+          status: 'confirmed' as const,
+          broadcastedAt: newState.jBatchState.broadcastedAt || newState.jBatchState.lastBroadcast || 0,
+          confirmedAt: newState.timestamp,
+          opCount,
+          entityNonce: Number(nonce),
+        });
+        if (newState.batchHistory.length > 20) {
+          newState.batchHistory = newState.batchHistory.slice(-20);
+        }
+
+        // Clear batch for next cycle
         newState.jBatchState.batch = createEmptyBatch();
-        newState.jBatchState.pendingBroadcast = false; // Unlock for new operations
-        console.log(`   ✅ jBatch cleared on successful finalization`);
+        newState.jBatchState.pendingBroadcast = false;
+        newState.jBatchState.status = 'empty';
+        newState.jBatchState.batchHash = undefined;
+        newState.jBatchState.encodedBatch = undefined;
+        newState.jBatchState.broadcastedAt = undefined;
+        newState.jBatchState.txHash = undefined;
+        // entityNonce stays (tracks on-chain nonce for next batch)
+        console.log(`   ✅ jBatch confirmed (nonce ${nonce}, ${opCount} ops)`);
       }
       addMessage(newState, `✅ jBatch finalized (nonce ${nonce}) | Block ${blockNumber}`);
     } else {
-      // Batch failed - keep it for potential rebroadcast or manual clear
-      // pendingBroadcast stays true - user must j_clear_batch or rebroadcast
+      // Batch failed — update status, keep batch for retry
+      if (newState.jBatchState) {
+        newState.jBatchState.status = 'failed';
+        newState.jBatchState.failedAttempts++;
+
+        if (!newState.batchHistory) newState.batchHistory = [];
+        newState.batchHistory.push({
+          batchHash: newState.jBatchState.batchHash || '',
+          txHash: newState.jBatchState.txHash || '',
+          status: 'failed' as const,
+          broadcastedAt: newState.jBatchState.broadcastedAt || newState.jBatchState.lastBroadcast || 0,
+          confirmedAt: newState.timestamp,
+          opCount: 0,
+          entityNonce: Number(nonce),
+        });
+        if (newState.batchHistory.length > 20) {
+          newState.batchHistory = newState.batchHistory.slice(-20);
+        }
+      }
       console.warn(`   ⚠️ jBatch FAILED on-chain (nonce ${nonce}) - not clearing`);
       addMessage(newState, `⚠️ jBatch failed (nonce ${nonce}) - use j_clear_batch to abort | Block ${blockNumber}`);
     }

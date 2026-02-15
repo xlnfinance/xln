@@ -266,7 +266,7 @@ function processDueHooks(hooks: ScheduledHook[], replica: EntityReplica): Entity
  * Check all accounts for timeout and suggest disputes
  *
  * Pattern from 2019src.txt lines 1622-1675:
- * - Iterate over all channels
+ * - Iterate over all accounts
  * - Check missed_ack time
  * - If > threshold, suggest dispute to entity members
  */

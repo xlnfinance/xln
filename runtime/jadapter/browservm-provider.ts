@@ -114,7 +114,7 @@ export class BrowserVMProvider {
   }
 
   /** Initialize VM and deploy contracts */
-  async init(): Promise<void> {
+  async init(options?: { chainId?: number }): Promise<void> {
     if (this.initialized) {
       console.log('[BrowserVM] Already initialized, skipping');
       return;
@@ -165,7 +165,8 @@ export class BrowserVMProvider {
     console.log('[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)');
 
     // Create VM with evmOpts to disable contract size limit
-    const common = createCustomCommon({ chainId: 1337 }, Mainnet);
+    const vmChainId = options?.chainId ?? 31337;
+    const common = createCustomCommon({ chainId: vmChainId }, Mainnet);
     this.vm = await createVM({
       common,
       evmOpts: {
@@ -946,23 +947,23 @@ export class BrowserVMProvider {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
     // Use ethers Interface for ABI encoding (same as mainnet)
-    // Solidity mapping: _collaterals(bytes channelKey, uint tokenId) -> AccountCollateral
-    // Need to compute channelKey first via accountKey(e1, e2), then call the mapping getter
-    const channelKeyData = this.depositoryInterface.encodeFunctionData('accountKey', [entityId, counterpartyId]);
-    const channelKeyResult = await this.vm.evm.runCall({
+    // Solidity mapping: _collaterals(bytes accountKey, uint tokenId) -> AccountCollateral
+    // Need to compute accountKey first via accountKey(e1, e2), then call the mapping getter
+    const accountKeyData = this.depositoryInterface.encodeFunctionData('accountKey', [entityId, counterpartyId]);
+    const accountKeyResult = await this.vm.evm.runCall({
       to: this.depositoryAddress,
       caller: this.deployerAddress,
-      data: hexToBytes(channelKeyData as `0x${string}`),
+      data: hexToBytes(accountKeyData as `0x${string}`),
       gasLimit: 100000n,
     });
-    if (channelKeyResult.execResult.exceptionError) return { collateral: 0n, ondelta: 0n };
-    const channelKeyDecoded = this.depositoryInterface.decodeFunctionResult(
+    if (accountKeyResult.execResult.exceptionError) return { collateral: 0n, ondelta: 0n };
+    const accountKeyDecoded = this.depositoryInterface.decodeFunctionResult(
       'accountKey',
-      channelKeyResult.execResult.returnValue
+      accountKeyResult.execResult.returnValue
     );
-    const channelKey = channelKeyDecoded[0];
+    const accountKey = accountKeyDecoded[0];
 
-    const callData = this.depositoryInterface.encodeFunctionData('_collaterals', [channelKey, tokenId]);
+    const callData = this.depositoryInterface.encodeFunctionData('_collaterals', [accountKey, tokenId]);
 
     const result = await this.vm.evm.runCall({
       to: this.depositoryAddress,
@@ -1122,9 +1123,9 @@ export class BrowserVMProvider {
   }
 
   /**
-   * Get the channel key for two entities (canonical order: left < right)
+   * Get the account key for two entities (canonical order: left < right)
    */
-  private getChannelKey(leftEntity: string, rightEntity: string): string {
+  private getAccountKey(leftEntity: string, rightEntity: string): string {
     const isLeft = isLeftEntity(leftEntity, rightEntity);
     const left = isLeft ? leftEntity : rightEntity;
     const right = isLeft ? rightEntity : leftEntity;
@@ -1149,15 +1150,15 @@ export class BrowserVMProvider {
     }>,
     forgiveDebtsInTokenIds: number[] = []
   ): Promise<string> {
-    // Get current cooperativeNonce from chain
+    // Get current nonce from chain
     const accountInfo = await this.getAccountInfo(initiatorEntityId, counterpartyEntityId);
-    const cooperativeNonce = accountInfo.cooperativeNonce;
+    const onChainNonce = accountInfo.nonce;
 
     // Determine canonical left/right order
     const isLeft = isLeftEntity(initiatorEntityId, counterpartyEntityId);
     const leftEntity = isLeft ? initiatorEntityId : counterpartyEntityId;
     const rightEntity = isLeft ? counterpartyEntityId : initiatorEntityId;
-    const channelKey = this.getChannelKey(leftEntity, rightEntity);
+    const accountKey = this.getAccountKey(leftEntity, rightEntity);
 
     // Encode the message (must match Account.sol encoding)
     // IMPORTANT: Solidity enums are encoded as uint256, not uint8!
@@ -1168,8 +1169,8 @@ export class BrowserVMProvider {
       [
         BrowserVMProvider.MessageType.CooperativeUpdate,
         this.depositoryAddress?.toString() || '0x0000000000000000000000000000000000000000',
-        channelKey,
-        cooperativeNonce,
+        accountKey,
+        onChainNonce,
         diffs.map(d => [d.tokenId, d.leftDiff, d.rightDiff, d.collateralDiff, d.ondeltaDiff]),
         forgiveDebtsInTokenIds,
       ]
@@ -1178,8 +1179,8 @@ export class BrowserVMProvider {
     const hash = ethers.keccak256(encodedMsg);
     console.log(`[BrowserVM] signSettlement:`);
     console.log(`  hash: ${hash}`);
-    console.log(`  channelKey: ${channelKey} (${(channelKey.length - 2) / 2} bytes)`);
-    console.log(`  cooperativeNonce: ${cooperativeNonce}`);
+    console.log(`  accountKey: ${accountKey} (${(accountKey.length - 2) / 2} bytes)`);
+    console.log(`  nonce: ${onChainNonce}`);
     console.log(`  diffs: ${JSON.stringify(diffs.map(d => ({ tokenId: d.tokenId, leftDiff: d.leftDiff.toString(), rightDiff: d.rightDiff.toString(), collateralDiff: d.collateralDiff.toString(), ondeltaDiff: d.ondeltaDiff.toString() })))}`);
     console.log(`  encodedMsg length: ${(encodedMsg.length - 2) / 2} bytes`);
     console.log(`  encodedMsg first 200: ${encodedMsg.slice(0, 200)}`);
@@ -1198,18 +1199,18 @@ export class BrowserVMProvider {
   async signDisputeProof(
     entityId: string,
     counterpartyEntityId: string,
-    cooperativeNonce: bigint,
-    disputeNonce: bigint,
+    nonce: bigint,
     proofbodyHash: string
   ): Promise<string> {
-    const channelKey = this.getChannelKey(entityId, counterpartyEntityId);
+    const accountKey = this.getAccountKey(entityId, counterpartyEntityId);
 
     // IMPORTANT: Solidity enums are encoded as uint256, not uint8!
     // Include depositoryAddress for chain+depository binding (replay protection)
+    // Unified nonce: single nonce replaces cooperativeNonce + disputeNonce
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
     const encodedMsg = abiCoder.encode(
-      ['uint256', 'address', 'bytes', 'uint256', 'uint256', 'bytes32'],
-      [BrowserVMProvider.MessageType.DisputeProof, this.depositoryAddress?.toString() || '0x0000000000000000000000000000000000000000', channelKey, cooperativeNonce, disputeNonce, proofbodyHash]
+      ['uint256', 'address', 'bytes', 'uint256', 'bytes32'],
+      [BrowserVMProvider.MessageType.DisputeProof, this.depositoryAddress?.toString() || '0x0000000000000000000000000000000000000000', accountKey, nonce, proofbodyHash]
     );
 
     const hash = ethers.keccak256(encodedMsg);
@@ -1219,27 +1220,27 @@ export class BrowserVMProvider {
 
   // ═══════════════════════════════════════════════════════════════════════════
 
-  /** Get on-chain account info (cooperativeNonce, disputeHash, disputeTimeout) */
-  async getAccountInfo(entityId: string, counterpartyId: string): Promise<{ cooperativeNonce: bigint; disputeHash: string; disputeTimeout: bigint }> {
+  /** Get on-chain account info (nonce, disputeHash, disputeTimeout) */
+  async getAccountInfo(entityId: string, counterpartyId: string): Promise<{ nonce: bigint; disputeHash: string; disputeTimeout: bigint }> {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
-    const channelKeyData = this.depositoryInterface.encodeFunctionData('accountKey', [entityId, counterpartyId]);
-    const channelKeyResult = await this.vm.evm.runCall({
+    const accountKeyData = this.depositoryInterface.encodeFunctionData('accountKey', [entityId, counterpartyId]);
+    const accountKeyResult = await this.vm.evm.runCall({
       to: this.depositoryAddress,
       caller: this.deployerAddress,
-      data: hexToBytes(channelKeyData as `0x${string}`),
+      data: hexToBytes(accountKeyData as `0x${string}`),
       gasLimit: 100000n,
     });
-    if (channelKeyResult.execResult.exceptionError) {
-      return { cooperativeNonce: 0n, disputeHash: '0x', disputeTimeout: 0n };
+    if (accountKeyResult.execResult.exceptionError) {
+      return { nonce: 0n, disputeHash: '0x', disputeTimeout: 0n };
     }
-    const channelKeyDecoded = this.depositoryInterface.decodeFunctionResult(
+    const accountKeyDecoded = this.depositoryInterface.decodeFunctionResult(
       'accountKey',
-      channelKeyResult.execResult.returnValue
+      accountKeyResult.execResult.returnValue
     );
-    const channelKey = channelKeyDecoded[0];
+    const accountKey = accountKeyDecoded[0];
 
-    const callData = this.depositoryInterface.encodeFunctionData('_accounts', [channelKey]);
+    const callData = this.depositoryInterface.encodeFunctionData('_accounts', [accountKey]);
     const result = await this.vm.evm.runCall({
       to: this.depositoryAddress,
       caller: this.deployerAddress,
@@ -1247,12 +1248,12 @@ export class BrowserVMProvider {
       gasLimit: 100000n,
     });
     if (result.execResult.exceptionError) {
-      return { cooperativeNonce: 0n, disputeHash: '0x', disputeTimeout: 0n };
+      return { nonce: 0n, disputeHash: '0x', disputeTimeout: 0n };
     }
 
     const decoded = this.depositoryInterface.decodeFunctionResult('_accounts', result.execResult.returnValue);
     return {
-      cooperativeNonce: BigInt(decoded[0]),
+      nonce: BigInt(decoded[0]),
       disputeHash: decoded[1],
       disputeTimeout: BigInt(decoded[2]),
     };

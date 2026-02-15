@@ -32,7 +32,7 @@ interface IDepository {
    */
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
 
-  // NOTE: AccountSettled is defined in Account.sol as it uses the Settled struct
+  // NOTE: AccountSettled is defined in Account.sol (uses AccountSettlement struct)
 
   // ========== CORE FUNCTIONS ==========
 

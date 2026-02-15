@@ -23,9 +23,7 @@ import type {
   TypedContractMethod,
 } from "./common";
 
-export type SettledStruct = {
-  left: BytesLike;
-  right: BytesLike;
+export type TokenSettlementStruct = {
   tokenId: BigNumberish;
   leftReserve: BigNumberish;
   rightReserve: BigNumberish;
@@ -33,17 +31,13 @@ export type SettledStruct = {
   ondelta: BigNumberish;
 };
 
-export type SettledStructOutput = [
-  left: string,
-  right: string,
+export type TokenSettlementStructOutput = [
   tokenId: bigint,
   leftReserve: bigint,
   rightReserve: bigint,
   collateral: bigint,
   ondelta: bigint
 ] & {
-  left: string;
-  right: string;
   tokenId: bigint;
   leftReserve: bigint;
   rightReserve: bigint;
@@ -51,48 +45,23 @@ export type SettledStructOutput = [
   ondelta: bigint;
 };
 
-export type SettlementDiffStruct = {
-  tokenId: BigNumberish;
-  leftDiff: BigNumberish;
-  rightDiff: BigNumberish;
-  collateralDiff: BigNumberish;
-  ondeltaDiff: BigNumberish;
+export type AccountSettlementStruct = {
+  left: BytesLike;
+  right: BytesLike;
+  tokens: TokenSettlementStruct[];
+  nonce: BigNumberish;
 };
 
-export type SettlementDiffStructOutput = [
-  tokenId: bigint,
-  leftDiff: bigint,
-  rightDiff: bigint,
-  collateralDiff: bigint,
-  ondeltaDiff: bigint
+export type AccountSettlementStructOutput = [
+  left: string,
+  right: string,
+  tokens: TokenSettlementStructOutput[],
+  nonce: bigint
 ] & {
-  tokenId: bigint;
-  leftDiff: bigint;
-  rightDiff: bigint;
-  collateralDiff: bigint;
-  ondeltaDiff: bigint;
-};
-
-export type InsuranceRegistrationStruct = {
-  insured: BytesLike;
-  insurer: BytesLike;
-  tokenId: BigNumberish;
-  limit: BigNumberish;
-  expiresAt: BigNumberish;
-};
-
-export type InsuranceRegistrationStructOutput = [
-  insured: string,
-  insurer: string,
-  tokenId: bigint,
-  limit: bigint,
-  expiresAt: bigint
-] & {
-  insured: string;
-  insurer: string;
-  tokenId: bigint;
-  limit: bigint;
-  expiresAt: bigint;
+  left: string;
+  right: string;
+  tokens: TokenSettlementStructOutput[];
+  nonce: bigint;
 };
 
 export interface AccountInterface extends Interface {
@@ -101,12 +70,6 @@ export interface AccountInterface extends Interface {
       | "accountKey"
       | "computeBatchHankoHash"
       | "encodeDisputeHash"
-      | "packTokenReference"
-      | "unpackTokenReference"
-      | "verifyCooperativeProofSig"
-      | "verifyDisputeProofSig"
-      | "verifyFinalDisputeProofSig"
-      | "verifySettlementSig"
   ): FunctionFragment;
 
   getEvent(
@@ -115,7 +78,6 @@ export interface AccountInterface extends Interface {
       | "DebtCreated"
       | "DebtForgiven"
       | "DisputeStarted"
-      | "InsuranceRegistered"
       | "ReserveUpdated"
   ): EventFragment;
 
@@ -129,67 +91,7 @@ export interface AccountInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "encodeDisputeHash",
-    values: [
-      BigNumberish,
-      BigNumberish,
-      boolean,
-      BigNumberish,
-      BytesLike,
-      BytesLike
-    ]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "packTokenReference",
-    values: [BigNumberish, AddressLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "unpackTokenReference",
-    values: [BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "verifyCooperativeProofSig",
-    values: [
-      BytesLike,
-      BigNumberish,
-      BytesLike,
-      BytesLike,
-      BytesLike,
-      BytesLike
-    ]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "verifyDisputeProofSig",
-    values: [
-      BytesLike,
-      BigNumberish,
-      BigNumberish,
-      BytesLike,
-      BytesLike,
-      BytesLike
-    ]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "verifyFinalDisputeProofSig",
-    values: [
-      BytesLike,
-      BigNumberish,
-      BigNumberish,
-      BigNumberish,
-      BytesLike,
-      BytesLike
-    ]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "verifySettlementSig",
-    values: [
-      BytesLike,
-      BigNumberish,
-      SettlementDiffStruct[],
-      BigNumberish[],
-      InsuranceRegistrationStruct[],
-      BytesLike,
-      BytesLike
-    ]
+    values: [BigNumberish, boolean, BigNumberish, BytesLike, BytesLike]
   ): string;
 
   decodeFunctionResult(functionFragment: "accountKey", data: BytesLike): Result;
@@ -201,37 +103,13 @@ export interface AccountInterface extends Interface {
     functionFragment: "encodeDisputeHash",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(
-    functionFragment: "packTokenReference",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "unpackTokenReference",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "verifyCooperativeProofSig",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "verifyDisputeProofSig",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "verifyFinalDisputeProofSig",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "verifySettlementSig",
-    data: BytesLike
-  ): Result;
 }
 
 export namespace AccountSettledEvent {
-  export type InputTuple = [settled: SettledStruct[]];
-  export type OutputTuple = [settled: SettledStructOutput[]];
+  export type InputTuple = [settled: AccountSettlementStruct[]];
+  export type OutputTuple = [settled: AccountSettlementStructOutput[]];
   export interface OutputObject {
-    settled: SettledStructOutput[];
+    settled: AccountSettlementStructOutput[];
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -299,48 +177,23 @@ export namespace DisputeStartedEvent {
   export type InputTuple = [
     sender: BytesLike,
     counterentity: BytesLike,
-    disputeNonce: BigNumberish,
+    nonce: BigNumberish,
+    proofbodyHash: BytesLike,
     initialArguments: BytesLike
   ];
   export type OutputTuple = [
     sender: string,
     counterentity: string,
-    disputeNonce: bigint,
+    nonce: bigint,
+    proofbodyHash: string,
     initialArguments: string
   ];
   export interface OutputObject {
     sender: string;
     counterentity: string;
-    disputeNonce: bigint;
+    nonce: bigint;
+    proofbodyHash: string;
     initialArguments: string;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace InsuranceRegisteredEvent {
-  export type InputTuple = [
-    insured: BytesLike,
-    insurer: BytesLike,
-    tokenId: BigNumberish,
-    limit: BigNumberish,
-    expiresAt: BigNumberish
-  ];
-  export type OutputTuple = [
-    insured: string,
-    insurer: string,
-    tokenId: bigint,
-    limit: bigint,
-    expiresAt: bigint
-  ];
-  export interface OutputObject {
-    insured: string;
-    insurer: string;
-    tokenId: bigint;
-    limit: bigint;
-    expiresAt: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -433,89 +286,13 @@ export interface Account extends BaseContract {
 
   encodeDisputeHash: TypedContractMethod<
     [
-      cooperativeNonce: BigNumberish,
-      disputeNonce: BigNumberish,
+      nonce: BigNumberish,
       startedByLeft: boolean,
       timeout: BigNumberish,
       proofbodyHash: BytesLike,
       initialArguments: BytesLike
     ],
     [string],
-    "view"
-  >;
-
-  packTokenReference: TypedContractMethod<
-    [
-      tokenType: BigNumberish,
-      contractAddress: AddressLike,
-      externalTokenId: BigNumberish
-    ],
-    [string],
-    "view"
-  >;
-
-  unpackTokenReference: TypedContractMethod<
-    [packed: BytesLike],
-    [
-      [string, bigint, bigint] & {
-        contractAddress: string;
-        externalTokenId: bigint;
-        tokenType: bigint;
-      }
-    ],
-    "view"
-  >;
-
-  verifyCooperativeProofSig: TypedContractMethod<
-    [
-      ch_key: BytesLike,
-      cooperativeNonce: BigNumberish,
-      proofbodyHash: BytesLike,
-      initialArgumentsHash: BytesLike,
-      sig: BytesLike,
-      expectedSigner: BytesLike
-    ],
-    [boolean],
-    "view"
-  >;
-
-  verifyDisputeProofSig: TypedContractMethod<
-    [
-      ch_key: BytesLike,
-      cooperativeNonce: BigNumberish,
-      disputeNonce: BigNumberish,
-      proofbodyHash: BytesLike,
-      sig: BytesLike,
-      expectedSigner: BytesLike
-    ],
-    [boolean],
-    "view"
-  >;
-
-  verifyFinalDisputeProofSig: TypedContractMethod<
-    [
-      ch_key: BytesLike,
-      finalCooperativeNonce: BigNumberish,
-      initialDisputeNonce: BigNumberish,
-      finalDisputeNonce: BigNumberish,
-      sig: BytesLike,
-      expectedSigner: BytesLike
-    ],
-    [boolean],
-    "view"
-  >;
-
-  verifySettlementSig: TypedContractMethod<
-    [
-      ch_key: BytesLike,
-      cooperativeNonce: BigNumberish,
-      diffs: SettlementDiffStruct[],
-      forgiveDebtsInTokenIds: BigNumberish[],
-      insuranceRegs: InsuranceRegistrationStruct[],
-      sig: BytesLike,
-      expectedSigner: BytesLike
-    ],
-    [boolean],
     "view"
   >;
 
@@ -543,95 +320,13 @@ export interface Account extends BaseContract {
     nameOrSignature: "encodeDisputeHash"
   ): TypedContractMethod<
     [
-      cooperativeNonce: BigNumberish,
-      disputeNonce: BigNumberish,
+      nonce: BigNumberish,
       startedByLeft: boolean,
       timeout: BigNumberish,
       proofbodyHash: BytesLike,
       initialArguments: BytesLike
     ],
     [string],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "packTokenReference"
-  ): TypedContractMethod<
-    [
-      tokenType: BigNumberish,
-      contractAddress: AddressLike,
-      externalTokenId: BigNumberish
-    ],
-    [string],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "unpackTokenReference"
-  ): TypedContractMethod<
-    [packed: BytesLike],
-    [
-      [string, bigint, bigint] & {
-        contractAddress: string;
-        externalTokenId: bigint;
-        tokenType: bigint;
-      }
-    ],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "verifyCooperativeProofSig"
-  ): TypedContractMethod<
-    [
-      ch_key: BytesLike,
-      cooperativeNonce: BigNumberish,
-      proofbodyHash: BytesLike,
-      initialArgumentsHash: BytesLike,
-      sig: BytesLike,
-      expectedSigner: BytesLike
-    ],
-    [boolean],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "verifyDisputeProofSig"
-  ): TypedContractMethod<
-    [
-      ch_key: BytesLike,
-      cooperativeNonce: BigNumberish,
-      disputeNonce: BigNumberish,
-      proofbodyHash: BytesLike,
-      sig: BytesLike,
-      expectedSigner: BytesLike
-    ],
-    [boolean],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "verifyFinalDisputeProofSig"
-  ): TypedContractMethod<
-    [
-      ch_key: BytesLike,
-      finalCooperativeNonce: BigNumberish,
-      initialDisputeNonce: BigNumberish,
-      finalDisputeNonce: BigNumberish,
-      sig: BytesLike,
-      expectedSigner: BytesLike
-    ],
-    [boolean],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "verifySettlementSig"
-  ): TypedContractMethod<
-    [
-      ch_key: BytesLike,
-      cooperativeNonce: BigNumberish,
-      diffs: SettlementDiffStruct[],
-      forgiveDebtsInTokenIds: BigNumberish[],
-      insuranceRegs: InsuranceRegistrationStruct[],
-      sig: BytesLike,
-      expectedSigner: BytesLike
-    ],
-    [boolean],
     "view"
   >;
 
@@ -662,13 +357,6 @@ export interface Account extends BaseContract {
     DisputeStartedEvent.InputTuple,
     DisputeStartedEvent.OutputTuple,
     DisputeStartedEvent.OutputObject
-  >;
-  getEvent(
-    key: "InsuranceRegistered"
-  ): TypedContractEvent<
-    InsuranceRegisteredEvent.InputTuple,
-    InsuranceRegisteredEvent.OutputTuple,
-    InsuranceRegisteredEvent.OutputObject
   >;
   getEvent(
     key: "ReserveUpdated"
@@ -712,7 +400,7 @@ export interface Account extends BaseContract {
       DebtForgivenEvent.OutputObject
     >;
 
-    "DisputeStarted(bytes32,bytes32,uint256,bytes)": TypedContractEvent<
+    "DisputeStarted(bytes32,bytes32,uint256,bytes32,bytes)": TypedContractEvent<
       DisputeStartedEvent.InputTuple,
       DisputeStartedEvent.OutputTuple,
       DisputeStartedEvent.OutputObject
@@ -721,17 +409,6 @@ export interface Account extends BaseContract {
       DisputeStartedEvent.InputTuple,
       DisputeStartedEvent.OutputTuple,
       DisputeStartedEvent.OutputObject
-    >;
-
-    "InsuranceRegistered(bytes32,bytes32,uint256,uint256,uint256)": TypedContractEvent<
-      InsuranceRegisteredEvent.InputTuple,
-      InsuranceRegisteredEvent.OutputTuple,
-      InsuranceRegisteredEvent.OutputObject
-    >;
-    InsuranceRegistered: TypedContractEvent<
-      InsuranceRegisteredEvent.InputTuple,
-      InsuranceRegisteredEvent.OutputTuple,
-      InsuranceRegisteredEvent.OutputObject
     >;
 
     "ReserveUpdated(bytes32,uint256,uint256)": TypedContractEvent<

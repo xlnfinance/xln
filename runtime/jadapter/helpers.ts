@@ -178,6 +178,8 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       }];
 
     case 'AccountSettled': {
+      // AccountSettlement[] = { left, right, tokens: TokenSettlement[], nonce }
+      // TokenSettlement = { tokenId, leftReserve, rightReserve, collateral, ondelta }
       const settled = args.settled ?? args[''] ?? args[0] ?? [];
       const results: Array<{ type: string; data: Record<string, any> }> = [];
       for (const s of settled) {
@@ -185,26 +187,33 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
         const right = s[1] ?? s.right;
         if (String(left).toLowerCase() === entityId.toLowerCase() ||
             String(right).toLowerCase() === entityId.toLowerCase()) {
-          const tokenId = Number(s[2] ?? s.tokenId ?? 0);
-          const leftReserve = (s[3] ?? s.leftReserve ?? 0n).toString();
-          const rightReserve = (s[4] ?? s.rightReserve ?? 0n).toString();
-          const collateral = (s[5] ?? s.collateral ?? 0n).toString();
-          const ondelta = (s[6] ?? s.ondelta ?? 0n).toString();
+          const tokens = s[2] ?? s.tokens ?? [];
+          const nonce = Number(s[3] ?? s.nonce ?? 0);
           const isLeft = String(left).toLowerCase() === entityId.toLowerCase();
-          results.push({
-            type: 'AccountSettled',
-            data: {
-              leftEntity: left,
-              rightEntity: right,
-              counterpartyEntityId: isLeft ? right : left,
-              tokenId,
-              ownReserve: isLeft ? leftReserve : rightReserve,
-              counterpartyReserve: isLeft ? rightReserve : leftReserve,
-              collateral,
-              ondelta,
-              side: isLeft ? 'left' : 'right',
-            },
-          });
+
+          // Emit one j-event per token in the settlement
+          for (const tok of tokens) {
+            const tokenId = Number(tok[0] ?? tok.tokenId ?? 0);
+            const leftReserve = (tok[1] ?? tok.leftReserve ?? 0n).toString();
+            const rightReserve = (tok[2] ?? tok.rightReserve ?? 0n).toString();
+            const collateral = (tok[3] ?? tok.collateral ?? 0n).toString();
+            const ondelta = (tok[4] ?? tok.ondelta ?? 0n).toString();
+            results.push({
+              type: 'AccountSettled',
+              data: {
+                leftEntity: left,
+                rightEntity: right,
+                counterpartyEntityId: isLeft ? right : left,
+                tokenId,
+                ownReserve: isLeft ? leftReserve : rightReserve,
+                counterpartyReserve: isLeft ? rightReserve : leftReserve,
+                collateral,
+                ondelta,
+                nonce,
+                side: isLeft ? 'left' : 'right',
+              },
+            });
+          }
         }
       }
       return results;
@@ -226,7 +235,7 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
         data: {
           sender: args.sender,
           counterentity: args.counterentity,
-          disputeNonce: args.disputeNonce,
+          nonce: args.nonce,
           proofbodyHash: args.proofbodyHash,
           initialArguments: args.initialArguments ?? '0x',
         },
@@ -238,7 +247,7 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
         data: {
           sender: args.sender,
           counterentity: args.counterentity,
-          initialDisputeNonce: args.initialDisputeNonce,
+          initialNonce: args.initialNonce,
           initialProofbodyHash: args.initialProofbodyHash,
           finalProofbodyHash: args.finalProofbodyHash,
         },

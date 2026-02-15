@@ -151,7 +151,6 @@ export async function handleDisputeStart(
     return { newState, outputs };
   }
 
-  const disputeNonce = account.proofHeader.disputeNonce;
   const counterpartyIsLeft = account.leftEntity === counterpartyEntityId;
 
   const fillRatiosByOfferId = buildPendingSwapFillRatios(newState, counterpartyEntityId, account);
@@ -194,38 +193,50 @@ export async function handleDisputeStart(
     console.warn(`⚠️ No stored proofBodyHash - using fresh (may mismatch hanko!)`);
   }
 
-  // Use cooperativeNonce that matches the stored counterparty dispute signature.
-  // Prefer exact hash mapping, then cached nonce, then proofHeader fallback.
-  let cooperativeNonce = account.proofHeader.cooperativeNonce;
+  // Resolve the offchain nonce that matches the stored counterparty dispute signature.
+  // This is the bilateral nonce at which the counterparty signed the dispute proof.
+  // NOT the on-chain nonce (which is the last event-synced nonce from the J-machine).
+  // Priority: exact hash→nonce map > stored counterparty sig nonce > proofHeader fallback.
+  let signedNonce: number = account.proofHeader.nonce;
   let nonceSource = 'proofHeader';
   const mappedNonce = account.disputeProofNoncesByHash?.[proofBodyHashToUse];
   if (mappedNonce !== undefined) {
-    cooperativeNonce = mappedNonce;
+    signedNonce = mappedNonce;
     nonceSource = 'hashMap';
-  } else if (account.counterpartyDisputeProofCooperativeNonce !== undefined) {
-    cooperativeNonce = account.counterpartyDisputeProofCooperativeNonce;
+  } else if (account.counterpartyDisputeProofNonce !== undefined) {
+    signedNonce = account.counterpartyDisputeProofNonce;
     nonceSource = 'counterpartySig';
   }
-  console.log(`   Using cooperativeNonce=${cooperativeNonce} (${nonceSource}), disputeNonce=${disputeNonce}`);
 
-  // Add to jBatch (sig = hanko for entity signing)
+  // ASSERT: signedNonce must be positive (bilateral frames start nonces at 1)
+  if (signedNonce <= 0) {
+    addMessage(newState, `❌ Invalid dispute signedNonce=${signedNonce} — must be > 0`);
+    console.error(`❌ disputeStart: signedNonce=${signedNonce} is invalid (source=${nonceSource})`);
+    return { newState, outputs };
+  }
+
+  console.log(`   signedNonce=${signedNonce} (source=${nonceSource})`);
+
+  // The signed nonce is passed directly to the contract. Solidity requires:
+  //   nonce > _accounts[ch_key].nonce  (Account.sol:354)
+  // On-chain nonce starts at 0 and only increments via settlements/disputes.
+  // signedNonce >= 1 (from bilateral consensus) satisfies this.
+  // CRITICAL: Do NOT add +1 — the hanko was signed over this exact nonce.
   newState.jBatchState.batch.disputeStarts.push({
     counterentity: counterpartyEntityId,
-    cooperativeNonce,
-    disputeNonce,
+    nonce: signedNonce,
     proofbodyHash: proofBodyHashToUse,
-    sig: counterpartyDisputeHanko,  // Hanko signature
+    sig: counterpartyDisputeHanko,
     initialArguments,
   });
 
   console.log(`✅ disputeStart: Added to jBatch for ${entityState.entityId.slice(-4)}`);
-  console.log(`   Proof hash: ${proofBodyHashToUse.slice(0, 10)}...`);
-  console.log(`   Hanko sig length: ${counterpartyDisputeHanko?.length || 0}, first 40: ${counterpartyDisputeHanko?.slice(0, 40) || 'EMPTY'}`);
-  console.log(`   cooperativeNonce: ${cooperativeNonce}, disputeNonce: ${disputeNonce}`);
+  console.log(`   proofBodyHash: ${proofBodyHashToUse.slice(0, 18)}...`);
+  console.log(`   hankoLen: ${counterpartyDisputeHanko.length}, signedNonce: ${signedNonce}`);
 
   // NOTE: activeDispute will be set when DisputeStarted event arrives from J-machine
   // Event handler will query on-chain state and populate:
-  // - startedByLeft, disputeTimeout, onChainCooperativeNonce
+  // - startedByLeft, disputeTimeout, onChainNonce
 
   addMessage(newState, `⚔️ Dispute started vs ${counterpartyEntityId.slice(-4)} ${description ? `(${description})` : ''} - use jBroadcast to commit`);
 
@@ -276,21 +287,52 @@ export async function handleDisputeFinalize(
     : undefined;
 
   // Determine finalization mode
-  const isCounterDispute = account.proofHeader.disputeNonce > account.activeDispute.initialDisputeNonce;
+  // Counter-dispute: our nonce is higher than the dispute's initial nonce (we have newer state)
+  let isCounterDispute = account.proofHeader.nonce > account.activeDispute.initialNonce;
 
-  // Counter-dispute: use counterparty's DisputeProof hanko (same as start, proves they signed newer state)
+  // Resolve finalNonce — the offchain bilateral nonce for the finalization proof.
+  // Counter-dispute: newer nonce from counterparty's signed proof (must be > initialNonce).
+  // Unilateral: same as initialNonce (no sig needed, timeout enforces, contract does nonce++).
+  // Priority: exact hash→nonce map > stored counterparty sig nonce > proofHeader fallback.
+  const mappedFinalNonce = account.counterpartyDisputeProofBodyHash
+    ? account.disputeProofNoncesByHash?.[account.counterpartyDisputeProofBodyHash]
+    : undefined;
+  let finalNonce: number;
+  let finalNonceSource: string;
+  if (!isCounterDispute) {
+    finalNonce = account.activeDispute.initialNonce;
+    finalNonceSource = 'initialNonce (unilateral)';
+  } else if (mappedFinalNonce !== undefined) {
+    finalNonce = mappedFinalNonce;
+    finalNonceSource = 'hashMap';
+  } else if (account.counterpartyDisputeProofNonce !== undefined) {
+    finalNonce = account.counterpartyDisputeProofNonce;
+    finalNonceSource = 'counterpartySig';
+  } else {
+    finalNonce = account.proofHeader.nonce;
+    finalNonceSource = 'proofHeader (fallback)';
+  }
+
+  // ASSERT: finalNonce must be positive
+  if (finalNonce <= 0) {
+    addMessage(newState, `❌ Invalid dispute finalNonce=${finalNonce} — must be > 0`);
+    console.error(`❌ disputeFinalize: finalNonce=${finalNonce} is invalid (source=${finalNonceSource})`);
+    return { newState, outputs };
+  }
+  // Downgrade counter-dispute to unilateral if counterparty's signed nonce isn't actually newer
+  if (isCounterDispute && finalNonce <= account.activeDispute.initialNonce) {
+    console.warn(`⚠️ disputeFinalize: counter-dispute finalNonce=${finalNonce} <= initialNonce=${account.activeDispute.initialNonce} (source=${finalNonceSource}), downgrading to unilateral`);
+    isCounterDispute = false;
+    finalNonce = account.activeDispute.initialNonce;
+    finalNonceSource = 'initialNonce (downgraded to unilateral)';
+  }
+
+  // Counter-dispute: use counterparty's DisputeProof hanko (proves they signed newer state)
   // Unilateral: no signature (timeout enforces)
   // Cooperative: use cooperative settlement sig (not implemented yet)
   const finalizeSig = isCounterDispute && account.counterpartyDisputeProofHanko
     ? account.counterpartyDisputeProofHanko
     : '0x';
-
-  const mappedFinalNonce = account.counterpartyDisputeProofBodyHash
-    ? account.disputeProofNoncesByHash?.[account.counterpartyDisputeProofBodyHash]
-    : undefined;
-  const finalCooperativeNonce = isCounterDispute
-    ? (mappedFinalNonce ?? account.counterpartyDisputeProofCooperativeNonce ?? account.proofHeader.cooperativeNonce)
-    : account.activeDispute.onChainCooperativeNonce;
 
   const callerIsLeft = account.leftEntity === newState.entityId;
   const fillRatiosByOfferId = buildPendingSwapFillRatios(newState, counterpartyEntityId, account);
@@ -324,10 +366,8 @@ export async function handleDisputeFinalize(
 
   const finalProof = {
     counterentity: counterpartyEntityId,
-    initialCooperativeNonce: account.activeDispute.initialCooperativeNonce,  // From disputeStart
-    finalCooperativeNonce,
-    initialDisputeNonce: account.activeDispute.initialDisputeNonce,
-    finalDisputeNonce: isCounterDispute ? account.proofHeader.disputeNonce : account.activeDispute.initialDisputeNonce,
+    initialNonce: account.activeDispute.initialNonce,  // Nonce when dispute was started
+    finalNonce,  // Counter-dispute: newer nonce (> initial). Unilateral: same as initial.
     initialProofbodyHash: account.activeDispute.initialProofbodyHash,  // From disputeStart (commit)
     finalProofbody,  // REVEAL
     finalArguments,
@@ -351,7 +391,7 @@ export async function handleDisputeFinalize(
   }
 
   console.log(`   Mode: ${isCounterDispute ? 'counter-dispute' : 'unilateral'}, timeout=${account.activeDispute.disputeTimeout}`);
-  console.log(`   DEBUG: initialCooperativeNonce=${finalProof.initialCooperativeNonce}, onChainNonce=${finalProof.finalCooperativeNonce}`);
+  console.log(`   initialNonce=${finalProof.initialNonce}, finalNonce=${finalProof.finalNonce} (source=${finalNonceSource})`);
 
   // Add to jBatch
   newState.jBatchState.batch.disputeFinalizations.push(finalProof);

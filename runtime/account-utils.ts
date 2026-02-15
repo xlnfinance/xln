@@ -200,7 +200,7 @@ export function getTokenInfo(tokenId: number) {
 }
 
 /**
- * Default per-token credit limit scaled to token decimals (matches old channel behavior)
+ * Default per-token credit limit scaled to token decimals (matches old account behavior)
  */
 export function getDefaultCreditLimit(tokenId: number): bigint {
   const tokenInfo = getTokenInfo(tokenId);

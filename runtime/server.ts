@@ -2567,7 +2567,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         console.log(`[WS] New ${data.type} connection`);
         pushDebugEvent(relayStore, {
           event: 'ws_open',
-          details: { channel: data.type },
+          details: { wsType: data.type },
         });
       },
 
@@ -2617,7 +2617,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
           pushDebugEvent(relayStore, {
             event: 'error',
             reason: 'Invalid JSON',
-            details: { channel: data.type, len: msgStr.length, error: (error as Error).message },
+            details: { wsType: data.type, len: msgStr.length, error: (error as Error).message },
           });
           ws.send(safeStringify({ type: 'error', error: 'Invalid JSON' }));
         }
@@ -2630,7 +2630,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             event: 'ws_close',
             runtimeId: removedId,
             from: removedId,
-            details: { channel: ((ws as any).data || {}).type || 'unknown' },
+            details: { wsType: ((ws as any).data || {}).type || 'unknown' },
           });
         }
       },

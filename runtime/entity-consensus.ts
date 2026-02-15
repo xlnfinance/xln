@@ -767,6 +767,20 @@ export const applyEntityInput = async (
         }
       }
 
+      // Step 3c: Attach quorum hanko to jBatch JTx outputs
+      for (const jInput of commitJOutputs) {
+        for (const jTx of jInput.jTxs) {
+          if (jTx.type === 'batch' && jTx.data?.batchHash) {
+            const batchHankoEntry = workingReplica.hankoWitness?.get(jTx.data.batchHash);
+            if (batchHankoEntry) {
+              jTx.data.hankoSignature = batchHankoEntry.hanko;
+              attachedCount++;
+              console.log(`🔐 ATTACH-HANKO: jBatch for ${jTx.entityId.slice(-4)} hash=${jTx.data.batchHash.slice(0, 10)}...`);
+            }
+          }
+        }
+      }
+
       entityOutbox.push(...commitOutputs);
       jOutbox.push(...commitJOutputs);
       console.log(`🔐 ENTITY-COMMIT: ${commitOutputs.length} stored outputs, attached ${attachedCount} hankos`);

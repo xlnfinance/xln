@@ -9,7 +9,7 @@ pragma solidity ^0.8.24;
 // ========== ACCOUNT STATE ==========
 
 struct AccountInfo {
-  uint cooperativeNonce;
+  uint nonce;              // Unified nonce: increments on settlement OR dispute start
   bytes32 disputeHash;
   uint256 disputeTimeout;
 }
@@ -29,14 +29,21 @@ struct SettlementDiff {
   int ondeltaDiff;
 }
 
-struct Settled {
-  bytes32 left;
-  bytes32 right;
+// Per-token state snapshot after settlement (used in AccountSettled event)
+struct TokenSettlement {
   uint tokenId;
   uint leftReserve;
   uint rightReserve;
   uint collateral;
   int ondelta;
+}
+
+// Per-account settlement result (groups all tokens for one bilateral pair)
+struct AccountSettlement {
+  bytes32 left;
+  bytes32 right;
+  TokenSettlement[] tokens;
+  uint nonce;  // Post-increment nonce for watcher correlation
 }
 
 // ========== DEBT ==========
@@ -70,8 +77,7 @@ struct ProofBody {
 
 struct InitialDisputeProof {
   bytes32 counterentity;
-  uint cooperativeNonce;
-  uint disputeNonce;
+  uint nonce;              // Unified nonce at time of signing
   bytes32 proofbodyHash;
   bytes sig;
   bytes initialArguments;
@@ -79,10 +85,8 @@ struct InitialDisputeProof {
 
 struct FinalDisputeProof {
   bytes32 counterentity;
-  uint initialCooperativeNonce;  // Nonce from when dispute was started
-  uint finalCooperativeNonce;
-  uint initialDisputeNonce;
-  uint finalDisputeNonce;
+  uint initialNonce;       // Nonce when dispute was started
+  uint finalNonce;         // Nonce of the counter-proof (must be > initialNonce)
   bytes32 initialProofbodyHash;
   ProofBody finalProofbody;
   bytes finalArguments;
@@ -90,7 +94,7 @@ struct FinalDisputeProof {
   bytes sig;
   bool startedByLeft;
   uint disputeUntilBlock;
-  bool cooperative; // NEW: if true, skip timeout (mutual agreement)
+  bool cooperative;        // if true, skip timeout (mutual agreement)
 }
 
 // ========== BATCH OPERATIONS ==========
@@ -154,7 +158,8 @@ struct CollateralToReserve {
   bytes32 counterparty;
   uint tokenId;
   uint amount;
-  bytes sig;  // counterparty hanko (still bilateral)
+  uint nonce;   // signed nonce (must be > stored account nonce)
+  bytes sig;    // counterparty hanko (still bilateral)
 }
 
 struct Batch {
